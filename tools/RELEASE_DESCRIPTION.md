@@ -1,4 +1,4 @@
-## 🎉 Patent Hub v0.1.0 - 首个公开发布版本
+## 🎉 Patent Hub v0.1.1 - 项目结构优化版本
 
 ### ✨ 核心特性
 
@@ -29,7 +29,7 @@
 
 1. **下载并解压**
    ```
-   下载 patent-hub-v0.1.0-windows-x86_64.zip
+   下载 patent-hub-v0.1.1-windows-x86_64.zip
    解压到任意目录
    ```
 
@@ -160,8 +160,10 @@ MIT License - 详见 [LICENSE](https://github.com/jsshwqz/patent-hub/blob/main/L
 ---
 
 **发布日期**: 2026-02-24  
-**版本**: v0.1.0  
+**版本**: v0.1.1  
 **构建**: Windows x86_64  
 **文件大小**: 3.42 MB
 
-**下载地址**: [patent-hub-v0.1.0-windows-x86_64.zip](https://github.com/jsshwqz/patent-hub/releases/download/v0.1.0/patent-hub-v0.1.0-windows-x86_64.zip)
+**下载地址**: [patent-hub-v0.1.1-windows-x86_64.zip](https://github.com/jsshwqz/patent-hub/releases/download/v0.1.1/patent-hub-v0.1.1-windows-x86_64.zip)
+
+
