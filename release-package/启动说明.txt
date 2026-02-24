@@ -1,0 +1,58 @@
+# Patent Hub - 快速启动指南
+
+## 使用步骤
+
+### 1. 配置 API 密钥
+复制 .env.example 为 .env，然后编辑 .env 文件：
+
+```
+SERPAPI_KEY=你的_SerpAPI_密钥
+AI_API_KEY=你的_AI_API_密钥
+AI_API_BASE=https://open.bigmodel.cn/api/paas/v4
+AI_MODEL=glm-4-flash
+```
+
+### 2. 启动应用
+
+#### Windows 用户
+双击运行 patent-hub.exe
+
+#### 命令行启动
+```
+patent-hub.exe
+```
+
+### 3. 访问应用
+
+启动后，在浏览器中访问：
+- 本地访问: http://localhost:3000
+- 移动设备: http://[显示的IP地址]:3000
+
+## 功能说明
+
+- 在线专利搜索
+- 本地数据库存储
+- AI 智能分析
+- 专利对比
+- 相似推荐
+- 文件上传对比
+- 搜索历史
+- 统计图表
+- Excel 导出
+
+## 获取 API 密钥
+
+### SerpAPI
+访问 https://serpapi.com/ 注册并获取 API 密钥
+
+### AI API (智谱 GLM)
+访问 https://open.bigmodel.cn/ 注册并获取 API 密钥
+
+## 技术支持
+
+- GitHub: https://github.com/jsshwqz/patent-hub
+- Issues: https://github.com/jsshwqz/patent-hub/issues
+
+## 许可证
+
+MIT License - 详见 LICENSE 文件
