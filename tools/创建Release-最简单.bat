@@ -14,7 +14,7 @@ echo ========================================
 echo.
 
 REM 检查 ZIP 文件
-if not exist "patent-hub-v0.1.0-windows-x86_64.zip" (
+if not exist "..\patent-hub-v0.1.0-windows-x86_64.zip" (
     echo [X] 错误: 未找到 ZIP 文件
     echo.
     echo 请确保文件存在:
@@ -25,7 +25,7 @@ if not exist "patent-hub-v0.1.0-windows-x86_64.zip" (
 )
 
 echo [√] ZIP 文件已准备好
-for %%A in ("patent-hub-v0.1.0-windows-x86_64.zip") do (
+for %%A in ("..\patent-hub-v0.1.0-windows-x86_64.zip") do (
     set size=%%~zA
     set /a sizeMB=!size! / 1048576
 )
@@ -92,7 +92,7 @@ echo.
 REM 打开文件所在目录，方便拖拽
 echo 正在打开文件所在目录...
 echo.
-explorer /select,"patent-hub-v0.1.0-windows-x86_64.zip"
+explorer /select,"..\patent-hub-v0.1.0-windows-x86_64.zip"
 
 echo [√] 文件夹已打开
 echo     (可以直接拖拽 ZIP 文件到浏览器)

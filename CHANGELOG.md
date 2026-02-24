@@ -4,9 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-02-24
+
+### Changed
+- 精简项目结构，根目录从 60+ 文件减少到 15 个
+- 工具脚本统一移至 `tools/` 目录
+- 移除竞品对比内容
+- 添加 Gitee 镜像仓库，GitHub ↔ Gitee 双向同步
+
 ### Added
-- 跨平台支持准备
-- 开源文档完善
+- GitHub → Gitee 自动同步 CI 配置
+- `tools/` 目录及工具说明文档
 
 ## [0.1.0] - 2024-12-24
 
