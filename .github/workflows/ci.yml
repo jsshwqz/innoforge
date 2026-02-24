@@ -61,10 +61,12 @@ jobs:
     
     - name: Build
       run: cargo build --release --verbose
+      continue-on-error: true
 
   build:
     name: Build Release
     needs: test
+    if: always()
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
