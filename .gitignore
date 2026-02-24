@@ -32,3 +32,10 @@ desktop.ini
 *.dll
 *.so
 *.dylib
+
+# Development files
+.dev/
+
+# Release packages
+*.zip
+release-package/
