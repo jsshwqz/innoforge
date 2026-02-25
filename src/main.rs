@@ -78,10 +78,20 @@ async fn main() -> anyhow::Result<()> {
     println!("Patent Hub running at http://{addr}");
     println!("Local access: http://127.0.0.1:3000");
     
+    // Auto-open browser
+    let url = "http://127.0.0.1:3000/search";
+    println!("\n正在打开浏览器...");
+    if let Err(e) = open::that(url) {
+        println!("无法自动打开浏览器: {}", e);
+        println!("请手动访问: {}", url);
+    } else {
+        println!("✓ 浏览器已打开");
+    }
+    
     // Try to get local IP for mobile access
     match local_ip_address::local_ip() {
         Ok(local_ip) => {
-            println!("Mobile access: http://{}:3000", local_ip);
+            println!("\nMobile access: http://{}:3000", local_ip);
             println!("Scan QR code on mobile:");
             println!("  ┌─────────────────────────────┐");
             println!("  │ Use your phone camera to    │");
