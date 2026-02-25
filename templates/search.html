@@ -31,6 +31,12 @@
 <option value="online">在线搜索 (Google Patents)</option>
 <option value="local">本地数据库</option>
 </select>
+<select id="page-size" style="width: 100px;">
+<option value="10">10条/页</option>
+<option value="20" selected>20条/页</option>
+<option value="50">50条/页</option>
+<option value="100">100条/页</option>
+</select>
 <input type="date" id="date-from" placeholder="起始日期" style="width: 140px;">
 <input type="date" id="date-to" placeholder="截止日期" style="width: 140px;">
 <button onclick="doSearch(1)">检索</button>
@@ -109,6 +115,7 @@ async function doSearch(page) {
 const query = document.getElementById('search-input').value.trim();
 const country = document.getElementById('country-filter').value;
 const mode = document.getElementById('search-mode').value;
+const pageSize = parseInt(document.getElementById('page-size').value);
 if (!query) return;
 currentQuery = query;
 saveSearchHistory(query);
@@ -117,7 +124,7 @@ document.getElementById('results').innerHTML = '<p style="text-align:center;">�
 document.getElementById('stats-container').style.display = 'none';
 try {
 const endpoint = mode === 'online' ? '/api/search/online' : '/api/search/local';
-const body = { query, page, page_size: 20 };
+const body = { query, page, page_size: pageSize };
 const dateFrom = document.getElementById("date-from").value;
 const dateTo = document.getElementById("date-to").value;
 if (dateFrom) body.date_from = dateFrom;
@@ -130,7 +137,7 @@ body: JSON.stringify(body)
 });
 const data = await res.json();
 totalResults = data.total || 0;
-document.getElementById('results-info').innerHTML = `<p style="color: #8b949e;">找到 <strong style="color: #58a6ff;">${totalResults}</strong> 条结果 | 第 ${page} 页</p>`;
+document.getElementById('results-info').innerHTML = `<p style="color: #8b949e;">找到 <strong style="color: #58a6ff;">${totalResults}</strong> 条结果 | 第 ${page} 页 | 每页 ${pageSize} 条</p>`;
 if (data.patents.length === 0) {
 document.getElementById('results').innerHTML = '<p style="text-align:center;color:#8b949e;">未找到相关专利</p><p style="text-align:center;margin-top:8px;"><a href="https://patents.google.com/?q=' + encodeURIComponent(query) + '" target="_blank" style="color:#58a6ff;">在 Google Patents 查看</a></p>';
 renderPagination(0);
@@ -138,15 +145,16 @@ return;
 }
 let html = '';
 data.patents.forEach(p => {
-html += `<div class="patent-card">
-<h3><a href="/patent/${p.id}">${p.title || '无标题'}</a></h3>
-<div class="patent-meta">
+const abstractPreview = (p.abstract_text || '').substring(0, 150);
+html += `<div class="patent-card" style="padding: 12px 16px;">
+<h3 style="margin: 0 0 8px 0; font-size: 16px;"><a href="/patent/${p.id}">${p.title || '无标题'}</a></h3>
+<div class="patent-meta" style="font-size: 13px; margin-bottom: 8px;">
 <span>📄 ${p.patent_number || 'N/A'}</span>
 <span>👤 ${p.applicant || 'N/A'}</span>
 <span>📅 ${p.filing_date || 'N/A'}</span>
 <span>🌍 ${p.country || 'N/A'}</span>
 </div>
-<p class="patent-abstract">${(p.abstract || '').substring(0, 200)}${(p.abstract || '').length > 200 ? '...' : ''}</p>
+<p class="patent-abstract" style="font-size: 14px; line-height: 1.5; margin: 0;">${abstractPreview}${abstractPreview.length >= 150 ? '...' : ''}</p>
 </div>`;
 });
 document.getElementById('results').innerHTML = html;
@@ -160,7 +168,8 @@ document.getElementById('results').innerHTML = `<p style="color:#f85149;">错误
 }
 
 function renderPagination(total) {
-const totalPages = Math.ceil(total / 20);
+const pageSize = parseInt(document.getElementById('page-size').value);
+const totalPages = Math.ceil(total / pageSize);
 if (totalPages <= 1) {
 document.getElementById('pagination').innerHTML = '';
 return;

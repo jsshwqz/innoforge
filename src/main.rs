@@ -3,7 +3,7 @@ mod ai;
 mod patent;
 mod routes;
 
-use axum::{Router, routing::get, routing::post};
+use axum::{Router, routing::get, routing::post, response::Html};
 use std::net::SocketAddr;
 use tower_http::services::ServeDir;
 
@@ -54,6 +54,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/ai", get(routes::ai_page))
         .route("/compare", get(routes::compare_page))
         .route("/settings", get(routes::settings_page))
+        .route("/test", get(|| async { Html(include_str!("../templates/test.html").to_string()) }))
+        .route("/import", get(|| async { Html(std::fs::read_to_string("templates/import_sample_data.html").unwrap_or_default()) }))
         .route("/api/settings", get(routes::api_get_settings))
         .route("/api/settings/serpapi", post(routes::api_save_serpapi))
         .route("/api/settings/ai", post(routes::api_save_ai))
