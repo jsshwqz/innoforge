@@ -44,12 +44,8 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
     ensure_ollama();
     let db = db::Database::init("patent_hub.db")?;
-    let ai_client = reqwest::Client::new();
-    let ai_model = std::env::var("AI_MODEL").unwrap_or_else(|_| "glm-4-flash".to_string());
     let state = routes::AppState { 
         db: std::sync::Arc::new(db),
-        ai_client,
-        ai_model,
     };
     let app = Router::new()
         .route("/", get(routes::index_page))

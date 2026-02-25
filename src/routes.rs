@@ -3,7 +3,7 @@ use std::sync::Arc;
 use serde_json::json;
 use crate::{ai::AiClient, db::Database, patent::*};
 #[derive(Clone)]
-pub struct AppState { pub db: Arc<Database>, pub ai_client: reqwest::Client, pub ai_model: String }
+pub struct AppState { pub db: Arc<Database> }
 
 pub async fn index_page() -> Html<String> { Html(include_str!("../templates/index.html").to_string()) }
 pub async fn search_page() -> Html<String> { Html(include_str!("../templates/search.html").to_string()) }
@@ -567,26 +567,3 @@ pub async fn api_upload_compare(
 
 
 
-// 日期过滤辅助函数
-fn filter_by_date(patents: Vec<PatentSummary>, date_from: Option<&str>, date_to: Option<&str>) -> Vec<PatentSummary> {
-    if date_from.is_none() && date_to.is_none() {
-        return patents;
-    }
-    patents.into_iter().filter(|p| {
-        if p.filing_date.is_empty() {
-            return true; // 保留没有日期的专利
-        }
-        let date = &p.filing_date;
-        if let Some(from) = date_from {
-            if date.as_str() < from {
-                return false;
-            }
-        }
-        if let Some(to) = date_to {
-            if date.as_str() > to {
-                return false;
-            }
-        }
-        true
-    }).collect()
-}
