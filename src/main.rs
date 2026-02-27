@@ -40,7 +40,8 @@ fn ensure_ollama() {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let _ = dotenvy::dotenv();
+    // Load .env file and override any existing environment variables
+    let _ = dotenvy::dotenv_override();
     tracing_subscriber::fmt::init();
     ensure_ollama();
     let db = db::Database::init("patent_hub.db")?;

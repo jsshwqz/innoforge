@@ -1,8 +1,9 @@
 ﻿use anyhow::Result;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
-/// AI client compatible with OpenAI API (works with Ollama, vLLM, etc.)
+/// AI client compatible with OpenAI API (works with Ollama, vLLM, Zhipu, etc.)
 pub struct AiClient {
     client: Client,
     base_url: String,
@@ -23,14 +24,18 @@ struct Message {
     content: String,
 }
 
+// Flexible response parser for different AI providers
 #[derive(Deserialize)]
 struct ChatResponse {
-    choices: Vec<Choice>,
+    choices: Option<Vec<Choice>>,
+    data: Option<Value>,  // Zhipu format
+    result: Option<String>,  // Some providers use this
 }
 
 #[derive(Deserialize)]
 struct Choice {
-    message: Message,
+    message: Option<Message>,
+    delta: Option<Message>,  // Streaming format
 }
 
 impl AiClient {
@@ -80,13 +85,52 @@ impl AiClient {
                 temperature: 0.7,
             })
             .send()
-            .await?
-            .json::<ChatResponse>()
             .await?;
 
-        Ok(resp.choices.first()
-            .map(|c| c.message.content.clone())
-            .unwrap_or_else(|| "AI 未返回有效回复".into()))
+        // Get raw response text first
+        let raw_text = resp.text().await?;
+        
+        // Try to parse as JSON and extract response flexibly
+        if let Ok(json) = serde_json::from_str::<Value>(&raw_text) {
+            // Try OpenAI/Zhipu standard format: choices[0].message.content
+            if let Some(choices) = json["choices"].as_array() {
+                if let Some(first) = choices.first() {
+                    if let Some(content) = first["message"]["content"].as_str() {
+                        return Ok(content.to_string());
+                    }
+                    // Try delta for streaming
+                    if let Some(content) = first["delta"]["content"].as_str() {
+                        return Ok(content.to_string());
+                    }
+                }
+            }
+            // Try Zhipu format: data.choices or data.content
+            if let Some(data) = json["data"].as_object() {
+                if let Some(choices) = data.get("choices").and_then(|c| c.as_array()) {
+                    if let Some(first) = choices.first() {
+                        if let Some(content) = first["message"]["content"].as_str() {
+                            return Ok(content.to_string());
+                        }
+                    }
+                }
+                if let Some(content) = data.get("content").and_then(|c| c.as_str()) {
+                    return Ok(content.to_string());
+                }
+            }
+            // Try direct result field
+            if let Some(result) = json["result"].as_str() {
+                return Ok(result.to_string());
+            }
+            // Try error message
+            if let Some(err) = json["error"]["message"].as_str() {
+                return Ok(format!("AI 错误：{}", err));
+            }
+            if let Some(msg) = json["msg"].as_str() {
+                return Ok(format!("AI 错误：{}", msg));
+            }
+        }
+
+        Ok(format!("AI 响应解析失败，原始响应：{}", raw_text.chars().take(200).collect::<String>()))
     }
 
     pub async fn summarize_patent(&self, patent_title: &str, abstract_text: &str, claims: &str) -> Result<String> {

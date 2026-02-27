@@ -12,7 +12,16 @@ pub struct Patent {
     pub source: String, pub raw_json: String, pub created_at: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub enum SearchType {
+    Applicant,    // 按申请人搜索
+    Inventor,     // 按发明人搜索
+    PatentNumber, // 按专利号搜索
+    Keyword,      // 关键词搜索（标题/摘要）
+    Mixed,        // 混合搜索
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchRequest {
     pub query: String,
     #[serde(default = "d1")] pub page: usize,
@@ -21,19 +30,33 @@ pub struct SearchRequest {
     pub date_from: Option<String>,
     pub date_to: Option<String>,
     pub search_type: Option<String>, // "applicant", "inventor", "keyword", "mixed"
+    pub sort_by: Option<String>, // "relevance", "new", "old"
 }
+
 fn d1() -> usize { 1 }
 fn d20() -> usize { 20 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SearchResult {
-    pub patents: Vec<PatentSummary>, pub total: usize, pub page: usize, pub page_size: usize,
+    pub patents: Vec<PatentSummary>,
+    pub total: usize,
+    pub page: usize,
+    pub page_size: usize,
+    pub search_type: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PatentSummary {
-    pub id: String, pub patent_number: String, pub title: String,
-    pub abstract_text: String, pub applicant: String, pub filing_date: String, pub country: String,
+    pub id: String,
+    pub patent_number: String,
+    pub title: String,
+    pub abstract_text: String,
+    pub applicant: String,
+    pub inventor: String,
+    pub filing_date: String,
+    pub country: String,
+    #[serde(default)]
+    pub relevance_score: Option<f64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

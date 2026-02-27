@@ -111,10 +111,24 @@ $importBody = @{
             patent_number = "CN999999A"
             title = "API测试专利"
             abstract_text = "这是通过API导入的测试专利"
+            description = "详细描述"
+            claims = "权利要求"
             applicant = "测试公司"
+            inventor = "测试人员"
             filing_date = "2024-01-01"
+            publication_date = "2024-06-01"
+            grant_date = $null
+            ipc_codes = "G06N"
+            cpc_codes = "G06N"
+            priority_date = "2024-01-01"
             country = "CN"
+            kind_code = "A"
+            family_id = $null
+            legal_status = "pending"
+            citations = ""
+            cited_by = ""
             source = "api_test"
+            raw_json = "{}"
             created_at = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
         }
     )

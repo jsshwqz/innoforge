@@ -6,7 +6,15 @@ use crate::{ai::AiClient, db::Database, patent::*};
 pub struct AppState { pub db: Arc<Database> }
 
 pub async fn index_page() -> Html<String> { Html(include_str!("../templates/index.html").to_string()) }
-pub async fn search_page() -> Html<String> { Html(include_str!("../templates/search.html").to_string()) }
+pub async fn search_page() -> Html<String> { 
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let html = include_str!("../templates/search.html")
+        .replace("{{timestamp}}", &timestamp.to_string());
+    Html(html)
+}
 pub async fn ai_page() -> Html<String> { Html(include_str!("../templates/ai.html").to_string()) }
 pub async fn compare_page() -> Html<String> { Html(include_str!("../templates/compare.html").to_string()) }
 
@@ -25,13 +33,80 @@ pub async fn patent_detail_page(Path(id): Path<String>, State(s): State<AppState
 }
 
 pub async fn api_search(State(s): State<AppState>, Json(req): Json<SearchRequest>) -> Json<SearchResult> {
-    match s.db.search_fts(&req.query, req.page, req.page_size) {
-        Ok((patents, total)) if !patents.is_empty() => Json(SearchResult { patents, total, page: req.page, page_size: req.page_size }),
-        _ => match s.db.search_like(&req.query, req.country.as_deref(), req.page, req.page_size) {
-            Ok((patents, total)) => Json(SearchResult { patents, total, page: req.page, page_size: req.page_size }),
-            Err(_) => Json(SearchResult { patents: vec![], total: 0, page: 1, page_size: 20 }),
+    // 使用智能搜索，自动识别搜索类型
+    let search_type = req.search_type.as_ref().map(|t| {
+        match t.as_str() {
+            "applicant" => SearchType::Applicant,
+            "inventor" => SearchType::Inventor,
+            "patent_number" => SearchType::PatentNumber,
+            "keyword" => SearchType::Keyword,
+            _ => SearchType::Mixed,
+        }
+    });
+    
+    let (mut patents, total, detected_type) = match s.db.search_smart(&req.query, search_type.as_ref(), req.country.as_deref(), req.page, req.page_size) {
+        Ok((patents, total, search_type)) => (patents, total, search_type),
+        Err(_) => (vec![], 0, SearchType::Mixed),
+    };
+
+    // 根据搜索类型自动排序
+    if let Some(sort_by) = req.sort_by.as_deref() {
+        match sort_by {
+            "new" => {
+                // 按申请日降序（最新优先）
+                patents.sort_by(|a, b| b.filing_date.cmp(&a.filing_date));
+            },
+            "old" => {
+                // 按申请日升序（最早优先）
+                patents.sort_by(|a, b| a.filing_date.cmp(&b.filing_date));
+            },
+            "relevance" | _ => {
+                // 按相关性分数降序排序
+                patents.sort_by(|a, b| {
+                    let score_a = a.relevance_score.unwrap_or(0.0);
+                    let score_b = b.relevance_score.unwrap_or(0.0);
+                    score_b.partial_cmp(&score_a).unwrap_or(std::cmp::Ordering::Equal)
+                });
+            }
+        }
+    } else {
+        // 默认按相关性排序（发明人/申请人搜索时特别有用）
+        match detected_type {
+            SearchType::Inventor | SearchType::Applicant => {
+                // 发明人/申请人搜索：按相关性降序
+                patents.sort_by(|a, b| {
+                    let score_a = a.relevance_score.unwrap_or(0.0);
+                    let score_b = b.relevance_score.unwrap_or(0.0);
+                    score_b.partial_cmp(&score_a).unwrap_or(std::cmp::Ordering::Equal)
+                });
+            }
+            SearchType::PatentNumber => {
+                // 专利号搜索：精确匹配优先
+                patents.sort_by(|a, b| b.filing_date.cmp(&a.filing_date));
+            }
+            SearchType::Keyword | SearchType::Mixed => {
+                // 关键词搜索：默认按日期降序
+                patents.sort_by(|a, b| b.filing_date.cmp(&a.filing_date));
+            }
         }
     }
+
+    // 将搜索类型转换为字符串返回
+    let search_type_str = match detected_type {
+        SearchType::Applicant => "applicant",
+        SearchType::Inventor => "inventor",
+        SearchType::PatentNumber => "patent_number",
+        SearchType::Keyword => "keyword",
+        SearchType::Mixed => "mixed",
+    };
+
+    Json(SearchResult {
+        patents,
+        total,
+        page: req.page,
+        page_size: req.page_size,
+        search_type: Some(search_type_str.to_string()),
+    })
 }
 
 pub async fn api_fetch_patent(State(s): State<AppState>, Json(req): Json<FetchPatentRequest>) -> Json<serde_json::Value> {
@@ -185,6 +260,8 @@ pub async fn api_export_csv(State(s): State<AppState>, Json(req): Json<SearchReq
     // Build CSV
     let mut csv_data = String::from("专利号,标题,申请人,发明人,申请日,公开日,国家/地区,摘要\n");
     for p in all_results {
+        // Safely truncate abstract at character boundary
+        let abstract_preview = p.abstract_text.chars().take(150).collect::<String>();
         let row = format!("{},{},{},{},{},{},{},{}\n",
             escape_csv(&p.patent_number),
             escape_csv(&p.title),
@@ -193,7 +270,7 @@ pub async fn api_export_csv(State(s): State<AppState>, Json(req): Json<SearchReq
             escape_csv(&p.filing_date),
             "",
             escape_csv(&p.country),
-            escape_csv(&p.abstract_text[..p.abstract_text.len().min(200)])
+            escape_csv(&abstract_preview)
         );
         csv_data.push_str(&row);
     }
@@ -230,9 +307,14 @@ pub async fn api_search_online(State(s): State<AppState>, Json(req): Json<Search
             Some(c) if !c.is_empty() => format!("&country={}", c),
             _ => String::new(),
         };
+        let sort_param = match req.sort_by.as_deref() {
+            Some("new") => "&sort=new",
+            Some("old") => "&sort=old",
+            _ => "", // relevance is default
+        };
         let url = format!(
-            "https://serpapi.com/search.json?engine=google_patents&q={}&page={}{}&api_key={}",
-            urlencoded(&search_query), serp_page, country_param, api_key
+            "https://serpapi.com/search.json?engine=google_patents&q={}&page={}{}{}&api_key={}",
+            urlencoded(&search_query), serp_page, country_param, sort_param, api_key
         );
         println!("[ONLINE] SerpAPI query='{}' page={} country_param='{}'", search_query, serp_page, country_param);
         match client.get(&url).send().await {
@@ -255,10 +337,15 @@ pub async fn api_search_online(State(s): State<AppState>, Json(req): Json<Search
                                     if !p.title.is_empty() {
                                         let _ = s.db.insert_patent(&p);
                                         patents.push(PatentSummary {
-                                            id: p.id.clone(), patent_number: p.patent_number.clone(),
-                                            title: p.title.clone(), abstract_text: p.abstract_text.clone(),
-                                            applicant: p.applicant.clone(), filing_date: p.filing_date.clone(),
+                                            id: p.id.clone(),
+                                            patent_number: p.patent_number.clone(),
+                                            title: p.title.clone(),
+                                            abstract_text: p.abstract_text.clone(),
+                                            applicant: p.applicant.clone(),
+                                            inventor: p.inventor.clone(),
+                                            filing_date: p.filing_date.clone(),
                                             country: p.country.clone(),
+                                            relevance_score: None,
                                         });
                                     }
                                 }
@@ -481,6 +568,7 @@ pub async fn api_recommend_similar(
         date_from: None, 
         date_to: None,
         search_type: None,
+        sort_by: None,
     };
     
     match api_search_online(State(s), Json(req)).await {
@@ -573,39 +661,184 @@ pub async fn settings_page() -> Html<String> {
     Html(include_str!("../templates/settings.html").to_string()) 
 }
 
+// AI语义分析 - 对搜索结果做深度分析
+pub async fn api_ai_analyze_results(Json(req): Json<serde_json::Value>) -> Json<serde_json::Value> {
+    let query = req["query"].as_str().unwrap_or("");
+    let patents = req["patents"].as_array();
+    
+    if query.is_empty() || patents.is_none() {
+        return Json(json!({"error": "缺少查询词或专利数据"}));
+    }
+    let patents = patents.unwrap();
+    
+    // 构建专利摘要列表
+    let mut patent_list = String::new();
+    for (i, p) in patents.iter().enumerate().take(10) {
+        let title = p["title"].as_str().unwrap_or("");
+        let abstract_text = p["abstract_text"].as_str().unwrap_or("");
+        let applicant = p["applicant"].as_str().unwrap_or("");
+        let preview: String = abstract_text.chars().take(100).collect();
+        patent_list.push_str(&format!(
+            "{}. 标题：{}\n   申请人：{}\n   摘要：{}\n\n",
+            i + 1, title, applicant, preview
+        ));
+    }
+    
+    let prompt = format!(
+        "你是一个专利分析专家和研发创新顾问。用户正在研究「{}」方向。\n\n\
+         以下是搜索到的相关专利列表：\n{}\n\n\
+         请完成以下分析（用JSON格式返回）：\n\n\
+         1. **语义相关性评分**：对每条专利给出0-100的语义相关性评分，考虑技术领域、解决方案、应用场景的匹配度\n\
+         2. **技术趋势**：这些专利反映了什么技术发展趋势\n\
+         3. **技术空白**：基于现有专利，哪些方向还没有被充分覆盖，存在创新机会\n\
+         4. **创新建议**：针对用户的研究方向，给出2-3个具体的创新切入点\n\n\
+         请严格按以下JSON格式返回（不要包含其他文字）：\n\
+         {{\n\
+           \"scores\": [{{\"index\": 1, \"score\": 85, \"reason\": \"简短原因\"}}, ...],\n\
+           \"trend\": \"技术趋势分析文字\",\n\
+           \"gaps\": \"技术空白分析文字\",\n\
+           \"suggestions\": [\"建议1\", \"建议2\", \"建议3\"]\n\
+         }}",
+        query, patent_list
+    );
+    
+    let ai = AiClient::new();
+    match ai.chat(&prompt, None).await {
+        Ok(content) => {
+            // 尝试解析JSON
+            let trimmed = content.trim();
+            // 提取JSON部分（AI可能会在前后加文字）
+            let json_str = if let Some(start) = trimmed.find('{') {
+                if let Some(end) = trimmed.rfind('}') {
+                    &trimmed[start..=end]
+                } else { trimmed }
+            } else { trimmed };
+            
+            match serde_json::from_str::<serde_json::Value>(json_str) {
+                Ok(parsed) => Json(json!({"status": "ok", "analysis": parsed})),
+                Err(_) => Json(json!({"status": "ok", "analysis": {"raw": content}})),
+            }
+        }
+        Err(e) => Json(json!({"error": format!("AI分析失败: {}。请在设置页面配置AI服务。", e)})),
+    }
+}
+
 // Get current settings
 pub async fn api_get_settings() -> Json<serde_json::Value> {
+    // Helper function to mask API keys
+    fn mask_api_key(key: &str) -> String {
+        if key.is_empty() || key == "your-serpapi-key-here" {
+            String::new()
+        } else if key.len() <= 8 {
+            "****".to_string()
+        } else {
+            format!("{}****{}", &key[..4], &key[key.len()-4..])
+        }
+    }
+
+    let serpapi_key = std::env::var("SERPAPI_KEY").unwrap_or_default();
+    let ai_api_key = std::env::var("AI_API_KEY").unwrap_or_default();
+
     Json(json!({
-        "serpapi_key": std::env::var("SERPAPI_KEY").unwrap_or_default(),
+        "serpapi_key": mask_api_key(&serpapi_key),
+        "serpapi_key_configured": !serpapi_key.is_empty() && serpapi_key != "your-serpapi-key-here",
         "ai_base_url": std::env::var("AI_BASE_URL").unwrap_or_default(),
-        "ai_api_key": std::env::var("AI_API_KEY").unwrap_or_default(),
+        "ai_api_key": mask_api_key(&ai_api_key),
+        "ai_api_key_configured": !ai_api_key.is_empty(),
         "ai_model": std::env::var("AI_MODEL").unwrap_or_default()
     }))
 }
 
 // Save SerpAPI key
 pub async fn api_save_serpapi(Json(req): Json<serde_json::Value>) -> Json<serde_json::Value> {
-    if let Some(key) = req["api_key"].as_str() {
-        if let Err(e) = update_env_file("SERPAPI_KEY", key) {
-            return Json(json!({"status": "error", "message": e.to_string()}));
-        }
-        std::env::set_var("SERPAPI_KEY", key);
-        Json(json!({"status": "ok"}))
-    } else {
-        Json(json!({"status": "error", "message": "Invalid API key"}))
+    let api_key = req["api_key"].as_str().unwrap_or("").trim();
+
+    if api_key.is_empty() {
+        return Json(json!({
+            "status": "error",
+            "message": "API key is required"
+        }));
     }
+
+    // Validate key length
+    if api_key.len() < 20 || api_key.len() > 200 {
+        return Json(json!({
+            "status": "error",
+            "message": "Invalid API key format"
+        }));
+    }
+
+    // Validate key characters (alphanumeric and common special chars)
+    if !api_key.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+        return Json(json!({
+            "status": "error",
+            "message": "API key contains invalid characters"
+        }));
+    }
+
+    if let Err(e) = update_env_file("SERPAPI_KEY", api_key) {
+        return Json(json!({"status": "error", "message": e.to_string()}));
+    }
+
+    std::env::set_var("SERPAPI_KEY", api_key);
+    Json(json!({"status": "ok"}))
 }
 
 // Save AI config
 pub async fn api_save_ai(Json(req): Json<serde_json::Value>) -> Json<serde_json::Value> {
-    let base_url = req["base_url"].as_str().unwrap_or("");
-    let api_key = req["api_key"].as_str().unwrap_or("");
-    let model = req["model"].as_str().unwrap_or("");
-    
+    let base_url = req["base_url"].as_str().unwrap_or("").trim();
+    let api_key = req["api_key"].as_str().unwrap_or("").trim();
+    let model = req["model"].as_str().unwrap_or("").trim();
+
+    // Validate all fields present
     if base_url.is_empty() || api_key.is_empty() || model.is_empty() {
-        return Json(json!({"status": "error", "message": "All fields required"}));
+        return Json(json!({
+            "status": "error",
+            "message": "All fields are required"
+        }));
     }
-    
+
+    // Validate URL format
+    if let Err(_) = url::Url::parse(base_url) {
+        return Json(json!({
+            "status": "error",
+            "message": "Invalid URL format. Must start with http:// or https://"
+        }));
+    }
+
+    // Validate URL scheme
+    if !base_url.starts_with("http://") && !base_url.starts_with("https://") {
+        return Json(json!({
+            "status": "error",
+            "message": "URL must use HTTP or HTTPS protocol"
+        }));
+    }
+
+    // Validate API key length (reasonable bounds)
+    if api_key.len() < 10 || api_key.len() > 200 {
+        return Json(json!({
+            "status": "error",
+            "message": "API key length must be between 10 and 200 characters"
+        }));
+    }
+
+    // Validate model name
+    if model.len() < 2 || model.len() > 100 {
+        return Json(json!({
+            "status": "error",
+            "message": "Model name must be between 2 and 100 characters"
+        }));
+    }
+
+    // Validate model name characters (alphanumeric, dash, underscore, dot)
+    if !model.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.') {
+        return Json(json!({
+            "status": "error",
+            "message": "Model name contains invalid characters"
+        }));
+    }
+
+    // Save if validation passes
     if let Err(e) = update_env_file("AI_BASE_URL", base_url) {
         return Json(json!({"status": "error", "message": e.to_string()}));
     }
@@ -615,25 +848,43 @@ pub async fn api_save_ai(Json(req): Json<serde_json::Value>) -> Json<serde_json:
     if let Err(e) = update_env_file("AI_MODEL", model) {
         return Json(json!({"status": "error", "message": e.to_string()}));
     }
-    
+
     std::env::set_var("AI_BASE_URL", base_url);
     std::env::set_var("AI_API_KEY", api_key);
     std::env::set_var("AI_MODEL", model);
-    
+
     Json(json!({"status": "ok"}))
 }
 
-// Helper function to update .env file
+// Helper function to update .env file with file locking
 fn update_env_file(key: &str, value: &str) -> Result<(), String> {
-    use std::fs;
-    use std::io::Write;
-    
+    use fs2::FileExt;
+    use std::fs::OpenOptions;
+    use std::io::{Read, Write, Seek, SeekFrom};
+
     let env_path = ".env";
-    let content = fs::read_to_string(env_path).unwrap_or_default();
+
+    // Open file with read/write access, create if doesn't exist
+    let mut file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .open(env_path)
+        .map_err(|e| format!("Failed to open .env file: {}", e))?;
+
+    // Lock file for exclusive access (prevents concurrent writes)
+    file.lock_exclusive()
+        .map_err(|e| format!("Failed to lock .env file: {}", e))?;
+
+    // Read current content
+    let mut content = String::new();
+    file.read_to_string(&mut content)
+        .map_err(|e| format!("Failed to read .env file: {}", e))?;
+
+    // Parse and update lines
     let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
-    
-    // Find and update or append
     let mut found = false;
+
     for line in &mut lines {
         if line.starts_with(&format!("{}=", key)) {
             *line = format!("{}={}", key, value);
@@ -641,13 +892,22 @@ fn update_env_file(key: &str, value: &str) -> Result<(), String> {
             break;
         }
     }
-    
+
     if !found {
         lines.push(format!("{}={}", key, value));
     }
-    
-    let mut file = fs::File::create(env_path).map_err(|e| e.to_string())?;
-    file.write_all(lines.join("\n").as_bytes()).map_err(|e| e.to_string())?;
-    
+
+    // Write back to file
+    file.set_len(0)
+        .map_err(|e| format!("Failed to truncate .env file: {}", e))?;
+    file.seek(SeekFrom::Start(0))
+        .map_err(|e| format!("Failed to seek .env file: {}", e))?;
+    file.write_all(lines.join("\n").as_bytes())
+        .map_err(|e| format!("Failed to write .env file: {}", e))?;
+
+    // Unlock file
+    file.unlock()
+        .map_err(|e| format!("Failed to unlock .env file: {}", e))?;
+
     Ok(())
 }

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>专利检索 - Patent Hub</title>
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/style.css?v={{timestamp}}">
 </head>
 <body>
 <nav class="navbar">
@@ -13,6 +13,7 @@
 <a href="/search" class="active">专利检索</a>
 <a href="/compare">专利对比</a>
 <a href="/ai">AI 助手</a>
+<a href="/settings">设置</a>
 </div>
 </nav>
 <main class="container">
@@ -123,7 +124,7 @@ currentPage = page;
 document.getElementById('results').innerHTML = '<p style="text-align:center;">检索中...</p>';
 document.getElementById('stats-container').style.display = 'none';
 try {
-const endpoint = mode === 'online' ? '/api/search/online' : '/api/search/local';
+const endpoint = mode === 'online' ? '/api/search/online' : '/api/search';
 const body = { query, page, page_size: pageSize };
 const dateFrom = document.getElementById("date-from").value;
 const dateTo = document.getElementById("date-to").value;
