@@ -1,6 +1,7 @@
 mod ai;
 mod collections;
 mod idea;
+mod ipc;
 mod pages;
 mod patent;
 mod search;
@@ -10,6 +11,7 @@ mod upload;
 pub use ai::*;
 pub use collections::*;
 pub use idea::*;
+pub use ipc::*;
 pub use pages::*;
 pub use patent::*;
 pub use search::*;

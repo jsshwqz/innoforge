@@ -630,6 +630,45 @@ impl Database {
         Ok((rows, total))
     }
 
+    // ── IPC Classification ────────────────────────────────────────────────────
+
+    pub fn get_all_ipc_codes(&self) -> Result<Vec<String>> {
+        let c = self.conn();
+        let mut stmt = c.prepare(
+            "SELECT ipc_codes FROM patents WHERE ipc_codes != '' AND ipc_codes IS NOT NULL",
+        )?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    }
+
+    pub fn search_by_ipc(&self, code: &str) -> Result<Vec<serde_json::Value>> {
+        let c = self.conn();
+        let pattern = format!("%{}%", code);
+        let mut stmt = c.prepare(
+            "SELECT id, patent_number, title, abstract_text, applicant, filing_date, country, ipc_codes
+             FROM patents WHERE ipc_codes LIKE ?1 ORDER BY filing_date DESC LIMIT 100",
+        )?;
+        let rows = stmt
+            .query_map(params![pattern], |row| {
+                Ok(serde_json::json!({
+                    "id": row.get::<_, String>(0)?,
+                    "patent_number": row.get::<_, String>(1)?,
+                    "title": row.get::<_, String>(2)?,
+                    "abstract_text": row.get::<_, String>(3).unwrap_or_default(),
+                    "applicant": row.get::<_, String>(4).unwrap_or_default(),
+                    "filing_date": row.get::<_, String>(5).unwrap_or_default(),
+                    "country": row.get::<_, String>(6).unwrap_or_default(),
+                    "ipc_codes": row.get::<_, String>(7).unwrap_or_default(),
+                }))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    }
+
     // ── Idea CRUD ─────────────────────────────────────────────────────────────
 
     pub fn insert_idea(&self, idea: &Idea) -> Result<()> {

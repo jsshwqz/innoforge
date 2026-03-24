@@ -74,6 +74,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/idea/:id/chat", post(routes::api_idea_chat))
         .route("/api/idea/:id/messages", get(routes::api_idea_messages))
         .route("/api/idea/:id/summarize", post(routes::api_idea_summarize_discussion))
+        // IPC Classification API
+        .route("/api/ipc/tree", get(routes::api_ipc_tree))
+        .route("/api/ipc/:code/patents", get(routes::api_ipc_patents))
         // Import API
         .route("/api/patents/import", post(routes::api_import_patents))
         // Collections API
