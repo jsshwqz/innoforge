@@ -630,21 +630,6 @@ impl Database {
         Ok((rows, total))
     }
 
-    fn row_to_summary(r: &rusqlite::Row) -> rusqlite::Result<PatentSummary> {
-        Ok(PatentSummary {
-            id: r.get(0)?,
-            patent_number: r.get(1)?,
-            title: r.get(2)?,
-            abstract_text: r.get::<_, String>(3).unwrap_or_default(),
-            applicant: r.get::<_, String>(4).unwrap_or_default(),
-            inventor: r.get::<_, String>(5).unwrap_or_default(),
-            filing_date: r.get::<_, String>(6).unwrap_or_default(),
-            country: r.get::<_, String>(7).unwrap_or_default(),
-            relevance_score: None,
-            score_source: None,
-        })
-    }
-
     // ── Idea CRUD ─────────────────────────────────────────────────────────────
 
     pub fn insert_idea(&self, idea: &Idea) -> Result<()> {
