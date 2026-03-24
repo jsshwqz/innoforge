@@ -236,8 +236,13 @@ pub async fn api_search_online(
                                         if let Err(e) = s.db.insert_patent(&p) {
                                             tracing::warn!("Failed to cache online patent {}: {}", p.patent_number, e);
                                         }
-                                        // Position-based relevance: 1st=98, 2nd=95, 3rd=92...
-                                        let score = (98.0 - idx as f64 * 3.0).max(30.0);
+                                        // Hybrid relevance: position + content matching
+                                        let position_score = (98.0 - idx as f64 * 3.0).max(30.0);
+                                        let content_score = calculate_online_relevance(
+                                            &req.query, &p.title, &p.abstract_text, &p.applicant,
+                                        );
+                                        let score = (position_score * 0.4 + content_score * 0.6).min(100.0);
+                                        let source = format!("hybrid(pos:{:.0}+content:{:.0})", position_score, content_score);
                                         patents.push(PatentSummary {
                                             id: p.id.clone(),
                                             patent_number: p.patent_number.clone(),
@@ -248,7 +253,7 @@ pub async fn api_search_online(
                                             filing_date: p.filing_date.clone(),
                                             country: p.country.clone(),
                                             relevance_score: Some(score),
-                                            score_source: Some("search-rank".to_string()),
+                                            score_source: Some(source),
                                         });
                                     }
                                 }
@@ -680,6 +685,9 @@ async fn search_google_patents_direct(
                         .to_string();
 
                     if !title.is_empty() {
+                        let content_score = calculate_online_relevance(
+                            &query, &title, &snippet, &applicant,
+                        );
                         patents.push(PatentSummary {
                             id: uuid::Uuid::new_v4().to_string(),
                             patent_number: patent_number.to_string(),
@@ -689,8 +697,8 @@ async fn search_google_patents_direct(
                             inventor,
                             filing_date,
                             country,
-                            relevance_score: None,
-                            score_source: None,
+                            relevance_score: Some(content_score),
+                            score_source: Some("content-match".to_string()),
                         });
                     }
                 }
@@ -700,6 +708,49 @@ async fn search_google_patents_direct(
 
     println!("[FREE] Google Patents direct: {} results, total {}", patents.len(), total);
     Ok((patents, total))
+}
+
+/// Calculate content-based relevance for online search results.
+fn calculate_online_relevance(query: &str, title: &str, abstract_text: &str, applicant: &str) -> f64 {
+    let q = query.trim().to_lowercase();
+    let t = title.trim().to_lowercase();
+    let a = abstract_text.trim().to_lowercase();
+    let app = applicant.trim().to_lowercase();
+
+    let mut score = 30.0;
+
+    // Title matching (most important)
+    if t == q { score += 50.0; }
+    else if t.contains(&q) { score += 35.0; }
+    else {
+        // Word-level matching in title
+        let q_words: Vec<&str> = q.split_whitespace().filter(|w| w.len() > 1).collect();
+        if !q_words.is_empty() {
+            let matches = q_words.iter().filter(|w| t.contains(*w)).count();
+            score += (matches as f64 / q_words.len() as f64) * 30.0;
+        }
+        // Chinese character matching in title
+        let q_chars: Vec<char> = q.chars().filter(|c| *c > '\u{4E00}' && *c < '\u{9FFF}').collect();
+        if !q_chars.is_empty() {
+            let matches = q_chars.iter().filter(|c| t.contains(**c)).count();
+            score += (matches as f64 / q_chars.len() as f64) * 25.0;
+        }
+    }
+
+    // Abstract matching (secondary)
+    if a.contains(&q) { score += 15.0; }
+    else {
+        let q_words: Vec<&str> = q.split_whitespace().filter(|w| w.len() > 1).collect();
+        if !q_words.is_empty() {
+            let matches = q_words.iter().filter(|w| a.contains(*w)).count();
+            score += (matches as f64 / q_words.len() as f64) * 10.0;
+        }
+    }
+
+    // Applicant matching (bonus)
+    if app.contains(&q) { score += 5.0; }
+
+    score.min(100.0)
 }
 
 fn strip_html_tags(s: &str) -> String {
