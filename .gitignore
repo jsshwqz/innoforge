@@ -7,5 +7,5 @@ target/
 .skill-router/
 Cargo.lock
 mcp_stderr.txt
-skills/
 docs/plans/
+*.zip
