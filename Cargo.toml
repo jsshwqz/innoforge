@@ -14,6 +14,10 @@ path = "src/main.rs"
 name = "skill-router"
 path = "src/bin/skill-router.rs"
 
+[[bin]]
+name = "patent-hub-mcp"
+path = "src/bin/mcp-server.rs"
+
 [lib]
 name = "patent_hub"
 path = "src/lib.rs"
