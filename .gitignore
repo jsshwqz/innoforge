@@ -9,3 +9,4 @@ Cargo.lock
 mcp_stderr.txt
 docs/plans/
 *.zip
+node_modules
