@@ -175,6 +175,32 @@ jobs:
           cargo tauri android init
           cargo tauri android build --apk
 
+      - name: Sign APK
+        run: |
+          # Generate a release keystore for signing
+          keytool -genkeypair -v \
+            -keystore patent-hub.keystore \
+            -alias patent-hub \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass patent-hub-2024 \
+            -keypass patent-hub-2024 \
+            -dname "CN=Patent Hub, OU=Dev, O=Patent Hub, L=SZ, ST=GD, C=CN"
+          # Find and sign all APKs
+          for apk in $(find . -name "*.apk" -type f); do
+            echo "Signing: $apk"
+            # Align the APK
+            ${ANDROID_HOME}/build-tools/$(ls ${ANDROID_HOME}/build-tools/ | tail -1)/zipalign -f 4 "$apk" "${apk}.aligned"
+            mv "${apk}.aligned" "$apk"
+            # Sign with apksigner
+            ${ANDROID_HOME}/build-tools/$(ls ${ANDROID_HOME}/build-tools/ | tail -1)/apksigner sign \
+              --ks patent-hub.keystore \
+              --ks-key-alias patent-hub \
+              --ks-pass pass:patent-hub-2024 \
+              --key-pass pass:patent-hub-2024 \
+              "$apk"
+            echo "Signed: $apk"
+          done
+
       - name: Find APK
         id: find-apk
         run: |
@@ -186,8 +212,7 @@ jobs:
             echo "apk_found=true" >> $GITHUB_OUTPUT
             echo "Found APK: $APK"
           else
-            echo "No APK found, checking for AAB..."
-            find . -name "*.aab" -type f 2>/dev/null
+            echo "No APK found"
             echo "apk_found=false" >> $GITHUB_OUTPUT
           fi
 
