@@ -23,24 +23,34 @@ pub async fn api_search(
         req.page_size,
     ) {
         Ok((patents, total, search_type)) => (patents, total, search_type),
-        Err(_) => (vec![], 0, SearchType::Mixed),
+        Err(e) => {
+            tracing::error!("search_smart failed: {}", e);
+            (vec![], 0, SearchType::Mixed)
+        }
     };
 
-    // IPC/CPC post-filtering: fetch full patent to check classification codes
+    // IPC/CPC post-filtering: batch-fetch patents to avoid N+1 queries
     let ipc_filter = req.ipc.as_deref().unwrap_or("").trim().to_lowercase();
     let cpc_filter = req.cpc.as_deref().unwrap_or("").trim().to_lowercase();
     if !ipc_filter.is_empty() || !cpc_filter.is_empty() {
+        let mut cache: std::collections::HashMap<String, crate::patent::Patent> =
+            std::collections::HashMap::new();
+        for p in &patents {
+            if let Ok(Some(full)) = s.db.get_patent(&p.id) {
+                cache.insert(p.id.clone(), full);
+            }
+        }
         patents.retain(|p| {
             let matches_ipc = if ipc_filter.is_empty() {
                 true
-            } else if let Ok(Some(full)) = s.db.get_patent(&p.id) {
+            } else if let Some(full) = cache.get(&p.id) {
                 full.ipc_codes.to_lowercase().contains(&ipc_filter)
             } else {
                 false
             };
             let matches_cpc = if cpc_filter.is_empty() {
                 true
-            } else if let Ok(Some(full)) = s.db.get_patent(&p.id) {
+            } else if let Some(full) = cache.get(&p.id) {
                 full.cpc_codes.to_lowercase().contains(&cpc_filter)
             } else {
                 false
@@ -482,6 +492,7 @@ pub async fn api_export_csv(
         .into_response()
 }
 
+#[cfg(not(target_os = "android"))]
 pub async fn api_export_xlsx(
     State(s): State<AppState>,
     Json(req): Json<SearchRequest>,
@@ -558,6 +569,11 @@ pub async fn api_export_xlsx(
         )
             .into_response(),
     }
+}
+
+#[cfg(target_os = "android")]
+pub async fn api_export_xlsx() -> impl IntoResponse {
+    (StatusCode::NOT_IMPLEMENTED, "Excel export not available on Android").into_response()
 }
 
 pub(crate) fn serp_to_patent(r: &serde_json::Value) -> Patent {
