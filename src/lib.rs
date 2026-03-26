@@ -3,24 +3,52 @@ pub mod db;
 pub mod patent;
 pub mod skill_router;
 
-// Re-export routes module for embedded server use
 mod error;
 mod routes;
 
-/// Start the patent-hub web server. Can be called from Tauri or standalone.
-/// This function blocks until the server shuts down.
-pub async fn start_server(db_path: &str) -> anyhow::Result<()> {
-    use axum::{
-        extract::DefaultBodyLimit,
-        http::HeaderValue,
-        routing::{get, post},
-        Router,
-    };
-    use std::net::SocketAddr;
-    use std::sync::{Arc, RwLock};
-    use tower_http::services::ServeDir;
-    use tower_http::set_header::SetResponseHeaderLayer;
+use axum::{
+    body::Body,
+    extract::DefaultBodyLimit,
+    http::{HeaderValue, Response, StatusCode},
+    routing::{get, post},
+    Router,
+};
+use rust_embed::Embed;
+use std::net::SocketAddr;
+use std::sync::{Arc, RwLock};
+use tower_http::set_header::SetResponseHeaderLayer;
 
+#[derive(Embed)]
+#[folder = "static/"]
+struct StaticAssets;
+
+#[derive(Embed)]
+#[folder = "templates/"]
+struct TemplateAssets;
+
+async fn serve_static_embedded(
+    axum::extract::Path(path): axum::extract::Path<String>,
+) -> Response<Body> {
+    match StaticAssets::get(&path) {
+        Some(content) => {
+            let mime = mime_guess::from_path(&path).first_or_octet_stream();
+            Response::builder()
+                .status(StatusCode::OK)
+                .header("Content-Type", mime.as_ref())
+                .header("Cache-Control", "public, max-age=3600")
+                .body(Body::from(content.data.to_vec()))
+                .unwrap()
+        }
+        None => Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(Body::from("Not found"))
+            .unwrap(),
+    }
+}
+
+/// Start the patent-hub web server with embedded assets.
+/// db_path: path to SQLite database (use app data dir on Android)
+pub async fn start_server(db_path: &str) -> anyhow::Result<()> {
     let db = db::Database::init(db_path)?;
     let config = routes::AppConfig::from_env();
     let state = routes::AppState {
@@ -79,7 +107,8 @@ pub async fn start_server(db_path: &str) -> anyhow::Result<()> {
         .route("/api/patents/:id/collections", get(routes::api_get_patent_collections))
         .route("/api/tags", get(routes::api_list_all_tags))
         .route("/api/upload/compare", post(routes::api_upload_compare))
-        .nest_service("/static", ServeDir::new("static"))
+        // Serve embedded static files
+        .route("/static/*path", get(serve_static_embedded))
         .layer(DefaultBodyLimit::max(10 * 1024 * 1024))
         .layer(SetResponseHeaderLayer::overriding(
             axum::http::header::X_FRAME_OPTIONS,
@@ -95,10 +124,11 @@ pub async fn start_server(db_path: &str) -> anyhow::Result<()> {
         ))
         .with_state(state);
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
+    let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
     println!("Patent Hub server starting at http://{addr}");
     axum::Server::bind(&addr)
         .serve(app.into_make_service())
         .await?;
     Ok(())
 }
+

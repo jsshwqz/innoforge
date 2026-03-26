@@ -6,6 +6,10 @@ license = "MIT"
 description = "Patent search, analysis and management platform with AI integration"
 repository = "https://github.com/jsshwqz/patent-hub"
 
+[lib]
+name = "patent_hub"
+path = "src/lib.rs"
+
 [[bin]]
 name = "patent-hub"
 path = "src/main.rs"
@@ -18,9 +22,9 @@ path = "src/bin/skill-router.rs"
 name = "patent-hub-mcp"
 path = "src/bin/mcp-server.rs"
 
-[lib]
-name = "patent_hub"
-path = "src/lib.rs"
+[[bin]]
+name = "patent-hub-mobile"
+path = "src/bin/mobile.rs"
 
 [dependencies]
 anyhow = "1"
@@ -45,6 +49,10 @@ rust_xlsxwriter = "0.79"
 regex = "1.12.3"
 rust-embed = { version = "8.11.0", features = ["mime-guess"] }
 mime_guess = "2.0.5"
+
+[target.'cfg(target_os = "android")'.dependencies]
+wry = "0.46"
+tao = "0.30"
 
 [dev-dependencies]
 tempfile = "3"
