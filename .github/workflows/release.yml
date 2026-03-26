@@ -165,12 +165,12 @@ jobs:
       - name: 安装 cargo-ndk
         run: cargo install cargo-ndk
 
-      - name: 交叉编译 Rust 二进制
+      - name: 交叉编译 Rust 共享库（cdylib）
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.0.12077973
         run: |
-          cargo ndk -t arm64-v8a build --release --bin patent-hub-mobile
-          ls -la target/aarch64-linux-android/release/patent-hub-mobile
+          cargo ndk -t arm64-v8a build --release --lib
+          ls -la target/aarch64-linux-android/release/libpatent_hub.so
 
       - name: 打包 APK
         run: |
@@ -179,8 +179,8 @@ jobs:
           mkdir -p apk-build/assets/templates
           mkdir -p apk-build/assets/static
 
-          # 复制二进制为 .so（Android 只加载 .so）
-          cp target/aarch64-linux-android/release/patent-hub-mobile apk-build/lib/arm64-v8a/libpatent_hub.so
+          # 复制 cdylib 共享库
+          cp target/aarch64-linux-android/release/libpatent_hub.so apk-build/lib/arm64-v8a/libpatent_hub.so
 
           # 复制 Web 资源
           cp templates/*.html apk-build/assets/templates/
@@ -300,7 +300,7 @@ jobs:
           javac -source 11 -target 11 -classpath ${PLATFORM}/android.jar \
             -d java-classes java-src/com/patenthub/app/MainActivity.java
 
-          ${D8} --output apk-build/ java-classes/com/patenthub/app/MainActivity.class
+          find java-classes -name '*.class' | xargs ${D8} --output apk-build/
 
           # 编译资源
           ${AAPT2} compile --dir apk-build/res -o compiled.zip
