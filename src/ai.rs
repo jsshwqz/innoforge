@@ -219,6 +219,12 @@ impl AiClient {
                     return Ok(content);
                 }
                 Err(e) => {
+                    if e.is_connect() && provider.base_url.contains("localhost") {
+                        return Err(anyhow::anyhow!(
+                            "AI 未配置。请打开「设置」页面，配置云端 AI 服务（如智谱 GLM、OpenRouter 等）。\
+                             当前默认连接本地 Ollama (localhost:11434)，手机端不可用。"
+                        ));
+                    }
                     if attempt < max_retries - 1 && (e.is_timeout() || e.is_connect()) {
                         last_err = Some(e.into());
                         continue;
