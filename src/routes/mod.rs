@@ -68,13 +68,6 @@ impl AppConfig {
         }
     }
 
-    /// Whether AI is properly configured (not default Ollama placeholder).
-    pub fn has_ai(&self) -> bool {
-        !self.ai_api_key.is_empty()
-            && self.ai_api_key != "ollama"
-            && self.ai_api_key != "your-api-key-here"
-    }
-
     /// Build an AiClient from the current config (with fallback support).
     pub fn ai_client(&self) -> AiClient {
         let mut client = AiClient::with_config(&self.ai_base_url, &self.ai_api_key, &self.ai_model);

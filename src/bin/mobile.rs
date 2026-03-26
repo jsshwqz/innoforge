@@ -37,7 +37,7 @@ fn main() {
     println!("[Patent Hub Mobile] 等待服务器就绪...");
     for i in 0..30 {
         thread::sleep(Duration::from_millis(200));
-        if let Ok(_) = std::net::TcpStream::connect("127.0.0.1:3000") {
+        if std::net::TcpStream::connect("127.0.0.1:3000").is_ok() {
             println!("[Patent Hub Mobile] 服务器已就绪 ({}ms)", (i + 1) * 200);
             break;
         }

@@ -70,6 +70,7 @@ use tower_http::set_header::SetResponseHeaderLayer;
 #[folder = "static/"]
 struct StaticAssets;
 
+#[allow(dead_code)]
 #[derive(Embed)]
 #[folder = "templates/"]
 struct TemplateAssets;
