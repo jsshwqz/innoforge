@@ -44,12 +44,10 @@ pub async fn api_save_serpapi(
         return Json(json!({"status": "error", "message": "API key contains invalid characters"}));
     }
 
-    if let Err(e) = update_env_file("SERPAPI_KEY", api_key) {
-        return Json(json!({"status": "error", "message": e.to_string()}));
-    }
-
-    // Update shared config instead of env var
+    // 先更新内存配置（立即生效）
     s.config.write().unwrap().serpapi_key = api_key.to_string();
+    // .env 持久化为可选
+    let _ = update_env_file("SERPAPI_KEY", api_key);
     Json(json!({"status": "ok"}))
 }
 
@@ -80,23 +78,18 @@ pub async fn api_save_ai(
         return Json(json!({"status": "error", "message": "Model name contains invalid characters"}));
     }
 
-    if let Err(e) = update_env_file("AI_BASE_URL", base_url) {
-        return Json(json!({"status": "error", "message": e.to_string()}));
-    }
-    if let Err(e) = update_env_file("AI_API_KEY", api_key) {
-        return Json(json!({"status": "error", "message": e.to_string()}));
-    }
-    if let Err(e) = update_env_file("AI_MODEL", model) {
-        return Json(json!({"status": "error", "message": e.to_string()}));
-    }
-
-    // Update shared config instead of env vars
+    // 先更新内存配置（立即生效）
     {
         let mut config = s.config.write().unwrap();
         config.ai_base_url = base_url.to_string();
         config.ai_api_key = api_key.to_string();
         config.ai_model = model.to_string();
     }
+
+    // .env 持久化为可选（Android 上可能无法写入）
+    let _ = update_env_file("AI_BASE_URL", base_url);
+    let _ = update_env_file("AI_API_KEY", api_key);
+    let _ = update_env_file("AI_MODEL", model);
 
     Json(json!({"status": "ok"}))
 }
