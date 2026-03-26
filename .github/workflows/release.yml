@@ -163,8 +163,13 @@ jobs:
         working-directory: android-app
         run: gradle assembleRelease
 
-      - name: Sign APK
+      - name: Sign and prepare APK
         run: |
+          echo "=== 查找所有 APK ==="
+          find . -name "*.apk" -type f
+          echo "=== 查找所有 build output ==="
+          find android-app -name "*.apk" -o -name "*.aab" 2>/dev/null
+
           keytool -genkeypair -v \
             -keystore patent-hub.keystore \
             -alias patent-hub \
@@ -172,21 +177,29 @@ jobs:
             -storepass patent-hub-2024 \
             -keypass patent-hub-2024 \
             -dname "CN=Patent Hub, OU=Dev, O=Patent Hub, L=SZ, ST=GD, C=CN"
-          APK=$(find android-app -name "*.apk" -type f | head -1)
+
+          APK=$(find . -name "*.apk" -path "*/release/*" -type f | head -1)
+          if [ -z "$APK" ]; then
+            APK=$(find . -name "*.apk" -type f | head -1)
+          fi
+
           if [ -n "$APK" ]; then
-            echo "Found: $APK"
-            ${ANDROID_HOME}/build-tools/$(ls ${ANDROID_HOME}/build-tools/ | tail -1)/zipalign -f 4 "$APK" patent-hub-android.apk
-            ${ANDROID_HOME}/build-tools/$(ls ${ANDROID_HOME}/build-tools/ | tail -1)/apksigner sign \
+            echo "Found APK: $APK ($(stat -c%s "$APK") bytes)"
+            BT=$(ls ${ANDROID_HOME}/build-tools/ | tail -1)
+            ${ANDROID_HOME}/build-tools/${BT}/zipalign -f 4 "$APK" patent-hub-android.apk
+            ${ANDROID_HOME}/build-tools/${BT}/apksigner sign \
               --ks patent-hub.keystore \
               --ks-key-alias patent-hub \
               --ks-pass pass:patent-hub-2024 \
               --key-pass pass:patent-hub-2024 \
               patent-hub-android.apk
-            echo "Signed successfully"
+            echo "Signed! Size: $(stat -c%s patent-hub-android.apk) bytes"
+          else
+            echo "ERROR: No APK found!"
+            exit 1
           fi
 
       - name: Upload APK
-        if: ${{ hashFiles('patent-hub-android.apk') != '' }}
         uses: softprops/action-gh-release@v2
         with:
           files: patent-hub-android.apk
