@@ -1,0 +1,15 @@
+[application]
+name = "Patent Hub"
+default_platform = "mobile"
+out_dir = "dist"
+
+[application.android]
+package = "com.patenthub.app"
+min_sdk_version = 24
+target_sdk_version = 34
+
+[web.app]
+title = "Patent Hub"
+
+[bundle]
+identifier = "com.patenthub.app"

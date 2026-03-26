@@ -163,37 +163,16 @@ jobs:
       - name: Install Android NDK
         run: sdkmanager "ndk;27.0.12077973"
 
-      - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "^2"
+      - name: Install Dioxus CLI
+        run: cargo install dioxus-cli
 
       - name: Build Android APK
-        working-directory: src-tauri
+        working-directory: mobile
         env:
           ANDROID_HOME: ${{ env.ANDROID_HOME }}
           NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.0.12077973
         run: |
-          cargo tauri android init
-
-          # Allow cleartext HTTP to localhost (Android 9+ blocks it by default)
-          mkdir -p gen/android/app/src/main/res/xml
-          printf '<?xml version="1.0" encoding="utf-8"?>\n<network-security-config>\n  <domain-config cleartextTrafficPermitted="true">\n    <domain includeSubdomains="false">localhost</domain>\n    <domain includeSubdomains="false">127.0.0.1</domain>\n    <domain includeSubdomains="false">10.0.2.2</domain>\n  </domain-config>\n</network-security-config>\n' > gen/android/app/src/main/res/xml/network_security_config.xml
-
-          # Patch AndroidManifest.xml - use Python to avoid sed XML corruption
-          MANIFEST="gen/android/app/src/main/AndroidManifest.xml"
-          if [ -f "$MANIFEST" ]; then
-            python3 -c "
-import re, sys
-with open('$MANIFEST', 'r') as f:
-    content = f.read()
-content = content.replace('<application', '<application android:usesCleartextTraffic=\"true\" android:networkSecurityConfig=\"@xml/network_security_config\"', 1)
-with open('$MANIFEST', 'w') as f:
-    f.write(content)
-print('Patched AndroidManifest.xml')
-"
-            cat "$MANIFEST"
-          fi
-
-          cargo tauri android build --apk
+          dx build --platform android --release
 
       - name: Sign APK
         run: |
