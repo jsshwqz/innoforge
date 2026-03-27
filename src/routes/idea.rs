@@ -1,10 +1,15 @@
 use super::AppState;
 use crate::patent::*;
+use crate::pipeline::context::PipelineProgress;
+use crate::pipeline::runner::PipelineRunner;
 use axum::{
     extract::{Path, State},
+    response::sse::{Event, Sse},
     Json,
 };
+use futures::stream::Stream;
 use serde_json::json;
+use std::convert::Infallible;
 
 pub async fn api_idea_submit(
     State(s): State<AppState>,
@@ -523,6 +528,190 @@ pub async fn api_idea_messages(
             Json(json!({"messages": list}))
         }
         Err(e) => Json(json!({"error": format!("{}", e)})),
+    }
+}
+
+// ── Pipeline API ─────────────────────────────────────────────────────
+
+/// POST /api/idea/pipeline — 启动 12 步创新验证流水线
+pub async fn api_idea_pipeline(
+    State(s): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let id = req["id"].as_str().unwrap_or("");
+    if id.is_empty() {
+        return Json(json!({"status": "error", "message": "缺少创意 ID"}));
+    }
+
+    let idea = match s.db.get_idea(id) {
+        Ok(Some(i)) => i,
+        _ => return Json(json!({"status": "error", "message": "创意不存在"})),
+    };
+
+    // Create broadcast channel for progress
+    let (tx, _) = tokio::sync::broadcast::channel::<PipelineProgress>(64);
+    {
+        let mut channels = s.pipeline_channels.lock().unwrap();
+        channels.insert(id.to_string(), tx.clone());
+    }
+
+    // Build runner from config
+    let config = s.config.read().unwrap().clone();
+    let ai_client = config.ai_client();
+    let db = s.db.clone();
+    let serpapi_key = config.serpapi_key.clone();
+    let runner = PipelineRunner::new(ai_client, db.clone(), serpapi_key);
+
+    let idea_id = id.to_string();
+    let title = idea.title.clone();
+    let description = idea.description.clone();
+    let channels = s.pipeline_channels.clone();
+
+    // Run pipeline in background
+    tokio::spawn(async move {
+        let result = runner.run(&idea_id, &title, &description, Some(tx)).await;
+
+        // Save result to database
+        match &result {
+            Ok(ctx) => {
+                if let Ok(Some(mut idea)) = db.get_idea(&idea_id) {
+                    idea.novelty_score = Some(ctx.novelty_score);
+                    idea.analysis = if !ctx.ai_analysis.is_empty() {
+                        ctx.ai_analysis.clone()
+                    } else {
+                        // Use code-generated report from finalize step
+                        format!(
+                            "## 创新验证报告\n\n\
+                             **新颖性评分：{:.0}/100**\n\n\
+                             ### 评分细项\n\
+                             - 最高相似度：{:.1}%\n\
+                             - Top5 平均相似度：{:.1}%\n\
+                             - 矛盾信号加分：+{:.0}\n\
+                             - 覆盖缺口加分：+{:.0}\n\n\
+                             ### 搜索结果\n\
+                             - 网络结果：{} 条\n\
+                             - 专利结果：{} 条\n\
+                             - 多样性评分：{:.0}%\n\n\
+                             ### Top 匹配\n{}\n\n\
+                             {}{}",
+                            ctx.novelty_score,
+                            ctx.score_breakdown.max_similarity * 100.0,
+                            ctx.score_breakdown.avg_top5_similarity * 100.0,
+                            ctx.score_breakdown.contradiction_bonus,
+                            ctx.score_breakdown.coverage_gap_bonus,
+                            ctx.web_results.len(),
+                            ctx.patent_results.len(),
+                            ctx.diversity_score * 100.0,
+                            ctx.top_matches
+                                .iter()
+                                .take(5)
+                                .map(|m| format!(
+                                    "- **{}** (相似度 {:.0}%) [{}]({})",
+                                    m.source_title,
+                                    m.combined_score * 100.0,
+                                    m.source_type,
+                                    m.source_url
+                                ))
+                                .collect::<Vec<_>>()
+                                .join("\n"),
+                            if !ctx.contradictions.is_empty() {
+                                format!(
+                                    "\n### 矛盾信号（创新机会）\n{}\n",
+                                    ctx.contradictions
+                                        .iter()
+                                        .map(|c| format!("- {} (信号强度 {:.0}%)", c.opportunity, c.signal_strength * 100.0))
+                                        .collect::<Vec<_>>()
+                                        .join("\n")
+                                )
+                            } else {
+                                String::new()
+                            },
+                            if !ctx.action_plan.is_empty() {
+                                format!("\n### 行动建议\n{}\n", ctx.action_plan)
+                            } else {
+                                String::new()
+                            },
+                        )
+                    };
+                    idea.status = "done".into();
+                    let _ = db.update_idea(&idea);
+                }
+            }
+            Err(e) => {
+                if let Ok(Some(mut idea)) = db.get_idea(&idea_id) {
+                    idea.analysis = format!("流水线执行失败：{}", e);
+                    idea.status = "error".into();
+                    let _ = db.update_idea(&idea);
+                }
+            }
+        }
+
+        // Clean up channel
+        let mut ch = channels.lock().unwrap();
+        ch.remove(&idea_id);
+    });
+
+    Json(json!({"status": "ok", "message": "流水线已启动"}))
+}
+
+/// GET /api/idea/:id/progress — SSE 实时进度流
+pub async fn api_idea_progress(
+    State(s): State<AppState>,
+    Path(idea_id): Path<String>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let rx = {
+        let channels = s.pipeline_channels.lock().unwrap();
+        channels.get(&idea_id).map(|tx| tx.subscribe())
+    };
+
+    let stream = async_stream::stream! {
+        if let Some(mut rx) = rx {
+            loop {
+                match rx.recv().await {
+                    Ok(progress) => {
+                        let data = serde_json::to_string(&progress).unwrap_or_default();
+                        yield Ok(Event::default().data(data));
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        // Pipeline finished
+                        yield Ok(Event::default().event("done").data("complete"));
+                        break;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                        continue;
+                    }
+                }
+            }
+        } else {
+            // No active pipeline, send done immediately
+            yield Ok(Event::default().event("done").data("no active pipeline"));
+        }
+    };
+
+    Sse::new(stream)
+}
+
+/// GET /api/idea/:id/report — 获取流水线完整报告
+pub async fn api_idea_report(
+    State(s): State<AppState>,
+    Path(idea_id): Path<String>,
+) -> Json<serde_json::Value> {
+    match s.db.get_idea(&idea_id) {
+        Ok(Some(idea)) => Json(json!({
+            "status": "ok",
+            "report": {
+                "id": idea.id,
+                "title": idea.title,
+                "description": idea.description,
+                "status": idea.status,
+                "novelty_score": idea.novelty_score,
+                "analysis": idea.analysis,
+                "web_results": serde_json::from_str::<serde_json::Value>(&idea.web_results).unwrap_or_default(),
+                "patent_results": serde_json::from_str::<serde_json::Value>(&idea.patent_results).unwrap_or_default(),
+                "created_at": idea.created_at,
+            }
+        })),
+        _ => Json(json!({"status": "error", "message": "创意不存在"})),
     }
 }
 

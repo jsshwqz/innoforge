@@ -46,7 +46,11 @@ pub async fn api_save_serpapi(
 
     // 先更新内存配置（立即生效）
     s.config.write().unwrap().serpapi_key = api_key.to_string();
-    // .env 持久化为可选
+    // SQLite 持久化（主存储，Android 友好）
+    if let Err(e) = s.db.set_setting("SERPAPI_KEY", api_key) {
+        tracing::warn!("保存设置到数据库失败: {}", e);
+    }
+    // .env 持久化为可选（桌面端后备）
     let _ = update_env_file("SERPAPI_KEY", api_key);
     Json(json!({"status": "ok"}))
 }
@@ -86,7 +90,13 @@ pub async fn api_save_ai(
         config.ai_model = model.to_string();
     }
 
-    // .env 持久化为可选（Android 上可能无法写入）
+    // SQLite 持久化（主存储，Android 友好）
+    for (k, v) in [("AI_BASE_URL", base_url), ("AI_API_KEY", api_key), ("AI_MODEL", model)] {
+        if let Err(e) = s.db.set_setting(k, v) {
+            tracing::warn!("保存设置 {} 到数据库失败: {}", k, e);
+        }
+    }
+    // .env 持久化为可选（桌面端后备）
     let _ = update_env_file("AI_BASE_URL", base_url);
     let _ = update_env_file("AI_API_KEY", api_key);
     let _ = update_env_file("AI_MODEL", model);
@@ -128,7 +138,14 @@ pub async fn api_save_fallbacks(
             continue;
         }
 
-        // Save to .env
+        // SQLite 持久化（主存储）
+        for (suffix, val) in [("NAME", name.as_str()), ("URL", url.as_str()), ("KEY", key.as_str()), ("MODEL", model.as_str())] {
+            let db_key = format!("FALLBACK_AI_{}_{}", idx, suffix);
+            if let Err(e) = s.db.set_setting(&db_key, val) {
+                tracing::warn!("保存设置 {} 到数据库失败: {}", db_key, e);
+            }
+        }
+        // .env 持久化为可选（桌面端后备）
         let _ = update_env_file(&format!("FALLBACK_AI_{}_NAME", idx), &name);
         let _ = update_env_file(&format!("FALLBACK_AI_{}_URL", idx), &url);
         let _ = update_env_file(&format!("FALLBACK_AI_{}_KEY", idx), &key);
@@ -139,6 +156,11 @@ pub async fn api_save_fallbacks(
 
     // Clear remaining slots
     for idx in (fallbacks.len() + 1)..=5 {
+        // 清除 SQLite 中的旧槽位
+        for suffix in ["NAME", "URL", "KEY", "MODEL"] {
+            let db_key = format!("FALLBACK_AI_{}_{}", idx, suffix);
+            let _ = s.db.set_setting(&db_key, "");
+        }
         let _ = update_env_file(&format!("FALLBACK_AI_{}_URL", idx), "");
         let _ = update_env_file(&format!("FALLBACK_AI_{}_KEY", idx), "");
     }

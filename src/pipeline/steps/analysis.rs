@@ -1,0 +1,142 @@
+//! Step 10-11: AiDeepAnalysis + AiActionPlan
+//!
+//! 类型：LLM
+//!
+//! 关键设计：AI 接收的是结构化计算结果，而非让 AI 自己猜测
+
+use crate::ai::AiClient;
+use crate::pipeline::context::PipelineContext;
+use anyhow::Result;
+
+/// 执行 Step 10: AI 深度分析
+pub async fn deep_analysis(ctx: &mut PipelineContext, ai: &AiClient) -> Result<()> {
+    // 构建结构化数据包，让 AI 基于代码计算的结果分析
+    let top_matches_summary: String = ctx
+        .top_matches
+        .iter()
+        .take(10)
+        .map(|m| {
+            format!(
+                "- [{}] {} (相似度: {:.1}%)\n  {}\n  来源: {}",
+                m.source_type,
+                m.source_title,
+                m.combined_score * 100.0,
+                if m.snippet.len() > 150 {
+                    format!("{}...", &m.snippet.chars().take(150).collect::<String>())
+                } else {
+                    m.snippet.clone()
+                },
+                m.source_url,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+
+    let contradictions_summary = if ctx.contradictions.is_empty() {
+        "未检测到明显的技术路线矛盾。".to_string()
+    } else {
+        ctx.contradictions
+            .iter()
+            .map(|c| {
+                format!(
+                    "- 矛盾维度: {}\n  信号强度: {:.0}%\n  机会: {}",
+                    c.dimension,
+                    c.signal_strength * 100.0,
+                    c.opportunity,
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    };
+
+    let prompt = format!(
+        "## 用户的创意\n\
+         **标题：** {title}\n\
+         **描述：** {description}\n\
+         **技术领域：** {domain}\n\n\
+         ## 代码计算结果（已验证，请基于此分析）\n\n\
+         **新颖性评分：{score:.0}/100**\n\
+         - 最高相似度：{max_sim:.1}%（与最相似的现有技术）\n\
+         - Top5 平均相似度：{avg_sim:.1}%\n\
+         - 矛盾信号加分：+{contra_bonus:.0}\n\
+         - 覆盖缺口加分：+{gap_bonus:.0}\n\
+         - 搜索多样性：{diversity:.0}%\n\n\
+         ## 最相关的现有技术（按相似度排序）\n\n\
+         {matches}\n\n\
+         ## 矛盾信号（不同技术路线 = 创新空间）\n\n\
+         {contradictions}\n\n\
+         请基于以上**代码已计算的结构化数据**进行深度分析，用 Markdown 格式返回：\n\n\
+         ### 1. 新颖性解读\n\
+         - 解读评分含义，哪些方面是新颖的，哪些已有先例\n\n\
+         ### 2. 已有方案分析\n\
+         - 对最相关的 3-5 个现有方案进行优缺点分析\n\n\
+         ### 3. 差异化机会\n\
+         - 基于矛盾信号和覆盖缺口，指出最有前景的创新方向\n\n\
+         ### 4. 风险提示\n\
+         - 技术壁垒、知识产权风险、市场竞争风险",
+        title = ctx.title,
+        description = ctx.description,
+        domain = ctx.technical_domain,
+        score = ctx.novelty_score,
+        max_sim = ctx.score_breakdown.max_similarity * 100.0,
+        avg_sim = ctx.score_breakdown.avg_top5_similarity * 100.0,
+        contra_bonus = ctx.score_breakdown.contradiction_bonus,
+        gap_bonus = ctx.score_breakdown.coverage_gap_bonus,
+        diversity = ctx.diversity_score * 100.0,
+        matches = top_matches_summary,
+        contradictions = contradictions_summary,
+    );
+
+    match ai.chat(&prompt, None).await {
+        Ok(analysis) => ctx.ai_analysis = analysis,
+        Err(e) => {
+            ctx.ai_analysis = format!(
+                "AI 分析暂不可用（{}）。\n\n\
+                 基于代码计算的结果：新颖性评分 {:.0}/100，\
+                 找到 {} 个相关现有技术，{} 个矛盾信号。\n\
+                 请参考上方的量化数据进行判断。",
+                e,
+                ctx.novelty_score,
+                ctx.top_matches.len(),
+                ctx.contradictions.len(),
+            );
+        }
+    }
+
+    Ok(())
+}
+
+/// 执行 Step 11: AI 生成行动方案
+pub async fn action_plan(ctx: &mut PipelineContext, ai: &AiClient) -> Result<()> {
+    let prompt = format!(
+        "基于以下创意分析结果，生成具体的行动方案：\n\n\
+         **创意：** {}\n\
+         **新颖性评分：** {:.0}/100\n\
+         **技术领域：** {}\n\
+         **矛盾信号数量：** {}\n\n\
+         **AI 分析摘要（前 500 字）：**\n{}\n\n\
+         请给出：\n\n\
+         ### 优化建议\n\
+         - 3-5 条具体可执行的技术改进方向\n\n\
+         ### 推荐行动\n\
+         - 短期（1-3个月）应该做什么\n\
+         - 中期（3-6个月）应该做什么\n\n\
+         ### 潜在合作/资源\n\
+         - 可以参考或合作的机构/团队\n\
+         - 推荐关注的技术社区或会议",
+        ctx.title,
+        ctx.novelty_score,
+        ctx.technical_domain,
+        ctx.contradictions.len(),
+        ctx.ai_analysis.chars().take(500).collect::<String>(),
+    );
+
+    match ai.chat(&prompt, None).await {
+        Ok(plan) => ctx.action_plan = plan,
+        Err(e) => {
+            ctx.action_plan = format!("行动方案生成暂不可用：{}", e);
+        }
+    }
+
+    Ok(())
+}

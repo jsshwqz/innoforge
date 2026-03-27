@@ -55,9 +55,16 @@
         .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #30363d; border-top-color: #58a6ff; border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 8px; vertical-align: middle; }
         @keyframes spin { to { transform: rotate(360deg); } }
         .progress-steps { margin-top: 8px; font-size: 0.85em; color: #8b949e; }
-        .progress-steps .step { margin: 4px 0; }
-        .progress-steps .step.active { color: #58a6ff; }
+        .progress-steps .step { margin: 4px 0; padding: 4px 8px; border-radius: 4px; display: flex; align-items: center; gap: 8px; }
+        .progress-steps .step.active { color: #58a6ff; background: #1f6feb11; }
         .progress-steps .step.done { color: #3fb950; }
+        .progress-steps .step.skipped { color: #9e6a03; text-decoration: line-through; }
+        .progress-steps .step.error { color: #f85149; }
+        .progress-steps .step-icon { width: 18px; text-align: center; }
+        .pipeline-progress { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 16px; margin-top: 16px; }
+        .pipeline-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+        .pipeline-bar { height: 6px; background: #21262d; border-radius: 3px; overflow: hidden; }
+        .pipeline-bar-fill { height: 100%; background: #1f6feb; border-radius: 3px; transition: width 0.3s ease; }
         @media (max-width: 768px) {
             .idea-layout { grid-template-columns: 1fr; }
             .idea-sidebar { border-right: none; border-bottom: 1px solid #30363d; max-height: 200px; }
@@ -142,6 +149,59 @@
         loadHistory();
     }
 
+    // 12-step pipeline definitions
+    const PIPELINE_STEPS = [
+        { key: 'parse_input', zh: '解析输入，提取关键词', en: 'Parse input & extract keywords', type: 'code' },
+        { key: 'expand_query', zh: 'AI 扩展搜索词', en: 'AI query expansion', type: 'llm' },
+        { key: 'search_web', zh: '网络搜索', en: 'Web search', type: 'code' },
+        { key: 'search_patents', zh: '专利搜索', en: 'Patent search', type: 'code' },
+        { key: 'diversity_gate', zh: '多样性检查', en: 'Diversity gate', type: 'code' },
+        { key: 'compute_similarity', zh: '相似度计算', en: 'Compute similarity', type: 'code' },
+        { key: 'rank_and_filter', zh: '排序过滤', en: 'Rank & filter', type: 'code' },
+        { key: 'detect_contradictions', zh: '矛盾信号检测', en: 'Detect contradictions', type: 'code' },
+        { key: 'score_novelty', zh: '新颖性评分', en: 'Score novelty', type: 'code' },
+        { key: 'ai_deep_analysis', zh: 'AI 深度分析', en: 'AI deep analysis', type: 'llm' },
+        { key: 'ai_action_plan', zh: 'AI 行动方案', en: 'AI action plan', type: 'llm' },
+        { key: 'finalize', zh: '生成报告', en: 'Generate report', type: 'code' },
+    ];
+
+    function buildPipelineUI() {
+        let stepsHtml = PIPELINE_STEPS.map(function(s, i) {
+            var label = i18nLang === 'en' ? s.en : s.zh;
+            var typeTag = s.type === 'llm' ? ' <span style="font-size:0.75em;color:#d2a8ff;">[LLM]</span>' : '';
+            return '<div class="step" id="pipeline-step-' + i + '" data-key="' + s.key + '">' +
+                '<span class="step-icon">⏳</span>' +
+                '<span>' + (i+1) + '. ' + label + typeTag + '</span></div>';
+        }).join('');
+
+        return '<div class="pipeline-progress">' +
+            '<div class="pipeline-header">' +
+            '<span style="font-weight:600;color:#f0f6fc;">' + (i18nLang === 'en' ? 'Innovation Validation Pipeline' : '创新验证流水线') + '</span>' +
+            '<span id="pipeline-percent" style="color:#58a6ff;font-size:0.9em;">0%</span></div>' +
+            '<div class="pipeline-bar"><div class="pipeline-bar-fill" id="pipeline-bar-fill" style="width:0%"></div></div>' +
+            '<div class="progress-steps" id="pipeline-steps">' + stepsHtml + '</div></div>';
+    }
+
+    function updatePipelineStep(stepIndex, status) {
+        var el = document.getElementById('pipeline-step-' + stepIndex);
+        if (!el) return;
+        el.className = 'step ' + status;
+        var icon = '⏳';
+        if (status === 'running') icon = '<span class="spinner" style="width:14px;height:14px;border-width:2px;"></span>';
+        else if (status === 'done') icon = '✅';
+        else if (status === 'skipped') icon = '⏭️';
+        else if (status === 'error') icon = '❌';
+        el.querySelector('.step-icon').innerHTML = icon;
+
+        // Update progress bar
+        var doneCount = document.querySelectorAll('#pipeline-steps .step.done, #pipeline-steps .step.skipped').length;
+        var pct = Math.round((doneCount / 12) * 100);
+        var fill = document.getElementById('pipeline-bar-fill');
+        var pctEl = document.getElementById('pipeline-percent');
+        if (fill) fill.style.width = pct + '%';
+        if (pctEl) pctEl.textContent = pct + '%';
+    }
+
     async function submitIdea() {
         const title = document.getElementById('idea-title').value.trim();
         const desc = document.getElementById('idea-desc').value.trim();
@@ -153,70 +213,76 @@
         const btn = document.getElementById('submit-btn');
         btn.disabled = true;
         btn.textContent = t('idea.analyzing');
-
-        showStatus('analyzing', '<span class="spinner"></span>' + t('idea.submitting'));
         clearResults();
 
         try {
+            // Step 1: Submit idea
             const submitResp = await fetch('/api/idea/submit', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ title, description: desc, input_type: 'text' }),
             });
-
-            if (!submitResp.ok) {
-                throw new Error(t('idea.serverError') + ' (' + submitResp.status + ')');
-            }
-
+            if (!submitResp.ok) throw new Error(t('idea.serverError') + ' (' + submitResp.status + ')');
             const submitData = await submitResp.json();
-            if (submitData.status !== 'ok') {
-                throw new Error(submitData.message || t('idea.submitFail'));
-            }
+            if (submitData.status !== 'ok') throw new Error(submitData.message || t('idea.submitFail'));
 
             currentIdeaId = submitData.id;
-            showStatus('analyzing',
-                '<span class="spinner"></span>' + t('idea.analyzing') +
-                '<div class="progress-steps">' +
-                '<div class="step active">' + t('idea.step1') + '</div>' +
-                '<div class="step">' + t('idea.step2') + '</div>' +
-                '<div class="step">' + t('idea.step3') + '</div>' +
-                '<div class="step">' + t('idea.step4') + '</div>' +
-                '</div>'
-            );
 
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 180000);
+            // Show pipeline progress UI
+            document.getElementById('status-area').innerHTML = buildPipelineUI();
 
-            try {
-                const analyzeResp = await fetch('/api/idea/analyze', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id: submitData.id }),
-                    signal: controller.signal,
+            // Step 2: Start pipeline
+            const pipelineResp = await fetch('/api/idea/pipeline', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: submitData.id }),
+            });
+            if (!pipelineResp.ok) throw new Error('Pipeline start failed (' + pipelineResp.status + ')');
+
+            // Step 3: Connect SSE for real-time progress
+            await new Promise(function(resolve, reject) {
+                var eventSource = new EventSource('/api/idea/' + submitData.id + '/progress');
+                var timeout = setTimeout(function() {
+                    eventSource.close();
+                    resolve(); // timeout = pipeline probably finished, load report
+                }, 300000); // 5 min max
+
+                eventSource.onmessage = function(e) {
+                    try {
+                        var progress = JSON.parse(e.data);
+                        updatePipelineStep(progress.step_index, progress.status);
+                    } catch(err) {}
+                };
+
+                eventSource.addEventListener('done', function() {
+                    clearTimeout(timeout);
+                    eventSource.close();
+                    resolve();
                 });
-                clearTimeout(timeoutId);
 
-                if (!analyzeResp.ok) {
-                    throw new Error(t('idea.analyzeError') + ' (' + analyzeResp.status + ')');
-                }
+                eventSource.onerror = function() {
+                    clearTimeout(timeout);
+                    eventSource.close();
+                    resolve(); // try to load report anyway
+                };
+            });
 
-                const analyzeData = await analyzeResp.json();
+            // Step 4: Load final report
+            const reportResp = await fetch('/api/idea/' + submitData.id + '/report');
+            const reportData = await reportResp.json();
 
-                if (analyzeData.status === 'ok') {
-                    showStatus('done', t('idea.done'));
-                    displayResults(analyzeData.idea);
-                    loadHistory();
-                    showDiscussionPanel();
-                } else {
-                    throw new Error(analyzeData.message || t('idea.analyzeFail'));
-                }
-            } catch (e) {
-                clearTimeout(timeoutId);
-                if (e.name === 'AbortError') {
-                    showStatus('error', t('idea.timeout'));
-                } else {
-                    throw e;
-                }
+            if (reportData.status === 'ok') {
+                // Update pipeline bar to 100%
+                var fill = document.getElementById('pipeline-bar-fill');
+                var pctEl = document.getElementById('pipeline-percent');
+                if (fill) { fill.style.width = '100%'; fill.style.background = '#238636'; }
+                if (pctEl) pctEl.textContent = '100% ✓';
+
+                displayResults(reportData.report);
+                loadHistory();
+                showDiscussionPanel();
+            } else {
+                showStatus('error', reportData.message || t('idea.analyzeFail'));
             }
         } catch (e) {
             showStatus('error', t('idea.analyzeFail') + '：' + e.message);

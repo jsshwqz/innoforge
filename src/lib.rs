@@ -1,6 +1,7 @@
 pub mod ai;
 pub mod db;
 pub mod patent;
+pub mod pipeline;
 pub mod skill_router;
 
 // ── Android JNI 入口 ─────────────────────────────────────────────────────────
@@ -99,10 +100,11 @@ async fn serve_static_embedded(
 /// db_path: path to SQLite database (use app data dir on Android)
 pub async fn start_server(db_path: &str) -> anyhow::Result<()> {
     let db = db::Database::init(db_path)?;
-    let config = routes::AppConfig::from_env();
+    let config = routes::AppConfig::from_db_and_env(Some(&db));
     let state = routes::AppState {
         db: Arc::new(db),
         config: Arc::new(RwLock::new(config)),
+        pipeline_channels: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     };
 
     let app = Router::new()
@@ -138,8 +140,11 @@ pub async fn start_server(db_path: &str) -> anyhow::Result<()> {
         .route("/api/ai/batch-summarize", post(routes::api_ai_batch_summarize))
         .route("/api/idea/submit", post(routes::api_idea_submit))
         .route("/api/idea/analyze", post(routes::api_idea_analyze))
+        .route("/api/idea/pipeline", post(routes::api_idea_pipeline))
         .route("/api/idea/list", get(routes::api_idea_list))
         .route("/api/idea/:id", get(routes::api_idea_get))
+        .route("/api/idea/:id/progress", get(routes::api_idea_progress))
+        .route("/api/idea/:id/report", get(routes::api_idea_report))
         .route("/api/idea/:id/chat", post(routes::api_idea_chat))
         .route("/api/idea/:id/messages", get(routes::api_idea_messages))
         .route("/api/idea/:id/summarize", post(routes::api_idea_summarize_discussion))

@@ -1,5 +1,8 @@
 {
   "dependencies": {
     "sharp": "^0.34.5"
+  },
+  "devDependencies": {
+    "png-to-ico": "^3.0.1"
   }
 }

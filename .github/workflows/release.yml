@@ -192,7 +192,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android"
               package="com.patenthub.app"
               android:versionCode="3"
-              android:versionName="0.3.2">
+              android:versionName="0.3.3">
               <uses-permission android:name="android.permission.INTERNET" />
               <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
               <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="34" />
@@ -270,7 +270,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android"
               package="com.patenthub.app"
               android:versionCode="32"
-              android:versionName="0.3.2">
+              android:versionName="0.3.3">
               <uses-permission android:name="android.permission.INTERNET" />
               <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
               <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="34" />
@@ -392,3 +392,88 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: patent-hub-ios.ipa
+
+  # ── HarmonyOS HAP ──────────────────────────────────────────────────────────
+  # 注意：GitHub Actions 目前没有 DevEco Studio 环境，
+  # HarmonyOS HAP 需要在本地使用 DevEco Studio 手动构建。
+  # 此 Job 仅作为占位和文档说明。
+  #
+  # Note: GitHub Actions does not have DevEco Studio available.
+  # HarmonyOS HAP must be built locally with DevEco Studio.
+  # This job serves as a placeholder and documentation.
+  #
+  # 本地构建步骤 / Local build steps:
+  #   cd harmonyos && ./build.sh release
+  #   然后手动上传 patent-hub-harmonyos.hap 到 Release
+  #   Then manually upload patent-hub-harmonyos.hap to the Release
+  build-harmonyos:
+    name: 构建 HarmonyOS HAP（需手动构建）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: HarmonyOS 构建说明 / HarmonyOS build instructions
+        run: |
+          echo "============================================"
+          echo " HarmonyOS HAP 需要 DevEco Studio 构建"
+          echo " HarmonyOS HAP requires DevEco Studio"
+          echo "============================================"
+          echo ""
+          echo "GitHub Actions 暂不支持 DevEco Studio 环境。"
+          echo "GitHub Actions does not support DevEco Studio yet."
+          echo ""
+          echo "请在本地执行以下步骤 / Please follow these steps locally:"
+          echo ""
+          echo "  1. 安装 DevEco Studio 5.0+ (NEXT)"
+          echo "     Install DevEco Studio 5.0+ (NEXT)"
+          echo "     https://developer.huawei.com/consumer/cn/deveco-studio/"
+          echo ""
+          echo "  2. 安装 HarmonyOS SDK API 12+"
+          echo "     Install HarmonyOS SDK API 12+"
+          echo ""
+          echo "  3. 执行构建脚本 / Run build script:"
+          echo "     cd harmonyos && ./build.sh release"
+          echo ""
+          echo "  4. 上传 HAP 到 Release / Upload HAP to Release:"
+          echo "     gh release upload <tag> patent-hub-harmonyos.hap"
+          echo ""
+          echo "项目配置 / Project config:"
+          echo "  Bundle: com.patenthub.app"
+          echo "  Version: 0.4.0"
+          echo "  API: 12+ (HarmonyOS NEXT)"
+          echo "  设备 / Devices: phone, tablet"
+
+      - name: 验证项目文件完整性 / Verify project file integrity
+        run: |
+          echo "检查 HarmonyOS 项目文件 / Checking HarmonyOS project files..."
+          FILES=(
+            "harmonyos/AppScope/app.json5"
+            "harmonyos/build-profile.json5"
+            "harmonyos/hvigorfile.ts"
+            "harmonyos/oh-package.json5"
+            "harmonyos/hvigor/hvigor-config.json5"
+            "harmonyos/entry/hvigorfile.ts"
+            "harmonyos/entry/build-profile.json5"
+            "harmonyos/entry/oh-package.json5"
+            "harmonyos/entry/src/main/module.json5"
+            "harmonyos/entry/src/main/ets/entryability/EntryAbility.ets"
+            "harmonyos/entry/src/main/ets/pages/Index.ets"
+            "harmonyos/entry/src/main/ets/pages/Splash.ets"
+            "harmonyos/entry/src/main/resources/base/profile/main_pages.json"
+          )
+          MISSING=0
+          for f in "${FILES[@]}"; do
+            if [ -f "$f" ]; then
+              echo "  [OK] $f"
+            else
+              echo "  [MISSING] $f"
+              MISSING=$((MISSING + 1))
+            fi
+          done
+          if [ $MISSING -gt 0 ]; then
+            echo ""
+            echo "警告: ${MISSING} 个文件缺失 / Warning: ${MISSING} files missing"
+            exit 1
+          fi
+          echo ""
+          echo "所有项目文件完整 / All project files present"

@@ -18,8 +18,10 @@ pub use search::*;
 pub use settings::*;
 pub use upload::*;
 
-use crate::{ai::AiClient, db::Database};
-use std::sync::{Arc, RwLock};
+use crate::{ai::AiClient, db::Database, pipeline::context::PipelineProgress};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, RwLock};
+use tokio::sync::broadcast;
 
 /// Shared application configuration (replaces env::set_var).
 #[derive(Debug, Clone)]
@@ -41,29 +43,46 @@ pub struct AiFallback {
 }
 
 impl AppConfig {
-    /// Load from environment (at startup).
+    /// Load from environment only (without DB). Kept for tests/fallback.
+    #[allow(dead_code)]
     pub fn from_env() -> Self {
-        let mut fallbacks = Vec::new();
+        Self::from_db_and_env(None)
+    }
 
-        // Load fallback providers from FALLBACK_AI_* env vars
-        // Format: FALLBACK_AI_1_URL, FALLBACK_AI_1_KEY, FALLBACK_AI_1_MODEL, FALLBACK_AI_1_NAME
+    /// 从 SQLite 数据库加载设置，环境变量作为后备。
+    /// SQLite 是主存储（Android 友好），.env 是次要存储（桌面端后备）。
+    pub fn from_db_and_env(db: Option<&Database>) -> Self {
+        // 先从数据库加载所有设置
+        let db_settings = db
+            .and_then(|d| d.get_all_settings().ok())
+            .unwrap_or_default();
+
+        // 辅助：优先取 DB 值，其次取环境变量，最后用默认值
+        let get = |key: &str, default: &str| -> String {
+            if let Some(v) = db_settings.get(key) {
+                if !v.is_empty() {
+                    return v.clone();
+                }
+            }
+            std::env::var(key).unwrap_or_else(|_| default.to_string())
+        };
+
+        let mut fallbacks = Vec::new();
         for i in 1..=5 {
-            let url = std::env::var(format!("FALLBACK_AI_{}_URL", i)).unwrap_or_default();
-            let key = std::env::var(format!("FALLBACK_AI_{}_KEY", i)).unwrap_or_default();
-            let model = std::env::var(format!("FALLBACK_AI_{}_MODEL", i)).unwrap_or_default();
-            let name = std::env::var(format!("FALLBACK_AI_{}_NAME", i))
-                .unwrap_or_else(|_| format!("Fallback-{}", i));
+            let url = get(&format!("FALLBACK_AI_{}_URL", i), "");
+            let key = get(&format!("FALLBACK_AI_{}_KEY", i), "");
+            let model = get(&format!("FALLBACK_AI_{}_MODEL", i), "");
+            let name = get(&format!("FALLBACK_AI_{}_NAME", i), &format!("Fallback-{}", i));
             if !url.is_empty() && !key.is_empty() && !model.is_empty() {
                 fallbacks.push(AiFallback { name, base_url: url, api_key: key, model });
             }
         }
 
         Self {
-            serpapi_key: std::env::var("SERPAPI_KEY").unwrap_or_default(),
-            ai_base_url: std::env::var("AI_BASE_URL")
-                .unwrap_or_else(|_| "http://localhost:11434/v1".into()),
-            ai_api_key: std::env::var("AI_API_KEY").unwrap_or_else(|_| "ollama".into()),
-            ai_model: std::env::var("AI_MODEL").unwrap_or_else(|_| "qwen2.5:7b".into()),
+            serpapi_key: get("SERPAPI_KEY", ""),
+            ai_base_url: get("AI_BASE_URL", "http://localhost:11434/v1"),
+            ai_api_key: get("AI_API_KEY", "ollama"),
+            ai_model: get("AI_MODEL", "qwen2.5:7b"),
             ai_fallbacks: fallbacks,
         }
     }
@@ -87,6 +106,8 @@ impl AppConfig {
 pub struct AppState {
     pub db: Arc<Database>,
     pub config: Arc<RwLock<AppConfig>>,
+    /// Pipeline progress channels for SSE streaming
+    pub pipeline_channels: Arc<Mutex<HashMap<String, broadcast::Sender<PipelineProgress>>>>,
 }
 
 use crate::patent::SearchType;

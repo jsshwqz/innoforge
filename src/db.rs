@@ -17,7 +17,7 @@ impl Database {
     }
 
     /// Current schema version. Increment when adding migrations.
-    const SCHEMA_VERSION: i32 = 4;
+    const SCHEMA_VERSION: i32 = 5;
 
     pub fn init(path: &str) -> Result<Self> {
         let conn = Connection::open(path)?;
@@ -147,6 +147,23 @@ impl Database {
             tracing::info!("Database migrated to version 4 (patent images)");
         }
 
+        // Migration 4 → 5: App settings table (for Android persistence)
+        if current_version < 5 {
+            conn.execute_batch(
+                "
+                CREATE TABLE IF NOT EXISTS app_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at TEXT DEFAULT (datetime('now'))
+                );
+
+                DELETE FROM schema_version;
+                INSERT INTO schema_version (version) VALUES (5);
+            ",
+            )?;
+            tracing::info!("Database migrated to version 5 (app_settings 表)");
+        }
+
         if current_version > 0 && current_version < Self::SCHEMA_VERSION {
             tracing::info!("Database migrated from version {} to {}", current_version, Self::SCHEMA_VERSION);
         }
@@ -162,6 +179,47 @@ impl Database {
         let c = self.conn();
         let v: i32 = c.query_row("SELECT COALESCE(MAX(version), 0) FROM schema_version", [], |r| r.get(0))?;
         Ok(v)
+    }
+
+    // ── App Settings (SQLite-based persistence, works on Android) ──
+
+    /// 获取单个设置项
+    pub fn get_setting(&self, key: &str) -> Result<Option<String>> {
+        let c = self.conn();
+        let result = c
+            .query_row(
+                "SELECT value FROM app_settings WHERE key = ?1",
+                params![key],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(result)
+    }
+
+    /// 保存设置项（插入或更新）
+    pub fn set_setting(&self, key: &str, value: &str) -> Result<()> {
+        let c = self.conn();
+        c.execute(
+            "INSERT INTO app_settings (key, value, updated_at) VALUES (?1, ?2, datetime('now'))
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+            params![key, value],
+        )?;
+        Ok(())
+    }
+
+    /// 获取所有设置项
+    pub fn get_all_settings(&self) -> Result<std::collections::HashMap<String, String>> {
+        let c = self.conn();
+        let mut stmt = c.prepare("SELECT key, value FROM app_settings")?;
+        let rows = stmt.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })?;
+        let mut map = std::collections::HashMap::new();
+        for row in rows {
+            let (k, v) = row?;
+            map.insert(k, v);
+        }
+        Ok(map)
     }
 
     pub fn insert_patent(&self, p: &Patent) -> Result<()> {
