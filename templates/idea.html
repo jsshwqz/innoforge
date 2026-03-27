@@ -231,21 +231,26 @@
             // Show pipeline progress UI
             document.getElementById('status-area').innerHTML = buildPipelineUI();
 
-            // Step 2: Start pipeline
-            const pipelineResp = await fetch('/api/idea/pipeline', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: submitData.id }),
-            });
-            if (!pipelineResp.ok) throw new Error('Pipeline start failed (' + pipelineResp.status + ')');
-
-            // Step 3: Connect SSE for real-time progress
+            // Step 2: Connect SSE FIRST, then start pipeline (avoids race condition)
             await new Promise(function(resolve, reject) {
                 var eventSource = new EventSource('/api/idea/' + submitData.id + '/progress');
+                var pipelineStarted = false;
                 var timeout = setTimeout(function() {
                     eventSource.close();
-                    resolve(); // timeout = pipeline probably finished, load report
+                    resolve();
                 }, 300000); // 5 min max
+
+                eventSource.onopen = function() {
+                    // SSE connected — now safe to start pipeline
+                    if (!pipelineStarted) {
+                        pipelineStarted = true;
+                        fetch('/api/idea/pipeline', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ id: submitData.id }),
+                        });
+                    }
+                };
 
                 eventSource.onmessage = function(e) {
                     try {
@@ -263,7 +268,16 @@
                 eventSource.onerror = function() {
                     clearTimeout(timeout);
                     eventSource.close();
-                    resolve(); // try to load report anyway
+                    // If pipeline wasn't started yet, start it without SSE
+                    if (!pipelineStarted) {
+                        pipelineStarted = true;
+                        fetch('/api/idea/pipeline', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ id: submitData.id }),
+                        });
+                    }
+                    resolve();
                 };
             });
 

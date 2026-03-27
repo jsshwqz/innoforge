@@ -340,16 +340,11 @@
                     body: JSON.stringify({ api_key: key })
                 });
 
-                if (res.ok) {
-                    showStatus(statusEl, 'success', '✅ SerpAPI 配置已保存！3 秒后返回...');
-                    // 如果有返回地址，3 秒后自动返回
-                    if (returnUrl && !returnUrl.includes('/settings')) {
-                        setTimeout(() => {
-                            window.location.href = returnUrl;
-                        }, 3000);
-                    }
+                const data = await res.json();
+                if (res.ok && data.status === 'ok') {
+                    showStatus(statusEl, 'success', '✅ SerpAPI 配置已保存！');
                 } else {
-                    showStatus(statusEl, 'error', '保存失败，请重试');
+                    showStatus(statusEl, 'error', data.message || '保存失败，请重试');
                 }
             } catch (e) {
                 showStatus(statusEl, 'error', '网络错误：' + e.message);
@@ -374,16 +369,11 @@
                     body: JSON.stringify({ base_url: baseUrl, api_key: apiKey, model: model })
                 });
 
-                if (res.ok) {
-                    showStatus(statusEl, 'success', '✅ AI 配置已保存！3 秒后返回...');
-                    // 如果有返回地址，3 秒后自动返回
-                    if (returnUrl && !returnUrl.includes('/settings')) {
-                        setTimeout(() => {
-                            window.location.href = returnUrl;
-                        }, 3000);
-                    }
+                const data = await res.json();
+                if (res.ok && data.status === 'ok') {
+                    showStatus(statusEl, 'success', '✅ AI 配置已保存！');
                 } else {
-                    showStatus(statusEl, 'error', '保存失败，请重试');
+                    showStatus(statusEl, 'error', data.message || '保存失败，请重试');
                 }
             } catch (e) {
                 showStatus(statusEl, 'error', '网络错误：' + e.message);

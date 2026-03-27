@@ -31,6 +31,7 @@
                     <button class="ai-btn" onclick="aiSummarize()">🤖 <span data-i18n="detail.analyze"></span></button>
                     <button class="ai-btn" id="load-full-btn" onclick="loadFullText()" style="background:#1f6feb;">📄 加载全文</button>
                     <button class="ai-btn" onclick="window.open('/api/patent/pdf/{{id}}','_blank')" style="background:#8b5cf6;">📥 导出 PDF</button>
+                    <button class="ai-btn" id="collect-btn" onclick="toggleCollect()" style="background:#d29922;">⭐ 收藏</button>
                     <select onchange="setI18nLang(this.value);applyI18nCommon();applyDetailI18n()" id="lang-switch" style="padding:4px 8px;background:#0d1117;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;">
                         <option value="zh">中文</option>
                         <option value="en">EN</option>
@@ -38,6 +39,14 @@
                 </div>
             </div>
             <div id="ai-summary" class="ai-summary" style="display:none"></div>
+
+            <!-- 收藏夹 & 标签 -->
+            <div id="collect-tags-area" style="margin:12px 0;display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
+                <span id="collections-display" style="color:#8b949e;font-size:0.9em;"></span>
+                <span style="color:#30363d;">|</span>
+                <span id="tags-display" style="font-size:0.9em;"></span>
+                <input type="text" id="new-tag-input" placeholder="添加标签..." style="background:#0d1117;border:1px solid #30363d;color:#c9d1d9;padding:4px 8px;border-radius:4px;width:120px;font-size:0.85em;" onkeydown="if(event.key==='Enter')addTag()">
+            </div>
 
             <div class="detail-grid">
                 <div class="detail-section">
@@ -416,6 +425,84 @@
         var initialPdfUrl = '{{pdf_url}}';
         renderImages(initialImages, initialPdfUrl);
     } catch(e) {}
+
+    // ── 收藏 & 标签功能 ────────────────────────────
+    var patentId = '{{id}}';
+    var isCollected = false;
+    var defaultCollectionId = '';
+
+    async function loadCollectState() {
+        try {
+            var res = await fetch('/api/patents/' + patentId + '/collections');
+            var data = await res.json();
+            var cols = (data.collection_ids || data.collections || []).filter(function(c) { return c; });
+            isCollected = cols.length > 0;
+            if (isCollected) defaultCollectionId = cols[0];
+            var btn = document.getElementById('collect-btn');
+            btn.textContent = isCollected ? '⭐ 已收藏' : '⭐ 收藏';
+            btn.style.background = isCollected ? '#238636' : '#d29922';
+            document.getElementById('collections-display').textContent = isCollected ? '已加入 ' + cols.length + ' 个收藏夹' : '';
+        } catch(e) {}
+    }
+
+    async function toggleCollect() {
+        if (isCollected && defaultCollectionId) {
+            await fetch('/api/collections/' + defaultCollectionId + '/remove/' + patentId, {method:'DELETE'});
+        } else {
+            // Ensure default collection exists
+            var listRes = await fetch('/api/collections');
+            var listData = await listRes.json();
+            var cols = listData.collections || [];
+            var colId;
+            if (cols.length > 0) {
+                colId = cols[0].id;
+            } else {
+                var createRes = await fetch('/api/collections', {
+                    method:'POST', headers:{'Content-Type':'application/json'},
+                    body: JSON.stringify({name:'我的收藏', description:'默认收藏夹'})
+                });
+                var createData = await createRes.json();
+                colId = createData.id;
+            }
+            await fetch('/api/collections/' + colId + '/add', {
+                method:'POST', headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({patent_id: patentId})
+            });
+        }
+        loadCollectState();
+    }
+
+    async function loadTags() {
+        try {
+            var res = await fetch('/api/patents/' + patentId + '/tags');
+            var data = await res.json();
+            var tags = data.tags || [];
+            var html = tags.map(function(t) {
+                return '<span style="background:#1f6feb;color:white;padding:2px 8px;border-radius:10px;font-size:0.8em;cursor:pointer;" onclick="removeTag(\'' + t + '\')">' + t + ' ✕</span>';
+            }).join(' ');
+            document.getElementById('tags-display').innerHTML = html;
+        } catch(e) {}
+    }
+
+    async function addTag() {
+        var input = document.getElementById('new-tag-input');
+        var tag = input.value.trim();
+        if (!tag) return;
+        await fetch('/api/patents/' + patentId + '/tags', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({tag: tag})
+        });
+        input.value = '';
+        loadTags();
+    }
+
+    async function removeTag(tag) {
+        await fetch('/api/patents/' + patentId + '/tags/' + encodeURIComponent(tag), {method:'DELETE'});
+        loadTags();
+    }
+
+    loadCollectState();
+    loadTags();
     </script>
 </body>
 </html>
