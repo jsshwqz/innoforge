@@ -147,12 +147,12 @@ patent-hub/
 
 ## 致谢
 
-本项目的分析流水线设计受以下项目和理论启发：
+本项目使用了以下算法，并受以下项目的架构理念启发：
 
-- [Harness Research](https://github.com/Nimo1987/harness-research) -- 状态机驱动的研究引擎，LLM/代码职责分离、CRAAP 混合评分、质量门机制
-- [CRAAP 框架](https://library.csuchico.edu/help/source-or-information-good) -- 信息源评估框架（Currency, Relevance, Authority, Accuracy, Purpose）
-- [TF-IDF](https://en.wikipedia.org/wiki/Tf%E2%80%93idf) -- 文本相似度匹配算法，用于权利要求与现有技术匹配
-- [Shannon 信息熵](https://en.wikipedia.org/wiki/Entropy_(information_theory)) -- 信息多样性度量
+- [TF-IDF](https://en.wikipedia.org/wiki/Tf%E2%80%93idf) -- 词频-逆文档频率算法，用于权利要求与现有技术的文本相似度匹配（实现于 similarity.rs）
+- [Jaccard 相似系数](https://en.wikipedia.org/wiki/Jaccard_index) -- 集合相似度度量，用于文本重叠检测与矛盾分析（实现于 similarity.rs、contradiction.rs）
+- [余弦相似度](https://en.wikipedia.org/wiki/Cosine_similarity) -- 向量空间相似度计算，作为 TF-IDF 流水线的一部分使用
+- [Harness Research](https://github.com/Nimo1987/harness-research) -- 架构理念启发：状态机驱动的流水线模式、LLM 与代码的职责分离
 
 ---
 
@@ -304,10 +304,12 @@ patent-hub/
 
 ### Credits
 
-- [Harness Research](https://github.com/Nimo1987/harness-research) -- State-machine driven research engine
-- [CRAAP Framework](https://library.csuchico.edu/help/source-or-information-good) -- Source evaluation framework
-- [TF-IDF](https://en.wikipedia.org/wiki/Tf%E2%80%93idf) -- Text similarity matching
-- [Shannon Entropy](https://en.wikipedia.org/wiki/Entropy_(information_theory)) -- Information diversity measurement
+The analysis pipeline uses the following algorithms and was inspired by the architectural philosophy of the following project:
+
+- [TF-IDF](https://en.wikipedia.org/wiki/Tf%E2%80%93idf) -- Term frequency-inverse document frequency for matching claims against prior art (implemented in similarity.rs)
+- [Jaccard Similarity](https://en.wikipedia.org/wiki/Jaccard_index) -- Set similarity metric for text overlap detection and contradiction analysis (implemented in similarity.rs, contradiction.rs)
+- [Cosine Similarity](https://en.wikipedia.org/wiki/Cosine_similarity) -- Vector space similarity computation, used as part of the TF-IDF pipeline
+- [Harness Research](https://github.com/Nimo1987/harness-research) -- Architectural inspiration: state-machine pipeline pattern and separation of LLM vs. code responsibilities
 
 ### License
 

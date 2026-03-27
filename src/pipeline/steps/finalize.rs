@@ -22,7 +22,7 @@ pub async fn execute(ctx: &mut PipelineContext) -> Result<()> {
 fn generate_code_only_report(ctx: &PipelineContext) -> String {
     let mut report = String::new();
 
-    report.push_str(&format!("## 创新验证报告（数据驱动）\n\n"));
+    report.push_str("## 创新验证报告（数据驱动）\n\n");
     report.push_str(&format!("**新颖性评分：{:.0}/100**\n\n", ctx.novelty_score));
 
     // 评分解读

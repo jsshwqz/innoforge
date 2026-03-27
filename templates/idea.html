@@ -122,16 +122,16 @@
             <!-- Multi-round discussion panel -->
             <div id="discussion-panel" style="display:none; margin-top:24px; padding:20px; background:#161b22; border-radius:8px; border:1px solid #30363d;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-                    <h3 style="margin:0; color:#58a6ff;" id="disc-title">💬 继续讨论</h3>
-                    <button onclick="summarizeDiscussion()" style="background:#238636; padding:4px 12px; font-size:0.85em;" id="summary-btn">📋 生成总结</button>
+                    <h3 style="margin:0; color:#58a6ff;" id="disc-title" data-i18n="idea.discussTitle"></h3>
+                    <button onclick="summarizeDiscussion()" style="background:#238636; padding:4px 12px; font-size:0.85em;" id="summary-btn" data-i18n="idea.generateSummary"></button>
                 </div>
                 <div id="discussion-summary" style="display:none; margin-bottom:12px; padding:12px; background:#0d1117; border-radius:6px; border-left:3px solid #58a6ff;">
                 </div>
                 <div id="chat-messages" style="max-height:400px; overflow-y:auto; margin-bottom:12px;">
                 </div>
                 <div style="display:flex; gap:8px;">
-                    <input type="text" id="chat-input" placeholder="继续讨论这个创意..." style="flex:1; padding:8px 12px; background:#0d1117; border:1px solid #30363d; border-radius:6px; color:#c9d1d9;" onkeydown="if(event.key==='Enter')sendChatMessage()">
-                    <button onclick="sendChatMessage()" style="background:#238636; padding:8px 16px; white-space:nowrap;">发送</button>
+                    <input type="text" id="chat-input" data-i18n-placeholder="idea.chatPlaceholder" style="flex:1; padding:8px 12px; background:#0d1117; border:1px solid #30363d; border-radius:6px; color:#c9d1d9;" onkeydown="if(event.key==='Enter')sendChatMessage()">
+                    <button onclick="sendChatMessage()" style="background:#238636; padding:8px 16px; white-space:nowrap;" data-i18n="idea.send"></button>
                 </div>
             </div>
         </div>
