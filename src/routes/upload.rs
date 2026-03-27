@@ -67,11 +67,27 @@ pub async fn api_upload_compare(
             Ok(_) => return Json(json!({"error": "PDF 文件无可提取的文字内容（可能是扫描件），请转换为文本后重试"})),
             Err(e) => return Json(json!({"error": format!("PDF 解析失败: {}", e)})),
         }
+    } else if ext == "docx" {
+        // DOCX = ZIP containing XML; extract text from word/document.xml
+        match extract_docx_text(&file_bytes) {
+            Ok(text) if !text.trim().is_empty() => text,
+            Ok(_) => return Json(json!({"error": "DOCX 文件无可提取的文字内容"})),
+            Err(e) => return Json(json!({"error": format!("DOCX 解析失败: {}", e)})),
+        }
+    } else if ext == "doc" {
+        return Json(json!({"error": "暂不支持旧版 .doc 格式，请将文件另存为 .docx、.txt 或 .pdf 后重试"}));
     } else {
-        // TXT, DOC, etc. — treat as UTF-8 text
-        match String::from_utf8(file_bytes) {
+        // TXT, CSV, etc. — try UTF-8, then GBK
+        match String::from_utf8(file_bytes.clone()) {
             Ok(text) => text,
-            Err(_) => return Json(json!({"error": "文件编码不支持，请上传 UTF-8 文本文件、PDF 或图片"})),
+            Err(_) => {
+                // Try GBK/GB18030 for Chinese text files
+                let (text, _encoding, had_errors) = encoding_rs::GBK.decode(&file_bytes);
+                if had_errors {
+                    return Json(json!({"error": "文件编码不支持，请上传 UTF-8 或 GBK 编码的文本文件、.docx、PDF 或图片"}));
+                }
+                text.into_owned()
+            }
         }
     };
 
@@ -114,6 +130,33 @@ pub async fn api_upload_compare(
 /// Extract text from a PDF file using pdf-extract
 fn extract_pdf_text(data: &[u8]) -> Result<String, String> {
     pdf_extract::extract_text_from_mem(data).map_err(|e| format!("{}", e))
+}
+
+/// Extract text from a DOCX file (ZIP containing XML)
+fn extract_docx_text(data: &[u8]) -> Result<String, String> {
+    use std::io::{Cursor, Read};
+    let reader = Cursor::new(data);
+    let mut archive = zip::ZipArchive::new(reader).map_err(|e| format!("非有效DOCX: {}", e))?;
+    let mut xml = String::new();
+    if let Ok(mut file) = archive.by_name("word/document.xml") {
+        file.read_to_string(&mut xml)
+            .map_err(|e| format!("读取失败: {}", e))?;
+    } else {
+        return Err("DOCX 中找不到 word/document.xml".into());
+    }
+    // Strip XML tags to get plain text
+    let mut text = String::new();
+    let mut in_tag = false;
+    for ch in xml.chars() {
+        if ch == '<' {
+            in_tag = true;
+        } else if ch == '>' {
+            in_tag = false;
+        } else if !in_tag {
+            text.push(ch);
+        }
+    }
+    Ok(text)
 }
 
 /// Use AI vision (GLM-4V or compatible) to describe an image

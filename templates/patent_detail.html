@@ -168,11 +168,24 @@
                 body: JSON.stringify({message: msg, patent_id: '{{id}}'})
             });
             const data = await resp.json();
-            document.getElementById('ai-loading').outerHTML =
-                '<div class="msg ai">' + escapeHtml(data.content).replace(/\n/g, '<br>') + '</div>';
+            if (data.error || !data.content) {
+                var errMsg = data.error || 'AI 无响应';
+                if (errMsg.includes('unexpected end of file') || errMsg.includes('connection')) {
+                    errMsg += '\n\n💡 可能原因：API Key 无效或网络不稳定。请到「设置」页检查 AI 配置。';
+                }
+                document.getElementById('ai-loading').outerHTML =
+                    '<div class="msg ai error" style="color:#f85149;">' + escapeHtml(errMsg).replace(/\n/g, '<br>') + '</div>';
+            } else {
+                document.getElementById('ai-loading').outerHTML =
+                    '<div class="msg ai">' + escapeHtml(data.content).replace(/\n/g, '<br>') + '</div>';
+            }
         } catch(e) {
+            var errText = String(e);
+            if (errText.includes('unexpected end of file') || errText.includes('connection')) {
+                errText += '\n\n💡 请到「设置」页检查 AI API Key 是否正确配置。';
+            }
             document.getElementById('ai-loading').outerHTML =
-                '<div class="msg ai error">' + t('ai.fail') + ': ' + escapeHtml(String(e)) + '</div>';
+                '<div class="msg ai error" style="color:#f85149;">' + escapeHtml(errText).replace(/\n/g, '<br>') + '</div>';
         }
         box.scrollTop = box.scrollHeight;
     }
