@@ -15,6 +15,7 @@ use axum::{
 use rust_embed::Embed;
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
+use tower_http::services::ServeDir;
 use tower_http::set_header::SetResponseHeaderLayer;
 
 #[derive(Embed)]
@@ -131,6 +132,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/upload/compare", post(routes::api_upload_compare))
         // Static files (embedded in binary)
         .route("/static/*path", get(serve_static))
+        // Tauri desktop frontend served for browser testing
+        .nest_service("/app", ServeDir::new("src-tauri/frontend"))
         // Body size limit (10MB)
         .layer(DefaultBodyLimit::max(10 * 1024 * 1024))
         // Security headers

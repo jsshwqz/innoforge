@@ -112,7 +112,7 @@ pub async fn api_idea_analyze(
     idea.patent_results =
         serde_json::to_string(&all_patent_findings).unwrap_or_else(|_| "[]".into());
 
-    // Step 4: AI analysis
+    // Step 4: AI analysis（失败时降级到代码计算评分）
     let ai = config.ai_client();
     match ai
         .analyze_idea(
@@ -129,8 +129,25 @@ pub async fn api_idea_analyze(
             idea.status = "done".into();
         }
         Err(e) => {
-            idea.analysis = format!("AI 分析失败：{}", e);
-            idea.status = "error".into();
+            // AI 不可用时，用简单启发式估算新颖性
+            let patent_count = all_patent_findings.len();
+            let web_count = web_findings.len();
+            let fallback_score = if patent_count == 0 && web_count < 3 {
+                95.0 // 几乎无先例，高度原创
+            } else if patent_count == 0 {
+                85.0 // 无专利，有网络资料
+            } else if patent_count < 3 {
+                72.0 // 少量相关专利
+            } else {
+                55.0 // 较多相关专利，需人工评估
+            };
+            tracing::warn!("AI 分析失败，使用启发式评分 {}: {}", fallback_score, e);
+            idea.novelty_score = Some(fallback_score);
+            idea.analysis = format!(
+                "AI 分析暂不可用（{}）。\n\n基于检索结果的启发式评估：\n- 找到 {} 篇网络资料\n- 找到 {} 条相关专利\n- 估算新颖性评分：{}/100\n\n建议配置可用的 AI 服务以获得深度分析。",
+                e, web_count, patent_count, fallback_score as u32
+            );
+            idea.status = "done".into();
         }
     }
 
