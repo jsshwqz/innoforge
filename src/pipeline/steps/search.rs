@@ -95,6 +95,26 @@ pub async fn search_web(ctx: &mut PipelineContext, serpapi_key: &str, bing_api_k
         }
     }
 
+    // 搜狗免费兜底（无需任何 Key，开箱即用，国内可用）
+    if all_results.is_empty() {
+        for query in ctx.expanded_queries.iter().take(2) {
+            if let Ok(results) = search_sogou_pipeline(&format!("{} 专利", query)).await {
+                for r in results {
+                    let link = r.url.clone();
+                    if link.is_empty() || seen_urls.contains(&link) { continue; }
+                    seen_urls.insert(link.clone());
+                    all_results.push(SearchResult {
+                        id: format!("web_{}", all_results.len()),
+                        title: r.title,
+                        snippet: r.snippet,
+                        link,
+                        source: "sogou_free".into(),
+                    });
+                }
+            }
+        }
+    }
+
     ctx.web_results = all_results;
     Ok(())
 }
@@ -259,4 +279,88 @@ async fn search_lens_raw(query: &str, api_key: &str) -> Result<serde_json::Value
         return Err(format!("Lens HTTP {}", resp.status()));
     }
     resp.json::<serde_json::Value>().await.map_err(|e| e.to_string())
+}
+
+/// 搜狗搜索结果（pipeline 用）
+struct SogouResultItem {
+    title: String,
+    snippet: String,
+    url: String,
+}
+
+/// 搜狗搜索（pipeline 用，零配置，国内可用）
+async fn search_sogou_pipeline(query: &str) -> Result<Vec<SogouResultItem>, String> {
+    let client = Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let url = format!(
+        "https://www.sogou.com/web?query={}&num=10",
+        urlencoding::encode(query)
+    );
+
+    let resp = client
+        .get(&url)
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        .header("Accept-Language", "zh-CN,zh;q=0.9")
+        .header("Accept", "text/html,application/xhtml+xml")
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !resp.status().is_success() {
+        return Err(format!("搜狗 HTTP {}", resp.status()));
+    }
+
+    let html = resp.text().await.map_err(|e| e.to_string())?;
+    if html.contains("安全验证") || html.len() < 5000 {
+        return Err("搜狗触发验证".to_string());
+    }
+
+    let title_re = regex::Regex::new(
+        r#"<h3[^>]*>.*?<a[^>]+href="([^"]+)"[^>]*>(.*?)</a>.*?</h3>"#
+    ).map_err(|e| e.to_string())?;
+    let snippet_re = regex::Regex::new(r#"<p[^>]*>(.*?)</p>"#).map_err(|e| e.to_string())?;
+
+    let mut results = Vec::new();
+    for cap in title_re.captures_iter(&html) {
+        if results.len() >= 10 { break; }
+        let raw_url = cap[1].to_string();
+        let title = strip_html(&cap[2]).trim().to_string();
+        if title.is_empty() { continue; }
+
+        let full_url = if raw_url.starts_with("/link?") {
+            format!("https://www.sogou.com{}", raw_url)
+        } else {
+            raw_url
+        };
+
+        let match_end = cap.get(0).unwrap().end();
+        let rest = &html[match_end..std::cmp::min(match_end + 2000, html.len())];
+        let snippet = if let Some(snip_cap) = snippet_re.captures(rest) {
+            strip_html(&snip_cap[1]).trim().chars().take(200).collect::<String>()
+        } else {
+            String::new()
+        };
+
+        results.push(SogouResultItem { title, snippet, url: full_url });
+    }
+
+    Ok(results)
+}
+
+/// 简单 HTML 标签去除
+fn strip_html(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut in_tag = false;
+    for c in s.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => out.push(c),
+            _ => {}
+        }
+    }
+    out
 }

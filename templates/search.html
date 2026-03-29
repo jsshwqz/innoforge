@@ -137,6 +137,7 @@
 </div>
 
 <div class="panel">
+<div id="search-hint" style="display:none;padding:8px 12px;margin-bottom:10px;background:#1a3a2e;border:1px solid #3fb950;border-radius:6px;color:#8b949e;font-size:13px;"></div>
 <div id="results-info"></div>
 <div id="results"></div>
 <div id="pagination" class="pagination"></div>
@@ -362,6 +363,18 @@ function renderResults(data, page, pageSize) {
         size: pageSize,
         source
     });
+
+    // 显示搜索来源提示（如免费搜索时建议注册更好的服务）
+    if (data.hint) {
+        const hintEl = document.getElementById('search-hint');
+        if (hintEl) {
+            hintEl.innerHTML = `💡 ${escapeHtml(data.hint)} <a href="/settings" style="color:#58a6ff;">去设置</a>`;
+            hintEl.style.display = 'block';
+        }
+    } else {
+        const hintEl = document.getElementById('search-hint');
+        if (hintEl) hintEl.style.display = 'none';
+    }
 
     const patents = Array.isArray(data.patents) ? data.patents : [];
     if (!patents.length) {

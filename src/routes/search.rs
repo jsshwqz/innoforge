@@ -403,7 +403,48 @@ pub async fn api_search_online(
         }
     }
 
-    // Fallback 4: local DB search
+    // Fallback 4: 搜狗搜索（国内可用，无需任何 Key，开箱即用）
+    println!("[ONLINE] Trying Sogou free search (无需 Key)...");
+    let search_query_free = build_online_query(
+        &req.query,
+        online_search_type.as_ref(),
+        req.date_from.as_deref(),
+        req.date_to.as_deref(),
+    );
+    match search_sogou_free(&format!("{} 专利", search_query_free)).await {
+        Ok((results, total)) if !results.is_empty() => {
+            let patents: Vec<PatentSummary> = results.iter().map(|r| {
+                PatentSummary {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    patent_number: String::new(),
+                    title: r.title.clone(),
+                    abstract_text: r.snippet.clone(),
+                    applicant: String::new(),
+                    inventor: String::new(),
+                    filing_date: String::new(),
+                    country: String::new(),
+                    relevance_score: r.score,
+                    score_source: Some("sogou_free".to_string()),
+                }
+            }).collect();
+            let has_lens = !s.config.read().unwrap().lens_api_key.is_empty();
+            let hint = if !has_lens {
+                Some("当前使用搜狗免费搜索。到「设置」配置 Lens.org Key 可获得更专业的专利搜索。".to_string())
+            } else { None };
+            return Json(json!({
+                "patents": patents,
+                "total": total,
+                "page": req.page,
+                "page_size": 10,
+                "source": "sogou_free",
+                "hint": hint
+            }));
+        }
+        Ok(_) => println!("[ONLINE] Sogou returned empty"),
+        Err(e) => println!("[ONLINE] Sogou error: {}", e),
+    }
+
+    // Fallback 5: local DB search
     println!("[ONLINE] Falling back to local DB");
     let local = s
         .db
@@ -983,4 +1024,98 @@ pub async fn search_lens_patents(
 
     println!("[LENS] {} results, total {}", patents.len(), total);
     Ok((patents, total))
+}
+
+// ── 搜狗搜索（国内可用，无需 Key，内置免费方案） ──────────────────────────
+
+/// 搜狗搜索结果
+struct FreeSearchResult {
+    title: String,
+    snippet: String,
+    url: String,
+    score: Option<f64>,
+}
+
+/// 通过搜狗搜索实现免费网页搜索（国内可用，无需 API Key）
+/// 搜狗对自动化请求相对宽松，适合作为内置免费搜索方案
+async fn search_sogou_free(query: &str) -> Result<(Vec<FreeSearchResult>, usize), String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let url = format!(
+        "https://www.sogou.com/web?query={}&num=10",
+        urlencoding::encode(query)
+    );
+    println!("[SOGOU] Searching: {}", url);
+
+    let resp = client
+        .get(&url)
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        .header("Accept-Language", "zh-CN,zh;q=0.9")
+        .header("Accept", "text/html,application/xhtml+xml")
+        .send()
+        .await
+        .map_err(|e| format!("搜狗请求失败: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("搜狗 HTTP {}", resp.status()));
+    }
+
+    let html = resp.text().await.map_err(|e| format!("读取响应失败: {}", e))?;
+
+    // 检查是否触发验证码
+    if html.contains("安全验证") || html.contains("captcha") || html.len() < 5000 {
+        return Err("搜狗触发了安全验证，请稍后重试".to_string());
+    }
+
+    // 解析搜狗搜索结果 HTML
+    // 结构：<h3><a href="URL">TITLE</a></h3> 后面跟 <p>SNIPPET</p>
+    let mut results = Vec::new();
+    let title_re = regex::Regex::new(
+        r#"<h3[^>]*>.*?<a[^>]+href="([^"]+)"[^>]*>(.*?)</a>.*?</h3>"#
+    ).map_err(|e| e.to_string())?;
+    let snippet_re = regex::Regex::new(
+        r#"<p[^>]*>(.*?)</p>"#
+    ).map_err(|e| e.to_string())?;
+
+    // 按 <h3> 标签分块匹配
+    for cap in title_re.captures_iter(&html) {
+        if results.len() >= 10 { break; }
+        let raw_url = cap[1].to_string();
+        let title = strip_html_tags(&cap[2]).trim().to_string();
+        if title.is_empty() { continue; }
+
+        // 拼完整 URL
+        let full_url = if raw_url.starts_with("/link?") {
+            format!("https://www.sogou.com{}", raw_url)
+        } else {
+            raw_url
+        };
+
+        // 在匹配位置之后搜索 snippet
+        let match_end = cap.get(0).unwrap().end();
+        let rest = &html[match_end..std::cmp::min(match_end + 2000, html.len())];
+        let snippet = if let Some(snip_cap) = snippet_re.captures(rest) {
+            strip_html_tags(&snip_cap[1]).trim().chars().take(200).collect::<String>()
+        } else {
+            String::new()
+        };
+
+        let content_score = calculate_online_relevance(
+            query, &title, &snippet, "",
+        );
+        results.push(FreeSearchResult {
+            title,
+            snippet,
+            url: full_url,
+            score: Some(content_score),
+        });
+    }
+
+    let total = results.len();
+    println!("[SOGOU] Parsed {} results", total);
+    Ok((results, total))
 }
