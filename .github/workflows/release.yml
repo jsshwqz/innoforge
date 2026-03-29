@@ -341,6 +341,12 @@ jobs:
         with:
           files: patent-hub-android.apk
 
+  # ── Tauri v2 iOS 构建 ─────────────────────────────────────────────────────
+  # 除此原生 Xcode 构建外，另有独立的 Tauri v2 iOS 工作流：
+  #   .github/workflows/ios-build.yml
+  # 该工作流使用 `cargo tauri ios build` 命令，适合标准 Tauri 应用场景。
+  # 详细文档见 docs/ios-build.md
+
   build-ios:
     name: 构建 iOS IPA
     runs-on: macos-latest

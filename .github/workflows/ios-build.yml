@@ -1,0 +1,154 @@
+# ============================================================================
+# Patent Hub - Tauri v2 iOS 构建工作流
+# ============================================================================
+# 使用 Tauri v2 原生 iOS 支持构建未签名 IPA，用于侧载测试（AltStore / Sideloadly）
+# 注意：此工作流与 release.yml 中的 build-ios job 不同，
+#       这里使用 Tauri v2 的 `cargo tauri ios` 命令，而非自定义 Xcode 项目
+# ============================================================================
+
+name: iOS Build (Tauri v2)
+
+# 触发条件：推送 v* 标签 或 手动触发
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      build_mode:
+        description: '构建模式 (debug / release)'
+        required: false
+        default: 'release'
+        type: choice
+        options:
+          - debug
+          - release
+
+permissions:
+  contents: write
+
+jobs:
+  build-ios-tauri:
+    name: 构建 Tauri v2 iOS IPA
+    # 使用 macos-14 (Apple Silicon M1) 以获得更好的 ARM64 编译性能
+    runs-on: macos-14
+
+    steps:
+      # ── 第1步：检出代码 ──────────────────────────────────────────────
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      # ── 第2步：安装 Rust 工具链 + iOS 目标平台 ────────────────────────
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+
+      # ── 第3步：启用 Rust 编译缓存，加速后续构建 ──────────────────────
+      - name: Rust 编译缓存
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ios-tauri-aarch64
+
+      # ── 第4步：安装 Node.js（Tauri v2 前端构建需要）──────────────────
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # ── 第5步：安装 Tauri CLI v2 ────────────────────────────────────
+      - name: 安装 Tauri CLI
+        run: cargo install tauri-cli@^2
+
+      # ── 第6步：安装前端依赖（如果有 package.json）────────────────────
+      - name: 安装前端依赖
+        run: |
+          if [ -f package.json ]; then
+            npm install
+          fi
+
+      # ── 第7步：确认 Xcode 环境 ─────────────────────────────────────
+      # macOS runner 已预装 Xcode，这里只做版本确认
+      - name: 确认 Xcode 版本
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-path
+          echo "Xcode 环境就绪"
+
+      # ── 第8步：初始化 Tauri iOS 项目 ────────────────────────────────
+      # 运行 `cargo tauri ios init` 生成 src-tauri/gen/apple 目录下的 Xcode 项目
+      - name: 初始化 Tauri iOS 项目
+        working-directory: .
+        run: |
+          cargo tauri ios init
+          echo "Tauri iOS 项目已初始化"
+          ls -la src-tauri/gen/apple/ || echo "gen/apple 目录未生成，检查配置"
+
+      # ── 第9步：构建 iOS（未签名，用于侧载）──────────────────────────
+      # 无 Apple Developer 证书时，构建未签名的产物
+      # 后续可通过 AltStore / Sideloadly 侧载到设备
+      - name: 构建 Tauri iOS
+        working-directory: .
+        env:
+          # 禁用代码签名，生成未签名的构建产物
+          CODE_SIGNING_ALLOWED: 'NO'
+        run: |
+          BUILD_MODE="${{ github.event.inputs.build_mode || 'release' }}"
+
+          if [ "$BUILD_MODE" = "debug" ]; then
+            cargo tauri ios build --debug 2>&1 || true
+          else
+            cargo tauri ios build 2>&1 || true
+          fi
+
+          echo "构建完成，查找产物..."
+
+      # ── 第10步：查找并打包构建产物 ─────────────────────────────────
+      # Tauri v2 iOS 构建产物通常在 src-tauri/gen/apple/build 目录
+      - name: 打包 IPA
+        run: |
+          echo "=== 查找 .app 产物 ==="
+          find src-tauri/gen/apple -name "*.app" -type d 2>/dev/null || true
+
+          # 尝试从 Xcode 构建产物中找到 .app
+          APP_PATH=$(find src-tauri/gen/apple -name "*.app" -type d 2>/dev/null | head -1)
+
+          if [ -n "$APP_PATH" ]; then
+            echo "找到 .app: $APP_PATH"
+
+            # 将 .app 打包为 .ipa（标准 iOS 分发格式）
+            mkdir -p Payload
+            cp -r "$APP_PATH" Payload/
+            zip -r patent-hub-ios-tauri.ipa Payload/
+            rm -rf Payload
+
+            echo "IPA 已生成"
+            ls -la patent-hub-ios-tauri.ipa
+          else
+            echo "警告：未找到 .app 产物"
+            echo "尝试查找所有构建产物..."
+            find src-tauri/gen/apple -type f -name "*.app" -o -name "*.ipa" 2>/dev/null || true
+            find target/aarch64-apple-ios -type f -name "patent*" 2>/dev/null || true
+
+            # 即使没有 .app，也创建一个包含构建日志的存档
+            echo "构建可能因缺少签名而未生成 .app"
+            echo "请参考 docs/ios-build.md 了解本地构建方法"
+            exit 1
+          fi
+
+      # ── 第11步：上传 IPA 到 GitHub Release ─────────────────────────
+      - name: 上传 IPA 到 Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: patent-hub-ios-tauri.ipa
+
+      # ── 第12步：上传构建产物为 Artifact（非 tag 推送时）─────────────
+      # 手动触发时，将产物作为 workflow artifact 保存
+      - name: 上传为 Artifact
+        if: "!startsWith(github.ref, 'refs/tags/v')"
+        uses: actions/upload-artifact@v4
+        with:
+          name: patent-hub-ios-tauri-ipa
+          path: patent-hub-ios-tauri.ipa
+          retention-days: 30
