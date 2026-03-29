@@ -4,6 +4,36 @@
 
 ---
 
+## [v0.4.0] - 2026-03-30
+
+### 重大变更
+- **创意验证 pipeline 统一** -- api_idea_analyze 改为 pipeline 快捷模式，删除 220 行重复代码
+- **仓库架构重组** -- 主仓瘦身为纯 Rust 核心，iOS/鸿蒙/Tauri 拆至独立仓库
+- **前端新增验证模式切换** -- 「快速验证」（6 步）/ 「深度验证」（12 步）可选
+
+### 新增
+- PipelineRunner 支持 quick_mode，跳过非必要步骤加速验证
+- Android 固定签名证书，后续更新可直接覆盖安装
+- CHANGELOG.md 完整版本历史
+- CONTRIBUTING.md 贡献指南
+
+### 改进
+- cargo fmt 全量格式化 + cargo clippy 零警告
+- Cargo.toml 补齐 authors/keywords/categories 元数据
+- 致谢部分详细说明 Harness Research 借鉴内容及第三方库署名
+- .gitattributes 优化 GitHub 语言统计（Rust 占比 90%+）
+- 清理冗余文件（Node.js 依赖、过时 CI workflow、构建产物）
+
+### 删除
+- ios-app/ -> 独立仓库 patent-hub-ios
+- harmonyos/ -> 独立仓库 patent-hub-harmony
+- src-tauri/ -> 独立仓库 patent-hub-desktop
+- generate-icons.mjs、package.json（随 Tauri 拆出）
+- ios-build.yml workflow（随 iOS 拆出）
+- release.yml 中 iOS/HarmonyOS 构建任务
+
+---
+
 ## [v0.3.5] - 2026-03-29
 
 ### 新增
