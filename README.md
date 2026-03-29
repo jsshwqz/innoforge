@@ -152,12 +152,26 @@ patent-hub/                # Rust 主仓
 
 ## 致谢
 
-本项目使用了以下算法，并受以下项目的架构理念启发：
+### 架构灵感
 
-- [TF-IDF](https://en.wikipedia.org/wiki/Tf%E2%80%93idf) -- 词频-逆文档频率算法，用于权利要求与现有技术的文本相似度匹配（实现于 similarity.rs）
-- [Jaccard 相似系数](https://en.wikipedia.org/wiki/Jaccard_index) -- 集合相似度度量，用于文本重叠检测与矛盾分析（实现于 similarity.rs、contradiction.rs）
-- [余弦相似度](https://en.wikipedia.org/wiki/Cosine_similarity) -- 向量空间相似度计算，作为 TF-IDF 流水线的一部分使用
-- [Harness Research](https://github.com/Nimo1987/harness-research) -- 架构理念启发：状态机驱动的流水线模式、LLM 与代码的职责分离
+- [Harness Research](https://github.com/Nimo1987/harness-research) -- 本项目的 12 步创新验证流水线受其启发，借鉴了以下设计理念：
+  - **状态机驱动的流水线模式** -- 将复杂任务拆解为确定性步骤链，每步可独立重试/跳过
+  - **LLM 与代码的职责分离** -- 评分、排序、去重等结构化任务由代码完成，AI 仅负责语义分析和建议生成
+  - **多层搜索降级架构** -- 多数据源级联回退，确保任何网络环境都能返回结果
+  - 注：本项目未复制 Harness Research 的任何源代码，所有实现均为原创
+
+### 使用的算法
+
+- [TF-IDF](https://en.wikipedia.org/wiki/Tf%E2%80%93idf) -- 词频-逆文档频率，用于文本相似度匹配（实现于 pipeline/steps/similarity.rs）
+- [Jaccard 相似系数](https://en.wikipedia.org/wiki/Jaccard_index) -- 集合相似度，用于重叠检测与矛盾分析（实现于 similarity.rs、contradiction.rs）
+- [余弦相似度](https://en.wikipedia.org/wiki/Cosine_similarity) -- 向量空间相似度，作为 TF-IDF 流水线的一部分
+
+### 第三方库与服务
+
+- [Chart.js](https://www.chartjs.org/) v4 (MIT) -- 搜索统计图表可视化
+- [SerpAPI](https://serpapi.com/) -- Google Patents 搜索接口
+- [Lens.org](https://www.lens.org/) -- 开放专利数据库 API
+- [Sogou](https://www.sogou.com/) -- 国内免费搜索降级方案
 
 ---
 

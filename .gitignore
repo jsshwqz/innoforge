@@ -16,3 +16,8 @@ server.log
 # Android signing credentials (passwords, not keystore)
 keystore.properties
 memory_store.json
+
+# 构建产物和临时文件
+*.zip
+server.log
+*.db-journal
