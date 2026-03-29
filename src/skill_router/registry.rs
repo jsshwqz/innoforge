@@ -92,7 +92,10 @@ impl RegistryStore {
             .unwrap_or(UNIX_EPOCH);
         let mut purged = Vec::new();
         self.state.skills.retain(|name, stored| {
-            let last = stored.last_used_epoch_ms.map(epoch_ms_to_system_time).unwrap_or(UNIX_EPOCH);
+            let last = stored
+                .last_used_epoch_ms
+                .map(epoch_ms_to_system_time)
+                .unwrap_or(UNIX_EPOCH);
             if last < cutoff {
                 purged.push(name.clone());
                 false

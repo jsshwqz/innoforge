@@ -16,10 +16,7 @@ pub async fn api_upload_compare(
         let name = field.name().unwrap_or("").to_string();
 
         if name == "file" {
-            file_name = field
-                .file_name()
-                .unwrap_or("unknown.txt")
-                .to_lowercase();
+            file_name = field.file_name().unwrap_or("unknown.txt").to_lowercase();
             match field.bytes().await {
                 Ok(data) => {
                     if data.len() > MAX_FILE_SIZE {
@@ -46,13 +43,12 @@ pub async fn api_upload_compare(
     };
 
     // Extract text content based on file type
-    let ext = file_name
-        .rsplit('.')
-        .next()
-        .unwrap_or("")
-        .to_lowercase();
+    let ext = file_name.rsplit('.').next().unwrap_or("").to_lowercase();
 
-    let is_image = matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp");
+    let is_image = matches!(
+        ext.as_str(),
+        "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp"
+    );
 
     let file_content = if is_image {
         // For images, use AI vision to describe the content
@@ -64,7 +60,11 @@ pub async fn api_upload_compare(
     } else if ext == "pdf" {
         match extract_pdf_text(&file_bytes) {
             Ok(text) if !text.trim().is_empty() => text,
-            Ok(_) => return Json(json!({"error": "PDF 文件无可提取的文字内容（可能是扫描件），请转换为文本后重试"})),
+            Ok(_) => {
+                return Json(
+                    json!({"error": "PDF 文件无可提取的文字内容（可能是扫描件），请转换为文本后重试"}),
+                )
+            }
             Err(e) => return Json(json!({"error": format!("PDF 解析失败: {}", e)})),
         }
     } else if ext == "docx" {
@@ -75,7 +75,9 @@ pub async fn api_upload_compare(
             Err(e) => return Json(json!({"error": format!("DOCX 解析失败: {}", e)})),
         }
     } else if ext == "doc" {
-        return Json(json!({"error": "暂不支持旧版 .doc 格式，请将文件另存为 .docx、.txt 或 .pdf 后重试"}));
+        return Json(
+            json!({"error": "暂不支持旧版 .doc 格式，请将文件另存为 .docx、.txt 或 .pdf 后重试"}),
+        );
     } else {
         // TXT, CSV, etc. — try UTF-8, then GBK
         match String::from_utf8(file_bytes.clone()) {
@@ -84,7 +86,9 @@ pub async fn api_upload_compare(
                 // Try GBK/GB18030 for Chinese text files
                 let (text, _encoding, had_errors) = encoding_rs::GBK.decode(&file_bytes);
                 if had_errors {
-                    return Json(json!({"error": "文件编码不支持，请上传 UTF-8 或 GBK 编码的文本文件、.docx、PDF 或图片"}));
+                    return Json(
+                        json!({"error": "文件编码不支持，请上传 UTF-8 或 GBK 编码的文本文件、.docx、PDF 或图片"}),
+                    );
                 }
                 text.into_owned()
             }
@@ -97,7 +101,11 @@ pub async fn api_upload_compare(
 
     let ai_client = s.config.read().unwrap().ai_client();
 
-    let file_type_label = if is_image { "图片识别内容" } else { "上传文档" };
+    let file_type_label = if is_image {
+        "图片识别内容"
+    } else {
+        "上传文档"
+    };
 
     let prompt = format!(
         "请对比以下两份技术文档，分析它们的相似性和差异：\n\n\

@@ -36,16 +36,28 @@ pub async fn execute(ctx: &mut PipelineContext) -> Result<()> {
     }
 
     // 维度 4：结果标题中包含多种语言
-    let has_chinese = ctx.web_results.iter().chain(ctx.patent_results.iter())
-        .any(|r| r.title.chars().any(|c| (c as u32) >= 0x4E00 && (c as u32) <= 0x9FFF));
-    let has_english = ctx.web_results.iter().chain(ctx.patent_results.iter())
+    let has_chinese = ctx
+        .web_results
+        .iter()
+        .chain(ctx.patent_results.iter())
+        .any(|r| {
+            r.title
+                .chars()
+                .any(|c| (c as u32) >= 0x4E00 && (c as u32) <= 0x9FFF)
+        });
+    let has_english = ctx
+        .web_results
+        .iter()
+        .chain(ctx.patent_results.iter())
         .any(|r| r.title.chars().any(|c| c.is_ascii_alphabetic()));
     if has_chinese && has_english {
         dimensions.insert("language_diversity");
     }
 
     // 维度 5：内容多样性（标题关键词不过度集中）
-    let all_titles: String = ctx.web_results.iter()
+    let all_titles: String = ctx
+        .web_results
+        .iter()
         .chain(ctx.patent_results.iter())
         .map(|r| r.title.as_str())
         .collect::<Vec<_>>()

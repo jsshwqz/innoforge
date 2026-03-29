@@ -26,9 +26,15 @@ impl Database {
         conn.execute_batch("PRAGMA journal_mode=WAL;")?;
 
         // Schema version tracking
-        conn.execute_batch("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);")?;
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);",
+        )?;
         let current_version: i32 = conn
-            .query_row("SELECT COALESCE(MAX(version), 0) FROM schema_version", [], |r| r.get(0))
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                [],
+                |r| r.get(0),
+            )
             .unwrap_or(0);
 
         // Migration 0 → 1: Initial schema
@@ -165,7 +171,11 @@ impl Database {
         }
 
         if current_version > 0 && current_version < Self::SCHEMA_VERSION {
-            tracing::info!("Database migrated from version {} to {}", current_version, Self::SCHEMA_VERSION);
+            tracing::info!(
+                "Database migrated from version {} to {}",
+                current_version,
+                Self::SCHEMA_VERSION
+            );
         }
 
         Ok(Self {
@@ -177,7 +187,11 @@ impl Database {
     #[allow(dead_code)]
     pub fn query_schema_version(&self) -> Result<i32> {
         let c = self.conn();
-        let v: i32 = c.query_row("SELECT COALESCE(MAX(version), 0) FROM schema_version", [], |r| r.get(0))?;
+        let v: i32 = c.query_row(
+            "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+            [],
+            |r| r.get(0),
+        )?;
         Ok(v)
     }
 
@@ -211,9 +225,7 @@ impl Database {
     pub fn get_all_settings(&self) -> Result<std::collections::HashMap<String, String>> {
         let c = self.conn();
         let mut stmt = c.prepare("SELECT key, value FROM app_settings")?;
-        let rows = stmt.query_map([], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-        })?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
         let mut map = std::collections::HashMap::new();
         for row in rows {
             let (k, v) = row?;
@@ -272,10 +284,30 @@ impl Database {
 
         // Company keywords (check BEFORE name detection to avoid misclassifying company names)
         let company_keywords = [
-            "公司", "集团", "股份", "有限", "责任",
-            "corporation", "corp", "inc", "ltd", "gmbh", "co.", "co,", "company",
-            "tech", "technologies", "systems", "global", "group", "energy",
-            "electronics", "motors", "pharma", "lab", "labs",
+            "公司",
+            "集团",
+            "股份",
+            "有限",
+            "责任",
+            "corporation",
+            "corp",
+            "inc",
+            "ltd",
+            "gmbh",
+            "co.",
+            "co,",
+            "company",
+            "tech",
+            "technologies",
+            "systems",
+            "global",
+            "group",
+            "energy",
+            "electronics",
+            "motors",
+            "pharma",
+            "lab",
+            "labs",
         ];
         let q_lower = q.to_lowercase();
         if company_keywords.iter().any(|k| q_lower.contains(k)) {
@@ -312,10 +344,20 @@ impl Database {
                 .search_by_patent_number(query, date_from, date_to, page, page_size)
                 .map(|(p, t)| (p, t, SearchType::PatentNumber)),
             SearchType::Applicant => self
-                .search_by_field(query, "applicant", country, date_from, date_to, page, page_size)
+                .search_by_field(
+                    query,
+                    "applicant",
+                    country,
+                    date_from,
+                    date_to,
+                    page,
+                    page_size,
+                )
                 .map(|(p, t)| (p, t, SearchType::Applicant)),
             SearchType::Inventor => self
-                .search_by_field(query, "inventor", country, date_from, date_to, page, page_size)
+                .search_by_field(
+                    query, "inventor", country, date_from, date_to, page, page_size,
+                )
                 .map(|(p, t)| (p, t, SearchType::Inventor)),
             SearchType::Keyword => {
                 let has_filters = country.filter(|s| !s.is_empty()).is_some()
@@ -553,27 +595,24 @@ impl Database {
             .unwrap_or(0);
         let mut stmt = c.prepare("SELECT p.id,p.patent_number,p.title,p.abstract_text,p.applicant,p.inventor,p.filing_date,p.country,f.rank FROM patents p INNER JOIN patents_fts f ON p.rowid=f.rowid WHERE patents_fts MATCH ?1 ORDER BY rank LIMIT ?2 OFFSET ?3")?;
         let rows = stmt
-            .query_map(
-                params![safe_query, page_size as i64, offset as i64],
-                |r| {
-                    let rank: f64 = r.get::<_, f64>(8).unwrap_or(0.0);
-                    // FTS5 rank is negative (closer to 0 = better). Normalize to 0-100.
-                    // Typical range: -20 (very relevant) to 0 (less relevant)
-                    let score = ((-rank).min(20.0) / 20.0 * 70.0 + 30.0).min(100.0);
-                    Ok(PatentSummary {
-                        id: r.get(0)?,
-                        patent_number: r.get(1)?,
-                        title: r.get(2)?,
-                        abstract_text: r.get::<_, String>(3).unwrap_or_default(),
-                        applicant: r.get::<_, String>(4).unwrap_or_default(),
-                        inventor: r.get::<_, String>(5).unwrap_or_default(),
-                        filing_date: r.get::<_, String>(6).unwrap_or_default(),
-                        country: r.get::<_, String>(7).unwrap_or_default(),
-                        relevance_score: Some(score),
-                        score_source: Some("FTS5-BM25".to_string()),
-                    })
-                },
-            )?
+            .query_map(params![safe_query, page_size as i64, offset as i64], |r| {
+                let rank: f64 = r.get::<_, f64>(8).unwrap_or(0.0);
+                // FTS5 rank is negative (closer to 0 = better). Normalize to 0-100.
+                // Typical range: -20 (very relevant) to 0 (less relevant)
+                let score = ((-rank).min(20.0) / 20.0 * 70.0 + 30.0).min(100.0);
+                Ok(PatentSummary {
+                    id: r.get(0)?,
+                    patent_number: r.get(1)?,
+                    title: r.get(2)?,
+                    abstract_text: r.get::<_, String>(3).unwrap_or_default(),
+                    applicant: r.get::<_, String>(4).unwrap_or_default(),
+                    inventor: r.get::<_, String>(5).unwrap_or_default(),
+                    filing_date: r.get::<_, String>(6).unwrap_or_default(),
+                    country: r.get::<_, String>(7).unwrap_or_default(),
+                    relevance_score: Some(score),
+                    score_source: Some("FTS5-BM25".to_string()),
+                })
+            })?
             .filter_map(|r| r.ok())
             .collect();
         Ok((rows, total))
@@ -608,10 +647,9 @@ impl Database {
 
         let total: usize = if has_country {
             c.prepare(&format!("SELECT COUNT(*) FROM patents {where_clause}"))?
-                .query_row(
-                    params![q, country.unwrap(), date_from, date_to],
-                    |r| r.get(0),
-                )?
+                .query_row(params![q, country.unwrap(), date_from, date_to], |r| {
+                    r.get(0)
+                })?
         } else {
             c.prepare(&format!("SELECT COUNT(*) FROM patents {where_clause}"))?
                 .query_row(params![q, date_from, date_to], |r| r.get(0))?
@@ -636,8 +674,7 @@ impl Database {
                         let applicant = row.get::<_, String>(4).unwrap_or_default();
                         let inventor = row.get::<_, String>(5).unwrap_or_default();
                         let title = row.get::<_, String>(2).unwrap_or_default();
-                        let score =
-                            calculate_mixed_relevance(query, &applicant, &inventor, &title);
+                        let score = calculate_mixed_relevance(query, &applicant, &inventor, &title);
                         Ok(PatentSummary {
                             id: row.get(0)?,
                             patent_number: row.get(1)?,
@@ -665,8 +702,7 @@ impl Database {
                         let applicant = row.get::<_, String>(4).unwrap_or_default();
                         let inventor = row.get::<_, String>(5).unwrap_or_default();
                         let title = row.get::<_, String>(2).unwrap_or_default();
-                        let score =
-                            calculate_mixed_relevance(query, &applicant, &inventor, &title);
+                        let score = calculate_mixed_relevance(query, &applicant, &inventor, &title);
                         Ok(PatentSummary {
                             id: row.get(0)?,
                             patent_number: row.get(1)?,
@@ -860,7 +896,10 @@ impl Database {
 
     pub fn delete_collection(&self, id: &str) -> Result<()> {
         let c = self.conn();
-        c.execute("DELETE FROM patent_collections WHERE collection_id = ?1", params![id])?;
+        c.execute(
+            "DELETE FROM patent_collections WHERE collection_id = ?1",
+            params![id],
+        )?;
         c.execute("DELETE FROM collections WHERE id = ?1", params![id])?;
         Ok(())
     }
@@ -915,9 +954,8 @@ impl Database {
 
     pub fn get_patent_collections(&self, patent_id: &str) -> Result<Vec<String>> {
         let c = self.conn();
-        let mut stmt = c.prepare(
-            "SELECT collection_id FROM patent_collections WHERE patent_id = ?1",
-        )?;
+        let mut stmt =
+            c.prepare("SELECT collection_id FROM patent_collections WHERE patent_id = ?1")?;
         let rows = stmt
             .query_map(params![patent_id], |r| r.get::<_, String>(0))?
             .filter_map(|r| r.ok())
@@ -947,7 +985,8 @@ impl Database {
 
     pub fn get_patent_tags(&self, patent_id: &str) -> Result<Vec<String>> {
         let c = self.conn();
-        let mut stmt = c.prepare("SELECT tag FROM patent_tags WHERE patent_id = ?1 ORDER BY tag")?;
+        let mut stmt =
+            c.prepare("SELECT tag FROM patent_tags WHERE patent_id = ?1 ORDER BY tag")?;
         let rows = stmt
             .query_map(params![patent_id], |r| r.get::<_, String>(0))?
             .filter_map(|r| r.ok())
@@ -969,7 +1008,13 @@ impl Database {
 
     // ── Idea Messages CRUD ───────────────────────────────────────────
 
-    pub fn add_idea_message(&self, id: &str, idea_id: &str, role: &str, content: &str) -> Result<()> {
+    pub fn add_idea_message(
+        &self,
+        id: &str,
+        idea_id: &str,
+        role: &str,
+        content: &str,
+    ) -> Result<()> {
         let c = self.conn();
         c.execute(
             "INSERT INTO idea_messages (id, idea_id, role, content) VALUES (?1, ?2, ?3, ?4)",
@@ -978,7 +1023,10 @@ impl Database {
         Ok(())
     }
 
-    pub fn get_idea_messages(&self, idea_id: &str) -> Result<Vec<(String, String, String, String)>> {
+    pub fn get_idea_messages(
+        &self,
+        idea_id: &str,
+    ) -> Result<Vec<(String, String, String, String)>> {
         let c = self.conn();
         let mut stmt = c.prepare(
             "SELECT id, role, content, created_at FROM idea_messages WHERE idea_id = ?1 ORDER BY created_at ASC",
@@ -1008,11 +1056,13 @@ impl Database {
 
     pub fn get_idea_summary(&self, idea_id: &str) -> Result<String> {
         let c = self.conn();
-        let summary: String = c.query_row(
-            "SELECT COALESCE(discussion_summary, '') FROM ideas WHERE id = ?1",
-            params![idea_id],
-            |r| r.get(0),
-        ).unwrap_or_default();
+        let summary: String = c
+            .query_row(
+                "SELECT COALESCE(discussion_summary, '') FROM ideas WHERE id = ?1",
+                params![idea_id],
+                |r| r.get(0),
+            )
+            .unwrap_or_default();
         Ok(summary)
     }
 }
@@ -1045,9 +1095,7 @@ fn calculate_field_relevance(query: &str, field_value: &str, field_name: &str) -
         let f_chars: Vec<char> = f.chars().filter(|c| *c > '\u{7F}').collect();
         if !q_chars.is_empty() && !f_chars.is_empty() {
             // Surname match
-            if q_chars.first() == f_chars.first()
-                && (q_chars.len() <= 2 || f_chars.len() <= 2)
-            {
+            if q_chars.first() == f_chars.first() && (q_chars.len() <= 2 || f_chars.len() <= 2) {
                 return (85.0, "surname match".to_string());
             }
             if q_chars.iter().all(|qc| f_chars.contains(qc)) {
@@ -1214,7 +1262,11 @@ mod tests {
         // FTS results now have BM25-based relevance scores (30-100 range)
         assert!(rows[0].relevance_score.is_some());
         let score = rows[0].relevance_score.unwrap();
-        assert!(score >= 30.0 && score <= 100.0, "FTS score {} out of range", score);
+        assert!(
+            score >= 30.0 && score <= 100.0,
+            "FTS score {} out of range",
+            score
+        );
     }
 
     #[test]

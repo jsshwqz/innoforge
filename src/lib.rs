@@ -127,17 +127,32 @@ pub async fn start_server(db_path: &str) -> anyhow::Result<()> {
         .route("/api/search/analyze", post(routes::api_ai_analyze_results))
         .route("/api/patent/fetch", post(routes::api_fetch_patent))
         .route("/api/patent/enrich/:id", get(routes::api_enrich_patent))
-        .route("/api/patent/enrich-free/:id", get(routes::api_enrich_patent_free))
+        .route(
+            "/api/patent/enrich-free/:id",
+            get(routes::api_enrich_patent_free),
+        )
         .route("/api/patent/pdf/:id", get(routes::api_patent_pdf))
-        .route("/api/patent/image-proxy", get(routes::api_patent_image_proxy))
-        .route("/api/patent/similar/:id", get(routes::api_recommend_similar))
+        .route(
+            "/api/patent/image-proxy",
+            get(routes::api_patent_image_proxy),
+        )
+        .route(
+            "/api/patent/similar/:id",
+            get(routes::api_recommend_similar),
+        )
         .route("/api/ai/chat", post(routes::api_ai_chat))
         .route("/api/ai/summarize", post(routes::api_ai_summarize))
         .route("/api/ai/compare", post(routes::api_ai_compare))
         .route("/api/ai/claims", post(routes::api_ai_claims_analysis))
         .route("/api/ai/risk", post(routes::api_ai_risk_assessment))
-        .route("/api/ai/compare-matrix", post(routes::api_ai_compare_matrix))
-        .route("/api/ai/batch-summarize", post(routes::api_ai_batch_summarize))
+        .route(
+            "/api/ai/compare-matrix",
+            post(routes::api_ai_compare_matrix),
+        )
+        .route(
+            "/api/ai/batch-summarize",
+            post(routes::api_ai_batch_summarize),
+        )
         .route("/api/idea/submit", post(routes::api_idea_submit))
         .route("/api/idea/analyze", post(routes::api_idea_analyze))
         .route("/api/idea/pipeline", post(routes::api_idea_pipeline))
@@ -147,18 +162,45 @@ pub async fn start_server(db_path: &str) -> anyhow::Result<()> {
         .route("/api/idea/:id/report", get(routes::api_idea_report))
         .route("/api/idea/:id/chat", post(routes::api_idea_chat))
         .route("/api/idea/:id/messages", get(routes::api_idea_messages))
-        .route("/api/idea/:id/summarize", post(routes::api_idea_summarize_discussion))
+        .route(
+            "/api/idea/:id/summarize",
+            post(routes::api_idea_summarize_discussion),
+        )
         .route("/api/ipc/tree", get(routes::api_ipc_tree))
         .route("/api/ipc/:code/patents", get(routes::api_ipc_patents))
         .route("/api/patents/import", post(routes::api_import_patents))
-        .route("/api/collections", get(routes::api_list_collections).post(routes::api_create_collection))
-        .route("/api/collections/:id", axum::routing::delete(routes::api_delete_collection))
-        .route("/api/collections/:id/patents", get(routes::api_get_collection_patents))
-        .route("/api/collections/:id/add", post(routes::api_add_to_collection))
-        .route("/api/collections/:id/remove/:patent_id", axum::routing::delete(routes::api_remove_from_collection))
-        .route("/api/patents/:id/tags", get(routes::api_get_patent_tags).post(routes::api_add_tag))
-        .route("/api/patents/:id/tags/:tag", axum::routing::delete(routes::api_remove_tag))
-        .route("/api/patents/:id/collections", get(routes::api_get_patent_collections))
+        .route(
+            "/api/collections",
+            get(routes::api_list_collections).post(routes::api_create_collection),
+        )
+        .route(
+            "/api/collections/:id",
+            axum::routing::delete(routes::api_delete_collection),
+        )
+        .route(
+            "/api/collections/:id/patents",
+            get(routes::api_get_collection_patents),
+        )
+        .route(
+            "/api/collections/:id/add",
+            post(routes::api_add_to_collection),
+        )
+        .route(
+            "/api/collections/:id/remove/:patent_id",
+            axum::routing::delete(routes::api_remove_from_collection),
+        )
+        .route(
+            "/api/patents/:id/tags",
+            get(routes::api_get_patent_tags).post(routes::api_add_tag),
+        )
+        .route(
+            "/api/patents/:id/tags/:tag",
+            axum::routing::delete(routes::api_remove_tag),
+        )
+        .route(
+            "/api/patents/:id/collections",
+            get(routes::api_get_patent_collections),
+        )
         .route("/api/tags", get(routes::api_list_all_tags))
         .route("/api/upload/compare", post(routes::api_upload_compare))
         // Serve embedded static files
@@ -185,4 +227,3 @@ pub async fn start_server(db_path: &str) -> anyhow::Result<()> {
         .await?;
     Ok(())
 }
-

@@ -99,15 +99,23 @@ pub async fn api_search(
 
     // Build category statistics for large result sets
     let categories = if patents.len() >= 10 {
-        let mut by_applicant: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-        let mut by_country: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        let mut by_applicant: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+        let mut by_country: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
         for p in &patents {
-            let app = if p.applicant.is_empty() { "未知".to_string() } else {
+            let app = if p.applicant.is_empty() {
+                "未知".to_string()
+            } else {
                 // Normalize applicant name (take first 20 chars to group variants)
                 p.applicant.chars().take(20).collect()
             };
             *by_applicant.entry(app).or_insert(0) += 1;
-            let country = if p.country.is_empty() { "未知".to_string() } else { p.country.clone() };
+            let country = if p.country.is_empty() {
+                "未知".to_string()
+            } else {
+                p.country.clone()
+            };
             *by_country.entry(country).or_insert(0) += 1;
         }
         let mut groups: Vec<CategoryGroup> = Vec::new();
@@ -116,16 +124,26 @@ pub async fn api_search(
         app_list.sort_by(|a, b| b.1.cmp(&a.1));
         for (name, count) in app_list.iter().take(5) {
             if *count >= 2 {
-                groups.push(CategoryGroup { label: format!("申请人: {}", name), count: *count });
+                groups.push(CategoryGroup {
+                    label: format!("申请人: {}", name),
+                    count: *count,
+                });
             }
         }
         // Countries
         let mut country_list: Vec<_> = by_country.into_iter().collect();
         country_list.sort_by(|a, b| b.1.cmp(&a.1));
         for (name, count) in country_list.iter().take(5) {
-            groups.push(CategoryGroup { label: format!("国家: {}", name), count: *count });
+            groups.push(CategoryGroup {
+                label: format!("国家: {}", name),
+                count: *count,
+            });
         }
-        if groups.is_empty() { None } else { Some(groups) }
+        if groups.is_empty() {
+            None
+        } else {
+            Some(groups)
+        }
     } else {
         None
     };
@@ -244,8 +262,7 @@ pub async fn api_search_online(
                         } else {
                             let total = json["search_information"]["total_results"]
                                 .as_u64()
-                                .unwrap_or(0)
-                                as usize;
+                                .unwrap_or(0) as usize;
                             let mut patents = Vec::new();
                             if let Some(results) = json["organic_results"].as_array() {
                                 println!(
@@ -257,15 +274,26 @@ pub async fn api_search_online(
                                     let p = serp_to_patent(r);
                                     if !p.title.is_empty() {
                                         if let Err(e) = s.db.insert_patent(&p) {
-                                            tracing::warn!("Failed to cache online patent {}: {}", p.patent_number, e);
+                                            tracing::warn!(
+                                                "Failed to cache online patent {}: {}",
+                                                p.patent_number,
+                                                e
+                                            );
                                         }
                                         // Hybrid relevance: position + content matching
                                         let position_score = (98.0 - idx as f64 * 3.0).max(30.0);
                                         let content_score = calculate_online_relevance(
-                                            &req.query, &p.title, &p.abstract_text, &p.applicant,
+                                            &req.query,
+                                            &p.title,
+                                            &p.abstract_text,
+                                            &p.applicant,
                                         );
-                                        let score = (position_score * 0.4 + content_score * 0.6).min(100.0);
-                                        let source = format!("hybrid(pos:{:.0}+content:{:.0})", position_score, content_score);
+                                        let score =
+                                            (position_score * 0.4 + content_score * 0.6).min(100.0);
+                                        let source = format!(
+                                            "hybrid(pos:{:.0}+content:{:.0})",
+                                            position_score, content_score
+                                        );
                                         patents.push(PatentSummary {
                                             id: p.id.clone(),
                                             patent_number: p.patent_number.clone(),
@@ -413,8 +441,9 @@ pub async fn api_search_online(
     );
     match search_sogou_free(&format!("{} 专利", search_query_free)).await {
         Ok((results, total)) if !results.is_empty() => {
-            let patents: Vec<PatentSummary> = results.iter().map(|r| {
-                PatentSummary {
+            let patents: Vec<PatentSummary> = results
+                .iter()
+                .map(|r| PatentSummary {
                     id: uuid::Uuid::new_v4().to_string(),
                     patent_number: String::new(),
                     title: r.title.clone(),
@@ -425,12 +454,17 @@ pub async fn api_search_online(
                     country: String::new(),
                     relevance_score: r.score,
                     score_source: Some("sogou_free".to_string()),
-                }
-            }).collect();
+                })
+                .collect();
             let has_lens = !s.config.read().unwrap().lens_api_key.is_empty();
             let hint = if !has_lens {
-                Some("当前使用搜狗免费搜索。到「设置」配置 Lens.org Key 可获得更专业的专利搜索。".to_string())
-            } else { None };
+                Some(
+                    "当前使用搜狗免费搜索。到「设置」配置 Lens.org Key 可获得更专业的专利搜索。"
+                        .to_string(),
+                )
+            } else {
+                None
+            };
             return Json(json!({
                 "patents": patents,
                 "total": total,
@@ -446,9 +480,8 @@ pub async fn api_search_online(
 
     // Fallback 5: local DB search
     println!("[ONLINE] Falling back to local DB");
-    let local = s
-        .db
-        .search_smart(
+    let local =
+        s.db.search_smart(
             &req.query,
             online_search_type.as_ref(),
             req.country.as_deref(),
@@ -564,8 +597,7 @@ pub async fn api_export_csv(
         return (StatusCode::NOT_FOUND, "No results to export").into_response();
     }
 
-    let mut csv_data =
-        String::from("专利号,标题,申请人,发明人,申请日,公开日,国家/地区,摘要\n");
+    let mut csv_data = String::from("专利号,标题,申请人,发明人,申请日,公开日,国家/地区,摘要\n");
     for p in all_results {
         let abstract_preview: String = p.abstract_text.chars().take(150).collect();
         let row = format!(
@@ -582,10 +614,7 @@ pub async fn api_export_csv(
         csv_data.push_str(&row);
     }
 
-    let filename = format!(
-        "patents_{}.csv",
-        chrono::Utc::now().format("%Y%m%d_%H%M%S")
-    );
+    let filename = format!("patents_{}.csv", chrono::Utc::now().format("%Y%m%d_%H%M%S"));
 
     (
         StatusCode::OK,
@@ -629,7 +658,15 @@ pub async fn api_export_xlsx(
     // Header style
     let header_format = rust_xlsxwriter::Format::new().set_bold();
 
-    let headers = ["Patent No.", "Title", "Applicant", "Inventor", "Filing Date", "Country", "Abstract"];
+    let headers = [
+        "Patent No.",
+        "Title",
+        "Applicant",
+        "Inventor",
+        "Filing Date",
+        "Country",
+        "Abstract",
+    ];
     for (col, h) in headers.iter().enumerate() {
         let _ = sheet.write_string_with_format(0, col as u16, *h, &header_format);
     }
@@ -664,8 +701,15 @@ pub async fn api_export_xlsx(
             (
                 StatusCode::OK,
                 [
-                    (header::CONTENT_TYPE, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet".to_string()),
-                    (header::CONTENT_DISPOSITION, format!("attachment; filename=\"{}\"", filename)),
+                    (
+                        header::CONTENT_TYPE,
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                            .to_string(),
+                    ),
+                    (
+                        header::CONTENT_DISPOSITION,
+                        format!("attachment; filename=\"{}\"", filename),
+                    ),
                 ],
                 buffer,
             )
@@ -679,12 +723,8 @@ pub async fn api_export_xlsx(
     }
 }
 
-
 pub(crate) fn serp_to_patent(r: &serde_json::Value) -> Patent {
-    let pub_num = r["publication_number"]
-        .as_str()
-        .unwrap_or("")
-        .to_string();
+    let pub_num = r["publication_number"].as_str().unwrap_or("").to_string();
     let country = pub_num.chars().take(2).collect::<String>();
     Patent {
         id: uuid::Uuid::new_v4().to_string(),
@@ -750,7 +790,10 @@ async fn search_google_patents_direct(
 
     let resp = client
         .get(&url)
-        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        .header(
+            "User-Agent",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        )
         .send()
         .await
         .map_err(|e| format!("request failed: {}", e))?;
@@ -763,9 +806,7 @@ async fn search_google_patents_direct(
     let json: serde_json::Value =
         serde_json::from_str(&body).map_err(|e| format!("JSON parse: {}", e))?;
 
-    let total = json["results"]["total_num_results"]
-        .as_u64()
-        .unwrap_or(0) as usize;
+    let total = json["results"]["total_num_results"].as_u64().unwrap_or(0) as usize;
 
     let mut patents = Vec::new();
     if let Some(clusters) = json["results"]["cluster"].as_array() {
@@ -780,17 +821,10 @@ async fn search_google_patents_direct(
                     let country = patent_number.chars().take(2).collect::<String>();
 
                     // Clean HTML tags from title and snippet
-                    let title = strip_html_tags(
-                        pat["title"].as_str().unwrap_or(""),
-                    );
-                    let snippet = strip_html_tags(
-                        pat["snippet"].as_str().unwrap_or(""),
-                    );
+                    let title = strip_html_tags(pat["title"].as_str().unwrap_or(""));
+                    let snippet = strip_html_tags(pat["snippet"].as_str().unwrap_or(""));
 
-                    let filing_date = pat["filing_date"]
-                        .as_str()
-                        .unwrap_or("")
-                        .to_string();
+                    let filing_date = pat["filing_date"].as_str().unwrap_or("").to_string();
                     let applicant = pat["assignee_localized"]
                         .as_array()
                         .and_then(|a| a.first())
@@ -805,9 +839,8 @@ async fn search_google_patents_direct(
                         .to_string();
 
                     if !title.is_empty() {
-                        let content_score = calculate_online_relevance(
-                            &query, &title, &snippet, &applicant,
-                        );
+                        let content_score =
+                            calculate_online_relevance(&query, &title, &snippet, &applicant);
                         patents.push(PatentSummary {
                             id: uuid::Uuid::new_v4().to_string(),
                             patent_number: patent_number.to_string(),
@@ -826,12 +859,21 @@ async fn search_google_patents_direct(
         }
     }
 
-    println!("[FREE] Google Patents direct: {} results, total {}", patents.len(), total);
+    println!(
+        "[FREE] Google Patents direct: {} results, total {}",
+        patents.len(),
+        total
+    );
     Ok((patents, total))
 }
 
 /// Calculate content-based relevance for online search results.
-fn calculate_online_relevance(query: &str, title: &str, abstract_text: &str, applicant: &str) -> f64 {
+fn calculate_online_relevance(
+    query: &str,
+    title: &str,
+    abstract_text: &str,
+    applicant: &str,
+) -> f64 {
     let q = query.trim().to_lowercase();
     let t = title.trim().to_lowercase();
     let a = abstract_text.trim().to_lowercase();
@@ -840,9 +882,11 @@ fn calculate_online_relevance(query: &str, title: &str, abstract_text: &str, app
     let mut score = 30.0;
 
     // Title matching (most important)
-    if t == q { score += 50.0; }
-    else if t.contains(&q) { score += 35.0; }
-    else {
+    if t == q {
+        score += 50.0;
+    } else if t.contains(&q) {
+        score += 35.0;
+    } else {
         // Word-level matching in title
         let q_words: Vec<&str> = q.split_whitespace().filter(|w| w.len() > 1).collect();
         if !q_words.is_empty() {
@@ -850,7 +894,10 @@ fn calculate_online_relevance(query: &str, title: &str, abstract_text: &str, app
             score += (matches as f64 / q_words.len() as f64) * 30.0;
         }
         // Chinese character matching in title
-        let q_chars: Vec<char> = q.chars().filter(|c| *c > '\u{4E00}' && *c < '\u{9FFF}').collect();
+        let q_chars: Vec<char> = q
+            .chars()
+            .filter(|c| *c > '\u{4E00}' && *c < '\u{9FFF}')
+            .collect();
         if !q_chars.is_empty() {
             let matches = q_chars.iter().filter(|c| t.contains(**c)).count();
             score += (matches as f64 / q_chars.len() as f64) * 25.0;
@@ -858,8 +905,9 @@ fn calculate_online_relevance(query: &str, title: &str, abstract_text: &str, app
     }
 
     // Abstract matching (secondary)
-    if a.contains(&q) { score += 15.0; }
-    else {
+    if a.contains(&q) {
+        score += 15.0;
+    } else {
         let q_words: Vec<&str> = q.split_whitespace().filter(|w| w.len() > 1).collect();
         if !q_words.is_empty() {
             let matches = q_words.iter().filter(|w| a.contains(*w)).count();
@@ -868,7 +916,9 @@ fn calculate_online_relevance(query: &str, title: &str, abstract_text: &str, app
     }
 
     // Applicant matching (bonus)
-    if app.contains(&q) { score += 5.0; }
+    if app.contains(&q) {
+        score += 5.0;
+    }
 
     score.min(100.0)
 }
@@ -948,7 +998,10 @@ pub async fn search_lens_patents(
         for item in data {
             // 专利号：从 biblio.publication_reference 取 jurisdiction + doc_number + kind
             let pub_ref = &item["biblio"]["publication_reference"];
-            let jurisdiction = pub_ref["jurisdiction"].as_str().unwrap_or("").to_uppercase();
+            let jurisdiction = pub_ref["jurisdiction"]
+                .as_str()
+                .unwrap_or("")
+                .to_uppercase();
             let doc_number = pub_ref["doc_number"].as_str().unwrap_or("");
             let kind = pub_ref["kind"].as_str().unwrap_or("");
             let patent_number = if doc_number.is_empty() {
@@ -997,16 +1050,14 @@ pub async fn search_lens_patents(
                 .unwrap_or("")
                 .to_string();
 
-            let filing_date = item["date_published"]
-                .as_str()
-                .unwrap_or("")
-                .to_string();
+            let filing_date = item["date_published"].as_str().unwrap_or("").to_string();
 
             if title.is_empty() && patent_number.is_empty() {
                 continue;
             }
 
-            let content_score = calculate_online_relevance(query, &title, &abstract_text, &applicant);
+            let content_score =
+                calculate_online_relevance(query, &title, &abstract_text, &applicant);
             patents.push(PatentSummary {
                 id: uuid::Uuid::new_v4().to_string(),
                 patent_number,
@@ -1029,6 +1080,7 @@ pub async fn search_lens_patents(
 // ── 搜狗搜索（国内可用，无需 Key，内置免费方案） ──────────────────────────
 
 /// 搜狗搜索结果
+#[allow(dead_code)] // url 保留用于后续结果详情链接
 struct FreeSearchResult {
     title: String,
     snippet: String,
@@ -1064,7 +1116,10 @@ async fn search_sogou_free(query: &str) -> Result<(Vec<FreeSearchResult>, usize)
         return Err(format!("搜狗 HTTP {}", resp.status()));
     }
 
-    let html = resp.text().await.map_err(|e| format!("读取响应失败: {}", e))?;
+    let html = resp
+        .text()
+        .await
+        .map_err(|e| format!("读取响应失败: {}", e))?;
 
     // 检查是否触发验证码
     if html.contains("安全验证") || html.contains("captcha") || html.len() < 5000 {
@@ -1074,19 +1129,20 @@ async fn search_sogou_free(query: &str) -> Result<(Vec<FreeSearchResult>, usize)
     // 解析搜狗搜索结果 HTML
     // 结构：<h3><a href="URL">TITLE</a></h3> 后面跟 <p>SNIPPET</p>
     let mut results = Vec::new();
-    let title_re = regex::Regex::new(
-        r#"<h3[^>]*>.*?<a[^>]+href="([^"]+)"[^>]*>(.*?)</a>.*?</h3>"#
-    ).map_err(|e| e.to_string())?;
-    let snippet_re = regex::Regex::new(
-        r#"<p[^>]*>(.*?)</p>"#
-    ).map_err(|e| e.to_string())?;
+    let title_re = regex::Regex::new(r#"<h3[^>]*>.*?<a[^>]+href="([^"]+)"[^>]*>(.*?)</a>.*?</h3>"#)
+        .map_err(|e| e.to_string())?;
+    let snippet_re = regex::Regex::new(r#"<p[^>]*>(.*?)</p>"#).map_err(|e| e.to_string())?;
 
     // 按 <h3> 标签分块匹配
     for cap in title_re.captures_iter(&html) {
-        if results.len() >= 10 { break; }
+        if results.len() >= 10 {
+            break;
+        }
         let raw_url = cap[1].to_string();
         let title = strip_html_tags(&cap[2]).trim().to_string();
-        if title.is_empty() { continue; }
+        if title.is_empty() {
+            continue;
+        }
 
         // 拼完整 URL
         let full_url = if raw_url.starts_with("/link?") {
@@ -1099,14 +1155,16 @@ async fn search_sogou_free(query: &str) -> Result<(Vec<FreeSearchResult>, usize)
         let match_end = cap.get(0).unwrap().end();
         let rest = &html[match_end..std::cmp::min(match_end + 2000, html.len())];
         let snippet = if let Some(snip_cap) = snippet_re.captures(rest) {
-            strip_html_tags(&snip_cap[1]).trim().chars().take(200).collect::<String>()
+            strip_html_tags(&snip_cap[1])
+                .trim()
+                .chars()
+                .take(200)
+                .collect::<String>()
         } else {
             String::new()
         };
 
-        let content_score = calculate_online_relevance(
-            query, &title, &snippet, "",
-        );
+        let content_score = calculate_online_relevance(query, &title, &snippet, "");
         results.push(FreeSearchResult {
             title,
             snippet,

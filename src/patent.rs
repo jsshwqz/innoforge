@@ -82,9 +82,9 @@ pub struct SearchRequest {
     pub search_type: Option<String>, // "applicant", "inventor", "keyword", "mixed"
     pub sort_by: Option<String>,     // "relevance", "new", "old"
     #[serde(default)]
-    pub ipc: Option<String>,         // IPC classification filter (prefix match)
+    pub ipc: Option<String>, // IPC classification filter (prefix match)
     #[serde(default)]
-    pub cpc: Option<String>,         // CPC classification filter (prefix match)
+    pub cpc: Option<String>, // CPC classification filter (prefix match)
 }
 
 fn d1() -> usize {

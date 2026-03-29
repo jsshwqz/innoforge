@@ -17,6 +17,7 @@ pub struct PipelineRunner {
     serpapi_key: String,
     bing_api_key: String,
     lens_api_key: String,
+    quick_mode: bool,
 }
 
 impl PipelineRunner {
@@ -26,6 +27,7 @@ impl PipelineRunner {
         serpapi_key: String,
         bing_api_key: String,
         lens_api_key: String,
+        quick_mode: bool,
     ) -> Self {
         Self {
             ai_client,
@@ -33,6 +35,7 @@ impl PipelineRunner {
             serpapi_key,
             bing_api_key,
             lens_api_key,
+            quick_mode,
         }
     }
 
@@ -51,6 +54,25 @@ impl PipelineRunner {
             let step = ctx.current_step;
             let step_start = Instant::now();
             tracing::info!("Pipeline step {:?} starting", step);
+
+            // 快速模式：跳过非必要步骤
+            if self.quick_mode && step.skipped_in_quick_mode() {
+                tracing::info!("Quick mode: skipping step {:?}", step);
+                self.send_progress(&progress_tx, &step, StepStatus::Skipped);
+                ctx.step_results.push(StepResult {
+                    step,
+                    duration_ms: 0,
+                    status: "skipped".into(),
+                    error: None,
+                });
+                match step.next() {
+                    Some(next) => {
+                        ctx.current_step = next;
+                        continue;
+                    }
+                    None => break,
+                }
+            }
 
             // 发送进度
             self.send_progress(&progress_tx, &step, StepStatus::Running);
@@ -87,20 +109,23 @@ impl PipelineRunner {
                         ));
                     }
                     // 非关键步骤失败，跳过继续
-                    tracing::warn!(
-                        "非关键步骤 {:?} 失败: {}，跳过继续",
-                        step,
-                        e
-                    );
+                    tracing::warn!("非关键步骤 {:?} 失败: {}，跳过继续", step, e);
                     self.send_progress(&progress_tx, &step, StepStatus::Skipped);
                 }
             }
 
             // DiversityGate 可能触发回退
-            if step == PipelineStep::DiversityGate && ctx.diversity_score < 0.3 && ctx.retry_count < 2 {
+            if step == PipelineStep::DiversityGate
+                && ctx.diversity_score < 0.3
+                && ctx.retry_count < 2
+            {
                 ctx.retry_count += 1;
                 ctx.current_step = PipelineStep::SearchWeb;
-                tracing::info!("多样性不足 ({:.0}%)，补充搜索第 {} 轮", ctx.diversity_score * 100.0, ctx.retry_count);
+                tracing::info!(
+                    "多样性不足 ({:.0}%)，补充搜索第 {} 轮",
+                    ctx.diversity_score * 100.0,
+                    ctx.retry_count
+                );
                 continue;
             }
 
@@ -119,9 +144,12 @@ impl PipelineRunner {
         match ctx.current_step {
             PipelineStep::ParseInput => steps::parse::execute(ctx).await,
             PipelineStep::ExpandQuery => steps::expand::execute(ctx, &self.ai_client).await,
-            PipelineStep::SearchWeb => steps::search::search_web(ctx, &self.serpapi_key, &self.bing_api_key).await,
+            PipelineStep::SearchWeb => {
+                steps::search::search_web(ctx, &self.serpapi_key, &self.bing_api_key).await
+            }
             PipelineStep::SearchPatents => {
-                steps::search::search_patents(ctx, &self.serpapi_key, &self.lens_api_key, &self.db).await
+                steps::search::search_patents(ctx, &self.serpapi_key, &self.lens_api_key, &self.db)
+                    .await
             }
             PipelineStep::DiversityGate => steps::diversity::execute(ctx).await,
             PipelineStep::ComputeSimilarity => steps::similarity::execute(ctx).await,
@@ -131,9 +159,7 @@ impl PipelineRunner {
             PipelineStep::AiDeepAnalysis => {
                 steps::analysis::deep_analysis(ctx, &self.ai_client).await
             }
-            PipelineStep::AiActionPlan => {
-                steps::analysis::action_plan(ctx, &self.ai_client).await
-            }
+            PipelineStep::AiActionPlan => steps::analysis::action_plan(ctx, &self.ai_client).await,
             PipelineStep::Finalize => steps::finalize::execute(ctx).await,
         }
     }

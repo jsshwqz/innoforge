@@ -26,7 +26,11 @@ pub async fn execute(ctx: &mut PipelineContext, ai: &AiClient) -> Result<()> {
         Ok(response) => {
             let queries: Vec<String> = response
                 .lines()
-                .map(|l| l.trim().trim_start_matches(|c: char| c.is_numeric() || c == '.' || c == '、' || c == '-'))
+                .map(|l| {
+                    l.trim().trim_start_matches(|c: char| {
+                        c.is_numeric() || c == '.' || c == '、' || c == '-'
+                    })
+                })
                 .map(|l| l.trim().to_string())
                 .filter(|l| !l.is_empty() && l.len() >= 2)
                 .take(8)

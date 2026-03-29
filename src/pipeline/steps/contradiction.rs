@@ -15,7 +15,11 @@ fn token_jaccard(a: &[String], b: &[String]) -> f64 {
     let set_b: HashSet<&String> = b.iter().collect();
     let intersection = set_a.intersection(&set_b).count() as f64;
     let union = set_a.union(&set_b).count() as f64;
-    if union == 0.0 { 0.0 } else { intersection / union }
+    if union == 0.0 {
+        0.0
+    } else {
+        intersection / union
+    }
 }
 
 /// 提取两个结果之间的差异关键词
@@ -60,11 +64,7 @@ pub async fn execute(ctx: &mut PipelineContext) -> Result<()> {
                 let signal_strength = 1.0 - mutual_sim; // 差异越大，信号越强
 
                 let dimension = if !a_unique.is_empty() && !b_unique.is_empty() {
-                    format!(
-                        "{} vs {}",
-                        a_unique.join("/"),
-                        b_unique.join("/")
-                    )
+                    format!("{} vs {}", a_unique.join("/"), b_unique.join("/"))
                 } else {
                     "技术路线差异".into()
                 };
@@ -89,7 +89,9 @@ pub async fn execute(ctx: &mut PipelineContext) -> Result<()> {
 
     // 按信号强度排序，取 Top 5
     contradictions.sort_by(|a, b| {
-        b.signal_strength.partial_cmp(&a.signal_strength).unwrap_or(std::cmp::Ordering::Equal)
+        b.signal_strength
+            .partial_cmp(&a.signal_strength)
+            .unwrap_or(std::cmp::Ordering::Equal)
     });
     contradictions.truncate(5);
 

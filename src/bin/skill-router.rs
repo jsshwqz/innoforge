@@ -22,7 +22,8 @@ fn run() -> anyhow::Result<()> {
 
     // GC command: skill-router --gc [--days N]
     if args.iter().any(|a| a == "--gc") {
-        let days = args.windows(2)
+        let days = args
+            .windows(2)
             .find(|w| w[0] == "--days")
             .and_then(|w| w[1].parse::<u64>().ok())
             .unwrap_or(90);
@@ -34,7 +35,11 @@ fn run() -> anyhow::Result<()> {
         if purged.is_empty() {
             eprintln!("GC: no skills purged (threshold: {} days unused)", days);
         } else {
-            eprintln!("GC: purged {} skill(s): {}", purged.len(), purged.join(", "));
+            eprintln!(
+                "GC: purged {} skill(s): {}",
+                purged.len(),
+                purged.join(", ")
+            );
         }
         return Ok(());
     }
@@ -55,14 +60,17 @@ fn run() -> anyhow::Result<()> {
             "--context" | "-x" => {
                 i += 1;
                 if let Some(raw) = args.get(i) {
-                    context_json = Some(serde_json::from_str(raw).map_err(|e| {
-                        anyhow::anyhow!("--context must be valid JSON: {e}")
-                    })?);
+                    context_json = Some(
+                        serde_json::from_str(raw)
+                            .map_err(|e| anyhow::anyhow!("--context must be valid JSON: {e}"))?,
+                    );
                 }
             }
             "--verbose" | "-v" => verbose = true,
             other => {
-                if !task.is_empty() { task.push(' '); }
+                if !task.is_empty() {
+                    task.push(' ');
+                }
                 task.push_str(other);
             }
         }

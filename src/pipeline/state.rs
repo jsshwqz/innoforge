@@ -93,4 +93,17 @@ impl PipelineStep {
             Self::ParseInput | Self::SearchWeb | Self::ComputeSimilarity | Self::ScoreNovelty
         )
     }
+
+    /// 快速模式下跳过的步骤
+    pub fn skipped_in_quick_mode(&self) -> bool {
+        matches!(
+            self,
+            Self::ExpandQuery
+                | Self::DiversityGate
+                | Self::RankAndFilter
+                | Self::DetectContradictions
+                | Self::AiDeepAnalysis
+                | Self::AiActionPlan
+        )
+    }
 }

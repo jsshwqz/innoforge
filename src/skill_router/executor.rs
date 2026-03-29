@@ -446,7 +446,11 @@ impl Executor {
                 "task": context.task,
                 "status": response.status,
             });
-            let _ = writeln!(file, "{}", serde_json::to_string(&entry).unwrap_or_default());
+            let _ = writeln!(
+                file,
+                "{}",
+                serde_json::to_string(&entry).unwrap_or_default()
+            );
         }
     }
 }

@@ -8,28 +8,29 @@ use std::collections::HashSet;
 
 /// 中文停用词（常见虚词）
 const ZH_STOPWORDS: &[&str] = &[
-    "的", "了", "在", "是", "我", "有", "和", "就", "不", "人", "都", "一",
-    "一个", "上", "也", "很", "到", "说", "要", "去", "你", "会", "着",
-    "没有", "看", "好", "自己", "这", "他", "她", "它", "们", "那", "些",
-    "可以", "什么", "用", "能", "如何", "通过", "进行", "以及", "或者",
-    "但是", "因为", "所以", "如果", "而", "与", "将", "对", "把", "从",
-    "被", "比", "为", "等", "该", "其", "中", "更", "之", "及",
+    "的", "了", "在", "是", "我", "有", "和", "就", "不", "人", "都", "一", "一个", "上", "也",
+    "很", "到", "说", "要", "去", "你", "会", "着", "没有", "看", "好", "自己", "这", "他", "她",
+    "它", "们", "那", "些", "可以", "什么", "用", "能", "如何", "通过", "进行", "以及", "或者",
+    "但是", "因为", "所以", "如果", "而", "与", "将", "对", "把", "从", "被", "比", "为", "等",
+    "该", "其", "中", "更", "之", "及",
 ];
 
 /// 英文停用词
 const EN_STOPWORDS: &[&str] = &[
-    "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
-    "have", "has", "had", "do", "does", "did", "will", "would", "could",
-    "should", "may", "might", "can", "shall", "and", "or", "but", "if",
-    "in", "on", "at", "to", "for", "of", "with", "by", "from", "as",
-    "into", "about", "between", "through", "during", "before", "after",
-    "above", "below", "this", "that", "these", "those", "it", "its",
-    "not", "no", "nor", "so", "than", "too", "very", "just", "also",
+    "the", "a", "an", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had",
+    "do", "does", "did", "will", "would", "could", "should", "may", "might", "can", "shall", "and",
+    "or", "but", "if", "in", "on", "at", "to", "for", "of", "with", "by", "from", "as", "into",
+    "about", "between", "through", "during", "before", "after", "above", "below", "this", "that",
+    "these", "those", "it", "its", "not", "no", "nor", "so", "than", "too", "very", "just", "also",
 ];
 
 /// 分词：中文按字符 bigram + 英文按空格
 pub fn tokenize(text: &str) -> Vec<String> {
-    let stopwords: HashSet<&str> = ZH_STOPWORDS.iter().chain(EN_STOPWORDS.iter()).copied().collect();
+    let stopwords: HashSet<&str> = ZH_STOPWORDS
+        .iter()
+        .chain(EN_STOPWORDS.iter())
+        .copied()
+        .collect();
     let mut tokens = Vec::new();
 
     // 分离中英文部分
@@ -49,7 +50,10 @@ pub fn tokenize(text: &str) -> Vec<String> {
             }
         }
     }
-    if !current_ascii.is_empty() && current_ascii.len() >= 2 && !stopwords.contains(current_ascii.as_str()) {
+    if !current_ascii.is_empty()
+        && current_ascii.len() >= 2
+        && !stopwords.contains(current_ascii.as_str())
+    {
         tokens.push(current_ascii);
     }
 
@@ -92,21 +96,104 @@ fn extract_keywords(text: &str, max_keywords: usize) -> Vec<String> {
     let mut sorted: Vec<_> = freq.into_iter().collect();
     sorted.sort_by(|a, b| b.1.cmp(&a.1));
 
-    sorted.into_iter().take(max_keywords).map(|(k, _)| k).collect()
+    sorted
+        .into_iter()
+        .take(max_keywords)
+        .map(|(k, _)| k)
+        .collect()
 }
 
 /// 推断技术领域
 fn infer_domain(keywords: &[String]) -> String {
     let domain_indicators: &[(&[&str], &str)] = &[
-        (&["电池", "锂", "充电", "能量", "储能", "电极", "battery", "lithium", "energy"], "新能源/电池技术"),
-        (&["芯片", "半导体", "晶圆", "集成电路", "chip", "semiconductor", "wafer"], "半导体/集成电路"),
-        (&["算法", "模型", "神经网络", "深度学习", "ai", "machine", "learning", "neural"], "人工智能/机器学习"),
-        (&["药物", "蛋白", "基因", "细胞", "抗体", "drug", "protein", "gene", "cell"], "生物医药"),
-        (&["机器人", "传感器", "控制", "自动", "robot", "sensor", "control", "autonomous"], "机器人/自动化"),
-        (&["通信", "信号", "频率", "天线", "5g", "6g", "wireless", "antenna"], "通信技术"),
-        (&["材料", "合金", "涂层", "纳米", "material", "alloy", "coating", "nano"], "新材料"),
-        (&["发动机", "飞行", "航空", "推进", "engine", "flight", "aviation", "propulsion"], "航空航天"),
-        (&["阀门", "流量", "管道", "液压", "valve", "flow", "pipe", "hydraulic"], "流体控制/阀门"),
+        (
+            &[
+                "电池", "锂", "充电", "能量", "储能", "电极", "battery", "lithium", "energy",
+            ],
+            "新能源/电池技术",
+        ),
+        (
+            &[
+                "芯片",
+                "半导体",
+                "晶圆",
+                "集成电路",
+                "chip",
+                "semiconductor",
+                "wafer",
+            ],
+            "半导体/集成电路",
+        ),
+        (
+            &[
+                "算法",
+                "模型",
+                "神经网络",
+                "深度学习",
+                "ai",
+                "machine",
+                "learning",
+                "neural",
+            ],
+            "人工智能/机器学习",
+        ),
+        (
+            &[
+                "药物", "蛋白", "基因", "细胞", "抗体", "drug", "protein", "gene", "cell",
+            ],
+            "生物医药",
+        ),
+        (
+            &[
+                "机器人",
+                "传感器",
+                "控制",
+                "自动",
+                "robot",
+                "sensor",
+                "control",
+                "autonomous",
+            ],
+            "机器人/自动化",
+        ),
+        (
+            &[
+                "通信", "信号", "频率", "天线", "5g", "6g", "wireless", "antenna",
+            ],
+            "通信技术",
+        ),
+        (
+            &[
+                "材料", "合金", "涂层", "纳米", "material", "alloy", "coating", "nano",
+            ],
+            "新材料",
+        ),
+        (
+            &[
+                "发动机",
+                "飞行",
+                "航空",
+                "推进",
+                "engine",
+                "flight",
+                "aviation",
+                "propulsion",
+            ],
+            "航空航天",
+        ),
+        (
+            &[
+                "阀门",
+                "流量",
+                "管道",
+                "液压",
+                "valve",
+                "flow",
+                "pipe",
+                "hydraulic",
+            ],
+            "流体控制/阀门",
+        ),
     ];
 
     let keywords_lower: Vec<String> = keywords.iter().map(|k| k.to_lowercase()).collect();

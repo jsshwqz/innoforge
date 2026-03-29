@@ -14,10 +14,7 @@ pub async fn execute(ctx: &mut PipelineContext) -> Result<()> {
     let scores = &ctx.similarity_scores;
 
     // 最高相似度
-    let max_similarity = scores
-        .first()
-        .map(|s| s.combined_score)
-        .unwrap_or(0.0);
+    let max_similarity = scores.first().map(|s| s.combined_score).unwrap_or(0.0);
 
     // Top5 平均相似度
     let top5: Vec<f64> = scores.iter().take(5).map(|s| s.combined_score).collect();
@@ -43,7 +40,8 @@ pub async fn execute(ctx: &mut PipelineContext) -> Result<()> {
     // 平均相似度惩罚（权重 20%）
     let avg_penalty = avg_top5 * 20.0;
 
-    let raw_score = 100.0 - max_sim_penalty - avg_penalty + contradiction_bonus + coverage_gap_bonus;
+    let raw_score =
+        100.0 - max_sim_penalty - avg_penalty + contradiction_bonus + coverage_gap_bonus;
 
     // 限制在 0-100 范围
     let final_score = raw_score.clamp(0.0, 100.0);
@@ -67,7 +65,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_no_results_means_high_novelty() {
-        let mut ctx = PipelineContext::new("test", "新型量子纠缠传感器", "利用量子纠缠效应进行超灵敏传感");
+        let mut ctx = PipelineContext::new(
+            "test",
+            "新型量子纠缠传感器",
+            "利用量子纠缠效应进行超灵敏传感",
+        );
         execute(&mut ctx).await.unwrap();
         // 没有搜索结果 → 相似度为 0 → 新颖性接近 100
         assert!(ctx.novelty_score > 90.0);

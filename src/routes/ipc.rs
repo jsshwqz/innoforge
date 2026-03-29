@@ -1,4 +1,4 @@
-use axum::{extract::State, extract::Path, Json};
+use axum::{extract::Path, extract::State, Json};
 use serde_json::{json, Value};
 
 use super::AppState;
@@ -38,7 +38,12 @@ pub async fn api_ipc_tree(State(s): State<AppState>) -> Json<Value> {
             if code.is_empty() {
                 continue;
             }
-            let section = code.chars().next().unwrap_or('?').to_uppercase().to_string();
+            let section = code
+                .chars()
+                .next()
+                .unwrap_or('?')
+                .to_uppercase()
+                .to_string();
             *section_counts.entry(section.clone()).or_insert(0) += 1;
 
             if code.len() >= 3 {
@@ -114,10 +119,7 @@ pub async fn api_ipc_tree(State(s): State<AppState>) -> Json<Value> {
 }
 
 /// GET /api/ipc/:code/patents — get patents matching an IPC code prefix
-pub async fn api_ipc_patents(
-    State(s): State<AppState>,
-    Path(code): Path<String>,
-) -> Json<Value> {
+pub async fn api_ipc_patents(State(s): State<AppState>, Path(code): Path<String>) -> Json<Value> {
     let code = code.trim().to_uppercase();
     match s.db.search_by_ipc(&code) {
         Ok(patents) => Json(json!({

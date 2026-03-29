@@ -194,13 +194,22 @@ impl AiClient {
 
                     if status.as_u16() == 429 {
                         let raw_text = resp.text().await.unwrap_or_default();
-                        tracing::warn!("[{}] rate limited (429): {}", provider.name, safe_truncate(&raw_text, 100));
+                        tracing::warn!(
+                            "[{}] rate limited (429): {}",
+                            provider.name,
+                            safe_truncate(&raw_text, 100)
+                        );
                         return Err(anyhow::anyhow!("AI 频率限制，请稍后再试"));
                     }
 
                     if status.as_u16() == 401 || status.as_u16() == 403 {
                         let raw_text = resp.text().await.unwrap_or_default();
-                        tracing::warn!("[{}] auth error ({}): {}", provider.name, status.as_u16(), safe_truncate(&raw_text, 200));
+                        tracing::warn!(
+                            "[{}] auth error ({}): {}",
+                            provider.name,
+                            status.as_u16(),
+                            safe_truncate(&raw_text, 200)
+                        );
                         return Err(anyhow::anyhow!(
                             "AI API Key 无效或已过期。请到「设置」页面检查 API Key 配置。"
                         ));
@@ -259,7 +268,10 @@ impl AiClient {
     /// Send a chat completion request with automatic failover across providers.
     async fn send_chat(&self, messages: Vec<Message>, temperature: f32) -> Result<String> {
         // Try primary provider first
-        match self.try_provider(&self.primary, &messages, temperature).await {
+        match self
+            .try_provider(&self.primary, &messages, temperature)
+            .await
+        {
             Ok(content) => return Ok(content),
             Err(e) => {
                 if self.fallbacks.is_empty() {
@@ -352,7 +364,8 @@ impl AiClient {
             Message {
                 role: "system".into(),
                 content: "你是一个专业的创新分析师和技术顾问。你会客观地评估用户想法的新颖性，\
-                         对比已有方案，并提供建设性的改进建议。回答要全面、有深度、实用。".into(),
+                         对比已有方案，并提供建设性的改进建议。回答要全面、有深度、实用。"
+                    .into(),
             },
             Message {
                 role: "user".into(),
@@ -470,7 +483,8 @@ impl AiClient {
             Message {
                 role: "system".into(),
                 content: "你是一位资深专利代理人和知识产权律师。你擅长解读专利权利要求书，\
-                         分析保护范围，识别关键技术特征。请用专业、严谨的语言分析。".into(),
+                         分析保护范围，识别关键技术特征。请用专业、严谨的语言分析。"
+                    .into(),
             },
             Message {
                 role: "user".into(),
@@ -555,7 +569,8 @@ impl AiClient {
             Message {
                 role: "system".into(),
                 content: "你是一位专利技术分析专家，擅长对比分析多个专利的技术方案，\
-                         识别技术演进趋势和创新差异。请用结构化的表格形式呈现分析结果。".into(),
+                         识别技术演进趋势和创新差异。请用结构化的表格形式呈现分析结果。"
+                    .into(),
             },
             Message {
                 role: "user".into(),
@@ -567,17 +582,22 @@ impl AiClient {
     }
 
     /// Batch summarize multiple patents concurrently.
-    pub async fn batch_summarize(&self, patents: &[(String, String, String)]) -> Vec<(String, Result<String>)> {
+    pub async fn batch_summarize(
+        &self,
+        patents: &[(String, String, String)],
+    ) -> Vec<(String, Result<String>)> {
         let mut results = Vec::new();
         for (id, title, abstract_text) in patents {
-            let result = self.chat(
-                &format!(
-                    "请用2-3句话简要总结这个专利的核心技术方案：\n标题：{}\n摘要：{}",
-                    title,
-                    safe_truncate(abstract_text, 500)
-                ),
-                None,
-            ).await;
+            let result = self
+                .chat(
+                    &format!(
+                        "请用2-3句话简要总结这个专利的核心技术方案：\n标题：{}\n摘要：{}",
+                        title,
+                        safe_truncate(abstract_text, 500)
+                    ),
+                    None,
+                )
+                .await;
             results.push((id.clone(), result));
         }
         results

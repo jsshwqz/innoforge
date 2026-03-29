@@ -230,7 +230,12 @@ pub async fn api_ai_risk_assessment(
             let claims_preview: String = p.claims.chars().take(800).collect();
             patents_info.push_str(&format!(
                 "### 专利 {} - {}\n专利号：{}\n申请人：{}\n摘要：{}\n权利要求：{}\n\n",
-                i + 1, p.title, p.patent_number, p.applicant, p.abstract_text, claims_preview
+                i + 1,
+                p.title,
+                p.patent_number,
+                p.applicant,
+                p.abstract_text,
+                claims_preview
             ));
         }
     }
@@ -268,7 +273,12 @@ pub async fn api_ai_compare_matrix(
             let claims_preview: String = p.claims.chars().take(600).collect();
             patents_info.push_str(&format!(
                 "### 专利 {}\n专利号：{}\n标题：{}\n申请人：{}\n摘要：{}\n权利要求：{}\n\n",
-                i + 1, p.patent_number, p.title, p.applicant, p.abstract_text, claims_preview
+                i + 1,
+                p.patent_number,
+                p.title,
+                p.applicant,
+                p.abstract_text,
+                claims_preview
             ));
         }
     }

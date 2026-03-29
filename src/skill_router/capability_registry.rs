@@ -86,7 +86,11 @@ impl CapabilityRegistry {
                 name: "text_diff".to_string(),
                 description: "Compute a line-level diff between two text inputs".to_string(),
                 inputs: vec!["a".to_string(), "b".to_string()],
-                outputs: vec!["diff".to_string(), "added".to_string(), "removed".to_string()],
+                outputs: vec![
+                    "diff".to_string(),
+                    "added".to_string(),
+                    "removed".to_string(),
+                ],
             },
             CapabilityDefinition {
                 name: "text_embed".to_string(),
@@ -192,8 +196,15 @@ impl CapabilityRegistry {
         Ok(())
     }
 
-    pub fn persist_to_dir(&mut self, name: &str, task: &str, capabilities_dir: &std::path::Path) -> anyhow::Result<()> {
-        if self.contains(name) { return Ok(()); }
+    pub fn persist_to_dir(
+        &mut self,
+        name: &str,
+        task: &str,
+        capabilities_dir: &std::path::Path,
+    ) -> anyhow::Result<()> {
+        if self.contains(name) {
+            return Ok(());
+        }
         std::fs::create_dir_all(capabilities_dir)?;
         let def = CapabilityDefinition {
             name: name.to_string(),

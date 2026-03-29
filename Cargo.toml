@@ -1,10 +1,13 @@
 [package]
 name = "patent-hub"
-version = "0.3.3"
+version = "0.3.5"
 edition = "2021"
 license = "MIT"
 description = "Patent search, analysis and management platform with AI integration"
 repository = "https://github.com/jsshwqz/patent-hub"
+authors = ["jsshwqz"]
+keywords = ["patent", "search", "ai", "analysis", "innovation"]
+categories = ["command-line-utilities", "web-programming"]
 
 [lib]
 name = "patent_hub"

@@ -50,7 +50,9 @@ fn main() {
             "tools/list" => handle_tools_list(),
             "tools/call" => handle_tools_call(&req),
             "ping" => json!({}),
-            _ => json!({"error": {"code": -32601, "message": format!("Unknown method: {}", method)}}),
+            _ => {
+                json!({"error": {"code": -32601, "message": format!("Unknown method: {}", method)}})
+            }
         };
 
         let response = if result.get("error").is_some() {
@@ -222,7 +224,11 @@ fn call_patent_search(args: &Value) -> Result<String, String> {
         "country": country,
     });
 
-    let path = if online { "/api/search/online" } else { "/api/search" };
+    let path = if online {
+        "/api/search/online"
+    } else {
+        "/api/search"
+    };
     let data = http_post(path, &body)?;
 
     let total = data["total"].as_u64().unwrap_or(0);
@@ -252,7 +258,8 @@ fn call_patent_search(args: &Value) -> Result<String, String> {
     if let Some(cats) = data["categories"].as_array() {
         output.push_str("Categories:\n");
         for cat in cats {
-            output.push_str(&format!("  - {}: {}\n",
+            output.push_str(&format!(
+                "  - {}: {}\n",
                 cat["label"].as_str().unwrap_or(""),
                 cat["count"].as_u64().unwrap_or(0)
             ));
@@ -307,7 +314,10 @@ fn call_patent_detail(args: &Value) -> Result<String, String> {
     output.push_str("\n\n== Claims ==\n");
     output.push_str(truncate(p["claims"].as_str().unwrap_or("Not loaded"), 2000));
     output.push_str("\n\n== Description ==\n");
-    output.push_str(truncate(p["description"].as_str().unwrap_or("Not loaded"), 2000));
+    output.push_str(truncate(
+        p["description"].as_str().unwrap_or("Not loaded"),
+        2000,
+    ));
 
     // Image count
     if let Ok(imgs) = serde_json::from_str::<Vec<String>>(p["images"].as_str().unwrap_or("[]")) {
@@ -323,20 +333,32 @@ fn call_patent_analyze(args: &Value) -> Result<String, String> {
     let patent_id = args["patent_id"].as_str().ok_or("Missing 'patent_id'")?;
     let body = json!({"patent_number": patent_id});
     let data = http_post("/api/ai/summarize", &body)?;
-    Ok(data["content"].as_str().unwrap_or("AI analysis failed").to_string())
+    Ok(data["content"]
+        .as_str()
+        .unwrap_or("AI analysis failed")
+        .to_string())
 }
 
 fn call_patent_compare(args: &Value) -> Result<String, String> {
-    let id1 = args["patent_id_1"].as_str().ok_or("Missing 'patent_id_1'")?;
-    let id2 = args["patent_id_2"].as_str().ok_or("Missing 'patent_id_2'")?;
+    let id1 = args["patent_id_1"]
+        .as_str()
+        .ok_or("Missing 'patent_id_1'")?;
+    let id2 = args["patent_id_2"]
+        .as_str()
+        .ok_or("Missing 'patent_id_2'")?;
     let body = json!({"patent_ids": [id1, id2]});
     let data = http_post("/api/ai/analyze-results", &body)?;
-    Ok(data["content"].as_str().unwrap_or("Comparison failed").to_string())
+    Ok(data["content"]
+        .as_str()
+        .unwrap_or("Comparison failed")
+        .to_string())
 }
 
 fn call_idea_validate(args: &Value) -> Result<String, String> {
     let title = args["title"].as_str().ok_or("Missing 'title'")?;
-    let description = args["description"].as_str().ok_or("Missing 'description'")?;
+    let description = args["description"]
+        .as_str()
+        .ok_or("Missing 'description'")?;
     let body = json!({"title": title, "description": description});
     let data = http_post("/api/idea/submit", &body)?;
 
@@ -352,7 +374,10 @@ fn call_idea_validate(args: &Value) -> Result<String, String> {
         output.push_str(idea["analysis"].as_str().unwrap_or("Pending..."));
         Ok(output)
     } else {
-        Ok(format!("Submitted. ID: {}. Analysis in progress.", data["id"].as_str().unwrap_or("unknown")))
+        Ok(format!(
+            "Submitted. ID: {}. Analysis in progress.",
+            data["id"].as_str().unwrap_or("unknown")
+        ))
     }
 }
 
@@ -361,7 +386,10 @@ fn call_patent_chat(args: &Value) -> Result<String, String> {
     let message = args["message"].as_str().ok_or("Missing 'message'")?;
     let body = json!({"message": message, "patent_id": patent_id});
     let data = http_post("/api/ai/chat", &body)?;
-    Ok(data["content"].as_str().unwrap_or("No response").to_string())
+    Ok(data["content"]
+        .as_str()
+        .unwrap_or("No response")
+        .to_string())
 }
 
 fn truncate(s: &str, max: usize) -> &str {

@@ -64,13 +64,13 @@ impl Synthesizer {
                  ```json\n{usage}\n```\n\n\
                  ## Permissions\n\n\
                  {perms}\n",
-                name        = def.metadata.name,
-                cap         = capability,
-                ep          = def.metadata.entrypoint,
-                task        = task,
+                name = def.metadata.name,
+                cap = capability,
+                ep = def.metadata.entrypoint,
+                task = task,
                 description = description,
-                usage       = usage_example,
-                perms       = Self::describe_permissions(&def.metadata.permissions),
+                usage = usage_example,
+                perms = Self::describe_permissions(&def.metadata.permissions),
             ),
         )?;
 
@@ -79,25 +79,77 @@ impl Synthesizer {
 
     fn builtin_for_capability(capability: &str) -> (String, PermissionSet) {
         match capability {
-            "yaml_parse"      => ("builtin:yaml_parse".into(),      PermissionSet::default_deny().with_filesystem_read(true)),
-            "json_parse"      => ("builtin:json_parse".into(),      PermissionSet::default_deny().with_filesystem_read(true)),
-            "toml_parse"      => ("builtin:toml_parse".into(),      PermissionSet::default_deny().with_filesystem_read(true)),
-            "csv_parse"       => ("builtin:csv_parse".into(),       PermissionSet::default_deny().with_filesystem_read(true)),
-            "markdown_render" => ("builtin:markdown_render".into(), PermissionSet::default_deny().with_filesystem_read(true)),
-            "text_diff"       => ("builtin:text_diff".into(),       PermissionSet::default_deny()),
-            "text_embed"      => ("builtin:text_embed".into(),      PermissionSet::default_deny()),
-            "text_summarize"  => ("builtin:text_summarize".into(),  PermissionSet::default_deny().with_network(true)),
-            "text_translate"  => ("builtin:text_translate".into(),  PermissionSet::default_deny().with_network(true)),
-            "text_classify"   => ("builtin:text_classify".into(),   PermissionSet::default_deny().with_network(true)),
-            "text_extract"    => ("builtin:text_extract".into(),    PermissionSet::default_deny().with_network(true)),
-            "web_search"      => ("builtin:web_search".into(),      PermissionSet::default_deny().with_network(true)),
-            "http_fetch"      => ("builtin:http_fetch".into(),      PermissionSet::default_deny().with_network(true)),
-            "code_generate"   => ("builtin:code_generate".into(),   PermissionSet::default_deny().with_network(true)),
-            "code_test"       => ("builtin:code_test".into(),       PermissionSet::default_deny().with_network(true)),
-            "code_lint"       => ("builtin:code_lint".into(),       PermissionSet::default_deny().with_network(true)),
-            "image_describe"  => ("builtin:image_describe".into(),  PermissionSet::default_deny().with_network(true).with_filesystem_read(true)),
-            "pdf_parse"       => ("builtin:pdf_parse".into(),       PermissionSet::default_deny().with_network(true).with_filesystem_read(true)),
-            _                 => ("builtin:placeholder".into(),     PermissionSet::default_deny()),
+            "yaml_parse" => (
+                "builtin:yaml_parse".into(),
+                PermissionSet::default_deny().with_filesystem_read(true),
+            ),
+            "json_parse" => (
+                "builtin:json_parse".into(),
+                PermissionSet::default_deny().with_filesystem_read(true),
+            ),
+            "toml_parse" => (
+                "builtin:toml_parse".into(),
+                PermissionSet::default_deny().with_filesystem_read(true),
+            ),
+            "csv_parse" => (
+                "builtin:csv_parse".into(),
+                PermissionSet::default_deny().with_filesystem_read(true),
+            ),
+            "markdown_render" => (
+                "builtin:markdown_render".into(),
+                PermissionSet::default_deny().with_filesystem_read(true),
+            ),
+            "text_diff" => ("builtin:text_diff".into(), PermissionSet::default_deny()),
+            "text_embed" => ("builtin:text_embed".into(), PermissionSet::default_deny()),
+            "text_summarize" => (
+                "builtin:text_summarize".into(),
+                PermissionSet::default_deny().with_network(true),
+            ),
+            "text_translate" => (
+                "builtin:text_translate".into(),
+                PermissionSet::default_deny().with_network(true),
+            ),
+            "text_classify" => (
+                "builtin:text_classify".into(),
+                PermissionSet::default_deny().with_network(true),
+            ),
+            "text_extract" => (
+                "builtin:text_extract".into(),
+                PermissionSet::default_deny().with_network(true),
+            ),
+            "web_search" => (
+                "builtin:web_search".into(),
+                PermissionSet::default_deny().with_network(true),
+            ),
+            "http_fetch" => (
+                "builtin:http_fetch".into(),
+                PermissionSet::default_deny().with_network(true),
+            ),
+            "code_generate" => (
+                "builtin:code_generate".into(),
+                PermissionSet::default_deny().with_network(true),
+            ),
+            "code_test" => (
+                "builtin:code_test".into(),
+                PermissionSet::default_deny().with_network(true),
+            ),
+            "code_lint" => (
+                "builtin:code_lint".into(),
+                PermissionSet::default_deny().with_network(true),
+            ),
+            "image_describe" => (
+                "builtin:image_describe".into(),
+                PermissionSet::default_deny()
+                    .with_network(true)
+                    .with_filesystem_read(true),
+            ),
+            "pdf_parse" => (
+                "builtin:pdf_parse".into(),
+                PermissionSet::default_deny()
+                    .with_network(true)
+                    .with_filesystem_read(true),
+            ),
+            _ => ("builtin:placeholder".into(), PermissionSet::default_deny()),
         }
     }
 

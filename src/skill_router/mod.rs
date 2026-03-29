@@ -45,7 +45,11 @@ impl SkillRouter {
         self.route_with_context(task, None)
     }
 
-    pub fn route_with_context(&self, task: &str, context: Option<serde_json::Value>) -> Result<RouteResult> {
+    pub fn route_with_context(
+        &self,
+        task: &str,
+        context: Option<serde_json::Value>,
+    ) -> Result<RouteResult> {
         let capability = {
             let mut reg = self.capability_registry.lock().unwrap();
             Planner::infer_capability_with_paths(task, &mut reg, &self.paths)?
@@ -54,7 +58,12 @@ impl SkillRouter {
         self.route_inner(task, &capability, context)
     }
 
-    pub fn route_with_capability(&self, task: &str, capability: &str, context: Option<serde_json::Value>) -> Result<RouteResult> {
+    pub fn route_with_capability(
+        &self,
+        task: &str,
+        capability: &str,
+        context: Option<serde_json::Value>,
+    ) -> Result<RouteResult> {
         {
             let reg = self.capability_registry.lock().unwrap();
             reg.validate_name(capability)
@@ -63,7 +72,12 @@ impl SkillRouter {
         self.route_inner(task, capability, context)
     }
 
-    fn route_inner(&self, task: &str, capability: &str, extra_context: Option<serde_json::Value>) -> Result<RouteResult> {
+    fn route_inner(
+        &self,
+        task: &str,
+        capability: &str,
+        extra_context: Option<serde_json::Value>,
+    ) -> Result<RouteResult> {
         let selected = {
             let reg = self.capability_registry.lock().unwrap();
             let local_skills = Loader::load_local_skills(&self.paths, &reg)?;
@@ -74,35 +88,65 @@ impl SkillRouter {
             let trusted = TrustedSourceSearch::search(&self.paths, capability).unwrap_or_default();
             let registry_store = RegistryStore::load(&self.paths)?;
             let synthesized = if matching_local.is_empty() {
-                vec![Synthesizer::create_placeholder(&self.paths, capability, task)?]
+                vec![Synthesizer::create_placeholder(
+                    &self.paths,
+                    capability,
+                    task,
+                )?]
             } else {
                 Vec::new()
             };
             if !matching_local.is_empty() {
-                Matcher::select_best_with_registry(capability, &matching_local, &trusted, Some(&registry_store))?
+                Matcher::select_best_with_registry(
+                    capability,
+                    &matching_local,
+                    &trusted,
+                    Some(&registry_store),
+                )?
             } else if !synthesized.is_empty() {
-                Matcher::select_best_with_registry(capability, &synthesized, &trusted, Some(&registry_store))?
+                Matcher::select_best_with_registry(
+                    capability,
+                    &synthesized,
+                    &trusted,
+                    Some(&registry_store),
+                )?
             } else {
-                return Err(anyhow::anyhow!("no skill available for capability {capability}"));
+                return Err(anyhow::anyhow!(
+                    "no skill available for capability {capability}"
+                ));
             }
         };
 
         let exec_ctx = {
             let mut ctx = ExecutionContext::new(task, capability);
-            if let Some(extra) = extra_context { ctx = ctx.with_context(extra); }
+            if let Some(extra) = extra_context {
+                ctx = ctx.with_context(extra);
+            }
             ctx
         };
 
         let execution = Executor::execute(&selected, &exec_ctx, &self.paths)?;
 
         let mut registry = RegistryStore::load(&self.paths)?;
-        registry.record_execution(&selected.metadata.name, execution.status == "ok", std::time::SystemTime::now());
+        registry.record_execution(
+            &selected.metadata.name,
+            execution.status == "ok",
+            std::time::SystemTime::now(),
+        );
         registry.save(&self.paths)?;
 
-        let stats = registry.skill_stats(&selected.metadata.name)
-            .ok_or_else(|| anyhow::anyhow!("missing registry stats for {}", selected.metadata.name))?;
+        let stats = registry
+            .skill_stats(&selected.metadata.name)
+            .ok_or_else(|| {
+                anyhow::anyhow!("missing registry stats for {}", selected.metadata.name)
+            })?;
         let lifecycle = LifecycleRecommendation::from_stats(&stats, std::time::SystemTime::now());
 
-        Ok(RouteResult { capability: capability.to_string(), skill: selected, execution, lifecycle })
+        Ok(RouteResult {
+            capability: capability.to_string(),
+            skill: selected,
+            execution,
+            lifecycle,
+        })
     }
 }

@@ -60,23 +60,23 @@ fn hash_task(task: &str) -> u64 {
 // ── Keyword → capability mapping ─────────────────────────────────────────────
 
 const KEYWORD_MAP: &[(&[&str], &str)] = &[
-    (&["yaml", "yml"],                        "yaml_parse"),
-    (&["json", "parse json"],                 "json_parse"),
-    (&["toml"],                               "toml_parse"),
-    (&["csv", "spreadsheet"],                 "csv_parse"),
-    (&["pdf"],                                "pdf_parse"),
-    (&["markdown", "md"],                     "markdown_render"),
-    (&["summarize", "summary", "tldr"],       "text_summarize"),
-    (&["translate", "translation"],           "text_translate"),
-    (&["classify", "categorize", "label"],    "text_classify"),
-    (&["extract", "entities", "ner"],         "text_extract"),
-    (&["diff", "compare text"],              "text_diff"),
-    (&["embed", "embedding", "vector"],       "text_embed"),
-    (&["search", "google", "web search"],     "web_search"),
-    (&["fetch", "http", "url", "download"],   "http_fetch"),
-    (&["describe image", "image"],            "image_describe"),
-    (&["generate code", "write code"],        "code_generate"),
-    (&["test code", "unit test"],             "code_test"),
+    (&["yaml", "yml"], "yaml_parse"),
+    (&["json", "parse json"], "json_parse"),
+    (&["toml"], "toml_parse"),
+    (&["csv", "spreadsheet"], "csv_parse"),
+    (&["pdf"], "pdf_parse"),
+    (&["markdown", "md"], "markdown_render"),
+    (&["summarize", "summary", "tldr"], "text_summarize"),
+    (&["translate", "translation"], "text_translate"),
+    (&["classify", "categorize", "label"], "text_classify"),
+    (&["extract", "entities", "ner"], "text_extract"),
+    (&["diff", "compare text"], "text_diff"),
+    (&["embed", "embedding", "vector"], "text_embed"),
+    (&["search", "google", "web search"], "web_search"),
+    (&["fetch", "http", "url", "download"], "http_fetch"),
+    (&["describe image", "image"], "image_describe"),
+    (&["generate code", "write code"], "code_generate"),
+    (&["test code", "unit test"], "code_test"),
     (&["lint", "review code", "code review"], "code_lint"),
 ];
 
@@ -155,10 +155,7 @@ impl Planner {
         let api_key = std::env::var("AI_API_KEY").unwrap_or_else(|_| "ollama".to_string());
         let model = std::env::var("AI_MODEL").unwrap_or_else(|_| "qwen2.5:7b".to_string());
 
-        let capabilities: Vec<&str> = registry
-            .definitions()
-            .map(|d| d.name.as_str())
-            .collect();
+        let capabilities: Vec<&str> = registry.definitions().map(|d| d.name.as_str()).collect();
         let cap_list = capabilities.join(", ");
 
         let prompt = format!(

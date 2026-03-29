@@ -76,9 +76,17 @@ impl AppConfig {
             let url = get(&format!("FALLBACK_AI_{}_URL", i), "");
             let key = get(&format!("FALLBACK_AI_{}_KEY", i), "");
             let model = get(&format!("FALLBACK_AI_{}_MODEL", i), "");
-            let name = get(&format!("FALLBACK_AI_{}_NAME", i), &format!("Fallback-{}", i));
+            let name = get(
+                &format!("FALLBACK_AI_{}_NAME", i),
+                &format!("Fallback-{}", i),
+            );
             if !url.is_empty() && !key.is_empty() && !model.is_empty() {
-                fallbacks.push(AiFallback { name, base_url: url, api_key: key, model });
+                fallbacks.push(AiFallback {
+                    name,
+                    base_url: url,
+                    api_key: key,
+                    model,
+                });
             }
         }
 

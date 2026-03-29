@@ -28,16 +28,18 @@ pub async fn execute(ctx: &mut PipelineContext) -> Result<()> {
 
     for entry in &ctx.similarity_scores {
         // 去重：标题相似的只保留第一个
-        let title_key = entry.source_title.chars().take(30).collect::<String>().to_lowercase();
+        let title_key = entry
+            .source_title
+            .chars()
+            .take(30)
+            .collect::<String>()
+            .to_lowercase();
         if seen_titles.contains(&title_key) {
             continue;
         }
         seen_titles.insert(title_key);
 
-        let (url, snippet) = url_map
-            .get(&entry.source_id)
-            .cloned()
-            .unwrap_or_default();
+        let (url, snippet) = url_map.get(&entry.source_id).cloned().unwrap_or_default();
 
         let tokens = tokenize(&format!("{} {}", entry.source_title, snippet));
 

@@ -30,9 +30,7 @@ pub async fn api_idea_submit(
         return Json(json!({"status": "error", "message": "描述不能超过10000字"}));
     }
     let id = uuid::Uuid::new_v4().to_string();
-    let now = chrono::Utc::now()
-        .format("%Y-%m-%dT%H:%M:%SZ")
-        .to_string();
+    let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
 
     let idea = Idea {
         id: id.clone(),
@@ -69,104 +67,111 @@ pub async fn api_idea_analyze(
         return Json(json!({"status": "error", "message": "missing idea id"}));
     }
 
-    let mut idea = match s.db.get_idea(id) {
+    let idea = match s.db.get_idea(id) {
         Ok(Some(i)) => i,
         _ => return Json(json!({"status": "error", "message": "idea not found"})),
     };
 
-    idea.status = "analyzing".into();
-    if let Err(e) = s.db.update_idea(&idea) {
-        tracing::error!("Failed to update idea {} status: {}", idea.id, e);
-    }
-
-    let config = s.config.read().unwrap().clone();
-
-    // Step 1: Web search via SerpAPI (general web)
-    let web_findings =
-        search_web_for_idea(&config.serpapi_key, &idea.title, &idea.description).await;
-    let web_summary = summarize_web_results(&web_findings);
-
-    // Step 2: Google Patents search via SerpAPI (patent-specific)
-    let online_patent_findings =
-        search_patents_online_for_idea(&config.serpapi_key, &idea.title, &idea.description).await;
-
-    // Step 3: Local patent search
-    let local_patent_findings = search_patents_local(&s.db, &idea.title);
-
-    // Merge patent results (online first, then local, deduplicated)
-    let mut all_patent_findings = online_patent_findings;
-    for local in &local_patent_findings {
-        let num = local["patent_number"].as_str().unwrap_or("");
-        let already_exists = all_patent_findings
-            .iter()
-            .any(|p| p["patent_number"].as_str().unwrap_or("") == num);
-        if !already_exists {
-            all_patent_findings.push(local.clone());
+    // Mark as analyzing
+    {
+        let mut idea_mut = idea.clone();
+        idea_mut.status = "analyzing".into();
+        if let Err(e) = s.db.update_idea(&idea_mut) {
+            tracing::error!("Failed to update idea {} status: {}", idea.id, e);
         }
     }
 
-    let patent_summary = summarize_patent_results(&all_patent_findings);
+    // Run pipeline in quick mode (synchronous await)
+    let config = s.config.read().unwrap().clone();
+    let ai_client = config.ai_client();
+    let db = s.db.clone();
+    let runner = PipelineRunner::new(
+        ai_client,
+        db.clone(),
+        config.serpapi_key.clone(),
+        config.bing_api_key.clone(),
+        config.lens_api_key.clone(),
+        true, // quick_mode
+    );
 
-    idea.web_results =
-        serde_json::to_string(&web_findings).unwrap_or_else(|_| "[]".into());
-    idea.patent_results =
-        serde_json::to_string(&all_patent_findings).unwrap_or_else(|_| "[]".into());
+    let result = runner.run(id, &idea.title, &idea.description, None).await;
 
-    // Step 4: AI analysis（失败时降级到代码计算评分）
-    let ai = config.ai_client();
-    match ai
-        .analyze_idea(
-            &idea.title,
-            &idea.description,
-            &web_summary,
-            &patent_summary,
-        )
-        .await
-    {
-        Ok(analysis) => {
-            idea.novelty_score = extract_novelty_score(&analysis);
-            idea.analysis = analysis;
-            idea.status = "done".into();
+    // Save result and build response
+    match result {
+        Ok(ctx) => {
+            if let Ok(Some(mut idea)) = db.get_idea(id) {
+                idea.novelty_score = Some(ctx.novelty_score);
+                idea.web_results = serde_json::to_string(
+                    &ctx.web_results
+                        .iter()
+                        .map(|r| {
+                            json!({
+                                "title": r.title,
+                                "snippet": r.snippet,
+                                "link": r.link,
+                                "source": r.source,
+                            })
+                        })
+                        .collect::<Vec<_>>(),
+                )
+                .unwrap_or_else(|_| "[]".into());
+                idea.patent_results = serde_json::to_string(
+                    &ctx.patent_results
+                        .iter()
+                        .map(|r| {
+                            json!({
+                                "patent_number": r.id,
+                                "title": r.title,
+                                "abstract": r.snippet,
+                                "source": r.source,
+                            })
+                        })
+                        .collect::<Vec<_>>(),
+                )
+                .unwrap_or_else(|_| "[]".into());
+                idea.analysis = format!(
+                    "## 快速验证报告\n\n\
+                     **新颖性评分：{:.0}/100**\n\n\
+                     ### 评分细项\n\
+                     - 最高相似度：{:.1}%\n\
+                     - Top5 平均相似度：{:.1}%\n\n\
+                     ### 搜索结果\n\
+                     - 网络结果：{} 条\n\
+                     - 专利结果：{} 条\n",
+                    ctx.novelty_score,
+                    ctx.score_breakdown.max_similarity * 100.0,
+                    ctx.score_breakdown.avg_top5_similarity * 100.0,
+                    ctx.web_results.len(),
+                    ctx.patent_results.len(),
+                );
+                idea.status = "done".into();
+                let _ = db.update_idea(&idea);
+
+                Json(json!({
+                    "status": "ok",
+                    "idea": {
+                        "id": idea.id,
+                        "title": idea.title,
+                        "status": idea.status,
+                        "analysis": idea.analysis,
+                        "novelty_score": idea.novelty_score,
+                        "web_results": serde_json::from_str::<serde_json::Value>(&idea.web_results).unwrap_or_default(),
+                        "patent_results": serde_json::from_str::<serde_json::Value>(&idea.patent_results).unwrap_or_default(),
+                    }
+                }))
+            } else {
+                Json(json!({"status": "error", "message": "idea not found after pipeline"}))
+            }
         }
         Err(e) => {
-            // AI 不可用时，用简单启发式估算新颖性
-            let patent_count = all_patent_findings.len();
-            let web_count = web_findings.len();
-            let fallback_score = if patent_count == 0 && web_count < 3 {
-                95.0 // 几乎无先例，高度原创
-            } else if patent_count == 0 {
-                85.0 // 无专利，有网络资料
-            } else if patent_count < 3 {
-                72.0 // 少量相关专利
-            } else {
-                55.0 // 较多相关专利，需人工评估
-            };
-            tracing::warn!("AI 分析失败，使用启发式评分 {}: {}", fallback_score, e);
-            idea.novelty_score = Some(fallback_score);
-            idea.analysis = format!(
-                "AI 分析暂不可用（{}）。\n\n基于检索结果的启发式评估：\n- 找到 {} 篇网络资料\n- 找到 {} 条相关专利\n- 估算新颖性评分：{}/100\n\n建议配置可用的 AI 服务以获得深度分析。",
-                e, web_count, patent_count, fallback_score as u32
-            );
-            idea.status = "done".into();
+            if let Ok(Some(mut idea)) = db.get_idea(id) {
+                idea.analysis = format!("快速验证失败：{}", e);
+                idea.status = "error".into();
+                let _ = db.update_idea(&idea);
+            }
+            Json(json!({"status": "error", "message": format!("快速验证失败：{}", e)}))
         }
     }
-
-    if let Err(e) = s.db.update_idea(&idea) {
-        tracing::error!("Failed to save idea {} analysis: {}", idea.id, e);
-    }
-
-    Json(json!({
-        "status": "ok",
-        "idea": {
-            "id": idea.id,
-            "title": idea.title,
-            "status": idea.status,
-            "analysis": idea.analysis,
-            "novelty_score": idea.novelty_score,
-            "web_results": serde_json::from_str::<serde_json::Value>(&idea.web_results).unwrap_or_default(),
-            "patent_results": serde_json::from_str::<serde_json::Value>(&idea.patent_results).unwrap_or_default(),
-        }
-    }))
 }
 
 pub async fn api_idea_get(
@@ -198,228 +203,6 @@ pub async fn api_idea_list(State(s): State<AppState>) -> Json<serde_json::Value>
         Ok(ideas) => Json(json!({"status": "ok", "ideas": ideas})),
         Err(e) => Json(json!({"status": "error", "message": e.to_string()})),
     }
-}
-
-// ── Idea helper functions ────────────────────────────────────────────────────
-
-/// Search general web via SerpAPI Google search.
-async fn search_web_for_idea(
-    api_key: &str,
-    title: &str,
-    description: &str,
-) -> Vec<serde_json::Value> {
-    if api_key.is_empty() || api_key == "your-serpapi-key-here" {
-        return Vec::new();
-    }
-
-    let desc_preview: String = description.chars().take(100).collect();
-    let query = format!("{} {}", title, desc_preview);
-
-    let client = reqwest::Client::new();
-    let url = format!(
-        "https://serpapi.com/search.json?engine=google&q={}&num=10&api_key={}",
-        urlencoding::encode(&query),
-        api_key
-    );
-
-    match client.get(&url).send().await {
-        Ok(resp) => {
-            if let Ok(body) = resp.json::<serde_json::Value>().await {
-                if let Some(results) = body["organic_results"].as_array() {
-                    return results
-                        .iter()
-                        .take(10)
-                        .map(|r| {
-                            json!({
-                                "title": r["title"].as_str().unwrap_or(""),
-                                "snippet": r["snippet"].as_str().unwrap_or(""),
-                                "link": r["link"].as_str().unwrap_or(""),
-                                "source": r["source"].as_str().unwrap_or(""),
-                            })
-                        })
-                        .collect();
-                }
-            }
-            Vec::new()
-        }
-        Err(e) => {
-            println!("[IDEA] Web search error: {}", e);
-            Vec::new()
-        }
-    }
-}
-
-/// Search Google Patents via SerpAPI for patent-specific results.
-async fn search_patents_online_for_idea(
-    api_key: &str,
-    title: &str,
-    description: &str,
-) -> Vec<serde_json::Value> {
-    if api_key.is_empty() || api_key == "your-serpapi-key-here" {
-        return Vec::new();
-    }
-
-    let desc_preview: String = description.chars().take(80).collect();
-    let query = format!("{} {}", title, desc_preview);
-
-    let client = reqwest::Client::new();
-    let url = format!(
-        "https://serpapi.com/search.json?engine=google_patents&q={}&num=10&api_key={}",
-        urlencoding::encode(&query),
-        api_key
-    );
-
-    println!("[IDEA] Searching Google Patents: {}", title);
-    match client.get(&url).send().await {
-        Ok(resp) => {
-            if let Ok(body) = resp.json::<serde_json::Value>().await {
-                if let Some(err) = body.get("error") {
-                    println!("[IDEA] Google Patents search error: {}", err);
-                    return Vec::new();
-                }
-                if let Some(results) = body["organic_results"].as_array() {
-                    println!("[IDEA] Found {} patent results", results.len());
-                    return results
-                        .iter()
-                        .take(10)
-                        .map(|r| {
-                            json!({
-                                "patent_number": r["publication_number"].as_str().unwrap_or(""),
-                                "title": r["title"].as_str().unwrap_or(""),
-                                "abstract": r["snippet"].as_str().unwrap_or(""),
-                                "applicant": r["assignee"].as_str().unwrap_or(""),
-                                "filing_date": r["filing_date"].as_str().unwrap_or(""),
-                                "source": "google_patents",
-                            })
-                        })
-                        .collect();
-                }
-            }
-            Vec::new()
-        }
-        Err(e) => {
-            println!("[IDEA] Google Patents search error: {}", e);
-            Vec::new()
-        }
-    }
-}
-
-/// Search local patent database.
-fn search_patents_local(
-    db: &crate::db::Database,
-    title: &str,
-) -> Vec<serde_json::Value> {
-    let keywords: Vec<&str> = title.split_whitespace().take(5).collect();
-    let query = keywords.join(" ");
-    if query.is_empty() {
-        return Vec::new();
-    }
-
-    match db.search_smart(
-        &query,
-        Some(&SearchType::Keyword),
-        None,
-        None,
-        None,
-        1,
-        10,
-    ) {
-        Ok((patents, _, _)) => patents
-            .iter()
-            .map(|p| {
-                json!({
-                    "patent_number": p.patent_number,
-                    "title": p.title,
-                    "abstract": p.abstract_text,
-                    "applicant": p.applicant,
-                    "filing_date": p.filing_date,
-                    "source": "local",
-                })
-            })
-            .collect(),
-        Err(_) => Vec::new(),
-    }
-}
-
-fn summarize_web_results(results: &[serde_json::Value]) -> String {
-    if results.is_empty() {
-        return "未找到相关网络结果（SerpAPI 未配置或无结果）".into();
-    }
-    results
-        .iter()
-        .enumerate()
-        .map(|(i, r)| {
-            format!(
-                "{}. **{}**\n   {}\n   来源：{}",
-                i + 1,
-                r["title"].as_str().unwrap_or(""),
-                r["snippet"].as_str().unwrap_or(""),
-                r["link"].as_str().unwrap_or(""),
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n")
-}
-
-fn summarize_patent_results(results: &[serde_json::Value]) -> String {
-    if results.is_empty() {
-        return "未找到相关专利".into();
-    }
-    results
-        .iter()
-        .enumerate()
-        .map(|(i, p)| {
-            format!(
-                "{}. [{}] {}\n   申请人：{} | 来源：{} | 摘要：{}",
-                i + 1,
-                p["patent_number"].as_str().unwrap_or(""),
-                p["title"].as_str().unwrap_or(""),
-                p["applicant"].as_str().unwrap_or(""),
-                p["source"].as_str().unwrap_or("unknown"),
-                p["abstract"]
-                    .as_str()
-                    .unwrap_or("")
-                    .chars()
-                    .take(200)
-                    .collect::<String>(),
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n")
-}
-
-fn extract_novelty_score(analysis: &str) -> Option<f64> {
-    // Try multiple patterns for robustness
-    for line in analysis.lines() {
-        if line.contains("新颖性评分") || line.contains("novelty") || line.contains("评分") {
-            // Extract numbers from the line, looking for XX/100 pattern
-            let chars: Vec<char> = line.chars().collect();
-            let mut i = 0;
-            while i < chars.len() {
-                if chars[i].is_ascii_digit() {
-                    let start = i;
-                    while i < chars.len() && chars[i].is_ascii_digit() {
-                        i += 1;
-                    }
-                    let num_str: String = chars[start..i].iter().collect();
-                    if let Ok(n) = num_str.parse::<f64>() {
-                        if (0.0..=100.0).contains(&n) {
-                            // Check if followed by /100 pattern
-                            if i < chars.len() && chars[i] == '/' {
-                                return Some(n);
-                            }
-                            // Or just a reasonable score in context
-                            if n >= 1.0 {
-                                return Some(n);
-                            }
-                        }
-                    }
-                }
-                i += 1;
-            }
-        }
-    }
-    None
 }
 
 // ── Idea multi-round chat ────────────────────────────────────────────
@@ -475,7 +258,7 @@ pub async fn api_idea_chat(
 
     system_context.push_str(
         "\n请基于以上背景信息与用户继续讨论。回答要专业、有深度、有建设性。\
-         帮助用户完善创意、规避风险、找到差异化方向。"
+         帮助用户完善创意、规避风险、找到差异化方向。",
     );
 
     // Build message history
@@ -497,7 +280,9 @@ pub async fn api_idea_chat(
 
     // Save user message to DB
     let user_msg_id = uuid::Uuid::new_v4().to_string();
-    if let Err(e) = s.db.add_idea_message(&user_msg_id, &idea_id, "user", user_msg) {
+    if let Err(e) =
+        s.db.add_idea_message(&user_msg_id, &idea_id, "user", user_msg)
+    {
         return Json(json!({"error": format!("保存消息失败: {}", e)}));
     }
 
@@ -512,7 +297,8 @@ pub async fn api_idea_chat(
 
     // Save AI response to DB
     let ai_msg_id = uuid::Uuid::new_v4().to_string();
-    let _ = s.db.add_idea_message(&ai_msg_id, &idea_id, "assistant", &ai_response);
+    let _ =
+        s.db.add_idea_message(&ai_msg_id, &idea_id, "assistant", &ai_response);
 
     Json(json!({
         "status": "ok",
@@ -579,7 +365,14 @@ pub async fn api_idea_pipeline(
     let serpapi_key = config.serpapi_key.clone();
     let bing_api_key = config.bing_api_key.clone();
     let lens_api_key = config.lens_api_key.clone();
-    let runner = PipelineRunner::new(ai_client, db.clone(), serpapi_key, bing_api_key, lens_api_key);
+    let runner = PipelineRunner::new(
+        ai_client,
+        db.clone(),
+        serpapi_key,
+        bing_api_key,
+        lens_api_key,
+        false,
+    );
 
     let idea_id = id.to_string();
     let title = idea.title.clone();
@@ -640,7 +433,11 @@ pub async fn api_idea_pipeline(
                                     "\n### 矛盾信号（创新机会）\n{}\n",
                                     ctx.contradictions
                                         .iter()
-                                        .map(|c| format!("- {} (信号强度 {:.0}%)", c.opportunity, c.signal_strength * 100.0))
+                                        .map(|c| format!(
+                                            "- {} (信号强度 {:.0}%)",
+                                            c.opportunity,
+                                            c.signal_strength * 100.0
+                                        ))
                                         .collect::<Vec<_>>()
                                         .join("\n")
                                 )

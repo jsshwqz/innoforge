@@ -50,8 +50,8 @@ impl Matcher {
     /// - Usage (30d) contributes 0–3 points (log-scaled, caps at 50 uses)
     fn score(skill: &SkillDefinition, registry: Option<&RegistryStore>) -> f64 {
         let source_score = match skill.source {
-            SkillSource::Local           => 4.0,
-            SkillSource::Generated       => 2.0,
+            SkillSource::Local => 4.0,
+            SkillSource::Generated => 2.0,
             SkillSource::RemoteCandidate => 1.0,
         };
 

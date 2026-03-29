@@ -58,7 +58,13 @@ impl AiSecurityReviewer {
     ) -> Verdict {
         // 1. Fast heuristic checks (no AI call needed, instant)
         if let Some(reason) = Self::heuristic_pre(skill, context) {
-            Self::log_audit("pre", "heuristic", &Verdict::Deny(reason.clone()), skill, paths);
+            Self::log_audit(
+                "pre",
+                "heuristic",
+                &Verdict::Deny(reason.clone()),
+                skill,
+                paths,
+            );
             return Verdict::Deny(reason);
         }
 
@@ -78,7 +84,13 @@ impl AiSecurityReviewer {
     ) -> Verdict {
         // 1. Fast heuristic scan of output
         if let Some(reason) = Self::heuristic_post(response) {
-            Self::log_audit("post", "heuristic", &Verdict::Deny(reason.clone()), skill, paths);
+            Self::log_audit(
+                "post",
+                "heuristic",
+                &Verdict::Deny(reason.clone()),
+                skill,
+                paths,
+            );
             return Verdict::Deny(reason);
         }
 
@@ -119,8 +131,17 @@ impl AiSecurityReviewer {
 
         // Block if context contains what looks like an API key or password being passed out
         let sensitive_patterns = [
-            "serpapi_key", "api_key", "api-key", "secret", "password",
-            "passwd", "token", "bearer", "private_key", "sk-", "-----begin",
+            "serpapi_key",
+            "api_key",
+            "api-key",
+            "secret",
+            "password",
+            "passwd",
+            "token",
+            "bearer",
+            "private_key",
+            "sk-",
+            "-----begin",
         ];
         for pat in &sensitive_patterns {
             if ctx_str.contains(pat) {
@@ -132,7 +153,8 @@ impl AiSecurityReviewer {
         }
 
         // Block shell_exec regardless of how it's invoked
-        if skill.metadata.entrypoint.contains("shell") || skill.metadata.entrypoint.contains("exec") {
+        if skill.metadata.entrypoint.contains("shell") || skill.metadata.entrypoint.contains("exec")
+        {
             return Some("shell/exec entrypoints are disabled".to_string());
         }
 
@@ -153,11 +175,21 @@ impl AiSecurityReviewer {
 
     fn is_private_network_url(url: &str) -> bool {
         let private_prefixes = [
-            "https://localhost", "https://127.", "https://0.",
-            "https://10.", "https://172.16.", "https://172.17.",
-            "https://172.18.", "https://172.19.", "https://172.2",
-            "https://172.3", "https://192.168.", "https://169.254.",
-            "https://[::1]", "https://[fc", "https://[fd",
+            "https://localhost",
+            "https://127.",
+            "https://0.",
+            "https://10.",
+            "https://172.16.",
+            "https://172.17.",
+            "https://172.18.",
+            "https://172.19.",
+            "https://172.2",
+            "https://172.3",
+            "https://192.168.",
+            "https://169.254.",
+            "https://[::1]",
+            "https://[fc",
+            "https://[fd",
         ];
         let lower = url.to_ascii_lowercase();
         private_prefixes.iter().any(|p| lower.starts_with(p))
@@ -186,8 +218,13 @@ impl AiSecurityReviewer {
         }
 
         // Detect if output contains .env file contents
-        if output.contains("SERPAPI_KEY=") || output.contains("AI_API_KEY=") || output.contains("AI_BASE_URL=") {
-            return Some("output blocked: response appears to contain .env file contents".to_string());
+        if output.contains("SERPAPI_KEY=")
+            || output.contains("AI_API_KEY=")
+            || output.contains("AI_BASE_URL=")
+        {
+            return Some(
+                "output blocked: response appears to contain .env file contents".to_string(),
+            );
         }
 
         None
@@ -342,7 +379,11 @@ impl AiSecurityReviewer {
                     Verdict::Deny(r)    => Value::String(r.clone()),
                 },
             });
-            let _ = writeln!(file, "{}", serde_json::to_string(&entry).unwrap_or_default());
+            let _ = writeln!(
+                file,
+                "{}",
+                serde_json::to_string(&entry).unwrap_or_default()
+            );
         }
     }
 }

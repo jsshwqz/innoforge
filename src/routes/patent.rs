@@ -78,9 +78,12 @@ pub async fn api_enrich_patent(
                     if description.is_empty() {
                         if let Some(desc_link) = json["description_link"].as_str() {
                             println!("[ENRICH] Fetching description from link: {}", desc_link);
-                            if let Ok(desc_resp) = client.get(desc_link)
+                            if let Ok(desc_resp) = client
+                                .get(desc_link)
                                 .header("User-Agent", "Mozilla/5.0")
-                                .send().await {
+                                .send()
+                                .await
+                            {
                                 if let Ok(desc_text) = desc_resp.text().await {
                                     // The link returns HTML, extract text content
                                     let clean = desc_text
@@ -89,7 +92,8 @@ pub async fn api_enrich_patent(
                                         .replace("<p>", "\n")
                                         .replace("</p>", "\n");
                                     // Strip remaining HTML tags
-                                    let re = regex::Regex::new(r"<[^>]+>").unwrap_or_else(|_| regex::Regex::new(r"$^").unwrap());
+                                    let re = regex::Regex::new(r"<[^>]+>")
+                                        .unwrap_or_else(|_| regex::Regex::new(r"$^").unwrap());
                                     description = re.replace_all(&clean, "").trim().to_string();
                                     println!("[ENRICH] Got description len={}", description.len());
                                 }
@@ -102,7 +106,8 @@ pub async fn api_enrich_patent(
                             a.iter()
                                 .filter_map(|v| {
                                     // Handle both string and object formats
-                                    v.as_str().map(|s| s.to_string())
+                                    v.as_str()
+                                        .map(|s| s.to_string())
                                         .or_else(|| v["code"].as_str().map(|s| s.to_string()))
                                 })
                                 .collect::<Vec<_>>()
@@ -146,9 +151,8 @@ pub async fn api_enrich_patent(
                     }
                     // Extract images
                     if let Some(images) = json["images"].as_array() {
-                        let img_urls: Vec<&str> = images.iter()
-                            .filter_map(|v| v.as_str())
-                            .collect();
+                        let img_urls: Vec<&str> =
+                            images.iter().filter_map(|v| v.as_str()).collect();
                         if !img_urls.is_empty() {
                             updated.images = serde_json::to_string(&img_urls).unwrap_or_default();
                         }
@@ -158,7 +162,11 @@ pub async fn api_enrich_patent(
                         updated.pdf_url = pdf.to_string();
                     }
                     if let Err(e) = s.db.insert_patent(&updated) {
-                        tracing::warn!("Failed to save enriched patent {}: {}", updated.patent_number, e);
+                        tracing::warn!(
+                            "Failed to save enriched patent {}: {}",
+                            updated.patent_number,
+                            e
+                        );
                     }
                     println!(
                         "[ENRICH] Updated patent {} with claims_len={} desc_len={}",
@@ -191,7 +199,11 @@ pub async fn api_enrich_patent_free(
     }
 
     let pn = &patent.patent_number;
-    let lang = if patent.country == "CN" || pn.starts_with("CN") { "zh" } else { "en" };
+    let lang = if patent.country == "CN" || pn.starts_with("CN") {
+        "zh"
+    } else {
+        "en"
+    };
 
     // Try Google Patents HTML page directly
     let url = format!("https://patents.google.com/patent/{}/{}", pn, lang);
@@ -204,7 +216,10 @@ pub async fn api_enrich_patent_free(
 
     let resp = match client
         .get(&url)
-        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        .header(
+            "User-Agent",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        )
         .send()
         .await
     {
@@ -256,7 +271,11 @@ pub async fn api_enrich_patent_free(
 
     // Save enriched data
     if let Err(e) = s.db.insert_patent(&updated) {
-        tracing::warn!("Failed to save enriched patent {}: {}", updated.patent_number, e);
+        tracing::warn!(
+            "Failed to save enriched patent {}: {}",
+            updated.patent_number,
+            e
+        );
     }
 
     println!(
@@ -278,7 +297,9 @@ fn extract_section(html: &str, section: &str) -> Option<String> {
     let section_html = &html[start..];
 
     // Find the closing </section>
-    let end = section_html.find("</section>").unwrap_or(section_html.len().min(200_000));
+    let end = section_html
+        .find("</section>")
+        .unwrap_or(section_html.len().min(200_000));
     let content = &section_html[..end];
 
     // Extract text from <div class="abstract">, <claim-text>, or <div class="description-paragraph">
@@ -299,7 +320,10 @@ fn extract_section(html: &str, section: &str) -> Option<String> {
                 let text = &content[text_start..pos].trim();
                 if !text.is_empty() && text.len() > 1 {
                     // Skip tag attributes and class names
-                    if !text.starts_with("class=") && !text.starts_with("itemprop=") && !text.contains("data-") {
+                    if !text.starts_with("class=")
+                        && !text.starts_with("itemprop=")
+                        && !text.contains("data-")
+                    {
                         parts.push(text.to_string());
                     }
                 }
@@ -335,7 +359,8 @@ fn extract_classifications(html: &str) -> Option<String> {
                 // Valid IPC/CPC codes contain letters and digits (e.g., F02K7/06)
                 let is_valid = !code.is_empty()
                     && code.len() >= 3
-                    && code != "true" && code != "false"
+                    && code != "true"
+                    && code != "false"
                     && code.chars().any(|c| c.is_ascii_alphabetic())
                     && code.chars().any(|c| c.is_ascii_digit());
                 if is_valid && !codes.contains(&code.to_string()) {
@@ -510,11 +535,18 @@ pub async fn api_patent_pdf(
 
     // Auto-enrich if missing full text
     if patent.description.len() < 50 || patent.claims.len() < 50 {
-        println!("[PDF] Auto-enriching patent {} before PDF generation", patent.patent_number);
+        println!(
+            "[PDF] Auto-enriching patent {} before PDF generation",
+            patent.patent_number
+        );
         // Try SerpAPI enrich
         let api_key = s.config.read().unwrap().serpapi_key.clone();
         if !api_key.is_empty() {
-            let lang = if patent.country == "CN" || patent.patent_number.starts_with("CN") { "zh" } else { "en" };
+            let lang = if patent.country == "CN" || patent.patent_number.starts_with("CN") {
+                "zh"
+            } else {
+                "en"
+            };
             let patent_id_param = format!("patent/{}/{}", patent.patent_number, lang);
             let url = format!(
                 "https://serpapi.com/search.json?engine=google_patents_details&patent_id={}&api_key={}",
@@ -529,23 +561,41 @@ pub async fn api_patent_pdf(
                     if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) {
                         if json.get("error").is_none() {
                             let desc = json["description"].as_str().unwrap_or("");
-                            if !desc.is_empty() { patent.description = desc.to_string(); }
+                            if !desc.is_empty() {
+                                patent.description = desc.to_string();
+                            }
                             let abs = json["abstract"].as_str().unwrap_or("");
-                            if !abs.is_empty() && patent.abstract_text.is_empty() { patent.abstract_text = abs.to_string(); }
+                            if !abs.is_empty() && patent.abstract_text.is_empty() {
+                                patent.abstract_text = abs.to_string();
+                            }
                             if let Some(claims_arr) = json["claims"].as_array() {
-                                let claims = claims_arr.iter()
+                                let claims = claims_arr
+                                    .iter()
                                     .filter_map(|v| v.as_str())
-                                    .collect::<Vec<_>>().join("\n\n");
-                                if !claims.is_empty() { patent.claims = claims; }
+                                    .collect::<Vec<_>>()
+                                    .join("\n\n");
+                                if !claims.is_empty() {
+                                    patent.claims = claims;
+                                }
                             }
                             if let Some(images) = json["images"].as_array() {
-                                let img_urls: Vec<&str> = images.iter().filter_map(|v| v.as_str()).collect();
-                                if !img_urls.is_empty() { patent.images = serde_json::to_string(&img_urls).unwrap_or_default(); }
+                                let img_urls: Vec<&str> =
+                                    images.iter().filter_map(|v| v.as_str()).collect();
+                                if !img_urls.is_empty() {
+                                    patent.images =
+                                        serde_json::to_string(&img_urls).unwrap_or_default();
+                                }
                             }
-                            if let Some(pdf) = json["pdf"].as_str() { patent.pdf_url = pdf.to_string(); }
+                            if let Some(pdf) = json["pdf"].as_str() {
+                                patent.pdf_url = pdf.to_string();
+                            }
                             // Save enriched data
                             let _ = s.db.insert_patent(&patent);
-                            println!("[PDF] Enriched: desc={} claims={}", patent.description.len(), patent.claims.len());
+                            println!(
+                                "[PDF] Enriched: desc={} claims={}",
+                                patent.description.len(),
+                                patent.claims.len()
+                            );
                         }
                     }
                 }
@@ -561,9 +611,13 @@ pub async fn api_patent_pdf(
     };
 
     let desc_html = if patent.description.is_empty() {
-        "<p style='color:#999;'>说明书内容未加载。请先在详情页点击「加载全文」后再导出。</p>".to_string()
+        "<p style='color:#999;'>说明书内容未加载。请先在详情页点击「加载全文」后再导出。</p>"
+            .to_string()
     } else {
-        format!("<pre style='white-space:pre-wrap;font-family:SimSun,serif;line-height:1.8;'>{}</pre>", esc(&patent.description))
+        format!(
+            "<pre style='white-space:pre-wrap;font-family:SimSun,serif;line-height:1.8;'>{}</pre>",
+            esc(&patent.description)
+        )
     };
 
     // Build images HTML
@@ -579,7 +633,9 @@ pub async fn api_patent_pdf(
                     "<div style='text-align:center;margin:20px 0;page-break-inside:avoid;'>\
                      <img src='{}' alt='图 {}' style='max-width:100%;max-height:700px;'>\
                      <p style='color:#666;font-size:12px;'>图 {}</p></div>\n",
-                    proxy_url, i + 1, i + 1
+                    proxy_url,
+                    i + 1,
+                    i + 1
                 ));
             }
             html
@@ -589,10 +645,14 @@ pub async fn api_patent_pdf(
     let claims_html = if patent.claims.is_empty() {
         "<p style='color:#999;'>权利要求内容未加载。</p>".to_string()
     } else {
-        format!("<pre style='white-space:pre-wrap;font-family:SimSun,serif;line-height:1.8;'>{}</pre>", esc(&patent.claims))
+        format!(
+            "<pre style='white-space:pre-wrap;font-family:SimSun,serif;line-height:1.8;'>{}</pre>",
+            esc(&patent.claims)
+        )
     };
 
-    let html = format!(r#"<!DOCTYPE html>
+    let html = format!(
+        r#"<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">

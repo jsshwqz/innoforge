@@ -108,6 +108,20 @@
                     <label data-i18n="idea.descLabel"></label>
                     <textarea id="idea-desc" data-i18n-placeholder="idea.descPlaceholder"></textarea>
                 </div>
+                <div class="form-group" style="display:flex;align-items:center;gap:12px;">
+                    <label style="margin:0;white-space:nowrap;">验证模式:</label>
+                    <div style="display:flex;border:1px solid #30363d;border-radius:6px;overflow:hidden;">
+                        <button type="button" id="mode-quick" onclick="setAnalysisMode('quick')"
+                            style="padding:6px 14px;font-size:0.85em;border:none;cursor:pointer;background:#21262d;color:#8b949e;">
+                            快速验证
+                        </button>
+                        <button type="button" id="mode-deep" onclick="setAnalysisMode('deep')"
+                            style="padding:6px 14px;font-size:0.85em;border:none;cursor:pointer;background:#1f6feb;color:#fff;">
+                            深度验证
+                        </button>
+                    </div>
+                    <span id="mode-hint" style="font-size:0.8em;color:#8b949e;">12 步流水线，含 AI 深度分析</span>
+                </div>
                 <div class="btn-row">
                     <button class="btn-primary" id="submit-btn" onclick="submitIdea()" data-i18n="idea.submit"></button>
                     <button onclick="clearForm()" style="background:#21262d;" data-i18n="idea.clear"></button>
@@ -141,6 +155,27 @@
     <script>
     let currentIdeaId = null;
     let isAnalyzing = false;
+    let analysisMode = 'deep'; // 'quick' or 'deep'
+
+    function setAnalysisMode(mode) {
+        analysisMode = mode;
+        var quickBtn = document.getElementById('mode-quick');
+        var deepBtn = document.getElementById('mode-deep');
+        var hint = document.getElementById('mode-hint');
+        if (mode === 'quick') {
+            quickBtn.style.background = '#1f6feb';
+            quickBtn.style.color = '#fff';
+            deepBtn.style.background = '#21262d';
+            deepBtn.style.color = '#8b949e';
+            hint.textContent = i18nLang === 'en' ? '6 steps, fast sync analysis' : '6 步精简流程，快速同步返回';
+        } else {
+            deepBtn.style.background = '#1f6feb';
+            deepBtn.style.color = '#fff';
+            quickBtn.style.background = '#21262d';
+            quickBtn.style.color = '#8b949e';
+            hint.textContent = i18nLang === 'en' ? '12-step pipeline with AI deep analysis' : '12 步流水线，含 AI 深度分析';
+        }
+    }
 
     function esc(s) { return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
@@ -228,75 +263,97 @@
 
             currentIdeaId = submitData.id;
 
-            // Show pipeline progress UI
-            document.getElementById('status-area').innerHTML = buildPipelineUI();
+            if (analysisMode === 'quick') {
+                // Quick mode: synchronous call to /api/idea/analyze
+                showStatus('analyzing', '<span class="spinner"></span>' + (i18nLang === 'en' ? 'Quick validation in progress...' : '快速验证中...'));
 
-            // Step 2: Connect SSE FIRST, then start pipeline (avoids race condition)
-            await new Promise(function(resolve, reject) {
-                var eventSource = new EventSource('/api/idea/' + submitData.id + '/progress');
-                var pipelineStarted = false;
-                var timeout = setTimeout(function() {
-                    eventSource.close();
-                    resolve();
-                }, 300000); // 5 min max
+                const analyzeResp = await fetch('/api/idea/analyze', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: submitData.id }),
+                });
+                const analyzeData = await analyzeResp.json();
 
-                eventSource.onopen = function() {
-                    // SSE connected — now safe to start pipeline
-                    if (!pipelineStarted) {
-                        pipelineStarted = true;
-                        fetch('/api/idea/pipeline', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ id: submitData.id }),
-                        });
-                    }
-                };
+                if (analyzeData.status === 'ok') {
+                    showStatus('done', i18nLang === 'en' ? 'Quick validation complete' : '快速验证完成');
+                    displayResults(analyzeData.idea);
+                    loadHistory();
+                    showDiscussionPanel();
+                } else {
+                    showStatus('error', analyzeData.message || t('idea.analyzeFail'));
+                }
+            } else {
+                // Deep mode: 12-step pipeline with SSE progress
+                // Show pipeline progress UI
+                document.getElementById('status-area').innerHTML = buildPipelineUI();
 
-                eventSource.onmessage = function(e) {
-                    try {
-                        var progress = JSON.parse(e.data);
-                        updatePipelineStep(progress.step_index, progress.status);
-                    } catch(err) {}
-                };
+                // Connect SSE FIRST, then start pipeline (avoids race condition)
+                await new Promise(function(resolve, reject) {
+                    var eventSource = new EventSource('/api/idea/' + submitData.id + '/progress');
+                    var pipelineStarted = false;
+                    var timeout = setTimeout(function() {
+                        eventSource.close();
+                        resolve();
+                    }, 300000); // 5 min max
 
-                eventSource.addEventListener('done', function() {
-                    clearTimeout(timeout);
-                    eventSource.close();
-                    resolve();
+                    eventSource.onopen = function() {
+                        // SSE connected — now safe to start pipeline
+                        if (!pipelineStarted) {
+                            pipelineStarted = true;
+                            fetch('/api/idea/pipeline', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ id: submitData.id }),
+                            });
+                        }
+                    };
+
+                    eventSource.onmessage = function(e) {
+                        try {
+                            var progress = JSON.parse(e.data);
+                            updatePipelineStep(progress.step_index, progress.status);
+                        } catch(err) {}
+                    };
+
+                    eventSource.addEventListener('done', function() {
+                        clearTimeout(timeout);
+                        eventSource.close();
+                        resolve();
+                    });
+
+                    eventSource.onerror = function() {
+                        clearTimeout(timeout);
+                        eventSource.close();
+                        // If pipeline wasn't started yet, start it without SSE
+                        if (!pipelineStarted) {
+                            pipelineStarted = true;
+                            fetch('/api/idea/pipeline', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ id: submitData.id }),
+                            });
+                        }
+                        resolve();
+                    };
                 });
 
-                eventSource.onerror = function() {
-                    clearTimeout(timeout);
-                    eventSource.close();
-                    // If pipeline wasn't started yet, start it without SSE
-                    if (!pipelineStarted) {
-                        pipelineStarted = true;
-                        fetch('/api/idea/pipeline', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ id: submitData.id }),
-                        });
-                    }
-                    resolve();
-                };
-            });
+                // Load final report
+                const reportResp = await fetch('/api/idea/' + submitData.id + '/report');
+                const reportData = await reportResp.json();
 
-            // Step 4: Load final report
-            const reportResp = await fetch('/api/idea/' + submitData.id + '/report');
-            const reportData = await reportResp.json();
+                if (reportData.status === 'ok') {
+                    // Update pipeline bar to 100%
+                    var fill = document.getElementById('pipeline-bar-fill');
+                    var pctEl = document.getElementById('pipeline-percent');
+                    if (fill) { fill.style.width = '100%'; fill.style.background = '#238636'; }
+                    if (pctEl) pctEl.textContent = '100% ✓';
 
-            if (reportData.status === 'ok') {
-                // Update pipeline bar to 100%
-                var fill = document.getElementById('pipeline-bar-fill');
-                var pctEl = document.getElementById('pipeline-percent');
-                if (fill) { fill.style.width = '100%'; fill.style.background = '#238636'; }
-                if (pctEl) pctEl.textContent = '100% ✓';
-
-                displayResults(reportData.report);
-                loadHistory();
-                showDiscussionPanel();
-            } else {
-                showStatus('error', reportData.message || t('idea.analyzeFail'));
+                    displayResults(reportData.report);
+                    loadHistory();
+                    showDiscussionPanel();
+                } else {
+                    showStatus('error', reportData.message || t('idea.analyzeFail'));
+                }
             }
         } catch (e) {
             showStatus('error', t('idea.analyzeFail') + '：' + e.message);

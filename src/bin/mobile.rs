@@ -23,8 +23,7 @@ fn main() {
     // 2. 后台线程启动 Axum 服务器
     let db_path_clone = db_path.clone();
     thread::spawn(move || {
-        let rt = tokio::runtime::Runtime::new()
-            .expect("无法创建 tokio 运行时");
+        let rt = tokio::runtime::Runtime::new().expect("无法创建 tokio 运行时");
         rt.block_on(async {
             println!("[Patent Hub Mobile] 正在启动服务器...");
             if let Err(e) = patent_hub::start_server(&db_path_clone).await {
@@ -63,10 +62,10 @@ fn main() {
 
 #[cfg(target_os = "android")]
 fn start_android_webview() {
-    use wry::WebViewBuilder;
+    use tao::event::{Event, WindowEvent};
     use tao::event_loop::{ControlFlow, EventLoop};
     use tao::window::WindowBuilder;
-    use tao::event::{Event, WindowEvent};
+    use wry::WebViewBuilder;
 
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new()

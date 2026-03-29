@@ -148,7 +148,15 @@ fn fts_search_finds_matching_patent() {
         .unwrap();
 
     let (results, total, _) = db
-        .search_smart("neural", Some(&SearchType::Keyword), None, None, None, 1, 10)
+        .search_smart(
+            "neural",
+            Some(&SearchType::Keyword),
+            None,
+            None,
+            None,
+            1,
+            10,
+        )
         .unwrap();
     assert_eq!(total, 1);
     assert_eq!(results.len(), 1);
@@ -306,7 +314,8 @@ fn ai_extracts_zhipu_format() {
 #[test]
 fn empty_query_fts_returns_empty() {
     let db = Database::init(":memory:").unwrap();
-    db.insert_patent(&sample_patent("e1", "Some patent")).unwrap();
+    db.insert_patent(&sample_patent("e1", "Some patent"))
+        .unwrap();
     let (results, total) = db.search_fts("", 1, 10).unwrap();
     assert_eq!(total, 0);
     assert!(results.is_empty());
@@ -315,7 +324,8 @@ fn empty_query_fts_returns_empty() {
 #[test]
 fn search_special_characters_does_not_panic() {
     let db = Database::init(":memory:").unwrap();
-    db.insert_patent(&sample_patent("sc1", "Test patent")).unwrap();
+    db.insert_patent(&sample_patent("sc1", "Test patent"))
+        .unwrap();
     // These should not panic or error
     let _ = db.search_smart("\"test\"", None, None, None, None, 1, 10);
     let _ = db.search_smart("test OR drop", None, None, None, None, 1, 10);
@@ -355,7 +365,8 @@ fn reinit_same_db_is_idempotent() {
     let path_str = path.to_str().unwrap();
 
     let db1 = Database::init(path_str).unwrap();
-    db1.insert_patent(&sample_patent("m1", "Migration test")).unwrap();
+    db1.insert_patent(&sample_patent("m1", "Migration test"))
+        .unwrap();
     drop(db1);
 
     // Re-open — should not fail or lose data

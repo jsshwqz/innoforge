@@ -74,16 +74,22 @@ pub async fn api_save_ai(
         return Json(json!({"status": "error", "message": "URL must use HTTP or HTTPS protocol"}));
     }
     if api_key.len() < 8 || api_key.len() > 200 {
-        return Json(json!({"status": "error", "message": "API key length must be between 8 and 200 characters"}));
+        return Json(
+            json!({"status": "error", "message": "API key length must be between 8 and 200 characters"}),
+        );
     }
     if model.len() < 2 || model.len() > 100 {
-        return Json(json!({"status": "error", "message": "Model name must be between 2 and 100 characters"}));
+        return Json(
+            json!({"status": "error", "message": "Model name must be between 2 and 100 characters"}),
+        );
     }
     if !model
         .chars()
         .all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.' || c == ':' || c == '/')
     {
-        return Json(json!({"status": "error", "message": "Model name contains invalid characters"}));
+        return Json(
+            json!({"status": "error", "message": "Model name contains invalid characters"}),
+        );
     }
 
     // 先更新内存配置（立即生效）
@@ -95,7 +101,11 @@ pub async fn api_save_ai(
     }
 
     // SQLite 持久化（主存储，Android 友好）
-    for (k, v) in [("AI_BASE_URL", base_url), ("AI_API_KEY", api_key), ("AI_MODEL", model)] {
+    for (k, v) in [
+        ("AI_BASE_URL", base_url),
+        ("AI_API_KEY", api_key),
+        ("AI_MODEL", model),
+    ] {
         if let Err(e) = s.db.set_setting(k, v) {
             tracing::warn!("保存设置 {} 到数据库失败: {}", k, e);
         }
@@ -108,6 +118,7 @@ pub async fn api_save_ai(
     Json(json!({"status": "ok"}))
 }
 
+#[allow(dead_code)] // 在 main.rs bin target 中使用
 pub async fn api_save_bing(
     State(s): State<AppState>,
     Json(req): Json<serde_json::Value>,
@@ -129,6 +140,7 @@ pub async fn api_save_bing(
     Json(json!({"status": "ok"}))
 }
 
+#[allow(dead_code)] // 在 main.rs bin target 中使用
 pub async fn api_save_lens(
     State(s): State<AppState>,
     Json(req): Json<serde_json::Value>,
@@ -184,7 +196,12 @@ pub async fn api_save_fallbacks(
         }
 
         // SQLite 持久化（主存储）
-        for (suffix, val) in [("NAME", name.as_str()), ("URL", url.as_str()), ("KEY", key.as_str()), ("MODEL", model.as_str())] {
+        for (suffix, val) in [
+            ("NAME", name.as_str()),
+            ("URL", url.as_str()),
+            ("KEY", key.as_str()),
+            ("MODEL", model.as_str()),
+        ] {
             let db_key = format!("FALLBACK_AI_{}_{}", idx, suffix);
             if let Err(e) = s.db.set_setting(&db_key, val) {
                 tracing::warn!("保存设置 {} 到数据库失败: {}", db_key, e);
@@ -196,7 +213,12 @@ pub async fn api_save_fallbacks(
         let _ = update_env_file(&format!("FALLBACK_AI_{}_KEY", idx), &key);
         let _ = update_env_file(&format!("FALLBACK_AI_{}_MODEL", idx), &model);
 
-        new_fallbacks.push(super::AiFallback { name, base_url: url, api_key: key, model });
+        new_fallbacks.push(super::AiFallback {
+            name,
+            base_url: url,
+            api_key: key,
+            model,
+        });
     }
 
     // Clear remaining slots

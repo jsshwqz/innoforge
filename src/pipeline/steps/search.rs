@@ -14,7 +14,11 @@ use std::sync::Arc;
 
 /// 执行 Step 3: 网络搜索
 /// 优先使用 SerpAPI，无 SerpAPI 时降级到 Bing Web Search API（国内可用）
-pub async fn search_web(ctx: &mut PipelineContext, serpapi_key: &str, bing_api_key: &str) -> Result<()> {
+pub async fn search_web(
+    ctx: &mut PipelineContext,
+    serpapi_key: &str,
+    bing_api_key: &str,
+) -> Result<()> {
     let has_serp = !serpapi_key.is_empty() && serpapi_key != "your-serpapi-key-here";
     let has_bing = !bing_api_key.is_empty();
 
@@ -33,7 +37,10 @@ pub async fn search_web(ctx: &mut PipelineContext, serpapi_key: &str, bing_api_k
             let resp = client
                 .get("https://serpapi.com/search.json")
                 .query(&[
-                    ("q", format!("{} site:patents.google.com OR technology OR patent", query)),
+                    (
+                        "q",
+                        format!("{} site:patents.google.com OR technology OR patent", query),
+                    ),
                     ("api_key", serpapi_key.to_string()),
                     ("num", "10".to_string()),
                 ])
@@ -45,7 +52,9 @@ pub async fn search_web(ctx: &mut PipelineContext, serpapi_key: &str, bing_api_k
                     if let Some(results) = json["organic_results"].as_array() {
                         for r in results {
                             let link = r["link"].as_str().unwrap_or("").to_string();
-                            if link.is_empty() || seen_urls.contains(&link) { continue; }
+                            if link.is_empty() || seen_urls.contains(&link) {
+                                continue;
+                            }
                             seen_urls.insert(link.clone());
                             all_results.push(SearchResult {
                                 id: format!("web_{}", all_results.len()),
@@ -66,11 +75,7 @@ pub async fn search_web(ctx: &mut PipelineContext, serpapi_key: &str, bing_api_k
             let resp = client
                 .get("https://api.bing.microsoft.com/v7.0/search")
                 .header("Ocp-Apim-Subscription-Key", bing_api_key)
-                .query(&[
-                    ("q", q.as_str()),
-                    ("mkt", "zh-CN"),
-                    ("count", "10"),
-                ])
+                .query(&[("q", q.as_str()), ("mkt", "zh-CN"), ("count", "10")])
                 .send()
                 .await;
 
@@ -79,7 +84,9 @@ pub async fn search_web(ctx: &mut PipelineContext, serpapi_key: &str, bing_api_k
                     if let Some(results) = json["webPages"]["value"].as_array() {
                         for r in results {
                             let link = r["url"].as_str().unwrap_or("").to_string();
-                            if link.is_empty() || seen_urls.contains(&link) { continue; }
+                            if link.is_empty() || seen_urls.contains(&link) {
+                                continue;
+                            }
                             seen_urls.insert(link.clone());
                             all_results.push(SearchResult {
                                 id: format!("web_{}", all_results.len()),
@@ -101,7 +108,9 @@ pub async fn search_web(ctx: &mut PipelineContext, serpapi_key: &str, bing_api_k
             if let Ok(results) = search_sogou_pipeline(&format!("{} 专利", query)).await {
                 for r in results {
                     let link = r.url.clone();
-                    if link.is_empty() || seen_urls.contains(&link) { continue; }
+                    if link.is_empty() || seen_urls.contains(&link) {
+                        continue;
+                    }
                     seen_urls.insert(link.clone());
                     all_results.push(SearchResult {
                         id: format!("web_{}", all_results.len()),
@@ -169,7 +178,8 @@ pub async fn search_patents(
                     if let Some(results) = json["organic_results"].as_array() {
                         for r in results {
                             let title = r["title"].as_str().unwrap_or("").to_string();
-                            let title_key = title.chars().take(20).collect::<String>().to_lowercase();
+                            let title_key =
+                                title.chars().take(20).collect::<String>().to_lowercase();
                             if seen_titles.contains(&title_key) {
                                 continue;
                             }
@@ -198,7 +208,10 @@ pub async fn search_patents(
                 if let Some(data) = json["data"].as_array() {
                     for item in data {
                         let pub_ref = &item["biblio"]["publication_reference"];
-                        let jurisdiction = pub_ref["jurisdiction"].as_str().unwrap_or("").to_uppercase();
+                        let jurisdiction = pub_ref["jurisdiction"]
+                            .as_str()
+                            .unwrap_or("")
+                            .to_uppercase();
                         let doc_number = pub_ref["doc_number"].as_str().unwrap_or("");
                         let kind = pub_ref["kind"].as_str().unwrap_or("");
                         let _patent_number = format!("{}{}{}", jurisdiction, doc_number, kind);
@@ -206,7 +219,8 @@ pub async fn search_patents(
                         let title = item["title"]
                             .as_array()
                             .and_then(|arr| {
-                                arr.iter().find(|t| t["lang"].as_str() == Some("zh"))
+                                arr.iter()
+                                    .find(|t| t["lang"].as_str() == Some("zh"))
                                     .or_else(|| arr.first())
                             })
                             .and_then(|t| t["text"].as_str())
@@ -216,7 +230,8 @@ pub async fn search_patents(
                         let snippet = item["abstract"]
                             .as_array()
                             .and_then(|arr| {
-                                arr.iter().find(|t| t["lang"].as_str() == Some("zh"))
+                                arr.iter()
+                                    .find(|t| t["lang"].as_str() == Some("zh"))
                                     .or_else(|| arr.first())
                             })
                             .and_then(|t| t["text"].as_str())
@@ -226,14 +241,19 @@ pub async fn search_patents(
                             .collect::<String>();
 
                         let title_key = title.chars().take(20).collect::<String>().to_lowercase();
-                        if seen_titles.contains(&title_key) || title.is_empty() { continue; }
+                        if seen_titles.contains(&title_key) || title.is_empty() {
+                            continue;
+                        }
                         seen_titles.insert(title_key);
 
                         all_results.push(SearchResult {
                             id: format!("patent_lens_{}", all_results.len()),
                             title,
                             snippet,
-                            link: format!("https://www.lens.org/lens/patent/{}", item["lens_id"].as_str().unwrap_or("")),
+                            link: format!(
+                                "https://www.lens.org/lens/patent/{}",
+                                item["lens_id"].as_str().unwrap_or("")
+                            ),
                             source: "lens_org".into(),
                         });
                     }
@@ -278,7 +298,9 @@ async fn search_lens_raw(query: &str, api_key: &str) -> Result<serde_json::Value
     if !resp.status().is_success() {
         return Err(format!("Lens HTTP {}", resp.status()));
     }
-    resp.json::<serde_json::Value>().await.map_err(|e| e.to_string())
+    resp.json::<serde_json::Value>()
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// 搜狗搜索结果（pipeline 用）
@@ -318,17 +340,20 @@ async fn search_sogou_pipeline(query: &str) -> Result<Vec<SogouResultItem>, Stri
         return Err("搜狗触发验证".to_string());
     }
 
-    let title_re = regex::Regex::new(
-        r#"<h3[^>]*>.*?<a[^>]+href="([^"]+)"[^>]*>(.*?)</a>.*?</h3>"#
-    ).map_err(|e| e.to_string())?;
+    let title_re = regex::Regex::new(r#"<h3[^>]*>.*?<a[^>]+href="([^"]+)"[^>]*>(.*?)</a>.*?</h3>"#)
+        .map_err(|e| e.to_string())?;
     let snippet_re = regex::Regex::new(r#"<p[^>]*>(.*?)</p>"#).map_err(|e| e.to_string())?;
 
     let mut results = Vec::new();
     for cap in title_re.captures_iter(&html) {
-        if results.len() >= 10 { break; }
+        if results.len() >= 10 {
+            break;
+        }
         let raw_url = cap[1].to_string();
         let title = strip_html(&cap[2]).trim().to_string();
-        if title.is_empty() { continue; }
+        if title.is_empty() {
+            continue;
+        }
 
         let full_url = if raw_url.starts_with("/link?") {
             format!("https://www.sogou.com{}", raw_url)
@@ -339,12 +364,20 @@ async fn search_sogou_pipeline(query: &str) -> Result<Vec<SogouResultItem>, Stri
         let match_end = cap.get(0).unwrap().end();
         let rest = &html[match_end..std::cmp::min(match_end + 2000, html.len())];
         let snippet = if let Some(snip_cap) = snippet_re.captures(rest) {
-            strip_html(&snip_cap[1]).trim().chars().take(200).collect::<String>()
+            strip_html(&snip_cap[1])
+                .trim()
+                .chars()
+                .take(200)
+                .collect::<String>()
         } else {
             String::new()
         };
 
-        results.push(SogouResultItem { title, snippet, url: full_url });
+        results.push(SogouResultItem {
+            title,
+            snippet,
+            url: full_url,
+        });
     }
 
     Ok(results)

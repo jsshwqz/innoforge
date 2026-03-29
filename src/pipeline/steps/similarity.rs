@@ -14,7 +14,11 @@ fn jaccard(a: &HashSet<String>, b: &HashSet<String>) -> f64 {
     }
     let intersection = a.intersection(b).count() as f64;
     let union = a.union(b).count() as f64;
-    if union == 0.0 { 0.0 } else { intersection / union }
+    if union == 0.0 {
+        0.0
+    } else {
+        intersection / union
+    }
 }
 
 /// 计算 IDF（逆文档频率）
@@ -39,11 +43,7 @@ fn compute_idf(documents: &[Vec<String>]) -> HashMap<String, f64> {
 }
 
 /// 计算 TF-IDF 余弦相似度
-fn tfidf_cosine(
-    query_tokens: &[String],
-    doc_tokens: &[String],
-    idf: &HashMap<String, f64>,
-) -> f64 {
+fn tfidf_cosine(query_tokens: &[String], doc_tokens: &[String], idf: &HashMap<String, f64>) -> f64 {
     // 计算 TF
     let query_tf = term_frequency(query_tokens);
     let doc_tf = term_frequency(doc_tokens);
@@ -64,7 +64,11 @@ fn tfidf_cosine(
     }
 
     let denom = query_norm.sqrt() * doc_norm.sqrt();
-    if denom == 0.0 { 0.0 } else { dot_product / denom }
+    if denom == 0.0 {
+        0.0
+    } else {
+        dot_product / denom
+    }
 }
 
 /// 计算词频（归一化）
@@ -134,7 +138,11 @@ pub async fn execute(ctx: &mut PipelineContext) -> Result<()> {
     }
 
     // 按 combined_score 降序排序
-    scores.sort_by(|a, b| b.combined_score.partial_cmp(&a.combined_score).unwrap_or(std::cmp::Ordering::Equal));
+    scores.sort_by(|a, b| {
+        b.combined_score
+            .partial_cmp(&a.combined_score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     ctx.similarity_scores = scores;
     Ok(())
