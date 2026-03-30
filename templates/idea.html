@@ -457,15 +457,49 @@
                     idea.novelty_score >= 70 ? 'score-high' : idea.novelty_score >= 40 ? 'score-mid' : 'score-low';
                 const scoreText = idea.novelty_score != null ? idea.novelty_score : '-';
                 const active = idea.id === currentIdeaId ? ' active' : '';
-                return '<div class="history-item' + active + '" onclick="loadIdea(\'' + esc(idea.id) + '\')">' +
+                var dateStr = (idea.created_at || '').substring(0, 10);
+                var timeStr = (idea.created_at || '').substring(11, 16);
+                var snippet = (idea.description || '').substring(0, 40);
+                if ((idea.description || '').length > 40) snippet += '…';
+                var chatBadge = idea.message_count > 0 ? ' 💬' + idea.message_count : '';
+                return '<div class="history-item' + active + '" style="position:relative;">' +
+                    '<div onclick="loadIdea(\'' + esc(idea.id) + '\')" style="cursor:pointer;">' +
                     '<div class="history-title">' + esc(idea.title) + '</div>' +
+                    (snippet ? '<div style="font-size:0.78em;color:#8b949e;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(snippet) + '</div>' : '') +
                     '<div class="history-meta">' +
-                    '<span>' + esc((idea.created_at || '').substring(0, 10)) + '</span>' +
-                    '<span class="score-badge ' + scoreClass + '">' + scoreText + '</span>' +
-                    '</div></div>';
+                    '<span>' + esc(dateStr) + ' ' + esc(timeStr) + '</span>' +
+                    '<span>' + chatBadge + ' <span class="score-badge ' + scoreClass + '">' + scoreText + '</span></span>' +
+                    '</div></div>' +
+                    '<button onclick="event.stopPropagation();deleteIdea(\'' + esc(idea.id) + '\',\'' + esc(idea.title).replace(/'/g,"") + '\')" ' +
+                    'style="position:absolute;top:4px;right:4px;background:none;border:none;color:#484f58;cursor:pointer;font-size:0.8em;padding:2px 6px;" ' +
+                    'title="删除">✕</button>' +
+                    '</div>';
             }).join('');
         } catch (e) {
             console.error('Failed to load history:', e);
+        }
+    }
+
+    async function deleteIdea(id, title) {
+        if (!confirm('确定删除「' + title + '」及其所有讨论记录？')) return;
+        try {
+            const resp = await fetch('/api/idea/' + encodeURIComponent(id) + '/delete', { method: 'POST' });
+            const data = await resp.json();
+            if (data.status === 'ok') {
+                if (currentIdeaId === id) {
+                    currentIdeaId = null;
+                    document.getElementById('idea-title').value = '';
+                    document.getElementById('idea-desc').value = '';
+                    document.getElementById('score-area').innerHTML = '';
+                    document.getElementById('analysis-area').innerHTML = '';
+                    document.getElementById('chat-messages').innerHTML = '';
+                }
+                loadHistory();
+            } else {
+                alert(data.message || '删除失败');
+            }
+        } catch(e) {
+            alert('请求失败: ' + e.message);
         }
     }
 
@@ -497,6 +531,14 @@
                 var item = event.target.closest('.history-item');
                 if (item) item.classList.add('active');
             }
+
+            // Auto-scroll to discussion panel so user can see conversation history
+            setTimeout(function() {
+                var panel = document.getElementById('discussion-panel');
+                if (panel && panel.style.display !== 'none') {
+                    panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            }, 300);
         } catch (e) {
             console.error('Failed to load idea:', e);
         }

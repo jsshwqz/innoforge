@@ -809,10 +809,27 @@ impl Database {
         Ok(())
     }
 
+    pub fn delete_idea(&self, id: &str) -> Result<()> {
+        let c = self.conn();
+        c.execute("DELETE FROM ideas WHERE id=?1", params![id])?;
+        Ok(())
+    }
+
+    pub fn delete_idea_messages(&self, idea_id: &str) -> Result<()> {
+        let c = self.conn();
+        c.execute(
+            "DELETE FROM idea_messages WHERE idea_id=?1",
+            params![idea_id],
+        )?;
+        Ok(())
+    }
+
     pub fn list_ideas(&self) -> Result<Vec<IdeaSummary>> {
         let c = self.conn();
         let mut stmt = c.prepare(
-            "SELECT id,title,status,novelty_score,created_at FROM ideas ORDER BY created_at DESC LIMIT 50",
+            "SELECT i.id, i.title, i.status, i.novelty_score, i.created_at, COALESCE(i.description,''), \
+             (SELECT COUNT(*) FROM idea_messages m WHERE m.idea_id = i.id) \
+             FROM ideas i ORDER BY i.created_at DESC LIMIT 50",
         )?;
         let rows = stmt
             .query_map([], |r| {
@@ -822,6 +839,8 @@ impl Database {
                     status: r.get(2)?,
                     novelty_score: r.get(3)?,
                     created_at: r.get(4)?,
+                    description: r.get(5)?,
+                    message_count: r.get(6)?,
                 })
             })?
             .filter_map(|r| r.ok())

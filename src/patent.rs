@@ -190,4 +190,8 @@ pub struct IdeaSummary {
     pub status: String,
     pub novelty_score: Option<f64>,
     pub created_at: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub message_count: i32,
 }

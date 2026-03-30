@@ -120,6 +120,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/idea/pipeline", post(routes::api_idea_pipeline))
         .route("/api/idea/list", get(routes::api_idea_list))
         .route("/api/idea/:id", get(routes::api_idea_get))
+        .route("/api/idea/:id/delete", post(routes::api_idea_delete))
         .route("/api/idea/:id/progress", get(routes::api_idea_progress))
         .route("/api/idea/:id/report", get(routes::api_idea_report))
         .route("/api/idea/:id/chat", post(routes::api_idea_chat))

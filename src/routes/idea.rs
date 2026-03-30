@@ -205,6 +205,21 @@ pub async fn api_idea_list(State(s): State<AppState>) -> Json<serde_json::Value>
     }
 }
 
+// ── Idea delete ─────────────────────────────────────────────────────
+
+/// Delete an idea and all its messages
+pub async fn api_idea_delete(
+    State(s): State<AppState>,
+    Path(idea_id): Path<String>,
+) -> Json<serde_json::Value> {
+    // Delete messages first, then idea
+    let _ = s.db.delete_idea_messages(&idea_id);
+    match s.db.delete_idea(&idea_id) {
+        Ok(_) => Json(json!({"status": "ok"})),
+        Err(e) => Json(json!({"status": "error", "message": e.to_string()})),
+    }
+}
+
 // ── Idea multi-round chat ────────────────────────────────────────────
 
 /// Send a message in an idea discussion (multi-round with context)
@@ -230,9 +245,42 @@ pub async fn api_idea_chat(
     // Get previous messages for context
     let history = s.db.get_idea_messages(&idea_id).unwrap_or_default();
 
-    // Build context-aware prompt with full conversation history
+    // === 智能上下文管理 ===
+    // 策略：超过 8 轮对话时，自动将旧消息压缩为总结，保留最近 6 轮 + 总结
+    // 这样既省 token 又不丢失关键信息
+    let auto_summary_threshold = 8; // 超过这个数触发自动总结
+    let keep_recent = 6; // 保留最近 N 条消息
+
+    // 如果消息量超过阈值且没有现有总结，自动触发压缩
+    let mut summary = s.db.get_idea_summary(&idea_id).unwrap_or_default();
+    if history.len() > auto_summary_threshold && summary.is_empty() {
+        // 取旧消息（除最近 keep_recent 条）进行压缩
+        let old_count = history.len() - keep_recent;
+        let old_messages: Vec<_> = history[..old_count].to_vec();
+        if !old_messages.is_empty() {
+            let mut conv_text = String::new();
+            for (_id, role, content, _ts) in &old_messages {
+                let label = if role == "user" { "用户" } else { "AI" };
+                conv_text.push_str(&format!("{}：{}\n\n", label, content));
+            }
+            let compress_prompt = format!(
+                "请将以下关于「{}」的研发讨论对话压缩为一段简洁的摘要，\
+                 保留所有关键技术结论、决策和未解决的问题：\n\n{}",
+                idea.title, conv_text
+            );
+            let ai_tmp = s.config.read().unwrap().ai_client();
+            if let Ok(compressed) = ai_tmp.chat(&compress_prompt, None).await {
+                let _ = s.db.update_idea_summary(&idea_id, &compressed);
+                summary = compressed;
+                tracing::info!("[CHAT] Auto-compressed {} old messages into summary", old_count);
+            }
+        }
+    }
+
+    // Build context-aware prompt with enhanced depth
     let mut system_context = format!(
-        "你是一位创新分析师。正在与用户讨论一个创意想法。\n\n\
+        "你是一位资深研发创新顾问，拥有专利分析、技术路线规划和创新方法论（TRIZ、第一性原理）的深厚经验。\n\
+         你正在与研发人员深入讨论一个创新想法。\n\n\
          ## 创意信息\n\
          **标题：** {}\n\
          **描述：** {}\n\
@@ -242,31 +290,64 @@ pub async fn api_idea_chat(
 
     // Add analysis results if available
     if !idea.analysis.is_empty() {
-        let analysis_preview: String = idea.analysis.chars().take(1000).collect();
-        system_context.push_str(&format!("\n## 之前的分析结果\n{}\n", analysis_preview));
+        // 只提取分析中的关键结论段落，不灌水
+        let analysis_lines: Vec<&str> = idea.analysis.lines()
+            .filter(|l| {
+                let t = l.trim();
+                // 保留：标题行、评分行、结论行、风险行；跳过：空行、纯装饰、过长描述
+                !t.is_empty() && (
+                    t.starts_with('#') || t.starts_with('*') || t.starts_with('-') ||
+                    t.contains("评分") || t.contains("结论") || t.contains("风险") ||
+                    t.contains("建议") || t.contains("差异") || t.contains("创新") ||
+                    t.contains("score") || t.contains("novel") || t.contains("risk")
+                )
+            })
+            .take(30) // 最多 30 行关键内容
+            .collect();
+        if !analysis_lines.is_empty() {
+            system_context.push_str(&format!(
+                "\n## 验证分析结果（关键结论）\n{}\n",
+                analysis_lines.join("\n")
+            ));
+        }
     }
 
     if let Some(score) = idea.novelty_score {
-        system_context.push_str(&format!("\n**新颖性评分：** {}/100\n", score));
+        system_context.push_str(&format!("\n**新颖性评分：** {:.1}/100\n", score));
     }
 
-    // Add discussion summary if exists
-    let summary = s.db.get_idea_summary(&idea_id).unwrap_or_default();
+    // Add compressed discussion summary (long-term memory)
     if !summary.is_empty() {
-        system_context.push_str(&format!("\n## 之前的讨论总结\n{}\n", summary));
+        system_context.push_str(&format!(
+            "\n## 之前的讨论记忆（已压缩）\n{}\n\
+             （以上是之前多轮讨论的精华总结，请基于此继续深入）\n",
+            summary
+        ));
     }
 
     system_context.push_str(
-        "\n请基于以上背景信息与用户继续讨论。回答要专业、有深度、有建设性。\
-         帮助用户完善创意、规避风险、找到差异化方向。",
+        "\n## 你的思维工具箱（按场景灵活运用，不要每次都用全部）\n\
+         - **第一性原理**：遇到复杂方案时，回到物理/化学/数学基本原理验证可行性\n\
+         - **TRIZ 矛盾分析**：发现技术矛盾时（如强度 vs 重量），用 TRIZ 思路提出解决方向\n\
+         - **逆向工程思维**：从期望结果倒推，找出实现路径上的关键瓶颈\n\
+         - **类比迁移**：从其他行业/领域找到类似问题的已有解决方案\n\
+         - **边界探测**：主动测试方案的极端情况和失效条件\n\n\
+         ## 你的行为准则\n\
+         1. **精准追问**：不问泛泛的问题，每个问题都指向具体的技术决策点\n\
+         2. **假设-验证链**：先明确假设，再给出验证路径，最后给结论\n\
+         3. **盲点发现**：主动指出用户可能忽略的技术风险或竞争威胁\n\
+         4. **证据优先**：引用物理定律、已知材料参数、行业标准等硬证据\n\
+         5. **风险分级**：区分「致命缺陷」「需要验证」「可接受风险」三个级别\n\
+         6. **每轮推进**：回答末尾提出 1-2 个精准的引导性问题，推动研发进入下一层\n\
+         7. **简洁有力**：不说废话，每句话都有信息量\n",
     );
 
-    // Build message history
+    // Build message history with smart windowing
     let mut messages = vec![];
 
-    // Include recent history (last 10 messages to stay within token limits)
-    let recent_history: Vec<_> = if history.len() > 10 {
-        history[history.len() - 10..].to_vec()
+    // Use recent messages only (old ones already compressed into summary)
+    let recent_history: Vec<_> = if history.len() > keep_recent {
+        history[history.len() - keep_recent..].to_vec()
     } else {
         history.clone()
     };
