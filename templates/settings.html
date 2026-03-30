@@ -235,11 +235,30 @@
                     document.getElementById('ai-model').value = config.ai_model || '';
 
                     updateConfigStatus(config);
+
+                    // 根据已保存的 base_url 反推预设下拉框
+                    const savedUrl = (config.ai_base_url || '').replace(/\/+$/, '');
+                    const providerSelect = document.getElementById('ai-provider');
+                    const urlToProvider = {
+                        'https://open.bigmodel.cn/api/paas/v4': config.ai_model === 'glm-4-plus' ? 'zhipu-plus' : 'zhipu',
+                        'https://api.deepseek.com/v1': 'deepseek',
+                        'https://openrouter.ai/api/v1': 'openrouter',
+                        'https://generativelanguage.googleapis.com/v1beta/openai': 'gemini',
+                        'https://api.openai.com/v1': 'openai',
+                        'https://api.anthropic.com/v1': 'claude',
+                        'http://localhost:11434/v1': 'ollama',
+                    };
+                    const matched = urlToProvider[savedUrl];
+                    if (matched) {
+                        providerSelect.value = matched;
+                    } else if (savedUrl) {
+                        providerSelect.value = 'custom';
+                    }
                 }
             } catch (e) {
                 console.error('Failed to load config:', e);
             }
-            updateAiFields();
+            // 不调用 updateAiFields()，避免覆盖已保存的配置
         };
         
         // 返回上一页

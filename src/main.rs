@@ -170,6 +170,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/tags", get(routes::api_list_all_tags))
         // File upload
         .route("/api/upload/compare", post(routes::api_upload_compare))
+        .route("/api/upload/extract", post(routes::api_upload_extract))
         // Static files (embedded in binary)
         .route("/static/*path", get(serve_static))
         // 备用前端路径（桌面端已拆到独立仓库 patent-hub-desktop）
@@ -196,7 +197,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Auto-open browser (disabled when PATENT_HUB_NO_OPEN is set)
     if std::env::var("PATENT_HUB_NO_OPEN").is_err() {
-        let url = "http://127.0.0.1:3000/search";
+        let url = "http://127.0.0.1:3000/";
         if let Err(e) = open::that(url) {
             println!("Could not open browser: {}", e);
             println!("Please visit: {}", url);

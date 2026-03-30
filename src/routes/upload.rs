@@ -135,6 +135,77 @@ pub async fn api_upload_compare(
     }
 }
 
+/// 通用文件内容提取（首页上传附件用）
+pub async fn api_upload_extract(
+    State(s): State<AppState>,
+    mut multipart: axum::extract::Multipart,
+) -> Json<serde_json::Value> {
+    let mut file_bytes: Vec<u8> = Vec::new();
+    let mut file_name = String::new();
+
+    while let Ok(Some(field)) = multipart.next_field().await {
+        let name = field.name().unwrap_or("").to_string();
+        if name == "file" {
+            file_name = field.file_name().unwrap_or("unknown.txt").to_lowercase();
+            match field.bytes().await {
+                Ok(data) => {
+                    if data.len() > MAX_FILE_SIZE {
+                        return Json(json!({"error": "文件大小超过 10MB 限制"}));
+                    }
+                    file_bytes = data.to_vec();
+                }
+                Err(_) => return Json(json!({"error": "文件读取失败"})),
+            }
+        }
+    }
+
+    if file_bytes.is_empty() {
+        return Json(json!({"error": "缺少文件"}));
+    }
+
+    let ext = file_name.rsplit('.').next().unwrap_or("").to_lowercase();
+    let is_image = matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp");
+
+    let text = if is_image {
+        let ai_client = s.config.read().unwrap().ai_client();
+        match describe_image_with_ai(&ai_client, &file_bytes, &ext).await {
+            Ok(desc) => desc,
+            Err(e) => return Json(json!({"error": format!("图片识别失败: {}", e)})),
+        }
+    } else if ext == "pdf" {
+        match extract_pdf_text(&file_bytes) {
+            Ok(t) if !t.trim().is_empty() => t,
+            Ok(_) => return Json(json!({"error": "PDF 无可提取文字"})),
+            Err(e) => return Json(json!({"error": format!("PDF 解析失败: {}", e)})),
+        }
+    } else if ext == "docx" {
+        match extract_docx_text(&file_bytes) {
+            Ok(t) if !t.trim().is_empty() => t,
+            Ok(_) => return Json(json!({"error": "DOCX 无可提取文字"})),
+            Err(e) => return Json(json!({"error": format!("DOCX 解析失败: {}", e)})),
+        }
+    } else if ext == "doc" {
+        return Json(json!({"error": "暂不支持 .doc 格式，请另存为 .docx 或 .pdf"}));
+    } else {
+        match String::from_utf8(file_bytes.clone()) {
+            Ok(t) => t,
+            Err(_) => {
+                let (t, _, had_errors) = encoding_rs::GBK.decode(&file_bytes);
+                if had_errors {
+                    return Json(json!({"error": "文件编码不支持"}));
+                }
+                t.into_owned()
+            }
+        }
+    };
+
+    Json(json!({
+        "text": text.chars().take(5000).collect::<String>(),
+        "file_type": ext,
+        "length": text.len()
+    }))
+}
+
 /// Extract text from a PDF file using pdf-extract
 fn extract_pdf_text(data: &[u8]) -> Result<String, String> {
     pdf_extract::extract_text_from_mem(data).map_err(|e| format!("{}", e))

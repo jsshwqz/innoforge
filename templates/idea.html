@@ -143,9 +143,18 @@
                 </div>
                 <div id="chat-messages" style="max-height:400px; overflow-y:auto; margin-bottom:12px;">
                 </div>
-                <div style="display:flex; gap:8px;">
-                    <input type="text" id="chat-input" data-i18n-placeholder="idea.chatPlaceholder" style="flex:1; padding:8px 12px; background:#0d1117; border:1px solid #30363d; border-radius:6px; color:#c9d1d9;" onkeydown="if(event.key==='Enter')sendChatMessage()">
-                    <button onclick="sendChatMessage()" style="background:#238636; padding:8px 16px; white-space:nowrap;" data-i18n="idea.send"></button>
+                <div id="chat-attachments" style="display:none; margin-bottom:6px; font-size:0.85em;"></div>
+                <div style="display:flex; gap:8px; align-items:flex-end;">
+                    <div style="flex:1; position:relative;">
+                        <textarea id="chat-input" data-i18n-placeholder="idea.chatPlaceholder" rows="3" style="width:100%; padding:8px 12px; background:#0d1117; border:1px solid #30363d; border-radius:6px; color:#c9d1d9; resize:vertical; min-height:60px; max-height:300px; font-size:0.95em; font-family:inherit;" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMessage();}"></textarea>
+                    </div>
+                    <div style="display:flex; flex-direction:column; gap:4px;">
+                        <label style="background:#21262d; padding:8px 10px; border-radius:6px; cursor:pointer; text-align:center; border:1px solid #30363d; font-size:0.85em; color:#8b949e;" title="上传图片或文件">
+                            📎
+                            <input type="file" id="chat-file-input" multiple accept=".pdf,.docx,.doc,.txt,.png,.jpg,.jpeg,.gif,.webp" style="display:none;" onchange="handleChatFileSelect(this)">
+                        </label>
+                        <button onclick="sendChatMessage()" style="background:#238636; padding:8px 16px; white-space:nowrap; border-radius:6px;" data-i18n="idea.send"></button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -370,7 +379,7 @@
             const scoreLabel = idea.novelty_score >= 70 ? t('idea.scoreHigh') : idea.novelty_score >= 40 ? t('idea.scoreMid') : t('idea.scoreLow');
             document.getElementById('score-area').innerHTML =
                 '<div class="score-display">' +
-                '<div class="score-number ' + scoreClass + '" style="background:transparent;">' + idea.novelty_score + '</div>' +
+                '<div class="score-number ' + scoreClass + '" style="background:transparent;">' + Math.round(idea.novelty_score * 10) / 10 + '</div>' +
                 '<div class="score-label">' + (i18nLang === 'en' ? 'Novelty Score / 100 — ' : '新颖性评分 / 100 — ') + scoreLabel + '</div>' +
                 '</div>';
         }
@@ -558,10 +567,57 @@
         } catch(e) {}
     }
 
+    var chatAttachedFiles = [];
+
+    function handleChatFileSelect(input) {
+        var files = Array.from(input.files);
+        var container = document.getElementById('chat-attachments');
+        files.forEach(function(f) {
+            if (f.size > 10 * 1024 * 1024) {
+                alert('文件 ' + f.name + ' 超过 10MB 限制');
+                return;
+            }
+            chatAttachedFiles.push(f);
+        });
+        if (chatAttachedFiles.length > 0) {
+            container.style.display = 'block';
+            container.innerHTML = chatAttachedFiles.map(function(f, i) {
+                var icon = f.type.startsWith('image/') ? '🖼️' : '📄';
+                var size = (f.size / 1024).toFixed(1) + 'KB';
+                return '<span style="display:inline-flex;align-items:center;gap:4px;background:#21262d;padding:3px 8px;border-radius:4px;margin:2px;color:#8b949e;">' +
+                    icon + ' ' + f.name + ' (' + size + ')' +
+                    '<button onclick="removeChatFile(' + i + ')" style="background:none;border:none;color:#f85149;cursor:pointer;padding:0 2px;">×</button></span>';
+            }).join('');
+        } else {
+            container.style.display = 'none';
+        }
+        input.value = '';
+    }
+
+    function removeChatFile(idx) {
+        chatAttachedFiles.splice(idx, 1);
+        var container = document.getElementById('chat-attachments');
+        if (chatAttachedFiles.length === 0) {
+            container.style.display = 'none';
+            container.innerHTML = '';
+        } else {
+            handleChatFileSelect({files: [], value: ''});
+            // Re-render
+            container.innerHTML = chatAttachedFiles.map(function(f, i) {
+                var icon = f.type.startsWith('image/') ? '🖼️' : '📄';
+                var size = (f.size / 1024).toFixed(1) + 'KB';
+                return '<span style="display:inline-flex;align-items:center;gap:4px;background:#21262d;padding:3px 8px;border-radius:4px;margin:2px;color:#8b949e;">' +
+                    icon + ' ' + f.name + ' (' + size + ')' +
+                    '<button onclick="removeChatFile(' + i + ')" style="background:none;border:none;color:#f85149;cursor:pointer;padding:0 2px;">×</button></span>';
+            }).join('');
+        }
+    }
+
     async function sendChatMessage() {
         var input = document.getElementById('chat-input');
         var msg = input.value.trim();
-        if (!msg || !currentIdeaId) return;
+        var hasFiles = chatAttachedFiles.length > 0;
+        if ((!msg && !hasFiles) || !currentIdeaId) return;
         input.value = '';
         input.disabled = true;
 
@@ -619,7 +675,9 @@
                 sumDiv.innerHTML = '<div style="font-size:0.8em; color:#58a6ff; margin-bottom:4px; font-weight:bold;">📋 讨论总结</div>' +
                     '<div style="color:#c9d1d9; font-size:0.9em; line-height:1.6;">' + renderMarkdown(data.summary) + '</div>';
             } else {
-                alert(data.error || '生成总结失败');
+                var sumDiv = document.getElementById('discussion-summary');
+                sumDiv.style.display = 'block';
+                sumDiv.innerHTML = '<div style="color:#f0ad4e; font-size:0.85em; padding:8px;">💡 ' + (data.error || '生成总结失败') + '，请先在下方输入框和 AI 讨论几轮后再生成总结。</div>';
             }
         } catch(e) {
             alert('请求失败: ' + e.message);

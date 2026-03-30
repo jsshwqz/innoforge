@@ -203,6 +203,7 @@ pub async fn start_server(db_path: &str) -> anyhow::Result<()> {
         )
         .route("/api/tags", get(routes::api_list_all_tags))
         .route("/api/upload/compare", post(routes::api_upload_compare))
+        .route("/api/upload/extract", post(routes::api_upload_extract))
         // Serve embedded static files
         .route("/static/*path", get(serve_static_embedded))
         .layer(DefaultBodyLimit::max(10 * 1024 * 1024))

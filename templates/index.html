@@ -1,75 +1,366 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>专利智能平台 - Patent Hub</title>
+    <title>Patent Hub — 研发创新验证助手</title>
     <link rel="stylesheet" href="/static/style.css">
     <link rel="manifest" href="/static/manifest.json">
     <meta name="theme-color" content="#0d1117">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+    <style>
+        .hero { text-align: center; padding: 40px 20px 20px; }
+        .hero h1 { font-size: 2.2em; margin-bottom: 8px; }
+        .hero .subtitle { color: #8b949e; font-size: 1.1em; margin-bottom: 30px; }
+
+        /* 主入口区域 */
+        .main-entry { max-width: 700px; margin: 0 auto 40px; }
+        .idea-input-area {
+            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+            padding: 24px; margin-bottom: 20px;
+        }
+        .idea-input-area label {
+            display: block; color: #c9d1d9; font-size: 1em;
+            margin-bottom: 10px; font-weight: 500;
+        }
+        .idea-input-area textarea {
+            width: 100%; min-height: 100px; background: #0d1117;
+            border: 1px solid #30363d; border-radius: 8px; color: #c9d1d9;
+            padding: 12px; font-size: 0.95em; resize: vertical;
+            font-family: inherit; line-height: 1.6;
+        }
+        .idea-input-area textarea:focus { outline: none; border-color: #58a6ff; }
+        .idea-input-area textarea::placeholder { color: #484f58; }
+
+        .start-buttons {
+            display: flex; gap: 12px; justify-content: center; margin-top: 16px;
+            flex-wrap: wrap;
+        }
+        .btn-primary {
+            background: #238636; color: white; border: none; padding: 12px 28px;
+            border-radius: 8px; font-size: 1em; cursor: pointer; font-weight: 500;
+            transition: background 0.2s;
+        }
+        .btn-primary:hover { background: #2ea043; }
+        .btn-secondary {
+            background: transparent; color: #58a6ff; border: 1px solid #30363d;
+            padding: 12px 28px; border-radius: 8px; font-size: 1em; cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-secondary:hover { background: #161b22; border-color: #58a6ff; }
+
+        /* 流程指引 */
+        .workflow-hint {
+            display: flex; align-items: center; justify-content: center;
+            gap: 8px; color: #484f58; font-size: 0.85em; margin: 20px 0;
+            flex-wrap: wrap;
+        }
+        .workflow-hint .step {
+            background: #161b22; border: 1px solid #21262d; border-radius: 16px;
+            padding: 4px 12px; white-space: nowrap;
+        }
+        .workflow-hint .arrow { color: #30363d; }
+
+        /* 能力卡片 */
+        .capabilities {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px; max-width: 800px; margin: 0 auto 30px; padding: 0 20px;
+        }
+        .cap-card {
+            background: #161b22; border: 1px solid #21262d; border-radius: 10px;
+            padding: 20px; text-align: left; cursor: pointer; transition: all 0.2s;
+            text-decoration: none; color: inherit; display: block;
+        }
+        .cap-card:hover { border-color: #58a6ff; transform: translateY(-2px); }
+        .cap-card h3 { font-size: 1em; margin-bottom: 6px; color: #c9d1d9; }
+        .cap-card p { font-size: 0.82em; color: #8b949e; margin: 0; line-height: 1.5; }
+
+        /* 快速抓取（折叠） */
+        .quick-fetch {
+            max-width: 700px; margin: 0 auto 30px; padding: 0 20px;
+        }
+        .quick-fetch summary {
+            color: #8b949e; cursor: pointer; font-size: 0.9em;
+            padding: 8px 0; user-select: none;
+        }
+        .quick-fetch summary:hover { color: #c9d1d9; }
+        .fetch-box {
+            display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap;
+        }
+        .fetch-box input, .fetch-box select {
+            background: #0d1117; border: 1px solid #30363d; color: #c9d1d9;
+            padding: 8px 12px; border-radius: 6px; font-size: 0.9em;
+        }
+        .fetch-box input { flex: 1; min-width: 200px; }
+        .fetch-box button {
+            background: #21262d; color: #c9d1d9; border: 1px solid #30363d;
+            padding: 8px 16px; border-radius: 6px; cursor: pointer;
+        }
+        .fetch-box button:hover { background: #30363d; }
+
+        /* 文件上传区 */
+        .upload-zone {
+            border: 1px dashed #30363d; border-radius: 8px; padding: 12px;
+            text-align: center; color: #484f58; font-size: 0.85em;
+            cursor: pointer; transition: all 0.2s; margin-top: 10px;
+        }
+        .upload-zone:hover { border-color: #58a6ff; color: #8b949e; }
+        .upload-zone.dragover { border-color: #58a6ff; background: rgba(88,166,255,0.05); }
+        .upload-zone input[type="file"] { display: none; }
+        .file-list {
+            margin-top: 8px; text-align: left; font-size: 0.85em;
+        }
+        .file-item {
+            display: flex; align-items: center; justify-content: space-between;
+            background: #0d1117; border: 1px solid #21262d; border-radius: 6px;
+            padding: 6px 10px; margin-top: 4px; color: #8b949e;
+        }
+        .file-item .remove {
+            color: #f85149; cursor: pointer; font-size: 0.9em;
+            background: none; border: none; padding: 2px 6px;
+        }
+
+        /* 模式选择 */
+        .mode-toggle {
+            display: flex; gap: 0; margin-bottom: 12px; border-radius: 8px;
+            overflow: hidden; border: 1px solid #30363d;
+        }
+        .mode-btn {
+            flex: 1; padding: 10px; text-align: center; cursor: pointer;
+            background: #0d1117; color: #8b949e; border: none; font-size: 0.9em;
+            transition: all 0.2s;
+        }
+        .mode-btn.active { background: #161b22; color: #58a6ff; font-weight: 500; }
+        .mode-btn:hover:not(.active) { background: #161b22; }
+        .mode-hint {
+            color: #484f58; font-size: 0.8em; text-align: center;
+            margin-bottom: 8px; min-height: 20px;
+        }
+    </style>
 </head>
 <body>
     <nav class="navbar">
-        <a href="/" class="logo">🔬 Patent Hub</a>
+        <a href="/" class="logo">Patent Hub</a>
         <div class="nav-links">
-            <a href="/search">专利检索</a>
-            <a href="/idea">创意验证</a>
-            <a href="/compare">专利对比</a>
-            <a href="/ai">AI 助手</a>
+            <a href="/search">检索</a>
+            <a href="/idea">验证</a>
+            <a href="/compare">对比</a>
+            <a href="/ai">AI</a>
             <a href="/settings?from=/">设置</a>
         </div>
     </nav>
+
     <main class="hero">
-        <h1>Patent Hub</h1>
-        <p class="subtitle">个人专利智能分析平台</p>
-        <div class="search-box">
-            <input type="text" id="quick-search" placeholder="输入关键词、专利号或申请人..." autofocus>
-            <button onclick="quickSearch()">检索</button>
+        <h1>研发创新验证助手</h1>
+        <p class="subtitle">从灵感到验证，AI 全程协助</p>
+
+        <!-- 研发流程指引 -->
+        <div class="workflow-hint">
+            <span class="step">描述想法</span>
+            <span class="arrow">&rarr;</span>
+            <span class="step">AI 分析拆解</span>
+            <span class="arrow">&rarr;</span>
+            <span class="step">自动查新</span>
+            <span class="arrow">&rarr;</span>
+            <span class="step">验证报告</span>
         </div>
-        <div class="features">
-            <div class="feature-card">
-                <h3>🔍 智能检索</h3>
-                <p>关键词、语义、专利号多模式检索，支持全文索引</p>
-            </div>
-            <div class="feature-card">
-                <h3>📋 专利详情</h3>
-                <p>完整专利信息：说明书、权利要求、法律状态、引用关系</p>
-            </div>
-            <div class="feature-card">
-                <h3>🤖 AI 分析</h3>
-                <p>智能摘要、技术解读、权利要求分析、专利问答</p>
+
+        <!-- 主入口：描述你的想法 -->
+        <div class="main-entry">
+            <div class="idea-input-area">
+                <label>描述你的技术想法或创新方案</label>
+                <textarea id="idea-input" placeholder="例如：一种基于液态金属的手机散热方案，利用镓铟合金的高导热性，在手机内部形成微循环散热通道...
+
+支持粘贴文字，也可以拖入文件。越详细，AI 验证越准确。"></textarea>
+
+                <!-- 文件上传区 -->
+                <div class="upload-zone" id="upload-zone" onclick="document.getElementById('file-input').click()">
+                    <input type="file" id="file-input" multiple accept=".pdf,.docx,.doc,.txt,.png,.jpg,.jpeg,.gif,.bmp,.webp">
+                    拖拽文件到此处，或点击上传（PDF / Word / 图片 / 文本）
+                </div>
+                <div class="file-list" id="file-list"></div>
+
+                <!-- 模式选择 -->
+                <div class="mode-toggle">
+                    <button class="mode-btn active" onclick="setMode('chat')" id="mode-chat">AI 对话梳理</button>
+                    <button class="mode-btn" onclick="setMode('quick')" id="mode-quick">快速验证</button>
+                    <button class="mode-btn" onclick="setMode('deep')" id="mode-deep">深度验证</button>
+                </div>
+                <div class="mode-hint" id="mode-hint">先与 AI 对话，梳理技术方案、拆解创新点，确认后再验证</div>
+
+                <div class="start-buttons">
+                    <button class="btn-primary" onclick="startFlow()" id="start-btn">开始对话</button>
+                    <button class="btn-secondary" onclick="window.location.href='/idea'">历史项目</button>
+                </div>
             </div>
         </div>
-        <div class="quick-actions">
-            <h3>快速抓取专利</h3>
-            <div class="fetch-box">
-                <input type="text" id="fetch-number" placeholder="输入专利号 (如 EP1234567, US10000000)">
-                <select id="fetch-source">
-                    <option value="epo">EPO (欧洲/全球)</option>
-                    <option value="uspto">USPTO (美国)</option>
-                </select>
-                <button onclick="fetchPatent()">抓取</button>
-            </div>
-            <div id="fetch-result"></div>
+
+        <!-- 能力卡片 -->
+        <div class="capabilities">
+            <a href="/search" class="cap-card">
+                <h3>专利检索</h3>
+                <p>全球专利数据库搜索，支持 Google Patents、Lens.org、搜狗免费搜索</p>
+            </a>
+            <a href="/idea" class="cap-card">
+                <h3>创新验证</h3>
+                <p>12 步 AI 流水线：自动查新、相似度计算、新颖性评分、行动方案</p>
+            </a>
+            <a href="/compare" class="cap-card">
+                <h3>专利对比</h3>
+                <p>多专利矩阵对比、技术方案差异分析、侵权风险预筛查</p>
+            </a>
+            <a href="/ai" class="cap-card">
+                <h3>AI 分析</h3>
+                <p>专利摘要、权利要求解读、技术问答、批量分析</p>
+            </a>
+        </div>
+
+        <!-- 快速抓取（折叠，不抢焦点） -->
+        <div class="quick-fetch">
+            <details>
+                <summary>快速抓取专利（输入专利号直接获取）</summary>
+                <div class="fetch-box">
+                    <input type="text" id="fetch-number" placeholder="输入专利号 (如 EP1234567, US10000000)">
+                    <select id="fetch-source">
+                        <option value="epo">EPO (欧洲/全球)</option>
+                        <option value="uspto">USPTO (美国)</option>
+                    </select>
+                    <button onclick="fetchPatent()">抓取</button>
+                </div>
+                <div id="fetch-result"></div>
+            </details>
         </div>
     </main>
+
     <script>
-    function quickSearch() {
-        const q = document.getElementById('quick-search').value;
-        if (q) window.location.href = '/search?q=' + encodeURIComponent(q);
+    let currentMode = 'chat';
+    let uploadedFiles = [];
+
+    // 模式切换
+    function setMode(mode) {
+        currentMode = mode;
+        document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById('mode-' + mode).classList.add('active');
+        const hints = {
+            chat: '先与 AI 对话，梳理技术方案、拆解创新点，确认后再验证',
+            quick: '跳过对话，直接运行 6 步快速验证（约 30 秒）',
+            deep: '跳过对话，直接运行 12 步深度验证（约 2-5 分钟）'
+        };
+        const btnTexts = { chat: '开始对话', quick: '快速验证', deep: '深度验证' };
+        document.getElementById('mode-hint').textContent = hints[mode];
+        document.getElementById('start-btn').textContent = btnTexts[mode];
     }
-    document.getElementById('quick-search').addEventListener('keydown', e => {
-        if (e.key === 'Enter') quickSearch();
+
+    // 文件上传
+    const uploadZone = document.getElementById('upload-zone');
+    const fileInput = document.getElementById('file-input');
+
+    uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('dragover'); });
+    uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragover'));
+    uploadZone.addEventListener('drop', e => {
+        e.preventDefault();
+        uploadZone.classList.remove('dragover');
+        addFiles(e.dataTransfer.files);
     });
+    fileInput.addEventListener('change', () => addFiles(fileInput.files));
+
+    function addFiles(fileList) {
+        for (const f of fileList) {
+            if (f.size > 10 * 1024 * 1024) { alert(f.name + ' 超过 10MB 限制'); continue; }
+            if (uploadedFiles.length >= 5) { alert('最多上传 5 个文件'); break; }
+            uploadedFiles.push(f);
+        }
+        renderFileList();
+    }
+
+    function removeFile(idx) {
+        uploadedFiles.splice(idx, 1);
+        renderFileList();
+    }
+
+    function renderFileList() {
+        const el = document.getElementById('file-list');
+        if (uploadedFiles.length === 0) { el.innerHTML = ''; return; }
+        el.innerHTML = uploadedFiles.map((f, i) => {
+            const size = f.size < 1024 ? f.size + 'B' : (f.size / 1024).toFixed(1) + 'KB';
+            const icon = f.type.startsWith('image/') ? '🖼' : f.name.endsWith('.pdf') ? '📄' : '📎';
+            return `<div class="file-item">
+                <span>${icon} ${f.name} (${size})</span>
+                <button class="remove" onclick="removeFile(${i})">x</button>
+            </div>`;
+        }).join('');
+    }
+
+    // 主流程
+    async function startFlow() {
+        const text = document.getElementById('idea-input').value.trim();
+        if (!text && uploadedFiles.length === 0) {
+            document.getElementById('idea-input').focus();
+            return;
+        }
+
+        const title = (text.split(/[。.!！?\n]/)[0] || '').substring(0, 50) || '新研发项目';
+        let description = text;
+
+        // 如果有文件，先上传提取内容追加到描述
+        if (uploadedFiles.length > 0) {
+            document.getElementById('start-btn').textContent = '上传文件中...';
+            document.getElementById('start-btn').disabled = true;
+            for (const f of uploadedFiles) {
+                try {
+                    const formData = new FormData();
+                    formData.append('file', f);
+                    const resp = await fetch('/api/upload/extract', {
+                        method: 'POST', body: formData
+                    });
+                    const data = await resp.json();
+                    if (data.text) {
+                        description += '\n\n---附件: ' + f.name + '---\n' + data.text.substring(0, 3000);
+                    }
+                } catch(e) {
+                    console.error('文件提取失败:', f.name, e);
+                }
+            }
+            document.getElementById('start-btn').disabled = false;
+        }
+
+        // 提交创意
+        try {
+            const resp = await fetch('/api/idea/submit', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ title, description, input_type: uploadedFiles.length > 0 ? 'mixed' : 'text' })
+            });
+            const data = await resp.json();
+            if (!data.id) { alert(data.message || '提交失败'); return; }
+
+            // 根据模式跳转
+            if (currentMode === 'chat') {
+                window.location.href = '/idea?id=' + data.id + '&mode=chat';
+            } else if (currentMode === 'quick') {
+                window.location.href = '/idea?id=' + data.id + '&autostart=quick';
+            } else {
+                window.location.href = '/idea?id=' + data.id + '&autostart=deep';
+            }
+        } catch(e) {
+            alert('请求失败: ' + e);
+        }
+    }
+
+    // Ctrl+Enter 提交
+    document.getElementById('idea-input').addEventListener('keydown', e => {
+        if (e.key === 'Enter' && e.ctrlKey) startFlow();
+    });
+
+    // 快速抓取
     async function fetchPatent() {
         const num = document.getElementById('fetch-number').value;
         const source = document.getElementById('fetch-source').value;
         const el = document.getElementById('fetch-result');
         if (!num) return;
-        el.innerHTML = '<p>正在抓取...</p>';
+        el.innerHTML = '<p style="color:#8b949e;margin-top:8px;">正在抓取...</p>';
         try {
             const resp = await fetch('/api/patent/fetch', {
                 method: 'POST',
@@ -78,12 +369,12 @@
             });
             const data = await resp.json();
             if (data.status === 'ok') {
-                el.innerHTML = `<p class="success">✅ 已抓取: ${data.patent.title || num}</p>
-                    <a href="/patent/${data.patent.id}">查看详情</a>`;
+                el.innerHTML = `<p style="color:#3fb950;margin-top:8px;">已抓取: ${data.patent.title || num}
+                    <a href="/patent/${data.patent.id}" style="color:#58a6ff;margin-left:8px;">查看详情</a></p>`;
             } else {
-                el.innerHTML = `<p class="error">❌ ${data.message}</p>`;
+                el.innerHTML = `<p style="color:#f85149;margin-top:8px;">${data.message}</p>`;
             }
-        } catch(e) { el.innerHTML = `<p class="error">请求失败: ${e}</p>`; }
+        } catch(e) { el.innerHTML = `<p style="color:#f85149;margin-top:8px;">请求失败: ${e}</p>`; }
     }
     </script>
 </body>
