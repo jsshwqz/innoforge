@@ -143,9 +143,18 @@ pub async fn api_new_endpoint(
 
 ### Fixing security issues
 
-**XSS in HTML templates**: Search for `innerHTML` in `templates/*.html`. Replace with:
-- `textContent` for plain text
-- `DOMPurify.sanitize(html)` for formatted content (add DOMPurify CDN to template head)
+**XSS in HTML templates**: ALL template files that use `innerHTML`:
+- `templates/idea.html` — pipeline UI, chat messages, analysis display, history list
+- `templates/ai.html` — chat message rendering (user + AI responses)
+- `templates/settings.html` — config status, provider guide, fallback AI rows
+- `templates/index.html` — patent fetch results, file list rendering
+- `templates/patent_detail.html` — tag rendering with onclick handlers
+
+**You MUST fix ALL of these files**, not just the ones mentioned in a task description. For each:
+1. Add DOMPurify CDN (`<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>`) to `<head>`
+2. Use `textContent` for plain text assignments (error messages, labels, file names)
+3. Use `DOMPurify.sanitize(html)` for formatted HTML content (markdown renders, API responses with HTML)
+4. Use `createElement` + `appendChild` instead of `innerHTML +=` for building DOM nodes
 
 **SSRF in image proxy**: In `src/routes/patent.rs`, the image proxy endpoint must validate URL domains against an allowlist:
 ```rust
