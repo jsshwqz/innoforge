@@ -422,11 +422,6 @@
             const key = document.getElementById('serpapi-key').value.trim();
             const statusEl = document.getElementById('serpapi-status');
 
-            if (!key) {
-                showStatus(statusEl, 'error', '请输入 API Key');
-                return;
-            }
-
             try {
                 const res = await fetch('/api/settings/serpapi', {
                     method: 'POST',
@@ -436,7 +431,7 @@
 
                 const data = await res.json();
                 if (res.ok && data.status === 'ok') {
-                    showStatus(statusEl, 'success', '✅ SerpAPI 配置已保存！');
+                    showStatus(statusEl, 'success', key ? '✅ SerpAPI 配置已保存！' : '✅ SerpAPI Key 已清除');
                 } else {
                     showStatus(statusEl, 'error', data.message || '保存失败，请重试');
                 }
@@ -500,18 +495,66 @@
             };
             var row = document.createElement('div');
             row.style.cssText = 'padding:12px;margin:8px 0;background:#0d1117;border:1px solid #30363d;border-radius:6px;';
-            row.innerHTML = DOMPurify.sanitize('<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'
-                + '<strong style="color:#58a6ff;">备用 AI #' + i + '</strong>'
-                + '<button onclick="this.parentElement.parentElement.remove();fallbackCount--;" style="background:#da3633;padding:2px 8px;font-size:0.8em;">删除</button></div>'
-                + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">'
-                + '<div><label style="font-size:0.8em;color:#8b949e;">服务商预设</label>'
-                + '<select onchange="applyPreset(this,' + i + ')" style="width:100%;padding:4px;background:#161b22;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;">'
-                + '<option value="">自定义</option><option value="zhipu">智谱 GLM（免费）</option><option value="deepseek">DeepSeek</option><option value="openrouter">OpenRouter</option><option value="gemini">Google Gemini</option><option value="openai">OpenAI</option><option value="nvidia">NVIDIA</option></select></div>'
-                + '<div><label style="font-size:0.8em;color:#8b949e;">名称</label><input type="text" id="fb-name-' + i + '" value="' + (name||'') + '" placeholder="OpenRouter" style="width:100%;padding:4px;background:#161b22;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;"></div>'
-                + '<div><label style="font-size:0.8em;color:#8b949e;">Base URL</label><input type="text" id="fb-url-' + i + '" value="' + (url||'') + '" placeholder="https://..." style="width:100%;padding:4px;background:#161b22;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;"></div>'
-                + '<div><label style="font-size:0.8em;color:#8b949e;">API Key</label><input type="text" id="fb-key-' + i + '" value="' + (key||'') + '" placeholder="sk-..." style="width:100%;padding:4px;background:#161b22;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;"></div>'
-                + '<div style="grid-column:span 2;"><label style="font-size:0.8em;color:#8b949e;">模型</label><input type="text" id="fb-model-' + i + '" value="' + (model||'') + '" placeholder="model-name" style="width:100%;padding:4px;background:#161b22;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;"></div>'
-                + '</div>');
+
+            // Build header
+            var header = document.createElement('div');
+            header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;';
+            var title = document.createElement('strong');
+            title.style.color = '#58a6ff';
+            title.textContent = '备用 AI #' + i;
+            var delBtn = document.createElement('button');
+            delBtn.style.cssText = 'background:#da3633;padding:2px 8px;font-size:0.8em;color:white;border:none;border-radius:4px;cursor:pointer;';
+            delBtn.textContent = '删除';
+            delBtn.addEventListener('click', function() { row.remove(); fallbackCount--; });
+            header.appendChild(title);
+            header.appendChild(delBtn);
+            row.appendChild(header);
+
+            // Build grid
+            var grid = document.createElement('div');
+            grid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:8px;';
+            var inputStyle = 'width:100%;padding:4px;background:#161b22;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;';
+            var labelStyle = 'font-size:0.8em;color:#8b949e;';
+
+            // Preset select
+            var presetDiv = document.createElement('div');
+            var presetLabel = document.createElement('label');
+            presetLabel.style.cssText = labelStyle;
+            presetLabel.textContent = '服务商预设';
+            var presetSelect = document.createElement('select');
+            presetSelect.style.cssText = inputStyle;
+            presetSelect.innerHTML = '<option value="">自定义</option><option value="zhipu">智谱 GLM（免费）</option><option value="deepseek">DeepSeek</option><option value="openrouter">OpenRouter</option><option value="gemini">Google Gemini</option><option value="openai">OpenAI</option><option value="nvidia">NVIDIA</option>';
+            (function(idx) {
+                presetSelect.addEventListener('change', function() { applyPreset(presetSelect, idx); });
+            })(i);
+            presetDiv.appendChild(presetLabel);
+            presetDiv.appendChild(presetSelect);
+            grid.appendChild(presetDiv);
+
+            // Helper to create input fields
+            function makeField(label, id, val, placeholder, spanCols) {
+                var div = document.createElement('div');
+                if (spanCols) div.style.gridColumn = 'span 2';
+                var lbl = document.createElement('label');
+                lbl.style.cssText = labelStyle;
+                lbl.textContent = label;
+                var inp = document.createElement('input');
+                inp.type = 'text';
+                inp.id = id;
+                inp.value = val || '';
+                inp.placeholder = placeholder;
+                inp.style.cssText = inputStyle;
+                div.appendChild(lbl);
+                div.appendChild(inp);
+                grid.appendChild(div);
+            }
+
+            makeField('名称', 'fb-name-' + i, name, 'OpenRouter');
+            makeField('Base URL', 'fb-url-' + i, url, 'https://...');
+            makeField('API Key', 'fb-key-' + i, key, 'sk-...');
+            makeField('模型', 'fb-model-' + i, model, 'model-name', true);
+
+            row.appendChild(grid);
             container.appendChild(row);
         }
         window.applyPreset = function(sel, idx) {

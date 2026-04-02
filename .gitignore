@@ -21,3 +21,8 @@ memory_store.json
 *.zip
 server.log
 *.db-journal
+
+# 临时测试脚本和截图 / Temp test files
+test-*.js
+image_*.png
+.mcp.json

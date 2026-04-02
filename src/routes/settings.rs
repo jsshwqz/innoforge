@@ -36,7 +36,11 @@ pub async fn api_save_serpapi(
     let api_key = req["api_key"].as_str().unwrap_or("").trim();
 
     if api_key.is_empty() {
-        return Json(json!({"status": "error", "message": "API key is required"}));
+        // 允许清空（与 Bing/Lens 行为一致）
+        s.config.write().unwrap().serpapi_key = String::new();
+        let _ = s.db.set_setting("SERPAPI_KEY", "");
+        let _ = update_env_file("SERPAPI_KEY", "");
+        return Json(json!({"status": "ok", "message": "SerpAPI Key 已清除"}));
     }
     if api_key.len() < 20 || api_key.len() > 200 {
         return Json(json!({"status": "error", "message": "Invalid API key format"}));
