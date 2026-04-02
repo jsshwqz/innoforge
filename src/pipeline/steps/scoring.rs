@@ -1,4 +1,4 @@
-//! Step 9: ScoreNovelty — 基于结构化数据计算新颖性评分
+//! Step 10: ScoreNovelty — 基于结构化数据计算新颖性评分
 //!
 //! 类型：CODE（不依赖 LLM，完全可复现）
 //!
@@ -9,7 +9,7 @@
 use crate::pipeline::context::{PipelineContext, ScoreBreakdown};
 use anyhow::Result;
 
-/// 执行 Step 9
+/// 执行 Step 10
 pub async fn execute(ctx: &mut PipelineContext) -> Result<()> {
     let scores = &ctx.similarity_scores;
 

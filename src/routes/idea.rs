@@ -3,7 +3,9 @@ use crate::patent::*;
 use crate::pipeline::context::PipelineProgress;
 use crate::pipeline::runner::PipelineRunner;
 use axum::{
+    body::Body,
     extract::{Path, State},
+    http::{Response, StatusCode},
     response::sse::{Event, Sse},
     Json,
 };
@@ -417,7 +419,7 @@ pub async fn api_idea_messages(
 
 // ── Pipeline API ─────────────────────────────────────────────────────
 
-/// POST /api/idea/pipeline — 启动 12 步创新验证流水线
+/// POST /api/idea/pipeline — 启动 13 步创新验证流水线
 pub async fn api_idea_pipeline(
     State(s): State<AppState>,
     Json(req): Json<serde_json::Value>,
@@ -432,11 +434,14 @@ pub async fn api_idea_pipeline(
         _ => return Json(json!({"status": "error", "message": "创意不存在"})),
     };
 
-    // Create broadcast channel for progress
+    // 创建进度广播通道 / Create broadcast channel for progress
     let (tx, _) = tokio::sync::broadcast::channel::<PipelineProgress>(64);
     {
         let mut channels = s.pipeline_channels.lock().unwrap();
-        channels.insert(id.to_string(), tx.clone());
+        channels.insert(id.to_string(), super::PipelineChannelEntry {
+            sender: tx.clone(),
+            created_at: std::time::Instant::now(),
+        });
     }
 
     // Build runner from config
@@ -553,6 +558,61 @@ pub async fn api_idea_pipeline(
     Json(json!({"status": "ok", "message": "流水线已启动"}))
 }
 
+/// POST /api/idea/:id/resume — 断点续跑：从上次中断的步骤继续
+/// Resume pipeline from last saved snapshot
+pub async fn api_idea_resume(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+) -> Json<serde_json::Value> {
+    // 检查是否有快照 / Check if snapshot exists
+    match s.db.load_pipeline_snapshot(&id) {
+        Ok(Some(_)) => {}
+        Ok(None) => return Json(json!({"status": "error", "message": "没有可恢复的管道快照"})),
+        Err(e) => return Json(json!({"status": "error", "message": e.to_string()})),
+    }
+
+    let config = s.config.read().unwrap().clone();
+    let ai_client = config.ai_client();
+    let db = s.db.clone();
+    let runner = PipelineRunner::new(
+        ai_client,
+        db.clone(),
+        config.serpapi_key.clone(),
+        config.bing_api_key.clone(),
+        config.lens_api_key.clone(),
+        false,
+    );
+
+    let idea_id = id.clone();
+    tokio::spawn(async move {
+        tracing::info!("Pipeline 断点续跑: {}", idea_id);
+        match runner.resume(&idea_id, None).await {
+            Ok(Some(ctx)) => {
+                if let Ok(Some(mut idea)) = db.get_idea(&idea_id) {
+                    idea.novelty_score = Some(ctx.novelty_score);
+                    if !ctx.ai_analysis.is_empty() {
+                        idea.analysis = ctx.ai_analysis;
+                    }
+                    idea.status = "done".into();
+                    let _ = db.update_idea(&idea);
+                }
+                tracing::info!("Pipeline 续跑完成: {}", idea_id);
+            }
+            Ok(None) => tracing::info!("Pipeline 无需续跑（已完成）: {}", idea_id),
+            Err(e) => {
+                tracing::error!("Pipeline 续跑失败: {} — {}", idea_id, e);
+                if let Ok(Some(mut idea)) = db.get_idea(&idea_id) {
+                    idea.status = "error".into();
+                    idea.analysis = format!("续跑失败: {}", e);
+                    let _ = db.update_idea(&idea);
+                }
+            }
+        }
+    });
+
+    Json(json!({"status": "ok", "message": "管道正在恢复执行"}))
+}
+
 /// GET /api/idea/:id/progress — SSE 实时进度流
 pub async fn api_idea_progress(
     State(s): State<AppState>,
@@ -567,8 +627,8 @@ pub async fn api_idea_progress(
         for _ in 0..10 {
             {
                 let ch = channels.lock().unwrap();
-                if let Some(tx) = ch.get(&id) {
-                    rx = Some(tx.subscribe());
+                if let Some(entry) = ch.get(&id) {
+                    rx = Some(entry.sender.subscribe());
                     break;
                 }
             }
@@ -624,6 +684,140 @@ pub async fn api_idea_report(
     }
 }
 
+/// GET /api/idea/:id/report.html — 可打印的 HTML 验证报告（浏览器 Ctrl+P 另存 PDF）
+/// Printable HTML validation report (browser Save as PDF)
+pub async fn api_idea_report_html(
+    State(s): State<AppState>,
+    Path(idea_id): Path<String>,
+) -> Response<Body> {
+    let idea = match s.db.get_idea(&idea_id) {
+        Ok(Some(i)) => i,
+        _ => {
+            return Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .body(Body::from("创意不存在"))
+                .unwrap();
+        }
+    };
+
+    let feature_cards = s
+        .db
+        .get_feature_cards_by_idea(&idea_id)
+        .unwrap_or_default();
+
+    let cards_html: String = if feature_cards.is_empty() {
+        "<p>暂无特征卡片</p>".to_string()
+    } else {
+        feature_cards
+            .iter()
+            .map(|c| {
+                format!(
+                    "<div class='card'>\
+                     <h4>{}</h4>\
+                     <p>{}</p>\
+                     <span class='score'>新颖性: {}</span>\
+                     </div>",
+                    html_escape(&c.title),
+                    html_escape(&c.description),
+                    c.novelty_score
+                        .map(|s| format!("{:.0}", s))
+                        .unwrap_or_else(|| "N/A".into()),
+                )
+            })
+            .collect()
+    };
+
+    let analysis_html = if idea.analysis.is_empty() {
+        "分析尚未完成".to_string()
+    } else {
+        html_escape(&idea.analysis)
+    };
+    let score_display = idea
+        .novelty_score
+        .map(|s| format!("{:.0}/100", s))
+        .unwrap_or_else(|| "N/A".into());
+
+    let html = format!(
+        r#"<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>创新验证报告 — {title}</title>
+<style>
+  @media print {{ @page {{ margin: 1.5cm; }} }}
+  body {{ font-family: -apple-system, "Microsoft YaHei", sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; color: #333; line-height: 1.6; }}
+  h1 {{ border-bottom: 2px solid #2563eb; padding-bottom: 8px; }}
+  .meta {{ color: #666; margin-bottom: 20px; }}
+  .score-box {{ background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 16px; text-align: center; margin: 20px 0; }}
+  .score-box .score {{ font-size: 2em; font-weight: bold; color: #2563eb; }}
+  .card {{ border: 1px solid #e5e7eb; border-radius: 6px; padding: 12px; margin: 8px 0; }}
+  .card h4 {{ margin: 0 0 4px 0; }}
+  .card .score {{ font-size: 0.85em; color: #059669; }}
+  .section {{ margin-top: 24px; }}
+  .section h2 {{ color: #1e40af; }}
+  .analysis {{ white-space: pre-wrap; background: #f9fafb; padding: 16px; border-radius: 8px; }}
+  .print-btn {{ background: #2563eb; color: #fff; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer; font-size: 16px; }}
+  @media print {{ .no-print {{ display: none; }} }}
+</style>
+</head>
+<body>
+<div class="no-print" style="text-align:right;margin-bottom:16px;">
+  <button class="print-btn" onclick="window.print()">导出 PDF / 打印</button>
+</div>
+<h1>创新验证报告</h1>
+<div class="meta">
+  <strong>创意：</strong>{title}<br>
+  <strong>描述：</strong>{description}<br>
+  <strong>状态：</strong>{status}<br>
+  <strong>创建时间：</strong>{created_at}
+</div>
+
+<div class="score-box">
+  <div>新颖性评分</div>
+  <div class="score">{score}</div>
+</div>
+
+<div class="section">
+  <h2>AI 深度分析</h2>
+  <div class="analysis">{analysis}</div>
+</div>
+
+<div class="section">
+  <h2>特征卡片 ({card_count} 张)</h2>
+  {cards}
+</div>
+
+<div class="section" style="color:#999;font-size:0.85em;margin-top:40px;border-top:1px solid #eee;padding-top:8px;">
+  Patent Hub 创新验证报告 · {created_at}
+</div>
+</body>
+</html>"#,
+        title = html_escape(&idea.title),
+        description = html_escape(&idea.description),
+        status = html_escape(&idea.status),
+        created_at = html_escape(&idea.created_at),
+        score = score_display,
+        analysis = analysis_html,
+        card_count = feature_cards.len(),
+        cards = cards_html,
+    );
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", "text/html; charset=utf-8")
+        .body(Body::from(html))
+        .unwrap()
+}
+
+/// 简单 HTML 转义 / Simple HTML escape
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#x27;")
+}
+
 /// Generate a summary of the idea discussion
 pub async fn api_idea_summarize_discussion(
     State(s): State<AppState>,
@@ -669,4 +863,98 @@ pub async fn api_idea_summarize_discussion(
         }
         Err(e) => Json(json!({"error": format!("总结生成失败: {}", e)})),
     }
+}
+
+/// POST /api/ideas/batch-compare — 批量创意对比矩阵 / Batch idea comparison matrix
+///
+/// 请求：{ "idea_ids": ["id1", "id2", ...] }（2-10 个）
+/// 返回：每个创意的摘要 + 两两相似度矩阵
+pub async fn api_ideas_batch_compare(
+    State(s): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let ids: Vec<String> = match req["idea_ids"].as_array() {
+        Some(arr) => arr.iter().filter_map(|v| v.as_str().map(String::from)).collect(),
+        None => return Json(json!({"status": "error", "message": "缺少 idea_ids 数组"})),
+    };
+    if ids.len() < 2 {
+        return Json(json!({"status": "error", "message": "至少需要 2 个创意进行对比"}));
+    }
+    if ids.len() > 10 {
+        return Json(json!({"status": "error", "message": "最多支持 10 个创意同时对比"}));
+    }
+
+    // 加载所有创意
+    let mut ideas = Vec::new();
+    for id in &ids {
+        match s.db.get_idea(id) {
+            Ok(Some(idea)) => ideas.push(idea),
+            _ => return Json(json!({"status": "error", "message": format!("创意 {} 不存在", id)})),
+        }
+    }
+
+    // 构建摘要列表
+    let summaries: Vec<serde_json::Value> = ideas
+        .iter()
+        .map(|i| {
+            json!({
+                "id": i.id,
+                "title": i.title,
+                "description": i.description.chars().take(200).collect::<String>(),
+                "novelty_score": i.novelty_score,
+                "status": i.status,
+            })
+        })
+        .collect();
+
+    // 计算两两文本相似度矩阵（Jaccard on character trigrams）
+    let n = ideas.len();
+    let mut matrix = vec![vec![0.0f64; n]; n];
+    let trigrams: Vec<std::collections::HashSet<String>> = ideas
+        .iter()
+        .map(|i| {
+            let text = format!("{} {}", i.title, i.description);
+            char_trigrams(&text)
+        })
+        .collect();
+
+    for i in 0..n {
+        matrix[i][i] = 1.0;
+        for j in (i + 1)..n {
+            let sim = jaccard_trigram(&trigrams[i], &trigrams[j]);
+            matrix[i][j] = sim;
+            matrix[j][i] = sim;
+        }
+    }
+
+    Json(json!({
+        "status": "ok",
+        "ideas": summaries,
+        "similarity_matrix": matrix,
+    }))
+}
+
+/// 字符三元组集合 / Character trigram set
+fn char_trigrams(text: &str) -> std::collections::HashSet<String> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut set = std::collections::HashSet::new();
+    if chars.len() >= 3 {
+        for w in chars.windows(3) {
+            set.insert(w.iter().collect::<String>());
+        }
+    }
+    set
+}
+
+/// Jaccard 相似度 / Jaccard similarity between two sets
+fn jaccard_trigram(
+    a: &std::collections::HashSet<String>,
+    b: &std::collections::HashSet<String>,
+) -> f64 {
+    if a.is_empty() && b.is_empty() {
+        return 1.0;
+    }
+    let inter = a.intersection(b).count() as f64;
+    let union = a.union(b).count() as f64;
+    if union == 0.0 { 0.0 } else { inter / union }
 }

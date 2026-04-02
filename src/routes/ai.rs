@@ -1,7 +1,47 @@
 use super::AppState;
 use crate::patent::*;
-use axum::{extract::State, Json};
+use axum::{
+    extract::State,
+    response::sse::{Event, Sse},
+    Json,
+};
+use futures::stream::Stream;
 use serde_json::json;
+use std::convert::Infallible;
+
+/// POST /api/ai/chat/stream — SSE 流式 AI 聊天 / Streaming AI chat via SSE
+pub async fn api_ai_chat_stream(
+    State(s): State<AppState>,
+    Json(req): Json<AiChatRequest>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let ai = s.config.read().unwrap().ai_client();
+    let ctx = req
+        .patent_id
+        .as_ref()
+        .and_then(|pid| s.db.get_patent(pid).ok().flatten())
+        .map(|p| {
+            let claims_preview: String = p.claims.chars().take(3000).collect();
+            format!(
+                "Patent: {}\nTitle: {}\nAbstract: {}\nClaims: {}",
+                p.patent_number, p.title, p.abstract_text, claims_preview
+            )
+        });
+
+    let mut rx = ai.chat_stream(&req.message, ctx.as_deref());
+
+    let stream = async_stream::stream! {
+        while let Some(chunk) = rx.recv().await {
+            if chunk.starts_with("[ERROR]") {
+                yield Ok(Event::default().event("error").data(chunk));
+                break;
+            }
+            yield Ok(Event::default().data(chunk));
+        }
+        yield Ok(Event::default().event("done").data("[DONE]"));
+    };
+
+    Sse::new(stream)
+}
 
 pub async fn api_ai_chat(
     State(s): State<AppState>,

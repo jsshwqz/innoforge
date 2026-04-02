@@ -10,6 +10,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
 </head>
 <body>
     <nav class="navbar">
@@ -51,11 +52,16 @@
         if (!msg) return;
         input.value = '';
         var box = document.getElementById('chat-messages');
-        var escaped = document.createElement('div');
-        escaped.textContent = msg;
-        box.innerHTML += '<div class="msg user">' + escaped.innerHTML + '</div>';
+        var userDiv = document.createElement('div');
+        userDiv.className = 'msg user';
+        userDiv.textContent = msg;
+        box.appendChild(userDiv);
         var loadingId = 'ai-' + Date.now();
-        box.innerHTML += '<div class="msg ai" id="' + loadingId + '">' + t('ai.thinking') + '</div>';
+        var aiDiv = document.createElement('div');
+        aiDiv.className = 'msg ai';
+        aiDiv.id = loadingId;
+        aiDiv.textContent = t('ai.thinking');
+        box.appendChild(aiDiv);
         box.scrollTop = box.scrollHeight;
         try {
             var resp = await fetch('/api/ai/chat', {
@@ -64,7 +70,7 @@
                 body: JSON.stringify({ message: msg })
             });
             var data = await resp.json();
-            document.getElementById(loadingId).innerHTML = escapeHtml(data.content).replace(/\n/g, '<br>');
+            document.getElementById(loadingId).innerHTML = DOMPurify.sanitize(escapeHtml(data.content).replace(/\n/g, '<br>'));
         } catch(e) {
             var el = document.getElementById(loadingId);
             el.textContent = t('ai.fail') + ': ' + e;

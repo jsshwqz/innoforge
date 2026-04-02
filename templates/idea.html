@@ -10,6 +10,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
     <style>
         .idea-layout { display: grid; grid-template-columns: 280px 1fr; gap: 24px; min-height: calc(100vh - 60px); }
         .idea-sidebar { background: #161b22; border-right: 1px solid #30363d; padding: 20px; overflow-y: auto; }
@@ -235,7 +236,7 @@
         else if (status === 'done') icon = '✅';
         else if (status === 'skipped') icon = '⏭️';
         else if (status === 'error') icon = '❌';
-        el.querySelector('.step-icon').innerHTML = icon;
+        el.querySelector('.step-icon').innerHTML = DOMPurify.sanitize(icon);
 
         // Update progress bar
         var doneCount = document.querySelectorAll('#pipeline-steps .step.done, #pipeline-steps .step.skipped').length;
@@ -294,7 +295,7 @@
             } else {
                 // Deep mode: 12-step pipeline with SSE progress
                 // Show pipeline progress UI
-                document.getElementById('status-area').innerHTML = buildPipelineUI();
+                document.getElementById('status-area').innerHTML = DOMPurify.sanitize(buildPipelineUI());
 
                 // Connect SSE FIRST, then start pipeline (avoids race condition)
                 await new Promise(function(resolve, reject) {
@@ -377,16 +378,16 @@
         if (idea.novelty_score != null) {
             const scoreClass = idea.novelty_score >= 70 ? 'score-high' : idea.novelty_score >= 40 ? 'score-mid' : 'score-low';
             const scoreLabel = idea.novelty_score >= 70 ? t('idea.scoreHigh') : idea.novelty_score >= 40 ? t('idea.scoreMid') : t('idea.scoreLow');
-            document.getElementById('score-area').innerHTML =
+            document.getElementById('score-area').innerHTML = DOMPurify.sanitize(
                 '<div class="score-display">' +
                 '<div class="score-number ' + scoreClass + '" style="background:transparent;">' + Math.round(idea.novelty_score * 10) / 10 + '</div>' +
                 '<div class="score-label">' + (i18nLang === 'en' ? 'Novelty Score / 100 — ' : '新颖性评分 / 100 — ') + scoreLabel + '</div>' +
-                '</div>';
+                '</div>');
         }
 
         if (idea.analysis) {
-            document.getElementById('analysis-area').innerHTML =
-                '<div class="analysis-result">' + renderMarkdown(idea.analysis) + '</div>';
+            document.getElementById('analysis-area').innerHTML = DOMPurify.sanitize(
+                '<div class="analysis-result">' + renderMarkdown(idea.analysis) + '</div>');
         }
 
         let findingsHtml = '';
@@ -419,12 +420,12 @@
             });
             findingsHtml += '</div>';
         }
-        document.getElementById('findings-area').innerHTML = findingsHtml;
+        document.getElementById('findings-area').innerHTML = DOMPurify.sanitize(findingsHtml);
     }
 
     function showStatus(type, msg) {
-        document.getElementById('status-area').innerHTML =
-            '<div class="status-bar status-' + type + '">' + msg + '</div>';
+        document.getElementById('status-area').innerHTML = DOMPurify.sanitize(
+            '<div class="status-bar status-' + type + '">' + msg + '</div>');
     }
 
     function clearResults() {
@@ -447,12 +448,18 @@
             if (!resp.ok) return;
             const data = await resp.json();
             if (data.status !== 'ok' || !data.ideas || !data.ideas.length) {
-                document.getElementById('history-list').innerHTML = '<p class="hint" style="font-size:0.85em;">' + t('idea.historyEmpty') + '</p>';
+                var emptyHint = document.createElement('p');
+                emptyHint.className = 'hint';
+                emptyHint.style.fontSize = '0.85em';
+                emptyHint.textContent = t('idea.historyEmpty');
+                var histList = document.getElementById('history-list');
+                histList.innerHTML = '';
+                histList.appendChild(emptyHint);
                 return;
             }
 
             const list = document.getElementById('history-list');
-            list.innerHTML = data.ideas.map(function(idea) {
+            list.innerHTML = DOMPurify.sanitize(data.ideas.map(function(idea) {
                 const scoreClass = idea.novelty_score == null ? '' :
                     idea.novelty_score >= 70 ? 'score-high' : idea.novelty_score >= 40 ? 'score-mid' : 'score-low';
                 const scoreText = idea.novelty_score != null ? idea.novelty_score : '-';
@@ -474,7 +481,7 @@
                     'style="position:absolute;top:4px;right:4px;background:none;border:none;color:#484f58;cursor:pointer;font-size:0.8em;padding:2px 6px;" ' +
                     'title="删除">✕</button>' +
                     '</div>';
-            }).join('');
+            }).join(''));
         } catch (e) {
             console.error('Failed to load history:', e);
         }
@@ -572,7 +579,11 @@
             var data = await res.json();
             var container = document.getElementById('chat-messages');
             if (!data.messages || data.messages.length === 0) {
-                container.innerHTML = '<p style="color:#8b949e; font-size:0.9em; text-align:center;">提出你的问题，开始讨论这个创意</p>';
+                var chatHintP = document.createElement('p');
+                chatHintP.style.cssText = 'color:#8b949e; font-size:0.9em; text-align:center;';
+                chatHintP.textContent = '提出你的问题，开始讨论这个创意';
+                container.innerHTML = '';
+                container.appendChild(chatHintP);
                 return;
             }
             var html = '';
@@ -588,7 +599,7 @@
                     '<span style="font-size:0.75em; color:#8b949e;">' + esc(time) + '</span></div>' +
                     '<div style="color:#c9d1d9; white-space:pre-wrap; line-height:1.6; font-size:0.92em;">' + renderMarkdown(msg.content) + '</div></div>';
             });
-            container.innerHTML = html;
+            container.innerHTML = DOMPurify.sanitize(html);
             container.scrollTop = container.scrollHeight;
         } catch (e) {
             console.error('Failed to load messages:', e);
@@ -601,8 +612,8 @@
             var sumDiv = document.getElementById('discussion-summary');
             if (ideaData.discussion_summary && ideaData.discussion_summary.length > 0) {
                 sumDiv.style.display = 'block';
-                sumDiv.innerHTML = '<div style="font-size:0.8em; color:#58a6ff; margin-bottom:4px; font-weight:bold;">📋 讨论总结</div>' +
-                    '<div style="color:#c9d1d9; font-size:0.9em; line-height:1.6;">' + renderMarkdown(ideaData.discussion_summary) + '</div>';
+                sumDiv.innerHTML = DOMPurify.sanitize('<div style="font-size:0.8em; color:#58a6ff; margin-bottom:4px; font-weight:bold;">📋 讨论总结</div>' +
+                    '<div style="color:#c9d1d9; font-size:0.9em; line-height:1.6;">' + renderMarkdown(ideaData.discussion_summary) + '</div>');
             } else {
                 sumDiv.style.display = 'none';
             }
@@ -623,13 +634,20 @@
         });
         if (chatAttachedFiles.length > 0) {
             container.style.display = 'block';
-            container.innerHTML = chatAttachedFiles.map(function(f, i) {
+            container.innerHTML = '';
+            chatAttachedFiles.forEach(function(f, i) {
                 var icon = f.type.startsWith('image/') ? '🖼️' : '📄';
                 var size = (f.size / 1024).toFixed(1) + 'KB';
-                return '<span style="display:inline-flex;align-items:center;gap:4px;background:#21262d;padding:3px 8px;border-radius:4px;margin:2px;color:#8b949e;">' +
-                    icon + ' ' + f.name + ' (' + size + ')' +
-                    '<button onclick="removeChatFile(' + i + ')" style="background:none;border:none;color:#f85149;cursor:pointer;padding:0 2px;">×</button></span>';
-            }).join('');
+                var span = document.createElement('span');
+                span.style.cssText = 'display:inline-flex;align-items:center;gap:4px;background:#21262d;padding:3px 8px;border-radius:4px;margin:2px;color:#8b949e;';
+                span.textContent = icon + ' ' + f.name + ' (' + size + ')';
+                var removeBtn = document.createElement('button');
+                removeBtn.style.cssText = 'background:none;border:none;color:#f85149;cursor:pointer;padding:0 2px;';
+                removeBtn.textContent = '×';
+                removeBtn.setAttribute('onclick', 'removeChatFile(' + i + ')');
+                span.appendChild(removeBtn);
+                container.appendChild(span);
+            });
         } else {
             container.style.display = 'none';
         }
@@ -643,15 +661,21 @@
             container.style.display = 'none';
             container.innerHTML = '';
         } else {
-            handleChatFileSelect({files: [], value: ''});
             // Re-render
-            container.innerHTML = chatAttachedFiles.map(function(f, i) {
+            container.innerHTML = '';
+            chatAttachedFiles.forEach(function(f, i) {
                 var icon = f.type.startsWith('image/') ? '🖼️' : '📄';
                 var size = (f.size / 1024).toFixed(1) + 'KB';
-                return '<span style="display:inline-flex;align-items:center;gap:4px;background:#21262d;padding:3px 8px;border-radius:4px;margin:2px;color:#8b949e;">' +
-                    icon + ' ' + f.name + ' (' + size + ')' +
-                    '<button onclick="removeChatFile(' + i + ')" style="background:none;border:none;color:#f85149;cursor:pointer;padding:0 2px;">×</button></span>';
-            }).join('');
+                var span = document.createElement('span');
+                span.style.cssText = 'display:inline-flex;align-items:center;gap:4px;background:#21262d;padding:3px 8px;border-radius:4px;margin:2px;color:#8b949e;';
+                span.textContent = icon + ' ' + f.name + ' (' + size + ')';
+                var removeBtn = document.createElement('button');
+                removeBtn.style.cssText = 'background:none;border:none;color:#f85149;cursor:pointer;padding:0 2px;';
+                removeBtn.textContent = '×';
+                removeBtn.setAttribute('onclick', 'removeChatFile(' + i + ')');
+                span.appendChild(removeBtn);
+                container.appendChild(span);
+            });
         }
     }
 
@@ -667,13 +691,27 @@
         var container = document.getElementById('chat-messages');
         var placeholder = container.querySelector('p');
         if (placeholder) placeholder.remove();
-        container.innerHTML += '<div style="margin-bottom:10px; padding:10px 14px; background:#1f2937; border-radius:8px; border-left:3px solid #30363d;">' +
-            '<span style="font-size:0.8em; color:#58a6ff; font-weight:bold;">👤 你</span>' +
-            '<div style="color:#c9d1d9; margin-top:4px; white-space:pre-wrap;">' + esc(msg) + '</div></div>';
+        var userMsgDiv = document.createElement('div');
+        userMsgDiv.style.cssText = 'margin-bottom:10px; padding:10px 14px; background:#1f2937; border-radius:8px; border-left:3px solid #30363d;';
+        var userLabel = document.createElement('span');
+        userLabel.style.cssText = 'font-size:0.8em; color:#58a6ff; font-weight:bold;';
+        userLabel.textContent = '👤 你';
+        var userBody = document.createElement('div');
+        userBody.style.cssText = 'color:#c9d1d9; margin-top:4px; white-space:pre-wrap;';
+        userBody.textContent = msg;
+        userMsgDiv.appendChild(userLabel);
+        userMsgDiv.appendChild(userBody);
+        container.appendChild(userMsgDiv);
 
         // Show thinking indicator
-        container.innerHTML += '<div id="thinking-indicator" style="margin-bottom:10px; padding:10px 14px; background:#0d1117; border-radius:8px; border-left:3px solid #1f6feb;">' +
-            '<span style="color:#58a6ff; font-size:0.9em;">🤖 思考中...</span></div>';
+        var thinkDiv = document.createElement('div');
+        thinkDiv.id = 'thinking-indicator';
+        thinkDiv.style.cssText = 'margin-bottom:10px; padding:10px 14px; background:#0d1117; border-radius:8px; border-left:3px solid #1f6feb;';
+        var thinkSpan = document.createElement('span');
+        thinkSpan.style.cssText = 'color:#58a6ff; font-size:0.9em;';
+        thinkSpan.textContent = '🤖 思考中...';
+        thinkDiv.appendChild(thinkSpan);
+        container.appendChild(thinkDiv);
         container.scrollTop = container.scrollHeight;
 
         try {
@@ -687,17 +725,31 @@
             if (indicator) indicator.remove();
 
             if (data.status === 'ok' && data.message) {
-                container.innerHTML += '<div style="margin-bottom:10px; padding:10px 14px; background:#0d1117; border-radius:8px; border-left:3px solid #1f6feb;">' +
-                    '<span style="font-size:0.8em; color:#58a6ff; font-weight:bold;">🤖 AI</span>' +
-                    '<div style="color:#c9d1d9; margin-top:4px; white-space:pre-wrap; line-height:1.6;">' + renderMarkdown(data.message.content) + '</div></div>';
+                var aiMsgDiv = document.createElement('div');
+                aiMsgDiv.style.cssText = 'margin-bottom:10px; padding:10px 14px; background:#0d1117; border-radius:8px; border-left:3px solid #1f6feb;';
+                var aiLabel = document.createElement('span');
+                aiLabel.style.cssText = 'font-size:0.8em; color:#58a6ff; font-weight:bold;';
+                aiLabel.textContent = '🤖 AI';
+                var aiBody = document.createElement('div');
+                aiBody.style.cssText = 'color:#c9d1d9; margin-top:4px; white-space:pre-wrap; line-height:1.6;';
+                aiBody.innerHTML = DOMPurify.sanitize(renderMarkdown(data.message.content));
+                aiMsgDiv.appendChild(aiLabel);
+                aiMsgDiv.appendChild(aiBody);
+                container.appendChild(aiMsgDiv);
             } else {
-                container.innerHTML += '<div style="padding:10px; color:#f85149;">错误: ' + esc(data.error || '未知错误') + '</div>';
+                var errDiv = document.createElement('div');
+                errDiv.style.cssText = 'padding:10px; color:#f85149;';
+                errDiv.textContent = '错误: ' + (data.error || '未知错误');
+                container.appendChild(errDiv);
             }
             container.scrollTop = container.scrollHeight;
         } catch (e) {
             var ind = document.getElementById('thinking-indicator');
             if (ind) ind.remove();
-            container.innerHTML += '<div style="padding:10px; color:#f85149;">请求失败: ' + esc(e.message) + '</div>';
+            var reqErrDiv = document.createElement('div');
+            reqErrDiv.style.cssText = 'padding:10px; color:#f85149;';
+            reqErrDiv.textContent = '请求失败: ' + e.message;
+            container.appendChild(reqErrDiv);
         }
         input.disabled = false;
         input.focus();
@@ -714,12 +766,16 @@
             if (data.status === 'ok') {
                 var sumDiv = document.getElementById('discussion-summary');
                 sumDiv.style.display = 'block';
-                sumDiv.innerHTML = '<div style="font-size:0.8em; color:#58a6ff; margin-bottom:4px; font-weight:bold;">📋 讨论总结</div>' +
-                    '<div style="color:#c9d1d9; font-size:0.9em; line-height:1.6;">' + renderMarkdown(data.summary) + '</div>';
+                sumDiv.innerHTML = DOMPurify.sanitize('<div style="font-size:0.8em; color:#58a6ff; margin-bottom:4px; font-weight:bold;">📋 讨论总结</div>' +
+                    '<div style="color:#c9d1d9; font-size:0.9em; line-height:1.6;">' + renderMarkdown(data.summary) + '</div>');
             } else {
                 var sumDiv = document.getElementById('discussion-summary');
                 sumDiv.style.display = 'block';
-                sumDiv.innerHTML = '<div style="color:#f0ad4e; font-size:0.85em; padding:8px;">💡 ' + (data.error || '生成总结失败') + '，请先在下方输入框和 AI 讨论几轮后再生成总结。</div>';
+                var sumErrDiv = document.createElement('div');
+                sumErrDiv.style.cssText = 'color:#f0ad4e; font-size:0.85em; padding:8px;';
+                sumErrDiv.textContent = '💡 ' + (data.error || '生成总结失败') + '，请先在下方输入框和 AI 讨论几轮后再生成总结。';
+                sumDiv.innerHTML = '';
+                sumDiv.appendChild(sumErrDiv);
             }
         } catch(e) {
             alert('请求失败: ' + e.message);

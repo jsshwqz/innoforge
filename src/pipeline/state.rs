@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-/// 流水线步骤枚举 — 12 步固定序列
+/// 流水线步骤枚举 — 13 步固定序列
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PipelineStep {
@@ -11,6 +11,7 @@ pub enum PipelineStep {
     DiversityGate,
     ComputeSimilarity,
     RankAndFilter,
+    PriorArtCluster,
     DetectContradictions,
     ScoreNovelty,
     AiDeepAnalysis,
@@ -26,7 +27,7 @@ pub enum StepType {
 }
 
 impl PipelineStep {
-    pub const TOTAL_STEPS: usize = 12;
+    pub const TOTAL_STEPS: usize = 13;
 
     pub fn step_type(&self) -> StepType {
         match self {
@@ -43,7 +44,8 @@ impl PipelineStep {
             Self::SearchPatents => Some(Self::DiversityGate),
             Self::DiversityGate => Some(Self::ComputeSimilarity),
             Self::ComputeSimilarity => Some(Self::RankAndFilter),
-            Self::RankAndFilter => Some(Self::DetectContradictions),
+            Self::RankAndFilter => Some(Self::PriorArtCluster),
+            Self::PriorArtCluster => Some(Self::DetectContradictions),
             Self::DetectContradictions => Some(Self::ScoreNovelty),
             Self::ScoreNovelty => Some(Self::AiDeepAnalysis),
             Self::AiDeepAnalysis => Some(Self::AiActionPlan),
@@ -61,11 +63,12 @@ impl PipelineStep {
             Self::DiversityGate => 4,
             Self::ComputeSimilarity => 5,
             Self::RankAndFilter => 6,
-            Self::DetectContradictions => 7,
-            Self::ScoreNovelty => 8,
-            Self::AiDeepAnalysis => 9,
-            Self::AiActionPlan => 10,
-            Self::Finalize => 11,
+            Self::PriorArtCluster => 7,
+            Self::DetectContradictions => 8,
+            Self::ScoreNovelty => 9,
+            Self::AiDeepAnalysis => 10,
+            Self::AiActionPlan => 11,
+            Self::Finalize => 12,
         }
     }
 
@@ -78,6 +81,7 @@ impl PipelineStep {
             Self::DiversityGate => "多样性检查",
             Self::ComputeSimilarity => "相似度计算",
             Self::RankAndFilter => "排序过滤",
+            Self::PriorArtCluster => "现有技术聚类 / Prior art clustering",
             Self::DetectContradictions => "矛盾信号检测",
             Self::ScoreNovelty => "新颖性评分",
             Self::AiDeepAnalysis => "AI 深度分析",
@@ -101,6 +105,7 @@ impl PipelineStep {
             Self::ExpandQuery
                 | Self::DiversityGate
                 | Self::RankAndFilter
+                | Self::PriorArtCluster
                 | Self::DetectContradictions
                 | Self::AiDeepAnalysis
                 | Self::AiActionPlan

@@ -3,10 +3,10 @@
 //! 基于 SQLite + FTS5 的本地数据持久化，支持全文搜索、创意管理、收藏夹、标签等。
 //! Local data persistence with SQLite + FTS5, supporting full-text search, ideas, collections, tags.
 //!
-//! 数据库自动迁移，当前 schema 版本：5。
-//! Auto-migration, current schema version: 5.
+//! 数据库自动迁移，当前 schema 版本：6。
+//! Auto-migration, current schema version: 6.
 
-use crate::patent::{Idea, IdeaSummary, Patent, PatentSummary, SearchType};
+use crate::patent::{FeatureCard, Idea, IdeaSummary, Patent, PatentSummary, SearchType};
 use anyhow::Result;
 use rusqlite::{params, Connection, OptionalExtension};
 use std::sync::Mutex;
@@ -26,7 +26,7 @@ impl Database {
     }
 
     /// Current schema version. Increment when adding migrations.
-    const SCHEMA_VERSION: i32 = 5;
+    const SCHEMA_VERSION: i32 = 7;
 
     pub fn init(path: &str) -> Result<Self> {
         let conn = Connection::open(path)?;
@@ -177,6 +177,53 @@ impl Database {
             ",
             )?;
             tracing::info!("Database migrated to version 5 (app_settings 表)");
+        }
+
+        // Migration 5 → 6: Feature cards
+        if current_version < 6 {
+            conn.execute_batch("
+                CREATE TABLE IF NOT EXISTS feature_cards (
+                    id TEXT PRIMARY KEY,
+                    idea_id TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    description TEXT DEFAULT '',
+                    novelty_score REAL,
+                    created_at TEXT DEFAULT (datetime('now')),
+                    FOREIGN KEY (idea_id) REFERENCES ideas(id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_fc_idea ON feature_cards(idea_id);
+                CREATE INDEX IF NOT EXISTS idx_fc_score ON feature_cards(novelty_score);
+
+                DELETE FROM schema_version;
+                INSERT INTO schema_version (version) VALUES (6);
+            ")?;
+            tracing::info!("Database migrated to version 6 (feature_cards)");
+        }
+
+        // Migration 6 → 7: 管道快照 + 搜索缓存 / Pipeline snapshots + search cache
+        if current_version < 7 {
+            conn.execute_batch("
+                CREATE TABLE IF NOT EXISTS pipeline_snapshots (
+                    idea_id TEXT PRIMARY KEY,
+                    context_json TEXT NOT NULL,
+                    current_step TEXT NOT NULL,
+                    updated_at TEXT DEFAULT (datetime('now'))
+                );
+
+                CREATE TABLE IF NOT EXISTS search_cache (
+                    query_hash TEXT PRIMARY KEY,
+                    query_text TEXT NOT NULL,
+                    results_json TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    created_at TEXT DEFAULT (datetime('now')),
+                    expires_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_cache_expires ON search_cache(expires_at);
+
+                DELETE FROM schema_version;
+                INSERT INTO schema_version (version) VALUES (7);
+            ")?;
+            tracing::info!("Database migrated to version 7 (pipeline_snapshots + search_cache)");
         }
 
         if current_version > 0 && current_version < Self::SCHEMA_VERSION {
@@ -1092,6 +1139,131 @@ impl Database {
             )
             .unwrap_or_default();
         Ok(summary)
+    }
+
+    // ── Feature Cards CRUD ──────────────────────────────────────────
+
+    pub fn insert_feature_card(&self, card: &FeatureCard) -> Result<()> {
+        let c = self.conn();
+        c.execute(
+            "INSERT INTO feature_cards (id, idea_id, title, description, novelty_score, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                card.id,
+                card.idea_id,
+                card.title,
+                card.description,
+                card.novelty_score,
+                card.created_at
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// 按 ID 获取单张特征卡片 / Get a single feature card by ID
+    pub fn get_feature_card(&self, id: &str) -> Result<Option<FeatureCard>> {
+        let c = self.conn();
+        let mut stmt = c.prepare(
+            "SELECT id, idea_id, title, COALESCE(description,''), novelty_score, created_at \
+             FROM feature_cards WHERE id = ?1",
+        )?;
+        let card = stmt
+            .query_row(params![id], |r| {
+                Ok(FeatureCard {
+                    id: r.get(0)?,
+                    idea_id: r.get(1)?,
+                    title: r.get(2)?,
+                    description: r.get(3)?,
+                    novelty_score: r.get(4)?,
+                    created_at: r.get(5)?,
+                })
+            })
+            .ok();
+        Ok(card)
+    }
+
+    pub fn get_feature_cards_by_idea(&self, idea_id: &str) -> Result<Vec<FeatureCard>> {
+        let c = self.conn();
+        let mut stmt = c.prepare(
+            "SELECT id, idea_id, title, COALESCE(description,''), novelty_score, created_at \
+             FROM feature_cards WHERE idea_id = ?1 ORDER BY created_at ASC",
+        )?;
+        let rows = stmt
+            .query_map(params![idea_id], |r| {
+                Ok(FeatureCard {
+                    id: r.get(0)?,
+                    idea_id: r.get(1)?,
+                    title: r.get(2)?,
+                    description: r.get(3)?,
+                    novelty_score: r.get(4)?,
+                    created_at: r.get(5)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    }
+    // ── 管道断点快照 / Pipeline Snapshots ──────────────────────────────────
+
+    /// 保存管道执行快照（每步完成后调用）/ Save pipeline snapshot after each step
+    pub fn save_pipeline_snapshot(&self, idea_id: &str, context_json: &str, current_step: &str) -> Result<()> {
+        let c = self.conn();
+        c.execute(
+            "INSERT OR REPLACE INTO pipeline_snapshots (idea_id, context_json, current_step, updated_at) \
+             VALUES (?1, ?2, ?3, datetime('now'))",
+            params![idea_id, context_json, current_step],
+        )?;
+        Ok(())
+    }
+
+    /// 加载管道快照（用于断点续跑）/ Load pipeline snapshot for resume
+    pub fn load_pipeline_snapshot(&self, idea_id: &str) -> Result<Option<(String, String)>> {
+        let c = self.conn();
+        let mut stmt = c.prepare(
+            "SELECT context_json, current_step FROM pipeline_snapshots WHERE idea_id = ?1",
+        )?;
+        let result = stmt
+            .query_row(params![idea_id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+            .ok();
+        Ok(result)
+    }
+
+    /// 删除管道快照（完成后清理）/ Delete snapshot after pipeline completes
+    pub fn delete_pipeline_snapshot(&self, idea_id: &str) -> Result<()> {
+        let c = self.conn();
+        c.execute("DELETE FROM pipeline_snapshots WHERE idea_id = ?1", params![idea_id])?;
+        Ok(())
+    }
+
+    // ── 搜索结果缓存 / Search Cache ──────────────────────────────────────
+
+    /// 查询缓存（未过期才返回）/ Get cached search results if not expired
+    pub fn get_search_cache(&self, query_hash: &str) -> Result<Option<String>> {
+        let c = self.conn();
+        let mut stmt = c.prepare(
+            "SELECT results_json FROM search_cache \
+             WHERE query_hash = ?1 AND expires_at > datetime('now')",
+        )?;
+        let result = stmt.query_row(params![query_hash], |r| r.get::<_, String>(0)).ok();
+        Ok(result)
+    }
+
+    /// 写入搜索缓存（TTL 24h）/ Write search cache with 24h TTL
+    pub fn set_search_cache(&self, query_hash: &str, query_text: &str, results_json: &str, source: &str) -> Result<()> {
+        let c = self.conn();
+        c.execute(
+            "INSERT OR REPLACE INTO search_cache (query_hash, query_text, results_json, source, created_at, expires_at) \
+             VALUES (?1, ?2, ?3, ?4, datetime('now'), datetime('now', '+24 hours'))",
+            params![query_hash, query_text, results_json, source],
+        )?;
+        Ok(())
+    }
+
+    /// 清理过期缓存 / Purge expired cache entries
+    pub fn purge_expired_cache(&self) -> Result<usize> {
+        let c = self.conn();
+        let deleted = c.execute("DELETE FROM search_cache WHERE expires_at <= datetime('now')", [])?;
+        Ok(deleted)
     }
 }
 

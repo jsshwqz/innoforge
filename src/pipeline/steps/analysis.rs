@@ -1,14 +1,16 @@
-//! Step 10-11: AiDeepAnalysis + AiActionPlan
+//! Step 11-12: AiDeepAnalysis + AiActionPlan
 //!
 //! 类型：LLM
 //!
 //! 关键设计：AI 接收的是结构化计算结果，而非让 AI 自己猜测
 
 use crate::ai::AiClient;
+use crate::db::Database;
+use crate::patent::FeatureCard;
 use crate::pipeline::context::PipelineContext;
 use anyhow::Result;
 
-/// 执行 Step 10: AI 深度分析
+/// 执行 Step 11: AI 深度分析
 pub async fn deep_analysis(ctx: &mut PipelineContext, ai: &AiClient) -> Result<()> {
     // 构建结构化数据包，让 AI 基于代码计算的结果分析
     let top_matches_summary: String = ctx
@@ -106,7 +108,7 @@ pub async fn deep_analysis(ctx: &mut PipelineContext, ai: &AiClient) -> Result<(
     Ok(())
 }
 
-/// 执行 Step 11: AI 生成行动方案
+/// 执行 Step 12: AI 生成行动方案
 pub async fn action_plan(ctx: &mut PipelineContext, ai: &AiClient) -> Result<()> {
     let prompt = format!(
         "基于以下创意分析结果，生成具体的行动方案：\n\n\
@@ -138,5 +140,56 @@ pub async fn action_plan(ctx: &mut PipelineContext, ai: &AiClient) -> Result<()>
         }
     }
 
+    Ok(())
+}
+
+/// 从 AI 分析结果和 top_matches 自动提取特征卡片并存入数据库
+/// Extract feature cards from AI analysis + ranked matches, persist to DB
+pub async fn extract_feature_cards(ctx: &PipelineContext, db: &Database) -> Result<()> {
+    let idea_id = &ctx.idea_id;
+    let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+
+    // 从 top_matches 提取：每个高相似度匹配 → 一张特征卡
+    // 反转 combined_score 为 novelty_score：相似度越高 → 新颖性越低
+    for (i, m) in ctx.top_matches.iter().take(5).enumerate() {
+        let novelty = ((1.0 - m.combined_score) * 100.0).clamp(0.0, 100.0);
+        let description = if m.snippet.chars().count() > 300 {
+            format!("{}...", m.snippet.chars().take(300).collect::<String>())
+        } else {
+            m.snippet.clone()
+        };
+
+        let card = FeatureCard {
+            id: format!("{}-fc-{}", idea_id, i + 1),
+            idea_id: idea_id.clone(),
+            title: format!("[{}] {}", m.source_type, m.source_title),
+            description,
+            novelty_score: Some(novelty),
+            created_at: now.clone(),
+        };
+
+        if let Err(e) = db.insert_feature_card(&card) {
+            tracing::warn!("特征卡片存储失败: {} — {}", card.title, e);
+        }
+    }
+
+    // 从矛盾信号提取：每个矛盾 → 一张「创新机会」特征卡
+    for (i, c) in ctx.contradictions.iter().enumerate() {
+        let card = FeatureCard {
+            id: format!("{}-fc-opp-{}", idea_id, i + 1),
+            idea_id: idea_id.clone(),
+            title: format!("创新机会: {}", c.dimension),
+            description: c.opportunity.clone(),
+            novelty_score: Some(c.signal_strength * 100.0),
+            created_at: now.clone(),
+        };
+
+        if let Err(e) = db.insert_feature_card(&card) {
+            tracing::warn!("创新机会卡片存储失败: {} — {}", card.title, e);
+        }
+    }
+
+    let total = ctx.top_matches.len().min(5) + ctx.contradictions.len();
+    tracing::info!("已自动提取 {} 张特征卡片 (idea: {})", total, idea_id);
     Ok(())
 }

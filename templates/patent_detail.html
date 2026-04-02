@@ -10,6 +10,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
 </head>
 <body>
     <nav class="navbar">
@@ -136,7 +137,7 @@
     async function aiSummarize() {
         const el = document.getElementById('ai-summary');
         el.style.display = 'block';
-        el.innerHTML = '🤖 ' + t('detail.analyzing');
+        el.textContent = '🤖 ' + t('detail.analyzing');
         try {
             const resp = await fetch('/api/ai/summarize', {
                 method: 'POST',
@@ -144,7 +145,7 @@
                 body: JSON.stringify({patent_number: '{{id}}'})
             });
             const data = await resp.json();
-            el.innerHTML = '<h3>🤖 ' + t('detail.result') + '</h3><div>' + escapeHtml(data.content).replace(/\n/g, '<br>') + '</div>';
+            el.innerHTML = DOMPurify.sanitize('<h3>🤖 ' + t('detail.result') + '</h3><div>' + escapeHtml(data.content).replace(/\n/g, '<br>') + '</div>');
         } catch(e) { el.textContent = t('detail.fail') + ': ' + e; }
     }
 
@@ -158,8 +159,15 @@
         if (!msg) return;
         input.value = '';
         const box = document.getElementById('chat-messages');
-        box.innerHTML += '<div class="msg user">' + escapeHtml(msg) + '</div>';
-        box.innerHTML += '<div class="msg ai" id="ai-loading">' + t('ai.thinking') + '</div>';
+        var userMsgDiv = document.createElement('div');
+        userMsgDiv.className = 'msg user';
+        userMsgDiv.textContent = msg;
+        box.appendChild(userMsgDiv);
+        var aiLoadDiv = document.createElement('div');
+        aiLoadDiv.className = 'msg ai';
+        aiLoadDiv.id = 'ai-loading';
+        aiLoadDiv.textContent = t('ai.thinking');
+        box.appendChild(aiLoadDiv);
         box.scrollTop = box.scrollHeight;
         try {
             const resp = await fetch('/api/ai/chat', {
@@ -173,19 +181,30 @@
                 if (errMsg.includes('unexpected end of file') || errMsg.includes('connection')) {
                     errMsg += '\n\n💡 可能原因：API Key 无效或网络不稳定。请到「设置」页检查 AI 配置。';
                 }
-                document.getElementById('ai-loading').outerHTML =
-                    '<div class="msg ai error" style="color:#f85149;">' + escapeHtml(errMsg).replace(/\n/g, '<br>') + '</div>';
+                var errEl = document.getElementById('ai-loading');
+                var errReplace = document.createElement('div');
+                errReplace.className = 'msg ai error';
+                errReplace.style.color = '#f85149';
+                errReplace.innerHTML = DOMPurify.sanitize(escapeHtml(errMsg).replace(/\n/g, '<br>'));
+                errEl.parentNode.replaceChild(errReplace, errEl);
             } else {
-                document.getElementById('ai-loading').outerHTML =
-                    '<div class="msg ai">' + escapeHtml(data.content).replace(/\n/g, '<br>') + '</div>';
+                var loadEl = document.getElementById('ai-loading');
+                var aiReplace = document.createElement('div');
+                aiReplace.className = 'msg ai';
+                aiReplace.innerHTML = DOMPurify.sanitize(escapeHtml(data.content).replace(/\n/g, '<br>'));
+                loadEl.parentNode.replaceChild(aiReplace, loadEl);
             }
         } catch(e) {
             var errText = String(e);
             if (errText.includes('unexpected end of file') || errText.includes('connection')) {
                 errText += '\n\n💡 请到「设置」页检查 AI API Key 是否正确配置。';
             }
-            document.getElementById('ai-loading').outerHTML =
-                '<div class="msg ai error" style="color:#f85149;">' + escapeHtml(errText).replace(/\n/g, '<br>') + '</div>';
+            var catchEl = document.getElementById('ai-loading');
+            var catchReplace = document.createElement('div');
+            catchReplace.className = 'msg ai error';
+            catchReplace.style.color = '#f85149';
+            catchReplace.innerHTML = DOMPurify.sanitize(escapeHtml(errText).replace(/\n/g, '<br>'));
+            catchEl.parentNode.replaceChild(catchReplace, catchEl);
         }
         box.scrollTop = box.scrollHeight;
     }
@@ -201,10 +220,10 @@
         document.querySelectorAll('.detail-section p').forEach(function(el) {
             // Only update if we have real classification codes (not boolean/empty)
             if (el.innerHTML.indexOf('IPC:') >= 0 && p.ipc_codes && typeof p.ipc_codes === 'string' && p.ipc_codes.length > 2 && p.ipc_codes !== 'true') {
-                el.innerHTML = '<strong>IPC:</strong> ' + escapeHtml(p.ipc_codes);
+                el.innerHTML = DOMPurify.sanitize('<strong>IPC:</strong> ' + escapeHtml(p.ipc_codes));
             }
             if (el.innerHTML.indexOf('CPC:') >= 0 && p.cpc_codes && typeof p.cpc_codes === 'string' && p.cpc_codes.length > 2 && p.cpc_codes !== 'true') {
-                el.innerHTML = '<strong>CPC:</strong> ' + escapeHtml(p.cpc_codes);
+                el.innerHTML = DOMPurify.sanitize('<strong>CPC:</strong> ' + escapeHtml(p.cpc_codes));
             }
         });
         if (p.legal_status) {
@@ -227,7 +246,11 @@
         } catch(e) {}
 
         if (images.length === 0) {
-            container.innerHTML = '<p style="color:#8b949e;">暂无图纸。点击「加载全文」获取。</p>';
+            container.innerHTML = '';
+            var noDrawP = document.createElement('p');
+            noDrawP.style.color = '#8b949e';
+            noDrawP.textContent = '暂无图纸。点击「加载全文」获取。';
+            container.appendChild(noDrawP);
             return;
         }
 
@@ -251,7 +274,7 @@
             html += '</div>';
         });
         html += '</div>';
-        container.innerHTML = html;
+        container.innerHTML = DOMPurify.sanitize(html);
 
         // Update tab button badge
         var tabBtn = document.getElementById('tab-drawings-btn');
@@ -370,7 +393,7 @@
                         + '<span>' + escapeHtml(p.applicant || '暂无') + '</span>'
                         + '</div></div>';
                 });
-                document.getElementById('similar-list').innerHTML = html;
+                document.getElementById('similar-list').innerHTML = DOMPurify.sanitize(html);
             } else {
                 document.getElementById('similar-list').textContent = t('detail.similarNone');
             }
@@ -387,17 +410,34 @@
         const formData = new FormData();
         formData.append('file', file);
         formData.append('patent_id', patentId);
-        document.getElementById('upload-result').innerHTML = '<p style="color: #58a6ff;">' + t('detail.uploadAnalyzing') + '</p>';
+        var uploadResultEl = document.getElementById('upload-result');
+        uploadResultEl.innerHTML = '';
+        var analyzingP = document.createElement('p');
+        analyzingP.style.color = '#58a6ff';
+        analyzingP.textContent = t('detail.uploadAnalyzing');
+        uploadResultEl.appendChild(analyzingP);
         try {
             const res = await fetch('/api/upload/compare', { method: 'POST', body: formData });
             const data = await res.json();
             if (data.success) {
-                document.getElementById('upload-result').innerHTML = '<div style="padding: 16px; background: #0d1117; border-radius: 6px; white-space: pre-wrap; line-height: 1.6;">' + escapeHtml(data.analysis) + '</div>';
+                var resultDiv = document.createElement('div');
+                resultDiv.style.cssText = 'padding: 16px; background: #0d1117; border-radius: 6px; white-space: pre-wrap; line-height: 1.6;';
+                resultDiv.textContent = data.analysis;
+                document.getElementById('upload-result').innerHTML = '';
+                document.getElementById('upload-result').appendChild(resultDiv);
             } else {
-                document.getElementById('upload-result').innerHTML = '<p style="color: #f85149;">' + escapeHtml(data.error) + '</p>';
+                var errP2 = document.createElement('p');
+                errP2.style.color = '#f85149';
+                errP2.textContent = data.error;
+                document.getElementById('upload-result').innerHTML = '';
+                document.getElementById('upload-result').appendChild(errP2);
             }
         } catch (err) {
-            document.getElementById('upload-result').innerHTML = '<p style="color: #f85149;">' + escapeHtml(err.message) + '</p>';
+            var errP3 = document.createElement('p');
+            errP3.style.color = '#f85149';
+            errP3.textContent = err.message;
+            document.getElementById('upload-result').innerHTML = '';
+            document.getElementById('upload-result').appendChild(errP3);
         }
     }
 
@@ -408,7 +448,7 @@
         btn.textContent = '⏳ 分析中...';
         btn.disabled = true;
         result.style.display = 'block';
-        result.innerHTML = '<span style="color:#8b949e;">正在分析权利要求...</span>';
+        result.textContent = '正在分析权利要求...';
         try {
             var resp = await fetch('/api/ai/claims', {
                 method: 'POST',
@@ -417,12 +457,20 @@
             });
             var data = await resp.json();
             if (data.status === 'ok') {
-                result.innerHTML = '<h3 style="color:#58a6ff;margin:0 0 12px;">🔍 权利要求分析</h3><div style="color:#c9d1d9;line-height:1.8;white-space:pre-wrap;">' + escapeHtml(data.analysis).replace(/\n/g, '<br>') + '</div>';
+                result.innerHTML = DOMPurify.sanitize('<h3 style="color:#58a6ff;margin:0 0 12px;">🔍 权利要求分析</h3><div style="color:#c9d1d9;line-height:1.8;white-space:pre-wrap;">' + escapeHtml(data.analysis).replace(/\n/g, '<br>') + '</div>');
             } else {
-                result.innerHTML = '<span style="color:#f85149;">❌ ' + escapeHtml(data.error || data.message || '分析失败') + '</span>';
+                var claimErrSpan = document.createElement('span');
+                claimErrSpan.style.color = '#f85149';
+                claimErrSpan.textContent = '❌ ' + (data.error || data.message || '分析失败');
+                result.innerHTML = '';
+                result.appendChild(claimErrSpan);
             }
         } catch(e) {
-            result.innerHTML = '<span style="color:#f85149;">❌ 请求失败: ' + escapeHtml(e.message) + '</span>';
+            var claimCatchSpan = document.createElement('span');
+            claimCatchSpan.style.color = '#f85149';
+            claimCatchSpan.textContent = '❌ 请求失败: ' + e.message;
+            result.innerHTML = '';
+            result.appendChild(claimCatchSpan);
         }
         btn.textContent = '🔍 分析权利要求';
         btn.disabled = false;
@@ -490,10 +538,16 @@
             var res = await fetch('/api/patents/' + patentId + '/tags');
             var data = await res.json();
             var tags = data.tags || [];
-            var html = tags.map(function(t) {
-                return '<span style="background:#1f6feb;color:white;padding:2px 8px;border-radius:10px;font-size:0.8em;cursor:pointer;" onclick="removeTag(\'' + t + '\')">' + t + ' ✕</span>';
-            }).join(' ');
-            document.getElementById('tags-display').innerHTML = html;
+            var tagsContainer = document.getElementById('tags-display');
+            tagsContainer.innerHTML = '';
+            tags.forEach(function(tagName) {
+                var tagSpan = document.createElement('span');
+                tagSpan.style.cssText = 'background:#1f6feb;color:white;padding:2px 8px;border-radius:10px;font-size:0.8em;cursor:pointer;';
+                tagSpan.textContent = tagName + ' ✕';
+                tagSpan.setAttribute('onclick', "removeTag('" + tagName.replace(/'/g, "\\'") + "')");
+                tagsContainer.appendChild(tagSpan);
+                tagsContainer.appendChild(document.createTextNode(' '));
+            });
         } catch(e) {}
     }
 

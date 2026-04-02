@@ -354,7 +354,7 @@ fn schema_version_is_set_on_fresh_db() {
     let version: i32 = db
         .query_schema_version()
         .expect("should be able to read schema version");
-    assert_eq!(version, 5);
+    assert_eq!(version, 7);
 }
 
 #[test]
@@ -376,5 +376,310 @@ fn reinit_same_db_is_idempotent() {
     assert_eq!(p.unwrap().title, "Migration test");
 
     let version = db2.query_schema_version().unwrap();
-    assert_eq!(version, 5);
+    assert_eq!(version, 7);
+}
+
+// ── Feature cards CRUD ──────────────────────────────────────────────────────
+
+#[test]
+fn feature_card_insert_and_retrieve() {
+    use patent_hub::patent::FeatureCard;
+
+    let db = Database::init(":memory:").unwrap();
+
+    // Create an idea first (FK constraint)
+    let idea = Idea {
+        id: "idea-fc1".to_string(),
+        title: "Test idea for feature cards".to_string(),
+        description: "Description".to_string(),
+        input_type: "text".to_string(),
+        status: "pending".to_string(),
+        analysis: String::new(),
+        web_results: "[]".to_string(),
+        patent_results: "[]".to_string(),
+        novelty_score: None,
+        created_at: "2026-04-01T00:00:00Z".to_string(),
+        updated_at: "2026-04-01T00:00:00Z".to_string(),
+        discussion_summary: String::new(),
+    };
+    db.insert_idea(&idea).unwrap();
+
+    let card = FeatureCard {
+        id: "fc1".to_string(),
+        idea_id: "idea-fc1".to_string(),
+        title: "Novel heat dissipation method".to_string(),
+        description: "Uses graphene layer for thermal conductivity".to_string(),
+        novelty_score: Some(85.5),
+        created_at: "2026-04-01T00:00:00Z".to_string(),
+    };
+    db.insert_feature_card(&card).unwrap();
+
+    let cards = db.get_feature_cards_by_idea("idea-fc1").unwrap();
+    assert_eq!(cards.len(), 1);
+    assert_eq!(cards[0].id, "fc1");
+    assert_eq!(cards[0].title, "Novel heat dissipation method");
+    assert_eq!(cards[0].description, "Uses graphene layer for thermal conductivity");
+    assert_eq!(cards[0].novelty_score, Some(85.5));
+}
+
+#[test]
+fn feature_cards_empty_for_unknown_idea() {
+    let db = Database::init(":memory:").unwrap();
+    let cards = db.get_feature_cards_by_idea("nonexistent").unwrap();
+    assert!(cards.is_empty());
+}
+
+#[test]
+fn feature_card_chinese_title() {
+    use patent_hub::patent::FeatureCard;
+
+    let db = Database::init(":memory:").unwrap();
+
+    let idea = Idea {
+        id: "idea-cn".to_string(),
+        title: "中文创意测试".to_string(),
+        description: "测试描述".to_string(),
+        input_type: "text".to_string(),
+        status: "pending".to_string(),
+        analysis: String::new(),
+        web_results: "[]".to_string(),
+        patent_results: "[]".to_string(),
+        novelty_score: None,
+        created_at: "2026-04-01T00:00:00Z".to_string(),
+        updated_at: "2026-04-01T00:00:00Z".to_string(),
+        discussion_summary: String::new(),
+    };
+    db.insert_idea(&idea).unwrap();
+
+    let card = FeatureCard {
+        id: "fc-cn".to_string(),
+        idea_id: "idea-cn".to_string(),
+        title: "基于石墨烯的散热方法".to_string(),
+        description: "利用石墨烯优异的导热性能实现高效散热".to_string(),
+        novelty_score: Some(92.0),
+        created_at: "2026-04-01T00:00:00Z".to_string(),
+    };
+    db.insert_feature_card(&card).unwrap();
+
+    let cards = db.get_feature_cards_by_idea("idea-cn").unwrap();
+    assert_eq!(cards.len(), 1);
+    assert_eq!(cards[0].title, "基于石墨烯的散热方法");
+    assert_eq!(cards[0].description, "利用石墨烯优异的导热性能实现高效散热");
+}
+
+// ── Pipeline snapshots CRUD ────────────────────────────────────────────────────
+
+#[test]
+fn pipeline_snapshot_save_load_delete() {
+    let db = Database::init(":memory:").unwrap();
+
+    // Save
+    db.save_pipeline_snapshot("snap-idea1", r#"{"step":1,"title":"test"}"#, "ParseInput")
+        .unwrap();
+
+    // Load
+    let loaded = db.load_pipeline_snapshot("snap-idea1").unwrap();
+    assert!(loaded.is_some());
+    let (json, step) = loaded.unwrap();
+    assert!(json.contains("\"step\":1"));
+    assert_eq!(step, "ParseInput");
+
+    // Delete
+    db.delete_pipeline_snapshot("snap-idea1").unwrap();
+
+    // Load after delete → None
+    let gone = db.load_pipeline_snapshot("snap-idea1").unwrap();
+    assert!(gone.is_none());
+}
+
+// ── Search cache CRUD ─────────────────────────────────────────────────────────
+
+#[test]
+fn search_cache_set_get() {
+    let db = Database::init(":memory:").unwrap();
+
+    db.set_search_cache("hash_abc", "电池 专利", r#"[{"id":"r1"}]"#, "web")
+        .unwrap();
+
+    let cached = db.get_search_cache("hash_abc").unwrap();
+    assert!(cached.is_some());
+    assert_eq!(cached.unwrap(), r#"[{"id":"r1"}]"#);
+
+    // Nonexistent hash → None
+    let miss = db.get_search_cache("no_such_hash").unwrap();
+    assert!(miss.is_none());
+}
+
+#[test]
+fn search_cache_upsert_overwrites() {
+    let db = Database::init(":memory:").unwrap();
+
+    db.set_search_cache("hash_up", "query", r#"[{"v":1}]"#, "patent")
+        .unwrap();
+    db.set_search_cache("hash_up", "query", r#"[{"v":2}]"#, "patent")
+        .unwrap();
+
+    let cached = db.get_search_cache("hash_up").unwrap().unwrap();
+    assert_eq!(cached, r#"[{"v":2}]"#);
+}
+
+// ── Feature card get by ID ────────────────────────────────────────────────────
+
+#[test]
+fn feature_card_get_by_id() {
+    use patent_hub::patent::FeatureCard;
+
+    let db = Database::init(":memory:").unwrap();
+
+    let idea = Idea {
+        id: "idea-getfc".to_string(),
+        title: "Test idea".to_string(),
+        description: "Desc".to_string(),
+        input_type: "text".to_string(),
+        status: "pending".to_string(),
+        analysis: String::new(),
+        web_results: "[]".to_string(),
+        patent_results: "[]".to_string(),
+        novelty_score: Some(75.0),
+        created_at: "2026-04-01T00:00:00Z".to_string(),
+        updated_at: "2026-04-01T00:00:00Z".to_string(),
+        discussion_summary: String::new(),
+    };
+    db.insert_idea(&idea).unwrap();
+
+    let card = FeatureCard {
+        id: "fc-get1".to_string(),
+        idea_id: "idea-getfc".to_string(),
+        title: "Unique feature".to_string(),
+        description: "Feature description here".to_string(),
+        novelty_score: Some(88.0),
+        created_at: "2026-04-01T00:00:00Z".to_string(),
+    };
+    db.insert_feature_card(&card).unwrap();
+
+    // Get existing
+    let found = db.get_feature_card("fc-get1").unwrap();
+    assert!(found.is_some());
+    let c = found.unwrap();
+    assert_eq!(c.title, "Unique feature");
+    assert_eq!(c.novelty_score, Some(88.0));
+
+    // Get nonexistent
+    let miss = db.get_feature_card("no-such-card").unwrap();
+    assert!(miss.is_none());
+}
+
+// ── Batch idea retrieval ──────────────────────────────────────────────────────
+
+#[test]
+fn batch_idea_get_multiple() {
+    let db = Database::init(":memory:").unwrap();
+
+    let make_idea = |id: &str, title: &str, score: Option<f64>| Idea {
+        id: id.to_string(),
+        title: title.to_string(),
+        description: "batch test".to_string(),
+        input_type: "text".to_string(),
+        status: "completed".to_string(),
+        analysis: String::new(),
+        web_results: "[]".to_string(),
+        patent_results: "[]".to_string(),
+        novelty_score: score,
+        created_at: "2026-04-02T00:00:00Z".to_string(),
+        updated_at: "2026-04-02T00:00:00Z".to_string(),
+        discussion_summary: String::new(),
+    };
+
+    db.insert_idea(&make_idea("b1", "Battery tech", Some(80.0))).unwrap();
+    db.insert_idea(&make_idea("b2", "Solar panel", Some(60.0))).unwrap();
+    db.insert_idea(&make_idea("b3", "Wind turbine", None)).unwrap();
+
+    let i1 = db.get_idea("b1").unwrap().unwrap();
+    assert_eq!(i1.title, "Battery tech");
+    assert_eq!(i1.novelty_score, Some(80.0));
+
+    let i2 = db.get_idea("b2").unwrap().unwrap();
+    assert_eq!(i2.title, "Solar panel");
+    assert_eq!(i2.novelty_score, Some(60.0));
+
+    let i3 = db.get_idea("b3").unwrap().unwrap();
+    assert_eq!(i3.title, "Wind turbine");
+    assert_eq!(i3.novelty_score, None);
+}
+
+// ── PriorArtCluster pipeline step ────────────────────────────────────────────
+
+#[tokio::test]
+async fn prior_art_cluster_integration_with_sample_ranked_results() {
+    use patent_hub::pipeline::context::{PipelineContext, RankedMatch};
+    use patent_hub::pipeline::steps::prior_art_cluster;
+
+    let mut ctx = PipelineContext::new("idea-cluster", "智能停车创新", "基于AI的停车位识别系统");
+
+    // Simulate ranked results with a mix of Chinese and English text
+    ctx.top_matches = vec![
+        RankedMatch {
+            rank: 1,
+            source_id: "p1".into(),
+            source_title: "Neural network parking detection".into(),
+            source_type: "patent".into(),
+            source_url: "https://example.com/p1".into(),
+            snippet: "Deep learning for parking spot recognition".into(),
+            combined_score: 0.85,
+            tokens: vec!["neural".into(), "network".into(), "parking".into(), "detection".into(), "deep".into(), "learning".into(), "spot".into(), "recognition".into()],
+        },
+        RankedMatch {
+            rank: 2,
+            source_id: "p2".into(),
+            source_title: "Deep learning vehicle detection system".into(),
+            source_type: "web".into(),
+            source_url: "https://example.com/p2".into(),
+            snippet: "CNN-based parking lot monitoring with neural networks".into(),
+            combined_score: 0.80,
+            tokens: vec!["deep".into(), "learning".into(), "vehicle".into(), "detection".into(), "system".into(), "cnn".into(), "parking".into(), "neural".into(), "networks".into()],
+        },
+        RankedMatch {
+            rank: 3,
+            source_id: "p3".into(),
+            source_title: "基于区块链的停车费支付系统".into(),
+            source_type: "patent".into(),
+            source_url: "https://example.com/p3".into(),
+            snippet: "分布式账本技术用于停车场计费".into(),
+            combined_score: 0.60,
+            tokens: vec!["区块链".into(), "停车费".into(), "支付".into(), "系统".into(), "分布式".into(), "账本".into()],
+        },
+        RankedMatch {
+            rank: 4,
+            source_id: "p4".into(),
+            source_title: "IoT sensor array for smart parking".into(),
+            source_type: "patent".into(),
+            source_url: "https://example.com/p4".into(),
+            snippet: "Ultrasonic and infrared sensors for occupancy detection".into(),
+            combined_score: 0.55,
+            tokens: vec!["iot".into(), "sensor".into(), "array".into(), "smart".into(), "parking".into(), "ultrasonic".into(), "infrared".into(), "occupancy".into()],
+        },
+    ];
+
+    prior_art_cluster::execute(&mut ctx).await.unwrap();
+
+    // p1 and p2 share many tokens (neural, deep, learning, parking, detection) — should cluster
+    // p3 is blockchain-related — separate cluster
+    // p4 is IoT sensor — only shares "parking" with p1/p2, low Jaccard — separate cluster
+    assert!(ctx.prior_art_clusters.len() >= 2, "Expected at least 2 clusters, got {}", ctx.prior_art_clusters.len());
+
+    // Verify the neural-network cluster has p1 and p2
+    let nn_cluster = ctx.prior_art_clusters.iter().find(|c| c.patent_indices.contains(&0)).unwrap();
+    assert!(nn_cluster.patent_indices.contains(&1), "p2 should be in same cluster as p1");
+
+    // Verify blockchain item is in its own cluster
+    let bc_cluster = ctx.prior_art_clusters.iter().find(|c| c.patent_indices.contains(&2)).unwrap();
+    assert_eq!(bc_cluster.patent_indices.len(), 1, "Blockchain item should be in its own cluster");
+
+    // Verify avg_similarity is computed correctly for the nn cluster
+    let expected_avg = (0.85 + 0.80) / 2.0;
+    assert!((nn_cluster.avg_similarity - expected_avg).abs() < 0.001);
+
+    // Verify topic is non-empty
+    assert!(!nn_cluster.topic.is_empty());
+    assert!(!bc_cluster.topic.is_empty());
 }

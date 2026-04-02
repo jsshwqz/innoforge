@@ -1,4 +1,4 @@
-//! Step 8: DetectContradictions — 检测现有技术间的矛盾信号
+//! Step 9: DetectContradictions — 检测现有技术间的矛盾信号
 //!
 //! 类型：CODE
 //!
@@ -32,7 +32,7 @@ fn difference_keywords(a: &[String], b: &[String]) -> Vec<String> {
         .collect()
 }
 
-/// 执行 Step 8
+/// 执行 Step 9
 pub async fn execute(ctx: &mut PipelineContext) -> Result<()> {
     let matches = &ctx.top_matches;
     if matches.len() < 2 {

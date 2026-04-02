@@ -4,6 +4,7 @@ pub mod diversity;
 pub mod expand;
 pub mod finalize;
 pub mod parse;
+pub mod prior_art_cluster;
 pub mod rank;
 pub mod scoring;
 pub mod search;

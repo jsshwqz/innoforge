@@ -189,6 +189,29 @@ fn default_text() -> String {
     "text".to_string()
 }
 
+// ── Feature Cards ────────────────────────────────────────────────────────────
+
+/// A feature card linked to an idea, capturing a specific inventive feature.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FeatureCard {
+    pub id: String,
+    pub idea_id: String,
+    pub title: String,
+    #[serde(default)]
+    pub description: String,
+    pub novelty_score: Option<f64>,
+    pub created_at: String,
+}
+
+/// Request body for creating a new feature card.
+#[derive(Debug, Deserialize)]
+pub struct CreateFeatureCardRequest {
+    pub title: String,
+    #[serde(default)]
+    pub description: String,
+    pub novelty_score: Option<f64>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct IdeaSummary {
     pub id: String,

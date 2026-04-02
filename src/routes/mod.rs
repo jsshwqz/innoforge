@@ -15,6 +15,7 @@
 
 mod ai;
 mod collections;
+mod feature_cards;
 mod idea;
 mod ipc;
 mod pages;
@@ -25,6 +26,7 @@ mod upload;
 
 pub use ai::*;
 pub use collections::*;
+pub use feature_cards::*;
 pub use idea::*;
 pub use ipc::*;
 pub use pages::*;
@@ -36,7 +38,15 @@ pub use upload::*;
 use crate::{ai::AiClient, db::Database, pipeline::context::PipelineProgress};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
+use std::time::Instant;
 use tokio::sync::broadcast;
+
+/// 管道通道条目，附带创建时间用于超时清理
+/// Pipeline channel entry with creation timestamp for stale cleanup
+pub struct PipelineChannelEntry {
+    pub sender: broadcast::Sender<PipelineProgress>,
+    pub created_at: Instant,
+}
 
 /// Shared application configuration (replaces env::set_var).
 #[derive(Debug, Clone)]
@@ -145,8 +155,34 @@ impl AppConfig {
 pub struct AppState {
     pub db: Arc<Database>,
     pub config: Arc<RwLock<AppConfig>>,
-    /// Pipeline progress channels for SSE streaming
-    pub pipeline_channels: Arc<Mutex<HashMap<String, broadcast::Sender<PipelineProgress>>>>,
+    /// 管道进度通道（SSE 推送），附带超时清理 / Pipeline progress channels with stale cleanup
+    pub pipeline_channels: Arc<Mutex<HashMap<String, PipelineChannelEntry>>>,
+}
+
+impl AppState {
+    /// 启动后台定时清理，移除超过 5 分钟的管道通道（防止 panic 导致泄漏）
+    /// Spawn background task to remove pipeline channels older than 5 minutes
+    pub fn spawn_channel_cleaner(&self) {
+        let channels = self.pipeline_channels.clone();
+        tokio::spawn(async move {
+            let stale_threshold = std::time::Duration::from_secs(300); // 5 分钟
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                let mut ch = channels.lock().unwrap();
+                let before = ch.len();
+                ch.retain(|id, entry| {
+                    let stale = entry.created_at.elapsed() > stale_threshold;
+                    if stale {
+                        tracing::info!("清理超时管道通道: {} (已存在 {:?})", id, entry.created_at.elapsed());
+                    }
+                    !stale
+                });
+                if ch.len() < before {
+                    tracing::info!("管道通道清理完成: 移除 {} 个", before - ch.len());
+                }
+            }
+        });
+    }
 }
 
 use crate::patent::SearchType;

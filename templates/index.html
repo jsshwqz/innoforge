@@ -10,6 +10,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
     <style>
         .hero { text-align: center; padding: 40px 20px 20px; }
         .hero h1 { font-size: 2.2em; margin-bottom: 8px; }
@@ -283,14 +284,22 @@
     function renderFileList() {
         const el = document.getElementById('file-list');
         if (uploadedFiles.length === 0) { el.innerHTML = ''; return; }
-        el.innerHTML = uploadedFiles.map((f, i) => {
+        el.innerHTML = '';
+        uploadedFiles.forEach((f, i) => {
             const size = f.size < 1024 ? f.size + 'B' : (f.size / 1024).toFixed(1) + 'KB';
             const icon = f.type.startsWith('image/') ? '🖼' : f.name.endsWith('.pdf') ? '📄' : '📎';
-            return `<div class="file-item">
-                <span>${icon} ${f.name} (${size})</span>
-                <button class="remove" onclick="removeFile(${i})">x</button>
-            </div>`;
-        }).join('');
+            const item = document.createElement('div');
+            item.className = 'file-item';
+            const span = document.createElement('span');
+            span.textContent = icon + ' ' + f.name + ' (' + size + ')';
+            const btn = document.createElement('button');
+            btn.className = 'remove';
+            btn.textContent = 'x';
+            btn.setAttribute('onclick', 'removeFile(' + i + ')');
+            item.appendChild(span);
+            item.appendChild(btn);
+            el.appendChild(item);
+        });
     }
 
     // 主流程
@@ -360,7 +369,11 @@
         const source = document.getElementById('fetch-source').value;
         const el = document.getElementById('fetch-result');
         if (!num) return;
-        el.innerHTML = '<p style="color:#8b949e;margin-top:8px;">正在抓取...</p>';
+        el.innerHTML = '';
+        var fetchingP = document.createElement('p');
+        fetchingP.style.cssText = 'color:#8b949e;margin-top:8px;';
+        fetchingP.textContent = '正在抓取...';
+        el.appendChild(fetchingP);
         try {
             const resp = await fetch('/api/patent/fetch', {
                 method: 'POST',
@@ -369,12 +382,30 @@
             });
             const data = await resp.json();
             if (data.status === 'ok') {
-                el.innerHTML = `<p style="color:#3fb950;margin-top:8px;">已抓取: ${data.patent.title || num}
-                    <a href="/patent/${data.patent.id}" style="color:#58a6ff;margin-left:8px;">查看详情</a></p>`;
+                el.innerHTML = '';
+                var successP = document.createElement('p');
+                successP.style.cssText = 'color:#3fb950;margin-top:8px;';
+                successP.textContent = '已抓取: ' + (data.patent.title || num) + ' ';
+                var detailLink = document.createElement('a');
+                detailLink.href = '/patent/' + data.patent.id;
+                detailLink.style.cssText = 'color:#58a6ff;margin-left:8px;';
+                detailLink.textContent = '查看详情';
+                successP.appendChild(detailLink);
+                el.appendChild(successP);
             } else {
-                el.innerHTML = `<p style="color:#f85149;margin-top:8px;">${data.message}</p>`;
+                el.innerHTML = '';
+                var errP = document.createElement('p');
+                errP.style.cssText = 'color:#f85149;margin-top:8px;';
+                errP.textContent = data.message;
+                el.appendChild(errP);
             }
-        } catch(e) { el.innerHTML = `<p style="color:#f85149;margin-top:8px;">请求失败: ${e}</p>`; }
+        } catch(e) {
+            el.innerHTML = '';
+            var catchP = document.createElement('p');
+            catchP.style.cssText = 'color:#f85149;margin-top:8px;';
+            catchP.textContent = '请求失败: ' + e;
+            el.appendChild(catchP);
+        }
     }
     </script>
 </body>

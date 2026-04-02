@@ -6,10 +6,43 @@
 //!   网页搜索：SerpAPI → Bing Web Search API（国内可用）
 //!   专利搜索：本地 DB → SerpAPI Google Patents → Lens.org（国内可用）
 
+use crate::db::Database;
 use crate::pipeline::context::{PipelineContext, SearchResult};
 use anyhow::Result;
 use reqwest::Client;
 use std::collections::HashSet;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+
+/// 计算查询哈希（用于缓存键）/ Compute query hash for cache key
+fn query_hash(query: &str, source: &str) -> String {
+    let mut h = DefaultHasher::new();
+    query.hash(&mut h);
+    source.hash(&mut h);
+    format!("{:016x}", h.finish())
+}
+
+/// 尝试从缓存加载搜索结果 / Try loading search results from cache
+fn try_cache(db: &Database, queries: &[String], source: &str) -> Option<Vec<SearchResult>> {
+    let combined = queries.join("|");
+    let hash = query_hash(&combined, source);
+    if let Ok(Some(json)) = db.get_search_cache(&hash) {
+        if let Ok(results) = serde_json::from_str::<Vec<SearchResult>>(&json) {
+            tracing::info!("搜索缓存命中: {} ({} 条结果)", source, results.len());
+            return Some(results);
+        }
+    }
+    None
+}
+
+/// 写入搜索缓存 / Save search results to cache
+fn save_cache(db: &Database, queries: &[String], source: &str, results: &[SearchResult]) {
+    let combined = queries.join("|");
+    let hash = query_hash(&combined, source);
+    if let Ok(json) = serde_json::to_string(results) {
+        let _ = db.set_search_cache(&hash, &combined, &json, source);
+    }
+}
 use std::sync::Arc;
 
 /// 执行 Step 3: 网络搜索
@@ -18,12 +51,20 @@ pub async fn search_web(
     ctx: &mut PipelineContext,
     serpapi_key: &str,
     bing_api_key: &str,
+    db: &Database,
 ) -> Result<()> {
     let has_serp = !serpapi_key.is_empty() && serpapi_key != "your-serpapi-key-here";
     let has_bing = !bing_api_key.is_empty();
 
     if !has_serp && !has_bing {
         // 两者均未配置，跳过网络搜索
+        return Ok(());
+    }
+
+    // 缓存命中则直接返回 / Return cached results if available
+    let queries: Vec<String> = ctx.expanded_queries.iter().take(3).cloned().collect();
+    if let Some(cached) = try_cache(db, &queries, "web") {
+        ctx.web_results = cached;
         return Ok(());
     }
 
@@ -124,6 +165,11 @@ pub async fn search_web(
         }
     }
 
+    // 写入缓存 / Persist to cache
+    if !all_results.is_empty() {
+        save_cache(db, &queries, "web", &all_results);
+    }
+
     ctx.web_results = all_results;
     Ok(())
 }
@@ -136,6 +182,13 @@ pub async fn search_patents(
     lens_api_key: &str,
     db: &Arc<crate::db::Database>,
 ) -> Result<()> {
+    // 缓存命中则直接返回 / Return cached results if available
+    let queries: Vec<String> = ctx.expanded_queries.iter().take(3).cloned().collect();
+    if let Some(cached) = try_cache(db, &queries, "patent") {
+        ctx.patent_results = cached;
+        return Ok(());
+    }
+
     let mut all_results = Vec::new();
     let mut seen_titles: HashSet<String> = HashSet::new();
 
@@ -260,6 +313,11 @@ pub async fn search_patents(
                 }
             }
         }
+    }
+
+    // 写入缓存 / Persist to cache
+    if !all_results.is_empty() {
+        save_cache(db, &queries, "patent", &all_results);
     }
 
     ctx.patent_results = all_results;

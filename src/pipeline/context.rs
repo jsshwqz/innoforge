@@ -25,6 +25,16 @@ pub struct RankedMatch {
     pub tokens: Vec<String>,
 }
 
+/// 现有技术聚类
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PriorArtCluster {
+    pub cluster_id: usize,
+    pub topic: String,
+    pub patent_indices: Vec<usize>,
+    pub representative_title: String,
+    pub avg_similarity: f64,
+}
+
 /// 矛盾信号
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Contradiction {
@@ -112,14 +122,17 @@ pub struct PipelineContext {
     // Step 7: RankAndFilter
     pub top_matches: Vec<RankedMatch>,
 
-    // Step 8: DetectContradictions
+    // Step 8: PriorArtCluster
+    pub prior_art_clusters: Vec<PriorArtCluster>,
+
+    // Step 9: DetectContradictions
     pub contradictions: Vec<Contradiction>,
 
-    // Step 9: ScoreNovelty
+    // Step 10: ScoreNovelty
     pub novelty_score: f64,
     pub score_breakdown: ScoreBreakdown,
 
-    // Step 10-11: AI Analysis
+    // Step 11-12: AI Analysis
     pub ai_analysis: String,
     pub action_plan: String,
 
@@ -144,6 +157,7 @@ impl PipelineContext {
             retry_count: 0,
             similarity_scores: Vec::new(),
             top_matches: Vec::new(),
+            prior_art_clusters: Vec::new(),
             contradictions: Vec::new(),
             novelty_score: 0.0,
             score_breakdown: ScoreBreakdown::default(),

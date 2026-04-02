@@ -1,11 +1,11 @@
-//! Step 12: Finalize — 汇总报告，持久化到数据库
+//! Step 13: Finalize — 汇总报告，持久化到数据库
 //!
 //! 类型：CODE
 
 use crate::pipeline::context::PipelineContext;
 use anyhow::Result;
 
-/// 执行 Step 12
+/// 执行 Step 13
 pub async fn execute(ctx: &mut PipelineContext) -> Result<()> {
     // 确保评分在合理范围内
     ctx.novelty_score = ctx.novelty_score.clamp(0.0, 100.0);

@@ -10,6 +10,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
     <style>
         .settings-container {
             max-width: 800px;
@@ -291,7 +292,7 @@
                 status.push('❌ AI 服务未配置（无法使用智能分析）');
             }
 
-            document.getElementById('config-status').innerHTML = status.join('<br>');
+            document.getElementById('config-status').innerHTML = DOMPurify.sanitize(status.join('<br>'));
         }
 
         async function saveBingKey() {
@@ -410,7 +411,7 @@
                     baseUrlInput.value = cfg.baseUrl;
                     modelInput.value = cfg.model;
                 }
-                guideEl.innerHTML = cfg.guide;
+                guideEl.innerHTML = DOMPurify.sanitize(cfg.guide);
                 guideEl.style.display = 'block';
             } else {
                 guideEl.style.display = 'none';
@@ -499,7 +500,7 @@
             };
             var row = document.createElement('div');
             row.style.cssText = 'padding:12px;margin:8px 0;background:#0d1117;border:1px solid #30363d;border-radius:6px;';
-            row.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'
+            row.innerHTML = DOMPurify.sanitize('<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'
                 + '<strong style="color:#58a6ff;">备用 AI #' + i + '</strong>'
                 + '<button onclick="this.parentElement.parentElement.remove();fallbackCount--;" style="background:#da3633;padding:2px 8px;font-size:0.8em;">删除</button></div>'
                 + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">'
@@ -510,7 +511,7 @@
                 + '<div><label style="font-size:0.8em;color:#8b949e;">Base URL</label><input type="text" id="fb-url-' + i + '" value="' + (url||'') + '" placeholder="https://..." style="width:100%;padding:4px;background:#161b22;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;"></div>'
                 + '<div><label style="font-size:0.8em;color:#8b949e;">API Key</label><input type="text" id="fb-key-' + i + '" value="' + (key||'') + '" placeholder="sk-..." style="width:100%;padding:4px;background:#161b22;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;"></div>'
                 + '<div style="grid-column:span 2;"><label style="font-size:0.8em;color:#8b949e;">模型</label><input type="text" id="fb-model-' + i + '" value="' + (model||'') + '" placeholder="model-name" style="width:100%;padding:4px;background:#161b22;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;"></div>'
-                + '</div>';
+                + '</div>');
             container.appendChild(row);
         }
         window.applyPreset = function(sel, idx) {

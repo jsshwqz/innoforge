@@ -5,6 +5,42 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 
+## [v0.4.3] - 2026-04-02
+
+### 新增 / Added
+- **Pipeline 13 步** -- 新增 PriorArtCluster 步骤（现有技术按主题聚类），优化矛盾检测上游数据
+  Pipeline upgraded to 13 steps -- PriorArtCluster groups similar prior art by topic
+- **特征卡片系统** -- Feature Card CRUD + 差异对比 API（`/api/ideas/:id/feature-cards`, `/api/feature-cards/diff`）
+  Feature Cards system -- CRUD + diff comparison API for structured idea features
+- **AI 流式聊天** -- SSE 方式逐字返回 AI 回答（`/api/ai/chat/stream`）
+  AI streaming chat -- SSE-based token-by-token response
+- **Pipeline 断点续跑** -- 中断后可从快照恢复（`/api/idea/:id/resume`）
+  Pipeline resume -- restore from snapshot after interruption
+- **HTML 验证报告** -- 可视化验证结果页面（`/api/idea/:id/report.html`）
+  HTML validation report -- visual report page
+- **批量创意对比** -- 2-10 个创意同时对比（`/api/ideas/batch-compare`）
+  Batch idea comparison -- compare 2-10 ideas simultaneously
+- **CORS 中间件** -- 支持跨域 API 调用（MCP 客户端等）
+  CORS middleware -- enables cross-origin API calls for MCP clients
+
+### 安全修复 / Security Fixes
+- **XSS 防护** -- 全部 5 个 HTML 模板加入 DOMPurify，innerHTML 改为 createElement + textContent
+  XSS protection -- DOMPurify added to all 5 HTML templates, innerHTML replaced with safe DOM APIs
+- **SSRF 防护** -- 图片代理添加域名白名单（仅允许 googleapis.com / espacenet.com / sogou.com）
+  SSRF protection -- image proxy now validates URL against domain allowlist
+- **AI 全局超时** -- 从 24 分钟最坏情况降为 60 秒全局上限
+  AI global timeout -- worst case reduced from 24 min to 60s global cap
+
+### 改进 / Improved
+- Pipeline 通道自动清理（超 5 分钟自动移除，防止内存泄漏）
+  Pipeline channel auto-cleanup (removes stale entries after 5 min)
+- 数据库 schema 升级到 v6（新增 feature_cards 表）
+  Database schema upgraded to v6 (feature_cards table)
+- Skill Router 安全规则：允许代码审查类任务讨论漏洞
+  Skill Router security: allow code review tasks that discuss vulnerabilities
+
+---
+
 ## [v0.4.2] - 2026-03-30
 
 ### 新增 / Added

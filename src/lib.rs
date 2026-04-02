@@ -7,7 +7,7 @@
 //! - [`ai`] — AI 多模型容灾客户端 / Multi-provider AI client with failover
 //! - [`db`] — SQLite 数据库操作 / SQLite database operations
 //! - [`patent`] — 专利数据结构 / Patent data structures
-//! - [`pipeline`] — 12 步创新验证流水线 / 12-step innovation validation pipeline
+//! - [`pipeline`] — 13 步创新验证流水线 / 13-step innovation validation pipeline
 //! - [`skill_router`] — 技能路由引擎 / Skill routing engine
 
 pub mod ai;
@@ -77,6 +77,7 @@ use axum::{
 use rust_embed::Embed;
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
+use tower_http::cors::{Any, CorsLayer};
 use tower_http::set_header::SetResponseHeaderLayer;
 
 #[derive(Embed)]
@@ -119,6 +120,9 @@ pub async fn start_server(db_path: &str) -> anyhow::Result<()> {
         pipeline_channels: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     };
 
+    // 启动管道通道超时清理
+    state.spawn_channel_cleaner();
+
     let app = Router::new()
         .route("/", get(routes::index_page))
         .route("/search", get(routes::search_page))
@@ -153,6 +157,7 @@ pub async fn start_server(db_path: &str) -> anyhow::Result<()> {
             get(routes::api_recommend_similar),
         )
         .route("/api/ai/chat", post(routes::api_ai_chat))
+        .route("/api/ai/chat/stream", post(routes::api_ai_chat_stream))
         .route("/api/ai/summarize", post(routes::api_ai_summarize))
         .route("/api/ai/compare", post(routes::api_ai_compare))
         .route("/api/ai/claims", post(routes::api_ai_claims_analysis))
@@ -168,17 +173,26 @@ pub async fn start_server(db_path: &str) -> anyhow::Result<()> {
         .route("/api/idea/submit", post(routes::api_idea_submit))
         .route("/api/idea/analyze", post(routes::api_idea_analyze))
         .route("/api/idea/pipeline", post(routes::api_idea_pipeline))
+        .route("/api/ideas/batch-compare", post(routes::api_ideas_batch_compare))
         .route("/api/idea/list", get(routes::api_idea_list))
         .route("/api/idea/:id", get(routes::api_idea_get))
         .route("/api/idea/:id/delete", post(routes::api_idea_delete))
         .route("/api/idea/:id/progress", get(routes::api_idea_progress))
+        .route("/api/idea/:id/resume", post(routes::api_idea_resume))
         .route("/api/idea/:id/report", get(routes::api_idea_report))
+        .route("/api/idea/:id/report.html", get(routes::api_idea_report_html))
         .route("/api/idea/:id/chat", post(routes::api_idea_chat))
         .route("/api/idea/:id/messages", get(routes::api_idea_messages))
         .route(
             "/api/idea/:id/summarize",
             post(routes::api_idea_summarize_discussion),
         )
+        // 特征卡片 API / Feature cards API
+        .route(
+            "/api/ideas/:id/feature-cards",
+            get(routes::api_get_feature_cards).post(routes::api_create_feature_card),
+        )
+        .route("/api/feature-cards/diff", get(routes::api_feature_card_diff))
         .route("/api/ipc/tree", get(routes::api_ipc_tree))
         .route("/api/ipc/:code/patents", get(routes::api_ipc_patents))
         .route("/api/patents/import", post(routes::api_import_patents))
@@ -220,6 +234,10 @@ pub async fn start_server(db_path: &str) -> anyhow::Result<()> {
         // Serve embedded static files
         .route("/static/*path", get(serve_static_embedded))
         .layer(DefaultBodyLimit::max(10 * 1024 * 1024))
+        .layer(CorsLayer::new()
+            .allow_origin(Any)
+            .allow_methods(Any)
+            .allow_headers(Any))
         .layer(SetResponseHeaderLayer::overriding(
             axum::http::header::X_FRAME_OPTIONS,
             HeaderValue::from_static("DENY"),

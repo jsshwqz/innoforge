@@ -746,12 +746,22 @@ pub async fn api_patent_image_proxy(
         }
     };
 
-    // Only allow proxying from Google patent image servers
-    if !url.starts_with("https://patentimages.storage.googleapis.com/") {
+    // SSRF 防护：仅允许已知专利图片域名 / SSRF protection: allowlist of patent image domains
+    const ALLOWED_DOMAINS: &[&str] = &[
+        "patentimages.storage.googleapis.com",
+        "worldwide.espacenet.com",
+        "image.patent.k.sogou.com",
+    ];
+    let allowed = url
+        .strip_prefix("https://")
+        .and_then(|rest| rest.split('/').next())
+        .map(|host| ALLOWED_DOMAINS.iter().any(|d| host == *d))
+        .unwrap_or(false);
+    if !allowed {
         return (
             StatusCode::FORBIDDEN,
             [(header::CONTENT_TYPE, "text/plain")],
-            b"Only patent image URLs allowed".to_vec(),
+            b"Only patent image URLs from allowed domains".to_vec(),
         );
     }
 
