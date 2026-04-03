@@ -6,14 +6,14 @@
 
 > AI 辅助的技术验证工具。支持专利/文献检索、方案可行性分析、多角度 AI 推演，帮助研发人员快速验证想法。
 
-### [📥 下载最新版](https://github.com/jsshwqz/patent-hub/releases/latest) ｜ [📖 使用文档](https://github.com/jsshwqz/patent-hub/wiki) ｜ [Gitee 镜像](https://gitee.com/jsshwqz/patent-hub)
+### 📥 下载 ｜ [📖 使用文档](#快速开始)
 
-| 平台 | 下载 |
-|------|------|
-| Windows | [📦 patent-hub-windows.zip](https://github.com/jsshwqz/patent-hub/releases/latest) — 解压后双击 `start.bat` |
-| Linux / macOS | [📦 patent-hub-linux.tar.gz](https://github.com/jsshwqz/patent-hub/releases/latest) — 解压后运行 `./start.sh` |
-| Android | [📱 patent-hub-android.apk](https://github.com/jsshwqz/patent-hub/releases/latest) — 安装即用，内嵌服务器 |
-| Docker | `docker run -p 3000:3000 jsshwqz/patent-hub` |
+| 平台 | GitHub 下载 | Gitee 下载（国内快） |
+|------|------------|-------------------|
+| Windows | [📦 下载](https://github.com/jsshwqz/patent-hub/releases/latest) | [📦 下载](https://gitee.com/jsshwqz/patent-hub/releases) |
+| Linux / macOS | [📦 下载](https://github.com/jsshwqz/patent-hub/releases/latest) | [📦 下载](https://gitee.com/jsshwqz/patent-hub/releases) |
+| Android | [📱 下载](https://github.com/jsshwqz/patent-hub/releases/latest) | [📱 下载](https://gitee.com/jsshwqz/patent-hub/releases) |
+| Docker | `docker run -p 3000:3000 jsshwqz/patent-hub` | 同左 |
 
 > 启动后打开浏览器访问 **http://127.0.0.1:3000** 即可使用。无需安装数据库，无需联网（AI 功能需配置 API 密钥）。
 
@@ -254,7 +254,7 @@ cargo run --release --bin patent-hub
 
 #### Run from Release Package
 
-1. Download from [Releases](https://github.com/jsshwqz/patent-hub/releases)
+1. Download from [GitHub Releases](https://github.com/jsshwqz/patent-hub/releases) or [Gitee Releases](https://gitee.com/jsshwqz/patent-hub/releases)
 2. Extract the archive
 3. Run `start.bat` (Windows) or `./start.sh` (Linux/macOS)
 4. Open http://127.0.0.1:3000
