@@ -1,4 +1,4 @@
-# Patent Hub — 研发助手
+# 研发助手 (Patent Hub)
 
 [![CI](https://github.com/jsshwqz/patent-hub/actions/workflows/ci.yml/badge.svg)](https://github.com/jsshwqz/patent-hub/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
