@@ -1,7 +1,6 @@
 # 研发助手 (Patent Hub)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/jsshwqz/patent-hub)](https://github.com/jsshwqz/patent-hub/releases)
 
 **仓库地址：** [GitHub](https://github.com/jsshwqz/patent-hub) ｜ [Gitee（国内）](https://gitee.com/jsshwqz/patent-hub)
 
