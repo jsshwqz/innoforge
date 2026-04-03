@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Patent Hub — 研发创新验证助手</title>
+    <title>研发助手</title>
     <link rel="stylesheet" href="/static/style.css">
     <link rel="manifest" href="/static/manifest.json">
     <meta name="theme-color" content="#0d1117">
@@ -143,29 +143,29 @@
 </head>
 <body>
     <nav class="navbar">
-        <a href="/" class="logo">Patent Hub</a>
+        <a href="/" class="logo">研发助手</a>
         <div class="nav-links">
-            <a href="/search">检索</a>
-            <a href="/idea">验证</a>
-            <a href="/compare">对比</a>
-            <a href="/ai">AI</a>
+            <a href="/idea">创新推演</a>
+            <a href="/search">技术调研</a>
+            <a href="/compare">方案对比</a>
+            <a href="/ai">AI 助手</a>
             <a href="/settings?from=/">设置</a>
         </div>
     </nav>
 
     <main class="hero">
-        <h1>研发创新验证助手</h1>
-        <p class="subtitle">从灵感到验证，AI 全程协助</p>
+        <h1>研发助手</h1>
+        <p class="subtitle">AI 技术验证 · 专利检索 · 方案推演</p>
 
         <!-- 研发流程指引 -->
         <div class="workflow-hint">
             <span class="step">描述想法</span>
             <span class="arrow">&rarr;</span>
-            <span class="step">AI 分析拆解</span>
+            <span class="step">AI 分析推演</span>
             <span class="arrow">&rarr;</span>
-            <span class="step">自动查新</span>
+            <span class="step">全网技术调研</span>
             <span class="arrow">&rarr;</span>
-            <span class="step">验证报告</span>
+            <span class="step">可行性报告</span>
         </div>
 
         <!-- 主入口：描述你的想法 -->
@@ -186,8 +186,8 @@
                 <!-- 模式选择 -->
                 <div class="mode-toggle">
                     <button class="mode-btn active" onclick="setMode('chat')" id="mode-chat">AI 对话梳理</button>
-                    <button class="mode-btn" onclick="setMode('quick')" id="mode-quick">快速验证</button>
-                    <button class="mode-btn" onclick="setMode('deep')" id="mode-deep">深度验证</button>
+                    <button class="mode-btn" onclick="setMode('quick')" id="mode-quick">快速推演</button>
+                    <button class="mode-btn" onclick="setMode('deep')" id="mode-deep">深度推演</button>
                 </div>
                 <div class="mode-hint" id="mode-hint">先与 AI 对话，梳理技术方案、拆解创新点，确认后再验证</div>
 
@@ -200,28 +200,28 @@
 
         <!-- 能力卡片 -->
         <div class="capabilities">
-            <a href="/search" class="cap-card">
-                <h3>专利检索</h3>
-                <p>全球专利数据库搜索，支持 Google Patents、Lens.org、搜狗免费搜索</p>
-            </a>
             <a href="/idea" class="cap-card">
-                <h3>创新验证</h3>
-                <p>13 步 AI 流水线：自动查新、相似度计算、新颖性评分、行动方案</p>
+                <h3>创新推演</h3>
+                <p>描述你的想法，AI 多角度分析可行性并生成报告</p>
+            </a>
+            <a href="/search" class="cap-card">
+                <h3>专利 / 文献检索</h3>
+                <p>搜索全球专利和技术文献，发现相似方案与先行技术</p>
             </a>
             <a href="/compare" class="cap-card">
-                <h3>专利对比</h3>
-                <p>多专利矩阵对比、技术方案差异分析、侵权风险预筛查</p>
+                <h3>方案对比</h3>
+                <p>多方案并排对比、差异分析</p>
             </a>
             <a href="/ai" class="cap-card">
-                <h3>AI 分析</h3>
-                <p>专利摘要、权利要求解读、技术问答、批量分析</p>
+                <h3>AI 助手</h3>
+                <p>技术问答、文献解读、研发对话</p>
             </a>
         </div>
 
         <!-- 快速抓取（折叠，不抢焦点） -->
         <div class="quick-fetch">
             <details>
-                <summary>快速抓取专利（输入专利号直接获取）</summary>
+                <summary>快速导入技术文献（输入专利号或文献编号）</summary>
                 <div class="fetch-box">
                     <input type="text" id="fetch-number" placeholder="输入专利号 (如 EP1234567, US10000000)">
                     <select id="fetch-source">
@@ -245,11 +245,11 @@
         document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
         document.getElementById('mode-' + mode).classList.add('active');
         const hints = {
-            chat: '先与 AI 对话，梳理技术方案、拆解创新点，确认后再验证',
-            quick: '跳过对话，直接运行 6 步快速验证（约 30 秒）',
-            deep: '跳过对话，直接运行 13 步深度验证（约 2-5 分钟）'
+            chat: '先与 AI 对话，梳理技术方案、拆解创新点，确认后再推演',
+            quick: '跳过对话，直接运行 6 步快速推演（约 30 秒）',
+            deep: '跳过对话，直接运行 13 步深度推演（约 2-5 分钟）'
         };
-        const btnTexts = { chat: '开始对话', quick: '快速验证', deep: '深度验证' };
+        const btnTexts = { chat: '开始对话', quick: '快速推演', deep: '深度推演' };
         document.getElementById('mode-hint').textContent = hints[mode];
         document.getElementById('start-btn').textContent = btnTexts[mode];
     }
@@ -266,6 +266,30 @@
         addFiles(e.dataTransfer.files);
     });
     fileInput.addEventListener('change', () => addFiles(fileInput.files));
+
+    // 粘贴图片支持
+    document.getElementById('idea-input').addEventListener('paste', e => {
+        const items = (e.clipboardData || e.originalEvent.clipboardData).items;
+        let hasImage = false;
+        for (let i = 0; i < items.length; i++) {
+            if (items[i].type.indexOf('image') !== -1) {
+                hasImage = true;
+                const blob = items[i].getAsFile();
+                const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+                const ext = blob.type.split('/')[1] || 'png';
+                const file = new File([blob], 'paste-' + ts + '.' + ext, { type: blob.type });
+                if (uploadedFiles.length < 5) {
+                    uploadedFiles.push(file);
+                } else {
+                    alert('最多上传 5 个文件');
+                }
+            }
+        }
+        if (hasImage) {
+            e.preventDefault();
+            renderFileList();
+        }
+    });
 
     function addFiles(fileList) {
         for (const f of fileList) {

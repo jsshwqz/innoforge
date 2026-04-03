@@ -140,6 +140,8 @@ pub struct PatentSummary {
 pub struct AiChatRequest {
     pub message: String,
     pub patent_id: Option<String>,
+    #[serde(default)]
+    pub history: Vec<(String, String)>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

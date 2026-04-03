@@ -220,7 +220,7 @@ async fn main() -> anyhow::Result<()> {
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
-    println!("Patent Hub running at http://{addr}");
+    println!("研发助手 running at http://{addr}");
     println!("Local access: http://127.0.0.1:3000");
 
     // 自动打开浏览器（设置 PATENT_HUB_NO_OPEN 可禁用）

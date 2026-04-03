@@ -9,6 +9,65 @@ use futures::stream::Stream;
 use serde_json::json;
 use std::convert::Infallible;
 
+/// Estimate token count (CJK ~1.5 tok/char, ASCII ~0.25 tok/char)
+fn estimate_tokens(s: &str) -> usize {
+    let mut t = 0usize;
+    for ch in s.chars() {
+        t += if ch > '\u{2E80}' { 3 } else { 1 };
+    }
+    t / 2 + 1
+}
+
+/// When history is too long, summarize early messages via AI and combine with recent ones.
+/// Returns (condensed_history, whether summarization was applied).
+async fn compress_history(
+    ai: &crate::ai::AiClient,
+    history: Vec<(String, String)>,
+    max_tokens: usize,
+) -> Vec<(String, String)> {
+    let total: usize = history.iter().map(|(_, c)| estimate_tokens(c)).sum();
+    if total <= max_tokens || history.len() <= 10 {
+        return history;
+    }
+
+    // Keep the last 8 messages (4 rounds) intact, summarize everything before that
+    let keep_recent = 8.min(history.len());
+    let split_at = history.len() - keep_recent;
+    let (old_part, recent_part) = history.split_at(split_at);
+
+    // Build text of old conversation for summarization
+    let mut old_text = String::new();
+    for (role, content) in old_part {
+        let label = if role == "user" { "用户" } else { "助手" };
+        old_text.push_str(&format!("{}：{}\n", label, content));
+    }
+
+    // Ask AI to compress — use a short, focused prompt
+    let summary = ai.chat(
+        &format!(
+            "请将以下对话历史压缩为一段简洁的摘要（保留所有关键信息、结论、数据和用户偏好，不超过500字）：\n\n{}",
+            old_text
+        ),
+        None,
+    ).await;
+
+    match summary {
+        Ok(summary_text) => {
+            let mut result = Vec::with_capacity(1 + recent_part.len());
+            result.push((
+                "system".to_string(),
+                format!("【前期对话摘要】{}", summary_text),
+            ));
+            result.extend_from_slice(recent_part);
+            result
+        }
+        Err(_) => {
+            // Summarization failed, just send all and let the model handle it
+            history
+        }
+    }
+}
+
 /// POST /api/ai/chat/stream — SSE 流式 AI 聊天 / Streaming AI chat via SSE
 pub async fn api_ai_chat_stream(
     State(s): State<AppState>,
@@ -59,7 +118,20 @@ pub async fn api_ai_chat(
                 p.patent_number, p.title, p.abstract_text, claims_preview
             )
         });
-    match ai.chat(&req.message, ctx.as_deref()).await {
+
+    let system_prompt = ctx.as_deref().unwrap_or("你是一个技术研发助手，擅长专利分析、技术方案评估和可行性验证。请用中文回答。");
+
+    let result = if req.history.is_empty() {
+        ai.chat(&req.message, ctx.as_deref()).await
+    } else {
+        let mut history = req.history;
+        history.push(("user".to_string(), req.message));
+        // 超过 ~8000 token 时自动压缩早期对话为摘要
+        let history = compress_history(&ai, history, 8000).await;
+        ai.chat_with_history(system_prompt, history, 0.7).await
+    };
+
+    match result {
         Ok(content) => Json(AiResponse { content }),
         Err(e) => Json(AiResponse {
             content: format!("AI error: {e}"),

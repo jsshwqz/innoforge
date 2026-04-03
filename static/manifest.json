@@ -1,9 +1,9 @@
 {
-  "name": "Patent Hub",
-  "short_name": "PatentHub",
-  "description": "专利搜索与 AI 分析平台 / Patent Search & AI Analysis",
+  "name": "研发助手",
+  "short_name": "研发助手",
+  "description": "AI 辅助研发验证工具",
   "lang": "zh-CN",
-  "start_url": "/search",
+  "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "any",

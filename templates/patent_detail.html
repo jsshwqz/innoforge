@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{title}} - Patent Hub</title>
+    <title>{{title}} - 研发助手</title>
     <link rel="stylesheet" href="/static/style.css">
     <link rel="manifest" href="/static/manifest.json">
     <meta name="theme-color" content="#0d1117">
@@ -14,10 +14,10 @@
 </head>
 <body>
     <nav class="navbar">
-        <a href="/" class="logo">Patent Hub</a>
+        <a href="/" class="logo">研发助手</a>
         <div class="nav-links">
-            <a href="/search" data-i18n="nav.search"></a>
             <a href="/idea" data-i18n="nav.idea"></a>
+            <a href="/search" data-i18n="nav.search"></a>
             <a href="/compare" data-i18n="nav.compare"></a>
             <a href="/ai" data-i18n="nav.ai"></a>
             <a href="/settings?from=/patent/{{id}}" data-i18n="nav.settings"></a>
@@ -153,6 +153,8 @@
         if (e.key === 'Enter') sendChat();
     });
 
+    var patentChatHistory = [];
+
     async function sendChat() {
         const input = document.getElementById('chat-msg');
         const msg = input.value.trim();
@@ -173,7 +175,7 @@
             const resp = await fetch('/api/ai/chat', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({message: msg, patent_id: '{{id}}'})
+                body: JSON.stringify({message: msg, patent_id: '{{id}}', history: patentChatHistory})
             });
             const data = await resp.json();
             if (data.error || !data.content) {
@@ -193,6 +195,8 @@
                 aiReplace.className = 'msg ai';
                 aiReplace.innerHTML = DOMPurify.sanitize(escapeHtml(data.content).replace(/\n/g, '<br>'));
                 loadEl.parentNode.replaceChild(aiReplace, loadEl);
+                patentChatHistory.push(["user", msg]);
+                patentChatHistory.push(["assistant", data.content]);
             }
         } catch(e) {
             var errText = String(e);

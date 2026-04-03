@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>创意验证 - Patent Hub</title>
+    <title>创新推演 - 研发助手</title>
     <link rel="stylesheet" href="/static/style.css">
     <link rel="manifest" href="/static/manifest.json">
     <meta name="theme-color" content="#0d1117">
@@ -74,10 +74,10 @@
 </head>
 <body>
     <nav class="navbar">
-        <a href="/" class="logo">Patent Hub</a>
+        <a href="/" class="logo">研发助手</a>
         <div class="nav-links">
-            <a href="/search" data-i18n="nav.search"></a>
             <a href="/idea" class="active" data-i18n="nav.idea"></a>
+            <a href="/search" data-i18n="nav.search"></a>
             <a href="/compare" data-i18n="nav.compare"></a>
             <a href="/ai" data-i18n="nav.ai"></a>
             <a href="/settings?from=/idea" data-i18n="nav.settings"></a>
@@ -110,18 +110,18 @@
                     <textarea id="idea-desc" data-i18n-placeholder="idea.descPlaceholder"></textarea>
                 </div>
                 <div class="form-group" style="display:flex;align-items:center;gap:12px;">
-                    <label style="margin:0;white-space:nowrap;">验证模式:</label>
+                    <label style="margin:0;white-space:nowrap;">推演模式:</label>
                     <div style="display:flex;border:1px solid #30363d;border-radius:6px;overflow:hidden;">
                         <button type="button" id="mode-quick" onclick="setAnalysisMode('quick')"
                             style="padding:6px 14px;font-size:0.85em;border:none;cursor:pointer;background:#21262d;color:#8b949e;">
-                            快速验证
+                            快速推演
                         </button>
                         <button type="button" id="mode-deep" onclick="setAnalysisMode('deep')"
                             style="padding:6px 14px;font-size:0.85em;border:none;cursor:pointer;background:#1f6feb;color:#fff;">
-                            深度验证
+                            深度推演
                         </button>
                     </div>
-                    <span id="mode-hint" style="font-size:0.8em;color:#8b949e;">13 步流水线，含 AI 深度分析</span>
+                    <span id="mode-hint" style="font-size:0.8em;color:#8b949e;">13 步流水线 + 多角度 AI 分析</span>
                 </div>
                 <div class="btn-row">
                     <button class="btn-primary" id="submit-btn" onclick="submitIdea()" data-i18n="idea.submit"></button>
@@ -177,13 +177,13 @@
             quickBtn.style.color = '#fff';
             deepBtn.style.background = '#21262d';
             deepBtn.style.color = '#8b949e';
-            hint.textContent = i18nLang === 'en' ? '6 steps, fast sync analysis' : '6 步精简流程，快速同步返回';
+            hint.textContent = i18nLang === 'en' ? '6-step fast reasoning' : '6 步快速推演，同步返回';
         } else {
             deepBtn.style.background = '#1f6feb';
             deepBtn.style.color = '#fff';
             quickBtn.style.background = '#21262d';
             quickBtn.style.color = '#8b949e';
-            hint.textContent = i18nLang === 'en' ? '13-step pipeline with AI deep analysis' : '13 步流水线，含 AI 深度分析';
+            hint.textContent = i18nLang === 'en' ? '13-step pipeline + multi-angle AI analysis' : '13 步流水线 + 多角度 AI 分析';
         }
     }
 
@@ -218,7 +218,7 @@
         { key: 'rank_and_filter', zh: '排序过滤', en: 'Rank & filter', type: 'code' },
         { key: 'detect_contradictions', zh: '矛盾信号检测', en: 'Detect contradictions', type: 'code' },
         { key: 'score_novelty', zh: '新颖性评分', en: 'Score novelty', type: 'code' },
-        { key: 'ai_deep_analysis', zh: '多维深度推演', en: 'Multi-dim reasoning', type: 'llm' },
+        { key: 'ai_deep_analysis', zh: 'AI 深度分析', en: 'AI deep analysis', type: 'llm' },
         { key: 'ai_action_plan', zh: 'AI 行动方案', en: 'AI action plan', type: 'llm' },
         { key: 'finalize', zh: '生成报告', en: 'Generate report', type: 'code' },
     ];
@@ -846,9 +846,59 @@
 
     var chatAttachedFiles = [];
 
+    // 粘贴图片支持
+    document.getElementById('chat-input').addEventListener('paste', function(e) {
+        var items = (e.clipboardData || e.originalEvent.clipboardData).items;
+        var hasImage = false;
+        for (var i = 0; i < items.length; i++) {
+            if (items[i].type.indexOf('image') !== -1) {
+                hasImage = true;
+                var blob = items[i].getAsFile();
+                var ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+                var ext = blob.type.split('/')[1] || 'png';
+                var file = new File([blob], 'paste-' + ts + '.' + ext, { type: blob.type });
+                chatAttachedFiles.push(file);
+            }
+        }
+        if (hasImage) {
+            e.preventDefault();
+            renderChatAttachments();
+        }
+    });
+
+    function renderChatAttachments() {
+        var container = document.getElementById('chat-attachments');
+        if (chatAttachedFiles.length === 0) {
+            container.style.display = 'none';
+            container.innerHTML = '';
+            return;
+        }
+        container.style.display = 'block';
+        container.innerHTML = '';
+        chatAttachedFiles.forEach(function(f, i) {
+            var icon = f.type.startsWith('image/') ? '🖼️' : '📄';
+            var size = (f.size / 1024).toFixed(1) + 'KB';
+            var span = document.createElement('span');
+            span.style.cssText = 'display:inline-flex;align-items:center;gap:4px;background:#21262d;padding:3px 8px;border-radius:4px;margin:2px;color:#8b949e;';
+            span.textContent = icon + ' ' + f.name + ' (' + size + ')';
+            // 图片预览缩略图
+            if (f.type.startsWith('image/')) {
+                var thumb = document.createElement('img');
+                thumb.style.cssText = 'height:20px;border-radius:2px;margin-right:2px;';
+                thumb.src = URL.createObjectURL(f);
+                span.insertBefore(thumb, span.firstChild);
+            }
+            var removeBtn = document.createElement('button');
+            removeBtn.style.cssText = 'background:none;border:none;color:#f85149;cursor:pointer;padding:0 2px;';
+            removeBtn.textContent = '×';
+            removeBtn.setAttribute('onclick', 'removeChatFile(' + i + ')');
+            span.appendChild(removeBtn);
+            container.appendChild(span);
+        });
+    }
+
     function handleChatFileSelect(input) {
         var files = Array.from(input.files);
-        var container = document.getElementById('chat-attachments');
         files.forEach(function(f) {
             if (f.size > 10 * 1024 * 1024) {
                 alert('文件 ' + f.name + ' 超过 10MB 限制');
@@ -856,51 +906,13 @@
             }
             chatAttachedFiles.push(f);
         });
-        if (chatAttachedFiles.length > 0) {
-            container.style.display = 'block';
-            container.innerHTML = '';
-            chatAttachedFiles.forEach(function(f, i) {
-                var icon = f.type.startsWith('image/') ? '🖼️' : '📄';
-                var size = (f.size / 1024).toFixed(1) + 'KB';
-                var span = document.createElement('span');
-                span.style.cssText = 'display:inline-flex;align-items:center;gap:4px;background:#21262d;padding:3px 8px;border-radius:4px;margin:2px;color:#8b949e;';
-                span.textContent = icon + ' ' + f.name + ' (' + size + ')';
-                var removeBtn = document.createElement('button');
-                removeBtn.style.cssText = 'background:none;border:none;color:#f85149;cursor:pointer;padding:0 2px;';
-                removeBtn.textContent = '×';
-                removeBtn.setAttribute('onclick', 'removeChatFile(' + i + ')');
-                span.appendChild(removeBtn);
-                container.appendChild(span);
-            });
-        } else {
-            container.style.display = 'none';
-        }
+        renderChatAttachments();
         input.value = '';
     }
 
     function removeChatFile(idx) {
         chatAttachedFiles.splice(idx, 1);
-        var container = document.getElementById('chat-attachments');
-        if (chatAttachedFiles.length === 0) {
-            container.style.display = 'none';
-            container.innerHTML = '';
-        } else {
-            // Re-render
-            container.innerHTML = '';
-            chatAttachedFiles.forEach(function(f, i) {
-                var icon = f.type.startsWith('image/') ? '🖼️' : '📄';
-                var size = (f.size / 1024).toFixed(1) + 'KB';
-                var span = document.createElement('span');
-                span.style.cssText = 'display:inline-flex;align-items:center;gap:4px;background:#21262d;padding:3px 8px;border-radius:4px;margin:2px;color:#8b949e;';
-                span.textContent = icon + ' ' + f.name + ' (' + size + ')';
-                var removeBtn = document.createElement('button');
-                removeBtn.style.cssText = 'background:none;border:none;color:#f85149;cursor:pointer;padding:0 2px;';
-                removeBtn.textContent = '×';
-                removeBtn.setAttribute('onclick', 'removeChatFile(' + i + ')');
-                span.appendChild(removeBtn);
-                container.appendChild(span);
-            });
-        }
+        renderChatAttachments();
     }
 
     async function sendChatMessage() {

@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/jsshwqz/patent-hub)](https://github.com/jsshwqz/patent-hub/releases)
 
-> **Patent Hub** -- 专利检索、AI 智能分析与管理平台，支持中英双语。
+> **研发助手** -- AI 辅助的技术验证工具。支持专利/文献检索、方案可行性分析、多角度 AI 推演，帮助研发人员快速验证想法。
 
 [English](#english) | [Gitee 镜像](https://gitee.com/jsshwqz/patent-hub)
 
@@ -12,12 +12,14 @@
 
 ## 功能特性
 
-- **专利检索** -- 全球专利搜索，支持相关性评分、去重、分类统计
-- **AI 智能分析** -- AI 驱动的专利摘要、问答、创意验证与多轮对话
-- **专利对比** -- 并排对比多个专利，支持上传文件（PDF、DOCX、图片）
-- **专利附图** -- 查看专利技术附图，本地图片代理
-- **PDF 导出** -- 导出专利详情（含附图）为 PDF
-- **收藏与标签** -- 通过收藏夹和标签管理专利
+- **创新推演** -- AI 多角度分析你的技术想法，自动检索相关专利和文献，生成可行性报告
+- **专利/文献检索** -- 搜索全球专利和技术文献，发现相似方案与先行技术
+- **方案对比** -- 并排对比多个技术方案，支持上传文件（PDF、DOCX、图片）
+- **AI 助手** -- 技术问答、文献解读、多轮讨论
+- **13 步分析流水线** -- 从想法提交到可行性报告，自动完成检索、分析、评分全流程
+- **技术附图查看** -- 查看文献技术附图，本地图片代理
+- **PDF 导出** -- 导出技术详情（含附图）为 PDF
+- **收藏与标签** -- 通过收藏夹和标签管理技术文献
 - **AI 自动容灾** -- 多 AI 服务商自动切换（智谱 GLM、OpenRouter、Gemini、OpenAI、NVIDIA、DeepSeek）
 - **中英双语** -- 完整的中文/英文界面支持
 - **零配置数据库** -- 内嵌 SQLite + FTS5 全文搜索，无需安装
@@ -45,7 +47,7 @@ cargo run --release --bin patent-hub
 1. 从 [Releases](https://github.com/jsshwqz/patent-hub/releases) 下载
 2. 解压
 3. 运行 `start.bat`（Windows）或 `./start.sh`（Linux/macOS）
-4. 打开 http://127.0.0.1:3000/search
+4. 打开 http://127.0.0.1:3000
 
 ### Docker
 
@@ -69,12 +71,12 @@ docker run -p 3000:3000 -v patent-data:/data patent-hub
 | `AI_BASE_URL` | AI 功能需要 | 任意 OpenAI 兼容 API 端点 |
 | `AI_API_KEY` | AI 功能需要 | AI 服务 API 密钥 |
 | `AI_MODEL` | AI 功能需要 | 模型名（如 `glm-4.7-flash`） |
-| `SERPAPI_KEY` | 在线搜索需要 | [SerpAPI](https://serpapi.com/) 密钥，用于搜索 Google Patents |
+| `SERPAPI_KEY` | 在线搜索需要 | [SerpAPI](https://serpapi.com/) 密钥，用于在线文献检索 |
 | `FALLBACK_AI_*` | 可选 | 最多 5 个备用 AI 服务商 |
 | `HOST` | 可选 | 服务器绑定地址（默认 `0.0.0.0`） |
 | `PORT` | 可选 | 服务器端口（默认 `3000`） |
 
-**没有 API 密钥？** 应用仍可使用 -- 搜索使用本地数据库，AI 功能会显示配置引导。
+**没有 API 密钥？** 应用仍可使用 -- 检索使用本地数据库，AI 功能会显示配置引导。
 
 ### 支持的 AI 服务商
 
@@ -94,16 +96,16 @@ docker run -p 3000:3000 -v patent-data:/data patent-hub
 
 | 接口 | 方法 | 说明 |
 |------|------|------|
-| `/api/search` | POST | 本地专利搜索 |
-| `/api/search/online` | POST | 在线专利搜索（SerpAPI / Google Patents） |
+| `/api/search` | POST | 本地文献搜索 |
+| `/api/search/online` | POST | 在线技术文献搜索 |
 | `/api/search/export/csv` | POST | 导出搜索结果为 CSV |
-| `/api/ai/summarize` | POST | AI 专利摘要 |
-| `/api/ai/chat` | POST | AI 专利问答 |
-| `/api/idea/submit` | POST | 提交创意验证 |
-| `/api/idea/:id/chat` | POST | 创意多轮讨论 |
-| `/api/patent/enrich/:id` | GET | 加载专利全文 + 附图 |
-| `/api/patent/pdf/:id` | GET | 导出专利为 PDF |
-| `/api/patent/image-proxy` | GET | 专利图片代理 |
+| `/api/ai/summarize` | POST | AI 文献摘要 |
+| `/api/ai/chat` | POST | AI 技术问答 |
+| `/api/idea/submit` | POST | 提交想法 |
+| `/api/idea/pipeline` | POST | 启动 13 步分析流水线 |
+| `/api/idea/:id/chat` | POST | 多轮讨论 |
+| `/api/patent/enrich/:id` | GET | 加载文献全文 + 附图 |
+| `/api/patent/pdf/:id` | GET | 导出为 PDF |
 | `/api/settings` | GET/POST | 配置管理 |
 | `/api/collections` | GET/POST | 收藏管理 |
 
@@ -122,7 +124,9 @@ patent-hub/                # Rust 主仓
     db.rs                 # SQLite 数据库 + FTS5 全文搜索
     patent.rs             # 数据模型
     routes/               # API 路由处理器
-    pipeline/             # 12步创新验证流水线
+    pipeline/             # 13步创新推演流水线
+      steps/
+        deep_reasoning.rs # AI 深度分析
     bin/
       mcp-server.rs       # MCP 服务器
   mobile/                 # Dioxus 移动端（Rust UI）
@@ -143,7 +147,7 @@ patent-hub/                # Rust 主仓
 
 - **后端**：Rust + Axum + SQLite（内嵌，零配置）
 - **前端**：HTML 模板（Rust include_str! 内嵌）
-- **AI**：任意 OpenAI 兼容 API，自动容灾切换
+- **AI**：任意 OpenAI 兼容 API + 自动容灾切换
 - **搜索**：SQLite FTS5 + SerpAPI + Google Patents + 搜狗免费搜索（国内无VPN可用）
 - **移动端**：Rust cdylib + JNI + Android WebView / Dioxus
 - **国际化**：中英双语
@@ -154,9 +158,9 @@ patent-hub/                # Rust 主仓
 
 ### 架构灵感
 
-- [Harness Research](https://github.com/Nimo1987/harness-research) -- 本项目的 12 步创新验证流水线受其启发，借鉴了以下设计理念：
+- [Harness Research](https://github.com/Nimo1987/harness-research) -- 本项目的验证流水线受其启发，借鉴了以下设计理念：
   - **状态机驱动的流水线模式** -- 将复杂任务拆解为确定性步骤链，每步可独立重试/跳过
-  - **LLM 与代码的职责分离** -- 评分、排序、去重等结构化任务由代码完成，AI 仅负责语义分析和建议生成
+  - **LLM 与代码的职责分离** -- 评分、排序、去重等结构化任务由代码完成，AI 仅负责语义分析和推演
   - **多层搜索降级架构** -- 多数据源级联回退，确保任何网络环境都能返回结果
   - 注：本项目未复制 Harness Research 的任何源代码，所有实现均为原创
 
@@ -168,9 +172,9 @@ patent-hub/                # Rust 主仓
 
 ### 第三方库与服务
 
-- [Chart.js](https://www.chartjs.org/) v4 (MIT) -- 搜索统计图表可视化
-- [SerpAPI](https://serpapi.com/) -- Google Patents 搜索接口
-- [Lens.org](https://www.lens.org/) -- 开放专利数据库 API
+- [Chart.js](https://www.chartjs.org/) v4 (MIT) -- 统计图表可视化
+- [SerpAPI](https://serpapi.com/) -- 在线文献检索接口
+- [Lens.org](https://www.lens.org/) -- 开放技术文献数据库 API
 - [Sogou](https://www.sogou.com/) -- 国内免费搜索降级方案
 
 ---
@@ -205,16 +209,18 @@ patent-hub/                # Rust 主仓
 <a name="english"></a>
 ## English
 
-> **Patent Hub** -- Patent search, AI analysis, and management platform with multi-language support.
+> **R&D Assistant** -- AI-powered technical validation tool. Patent/literature search, feasibility analysis, and multi-angle AI reasoning to help engineers validate ideas quickly.
 
 ### Features
 
-- **Patent Search** -- Global patent search with relevance scoring, deduplication, and category statistics
-- **AI Analysis** -- AI-powered patent summarization, Q&A, and idea validation with multi-round dialogue
-- **Patent Comparison** -- Side-by-side patent comparison with file upload support (PDF, DOCX, images)
-- **Patent Drawings** -- View patent technical drawings with local image proxy
-- **PDF Export** -- Export patent details (with drawings) to PDF
-- **Collections & Tags** -- Organize patents with collections and tags
+- **Innovation Reasoning** -- AI analyzes your technical ideas from multiple angles, searches related patents and literature, generates feasibility reports
+- **Patent/Literature Search** -- Search global patents and technical literature, discover similar solutions and prior art
+- **Solution Comparison** -- Side-by-side comparison of multiple technical solutions with file upload support (PDF, DOCX, images)
+- **AI Assistant** -- Technical Q&A, literature interpretation, multi-round discussions
+- **13-Step Analysis Pipeline** -- From idea submission to feasibility report, automated search, analysis, and scoring
+- **Technical Drawings** -- View technical drawings with local image proxy
+- **PDF Export** -- Export technical details (with drawings) to PDF
+- **Collections & Tags** -- Organize technical literature with collections and tags
 - **AI Failover** -- Automatic failover across multiple AI providers (Zhipu GLM, OpenRouter, Gemini, OpenAI, NVIDIA, DeepSeek)
 - **i18n** -- Full Chinese/English bilingual support
 - **Zero Config Database** -- Embedded SQLite with FTS5 full-text search, no installation needed
@@ -240,7 +246,7 @@ cargo run --release --bin patent-hub
 1. Download from [Releases](https://github.com/jsshwqz/patent-hub/releases)
 2. Extract the archive
 3. Run `start.bat` (Windows) or `./start.sh` (Linux/macOS)
-4. Open http://127.0.0.1:3000/search
+4. Open http://127.0.0.1:3000
 
 #### Docker
 
@@ -262,7 +268,7 @@ All settings can be configured via the **Settings page** (http://localhost:3000/
 | `AI_BASE_URL` | For AI features | Any OpenAI-compatible API endpoint |
 | `AI_API_KEY` | For AI features | API key for AI service |
 | `AI_MODEL` | For AI features | Model name (e.g., `glm-4.7-flash`) |
-| `SERPAPI_KEY` | For online search | [SerpAPI](https://serpapi.com/) key for Google Patents |
+| `SERPAPI_KEY` | For online search | [SerpAPI](https://serpapi.com/) key for online literature search |
 | `FALLBACK_AI_*` | Optional | Up to 5 backup AI providers |
 | `HOST` | Optional | Server bind address (default: `0.0.0.0`) |
 | `PORT` | Optional | Server port (default: `3000`) |
@@ -281,64 +287,20 @@ All settings can be configured via the **Settings page** (http://localhost:3000/
 | NVIDIA | Free tier | `https://integrate.api.nvidia.com/v1` |
 | Ollama | Local/Free | `http://localhost:11434/v1` |
 
-### API Overview
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/search` | POST | Local patent search |
-| `/api/search/online` | POST | Online patent search (SerpAPI / Google Patents) |
-| `/api/search/export/csv` | POST | Export results to CSV |
-| `/api/ai/summarize` | POST | AI patent summarization |
-| `/api/ai/chat` | POST | AI Q&A about patents |
-| `/api/idea/submit` | POST | Submit idea for validation |
-| `/api/idea/:id/chat` | POST | Multi-round idea discussion |
-| `/api/patent/enrich/:id` | GET | Load patent full text + drawings |
-| `/api/patent/pdf/:id` | GET | Export patent as printable PDF |
-| `/api/patent/image-proxy` | GET | Proxy patent images |
-| `/api/settings` | GET/POST | Configuration management |
-| `/api/collections` | GET/POST | Collection management |
-
-Full API docs: [docs/API.md](docs/API.md)
-
-### Project Structure
-
-```
-patent-hub/
-  src/
-    main.rs          # Web server entry point
-    lib.rs           # Library exports + Android JNI / iOS FFI
-    ai.rs            # AI client with failover
-    db.rs            # SQLite database with FTS5
-    patent.rs        # Data models
-    routes/          # API route handlers
-    bin/
-      skill-router.rs  # Standalone CLI tool
-      mobile.rs        # Mobile entry point
-      mcp-server.rs    # MCP server
-  templates/         # HTML templates (7 pages)
-  static/            # CSS, JS (i18n)
-  ios-app/           # iOS Swift + WKWebView
-  harmonyos/         # HarmonyOS ArkTS + WebView
-  tests/             # Integration tests
-  docs/              # Documentation
-```
-
 ### Tech Stack
 
 - **Backend**: Rust + Axum + SQLite (embedded, zero-config)
 - **Frontend**: Vanilla HTML/CSS/JS (no build tools needed)
-- **AI**: Any OpenAI-compatible API with automatic failover
+- **AI**: Any OpenAI-compatible API + automatic failover
 - **Search**: SQLite FTS5 + SerpAPI + Google Patents
 - **Mobile**: Rust cdylib/staticlib + JNI (Android) / FFI (iOS) + WebView
 - **i18n**: Shared JS translation system
 
 ### Credits
 
-The analysis pipeline uses the following algorithms and was inspired by the architectural philosophy of the following project:
-
-- [TF-IDF](https://en.wikipedia.org/wiki/Tf%E2%80%93idf) -- Term frequency-inverse document frequency for matching claims against prior art (implemented in similarity.rs)
-- [Jaccard Similarity](https://en.wikipedia.org/wiki/Jaccard_index) -- Set similarity metric for text overlap detection and contradiction analysis (implemented in similarity.rs, contradiction.rs)
-- [Cosine Similarity](https://en.wikipedia.org/wiki/Cosine_similarity) -- Vector space similarity computation, used as part of the TF-IDF pipeline
+- [TF-IDF](https://en.wikipedia.org/wiki/Tf%E2%80%93idf) -- Term frequency-inverse document frequency for text similarity matching
+- [Jaccard Similarity](https://en.wikipedia.org/wiki/Jaccard_index) -- Set similarity metric for overlap detection and contradiction analysis
+- [Cosine Similarity](https://en.wikipedia.org/wiki/Cosine_similarity) -- Vector space similarity, part of the TF-IDF pipeline
 - [Harness Research](https://github.com/Nimo1987/harness-research) -- Architectural inspiration: state-machine pipeline pattern and separation of LLM vs. code responsibilities
 
 ### License
