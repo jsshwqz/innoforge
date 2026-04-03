@@ -306,31 +306,34 @@ Full API docs: [docs/API.md](docs/API.md)
 patent-hub/
   src/
     main.rs          # Web server entry point
-    lib.rs           # Library exports + Android JNI / iOS FFI
+    lib.rs           # Library exports + Android JNI entry point
     ai.rs            # AI client with failover
     db.rs            # SQLite database with FTS5
     patent.rs        # Data models
     routes/          # API route handlers
+    pipeline/        # 12-step innovation validation pipeline
     bin/
-      skill-router.rs  # Standalone CLI tool
-      mobile.rs        # Mobile entry point
-      mcp-server.rs    # MCP server
-  templates/         # HTML templates (7 pages)
-  static/            # CSS, JS (i18n)
-  ios-app/           # iOS Swift + WKWebView
-  harmonyos/         # HarmonyOS ArkTS + WebView
+      mcp-server.rs  # MCP server
+  mobile/            # Dioxus mobile client (Rust UI)
+  templates/         # HTML page templates
+  static/            # Static assets
   tests/             # Integration tests
   docs/              # Documentation
 ```
 
+**Related repositories:**
+- [patent-hub-desktop](https://gitee.com/jsshwqz/patent-hub-desktop) -- Tauri desktop/mobile shell
+- [patent-hub-ios](https://gitee.com/jsshwqz/patent-hub-ios) -- Native iOS shell
+- [patent-hub-harmony](https://gitee.com/jsshwqz/patent-hub-harmony) -- Native HarmonyOS shell
+
 ### Tech Stack
 
 - **Backend**: Rust + Axum + SQLite (embedded, zero-config)
-- **Frontend**: Vanilla HTML/CSS/JS (no build tools needed)
+- **Frontend**: HTML templates embedded by Rust via `include_str!`
 - **AI**: Any OpenAI-compatible API with automatic failover
-- **Search**: SQLite FTS5 + SerpAPI + Google Patents
-- **Mobile**: Rust cdylib/staticlib + JNI (Android) / FFI (iOS) + WebView
-- **i18n**: Shared JS translation system
+- **Search**: SQLite FTS5 + SerpAPI + Google Patents + Sogou free search
+- **Mobile**: Rust cdylib + JNI + Android WebView / Dioxus
+- **i18n**: Chinese/English bilingual support
 
 ### Credits
 
