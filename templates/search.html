@@ -52,8 +52,6 @@
 .bar-track { height: 8px; background: #0d1117; border-radius: 999px; overflow: hidden; }
 .bar-fill { height: 100%; background: linear-gradient(90deg, #238636, #58a6ff); }
 .muted { color: #8b949e; font-size: 13px; }
-.lang-row { display: flex; justify-content: flex-end; margin-bottom: 10px; }
-.lang-switch { width: 160px; }
 @media (max-width: 900px) {
     .search-grid { grid-template-columns: 1fr; }
     .search-grid-2 { grid-template-columns: 1fr 1fr; }
@@ -62,25 +60,10 @@
 </style>
 </head>
 <body>
-<nav class="navbar">
-<a href="/" class="logo">研发助手</a>
-<div class="nav-links">
-<a href="/idea" data-i18n="nav.idea"></a>
-<a href="/search" class="active" data-i18n="nav.search"></a>
-<a href="/compare" data-i18n="nav.compare"></a>
-<a href="/ai" data-i18n="nav.ai"></a>
-<a href="/settings?from=/search" data-i18n="nav.settings"></a>
-</div>
-</nav>
+<nav id="global-nav"></nav>
 
 <main class="container search-container">
 <div class="panel">
-<div class="lang-row">
-<select id="lang-switch" class="lang-switch" onchange="setLanguage(this.value)">
-<option value="zh">中文</option>
-<option value="en">English</option>
-</select>
-</div>
 <h3 data-i18n="search.title"></h3>
 <div class="search-grid">
 <input type="text" id="search-input" data-i18n-placeholder="search.placeholder">
@@ -145,22 +128,17 @@
 </div>
 </main>
 
+<script src="/static/i18n.js"></script>
 <script>
 const HISTORY_KEY = 'patent_hub_search_history_v1';
-const LANG_KEY = 'patent_hub_ui_lang';
 let currentRequest = null;
 let lastResponse = null;
 let lastPage = 1;
 let lastPageSize = 20;
-let currentLang = 'zh';
 
-const I18N = {
-  zh: {
-    'nav.search': '技术调研',
-    'nav.idea': '创新推演',
-    'nav.compare': '方案对比',
-    'nav.ai': 'AI 助手',
-    'nav.settings': '设置',
+// Merge search-specific i18n keys into global I18N_COMMON
+(function() {
+  var searchZh = {
     'search.title': '技术调研',
     'search.placeholder': '输入关键词、文献号、申请人或发明人...',
     'mode.local': '本地数据库',
@@ -206,13 +184,8 @@ const I18N = {
     'meta.inventor': '发明人',
     'meta.filing': '申请日',
     'meta.country': '国家'
-  },
-  en: {
-    'nav.search': 'Search',
-    'nav.idea': 'Idea Validation',
-    'nav.compare': 'Compare',
-    'nav.ai': 'AI',
-    'nav.settings': 'Settings',
+  };
+  var searchEn = {
     'search.title': 'Patent Search',
     'search.placeholder': 'Enter keywords, patent number, applicant, or inventor...',
     'mode.local': 'Local DB',
@@ -258,40 +231,25 @@ const I18N = {
     'meta.inventor': 'Inventor',
     'meta.filing': 'Filing',
     'meta.country': 'Country'
-  }
-};
+  };
+  Object.keys(searchZh).forEach(function(k) { if (!I18N_COMMON.zh[k]) I18N_COMMON.zh[k] = searchZh[k]; });
+  Object.keys(searchEn).forEach(function(k) { if (!I18N_COMMON.en[k]) I18N_COMMON.en[k] = searchEn[k]; });
+})();
 
-function t(key, vars = {}) {
-    const dict = I18N[currentLang] || I18N.zh;
-    let value = dict[key] || key;
-    Object.keys(vars).forEach((k) => {
-        value = value.replace(new RegExp(`\\{${k}\\}`, 'g'), String(vars[k]));
-    });
-    return value;
-}
-
-function setLanguage(lang) {
-    currentLang = (lang === 'en') ? 'en' : 'zh';
-    localStorage.setItem(LANG_KEY, currentLang);
-    applyI18n();
+// Hook into global language switch to update search-specific dynamic content
+var _origSetI18nLang = setI18nLang;
+setI18nLang = function(lang) {
+    _origSetI18nLang(lang);
+    renderNavbar('search');
     renderHistory();
     if (lastResponse) {
         renderResults(lastResponse, lastPage, lastPageSize);
     }
-}
+};
 
-function applyI18n() {
-    document.documentElement.lang = currentLang === 'zh' ? 'zh-CN' : 'en';
-    document.querySelectorAll('[data-i18n]').forEach((el) => {
-        el.textContent = t(el.getAttribute('data-i18n'));
-    });
-    document.querySelectorAll('[data-i18n-placeholder]').forEach((el) => {
-        el.placeholder = t(el.getAttribute('data-i18n-placeholder'));
-    });
-    document.querySelectorAll('[data-i18n-title]').forEach((el) => {
-        el.title = t(el.getAttribute('data-i18n-title'));
-    });
-}
+// Initialize navbar and apply i18n after search keys are registered
+renderNavbar('search');
+applyI18nCommon();
 
 function escapeHtml(str) {
     return String(str || '')
@@ -600,10 +558,6 @@ async function exportCsv() {
 }
 
 window.addEventListener('DOMContentLoaded', () => {
-    const saved = localStorage.getItem(LANG_KEY);
-    currentLang = (saved === 'en') ? 'en' : 'zh';
-    document.getElementById('lang-switch').value = currentLang;
-    applyI18n();
     renderHistory();
 
     document.getElementById('search-input').addEventListener('keydown', (e) => {

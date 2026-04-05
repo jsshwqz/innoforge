@@ -1,6 +1,7 @@
 // Patent Hub shared i18n system
 const I18N_COMMON = {
   zh: {
+    'nav.home': '研发助手',
     'nav.search': '技术调研',
     'nav.idea': '创新推演',
     'nav.compare': '方案对比',
@@ -98,6 +99,7 @@ const I18N_COMMON = {
     'common.info.classification': '分类号'
   },
   en: {
+    'nav.home': 'R&D Assistant',
     'nav.search': 'Research',
     'nav.idea': 'Deep Reasoning',
     'nav.compare': 'Compare',
@@ -208,6 +210,10 @@ function setI18nLang(lang) {
   i18nLang = (lang === 'en') ? 'en' : 'zh';
   localStorage.setItem(I18N_LANG_KEY, i18nLang);
   applyI18nCommon();
+  // Notify page-specific hooks
+  if (window._onI18nLangChange) {
+    window._onI18nLangChange.forEach(function(fn) { fn(); });
+  }
 }
 
 function applyI18nCommon() {
@@ -221,4 +227,34 @@ function applyI18nCommon() {
   document.querySelectorAll('[data-i18n-title]').forEach(function(el) {
     el.title = t(el.getAttribute('data-i18n-title'));
   });
+  var sw = document.getElementById('lang-switch');
+  if (sw) sw.value = i18nLang;
+}
+
+function renderNavbar(activePage) {
+  var nav = document.getElementById('global-nav');
+  if (!nav) return;
+  var fromPath = location.pathname;
+  var links = [
+    { href: '/idea', key: 'nav.idea', id: 'idea' },
+    { href: '/search', key: 'nav.search', id: 'search' },
+    { href: '/compare', key: 'nav.compare', id: 'compare' },
+    { href: '/ai', key: 'nav.ai', id: 'ai' },
+    { href: '/settings?from=' + encodeURIComponent(fromPath), key: 'nav.settings', id: 'settings' }
+  ];
+  var html = '<a href="/" class="logo">' + t('nav.home') + '</a>';
+  html += '<div class="nav-links">';
+  for (var i = 0; i < links.length; i++) {
+    var cls = (links[i].id === activePage) ? ' class="active"' : '';
+    html += '<a href="' + links[i].href + '"' + cls + ' data-i18n="' + links[i].key + '">' + t(links[i].key) + '</a>';
+  }
+  html += '</div>';
+  html += '<div class="nav-right">';
+  html += '<select onchange="setI18nLang(this.value)" id="lang-switch">';
+  html += '<option value="zh"' + (i18nLang === 'zh' ? ' selected' : '') + '>中文</option>';
+  html += '<option value="en"' + (i18nLang === 'en' ? ' selected' : '') + '>EN</option>';
+  html += '</select>';
+  html += '</div>';
+  nav.className = 'navbar';
+  nav.innerHTML = html;
 }

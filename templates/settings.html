@@ -97,18 +97,7 @@
     </style>
 </head>
 <body>
-    <nav>
-        <div class="nav-brand">研发助手</div>
-        <div class="nav-links">
-            <a href="/">首页</a>
-            <a href="/idea">创新推演</a>
-            <a href="/search">技术调研</a>
-            <a href="/compare">方案对比</a>
-            <a href="/ai">AI 助手</a>
-            <a href="/settings" class="active">设置</a>
-        </div>
-        <button onclick="goBack()" class="back-btn" id="back-btn" style="display:none;margin-left:auto;background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:13px;">← 返回</button>
-    </nav>
+    <nav id="global-nav"></nav>
 
     <div class="settings-container">
         <h2>系统设置</h2>
@@ -209,7 +198,11 @@
         </div>
     </div>
 
+    <script src="/static/i18n.js"></script>
     <script>
+        renderNavbar('settings');
+        applyI18nCommon();
+
         // 页面加载时获取当前配置
         let returnUrl = ''; // 记录返回地址
         
@@ -217,12 +210,6 @@
             // 从 URL 参数获取返回地址
             const urlParams = new URLSearchParams(window.location.search);
             returnUrl = urlParams.get('from') || document.referrer || '';
-            
-            // 显示/隐藏返回按钮
-            const backBtn = document.getElementById('back-btn');
-            if (returnUrl && !returnUrl.includes('/settings')) {
-                backBtn.style.display = 'block';
-            }
             
             try {
                 const res = await fetch('/api/settings');

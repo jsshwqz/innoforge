@@ -142,24 +142,7 @@
     </style>
 </head>
 <body>
-    <nav class="navbar">
-        <a href="/" class="logo">研发助手</a>
-        <div class="nav-links">
-            <a href="/idea">创新推演</a>
-            <a href="/search">技术调研</a>
-            <a href="/compare">方案对比</a>
-            <a href="/ai">AI 助手</a>
-            <a href="/settings?from=/">设置</a>
-        </div>
-        <div style="display:flex;align-items:center;gap:8px;margin-left:auto;">
-            <a href="https://github.com/jsshwqz/patent-hub/releases/latest" target="_blank" rel="noopener" title="下载安装包" style="color:#8b949e;text-decoration:none;font-size:0.8em;padding:4px 10px;border:1px solid #30363d;border-radius:6px;white-space:nowrap;">📥 下载</a>
-            <a href="https://github.com/jsshwqz/patent-hub#readme" target="_blank" rel="noopener" title="使用文档" style="color:#8b949e;text-decoration:none;font-size:0.8em;padding:4px 10px;border:1px solid #30363d;border-radius:6px;white-space:nowrap;">📖 文档</a>
-            <select onchange="setI18nLang(this.value)" id="lang-switch" style="padding:3px 6px;background:#0d1117;border:1px solid #30363d;color:#8b949e;border-radius:6px;font-size:0.8em;">
-                <option value="zh">中文</option>
-                <option value="en">EN</option>
-            </select>
-        </div>
-    </nav>
+    <nav id="global-nav"></nav>
 
     <main class="hero">
         <h1>研发助手</h1>
@@ -256,6 +239,10 @@
     </footer>
 
     <script src="/static/i18n.js"></script>
+    <script>
+    renderNavbar('home');
+    applyI18nCommon();
+    </script>
     <script>
     let currentMode = 'chat';
     let uploadedFiles = [];
@@ -478,9 +465,6 @@
         }
     }
 
-    // 语言切换初始化
-    var langSw = document.getElementById('lang-switch');
-    if (langSw) langSw.value = i18nLang;
     </script>
 </body>
 </html>
