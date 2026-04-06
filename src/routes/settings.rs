@@ -22,6 +22,10 @@ pub async fn api_get_settings(State(s): State<AppState>) -> Json<serde_json::Val
         "bing_api_key_configured": config.has_bing(),
         "lens_api_key": mask_api_key(&config.lens_api_key),
         "lens_api_key_configured": config.has_lens(),
+        "cnipr_client_id": &config.cnipr_client_id,
+        "cnipr_user": &config.cnipr_user,
+        "cnipr_password": mask_api_key(&config.cnipr_password),
+        "cnipr_configured": config.has_cnipr(),
         "ai_base_url": config.ai_base_url,
         "ai_api_key": mask_api_key(&config.ai_api_key),
         "ai_api_key_configured": !config.ai_api_key.is_empty(),
@@ -162,6 +166,85 @@ pub async fn api_save_lens(
     s.config.write().unwrap().lens_api_key = api_key.to_string();
     let _ = s.db.set_setting("LENS_API_KEY", api_key);
     let _ = update_env_file("LENS_API_KEY", api_key);
+    Json(json!({"status": "ok"}))
+}
+
+pub async fn api_save_cnipr(
+    State(s): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let custom_client_id = req["client_id"].as_str().unwrap_or("").trim().to_string();
+    let custom_client_secret = req["client_secret"].as_str().unwrap_or("").trim().to_string();
+    let user = req["user"].as_str().unwrap_or("").trim().to_string();
+    let password = req["password"].as_str().unwrap_or("").trim().to_string();
+
+    // Allow clearing (user and password both empty)
+    if user.is_empty() && password.is_empty() {
+        let mut config = s.config.write().unwrap();
+        config.cnipr_user = String::new();
+        config.cnipr_password = String::new();
+        config.cnipr_access_token = String::new();
+        config.cnipr_open_id = String::new();
+        config.cnipr_token_expires = 0;
+        // 恢复内置默认应用凭据
+        config.cnipr_client_id = super::CNIPR_DEFAULT_CLIENT_ID.to_string();
+        config.cnipr_client_secret = super::CNIPR_DEFAULT_CLIENT_SECRET.to_string();
+        drop(config);
+        for k in ["CNIPR_CLIENT_ID", "CNIPR_CLIENT_SECRET", "CNIPR_USER", "CNIPR_PASSWORD"] {
+            let _ = s.db.set_setting(k, "");
+            let _ = update_env_file(k, "");
+        }
+        return Json(json!({"status": "ok", "message": "CNIPR 配置已清除"}));
+    }
+
+    if user.is_empty() || password.is_empty() {
+        return Json(json!({"status": "error", "message": "请填写 CNIPR 登录账号和密码"}));
+    }
+
+    // 使用自定义凭据或内置默认值
+    let client_id = if custom_client_id.is_empty() {
+        super::CNIPR_DEFAULT_CLIENT_ID.to_string()
+    } else {
+        custom_client_id
+    };
+    let client_secret = if custom_client_secret.is_empty() {
+        super::CNIPR_DEFAULT_CLIENT_SECRET.to_string()
+    } else {
+        custom_client_secret
+    };
+
+    // Update in-memory config
+    {
+        let mut config = s.config.write().unwrap();
+        config.cnipr_client_id = client_id.clone();
+        config.cnipr_client_secret = client_secret.clone();
+        config.cnipr_user = user.clone();
+        config.cnipr_password = password.clone();
+        // Reset token so next search triggers re-login
+        config.cnipr_access_token = String::new();
+        config.cnipr_token_expires = 0;
+    }
+
+    // 只持久化用户凭据和自定义的应用凭据
+    for (k, v) in [
+        ("CNIPR_USER", user.as_str()),
+        ("CNIPR_PASSWORD", password.as_str()),
+    ] {
+        if let Err(e) = s.db.set_setting(k, v) {
+            tracing::warn!("保存设置 {} 到数据库失败: {}", k, e);
+        }
+        let _ = update_env_file(k, v);
+    }
+    // 只有用户自定义了应用凭据时才持久化（否则用内置默认值）
+    if client_id != super::CNIPR_DEFAULT_CLIENT_ID {
+        let _ = s.db.set_setting("CNIPR_CLIENT_ID", &client_id);
+        let _ = update_env_file("CNIPR_CLIENT_ID", &client_id);
+    }
+    if client_secret != super::CNIPR_DEFAULT_CLIENT_SECRET {
+        let _ = s.db.set_setting("CNIPR_CLIENT_SECRET", &client_secret);
+        let _ = update_env_file("CNIPR_CLIENT_SECRET", &client_secret);
+    }
+
     Json(json!({"status": "ok"}))
 }
 

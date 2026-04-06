@@ -98,13 +98,46 @@
 </head>
 <body>
     <nav id="global-nav"></nav>
-
-    <div class="settings-container">
+    <div class="page-with-sidebar">
+    <div class="settings-container page-main">
         <h2>系统设置</h2>
 
         <div class="setting-group">
-            <h3>🇨🇳 国内搜索配置（无需 VPN）</h3>
-            <p>国内用户推荐配置以下两项，可在不使用 VPN 的情况下进行在线专利检索。</p>
+            <h3>🇨🇳 CNIPR 国知局专利搜索（推荐）</h3>
+            <p>接入国家知识产权局 CNIPR 开放平台，获取最权威的中国专利数据，包括法律状态、审核进度等详细信息。</p>
+            <p style="color:#4ade80;font-size:13px;">搜索中文关键词或 CN 开头的专利号时自动优先使用 CNIPR 数据源。</p>
+            <p style="color:#8b949e;font-size:13px;">应用凭据已内置，只需填写你的 CNIPR 个人登录账号即可使用。</p>
+
+            <div class="form-group">
+                <label>登录账号</label>
+                <input type="text" id="cnipr-user" placeholder="CNIPR 开放平台注册的用户名/手机号">
+            </div>
+            <div class="form-group">
+                <label>登录密码</label>
+                <input type="password" id="cnipr-password" placeholder="登录密码">
+            </div>
+            <a href="https://open.cnipr.com/" target="_blank" class="help-link">
+                → 注册 CNIPR 开放平台账号（免费，国知局背景）
+            </a>
+            <br><br>
+            <details style="margin-bottom:12px;">
+                <summary style="color:#8b949e;font-size:13px;cursor:pointer;">高级：自定义应用凭据（一般无需修改）</summary>
+                <div class="form-group" style="margin-top:10px;">
+                    <label>Client ID <span style="color:#8b949e;font-size:12px;">（已内置默认值）</span></label>
+                    <input type="text" id="cnipr-client-id" placeholder="使用内置默认值">
+                </div>
+                <div class="form-group">
+                    <label>Client Secret</label>
+                    <input type="text" id="cnipr-client-secret" placeholder="使用内置默认值">
+                </div>
+            </details>
+            <button class="btn-save" onclick="saveCniprConfig()">保存 CNIPR 配置</button>
+            <div id="cnipr-status" class="status-message"></div>
+        </div>
+
+        <div class="setting-group">
+            <h3>🔍 其他搜索配置（国内无需 VPN）</h3>
+            <p>可选配置，用于补充国际专利搜索和网页搜索能力。</p>
 
             <div class="form-group">
                 <label>Bing Web Search API Key <span style="color:#4ade80;font-size:12px;">（网页搜索，替代 SerpAPI）</span></label>
@@ -197,10 +230,13 @@
             <p id="config-status">加载中...</p>
         </div>
     </div>
+    <aside id="page-sidebar" class="page-sidebar"></aside>
+    </div>
 
     <script src="/static/i18n.js"></script>
     <script>
         renderNavbar('settings');
+        renderSidebar();
         applyI18nCommon();
 
         // 页面加载时获取当前配置
@@ -218,6 +254,9 @@
                     document.getElementById('serpapi-key').value = config.serpapi_key || '';
                     document.getElementById('bing-api-key').value = config.bing_api_key || '';
                     document.getElementById('lens-api-key').value = config.lens_api_key || '';
+                    document.getElementById('cnipr-client-id').value = config.cnipr_client_id || '';
+                    document.getElementById('cnipr-user').value = config.cnipr_user || '';
+                    if (config.cnipr_password) document.getElementById('cnipr-password').value = config.cnipr_password;
                     document.getElementById('ai-base-url').value = config.ai_base_url || '';
                     document.getElementById('ai-api-key').value = config.ai_api_key || '';
                     document.getElementById('ai-model').value = config.ai_model || '';
@@ -261,6 +300,11 @@
         function updateConfigStatus(config) {
             const status = [];
 
+            // CNIPR 国知局
+            if (config.cnipr_configured) {
+                status.push('✅ CNIPR 国知局已配置（中国专利权威数据）');
+            }
+
             // 在线专利搜索能力
             if (config.serpapi_key_configured) {
                 status.push('✅ SerpAPI 已配置（Google Patents，需 VPN）');
@@ -269,7 +313,7 @@
                 if (config.bing_api_key_configured) parts.push('Bing 网页搜索');
                 if (config.lens_api_key_configured) parts.push('Lens.org 专利搜索');
                 status.push('✅ 国内搜索已配置（' + parts.join(' + ') + '，无需 VPN）');
-            } else {
+            } else if (!config.cnipr_configured) {
                 status.push('⚠️ 在线搜索未配置（仅本地数据库）');
             }
 
@@ -295,6 +339,30 @@
                 statusEl.className = 'status-message ' + (data.status === 'ok' ? 'success' : 'error');
                 statusEl.textContent = data.status === 'ok' ? (key ? '✅ Bing Key 已保存' : '✅ Bing Key 已清除') : ('❌ ' + data.message);
                 statusEl.style.display = 'block';
+            } catch(e) {
+                statusEl.className = 'status-message error';
+                statusEl.textContent = '❌ 保存失败: ' + e.message;
+                statusEl.style.display = 'block';
+            }
+        }
+
+        async function saveCniprConfig() {
+            const clientId = document.getElementById('cnipr-client-id').value.trim();
+            const clientSecret = document.getElementById('cnipr-client-secret').value.trim();
+            const user = document.getElementById('cnipr-user').value.trim();
+            const password = document.getElementById('cnipr-password').value.trim();
+            const statusEl = document.getElementById('cnipr-status');
+            try {
+                const res = await fetch('/api/settings/cnipr', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({client_id: clientId, client_secret: clientSecret, user: user, password: password})
+                });
+                const data = await res.json();
+                statusEl.className = 'status-message ' + (data.status === 'ok' ? 'success' : 'error');
+                statusEl.textContent = data.status === 'ok' ? (user ? '✅ CNIPR 配置已保存' : '✅ CNIPR 配置已清除') : ('❌ ' + data.message);
+                statusEl.style.display = 'block';
+                setTimeout(() => { statusEl.style.display = 'none'; }, 3000);
             } catch(e) {
                 statusEl.className = 'status-message error';
                 statusEl.textContent = '❌ 保存失败: ' + e.message;

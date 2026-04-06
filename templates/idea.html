@@ -12,9 +12,9 @@
     <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
     <style>
-        .idea-layout { display: grid; grid-template-columns: 280px 1fr; gap: 24px; min-height: calc(100vh - 60px); }
-        .idea-sidebar { background: #161b22; border-right: 1px solid #30363d; padding: 20px; overflow-y: auto; }
-        .idea-main { padding: 24px; max-width: 900px; }
+        .idea-layout { display: grid; grid-template-columns: 280px 1fr; gap: 0; height: 100vh; }
+        .idea-sidebar { background: #161b22; border-right: 1px solid #30363d; padding: 20px; overflow-y: auto; height: 100vh; position: sticky; top: 0; }
+        .idea-main { padding: 24px; max-width: 900px; overflow-y: auto; }
         .idea-form textarea { width: 100%; min-height: 150px; padding: 12px; border-radius: 8px; border: 1px solid #30363d; background: #0d1117; color: #f0f6fc; font-size: 0.95em; resize: vertical; font-family: inherit; line-height: 1.6; }
         .idea-form input[type="text"] { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #30363d; background: #0d1117; color: #f0f6fc; font-size: 1em; margin-bottom: 12px; }
         .idea-form label { display: block; color: #8b949e; margin-bottom: 6px; font-size: 0.9em; }
@@ -74,8 +74,8 @@
 </head>
 <body>
     <nav id="global-nav"></nav>
-
-    <div class="idea-layout">
+    <div class="page-with-sidebar">
+    <div class="idea-layout page-main">
         <div class="idea-sidebar">
             <h3 data-i18n="idea.history" style="margin-bottom:12px;"></h3>
             <div id="history-list"><p class="hint" style="font-size:0.85em;" data-i18n="idea.historyEmpty"></p></div>
@@ -145,10 +145,13 @@
             </div>
         </div>
     </div>
+    <aside id="page-sidebar" class="page-sidebar"></aside>
+    </div>
 
     <script src="/static/i18n.js"></script>
     <script>
     renderNavbar('idea');
+    renderSidebar();
     applyI18nCommon();
     // Hook reapplyPage into navbar language switch
     if (typeof window._onI18nLangChange === 'undefined') window._onI18nLangChange = [];

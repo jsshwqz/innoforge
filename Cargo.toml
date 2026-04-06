@@ -1,6 +1,6 @@
 [package]
 name = "patent-hub"
-version = "0.4.4"
+version = "0.4.5"
 edition = "2021"
 license = "MIT"
 description = "AI-assisted R&D validation tool with patent/literature search and feasibility analysis"

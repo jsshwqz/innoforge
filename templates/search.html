@@ -61,8 +61,8 @@
 </head>
 <body>
 <nav id="global-nav"></nav>
-
-<main class="container search-container">
+<div class="page-with-sidebar">
+<main class="container search-container page-main">
 <div class="panel">
 <h3 data-i18n="search.title"></h3>
 <div class="search-grid">
@@ -127,6 +127,8 @@
 <div id="pagination" class="pagination"></div>
 </div>
 </main>
+<aside id="page-sidebar" class="page-sidebar"></aside>
+</div>
 
 <script src="/static/i18n.js"></script>
 <script>
@@ -247,8 +249,22 @@ setI18nLang = function(lang) {
     }
 };
 
-// Initialize navbar and apply i18n after search keys are registered
+// Initialize navbar, sidebar, and apply i18n after search keys are registered
 renderNavbar('search');
+renderSidebar(
+  '<div class="sidebar-section">'
+  + '<div class="sidebar-label">' + t('mode.local').split(' ')[0] + '</div>'
+  + '<select id="sidebar-search-mode" onchange="document.getElementById(\'search-mode\').value=this.value">'
+  + '<option value="local" data-i18n="mode.local">' + t('mode.local') + '</option>'
+  + '<option value="online" data-i18n="mode.online">' + t('mode.online') + '</option>'
+  + '</select>'
+  + '</div>'
+  + '<div class="sidebar-section">'
+  + '<div class="sidebar-label">' + (i18nLang === 'zh' ? '快捷操作' : 'Actions') + '</div>'
+  + '<button class="sidebar-btn" onclick="showStats()" data-i18n="btn.stats">' + t('btn.stats') + '</button>'
+  + '<button class="sidebar-btn" onclick="exportCsv()" data-i18n="btn.export">' + t('btn.export') + '</button>'
+  + '</div>'
+);
 applyI18nCommon();
 
 function escapeHtml(str) {

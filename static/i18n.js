@@ -231,30 +231,43 @@ function applyI18nCommon() {
   if (sw) sw.value = i18nLang;
 }
 
+// activePage is stored globally for renderSidebar to use
+var _activePage = '';
 function renderNavbar(activePage) {
+  _activePage = activePage;
   var nav = document.getElementById('global-nav');
-  if (!nav) return;
+  if (nav) nav.style.display = 'none';
+}
+
+// Render right sidebar: navigation + language switch + page-specific controls
+function renderSidebar(extraHtml) {
+  var el = document.getElementById('page-sidebar');
+  if (!el) return;
   var fromPath = location.pathname;
   var links = [
+    { href: '/', key: 'nav.home', id: 'home' },
     { href: '/idea', key: 'nav.idea', id: 'idea' },
     { href: '/search', key: 'nav.search', id: 'search' },
     { href: '/compare', key: 'nav.compare', id: 'compare' },
     { href: '/ai', key: 'nav.ai', id: 'ai' },
     { href: '/settings?from=' + encodeURIComponent(fromPath), key: 'nav.settings', id: 'settings' }
   ];
-  var html = '<a href="/" class="logo">' + t('nav.home') + '</a>';
-  html += '<div class="nav-links">';
+  // Navigation section
+  var html = '<div class="sidebar-section">';
+  html += '<div class="sidebar-nav">';
   for (var i = 0; i < links.length; i++) {
-    var cls = (links[i].id === activePage) ? ' class="active"' : '';
+    var cls = (links[i].id === _activePage) ? ' class="active"' : '';
     html += '<a href="' + links[i].href + '"' + cls + ' data-i18n="' + links[i].key + '">' + t(links[i].key) + '</a>';
   }
-  html += '</div>';
-  html += '<div class="nav-right">';
+  html += '</div></div>';
+  // Language section
+  html += '<div class="sidebar-section">';
+  html += '<div class="sidebar-label">' + (i18nLang === 'zh' ? '语言' : 'Language') + '</div>';
   html += '<select onchange="setI18nLang(this.value)" id="lang-switch">';
   html += '<option value="zh"' + (i18nLang === 'zh' ? ' selected' : '') + '>中文</option>';
   html += '<option value="en"' + (i18nLang === 'en' ? ' selected' : '') + '>EN</option>';
   html += '</select>';
   html += '</div>';
-  nav.className = 'navbar';
-  nav.innerHTML = html;
+  if (extraHtml) html += extraHtml;
+  el.innerHTML = html;
 }

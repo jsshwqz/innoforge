@@ -14,24 +14,32 @@
 </head>
 <body>
     <nav id="global-nav"></nav>
-    <main class="container">
+    <div class="page-with-sidebar">
+    <main class="container page-main">
         <div class="chat-container">
             <h2 style="margin-bottom:8px;" data-i18n="ai.title"></h2>
             <p class="hint" data-i18n="ai.hint"></p>
             <div class="chat-box" id="chat-messages"></div>
             <div class="chat-input">
-                <label id="web-search-toggle" style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:0.85em;color:#8b949e;white-space:nowrap;" title="开启后 AI 会先联网搜索最新资料再回答">
-                    <input type="checkbox" id="web-search-cb" style="accent-color:#1f6feb;">
-                    <span data-i18n="ai.webSearch"></span>
-                </label>
                 <input type="text" id="chat-msg" data-i18n-placeholder="ai.placeholder" autofocus>
                 <button onclick="sendChat()" data-i18n="ai.send"></button>
             </div>
         </div>
     </main>
+    <aside id="page-sidebar" class="page-sidebar"></aside>
+    </div>
     <script src="/static/i18n.js"></script>
     <script>
     renderNavbar('ai');
+    renderSidebar(
+      '<div class="sidebar-section">'
+      + '<div class="sidebar-label">' + (i18nLang === 'zh' ? '搜索选项' : 'Search') + '</div>'
+      + '<label class="sidebar-toggle" title="开启后 AI 会先联网搜索最新资料再回答">'
+      + '<input type="checkbox" id="web-search-cb">'
+      + '<span data-i18n="ai.webSearch">' + t('ai.webSearch') + '</span>'
+      + '</label>'
+      + '</div>'
+    );
     </script>
     <script>
     function escapeHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }

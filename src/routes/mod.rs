@@ -48,6 +48,10 @@ pub struct PipelineChannelEntry {
     pub created_at: Instant,
 }
 
+/// 内置 CNIPR 开放平台应用凭据（所有用户共享，只需填个人登录账号密码）
+const CNIPR_DEFAULT_CLIENT_ID: &str = "72AB59432F027A98B9CA5D98F0CF64BF";
+const CNIPR_DEFAULT_CLIENT_SECRET: &str = "BE9DA0B9AB9DC573BDFF56F9E5C46218";
+
 /// Shared application configuration (replaces env::set_var).
 #[derive(Debug, Clone)]
 pub struct AppConfig {
@@ -56,6 +60,15 @@ pub struct AppConfig {
     pub bing_api_key: String,
     /// Lens.org Patent API key — 国内可用，替代 Google Patents
     pub lens_api_key: String,
+    /// CNIPR 开放平台（国知局）— 中国专利权威数据源
+    pub cnipr_client_id: String,
+    pub cnipr_client_secret: String,
+    pub cnipr_user: String,
+    pub cnipr_password: String,
+    /// CNIPR OAuth2 access token (runtime cache, not persisted)
+    pub cnipr_access_token: String,
+    pub cnipr_open_id: String,
+    pub cnipr_token_expires: u64,
     pub ai_base_url: String,
     pub ai_api_key: String,
     pub ai_model: String,
@@ -119,6 +132,13 @@ impl AppConfig {
             serpapi_key: get("SERPAPI_KEY", ""),
             bing_api_key: get("BING_API_KEY", ""),
             lens_api_key: get("LENS_API_KEY", ""),
+            cnipr_client_id: get("CNIPR_CLIENT_ID", CNIPR_DEFAULT_CLIENT_ID),
+            cnipr_client_secret: get("CNIPR_CLIENT_SECRET", CNIPR_DEFAULT_CLIENT_SECRET),
+            cnipr_user: get("CNIPR_USER", ""),
+            cnipr_password: get("CNIPR_PASSWORD", ""),
+            cnipr_access_token: String::new(),
+            cnipr_open_id: String::new(),
+            cnipr_token_expires: 0,
             ai_base_url: get("AI_BASE_URL", "http://localhost:11434/v1"),
             ai_api_key: get("AI_API_KEY", "ollama"),
             ai_model: get("AI_MODEL", "qwen2.5:7b"),
@@ -148,6 +168,11 @@ impl AppConfig {
     /// Whether Lens.org patent API is configured (国内可用替代方案).
     pub fn has_lens(&self) -> bool {
         !self.lens_api_key.is_empty()
+    }
+
+    /// Whether CNIPR (国知局) is configured — 只需登录账号密码，应用凭据已内置。
+    pub fn has_cnipr(&self) -> bool {
+        !self.cnipr_user.is_empty() && !self.cnipr_password.is_empty()
     }
 }
 

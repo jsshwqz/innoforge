@@ -14,7 +14,8 @@
 </head>
 <body>
     <nav id="global-nav"></nav>
-    <main class="container">
+    <div class="page-with-sidebar">
+    <main class="container page-main">
         <div class="patent-detail">
             <div class="detail-header">
                 <h1>{{title}}</h1>
@@ -104,6 +105,8 @@
 <h3 style="margin: 0 0 16px 0; color: #58a6ff;" data-i18n="detail.similar"></h3>
 <div id="similar-list" data-i18n="detail.similarLoading"></div>
 </div></main>
+    <aside id="page-sidebar" class="page-sidebar"></aside>
+    </div>
     <script src="/static/i18n.js"></script>
     <script>
     function escapeHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -469,6 +472,15 @@
 
     // Init
     renderNavbar('detail');
+    renderSidebar(
+      '<div class="sidebar-section">'
+      + '<div class="sidebar-label">' + (i18nLang === 'zh' ? '操作' : 'Actions') + '</div>'
+      + '<button class="sidebar-btn primary" onclick="aiSummarize()">🤖 ' + t('detail.analyze') + '</button>'
+      + '<button class="sidebar-btn" id="sb-load-full" onclick="loadFullText()">📄 加载全文</button>'
+      + '<button class="sidebar-btn" onclick="window.open(\'/api/patent/pdf/{{id}}\',\'_blank\')">📥 导出 PDF</button>'
+      + '<button class="sidebar-btn" id="sb-collect" onclick="toggleCollect()">⭐ 收藏</button>'
+      + '</div>'
+    );
     applyI18nCommon();
     window._onI18nLangChange = window._onI18nLangChange || [];
     window._onI18nLangChange.push(applyDetailI18n);

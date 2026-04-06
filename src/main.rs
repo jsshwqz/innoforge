@@ -87,6 +87,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/settings/serpapi", post(routes::api_save_serpapi))
         .route("/api/settings/bing", post(routes::api_save_bing))
         .route("/api/settings/lens", post(routes::api_save_lens))
+        .route("/api/settings/cnipr", post(routes::api_save_cnipr))
         .route("/api/settings/ai", post(routes::api_save_ai))
         .route("/api/settings/fallbacks", post(routes::api_save_fallbacks))
         // 搜索 API / Search API

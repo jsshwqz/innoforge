@@ -219,6 +219,60 @@ pub async fn api_search_online(
     );
     let online_search_type = parse_search_type(req.search_type.as_deref());
 
+    // Priority 0: CNIPR (国知局) for Chinese patent queries
+    let is_cn_query = matches!(req.country.as_deref(), Some("CN"))
+        || req.query.starts_with("CN")
+        || req.query.starts_with("ZL")
+        || req.query.chars().any(|c| c >= '\u{4e00}' && c <= '\u{9fff}');
+
+    if is_cn_query && s.config.read().unwrap().has_cnipr() {
+        println!("[ONLINE] Using CNIPR (国知局) for Chinese patent search");
+        match search_cnipr(&req.query, &s.config, req.page).await {
+            Ok((patents, total)) if !patents.is_empty() => {
+                // Cache to local DB
+                for p in &patents {
+                    let full = Patent {
+                        id: p.id.clone(),
+                        patent_number: p.patent_number.clone(),
+                        title: p.title.clone(),
+                        abstract_text: p.abstract_text.clone(),
+                        description: String::new(),
+                        claims: String::new(),
+                        applicant: p.applicant.clone(),
+                        inventor: p.inventor.clone(),
+                        filing_date: p.filing_date.clone(),
+                        publication_date: String::new(),
+                        grant_date: None,
+                        ipc_codes: String::new(),
+                        cpc_codes: String::new(),
+                        priority_date: String::new(),
+                        country: "CN".to_string(),
+                        kind_code: String::new(),
+                        family_id: None,
+                        legal_status: String::new(),
+                        citations: "[]".into(),
+                        cited_by: "[]".into(),
+                        source: "cnipr".into(),
+                        raw_json: String::new(),
+                        created_at: chrono::Utc::now().to_rfc3339(),
+                        images: "[]".into(),
+                        pdf_url: String::new(),
+                    };
+                    let _ = s.db.insert_patent(&full);
+                }
+                return Json(json!({
+                    "patents": patents,
+                    "total": total,
+                    "page": req.page,
+                    "page_size": 10,
+                    "source": "cnipr"
+                }));
+            }
+            Ok(_) => println!("[ONLINE] CNIPR returned empty, falling back"),
+            Err(e) => println!("[ONLINE] CNIPR error: {}, falling back", e),
+        }
+    }
+
     let api_key = s.config.read().unwrap().serpapi_key.clone();
     if !api_key.is_empty() && api_key != "your-serpapi-key-here" {
         let client = reqwest::Client::new();
@@ -238,12 +292,15 @@ pub async fn api_search_online(
             Some("old") => "&sort=old",
             _ => "",
         };
+        // 中文查询时请求中文结果
+        let lang_param = if is_cn_query { "&language=chinese" } else { "" };
         let url = format!(
-            "https://serpapi.com/search.json?engine=google_patents&q={}&page={}{}{}&api_key={}",
+            "https://serpapi.com/search.json?engine=google_patents&q={}&page={}{}{}{}&api_key={}",
             urlencoding::encode(&search_query),
             serp_page,
             country_param,
             sort_param,
+            lang_param,
             api_key
         );
         println!(
@@ -1176,4 +1233,221 @@ async fn search_sogou_free(query: &str) -> Result<(Vec<FreeSearchResult>, usize)
     let total = results.len();
     println!("[SOGOU] Parsed {} results", total);
     Ok((results, total))
+}
+
+// ── CNIPR (国知局) 专利搜索 ──────────────────────────────────────
+
+/// CNIPR OAuth2 login to get access_token
+async fn cnipr_login(
+    config: &std::sync::Arc<std::sync::RwLock<super::AppConfig>>,
+) -> Option<(String, String, String)> {
+    let (client_id, client_secret, user, password) = {
+        let c = config.read().unwrap();
+        // Check if token is still valid (with 60s buffer)
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        if !c.cnipr_access_token.is_empty() && c.cnipr_token_expires > now + 60 {
+            return Some((
+                c.cnipr_access_token.clone(),
+                c.cnipr_open_id.clone(),
+                c.cnipr_client_id.clone(),
+            ));
+        }
+        (
+            c.cnipr_client_id.clone(),
+            c.cnipr_client_secret.clone(),
+            c.cnipr_user.clone(),
+            c.cnipr_password.clone(),
+        )
+    };
+
+    if client_id.is_empty() || user.is_empty() || password.is_empty() {
+        return None;
+    }
+
+    println!("[CNIPR] Logging in as {}...", user);
+    let client = reqwest::Client::new();
+    let resp = client
+        .post("https://open.cnipr.com/oauth/json/user/login")
+        .form(&[
+            ("user_account", user.as_str()),
+            ("user_password", password.as_str()),
+            ("client_id", client_id.as_str()),
+            ("client_secret", client_secret.as_str()),
+            ("grant_type", "password"),
+            ("return_refresh_token", "1"),
+        ])
+        .send()
+        .await
+        .ok()?;
+
+    let body = resp.text().await.ok()?;
+    let json: serde_json::Value = serde_json::from_str(&body).ok()?;
+
+    if json["status"].as_i64() != Some(0) {
+        println!(
+            "[CNIPR] Login failed: {}",
+            json["message"].as_str().unwrap_or("unknown")
+        );
+        return None;
+    }
+
+    let access_token = json["access_token"].as_str()?.to_string();
+    let open_id = json["open_id"].as_str()?.to_string();
+    let expires_in = json["expires_in"].as_u64().unwrap_or(2592000);
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    // Cache token in config
+    {
+        let mut c = config.write().unwrap();
+        c.cnipr_access_token = access_token.clone();
+        c.cnipr_open_id = open_id.clone();
+        c.cnipr_token_expires = now + expires_in;
+    }
+
+    println!("[CNIPR] Login success, token expires in {}s", expires_in);
+    Some((access_token, open_id, client_id))
+}
+
+/// Search CNIPR for Chinese patents
+pub async fn search_cnipr(
+    query: &str,
+    config: &std::sync::Arc<std::sync::RwLock<super::AppConfig>>,
+    page: usize,
+) -> anyhow::Result<(Vec<PatentSummary>, usize)> {
+    let (access_token, open_id, client_id) =
+        cnipr_login(config).await.ok_or_else(|| anyhow::anyhow!("CNIPR login failed"))?;
+
+    let from = if page > 1 { (page - 1) * 10 } else { 0 };
+
+    // Build search expression: use 名称 or 摘要 for keyword search
+    // If query looks like a patent number (starts with CN, ZL, etc.), search by number
+    let exp = if query.starts_with("CN")
+        || query.starts_with("ZL")
+        || query.chars().all(|c| c.is_ascii_digit())
+    {
+        format!("公开（公告）号='{}'", query)
+    } else {
+        format!("名称+摘要=({})", query)
+    };
+
+    let url = format!(
+        "https://open.cnipr.com/cnipr-api/v1/api/search/sf1/{}",
+        client_id
+    );
+
+    println!("[CNIPR] Search exp='{}' from={}", exp, from);
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(&url)
+        .form(&[
+            ("openid", open_id.as_str()),
+            ("access_token", access_token.as_str()),
+            ("exp", exp.as_str()),
+            ("dbs", "FMZL"),  // 发明专利
+            ("dbs", "FMSQ"),  // 发明申请
+            ("dbs", "SYXX"),  // 实用新型
+            ("option", "1"),  // 按词检索
+            ("order", "-pubDate"), // 最新优先
+            ("from", &from.to_string()),
+            ("size", "10"),
+            ("displayCols", "名称,摘要,申请号,公开（公告）号,公开（公告）日,申请日,申请（专利权）人,发明（设计）人,主分类号,法律状态"),
+        ])
+        .send()
+        .await?;
+
+    let body = resp.text().await?;
+    println!("[CNIPR] Response len={}", body.len());
+
+    let json: serde_json::Value = serde_json::from_str(&body)?;
+
+    if json["status"].as_i64() != Some(0) {
+        let msg = json["message"].as_str().unwrap_or("unknown error");
+        println!("[CNIPR] Search error: {}", msg);
+        return Err(anyhow::anyhow!("CNIPR: {}", msg));
+    }
+
+    let total = json["total"].as_u64().unwrap_or(0) as usize;
+    let mut patents = Vec::new();
+
+    if let Some(results) = json["results"].as_array() {
+        println!("[CNIPR] Got {} results, total={}", results.len(), total);
+        for (idx, r) in results.iter().enumerate() {
+            let title = r["title"]
+                .as_str()
+                .or_else(|| r["名称"].as_str())
+                .unwrap_or("")
+                .to_string();
+            let abstract_text = r["abs"]
+                .as_str()
+                .or_else(|| r["摘要"].as_str())
+                .unwrap_or("")
+                .to_string();
+            let pub_number = r["pubNumber"]
+                .as_array()
+                .and_then(|a| a.first())
+                .and_then(|v| v.as_str())
+                .or_else(|| r["公开（公告）号"].as_str())
+                .unwrap_or("")
+                .to_string();
+            let app_date = r["appDate"]
+                .as_str()
+                .or_else(|| r["申请日"].as_str())
+                .unwrap_or("")
+                .to_string();
+            let applicant = r["applicantName"]
+                .as_array()
+                .and_then(|a| a.first())
+                .and_then(|v| v.as_str())
+                .or_else(|| r["申请（专利权）人"].as_str())
+                .unwrap_or("")
+                .to_string();
+            let inventor = r["inventorName"]
+                .as_array()
+                .and_then(|a| a.first())
+                .and_then(|v| v.as_str())
+                .or_else(|| r["发明（设计）人"].as_str())
+                .unwrap_or("")
+                .to_string();
+            let legal_status = r["lprs"]
+                .as_str()
+                .or_else(|| r["法律状态"].as_str())
+                .unwrap_or("")
+                .to_string();
+
+            // Compute relevance score
+            let position_score = (98.0 - idx as f64 * 3.0).max(30.0);
+            let content_score = calculate_online_relevance(query, &title, &abstract_text, &applicant);
+            let score = (position_score * 0.3 + content_score * 0.7).min(100.0);
+
+            // Append legal status to abstract for display
+            let display_abstract = if !legal_status.is_empty() {
+                format!("[{}] {}", legal_status, abstract_text)
+            } else {
+                abstract_text
+            };
+
+            patents.push(PatentSummary {
+                id: uuid::Uuid::new_v4().to_string(),
+                patent_number: pub_number,
+                title,
+                abstract_text: display_abstract,
+                applicant,
+                inventor,
+                filing_date: app_date,
+                country: "CN".to_string(),
+                relevance_score: Some(score),
+                score_source: Some("cnipr".to_string()),
+            });
+        }
+    }
+
+    Ok((patents, total))
 }

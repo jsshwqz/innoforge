@@ -64,20 +64,6 @@
         }
         .workflow-hint .arrow { color: #30363d; }
 
-        /* 能力卡片 */
-        .capabilities {
-            display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 16px; max-width: 800px; margin: 0 auto 30px; padding: 0 20px;
-        }
-        .cap-card {
-            background: #161b22; border: 1px solid #21262d; border-radius: 10px;
-            padding: 20px; text-align: left; cursor: pointer; transition: all 0.2s;
-            text-decoration: none; color: inherit; display: block;
-        }
-        .cap-card:hover { border-color: #58a6ff; transform: translateY(-2px); }
-        .cap-card h3 { font-size: 1em; margin-bottom: 6px; color: #c9d1d9; }
-        .cap-card p { font-size: 0.82em; color: #8b949e; margin: 0; line-height: 1.5; }
-
         /* 快速抓取（折叠） */
         .quick-fetch {
             max-width: 700px; margin: 0 auto 30px; padding: 0 20px;
@@ -143,8 +129,8 @@
 </head>
 <body>
     <nav id="global-nav"></nav>
-
-    <main class="hero">
+    <div class="page-with-sidebar">
+    <main class="hero page-main">
         <h1>研发助手</h1>
         <p class="subtitle">AI 技术验证 · 专利检索 · 方案推演</p>
 
@@ -189,26 +175,6 @@
             </div>
         </div>
 
-        <!-- 能力卡片 -->
-        <div class="capabilities">
-            <a href="/idea" class="cap-card">
-                <h3>创新推演</h3>
-                <p>描述你的想法，AI 多角度分析可行性并生成报告</p>
-            </a>
-            <a href="/search" class="cap-card">
-                <h3>专利 / 文献检索</h3>
-                <p>搜索全球专利和技术文献，发现相似方案与先行技术</p>
-            </a>
-            <a href="/compare" class="cap-card">
-                <h3>方案对比</h3>
-                <p>多方案并排对比、差异分析</p>
-            </a>
-            <a href="/ai" class="cap-card">
-                <h3>AI 助手</h3>
-                <p>技术问答、文献解读、研发对话</p>
-            </a>
-        </div>
-
         <!-- 服务状态 -->
         <div id="service-status" style="max-width:700px;margin:0 auto 20px;padding:0 20px;">
             <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;font-size:0.85em;">
@@ -237,10 +203,21 @@
     <footer style="text-align:center;padding:20px;color:#484f58;font-size:0.75em;">
         v0.4.4 · <a href="https://github.com/jsshwqz/patent-hub" target="_blank" rel="noopener" style="color:#484f58;">GitHub</a> · <a href="https://gitee.com/jsshwqz/patent-hub" target="_blank" rel="noopener" style="color:#484f58;">Gitee</a> · MIT License
     </footer>
+    </main>
+    <aside id="page-sidebar" class="page-sidebar"></aside>
+    </div>
 
     <script src="/static/i18n.js"></script>
     <script>
     renderNavbar('home');
+    renderSidebar(
+      '<div class="sidebar-section">'
+      + '<div class="sidebar-label">推演模式</div>'
+      + '<button class="sidebar-btn primary" id="sb-mode-chat" onclick="setMode(\'chat\')">对话梳理</button>'
+      + '<button class="sidebar-btn" id="sb-mode-quick" onclick="setMode(\'quick\')">快速推演</button>'
+      + '<button class="sidebar-btn" id="sb-mode-deep" onclick="setMode(\'deep\')">深度推演</button>'
+      + '</div>'
+    );
     applyI18nCommon();
     </script>
     <script>
@@ -252,6 +229,11 @@
         currentMode = mode;
         document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
         document.getElementById('mode-' + mode).classList.add('active');
+        // Sync sidebar buttons
+        ['chat','quick','deep'].forEach(function(m) {
+            var sb = document.getElementById('sb-mode-' + m);
+            if (sb) { sb.className = 'sidebar-btn' + (m === mode ? ' primary' : ''); }
+        });
         const hints = {
             chat: '先与 AI 对话，梳理技术方案、拆解创新点，确认后再推演',
             quick: '跳过对话，直接运行 6 步快速推演（约 30 秒）',
