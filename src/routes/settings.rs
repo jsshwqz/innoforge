@@ -169,6 +169,7 @@ pub async fn api_save_lens(
     Json(json!({"status": "ok"}))
 }
 
+#[allow(dead_code)]
 pub async fn api_save_cnipr(
     State(s): State<AppState>,
     Json(req): Json<serde_json::Value>,

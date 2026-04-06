@@ -223,7 +223,7 @@ pub async fn api_search_online(
     let is_cn_query = matches!(req.country.as_deref(), Some("CN"))
         || req.query.starts_with("CN")
         || req.query.starts_with("ZL")
-        || req.query.chars().any(|c| c >= '\u{4e00}' && c <= '\u{9fff}');
+        || req.query.chars().any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c));
 
     if is_cn_query && s.config.read().unwrap().has_cnipr() {
         println!("[ONLINE] Using CNIPR (国知局) for Chinese patent search");
