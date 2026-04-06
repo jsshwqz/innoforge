@@ -223,7 +223,7 @@ pub async fn api_ai_chat(
         });
 
     // Build system prompt with optional web search results
-    let base_prompt = ctx.as_deref().unwrap_or("你是一个技术研发助手，擅长专利分析、技术方案评估和可行性验证。请用中文回答。");
+    let base_prompt = ctx.as_deref().unwrap_or("你是创研台的 AI 助手，擅长专利分析、技术方案评估、可行性验证和知识产权保护。请用中文回答。");
     let system_prompt = match &web_context {
         Some(web) => format!("{}\n\n以下是联网搜索到的最新资料，请结合这些信息回答用户问题：\n{}", base_prompt, web),
         None => base_prompt.to_string(),

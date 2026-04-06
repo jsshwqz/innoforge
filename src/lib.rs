@@ -1,7 +1,7 @@
-//! # Patent Hub 核心库 / Core Library
+//! # 创研台 InnoForge 核心库 / Core Library
 //!
-//! 专利检索、分析与创新验证平台的核心模块。
-//! Core modules for patent search, analysis and innovation validation.
+//! 从想法到落地的研发验证平台核心模块。
+//! Core modules for turning ideas into decisions, plans, products, and IP protection.
 //!
 //! ## 模块 / Modules
 //! - [`ai`] — AI 多模型容灾客户端 / Multi-provider AI client with failover
@@ -32,9 +32,9 @@ pub extern "C" fn Java_com_patenthub_app_MainActivity_startServer(
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
         rt.block_on(async {
-            eprintln!("[Patent Hub] 启动服务器, 数据库: {}", db_path);
+            eprintln!("[InnoForge] 启动服务器, 数据库: {}", db_path);
             if let Err(e) = start_server(&db_path).await {
-                eprintln!("[Patent Hub] 服务器错误: {}", e);
+                eprintln!("[InnoForge] 服务器错误: {}", e);
             }
         });
     });
@@ -56,9 +56,9 @@ pub extern "C" fn patent_hub_start_server(db_path: *const std::os::raw::c_char) 
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
         rt.block_on(async {
-            eprintln!("[Patent Hub] 启动服务器, 数据库: {}", db_path);
+            eprintln!("[InnoForge] 启动服务器, 数据库: {}", db_path);
             if let Err(e) = start_server(&db_path).await {
-                eprintln!("[Patent Hub] 服务器错误: {}", e);
+                eprintln!("[InnoForge] 服务器错误: {}", e);
             }
         });
     });
@@ -253,7 +253,7 @@ pub async fn start_server(db_path: &str) -> anyhow::Result<()> {
         .with_state(state);
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
-    println!("Patent Hub server starting at http://{addr}");
+    println!("InnoForge server starting at http://{addr}");
     axum::Server::bind(&addr)
         .serve(app.into_make_service())
         .await?;

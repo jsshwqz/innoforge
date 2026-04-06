@@ -1,4 +1,4 @@
-//! Patent Hub 移动端入口 - 纯 Rust
+//! 创研台 InnoForge 移动端入口 - 纯 Rust
 //!
 //! 启动内嵌 Axum 服务器 + WebView，完全不依赖 Java。
 //! 编译目标: aarch64-linux-android
@@ -18,26 +18,26 @@ fn main() {
         "patent_hub.db".to_string()
     };
 
-    println!("[Patent Hub Mobile] 数据库路径: {}", db_path);
+    println!("[InnoForge Mobile] 数据库路径: {}", db_path);
 
     // 2. 后台线程启动 Axum 服务器
     let db_path_clone = db_path.clone();
     thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().expect("无法创建 tokio 运行时");
         rt.block_on(async {
-            println!("[Patent Hub Mobile] 正在启动服务器...");
+            println!("[InnoForge Mobile] 正在启动服务器...");
             if let Err(e) = patent_hub::start_server(&db_path_clone).await {
-                eprintln!("[Patent Hub Mobile] 服务器错误: {}", e);
+                eprintln!("[InnoForge Mobile] 服务器错误: {}", e);
             }
         });
     });
 
     // 3. 等待服务器启动
-    println!("[Patent Hub Mobile] 等待服务器就绪...");
+    println!("[InnoForge Mobile] 等待服务器就绪...");
     for i in 0..30 {
         thread::sleep(Duration::from_millis(200));
         if std::net::TcpStream::connect("127.0.0.1:3000").is_ok() {
-            println!("[Patent Hub Mobile] 服务器已就绪 ({}ms)", (i + 1) * 200);
+            println!("[InnoForge Mobile] 服务器已就绪 ({}ms)", (i + 1) * 200);
             break;
         }
     }
@@ -46,7 +46,7 @@ fn main() {
     #[cfg(not(target_os = "android"))]
     {
         let url = "http://127.0.0.1:3000/search";
-        println!("[Patent Hub Mobile] 打开: {}", url);
+        println!("[InnoForge Mobile] 打开: {}", url);
         let _ = open::that(url);
         // 保持主线程运行
         loop {
@@ -69,7 +69,7 @@ fn start_android_webview() {
 
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new()
-        .with_title("Patent Hub")
+        .with_title("创研台 InnoForge")
         .build(&event_loop)
         .unwrap();
 

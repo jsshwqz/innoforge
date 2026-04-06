@@ -1,7 +1,7 @@
-// Patent Hub shared i18n system
+// InnoForge shared i18n system
 const I18N_COMMON = {
   zh: {
-    'nav.home': '研发助手',
+    'nav.home': '创研台',
     'nav.search': '技术调研',
     'nav.idea': '创新推演',
     'nav.compare': '方案对比',
@@ -99,7 +99,7 @@ const I18N_COMMON = {
     'common.info.classification': '分类号'
   },
   en: {
-    'nav.home': 'R&D Assistant',
+    'nav.home': 'InnoForge',
     'nav.search': 'Research',
     'nav.idea': 'Deep Reasoning',
     'nav.compare': 'Compare',

@@ -786,7 +786,7 @@ pub async fn api_idea_report_html(
 </div>
 
 <div class="section" style="color:#999;font-size:0.85em;margin-top:40px;border-top:1px solid #eee;padding-top:8px;">
-  研发助手 · 创新推演报告 · {created_at}
+  创研台 InnoForge · 创新推演报告 · {created_at}
 </div>
 </body>
 </html>"#,

@@ -10,5 +10,5 @@
   <circle cx="340" cy="300" r="70" fill="none" stroke="#58a6ff" stroke-width="12"/>
   <line x1="390" y1="350" x2="440" y2="400" stroke="#58a6ff" stroke-width="16" stroke-linecap="round"/>
   <circle cx="340" cy="300" r="30" fill="#3fb950" opacity="0.3"/>
-  <text x="256" y="460" text-anchor="middle" font-family="Arial,sans-serif" font-size="48" font-weight="bold" fill="#58a6ff">Patent Hub</text>
+  <text x="256" y="460" text-anchor="middle" font-family="Arial,sans-serif" font-size="48" font-weight="bold" fill="#58a6ff">InnoForge</text>
 </svg>

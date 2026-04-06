@@ -1,7 +1,7 @@
-//! Patent Hub MCP Server
+//! InnoForge MCP Server
 //!
-//! Exposes Patent Hub capabilities as MCP tools via stdio JSON-RPC.
-//! Requires patent-hub web server running on localhost:3000.
+//! Exposes InnoForge capabilities as MCP tools via stdio JSON-RPC.
+//! Requires InnoForge web server running on localhost:3000.
 //!
 //! Usage in MCP config:
 //! ```json

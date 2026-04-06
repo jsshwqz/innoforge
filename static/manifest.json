@@ -1,7 +1,7 @@
 {
-  "name": "研发助手",
-  "short_name": "研发助手",
-  "description": "AI 辅助研发验证工具",
+  "name": "创研台 InnoForge",
+  "short_name": "创研台",
+  "description": "从想法到落地的研发验证平台",
   "lang": "zh-CN",
   "start_url": "/",
   "scope": "/",

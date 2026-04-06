@@ -1,4 +1,4 @@
-const CACHE_NAME = 'patent-hub-v2';
+const CACHE_NAME = 'innoforge-v3';
 
 const STATIC_ASSETS = [
     '/static/style.css',
