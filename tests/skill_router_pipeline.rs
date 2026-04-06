@@ -4,7 +4,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use patent_hub::skill_router::{
+use innoforge::skill_router::{
     capability_registry::CapabilityRegistry,
     executor::Executor,
     lifecycle::LifecycleRecommendation,

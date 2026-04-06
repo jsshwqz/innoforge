@@ -58,9 +58,13 @@ async fn main() -> anyhow::Result<()> {
         let data_dir = std::env::var("HOME")
             .or_else(|_| std::env::var("TMPDIR"))
             .unwrap_or_else(|_| "/data/local/tmp".to_string());
-        format!("{}/patent_hub.db", data_dir)
+        format!("{}/innoforge.db", data_dir)
     } else {
-        "patent_hub.db".to_string()
+        // 兼容旧版数据库文件名
+        if std::path::Path::new("patent_hub.db").exists() && !std::path::Path::new("innoforge.db").exists() {
+            let _ = std::fs::rename("patent_hub.db", "innoforge.db");
+        }
+        "innoforge.db".to_string()
     };
     let db = db::Database::init(&db_path)?;
     let config = routes::AppConfig::from_db_and_env(Some(&db));
@@ -197,7 +201,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/upload/extract", post(routes::api_upload_extract))
         // 静态资源（内嵌二进制）/ Static files (embedded in binary)
         .route("/static/*path", get(serve_static))
-        // 备用前端路径（桌面端已拆到独立仓库 patent-hub-desktop）
+        // 备用前端路径（桌面端已拆到独立仓库 innoforge-desktop）
         // 请求体大小限制（10MB）/ Body size limit (10MB)
         .layer(DefaultBodyLimit::max(10 * 1024 * 1024))
         // 跨域支持（MCP 客户端等需要）/ CORS for MCP clients and external frontends
@@ -226,7 +230,7 @@ async fn main() -> anyhow::Result<()> {
 
     // 自动打开浏览器（设置 PATENT_HUB_NO_OPEN 可禁用）
     // Auto-open browser (disabled when PATENT_HUB_NO_OPEN is set)
-    if std::env::var("PATENT_HUB_NO_OPEN").is_err() {
+    if std::env::var("INNOFORGE_NO_OPEN").is_err() {
         let url = "http://127.0.0.1:3000/";
         if let Err(e) = open::that(url) {
             println!("Could not open browser: {}", e);

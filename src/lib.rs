@@ -27,7 +27,7 @@ pub extern "C" fn Java_com_patenthub_app_MainActivity_startServer(
     let db_path: String = env
         .get_string(&db_path)
         .map(|s| s.into())
-        .unwrap_or_else(|_| "/data/local/tmp/patent_hub.db".to_string());
+        .unwrap_or_else(|_| "/data/local/tmp/innoforge.db".to_string());
 
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
@@ -43,13 +43,13 @@ pub extern "C" fn Java_com_patenthub_app_MainActivity_startServer(
 // ── iOS C FFI 入口 ──────────────────────────────────────────────────────────
 #[cfg(target_os = "ios")]
 #[no_mangle]
-pub extern "C" fn patent_hub_start_server(db_path: *const std::os::raw::c_char) {
+pub extern "C" fn innoforge_start_server(db_path: *const std::os::raw::c_char) {
     let db_path = if db_path.is_null() {
-        "patent_hub.db".to_string()
+        "innoforge.db".to_string()
     } else {
         unsafe { std::ffi::CStr::from_ptr(db_path) }
             .to_str()
-            .unwrap_or("patent_hub.db")
+            .unwrap_or("innoforge.db")
             .to_string()
     };
 
@@ -109,7 +109,7 @@ async fn serve_static_embedded(
     }
 }
 
-/// Start the patent-hub web server with embedded assets.
+/// Start the InnoForge web server with embedded assets.
 /// db_path: path to SQLite database (use app data dir on Android)
 pub async fn start_server(db_path: &str) -> anyhow::Result<()> {
     let db = db::Database::init(db_path)?;

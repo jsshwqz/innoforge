@@ -192,7 +192,7 @@ const I18N_COMMON = {
   }
 };
 
-const I18N_LANG_KEY = 'patent_hub_ui_lang';
+const I18N_LANG_KEY = 'innoforge_ui_lang';
 let i18nLang = localStorage.getItem(I18N_LANG_KEY) || 'zh';
 
 function t(key, vars) {

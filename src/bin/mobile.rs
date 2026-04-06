@@ -13,9 +13,9 @@ fn main() {
         std::env::var("HOME")
             .or_else(|_| std::env::var("TMPDIR"))
             .unwrap_or_else(|_| "/data/local/tmp".to_string())
-            + "/patent_hub.db"
+            + "/innoforge.db"
     } else {
-        "patent_hub.db".to_string()
+        "innoforge.db".to_string()
     };
 
     println!("[InnoForge Mobile] 数据库路径: {}", db_path);
@@ -26,7 +26,7 @@ fn main() {
         let rt = tokio::runtime::Runtime::new().expect("无法创建 tokio 运行时");
         rt.block_on(async {
             println!("[InnoForge Mobile] 正在启动服务器...");
-            if let Err(e) = patent_hub::start_server(&db_path_clone).await {
+            if let Err(e) = innoforge::start_server(&db_path_clone).await {
                 eprintln!("[InnoForge Mobile] 服务器错误: {}", e);
             }
         });

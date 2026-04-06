@@ -1,11 +1,11 @@
 {
-  "skill_name": "patent-hub-dev",
+  "skill_name": "innoforge-dev",
   "iteration": 2,
   "evals": [
     {
       "id": "eval-1-fix-xss",
       "title": "修复 XSS 漏洞",
-      "prompt": "Our security audit flagged XSS vulnerabilities in patent-hub's HTML templates. The templates use innerHTML in several places. Please fix these security issues. Make sure the app still works correctly after your changes. Build to verify.",
+      "prompt": "Our security audit flagged XSS vulnerabilities in innoforge's HTML templates. The templates use innerHTML in several places. Please fix these security issues. Make sure the app still works correctly after your changes. Build to verify.",
       "prompt_design_note": "Deliberately vague: does NOT specify which templates, does NOT name DOMPurify, does NOT list specific innerHTML locations. Agent must discover affected files, choose sanitization strategy, and verify.",
       "assertions": [
         {"id": "builds", "text": "cargo build --release succeeds", "type": "build"},
@@ -21,7 +21,7 @@
     {
       "id": "eval-2-add-api-route",
       "title": "新增 feature_cards API 路由",
-      "prompt": "We need a REST API to manage feature cards in patent-hub. Add GET /api/ideas/:id/feature-cards (returns cards for an idea) and POST /api/ideas/:id/feature-cards (creates a new card). Use the existing FeatureCard struct and Database methods. Follow the project's API response conventions. Add a test. Build and test.",
+      "prompt": "We need a REST API to manage feature cards in innoforge. Add GET /api/ideas/:id/feature-cards (returns cards for an idea) and POST /api/ideas/:id/feature-cards (creates a new card). Use the existing FeatureCard struct and Database methods. Follow the project's API response conventions. Add a test. Build and test.",
       "prompt_design_note": "Vague on: where to put the handler, what AppState fields to use, error format convention, how to register routes. Agent must discover project patterns from code or SKILL.md.",
       "assertions": [
         {"id": "builds", "text": "cargo build --release succeeds", "type": "build"},
@@ -38,7 +38,7 @@
     {
       "id": "eval-3-add-pipeline-step",
       "title": "新增 prior_art_cluster pipeline 步骤",
-      "prompt": "Add a 'PriorArtCluster' step to the patent-hub validation pipeline. It should cluster similar patents from the ranked results into groups by topic similarity, so the analysis step can reason about prior art themes instead of individual patents. Insert it at the appropriate position in the pipeline. Make sure all tests pass.",
+      "prompt": "Add a 'PriorArtCluster' step to the innoforge validation pipeline. It should cluster similar patents from the ranked results into groups by topic similarity, so the analysis step can reason about prior art themes instead of individual patents. Insert it at the appropriate position in the pipeline. Make sure all tests pass.",
       "prompt_design_note": "Deliberately vague: does NOT specify which files to modify, the 4-file pattern, TOTAL_STEPS, index values, or where in the chain to insert. Agent must discover the pipeline architecture and coordinate all changes. SKILL.md explicitly documents this pattern.",
       "assertions": [
         {"id": "builds", "text": "cargo build --release succeeds", "type": "build"},

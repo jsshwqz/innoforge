@@ -7,8 +7,8 @@
 //! ```json
 //! {
 //!   "mcpServers": {
-//!     "patent-hub": {
-//!       "command": "patent-hub-mcp",
+//!     "innoforge": {
+//!       "command": "innoforge-mcp",
 //!       "args": []
 //!     }
 //!   }
@@ -18,7 +18,7 @@
 use serde_json::{json, Value};
 use std::io::{self, BufRead, Write};
 
-const SERVER_NAME: &str = "patent-hub-mcp";
+const SERVER_NAME: &str = "innoforge-mcp";
 const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
 const BASE_URL: &str = "http://127.0.0.1:3000";
 
@@ -194,7 +194,7 @@ fn http_post(path: &str, body: &Value) -> Result<Value, String> {
         .post(&url)
         .json(body)
         .send()
-        .map_err(|e| format!("HTTP error (is patent-hub running on port 3000?): {}", e))?;
+        .map_err(|e| format!("HTTP error (is innoforge running on port 3000?): {}", e))?;
     resp.json::<Value>().map_err(|e| e.to_string())
 }
 
@@ -207,7 +207,7 @@ fn http_get(path: &str) -> Result<Value, String> {
     let resp = client
         .get(&url)
         .send()
-        .map_err(|e| format!("HTTP error (is patent-hub running on port 3000?): {}", e))?;
+        .map_err(|e| format!("HTTP error (is innoforge running on port 3000?): {}", e))?;
     resp.json::<Value>().map_err(|e| e.to_string())
 }
 

@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**仓库地址：** [GitHub](https://github.com/jsshwqz/patent-hub) | [Gitee（国内）](https://gitee.com/jsshwqz/patent-hub)
+**仓库地址：** [GitHub](https://github.com/jsshwqz/innoforge) | [Gitee（国内）](https://gitee.com/jsshwqz/innoforge)
 
 很多产品不是死在实现阶段，而是死在更早之前：想法看起来不错，却缺少判断依据；方向似乎可行，却没有清晰方案；产品刚开始推进，才发现已有技术、专利壁垒或知识产权保护缺口。
 
@@ -16,10 +16,10 @@
 
 | 平台 | GitHub 下载 | Gitee 下载（国内快） |
 |------|------------|-------------------|
-| Windows | [📦 下载](https://github.com/jsshwqz/patent-hub/releases/latest) | [📦 下载](https://gitee.com/jsshwqz/patent-hub/releases) |
-| Linux / macOS | [📦 下载](https://github.com/jsshwqz/patent-hub/releases/latest) | [📦 下载](https://gitee.com/jsshwqz/patent-hub/releases) |
-| Android | [📱 下载](https://github.com/jsshwqz/patent-hub/releases/latest) | [📱 下载](https://gitee.com/jsshwqz/patent-hub/releases) |
-| Docker | `docker run -p 3000:3000 jsshwqz/patent-hub` | 同左 |
+| Windows | [📦 下载](https://github.com/jsshwqz/innoforge/releases/latest) | [📦 下载](https://gitee.com/jsshwqz/innoforge/releases) |
+| Linux / macOS | [📦 下载](https://github.com/jsshwqz/innoforge/releases/latest) | [📦 下载](https://gitee.com/jsshwqz/innoforge/releases) |
+| Android | [📱 下载](https://github.com/jsshwqz/innoforge/releases/latest) | [📱 下载](https://gitee.com/jsshwqz/innoforge/releases) |
+| Docker | `docker run -p 3000:3000 jsshwqz/innoforge` | 同左 |
 
 > 下载解压后运行 `start.bat`（Windows）或 `./start.sh`，打开 **http://127.0.0.1:3000** 即可使用。无需安装数据库。
 
@@ -72,19 +72,19 @@
 
 ### 方式一：下载发布包（推荐）
 
-1. 从 [GitHub Releases](https://github.com/jsshwqz/patent-hub/releases) 或 [Gitee Releases](https://gitee.com/jsshwqz/patent-hub/releases) 下载
+1. 从 [GitHub Releases](https://github.com/jsshwqz/innoforge/releases) 或 [Gitee Releases](https://gitee.com/jsshwqz/innoforge/releases) 下载
 2. 解压，运行 `start.bat`（Windows）或 `./start.sh`（Linux/macOS）
 3. 打开 http://127.0.0.1:3000
 
 ### 方式二：源码编译
 
 ```bash
-git clone https://github.com/jsshwqz/patent-hub.git
-# 或 Gitee：git clone https://gitee.com/jsshwqz/patent-hub.git
+git clone https://github.com/jsshwqz/innoforge.git
+# 或 Gitee：git clone https://gitee.com/jsshwqz/innoforge.git
 
-cd patent-hub
+cd innoforge
 cp .env.example .env   # 编辑 .env 填入 API 密钥（可选）
-cargo run --release --bin patent-hub
+cargo run --release --bin innoforge
 ```
 
 需要 [Rust](https://rustup.rs/) 1.70+。
@@ -92,13 +92,13 @@ cargo run --release --bin patent-hub
 ### 方式三：Docker
 
 ```bash
-docker build -t patent-hub .
-docker run -p 3000:3000 -v patent-data:/data patent-hub
+docker build -t innoforge .
+docker run -p 3000:3000 -v innoforge-data:/data innoforge
 ```
 
 ### 方式四：Android
 
-从 [Releases](https://github.com/jsshwqz/patent-hub/releases) 下载 `patent-hub-android.apk`。内嵌服务器，本地运行。
+从 [Releases](https://github.com/jsshwqz/innoforge/releases) 下载 `innoforge-android.apk`。内嵌服务器，本地运行。
 
 ---
 
@@ -154,7 +154,7 @@ docker run -p 3000:3000 -v patent-data:/data patent-hub
 ## 项目结构
 
 ```
-patent-hub/
+innoforge/
   src/
     main.rs               # Web 服务器入口
     lib.rs                # 库导出 + Android JNI / iOS FFI
@@ -179,9 +179,9 @@ patent-hub/
 ```
 
 **关联仓库：**
-- [patent-hub-desktop](https://gitee.com/jsshwqz/patent-hub-desktop) -- Tauri 桌面端
-- [patent-hub-ios](https://gitee.com/jsshwqz/patent-hub-ios) -- iOS 原生壳
-- [patent-hub-harmony](https://gitee.com/jsshwqz/patent-hub-harmony) -- 鸿蒙原生壳
+- [innoforge-desktop](https://gitee.com/jsshwqz/innoforge-desktop) -- Tauri 桌面端
+- [innoforge-ios](https://gitee.com/jsshwqz/innoforge-ios) -- iOS 原生壳
+- [innoforge-harmony](https://gitee.com/jsshwqz/innoforge-harmony) -- 鸿蒙原生壳
 
 ---
 
@@ -233,8 +233,8 @@ patent-hub/
 ## 获取更新通知
 
 - **GitHub Watch** -- 仓库右上角点击 **Watch → Custom → Releases**
-- **Gitee 关注** -- [Gitee 仓库](https://gitee.com/jsshwqz/patent-hub) 点击 **Watch**
-- **RSS** -- `https://github.com/jsshwqz/patent-hub/releases.atom`
+- **Gitee 关注** -- [Gitee 仓库](https://gitee.com/jsshwqz/innoforge) 点击 **Watch**
+- **RSS** -- `https://github.com/jsshwqz/innoforge/releases.atom`
 
 ---
 
@@ -262,9 +262,9 @@ Most products don't fail at the implementation stage -- they fail much earlier: 
 # Open http://127.0.0.1:3000
 
 # Or build from source:
-git clone https://github.com/jsshwqz/patent-hub.git
-cd patent-hub && cp .env.example .env
-cargo run --release --bin patent-hub
+git clone https://github.com/jsshwqz/innoforge.git
+cd innoforge && cp .env.example .env
+cargo run --release --bin innoforge
 ```
 
 ### Configuration

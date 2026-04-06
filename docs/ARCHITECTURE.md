@@ -2,7 +2,7 @@
 
 ## 概述 / Overview
 
-Patent Hub 采用经典的三层架构设计，注重跨平台兼容性和可扩展性。
+InnoForge 采用经典的三层架构设计，注重跨平台兼容性和可扩展性。
 
 ```
 ┌─────────────────────────────────────────┐
@@ -139,7 +139,7 @@ Use `std::path::PathBuf` for all paths:
 ```rust
 use std::path::PathBuf;
 
-let db_path = PathBuf::from("patent_hub.db");
+let db_path = PathBuf::from("innoforge.db");
 ```
 
 ### 环境变量 / Environment Variables
@@ -170,7 +170,7 @@ rusqlite = { version = "0.29", features = ["bundled"] }
 
 ```bash
 cargo build --release
-./target/release/patent-hub
+./target/release/innoforge
 ```
 
 Pros:
@@ -181,8 +181,8 @@ Pros:
 ### 2. Docker 容器 / Docker Container
 
 ```bash
-docker build -t patent-hub .
-docker run -p 3000:3000 patent-hub
+docker build -t innoforge .
+docker run -p 3000:3000 innoforge
 ```
 
 Pros:

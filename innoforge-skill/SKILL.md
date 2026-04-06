@@ -1,11 +1,11 @@
 ---
-name: patent-hub-dev
-description: "Develop, fix, and extend Patent Hub — a Rust/Axum patent search & AI analysis platform. Trigger when: adding pipeline steps, fixing security issues (XSS/SSRF), writing database migrations, adding API routes, modifying AI prompts, or any patent-hub feature work. Also trigger on mentions of patent-hub, idea validation pipeline, patent search, or novelty scoring."
+name: innoforge-dev
+description: "Develop, fix, and extend InnoForge — a Rust/Axum patent search & AI analysis platform. Trigger when: adding pipeline steps, fixing security issues (XSS/SSRF), writing database migrations, adding API routes, modifying AI prompts, or any innoforge feature work. Also trigger on mentions of innoforge, idea validation pipeline, patent search, or novelty scoring."
 ---
 
-# Patent Hub Development Skill
+# InnoForge Development Skill
 
-Guides development of **patent-hub** v0.4.x — a Rust Axum platform for patent search, AI analysis, and innovation validation.
+Guides development of **innoforge** v0.4.x — a Rust Axum platform for patent search, AI analysis, and innovation validation.
 
 ## Architecture Overview
 
@@ -76,7 +76,7 @@ PipelineStep::NewStep => steps::new_step::execute(ctx).await,
 
 5. **`src/pipeline/steps/mod.rs`**: Add `pub mod new_step;`
 
-6. **Update tests**: Add integration test in `tests/patent_hub_integration.rs`
+6. **Update tests**: Add integration test in `tests/innoforge_integration.rs`
 
 7. Build and test: `cargo build --release && cargo test`
 
@@ -180,13 +180,13 @@ When modifying prompts:
 
 Run: `cargo build --release && cargo test`
 
-Integration tests in `tests/patent_hub_integration.rs` use in-memory SQLite. When adding tests:
+Integration tests in `tests/innoforge_integration.rs` use in-memory SQLite. When adding tests:
 - Use `Database::init(":memory:")` for isolation
 - Create sample data with `insert_patent()` helper
 - Test Chinese character support explicitly (this is a bilingual app)
 - For pipeline tests, mock AI responses by testing individual steps with pre-filled `PipelineContext`
 
-**Critical**: When changing `SCHEMA_VERSION`, update existing tests that assert the version number. Search for the old version value in `tests/patent_hub_integration.rs` — tests like `schema_version_is_set_on_fresh_db` and `reinit_same_db_is_idempotent` hard-code the expected version.
+**Critical**: When changing `SCHEMA_VERSION`, update existing tests that assert the version number. Search for the old version value in `tests/innoforge_integration.rs` — tests like `schema_version_is_set_on_fresh_db` and `reinit_same_db_is_idempotent` hard-code the expected version.
 
 **Test completeness checklist**:
 - New DB methods → add insert + retrieve + empty-result tests

@@ -18,20 +18,20 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            asset: patent-hub-linux-x86_64.tar.gz
+            asset: innoforge-linux-x86_64.tar.gz
           - os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
-            asset: patent-hub-linux-aarch64.tar.gz
+            asset: innoforge-linux-aarch64.tar.gz
             cross: true
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            asset: patent-hub-windows-x86_64.zip
+            asset: innoforge-windows-x86_64.zip
           - os: macos-latest
             target: x86_64-apple-darwin
-            asset: patent-hub-macos-x86_64.tar.gz
+            asset: innoforge-macos-x86_64.tar.gz
           - os: macos-latest
             target: aarch64-apple-darwin
-            asset: patent-hub-macos-aarch64.tar.gz
+            asset: innoforge-macos-aarch64.tar.gz
 
     steps:
       - uses: actions/checkout@v4
@@ -64,7 +64,7 @@ jobs:
         run: |
           BIN_DIR="target/${{ matrix.target }}/release"
           mkdir -p pkg
-          cp "$BIN_DIR/patent-hub"    pkg/
+          cp "$BIN_DIR/innoforge"    pkg/
           cp "$BIN_DIR/skill-router"  pkg/
           cp -r templates static .env.example pkg/
           [ -f README.md ] && cp README.md pkg/ || true
@@ -73,16 +73,16 @@ jobs:
           cat > pkg/start.sh << 'EOF'
           #!/bin/bash
           cd "$(dirname "$0")"
-          ./patent-hub
+          ./innoforge
           EOF
-          chmod +x pkg/start.sh pkg/patent-hub pkg/skill-router
+          chmod +x pkg/start.sh pkg/innoforge pkg/skill-router
 
           cat > pkg/USAGE.txt << 'EOF'
-          # Patent Hub + Skill Router / 使用说明
+          # InnoForge 创研台 + Skill Router / 使用说明
 
           ## 启动 Web 服务器 / Start web server
             ./start.sh
-            # 或 / or: ./patent-hub
+            # 或 / or: ./innoforge
 
           ## Skill Router 命令行 / CLI
             ./skill-router "parse this yaml"
@@ -103,7 +103,7 @@ jobs:
         run: |
           $binDir = "target\${{ matrix.target }}\release"
           New-Item -ItemType Directory -Path pkg -Force | Out-Null
-          Copy-Item "$binDir\patent-hub.exe"   pkg\
+          Copy-Item "$binDir\innoforge.exe"   pkg\
           Copy-Item "$binDir\skill-router.exe" pkg\
           Copy-Item -Recurse templates, static pkg\
           Copy-Item .env.example pkg\
@@ -113,15 +113,15 @@ jobs:
           @'
           @echo off
           cd /d "%~dp0"
-          patent-hub.exe
+          innoforge.exe
           '@ | Set-Content pkg\start.bat -Encoding ASCII
 
           @'
-          # Patent Hub + Skill Router / 使用说明
+          # InnoForge 创研台 + Skill Router / 使用说明
 
           ## 启动 Web 服务器 / Start web server
             start.bat
-            或 / or: patent-hub.exe
+            或 / or: innoforge.exe
 
           ## Skill Router 命令行 / CLI
             skill-router.exe "parse this yaml"
@@ -136,13 +136,10 @@ jobs:
           Compress-Archive -Path pkg\* -DestinationPath "${{ matrix.asset }}" -Force
 
       # ── Upload ────────────────────────────────────────────────────────────
-      # 上传构建产物到 Release / Upload build artifacts to Release
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
         with:
           files: ${{ matrix.asset }}
-          # 不自动生成 release notes（由 CHANGELOG.md 手动管理，避免多矩阵任务导致重复追加）
-          # Don't auto-generate release notes (managed via CHANGELOG.md, avoids duplicate appends from matrix jobs)
           generate_release_notes: false
 
   # ── 同步 Release 到 Gitee ─────────────────────────────────────────────
@@ -172,7 +169,7 @@ jobs:
         run: |
           # 创建 Gitee Release
           RELEASE_RESP=$(curl -s -X POST \
-            "https://gitee.com/api/v5/repos/jsshwqz/patent-hub/releases" \
+            "https://gitee.com/api/v5/repos/jsshwqz/innoforge/releases" \
             -H "Content-Type: application/json" \
             -d "{
               \"access_token\": \"${GITEE_TOKEN}\",
@@ -195,7 +192,7 @@ jobs:
             [ -f "$file" ] || continue
             echo "Uploading $(basename "$file")..."
             curl -s -X POST \
-              "https://gitee.com/api/v5/repos/jsshwqz/patent-hub/releases/${RELEASE_ID}/attach_files" \
+              "https://gitee.com/api/v5/repos/jsshwqz/innoforge/releases/${RELEASE_ID}/attach_files" \
               -H "Content-Type: multipart/form-data" \
               -F "access_token=${GITEE_TOKEN}" \
               -F "file=@${file}"
@@ -206,6 +203,6 @@ jobs:
 
   # ── 移动端 / 桌面端构建已移至独立仓库 ──────────────────────────────────
   # Android:   已拆出（cdylib 不再在主仓编译）
-  # iOS:       https://gitee.com/jsshwqz/patent-hub-ios
-  # HarmonyOS: https://gitee.com/jsshwqz/patent-hub-harmony
-  # Desktop:   https://gitee.com/jsshwqz/patent-hub-desktop
+  # iOS:       https://gitee.com/jsshwqz/innoforge-ios
+  # HarmonyOS: https://gitee.com/jsshwqz/innoforge-harmony
+  # Desktop:   https://gitee.com/jsshwqz/innoforge-desktop

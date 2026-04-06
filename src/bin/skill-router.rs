@@ -1,5 +1,5 @@
-use patent_hub::skill_router::types::RouterPaths;
-use patent_hub::skill_router::SkillRouter;
+use innoforge::skill_router::types::RouterPaths;
+use innoforge::skill_router::SkillRouter;
 
 fn main() {
     if let Err(error) = run() {
@@ -29,7 +29,7 @@ fn run() -> anyhow::Result<()> {
             .unwrap_or(90);
         let workspace = std::env::current_dir()?;
         let paths = RouterPaths::for_workspace(&workspace);
-        let mut registry = patent_hub::skill_router::registry::RegistryStore::load(&paths)?;
+        let mut registry = innoforge::skill_router::registry::RegistryStore::load(&paths)?;
         let purged = registry.gc(days);
         registry.save(&paths)?;
         if purged.is_empty() {

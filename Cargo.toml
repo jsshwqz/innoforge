@@ -1,21 +1,21 @@
 [package]
-name = "patent-hub"
-version = "0.4.5"
+name = "innoforge"
+version = "0.5.0"
 edition = "2021"
 license = "MIT"
 description = "InnoForge - Turn ideas into decisions, plans, products, and IP protection with AI-powered patent search and feasibility analysis"
-repository = "https://github.com/jsshwqz/patent-hub"
+repository = "https://github.com/jsshwqz/innoforge"
 authors = ["jsshwqz"]
 keywords = ["patent", "search", "ai", "analysis", "innovation"]
 categories = ["command-line-utilities", "web-programming"]
 
 [lib]
-name = "patent_hub"
+name = "innoforge"
 path = "src/lib.rs"
 crate-type = ["lib"]
 
 [[bin]]
-name = "patent-hub"
+name = "innoforge"
 path = "src/main.rs"
 
 [[bin]]
@@ -23,10 +23,10 @@ name = "skill-router"
 path = "src/bin/skill-router.rs"
 
 [[bin]]
-name = "patent-hub-mcp"
+name = "innoforge-mcp"
 path = "src/bin/mcp-server.rs"
 
-# patent-hub-mobile 已拆至独立仓库 patent-hub-desktop
+# innoforge-mobile 已拆至独立仓库 innoforge-desktop
 
 [dependencies]
 anyhow = "1"

@@ -1,4 +1,4 @@
-# Patent Hub 项目交接文档
+# InnoForge 项目交接文档
 
 > 供接手的 AI 助手快速了解项目全貌，避免重复踩坑。
 
@@ -8,18 +8,18 @@
 
 | 项目 | 说明 |
 |------|------|
-| 名称 | Patent Hub |
+| 名称 | InnoForge |
 | 版本 | v0.4.2 |
 | 技术栈 | Rust + Axum + SQLite（本地优先 Web 应用） |
-| 仓库 | GitHub: https://github.com/jsshwqz/patent-hub |
-| 镜像 | Gitee: https://gitee.com/jsshwqz/patent-hub |
+| 仓库 | GitHub: https://github.com/jsshwqz/innoforge |
+| 镜像 | Gitee: https://gitee.com/jsshwqz/innoforge |
 | 许可 | MIT |
 | 定位 | 从"专利搜索工具"升级为"研发创新验证助手" |
 
 ## 二、核心架构
 
 ```
-patent-hub/
+innoforge/
   src/
     main.rs          # Axum Web 服务器入口，50+ 路由注册
     lib.rs           # 库导出 + Android JNI 入口
@@ -134,13 +134,13 @@ P0 必做 5 项：
 - V-RAG 图文对齐
 
 ### v1.0.0 — 品牌发布
-- 产品定名（替代 Patent Hub）
+- 产品定名（替代 InnoForge）
 - AionUi MCP 集成上线
 
 ## 六、待办事项
 
-1. **AionUi PR** — 扩展包在 `D:/test/patent-hub-aionui-extension/`，等稳定后 Fork https://github.com/iOfficeAI/AionUi 提 PR
-2. **三个独立仓库推 Gitee** — patent-hub-ios / harmony / desktop（本地 git init 完成，需用户在 Gitee 创建远程仓库）
+1. **AionUi PR** — 扩展包在 `D:/test/innoforge-aionui-extension/`，等稳定后 Fork https://github.com/iOfficeAI/AionUi 提 PR
+2. **三个独立仓库推 Gitee** — innoforge-ios / harmony / desktop（本地 git init 完成，需用户在 Gitee 创建远程仓库）
 3. **产品命名** — 候选名单在规划文档中
 
 ## 七、用户偏好
@@ -154,11 +154,11 @@ P0 必做 5 项：
 
 ```bash
 # 构建
-cargo build --release --bin patent-hub
+cargo build --release --bin innoforge
 
 # 运行
-cargo run --release --bin patent-hub
-# 或双击 start-patent-hub.bat
+cargo run --release --bin innoforge
+# 或双击 start-innoforge.bat
 
 # 测试
 cargo test
@@ -167,7 +167,7 @@ cargo test
 powershell -ExecutionPolicy Bypass -File scripts/self-review.ps1 -Force
 
 # MCP Server
-cargo run --release --bin patent-hub-mcp
+cargo run --release --bin innoforge-mcp
 ```
 
 ## 九、重要文件
@@ -188,7 +188,7 @@ cargo run --release --bin patent-hub-mcp
 
 1. **Windows BAT 脚本中文乱码** — GBK 编码问题，改用英文 label
 2. **AI 分析全部失败** — 通常是 API Key 无效（401）或限速（429），需要用户在设置页面切换到可用的 AI 服务商
-3. **cargo build "access denied"** — patent-hub.exe 被运行中的进程锁住，需先 taskkill
+3. **cargo build "access denied"** — innoforge.exe 被运行中的进程锁住，需先 taskkill
 4. **GitHub Release 重复 Changelog** — 已修复，根因是 `release.yml` 的 `generate_release_notes: true` 在 5 个矩阵构建任务中各追加一次
 5. **设置下拉框不回显** — 已修复，页面加载时 `updateAiFields()` 覆盖了保存的值
 6. **git push 用错 remote 名** — 仓库有两个 remote：`origin`（GitHub）和 `gitee`（Gitee）

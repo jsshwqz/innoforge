@@ -1,7 +1,7 @@
-//! Integration tests for Patent Hub core functionality.
+//! Integration tests for InnoForge core functionality.
 
-use patent_hub::db::Database;
-use patent_hub::patent::*;
+use innoforge::db::Database;
+use innoforge::patent::*;
 
 fn sample_patent(id: &str, title: &str) -> Patent {
     Patent {
@@ -383,7 +383,7 @@ fn reinit_same_db_is_idempotent() {
 
 #[test]
 fn feature_card_insert_and_retrieve() {
-    use patent_hub::patent::FeatureCard;
+    use innoforge::patent::FeatureCard;
 
     let db = Database::init(":memory:").unwrap();
 
@@ -431,7 +431,7 @@ fn feature_cards_empty_for_unknown_idea() {
 
 #[test]
 fn feature_card_chinese_title() {
-    use patent_hub::patent::FeatureCard;
+    use innoforge::patent::FeatureCard;
 
     let db = Database::init(":memory:").unwrap();
 
@@ -527,7 +527,7 @@ fn search_cache_upsert_overwrites() {
 
 #[test]
 fn feature_card_get_by_id() {
-    use patent_hub::patent::FeatureCard;
+    use innoforge::patent::FeatureCard;
 
     let db = Database::init(":memory:").unwrap();
 
@@ -611,8 +611,8 @@ fn batch_idea_get_multiple() {
 
 #[tokio::test]
 async fn prior_art_cluster_integration_with_sample_ranked_results() {
-    use patent_hub::pipeline::context::{PipelineContext, RankedMatch};
-    use patent_hub::pipeline::steps::prior_art_cluster;
+    use innoforge::pipeline::context::{PipelineContext, RankedMatch};
+    use innoforge::pipeline::steps::prior_art_cluster;
 
     let mut ctx = PipelineContext::new("idea-cluster", "智能停车创新", "基于AI的停车位识别系统");
 
