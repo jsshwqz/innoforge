@@ -4,7 +4,7 @@ use crate::pipeline::context::PipelineProgress;
 use crate::pipeline::runner::PipelineRunner;
 use axum::{
     body::Body,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{Response, StatusCode},
     response::sse::{Event, Sse},
     Json,
@@ -672,27 +672,99 @@ pub async fn api_idea_progress(
     Sse::new(stream)
 }
 
-/// GET /api/idea/:id/report — 获取流水线完整报告
+/// GET /api/idea/:id/report?type=executive|technical — 分层报告
+///
+/// - executive: 领导版（1 页摘要）
+/// - technical: 研发版（详细技术报告）
+/// - 无参数: 原始完整数据（向后兼容）
 pub async fn api_idea_report(
     State(s): State<AppState>,
     Path(idea_id): Path<String>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Json<serde_json::Value> {
-    match s.db.get_idea(&idea_id) {
-        Ok(Some(idea)) => Json(json!({
-            "status": "ok",
-            "report": {
-                "id": idea.id,
-                "title": idea.title,
-                "description": idea.description,
-                "status": idea.status,
-                "novelty_score": idea.novelty_score,
-                "analysis": idea.analysis,
-                "web_results": serde_json::from_str::<serde_json::Value>(&idea.web_results).unwrap_or_default(),
-                "patent_results": serde_json::from_str::<serde_json::Value>(&idea.patent_results).unwrap_or_default(),
-                "created_at": idea.created_at,
-            }
-        })),
-        _ => Json(json!({"status": "error", "message": "创意不存在"})),
+    let idea = match s.db.get_idea(&idea_id) {
+        Ok(Some(idea)) => idea,
+        _ => return Json(json!({"status": "error", "message": "创意不存在"})),
+    };
+
+    let report_type = params.get("type").map(|s| s.as_str()).unwrap_or("full");
+    let score = idea.novelty_score.unwrap_or(0.0);
+    let level = if score >= 70.0 { "高新颖性" } else if score >= 40.0 { "中等新颖性" } else { "低新颖性" };
+
+    match report_type {
+        "executive" => {
+            // 领导版：1 页精简报告
+            let risk = if score >= 70.0 { "低" } else if score >= 40.0 { "中" } else { "高" };
+            let conclusion = if score >= 70.0 {
+                "该创意具有较高新颖性，建议推进专利申请"
+            } else if score >= 40.0 {
+                "该创意有一定新颖性，建议进一步差异化后申请"
+            } else {
+                "该创意与现有技术重叠较多，建议调整技术路线"
+            };
+            let report_md = format!(
+                "# 创新验证结论\n\
+                 **项目**：{}\n\
+                 **新颖性评分**：{:.1}/100（{}）\n\
+                 **核心结论**：{}\n\
+                 **建议**：\n\
+                 - 1. 对核心技术差异点进行深度论证\n\
+                 - 2. 补充实验数据支撑新颖性主张\n\
+                 - 3. 关注竞品动态，及时更新技术方案\n\
+                 **风险等级**：{}",
+                idea.title, score, level, conclusion, risk
+            );
+            Json(json!({
+                "status": "ok",
+                "report_type": "executive",
+                "report": report_md,
+            }))
+        }
+        "technical" => {
+            // 研发版：详细技术报告
+            let web_results = serde_json::from_str::<serde_json::Value>(&idea.web_results).unwrap_or_default();
+            let patent_results = serde_json::from_str::<serde_json::Value>(&idea.patent_results).unwrap_or_default();
+            let report_md = format!(
+                "# 技术验证报告\n\n\
+                 ## 创意概述\n\
+                 **标题**：{}\n\
+                 **描述**：{}\n\n\
+                 ## 新颖性评分\n\
+                 **总分**：{:.1}/100（{}）\n\n\
+                 ## 现有技术对比\n\
+                 详见 web_results 和 patent_results 字段。\n\n\
+                 ## 技术差异分析\n\
+                 {}\n\n\
+                 ## 行动方案\n\
+                 基于以上分析，建议执行差异化策略。",
+                idea.title, idea.description, score, level, idea.analysis
+            );
+            Json(json!({
+                "status": "ok",
+                "report_type": "technical",
+                "report": report_md,
+                "web_results": web_results,
+                "patent_results": patent_results,
+            }))
+        }
+        _ => {
+            // 默认：完整原始数据（向后兼容）
+            Json(json!({
+                "status": "ok",
+                "report_type": "full",
+                "report": {
+                    "id": idea.id,
+                    "title": idea.title,
+                    "description": idea.description,
+                    "status": idea.status,
+                    "novelty_score": idea.novelty_score,
+                    "analysis": idea.analysis,
+                    "web_results": serde_json::from_str::<serde_json::Value>(&idea.web_results).unwrap_or_default(),
+                    "patent_results": serde_json::from_str::<serde_json::Value>(&idea.patent_results).unwrap_or_default(),
+                    "created_at": idea.created_at,
+                }
+            }))
+        }
     }
 }
 

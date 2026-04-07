@@ -240,8 +240,10 @@ fn classify_diff(a: &FeatureCard, b: &FeatureCard) -> (String, bool, String) {
         "structure"
     } else if method_changed {
         "method"
-    } else {
+    } else if problem_changed || relations_changed || scenarios_changed {
         "parameter"
+    } else {
+        "none"
     };
 
     let novelty_significance = structure_changed || method_changed;
