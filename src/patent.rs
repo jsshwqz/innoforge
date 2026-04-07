@@ -228,6 +228,17 @@ pub struct FeatureCard {
     pub description: String,
     pub novelty_score: Option<f64>,
     pub created_at: String,
+    // 5 维结构化字段
+    #[serde(default)]
+    pub technical_problem: String,
+    #[serde(default)]
+    pub core_structure: String,
+    #[serde(default)]
+    pub key_relations: String,
+    #[serde(default)]
+    pub process_steps: String,
+    #[serde(default)]
+    pub application_scenarios: String,
 }
 
 /// Request body for creating a new feature card.
@@ -237,6 +248,16 @@ pub struct CreateFeatureCardRequest {
     #[serde(default)]
     pub description: String,
     pub novelty_score: Option<f64>,
+    #[serde(default)]
+    pub technical_problem: String,
+    #[serde(default)]
+    pub core_structure: String,
+    #[serde(default)]
+    pub key_relations: String,
+    #[serde(default)]
+    pub process_steps: String,
+    #[serde(default)]
+    pub application_scenarios: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

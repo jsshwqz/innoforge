@@ -98,6 +98,11 @@ pub async fn api_create_feature_card(
         description: req.description.trim().to_string(),
         novelty_score: req.novelty_score,
         created_at: now,
+        technical_problem: req.technical_problem.trim().to_string(),
+        core_structure: req.core_structure.trim().to_string(),
+        key_relations: req.key_relations.trim().to_string(),
+        process_steps: req.process_steps.trim().to_string(),
+        application_scenarios: req.application_scenarios.trim().to_string(),
     };
 
     match s.db.insert_feature_card(&card) {

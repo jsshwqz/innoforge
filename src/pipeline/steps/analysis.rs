@@ -182,6 +182,11 @@ pub async fn extract_feature_cards(ctx: &PipelineContext, db: &Database) -> Resu
             description,
             novelty_score: Some(novelty),
             created_at: now.clone(),
+            technical_problem: String::new(),
+            core_structure: String::new(),
+            key_relations: String::new(),
+            process_steps: String::new(),
+            application_scenarios: String::new(),
         };
 
         if let Err(e) = db.insert_feature_card(&card) {
@@ -198,6 +203,11 @@ pub async fn extract_feature_cards(ctx: &PipelineContext, db: &Database) -> Resu
             description: c.opportunity.clone(),
             novelty_score: Some(c.signal_strength * 100.0),
             created_at: now.clone(),
+            technical_problem: String::new(),
+            core_structure: String::new(),
+            key_relations: String::new(),
+            process_steps: String::new(),
+            application_scenarios: String::new(),
         };
 
         if let Err(e) = db.insert_feature_card(&card) {

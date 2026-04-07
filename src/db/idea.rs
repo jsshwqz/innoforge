@@ -163,15 +163,21 @@ impl super::Database {
     pub fn insert_feature_card(&self, card: &FeatureCard) -> Result<()> {
         let c = self.conn();
         c.execute(
-            "INSERT INTO feature_cards (id, idea_id, title, description, novelty_score, created_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO feature_cards (id, idea_id, title, description, novelty_score, created_at, \
+             technical_problem, core_structure, key_relations, process_steps, application_scenarios) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 card.id,
                 card.idea_id,
                 card.title,
                 card.description,
                 card.novelty_score,
-                card.created_at
+                card.created_at,
+                card.technical_problem,
+                card.core_structure,
+                card.key_relations,
+                card.process_steps,
+                card.application_scenarios
             ],
         )?;
         Ok(())
@@ -181,7 +187,10 @@ impl super::Database {
     pub fn get_feature_card(&self, id: &str) -> Result<Option<FeatureCard>> {
         let c = self.conn();
         let mut stmt = c.prepare(
-            "SELECT id, idea_id, title, COALESCE(description,''), novelty_score, created_at \
+            "SELECT id, idea_id, title, COALESCE(description,''), novelty_score, created_at, \
+             COALESCE(technical_problem,''), COALESCE(core_structure,''), \
+             COALESCE(key_relations,''), COALESCE(process_steps,''), \
+             COALESCE(application_scenarios,'') \
              FROM feature_cards WHERE id = ?1",
         )?;
         let card = stmt
@@ -193,6 +202,11 @@ impl super::Database {
                     description: r.get(3)?,
                     novelty_score: r.get(4)?,
                     created_at: r.get(5)?,
+                    technical_problem: r.get(6)?,
+                    core_structure: r.get(7)?,
+                    key_relations: r.get(8)?,
+                    process_steps: r.get(9)?,
+                    application_scenarios: r.get(10)?,
                 })
             })
             .ok();
@@ -202,7 +216,10 @@ impl super::Database {
     pub fn get_feature_cards_by_idea(&self, idea_id: &str) -> Result<Vec<FeatureCard>> {
         let c = self.conn();
         let mut stmt = c.prepare(
-            "SELECT id, idea_id, title, COALESCE(description,''), novelty_score, created_at \
+            "SELECT id, idea_id, title, COALESCE(description,''), novelty_score, created_at, \
+             COALESCE(technical_problem,''), COALESCE(core_structure,''), \
+             COALESCE(key_relations,''), COALESCE(process_steps,''), \
+             COALESCE(application_scenarios,'') \
              FROM feature_cards WHERE idea_id = ?1 ORDER BY created_at ASC",
         )?;
         let rows = stmt
@@ -214,6 +231,11 @@ impl super::Database {
                     description: r.get(3)?,
                     novelty_score: r.get(4)?,
                     created_at: r.get(5)?,
+                    technical_problem: r.get(6)?,
+                    core_structure: r.get(7)?,
+                    key_relations: r.get(8)?,
+                    process_steps: r.get(9)?,
+                    application_scenarios: r.get(10)?,
                 })
             })?
             .filter_map(|r| r.ok())

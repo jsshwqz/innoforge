@@ -211,6 +211,21 @@ pub(crate) fn run(conn: &Connection, current_version: i32, target_version: i32) 
         tracing::info!("Database migrated to version 8 (evidence_chain)");
     }
 
+    // Migration 8 → 9: Feature Card 5 维结构化字段
+    if current_version < 9 {
+        conn.execute_batch("
+            ALTER TABLE feature_cards ADD COLUMN technical_problem TEXT DEFAULT '';
+            ALTER TABLE feature_cards ADD COLUMN core_structure TEXT DEFAULT '';
+            ALTER TABLE feature_cards ADD COLUMN key_relations TEXT DEFAULT '';
+            ALTER TABLE feature_cards ADD COLUMN process_steps TEXT DEFAULT '';
+            ALTER TABLE feature_cards ADD COLUMN application_scenarios TEXT DEFAULT '';
+
+            DELETE FROM schema_version;
+            INSERT INTO schema_version (version) VALUES (9);
+        ")?;
+        tracing::info!("Database migrated to version 9 (feature_card 5-dimension fields)");
+    }
+
     if current_version > 0 && current_version < target_version {
         tracing::info!(
             "Database migrated from version {} to {}",

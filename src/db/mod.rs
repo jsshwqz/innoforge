@@ -32,7 +32,7 @@ impl Database {
     }
 
     /// Current schema version. Increment when adding migrations.
-    pub(crate) const SCHEMA_VERSION: i32 = 8;
+    pub(crate) const SCHEMA_VERSION: i32 = 9;
 
     pub fn init(path: &str) -> Result<Self> {
         let conn = Connection::open(path)?;
