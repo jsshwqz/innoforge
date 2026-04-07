@@ -18,9 +18,9 @@
 | **数据持久化** | SQLite + 管道快照 | Git 仓库 (one quest = one repo) |
 | **语言** | Rust + Vanilla JS | Python + React |
 | **部署** | 零依赖单体二进制 | npm 全局安装 + daemon |
-| **目标用户** | 专利工程师、研发经理 | 研究生、实验室 |
+| **目标用户** | 研发人员（发明人、工程师、技术负责人） | 研究生、实验室 |
 
-**核心差异**：DeepScientist 让 AI 全自主跑实验写论文；InnoForge 让 AI 辅助验证创新点是否成立。两者互补而非竞争。
+**核心差异**：DeepScientist 面向学术研究全流程；InnoForge 面向研发人员的创新验证与 IP 保护。两者用户画像高度重叠——都是**会写代码、懂 Git、需要跑实验的技术人员**。这意味着 DeepScientist 的很多理念可以直接移植。
 
 **DeepScientist 七大契约**（AGENTS.md）：
 1. One Quest, One Repository — 每个研究课题一个 Git 仓库
@@ -123,25 +123,26 @@ InnoForge 当前是「跑一次管道 → 出报告 → 结束」，缺乏迭代
 
 Gemini 提出了 4 个模块（A/B/C/D），以下是务实评估：
 
-### 模块 A：自主实验验证引擎 — 采纳 20%
+### 模块 A：自主实验验证引擎 — 采纳 70% ⭐
 
-| Gemini 方案 | 问题 | 务实替代 |
-|------------|------|---------|
-| 自动生成验证脚本 + Docker 沙箱运行 | 过重，InnoForge 用户不跑实验 | AI **模拟论证**：基于文献数据生成对比实验表格 |
-| 指标捕获（吞吐量/延迟） | 依赖真实环境 | 用 AI 从已有 paper 中提取相关指标数据 |
-| 报告注入到 docx | 可保留 | 保留：将模拟数据填入交底书模板 |
+| Gemini 方案 | 与研发用户的契合度 | 实施建议 |
+|------------|-------------------|---------|
+| 自动生成验证脚本 | **高** — 研发用户会写代码、懂实验 | AI 生成 Python/Rust 验证脚本，用户可审查修改 |
+| 沙箱运行 | 中 — Docker 可接受但非必须 | 第一步用简单的子进程隔离，后期可选 Docker |
+| 指标捕获（吞吐量/延迟） | **高** — 研发用户关心性能数据 | 捕获标准输出中的数值指标，自动结构化 |
+| 报告注入到 docx | 高 | 将真实实验数据填入交底书的「实施例」章节 |
 
-**结论**：不做真实实验执行，改为 AI 驱动的「虚拟对比论证」。
+**结论**：研发用户有能力审查和运行实验代码，模块 A 的价值远高于之前评估。关键是让人保持控制权（Human Takeover）。
 
-### 模块 B：Git 驱动版本管理 — 采纳 40%
+### 模块 B：Git 驱动版本管理 — 采纳 80% ⭐
 
-| Gemini 方案 | 问题 | 务实替代 |
-|------------|------|---------|
-| 每个 Quest 创建 Git 子仓库 | 用户不懂 Git | SQLite `idea_versions` 表 |
-| `failed-path` 分支 | 概念过重 | Findings Memory（见 2.1） |
-| `design-around-01` 分支 | 好思路 | `idea_variants` 表：关联同一原始 idea 的规避方案 |
+| Gemini 方案 | 与研发用户的契合度 | 实施建议 |
+|------------|-------------------|---------|
+| 每个 Quest 创建 Git 子仓库 | **高** — 研发用户天天用 Git | 使用 `git2-rs` 管理，UI 提供可视化 |
+| `failed-path` 分支 | **高** — 研发人员理解分支概念 | 失败路径作为「非显而易见性」证据保留 |
+| `design-around-01` 分支 | **高** — 规避设计天然适合分支模型 | 每条规避路径一个分支，diff 可视化对比 |
 
-**结论**：用 DB 版本链替代 Git 子仓库，UI 展示为「方案演进时间线」。
+**结论**：研发用户懂 Git，直接采用 Quest-Git 模型。用 `git2-rs` 实现，前端用分支图可视化。
 
 ### 模块 C：权利要求特征拆解 — 采纳 90% ⭐
 
@@ -175,15 +176,15 @@ Gemini 提出了 4 个模块（A/B/C/D），以下是务实评估：
 
 | 优先级 | 方向 | 来源 | 工作量 | 价值 |
 |--------|------|------|--------|------|
-| **P0** | 权利要求特征拆解 + 授权率预测 | Gemini 模块 C | M | 直接对接已有 FeatureCard，核心竞争力 |
+| **P0** | 权利要求特征拆解 + 授权率预测 | 模块 C | M | 直接对接已有 FeatureCard，核心竞争力 |
+| **P0** | Quest-Git 版本管理 | 模块 B + DeepScientist | L | 研发用户懂 Git，规避设计天然适合分支 |
 | **P0** | 持续迭代 iterate API | DeepScientist | M | 核心体验提升 |
-| **P0** | Findings Memory 跨 Idea 复用 | DeepScientist | M | 研究效率飞跃 |
-| P1 | Research Map / 技术空间地图 | 两者结合 | L | 差异化亮点 |
-| P1 | 假设演化链 | DeepScientist | S | 研究严谨性 |
-| P2 | 方案版本管理（DB 版本链） | Gemini 模块 B | M | 规避设计支持 |
+| **P1** | 自主实验验证引擎 | 模块 A + DeepScientist | L | 研发用户能跑实验，真实数据支撑专利 |
+| **P1** | Findings Memory 跨 Idea 复用 | DeepScientist | M | 研究效率飞跃 |
+| **P1** | Research Map / 技术空间地图 | 模块 D + DeepScientist | L | 差异化亮点 |
+| P2 | 假设演化链 | DeepScientist | S | 研究严谨性 |
 | P2 | 人机协作 redirect | DeepScientist | M | 灵活性 |
 | P2 | Webhook 通知 | DeepScientist | S | 集成能力 |
-| P3 | AI 模拟论证（替代真实实验） | Gemini 模块 A | L | 交底书增强 |
 
 ---
 
@@ -191,11 +192,10 @@ Gemini 提出了 4 个模块（A/B/C/D），以下是务实评估：
 
 | 方案 | 不采纳理由 |
 |------|-----------|
-| AI 全自主执行实验代码 | InnoForge 定位是验证辅助，不是自主研究 |
-| Docker/WASM 沙箱 | 破坏零依赖单体架构的核心优势 |
-| Git 子仓库 | 目标用户不懂 Git，增加认知负担 |
-| npm/Python 依赖 | Rust 单体更适合目标场景 |
-| TUI 终端界面 | 已有 Web + MCP，够用 |
+| npm/Python daemon 架构 | Rust 单体零依赖是核心优势，不引入 Python 运行时 |
+| TUI 终端界面 | 已有 Web + MCP，投入产出比低 |
+| IM 连接器（QQ/微信/Telegram） | 创新验证需要专注环境，IM 驱动不适合 |
+| 论文 LaTeX 编译 | 专利交底书用 docx，不需要 LaTeX |
 
 ---
 
@@ -209,9 +209,14 @@ v0.6.0 — 从「一次性验证」到「持续创新研究」
 1. 权利要求特征拆解 + 授权率预测（模块 C）
    → GET /api/idea/:id/patentability
 
-2. 持续迭代 API
-   → POST /api/idea/:id/iterate
+2. Quest-Git 版本管理（模块 B）
+   → 每个 Quest 一个 Git 子仓库，分支管理规避路径
+   → 研发用户天天用 Git，零学习成本
 
-3. Findings Memory
-   → evidence_chain.finding_type + GET /api/findings?q=
+3. 持续迭代 API
+   → POST /api/idea/:id/iterate
 ```
+
+> **核心定位声明**：InnoForge 面向**研发用户**（发明人、工程师、技术负责人），
+> 而非专利代理人或法务人员。研发用户懂代码、懂 Git、能跑实验——
+> 这决定了 DeepScientist 的技术理念可以高度移植。
