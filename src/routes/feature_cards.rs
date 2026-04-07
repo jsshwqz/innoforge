@@ -180,11 +180,15 @@ pub async fn api_feature_card_diff(
     };
 
     let diff = compute_minimal_diff(&card_a, &card_b);
+    let (diff_type, novelty_significance, novelty_reason) = classify_diff(&card_a, &card_b);
     Json(json!({
         "status": "ok",
         "card_a": { "id": card_a.id, "title": card_a.title },
         "card_b": { "id": card_b.id, "title": card_b.title },
         "diff": diff,
+        "diff_type": diff_type,
+        "novelty_significance": novelty_significance,
+        "novelty_reason": novelty_reason,
     }))
     .into_response()
 }
@@ -206,12 +210,53 @@ fn compute_minimal_diff(
         }),
         _ => json!(null),
     };
+    let tp_diff = diff_strings(&a.technical_problem, &b.technical_problem);
+    let cs_diff = diff_strings(&a.core_structure, &b.core_structure);
+    let kr_diff = diff_strings(&a.key_relations, &b.key_relations);
+    let ps_diff = diff_strings(&a.process_steps, &b.process_steps);
+    let as_diff = diff_strings(&a.application_scenarios, &b.application_scenarios);
 
     json!({
         "title": title_diff,
         "description": desc_diff,
         "novelty_score": score_diff,
+        "technical_problem": tp_diff,
+        "core_structure": cs_diff,
+        "key_relations": kr_diff,
+        "process_steps": ps_diff,
+        "application_scenarios": as_diff,
     })
+}
+
+/// 差异类型分类 + 新颖性判断
+fn classify_diff(a: &FeatureCard, b: &FeatureCard) -> (String, bool, String) {
+    let structure_changed = a.core_structure != b.core_structure;
+    let method_changed = a.process_steps != b.process_steps;
+    let problem_changed = a.technical_problem != b.technical_problem;
+    let relations_changed = a.key_relations != b.key_relations;
+    let scenarios_changed = a.application_scenarios != b.application_scenarios;
+
+    let diff_type = if structure_changed {
+        "structure"
+    } else if method_changed {
+        "method"
+    } else {
+        "parameter"
+    };
+
+    let novelty_significance = structure_changed || method_changed;
+
+    let novelty_reason = if structure_changed {
+        "核心结构采用了不同的技术方案".to_string()
+    } else if method_changed {
+        "工艺/实施步骤存在差异".to_string()
+    } else if problem_changed || relations_changed || scenarios_changed {
+        "参数级差异，新颖性意义较低".to_string()
+    } else {
+        "无显著差异".to_string()
+    };
+
+    (diff_type.to_string(), novelty_significance, novelty_reason)
 }
 
 /// 字符级差异提取 / Character-level diff extraction
