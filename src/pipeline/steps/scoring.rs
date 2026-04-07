@@ -55,6 +55,12 @@ pub async fn execute(ctx: &mut PipelineContext) -> Result<()> {
     };
     ctx.novelty_score = final_score;
 
+    // 更新研发状态机：记录验证结论
+    ctx.research_state.verified_claims.push(format!(
+        "新颖性评分 {:.1}/100（最高相似度 {:.2}）",
+        final_score, max_similarity
+    ));
+
     // 生成评分汇总证据 / Generate scoring summary evidence
     let level = if final_score >= 70.0 { "高新颖性" } else if final_score >= 40.0 { "中等新颖性" } else { "低新颖性" };
     let relation = if final_score >= 60.0 { "supports" } else { "contradicts" };

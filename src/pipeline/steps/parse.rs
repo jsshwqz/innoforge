@@ -221,6 +221,12 @@ pub async fn execute(ctx: &mut PipelineContext) -> Result<()> {
     ctx.keywords = extract_keywords(&full_text, 20);
     ctx.technical_domain = infer_domain(&ctx.keywords);
 
+    // 更新研发状态机：设置初始假设
+    ctx.research_state.current_hypothesis = format!(
+        "创意「{}」在{}领域可能具有新颖性",
+        ctx.title, ctx.technical_domain
+    );
+
     if ctx.keywords.len() < 2 {
         anyhow::bail!("输入内容太短，无法提取有效关键词（至少需要 2 个关键词）");
     }

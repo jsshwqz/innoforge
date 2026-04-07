@@ -116,6 +116,15 @@ pub async fn execute(ctx: &mut PipelineContext) -> Result<()> {
     }
 
     ctx.contradictions = contradictions;
+
+    // 更新研发状态机：为每个矛盾添加开放问题
+    for c in &ctx.contradictions {
+        ctx.research_state.open_questions.push(format!(
+            "{}与{}在{}维度存在矛盾，需进一步验证",
+            c.source_a, c.source_b, c.dimension
+        ));
+    }
+
     Ok(())
 }
 

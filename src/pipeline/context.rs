@@ -141,6 +141,15 @@ pub struct Evidence {
     pub created_at: String,
 }
 
+/// 研发状态机 — 跟踪研究过程中的假设、排除路径和开放问题
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ResearchState {
+    pub current_hypothesis: String,
+    pub excluded_paths: Vec<String>,
+    pub open_questions: Vec<String>,
+    pub verified_claims: Vec<String>,
+}
+
 /// 流水线上下文 — 在步骤间传递的数据载体
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PipelineContext {
@@ -192,6 +201,10 @@ pub struct PipelineContext {
     #[serde(default)]
     pub evidence_chain: Vec<Evidence>,
 
+    // 研发状态机 / Research state machine
+    #[serde(default)]
+    pub research_state: ResearchState,
+
     // 元数据
     pub current_step: PipelineStep,
     pub step_results: Vec<StepResult>,
@@ -221,6 +234,7 @@ impl PipelineContext {
             action_plan: String::new(),
             deep_reasoning: DeepReasoningResult::default(),
             evidence_chain: Vec::new(),
+            research_state: ResearchState::default(),
             current_step: PipelineStep::ParseInput,
             step_results: Vec::new(),
         }
