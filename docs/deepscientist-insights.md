@@ -172,51 +172,107 @@ Gemini 提出了 4 个模块（A/B/C/D），以下是务实评估：
 
 ---
 
-## 4. 综合优先级排序
+## 4. 三方分析对比（Forge 工程视角 + 战略 ZL 矛盾视角 + Claude 产品视角）
 
-| 优先级 | 方向 | 来源 | 工作量 | 价值 |
-|--------|------|------|--------|------|
-| **P0** | 权利要求特征拆解 + 授权率预测 | 模块 C | M | 直接对接已有 FeatureCard，核心竞争力 |
-| **P0** | Quest-Git 版本管理 | 模块 B + DeepScientist | L | 研发用户懂 Git，规避设计天然适合分支 |
-| **P0** | 持续迭代 iterate API | DeepScientist | M | 核心体验提升 |
-| **P1** | 自主实验验证引擎 | 模块 A + DeepScientist | L | 研发用户能跑实验，真实数据支撑专利 |
-| **P1** | Findings Memory 跨 Idea 复用 | DeepScientist | M | 研究效率飞跃 |
-| **P1** | Research Map / 技术空间地图 | 模块 D + DeepScientist | L | 差异化亮点 |
-| P2 | 假设演化链 | DeepScientist | S | 研究严谨性 |
-| P2 | 人机协作 redirect | DeepScientist | M | 灵活性 |
-| P2 | Webhook 通知 | DeepScientist | S | 集成能力 |
+### 4.1 该舍弃什么（三方共识）
+
+| 现有组件 | Forge (Gemini) | 战略 ZL | Claude | 共识 |
+|---------|---------------|---------|--------|------|
+| runner.rs 线性编排 | 舍弃，改 Skill 编排器 | 舍弃（严重度 9/10），改 DAG | 舍弃，改状态机 | **三方一致：舍弃** |
+| pipeline_snapshots 表 | 舍弃，版本化替代 | 舍弃 | 舍弃 | **三方一致：舍弃** |
+| ResearchState 内存模式 | 重构为持久化 | 舍弃（严重度 8/10） | 重构 | **三方一致：改为持久化** |
+| FeatureCard 作为顶层模型 | 降级为 ClaimTree 注解 | 降级（严重度 7/10） | 降级为摘要层 | **三方一致：降级不删除** |
+
+### 4.2 该保留什么（三方共识）
+
+| 现有组件 | 判定 | 理由 |
+|---------|------|------|
+| 13 步的算法逻辑代码 | **保留**，改接口为 Skill | 算法本身没问题，编排方式有问题 |
+| SQLite 数据库 | **保留为唯一存储** | 不引入 Git 存储，用表结构模拟版本管理 |
+| AI 客户端 | **保留** | 与架构无关 |
+| 分层报告生成 | **保留** | 输出格式和存储解耦 |
+| diff_strings / LCS 算法 | **保留** | 纯算法，与架构无关 |
+| FeatureCard 5 维数据 | **保留为摘要** | 降级但不删除 |
+
+### 4.3 主要矛盾（战略 ZL 判定）
+
+**主要矛盾（严重度 9/10）**：单次线性 Pipeline vs 迭代式分支实验
+— 根源：runner.rs 假设 Step(i)→Step(i+1)，不支持回退、分支、循环
+
+**次要矛盾**：
+- 严重度 8：ResearchState 内存临时 vs 需要持久化可追溯
+- 严重度 7：FeatureCard 通用 5 维 vs 需要权利要求级精确拆解
+- 严重度 6：SQLite 单体 vs 实验环境隔离需求
+
+### 4.4 资源分配（综合三方）
+
+| 方向 | 占比 | 说明 |
+|------|------|------|
+| Pipeline→状态机重构 | **35%** | 主要矛盾，一步到位 |
+| 实验验证引擎 | **25%** | 决策：先做 |
+| ClaimTree 特征下沉 | **20%** | 对接已有 FeatureCard |
+| 状态持久化 + 版本管理 | **15%** | SQLite 表模拟分支 |
+| Findings Memory | **5%** | 在上述基础上自然产生 |
 
 ---
 
-## 5. 不采纳的部分
+## 5. 架构决策记录
+
+| 决策项 | 最终选择 | 否决方案 | 理由 |
+|--------|---------|---------|------|
+| 迁移策略 | **一步到位** | 4 阶段渐进 | 渐进会留大量兼容代码，维护成本高 |
+| 存储模型 | **纯 SQLite** | SQLite+Git 混合 / 纯 Git | 混合有同步风险和双写复杂度；纯 Git 跨课题检索慢 |
+| 实验验证引擎 | **先做**（P0） | 放到 P1/P2 | 研发用户能跑实验，真实数据对专利价值最大 |
+| Git 分支语义 | **SQLite 表模拟** | 真实 Git 子仓库 | 保持单体架构简洁性 |
+| FeatureCard 处置 | **降级为 ClaimTree 摘要** | 删除 / 保持原样 | 已有数据和 API 继续可用 |
+
+---
+
+## 6. 不采纳的部分
 
 | 方案 | 不采纳理由 |
 |------|-----------|
-| npm/Python daemon 架构 | Rust 单体零依赖是核心优势，不引入 Python 运行时 |
+| Git 子仓库存储课题数据 | 增加同步复杂度，SQLite 表可模拟版本语义 |
+| npm/Python daemon 架构 | Rust 单体零依赖是核心优势 |
 | TUI 终端界面 | 已有 Web + MCP，投入产出比低 |
-| IM 连接器（QQ/微信/Telegram） | 创新验证需要专注环境，IM 驱动不适合 |
-| 论文 LaTeX 编译 | 专利交底书用 docx，不需要 LaTeX |
+| IM 连接器（QQ/微信/Telegram） | 创新验证需要专注环境 |
+| 论文 LaTeX 编译 | 专利交底书用 docx |
+| 4 阶段渐进迁移 | 一步到位，避免兼容代码积累 |
 
 ---
 
-## 6. 下一步行动
-
-建议 v0.6.0 版本聚焦 P0 三件事：
+## 7. v0.6.0 执行计划
 
 ```
 v0.6.0 — 从「一次性验证」到「持续创新研究」
+存储：纯 SQLite，一步到位重构
+策略：先做实验验证引擎
 
-1. 权利要求特征拆解 + 授权率预测（模块 C）
-   → GET /api/idea/:id/patentability
+1. Pipeline 状态机重构（35%）
+   → runner.rs 拆为 Skill trait + Orchestrator 状态机
+   → 支持迭代、跳转、回退
+   → pipeline_snapshots 表废弃，改为 idea_steps 版本表
 
-2. Quest-Git 版本管理（模块 B）
-   → 每个 Quest 一个 Git 子仓库，分支管理规避路径
-   → 研发用户天天用 Git，零学习成本
+2. 实验验证引擎（25%）
+   → AI 生成验证脚本（Python/Rust）
+   → 子进程隔离运行，捕获标准输出中的指标
+   → 实验数据自动填入报告
 
-3. 持续迭代 API
+3. ClaimTree 权利要求级特征（20%）
+   → 新增 ClaimNode + TechnicalFeature 结构
+   → FeatureCard 降级为 ClaimTree 的可读摘要
+   → GET /api/idea/:id/patentability 授权率预测
+
+4. SQLite 版本管理表（15%）
+   → idea_versions 表：记录创意演进历史
+   → idea_branches 表：管理规避设计路径
+   → findings 表：跨课题知识积累
+
+5. 持续迭代 API（5%）
    → POST /api/idea/:id/iterate
+   → ResearchState 持久化到 idea_research_state 表
 ```
 
 > **核心定位声明**：InnoForge 面向**研发用户**（发明人、工程师、技术负责人），
 > 而非专利代理人或法务人员。研发用户懂代码、懂 Git、能跑实验——
-> 这决定了 DeepScientist 的技术理念可以高度移植。
+> 这决定了 DeepScientist 的技术理念可以高度移植，但存储模型保持 SQLite 单体简洁。
