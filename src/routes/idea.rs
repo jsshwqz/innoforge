@@ -1151,6 +1151,60 @@ pub async fn api_idea_iterate(
     }))
 }
 
+/// GET /api/idea/:id/claim-tree — 获取权利要求树
+pub async fn api_idea_claim_tree(
+    State(s): State<AppState>,
+    Path(idea_id): Path<String>,
+) -> Json<serde_json::Value> {
+    let conn = s.db.conn();
+    let mut stmt = match conn.prepare(
+        "SELECT cn.id, cn.claim_number, cn.claim_type, cn.parent_claim_id, cn.content, \
+         cn.created_at FROM claim_nodes cn WHERE cn.idea_id = ?1 ORDER BY cn.claim_number ASC"
+    ) {
+        Ok(s) => s,
+        Err(e) => return Json(json!({"status": "error", "message": e.to_string()})),
+    };
+
+    let claims: Vec<serde_json::Value> = match stmt.query_map(rusqlite::params![idea_id], |r| {
+        Ok(json!({
+            "id": r.get::<_, String>(0)?,
+            "claim_number": r.get::<_, i32>(1)?,
+            "claim_type": r.get::<_, String>(2)?,
+            "parent_claim_id": r.get::<_, Option<String>>(3)?,
+            "content": r.get::<_, String>(4)?,
+            "created_at": r.get::<_, String>(5)?,
+        }))
+    }) {
+        Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+        Err(_) => Vec::new(),
+    };
+
+    // 为每个 claim 加载 features
+    let mut result_claims = Vec::new();
+    for claim in &claims {
+        let claim_id = claim["id"].as_str().unwrap_or("");
+        let mut feat_stmt = conn.prepare(
+            "SELECT id, description, novelty_flag FROM technical_features WHERE claim_id = ?1"
+        ).unwrap();
+        let features: Vec<serde_json::Value> = match feat_stmt.query_map(rusqlite::params![claim_id], |r| {
+            Ok(json!({
+                "id": r.get::<_, String>(0)?,
+                "description": r.get::<_, String>(1)?,
+                "novelty_flag": r.get::<_, i32>(2)? != 0,
+            }))
+        }) {
+            Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+            Err(_) => Vec::new(),
+        };
+
+        let mut c = claim.clone();
+        c.as_object_mut().unwrap().insert("features".to_string(), json!(features));
+        result_claims.push(c);
+    }
+
+    Json(json!({"status": "ok", "claims": result_claims}))
+}
+
 /// GET /api/idea/:id/versions — 列出版本历史
 pub async fn api_idea_versions(
     State(s): State<AppState>,

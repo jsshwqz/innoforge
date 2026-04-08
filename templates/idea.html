@@ -596,6 +596,42 @@
             }
         }
 
+        // T17: 权利要求树渲染 — 从 API 加载 claim_nodes 数据
+        if (idea.id) {
+            fetch('/api/idea/' + idea.id + '/claim-tree')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.status === 'ok' && data.claims && data.claims.length > 0) {
+                        var html = '<div style="margin-top:20px;border:1px solid #30363d;border-radius:8px;overflow:hidden;">';
+                        html += '<div style="padding:12px 16px;background:#161b22;border-bottom:1px solid #30363d;">';
+                        html += '<h3 style="margin:0;color:#d2a8ff;">📋 ' + (i18nLang === 'en' ? 'Claim Tree Analysis' : '权利要求树分析') + '</h3></div>';
+                        html += '<div style="padding:16px;">';
+                        data.claims.forEach(function(claim) {
+                            var typeLabel = claim.claim_type === 'independent'
+                                ? '<span style="color:#3fb950;font-size:0.8em;">独立</span>'
+                                : '<span style="color:#8b949e;font-size:0.8em;">从属</span>';
+                            html += '<div style="margin-bottom:12px;padding:10px;background:#0d1117;border-radius:6px;">';
+                            html += '<div style="font-weight:600;color:#f0f6fc;">权利要求 ' + claim.claim_number + ' ' + typeLabel + '</div>';
+                            html += '<div style="color:#c9d1d9;margin-top:4px;line-height:1.6;">' + esc(claim.content) + '</div>';
+                            if (claim.features && claim.features.length > 0) {
+                                html += '<div style="margin-top:8px;padding-left:12px;border-left:2px solid #30363d;">';
+                                html += '<div style="color:#8b949e;font-size:0.85em;margin-bottom:4px;">必要技术特征：</div>';
+                                claim.features.forEach(function(f) {
+                                    var flag = f.novelty_flag ? '<span style="color:#f85149;font-weight:600;">[新] </span>' : '';
+                                    html += '<div style="color:#c9d1d9;padding:2px 0;">' + flag + esc(f.description) + '</div>';
+                                });
+                                html += '</div>';
+                            }
+                            html += '</div>';
+                        });
+                        html += '</div></div>';
+                        var area = document.getElementById('analysis-area');
+                        if (area) area.innerHTML += DOMPurify.sanitize(html);
+                    }
+                })
+                .catch(function() { /* claim-tree API 不存在或出错，静默忽略 */ });
+        }
+
         let findingsHtml = '';
         const webResults = idea.web_results || [];
         if (webResults.length > 0) {

@@ -164,6 +164,7 @@ async fn main() -> anyhow::Result<()> {
         )
         .route("/api/feature-cards/diff", get(routes::api_feature_card_diff))
         // 版本管理 + 迭代 API / Version management + iterate API
+        .route("/api/idea/:id/claim-tree", get(routes::api_idea_claim_tree))
         .route("/api/idea/:id/iterate", post(routes::api_idea_iterate))
         .route("/api/idea/:id/versions", get(routes::api_idea_versions))
         .route("/api/idea/:id/branches", get(routes::api_idea_branches))
