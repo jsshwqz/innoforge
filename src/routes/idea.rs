@@ -688,7 +688,28 @@ pub async fn api_idea_report(
     };
 
     let report_type = params.get("type").map(|s| s.as_str()).unwrap_or("full");
-    let score = idea.novelty_score.unwrap_or(0.0);
+
+    // T21: 支持 ?version_id= 从历史版本快照生成报告
+    let (score, analysis_text) = if let Some(vid) = params.get("version_id") {
+        // 从 idea_versions 读取快照
+        match s.db.get_idea_versions(&idea_id) {
+            Ok(versions) => {
+                if let Some(ver) = versions.iter().find(|v| v.id == *vid) {
+                    if let Ok(ctx) = serde_json::from_str::<crate::pipeline::context::PipelineContext>(&ver.context_json) {
+                        (ctx.novelty_score, ctx.ai_analysis)
+                    } else {
+                        (idea.novelty_score.unwrap_or(0.0), idea.analysis.clone())
+                    }
+                } else {
+                    return Json(json!({"status": "error", "message": "版本不存在"}));
+                }
+            }
+            Err(_) => (idea.novelty_score.unwrap_or(0.0), idea.analysis.clone()),
+        }
+    } else {
+        (idea.novelty_score.unwrap_or(0.0), idea.analysis.clone())
+    };
+
     let level = if score >= 70.0 { "高新颖性" } else if score >= 40.0 { "中等新颖性" } else { "低新颖性" };
 
     match report_type {
@@ -737,7 +758,7 @@ pub async fn api_idea_report(
                  {}\n\n\
                  ## 行动方案\n\
                  基于以上分析，建议执行差异化策略。",
-                idea.title, idea.description, score, level, idea.analysis
+                idea.title, idea.description, score, level, analysis_text
             );
             Json(json!({
                 "status": "ok",
@@ -1045,7 +1066,7 @@ fn jaccard_trigram(
 
 // ── 版本管理 + 迭代 API / Version management + iterate API ────────────
 
-/// POST /api/idea/:id/iterate — 持续迭代：基于上一轮结果重跑 Pipeline
+/// POST /api/idea/:id/iterate — 持续迭代：基于上一轮结果，用 Orchestrator 跳转重跑
 pub async fn api_idea_iterate(
     State(s): State<AppState>,
     Path(idea_id): Path<String>,
@@ -1073,9 +1094,6 @@ pub async fn api_idea_iterate(
     ctx.iteration_count += 1;
     ctx.parent_version_id = latest.id.clone();
 
-    // 从 SearchWeb 重新开始（保留 keywords 和 expanded_queries，补充新搜索）
-    ctx.current_step = crate::pipeline::state::PipelineStep::SearchWeb;
-
     // 使用 open_questions 作为额外搜索种子
     if !ctx.research_state.open_questions.is_empty() {
         let extra_queries: Vec<String> = ctx.research_state.open_questions
@@ -1086,9 +1104,11 @@ pub async fn api_idea_iterate(
         ctx.expanded_queries.extend(extra_queries);
     }
 
-    // 启动后台 Pipeline（从 SearchWeb 开始）
+    let iteration = ctx.iteration_count;
+
+    // 用 Orchestrator 从 SearchWeb 跳转重跑（不是线性续跑）
     let config = s.config.read().unwrap().clone();
-    let runner = PipelineRunner::new(
+    let mut orch = crate::orchestrator::engine::Orchestrator::new(
         config.ai_client(),
         s.db.clone(),
         config.serpapi_key.clone(),
@@ -1096,16 +1116,28 @@ pub async fn api_idea_iterate(
         config.lens_api_key.clone(),
         false,
     );
+    orch.inject_command(crate::orchestrator::OrchestratorCommand::Jump(
+        crate::pipeline::state::PipelineStep::SearchWeb,
+    ));
 
     let db = s.db.clone();
     let idea_id_clone = idea_id.clone();
     tokio::spawn(async move {
-        match runner.resume(&idea_id_clone, None).await {
-            Ok(_) => tracing::info!("Iterate pipeline completed for {}", idea_id_clone),
+        match orch.run(ctx, None).await {
+            Ok(result_ctx) => {
+                tracing::info!("Iterate completed for {} (iter={})", idea_id_clone, iteration);
+                if let Ok(Some(mut idea)) = db.get_idea(&idea_id_clone) {
+                    idea.novelty_score = Some(result_ctx.novelty_score);
+                    idea.analysis = result_ctx.ai_analysis;
+                    idea.status = "done".into();
+                    let _ = db.update_idea(&idea);
+                }
+            }
             Err(e) => {
-                tracing::error!("Iterate pipeline failed: {}", e);
+                tracing::error!("Iterate failed: {}", e);
                 if let Ok(Some(mut idea)) = db.get_idea(&idea_id_clone) {
                     idea.analysis = format!("迭代失败: {}", e);
+                    idea.status = "error".into();
                     let _ = db.update_idea(&idea);
                 }
             }
@@ -1114,8 +1146,8 @@ pub async fn api_idea_iterate(
 
     Json(serde_json::json!({
         "status": "ok",
-        "message": format!("第 {} 轮迭代已启动", ctx.iteration_count),
-        "iteration": ctx.iteration_count,
+        "message": format!("第 {} 轮迭代已启动（Orchestrator Jump→SearchWeb）", iteration),
+        "iteration": iteration,
     }))
 }
 

@@ -4,10 +4,9 @@
 //! 当前版本保持向后兼容：默认行为与原线性 Pipeline 一致，
 //! 通过 OrchestratorCommand 可触发高级控制流。
 
-#[allow(dead_code)]
 pub mod command;
+pub mod engine;
 
-#[allow(unused_imports)]
 pub use command::OrchestratorCommand;
 
 use crate::db::Database;
@@ -66,7 +65,6 @@ pub fn record_failure(
 }
 
 /// 创建新分支
-#[allow(dead_code)]
 pub fn create_branch(
     db: &Arc<Database>,
     ctx: &PipelineContext,

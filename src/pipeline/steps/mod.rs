@@ -1,4 +1,5 @@
 pub mod analysis;
+pub mod claim_tree;
 pub mod contradiction;
 pub mod experiment;
 pub mod deep_reasoning;

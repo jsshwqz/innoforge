@@ -16,6 +16,7 @@ pub(super) struct AiProvider {
 }
 
 /// AI client with automatic failover across multiple providers.
+#[derive(Clone)]
 pub struct AiClient {
     pub(super) client: Client,
     pub(super) primary: AiProvider,

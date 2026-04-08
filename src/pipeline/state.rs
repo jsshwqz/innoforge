@@ -17,6 +17,7 @@ pub enum PipelineStep {
     AiDeepAnalysis,
     AiActionPlan,
     ExperimentValidation,
+    BuildClaimTree,
     Finalize,
 }
 
@@ -28,7 +29,7 @@ pub enum StepType {
 }
 
 impl PipelineStep {
-    pub const TOTAL_STEPS: usize = 14;
+    pub const TOTAL_STEPS: usize = 15;
 
     pub fn step_type(&self) -> StepType {
         match self {
@@ -51,7 +52,8 @@ impl PipelineStep {
             Self::ScoreNovelty => Some(Self::AiDeepAnalysis),
             Self::AiDeepAnalysis => Some(Self::AiActionPlan),
             Self::AiActionPlan => Some(Self::ExperimentValidation),
-            Self::ExperimentValidation => Some(Self::Finalize),
+            Self::ExperimentValidation => Some(Self::BuildClaimTree),
+            Self::BuildClaimTree => Some(Self::Finalize),
             Self::Finalize => None,
         }
     }
@@ -71,7 +73,8 @@ impl PipelineStep {
             Self::AiDeepAnalysis => 10,
             Self::AiActionPlan => 11,
             Self::ExperimentValidation => 12,
-            Self::Finalize => 13,
+            Self::BuildClaimTree => 13,
+            Self::Finalize => 14,
         }
     }
 
@@ -90,6 +93,7 @@ impl PipelineStep {
             Self::AiDeepAnalysis => "AI 深度分析",
             Self::AiActionPlan => "AI 行动方案",
             Self::ExperimentValidation => "实验验证",
+            Self::BuildClaimTree => "权利要求树构建",
             Self::Finalize => "生成报告",
         }
     }
@@ -114,6 +118,7 @@ impl PipelineStep {
                 | Self::AiDeepAnalysis
                 | Self::AiActionPlan
                 | Self::ExperimentValidation
+                | Self::BuildClaimTree
         )
     }
 }

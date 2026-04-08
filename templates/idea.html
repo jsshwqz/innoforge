@@ -212,7 +212,7 @@
         loadHistory();
     }
 
-    // 13-step pipeline definitions
+    // 14-step pipeline definitions (v0.5.2: +ExperimentValidation)
     const PIPELINE_STEPS = [
         { key: 'parse_input', zh: '解析输入，提取关键词', en: 'Parse input & extract keywords', type: 'code' },
         { key: 'expand_query', zh: 'AI 扩展搜索词', en: 'AI query expansion', type: 'llm' },
@@ -225,6 +225,8 @@
         { key: 'score_novelty', zh: '新颖性评分', en: 'Score novelty', type: 'code' },
         { key: 'ai_deep_analysis', zh: 'AI 深度分析', en: 'AI deep analysis', type: 'llm' },
         { key: 'ai_action_plan', zh: 'AI 行动方案', en: 'AI action plan', type: 'llm' },
+        { key: 'experiment_validation', zh: '实验验证', en: 'Experiment validation', type: 'llm' },
+        { key: 'build_claim_tree', zh: '权利要求树构建', en: 'Build claim tree', type: 'llm' },
         { key: 'finalize', zh: '生成报告', en: 'Generate report', type: 'code' },
     ];
 
@@ -287,7 +289,7 @@
 
         // Update progress bar
         var doneCount = document.querySelectorAll('#pipeline-steps .step.done, #pipeline-steps .step.skipped').length;
-        var pct = Math.round((doneCount / 12) * 100);
+        var pct = Math.round((doneCount / PIPELINE_STEPS.length) * 100);
         var fill = document.getElementById('pipeline-bar-fill');
         var pctEl = document.getElementById('pipeline-percent');
         if (fill) fill.style.width = pct + '%';
@@ -547,13 +549,13 @@
                 + '<div style="color:#c9d1d9;line-height:1.8;">' + renderMarkdown(synthesisSection) + '</div></div>';
         }
 
-        // 6 个维度手风琴
+        // 6 个维度手风琴（用 data-dim 属性替代 inline onclick，避免 DOMPurify 清除事件）
         html += '<div style="display:flex;flex-direction:column;gap:4px;">';
         dims.forEach(function(d, i) {
             var content = dimSections[d.key] || '';
             var id = 'dim-' + d.key;
             html += '<div style="border:1px solid #30363d;border-radius:6px;overflow:hidden;">'
-                + '<div onclick="toggleDimension(\'' + id + '\')" style="padding:10px 14px;background:#161b22;cursor:pointer;display:flex;align-items:center;gap:8px;user-select:none;">'
+                + '<div data-dim="' + id + '" style="padding:10px 14px;background:#161b22;cursor:pointer;display:flex;align-items:center;gap:8px;user-select:none;">'
                 + '<span style="color:' + d.color + ';font-size:1.1em;">' + d.icon + '</span>'
                 + '<span style="color:' + d.color + ';font-weight:600;">' + d.label + '</span>'
                 + '<span id="' + id + '-arrow" style="margin-left:auto;color:#484f58;transition:transform 0.2s;">▶</span>'
@@ -565,6 +567,12 @@
         html += '</div></div>';
         return html;
     }
+
+    // DOMPurify 会清除 inline onclick，所以用事件委托绑定手风琴点击
+    document.addEventListener('click', function(e) {
+        var target = e.target.closest('[data-dim]');
+        if (target) toggleDimension(target.getAttribute('data-dim'));
+    });
 
     function displayResults(idea) {
         if (idea.novelty_score != null) {
