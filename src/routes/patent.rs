@@ -45,8 +45,8 @@ pub async fn api_enrich_patent(
         return Json(json!({"status":"error","message":"SERPAPI_KEY not configured"}));
     }
 
-    // SerpAPI Google Patents Details only supports "en" - "zh" returns no results
-    let patent_id_param = format!("patent/{}/en", patent.patent_number);
+    let lang = if patent.country == "CN" || patent.patent_number.starts_with("CN") { "zh" } else { "en" };
+    let patent_id_param = format!("patent/{}/{}", patent.patent_number, lang);
     let url = format!(
         "https://serpapi.com/search.json?engine=google_patents_details&patent_id={}&api_key={}",
         urlencoding::encode(&patent_id_param),
