@@ -66,6 +66,11 @@
         .pipeline-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
         .pipeline-bar { height: 6px; background: #21262d; border-radius: 3px; overflow: hidden; }
         .pipeline-bar-fill { height: 100%; background: #1f6feb; border-radius: 3px; transition: width 0.3s ease; }
+        .tab-btn { background: none; border: none; border-bottom: 2px solid transparent; color: #8b949e; padding: 8px 14px; cursor: pointer; font-size: 13px; white-space: nowrap; }
+        .tab-btn:hover { color: #c9d1d9; }
+        .tab-btn.active { border-bottom-color: #f78166; color: #c9d1d9; font-weight: 600; }
+        .tab-panel { display: none; padding-top: 12px; }
+        .tab-panel.active { display: block; }
         @media (max-width: 768px) {
             .idea-layout { grid-template-columns: 1fr; }
             .idea-sidebar { border-right: none; border-bottom: 1px solid #30363d; max-height: 200px; }
@@ -116,61 +121,88 @@
 
             <div id="status-area"></div>
             <div id="score-area"></div>
-            <div id="analysis-area"></div>
-            <div id="findings-area"></div>
 
-            <!-- Evidence chain panel -->
-            <div id="evidence-panel" style="display:none; margin-top:16px; padding:16px; background:#161b22; border-radius:8px; border:1px solid #30363d;">
-                <details>
-                    <summary style="cursor:pointer; color:#58a6ff; font-weight:bold; font-size:1.05em;">
-                        🔗 证据链 / Evidence Chain (<span id="evidence-count">0</span> 条)
-                    </summary>
-                    <div id="evidence-list" style="margin-top:12px;"></div>
-                </details>
+            <!-- Tab 导航 -->
+            <div id="result-tabs" style="display:none; border-bottom:1px solid #30363d; margin-top:12px;">
+                <button class="tab-btn active" data-tab="overview" onclick="switchTab('overview')">📊 概览</button>
+                <button class="tab-btn" data-tab="evidence" onclick="switchTab('evidence')">🔍 证据链</button>
+                <button class="tab-btn" data-tab="features" onclick="switchTab('features')">🧩 特征卡片</button>
+                <button class="tab-btn" data-tab="claims" onclick="switchTab('claims')">🌳 权利要求树</button>
+                <button class="tab-btn" data-tab="findings" onclick="switchTab('findings')">🔑 关键发现</button>
+                <button class="tab-btn" data-tab="chat" onclick="switchTab('chat')">💬 讨论</button>
+                <button class="tab-btn" data-tab="versions" onclick="switchTab('versions')">📜 版本历史</button>
             </div>
 
-            <!-- Key findings panel -->
-            <div id="key-findings-panel" style="display:none; margin-top:16px; padding:16px; background:#161b22; border-radius:8px; border:1px solid #30363d;">
-                <details open>
-                    <summary style="cursor:pointer; color:#58a6ff; font-weight:bold; font-size:1.05em;">
-                        🔍 <span data-i18n="idea.keyFindings">关键发现 / Key Findings</span> (<span id="key-findings-count">0</span>)
-                    </summary>
-                    <div id="key-findings-list" style="margin-top:12px;"></div>
-                </details>
+            <!-- Tab: 概览 -->
+            <div id="tab-overview" class="tab-panel active">
+                <div id="analysis-area"></div>
+                <div id="findings-area"></div>
             </div>
 
-            <!-- Version history panel -->
-            <div id="version-history-panel" style="display:none; margin-top:16px; padding:16px; background:#161b22; border-radius:8px; border:1px solid #30363d;">
-                <details>
-                    <summary style="cursor:pointer; color:#d2a8ff; font-weight:bold; font-size:1.05em;">
-                        📜 <span id="version-history-title">版本历史 / Version History</span> (<span id="version-count">0</span>)
-                    </summary>
-                    <div id="version-list" style="margin-top:12px;"></div>
-                </details>
+            <!-- Tab: 证据链 -->
+            <div id="tab-evidence" class="tab-panel">
+                <div id="evidence-panel" style="padding:16px; background:#161b22; border-radius:8px; border:1px solid #30363d;">
+                    <h3 style="color:#58a6ff; margin:0 0 12px;">🔗 证据链 / Evidence Chain (<span id="evidence-count">0</span> 条)</h3>
+                    <div id="evidence-list"></div>
+                </div>
             </div>
 
-            <!-- Multi-round discussion panel -->
-            <div id="discussion-panel" style="display:none; margin-top:24px; padding:20px; background:#161b22; border-radius:8px; border:1px solid #30363d;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-                    <h3 style="margin:0; color:#58a6ff;" id="disc-title" data-i18n="idea.discussTitle"></h3>
-                    <button onclick="summarizeDiscussion()" style="background:#238636; padding:4px 12px; font-size:0.85em;" id="summary-btn" data-i18n="idea.generateSummary"></button>
+            <!-- Tab: 特征卡片 -->
+            <div id="tab-features" class="tab-panel">
+                <div id="feature-cards-area" style="padding:16px; background:#161b22; border-radius:8px; border:1px solid #30363d;">
+                    <h3 style="color:#58a6ff; margin:0 0 12px;">🧩 特征卡片 / Feature Cards</h3>
+                    <div id="feature-cards-list"><p style="color:#8b949e;">暂无特征卡片</p></div>
                 </div>
-                <div id="discussion-summary" style="display:none; margin-bottom:12px; padding:12px; background:#0d1117; border-radius:6px; border-left:3px solid #58a6ff;">
+            </div>
+
+            <!-- Tab: 权利要求树 -->
+            <div id="tab-claims" class="tab-panel">
+                <div id="claim-tree-area" style="padding:16px; background:#161b22; border-radius:8px; border:1px solid #30363d;">
+                    <h3 style="color:#d2a8ff; margin:0 0 12px;">🌳 权利要求树 / Claim Tree</h3>
+                    <div id="claim-tree-content"><p style="color:#8b949e;">暂无权利要求树数据</p></div>
                 </div>
-                <div id="chat-messages" style="max-height:400px; overflow-y:auto; margin-bottom:12px;">
+            </div>
+
+            <!-- Tab: 关键发现 -->
+            <div id="tab-findings" class="tab-panel">
+                <div id="key-findings-panel" style="padding:16px; background:#161b22; border-radius:8px; border:1px solid #30363d;">
+                    <h3 style="color:#58a6ff; margin:0 0 12px;">🔑 关键发现 / Key Findings (<span id="key-findings-count">0</span>)</h3>
+                    <div id="key-findings-list"><p style="color:#8b949e;">暂无发现记录</p></div>
                 </div>
-                <div id="chat-attachments" style="display:none; margin-bottom:6px; font-size:0.85em;"></div>
-                <div style="display:flex; gap:8px; align-items:flex-end;">
-                    <div style="flex:1; position:relative;">
-                        <textarea id="chat-input" data-i18n-placeholder="idea.chatPlaceholder" rows="3" style="width:100%; padding:8px 12px; background:#0d1117; border:1px solid #30363d; border-radius:6px; color:#c9d1d9; resize:vertical; min-height:60px; max-height:300px; font-size:0.95em; font-family:inherit;" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMessage();}"></textarea>
+            </div>
+
+            <!-- Tab: 讨论 -->
+            <div id="tab-chat" class="tab-panel">
+                <div id="discussion-panel" style="padding:20px; background:#161b22; border-radius:8px; border:1px solid #30363d;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                        <h3 style="margin:0; color:#58a6ff;" id="disc-title" data-i18n="idea.discussTitle"></h3>
+                        <button onclick="summarizeDiscussion()" style="background:#238636; padding:4px 12px; font-size:0.85em;" id="summary-btn" data-i18n="idea.generateSummary"></button>
                     </div>
-                    <div style="display:flex; flex-direction:column; gap:4px;">
-                        <label style="background:#21262d; padding:8px 10px; border-radius:6px; cursor:pointer; text-align:center; border:1px solid #30363d; font-size:0.85em; color:#8b949e;" title="上传图片或文件">
-                            📎
-                            <input type="file" id="chat-file-input" multiple accept=".pdf,.docx,.doc,.txt,.png,.jpg,.jpeg,.gif,.webp" style="display:none;" onchange="handleChatFileSelect(this)">
-                        </label>
-                        <button onclick="sendChatMessage()" style="background:#238636; padding:8px 16px; white-space:nowrap; border-radius:6px;" data-i18n="idea.send"></button>
+                    <div id="discussion-summary" style="display:none; margin-bottom:12px; padding:12px; background:#0d1117; border-radius:6px; border-left:3px solid #58a6ff;">
                     </div>
+                    <div id="chat-messages" style="max-height:400px; overflow-y:auto; margin-bottom:12px;">
+                    </div>
+                    <div id="chat-attachments" style="display:none; margin-bottom:6px; font-size:0.85em;"></div>
+                    <div style="display:flex; gap:8px; align-items:flex-end;">
+                        <div style="flex:1; position:relative;">
+                            <textarea id="chat-input" data-i18n-placeholder="idea.chatPlaceholder" rows="3" style="width:100%; padding:8px 12px; background:#0d1117; border:1px solid #30363d; border-radius:6px; color:#c9d1d9; resize:vertical; min-height:60px; max-height:300px; font-size:0.95em; font-family:inherit;" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMessage();}"></textarea>
+                        </div>
+                        <div style="display:flex; flex-direction:column; gap:4px;">
+                            <label style="background:#21262d; padding:8px 10px; border-radius:6px; cursor:pointer; text-align:center; border:1px solid #30363d; font-size:0.85em; color:#8b949e;" title="上传图片或文件">
+                                📎
+                                <input type="file" id="chat-file-input" multiple accept=".pdf,.docx,.doc,.txt,.png,.jpg,.jpeg,.gif,.webp" style="display:none;" onchange="handleChatFileSelect(this)">
+                            </label>
+                            <button onclick="sendChatMessage()" style="background:#238636; padding:8px 16px; white-space:nowrap; border-radius:6px;" data-i18n="idea.send"></button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab: 版本历史 -->
+            <div id="tab-versions" class="tab-panel">
+                <div id="version-history-panel" style="padding:16px; background:#161b22; border-radius:8px; border:1px solid #30363d;">
+                    <h3 style="color:#d2a8ff; margin:0 0 12px;">📜 版本历史 / Version History (<span id="version-count">0</span>)</h3>
+                    <div id="version-list"><p style="color:#8b949e;">暂无版本历史</p></div>
                 </div>
             </div>
         </div>
@@ -225,6 +257,14 @@
             el.style.display = 'none';
             if (arrow) arrow.style.transform = 'rotate(0deg)';
         }
+    }
+
+    function switchTab(tabId) {
+        document.querySelectorAll('.tab-panel').forEach(function(p) { p.classList.remove('active'); });
+        document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
+        var panel = document.getElementById('tab-' + tabId);
+        if (panel) panel.classList.add('active');
+        document.querySelectorAll('.tab-btn[data-tab="' + tabId + '"]').forEach(function(b) { b.classList.add('active'); });
     }
 
     function reapplyPage() {
@@ -792,6 +832,8 @@
     });
 
     function displayResults(idea) {
+        document.getElementById('result-tabs').style.display = 'flex';
+        switchTab('overview');
         if (idea.novelty_score != null) {
             const scoreClass = idea.novelty_score >= 70 ? 'score-high' : idea.novelty_score >= 40 ? 'score-mid' : 'score-low';
             const scoreLabel = idea.novelty_score >= 70 ? t('idea.scoreHigh') : idea.novelty_score >= 40 ? t('idea.scoreMid') : t('idea.scoreLow');
@@ -872,8 +914,8 @@
                             html += '</div>';
                         });
                         html += '</div></div>';
-                        var area = document.getElementById('analysis-area');
-                        if (area) area.innerHTML += DOMPurify.sanitize(html);
+                        var claimArea = document.getElementById('claim-tree-content');
+                        if (claimArea) claimArea.innerHTML = DOMPurify.sanitize(html);
                     }
                 })
                 .catch(function() { /* claim-tree API 不存在或出错，静默忽略 */ });
@@ -915,6 +957,8 @@
         loadEvidenceChain(idea.id);
         // 加载关键发现 / Load key findings
         loadKeyFindings(idea.id);
+        // 加载特征卡片 / Load feature cards
+        loadFeatureCards(idea.id);
     }
 
     async function loadEvidenceChain(ideaId) {
@@ -925,10 +969,9 @@
             var resp = await fetch('/api/idea/' + ideaId + '/evidence');
             var data = await resp.json();
             if (data.status !== 'ok' || !data.evidence || data.evidence.length === 0) {
-                panel.style.display = 'none';
+                list.innerHTML = '<p style="color:#8b949e;">暂无证据链数据</p>';
                 return;
             }
-            panel.style.display = 'block';
             countEl.textContent = data.evidence.length;
             list.innerHTML = '';
             data.evidence.forEach(function(ev) {
@@ -1090,6 +1133,28 @@
         }
     }
 
+    async function loadFeatureCards(ideaId) {
+        var list = document.getElementById('feature-cards-list');
+        try {
+            var resp = await fetch('/api/ideas/' + ideaId + '/feature-cards');
+            if (!resp.ok) return;
+            var data = await resp.json();
+            if (data.status !== 'ok' || !data.cards || data.cards.length === 0) {
+                list.innerHTML = '<p style="color:#8b949e;">暂无特征卡片</p>';
+                return;
+            }
+            list.innerHTML = '';
+            data.cards.forEach(function(c) {
+                var card = document.createElement('div');
+                card.style.cssText = 'margin-bottom:8px;padding:10px;background:#0d1117;border:1px solid #30363d;border-radius:6px;';
+                var scoreHtml = c.novelty_score != null ? '<span style="color:#3fb950;font-size:0.8em;float:right;">新颖性: ' + Math.round(c.novelty_score) + '</span>' : '';
+                card.innerHTML = DOMPurify.sanitize('<div style="font-weight:600;color:#f0f6fc;">' + esc(c.title) + scoreHtml + '</div>' +
+                    '<div style="color:#8b949e;font-size:0.85em;margin-top:4px;">' + esc(c.description || '') + '</div>');
+                list.appendChild(card);
+            });
+        } catch(e) {}
+    }
+
     function showStatus(type, msg) {
         document.getElementById('status-area').innerHTML = DOMPurify.sanitize(
             '<div class="status-bar status-' + type + '">' + msg + '</div>');
@@ -1099,7 +1164,7 @@
         document.getElementById('score-area').innerHTML = '';
         document.getElementById('analysis-area').innerHTML = '';
         document.getElementById('findings-area').innerHTML = '';
-        document.getElementById('key-findings-panel').style.display = 'none';
+        document.getElementById('result-tabs').style.display = 'none';
     }
 
     function clearForm() {
@@ -1256,13 +1321,7 @@
                 if (item) item.classList.add('active');
             }
 
-            // Auto-scroll to discussion panel so user can see conversation history
-            setTimeout(function() {
-                var panel = document.getElementById('discussion-panel');
-                if (panel && panel.style.display !== 'none') {
-                    panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                }
-            }, 300);
+            // 不再自动滚动，用户通过 Tab 切换查看讨论
         } catch (e) {
             console.error('Failed to load idea:', e);
         }
@@ -1285,7 +1344,6 @@
 
     function showDiscussionPanel() {
         if (!currentIdeaId) return;
-        document.getElementById('discussion-panel').style.display = 'block';
         loadChatMessages();
     }
 
