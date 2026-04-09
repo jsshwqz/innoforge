@@ -36,7 +36,11 @@ pub async fn api_enrich_patent(
     };
     // Only skip if we have claims AND images already
     let has_images = patent.images.len() > 5;
-    if patent.claims.len() > 50 && has_images {
+    let is_cn = patent.country == "CN" || patent.patent_number.starts_with("CN");
+    // For CN patents, force re-fetch if existing content has no CJK characters (was fetched in English)
+    let cn_needs_refetch = is_cn && patent.claims.len() > 50
+        && !patent.claims.chars().any(|c| c >= '\u{4e00}' && c <= '\u{9fff}');
+    if patent.claims.len() > 50 && has_images && !cn_needs_refetch {
         return Json(json!({"status":"ok","message":"Already enriched","patent":patent}));
     }
 
@@ -194,8 +198,11 @@ pub async fn api_enrich_patent_free(
         Ok(Some(p)) => p,
         _ => return Json(json!({"status":"error","message":"Patent not found"})),
     };
-    // Already has full text
-    if patent.description.len() > 50 && patent.claims.len() > 50 {
+    // Already has full text — but for CN patents, re-fetch if content is in English
+    let is_cn = patent.country == "CN" || patent.patent_number.starts_with("CN");
+    let cn_needs_refetch = is_cn && patent.claims.len() > 50
+        && !patent.claims.chars().any(|c| c >= '\u{4e00}' && c <= '\u{9fff}');
+    if patent.description.len() > 50 && patent.claims.len() > 50 && !cn_needs_refetch {
         return Json(json!({"status":"ok","message":"Already enriched","patent":patent}));
     }
 
