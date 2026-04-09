@@ -1328,16 +1328,26 @@
     }
 
     function renderMarkdown(text) {
-        return text
+        // 先提取代码块，避免内部被其他规则破坏
+        var codeBlocks = [];
+        text = text.replace(/```(\w*)\n?([\s\S]*?)```/g, function(_, lang, code) {
+            codeBlocks.push('<pre style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:10px;overflow-x:auto;font-size:0.85em;"><code>' + code.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</code></pre>');
+            return '\x00CB' + (codeBlocks.length - 1) + '\x00';
+        });
+        var result = text
             .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
             .replace(/^### (.+)$/gm, '<h3>$1</h3>')
             .replace(/^## (.+)$/gm, '<h3 style="font-size:1.1em">$1</h3>')
+            .replace(/`([^`]+)`/g, '<code style="background:#21262d;padding:1px 5px;border-radius:3px;font-size:0.9em;">$1</code>')
             .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
             .replace(/^\- (.+)$/gm, '<li>$1</li>')
             .replace(/^(\d+)\. (.+)$/gm, '<li>$2</li>')
             .replace(/\n{2,}/g, '</p><p>')
             .replace(/\n/g, '<br>')
             .replace(/^/, '<p>').replace(/$/, '</p>');
+        // 恢复代码块
+        result = result.replace(/\x00CB(\d+)\x00/g, function(_, i) { return codeBlocks[parseInt(i)]; });
+        return result;
     }
 
     // ── Multi-round discussion ──────────────────────────────────────
