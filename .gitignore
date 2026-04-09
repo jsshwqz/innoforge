@@ -24,5 +24,11 @@ server.log
 
 # 临时测试脚本和截图 / Temp test files
 test-*.js
+test-screenshots/
+test-screenshots-e2e/
 image_*.png
 .mcp.json
+
+# 运行时产物 / Runtime artifacts
+*.log
+docs/self-review/last-run.log
