@@ -404,6 +404,7 @@ pub async fn api_recommend_similar(
         sort_by: None,
         ipc: None,
         cpc: None,
+        region: None,
     };
 
     match super::api_search_online(State(s), Json(req)).await {

@@ -91,6 +91,8 @@ pub struct SearchRequest {
     pub ipc: Option<String>, // IPC classification filter (prefix match)
     #[serde(default)]
     pub cpc: Option<String>, // CPC classification filter (prefix match)
+    #[serde(default)]
+    pub region: Option<String>, // "cn" (国内) | "intl" (国外) | None (auto)
 }
 
 fn d1() -> usize {

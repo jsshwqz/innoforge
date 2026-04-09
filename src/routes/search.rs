@@ -214,24 +214,35 @@ pub async fn api_search_online(
     Json(req): Json<SearchRequest>,
 ) -> Json<serde_json::Value> {
     println!(
-        "[ONLINE] query='{}' page={} country={:?}",
-        req.query, req.page, req.country
+        "[ONLINE] query='{}' page={} country={:?} region={:?}",
+        req.query, req.page, req.country, req.region
     );
     let online_search_type = parse_search_type(req.search_type.as_deref());
 
-    // Priority 0: CNIPR (国知局) for Chinese patent queries
+    // 搜索区域判定：用户明确选择 > 自动检测
     let query_trimmed = req.query.trim();
     let looks_like_cn_patent_number = {
-        // 中国专利申请号格式：纯数字12-13位，可能带点号（如 202210835143.9）
         let digits_only: String = query_trimmed.chars().filter(|c| c.is_ascii_digit()).collect();
         digits_only.len() >= 10 && digits_only.len() <= 15
             && query_trimmed.chars().all(|c| c.is_ascii_digit() || c == '.')
     };
-    let is_cn_query = matches!(req.country.as_deref(), Some("CN"))
+    let auto_cn = matches!(req.country.as_deref(), Some("CN"))
         || query_trimmed.starts_with("CN")
         || query_trimmed.starts_with("ZL")
         || looks_like_cn_patent_number
         || query_trimmed.chars().any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c));
+
+    let is_cn_query = match req.region.as_deref() {
+        Some("cn") => true,              // 用户明确选国内
+        Some("intl") => false,           // 用户明确选国外
+        _ => auto_cn,                     // 自动检测
+    };
+    let is_intl_query = match req.region.as_deref() {
+        Some("intl") => true,
+        Some("cn") => false,
+        _ => !auto_cn,
+    };
+    println!("[ONLINE] region resolve: is_cn={} is_intl={}", is_cn_query, is_intl_query);
 
     if is_cn_query && s.config.read().unwrap().has_cnipr() {
         println!("[ONLINE] Using CNIPR (国知局) for Chinese patent search");

@@ -67,9 +67,14 @@
 <h3 data-i18n="search.title"></h3>
 <div class="search-grid">
 <input type="text" id="search-input" data-i18n-placeholder="search.placeholder">
-<select id="search-mode">
+<select id="search-mode" onchange="toggleRegionSelect()">
 <option value="local" data-i18n="mode.local"></option>
 <option value="online" data-i18n="mode.online"></option>
+</select>
+<select id="search-region" style="display:none" title="搜索区域">
+<option value="auto" data-i18n="region.auto"></option>
+<option value="cn" data-i18n="region.cn"></option>
+<option value="intl" data-i18n="region.intl"></option>
 </select>
 <select id="search-type">
 <option value="auto" data-i18n="type.auto"></option>
@@ -145,6 +150,9 @@ let lastPageSize = 20;
     'search.placeholder': '输入关键词、文献号、申请人或发明人...',
     'mode.local': '本地数据库',
     'mode.online': '在线搜索',
+    'region.auto': '自动识别区域',
+    'region.cn': '国内（国知局/搜狗）',
+    'region.intl': '国外（SerpAPI/Google）',
     'type.auto': '自动识别',
     'type.inventor': '发明人',
     'type.applicant': '申请人',
@@ -192,6 +200,9 @@ let lastPageSize = 20;
     'search.placeholder': 'Enter keywords, patent number, applicant, or inventor...',
     'mode.local': 'Local DB',
     'mode.online': 'Online',
+    'region.auto': 'Auto Detect',
+    'region.cn': 'China (CNIPR/Sogou)',
+    'region.intl': 'International (SerpAPI/Google)',
     'type.auto': 'Auto Detect',
     'type.inventor': 'Inventor',
     'type.applicant': 'Applicant',
@@ -276,8 +287,14 @@ function escapeHtml(str) {
         .replace(/'/g, '&#39;');
 }
 
+function toggleRegionSelect() {
+    var mode = document.getElementById('search-mode').value;
+    var regionEl = document.getElementById('search-region');
+    if (regionEl) regionEl.style.display = mode === 'online' ? '' : 'none';
+}
+
 function getSearchEndpoint() {
-    const mode = document.getElementById('search-mode').value;
+    var mode = document.getElementById('search-mode').value;
     return mode === 'online' ? '/api/search/online' : '/api/search';
 }
 
@@ -290,11 +307,13 @@ function buildRequest(page) {
     const dateTo = document.getElementById('date-to').value;
     const pageSize = parseInt(document.getElementById('page-size').value, 10);
 
+    const region = document.getElementById('search-region').value;
     const body = { query, page, page_size: pageSize, sort_by: sortBy };
     if (country) body.country = country;
     if (searchType && searchType !== 'auto') body.search_type = searchType;
     if (dateFrom) body.date_from = dateFrom;
     if (dateTo) body.date_to = dateTo;
+    if (region && region !== 'auto') body.region = region;
     return body;
 }
 
