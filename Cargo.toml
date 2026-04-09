@@ -19,14 +19,8 @@ name = "innoforge"
 path = "src/main.rs"
 
 [[bin]]
-name = "skill-router"
-path = "src/bin/skill-router.rs"
-
-[[bin]]
 name = "innoforge-mcp"
 path = "src/bin/mcp-server.rs"
-
-# innoforge-mobile 已拆至独立仓库 innoforge-desktop
 
 [dependencies]
 anyhow = "1"
@@ -55,9 +49,6 @@ rust-embed = { version = "8.11.0", features = ["mime-guess"] }
 mime_guess = "2.0.5"
 futures = "0.3"
 async-stream = "0.3"
-
-[target.'cfg(target_os = "android")'.dependencies]
-jni = "0.21"
 
 [dev-dependencies]
 tempfile = "3"

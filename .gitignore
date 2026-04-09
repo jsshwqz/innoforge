@@ -31,4 +31,12 @@ image_*.png
 
 # 运行时产物 / Runtime artifacts
 *.log
-docs/self-review/last-run.log
+docs/self-review/
+
+# 已拆出的独立项目 / Separated into standalone repos
+skills/
+innoforge-skill/
+mobile/
+harmonyos/
+scripts/
+self-review.bat

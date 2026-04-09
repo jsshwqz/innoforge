@@ -6,9 +6,10 @@
 //! ## 模块 / Modules
 //! - [`ai`] — AI 多模型容灾客户端 / Multi-provider AI client with failover
 //! - [`db`] — SQLite 数据库操作 / SQLite database operations
+//! - [`experiment`] — 实验验证引擎 / Experiment verification engine
+//! - [`orchestrator`] — 状态机编排器 / State machine orchestrator
 //! - [`patent`] — 专利数据结构 / Patent data structures
-//! - [`pipeline`] — 13 步创新验证流水线 / 13-step innovation validation pipeline
-//! - [`skill_router`] — 技能路由引擎 / Skill routing engine
+//! - [`pipeline`] — 15 步创新验证流水线 / 15-step innovation validation pipeline
 
 pub mod ai;
 pub mod db;
@@ -16,55 +17,6 @@ pub mod experiment;
 pub mod orchestrator;
 pub mod patent;
 pub mod pipeline;
-pub mod skill_router;
-
-// ── Android JNI 入口 ─────────────────────────────────────────────────────────
-#[cfg(target_os = "android")]
-#[no_mangle]
-pub extern "C" fn Java_com_patenthub_app_MainActivity_startServer(
-    mut env: jni::JNIEnv,
-    _class: jni::objects::JClass,
-    db_path: jni::objects::JString,
-) {
-    let db_path: String = env
-        .get_string(&db_path)
-        .map(|s| s.into())
-        .unwrap_or_else(|_| "/data/local/tmp/innoforge.db".to_string());
-
-    std::thread::spawn(move || {
-        let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
-        rt.block_on(async {
-            eprintln!("[InnoForge] 启动服务器, 数据库: {}", db_path);
-            if let Err(e) = start_server(&db_path).await {
-                eprintln!("[InnoForge] 服务器错误: {}", e);
-            }
-        });
-    });
-}
-
-// ── iOS C FFI 入口 ──────────────────────────────────────────────────────────
-#[cfg(target_os = "ios")]
-#[no_mangle]
-pub extern "C" fn innoforge_start_server(db_path: *const std::os::raw::c_char) {
-    let db_path = if db_path.is_null() {
-        "innoforge.db".to_string()
-    } else {
-        unsafe { std::ffi::CStr::from_ptr(db_path) }
-            .to_str()
-            .unwrap_or("innoforge.db")
-            .to_string()
-    };
-
-    std::thread::spawn(move || {
-        let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
-        rt.block_on(async {
-            eprintln!("[InnoForge] 启动服务器, 数据库: {}", db_path);
-            if let Err(e) = start_server(&db_path).await {
-                eprintln!("[InnoForge] 服务器错误: {}", e);
-            }
-        });
-    });
-}
 
 mod error;
 mod routes;
