@@ -507,7 +507,56 @@ pub async fn api_search_online(
         }
     }
 
-    // Fallback 4: 搜狗搜索（国内可用，无需任何 Key，开箱即用）
+    // Fallback 4: SerpAPI 百度引擎（国内专利搜索，比搜狗质量高）
+    if is_cn_query && !api_key.is_empty() && api_key != "your-serpapi-key-here" {
+        println!("[ONLINE] Trying SerpAPI Baidu engine for CN patent...");
+        let client = reqwest::Client::new();
+        let baidu_url = format!(
+            "https://serpapi.com/search.json?engine=baidu&q={}&api_key={}",
+            urlencoding::encode(&format!("{} 专利", req.query)),
+            api_key,
+        );
+        if let Ok(resp) = client.get(&baidu_url).send().await {
+            if let Ok(json) = resp.json::<serde_json::Value>().await {
+                if let Some(results) = json["organic_results"].as_array() {
+                    if !results.is_empty() {
+                        let patents: Vec<PatentSummary> = results.iter().take(10).map(|r| {
+                            let title = r["title"].as_str().unwrap_or("").to_string();
+                            let snippet = r["snippet"].as_str().unwrap_or("").to_string();
+                            let link = r["link"].as_str().unwrap_or("").to_string();
+                            // 尝试从天眼查/SooPAT 等链接中提取专利号
+                            let patent_number = extract_cn_patent_number(&title, &snippet, &link);
+                            PatentSummary {
+                                id: uuid::Uuid::new_v4().to_string(),
+                                patent_number,
+                                title: clean_html_tags(&title),
+                                abstract_text: clean_html_tags(&snippet),
+                                applicant: String::new(),
+                                inventor: String::new(),
+                                filing_date: String::new(),
+                                country: "CN".to_string(),
+                                relevance_score: Some(0.7),
+                                score_source: Some("serpapi_baidu".to_string()),
+                            }
+                        }).collect();
+                        println!("[ONLINE] SerpAPI Baidu found {} results", patents.len());
+                        return Json(json!({
+                            "patents": patents,
+                            "total": patents.len(),
+                            "page": req.page,
+                            "page_size": 10,
+                            "source": "serpapi_baidu"
+                        }));
+                    }
+                }
+                if let Some(err) = json["error"].as_str() {
+                    println!("[ONLINE] SerpAPI Baidu error: {}", err);
+                }
+            }
+        }
+    }
+
+    // Fallback 5: 搜狗搜索（国内可用，无需任何 Key，开箱即用）
     println!("[ONLINE] Trying Sogou free search (无需 Key)...");
     let search_query_free = build_online_query(
         &req.query,
@@ -1468,4 +1517,23 @@ pub async fn search_cnipr(
     }
 
     Ok((patents, total))
+}
+
+/// 从标题/摘要/链接中提取中国专利号（CN开头或纯数字申请号）
+fn extract_cn_patent_number(title: &str, snippet: &str, link: &str) -> String {
+    let all_text = format!("{} {} {}", title, snippet, link);
+    // 匹配 CN + 数字 + 字母 格式（如 CN116401354A）
+    if let Some(m) = regex::Regex::new(r"CN\d{6,}[A-Z]?").ok().and_then(|re| re.find(&all_text)) {
+        return m.as_str().to_string();
+    }
+    // 匹配纯数字申请号（12-13位）
+    if let Some(m) = regex::Regex::new(r"\d{12,13}\.\d").ok().and_then(|re| re.find(&all_text)) {
+        return m.as_str().to_string();
+    }
+    String::new()
+}
+
+/// 清理 HTML 标签（百度搜索结果含 <em> 等标签）
+fn clean_html_tags(s: &str) -> String {
+    regex::Regex::new(r"<[^>]+>").unwrap().replace_all(s, "").to_string()
 }
