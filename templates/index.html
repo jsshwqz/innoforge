@@ -108,6 +108,19 @@
             color: #f85149; cursor: pointer; font-size: 0.9em;
             background: none; border: none; padding: 2px 6px;
         }
+        .file-item .preview-btn {
+            color: #58a6ff; cursor: pointer; font-size: 0.85em;
+            background: none; border: none; padding: 2px 6px;
+        }
+        .file-item .preview-btn:hover { color: #79c0ff; }
+
+        /* PDF Preview Modal */
+        .pdf-modal-overlay { display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.8); z-index:2000; justify-content:center; align-items:center; }
+        .pdf-modal-overlay.show { display:flex; }
+        .pdf-modal { width:90vw; height:85vh; background:#161b22; border:1px solid #30363d; border-radius:8px; display:flex; flex-direction:column; position:relative; }
+        .pdf-modal-close { position:absolute; top:8px; right:12px; background:none; border:none; color:#c9d1d9; font-size:24px; cursor:pointer; z-index:1; padding:4px 8px; }
+        .pdf-modal-close:hover { color:#f85149; }
+        .pdf-modal iframe { flex:1; border:none; border-radius:0 0 8px 8px; }
 
         /* 模式选择 */
         .mode-toggle {
@@ -206,6 +219,14 @@
         </div>
     </main>
 
+    <!-- PDF Preview Modal -->
+    <div class="pdf-modal-overlay" id="pdf-preview-modal">
+        <div class="pdf-modal">
+            <button class="pdf-modal-close" onclick="closePdfPreview()">&times;</button>
+            <iframe id="pdf-preview-iframe" src="about:blank"></iframe>
+        </div>
+    </div>
+
     <footer style="text-align:center;padding:20px;color:#484f58;font-size:0.75em;">
         v0.5.3 · <a href="https://github.com/jsshwqz/innoforge" target="_blank" rel="noopener" style="color:#484f58;">GitHub</a> · <a href="https://gitee.com/jsshwqz/innoforge" target="_blank" rel="noopener" style="color:#484f58;">Gitee</a> · MIT License
     </footer>
@@ -229,6 +250,41 @@
     <script>
     let currentMode = 'chat';
     let uploadedFiles = [];
+
+    // ── PDF Preview ──
+    function showPdfPreview(url) {
+        var iframe = document.getElementById('pdf-preview-iframe');
+        iframe.src = url;
+        document.getElementById('pdf-preview-modal').classList.add('show');
+    }
+
+    function closePdfPreview() {
+        document.getElementById('pdf-preview-modal').classList.remove('show');
+        document.getElementById('pdf-preview-iframe').src = 'about:blank';
+    }
+
+    document.getElementById('pdf-preview-modal').addEventListener('click', function(e) {
+        if (e.target === this) closePdfPreview();
+    });
+
+    async function previewPdfFile(idx) {
+        var file = uploadedFiles[idx];
+        if (!file) return;
+        var form = new FormData();
+        form.append('file', file);
+        try {
+            var resp = await fetch('/api/upload/pdf-store', { method: 'POST', body: form });
+            if (!resp.ok) throw new Error('上传失败 (' + resp.status + ')');
+            var data = await resp.json();
+            if (data.status === 'ok' && data.url) {
+                showPdfPreview(data.url);
+            } else {
+                alert(data.message || 'PDF 存储失败');
+            }
+        } catch(e) {
+            alert('PDF 预览失败: ' + e.message);
+        }
+    }
 
     // 模式切换
     function setMode(mode) {
@@ -312,12 +368,23 @@
             item.className = 'file-item';
             const span = document.createElement('span');
             span.textContent = icon + ' ' + f.name + ' (' + size + ')';
+            const actions = document.createElement('span');
+            actions.style.cssText = 'display:flex;align-items:center;gap:2px;';
+            if (f.name.toLowerCase().endsWith('.pdf')) {
+                const pvBtn = document.createElement('button');
+                pvBtn.className = 'preview-btn';
+                pvBtn.textContent = '👁';
+                pvBtn.title = '查看原文';
+                pvBtn.setAttribute('onclick', 'previewPdfFile(' + i + ')');
+                actions.appendChild(pvBtn);
+            }
             const btn = document.createElement('button');
             btn.className = 'remove';
             btn.textContent = 'x';
             btn.setAttribute('onclick', 'removeFile(' + i + ')');
+            actions.appendChild(btn);
             item.appendChild(span);
-            item.appendChild(btn);
+            item.appendChild(actions);
             el.appendChild(item);
         });
     }

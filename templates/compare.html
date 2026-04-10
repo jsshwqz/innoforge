@@ -74,6 +74,15 @@
 .collapsible-body.collapsed { max-height:0 !important; overflow:hidden; }
 /* Ref counter badge */
 .ref-counter { display:inline-block; background:#21262d; color:#8b949e; font-size:12px; padding:2px 8px; border-radius:999px; margin-left:8px; }
+/* PDF Preview Modal */
+.pdf-modal-overlay { display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.8); z-index:2000; justify-content:center; align-items:center; }
+.pdf-modal-overlay.show { display:flex; }
+.pdf-modal { width:90vw; height:85vh; background:#161b22; border:1px solid #30363d; border-radius:8px; display:flex; flex-direction:column; position:relative; }
+.pdf-modal-close { position:absolute; top:8px; right:12px; background:none; border:none; color:#c9d1d9; font-size:24px; cursor:pointer; z-index:1; padding:4px 8px; }
+.pdf-modal-close:hover { color:#f85149; }
+.pdf-modal iframe { flex:1; border:none; border-radius:0 0 8px 8px; }
+.btn-preview { background:#21262d; border:1px solid #30363d; color:#58a6ff; padding:3px 8px; border-radius:4px; cursor:pointer; font-size:12px; margin-left:4px; }
+.btn-preview:hover { background:#30363d; color:#79c0ff; }
 </style>
 </head>
 <body>
@@ -129,6 +138,14 @@
     </main>
     <aside id="page-sidebar" class="page-sidebar"></aside>
     </div>
+    <!-- PDF Preview Modal -->
+    <div class="pdf-modal-overlay" id="pdf-preview-modal">
+        <div class="pdf-modal">
+            <button class="pdf-modal-close" onclick="closePdfPreview()">&times;</button>
+            <iframe id="pdf-preview-iframe" src="about:blank"></iframe>
+        </div>
+    </div>
+
     <!-- Paste Text Modal -->
     <div class="paste-modal-overlay" id="paste-modal">
         <div class="paste-modal">
@@ -143,6 +160,47 @@
     </div>
     <script src="/static/i18n.js"></script>
     <script>
+    // ── PDF Preview ──
+    // Store original File objects for PDF preview
+    var uploadedFileObjects = {};
+
+    function showPdfPreview(url) {
+        var iframe = document.getElementById('pdf-preview-iframe');
+        iframe.src = url;
+        document.getElementById('pdf-preview-modal').classList.add('show');
+    }
+
+    function closePdfPreview() {
+        document.getElementById('pdf-preview-modal').classList.remove('show');
+        document.getElementById('pdf-preview-iframe').src = 'about:blank';
+    }
+
+    document.getElementById('pdf-preview-modal').addEventListener('click', function(e) {
+        if (e.target === this) closePdfPreview();
+    });
+
+    async function uploadAndPreviewPdf(file) {
+        var form = new FormData();
+        form.append('file', file);
+        try {
+            var resp = await fetch('/api/upload/pdf-store', { method: 'POST', body: form });
+            if (!resp.ok) throw new Error('上传失败 (' + resp.status + ')');
+            var data = await resp.json();
+            if (data.status === 'ok' && data.url) {
+                showPdfPreview(data.url);
+            } else {
+                alert(data.message || 'PDF 存储失败');
+            }
+        } catch(e) {
+            alert('PDF 预览失败: ' + e.message);
+        }
+    }
+
+    function previewPdfByKey(key) {
+        var file = uploadedFileObjects[key];
+        if (file) uploadAndPreviewPdf(file);
+    }
+
     var MAX_REFS = 5;
     // Store uploaded text data: { title, content } keyed by row index or "my"
     var uploadedData = {};
@@ -179,11 +237,15 @@
             try {
                 var result = await extractFile(file);
                 uploadedData['my'] = result;
+                if (file.name.toLowerCase().endsWith('.pdf')) uploadedFileObjects['my'] = file;
                 document.getElementById('my-patent').value = '';
                 document.getElementById('my-patent').disabled = true;
+                var previewBtn = file.name.toLowerCase().endsWith('.pdf')
+                    ? ' <button class="btn-preview" onclick="previewPdfByKey(\'my\')">📄 查看原文</button>'
+                    : '';
                 tagEl.innerHTML = '<span class="file-tag">📄 ' + escapeHtml(result.title)
                     + ' (' + result.content.length + '字)'
-                    + '<span class="tag-remove" onclick="clearMyUpload()">&times;</span></span>';
+                    + '<span class="tag-remove" onclick="clearMyUpload()">&times;</span></span>' + previewBtn;
             } catch(e) {
                 tagEl.innerHTML = '<span style="color:#f85149; font-size:12px;">' + escapeHtml(e.message) + '</span>';
             }
@@ -192,6 +254,7 @@
 
     function clearMyUpload() {
         delete uploadedData['my'];
+        delete uploadedFileObjects['my'];
         document.getElementById('my-patent').disabled = false;
         document.getElementById('my-file-tag').innerHTML = '';
     }
@@ -212,11 +275,15 @@
             try {
                 var result = await extractFile(file);
                 uploadedData['ref_' + idx] = result;
+                if (file.name.toLowerCase().endsWith('.pdf')) uploadedFileObjects['ref_' + idx] = file;
                 row.querySelector('.ref-input').value = '';
                 row.querySelector('.ref-input').disabled = true;
+                var previewBtn = file.name.toLowerCase().endsWith('.pdf')
+                    ? ' <button class="btn-preview" onclick="previewPdfByKey(\'ref_' + idx + '\')">📄 查看原文</button>'
+                    : '';
                 existing.innerHTML = '<span class="file-tag" style="margin-left:8px;">📄 ' + escapeHtml(result.title)
                     + ' (' + result.content.length + '字)'
-                    + '<span class="tag-remove" onclick="clearRefUpload(\'' + idx + '\')">&times;</span></span>';
+                    + '<span class="tag-remove" onclick="clearRefUpload(\'' + idx + '\')">&times;</span></span>' + previewBtn;
             } catch(e) {
                 existing.innerHTML = '<span style="color:#f85149; font-size:12px; margin-left:8px;">' + escapeHtml(e.message) + '</span>';
             }
@@ -225,6 +292,7 @@
 
     function clearRefUpload(idx) {
         delete uploadedData['ref_' + idx];
+        delete uploadedFileObjects['ref_' + idx];
         var rows = document.querySelectorAll('.ref-row');
         for (var i = 0; i < rows.length; i++) {
             if (rows[i].getAttribute('data-idx') === idx) {
@@ -369,9 +437,13 @@
             try {
                 var result = await extractFile(file);
                 uploadedData['oa'] = result;
+                if (file.name.toLowerCase().endsWith('.pdf')) uploadedFileObjects['oa'] = file;
+                var previewBtn = file.name.toLowerCase().endsWith('.pdf')
+                    ? ' <button class="btn-preview" onclick="previewPdfByKey(\'oa\')">📄 查看原文</button>'
+                    : '';
                 tagEl.innerHTML = '<span class="file-tag" style="border-color:#f85149; color:#f85149;">📄 ' + escapeHtml(result.title)
                     + ' (' + result.content.length + '字)'
-                    + '<span class="tag-remove" onclick="clearOA()">&times;</span></span>';
+                    + '<span class="tag-remove" onclick="clearOA()">&times;</span></span>' + previewBtn;
             } catch(e) {
                 tagEl.innerHTML = '<span style="color:#f85149; font-size:12px;">' + escapeHtml(e.message) + '</span>';
             }
@@ -389,6 +461,7 @@
 
     function clearOA() {
         delete uploadedData['oa'];
+        delete uploadedFileObjects['oa'];
         document.getElementById('oa-file-tag').innerHTML = '';
     }
 
