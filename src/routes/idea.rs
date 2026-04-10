@@ -181,21 +181,29 @@ pub async fn api_idea_get(
     Path(id): Path<String>,
 ) -> Json<serde_json::Value> {
     match s.db.get_idea(&id) {
-        Ok(Some(idea)) => Json(json!({
-            "status": "ok",
-            "idea": {
-                "id": idea.id,
-                "title": idea.title,
-                "description": idea.description,
-                "status": idea.status,
-                "analysis": idea.analysis,
-                "novelty_score": idea.novelty_score,
-                "web_results": serde_json::from_str::<serde_json::Value>(&idea.web_results).unwrap_or_default(),
-                "patent_results": serde_json::from_str::<serde_json::Value>(&idea.patent_results).unwrap_or_default(),
-                "created_at": idea.created_at,
-                "discussion_summary": idea.discussion_summary,
-            }
-        })),
+        Ok(Some(idea)) => {
+            // 判断是否可以重新运行：error 或 pending 状态的创意可以重跑
+            let can_rerun = idea.status == "error" || idea.status == "pending";
+            // 检查是否有断点快照（可恢复续跑）
+            let has_snapshot = s.db.load_pipeline_snapshot(&id).ok().flatten().is_some();
+            Json(json!({
+                "status": "ok",
+                "idea": {
+                    "id": idea.id,
+                    "title": idea.title,
+                    "description": idea.description,
+                    "status": idea.status,
+                    "analysis": idea.analysis,
+                    "novelty_score": idea.novelty_score,
+                    "web_results": serde_json::from_str::<serde_json::Value>(&idea.web_results).unwrap_or_default(),
+                    "patent_results": serde_json::from_str::<serde_json::Value>(&idea.patent_results).unwrap_or_default(),
+                    "created_at": idea.created_at,
+                    "discussion_summary": idea.discussion_summary,
+                    "can_rerun": can_rerun,
+                    "has_snapshot": has_snapshot,
+                }
+            }))
+        }
         _ => Json(json!({"status": "error", "message": "not found"})),
     }
 }

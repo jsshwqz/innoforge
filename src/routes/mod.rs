@@ -189,10 +189,13 @@ impl AppState {
     /// Spawn background task to remove pipeline channels older than 5 minutes
     pub fn spawn_channel_cleaner(&self) {
         let channels = self.pipeline_channels.clone();
+        let db = self.db.clone();
         tokio::spawn(async move {
             let stale_threshold = std::time::Duration::from_secs(300); // 5 分钟
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+
+                // 清理超时的管道通道
                 let mut ch = channels.lock().unwrap_or_else(|e| e.into_inner());
                 let before = ch.len();
                 ch.retain(|id, entry| {
@@ -204,6 +207,14 @@ impl AppState {
                 });
                 if ch.len() < before {
                     tracing::info!("管道通道清理完成: 移除 {} 个", before - ch.len());
+                }
+                drop(ch);
+
+                // 重置卡住超过 10 分钟的 analyzing 创意为 error
+                match db.reset_stuck_analyzing(10) {
+                    Ok(n) if n > 0 => tracing::warn!("自动恢复: 重置 {} 个卡住的 analyzing 创意为 error", n),
+                    Ok(_) => {}
+                    Err(e) => tracing::error!("自动恢复检查失败: {}", e),
                 }
             }
         });

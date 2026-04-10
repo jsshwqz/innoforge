@@ -59,6 +59,19 @@ impl super::Database {
         Ok(count)
     }
 
+    /// 运行时重置超过指定分钟数仍在 "analyzing" 的创意为 "error"
+    /// Runtime: reset ideas stuck in "analyzing" for more than N minutes
+    pub fn reset_stuck_analyzing(&self, stale_minutes: i64) -> Result<usize> {
+        let c = self.conn();
+        let count = c.execute(
+            "UPDATE ideas SET status='error' \
+             WHERE status='analyzing' \
+             AND updated_at < datetime('now', ?1)",
+            params![format!("-{} minutes", stale_minutes)],
+        )?;
+        Ok(count)
+    }
+
     pub fn delete_idea(&self, id: &str) -> Result<()> {
         let c = self.conn();
         c.execute("DELETE FROM ideas WHERE id=?1", params![id])?;
