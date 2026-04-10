@@ -29,7 +29,7 @@
 .btn-inventive { padding:12px 24px; background:#f0883e; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:15px; font-weight:600; }
 .btn-inventive:hover { background:#f4a261; }
 .btn-primary:disabled, .btn-inventive:disabled { opacity:0.5; cursor:not-allowed; }
-.btn-row { display:flex; gap:12px; margin-top:16px; }
+.btn-row { display:flex; gap:12px; margin-top:16px; flex-wrap:wrap; }
 .result-box { margin-top:20px; background:#161b22; border:1px solid #30363d; border-radius:8px; padding:20px; color:#c9d1d9; line-height:1.8; }
 .result-box h3, .result-box h2 { color:#58a6ff; }
 .result-box table { width:100%; border-collapse:collapse; margin:12px 0; font-size:14px; }
@@ -59,6 +59,21 @@
 .paste-modal .btn-modal-cancel { background:#21262d; color:#c9d1d9; border:1px solid #30363d; }
 .paste-modal .btn-modal-cancel:hover { background:#30363d; }
 .paste-title-input { width:100%; padding:8px; background:#0d1117; border:1px solid #30363d; border-radius:6px; color:#c9d1d9; font-size:13px; margin-bottom:8px; }
+/* Result toolbar */
+.result-toolbar { display:flex; gap:8px; margin-bottom:12px; padding-bottom:12px; border-bottom:1px solid #30363d; }
+.result-toolbar button { background:#21262d; border:1px solid #30363d; color:#c9d1d9; padding:6px 14px; border-radius:6px; cursor:pointer; font-size:13px; }
+.result-toolbar button:hover { background:#30363d; color:#58a6ff; }
+.result-toolbar .btn-followup { background:#f0883e22; border-color:#f0883e; color:#f0883e; font-weight:600; }
+.result-toolbar .btn-followup:hover { background:#f0883e44; }
+/* Collapsible sections */
+.collapsible-header { display:flex; align-items:center; gap:8px; cursor:pointer; user-select:none; padding:8px 0; }
+.collapsible-header:hover { color:#58a6ff; }
+.collapsible-header .toggle-icon { transition:transform 0.2s; font-size:12px; color:#8b949e; }
+.collapsible-header.collapsed .toggle-icon { transform:rotate(-90deg); }
+.collapsible-body { overflow:hidden; transition:max-height 0.3s ease; }
+.collapsible-body.collapsed { max-height:0 !important; overflow:hidden; }
+/* Ref counter badge */
+.ref-counter { display:inline-block; background:#21262d; color:#8b949e; font-size:12px; padding:2px 8px; border-radius:999px; margin-left:8px; }
 </style>
 </head>
 <body>
@@ -69,7 +84,7 @@
 
         <!-- My Patent -->
         <div class="cmp-section cmp-my">
-            <label class="cmp-label" style="color:#f0883e; font-weight:600;">我的专利</label>
+            <label class="cmp-label" style="color:#f0883e; font-weight:600;">我的专利（本申请）</label>
             <div class="my-input-row">
                 <input type="text" id="my-patent" class="cmp-input" placeholder="输入专利号或内部 ID（如 CN115076688A）">
                 <button class="btn-upload" onclick="uploadMyPatent()">📎 上传</button>
@@ -80,7 +95,7 @@
 
         <!-- Reference Documents -->
         <div class="cmp-section cmp-ref">
-            <label class="cmp-label" style="color:#58a6ff; font-weight:600;">对比文件</label>
+            <label class="cmp-label" style="color:#58a6ff; font-weight:600;">对比文件 <span class="ref-counter" id="ref-counter">1 / 5</span></label>
             <div id="ref-list">
                 <div class="ref-row" data-idx="0">
                     <input type="text" class="cmp-input ref-input" placeholder="对比文件 1 — 专利号或 ID">
@@ -128,10 +143,13 @@
     </div>
     <script src="/static/i18n.js"></script>
     <script>
-    var MAX_REFS = 4;
+    var MAX_REFS = 5;
     // Store uploaded text data: { title, content } keyed by row index or "my"
     var uploadedData = {};
     var refIdxCounter = 0;
+    // Store last analysis context for follow-up actions (e.g. generate office action after inventiveness)
+    var lastAnalysisContext = null;
+    var lastAnalysisRawText = '';
 
     // ── Upload helpers ──
     function triggerFileSelect(callback) {
@@ -233,6 +251,7 @@
             + '<button class="btn-remove" onclick="removeRef(this)" title="移除">&times;</button>';
         list.appendChild(row);
         updateAddBtn();
+        updateRefCounter();
     }
 
     function removeRef(btn) {
@@ -246,11 +265,17 @@
         row.remove();
         updateAddBtn();
         reindexPlaceholders();
+        updateRefCounter();
     }
 
     function updateAddBtn() {
         var count = document.getElementById('ref-list').querySelectorAll('.ref-row').length;
         document.getElementById('btn-add-ref').style.display = count >= MAX_REFS ? 'none' : '';
+    }
+
+    function updateRefCounter() {
+        var count = document.getElementById('ref-list').querySelectorAll('.ref-row').length;
+        document.getElementById('ref-counter').textContent = count + ' / ' + MAX_REFS;
     }
 
     function reindexPlaceholders() {
@@ -413,14 +438,55 @@
         document.getElementById('btn-oa').disabled = false;
     }
 
-    function showResult(html) {
-        document.getElementById('result').innerHTML = '<div class="result-box">' + html + '</div>';
+    function buildToolbar(options) {
+        var html = '<div class="result-toolbar">';
+        if (options.copy) {
+            html += '<button onclick="copyResultText()" title="复制全文到剪贴板">📋 复制全文</button>';
+        }
+        if (options.export) {
+            html += '<button onclick="exportResultMarkdown()" title="导出为 Markdown 文件">📥 导出 Markdown</button>';
+        }
+        if (options.generateOA) {
+            html += '<button class="btn-followup" onclick="doGenerateOAFromAnalysis()" title="基于上方创造性分析结果，生成意见陈述书草稿">📝 生成意见陈述书</button>';
+        }
+        html += '</div>';
+        return html;
+    }
+
+    function showResult(html, options) {
+        options = options || { copy: true, export: true };
+        var toolbar = buildToolbar(options);
+        document.getElementById('result').innerHTML = '<div class="result-box">' + toolbar + '<div class="result-content">' + html + '</div></div>';
         clearLoading();
     }
 
     function showError(msg) {
         document.getElementById('result').innerHTML = '<div class="result-box" style="border-color:#f85149; color:#f85149;">' + escapeHtml(msg) + '</div>';
         clearLoading();
+    }
+
+    // ── Copy / Export ──
+    function copyResultText() {
+        var el = document.querySelector('.result-content');
+        if (!el) return;
+        // Copy the raw markdown text if available, otherwise inner text
+        var text = lastAnalysisRawText || el.innerText;
+        navigator.clipboard.writeText(text).then(function() {
+            var btn = document.querySelector('.result-toolbar button');
+            if (btn) { var orig = btn.textContent; btn.textContent = '✅ 已复制'; setTimeout(function() { btn.textContent = orig; }, 1500); }
+        });
+    }
+
+    function exportResultMarkdown() {
+        var text = lastAnalysisRawText || (document.querySelector('.result-content') || {}).innerText || '';
+        if (!text) return;
+        var blob = new Blob([text], { type: 'text/markdown;charset=utf-8' });
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        var ts = new Date().toISOString().slice(0, 16).replace(/[T:]/g, '-');
+        a.download = '分析报告_' + ts + '.md';
+        a.click();
+        URL.revokeObjectURL(a.href);
     }
 
     // ── General Compare ──
@@ -440,7 +506,9 @@
                 });
                 var data = await resp.json();
                 if (data.error) { showError(data.error); return; }
-                showResult(renderMarkdown(data.content));
+                lastAnalysisRawText = data.content || '';
+                lastAnalysisContext = null;
+                showResult(renderMarkdown(data.content), { copy: true, export: true });
             } catch(e) { showError('请求失败: ' + e.message); }
         } else {
             setLoading('正在进行 ' + allItems.length + ' 篇对比分析...');
@@ -452,7 +520,9 @@
                 });
                 var data = await resp.json();
                 if (data.error) { showError(data.error); return; }
-                showResult(renderMarkdown(data.analysis));
+                lastAnalysisRawText = data.analysis || '';
+                lastAnalysisContext = null;
+                showResult(renderMarkdown(data.analysis), { copy: true, export: true });
             } catch(e) { showError('请求失败: ' + e.message); }
         }
     }
@@ -467,7 +537,6 @@
         setLoading('正在进行创造性三步法分析（可能需要1-2分钟）...');
         try {
             var body = { references: refs };
-            // my_patent can be string (ID) or object (uploaded text)
             if (typeof my === 'string') {
                 body.my_patent_id = my;
             } else {
@@ -480,7 +549,42 @@
             });
             var data = await resp.json();
             if (data.error) { showError(data.error); return; }
-            showResult(renderMarkdown(data.analysis));
+            lastAnalysisRawText = data.analysis || '';
+            // Save context for follow-up office action generation
+            lastAnalysisContext = { my: my, refs: refs, analysis: data.analysis };
+            showResult(renderMarkdown(data.analysis), { copy: true, export: true, generateOA: true });
+        } catch(e) { showError('请求失败: ' + e.message); }
+    }
+
+    // ── Generate Office Action from Inventiveness Analysis context ──
+    async function doGenerateOAFromAnalysis() {
+        if (!lastAnalysisContext) { alert('请先完成创造性分析'); return; }
+        var ctx = lastAnalysisContext;
+        setLoading('正在基于创造性分析结果生成意见陈述书（可能需要2-3分钟）...');
+        try {
+            var body = {
+                references: ctx.refs,
+                // Use the inventiveness analysis result as the "office action" context
+                office_action: {
+                    type: 'text',
+                    title: '创造性分析结果（用于生成意见陈述书）',
+                    content: '以下是对本申请的创造性三步法分析结果，请基于此生成答辩意见陈述书：\n\n' + ctx.analysis
+                }
+            };
+            if (typeof ctx.my === 'string') {
+                body.my_patent_id = ctx.my;
+            } else {
+                body.my_patent = ctx.my;
+            }
+            var resp = await fetch('/api/ai/office-action-response', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(body)
+            });
+            var data = await resp.json();
+            if (data.error) { showError(data.error); return; }
+            lastAnalysisRawText = data.analysis || '';
+            showResult(renderMarkdown(data.analysis), { copy: true, export: true });
         } catch(e) { showError('请求失败: ' + e.message); }
     }
 
@@ -507,7 +611,9 @@
             });
             var data = await resp.json();
             if (data.error) { showError(data.error); return; }
-            showResult(renderMarkdown(data.analysis));
+            lastAnalysisRawText = data.analysis || '';
+            lastAnalysisContext = null;
+            showResult(renderMarkdown(data.analysis), { copy: true, export: true });
         } catch(e) { showError('请求失败: ' + e.message); }
     }
 
