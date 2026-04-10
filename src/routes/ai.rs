@@ -272,44 +272,70 @@ pub async fn api_ai_summarize(
     }
 }
 
+/// Resolve a single patent/text item into a compare info block.
+fn resolve_compare_item(
+    db: &crate::db::Database,
+    item: &serde_json::Value,
+    label: &str,
+) -> Result<String, String> {
+    // Text object: { "type": "text", "title": "...", "content": "..." }
+    if let Some(obj) = item.as_object() {
+        if obj.get("type").and_then(|v| v.as_str()) == Some("text") {
+            let title = obj.get("title").and_then(|v| v.as_str()).unwrap_or("上传文件");
+            let content = obj.get("content").and_then(|v| v.as_str()).unwrap_or("");
+            let preview: String = content.chars().take(2000).collect();
+            return Ok(format!("【{}】\n标题：{}\n内容：{}", label, title, preview));
+        }
+    }
+    // String — patent ID
+    let id = item.as_str().unwrap_or("");
+    if id.is_empty() {
+        return Err(format!("{}未填写", label));
+    }
+    match db.get_patent(id) {
+        Ok(Some(p)) => {
+            let abs: String = p.abstract_text.chars().take(500).collect();
+            let claims: String = p.claims.chars().take(1000).collect();
+            Ok(format!(
+                "【{}】\n专利号：{}\n标题：{}\n申请人：{}\n摘要：{}\n权利要求（前部分）：{}",
+                label, p.patent_number, p.title, p.applicant, abs, claims
+            ))
+        }
+        _ => Err(format!("{}「{}」未找到。请确认已通过搜索页收录到本地库。", label, id)),
+    }
+}
+
 pub async fn api_ai_compare(
     State(s): State<AppState>,
     Json(req): Json<serde_json::Value>,
 ) -> Json<AiResponse> {
-    let id1 = req["patent_id1"].as_str().unwrap_or("");
-    let id2 = req["patent_id2"].as_str().unwrap_or("");
-
-    let p1 = match s.db.get_patent(id1) {
-        Ok(Some(p)) => p,
-        _ => {
-            return Json(AiResponse {
-                content: format!("专利1「{}」未找到。请确认该专利已通过搜索页收录到本地库。", id1),
-            })
+    // Support new format: items array with mixed types
+    let (info1, info2) = if let Some(items) = req["items"].as_array() {
+        if items.len() < 2 {
+            return Json(AiResponse { content: "请至少选择两个专利/文件进行对比".into() });
         }
+        let i1 = match resolve_compare_item(&s.db, &items[0], "专利1") {
+            Ok(s) => s, Err(e) => return Json(AiResponse { content: e }),
+        };
+        let i2 = match resolve_compare_item(&s.db, &items[1], "专利2") {
+            Ok(s) => s, Err(e) => return Json(AiResponse { content: e }),
+        };
+        (i1, i2)
+    } else {
+        // Backward compatible: patent_id1 / patent_id2
+        let id1 = json!(req["patent_id1"].as_str().unwrap_or(""));
+        let id2 = json!(req["patent_id2"].as_str().unwrap_or(""));
+        let i1 = match resolve_compare_item(&s.db, &id1, "专利1") {
+            Ok(s) => s, Err(e) => return Json(AiResponse { content: e }),
+        };
+        let i2 = match resolve_compare_item(&s.db, &id2, "专利2") {
+            Ok(s) => s, Err(e) => return Json(AiResponse { content: e }),
+        };
+        (i1, i2)
     };
-    let p2 = match s.db.get_patent(id2) {
-        Ok(Some(p)) => p,
-        _ => {
-            return Json(AiResponse {
-                content: format!("专利2「{}」未找到。请确认该专利已通过搜索页收录到本地库。", id2),
-            })
-        }
-    };
-
-    let ai = s.config.read().unwrap_or_else(|e| e.into_inner()).ai_client();
-    let p1_abstract: String = p1.abstract_text.chars().take(500).collect();
-    let p1_claims: String = p1.claims.chars().take(1000).collect();
-    let p2_abstract: String = p2.abstract_text.chars().take(500).collect();
-    let p2_claims: String = p2.claims.chars().take(1000).collect();
 
     let prompt = format!(
-        "请对比分析以下两个专利的异同：\n\n\
-         【专利1】\n\
-         专利号：{}\n标题：{}\n申请人：{}\n\
-         摘要：{}\n权利要求（前部分）：{}\n\n\
-         【专利2】\n\
-         专利号：{}\n标题：{}\n申请人：{}\n\
-         摘要：{}\n权利要求（前部分）：{}\n\n\
+        "请对比分析以下两个专利/文件的异同：\n\n{}\n\n{}\n\n\
          请从以下方面对比：\n\
          1. 技术领域是否相同\n\
          2. 解决的技术问题对比\n\
@@ -317,18 +343,10 @@ pub async fn api_ai_compare(
          4. 创新点对比\n\
          5. 保护范围对比\n\
          6. 是否存在侵权风险（初步判断）",
-        p1.patent_number,
-        p1.title,
-        p1.applicant,
-        p1_abstract,
-        p1_claims,
-        p2.patent_number,
-        p2.title,
-        p2.applicant,
-        p2_abstract,
-        p2_claims
+        info1, info2
     );
 
+    let ai = s.config.read().unwrap_or_else(|e| e.into_inner()).ai_client();
     match ai.chat(&prompt, None).await {
         Ok(content) => Json(AiResponse { content }),
         Err(e) => Json(AiResponse {
@@ -486,29 +504,38 @@ pub async fn api_ai_compare_matrix(
     State(s): State<AppState>,
     Json(req): Json<serde_json::Value>,
 ) -> Json<serde_json::Value> {
-    let patent_ids = req["patent_ids"].as_array();
+    // Support new format: items array with mixed types (text objects + patent IDs)
+    let items = req["items"].as_array()
+        .or_else(|| req["patent_ids"].as_array());  // backward compat
 
-    let ids = match patent_ids {
-        Some(arr) => arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>(),
+    let items = match items {
+        Some(arr) if arr.len() >= 2 && arr.len() <= 5 => arr.clone(),
+        Some(arr) if arr.len() < 2 => return Json(json!({"error": "请选择至少2个专利/文件"})),
+        Some(_) => return Json(json!({"error": "请选择 2-5 个专利/文件进行对比"})),
         None => return Json(json!({"error": "请选择至少2个专利"})),
     };
 
-    if ids.len() < 2 || ids.len() > 5 {
-        return Json(json!({"error": "请选择 2-5 个专利进行对比"}));
-    }
-
     let mut patents_info = String::new();
-    for (i, id) in ids.iter().enumerate() {
+    for (i, item) in items.iter().enumerate() {
+        if let Some(obj) = item.as_object() {
+            if obj.get("type").and_then(|v| v.as_str()) == Some("text") {
+                let title = obj.get("title").and_then(|v| v.as_str()).unwrap_or("上传文件");
+                let content = obj.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                let preview: String = content.chars().take(2000).collect();
+                patents_info.push_str(&format!(
+                    "### 文件 {}\n标题：{}\n内容：{}\n\n",
+                    i + 1, title, preview
+                ));
+                continue;
+            }
+        }
+        let id = item.as_str().unwrap_or("");
         if let Ok(Some(p)) = s.db.get_patent(id) {
             let claims_preview: String = p.claims.chars().take(600).collect();
             patents_info.push_str(&format!(
                 "### 专利 {}\n专利号：{}\n标题：{}\n申请人：{}\n摘要：{}\n权利要求：{}\n\n",
-                i + 1,
-                p.patent_number,
-                p.title,
-                p.applicant,
-                p.abstract_text,
-                claims_preview
+                i + 1, p.patent_number, p.title, p.applicant,
+                p.abstract_text, claims_preview
             ));
         }
     }
@@ -565,4 +592,205 @@ pub async fn api_ai_batch_summarize(
         .collect();
 
     Json(json!({"status": "ok", "summaries": summaries}))
+}
+
+/// Resolve "my patent" input: either patent ID/number from DB, or uploaded text object.
+/// Returns formatted patent info string.
+fn resolve_my_patent(
+    db: &crate::db::Database,
+    req: &serde_json::Value,
+) -> Result<String, String> {
+    // Check for uploaded text first: { "type": "text", "title": "...", "content": "..." }
+    if let Some(obj) = req["my_patent"].as_object() {
+        if obj.get("type").and_then(|v| v.as_str()) == Some("text") {
+            let title = obj.get("title").and_then(|v| v.as_str()).unwrap_or("上传文件");
+            let content = obj.get("content").and_then(|v| v.as_str()).unwrap_or("");
+            if content.trim().len() < 10 {
+                return Err("上传的文件内容过短".into());
+            }
+            let preview: String = content.chars().take(5000).collect();
+            return Ok(format!("标题：{}\n\n文件全文：\n{}", title, preview));
+        }
+    }
+
+    // Otherwise treat as patent ID/number
+    let my_id = req["my_patent_id"].as_str().unwrap_or("").trim();
+    if my_id.is_empty() {
+        return Err("请输入我的专利号或 ID，或上传 PDF".into());
+    }
+
+    let patent = db.get_patent(my_id).ok().flatten().ok_or_else(|| {
+        format!("我的专利「{}」未找到。请确认已通过搜索页收录到本地库。", my_id)
+    })?;
+
+    if patent.claims.trim().len() < 10 {
+        return Err("我的专利缺少权利要求数据，请先在详情页加载全文".into());
+    }
+
+    let desc_preview: String = patent.description.chars().take(3000).collect();
+    Ok(format!(
+        "专利号：{}\n标题：{}\n申请人：{}\n\n摘要：{}\n\n权利要求书全文：\n{}\n\n说明书（前部分）：\n{}",
+        patent.patent_number, patent.title, patent.applicant,
+        patent.abstract_text, patent.claims, desc_preview
+    ))
+}
+
+/// Resolve a list of references: each can be a patent ID string or an uploaded text object.
+/// Returns formatted references info string.
+fn resolve_references(
+    db: &crate::db::Database,
+    refs: &[serde_json::Value],
+) -> Result<String, String> {
+    let mut refs_info = String::new();
+    let mut not_found: Vec<String> = Vec::new();
+
+    for (i, item) in refs.iter().enumerate() {
+        if let Some(obj) = item.as_object() {
+            if obj.get("type").and_then(|v| v.as_str()) == Some("text") {
+                let title = obj.get("title").and_then(|v| v.as_str()).unwrap_or("上传文件");
+                let content = obj.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                let preview: String = content.chars().take(3000).collect();
+                refs_info.push_str(&format!(
+                    "### 对比文件 {} — {}\n\n文件全文：\n{}\n\n",
+                    i + 1, title, preview
+                ));
+                continue;
+            }
+        }
+        // String — patent ID/number
+        let id = item.as_str().unwrap_or("");
+        if id.is_empty() { continue; }
+        if let Ok(Some(p)) = db.get_patent(id) {
+            let claims_preview: String = p.claims.chars().take(1500).collect();
+            let abs_preview: String = p.abstract_text.chars().take(1500).collect();
+            refs_info.push_str(&format!(
+                "### 对比文件 {} — {}\n专利号：{}\n标题：{}\n申请人：{}\n\n摘要：{}\n\n权利要求（前部分）：\n{}\n\n",
+                i + 1, p.patent_number, p.patent_number, p.title, p.applicant,
+                abs_preview, claims_preview
+            ));
+        } else {
+            not_found.push(id.to_string());
+        }
+    }
+
+    if refs_info.is_empty() {
+        if not_found.is_empty() {
+            return Err("请添加至少一个对比文件".into());
+        }
+        return Err(format!(
+            "对比文件「{}」未找到。请确认已通过搜索页收录到本地库。",
+            not_found.join(", ")
+        ));
+    }
+    Ok(refs_info)
+}
+
+/// Inventiveness (创造性) analysis: my patent vs reference documents
+pub async fn api_ai_inventiveness_analysis(
+    State(s): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let my_info = match resolve_my_patent(&s.db, &req) {
+        Ok(info) => info,
+        Err(e) => return Json(json!({"error": e})),
+    };
+
+    let refs = req["references"].as_array()
+        .or_else(|| req["reference_ids"].as_array());  // backward compat
+    let refs = match refs {
+        Some(arr) if !arr.is_empty() && arr.len() <= 4 => arr.clone(),
+        Some(arr) if arr.is_empty() => return Json(json!({"error": "请选择至少一个对比文件"})),
+        Some(_) => return Json(json!({"error": "请选择 1-4 个对比文件"})),
+        None => return Json(json!({"error": "请选择至少一个对比文件"})),
+    };
+
+    let refs_info = match resolve_references(&s.db, &refs) {
+        Ok(info) => info,
+        Err(e) => return Json(json!({"error": e})),
+    };
+
+    let ai = s.config.read().unwrap_or_else(|e| e.into_inner()).ai_client();
+    match ai.inventiveness_analysis(&my_info, &refs_info).await {
+        Ok(content) => Json(json!({"status": "ok", "analysis": content})),
+        Err(e) => Json(json!({"error": format!("创造性分析失败: {}", e)})),
+    }
+}
+
+/// Office action response analysis: deep analysis for responding to examination opinions
+pub async fn api_ai_office_action_response(
+    State(s): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    // my_patent: text object or patent ID string
+    let my_info = if let Some(obj) = req["my_patent"].as_object() {
+        if obj.get("type").and_then(|v| v.as_str()) == Some("text") {
+            let title = obj.get("title").and_then(|v| v.as_str()).unwrap_or("我的专利");
+            let content = obj.get("content").and_then(|v| v.as_str()).unwrap_or("");
+            if content.trim().len() < 10 {
+                return Json(json!({"error": "我的专利内容过短"}));
+            }
+            format!("标题：{}\n\n{}", title, content)
+        } else {
+            match resolve_my_patent(&s.db, &req) {
+                Ok(info) => info,
+                Err(e) => return Json(json!({"error": e})),
+            }
+        }
+    } else {
+        match resolve_my_patent(&s.db, &req) {
+            Ok(info) => info,
+            Err(e) => return Json(json!({"error": e})),
+        }
+    };
+
+    // office_action: text object or plain string
+    let oa_text = if let Some(obj) = req["office_action"].as_object() {
+        if obj.get("type").and_then(|v| v.as_str()) == Some("text") {
+            obj.get("content").and_then(|v| v.as_str()).unwrap_or("").to_string()
+        } else {
+            req["office_action"].as_str().unwrap_or("").to_string()
+        }
+    } else {
+        req["office_action"].as_str().unwrap_or("").to_string()
+    };
+    if oa_text.trim().len() < 10 {
+        return Json(json!({"error": "请输入审查意见通知书内容"}));
+    }
+
+    // references: array of text objects or patent ID strings
+    let refs = req["references"].as_array();
+    let refs_info = match refs {
+        Some(arr) if !arr.is_empty() => {
+            let mut info = String::new();
+            for (i, item) in arr.iter().enumerate() {
+                if let Some(obj) = item.as_object() {
+                    if obj.get("type").and_then(|v| v.as_str()) == Some("text") {
+                        let title = obj.get("title").and_then(|v| v.as_str()).unwrap_or("对比文献");
+                        let content = obj.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                        info.push_str(&format!("### 对比文献 {} — {}\n{}\n\n", i + 1, title, content));
+                        continue;
+                    }
+                }
+                let id = item.as_str().unwrap_or("");
+                if !id.is_empty() {
+                    if let Ok(Some(p)) = s.db.get_patent(id) {
+                        info.push_str(&format!(
+                            "### 对比文献 {} — {}\n专利号：{}\n标题：{}\n摘要：{}\n权利要求：\n{}\n说明书（前部分）：\n{}\n\n",
+                            i + 1, p.patent_number, p.patent_number, p.title,
+                            p.abstract_text, p.claims,
+                            p.description.chars().take(3000).collect::<String>()
+                        ));
+                    }
+                }
+            }
+            info
+        }
+        _ => String::new(),
+    };
+
+    let ai = s.config.read().unwrap_or_else(|e| e.into_inner()).ai_client();
+    match ai.office_action_response(&my_info, &oa_text, &refs_info).await {
+        Ok(content) => Json(json!({"status": "ok", "analysis": content})),
+        Err(e) => Json(json!({"error": format!("分析失败: {}", e)})),
+    }
 }

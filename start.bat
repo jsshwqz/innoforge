@@ -4,9 +4,8 @@ cd /d "%~dp0"
 
 REM Kill existing instance if running
 taskkill /F /IM innoforge.exe >nul 2>nul
-timeout /t 1 /nobreak >nul
+timeout /t 3 /nobreak >nul
 
-echo [InnoForge] Starting...
 echo [InnoForge] Building...
 cargo build --release --bin innoforge
 if errorlevel 1 (
@@ -14,6 +13,7 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
+
 echo [InnoForge] Launching...
 .\target\release\innoforge.exe
 pause

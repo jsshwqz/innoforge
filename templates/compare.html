@@ -10,51 +10,555 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<style>
+.cmp-input { width:100%; padding:10px; background:#0d1117; border:1px solid #30363d; border-radius:6px; color:#c9d1d9; }
+.cmp-label { display:block; margin-bottom:6px; color:#8b949e; font-size:13px; }
+.cmp-section { background:#161b22; border:1px solid #30363d; border-radius:8px; padding:16px; margin-bottom:16px; }
+.cmp-my { border-left:3px solid #f0883e; }
+.cmp-ref { border-left:3px solid #58a6ff; }
+.ref-row { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
+.ref-row input { flex:1; }
+.btn-add { background:#21262d; border:1px solid #30363d; color:#58a6ff; padding:6px 14px; border-radius:6px; cursor:pointer; font-size:13px; }
+.btn-add:hover { background:#30363d; }
+.btn-remove { background:none; border:none; color:#f85149; cursor:pointer; font-size:18px; padding:4px 8px; }
+.btn-remove:hover { color:#ff7b72; }
+.btn-upload { background:#21262d; border:1px solid #30363d; color:#c9d1d9; padding:6px 10px; border-radius:6px; cursor:pointer; font-size:13px; white-space:nowrap; }
+.btn-upload:hover { background:#30363d; color:#58a6ff; }
+.btn-primary { padding:12px 24px; background:#58a6ff; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:15px; font-weight:600; }
+.btn-primary:hover { background:#79c0ff; }
+.btn-inventive { padding:12px 24px; background:#f0883e; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:15px; font-weight:600; }
+.btn-inventive:hover { background:#f4a261; }
+.btn-primary:disabled, .btn-inventive:disabled { opacity:0.5; cursor:not-allowed; }
+.btn-row { display:flex; gap:12px; margin-top:16px; }
+.result-box { margin-top:20px; background:#161b22; border:1px solid #30363d; border-radius:8px; padding:20px; color:#c9d1d9; line-height:1.8; }
+.result-box h3, .result-box h2 { color:#58a6ff; }
+.result-box table { width:100%; border-collapse:collapse; margin:12px 0; font-size:14px; }
+.result-box th { background:#21262d; color:#c9d1d9; padding:8px 10px; border:1px solid #30363d; text-align:left; }
+.result-box td { padding:8px 10px; border:1px solid #30363d; vertical-align:top; }
+.result-box tr:nth-child(even) { background:#0d1117; }
+.result-box strong { color:#f0883e; }
+.result-box code { background:#21262d; padding:1px 5px; border-radius:3px; font-size:0.9em; }
+.result-box li { margin-bottom:4px; }
+.result-box pre { background:#0d1117; border:1px solid #30363d; border-radius:6px; padding:10px; overflow-x:auto; font-size:0.85em; }
+.file-tag { display:inline-flex; align-items:center; gap:4px; background:#1f6feb22; border:1px solid #1f6feb; color:#58a6ff; padding:4px 10px; border-radius:999px; font-size:12px; margin-top:4px; }
+.file-tag .tag-remove { cursor:pointer; color:#f85149; margin-left:4px; font-size:14px; }
+.file-tag .tag-remove:hover { color:#ff7b72; }
+.my-input-row { display:flex; gap:8px; align-items:center; }
+.my-input-row input { flex:1; }
+.btn-paste { background:#21262d; border:1px solid #30363d; color:#c9d1d9; padding:6px 10px; border-radius:6px; cursor:pointer; font-size:13px; white-space:nowrap; }
+.btn-paste:hover { background:#30363d; color:#f0883e; }
+.paste-modal-overlay { display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.6); z-index:1000; justify-content:center; align-items:center; }
+.paste-modal-overlay.show { display:flex; }
+.paste-modal { background:#161b22; border:1px solid #30363d; border-radius:10px; padding:20px; width:90%; max-width:700px; max-height:80vh; display:flex; flex-direction:column; }
+.paste-modal h3 { color:#c9d1d9; margin:0 0 8px 0; font-size:16px; }
+.paste-modal textarea { flex:1; min-height:260px; background:#0d1117; border:1px solid #30363d; border-radius:6px; color:#c9d1d9; padding:10px; font-size:13px; resize:vertical; line-height:1.6; }
+.paste-modal .modal-btns { display:flex; gap:8px; margin-top:12px; justify-content:flex-end; }
+.paste-modal .modal-btns button { padding:8px 18px; border-radius:6px; border:none; cursor:pointer; font-size:14px; }
+.paste-modal .btn-modal-ok { background:#58a6ff; color:#fff; }
+.paste-modal .btn-modal-ok:hover { background:#79c0ff; }
+.paste-modal .btn-modal-cancel { background:#21262d; color:#c9d1d9; border:1px solid #30363d; }
+.paste-modal .btn-modal-cancel:hover { background:#30363d; }
+.paste-title-input { width:100%; padding:8px; background:#0d1117; border:1px solid #30363d; border-radius:6px; color:#c9d1d9; font-size:13px; margin-bottom:8px; }
+</style>
 </head>
 <body>
     <nav id="global-nav"></nav>
     <div class="page-with-sidebar">
     <main class="container page-main" style="max-width:1100px;">
         <h2 data-i18n="compare.title" style="margin-bottom:16px;"></h2>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px;">
-            <div>
-                <label style="display:block;margin-bottom:8px;color:#8b949e;" data-i18n="compare.patent1"></label>
-                <input type="text" id="patent1" data-i18n-placeholder="compare.placeholder1" style="width:100%;padding:10px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;">
+
+        <!-- My Patent -->
+        <div class="cmp-section cmp-my">
+            <label class="cmp-label" style="color:#f0883e; font-weight:600;">我的专利</label>
+            <div class="my-input-row">
+                <input type="text" id="my-patent" class="cmp-input" placeholder="输入专利号或内部 ID（如 CN115076688A）">
+                <button class="btn-upload" onclick="uploadMyPatent()">📎 上传</button>
+                <button class="btn-paste" onclick="pasteMyPatent()">📋 粘贴文本</button>
             </div>
-            <div>
-                <label style="display:block;margin-bottom:8px;color:#8b949e;" data-i18n="compare.patent2"></label>
-                <input type="text" id="patent2" data-i18n-placeholder="compare.placeholder2" style="width:100%;padding:10px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;">
-            </div>
+            <div id="my-file-tag"></div>
         </div>
-        <button onclick="comparePatents()" style="width:100%;padding:12px;background:#58a6ff;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:16px;" data-i18n="compare.btn"></button>
-        <div id="result" style="margin-top:20px;"></div>
+
+        <!-- Reference Documents -->
+        <div class="cmp-section cmp-ref">
+            <label class="cmp-label" style="color:#58a6ff; font-weight:600;">对比文件</label>
+            <div id="ref-list">
+                <div class="ref-row" data-idx="0">
+                    <input type="text" class="cmp-input ref-input" placeholder="对比文件 1 — 专利号或 ID">
+                    <button class="btn-upload" onclick="uploadRef(this)">📎 上传</button>
+                    <button class="btn-paste" onclick="pasteRef(this)">📋 粘贴</button>
+                    <button class="btn-remove" onclick="removeRef(this)" title="移除">&times;</button>
+                </div>
+            </div>
+            <button class="btn-add" onclick="addRef()" id="btn-add-ref">+ 添加对比文件</button>
+        </div>
+
+        <!-- Office Action (审查意见书) -->
+        <div class="cmp-section" style="border-left:3px solid #f85149;">
+            <label class="cmp-label" style="color:#f85149; font-weight:600;">审查意见通知书（可选 — 一审答复专用）</label>
+            <div class="my-input-row">
+                <input type="text" id="oa-input" class="cmp-input" disabled placeholder="请上传 PDF 或粘贴审查意见全文" style="flex:1;">
+                <button class="btn-upload" onclick="uploadOA()">📎 上传</button>
+                <button class="btn-paste" onclick="pasteOA()">📋 粘贴文本</button>
+            </div>
+            <div id="oa-file-tag"></div>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="btn-row">
+            <button class="btn-primary" id="btn-compare" onclick="doCompare()">通用对比</button>
+            <button class="btn-inventive" id="btn-inventive" onclick="doInventiveness()">创造性分析（三步法）</button>
+            <button class="btn-inventive" id="btn-oa" onclick="doOfficeAction()" style="background:#f85149;">一审答复分析</button>
+        </div>
+
+        <div id="result"></div>
     </main>
     <aside id="page-sidebar" class="page-sidebar"></aside>
     </div>
+    <!-- Paste Text Modal -->
+    <div class="paste-modal-overlay" id="paste-modal">
+        <div class="paste-modal">
+            <h3 id="paste-modal-title">粘贴专利文本</h3>
+            <input type="text" class="paste-title-input" id="paste-title" placeholder="文档标题（如：CN115076688A 说明书）">
+            <textarea id="paste-content" placeholder="在此粘贴专利全文内容（权利要求书、说明书等）..."></textarea>
+            <div class="modal-btns">
+                <button class="btn-modal-cancel" onclick="closePasteModal()">取消</button>
+                <button class="btn-modal-ok" onclick="confirmPaste()">确定</button>
+            </div>
+        </div>
+    </div>
     <script src="/static/i18n.js"></script>
     <script>
-    function escapeHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-    async function comparePatents() {
-        var id1 = document.getElementById('patent1').value.trim();
-        var id2 = document.getElementById('patent2').value.trim();
-        if (!id1 || !id2) {
-            alert(t('compare.alert'));
-            return;
+    var MAX_REFS = 4;
+    // Store uploaded text data: { title, content } keyed by row index or "my"
+    var uploadedData = {};
+    var refIdxCounter = 0;
+
+    // ── Upload helpers ──
+    function triggerFileSelect(callback) {
+        var input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.pdf,.docx,.txt';
+        input.onchange = function() {
+            if (input.files.length > 0) callback(input.files[0]);
+        };
+        input.click();
+    }
+
+    async function extractFile(file) {
+        var form = new FormData();
+        form.append('file', file);
+        var resp = await fetch('/api/upload/extract', { method: 'POST', body: form });
+        var data = await resp.json();
+        if (data.error) throw new Error(data.error);
+        return { title: file.name, content: data.text };
+    }
+
+    // ── My Patent upload ──
+    function uploadMyPatent() {
+        triggerFileSelect(async function(file) {
+            var tagEl = document.getElementById('my-file-tag');
+            tagEl.innerHTML = '<span style="color:#8b949e; font-size:12px;">正在提取文本...</span>';
+            try {
+                var result = await extractFile(file);
+                uploadedData['my'] = result;
+                document.getElementById('my-patent').value = '';
+                document.getElementById('my-patent').disabled = true;
+                tagEl.innerHTML = '<span class="file-tag">📄 ' + escapeHtml(result.title)
+                    + ' (' + result.content.length + '字)'
+                    + '<span class="tag-remove" onclick="clearMyUpload()">&times;</span></span>';
+            } catch(e) {
+                tagEl.innerHTML = '<span style="color:#f85149; font-size:12px;">' + escapeHtml(e.message) + '</span>';
+            }
+        });
+    }
+
+    function clearMyUpload() {
+        delete uploadedData['my'];
+        document.getElementById('my-patent').disabled = false;
+        document.getElementById('my-file-tag').innerHTML = '';
+    }
+
+    // ── Reference upload ──
+    function uploadRef(btn) {
+        var row = btn.closest('.ref-row');
+        var idx = row.getAttribute('data-idx');
+        triggerFileSelect(async function(file) {
+            var existing = row.querySelector('.file-tag-container');
+            if (!existing) {
+                existing = document.createElement('div');
+                existing.className = 'file-tag-container';
+                row.parentElement.insertBefore(existing, row.nextSibling);
+                existing.setAttribute('data-for', idx);
+            }
+            existing.innerHTML = '<span style="color:#8b949e; font-size:12px; margin-left:8px;">正在提取文本...</span>';
+            try {
+                var result = await extractFile(file);
+                uploadedData['ref_' + idx] = result;
+                row.querySelector('.ref-input').value = '';
+                row.querySelector('.ref-input').disabled = true;
+                existing.innerHTML = '<span class="file-tag" style="margin-left:8px;">📄 ' + escapeHtml(result.title)
+                    + ' (' + result.content.length + '字)'
+                    + '<span class="tag-remove" onclick="clearRefUpload(\'' + idx + '\')">&times;</span></span>';
+            } catch(e) {
+                existing.innerHTML = '<span style="color:#f85149; font-size:12px; margin-left:8px;">' + escapeHtml(e.message) + '</span>';
+            }
+        });
+    }
+
+    function clearRefUpload(idx) {
+        delete uploadedData['ref_' + idx];
+        var rows = document.querySelectorAll('.ref-row');
+        for (var i = 0; i < rows.length; i++) {
+            if (rows[i].getAttribute('data-idx') === idx) {
+                rows[i].querySelector('.ref-input').disabled = false;
+                break;
+            }
         }
-        var el = document.getElementById('result');
-        el.innerHTML = '<div style="padding:20px;background:#161b22;border-radius:8px;color:#8b949e;">🤖 ' + t('compare.analyzing') + '</div>';
-        try {
-            var resp = await fetch('/api/ai/compare', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ patent_id1: id1, patent_id2: id2 })
-            });
-            var data = await resp.json();
-            el.innerHTML = '<div style="padding:20px;background:#161b22;border-radius:8px;"><h3 style="margin:0 0 16px 0;color:#58a6ff;">📊 ' + t('compare.result') + '</h3><div style="color:#c9d1d9;line-height:1.8;white-space:pre-wrap;">' + escapeHtml(data.content).replace(/\n/g, '<br>') + '</div></div>';
-        } catch(e) {
-            el.innerHTML = '<div style="padding:20px;background:#161b22;border-radius:8px;color:#f85149;">' + t('compare.fail') + ': ' + escapeHtml(String(e)) + '</div>';
+        var tagContainer = document.querySelector('[data-for="' + idx + '"]');
+        if (tagContainer) tagContainer.remove();
+    }
+
+    // ── Ref row management ──
+    function addRef() {
+        var list = document.getElementById('ref-list');
+        var count = list.querySelectorAll('.ref-row').length;
+        if (count >= MAX_REFS) { alert('最多添加 ' + MAX_REFS + ' 个对比文件'); return; }
+        refIdxCounter++;
+        var row = document.createElement('div');
+        row.className = 'ref-row';
+        row.setAttribute('data-idx', String(refIdxCounter));
+        row.innerHTML = '<input type="text" class="cmp-input ref-input" placeholder="对比文件 ' + (count + 1) + ' — 专利号或 ID">'
+            + '<button class="btn-upload" onclick="uploadRef(this)">📎 上传</button>'
+            + '<button class="btn-paste" onclick="pasteRef(this)">📋 粘贴</button>'
+            + '<button class="btn-remove" onclick="removeRef(this)" title="移除">&times;</button>';
+        list.appendChild(row);
+        updateAddBtn();
+    }
+
+    function removeRef(btn) {
+        var list = document.getElementById('ref-list');
+        if (list.querySelectorAll('.ref-row').length <= 1) return;
+        var row = btn.closest('.ref-row');
+        var idx = row.getAttribute('data-idx');
+        delete uploadedData['ref_' + idx];
+        var tagContainer = document.querySelector('[data-for="' + idx + '"]');
+        if (tagContainer) tagContainer.remove();
+        row.remove();
+        updateAddBtn();
+        reindexPlaceholders();
+    }
+
+    function updateAddBtn() {
+        var count = document.getElementById('ref-list').querySelectorAll('.ref-row').length;
+        document.getElementById('btn-add-ref').style.display = count >= MAX_REFS ? 'none' : '';
+    }
+
+    function reindexPlaceholders() {
+        var inputs = document.querySelectorAll('.ref-input');
+        for (var i = 0; i < inputs.length; i++) {
+            if (!inputs[i].disabled) {
+                inputs[i].placeholder = '对比文件 ' + (i + 1) + ' — 专利号或 ID';
+            }
         }
     }
+
+    // ── Paste text modal ──
+    var pasteTarget = null; // 'my' or 'ref_<idx>'
+
+    function pasteMyPatent() {
+        pasteTarget = 'my';
+        document.getElementById('paste-modal-title').textContent = '粘贴「我的专利」文本';
+        document.getElementById('paste-title').value = '';
+        document.getElementById('paste-content').value = '';
+        document.getElementById('paste-modal').classList.add('show');
+        document.getElementById('paste-content').focus();
+    }
+
+    function pasteRef(btn) {
+        var row = btn.closest('.ref-row');
+        var idx = row.getAttribute('data-idx');
+        pasteTarget = 'ref_' + idx;
+        document.getElementById('paste-modal-title').textContent = '粘贴对比文件文本';
+        document.getElementById('paste-title').value = '';
+        document.getElementById('paste-content').value = '';
+        document.getElementById('paste-modal').classList.add('show');
+        document.getElementById('paste-content').focus();
+    }
+
+    function closePasteModal() {
+        document.getElementById('paste-modal').classList.remove('show');
+        pasteTarget = null;
+    }
+
+    function confirmPaste() {
+        var title = document.getElementById('paste-title').value.trim() || '粘贴文本';
+        var content = document.getElementById('paste-content').value.trim();
+        if (!content) { alert('请粘贴文本内容'); return; }
+
+        uploadedData[pasteTarget] = { title: title, content: content };
+
+        if (pasteTarget === 'my') {
+            document.getElementById('my-patent').value = '';
+            document.getElementById('my-patent').disabled = true;
+            document.getElementById('my-file-tag').innerHTML = '<span class="file-tag">📋 ' + escapeHtml(title)
+                + ' (' + content.length + '字)'
+                + '<span class="tag-remove" onclick="clearMyUpload()">&times;</span></span>';
+        } else if (pasteTarget === 'oa') {
+            document.getElementById('oa-file-tag').innerHTML = '<span class="file-tag" style="border-color:#f85149; color:#f85149;">📋 ' + escapeHtml(title)
+                + ' (' + content.length + '字)'
+                + '<span class="tag-remove" onclick="clearOA()">&times;</span></span>';
+        } else {
+            var idx = pasteTarget.replace('ref_', '');
+            var rows = document.querySelectorAll('.ref-row');
+            for (var i = 0; i < rows.length; i++) {
+                if (rows[i].getAttribute('data-idx') === idx) {
+                    rows[i].querySelector('.ref-input').value = '';
+                    rows[i].querySelector('.ref-input').disabled = true;
+                    var existing = document.querySelector('[data-for="' + idx + '"]');
+                    if (!existing) {
+                        existing = document.createElement('div');
+                        existing.className = 'file-tag-container';
+                        existing.setAttribute('data-for', idx);
+                        rows[i].parentElement.insertBefore(existing, rows[i].nextSibling);
+                    }
+                    existing.innerHTML = '<span class="file-tag" style="margin-left:8px;">📋 ' + escapeHtml(title)
+                        + ' (' + content.length + '字)'
+                        + '<span class="tag-remove" onclick="clearRefUpload(\'' + idx + '\')">&times;</span></span>';
+                    break;
+                }
+            }
+        }
+        closePasteModal();
+    }
+
+    // Close modal on overlay click
+    document.getElementById('paste-modal').addEventListener('click', function(e) {
+        if (e.target === this) closePasteModal();
+    });
+
+    // ── Office Action (审查意见) upload/paste ──
+    function uploadOA() {
+        triggerFileSelect(async function(file) {
+            var tagEl = document.getElementById('oa-file-tag');
+            tagEl.innerHTML = '<span style="color:#8b949e; font-size:12px;">正在提取文本...</span>';
+            try {
+                var result = await extractFile(file);
+                uploadedData['oa'] = result;
+                tagEl.innerHTML = '<span class="file-tag" style="border-color:#f85149; color:#f85149;">📄 ' + escapeHtml(result.title)
+                    + ' (' + result.content.length + '字)'
+                    + '<span class="tag-remove" onclick="clearOA()">&times;</span></span>';
+            } catch(e) {
+                tagEl.innerHTML = '<span style="color:#f85149; font-size:12px;">' + escapeHtml(e.message) + '</span>';
+            }
+        });
+    }
+
+    function pasteOA() {
+        pasteTarget = 'oa';
+        document.getElementById('paste-modal-title').textContent = '粘贴审查意见通知书';
+        document.getElementById('paste-title').value = '审查意见通知书';
+        document.getElementById('paste-content').value = '';
+        document.getElementById('paste-modal').classList.add('show');
+        document.getElementById('paste-content').focus();
+    }
+
+    function clearOA() {
+        delete uploadedData['oa'];
+        document.getElementById('oa-file-tag').innerHTML = '';
+    }
+
+    function getOA() {
+        if (uploadedData['oa']) {
+            return { type: 'text', title: uploadedData['oa'].title, content: uploadedData['oa'].content };
+        }
+        return null;
+    }
+
+    // ── Data getters (mixed: patent ID strings + text objects) ──
+    function getMyPatent() {
+        if (uploadedData['my']) {
+            return { type: 'text', title: uploadedData['my'].title, content: uploadedData['my'].content };
+        }
+        var v = document.getElementById('my-patent').value.trim();
+        return v || null;
+    }
+
+    function getRefs() {
+        var rows = document.querySelectorAll('.ref-row');
+        var refs = [];
+        for (var i = 0; i < rows.length; i++) {
+            var idx = rows[i].getAttribute('data-idx');
+            if (uploadedData['ref_' + idx]) {
+                var d = uploadedData['ref_' + idx];
+                refs.push({ type: 'text', title: d.title, content: d.content });
+            } else {
+                var v = rows[i].querySelector('.ref-input').value.trim();
+                if (v) refs.push(v);
+            }
+        }
+        return refs;
+    }
+
+    // ── UI helpers ──
+    function setLoading(msg) {
+        document.getElementById('btn-compare').disabled = true;
+        document.getElementById('btn-inventive').disabled = true;
+        document.getElementById('btn-oa').disabled = true;
+        document.getElementById('result').innerHTML = '<div class="result-box" style="color:#8b949e; text-align:center; padding:40px;">⏳ ' + escapeHtml(msg) + '</div>';
+    }
+
+    function clearLoading() {
+        document.getElementById('btn-compare').disabled = false;
+        document.getElementById('btn-inventive').disabled = false;
+        document.getElementById('btn-oa').disabled = false;
+    }
+
+    function showResult(html) {
+        document.getElementById('result').innerHTML = '<div class="result-box">' + html + '</div>';
+        clearLoading();
+    }
+
+    function showError(msg) {
+        document.getElementById('result').innerHTML = '<div class="result-box" style="border-color:#f85149; color:#f85149;">' + escapeHtml(msg) + '</div>';
+        clearLoading();
+    }
+
+    // ── General Compare ──
+    async function doCompare() {
+        var my = getMyPatent();
+        var refs = getRefs();
+        if (!my || refs.length === 0) { alert('请填写我的专利和至少一个对比文件'); return; }
+
+        var allItems = [my].concat(refs);
+        if (allItems.length === 2) {
+            setLoading('正在进行通用对比分析...');
+            try {
+                var resp = await fetch('/api/ai/compare', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ items: allItems })
+                });
+                var data = await resp.json();
+                if (data.error) { showError(data.error); return; }
+                showResult(renderMarkdown(data.content));
+            } catch(e) { showError('请求失败: ' + e.message); }
+        } else {
+            setLoading('正在进行 ' + allItems.length + ' 篇对比分析...');
+            try {
+                var resp = await fetch('/api/ai/compare-matrix', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ items: allItems })
+                });
+                var data = await resp.json();
+                if (data.error) { showError(data.error); return; }
+                showResult(renderMarkdown(data.analysis));
+            } catch(e) { showError('请求失败: ' + e.message); }
+        }
+    }
+
+    // ── Inventiveness Analysis ──
+    async function doInventiveness() {
+        var my = getMyPatent();
+        var refs = getRefs();
+        if (!my) { alert('请填写「我的专利」或上传 PDF'); return; }
+        if (refs.length === 0) { alert('请添加至少一个对比文件'); return; }
+
+        setLoading('正在进行创造性三步法分析（可能需要1-2分钟）...');
+        try {
+            var body = { references: refs };
+            // my_patent can be string (ID) or object (uploaded text)
+            if (typeof my === 'string') {
+                body.my_patent_id = my;
+            } else {
+                body.my_patent = my;
+            }
+            var resp = await fetch('/api/ai/inventiveness-analysis', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(body)
+            });
+            var data = await resp.json();
+            if (data.error) { showError(data.error); return; }
+            showResult(renderMarkdown(data.analysis));
+        } catch(e) { showError('请求失败: ' + e.message); }
+    }
+
+    // ── Office Action Response Analysis ──
+    async function doOfficeAction() {
+        var my = getMyPatent();
+        var oa = getOA();
+        var refs = getRefs();
+        if (!my) { alert('请填写「我的专利」或上传 PDF'); return; }
+        if (!oa) { alert('请上传或粘贴审查意见通知书'); return; }
+
+        setLoading('正在生成一审答复方案（深度分析，可能需要2-3分钟）...');
+        try {
+            var body = { references: refs, office_action: oa };
+            if (typeof my === 'string') {
+                body.my_patent_id = my;
+            } else {
+                body.my_patent = my;
+            }
+            var resp = await fetch('/api/ai/office-action-response', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(body)
+            });
+            var data = await resp.json();
+            if (data.error) { showError(data.error); return; }
+            showResult(renderMarkdown(data.analysis));
+        } catch(e) { showError('请求失败: ' + e.message); }
+    }
+
+    // ── Markdown Renderer (with table support) ──
+    function escapeHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+    function renderMarkdown(text) {
+        if (!text) return '';
+        var codeBlocks = [];
+        text = text.replace(/```(\w*)\n?([\s\S]*?)```/g, function(_, lang, code) {
+            codeBlocks.push('<pre><code>' + escapeHtml(code) + '</code></pre>');
+            return '\x00CB' + (codeBlocks.length - 1) + '\x00';
+        });
+
+        var tableBlocks = [];
+        text = text.replace(/(?:^|\n)(\|.+\|)\n(\|[\s:|-]+\|)\n((?:\|.+\|\n?)+)/gm, function(_, header, sep, body) {
+            var ths = header.split('|').filter(function(c) { return c.trim() !== ''; });
+            var rows = body.trim().split('\n');
+            var html = '<table><thead><tr>';
+            for (var i = 0; i < ths.length; i++) html += '<th>' + escapeHtml(ths[i].trim()) + '</th>';
+            html += '</tr></thead><tbody>';
+            for (var r = 0; r < rows.length; r++) {
+                var cells = rows[r].split('|').filter(function(c) { return c.trim() !== ''; });
+                html += '<tr>';
+                for (var c = 0; c < cells.length; c++) html += '<td>' + escapeHtml(cells[c].trim()).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>') + '</td>';
+                html += '</tr>';
+            }
+            html += '</tbody></table>';
+            tableBlocks.push(html);
+            return '\n\x00TB' + (tableBlocks.length - 1) + '\x00\n';
+        });
+
+        var result = escapeHtml(text)
+            .replace(/^#### (.+)$/gm, '<h4>$1</h4>')
+            .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+            .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+            .replace(/`([^`]+)`/g, '<code>$1</code>')
+            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+            .replace(/^\- (.+)$/gm, '<li>$1</li>')
+            .replace(/^(\d+)\. (.+)$/gm, '<li>$2</li>')
+            .replace(/(<li>.*<\/li>)/g, '<ul>$1</ul>')
+            .replace(/<\/ul>\s*<ul>/g, '')
+            .replace(/\n{2,}/g, '</p><p>')
+            .replace(/\n/g, '<br>');
+
+        result = result.replace(/\x00CB(\d+)\x00/g, function(_, i) { return codeBlocks[parseInt(i)]; });
+        result = result.replace(/\x00TB(\d+)\x00/g, function(_, i) { return tableBlocks[parseInt(i)]; });
+
+        return result;
+    }
+
     renderNavbar('compare');
     renderSidebar();
     applyI18nCommon();

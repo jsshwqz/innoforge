@@ -234,14 +234,23 @@ pub(crate) fn build_online_query(
         Some(SearchType::Inventor) => format!("inventor:\"{}\"", q),
         Some(SearchType::PatentNumber) => {
             // For bare Chinese application numbers (e.g. "202210835143.9"),
-            // add CN prefix so Google Patents can find them
+            // Google Patents indexes by PUBLICATION number, not application number.
+            // Searching bare digits (without dot/quotes) lets Google Patents find
+            // the patent via full-text match on the application number field.
             let digits: String = q.chars().filter(|c| c.is_ascii_digit()).collect();
             let is_bare_cn_app = digits.len() >= 10
                 && digits.len() <= 15
                 && q.chars().all(|c| c.is_ascii_digit() || c == '.');
             if is_bare_cn_app {
-                // Search both with CN prefix and original format
-                format!("\"CN{}\" OR \"{}\"", digits, q)
+                // Strip the trailing check digit to get the core application number
+                // e.g. "202210835143.9" → digits "2022108351439" → strip last → "202210835143"
+                let core = if digits.len() >= 13 {
+                    &digits[..digits.len() - 1]
+                } else {
+                    &digits
+                };
+                // Bare digits — Google Patents finds this via application_number field
+                core.to_string()
             } else {
                 format!("\"{}\"", q)
             }

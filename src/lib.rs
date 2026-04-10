@@ -128,6 +128,14 @@ pub async fn start_server(db_path: &str) -> anyhow::Result<()> {
             "/api/ai/batch-summarize",
             post(routes::api_ai_batch_summarize),
         )
+        .route(
+            "/api/ai/inventiveness-analysis",
+            post(routes::api_ai_inventiveness_analysis),
+        )
+        .route(
+            "/api/ai/office-action-response",
+            post(routes::api_ai_office_action_response),
+        )
         .route("/api/idea/submit", post(routes::api_idea_submit))
         .route("/api/idea/analyze", post(routes::api_idea_analyze))
         .route("/api/idea/pipeline", post(routes::api_idea_pipeline))

@@ -62,10 +62,10 @@ pub async fn api_upload_compare(
             Ok(text) if !text.trim().is_empty() => text,
             Ok(_) => {
                 return Json(
-                    json!({"error": "PDF 文件无可提取的文字内容（可能是扫描件），请转换为文本后重试"}),
+                    json!({"error": "PDF 无法提取文字。请直接输入专利号或使用「粘贴文本」功能。"}),
                 )
             }
-            Err(e) => return Json(json!({"error": format!("PDF 解析失败: {}", e)})),
+            Err(e) => return Json(json!({"error": format!("PDF 提取失败: {}", e)})),
         }
     } else if ext == "docx" {
         // DOCX = ZIP containing XML; extract text from word/document.xml
@@ -175,8 +175,8 @@ pub async fn api_upload_extract(
     } else if ext == "pdf" {
         match extract_pdf_text(&file_bytes) {
             Ok(t) if !t.trim().is_empty() => t,
-            Ok(_) => return Json(json!({"error": "PDF 无可提取文字"})),
-            Err(e) => return Json(json!({"error": format!("PDF 解析失败: {}", e)})),
+            Ok(_) => return Json(json!({"error": "该 PDF 无法提取文字。请直接输入专利号，系统会自动在线获取专利内容；或使用「粘贴文本」功能手动输入。"})),
+            Err(e) => return Json(json!({"error": format!("PDF 提取失败: {}。请直接输入专利号或使用「粘贴文本」功能。", e)})),
         }
     } else if ext == "docx" {
         match extract_docx_text(&file_bytes) {
@@ -200,15 +200,122 @@ pub async fn api_upload_extract(
     };
 
     Json(json!({
-        "text": text.chars().take(5000).collect::<String>(),
+        "text": text.chars().take(50000).collect::<String>(),
         "file_type": ext,
         "length": text.len()
     }))
 }
 
-/// Extract text from a PDF file using pdf-extract
+/// Extract text from a PDF file: pdf-extract → PyMuPDF → Tesseract OCR
 fn extract_pdf_text(data: &[u8]) -> Result<String, String> {
-    pdf_extract::extract_text_from_mem(data).map_err(|e| format!("{}", e))
+    // Step 1: Rust pdf-extract
+    if let Ok(text) = pdf_extract::extract_text_from_mem(data) {
+        if !text.trim().is_empty() {
+            return Ok(text);
+        }
+    }
+    // Step 2: PyMuPDF
+    if let Ok(text) = extract_pdf_text_pymupdf(data) {
+        if !text.trim().is_empty() {
+            return Ok(text);
+        }
+    }
+    // Step 3: Tesseract OCR (handles scanned/special font PDFs)
+    extract_pdf_text_ocr(data)
+}
+
+/// Fallback: use Python PyMuPDF (fitz) to extract text from PDF
+fn extract_pdf_text_pymupdf(data: &[u8]) -> Result<String, String> {
+    use std::io::Write;
+
+    let tmp_dir = std::env::temp_dir();
+    let tmp_path = tmp_dir.join(format!("innoforge_pdf_{}.pdf", std::process::id()));
+    let tmp_str = tmp_path.to_string_lossy().to_string();
+
+    // Write PDF bytes to temp file
+    let mut f = std::fs::File::create(&tmp_path)
+        .map_err(|e| format!("创建临时文件失败: {}", e))?;
+    f.write_all(data)
+        .map_err(|e| format!("写入临时文件失败: {}", e))?;
+    drop(f);
+
+    let python = r"C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe";
+    let script = format!(
+        "import fitz,sys\nsys.stdout.reconfigure(encoding='utf-8')\ndoc=fitz.open(sys.argv[1])\nfor p in doc:\n print(p.get_text())",
+    );
+
+    let output = std::process::Command::new(python)
+        .args(["-c", &script, &tmp_str])
+        .output();
+
+    // Clean up temp file
+    let _ = std::fs::remove_file(&tmp_path);
+
+    match output {
+        Ok(o) if o.status.success() => {
+            let text = String::from_utf8_lossy(&o.stdout).to_string();
+            if text.trim().is_empty() {
+                Ok(String::new()) // empty — let caller try next method
+            } else {
+                Ok(text)
+            }
+        }
+        Ok(_) | Err(_) => Ok(String::new()), // failed — let caller try next method
+    }
+}
+
+/// Fallback: use Tesseract OCR via Python to extract text from scanned PDFs
+fn extract_pdf_text_ocr(data: &[u8]) -> Result<String, String> {
+    use std::io::Write;
+
+    let tmp_dir = std::env::temp_dir();
+    let tmp_path = tmp_dir.join(format!("innoforge_ocr_{}.pdf", std::process::id()));
+    let tmp_str = tmp_path.to_string_lossy().to_string();
+
+    let mut f = std::fs::File::create(&tmp_path)
+        .map_err(|e| format!("创建临时文件失败: {}", e))?;
+    f.write_all(data)
+        .map_err(|e| format!("写入临时文件失败: {}", e))?;
+    drop(f);
+
+    let python = r"C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe";
+    let script = r#"
+import pytesseract, fitz, sys
+from PIL import Image
+import io
+
+sys.stdout.reconfigure(encoding='utf-8')
+pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+doc = fitz.open(sys.argv[1])
+for page in doc:
+    mat = fitz.Matrix(2.0, 2.0)
+    pix = page.get_pixmap(matrix=mat)
+    img = Image.open(io.BytesIO(pix.tobytes('png')))
+    text = pytesseract.image_to_string(img, lang='chi_sim+eng')
+    print(text)
+"#;
+
+    let output = std::process::Command::new(python)
+        .args(["-c", script, &tmp_str])
+        .output();
+
+    let _ = std::fs::remove_file(&tmp_path);
+
+    match output {
+        Ok(o) if o.status.success() => {
+            let text = String::from_utf8_lossy(&o.stdout).to_string();
+            if text.trim().is_empty() {
+                Err("OCR 也无法识别文字".into())
+            } else {
+                Ok(text)
+            }
+        }
+        Ok(o) => {
+            let stderr = String::from_utf8_lossy(&o.stderr);
+            Err(format!("OCR 失败: {}", stderr.chars().take(200).collect::<String>()))
+        }
+        Err(e) => Err(format!("无法调用 Python OCR: {}", e)),
+    }
 }
 
 /// Extract text from a DOCX file (ZIP containing XML)
