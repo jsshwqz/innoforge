@@ -130,6 +130,7 @@
                 <button class="tab-btn" data-tab="claims" onclick="switchTab('claims')">🌳 权利要求树</button>
                 <button class="tab-btn" data-tab="findings" onclick="switchTab('findings')">🔑 关键发现</button>
                 <button class="tab-btn" data-tab="chat" onclick="switchTab('chat')">💬 讨论</button>
+                <button class="tab-btn" data-tab="report" onclick="switchTab('report')">📄 报告</button>
                 <button class="tab-btn" data-tab="versions" onclick="switchTab('versions')">📜 版本历史</button>
             </div>
 
@@ -198,10 +199,31 @@
                 </div>
             </div>
 
+            <!-- Tab: 报告 -->
+            <div id="tab-report" class="tab-panel">
+                <div id="report-panel" style="padding:16px; background:#161b22; border-radius:8px; border:1px solid #30363d;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                        <h3 style="color:#58a6ff; margin:0;">📄 报告 / Report</h3>
+                        <div id="report-type-switcher" style="display:flex; border:1px solid #30363d; border-radius:6px; overflow:hidden;">
+                            <button class="report-type-btn active" data-rtype="full" onclick="switchReportType('full')" style="padding:5px 12px;font-size:0.82em;border:none;cursor:pointer;background:#1f6feb;color:#fff;">完整版</button>
+                            <button class="report-type-btn" data-rtype="technical" onclick="switchReportType('technical')" style="padding:5px 12px;font-size:0.82em;border:none;cursor:pointer;background:#21262d;color:#8b949e;">技术版</button>
+                            <button class="report-type-btn" data-rtype="executive" onclick="switchReportType('executive')" style="padding:5px 12px;font-size:0.82em;border:none;cursor:pointer;background:#21262d;color:#8b949e;">精简版</button>
+                        </div>
+                    </div>
+                    <div id="report-content" style="line-height:1.7; color:#c9d1d9;"><p style="color:#8b949e;">完成推演后可查看报告</p></div>
+                    <div style="margin-top:12px; text-align:right;">
+                        <button id="report-open-btn" onclick="openReportInNewTab()" style="display:none; padding:6px 14px; background:#8b5cf6; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:0.85em;">在新窗口打开</button>
+                    </div>
+                </div>
+            </div>
+
             <!-- Tab: 版本历史 -->
             <div id="tab-versions" class="tab-panel">
                 <div id="version-history-panel" style="padding:16px; background:#161b22; border-radius:8px; border:1px solid #30363d;">
-                    <h3 style="color:#d2a8ff; margin:0 0 12px;">📜 版本历史 / Version History (<span id="version-count">0</span>)</h3>
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                        <h3 style="color:#d2a8ff; margin:0;">📜 版本历史 / Version History (<span id="version-count">0</span>)</h3>
+                        <button id="iterate-from-versions-btn" onclick="if(currentIdeaId) startIterate(currentIdeaId);" style="display:none; padding:5px 14px; background:#1f6feb; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:0.85em;">继续迭代</button>
+                    </div>
                     <div id="version-list"><p style="color:#8b949e;">暂无版本历史</p></div>
                 </div>
             </div>
@@ -609,16 +631,19 @@
         var panel = document.getElementById('version-history-panel');
         var list = document.getElementById('version-list');
         var countEl = document.getElementById('version-count');
+        var iterBtn = document.getElementById('iterate-from-versions-btn');
         try {
             var resp = await fetch('/api/idea/' + encodeURIComponent(ideaId) + '/versions');
-            if (!resp.ok) { panel.style.display = 'none'; return; }
+            if (!resp.ok) { if (panel) panel.style.display = 'none'; if (iterBtn) iterBtn.style.display = 'none'; return; }
             var data = await resp.json();
             if (data.status !== 'ok' || !data.versions || data.versions.length === 0) {
-                panel.style.display = 'none';
+                if (panel) panel.style.display = 'none';
+                if (iterBtn) iterBtn.style.display = 'none';
                 return;
             }
-            panel.style.display = 'block';
-            countEl.textContent = data.versions.length;
+            if (panel) panel.style.display = 'block';
+            if (iterBtn) iterBtn.style.display = 'inline-block';
+            if (countEl) countEl.textContent = data.versions.length;
             list.innerHTML = '';
             data.versions.forEach(function(ver) {
                 var row = document.createElement('div');
@@ -649,7 +674,8 @@
                 list.appendChild(row);
             });
         } catch(e) {
-            panel.style.display = 'none';
+            if (panel) panel.style.display = 'none';
+            if (iterBtn) iterBtn.style.display = 'none';
         }
     }
 
@@ -998,6 +1024,8 @@
         loadKeyFindings(idea.id);
         // 加载特征卡片 / Load feature cards
         loadFeatureCards(idea.id);
+        // 加载报告 Tab / Load report tab
+        loadReportTab(idea.id, currentReportType);
     }
 
     async function loadEvidenceChain(ideaId) {
@@ -1109,6 +1137,58 @@
             w.document.close();
         } catch(e) {
             alert('获取报告失败: ' + e.message);
+        }
+    }
+
+    // ── 报告 Tab 功能 ──────────────────────────────────────
+    var currentReportType = 'full';
+
+    function switchReportType(rtype) {
+        currentReportType = rtype;
+        document.querySelectorAll('.report-type-btn').forEach(function(btn) {
+            if (btn.getAttribute('data-rtype') === rtype) {
+                btn.style.background = '#1f6feb';
+                btn.style.color = '#fff';
+                btn.classList.add('active');
+            } else {
+                btn.style.background = '#21262d';
+                btn.style.color = '#8b949e';
+                btn.classList.remove('active');
+            }
+        });
+        if (currentIdeaId) loadReportTab(currentIdeaId, rtype);
+    }
+
+    async function loadReportTab(ideaId, reportType) {
+        var content = document.getElementById('report-content');
+        var openBtn = document.getElementById('report-open-btn');
+        if (!content) return;
+        content.innerHTML = '<p style="color:#58a6ff;"><span class="spinner"></span> 加载中...</p>';
+        try {
+            var url = '/api/idea/' + encodeURIComponent(ideaId) + '/report';
+            if (reportType && reportType !== 'full') url += '?type=' + reportType;
+            var resp = await fetch(url);
+            if (!resp.ok) { content.innerHTML = '<p style="color:#f85149;">获取报告失败 (' + resp.status + ')</p>'; return; }
+            var data = await resp.json();
+            if (data.status === 'ok') {
+                var reportText = data.report || data.analysis || '';
+                content.innerHTML = DOMPurify.sanitize('<div class="analysis-result">' + renderMarkdown(reportText) + '</div>');
+                if (openBtn) openBtn.style.display = 'inline-block';
+            } else {
+                content.innerHTML = '<p style="color:#8b949e;">' + (data.message || '暂无报告') + '</p>';
+                if (openBtn) openBtn.style.display = 'none';
+            }
+        } catch(e) {
+            content.innerHTML = '<p style="color:#f85149;">加载失败: ' + esc(e.message) + '</p>';
+        }
+    }
+
+    function openReportInNewTab() {
+        if (!currentIdeaId) return;
+        if (currentReportType === 'full') {
+            window.open('/api/idea/' + encodeURIComponent(currentIdeaId) + '/report.html', '_blank');
+        } else {
+            openReport(currentIdeaId, currentReportType);
         }
     }
 
