@@ -668,6 +668,16 @@
     renderNavbar('compare');
     renderSidebar();
     applyI18nCommon();
+
+    // Pre-fill from URL params (e.g. ?patent=CN115076688A)
+    (function() {
+        var params = new URLSearchParams(window.location.search);
+        var patent = params.get('patent');
+        if (patent) {
+            var myInput = document.getElementById('my-patent-input');
+            if (myInput) myInput.value = patent;
+        }
+    })();
     </script>
 </body>
 </html>

@@ -24,6 +24,7 @@
                     <button class="ai-btn" onclick="aiSummarize()">🤖 <span data-i18n="detail.analyze"></span></button>
                     <button class="ai-btn" id="load-full-btn" onclick="loadFullText()" style="background:#1f6feb;">📄 加载全文</button>
                     <button class="ai-btn" onclick="window.open('/api/patent/pdf/{{id}}','_blank')" style="background:#8b5cf6;">📥 导出 PDF</button>
+                    <button class="ai-btn" onclick="window.location.href='/compare?patent={{patent_number}}'" style="background:#238636;">⚖️ 对比分析</button>
                     <button class="ai-btn" id="collect-btn" onclick="toggleCollect()" style="background:#d29922;">⭐ 收藏</button>
                 </div>
             </div>
