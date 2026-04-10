@@ -223,6 +223,21 @@
     let currentIdeaId = null;
     let isAnalyzing = false;
     let analysisMode = 'deep'; // 'quick' or 'deep'
+    let activeEventSource = null;   // 全局 SSE 连接引用，防止竞态
+    let activeSSEConnectionId = 0;  // SSE 连接 ID，确保只处理当前连接的事件
+
+    // 关闭活跃的 SSE 连接
+    function closeActiveSSE() {
+        if (activeEventSource) {
+            try { activeEventSource.close(); } catch(e) {}
+            activeEventSource = null;
+        }
+    }
+
+    // 页面卸载时关闭 SSE
+    window.addEventListener('beforeunload', function() {
+        closeActiveSSE();
+    });
 
     function setAnalysisMode(mode) {
         analysisMode = mode;
@@ -385,38 +400,45 @@
             } else {
                 document.getElementById('status-area').innerHTML = DOMPurify.sanitize(buildPipelineUI());
                 var sseErrorCount = 0;
+                closeActiveSSE();
+                var connId = ++activeSSEConnectionId;
                 await new Promise(function(resolve) {
                     var eventSource = new EventSource('/api/idea/' + ideaId + '/progress');
+                    activeEventSource = eventSource;
                     var pipelineStarted = false;
-                    var timeout = setTimeout(function() { eventSource.close(); resolve(); }, 300000);
+                    var timeout = setTimeout(function() { eventSource.close(); if (activeEventSource === eventSource) activeEventSource = null; resolve(); }, 300000);
 
                     eventSource.onopen = function() {
+                        if (connId !== activeSSEConnectionId) { eventSource.close(); return; }
                         sseErrorCount = 0;
                         if (!pipelineStarted) {
                             pipelineStarted = true;
                             fetch('/api/idea/pipeline', {
                                 method: 'POST', headers: {'Content-Type': 'application/json'},
                                 body: JSON.stringify({ id: ideaId }),
-                            });
+                            }).catch(function(e) { console.error('pipeline start failed:', e); });
                         }
                     };
                     eventSource.onmessage = function(e) {
+                        if (connId !== activeSSEConnectionId) { eventSource.close(); return; }
                         try {
                             var progress = JSON.parse(e.data);
                             updatePipelineStep(progress.step_index, progress.status, progress.sub_step || null, progress.sub_progress || null, progress.message || null);
                         } catch(err) {}
                     };
-                    eventSource.addEventListener('done', function() { clearTimeout(timeout); eventSource.close(); resolve(); });
+                    eventSource.addEventListener('done', function() { clearTimeout(timeout); eventSource.close(); if (activeEventSource === eventSource) activeEventSource = null; resolve(); });
                     eventSource.onerror = function() {
+                        if (connId !== activeSSEConnectionId) { eventSource.close(); return; }
                         sseErrorCount++;
-                        if (sseErrorCount <= 3) return; // let browser auto-reconnect a few times
+                        if (sseErrorCount <= 3) return;
                         clearTimeout(timeout); eventSource.close();
+                        if (activeEventSource === eventSource) activeEventSource = null;
                         if (!pipelineStarted) {
                             pipelineStarted = true;
                             fetch('/api/idea/pipeline', {
                                 method: 'POST', headers: {'Content-Type': 'application/json'},
                                 body: JSON.stringify({ id: ideaId }),
-                            });
+                            }).catch(function(e) { console.error('pipeline start failed:', e); });
                         }
                         resolve();
                     };
@@ -464,32 +486,39 @@
 
         try {
             var sseErrCount = 0;
+            closeActiveSSE();
+            var connId = ++activeSSEConnectionId;
             await new Promise(function(resolve) {
                 var eventSource = new EventSource('/api/idea/' + ideaId + '/progress');
+                activeEventSource = eventSource;
                 var resumeStarted = false;
-                var timeout = setTimeout(function() { eventSource.close(); resolve(); }, 300000);
+                var timeout = setTimeout(function() { eventSource.close(); if (activeEventSource === eventSource) activeEventSource = null; resolve(); }, 300000);
 
                 eventSource.onopen = function() {
+                    if (connId !== activeSSEConnectionId) { eventSource.close(); return; }
                     sseErrCount = 0;
                     if (!resumeStarted) {
                         resumeStarted = true;
-                        fetch('/api/idea/' + ideaId + '/resume', { method: 'POST' });
+                        fetch('/api/idea/' + ideaId + '/resume', { method: 'POST' }).catch(function(e) { console.error('resume failed:', e); });
                     }
                 };
                 eventSource.onmessage = function(e) {
+                    if (connId !== activeSSEConnectionId) { eventSource.close(); return; }
                     try {
                         var progress = JSON.parse(e.data);
                         updatePipelineStep(progress.step_index, progress.status, progress.sub_step || null, progress.sub_progress || null, progress.message || null);
                     } catch(err) {}
                 };
-                eventSource.addEventListener('done', function() { clearTimeout(timeout); eventSource.close(); resolve(); });
+                eventSource.addEventListener('done', function() { clearTimeout(timeout); eventSource.close(); if (activeEventSource === eventSource) activeEventSource = null; resolve(); });
                 eventSource.onerror = function() {
+                    if (connId !== activeSSEConnectionId) { eventSource.close(); return; }
                     sseErrCount++;
                     if (sseErrCount <= 3) return;
                     clearTimeout(timeout); eventSource.close();
+                    if (activeEventSource === eventSource) activeEventSource = null;
                     if (!resumeStarted) {
                         resumeStarted = true;
-                        fetch('/api/idea/' + ideaId + '/resume', { method: 'POST' });
+                        fetch('/api/idea/' + ideaId + '/resume', { method: 'POST' }).catch(function(e) { console.error('resume failed:', e); });
                     }
                     resolve();
                 };
@@ -677,15 +706,20 @@
 
                 // Connect SSE FIRST, then start pipeline (avoids race condition)
                 var sseErrors = 0;
+                closeActiveSSE();
+                var connId = ++activeSSEConnectionId;
                 await new Promise(function(resolve, reject) {
                     var eventSource = new EventSource('/api/idea/' + submitData.id + '/progress');
+                    activeEventSource = eventSource;
                     var pipelineStarted = false;
                     var timeout = setTimeout(function() {
                         eventSource.close();
+                        if (activeEventSource === eventSource) activeEventSource = null;
                         resolve();
                     }, 300000); // 5 min max
 
                     eventSource.onopen = function() {
+                        if (connId !== activeSSEConnectionId) { eventSource.close(); return; }
                         // SSE connected — now safe to start pipeline
                         sseErrors = 0;
                         if (!pipelineStarted) {
@@ -694,11 +728,12 @@
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({ id: submitData.id }),
-                            });
+                            }).catch(function(e) { console.error('pipeline start failed:', e); });
                         }
                     };
 
                     eventSource.onmessage = function(e) {
+                        if (connId !== activeSSEConnectionId) { eventSource.close(); return; }
                         try {
                             var progress = JSON.parse(e.data);
                             updatePipelineStep(
@@ -714,14 +749,17 @@
                     eventSource.addEventListener('done', function() {
                         clearTimeout(timeout);
                         eventSource.close();
+                        if (activeEventSource === eventSource) activeEventSource = null;
                         resolve();
                     });
 
                     eventSource.onerror = function() {
+                        if (connId !== activeSSEConnectionId) { eventSource.close(); return; }
                         sseErrors++;
                         if (sseErrors <= 3) return; // let browser auto-reconnect a few times
                         clearTimeout(timeout);
                         eventSource.close();
+                        if (activeEventSource === eventSource) activeEventSource = null;
                         // If pipeline wasn't started yet, start it without SSE
                         if (!pipelineStarted) {
                             pipelineStarted = true;
@@ -729,7 +767,7 @@
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({ id: submitData.id }),
-                            });
+                            }).catch(function(e) { console.error('pipeline start failed:', e); });
                         }
                         resolve();
                     };
@@ -832,7 +870,8 @@
     });
 
     function displayResults(idea) {
-        document.getElementById('result-tabs').style.display = 'flex';
+        var resultTabs = document.getElementById('result-tabs');
+        if (resultTabs) resultTabs.style.display = 'flex';
         switchTab('overview');
         if (idea.novelty_score != null) {
             const scoreClass = idea.novelty_score >= 70 ? 'score-high' : idea.novelty_score >= 40 ? 'score-mid' : 'score-low';
@@ -967,6 +1006,7 @@
         var countEl = document.getElementById('evidence-count');
         try {
             var resp = await fetch('/api/idea/' + ideaId + '/evidence');
+            if (!resp.ok) { list.innerHTML = '<p style="color:#8b949e;">暂无证据链数据</p>'; return; }
             var data = await resp.json();
             if (data.status !== 'ok' || !data.evidence || data.evidence.length === 0) {
                 list.innerHTML = '<p style="color:#8b949e;">暂无证据链数据</p>';
@@ -1161,16 +1201,23 @@
     }
 
     function clearResults() {
-        document.getElementById('score-area').innerHTML = '';
-        document.getElementById('analysis-area').innerHTML = '';
-        document.getElementById('findings-area').innerHTML = '';
-        document.getElementById('result-tabs').style.display = 'none';
+        var scoreArea = document.getElementById('score-area');
+        var analysisArea = document.getElementById('analysis-area');
+        var findingsArea = document.getElementById('findings-area');
+        var resultTabs = document.getElementById('result-tabs');
+        if (scoreArea) scoreArea.innerHTML = '';
+        if (analysisArea) analysisArea.innerHTML = '';
+        if (findingsArea) findingsArea.innerHTML = '';
+        if (resultTabs) resultTabs.style.display = 'none';
     }
 
     function clearForm() {
-        document.getElementById('idea-title').value = '';
-        document.getElementById('idea-desc').value = '';
-        document.getElementById('status-area').innerHTML = '';
+        var titleEl = document.getElementById('idea-title');
+        var descEl = document.getElementById('idea-desc');
+        var statusArea = document.getElementById('status-area');
+        if (titleEl) titleEl.value = '';
+        if (descEl) descEl.value = '';
+        if (statusArea) statusArea.innerHTML = '';
         clearResults();
         currentIdeaId = null;
     }
@@ -1283,8 +1330,10 @@
 
             currentIdeaId = id;
             const idea = data.idea;
-            document.getElementById('idea-title').value = idea.title || '';
-            document.getElementById('idea-desc').value = idea.description || '';
+            var titleInput = document.getElementById('idea-title');
+            var descInput = document.getElementById('idea-desc');
+            if (titleInput) titleInput.value = idea.title || '';
+            if (descInput) descInput.value = idea.description || '';
 
             if (idea.status === 'done') {
                 showStatus('done', t('idea.done'));
