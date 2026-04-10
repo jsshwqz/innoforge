@@ -15,6 +15,15 @@ pub async fn api_get_settings(State(s): State<AppState>) -> Json<serde_json::Val
         }
     }
 
+    let fallbacks: Vec<serde_json::Value> = config.ai_fallbacks.iter().map(|fb| {
+        json!({
+            "name": &fb.name,
+            "base_url": &fb.base_url,
+            "api_key": mask_api_key(&fb.api_key),
+            "model": &fb.model,
+        })
+    }).collect();
+
     Json(json!({
         "serpapi_key": mask_api_key(&config.serpapi_key),
         "serpapi_key_configured": config.has_serpapi(),
@@ -30,6 +39,7 @@ pub async fn api_get_settings(State(s): State<AppState>) -> Json<serde_json::Val
         "ai_api_key": mask_api_key(&config.ai_api_key),
         "ai_api_key_configured": !config.ai_api_key.is_empty(),
         "ai_model": config.ai_model,
+        "ai_fallbacks": fallbacks,
     }))
 }
 
