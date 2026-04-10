@@ -843,7 +843,7 @@ pub async fn api_idea_report_html(
     let analysis_html = if idea.analysis.is_empty() {
         "分析尚未完成".to_string()
     } else {
-        html_escape(&idea.analysis)
+        simple_md_to_html(&idea.analysis)
     };
     let score_display = idea
         .novelty_score
@@ -868,7 +868,7 @@ pub async fn api_idea_report_html(
   .card .score {{ font-size: 0.85em; color: #059669; }}
   .section {{ margin-top: 24px; }}
   .section h2 {{ color: #1e40af; }}
-  .analysis {{ white-space: pre-wrap; background: #f9fafb; padding: 16px; border-radius: 8px; }}
+  .analysis {{ background: #f9fafb; padding: 16px; border-radius: 8px; }}
   .print-btn {{ background: #2563eb; color: #fff; border: none; padding: 10px 24px; border-radius: 6px; cursor: pointer; font-size: 16px; }}
   @media print {{ .no-print {{ display: none; }} }}
 </style>
@@ -929,6 +929,98 @@ fn html_escape(s: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&#x27;")
+}
+
+/// 简易 Markdown → HTML（用于可打印报告，无需外部依赖）
+#[allow(unused_assignments)]
+fn simple_md_to_html(md: &str) -> String {
+    let mut out = String::with_capacity(md.len() * 2);
+    let mut in_table = false;
+    let mut table_header_done = false;
+
+    for line in md.lines() {
+        let trimmed = line.trim();
+
+        // Table rows
+        if trimmed.starts_with('|') && trimmed.ends_with('|') {
+            // Separator row (|---|---|)
+            if trimmed.chars().all(|c| c == '|' || c == '-' || c == ':' || c == ' ') {
+                if !in_table {
+                    in_table = true;
+                    table_header_done = false;
+                }
+                table_header_done = true;
+                continue;
+            }
+            if !in_table {
+                out.push_str("<table style='border-collapse:collapse;width:100%;margin:12px 0;'>");
+                in_table = true;
+                table_header_done = false;
+            }
+            let cells: Vec<&str> = trimmed.split('|')
+                .filter(|c| !c.is_empty())
+                .collect();
+            let tag = if !table_header_done { "th" } else { "td" };
+            let bg = if !table_header_done { "background:#eff6ff;" } else { "" };
+            out.push_str("<tr>");
+            for cell in cells {
+                out.push_str(&format!(
+                    "<{tag} style='border:1px solid #d1d5db;padding:6px 10px;{bg}'>{}</{tag}>",
+                    html_escape(cell.trim())
+                ));
+            }
+            out.push_str("</tr>");
+            if !table_header_done { table_header_done = true; }
+            continue;
+        }
+
+        // End table if we were in one
+        if in_table {
+            out.push_str("</table>");
+            in_table = false;
+            table_header_done = false;
+        }
+
+        if trimmed.is_empty() {
+            out.push_str("<br>");
+        } else if let Some(h) = trimmed.strip_prefix("### ") {
+            out.push_str(&format!("<h3 style='color:#1e40af;margin:16px 0 8px;'>{}</h3>", html_escape(h)));
+        } else if let Some(h) = trimmed.strip_prefix("## ") {
+            out.push_str(&format!("<h2 style='color:#1e40af;margin:20px 0 8px;'>{}</h2>", html_escape(h)));
+        } else if let Some(h) = trimmed.strip_prefix("# ") {
+            out.push_str(&format!("<h1 style='color:#1e40af;'>{}</h1>", html_escape(h)));
+        } else if let Some(item) = trimmed.strip_prefix("- ") {
+            out.push_str(&format!("<li style='margin:4px 0;'>{}</li>", inline_md(&html_escape(item))));
+        } else if trimmed.starts_with("1. ") || trimmed.starts_with("2. ") || trimmed.starts_with("3. ") {
+            if let Some(pos) = trimmed.find(". ") {
+                let item = &trimmed[pos + 2..];
+                out.push_str(&format!("<li style='margin:4px 0;'>{}</li>", inline_md(&html_escape(item))));
+            }
+        } else {
+            out.push_str(&format!("<p style='margin:6px 0;'>{}</p>", inline_md(&html_escape(trimmed))));
+        }
+    }
+
+    if in_table {
+        out.push_str("</table>");
+    }
+    out
+}
+
+/// 行内 Markdown: **bold**, *italic*, `code`
+fn inline_md(s: &str) -> String {
+    use std::borrow::Cow;
+    let s: Cow<str> = Cow::Borrowed(s);
+    // Bold
+    let re_bold = regex::Regex::new(r"\*\*(.+?)\*\*").unwrap();
+    let s = re_bold.replace_all(&s, "<strong>$1</strong>");
+    // Italic
+    let re_italic = regex::Regex::new(r"\*(.+?)\*").unwrap();
+    let s = re_italic.replace_all(&s, "<em>$1</em>");
+    // Inline code
+    let re_code = regex::Regex::new(r"`([^`]+)`").unwrap();
+    let s = re_code.replace_all(&s, "<code style='background:#f3f4f6;padding:1px 4px;border-radius:3px;'>$1</code>");
+    s.into_owned()
 }
 
 /// Generate a summary of the idea discussion
