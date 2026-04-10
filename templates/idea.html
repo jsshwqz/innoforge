@@ -89,7 +89,13 @@
         </div>
 
         <div class="idea-main">
-            <h2 style="margin-bottom: 6px;" data-i18n="idea.title"></h2>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                <h2 style="margin:0;" data-i18n="idea.title"></h2>
+                <div style="display:flex;gap:8px;">
+                    <a href="/" style="color:#8b949e;text-decoration:none;font-size:0.85em;padding:4px 10px;border:1px solid #30363d;border-radius:6px;">首页</a>
+                    <button onclick="showNewIdeaForm()" style="background:#238636;color:#fff;border:none;padding:4px 12px;border-radius:6px;font-size:0.85em;cursor:pointer;">+ 新建</button>
+                </div>
+            </div>
             <p class="hint" data-i18n="idea.hint"></p>
 
             <div class="idea-form" id="idea-form">
@@ -1304,6 +1310,16 @@
         currentIdeaId = null;
     }
 
+    function showNewIdeaForm() {
+        clearForm();
+        document.getElementById('idea-form').style.display = '';
+        document.getElementById('results-area').style.display = 'none';
+        var titleEl = document.getElementById('idea-title');
+        if (titleEl) titleEl.focus();
+        // Update URL without reload
+        window.history.pushState({}, '', '/idea');
+    }
+
     async function loadHistory() {
         try {
             const resp = await fetch('/api/idea/list');
@@ -1465,19 +1481,42 @@
             codeBlocks.push('<pre style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:10px;overflow-x:auto;font-size:0.85em;"><code>' + code.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</code></pre>');
             return '\x00CB' + (codeBlocks.length - 1) + '\x00';
         });
+        // 提取表格
+        var tables = [];
+        text = text.replace(/((?:^\|.+\|[ \t]*\n)+)/gm, function(block) {
+            var rows = block.trim().split('\n');
+            if (rows.length < 2) return block;
+            var html = '<table style="border-collapse:collapse;width:100%;margin:8px 0;font-size:0.9em;">';
+            rows.forEach(function(row, ri) {
+                if (row.replace(/[\|\-\s:]/g, '') === '') return; // skip separator row
+                var tag = ri === 0 ? 'th' : 'td';
+                var cells = row.split('|').filter(function(c, i, a) { return i > 0 && i < a.length - 1; });
+                html += '<tr>';
+                cells.forEach(function(c) {
+                    var st = 'border:1px solid #30363d;padding:6px 10px;' + (ri === 0 ? 'background:#161b22;color:#58a6ff;font-weight:600;' : '');
+                    html += '<' + tag + ' style="' + st + '">' + c.trim() + '</' + tag + '>';
+                });
+                html += '</tr>';
+            });
+            html += '</table>';
+            tables.push(html);
+            return '\x00TB' + (tables.length - 1) + '\x00';
+        });
         var result = text
             .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
             .replace(/^### (.+)$/gm, '<h3>$1</h3>')
             .replace(/^## (.+)$/gm, '<h3 style="font-size:1.1em">$1</h3>')
             .replace(/`([^`]+)`/g, '<code style="background:#21262d;padding:1px 5px;border-radius:3px;font-size:0.9em;">$1</code>')
             .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+            .replace(/\*(.+?)\*/g, '<em>$1</em>')
             .replace(/^\- (.+)$/gm, '<li>$1</li>')
             .replace(/^(\d+)\. (.+)$/gm, '<li>$2</li>')
             .replace(/\n{2,}/g, '</p><p>')
             .replace(/\n/g, '<br>')
             .replace(/^/, '<p>').replace(/$/, '</p>');
-        // 恢复代码块
+        // 恢复代码块和表格
         result = result.replace(/\x00CB(\d+)\x00/g, function(_, i) { return codeBlocks[parseInt(i)]; });
+        result = result.replace(/\x00TB(\d+)\x00/g, function(_, i) { return tables[parseInt(i)]; });
         return result;
     }
 
