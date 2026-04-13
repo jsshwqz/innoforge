@@ -272,41 +272,90 @@ pub async fn api_idea_chat(
     // Get previous messages for context
     let history = s.db.get_idea_messages(&idea_id).unwrap_or_default();
 
-    // === 智能上下文管理 ===
-    // 策略：超过 8 轮对话时，自动将旧消息压缩为总结，保留最近 6 轮 + 总结
-    // 这样既省 token 又不丢失关键信息
+    // === 渐进式分层摘要 ===
+    // 策略：每当消息超过阈值时，只压缩新增的旧消息为结构化片段，追加到已有摘要
+    // 当摘要累积超过 2000 字时，做二级压缩（多段合并为精华版）
     let auto_summary_threshold = 8; // 超过这个数触发自动总结
     let keep_recent = 6; // 保留最近 N 条消息
 
-    // 如果消息量超过阈值且没有现有总结，自动触发压缩
     let mut summary = s.db.get_idea_summary(&idea_id).unwrap_or_default();
-    if history.len() > auto_summary_threshold && summary.is_empty() {
-        // 取旧消息（除最近 keep_recent 条）进行压缩
+    if history.len() > auto_summary_threshold {
+        // 计算上次已压缩的消息数（从摘要中解析标记，或按 keep_recent 推算）
+        let compressed_count = if summary.is_empty() {
+            0
+        } else {
+            // 摘要中每个 【第 X-Y 轮】 标记记录了已压缩范围
+            // 简化：已压缩消息数 = 总消息数 - 当前窗口大小 - 新增未压缩数
+            // 用标记计数：摘要中 "【第" 出现的次数 × keep_recent 估算
+            let segment_count = summary.matches("【第").count();
+            segment_count * keep_recent
+        };
+
         let old_count = history.len() - keep_recent;
-        let old_messages: Vec<_> = history[..old_count].to_vec();
-        if !old_messages.is_empty() {
-            let mut conv_text = String::new();
-            for (_id, role, content, _ts) in &old_messages {
-                let label = if role == "user" { "用户" } else { "AI" };
-                conv_text.push_str(&format!("{}：{}\n\n", label, content));
-            }
-            let compress_prompt = format!(
-                "请将以下关于「{}」的研发讨论对话压缩为一段简洁的摘要，\
-                 保留所有关键技术结论、决策和未解决的问题：\n\n{}",
-                idea.title, conv_text
-            );
-            let ai_tmp = s
-                .config
-                .read()
-                .unwrap_or_else(|e| e.into_inner())
-                .ai_client();
-            if let Ok(compressed) = ai_tmp.chat(&compress_prompt, None).await {
-                let _ = s.db.update_idea_summary(&idea_id, &compressed);
-                summary = compressed;
-                tracing::info!(
-                    "[CHAT] Auto-compressed {} old messages into summary",
-                    old_count
+        // 只压缩 compressed_count 之后、keep_recent 之前的新增消息
+        if old_count > compressed_count {
+            let new_old_messages: Vec<_> = history[compressed_count..old_count].to_vec();
+            if !new_old_messages.is_empty() {
+                let mut conv_text = String::new();
+                for (_id, role, content, _ts) in &new_old_messages {
+                    let label = if role == "user" { "用户" } else { "AI" };
+                    conv_text.push_str(&format!("{}：{}\n\n", label, content));
+                }
+                let round_start = compressed_count + 1;
+                let round_end = old_count;
+                let compress_prompt = format!(
+                    "请将以下关于「{}」的研发讨论对话压缩为结构化摘要。\n\
+                     严格使用以下格式，每类最多 5 条：\n\n\
+                     - **决策**：已确定的技术方案或选择\n\
+                     - **结论**：经过讨论得出的技术判断\n\
+                     - **代码/参数**：讨论中提到的关键代码片段、公式或参数值\n\
+                     - **待定**：未解决的问题或需要进一步验证的事项\n\n\
+                     对话内容：\n{}",
+                    idea.title, conv_text
                 );
+                let ai_tmp = s
+                    .config
+                    .read()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .ai_client();
+                if let Ok(compressed) = ai_tmp.chat(&compress_prompt, None).await {
+                    // 追加新段到已有摘要（不覆盖）
+                    let new_segment = format!(
+                        "\n【第 {}-{} 轮摘要】\n{}",
+                        round_start, round_end, compressed
+                    );
+                    let updated_summary = format!("{}{}", summary, new_segment);
+
+                    // 二级压缩：摘要超过 2000 字时，合并为精华版
+                    let final_summary = if updated_summary.chars().count() > 2000 {
+                        let merge_prompt = format!(
+                            "以下是多段研发讨论摘要，请合并为一份精华版（不超过 1000 字）。\n\
+                             保留所有**决策**和**结论**，合并重复内容，删除已被推翻的旧决策：\n\n{}",
+                            updated_summary
+                        );
+                        if let Ok(merged) = ai_tmp.chat(&merge_prompt, None).await {
+                            tracing::info!(
+                                "[CHAT] L2 merge: {} chars → {} chars",
+                                updated_summary.chars().count(),
+                                merged.chars().count()
+                            );
+                            format!("【精华摘要（截至第 {} 轮）】\n{}", round_end, merged)
+                        } else {
+                            updated_summary
+                        }
+                    } else {
+                        updated_summary
+                    };
+
+                    let _ = s.db.update_idea_summary(&idea_id, &final_summary);
+                    summary = final_summary;
+                    tracing::info!(
+                        "[CHAT] Incremental compress: rounds {}-{} ({} messages)",
+                        round_start,
+                        round_end,
+                        new_old_messages.len()
+                    );
+                }
             }
         }
     }

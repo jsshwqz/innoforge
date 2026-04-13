@@ -129,7 +129,7 @@ fn estimate_tokens(s: &str) -> usize {
 }
 
 /// When history is too long, summarize early messages via AI and combine with recent ones.
-/// Returns (condensed_history, whether summarization was applied).
+/// Uses structured compression to preserve key decisions, conclusions, and parameters.
 async fn compress_history(
     ai: &crate::ai::AiClient,
     history: Vec<(String, String)>,
@@ -152,21 +152,29 @@ async fn compress_history(
         old_text.push_str(&format!("{}：{}\n", label, content));
     }
 
-    // Ask AI to compress — use a short, focused prompt
-    let summary = ai.chat(
-        &format!(
-            "请将以下对话历史压缩为一段简洁的摘要（保留所有关键信息、结论、数据和用户偏好，不超过500字）：\n\n{}",
-            old_text
-        ),
-        None,
-    ).await;
+    // Structured compression prompt — preserves decisions and technical details
+    let summary = ai
+        .chat(
+            &format!(
+                "请将以下对话历史压缩为结构化摘要（不超过 800 字）。\n\
+                 严格使用以下格式，每类最多 5 条：\n\n\
+                 - **决策**：已确定的技术方案或选择\n\
+                 - **结论**：经过讨论得出的技术判断\n\
+                 - **代码/参数**：讨论中提到的关键代码片段、公式或参数值\n\
+                 - **待定**：未解决的问题或需要进一步验证的事项\n\n\
+                 对话内容：\n{}",
+                old_text
+            ),
+            None,
+        )
+        .await;
 
     match summary {
         Ok(summary_text) => {
             let mut result = Vec::with_capacity(1 + recent_part.len());
             result.push((
                 "system".to_string(),
-                format!("【前期对话摘要】{}", summary_text),
+                format!("【前期对话摘要】\n{}", summary_text),
             ));
             result.extend_from_slice(recent_part);
             result
