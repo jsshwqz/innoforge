@@ -7,7 +7,7 @@ target/
 .skill-router/
 Cargo.lock
 mcp_stderr.txt
-docs/plans/
+# docs/plans/ — 版本规划文档需要入库，不再忽略
 *.zip
 node_modules
 package-lock.json
