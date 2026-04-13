@@ -223,29 +223,45 @@ pub async fn api_search_online(
     // 搜索区域判定：用户明确选择 > 自动检测
     let query_trimmed = req.query.trim();
     let looks_like_cn_patent_number = {
-        let digits_only: String = query_trimmed.chars().filter(|c| c.is_ascii_digit()).collect();
-        digits_only.len() >= 10 && digits_only.len() <= 15
-            && query_trimmed.chars().all(|c| c.is_ascii_digit() || c == '.')
+        let digits_only: String = query_trimmed
+            .chars()
+            .filter(|c| c.is_ascii_digit())
+            .collect();
+        digits_only.len() >= 10
+            && digits_only.len() <= 15
+            && query_trimmed
+                .chars()
+                .all(|c| c.is_ascii_digit() || c == '.')
     };
     let auto_cn = matches!(req.country.as_deref(), Some("CN"))
         || query_trimmed.starts_with("CN")
         || query_trimmed.starts_with("ZL")
         || looks_like_cn_patent_number
-        || query_trimmed.chars().any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c));
+        || query_trimmed
+            .chars()
+            .any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c));
 
     let is_cn_query = match req.region.as_deref() {
-        Some("cn") => true,              // 用户明确选国内
-        Some("intl") => false,           // 用户明确选国外
-        _ => auto_cn,                     // 自动检测
+        Some("cn") => true,    // 用户明确选国内
+        Some("intl") => false, // 用户明确选国外
+        _ => auto_cn,          // 自动检测
     };
     let is_intl_query = match req.region.as_deref() {
         Some("intl") => true,
         Some("cn") => false,
         _ => !auto_cn,
     };
-    println!("[ONLINE] region resolve: is_cn={} is_intl={}", is_cn_query, is_intl_query);
+    println!(
+        "[ONLINE] region resolve: is_cn={} is_intl={}",
+        is_cn_query, is_intl_query
+    );
 
-    if is_cn_query && s.config.read().unwrap_or_else(|e| e.into_inner()).has_cnipr() {
+    if is_cn_query
+        && s.config
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .has_cnipr()
+    {
         println!("[ONLINE] Using CNIPR (国知局) for Chinese patent search");
         match search_cnipr(&req.query, &s.config, req.page).await {
             Ok((patents, total)) if !patents.is_empty() => {
@@ -294,7 +310,12 @@ pub async fn api_search_online(
     }
 
     // ── 精确专利号查询：当检测为 PatentNumber 时，先尝试 SerpAPI Details 精确抓取 ──
-    let api_key = s.config.read().unwrap_or_else(|e| e.into_inner()).serpapi_key.clone();
+    let api_key = s
+        .config
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .serpapi_key
+        .clone();
     if matches!(online_search_type.as_ref(), Some(SearchType::PatentNumber))
         && !api_key.is_empty()
         && api_key != "your-serpapi-key-here"
@@ -464,7 +485,12 @@ pub async fn api_search_online(
     }
 
     // Fallback 3: Lens.org patent search (国内可用，无需 VPN)
-    let lens_key = s.config.read().unwrap_or_else(|e| e.into_inner()).lens_api_key.clone();
+    let lens_key = s
+        .config
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .lens_api_key
+        .clone();
     if !lens_key.is_empty() {
         println!("[ONLINE] Trying Lens.org patent search (国内可用)...");
         let search_query = build_online_query(
@@ -531,49 +557,76 @@ pub async fn api_search_online(
             if let Ok(json) = resp.json::<serde_json::Value>().await {
                 if let Some(results) = json["organic_results"].as_array() {
                     if !results.is_empty() {
-                        let query_clean = req.query.replace('.', "").replace('-', "");
+                        let query_clean = req.query.replace(['.', '-'], "");
                         // 专利相关域名白名单，过滤掉不相关的网页
                         let patent_domains = [
-                            "tianyancha.com", "soopat.com", "patents.google.com", "cnipa.gov.cn",
-                            "baiten.cn", "patent9.com", "xueshu.baidu.com", "epub.cnipa.gov.cn",
-                            "pss-system.cponline.cnipa.gov.cn", "zhuanli.", "patent",
+                            "tianyancha.com",
+                            "soopat.com",
+                            "patents.google.com",
+                            "cnipa.gov.cn",
+                            "baiten.cn",
+                            "patent9.com",
+                            "xueshu.baidu.com",
+                            "epub.cnipa.gov.cn",
+                            "pss-system.cponline.cnipa.gov.cn",
+                            "zhuanli.",
+                            "patent",
                         ];
-                        let filtered: Vec<&serde_json::Value> = results.iter().filter(|r| {
-                            let link = r["link"].as_str().unwrap_or("");
-                            let title = r["title"].as_str().unwrap_or("");
-                            let snippet = r["snippet"].as_str().unwrap_or("");
-                            let all = format!("{} {} {}", link, title, snippet);
-                            // 保留：来自专利网站 OR 包含查询号 OR 标题含"专利"
-                            patent_domains.iter().any(|d| link.contains(d))
-                                || all.contains(&req.query) || all.contains(&query_clean)
-                                || title.contains("专利") || title.contains("patent")
-                        }).collect();
+                        let filtered: Vec<&serde_json::Value> = results
+                            .iter()
+                            .filter(|r| {
+                                let link = r["link"].as_str().unwrap_or("");
+                                let title = r["title"].as_str().unwrap_or("");
+                                let snippet = r["snippet"].as_str().unwrap_or("");
+                                let all = format!("{} {} {}", link, title, snippet);
+                                // 保留：来自专利网站 OR 包含查询号 OR 标题含"专利"
+                                patent_domains.iter().any(|d| link.contains(d))
+                                    || all.contains(&req.query)
+                                    || all.contains(&query_clean)
+                                    || title.contains("专利")
+                                    || title.contains("patent")
+                            })
+                            .collect();
 
-                        let source_results = if filtered.is_empty() { results.iter().collect::<Vec<_>>() } else { filtered };
-                        let mut patents: Vec<PatentSummary> = source_results.iter().take(15).map(|r| {
-                            let title = r["title"].as_str().unwrap_or("").to_string();
-                            let snippet = r["snippet"].as_str().unwrap_or("").to_string();
-                            let link = r["link"].as_str().unwrap_or("").to_string();
-                            let patent_number = extract_cn_patent_number(&title, &snippet, &link);
-                            // 精确匹配查询号的排前面
-                            let all_text = format!("{} {} {}", title, snippet, link);
-                            let exact_match = all_text.contains(&req.query) || all_text.contains(&query_clean);
-                            let score = if exact_match { 95.0 } else { 30.0 };
-                            PatentSummary {
-                                id: uuid::Uuid::new_v4().to_string(),
-                                patent_number,
-                                title: clean_html_tags(&title),
-                                abstract_text: clean_html_tags(&snippet),
-                                applicant: String::new(),
-                                inventor: String::new(),
-                                filing_date: String::new(),
-                                country: "CN".to_string(),
-                                relevance_score: Some(score),
-                                score_source: Some("serpapi_baidu".to_string()),
-                            }
-                        }).collect();
+                        let source_results = if filtered.is_empty() {
+                            results.iter().collect::<Vec<_>>()
+                        } else {
+                            filtered
+                        };
+                        let mut patents: Vec<PatentSummary> = source_results
+                            .iter()
+                            .take(15)
+                            .map(|r| {
+                                let title = r["title"].as_str().unwrap_or("").to_string();
+                                let snippet = r["snippet"].as_str().unwrap_or("").to_string();
+                                let link = r["link"].as_str().unwrap_or("").to_string();
+                                let patent_number =
+                                    extract_cn_patent_number(&title, &snippet, &link);
+                                // 精确匹配查询号的排前面
+                                let all_text = format!("{} {} {}", title, snippet, link);
+                                let exact_match = all_text.contains(&req.query)
+                                    || all_text.contains(&query_clean);
+                                let score = if exact_match { 95.0 } else { 30.0 };
+                                PatentSummary {
+                                    id: uuid::Uuid::new_v4().to_string(),
+                                    patent_number,
+                                    title: clean_html_tags(&title),
+                                    abstract_text: clean_html_tags(&snippet),
+                                    applicant: String::new(),
+                                    inventor: String::new(),
+                                    filing_date: String::new(),
+                                    country: "CN".to_string(),
+                                    relevance_score: Some(score),
+                                    score_source: Some("serpapi_baidu".to_string()),
+                                }
+                            })
+                            .collect();
                         // 按相关度排序：精确匹配排前
-                        patents.sort_by(|a, b| b.relevance_score.partial_cmp(&a.relevance_score).unwrap_or(std::cmp::Ordering::Equal));
+                        patents.sort_by(|a, b| {
+                            b.relevance_score
+                                .partial_cmp(&a.relevance_score)
+                                .unwrap_or(std::cmp::Ordering::Equal)
+                        });
                         println!("[ONLINE] SerpAPI Baidu found {} results", patents.len());
                         return Json(json!({
                             "patents": patents,
@@ -616,13 +669,20 @@ pub async fn api_search_online(
                     score_source: Some("sogou_free".to_string()),
                 })
                 .collect();
-            let has_cnipr = s.config.read().unwrap_or_else(|e| e.into_inner()).has_cnipr();
+            let has_cnipr = s
+                .config
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .has_cnipr();
             let hint = if is_cn_query && has_cnipr {
                 Some("CNIPR 国知局授权已失效，当前降级为搜狗搜索。请到 open.cnipr.com 检查应用授权。".to_string())
             } else if is_cn_query {
                 Some("未配置 CNIPR 国知局。到「设置」配置可获得更完整的中国专利搜索。".to_string())
             } else {
-                Some("当前使用搜狗免费搜索。到「设置」配置 SerpAPI Key 可获得更专业的专利搜索。".to_string())
+                Some(
+                    "当前使用搜狗免费搜索。到「设置」配置 SerpAPI Key 可获得更专业的专利搜索。"
+                        .to_string(),
+                )
             };
             return Json(json!({
                 "patents": patents,
@@ -1370,7 +1430,10 @@ async fn cnipr_login(
     }
 
     println!("[CNIPR] Logging in as {}...", user);
-    let client = reqwest::Client::builder().no_proxy().build().unwrap_or_else(|_| reqwest::Client::new());
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
     let resp = client
         .post("https://open.cnipr.com/oauth/json/user/login")
         .form(&[
@@ -1423,14 +1486,16 @@ pub async fn search_cnipr(
     config: &std::sync::Arc<std::sync::RwLock<super::AppConfig>>,
     page: usize,
 ) -> anyhow::Result<(Vec<PatentSummary>, usize)> {
-    let (access_token, open_id, client_id) =
-        cnipr_login(config).await.ok_or_else(|| anyhow::anyhow!("CNIPR login failed"))?;
+    let (access_token, open_id, client_id) = cnipr_login(config)
+        .await
+        .ok_or_else(|| anyhow::anyhow!("CNIPR login failed"))?;
 
     let from = if page > 1 { (page - 1) * 10 } else { 0 };
 
     // Build search expression
     let query_clean = query.trim().replace('.', "");
-    let is_number = query.starts_with("CN") || query.starts_with("ZL")
+    let is_number = query.starts_with("CN")
+        || query.starts_with("ZL")
         || query_clean.chars().all(|c| c.is_ascii_digit());
     let exp = if is_number {
         // 同时搜 公开号 和 申请号（用户可能输入任一种）
@@ -1471,7 +1536,10 @@ pub async fn search_cnipr(
 
     println!("[CNIPR] Search exp='{}' from={}", exp, from);
 
-    let client = reqwest::Client::builder().no_proxy().build().unwrap_or_else(|_| reqwest::Client::new());
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
     let resp = client
         .post(&url)
         .form(&[
@@ -1551,7 +1619,8 @@ pub async fn search_cnipr(
 
             // Compute relevance score
             let position_score = (98.0 - idx as f64 * 3.0).max(30.0);
-            let content_score = calculate_online_relevance(query, &title, &abstract_text, &applicant);
+            let content_score =
+                calculate_online_relevance(query, &title, &abstract_text, &applicant);
             let score = (position_score * 0.3 + content_score * 0.7).min(100.0);
 
             // Append legal status to abstract for display
@@ -1583,11 +1652,17 @@ pub async fn search_cnipr(
 fn extract_cn_patent_number(title: &str, snippet: &str, link: &str) -> String {
     let all_text = format!("{} {} {}", title, snippet, link);
     // 匹配 CN + 数字 + 字母 格式（如 CN116401354A）
-    if let Some(m) = regex::Regex::new(r"CN\d{6,}[A-Z]?").ok().and_then(|re| re.find(&all_text)) {
+    if let Some(m) = regex::Regex::new(r"CN\d{6,}[A-Z]?")
+        .ok()
+        .and_then(|re| re.find(&all_text))
+    {
         return m.as_str().to_string();
     }
     // 匹配纯数字申请号（12-13位）
-    if let Some(m) = regex::Regex::new(r"\d{12,13}\.\d").ok().and_then(|re| re.find(&all_text)) {
+    if let Some(m) = regex::Regex::new(r"\d{12,13}\.\d")
+        .ok()
+        .and_then(|re| re.find(&all_text))
+    {
         return m.as_str().to_string();
     }
     String::new()
@@ -1595,7 +1670,10 @@ fn extract_cn_patent_number(title: &str, snippet: &str, link: &str) -> String {
 
 /// 清理 HTML 标签（百度搜索结果含 <em> 等标签）
 fn clean_html_tags(s: &str) -> String {
-    regex::Regex::new(r"<[^>]+>").unwrap().replace_all(s, "").to_string()
+    regex::Regex::new(r"<[^>]+>")
+        .unwrap()
+        .replace_all(s, "")
+        .to_string()
 }
 
 /// 精确专利号查询：通过 SerpAPI 按专利号精确抓取
@@ -1620,8 +1698,12 @@ async fn try_exact_patent_lookup(
         && digits.len() <= 15
         && q.chars().all(|c| c.is_ascii_digit() || c == '.');
 
-    if q.starts_with("CN") || q.starts_with("US") || q.starts_with("EP")
-        || q.starts_with("WO") || q.starts_with("JP") || q.starts_with("KR")
+    if q.starts_with("CN")
+        || q.starts_with("US")
+        || q.starts_with("EP")
+        || q.starts_with("WO")
+        || q.starts_with("JP")
+        || q.starts_with("KR")
     {
         // Already has country prefix — likely a publication number, try directly
         let no_dot = q.replace('.', "");
@@ -1632,11 +1714,14 @@ async fn try_exact_patent_lookup(
         // Google Patents indexes by PUBLICATION number, not application number.
         // We must first search to discover the publication number.
         let core = if digits.len() >= 13 {
-            &digits[..digits.len() - 1]  // strip check digit
+            &digits[..digits.len() - 1] // strip check digit
         } else {
             &digits
         };
-        println!("[EXACT] Bare CN app number detected, searching for publication number via '{}'", core);
+        println!(
+            "[EXACT] Bare CN app number detected, searching for publication number via '{}'",
+            core
+        );
 
         let search_url = format!(
             "https://serpapi.com/search.json?engine=google_patents&q={}&page=1&api_key={}",
@@ -1701,11 +1786,21 @@ async fn try_exact_patent_lookup(
     // Extract inventors/assignees from arrays
     let inventor = json["inventors"]
         .as_array()
-        .map(|arr| arr.iter().filter_map(|v| v["name"].as_str()).collect::<Vec<_>>().join("; "))
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v["name"].as_str())
+                .collect::<Vec<_>>()
+                .join("; ")
+        })
         .unwrap_or_default();
     let assignee = json["assignees"]
         .as_array()
-        .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join("; "))
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str())
+                .collect::<Vec<_>>()
+                .join("; ")
+        })
         .unwrap_or_default();
 
     let pub_number = json["publication_number"].as_str().unwrap_or(q).to_string();
@@ -1718,7 +1813,12 @@ async fn try_exact_patent_lookup(
         description: json["description"].as_str().unwrap_or("").to_string(),
         claims: json["claims"]
             .as_array()
-            .map(|a| a.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join("\n\n"))
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n\n")
+            })
             .unwrap_or_default(),
         applicant: assignee.clone(),
         inventor: inventor.clone(),
@@ -1757,7 +1857,10 @@ async fn try_exact_patent_lookup(
         score_source: Some("exact_lookup".to_string()),
     };
 
-    println!("[EXACT] Found patent: {} — {}", summary.patent_number, summary.title);
+    println!(
+        "[EXACT] Found patent: {} — {}",
+        summary.patent_number, summary.title
+    );
     Some(serde_json::json!({
         "patents": [summary],
         "total": 1,

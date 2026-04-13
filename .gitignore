@@ -33,6 +33,13 @@ image_*.png
 *.log
 docs/self-review/
 
+# AI 生成的报告和临时产物 / AI-generated reports and temp artifacts
+辩论报告*.md
+辩论报告*.txt
+ocr_result.json
+test_*.png
+test_*.pdf
+
 # 已拆出的独立项目 / Separated into standalone repos
 skills/
 innoforge-skill/

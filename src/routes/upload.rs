@@ -20,7 +20,9 @@ pub async fn api_upload_pdf_store(
             match field.bytes().await {
                 Ok(data) => {
                     if data.len() > MAX_PDF_STORE_SIZE {
-                        return Json(json!({"status": "error", "message": "文件大小超过 20MB 限制"}));
+                        return Json(
+                            json!({"status": "error", "message": "文件大小超过 20MB 限制"}),
+                        );
                     }
                     file_bytes = data.to_vec();
                 }
@@ -111,7 +113,11 @@ pub async fn api_upload_compare(
 
     let file_content = if is_image {
         // For images, use AI vision to describe the content
-        let ai_client = s.config.read().unwrap_or_else(|e| e.into_inner()).ai_client();
+        let ai_client = s
+            .config
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .ai_client();
         match describe_image_with_ai(&ai_client, &file_bytes, &ext).await {
             Ok(description) => description,
             Err(e) => return Json(json!({"error": format!("图片识别失败: {}", e)})),
@@ -124,10 +130,16 @@ pub async fn api_upload_compare(
         } else {
             // 文字提取失败，用 AI 视觉模型兜底
             tracing::info!("[UPLOAD] PDF 文字提取失败，尝试 AI 视觉识别...");
-            let ai_client = s.config.read().unwrap_or_else(|e| e.into_inner()).ai_client();
+            let ai_client = s
+                .config
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .ai_client();
             match extract_pdf_via_ai_vision(&file_bytes, &ai_client).await {
                 Ok(t) => t,
-                Err(e) => return Json(json!({"error": format!("PDF 提取失败（含 AI 视觉兜底）: {}", e)})),
+                Err(e) => {
+                    return Json(json!({"error": format!("PDF 提取失败（含 AI 视觉兜底）: {}", e)}))
+                }
             }
         }
     } else if ext == "docx" {
@@ -162,7 +174,11 @@ pub async fn api_upload_compare(
         return Json(json!({"error": "文件内容为空"}));
     }
 
-    let ai_client = s.config.read().unwrap_or_else(|e| e.into_inner()).ai_client();
+    let ai_client = s
+        .config
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .ai_client();
 
     let file_type_label = if is_image {
         "图片识别内容"
@@ -227,10 +243,17 @@ pub async fn api_upload_extract(
     }
 
     let ext = file_name.rsplit('.').next().unwrap_or("").to_lowercase();
-    let is_image = matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp");
+    let is_image = matches!(
+        ext.as_str(),
+        "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp"
+    );
 
     let text = if is_image {
-        let ai_client = s.config.read().unwrap_or_else(|e| e.into_inner()).ai_client();
+        let ai_client = s
+            .config
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .ai_client();
         match describe_image_with_ai(&ai_client, &file_bytes, &ext).await {
             Ok(desc) => desc,
             Err(e) => return Json(json!({"error": format!("图片识别失败: {}", e)})),
@@ -243,10 +266,16 @@ pub async fn api_upload_extract(
         } else {
             // 文字提取失败，用 AI 视觉模型兜底
             tracing::info!("[UPLOAD] PDF 文字提取失败，尝试 AI 视觉识别...");
-            let ai_client = s.config.read().unwrap_or_else(|e| e.into_inner()).ai_client();
+            let ai_client = s
+                .config
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .ai_client();
             match extract_pdf_via_ai_vision(&file_bytes, &ai_client).await {
                 Ok(t) => t,
-                Err(e) => return Json(json!({"error": format!("PDF 提取失败（含 AI 视觉兜底）: {}", e)})),
+                Err(e) => {
+                    return Json(json!({"error": format!("PDF 提取失败（含 AI 视觉兜底）: {}", e)}))
+                }
             }
         }
     } else if ext == "docx" {
@@ -293,22 +322,20 @@ async fn extract_pdf_via_ai_vision(
     let out_prefix_str = out_prefix.to_string_lossy().to_string();
 
     // Write PDF to temp file
-    let mut f = std::fs::File::create(&tmp_pdf)
-        .map_err(|e| format!("创建临时文件失败: {}", e))?;
+    let mut f = std::fs::File::create(&tmp_pdf).map_err(|e| format!("创建临时文件失败: {}", e))?;
     f.write_all(data)
         .map_err(|e| format!("写入临时文件失败: {}", e))?;
     drop(f);
 
     // Convert PDF pages to PNG using PyMuPDF (max 10 pages)
     let python = r"C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe";
-    let script = format!(
-        "import fitz,sys\n\
+    let script = "import fitz,sys\n\
          doc=fitz.open(sys.argv[1])\n\
          n=min(len(doc),10)\n\
          for i in range(n):\n\
-             doc[i].get_pixmap(dpi=200).save(f'{{sys.argv[2]}}_{{i}}.png')\n\
-         print(n)",
-    );
+             doc[i].get_pixmap(dpi=200).save(f'{sys.argv[2]}_{i}.png')\n\
+         print(n)"
+        .to_string();
 
     let output = std::process::Command::new(python)
         .args(["-c", &script, &tmp_pdf_str, &out_prefix_str])
@@ -317,15 +344,16 @@ async fn extract_pdf_via_ai_vision(
     let _ = std::fs::remove_file(&tmp_pdf);
 
     let page_count: usize = match output {
-        Ok(o) if o.status.success() => {
-            String::from_utf8_lossy(&o.stdout)
-                .trim()
-                .parse()
-                .unwrap_or(0)
-        }
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout)
+            .trim()
+            .parse()
+            .unwrap_or(0),
         Ok(o) => {
             let stderr = String::from_utf8_lossy(&o.stderr);
-            return Err(format!("PDF 转图片失败: {}", stderr.chars().take(200).collect::<String>()));
+            return Err(format!(
+                "PDF 转图片失败: {}",
+                stderr.chars().take(200).collect::<String>()
+            ));
         }
         Err(e) => return Err(format!("无法调用 Python: {}", e)),
     };
@@ -397,16 +425,13 @@ fn extract_pdf_text_pymupdf(data: &[u8]) -> Result<String, String> {
     let tmp_str = tmp_path.to_string_lossy().to_string();
 
     // Write PDF bytes to temp file
-    let mut f = std::fs::File::create(&tmp_path)
-        .map_err(|e| format!("创建临时文件失败: {}", e))?;
+    let mut f = std::fs::File::create(&tmp_path).map_err(|e| format!("创建临时文件失败: {}", e))?;
     f.write_all(data)
         .map_err(|e| format!("写入临时文件失败: {}", e))?;
     drop(f);
 
     let python = r"C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe";
-    let script = format!(
-        "import fitz,sys\nsys.stdout.reconfigure(encoding='utf-8')\ndoc=fitz.open(sys.argv[1])\nfor p in doc:\n print(p.get_text())",
-    );
+    let script = "import fitz,sys\nsys.stdout.reconfigure(encoding='utf-8')\ndoc=fitz.open(sys.argv[1])\nfor p in doc:\n print(p.get_text())".to_string();
 
     let output = std::process::Command::new(python)
         .args(["-c", &script, &tmp_str])
@@ -436,8 +461,7 @@ fn extract_pdf_text_ocr(data: &[u8]) -> Result<String, String> {
     let tmp_path = tmp_dir.join(format!("innoforge_ocr_{}.pdf", std::process::id()));
     let tmp_str = tmp_path.to_string_lossy().to_string();
 
-    let mut f = std::fs::File::create(&tmp_path)
-        .map_err(|e| format!("创建临时文件失败: {}", e))?;
+    let mut f = std::fs::File::create(&tmp_path).map_err(|e| format!("创建临时文件失败: {}", e))?;
     f.write_all(data)
         .map_err(|e| format!("写入临时文件失败: {}", e))?;
     drop(f);
@@ -476,7 +500,10 @@ for page in doc:
         }
         Ok(o) => {
             let stderr = String::from_utf8_lossy(&o.stderr);
-            Err(format!("OCR 失败: {}", stderr.chars().take(200).collect::<String>()))
+            Err(format!(
+                "OCR 失败: {}",
+                stderr.chars().take(200).collect::<String>()
+            ))
         }
         Err(e) => Err(format!("无法调用 Python OCR: {}", e)),
     }

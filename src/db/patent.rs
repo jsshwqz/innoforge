@@ -1,7 +1,7 @@
+use super::relevance::{calculate_field_relevance, calculate_mixed_relevance, is_likely_name};
+use crate::patent::{Patent, PatentSummary, SearchType};
 use anyhow::Result;
 use rusqlite::{params, OptionalExtension};
-use crate::patent::{Patent, PatentSummary, SearchType};
-use super::relevance::{calculate_field_relevance, calculate_mixed_relevance, is_likely_name};
 
 impl super::Database {
     pub fn insert_patent(&self, p: &Patent) -> Result<()> {
@@ -49,9 +49,7 @@ impl super::Database {
             }
             // Pure digits (7+) or digit.digit application number format (e.g. 202310123456.7)
             let digits_only: String = q.chars().filter(|c| c.is_ascii_digit()).collect();
-            if digits_only.len() >= 7
-                && q.chars().all(|c| c.is_ascii_digit() || c == '.')
-            {
+            if digits_only.len() >= 7 && q.chars().all(|c| c.is_ascii_digit() || c == '.') {
                 return SearchType::PatentNumber;
             }
         }
@@ -164,7 +162,7 @@ impl super::Database {
         let c = self.conn();
         let offset = page.saturating_sub(1) * page_size;
         // Strip spaces and dots for flexible matching (e.g. 202310123456.7 → 2023101234567)
-        let q_clean = query.replace(' ', "").replace('.', "");
+        let q_clean = query.replace([' ', '.'], "");
         // Also strip CN/ZL prefix to match against bare numbers in patent_number field
         let q_digits: String = q_clean.chars().filter(|c| c.is_ascii_digit()).collect();
         let q_with_prefix = format!("%{}%", query.replace(' ', ""));
@@ -181,7 +179,10 @@ impl super::Database {
              AND (?2 = '' OR filing_date >= ?2)
              AND (?3 = '' OR filing_date <= ?3)",
             )?
-            .query_row(params![q_with_prefix, date_from, date_to, q_digits_like], |r| r.get(0))?;
+            .query_row(
+                params![q_with_prefix, date_from, date_to, q_digits_like],
+                |r| r.get(0),
+            )?;
 
         let mut stmt = c.prepare(
             "SELECT id,patent_number,title,abstract_text,applicant,inventor,filing_date,country
@@ -194,7 +195,14 @@ impl super::Database {
         )?;
         let rows = stmt
             .query_map(
-                params![q_with_prefix, date_from, date_to, q_digits_like, page_size as i64, offset as i64],
+                params![
+                    q_with_prefix,
+                    date_from,
+                    date_to,
+                    q_digits_like,
+                    page_size as i64,
+                    offset as i64
+                ],
                 |r| {
                     Ok(PatentSummary {
                         id: r.get(0)?,
@@ -576,7 +584,11 @@ impl super::Database {
     }
 
     /// 更新专利的法律状态 / Update patent legal status
-    pub fn update_patent_legal_status(&self, patent_number: &str, legal_status: &str) -> Result<()> {
+    pub fn update_patent_legal_status(
+        &self,
+        patent_number: &str,
+        legal_status: &str,
+    ) -> Result<()> {
         let c = self.conn();
         c.execute(
             "UPDATE patents SET legal_status = ?1 WHERE patent_number = ?2",

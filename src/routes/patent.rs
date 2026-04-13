@@ -38,18 +38,31 @@ pub async fn api_enrich_patent(
     let has_images = patent.images.len() > 5;
     let is_cn = patent.country == "CN" || patent.patent_number.starts_with("CN");
     // For CN patents, force re-fetch if existing content has no CJK characters (was fetched in English)
-    let cn_needs_refetch = is_cn && patent.claims.len() > 50
-        && !patent.claims.chars().any(|c| c >= '\u{4e00}' && c <= '\u{9fff}');
+    let cn_needs_refetch = is_cn
+        && patent.claims.len() > 50
+        && !patent
+            .claims
+            .chars()
+            .any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c));
     if patent.claims.len() > 50 && has_images && !cn_needs_refetch {
         return Json(json!({"status":"ok","message":"Already enriched","patent":patent}));
     }
 
-    let api_key = s.config.read().unwrap_or_else(|e| e.into_inner()).serpapi_key.clone();
+    let api_key = s
+        .config
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .serpapi_key
+        .clone();
     if api_key.is_empty() {
         return Json(json!({"status":"error","message":"SERPAPI_KEY not configured"}));
     }
 
-    let lang = if patent.country == "CN" || patent.patent_number.starts_with("CN") { "zh" } else { "en" };
+    let lang = if patent.country == "CN" || patent.patent_number.starts_with("CN") {
+        "zh"
+    } else {
+        "en"
+    };
     let patent_id_param = format!("patent/{}/{}", patent.patent_number, lang);
     let url = format!(
         "https://serpapi.com/search.json?engine=google_patents_details&patent_id={}&api_key={}",
@@ -200,8 +213,12 @@ pub async fn api_enrich_patent_free(
     };
     // Already has full text — but for CN patents, re-fetch if content is in English
     let is_cn = patent.country == "CN" || patent.patent_number.starts_with("CN");
-    let cn_needs_refetch = is_cn && patent.claims.len() > 50
-        && !patent.claims.chars().any(|c| c >= '\u{4e00}' && c <= '\u{9fff}');
+    let cn_needs_refetch = is_cn
+        && patent.claims.len() > 50
+        && !patent
+            .claims
+            .chars()
+            .any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c));
     if patent.description.len() > 50 && patent.claims.len() > 50 && !cn_needs_refetch {
         return Json(json!({"status":"ok","message":"Already enriched","patent":patent}));
     }
@@ -549,7 +566,12 @@ pub async fn api_patent_pdf(
             patent.patent_number
         );
         // Try SerpAPI enrich
-        let api_key = s.config.read().unwrap_or_else(|e| e.into_inner()).serpapi_key.clone();
+        let api_key = s
+            .config
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .serpapi_key
+            .clone();
         if !api_key.is_empty() {
             let lang = if patent.country == "CN" || patent.patent_number.starts_with("CN") {
                 "zh"
@@ -839,7 +861,8 @@ pub async fn api_patent_legal_status(
                     .map(|e| format!("{} ({})", e.title, e.date))
                     .collect::<Vec<_>>()
                     .join("; ");
-                let _ = s.db.update_patent_legal_status(&patent_number, &status_text);
+                let _ =
+                    s.db.update_patent_legal_status(&patent_number, &status_text);
             }
             Json(json!({"status": "ok", "result": result}))
         }
@@ -890,7 +913,11 @@ async fn fetch_legal_from_google_patents(
     patent_number: &str,
     config: &Arc<RwLock<super::AppConfig>>,
 ) -> anyhow::Result<LegalStatusResult> {
-    let serpapi_key = config.read().unwrap_or_else(|e| e.into_inner()).serpapi_key.clone();
+    let serpapi_key = config
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .serpapi_key
+        .clone();
     if serpapi_key.is_empty() {
         return Err(anyhow::anyhow!("SerpAPI key not configured"));
     }
@@ -945,7 +972,11 @@ async fn fetch_legal_from_lens(
     patent_number: &str,
     config: &Arc<RwLock<super::AppConfig>>,
 ) -> anyhow::Result<LegalStatusResult> {
-    let lens_key = config.read().unwrap_or_else(|e| e.into_inner()).lens_api_key.clone();
+    let lens_key = config
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .lens_api_key
+        .clone();
     if lens_key.is_empty() {
         return Err(anyhow::anyhow!("Lens.org key not configured"));
     }
@@ -1032,9 +1063,24 @@ async fn fetch_legal_from_sogou(patent_number: &str) -> anyhow::Result<LegalStat
 
     // 从搜索结果摘要中提取法律状态关键词
     let status_keywords = [
-        "授权", "有效", "无效", "驳回", "撤回", "实审", "公开",
-        "审查中", "失效", "届满", "缴费", "转让", "许可",
-        "Grant", "Active", "Expired", "Rejected", "Withdrawn",
+        "授权",
+        "有效",
+        "无效",
+        "驳回",
+        "撤回",
+        "实审",
+        "公开",
+        "审查中",
+        "失效",
+        "届满",
+        "缴费",
+        "转让",
+        "许可",
+        "Grant",
+        "Active",
+        "Expired",
+        "Rejected",
+        "Withdrawn",
     ];
 
     // 从整个页面中提取法律状态关键词（搜索词已限定专利号，结果都是相关的）
@@ -1043,8 +1089,10 @@ async fn fetch_legal_from_sogou(patent_number: &str) -> anyhow::Result<LegalStat
     static RE_SCRIPT: OnceLock<regex::Regex> = OnceLock::new();
     static RE_STYLE: OnceLock<regex::Regex> = OnceLock::new();
     static RE_TAG: OnceLock<regex::Regex> = OnceLock::new();
-    let re_script = RE_SCRIPT.get_or_init(|| regex::Regex::new(r"(?is)<script[^>]*>.*?</script>").unwrap());
-    let re_style = RE_STYLE.get_or_init(|| regex::Regex::new(r"(?is)<style[^>]*>.*?</style>").unwrap());
+    let re_script =
+        RE_SCRIPT.get_or_init(|| regex::Regex::new(r"(?is)<script[^>]*>.*?</script>").unwrap());
+    let re_style =
+        RE_STYLE.get_or_init(|| regex::Regex::new(r"(?is)<style[^>]*>.*?</style>").unwrap());
     let re_tag = RE_TAG.get_or_init(|| regex::Regex::new(r"<[^>]*>").unwrap());
     let no_script = re_script.replace_all(&html, " ");
     let no_style = re_style.replace_all(&no_script, " ");
@@ -1068,7 +1116,10 @@ async fn fetch_legal_from_sogou(patent_number: &str) -> anyhow::Result<LegalStat
                 let context = clean_html[byte_start..byte_end].trim().to_string();
 
                 // 过滤非有效中文描述：非中文字符占比 > 70% 则跳过
-                let chinese_count = context.chars().filter(|c| *c >= '\u{4e00}' && *c <= '\u{9fff}').count();
+                let chinese_count = context
+                    .chars()
+                    .filter(|c| *c >= '\u{4e00}' && *c <= '\u{9fff}')
+                    .count();
                 let total_non_space = context.chars().filter(|c| !c.is_whitespace()).count();
                 if total_non_space > 0 && (chinese_count as f64 / total_non_space as f64) < 0.3 {
                     continue;
