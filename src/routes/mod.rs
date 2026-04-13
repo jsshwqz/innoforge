@@ -270,22 +270,32 @@ pub(crate) fn build_online_query(
         Some(SearchType::PatentNumber) => {
             // For bare Chinese application numbers (e.g. "202210835143.9"),
             // Google Patents indexes by PUBLICATION number, not application number.
-            // Searching bare digits (without dot/quotes) lets Google Patents find
-            // the patent via full-text match on the application number field.
+            // CN application number format: YYYYMMNNNNNN.X (12 digits + check digit)
             let digits: String = q.chars().filter(|c| c.is_ascii_digit()).collect();
+            let has_dot = q.contains('.');
             let is_bare_cn_app = digits.len() >= 10
                 && digits.len() <= 15
                 && q.chars().all(|c| c.is_ascii_digit() || c == '.');
             if is_bare_cn_app {
-                // Strip the trailing check digit to get the core application number
-                // e.g. "202210835143.9" → digits "2022108351439" → strip last → "202210835143"
-                let core = if digits.len() >= 13 {
-                    &digits[..digits.len() - 1]
+                // If the original query has a dot (e.g. "202210835143.9"),
+                // strip the check digit after dot → use 12-digit core number.
+                // If no dot but 13 digits, the last digit is likely the check digit.
+                let core = if has_dot {
+                    // Take only digits before the dot position
+                    let dot_pos = q.find('.').unwrap_or(q.len());
+                    let pre_dot: String = q[..dot_pos]
+                        .chars()
+                        .filter(|c| c.is_ascii_digit())
+                        .collect();
+                    pre_dot
+                } else if digits.len() == 13 {
+                    // 13 digits without dot: last digit is check digit
+                    digits[..12].to_string()
                 } else {
-                    &digits
+                    digits
                 };
                 // Bare digits — Google Patents finds this via application_number field
-                core.to_string()
+                core
             } else {
                 format!("\"{}\"", q)
             }

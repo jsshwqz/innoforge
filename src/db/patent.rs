@@ -39,18 +39,35 @@ impl super::Database {
         let q = query.trim();
 
         // Patent number format (e.g., CN1234567A, US10000000B2, ZL202310123456.7)
-        if q.len() >= 6 && q.len() <= 25 {
+        // Use char count (not byte len) to handle multibyte chars correctly
+        let char_count = q.chars().count();
+        if (6..=30).contains(&char_count) {
             let upper = q.to_uppercase();
             let country_codes = ["CN", "US", "EP", "JP", "KR", "TW", "HK", "WO", "PCT", "ZL"];
             for code in country_codes {
-                if upper.starts_with(code) {
-                    return SearchType::PatentNumber;
+                if let Some(rest) = upper.strip_prefix(code) {
+                    // Verify it actually has digits after the prefix (not just "CN公司")
+                    if rest.chars().any(|c| c.is_ascii_digit()) {
+                        return SearchType::PatentNumber;
+                    }
                 }
             }
             // Pure digits (7+) or digit.digit application number format (e.g. 202310123456.7)
             let digits_only: String = q.chars().filter(|c| c.is_ascii_digit()).collect();
             if digits_only.len() >= 7 && q.chars().all(|c| c.is_ascii_digit() || c == '.') {
                 return SearchType::PatentNumber;
+            }
+        }
+        // Short patent-like queries with country prefix (e.g. "CN123")
+        if (4..6).contains(&char_count) {
+            let upper = q.to_uppercase();
+            let prefixes = ["CN", "US", "EP", "JP", "WO", "ZL"];
+            for code in prefixes {
+                if let Some(rest) = upper.strip_prefix(code) {
+                    if rest.chars().all(|c| c.is_ascii_digit()) {
+                        return SearchType::PatentNumber;
+                    }
+                }
             }
         }
 
@@ -353,11 +370,21 @@ impl super::Database {
     /// Sanitize user input for FTS5 MATCH queries.
     /// Wraps each token in double quotes to prevent FTS5 syntax injection.
     fn sanitize_fts_query(query: &str) -> String {
+        // FTS5 reserved operators that must not appear as bare tokens
+        let reserved = ["AND", "OR", "NOT", "NEAR"];
         query
             .split_whitespace()
             .map(|word| {
-                let clean: String = word.chars().filter(|c| *c != '"').collect();
+                // Strip all FTS5 special characters: " * ^ ( ) { } :
+                let clean: String = word
+                    .chars()
+                    .filter(|c| !matches!(*c, '"' | '*' | '^' | '(' | ')' | '{' | '}' | ':'))
+                    .collect();
                 if clean.is_empty() {
+                    return String::new();
+                }
+                // Skip FTS5 reserved keywords (they cause syntax errors when quoted alone)
+                if reserved.contains(&clean.to_uppercase().as_str()) && clean.len() <= 4 {
                     return String::new();
                 }
                 format!("\"{}\"", clean)

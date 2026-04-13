@@ -92,7 +92,7 @@ pub(crate) fn calculate_mixed_relevance(
         return inventor_score;
     }
 
-    // Title match
+    // Title match — exact/prefix/contains
     let t = title.trim().to_lowercase();
     if t == q {
         return 95.0;
@@ -102,6 +102,37 @@ pub(crate) fn calculate_mixed_relevance(
     }
     if t.contains(&q) {
         return 75.0;
+    }
+
+    // Word-level matching for space-separated queries (English / mixed)
+    let q_words: Vec<&str> = q.split_whitespace().filter(|w| w.len() > 1).collect();
+    if !q_words.is_empty() {
+        let matches = q_words.iter().filter(|w| t.contains(*w)).count();
+        let ratio = matches as f64 / q_words.len() as f64;
+        if ratio >= 0.5 {
+            return 50.0 + ratio * 30.0;
+        }
+    }
+
+    // Chinese bigram matching — "电池热管理" vs "锂电池的热管理系统"
+    let q_chars: Vec<char> = q
+        .chars()
+        .filter(|c| ('\u{4E00}'..='\u{9FFF}').contains(c))
+        .collect();
+    if q_chars.len() >= 2 {
+        let q_bigrams: Vec<String> = q_chars.windows(2).map(|w| w.iter().collect()).collect();
+        let t_chars: Vec<char> = t
+            .chars()
+            .filter(|c| ('\u{4E00}'..='\u{9FFF}').contains(c))
+            .collect();
+        if t_chars.len() >= 2 {
+            let t_bigrams: Vec<String> = t_chars.windows(2).map(|w| w.iter().collect()).collect();
+            let matches = q_bigrams.iter().filter(|bg| t_bigrams.contains(bg)).count();
+            let ratio = matches as f64 / q_bigrams.len() as f64;
+            if ratio >= 0.3 {
+                return 45.0 + ratio * 35.0;
+            }
+        }
     }
 
     applicant_score.max(inventor_score).max(40.0)

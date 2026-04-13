@@ -187,26 +187,34 @@ fn sort_by_relevance(patents: &mut [PatentSummary]) {
 /// "CN123456A", "CN123456B", "CN123456C" -> "CN123456"
 fn normalize_patent_number(num: &str) -> String {
     let num = num.trim().to_uppercase();
-    // Strip trailing kind code (A, A1, A2, B, B1, B2, C, U, etc.)
-    let trimmed = num.trim_end_matches(|c: char| c.is_ascii_alphabetic() || c.is_ascii_digit());
-    // But we need to be smarter: kind code is usually 1-2 chars at end after digits
-    // E.g. "CN113557390B" -> strip "B", "US20110265482A1" -> strip "A1"
-    let bytes = num.as_bytes();
-    let mut end = bytes.len();
-    // Strip trailing kind code (1-2 chars that are letters or letter+digit)
-    if end > 2 {
-        let last = bytes[end - 1];
-        let second_last = bytes[end - 2];
-        if last.is_ascii_digit() && second_last.is_ascii_alphabetic() {
-            // e.g., A1, B2
-            end -= 2;
-        } else if last.is_ascii_alphabetic() && second_last.is_ascii_digit() {
-            // e.g., ...0B
-            end -= 1;
-        }
+    // Remove spaces and dots for uniform comparison
+    let clean: String = num
+        .chars()
+        .filter(|c| !c.is_whitespace() && *c != '.')
+        .collect();
+
+    // Strip trailing kind code: letter (A/B/C/U/Y/S) optionally followed by a digit (A1/B2/C5)
+    // Must have at least one digit before the kind code to avoid stripping real content
+    let bytes = clean.as_bytes();
+    let len = bytes.len();
+    if len < 3 {
+        return clean;
     }
-    let _ = trimmed; // suppress unused warning
-    num[..end].to_string()
+
+    let last = bytes[len - 1];
+    let second_last = bytes[len - 2];
+    let third_last = bytes[len - 3];
+
+    // Pattern: ...digit + letter + digit  (e.g., "0A1", "5B2")
+    if last.is_ascii_digit() && second_last.is_ascii_alphabetic() && third_last.is_ascii_digit() {
+        return clean[..len - 2].to_string();
+    }
+    // Pattern: ...digit + letter  (e.g., "0B", "9A")
+    if last.is_ascii_alphabetic() && second_last.is_ascii_digit() {
+        return clean[..len - 1].to_string();
+    }
+
+    clean
 }
 
 pub async fn api_search_online(
@@ -1100,7 +1108,7 @@ fn calculate_online_relevance(
 
     let mut score = 30.0;
 
-    // Title matching (most important)
+    // Title matching (most important, max +50)
     if t == q {
         score += 50.0;
     } else if t.contains(&q) {
@@ -1112,18 +1120,35 @@ fn calculate_online_relevance(
             let matches = q_words.iter().filter(|w| t.contains(*w)).count();
             score += (matches as f64 / q_words.len() as f64) * 30.0;
         }
-        // Chinese character matching in title
+        // Chinese bigram matching (more meaningful than single-char matching)
         let q_chars: Vec<char> = q
             .chars()
-            .filter(|c| *c > '\u{4E00}' && *c < '\u{9FFF}')
+            .filter(|c| ('\u{4E00}'..='\u{9FFF}').contains(c))
             .collect();
-        if !q_chars.is_empty() {
+        if q_chars.len() >= 2 {
+            // Build bigrams for better semantic matching
+            let q_bigrams: Vec<String> = q_chars.windows(2).map(|w| w.iter().collect()).collect();
+            let t_chars: Vec<char> = t
+                .chars()
+                .filter(|c| ('\u{4E00}'..='\u{9FFF}').contains(c))
+                .collect();
+            let t_bigrams: Vec<String> = if t_chars.len() >= 2 {
+                t_chars.windows(2).map(|w| w.iter().collect()).collect()
+            } else {
+                vec![]
+            };
+            if !q_bigrams.is_empty() && !t_bigrams.is_empty() {
+                let matches = q_bigrams.iter().filter(|bg| t_bigrams.contains(bg)).count();
+                score += (matches as f64 / q_bigrams.len() as f64) * 25.0;
+            }
+        } else if !q_chars.is_empty() {
+            // Fallback to single-char matching for short queries
             let matches = q_chars.iter().filter(|c| t.contains(**c)).count();
-            score += (matches as f64 / q_chars.len() as f64) * 25.0;
+            score += (matches as f64 / q_chars.len() as f64) * 20.0;
         }
     }
 
-    // Abstract matching (secondary)
+    // Abstract matching (secondary, max +15)
     if a.contains(&q) {
         score += 15.0;
     } else {
@@ -1132,9 +1157,30 @@ fn calculate_online_relevance(
             let matches = q_words.iter().filter(|w| a.contains(*w)).count();
             score += (matches as f64 / q_words.len() as f64) * 10.0;
         }
+        // Chinese bigram matching in abstract too
+        let q_chars: Vec<char> = q
+            .chars()
+            .filter(|c| ('\u{4E00}'..='\u{9FFF}').contains(c))
+            .collect();
+        if q_chars.len() >= 2 {
+            let q_bigrams: Vec<String> = q_chars.windows(2).map(|w| w.iter().collect()).collect();
+            let a_chars: Vec<char> = a
+                .chars()
+                .filter(|c| ('\u{4E00}'..='\u{9FFF}').contains(c))
+                .collect();
+            let a_bigrams: Vec<String> = if a_chars.len() >= 2 {
+                a_chars.windows(2).map(|w| w.iter().collect()).collect()
+            } else {
+                vec![]
+            };
+            if !q_bigrams.is_empty() && !a_bigrams.is_empty() {
+                let matches = q_bigrams.iter().filter(|bg| a_bigrams.contains(bg)).count();
+                score += (matches as f64 / q_bigrams.len() as f64) * 8.0;
+            }
+        }
     }
 
-    // Applicant matching (bonus)
+    // Applicant matching (bonus, max +5)
     if app.contains(&q) {
         score += 5.0;
     }
@@ -1178,6 +1224,7 @@ pub async fn search_lens_patents(
         "include": [
             "lens_id", "title", "abstract", "date_published",
             "biblio.publication_reference",
+            "biblio.application_reference",
             "biblio.parties.applicants",
             "biblio.parties.inventors"
         ]
@@ -1269,7 +1316,12 @@ pub async fn search_lens_patents(
                 .unwrap_or("")
                 .to_string();
 
-            let filing_date = item["date_published"].as_str().unwrap_or("").to_string();
+            // Prefer application filing date; fall back to publication date
+            let filing_date = item["biblio"]["application_reference"]["date"]
+                .as_str()
+                .or_else(|| item["date_published"].as_str())
+                .unwrap_or("")
+                .to_string();
 
             if title.is_empty() && patent_number.is_empty() {
                 continue;
