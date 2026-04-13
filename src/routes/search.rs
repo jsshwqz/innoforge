@@ -447,7 +447,7 @@ pub async fn api_search_online(
 
     // Fallback 2: Google Patents direct (free, no API key, no VPN needed)
     println!("[ONLINE] Trying Google Patents direct (free)...");
-    match search_google_patents_direct(&req, online_search_type.as_ref()).await {
+    match search_google_patents_direct(&req, online_search_type.as_ref(), is_cn_query).await {
         Ok((patents, total)) if !patents.is_empty() => {
             // Cache results to local DB
             for p in &patents {
@@ -987,6 +987,7 @@ pub(crate) fn serp_to_patent(r: &serde_json::Value) -> Patent {
 async fn search_google_patents_direct(
     req: &SearchRequest,
     search_type: Option<&SearchType>,
+    is_cn_query: bool,
 ) -> Result<(Vec<PatentSummary>, usize), String> {
     let query = build_online_query(
         &req.query,
@@ -1002,11 +1003,14 @@ async fn search_google_patents_direct(
     let page = req.page.saturating_sub(1);
     let num = 10;
 
+    // 中文查询时加 hl=zh 让 Google Patents 返回中文标题/摘要
+    let lang_param = if is_cn_query { "&hl=zh" } else { "" };
     let url = format!(
-        "https://patents.google.com/xhr/query?url=q%3D{}&exp=&num={}&page={}",
+        "https://patents.google.com/xhr/query?url=q%3D{}&exp=&num={}&page={}{}",
         urlencoding::encode(&full_query),
         num,
-        page
+        page,
+        lang_param
     );
     println!("[FREE] Google Patents direct URL: {}", url);
 
@@ -1048,19 +1052,60 @@ async fn search_google_patents_direct(
                     let country = patent_number.chars().take(2).collect::<String>();
 
                     // Clean HTML tags from title and snippet
-                    let title = strip_html_tags(pat["title"].as_str().unwrap_or(""));
+                    // Prefer localized (Chinese) title over default English
+                    let title = {
+                        let localized = pat["title_localized"]
+                            .as_array()
+                            .and_then(|arr| {
+                                // Prefer zh, then first available
+                                arr.iter()
+                                    .find(|t| {
+                                        t["lang"]
+                                            .as_str()
+                                            .map(|l| l.starts_with("zh"))
+                                            .unwrap_or(false)
+                                    })
+                                    .or_else(|| arr.first())
+                            })
+                            .and_then(|v| v["value"].as_str())
+                            .unwrap_or("");
+                        if localized.is_empty() {
+                            strip_html_tags(pat["title"].as_str().unwrap_or(""))
+                        } else {
+                            strip_html_tags(localized)
+                        }
+                    };
                     let snippet = strip_html_tags(pat["snippet"].as_str().unwrap_or(""));
 
                     let filing_date = pat["filing_date"].as_str().unwrap_or("").to_string();
+                    // Prefer localized (Chinese) assignee/inventor
                     let applicant = pat["assignee_localized"]
                         .as_array()
-                        .and_then(|a| a.first())
+                        .and_then(|arr| {
+                            arr.iter()
+                                .find(|a| {
+                                    a["lang"]
+                                        .as_str()
+                                        .map(|l| l.starts_with("zh"))
+                                        .unwrap_or(false)
+                                })
+                                .or_else(|| arr.first())
+                        })
                         .and_then(|v| v["value"].as_str())
                         .unwrap_or("")
                         .to_string();
                     let inventor = pat["inventor_localized"]
                         .as_array()
-                        .and_then(|a| a.first())
+                        .and_then(|arr| {
+                            arr.iter()
+                                .find(|a| {
+                                    a["lang"]
+                                        .as_str()
+                                        .map(|l| l.starts_with("zh"))
+                                        .unwrap_or(false)
+                                })
+                                .or_else(|| arr.first())
+                        })
                         .and_then(|v| v["value"].as_str())
                         .unwrap_or("")
                         .to_string();
