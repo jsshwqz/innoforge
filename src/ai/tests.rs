@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod tests {
+mod extraction_tests {
     use crate::ai::client::extract_chat_content;
 
     #[test]

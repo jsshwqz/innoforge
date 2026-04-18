@@ -1,7 +1,8 @@
 use super::AppState;
 use crate::patent::*;
-use crate::pipeline::context::PipelineProgress;
+use crate::pipeline::context::{PipelineContext, PipelineProgress, ResearchState};
 use crate::pipeline::runner::PipelineRunner;
+use crate::pipeline::state::PipelineStep;
 use axum::{
     body::Body,
     extract::{Path, Query, State},
@@ -10,8 +11,148 @@ use axum::{
     Json,
 };
 use futures::stream::Stream;
+use serde::Deserialize;
 use serde_json::json;
 use std::convert::Infallible;
+
+#[derive(Debug, Deserialize, Default, Clone)]
+pub struct ResearchStateUpdateRequest {
+    pub current_hypothesis: Option<String>,
+    pub excluded_paths: Option<Vec<String>>,
+    pub open_questions: Option<Vec<String>>,
+    pub verified_claims: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct RedirectRequest {
+    pub restart_from: Option<String>,
+    pub technical_domain: Option<String>,
+    pub add_queries: Option<Vec<String>>,
+    pub reason: Option<String>,
+    pub research_state: Option<ResearchStateUpdateRequest>,
+}
+
+fn normalize_lines(items: &[String], max_items: usize, max_chars: usize) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for item in items {
+        if out.len() >= max_items {
+            break;
+        }
+        let trimmed = item.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let normalized: String = trimmed.chars().take(max_chars).collect();
+        if seen.insert(normalized.clone()) {
+            out.push(normalized);
+        }
+    }
+    out
+}
+
+fn apply_research_state_update(state: &mut ResearchState, req: &ResearchStateUpdateRequest) {
+    if let Some(h) = req.current_hypothesis.as_ref() {
+        state.current_hypothesis = h.trim().chars().take(500).collect();
+    }
+    if let Some(v) = req.excluded_paths.as_ref() {
+        state.excluded_paths = normalize_lines(v, 50, 200);
+    }
+    if let Some(v) = req.open_questions.as_ref() {
+        state.open_questions = normalize_lines(v, 50, 200);
+    }
+    if let Some(v) = req.verified_claims.as_ref() {
+        state.verified_claims = normalize_lines(v, 100, 300);
+    }
+}
+
+fn parse_restart_step(raw: Option<&str>) -> PipelineStep {
+    let normalized = raw
+        .unwrap_or("search_web")
+        .trim()
+        .to_lowercase()
+        .replace(['-', ' '], "_");
+    match normalized.as_str() {
+        "parse_input" | "parse" => PipelineStep::ParseInput,
+        "expand_query" | "expand" => PipelineStep::ExpandQuery,
+        "search_web" | "web" => PipelineStep::SearchWeb,
+        "search_patents" | "patents" | "search_patent" => PipelineStep::SearchPatents,
+        "diversity_gate" | "diversity" => PipelineStep::DiversityGate,
+        "compute_similarity" | "similarity" => PipelineStep::ComputeSimilarity,
+        "rank_and_filter" | "rank" => PipelineStep::RankAndFilter,
+        "prior_art_cluster" | "cluster" => PipelineStep::PriorArtCluster,
+        "detect_contradictions" | "contradictions" => PipelineStep::DetectContradictions,
+        "score_novelty" | "score" => PipelineStep::ScoreNovelty,
+        "ai_deep_analysis" | "deep_analysis" => PipelineStep::AiDeepAnalysis,
+        "ai_action_plan" | "action_plan" => PipelineStep::AiActionPlan,
+        "experiment_validation" | "experiment" => PipelineStep::ExperimentValidation,
+        "build_claim_tree" | "claim_tree" => PipelineStep::BuildClaimTree,
+        "finalize" | "final" => PipelineStep::Finalize,
+        _ => PipelineStep::SearchWeb,
+    }
+}
+
+fn step_key(step: PipelineStep) -> &'static str {
+    match step {
+        PipelineStep::ParseInput => "parse_input",
+        PipelineStep::ExpandQuery => "expand_query",
+        PipelineStep::SearchWeb => "search_web",
+        PipelineStep::SearchPatents => "search_patents",
+        PipelineStep::DiversityGate => "diversity_gate",
+        PipelineStep::ComputeSimilarity => "compute_similarity",
+        PipelineStep::RankAndFilter => "rank_and_filter",
+        PipelineStep::PriorArtCluster => "prior_art_cluster",
+        PipelineStep::DetectContradictions => "detect_contradictions",
+        PipelineStep::ScoreNovelty => "score_novelty",
+        PipelineStep::AiDeepAnalysis => "ai_deep_analysis",
+        PipelineStep::AiActionPlan => "ai_action_plan",
+        PipelineStep::ExperimentValidation => "experiment_validation",
+        PipelineStep::BuildClaimTree => "build_claim_tree",
+        PipelineStep::Finalize => "finalize",
+    }
+}
+
+fn parse_research_state_from_ctx_json(ctx_json: &str) -> Option<ResearchState> {
+    serde_json::from_str::<PipelineContext>(ctx_json)
+        .ok()
+        .map(|ctx| ctx.research_state)
+}
+
+fn load_research_state_with_source(s: &AppState, idea_id: &str) -> (ResearchState, &'static str) {
+    if let Ok(Some(state)) = s.db.get_research_state(idea_id) {
+        return (state, "db");
+    }
+
+    if let Ok(Some((ctx_json, _step))) = s.db.load_pipeline_snapshot(idea_id) {
+        if let Some(state) = parse_research_state_from_ctx_json(&ctx_json) {
+            return (state, "snapshot");
+        }
+    }
+
+    if let Ok(Some(version)) = s.db.get_latest_version(idea_id, "main") {
+        if let Some(state) = parse_research_state_from_ctx_json(&version.context_json) {
+            return (state, "version");
+        }
+    }
+
+    (ResearchState::default(), "default")
+}
+
+fn load_redirect_context(s: &AppState, idea: &Idea) -> PipelineContext {
+    if let Ok(Some((ctx_json, _step))) = s.db.load_pipeline_snapshot(&idea.id) {
+        if let Ok(ctx) = serde_json::from_str::<PipelineContext>(&ctx_json) {
+            return ctx;
+        }
+    }
+
+    if let Ok(Some(version)) = s.db.get_latest_version(&idea.id, "main") {
+        if let Ok(ctx) = serde_json::from_str::<PipelineContext>(&version.context_json) {
+            return ctx;
+        }
+    }
+
+    PipelineContext::new(&idea.id, &idea.title, &idea.description)
+}
 
 pub async fn api_idea_submit(
     State(s): State<AppState>,
@@ -222,8 +363,9 @@ pub async fn api_idea_delete(
     State(s): State<AppState>,
     Path(idea_id): Path<String>,
 ) -> Json<serde_json::Value> {
-    // 级联删除：证据链 → 特征卡片 → 消息 → 创意 / Cascade delete: evidence → feature cards → messages → idea
+    // 级联删除：证据链 → 研发状态 → 特征卡片 → 消息 → 创意
     let _ = s.db.delete_evidence_by_idea(&idea_id);
+    let _ = s.db.delete_research_state(&idea_id);
     let _ = s.db.delete_feature_cards_by_idea(&idea_id);
     let _ = s.db.delete_idea_messages(&idea_id);
     match s.db.delete_idea(&idea_id) {
@@ -1395,6 +1537,154 @@ pub async fn api_idea_iterate(
         "status": "ok",
         "message": format!("第 {} 轮迭代已启动（Orchestrator Jump→SearchWeb）", iteration),
         "iteration": iteration,
+    }))
+}
+
+/// GET /api/idea/:id/research-state — 读取研发状态机
+pub async fn api_idea_research_state(
+    State(s): State<AppState>,
+    Path(idea_id): Path<String>,
+) -> Json<serde_json::Value> {
+    match s.db.get_idea(&idea_id) {
+        Ok(Some(_)) => {}
+        Ok(None) => return Json(json!({"status": "error", "message": "创意不存在"})),
+        Err(e) => return Json(json!({"status": "error", "message": e.to_string()})),
+    }
+
+    let (state, source) = load_research_state_with_source(&s, &idea_id);
+    Json(json!({
+        "status": "ok",
+        "source": source,
+        "research_state": state
+    }))
+}
+
+/// POST /api/idea/:id/research-state — 更新研发状态机
+pub async fn api_idea_research_state_update(
+    State(s): State<AppState>,
+    Path(idea_id): Path<String>,
+    Json(req): Json<ResearchStateUpdateRequest>,
+) -> Json<serde_json::Value> {
+    match s.db.get_idea(&idea_id) {
+        Ok(Some(_)) => {}
+        Ok(None) => return Json(json!({"status": "error", "message": "创意不存在"})),
+        Err(e) => return Json(json!({"status": "error", "message": e.to_string()})),
+    }
+
+    let (mut state, _) = load_research_state_with_source(&s, &idea_id);
+    apply_research_state_update(&mut state, &req);
+
+    match s.db.upsert_research_state(&idea_id, &state) {
+        Ok(_) => Json(json!({"status": "ok", "research_state": state})),
+        Err(e) => Json(json!({"status": "error", "message": e.to_string()})),
+    }
+}
+
+/// POST /api/idea/:id/redirect — 注入新约束并从指定步骤重跑
+pub async fn api_idea_redirect(
+    State(s): State<AppState>,
+    Path(idea_id): Path<String>,
+    Json(req): Json<RedirectRequest>,
+) -> Json<serde_json::Value> {
+    let idea = match s.db.get_idea(&idea_id) {
+        Ok(Some(idea)) => idea,
+        Ok(None) => return Json(json!({"status": "error", "message": "创意不存在"})),
+        Err(e) => return Json(json!({"status": "error", "message": e.to_string()})),
+    };
+
+    let restart_step = parse_restart_step(req.restart_from.as_deref());
+    let mut ctx = load_redirect_context(&s, &idea);
+    ctx.idea_id = idea.id.clone();
+    ctx.title = idea.title.clone();
+    ctx.description = idea.description.clone();
+
+    if let Ok(Some(db_state)) = s.db.get_research_state(&idea_id) {
+        ctx.research_state = db_state;
+    }
+    if let Some(state_req) = req.research_state.as_ref() {
+        apply_research_state_update(&mut ctx.research_state, state_req);
+    }
+
+    if let Some(domain) = req.technical_domain.as_ref() {
+        let normalized: String = domain.trim().chars().take(120).collect();
+        if !normalized.is_empty() {
+            ctx.technical_domain = normalized;
+        }
+    }
+
+    if let Some(extra_queries) = req.add_queries.as_ref() {
+        let normalized = normalize_lines(extra_queries, 30, 120);
+        for q in normalized {
+            if !ctx.expanded_queries.iter().any(|x| x == &q) {
+                ctx.expanded_queries.push(q);
+            }
+        }
+    }
+
+    if let Err(e) = s.db.upsert_research_state(&idea_id, &ctx.research_state) {
+        return Json(json!({"status": "error", "message": format!("保存研发状态失败: {}", e)}));
+    }
+
+    if let Ok(Some(mut idea_mut)) = s.db.get_idea(&idea_id) {
+        idea_mut.status = "analyzing".into();
+        let _ = s.db.update_idea(&idea_mut);
+    }
+
+    let reason = req
+        .reason
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("manual_redirect")
+        .to_string();
+    let restart_key = step_key(restart_step).to_string();
+    let reason_for_task = reason.clone();
+    let restart_key_for_task = restart_key.clone();
+
+    let config = s.config.read().unwrap_or_else(|e| e.into_inner()).clone();
+    let mut orch = crate::orchestrator::engine::Orchestrator::new(
+        config.ai_client(),
+        s.db.clone(),
+        config.serpapi_key.clone(),
+        config.bing_api_key.clone(),
+        config.lens_api_key.clone(),
+        false,
+    );
+    orch.inject_command(crate::orchestrator::OrchestratorCommand::Jump(restart_step));
+
+    let db = s.db.clone();
+    let idea_id_clone = idea_id.clone();
+    tokio::spawn(async move {
+        match orch.run(ctx, None).await {
+            Ok(result_ctx) => {
+                tracing::info!(
+                    "Redirect completed for {} from {}",
+                    idea_id_clone,
+                    restart_key_for_task
+                );
+                if let Ok(Some(mut idea)) = db.get_idea(&idea_id_clone) {
+                    idea.novelty_score = Some(result_ctx.novelty_score);
+                    idea.analysis = result_ctx.ai_analysis;
+                    idea.status = "done".into();
+                    let _ = db.update_idea(&idea);
+                }
+            }
+            Err(e) => {
+                tracing::error!("Redirect failed for {}: {}", idea_id_clone, e);
+                if let Ok(Some(mut idea)) = db.get_idea(&idea_id_clone) {
+                    idea.status = "error".into();
+                    idea.analysis = format!("重定向重跑失败（{}）: {}", reason_for_task, e);
+                    let _ = db.update_idea(&idea);
+                }
+            }
+        }
+    });
+
+    Json(json!({
+        "status": "ok",
+        "message": "重定向已启动",
+        "restart_from": step_key(restart_step),
+        "reason": reason
     }))
 }
 

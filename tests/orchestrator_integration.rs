@@ -146,13 +146,14 @@ fn orchestrator_next_version_number() {
 }
 
 #[test]
-fn migration_v11_claim_tables_exist() {
+fn migration_v12_orchestrator_tables_exist() {
     let db = Database::init(":memory:").unwrap();
     let version = db.query_schema_version().unwrap();
-    assert_eq!(version, 11);
+    assert_eq!(version, 12);
 
-    // 验证 idea_versions/idea_branches/findings 表都可用（通过 CRUD 方法）
+    // 验证 idea_versions/idea_branches/findings/research_state 表都可用（通过 CRUD 方法）
     assert!(db.get_idea_versions("nonexistent").unwrap().is_empty());
     assert!(db.get_idea_branches("nonexistent").unwrap().is_empty());
     assert!(db.get_findings_by_idea("nonexistent").unwrap().is_empty());
+    assert!(db.get_research_state("nonexistent").unwrap().is_none());
 }

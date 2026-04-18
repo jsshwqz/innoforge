@@ -139,6 +139,10 @@ impl Orchestrator {
                             &format!("{:?}", step),
                         );
                     }
+                    // 持久化研发状态机（跨续跑/跨版本可查询）
+                    let _ = self
+                        .db
+                        .upsert_research_state(&ctx.idea_id, &ctx.research_state);
                     // 写入版本历史
                     super::save_version_snapshot(&self.db, &ctx, step);
                 }

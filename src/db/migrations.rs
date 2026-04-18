@@ -320,6 +320,28 @@ pub(crate) fn run(conn: &Connection, current_version: i32, target_version: i32) 
         tracing::info!("Database migrated to version 11 (claim_nodes + technical_features)");
     }
 
+    // Migration 11 → 12: 研发状态机持久化 / Persistent research state
+    if current_version < 12 {
+        conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS idea_research_state (
+                idea_id TEXT PRIMARY KEY,
+                current_hypothesis TEXT DEFAULT '',
+                excluded_paths TEXT DEFAULT '[]',
+                open_questions TEXT DEFAULT '[]',
+                verified_claims TEXT DEFAULT '[]',
+                updated_at TEXT DEFAULT (datetime('now')),
+                FOREIGN KEY (idea_id) REFERENCES ideas(id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_rs_updated_at ON idea_research_state(updated_at);
+
+            DELETE FROM schema_version;
+            INSERT INTO schema_version (version) VALUES (12);
+        ",
+        )?;
+        tracing::info!("Database migrated to version 12 (idea_research_state)");
+    }
+
     if current_version > 0 && current_version < target_version {
         tracing::info!(
             "Database migrated from version {} to {}",

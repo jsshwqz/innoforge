@@ -2,6 +2,7 @@
 
 use innoforge::db::Database;
 use innoforge::patent::*;
+use innoforge::pipeline::context::ResearchState;
 
 fn sample_patent(id: &str, title: &str) -> Patent {
     Patent {
@@ -257,6 +258,43 @@ fn get_nonexistent_idea_returns_none() {
     assert!(db.get_idea("nonexistent").unwrap().is_none());
 }
 
+#[test]
+fn research_state_crud_works() {
+    let db = Database::init(":memory:").unwrap();
+    let idea = Idea {
+        id: "idea_rs_1".to_string(),
+        title: "研发状态机测试".to_string(),
+        description: "测试 research_state 的增删改查".to_string(),
+        input_type: "text".to_string(),
+        status: "pending".to_string(),
+        analysis: String::new(),
+        web_results: "[]".to_string(),
+        patent_results: "[]".to_string(),
+        novelty_score: None,
+        created_at: "2026-04-18T00:00:00Z".to_string(),
+        updated_at: "2026-04-18T00:00:00Z".to_string(),
+        discussion_summary: String::new(),
+    };
+    db.insert_idea(&idea).unwrap();
+
+    let state = ResearchState {
+        current_hypothesis: "假设 A".to_string(),
+        excluded_paths: vec!["路径1".to_string(), "路径2".to_string()],
+        open_questions: vec!["问题1".to_string()],
+        verified_claims: vec!["已验证点1".to_string()],
+    };
+    db.upsert_research_state(&idea.id, &state).unwrap();
+
+    let loaded = db.get_research_state(&idea.id).unwrap().unwrap();
+    assert_eq!(loaded.current_hypothesis, "假设 A");
+    assert_eq!(loaded.excluded_paths.len(), 2);
+    assert_eq!(loaded.open_questions, vec!["问题1".to_string()]);
+    assert_eq!(loaded.verified_claims, vec!["已验证点1".to_string()]);
+
+    db.delete_research_state(&idea.id).unwrap();
+    assert!(db.get_research_state(&idea.id).unwrap().is_none());
+}
+
 // ── Pagination ───────────────────────────────────────────────────────────────
 
 #[test]
@@ -354,7 +392,7 @@ fn schema_version_is_set_on_fresh_db() {
     let version: i32 = db
         .query_schema_version()
         .expect("should be able to read schema version");
-    assert_eq!(version, 11);
+    assert_eq!(version, 12);
 }
 
 #[test]
@@ -376,7 +414,7 @@ fn reinit_same_db_is_idempotent() {
     assert_eq!(p.unwrap().title, "Migration test");
 
     let version = db2.query_schema_version().unwrap();
-    assert_eq!(version, 11);
+    assert_eq!(version, 12);
 }
 
 // ── Feature cards CRUD ──────────────────────────────────────────────────────

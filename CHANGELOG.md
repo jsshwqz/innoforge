@@ -5,6 +5,24 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 
+## [v0.5.6] - 2026-04-18
+
+### 新增 / Added
+- **研发状态机持久化（ResearchState Persistence）** -- 新增 `idea_research_state` 表，研发假设/排除路径/开放问题/已验证结论可独立持久化并跨续跑保留
+  Added persistent `idea_research_state` table for hypothesis/excluded paths/open questions/verified claims across runs
+- **ResearchState API** -- 新增读取与更新接口（`GET/POST /api/idea/:id/research-state`）
+  Added read/update API for research state (`GET/POST /api/idea/:id/research-state`)
+- **中途重定向重跑（Redirect Run）** -- 新增 `POST /api/idea/:id/redirect`，支持注入新约束并从指定步骤跳转重跑
+  Added redirect endpoint to inject constraints and restart from a specified step (`POST /api/idea/:id/redirect`)
+
+### 改进 / Improved
+- Orchestrator 每步成功后自动落盘 `ResearchState`，删除创意时级联清理对应研发状态
+  Orchestrator now persists research state after each successful step and cleans it up on idea deletion
+- 数据库 schema 升级到 v12，并补齐集成测试覆盖 `research_state` CRUD
+  Database schema upgraded to v12 with integration coverage for `research_state` CRUD
+
+---
+
 ## [v0.5.4] - 2026-04-18
 
 ### 新增 / Added

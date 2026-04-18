@@ -61,7 +61,7 @@ fn keyword_search_without_filters_uses_fts_path() {
     assert!(rows[0].relevance_score.is_some());
     let score = rows[0].relevance_score.unwrap();
     assert!(
-        score >= 30.0 && score <= 100.0,
+        (30.0..=100.0).contains(&score),
         "FTS score {} out of range",
         score
     );

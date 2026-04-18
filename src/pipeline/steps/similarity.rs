@@ -168,7 +168,7 @@ mod tests {
     #[test]
     fn test_tfidf_same_doc() {
         let tokens = vec!["hello".into(), "world".into()];
-        let idf = compute_idf(&[tokens.clone()]);
+        let idf = compute_idf(std::slice::from_ref(&tokens));
         let score = tfidf_cosine(&tokens, &tokens, &idf);
         assert!(score > 0.99);
     }

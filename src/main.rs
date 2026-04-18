@@ -173,6 +173,11 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/idea/:id/delete", post(routes::api_idea_delete))
         .route("/api/idea/:id/progress", get(routes::api_idea_progress))
         .route("/api/idea/:id/resume", post(routes::api_idea_resume))
+        .route(
+            "/api/idea/:id/research-state",
+            get(routes::api_idea_research_state).post(routes::api_idea_research_state_update),
+        )
+        .route("/api/idea/:id/redirect", post(routes::api_idea_redirect))
         .route("/api/idea/:id/report", get(routes::api_idea_report))
         .route(
             "/api/idea/:id/report.html",
