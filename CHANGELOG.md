@@ -5,6 +5,20 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 
+## [v0.5.4] - 2026-04-18
+
+### 新增 / Added
+- **移动端 C ABI 启动入口** -- 主仓新增/补齐 innoforge_start_server + patent_hub_start_server 兼容别名
+  Mobile C ABI startup entry -- main repo adds/completes innoforge_start_server + patent_hub_start_server compatible aliases
+- **Desktop 壳入口对齐** -- 窗口入口改为本地 http://127.0.0.1:3000，核心品牌字段对齐
+  Desktop shell entry alignment -- window entry changed to local http://127.0.0.1:3000, core brand fields aligned
+- **iOS 壳对齐** -- 改用 innoforge.db 与 innoforge_start_server，Bundle Identifier/显示名对齐
+  iOS shell alignment -- switched to innoforge.db and innoforge_start_server, Bundle ID/display name aligned
+- **Harmony 品牌对齐** -- app 元数据与页面文案品牌版本对齐至 0.5.4
+  Harmony brand alignment -- app metadata and page text brand version aligned to 0.5.4
+
+---
+
 ## [v0.4.4] - 2026-04-03
 
 ### 新增 / Added

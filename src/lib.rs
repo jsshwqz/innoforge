@@ -30,7 +30,9 @@ use axum::{
 };
 use rust_embed::Embed;
 use std::net::SocketAddr;
+use std::os::raw::c_char;
 use std::sync::{Arc, RwLock};
+use std::thread;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::ServeDir;
 use tower_http::set_header::SetResponseHeaderLayer;
@@ -249,4 +251,60 @@ pub async fn start_server(db_path: &str) -> anyhow::Result<()> {
         .serve(app.into_make_service())
         .await?;
     Ok(())
+}
+
+/// Start the InnoForge server in a background thread.
+///
+/// # Safety
+/// - `db_path` must be a valid pointer to a null-terminated UTF-8 C string
+/// - The pointed string must be valid for the duration of this call
+///
+/// # Returns
+/// - 0: success (server started in background thread)
+/// - 1: db_path is null
+/// - 2: db_path is not valid UTF-8
+#[no_mangle]
+pub unsafe extern "C" fn innoforge_start_server(db_path: *const c_char) -> i32 {
+    if db_path.is_null() {
+        eprintln!("Error: db_path is null");
+        return 1;
+    }
+
+    let db_path_string = match unsafe { std::ffi::CStr::from_ptr(db_path).to_str() } {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            eprintln!("Error: db_path is not valid UTF-8");
+            return 2;
+        }
+    };
+
+    thread::spawn(move || {
+        let rt = match tokio::runtime::Runtime::new() {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("Failed to create Tokio runtime: {}", e);
+                return;
+            }
+        };
+        if let Err(e) = rt.block_on(start_server(&db_path_string)) {
+            eprintln!("Server error: {}", e);
+        }
+    });
+
+    0
+}
+
+/// Alias for [`innoforge_start_server`] with patent_hub branding.
+///
+/// # Safety
+/// - `db_path` must be a valid pointer to a null-terminated UTF-8 C string
+/// - The pointed string must be valid for the duration of this call
+///
+/// # Returns
+/// - 0: success (server started in background thread)
+/// - 1: db_path is null
+/// - 2: db_path is not valid UTF-8
+#[no_mangle]
+pub unsafe extern "C" fn patent_hub_start_server(db_path: *const c_char) -> i32 {
+    innoforge_start_server(db_path)
 }

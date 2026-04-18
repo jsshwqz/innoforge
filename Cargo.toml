@@ -12,7 +12,7 @@ categories = ["command-line-utilities", "web-programming"]
 [lib]
 name = "innoforge"
 path = "src/lib.rs"
-crate-type = ["lib"]
+crate-type = ["lib", "cdylib", "staticlib"]
 
 [[bin]]
 name = "innoforge"
