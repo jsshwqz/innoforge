@@ -101,3 +101,32 @@ fn keyword_search_with_date_filter_uses_filtered_search() {
     assert_eq!(rows[0].title, "Vector database patent new");
     assert!(rows[0].relevance_score.is_some());
 }
+
+#[test]
+fn mixed_search_routes_patent_like_query_to_patent_number_search() {
+    let db = Database::init(":memory:").expect("init db");
+    let mut patent = sample_patent(
+        "123456789",
+        "Foldable hinge dustproof structure",
+        "2026-01-10",
+    );
+    patent.patent_number = "CN 123456789 A".to_string();
+    db.insert_patent(&patent).expect("insert patent");
+
+    let (rows, total, detected) = db
+        .search_smart(
+            "CN123456789A",
+            Some(&SearchType::Mixed),
+            None,
+            None,
+            None,
+            1,
+            10,
+        )
+        .expect("search succeeds");
+
+    assert_eq!(detected, SearchType::PatentNumber);
+    assert_eq!(total, 1);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].patent_number, "CN 123456789 A");
+}

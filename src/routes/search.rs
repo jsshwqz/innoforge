@@ -1147,13 +1147,16 @@ async fn search_google_patents_direct(
                             })
                             .and_then(|v| v["value"].as_str())
                             .unwrap_or("");
-                        if localized.is_empty() {
+                        let raw_title = if localized.is_empty() {
                             strip_html_tags(pat["title"].as_str().unwrap_or(""))
                         } else {
                             strip_html_tags(localized)
-                        }
+                        };
+                        raw_title.trim().to_string()
                     };
-                    let snippet = strip_html_tags(pat["snippet"].as_str().unwrap_or(""));
+                    let snippet = strip_html_tags(pat["snippet"].as_str().unwrap_or(""))
+                        .trim()
+                        .to_string();
 
                     let filing_date = pat["filing_date"].as_str().unwrap_or("").to_string();
                     // Prefer localized (Chinese) assignee/inventor
@@ -1191,6 +1194,15 @@ async fn search_google_patents_direct(
                     if !title.is_empty() {
                         let content_score =
                             calculate_online_relevance(&query, &title, &snippet, &applicant);
+                        if !is_online_result_relevant(
+                            &query,
+                            &title,
+                            &snippet,
+                            content_score,
+                            is_cn_query,
+                        ) {
+                            continue;
+                        }
                         patents.push(PatentSummary {
                             id: uuid::Uuid::new_v4().to_string(),
                             patent_number: patent_number.to_string(),
@@ -1343,7 +1355,42 @@ fn is_online_result_relevant(
         return content_score >= 62.0;
     }
 
-    // 英文/国际查询：保持一定召回
+    // 英文/国际查询：多词技术查询至少命中两个查询词，避免泛 "mobile phone"
+    // 之类结果仅凭低分阈值进入专利列表。
+    let query_terms: Vec<&str> = ql
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|w| w.len() >= 3)
+        .filter(|w| {
+            !matches!(
+                *w,
+                "patent"
+                    | "device"
+                    | "method"
+                    | "system"
+                    | "apparatus"
+                    | "mobile"
+                    | "phone"
+                    | "electronic"
+            )
+        })
+        .collect();
+    if query_terms.len() >= 2 {
+        let haystack = format!("{t} {a}");
+        let matched = query_terms
+            .iter()
+            .filter(|term| haystack.contains(**term))
+            .count();
+        let required_matches = if query_terms.len() <= 3 {
+            query_terms.len()
+        } else {
+            (query_terms.len() * 2).div_ceil(3)
+        };
+        if matched < required_matches {
+            return false;
+        }
+    }
+
+    // 英文/国际查询：保留一定召回，但先经过上面的查询词命中门槛。
     content_score >= 40.0
 }
 
@@ -1938,4 +1985,45 @@ async fn try_exact_patent_lookup(
         "page_size": 10,
         "source": "serpapi_exact"
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn intl_relevance_rejects_generic_phone_results_for_specific_hinge_query() {
+        let query = "foldable phone hinge dustproof patent";
+        assert!(!is_online_result_relevant(
+            query,
+            "mobile phone",
+            "A mobile phone includes a touch screen and a camera.",
+            42.0,
+            false,
+        ));
+    }
+
+    #[test]
+    fn intl_relevance_rejects_results_missing_specific_constraint_terms() {
+        let query = "foldable phone hinge dustproof patent";
+        assert!(!is_online_result_relevant(
+            query,
+            "mobile phone",
+            "A foldable mobile communication terminal has a biaxial hinge device.",
+            60.0,
+            false,
+        ));
+    }
+
+    #[test]
+    fn intl_relevance_keeps_specific_hinge_results() {
+        let query = "foldable phone hinge dustproof patent";
+        assert!(is_online_result_relevant(
+            query,
+            "Dustproof hinge for a foldable electronic device",
+            "The hinge blocks dust ingress while the foldable phone opens and closes.",
+            52.0,
+            false,
+        ));
+    }
 }

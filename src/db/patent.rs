@@ -147,7 +147,13 @@ impl super::Database {
         page_size: usize,
     ) -> Result<(Vec<PatentSummary>, usize, SearchType)> {
         let detected_type = if let Some(st) = search_type {
-            st.clone()
+            let auto_detected = self.detect_search_type(query);
+            if matches!(st, SearchType::Mixed) && matches!(auto_detected, SearchType::PatentNumber)
+            {
+                auto_detected
+            } else {
+                st.clone()
+            }
         } else {
             self.detect_search_type(query)
         };

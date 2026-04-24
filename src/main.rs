@@ -33,6 +33,13 @@ use tower_http::set_header::SetResponseHeaderLayer;
 #[folder = "static/"]
 struct StaticAssets;
 
+fn bind_candidate_ports(configured_port: Option<u16>) -> Vec<u16> {
+    match configured_port {
+        Some(port) => vec![port],
+        None => vec![3000, 3921, 3100],
+    }
+}
+
 async fn serve_static(axum::extract::Path(path): axum::extract::Path<String>) -> Response<Body> {
     match StaticAssets::get(&path) {
         Some(content) => {
@@ -278,11 +285,39 @@ async fn main() -> anyhow::Result<()> {
         ))
         .with_state(state);
 
-    let port: u16 = std::env::var("INNOFORGE_PORT")
+    let configured_port = std::env::var("INNOFORGE_PORT")
         .ok()
-        .and_then(|v| v.parse::<u16>().ok())
-        .unwrap_or(3000);
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+        .and_then(|v| v.parse::<u16>().ok());
+    let mut server = None;
+    let mut last_bind_error = None;
+    for candidate in bind_candidate_ports(configured_port) {
+        let candidate_addr = SocketAddr::from(([0, 0, 0, 0], candidate));
+        match axum::Server::try_bind(&candidate_addr) {
+            Ok(bound_server) => {
+                server = Some((candidate, candidate_addr, bound_server));
+                break;
+            }
+            Err(e) => {
+                if configured_port.is_some() {
+                    return Err(e.into());
+                }
+                eprintln!(
+                    "Port {} unavailable ({}), trying next fallback...",
+                    candidate, e
+                );
+                last_bind_error = Some(e);
+            }
+        }
+    }
+    let (port, addr, server) = match server {
+        Some(server) => server,
+        None => {
+            if let Some(e) = last_bind_error {
+                return Err(e.into());
+            }
+            return Err(anyhow::anyhow!("no bind candidate ports configured"));
+        }
+    };
     println!("创研台 InnoForge running at http://{addr}");
     println!("Local access: http://127.0.0.1:{port}");
 
@@ -301,8 +336,21 @@ async fn main() -> anyhow::Result<()> {
         println!("Mobile access: http://{}:{port}", local_ip);
     }
 
-    axum::Server::bind(&addr)
-        .serve(app.into_make_service())
-        .await?;
+    server.serve(app.into_make_service()).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::bind_candidate_ports;
+
+    #[test]
+    fn default_port_has_fallback_candidates() {
+        assert_eq!(bind_candidate_ports(None), vec![3000, 3921, 3100]);
+    }
+
+    #[test]
+    fn explicit_port_does_not_fallback_to_other_ports() {
+        assert_eq!(bind_candidate_ports(Some(4567)), vec![4567]);
+    }
 }
