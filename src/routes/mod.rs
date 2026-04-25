@@ -60,6 +60,9 @@ pub struct AppConfig {
     pub bing_api_key: String,
     /// Lens.org Patent API key — 国内可用，替代 Google Patents
     pub lens_api_key: String,
+    /// Firecrawl Search API — SerpAPI 后备，用于发现专利站页面
+    pub firecrawl_api_key: String,
+    pub firecrawl_api_url: String,
     /// CNIPR 开放平台（国知局）— 中国专利权威数据源
     pub cnipr_client_id: String,
     pub cnipr_client_secret: String,
@@ -132,6 +135,8 @@ impl AppConfig {
             serpapi_key: get("SERPAPI_KEY", ""),
             bing_api_key: get("BING_API_KEY", ""),
             lens_api_key: get("LENS_API_KEY", ""),
+            firecrawl_api_key: get("FIRECRAWL_API_KEY", ""),
+            firecrawl_api_url: get("FIRECRAWL_API_URL", "https://api.firecrawl.dev/v2"),
             cnipr_client_id: get("CNIPR_CLIENT_ID", CNIPR_DEFAULT_CLIENT_ID),
             cnipr_client_secret: get("CNIPR_CLIENT_SECRET", CNIPR_DEFAULT_CLIENT_SECRET),
             cnipr_user: get("CNIPR_USER", ""),
@@ -168,6 +173,11 @@ impl AppConfig {
     /// Whether Lens.org patent API is configured (国内可用替代方案).
     pub fn has_lens(&self) -> bool {
         !self.lens_api_key.is_empty()
+    }
+
+    /// Whether Firecrawl Search API is configured.
+    pub fn has_firecrawl(&self) -> bool {
+        !self.firecrawl_api_key.is_empty()
     }
 
     /// Whether CNIPR (国知局) is configured — 只需登录账号密码，应用凭据已内置。

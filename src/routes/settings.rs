@@ -35,6 +35,9 @@ pub async fn api_get_settings(State(s): State<AppState>) -> Json<serde_json::Val
         "bing_api_key_configured": config.has_bing(),
         "lens_api_key": mask_api_key(&config.lens_api_key),
         "lens_api_key_configured": config.has_lens(),
+        "firecrawl_api_key": mask_api_key(&config.firecrawl_api_key),
+        "firecrawl_api_key_configured": config.has_firecrawl(),
+        "firecrawl_api_url": &config.firecrawl_api_url,
         "cnipr_client_id": &config.cnipr_client_id,
         "cnipr_user": &config.cnipr_user,
         "cnipr_password": mask_api_key(&config.cnipr_password),
@@ -143,6 +146,56 @@ pub async fn api_save_ai(
     let _ = update_env_file("AI_API_KEY", api_key);
     let _ = update_env_file("AI_MODEL", model);
 
+    Json(json!({"status": "ok"}))
+}
+
+#[allow(dead_code)] // 在 main.rs bin target 中使用
+pub async fn api_save_firecrawl(
+    State(s): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let api_key = req["api_key"].as_str().unwrap_or("").trim();
+    let api_url = req["api_url"]
+        .as_str()
+        .unwrap_or("https://api.firecrawl.dev/v2")
+        .trim()
+        .trim_end_matches('/')
+        .to_string();
+
+    if api_key.is_empty() {
+        {
+            let mut config = s.config.write().unwrap_or_else(|e| e.into_inner());
+            config.firecrawl_api_key = String::new();
+            config.firecrawl_api_url = if api_url.is_empty() {
+                "https://api.firecrawl.dev/v2".to_string()
+            } else {
+                api_url.clone()
+            };
+        }
+        let _ = s.db.set_setting("FIRECRAWL_API_KEY", "");
+        let _ = s.db.set_setting("FIRECRAWL_API_URL", &api_url);
+        let _ = update_env_file("FIRECRAWL_API_KEY", "");
+        let _ = update_env_file("FIRECRAWL_API_URL", &api_url);
+        return Json(json!({"status": "ok", "message": "Firecrawl Key 已清除"}));
+    }
+    if api_key.len() < 8 || api_key.len() > 300 {
+        return Json(json!({"status": "error", "message": "Firecrawl Key 长度无效（8-300字符）"}));
+    }
+    if api_url.is_empty() || (!api_url.starts_with("http://") && !api_url.starts_with("https://")) {
+        return Json(
+            json!({"status": "error", "message": "Firecrawl API URL 必须是 http 或 https"}),
+        );
+    }
+
+    {
+        let mut config = s.config.write().unwrap_or_else(|e| e.into_inner());
+        config.firecrawl_api_key = api_key.to_string();
+        config.firecrawl_api_url = api_url.clone();
+    }
+    let _ = s.db.set_setting("FIRECRAWL_API_KEY", api_key);
+    let _ = s.db.set_setting("FIRECRAWL_API_URL", &api_url);
+    let _ = update_env_file("FIRECRAWL_API_KEY", api_key);
+    let _ = update_env_file("FIRECRAWL_API_URL", &api_url);
     Json(json!({"status": "ok"}))
 }
 

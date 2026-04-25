@@ -136,10 +136,24 @@
 
         <div class="setting-group">
             <h3>🔍 搜索配置（国外数据源）</h3>
-            <p>在线检索当前默认优先使用国外数据源链路。</p>
+            <p>在线检索按 SerpAPI → Firecrawl → Google Patents 直连 → Bing 低可信兜底 → 本地库 的顺序执行。</p>
 
             <div class="form-group">
-                <label>Bing Web Search API Key <span style="color:#8b949e;font-size:12px;">（可选网页搜索）</span></label>
+                <label>Firecrawl API URL <span style="color:#8b949e;font-size:12px;">（默认官方 v2，也可填自部署地址）</span></label>
+                <input type="text" id="firecrawl-api-url" placeholder="https://api.firecrawl.dev/v2">
+            </div>
+            <div class="form-group">
+                <label>Firecrawl API Key <span style="color:#8b949e;font-size:12px;">（备用搜索，推荐配置）</span></label>
+                <input type="text" id="firecrawl-api-key" placeholder="输入 Firecrawl API Key">
+                <a href="https://www.firecrawl.dev/" target="_blank" class="help-link">
+                    → 获取 Firecrawl Key
+                </a>
+            </div>
+            <button class="btn-save" onclick="saveFirecrawlConfig()">保存 Firecrawl 配置</button>
+            <div id="firecrawl-status" class="status-message"></div>
+
+            <div class="form-group">
+                <label>Bing Web Search API Key <span style="color:#8b949e;font-size:12px;">（低可信兜底，不建议作为主力）</span></label>
                 <input type="text" id="bing-api-key" placeholder="输入 Azure Bing Search API Key">
                 <a href="https://www.microsoft.com/en-us/bing/apis/bing-web-search-api" target="_blank" class="help-link">
                     → 注册 Azure 获取免费 Key（每月 1000 次）
@@ -152,7 +166,7 @@
 
         <div class="setting-group">
             <h3>🔑 SerpAPI 配置（可选，需要 VPN 或海外服务器）</h3>
-            <p>配置 SerpAPI Key 后可搜索 Google Patents 全球专利数据。未配置时仍可使用本地专利库或上方国内方案。</p>
+            <p>配置 SerpAPI Key 后作为在线专利搜索第一优先级。未配置或无结果时会继续尝试 Firecrawl / Google Patents / Bing / 本地库。</p>
             <p style="color:#f0ad4e;font-size:13px;">SerpAPI 免费版每月 250 次搜索，足够个人使用。</p>
             <div class="form-group">
                 <label>SerpAPI Key</label>
@@ -245,6 +259,8 @@
                     const config = await res.json();
                     loadedConfig = config;
                     document.getElementById('serpapi-key').value = config.serpapi_key || '';
+                    document.getElementById('firecrawl-api-key').value = config.firecrawl_api_key || '';
+                    document.getElementById('firecrawl-api-url').value = config.firecrawl_api_url || 'https://api.firecrawl.dev/v2';
                     document.getElementById('bing-api-key').value = config.bing_api_key || '';
                     document.getElementById('cnipr-client-id').value = config.cnipr_client_id || '';
                     document.getElementById('cnipr-user').value = config.cnipr_user || '';
@@ -303,13 +319,15 @@
             if (config.serpapi_key_configured) {
                 status.push('✅ SerpAPI 已配置（Google Patents）');
             }
-            if (!config.serpapi_key_configured && config.bing_api_key_configured) {
-                const parts = [];
-                if (config.bing_api_key_configured) parts.push('Bing 网页搜索');
-                status.push('✅ 备用搜索已配置（' + parts.join(' + ') + '）');
+            if (config.firecrawl_api_key_configured) {
+                status.push('✅ Firecrawl 已配置（第二优先级备用搜索）');
             }
-            if (!config.serpapi_key_configured) {
-                status.push('⚠️ 国外在线专利搜索未配置（将回退本地数据库）');
+            status.push('✅ Google Patents 直连可用（无需 Key，网络不可达时自动跳过）');
+            if (config.bing_api_key_configured) {
+                status.push('⚠️ Bing 已配置（低可信网页兜底）');
+            }
+            if (!config.serpapi_key_configured && !config.firecrawl_api_key_configured && !config.bing_api_key_configured) {
+                status.push('⚠️ 未配置付费/授权在线源，将主要依赖 Google Patents 直连和本地缓存');
             }
 
             if (config.ai_api_key_configured) {
@@ -338,6 +356,28 @@
                 statusEl.className = 'status-message error';
                 statusEl.textContent = '❌ 保存失败: ' + e.message;
                 statusEl.style.display = 'block';
+            }
+        }
+
+        async function saveFirecrawlConfig() {
+            const apiUrl = document.getElementById('firecrawl-api-url').value.trim() || 'https://api.firecrawl.dev/v2';
+            const apiKey = document.getElementById('firecrawl-api-key').value.trim();
+            const statusEl = document.getElementById('firecrawl-status');
+
+            try {
+                const res = await fetch('/api/settings/firecrawl', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ api_url: apiUrl, api_key: apiKey })
+                });
+                const data = await res.json();
+                if (res.ok && data.status === 'ok') {
+                    showStatus(statusEl, 'success', apiKey ? '✅ Firecrawl 配置已保存' : '✅ Firecrawl Key 已清除，API URL 已保存');
+                } else {
+                    showStatus(statusEl, 'error', data.message || '保存失败，请重试');
+                }
+            } catch (e) {
+                showStatus(statusEl, 'error', '网络错误：' + e.message);
             }
         }
 
