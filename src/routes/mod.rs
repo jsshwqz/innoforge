@@ -37,9 +37,13 @@ pub use upload::*;
 
 use crate::{ai::AiClient, db::Database, pipeline::context::PipelineProgress};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
 use tokio::sync::broadcast;
+
+/// Round-robin counter for SerpAPI multi-key rotation.
+static SERPAPI_KEY_INDEX: AtomicUsize = AtomicUsize::new(0);
 
 /// 管道通道条目，附带创建时间用于超时清理
 /// Pipeline channel entry with creation timestamp for stale cleanup
@@ -55,11 +59,15 @@ const CNIPR_DEFAULT_CLIENT_SECRET: &str = "BE9DA0B9AB9DC573BDFF56F9E5C46218";
 /// Shared application configuration (replaces env::set_var).
 #[derive(Debug, Clone)]
 pub struct AppConfig {
-    pub serpapi_key: String,
+    /// SerpAPI multi-key support (round-robin) — 最多 5 个 Key，自动轮询
+    pub serpapi_keys: Vec<String>,
     /// Bing Web Search API key (Azure Cognitive Services) — 国内可用，替代 SerpAPI
     pub bing_api_key: String,
     /// Lens.org Patent API key — 国内可用，替代 Google Patents
     pub lens_api_key: String,
+    /// Firecrawl Search API — SerpAPI 后备，用于发现专利站页面
+    pub firecrawl_api_key: String,
+    pub firecrawl_api_url: String,
     /// CNIPR 开放平台（国知局）— 中国专利权威数据源
     pub cnipr_client_id: String,
     pub cnipr_client_secret: String,
@@ -109,6 +117,22 @@ impl AppConfig {
             std::env::var(key).unwrap_or_else(|_| default.to_string())
         };
 
+        // Load SerpAPI multi-key (SERPAPI_KEY_1 ~ SERPAPI_KEY_5)
+        let mut serpapi_keys: Vec<String> = Vec::new();
+        for i in 1..=5 {
+            let k = get(&format!("SERPAPI_KEY_{}", i), "");
+            if !k.is_empty() && k != "your-serpapi-key-here" {
+                serpapi_keys.push(k);
+            }
+        }
+        // Backward compatibility: read old SERPAPI_KEY if no multi-key configured
+        if serpapi_keys.is_empty() {
+            let old = get("SERPAPI_KEY", "");
+            if !old.is_empty() && old != "your-serpapi-key-here" {
+                serpapi_keys.push(old);
+            }
+        }
+
         let mut fallbacks = Vec::new();
         for i in 1..=5 {
             let url = get(&format!("FALLBACK_AI_{}_URL", i), "");
@@ -129,9 +153,11 @@ impl AppConfig {
         }
 
         Self {
-            serpapi_key: get("SERPAPI_KEY", ""),
+            serpapi_keys,
             bing_api_key: get("BING_API_KEY", ""),
             lens_api_key: get("LENS_API_KEY", ""),
+            firecrawl_api_key: get("FIRECRAWL_API_KEY", ""),
+            firecrawl_api_url: get("FIRECRAWL_API_URL", "https://api.firecrawl.dev/v2"),
             cnipr_client_id: get("CNIPR_CLIENT_ID", CNIPR_DEFAULT_CLIENT_ID),
             cnipr_client_secret: get("CNIPR_CLIENT_SECRET", CNIPR_DEFAULT_CLIENT_SECRET),
             cnipr_user: get("CNIPR_USER", ""),
@@ -147,6 +173,8 @@ impl AppConfig {
     }
 
     /// Build an AiClient from the current config (with fallback support).
+    /// Primary is always the configured AI_URL/AI_KEY/AI_MODEL;
+    /// fallbacks are tried only when the primary fails at runtime.
     pub fn ai_client(&self) -> AiClient {
         let mut client = AiClient::with_config(&self.ai_base_url, &self.ai_api_key, &self.ai_model);
         for fb in &self.ai_fallbacks {
@@ -155,9 +183,18 @@ impl AppConfig {
         client
     }
 
-    /// Whether SerpAPI is configured and usable.
+    /// Whether at least one SerpAPI key is configured.
     pub fn has_serpapi(&self) -> bool {
-        !self.serpapi_key.is_empty() && self.serpapi_key != "your-serpapi-key-here"
+        !self.serpapi_keys.is_empty()
+    }
+
+    /// Round-robin: pick the next SerpAPI key.
+    pub fn next_serpapi_key(&self) -> Option<String> {
+        if self.serpapi_keys.is_empty() {
+            return None;
+        }
+        let idx = SERPAPI_KEY_INDEX.fetch_add(1, Ordering::Relaxed) % self.serpapi_keys.len();
+        Some(self.serpapi_keys[idx].clone())
     }
 
     /// Whether Bing Search API is configured (国内可用替代方案).
@@ -168,6 +205,11 @@ impl AppConfig {
     /// Whether Lens.org patent API is configured (国内可用替代方案).
     pub fn has_lens(&self) -> bool {
         !self.lens_api_key.is_empty()
+    }
+
+    /// Whether Firecrawl Search API is configured.
+    pub fn has_firecrawl(&self) -> bool {
+        !self.firecrawl_api_key.is_empty()
     }
 
     /// Whether CNIPR (国知局) is configured — 只需登录账号密码，应用凭据已内置。
@@ -268,15 +310,16 @@ pub(crate) fn build_online_query(
         Some(SearchType::Applicant) => format!("assignee:\"{}\"", q),
         Some(SearchType::Inventor) => format!("inventor:\"{}\"", q),
         Some(SearchType::PatentNumber) => {
-            // For bare Chinese application numbers (e.g. "202210835143.9"),
+            // For Chinese application numbers (e.g. "CN202420009882.7" or "202210835143.9"),
             // Google Patents indexes by PUBLICATION number, not application number.
             // CN application number format: YYYYMMNNNNNN.X (12 digits + check digit)
             let digits: String = q.chars().filter(|c| c.is_ascii_digit()).collect();
             let has_dot = q.contains('.');
-            let is_bare_cn_app = digits.len() >= 10
+            let is_cn_app = digits.len() >= 10
                 && digits.len() <= 15
-                && q.chars().all(|c| c.is_ascii_digit() || c == '.');
-            if is_bare_cn_app {
+                && (q.chars().all(|c| c.is_ascii_digit() || c == '.')
+                    || (q.starts_with("CN") && q.contains('.')));
+            if is_cn_app {
                 // If the original query has a dot (e.g. "202210835143.9"),
                 // strip the check digit after dot → use 12-digit core number.
                 // If no dot but 13 digits, the last digit is likely the check digit.

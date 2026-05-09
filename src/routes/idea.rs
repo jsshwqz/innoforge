@@ -231,7 +231,7 @@ pub async fn api_idea_analyze(
     let runner = PipelineRunner::new(
         ai_client,
         db.clone(),
-        config.serpapi_key.clone(),
+        config.next_serpapi_key().unwrap_or_default(),
         config.bing_api_key.clone(),
         config.lens_api_key.clone(),
         true, // quick_mode
@@ -718,7 +718,7 @@ pub async fn api_idea_pipeline(
     let config = s.config.read().unwrap_or_else(|e| e.into_inner()).clone();
     let ai_client = config.ai_client();
     let db = s.db.clone();
-    let serpapi_key = config.serpapi_key.clone();
+    let serpapi_key = config.next_serpapi_key().unwrap_or_default();
     let bing_api_key = config.bing_api_key.clone();
     let lens_api_key = config.lens_api_key.clone();
     let runner = PipelineRunner::new(
@@ -847,7 +847,7 @@ pub async fn api_idea_resume(
     let runner = PipelineRunner::new(
         ai_client,
         db.clone(),
-        config.serpapi_key.clone(),
+        config.next_serpapi_key().unwrap_or_default(),
         config.bing_api_key.clone(),
         config.lens_api_key.clone(),
         false,
@@ -1524,7 +1524,7 @@ pub async fn api_idea_iterate(
     let mut orch = crate::orchestrator::engine::Orchestrator::new(
         config.ai_client(),
         s.db.clone(),
-        config.serpapi_key.clone(),
+        config.next_serpapi_key().unwrap_or_default(),
         config.bing_api_key.clone(),
         config.lens_api_key.clone(),
         false,
@@ -1673,7 +1673,7 @@ pub async fn api_idea_redirect(
     let mut orch = crate::orchestrator::engine::Orchestrator::new(
         config.ai_client(),
         s.db.clone(),
-        config.serpapi_key.clone(),
+        config.next_serpapi_key().unwrap_or_default(),
         config.bing_api_key.clone(),
         config.lens_api_key.clone(),
         false,

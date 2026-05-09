@@ -270,7 +270,7 @@ impl AiClient {
     }
 
     /// 全局超时上限
-    pub(super) const GLOBAL_TIMEOUT_SECS: u64 = 45;
+    pub(super) const GLOBAL_TIMEOUT_SECS: u64 = 60;
 
     /// 带全局超时的 AI 调用入口
     pub(super) async fn send_chat(

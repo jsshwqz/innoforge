@@ -52,11 +52,10 @@ pub async fn api_enrich_patent(
         .config
         .read()
         .unwrap_or_else(|e| e.into_inner())
-        .serpapi_key
-        .clone();
-    if api_key.is_empty() {
+        .next_serpapi_key();
+    let Some(ref api_key) = api_key else {
         return Json(json!({"status":"error","message":"SERPAPI_KEY not configured"}));
-    }
+    };
 
     let lang = if patent.country == "CN" || patent.patent_number.starts_with("CN") {
         "zh"
@@ -559,20 +558,18 @@ pub async fn api_patent_pdf(
         }
     };
 
-    // Auto-enrich if missing full text
+    // Auto-enrich if missing full text — use old pattern to avoid Handler trait issue
     if patent.description.len() < 50 || patent.claims.len() < 50 {
         println!(
             "[PDF] Auto-enriching patent {} before PDF generation",
             patent.patent_number
         );
-        // Try SerpAPI enrich
         let api_key = s
             .config
             .read()
             .unwrap_or_else(|e| e.into_inner())
-            .serpapi_key
-            .clone();
-        if !api_key.is_empty() {
+            .next_serpapi_key();
+        if let Some(ref api_key) = api_key {
             let lang = if patent.country == "CN" || patent.patent_number.starts_with("CN") {
                 "zh"
             } else {
@@ -916,11 +913,10 @@ async fn fetch_legal_from_google_patents(
     let serpapi_key = config
         .read()
         .unwrap_or_else(|e| e.into_inner())
-        .serpapi_key
-        .clone();
-    if serpapi_key.is_empty() {
+        .next_serpapi_key();
+    let Some(ref serpapi_key) = serpapi_key else {
         return Err(anyhow::anyhow!("SerpAPI key not configured"));
-    }
+    };
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
