@@ -142,6 +142,7 @@ impl AiClient {
     pub fn with_config(base_url: &str, api_key: &str, model: &str) -> Self {
         Self {
             client: Client::builder()
+                .no_proxy()
                 .timeout(Duration::from_secs(PROVIDER_HTTP_TIMEOUT_SECS))
                 .build()
                 .unwrap_or_else(|_| Client::new()),
