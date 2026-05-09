@@ -5,6 +5,28 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 
+## [v0.5.8] - 2026-05-09
+
+### 新增 / Added
+- **SerpAPI 多 Key 轮询** -- 支持配置最多 5 个 SerpAPI Key 自动轮询，突破单账号每月 250 次限制
+  SerpAPI multi-key round-robin -- supports up to 5 keys to bypass monthly 250-query limit
+- **设置页多 Key UI** -- 设置页面支持动态增删 SerpAPI Key 行
+  Settings page multi-key UI with dynamic add/delete rows
+
+### 修复 / Fixed
+- 设置页删除 Key 行后保存丢失数据（`querySelectorAll` 修复）
+  Fixed key loss after deleting a row on settings page (querySelectorAll fix)
+- AI 备用服务商自动启用 bug（`ai_client()` 回退到主 AI 优先）
+  Fixed auto-promotion of backup AI providers (ai_client() now prefers primary)
+- 生产路径 `unwrap()` 消除（search.rs 等）
+  Removed unwrap() from production code paths (search.rs, etc.)
+- `api_patent_pdf` Handler 编译错误（内联方法链拆解）
+  Fixed api_patent_pdf Handler trait compilation error
+- 搜索降级链优化：SerpAPI → Firecrawl → Google Patents → Bing → 本地库
+  Optimized search fallback chain
+
+---
+
 ## [v0.5.6] - 2026-04-18
 
 ### 新增 / Added
