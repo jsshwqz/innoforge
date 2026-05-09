@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::time::Duration;
 
-const PROVIDER_HTTP_TIMEOUT_SECS: u64 = 25;
+const PROVIDER_HTTP_TIMEOUT_SECS: u64 = 45;
 const PROVIDER_MAX_RETRIES: usize = 1;
 
 /// 单个 AI 服务商端点 / A single AI provider endpoint.
