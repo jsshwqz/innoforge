@@ -27,6 +27,18 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 
+## [v0.5.7] - 2026-05-02
+
+### 新增 / Added
+- **Firecrawl 专利兜底搜索** -- 新增 Firecrawl 作为 SerpAPI 超时/无结果时的降级源
+  Added Firecrawl patent fallback search when SerpAPI times out or returns no results
+
+### 改进 / Improved
+- 启动与搜索质量优化
+  Startup and search quality improvements
+
+---
+
 ## [v0.5.6] - 2026-04-18
 
 ### 新增 / Added
