@@ -103,132 +103,97 @@
         <h2>系统设置</h2>
 
         <div class="setting-group">
-            <h3>🇨🇳 CNIPR 国知局专利搜索（兼容保留）</h3>
-            <p>该配置项保留用于兼容历史版本。</p>
-            <p style="color:#f0ad4e;font-size:13px;">当前在线检索主链路默认使用国外数据源（SerpAPI / Google Patents），不再优先走 CNIPR。</p>
-
-            <div class="form-group">
-                <label>登录账号</label>
-                <input type="text" id="cnipr-user" placeholder="CNIPR 开放平台注册的用户名/手机号">
-            </div>
-            <div class="form-group">
-                <label>登录密码</label>
-                <input type="password" id="cnipr-password" placeholder="登录密码">
-            </div>
-            <a href="https://open.cnipr.com/" target="_blank" class="help-link">
-                → 注册 CNIPR 开放平台账号（免费，国知局背景）
-            </a>
-            <br><br>
-            <details style="margin-bottom:12px;">
-                <summary style="color:#8b949e;font-size:13px;cursor:pointer;">高级：自定义应用凭据（一般无需修改）</summary>
-                <div class="form-group" style="margin-top:10px;">
-                    <label>Client ID <span style="color:#8b949e;font-size:12px;">（已内置默认值）</span></label>
-                    <input type="text" id="cnipr-client-id" placeholder="使用内置默认值">
-                </div>
-                <div class="form-group">
-                    <label>Client Secret</label>
-                    <input type="text" id="cnipr-client-secret" placeholder="使用内置默认值">
-                </div>
-            </details>
-            <button class="btn-save" onclick="saveCniprConfig()">保存 CNIPR 配置</button>
-            <div id="cnipr-status" class="status-message"></div>
-        </div>
-
-        <div class="setting-group">
-            <h3>🔍 搜索配置（国外数据源）</h3>
-            <p>在线检索按 SerpAPI → Firecrawl → Google Patents 直连 → Bing 低可信兜底 → 本地库 的顺序执行。</p>
-
-            <div class="form-group">
-                <label>Firecrawl API URL <span style="color:#8b949e;font-size:12px;">（默认官方 v2，也可填自部署地址）</span></label>
-                <input type="text" id="firecrawl-api-url" placeholder="https://api.firecrawl.dev/v2">
-            </div>
-            <div class="form-group">
-                <label>Firecrawl API Key <span style="color:#8b949e;font-size:12px;">（备用搜索，推荐配置）</span></label>
-                <input type="text" id="firecrawl-api-key" placeholder="输入 Firecrawl API Key">
-                <a href="https://www.firecrawl.dev/" target="_blank" class="help-link">
-                    → 获取 Firecrawl Key
-                </a>
-            </div>
-            <button class="btn-save" onclick="saveFirecrawlConfig()">保存 Firecrawl 配置</button>
-            <div id="firecrawl-status" class="status-message"></div>
-
-            <div class="form-group">
-                <label>Bing Web Search API Key <span style="color:#8b949e;font-size:12px;">（低可信兜底，不建议作为主力）</span></label>
-                <input type="text" id="bing-api-key" placeholder="输入 Azure Bing Search API Key">
-                <a href="https://www.microsoft.com/en-us/bing/apis/bing-web-search-api" target="_blank" class="help-link">
-                    → 注册 Azure 获取免费 Key（每月 1000 次）
-                </a>
-            </div>
-            <button class="btn-save" onclick="saveBingKey()">保存 Bing Key</button>
-            <div id="bing-status" class="status-message"></div>
-
-        </div>
-
-        <div class="setting-group">
-            <h3>🔑 SerpAPI 配置（可选，需要 VPN 或海外服务器）</h3>
-            <p>配置 SerpAPI Key 后作为在线专利搜索第一优先级。未配置或无结果时会继续尝试 Firecrawl / Google Patents / Bing / 本地库。</p>
-            <p style="color:#f0ad4e;font-size:13px;">SerpAPI 免费版每月 250 次搜索，足够个人使用。</p>
-            <div class="form-group">
-                <label>SerpAPI Key</label>
-                <input type="text" id="serpapi-key" placeholder="输入你的 SerpAPI Key">
-                <a href="https://serpapi.com/manage-api-key" target="_blank" class="help-link">
-                    → 注册获取免费 Key（每月 250 次）
-                </a>
-            </div>
-            <button class="btn-save" onclick="saveSerpApiKey()">保存搜索配置</button>
+            <h3>🔑 SerpAPI 搜索配置（多 Key 轮询）</h3>
+            <p>配置多个 SerpAPI Key 自动轮询，突破单账号每月 250 次限制。未配置时自动降级到 Firecrawl / Google Patents 直连 / Bing。</p>
+            <p style="color:#f0ad4e;font-size:13px;">注册地址：<a href="https://serpapi.com/manage-api-key" target="_blank">https://serpapi.com/manage-api-key</a></p>
+            <div id="serpapi-key-list"></div>
+            <button class="btn-save" style="background:#21262d;margin-top:8px;" onclick="addSerpapiKeyRow()">+ 添加 SerpAPI Key</button>
+            <button class="btn-save" onclick="saveSerpApiKey()">保存</button>
             <div id="serpapi-status" class="status-message"></div>
         </div>
 
         <div class="setting-group">
-            <h3>🤖 AI 配置（智能分析）</h3>
-            <p>配置 AI 服务用于专利智能分析、创意验证、摘要生成等功能</p>
-
-            <div class="form-group">
-                <label>AI 服务商</label>
-                <select id="ai-provider" onchange="updateAiFields()">
-                    <option value="zhipu">智谱 GLM-4.7-Flash（免费）</option>
-                    <option value="zhipu-plus">智谱 GLM-4-Plus（付费，更强）</option>
-                    <option value="deepseek">DeepSeek（低价）</option>
-                    <option value="openrouter">OpenRouter（多模型聚合）</option>
-                    <option value="gemini">Google Gemini（免费额度）</option>
-                    <option value="openai">OpenAI GPT</option>
-                    <option value="claude">Claude (Anthropic)</option>
-                    <option value="nvidia">NVIDIA NIM</option>
-                    <option value="ollama">Ollama（本地部署）</option>
-                    <option value="custom">自定义（任意 OpenAI 兼容 API）</option>
-                </select>
-            </div>
-
-            <div id="provider-guide" style="margin:10px 0;padding:10px;background:#0d1117;border:1px solid #30363d;border-radius:4px;font-size:13px;color:#8b949e;display:none;">
-            </div>
-
-            <div class="form-group">
-                <label>API Base URL</label>
-                <input type="text" id="ai-base-url" placeholder="https://open.bigmodel.cn/api/paas/v4">
-            </div>
+            <h3>🤖 DeepSeek AI 配置</h3>
+            <p>当前默认 AI 服务商，用于专利分析、创意验证等。</p>
 
             <div class="form-group">
                 <label>API Key</label>
-                <input type="text" id="ai-api-key" placeholder="输入你的 AI API Key">
+                <input type="text" id="ai-api-key" placeholder="输入 DeepSeek API Key">
+                <a href="https://platform.deepseek.com/" target="_blank" class="help-link">
+                    → 获取 DeepSeek Key
+                </a>
             </div>
 
-            <div class="form-group">
-                <label>模型名称</label>
-                <input type="text" id="ai-model" placeholder="glm-4.7-flash">
-            </div>
+            <input type="hidden" id="ai-base-url" value="https://api.deepseek.com/v1">
+            <input type="hidden" id="ai-model" value="deepseek-chat">
 
-            <button class="btn-save" onclick="saveAiConfig()">保存 AI 配置</button>
+            <button class="btn-save" onclick="saveAiConfig()">保存</button>
             <div id="ai-status" class="status-message"></div>
         </div>
 
-        <div class="setting-group">
-            <h3>🔄 备用 AI（主 AI 失败时自动切换）</h3>
-            <p>配置备用 AI 服务商。当主 AI 不可用时自动降级到备用。支持最多 5 个备用。</p>
-            <div id="fallback-list"></div>
-            <button class="btn-save" style="background:#21262d;margin-top:8px;" onclick="addFallbackRow()">+ 添加备用 AI</button>
-            <button class="btn-save" onclick="saveFallbacks()">保存备用 AI 配置</button>
-            <div id="fallback-status" class="status-message"></div>
-        </div>
+        <details style="margin-top:24px;background:#1e1e1e;border-radius:8px;padding:16px;">
+            <summary style="color:#8b949e;font-size:14px;cursor:pointer;padding:8px;">⚙️ 高级设置（备用搜索源、备用 AI、CNIPR 等）</summary>
+            <div style="margin-top:16px;">
+
+            <div class="setting-group">
+                <h3>🔍 备用搜索源（Firecrawl / Bing）</h3>
+                <p>当 SerpAPI 不可用时按 Firecrawl → Google Patents 直连 → Bing 的顺序降级。</p>
+
+                <div class="form-group">
+                    <label>Firecrawl API URL <span style="color:#8b949e;font-size:12px;">（默认官方 v2）</span></label>
+                    <input type="text" id="firecrawl-api-url" placeholder="https://api.firecrawl.dev/v2">
+                </div>
+                <div class="form-group">
+                    <label>Firecrawl API Key</label>
+                    <input type="text" id="firecrawl-api-key" placeholder="输入 Firecrawl API Key">
+                </div>
+                <button class="btn-save" onclick="saveFirecrawlConfig()">保存 Firecrawl</button>
+                <div id="firecrawl-status" class="status-message"></div>
+
+                <div class="form-group">
+                    <label>Bing Web Search API Key</label>
+                    <input type="text" id="bing-api-key" placeholder="输入 Azure Bing Search API Key">
+                </div>
+                <button class="btn-save" onclick="saveBingKey()">保存 Bing</button>
+                <div id="bing-status" class="status-message"></div>
+            </div>
+
+            <div class="setting-group">
+                <h3>🇨🇳 CNIPR 国知局搜索</h3>
+                <div class="form-group">
+                    <label>登录账号</label>
+                    <input type="text" id="cnipr-user" placeholder="CNIPR 开放平台注册的用户名/手机号">
+                </div>
+                <div class="form-group">
+                    <label>登录密码</label>
+                    <input type="password" id="cnipr-password" placeholder="登录密码">
+                </div>
+                <details style="margin-bottom:12px;">
+                    <summary style="color:#8b949e;font-size:13px;cursor:pointer;">高级：自定义应用凭据（一般无需修改）</summary>
+                    <div class="form-group" style="margin-top:10px;">
+                        <label>Client ID <span style="color:#8b949e;font-size:12px;">（已内置默认值）</span></label>
+                        <input type="text" id="cnipr-client-id" placeholder="使用内置默认值">
+                    </div>
+                    <div class="form-group">
+                        <label>Client Secret</label>
+                        <input type="text" id="cnipr-client-secret" placeholder="使用内置默认值">
+                    </div>
+                </details>
+                <button class="btn-save" onclick="saveCniprConfig()">保存 CNIPR</button>
+                <div id="cnipr-status" class="status-message"></div>
+            </div>
+
+            <div class="setting-group">
+                <h3>🔄 备用 AI</h3>
+                <p>主 AI（DeepSeek）不可用时自动切换。支持最多 5 个备用。</p>
+                <div id="fallback-list"></div>
+                <button class="btn-save" style="background:#21262d;margin-top:8px;" onclick="addFallbackRow()">+ 添加备用 AI</button>
+                <button class="btn-save" onclick="saveFallbacks()">保存备用 AI</button>
+                <div id="fallback-status" class="status-message"></div>
+            </div>
+
+            </div>
+        </details>
 
         <div class="setting-group">
             <h3>ℹ️ 当前配置状态</h3>
@@ -258,7 +223,14 @@
                 if (res.ok) {
                     const config = await res.json();
                     loadedConfig = config;
-                    document.getElementById('serpapi-key').value = config.serpapi_key || '';
+                    // Load SerpAPI multi-key list
+                    if (config.serpapi_keys && config.serpapi_keys.length > 0) {
+                        config.serpapi_keys.forEach(function(k) {
+                            addSerpapiKeyRow(k);
+                        });
+                    } else {
+                        addSerpapiKeyRow('');
+                    }
                     document.getElementById('firecrawl-api-key').value = config.firecrawl_api_key || '';
                     document.getElementById('firecrawl-api-url').value = config.firecrawl_api_url || 'https://api.firecrawl.dev/v2';
                     document.getElementById('bing-api-key').value = config.bing_api_key || '';
@@ -494,20 +466,56 @@
             }
         }
 
-        async function saveSerpApiKey() {
-            const key = document.getElementById('serpapi-key').value.trim();
-            const statusEl = document.getElementById('serpapi-status');
+        // ── SerpAPI Multi-Key Management ──
+        var serpapiKeyCount = 0;
+        function addSerpapiKeyRow(key) {
+            if (serpapiKeyCount >= 5) return;
+            serpapiKeyCount++;
+            var i = serpapiKeyCount;
+            var container = document.getElementById('serpapi-key-list');
+            var row = document.createElement('div');
+            row.style.cssText = 'background:#161b22;border:1px solid #30363d;border-radius:6px;padding:10px;margin-bottom:8px;';
 
+            var header = document.createElement('div');
+            header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;';
+            var title = document.createElement('strong');
+            title.style.color = '#58a6ff';
+            title.textContent = 'SerpAPI Key #' + i;
+            var delBtn = document.createElement('button');
+            delBtn.style.cssText = 'background:#da3633;padding:2px 8px;font-size:0.8em;color:white;border:none;border-radius:4px;cursor:pointer;';
+            delBtn.textContent = '删除';
+            delBtn.addEventListener('click', function() { row.remove(); serpapiKeyCount--; });
+            header.appendChild(title);
+            header.appendChild(delBtn);
+            row.appendChild(header);
+
+            var input = document.createElement('input');
+            input.type = 'text';
+            input.id = 'serpapi-key-' + i;
+            input.placeholder = '输入 SerpAPI Key #' + i;
+            input.value = key || '';
+            input.style.cssText = 'width:100%;padding:8px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;font-size:0.9em;box-sizing:border-box;';
+            row.appendChild(input);
+            container.appendChild(row);
+        }
+
+        async function saveSerpApiKey() {
+            var statusEl = document.getElementById('serpapi-status');
+            var keys = [];
+            var inputs = document.querySelectorAll('#serpapi-key-list input[type="text"]');
+            for (var i = 0; i < inputs.length; i++) {
+                var val = inputs[i].value.trim();
+                if (val) keys.push(val);
+            }
             try {
                 const res = await fetch('/api/settings/serpapi', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ api_key: key })
+                    body: JSON.stringify({ api_keys: keys })
                 });
-
                 const data = await res.json();
                 if (res.ok && data.status === 'ok') {
-                    showStatus(statusEl, 'success', key ? '✅ SerpAPI 配置已保存！' : '✅ SerpAPI Key 已清除');
+                    showStatus(statusEl, 'success', '✅ 已保存 ' + keys.length + ' 个 SerpAPI Key（轮询模式）');
                 } else {
                     showStatus(statusEl, 'error', data.message || '保存失败，请重试');
                 }

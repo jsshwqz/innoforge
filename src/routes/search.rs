@@ -277,22 +277,21 @@ pub async fn api_search_online(
     // 不再进入 CNIPR / 百度 / 搜狗 分支。
 
     // ── 精确专利号查询：当检测为 PatentNumber 时，先尝试 SerpAPI Details 精确抓取 ──
-    let api_key = s
+    // Round-robin 选取一个可用 Key
+    let api_key_opt = s
         .config
         .read()
         .unwrap_or_else(|e| e.into_inner())
-        .serpapi_key
-        .clone();
-    if matches!(online_search_type.as_ref(), Some(SearchType::PatentNumber))
-        && !api_key.is_empty()
-        && api_key != "your-serpapi-key-here"
-    {
-        if let Some(result) = try_exact_patent_lookup(&req.query, &api_key, &s).await {
-            return Json(result);
+        .next_serpapi_key();
+    if matches!(online_search_type.as_ref(), Some(SearchType::PatentNumber)) {
+        if let Some(ref api_key) = api_key_opt {
+            if let Some(result) = try_exact_patent_lookup(&req.query, api_key, &s).await {
+                return Json(result);
+            }
         }
     }
 
-    if !api_key.is_empty() && api_key != "your-serpapi-key-here" {
+    if let Some(ref api_key) = api_key_opt {
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(ONLINE_UPSTREAM_TIMEOUT_SECS))
             .build()
@@ -382,13 +381,14 @@ pub async fn api_search_online(
                                 for (idx, r) in results.iter().enumerate() {
                                     let p = serp_to_patent(r);
                                     if !p.title.is_empty() {
-                                        if let Err(e) = s.db.insert_patent(&p) {
+                                        let saved_id = s.db.insert_patent(&p).unwrap_or_else(|e| {
                                             tracing::warn!(
                                                 "Failed to cache online patent {}: {}",
                                                 p.patent_number,
                                                 e
                                             );
-                                        }
+                                            p.id.clone()
+                                        });
                                         // Hybrid relevance: position + content matching
                                         let position_score = (98.0 - idx as f64 * 3.0).max(30.0);
                                         let content_score = calculate_online_relevance(
@@ -413,7 +413,7 @@ pub async fn api_search_online(
                                             position_score, content_score
                                         );
                                         patents.push(PatentSummary {
-                                            id: p.id.clone(),
+                                            id: saved_id,
                                             patent_number: p.patent_number.clone(),
                                             title: p.title.clone(),
                                             abstract_text: p.abstract_text.clone(),
@@ -506,8 +506,8 @@ pub async fn api_search_online(
         .await
         {
             Ok((patents, total)) if !patents.is_empty() => {
-                let patents = dedup_patent_summaries(patents);
-                for p in &patents {
+                let mut patents = dedup_patent_summaries(patents);
+                for p in &mut patents {
                     let full = Patent {
                         id: p.id.clone(),
                         patent_number: p.patent_number.clone(),
@@ -535,7 +535,9 @@ pub async fn api_search_online(
                         images: "[]".into(),
                         pdf_url: String::new(),
                     };
-                    let _ = s.db.insert_patent(&full);
+                    if let Ok(saved_id) = s.db.insert_patent(&full) {
+                        p.id = saved_id;
+                    }
                 }
                 let mut out = json!({
                     "patents": patents,
@@ -553,8 +555,13 @@ pub async fn api_search_online(
             Ok(_) => println!("[ONLINE] Firecrawl patent fallback returned empty"),
             Err(e) => {
                 println!("[ONLINE] Firecrawl patent fallback error: {}", e);
-                if upstream_hint.is_none() {
-                    upstream_hint = Some(format!("Firecrawl 兜底异常：{}。", e));
+                let err_str = e.to_string().to_lowercase();
+                let is_auth_err = err_str.contains("401")
+                    || err_str.contains("403")
+                    || err_str.contains("unauthorized")
+                    || err_str.contains("invalid key");
+                if upstream_hint.is_none() && !is_auth_err {
+                    upstream_hint = Some("Firecrawl 兜底异常，已跳过。".to_string());
                 }
             }
         }
@@ -567,9 +574,9 @@ pub async fn api_search_online(
         println!("[ONLINE] Trying Google Patents direct (free)...");
         match search_google_patents_direct(&req, online_search_type.as_ref(), is_cn_query).await {
             Ok((patents, total)) if !patents.is_empty() => {
-                let patents = dedup_patent_summaries(patents);
+                let mut patents = dedup_patent_summaries(patents);
                 // Cache results to local DB
-                for p in &patents {
+                for p in &mut patents {
                     let full = Patent {
                         id: p.id.clone(),
                         patent_number: p.patent_number.clone(),
@@ -597,7 +604,9 @@ pub async fn api_search_online(
                         images: "[]".into(),
                         pdf_url: String::new(),
                     };
-                    let _ = s.db.insert_patent(&full);
+                    if let Ok(saved_id) = s.db.insert_patent(&full) {
+                        p.id = saved_id;
+                    }
                 }
                 let dedup_total = total.max(patents.len());
                 return Json(json!({
@@ -633,8 +642,8 @@ pub async fn api_search_online(
         .await
         {
             Ok((patents, total)) if !patents.is_empty() => {
-                let patents = dedup_patent_summaries(patents);
-                for p in &patents {
+                let mut patents = dedup_patent_summaries(patents);
+                for p in &mut patents {
                     let full = Patent {
                         id: p.id.clone(),
                         patent_number: p.patent_number.clone(),
@@ -662,7 +671,9 @@ pub async fn api_search_online(
                         images: "[]".into(),
                         pdf_url: String::new(),
                     };
-                    let _ = s.db.insert_patent(&full);
+                    if let Ok(saved_id) = s.db.insert_patent(&full) {
+                        p.id = saved_id;
+                    }
                 }
 
                 let dedup_total = total.max(patents.len());
@@ -683,8 +694,13 @@ pub async fn api_search_online(
             Ok(_) => println!("[ONLINE] Bing patent fallback returned empty"),
             Err(e) => {
                 println!("[ONLINE] Bing patent fallback error: {}", e);
-                if upstream_hint.is_none() {
-                    upstream_hint = Some(format!("Bing 兜底异常：{}。", e));
+                let err_str = e.to_string().to_lowercase();
+                let is_auth_err = err_str.contains("401")
+                    || err_str.contains("403")
+                    || err_str.contains("unauthorized")
+                    || err_str.contains("invalid subscription key");
+                if upstream_hint.is_none() && !is_auth_err {
+                    upstream_hint = Some("Bing 兜底异常，已跳过。".to_string());
                 }
             }
         }
@@ -2081,6 +2097,9 @@ async fn try_exact_patent_lookup(
         && digits.len() <= 15
         && q.chars().all(|c| c.is_ascii_digit() || c == '.');
 
+    let is_cn_app_with_prefix =
+        q.starts_with("CN") && q.contains('.') && digits.len() >= 10 && digits.len() <= 15;
+
     if q.starts_with("CN")
         || q.starts_with("US")
         || q.starts_with("EP")
@@ -2088,10 +2107,56 @@ async fn try_exact_patent_lookup(
         || q.starts_with("JP")
         || q.starts_with("KR")
     {
-        // Already has country prefix — likely a publication number, try directly
-        let no_dot = q.replace('.', "");
-        let lang = if q.starts_with("CN") { "zh" } else { "en" };
-        patent_id = format!("patent/{}/{}", no_dot, lang);
+        if is_cn_app_with_prefix {
+            // CN APPLICATION number with CN prefix (e.g., CN202420009882.7)
+            // Google Patents indexes by PUBLICATION number, not application number.
+            // We must first search to discover the publication number.
+            let dot_pos = q.find('.').unwrap_or(q.len());
+            let core: String = q[..dot_pos]
+                .chars()
+                .filter(|c| c.is_ascii_digit())
+                .collect();
+            println!(
+                "[EXACT] CN app number with prefix detected, searching for publication via '{}'",
+                core
+            );
+
+            let search_url = format!(
+                "https://serpapi.com/search.json?engine=google_patents&q={}&page=1&api_key={}",
+                urlencoding::encode(&core),
+                api_key
+            );
+            let resp = client.get(&search_url).send().await.ok()?;
+            let body = resp.text().await.ok()?;
+            let json: serde_json::Value = serde_json::from_str(&body).ok()?;
+
+            let found_id = json["organic_results"]
+                .as_array()
+                .and_then(|arr| arr.first())
+                .and_then(|r| r["patent_id"].as_str())
+                .map(|s| s.to_string());
+
+            match found_id {
+                Some(id) => {
+                    let id = if id.contains("/CN") {
+                        id.replace("/en", "/zh")
+                    } else {
+                        id
+                    };
+                    println!("[EXACT] Found publication via keyword search: {}", id);
+                    patent_id = id;
+                }
+                None => {
+                    println!("[EXACT] Keyword search returned no results for '{}'", core);
+                    return None;
+                }
+            }
+        } else {
+            // Already has country prefix — publication number, try directly
+            let no_dot = q.replace('.', "");
+            let lang = if q.starts_with("CN") { "zh" } else { "en" };
+            patent_id = format!("patent/{}/{}", no_dot, lang);
+        }
     } else if is_bare_cn_app {
         // Bare Chinese APPLICATION number (e.g. 202210835143.9)
         // Google Patents indexes by PUBLICATION number, not application number.
@@ -2224,11 +2289,11 @@ async fn try_exact_patent_lookup(
         pdf_url: json["pdf"].as_str().unwrap_or("").to_string(),
     };
 
-    // Cache to local DB
-    let _ = state.db.insert_patent(&patent);
+    // Cache to local DB, use actual stored id
+    let saved_id = state.db.insert_patent(&patent).unwrap_or(patent.id.clone());
 
     let summary = PatentSummary {
-        id: patent.id.clone(),
+        id: saved_id,
         patent_number: patent.patent_number.clone(),
         title: patent.title.clone(),
         abstract_text: patent.abstract_text.clone(),

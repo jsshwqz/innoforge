@@ -83,6 +83,23 @@
 .pdf-modal iframe { flex:1; border:none; border-radius:0 0 8px 8px; }
 .btn-preview { background:#21262d; border:1px solid #30363d; color:#58a6ff; padding:3px 8px; border-radius:4px; cursor:pointer; font-size:12px; margin-left:4px; }
 .btn-preview:hover { background:#30363d; color:#79c0ff; }
+/* Discussion panel */
+.discussion-panel { margin-top:16px; border-top:1px solid #30363d; padding-top:16px; }
+.discussion-panel.hidden { display:none; }
+.discussion-header { display:flex; align-items:center; gap:8px; margin-bottom:12px; color:#8b949e; font-weight:600; font-size:14px; }
+.discussion-messages { max-height:400px; overflow-y:auto; display:flex; flex-direction:column; gap:10px; margin-bottom:12px; padding-right:4px; }
+.msg { display:flex; }
+.msg-user { justify-content:flex-end; }
+.msg-ai { justify-content:flex-start; }
+.msg-bubble { max-width:80%; padding:10px 14px; border-radius:10px; font-size:13px; line-height:1.6; word-break:break-word; }
+.msg-user .msg-bubble { background:#1f6feb; color:#fff; border-bottom-right-radius:4px; }
+.msg-ai .msg-bubble { background:#21262d; color:#c9d1d9; border:1px solid #30363d; border-bottom-left-radius:4px; }
+.discussion-input-row { display:flex; gap:8px; }
+.discussion-input-row input { flex:1; padding:10px; background:#0d1117; border:1px solid #30363d; border-radius:6px; color:#c9d1d9; font-size:13px; }
+.discussion-input-row input:focus { border-color:#58a6ff; outline:none; }
+.discussion-input-row button { padding:8px 18px; background:#21262d; color:#c9d1d9; border:1px solid #30363d; border-radius:6px; cursor:pointer; font-size:13px; font-weight:500; white-space:nowrap; }
+.discussion-input-row button:hover { background:#30363d; color:#58a6ff; }
+.discussion-input-row button:disabled { opacity:0.5; cursor:not-allowed; }
 </style>
 </head>
 <body>
@@ -135,6 +152,16 @@
         </div>
 
         <div id="result"></div>
+
+        <!-- AI Discussion Panel -->
+        <div class="discussion-panel hidden" id="discussion-panel">
+            <div class="discussion-header">💬 AI 讨论 — 基于当前对比上下文</div>
+            <div class="discussion-messages" id="discussion-messages"></div>
+            <div class="discussion-input-row">
+                <input type="text" id="discussion-input" placeholder="输入你的问题..." onkeydown="if(event.key==='Enter') sendDiscussionMessage()">
+                <button id="discussion-send-btn" onclick="sendDiscussionMessage()">发送</button>
+            </div>
+        </div>
     </main>
     <aside id="page-sidebar" class="page-sidebar"></aside>
     </div>
@@ -522,6 +549,9 @@
         if (options.generateOA) {
             html += '<button class="btn-followup" onclick="doGenerateOAFromAnalysis()" title="基于上方创造性分析结果，生成意见陈述书草稿">📝 生成意见陈述书</button>';
         }
+        if (options.showDiscussion) {
+            html += '<button onclick="startDiscussion()" title="基于当前对比结果与 AI 讨论">💬 AI 讨论</button>';
+        }
         html += '</div>';
         return html;
     }
@@ -581,7 +611,7 @@
                 if (data.error) { showError(data.error); return; }
                 lastAnalysisRawText = data.content || '';
                 lastAnalysisContext = null;
-                showResult(renderMarkdown(data.content), { copy: true, export: true });
+                showResult(renderMarkdown(data.content), { copy: true, export: true, showDiscussion: true });
             } catch(e) { showError('请求失败: ' + e.message); }
         } else {
             setLoading('正在进行 ' + allItems.length + ' 篇对比分析...');
@@ -595,7 +625,7 @@
                 if (data.error) { showError(data.error); return; }
                 lastAnalysisRawText = data.analysis || '';
                 lastAnalysisContext = null;
-                showResult(renderMarkdown(data.analysis), { copy: true, export: true });
+                showResult(renderMarkdown(data.analysis), { copy: true, export: true, showDiscussion: true });
             } catch(e) { showError('请求失败: ' + e.message); }
         }
     }
@@ -625,7 +655,7 @@
             lastAnalysisRawText = data.analysis || '';
             // Save context for follow-up office action generation
             lastAnalysisContext = { my: my, refs: refs, analysis: data.analysis };
-            showResult(renderMarkdown(data.analysis), { copy: true, export: true, generateOA: true });
+            showResult(renderMarkdown(data.analysis), { copy: true, export: true, generateOA: true, showDiscussion: true });
         } catch(e) { showError('请求失败: ' + e.message); }
     }
 
@@ -657,7 +687,7 @@
             var data = await resp.json();
             if (data.error) { showError(data.error); return; }
             lastAnalysisRawText = data.analysis || '';
-            showResult(renderMarkdown(data.analysis), { copy: true, export: true });
+            showResult(renderMarkdown(data.analysis), { copy: true, export: true, showDiscussion: true });
         } catch(e) { showError('请求失败: ' + e.message); }
     }
 
@@ -686,7 +716,7 @@
             if (data.error) { showError(data.error); return; }
             lastAnalysisRawText = data.analysis || '';
             lastAnalysisContext = null;
-            showResult(renderMarkdown(data.analysis), { copy: true, export: true });
+            showResult(renderMarkdown(data.analysis), { copy: true, export: true, showDiscussion: true });
         } catch(e) { showError('请求失败: ' + e.message); }
     }
 
@@ -751,6 +781,86 @@
             if (myInput) myInput.value = patent;
         }
     })();
+
+    // ── AI Discussion ──
+    var discussionHistory = [];
+    var discussionContext = '';
+
+    function startDiscussion() {
+        var my = getMyPatent();
+        var refs = getRefs();
+        var ctx = '【技术方案对比讨论】\n\n';
+        ctx += '== 我的专利 ==\n';
+        if (typeof my === 'string') {
+            ctx += '专利号/ID: ' + my + '\n';
+        } else if (my && my.content) {
+            ctx += '标题: ' + (my.title || '') + '\n';
+            ctx += '内容:\n' + my.content.slice(0, 2000) + '\n';
+        }
+        ctx += '\n== 对比文件 ==\n';
+        for (var i = 0; i < refs.length; i++) {
+            var r = refs[i];
+            ctx += '文件' + (i + 1) + ': ';
+            if (typeof r === 'string') {
+                ctx += r + '\n';
+            } else if (r && r.content) {
+                ctx += (r.title || '未命名') + '\n';
+                ctx += r.content.slice(0, 1500) + '\n';
+            }
+        }
+        if (lastAnalysisRawText) {
+            ctx += '\n== 当前分析结果 ==\n';
+            ctx += lastAnalysisRawText.slice(0, 3000) + '\n';
+        }
+        discussionContext = ctx;
+        discussionHistory = [['system', ctx]];
+        var panel = document.getElementById('discussion-panel');
+        panel.classList.remove('hidden');
+        document.getElementById('discussion-messages').innerHTML =
+            '<div class="msg msg-ai"><div class="msg-bubble">已加载对比上下文，请提出你的问题。例如："对比文件1是否公开了本申请的全部必要技术特征？"</div></div>';
+        panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        document.getElementById('discussion-input').focus();
+    }
+
+    async function sendDiscussionMessage() {
+        var input = document.getElementById('discussion-input');
+        var text = input.value.trim();
+        if (!text) return;
+        input.value = '';
+        input.disabled = true;
+        document.getElementById('discussion-send-btn').disabled = true;
+
+        renderMsg('user', text);
+
+        var apiHistory = discussionHistory.map(function(h) { return [h[0], h[1]]; });
+        try {
+            var resp = await fetch('/api/ai/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: text, patent_id: null, history: apiHistory, web_search: false })
+            });
+            var data = await resp.json();
+            var content = data.content || 'AI error: empty response';
+            discussionHistory.push(['user', text]);
+            discussionHistory.push(['assistant', content]);
+            renderMsg('ai', content);
+        } catch (e) {
+            renderMsg('ai', '请求失败: ' + e.message);
+        }
+        input.disabled = false;
+        document.getElementById('discussion-send-btn').disabled = false;
+        input.focus();
+    }
+
+    function renderMsg(role, content) {
+        var container = document.getElementById('discussion-messages');
+        var div = document.createElement('div');
+        div.className = 'msg msg-' + role;
+        var bubbleContent = escapeHtml(content).replace(/\n/g, '<br>');
+        div.innerHTML = '<div class="msg-bubble">' + bubbleContent + '</div>';
+        container.appendChild(div);
+        container.scrollTop = container.scrollHeight;
+    }
     </script>
 </body>
 </html>
