@@ -4,7 +4,7 @@ use anyhow::Result;
 use rusqlite::{params, OptionalExtension};
 
 impl super::Database {
-    pub fn insert_patent(&self, p: &Patent) -> Result<()> {
+    pub fn insert_patent(&self, p: &Patent) -> Result<String> {
         let c = self.conn();
         let canonical = crate::patent::canonical_patent_key(&p.patent_number);
         let mut final_id = p.id.clone();
@@ -46,7 +46,7 @@ impl super::Database {
         ) {
             tracing::warn!("FTS insert for patent {} failed: {}", final_id, e);
         }
-        Ok(())
+        Ok(final_id)
     }
 
     pub fn get_patent(&self, id: &str) -> Result<Option<Patent>> {

@@ -13,8 +13,8 @@ use std::time::Instant;
 
 const QUICK_WEB_UPSTREAM_TIMEOUT_SECS: u64 = 6;
 const QUICK_WEB_TOTAL_BUDGET_SECS: u64 = 8;
-const AI_CHAT_ROUTE_TIMEOUT_SECS_WEB: u64 = 20;
-const AI_CHAT_ROUTE_TIMEOUT_SECS_NORMAL: u64 = 35;
+const AI_CHAT_ROUTE_TIMEOUT_SECS_WEB: u64 = 35;
+const AI_CHAT_ROUTE_TIMEOUT_SECS_NORMAL: u64 = 60;
 
 /// Quick web search: SerpAPI → Sogou free fallback. Returns formatted context string.
 async fn quick_web_search(query: &str, serpapi_key: &str) -> Option<String> {
@@ -253,17 +253,18 @@ pub async fn api_ai_chat(
         .read()
         .unwrap_or_else(|e| e.into_inner())
         .ai_client();
-    let serpapi_key = s
-        .config
-        .read()
-        .unwrap_or_else(|e| e.into_inner())
-        .serpapi_key
-        .clone();
-
     // Optional web search: fetch real-time info before AI response
     let web_start = Instant::now();
     let web_context = if req.web_search {
-        quick_web_search(&req.message, &serpapi_key).await
+        let serpapi_key = s
+            .config
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .next_serpapi_key();
+        match serpapi_key {
+            Some(ref k) => quick_web_search(&req.message, k).await,
+            None => None,
+        }
     } else {
         None
     };
