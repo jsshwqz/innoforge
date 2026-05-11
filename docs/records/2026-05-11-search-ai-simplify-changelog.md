@@ -91,7 +91,7 @@
 
 | 文件 | 操作 |
 |------|------|
-| `D:\test\patent-hub-backup\.claude\settings.local.json` | **重写** — 删除无效 `allowMode`，采用官方格式 |
+| `.../patent-hub-backup/.claude/settings.local.json` | **重写** — 删除无效 `allowMode`，采用官方格式 |
 | `.claude/settings.local.json`（工作区） | **重写** — 同上 |
 
 > **注意**：设置文件在 Claude Code 启动时加载，重启 `claude` 新会话后生效。
