@@ -1,7 +1,9 @@
 param(
     [string]$Owner = "jsshwqz",
     [string]$Repo = "innoforge",
-    [string]$Tag = ""
+    [string]$Tag = "",
+    [switch]$RequireForgeRecord,
+    [string]$ForgeRecord = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -9,6 +11,51 @@ $ErrorActionPreference = "Stop"
 function Write-Check([string]$name, [bool]$ok, [string]$detail) {
     $flag = if ($ok) { "PASS" } else { "FAIL" }
     Write-Host ("[{0}] {1} - {2}" -f $flag, $name, $detail)
+}
+
+function Test-ForgeRecord([string]$RecordFile) {
+    if (!(Test-Path $RecordFile)) {
+        Write-Check "forge record exists" $false $RecordFile
+        return $false
+    }
+
+    $content = Get-Content -Raw -Encoding UTF8 $RecordFile
+    $requiredHeaders = @(
+        "## Task Goal",
+        "## Forge Calls",
+        "## Execution Decision",
+        "## Verification"
+    )
+    foreach ($h in $requiredHeaders) {
+        if ($content -notmatch [regex]::Escape($h)) {
+            Write-Check "forge header" $false $h
+            return $false
+        }
+    }
+
+    $forgeSection = ($content -split "## Forge Calls", 2)[1]
+    if ([string]::IsNullOrWhiteSpace($forgeSection)) {
+        Write-Check "forge calls section" $false "empty"
+        return $false
+    }
+    if ($forgeSection -notmatch "Output Summary") {
+        Write-Check "forge output summary" $false "missing Output Summary"
+        return $false
+    }
+
+    Write-Check "forge record" $true $RecordFile
+    return $true
+}
+
+if ($RequireForgeRecord) {
+    Write-Host "== Forge 输出门禁检查 =="
+    if ([string]::IsNullOrWhiteSpace($ForgeRecord)) {
+        Write-Check "ForgeRecord param" $false "missing -ForgeRecord"
+        exit 1
+    }
+    $ok = Test-ForgeRecord $ForgeRecord
+    if (-not $ok) { exit 1 }
+    Write-Host ""
 }
 
 Write-Host "== 本地静态检查 =="
