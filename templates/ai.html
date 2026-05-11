@@ -43,12 +43,46 @@
     </script>
     <script>
     function escapeHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+    // ── 持久化存储 ──
+    var AI_CHAT_KEY = 'innoforge_ai_chat';
     var chatHistory = [];
+    var chatSending = false;
+    var retryMsg = '';
+
+    // 页面加载时恢复历史
+    (function loadChatHistory() {
+        var saved = localStorage.getItem(AI_CHAT_KEY);
+        if (saved) {
+            try { chatHistory = JSON.parse(saved); } catch(e) {}
+        }
+        renderAllMessages();
+    })();
+
+    function renderAllMessages() {
+        var box = document.getElementById('chat-messages');
+        box.innerHTML = '';
+        for (var i = 0; i < chatHistory.length; i += 2) {
+            var userDiv = document.createElement('div');
+            userDiv.className = 'msg user';
+            userDiv.textContent = chatHistory[i][1];
+            box.appendChild(userDiv);
+            var aiDiv = document.createElement('div');
+            aiDiv.className = 'msg ai';
+            aiDiv.innerHTML = DOMPurify.sanitize(escapeHtml(chatHistory[i+1][1]).replace(/\n/g, '<br>'));
+            box.appendChild(aiDiv);
+        }
+        box.scrollTop = box.scrollHeight;
+    }
+
+    function saveChatHistory() {
+        localStorage.setItem(AI_CHAT_KEY, JSON.stringify(chatHistory));
+    }
 
     document.getElementById('chat-msg').addEventListener('keydown', function(e) {
         if (e.key === 'Enter') sendChat();
     });
-    var chatSending = false;
+
     async function sendChat() {
         var input = document.getElementById('chat-msg');
         var sendBtn = input.parentElement.querySelector('button');
@@ -63,6 +97,17 @@
         userDiv.className = 'msg user';
         userDiv.textContent = msg;
         box.appendChild(userDiv);
+        await doSend(msg);
+        chatSending = false;
+        input.disabled = false;
+        if (sendBtn) sendBtn.disabled = false;
+        input.focus();
+        box.scrollTop = box.scrollHeight;
+    }
+
+    async function doSend(msg) {
+        retryMsg = msg;
+        var box = document.getElementById('chat-messages');
         var loadingId = 'ai-' + Date.now();
         var aiDiv = document.createElement('div');
         aiDiv.className = 'msg ai';
@@ -81,17 +126,31 @@
             document.getElementById(loadingId).innerHTML = DOMPurify.sanitize(escapeHtml(data.content).replace(/\n/g, '<br>'));
             chatHistory.push(["user", msg]);
             chatHistory.push(["assistant", data.content]);
+            saveChatHistory();
+            retryMsg = '';
         } catch(e) {
             var el = document.getElementById(loadingId);
-            el.textContent = t('ai.fail') + ': ' + e.message;
+            el.innerHTML = DOMPurify.sanitize(
+                '<div style="color:#f85149;">' + escapeHtml(t('ai.fail') + ': ' + e.message) + '</div>' +
+                '<button onclick="retrySend()" class="btn-retry" style="background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:4px 12px;border-radius:4px;cursor:pointer;margin-top:8px;font-size:0.85em;">' + t('ai.retry') + '</button>'
+            );
             el.classList.add('error');
         }
-        chatSending = false;
-        input.disabled = false;
-        if (sendBtn) sendBtn.disabled = false;
-        input.focus();
-        box.scrollTop = box.scrollHeight;
     }
+
+    function retrySend() {
+        var msg = retryMsg;
+        if (!msg) return;
+        retryMsg = '';
+        // 移除上一条错误消息
+        var box = document.getElementById('chat-messages');
+        var last = box.lastChild;
+        if (last && last.classList.contains('msg')) {
+            box.removeChild(last);
+        }
+        doSend(msg);
+    }
+
     applyI18nCommon();
     </script>
 </body>

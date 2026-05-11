@@ -52,44 +52,14 @@ pub struct PipelineChannelEntry {
     pub created_at: Instant,
 }
 
-/// 内置 CNIPR 开放平台应用凭据（所有用户共享，只需填个人登录账号密码）
-const CNIPR_DEFAULT_CLIENT_ID: &str = "72AB59432F027A98B9CA5D98F0CF64BF";
-const CNIPR_DEFAULT_CLIENT_SECRET: &str = "BE9DA0B9AB9DC573BDFF56F9E5C46218";
-
-/// Shared application configuration (replaces env::set_var).
+/// Shared application configuration — 仅保留 SerpAPI + DeepSeek AI，其它搜索源和 AI 已屏蔽
 #[derive(Debug, Clone)]
 pub struct AppConfig {
     /// SerpAPI multi-key support (round-robin) — 最多 5 个 Key，自动轮询
     pub serpapi_keys: Vec<String>,
-    /// Bing Web Search API key (Azure Cognitive Services) — 国内可用，替代 SerpAPI
-    pub bing_api_key: String,
-    /// Lens.org Patent API key — 国内可用，替代 Google Patents
-    pub lens_api_key: String,
-    /// Firecrawl Search API — SerpAPI 后备，用于发现专利站页面
-    pub firecrawl_api_key: String,
-    pub firecrawl_api_url: String,
-    /// CNIPR 开放平台（国知局）— 中国专利权威数据源
-    pub cnipr_client_id: String,
-    pub cnipr_client_secret: String,
-    pub cnipr_user: String,
-    pub cnipr_password: String,
-    /// CNIPR OAuth2 access token (runtime cache, not persisted)
-    pub cnipr_access_token: String,
-    pub cnipr_open_id: String,
-    pub cnipr_token_expires: u64,
     pub ai_base_url: String,
     pub ai_api_key: String,
     pub ai_model: String,
-    // Fallback AI providers for automatic failover
-    pub ai_fallbacks: Vec<AiFallback>,
-}
-
-#[derive(Debug, Clone)]
-pub struct AiFallback {
-    pub name: String,
-    pub base_url: String,
-    pub api_key: String,
-    pub model: String,
 }
 
 impl AppConfig {
@@ -133,54 +103,18 @@ impl AppConfig {
             }
         }
 
-        let mut fallbacks = Vec::new();
-        for i in 1..=5 {
-            let url = get(&format!("FALLBACK_AI_{}_URL", i), "");
-            let key = get(&format!("FALLBACK_AI_{}_KEY", i), "");
-            let model = get(&format!("FALLBACK_AI_{}_MODEL", i), "");
-            let name = get(
-                &format!("FALLBACK_AI_{}_NAME", i),
-                &format!("Fallback-{}", i),
-            );
-            if !url.is_empty() && !key.is_empty() && !model.is_empty() {
-                fallbacks.push(AiFallback {
-                    name,
-                    base_url: url,
-                    api_key: key,
-                    model,
-                });
-            }
-        }
-
         Self {
             serpapi_keys,
-            bing_api_key: get("BING_API_KEY", ""),
-            lens_api_key: get("LENS_API_KEY", ""),
-            firecrawl_api_key: get("FIRECRAWL_API_KEY", ""),
-            firecrawl_api_url: get("FIRECRAWL_API_URL", "https://api.firecrawl.dev/v2"),
-            cnipr_client_id: get("CNIPR_CLIENT_ID", CNIPR_DEFAULT_CLIENT_ID),
-            cnipr_client_secret: get("CNIPR_CLIENT_SECRET", CNIPR_DEFAULT_CLIENT_SECRET),
-            cnipr_user: get("CNIPR_USER", ""),
-            cnipr_password: get("CNIPR_PASSWORD", ""),
-            cnipr_access_token: String::new(),
-            cnipr_open_id: String::new(),
-            cnipr_token_expires: 0,
             ai_base_url: get("AI_BASE_URL", "http://localhost:11434/v1"),
             ai_api_key: get("AI_API_KEY", "ollama"),
             ai_model: get("AI_MODEL", "qwen2.5:7b"),
-            ai_fallbacks: fallbacks,
         }
     }
 
-    /// Build an AiClient from the current config (with fallback support).
-    /// Primary is always the configured AI_URL/AI_KEY/AI_MODEL;
-    /// fallbacks are tried only when the primary fails at runtime.
+    /// Build an AiClient from the current config.
+    /// 仅使用 DeepSeek，无备用 AI 服务商。
     pub fn ai_client(&self) -> AiClient {
-        let mut client = AiClient::with_config(&self.ai_base_url, &self.ai_api_key, &self.ai_model);
-        for fb in &self.ai_fallbacks {
-            client.add_fallback(&fb.base_url, &fb.api_key, &fb.model, &fb.name);
-        }
-        client
+        AiClient::with_config(&self.ai_base_url, &self.ai_api_key, &self.ai_model)
     }
 
     /// Whether at least one SerpAPI key is configured.
@@ -195,26 +129,6 @@ impl AppConfig {
         }
         let idx = SERPAPI_KEY_INDEX.fetch_add(1, Ordering::Relaxed) % self.serpapi_keys.len();
         Some(self.serpapi_keys[idx].clone())
-    }
-
-    /// Whether Bing Search API is configured (国内可用替代方案).
-    pub fn has_bing(&self) -> bool {
-        !self.bing_api_key.is_empty()
-    }
-
-    /// Whether Lens.org patent API is configured (国内可用替代方案).
-    pub fn has_lens(&self) -> bool {
-        !self.lens_api_key.is_empty()
-    }
-
-    /// Whether Firecrawl Search API is configured.
-    pub fn has_firecrawl(&self) -> bool {
-        !self.firecrawl_api_key.is_empty()
-    }
-
-    /// Whether CNIPR (国知局) is configured — 只需登录账号密码，应用凭据已内置。
-    pub fn has_cnipr(&self) -> bool {
-        !self.cnipr_user.is_empty() && !self.cnipr_password.is_empty()
     }
 }
 

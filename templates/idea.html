@@ -1679,6 +1679,8 @@
         renderChatAttachments();
     }
 
+    var ideaRetryMsg = '';
+
     async function sendChatMessage() {
         var input = document.getElementById('chat-input');
         var msg = input.value.trim();
@@ -1702,6 +1704,15 @@
         userMsgDiv.appendChild(userLabel);
         userMsgDiv.appendChild(userBody);
         container.appendChild(userMsgDiv);
+
+        await doIdeaSend(msg);
+        input.disabled = false;
+        input.focus();
+    }
+
+    async function doIdeaSend(msg) {
+        ideaRetryMsg = msg;
+        var container = document.getElementById('chat-messages');
 
         // Show thinking indicator
         var thinkDiv = document.createElement('div');
@@ -1737,7 +1748,10 @@
                 aiMsgDiv.appendChild(aiLabel);
                 aiMsgDiv.appendChild(aiBody);
                 container.appendChild(aiMsgDiv);
+                ideaRetryMsg = '';
             } else {
+                var indicator2 = document.getElementById('thinking-indicator');
+                if (indicator2) indicator2.remove();
                 var errDiv = document.createElement('div');
                 errDiv.style.cssText = 'padding:10px; color:#f85149;';
                 errDiv.textContent = '错误: ' + (data.error || '未知错误');
@@ -1747,13 +1761,27 @@
         } catch (e) {
             var ind = document.getElementById('thinking-indicator');
             if (ind) ind.remove();
-            var reqErrDiv = document.createElement('div');
-            reqErrDiv.style.cssText = 'padding:10px; color:#f85149;';
-            reqErrDiv.textContent = '请求失败: ' + e.message;
-            container.appendChild(reqErrDiv);
+            var ideaErrDiv = document.createElement('div');
+            ideaErrDiv.id = 'idea-error-' + Date.now();
+            ideaErrDiv.style.cssText = 'margin-bottom:10px; padding:10px 14px; background:#0d1117; border-radius:8px; border-left:3px solid #da3633;';
+            ideaErrDiv.innerHTML = DOMPurify.sanitize(
+                '<div style="color:#f85149; font-size:0.9em;">请求失败: ' + escapeHtml(e.message) + '</div>' +
+                '<button onclick="retryIdeaSend()" class="btn-retry" style="background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:4px 12px;border-radius:4px;cursor:pointer;margin-top:8px;font-size:0.85em;">' + t('ai.retry') + '</button>'
+            );
+            container.appendChild(ideaErrDiv);
         }
-        input.disabled = false;
-        input.focus();
+        container.scrollTop = container.scrollHeight;
+    }
+
+    function retryIdeaSend() {
+        var msg = ideaRetryMsg;
+        if (!msg) return;
+        ideaRetryMsg = '';
+        // 移除最后一条错误消息
+        var container = document.getElementById('chat-messages');
+        var last = container.lastChild;
+        if (last) container.removeChild(last);
+        doIdeaSend(msg);
     }
 
     async function summarizeDiscussion() {

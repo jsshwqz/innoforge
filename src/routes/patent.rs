@@ -881,14 +881,7 @@ async fn fetch_legal_status(
         }
     }
 
-    // 第 2 级：Lens.org
-    if let Ok(result) = fetch_legal_from_lens(patent_number, config).await {
-        if !result.events.is_empty() {
-            return Ok(result);
-        }
-    }
-
-    // 第 3 级：搜狗搜索国知局公告
+    // 第 2 级：搜狗搜索国知局公告（Lens.org 已屏蔽）
     if let Ok(result) = fetch_legal_from_sogou(patent_number).await {
         if !result.events.is_empty() {
             return Ok(result);
@@ -963,72 +956,7 @@ async fn fetch_legal_from_google_patents(
     })
 }
 
-/// 第 2 级：Lens.org API
-async fn fetch_legal_from_lens(
-    patent_number: &str,
-    config: &Arc<RwLock<super::AppConfig>>,
-) -> anyhow::Result<LegalStatusResult> {
-    let lens_key = config
-        .read()
-        .unwrap_or_else(|e| e.into_inner())
-        .lens_api_key
-        .clone();
-    if lens_key.is_empty() {
-        return Err(anyhow::anyhow!("Lens.org key not configured"));
-    }
-
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .build()?;
-
-    let body = json!({
-        "query": { "terms": { "lens_id": [patent_number] } },
-        "include": ["legal_status", "publication_type", "biblio"],
-        "size": 1
-    });
-
-    let resp = client
-        .post("https://api.lens.org/patent/search")
-        .header("Authorization", format!("Bearer {}", lens_key))
-        .header("Content-Type", "application/json")
-        .json(&body)
-        .send()
-        .await?;
-
-    if !resp.status().is_success() {
-        return Err(anyhow::anyhow!("Lens.org returned {}", resp.status()));
-    }
-
-    let json: serde_json::Value = resp.json().await?;
-    let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
-    let mut events = Vec::new();
-
-    if let Some(data) = json["data"].as_array().and_then(|a| a.first()) {
-        if let Some(status) = data["legal_status"]["patent_status"].as_str() {
-            events.push(LegalEvent {
-                date: now.clone(),
-                title: status.to_string(),
-                description: String::new(),
-            });
-        }
-    }
-
-    let current_status = if events.is_empty() {
-        "未知".to_string()
-    } else {
-        events[0].title.clone()
-    };
-
-    Ok(LegalStatusResult {
-        patent_number: patent_number.to_string(),
-        current_status,
-        events,
-        source: "lens".to_string(),
-        updated_at: now,
-    })
-}
-
-/// 第 3 级：搜狗搜索国知局公告页面
+/// 第 2 级：搜狗搜索国知局公告页面（Lens.org 已屏蔽）
 async fn fetch_legal_from_sogou(patent_number: &str) -> anyhow::Result<LegalStatusResult> {
     // 搜狗必须直连（不走代理），否则触发反爬虫
     let client = reqwest::Client::builder()
