@@ -153,6 +153,7 @@ jobs:
         with:
           files: ${{ matrix.asset }}
           generate_release_notes: false
+          overwrite_files: true
 
   # ── 同步 Release 到 Gitee ─────────────────────────────────────────────
   sync-gitee:
