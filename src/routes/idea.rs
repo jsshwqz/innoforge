@@ -614,7 +614,7 @@ pub async fn api_idea_chat(
         .unwrap_or_else(|e| e.into_inner())
         .ai_client();
     let ai_response = match ai
-        .chat_with_history(&system_context, chat_history, 0.7)
+        .chat_with_history_expert(&system_context, chat_history, 0.6)
         .await
     {
         Ok(content) => content,

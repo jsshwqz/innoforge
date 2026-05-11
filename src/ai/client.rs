@@ -138,6 +138,25 @@ fn extract_content_from_data(data: &Value) -> Option<String> {
 }
 
 impl AiClient {
+    fn expert_model_name() -> String {
+        std::env::var("AI_MODEL_EXPERT")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "deepseek-reasoner".to_string())
+    }
+
+    fn apply_model_override(provider: &AiProvider, model_override: Option<&str>) -> AiProvider {
+        if let Some(model) = model_override {
+            let m = model.trim();
+            if !m.is_empty() {
+                let mut p = provider.clone();
+                p.model = m.to_string();
+                return p;
+            }
+        }
+        provider.clone()
+    }
+
     /// Create from explicit config values (preferred).
     pub fn with_config(base_url: &str, api_key: &str, model: &str) -> Self {
         Self {
@@ -333,6 +352,72 @@ impl AiClient {
                 "AI 多通道均失败（{}）。请检查对应服务商 Key/额度/网络状态。",
                 failed_chain.join(" | ")
             ))
+        }
+    }
+
+    async fn send_chat_inner_with_model(
+        &self,
+        messages: Vec<Message>,
+        temperature: f32,
+        model_override: Option<&str>,
+    ) -> Result<String> {
+        let mut failed_chain: Vec<String> = Vec::new();
+        let primary = Self::apply_model_override(&self.primary, model_override);
+        match self.try_provider(&primary, &messages, temperature).await {
+            Ok(content) => return Ok(content),
+            Err(e) => {
+                failed_chain.push(format!("{}: {}", primary.name, e));
+                if self.fallbacks.is_empty() {
+                    return Err(e);
+                }
+                tracing::warn!("[{}] failed: {}, trying fallbacks...", primary.name, e);
+            }
+        }
+
+        let mut last_err = anyhow::anyhow!("All providers failed");
+        for fallback in &self.fallbacks {
+            let fb = Self::apply_model_override(fallback, model_override);
+            tracing::info!("[failover] trying {}...", fb.name);
+            match self.try_provider(&fb, &messages, temperature).await {
+                Ok(content) => {
+                    tracing::info!("[failover] {} succeeded", fb.name);
+                    return Ok(content);
+                }
+                Err(e) => {
+                    tracing::warn!("[failover] {} failed: {}", fb.name, e);
+                    failed_chain.push(format!("{}: {}", fb.name, e));
+                    last_err = e;
+                }
+            }
+        }
+
+        if failed_chain.is_empty() {
+            Err(last_err)
+        } else {
+            Err(anyhow::anyhow!(
+                "AI 多通道均失败（{}）。请检查对应服务商 Key/额度/网络状态。",
+                failed_chain.join(" | ")
+            ))
+        }
+    }
+
+    pub(super) async fn send_chat_expert(
+        &self,
+        messages: Vec<Message>,
+        temperature: f32,
+    ) -> Result<String> {
+        let expert = Self::expert_model_name();
+        match tokio::time::timeout(
+            Duration::from_secs(Self::GLOBAL_TIMEOUT_SECS),
+            self.send_chat_inner_with_model(messages, temperature, Some(&expert)),
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(_) => Err(anyhow::anyhow!(
+                "AI 调用超时（全局上限 {}s）。请检查网络或更换 AI 服务商。",
+                Self::GLOBAL_TIMEOUT_SECS
+            )),
         }
     }
 }

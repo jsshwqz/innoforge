@@ -5,6 +5,31 @@ use anyhow::Result;
 use std::time::Duration;
 
 impl AiClient {
+    /// 专家模式：用于创新推演、专利深分析等高推理任务。
+    /// 模型优先取 AI_MODEL_EXPERT（默认 deepseek-reasoner）。
+    pub async fn chat_expert(&self, user_msg: &str, context: Option<&str>) -> Result<String> {
+        let mut messages = vec![Message {
+            role: "system".into(),
+            content: "你是资深专利与研发战略专家。请使用“结论→证据→反证→风险→下一步”的结构回答，\
+                      并明确给出置信度（高/中/低）与依据。"
+                .into(),
+        }];
+
+        if let Some(ctx) = context {
+            messages.push(Message {
+                role: "system".into(),
+                content: format!("以下是相关专利信息供参考：\n{ctx}"),
+            });
+        }
+
+        messages.push(Message {
+            role: "user".into(),
+            content: user_msg.to_string(),
+        });
+
+        self.send_chat_expert(messages, 0.5).await
+    }
+
     /// 带完整消息历史的聊天（用于多轮讨论保持上下文）
     pub async fn chat_with_history(
         &self,
@@ -20,6 +45,22 @@ impl AiClient {
             messages.push(Message { role, content });
         }
         self.send_chat(messages, temperature).await
+    }
+
+    pub async fn chat_with_history_expert(
+        &self,
+        system_prompt: &str,
+        history: Vec<(String, String)>,
+        temperature: f32,
+    ) -> Result<String> {
+        let mut messages = vec![Message {
+            role: "system".into(),
+            content: system_prompt.to_string(),
+        }];
+        for (role, content) in history {
+            messages.push(Message { role, content });
+        }
+        self.send_chat_expert(messages, temperature).await
     }
 
     /// 自定义 system prompt + temperature 的聊天（用于多维推演引擎）
@@ -39,7 +80,7 @@ impl AiClient {
                 content: user_msg.to_string(),
             },
         ];
-        self.send_chat(messages, temperature).await
+        self.send_chat_expert(messages, temperature).await
     }
 
     pub async fn chat(&self, user_msg: &str, context: Option<&str>) -> Result<String> {

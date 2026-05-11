@@ -112,7 +112,7 @@ pub async fn deep_analysis_simple(ctx: &mut PipelineContext, ai: &AiClient) -> R
         contradictions = contradictions_summary,
     );
 
-    match ai.chat(&prompt, None).await {
+    match ai.chat_expert(&prompt, None).await {
         Ok(analysis) => ctx.ai_analysis = analysis,
         Err(e) => {
             ctx.ai_analysis = format!(
@@ -156,7 +156,7 @@ pub async fn action_plan(ctx: &mut PipelineContext, ai: &AiClient) -> Result<()>
         ctx.ai_analysis.chars().take(500).collect::<String>(),
     );
 
-    match ai.chat(&prompt, None).await {
+    match ai.chat_expert(&prompt, None).await {
         Ok(plan) => ctx.action_plan = plan,
         Err(e) => {
             ctx.action_plan = format!("行动方案生成暂不可用：{}", e);
@@ -250,7 +250,7 @@ pub async fn extract_feature_cards_ai(
         ctx.ai_analysis.chars().take(2000).collect::<String>()
     );
 
-    match ai.chat(&prompt, None).await {
+    match ai.chat_expert(&prompt, None).await {
         Ok(response) => {
             let cleaned = response
                 .trim()
