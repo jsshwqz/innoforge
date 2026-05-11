@@ -104,7 +104,8 @@
 
         <div class="setting-group">
             <h3>🔑 SerpAPI 搜索配置（多 Key 轮询）</h3>
-            <p>配置多个 SerpAPI Key 自动轮询，突破单账号每月 250 次限制。未配置时自动降级到 Firecrawl / Google Patents 直连 / Bing。</p>
+
+            <p>配置多个 SerpAPI Key 自动轮询，突破单账号每月 250 次限制。未配置时自动回退本地数据库。</p>
             <p style="color:#f0ad4e;font-size:13px;">注册地址：<a href="https://serpapi.com/manage-api-key" target="_blank">https://serpapi.com/manage-api-key</a></p>
             <div id="serpapi-key-list"></div>
             <button class="btn-save" style="background:#21262d;margin-top:8px;" onclick="addSerpapiKeyRow()">+ 添加 SerpAPI Key</button>
@@ -131,69 +132,8 @@
             <div id="ai-status" class="status-message"></div>
         </div>
 
-        <details style="margin-top:24px;background:#1e1e1e;border-radius:8px;padding:16px;">
-            <summary style="color:#8b949e;font-size:14px;cursor:pointer;padding:8px;">⚙️ 高级设置（备用搜索源、备用 AI、CNIPR 等）</summary>
-            <div style="margin-top:16px;">
 
-            <div class="setting-group">
-                <h3>🔍 备用搜索源（Firecrawl / Bing）</h3>
-                <p>当 SerpAPI 不可用时按 Firecrawl → Google Patents 直连 → Bing 的顺序降级。</p>
-
-                <div class="form-group">
-                    <label>Firecrawl API URL <span style="color:#8b949e;font-size:12px;">（默认官方 v2）</span></label>
-                    <input type="text" id="firecrawl-api-url" placeholder="https://api.firecrawl.dev/v2">
-                </div>
-                <div class="form-group">
-                    <label>Firecrawl API Key</label>
-                    <input type="text" id="firecrawl-api-key" placeholder="输入 Firecrawl API Key">
-                </div>
-                <button class="btn-save" onclick="saveFirecrawlConfig()">保存 Firecrawl</button>
-                <div id="firecrawl-status" class="status-message"></div>
-
-                <div class="form-group">
-                    <label>Bing Web Search API Key</label>
-                    <input type="text" id="bing-api-key" placeholder="输入 Azure Bing Search API Key">
-                </div>
-                <button class="btn-save" onclick="saveBingKey()">保存 Bing</button>
-                <div id="bing-status" class="status-message"></div>
-            </div>
-
-            <div class="setting-group">
-                <h3>🇨🇳 CNIPR 国知局搜索</h3>
-                <div class="form-group">
-                    <label>登录账号</label>
-                    <input type="text" id="cnipr-user" placeholder="CNIPR 开放平台注册的用户名/手机号">
-                </div>
-                <div class="form-group">
-                    <label>登录密码</label>
-                    <input type="password" id="cnipr-password" placeholder="登录密码">
-                </div>
-                <details style="margin-bottom:12px;">
-                    <summary style="color:#8b949e;font-size:13px;cursor:pointer;">高级：自定义应用凭据（一般无需修改）</summary>
-                    <div class="form-group" style="margin-top:10px;">
-                        <label>Client ID <span style="color:#8b949e;font-size:12px;">（已内置默认值）</span></label>
-                        <input type="text" id="cnipr-client-id" placeholder="使用内置默认值">
-                    </div>
-                    <div class="form-group">
-                        <label>Client Secret</label>
-                        <input type="text" id="cnipr-client-secret" placeholder="使用内置默认值">
-                    </div>
-                </details>
-                <button class="btn-save" onclick="saveCniprConfig()">保存 CNIPR</button>
-                <div id="cnipr-status" class="status-message"></div>
-            </div>
-
-            <div class="setting-group">
-                <h3>🔄 备用 AI</h3>
-                <p>主 AI（DeepSeek）不可用时自动切换。支持最多 5 个备用。</p>
-                <div id="fallback-list"></div>
-                <button class="btn-save" style="background:#21262d;margin-top:8px;" onclick="addFallbackRow()">+ 添加备用 AI</button>
-                <button class="btn-save" onclick="saveFallbacks()">保存备用 AI</button>
-                <div id="fallback-status" class="status-message"></div>
-            </div>
-
-            </div>
-        </details>
+        <!-- 备用搜索源（Firecrawl/Bing/CNIPR）和备用 AI 已屏蔽，仅保留 SerpAPI + DeepSeek -->
 
         <div class="setting-group">
             <h3>ℹ️ 当前配置状态</h3>
@@ -211,18 +151,17 @@
 
         // 页面加载时获取当前配置
         let returnUrl = ''; // 记录返回地址
-        let loadedConfig = null;
-        
+
         window.onload = async function() {
             // 从 URL 参数获取返回地址
             const urlParams = new URLSearchParams(window.location.search);
             returnUrl = urlParams.get('from') || document.referrer || '';
-            
+
             try {
                 const res = await fetch('/api/settings');
                 if (res.ok) {
                     const config = await res.json();
-                    loadedConfig = config;
+
                     // Load SerpAPI multi-key list
                     if (config.serpapi_keys && config.serpapi_keys.length > 0) {
                         config.serpapi_keys.forEach(function(k) {
@@ -231,48 +170,16 @@
                     } else {
                         addSerpapiKeyRow('');
                     }
-                    document.getElementById('firecrawl-api-key').value = config.firecrawl_api_key || '';
-                    document.getElementById('firecrawl-api-url').value = config.firecrawl_api_url || 'https://api.firecrawl.dev/v2';
-                    document.getElementById('bing-api-key').value = config.bing_api_key || '';
-                    document.getElementById('cnipr-client-id').value = config.cnipr_client_id || '';
-                    document.getElementById('cnipr-user').value = config.cnipr_user || '';
-                    if (config.cnipr_password) document.getElementById('cnipr-password').value = config.cnipr_password;
-                    document.getElementById('ai-base-url').value = config.ai_base_url || '';
+
+                    document.getElementById('ai-base-url').value = config.ai_base_url || 'https://api.deepseek.com/v1';
                     document.getElementById('ai-api-key').value = config.ai_api_key || '';
-                    document.getElementById('ai-model').value = config.ai_model || '';
+                    document.getElementById('ai-model').value = config.ai_model || 'deepseek-chat';
 
                     updateConfigStatus(config);
-
-                    // 根据已保存的 base_url 反推预设下拉框
-                    const savedUrl = (config.ai_base_url || '').replace(/\/+$/, '');
-                    const providerSelect = document.getElementById('ai-provider');
-                    const urlToProvider = {
-                        'https://open.bigmodel.cn/api/paas/v4': config.ai_model === 'glm-4-plus' ? 'zhipu-plus' : 'zhipu',
-                        'https://api.deepseek.com/v1': 'deepseek',
-                        'https://openrouter.ai/api/v1': 'openrouter',
-                        'https://generativelanguage.googleapis.com/v1beta/openai': 'gemini',
-                        'https://api.openai.com/v1': 'openai',
-                        'https://api.anthropic.com/v1': 'claude',
-                        'https://integrate.api.nvidia.com/v1': 'nvidia',
-                        'http://localhost:11434/v1': 'ollama',
-                    };
-                    const matched = urlToProvider[savedUrl];
-                    if (matched) {
-                        providerSelect.value = matched;
-                    } else if (savedUrl) {
-                        providerSelect.value = 'custom';
-                    }
-                }
-                // Load saved fallback providers
-                if (loadedConfig && loadedConfig.ai_fallbacks && loadedConfig.ai_fallbacks.length > 0) {
-                    loadedConfig.ai_fallbacks.forEach(function(fb) {
-                        addFallbackRow(fb.name || '', fb.base_url || '', '', fb.model || '');
-                    });
                 }
             } catch (e) {
                 console.error('Failed to load config:', e);
             }
-            // 不调用 updateAiFields()，避免覆盖已保存的配置
         };
         
         // 返回上一页
@@ -287,23 +194,14 @@
         function updateConfigStatus(config) {
             const status = [];
 
-            // 在线专利搜索能力
             if (config.serpapi_key_configured) {
                 status.push('✅ SerpAPI 已配置（Google Patents）');
-            }
-            if (config.firecrawl_api_key_configured) {
-                status.push('✅ Firecrawl 已配置（第二优先级备用搜索）');
-            }
-            status.push('✅ Google Patents 直连可用（无需 Key，网络不可达时自动跳过）');
-            if (config.bing_api_key_configured) {
-                status.push('⚠️ Bing 已配置（低可信网页兜底）');
-            }
-            if (!config.serpapi_key_configured && !config.firecrawl_api_key_configured && !config.bing_api_key_configured) {
-                status.push('⚠️ 未配置付费/授权在线源，将主要依赖 Google Patents 直连和本地缓存');
+            } else {
+                status.push('⚠️ SerpAPI 未配置，将仅搜索本地数据库');
             }
 
             if (config.ai_api_key_configured) {
-                status.push('✅ AI 服务已配置');
+                status.push('✅ AI 服务已配置（DeepSeek）');
             } else {
                 status.push('❌ AI 服务未配置（无法使用智能分析）');
             }
@@ -311,160 +209,8 @@
             document.getElementById('config-status').innerHTML = DOMPurify.sanitize(status.join('<br>'));
         }
 
-        async function saveBingKey() {
-            const key = document.getElementById('bing-api-key').value.trim();
-            const statusEl = document.getElementById('bing-status');
-            try {
-                const res = await fetch('/api/settings/bing', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({api_key: key})
-                });
-                const data = await res.json();
-                statusEl.className = 'status-message ' + (data.status === 'ok' ? 'success' : 'error');
-                statusEl.textContent = data.status === 'ok' ? (key ? '✅ Bing Key 已保存' : '✅ Bing Key 已清除') : ('❌ ' + data.message);
-                statusEl.style.display = 'block';
-            } catch(e) {
-                statusEl.className = 'status-message error';
-                statusEl.textContent = '❌ 保存失败: ' + e.message;
-                statusEl.style.display = 'block';
-            }
-        }
-
-        async function saveFirecrawlConfig() {
-            const apiUrl = document.getElementById('firecrawl-api-url').value.trim() || 'https://api.firecrawl.dev/v2';
-            const apiKey = document.getElementById('firecrawl-api-key').value.trim();
-            const statusEl = document.getElementById('firecrawl-status');
-
-            try {
-                const res = await fetch('/api/settings/firecrawl', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ api_url: apiUrl, api_key: apiKey })
-                });
-                const data = await res.json();
-                if (res.ok && data.status === 'ok') {
-                    showStatus(statusEl, 'success', apiKey ? '✅ Firecrawl 配置已保存' : '✅ Firecrawl Key 已清除，API URL 已保存');
-                } else {
-                    showStatus(statusEl, 'error', data.message || '保存失败，请重试');
-                }
-            } catch (e) {
-                showStatus(statusEl, 'error', '网络错误：' + e.message);
-            }
-        }
-
-        async function saveCniprConfig() {
-            const clientId = document.getElementById('cnipr-client-id').value.trim();
-            const clientSecret = document.getElementById('cnipr-client-secret').value.trim();
-            const user = document.getElementById('cnipr-user').value.trim();
-            const password = document.getElementById('cnipr-password').value.trim();
-            const statusEl = document.getElementById('cnipr-status');
-            try {
-                const res = await fetch('/api/settings/cnipr', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({client_id: clientId, client_secret: clientSecret, user: user, password: password})
-                });
-                const data = await res.json();
-                statusEl.className = 'status-message ' + (data.status === 'ok' ? 'success' : 'error');
-                statusEl.textContent = data.status === 'ok' ? (user ? '✅ CNIPR 配置已保存' : '✅ CNIPR 配置已清除') : ('❌ ' + data.message);
-                statusEl.style.display = 'block';
-                setTimeout(() => { statusEl.style.display = 'none'; }, 3000);
-            } catch(e) {
-                statusEl.className = 'status-message error';
-                statusEl.textContent = '❌ 保存失败: ' + e.message;
-                statusEl.style.display = 'block';
-            }
-        }
-
-        function updateAiFields() {
-            const provider = document.getElementById('ai-provider').value;
-            const baseUrlInput = document.getElementById('ai-base-url');
-            const modelInput = document.getElementById('ai-model');
-            const guideEl = document.getElementById('provider-guide');
-
-            const configs = {
-                'zhipu': {
-                    baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
-                    model: 'glm-4.7-flash',
-                    guide: '💡 <b>完全免费</b>，国内直连，推荐首选！<br>'
-                        + '① 打开 <a href="https://open.bigmodel.cn/" target="_blank" style="color:#4a9eff;">open.bigmodel.cn</a> 注册（手机号）<br>'
-                        + '② 进入控制台 → API Keys → 创建 Key<br>'
-                        + '③ 复制 Key 粘贴到下方输入框'
-                },
-                'zhipu-plus': {
-                    baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
-                    model: 'glm-4-plus',
-                    guide: '💰 付费模型，效果更好。注册同上，新用户送额度。<br>'
-                        + '<a href="https://open.bigmodel.cn/" target="_blank" style="color:#4a9eff;">→ 注册智谱 AI</a>'
-                },
-                'deepseek': {
-                    baseUrl: 'https://api.deepseek.com/v1',
-                    model: 'deepseek-chat',
-                    guide: '💰 低价高质量，国内直连。<br>'
-                        + '① 打开 <a href="https://platform.deepseek.com/" target="_blank" style="color:#4a9eff;">platform.deepseek.com</a> 注册<br>'
-                        + '② API Keys → 创建 → 复制粘贴到下方'
-                },
-                'openrouter': {
-                    baseUrl: 'https://openrouter.ai/api/v1',
-                    model: 'google/gemini-2.0-flash-exp:free',
-                    guide: '💡 聚合多家模型，部分免费。需科学上网。<br>'
-                        + '① 打开 <a href="https://openrouter.ai/keys" target="_blank" style="color:#4a9eff;">openrouter.ai</a> 用 Google 账号登录<br>'
-                        + '② 创建 Key → 粘贴到下方<br>'
-                        + '③ 免费模型后缀带 :free'
-                },
-                'gemini': {
-                    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/',
-                    model: 'gemini-2.0-flash',
-                    guide: '💡 免费额度大（每分钟 15 次）。需科学上网。<br>'
-                        + '① 打开 <a href="https://aistudio.google.com/apikey" target="_blank" style="color:#4a9eff;">Google AI Studio</a><br>'
-                        + '② 创建 API Key → 粘贴到下方'
-                },
-                'openai': {
-                    baseUrl: 'https://api.openai.com/v1',
-                    model: 'gpt-4o-mini',
-                    guide: '💰 付费，需科学上网。<br>'
-                        + '<a href="https://platform.openai.com/api-keys" target="_blank" style="color:#4a9eff;">→ 获取 OpenAI API Key</a>'
-                },
-                'claude': {
-                    baseUrl: 'https://api.anthropic.com/v1',
-                    model: 'claude-sonnet-4-6',
-                    guide: '💰 付费，需科学上网。<br>'
-                        + '<a href="https://console.anthropic.com/settings/keys" target="_blank" style="color:#4a9eff;">→ 获取 Claude API Key</a><br>'
-                        + '⚠️ Claude API 格式与 OpenAI 不完全兼容，建议通过 OpenRouter 使用'
-                },
-                'nvidia': {
-                    baseUrl: 'https://integrate.api.nvidia.com/v1',
-                    model: 'meta/llama-3.1-405b-instruct',
-                    guide: '🟢 NVIDIA NIM — 高性能推理 API，支持多种开源模型。<br>'
-                        + '<a href="https://build.nvidia.com/" target="_blank" style="color:#4a9eff;">→ 获取 NVIDIA API Key</a>'
-                },
-                'ollama': {
-                    baseUrl: 'http://localhost:11434/v1',
-                    model: 'qwen2.5:7b',
-                    guide: '💻 本地部署，完全免费，需电脑运行 Ollama。手机端不可用。<br>'
-                        + '<a href="https://ollama.ai/" target="_blank" style="color:#4a9eff;">→ 下载 Ollama</a>'
-                },
-                'custom': {
-                    baseUrl: '',
-                    model: '',
-                    guide: '🔧 填写任意 OpenAI 兼容 API 的地址、Key 和模型名。<br>'
-                        + '适用于私有部署或其他未列出的 AI 服务商。'
-                }
-            };
-
-            const cfg = configs[provider];
-            if (cfg) {
-                if (provider !== 'custom') {
-                    baseUrlInput.value = cfg.baseUrl;
-                    modelInput.value = cfg.model;
-                }
-                guideEl.innerHTML = DOMPurify.sanitize(cfg.guide);
-                guideEl.style.display = 'block';
-            } else {
-                guideEl.style.display = 'none';
-            }
-        }
+        // 以下功能已屏蔽（仅保留 SerpAPI + DeepSeek）：
+        // Firecrawl/Bing/CNIPR/搜狗搜索源、备用 AI 服务商 均已移除
 
         // ── SerpAPI Multi-Key Management ──
         var serpapiKeyCount = 0;
@@ -498,6 +244,7 @@
             row.appendChild(input);
             container.appendChild(row);
         }
+
 
         async function saveSerpApiKey() {
             var statusEl = document.getElementById('serpapi-status');
@@ -562,127 +309,7 @@
             }, 3000);
         }
 
-        // ── Fallback AI Management ──
-        var fallbackCount = 0;
-        function addFallbackRow(name, url, key, model) {
-            if (fallbackCount >= 5) return;
-            fallbackCount++;
-            var i = fallbackCount;
-            var container = document.getElementById('fallback-list');
-            var presets = {
-                'zhipu': { name: '智谱 GLM（免费）', url: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4.7-flash' },
-                'deepseek': { name: 'DeepSeek', url: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
-                'openrouter': { name: 'OpenRouter', url: 'https://openrouter.ai/api/v1', model: 'google/gemini-2.0-flash-exp:free' },
-                'gemini': { name: 'Google Gemini', url: 'https://generativelanguage.googleapis.com/v1beta/openai/', model: 'gemini-2.0-flash' },
-                'openai': { name: 'OpenAI', url: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
-                'nvidia': { name: 'NVIDIA', url: 'https://integrate.api.nvidia.com/v1', model: 'meta/llama-3.1-405b-instruct' }
-            };
-            var row = document.createElement('div');
-            row.style.cssText = 'padding:12px;margin:8px 0;background:#0d1117;border:1px solid #30363d;border-radius:6px;';
-
-            // Build header
-            var header = document.createElement('div');
-            header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;';
-            var title = document.createElement('strong');
-            title.style.color = '#58a6ff';
-            title.textContent = '备用 AI #' + i;
-            var delBtn = document.createElement('button');
-            delBtn.style.cssText = 'background:#da3633;padding:2px 8px;font-size:0.8em;color:white;border:none;border-radius:4px;cursor:pointer;';
-            delBtn.textContent = '删除';
-            delBtn.addEventListener('click', function() { row.remove(); fallbackCount--; });
-            header.appendChild(title);
-            header.appendChild(delBtn);
-            row.appendChild(header);
-
-            // Build grid
-            var grid = document.createElement('div');
-            grid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:8px;';
-            var inputStyle = 'width:100%;padding:4px;background:#161b22;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;';
-            var labelStyle = 'font-size:0.8em;color:#8b949e;';
-
-            // Preset select
-            var presetDiv = document.createElement('div');
-            var presetLabel = document.createElement('label');
-            presetLabel.style.cssText = labelStyle;
-            presetLabel.textContent = '服务商预设';
-            var presetSelect = document.createElement('select');
-            presetSelect.style.cssText = inputStyle;
-            presetSelect.innerHTML = '<option value="">自定义</option><option value="zhipu">智谱 GLM（免费）</option><option value="deepseek">DeepSeek</option><option value="openrouter">OpenRouter</option><option value="gemini">Google Gemini</option><option value="openai">OpenAI</option><option value="nvidia">NVIDIA</option><option value="ollama">Ollama（本地）</option>';
-            (function(idx) {
-                presetSelect.addEventListener('change', function() { applyPreset(presetSelect, idx); });
-            })(i);
-            presetDiv.appendChild(presetLabel);
-            presetDiv.appendChild(presetSelect);
-            grid.appendChild(presetDiv);
-
-            // Helper to create input fields
-            function makeField(label, id, val, placeholder, spanCols) {
-                var div = document.createElement('div');
-                if (spanCols) div.style.gridColumn = 'span 2';
-                var lbl = document.createElement('label');
-                lbl.style.cssText = labelStyle;
-                lbl.textContent = label;
-                var inp = document.createElement('input');
-                inp.type = 'text';
-                inp.id = id;
-                inp.value = val || '';
-                inp.placeholder = placeholder;
-                inp.style.cssText = inputStyle;
-                div.appendChild(lbl);
-                div.appendChild(inp);
-                grid.appendChild(div);
-            }
-
-            makeField('名称', 'fb-name-' + i, name, 'OpenRouter');
-            makeField('Base URL', 'fb-url-' + i, url, 'https://...');
-            makeField('API Key', 'fb-key-' + i, key, 'sk-...');
-            makeField('模型', 'fb-model-' + i, model, 'model-name', true);
-
-            row.appendChild(grid);
-            container.appendChild(row);
-        }
-        window.applyPreset = function(sel, idx) {
-            var presets = {
-                'zhipu': { name: '智谱 GLM（免费）', url: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4.7-flash' },
-                'deepseek': { name: 'DeepSeek', url: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
-                'openrouter': { name: 'OpenRouter', url: 'https://openrouter.ai/api/v1', model: 'google/gemini-2.0-flash-exp:free' },
-                'gemini': { name: 'Google Gemini', url: 'https://generativelanguage.googleapis.com/v1beta/openai/', model: 'gemini-2.0-flash' },
-                'openai': { name: 'OpenAI', url: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
-                'nvidia': { name: 'NVIDIA', url: 'https://integrate.api.nvidia.com/v1', model: 'meta/llama-3.1-405b-instruct' },
-                'ollama': { name: 'Ollama（本地）', url: 'http://localhost:11434/v1', model: 'qwen2.5:7b' }
-            };
-            var p = presets[sel.value];
-            if (p) {
-                document.getElementById('fb-name-' + idx).value = p.name;
-                document.getElementById('fb-url-' + idx).value = p.url;
-                document.getElementById('fb-model-' + idx).value = p.model;
-            }
-        };
-        async function saveFallbacks() {
-            var statusEl = document.getElementById('fallback-status');
-            var fallbacks = [];
-            for (var i = 1; i <= fallbackCount; i++) {
-                var nameEl = document.getElementById('fb-name-' + i);
-                if (!nameEl) continue;
-                fallbacks.push({
-                    name: nameEl.value,
-                    url: document.getElementById('fb-url-' + i).value,
-                    key: document.getElementById('fb-key-' + i).value,
-                    model: document.getElementById('fb-model-' + i).value
-                });
-            }
-            try {
-                var resp = await fetch('/api/settings/fallbacks', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ fallbacks: fallbacks })
-                });
-                var data = await resp.json();
-                showStatus(statusEl, data.status === 'ok' ? 'success' : 'error', data.message || '已保存');
-            } catch(e) {
-                showStatus(statusEl, 'error', '保存失败: ' + e.message);
-            }
-        }
+        // 备用 AI 管理已移除（仅保留 DeepSeek）
     </script>
 </body>
 </html>

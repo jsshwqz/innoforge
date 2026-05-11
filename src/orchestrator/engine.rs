@@ -21,8 +21,6 @@ pub struct Orchestrator {
     ai_client: AiClient,
     db: Arc<Database>,
     serpapi_key: String,
-    bing_api_key: String,
-    lens_api_key: String,
     quick_mode: bool,
     /// 外部注入的命令（通过 iterate API 等触发）
     pending_command: Option<OrchestratorCommand>,
@@ -33,16 +31,12 @@ impl Orchestrator {
         ai_client: AiClient,
         db: Arc<Database>,
         serpapi_key: String,
-        bing_api_key: String,
-        lens_api_key: String,
         quick_mode: bool,
     ) -> Self {
         Self {
             ai_client,
             db,
             serpapi_key,
-            bing_api_key,
-            lens_api_key,
             quick_mode,
             pending_command: None,
         }
@@ -246,12 +240,10 @@ impl Orchestrator {
             PipelineStep::ParseInput => steps::parse::execute(ctx).await,
             PipelineStep::ExpandQuery => steps::expand::execute(ctx, &self.ai_client).await,
             PipelineStep::SearchWeb => {
-                steps::search::search_web(ctx, &self.serpapi_key, &self.bing_api_key, &self.db)
-                    .await
+                steps::search::search_web(ctx, &self.serpapi_key, &self.db).await
             }
             PipelineStep::SearchPatents => {
-                steps::search::search_patents(ctx, &self.serpapi_key, &self.lens_api_key, &self.db)
-                    .await
+                steps::search::search_patents(ctx, &self.serpapi_key, &self.db).await
             }
             PipelineStep::DiversityGate => {
                 let r = steps::diversity::execute(ctx).await;

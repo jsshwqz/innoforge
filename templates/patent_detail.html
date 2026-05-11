@@ -146,7 +146,39 @@
         if (e.key === 'Enter') sendChat();
     });
 
+    // ── 持久化存储 ──
+    var PATENT_CHAT_KEY = 'innoforge_chat_patent_{{patent_number}}';
     var patentChatHistory = [];
+    var patentRetryMsg = '';
+
+    // 页面加载时恢复历史
+    (function loadPatentChat() {
+        var saved = localStorage.getItem(PATENT_CHAT_KEY);
+        if (saved) {
+            try { patentChatHistory = JSON.parse(saved); } catch(e) {}
+        }
+        renderPatentMessages();
+    })();
+
+    function renderPatentMessages() {
+        var box = document.getElementById('chat-messages');
+        box.innerHTML = '';
+        for (var i = 0; i < patentChatHistory.length; i += 2) {
+            var userDiv = document.createElement('div');
+            userDiv.className = 'msg user';
+            userDiv.textContent = patentChatHistory[i][1];
+            box.appendChild(userDiv);
+            var aiDiv = document.createElement('div');
+            aiDiv.className = 'msg ai';
+            aiDiv.innerHTML = DOMPurify.sanitize(escapeHtml(patentChatHistory[i+1][1]).replace(/\n/g, '<br>'));
+            box.appendChild(aiDiv);
+        }
+        box.scrollTop = box.scrollHeight;
+    }
+
+    function savePatentChat() {
+        localStorage.setItem(PATENT_CHAT_KEY, JSON.stringify(patentChatHistory));
+    }
 
     async function sendChat() {
         const input = document.getElementById('chat-msg');
@@ -158,6 +190,13 @@
         userMsgDiv.className = 'msg user';
         userMsgDiv.textContent = msg;
         box.appendChild(userMsgDiv);
+        await doPatentSend(msg);
+        box.scrollTop = box.scrollHeight;
+    }
+
+    async function doPatentSend(msg) {
+        patentRetryMsg = msg;
+        var box = document.getElementById('chat-messages');
         var aiLoadDiv = document.createElement('div');
         aiLoadDiv.className = 'msg ai';
         aiLoadDiv.id = 'ai-loading';
@@ -177,12 +216,7 @@
                 if (errMsg.includes('unexpected end of file') || errMsg.includes('connection')) {
                     errMsg += '\n\n💡 可能原因：API Key 无效或网络不稳定。请到「设置」页检查 AI 配置。';
                 }
-                var errEl = document.getElementById('ai-loading');
-                var errReplace = document.createElement('div');
-                errReplace.className = 'msg ai error';
-                errReplace.style.color = '#f85149';
-                errReplace.innerHTML = DOMPurify.sanitize(escapeHtml(errMsg).replace(/\n/g, '<br>'));
-                errEl.parentNode.replaceChild(errReplace, errEl);
+                showPatentError(errMsg);
             } else {
                 var loadEl = document.getElementById('ai-loading');
                 var aiReplace = document.createElement('div');
@@ -191,20 +225,42 @@
                 loadEl.parentNode.replaceChild(aiReplace, loadEl);
                 patentChatHistory.push(["user", msg]);
                 patentChatHistory.push(["assistant", data.content]);
+                savePatentChat();
+                patentRetryMsg = '';
             }
         } catch(e) {
             var errText = String(e);
             if (errText.includes('unexpected end of file') || errText.includes('connection')) {
                 errText += '\n\n💡 请到「设置」页检查 AI API Key 是否正确配置。';
             }
-            var catchEl = document.getElementById('ai-loading');
-            var catchReplace = document.createElement('div');
-            catchReplace.className = 'msg ai error';
-            catchReplace.style.color = '#f85149';
-            catchReplace.innerHTML = DOMPurify.sanitize(escapeHtml(errText).replace(/\n/g, '<br>'));
-            catchEl.parentNode.replaceChild(catchReplace, catchEl);
+            showPatentError(errText);
         }
         box.scrollTop = box.scrollHeight;
+    }
+
+    function showPatentError(errText) {
+        var loadEl = document.getElementById('ai-loading');
+        var errDiv = document.createElement('div');
+        errDiv.className = 'msg ai error';
+        errDiv.style.color = '#f85149';
+        errDiv.innerHTML = DOMPurify.sanitize(
+            escapeHtml(errText).replace(/\n/g, '<br>') +
+            '<br><button onclick="retryPatentSend()" class="btn-retry" style="background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:4px 12px;border-radius:4px;cursor:pointer;margin-top:8px;font-size:0.85em;">' + t('ai.retry') + '</button>'
+        );
+        loadEl.parentNode.replaceChild(errDiv, loadEl);
+    }
+
+    function retryPatentSend() {
+        var msg = patentRetryMsg;
+        if (!msg) return;
+        patentRetryMsg = '';
+        // 移除最后一条错误消息
+        var box = document.getElementById('chat-messages');
+        var last = box.lastChild;
+        if (last && last.classList.contains('msg')) {
+            box.removeChild(last);
+        }
+        doPatentSend(msg);
     }
 
     // Update page content from enriched patent data

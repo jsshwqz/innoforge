@@ -112,12 +112,7 @@ async fn main() -> anyhow::Result<()> {
         // 设置 API / Settings API
         .route("/api/settings", get(routes::api_get_settings))
         .route("/api/settings/serpapi", post(routes::api_save_serpapi))
-        .route("/api/settings/firecrawl", post(routes::api_save_firecrawl))
-        .route("/api/settings/bing", post(routes::api_save_bing))
-        .route("/api/settings/lens", post(routes::api_save_lens))
-        .route("/api/settings/cnipr", post(routes::api_save_cnipr))
         .route("/api/settings/ai", post(routes::api_save_ai))
-        .route("/api/settings/fallbacks", post(routes::api_save_fallbacks))
         // 搜索 API / Search API
         .route("/api/search", post(routes::api_search))
         .route("/api/search/stats", post(routes::api_search_stats))

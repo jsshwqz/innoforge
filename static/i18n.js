@@ -16,6 +16,7 @@ const I18N_COMMON = {
     'ai.fail': '请求失败',
     'ai.webSearch': '联网搜索',
     'ai.searching': '正在联网搜索...',
+    'ai.retry': '🔄 重试',
     // Compare page
     'compare.title': '方案对比',
     'compare.patent1': '专利1（ID 或专利号）',
@@ -137,6 +138,7 @@ const I18N_COMMON = {
     'ai.fail': 'Request failed',
     'ai.webSearch': 'Web Search',
     'ai.searching': 'Searching the web...',
+    'ai.retry': '🔄 Retry',
     'compare.title': 'Solution Comparison',
     'compare.patent1': 'Patent 1 (ID or patent number)',
     'compare.patent2': 'Patent 2 (ID or patent number)',

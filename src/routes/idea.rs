@@ -232,8 +232,6 @@ pub async fn api_idea_analyze(
         ai_client,
         db.clone(),
         config.next_serpapi_key().unwrap_or_default(),
-        config.bing_api_key.clone(),
-        config.lens_api_key.clone(),
         true, // quick_mode
     );
 
@@ -719,16 +717,7 @@ pub async fn api_idea_pipeline(
     let ai_client = config.ai_client();
     let db = s.db.clone();
     let serpapi_key = config.next_serpapi_key().unwrap_or_default();
-    let bing_api_key = config.bing_api_key.clone();
-    let lens_api_key = config.lens_api_key.clone();
-    let runner = PipelineRunner::new(
-        ai_client,
-        db.clone(),
-        serpapi_key,
-        bing_api_key,
-        lens_api_key,
-        false,
-    );
+    let runner = PipelineRunner::new(ai_client, db.clone(), serpapi_key, false);
 
     let idea_id = id.to_string();
     let title = idea.title.clone();
@@ -848,8 +837,6 @@ pub async fn api_idea_resume(
         ai_client,
         db.clone(),
         config.next_serpapi_key().unwrap_or_default(),
-        config.bing_api_key.clone(),
-        config.lens_api_key.clone(),
         false,
     );
 
@@ -1525,8 +1512,6 @@ pub async fn api_idea_iterate(
         config.ai_client(),
         s.db.clone(),
         config.next_serpapi_key().unwrap_or_default(),
-        config.bing_api_key.clone(),
-        config.lens_api_key.clone(),
         false,
     );
     orch.inject_command(crate::orchestrator::OrchestratorCommand::Jump(
@@ -1674,8 +1659,6 @@ pub async fn api_idea_redirect(
         config.ai_client(),
         s.db.clone(),
         config.next_serpapi_key().unwrap_or_default(),
-        config.bing_api_key.clone(),
-        config.lens_api_key.clone(),
         false,
     );
     orch.inject_command(crate::orchestrator::OrchestratorCommand::Jump(restart_step));

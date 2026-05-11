@@ -5,13 +5,27 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 
-## [v0.5.8] - 2026-05-09
+## [v0.5.8] - 2026-05-11
 
 ### 新增 / Added
 - **SerpAPI 多 Key 轮询** -- 支持配置最多 5 个 SerpAPI Key 自动轮询，突破单账号每月 250 次限制
   SerpAPI multi-key round-robin -- supports up to 5 keys to bypass monthly 250-query limit
 - **设置页多 Key UI** -- 设置页面支持动态增删 SerpAPI Key 行
   Settings page multi-key UI with dynamic add/delete rows
+- **AI 对话持久化** — AI 助手页 (`/ai`) 和专利详情页 (`/patent/:id`) 的聊天记录通过 localStorage 持久化保存，页面刷新后自动恢复
+  AI chat persistence via localStorage for AI Assistant and Patent Detail pages (survives page refresh)
+- **网络错误重试按钮** — 三个 AI 对话页面（AI 助手 / 专利详情 / 创意推演）在网络错误时显示 🔄 重试按钮，一键重发上一条消息，无需手动复制
+  Retry button on network errors for all 3 AI chat pages, one-click resend of last message
+
+### 改进 / Improved
+- **搜索源精简** — 仅保留 SerpAPI + 本地数据库，移除 Firecrawl/Bing/Lens.org/CNIPR/搜狗，代码减少约 1100 行
+  Search sources simplified to SerpAPI + local DB only (removed Firecrawl/Bing/Lens.org/CNIPR/Sogou, ~1100 lines removed)
+- **AI 服务商精简** — 仅保留 DeepSeek，移除 6 个备用 AI 服务商（智谱/OpenRouter/Gemini/OpenAI/NVIDIA/Ollama）
+  AI providers simplified to DeepSeek only (removed 6 fallback providers)
+- **设置页 UI 简化** — 只显示 SerpAPI 多 Key 管理和 DeepSeek 配置，删除已移除服务的配置项
+  Settings page UI simplified to show only SerpAPI + DeepSeek configuration
+- **`.claude/settings.local.json` 权限配置修正** — 删除无效的 `allowMode` 键，按官方文档使用 `defaultMode: "bypassPermissions"`
+  Fixed Claude Code permissions config: removed invalid `allowMode` key, uses official `defaultMode: "bypassPermissions"`
 
 ### 修复 / Fixed
 - 设置页删除 Key 行后保存丢失数据（`querySelectorAll` 修复）
@@ -22,8 +36,11 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
   Removed unwrap() from production code paths (search.rs, etc.)
 - `api_patent_pdf` Handler 编译错误（内联方法链拆解）
   Fixed api_patent_pdf Handler trait compilation error
-- 搜索降级链优化：SerpAPI → Firecrawl → Google Patents → Bing → 本地库
-  Optimized search fallback chain
+
+### 移除 / Removed
+- 搜索源：Firecrawl / Bing / Lens.org / CNIPR / 搜狗（已移除全部代码）
+- AI 服务商：智谱 GLM / OpenRouter / Gemini / OpenAI / NVIDIA / Ollama（仅保留 DeepSeek）
+- 配置项：`bing_api_key` / `lens_api_key` / `firecrawl_api_key` / `cnipr_*` / `ai_fallbacks`
 
 ---
 

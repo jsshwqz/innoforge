@@ -13,8 +13,6 @@ pub struct PipelineRunner {
     ai_client: AiClient,
     db: Arc<Database>,
     serpapi_key: String,
-    bing_api_key: String,
-    lens_api_key: String,
     quick_mode: bool,
 }
 
@@ -23,16 +21,12 @@ impl PipelineRunner {
         ai_client: AiClient,
         db: Arc<Database>,
         serpapi_key: String,
-        bing_api_key: String,
-        lens_api_key: String,
         quick_mode: bool,
     ) -> Self {
         Self {
             ai_client,
             db,
             serpapi_key,
-            bing_api_key,
-            lens_api_key,
             quick_mode,
         }
     }
@@ -42,8 +36,6 @@ impl PipelineRunner {
             self.ai_client.clone(),
             self.db.clone(),
             self.serpapi_key.clone(),
-            self.bing_api_key.clone(),
-            self.lens_api_key.clone(),
             self.quick_mode,
         )
     }
