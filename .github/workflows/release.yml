@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要重发的标签（例如 v0.5.8）'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -11,6 +17,7 @@ permissions:
 jobs:
   build:
     name: Build ${{ matrix.target }}
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -35,6 +42,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', github.event.inputs.tag) || github.ref }}
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -149,11 +158,17 @@ jobs:
   sync-gitee:
     name: Sync Release to Gitee
     needs: build
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Get tag name
         id: tag
-        run: echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
 
       - name: Download all assets from GitHub Release
         env:
