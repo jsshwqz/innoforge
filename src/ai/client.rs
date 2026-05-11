@@ -295,12 +295,14 @@ impl AiClient {
 
     /// 内部实现：依次尝试 primary + fallbacks
     async fn send_chat_inner(&self, messages: Vec<Message>, temperature: f32) -> Result<String> {
+        let mut failed_chain: Vec<String> = Vec::new();
         match self
             .try_provider(&self.primary, &messages, temperature)
             .await
         {
             Ok(content) => return Ok(content),
             Err(e) => {
+                failed_chain.push(format!("{}: {}", self.primary.name, e));
                 if self.fallbacks.is_empty() {
                     return Err(e);
                 }
@@ -318,11 +320,19 @@ impl AiClient {
                 }
                 Err(e) => {
                     tracing::warn!("[failover] {} failed: {}", fallback.name, e);
+                    failed_chain.push(format!("{}: {}", fallback.name, e));
                     last_err = e;
                 }
             }
         }
 
-        Err(last_err)
+        if failed_chain.is_empty() {
+            Err(last_err)
+        } else {
+            Err(anyhow::anyhow!(
+                "AI 多通道均失败（{}）。请检查对应服务商 Key/额度/网络状态。",
+                failed_chain.join(" | ")
+            ))
+        }
     }
 }

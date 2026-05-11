@@ -236,6 +236,15 @@ pub async fn api_search_online(
 
     // 搜索区域判定：用户明确选择 > 自动检测
     let query_trimmed = req.query.trim();
+    if query_trimmed.is_empty() {
+        return Json(json!({
+            "patents": [],
+            "total": 0,
+            "page": req.page,
+            "page_size": req.page_size,
+            "message": "查询词为空，已跳过在线检索"
+        }));
+    }
     let looks_like_cn_patent_number = {
         let digits_only: String = query_trimmed
             .chars()
@@ -1006,45 +1015,38 @@ async fn try_exact_patent_lookup(
             // CN APPLICATION number with CN prefix (e.g., CN202420009882.7)
             // Google Patents indexes by PUBLICATION number, not application number.
             // We must first search to discover the publication number.
+            let mut candidates = vec![q.to_string(), q.replace('.', "")];
             let dot_pos = q.find('.').unwrap_or(q.len());
-            let core: String = q[..dot_pos]
+            let pre_dot_digits: String = q[..dot_pos]
                 .chars()
                 .filter(|c| c.is_ascii_digit())
                 .collect();
+            if !pre_dot_digits.is_empty() {
+                candidates.push(pre_dot_digits.clone());
+                if pre_dot_digits.len() > 1 {
+                    candidates.push(format!("CN{}", pre_dot_digits));
+                }
+            }
+
             println!(
-                "[EXACT] CN app number with prefix detected, searching for publication via '{}'",
-                core
+                "[EXACT] CN app number with prefix detected, trying candidates: {:?}",
+                candidates
             );
-
-            let search_url = format!(
-                "https://serpapi.com/search.json?engine=google_patents&q={}&page=1&api_key={}",
-                urlencoding::encode(&core),
-                api_key
-            );
-            let resp = client.get(&search_url).send().await.ok()?;
-            let body = resp.text().await.ok()?;
-            let json: serde_json::Value = serde_json::from_str(&body).ok()?;
-
-            let found_id = json["organic_results"]
-                .as_array()
-                .and_then(|arr| arr.first())
-                .and_then(|r| r["patent_id"].as_str())
-                .map(|s| s.to_string());
-
-            match found_id {
-                Some(id) => {
-                    let id = if id.contains("/CN") {
-                        id.replace("/en", "/zh")
-                    } else {
-                        id
-                    };
-                    println!("[EXACT] Found publication via keyword search: {}", id);
-                    patent_id = id;
-                }
-                None => {
-                    println!("[EXACT] Keyword search returned no results for '{}'", core);
-                    return None;
-                }
+            let found_id = find_publication_patent_id(&client, api_key, &candidates).await;
+            if let Some(id) = found_id {
+                let id = if id.contains("/CN") {
+                    id.replace("/en", "/zh")
+                } else {
+                    id
+                };
+                println!("[EXACT] Found publication via keyword search: {}", id);
+                patent_id = id;
+            } else {
+                println!(
+                    "[EXACT] Keyword search returned no results for {:?}",
+                    candidates
+                );
+                return None;
             }
         } else {
             // Already has country prefix — publication number, try directly
@@ -1056,33 +1058,22 @@ async fn try_exact_patent_lookup(
         // Bare Chinese APPLICATION number (e.g. 202210835143.9)
         // Google Patents indexes by PUBLICATION number, not application number.
         // We must first search to discover the publication number.
-        let core = if digits.len() >= 13 {
-            &digits[..digits.len() - 1] // strip check digit
-        } else {
-            &digits
-        };
+        let mut candidates = Vec::new();
+        candidates.push(q.to_string());
+        candidates.push(digits.clone());
+        if digits.len() >= 13 {
+            candidates.push(digits[..digits.len() - 1].to_string());
+            candidates.push(format!("CN{}", &digits[..digits.len() - 1]));
+        }
+        if digits.len() >= 12 {
+            candidates.push(format!("CN{}", &digits[..12]));
+        }
         println!(
-            "[EXACT] Bare CN app number detected, searching for publication number via '{}'",
-            core
+            "[EXACT] Bare CN app number detected, trying candidates: {:?}",
+            candidates
         );
 
-        let search_url = format!(
-            "https://serpapi.com/search.json?engine=google_patents&q={}&page=1&api_key={}",
-            urlencoding::encode(core),
-            api_key
-        );
-        let resp = client.get(&search_url).send().await.ok()?;
-        let body = resp.text().await.ok()?;
-        let json: serde_json::Value = serde_json::from_str(&body).ok()?;
-
-        // Find the first result's patent_id
-        let found_id = json["organic_results"]
-            .as_array()
-            .and_then(|arr| arr.first())
-            .and_then(|r| r["patent_id"].as_str())
-            .map(|s| s.to_string());
-
-        match found_id {
+        match find_publication_patent_id(&client, api_key, &candidates).await {
             Some(id) => {
                 // For CN patents, use /zh to get Chinese results
                 let id = if id.contains("/CN") {
@@ -1094,7 +1085,10 @@ async fn try_exact_patent_lookup(
                 patent_id = id;
             }
             None => {
-                println!("[EXACT] Keyword search returned no results for '{}'", core);
+                println!(
+                    "[EXACT] Keyword search returned no results for {:?}",
+                    candidates
+                );
                 return None;
             }
         }
@@ -1211,6 +1205,36 @@ async fn try_exact_patent_lookup(
         "page_size": 10,
         "source": "serpapi_exact"
     }))
+}
+
+async fn find_publication_patent_id(
+    client: &reqwest::Client,
+    api_key: &str,
+    candidates: &[String],
+) -> Option<String> {
+    for candidate in candidates {
+        let c = candidate.trim();
+        if c.is_empty() {
+            continue;
+        }
+        let search_url = format!(
+            "https://serpapi.com/search.json?engine=google_patents&q={}&page=1&api_key={}",
+            urlencoding::encode(c),
+            api_key
+        );
+        let resp = client.get(&search_url).send().await.ok()?;
+        let body = resp.text().await.ok()?;
+        let json: serde_json::Value = serde_json::from_str(&body).ok()?;
+        if let Some(id) = json["organic_results"]
+            .as_array()
+            .and_then(|arr| arr.first())
+            .and_then(|r| r["patent_id"].as_str())
+            .map(|s| s.to_string())
+        {
+            return Some(id);
+        }
+    }
+    None
 }
 
 #[cfg(test)]

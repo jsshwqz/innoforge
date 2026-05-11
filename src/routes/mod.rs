@@ -254,8 +254,8 @@ pub(crate) fn build_online_query(
                 } else {
                     digits
                 };
-                // Bare digits — Google Patents finds this via application_number field
-                core
+                // 同时保留原始申请号与核心位数，提升 SerpAPI 在不同索引形态下的命中率
+                format!("\"{}\" OR \"{}\"", q, core)
             } else {
                 format!("\"{}\"", q)
             }
