@@ -186,8 +186,8 @@ docs/          # 文档和规划
 - **版本**：见 `Cargo.toml` 的 `version` 字段（以此为准）
 - **DB Schema**：见 `src/db/migrations.rs` 中最新迁移版本号
 - **Pipeline 步骤**：13 步（见 `src/pipeline/state.rs` 的 `PipelineStep` 枚举）
-- **AI 服务商**：7 个（智谱/DeepSeek/OpenRouter/Gemini/OpenAI/NVIDIA/Ollama）
-- **搜索源**：5 个（CNIPR/SerpAPI/Lens.org/Google Patents/搜狗）
+- **AI 服务商**：1 个（DeepSeek）
+- **搜索源**：2 个（SerpAPI / 本地 SQLite FTS5）
 - **前端页面**：7 个（index/search/patent_detail/idea/ai/compare/settings）
 
 > 注意：版本号、Schema 版本等数字会随开发变化，请以源码文件为准，不要依赖本节的静态数字。
