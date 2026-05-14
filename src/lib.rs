@@ -94,6 +94,20 @@ pub async fn start_server(db_path: &str) -> anyhow::Result<()> {
         .route("/api/settings", get(routes::api_get_settings))
         .route("/api/settings/serpapi", post(routes::api_save_serpapi))
         .route("/api/settings/ai", post(routes::api_save_ai))
+        .route(
+            "/api/settings/serpapi/balance",
+            get(routes::api_serpapi_balance),
+        )
+        // 聊天记录 API / Chat Records API
+        .route("/api/chat/:session_key", get(routes::api_chat_get_messages))
+        .route(
+            "/api/chat/:session_key/save",
+            post(routes::api_chat_save_message),
+        )
+        .route(
+            "/api/chat/:session_key/delete",
+            post(routes::api_chat_delete_messages),
+        )
         .route("/api/search", post(routes::api_search))
         .route("/api/search/stats", post(routes::api_search_stats))
         .route("/api/search/export", post(routes::api_export_csv))

@@ -321,9 +321,9 @@ pub async fn api_search_online(
             Some("old") => "&sort=old",
             _ => "",
         };
-        // 中文查询时请求中文结果（并尽量约束语种）
+        // 中文查询时请求中文结果（地理 + 语种约束）
         let lang_param = if is_cn_query {
-            "&hl=zh-cn&lr=lang_zh-CN"
+            "&hl=zh-cn&gl=cn&lr=lang_zh-CN"
         } else {
             ""
         };

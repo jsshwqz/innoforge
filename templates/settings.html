@@ -111,6 +111,14 @@
             <button class="btn-save" style="background:#21262d;margin-top:8px;" onclick="addSerpapiKeyRow()">+ 添加 SerpAPI Key</button>
             <button class="btn-save" onclick="saveSerpApiKey()">保存</button>
             <div id="serpapi-status" class="status-message"></div>
+
+            <div style="margin-top:15px;padding:12px;background:#161b22;border:1px solid #30363d;border-radius:6px;">
+                <strong style="color:#58a6ff;">📊 SerpAPI 余额 / 用量</strong>
+                <div id="serpapi-balance-content" style="margin-top:8px;color:#c9d1d9;font-size:14px;">
+                    点击查询加载...
+                </div>
+                <button class="btn-save" style="background:#21262d;margin-top:8px;padding:6px 16px;font-size:13px;" onclick="fetchSerpapiBalance()">🔄 刷新余额</button>
+            </div>
         </div>
 
         <div class="setting-group">
@@ -125,8 +133,28 @@
                 </a>
             </div>
 
-            <input type="hidden" id="ai-base-url" value="https://api.deepseek.com/v1">
-            <input type="hidden" id="ai-model" value="deepseek-chat">
+            <div class="form-group">
+                <label>API Base URL</label>
+                <input type="text" id="ai-base-url" value="https://api.deepseek.com/v1" placeholder="https://api.deepseek.com/v1">
+                <span style="color:#999;font-size:13px;">兼容 OpenAI 格式的 API 地址</span>
+            </div>
+
+            <div class="form-group">
+                <label>AI 模型</label>
+                <select id="ai-model" style="width:100%;padding:10px;background:#1a1a1a;border:1px solid #444;border-radius:4px;color:#fff;font-size:14px;">
+                    <option value="deepseek-chat">DeepSeek Chat (V3，通用对话)</option>
+                    <option value="deepseek-reasoner">DeepSeek Reasoner (R1，深度推理)</option>
+                    <option value="deepseek-chat-v4-flash">DeepSeek Flash (快速)</option>
+                    <option value="gpt-4o">GPT-4o (OpenRouter)</option>
+                    <option value="gpt-4o-mini">GPT-4o Mini (OpenRouter)</option>
+                    <option value="custom">自定义模型...</option>
+                </select>
+                <div id="custom-model-group" class="form-group" style="display:none;margin-top:8px;">
+                    <label>自定义模型名称</label>
+                    <input type="text" id="ai-model-custom" placeholder="输入模型名称（如 claude-3-opus）">
+                </div>
+                <span style="color:#999;font-size:13px;">切换至自定义选项后可输入任意模型名</span>
+            </div>
 
             <button class="btn-save" onclick="saveAiConfig()">保存</button>
             <div id="ai-status" class="status-message"></div>
@@ -173,8 +201,27 @@
 
                     document.getElementById('ai-base-url').value = config.ai_base_url || 'https://api.deepseek.com/v1';
                     document.getElementById('ai-api-key').value = config.ai_api_key || '';
-                    document.getElementById('ai-model').value = config.ai_model || 'deepseek-chat';
 
+                    // 设置模型下拉选项
+                    var modelVal = config.ai_model || 'deepseek-chat';
+                    var modelSelect = document.getElementById('ai-model');
+                    var customOption = modelSelect.querySelector('option[value="custom"]');
+                    var found = false;
+                    for (var i = 0; i < modelSelect.options.length; i++) {
+                        if (modelSelect.options[i].value === modelVal) {
+                            modelSelect.value = modelVal;
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found && customOption) {
+                        modelSelect.value = 'custom';
+                        document.getElementById('custom-model-group').style.display = 'block';
+                        document.getElementById('ai-model-custom').value = modelVal;
+                    }
+
+                    // 初次加载刷新余额
+                    fetchSerpapiBalance();
                     updateConfigStatus(config);
                 }
             } catch (e) {
@@ -246,6 +293,52 @@
         }
 
 
+        // ── AI 模型下拉切换 ──
+        document.addEventListener('change', function(e) {
+            if (e.target && e.target.id === 'ai-model') {
+                var customGroup = document.getElementById('custom-model-group');
+                if (e.target.value === 'custom') {
+                    customGroup.style.display = 'block';
+                } else {
+                    customGroup.style.display = 'none';
+                }
+            }
+        });
+
+        // ── SerpAPI 余额查询 ──
+        async function fetchSerpapiBalance() {
+            var contentEl = document.getElementById('serpapi-balance-content');
+            contentEl.textContent = '查询中...';
+            try {
+                const res = await fetch('/api/settings/serpapi/balance');
+                const data = await res.json();
+                if (data.status === 'ok') {
+                    var used = data.this_month_usage || 0;
+                    var limit = data.searches_per_month || 250;
+                    var remaining = data.remaining || 0;
+                    var pct = limit > 0 ? Math.round(used / limit * 100) : 0;
+                    var barColor = pct > 80 ? '#f85149' : pct > 60 ? '#d29922' : '#3fb950';
+                    contentEl.innerHTML = DOMPurify.sanitize(
+                        '<div style="display:flex;justify-content:space-between;margin-bottom:4px;">' +
+                            '<span>已用：' + used + ' / ' + limit + '（' + pct + '%）</span>' +
+                            '<span>剩余：' + remaining + '</span>' +
+                        '</div>' +
+                        '<div style="background:#0d1117;border-radius:4px;height:8px;overflow:hidden;">' +
+                            '<div style="width:' + Math.min(pct, 100) + '%;background:' + barColor + ';height:100%;border-radius:4px;"></div>' +
+                        '</div>' +
+                        '<div style="margin-top:4px;color:#8b949e;font-size:12px;">' +
+                            '套餐：' + DOMPurify.sanitize(data.plan_name || 'Free') +
+                            ' | 配置 Key 数：' + data.key_count +
+                        '</div>'
+                    );
+                } else {
+                    contentEl.textContent = '❌ ' + (data.message || '查询失败');
+                }
+            } catch (e) {
+                contentEl.textContent = '❌ 网络错误：' + e.message;
+            }
+        }
+
         async function saveSerpApiKey() {
             var statusEl = document.getElementById('serpapi-status');
             var keys = [];
@@ -274,7 +367,10 @@
         async function saveAiConfig() {
             const baseUrl = document.getElementById('ai-base-url').value.trim();
             const apiKey = document.getElementById('ai-api-key').value.trim();
-            const model = document.getElementById('ai-model').value.trim();
+            var modelSelect = document.getElementById('ai-model');
+            var model = modelSelect.value === 'custom'
+                ? document.getElementById('ai-model-custom').value.trim()
+                : modelSelect.value;
             const statusEl = document.getElementById('ai-status');
 
             if (!baseUrl || !apiKey || !model) {
@@ -292,6 +388,14 @@
                 const data = await res.json();
                 if (res.ok && data.status === 'ok') {
                     showStatus(statusEl, 'success', '✅ AI 配置已保存！');
+                    // 刷新配置状态
+                    try {
+                        const refreshRes = await fetch('/api/settings');
+                        if (refreshRes.ok) {
+                            const refreshed = await refreshRes.json();
+                            updateConfigStatus(refreshed);
+                        }
+                    } catch (_) {}
                 } else {
                     showStatus(statusEl, 'error', data.message || '保存失败，请重试');
                 }

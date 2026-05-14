@@ -146,18 +146,32 @@
         if (e.key === 'Enter') sendChat();
     });
 
-    // ── 持久化存储 ──
+    // ── 持久化存储（后端 SQLite 替代 localStorage）──
     var PATENT_CHAT_KEY = 'innoforge_chat_patent_{{patent_number}}';
     var patentChatHistory = [];
     var patentRetryMsg = '';
 
-    // 页面加载时恢复历史
+    // 页面加载时从后端恢复历史
     (function loadPatentChat() {
-        var saved = localStorage.getItem(PATENT_CHAT_KEY);
-        if (saved) {
-            try { patentChatHistory = JSON.parse(saved); } catch(e) {}
-        }
-        renderPatentMessages();
+        fetch('/api/chat/' + encodeURIComponent(PATENT_CHAT_KEY))
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.status === 'ok' && data.messages) {
+                    patentChatHistory = [];
+                    data.messages.forEach(function(m) {
+                        patentChatHistory.push([m.role, m.content]);
+                    });
+                }
+                renderPatentMessages();
+            })
+            .catch(function() {
+                // 后端不可用时降级到 localStorage
+                var saved = localStorage.getItem(PATENT_CHAT_KEY);
+                if (saved) {
+                    try { patentChatHistory = JSON.parse(saved); } catch(e) {}
+                }
+                renderPatentMessages();
+            });
     })();
 
     function renderPatentMessages() {
@@ -176,8 +190,14 @@
         box.scrollTop = box.scrollHeight;
     }
 
-    function savePatentChat() {
-        localStorage.setItem(PATENT_CHAT_KEY, JSON.stringify(patentChatHistory));
+    function savePatentMessage(role, content) {
+        fetch('/api/chat/' + encodeURIComponent(PATENT_CHAT_KEY) + '/save', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({role: role, content: content})
+        }).catch(function(e) {
+            console.warn('保存聊天记录失败:', e);
+        });
     }
 
     async function sendChat() {
@@ -225,7 +245,8 @@
                 loadEl.parentNode.replaceChild(aiReplace, loadEl);
                 patentChatHistory.push(["user", msg]);
                 patentChatHistory.push(["assistant", data.content]);
-                savePatentChat();
+                savePatentMessage('user', msg);
+                savePatentMessage('assistant', data.content);
                 patentRetryMsg = '';
             }
         } catch(e) {

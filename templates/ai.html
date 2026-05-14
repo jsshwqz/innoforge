@@ -44,19 +44,33 @@
     <script>
     function escapeHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
-    // ── 持久化存储 ──
+    // ── 持久化存储（后端 SQLite 替代 localStorage）──
     var AI_CHAT_KEY = 'innoforge_ai_chat';
     var chatHistory = [];
     var chatSending = false;
     var retryMsg = '';
 
-    // 页面加载时恢复历史
+    // 页面加载时从后端恢复历史
     (function loadChatHistory() {
-        var saved = localStorage.getItem(AI_CHAT_KEY);
-        if (saved) {
-            try { chatHistory = JSON.parse(saved); } catch(e) {}
-        }
-        renderAllMessages();
+        fetch('/api/chat/' + encodeURIComponent(AI_CHAT_KEY))
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.status === 'ok' && data.messages) {
+                    chatHistory = [];
+                    data.messages.forEach(function(m) {
+                        chatHistory.push([m.role, m.content]);
+                    });
+                }
+                renderAllMessages();
+            })
+            .catch(function() {
+                // 后端不可用时降级到 localStorage
+                var saved = localStorage.getItem(AI_CHAT_KEY);
+                if (saved) {
+                    try { chatHistory = JSON.parse(saved); } catch(e) {}
+                }
+                renderAllMessages();
+            });
     })();
 
     function renderAllMessages() {
@@ -75,8 +89,14 @@
         box.scrollTop = box.scrollHeight;
     }
 
-    function saveChatHistory() {
-        localStorage.setItem(AI_CHAT_KEY, JSON.stringify(chatHistory));
+    function saveMessage(role, content) {
+        fetch('/api/chat/' + encodeURIComponent(AI_CHAT_KEY) + '/save', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({role: role, content: content})
+        }).catch(function(e) {
+            console.warn('保存聊天记录失败:', e);
+        });
     }
 
     document.getElementById('chat-msg').addEventListener('keydown', function(e) {
@@ -126,7 +146,8 @@
             document.getElementById(loadingId).innerHTML = DOMPurify.sanitize(escapeHtml(data.content).replace(/\n/g, '<br>'));
             chatHistory.push(["user", msg]);
             chatHistory.push(["assistant", data.content]);
-            saveChatHistory();
+            saveMessage('user', msg);
+            saveMessage('assistant', data.content);
             retryMsg = '';
         } catch(e) {
             var el = document.getElementById(loadingId);

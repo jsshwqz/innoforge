@@ -5,6 +5,34 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 
+## [v0.5.9] - 2026-05-14
+
+### 新增 / Added
+- **设置页 DeepSeek 模型下拉选择** — 设置页 AI 配置支持选择 deepseek-chat / deepseek-reasoner / deepseek-chat-v4-flash / gpt-4o / gpt-4o-mini / 自定义模型，不再固定为 deepseek-chat
+  Settings page: AI model dropdown with 6 presets + custom model input
+- **SerpAPI 余额/用量显示** — 设置页新增 SerpAPI 余额进度条，显示 plan_name、searches_per_month、当月用量、剩余次数
+  Settings page: SerpAPI balance indicator with progress bar (plan, quota, usage, remaining)
+- **对话跨设备同步** — AI 助手和专利详情页的聊天记录从 localStorage 迁移到后端 SQLite 持久化，换设备不丢失
+  Cross-device chat sync: chat history migrated from localStorage to backend SQLite persistence
+- **聊天记录 CRUD API** — 新增 `GET/POST /api/chat/:key` 和 `POST /api/chat/:key/delete` 三个端点
+  Chat records CRUD API: 3 new endpoints for get/save/delete chat messages
+
+### 改进 / Improved
+- **SerpAPI 中文搜索精度** — 中文查询自动附加 `hl=zh-cn&gl=cn&lr=lang_zh-CN` 参数，提升中文专利搜索命中率
+  SerpAPI Chinese search accuracy: auto-attach hl/gl/lr params for Chinese queries
+- **本地 FTS5 排序权重** — BM25 权重调优：标题 10.0、专利号 5.0、摘要 5.0、权利要求 3.0、申请人 2.0、发明人 2.0、IPC 1.0
+  FTS5 BM25 ranking weights tuned: title 10.0, patent_number 5.0, abstract 5.0, claims 3.0, applicant 2.0, inventor 2.0, IPC 1.0
+- **数据库 schema 升级到 v13** — 新增 `chat_records` 表用于聊天记录持久化
+  Database schema upgraded to v13 (chat_records table)
+
+### 测试 / Tests
+- **聊天记录集成测试** — 新增 6 个测试覆盖 chat CRUD、会话隔离、边界条件
+  6 new chat record integration tests (CRUD, isolation, edge cases)
+- **Schema 版本断言更新** — 3 个集成测试中的版本断言从 12 更新为 13
+  3 integration tests updated schema version assertion from 12 to 13
+
+---
+
 ## [v0.5.8] - 2026-05-11
 
 ### 新增 / Added

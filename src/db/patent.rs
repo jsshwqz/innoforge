@@ -440,11 +440,13 @@ impl super::Database {
             .prepare("SELECT COUNT(*) FROM patents_fts WHERE patents_fts MATCH ?1")?
             .query_row(params![safe_query], |r| r.get(0))
             .unwrap_or(0);
-        let mut stmt = c.prepare("SELECT p.id,p.patent_number,p.title,p.abstract_text,p.applicant,p.inventor,p.filing_date,p.country,f.rank FROM patents p INNER JOIN patents_fts f ON p.rowid=f.rowid WHERE patents_fts MATCH ?1 ORDER BY rank LIMIT ?2 OFFSET ?3")?;
+        // BM25 权重：title(1) 最高, abstract(2) 次之, claims(3) 中等, applicant/inventor(4-5) 较低
+        // 列顺序: patent_number(0), title(1), abstract_text(2), claims(3), applicant(4), inventor(5), ipc_codes(6)
+        let mut stmt = c.prepare("SELECT p.id,p.patent_number,p.title,p.abstract_text,p.applicant,p.inventor,p.filing_date,p.country,f.rank FROM patents p INNER JOIN patents_fts f ON p.rowid=f.rowid WHERE patents_fts MATCH ?1 ORDER BY bm25(patents_fts, 0.0, 5.0, 10.0, 5.0, 3.0, 2.0, 2.0, 1.0) LIMIT ?2 OFFSET ?3")?;
         let rows = stmt
             .query_map(params![safe_query, page_size as i64, offset as i64], |r| {
                 let rank: f64 = r.get::<_, f64>(8).unwrap_or(0.0);
-                // FTS5 rank is negative (closer to 0 = better). Normalize to 0-100.
+                // FTS5 BM25 rank is negative (closer to 0 = better). Normalize to 0-100.
                 // Typical range: -20 (very relevant) to 0 (less relevant)
                 let score = ((-rank).min(20.0) / 20.0 * 70.0 + 30.0).min(100.0);
                 Ok(PatentSummary {

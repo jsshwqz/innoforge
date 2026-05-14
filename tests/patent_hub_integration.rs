@@ -392,7 +392,7 @@ fn schema_version_is_set_on_fresh_db() {
     let version: i32 = db
         .query_schema_version()
         .expect("should be able to read schema version");
-    assert_eq!(version, 12);
+    assert_eq!(version, 13);
 }
 
 #[test]
@@ -414,7 +414,101 @@ fn reinit_same_db_is_idempotent() {
     assert_eq!(p.unwrap().title, "Migration test");
 
     let version = db2.query_schema_version().unwrap();
-    assert_eq!(version, 12);
+    assert_eq!(version, 13);
+}
+
+// ── Chat records CRUD ────────────────────────────────────────────────────────
+
+#[test]
+fn chat_save_and_get_messages() {
+    let db = Database::init(":memory:").unwrap();
+    let session = "test-session-001";
+
+    let id1 = db.save_chat_message(session, "user", "你好").unwrap();
+    let id2 = db.save_chat_message(session, "assistant", "你好！有什么可以帮助你的？").unwrap();
+    let id3 = db.save_chat_message(session, "user", "请分析这篇专利").unwrap();
+
+    let messages = db.get_chat_messages(session).unwrap();
+    assert_eq!(messages.len(), 3);
+    assert_eq!(messages[0].role, "user");
+    assert_eq!(messages[0].content, "你好");
+    assert_eq!(messages[1].role, "assistant");
+    assert_eq!(messages[1].content, "你好！有什么可以帮助你的？");
+    assert_eq!(messages[2].role, "user");
+    assert_eq!(messages[2].content, "请分析这篇专利");
+
+    // IDs should be ascending
+    assert!(id2 > id1);
+    assert!(id3 > id2);
+}
+
+#[test]
+fn chat_messages_ordered_by_insertion() {
+    let db = Database::init(":memory:").unwrap();
+    let session = "order-test";
+
+    db.save_chat_message(session, "user", "第一轮提问").unwrap();
+    db.save_chat_message(session, "assistant", "第一轮回答").unwrap();
+    db.save_chat_message(session, "user", "第二轮提问").unwrap();
+    db.save_chat_message(session, "assistant", "第二轮回答").unwrap();
+
+    let messages = db.get_chat_messages(session).unwrap();
+    assert_eq!(messages.len(), 4);
+    assert_eq!(messages[0].content, "第一轮提问");
+    assert_eq!(messages[1].content, "第一轮回答");
+    assert_eq!(messages[2].content, "第二轮提问");
+    assert_eq!(messages[3].content, "第二轮回答");
+}
+
+#[test]
+fn chat_delete_messages() {
+    let db = Database::init(":memory:").unwrap();
+    let session = "delete-test";
+
+    db.save_chat_message(session, "user", "消息1").unwrap();
+    db.save_chat_message(session, "assistant", "回复1").unwrap();
+    db.save_chat_message(session, "user", "消息2").unwrap();
+
+    let deleted = db.delete_chat_messages(session).unwrap();
+    assert_eq!(deleted, 3);
+
+    let messages = db.get_chat_messages(session).unwrap();
+    assert!(messages.is_empty());
+}
+
+#[test]
+fn chat_get_nonexistent_session_returns_empty() {
+    let db = Database::init(":memory:").unwrap();
+    let messages = db.get_chat_messages("nonexistent-session").unwrap();
+    assert!(messages.is_empty());
+}
+
+#[test]
+fn chat_delete_nonexistent_session_returns_zero() {
+    let db = Database::init(":memory:").unwrap();
+    let deleted = db.delete_chat_messages("nonexistent").unwrap();
+    assert_eq!(deleted, 0);
+}
+
+#[test]
+fn chat_sessions_are_isolated() {
+    let db = Database::init(":memory:").unwrap();
+
+    db.save_chat_message("session-a", "user", "A的消息").unwrap();
+    db.save_chat_message("session-b", "user", "B的消息").unwrap();
+
+    let a_msgs = db.get_chat_messages("session-a").unwrap();
+    assert_eq!(a_msgs.len(), 1);
+    assert_eq!(a_msgs[0].content, "A的消息");
+
+    let b_msgs = db.get_chat_messages("session-b").unwrap();
+    assert_eq!(b_msgs.len(), 1);
+    assert_eq!(b_msgs[0].content, "B的消息");
+
+    // Delete session-a should not affect session-b
+    db.delete_chat_messages("session-a").unwrap();
+    let b_msgs_after = db.get_chat_messages("session-b").unwrap();
+    assert_eq!(b_msgs_after.len(), 1);
 }
 
 // ── Feature cards CRUD ──────────────────────────────────────────────────────

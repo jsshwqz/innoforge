@@ -3,6 +3,7 @@
 //! 基于 SQLite + FTS5 的本地数据持久化，支持全文搜索、创意管理、收藏夹、标签等。
 //! Local data persistence with SQLite + FTS5, supporting full-text search, ideas, collections, tags.
 
+mod chat;
 mod collection;
 mod evidence;
 mod idea;
@@ -34,7 +35,7 @@ impl Database {
     }
 
     /// Current schema version. Increment when adding migrations.
-    pub(crate) const SCHEMA_VERSION: i32 = 12;
+    pub(crate) const SCHEMA_VERSION: i32 = 13;
 
     pub fn init(path: &str) -> Result<Self> {
         let conn = Connection::open(path)?;

@@ -16,6 +16,21 @@ use std::time::Duration;
 
 const SEARCH_UPSTREAM_TIMEOUT_SECS: u64 = 8;
 
+/// 检测查询是否包含中文字符 / Check if query contains CJK characters
+fn contains_cjk(s: &str) -> bool {
+    s.chars()
+        .any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c) || ('\u{3400}'..='\u{4dbf}').contains(&c))
+}
+
+/// 中文字符集补充的 SerpAPI 参数（地理 + 语言约束）
+fn serpapi_cn_params(query: &str) -> Vec<(&'static str, String)> {
+    if contains_cjk(query) {
+        vec![("hl", "zh-cn".to_string()), ("gl", "cn".to_string())]
+    } else {
+        vec![]
+    }
+}
+
 /// 计算查询哈希（用于缓存键）/ Compute query hash for cache key
 fn query_hash(query: &str, source: &str) -> String {
     let mut h = DefaultHasher::new();
@@ -69,16 +84,21 @@ pub async fn search_web(ctx: &mut PipelineContext, serpapi_key: &str, db: &Datab
 
     // SerpAPI 搜索
     for query in ctx.expanded_queries.iter().take(3) {
+        let mut params = vec![
+            (
+                "q",
+                format!("{} site:patents.google.com OR technology OR patent", query),
+            ),
+            ("api_key", serpapi_key.to_string()),
+            ("num", "10".to_string()),
+        ];
+        // 中文查询添加语言和地理参数
+        for (k, v) in serpapi_cn_params(query) {
+            params.push((k, v));
+        }
         let resp = client
             .get("https://serpapi.com/search.json")
-            .query(&[
-                (
-                    "q",
-                    format!("{} site:patents.google.com OR technology OR patent", query),
-                ),
-                ("api_key", serpapi_key.to_string()),
-                ("num", "10".to_string()),
-            ])
+            .query(&params)
             .send()
             .await;
 
@@ -156,13 +176,18 @@ pub async fn search_patents(
             .build()
             .unwrap_or_else(|_| Client::new());
         for query in ctx.expanded_queries.iter().take(2) {
+            let mut params = vec![
+                ("engine", "google_patents".to_string()),
+                ("q", query.clone()),
+                ("api_key", serpapi_key.to_string()),
+            ];
+            // 中文查询添加语言和地理参数
+            for (k, v) in serpapi_cn_params(query) {
+                params.push((k, v));
+            }
             let resp = client
                 .get("https://serpapi.com/search.json")
-                .query(&[
-                    ("engine", "google_patents".to_string()),
-                    ("q", query.clone()),
-                    ("api_key", serpapi_key.to_string()),
-                ])
+                .query(&params)
                 .send()
                 .await;
 

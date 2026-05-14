@@ -342,6 +342,27 @@ pub(crate) fn run(conn: &Connection, current_version: i32, target_version: i32) 
         tracing::info!("Database migrated to version 12 (idea_research_state)");
     }
 
+    // Migration 12 → 13: 聊天记录跨设备同步 / Chat records for cross-device sync
+    if current_version < 13 {
+        conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS chat_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_key TEXT NOT NULL,
+                role TEXT NOT NULL CHECK(role IN ('user','assistant','system')),
+                content TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_chat_session ON chat_records(session_key);
+            CREATE INDEX IF NOT EXISTS idx_chat_created ON chat_records(created_at);
+
+            DELETE FROM schema_version;
+            INSERT INTO schema_version (version) VALUES (13);
+        ",
+        )?;
+        tracing::info!("Database migrated to version 13 (chat_records)");
+    }
+
     if current_version > 0 && current_version < target_version {
         tracing::info!(
             "Database migrated from version {} to {}",

@@ -148,6 +148,63 @@ pub async fn api_save_ai(
     Json(json!({"status": "ok"}))
 }
 
+/// 查询 SerpAPI 账户余额/用量
+pub async fn api_serpapi_balance(State(s): State<AppState>) -> Json<serde_json::Value> {
+    let config = s.config.read().unwrap_or_else(|e| e.into_inner());
+    let keys = config.serpapi_keys.clone();
+    drop(config);
+
+    // 使用同步线程 + channel 的方式查询 SerpAPI（避免 async reqwest 的 Send 问题）
+    let data = if keys.is_empty() {
+        None
+    } else {
+        let key = keys[0].clone();
+        let url = format!("https://serpapi.com/account.json?api_key={}", key);
+        let (tx, rx) = std::sync::mpsc::channel::<Result<serde_json::Value, String>>();
+        std::thread::spawn(move || {
+            let client = reqwest::blocking::Client::new();
+            let result = client
+                .get(&url)
+                .send()
+                .map_err(|e| format!("连接 SerpAPI 失败: {}", e))
+                .and_then(|r| {
+                    r.json::<serde_json::Value>()
+                        .map_err(|e| format!("解析 SerpAPI 响应失败: {}", e))
+                });
+            let _ = tx.send(result);
+        });
+        match rx.recv() {
+            Ok(Ok(d)) => Some(d),
+            Ok(Err(e)) => return Json(json!({"status": "error", "message": e})),
+            Err(e) => {
+                return Json(
+                    json!({"status": "error", "message": format!("接收线程结果失败: {}", e)}),
+                )
+            }
+        }
+    };
+
+    let Some(data) = data else {
+        return Json(json!({"status": "error", "message": "未配置 SerpAPI Key"}));
+    };
+
+    let searches_per_month = data["searches_per_month"].as_i64().unwrap_or(250);
+    let this_month_usage = data["this_month_usage"].as_i64().unwrap_or(0);
+    let total_usage = data["total_usage"].as_i64().unwrap_or(0);
+    let plan_name = data["plan_name"].as_str().unwrap_or("Free").to_string();
+    let remaining = (searches_per_month - this_month_usage).max(0);
+
+    Json(json!({
+        "status": "ok",
+        "plan_name": plan_name,
+        "searches_per_month": searches_per_month,
+        "this_month_usage": this_month_usage,
+        "remaining": remaining,
+        "total_usage": total_usage,
+        "key_count": keys.len(),
+    }))
+}
+
 // 以下搜索源保存接口已屏蔽（仅保留 SerpAPI）：
 // api_save_firecrawl, api_save_bing, api_save_lens, api_save_cnipr
 

@@ -14,6 +14,7 @@
 //! - [`pages`] — 页面渲染 / Page rendering
 
 mod ai;
+mod chat;
 mod collections;
 mod feature_cards;
 mod idea;
@@ -25,6 +26,7 @@ mod settings;
 mod upload;
 
 pub use ai::*;
+pub use chat::*;
 pub use collections::*;
 pub use feature_cards::*;
 pub use idea::*;
