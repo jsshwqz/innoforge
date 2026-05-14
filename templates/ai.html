@@ -50,16 +50,42 @@
     var chatSending = false;
     var retryMsg = '';
 
+    // 一次性迁移：将旧 localStorage 中的聊天记录导入后端
+    function migrateOldChat(key) {
+        var saved = localStorage.getItem(key);
+        if (!saved) return;
+        try {
+            var old = JSON.parse(saved);
+            if (!old || old.length === 0) return;
+            for (var i = 0; i < old.length; i++) {
+                var m = old[i];
+                fetch('/api/chat/' + encodeURIComponent(key) + '/save', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({role: m[0], content: m[1]})
+                }).catch(function(e) { console.warn('迁移旧聊天记录失败:', e); });
+            }
+            console.log('已迁移 ' + old.length + ' 条旧聊天记录到后端');
+        } catch(e) {}
+    }
+
     // 页面加载时从后端恢复历史
     (function loadChatHistory() {
         fetch('/api/chat/' + encodeURIComponent(AI_CHAT_KEY))
             .then(function(r) { return r.json(); })
             .then(function(data) {
-                if (data.status === 'ok' && data.messages) {
+                if (data.status === 'ok' && data.messages && data.messages.length > 0) {
                     chatHistory = [];
                     data.messages.forEach(function(m) {
                         chatHistory.push([m.role, m.content]);
                     });
+                } else {
+                    // 后端无数据时，尝试从旧 localStorage 迁移
+                    migrateOldChat(AI_CHAT_KEY);
+                    var saved = localStorage.getItem(AI_CHAT_KEY);
+                    if (saved) {
+                        try { chatHistory = JSON.parse(saved); } catch(e) {}
+                    }
                 }
                 renderAllMessages();
             })
