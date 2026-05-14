@@ -10,14 +10,22 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 ### 新增 / Added
 - **设置页 DeepSeek 模型下拉选择** — 设置页 AI 配置支持选择 deepseek-chat / deepseek-reasoner / deepseek-chat-v4-flash / gpt-4o / gpt-4o-mini / 自定义模型，不再固定为 deepseek-chat
   Settings page: AI model dropdown with 6 presets + custom model input
+- **专家模型配置（深度分析）** — 设置页新增"专家模型"下拉框，独立于默认模型，用于创造性分析、侵权评估等高推理任务
+  Expert model config: separate dropdown for deep analysis tasks (inventiveness, infringement, claims, office action)
 - **SerpAPI 余额/用量显示** — 设置页新增 SerpAPI 余额进度条，显示 plan_name、searches_per_month、当月用量、剩余次数
   Settings page: SerpAPI balance indicator with progress bar (plan, quota, usage, remaining)
 - **对话跨设备同步** — AI 助手和专利详情页的聊天记录从 localStorage 迁移到后端 SQLite 持久化，换设备不丢失
   Cross-device chat sync: chat history migrated from localStorage to backend SQLite persistence
 - **聊天记录 CRUD API** — 新增 `GET/POST /api/chat/:key` 和 `POST /api/chat/:key/delete` 三个端点
   Chat records CRUD API: 3 new endpoints for get/save/delete chat messages
+- **CI/CD 自动化** — GitHub Actions: push/PR 到 main 自动运行 fmt + clippy + test；打 v* tag 自动构建全平台 Release
+  CI/CD: GitHub Actions CI (fmt + clippy + test) and Release (build for ubuntu/windows/macos, publish)
 
 ### 改进 / Improved
+- **AI 专家深度增强** — 4 个深度分析端点（创造性三步法分析、权利要求分析、侵权评估、审查意见答复）自动使用专家模型（默认 deepseek-reasoner），提升分析质量；inventiveness_analysis 提示词增加结构化输出（结论/置信度/证据/反论/下一步）
+  AI expert enhancement: 4 deep analysis endpoints now use expert model (default deepseek-reasoner); inventiveness prompt enhanced with structured output (conclusion/confidence/evidence/counterargument/next-step)
+- **分析页面模型标识** — 创造性分析、一审答复、权利要求分析、侵权评估按钮添加 (Reasoner) 标签，明确标识使用深度推理模型
+  Analysis page model badges: (Reasoner) label added to inventiveness, OA, claims analysis, and risk assessment buttons
 - **SerpAPI 中文搜索精度** — 中文查询自动附加 `hl=zh-cn&gl=cn&lr=lang_zh-CN` 参数，提升中文专利搜索命中率
   SerpAPI Chinese search accuracy: auto-attach hl/gl/lr params for Chinese queries
 - **本地 FTS5 排序权重** — BM25 权重调优：标题 10.0、专利号 5.0、摘要 5.0、权利要求 3.0、申请人 2.0、发明人 2.0、IPC 1.0
