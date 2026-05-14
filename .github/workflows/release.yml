@@ -4,225 +4,68 @@ on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: '要重发的标签（例如 v0.5.8）'
-        required: true
-        type: string
 
-permissions:
-  contents: write
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
   build:
-    name: Build ${{ matrix.target }}
-    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    name: Build ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            asset: innoforge-linux-x86_64.tar.gz
-          - os: ubuntu-latest
-            target: aarch64-unknown-linux-gnu
-            asset: innoforge-linux-aarch64.tar.gz
-            cross: true
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            asset: innoforge-windows-x86_64.zip
-          - os: macos-latest
-            target: x86_64-apple-darwin
-            asset: innoforge-macos-x86_64.tar.gz
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            asset: innoforge-macos-aarch64.tar.gz
+        os: [ubuntu-latest, windows-latest, macos-latest]
+      fail-fast: false
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build release
+        run: cargo build --release
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', github.event.inputs.tag) || github.ref }}
+          name: innoforge-${{ matrix.os }}
+          path: |
+            target/release/innoforge
+            target/release/innoforge.exe
+          if-no-files-found: warn
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
 
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.target }}
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
 
-      # cross 用于 Linux aarch64 交叉编译
-      - name: Install cross
-        if: matrix.cross == true
-        run: cargo install cross --git https://github.com/cross-rs/cross
-
-      - name: Build (native)
-        if: matrix.cross != true
-        run: cargo build --release --target ${{ matrix.target }}
-
-      - name: Build (cross)
-        if: matrix.cross == true
-        run: cross build --release --target ${{ matrix.target }}
-
-      # ── Package Unix ──────────────────────────────────────────────────────
-      - name: Package (Unix)
-        if: runner.os != 'Windows'
-        shell: bash
+      - name: Generate release notes
+        id: release_notes
         run: |
-          BIN_DIR="target/${{ matrix.target }}/release"
-          mkdir -p pkg
-          cp "$BIN_DIR/innoforge"    pkg/
-          if [ -f "$BIN_DIR/skill-router" ]; then
-            cp "$BIN_DIR/skill-router" pkg/
+          if [ -f CHANGELOG.md ]; then
+            # Extract the latest version section from CHANGELOG
+            awk '/^## /{if(++c==2) exit} c==1' CHANGELOG.md > release_notes.md
+          else
+            echo "Release $(echo ${{ github.ref_name }} | sed 's/^v//')" > release_notes.md
           fi
-          cp -r templates static .env.example pkg/
-          [ -f README.md ] && cp README.md pkg/ || true
-          [ -f LICENSE ] && cp LICENSE pkg/ || true
 
-          cat > pkg/start.sh << 'EOF'
-          #!/bin/bash
-          cd "$(dirname "$0")"
-          ./innoforge
-          EOF
-          chmod +x pkg/start.sh pkg/innoforge
-          [ -f pkg/skill-router ] && chmod +x pkg/skill-router || true
-
-          cat > pkg/USAGE.txt << 'EOF'
-          # InnoForge 创研台 + Skill Router / 使用说明
-
-          ## 启动 Web 服务器 / Start web server
-            ./start.sh
-            # 或 / or: ./innoforge
-
-          ## Skill Router 命令行 / CLI
-            ./skill-router "parse this yaml"
-            ./skill-router -c text_summarize -x '{"text":"hello world"}' summarize
-            ./skill-router --gc --days 30
-
-          ## 配置 / Configure
-            cp .env.example .env
-            # 编辑 .env 填入 API 密钥 / Edit .env with your API keys
-          EOF
-
-          cd pkg && tar czf "../${{ matrix.asset }}" .
-
-      # ── Package Windows ───────────────────────────────────────────────────
-      - name: Package (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $binDir = "target\${{ matrix.target }}\release"
-          New-Item -ItemType Directory -Path pkg -Force | Out-Null
-          Copy-Item "$binDir\innoforge.exe"   pkg\
-          if (Test-Path "$binDir\skill-router.exe") { Copy-Item "$binDir\skill-router.exe" pkg\ }
-          Copy-Item -Recurse templates, static pkg\
-          Copy-Item .env.example pkg\
-          if (Test-Path README.md) { Copy-Item README.md pkg\ }
-          if (Test-Path LICENSE) { Copy-Item LICENSE pkg\ }
-
-          @'
-          @echo off
-          cd /d "%~dp0"
-          innoforge.exe
-          '@ | Set-Content pkg\start.bat -Encoding ASCII
-
-          @'
-          # InnoForge 创研台 + Skill Router / 使用说明
-
-          ## 启动 Web 服务器 / Start web server
-            start.bat
-            或 / or: innoforge.exe
-
-          ## Skill Router 命令行 / CLI
-            skill-router.exe "parse this yaml"
-            skill-router.exe -c text_summarize -x "{\"text\":\"hello world\"}" summarize
-            skill-router.exe --gc --days 30
-
-          ## 配置 / Configure
-            copy .env.example .env
-            编辑 .env 填入 API 密钥 / Edit .env with your API keys
-          '@ | Set-Content pkg\USAGE.txt -Encoding UTF8
-
-          Compress-Archive -Path pkg\* -DestinationPath "${{ matrix.asset }}" -Force
-
-      # ── Upload ────────────────────────────────────────────────────────────
-      - name: Upload release asset
+      - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
-          files: ${{ matrix.asset }}
-          generate_release_notes: false
-          overwrite_files: true
-
-  # ── 同步 Release 到 Gitee ─────────────────────────────────────────────
-  sync-gitee:
-    name: Sync Release to Gitee
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Get tag name
-        id: tag
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "tag=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
-          else
-            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Download all assets from GitHub Release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          mkdir -p assets
-          gh release download "${{ steps.tag.outputs.tag }}" \
-            --repo "${{ github.repository }}" \
-            --dir assets || true
-          ls -la assets/
-
-      - name: Create Gitee Release and upload assets
-        env:
-          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-          TAG: ${{ steps.tag.outputs.tag }}
-        run: |
-          # 创建 Gitee Release
-          RELEASE_RESP=$(curl -s -X POST \
-            "https://gitee.com/api/v5/repos/jsshwqz/innoforge/releases" \
-            -H "Content-Type: application/json" \
-            -d "{
-              \"access_token\": \"${GITEE_TOKEN}\",
-              \"tag_name\": \"${TAG}\",
-              \"name\": \"${TAG}\",
-              \"body\": \"从 GitHub Actions 自动同步。详细更新日志见 CHANGELOG.md\",
-              \"prerelease\": false
-            }")
-
-          RELEASE_ID=$(echo "$RELEASE_RESP" | jq -r '.id')
-          echo "Gitee Release ID: $RELEASE_ID"
-
-          if [ "$RELEASE_ID" = "null" ] || [ -z "$RELEASE_ID" ]; then
-            echo "::warning::Failed to create Gitee release, response: $RELEASE_RESP"
-            exit 0
-          fi
-
-          # 上传所有构建产物
-          for file in assets/*; do
-            [ -f "$file" ] || continue
-            echo "Uploading $(basename "$file")..."
-            curl -s -X POST \
-              "https://gitee.com/api/v5/repos/jsshwqz/innoforge/releases/${RELEASE_ID}/attach_files" \
-              -H "Content-Type: multipart/form-data" \
-              -F "access_token=${GITEE_TOKEN}" \
-              -F "file=@${file}"
-            echo ""
-          done
-
-          echo "✅ Gitee release synced: ${TAG}"
-
-  # ── 移动端 / 桌面端构建已移至独立仓库 ──────────────────────────────────
-  # Android:   已拆出（cdylib 不再在主仓编译）
-  # iOS:       https://gitee.com/jsshwqz/innoforge-ios
-  # HarmonyOS: https://gitee.com/jsshwqz/innoforge-harmony
-  # Desktop:   https://gitee.com/jsshwqz/innoforge-desktop
+          body_path: release_notes.md
+          files: |
+            innoforge-ubuntu-latest/innoforge
+            innoforge-windows-latest/innoforge.exe
+            innoforge-macos-latest/innoforge
+          fail_on_unmatched_files: false

@@ -553,7 +553,7 @@ pub async fn api_ai_claims_analysis(
         .config
         .read()
         .unwrap_or_else(|e| e.into_inner())
-        .ai_client();
+        .ai_client_expert();
     match ai.analyze_claims(&patent.title, &patent.claims).await {
         Ok(content) => Json(json!({"status": "ok", "analysis": content})),
         Err(e) => Json(json!({"error": format!("分析失败: {}", e)})),
@@ -611,7 +611,7 @@ pub async fn api_ai_risk_assessment(
         .config
         .read()
         .unwrap_or_else(|e| e.into_inner())
-        .ai_client();
+        .ai_client_expert();
     match ai.assess_infringement(product_desc, &patents_info).await {
         Ok(content) => Json(json!({"status": "ok", "analysis": content})),
         Err(e) => Json(json!({"error": format!("评估失败: {}", e)})),
@@ -861,7 +861,7 @@ pub async fn api_ai_inventiveness_analysis(
         .config
         .read()
         .unwrap_or_else(|e| e.into_inner())
-        .ai_client();
+        .ai_client_expert();
     match ai.inventiveness_analysis(&my_info, &refs_info).await {
         Ok(content) => Json(json!({"status": "ok", "analysis": content})),
         Err(e) => Json(json!({"error": format!("创造性分析失败: {}", e)})),
@@ -958,7 +958,7 @@ pub async fn api_ai_office_action_response(
         .config
         .read()
         .unwrap_or_else(|e| e.into_inner())
-        .ai_client();
+        .ai_client_expert();
     match ai
         .office_action_response(&my_info, &oa_text, &refs_info)
         .await

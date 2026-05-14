@@ -425,8 +425,12 @@ fn chat_save_and_get_messages() {
     let session = "test-session-001";
 
     let id1 = db.save_chat_message(session, "user", "你好").unwrap();
-    let id2 = db.save_chat_message(session, "assistant", "你好！有什么可以帮助你的？").unwrap();
-    let id3 = db.save_chat_message(session, "user", "请分析这篇专利").unwrap();
+    let id2 = db
+        .save_chat_message(session, "assistant", "你好！有什么可以帮助你的？")
+        .unwrap();
+    let id3 = db
+        .save_chat_message(session, "user", "请分析这篇专利")
+        .unwrap();
 
     let messages = db.get_chat_messages(session).unwrap();
     assert_eq!(messages.len(), 3);
@@ -448,9 +452,11 @@ fn chat_messages_ordered_by_insertion() {
     let session = "order-test";
 
     db.save_chat_message(session, "user", "第一轮提问").unwrap();
-    db.save_chat_message(session, "assistant", "第一轮回答").unwrap();
+    db.save_chat_message(session, "assistant", "第一轮回答")
+        .unwrap();
     db.save_chat_message(session, "user", "第二轮提问").unwrap();
-    db.save_chat_message(session, "assistant", "第二轮回答").unwrap();
+    db.save_chat_message(session, "assistant", "第二轮回答")
+        .unwrap();
 
     let messages = db.get_chat_messages(session).unwrap();
     assert_eq!(messages.len(), 4);
@@ -494,8 +500,10 @@ fn chat_delete_nonexistent_session_returns_zero() {
 fn chat_sessions_are_isolated() {
     let db = Database::init(":memory:").unwrap();
 
-    db.save_chat_message("session-a", "user", "A的消息").unwrap();
-    db.save_chat_message("session-b", "user", "B的消息").unwrap();
+    db.save_chat_message("session-a", "user", "A的消息")
+        .unwrap();
+    db.save_chat_message("session-b", "user", "B的消息")
+        .unwrap();
 
     let a_msgs = db.get_chat_messages("session-a").unwrap();
     assert_eq!(a_msgs.len(), 1);

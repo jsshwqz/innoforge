@@ -30,6 +30,7 @@ pub async fn api_get_settings(State(s): State<AppState>) -> Json<serde_json::Val
         "ai_api_key": mask_api_key(&config.ai_api_key),
         "ai_api_key_configured": !config.ai_api_key.is_empty(),
         "ai_model": config.ai_model,
+        "ai_model_expert": config.ai_model_expert,
     }))
 }
 
@@ -96,6 +97,7 @@ pub async fn api_save_ai(
     let base_url = req["base_url"].as_str().unwrap_or("").trim();
     let api_key = req["api_key"].as_str().unwrap_or("").trim();
     let model = req["model"].as_str().unwrap_or("").trim();
+    let model_expert = req["ai_model_expert"].as_str().unwrap_or("").trim();
 
     if base_url.is_empty() || api_key.is_empty() || model.is_empty() {
         return Json(json!({"status": "error", "message": "All fields are required"}));
@@ -121,6 +123,20 @@ pub async fn api_save_ai(
             json!({"status": "error", "message": "Model name contains invalid characters"}),
         );
     }
+    let model_expert = if model_expert.is_empty() {
+        "deepseek-reasoner"
+    } else {
+        model_expert
+    };
+    if model_expert.len() > 100
+        || !model_expert.chars().all(|c| {
+            c.is_alphanumeric() || c == '-' || c == '_' || c == '.' || c == ':' || c == '/'
+        })
+    {
+        return Json(
+            json!({"status": "error", "message": "Expert model name contains invalid characters"}),
+        );
+    }
 
     // 先更新内存配置（立即生效）
     {
@@ -128,6 +144,7 @@ pub async fn api_save_ai(
         config.ai_base_url = base_url.to_string();
         config.ai_api_key = api_key.to_string();
         config.ai_model = model.to_string();
+        config.ai_model_expert = model_expert.to_string();
     }
 
     // SQLite 持久化（主存储，Android 友好）
@@ -135,6 +152,7 @@ pub async fn api_save_ai(
         ("AI_BASE_URL", base_url),
         ("AI_API_KEY", api_key),
         ("AI_MODEL", model),
+        ("AI_MODEL_EXPERT", model_expert),
     ] {
         if let Err(e) = s.db.set_setting(k, v) {
             tracing::warn!("保存设置 {} 到数据库失败: {}", k, e);
@@ -144,6 +162,7 @@ pub async fn api_save_ai(
     let _ = update_env_file("AI_BASE_URL", base_url);
     let _ = update_env_file("AI_API_KEY", api_key);
     let _ = update_env_file("AI_MODEL", model);
+    let _ = update_env_file("AI_MODEL_EXPERT", model_expert);
 
     Json(json!({"status": "ok"}))
 }

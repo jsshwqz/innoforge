@@ -63,6 +63,8 @@ pub struct AppConfig {
     pub ai_base_url: String,
     pub ai_api_key: String,
     pub ai_model: String,
+    /// 专家模型（用于创新推演、深分析等高推理任务，默认 deepseek-reasoner）
+    pub ai_model_expert: String,
 }
 
 impl AppConfig {
@@ -113,6 +115,7 @@ impl AppConfig {
             ai_base_url: get("AI_BASE_URL", "http://localhost:11434/v1"),
             ai_api_key: get("AI_API_KEY", "ollama"),
             ai_model: get("AI_MODEL", "qwen2.5:7b"),
+            ai_model_expert: get("AI_MODEL_EXPERT", "deepseek-reasoner"),
         }
     }
 
@@ -120,6 +123,11 @@ impl AppConfig {
     /// 仅使用 DeepSeek，无备用 AI 服务商。
     pub fn ai_client(&self) -> AiClient {
         AiClient::with_config(&self.ai_base_url, &self.ai_api_key, &self.ai_model)
+    }
+
+    /// Build an AiClient using the expert model for deep analysis tasks.
+    pub fn ai_client_expert(&self) -> AiClient {
+        AiClient::with_config(&self.ai_base_url, &self.ai_api_key, &self.ai_model_expert)
     }
 
     /// Whether at least one SerpAPI key is configured.

@@ -434,7 +434,7 @@ function renderResults(data, page, pageSize) {
         <label style="color:#8b949e;font-size:0.85em;cursor:pointer;"><input type="checkbox" onchange="toggleAllChecks(this.checked)" style="margin-right:4px;">全选</label>
         <button onclick="batchSummarize()" style="background:#1f6feb;padding:4px 12px;font-size:0.85em;border-radius:4px;color:white;border:none;cursor:pointer;">🤖 批量摘要</button>
         <button onclick="compareMatrix()" style="background:#8b5cf6;padding:4px 12px;font-size:0.85em;border-radius:4px;color:white;border:none;cursor:pointer;">📊 对比矩阵</button>
-        <button onclick="toggleRiskModal()" style="background:#da3633;padding:4px 12px;font-size:0.85em;border-radius:4px;color:white;border:none;cursor:pointer;">⚠️ 侵权评估</button>
+        <button onclick="toggleRiskModal()" style="background:#da3633;padding:4px 12px;font-size:0.85em;border-radius:4px;color:white;border:none;cursor:pointer;">⚠️ 侵权评估 <span style="font-size:10px;background:#da363344;border:1px solid #f85149;border-radius:3px;padding:1px 5px;margin-left:2px;vertical-align:middle;">Reasoner</span></button>
         <span id="batch-count" style="color:#8b949e;font-size:0.8em;"></span>
     </div>` + html;
 
