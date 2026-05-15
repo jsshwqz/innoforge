@@ -211,6 +211,9 @@ pub struct AiChatRequest {
     pub history: Vec<(String, String)>,
     #[serde(default)]
     pub web_search: bool,
+    /// Base64-encoded images for multimodal vision models (e.g., Gemini)
+    #[serde(default)]
+    pub images: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

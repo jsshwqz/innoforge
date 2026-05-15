@@ -21,7 +21,10 @@
             <p class="hint" data-i18n="ai.hint"></p>
             <div class="chat-box" id="chat-messages"></div>
             <div class="chat-input">
-                <input type="text" id="chat-msg" data-i18n-placeholder="ai.placeholder" autofocus>
+                <div class="chat-input-wrap">
+                    <textarea id="chat-msg" rows="1" data-i18n-placeholder="ai.placeholder" autofocus></textarea>
+                    <div id="image-preview-area" class="image-preview-area" style="display:none;"></div>
+                </div>
                 <button onclick="sendChat()" data-i18n="ai.send"></button>
             </div>
         </div>
@@ -49,6 +52,7 @@
     var chatHistory = [];
     var chatSending = false;
     var retryMsg = '';
+    var retryImages = [];
 
     // 一次性迁移：将旧 localStorage 中的聊天记录导入后端
     function migrateOldChat(key) {
@@ -126,24 +130,88 @@
     }
 
     document.getElementById('chat-msg').addEventListener('keydown', function(e) {
-        if (e.key === 'Enter') sendChat();
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
     });
+
+    // ── 图片粘贴支持 ──
+    var pastedImages = [];
+
+    document.getElementById('chat-msg').addEventListener('paste', function(e) {
+        var items = (e.clipboardData || window.clipboardData).items;
+        for (var i = 0; i < items.length; i++) {
+            if (items[i].type.indexOf('image') === 0) {
+                e.preventDefault();
+                var file = items[i].getAsFile();
+                if (!file) continue;
+                var reader = new FileReader();
+                reader.onload = function(ev) {
+                    var base64 = ev.target.result.split(',')[1];
+                    pastedImages.push(base64);
+                    showImagePreview();
+                };
+                reader.readAsDataURL(file);
+                break;
+            }
+        }
+    });
+
+    function showImagePreview() {
+        var area = document.getElementById('image-preview-area');
+        area.innerHTML = '';
+        if (pastedImages.length === 0) {
+            area.style.display = 'none';
+            return;
+        }
+        area.style.display = 'flex';
+        for (var i = 0; i < pastedImages.length; i++) {
+            var thumb = document.createElement('div');
+            thumb.className = 'image-preview-thumb';
+            thumb.innerHTML = '<img src="data:image/png;base64,' + pastedImages[i] + '">'
+                + '<span class="image-preview-remove" onclick="removeImage(' + i + ')">&times;</span>';
+            area.appendChild(thumb);
+        }
+    }
+
+    function removeImage(idx) {
+        pastedImages.splice(idx, 1);
+        showImagePreview();
+    }
 
     async function sendChat() {
         var input = document.getElementById('chat-msg');
-        var sendBtn = input.parentElement.querySelector('button');
+        var sendBtn = document.querySelector('.chat-input > button');
         var msg = input.value.trim();
-        if (!msg || chatSending) return;
+        var images = pastedImages.slice();
+        if ((!msg || !msg.trim()) && images.length === 0) return;
+        if (chatSending) return;
         chatSending = true;
         input.value = '';
         input.disabled = true;
         if (sendBtn) sendBtn.disabled = true;
+        pastedImages = [];
+        showImagePreview();
         var box = document.getElementById('chat-messages');
         var userDiv = document.createElement('div');
         userDiv.className = 'msg user';
-        userDiv.textContent = msg;
+        if (images.length > 0) {
+            var userContent = msg || t('ai.viewImage') || '[图片]';
+            userDiv.textContent = userContent;
+            // 显示图片缩略图
+            for (var i = 0; i < images.length; i++) {
+                var imgThumb = document.createElement('img');
+                imgThumb.src = 'data:image/png;base64,' + images[i];
+                imgThumb.style.maxWidth = '120px';
+                imgThumb.style.maxHeight = '120px';
+                imgThumb.style.borderRadius = '4px';
+                imgThumb.style.marginTop = '4px';
+                imgThumb.style.display = 'block';
+                userDiv.appendChild(imgThumb);
+            }
+        } else {
+            userDiv.textContent = msg;
+        }
         box.appendChild(userDiv);
-        await doSend(msg);
+        await doSend(msg, images);
         chatSending = false;
         input.disabled = false;
         if (sendBtn) sendBtn.disabled = false;
@@ -151,8 +219,10 @@
         box.scrollTop = box.scrollHeight;
     }
 
-    async function doSend(msg) {
+    async function doSend(msg, images) {
+        images = images || [];
         retryMsg = msg;
+        retryImages = images;
         var box = document.getElementById('chat-messages');
         var loadingId = 'ai-' + Date.now();
         var aiDiv = document.createElement('div');
@@ -162,10 +232,12 @@
         box.appendChild(aiDiv);
         box.scrollTop = box.scrollHeight;
         try {
+            var bodyObj = { message: msg, history: chatHistory, web_search: document.getElementById('web-search-cb').checked };
+            if (images.length > 0) bodyObj.images = images;
             var resp = await fetch('/api/ai/chat', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ message: msg, history: chatHistory, web_search: document.getElementById('web-search-cb').checked })
+                body: JSON.stringify(bodyObj)
             });
             if (!resp.ok) throw new Error('服务器错误 (' + resp.status + ')');
             var data = await resp.json();
@@ -187,15 +259,17 @@
 
     function retrySend() {
         var msg = retryMsg;
-        if (!msg) return;
+        var images = retryImages;
+        if (!msg && (!images || images.length === 0)) return;
         retryMsg = '';
+        retryImages = [];
         // 移除上一条错误消息
         var box = document.getElementById('chat-messages');
         var last = box.lastChild;
         if (last && last.classList.contains('msg')) {
             box.removeChild(last);
         }
-        doSend(msg);
+        doSend(msg, images);
     }
 
     applyI18nCommon();

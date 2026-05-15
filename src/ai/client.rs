@@ -34,7 +34,7 @@ pub(super) struct ChatRequest {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub(super) struct Message {
+pub struct Message {
     pub role: String,
     pub content: String,
 }
@@ -208,7 +208,7 @@ impl AiClient {
 
             match self
                 .client
-                .post(format!("{}/chat/completions", provider.base_url))
+                .post(format!("{}/chat/completions", provider.base_url.trim_end_matches('/')))
                 .header("Authorization", format!("Bearer {}", provider.api_key))
                 .json(&request_body)
                 .send()
@@ -256,6 +256,13 @@ impl AiClient {
                             ));
                         }
                     };
+                    tracing::debug!(
+                        "[{}] status={} body_len={} body_preview={}",
+                        provider.name,
+                        status.as_u16(),
+                        raw_text.len(),
+                        safe_truncate(&raw_text, 120)
+                    );
                     let content = extract_chat_content(&raw_text);
 
                     if status.is_server_error() && attempt < max_retries - 1 {
@@ -291,6 +298,123 @@ impl AiClient {
 
     /// 全局超时上限
     pub(super) const GLOBAL_TIMEOUT_SECS: u64 = 60;
+
+    /// Get the current model name.
+    pub fn model_name(&self) -> &str {
+        &self.primary.model
+    }
+
+    /// Send a raw JSON body to the AI provider (used for multimodal/vision requests).
+    pub async fn send_json_body(&self, body: serde_json::Value) -> Result<String> {
+        match tokio::time::timeout(
+            Duration::from_secs(Self::GLOBAL_TIMEOUT_SECS),
+            self.send_json_body_inner(body),
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(_) => Err(anyhow::anyhow!(
+                "AI 调用超时（全局上限 {}s）。请检查网络或更换 AI 服务商。",
+                Self::GLOBAL_TIMEOUT_SECS
+            )),
+        }
+    }
+
+    async fn send_json_body_inner(&self, body: serde_json::Value) -> Result<String> {
+        let mut last_err = anyhow::anyhow!("All providers failed");
+        let mut failed_chain: Vec<String> = Vec::new();
+        // Try primary
+        match self.try_provider_with_body(&self.primary, &body).await {
+            Ok(content) => return Ok(content),
+            Err(e) => {
+                failed_chain.push(format!("{}: {}", self.primary.name, e));
+                if self.fallbacks.is_empty() {
+                    return Err(e);
+                }
+                tracing::warn!("[{}] failed: {}, trying fallbacks...", self.primary.name, e);
+                last_err = e;
+            }
+        }
+        for fallback in &self.fallbacks {
+            match self.try_provider_with_body(fallback, &body).await {
+                Ok(content) => return Ok(content),
+                Err(e) => {
+                    failed_chain.push(format!("{}: {}", fallback.name, e));
+                    last_err = e;
+                }
+            }
+        }
+        if failed_chain.is_empty() {
+            Err(last_err)
+        } else {
+            Err(anyhow::anyhow!(
+                "AI 多通道均失败（{}）。请检查对应服务商 Key/额度/网络状态。",
+                failed_chain.join(" | ")
+            ))
+        }
+    }
+
+    /// Try a single provider with a raw JSON body (for multimodal etc.)
+    async fn try_provider_with_body(
+        &self,
+        provider: &AiProvider,
+        body: &serde_json::Value,
+    ) -> Result<String> {
+        let max_retries = PROVIDER_MAX_RETRIES;
+        let mut last_err = None;
+        for attempt in 0..max_retries {
+            if attempt > 0 {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
+            match self
+                .client
+                .post(format!("{}/chat/completions", provider.base_url.trim_end_matches('/')))
+                .header("Authorization", format!("Bearer {}", provider.api_key))
+                .json(body)
+                .send()
+                .await
+            {
+                Ok(resp) => {
+                    let status = resp.status();
+                    if status.as_u16() == 429 {
+                        let raw_text = resp.text().await.unwrap_or_default();
+                        tracing::warn!("[{}] rate limited (429): {}", provider.name, safe_truncate(&raw_text, 100));
+                        return Err(anyhow::anyhow!("AI 频率限制，请稍后再试"));
+                    }
+                    if status.as_u16() == 401 || status.as_u16() == 403 {
+                        let raw_text = resp.text().await.unwrap_or_default();
+                        tracing::warn!("[{}] auth error ({}): {}", provider.name, status.as_u16(), safe_truncate(&raw_text, 200));
+                        return Err(anyhow::anyhow!("AI API Key 无效或已过期。请到「设置」页面检查 API Key 配置。"));
+                    }
+                    let raw_text = match resp.text().await {
+                        Ok(text) => text,
+                        Err(e) => {
+                            if attempt < max_retries - 1 { last_err = Some(anyhow::anyhow!("AI 响应读取中断: {}", e)); continue; }
+                            return Err(anyhow::anyhow!("AI 响应读取失败（连接中断）。可能原因：\n 1. API Key 无效或余额不足\n 2. 网络不稳定\n 3. AI 服务暂时不可用\n 请到「设置」检查 AI 配置。"));
+                        }
+                    };
+                    let content = extract_chat_content(&raw_text);
+                    if status.is_server_error() && attempt < max_retries - 1 {
+                        last_err = Some(anyhow::anyhow!("Server error {}", status));
+                        continue;
+                    }
+                    if content.starts_with("AI 错误") && attempt < max_retries - 1 {
+                        last_err = Some(anyhow::anyhow!("{}", content));
+                        continue;
+                    }
+                    return Ok(content);
+                }
+                Err(e) => {
+                    if attempt < max_retries - 1 && (e.is_timeout() || e.is_connect()) {
+                        last_err = Some(e.into());
+                        continue;
+                    }
+                    return Err(e.into());
+                }
+            }
+        }
+        Err(last_err.unwrap_or_else(|| anyhow::anyhow!("Provider {} failed", provider.name)))
+    }
 
     /// 带全局超时的 AI 调用入口
     pub(super) async fn send_chat(

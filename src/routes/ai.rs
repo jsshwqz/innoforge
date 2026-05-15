@@ -299,7 +299,39 @@ pub async fn api_ai_chat(
         AI_CHAT_ROUTE_TIMEOUT_SECS_NORMAL
     };
     let result = tokio::time::timeout(std::time::Duration::from_secs(route_timeout_secs), async {
-        if req.history.is_empty() {
+        let has_images = !req.images.is_empty();
+
+        if has_images {
+            // Multimodal: build raw JSON request with image content parts
+            let mut json_messages: Vec<serde_json::Value> = vec![
+                serde_json::json!({"role": "system", "content": system_prompt})
+            ];
+
+            // Add history messages
+            for (role, content) in &req.history {
+                json_messages.push(serde_json::json!({"role": role, "content": content}));
+            }
+
+            // User message with text + images as multimodal content array
+            let mut content_parts = vec![serde_json::json!({"type": "text", "text": req.message})];
+            for img in &req.images {
+                content_parts.push(serde_json::json!({
+                    "type": "image_url",
+                    "image_url": {"url": format!("data:image/png;base64,{}", img)}
+                }));
+            }
+            json_messages.push(serde_json::json!({
+                "role": "user",
+                "content": content_parts
+            }));
+
+            let body = serde_json::json!({
+                "model": ai.model_name(),
+                "messages": json_messages,
+                "temperature": 0.7
+            });
+            ai.send_json_body(body).await
+        } else if req.history.is_empty() {
             let ctx_with_web = match &web_context {
                 Some(web) => Some(format!("{}\n{}", ctx.as_deref().unwrap_or(""), web)),
                 None => ctx,

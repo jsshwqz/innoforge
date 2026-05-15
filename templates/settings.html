@@ -122,53 +122,53 @@
         </div>
 
         <div class="setting-group">
-            <h3>🤖 DeepSeek AI 配置</h3>
+            <h3>🤖 <span id="ai-provider-title">AI</span> 配置</h3>
             <p>当前默认 AI 服务商，用于专利分析、创意验证等。</p>
 
             <div class="form-group">
+                <label>AI 服务商</label>
+                <select id="ai-provider" style="width:100%;padding:10px;background:#1a1a1a;border:1px solid #444;border-radius:4px;color:#fff;font-size:14px;">
+                    <option value="deepseek">DeepSeek（当前）</option>
+                    <option value="xiaomi">小米 MiMo（支持看图）</option>
+                    <option value="sensetime">商汤 SenseNova</option>
+                    <option value="openrouter">OpenRouter（GPT-4o 等）</option>
+                    <option value="gemini">Google Gemini（支持看图）</option>
+                    <option value="custom">自定义</option>
+                </select>
+            </div>
+
+            <div class="form-group">
                 <label>API Key</label>
-                <input type="text" id="ai-api-key" placeholder="输入 DeepSeek API Key">
-                <a href="https://platform.deepseek.com/" target="_blank" class="help-link">
-                    → 获取 DeepSeek Key
+                <input type="text" id="ai-api-key" placeholder="输入 API Key">
+                <a id="ai-key-link" href="https://platform.deepseek.com/" target="_blank" class="help-link">
+                    → 获取 API Key
                 </a>
             </div>
 
             <div class="form-group">
                 <label>API Base URL</label>
                 <input type="text" id="ai-base-url" value="https://api.deepseek.com/v1" placeholder="https://api.deepseek.com/v1">
-                <span style="color:#999;font-size:13px;">兼容 OpenAI 格式的 API 地址</span>
+                <span style="color:#999;font-size:13px;" id="ai-base-hint">兼容 OpenAI 格式的 API 地址</span>
             </div>
 
             <div class="form-group">
                 <label>AI 模型（默认）</label>
                 <select id="ai-model" style="width:100%;padding:10px;background:#1a1a1a;border:1px solid #444;border-radius:4px;color:#fff;font-size:14px;">
-                    <option value="deepseek-chat">DeepSeek Chat (V3，通用对话)</option>
-                    <option value="deepseek-reasoner">DeepSeek Reasoner (R1，深度推理)</option>
-                    <option value="deepseek-chat-v4-flash">DeepSeek Flash (快速)</option>
-                    <option value="gpt-4o">GPT-4o (OpenRouter)</option>
-                    <option value="gpt-4o-mini">GPT-4o Mini (OpenRouter)</option>
-                    <option value="custom">自定义模型...</option>
                 </select>
                 <div id="custom-model-group" class="form-group" style="display:none;margin-top:8px;">
                     <label>自定义模型名称</label>
-                    <input type="text" id="ai-model-custom" placeholder="输入模型名称（如 claude-3-opus）">
+                    <input type="text" id="ai-model-custom" placeholder="输入模型名称">
                 </div>
-                <span style="color:#999;font-size:13px;">切换至自定义选项后可输入任意模型名</span>
+                <span style="color:#999;font-size:13px;" id="ai-model-hint">选择模型或切换至自定义输入</span>
             </div>
 
             <div class="form-group">
                 <label>专家模型（深度分析）</label>
                 <select id="ai-model-expert" style="width:100%;padding:10px;background:#1a1a1a;border:1px solid #444;border-radius:4px;color:#fff;font-size:14px;">
-                    <option value="deepseek-reasoner">DeepSeek Reasoner (R1，深度推理) (推荐)</option>
-                    <option value="deepseek-chat">DeepSeek Chat (V3，通用对话)</option>
-                    <option value="deepseek-chat-v4-flash">DeepSeek Flash (快速)</option>
-                    <option value="gpt-4o">GPT-4o (OpenRouter)</option>
-                    <option value="gpt-4o-mini">GPT-4o Mini (OpenRouter)</option>
-                    <option value="custom">自定义模型...</option>
                 </select>
                 <div id="custom-expert-model-group" class="form-group" style="display:none;margin-top:8px;">
                     <label>自定义专家模型名称</label>
-                    <input type="text" id="ai-model-expert-custom" placeholder="输入模型名称（如 claude-3-opus）">
+                    <input type="text" id="ai-model-expert-custom" placeholder="输入模型名称">
                 </div>
                 <span style="color:#999;font-size:13px;">用于创新推演、创造性分析、侵权评估等高推理任务</span>
             </div>
@@ -193,6 +193,146 @@
         renderNavbar('settings');
         renderSidebar();
         applyI18nCommon();
+
+        // ── AI 服务商预设数据 ──
+        var AI_PROVIDERS = {
+            deepseek: {
+                title: 'DeepSeek',
+                base_url: 'https://api.deepseek.com/v1',
+                key_link: 'https://platform.deepseek.com/',
+                models: [
+                    {value: 'deepseek-chat', label: 'DeepSeek Chat (V3，通用对话)'},
+                    {value: 'deepseek-reasoner', label: 'DeepSeek Reasoner (R1，深度推理)'},
+                    {value: 'deepseek-chat-v4-flash', label: 'DeepSeek Flash (快速)'},
+                ],
+                expert_models: [
+                    {value: 'deepseek-reasoner', label: 'DeepSeek Reasoner (R1，深度推理) (推荐)'},
+                    {value: 'deepseek-chat', label: 'DeepSeek Chat (V3，通用对话)'},
+                    {value: 'deepseek-chat-v4-flash', label: 'DeepSeek Flash (快速)'},
+                ],
+                hint: '兼容 OpenAI 格式的 API 地址'
+            },
+            xiaomi: {
+                title: '小米 MiMo',
+                base_url: 'https://api.xiaomimimo.com/v1',
+                key_link: 'https://platform.xiaomimimo.com',
+                models: [
+                    {value: 'mimo-v2.5-pro', label: 'MiMo V2.5 Pro（推荐，支持看图）'},
+                    {value: 'mimo-v2.5', label: 'MiMo V2.5'},
+                    {value: 'mimo-v2-omni', label: 'MiMo V2 Omni'},
+                ],
+                expert_models: [
+                    {value: 'mimo-v2.5-pro', label: 'MiMo V2.5 Pro（推荐，支持看图）'},
+                    {value: 'mimo-v2.5', label: 'MiMo V2.5'},
+                ],
+                hint: '小米 MiMo API，支持图片多模态'
+            },
+            sensetime: {
+                title: '商汤 SenseNova',
+                base_url: 'https://api.sensenova.cn/v1',
+                key_link: 'https://platform.sensenova.cn/',
+                models: [
+                    {value: 'SenseChat-5', label: 'SenseChat 5（日日新）'},
+                    {value: 'SenseChat-Turbo', label: 'SenseChat Turbo'},
+                ],
+                expert_models: [
+                    {value: 'SenseChat-5', label: 'SenseChat 5（日日新）'},
+                    {value: 'SenseChat-Turbo', label: 'SenseChat Turbo'},
+                ],
+                hint: '商汤日日新 API'
+            },
+            openrouter: {
+                title: 'OpenRouter',
+                base_url: 'https://openrouter.ai/api/v1',
+                key_link: 'https://openrouter.ai/keys',
+                models: [
+                    {value: 'gpt-4o', label: 'GPT-4o（支持看图）'},
+                    {value: 'gpt-4o-mini', label: 'GPT-4o Mini'},
+                ],
+                expert_models: [
+                    {value: 'gpt-4o', label: 'GPT-4o（支持看图）'},
+                    {value: 'gpt-4o-mini', label: 'GPT-4o Mini'},
+                ],
+                hint: 'OpenRouter 统一 API 网关'
+            },
+            gemini: {
+                title: 'Google Gemini',
+                base_url: 'https://generativelanguage.googleapis.com/v1beta/openai',
+                key_link: 'https://aistudio.google.com/apikey',
+                models: [
+                    {value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash（推荐，支持看图）'},
+                    {value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro（最强，需付费）'},
+                    {value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash'},
+                    {value: 'gemini-2.0-flash-lite', label: 'Gemini 2.0 Flash Lite'},
+                ],
+                expert_models: [
+                    {value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro（最强）'},
+                    {value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash'},
+                    {value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash'},
+                ],
+                hint: 'Google Gemini API（OpenAI 兼容接口）'
+            }
+        };
+
+        function detectProvider(baseUrl) {
+            baseUrl = (baseUrl || '').toLowerCase();
+            if (baseUrl.includes('deepseek')) return 'deepseek';
+            if (baseUrl.includes('xiaomimimo')) return 'xiaomi';
+            if (baseUrl.includes('sensenova')) return 'sensetime';
+            if (baseUrl.includes('openrouter')) return 'openrouter';
+            if (baseUrl.includes('googleapis')) return 'gemini';
+            return 'custom';
+        }
+
+        function updateProviderUI(providerKey) {
+            var provider = AI_PROVIDERS[providerKey];
+            if (!provider) providerKey = 'custom';
+
+            document.getElementById('ai-provider-title').textContent = provider ? provider.title : '自定义';
+            document.getElementById('ai-provider').value = providerKey;
+
+            if (provider) {
+                document.getElementById('ai-base-url').value = provider.base_url;
+                document.getElementById('ai-key-link').href = provider.key_link;
+                document.getElementById('ai-key-link').textContent = '\u2192 \u83b7\u53d6 ' + provider.title + ' Key';
+                document.getElementById('ai-base-hint').textContent = provider.hint;
+                populateSelect('ai-model', provider.models, '');
+                populateSelect('ai-model-expert', provider.expert_models, '');
+            }
+
+            document.getElementById('custom-model-group').style.display = 'none';
+            document.getElementById('custom-expert-model-group').style.display = 'none';
+        }
+
+        function populateSelect(selectId, options, currentValue) {
+            var select = document.getElementById(selectId);
+            select.innerHTML = '';
+            for (var i = 0; i < options.length; i++) {
+                var opt = document.createElement('option');
+                opt.value = options[i].value;
+                opt.textContent = options[i].label;
+                select.appendChild(opt);
+            }
+            var custom = document.createElement('option');
+            custom.value = 'custom';
+            custom.textContent = '\u81ea\u5b9a\u4e49\u6a21\u578b...';
+            select.appendChild(custom);
+            if (currentValue) {
+                select.value = currentValue;
+                if (select.value !== currentValue) {
+                    select.value = 'custom';
+                }
+            }
+        }
+
+        function onProviderChange() {
+            var val = document.getElementById('ai-provider').value;
+            if (val === 'custom') {
+                document.getElementById('ai-provider-title').textContent = '\u81ea\u5b9a\u4e49';
+                return;
+            }
+            updateProviderUI(val);
+        }
 
         // 页面加载时获取当前配置
         let returnUrl = ''; // 记录返回地址
@@ -219,40 +359,31 @@
                     document.getElementById('ai-base-url').value = config.ai_base_url || 'https://api.deepseek.com/v1';
                     document.getElementById('ai-api-key').value = config.ai_api_key || '';
 
-                    // 设置模型下拉选项
-                    var modelVal = config.ai_model || 'deepseek-chat';
+                    // 根据 base_url 自动检测服务商并填充下拉
+                    var detectedProvider = detectProvider(config.ai_base_url);
+                    updateProviderUI(detectedProvider);
+
+                    // 设置模型下拉值
+                    var modelVal = config.ai_model || '';
                     var modelSelect = document.getElementById('ai-model');
-                    var customOption = modelSelect.querySelector('option[value="custom"]');
-                    var found = false;
-                    for (var i = 0; i < modelSelect.options.length; i++) {
-                        if (modelSelect.options[i].value === modelVal) {
-                            modelSelect.value = modelVal;
-                            found = true;
-                            break;
+                    if (modelVal) {
+                        modelSelect.value = modelVal;
+                        if (modelSelect.value !== modelVal) {
+                            modelSelect.value = 'custom';
+                            document.getElementById('custom-model-group').style.display = 'block';
+                            document.getElementById('ai-model-custom').value = modelVal;
                         }
-                    }
-                    if (!found && customOption) {
-                        modelSelect.value = 'custom';
-                        document.getElementById('custom-model-group').style.display = 'block';
-                        document.getElementById('ai-model-custom').value = modelVal;
                     }
 
-                    // 设置专家模型下拉
-                    var expertVal = config.ai_model_expert || 'deepseek-reasoner';
+                    var expertVal = config.ai_model_expert || '';
                     var expertSelect = document.getElementById('ai-model-expert');
-                    var expertCustomOption = expertSelect.querySelector('option[value="custom"]');
-                    var expertFound = false;
-                    for (var i = 0; i < expertSelect.options.length; i++) {
-                        if (expertSelect.options[i].value === expertVal) {
-                            expertSelect.value = expertVal;
-                            expertFound = true;
-                            break;
+                    if (expertVal) {
+                        expertSelect.value = expertVal;
+                        if (expertSelect.value !== expertVal) {
+                            expertSelect.value = 'custom';
+                            document.getElementById('custom-expert-model-group').style.display = 'block';
+                            document.getElementById('ai-model-expert-custom').value = expertVal;
                         }
-                    }
-                    if (!expertFound && expertCustomOption) {
-                        expertSelect.value = 'custom';
-                        document.getElementById('custom-expert-model-group').style.display = 'block';
-                        document.getElementById('ai-model-expert-custom').value = expertVal;
                     }
 
                     // 初次加载刷新余额
@@ -328,23 +459,18 @@
         }
 
 
-        // ── AI 模型下拉切换 ──
+        // ── AI 服务商/模型下拉切换 ──
         document.addEventListener('change', function(e) {
+            if (e.target && e.target.id === 'ai-provider') {
+                onProviderChange();
+            }
             if (e.target && e.target.id === 'ai-model') {
                 var customGroup = document.getElementById('custom-model-group');
-                if (e.target.value === 'custom') {
-                    customGroup.style.display = 'block';
-                } else {
-                    customGroup.style.display = 'none';
-                }
+                customGroup.style.display = e.target.value === 'custom' ? 'block' : 'none';
             }
             if (e.target && e.target.id === 'ai-model-expert') {
                 var customGroup = document.getElementById('custom-expert-model-group');
-                if (e.target.value === 'custom') {
-                    customGroup.style.display = 'block';
-                } else {
-                    customGroup.style.display = 'none';
-                }
+                customGroup.style.display = e.target.value === 'custom' ? 'block' : 'none';
             }
         });
 
