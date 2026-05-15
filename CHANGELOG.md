@@ -8,8 +8,10 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 ## [v0.5.9] - 2026-05-14
 
 ### 新增 / Added
-- **设置页 DeepSeek 模型下拉选择** — 设置页 AI 配置支持选择 deepseek-chat / deepseek-reasoner / deepseek-chat-v4-flash / gpt-4o / gpt-4o-mini / 自定义模型，不再固定为 deepseek-chat
-  Settings page: AI model dropdown with 6 presets + custom model input
+- **设置页 AI 服务商预设** — 支持 DeepSeek / 小米 MiMo / 商汤 SenseNova / OpenRouter / Google Gemini 一键切换，模型下拉随服务商动态变化
+  Settings page: AI provider presets (DeepSeek/Xiaomi/SenseTime/OpenRouter/Gemini) with dynamic model dropdowns
+- **聊天图片粘贴支持** — AI 助手页面支持 Ctrl+V 粘贴图片，基于 Gemini 等多模态模型识别图片内容
+  AI Chat: paste image support (Ctrl+V), uses multimodal models (Gemini) for image recognition
 - **专家模型配置（深度分析）** — 设置页新增"专家模型"下拉框，独立于默认模型，用于创造性分析、侵权评估等高推理任务
   Expert model config: separate dropdown for deep analysis tasks (inventiveness, infringement, claims, office action)
 - **SerpAPI 余额/用量显示** — 设置页新增 SerpAPI 余额进度条，显示 plan_name、searches_per_month、当月用量、剩余次数
@@ -32,6 +34,14 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
   FTS5 BM25 ranking weights tuned: title 10.0, patent_number 5.0, abstract 5.0, claims 3.0, applicant 2.0, inventor 2.0, IPC 1.0
 - **数据库 schema 升级到 v13** — 新增 `chat_records` 表用于聊天记录持久化
   Database schema upgraded to v13 (chat_records table)
+- **聊天输入框升级** — input 替换为 textarea，支持 Shift+Enter 换行、Enter 发送，支持图片粘贴预览
+  Chat input upgraded to textarea with Shift+Enter for newlines, Enter to send, image paste preview
+
+### 修复 / Fixed
+- **Gemini API 双斜杠 URL 导致 404** — AI client URL 拼接时 trim 尾斜杠，修复 Gemini base_url 尾部 `/` 导致 `openai//chat/completions` 404 问题
+  Fixed Gemini API 404 due to double-slash URL (trailing slash in base_url)
+- **Gemini 模型配额选择** — 默认模型从 gemini-2.0-flash（免费配额耗尽）改为 gemini-2.5-flash（有可用配额）
+  Default Gemini model changed from gemini-2.0-flash (quota=0) to gemini-2.5-flash (working)
 
 ### 测试 / Tests
 - **聊天记录集成测试** — 新增 6 个测试覆盖 chat CRUD、会话隔离、边界条件
