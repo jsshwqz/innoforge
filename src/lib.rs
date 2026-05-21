@@ -52,17 +52,24 @@ async fn serve_static_embedded(
     match StaticAssets::get(&path) {
         Some(content) => {
             let mime = mime_guess::from_path(&path).first_or_octet_stream();
-            Response::builder()
+            // 使用 match 替代 unwrap，遵循 CLAUDE.md 2.7（禁止生产路径 unwrap/expect）
+            match Response::builder()
                 .status(StatusCode::OK)
                 .header("Content-Type", mime.as_ref())
                 .header("Cache-Control", "public, max-age=3600")
                 .body(Body::from(content.data.to_vec()))
-                .unwrap()
+            {
+                Ok(resp) => resp,
+                Err(_) => Response::new(Body::from(content.data.to_vec())),
+            }
         }
-        None => Response::builder()
+        None => match Response::builder()
             .status(StatusCode::NOT_FOUND)
             .body(Body::from("Not found"))
-            .unwrap(),
+        {
+            Ok(resp) => resp,
+            Err(_) => Response::new(Body::from("Not found")),
+        },
     }
 }
 
@@ -70,6 +77,14 @@ async fn serve_static_embedded(
 /// db_path: path to SQLite database (use app data dir on Android)
 pub async fn start_server(db_path: &str) -> anyhow::Result<()> {
     let db = db::Database::init(db_path)?;
+
+    // 启动时将卡在 analyzing 的创意重置为 error（上次 pipeline 中断）
+    match db.reset_stale_analyzing() {
+        Ok(n) if n > 0 => tracing::warn!("Reset {} stale analyzing ideas to error", n),
+        Ok(_) => {}
+        Err(e) => tracing::error!("Failed to reset stale analyzing ideas: {}", e),
+    }
+
     let config = routes::AppConfig::from_db_and_env(Some(&db));
     let state = routes::AppState {
         db: Arc::new(db),

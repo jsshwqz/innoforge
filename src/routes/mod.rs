@@ -127,10 +127,16 @@ impl AppConfig {
             }
         }
 
-        // 解析 google_token_expiry（存储在 DB 中的字符串）
+        // 解析 google_token_expiry（存储在 DB 中的字符串），
+        // 环境变量 GOOGLE_TOKEN_EXPIRY 作为后备
         let google_token_expiry = db_settings
             .get("google_token_expiry")
-            .and_then(|v| v.parse::<i64>().ok());
+            .and_then(|v| v.parse::<i64>().ok())
+            .or_else(|| {
+                std::env::var("GOOGLE_TOKEN_EXPIRY")
+                    .ok()
+                    .and_then(|v| v.parse::<i64>().ok())
+            });
 
         Self {
             serpapi_keys,
@@ -212,7 +218,7 @@ impl AppConfig {
                         .as_secs() as i64;
                     now >= exp
                 })
-                .unwrap_or(false);
+                .unwrap_or(true);
             if !is_expired {
                 return self.google_access_token.clone();
             }
@@ -290,22 +296,6 @@ pub struct AppState {
 }
 
 impl AppState {
-    /// 获取 AiClient，调用前自动刷新 Google OAuth token（如需要）
-    #[allow(dead_code)]
-    pub async fn get_ai_client(&self) -> crate::ai::AiClient {
-        self.ensure_google_token().await;
-        let cfg = self.config.read().unwrap_or_else(|e| e.into_inner());
-        cfg.ai_client()
-    }
-
-    /// 获取使用 expert 模型的 AiClient，自动刷新 Google OAuth token（如需要）
-    #[allow(dead_code)]
-    pub async fn get_ai_client_expert(&self) -> crate::ai::AiClient {
-        self.ensure_google_token().await;
-        let cfg = self.config.read().unwrap_or_else(|e| e.into_inner());
-        cfg.ai_client_expert()
-    }
-
     /// 启动后台定时清理，移除超过 5 分钟的管道通道（防止 panic 导致泄漏）
     /// Spawn background task to remove pipeline channels older than 5 minutes
     pub fn spawn_channel_cleaner(&self) {

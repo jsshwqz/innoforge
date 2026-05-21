@@ -508,159 +508,6 @@ pub async fn api_google_oauth_status(State(s): State<AppState>) -> Json<serde_js
     }))
 }
 
-impl AppState {
-    /// 确保 Google 访问令牌有效（过期则自动刷新）
-    /// 在调用 Gemini API 前调用此方法。
-    /// 根据 auth_mode 自动选择刷新方式：
-    /// - "gcloud": 重新运行 gcloud CLI 或读取 ADC 文件
-    /// - "oauth": 使用 refresh_token 刷新
-    #[allow(dead_code)]
-    pub async fn ensure_google_token(&self) -> bool {
-        let needs_refresh = {
-            let cfg = self.config.read().unwrap_or_else(|e| e.into_inner());
-            let is_gemini = cfg.ai_base_url.contains("googleapis");
-            if !is_gemini {
-                return true; // 非 Gemini 不需要 Google 令牌
-            }
-            // 如果已有有效令牌，无需刷新
-            let has_valid = !cfg.google_access_token.is_empty()
-                && cfg
-                    .google_token_expiry
-                    .map(|exp| chrono::Utc::now().timestamp() < exp - 60)
-                    .unwrap_or(false);
-            !has_valid
-        };
-
-        if !needs_refresh {
-            return true;
-        }
-
-        // 判断认证模式
-        let auth_mode = {
-            let cfg = self.config.read().unwrap_or_else(|e| e.into_inner());
-            cfg.google_auth_mode.clone()
-        };
-
-        match auth_mode.as_str() {
-            "gcloud" => self.refresh_gcloud_token().await,
-            "oauth" => self.refresh_oauth_token().await,
-            _ => {
-                // 无认证模式，使用 API Key
-                true
-            }
-        }
-    }
-
-    /// 通过 gcloud 方式刷新令牌
-    #[allow(dead_code)]
-    async fn refresh_gcloud_token(&self) -> bool {
-        // 先尝试 gcloud CLI
-        if detect_gcloud_cli() {
-            if let Some(token) = get_token_from_gcloud_cli() {
-                let expiry = chrono::Utc::now().timestamp() + 3600;
-                {
-                    let mut cfg = self.config.write().unwrap_or_else(|e| e.into_inner());
-                    cfg.google_access_token = token.clone();
-                    cfg.google_token_expiry = Some(expiry);
-                }
-                let _ = self.db.set_setting("google_access_token", &token);
-                let _ = self
-                    .db
-                    .set_setting("google_token_expiry", &expiry.to_string());
-                tracing::info!("gcloud 令牌已刷新，有效期至 {}", expiry);
-                return true;
-            }
-        }
-
-        // 再尝试 ADC 文件
-        if let Some(adc_path) = get_adc_path() {
-            if adc_path.exists() {
-                if let Some(token) = refresh_token_from_adc(&adc_path).await {
-                    let expiry = chrono::Utc::now().timestamp() + 3600;
-                    {
-                        let mut cfg = self.config.write().unwrap_or_else(|e| e.into_inner());
-                        cfg.google_access_token = token.clone();
-                        cfg.google_token_expiry = Some(expiry);
-                    }
-                    let _ = self.db.set_setting("google_access_token", &token);
-                    let _ = self
-                        .db
-                        .set_setting("google_token_expiry", &expiry.to_string());
-                    tracing::info!("ADC 令牌已刷新");
-                    return true;
-                }
-            }
-        }
-
-        false
-    }
-
-    /// 通过 OAuth refresh_token 刷新令牌
-    #[allow(dead_code)]
-    async fn refresh_oauth_token(&self) -> bool {
-        let (client_id, client_secret, refresh_token) = {
-            let cfg = self.config.read().unwrap_or_else(|e| e.into_inner());
-            (
-                cfg.google_client_id.clone(),
-                cfg.google_client_secret.clone(),
-                cfg.google_refresh_token.clone(),
-            )
-        };
-
-        if refresh_token.is_empty() || client_id.is_empty() || client_secret.is_empty() {
-            return false;
-        }
-
-        let http_client = reqwest::Client::new();
-        let mut params = std::collections::HashMap::new();
-        params.insert("client_id", client_id.clone());
-        params.insert("client_secret", client_secret.clone());
-        params.insert("refresh_token", refresh_token.clone());
-        params.insert("grant_type", "refresh_token".to_string());
-
-        match http_client
-            .post(GOOGLE_TOKEN_URL)
-            .form(&params)
-            .send()
-            .await
-        {
-            Ok(resp) => match resp.json::<serde_json::Value>().await {
-                Ok(token_data) => {
-                    if let Some(access_token) = token_data["access_token"].as_str() {
-                        let expires_in = token_data["expires_in"].as_i64().unwrap_or(3600);
-                        let expiry = chrono::Utc::now().timestamp() + expires_in;
-
-                        {
-                            let mut cfg = self.config.write().unwrap_or_else(|e| e.into_inner());
-                            cfg.google_access_token = access_token.to_string();
-                            cfg.google_token_expiry = Some(expiry);
-                        }
-
-                        let _ = self.db.set_setting("google_access_token", access_token);
-                        let _ = self
-                            .db
-                            .set_setting("google_token_expiry", &expiry.to_string());
-
-                        tracing::info!("OAuth token refreshed, expires in {}s", expires_in);
-                        true
-                    } else {
-                        tracing::warn!("OAuth token refresh failed: no access_token");
-                        false
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!("OAuth token refresh parse error: {}", e);
-                    false
-                }
-            },
-            Err(e) => {
-                tracing::warn!("OAuth token refresh request failed: {}", e);
-                false
-            }
-        }
-    }
-}
-
 /// 后台定期刷新 Google 令牌的独立函数
 /// 由 spawn_channel_cleaner 每 60 秒调用一次
 pub(crate) async fn refresh_google_token_background(
@@ -688,9 +535,13 @@ pub(crate) async fn refresh_google_token_background(
 
     match auth_mode.as_str() {
         "gcloud" => {
-            // 尝试 gcloud CLI
+            // 尝试 gcloud CLI（在 blocking 线程池中执行，避免阻塞 tokio worker）
             if detect_gcloud_cli() {
-                if let Some(token) = get_token_from_gcloud_cli() {
+                let token = tokio::task::spawn_blocking(get_token_from_gcloud_cli)
+                    .await
+                    .ok()
+                    .flatten();
+                if let Some(token) = token {
                     let expiry = chrono::Utc::now().timestamp() + 3600;
                     {
                         let mut cfg = config.write().unwrap_or_else(|e| e.into_inner());

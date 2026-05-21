@@ -497,13 +497,14 @@ pub async fn api_ai_analyze_results(
     State(s): State<AppState>,
     Json(req): Json<serde_json::Value>,
 ) -> Json<serde_json::Value> {
-    let query = req["query"].as_str().unwrap_or("");
-    let patents = req["patents"].as_array();
-
-    if query.is_empty() || patents.is_none() {
-        return Json(json!({"error": "缺少查询词或专利数据"}));
-    }
-    let patents = patents.unwrap();
+    let query = match req["query"].as_str() {
+        Some(q) if !q.is_empty() => q,
+        _ => return Json(json!({"error": "缺少查询词或专利数据"})),
+    };
+    let patents = match req["patents"].as_array() {
+        Some(arr) => arr,
+        None => return Json(json!({"error": "缺少查询词或专利数据"})),
+    };
 
     let mut patent_list = String::new();
     for (i, p) in patents.iter().enumerate().take(10) {

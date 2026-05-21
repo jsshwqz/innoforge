@@ -1773,11 +1773,21 @@ pub async fn api_idea_claim_tree(
     let mut result_claims = Vec::new();
     for claim in &claims {
         let claim_id = claim["id"].as_str().unwrap_or("");
-        let mut feat_stmt = conn
-            .prepare(
-                "SELECT id, description, novelty_flag FROM technical_features WHERE claim_id = ?1",
-            )
-            .unwrap();
+        let mut feat_stmt = match conn.prepare(
+            "SELECT id, description, novelty_flag FROM technical_features WHERE claim_id = ?1",
+        ) {
+            Ok(stmt) => stmt,
+            Err(e) => {
+                tracing::warn!("加载 technical_features 失败: {}", e);
+                // 出错时 features 为空继续
+                let mut c = claim.clone();
+                if let Some(obj) = c.as_object_mut() {
+                    obj.insert("features".to_string(), json!([]));
+                }
+                result_claims.push(c);
+                continue;
+            }
+        };
         let features: Vec<serde_json::Value> =
             match feat_stmt.query_map(rusqlite::params![claim_id], |r| {
                 Ok(json!({
@@ -1791,9 +1801,9 @@ pub async fn api_idea_claim_tree(
             };
 
         let mut c = claim.clone();
-        c.as_object_mut()
-            .unwrap()
-            .insert("features".to_string(), json!(features));
+        if let Some(obj) = c.as_object_mut() {
+            obj.insert("features".to_string(), json!(features));
+        }
         result_claims.push(c);
     }
 

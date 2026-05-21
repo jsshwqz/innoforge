@@ -44,17 +44,23 @@ async fn serve_static(axum::extract::Path(path): axum::extract::Path<String>) ->
     match StaticAssets::get(&path) {
         Some(content) => {
             let mime = mime_guess::from_path(&path).first_or_octet_stream();
-            Response::builder()
+            match Response::builder()
                 .status(StatusCode::OK)
                 .header("Content-Type", mime.as_ref())
                 .header("Cache-Control", "public, max-age=3600")
                 .body(Body::from(content.data.to_vec()))
-                .unwrap()
+            {
+                Ok(resp) => resp,
+                Err(_) => Response::new(Body::from(content.data.to_vec())),
+            }
         }
-        None => Response::builder()
+        None => match Response::builder()
             .status(StatusCode::NOT_FOUND)
             .body(Body::from("Not found"))
-            .unwrap(),
+        {
+            Ok(resp) => resp,
+            Err(_) => Response::new(Body::from("Not found")),
+        },
     }
 }
 

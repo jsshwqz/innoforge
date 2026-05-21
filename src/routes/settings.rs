@@ -46,13 +46,39 @@ pub async fn api_save_serpapi(
     State(s): State<AppState>,
     Json(req): Json<serde_json::Value>,
 ) -> Json<serde_json::Value> {
+    // 读取当前内存中的实际 Key（用于反查掩码对应的原始值）
+    let current_keys: Vec<String> = {
+        let config = s.config.read().unwrap_or_else(|e| e.into_inner());
+        config.serpapi_keys.clone()
+    };
+
     let keys: Vec<String> = req["api_keys"]
         .as_array()
         .map(|arr| {
             arr.iter()
                 .filter_map(|v| {
                     let k = v.as_str()?.trim().to_string();
-                    if k.is_empty() || k.len() < 20 || k.len() > 200 {
+                    if k.is_empty() || k.len() > 200 {
+                        return None;
+                    }
+                    // 如果是掩码值（前端 GET 后再 PUT），反查原始 Key
+                    if k.contains("****") {
+                        // 去掉 **** 后取前后缀，匹配当前有效的 Key
+                        let parts: Vec<&str> = k.split("****").collect();
+                        if parts.len() == 2 {
+                            let prefix = parts[0];
+                            let suffix = parts[1];
+                            for current in &current_keys {
+                                if current.starts_with(prefix) && current.ends_with(suffix) {
+                                    return Some(current.clone());
+                                }
+                            }
+                        }
+                        // 未匹配到原始 Key，跳过
+                        return None;
+                    }
+                    // 非掩码 Key：正常校验
+                    if k.len() < 20 {
                         return None;
                     }
                     if !k
@@ -66,8 +92,6 @@ pub async fn api_save_serpapi(
                 .collect()
         })
         .unwrap_or_default();
-
-    let mut new_keys: Vec<String> = Vec::new();
 
     // 先清除 DB 和 .env 中旧的单 key 和多 key 记录
     for suffix in ["", "_1", "_2", "_3", "_4", "_5"] {
@@ -83,13 +107,12 @@ pub async fn api_save_serpapi(
             tracing::warn!("保存设置 {} 到数据库失败: {}", db_key, e);
         }
         let _ = update_env_file(&db_key, k);
-        new_keys.push(k.clone());
     }
 
     // 更新内存配置（立即生效）
     {
         let mut config = s.config.write().unwrap_or_else(|e| e.into_inner());
-        config.serpapi_keys = new_keys;
+        config.serpapi_keys = keys.clone();
     }
 
     Json(json!({
@@ -123,7 +146,8 @@ pub async fn api_save_ai(
     if !base_url.starts_with("http://") && !base_url.starts_with("https://") {
         return Json(json!({"status": "error", "message": "URL must use HTTP or HTTPS protocol"}));
     }
-    if api_key.len() < 8 || api_key.len() > 200 {
+    // 掩码检测必须在长度检查之前：如果用户使用 ≤8 字符的短 Key 的掩码值 "****"，应允许通过
+    if !api_key.contains("****") && (api_key.len() < 8 || api_key.len() > 200) {
         return Json(
             json!({"status": "error", "message": "API key length must be between 8 and 200 characters"}),
         );
@@ -177,10 +201,28 @@ pub async fn api_save_ai(
         api_key.to_string()
     };
 
-    // Google Client Secret 同理：前端传来空值时保持原有值
-    let google_client_secret = if google_client_secret.is_empty() {
+    // Google Client Secret 同理：前端传来空值或掩码时保持原有值
+    let google_client_secret = if google_client_secret.is_empty()
+        || google_client_secret.contains("****")
+    {
         let current = s.config.read().unwrap_or_else(|e| e.into_inner());
-        current.google_client_secret.clone()
+        let old = current.google_client_secret.clone();
+        if google_client_secret.contains("****") {
+            // 掩码情况下额外检查是否切换了服务商（域名变更）
+            let old_domain = extract_domain(&current.ai_base_url);
+            let new_domain = extract_domain(base_url);
+            if old_domain != new_domain {
+                return Json(json!({
+                    "status": "error",
+                    "message": format!(
+                        "检测到切换 AI 服务商（{} → {}），请手动输入新的 Google Client Secret，不能使用旧 Secret 的掩码值。",
+                        old_domain.as_deref().unwrap_or("<unknown>"),
+                        new_domain.as_deref().unwrap_or("<unknown>")
+                    )
+                }));
+            }
+        }
+        old
     } else {
         google_client_secret
     };
@@ -198,6 +240,15 @@ pub async fn api_save_ai(
         config.ai_model_expert = model_expert.to_string();
         config.google_client_id = google_client_id.clone();
         config.google_client_secret = google_client_secret.clone();
+
+        // 非 Gemini 服务商时，清除 OAuth 令牌（避免旧令牌持久化干扰）
+        if !base_url.contains("googleapis") {
+            config.google_access_token.clear();
+            config.google_token_expiry = None;
+            config.google_refresh_token.clear();
+            config.google_auth_mode.clear();
+        }
+
         config.gemini_cli_enabled = gemini_cli_enabled;
         config.gemini_cli_path = gemini_cli_path.clone();
     }
@@ -255,9 +306,12 @@ pub async fn api_serpapi_balance(State(s): State<AppState>) -> Json<serde_json::
                 });
             let _ = tx.send(result);
         });
-        match rx.recv() {
+        match rx.recv_timeout(std::time::Duration::from_secs(30)) {
             Ok(Ok(d)) => Some(d),
             Ok(Err(e)) => return Json(json!({"status": "error", "message": e})),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                return Json(json!({"status": "error", "message": "查询 SerpAPI 余额超时（>30s）"}))
+            }
             Err(e) => {
                 return Json(
                     json!({"status": "error", "message": format!("接收线程结果失败: {}", e)}),
@@ -323,8 +377,12 @@ fn update_env_file(key: &str, value: &str) -> Result<(), String> {
         lines.push(format!("{}={}", key, value));
     }
 
-    std::fs::write(env_path, lines.join("\n"))
-        .map_err(|e| format!("Failed to write .env file: {}", e))?;
+    // 原子写入：先写临时文件，再重命名，避免并发写入丢失数据
+    let tmp_path = format!("{}.tmp", env_path);
+    std::fs::write(&tmp_path, lines.join("\n"))
+        .map_err(|e| format!("Failed to write .env.tmp file: {}", e))?;
+    std::fs::rename(&tmp_path, env_path)
+        .map_err(|e| format!("Failed to rename .env.tmp to .env: {}", e))?;
 
     Ok(())
 }
@@ -336,6 +394,11 @@ fn extract_domain(url: &str) -> Option<String> {
         .strip_prefix("https://")
         .or_else(|| url.strip_prefix("http://"))?;
     let domain = after_protocol.split('/').next()?;
+    // 检测是否为 IP 地址（如 192.168.1.1），IP 地址返回完整 IP
+    let is_ip = domain.chars().all(|c| c.is_ascii_digit() || c == '.');
+    if is_ip {
+        return Some(domain.to_string());
+    }
     // 只取主域名（如 api.deepseek.com → deepseek.com, generativelanguage.googleapis.com → googleapis.com）
     let parts: Vec<&str> = domain.split('.').collect();
     if parts.len() >= 2 {

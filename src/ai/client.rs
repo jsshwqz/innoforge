@@ -63,6 +63,7 @@ struct ChatResponse {
     choices: Option<Vec<Choice>>,
     data: Option<Value>,    // Zhipu format
     result: Option<String>, // Some providers use this
+    error: Option<Value>,   // Provider error object (e.g. {"message": "..."})
 }
 
 #[derive(Deserialize)]
@@ -73,14 +74,33 @@ struct Choice {
 
 pub(crate) fn extract_chat_content(raw_text: &str) -> String {
     if let Ok(resp) = serde_json::from_str::<ChatResponse>(raw_text) {
+        // 先从 choices 中提取正常内容
         if let Some(choices) = resp.choices {
-            for choice in choices {
+            let mut all_empty = true;
+            for choice in &choices {
                 if let Some(content) = choice
                     .message
-                    .and_then(|message| message.content)
-                    .or_else(|| choice.delta.and_then(|delta| delta.content))
+                    .as_ref()
+                    .and_then(|message| message.content.as_ref())
+                    .or_else(|| {
+                        choice
+                            .delta
+                            .as_ref()
+                            .and_then(|delta| delta.content.as_ref())
+                    })
                 {
-                    return content;
+                    all_empty = false;
+                    if !content.is_empty() {
+                        return content.clone();
+                    }
+                }
+            }
+            // choices 存在但全为空 → 尝试提取 error 中的错误信息
+            if all_empty && !choices.is_empty() {
+                if let Some(err) = &resp.error {
+                    if let Some(msg) = err["message"].as_str() {
+                        return format!("AI 错误：{}", msg);
+                    }
                 }
             }
         }
@@ -93,6 +113,13 @@ pub(crate) fn extract_chat_content(raw_text: &str) -> String {
 
         if let Some(result) = resp.result {
             return result;
+        }
+
+        // ChatResponse 解析成功但无内容 → 检查 error 字段
+        if let Some(err) = &resp.error {
+            if let Some(msg) = err["message"].as_str() {
+                return format!("AI 错误：{}", msg);
+            }
         }
     }
 
@@ -497,6 +524,12 @@ impl AiClient {
                     return Ok(content);
                 }
                 Err(e) => {
+                    if e.is_connect() && provider.base_url.contains("localhost") {
+                        return Err(anyhow::anyhow!(
+                            "AI 未配置。请打开「设置」页面，配置云端 AI 服务（如智谱 GLM、OpenRouter 等）。\
+                             当前默认连接本地 Ollama (localhost:11434)，手机端不可用。"
+                        ));
+                    }
                     if attempt < max_retries - 1 && (e.is_timeout() || e.is_connect()) {
                         last_err = Some(e.into());
                         continue;
