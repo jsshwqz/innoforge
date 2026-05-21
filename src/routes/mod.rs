@@ -63,7 +63,14 @@ pub struct AppConfig {
     pub serpapi_keys: Vec<String>,
 
     pub ai_base_url: String,
+    /// 通用 AI API Key（自定义服务商使用 + 向后兼容）
     pub ai_api_key: String,
+    /// 各服务商独立 Key：切换服务商不会丢失
+    pub ai_api_key_deepseek: String,
+    pub ai_api_key_xiaomi: String,
+    pub ai_api_key_sensetime: String,
+    pub ai_api_key_openrouter: String,
+    pub ai_api_key_gemini: String,
     pub ai_model: String,
     /// 专家模型（用于创新推演、深分析等高推理任务，默认 deepseek-reasoner）
     pub ai_model_expert: String,
@@ -138,11 +145,26 @@ impl AppConfig {
                     .and_then(|v| v.parse::<i64>().ok())
             });
 
+        // 加载各服务商独立 Key，优先使用独立 Key，其次回退到通用 AI_API_KEY
+        let load_provider_key = |specific_key: &str| -> String {
+            let v = get(specific_key, "");
+            if v.is_empty() {
+                get("AI_API_KEY", "") // 回退到通用 Key
+            } else {
+                v
+            }
+        };
+
         Self {
             serpapi_keys,
 
             ai_base_url: get("AI_BASE_URL", "http://localhost:11434/v1"),
             ai_api_key: get("AI_API_KEY", "ollama"),
+            ai_api_key_deepseek: load_provider_key("AI_API_KEY_DEEPSEEK"),
+            ai_api_key_xiaomi: load_provider_key("AI_API_KEY_XIAOMI"),
+            ai_api_key_sensetime: load_provider_key("AI_API_KEY_SENSENOVA"),
+            ai_api_key_openrouter: load_provider_key("AI_API_KEY_OPENROUTER"),
+            ai_api_key_gemini: load_provider_key("AI_API_KEY_GEMINI"),
             ai_model: get("AI_MODEL", "qwen2.5:7b"),
             ai_model_expert: get("AI_MODEL_EXPERT", "deepseek-reasoner"),
 
@@ -202,10 +224,33 @@ impl AppConfig {
         }
     }
 
+    /// 根据 base_url 检测当前 AI 服务商、返回对应的 API Key。
+    /// custom/未识别服务商返回通用 `ai_api_key`（向后兼容）。
+    pub fn api_key_for_provider(&self, base_url: &str) -> String {
+        let key = if base_url.contains("deepseek") {
+            &self.ai_api_key_deepseek
+        } else if base_url.contains("xiaomimimo") {
+            &self.ai_api_key_xiaomi
+        } else if base_url.contains("sensenova") {
+            &self.ai_api_key_sensetime
+        } else if base_url.contains("openrouter") {
+            &self.ai_api_key_openrouter
+        } else if base_url.contains("googleapis") {
+            &self.ai_api_key_gemini
+        } else {
+            &self.ai_api_key
+        };
+        if key.is_empty() {
+            self.ai_api_key.clone()
+        } else {
+            key.clone()
+        }
+    }
+
     /// 返回有效的 API Key：
-    /// - 如果使用 Gemini 且配置了有效（未过期）的 OAuth token，返回 access_token
-    /// - 如果 OAuth token 已过期，回退到 API Key
-    /// - 非 Gemini 端点直接返回 API Key
+    /// - 先按服务商获取独立 Key
+    /// - 如果使用 Gemini 且配置了有效（未过期）的 OAuth token，优先返回 access_token
+    /// - 如果 OAuth token 已过期，回退到 Gemini 独立 Key
     fn effective_api_key(&self) -> String {
         let is_gemini = self.ai_base_url.contains("googleapis");
         if is_gemini && !self.google_access_token.is_empty() {
@@ -227,7 +272,7 @@ impl AppConfig {
                 self.google_token_expiry
             );
         }
-        self.ai_api_key.clone()
+        self.api_key_for_provider(&self.ai_base_url)
     }
 
     /// Whether at least one SerpAPI key is configured.

@@ -6,7 +6,9 @@ use axum::{
 };
 
 pub async fn index_page() -> Html<String> {
-    Html(include_str!("../../templates/index.html").to_string())
+    let html = include_str!("../../templates/index.html")
+        .replace("{{version}}", env!("CARGO_PKG_VERSION"));
+    Html(html)
 }
 
 pub async fn search_page() -> Html<String> {

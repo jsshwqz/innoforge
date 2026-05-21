@@ -2,6 +2,23 @@ use super::{find_gemini_cli, AppState};
 use axum::{extract::State, Json};
 use serde_json::json;
 
+/// 根据 base_url 返回该服务商对应的 DB/.env Key 名称
+fn provider_db_key(base_url: &str) -> &'static str {
+    if base_url.contains("deepseek") {
+        "AI_API_KEY_DEEPSEEK"
+    } else if base_url.contains("xiaomimimo") {
+        "AI_API_KEY_XIAOMI"
+    } else if base_url.contains("sensenova") {
+        "AI_API_KEY_SENSENOVA"
+    } else if base_url.contains("openrouter") {
+        "AI_API_KEY_OPENROUTER"
+    } else if base_url.contains("googleapis") {
+        "AI_API_KEY_GEMINI"
+    } else {
+        "AI_API_KEY"
+    }
+}
+
 pub async fn api_get_settings(State(s): State<AppState>) -> Json<serde_json::Value> {
     let config = s.config.read().unwrap_or_else(|e| e.into_inner());
 
@@ -21,14 +38,17 @@ pub async fn api_get_settings(State(s): State<AppState>) -> Json<serde_json::Val
         .map(|k| mask_api_key(k))
         .collect();
 
+    // 返回当前服务商对应的 Key（而非共享 ai_api_key）
+    let current_key = config.api_key_for_provider(&config.ai_base_url);
+
     // 仅保留 SerpAPI + AI 配置，其他搜索源（Firecrawl/Bing/Lens/CNIPR）和备用 AI 已屏蔽
 
     Json(json!({
         "serpapi_keys": serpapi_keys,
         "serpapi_key_configured": config.has_serpapi(),
         "ai_base_url": config.ai_base_url,
-        "ai_api_key": mask_api_key(&config.ai_api_key),
-        "ai_api_key_configured": !config.ai_api_key.is_empty(),
+        "ai_api_key": mask_api_key(&current_key),
+        "ai_api_key_configured": !current_key.is_empty(),
         "ai_model": config.ai_model,
         "ai_model_expert": config.ai_model_expert,
         "google_client_id": config.google_client_id.clone(),
@@ -180,23 +200,19 @@ pub async fn api_save_ai(
         );
     }
 
-    // 检查 API Key 是否为掩码形式（包含 ****），若是则保持原有值不变
-    // 但如果 base_url 域名变了（切换服务商），则拒绝保存并提示用户手动输入新 Key
+    // 检查 API Key 是否为掩码形式（包含 ****），若是则从该服务商独立 Key 字段中读取真实值
+    let db_key_name = provider_db_key(base_url);
     let api_key = if api_key.contains("****") {
-        let current = s.config.read().unwrap_or_else(|e| e.into_inner());
-        let old_domain = extract_domain(&current.ai_base_url);
-        let new_domain = extract_domain(base_url);
-        if old_domain != new_domain {
+        // 从当前内存配置中反查该服务商的真实 Key
+        let config = s.config.read().unwrap_or_else(|e| e.into_inner());
+        let current_key = config.api_key_for_provider(base_url);
+        if current_key.is_empty() || current_key == "ollama" {
             return Json(json!({
                 "status": "error",
-                "message": format!(
-                    "检测到切换 AI 服务商（{} → {}），请手动输入新的 API Key，不能使用旧 Key 的掩码值。",
-                    old_domain.as_deref().unwrap_or("<unknown>"),
-                    new_domain.as_deref().unwrap_or("<unknown>")
-                )
+                "message": "该服务商尚未配置过 API Key，请手动输入完整 Key，不能使用掩码值。"
             }));
         }
-        current.ai_api_key.clone()
+        current_key
     } else {
         api_key.to_string()
     };
@@ -208,7 +224,7 @@ pub async fn api_save_ai(
         let current = s.config.read().unwrap_or_else(|e| e.into_inner());
         let old = current.google_client_secret.clone();
         if google_client_secret.contains("****") {
-            // 掩码情况下额外检查是否切换了服务商（域名变更）
+            // 掩码情况下检查域名变更（Google Client Secret 仍与服务商绑定）
             let old_domain = extract_domain(&current.ai_base_url);
             let new_domain = extract_domain(base_url);
             if old_domain != new_domain {
@@ -235,7 +251,17 @@ pub async fn api_save_ai(
     {
         let mut config = s.config.write().unwrap_or_else(|e| e.into_inner());
         config.ai_base_url = base_url.to_string();
-        config.ai_api_key = api_key.clone();
+        config.ai_api_key = api_key.clone(); // 始终更新通用 Key（向后兼容）
+                                             // 同时更新对应服务商的独立 Key
+        *match db_key_name {
+            "AI_API_KEY_DEEPSEEK" => &mut config.ai_api_key_deepseek,
+            "AI_API_KEY_XIAOMI" => &mut config.ai_api_key_xiaomi,
+            "AI_API_KEY_SENSENOVA" => &mut config.ai_api_key_sensetime,
+            "AI_API_KEY_OPENROUTER" => &mut config.ai_api_key_openrouter,
+            "AI_API_KEY_GEMINI" => &mut config.ai_api_key_gemini,
+            _ => &mut config.ai_api_key, // custom → 通用 Key
+        } = api_key.clone();
+
         config.ai_model = model.to_string();
         config.ai_model_expert = model_expert.to_string();
         config.google_client_id = google_client_id.clone();
@@ -256,7 +282,8 @@ pub async fn api_save_ai(
     // SQLite 持久化（主存储，Android 友好）
     for (k, v) in [
         ("AI_BASE_URL", base_url),
-        ("AI_API_KEY", &api_key),
+        (db_key_name, &api_key),  // 服务商独立 Key
+        ("AI_API_KEY", &api_key), // 通用 Key（向后兼容）
         ("AI_MODEL", model),
         ("AI_MODEL_EXPERT", model_expert),
         ("GOOGLE_CLIENT_ID", &google_client_id),
@@ -272,6 +299,7 @@ pub async fn api_save_ai(
     let _ = update_env_file("GEMINI_CLI_ENABLED", gemini_cli_val);
     // .env 持久化为可选（桌面端后备）
     let _ = update_env_file("AI_BASE_URL", base_url);
+    let _ = update_env_file(db_key_name, &api_key);
     let _ = update_env_file("AI_API_KEY", &api_key);
     let _ = update_env_file("AI_MODEL", model);
     let _ = update_env_file("AI_MODEL_EXPERT", model_expert);
