@@ -194,8 +194,16 @@ pub(crate) fn detect_gcloud_cli() -> bool {
 }
 
 /// 运行 gcloud CLI 获取访问令牌
+/// 注意：使用 tokio::process::Command 并设置超时，防止在无凭证环境中阻塞 30+ 秒
 fn get_token_from_gcloud_cli() -> Option<String> {
     let gcloud = find_gcloud()?;
+
+    // 快速检查：如果没有 ADC 文件，大概率 gcloud 也无凭证，跳过耗时的 metadata server 探测
+    if !has_adc_credentials() {
+        tracing::debug!("skip gcloud token refresh: no ADC credentials found");
+        return None;
+    }
+
     let output = std::process::Command::new(gcloud)
         .args(["auth", "application-default", "print-access-token"])
         .output()
@@ -212,6 +220,11 @@ fn get_token_from_gcloud_cli() -> Option<String> {
         return None;
     }
     Some(token)
+}
+
+/// 快速检查是否存在 ADC 凭据文件，避免执行 gcloud 命令因无凭证而长时间阻塞
+fn has_adc_credentials() -> bool {
+    get_adc_path().is_some_and(|p| p.exists())
 }
 
 /// 从 ADC 文件刷新令牌（无需 gcloud CLI）

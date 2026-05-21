@@ -155,9 +155,11 @@ impl AppConfig {
     /// Build an AiClient from the current config.
     /// 如果配置了 Google OAuth 且当前是 Gemini 端点，自动使用 OAuth access_token。
     /// 如果启用了 Gemini CLI 模式，使用子进程调用 Gemini CLI。
+    /// 如果基础 URL 是 Google API，自动添加模型降级兜底（quota 不足时 fallback 到更便宜的模型）。
     pub fn ai_client(&self) -> AiClient {
         let api_key = self.effective_api_key();
         let mut client = AiClient::with_config(&self.ai_base_url, &api_key, &self.ai_model);
+        self.add_gemini_model_fallback(&mut client, &self.ai_model);
         if self.gemini_cli_enabled && !self.gemini_cli_path.is_empty() {
             client.set_gemini_cli(&self.gemini_cli_path);
         }
@@ -165,13 +167,33 @@ impl AppConfig {
     }
 
     /// Build an AiClient using the expert model for deep analysis tasks.
+    /// 同样自动添加模型降级兜底。
     pub fn ai_client_expert(&self) -> AiClient {
         let api_key = self.effective_api_key();
         let mut client = AiClient::with_config(&self.ai_base_url, &api_key, &self.ai_model_expert);
+        self.add_gemini_model_fallback(&mut client, &self.ai_model_expert);
         if self.gemini_cli_enabled && !self.gemini_cli_path.is_empty() {
             client.set_gemini_cli(&self.gemini_cli_path);
         }
         client
+    }
+
+    /// 为 Gemini 端点添加模型降级兜底：从高到低，主模型 quota 用完后尝试更便宜的模型。
+    /// 非 Gemini 端点不添加降级。
+    fn add_gemini_model_fallback(&self, client: &mut AiClient, primary_model: &str) {
+        let is_gemini = self.ai_base_url.contains("googleapis");
+        if !is_gemini || self.gemini_cli_enabled {
+            return;
+        }
+        let api_key = self.effective_api_key();
+        // 降级优先级：从最新到最稳定（越靠前越新、quota 可能越紧）
+        let fallback_chain = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+        for fb_model in &fallback_chain {
+            if fb_model == &primary_model {
+                continue;
+            }
+            client.add_fallback(&self.ai_base_url, &api_key, fb_model, fb_model);
+        }
     }
 
     /// 返回有效的 API Key：
