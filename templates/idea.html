@@ -204,12 +204,16 @@
                     </div>
                     <div id="discussion-summary" style="display:none; margin-bottom:12px; padding:12px; background:#0d1117; border-radius:6px; border-left:3px solid #58a6ff;">
                     </div>
-                    <div id="chat-messages" style="max-height:400px; overflow-y:auto; margin-bottom:12px;">
+                    <div style="position:relative;">
+                        <div id="chat-messages" style="max-height:400px; overflow-y:auto; margin-bottom:12px;">
+                        </div>
+                        <button class="scroll-bottom-btn" id="scroll-bottom-btn-idea" onclick="scrollIdeaChatToBottom()">↓</button>
                     </div>
                     <div id="chat-attachments" style="display:none; margin-bottom:6px; font-size:0.85em;"></div>
                     <div style="display:flex; gap:8px; align-items:flex-end;">
                         <div style="flex:1; position:relative;">
                             <textarea id="chat-input" data-i18n-placeholder="idea.chatPlaceholder" rows="3" style="width:100%; padding:8px 12px; background:#0d1117; border:1px solid #30363d; border-radius:6px; color:#c9d1d9; resize:vertical; min-height:60px; max-height:300px; font-size:0.95em; font-family:inherit;" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMessage();}"></textarea>
+                            <div id="idea-image-preview-area" style="display:none; gap:6px; flex-wrap:wrap; padding:4px 0;"></div>
                         </div>
                         <div style="display:flex; flex-direction:column; gap:4px;">
                             <label style="background:#21262d; padding:8px 10px; border-radius:6px; cursor:pointer; text-align:center; border:1px solid #30363d; font-size:0.85em; color:#8b949e;" title="上传图片或文件">
@@ -1610,25 +1614,49 @@
 
     var chatAttachedFiles = [];
 
-    // 粘贴图片支持
+    // 粘贴图片支持（读取为 base64 用于多模态 AI）
+    var ideaPastedImages = [];
+
     document.getElementById('chat-input').addEventListener('paste', function(e) {
-        var items = (e.clipboardData || e.originalEvent.clipboardData).items;
-        var hasImage = false;
+        var items = (e.clipboardData || window.clipboardData).items;
         for (var i = 0; i < items.length; i++) {
-            if (items[i].type.indexOf('image') !== -1) {
-                hasImage = true;
-                var blob = items[i].getAsFile();
-                var ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-                var ext = blob.type.split('/')[1] || 'png';
-                var file = new File([blob], 'paste-' + ts + '.' + ext, { type: blob.type });
-                chatAttachedFiles.push(file);
+            if (items[i].type.indexOf('image') === 0) {
+                e.preventDefault();
+                var file = items[i].getAsFile();
+                if (!file) continue;
+                var reader = new FileReader();
+                reader.onload = function(ev) {
+                    var base64 = ev.target.result.split(',')[1];
+                    ideaPastedImages.push(base64);
+                    showIdeaImagePreview();
+                };
+                reader.readAsDataURL(file);
+                break;
             }
         }
-        if (hasImage) {
-            e.preventDefault();
-            renderChatAttachments();
-        }
     });
+
+    function showIdeaImagePreview() {
+        var area = document.getElementById('idea-image-preview-area');
+        area.innerHTML = '';
+        if (ideaPastedImages.length === 0) {
+            area.style.display = 'none';
+            return;
+        }
+        area.style.display = 'flex';
+        for (var i = 0; i < ideaPastedImages.length; i++) {
+            var thumb = document.createElement('div');
+            thumb.style.cssText = 'position:relative; display:inline-block;';
+            thumb.innerHTML = '<img src="data:image/png;base64,' + ideaPastedImages[i] + '" style="max-width:80px; max-height:80px; border-radius:6px; border:1px solid rgba(255,255,255,0.08); object-fit:cover;">'
+                + '<span onclick="removeIdeaImage(' + i + ')" style="position:absolute; top:-6px; right:-6px; width:18px; height:18px; border-radius:50%; background:#f85149; color:#fff; font-size:14px; line-height:18px; text-align:center; cursor:pointer; border:2px solid #0d1117;">&times;</span>';
+            area.appendChild(thumb);
+        }
+    }
+
+    function removeIdeaImage(idx) {
+        ideaPastedImages.splice(idx, 1);
+        showIdeaImagePreview();
+    }
 
     function renderChatAttachments() {
         var container = document.getElementById('chat-attachments');
@@ -1680,14 +1708,35 @@
     }
 
     var ideaRetryMsg = '';
+    var ideaRetryImages = [];
+
+    // ── 滚到底部按钮 ──
+    var ideaChatBox = document.getElementById('chat-messages');
+    var ideaScrollBtn = document.getElementById('scroll-bottom-btn-idea');
+    if (ideaChatBox && ideaScrollBtn) {
+        ideaChatBox.addEventListener('scroll', function() {
+            var threshold = 200;
+            var atBottom = ideaChatBox.scrollHeight - ideaChatBox.scrollTop - ideaChatBox.clientHeight < threshold;
+            ideaScrollBtn.classList.toggle('visible', !atBottom);
+        });
+    }
+    function scrollIdeaChatToBottom() {
+        if (ideaChatBox) {
+            ideaChatBox.scrollTo({ top: ideaChatBox.scrollHeight, behavior: 'smooth' });
+            ideaScrollBtn.classList.remove('visible');
+        }
+    }
 
     async function sendChatMessage() {
         var input = document.getElementById('chat-input');
         var msg = input.value.trim();
         var hasFiles = chatAttachedFiles.length > 0;
-        if ((!msg && !hasFiles) || !currentIdeaId) return;
+        var images = ideaPastedImages.slice();
+        if ((!msg && !hasFiles && images.length === 0) || !currentIdeaId) return;
         input.value = '';
         input.disabled = true;
+        ideaPastedImages = [];
+        showIdeaImagePreview();
 
         // Show user message immediately
         var container = document.getElementById('chat-messages');
@@ -1705,13 +1754,15 @@
         userMsgDiv.appendChild(userBody);
         container.appendChild(userMsgDiv);
 
-        await doIdeaSend(msg);
+        await doIdeaSend(msg, images);
         input.disabled = false;
         input.focus();
     }
 
-    async function doIdeaSend(msg) {
+    async function doIdeaSend(msg, images) {
+        images = images || [];
         ideaRetryMsg = msg;
+        ideaRetryImages = images;
         var container = document.getElementById('chat-messages');
 
         // Show thinking indicator
@@ -1726,10 +1777,12 @@
         container.scrollTop = container.scrollHeight;
 
         try {
+            var bodyObj = { message: msg };
+            if (images.length > 0) bodyObj.images = images;
             var res = await fetch('/api/idea/' + currentIdeaId + '/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message: msg })
+                body: JSON.stringify(bodyObj)
             });
             if (!res.ok) throw new Error('服务器错误 (' + res.status + ')');
             var data = await res.json();
@@ -1749,6 +1802,7 @@
                 aiMsgDiv.appendChild(aiBody);
                 container.appendChild(aiMsgDiv);
                 ideaRetryMsg = '';
+                ideaRetryImages = [];
             } else {
                 var indicator2 = document.getElementById('thinking-indicator');
                 if (indicator2) indicator2.remove();
@@ -1775,13 +1829,15 @@
 
     function retryIdeaSend() {
         var msg = ideaRetryMsg;
-        if (!msg) return;
+        var images = ideaRetryImages || [];
+        if (!msg && images.length === 0) return;
         ideaRetryMsg = '';
+        ideaRetryImages = [];
         // 移除最后一条错误消息
         var container = document.getElementById('chat-messages');
         var last = container.lastChild;
         if (last) container.removeChild(last);
-        doIdeaSend(msg);
+        doIdeaSend(msg, images);
     }
 
     async function summarizeDiscussion() {

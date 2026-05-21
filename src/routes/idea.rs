@@ -585,6 +585,17 @@ pub async fn api_idea_chat(
          7. **简洁有力**：不说废话，每句话都有信息量\n",
     );
 
+    // Extract optional images from request (multimodal support)
+    let images: Vec<String> = req["images"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    let has_images = !images.is_empty();
+
     // Build message history with smart windowing
     let recent_history: Vec<_> = if history.len() > keep_recent {
         history[history.len() - keep_recent..].to_vec()
@@ -613,10 +624,41 @@ pub async fn api_idea_chat(
         .read()
         .unwrap_or_else(|e| e.into_inner())
         .ai_client();
-    let ai_response = match ai
-        .chat_with_history_expert(&system_context, chat_history, 0.6)
-        .await
-    {
+    let ai_result = if has_images {
+        // Multimodal path: build raw JSON body with image content parts
+        let mut json_messages: Vec<serde_json::Value> =
+            vec![serde_json::json!({"role": "system", "content": system_context})];
+
+        // Add history messages (excluding the last one = current user message)
+        let history_end = chat_history.len().saturating_sub(1);
+        for (role, content) in &chat_history[..history_end] {
+            json_messages.push(serde_json::json!({"role": role, "content": content}));
+        }
+
+        // Build current user message with text + images as multimodal content array
+        let mut content_parts = vec![serde_json::json!({"type": "text", "text": user_msg})];
+        for img in &images {
+            content_parts.push(serde_json::json!({
+                "type": "image_url",
+                "image_url": {"url": format!("data:image/png;base64,{}", img)}
+            }));
+        }
+        json_messages.push(serde_json::json!({
+            "role": "user",
+            "content": content_parts
+        }));
+
+        let body = serde_json::json!({
+            "model": ai.model_name(),
+            "messages": json_messages,
+            "temperature": 0.6
+        });
+        ai.send_json_body(body).await
+    } else {
+        ai.chat_with_history_expert(&system_context, chat_history, 0.6)
+            .await
+    };
+    let ai_response = match ai_result {
         Ok(content) => content,
         Err(e) => {
             // 上游 AI 失败时，返回可执行的本地降级建议，避免前端按钮功能整体失效。

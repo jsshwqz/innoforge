@@ -11,6 +11,34 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
+    <style>
+    .quote-btn {
+        position: absolute;
+        background: #238636;
+        color: #fff;
+        padding: 4px 10px;
+        border-radius: 4px;
+        font-size: 12px;
+        cursor: pointer;
+        z-index: 100;
+        display: none;
+        white-space: nowrap;
+        user-select: none;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        pointer-events: auto;
+        line-height: 1.4;
+    }
+    .quote-btn:hover {
+        background: #2ea043;
+    }
+    .quote-line {
+        border-left: 3px solid #58a6ff;
+        padding-left: 10px;
+        margin: 4px 0;
+        color: #8b949e;
+        font-style: italic;
+    }
+    </style>
 </head>
 <body>
     <nav id="global-nav"></nav>
@@ -19,7 +47,8 @@
         <div class="chat-container">
             <h2 style="margin-bottom:8px;" data-i18n="ai.title"></h2>
             <p class="hint" data-i18n="ai.hint"></p>
-            <div class="chat-box" id="chat-messages"></div>
+            <div class="chat-box" id="chat-messages" style="position:relative;"></div>
+            <button class="scroll-bottom-btn" id="scroll-bottom-btn" onclick="scrollChatToBottom()">↓</button>
             <div class="chat-input">
                 <div class="chat-input-wrap">
                     <textarea id="chat-msg" rows="1" data-i18n-placeholder="ai.placeholder" autofocus></textarea>
@@ -108,8 +137,7 @@
         box.innerHTML = '';
         for (var i = 0; i < chatHistory.length; i += 2) {
             var userDiv = document.createElement('div');
-            userDiv.className = 'msg user';
-            userDiv.textContent = chatHistory[i][1];
+            renderUserMessage(userDiv, chatHistory[i][1]);
             box.appendChild(userDiv);
             var aiDiv = document.createElement('div');
             aiDiv.className = 'msg ai';
@@ -118,6 +146,163 @@
         }
         box.scrollTop = box.scrollHeight;
     }
+
+    // ── 滚到底部按钮 ──
+    var chatBox = document.getElementById('chat-messages');
+    var scrollBtn = document.getElementById('scroll-bottom-btn');
+    if (chatBox && scrollBtn) {
+        chatBox.addEventListener('scroll', function() {
+            var threshold = 200;
+            var atBottom = chatBox.scrollHeight - chatBox.scrollTop - chatBox.clientHeight < threshold;
+            scrollBtn.classList.toggle('visible', !atBottom);
+        });
+    }
+    function scrollChatToBottom() {
+        if (chatBox) {
+            chatBox.scrollTo({ top: chatBox.scrollHeight, behavior: 'smooth' });
+            scrollBtn.classList.remove('visible');
+        }
+    }
+
+    // ── 引用选中文字 / Quote selected text ──
+    var quoteBtn = null;
+    var selectedQuoteText = '';
+
+    function createQuoteButton() {
+        var btn = document.createElement('div');
+        btn.className = 'quote-btn';
+        btn.textContent = t('ai.quote');
+        btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            insertQuote();
+        });
+        document.getElementById('chat-messages').appendChild(btn);
+        return btn;
+    }
+
+    function getQuoteBtn() {
+        if (!quoteBtn) quoteBtn = createQuoteButton();
+        return quoteBtn;
+    }
+
+    function showQuoteButton(text, rect) {
+        var btn = getQuoteBtn();
+        selectedQuoteText = text;
+        var container = document.getElementById('chat-messages');
+        var cr = container.getBoundingClientRect();
+        var left = rect.right - cr.left - btn.offsetWidth / 2;
+        var top = rect.top - cr.top - 36;
+        // 确保不溢出容器边界
+        left = Math.max(4, Math.min(left, cr.width - btn.offsetWidth - 4));
+        top = Math.max(4, top);
+        btn.style.left = left + 'px';
+        btn.style.top = top + 'px';
+        btn.style.display = 'block';
+    }
+
+    function hideQuoteButton() {
+        var btn = getQuoteBtn();
+        btn.style.display = 'none';
+        selectedQuoteText = '';
+    }
+
+    function insertQuote() {
+        if (!selectedQuoteText) return;
+        var textarea = document.getElementById('chat-msg');
+        // 每行前加 "> "，末尾加两个换行
+        var quoted = selectedQuoteText.split('\n').map(function(line) {
+            return '> ' + line;
+        }).join('\n') + '\n\n';
+        var start = textarea.selectionStart;
+        var end = textarea.selectionEnd;
+        var before = textarea.value.substring(0, start);
+        var after = textarea.value.substring(end);
+        textarea.value = before + quoted + after;
+        var newPos = start + quoted.length;
+        textarea.selectionStart = textarea.selectionEnd = newPos;
+        textarea.style.height = 'auto';
+        textarea.style.height = textarea.scrollHeight + 'px';
+        textarea.focus();
+        hideQuoteButton();
+    }
+
+    // 格式化用户消息：将 > 前缀行渲染为 blockquote
+    function formatUserContent(text) {
+        if (!text || (text.indexOf('\n> ') === -1 && !text.startsWith('> '))) {
+            return null;
+        }
+        var lines = text.split('\n');
+        var parts = [];
+        for (var i = 0; i < lines.length; i++) {
+            var line = lines[i];
+            if (line.startsWith('> ')) {
+                parts.push('<div class="quote-line">' + escapeHtml(line.substring(2)) + '</div>');
+            } else if (line === '>') {
+                parts.push('<div class="quote-line"></div>');
+            } else {
+                parts.push(escapeHtml(line));
+            }
+        }
+        return DOMPurify.sanitize(parts.join('<br>'));
+    }
+
+    // 渲染用户消息（支持 blockquote + 图片）
+    function renderUserMessage(container, text, images) {
+        container.className = 'msg user';
+        var formatted = formatUserContent(text);
+        if (formatted) {
+            container.innerHTML = formatted;
+        } else {
+            container.textContent = text;
+        }
+        if (images && images.length > 0) {
+            for (var i = 0; i < images.length; i++) {
+                var img = document.createElement('img');
+                img.src = 'data:image/png;base64,' + images[i];
+                img.style.cssText = 'max-width:120px;max-height:120px;border-radius:4px;margin-top:4px;display:block;';
+                container.appendChild(img);
+            }
+        }
+    }
+
+    // 文本选择检测：释放鼠标时若选中文字则显示引用按钮
+    document.getElementById('chat-messages').addEventListener('mouseup', function(e) {
+        var target = e.target;
+        if (target && target.nodeType === 3) target = target.parentNode;
+        if (target && target.closest && target.closest('.quote-btn')) return;
+        // 延迟让 selection 稳定
+        setTimeout(function() {
+            var sel = window.getSelection();
+            var text = sel ? sel.toString().trim() : '';
+            if (!text) { hideQuoteButton(); return; }
+            var node = sel.anchorNode;
+            if (node) {
+                if (node.nodeType === 3) node = node.parentNode;
+                if (!node.closest('.msg')) { hideQuoteButton(); return; }
+            }
+            if (!sel.rangeCount) return;
+            var range = sel.getRangeAt(0);
+            var rect = range.getBoundingClientRect();
+            if (!rect || (rect.width === 0 && rect.height === 0)) { hideQuoteButton(); return; }
+            showQuoteButton(text, rect);
+        }, 10);
+    });
+
+    // 引用按钮点击时不要关闭自己；点击其它区域则隐藏
+    document.addEventListener('mousedown', function(e) {
+        if (e.target && e.target.closest && e.target.closest('.quote-btn')) return;
+        hideQuoteButton();
+    });
+
+    // 滚动时隐藏引用按钮
+    document.getElementById('chat-messages').addEventListener('scroll', function() {
+        hideQuoteButton();
+    });
+
+    // Escape 隐藏
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') hideQuoteButton();
+    });
 
     function saveMessage(role, content) {
         fetch('/api/chat/' + encodeURIComponent(AI_CHAT_KEY) + '/save', {
@@ -192,24 +377,7 @@
         showImagePreview();
         var box = document.getElementById('chat-messages');
         var userDiv = document.createElement('div');
-        userDiv.className = 'msg user';
-        if (images.length > 0) {
-            var userContent = msg || t('ai.viewImage') || '[图片]';
-            userDiv.textContent = userContent;
-            // 显示图片缩略图
-            for (var i = 0; i < images.length; i++) {
-                var imgThumb = document.createElement('img');
-                imgThumb.src = 'data:image/png;base64,' + images[i];
-                imgThumb.style.maxWidth = '120px';
-                imgThumb.style.maxHeight = '120px';
-                imgThumb.style.borderRadius = '4px';
-                imgThumb.style.marginTop = '4px';
-                imgThumb.style.display = 'block';
-                userDiv.appendChild(imgThumb);
-            }
-        } else {
-            userDiv.textContent = msg;
-        }
+        renderUserMessage(userDiv, msg, images);
         box.appendChild(userDiv);
         await doSend(msg, images);
         chatSending = false;

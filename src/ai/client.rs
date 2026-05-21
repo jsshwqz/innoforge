@@ -7,7 +7,16 @@ use serde_json::Value;
 use std::time::Duration;
 
 const PROVIDER_HTTP_TIMEOUT_SECS: u64 = 45;
-const PROVIDER_MAX_RETRIES: usize = 1;
+const PROVIDER_MAX_RETRIES: usize = 3;
+
+/// AI 提供者模式 / AI provider operation mode.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AiProviderMode {
+    /// Standard HTTP-based AI provider (e.g. DeepSeek, OpenAI)
+    Http,
+    /// Use Gemini CLI subprocess (bypasses API key / scope issues)
+    GeminiCli,
+}
 
 /// 单个 AI 服务商端点 / A single AI provider endpoint.
 #[derive(Clone)]
@@ -24,6 +33,10 @@ pub struct AiClient {
     pub(super) client: Client,
     pub(super) primary: AiProvider,
     pub(super) fallbacks: Vec<AiProvider>,
+    /// Provider mode: HTTP (default) or Gemini CLI subprocess
+    pub provider_mode: AiProviderMode,
+    /// Path to the Gemini CLI executable (e.g. gemini.cmd)
+    pub gemini_cli_path: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -93,6 +106,14 @@ pub(crate) fn extract_chat_content(raw_text: &str) -> String {
         if let Some(msg) = json["msg"].as_str() {
             return format!("AI 错误：{}", msg);
         }
+        // Handle array response: [{"error": {"message": "...", ...}}]
+        if let Some(arr) = json.as_array() {
+            for item in arr {
+                if let Some(err) = item["error"]["message"].as_str() {
+                    return format!("AI 错误：{}", err);
+                }
+            }
+        }
     }
 
     format!(
@@ -161,7 +182,6 @@ impl AiClient {
     pub fn with_config(base_url: &str, api_key: &str, model: &str) -> Self {
         Self {
             client: Client::builder()
-                .no_proxy()
                 .timeout(Duration::from_secs(PROVIDER_HTTP_TIMEOUT_SECS))
                 .build()
                 .unwrap_or_else(|_| Client::new()),
@@ -172,7 +192,15 @@ impl AiClient {
                 model: model.to_string(),
             },
             fallbacks: Vec::new(),
+            provider_mode: AiProviderMode::Http,
+            gemini_cli_path: None,
         }
+    }
+
+    /// Switch to Gemini CLI subprocess mode.
+    pub fn set_gemini_cli(&mut self, path: &str) {
+        self.provider_mode = AiProviderMode::GeminiCli;
+        self.gemini_cli_path = Some(path.to_string());
     }
 
     /// Add a fallback AI provider.
@@ -206,9 +234,20 @@ impl AiClient {
                 tokio::time::sleep(delay).await;
             }
 
+            let req_url = format!(
+                "{}/chat/completions",
+                provider.base_url.trim_end_matches('/')
+            );
+            tracing::debug!(
+                "[{}] POST {} model={} messages={}",
+                provider.name,
+                req_url,
+                provider.model,
+                messages.len()
+            );
             match self
                 .client
-                .post(format!("{}/chat/completions", provider.base_url.trim_end_matches('/')))
+                .post(&req_url)
                 .header("Authorization", format!("Bearer {}", provider.api_key))
                 .json(&request_body)
                 .send()
@@ -218,12 +257,30 @@ impl AiClient {
                     let status = resp.status();
 
                     if status.as_u16() == 429 {
+                        let retry_after = resp
+                            .headers()
+                            .get("retry-after")
+                            .and_then(|v| v.to_str().ok())
+                            .and_then(|v| v.parse::<u64>().ok());
                         let raw_text = resp.text().await.unwrap_or_default();
                         tracing::warn!(
                             "[{}] rate limited (429): {}",
                             provider.name,
                             safe_truncate(&raw_text, 100)
                         );
+                        if attempt < max_retries - 1 {
+                            let delay = retry_after.map(Duration::from_secs).unwrap_or_else(|| {
+                                Duration::from_secs(2u64.pow(attempt as u32 + 1))
+                            });
+                            tracing::info!(
+                                "[{}] retrying after {}s due to rate limit...",
+                                provider.name,
+                                delay.as_secs()
+                            );
+                            tokio::time::sleep(delay).await;
+                            last_err = Some(anyhow::anyhow!("AI 频率限制，请稍后再试"));
+                            continue;
+                        }
                         return Err(anyhow::anyhow!("AI 频率限制，请稍后再试"));
                     }
 
@@ -368,7 +425,10 @@ impl AiClient {
             }
             match self
                 .client
-                .post(format!("{}/chat/completions", provider.base_url.trim_end_matches('/')))
+                .post(format!(
+                    "{}/chat/completions",
+                    provider.base_url.trim_end_matches('/')
+                ))
                 .header("Authorization", format!("Bearer {}", provider.api_key))
                 .json(body)
                 .send()
@@ -377,19 +437,51 @@ impl AiClient {
                 Ok(resp) => {
                     let status = resp.status();
                     if status.as_u16() == 429 {
+                        let retry_after = resp
+                            .headers()
+                            .get("retry-after")
+                            .and_then(|v| v.to_str().ok())
+                            .and_then(|v| v.parse::<u64>().ok());
                         let raw_text = resp.text().await.unwrap_or_default();
-                        tracing::warn!("[{}] rate limited (429): {}", provider.name, safe_truncate(&raw_text, 100));
+                        tracing::warn!(
+                            "[{}] rate limited (429): {}",
+                            provider.name,
+                            safe_truncate(&raw_text, 100)
+                        );
+                        if attempt < max_retries - 1 {
+                            let delay = retry_after.map(Duration::from_secs).unwrap_or_else(|| {
+                                Duration::from_secs(2u64.pow(attempt as u32 + 1))
+                            });
+                            tracing::info!(
+                                "[{}] retrying after {}s due to rate limit...",
+                                provider.name,
+                                delay.as_secs()
+                            );
+                            tokio::time::sleep(delay).await;
+                            last_err = Some(anyhow::anyhow!("AI 频率限制，请稍后再试"));
+                            continue;
+                        }
                         return Err(anyhow::anyhow!("AI 频率限制，请稍后再试"));
                     }
                     if status.as_u16() == 401 || status.as_u16() == 403 {
                         let raw_text = resp.text().await.unwrap_or_default();
-                        tracing::warn!("[{}] auth error ({}): {}", provider.name, status.as_u16(), safe_truncate(&raw_text, 200));
-                        return Err(anyhow::anyhow!("AI API Key 无效或已过期。请到「设置」页面检查 API Key 配置。"));
+                        tracing::warn!(
+                            "[{}] auth error ({}): {}",
+                            provider.name,
+                            status.as_u16(),
+                            safe_truncate(&raw_text, 200)
+                        );
+                        return Err(anyhow::anyhow!(
+                            "AI API Key 无效或已过期。请到「设置」页面检查 API Key 配置。"
+                        ));
                     }
                     let raw_text = match resp.text().await {
                         Ok(text) => text,
                         Err(e) => {
-                            if attempt < max_retries - 1 { last_err = Some(anyhow::anyhow!("AI 响应读取中断: {}", e)); continue; }
+                            if attempt < max_retries - 1 {
+                                last_err = Some(anyhow::anyhow!("AI 响应读取中断: {}", e));
+                                continue;
+                            }
                             return Err(anyhow::anyhow!("AI 响应读取失败（连接中断）。可能原因：\n 1. API Key 无效或余额不足\n 2. 网络不稳定\n 3. AI 服务暂时不可用\n 请到「设置」检查 AI 配置。"));
                         }
                     };
@@ -436,8 +528,118 @@ impl AiClient {
         }
     }
 
-    /// 内部实现：依次尝试 primary + fallbacks
+    /// 调用 Gemini CLI 子进程进行 AI 推理 / Call Gemini CLI subprocess for AI inference.
+    async fn call_gemini_cli(messages: &[Message], gemini_path: Option<&str>) -> Result<String> {
+        let gemini_path = gemini_path.unwrap_or("gemini.cmd");
+
+        // Build the conversation text from messages
+        let mut prompt = String::new();
+        for msg in messages {
+            let label = match msg.role.as_str() {
+                "system" => "System",
+                "user" => "User",
+                "assistant" => "Assistant",
+                _ => &msg.role,
+            };
+            prompt.push_str(&format!("{}: {}\n", label, msg.content));
+        }
+
+        tracing::info!(
+            "Gemini CLI subprocess: path={} prompt_len={}",
+            gemini_path,
+            prompt.len()
+        );
+
+        // Spawn Gemini CLI subprocess
+        // On Windows, .cmd batch files are just wrappers for node scripts.
+        // We resolve the actual JS file and run `node` directly to avoid
+        // cmd.exe argument forwarding issues.
+        let (program, extra_args) = if gemini_path.ends_with(".cmd") {
+            // gemini.cmd resolves to:
+            //   %dp0%\node_modules\@google\gemini-cli\bundle\gemini.js
+            let dir = std::path::Path::new(gemini_path)
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new("."));
+            let js_path = dir
+                .join("node_modules")
+                .join("@google")
+                .join("gemini-cli")
+                .join("bundle")
+                .join("gemini.js");
+            (
+                "node".to_string(),
+                vec![js_path.to_string_lossy().to_string()],
+            )
+        } else {
+            (gemini_path.to_string(), vec![])
+        };
+        let output = tokio::process::Command::new(&program)
+            .env("GEMINI_CLI_TRUST_WORKSPACE", "true")
+            .args(&extra_args)
+            .args(["-p", &prompt, "--skip-trust", "--output-format", "json"])
+            .output()
+            .await
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "Gemini CLI 启动失败（{}）。请确认已安装 Gemini CLI（npm install -g @google/gemini-cli）。",
+                    e
+                )
+            })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stderr_trimmed: String = stderr.chars().take(500).collect();
+            return Err(anyhow::anyhow!(
+                "Gemini CLI 执行失败（exit code: {}）: {}",
+                output.status.code().unwrap_or(-1),
+                stderr_trimmed
+            ));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+
+        // Find JSON object in stdout (may have warnings/logs before it)
+        let json_start = stdout
+            .find('{')
+            .ok_or_else(|| anyhow::anyhow!("Gemini CLI 输出中没有找到 JSON 响应"))?;
+        let json_str = &stdout[json_start..];
+
+        // Find matching closing brace
+        let mut depth = 0;
+        let json_end = json_str
+            .char_indices()
+            .find(|&(_, c)| {
+                match c {
+                    '{' => depth += 1,
+                    '}' => depth -= 1,
+                    _ => {}
+                }
+                depth == 0 && c == '}'
+            })
+            .map(|(i, _)| i + 1)
+            .unwrap_or(json_str.len());
+        let json_str = &json_str[..json_end];
+
+        let json: serde_json::Value = serde_json::from_str(json_str).map_err(|e| {
+            anyhow::anyhow!(
+                "Gemini CLI 响应解析失败: {} (preview: {})",
+                e,
+                safe_truncate(json_str, 200)
+            )
+        })?;
+
+        json["response"]
+            .as_str()
+            .map(|s| s.to_string())
+            .ok_or_else(|| anyhow::anyhow!("Gemini CLI 响应中缺少 response 字段"))
+    }
+
+    /// 内部实现：Gemini CLI 模式或依次尝试 primary + fallbacks
     async fn send_chat_inner(&self, messages: Vec<Message>, temperature: f32) -> Result<String> {
+        if self.provider_mode == AiProviderMode::GeminiCli {
+            return Self::call_gemini_cli(&messages, self.gemini_cli_path.as_deref()).await;
+        }
+
         let mut failed_chain: Vec<String> = Vec::new();
         match self
             .try_provider(&self.primary, &messages, temperature)
@@ -485,6 +687,10 @@ impl AiClient {
         temperature: f32,
         model_override: Option<&str>,
     ) -> Result<String> {
+        if self.provider_mode == AiProviderMode::GeminiCli {
+            return Self::call_gemini_cli(&messages, self.gemini_cli_path.as_deref()).await;
+        }
+
         let mut failed_chain: Vec<String> = Vec::new();
         let primary = Self::apply_model_override(&self.primary, model_override);
         match self.try_provider(&primary, &messages, temperature).await {

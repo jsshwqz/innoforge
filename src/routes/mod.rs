@@ -14,6 +14,7 @@
 //! - [`pages`] — 页面渲染 / Page rendering
 
 mod ai;
+mod auth;
 mod chat;
 mod collections;
 mod feature_cards;
@@ -26,6 +27,7 @@ mod settings;
 mod upload;
 
 pub use ai::*;
+pub use auth::*;
 pub use chat::*;
 pub use collections::*;
 pub use feature_cards::*;
@@ -65,6 +67,22 @@ pub struct AppConfig {
     pub ai_model: String,
     /// 专家模型（用于创新推演、深分析等高推理任务，默认 deepseek-reasoner）
     pub ai_model_expert: String,
+
+    // ── Google OAuth for Gemini API ──
+    pub google_client_id: String,
+    pub google_client_secret: String,
+    pub google_refresh_token: String,
+    pub google_access_token: String,
+    pub google_token_expiry: Option<i64>,
+    /// 认证模式："oauth"（浏览器 OAuth）或 "gcloud"（gcloud CLI/ADC）
+    /// 空字符串表示未配置 Google 认证
+    pub google_auth_mode: String,
+
+    // ── Gemini CLI 子进程模式 ──
+    /// 是否启用 Gemini CLI 子进程模式（替代 HTTP API Key 方式）
+    pub gemini_cli_enabled: bool,
+    /// Gemini CLI 可执行文件路径（自动检测）
+    pub gemini_cli_path: String,
 }
 
 impl AppConfig {
@@ -109,6 +127,11 @@ impl AppConfig {
             }
         }
 
+        // 解析 google_token_expiry（存储在 DB 中的字符串）
+        let google_token_expiry = db_settings
+            .get("google_token_expiry")
+            .and_then(|v| v.parse::<i64>().ok());
+
         Self {
             serpapi_keys,
 
@@ -116,18 +139,67 @@ impl AppConfig {
             ai_api_key: get("AI_API_KEY", "ollama"),
             ai_model: get("AI_MODEL", "qwen2.5:7b"),
             ai_model_expert: get("AI_MODEL_EXPERT", "deepseek-reasoner"),
+
+            google_client_id: get("GOOGLE_CLIENT_ID", ""),
+            google_client_secret: get("GOOGLE_CLIENT_SECRET", ""),
+            google_refresh_token: get("google_refresh_token", ""),
+            google_access_token: get("google_access_token", ""),
+            google_token_expiry,
+            google_auth_mode: get("google_auth_mode", ""),
+
+            gemini_cli_enabled: get("GEMINI_CLI_ENABLED", "") == "true",
+            gemini_cli_path: find_gemini_cli().unwrap_or_default(),
         }
     }
 
     /// Build an AiClient from the current config.
-    /// 仅使用 DeepSeek，无备用 AI 服务商。
+    /// 如果配置了 Google OAuth 且当前是 Gemini 端点，自动使用 OAuth access_token。
+    /// 如果启用了 Gemini CLI 模式，使用子进程调用 Gemini CLI。
     pub fn ai_client(&self) -> AiClient {
-        AiClient::with_config(&self.ai_base_url, &self.ai_api_key, &self.ai_model)
+        let api_key = self.effective_api_key();
+        let mut client = AiClient::with_config(&self.ai_base_url, &api_key, &self.ai_model);
+        if self.gemini_cli_enabled && !self.gemini_cli_path.is_empty() {
+            client.set_gemini_cli(&self.gemini_cli_path);
+        }
+        client
     }
 
     /// Build an AiClient using the expert model for deep analysis tasks.
     pub fn ai_client_expert(&self) -> AiClient {
-        AiClient::with_config(&self.ai_base_url, &self.ai_api_key, &self.ai_model_expert)
+        let api_key = self.effective_api_key();
+        let mut client = AiClient::with_config(&self.ai_base_url, &api_key, &self.ai_model_expert);
+        if self.gemini_cli_enabled && !self.gemini_cli_path.is_empty() {
+            client.set_gemini_cli(&self.gemini_cli_path);
+        }
+        client
+    }
+
+    /// 返回有效的 API Key：
+    /// - 如果使用 Gemini 且配置了有效（未过期）的 OAuth token，返回 access_token
+    /// - 如果 OAuth token 已过期，回退到 API Key
+    /// - 非 Gemini 端点直接返回 API Key
+    fn effective_api_key(&self) -> String {
+        let is_gemini = self.ai_base_url.contains("googleapis");
+        if is_gemini && !self.google_access_token.is_empty() {
+            let is_expired = self
+                .google_token_expiry
+                .map(|exp| {
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs() as i64;
+                    now >= exp
+                })
+                .unwrap_or(false);
+            if !is_expired {
+                return self.google_access_token.clone();
+            }
+            tracing::warn!(
+                "Google OAuth token expired (expiry={:?}), falling back to API Key",
+                self.google_token_expiry
+            );
+        }
+        self.ai_api_key.clone()
     }
 
     /// Whether at least one SerpAPI key is configured.
@@ -145,6 +217,48 @@ impl AppConfig {
     }
 }
 
+/// 检测 Gemini CLI 是否可用 / Detect Gemini CLI installation.
+/// 返回可执行文件的完整路径，如果未安装则返回 None。
+pub(crate) fn find_gemini_cli() -> Option<String> {
+    // 检查常见安装路径
+    let candidates = [
+        // Windows npm global
+        r"C:\Users\Administrator\AppData\Roaming\npm\gemini.cmd",
+        // Windows npm global (alternative)
+        r"C:\Program Files\nodejs\gemini.cmd",
+        r"C:\Program Files (x86)\nodejs\gemini.cmd",
+        // PATH lookups
+        "gemini.cmd",
+        "gemini",
+    ];
+
+    // Check PATH candidates first
+    let found = candidates.iter().find(|cmd| {
+        std::process::Command::new(cmd)
+            .args(["--version"])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    });
+    if let Some(cmd) = found {
+        return Some(cmd.to_string());
+    }
+
+    // On Windows, also check USERPROFILE
+    if let Some(userprofile) = std::env::var_os("USERPROFILE") {
+        let npm_path = std::path::PathBuf::from(&userprofile)
+            .join("AppData")
+            .join("Roaming")
+            .join("npm")
+            .join("gemini.cmd");
+        if npm_path.exists() {
+            return Some(npm_path.to_string_lossy().to_string());
+        }
+    }
+
+    None
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub db: Arc<Database>,
@@ -154,34 +268,55 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// 获取 AiClient，调用前自动刷新 Google OAuth token（如需要）
+    #[allow(dead_code)]
+    pub async fn get_ai_client(&self) -> crate::ai::AiClient {
+        self.ensure_google_token().await;
+        let cfg = self.config.read().unwrap_or_else(|e| e.into_inner());
+        cfg.ai_client()
+    }
+
+    /// 获取使用 expert 模型的 AiClient，自动刷新 Google OAuth token（如需要）
+    #[allow(dead_code)]
+    pub async fn get_ai_client_expert(&self) -> crate::ai::AiClient {
+        self.ensure_google_token().await;
+        let cfg = self.config.read().unwrap_or_else(|e| e.into_inner());
+        cfg.ai_client_expert()
+    }
+
     /// 启动后台定时清理，移除超过 5 分钟的管道通道（防止 panic 导致泄漏）
     /// Spawn background task to remove pipeline channels older than 5 minutes
     pub fn spawn_channel_cleaner(&self) {
         let channels = self.pipeline_channels.clone();
         let db = self.db.clone();
+        let config = self.config.clone();
         tokio::spawn(async move {
             let stale_threshold = std::time::Duration::from_secs(300); // 5 分钟
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(60)).await;
 
                 // 清理超时的管道通道
-                let mut ch = channels.lock().unwrap_or_else(|e| e.into_inner());
-                let before = ch.len();
-                ch.retain(|id, entry| {
-                    let stale = entry.created_at.elapsed() > stale_threshold;
-                    if stale {
-                        tracing::info!(
-                            "清理超时管道通道: {} (已存在 {:?})",
-                            id,
-                            entry.created_at.elapsed()
-                        );
+                {
+                    let mut ch = channels.lock().unwrap_or_else(|e| e.into_inner());
+                    let before = ch.len();
+                    ch.retain(|id, entry| {
+                        let stale = entry.created_at.elapsed() > stale_threshold;
+                        if stale {
+                            tracing::info!(
+                                "清理超时管道通道: {} (已存在 {:?})",
+                                id,
+                                entry.created_at.elapsed()
+                            );
+                        }
+                        !stale
+                    });
+                    if ch.len() < before {
+                        tracing::info!("管道通道清理完成: 移除 {} 个", before - ch.len());
                     }
-                    !stale
-                });
-                if ch.len() < before {
-                    tracing::info!("管道通道清理完成: 移除 {} 个", before - ch.len());
-                }
-                drop(ch);
+                } // ch dropped here
+
+                // 自动刷新 Google OAuth / gcloud 令牌（如需要）
+                refresh_google_token_background(&config, &db).await;
 
                 // 重置卡住超过 10 分钟的 analyzing 创意为 error
                 match db.reset_stuck_analyzing(10) {

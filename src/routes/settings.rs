@@ -1,4 +1,4 @@
-use super::AppState;
+use super::{find_gemini_cli, AppState};
 use axum::{extract::State, Json};
 use serde_json::json;
 
@@ -31,6 +31,14 @@ pub async fn api_get_settings(State(s): State<AppState>) -> Json<serde_json::Val
         "ai_api_key_configured": !config.ai_api_key.is_empty(),
         "ai_model": config.ai_model,
         "ai_model_expert": config.ai_model_expert,
+        "google_client_id": config.google_client_id.clone(),
+        "google_client_id_set": !config.google_client_id.is_empty(),
+        "google_client_secret_set": !config.google_client_secret.is_empty(),
+        "google_oauth_connected": !config.google_refresh_token.is_empty() || !config.google_access_token.is_empty(),
+        "google_auth_mode": config.google_auth_mode,
+        "gemini_cli_enabled": config.gemini_cli_enabled,
+        "gemini_cli_available": !config.gemini_cli_path.is_empty(),
+        "gemini_cli_path": config.gemini_cli_path,
     }))
 }
 
@@ -98,6 +106,16 @@ pub async fn api_save_ai(
     let api_key = req["api_key"].as_str().unwrap_or("").trim();
     let model = req["model"].as_str().unwrap_or("").trim();
     let model_expert = req["ai_model_expert"].as_str().unwrap_or("").trim();
+    let google_client_id = req["google_client_id"]
+        .as_str()
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let google_client_secret = req["google_client_secret"]
+        .as_str()
+        .unwrap_or("")
+        .trim()
+        .to_string();
 
     if base_url.is_empty() || api_key.is_empty() || model.is_empty() {
         return Json(json!({"status": "error", "message": "All fields are required"}));
@@ -138,31 +156,63 @@ pub async fn api_save_ai(
         );
     }
 
+    // 检查 API Key 是否为掩码形式（包含 ****），若是则保持原有值不变
+    let api_key = if api_key.contains("****") {
+        let current = s.config.read().unwrap_or_else(|e| e.into_inner());
+        current.ai_api_key.clone()
+    } else {
+        api_key.to_string()
+    };
+
+    // Google Client Secret 同理：前端传来空值时保持原有值
+    let google_client_secret = if google_client_secret.is_empty() {
+        let current = s.config.read().unwrap_or_else(|e| e.into_inner());
+        current.google_client_secret.clone()
+    } else {
+        google_client_secret
+    };
+
+    // Gemini CLI 模式设置
+    let gemini_cli_enabled = req["gemini_cli_enabled"].as_bool().unwrap_or(false);
+    let gemini_cli_path = find_gemini_cli().unwrap_or_default();
+
     // 先更新内存配置（立即生效）
     {
         let mut config = s.config.write().unwrap_or_else(|e| e.into_inner());
         config.ai_base_url = base_url.to_string();
-        config.ai_api_key = api_key.to_string();
+        config.ai_api_key = api_key.clone();
         config.ai_model = model.to_string();
         config.ai_model_expert = model_expert.to_string();
+        config.google_client_id = google_client_id.clone();
+        config.google_client_secret = google_client_secret.clone();
+        config.gemini_cli_enabled = gemini_cli_enabled;
+        config.gemini_cli_path = gemini_cli_path.clone();
     }
 
     // SQLite 持久化（主存储，Android 友好）
     for (k, v) in [
         ("AI_BASE_URL", base_url),
-        ("AI_API_KEY", api_key),
+        ("AI_API_KEY", &api_key),
         ("AI_MODEL", model),
         ("AI_MODEL_EXPERT", model_expert),
+        ("GOOGLE_CLIENT_ID", &google_client_id),
+        ("GOOGLE_CLIENT_SECRET", &google_client_secret),
     ] {
         if let Err(e) = s.db.set_setting(k, v) {
             tracing::warn!("保存设置 {} 到数据库失败: {}", k, e);
         }
     }
+    // Gemini CLI 设置持久化
+    let gemini_cli_val = if gemini_cli_enabled { "true" } else { "false" };
+    let _ = s.db.set_setting("GEMINI_CLI_ENABLED", gemini_cli_val);
+    let _ = update_env_file("GEMINI_CLI_ENABLED", gemini_cli_val);
     // .env 持久化为可选（桌面端后备）
     let _ = update_env_file("AI_BASE_URL", base_url);
-    let _ = update_env_file("AI_API_KEY", api_key);
+    let _ = update_env_file("AI_API_KEY", &api_key);
     let _ = update_env_file("AI_MODEL", model);
     let _ = update_env_file("AI_MODEL_EXPERT", model_expert);
+    let _ = update_env_file("GOOGLE_CLIENT_ID", &google_client_id);
+    let _ = update_env_file("GOOGLE_CLIENT_SECRET", &google_client_secret);
 
     Json(json!({"status": "ok"}))
 }

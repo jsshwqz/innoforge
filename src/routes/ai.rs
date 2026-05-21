@@ -303,9 +303,8 @@ pub async fn api_ai_chat(
 
         if has_images {
             // Multimodal: build raw JSON request with image content parts
-            let mut json_messages: Vec<serde_json::Value> = vec![
-                serde_json::json!({"role": "system", "content": system_prompt})
-            ];
+            let mut json_messages: Vec<serde_json::Value> =
+                vec![serde_json::json!({"role": "system", "content": system_prompt})];
 
             // Add history messages
             for (role, content) in &req.history {

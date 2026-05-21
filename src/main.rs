@@ -157,6 +157,23 @@ async fn main() -> anyhow::Result<()> {
         // AI 接口 / AI API
         .route("/api/ai/chat", post(routes::api_ai_chat))
         .route("/api/ai/chat/stream", post(routes::api_ai_chat_stream))
+        // Google OAuth
+        .route("/api/auth/google/url", get(routes::api_google_auth_url))
+        .route(
+            "/api/auth/google/callback",
+            get(routes::api_google_callback),
+        )
+        .route(
+            "/api/auth/google/exchange",
+            post(routes::api_google_exchange_handler),
+        )
+        .route(
+            "/api/auth/google/status",
+            get(routes::api_google_oauth_status),
+        )
+        // gcloud CLI auth
+        .route("/api/auth/gcloud/status", get(routes::api_gcloud_status))
+        .route("/api/auth/gcloud/login", post(routes::api_gcloud_login))
         .route("/api/ai/summarize", post(routes::api_ai_summarize))
         .route("/api/ai/compare", post(routes::api_ai_compare))
         .route("/api/ai/claims", post(routes::api_ai_claims_analysis))

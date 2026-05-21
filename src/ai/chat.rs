@@ -1,6 +1,6 @@
 //! 聊天接口 / Chat interface methods
 
-use super::client::{safe_truncate, AiClient, Message};
+use super::client::{safe_truncate, AiClient, AiProviderMode, Message};
 use anyhow::Result;
 use std::time::Duration;
 
@@ -113,6 +113,14 @@ impl AiClient {
         context: Option<&str>,
     ) -> tokio::sync::mpsc::Receiver<String> {
         let (tx, rx) = tokio::sync::mpsc::channel::<String>(64);
+
+        // Gemini CLI 模式不支持流式输出
+        if self.provider_mode == AiProviderMode::GeminiCli {
+            let _ = tx.try_send(
+                "[ERROR] Gemini CLI 模式暂不支持流式输出，请使用普通聊天模式。".to_string(),
+            );
+            return rx;
+        }
 
         let mut messages = vec![Message {
             role: "system".into(),

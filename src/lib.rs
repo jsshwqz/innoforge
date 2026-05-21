@@ -155,6 +155,23 @@ pub async fn start_server(db_path: &str) -> anyhow::Result<()> {
             "/api/ai/office-action-response",
             post(routes::api_ai_office_action_response),
         )
+        // Google OAuth
+        .route("/api/auth/google/url", get(routes::api_google_auth_url))
+        .route(
+            "/api/auth/google/callback",
+            get(routes::api_google_callback),
+        )
+        .route(
+            "/api/auth/google/exchange",
+            post(routes::api_google_exchange_handler),
+        )
+        .route(
+            "/api/auth/google/status",
+            get(routes::api_google_oauth_status),
+        )
+        // gcloud CLI auth
+        .route("/api/auth/gcloud/status", get(routes::api_gcloud_status))
+        .route("/api/auth/gcloud/login", post(routes::api_gcloud_login))
         .route("/api/idea/submit", post(routes::api_idea_submit))
         .route("/api/idea/analyze", post(routes::api_idea_analyze))
         .route("/api/idea/pipeline", post(routes::api_idea_pipeline))
