@@ -157,8 +157,21 @@ pub async fn api_save_ai(
     }
 
     // 检查 API Key 是否为掩码形式（包含 ****），若是则保持原有值不变
+    // 但如果 base_url 域名变了（切换服务商），则拒绝保存并提示用户手动输入新 Key
     let api_key = if api_key.contains("****") {
         let current = s.config.read().unwrap_or_else(|e| e.into_inner());
+        let old_domain = extract_domain(&current.ai_base_url);
+        let new_domain = extract_domain(base_url);
+        if old_domain != new_domain {
+            return Json(json!({
+                "status": "error",
+                "message": format!(
+                    "检测到切换 AI 服务商（{} → {}），请手动输入新的 API Key，不能使用旧 Key 的掩码值。",
+                    old_domain.as_deref().unwrap_or("<unknown>"),
+                    new_domain.as_deref().unwrap_or("<unknown>")
+                )
+            }));
+        }
         current.ai_api_key.clone()
     } else {
         api_key.to_string()
@@ -314,4 +327,24 @@ fn update_env_file(key: &str, value: &str) -> Result<(), String> {
         .map_err(|e| format!("Failed to write .env file: {}", e))?;
 
     Ok(())
+}
+
+/// 从 URL 提取域名用于检测是否切换了服务商
+fn extract_domain(url: &str) -> Option<String> {
+    let url = url.trim();
+    let after_protocol = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))?;
+    let domain = after_protocol.split('/').next()?;
+    // 只取主域名（如 api.deepseek.com → deepseek.com, generativelanguage.googleapis.com → googleapis.com）
+    let parts: Vec<&str> = domain.split('.').collect();
+    if parts.len() >= 2 {
+        Some(format!(
+            "{}.{}",
+            parts[parts.len() - 2],
+            parts[parts.len() - 1]
+        ))
+    } else {
+        Some(domain.to_string())
+    }
 }
