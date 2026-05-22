@@ -5,7 +5,29 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 
-## [v0.5.10] - 2026-05-22
+## [v0.6.0] - 2026-05-23
+
+### 新增 / Added
+- **OA 答复分析页面** — 全新 `/oa-response` 独立页面，支持三种审查意见类型：一审/二审答复、非正常申请答辩、驳回后复审请求，各有专属 system prompt
+  New OA Response page (`/oa-response`): supports 3 office action types — 1st/2nd OA, abnormal application, re-examination after rejection
+- **三档分析深度** — OA 分析支持快速概览（单次简要）、标准分析（特征对比表+分层策略）、深度穷追（标准+AI 自检反驳，两次串行调用），用户按需选择
+  Three-level analysis depth: Quick (single-pass brief), Standard (feature table + layered strategy), Deep (Standard + AI self-critique, two-pass serial)
+- **AI 自检反驳机制** — 深度模式下 AI 先提答复方案，再换审查员视角逐条挑刺，输出「审查员视角预判」附在方案后
+  AI self-critique: Deep mode generates response first, then re-analyzes from examiner's perspective, outputting "examiner's predicted objections"
+- **特征对比表 + 分层策略** — 标准/深度模式下 AI 强制输出权利要求逐特征对比表，以及「否定技术启示→强调协同效果→保底修改」三层论证
+  Feature comparison table + layered strategy: Standard/Deep modes output claim-by-claim feature comparison table and 3-tier argument structure
+- **侧边栏导航 OA 入口** — 全局导航增加「OA答复」链接，方便快速访问
+  Sidebar nav: added "OA Reply" link for quick access
+
+### 改进 / Improved
+- **AI 通俗表达规则** — 深度/中度模式新增第 8/7 条规则，要求 AI 保留全部技术分析能力但用通俗语言呈现结论和推理过程，避免堆砌公式
+  Plain language rule added to deep/medium prompts: AI retains full analytical capability but explains conclusions in accessible language
+
+### 修复 / Fixed
+- **引用按钮不显示** — ai.html 的 getQuoteBtn 添加 document.body.contains 检测，修复 renderAllMessages 清空 DOM 后引用按钮丢失的问题
+  Fixed quote button disappearing after renderAllMessages clears DOM — added document.body.contains check in getQuoteBtn
+- **时间显示为中国时区** — idea.html 版本列表、侧边栏创意列表、对话消息三处时间从 UTC 改为 CST (UTC+8)，新增 toCST() 辅助函数
+  Fixed timezone: idea page timestamps (version list, sidebar, chat messages) now display in CST (UTC+8) via new toCST() helper
 
 ### 新增 / Added
 - **讨论深度选择器** — IDEA 创意讨论支持浅度/中度/深度三档，控制 AI 回答的分析深度和严谨程度
