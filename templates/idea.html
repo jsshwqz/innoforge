@@ -313,6 +313,15 @@
     let activeEventSource = null;   // 全局 SSE 连接引用，防止竞态
     let activeSSEConnectionId = 0;  // SSE 连接 ID，确保只处理当前连接的事件
 
+    // UTC → 中国时间（UTC+8）
+    function toCST(utcStr) {
+        if (!utcStr) return '';
+        var d = new Date(utcStr);
+        if (isNaN(d.getTime())) return utcStr;
+        var cst = new Date(d.getTime() + 8 * 3600000);
+        return cst.toISOString();
+    }
+
     // 关闭活跃的 SSE 连接
     function closeActiveSSE() {
         if (activeEventSource) {
@@ -729,7 +738,7 @@
 
                 var right = document.createElement('div');
                 right.style.cssText = 'color:#8b949e;font-size:0.8em;';
-                right.textContent = (ver.created_at || '').substring(0, 16);
+                right.textContent = toCST(ver.created_at).substring(0, 16).replace('T', ' ');
 
                 row.appendChild(left);
                 row.appendChild(right);
@@ -1401,8 +1410,9 @@
                     idea.novelty_score >= 70 ? 'score-high' : idea.novelty_score >= 40 ? 'score-mid' : 'score-low';
                 const scoreText = idea.novelty_score != null ? idea.novelty_score : '-';
                 const active = idea.id === currentIdeaId ? ' active' : '';
-                var dateStr = (idea.created_at || '').substring(0, 10);
-                var timeStr = (idea.created_at || '').substring(11, 16);
+                var dt = toCST(idea.created_at);
+                var dateStr = dt.substring(0, 10);
+                var timeStr = dt.substring(11, 16);
                 var snippet = (idea.description || '').substring(0, 40);
                 if ((idea.description || '').length > 40) snippet += '…';
                 var chatBadge = idea.message_count > 0 ? ' 💬' + idea.message_count : '';
@@ -1622,7 +1632,7 @@
                 var bg = isUser ? '#1f2937' : '#0d1117';
                 var border = isUser ? '#30363d' : '#1f6feb';
                 var label = isUser ? '👤 你' : '🤖 AI';
-                var time = msg.created_at ? msg.created_at.substring(5, 16) : '';
+                var time = msg.created_at ? toCST(msg.created_at).substring(5, 16) : '';
                 html += '<div class="msg" style="margin-bottom:10px; padding:10px 14px; background:' + bg + '; border-radius:8px; border-left:3px solid ' + border + ';">' +
                     '<div style="display:flex; justify-content:space-between; margin-bottom:4px;">' +
                     '<span style="font-size:0.8em; color:#58a6ff; font-weight:bold;">' + label + '</span>' +
