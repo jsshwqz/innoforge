@@ -100,6 +100,34 @@ async fn main() -> anyhow::Result<()> {
         pipeline_channels: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     };
 
+    // 启动日志：打印当前 AI 服务商和超时配置，便于排查 provider/超时问题
+    {
+        let cfg = state.config.read().unwrap_or_else(|e| e.into_inner());
+        let is_gemini = cfg.ai_base_url.contains("googleapis");
+        let provider_label = if cfg.ai_base_url.contains("deepseek") {
+            "DeepSeek"
+        } else if is_gemini {
+            "Gemini"
+        } else if cfg.ai_base_url.contains("bigmodel") {
+            "Zhipu"
+        } else {
+            "Custom"
+        };
+        let mode = if is_gemini && cfg.gemini_cli_enabled {
+            "Gemini CLI"
+        } else {
+            "HTTP API"
+        };
+        tracing::info!(
+            "[CONFIG] AI provider={}, mode={}, timeout={}s, base_url={}, model={}",
+            provider_label,
+            mode,
+            crate::ai::AiClient::GLOBAL_TIMEOUT_SECS,
+            cfg.ai_base_url,
+            cfg.ai_model,
+        );
+    }
+
     // 创建上传目录 / Create uploads directory
     let _ = std::fs::create_dir_all("data/uploads");
 
@@ -163,6 +191,10 @@ async fn main() -> anyhow::Result<()> {
         // AI 接口 / AI API
         .route("/api/ai/chat", post(routes::api_ai_chat))
         .route("/api/ai/chat/stream", post(routes::api_ai_chat_stream))
+        .route(
+            "/api/ai/chat/conclusions",
+            post(routes::api_ai_chat_conclusions),
+        )
         // Google OAuth
         .route("/api/auth/google/url", get(routes::api_google_auth_url))
         .route(
@@ -226,6 +258,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/idea/:id/evidence", get(routes::api_idea_evidence))
         .route("/api/idea/:id/chat", post(routes::api_idea_chat))
         .route("/api/idea/:id/messages", get(routes::api_idea_messages))
+        .route(
+            "/api/idea/:id/chat/conclusions",
+            get(routes::api_idea_chat_conclusions),
+        )
         .route(
             "/api/idea/:id/summarize",
             post(routes::api_idea_summarize_discussion),

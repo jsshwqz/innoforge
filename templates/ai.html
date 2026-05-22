@@ -55,6 +55,8 @@
                     <div id="image-preview-area" class="image-preview-area" style="display:none;"></div>
                 </div>
                 <button onclick="sendChat()" data-i18n="ai.send"></button>
+                <button id="btn-stop" onclick="stopGeneration()" style="display:none;margin-left:4px;padding:6px 10px;border:1px solid #f85149;background:#21262d;color:#f85149;border-radius:4px;cursor:pointer;font-size:0.85em;" data-i18n="ai.stop"></button>
+                <button id="btn-export" onclick="exportConclusions()" style="display:none;margin-left:4px;padding:6px 10px;border:1px solid #6e7681;background:#21262d;color:#c9d1d9;border-radius:4px;cursor:pointer;font-size:0.85em;" data-i18n="ai.exportConclusions"></button>
             </div>
         </div>
     </main>
@@ -82,6 +84,7 @@
     var chatSending = false;
     var retryMsg = '';
     var retryImages = [];
+    var currentAbortController = null;
 
     // 一次性迁移：将旧 localStorage 中的聊天记录导入后端
     function migrateOldChat(key) {
@@ -121,6 +124,7 @@
                     }
                 }
                 renderAllMessages();
+                showExportButton();
             })
             .catch(function() {
                 // 后端不可用时降级到 localStorage
@@ -129,6 +133,7 @@
                     try { chatHistory = JSON.parse(saved); } catch(e) {}
                 }
                 renderAllMessages();
+                showExportButton();
             });
     })();
 
@@ -145,9 +150,8 @@
             box.appendChild(aiDiv);
         }
         box.scrollTop = box.scrollHeight;
+        showExportButton();
     }
-
-    // ── 滚到底部按钮 ──
     var chatBox = document.getElementById('chat-messages');
     var scrollBtn = document.getElementById('scroll-bottom-btn');
     if (chatBox && scrollBtn) {
@@ -364,25 +368,32 @@
 
     async function sendChat() {
         var input = document.getElementById('chat-msg');
-        var sendBtn = document.querySelector('.chat-input > button');
         var msg = input.value.trim();
         var images = pastedImages.slice();
         if ((!msg || !msg.trim()) && images.length === 0) return;
-        if (chatSending) return;
-        chatSending = true;
+        if (chatSending) {
+            if (currentAbortController) {
+                currentAbortController.abort();
+                currentAbortController = null;
+            }
+            var box = document.getElementById('chat-messages');
+            var last = box.lastChild;
+            if (last && last.classList.contains('msg') && last.classList.contains('ai') && last.id && last.id.startsWith('ai-')) {
+                box.removeChild(last);
+            }
+        }
         input.value = '';
-        input.disabled = true;
-        if (sendBtn) sendBtn.disabled = true;
         pastedImages = [];
         showImagePreview();
         var box = document.getElementById('chat-messages');
         var userDiv = document.createElement('div');
         renderUserMessage(userDiv, msg, images);
         box.appendChild(userDiv);
+        chatSending = true;
+        showStopButton();
         await doSend(msg, images);
         chatSending = false;
-        input.disabled = false;
-        if (sendBtn) sendBtn.disabled = false;
+        hideStopButton();
         input.focus();
         box.scrollTop = box.scrollHeight;
     }
@@ -399,13 +410,16 @@
         aiDiv.textContent = document.getElementById('web-search-cb').checked ? t('ai.searching') : t('ai.thinking');
         box.appendChild(aiDiv);
         box.scrollTop = box.scrollHeight;
+        var controller = new AbortController();
+        currentAbortController = controller;
         try {
             var bodyObj = { message: msg, history: chatHistory, web_search: document.getElementById('web-search-cb').checked };
             if (images.length > 0) bodyObj.images = images;
             var resp = await fetch('/api/ai/chat', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(bodyObj)
+                body: JSON.stringify(bodyObj),
+                signal: controller.signal
             });
             if (!resp.ok) throw new Error('服务器错误 (' + resp.status + ')');
             var data = await resp.json();
@@ -416,13 +430,78 @@
             saveMessage('assistant', data.content);
             retryMsg = '';
         } catch(e) {
+            if (e.name === 'AbortError') return;
             var el = document.getElementById(loadingId);
+            if (!el) return;
             el.innerHTML = DOMPurify.sanitize(
                 '<div style="color:#f85149;">' + escapeHtml(t('ai.fail') + ': ' + e.message) + '</div>' +
                 '<button onclick="retrySend()" class="btn-retry" style="background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:4px 12px;border-radius:4px;cursor:pointer;margin-top:8px;font-size:0.85em;">' + t('ai.retry') + '</button>'
             );
             el.classList.add('error');
+        } finally {
+            if (currentAbortController === controller) {
+                currentAbortController = null;
+            }
         }
+    }
+
+    function stopGeneration() {
+        if (currentAbortController) {
+            currentAbortController.abort();
+            currentAbortController = null;
+        }
+    }
+
+    function showStopButton() {
+        var btn = document.getElementById('btn-stop');
+        if (btn) btn.style.display = '';
+    }
+
+    function hideStopButton() {
+        var btn = document.getElementById('btn-stop');
+        if (btn) btn.style.display = 'none';
+    }
+
+    function showExportButton() {
+        var btn = document.getElementById('btn-export');
+        if (btn && chatHistory.length > 0) btn.style.display = '';
+    }
+
+    function hideExportButton() {
+        var btn = document.getElementById('btn-export');
+        if (btn) btn.style.display = 'none';
+    }
+
+    async function exportConclusions() {
+        if (chatHistory.length === 0) return;
+        var btn = document.getElementById('btn-export');
+        btn.textContent = t('ai.exporting');
+        btn.disabled = true;
+        try {
+            var resp = await fetch('/api/ai/chat/conclusions', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({session_key: AI_CHAT_KEY})
+            });
+            var data = await resp.json();
+            if (data.status === 'ok' && data.conclusions) {
+                var box = document.getElementById('chat-messages');
+                var div = document.createElement('div');
+                div.className = 'msg ai';
+                div.innerHTML = DOMPurify.sanitize(
+                    '<div style="font-size:0.8em;color:#58a6ff;margin-bottom:4px;font-weight:bold;">📝 ' + t('ai.exportConclusions') + '</div>' +
+                    '<div style="color:#c9d1d9;font-size:0.9em;line-height:1.6;">' + escapeHtml(data.conclusions).replace(/\n/g, '<br>') + '</div>'
+                );
+                box.appendChild(div);
+                box.scrollTop = box.scrollHeight;
+            } else {
+                alert(data.error || '导出失败');
+            }
+        } catch(e) {
+            alert('请求失败: ' + e.message);
+        }
+        btn.textContent = t('ai.exportConclusions');
+        btn.disabled = false;
     }
 
     function retrySend() {

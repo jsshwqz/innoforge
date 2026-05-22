@@ -57,7 +57,7 @@ pub struct PipelineChannelEntry {
 }
 
 /// Shared application configuration — 仅保留 SerpAPI + DeepSeek AI，其它搜索源和 AI 已屏蔽
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct AppConfig {
     /// SerpAPI multi-key support (round-robin) — 最多 5 个 Key，自动轮询
     pub serpapi_keys: Vec<String>,
@@ -71,6 +71,7 @@ pub struct AppConfig {
     pub ai_api_key_sensetime: String,
     pub ai_api_key_openrouter: String,
     pub ai_api_key_gemini: String,
+    pub ai_api_key_zhipu: String,
     pub ai_model: String,
     /// 专家模型（用于创新推演、深分析等高推理任务，默认 deepseek-reasoner）
     pub ai_model_expert: String,
@@ -165,6 +166,7 @@ impl AppConfig {
             ai_api_key_sensetime: load_provider_key("AI_API_KEY_SENSENOVA"),
             ai_api_key_openrouter: load_provider_key("AI_API_KEY_OPENROUTER"),
             ai_api_key_gemini: load_provider_key("AI_API_KEY_GEMINI"),
+            ai_api_key_zhipu: load_provider_key("AI_API_KEY_ZHIPU"),
             ai_model: get("AI_MODEL", "qwen2.5:7b"),
             ai_model_expert: get("AI_MODEL_EXPERT", "deepseek-reasoner"),
 
@@ -188,7 +190,8 @@ impl AppConfig {
         let api_key = self.effective_api_key();
         let mut client = AiClient::with_config(&self.ai_base_url, &api_key, &self.ai_model);
         self.add_gemini_model_fallback(&mut client, &self.ai_model);
-        if self.gemini_cli_enabled && !self.gemini_cli_path.is_empty() {
+        let is_gemini = self.ai_base_url.contains("googleapis");
+        if is_gemini && self.gemini_cli_enabled && !self.gemini_cli_path.is_empty() {
             client.set_gemini_cli(&self.gemini_cli_path);
         }
         client
@@ -200,7 +203,8 @@ impl AppConfig {
         let api_key = self.effective_api_key();
         let mut client = AiClient::with_config(&self.ai_base_url, &api_key, &self.ai_model_expert);
         self.add_gemini_model_fallback(&mut client, &self.ai_model_expert);
-        if self.gemini_cli_enabled && !self.gemini_cli_path.is_empty() {
+        let is_gemini = self.ai_base_url.contains("googleapis");
+        if is_gemini && self.gemini_cli_enabled && !self.gemini_cli_path.is_empty() {
             client.set_gemini_cli(&self.gemini_cli_path);
         }
         client
@@ -237,6 +241,8 @@ impl AppConfig {
             &self.ai_api_key_openrouter
         } else if base_url.contains("googleapis") {
             &self.ai_api_key_gemini
+        } else if base_url.contains("bigmodel") {
+            &self.ai_api_key_zhipu
         } else {
             &self.ai_api_key
         };
@@ -530,6 +536,7 @@ pub(crate) fn efld(json: &serde_json::Value, field: &str) -> String {
 mod tests {
     use super::build_online_query;
     use crate::patent::SearchType;
+    use crate::routes::AppConfig;
 
     #[test]
     fn online_query_uses_applicant_scope() {
@@ -548,6 +555,57 @@ mod tests {
         assert_eq!(
             q,
             "inventor:\"Alice Zhang\" after:2024-01-01 before:2024-12-31"
+        );
+    }
+
+    /// 验证非 Google 服务商不会启用 Gemini CLI 模式
+    /// 这是对赌的核心保护——防止未来代码修改 reintroduce 此 bug
+    #[test]
+    fn non_gemini_provider_does_not_enable_gemini_cli() {
+        // 模拟 DeepSeek 配置（仅设置关键字段，其余用默认值）
+        let config = AppConfig {
+            ai_base_url: "https://api.deepseek.com/v1".into(),
+            ai_model: "deepseek-chat".into(),
+            ai_api_key_deepseek: "test-key".into(),
+            gemini_cli_enabled: true, // 即使 .env 中有此标记…
+            gemini_cli_path: "gemini.cmd".into(),
+            ..AppConfig::default()
+        };
+
+        let client = config.ai_client();
+        // 断言：client 的 provider_mode 是 Http，不是 GeminiCli
+        assert!(
+            !client.is_gemini_cli_mode(),
+            "DeepSeek provider should NOT enable Gemini CLI mode, even when gemini_cli_enabled=true"
+        );
+    }
+
+    /// 验证 Gemini 服务商 + CLI 标记时确实启用 Gemini CLI 模式（正常功能不受影响）
+    #[test]
+    fn gemini_provider_with_cli_enables_gemini_cli() {
+        let config = AppConfig {
+            ai_base_url: "https://generativelanguage.googleapis.com/v1beta/openai/".into(),
+            ai_model: "gemini-2.0-flash".into(),
+            ai_api_key_gemini: "test-key".into(),
+            gemini_cli_enabled: true,
+            gemini_cli_path: "gemini.cmd".into(),
+            ..AppConfig::default()
+        };
+
+        let client = config.ai_client();
+        assert!(
+            client.is_gemini_cli_mode(),
+            "Gemini provider with gemini_cli_enabled=true SHOULD enable CLI mode"
+        );
+    }
+
+    /// 验证全局超时已改为 300s（不是 60s）
+    #[test]
+    fn global_timeout_is_300_seconds() {
+        assert_eq!(
+            crate::ai::AiClient::GLOBAL_TIMEOUT_SECS,
+            300,
+            "Global timeout must be 300s to prevent premature timeout on large contexts"
         );
     }
 }

@@ -6,7 +6,7 @@ use std::time::Duration;
 
 impl AiClient {
     /// 专家模式：用于创新推演、专利深分析等高推理任务。
-    /// 模型优先取 AI_MODEL_EXPERT（默认 deepseek-reasoner）。
+    /// 使用 AiClient 创建时配置的模型（ai_client_expert → ai_model_expert，ai_client → ai_model）。
     pub async fn chat_expert(&self, user_msg: &str, context: Option<&str>) -> Result<String> {
         let mut messages = vec![Message {
             role: "system".into(),

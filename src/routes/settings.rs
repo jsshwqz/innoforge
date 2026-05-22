@@ -14,6 +14,8 @@ fn provider_db_key(base_url: &str) -> &'static str {
         "AI_API_KEY_OPENROUTER"
     } else if base_url.contains("googleapis") {
         "AI_API_KEY_GEMINI"
+    } else if base_url.contains("bigmodel") {
+        "AI_API_KEY_ZHIPU"
     } else {
         "AI_API_KEY"
     }
@@ -41,6 +43,14 @@ pub async fn api_get_settings(State(s): State<AppState>) -> Json<serde_json::Val
     // 返回当前服务商对应的 Key（而非共享 ai_api_key）
     let current_key = config.api_key_for_provider(&config.ai_base_url);
 
+    // 所有服务商的独立 Key（掩码），供前端切换时使用
+    let mask = |k: &str| mask_api_key(k);
+
+    // 从 DB 读取原始存储值（不经过 config 的回退逻辑），
+    // 让前端能区分"已配置"和"未配置"，避免回退值误导
+    let db_settings = s.db.get_all_settings().ok().unwrap_or_default();
+    let raw_key = |db_key: &str| -> String { db_settings.get(db_key).cloned().unwrap_or_default() };
+
     // 仅保留 SerpAPI + AI 配置，其他搜索源（Firecrawl/Bing/Lens/CNIPR）和备用 AI 已屏蔽
 
     Json(json!({
@@ -49,6 +59,13 @@ pub async fn api_get_settings(State(s): State<AppState>) -> Json<serde_json::Val
         "ai_base_url": config.ai_base_url,
         "ai_api_key": mask_api_key(&current_key),
         "ai_api_key_configured": !current_key.is_empty(),
+        // 各服务商独立 Key（从 DB 读取原始值，不含回退逻辑）
+        "ai_api_key_deepseek": mask(&raw_key("AI_API_KEY_DEEPSEEK")),
+        "ai_api_key_xiaomi": mask(&raw_key("AI_API_KEY_XIAOMI")),
+        "ai_api_key_sensetime": mask(&raw_key("AI_API_KEY_SENSENOVA")),
+        "ai_api_key_openrouter": mask(&raw_key("AI_API_KEY_OPENROUTER")),
+        "ai_api_key_gemini": mask(&raw_key("AI_API_KEY_GEMINI")),
+        "ai_api_key_zhipu": mask(&raw_key("AI_API_KEY_ZHIPU")),
         "ai_model": config.ai_model,
         "ai_model_expert": config.ai_model_expert,
         "google_client_id": config.google_client_id.clone(),
@@ -259,6 +276,7 @@ pub async fn api_save_ai(
             "AI_API_KEY_SENSENOVA" => &mut config.ai_api_key_sensetime,
             "AI_API_KEY_OPENROUTER" => &mut config.ai_api_key_openrouter,
             "AI_API_KEY_GEMINI" => &mut config.ai_api_key_gemini,
+            "AI_API_KEY_ZHIPU" => &mut config.ai_api_key_zhipu,
             _ => &mut config.ai_api_key, // custom → 通用 Key
         } = api_key.clone();
 

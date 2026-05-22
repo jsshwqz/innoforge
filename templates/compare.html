@@ -160,6 +160,8 @@
             <div class="discussion-input-row">
                 <input type="text" id="discussion-input" placeholder="输入你的问题..." onkeydown="if(event.key==='Enter') sendDiscussionMessage()">
                 <button id="discussion-send-btn" onclick="sendDiscussionMessage()">发送</button>
+                <button id="discussion-stop-btn" onclick="stopDiscussionGeneration()" style="display:none;padding:8px 10px;background:#21262d;color:#f85149;border:1px solid #f85149;border-radius:6px;cursor:pointer;font-size:13px;white-space:nowrap;" data-i18n="compare.stop"></button>
+                <button id="discussion-export-btn" onclick="exportDiscussionConclusions()" style="display:none;padding:8px 10px;background:#21262d;color:#c9d1d9;border:1px solid #6e7681;border-radius:6px;cursor:pointer;font-size:13px;white-space:nowrap;" data-i18n="compare.exportConclusions"></button>
             </div>
         </div>
     </main>
@@ -785,6 +787,8 @@
     // ── AI Discussion ──
     var discussionHistory = [];
     var discussionContext = '';
+    var discussionAbortController = null;
+    var discussionSending = false;
 
     function startDiscussion() {
         var my = getMyPatent();
@@ -820,33 +824,71 @@
             '<div class="msg msg-ai"><div class="msg-bubble">已加载对比上下文，请提出你的问题。例如："对比文件1是否公开了本申请的全部必要技术特征？"</div></div>';
         panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
         document.getElementById('discussion-input').focus();
+        showDiscussionExportButton();
     }
 
     async function sendDiscussionMessage() {
         var input = document.getElementById('discussion-input');
         var text = input.value.trim();
         if (!text) return;
+        if (discussionSending) {
+            if (discussionAbortController) {
+                discussionAbortController.abort();
+                discussionAbortController = null;
+            }
+            var container = document.getElementById('discussion-messages');
+            var last = container.lastChild;
+            if (last && last.classList.contains('msg-ai') && last.id === 'ai-loading-disc') {
+                container.removeChild(last);
+            }
+        }
         input.value = '';
         input.disabled = true;
         document.getElementById('discussion-send-btn').disabled = true;
+        discussionSending = true;
+        showDiscussionStopButton();
 
         renderMsg('user', text);
 
+        // Loading indicator
+        var container = document.getElementById('discussion-messages');
+        var loadDiv = document.createElement('div');
+        loadDiv.className = 'msg msg-ai';
+        loadDiv.id = 'ai-loading-disc';
+        loadDiv.innerHTML = '<div class="msg-bubble">思考中...</div>';
+        container.appendChild(loadDiv);
+        container.scrollTop = container.scrollHeight;
+
+        var controller = new AbortController();
+        discussionAbortController = controller;
         var apiHistory = discussionHistory.map(function(h) { return [h[0], h[1]]; });
         try {
             var resp = await fetch('/api/ai/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message: text, patent_id: null, history: apiHistory, web_search: false })
+                body: JSON.stringify({ message: text, patent_id: null, history: apiHistory, web_search: false }),
+                signal: controller.signal
             });
             var data = await resp.json();
+            var loadEl = document.getElementById('ai-loading-disc');
+            if (loadEl) loadEl.remove();
             var content = data.content || 'AI error: empty response';
             discussionHistory.push(['user', text]);
             discussionHistory.push(['assistant', content]);
             renderMsg('ai', content);
+            showDiscussionExportButton();
         } catch (e) {
+            var loadEl = document.getElementById('ai-loading-disc');
+            if (loadEl) loadEl.remove();
+            if (e.name === 'AbortError') return;
             renderMsg('ai', '请求失败: ' + e.message);
+        } finally {
+            if (discussionAbortController === controller) {
+                discussionAbortController = null;
+            }
         }
+        discussionSending = false;
+        hideDiscussionStopButton();
         input.disabled = false;
         document.getElementById('discussion-send-btn').disabled = false;
         input.focus();
@@ -860,6 +902,64 @@
         div.innerHTML = '<div class="msg-bubble">' + bubbleContent + '</div>';
         container.appendChild(div);
         container.scrollTop = container.scrollHeight;
+    }
+
+    function stopDiscussionGeneration() {
+        if (discussionAbortController) {
+            discussionAbortController.abort();
+            discussionAbortController = null;
+        }
+    }
+
+    function showDiscussionStopButton() {
+        var btn = document.getElementById('discussion-stop-btn');
+        if (btn) btn.style.display = '';
+        var sendBtn = document.getElementById('discussion-send-btn');
+        if (sendBtn) sendBtn.style.display = 'none';
+    }
+
+    function hideDiscussionStopButton() {
+        var btn = document.getElementById('discussion-stop-btn');
+        if (btn) btn.style.display = 'none';
+        var sendBtn = document.getElementById('discussion-send-btn');
+        if (sendBtn) sendBtn.style.display = '';
+    }
+
+    function showDiscussionExportButton() {
+        var btn = document.getElementById('discussion-export-btn');
+        if (btn && discussionHistory.length > 1) btn.style.display = '';
+    }
+
+    async function exportDiscussionConclusions() {
+        if (discussionHistory.length <= 1) return;
+        var btn = document.getElementById('discussion-export-btn');
+        btn.textContent = t('compare.exporting');
+        btn.disabled = true;
+        try {
+            var resp = await fetch('/api/ai/chat/conclusions', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({history: discussionHistory})
+            });
+            var data = await resp.json();
+            if (data.status === 'ok' && data.conclusions) {
+                var container = document.getElementById('discussion-messages');
+                var div = document.createElement('div');
+                div.className = 'msg msg-ai';
+                div.innerHTML = '<div class="msg-bubble" style="border-left:3px solid #6e7681;">' +
+                    '<div style="font-size:0.8em;color:#58a6ff;margin-bottom:4px;font-weight:bold;">📝 ' + t('compare.exportConclusions') + '</div>' +
+                    '<div style="color:#c9d1d9;font-size:0.9em;line-height:1.6;">' + escapeHtml(data.conclusions).replace(/\n/g, '<br>') + '</div>' +
+                    '</div>';
+                container.appendChild(div);
+                container.scrollTop = container.scrollHeight;
+            } else {
+                alert(data.error || '导出失败');
+            }
+        } catch(e) {
+            alert('请求失败: ' + e.message);
+        }
+        btn.textContent = t('compare.exportConclusions');
+        btn.disabled = false;
     }
     </script>
 </body>

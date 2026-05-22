@@ -150,6 +150,10 @@ pub async fn start_server(db_path: &str) -> anyhow::Result<()> {
         )
         .route("/api/ai/chat", post(routes::api_ai_chat))
         .route("/api/ai/chat/stream", post(routes::api_ai_chat_stream))
+        .route(
+            "/api/ai/chat/conclusions",
+            post(routes::api_ai_chat_conclusions),
+        )
         .route("/api/ai/summarize", post(routes::api_ai_summarize))
         .route("/api/ai/compare", post(routes::api_ai_compare))
         .route("/api/ai/claims", post(routes::api_ai_claims_analysis))
@@ -212,6 +216,10 @@ pub async fn start_server(db_path: &str) -> anyhow::Result<()> {
         .route("/api/idea/:id/evidence", get(routes::api_idea_evidence))
         .route("/api/idea/:id/chat", post(routes::api_idea_chat))
         .route("/api/idea/:id/messages", get(routes::api_idea_messages))
+        .route(
+            "/api/idea/:id/chat/conclusions",
+            get(routes::api_idea_chat_conclusions),
+        )
         .route(
             "/api/idea/:id/summarize",
             post(routes::api_idea_summarize_discussion),

@@ -92,7 +92,34 @@
             .idea-sidebar { height: auto; max-height: 300px; border-right: none; border-bottom: 1px solid var(--border-subtle); position: static; box-shadow: none; }
             .progress-steps { grid-template-columns: 1fr; }
         }
-    </style>
+    
+.quote-btn {
+    position: absolute;
+    background: #238636;
+    color: #fff;
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+    z-index: 100;
+    display: none;
+    white-space: nowrap;
+    user-select: none;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    pointer-events: auto;
+    line-height: 1.4;
+}
+.quote-btn:hover {
+    background: #2ea043;
+}
+.quote-line {
+    border-left: 3px solid #58a6ff;
+    padding-left: 10px;
+    margin: 4px 0;
+    color: #8b949e;
+    font-style: italic;
+}
+</style>
 </head>
 <body>
     <nav id="global-nav"></nav>
@@ -200,7 +227,16 @@
                 <div id="discussion-panel" style="padding:20px; background:#161b22; border-radius:8px; border:1px solid #30363d;">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
                         <h3 style="margin:0; color:#58a6ff;" id="disc-title" data-i18n="idea.discussTitle"></h3>
-                        <button onclick="summarizeDiscussion()" style="background:#238636; padding:4px 12px; font-size:0.85em;" id="summary-btn" data-i18n="idea.generateSummary"></button>
+                        <div style="display:flex; gap:6px; align-items:center;">
+                            <span style="font-size:0.82em; color:#8b949e;" id="chat-depth-label" data-i18n="idea.chatDepth"></span>
+                            <select id="chat-depth-select" onchange="chatDepth=this.value" style="background:#21262d; color:#c9d1d9; border:1px solid #30363d; border-radius:6px; padding:4px 8px; font-size:0.82em;">
+                                <option value="shallow" data-i18n="idea.depthShallow">浅度（探索）</option>
+                                <option value="medium" selected data-i18n="idea.depthMedium">中度（收敛）</option>
+                                <option value="deep" data-i18n="idea.depthDeep">深度（苏格拉底）</option>
+                            </select>
+                            <button onclick="exportConclusions()" style="background:#6e7681; padding:4px 12px; font-size:0.85em; white-space:nowrap;" id="export-conclusions-btn" data-i18n="idea.exportConclusions"></button>
+                            <button onclick="summarizeDiscussion()" style="background:#238636; padding:4px 12px; font-size:0.85em;" id="summary-btn" data-i18n="idea.generateSummary"></button>
+                        </div>
                     </div>
                     <div id="discussion-summary" style="display:none; margin-bottom:12px; padding:12px; background:#0d1117; border-radius:6px; border-left:3px solid #58a6ff;">
                     </div>
@@ -220,7 +256,8 @@
                                 📎
                                 <input type="file" id="chat-file-input" multiple accept=".pdf,.docx,.doc,.txt,.png,.jpg,.jpeg,.gif,.webp" style="display:none;" onchange="handleChatFileSelect(this)">
                             </label>
-                            <button onclick="sendChatMessage()" style="background:#238636; padding:8px 16px; white-space:nowrap; border-radius:6px;" data-i18n="idea.send"></button>
+                            <button id="idea-send-btn" onclick="sendChatMessage()" style="background:#238636; padding:8px 16px; white-space:nowrap; border-radius:6px;" data-i18n="idea.send"></button>
+                            <button id="idea-stop-btn" onclick="stopIdeaGeneration()" style="display:none;background:#21262d; padding:8px 12px; white-space:nowrap; border-radius:6px; border:1px solid #f85149; color:#f85149; font-size:0.9em;" data-i18n="idea.stop"></button>
                         </div>
                     </div>
                 </div>
@@ -272,6 +309,7 @@
     let currentIdeaId = null;
     let isAnalyzing = false;
     let analysisMode = 'deep'; // 'quick' or 'deep'
+    let chatDepth = 'medium';   // 'shallow' / 'medium' / 'deep'
     let activeEventSource = null;   // 全局 SSE 连接引用，防止竞态
     let activeSSEConnectionId = 0;  // SSE 连接 ID，确保只处理当前连接的事件
 
@@ -1585,7 +1623,7 @@
                 var border = isUser ? '#30363d' : '#1f6feb';
                 var label = isUser ? '👤 你' : '🤖 AI';
                 var time = msg.created_at ? msg.created_at.substring(5, 16) : '';
-                html += '<div style="margin-bottom:10px; padding:10px 14px; background:' + bg + '; border-radius:8px; border-left:3px solid ' + border + ';">' +
+                html += '<div class="msg" style="margin-bottom:10px; padding:10px 14px; background:' + bg + '; border-radius:8px; border-left:3px solid ' + border + ';">' +
                     '<div style="display:flex; justify-content:space-between; margin-bottom:4px;">' +
                     '<span style="font-size:0.8em; color:#58a6ff; font-weight:bold;">' + label + '</span>' +
                     '<span style="font-size:0.75em; color:#8b949e;">' + esc(time) + '</span></div>' +
@@ -1653,7 +1691,108 @@
         }
     }
 
-    function removeIdeaImage(idx) {
+    
+    // ── 选中文字引用功能 ──
+    var ideaQuoteBtn = null;
+    var ideaSelectedQuoteText = '';
+
+    function createIdeaQuoteButton() {
+        var btn = document.createElement('div');
+        btn.className = 'quote-btn';
+        btn.textContent = t('ai.quote');
+        btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            ideaInsertQuote();
+        });
+        document.getElementById('chat-messages').appendChild(btn);
+        return btn;
+    }
+
+    function getIdeaQuoteBtn() {
+        if (!ideaQuoteBtn) ideaQuoteBtn = createIdeaQuoteButton();
+        return ideaQuoteBtn;
+    }
+
+    function showIdeaQuoteButton(text, rect) {
+        var btn = getIdeaQuoteBtn();
+        ideaSelectedQuoteText = text;
+        var container = document.getElementById('chat-messages');
+        var cr = container.getBoundingClientRect();
+        var left = rect.right - cr.left - btn.offsetWidth / 2;
+        var top = rect.top - cr.top - 36;
+        left = Math.max(4, Math.min(left, cr.width - btn.offsetWidth - 4));
+        top = Math.max(4, top);
+        btn.style.left = left + 'px';
+        btn.style.top = top + 'px';
+        btn.style.display = 'block';
+    }
+
+    function hideIdeaQuoteButton() {
+        var btn = getIdeaQuoteBtn();
+        btn.style.display = 'none';
+        ideaSelectedQuoteText = '';
+    }
+
+    function ideaInsertQuote() {
+        if (!ideaSelectedQuoteText) return;
+        var textarea = document.getElementById('chat-input');
+        var quoted = ideaSelectedQuoteText.split('\n').map(function(line) {
+            return '> ' + line;
+        }).join('\n') + '\n\n';
+        var start = textarea.selectionStart;
+        var end = textarea.selectionEnd;
+        var before = textarea.value.substring(0, start);
+        var after = textarea.value.substring(end);
+        textarea.value = before + quoted + after;
+        var newPos = start + quoted.length;
+        textarea.selectionStart = textarea.selectionEnd = newPos;
+        textarea.focus();
+        hideIdeaQuoteButton();
+    }
+
+    // 文本选择检测
+    var ideaChatMsgContainer = document.getElementById('chat-messages');
+    if (ideaChatMsgContainer) {
+        ideaChatMsgContainer.addEventListener('mouseup', function(e) {
+            var target = e.target;
+            if (target && target.nodeType === 3) target = target.parentNode;
+            if (target && target.closest && target.closest('.quote-btn')) return;
+            setTimeout(function() {
+                var sel = window.getSelection();
+                var text = sel ? sel.toString().trim() : '';
+                if (!text) { hideIdeaQuoteButton(); return; }
+                var node = sel.anchorNode;
+                if (node) {
+                    if (node.nodeType === 3) node = node.parentNode;
+                    if (!node.closest('.msg')) { hideIdeaQuoteButton(); return; }
+                }
+                if (!sel.rangeCount) return;
+                var range = sel.getRangeAt(0);
+                var rect = range.getBoundingClientRect();
+                if (!rect || (rect.width === 0 && rect.height === 0)) { hideIdeaQuoteButton(); return; }
+                showIdeaQuoteButton(text, rect);
+            }, 10);
+        });
+    }
+
+    document.addEventListener('mousedown', function(e) {
+        if (e.target && e.target.closest && e.target.closest('.quote-btn')) return;
+        hideIdeaQuoteButton();
+    });
+
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') hideIdeaQuoteButton();
+    });
+
+    // 滚动时隐藏引用按钮
+    var ideaScrollContainer = document.getElementById('chat-messages');
+    if (ideaScrollContainer) {
+        ideaScrollContainer.addEventListener('scroll', function() {
+            hideIdeaQuoteButton();
+        });
+    }
+
+function removeIdeaImage(idx) {
         ideaPastedImages.splice(idx, 1);
         showIdeaImagePreview();
     }
@@ -1709,6 +1848,8 @@
 
     var ideaRetryMsg = '';
     var ideaRetryImages = [];
+    var ideaAbortController = null;
+    var ideaChatSending = false;
 
     // ── 滚到底部按钮 ──
     var ideaChatBox = document.getElementById('chat-messages');
@@ -1733,17 +1874,27 @@
         var hasFiles = chatAttachedFiles.length > 0;
         var images = ideaPastedImages.slice();
         if ((!msg && !hasFiles && images.length === 0) || !currentIdeaId) return;
+        if (ideaChatSending) {
+            if (ideaAbortController) {
+                ideaAbortController.abort();
+                ideaAbortController = null;
+            }
+            var ind = document.getElementById('thinking-indicator');
+            if (ind) ind.remove();
+        }
         input.value = '';
         input.disabled = true;
         ideaPastedImages = [];
         showIdeaImagePreview();
+        ideaChatSending = true;
+        showIdeaStopButton();
 
         // Show user message immediately
         var container = document.getElementById('chat-messages');
         var placeholder = container.querySelector('p');
         if (placeholder) placeholder.remove();
         var userMsgDiv = document.createElement('div');
-        userMsgDiv.style.cssText = 'margin-bottom:10px; padding:10px 14px; background:#1f2937; border-radius:8px; border-left:3px solid #30363d;';
+        userMsgDiv.className = 'msg'; userMsgDiv.style.cssText = 'margin-bottom:10px; padding:10px 14px; background:#1f2937; border-radius:8px; border-left:3px solid #30363d;';
         var userLabel = document.createElement('span');
         userLabel.style.cssText = 'font-size:0.8em; color:#58a6ff; font-weight:bold;';
         userLabel.textContent = '👤 你';
@@ -1755,6 +1906,8 @@
         container.appendChild(userMsgDiv);
 
         await doIdeaSend(msg, images);
+        ideaChatSending = false;
+        hideIdeaStopButton();
         input.disabled = false;
         input.focus();
     }
@@ -1776,13 +1929,16 @@
         container.appendChild(thinkDiv);
         container.scrollTop = container.scrollHeight;
 
+        var controller = new AbortController();
+        ideaAbortController = controller;
         try {
-            var bodyObj = { message: msg };
+            var bodyObj = { message: msg, depth: chatDepth };
             if (images.length > 0) bodyObj.images = images;
             var res = await fetch('/api/idea/' + currentIdeaId + '/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(bodyObj)
+                body: JSON.stringify(bodyObj),
+                signal: controller.signal
             });
             if (!res.ok) throw new Error('服务器错误 (' + res.status + ')');
             var data = await res.json();
@@ -1791,7 +1947,7 @@
 
             if (data.status === 'ok' && data.message) {
                 var aiMsgDiv = document.createElement('div');
-                aiMsgDiv.style.cssText = 'margin-bottom:10px; padding:10px 14px; background:#0d1117; border-radius:8px; border-left:3px solid #1f6feb;';
+                aiMsgDiv.className = 'msg'; aiMsgDiv.style.cssText = 'margin-bottom:10px; padding:10px 14px; background:#0d1117; border-radius:8px; border-left:3px solid #1f6feb;';
                 var aiLabel = document.createElement('span');
                 aiLabel.style.cssText = 'font-size:0.8em; color:#58a6ff; font-weight:bold;';
                 aiLabel.textContent = '🤖 AI';
@@ -1813,6 +1969,11 @@
             }
             container.scrollTop = container.scrollHeight;
         } catch (e) {
+            if (e.name === 'AbortError') {
+                var ind2 = document.getElementById('thinking-indicator');
+                if (ind2) ind2.remove();
+                return;
+            }
             var ind = document.getElementById('thinking-indicator');
             if (ind) ind.remove();
             var ideaErrDiv = document.createElement('div');
@@ -1823,8 +1984,33 @@
                 '<button onclick="retryIdeaSend()" class="btn-retry" style="background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:4px 12px;border-radius:4px;cursor:pointer;margin-top:8px;font-size:0.85em;">' + t('ai.retry') + '</button>'
             );
             container.appendChild(ideaErrDiv);
+        } finally {
+            if (ideaAbortController === controller) {
+                ideaAbortController = null;
+            }
         }
         container.scrollTop = container.scrollHeight;
+    }
+
+    function stopIdeaGeneration() {
+        if (ideaAbortController) {
+            ideaAbortController.abort();
+            ideaAbortController = null;
+        }
+    }
+
+    function showIdeaStopButton() {
+        var btn = document.getElementById('idea-stop-btn');
+        if (btn) btn.style.display = '';
+        var sendBtn = document.getElementById('idea-send-btn');
+        if (sendBtn) sendBtn.style.display = 'none';
+    }
+
+    function hideIdeaStopButton() {
+        var btn = document.getElementById('idea-stop-btn');
+        if (btn) btn.style.display = 'none';
+        var sendBtn = document.getElementById('idea-send-btn');
+        if (sendBtn) sendBtn.style.display = '';
     }
 
     function retryIdeaSend() {
@@ -1838,6 +2024,33 @@
         var last = container.lastChild;
         if (last) container.removeChild(last);
         doIdeaSend(msg, images);
+    }
+
+    async function exportConclusions() {
+        if (!currentIdeaId) return;
+        var btn = document.getElementById('export-conclusions-btn');
+        btn.textContent = '⏳ 导出中...';
+        btn.disabled = true;
+        try {
+            var res = await fetch('/api/idea/' + currentIdeaId + '/chat/conclusions');
+            var data = await res.json();
+            var sumDiv = document.getElementById('discussion-summary');
+            sumDiv.style.display = 'block';
+            if (data.status === 'ok' && data.conclusions) {
+                sumDiv.innerHTML = DOMPurify.sanitize('<div style="font-size:0.8em; color:#58a6ff; margin-bottom:4px; font-weight:bold;">📝 讨论结论导出</div>' +
+                    '<div style="color:#c9d1d9; font-size:0.9em; line-height:1.6;">' + renderMarkdown(data.conclusions) + '</div>');
+            } else {
+                var errDiv = document.createElement('div');
+                errDiv.style.cssText = 'color:#f0ad4e; font-size:0.85em; padding:8px;';
+                errDiv.textContent = '💡 ' + (data.error || '暂无足够的讨论内容可以导出结论。请先与 AI 讨论几轮后再试。');
+                sumDiv.innerHTML = '';
+                sumDiv.appendChild(errDiv);
+            }
+        } catch(e) {
+            alert('请求失败: ' + e.message);
+        }
+        btn.textContent = '📝 导出结论';
+        btn.disabled = false;
     }
 
     async function summarizeDiscussion() {

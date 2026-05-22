@@ -8,6 +8,7 @@ timeout /t 3 /nobreak >nul
 
 echo [InnoForge] Building...
 if exist Cargo.toml (
+    copy /b src\main.rs +,, >nul
     cargo build --release --bin innoforge
     if errorlevel 1 (
         echo [InnoForge] Build failed!

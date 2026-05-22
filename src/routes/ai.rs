@@ -369,6 +369,98 @@ pub async fn api_ai_chat(
     }
 }
 
+/// POST /api/ai/chat/conclusions
+/// Export structured conclusions from chat history.
+/// Accepts either session_key (loads from chat_records table) or history (inline array).
+/// Optional patent_id injects patent metadata into the prompt.
+///
+/// 导出讨论的结构化结论，支持两种历史来源：
+/// - session_key: 从 chat_records 表加载
+/// - history: 显式传入历史数组（用于纯内存场景如 compare 页）
+pub async fn api_ai_chat_conclusions(
+    State(s): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let session_key = req["session_key"].as_str().unwrap_or("").trim();
+    let history_raw = req["history"].as_array();
+    let patent_id = req["patent_id"].as_str().unwrap_or("").trim();
+
+    // Build conversation text
+    let mut conv = String::new();
+
+    // If patent_id provided, inject patent context
+    if !patent_id.is_empty() {
+        if let Ok(Some(p)) = s.db.get_patent(patent_id) {
+            conv.push_str(&format!(
+                "专利号：{}\n标题：{}\n摘要：{}\n\n",
+                p.patent_number, p.title, p.abstract_text
+            ));
+        }
+    }
+
+    // Gather messages from either source
+    if !session_key.is_empty() && session_key.len() <= 255 {
+        match s.db.get_chat_messages(session_key) {
+            Ok(messages) => {
+                if messages.is_empty() {
+                    return Json(json!({"error": "该会话没有聊天记录，请先开始对话后再导出结论"}));
+                }
+                conv.push_str("完整讨论记录：\n");
+                for m in &messages {
+                    let label = if m.role == "user" { "用户" } else { "AI" };
+                    let preview: String = m.content.chars().take(800).collect();
+                    conv.push_str(&format!("\n【{}】{}\n", label, preview));
+                }
+            }
+            Err(e) => return Json(json!({"error": format!("查询聊天记录失败: {}", e)})),
+        }
+    } else if let Some(arr) = history_raw {
+        if arr.is_empty() {
+            return Json(json!({"error": "没有聊天记录可以导出，请先开始对话后再试"}));
+        }
+        conv.push_str("完整讨论记录：\n");
+        for entry in arr {
+            let role = entry.get(0).and_then(|v| v.as_str()).unwrap_or("");
+            let content = entry.get(1).and_then(|v| v.as_str()).unwrap_or("");
+            let label = match role {
+                "user" => "用户",
+                "assistant" => "AI",
+                _ => "系统",
+            };
+            let preview: String = content.chars().take(800).collect();
+            conv.push_str(&format!("\n【{}】{}\n", label, preview));
+        }
+    } else {
+        return Json(json!({"error": "请提供 session_key 或 history 参数"}));
+    }
+
+    let prompt = format!(
+        "{}\n\n请基于以上讨论，输出一份结构化结论报告。严格按以下格式输出：\n\n\
+         ## 已定决策\n\
+         - 列出已确定的技术方案或选择，每条标明理由\n\n\
+         ## 达成的结论\n\
+         - 列出经过讨论验证的技术判断，每条给出支撑证据\n\n\
+         ## 待解决问题\n\
+         - 列出尚未得出结论或需要进一步验证的问题\n\n\
+         ## 风险项及等级\n\
+         - 致命缺陷：列出可能导致方案失败的致命风险\n\
+         - 需要验证：列出需要实验或数据验证的中等风险\n\
+         - 可接受风险：列出已评估可接受的低风险\n\n\
+         要求：结论要具体、有依据，不写泛泛的空话。",
+        conv.chars().take(5000).collect::<String>()
+    );
+
+    let ai = s
+        .config
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .ai_client();
+    match ai.chat(&prompt, None).await {
+        Ok(conclusions) => Json(json!({"status": "ok", "conclusions": conclusions})),
+        Err(e) => Json(json!({"error": format!("导出结论失败: {}", e)})),
+    }
+}
+
 pub async fn api_ai_summarize(
     State(s): State<AppState>,
     Json(req): Json<FetchPatentRequest>,

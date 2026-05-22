@@ -275,14 +275,14 @@
                 base_url: 'https://api.deepseek.com/v1',
                 key_link: 'https://platform.deepseek.com/',
                 models: [
-                    {value: 'deepseek-chat', label: 'DeepSeek Chat (V3，通用对话)'},
+                    {value: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash (快速，推荐)'},
+                    {value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro (最强)'},
                     {value: 'deepseek-reasoner', label: 'DeepSeek Reasoner (R1，深度推理)'},
-                    {value: 'deepseek-chat-v4-flash', label: 'DeepSeek Flash (快速)'},
                 ],
                 expert_models: [
-                    {value: 'deepseek-reasoner', label: 'DeepSeek Reasoner (R1，深度推理) (推荐)'},
-                    {value: 'deepseek-chat', label: 'DeepSeek Chat (V3，通用对话)'},
-                    {value: 'deepseek-chat-v4-flash', label: 'DeepSeek Flash (快速)'},
+                    {value: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash (快速，推荐)'},
+                    {value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro (最强)'},
+                    {value: 'deepseek-reasoner', label: 'DeepSeek Reasoner (R1，深度推理)'},
                 ],
                 hint: '兼容 OpenAI 格式的 API 地址'
             },
@@ -345,9 +345,26 @@
                     {value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash'},
                 ],
                 hint: 'Google Gemini API（OpenAI 兼容接口）'
+            },
+            zhipu: {
+                title: '智谱 GLM',
+                base_url: 'https://open.bigmodel.cn/api/paas/v4',
+                key_link: 'https://open.bigmodel.cn/usercenter/apikeys',
+                models: [
+                    {value: 'glm-4-plus', label: 'GLM-4-Plus（最强）'},
+                    {value: 'glm-4-flash', label: 'GLM-4-Flash（免费，推荐）'},
+                    {value: 'glm-4-air', label: 'GLM-4-Air（快速）'},
+                    {value: 'glm-4-flashx', label: 'GLM-4-FlashX（快速免费）'},
+                ],
+                expert_models: [
+                    {value: 'glm-4-plus', label: 'GLM-4-Plus（最强）'},
+                    {value: 'glm-4-flash', label: 'GLM-4-Flash（免费）'},
+                ],
+                hint: '智谱 GLM OpenAI 兼容接口'
             }
         };
 
+        var providerKeys = {};
         function detectProvider(baseUrl) {
             baseUrl = (baseUrl || '').toLowerCase();
             if (baseUrl.includes('deepseek')) return 'deepseek';
@@ -355,6 +372,7 @@
             if (baseUrl.includes('sensenova')) return 'sensetime';
             if (baseUrl.includes('openrouter')) return 'openrouter';
             if (baseUrl.includes('googleapis')) return 'gemini';
+            if (baseUrl.includes('bigmodel')) return 'zhipu';
             return 'custom';
         }
 
@@ -372,6 +390,31 @@
                 document.getElementById('ai-base-hint').textContent = provider.hint;
                 populateSelect('ai-model', provider.models, '');
                 populateSelect('ai-model-expert', provider.expert_models, '');
+            }
+
+            // 切换服务商时自动更新 API Key 输入框
+            var keyMap = {
+                deepseek: 'ai_api_key_deepseek',
+                xiaomi: 'ai_api_key_xiaomi',
+                sensetime: 'ai_api_key_sensetime',
+                openrouter: 'ai_api_key_openrouter',
+                gemini: 'ai_api_key_gemini',
+                zhipu: 'ai_api_key_zhipu'
+            };
+            var keyField = keyMap[providerKey];
+            if (keyField && providerKeys[keyField] !== undefined) {
+                document.getElementById('ai-api-key').value = providerKeys[keyField] || '';
+            }
+
+            // 非 Gemini 服务商时自动关闭 Gemini CLI 模式
+            var geminiToggle = document.getElementById('gemini-cli-toggle');
+            if (providerKey !== 'gemini') {
+                geminiToggle.checked = false;
+                geminiToggle.disabled = true;
+                document.getElementById('gemini-cli-status').innerHTML =
+                    '<span style="color:#8b949e;">仅在 Gemini 作为 AI 服务商时可用</span>';
+            } else {
+                geminiToggle.disabled = false;
             }
 
             document.getElementById('custom-model-group').style.display = 'none';
@@ -432,6 +475,14 @@
 
                     document.getElementById('ai-base-url').value = config.ai_base_url || 'https://api.deepseek.com/v1';
                     document.getElementById('ai-api-key').value = config.ai_api_key || '';
+                    // 保存各服务商独立 Key，供切换服务商时自动更新
+                    providerKeys = {
+                        ai_api_key_deepseek: config.ai_api_key_deepseek || '',
+                        ai_api_key_xiaomi: config.ai_api_key_xiaomi || '',
+                        ai_api_key_sensetime: config.ai_api_key_sensetime || '',
+                        ai_api_key_openrouter: config.ai_api_key_openrouter || '',
+                        ai_api_key_gemini: config.ai_api_key_gemini || ''
+                    };
 
                     // 根据 base_url 自动检测服务商并填充下拉
                     var detectedProvider = detectProvider(config.ai_base_url);

@@ -5,6 +5,38 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 
+## [v0.5.10] - 2026-05-22
+
+### 新增 / Added
+- **讨论深度选择器** — IDEA 创意讨论支持浅度/中度/深度三档，控制 AI 回答的分析深度和严谨程度
+  Discussion depth selector: shallow/medium/deep modes for idea discussion, controls AI analysis depth
+- **全站暂停按钮** — AI 助手、专利详情、创意讨论、方案对比四个页面统一增加 ■ 停止按钮，可中止 AI 回复后立即输入新话题
+  Universal stop button: all 4 chat pages (AI Chat, Patent Detail, Idea Discussion, Compare) support AbortController-based stop
+- **全站导出结论** — 所有对话页面统一支持将讨论历史导出为结构化结论（已定决策/达成的结论/待解决问题/风险项及等级）
+  Universal export conclusions: all chat pages can export structured conclusions (decisions/conclusions/pending issues/risks)
+- **通用导出结论 API** — 新增 `POST /api/ai/chat/conclusions`，支持 session_key 和 history 双源
+  New API: POST /api/ai/chat/conclusions supporting session_key (DB) or history (in-memory) sources
+
+### 改进 / Improved
+- **深度模式 Prompt 重构** — AI 从「提问者」改为「深度回答者」，三档均不再向用户提问，改为控制回答深度
+  Depth prompt refactored: AI changed from questioner to deep-answerer across all 3 modes
+- **AI 超时提升至 300 秒** — 解决大上下文讨论超时问题
+  AI timeout increased from 60s to 300s to handle large context discussions
+- **Gemini CLI 误用修复** — 非 Gemini 服务商不再错误启用 Gemini CLI 模式
+  Gemini CLI no longer applies to non-Gemini providers via is_gemini guard
+- **启动日志增强** — 启动时输出 AI 服务商、模式、超时信息，便于排查
+  Startup config log: prints AI provider, mode, timeout for easier debugging
+
+### 修复 / Fixed
+- **DeepSeek 模型名称修正** — 前端模型下拉列表移除无效的 deepseek-chat-v4-flash，仅保留有效模型
+  Fixed DeepSeek model list: removed invalid model names, only deepseek-v4-flash and deepseek-v4-pro shown
+- **设置页 Gemini CLI 联动** — 切换非 Gemini 服务商时自动禁用 Gemini CLI 开关
+  Settings page: auto-disables Gemini CLI toggle when switching away from Gemini provider
+
+### 技术 / Technical
+- **新增自动化测试** — 3 个测试覆盖 Gemini CLI 模式保护和超时配置（共 121 测试通过）
+  3 automated tests for Gemini CLI guard and timeout config (121 total tests passing)
+
 ## [v0.5.9] - 2026-05-14
 
 ### 新增 / Added

@@ -186,13 +186,6 @@ fn extract_content_from_data(data: &Value) -> Option<String> {
 }
 
 impl AiClient {
-    fn expert_model_name() -> String {
-        std::env::var("AI_MODEL_EXPERT")
-            .ok()
-            .filter(|s| !s.trim().is_empty())
-            .unwrap_or_else(|| "deepseek-reasoner".to_string())
-    }
-
     fn apply_model_override(provider: &AiProvider, model_override: Option<&str>) -> AiProvider {
         if let Some(model) = model_override {
             let m = model.trim();
@@ -228,6 +221,11 @@ impl AiClient {
     pub fn set_gemini_cli(&mut self, path: &str) {
         self.provider_mode = AiProviderMode::GeminiCli;
         self.gemini_cli_path = Some(path.to_string());
+    }
+
+    /// Check if this client is in Gemini CLI subprocess mode.
+    pub fn is_gemini_cli_mode(&self) -> bool {
+        self.provider_mode == AiProviderMode::GeminiCli
     }
 
     /// Add a fallback AI provider.
@@ -381,7 +379,7 @@ impl AiClient {
     }
 
     /// 全局超时上限
-    pub(super) const GLOBAL_TIMEOUT_SECS: u64 = 60;
+    pub(crate) const GLOBAL_TIMEOUT_SECS: u64 = 300;
 
     /// Get the current model name.
     pub fn model_name(&self) -> &str {
@@ -769,10 +767,11 @@ impl AiClient {
         messages: Vec<Message>,
         temperature: f32,
     ) -> Result<String> {
-        let expert = Self::expert_model_name();
+        // 使用 AiClient 已配置的模型（由 ai_client_expert 或 ai_client 决定），
+        // 不再通过 env var 覆盖，确保设置页的模型选择生效。
         match tokio::time::timeout(
             Duration::from_secs(Self::GLOBAL_TIMEOUT_SECS),
-            self.send_chat_inner_with_model(messages, temperature, Some(&expert)),
+            self.send_chat_inner_with_model(messages, temperature, None),
         )
         .await
         {

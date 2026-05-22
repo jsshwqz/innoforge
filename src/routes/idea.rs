@@ -414,6 +414,8 @@ pub async fn api_idea_chat(
         return Json(json!({"error": "消息过长（最多5000字符）"}));
     }
 
+    let depth = req["depth"].as_str().unwrap_or("medium");
+
     // Get the idea for context
     let idea = match s.db.get_idea(&idea_id) {
         Ok(Some(i)) => i,
@@ -575,15 +577,40 @@ pub async fn api_idea_chat(
          - **逆向工程思维**：从期望结果倒推，找出实现路径上的关键瓶颈\n\
          - **类比迁移**：从其他行业/领域找到类似问题的已有解决方案\n\
          - **边界探测**：主动测试方案的极端情况和失效条件\n\n\
-         ## 你的行为准则\n\
-         1. **精准追问**：不问泛泛的问题，每个问题都指向具体的技术决策点\n\
-         2. **假设-验证链**：先明确假设，再给出验证路径，最后给结论\n\
-         3. **盲点发现**：主动指出用户可能忽略的技术风险或竞争威胁\n\
-         4. **证据优先**：引用物理定律、已知材料参数、行业标准等硬证据\n\
-         5. **风险分级**：区分「致命缺陷」「需要验证」「可接受风险」三个级别\n\
-         6. **每轮推进**：回答末尾提出 1-2 个精准的引导性问题，推动研发进入下一层\n\
-         7. **简洁有力**：不说废话，每句话都有信息量\n",
+         ## 你的行为准则\n",
     );
+
+    match depth {
+        "shallow" => {
+            system_context.push_str(
+                "1. **回答简洁直接**：先给结论，1-2 句话解释核心逻辑，不展开过多细节\n\
+                 2. **集中一点**：只回答用户当前问题的核心，不主动延伸\n\
+                 3. **收尾指明方向**：结尾列出 2-3 个可继续深挖的方向（一句话概括即可），由用户选择是否继续\n",
+            );
+        }
+        "deep" => {
+            system_context.push_str(
+                "1. **拆解假设**：先拆解问题中隐含的所有假设，逐一检查其成立前提\n\
+                 2. **严格推理链**：对每个子问题给出推理链（不允许逻辑跳跃），从第一性原理出发\n\
+                 3. **自我挑战**：必须主动给出至少 1 个反方论点或替代方案，不偏袒自己的结论\n\
+                 4. **证据严格**：每个论断需引用物理定律、材料参数、行业标准或计算过程\n\
+                 5. **风险不妥协**：区分「致命缺陷」「需要验证」「可接受风险」，对致命缺陷不回避不弱化\n\
+                 6. **深度与广度平衡**：每深入一层时自查是否有被忽略的技术维度；连续 3 层聚焦同一问题时主动提示其他维度\n\
+                 7. **收尾查漏**：结尾列出推理链中尚未闭合的环节（如有），供用户确认或补充\n",
+            );
+        }
+        _ => {
+            // medium (default) — 结构化分析
+            system_context.push_str(
+                "1. **结构化回答**：先给结论 → 再给推理过程 → 最后指出关键决策点\n\
+                 2. **假设-验证链**：拆解隐含假设，每个假设给出验证路径\n\
+                 3. **证据优先**：引用物理定律、材料参数、行业标准等硬证据\n\
+                 4. **盲点发现**：主动指出可能被忽略的技术风险或竞争威胁\n\
+                 5. **风险分级**：区分「致命缺陷」「需要验证」「可接受风险」\n\
+                 6. **收尾聚焦**：结尾指出 1 个最值得深入的关键决策点，供用户选择下一步分析方向\n",
+            );
+        }
+    }
 
     // Extract optional images from request (multimodal support)
     let images: Vec<String> = req["images"]
@@ -1344,6 +1371,72 @@ fn inline_md(s: &str) -> String {
         "<code style='background:#f3f4f6;padding:1px 4px;border-radius:3px;'>$1</code>",
     );
     s.into_owned()
+}
+
+/// Export structured conclusions from the idea discussion.
+/// 从讨论中导出结构化结论（已定决策 / 达成的结论 / 待解决问题 / 风险项）。
+pub async fn api_idea_chat_conclusions(
+    State(s): State<AppState>,
+    Path(idea_id): Path<String>,
+) -> Json<serde_json::Value> {
+    let idea = match s.db.get_idea(&idea_id) {
+        Ok(Some(i)) => i,
+        _ => return Json(json!({"error": "创意不存在"})),
+    };
+
+    let history = s.db.get_idea_messages(&idea_id).unwrap_or_default();
+    if history.is_empty() {
+        return Json(json!({"error": "还没有讨论记录，请先开始讨论后再导出结论"}));
+    }
+
+    let summary = s.db.get_idea_summary(&idea_id).unwrap_or_default();
+
+    // Build conversation context
+    let mut conv = format!(
+        "创意标题：{}\n创意描述：{}\n\n",
+        idea.title, idea.description
+    );
+
+    if !summary.is_empty() {
+        conv.push_str(&format!("之前的讨论摘要：\n{}\n\n", summary));
+    }
+
+    conv.push_str("完整讨论记录：\n");
+    for (_id, role, content, _ts) in &history {
+        let role_label = if role == "user" { "用户" } else { "AI" };
+        let preview: String = content.chars().take(800).collect();
+        conv.push_str(&format!("\n【{}】{}\n", role_label, preview));
+    }
+
+    let prompt = format!(
+        "{}\n\n请基于以上讨论，输出一份结构化结论报告。严格按以下格式输出：\n\n\
+         ## 已定决策\n\
+         - 列出已确定的技术方案或选择，每条标明理由\n\n\
+         ## 达成的结论\n\
+         - 列出经过讨论验证的技术判断，每条给出支撑证据\n\n\
+         ## 待解决问题\n\
+         - 列出尚未得出结论或需要进一步验证的问题\n\n\
+         ## 风险项及等级\n\
+         - 致命缺陷：列出可能导致方案失败的致命风险\n\
+         - 需要验证：列出需要实验或数据验证的中等风险\n\
+         - 可接受风险：列出已评估可接受的低风险\n\n\
+         要求：结论要具体、有依据，不写泛泛的空话。",
+        conv.chars().take(5000).collect::<String>()
+    );
+
+    let ai = s
+        .config
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .ai_client();
+    match ai.chat(&prompt, None).await {
+        Ok(conclusions) => {
+            // Also update the idea summary with conclusions for future reference
+            let _ = s.db.update_idea_summary(&idea_id, &conclusions);
+            Json(json!({"status": "ok", "conclusions": conclusions}))
+        }
+        Err(e) => Json(json!({"error": format!("导出结论失败: {}", e)})),
+    }
 }
 
 /// Generate a summary of the idea discussion
