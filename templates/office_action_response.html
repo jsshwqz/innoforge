@@ -1,0 +1,836 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OA答复 - 创研台</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#0d1117">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<style>
+.cmp-input { width:100%; padding:10px; background:#0d1117; border:1px solid #30363d; border-radius:6px; color:#c9d1d9; }
+.cmp-label { display:block; margin-bottom:6px; color:#8b949e; font-size:13px; }
+.cmp-section { background:#161b22; border:1px solid #30363d; border-radius:8px; padding:16px; margin-bottom:16px; }
+.cmp-my { border-left:3px solid #f0883e; }
+.cmp-ref { border-left:3px solid #58a6ff; }
+.ref-row { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
+.ref-row input { flex:1; }
+.btn-add { background:#21262d; border:1px solid #30363d; color:#58a6ff; padding:6px 14px; border-radius:6px; cursor:pointer; font-size:13px; }
+.btn-add:hover { background:#30363d; }
+.btn-remove { background:none; border:none; color:#f85149; cursor:pointer; font-size:18px; padding:4px 8px; }
+.btn-remove:hover { color:#ff7b72; }
+.btn-upload { background:#21262d; border:1px solid #30363d; color:#c9d1d9; padding:6px 10px; border-radius:6px; cursor:pointer; font-size:13px; white-space:nowrap; }
+.btn-upload:hover { background:#30363d; color:#58a6ff; }
+.btn-primary { padding:12px 24px; background:#58a6ff; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:15px; font-weight:600; }
+.btn-primary:hover { background:#79c0ff; }
+.btn-primary:disabled { opacity:0.5; cursor:not-allowed; }
+.btn-row { display:flex; gap:12px; margin-top:16px; flex-wrap:wrap; align-items:center; }
+.result-box { margin-top:20px; background:#161b22; border:1px solid #30363d; border-radius:8px; padding:20px; color:#c9d1d9; line-height:1.8; }
+.result-box h3, .result-box h2 { color:#58a6ff; }
+.result-box table { width:100%; border-collapse:collapse; margin:12px 0; font-size:14px; }
+.result-box th { background:#21262d; color:#c9d1d9; padding:8px 10px; border:1px solid #30363d; text-align:left; }
+.result-box td { padding:8px 10px; border:1px solid #30363d; vertical-align:top; }
+.result-box tr:nth-child(even) { background:#0d1117; }
+.result-box strong { color:#f0883e; }
+.result-box code { background:#21262d; padding:1px 5px; border-radius:3px; font-size:0.9em; }
+.result-box li { margin-bottom:4px; }
+.result-box pre { background:#0d1117; border:1px solid #30363d; border-radius:6px; padding:10px; overflow-x:auto; font-size:0.85em; }
+.file-tag { display:inline-flex; align-items:center; gap:4px; background:#1f6feb22; border:1px solid #1f6feb; color:#58a6ff; padding:4px 10px; border-radius:999px; font-size:12px; margin-top:4px; }
+.file-tag .tag-remove { cursor:pointer; color:#f85149; margin-left:4px; font-size:14px; }
+.file-tag .tag-remove:hover { color:#ff7b72; }
+.my-input-row { display:flex; gap:8px; align-items:center; }
+.my-input-row input { flex:1; }
+.btn-paste { background:#21262d; border:1px solid #30363d; color:#c9d1d9; padding:6px 10px; border-radius:6px; cursor:pointer; font-size:13px; white-space:nowrap; }
+.btn-paste:hover { background:#30363d; color:#f0883e; }
+.paste-modal-overlay { display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.6); z-index:1000; justify-content:center; align-items:center; }
+.paste-modal-overlay.show { display:flex; }
+.paste-modal { background:#161b22; border:1px solid #30363d; border-radius:10px; padding:20px; width:90%; max-width:700px; max-height:80vh; display:flex; flex-direction:column; }
+.paste-modal h3 { color:#c9d1d9; margin:0 0 8px 0; font-size:16px; }
+.paste-modal textarea { flex:1; min-height:260px; background:#0d1117; border:1px solid #30363d; border-radius:6px; color:#c9d1d9; padding:10px; font-size:13px; resize:vertical; line-height:1.6; }
+.paste-modal .modal-btns { display:flex; gap:8px; margin-top:12px; justify-content:flex-end; }
+.paste-modal .modal-btns button { padding:8px 18px; border-radius:6px; border:none; cursor:pointer; font-size:14px; }
+.paste-modal .btn-modal-ok { background:#58a6ff; color:#fff; }
+.paste-modal .btn-modal-ok:hover { background:#79c0ff; }
+.paste-modal .btn-modal-cancel { background:#21262d; color:#c9d1d9; border:1px solid #30363d; }
+.paste-modal .btn-modal-cancel:hover { background:#30363d; }
+.paste-title-input { width:100%; padding:8px; background:#0d1117; border:1px solid #30363d; border-radius:6px; color:#c9d1d9; font-size:13px; margin-bottom:8px; }
+/* Result toolbar */
+.result-toolbar { display:flex; gap:8px; margin-bottom:12px; padding-bottom:12px; border-bottom:1px solid #30363d; }
+.result-toolbar button { background:#21262d; border:1px solid #30363d; color:#c9d1d9; padding:6px 14px; border-radius:6px; cursor:pointer; font-size:13px; }
+.result-toolbar button:hover { background:#30363d; color:#58a6ff; }
+/* OA type selector */
+.oa-type-option { cursor:pointer; padding:10px 16px; border:2px solid #30363d; border-radius:8px; display:flex; align-items:center; gap:8px; transition:border-color 0.2s; }
+.oa-type-option:hover { border-color:#8b949e; }
+.oa-type-option input { accent-color:#d2a8ff; }
+/* Discussion panel */
+.discussion-panel { margin-top:16px; border-top:1px solid #30363d; padding-top:16px; }
+.discussion-panel.hidden { display:none; }
+.discussion-header { display:flex; align-items:center; gap:8px; margin-bottom:12px; color:#8b949e; font-weight:600; font-size:14px; }
+.discussion-messages { max-height:400px; overflow-y:auto; display:flex; flex-direction:column; gap:10px; margin-bottom:12px; padding-right:4px; }
+.msg { display:flex; }
+.msg-user { justify-content:flex-end; }
+.msg-ai { justify-content:flex-start; }
+.msg-bubble { max-width:80%; padding:10px 14px; border-radius:10px; font-size:13px; line-height:1.6; word-break:break-word; }
+.msg-user .msg-bubble { background:#1f6feb; color:#fff; border-bottom-right-radius:4px; }
+.msg-ai .msg-bubble { background:#21262d; color:#c9d1d9; border:1px solid #30363d; border-bottom-left-radius:4px; }
+.discussion-input-row { display:flex; gap:8px; }
+.discussion-input-row input { flex:1; padding:10px; background:#0d1117; border:1px solid #30363d; border-radius:6px; color:#c9d1d9; font-size:13px; }
+.discussion-input-row input:focus { border-color:#58a6ff; outline:none; }
+.discussion-input-row button { padding:8px 18px; background:#21262d; color:#c9d1d9; border:1px solid #30363d; border-radius:6px; cursor:pointer; font-size:13px; font-weight:500; white-space:nowrap; }
+.discussion-input-row button:hover { background:#30363d; color:#58a6ff; }
+.discussion-input-row button:disabled { opacity:0.5; cursor:not-allowed; }
+</style>
+</head>
+<body>
+    <nav id="global-nav"></nav>
+    <div class="page-with-sidebar">
+    <main class="container page-main" style="max-width:1100px;">
+        <h2 data-i18n="oar.title" style="margin-bottom:16px;"></h2>
+
+        <!-- OA Type Selector -->
+        <div class="cmp-section" style="border-left:3px solid #d2a8ff;">
+            <label class="cmp-label" data-i18n="oar.typeLabel" style="color:#d2a8ff;font-weight:600;"></label>
+            <div style="display:flex; gap:12px; flex-wrap:wrap;">
+                <label class="oa-type-option" id="oa-type-first-exam">
+                    <input type="radio" name="oa_type" value="first_exam" checked>
+                    <span data-i18n="oar.typeFirstExam"></span>
+                </label>
+                <label class="oa-type-option" id="oa-type-abnormal">
+                    <input type="radio" name="oa_type" value="abnormal">
+                    <span data-i18n="oar.typeAbnormal"></span>
+                </label>
+                <label class="oa-type-option" id="oa-type-reject-review">
+                    <input type="radio" name="oa_type" value="reject_review">
+                    <span data-i18n="oar.typeRejectReview"></span>
+                </label>
+            </div>
+        </div>
+
+        <!-- My Patent -->
+        <div class="cmp-section cmp-my">
+            <label class="cmp-label" style="color:#f0883e;font-weight:600;" data-i18n="oar.myPatent"></label>
+            <div class="my-input-row">
+                <input type="text" id="my-patent" class="cmp-input" data-i18n-placeholder="oar.myPatentPlaceholder">
+                <button class="btn-upload" onclick="uploadMyPatent()">📎 <span data-i18n="common.upload"></span></button>
+                <button class="btn-paste" onclick="pasteMyPatent()">📋 <span data-i18n="common.paste"></span></button>
+            </div>
+            <div id="my-file-tag"></div>
+        </div>
+
+        <!-- Office Action Text -->
+        <div class="cmp-section" style="border-left:3px solid #f85149;">
+            <label class="cmp-label" style="color:#f85149;font-weight:600;" data-i18n="oar.oaLabel"></label>
+            <div class="my-input-row">
+                <input type="text" id="oa-input" class="cmp-input" disabled data-i18n-placeholder="oar.oaPlaceholder" style="flex:1;">
+                <button class="btn-upload" onclick="uploadOA()">📎 <span data-i18n="common.upload"></span></button>
+                <button class="btn-paste" onclick="pasteOA()">📋 <span data-i18n="common.paste"></span></button>
+            </div>
+            <div id="oa-file-tag"></div>
+        </div>
+
+        <!-- Reference Documents -->
+        <div class="cmp-section cmp-ref">
+            <label class="cmp-label" style="color:#58a6ff;font-weight:600;" data-i18n="oar.refLabel"></label>
+            <div id="ref-list">
+                <div class="ref-row" data-idx="0">
+                    <input type="text" class="cmp-input ref-input" data-i18n-placeholder="oar.refPlaceholder">
+                    <button class="btn-upload" onclick="uploadRef(this)">📎 <span data-i18n="common.upload"></span></button>
+                    <button class="btn-paste" onclick="pasteRef(this)">📋 <span data-i18n="common.paste"></span></button>
+                    <button class="btn-remove" onclick="removeRef(this)" title="移除">&times;</button>
+                </div>
+            </div>
+            <button class="btn-add" onclick="addRef()" id="btn-add-ref">+ <span data-i18n="oar.addRef"></span></button>
+        </div>
+
+        <!-- Depth Selector + Action Buttons -->
+        <div class="btn-row">
+            <button class="btn-primary" id="btn-analyze" onclick="doOAAnalysis()" data-i18n="oar.btnAnalyze"></button>
+            <div style="display:flex;align-items:center;gap:8px;margin-left:auto;">
+                <span style="color:#8b949e;font-size:13px;" data-i18n="oar.depthLabel"></span>
+                <select id="depth-select" style="background:#21262d;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:6px 10px;font-size:13px;">
+                    <option value="shallow" data-i18n="oar.depthShallow"></option>
+                    <option value="medium" selected data-i18n="oar.depthMedium"></option>
+                    <option value="deep" data-i18n="oar.depthDeep"></option>
+                </select>
+            </div>
+        </div>
+
+        <div id="result"></div>
+
+        <!-- AI Discussion Panel -->
+        <div class="discussion-panel hidden" id="discussion-panel">
+            <div class="discussion-header" data-i18n="oar.discussTitle"></div>
+            <div class="discussion-messages" id="discussion-messages"></div>
+            <div class="discussion-input-row">
+                <input type="text" id="discussion-input" data-i18n-placeholder="oar.discussInput" onkeydown="if(event.key==='Enter') sendDiscussionMessage()">
+                <button id="discussion-send-btn" onclick="sendDiscussionMessage()" data-i18n="oar.send"></button>
+                <button id="discussion-stop-btn" onclick="stopDiscussionGeneration()" style="display:none;padding:8px 10px;background:#21262d;color:#f85149;border:1px solid #f85149;border-radius:6px;cursor:pointer;font-size:13px;white-space:nowrap;" data-i18n="oar.stop"></button>
+                <button id="discussion-export-btn" onclick="exportDiscussionConclusions()" style="display:none;padding:8px 10px;background:#21262d;color:#c9d1d9;border:1px solid #6e7681;border-radius:6px;cursor:pointer;font-size:13px;white-space:nowrap;" data-i18n="oar.exportConclusions"></button>
+            </div>
+        </div>
+    </main>
+    <aside id="page-sidebar" class="page-sidebar"></aside>
+    </div>
+
+    <!-- Paste Text Modal -->
+    <div class="paste-modal-overlay" id="paste-modal">
+        <div class="paste-modal">
+            <h3 id="paste-modal-title" data-i18n="oar.pasteTitle"></h3>
+            <input type="text" class="paste-title-input" id="paste-title" data-i18n-placeholder="oar.pasteTitlePlaceholder">
+            <textarea id="paste-content" data-i18n-placeholder="oar.pasteContentPlaceholder"></textarea>
+            <div class="modal-btns">
+                <button class="btn-modal-cancel" onclick="closePasteModal()" data-i18n="common.cancel"></button>
+                <button class="btn-modal-ok" onclick="confirmPaste()" data-i18n="common.confirm"></button>
+            </div>
+        </div>
+    </div>
+
+    <!-- PDF Preview Modal -->
+    <div class="pdf-modal-overlay" id="pdf-preview-modal">
+        <div class="pdf-modal">
+            <button class="pdf-modal-close" onclick="closePdfPreview()">&times;</button>
+            <iframe id="pdf-preview-iframe" src="about:blank"></iframe>
+        </div>
+    </div>
+
+    <script src="/static/i18n.js"></script>
+    <script>
+    // ── PDF Preview ──
+    var uploadedFileObjects = {};
+
+    function showPdfPreview(url) {
+        document.getElementById('pdf-preview-iframe').src = url;
+        document.getElementById('pdf-preview-modal').classList.add('show');
+    }
+
+    function closePdfPreview() {
+        document.getElementById('pdf-preview-modal').classList.remove('show');
+        document.getElementById('pdf-preview-iframe').src = 'about:blank';
+    }
+
+    document.getElementById('pdf-preview-modal').addEventListener('click', function(e) {
+        if (e.target === this) closePdfPreview();
+    });
+
+    async function uploadAndPreviewPdf(file) {
+        var form = new FormData();
+        form.append('file', file);
+        try {
+            var resp = await fetch('/api/upload/pdf-store', { method: 'POST', body: form });
+            if (!resp.ok) throw new Error('upload failed (' + resp.status + ')');
+            var data = await resp.json();
+            if (data.status === 'ok' && data.url) {
+                showPdfPreview(data.url);
+            } else {
+                alert(data.message || 'PDF store failed');
+            }
+        } catch(e) {
+            alert('PDF preview failed: ' + e.message);
+        }
+    }
+
+    function previewPdfByKey(key) {
+        var file = uploadedFileObjects[key];
+        if (file) uploadAndPreviewPdf(file);
+    }
+
+    // ── State ──
+    var uploadedData = {};
+    var refIdxCounter = 0;
+    var lastAnalysisRawText = '';
+    var discussionHistory = [];
+    var discussionAbortController = null;
+    var discussionSending = false;
+
+    // ── Helpers ──
+    function escapeHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+    function t(key) {
+        if (typeof window.i18nLang === 'undefined') window.i18nLang = 'zh';
+        var map = window['_i18n_' + window.i18nLang];
+        return (map && map[key]) || key;
+    }
+
+    function triggerFileSelect(callback) {
+        var input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.pdf,.docx,.txt';
+        input.onchange = function() {
+            if (input.files.length > 0) callback(input.files[0]);
+        };
+        input.click();
+    }
+
+    async function extractFile(file) {
+        var form = new FormData();
+        form.append('file', file);
+        var resp = await fetch('/api/upload/extract', { method: 'POST', body: form });
+        var data = await resp.json();
+        if (data.error) throw new Error(data.error);
+        return { title: file.name, content: data.text };
+    }
+
+    // ── OA Type selector highlight ──
+    document.querySelectorAll('input[name="oa_type"]').forEach(function(radio) {
+        radio.addEventListener('change', function() {
+            document.querySelectorAll('.oa-type-option').forEach(function(el) {
+                el.style.borderColor = '#30363d';
+            });
+            if (this.checked) {
+                this.closest('.oa-type-option').style.borderColor = '#d2a8ff';
+            }
+        });
+    });
+    (function() {
+        var checked = document.querySelector('input[name="oa_type"]:checked');
+        if (checked) checked.closest('.oa-type-option').style.borderColor = '#d2a8ff';
+    })();
+
+    // ── My Patent helpers ──
+    function uploadMyPatent() {
+        triggerFileSelect(async function(file) {
+            var tagEl = document.getElementById('my-file-tag');
+            tagEl.innerHTML = '<span style="color:#8b949e;font-size:12px;">' + t('common.extracting') + '</span>';
+            uploadedFileObjects['my'] = file;
+            try {
+                var result = await extractFile(file);
+                uploadedData['my'] = result;
+                var previewBtn = file.name.toLowerCase().endsWith('.pdf')
+                    ? ' <button class="btn-preview" onclick="previewPdfByKey(\'my\')" style="background:#21262d;border:1px solid #30363d;color:#58a6ff;padding:3px 8px;border-radius:4px;cursor:pointer;font-size:12px;margin-left:4px;">📄 ' + t('common.viewOriginal') + '</button>'
+                    : '';
+                tagEl.innerHTML = '<span class="file-tag">📄 ' + escapeHtml(result.title)
+                    + ' (' + result.content.length + t('common.chars') + ')'
+                    + '<span class="tag-remove" onclick="clearMyPatent()">&times;</span></span>' + previewBtn;
+                document.getElementById('my-patent').disabled = true;
+            } catch(e) {
+                tagEl.innerHTML = '<span style="color:#f85149;font-size:12px;">' + escapeHtml(e.message) + '</span>';
+            }
+        });
+    }
+
+    function clearMyPatent() {
+        delete uploadedData['my'];
+        delete uploadedFileObjects['my'];
+        document.getElementById('my-patent').disabled = false;
+        document.getElementById('my-patent').value = '';
+        document.getElementById('my-file-tag').innerHTML = '';
+    }
+
+    var pasteTarget = null; // 'my' or 'oa' or 'ref_<idx>'
+
+    function pasteMyPatent() {
+        pasteTarget = 'my';
+        document.getElementById('paste-modal-title').textContent = t('oar.pasteTitle');
+        document.getElementById('paste-title').value = t('oar.myPatentDefaultTitle');
+        document.getElementById('paste-content').value = '';
+        document.getElementById('paste-modal').classList.add('show');
+    }
+
+    function pasteOA() {
+        pasteTarget = 'oa';
+        document.getElementById('paste-modal-title').textContent = t('oar.pasteOATitle');
+        document.getElementById('paste-title').value = t('oar.pasteOADefaultTitle');
+        document.getElementById('paste-content').value = '';
+        document.getElementById('paste-modal').classList.add('show');
+    }
+
+    function pasteRef(btn) {
+        var row = btn.closest('.ref-row');
+        var idx = row.getAttribute('data-idx');
+        pasteTarget = 'ref_' + idx;
+        document.getElementById('paste-modal-title').textContent = t('oar.pasteRefTitle');
+        document.getElementById('paste-title').value = t('oar.pasteRefDefaultTitle');
+        document.getElementById('paste-content').value = '';
+        document.getElementById('paste-modal').classList.add('show');
+    }
+
+    function closePasteModal() {
+        document.getElementById('paste-modal').classList.remove('show');
+        pasteTarget = null;
+    }
+
+    function confirmPaste() {
+        var title = document.getElementById('paste-title').value.trim() || t('oar.untitled');
+        var content = document.getElementById('paste-content').value.trim();
+        if (!content) { alert(t('oar.alertEmptyContent')); return; }
+        var result = { title: title, content: content };
+        if (pasteTarget === 'my') {
+            uploadedData['my'] = result;
+            document.getElementById('my-patent').disabled = true;
+            document.getElementById('my-file-tag').innerHTML = '<span class="file-tag">📋 ' + escapeHtml(title)
+                + ' (' + content.length + t('common.chars') + ')'
+                + '<span class="tag-remove" onclick="clearMyPatent()">&times;</span></span>';
+        } else if (pasteTarget === 'oa') {
+            uploadedData['oa'] = result;
+            document.getElementById('oa-input').disabled = true;
+            document.getElementById('oa-file-tag').innerHTML = '<span class="file-tag">📋 ' + escapeHtml(title)
+                + ' (' + content.length + t('common.chars') + ')'
+                + '<span class="tag-remove" onclick="clearOA()">&times;</span></span>';
+        } else if (pasteTarget && pasteTarget.startsWith('ref_')) {
+            var idx = pasteTarget.replace('ref_', '');
+            uploadedData['ref_' + idx] = result;
+            var rows = document.querySelectorAll('.ref-row');
+            for (var i = 0; i < rows.length; i++) {
+                if (rows[i].getAttribute('data-idx') === idx) {
+                    rows[i].querySelector('.ref-input').disabled = true;
+                    var existing = rows[i].querySelector('.file-tag-container') || document.createElement('span');
+                    existing.className = 'file-tag-container';
+                    existing.innerHTML = '<span class="file-tag">📋 ' + escapeHtml(title)
+                        + ' (' + content.length + t('common.chars') + ')'
+                        + '<span class="tag-remove" onclick="clearRefUpload(\'' + idx + '\')">&times;</span></span>';
+                    rows[i].appendChild(existing);
+                    break;
+                }
+            }
+        }
+        closePasteModal();
+    }
+
+    // ── OA text helpers ──
+    function uploadOA() {
+        triggerFileSelect(async function(file) {
+            var tagEl = document.getElementById('oa-file-tag');
+            tagEl.innerHTML = '<span style="color:#8b949e;font-size:12px;">' + t('common.extracting') + '</span>';
+            try {
+                var result = await extractFile(file);
+                uploadedData['oa'] = result;
+                tagEl.innerHTML = '<span class="file-tag">📄 ' + escapeHtml(result.title)
+                    + ' (' + result.content.length + t('common.chars') + ')'
+                    + '<span class="tag-remove" onclick="clearOA()">&times;</span></span>';
+                document.getElementById('oa-input').disabled = true;
+            } catch(e) {
+                tagEl.innerHTML = '<span style="color:#f85149;font-size:12px;">' + escapeHtml(e.message) + '</span>';
+            }
+        });
+    }
+
+    function clearOA() {
+        delete uploadedData['oa'];
+        document.getElementById('oa-input').disabled = false;
+        document.getElementById('oa-input').value = '';
+        document.getElementById('oa-file-tag').innerHTML = '';
+    }
+
+    // ── Ref helpers ──
+    function addRef() {
+        var list = document.getElementById('ref-list');
+        refIdxCounter++;
+        var count = list.querySelectorAll('.ref-row').length;
+        var row = document.createElement('div');
+        row.className = 'ref-row';
+        row.setAttribute('data-idx', String(refIdxCounter));
+        row.innerHTML = '<input type="text" class="cmp-input ref-input" placeholder="' + t('oar.refPlaceholder').replace('{n}', count + 1) + '">'
+            + '<button class="btn-upload" onclick="uploadRef(this)">📎 <span data-i18n="common.upload"></span></button>'
+            + '<button class="btn-paste" onclick="pasteRef(this)">📋 <span data-i18n="common.paste"></span></button>'
+            + '<button class="btn-remove" onclick="removeRef(this)" title="' + t('common.remove') + '">&times;</button>';
+        list.appendChild(row);
+    }
+
+    function removeRef(btn) {
+        var list = document.getElementById('ref-list');
+        if (list.querySelectorAll('.ref-row').length <= 1) return;
+        var row = btn.closest('.ref-row');
+        var idx = row.getAttribute('data-idx');
+        delete uploadedData['ref_' + idx];
+        row.remove();
+        reindexPlaceholders();
+    }
+
+    function reindexPlaceholders() {
+        var inputs = document.querySelectorAll('.ref-input');
+        for (var i = 0; i < inputs.length; i++) {
+            if (!inputs[i].disabled) {
+                inputs[i].placeholder = t('oar.refPlaceholder').replace('{n}', i + 1);
+            }
+        }
+    }
+
+    function uploadRef(btn) {
+        var row = btn.closest('.ref-row');
+        var idx = row.getAttribute('data-idx');
+        triggerFileSelect(async function(file) {
+            var existing = row.querySelector('.file-tag-container') || document.createElement('span');
+            existing.className = 'file-tag-container';
+            existing.innerHTML = '<span style="color:#8b949e;font-size:12px;">' + t('common.extracting') + '</span>';
+            row.appendChild(existing);
+            try {
+                var result = await extractFile(file);
+                uploadedData['ref_' + idx] = result;
+                existing.innerHTML = '<span class="file-tag">📄 ' + escapeHtml(result.title)
+                    + ' (' + result.content.length + t('common.chars') + ')'
+                    + '<span class="tag-remove" onclick="clearRefUpload(\'' + idx + '\')">&times;</span></span>';
+                row.querySelector('.ref-input').disabled = true;
+            } catch(e) {
+                existing.innerHTML = '<span style="color:#f85149;font-size:12px;">' + escapeHtml(e.message) + '</span>';
+            }
+        });
+    }
+
+    function clearRefUpload(idx) {
+        delete uploadedData['ref_' + idx];
+        var rows = document.querySelectorAll('.ref-row');
+        for (var i = 0; i < rows.length; i++) {
+            if (rows[i].getAttribute('data-idx') === idx) {
+                rows[i].querySelector('.ref-input').disabled = false;
+                var container = rows[i].querySelector('.file-tag-container');
+                if (container) container.remove();
+                break;
+            }
+        }
+    }
+
+    // ── get input data ──
+    function getMyPatent() {
+        if (uploadedData['my']) return uploadedData['my'];
+        var val = document.getElementById('my-patent').value.trim();
+        return val || null;
+    }
+
+    function getOA() {
+        if (uploadedData['oa']) return uploadedData['oa'];
+        var val = document.getElementById('oa-input').value.trim();
+        return val || null;
+    }
+
+    function getRefs() {
+        var refs = [];
+        var inputs = document.querySelectorAll('.ref-input');
+        var rows = document.querySelectorAll('.ref-row');
+        for (var i = 0; i < rows.length; i++) {
+            var idx = rows[i].getAttribute('data-idx');
+            if (uploadedData['ref_' + idx]) {
+                refs.push(uploadedData['ref_' + idx]);
+            } else {
+                var val = inputs[i] ? inputs[i].value.trim() : '';
+                if (val) refs.push(val);
+            }
+        }
+        return refs;
+    }
+
+    // ── Loading / Result ──
+    function setLoading(msg) {
+        var btn = document.getElementById('btn-analyze');
+        if (btn) btn.disabled = true;
+        document.getElementById('result').innerHTML = '<div class="result-box" style="color:#8b949e;text-align:center;padding:40px;">⏳ ' + escapeHtml(msg) + '</div>';
+    }
+
+    function clearLoading() {
+        var btn = document.getElementById('btn-analyze');
+        if (btn) btn.disabled = false;
+    }
+
+    function buildToolbar(options) {
+        var html = '<div class="result-toolbar">';
+        if (options.copy) {
+            html += '<button onclick="copyResultText()" title="' + t('oar.copy') + '">📋 ' + t('oar.copy') + '</button>';
+        }
+        if (options.export) {
+            html += '<button onclick="exportResultMarkdown()" title="' + t('oar.export') + '">📥 ' + t('oar.export') + '</button>';
+        }
+        if (options.showDiscussion) {
+            html += '<button onclick="startDiscussion()">💬 ' + t('oar.discussBtn') + '</button>';
+        }
+        html += '</div>';
+        return html;
+    }
+
+    function showResult(html, options) {
+        options = options || { copy: true, export: true };
+        var toolbar = buildToolbar(options);
+        document.getElementById('result').innerHTML = '<div class="result-box">' + toolbar + '<div class="result-content">' + html + '</div></div>';
+        clearLoading();
+    }
+
+    function showError(msg) {
+        document.getElementById('result').innerHTML = '<div class="result-box" style="border-color:#f85149;color:#f85149;">' + escapeHtml(msg) + '</div>';
+        clearLoading();
+    }
+
+    // ── Copy / Export ──
+    function copyResultText() {
+        var text = lastAnalysisRawText || (document.querySelector('.result-content') || {}).innerText || '';
+        if (!text) return;
+        navigator.clipboard.writeText(text).then(function() {
+            var btn = document.querySelector('.result-toolbar button');
+            if (btn) { var orig = btn.textContent; btn.textContent = '✅ ' + t('common.copied'); setTimeout(function() { btn.textContent = orig; }, 1500); }
+        });
+    }
+
+    function exportResultMarkdown() {
+        var text = lastAnalysisRawText || (document.querySelector('.result-content') || {}).innerText || '';
+        if (!text) return;
+        var blob = new Blob([text], { type: 'text/markdown;charset=utf-8' });
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'OA_analysis_' + new Date().toISOString().slice(0, 16).replace(/[T:]/g, '-') + '.md';
+        a.click();
+        URL.revokeObjectURL(a.href);
+    }
+
+    // ── Markdown Renderer ──
+    function renderMarkdown(text) {
+        if (!text) return '';
+        var codeBlocks = [];
+        text = text.replace(/```(\w*)\n?([\s\S]*?)```/g, function(_, lang, code) {
+            codeBlocks.push('<pre style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:10px;overflow-x:auto;font-size:0.85em;"><code>' + escapeHtml(code) + '</code></pre>');
+            return '\x00CB' + (codeBlocks.length - 1) + '\x00';
+        });
+        var tableBlocks = [];
+        text = text.replace(/(?:^|\n)(\|.+\|)\n(\|[\s:|-]+\|)\n((?:\|.+\|\n?)+)/gm, function(_, header, sep, body) {
+            var ths = header.split('|').filter(function(c) { return c.trim() !== ''; });
+            var rows = body.trim().split('\n');
+            var html = '<table style="width:100%;border-collapse:collapse;margin:12px 0;font-size:14px;"><thead><tr>';
+            for (var i = 0; i < ths.length; i++) html += '<th style="background:#21262d;color:#c9d1d9;padding:8px 10px;border:1px solid #30363d;">' + escapeHtml(ths[i].trim()) + '</th>';
+            html += '</tr></thead><tbody>';
+            for (var r = 0; r < rows.length; r++) {
+                var cells = rows[r].split('|').filter(function(c) { return c.trim() !== ''; });
+                html += '<tr>';
+                for (var c = 0; c < cells.length; c++) html += '<td style="padding:8px 10px;border:1px solid #30363d;">' + escapeHtml(cells[c].trim()).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>') + '</td>';
+                html += '</tr>';
+            }
+            html += '</tbody></table>';
+            tableBlocks.push(html);
+            return '\n\x00TB' + (tableBlocks.length - 1) + '\x00\n';
+        });
+        var result = escapeHtml(text)
+            .replace(/^#### (.+)$/gm, '<h4>$1</h4>')
+            .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+            .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+            .replace(/`([^`]+)`/g, '<code style="background:#21262d;padding:1px 5px;border-radius:3px;font-size:0.9em;">$1</code>')
+            .replace(/\*\*(.+?)\*\*/g, '<strong style="color:#f0883e;">$1</strong>')
+            .replace(/^\- (.+)$/gm, '<li>$1</li>')
+            .replace(/^(\d+)\. (.+)$/gm, '<li>$2</li>')
+            .replace(/(<li>.*<\/li>)/g, '<ul>$1</ul>')
+            .replace(/<\/ul>\s*<ul>/g, '')
+            .replace(/\n{2,}/g, '</p><p>')
+            .replace(/\n/g, '<br>');
+        result = result.replace(/\x00CB(\d+)\x00/g, function(_, i) { return codeBlocks[parseInt(i)]; });
+        result = result.replace(/\x00TB(\d+)\x00/g, function(_, i) { return tableBlocks[parseInt(i)]; });
+        return result;
+    }
+
+    // ── Main OA Analysis ──
+    async function doOAAnalysis() {
+        var my = getMyPatent();
+        var oa = getOA();
+        var refs = getRefs();
+        var oaType = document.querySelector('input[name="oa_type"]:checked').value;
+        var depth = document.getElementById('depth-select').value;
+
+        if (!my) { alert(t('oar.alertPatent')); return; }
+        if (!oa) { alert(t('oar.alertOA')); return; }
+
+        var typeLabel = document.querySelector('input[name="oa_type"]:checked + span');
+        var typeName = typeLabel ? typeLabel.textContent : oaType;
+        setLoading(t('oar.analyzing').replace('{type}', typeName));
+
+        try {
+            var body = { references: refs, office_action: oa, oa_type: oaType, depth: depth };
+            if (typeof my === 'string') {
+                body.my_patent_id = my;
+            } else {
+                body.my_patent = my;
+            }
+            var resp = await fetch('/api/ai/office-action-response', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(body)
+            });
+            var data = await resp.json();
+            if (data.error) { showError(data.error); return; }
+            lastAnalysisRawText = data.analysis || '';
+            showResult(renderMarkdown(data.analysis), { copy: true, export: true, showDiscussion: true });
+        } catch(e) {
+            showError(t('oar.fail') + ': ' + e.message);
+        }
+    }
+
+    // ── AI Discussion ──
+    function startDiscussion() {
+        var my = getMyPatent();
+        var refs = getRefs();
+        var ctx = '【OA答复讨论】\n\n';
+        ctx += '== 我的专利 ==\n';
+        if (typeof my === 'string') {
+            ctx += '专利号/ID: ' + my + '\n';
+        } else if (my && my.content) {
+            ctx += '标题: ' + (my.title || '') + '\n';
+            ctx += '内容:\n' + my.content.slice(0, 2000) + '\n';
+        }
+        ctx += '\n== 对比文件 ==\n';
+        for (var i = 0; i < refs.length; i++) {
+            var r = refs[i];
+            ctx += '文件' + (i + 1) + ': ';
+            if (typeof r === 'string') {
+                ctx += r + '\n';
+            } else if (r && r.content) {
+                ctx += (r.title || '未命名') + '\n';
+                ctx += r.content.slice(0, 1500) + '\n';
+            }
+        }
+        if (lastAnalysisRawText) {
+            ctx += '\n== 当前分析结果 ==\n';
+            ctx += lastAnalysisRawText.slice(0, 3000) + '\n';
+        }
+        discussionHistory = [['system', ctx]];
+        var panel = document.getElementById('discussion-panel');
+        panel.classList.remove('hidden');
+        document.getElementById('discussion-messages').innerHTML =
+            '<div class="msg msg-ai"><div class="msg-bubble">' + t('oar.discussHint') + '</div></div>';
+        panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        document.getElementById('discussion-input').focus();
+        showDiscussionExportButton();
+    }
+
+    async function sendDiscussionMessage() {
+        var input = document.getElementById('discussion-input');
+        var text = input.value.trim();
+        if (!text) return;
+        if (discussionSending) {
+            if (discussionAbortController) {
+                discussionAbortController.abort();
+                discussionAbortController = null;
+            }
+            var container = document.getElementById('discussion-messages');
+            var last = container.lastChild;
+            if (last && last.classList.contains('msg-ai') && last.id === 'ai-loading-disc') {
+                container.removeChild(last);
+            }
+        }
+        input.value = '';
+        input.disabled = true;
+        document.getElementById('discussion-send-btn').disabled = true;
+        discussionSending = true;
+        showDiscussionStopButton();
+
+        // render user message
+        var container = document.getElementById('discussion-messages');
+        var userDiv = document.createElement('div');
+        userDiv.className = 'msg msg-user';
+        userDiv.innerHTML = '<div class="msg-bubble">' + escapeHtml(text) + '</div>';
+        container.appendChild(userDiv);
+
+        // loading indicator
+        var loadDiv = document.createElement('div');
+        loadDiv.className = 'msg msg-ai';
+        loadDiv.id = 'ai-loading-disc';
+        loadDiv.innerHTML = '<div class="msg-bubble">' + t('common.thinking') + '</div>';
+        container.appendChild(loadDiv);
+        container.scrollTop = container.scrollHeight;
+
+        var controller = new AbortController();
+        discussionAbortController = controller;
+        var apiHistory = discussionHistory.map(function(h) { return [h[0], h[1]]; });
+        try {
+            var resp = await fetch('/api/ai/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: text, patent_id: null, history: apiHistory, web_search: false }),
+                signal: controller.signal
+            });
+            var data = await resp.json();
+            var loadEl = document.getElementById('ai-loading-disc');
+            if (loadEl) loadEl.remove();
+            var content = data.content || 'AI error: empty response';
+            discussionHistory.push(['user', text]);
+            discussionHistory.push(['assistant', content]);
+            var aiDiv = document.createElement('div');
+            aiDiv.className = 'msg msg-ai';
+            aiDiv.innerHTML = '<div class="msg-bubble">' + renderMarkdown(content) + '</div>';
+            container.appendChild(aiDiv);
+            container.scrollTop = container.scrollHeight;
+            showDiscussionExportButton();
+        } catch(e) {
+            var loadEl = document.getElementById('ai-loading-disc');
+            if (loadEl) loadEl.remove();
+            if (e.name === 'AbortError') return;
+            var errDiv = document.createElement('div');
+            errDiv.className = 'msg msg-ai';
+            errDiv.innerHTML = '<div class="msg-bubble" style="color:#f85149;">' + t('oar.fail') + ': ' + escapeHtml(e.message) + '</div>';
+            container.appendChild(errDiv);
+        } finally {
+            if (discussionAbortController === controller) {
+                discussionAbortController = null;
+            }
+            input.disabled = false;
+            document.getElementById('discussion-send-btn').disabled = false;
+            discussionSending = false;
+            hideDiscussionStopButton();
+            input.focus();
+        }
+    }
+
+    function showDiscussionStopButton() {
+        var btn = document.getElementById('discussion-stop-btn');
+        if (btn) btn.style.display = '';
+    }
+
+    function hideDiscussionStopButton() {
+        var btn = document.getElementById('discussion-stop-btn');
+        if (btn) btn.style.display = 'none';
+    }
+
+    function stopDiscussionGeneration() {
+        if (discussionAbortController) {
+            discussionAbortController.abort();
+            discussionAbortController = null;
+        }
+    }
+
+    function showDiscussionExportButton() {
+        var btn = document.getElementById('discussion-export-btn');
+        if (btn && discussionHistory.length > 1) btn.style.display = '';
+    }
+
+    function hideDiscussionExportButton() {
+        var btn = document.getElementById('discussion-export-btn');
+        if (btn) btn.style.display = 'none';
+    }
+
+    async function exportDiscussionConclusions() {
+        if (discussionHistory.length < 2) { hideDiscussionExportButton(); return; }
+        var btn = document.getElementById('discussion-export-btn');
+        btn.textContent = t('oar.exporting');
+        btn.disabled = true;
+        try {
+            var messages = [];
+            for (var i = 1; i < discussionHistory.length; i++) {
+                messages.push({ role: discussionHistory[i][0], content: discussionHistory[i][1] });
+            }
+            var resp = await fetch('/api/ai/chat/conclusions', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ history: messages })
+            });
+            var data = await resp.json();
+            if (data.status === 'ok' && data.conclusions) {
+                var container = document.getElementById('discussion-messages');
+                var div = document.createElement('div');
+                div.className = 'msg msg-ai';
+                div.innerHTML = '<div class="msg-bubble">'
+                    + '<div style="font-size:0.8em;color:#58a6ff;margin-bottom:4px;font-weight:bold;">📝 ' + t('oar.exportConclusions') + '</div>'
+                    + '<div style="color:#c9d1d9;font-size:0.9em;line-height:1.6;">' + renderMarkdown(data.conclusions) + '</div>'
+                    + '</div>';
+                container.appendChild(div);
+                container.scrollTop = container.scrollHeight;
+            } else {
+                alert(data.error || t('oar.exportFail'));
+            }
+        } catch(e) {
+            alert(t('oar.fail') + ': ' + e.message);
+        }
+        btn.textContent = t('oar.exportConclusions');
+        btn.disabled = false;
+    }
+
+    // ── Apply i18n for dynamic text ──
+    renderNavbar('oar');
+    renderSidebar();
+    applyI18nCommon();
+    </script>
+</body>
+</html>

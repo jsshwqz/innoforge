@@ -143,6 +143,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/compare", get(routes::compare_page))
         .route("/idea", get(routes::idea_page))
         .route("/settings", get(routes::settings_page))
+        .route("/oa-response", get(routes::office_action_response_page))
         // 设置 API / Settings API
         .route("/api/settings", get(routes::api_get_settings))
         .route("/api/settings/serpapi", post(routes::api_save_serpapi))

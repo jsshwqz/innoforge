@@ -1083,8 +1083,18 @@ pub async fn api_ai_office_action_response(
         .read()
         .unwrap_or_else(|e| e.into_inner())
         .ai_client_expert();
+    let oa_type = req
+        .get("oa_type")
+        .and_then(|v| v.as_str())
+        .filter(|&v| v == "abnormal" || v == "reject_review" || v == "first_exam")
+        .unwrap_or("first_exam");
+    let depth = req
+        .get("depth")
+        .and_then(|v| v.as_str())
+        .filter(|&v| v == "shallow" || v == "deep")
+        .unwrap_or("medium");
     match ai
-        .office_action_response(&my_info, &oa_text, &refs_info)
+        .office_action_response(&my_info, &oa_text, &refs_info, oa_type, depth)
         .await
     {
         Ok(content) => Json(json!({"status": "ok", "analysis": content})),

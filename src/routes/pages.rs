@@ -37,6 +37,10 @@ pub async fn settings_page() -> Html<String> {
     Html(include_str!("../../templates/settings.html").to_string())
 }
 
+pub async fn office_action_response_page() -> Html<String> {
+    Html(include_str!("../../templates/office_action_response.html").to_string())
+}
+
 pub async fn patent_detail_page(Path(id): Path<String>, State(s): State<AppState>) -> Response {
     let t = include_str!("../../templates/patent_detail.html");
     match s.db.get_patent(&id) {

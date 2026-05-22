@@ -106,6 +106,7 @@ pub async fn start_server(db_path: &str) -> anyhow::Result<()> {
         .route("/compare", get(routes::compare_page))
         .route("/idea", get(routes::idea_page))
         .route("/settings", get(routes::settings_page))
+        .route("/oa-response", get(routes::office_action_response_page))
         .route("/api/settings", get(routes::api_get_settings))
         .route("/api/settings/serpapi", post(routes::api_save_serpapi))
         .route("/api/settings/ai", post(routes::api_save_ai))
