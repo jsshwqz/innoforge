@@ -185,7 +185,9 @@
     }
 
     function getQuoteBtn() {
-        if (!quoteBtn) quoteBtn = createQuoteButton();
+        if (!quoteBtn || !document.body.contains(quoteBtn)) {
+            quoteBtn = createQuoteButton();
+        }
         return quoteBtn;
     }
 
