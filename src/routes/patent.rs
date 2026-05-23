@@ -110,7 +110,7 @@ pub async fn api_enrich_patent(
                                         .replace("</p>", "\n");
                                     // Strip remaining HTML tags
                                     let re = regex::Regex::new(r"<[^>]+>")
-                                        .unwrap_or_else(|_| regex::Regex::new(r"$^").unwrap());
+                                        .expect("valid html tag regex");
                                     description = re.replace_all(&clean, "").trim().to_string();
                                     println!("[ENRICH] Got description len={}", description.len());
                                 }
@@ -1013,11 +1013,13 @@ async fn fetch_legal_from_sogou(patent_number: &str) -> anyhow::Result<LegalStat
     static RE_SCRIPT: OnceLock<regex::Regex> = OnceLock::new();
     static RE_STYLE: OnceLock<regex::Regex> = OnceLock::new();
     static RE_TAG: OnceLock<regex::Regex> = OnceLock::new();
-    let re_script =
-        RE_SCRIPT.get_or_init(|| regex::Regex::new(r"(?is)<script[^>]*>.*?</script>").unwrap());
-    let re_style =
-        RE_STYLE.get_or_init(|| regex::Regex::new(r"(?is)<style[^>]*>.*?</style>").unwrap());
-    let re_tag = RE_TAG.get_or_init(|| regex::Regex::new(r"<[^>]*>").unwrap());
+    let re_script = RE_SCRIPT.get_or_init(|| {
+        regex::Regex::new(r"(?is)<script[^>]*>.*?</script>").expect("valid script regex")
+    });
+    let re_style = RE_STYLE.get_or_init(|| {
+        regex::Regex::new(r"(?is)<style[^>]*>.*?</style>").expect("valid style regex")
+    });
+    let re_tag = RE_TAG.get_or_init(|| regex::Regex::new(r"<[^>]*>").expect("valid tag regex"));
     let no_script = re_script.replace_all(&html, " ");
     let no_style = re_style.replace_all(&no_script, " ");
     // Strip HTML tags for clean text matching

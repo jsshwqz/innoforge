@@ -13,8 +13,10 @@ node_modules
 package-lock.json
 server.log
 
-# Android signing credentials (passwords, not keystore)
-keystore.properties
+# 根目录不放置源代码文件（所有源码在 src/ 下）
+/main.rs
+# 工具脚本不提交到仓库
+/write_start.py
 memory_store.json
 
 # 构建产物和临时文件

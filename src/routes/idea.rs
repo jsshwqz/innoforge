@@ -1130,10 +1130,13 @@ pub async fn api_idea_report_html(
     let idea = match s.db.get_idea(&idea_id) {
         Ok(Some(i)) => i,
         _ => {
-            return Response::builder()
+            return match Response::builder()
                 .status(StatusCode::NOT_FOUND)
                 .body(Body::from("创意不存在"))
-                .unwrap();
+            {
+                Ok(resp) => resp,
+                Err(_) => Response::new(Body::from("创意不存在")),
+            };
         }
     };
 
@@ -1236,11 +1239,14 @@ pub async fn api_idea_report_html(
         cards = cards_html,
     );
 
-    Response::builder()
+    match Response::builder()
         .status(StatusCode::OK)
         .header("Content-Type", "text/html; charset=utf-8")
         .body(Body::from(html))
-        .unwrap()
+    {
+        Ok(resp) => resp,
+        Err(_) => Response::new(Body::from("Internal error generating report")),
+    }
 }
 
 /// 简单 HTML 转义 / Simple HTML escape
@@ -1361,13 +1367,13 @@ fn inline_md(s: &str) -> String {
     use std::borrow::Cow;
     let s: Cow<str> = Cow::Borrowed(s);
     // Bold
-    let re_bold = regex::Regex::new(r"\*\*(.+?)\*\*").unwrap();
+    let re_bold = regex::Regex::new(r"\*\*(.+?)\*\*").expect("valid bold regex");
     let s = re_bold.replace_all(&s, "<strong>$1</strong>");
     // Italic
-    let re_italic = regex::Regex::new(r"\*(.+?)\*").unwrap();
+    let re_italic = regex::Regex::new(r"\*(.+?)\*").expect("valid italic regex");
     let s = re_italic.replace_all(&s, "<em>$1</em>");
     // Inline code
-    let re_code = regex::Regex::new(r"`([^`]+)`").unwrap();
+    let re_code = regex::Regex::new(r"`([^`]+)`").expect("valid code regex");
     let s = re_code.replace_all(
         &s,
         "<code style='background:#f3f4f6;padding:1px 4px;border-radius:3px;'>$1</code>",

@@ -185,9 +185,9 @@ docs/          # 文档和规划
 
 - **版本**：见 `Cargo.toml` 的 `version` 字段（以此为准）
 - **DB Schema**：见 `src/db/migrations.rs` 中最新迁移版本号
-- **Pipeline 步骤**：13 步（见 `src/pipeline/state.rs` 的 `PipelineStep` 枚举）
-- **AI 服务商**：1 个（DeepSeek）
+- **Pipeline 步骤**：15 步（见 `src/pipeline/state.rs` 的 `PipelineStep` 枚举）
+- **AI 服务商**：支持多服务商（DeepSeek 为主，Gemini 为副，可在设置页切换）
 - **搜索源**：2 个（SerpAPI / 本地 SQLite FTS5）
-- **前端页面**：7 个（index/search/patent_detail/idea/ai/compare/settings）
+- **前端页面**：8 个（index/search/patent_detail/idea/ai/compare/settings/oa-response）
 
 > 注意：版本号、Schema 版本等数字会随开发变化，请以源码文件为准，不要依赖本节的静态数字。

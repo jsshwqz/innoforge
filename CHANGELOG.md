@@ -22,6 +22,12 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 ### 改进 / Improved
 - **AI 通俗表达规则** — 深度/中度模式新增第 8/7 条规则，要求 AI 保留全部技术分析能力但用通俗语言呈现结论和推理过程，避免堆砌公式
   Plain language rule added to deep/medium prompts: AI retains full analytical capability but explains conclusions in accessible language
+- **代码质量加固** — 消除生产路径 10+ 处 `unwrap()` 调用（`idea.rs` / `pages.rs` / `patent.rs` / `db/patent.rs` / `upload.rs`），包括 `Response::builder().unwrap()` → match 模式、`text_result.unwrap()` → 统一 match、`country.unwrap()` → `country_val` 提前绑定、`unwrap_or_default()` 替代
+  Production code quality: eliminated 10+ `unwrap()` calls across 5 source files, replaced with match/`unwrap_or_default()`/`expect()` patterns
+- **文档同步** — STATUS.md 版本同步到 v0.6.0、CLAUDE.md Pipeline 步数修正为 15 步、v0.6.0 计划文档创建
+  Documentation sync: STATUS.md updated to v0.6.0, CLAUDE.md pipeline step count corrected to 15, v0.6.0 plan doc created
+- **仓库清理** — 删除根目录冗余 `main.rs`（过时副本）和 `write_start.py` 工具脚本，`.gitignore` 增加防护
+  Repo cleanup: removed stale root `main.rs` and `write_start.py`, added .gitignore entries
 
 ### 修复 / Fixed
 - **引用按钮不显示** — ai.html 的 getQuoteBtn 添加 document.body.contains 检测，修复 renderAllMessages 清空 DOM 后引用按钮丢失的问题

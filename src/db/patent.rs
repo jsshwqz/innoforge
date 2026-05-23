@@ -481,7 +481,9 @@ impl super::Database {
         let q = format!("%{}%", query);
         let date_from = date_from.unwrap_or("");
         let date_to = date_to.unwrap_or("");
-        let has_country = country.filter(|s| !s.is_empty()).is_some();
+        let country = country.filter(|s| !s.is_empty());
+        let has_country = country.is_some();
+        let country_val = country.unwrap_or("");
 
         let where_clause = if has_country {
             "WHERE (title LIKE ?1 OR abstract_text LIKE ?1 OR applicant LIKE ?1 OR inventor LIKE ?1 OR patent_number LIKE ?1)
@@ -496,9 +498,7 @@ impl super::Database {
 
         let total: usize = if has_country {
             c.prepare(&format!("SELECT COUNT(*) FROM patents {where_clause}"))?
-                .query_row(params![q, country.unwrap(), date_from, date_to], |r| {
-                    r.get(0)
-                })?
+                .query_row(params![q, country_val, date_from, date_to], |r| r.get(0))?
         } else {
             c.prepare(&format!("SELECT COUNT(*) FROM patents {where_clause}"))?
                 .query_row(params![q, date_from, date_to], |r| r.get(0))?
@@ -513,7 +513,7 @@ impl super::Database {
                 .query_map(
                     params![
                         q,
-                        country.unwrap(),
+                        country_val,
                         date_from,
                         date_to,
                         page_size as i64,

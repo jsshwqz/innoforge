@@ -123,22 +123,23 @@ pub async fn api_upload_compare(
             Err(e) => return Json(json!({"error": format!("图片识别失败: {}", e)})),
         }
     } else if ext == "pdf" {
-        let text_result = extract_pdf_text(&file_bytes);
-        let has_text = matches!(&text_result, Ok(t) if !t.trim().is_empty());
-        if has_text {
-            text_result.unwrap()
-        } else {
-            // 文字提取失败，用 AI 视觉模型兜底
-            tracing::info!("[UPLOAD] PDF 文字提取失败，尝试 AI 视觉识别...");
-            let ai_client = s
-                .config
-                .read()
-                .unwrap_or_else(|e| e.into_inner())
-                .ai_client();
-            match extract_pdf_via_ai_vision(&file_bytes, &ai_client).await {
-                Ok(t) => t,
-                Err(e) => {
-                    return Json(json!({"error": format!("PDF 提取失败（含 AI 视觉兜底）: {}", e)}))
+        match extract_pdf_text(&file_bytes) {
+            Ok(t) if !t.trim().is_empty() => t,
+            _ => {
+                // 文字提取失败，用 AI 视觉模型兜底
+                tracing::info!("[UPLOAD] PDF 文字提取失败，尝试 AI 视觉识别...");
+                let ai_client = s
+                    .config
+                    .read()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .ai_client();
+                match extract_pdf_via_ai_vision(&file_bytes, &ai_client).await {
+                    Ok(t) => t,
+                    Err(e) => {
+                        return Json(
+                            json!({"error": format!("PDF 提取失败（含 AI 视觉兜底）: {}", e)}),
+                        )
+                    }
                 }
             }
         }
@@ -259,22 +260,23 @@ pub async fn api_upload_extract(
             Err(e) => return Json(json!({"error": format!("图片识别失败: {}", e)})),
         }
     } else if ext == "pdf" {
-        let text_result = extract_pdf_text(&file_bytes);
-        let has_text = matches!(&text_result, Ok(t) if !t.trim().is_empty());
-        if has_text {
-            text_result.unwrap()
-        } else {
-            // 文字提取失败，用 AI 视觉模型兜底
-            tracing::info!("[UPLOAD] PDF 文字提取失败，尝试 AI 视觉识别...");
-            let ai_client = s
-                .config
-                .read()
-                .unwrap_or_else(|e| e.into_inner())
-                .ai_client();
-            match extract_pdf_via_ai_vision(&file_bytes, &ai_client).await {
-                Ok(t) => t,
-                Err(e) => {
-                    return Json(json!({"error": format!("PDF 提取失败（含 AI 视觉兜底）: {}", e)}))
+        match extract_pdf_text(&file_bytes) {
+            Ok(t) if !t.trim().is_empty() => t,
+            _ => {
+                // 文字提取失败，用 AI 视觉模型兜底
+                tracing::info!("[UPLOAD] PDF 文字提取失败，尝试 AI 视觉识别...");
+                let ai_client = s
+                    .config
+                    .read()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .ai_client();
+                match extract_pdf_via_ai_vision(&file_bytes, &ai_client).await {
+                    Ok(t) => t,
+                    Err(e) => {
+                        return Json(
+                            json!({"error": format!("PDF 提取失败（含 AI 视觉兜底）: {}", e)}),
+                        )
+                    }
                 }
             }
         }

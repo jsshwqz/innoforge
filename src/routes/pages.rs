@@ -14,7 +14,7 @@ pub async fn index_page() -> Html<String> {
 pub async fn search_page() -> Html<String> {
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_default()
         .as_secs();
     let html = include_str!("../../templates/search.html")
         .replace("{{timestamp}}", &timestamp.to_string());
