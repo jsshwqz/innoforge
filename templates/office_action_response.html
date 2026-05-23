@@ -275,10 +275,11 @@
     var discussionSending = false;
 
     function saveOaState() {
-        try { sessionStorage.setItem(OA_STORAGE_KEY, JSON.stringify(uploadedData)); } catch(e) {}
+        try { localStorage.setItem(OA_STORAGE_KEY, JSON.stringify(_uploadedData)); } catch(e) {}
     }
-    // uploadedData 用 Proxy 包装，任何修改自动持久化到 sessionStorage
+    // uploadedData 用 Proxy 包装，任何修改自动持久化到 localStorage（关页面不丢）
     var _uploadedData = {};
+    try { if (localStorage.getItem('innoforge_oa_data')) { _uploadedData = JSON.parse(localStorage.getItem('innoforge_oa_data')); } } catch(e) { _uploadedData = {}; }
     var uploadedData = new Proxy(_uploadedData, {
         set: function(target, key, value) { target[key] = value; saveOaState(); return true; },
         deleteProperty: function(target, key) { delete target[key]; saveOaState(); return true; },
@@ -289,7 +290,7 @@
 
     function loadOaState() {
         try {
-            var saved = sessionStorage.getItem(OA_STORAGE_KEY);
+            var saved = localStorage.getItem(OA_STORAGE_KEY);
             if (saved) {
                 var data = JSON.parse(saved);
                 Object.keys(data).forEach(function(k) { uploadedData[k] = data[k]; });
@@ -299,7 +300,7 @@
     }
 
     function clearOaState() {
-        try { sessionStorage.removeItem(OA_STORAGE_KEY); } catch(e) {}
+        try { localStorage.removeItem(OA_STORAGE_KEY); } catch(e) {}
     }
 
     function restoreOaUi() {
