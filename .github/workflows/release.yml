@@ -71,13 +71,21 @@ jobs:
           fi
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ inputs.tag || github.ref_name }}
-          body_path: release_notes.md
-          make_latest: true
-          files: |
-            innoforge-ubuntu-latest/innoforge
-            innoforge-windows-latest/innoforge.exe
-            innoforge-macos-latest/innoforge
-          fail_on_unmatched_files: false
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Create or update release, then upload assets
+          gh release create "$TAG" \
+            --notes-file release_notes.md \
+            --latest \
+            || true  # release may already exist
+
+          # Upload assets (idempotent — overwrite existing)
+          for f in innoforge-ubuntu-latest/innoforge \
+                   innoforge-windows-latest/innoforge.exe \
+                   innoforge-macos-latest/innoforge; do
+            if [ -f "$f" ]; then
+              gh release upload "$TAG" "$f" --clobber || echo "upload skipped for $f"
+            fi
+          done
