@@ -827,6 +827,70 @@
         showDiscussionExportButton();
     }
 
+    // ── 引用选中文字 / Quote selected text from discussion messages ──
+    (function() {
+        var discMsgs = document.getElementById('discussion-messages');
+        if (!discMsgs) return;
+        var dQuoteBtn = null, dQuoteText = '';
+        function createBtn() {
+            var b = document.createElement('div');
+            b.className = 'quote-btn';
+            b.textContent = '引用';
+            b.addEventListener('click', function(e) {
+                e.stopPropagation();
+                var input = document.getElementById('discussion-input');
+                if (input && dQuoteText) {
+                    var pos = input.selectionStart || input.value.length;
+                    input.value = input.value.slice(0, pos) + '> ' + dQuoteText.replace(/\n/g, '\n> ') + '\n\n' + input.value.slice(pos);
+                    input.focus();
+                }
+                dQuoteText = '';
+                b.style.display = 'none';
+            });
+            discMsgs.appendChild(b);
+            return b;
+        }
+        function getBtn() {
+            if (!dQuoteBtn || !document.body.contains(dQuoteBtn)) dQuoteBtn = createBtn();
+            return dQuoteBtn;
+        }
+        function hideBtn() { try { getBtn().style.display = 'none'; } catch(e) {} }
+        discMsgs.addEventListener('mouseup', function(e) {
+            var t = e.target;
+            if (t && t.nodeType === 3) t = t.parentNode;
+            if (t && t.closest && t.closest('.quote-btn')) return;
+            setTimeout(function() {
+                var sel = window.getSelection();
+                var text = sel ? sel.toString().trim() : '';
+                if (!text) { hideBtn(); return; }
+                var node = sel.anchorNode;
+                if (node) {
+                    if (node.nodeType === 3) node = node.parentNode;
+                    if (!node.closest('.msg-bubble')) { hideBtn(); return; }
+                }
+                if (!sel.rangeCount) return;
+                var range = sel.getRangeAt(0);
+                var rect = range.getBoundingClientRect();
+                if (!rect || (rect.width === 0 && rect.height === 0)) { hideBtn(); return; }
+                var btn = getBtn();
+                dQuoteText = text;
+                var cr = discMsgs.getBoundingClientRect();
+                var left = rect.right - cr.left - btn.offsetWidth / 2;
+                var top = rect.top - cr.top - 36;
+                left = Math.max(4, Math.min(left, cr.width - btn.offsetWidth - 4));
+                top = Math.max(4, top);
+                btn.style.left = left + 'px';
+                btn.style.top = top + 'px';
+                btn.style.display = 'block';
+            }, 10);
+        });
+        discMsgs.addEventListener('scroll', hideBtn);
+        document.addEventListener('mousedown', function(e) {
+            if (e.target && e.target.closest && e.target.closest('.quote-btn')) return;
+            hideBtn();
+        });
+    })();
+
     async function sendDiscussionMessage() {
         var input = document.getElementById('discussion-input');
         var text = input.value.trim();

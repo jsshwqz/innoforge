@@ -397,6 +397,70 @@
         }
     }
 
+    // ── 引用选中文字 / Quote selected text ──
+    (function() {
+        var chatMessages = document.getElementById('chat-messages');
+        if (!chatMessages) return;
+        var pQuoteBtn = null, pQuoteText = '';
+        function createBtn() {
+            var b = document.createElement('div');
+            b.className = 'quote-btn';
+            b.textContent = '引用';
+            b.addEventListener('click', function(e) {
+                e.stopPropagation();
+                var input = document.getElementById('chat-msg');
+                if (input && pQuoteText) {
+                    var pos = input.selectionStart || input.value.length;
+                    input.value = input.value.slice(0, pos) + '> ' + pQuoteText.replace(/\n/g, '\n> ') + '\n\n' + input.value.slice(pos);
+                    input.focus();
+                }
+                pQuoteText = '';
+                b.style.display = 'none';
+            });
+            chatMessages.appendChild(b);
+            return b;
+        }
+        function getBtn() {
+            if (!pQuoteBtn || !document.body.contains(pQuoteBtn)) pQuoteBtn = createBtn();
+            return pQuoteBtn;
+        }
+        chatMessages.addEventListener('mouseup', function(e) {
+            var t = e.target;
+            if (t && t.nodeType === 3) t = t.parentNode;
+            if (t && t.closest && t.closest('.quote-btn')) return;
+            setTimeout(function() {
+                var sel = window.getSelection();
+                var text = sel ? sel.toString().trim() : '';
+                if (!text) { getBtn().style.display = 'none'; return; }
+                var node = sel.anchorNode;
+                if (node) {
+                    if (node.nodeType === 3) node = node.parentNode;
+                    if (!node.closest('.msg')) { getBtn().style.display = 'none'; return; }
+                }
+                if (!sel.rangeCount) return;
+                var range = sel.getRangeAt(0);
+                var rect = range.getBoundingClientRect();
+                if (!rect || (rect.width === 0 && rect.height === 0)) { getBtn().style.display = 'none'; return; }
+                var btn = getBtn();
+                pQuoteText = text;
+                var cr = chatMessages.getBoundingClientRect();
+                var left = rect.right - cr.left - btn.offsetWidth / 2;
+                var top = rect.top - cr.top - 36;
+                left = Math.max(4, Math.min(left, cr.width - btn.offsetWidth - 4));
+                top = Math.max(4, top);
+                btn.style.left = left + 'px';
+                btn.style.top = top + 'px';
+                btn.style.display = 'block';
+            }, 10);
+        });
+        chatMessages.addEventListener('scroll', function() { getBtn().style.display = 'none'; });
+        document.addEventListener('mousedown', function(e) {
+            if (e.target && e.target.closest && e.target.closest('.quote-btn')) return;
+            var btn = getBtn();
+            if (btn) btn.style.display = 'none';
+        });
+    })();
+
     function showPatentStopButton() {
         var btn = document.getElementById('patent-stop-btn');
         if (btn) btn.style.display = '';
