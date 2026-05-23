@@ -280,12 +280,10 @@
     // uploadedData 用 Proxy 包装，任何修改自动持久化到 localStorage（关页面不丢）
     var _uploadedData = {};
     try { if (localStorage.getItem('innoforge_oa_data')) { _uploadedData = JSON.parse(localStorage.getItem('innoforge_oa_data')); } } catch(e) { _uploadedData = {}; }
+    // Proxy 仅拦截 set/delete 触发自动保存；get/遍历等操作直接转发到 target
     var uploadedData = new Proxy(_uploadedData, {
         set: function(target, key, value) { target[key] = value; saveOaState(); return true; },
         deleteProperty: function(target, key) { delete target[key]; saveOaState(); return true; },
-        get: function(target, key) { return target[key]; },
-        has: function(target, key) { return key in target; },
-        ownKeys: function(target) { return Reflect.ownKeys(target); },
     });
 
     function loadOaState() {
@@ -293,7 +291,7 @@
             var saved = localStorage.getItem(OA_STORAGE_KEY);
             if (saved) {
                 var data = JSON.parse(saved);
-                Object.keys(data).forEach(function(k) { uploadedData[k] = data[k]; });
+                Object.keys(data).forEach(function(k) { _uploadedData[k] = data[k]; });
                 restoreOaUi();
             }
         } catch(e) {}
@@ -304,7 +302,7 @@
     }
 
     function restoreOaUi() {
-        for (var key in uploadedData) {
+        for (var key in _uploadedData) {
             if (key === 'my') {
                 document.getElementById('my-patent').disabled = true;
                 var d = uploadedData[key];
@@ -598,13 +596,13 @@
 
     // ── get input data ──
     function getMyPatent() {
-        if (uploadedData['my']) return uploadedData['my'];
+        if (_uploadedData['my']) return _uploadedData['my'];
         var val = document.getElementById('my-patent').value.trim();
         return val || null;
     }
 
     function getOA() {
-        if (uploadedData['oa']) return uploadedData['oa'];
+        if (_uploadedData['oa']) return _uploadedData['oa'];
         var val = document.getElementById('oa-input').value.trim();
         return val || null;
     }
@@ -615,7 +613,8 @@
         var rows = document.querySelectorAll('.ref-row');
         for (var i = 0; i < rows.length; i++) {
             var idx = rows[i].getAttribute('data-idx');
-            if (uploadedData['ref_' + idx]) {
+            if (_uploadedData['ref_' + idx]) {
+                refs.push(_uploadedData['ref_' + idx]);
                 refs.push(uploadedData['ref_' + idx]);
             } else {
                 var val = inputs[i] ? inputs[i].value.trim() : '';
