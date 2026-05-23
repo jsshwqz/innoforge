@@ -59,6 +59,11 @@ jobs:
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Debug artifacts
+        run: find artifacts -type f | head -20
 
       - name: Generate release notes
         id: release_notes
@@ -75,17 +80,13 @@ jobs:
           TAG: ${{ inputs.tag || github.ref_name }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Create or update release, then upload assets
+          # Create release (may already exist — ignore 422)
           gh release create "$TAG" \
             --notes-file release_notes.md \
-            --latest \
-            || true  # release may already exist
+            --latest 2>/dev/null || true
 
-          # Upload assets (idempotent — overwrite existing)
-          for f in innoforge-ubuntu-latest/innoforge \
-                   innoforge-windows-latest/innoforge.exe \
-                   innoforge-macos-latest/innoforge; do
-            if [ -f "$f" ]; then
-              gh release upload "$TAG" "$f" --clobber || echo "upload skipped for $f"
-            fi
+          # Find and upload all built binaries
+          find artifacts -type f \( -name "innoforge" -o -name "innoforge.exe" \) | while read f; do
+            echo "Uploading $f..."
+            gh release upload "$TAG" "$f" --clobber 2>/dev/null || echo "upload skipped for $f"
           done
