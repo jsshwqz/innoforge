@@ -351,7 +351,7 @@
             deepBtn.style.color = '#fff';
             quickBtn.style.background = '#21262d';
             quickBtn.style.color = '#8b949e';
-            hint.textContent = i18nLang === 'en' ? '13-step pipeline + multi-angle AI analysis' : '13 步流水线 + 多角度 AI 分析';
+            hint.textContent = i18nLang === 'en' ? '15-step pipeline + multi-angle AI analysis' : '15 步流水线 + 多角度 AI 分析';
         }
     }
 
@@ -383,7 +383,7 @@
         loadHistory();
     }
 
-    // 14-step pipeline definitions (v0.5.2: +ExperimentValidation)
+    // 15-step pipeline definitions (v0.6.0: +PriorArtCluster)
     const PIPELINE_STEPS = [
         { key: 'parse_input', zh: '解析输入，提取关键词', en: 'Parse input & extract keywords', type: 'code' },
         { key: 'expand_query', zh: 'AI 扩展搜索词', en: 'AI query expansion', type: 'llm' },
@@ -392,6 +392,7 @@
         { key: 'diversity_gate', zh: '多样性检查', en: 'Diversity gate', type: 'code' },
         { key: 'compute_similarity', zh: '相似度计算', en: 'Compute similarity', type: 'code' },
         { key: 'rank_and_filter', zh: '排序过滤', en: 'Rank & filter', type: 'code' },
+        { key: 'prior_art_cluster', zh: '现有技术聚类', en: 'Prior art clustering', type: 'code' },
         { key: 'detect_contradictions', zh: '矛盾信号检测', en: 'Detect contradictions', type: 'code' },
         { key: 'score_novelty', zh: '新颖性评分', en: 'Score novelty', type: 'code' },
         { key: 'ai_deep_analysis', zh: 'AI 深度分析', en: 'AI deep analysis', type: 'llm' },
@@ -429,10 +430,11 @@
         else if (status === 'error') icon = '❌';
         el.querySelector('.step-icon').innerHTML = DOMPurify.sanitize(icon);
 
-        // 多维推演子进度显示
-        var subEl = document.getElementById('deep-reasoning-sub');
-        if (subStep && stepIndex === 10) {
-            // Step 11 = index 10 = AiDeepAnalysis
+        // 通用子步骤显示（所有步骤通用，不限于 AiDeepAnalysis）
+        var subContainerId = 'sub-' + stepIndex;
+        var subEl = document.getElementById(subContainerId);
+        if (subStep) {
+            // 深度学习维度标签（step 10 特有）
             var dimLabels = {
                 'scientific': '🔬 科学推导', 'dialectical': '⚡ 辩证批判',
                 'epistemological': '🔍 知识审计', 'phenomenological': '🌊 本质还原',
@@ -442,17 +444,17 @@
             var label = dimLabels[subStep] || subStep;
             if (!subEl) {
                 subEl = document.createElement('div');
-                subEl.id = 'deep-reasoning-sub';
+                subEl.id = subContainerId;
                 subEl.style.cssText = 'margin-top:8px;padding:8px 12px;background:#0d1117;border:1px solid #30363d;border-radius:6px;font-size:0.85em;';
                 el.appendChild(subEl);
             }
             var pctVal = subProgress ? Math.round(subProgress * 100) : 0;
             subEl.innerHTML = DOMPurify.sanitize(
                 '<div style="display:flex;justify-content:space-between;align-items:center;">' +
-                '<span style="color:#d2a8ff;">' + label + '</span>' +
+                '<span style="color:' + (stepIndex === 10 ? '#d2a8ff' : '#58a6ff') + ';">' + label + '</span>' +
                 '<span style="color:#8b949e;">' + pctVal + '%</span></div>' +
                 '<div style="height:3px;background:#21262d;border-radius:2px;margin-top:4px;">' +
-                '<div style="height:100%;width:' + pctVal + '%;background:#d2a8ff;border-radius:2px;transition:width 0.3s;"></div></div>'
+                '<div style="height:100%;width:' + pctVal + '%;background:' + (stepIndex === 10 ? '#d2a8ff' : '#58a6ff') + ';border-radius:2px;transition:width 0.3s;"></div></div>'
             );
         } else if (subEl && status === 'done') {
             subEl.remove();
