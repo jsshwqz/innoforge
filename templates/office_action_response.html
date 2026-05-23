@@ -276,12 +276,6 @@
     // ── Helpers ──
     function escapeHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
-    function t(key) {
-        if (typeof window.i18nLang === 'undefined') window.i18nLang = 'zh';
-        var map = window['_i18n_' + window.i18nLang];
-        return (map && map[key]) || key;
-    }
-
     function triggerFileSelect(callback) {
         var input = document.createElement('input');
         input.type = 'file';
