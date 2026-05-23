@@ -31,12 +31,14 @@
 ## 已知问题 / Known Issues
 
 ### HIGH
-1. **Pipeline 步骤可视化不完整** — 前端进度条只显示主步骤，缺少子步骤状态。见 `docs/plans/2026-05-11-v0.5.9-plan.md` P2-1
-2. **聊天消息分段加载未实现** — 长对话目前全部渲染，可能卡顿。见 v0.5.9 计划 P1-2
+1. **Pipeline 步骤可视化不完整** — 前端进度条只显示主步骤，缺少子步骤状态 ✅ 2026-05-23 已修复（15 步 + 通用子步骤）
+2. **聊天消息分段加载未实现** — ✅ 2026-05-23 已实现（后端分页 + 前端加载更多）
 
 ### MEDIUM
-3. **Linux/macOS 安装包未更新** — 需要手动在对应平台编译，或等待 CI 配置完成
-4. **Gitee Release 同步** — ✅ 2026-05-23 已同步 v0.5.9 tag + v0.5.10/v0.6.0 release entries
+3. **Linux/macOS 安装包未更新** — GitHub Release v0.6.0 缺 macOS 二进制（构建成功但资产未上传，疑似 download-artifact@v4 路径问题），可手动触发 workflow_dispatch 重试
+
+### 已解决 / Resolved
+- ~~Gitee Release 同步~~ — ✅ 2026-05-23 v0.5.10/v0.6.0 Release + v0.5.9 tag
 
 ### 已解决 / Resolved
 - ~~生产路径残留 unwrap()~~ — ✅ 2026-05-23 修复 10+ 处
