@@ -84,6 +84,19 @@
 .discussion-input-row button:disabled { opacity:0.5; cursor:not-allowed; }
 .quote-btn { position:absolute; background:#238636; color:#fff; padding:4px 10px; border-radius:4px; font-size:12px; cursor:pointer; z-index:100; display:none; user-select:none; }
 .quote-btn:hover { background:#2ea043; }
+.arg-card { padding:8px 10px; background:#161b22; border:1px solid #30363d; border-radius:6px; font-size:12px; display:flex; align-items:flex-start; gap:8px; }
+.arg-card .arg-type { font-size:10px; padding:1px 6px; border-radius:3px; white-space:nowrap; font-weight:600; }
+.arg-type-confirmed { background:#23863622; color:#3fb950; border:1px solid #238636; }
+.arg-type-pending { background:#d2992222; color:#d29922; border:1px solid #d29922; }
+.arg-type-risk { background:#da363322; color:#f85149; border:1px solid #da3633; }
+.arg-card .arg-text { flex:1; color:#c9d1d9; line-height:1.5; }
+.arg-card .arg-actions { display:flex; gap:4px; }
+.arg-card .arg-actions button { background:none; border:1px solid #30363d; border-radius:3px; color:#8b949e; cursor:pointer; font-size:11px; padding:2px 6px; }
+.arg-card .arg-actions button:hover { background:#30363d; color:#c9d1d9; }
+.arg-card.adopted { opacity:0.5; border-color:#3fb950; }
+.arg-card.adopted .arg-actions button { display:none; }
+.arg-card.rejected { opacity:0.4; text-decoration:line-through; }
+.arg-card.rejected .arg-actions button { display:none; }
 </style>
 </head>
 <body>
@@ -166,6 +179,14 @@
         <!-- AI Discussion Panel -->
         <div class="discussion-panel hidden" id="discussion-panel">
             <div class="discussion-header" data-i18n="oar.discussTitle"></div>
+            <!-- 论点看板 / Argument Board -->
+            <div id="arg-board" style="display:none;margin-bottom:12px;padding:12px;background:#0d1117;border:1px solid #30363d;border-radius:8px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                    <span style="color:#58a6ff;font-weight:600;font-size:13px;">📋 <span data-i18n="oar.argTitle"></span></span>
+                    <span style="color:#8b949e;font-size:11px;cursor:pointer;" onclick="extractArgConclusions()" id="btn-extract-args">📝 <span data-i18n="oar.extractArgs"></span></span>
+                </div>
+                <div id="arg-list" style="display:flex;flex-direction:column;gap:6px;"></div>
+            </div>
             <div class="discussion-messages" id="discussion-messages"></div>
             <div class="discussion-input-row">
                 <input type="text" id="discussion-input" data-i18n-placeholder="oar.discussInput" onkeydown="if(event.key==='Enter') sendDiscussionMessage()">
@@ -988,6 +1009,105 @@
         btn.style.display = 'block';
     }
 
+    // ── Argument Board ──
+    var argList = [];
+
+    function showArgBoard() {
+        var board = document.getElementById('arg-board');
+        if (board) board.style.display = '';
+    }
+
+    function addArgCard(text, type) {
+        // type: 'confirmed' | 'pending' | 'risk'
+        if (!text || text.length < 5) return;
+        // 去重
+        for (var i = 0; i < argList.length; i++) {
+            if (argList[i].text === text) return;
+        }
+        argList.push({ text: text, type: type || 'pending', status: 'active' });
+        renderArgBoard();
+    }
+
+    function renderArgBoard() {
+        var list = document.getElementById('arg-list');
+        if (!list) return;
+        var active = argList.filter(function(a) { return a.status === 'active'; });
+        if (active.length === 0) { list.innerHTML = ''; return; }
+        showArgBoard();
+        var html = '';
+        for (var i = 0; i < active.length; i++) {
+            var a = active[i];
+            var typeClass = a.type === 'confirmed' ? 'arg-type-confirmed' : a.type === 'risk' ? 'arg-type-risk' : 'arg-type-pending';
+            var typeLabel = a.type === 'confirmed' ? '✅ ' + t('oar.argConfirmed') : a.type === 'risk' ? '⚠️ ' + t('oar.argRisk') : '📌 ' + t('oar.argPending');
+            html += '<div class="arg-card" id="arg-card-' + i + '">'
+                + '<div><span class="arg-type ' + typeClass + '">' + typeLabel + '</span></div>'
+                + '<div class="arg-text">' + escapeHtml(a.text) + '</div>'
+                + '<div class="arg-actions">'
+                + '<button onclick="setArgStatus(' + i + ',\'adopted\')" title="' + t('oar.argAdopt') + '">✅</button>'
+                + '<button onclick="setArgStatus(' + i + ',\'rejected\')" title="' + t('oar.argReject') + '">❌</button>'
+                + '</div></div>';
+        }
+        list.innerHTML = DOMPurify.sanitize(html);
+    }
+
+    function setArgStatus(idx, status) {
+        if (idx >= 0 && idx < argList.length) {
+            argList[idx].status = status;
+            renderArgBoard();
+        }
+    }
+
+    function parseArgsFromAI(content) {
+        // 从 AI 回复中提取可能的论点
+        var lines = content.split('\n');
+        var currentType = 'pending';
+        for (var i = 0; i < lines.length; i++) {
+            var line = lines[i].trim();
+            if (!line) continue;
+            // 检测类型标记
+            if (line.indexOf('✅') >= 0 || line.indexOf('已确定') >= 0 || line.indexOf('论点') >= 0) currentType = 'confirmed';
+            else if (line.indexOf('⚠️') >= 0 || line.indexOf('风险') >= 0 || line.indexOf('不足') >= 0) currentType = 'risk';
+            else if (line.indexOf('📌') >= 0 || line.indexOf('建议') >= 0 || line.indexOf('待补充') >= 0) currentType = 'pending';
+            // 提取论点内容（去掉标记符号）
+            var clean = line.replace(/^[\s\-*✅⚠️📌📝\d.]+/, '').trim();
+            if (clean.length > 10 && clean.indexOf('：') >= 0) {
+                addArgCard(clean, currentType);
+            } else if (clean.length > 15 && (line.indexOf('：') >= 0 || line.indexOf(':') >= 0 || line.indexOf('、') >= 0)) {
+                addArgCard(clean, currentType);
+            }
+        }
+    }
+
+    async function extractArgConclusions() {
+        if (discussionHistory.length < 2) return;
+        var btn = document.getElementById('btn-extract-args');
+        btn.textContent = '⏳ ' + t('oar.extracting');
+        btn.style.pointerEvents = 'none';
+        try {
+            var messages = [];
+            for (var i = 1; i < discussionHistory.length; i++) {
+                messages.push({ role: discussionHistory[i][0], content: discussionHistory[i][1] });
+            }
+            var resp = await fetch('/api/ai/chat/conclusions', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ history: messages })
+            });
+            var data = await resp.json();
+            if (data.status === 'ok' && data.conclusions) {
+                var lines = data.conclusions.split('\n');
+                for (var i = 0; i < lines.length; i++) {
+                    var line = lines[i].trim();
+                    if (!line) continue;
+                    if (line.length > 10) addArgCard(line, 'confirmed');
+                }
+                renderArgBoard();
+            }
+        } catch(e) {}
+        btn.textContent = '📝 ' + t('oar.extractArgs');
+        btn.style.pointerEvents = '';
+    }
+
     // ── AI Discussion ──
     function startDiscussion() {
         var my = getMyPatent();
@@ -1077,6 +1197,8 @@
             var content = data.content || 'AI error: empty response';
             discussionHistory.push(['user', text]);
             discussionHistory.push(['assistant', content]);
+            // 从 AI 回复中提取论点
+            parseArgsFromAI(content);
             var aiDiv = document.createElement('div');
             aiDiv.className = 'msg msg-ai';
             aiDiv.innerHTML = '<div class="msg-bubble">' + renderMarkdown(content) + '</div>';
