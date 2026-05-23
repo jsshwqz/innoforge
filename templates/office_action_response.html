@@ -82,6 +82,8 @@
 .discussion-input-row button { padding:8px 18px; background:#21262d; color:#c9d1d9; border:1px solid #30363d; border-radius:6px; cursor:pointer; font-size:13px; font-weight:500; white-space:nowrap; }
 .discussion-input-row button:hover { background:#30363d; color:#58a6ff; }
 .discussion-input-row button:disabled { opacity:0.5; cursor:not-allowed; }
+.quote-btn { position:absolute; background:#238636; color:#fff; padding:4px 10px; border-radius:4px; font-size:12px; cursor:pointer; z-index:100; display:none; user-select:none; }
+.quote-btn:hover { background:#2ea043; }
 </style>
 </head>
 <body>
@@ -880,6 +882,55 @@
         if (el) el.textContent = done + '/' + checks.length + ' ' + t('oar.checklistProgress');
     }
 
+    // ── Quote button for discussion panel ──
+    var discQuoteBtn = null;
+    var discSelectedText = '';
+
+    function createDiscQuoteBtn() {
+        var btn = document.createElement('div');
+        btn.className = 'quote-btn';
+        btn.textContent = '引用';
+        btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            var input = document.getElementById('discussion-input');
+            if (input && discSelectedText) {
+                var pos = input.selectionStart || input.value.length;
+                input.value = input.value.slice(0, pos) + '> ' + discSelectedText.replace(/\n/g, '\n> ') + '\n\n' + input.value.slice(pos);
+                input.focus();
+            }
+            hideDiscQuoteBtn();
+        });
+        document.getElementById('discussion-messages').appendChild(btn);
+        return btn;
+    }
+
+    function getDiscQuoteBtn() {
+        if (!discQuoteBtn || !document.body.contains(discQuoteBtn)) {
+            discQuoteBtn = createDiscQuoteBtn();
+        }
+        return discQuoteBtn;
+    }
+
+    function hideDiscQuoteBtn() {
+        discSelectedText = '';
+        var btn = getDiscQuoteBtn();
+        btn.style.display = 'none';
+    }
+
+    function showDiscQuoteBtn(text, rect) {
+        var btn = getDiscQuoteBtn();
+        discSelectedText = text;
+        var container = document.getElementById('discussion-messages');
+        var cr = container.getBoundingClientRect();
+        var left = rect.right - cr.left - btn.offsetWidth / 2;
+        var top = rect.top - cr.top - 36;
+        left = Math.max(4, Math.min(left, cr.width - btn.offsetWidth - 4));
+        top = Math.max(4, top);
+        btn.style.left = left + 'px';
+        btn.style.top = top + 'px';
+        btn.style.display = 'block';
+    }
+
     // ── AI Discussion ──
     function startDiscussion() {
         var my = getMyPatent();
@@ -1110,11 +1161,43 @@
         } catch(e) { /* load failed */ }
     }
 
+    // ── Discussion quote button event handlers ──
+    function initDiscQuoteEvents() {
+        var container = document.getElementById('discussion-messages');
+        if (!container) return;
+        container.addEventListener('mouseup', function(e) {
+            var target = e.target;
+            if (target && target.nodeType === 3) target = target.parentNode;
+            if (target && target.closest && target.closest('.quote-btn')) return;
+            setTimeout(function() {
+                var sel = window.getSelection();
+                var text = sel ? sel.toString().trim() : '';
+                if (!text) { hideDiscQuoteBtn(); return; }
+                var node = sel.anchorNode;
+                if (node) {
+                    if (node.nodeType === 3) node = node.parentNode;
+                    if (!node.closest('.msg-bubble')) { hideDiscQuoteBtn(); return; }
+                }
+                if (!sel.rangeCount) return;
+                var range = sel.getRangeAt(0);
+                var rect = range.getBoundingClientRect();
+                if (!rect || (rect.width === 0 && rect.height === 0)) { hideDiscQuoteBtn(); return; }
+                showDiscQuoteBtn(text, rect);
+            }, 10);
+        });
+        container.addEventListener('scroll', function() { hideDiscQuoteBtn(); });
+        document.addEventListener('mousedown', function(e) {
+            if (e.target && e.target.closest && e.target.closest('.quote-btn')) return;
+            hideDiscQuoteBtn();
+        });
+    }
+
     // ── Apply i18n for dynamic text ──
     renderNavbar('oar');
     renderSidebar();
     applyI18nCommon();
     loadOaHistory();
+    initDiscQuoteEvents();
     </script>
 </body>
 </html>
