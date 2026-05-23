@@ -290,7 +290,11 @@
     function loadOaState() {
         try {
             var saved = sessionStorage.getItem(OA_STORAGE_KEY);
-            if (saved) { uploadedData = JSON.parse(saved); restoreOaUi(); }
+            if (saved) {
+                var data = JSON.parse(saved);
+                Object.keys(data).forEach(function(k) { uploadedData[k] = data[k]; });
+                restoreOaUi();
+            }
         } catch(e) {}
     }
 
