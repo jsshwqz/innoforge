@@ -265,13 +265,72 @@
         if (file) uploadAndPreviewPdf(file);
     }
 
-    // ── State ──
+    // ── State (persisted to sessionStorage, survives page refresh) ──
+    var OA_STORAGE_KEY = 'innoforge_oa_data';
     var uploadedData = {};
     var refIdxCounter = 0;
     var lastAnalysisRawText = '';
     var discussionHistory = [];
     var discussionAbortController = null;
     var discussionSending = false;
+
+    function saveOaState() {
+        try { sessionStorage.setItem(OA_STORAGE_KEY, JSON.stringify(uploadedData)); } catch(e) {}
+    }
+    // uploadedData 用 Proxy 包装，任何修改自动持久化到 sessionStorage
+    var _uploadedData = {};
+    var uploadedData = new Proxy(_uploadedData, {
+        set: function(target, key, value) { target[key] = value; saveOaState(); return true; },
+        deleteProperty: function(target, key) { delete target[key]; saveOaState(); return true; },
+        get: function(target, key) { return target[key]; },
+        has: function(target, key) { return key in target; },
+        ownKeys: function(target) { return Reflect.ownKeys(target); },
+    });
+
+    function loadOaState() {
+        try {
+            var saved = sessionStorage.getItem(OA_STORAGE_KEY);
+            if (saved) { uploadedData = JSON.parse(saved); restoreOaUi(); }
+        } catch(e) {}
+    }
+
+    function clearOaState() {
+        try { sessionStorage.removeItem(OA_STORAGE_KEY); } catch(e) {}
+    }
+
+    function restoreOaUi() {
+        for (var key in uploadedData) {
+            if (key === 'my') {
+                document.getElementById('my-patent').disabled = true;
+                var d = uploadedData[key];
+                document.getElementById('my-file-tag').innerHTML = '<span class="file-tag">📋 ' + escapeHtml(d.title)
+                    + ' (' + (d.content || '').length + t('common.chars') + ')'
+                    + '<span class="tag-remove" onclick="clearMyPatent()">&times;</span></span>';
+            } else if (key === 'oa') {
+                document.getElementById('oa-input').disabled = true;
+                var d = uploadedData[key];
+                document.getElementById('oa-file-tag').innerHTML = '<span class="file-tag">📋 ' + escapeHtml(d.title)
+                    + ' (' + (d.content || '').length + t('common.chars') + ')'
+                    + '<span class="tag-remove" onclick="clearOA()">&times;</span></span>';
+            } else if (key.startsWith('ref_')) {
+                var idx = key.replace('ref_', '');
+                var rows = document.querySelectorAll('.ref-row');
+                for (var i = 0; i < rows.length; i++) {
+                    if (rows[i].getAttribute('data-idx') === idx) {
+                        rows[i].querySelector('.ref-input').disabled = true;
+                        var d = uploadedData[key];
+                        var tag = rows[i].querySelector('.file-tag-container') || document.createElement('span');
+                        tag.className = 'file-tag-container';
+                        tag.innerHTML = '<span class="file-tag">📋 ' + escapeHtml(d.title)
+                            + ' (' + (d.content || '').length + t('common.chars') + ')'
+                            + '<span class="tag-remove" onclick="clearRefUpload(\'' + idx + '\')">&times;</span></span>';
+                        rows[i].appendChild(tag);
+                        break;
+                    }
+                }
+            }
+        }
+    }
 
     // ── Helpers ──
     function escapeHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -1190,6 +1249,7 @@
     renderNavbar('oar');
     renderSidebar();
     applyI18nCommon();
+    loadOaState();
     loadOaHistory();
     initDiscQuoteEvents();
     </script>
