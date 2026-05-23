@@ -85,8 +85,17 @@ jobs:
             --notes-file release_notes.md \
             --latest 2>/dev/null || true
 
-          # Find and upload all built binaries
+          # Find and upload all built binaries (rename to avoid Linux/macOS name conflict)
           find artifacts -type f \( -name "innoforge" -o -name "innoforge.exe" \) | while read f; do
-            echo "Uploading $f..."
-            gh release upload "$TAG" "$f" --clobber 2>/dev/null || echo "upload skipped for $f"
+            # Derive platform from parent directory name
+            dir=$(basename "$(dirname "$f")")
+            case "$dir" in
+              *ubuntu*)   dest="innoforge-linux-x86_64" ;;
+              *macos*)    dest="innoforge-macos-aarch64" ;;
+              *windows*)  dest="innoforge-windows-x86_64.exe" ;;
+              *)          dest="$(basename "$f")" ;;
+            esac
+            cp "$f" "/tmp/$dest"
+            echo "Uploading $dest..."
+            gh release upload "$TAG" "/tmp/$dest" --clobber 2>&1 || echo "FAILED: $dest"
           done
