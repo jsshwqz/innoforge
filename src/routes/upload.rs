@@ -127,6 +127,15 @@ pub async fn api_upload_compare(
             Ok(t) if !t.trim().is_empty() => t,
             _ => {
                 // 文字提取失败，用 AI 视觉模型兜底
+                let is_deepseek = {
+                    let cfg = s.config.read().unwrap_or_else(|e| e.into_inner());
+                    cfg.ai_base_url.contains("deepseek")
+                };
+                if is_deepseek {
+                    return Json(
+                        json!({"error": "PDF 文字提取失败。当前 AI 为 DeepSeek 不支持图片识别，\n建议：1) 上传可编辑的文本文件(.txt/.docx) 2) 在设置页切换至 Gemini 后重试 3) 直接粘贴文字内容"}),
+                    );
+                }
                 tracing::info!("[UPLOAD] PDF 文字提取失败，尝试 AI 视觉识别...");
                 let ai_client = s
                     .config
@@ -264,6 +273,15 @@ pub async fn api_upload_extract(
             Ok(t) if !t.trim().is_empty() => t,
             _ => {
                 // 文字提取失败，用 AI 视觉模型兜底
+                let is_deepseek = {
+                    let cfg = s.config.read().unwrap_or_else(|e| e.into_inner());
+                    cfg.ai_base_url.contains("deepseek")
+                };
+                if is_deepseek {
+                    return Json(
+                        json!({"error": "PDF 文字提取失败。当前 AI 为 DeepSeek 不支持图片识别，\n建议：1) 上传可编辑的文本文件(.txt/.docx) 2) 在设置页切换至 Gemini 后重试 3) 直接粘贴文字内容"}),
+                    );
+                }
                 tracing::info!("[UPLOAD] PDF 文字提取失败，尝试 AI 视觉识别...");
                 let ai_client = s
                     .config
@@ -400,7 +418,7 @@ async fn extract_pdf_via_ai_vision(
     }
 }
 
-/// Extract text from a PDF file: pdf-extract → PyMuPDF → Tesseract OCR
+/// Extract text from a PDF file: pdf-extract → pdftotext → PyMuPDF → Tesseract OCR
 fn extract_pdf_text(data: &[u8]) -> Result<String, String> {
     // Step 1: Rust pdf-extract
     if let Ok(text) = pdf_extract::extract_text_from_mem(data) {
@@ -408,14 +426,78 @@ fn extract_pdf_text(data: &[u8]) -> Result<String, String> {
             return Ok(text);
         }
     }
-    // Step 2: PyMuPDF
+    // Step 2: pdftotext (poppler, handles malformed PDFs well)
+    if let Ok(text) = extract_pdf_text_pdftotext(data) {
+        if !text.trim().is_empty() {
+            return Ok(text);
+        }
+    }
+    // Step 3: PyMuPDF (Python fitz)
     if let Ok(text) = extract_pdf_text_pymupdf(data) {
         if !text.trim().is_empty() {
             return Ok(text);
         }
     }
-    // Step 3: Tesseract OCR (handles scanned/special font PDFs)
+    // Step 4: Tesseract OCR (handles scanned/special font PDFs)
     extract_pdf_text_ocr(data)
+}
+
+/// Fallback: use pdftotext (poppler) to extract text from PDF
+fn extract_pdf_text_pdftotext(data: &[u8]) -> Result<String, String> {
+    use std::io::Write;
+
+    let tmp_dir = std::env::temp_dir();
+    let tmp_path = tmp_dir.join(format!("innoforge_pdftotext_{}.pdf", std::process::id()));
+    let tmp_str = tmp_path.to_string_lossy().to_string();
+    let out_txt = tmp_dir.join(format!("innoforge_pdftotext_{}.txt", std::process::id()));
+    let out_str = out_txt.to_string_lossy().to_string();
+
+    // Write PDF bytes to temp file
+    let mut f = std::fs::File::create(&tmp_path).map_err(|e| format!("创建临时文件失败: {}", e))?;
+    f.write_all(data)
+        .map_err(|e| format!("写入临时文件失败: {}", e))?;
+    drop(f);
+
+    // Try common pdftotext locations
+    let pdftotext_candidates = [
+        r"C:\Program Files\poppler\Library\bin\pdftotext.exe",
+        r"C:\msys64\mingw64\bin\pdftotext.exe",
+        r"C:\Users\Administrator\scoop\apps\poppler\current\Library\bin\pdftotext.exe",
+        "/mingw64/bin/pdftotext",
+    ];
+
+    let mut result = Ok(String::new());
+    for pdftotext in &pdftotext_candidates {
+        if !std::path::Path::new(pdftotext).exists() {
+            continue;
+        }
+        let output = std::process::Command::new(pdftotext)
+            .args(["-nopgbrk", "-enc", "UTF-8", &tmp_str, &out_str])
+            .output();
+
+        match output {
+            Ok(o) if o.status.success() => {
+                let text = std::fs::read_to_string(&out_str).unwrap_or_default();
+                let _ = std::fs::remove_file(&out_txt);
+                let _ = std::fs::remove_file(&tmp_path);
+                if !text.trim().is_empty() {
+                    return Ok(text);
+                }
+                result = Ok(String::new());
+                break;
+            }
+            Ok(_) => {
+                // pdftotext failed, try next candidate
+                let _ = std::fs::remove_file(&out_txt);
+                continue;
+            }
+            Err(_) => continue,
+        }
+    }
+
+    let _ = std::fs::remove_file(&tmp_path);
+    let _ = std::fs::remove_file(&out_txt);
+    result
 }
 
 /// Fallback: use Python PyMuPDF (fitz) to extract text from PDF
