@@ -5,6 +5,30 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 
+## [v0.6.1] - 2026-05-23
+
+### 改进 / Improved
+- **代码质量加固** — 消除生产路径 14 处 `unwrap()` 调用（`idea.rs` / `pages.rs` / `patent.rs` / `db/patent.rs` / `upload.rs`）
+  Production code quality: eliminated 14 `unwrap()` calls across 5 source files
+- **Pipeline 步骤同步** — 前端进度条从 14 步更新为 15 步（补齐 PriorArtCluster），子步骤显示从 AiDeepAnalysis 独享泛化为所有步骤通用
+  Pipeline visualization: synced to 15 steps, sub-step progress generalized to all steps
+- **聊天消息分段加载** — 后端 `GET /api/chat/:key` 支持 `?limit=N&offset=M` 分页，前端默认加载最近 50 条，提供"加载更多"按钮
+  Chat pagination: backend paginated API + frontend load-more UI
+- **文档治理** — STATUS.md / CLAUDE.md / docs/plans 版本同步，根目录冗余文件清理
+  Documentation governance: STATUS.md, CLAUDE.md, plans synced to v0.6.1
+
+### 修复 / Fixed
+- **prior_art_cluster unwrap** — `best_cluster.unwrap().1` → `is_none_or()`（clippy 建议）
+  prior_art_cluster unwrap eliminated via is_none_or
+- **CI/CD release.yml** — 支持 `workflow_dispatch` 手动触发 + 按平台重命名二进制（解决 Linux/macOS 同名冲突）
+  CI/CD: workflow_dispatch support + platform-specific binary naming
+
+### 修复 / Fixed
+- **Gitee Release 同步** — 补齐 v0.5.9 tag，创建 v0.5.10 / v0.6.0 Release 条目
+  Gitee release sync: added missing v0.5.9 tag, created v0.5.10/v0.6.0 releases
+
+---
+
 ## [v0.6.0] - 2026-05-23
 
 ### 新增 / Added
