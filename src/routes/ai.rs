@@ -859,23 +859,7 @@ pub async fn api_ai_batch_summarize(
 /// Resolve "my patent" input: either patent ID/number from DB, or uploaded text object.
 /// Returns formatted patent info string.
 fn resolve_my_patent(db: &crate::db::Database, req: &serde_json::Value) -> Result<String, String> {
-    // Check for uploaded text first: { "type": "text", "title": "...", "content": "..." }
-    if let Some(obj) = req["my_patent"].as_object() {
-        if obj.get("type").and_then(|v| v.as_str()) == Some("text") {
-            let title = obj
-                .get("title")
-                .and_then(|v| v.as_str())
-                .unwrap_or("上传文件");
-            let content = obj.get("content").and_then(|v| v.as_str()).unwrap_or("");
-            if content.trim().len() < 10 {
-                return Err("上传的文件内容过短".into());
-            }
-            let preview: String = content.chars().take(5000).collect();
-            return Ok(format!("标题：{}\n\n文件全文：\n{}", title, preview));
-        }
-    }
-
-    // Otherwise treat as patent ID/number
+    // Treat as patent ID/number
     let my_id = req["my_patent_id"].as_str().unwrap_or("").trim();
     if my_id.is_empty() {
         return Err("请输入我的专利号或 ID，或上传 PDF".into());
@@ -998,17 +982,18 @@ pub async fn api_ai_office_action_response(
     State(s): State<AppState>,
     Json(req): Json<serde_json::Value>,
 ) -> Json<serde_json::Value> {
-    // my_patent: text object or patent ID string
+    // my_patent: text object (uploaded file with content) or patent ID string
     let my_info = if let Some(obj) = req["my_patent"].as_object() {
-        if obj.get("type").and_then(|v| v.as_str()) == Some("text") {
+        if obj
+            .get("content")
+            .and_then(|v| v.as_str())
+            .map_or(false, |c| c.len() > 10)
+        {
             let title = obj
                 .get("title")
                 .and_then(|v| v.as_str())
                 .unwrap_or("我的专利");
             let content = obj.get("content").and_then(|v| v.as_str()).unwrap_or("");
-            if content.trim().len() < 10 {
-                return Json(json!({"error": "我的专利内容过短"}));
-            }
             format!("标题：{}\n\n{}", title, content)
         } else {
             match resolve_my_patent(&s.db, &req) {
@@ -1025,14 +1010,10 @@ pub async fn api_ai_office_action_response(
 
     // office_action: text object or plain string
     let oa_text = if let Some(obj) = req["office_action"].as_object() {
-        if obj.get("type").and_then(|v| v.as_str()) == Some("text") {
-            obj.get("content")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string()
-        } else {
-            req["office_action"].as_str().unwrap_or("").to_string()
-        }
+        obj.get("content")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string()
     } else {
         req["office_action"].as_str().unwrap_or("").to_string()
     };
