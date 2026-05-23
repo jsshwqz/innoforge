@@ -154,6 +154,9 @@
     var patentRetryMsg = '';
     var patentChatSending = false;
     var patentAbortController = null;
+    var patentChatOffset = 0;
+    var patentChatTotal = 0;
+    var patentChatPageSize = 50;
 
     // 一次性迁移：将旧 localStorage 中的聊天记录导入后端
     function migrateOldPatentChat(key) {
@@ -174,12 +177,54 @@
         } catch(e) {}
     }
 
-    // 页面加载时从后端恢复历史
-    (function loadPatentChat() {
-        fetch('/api/chat/' + encodeURIComponent(PATENT_CHAT_KEY))
+    // 加载更多专利聊天消息
+    function loadMorePatentChat() {
+        if (patentChatSending) return;
+        fetch('/api/chat/' + encodeURIComponent(PATENT_CHAT_KEY) + '?limit=' + patentChatPageSize + '&offset=' + patentChatOffset)
             .then(function(r) { return r.json(); })
             .then(function(data) {
                 if (data.status === 'ok' && data.messages && data.messages.length > 0) {
+                    for (var i = data.messages.length - 1; i >= 0; i--) {
+                        var m = data.messages[i];
+                        patentChatHistory.unshift([m.role, m.content]);
+                    }
+                    patentChatOffset += data.messages.length;
+                    patentChatTotal = data.total;
+                    renderPatentMessages();
+                }
+                updatePatentLoadMore();
+            })
+            .catch(function(e) { console.warn('加载更多消息失败:', e); });
+    }
+
+    function updatePatentLoadMore() {
+        var existing = document.getElementById('patent-load-more');
+        if (patentChatOffset < patentChatTotal) {
+            if (!existing) {
+                var box = document.getElementById('patent-chat-messages');
+                var c = document.createElement('div');
+                c.id = 'patent-load-more';
+                c.style.cssText = 'text-align:center;padding:8px;';
+                var btn = document.createElement('button');
+                btn.textContent = t('ai.loadMore');
+                btn.style.cssText = 'background:#f0f0f0;border:1px solid #ddd;border-radius:4px;padding:4px 12px;cursor:pointer;font-size:13px;';
+                btn.onclick = loadMorePatentChat;
+                c.appendChild(btn);
+                box.insertBefore(c, box.firstChild);
+            }
+        } else {
+            if (existing) existing.remove();
+        }
+    }
+
+    // 页面加载时从后端恢复历史（分页加载最近 50 条）
+    (function loadPatentChat() {
+        fetch('/api/chat/' + encodeURIComponent(PATENT_CHAT_KEY) + '?limit=' + patentChatPageSize + '&offset=0')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.status === 'ok' && data.messages && data.messages.length > 0) {
+                    patentChatOffset = data.messages.length;
+                    patentChatTotal = data.total;
                     patentChatHistory = [];
                     data.messages.forEach(function(m) {
                         patentChatHistory.push([m.role, m.content]);
@@ -190,9 +235,12 @@
                     var saved = localStorage.getItem(PATENT_CHAT_KEY);
                     if (saved) {
                         try { patentChatHistory = JSON.parse(saved); } catch(e) {}
+                        patentChatTotal = patentChatHistory.length;
+                        patentChatOffset = patentChatHistory.length;
                     }
                 }
                 renderPatentMessages();
+                updatePatentLoadMore();
                 showPatentExportButton();
             })
             .catch(function() {
@@ -200,6 +248,8 @@
                 var saved = localStorage.getItem(PATENT_CHAT_KEY);
                 if (saved) {
                     try { patentChatHistory = JSON.parse(saved); } catch(e) {}
+                    patentChatTotal = patentChatHistory.length;
+                    patentChatOffset = patentChatHistory.length;
                 }
                 renderPatentMessages();
                 showPatentExportButton();

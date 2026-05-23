@@ -23,6 +23,7 @@ const I18N_COMMON = {
     'ai.quote': '引用',
     'ai.exportConclusions': '📝 导出结论',
     'ai.exporting': '导出中...',
+    'ai.loadMore': '加载更多消息',
     // Compare page
     'compare.title': '方案对比',
     'compare.patent1': '专利1（ID 或专利号）',
@@ -218,6 +219,7 @@ const I18N_COMMON = {
     'ai.quote': 'Quote',
     'ai.exportConclusions': '📝 Export Conclusions',
     'ai.exporting': 'Exporting...',
+    'ai.loadMore': 'Load more messages',
     'compare.title': 'Solution Comparison',
     'compare.patent1': 'Patent 1 (ID or patent number)',
     'compare.patent2': 'Patent 2 (ID or patent number)',

@@ -4,23 +4,43 @@
 //! Replaces frontend localStorage with backend SQLite persistence for cross-device sharing.
 
 use super::AppState;
-use axum::{extract::Path, extract::State, Json};
+use axum::extract::Path;
+use axum::extract::Query;
+use axum::extract::State;
+use axum::Json;
+use serde::Deserialize;
 use serde_json::json;
 
-/// 获取指定会话的所有消息（自动限制最近 200 条）
+#[derive(Deserialize, Default)]
+pub struct ChatPagination {
+    pub limit: Option<usize>,
+    pub offset: Option<usize>,
+}
+
+/// 获取指定会话的消息（分页，默认最近 50 条，按时间正序）
 pub async fn api_chat_get_messages(
     Path(session_key): Path<String>,
     State(s): State<AppState>,
+    Query(pagination): Query<ChatPagination>,
 ) -> Json<serde_json::Value> {
     // 安全检查：防止注入过长 session_key
     if session_key.len() > 255 || session_key.is_empty() {
         return Json(json!({"status": "error", "message": "无效的 session_key"}));
     }
 
-    match s.db.get_chat_messages(&session_key) {
-        Ok(messages) => Json(json!({
+    let limit = pagination.limit.unwrap_or(50).clamp(1, 200);
+    let offset = pagination.offset.unwrap_or(0);
+
+    match s
+        .db
+        .get_chat_messages_paginated(&session_key, limit, offset)
+    {
+        Ok((messages, total)) => Json(json!({
             "status": "ok",
             "messages": messages,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
         })),
         Err(e) => Json(json!({
             "status": "error",

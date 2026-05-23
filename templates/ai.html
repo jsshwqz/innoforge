@@ -85,6 +85,9 @@
     var retryMsg = '';
     var retryImages = [];
     var currentAbortController = null;
+    var chatOffset = 0;
+    var chatTotal = 0;
+    var chatPageSize = 50;
 
     // 一次性迁移：将旧 localStorage 中的聊天记录导入后端
     function migrateOldChat(key) {
@@ -105,12 +108,64 @@
         } catch(e) {}
     }
 
-    // 页面加载时从后端恢复历史
-    (function loadChatHistory() {
-        fetch('/api/chat/' + encodeURIComponent(AI_CHAT_KEY))
+    // 加载更多历史消息（追加到 chatHistory 头部）
+    function loadMoreMessages() {
+        if (chatSending) return;
+        fetch('/api/chat/' + encodeURIComponent(AI_CHAT_KEY) + '?limit=' + chatPageSize + '&offset=' + chatOffset)
             .then(function(r) { return r.json(); })
             .then(function(data) {
                 if (data.status === 'ok' && data.messages && data.messages.length > 0) {
+                    // 将更旧的消息插入到历史头部（保持时间正序）
+                    var oldLen = chatHistory.length;
+                    for (var i = data.messages.length - 1; i >= 0; i--) {
+                        var m = data.messages[i];
+                        chatHistory.unshift([m.role, m.content]);
+                    }
+                    chatOffset += data.messages.length;
+                    chatTotal = data.total;
+                    renderAllMessages();
+                    // 滚动保持当前位置
+                    var box = document.getElementById('chat-messages');
+                    if (box && data.messages.length > 0) {
+                        box.scrollTop = (data.messages.length) * 36;
+                    }
+                }
+                updateLoadMoreButton();
+            })
+            .catch(function(e) {
+                console.warn('加载更多消息失败:', e);
+            });
+    }
+
+    // 更新"加载更多"按钮
+    function updateLoadMoreButton() {
+        var existing = document.getElementById('load-more-btn-container');
+        if (chatOffset < chatTotal) {
+            if (!existing) {
+                var box = document.getElementById('chat-messages');
+                var container = document.createElement('div');
+                container.id = 'load-more-btn-container';
+                container.style.cssText = 'text-align:center;padding:8px;';
+                var btn = document.createElement('button');
+                btn.textContent = t('ai.loadMore');
+                btn.style.cssText = 'background:#f0f0f0;border:1px solid #ddd;border-radius:4px;padding:4px 12px;cursor:pointer;font-size:13px;';
+                btn.onclick = loadMoreMessages;
+                container.appendChild(btn);
+                box.insertBefore(container, box.firstChild);
+            }
+        } else {
+            if (existing) existing.remove();
+        }
+    }
+
+    // 页面加载时从后端恢复历史（分页加载最近 50 条）
+    (function loadChatHistory() {
+        fetch('/api/chat/' + encodeURIComponent(AI_CHAT_KEY) + '?limit=' + chatPageSize + '&offset=0')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.status === 'ok' && data.messages && data.messages.length > 0) {
+                    chatOffset = data.messages.length;
+                    chatTotal = data.total;
                     chatHistory = [];
                     data.messages.forEach(function(m) {
                         chatHistory.push([m.role, m.content]);
@@ -121,9 +176,12 @@
                     var saved = localStorage.getItem(AI_CHAT_KEY);
                     if (saved) {
                         try { chatHistory = JSON.parse(saved); } catch(e) {}
+                        chatTotal = chatHistory.length;
+                        chatOffset = chatHistory.length;
                     }
                 }
                 renderAllMessages();
+                updateLoadMoreButton();
                 showExportButton();
             })
             .catch(function() {
@@ -131,6 +189,8 @@
                 var saved = localStorage.getItem(AI_CHAT_KEY);
                 if (saved) {
                     try { chatHistory = JSON.parse(saved); } catch(e) {}
+                    chatTotal = chatHistory.length;
+                    chatOffset = chatHistory.length;
                 }
                 renderAllMessages();
                 showExportButton();
@@ -315,6 +375,8 @@
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({role: role, content: content})
+        }).then(function() {
+            chatTotal++;
         }).catch(function(e) {
             console.warn('保存聊天记录失败:', e);
         });
