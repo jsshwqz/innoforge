@@ -404,6 +404,30 @@ fn extract_classifications(html: &str) -> Option<String> {
     }
 }
 
+/// 按专利号从本地 DB 查找专利（用于 OA 页面自动补全）
+/// Lookup patent by number from local DB (for OA auto-fill)
+pub async fn api_patent_lookup(
+    Path(patent_number): Path<String>,
+    State(s): State<AppState>,
+) -> Json<serde_json::Value> {
+    match s.db.get_patent(&patent_number) {
+        Ok(Some(p)) => Json(json!({
+            "status": "ok",
+            "patent": {
+                "patent_number": p.patent_number,
+                "title": p.title,
+                "abstract_text": p.abstract_text,
+                "description": p.description,
+                "claims": p.claims,
+                "applicant": p.applicant,
+                "inventor": p.inventor,
+            }
+        })),
+        Ok(None) => Json(json!({"status": "error", "message": "Patent not found in local DB"})),
+        Err(e) => Json(json!({"status": "error", "message": format!("DB error: {}", e)})),
+    }
+}
+
 pub async fn api_recommend_similar(
     Path(id): Path<String>,
     State(s): State<AppState>,

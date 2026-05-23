@@ -141,6 +141,7 @@ pub async fn start_server(db_path: &str) -> anyhow::Result<()> {
             "/api/patent/image-proxy",
             get(routes::api_patent_image_proxy),
         )
+        .route("/api/patent/lookup/:number", get(routes::api_patent_lookup))
         .route(
             "/api/patent/similar/:id",
             get(routes::api_recommend_similar),
@@ -174,6 +175,24 @@ pub async fn start_server(db_path: &str) -> anyhow::Result<()> {
         .route(
             "/api/ai/office-action-response",
             post(routes::api_ai_office_action_response),
+        )
+        // OA 分析历史 API / OA History API
+        .route("/api/oa/history/all", get(routes::api_oa_history_all))
+        .route(
+            "/api/oa/history/:patent_number",
+            get(routes::api_oa_history),
+        )
+        .route(
+            "/api/oa/history/detail/:id",
+            get(routes::api_oa_history_get),
+        )
+        .route(
+            "/api/oa/history/:id/delete",
+            post(routes::api_oa_history_delete),
+        )
+        .route(
+            "/api/ai/check-amendments",
+            post(routes::api_ai_check_amendments),
         )
         // Google OAuth
         .route("/api/auth/google/url", get(routes::api_google_auth_url))

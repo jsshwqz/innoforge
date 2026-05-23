@@ -116,6 +116,7 @@
                 <input type="text" id="my-patent" class="cmp-input" data-i18n-placeholder="oar.myPatentPlaceholder">
                 <button class="btn-upload" onclick="uploadMyPatent()">📎 <span data-i18n="common.upload"></span></button>
                 <button class="btn-paste" onclick="pasteMyPatent()">📋 <span data-i18n="common.paste"></span></button>
+                <button class="btn-add" onclick="lookupMyPatent()">🔍 <span data-i18n="oar.lookup"></span></button>
             </div>
             <div id="my-file-tag"></div>
         </div>
@@ -170,6 +171,31 @@
                 <button id="discussion-stop-btn" onclick="stopDiscussionGeneration()" style="display:none;padding:8px 10px;background:#21262d;color:#f85149;border:1px solid #f85149;border-radius:6px;cursor:pointer;font-size:13px;white-space:nowrap;" data-i18n="oar.stop"></button>
                 <button id="discussion-export-btn" onclick="exportDiscussionConclusions()" style="display:none;padding:8px 10px;background:#21262d;color:#c9d1d9;border:1px solid #6e7681;border-radius:6px;cursor:pointer;font-size:13px;white-space:nowrap;" data-i18n="oar.exportConclusions"></button>
             </div>
+        </div>
+
+        <!-- P2: Claim Amendment Assistant -->
+        <div class="cmp-section" id="amendment-section" style="display:none;border-left:3px solid #3fb950;">
+            <label class="cmp-label" style="color:#3fb950;font-weight:600;">✏️ <span data-i18n="oar.amendTitle"></span></label>
+            <div style="margin-bottom:8px;">
+                <textarea id="claims-editor" style="width:100%;min-height:120px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:10px;font-size:13px;font-family:monospace;resize:vertical;"></textarea>
+            </div>
+            <div class="btn-row">
+                <button class="btn-add" onclick="checkAmendments()" id="btn-check-amendments">🔍 <span data-i18n="oar.checkAmendments"></span></button>
+                <span style="color:#8b949e;font-size:12px;" data-i18n="oar.amendHint"></span>
+            </div>
+            <div id="amendment-result"></div>
+        </div>
+
+        <!-- P3: Argument Library -->
+        <div class="cmp-section" id="lib-section" style="border-left:3px solid #d29922;">
+            <label class="cmp-label" style="color:#d29922;font-weight:600;cursor:pointer;" onclick="toggleArgLib()">📚 <span data-i18n="oar.libTitle"></span> <span id="lib-toggle" style="font-size:12px;">▼</span></label>
+            <div id="lib-content" style="margin-top:8px;font-size:13px;color:#c9d1d9;line-height:1.8;"></div>
+        </div>
+
+        <!-- P4: Checklist -->
+        <div class="cmp-section" id="checklist-section" style="display:none;border-left:3px solid #58a6ff;">
+            <label class="cmp-label" style="color:#58a6ff;font-weight:600;">✅ <span data-i18n="oar.checklistTitle"></span></label>
+            <div id="checklist-content" style="font-size:13px;color:#c9d1d9;"></div>
         </div>
     </main>
     <aside id="page-sidebar" class="page-sidebar"></aside>
@@ -327,6 +353,34 @@
         document.getElementById('paste-title').value = t('oar.myPatentDefaultTitle');
         document.getElementById('paste-content').value = '';
         document.getElementById('paste-modal').classList.add('show');
+    }
+
+    // ── Lookup patent from local DB ──
+    async function lookupMyPatent() {
+        var val = document.getElementById('my-patent').value.trim();
+        if (!val) { alert(t('oar.alertPatent')); return; }
+        var tagEl = document.getElementById('my-file-tag');
+        tagEl.innerHTML = '<span style="color:#8b949e;font-size:12px;">查找中...</span>';
+        try {
+            var resp = await fetch('/api/patent/lookup/' + encodeURIComponent(val));
+            var data = await resp.json();
+            if (data.status === 'ok' && data.patent) {
+                var p = data.patent;
+                var content = '【' + p.title + '】\n\n';
+                if (p.abstract_text) content += '摘要：' + p.abstract_text + '\n\n';
+                if (p.claims) content += '权利要求书：\n' + p.claims + '\n\n';
+                if (p.description) content += '说明书：\n' + p.description + '\n';
+                uploadedData['my'] = { title: p.patent_number + ' — ' + p.title, content: content };
+                document.getElementById('my-patent').disabled = true;
+                tagEl.innerHTML = '<span class="file-tag">📦 ' + escapeHtml(p.patent_number) + ' — ' + escapeHtml(p.title)
+                    + ' (' + content.length + t('common.chars') + ')'
+                    + '<span class="tag-remove" onclick="clearMyPatent()">&times;</span></span>';
+            } else {
+                tagEl.innerHTML = '<span style="color:#f85149;font-size:12px;">' + t('oar.lookupFail') + '</span>';
+            }
+        } catch(e) {
+            tagEl.innerHTML = '<span style="color:#f85149;font-size:12px;">' + escapeHtml(e.message) + '</span>';
+        }
     }
 
     function pasteOA() {
@@ -534,6 +588,9 @@
         if (options.showDiscussion) {
             html += '<button onclick="startDiscussion()">💬 ' + t('oar.discussBtn') + '</button>';
         }
+        if (options.amend) {
+            html += '<button onclick="showAmendmentEditor(getContentForAmend())">✏️ ' + t('oar.amendBtn') + '</button>';
+        }
         html += '</div>';
         return html;
     }
@@ -643,10 +700,184 @@
             var data = await resp.json();
             if (data.error) { showError(data.error); return; }
             lastAnalysisRawText = data.analysis || '';
-            showResult(renderMarkdown(data.analysis), { copy: true, export: true, showDiscussion: true });
+            showResult(renderMarkdown(data.analysis), { copy: true, export: true, showDiscussion: true, amend: true });
+
+            // 显示权利要求修改助手和检查清单
+            var content = (uploadedData['my'] && uploadedData['my'].content) || document.getElementById('my-patent').value || '';
+            if (content) showAmendmentEditor(content);
+            showChecklist();
+            // 刷新历史列表
+            loadOaHistory();
         } catch(e) {
             showError(t('oar.fail') + ': ' + e.message);
         }
+    }
+
+    // ── Helper: extract content for amendment editor ──
+    function getContentForAmend() {
+        return (uploadedData['my'] && uploadedData['my'].content) || document.getElementById('my-patent').value || '';
+    }
+
+    // ── P2: Claim Amendment Assistant ──
+    function showAmendmentEditor(claims) {
+        var section = document.getElementById('amendment-section');
+        if (!section) return;
+        section.style.display = '';
+        document.getElementById('claims-editor').value = claims || '';
+        document.getElementById('amendment-result').innerHTML = '';
+        section.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    async function checkAmendments() {
+        var editor = document.getElementById('claims-editor');
+        var amended = editor.value.trim();
+        if (!amended) { alert('请先修改权利要求'); return; }
+
+        // Get original claims from the input data
+        var original = '';
+        if (uploadedData['my'] && uploadedData['my'].content) {
+            var c = uploadedData['my'].content;
+            var idx = c.indexOf('权利要求书');
+            original = idx >= 0 ? c.slice(idx) : c;
+        }
+
+        var oaText = '';
+        if (uploadedData['oa'] && uploadedData['oa'].content) {
+            oaText = uploadedData['oa'].content.slice(0, 3000);
+        }
+
+        var btn = document.getElementById('btn-check-amendments');
+        btn.disabled = true;
+        var resultDiv = document.getElementById('amendment-result');
+        resultDiv.innerHTML = '<div style="color:#8b949e;text-align:center;padding:20px;">⏳ 审查中...</div>';
+
+        try {
+            var resp = await fetch('/api/ai/check-amendments', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ original_claims: original, amended_claims: amended, office_action: oaText })
+            });
+            var data = await resp.json();
+            if (data.error) {
+                resultDiv.innerHTML = '<div style="color:#f85149;">' + escapeHtml(data.error) + '</div>';
+            } else {
+                resultDiv.innerHTML = '<div class="result-box" style="margin-top:12px;">' + renderMarkdown(data.analysis) + '</div>';
+            }
+        } catch(e) {
+            resultDiv.innerHTML = '<div style="color:#f85149;">' + escapeHtml(e.message) + '</div>';
+        }
+        btn.disabled = false;
+    }
+
+    // ── P3: Argument Library ──
+    var argLibVisible = false;
+
+    function toggleArgLib() {
+        var content = document.getElementById('lib-content');
+        var toggle = document.getElementById('lib-toggle');
+        argLibVisible = !argLibVisible;
+        if (argLibVisible) {
+            toggle.textContent = '▲';
+            content.innerHTML = buildArgLibrary();
+        } else {
+            toggle.textContent = '▼';
+            content.innerHTML = '';
+        }
+    }
+
+    function buildArgLibrary() {
+        var oaType = document.querySelector('input[name="oa_type"]:checked').value;
+        var libs = {
+            'first_exam': [
+                { h: '📌 A22.2 新颖性答辩', c: '对比文献未公开本申请的全部技术特征，特别是……特征。\n本申请的区别特征……在对比文献中既未明确记载，也不构成隐含公开。\n因此，权利要求……具备新颖性（A22.2）。' },
+                { h: '📌 A22.3 创造性答辩 — 否定技术启示', c: '对比文献……的技术领域与本申请不同，本领域技术人员没有动机将对比文献……与对比文献……结合。\n对比文献……之间存在技术矛盾（反向教导）：……\n因此，权利要求……的修改方案具备创造性（A22.3）。' },
+                { h: '📌 A22.3 创造性答辩 — 协同效果', c: '本申请的区别特征……与现有技术相比，产生了意外技术效果：……\n该效果在对比文献中未被记载或暗示。\n因此，权利要求……具备创造性（A22.3）。' },
+                { h: '📌 A26.4 支持/清楚答辩', c: '原说明书第……段明确记载了……技术方案，本领域技术人员能够从说明书公开的内容中得到……技术特征。\n因此，权利要求……得到了说明书的支持（A26.4）。' },
+                { h: '📌 权利要求修改方案', c: '建议将原权利要求……的特征并入权利要求……，修改后的权利要求为：\n……\n修改未超出原说明书和权利要求书记载的范围（A33）。' },
+            ],
+            'abnormal': [
+                { h: '📌 技术方案真实性', c: '本申请的技术方案来源于申请人的实际研发项目……，具体研发过程……。\n本申请的技术方案具有明确的技术问题和可实施的技术方案，绝非编造。' },
+                { h: '📌 研发过程合理性', c: '本申请的申请时机与申请人的研发进度相符，申请布局具有合理的商业考量。\n专利内容与申请人的主营业务/研发方向一致。' },
+                { h: '📌 申请行为正当性', c: '本申请是申请人就实际研发成果提出的正当申请，不存在批量申请、抄袭、编造等行为。\n申请人的申请数量与研发投入规模相符。' },
+            ],
+            'reject_review': [
+                { h: '📌 复审请求要点', c: '原审查决定在事实认定上存在错误：……\n原审查决定在法条适用上存在不当：……\n本申请的权利要求……具备授权条件。' },
+                { h: '📌 复审修改策略', c: '为克服驳回理由，建议将权利要求……修改为：……\n修改后的权利要求与对比文献的区别在于：……' },
+            ]
+        };
+        var items = libs[oaType] || libs['first_exam'];
+        var html = '';
+        for (var i = 0; i < items.length; i++) {
+            html += '<div style="margin-bottom:10px;padding:10px 12px;background:#0d1117;border:1px solid #21262d;border-radius:6px;">'
+                + '<div style="font-weight:600;color:#d29922;margin-bottom:4px;cursor:pointer;" onclick="fillArgTemplate(' + i + ')">' + items[i].h + '</div>'
+                + '<div style="color:#8b949e;font-size:12px;line-height:1.6;white-space:pre-wrap;">' + items[i].c + '</div>'
+                + '</div>';
+        }
+        return html;
+    }
+
+    function fillArgTemplate(idx) {
+        var oaType = document.querySelector('input[name="oa_type"]:checked').value;
+        var libs = {
+            'first_exam': [
+                '对比文献未公开本申请的全部技术特征，特别是……特征。\n\n本申请的区别特征……在对比文献中既未明确记载，也不构成隐含公开。\n\n因此，权利要求……具备新颖性（A22.2）。',
+                '对比文献……的技术领域与本申请不同，本领域技术人员没有动机将对比文献……与对比文献……结合。\n\n对比文献……之间存在技术矛盾（反向教导）：……\n\n因此，权利要求……的修改方案具备创造性（A22.3）。',
+                '本申请的区别特征……与现有技术相比，产生了意外技术效果：……\n\n该效果在对比文献中未被记载或暗示。\n\n因此，权利要求……具备创造性（A22.3）。',
+                '原说明书第……段明确记载了……技术方案，本领域技术人员能够从说明书公开的内容中得到……技术特征。\n\n因此，权利要求……得到了说明书的支持（A26.4）。',
+                '建议将原权利要求……的特征并入权利要求……，修改后的权利要求为：\n……\n\n修改未超出原说明书和权利要求书记载的范围（A33）。'
+            ],
+            'abnormal': [
+                '本申请的技术方案来源于申请人的实际研发项目……，具体研发过程……。\n\n本申请的技术方案具有明确的技术问题和可实施的技术方案，绝非编造。',
+                '本申请的申请时机与申请人的研发进度相符，申请布局具有合理的商业考量。\n\n专利内容与申请人的主营业务/研发方向一致。',
+                '本申请是申请人就实际研发成果提出的正当申请，不存在批量申请、抄袭、编造等行为。\n\n申请人的申请数量与研发投入规模相符。'
+            ],
+            'reject_review': [
+                '原审查决定在事实认定上存在错误：……\n\n原审查决定在法条适用上存在不当：……\n\n本申请的权利要求……具备授权条件。',
+                '为克服驳回理由，建议将权利要求……修改为：……\n\n修改后的权利要求与对比文献的区别在于：……'
+            ]
+        };
+        var items = libs[oaType] || libs['first_exam'];
+        var text = items[idx] || '';
+        if (text) {
+            navigator.clipboard.writeText(text).then(function() {
+                var el = document.querySelector('#lib-content > div:nth-child(' + (idx + 1) + ')');
+                if (el) {
+                    el.style.borderColor = '#3fb950';
+                    setTimeout(function() { if (el) el.style.borderColor = '#21262d'; }, 1500);
+                }
+            });
+        }
+    }
+
+    // ── P4: Checklist ──
+    function showChecklist() {
+        var section = document.getElementById('checklist-section');
+        if (!section) return;
+        section.style.display = '';
+        var items = [
+            { label: t('oar.check1'), done: false },
+            { label: t('oar.check2'), done: false },
+            { label: t('oar.check3'), done: false },
+            { label: t('oar.check4'), done: false },
+            { label: t('oar.check5'), done: false },
+            { label: t('oar.check6'), done: false },
+        ];
+        var html = '';
+        for (var i = 0; i < items.length; i++) {
+            html += '<label style="display:flex;align-items:center;gap:8px;padding:6px 0;cursor:pointer;">'
+                + '<input type="checkbox" style="accent-color:#58a6ff;" onchange="updateChecklistProgress()">'
+                + '<span>' + items[i].label + '</span></label>';
+        }
+        html += '<div style="margin-top:8px;font-size:12px;color:#8b949e;" id="checklist-progress">0/' + items.length + ' ' + t('oar.checklistProgress') + '</div>';
+        document.getElementById('checklist-content').innerHTML = html;
+    }
+
+    function updateChecklistProgress() {
+        var checks = document.querySelectorAll('#checklist-content input[type=checkbox]');
+        var done = 0;
+        for (var i = 0; i < checks.length; i++) { if (checks[i].checked) done++; }
+        var el = document.getElementById('checklist-progress');
+        if (el) el.textContent = done + '/' + checks.length + ' ' + t('oar.checklistProgress');
     }
 
     // ── AI Discussion ──
@@ -827,10 +1058,63 @@
         btn.disabled = false;
     }
 
+    // ── OA History ──
+    var oaHistory = [];
+
+    async function loadOaHistory() {
+        try {
+            var resp = await fetch('/api/oa/history/all');
+            var data = await resp.json();
+            if (data.status === 'ok' && data.analyses) {
+                oaHistory = data.analyses;
+                renderOaHistory();
+            }
+        } catch(e) { /* history load failed silently */ }
+    }
+
+    function renderOaHistory() {
+        var sidebar = document.getElementById('page-sidebar');
+        if (!sidebar || oaHistory.length === 0) return;
+        var html = '<div class="sidebar-section">'
+            + '<div class="sidebar-label">📋 ' + t('oar.historyLabel') + '</div>';
+        for (var i = 0; i < Math.min(oaHistory.length, 20); i++) {
+            var h = oaHistory[i];
+            var typeLabel = h.oa_type === 'first_exam' ? '一审/二审'
+                : h.oa_type === 'abnormal' ? '非正常' : '复审';
+            html += '<div style="padding:6px 0;border-bottom:1px solid #21262d;cursor:pointer;font-size:12px;" onclick="loadOaAnalysis(' + h.id + ')">'
+                + '<div style="color:#c9d1d9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'
+                + escapeHtml(h.patent_title || h.patent_number)
+                + '</div>'
+                + '<div style="color:#8b949e;font-size:11px;">'
+                + typeLabel + ' · ' + (h.created_at || '').slice(0, 16)
+                + '</div></div>';
+        }
+        html += '</div>';
+        var existing = sidebar.querySelector('.oa-history-section');
+        if (existing) existing.remove();
+        var wrapper = document.createElement('div');
+        wrapper.className = 'oa-history-section';
+        wrapper.innerHTML = html;
+        sidebar.appendChild(wrapper);
+    }
+
+    async function loadOaAnalysis(id) {
+        try {
+            var resp = await fetch('/api/oa/history/detail/' + id);
+            var data = await resp.json();
+            if (data.status === 'ok' && data.analysis) {
+                lastAnalysisRawText = data.analysis.analysis_text || '';
+                showResult(renderMarkdown(lastAnalysisRawText), { copy: true, export: true, showDiscussion: true, amend: true });
+                window.scrollTo({ top: document.getElementById('result').offsetTop - 100, behavior: 'smooth' });
+            }
+        } catch(e) { /* load failed */ }
+    }
+
     // ── Apply i18n for dynamic text ──
     renderNavbar('oar');
     renderSidebar();
     applyI18nCommon();
+    loadOaHistory();
     </script>
 </body>
 </html>

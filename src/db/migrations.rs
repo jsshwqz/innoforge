@@ -363,6 +363,28 @@ pub(crate) fn run(conn: &Connection, current_version: i32, target_version: i32) 
         tracing::info!("Database migrated to version 13 (chat_records)");
     }
 
+    if current_version < 14 {
+        conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS oa_analyses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                patent_number TEXT NOT NULL,
+                patent_title TEXT DEFAULT '',
+                oa_type TEXT NOT NULL,
+                depth TEXT NOT NULL,
+                analysis_text TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime('now','localtime'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_oa_patent ON oa_analyses(patent_number);
+            CREATE INDEX IF NOT EXISTS idx_oa_created ON oa_analyses(created_at);
+
+            DELETE FROM schema_version;
+            INSERT INTO schema_version (version) VALUES (14);
+        ",
+        )?;
+        tracing::info!("Database migrated to version 14 (oa_analyses)");
+    }
+
     if current_version > 0 && current_version < target_version {
         tracing::info!(
             "Database migrated from version {} to {}",

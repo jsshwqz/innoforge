@@ -291,6 +291,46 @@ impl AiClient {
         self.send_chat(messages, 0.3).await
     }
 
+    /// Check whether amended claims properly overcome the rejection
+    pub async fn check_claim_amendments(
+        &self,
+        original_claims: &str,
+        amended_claims: &str,
+        office_action: &str,
+    ) -> Result<String> {
+        let prompt = format!(
+            "你是中国专利审查专家。请对比原始权利要求和修改后的权利要求，审查修改方案是否妥当。\n\n\
+             ## 审查意见通知书（摘要）\n{}\n\n\
+             ## 原始权利要求\n{}\n\n\
+             ## 修改后的权利要求\n{}\n\n\
+             请逐项分析：\n\n\
+             1. **修改是否克服驳回理由**：每项修改是否直接回应了审查员指出的缺陷\n\
+             2. **修改是否超范围**：修改是否超出原说明书和权利要求书记载的范围（A33）\n\
+             3. **修改后的创造性**：修改后的区别特征是否具备创造性（A22.3）\n\
+             4. **修改策略评分**：评分为 A（方案强）/ B（方案可接受）/ C（方案需加强）/ D（方案不可行）\n\
+             5. **改进建议**：如方案有风险，给出具体的修改建议",
+            safe_truncate(office_action, 6000),
+            safe_truncate(original_claims, 8000),
+            safe_truncate(amended_claims, 8000),
+        );
+
+        let messages = vec![
+            Message {
+                role: "system".into(),
+                content: "你是一位资深中国专利代理师，精通专利法及审查指南，\
+                         擅长审查权利要求修改方案是否能够克服审查意见通知书中的驳回理由。\
+                         你的分析要严谨、具体，直接指出方案的风险和不足。"
+                    .into(),
+            },
+            Message {
+                role: "user".into(),
+                content: prompt,
+            },
+        ];
+
+        self.send_chat(messages, 0.3).await
+    }
+
     // ── OA prompt builders ──
 
     fn build_first_exam_prompt(

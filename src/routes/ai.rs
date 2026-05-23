@@ -1,6 +1,7 @@
 use super::AppState;
 use crate::patent::*;
 use axum::{
+    extract::Path,
     extract::State,
     response::sse::{Event, Sse},
     Json,
@@ -1097,7 +1098,91 @@ pub async fn api_ai_office_action_response(
         .office_action_response(&my_info, &oa_text, &refs_info, oa_type, depth)
         .await
     {
-        Ok(content) => Json(json!({"status": "ok", "analysis": content})),
+        Ok(content) => {
+            // 自动保存到历史
+            let patent_number = req
+                .get("my_patent_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let patent_title = req
+                .get("my_patent")
+                .and_then(|v| v.as_object())
+                .and_then(|o| o.get("title"))
+                .and_then(|v| v.as_str())
+                .unwrap_or(patent_number);
+            if !patent_number.is_empty() {
+                let _ =
+                    s.db.save_oa_analysis(patent_number, patent_title, oa_type, depth, &content);
+            }
+            Json(json!({"status": "ok", "analysis": content}))
+        }
         Err(e) => Json(json!({"error": format!("分析失败: {}", e)})),
+    }
+}
+
+/// 获取某专利的 OA 分析历史
+pub async fn api_oa_history(
+    Path(patent_number): Path<String>,
+    State(s): State<AppState>,
+) -> Json<serde_json::Value> {
+    match s.db.list_oa_analyses(&patent_number) {
+        Ok(list) => Json(json!({"status": "ok", "analyses": list})),
+        Err(e) => Json(json!({"status": "error", "message": format!("查询失败: {}", e)})),
+    }
+}
+
+/// 获取所有 OA 分析历史（按时间倒序）
+pub async fn api_oa_history_all(State(s): State<AppState>) -> Json<serde_json::Value> {
+    match s.db.list_all_oa_analyses(100) {
+        Ok(list) => Json(json!({"status": "ok", "analyses": list})),
+        Err(e) => Json(json!({"status": "error", "message": format!("查询失败: {}", e)})),
+    }
+}
+
+/// 按 ID 获取 OA 分析详情
+pub async fn api_oa_history_get(
+    Path(id): Path<i64>,
+    State(s): State<AppState>,
+) -> Json<serde_json::Value> {
+    match s.db.get_oa_analysis(id) {
+        Ok(Some(a)) => Json(json!({"status": "ok", "analysis": a})),
+        Ok(None) => Json(json!({"status": "error", "message": "记录不存在"})),
+        Err(e) => Json(json!({"status": "error", "message": format!("查询失败: {}", e)})),
+    }
+}
+
+/// 删除 OA 分析记录
+pub async fn api_oa_history_delete(
+    Path(id): Path<i64>,
+    State(s): State<AppState>,
+) -> Json<serde_json::Value> {
+    match s.db.delete_oa_analysis(id) {
+        Ok(_) => Json(json!({"status": "ok"})),
+        Err(e) => Json(json!({"status": "error", "message": format!("删除失败: {}", e)})),
+    }
+}
+
+/// AI 审查权利要求修改方案
+pub async fn api_ai_check_amendments(
+    State(s): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let original = req["original_claims"].as_str().unwrap_or("");
+    let amended = req["amended_claims"].as_str().unwrap_or("");
+    let oa = req["office_action"].as_str().unwrap_or("");
+
+    if original.is_empty() || amended.is_empty() {
+        return Json(json!({"error": "原始权利要求和修改后权利要求不能为空"}));
+    }
+
+    let ai = s
+        .config
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .ai_client_expert();
+
+    match ai.check_claim_amendments(original, amended, oa).await {
+        Ok(content) => Json(json!({"status": "ok", "analysis": content})),
+        Err(e) => Json(json!({"error": format!("审查失败: {}", e)})),
     }
 }
