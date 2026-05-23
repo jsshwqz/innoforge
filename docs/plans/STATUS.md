@@ -36,7 +36,7 @@
 
 ### MEDIUM
 3. **Linux/macOS 安装包未更新** — 需要手动在对应平台编译，或等待 CI 配置完成
-4. **Gitee Release 同步** — Gitee 上缺少 v0.5.9 和 v0.6.0 发布说明，需手动编辑
+4. **Gitee Release 同步** — ✅ 2026-05-23 已同步 v0.5.9 tag + v0.5.10/v0.6.0 release entries
 
 ### 已解决 / Resolved
 - ~~生产路径残留 unwrap()~~ — ✅ 2026-05-23 修复 10+ 处
@@ -53,7 +53,7 @@
 - [x] 清理根目录冗余文件 main.rs + write_start.py
 - [x] 更新 CLAUDE.md Pipeline 步数（13 → 15）
 - [x] 创建 v0.6.0 计划文档 docs/plans/
-- [ ] 清理远程 worktree 分支 `claude/lucid-engelbart-8f807d`
+- [x] 清理远程 worktree 分支 `claude/lucid-engelbart-8f807d`
 - [ ] 聊天消息分段加载优化
 - [ ] Pipeline 步骤可视化增强
 - [ ] 全平台 Release 包构建
