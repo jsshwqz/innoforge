@@ -146,7 +146,7 @@ button:active { transform: translateY(0); }
 .content-box pre { white-space: pre-wrap; font-family: inherit; background: rgba(0,0,0,0.2); padding: 16px; border-radius: var(--radius-md); margin-top: 12px; }
 
 /* 聊天气泡体系 */
-.chat-box { border-radius: var(--radius-lg) var(--radius-lg) 0 0; padding: 24px; min-height: 500px; max-height: 65vh; border-bottom: none; display: flex; flex-direction: column; gap: 16px; overflow-y: auto; }
+.chat-box { border-radius: var(--radius-lg) var(--radius-lg) 0 0; padding: 24px; min-height: 500px; max-height: 65vh; border-bottom: none; display: flex; flex-direction: column; gap: 16px; overflow-y: auto; position: relative; }
 .quote-btn { position:absolute; background:#238636; color:#fff; padding:4px 10px; border-radius:4px; font-size:12px; cursor:pointer; z-index:100; display:none; user-select:none; }
 .quote-btn:hover { background:#2ea043; }
 .msg { padding: 14px 20px; border-radius: 18px; max-width: 85%; line-height: 1.6; font-size: 0.95em; position: relative; animation: slideIn 0.3s ease; }
