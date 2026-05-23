@@ -2,6 +2,11 @@ name: Release
 
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Git tag to build (e.g. v0.6.0)'
+        required: false
+        type: string
   push:
     tags:
       - 'v*'
@@ -20,6 +25,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -47,6 +54,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
