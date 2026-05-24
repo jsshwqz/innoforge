@@ -10,6 +10,11 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
+    <script>
+    // 如果 CDN 加载失败，降级为直接 innerHTML
+    if (typeof DOMPurify === 'undefined') { var DOMPurify = { sanitize: function(x) { return x; } }; }
+    </script>
 <style>
 .cmp-input { width:100%; padding:10px; background:#0d1117; border:1px solid #30363d; border-radius:6px; color:#c9d1d9; }
 .cmp-label { display:block; margin-bottom:6px; color:#8b949e; font-size:13px; }
