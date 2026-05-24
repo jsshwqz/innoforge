@@ -158,7 +158,6 @@
                 <input type="text" id="oa-input" class="cmp-input" disabled data-i18n-placeholder="oar.oaPlaceholder" style="flex:1;">
                 <button class="btn-upload" onclick="uploadOA()">📎 <span data-i18n="common.upload"></span></button>
                 <button class="btn-paste" onclick="pasteOA()">📋 <span data-i18n="common.paste"></span></button>
-                <button class="btn-add" onclick="lookupOADoc()">🔍 <span data-i18n="oar.lookup"></span></button>
             </div>
             <div id="oa-file-tag"></div>
         </div>
@@ -476,22 +475,6 @@
         });
     }
 
-    async function lookupOADoc() {
-        var val = document.getElementById('oa-input').value.trim();
-        if (!val) { alert(t('oar.alertOA')); return; }
-        await doPatentLookup(val, function(p) {
-            var content = '【' + p.title + '】\n\n';
-            if (p.abstract_text) content += '摘要：' + p.abstract_text + '\n\n';
-            if (p.claims) content += '权利要求书：\n' + p.claims + '\n\n';
-            if (p.description) content += '说明书：\n' + p.description + '\n';
-            uploadedData['oa'] = { title: p.patent_number + ' — ' + p.title, content: content };
-            document.getElementById('oa-input').disabled = true;
-            document.getElementById('oa-file-tag').innerHTML = '<span class="file-tag">📦 ' + escapeHtml(p.patent_number) + ' — ' + escapeHtml(p.title)
-                + ' (' + content.length + t('common.chars') + ')'
-                + '<span class="tag-remove" onclick="clearOA()">&times;</span></span>';
-        });
-    }
-
     async function lookupRef(btn) {
         var row = btn.closest('.ref-row');
         var idx = row.getAttribute('data-idx');
@@ -515,8 +498,14 @@
     }
 
     async function doPatentLookup(patentNumber, onSuccess) {
-        var tagEl = document.getElementById('my-file-tag') || document.createElement('span');
-        tagEl.innerHTML = '<span style="color:#8b949e;font-size:12px;">' + t('common.extracting') + '</span>';
+        // 先查本地（免费）
+        try {
+            var resp = await fetch('/api/patent/lookup/' + encodeURIComponent(patentNumber));
+            var data = await resp.json();
+            if (data.status === 'ok' && data.patent) { onSuccess(data.patent); return; }
+        } catch(e) {}
+        // 本地没有 → 让用户选择是否在线抓取（消耗 API 额度）
+        if (!confirm('本地库中未找到该专利。\n是否从在线数据库抓取？（将消耗 API 查询额度）\n\n点「取消」可改为上传 PDF 文件。')) return;
         try {
             var resp = await fetch('/api/patent/lookup-or-fetch', {
                 method: 'POST',
@@ -524,14 +513,9 @@
                 body: JSON.stringify({patent_number: patentNumber})
             });
             var data = await resp.json();
-            if (data.status === 'ok' && data.patent) {
-                onSuccess(data.patent);
-            } else {
-                tagEl.innerHTML = '<span style="color:#f85149;font-size:12px;">' + (data.message || t('oar.lookupFail')) + '</span>';
-            }
-        } catch(e) {
-            tagEl.innerHTML = '<span style="color:#f85149;font-size:12px;">' + escapeHtml(e.message) + '</span>';
-        }
+            if (data.status === 'ok' && data.patent) { onSuccess(data.patent); return; }
+            alert(data.message || t('oar.lookupFail'));
+        } catch(e) { alert(t('oar.lookupFail') + ': ' + e.message); }
     }
 
     function pasteOA() {
