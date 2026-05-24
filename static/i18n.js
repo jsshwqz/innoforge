@@ -198,6 +198,10 @@ const I18N_COMMON = {
     'oar.argRisk': '有风险',
     'oar.argAdopt': '采纳',
     'oar.argReject': '否决',
+    'oar.deadlineTitle': '答复期限',
+    'oar.deadlineLabel': 'OA 发文日：',
+    'oar.showDiff': '📊 对比差异',
+    'oar.matrixTitle': '驳回理由映射表',
     // Common utility
     'common.upload': '上传',
     'common.paste': '粘贴文本',
@@ -414,6 +418,10 @@ const I18N_COMMON = {
     'oar.argRisk': 'Has Risk',
     'oar.argAdopt': 'Adopt',
     'oar.argReject': 'Reject',
+    'oar.deadlineTitle': 'Deadline',
+    'oar.deadlineLabel': 'OA Date:',
+    'oar.showDiff': '📊 Show Diff',
+    'oar.matrixTitle': 'Rejection Mapping',
     // Common utility
     'common.upload': 'Upload',
     'common.paste': 'Paste',

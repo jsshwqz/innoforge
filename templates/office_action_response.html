@@ -97,6 +97,11 @@
 .arg-card.adopted .arg-actions button { display:none; }
 .arg-card.rejected { opacity:0.4; text-decoration:line-through; }
 .arg-card.rejected .arg-actions button { display:none; }
+.diff-add { background:#23863622; color:#3fb950; }
+.diff-remove { background:#da363322; color:#f85149; text-decoration:line-through; }
+.matrix-cell-yes { color:#3fb950; }
+.matrix-cell-no { color:#f85149; }
+.matrix-cell-part { color:#d29922; }
 </style>
 </head>
 <body>
@@ -134,6 +139,16 @@
                 <button class="btn-add" onclick="lookupMyPatent()">🔍 <span data-i18n="oar.lookup"></span></button>
             </div>
             <div id="my-file-tag"></div>
+        </div>
+
+        <!-- P0a: Deadline Countdown -->
+        <div class="cmp-section" id="deadline-section" style="border-left:3px solid #f0883e;display:none;">
+            <label class="cmp-label" style="color:#f0883e;font-weight:600;">⏰ <span data-i18n="oar.deadlineTitle"></span></label>
+            <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+                <span style="color:#8b949e;font-size:13px;" data-i18n="oar.deadlineLabel"></span>
+                <input type="date" id="oa-date" style="background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:6px 10px;font-size:13px;">
+                <span id="deadline-info" style="color:#8b949e;font-size:13px;"></span>
+            </div>
         </div>
 
         <!-- Office Action Text -->
@@ -204,6 +219,7 @@
             </div>
             <div class="btn-row">
                 <button class="btn-add" onclick="checkAmendments()" id="btn-check-amendments">🔍 <span data-i18n="oar.checkAmendments"></span></button>
+                <button class="btn-add" onclick="showClaimDiff()" style="border-color:#3fb950;color:#3fb950;">📊 <span data-i18n="oar.showDiff"></span></button>
                 <span style="color:#8b949e;font-size:12px;" data-i18n="oar.amendHint"></span>
             </div>
             <div id="amendment-result"></div>
@@ -219,6 +235,12 @@
         <div class="cmp-section" id="checklist-section" style="display:none;border-left:3px solid #58a6ff;">
             <label class="cmp-label" style="color:#58a6ff;font-weight:600;">✅ <span data-i18n="oar.checklistTitle"></span></label>
             <div id="checklist-content" style="font-size:13px;color:#c9d1d9;"></div>
+        </div>
+
+        <!-- P1a: Mapping Matrix -->
+        <div class="cmp-section" id="matrix-section" style="display:none;border-left:3px solid #d2a8ff;">
+            <label class="cmp-label" style="color:#d2a8ff;font-weight:600;">📊 <span data-i18n="oar.matrixTitle"></span></label>
+            <div id="matrix-content" style="font-size:13px;color:#c9d1d9;overflow-x:auto;"></div>
         </div>
     </main>
     <aside id="page-sidebar" class="page-sidebar"></aside>
@@ -677,8 +699,9 @@
 
     function showResult(html, options) {
         options = options || { copy: true, export: true };
+        var finalHtml = options.noAnchors ? html : enableAnchorJumps(html);
         var toolbar = buildToolbar(options);
-        document.getElementById('result').innerHTML = '<div class="result-box">' + toolbar + '<div class="result-content">' + html + '</div></div>';
+        document.getElementById('result').innerHTML = '<div class="result-box">' + toolbar + '<div class="result-content">' + finalHtml + '</div></div>';
         clearLoading();
     }
 
@@ -781,6 +804,10 @@
             if (data.error) { showError(data.error); return; }
             lastAnalysisRawText = data.analysis || '';
             showResult(renderMarkdown(data.analysis), { copy: true, export: true, showDiscussion: true, amend: true });
+
+            // 映射矩阵 + 锚点
+            numberRefParagraphs();
+            extractMappingMatrix(data.analysis);
 
             // 显示权利要求修改助手和检查清单
             var content = (uploadedData['my'] && uploadedData['my'].content) || document.getElementById('my-patent').value || '';
@@ -1108,6 +1135,197 @@
         btn.style.pointerEvents = '';
     }
 
+    // ── P0a: Deadline Countdown ──
+    function initDeadline() {
+        var saved = localStorage.getItem('innoforge_oa_date');
+        if (saved) document.getElementById('oa-date').value = saved;
+        var section = document.getElementById('deadline-section');
+        if (section) section.style.display = '';
+        document.getElementById('oa-date').addEventListener('change', function() {
+            var val = this.value;
+            localStorage.setItem('innoforge_oa_date', val);
+            updateDeadline();
+        });
+        updateDeadline();
+    }
+
+    function updateDeadline() {
+        var val = document.getElementById('oa-date').value;
+        var info = document.getElementById('deadline-info');
+        if (!val || !info) return;
+        var d = new Date(val + 'T00:00:00');
+        var oaType = document.querySelector('input[name="oa_type"]:checked').value;
+        var months = oaType === 'reject_review' ? 3 : 4; // 复审3个月，一审/二审4个月
+        var deadline = new Date(d);
+        deadline.setMonth(deadline.getMonth() + months);
+        var now = new Date();
+        var daysLeft = Math.ceil((deadline - now) / (1000 * 60 * 60 * 24));
+        var totalDays = Math.ceil((deadline - d) / (1000 * 60 * 60 * 24));
+        var pct = Math.round((totalDays - daysLeft) / totalDays * 100);
+        var color = daysLeft < 0 ? '#f85149' : daysLeft < 14 ? '#d29922' : '#3fb950';
+        var text = deadline.toLocaleDateString('zh-CN') + ' 截止';
+        if (daysLeft > 0) text += '（剩余 ' + daysLeft + ' 天）';
+        else if (daysLeft === 0) text += '（今天截止！）';
+        else text += '（已逾期 ' + Math.abs(daysLeft) + ' 天）';
+        info.innerHTML = '📅 ' + text;
+        info.style.color = color;
+        // 进度条
+        var bar = document.getElementById('deadline-bar') || (function(){
+            var b = document.createElement('div');
+            b.id = 'deadline-bar';
+            b.style.cssText = 'height:4px;background:#21262d;border-radius:2px;margin-top:6px;overflow:hidden;';
+            var fill = document.createElement('div');
+            fill.id = 'deadline-fill';
+            fill.style.cssText = 'height:100%;border-radius:2px;transition:width 0.5s;';
+            b.appendChild(fill);
+            document.getElementById('oa-date').parentNode.appendChild(b);
+            return fill;
+        })();
+        document.getElementById('deadline-fill').style.cssText = 'height:100%;border-radius:2px;width:' + Math.min(pct, 100) + '%;background:' + color + ';transition:width 0.5s;';
+    }
+
+    // ── P0b: Claim Amendment Diff ──
+    function computeLineDiff(oldLines, newLines) {
+        // Simple LCS-based line diff
+        var m = oldLines.length, n = newLines.length;
+        var dp = Array(m + 1).fill(null).map(function() { return Array(n + 1).fill(0); });
+        for (var i = 1; i <= m; i++) {
+            for (var j = 1; j <= n; j++) {
+                dp[i][j] = oldLines[i - 1] === newLines[j - 1] ? dp[i - 1][j - 1] + 1 : Math.max(dp[i - 1][j], dp[i][j - 1]);
+            }
+        }
+        var result = [];
+        var i = m, j = n;
+        while (i > 0 || j > 0) {
+            if (i > 0 && j > 0 && oldLines[i - 1] === newLines[j - 1]) {
+                result.unshift({ type: 'same', text: oldLines[i - 1] });
+                i--; j--;
+            } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+                result.unshift({ type: 'add', text: newLines[j - 1] });
+                j--;
+            } else {
+                result.unshift({ type: 'remove', text: oldLines[i - 1] });
+                i--;
+            }
+        }
+        return result;
+    }
+
+    function showClaimDiff() {
+        var editor = document.getElementById('claims-editor');
+        var amended = editor.value;
+        var original = getContentForAmend();
+        var oldLines = (original || '').split('\n');
+        var newLines = amended.split('\n');
+        var diff = computeLineDiff(oldLines, newLines);
+        var html = '<div style="font-family:monospace;font-size:13px;line-height:1.6;background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:10px;margin-top:8px;max-height:400px;overflow-y:auto;">';
+        for (var i = 0; i < diff.length; i++) {
+            var d = diff[i];
+            if (d.type === 'same') {
+                html += '<div style="color:#8b949e;padding:1px 8px;">' + escapeHtml(d.text) + '</div>';
+            } else if (d.type === 'add') {
+                html += '<div class="diff-add" style="padding:1px 8px;">+ ' + escapeHtml(d.text) + '</div>';
+            } else {
+                html += '<div class="diff-remove" style="padding:1px 8px;">- ' + escapeHtml(d.text) + '</div>';
+            }
+        }
+        html += '</div>';
+        var resultDiv = document.getElementById('amendment-result');
+        resultDiv.innerHTML = html;
+    }
+
+    // ── P1a: Mapping Matrix ──
+    function extractMappingMatrix(analysisText) {
+        var section = document.getElementById('matrix-section');
+        var content = document.getElementById('matrix-content');
+        if (!section || !content || !analysisText) return;
+        // Parse AI output for structured claim mapping
+        var rows = [];
+        var lines = analysisText.split('\n');
+        var currentClaim = '', currentReason = '', currentArticle = '', currentRef = '';
+        for (var i = 0; i < lines.length; i++) {
+            var line = lines[i].trim();
+            if (!line) continue;
+            // Extract claim numbers
+            var claimMatch = line.match(/权利要求\s*(\d+[\d,\s、\-]*\d*)/);
+            if (claimMatch) currentClaim = claimMatch[1];
+            // Extract rejection reason
+            if (line.indexOf('新颖性') >= 0 || line.indexOf('创造性') >= 0 || line.indexOf('不支持') >= 0 || line.indexOf('不清楚') >= 0) {
+                currentReason = line.indexOf('新颖性') >= 0 ? '缺乏新颖性' : line.indexOf('创造性') >= 0 ? '缺乏创造性' : line.indexOf('不支持') >= 0 ? '不支持' : '不清楚';
+            }
+            // Extract article
+            var articleMatch = line.match(/A22\.\d|A25|A26\.\d|A33/);
+            if (articleMatch) currentArticle = articleMatch[0];
+            // Extract reference
+            var refMatch = line.match(/对比文件\s*(\d+)|D\s*(\d+)/i);
+            if (refMatch) {
+                currentRef = 'D' + (refMatch[1] || refMatch[2]);
+                rows.push({ claim: currentClaim || '-', reason: currentReason || '-', article: currentArticle || '-', ref: currentRef || '-' });
+            } else if (currentClaim && currentReason && !currentRef) {
+                rows.push({ claim: currentClaim, reason: currentReason, article: currentArticle || '-', ref: '-' });
+                currentClaim = ''; currentReason = ''; currentArticle = ''; currentRef = '';
+            }
+        }
+        if (rows.length === 0) return;
+        section.style.display = '';
+        var html = '<table style="width:100%;border-collapse:collapse;"><thead><tr>';
+        html += '<th style="background:#21262d;color:#c9d1d9;padding:8px;border:1px solid #30363d;">权利要求</th>';
+        html += '<th style="background:#21262d;color:#c9d1d9;padding:8px;border:1px solid #30363d;">驳回理由</th>';
+        html += '<th style="background:#21262d;color:#c9d1d9;padding:8px;border:1px solid #30363d;">法条</th>';
+        html += '<th style="background:#21262d;color:#c9d1d9;padding:8px;border:1px solid #30363d;">对比文件</th></tr><tbody>';
+        for (var i = 0; i < rows.length; i++) {
+            html += '<tr><td style="padding:8px;border:1px solid #30363d;color:#c9d1d9;">' + escapeHtml(rows[i].claim) + '</td>';
+            html += '<td style="padding:8px;border:1px solid #30363d;color:#c9d1d9;">' + escapeHtml(rows[i].reason) + '</td>';
+            html += '<td style="padding:8px;border:1px solid #30363d;color:#58a6ff;">' + escapeHtml(rows[i].article) + '</td>';
+            html += '<td style="padding:8px;border:1px solid #30363d;color:#d29922;">' + escapeHtml(rows[i].ref) + '</td></tr>';
+        }
+        html += '</tbody></table>';
+        content.innerHTML = DOMPurify.sanitize(html);
+    }
+
+    // ── P1b: Reference Anchor Jump ──
+    function numberRefParagraphs() {
+        // Add paragraph numbers to reference content display
+        for (var key in _uploadedData) {
+            if (key.startsWith('ref_')) {
+                var ref = _uploadedData[key];
+                if (ref && ref.content) {
+                    var paras = ref.content.split('\n\n').filter(function(p) { return p.trim().length > 20; });
+                    var numbered = '';
+                    for (var i = 0; i < paras.length; i++) {
+                        numbered += '[§' + (i + 1) + '] ' + paras[i].trim() + '\n\n';
+                    }
+                    ref.content = numbered;
+                }
+            }
+        }
+    }
+
+    function enableAnchorJumps(html) {
+        // Replace D1/D2/对比文件 X references with clickable anchors
+        html = html.replace(/([Dd])(\d+)/g, function(m, d, num) {
+            return '<a href="#" onclick="scrollToRef(' + num + ');return false;" style="color:#58a6ff;text-decoration:underline;cursor:pointer;" title="跳转到对比文件D' + num + '">' + m + '</a>';
+        });
+        html = html.replace(/对比文件\s*(\d+)/g, function(m, num) {
+            return '<a href="#" onclick="scrollToRef(' + num + ');return false;" style="color:#d29922;text-decoration:underline;cursor:pointer;" title="跳转到对比文献段落">' + m + '</a>';
+        });
+        return html;
+    }
+
+    function scrollToRef(num) {
+        // Find the reference content in the page and scroll to it
+        var rows = document.querySelectorAll('.ref-row');
+        for (var i = 0; i < rows.length; i++) {
+            var idx = rows[i].getAttribute('data-idx');
+            if (_uploadedData['ref_' + idx]) {
+                rows[i].style.border = '2px solid #58a6ff';
+                rows[i].scrollIntoView({ behavior: 'smooth', block: 'center' });
+                setTimeout(function(el) { el.style.border = ''; }, 3000, rows[i]);
+                break;
+            }
+        }
+    }
+
     // ── AI Discussion ──
     function startDiscussion() {
         var my = getMyPatent();
@@ -1378,6 +1596,7 @@
     loadOaState();
     loadOaHistory();
     initDiscQuoteEvents();
+    initDeadline();
     </script>
 </body>
 </html>
