@@ -91,6 +91,7 @@
 <option value="JP">JP</option>
 <option value="KR">KR</option>
 </select>
+<input type="text" id="ipc-filter" placeholder="IPC" style="width:100px;padding:6px 8px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;font-size:13px;" title="IPC 分类号过滤（如 G06F、A61B）">
 <select id="sort-by">
 <option value="relevance" data-i18n="sort.relevance"></option>
 <option value="new" data-i18n="sort.new"></option>
@@ -316,6 +317,8 @@ function buildRequest(page) {
     if (dateFrom) body.date_from = dateFrom;
     if (dateTo) body.date_to = dateTo;
     if (region && region !== 'auto') body.region = region;
+    const ipc = document.getElementById('ipc-filter').value.trim();
+    if (ipc) body.ipc = ipc;
     return body;
 }
 
