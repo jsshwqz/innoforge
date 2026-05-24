@@ -1559,21 +1559,27 @@
         var sidebar = document.getElementById('page-sidebar');
         if (!sidebar || oaHistory.length === 0) return;
         var html = '<div class="sidebar-section">'
-            + '<div class="sidebar-label">📋 ' + t('oar.historyLabel') + '</div>';
-        for (var i = 0; i < Math.min(oaHistory.length, 20); i++) {
+            + '<div class="sidebar-label" style="display:flex;justify-content:space-between;align-items:center;">'
+            + '📋 ' + t('oar.historyLabel')
+            + '<span style="color:#8b949e;font-size:11px;font-weight:400;">' + oaHistory.length + ' 件</span></div>';
+        for (var i = 0; i < Math.min(oaHistory.length, 30); i++) {
             var h = oaHistory[i];
             var ver = h.version || '-';
             var typeLabel = h.oa_type === 'first_exam' ? '一审/二审'
                 : h.oa_type === 'abnormal' ? '非正常' : '复审';
-            html += '<div style="padding:5px 0;border-bottom:1px solid #21262d;cursor:pointer;font-size:12px;" onclick="loadOaAnalysis(' + h.id + ')">'
-                + '<div style="display:flex;align-items:center;gap:4px;">'
+            var typeColor = h.oa_type === 'first_exam' ? '#d2a8ff' : h.oa_type === 'abnormal' ? '#d29922' : '#f0883e';
+            html += '<div style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:8px 10px;margin-bottom:6px;cursor:pointer;" onclick="loadOaAnalysis(' + h.id + ')">'
+                + '<div style="display:flex;align-items:center;gap:4px;margin-bottom:4px;">'
                 + '<span style="background:#1f6feb22;border:1px solid #1f6feb;color:#58a6ff;border-radius:3px;padding:0 5px;font-size:10px;font-weight:600;">v' + ver + '</span>'
-                + '<span style="color:#c9d1d9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'
-                + escapeHtml(h.patent_title || h.patent_number)
-                + '</span></div>'
-                + '<div style="color:#8b949e;font-size:11px;padding-left:20px;">'
-                + typeLabel + ' · ' + (h.created_at || '').slice(0, 16)
+                + '<span style="font-size:11px;color:' + typeColor + ';border:1px solid ' + typeColor + '22;background:' + typeColor + '11;border-radius:3px;padding:0 5px;">' + typeLabel + '</span>'
+                + '</div>'
+                + '<div style="color:#c9d1d9;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:2px;">'
+                + escapeHtml(h.patent_title || h.patent_number) + '</div>'
+                + '<div style="color:#8b949e;font-size:10px;">'
+                + (h.created_at || '').slice(0, 16)
+                + ' · ' + (h.analysis_text ? h.analysis_text.length + '字' : '')
                 + '</div></div>';
+        }
         }
         html += '</div>';
         var existing = sidebar.querySelector('.oa-history-section');
