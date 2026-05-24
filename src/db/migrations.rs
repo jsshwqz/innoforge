@@ -385,6 +385,18 @@ pub(crate) fn run(conn: &Connection, current_version: i32, target_version: i32) 
         tracing::info!("Database migrated to version 14 (oa_analyses)");
     }
 
+    if current_version < 15 {
+        conn.execute_batch(
+            "
+            ALTER TABLE oa_analyses ADD COLUMN version INTEGER DEFAULT 1;
+
+            DELETE FROM schema_version;
+            INSERT INTO schema_version (version) VALUES (15);
+        ",
+        )?;
+        tracing::info!("Database migrated to version 15 (oa_analyses version)");
+    }
+
     if current_version > 0 && current_version < target_version {
         tracing::info!(
             "Database migrated from version {} to {}",
