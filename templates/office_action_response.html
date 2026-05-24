@@ -158,6 +158,7 @@
                 <input type="text" id="oa-input" class="cmp-input" disabled data-i18n-placeholder="oar.oaPlaceholder" style="flex:1;">
                 <button class="btn-upload" onclick="uploadOA()">📎 <span data-i18n="common.upload"></span></button>
                 <button class="btn-paste" onclick="pasteOA()">📋 <span data-i18n="common.paste"></span></button>
+                <button class="btn-add" onclick="lookupOADoc()">🔍 <span data-i18n="oar.lookup"></span></button>
             </div>
             <div id="oa-file-tag"></div>
         </div>
@@ -170,6 +171,7 @@
                     <input type="text" class="cmp-input ref-input" data-i18n-placeholder="oar.refPlaceholder">
                     <button class="btn-upload" onclick="uploadRef(this)">📎 <span data-i18n="common.upload"></span></button>
                     <button class="btn-paste" onclick="pasteRef(this)">📋 <span data-i18n="common.paste"></span></button>
+                    <button class="btn-add" onclick="lookupRef(this)">🔍 <span data-i18n="oar.lookup"></span></button>
                     <button class="btn-remove" onclick="removeRef(this)" title="移除">&times;</button>
                 </div>
             </div>
@@ -460,24 +462,72 @@
     async function lookupMyPatent() {
         var val = document.getElementById('my-patent').value.trim();
         if (!val) { alert(t('oar.alertPatent')); return; }
-        var tagEl = document.getElementById('my-file-tag');
-        tagEl.innerHTML = '<span style="color:#8b949e;font-size:12px;">查找中...</span>';
+        await doPatentLookup(val, function(p) {
+            var content = '【' + p.title + '】\n\n';
+            if (p.abstract_text) content += '摘要：' + p.abstract_text + '\n\n';
+            if (p.claims) content += '权利要求书：\n' + p.claims + '\n\n';
+            if (p.description) content += '说明书：\n' + p.description + '\n';
+            uploadedData['my'] = { title: p.patent_number + ' — ' + p.title, content: content };
+            document.getElementById('my-patent').disabled = true;
+            var tagEl = document.getElementById('my-file-tag');
+            tagEl.innerHTML = '<span class="file-tag">📦 ' + escapeHtml(p.patent_number) + ' — ' + escapeHtml(p.title)
+                + ' (' + content.length + t('common.chars') + ')'
+                + '<span class="tag-remove" onclick="clearMyPatent()">&times;</span></span>';
+        });
+    }
+
+    async function lookupOADoc() {
+        var val = document.getElementById('oa-input').value.trim();
+        if (!val) { alert(t('oar.alertOA')); return; }
+        await doPatentLookup(val, function(p) {
+            var content = '【' + p.title + '】\n\n';
+            if (p.abstract_text) content += '摘要：' + p.abstract_text + '\n\n';
+            if (p.claims) content += '权利要求书：\n' + p.claims + '\n\n';
+            if (p.description) content += '说明书：\n' + p.description + '\n';
+            uploadedData['oa'] = { title: p.patent_number + ' — ' + p.title, content: content };
+            document.getElementById('oa-input').disabled = true;
+            document.getElementById('oa-file-tag').innerHTML = '<span class="file-tag">📦 ' + escapeHtml(p.patent_number) + ' — ' + escapeHtml(p.title)
+                + ' (' + content.length + t('common.chars') + ')'
+                + '<span class="tag-remove" onclick="clearOA()">&times;</span></span>';
+        });
+    }
+
+    async function lookupRef(btn) {
+        var row = btn.closest('.ref-row');
+        var idx = row.getAttribute('data-idx');
+        var input = row.querySelector('.ref-input');
+        var val = input.value.trim();
+        if (!val) { alert(t('oar.alertPatent')); return; }
+        await doPatentLookup(val, function(p) {
+            var content = '【' + p.title + '】\n\n';
+            if (p.abstract_text) content += '摘要：' + p.abstract_text + '\n\n';
+            if (p.claims) content += '权利要求书：\n' + p.claims + '\n\n';
+            if (p.description) content += '说明书：\n' + p.description + '\n';
+            uploadedData['ref_' + idx] = { title: p.patent_number + ' — ' + p.title, content: content };
+            input.disabled = true;
+            var tag = row.querySelector('.file-tag-container') || document.createElement('span');
+            tag.className = 'file-tag-container';
+            tag.innerHTML = '<span class="file-tag">📦 ' + escapeHtml(p.patent_number) + ' — ' + escapeHtml(p.title)
+                + ' (' + content.length + t('common.chars') + ')'
+                + '<span class="tag-remove" onclick="clearRefUpload(\'' + idx + '\')">&times;</span></span>';
+            row.appendChild(tag);
+        });
+    }
+
+    async function doPatentLookup(patentNumber, onSuccess) {
+        var tagEl = document.getElementById('my-file-tag') || document.createElement('span');
+        tagEl.innerHTML = '<span style="color:#8b949e;font-size:12px;">' + t('common.extracting') + '</span>';
         try {
-            var resp = await fetch('/api/patent/lookup/' + encodeURIComponent(val));
+            var resp = await fetch('/api/patent/lookup-or-fetch', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({patent_number: patentNumber})
+            });
             var data = await resp.json();
             if (data.status === 'ok' && data.patent) {
-                var p = data.patent;
-                var content = '【' + p.title + '】\n\n';
-                if (p.abstract_text) content += '摘要：' + p.abstract_text + '\n\n';
-                if (p.claims) content += '权利要求书：\n' + p.claims + '\n\n';
-                if (p.description) content += '说明书：\n' + p.description + '\n';
-                uploadedData['my'] = { title: p.patent_number + ' — ' + p.title, content: content };
-                document.getElementById('my-patent').disabled = true;
-                tagEl.innerHTML = '<span class="file-tag">📦 ' + escapeHtml(p.patent_number) + ' — ' + escapeHtml(p.title)
-                    + ' (' + content.length + t('common.chars') + ')'
-                    + '<span class="tag-remove" onclick="clearMyPatent()">&times;</span></span>';
+                onSuccess(data.patent);
             } else {
-                tagEl.innerHTML = '<span style="color:#f85149;font-size:12px;">' + t('oar.lookupFail') + '</span>';
+                tagEl.innerHTML = '<span style="color:#f85149;font-size:12px;">' + (data.message || t('oar.lookupFail')) + '</span>';
             }
         } catch(e) {
             tagEl.innerHTML = '<span style="color:#f85149;font-size:12px;">' + escapeHtml(e.message) + '</span>';
@@ -580,6 +630,7 @@
         row.innerHTML = '<input type="text" class="cmp-input ref-input" placeholder="' + t('oar.refPlaceholder').replace('{n}', count + 1) + '">'
             + '<button class="btn-upload" onclick="uploadRef(this)">📎 <span data-i18n="common.upload"></span></button>'
             + '<button class="btn-paste" onclick="pasteRef(this)">📋 <span data-i18n="common.paste"></span></button>'
+            + '<button class="btn-add" onclick="lookupRef(this)">🔍 <span data-i18n="oar.lookup"></span></button>'
             + '<button class="btn-remove" onclick="removeRef(this)" title="' + t('common.remove') + '">&times;</button>';
         list.appendChild(row);
     }

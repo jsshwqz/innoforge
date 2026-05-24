@@ -406,12 +406,24 @@ fn extract_classifications(html: &str) -> Option<String> {
 
 /// 按专利号从本地 DB 查找专利（用于 OA 页面自动补全）
 /// Lookup patent by number from local DB (for OA auto-fill)
+/// Optional query param `?fetch=true` triggers online fetch if not found locally
 pub async fn api_patent_lookup(
     Path(patent_number): Path<String>,
     State(s): State<AppState>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Json<serde_json::Value> {
-    match s.db.get_patent(&patent_number) {
-        Ok(Some(p)) => Json(json!({
+    let auto_fetch = params.get("fetch").map_or(false, |v| v == "true");
+
+    // Try normalized search first, then exact match as fallback
+    let result = s
+        .db
+        .find_patent_by_number(&patent_number)
+        .ok()
+        .flatten()
+        .or_else(|| s.db.get_patent(&patent_number).ok().flatten());
+
+    if let Some(p) = result {
+        return Json(json!({
             "status": "ok",
             "patent": {
                 "patent_number": p.patent_number,
@@ -422,9 +434,121 @@ pub async fn api_patent_lookup(
                 "applicant": p.applicant,
                 "inventor": p.inventor,
             }
+        }));
+    }
+
+    // Auto-fetch from online if requested
+    if auto_fetch {
+        match fetch_patent(&patent_number, "epo").await {
+            Ok(p) => {
+                let pn = p.patent_number.clone();
+                if let Err(e) = s.db.insert_patent(&p) {
+                    tracing::warn!("Failed to cache patent {}: {}", pn, e);
+                }
+                if let Ok(Some(fp)) = s.db.find_patent_by_number(&patent_number) {
+                    return Json(json!({
+                        "status": "ok",
+                        "patent": {
+                            "patent_number": fp.patent_number,
+                            "title": fp.title,
+                            "abstract_text": fp.abstract_text,
+                            "description": fp.description,
+                            "claims": fp.claims,
+                            "applicant": fp.applicant,
+                            "inventor": fp.inventor,
+                        }
+                    }));
+                }
+            }
+            Err(e) => {
+                return Json(json!({
+                    "status": "error",
+                    "message": format!("本地未找到，在线抓取也失败: {}", e)
+                }));
+            }
+        }
+    }
+
+    Json(json!({"status": "error", "message": "Patent not found in local DB"}))
+}
+
+/// POST /api/patent/lookup-or-fetch — 先查本地库，找不到则在线抓取并缓存
+/// Lookup locally first, then fetch from online sources and cache
+pub async fn api_patent_lookup_and_fetch(
+    State(s): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let patent_number = req["patent_number"].as_str().unwrap_or("").trim();
+    if patent_number.is_empty() {
+        return Json(json!({"status": "error", "message": "请输入专利号"}));
+    }
+
+    // 1. Try local DB with normalized search
+    let local = s
+        .db
+        .find_patent_by_number(patent_number)
+        .ok()
+        .flatten()
+        .or_else(|| s.db.get_patent(patent_number).ok().flatten());
+
+    if let Some(p) = local {
+        return Json(json!({
+            "status": "ok",
+            "source": "local",
+            "patent": {
+                "patent_number": p.patent_number,
+                "title": p.title,
+                "abstract_text": p.abstract_text,
+                "description": p.description,
+                "claims": p.claims,
+                "applicant": p.applicant,
+                "inventor": p.inventor,
+            }
+        }));
+    }
+
+    // 2. Fetch from EPO online
+    match fetch_patent(patent_number, "epo").await {
+        Ok(p) => {
+            let pn = p.patent_number.clone();
+            if let Err(e) = s.db.insert_patent(&p) {
+                tracing::warn!("Failed to cache fetched patent {}: {}", pn, e);
+            }
+            // Try enriched lookup after caching
+            if let Ok(Some(fp)) = s.db.find_patent_by_number(patent_number) {
+                return Json(json!({
+                    "status": "ok",
+                    "source": "online",
+                    "patent": {
+                        "patent_number": fp.patent_number,
+                        "title": fp.title,
+                        "abstract_text": fp.abstract_text,
+                        "description": fp.description,
+                        "claims": fp.claims,
+                        "applicant": fp.applicant,
+                        "inventor": fp.inventor,
+                    }
+                }));
+            }
+            // Return the raw fetched data even if caching failed
+            Json(json!({
+                "status": "ok",
+                "source": "online",
+                "patent": {
+                    "patent_number": p.patent_number,
+                    "title": p.title,
+                    "abstract_text": p.abstract_text,
+                    "description": p.description,
+                    "claims": p.claims,
+                    "applicant": p.applicant,
+                    "inventor": p.inventor,
+                }
+            }))
+        }
+        Err(e) => Json(json!({
+            "status": "error",
+            "message": format!("在线抓取失败: {}", e)
         })),
-        Ok(None) => Json(json!({"status": "error", "message": "Patent not found in local DB"})),
-        Err(e) => Json(json!({"status": "error", "message": format!("DB error: {}", e)})),
     }
 }
 

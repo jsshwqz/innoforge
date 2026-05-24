@@ -58,6 +58,29 @@ impl super::Database {
         Ok(result)
     }
 
+    /// 按专利号模糊查找（归一化后匹配），支持带空格/点的输入
+    /// Flexible patent number lookup with normalization (handles spaces, dots, kind codes)
+    pub fn find_patent_by_number(&self, number: &str) -> Result<Option<Patent>> {
+        let canonical = crate::patent::canonical_patent_key(number);
+        if canonical.is_empty() {
+            return self.get_patent(number);
+        }
+        let c = self.conn();
+        let like = format!("%{}%", canonical);
+        let mut stmt = c.prepare(
+            "SELECT id,patent_number,title,abstract_text,description,claims,applicant,inventor,filing_date,publication_date,grant_date,ipc_codes,cpc_codes,priority_date,country,kind_code,family_id,legal_status,citations,cited_by,source,raw_json,created_at,images,pdf_url FROM patents WHERE REPLACE(REPLACE(UPPER(patent_number), ' ', ''), '.', '') LIKE ?1 LIMIT 5",
+        )?;
+        let rows = stmt.query_map(params![like], |r| Ok(Self::row_to_patent(r)))?;
+        for row in rows {
+            if let Ok(p) = row {
+                if crate::patent::canonical_patent_key(&p.patent_number) == canonical {
+                    return Ok(Some(p));
+                }
+            }
+        }
+        Ok(None)
+    }
+
     /// Detect search type from query string.
     pub fn detect_search_type(&self, query: &str) -> SearchType {
         let q = query.trim();
