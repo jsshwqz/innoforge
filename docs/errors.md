@@ -150,7 +150,7 @@
 - **预防**: 所有网络连接失败场景应考虑用户体验，用友好信息替代底层错误。
 - **提交**: `69980ab`
 
-### [2026-05-24] OA 页面 DOMPurify 缺失导致 JS 崩溃全黑
+### [2026-05-24 16:30] OA 页面 DOMPurify 缺失导致 JS 崩溃全黑
 - **严重程度**: CRITICAL
 - **涉及文件**: `templates/office_action_response.html`
 - **现象**: OA 页面打开后全黑，无文字、无法操作。控制台报 `ReferenceError: DOMPurify is not defined`。
@@ -329,4 +329,4 @@
 
 ---
 
-*最后更新: 2026-05-23*
+*最后更新: 2026-05-24 17:00*
