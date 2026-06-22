@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::time::Duration;
 
-const PROVIDER_HTTP_TIMEOUT_SECS: u64 = 45;
+const PROVIDER_HTTP_TIMEOUT_SECS: u64 = 180;
 const PROVIDER_MAX_RETRIES: usize = 3;
 
 /// AI 提供者模式 / AI provider operation mode.
@@ -203,8 +203,9 @@ impl AiClient {
         Self {
             client: Client::builder()
                 .timeout(Duration::from_secs(PROVIDER_HTTP_TIMEOUT_SECS))
+                .no_proxy()
                 .build()
-                .unwrap_or_else(|_| Client::new()),
+                .unwrap_or_else(|_| Client::builder().no_proxy().build().unwrap_or_else(|_| Client::new())),
             primary: AiProvider {
                 name: "primary".to_string(),
                 base_url: base_url.to_string(),
