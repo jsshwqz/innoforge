@@ -93,8 +93,8 @@
 
 ## 版本规划蓝图 / Roadmap
 
-详见 `docs/plans/2026-05-23-v0.6.0-plan.md`（当前版本）
-详见 `docs/plans/2026-05-11-v0.5.9-plan.md`（前一版本）
+详见 `docs/plans/2026-06-22-v0.6.3-plan.md`（当前版本）
+详见 `docs/plans/2026-05-23-v0.6.0-plan.md`（前一版本）
 详见 `docs/plans/研发助手升级规划-多方讨论.md`（长期规划）
 详见 `docs/plans/v0.5.0-remaining-tasks.md`（历史计划）
 
