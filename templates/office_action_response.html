@@ -700,7 +700,6 @@
             var idx = rows[i].getAttribute('data-idx');
             if (_uploadedData['ref_' + idx]) {
                 refs.push(_uploadedData['ref_' + idx]);
-                refs.push(uploadedData['ref_' + idx]);
             } else {
                 var val = inputs[i] ? inputs[i].value.trim() : '';
                 if (val) refs.push(val);
@@ -845,7 +844,7 @@
             var data = await resp.json();
             if (data.error) { showError(data.error); return; }
             lastAnalysisRawText = data.analysis || '';
-            showResult(renderMarkdown(data.analysis), { copy: true, export: true, showDiscussion: true, amend: true });
+            showOAAnalysisSections(data.analysis);
 
             // 映射矩阵 + 锚点
             numberRefParagraphs();
@@ -860,6 +859,110 @@
         } catch (e) {
             showError(t('oar.fail') + ': ' + e.message);
         }
+    }
+
+    // ── New: Parse OA analysis into sections ──
+    function parseOASections(text) {
+        if (!text) return [];
+        var sectionMarkers = [
+            { key: 'part1', label: '第一部分：权利要求逐项解析', color: '#58a6ff', patterns: ['=== 第一部分', '## 第一部分', '一、审查意见概述'] },
+            { key: 'part2', label: '第二部分：审查员驳回逻辑逐条还原', color: '#d29922', patterns: ['=== 第二部分', '## 第二部分'] },
+            { key: 'part3', label: '第三部分：特征对比总表', color: '#3fb950', patterns: ['=== 第三部分', '## 第三部分', '特征对比表', '特征对比总表'] },
+            { key: 'part4', label: '第四部分：逐权利要求反驳论点', color: '#d2a8ff', patterns: ['=== 第四部分', '## 第四部分', '分层反驳', '逐权利要求反驳'] },
+            { key: 'part5', label: '第五部分：意见陈述书草稿', color: '#f0883e', patterns: ['=== 第五部分', '## 第五部分', '意见陈述书草稿', '意见陈述书', '=== 第五部分'] },
+        ];
+        var sections = [];
+        var remaining = text;
+
+        for (var i = 0; i < sectionMarkers.length; i++) {
+            var marker = sectionMarkers[i];
+            var startIdx = -1;
+            // Find the first matching pattern
+            for (var p = 0; p < marker.patterns.length; p++) {
+                var idx = remaining.indexOf(marker.patterns[p]);
+                if (idx >= 0) { startIdx = idx; break; }
+            }
+            if (startIdx < 0) continue;
+
+            // Find where this section ends (next marker or end of string)
+            var endIdx = remaining.length;
+            for (var j = i + 1; j < sectionMarkers.length; j++) {
+                for (var p = 0; p < sectionMarkers[j].patterns.length; p++) {
+                    var nextIdx = remaining.indexOf(sectionMarkers[j].patterns[p], startIdx + 1);
+                    if (nextIdx >= 0 && nextIdx < endIdx) { endIdx = nextIdx; break; }
+                }
+            }
+            var sectionText = remaining.substring(startIdx, endIdx).trim();
+            if (sectionText) {
+                sections.push({
+                    key: marker.key,
+                    label: marker.label,
+                    color: marker.color,
+                    text: sectionText
+                });
+            }
+        }
+
+        return sections;
+    }
+
+    function showOAAnalysisSections(analysisText) {
+        var sections = parseOASections(analysisText);
+        var container = document.getElementById('result');
+
+        if (sections.length === 0) {
+            // Fallback: render as plain markdown
+            showResult(renderMarkdown(analysisText), { copy: true, export: true, showDiscussion: true, amend: true });
+            return;
+        }
+
+        // Build toolbar
+        var toolbar = buildToolbar({ copy: true, export: true, showDiscussion: true, amend: true });
+        var html = '<div class="result-box">' + toolbar;
+        html += '<div style="margin-bottom:12px;padding:8px 12px;background:#0d1117;border:1px solid #30363d;border-radius:6px;font-size:13px;color:#8b949e;">';
+        html += '📋 分析结果分为 <strong>' + sections.length + '</strong> 个部分，请逐部分审阅。';
+        html += '确认分析准确后，参考<strong>第五部分</strong>的意见陈述书草稿撰写正式答复。';
+        html += '</div>';
+        html += '<div class="result-content">';
+
+        for (var i = 0; i < sections.length; i++) {
+            var s = sections[i];
+            var sectionColor = s.color;
+            var isResponse = (s.key === 'part5');
+            html += '<div style="border:1px solid ' + sectionColor + '44;border-radius:8px;margin-bottom:12px;background:#0d1117;">';
+            html += '<div style="background:' + sectionColor + '15;padding:8px 12px;border-bottom:1px solid ' + sectionColor + '44;border-radius:8px 8px 0 0;display:flex;justify-content:space-between;align-items:center;">';
+            html += '<span style="color:' + sectionColor + ';font-weight:600;font-size:14px;">' + (i + 1) + '. ' + s.label + '</span>';
+            if (isResponse) {
+                html += '<button onclick="exportResponseDraft()" style="background:#f0883e;color:#fff;border:none;border-radius:4px;padding:4px 12px;cursor:pointer;font-size:12px;">📥 导出意见陈述书</button>';
+            }
+            html += '</div>';
+            html += '<div style="padding:12px 14px;font-size:13px;line-height:1.8;color:#c9d1d9;">';
+            html += renderMarkdown(s.text);
+            html += '</div></div>';
+        }
+
+        html += '</div></div>';
+        container.innerHTML = html;
+        clearLoading();
+    }
+
+    function exportResponseDraft() {
+        var sections = parseOASections(lastAnalysisRawText);
+        var responseSection = null;
+        for (var i = 0; i < sections.length; i++) {
+            if (sections[i].key === 'part5') { responseSection = sections[i]; break; }
+        }
+        if (!responseSection) { alert('未找到意见陈述书草稿'); return; }
+
+        var text = responseSection.text;
+        // Strip markdown markers for clean export
+        text = text.replace(/^#+\s*/gm, '').replace(/\*+/g, '');
+        var blob = new Blob(['意见陈述书\n\n' + text + '\n\n\n申请人：\n日期：\n'], { type: 'text/plain;charset=utf-8' });
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = '意见陈述书_' + new Date().toISOString().slice(0, 10) + '.txt';
+        a.click();
+        URL.revokeObjectURL(a.href);
     }
 
     // ── Helper: extract content for amendment editor ──
