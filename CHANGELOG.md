@@ -5,6 +5,38 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 
+## [v0.6.3] - 2026-06-22
+
+### 新增 / Added
+- **OA 一审结构化分析** — Prompt 重写，强制 AI 输出 5 部分固定结构：权利要求逐项解析 / 审查员驳回逻辑还原 / 特征对比总表 / 逐权利要求反驳论点 / 意见陈述书草稿。每项权利要求单独论述，引用对比文献具体段落
+  OA first exam structured analysis: 5-part fixed output (claim breakdown / examiner logic / feature comparison table / counter-arguments / response draft)
+- **分析结果分段展示** — 前端将 5 部分分析渲染为彩色卡片，特征对比表（绿色边框）突出显示，意见陈述书草稿可独立导出 `.txt` 直接粘贴提交
+  Analysis result displayed in 5 color-coded cards; response draft exportable as `.txt`
+- **深度模式增强** — `extract_oa_response_section` 辅助函数将 critique 审查范围缩小到第五部分意见陈述书，避免冗余分析
+  Deep mode: critique now targets only the response draft section
+
+### 改进 / Improved
+- **OA 审查员自检增强** — `oa_critique` prompt 增加特征对比准确性检查维度，要求 AI 从审查员视角核实对比文献公开内容认定的准确性
+  OA critique prompt enhanced with feature comparison accuracy verification
+
+### 修复 / Fixed
+- **DOMPurify OA 页面遗漏** — `office_action_response.html` 仍使用 CDN 引用，导致断网时 JS 崩溃全黑。已替换为 `/static/purify.min.js`
+  DOMPurify CDN → local in OA page (was missed in v0.6.2)
+- **系统代理导致 API 连接失败** — Windows HTTP_PROXY 环境变量（`http://127.0.0.1:10808`）被 reqwest 库自动读取，拦截了 DeepSeek 请求。reqwest 客户端强制 `.no_proxy()` 绕过系统代理
+  Windows system proxy (`HTTP_PROXY=127.0.0.1:10808`) blocked DeepSeek API calls; fixed with `.no_proxy()` on reqwest client
+- **AI 请求超时 45s 过短** — `PROVIDER_HTTP_TIMEOUT_SECS` 从 45 秒提升至 180 秒，解决 DeepSeek v4-pro 推理模型处理长 prompt 超时问题
+  HTTP timeout increased from 45s to 180s for reasoning model response times
+- **start.bat 找不到 cargo** — `cargo` 不在 Windows 系统 PATH 中时编译失败。加入 `set "PATH=%USERPROFILE%\.cargo\bin;%PATH%"`
+  start.bat: added cargo to PATH for systems where it's not in Windows environment
+- **start.bat 启动慢** — 每次运行都执行 `cargo build --release`（3-4分钟）。改为检测到已有二进制时跳过编译直达启动
+  start.bat: skip build if release binary already exists (instant startup)
+- **getRefs 重复推送** — `refs.push()` 对同一数据推送两次（`_uploadedData` + `uploadedData` Proxy），删除重复行
+  Fixed duplicate refs.push() in getRefs function
+- **dev.bat 同样缺少 cargo 路径** — 加入相同的 PATH 修复
+  dev.bat: same cargo PATH fix
+
+---
+
 ## [v0.6.2] - 2026-06-26
 
 ### 新增 / Added

@@ -329,7 +329,61 @@
 
 ---
 
-*最后更新: 2026-05-25 16:00
+### [2026-06-22] 系统代理拦截 DeepSeek API 请求
+- **严重程度**: CRITICAL
+- **涉及文件**: `src/ai/client.rs`
+- **现象**: OA 分析功能调用 DeepSeek API 时返回 "AI 响应读取失败（连接中断）"，浏览器显示 "分析失败: Failed to fetch"。服务器日志显示请求通过 `proxy(http://127.0.0.1:10808)` 发送，45 秒后超时取消。
+- **根因**: 
+  1. Windows 系统环境变量 `HTTP_PROXY=http://127.0.0.1:10808` 被 reqwest 库自动读取
+  2. 本地代理工具（Clash/v2ray）拦截了 DeepSeek 的 HTTPS 请求，但未正确转发
+  3. 请求建立连接后等待响应，代理无响应导致 45 秒超时，重试 3 次后失败
+- **修复**: 在 `Client::builder()` 链中增加 `.no_proxy()`，强制 reqwest 忽略系统代理设置
+- **预防**: 
+  1. 所有 HTTP 客户端创建处应显式控制代理行为，不依赖系统环境变量
+  2. 生产路径增加 `.no_proxy()` 确保不受代理干扰
+  3. 新增网络请求相关代码时检查是否有代理干扰
+- **提交**: `c250f50`
+
+### [2026-06-22] OA 页面 DOMPurify CDN 遗漏
+- **严重程度**: MEDIUM
+- **涉及文件**: `templates/office_action_response.html`
+- **现象**: 用户打开 OA 页面，点击分析后提示 "分析失败: Failed to fetch"。实际原因是 DOMPurify 未加载导致 JS 崩溃，后续所有 fetch 调用未执行。
+- **根因**: v0.6.2 的 DOMPurify CDN→本地迁移覆盖了 6 个模板但遗漏了 `office_action_response.html`。该页面仍引用 CDN（`cdnjs.cloudflare.com`），网络差时加载失败 → JS 停止执行。
+- **修复**: 将 CDN URL 替换为 `/static/purify.min.js`，移除 CDN 降级回退脚本块
+- **预防**: 
+  1. 批量替换时用 grep 确认所有文件已覆盖（`grep -r "cdnjs" templates/`）
+  2. 新增模板时检查前端依赖引用方式
+- **提交**: `c250f50`
+
+### [2026-06-22] AI HTTP 超时 45s 不足以处理 OA 长 prompt
+- **严重程度**: HIGH
+- **涉及文件**: `src/ai/client.rs`
+- **现象**: DeepSeek v4-pro 推理模型处理 OA 分析 prompt（约 3000 tokens 输入）需要 40-90 秒，但 HTTP 客户端超时为 45 秒，导致连接在第 45 秒被强制取消（CANCEL frame），重试 3 次后仍失败。
+- **根因**: `PROVIDER_HTTP_TIMEOUT_SECS = 45` 是针对普通对话场景设定的，未考虑推理模型处理长 prompt 的额外耗时。
+- **修复**: 超时从 45 秒提升至 180 秒（与全局 `GLOBAL_TIMEOUT_SECS` 保持一致）
+- **预防**: 
+  1. 推理模型（deepseek-reasoner 等）的 HTTP 超时应显著高于普通模型
+  2. 新增 AI 功能时根据最大预期响应时间调整超时
+  3. 考虑用流式响应（SSE）替代等待完整响应
+- **提交**: `c250f50`
+
+### [2026-06-22] start.bat 因 cargo 不在系统 PATH 中无法启动
+- **严重程度**: MEDIUM
+- **涉及文件**: `start.bat`、`dev.bat`
+- **现象**: 用户双击 `start.bat`，cmd 窗口一闪而过，服务器未启动。浏览器访问 `http://127.0.0.1:3000` 显示 ERR_CONNECTION_REFUSED。
+- **根因**: `start.bat` 执行 `cargo build --release --bin innoforge`，但 `cargo` 仅存在于 Git Bash 的 PATH（`C:\Users\Administrator\.cargo\bin`），不在 Windows 系统环境变量 PATH 中。从 Windows Explorer 双击 .bat 文件时由 cmd.exe 执行，找不到 cargo 命令。
+- **修复**: 
+  1. 在 `start.bat` 和 `dev.bat` 开头加入 `set "PATH=%USERPROFILE%\.cargo\bin;%PATH%"`
+  2. 优化 `start.bat`：已有 release 二进制时跳过编译（从 3-4 分钟减为 0 秒）
+  3. 去掉末尾 `pause >nul` 让错误可见
+- **预防**: 
+  1. .bat 文件应自行处理 PATH 依赖，不假设系统环境变量
+  2. 新增脚本文件时加上 `set "PATH=%USERPROFILE%\.cargo\bin;%PATH%"`
+- **提交**: `6b713f7` / `20de7e9`
+
+---
+
+*最后更新: 2026-06-22 22:30*
 
 ---
 
