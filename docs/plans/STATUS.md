@@ -7,13 +7,12 @@
 
 ## 当前焦点 / Current Focus
 
-**v0.6.1 — OA 答复深度增强 + 搜索质量升级（待继续）**
+**v0.6.2 — 搜索页 PDF 上传 + DOMPurify 本地化 + 代码质量加固**
 
-当前版本 v0.6.1 已发布，OA 全功能基本完成。下一步重点：搜索质量升级（向量检索、学术搜索、CRAAP 评分）。
+当前版本 v0.6.2 已发布。下一步重点：搜索质量升级（向量检索、学术搜索、CRAAP 评分）。
 
 ### ⚠️ 已知遗留问题
 1. ~~**OA 页面全黑问题** — 已修复（DOMPurify 缺失），但启动方式需注意：使用 `dev.bat`（debug 模式）而非 start.bat，后者可能闪退~~ ✅ **已彻底修复**：DOMPurify 已本地化到 `static/purify.min.js`，通过 `rust_embed` 编译进二进制，不依赖任何 CDN。`start.bat` 已重写，改为每次启动前重新编译，消除二进制与源码不一致问题。现在 `dev.bat` 和 `start.bat` 均可正常使用。
-2. **Aion Forge 工具链不稳定** — `ai_smart_collaborate` 频繁超时，OpenAI/Gemini 引擎因未充值不可用，仅 Claude 引擎可工作
 
 ---
 
@@ -21,6 +20,7 @@
 
 | 日期 | 变更 | 类型 |
 |------|------|------|
+| 2026-06-26 | v0.6.2 发布：搜索页 PDF 上传 + 首页文件持久化 + DOMPurify 本地化 + start.bat/dev.bat + clippy修复 + .gitignore增强 + 工作树清理 | fix |
 | 2026-05-25 | DOMPurify 本地化 + start.bat 修复：CDN → `static/purify.min.js` 编译嵌入，start.bat 改为始终编译 | fix |
 | 2026-05-23 | OA 答复深度增强：查库补全/分析历史DB v14/修改审查/论据库/检查清单 + 全页面引用按钮 | feat |
 | 2026-05-23 | v0.6.1 发布：代码质量加固（unwrap消除）+ 聊天分段加载 + Pipeline 15步同步 + CI/CD 修复 + 文档治理 | release |
@@ -54,8 +54,15 @@
 
 ## 下一步 / Next Steps
 
-### 已完成 / Completed
-- [x] 治理体系文档评审（CLAUDE.md 流程 + docs/errors.md + STATUS.md）
+### v0.6.2 已完成
+- [x] DOMPurify CDN → 本地 `/static/purify.min.js`（6 模板全部替换）
+- [x] 搜索页 PDF 上传区（拖拽/本地持久化/i18n 双语）
+- [x] 首页文件上传 localStorage 持久化（刷新不丢失）
+- [x] start.bat 重写（始终编译）+ dev.bat 调试启动脚本
+- [x] 3 个 clippy 警告修复（manual_flatten / is_some_and）
+- [x] .gitignore 增强（临时脚本/备份/适配器保护）
+- [x] 清理 3 个 Claude 工作树分支 + 2 个 detached worktrees
+- [x] 远程仓库同步（GitHub + Gitee）
 - [x] 消除生产路径残留 unwrap() — 14 处
 - [x] 清理根目录冗余文件
 - [x] CLAUDE.md Pipeline 步数（13 → 15）
@@ -92,4 +99,4 @@
 
 ---
 
-*最后更新: 2026-05-25 16:00*
+*最后更新: 2026-06-26 14:00*

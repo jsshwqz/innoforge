@@ -5,6 +5,30 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 
+## [v0.6.2] - 2026-06-26
+
+### 新增 / Added
+- **搜索页 PDF 上传** — 搜索页新增 PDF 上传区，支持拖拽上传 + 点击选择，文件送至 `/api/upload/extract` 提取文本后结合搜索分析
+  Search page PDF upload zone with drag-and-drop, text extraction via backend API
+- **首页文件上传持久化** — 上传的文件信息通过 localStorage 持久化，页面刷新后自动恢复，不丢失文件引用
+  Homepage file upload persistence: files survive page refresh via localStorage
+
+### 改进 / Improved
+- **DOMPurify 本地化** — 6 个模板（index/idea/ai/settings/patent_detail/oa-response）从 CDN 引用替换为 `/static/purify.min.js`，编译进二进制，完全消除网络依赖和断网黑屏
+  DOMPurify localized: 6 templates use embedded `/static/purify.min.js`, no CDN dependency
+- **启动脚本重构** — `start.bat` 重写为始终编译（删除旧二进制跳过逻辑），新增 `dev.bat` 调试模式快速启动脚本
+  start.bat rewritten to always recompile; new dev.bat for debug-mode fast startup
+- **代码质量加固** — 修复 3 个 clippy 警告（`manual_flatten` / `unnecessary_map_or` × 2），零警告通过
+  3 clippy fixes: manual_flatten, 2x unnecessary_map_or → is_some_and
+- **.gitignore 增强** — 增加 `.reasonix/` / 临时工具脚本 / 测试适配器 / 备份文件等保护规则
+  .gitignore strengthened with entries for temp scripts, test adapters, backup files
+
+### 修复 / Fixed
+- **search.html CSS 重复** — 移除搜索页 PDF 上传区样式定义重复，修复多余 `</script>` 标签
+  Fixed duplicate CSS definitions and extra `</script>` tag in search page
+
+---
+
 ## [v0.6.1] - 2026-05-23
 
 ### 改进 / Improved
