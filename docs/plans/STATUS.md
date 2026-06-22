@@ -56,15 +56,17 @@
 ## 下一步 / Next Steps
 
 ### v0.6.3 已完成
-- [x] OA 一审 Prompt 重写：强制 5 部分结构化输出（权利要求解析/审查员逻辑/特征对比表/反驳论点/意见陈述书）
-- [x] 分析结果分段展示：5 张彩色卡片，特征对比表突出显示
-- [x] 意见陈述书草稿独立导出为 `.txt`
-- [x] 深度模式 critique 范围缩小至第五部分
-- [x] DOMPurify OA 页面 CDN → 本地（v0.6.2 遗漏）
-- [x] reqwest 强制 `.no_proxy()` 绕过系统代理
-- [x] HTTP 超时 45s → 180s
-- [x] start.bat/dev.bat 加入 cargo PATH + 跳过编译优化
-- [x] 实测验证：模拟审查意见通知书分析，21KB 完整五部分输出
+- [x] OA 一审 Prompt 重写：强制 5 部分结构化输出（权利要求解析/审查员逻辑/特征对比表/反驳论点/意见陈述书） ✅ `8649b01`
+- [x] 分析结果分段展示：5 张彩色卡片，特征对比表突出显示 ✅ `8649b01`
+- [x] 意见陈述书草稿独立导出为 `.txt` ✅ `8649b01`
+- [x] 深度模式 critique 范围缩小至第五部分 ✅ `8649b01`
+- [x] DOMPurify OA 页面 CDN → 本地（v0.6.2 遗漏） ✅ `c250f50`
+- [x] reqwest 强制 `.no_proxy()` 绕过系统代理 ✅ `c250f50`
+- [x] HTTP 超时 45s → 180s ✅ `c250f50`
+- [x] start.bat/dev.bat 加入 cargo PATH + 跳过编译优化 ✅ `6b713f7` + `20de7e9`
+- [x] getRefs 重复推送修复 ✅ `8649b01`
+- [x] 实测验证：模拟审查意见通知书分析，21KB 完整五部分输出 ✅ `c250f50`
+- [x] 文档同步：CHANGELOG/STATUS/Cargo.toml 到 v0.6.3 + errors.md 4条复盘 ✅ `658255a`
 
 ### v0.6.2 已完成
 - [x] DOMPurify CDN → 本地 `/static/purify.min.js`（6 模板全部替换）
