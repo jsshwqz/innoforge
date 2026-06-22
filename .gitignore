@@ -24,7 +24,19 @@ memory_store.json
 server.log
 *.db-journal
 
-# 临时测试脚本和截图 / Temp test files
+# 临时工具脚本 / Temp utility scripts
+/fix_template.js
+/2
+
+# .reasonix 配置目录（AI Agent 工作文件）
+.reasonix/
+
+# 测试适配器 / Test adapters
+testaionui-adapters/
+testpatent-hub-backup.skill-routermanifest.json
+
+# 备份文件 / Backup files
+*.bak
 test-*.js
 test-screenshots/
 test-screenshots-e2e/
