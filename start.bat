@@ -9,22 +9,27 @@ REM Kill existing instance if running
 taskkill /F /IM innoforge.exe >nul 2>nul
 timeout /t 2 /nobreak >nul
 
-REM 总是重新编译，确保二进制与源代码一致
+REM 如果已存在 release 二进制，跳过编译直接启动（快）
+if exist ".\target\release\innoforge.exe" (
+    echo [InnoForge] Binary exists, skipping build...
+    goto :run
+)
+
+REM 没有二进制才编译
 echo [InnoForge] Building (release mode, optimized)...
-echo [InnoForge] First build may take 5-10 minutes...
+echo [InnoForge] This may take 5-10 minutes on first build.
 cargo build --release --bin innoforge
 if errorlevel 1 (
     echo [InnoForge] Build failed!
-    echo [InnoForge] Possible causes:
-    echo [InnoForge]   1. Rust/Cargo not installed
-    echo [InnoForge]   2. Network issue downloading dependencies
     echo [InnoForge] Try running dev.bat (debug mode) for faster builds.
     echo [InnoForge] Press any key to exit...
     pause
     exit /b 1
 )
 
-echo [InnoForge] All set. Launching server...
+:run
+echo [InnoForge] Launching server...
 echo [InnoForge] Open http://127.0.0.1:3000 in your browser.
+echo [InnoForge] Close this window to stop the server.
+echo.
 ".\target\release\innoforge.exe"
-pause
