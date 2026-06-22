@@ -13,7 +13,9 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
     <script>
     // 如果 CDN 加载失败，降级为直接 innerHTML
-    if (typeof DOMPurify === 'undefined') { var DOMPurify = { sanitize: function(x) { return x; } }; }
+    if (typeof DOMPurify === 'undefined') {
+        window.DOMPurify = { sanitize: function(x) { return x; } };
+    }
     </script>
 <style>
 .cmp-input { width:100%; padding:10px; background:#0d1117; border:1px solid #30363d; border-radius:6px; color:#c9d1d9; }
@@ -304,7 +306,7 @@
             } else {
                 alert(data.message || 'PDF store failed');
             }
-        } catch(e) {
+        } catch (e) {
             alert('PDF preview failed: ' + e.message);
         }
     }
@@ -324,11 +326,11 @@
     var discussionSending = false;
 
     function saveOaState() {
-        try { localStorage.setItem(OA_STORAGE_KEY, JSON.stringify(_uploadedData)); } catch(e) {}
+        try { localStorage.setItem(OA_STORAGE_KEY, JSON.stringify(_uploadedData)); } catch (e) { /* ignore */ }
     }
     // uploadedData 用 Proxy 包装，任何修改自动持久化到 localStorage（关页面不丢）
     var _uploadedData = {};
-    try { if (localStorage.getItem('innoforge_oa_data')) { _uploadedData = JSON.parse(localStorage.getItem('innoforge_oa_data')); } } catch(e) { _uploadedData = {}; }
+    try { if (localStorage.getItem('innoforge_oa_data')) { _uploadedData = JSON.parse(localStorage.getItem('innoforge_oa_data')); } } catch (e) { _uploadedData = {}; }
     // Proxy 仅拦截 set/delete 触发自动保存；get/遍历等操作直接转发到 target
     var uploadedData = new Proxy(_uploadedData, {
         set: function(target, key, value) { target[key] = value; saveOaState(); return true; },
@@ -343,11 +345,11 @@
                 Object.keys(data).forEach(function(k) { _uploadedData[k] = data[k]; });
                 restoreOaUi();
             }
-        } catch(e) {}
+        } catch (e) { /* ignore */ }
     }
 
     function clearOaState() {
-        try { localStorage.removeItem(OA_STORAGE_KEY); } catch(e) {}
+        try { localStorage.removeItem(OA_STORAGE_KEY); } catch (e) { /* ignore */ }
     }
 
     function restoreOaUi() {
@@ -438,7 +440,7 @@
                     + ' (' + result.content.length + t('common.chars') + ')'
                     + '<span class="tag-remove" onclick="clearMyPatent()">&times;</span></span>' + previewBtn;
                 document.getElementById('my-patent').disabled = true;
-            } catch(e) {
+            } catch (e) {
                 tagEl.innerHTML = '<span style="color:#f85149;font-size:12px;">' + escapeHtml(e.message) + '</span>';
             }
         });
@@ -508,7 +510,7 @@
             var resp = await fetch('/api/patent/lookup/' + encodeURIComponent(patentNumber));
             var data = await resp.json();
             if (data.status === 'ok' && data.patent) { onSuccess(data.patent); return; }
-        } catch(e) {}
+        } catch (e) {}
         // 本地没有 → 让用户选择是否在线抓取（消耗 API 额度）
         if (!confirm('本地库中未找到该专利。\n是否从在线数据库抓取？（将消耗 API 查询额度）\n\n点「取消」可改为上传 PDF 文件。')) return;
         try {
@@ -520,7 +522,7 @@
             var data = await resp.json();
             if (data.status === 'ok' && data.patent) { onSuccess(data.patent); return; }
             alert(data.message || t('oar.lookupFail'));
-        } catch(e) { alert(t('oar.lookupFail') + ': ' + e.message); }
+        } catch (e) { alert(t('oar.lookupFail') + ': ' + e.message); }
     }
 
     function pasteOA() {
@@ -595,7 +597,7 @@
                     + ' (' + result.content.length + t('common.chars') + ')'
                     + '<span class="tag-remove" onclick="clearOA()">&times;</span></span>';
                 document.getElementById('oa-input').disabled = true;
-            } catch(e) {
+            } catch (e) {
                 tagEl.innerHTML = '<span style="color:#f85149;font-size:12px;">' + escapeHtml(e.message) + '</span>';
             }
         });
@@ -658,7 +660,7 @@
                     + ' (' + result.content.length + t('common.chars') + ')'
                     + '<span class="tag-remove" onclick="clearRefUpload(\'' + idx + '\')">&times;</span></span>';
                 row.querySelector('.ref-input').disabled = true;
-            } catch(e) {
+            } catch (e) {
                 existing.innerHTML = '<span style="color:#f85149;font-size:12px;">' + escapeHtml(e.message) + '</span>';
             }
         });
@@ -855,7 +857,7 @@
             showChecklist();
             // 刷新历史列表
             loadOaHistory();
-        } catch(e) {
+        } catch (e) {
             showError(t('oar.fail') + ': ' + e.message);
         }
     }
@@ -910,7 +912,7 @@
             } else {
                 resultDiv.innerHTML = '<div class="result-box" style="margin-top:12px;">' + renderMarkdown(data.analysis) + '</div>';
             }
-        } catch(e) {
+        } catch (e) {
             resultDiv.innerHTML = '<div style="color:#f85149;">' + escapeHtml(e.message) + '</div>';
         }
         btn.disabled = false;
@@ -1170,7 +1172,7 @@
                 }
                 renderArgBoard();
             }
-        } catch(e) {}
+        } catch (e) {}
         btn.textContent = '📝 ' + t('oar.extractArgs');
         btn.style.pointerEvents = '';
     }
@@ -1463,7 +1465,7 @@
             container.appendChild(aiDiv);
             container.scrollTop = container.scrollHeight;
             showDiscussionExportButton();
-        } catch(e) {
+        } catch (e) {
             var loadEl = document.getElementById('ai-loading-disc');
             if (loadEl) loadEl.remove();
             if (e.name === 'AbortError') return;
@@ -1539,7 +1541,7 @@
             } else {
                 alert(data.error || t('oar.exportFail'));
             }
-        } catch(e) {
+        } catch (e) {
             alert(t('oar.fail') + ': ' + e.message);
         }
         btn.textContent = t('oar.exportConclusions');
@@ -1557,7 +1559,7 @@
                 oaHistory = data.analyses;
                 renderOaHistory();
             }
-        } catch(e) { /* history load failed silently */ }
+        } catch (e) { /* history load failed silently */ }
     }
 
     function renderOaHistory() {
@@ -1585,7 +1587,6 @@
                 + ' · ' + (h.analysis_text ? h.analysis_text.length + '字' : '')
                 + '</div></div>';
         }
-        }
         html += '</div>';
         var existing = sidebar.querySelector('.oa-history-section');
         if (existing) existing.remove();
@@ -1604,7 +1605,7 @@
                 showResult(renderMarkdown(lastAnalysisRawText), { copy: true, export: true, showDiscussion: true, amend: true });
                 window.scrollTo({ top: document.getElementById('result').offsetTop - 100, behavior: 'smooth' });
             }
-        } catch(e) { /* load failed */ }
+        } catch (e) { /* load failed */ }
     }
 
     // ── Discussion quote button event handlers ──

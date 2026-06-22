@@ -71,11 +71,9 @@ impl super::Database {
             "SELECT id,patent_number,title,abstract_text,description,claims,applicant,inventor,filing_date,publication_date,grant_date,ipc_codes,cpc_codes,priority_date,country,kind_code,family_id,legal_status,citations,cited_by,source,raw_json,created_at,images,pdf_url FROM patents WHERE REPLACE(REPLACE(UPPER(patent_number), ' ', ''), '.', '') LIKE ?1 LIMIT 5",
         )?;
         let rows = stmt.query_map(params![like], |r| Ok(Self::row_to_patent(r)))?;
-        for row in rows {
-            if let Ok(p) = row {
-                if crate::patent::canonical_patent_key(&p.patent_number) == canonical {
-                    return Ok(Some(p));
-                }
+        for p in rows.flatten() {
+            if crate::patent::canonical_patent_key(&p.patent_number) == canonical {
+                return Ok(Some(p));
             }
         }
         Ok(None)

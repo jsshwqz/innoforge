@@ -18,6 +18,13 @@
 .panel h3 { margin: 0 0 12px; color: #58a6ff; font-size: 16px; }
 .search-grid { display: grid; grid-template-columns: 2fr repeat(4, 1fr); gap: 8px; }
 .search-grid-2 { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin-top: 8px; }
+.upload-zone { margin-top: 12px; padding: 16px; border: 2px dashed #30363d; border-radius: 8px; text-align: center; color: #8b949e; cursor: pointer; transition: all 0.2s; }
+.upload-zone.dragover { border-color: #58a6ff; background: #0d1117; }
+.upload-zone:hover { border-color: #58a6ff; color: #58a6ff; }
+.file-list { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+.file-item { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 4px 8px; font-size: 12px; color: #c9d1d9; display: flex; align-items: center; gap: 4px; }
+.file-item .remove { color: #f85149; cursor: pointer; background: none; border: none; font-size: 14px; }
+.file-item .preview-btn { color: #58a6ff; cursor: pointer; background: none; border: none; font-size: 14px; }
 .search-grid input, .search-grid select, .search-grid-2 input, .search-grid-2 select {
     width: 100%;
     padding: 10px 12px;
@@ -111,6 +118,13 @@
 <button class="btn-secondary" onclick="showStats()" data-i18n="btn.stats"></button>
 <button class="btn-secondary" onclick="exportCsv()" data-i18n="btn.export"></button>
 </div>
+<!-- PDF Upload Zone -->
+<div id="pdf-upload-zone" class="upload-zone" onclick="document.getElementById('pdf-file-input').click()">
+    <span data-i18n="upload.dragDrop">拖拽PDF文件到此处，或点击上传</span>
+    <div style="font-size:11px;color:#8b949e;margin-top:4px;" data-i18n="upload.hint">支持单个PDF文件，用于提取技术方案进行检索分析</div>
+    <div class="file-list" id="pdf-file-list"></div>
+    <input type="file" id="pdf-file-input" accept=".pdf" multiple="false" style="display:none" onchange="handlePdfUpload(event)">
+</div>
 </div>
 
 <div class="panel">
@@ -143,6 +157,39 @@ let currentRequest = null;
 let lastResponse = null;
 let lastPage = 1;
 let lastPageSize = 20;
+
+// PDF Upload State
+let currentPdfFile = null;
+let currentPdfContent = null;
+const SEARCH_PDF_STORAGE_KEY = 'innoforge_search_pdf';
+let restoredSearchPdf = null;
+
+function saveSearchPdfMeta() {
+    try {
+        if (currentPdfFile && currentPdfContent) {
+            const data = { name: currentPdfFile.name, size: currentPdfFile.size, content: currentPdfContent, timestamp: Date.now() };
+            localStorage.setItem(SEARCH_PDF_STORAGE_KEY, JSON.stringify(data));
+        }
+    } catch(e) { /* ignore */ }
+}
+
+function loadSearchPdfMeta() {
+    try {
+        const raw = localStorage.getItem(SEARCH_PDF_STORAGE_KEY);
+        if (raw) {
+            const data = JSON.parse(raw);
+            if (data && data.name && data.content) {
+                restoredSearchPdf = data;
+                currentPdfContent = data.content;
+            }
+        }
+    } catch(e) { restoredSearchPdf = null; }
+}
+
+function clearSearchPdfMeta() {
+    localStorage.removeItem(SEARCH_PDF_STORAGE_KEY);
+    restoredSearchPdf = null;
+}
 
 // Merge search-specific i18n keys into global I18N_COMMON
 (function() {
@@ -195,7 +242,17 @@ let lastPageSize = 20;
     'meta.applicant': '申请人',
     'meta.inventor': '发明人',
     'meta.filing': '申请日',
-    'meta.country': '国家'
+    'meta.country': '国家',
+    'upload.dragDrop': '拖拽PDF文件到此处，或点击上传',
+    'upload.hint': '支持单个PDF文件，用于提取技术方案进行检索分析',
+    'upload.removed': '已移除',
+    'upload.preview': '预览',
+    'upload.uploading': '上传中...',
+    'upload.success': '上传成功',
+    'upload.error': '上传失败',
+    'upload.extracting': 'PDF解析中...',
+    'upload.extractSuccess': '解析完成',
+    'upload.extractFail': '解析失败，请重试'
   };
   var searchEn = {
     'search.title': 'Patent Search',
@@ -246,7 +303,17 @@ let lastPageSize = 20;
     'meta.applicant': 'Applicant',
     'meta.inventor': 'Inventor',
     'meta.filing': 'Filing',
-    'meta.country': 'Country'
+    'meta.country': 'Country',
+    'upload.dragDrop': 'Drag & drop PDF here, or click to upload',
+    'upload.hint': 'Single PDF file for extracting technical content for search analysis',
+    'upload.removed': 'Removed',
+    'upload.preview': 'Preview',
+    'upload.uploading': 'Uploading...',
+    'upload.success': 'Uploaded',
+    'upload.error': 'Upload failed',
+    'upload.extracting': 'Parsing PDF...',
+    'upload.extractSuccess': 'Parsed',
+    'upload.extractFail': 'Parse failed, retry'
   };
   Object.keys(searchZh).forEach(function(k) { if (!I18N_COMMON.zh[k]) I18N_COMMON.zh[k] = searchZh[k]; });
   Object.keys(searchEn).forEach(function(k) { if (!I18N_COMMON.en[k]) I18N_COMMON.en[k] = searchEn[k]; });
@@ -279,7 +346,16 @@ renderSidebar(
   + '<button class="sidebar-btn" onclick="exportCsv()" data-i18n="btn.export">' + t('btn.export') + '</button>'
   + '</div>'
 );
-applyI18nCommon();
+	applyI18nCommon();
+	loadSearchPdfMeta();
+	updatePdfFileList();
+	if (restoredSearchPdf) {
+	    const zone = document.getElementById('pdf-upload-zone');
+	    if (zone) {
+	        const span = zone.querySelector('span[data-i18n="upload.dragDrop"]');
+	        if (span) span.textContent = t('upload.extractSuccess');
+	    }
+	}
 
 function escapeHtml(str) {
     return String(str || '')
@@ -705,6 +781,142 @@ async function batchSummarize() {
     } catch(e) {
         resultDiv.innerHTML = '<p style="color:#f85149;">❌ 请求失败: ' + escapeHtml(e.message) + '</p>';
     }
+}
+</script>
+<script>
+// PDF Upload Functions
+function updatePdfFileList() {
+    const listEl = document.getElementById('pdf-file-list');
+    if (!listEl) return;
+    if (!currentPdfFile && !restoredSearchPdf) {
+        listEl.innerHTML = '';
+        return;
+    }
+    if (currentPdfFile) {
+        listEl.innerHTML = `
+            <div class="file-item">
+                <span class="preview-btn" onclick="previewPdfContent()" title="${t('upload.preview')}">👁️</span>
+                <span style="color:#58a6ff;">${escapeHtml(currentPdfFile.name)}</span>
+                <span style="color:#8b949e;font-size:10px;">(${formatFileSize(currentPdfFile.size)})</span>
+                <span class="remove" onclick="removePdfFile()" title="${t('upload.removed')}">×</span>
+            </div>
+        `;
+    } else if (restoredSearchPdf) {
+        listEl.innerHTML = `
+            <div class="file-item">
+                <span class="preview-btn" onclick="previewPdfContent()" title="${t('upload.preview')}">👁️</span>
+                <span style="color:#58a6ff;">${escapeHtml(restoredSearchPdf.name)}</span>
+                <span style="color:#8b949e;font-size:10px;">(${formatFileSize(restoredSearchPdf.size)})</span>
+                <span style="color:#3fb950;font-size:0.75em;margin-left:6px;">已保存</span>
+                <span class="remove" onclick="removePdfFile()" title="${t('upload.removed')}">×</span>
+            </div>
+        `;
+    }
+}
+
+function formatFileSize(bytes) {
+    if (!bytes) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return (bytes / Math.pow(k, i)).toFixed(1) + ' ' + sizes[i];
+}
+
+function handlePdfUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+        alert(t('upload.error') + ': 仅支持PDF文件');
+        return;
+    }
+    currentPdfFile = file;
+    updatePdfFileList();
+    // Auto-extract after upload
+    extractPdfContent();
+    event.target.value = ''; // Reset input
+}
+
+function removePdfFile() {
+    currentPdfFile = null;
+    currentPdfContent = null;
+    clearSearchPdfMeta();
+    const zone = document.getElementById('pdf-upload-zone');
+    if (zone) {
+        const span = zone.querySelector('span[data-i18n="upload.dragDrop"]');
+        if (span) span.textContent = t('upload.dragDrop');
+    }
+    updatePdfFileList();
+}
+
+function previewPdfContent() {
+    if (!currentPdfContent) {
+        alert('暂无解析内容');
+        return;
+    }
+    alert('PDF内容预览:\n\n' + currentPdfContent.slice(0, 500) + (currentPdfContent.length > 500 ? '...' : ''));
+}
+
+async function extractPdfContent() {
+    // If we already have restored content, skip re-upload
+    if (!currentPdfFile && currentPdfContent) {
+        const zone = document.getElementById('pdf-upload-zone');
+        if (zone) {
+            const span = zone.querySelector('span[data-i18n="upload.dragDrop"]');
+            if (span) span.textContent = t('upload.extractSuccess');
+        }
+        return;
+    }
+    if (!currentPdfFile) return;
+    const zone = document.getElementById('pdf-upload-zone');
+    const originalText = zone.querySelector('span[data-i18n="upload.dragDrop"]').textContent;
+    zone.querySelector('span[data-i18n="upload.dragDrop"]').textContent = t('upload.extracting');
+    zone.style.pointerEvents = 'none';
+    zone.style.opacity = '0.6';
+
+    try {
+        const formData = new FormData();
+        formData.append('file', currentPdfFile);
+        const res = await fetch('/api/upload/extract', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await res.json();
+        if (data.text) {
+            currentPdfContent = data.text;
+            saveSearchPdfMeta();
+            zone.querySelector('span[data-i18n="upload.dragDrop"]').textContent = t('upload.extractSuccess');
+        } else {
+            zone.querySelector('span[data-i18n="upload.dragDrop"]').textContent = t('upload.extractFail');
+        }
+    } catch (err) {
+        zone.querySelector('span[data-i18n="upload.dragDrop"]').textContent = t('upload.error') + ': ' + err.message;
+    } finally {
+        zone.style.pointerEvents = 'auto';
+        zone.style.opacity = '1';
+    }
+}
+
+// Drag & Drop support
+const uploadZone = document.getElementById('pdf-upload-zone');
+if (uploadZone) {
+    uploadZone.addEventListener('dragover', function(e) {
+        e.preventDefault();
+        uploadZone.classList.add('dragover');
+    });
+    uploadZone.addEventListener('dragleave', function(e) {
+        e.preventDefault();
+        uploadZone.classList.remove('dragover');
+    });
+    uploadZone.addEventListener('drop', function(e) {
+        e.preventDefault();
+        uploadZone.classList.remove('dragover');
+        const file = e.dataTransfer.files[0];
+        if (file) {
+            // Create a fake event
+            const fakeEvent = { target: { files: [file], value: '' } };
+            handlePdfUpload(fakeEvent);
+        }
+    });
 }
 </script>
 <script>

@@ -987,7 +987,7 @@ pub async fn api_ai_office_action_response(
         if obj
             .get("content")
             .and_then(|v| v.as_str())
-            .map_or(false, |c| c.len() > 10)
+            .is_some_and(|c| c.len() > 10)
         {
             let title = obj
                 .get("title")

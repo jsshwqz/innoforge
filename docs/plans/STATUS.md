@@ -12,7 +12,7 @@
 当前版本 v0.6.1 已发布，OA 全功能基本完成。下一步重点：搜索质量升级（向量检索、学术搜索、CRAAP 评分）。
 
 ### ⚠️ 已知遗留问题
-1. **OA 页面全黑问题** — 已修复（DOMPurify 缺失），但启动方式需注意：使用 `dev.bat`（debug 模式）而非 start.bat，后者可能闪退
+1. ~~**OA 页面全黑问题** — 已修复（DOMPurify 缺失），但启动方式需注意：使用 `dev.bat`（debug 模式）而非 start.bat，后者可能闪退~~ ✅ **已彻底修复**：DOMPurify 已本地化到 `static/purify.min.js`，通过 `rust_embed` 编译进二进制，不依赖任何 CDN。`start.bat` 已重写，改为每次启动前重新编译，消除二进制与源码不一致问题。现在 `dev.bat` 和 `start.bat` 均可正常使用。
 2. **Aion Forge 工具链不稳定** — `ai_smart_collaborate` 频繁超时，OpenAI/Gemini 引擎因未充值不可用，仅 Claude 引擎可工作
 
 ---
@@ -21,6 +21,7 @@
 
 | 日期 | 变更 | 类型 |
 |------|------|------|
+| 2026-05-25 | DOMPurify 本地化 + start.bat 修复：CDN → `static/purify.min.js` 编译嵌入，start.bat 改为始终编译 | fix |
 | 2026-05-23 | OA 答复深度增强：查库补全/分析历史DB v14/修改审查/论据库/检查清单 + 全页面引用按钮 | feat |
 | 2026-05-23 | v0.6.1 发布：代码质量加固（unwrap消除）+ 聊天分段加载 + Pipeline 15步同步 + CI/CD 修复 + 文档治理 | release |
 | 2026-05-23 | v0.6.0 治理维护：消除生产路径 `unwrap()` + 文档同步 + 根目录清理 + CLAUDE.md Pipeline 步数修正 | refactor |
@@ -91,4 +92,4 @@
 
 ---
 
-*最后更新: 2026-05-24 17:00*
+*最后更新: 2026-05-25 16:00*

@@ -412,15 +412,14 @@ pub async fn api_patent_lookup(
     State(s): State<AppState>,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Json<serde_json::Value> {
-    let auto_fetch = params.get("fetch").map_or(false, |v| v == "true");
+    let auto_fetch = params.get("fetch").is_some_and(|v| v == "true");
 
     // Try normalized search first, then exact match as fallback
-    let result = s
-        .db
-        .find_patent_by_number(&patent_number)
-        .ok()
-        .flatten()
-        .or_else(|| s.db.get_patent(&patent_number).ok().flatten());
+    let result =
+        s.db.find_patent_by_number(&patent_number)
+            .ok()
+            .flatten()
+            .or_else(|| s.db.get_patent(&patent_number).ok().flatten());
 
     if let Some(p) = result {
         return Json(json!({
@@ -484,12 +483,11 @@ pub async fn api_patent_lookup_and_fetch(
     }
 
     // 1. Try local DB with normalized search
-    let local = s
-        .db
-        .find_patent_by_number(patent_number)
-        .ok()
-        .flatten()
-        .or_else(|| s.db.get_patent(patent_number).ok().flatten());
+    let local =
+        s.db.find_patent_by_number(patent_number)
+            .ok()
+            .flatten()
+            .or_else(|| s.db.get_patent(patent_number).ok().flatten());
 
     if let Some(p) = local {
         return Json(json!({

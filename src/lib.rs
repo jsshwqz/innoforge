@@ -142,7 +142,10 @@ pub async fn start_server(db_path: &str) -> anyhow::Result<()> {
             get(routes::api_patent_image_proxy),
         )
         .route("/api/patent/lookup/:number", get(routes::api_patent_lookup))
-        .route("/api/patent/lookup-or-fetch", post(routes::api_patent_lookup_and_fetch))
+        .route(
+            "/api/patent/lookup-or-fetch",
+            post(routes::api_patent_lookup_and_fetch),
+        )
         .route(
             "/api/patent/similar/:id",
             get(routes::api_recommend_similar),

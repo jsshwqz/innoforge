@@ -10,7 +10,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
+    <script src="/static/purify.min.js"></script>
     <style>
         .hero { text-align: center; padding: 40px 20px 20px; position: relative;}
         .hero h1 { font-size: 3.2em; font-weight: 800; margin-bottom: 12px; letter-spacing: -0.5px;
@@ -39,7 +39,7 @@
         }
         .idea-input-area textarea {
             width: 100%; min-height: 120px; background: rgba(0,0,0,0.3);
-            border: 1px solid var(--border-subtle); border-radius: var(--radius-md); 
+            border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
             color: var(--text-main); padding: 16px; font-size: 1.05em; resize: vertical;
             font-family: inherit; line-height: 1.6; transition: var(--transition-smooth);
         }
@@ -47,7 +47,7 @@
         .idea-input-area textarea::placeholder { color: rgba(148, 163, 184, 0.5); }
 
         .start-buttons { display: flex; gap: 16px; justify-content: center; margin-top: 24px; flex-wrap: wrap; }
-        
+
         /* 流程指引美化 */
         .workflow-hint {
             display: flex; align-items: center; justify-content: center;
@@ -55,7 +55,7 @@
             flex-wrap: wrap; font-weight: 500;
         }
         .workflow-hint .step {
-            background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle); 
+            background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle);
             border-radius: 20px; padding: 6px 16px; white-space: nowrap;
             box-shadow: 0 2px 10px rgba(0,0,0,0.2); transition: var(--transition-smooth);
         }
@@ -236,6 +236,28 @@
     <script>
     let currentMode = 'chat';
     let uploadedFiles = [];
+    const UPLOAD_STORAGE_KEY = 'innoforge_uploaded_files';
+    let restoredFiles = [];
+
+    function saveUploadedMeta() {
+        try {
+            const data = restoredFiles.map(f => ({ name: f.name, size: f.size, type: f.type, text: f.text, timestamp: f.timestamp }));
+            localStorage.setItem(UPLOAD_STORAGE_KEY, JSON.stringify(data));
+        } catch(e) { /* ignore quota errors */ }
+    }
+
+    function loadUploadedMeta() {
+        try {
+            const raw = localStorage.getItem(UPLOAD_STORAGE_KEY);
+            if (raw) { restoredFiles = JSON.parse(raw); } else { restoredFiles = []; }
+        } catch(e) { restoredFiles = []; }
+    }
+
+    function removeRestoredFile(idx) {
+        restoredFiles.splice(idx, 1);
+        saveUploadedMeta();
+        renderFileList();
+    }
 
     // ── PDF Preview ──
     function showPdfPreview(url) {
@@ -345,7 +367,7 @@
 
     function renderFileList() {
         const el = document.getElementById('file-list');
-        if (uploadedFiles.length === 0) { el.innerHTML = ''; return; }
+        if (uploadedFiles.length === 0 && restoredFiles.length === 0) { el.innerHTML = ''; return; }
         el.innerHTML = '';
         uploadedFiles.forEach((f, i) => {
             const size = f.size < 1024 ? f.size + 'B' : (f.size / 1024).toFixed(1) + 'KB';
@@ -373,12 +395,34 @@
             item.appendChild(actions);
             el.appendChild(item);
         });
+        // Restored files from localStorage
+        restoredFiles.forEach(function(f, i) {
+            const size = f.size < 1024 ? f.size + 'B' : (f.size / 1024).toFixed(1) + 'KB';
+            const item = document.createElement('div');
+            item.className = 'file-item';
+            const span = document.createElement('span');
+            span.textContent = '📄 ' + f.name + ' (' + size + ')';
+            const tag = document.createElement('span');
+            tag.textContent = '已保存';
+            tag.style.cssText = 'color:#3fb950;font-size:0.75em;margin-left:6px;';
+            span.appendChild(tag);
+            const actions = document.createElement('span');
+            actions.style.cssText = 'display:flex;align-items:center;gap:2px;';
+            const btn = document.createElement('button');
+            btn.className = 'remove';
+            btn.textContent = 'x';
+            btn.setAttribute('onclick', 'removeRestoredFile(' + i + ')');
+            actions.appendChild(btn);
+            item.appendChild(span);
+            item.appendChild(actions);
+            el.appendChild(item);
+        });
     }
 
     // 主流程
     async function startFlow() {
         const text = document.getElementById('idea-input').value.trim();
-        if (!text && uploadedFiles.length === 0) {
+        if (!text && uploadedFiles.length === 0 && restoredFiles.length === 0) {
             document.getElementById('idea-input').focus();
             return;
         }
@@ -386,7 +430,7 @@
         const title = (text.split(/[。.!！?\n]/)[0] || '').substring(0, 50) || '新研发项目';
         let description = text;
 
-        // 如果有文件，先上传提取内容追加到描述
+        // 处理上传的文件（上传提取内容）
         if (uploadedFiles.length > 0) {
             document.getElementById('start-btn').textContent = '上传文件中...';
             document.getElementById('start-btn').disabled = true;
@@ -401,6 +445,12 @@
                     const data = await resp.json();
                     if (data.text) {
                         description += '\n\n---附件: ' + f.name + '---\n' + data.text.substring(0, 3000);
+                        // Save to localStorage for persistence across refresh
+                        const already = restoredFiles.some(function(rf) { return rf.name === f.name && rf.size === f.size; });
+                        if (!already) {
+                            restoredFiles.push({ name: f.name, size: f.size, type: f.type || 'application/pdf', text: data.text, timestamp: Date.now() });
+                            saveUploadedMeta();
+                        }
                     }
                 } catch(e) {
                     console.error('文件提取失败:', f.name, e);
@@ -409,12 +459,20 @@
             document.getElementById('start-btn').disabled = false;
         }
 
+        // 处理从 localStorage 恢复的文件（直接使用已保存的文本，无需重新上传）
+        restoredFiles.forEach(function(f) {
+            if (f.text) {
+                description += '\n\n---附件: ' + f.name + '---\n' + f.text.substring(0, 3000);
+            }
+        });
+
         // 提交创意
         try {
+            const hasFiles = uploadedFiles.length > 0 || restoredFiles.length > 0;
             const resp = await fetch('/api/idea/submit', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ title, description, input_type: uploadedFiles.length > 0 ? 'mixed' : 'text' })
+                body: JSON.stringify({ title, description, input_type: hasFiles ? 'mixed' : 'text' })
             });
             if (!resp.ok) { alert('服务器错误 (' + resp.status + ')'); return; }
             const data = await resp.json();
@@ -437,6 +495,10 @@
     document.getElementById('idea-input').addEventListener('keydown', e => {
         if (e.key === 'Enter' && e.ctrlKey) startFlow();
     });
+
+    // 页面加载时恢复已保存的文件
+    loadUploadedMeta();
+    renderFileList();
 
     // 服务状态检测
     (async function checkStatus() {

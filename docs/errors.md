@@ -329,4 +329,23 @@
 
 ---
 
-*最后更新: 2026-05-24 17:00*
+*最后更新: 2026-05-25 16:00
+
+---
+
+### [2026-05-25] DOMPurify CDN 依赖导致断网全黑 — 彻底修复
+- **严重程度**: MEDIUM
+- **涉及文件**: `static/purify.min.js`、`templates/*.html`（6文件）、`start.bat`
+- **现象**: 上轮修复仅添加了 CDN 引用 + 降级保护。但 CDN 在中国网络/离线环境下仍可能加载失败，且旧版 `start.bat` 不重新编译导致二进制与源码不一致，用户看到空白页后误以为"闪退"。
+- **根因**: 
+  1. DOMPurify 依赖 CDN（`cdnjs.cloudflare.com`），网络差时 JS 崩溃 → `applyI18nCommon()` 不执行 → 全黑无文字
+  2. `start.bat` 中存在"旧二进制直接启动"的短路逻辑（`if exist binary → run`），用户修改源码后不重新编译，永远运行旧版
+- **修复**: 
+  1. 下载 DOMPurify 3.0.6 完整库写入 `static/purify.min.js`，通过 `rust_embed` 编译进二进制，完全消除网络依赖
+  2. 所有 6 个模板（index、idea、ai、settings、patent_detail、office_action_response）将 CDN URL 替换为 `/static/purify.min.js`
+  3. `start.bat` 重写：删除"旧二进制跳过编译"短路逻辑，改为每次启动都执行 `cargo build --release`，确保二进制与源码一致
+- **预防**: 
+  1. 新页面引用 JS 库时优先使用本地 `/static/` 而非 CDN
+  2. `start.bat` / `dev.bat` 应保持"先编译后启动"语义，不允许跳过编译
+  3. 新增前端依赖时检查是否已本地化，未本地化的同步下载到 `static/`
+- **提交**: （未提交，正在进行中）*
