@@ -859,11 +859,11 @@
     function parseOASections(text) {
         if (!text) return [];
         var sectionMarkers = [
-            { key: 'part1', label: '第一部分：权利要求逐项解析', color: '#58a6ff', patterns: ['=== 第一部分', '## 第一部分', '一、审查意见概述'] },
-            { key: 'part2', label: '第二部分：审查员驳回逻辑逐条还原', color: '#d29922', patterns: ['=== 第二部分', '## 第二部分'] },
-            { key: 'part3', label: '第三部分：特征对比总表', color: '#3fb950', patterns: ['=== 第三部分', '## 第三部分', '特征对比表', '特征对比总表'] },
-            { key: 'part4', label: '第四部分：逐权利要求反驳论点', color: '#d2a8ff', patterns: ['=== 第四部分', '## 第四部分', '分层反驳', '逐权利要求反驳'] },
-            { key: 'part5', label: '第五部分：意见陈述书草稿', color: '#f0883e', patterns: ['=== 第五部分', '## 第五部分', '意见陈述书草稿', '意见陈述书', '=== 第五部分'] },
+            { key: 'part1', label: t('oar.section1'), color: '#58a6ff', patterns: ['=== 第一部分', '## 第一部分', '一、审查意见概述'] },
+            { key: 'part2', label: t('oar.section2'), color: '#d29922', patterns: ['=== 第二部分', '## 第二部分'] },
+            { key: 'part3', label: t('oar.section3'), color: '#3fb950', patterns: ['=== 第三部分', '## 第三部分', '特征对比表', '特征对比总表'] },
+            { key: 'part4', label: t('oar.section4'), color: '#d2a8ff', patterns: ['=== 第四部分', '## 第四部分', '分层反驳', '逐权利要求反驳'] },
+            { key: 'part5', label: t('oar.section5'), color: '#f0883e', patterns: ['=== 第五部分', '## 第五部分', '意见陈述书草稿', '意见陈述书', '=== 第五部分'] },
         ];
         var sections = [];
         var remaining = text;
@@ -914,8 +914,7 @@
         var toolbar = buildToolbar({ copy: true, export: true, showDiscussion: true, amend: true });
         var html = '<div class="result-box">' + toolbar;
         html += '<div style="margin-bottom:12px;padding:8px 12px;background:#0d1117;border:1px solid #30363d;border-radius:6px;font-size:13px;color:#8b949e;">';
-        html += '📋 分析结果分为 <strong>' + sections.length + '</strong> 个部分，请逐部分审阅。';
-        html += '确认分析准确后，参考<strong>第五部分</strong>的意见陈述书草稿撰写正式答复。';
+        html += t('oar.analysisInfo').replace('{n}', sections.length);
         html += '</div>';
         html += '<div class="result-content">';
 
@@ -927,7 +926,7 @@
             html += '<div style="background:' + sectionColor + '15;padding:8px 12px;border-bottom:1px solid ' + sectionColor + '44;border-radius:8px 8px 0 0;display:flex;justify-content:space-between;align-items:center;">';
             html += '<span style="color:' + sectionColor + ';font-weight:600;font-size:14px;">' + (i + 1) + '. ' + s.label + '</span>';
             if (isResponse) {
-                html += '<button onclick="exportResponseDraft()" style="background:#f0883e;color:#fff;border:none;border-radius:4px;padding:4px 12px;cursor:pointer;font-size:12px;">📥 导出意见陈述书</button>';
+                html += '<button onclick="exportResponseDraft()" style="background:#f0883e;color:#fff;border:none;border-radius:4px;padding:4px 12px;cursor:pointer;font-size:12px;">📥 ' + t('oar.exportResponse') + '</button>';
             }
             html += '</div>';
             html += '<div style="padding:12px 14px;font-size:13px;line-height:1.8;color:#c9d1d9;">';
@@ -946,15 +945,15 @@
         for (var i = 0; i < sections.length; i++) {
             if (sections[i].key === 'part5') { responseSection = sections[i]; break; }
         }
-        if (!responseSection) { alert('未找到意见陈述书草稿'); return; }
+        if (!responseSection) { alert(t('oar.noResponseDraft')); return; }
 
         var text = responseSection.text;
         // Strip markdown markers for clean export
         text = text.replace(/^#+\s*/gm, '').replace(/\*+/g, '');
-        var blob = new Blob(['意见陈述书\n\n' + text + '\n\n\n申请人：\n日期：\n'], { type: 'text/plain;charset=utf-8' });
+        var blob = new Blob([t('oar.responseDraftTitle') + '\n\n' + text + '\n\n\n' + t('oar.responseDraftApplicant') + '：\n' + t('oar.responseDraftDate') + '：\n'], { type: 'text/plain;charset=utf-8' });
         var a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
-        a.download = '意见陈述书_' + new Date().toISOString().slice(0, 10) + '.txt';
+        a.download = t('oar.responseDraftFilename') + '_' + new Date().toISOString().slice(0, 10) + '.txt';
         a.click();
         URL.revokeObjectURL(a.href);
     }
