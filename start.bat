@@ -2,6 +2,9 @@
 chcp 65001 >nul 2>nul
 cd /d "%~dp0"
 
+REM 将 Cargo 加入 PATH（若不在系统变量中）
+set "PATH=%USERPROFILE%\.cargo\bin;%PATH%"
+
 REM Kill existing instance if running
 taskkill /F /IM innoforge.exe >nul 2>nul
 timeout /t 2 /nobreak >nul
@@ -12,9 +15,12 @@ echo [InnoForge] First build may take 5-10 minutes...
 cargo build --release --bin innoforge
 if errorlevel 1 (
     echo [InnoForge] Build failed!
+    echo [InnoForge] Possible causes:
+    echo [InnoForge]   1. Rust/Cargo not installed
+    echo [InnoForge]   2. Network issue downloading dependencies
     echo [InnoForge] Try running dev.bat (debug mode) for faster builds.
     echo [InnoForge] Press any key to exit...
-    pause >nul
+    pause
     exit /b 1
 )
 
