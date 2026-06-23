@@ -14,6 +14,8 @@ const PROVIDER_MAX_RETRIES: usize = 3;
 pub enum AiProviderMode {
     /// Standard HTTP-based AI provider (e.g. DeepSeek, OpenAI)
     Http,
+    /// Anthropic Messages API (different auth, request format, streaming)
+    AnthropicApi,
     /// Use Gemini CLI subprocess (bypasses API key / scope issues)
     GeminiCli,
 }
@@ -251,6 +253,12 @@ impl AiClient {
         messages: &[Message],
         temperature: f32,
     ) -> Result<String> {
+        let is_anthropic = provider.base_url.contains("anthropic");
+
+        if is_anthropic {
+            return self.try_provider_anthropic(provider, messages, temperature).await;
+        }
+
         let request_body = ChatRequest {
             model: provider.model.clone(),
             messages: messages.to_vec(),
@@ -382,6 +390,128 @@ impl AiClient {
         }
 
         Err(last_err.unwrap_or_else(|| anyhow::anyhow!("Provider {} failed", provider.name)))
+    }
+
+    /// Anthropic Messages API: different auth, endpoint, and request/response format.
+    async fn try_provider_anthropic(
+        &self,
+        provider: &AiProvider,
+        messages: &[Message],
+        temperature: f32,
+    ) -> Result<String> {
+        // Separate system message from conversation messages
+        let mut system_prompt = String::new();
+        let mut chat_messages: Vec<serde_json::Value> = Vec::new();
+
+        for msg in messages {
+            if msg.role == "system" {
+                if !system_prompt.is_empty() {
+                    system_prompt.push('\n');
+                }
+                system_prompt.push_str(&msg.content);
+            } else {
+                chat_messages.push(serde_json::json!({
+                    "role": msg.role,
+                    "content": msg.content
+                }));
+            }
+        }
+
+        let mut body = serde_json::json!({
+            "model": provider.model,
+            "max_tokens": 8192,
+            "messages": chat_messages,
+            "temperature": temperature,
+        });
+        if !system_prompt.is_empty() {
+            body["system"] = serde_json::json!(system_prompt);
+        }
+
+        let req_url = format!(
+            "{}/messages",
+            provider.base_url.trim_end_matches('/')
+        );
+
+        let max_retries = PROVIDER_MAX_RETRIES;
+        let mut last_err = None;
+        for attempt in 0..max_retries {
+            if attempt > 0 {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
+
+            match self
+                .client
+                .post(&req_url)
+                .header("x-api-key", &provider.api_key)
+                .header("anthropic-version", "2023-06-01")
+                .json(&body)
+                .send()
+                .await
+            {
+                Ok(resp) => {
+                    let status = resp.status();
+                    if status.as_u16() == 429 {
+                        let raw = resp.text().await.unwrap_or_default();
+                        tracing::warn!("[{}] rate limited (429)", provider.name);
+                        if attempt < max_retries - 1 {
+                            tokio::time::sleep(Duration::from_secs(2u64.pow(attempt as u32 + 1))).await;
+                            last_err = Some(anyhow::anyhow!("Anthropic 频率限制"));
+                            continue;
+                        }
+                        return Err(anyhow::anyhow!("Anthropic 频率限制: {}", safe_truncate(&raw, 200)));
+                    }
+                    if status.as_u16() == 401 || status.as_u16() == 403 {
+                        let raw = resp.text().await.unwrap_or_default();
+                        return Err(anyhow::anyhow!(
+                            "Anthropic API Key 无效: {}",
+                            safe_truncate(&raw, 200)
+                        ));
+                    }
+                    if !status.is_success() {
+                        let raw = resp.text().await.unwrap_or_default();
+                        return Err(anyhow::anyhow!(
+                            "Anthropic HTTP {}: {}",
+                            status.as_u16(),
+                            safe_truncate(&raw, 300)
+                        ));
+                    }
+
+                    let raw_text = resp.text().await?;
+                    // Anthropic response: { "content": [{"type": "text", "text": "..."}] }
+                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&raw_text) {
+                        if let Some(content_arr) = val["content"].as_array() {
+                            let mut text = String::new();
+                            for block in content_arr {
+                                if block["type"].as_str() == Some("text") {
+                                    if let Some(t) = block["text"].as_str() {
+                                        text.push_str(t);
+                                    }
+                                }
+                            }
+                            if !text.is_empty() {
+                                return Ok(text);
+                            }
+                        }
+                        // Check for error
+                        if let Some(err) = val["error"]["message"].as_str() {
+                            return Err(anyhow::anyhow!("Anthropic: {}", err));
+                        }
+                    }
+                    return Err(anyhow::anyhow!(
+                        "Anthropic 响应解析失败: {}",
+                        safe_truncate(&raw_text, 300)
+                    ));
+                }
+                Err(e) => {
+                    last_err = Some(anyhow::anyhow!("Anthropic 请求失败: {}", e));
+                    if attempt < max_retries - 1 {
+                        continue;
+                    }
+                }
+            }
+        }
+
+        Err(last_err.unwrap_or_else(|| anyhow::anyhow!("Anthropic provider failed")))
     }
 
     /// 全局超时上限

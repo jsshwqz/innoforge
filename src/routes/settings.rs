@@ -61,6 +61,7 @@ pub async fn api_get_settings(State(s): State<AppState>) -> Json<serde_json::Val
         "ai_api_key_configured": !current_key.is_empty(),
         // 各服务商独立 Key（从 DB 读取原始值，不含回退逻辑）
         "ai_api_key_deepseek": mask(&raw_key("AI_API_KEY_DEEPSEEK")),
+        "ai_api_key_anthropic": mask(&raw_key("AI_API_KEY_ANTHROPIC")),
         "ai_api_key_xiaomi": mask(&raw_key("AI_API_KEY_XIAOMI")),
         "ai_api_key_sensetime": mask(&raw_key("AI_API_KEY_SENSENOVA")),
         "ai_api_key_openrouter": mask(&raw_key("AI_API_KEY_OPENROUTER")),
@@ -272,6 +273,7 @@ pub async fn api_save_ai(
                                              // 同时更新对应服务商的独立 Key
         *match db_key_name {
             "AI_API_KEY_DEEPSEEK" => &mut config.ai_api_key_deepseek,
+            "AI_API_KEY_ANTHROPIC" => &mut config.ai_api_key_anthropic,
             "AI_API_KEY_XIAOMI" => &mut config.ai_api_key_xiaomi,
             "AI_API_KEY_SENSENOVA" => &mut config.ai_api_key_sensetime,
             "AI_API_KEY_OPENROUTER" => &mut config.ai_api_key_openrouter,

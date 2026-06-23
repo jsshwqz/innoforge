@@ -123,17 +123,95 @@ impl AiClient {
 
         let provider = self.primary.clone();
         let client = self.client.clone();
+        let is_anthropic = provider.base_url.contains("anthropic");
 
         tokio::spawn(async move {
             let _ = tokio::time::timeout(
                 Duration::from_secs(AiClient::GLOBAL_TIMEOUT_SECS),
                 async {
-                    let request_body = serde_json::json!({
-                        "model": provider.model,
-                        "messages": messages.iter().map(|m| serde_json::json!({"role": m.role, "content": m.content})).collect::<Vec<_>>(),
-                        "temperature": temperature,
-                        "stream": true,
-                    });
+                    if is_anthropic {
+                        // ── Anthropic Messages API streaming ──
+                        let mut system_prompt = String::new();
+                        let mut chat_messages: Vec<serde_json::Value> = Vec::new();
+                        for msg in &messages {
+                            if msg.role == "system" {
+                                if !system_prompt.is_empty() { system_prompt.push('\n'); }
+                                system_prompt.push_str(&msg.content);
+                            } else {
+                                chat_messages.push(serde_json::json!({"role": msg.role, "content": msg.content}));
+                            }
+                        }
+                        let mut body = serde_json::json!({
+                            "model": provider.model,
+                            "max_tokens": 8192,
+                            "messages": chat_messages,
+                            "temperature": temperature,
+                            "stream": true,
+                        });
+                        if !system_prompt.is_empty() {
+                            body["system"] = serde_json::json!(system_prompt);
+                        }
+
+                        let mut resp = match client
+                            .post(format!("{}/messages", provider.base_url))
+                            .header("x-api-key", &provider.api_key)
+                            .header("anthropic-version", "2023-06-01")
+                            .json(&body)
+                            .send()
+                            .await
+                        {
+                            Ok(r) => r,
+                            Err(e) => { let _ = tx.send(format!("[ERROR] {}", e)).await; return; }
+                        };
+                        if !resp.status().is_success() {
+                            let status = resp.status();
+                            let b = resp.text().await.unwrap_or_default();
+                            let _ = tx.send(format!("[ERROR] Anthropic HTTP {}: {}", status, safe_truncate(&b, 200))).await;
+                            return;
+                        }
+
+                        let mut buf = String::new();
+                        loop {
+                            match resp.chunk().await {
+                                Ok(Some(chunk)) => {
+                                    buf.push_str(&String::from_utf8_lossy(&chunk));
+                                    while let Some(pos) = buf.find('\n') {
+                                        let line = buf[..pos].trim().to_string();
+                                        buf = buf[pos + 1..].to_string();
+                                        if let Some(json_str) = line.strip_prefix("data: ") {
+                                            if let Ok(val) = serde_json::from_str::<serde_json::Value>(json_str) {
+                                                match val["type"].as_str() {
+                                                    Some("content_block_delta") => {
+                                                        if let Some(text) = val["delta"]["text"].as_str() {
+                                                            if !text.is_empty() && tx.send(text.to_string()).await.is_err() {
+                                                                return;
+                                                            }
+                                                        }
+                                                    }
+                                                    Some("message_stop") => return,
+                                                    Some("error") => {
+                                                        let msg = val["error"]["message"].as_str().unwrap_or("unknown");
+                                                        let _ = tx.send(format!("[ERROR] Anthropic: {}", msg)).await;
+                                                        return;
+                                                    }
+                                                    _ => {}
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                Ok(None) => break,
+                                Err(_) => break,
+                            }
+                        }
+                    } else {
+                        // ── OpenAI-compatible streaming (DeepSeek, OpenAI, etc.) ──
+                        let request_body = serde_json::json!({
+                            "model": provider.model,
+                            "messages": messages.iter().map(|m| serde_json::json!({"role": m.role, "content": m.content})).collect::<Vec<_>>(),
+                            "temperature": temperature,
+                            "stream": true,
+                        });
 
                     let mut resp = match client
                         .post(format!("{}/chat/completions", provider.base_url))
@@ -187,6 +265,7 @@ impl AiClient {
                             Err(_) => break,
                         }
                     }
+                    } // end OpenAI-compatible branch
                 },
             )
             .await;

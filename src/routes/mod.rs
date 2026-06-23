@@ -67,6 +67,7 @@ pub struct AppConfig {
     pub ai_api_key: String,
     /// 各服务商独立 Key：切换服务商不会丢失
     pub ai_api_key_deepseek: String,
+    pub ai_api_key_anthropic: String,
     pub ai_api_key_xiaomi: String,
     pub ai_api_key_sensetime: String,
     pub ai_api_key_openrouter: String,
@@ -162,6 +163,7 @@ impl AppConfig {
             ai_base_url: get("AI_BASE_URL", "http://localhost:11434/v1"),
             ai_api_key: get("AI_API_KEY", "ollama"),
             ai_api_key_deepseek: load_provider_key("AI_API_KEY_DEEPSEEK"),
+            ai_api_key_anthropic: load_provider_key("AI_API_KEY_ANTHROPIC"),
             ai_api_key_xiaomi: load_provider_key("AI_API_KEY_XIAOMI"),
             ai_api_key_sensetime: load_provider_key("AI_API_KEY_SENSENOVA"),
             ai_api_key_openrouter: load_provider_key("AI_API_KEY_OPENROUTER"),
@@ -233,6 +235,8 @@ impl AppConfig {
     pub fn api_key_for_provider(&self, base_url: &str) -> String {
         let key = if base_url.contains("deepseek") {
             &self.ai_api_key_deepseek
+        } else if base_url.contains("anthropic") {
+            &self.ai_api_key_anthropic
         } else if base_url.contains("xiaomimimo") {
             &self.ai_api_key_xiaomi
         } else if base_url.contains("sensenova") {

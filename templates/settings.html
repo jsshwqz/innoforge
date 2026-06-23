@@ -129,6 +129,7 @@
                 <label>AI 服务商</label>
                 <select id="ai-provider" style="width:100%;padding:10px;background:#1a1a1a;border:1px solid #444;border-radius:4px;color:#fff;font-size:14px;">
                     <option value="deepseek">DeepSeek（当前）</option>
+                    <option value="anthropic">Anthropic Claude（法律推理最强）</option>
                     <option value="xiaomi">小米 MiMo（支持看图）</option>
                     <option value="sensetime">商汤 SenseNova</option>
                     <option value="openrouter">OpenRouter（GPT-4o 等）</option>
@@ -286,6 +287,21 @@
                 ],
                 hint: '兼容 OpenAI 格式的 API 地址'
             },
+            anthropic: {
+                title: 'Anthropic Claude',
+                base_url: 'https://api.anthropic.com/v1',
+                key_link: 'https://console.anthropic.com/',
+                models: [
+                    {value: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4 (推荐)'},
+                    {value: 'claude-opus-4-20250514', label: 'Claude Opus 4 (最强)'},
+                    {value: 'claude-haiku-4-20250514', label: 'Claude Haiku 4 (最快)'},
+                ],
+                expert_models: [
+                    {value: 'claude-opus-4-20250514', label: 'Claude Opus 4 (最强法律推理)'},
+                    {value: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4 (推荐)'},
+                ],
+                hint: 'Anthropic 官方 API，专利法律推理能力最强'
+            },
             xiaomi: {
                 title: '小米 MiMo',
                 base_url: 'https://api.xiaomimimo.com/v1',
@@ -368,6 +384,7 @@
         function detectProvider(baseUrl) {
             baseUrl = (baseUrl || '').toLowerCase();
             if (baseUrl.includes('deepseek')) return 'deepseek';
+            if (baseUrl.includes('anthropic')) return 'anthropic';
             if (baseUrl.includes('xiaomimimo')) return 'xiaomi';
             if (baseUrl.includes('sensenova')) return 'sensetime';
             if (baseUrl.includes('openrouter')) return 'openrouter';
@@ -395,6 +412,7 @@
             // 切换服务商时自动更新 API Key 输入框
             var keyMap = {
                 deepseek: 'ai_api_key_deepseek',
+                anthropic: 'ai_api_key_anthropic',
                 xiaomi: 'ai_api_key_xiaomi',
                 sensetime: 'ai_api_key_sensetime',
                 openrouter: 'ai_api_key_openrouter',
