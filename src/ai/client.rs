@@ -164,6 +164,29 @@ pub fn safe_truncate(s: &str, max_bytes: usize) -> &str {
     &s[..end]
 }
 
+/// Safely truncate a UTF-8 string to at most `max_chars` characters.
+/// Much more intuitive for CJK text where 1 char = 3 bytes.
+pub fn safe_truncate_chars(s: &str, max_chars: usize) -> &str {
+    if s.chars().count() <= max_chars {
+        return s;
+    }
+    let mut byte_pos = 0;
+    let mut char_count = 0;
+    for (i, _) in s.char_indices() {
+        if char_count >= max_chars {
+            break;
+        }
+        byte_pos = i;
+        char_count += 1;
+    }
+    // Include the last character fully
+    if char_count >= max_chars {
+        &s[..byte_pos]
+    } else {
+        s
+    }
+}
+
 fn extract_content_from_data(data: &Value) -> Option<String> {
     if let Some(choices) = data["choices"].as_array() {
         for choice in choices {

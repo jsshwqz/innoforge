@@ -2,7 +2,7 @@
 
 #![allow(clippy::needless_borrow)]
 
-use super::client::{safe_truncate, AiClient, Message};
+use super::client::{safe_truncate, safe_truncate_chars, AiClient, Message};
 use anyhow::Result;
 
 impl AiClient {
@@ -777,9 +777,9 @@ impl AiClient {
     ) -> tokio::sync::mpsc::Receiver<String> {
         let (tx, rx) = tokio::sync::mpsc::channel::<String>(64);
 
-        let analysis = safe_truncate(analysis_text, 30000);
-        let oa = safe_truncate(office_action, 12000);
-        let discussion = safe_truncate(discussion_json, 20000);
+        let analysis = safe_truncate_chars(analysis_text, 30000);   // 3万中文字
+        let oa = safe_truncate_chars(office_action, 8000);           // 8千字 OA
+        let discussion = safe_truncate_chars(discussion_json, 15000); // 1.5万讨论
 
         let doc_type = match oa_type {
             "abnormal" => "意见陈述书（非正常申请答辩）",

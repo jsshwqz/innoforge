@@ -1,5 +1,5 @@
 use super::AppState;
-use crate::ai::{safe_truncate, Message};
+use crate::ai::{safe_truncate_chars, Message};
 use crate::patent::*;
 use axum::{
     extract::Path,
@@ -1340,9 +1340,13 @@ pub async fn api_ai_oa_discuss(
         return Sse::new(error_sse("[ERROR] 请输入讨论内容".into()));
     }
 
-    // Use larger truncation limits for better context
-    let analysis = safe_truncate(&analysis_text, 30000);
-    let disc = safe_truncate(&discussion_json, 15000);
+    // Use character-based truncation for Chinese text (1 char = 3 bytes in UTF-8)
+    let analysis = safe_truncate_chars(&analysis_text, 30000);     // 3万中文字
+    let disc = safe_truncate_chars(&discussion_json, 15000);       // 1.5万中文字
+    let oa_snippet = safe_truncate_chars(
+        req.get("office_action").and_then(|v| v.as_str()).unwrap_or(""),
+        5000,  // 5千字 OA 原文参考
+    );
 
     let system_prompt = format!(
         "你是一位资深中国专利代理师（执业20年+），精通中国专利法、审查指南（2023修订版）及复审无效程序。\n\n\
@@ -1358,11 +1362,10 @@ pub async fn api_ai_oa_discuss(
          5. **法条引用**：每处法律论断必须引用具体法条（A22.2/A22.3/A26.3/A33 等），不可空泛。\n\
          6. **技术依据**：每处技术论断必须引用分析中的具体特征或对比文献段落。\n\n\
          ## 已有的 OA 分析结果\n{analysis}\n\n\
-         ## 原始审查意见通知书（供参考）\n{}\n\n\
+         ## 原始审查意见通知书（供参考）\n{oa_snippet}\n\n\
          请严格遵守以上规则，用专业但易懂的语言与发明人沟通。\
          不要简单地说「好的」或「明白了」——你需要像一个真正的专利代理师那样，\
          给出有实质内容的、能推动答复方案前进的专业意见。",
-        safe_truncate(req.get("office_action").and_then(|v| v.as_str()).unwrap_or(""), 5000)
     );
 
     let discussion_context = if disc.len() > 10 && disc != "[]" {
