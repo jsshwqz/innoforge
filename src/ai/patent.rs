@@ -1,5 +1,7 @@
 //! 专利分析方法 / Patent analysis methods
 
+#![allow(clippy::needless_borrow)]
+
 use super::client::{safe_truncate, AiClient, Message};
 use anyhow::Result;
 
@@ -221,9 +223,9 @@ impl AiClient {
         oa_type: &str,
         depth: &str,
     ) -> Result<String> {
-        let my_patent = safe_truncate(my_patent_info, 15000);
-        let oa = safe_truncate(office_action, 10000);
-        let refs = safe_truncate(references_info, 15000);
+        let my_patent = safe_truncate(my_patent_info, 30000);
+        let oa = safe_truncate(office_action, 20000);
+        let refs = safe_truncate(references_info, 30000);
         let is_deep = depth == "deep";
 
         let (system_role, prompt) = match oa_type {
@@ -274,8 +276,8 @@ impl AiClient {
              如果方案中引用了对比文献的具体段落号，请特别注意核实其准确性。\n\n\
              ## 审查意见通知书\n{}\n\n\
              ## 拟提交的答复方案\n{}",
-            safe_truncate(office_action, 8000),
-            safe_truncate(proposed_response, 12000),
+            safe_truncate(office_action, 15000),
+            safe_truncate(proposed_response, 20000),
         );
 
         let messages = vec![
@@ -608,5 +610,127 @@ impl AiClient {
             results.push((id.clone(), result));
         }
         results
+    }
+
+    /// 流式 OA 分析：返回 SSE chunk 接收端 / Streaming OA analysis
+    /// 对于 deep 模式，先输出主分析，再输出审查员视角预判。
+    pub fn office_action_response_stream(
+        &self,
+        my_patent_info: &str,
+        office_action: &str,
+        references_info: &str,
+        oa_type: &str,
+        depth: &str,
+    ) -> tokio::sync::mpsc::Receiver<String> {
+        let (tx, rx) = tokio::sync::mpsc::channel::<String>(64);
+
+        let my_patent_str = safe_truncate(my_patent_info, 30000);
+        let oa_str = safe_truncate(office_action, 20000).to_string();
+        let refs_str = safe_truncate(references_info, 30000);
+        let is_deep = depth == "deep";
+
+        let (system_role, prompt) = match oa_type {
+            "abnormal" => Self::build_abnormal_prompt(&my_patent_str, &oa_str, &refs_str, depth),
+            "reject_review" => {
+                Self::build_reject_review_prompt(&my_patent_str, &oa_str, &refs_str, depth)
+            }
+            _ => Self::build_first_exam_prompt(&my_patent_str, &oa_str, &refs_str, depth),
+        };
+
+        let messages = vec![
+            Message {
+                role: "system".into(),
+                content: system_role,
+            },
+            Message {
+                role: "user".into(),
+                content: prompt,
+            },
+        ];
+
+        let self_clone = self.clone();
+        Self::spawn_oa_stream_worker(tx, self_clone, messages, is_deep, oa_str);
+
+        rx
+    }
+
+    /// Spawn the OA streaming worker with all owned data (no &str params to avoid lifetime issues).
+    fn spawn_oa_stream_worker(
+        tx: tokio::sync::mpsc::Sender<String>,
+        self_clone: AiClient,
+        messages: Vec<Message>,
+        is_deep: bool,
+        oa_str: String,
+    ) {
+        tokio::spawn(async move {
+            // Phase 1: main analysis
+            let mut stream1 = self_clone.send_chat_stream(messages, 0.3);
+            let mut full_text = String::new();
+            while let Some(chunk) = stream1.recv().await {
+                if chunk.starts_with("[ERROR]") {
+                    let _ = tx.send(chunk).await;
+                    return;
+                }
+                full_text.push_str(&chunk);
+                if tx.send(chunk).await.is_err() {
+                    return;
+                }
+            }
+
+            if !is_deep {
+                return;
+            }
+
+            // Deep mode: phase 2 — self-critique from examiner perspective
+            let response_part = AiClient::extract_oa_response_section(&full_text);
+            let separator = "\n\n---\n\n## 审查员视角预判（AI 自检）\n";
+            if tx.send(separator.to_string()).await.is_err() {
+                return;
+            }
+
+            let critique_prompt = format!(
+                "你是一位资深中国专利审查员，具有 20 年实质审查经验。\
+                 请用审查员视角审阅以下答复方案，逐条指出：\n\n\
+                 1. **逻辑漏洞**：方案中的哪些论断存在推理跳跃或证据不足\n\
+                 2. **容易被反驳的点**：如果是你来审，你会从哪里切入反驳\n\
+                 3. **遗漏的关键点**：申请人可能漏掉了哪些重要论据\n\
+                 4. **修改建议**：如果要让这份方案更站得住脚，应该加强哪几个方向\n\
+                 5. **特征对比准确性**：方案中对对比文献公开内容的认定是否有误？\
+                 如果有，请指出审查员认为正确的认定是什么\n\n\
+                 请用简洁、直接的语气，每个要点用一两句话说清楚，不要客套。\
+                 如果方案中引用了对比文献的具体段落号，请特别注意核实其准确性。\n\n\
+                 ## 审查意见通知书\n{}\n\n\
+                 ## 拟提交的答复方案\n{}",
+                safe_truncate(&oa_str, 8000),
+                safe_truncate(&response_part, 12000),
+            );
+
+            let critique_messages = vec![
+                Message {
+                    role: "system".into(),
+                    content: "你是一位资深中国专利审查员（执业20年，曾任复审委员会成员）。\
+                             你精通中国专利法及审查指南，对创造性审查（A22.3）尤为严格。\
+                             你善于发现答复方案中的逻辑漏洞和论证不足。\
+                             你对对比文献公开内容的认定极其敏感——如果申请人歪曲了对比文献的公开内容，\
+                             你会毫不留情地指出。\
+                             请用挑剔、专业的眼光审阅，不需要客气。".into(),
+                },
+                Message {
+                    role: "user".into(),
+                    content: critique_prompt,
+                },
+            ];
+
+            let mut stream2 = self_clone.send_chat_stream(critique_messages, 0.3);
+            while let Some(chunk) = stream2.recv().await {
+                if chunk.starts_with("[ERROR]") {
+                    let _ = tx.send(chunk).await;
+                    return;
+                }
+                if tx.send(chunk).await.is_err() {
+                    return;
+                }
+            }
+        });
     }
 }

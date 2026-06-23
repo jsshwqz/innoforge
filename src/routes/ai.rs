@@ -10,6 +10,7 @@ use futures::stream::Stream;
 use reqwest::Client;
 use serde_json::json;
 use std::convert::Infallible;
+use std::pin::Pin;
 use std::time::Instant;
 
 const QUICK_WEB_UPSTREAM_TIMEOUT_SECS: u64 = 6;
@@ -1099,6 +1100,145 @@ pub async fn api_ai_office_action_response(
         }
         Err(e) => Json(json!({"error": format!("分析失败: {}", e)})),
     }
+}
+
+/// SSE 流式 OA 分析 / Streaming OA analysis with SSE
+pub async fn api_ai_office_action_response_stream(
+    State(s): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Sse<Pin<Box<dyn Stream<Item = Result<Event, Infallible>> + Send>>> {
+    // Helper: wrap a single error into an SSE stream
+    fn error_sse(msg: String) -> Pin<Box<dyn Stream<Item = Result<Event, Infallible>> + Send>> {
+        Box::pin(futures::stream::once(async move {
+            Ok(Event::default().event("error").data(msg))
+        }))
+    }
+
+    // Extract my_patent info
+    let my_info = match req["my_patent"].as_object() {
+        Some(obj)
+            if obj
+                .get("content")
+                .and_then(|v| v.as_str())
+                .is_some_and(|c| c.len() > 10) =>
+        {
+            let title = obj
+                .get("title")
+                .and_then(|v| v.as_str())
+                .unwrap_or("我的专利");
+            let content = obj.get("content").and_then(|v| v.as_str()).unwrap_or("");
+            format!("标题：{}\n\n{}", title, content)
+        }
+        _ => match resolve_my_patent(&s.db, &req) {
+            Ok(info) => info,
+            Err(e) => return Sse::new(error_sse(format!("[ERROR] {}", e))),
+        },
+    };
+
+    // Extract office_action text
+    let oa_text = match req["office_action"].as_object() {
+        Some(obj) => obj
+            .get("content")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        None => req["office_action"].as_str().unwrap_or("").to_string(),
+    };
+    if oa_text.trim().len() < 10 {
+        return Sse::new(error_sse("[ERROR] 请输入审查意见通知书内容".into()));
+    }
+
+    // Extract references info
+    let refs_info = {
+        let mut info = String::new();
+        if let Some(arr) = req["references"].as_array() {
+            for (i, item) in arr.iter().enumerate() {
+                if let Some(obj) = item.as_object() {
+                    if obj.get("type").and_then(|v| v.as_str()) == Some("text") {
+                        let title = obj
+                            .get("title")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("对比文献");
+                        let content = obj.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                        info.push_str(&format!(
+                            "### 对比文献 {} — {}\n{}\n\n",
+                            i + 1,
+                            title,
+                            content
+                        ));
+                        continue;
+                    }
+                }
+                if let Some(id) = item.as_str() {
+                    if !id.is_empty() {
+                        if let Ok(Some(p)) = s.db.get_patent(id) {
+                            info.push_str(&format!(
+                                "### 对比文献 {} — {}\n专利号：{}\n标题：{}\n摘要：{}\n权利要求：\n{}\n说明书（前部分）：\n{}\n\n",
+                                i + 1, p.patent_number, p.patent_number, p.title,
+                                p.abstract_text, p.claims,
+                                p.description.chars().take(3000).collect::<String>()
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        info
+    };
+
+    let oa_type = req
+        .get("oa_type")
+        .and_then(|v| v.as_str())
+        .filter(|&v| v == "abnormal" || v == "reject_review" || v == "first_exam")
+        .unwrap_or("first_exam")
+        .to_string();
+    let depth = req
+        .get("depth")
+        .and_then(|v| v.as_str())
+        .filter(|&v| v == "shallow" || v == "deep")
+        .unwrap_or("medium")
+        .to_string();
+
+    let ai = s
+        .config
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .ai_client_expert();
+    let mut rx = ai.office_action_response_stream(&my_info, &oa_text, &refs_info, &oa_type, &depth);
+
+    // Capture values for auto-save (must be before consuming s)
+    let patent_number = req
+        .get("my_patent_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let patent_title = req
+        .get("my_patent")
+        .and_then(|v| v.as_object())
+        .and_then(|o| o.get("title"))
+        .and_then(|v| v.as_str())
+        .unwrap_or(&patent_number)
+        .to_string();
+    let db = s.db.clone();
+
+    let stream = async_stream::stream! {
+        let mut full_text = String::new();
+        while let Some(chunk) = rx.recv().await {
+            if chunk.starts_with("[ERROR]") {
+                yield Ok(Event::default().event("error").data(chunk));
+                return;
+            }
+            full_text.push_str(&chunk);
+            yield Ok(Event::default().data(chunk));
+        }
+        yield Ok(Event::default().event("done").data("[DONE]"));
+
+        if !patent_number.is_empty() && !full_text.is_empty() {
+            let _ = db.save_oa_analysis(&patent_number, &patent_title, &oa_type, &depth, &full_text);
+        }
+    };
+
+    Sse::new(Box::pin(stream))
 }
 
 /// 获取某专利的 OA 分析历史

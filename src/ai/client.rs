@@ -205,7 +205,12 @@ impl AiClient {
                 .timeout(Duration::from_secs(PROVIDER_HTTP_TIMEOUT_SECS))
                 .no_proxy()
                 .build()
-                .unwrap_or_else(|_| Client::builder().no_proxy().build().unwrap_or_else(|_| Client::new())),
+                .unwrap_or_else(|_| {
+                    Client::builder()
+                        .no_proxy()
+                        .build()
+                        .unwrap_or_else(|_| Client::new())
+                }),
             primary: AiProvider {
                 name: "primary".to_string(),
                 base_url: base_url.to_string(),
