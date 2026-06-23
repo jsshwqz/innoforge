@@ -1341,11 +1341,34 @@ pub async fn api_ai_oa_discuss(
     }
 
     // Safety nets: DeepSeek V4 has 128K tokens (~400K Chinese chars). These limits are far below that.
-    let analysis = safe_truncate_chars(&analysis_text, 60000);     // 6万中文字
-    let disc = safe_truncate_chars(&discussion_json, 40000);       // 4万中文字
+    let analysis = safe_truncate_chars(&analysis_text, 60000);
+    let disc_raw = safe_truncate_chars(&discussion_json, 40000).to_string();
+
+    // Format discussion history as readable dialogue (input is JSON array)
+    let disc_formatted = if disc_raw.len() > 10 && disc_raw != "[]" {
+        if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(&disc_raw) {
+            let mut text = String::new();
+            for item in &arr {
+                let role = item["role"].as_str().unwrap_or("unknown");
+                let content = item["content"].as_str().unwrap_or("");
+                let label = match role {
+                    "user" => "发明人",
+                    "assistant" => "AI（代理师）",
+                    _ => role,
+                };
+                text.push_str(&format!("【{label}】{content}\n\n"));
+            }
+            text
+        } else {
+            disc_raw
+        }
+    } else {
+        String::new()
+    };
+
     let oa_snippet = safe_truncate_chars(
         req.get("office_action").and_then(|v| v.as_str()).unwrap_or(""),
-        15000,  // 1.5万 OA 原文
+        15000,
     );
 
     let system_prompt = format!(
@@ -1368,10 +1391,10 @@ pub async fn api_ai_oa_discuss(
          给出有实质内容的、能推动答复方案前进的专业意见。",
     );
 
-    let discussion_context = if disc.len() > 10 && disc != "[]" {
-        format!("\n\n## 之前的讨论记录\n{disc}\n\n## 发明人的最新意见\n{message}")
+    let discussion_context = if !disc_formatted.is_empty() {
+        format!("\n\n## 之前的讨论记录\n{disc_formatted}\n## 发明人的最新意见\n{message}")
     } else {
-        format!("\n\n## 发明人的意见\n{message}")
+        format!("\n## 发明人的意见\n{message}")
     };
 
     let user_prompt = format!(
