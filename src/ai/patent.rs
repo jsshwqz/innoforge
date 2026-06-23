@@ -222,6 +222,7 @@ impl AiClient {
         references_info: &str,
         oa_type: &str,
         depth: &str,
+        discuss: bool,
     ) -> Result<String> {
         let my_patent = safe_truncate(my_patent_info, 30000);
         let oa = safe_truncate(office_action, 20000);
@@ -229,9 +230,9 @@ impl AiClient {
         let is_deep = depth == "deep";
 
         let (system_role, prompt) = match oa_type {
-            "abnormal" => Self::build_abnormal_prompt(my_patent, oa, refs, depth),
-            "reject_review" => Self::build_reject_review_prompt(my_patent, oa, refs, depth),
-            _ => Self::build_first_exam_prompt(my_patent, oa, refs, depth),
+            "abnormal" => Self::build_abnormal_prompt(my_patent, oa, refs, depth, discuss),
+            "reject_review" => Self::build_reject_review_prompt(my_patent, oa, refs, depth, discuss),
+            _ => Self::build_first_exam_prompt(my_patent, oa, refs, depth, discuss),
         };
 
         let messages = vec![
@@ -347,6 +348,7 @@ impl AiClient {
         oa: &str,
         refs: &str,
         depth: &str,
+        discuss: bool,
     ) -> (String, String) {
         if depth == "shallow" {
             return (
@@ -364,6 +366,27 @@ impl AiClient {
         }
 
         // medium / deep: 先深度分析文档，再写回复
+        let section5_prompt = if discuss {
+            "\n\n---\n\
+             注意：**本次仅输出第一部分至第四部分的分析内容。**\n\
+             用户将在审阅分析结果并进行充分讨论后，再单独要求生成第五部分（意见陈述书草稿）。\n\
+             因此请专注于提供详尽、准确的分析（第一部分至第四部分），确保每一个判断都有据可查。"
+        } else {
+            "\n\n=== 第五部分：意见陈述书草稿 ===\n\n\
+             生成格式规范的「意见陈述书」，直接可用于提交，应包含：\n\n\
+             一、关于审查意见的答复\n\
+             （逐条回应审查员的驳回理由，引用上述分析）\n\n\
+             二、关于权利要求的修改\n\
+             （如有修改，逐条说明修改内容及A33合规性）\n\n\
+             三、关于创造性的论述\n\
+             （逐权利要求论述：区别特征、技术效果、非显而易见性）\n\n\
+             四、结论\n\
+             （请求审查员重新审查并授予专利权）\n\n\
+             ---\n\
+             注意：意见陈述书草稿必须**基于**第一部分至第四部分的分析结果撰写，\
+             不得凭空给出与前面分析矛盾的论点。"
+        };
+
         (
             "你是一位资深中国专利代理师（执业20年+），精通中国专利法及审查指南（2023修订版）。\
          你的工作流程是：**先深度分析，再写回复。**\
@@ -436,19 +459,7 @@ impl AiClient {
              - 修改后的权利要求：……\n\
              - 修改后的区别特征及创造性论证：……\n\
              - A33合规性说明：修改未超出原说明书和权利要求书记载的范围，理由是……\n\n\
-             === 第五部分：意见陈述书草稿 ===\n\n\
-             生成格式规范的「意见陈述书」，直接可用于提交，应包含：\n\n\
-             一、关于审查意见的答复\n\
-             （逐条回应审查员的驳回理由，引用上述分析）\n\n\
-             二、关于权利要求的修改\n\
-             （如有修改，逐条说明修改内容及A33合规性）\n\n\
-             三、关于创造性的论述\n\
-             （逐权利要求论述：区别特征、技术效果、非显而易见性）\n\n\
-             四、结论\n\
-             （请求审查员重新审查并授予专利权）\n\n\
-             ---\n\
-             注意：意见陈述书草稿必须**基于**第一部分至第四部分的分析结果撰写，\
-             不得凭空给出与前面分析矛盾的论点。",
+             {section5_prompt}",
             ),
         )
     }
@@ -458,6 +469,7 @@ impl AiClient {
         oa: &str,
         refs: &str,
         depth: &str,
+        discuss: bool,
     ) -> (String, String) {
         if depth == "shallow" {
             return (
@@ -471,6 +483,19 @@ impl AiClient {
                 ),
             );
         }
+
+        let section5_prompt = if discuss {
+            "\n\n---\n\
+             注意：**本次仅输出第一部分至第四部分的分析内容。**\n\
+             用户将在审阅分析结果并进行充分讨论后，再单独要求生成第五部分（意见陈述书草稿）。\n\
+             因此请专注于提供详尽、准确的分析（第一部分至第四部分），确保每一个判断都有据可查。"
+        } else {
+            "\n\n## 第五部分：意见陈述书草稿\n\
+             生成可直接提交的意见陈述书，包括：\n\
+             - 事实陈述\n\
+             - 法律依据\n\
+             - 请求撤销非正常认定"
+        };
 
         (
             "你是一位资深中国专利代理师，专攻非正常专利申请的答辩（中国国家知识产权局第77号令相关）。\
@@ -502,11 +527,7 @@ impl AiClient {
                  - 正面回应，不回避\n\
                  - 提供事实依据和技术说明\n\
                  - 必要时附证据组织建议\n\n\
-                 ## 第五部分：意见陈述书草稿\n\
-                 生成可直接提交的意见陈述书，包括：\n\
-                 - 事实陈述\n\
-                 - 法律依据\n\
-                 - 请求撤销非正常认定",
+                 {section5_prompt}",
             ),
         )
     }
@@ -516,6 +537,7 @@ impl AiClient {
         oa: &str,
         refs: &str,
         depth: &str,
+        discuss: bool,
     ) -> (String, String) {
         if depth == "shallow" {
             return (
@@ -530,6 +552,19 @@ impl AiClient {
                 ),
             );
         }
+
+        let section4_prompt = if discuss {
+            "\n\n---\n\
+             注意：**本次仅输出第一部分至第三部分的分析内容。**\n\
+             用户将在审阅分析结果并进行充分讨论后，再单独要求生成第四部分（复审请求书草稿）。\n\
+             因此请专注于提供详尽、准确的分析（第一部分至第三部分），确保每一个判断都有据可查。"
+        } else {
+            "\n\n## 第四部分：复审请求书草稿\n\
+             生成可直接提交的复审请求书，包括：\n\
+             - 驳回决定的错误或不当之处\n\
+             - 本申请具备创造性的理由\n\
+             - 修改说明（如有）"
+        };
 
         (
             "你是一位资深中国专利代理师，精通中国专利复审程序（专利法第41条）。\
@@ -559,11 +594,7 @@ impl AiClient {
                  1. 是否修改权利要求？（维持 / 缩小 / 重写）\n\
                  2. 修改后的权利要求相对于对比文献的区别\n\
                  3. 建议的修改后权利要求书\n\n\
-                 ## 第四部分：复审请求书草稿\n\
-                 生成可直接提交的复审请求书，包括：\n\
-                 - 驳回决定的错误或不当之处\n\
-                 - 本申请具备创造性的理由\n\
-                 - 修改说明（如有）",
+                 {section4_prompt}",
             ),
         )
     }
@@ -621,6 +652,7 @@ impl AiClient {
         references_info: &str,
         oa_type: &str,
         depth: &str,
+        discuss: bool,
     ) -> tokio::sync::mpsc::Receiver<String> {
         let (tx, rx) = tokio::sync::mpsc::channel::<String>(64);
 
@@ -630,11 +662,11 @@ impl AiClient {
         let is_deep = depth == "deep";
 
         let (system_role, prompt) = match oa_type {
-            "abnormal" => Self::build_abnormal_prompt(&my_patent_str, &oa_str, &refs_str, depth),
+            "abnormal" => Self::build_abnormal_prompt(&my_patent_str, &oa_str, &refs_str, depth, discuss),
             "reject_review" => {
-                Self::build_reject_review_prompt(&my_patent_str, &oa_str, &refs_str, depth)
+                Self::build_reject_review_prompt(&my_patent_str, &oa_str, &refs_str, depth, discuss)
             }
-            _ => Self::build_first_exam_prompt(&my_patent_str, &oa_str, &refs_str, depth),
+            _ => Self::build_first_exam_prompt(&my_patent_str, &oa_str, &refs_str, depth, discuss),
         };
 
         let messages = vec![
@@ -732,5 +764,87 @@ impl AiClient {
                 }
             }
         });
+    }
+
+    /// Generate the formal response letter (第五部分) after discussion confirms the analysis.
+    /// Takes the confirmed analysis text, discussion history, and original OA.
+    pub fn generate_response_letter_stream(
+        &self,
+        analysis_text: &str,
+        discussion_json: &str,
+        office_action: &str,
+        oa_type: &str,
+    ) -> tokio::sync::mpsc::Receiver<String> {
+        let (tx, rx) = tokio::sync::mpsc::channel::<String>(64);
+
+        let analysis = safe_truncate(analysis_text, 30000);
+        let oa = safe_truncate(office_action, 12000);
+        let discussion = safe_truncate(discussion_json, 8000);
+
+        let doc_type = match oa_type {
+            "abnormal" => "意见陈述书（非正常申请答辩）",
+            "reject_review" => "复审请求书",
+            _ => "意见陈述书",
+        };
+
+        let system_prompt = format!(
+            "你是一位资深中国专利代理师（执业20年+），精通中国专利法及审查指南。\
+             你的任务是基于已确认的分析结果和讨论内容，撰写一份格式规范、逻辑严密、可直接提交的{doc_type}。\
+             要求：\n\
+             1. 严格基于分析结果，不得引入分析中未讨论的新论点\n\
+             2. 如讨论中用户提出了修改意见，必须据此调整\n\
+             3. 语言专业、严谨、有据，每处论断均引用分析中的具体内容\n\
+             4. 格式规范，符合国家知识产权局要求的文书格式\n\
+             5. 语气尊重但坚定，不卑不亢"
+        );
+
+        let user_prompt = format!(
+            "## 原始审查意见通知书\n{oa}\n\n\
+             ## 已确认的分析结果\n{analysis}\n\n\
+             ## 讨论记录\n{discussion}\n\n\
+             请基于上述已确认的分析结果，生成完整的{doc_type}。\n\n\
+             输出格式：\n\n\
+             === 意见陈述书 ===\n\n\
+             **专利号**：【从分析中提取】\n\
+             **发明名称**：【从分析中提取】\n\n\
+             尊敬的审查员：\n\n\
+             针对贵局于【日期】发出的第【通知书编号】号审查意见通知书，\
+             申请人根据专利法及其实施细则的规定，特此陈述意见如下：\n\n\
+             一、关于审查意见的答复\n\
+             （逐条回应审查员的驳回理由，引用分析中的具体论证）\n\n\
+             二、关于权利要求的修改（如有）\n\
+             （逐条说明修改内容及A33合规性）\n\n\
+             三、关于创造性的论述\n\
+             （逐权利要求论述区别特征、技术效果、非显而易见性）\n\n\
+             四、结论\n\
+             综上所述，申请人认为本申请符合专利法及其实施细则的相关规定，\
+             请求审查员在考虑上述意见陈述的基础上，重新审查并授予专利权。\n\n\
+             此致\n\n\
+             申请人：【待填写】\n\
+             日期：【待填写】"
+        );
+
+        let messages = vec![
+            Message {
+                role: "system".into(),
+                content: system_prompt,
+            },
+            Message {
+                role: "user".into(),
+                content: user_prompt,
+            },
+        ];
+
+        let self_clone = self.clone();
+        tokio::spawn(async move {
+            let mut stream = self_clone.send_chat_stream(messages, 0.3);
+            while let Some(chunk) = stream.recv().await {
+                if tx.send(chunk).await.is_err() {
+                    return;
+                }
+            }
+        });
+
+        rx
     }
 }

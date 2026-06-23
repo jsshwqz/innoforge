@@ -106,38 +106,20 @@ impl AiClient {
         self.send_chat(messages, 0.7).await
     }
 
-    /// 流式聊天：返回 SSE chunk 接收端
-    pub fn chat_stream(
+    /// 通用流式消息发送：返回 SSE chunk 接收端 / Generic streaming: send messages, get chunk Receiver
+    pub fn send_chat_stream(
         &self,
-        user_msg: &str,
-        context: Option<&str>,
+        messages: Vec<Message>,
+        temperature: f32,
     ) -> tokio::sync::mpsc::Receiver<String> {
         let (tx, rx) = tokio::sync::mpsc::channel::<String>(64);
 
-        // Gemini CLI 模式不支持流式输出
         if self.provider_mode == AiProviderMode::GeminiCli {
             let _ = tx.try_send(
                 "[ERROR] Gemini CLI 模式暂不支持流式输出，请使用普通聊天模式。".to_string(),
             );
             return rx;
         }
-
-        let mut messages = vec![Message {
-            role: "system".into(),
-            content: "你是一个专利分析助手。你擅长分析专利文献、解读权利要求、评估专利价值、\
-                         进行技术趋势分析。请用中文回答，专业术语可以保留英文。"
-                .into(),
-        }];
-        if let Some(ctx) = context {
-            messages.push(Message {
-                role: "system".into(),
-                content: format!("以下是相关专利信息供参考：\n{ctx}"),
-            });
-        }
-        messages.push(Message {
-            role: "user".into(),
-            content: user_msg.to_string(),
-        });
 
         let provider = self.primary.clone();
         let client = self.client.clone();
@@ -149,7 +131,7 @@ impl AiClient {
                     let request_body = serde_json::json!({
                         "model": provider.model,
                         "messages": messages.iter().map(|m| serde_json::json!({"role": m.role, "content": m.content})).collect::<Vec<_>>(),
-                        "temperature": 0.7,
+                        "temperature": temperature,
                         "stream": true,
                     });
 
@@ -211,5 +193,31 @@ impl AiClient {
         });
 
         rx
+    }
+
+    /// 流式聊天：返回 SSE chunk 接收端
+    pub fn chat_stream(
+        &self,
+        user_msg: &str,
+        context: Option<&str>,
+    ) -> tokio::sync::mpsc::Receiver<String> {
+        let mut messages = vec![Message {
+            role: "system".into(),
+            content: "你是一个专利分析助手。你擅长分析专利文献、解读权利要求、评估专利价值、\
+                         进行技术趋势分析。请用中文回答，专业术语可以保留英文。"
+                .into(),
+        }];
+        if let Some(ctx) = context {
+            messages.push(Message {
+                role: "system".into(),
+                content: format!("以下是相关专利信息供参考：\n{ctx}"),
+            });
+        }
+        messages.push(Message {
+            role: "user".into(),
+            content: user_msg.to_string(),
+        });
+
+        self.send_chat_stream(messages, 0.7)
     }
 }

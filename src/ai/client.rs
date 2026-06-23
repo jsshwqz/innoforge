@@ -151,7 +151,7 @@ pub(crate) fn extract_chat_content(raw_text: &str) -> String {
 
 /// Safely truncate a UTF-8 string to at most `max_bytes` bytes
 /// without splitting multi-byte characters.
-pub(super) fn safe_truncate(s: &str, max_bytes: usize) -> &str {
+pub fn safe_truncate(s: &str, max_bytes: usize) -> &str {
     if s.len() <= max_bytes {
         return s;
     }

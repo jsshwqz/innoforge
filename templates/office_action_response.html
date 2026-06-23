@@ -808,7 +808,7 @@
         return result;
     }
 
-    // ── Main OA Analysis ──
+    // ── Main OA Analysis (SSE streaming with fallback) ──
     async function doOAAnalysis() {
         var my = getMyPatent();
         var oa = getOA();
@@ -821,37 +821,121 @@
 
         var typeLabel = document.querySelector('input[name="oa_type"]:checked + span');
         var typeName = typeLabel ? typeLabel.textContent : oaType;
-        setLoading(t('oar.analyzing').replace('{type}', typeName));
 
+        var body = { references: refs, office_action: oa, oa_type: oaType, depth: depth, discuss: true };
+        if (typeof my === 'string') {
+            body.my_patent_id = my;
+        } else {
+            body.my_patent = my;
+        }
+
+        // Show streaming-friendly UI
+        var container = document.getElementById('result');
+        var btn = document.getElementById('btn-analyze');
+        if (btn) btn.disabled = true;
+        container.innerHTML = '<div class="result-box" style="border-color:#30363d;"><div class="result-content" id="streaming-result" style="padding:16px;font-size:13px;line-height:1.8;color:#c9d1d9;white-space:pre-wrap;word-break:break-word;max-height:70vh;overflow-y:auto;font-family:Consolas,monospace;"></div></div>';
+
+        // Try SSE streaming first
         try {
-            var body = { references: refs, office_action: oa, oa_type: oaType, depth: depth };
-            if (typeof my === 'string') {
-                body.my_patent_id = my;
-            } else {
-                body.my_patent = my;
-            }
-            var resp = await fetch('/api/ai/office-action-response', {
+            var resp = await fetch('/api/ai/office-action-response/stream', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(body)
             });
-            var data = await resp.json();
-            if (data.error) { showError(data.error); return; }
-            lastAnalysisRawText = data.analysis || '';
-            showOAAnalysisSections(data.analysis);
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            if (!resp.body) throw new Error('No ReadableStream support');
 
-            // 映射矩阵 + 锚点
-            numberRefParagraphs();
-            extractMappingMatrix(data.analysis);
+            var reader = resp.body.getReader();
+            var decoder = new TextDecoder();
+            var buffer = '';
+            var fullText = '';
+            var currentEvent = '';
+            var streamDiv = document.getElementById('streaming-result');
+            var done = false;
+            var errored = false;
 
-            // 显示权利要求修改助手和检查清单
-            var content = (uploadedData['my'] && uploadedData['my'].content) || document.getElementById('my-patent').value || '';
-            if (content) showAmendmentEditor(content);
-            showChecklist();
-            // 刷新历史列表
-            loadOaHistory();
+            while (true) {
+                var { done: streamDone, value } = await reader.read();
+                if (streamDone) break;
+
+                buffer += decoder.decode(value, { stream: true });
+
+                // Parse SSE events
+                var lines = buffer.split('\n');
+                buffer = lines.pop(); // Keep incomplete line
+
+                for (var i = 0; i < lines.length; i++) {
+                    var line = lines[i];
+                    if (line.startsWith('event: ')) {
+                        currentEvent = line.slice(7).trim();
+                    } else if (line.startsWith('data: ')) {
+                        var data = line.slice(6);
+                        if (currentEvent === 'error' || data.startsWith('[ERROR]')) {
+                            showError(data.replace('[ERROR] ', ''));
+                            errored = true;
+                            done = true;
+                            break;
+                        }
+                        if (currentEvent === 'done' || data === '[DONE]') {
+                            done = true;
+                            break;
+                        }
+                        // Regular text chunk
+                        fullText += data;
+                        if (streamDiv) {
+                            streamDiv.textContent = fullText;
+                            streamDiv.scrollTop = streamDiv.scrollHeight;
+                        }
+                    } else if (line === '' && currentEvent) {
+                        // Empty line = end of event; reset for next event
+                        currentEvent = '';
+                    }
+                }
+                if (done) break;
+            }
+
+            if (!errored && fullText.length > 0) {
+                lastAnalysisRawText = fullText;
+                // Discuss mode: show sections 1-4 + discussion panel + generate button
+                showOAAnalysisDiscuss(fullText);
+
+                // 映射矩阵 + 锚点
+                numberRefParagraphs();
+                extractMappingMatrix(fullText);
+
+                // 显示权利要求修改助手和检查清单
+                var content = (uploadedData['my'] && uploadedData['my'].content) || document.getElementById('my-patent').value || '';
+                if (content) showAmendmentEditor(content);
+                showChecklist();
+                // 刷新历史列表
+                loadOaHistory();
+            } else {
+                showError(t('oar.fail'));
+            }
         } catch (e) {
-            showError(t('oar.fail') + ': ' + e.message);
+            // Fallback: try non-streaming endpoint
+            console.warn('SSE streaming failed, falling back to regular POST:', e.message);
+            try {
+                var resp2 = await fetch('/api/ai/office-action-response', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(body)
+                });
+                var data2 = await resp2.json();
+                if (data2.error) { showError(data2.error); return; }
+                lastAnalysisRawText = data2.analysis || '';
+                showOAAnalysisSections(data2.analysis);
+
+                numberRefParagraphs();
+                extractMappingMatrix(data2.analysis);
+
+                var content2 = (uploadedData['my'] && uploadedData['my'].content) || document.getElementById('my-patent').value || '';
+                if (content2) showAmendmentEditor(content2);
+                showChecklist();
+                loadOaHistory();
+            } catch (e2) {
+                showError(t('oar.fail') + ': ' + e2.message);
+            }
         }
     }
 
@@ -937,6 +1021,263 @@
         html += '</div></div>';
         container.innerHTML = html;
         clearLoading();
+    }
+
+    // ── Discuss mode: sections 1-4 + discussion + generate button ──
+    var oaDiscussMessages = []; // {role, content}
+    var oaDiscussOAText = '';
+    var oaDiscussOAType = '';
+
+    function showOAAnalysisDiscuss(analysisText) {
+        var sections = parseOASections(analysisText);
+        var container = document.getElementById('result');
+
+        // Init discussion state
+        oaDiscussMessages = [];
+        oaDiscussOAText = getOA() ? (getOA().content || getOA()) : '';
+        oaDiscussOAType = document.querySelector('input[name="oa_type"]:checked').value;
+
+        var toolbar = buildToolbar({ copy: true, export: true, showDiscussion: true, amend: true });
+        var html = '<div class="result-box">' + toolbar;
+        html += '<div style="margin-bottom:12px;padding:8px 12px;background:#0d1117;border:1px solid #30363d;border-radius:6px;font-size:13px;color:#8b949e;">';
+        html += '📊 ' + t('oar.analysisInfo').replace('{n}', Math.max(sections.length, 1)) + ' — ' + t('oar.discussHint') || '请审阅分析结果，讨论确认无误后再生成答复书';
+        html += '</div>';
+        html += '<div class="result-content">';
+
+        // Show sections (typically 1-4, no section 5)
+        for (var i = 0; i < sections.length; i++) {
+            var s = sections[i];
+            var sectionColor = s.color;
+            html += '<div style="border:1px solid ' + sectionColor + '44;border-radius:8px;margin-bottom:12px;background:#0d1117;">';
+            html += '<div style="background:' + sectionColor + '15;padding:8px 12px;border-bottom:1px solid ' + sectionColor + '44;border-radius:8px 8px 0 0;">';
+            html += '<span style="color:' + sectionColor + ';font-weight:600;font-size:14px;">' + (i + 1) + '. ' + s.label + '</span>';
+            html += '</div>';
+            html += '<div style="padding:12px 14px;font-size:13px;line-height:1.8;color:#c9d1d9;">';
+            html += renderMarkdown(s.text);
+            html += '</div></div>';
+        }
+
+        // If no sections found, show full text
+        if (sections.length === 0 && analysisText.length > 0) {
+            html += '<div style="border:1px solid #30363d;border-radius:8px;margin-bottom:12px;background:#0d1117;padding:12px 14px;font-size:13px;line-height:1.8;color:#c9d1d9;">';
+            html += renderMarkdown(analysisText);
+            html += '</div>';
+        }
+
+        html += '</div>'; // end result-content
+
+        // ── Section 5 placeholder + Generate button ──
+        html += '<div id="section5-area" style="border:2px dashed #f0883e44;border-radius:8px;margin-top:16px;background:#0d1117;">';
+        html += '<div style="background:#f0883e15;padding:8px 12px;border-bottom:1px dashed #f0883e44;">';
+        html += '<span style="color:#f0883e;font-weight:600;font-size:14px;">📝 ' + (sections.length + 1) + '. ' + (t('oar.section5') || '意见陈述书草稿') + '</span>';
+        html += '<span style="color:#8b949e;font-size:12px;margin-left:8px;">— ' + (t('oar.section5Pending') || '待讨论确认后生成') + '</span>';
+        html += '</div>';
+        html += '<div id="section5-content" style="padding:16px;text-align:center;"></div>';
+        html += '</div>';
+
+        // ── Discussion panel ──
+        html += '<div id="oa-discuss-panel" style="border:1px solid #30363d;border-radius:8px;margin-top:16px;background:#0d1117;">';
+        html += '<div style="background:#1a2332;padding:8px 12px;border-bottom:1px solid #30363d;border-radius:8px 8px 0 0;">';
+        html += '<span style="color:#58a6ff;font-weight:600;font-size:14px;">💬 ' + (t('oar.discussTitle') || '讨论区') + '</span>';
+        html += '<span style="color:#8b949e;font-size:12px;margin-left:8px;">' + (t('oar.discussDesc') || '对分析内容有疑问或修改意见？在此与 AI 讨论') + '</span>';
+        html += '</div>';
+        html += '<div id="oa-discuss-messages" style="max-height:400px;overflow-y:auto;padding:12px;">';
+        html += '<div style="color:#8b949e;font-size:13px;padding:8px;text-align:center;">🤖 ' + (t('oar.discussReady') || 'AI 分析已完成，请审阅。有任何疑问可以在此讨论。确认无误后点击下方按钮生成答复书。') + '</div>';
+        html += '</div>';
+        html += '<div style="border-top:1px solid #30363d;padding:8px 12px;display:flex;gap:8px;">';
+        html += '<input id="oa-discuss-input" type="text" placeholder="' + (t('oar.discussPlaceholder') || '输入讨论内容...') + '" style="flex:1;background:#161b22;border:1px solid #30363d;border-radius:6px;padding:8px 12px;color:#c9d1d9;font-size:13px;" onkeydown="if(event.key===\'Enter\')sendOADiscussion()">';
+        html += '<button onclick="sendOADiscussion()" style="background:#238636;color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-size:13px;white-space:nowrap;">' + (t('oar.discussSend') || '发送') + '</button>';
+        html += '</div>';
+        html += '</div>';
+
+        // ── Generate button ──
+        html += '<div style="margin-top:16px;text-align:center;">';
+        html += '<button id="btn-generate-response" onclick="generateResponseLetter()" style="background:#f0883e;color:#fff;border:none;border-radius:8px;padding:12px 32px;cursor:pointer;font-size:15px;font-weight:600;">';
+        html += '📝 ' + (t('oar.btnGenerateResponse') || '生成意见陈述书');
+        html += '</button>';
+        html += '<div style="color:#8b949e;font-size:12px;margin-top:6px;">' + (t('oar.generateHint') || '确认分析无误后可生成正式答复书') + '</div>';
+        html += '</div>';
+
+        html += '</div>'; // end result-box
+
+        container.innerHTML = html;
+        clearLoading();
+    }
+
+    async function sendOADiscussion() {
+        var input = document.getElementById('oa-discuss-input');
+        if (!input) return;
+        var msg = input.value.trim();
+        if (!msg) return;
+        input.value = '';
+        input.disabled = true;
+
+        // Add user message
+        addDiscussionMessage('user', msg);
+        oaDiscussMessages.push({ role: 'user', content: msg });
+
+        // Add AI placeholder
+        var aiMsgId = addDiscussionMessage('ai', '⏳ ...');
+        var aiDiv = document.getElementById(aiMsgId);
+
+        try {
+            var resp = await fetch('/api/ai/oa-discuss', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    analysis: lastAnalysisRawText,
+                    discussion: JSON.stringify(oaDiscussMessages.slice(0, -1)),
+                    message: msg
+                })
+            });
+
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            if (!resp.body) throw new Error('No streaming support');
+
+            var reader = resp.body.getReader();
+            var decoder = new TextDecoder();
+            var buffer = '';
+            var aiText = '';
+            var done = false;
+
+            while (true) {
+                var { done: sd, value } = await reader.read();
+                if (sd) break;
+                buffer += decoder.decode(value, { stream: true });
+                var lines = buffer.split('\n');
+                buffer = lines.pop();
+                for (var i = 0; i < lines.length; i++) {
+                    var line = lines[i];
+                    if (line.startsWith('data: ')) {
+                        var data = line.slice(6);
+                        if (data.startsWith('[ERROR]') || data === '[DONE]') {
+                            if (data.startsWith('[ERROR]')) {
+                                aiText = '⚠️ ' + data.replace('[ERROR] ', '');
+                            }
+                            done = true;
+                            break;
+                        }
+                        aiText += data;
+                        if (aiDiv) aiDiv.textContent = aiText;
+                    }
+                }
+                if (done) break;
+            }
+
+            oaDiscussMessages.push({ role: 'assistant', content: aiText });
+            if (aiDiv) aiDiv.innerHTML = renderMarkdown(aiText);
+        } catch (e) {
+            if (aiDiv) aiDiv.innerHTML = '<span style="color:#f85149;">讨论失败: ' + escapeHtml(e.message) + '</span>';
+        }
+        input.disabled = false;
+        input.focus();
+    }
+
+    function addDiscussionMessage(role, content) {
+        var container = document.getElementById('oa-discuss-messages');
+        if (!container) return '';
+        var id = 'discuss-msg-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+        var color = role === 'user' ? '#58a6ff' : '#c9d1d9';
+        var bg = role === 'user' ? '#1a2332' : '#161b22';
+        var label = role === 'user' ? '👤 ' + (t('oar.discussYou') || '你') : '🤖 AI';
+        var div = document.createElement('div');
+        div.id = id;
+        div.style.cssText = 'margin-bottom:12px;padding:10px 12px;background:' + bg + ';border:1px solid #30363d;border-radius:6px;font-size:13px;line-height:1.7;';
+        div.innerHTML = '<div style="color:' + color + ';font-weight:600;margin-bottom:4px;font-size:12px;">' + label + '</div><div style="color:#c9d1d9;">' + escapeHtml(content) + '</div>';
+        container.appendChild(div);
+        container.scrollTop = container.scrollHeight;
+        return id;
+    }
+
+    async function generateResponseLetter() {
+        var btn = document.getElementById('btn-generate-response');
+        if (btn) { btn.disabled = true; btn.textContent = '⏳ ' + (t('oar.generating') || '生成中...'); }
+
+        var section5Area = document.getElementById('section5-content');
+        if (section5Area) {
+            section5Area.innerHTML = '<div style="color:#8b949e;padding:16px;font-family:Consolas,monospace;font-size:13px;white-space:pre-wrap;" id="section5-stream"></div>';
+        }
+
+        try {
+            var resp = await fetch('/api/ai/oa-generate-response-letter', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    analysis: lastAnalysisRawText,
+                    discussion: JSON.stringify(oaDiscussMessages),
+                    office_action: oaDiscussOAText,
+                    oa_type: oaDiscussOAType
+                })
+            });
+
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            if (!resp.body) throw new Error('No streaming support');
+
+            var reader = resp.body.getReader();
+            var decoder = new TextDecoder();
+            var buffer = '';
+            var fullText = '';
+            var done = false;
+            var streamDiv = document.getElementById('section5-stream');
+
+            while (true) {
+                var { done: sd, value } = await reader.read();
+                if (sd) break;
+                buffer += decoder.decode(value, { stream: true });
+                var lines = buffer.split('\n');
+                buffer = lines.pop();
+                for (var i = 0; i < lines.length; i++) {
+                    var line = lines[i];
+                    if (line.startsWith('data: ')) {
+                        var data = line.slice(6);
+                        if (data.startsWith('[ERROR]')) {
+                            if (section5Area) section5Area.innerHTML = '<div style="color:#f85149;padding:16px;">' + escapeHtml(data) + '</div>';
+                            if (btn) { btn.disabled = false; btn.textContent = '📝 ' + (t('oar.btnGenerateResponse') || '生成意见陈述书'); }
+                            return;
+                        }
+                        if (data === '[DONE]') { done = true; break; }
+                        fullText += data;
+                        if (streamDiv) {
+                            streamDiv.textContent = fullText;
+                            streamDiv.parentElement.scrollTop = streamDiv.parentElement.scrollHeight;
+                        }
+                    }
+                }
+                if (done) break;
+            }
+
+            // Update section 5 area with rendered markdown
+            if (section5Area) {
+                section5Area.innerHTML = '<div style="padding:12px 14px;font-size:13px;line-height:1.8;color:#c9d1d9;">' + renderMarkdown(fullText) + '</div>';
+                // Add export button
+                section5Area.innerHTML += '<div style="padding:8px 14px;border-top:1px solid #30363d;text-align:right;">' +
+                    '<button onclick="exportGeneratedResponse()" style="background:#f0883e;color:#fff;border:none;border-radius:4px;padding:4px 12px;cursor:pointer;font-size:12px;">📥 ' + (t('oar.exportResponse') || '导出答复书') + '</button></div>';
+            }
+
+            // Update section 5 border to solid
+            var s5 = document.getElementById('section5-area');
+            if (s5) s5.style.border = '1px solid #f0883e44';
+
+            // Store for export
+            window._generatedResponseText = fullText;
+
+            if (btn) { btn.disabled = true; btn.textContent = '✅ ' + (t('oar.generated') || '已生成'); }
+        } catch (e) {
+            if (section5Area) section5Area.innerHTML = '<div style="color:#f85149;padding:16px;">生成失败: ' + escapeHtml(e.message) + '</div>';
+            if (btn) { btn.disabled = false; btn.textContent = '📝 ' + (t('oar.btnGenerateResponse') || '生成意见陈述书'); }
+        }
+    }
+
+    function exportGeneratedResponse() {
+        var text = window._generatedResponseText || '';
+        if (!text) { alert('请先生成答复书'); return; }
+        text = text.replace(/^#+\s*/gm, '').replace(/\*+/g, '');
+        var blob = new Blob([(t('oar.responseDraftTitle') || '意见陈述书') + '\n\n' + text + '\n\n\n' + (t('oar.responseDraftApplicant') || '申请人') + '：\n' + (t('oar.responseDraftDate') || '日期') + '：\n'], { type: 'text/plain;charset=utf-8' });
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = (t('oar.responseDraftFilename') || '意见陈述书') + '_' + new Date().toISOString().slice(0, 10) + '.txt';
+        a.click();
+        URL.revokeObjectURL(a.href);
     }
 
     function exportResponseDraft() {

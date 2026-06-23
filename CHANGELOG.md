@@ -18,6 +18,8 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 ### 改进 / Improved
 - **OA 审查员自检增强** — `oa_critique` prompt 增加特征对比准确性检查维度，要求 AI 从审查员视角核实对比文献公开内容认定的准确性
   OA critique prompt enhanced with feature comparison accuracy verification
+- **OA 分析 SSE 流式支持** — 新增 `send_chat_stream` 通用流式方法 + `office_action_response_stream` OA 流式端点 `/api/ai/office-action-response/stream`。前端实时显示文本生成过程，deep 模式两阶段流式（主分析 + 审查员自检），失败自动回退普通 POST
+  SSE streaming support for OA analysis: real-time text display, two-phase streaming for deep mode (analysis + critique), automatic fallback to regular POST
 
 ### 修复 / Fixed
 - **DOMPurify OA 页面遗漏** — `office_action_response.html` 仍使用 CDN 引用，导致断网时 JS 崩溃全黑。已替换为 `/static/purify.min.js`

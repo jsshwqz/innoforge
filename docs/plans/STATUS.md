@@ -7,9 +7,12 @@
 
 ## 当前焦点 / Current Focus
 
-**v0.6.3 — OA 一审结构化分析 + 代码质量加固**
+**v0.6.3 — OA 讨论模式 + SSE 流式支持 + 答复书分阶段生成**
 
-当前版本 v0.6.3 已发布。下一步重点：搜索质量升级（向量检索、学术搜索、CRAAP 评分）。
+当前版本 v0.6.3。新增：
+- **SSE 流式支持**：OA 分析过程实时可见，不再无反馈等待
+- **讨论模式**：分析先输出 1-4 部分（不含答复书），用户与 AI 讨论确认无误后，再点击"生成答复书"单独生成第 5 部分
+- **start.bat 修复**：去掉 chcp 65001（闪退原因），加自动打开浏览器，加崩溃暂停
 
 ### ⚠️ 已知遗留问题
 1. ~~**OA 页面全黑问题** — 已修复（DOMPurify 缺失），但启动方式需注意：使用 `dev.bat`（debug 模式）而非 start.bat，后者可能闪退~~ ✅ **已彻底修复**：DOMPurify 已本地化到 `static/purify.min.js`，通过 `rust_embed` 编译进二进制，不依赖任何 CDN。`start.bat` 已重写，改为每次启动前重新编译，消除二进制与源码不一致问题。现在 `dev.bat` 和 `start.bat` 均可正常使用。
@@ -20,6 +23,8 @@
 
 | 日期 | 变更 | 类型 |
 |------|------|------|
+| 2026-06-23 | OA 讨论模式：分析 1-4 部分先出，讨论确认后才生成答复书；3 个新 API 端点；start.bat 闪退修复 | feat |
+| 2026-06-23 | OA 分析 SSE 流式支持：实时文本展示，deep 模式两阶段流式，失败自动回退 | feat |
 | 2026-06-22 | v0.6.3 发布：OA 一审结构化分析（5部分输出） + 分段卡片展示 + 意见陈述书导出 + 代理/超时/DOMPurify/start.bat 修复 | feat |
 | 2026-06-26 | v0.6.2 发布：搜索页 PDF 上传 + 首页文件持久化 + DOMPurify 本地化 + start.bat/dev.bat + clippy修复 + .gitignore增强 + 工作树清理 | fix |
 | 2026-05-25 | DOMPurify 本地化 + start.bat 修复：CDN → `static/purify.min.js` 编译嵌入，start.bat 改为始终编译 | fix |
@@ -67,6 +72,10 @@
 - [x] getRefs 重复推送修复 ✅ `8649b01`
 - [x] 实测验证：模拟审查意见通知书分析，21KB 完整五部分输出 ✅ `c250f50`
 - [x] 文档同步：CHANGELOG/STATUS/Cargo.toml 到 v0.6.3 + errors.md 4条复盘 ✅ `658255a`
+- [x] **OA 分析 SSE 流式支持**：后端 `send_chat_stream` + `office_action_response_stream`，前端实时文本展示，失败自动回退普通 POST
+- [x] **OA 讨论模式**：分析默认只出 1-4 部分（不含答复书），加讨论面板（`/api/ai/oa-discuss`），确认后生成答复书（`/api/ai/oa-generate-response-letter`）
+- [x] **start.bat 闪退修复**：去除 chcp 65001 + 自动打开浏览器 + 崩溃暂停 + exit code 显示
+- [x] **模型质量说明**：OA 分析使用 DeepSeek V4 Pro（专家模型），temperature 0.3，PDF 文字提取纯后端完成，不依赖 AI 视觉
 
 ### v0.6.2 已完成
 - [x] DOMPurify CDN → 本地 `/static/purify.min.js`（6 模板全部替换）
@@ -113,4 +122,4 @@
 
 ---
 
-*最后更新: 2026-06-22 22:30*
+*最后更新: 2026-06-23 22:30*

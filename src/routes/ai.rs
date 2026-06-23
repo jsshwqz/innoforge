@@ -1,4 +1,5 @@
 use super::AppState;
+use crate::ai::{safe_truncate, Message};
 use crate::patent::*;
 use axum::{
     extract::Path,
@@ -1076,8 +1077,12 @@ pub async fn api_ai_office_action_response(
         .and_then(|v| v.as_str())
         .filter(|&v| v == "shallow" || v == "deep")
         .unwrap_or("medium");
+    let discuss = req
+        .get("discuss")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     match ai
-        .office_action_response(&my_info, &oa_text, &refs_info, oa_type, depth)
+        .office_action_response(&my_info, &oa_text, &refs_info, oa_type, depth, discuss)
         .await
     {
         Ok(content) => {
@@ -1198,13 +1203,17 @@ pub async fn api_ai_office_action_response_stream(
         .filter(|&v| v == "shallow" || v == "deep")
         .unwrap_or("medium")
         .to_string();
+    let discuss = req
+        .get("discuss")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     let ai = s
         .config
         .read()
         .unwrap_or_else(|e| e.into_inner())
         .ai_client_expert();
-    let mut rx = ai.office_action_response_stream(&my_info, &oa_text, &refs_info, &oa_type, &depth);
+    let mut rx = ai.office_action_response_stream(&my_info, &oa_text, &refs_info, &oa_type, &depth, discuss);
 
     // Capture values for auto-save (must be before consuming s)
     let patent_number = req
@@ -1236,6 +1245,141 @@ pub async fn api_ai_office_action_response_stream(
         if !patent_number.is_empty() && !full_text.is_empty() {
             let _ = db.save_oa_analysis(&patent_number, &patent_title, &oa_type, &depth, &full_text);
         }
+    };
+
+    Sse::new(Box::pin(stream))
+}
+
+/// 在讨论确认后，生成正式答复书（第五部分）
+pub async fn api_ai_oa_generate_response_letter(
+    State(s): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Sse<Pin<Box<dyn Stream<Item = Result<Event, Infallible>> + Send>>> {
+    fn error_sse(msg: String) -> Pin<Box<dyn Stream<Item = Result<Event, Infallible>> + Send>> {
+        Box::pin(futures::stream::once(async move {
+            Ok(Event::default().event("error").data(msg))
+        }))
+    }
+
+    let analysis_text = req
+        .get("analysis")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let discussion = req
+        .get("discussion")
+        .and_then(|v| v.as_str())
+        .unwrap_or("[]")
+        .to_string();
+    let office_action = req
+        .get("office_action")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let oa_type = req
+        .get("oa_type")
+        .and_then(|v| v.as_str())
+        .filter(|&v| v == "abnormal" || v == "reject_review" || v == "first_exam")
+        .unwrap_or("first_exam")
+        .to_string();
+
+    if analysis_text.trim().len() < 50 {
+        return Sse::new(error_sse("[ERROR] 缺少分析结果，请先完成分析后再生成答复书".into()));
+    }
+
+    let ai = s
+        .config
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .ai_client_expert();
+    let mut rx = ai.generate_response_letter_stream(&analysis_text, &discussion, &office_action, &oa_type);
+
+    let stream = async_stream::stream! {
+        while let Some(chunk) = rx.recv().await {
+            if chunk.starts_with("[ERROR]") {
+                yield Ok(Event::default().event("error").data(chunk));
+                return;
+            }
+            yield Ok(Event::default().data(chunk));
+        }
+        yield Ok(Event::default().event("done").data("[DONE]"));
+    };
+
+    Sse::new(Box::pin(stream))
+}
+
+/// OA 讨论消息：在分析完成后，用户与 AI 就分析内容进行讨论
+pub async fn api_ai_oa_discuss(
+    State(s): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Sse<Pin<Box<dyn Stream<Item = Result<Event, Infallible>> + Send>>> {
+    fn error_sse(msg: String) -> Pin<Box<dyn Stream<Item = Result<Event, Infallible>> + Send>> {
+        Box::pin(futures::stream::once(async move {
+            Ok(Event::default().event("error").data(msg))
+        }))
+    }
+
+    let analysis_text = req
+        .get("analysis")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let discussion_json = req
+        .get("discussion")
+        .and_then(|v| v.as_str())
+        .unwrap_or("[]")
+        .to_string();
+    let message = req
+        .get("message")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    if message.trim().is_empty() {
+        return Sse::new(error_sse("[ERROR] 请输入讨论内容".into()));
+    }
+
+    let analysis = safe_truncate(&analysis_text, 15000);
+    let disc = safe_truncate(&discussion_json, 6000);
+
+    let user_prompt = format!(
+        "## 已完成的 OA 分析\n{analysis}\n\n## 之前的讨论\n{disc}\n\n## 用户的新问题/意见\n{message}\n\n\
+         请针对用户的问题或意见进行回应。如果是修改建议，请说明如何调整分析。\
+         如果是质疑，请给出具体的技术或法律论证。\
+         保持专业、严谨、有据。"
+    );
+
+    let messages = vec![
+        Message {
+            role: "system".into(),
+            content: "你是一位资深中国专利代理师（执业20年+），精通中国专利法及审查指南。\
+                     你正在与发明人讨论一份审查意见通知书答复方案。\
+                     你需要针对发明人的问题或修改意见，给出专业、具体、可操作的回应。\
+                     每个回应都要引用具体的法律条文或技术特征，不可空泛。".into(),
+        },
+        Message {
+            role: "user".into(),
+            content: user_prompt,
+        },
+    ];
+
+    let ai = s
+        .config
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .ai_client_expert();
+
+    let mut rx = ai.send_chat_stream(messages, 0.3);
+
+    let stream = async_stream::stream! {
+        while let Some(chunk) = rx.recv().await {
+            if chunk.starts_with("[ERROR]") {
+                yield Ok(Event::default().event("error").data(chunk));
+                return;
+            }
+            yield Ok(Event::default().data(chunk));
+        }
+        yield Ok(Event::default().event("done").data("[DONE]"));
     };
 
     Sse::new(Box::pin(stream))

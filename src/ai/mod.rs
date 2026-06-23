@@ -14,4 +14,4 @@ mod idea;
 mod patent;
 mod tests;
 
-pub use client::AiClient;
+pub use client::{AiClient, Message, safe_truncate};
