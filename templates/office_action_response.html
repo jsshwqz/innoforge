@@ -271,6 +271,17 @@
 
     <script src="/static/i18n.js"></script>
     <script>
+    // Safe DOMPurify wrapper — fallback if script failed to load
+    function safeSanitize(html) {
+        if (typeof DOMPurify !== 'undefined' && DOMPurify.sanitize) {
+            return DOMPurify.sanitize(html);
+        }
+        // Fallback: basic XSS stripping
+        return html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+                   .replace(/on\w+="[^"]*"/gi, '')
+                   .replace(/on\w+='[^']*'/gi, '');
+    }
+
     // ── PDF Preview ──
     var uploadedFileObjects = {};
 
@@ -559,6 +570,8 @@
             document.getElementById('oa-file-tag').innerHTML = '<span class="file-tag">📋 ' + escapeHtml(title)
                 + ' (' + content.length + t('common.chars') + ')'
                 + '<span class="tag-remove" onclick="clearOA()">&times;</span></span>';
+            // Auto-detect patent number from pasted OA text
+            autoDetectPatentFromOA(content);
         } else if (pasteTarget && pasteTarget.startsWith('ref_')) {
             var idx = pasteTarget.replace('ref_', '');
             uploadedData['ref_' + idx] = result;
@@ -591,6 +604,8 @@
                     + ' (' + result.content.length + t('common.chars') + ')'
                     + '<span class="tag-remove" onclick="clearOA()">&times;</span></span>';
                 document.getElementById('oa-input').disabled = true;
+                // Auto-detect patent number from OA text
+                autoDetectPatentFromOA(result.content);
             } catch (e) {
                 tagEl.innerHTML = '<span style="color:#f85149;font-size:12px;">' + escapeHtml(e.message) + '</span>';
             }
@@ -602,6 +617,53 @@
         document.getElementById('oa-input').disabled = false;
         document.getElementById('oa-input').value = '';
         document.getElementById('oa-file-tag').innerHTML = '';
+    }
+
+    // Auto-detect patent number + OA date from OA text
+    function autoDetectPatentFromOA(oaText) {
+        if (!oaText) return;
+        // --- Patent number ---
+        var patterns = [
+            /CN\s*(\d{7,13}(?:\.\d)?)/i,
+            /ZL\s*(\d{7,13}(?:\.\d)?)/i,
+            /申请号[：:]\s*(\d{7,13}(?:\.\d)?)/,
+            /专利号[：:]\s*(\d{7,13}(?:\.\d)?)/,
+            /(\d{13}(?:\.\d)?)/,
+        ];
+        var patentNum = null;
+        for (var i = 0; i < patterns.length; i++) {
+            var m = oaText.match(patterns[i]);
+            if (m && m[1]) { patentNum = m[1].replace(/\s/g, ''); break; }
+        }
+        if (patentNum && patentNum.length >= 9) {
+            var existing = document.getElementById('my-patent').value.trim();
+            if (!existing || existing.length <= 5) {
+                document.getElementById('my-patent').value = patentNum;
+                lookupMyPatent();
+            }
+        }
+
+        // --- OA date ---
+        var datePatterns = [
+            /发文日[：:]\s*(\d{4})\s*[年\-]\s*(\d{1,2})\s*[月\-]\s*(\d{1,2})\s*日?/,
+            /(\d{4})\s*[年\-]\s*(\d{1,2})\s*[月\-]\s*(\d{1,2})\s*日?/,
+            /(\d{4})-(\d{1,2})-(\d{1,2})/,
+        ];
+        for (var j = 0; j < datePatterns.length; j++) {
+            var dm = oaText.match(datePatterns[j]);
+            if (dm && dm[1]) {
+                var year = dm[1];
+                var month = dm[2].padStart(2, '0');
+                var day = dm[3].padStart(2, '0');
+                var dateStr = year + '-' + month + '-' + day;
+                var oaDateInput = document.getElementById('oa-date');
+                if (oaDateInput && !oaDateInput.value) {
+                    oaDateInput.value = dateStr;
+                    oaDateInput.dispatchEvent(new Event('change'));
+                }
+                break;
+            }
+        }
     }
 
     // ── Ref helpers ──
@@ -1555,7 +1617,7 @@
                 + '<button onclick="setArgStatus(' + i + ',\'rejected\')" title="' + t('oar.argReject') + '">❌</button>'
                 + '</div></div>';
         }
-        list.innerHTML = DOMPurify.sanitize(html);
+        list.innerHTML = safeSanitize(html);
     }
 
     function setArgStatus(idx, status) {
@@ -1761,7 +1823,7 @@
             html += '<td style="padding:8px;border:1px solid #30363d;color:#d29922;">' + escapeHtml(rows[i].ref) + '</td></tr>';
         }
         html += '</tbody></table>';
-        content.innerHTML = DOMPurify.sanitize(html);
+        content.innerHTML = safeSanitize(html);
     }
 
     // ── P1b: Reference Anchor Jump ──
