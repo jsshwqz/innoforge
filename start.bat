@@ -1,39 +1,45 @@
 @echo off
+setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
-REM 将 Cargo 加入 PATH（若不在系统变量中）
-set "PATH=%USERPROFILE%\.cargo\bin;%PATH%"
+REM ---- find cargo ----
+set "CARGO_EXE="
+if exist "%USERPROFILE%\.cargo\bin\cargo.exe" set "CARGO_EXE=%USERPROFILE%\.cargo\bin\cargo.exe"
+if not defined CARGO_EXE (
+    where cargo >nul 2>&1
+    if not errorlevel 1 set "CARGO_EXE=cargo"
+)
+if not defined CARGO_EXE (
+    echo [ERROR] Cannot find cargo.exe. Please install Rust from https://rustup.rs
+    echo [ERROR] If already installed, add %%USERPROFILE%%\.cargo\bin to your system PATH.
+    pause
+    exit /b 1
+)
 
-REM Kill existing instance if running
-taskkill /F /IM innoforge.exe >nul 2>nul
+REM ---- kill existing ----
+taskkill /F /IM innoforge.exe >nul 2>&1
 timeout /t 1 /nobreak >nul
 
-REM 如果已存在 release 二进制，跳过编译直接启动（快）
+REM ---- build if needed ----
 if exist ".\target\release\innoforge.exe" (
-    echo [InnoForge] Binary exists, skipping build...
+    echo [InnoForge] Using existing binary, skipping build...
     goto :run
 )
 
-REM 没有二进制才编译
-echo [InnoForge] Building (release mode, optimized)...
-echo [InnoForge] This may take 5-10 minutes on first build.
-cargo build --release --bin innoforge
+echo [InnoForge] Building release binary (first time may take 5-10 min)...
+"%CARGO_EXE%" build --release --bin innoforge
 if errorlevel 1 (
-    echo [InnoForge] Build failed!
-    echo [InnoForge] Try running dev.bat (debug mode) for faster builds.
+    echo [InnoForge] Build FAILED! Check error messages above.
+    echo [InnoForge] Try running dev.bat instead (faster debug build).
     pause
     exit /b 1
 )
 
 :run
-echo [InnoForge] Launching server...
-echo [InnoForge] Open http://127.0.0.1:3000 in your browser.
-echo [InnoForge] Close this window or press Ctrl+C to stop.
+echo [InnoForge] Starting server at http://127.0.0.1:3000
+echo [InnoForge] Press Ctrl+C or close window to stop.
 echo.
-
-REM Auto-open browser after 2s delay (server startup)
-start "" http://127.0.0.1:3000
-
+start "" http://127.0.0.1:3000 2>nul
 ".\target\release\innoforge.exe"
 echo.
 echo [InnoForge] Server stopped (exit code: %ERRORLEVEL%).
