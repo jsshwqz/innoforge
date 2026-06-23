@@ -1127,7 +1127,8 @@
                 body: JSON.stringify({
                     analysis: lastAnalysisRawText,
                     discussion: JSON.stringify(oaDiscussMessages.slice(0, -1)),
-                    message: msg
+                    message: msg,
+                    office_action: oaDiscussOAText
                 })
             });
 
@@ -1158,7 +1159,8 @@
                             break;
                         }
                         aiText += data;
-                        if (aiDiv) aiDiv.textContent = aiText;
+                        // Real-time markdown rendering
+                        if (aiDiv) aiDiv.innerHTML = renderMarkdown(aiText) + '<span style="color:#f0883e;">▌</span>';
                     }
                 }
                 if (done) break;

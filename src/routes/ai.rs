@@ -1308,7 +1308,8 @@ pub async fn api_ai_oa_generate_response_letter(
     Sse::new(Box::pin(stream))
 }
 
-/// OA 讨论消息：在分析完成后，用户与 AI 就分析内容进行讨论
+/// OA 讨论消息：在分析完成后，用户与 AI 就分析内容进行深度讨论。
+/// AI 会主动评估用户意见、给出具体修改方案、并在必要时输出修改后的段落。
 pub async fn api_ai_oa_discuss(
     State(s): State<AppState>,
     Json(req): Json<serde_json::Value>,
@@ -1339,23 +1340,50 @@ pub async fn api_ai_oa_discuss(
         return Sse::new(error_sse("[ERROR] 请输入讨论内容".into()));
     }
 
-    let analysis = safe_truncate(&analysis_text, 15000);
-    let disc = safe_truncate(&discussion_json, 6000);
+    // Use larger truncation limits for better context
+    let analysis = safe_truncate(&analysis_text, 30000);
+    let disc = safe_truncate(&discussion_json, 15000);
+
+    let system_prompt = format!(
+        "你是一位资深中国专利代理师（执业20年+），精通中国专利法、审查指南（2023修订版）及复审无效程序。\n\n\
+         你正在与发明人就一份审查意见通知书答复方案进行深度讨论。你的任务是帮助发明人完善答复方案，\
+         确保最终的意见陈述书逻辑严密、论证充分、经得起审查员的推敲。\n\n\
+         ## 讨论规则\n\n\
+         1. **主动评估**：对发明人的每个意见，先评估其合理性（合理/部分合理/不合理），再给出具体建议。\n\
+         2. **具体修改**：如果发明人的意见合理，你必须给出修改后的具体段落文字，\
+         标注【建议修改】并用 > 引用原文、>>> 标明修改后文本，让发明人可以直接对比。\n\
+         3. **反驳论证**：如果发明人的意见不合理（例如误解了法条、遗漏了审查员的论点），\
+         用专业但尊重的语气解释为什么，并给出更好的替代方案。\n\
+         4. **主动引导**：如果分析中有些地方可能有争议或薄弱，主动指出并询问发明人的意见。\n\
+         5. **法条引用**：每处法律论断必须引用具体法条（A22.2/A22.3/A26.3/A33 等），不可空泛。\n\
+         6. **技术依据**：每处技术论断必须引用分析中的具体特征或对比文献段落。\n\n\
+         ## 已有的 OA 分析结果\n{analysis}\n\n\
+         ## 原始审查意见通知书（供参考）\n{}\n\n\
+         请严格遵守以上规则，用专业但易懂的语言与发明人沟通。\
+         不要简单地说「好的」或「明白了」——你需要像一个真正的专利代理师那样，\
+         给出有实质内容的、能推动答复方案前进的专业意见。",
+        safe_truncate(req.get("office_action").and_then(|v| v.as_str()).unwrap_or(""), 5000)
+    );
+
+    let discussion_context = if disc.len() > 10 && disc != "[]" {
+        format!("\n\n## 之前的讨论记录\n{disc}\n\n## 发明人的最新意见\n{message}")
+    } else {
+        format!("\n\n## 发明人的意见\n{message}")
+    };
 
     let user_prompt = format!(
-        "## 已完成的 OA 分析\n{analysis}\n\n## 之前的讨论\n{disc}\n\n## 用户的新问题/意见\n{message}\n\n\
-         请针对用户的问题或意见进行回应。如果是修改建议，请说明如何调整分析。\
-         如果是质疑，请给出具体的技术或法律论证。\
-         保持专业、严谨、有据。"
+        "请针对发明人的意见给出专业回应。记住：\n\
+         - 先评估合理性\n\
+         - 如合理，给出具体修改方案（含修改前后对比）\n\
+         - 如不合理，用专业理由说服，并给出替代方案\n\
+         - 引用具体法条和技术特征\n\
+         {discussion_context}"
     );
 
     let messages = vec![
         Message {
             role: "system".into(),
-            content: "你是一位资深中国专利代理师（执业20年+），精通中国专利法及审查指南。\
-                     你正在与发明人讨论一份审查意见通知书答复方案。\
-                     你需要针对发明人的问题或修改意见，给出专业、具体、可操作的回应。\
-                     每个回应都要引用具体的法律条文或技术特征，不可空泛。".into(),
+            content: system_prompt,
         },
         Message {
             role: "user".into(),
@@ -1369,7 +1397,8 @@ pub async fn api_ai_oa_discuss(
         .unwrap_or_else(|e| e.into_inner())
         .ai_client_expert();
 
-    let mut rx = ai.send_chat_stream(messages, 0.3);
+    // Higher temperature for discussion — more natural and flexible
+    let mut rx = ai.send_chat_stream(messages, 0.7);
 
     let stream = async_stream::stream! {
         while let Some(chunk) = rx.recv().await {
