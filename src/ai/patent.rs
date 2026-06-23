@@ -777,9 +777,9 @@ impl AiClient {
     ) -> tokio::sync::mpsc::Receiver<String> {
         let (tx, rx) = tokio::sync::mpsc::channel::<String>(64);
 
-        let analysis = safe_truncate_chars(analysis_text, 30000);   // 3万中文字
-        let oa = safe_truncate_chars(office_action, 8000);           // 8千字 OA
-        let discussion = safe_truncate_chars(discussion_json, 15000); // 1.5万讨论
+        let analysis = safe_truncate_chars(analysis_text, 60000);   // 6万中文字
+        let oa = safe_truncate_chars(office_action, 15000);          // 1.5万字 OA
+        let discussion = safe_truncate_chars(discussion_json, 40000); // 4万讨论
 
         let doc_type = match oa_type {
             "abnormal" => "意见陈述书（非正常申请答辩）",

@@ -1340,12 +1340,12 @@ pub async fn api_ai_oa_discuss(
         return Sse::new(error_sse("[ERROR] 请输入讨论内容".into()));
     }
 
-    // Use character-based truncation for Chinese text (1 char = 3 bytes in UTF-8)
-    let analysis = safe_truncate_chars(&analysis_text, 30000);     // 3万中文字
-    let disc = safe_truncate_chars(&discussion_json, 15000);       // 1.5万中文字
+    // Safety nets: DeepSeek V4 has 128K tokens (~400K Chinese chars). These limits are far below that.
+    let analysis = safe_truncate_chars(&analysis_text, 60000);     // 6万中文字
+    let disc = safe_truncate_chars(&discussion_json, 40000);       // 4万中文字
     let oa_snippet = safe_truncate_chars(
         req.get("office_action").and_then(|v| v.as_str()).unwrap_or(""),
-        5000,  // 5千字 OA 原文参考
+        15000,  // 1.5万 OA 原文
     );
 
     let system_prompt = format!(
