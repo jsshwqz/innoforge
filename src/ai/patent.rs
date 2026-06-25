@@ -231,7 +231,9 @@ impl AiClient {
 
         let (system_role, prompt) = match oa_type {
             "abnormal" => Self::build_abnormal_prompt(my_patent, oa, refs, depth, discuss),
-            "reject_review" => Self::build_reject_review_prompt(my_patent, oa, refs, depth, discuss),
+            "reject_review" => {
+                Self::build_reject_review_prompt(my_patent, oa, refs, depth, discuss)
+            }
             _ => Self::build_first_exam_prompt(my_patent, oa, refs, depth, discuss),
         };
 
@@ -398,6 +400,15 @@ impl AiClient {
          3. **区分事实与观点**：审查员的结论是观点，对比文献公开的内容是事实，两者要分开论述\n\
          4. **每项权利要求单独处理**：不得笼统说「权利要求1-X」\n\
          5. **诚实分析**：如果对比文献确实公开了某特征，必须承认；区别在于未被公开的特征及其效果\n\
+         6. **多维度对比**：除逐特征对比外，还需从技术领域、技术问题、技术效果、应用场景等维度综合评估\n\
+         7. **组合动机分析**：审查员将多篇对比文件结合时，必须分析各文件的技术领域是否相同、解决的技术问题是否一致、是否存在反向教导\n\
+         8. **AI输出风格限制**：你的输出将直接用于撰写正式意见陈述书，因此必须严格遵守以下规范：\n\
+            - 不使用加粗、表情符号（✅❌⚠️）或过度格式化\n\
+            - 表格可用，但不在表格内加粗\n\
+            - 避免「综上所述」「经分析可知」等模板化过渡语\n\
+            - 变化句式，不每段以「申请人」开头\n\
+            - 全部使用中文术语，不夹带英文\n\
+            - 语气尊重审查员但立场坚定，不攻击、不示弱\n\
          请用严谨、专业的语言输出。分析结果使用固定格式（见用户提示），不得省略任何部分。"
                 .into(),
             format!(
@@ -448,6 +459,8 @@ impl AiClient {
              - D1与本申请的技术领域是否相同？具体分析：……\n\
              - 本领域技术人员是否有动机将D1与D2结合？具体分析：……\n\
              - D1与D2之间是否存在反向教导？具体分析：……\n\
+             - 各对比文件解决的技术问题是否相同？\n\
+             - 各对比文件之间是否存在相互引用关系？\n\
              - 综上，审查员的结合动机论证不成立，理由是：……\n\n\
              **层级B—强调协同技术效果：**\n\
              - 真正区别特征「区别特征A」产生的技术效果：……\n\
@@ -662,7 +675,9 @@ impl AiClient {
         let is_deep = depth == "deep";
 
         let (system_role, prompt) = match oa_type {
-            "abnormal" => Self::build_abnormal_prompt(&my_patent_str, &oa_str, &refs_str, depth, discuss),
+            "abnormal" => {
+                Self::build_abnormal_prompt(&my_patent_str, &oa_str, &refs_str, depth, discuss)
+            }
             "reject_review" => {
                 Self::build_reject_review_prompt(&my_patent_str, &oa_str, &refs_str, depth, discuss)
             }
@@ -777,8 +792,8 @@ impl AiClient {
     ) -> tokio::sync::mpsc::Receiver<String> {
         let (tx, rx) = tokio::sync::mpsc::channel::<String>(64);
 
-        let analysis = safe_truncate_chars(analysis_text, 60000);   // 6万中文字
-        let oa = safe_truncate_chars(office_action, 15000);          // 1.5万字 OA
+        let analysis = safe_truncate_chars(analysis_text, 60000); // 6万中文字
+        let oa = safe_truncate_chars(office_action, 15000); // 1.5万字 OA
         let discussion = safe_truncate_chars(discussion_json, 40000); // 4万讨论
 
         let doc_type = match oa_type {

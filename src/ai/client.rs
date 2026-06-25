@@ -279,7 +279,9 @@ impl AiClient {
         let is_anthropic = provider.base_url.contains("anthropic");
 
         if is_anthropic {
-            return self.try_provider_anthropic(provider, messages, temperature).await;
+            return self
+                .try_provider_anthropic(provider, messages, temperature)
+                .await;
         }
 
         let request_body = ChatRequest {
@@ -450,10 +452,7 @@ impl AiClient {
             body["system"] = serde_json::json!(system_prompt);
         }
 
-        let req_url = format!(
-            "{}/messages",
-            provider.base_url.trim_end_matches('/')
-        );
+        let req_url = format!("{}/messages", provider.base_url.trim_end_matches('/'));
 
         let max_retries = PROVIDER_MAX_RETRIES;
         let mut last_err = None;
@@ -477,11 +476,15 @@ impl AiClient {
                         let raw = resp.text().await.unwrap_or_default();
                         tracing::warn!("[{}] rate limited (429)", provider.name);
                         if attempt < max_retries - 1 {
-                            tokio::time::sleep(Duration::from_secs(2u64.pow(attempt as u32 + 1))).await;
+                            tokio::time::sleep(Duration::from_secs(2u64.pow(attempt as u32 + 1)))
+                                .await;
                             last_err = Some(anyhow::anyhow!("Anthropic 频率限制"));
                             continue;
                         }
-                        return Err(anyhow::anyhow!("Anthropic 频率限制: {}", safe_truncate(&raw, 200)));
+                        return Err(anyhow::anyhow!(
+                            "Anthropic 频率限制: {}",
+                            safe_truncate(&raw, 200)
+                        ));
                     }
                     if status.as_u16() == 401 || status.as_u16() == 403 {
                         let raw = resp.text().await.unwrap_or_default();

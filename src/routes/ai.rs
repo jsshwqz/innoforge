@@ -1213,7 +1213,8 @@ pub async fn api_ai_office_action_response_stream(
         .read()
         .unwrap_or_else(|e| e.into_inner())
         .ai_client_expert();
-    let mut rx = ai.office_action_response_stream(&my_info, &oa_text, &refs_info, &oa_type, &depth, discuss);
+    let mut rx =
+        ai.office_action_response_stream(&my_info, &oa_text, &refs_info, &oa_type, &depth, discuss);
 
     // Capture values for auto-save (must be before consuming s)
     let patent_number = req
@@ -1284,7 +1285,9 @@ pub async fn api_ai_oa_generate_response_letter(
         .to_string();
 
     if analysis_text.trim().len() < 50 {
-        return Sse::new(error_sse("[ERROR] 缺少分析结果，请先完成分析后再生成答复书".into()));
+        return Sse::new(error_sse(
+            "[ERROR] 缺少分析结果，请先完成分析后再生成答复书".into(),
+        ));
     }
 
     let ai = s
@@ -1292,7 +1295,8 @@ pub async fn api_ai_oa_generate_response_letter(
         .read()
         .unwrap_or_else(|e| e.into_inner())
         .ai_client_expert();
-    let mut rx = ai.generate_response_letter_stream(&analysis_text, &discussion, &office_action, &oa_type);
+    let mut rx =
+        ai.generate_response_letter_stream(&analysis_text, &discussion, &office_action, &oa_type);
 
     let stream = async_stream::stream! {
         while let Some(chunk) = rx.recv().await {
@@ -1367,7 +1371,9 @@ pub async fn api_ai_oa_discuss(
     };
 
     let oa_snippet = safe_truncate_chars(
-        req.get("office_action").and_then(|v| v.as_str()).unwrap_or(""),
+        req.get("office_action")
+            .and_then(|v| v.as_str())
+            .unwrap_or(""),
         15000,
     );
 

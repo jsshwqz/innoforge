@@ -246,10 +246,7 @@ async fn main() -> anyhow::Result<()> {
             "/api/ai/oa-generate-response-letter",
             post(routes::api_ai_oa_generate_response_letter),
         )
-        .route(
-            "/api/ai/oa-discuss",
-            post(routes::api_ai_oa_discuss),
-        )
+        .route("/api/ai/oa-discuss", post(routes::api_ai_oa_discuss))
         // OA 分析历史 API / OA History API
         .route("/api/oa/history/all", get(routes::api_oa_history_all))
         .route(
