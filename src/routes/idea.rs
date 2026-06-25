@@ -88,6 +88,7 @@ fn parse_restart_step(raw: Option<&str>) -> PipelineStep {
         "experiment_validation" | "experiment" => PipelineStep::ExperimentValidation,
         "build_claim_tree" | "claim_tree" => PipelineStep::BuildClaimTree,
         "finalize" | "final" => PipelineStep::Finalize,
+        "generate_oa_response" | "oa_response" | "oa" => PipelineStep::GenerateOaResponse,
         _ => PipelineStep::SearchWeb,
     }
 }
@@ -109,6 +110,7 @@ fn step_key(step: PipelineStep) -> &'static str {
         PipelineStep::ExperimentValidation => "experiment_validation",
         PipelineStep::BuildClaimTree => "build_claim_tree",
         PipelineStep::Finalize => "finalize",
+        PipelineStep::GenerateOaResponse => "generate_oa_response",
     }
 }
 

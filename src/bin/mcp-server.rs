@@ -154,6 +154,45 @@ fn handle_tools_list() -> Value {
                     },
                     "required": ["patent_id", "message"]
                 }
+            },
+            {
+                "name": "patent_threat_assessment",
+                "description": "Assess threat level of multiple prior art patents against your patent claims. Returns X/Y/A classification with similarity matrix and combination analysis.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "my_claims": { "type": "string", "description": "Full claims text of your patent" },
+                        "patents": { "type": "string", "description": "JSON array of prior art patents, each with: patent_number, title, abstract_text, claims" }
+                    },
+                    "required": ["my_claims", "patents"]
+                }
+            },
+            {
+                "name": "patent_claim_chart",
+                "description": "Generate a claim chart mapping each claim element of your patent against a prior art reference. Element-by-element comparison for infringement/validity analysis.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "my_claims": { "type": "string", "description": "Full claims text of your patent" },
+                        "prior_art": { "type": "string", "description": "Full text of the prior art patent (abstract + claims + description)" }
+                    },
+                    "required": ["my_claims", "prior_art"]
+                }
+            },
+            {
+                "name": "patent_multi_compare",
+                "description": "Compare 3+ patents across multiple dimensions simultaneously. Generates a multi-dimensional comparison matrix.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "patent_ids": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "description": "Array of patent IDs or numbers to compare (3 or more)"
+                        }
+                    },
+                    "required": ["patent_ids"]
+                }
             }
         ]
     })
@@ -170,6 +209,9 @@ fn handle_tools_call(req: &Value) -> Value {
         "patent_compare" => call_patent_compare(args),
         "idea_validate" => call_idea_validate(args),
         "patent_chat" => call_patent_chat(args),
+        "patent_threat_assessment" => call_patent_threat_assessment(args),
+        "patent_claim_chart" => call_patent_claim_chart(args),
+        "patent_multi_compare" => call_patent_multi_compare(args),
         _ => Err(format!("Unknown tool: {}", tool_name)),
     };
 
@@ -389,6 +431,51 @@ fn call_patent_chat(args: &Value) -> Result<String, String> {
     Ok(data["content"]
         .as_str()
         .unwrap_or("No response")
+        .to_string())
+}
+
+fn call_patent_threat_assessment(args: &Value) -> Result<String, String> {
+    let my_claims = args["my_claims"].as_str().ok_or("Missing 'my_claims'")?;
+    let patents_str = args["patents"]
+        .as_str()
+        .ok_or("Missing 'patents' (JSON array as string)")?;
+    let patents: Value = serde_json::from_str(patents_str)
+        .map_err(|e| format!("Invalid JSON in 'patents': {}", e))?;
+    let body = json!({"my_claims": my_claims, "patents": patents});
+    let data = http_post("/api/ai/threat-assessment", &body)?;
+    Ok(data["analysis"]
+        .as_str()
+        .unwrap_or("Threat assessment failed")
+        .to_string())
+}
+
+fn call_patent_claim_chart(args: &Value) -> Result<String, String> {
+    let my_claims = args["my_claims"].as_str().ok_or("Missing 'my_claims'")?;
+    let prior_art = args["prior_art"].as_str().ok_or("Missing 'prior_art'")?;
+    let body = json!({"my_claims": my_claims, "prior_art": prior_art});
+    let data = http_post("/api/ai/claim-chart", &body)?;
+    Ok(data["analysis"]
+        .as_str()
+        .unwrap_or("Claim chart generation failed")
+        .to_string())
+}
+
+fn call_patent_multi_compare(args: &Value) -> Result<String, String> {
+    let ids = args["patent_ids"]
+        .as_array()
+        .ok_or("Missing 'patent_ids' array")?;
+    let id_strings: Vec<String> = ids
+        .iter()
+        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+        .collect();
+    if id_strings.len() < 3 {
+        return Err("Need at least 3 patent IDs for multi-compare".to_string());
+    }
+    let body = json!({"patent_ids": id_strings});
+    let data = http_post("/api/ai/compare-matrix", &body)?;
+    Ok(data["content"]
+        .as_str()
+        .unwrap_or("Multi-compare failed")
         .to_string())
 }
 

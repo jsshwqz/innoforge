@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-/// 流水线步骤枚举 — 13 步固定序列
+/// 流水线步骤枚举 — 16 步固定序列（新增第16步：OA答复辅助）
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PipelineStep {
@@ -19,6 +19,8 @@ pub enum PipelineStep {
     ExperimentValidation,
     BuildClaimTree,
     Finalize,
+    /// 第16步：基于流水线分析结果生成OA答复分析 / Generate OA response from pipeline analysis
+    GenerateOaResponse,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -29,11 +31,12 @@ pub enum StepType {
 }
 
 impl PipelineStep {
-    pub const TOTAL_STEPS: usize = 15;
+    pub const TOTAL_STEPS: usize = 16;
 
     pub fn step_type(&self) -> StepType {
         match self {
             Self::ExpandQuery | Self::AiDeepAnalysis | Self::AiActionPlan => StepType::Llm,
+            Self::GenerateOaResponse => StepType::Llm,
             _ => StepType::Code,
         }
     }
@@ -54,7 +57,8 @@ impl PipelineStep {
             Self::AiActionPlan => Some(Self::ExperimentValidation),
             Self::ExperimentValidation => Some(Self::BuildClaimTree),
             Self::BuildClaimTree => Some(Self::Finalize),
-            Self::Finalize => None,
+            Self::Finalize => Some(Self::GenerateOaResponse),
+            Self::GenerateOaResponse => None,
         }
     }
 
@@ -75,6 +79,7 @@ impl PipelineStep {
             Self::ExperimentValidation => 12,
             Self::BuildClaimTree => 13,
             Self::Finalize => 14,
+            Self::GenerateOaResponse => 15,
         }
     }
 
@@ -95,6 +100,7 @@ impl PipelineStep {
             Self::ExperimentValidation => "实验验证",
             Self::BuildClaimTree => "权利要求树构建",
             Self::Finalize => "生成报告",
+            Self::GenerateOaResponse => "OA 答复辅助分析 / OA response analysis",
         }
     }
 

@@ -277,6 +277,9 @@ impl Orchestrator {
                 steps::claim_tree::execute(ctx, &self.ai_client, &self.db).await
             }
             PipelineStep::Finalize => steps::finalize::execute(ctx, &self.db).await,
+            PipelineStep::GenerateOaResponse => {
+                steps::oa_response::execute(ctx, &self.ai_client).await
+            }
         }
     }
 

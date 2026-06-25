@@ -73,6 +73,17 @@
       + '<span data-i18n="ai.webSearch">' + t('ai.webSearch') + '</span>'
       + '</label>'
       + '</div>'
+      + '<div class="sidebar-section">'
+      + '<div class="sidebar-label">' + (i18nLang === 'zh' ? '角色预设' : 'Role Preset') + '</div>'
+      + '<select id="role-select" style="width:100%;padding:6px 8px;background:#21262d;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;font-size:0.85em;margin-bottom:4px;">'
+      + '<option value="general">' + (i18nLang === 'zh' ? '通用助手' : 'General Assistant') + '</option>'
+      + '<option value="patent_examiner">' + (i18nLang === 'zh' ? '专利审查专家' : 'Patent Examiner') + '</option>'
+      + '<option value="oa_expert">' + (i18nLang === 'zh' ? 'OA 答复专家' : 'OA Response Expert') + '</option>'
+      + '<option value="claim_analyst">' + (i18nLang === 'zh' ? '权利要求分析师' : 'Claim Analyst') + '</option>'
+      + '<option value="inventor_brainstorm">' + (i18nLang === 'zh' ? '发明人头脑风暴' : 'Inventor Brainstorm') + '</option>'
+      + '</select>'
+      + '<div style="font-size:0.78em;color:#8b949e;margin-top:2px;">' + (i18nLang === 'zh' ? '选择角色以定制 AI 回复风格和专业知识' : 'Select role to customize AI response style') + '</div>'
+      + '</div>'
     );
     </script>
     <script>
@@ -479,6 +490,12 @@
         try {
             var bodyObj = { message: msg, history: chatHistory, web_search: document.getElementById('web-search-cb').checked };
             if (images.length > 0) bodyObj.images = images;
+            // 角色预设
+            var roleSelect = document.getElementById('role-select');
+            if (roleSelect && roleSelect.value !== 'general') {
+                bodyObj.system_prompt = roleSelect.value;
+                bodyObj.preset_mode = true;
+            }
             var resp = await fetch('/api/ai/chat', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},

@@ -418,28 +418,55 @@ async fn extract_pdf_via_ai_vision(
     }
 }
 
-/// Extract text from a PDF file: pdf-extract → pdftotext → PyMuPDF → Tesseract OCR
+/// Extract text from a PDF file: pdf-extract → pdf-extract by-pages → pdftotext → PyMuPDF → Tesseract OCR
 fn extract_pdf_text(data: &[u8]) -> Result<String, String> {
-    // Step 1: Rust pdf-extract
+    // Step 1: Rust pdf-extract (standard mode, good for simple layouts)
     if let Ok(text) = pdf_extract::extract_text_from_mem(data) {
         if !text.trim().is_empty() {
             return Ok(text);
         }
     }
-    // Step 2: pdftotext (poppler, handles malformed PDFs well)
+    // Step 2: Rust pdf-extract by-pages (better for multi-column Chinese patents)
+    if let Ok(text) = extract_pdf_text_by_pages(data) {
+        if !text.trim().is_empty() {
+            return Ok(text);
+        }
+    }
+    // Step 3: pdftotext (poppler, handles malformed PDFs well)
     if let Ok(text) = extract_pdf_text_pdftotext(data) {
         if !text.trim().is_empty() {
             return Ok(text);
         }
     }
-    // Step 3: PyMuPDF (Python fitz)
+    // Step 4: PyMuPDF (Python fitz)
     if let Ok(text) = extract_pdf_text_pymupdf(data) {
         if !text.trim().is_empty() {
             return Ok(text);
         }
     }
-    // Step 4: Tesseract OCR (handles scanned/special font PDFs)
+    // Step 5: Tesseract OCR (handles scanned/special font PDFs)
     extract_pdf_text_ocr(data)
+}
+
+/// Extract text from PDF using page-by-page extraction (better for multi-column layouts)
+fn extract_pdf_text_by_pages(data: &[u8]) -> Result<String, String> {
+    let pages = pdf_extract::extract_text_from_mem_by_pages(data)
+        .map_err(|e| format!("逐页提取失败: {}", e))?;
+    let mut result = String::new();
+    for (i, page_text) in pages.iter().enumerate() {
+        let trimmed = page_text.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if !result.is_empty() {
+            result.push_str(&format!("\n\n--- 第 {} 页 ---\n\n", i + 1));
+        }
+        result.push_str(trimmed);
+    }
+    if result.trim().is_empty() {
+        return Err("逐页提取结果为空".into());
+    }
+    Ok(result)
 }
 
 /// Fallback: use pdftotext (poppler) to extract text from PDF
@@ -642,4 +669,136 @@ async fn describe_image_with_ai(
         .describe_image(&data_url)
         .await
         .map_err(|e| format!("{}", e))
+}
+
+/// POST /api/patent/pdf/extract-text — 针对专利 PDF 的专用文本提取，返回按页分段结果
+///
+/// 接收 patent_id（从 DB 查找专利获取 PDF）或直接上传 PDF 文件。
+/// 返回每页文本的 JSON 数组，方便 AI 按页分析。
+pub async fn api_patent_pdf_extract_text(
+    State(s): State<AppState>,
+    mut multipart: axum::extract::Multipart,
+) -> Json<serde_json::Value> {
+    let mut file_bytes: Vec<u8> = Vec::new();
+    let mut patent_id = String::new();
+
+    while let Ok(Some(field)) = multipart.next_field().await {
+        let name = field.name().unwrap_or("").to_string();
+        if name == "patent_id" {
+            if let Ok(text) = field.text().await {
+                patent_id = text;
+            }
+        } else if name == "file" {
+            match field.bytes().await {
+                Ok(data) => {
+                    if data.len() > MAX_PDF_STORE_SIZE {
+                        return Json(json!({"error": "文件大小超过 20MB 限制"}));
+                    }
+                    file_bytes = data.to_vec();
+                }
+                Err(_) => return Json(json!({"error": "文件读取失败"})),
+            }
+        }
+    }
+
+    // Try to get PDF bytes from patent_id if no file uploaded
+    if file_bytes.is_empty() && !patent_id.is_empty() {
+        // Look up patent PDF from enrichment
+        if let Ok(Some(patent)) = s.db.get_patent(&patent_id) {
+            if !patent.pdf_url.is_empty() {
+                match download_pdf(&patent.pdf_url).await {
+                    Ok(bytes) => file_bytes = bytes,
+                    Err(e) => tracing::warn!("下载专利 PDF 失败: {}", e),
+                }
+            }
+        }
+        if file_bytes.is_empty() {
+            return Json(json!({"error": "未找到专利 PDF，请直接上传 PDF 文件"}));
+        }
+    }
+
+    if file_bytes.is_empty() {
+        return Json(json!({"error": "缺少文件或 patent_id"}));
+    }
+
+    // Extract text using page-by-page extraction
+    let pages = match pdf_extract::extract_text_from_mem_by_pages(&file_bytes) {
+        Ok(pages) => pages,
+        Err(e) => {
+            // Fallback: try standard extraction and wrap as single page
+            match pdf_extract::extract_text_from_mem(&file_bytes) {
+                Ok(text) if !text.trim().is_empty() => {
+                    return Json(json!({
+                        "status": "ok",
+                        "pages": [{
+                            "page": 1,
+                            "text": text.trim(),
+                            "char_count": text.trim().len()
+                        }],
+                        "page_count": 1,
+                        "method": "standard_fallback"
+                    }));
+                }
+                _ => return Json(json!({"error": format!("PDF 文本提取失败: {}", e)})),
+            }
+        }
+    };
+
+    let page_count = pages.len();
+    let page_list: Vec<serde_json::Value> = pages
+        .into_iter()
+        .enumerate()
+        .filter(|(_, text)| !text.trim().is_empty())
+        .map(|(i, text)| {
+            json!({
+                "page": i + 1,
+                "text": text.trim(),
+                "char_count": text.trim().len()
+            })
+        })
+        .collect();
+
+    let total_chars: usize = page_list
+        .iter()
+        .filter_map(|p| p["char_count"].as_u64())
+        .sum::<u64>() as usize;
+
+    // Also return full text concatenated for convenience
+    let full_text: String = page_list
+        .iter()
+        .map(|p| {
+            format!(
+                "【第 {} 页】\n{}\n",
+                p["page"].as_u64().unwrap_or(0),
+                p["text"].as_str().unwrap_or("")
+            )
+        })
+        .collect();
+
+    Json(json!({
+        "status": "ok",
+        "pages": page_list,
+        "page_count": page_count,
+        "total_chars": total_chars,
+        "full_text": full_text,
+        "method": "by_pages"
+    }))
+}
+
+/// Download a PDF from a URL (for patent PDFs from enrichment)
+async fn download_pdf(url: &str) -> Result<Vec<u8>, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("HTTP 客户端创建失败: {}", e))?;
+    let resp = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("下载失败: {}", e))?;
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| format!("读取响应失败: {}", e))?;
+    Ok(bytes.to_vec())
 }

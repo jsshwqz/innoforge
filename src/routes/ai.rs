@@ -230,7 +230,16 @@ pub async fn api_ai_chat_stream(
             )
         });
 
-    let mut rx = ai.chat_stream(&req.message, ctx.as_deref());
+    // Support custom system prompt — prepend it as context if set
+    let ctx_with_role = match req.effective_system_prompt() {
+        Some(role) => {
+            let base = ctx.unwrap_or_default();
+            Some(format!("【角色设定】\n{}\n\n{}", role, base))
+        }
+        None => ctx,
+    };
+
+    let mut rx = ai.chat_stream(&req.message, ctx_with_role.as_deref());
 
     let stream = async_stream::stream! {
         while let Some(chunk) = rx.recv().await {
@@ -285,8 +294,14 @@ pub async fn api_ai_chat(
             )
         });
 
-    // Build system prompt with optional web search results
-    let base_prompt = ctx.as_deref().unwrap_or("你是创研台的 AI 助手，擅长专利分析、技术方案评估、可行性验证和知识产权保护。请用中文回答。");
+    // Build system prompt: custom prompt > preset > default, with optional web search context
+    let base_prompt = match req.effective_system_prompt() {
+        Some(custom) => custom,
+        None => match &ctx {
+            Some(pctx) => format!("你是创研台的 AI 助手，擅长专利分析、技术方案评估、可行性验证和知识产权保护。请用中文回答。\n\n以下是相关专利信息供参考：\n{}", pctx),
+            None => "你是创研台的 AI 助手，擅长专利分析、技术方案评估、可行性验证和知识产权保护。请用中文回答。".to_string(),
+        },
+    };
     let system_prompt = match &web_context {
         Some(web) => format!(
             "{}\n\n以下是联网搜索到的最新资料，请结合这些信息回答用户问题：\n{}",
@@ -1510,5 +1525,57 @@ pub async fn api_ai_check_amendments(
     match ai.check_claim_amendments(original, amended, oa).await {
         Ok(content) => Json(json!({"status": "ok", "analysis": content})),
         Err(e) => Json(json!({"error": format!("审查失败: {}", e)})),
+    }
+}
+
+/// POST /api/ai/threat-assessment — Multi-patent threat assessment (X/Y/A classification)
+pub async fn api_ai_threat_assessment(
+    State(s): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let my_claims = req["my_claims"].as_str().unwrap_or("");
+    let patents = req["patents"].as_array();
+
+    if my_claims.is_empty() {
+        return Json(json!({"error": "本申请权利要求不能为空"}));
+    }
+    let patents_json = match patents {
+        Some(arr) => serde_json::to_string(arr).unwrap_or_default(),
+        None => return Json(json!({"error": "对比专利列表不能为空"})),
+    };
+
+    let ai = s
+        .config
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .ai_client_expert();
+
+    match ai.threat_assessment(&patents_json, my_claims).await {
+        Ok(content) => Json(json!({"status": "ok", "analysis": content})),
+        Err(e) => Json(json!({"error": format!("威胁评估失败: {}", e)})),
+    }
+}
+
+/// POST /api/ai/claim-chart — Generate claim chart mapping elements to prior art
+pub async fn api_ai_claim_chart(
+    State(s): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let my_claims = req["my_claims"].as_str().unwrap_or("");
+    let prior_art = req["prior_art"].as_str().unwrap_or("");
+
+    if my_claims.is_empty() || prior_art.is_empty() {
+        return Json(json!({"error": "权利要求和对比文件内容不能为空"}));
+    }
+
+    let ai = s
+        .config
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .ai_client_expert();
+
+    match ai.claim_chart(my_claims, prior_art).await {
+        Ok(content) => Json(json!({"status": "ok", "analysis": content})),
+        Err(e) => Json(json!({"error": format!("权利要求对照表生成失败: {}", e)})),
     }
 }

@@ -210,6 +210,10 @@ pub struct PipelineContext {
     pub ai_analysis: String,
     pub action_plan: String,
 
+    // Step 16: GenerateOaResponse
+    #[serde(default)]
+    pub oa_response: String,
+
     // 多维深度推演结果
     #[serde(default)]
     pub deep_reasoning: DeepReasoningResult,
@@ -261,6 +265,7 @@ impl PipelineContext {
             score_breakdown: ScoreBreakdown::default(),
             ai_analysis: String::new(),
             action_plan: String::new(),
+            oa_response: String::new(),
             deep_reasoning: DeepReasoningResult::default(),
             evidence_chain: Vec::new(),
             research_state: ResearchState::default(),

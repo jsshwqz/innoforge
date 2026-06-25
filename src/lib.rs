@@ -138,6 +138,10 @@ pub async fn start_server(db_path: &str) -> anyhow::Result<()> {
         )
         .route("/api/patent/pdf/:id", get(routes::api_patent_pdf))
         .route(
+            "/api/patent/pdf/extract-text",
+            post(routes::api_patent_pdf_extract_text),
+        )
+        .route(
             "/api/patent/image-proxy",
             get(routes::api_patent_image_proxy),
         )
@@ -207,6 +211,12 @@ pub async fn start_server(db_path: &str) -> anyhow::Result<()> {
             "/api/ai/check-amendments",
             post(routes::api_ai_check_amendments),
         )
+        // 专利威胁评估 / Patent Threat Assessment
+        .route(
+            "/api/ai/threat-assessment",
+            post(routes::api_ai_threat_assessment),
+        )
+        .route("/api/ai/claim-chart", post(routes::api_ai_claim_chart))
         // Google OAuth
         .route("/api/auth/google/url", get(routes::api_google_auth_url))
         .route(

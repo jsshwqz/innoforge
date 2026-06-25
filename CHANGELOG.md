@@ -5,6 +5,30 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 
+## [v0.7.0] - 2026-06-25
+
+### 新增 / Added
+- **AI 对话角色预设系统** — 新增 5 种角色预设（专利审查专家、OA 答复专家、权利要求分析师、发明人头脑风暴），用户可在 AI 对话侧边栏切换角色，AI 回复风格和专业知识自动适配。支持自定义 system_prompt 传入
+  AI chat role preset system: 5 presets (Patent Examiner, OA Expert, Claim Analyst, Inventor Brainstorm) with auto-adapted response style and expertise; custom system_prompt support
+- **MCP 服务器新增 3 个专利分析工具** — `patent_threat_assessment`（X/Y/A 威胁分类）、`patent_claim_chart`（权利要求逐项对照表）、`patent_multi_compare`（3+ 专利多维对比矩阵）
+  3 new MCP tools: threat assessment (X/Y/A classification), claim chart (element-by-element mapping), multi-compare (3+ patents)
+- **专利威胁评估 API** — 后端 `/api/ai/threat-assessment`，批量评估多篇对比专利的威胁等级，输出威胁矩阵 + 组合威胁分析 + 答辩策略
+  Threat assessment API: bulk X/Y/A classification with similarity matrix and response strategy
+- **权利要求对照图表 API** — 后端 `/api/ai/claim-chart`，逐元素映射权利要求到对比文件，含等效/等同分析
+  Claim chart API: element-by-element mapping with equivalency analysis
+- **流水线新增第 16 步：OA 答复辅助分析** — `GenerateOaResponse` 作为流水线最终步骤，整合权利要求分析、现有技术聚类、新颖性评分、AI 深度分析，自动生成 OA 答复辅助分析报告（5 部分结构化输出）
+  Pipeline step 16: GenerateOaResponse — integrates claim analysis, prior art clusters, novelty scoring, AI deep analysis to generate structured OA response report
+
+### 改进 / Improved
+- **AI 对话流式响应支持 system_prompt** — `api_ai_chat` 和 `api_ai_chat_stream` 均支持传入自定义 system_prompt，可覆盖默认角色设定
+  AI chat streaming now supports custom system_prompt override
+- **流水线进度条更新** — 从 15 步同步更新为 16 步，前端进度显示适配新步骤
+  Pipeline progress bar synced from 15 to 16 steps
+- **PDF 专利文本提取增强** — `extract_pdf_text()` 新增 Rust 原生逐页提取（`extract_text_from_mem_by_pages`）作为第二级降级，在多栏中文专利排版下比标准模式效果更好。新增 `/api/patent/pdf/extract-text` 端点，返回按页分段的 JSON 数组，方便 AI 逐页分析。零新依赖
+  PDF text extraction enhanced: added page-by-page extraction as 2nd fallback (better for multi-column Chinese patents); new `/api/patent/pdf/extract-text` endpoint returns per-page JSON array; zero new dependencies
+
+---
+
 ## [v0.6.3] - 2026-06-22
 
 ### 新增 / Added

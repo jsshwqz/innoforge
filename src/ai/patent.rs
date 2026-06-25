@@ -883,4 +883,99 @@ impl AiClient {
 
         rx
     }
+
+    /// Multi-patent threat assessment: X/Y/A classification with similarity matrix.
+    ///
+    /// Input: JSON array of patent infos [{number, title, abstract, claims}]
+    /// Output: structured threat matrix with X/Y/A labels, similarity scores, and claim mapping
+    pub async fn threat_assessment(&self, patents_json: &str, my_claims: &str) -> Result<String> {
+        let prompt = format!(
+            "## 本申请权利要求\n{claims}\n\n\
+             ## 待评估的对比专利列表（JSON格式）\n{patents}\n\n\
+             请按照中国专利审查指南的标准，对本申请相对于各对比专利进行全面的威胁评估。\
+             按以下格式输出（使用 Markdown，不要使用加粗或表情符号）：\n\n\
+             ### 威胁评估矩阵\n\n\
+             | 专利号 | 威胁等级 | 置信度 | 相似度 | 覆盖的权利要求 | 关键区别 | 规避难度 |\n\
+             |--------|----------|--------|--------|----------------|----------|----------|\n\
+             （每项对比专利一行，威胁等级：X-单独影响新颖性/创造性，Y-与其他文件结合影响创造性，A-背景技术）\n\n\
+             ### 逐专利详细分析\n\
+             对每个标记为X或Y的专利：\n\
+             - 与本申请的权利要求逐特征对比\n\
+             - 公开了哪些特征（引用原文）\n\
+             - 未公开哪些特征（这是答辩的关键）\n\
+             - 如果是Y类，需要与哪些文件组合\n\n\
+             ### 组合威胁分析\n\
+             - 哪些专利之间存在组合风险（多篇Y类结合覆盖全部特征）\n\
+             - 组合动机分析：各文件技术领域是否相同、解决的技术问题是否一致、是否存在反向教导\n\n\
+             ### 综合风险评估与答辩策略\n\
+             - 整体授权前景评估（高/中/低）\n\
+             - 建议的答辩策略（修改权利要求/争辩/两者结合）\n\
+             - 建议重点防御的对比文件",
+            claims = safe_truncate(my_claims, 4000),
+            patents = safe_truncate(patents_json, 6000),
+        );
+
+        let messages = vec![
+            Message {
+                role: "system".into(),
+                content: "你是一位资深中国专利代理师（执业20年+），精通中国专利法及审查指南中的创造性判断标准（三步法）。\
+                         你擅长进行专利侵权/有效性分析中的威胁评估，能够准确判断对比文件对目标专利的威胁等级（X/Y/A）。\
+                         你的分析必须精确到技术特征级别，每一处论断都必须引用原文。\
+                         语气客观、专业。不使用加粗、表情符号或过度格式化。"
+                    .into(),
+            },
+            Message {
+                role: "user".into(),
+                content: prompt,
+            },
+        ];
+
+        self.send_chat(messages, 0.3).await
+    }
+
+    /// Claim chart: map each claim element to prior art with detailed comparison.
+    ///
+    /// Input: target patent claims + prior art patent text
+    /// Output: structured claim chart showing element-by-element mapping
+    pub async fn claim_chart(&self, my_claims: &str, prior_art: &str) -> Result<String> {
+        let prompt = format!(
+            "## 目标专利的权利要求\n{claims}\n\n\
+             ## 对比文件全文\n{prior_art}\n\n\
+             请生成一份权利要求对照图表（Claim Chart），逐项分析每项权利要求中的每个技术特征：\n\n\
+             ### 权利要求逐项对照表\n\n\
+             | 权利要求 | 技术特征 | 对比文件公开内容 | 是否被公开 | 备注 |\n\
+             |----------|----------|------------------|------------|------|\n\
+             （每个特征一行，独立权利要求的每个限定元素逐项列出，从属权利要求的附加特征逐项列出）\n\n\
+             ### 未公开特征汇总\n\
+             - 列出全部未被对比文件公开的技术特征\n\
+             - 对这些特征进行归类：结构特征 / 功能特征 / 方法步骤 / 参数限定\n\n\
+             ### 等效/等同分析\n\
+             - 对比文件中是否有以基本相同的手段、实现基本相同的功能、达到基本相同的效果的技术特征（等同原则）\n\
+             - 如有，说明等同的可能性等级（高/中/低）\n\n\
+             ### 区别特征的技术效果分析\n\
+             - 每个未被公开的特征带来了什么技术效果\n\
+             - 这些技术效果是否构成预料不到的技术效果\n\n\
+             ### 综合结论\n\
+             - 基于该对比文件，本申请的新颖性/创造性前景",
+            claims = safe_truncate(my_claims, 4000),
+            prior_art = safe_truncate(prior_art, 6000),
+        );
+
+        let messages = vec![
+            Message {
+                role: "system".into(),
+                content: "你是一位资深专利权利要求分析师和侵权分析专家。你擅长构建权利要求对照图表（Claim Chart），\
+                         逐元素分析专利权利要求与对比文件/涉嫌侵权产品之间的对应关系。\
+                         请用结构化方式输出，每一论断都必须有原文依据。\
+                         不使用加粗、表情符号或过度格式化。"
+                    .into(),
+            },
+            Message {
+                role: "user".into(),
+                content: prompt,
+            },
+        ];
+
+        self.send_chat(messages, 0.3).await
+    }
 }
