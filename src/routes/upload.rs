@@ -445,7 +445,18 @@ fn extract_pdf_text(data: &[u8]) -> Result<String, String> {
         }
     }
     // Step 5: Tesseract OCR (handles scanned/special font PDFs)
-    extract_pdf_text_ocr(data)
+    if let Ok(text) = extract_pdf_text_ocr(data) {
+        if !text.trim().is_empty() {
+            return Ok(text);
+        }
+    }
+    // Step 6: MinerU 云端 API（OCR+版面还原，中文专利优化）
+    if let Ok(text) = extract_pdf_text_mineru(data) {
+        if !text.trim().is_empty() {
+            return Ok(text);
+        }
+    }
+    Err("所有 PDF 提取方法均失败".into())
 }
 
 /// Extract text from PDF using page-by-page extraction (better for multi-column layouts)
@@ -561,6 +572,73 @@ fn extract_pdf_text_pymupdf(data: &[u8]) -> Result<String, String> {
             }
         }
         Ok(_) | Err(_) => Ok(String::new()), // failed — let caller try next method
+    }
+}
+
+/// MinerU 云端 API 提取（中文专利优化，需 MINERU_API_TOKEN 环境变量）
+/// 免费 token：https://mineru.net/apiManage/token
+/// 通过 Python mineru-open-sdk 调用，已在环境中安装
+fn extract_pdf_text_mineru(data: &[u8]) -> Result<String, String> {
+    use std::io::Write;
+
+    let token = std::env::var("MINERU_API_TOKEN").unwrap_or_default();
+    if token.is_empty() {
+        return Err("MINERU_API_TOKEN 未配置".into());
+    }
+
+    // Write PDF to temp file
+    let tmp_dir = std::env::temp_dir();
+    let tmp_pdf = tmp_dir.join(format!("innoforge_mineru_{}.pdf", std::process::id()));
+    let tmp_pdf_str = tmp_pdf.to_string_lossy().to_string();
+    let mut f = std::fs::File::create(&tmp_pdf).map_err(|e| format!("创建临时文件失败: {}", e))?;
+    f.write_all(data)
+        .map_err(|e| format!("写入临时文件失败: {}", e))?;
+    drop(f);
+
+    // Python script to call mineru-open-sdk and output markdown
+    let script = format!(
+        r#"import sys, json
+sys.stdout.reconfigure(encoding='utf-8')
+from mineru import MinerU
+client = MinerU('{}')
+result = client.extract(r'{}')
+if result and result.markdown:
+    print(result.markdown)
+else:
+    print('MINERU_EMPTY')
+"#,
+        token, tmp_pdf_str
+    );
+
+    let python = r"C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe";
+    let output = std::process::Command::new(python)
+        .args(["-c", &script])
+        .output();
+
+    // Clean up temp file
+    let _ = std::fs::remove_file(&tmp_pdf);
+
+    match output {
+        Ok(o) if o.status.success() => {
+            let text = String::from_utf8_lossy(&o.stdout).to_string();
+            if text.trim() == "MINERU_EMPTY" || text.trim().is_empty() {
+                let stderr = String::from_utf8_lossy(&o.stderr);
+                Err(format!(
+                    "MinerU 提取结果为空: {}",
+                    stderr.chars().take(200).collect::<String>()
+                ))
+            } else {
+                Ok(text)
+            }
+        }
+        Ok(o) => {
+            let stderr = String::from_utf8_lossy(&o.stderr);
+            Err(format!(
+                "MinerU 提取失败: {}",
+                stderr.chars().take(300).collect::<String>()
+            ))
+        }
+        Err(e) => Err(format!("无法调用 Python: {}", e)),
     }
 }
 
