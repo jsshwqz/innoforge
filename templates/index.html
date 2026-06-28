@@ -444,7 +444,8 @@
                     if (!resp.ok) throw new Error('上传失败 (' + resp.status + ')');
                     const data = await resp.json();
                     if (data.text) {
-                        description += '\n\n---附件: ' + f.name + '---\n' + data.text.substring(0, 3000);
+                        // Use full text — no truncation. PDFs often have 20k+ chars.
+                        description += '\n\n---附件: ' + f.name + '---\n' + data.text;
                         // Save to localStorage for persistence across refresh
                         const already = restoredFiles.some(function(rf) { return rf.name === f.name && rf.size === f.size; });
                         if (!already) {
@@ -462,7 +463,8 @@
         // 处理从 localStorage 恢复的文件（直接使用已保存的文本，无需重新上传）
         restoredFiles.forEach(function(f) {
             if (f.text) {
-                description += '\n\n---附件: ' + f.name + '---\n' + f.text.substring(0, 3000);
+                // Use full text — no truncation
+                description += '\n\n---附件: ' + f.name + '---\n' + f.text;
             }
         });
 

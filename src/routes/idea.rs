@@ -171,8 +171,9 @@ pub async fn api_idea_submit(
     if description.is_empty() {
         return Json(json!({"status": "error", "message": "描述不能为空"}));
     }
-    if description.chars().count() > 10000 {
-        return Json(json!({"status": "error", "message": "描述不能超过10000字"}));
+    // Allow up to 200K chars (≈ a few full PDFs). DeepSeek V4 128K token window handles this.
+    if description.chars().count() > 200000 {
+        return Json(json!({"status": "error", "message": "描述不能超过 20 万字"}));
     }
     let id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
