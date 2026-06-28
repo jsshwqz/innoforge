@@ -436,6 +436,24 @@
 - **预防**: 文本提取质量不足时优先以「新增最低优先级兜底」方式扩展，不替换现有可用链路。
 - **提交**: `4780356`
 
+### [2026-06-29] 前端截断破坏数据完整性 — 技术调研 PDF 全文被截到 3000 字
+- **严重程度**: HIGH
+- **涉及文件**: `templates/index.html` line 447/465（两处 `.substring(0, 3000)`）、`src/routes/idea.rs` line 174（后端 10000 字限制）
+- **现象**: PDF 文件上传后全文被截到 3000 字，导致 AI 分析残缺、导出报告不完整。叠加后端 1 万字限制，大 PDF 全部报错。
+- **根因**: 做 localStorage 持久化时，为省存储空间顺手加了 `substring(0, 3000)`，没人发现这是数据截断而非显示截断。
+- **修复**: 前端移除两处截断，后端上限 10000→200000。
+- **预防**: 所有截断（`substring`/`slice`/`chars().take()`）必须区分「显示截断」和「数据截断」——数据截断一律禁止，显示截断必须标注注释 `// display only`。
+- **提交**: `9a959c4`
+
+### [2026-06-29] DOMPurify 崩溃导致加载全文、标签页、讨论全部失灵
+- **严重程度**: HIGH
+- **涉及文件**: `templates/patent_detail.html`（applyEnrichedData）、`templates/office_action_response.html`、`templates/*.html`（多处 DOMPurify.sanitize 直接调用）
+- **现象**: purify.min.js 加载失败时，任何页面调用 DOMPurify.sanitize() 都会抛异常，导致 JS 函数链式中断——"加载全文"不更新内容、标签页空文本、OA 讨论报"分析失败"。
+- **根因**: DOMPurify 从 CDN 改为本地嵌入后，未考虑加载失败的兜底。所有 DOMPurify.sanitize 调用点都没有 null 保护。
+- **修复**: 每个页面 `<script>` 块第一行加全局保护（DOMPurify 未定义时自动创建 fallback sanitize 函数），CSAE 从安全增强变成必崩点。
+- **预防**: 项目中任何外部依赖的调用点都必须考虑加载失败场景，设全局保护或 try-catch。改完后 `grep -r "DOMPurify\.sanitize" templates/` 确认无遗漏。
+- **提交**: `1e1b6a0`
+
 ---
 
-*最后更新: 2026-06-28*
+*最后更新: 2026-06-29*

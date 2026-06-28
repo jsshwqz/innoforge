@@ -39,6 +39,17 @@
 - 纯 HTML/CSS/JS，禁止引入构建工具（webpack/vite 等）
 - 所有面向用户的文本必须通过 `static/i18n.js` 做中英双语
 - XSS 防护：禁止 `innerHTML = 用户输入`，使用 `createElement + textContent`；需要渲染富文本时必须经 DOMPurify 过滤
+- **DOMPurify 是必选依赖，不是可选增强**：所有 `innerHTML` 赋值必须调用 `DOMPurify.sanitize()`。DOMPurify 加载可能失败（网络/CDN/编译嵌入问题），因此每个页面都必须加全局保护：
+  ```javascript
+  if (typeof DOMPurify === 'undefined' || typeof DOMPurify.sanitize !== 'function') {
+      window.DOMPurify = { sanitize: function(html) {
+          return html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+                     .replace(/on\w+="[^"]*"/gi, '').replace(/on\w+='[^']*'/gi, '');
+      }};
+  }
+  ```
+  这条保护必须放在页面 `<script>` 块的第一行，**禁止在任何页面直接调用 `DOMPurify.sanitize()` 而不先设全局保护**。
+- **截断不得破坏数据完整性**：凡是截断文本（`substring`/`slice`/`safe_truncate`/`chars().take()`），必须确认被截的是显示用途而非数据用途。用于提交给后端或传给 AI 的数据，必须保留全文，禁止为了省 token 或省空间而截断数据内容。
 
 ### 2.6 AI 提示词
 - AI 相关 prompt 统一放在对应 route handler 中（不单独建 prompt 文件）
@@ -152,6 +163,12 @@ docs/          # 文档和规划
 - 运行 `cargo test`（测试通过）
 - 三项全过才算完成，任一失败必须修复后重跑
 - 优化：fmt 失败先修格式再跑后续；clippy 失败不必跑 test，先修警告
+- **端到端回退检测**：如果修改了模板文件（`templates/`）或静态资源（`static/`），特别是涉及截断、数据流、DOM 操作的改动，完成编译后必须手动跑一遍核心流程确认正常：
+  1. 首页 → 上传 PDF → 检查文件内容完整（未被截断）
+  2. 专利详情页 → 点「加载全文」→ 检查 5 个标签页内容均显示正常
+  3. OA 答复页 → 粘贴 OA → 专利号/日期自动填入 → 点分析 → 讨论 → 生成答复书
+  4. 技术调研 → 上传 PDF → 点开始 → 导出报告 → 检查 PDF 全文完整
+  **关键原则**：改了什么，就要测什么。改了 PDF 提取就测 PDF 上传，改了截断就测数据完整性，改了 i18n 就测标签页文本。
 
 ### Step 6: 提交
 - 提交信息格式：`feat/fix/refactor/chore/docs: 中文简要描述`
