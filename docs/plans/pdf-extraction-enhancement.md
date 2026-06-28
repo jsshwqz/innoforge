@@ -45,16 +45,16 @@ POST /api/patent/pdf/extract-text
 
 | 任务 | 状态 |
 |------|------|
-| `extract_pdf_text()` 新增逐页提取 Step 2 | ✅ 已完成 |
-| `extract_pdf_text_by_pages()` 函数 | ✅ 已完成 |
-| `api_patent_pdf_extract_text()` 端点 | ✅ 已完成 |
-| `download_pdf()` 辅助函数 | ✅ 已完成 |
-| `src/main.rs` 注册路由 | ✅ 已完成 |
-| `src/lib.rs` 同步注册路由 | ✅ 已完成 |
-| CHANGELOG.md 更新 | ✅ 已完成 |
-| `cargo fmt` | ⚠️ 需用户本地执行（沙箱不可用） |
+| `extract_pdf_text()` 新增逐页提取 Step 2 | ✅ `e058803` |
+| `extract_pdf_text_by_pages()` 函数 | ✅ `e058803` |
+| `api_patent_pdf_extract_text()` 端点 | ✅ `e058803` |
+| `download_pdf()` 辅助函数 | ✅ `e058803` |
+| `src/main.rs` 注册路由 | ✅ `e058803` |
+| `src/lib.rs` 同步注册路由 | ✅ `e058803` |
+| CHANGELOG.md 更新 | ✅ `e058803` |
+| `cargo fmt` | ✅ 通过 |
 | `cargo clippy` | ✅ 零警告 |
-| `cargo test` | ⚠️ 需用户本地执行（沙箱不可用） |
+| `cargo test` | ✅ 37/38 通过（仅 Python sandbox 预存失败无关） |
 
 ## 能力对比
 

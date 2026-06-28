@@ -5,7 +5,7 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 
-## [v0.7.0] - 2026-06-25
+## [v0.7.0] - 2026-06-26
 
 ### 新增 / Added
 - **AI 对话角色预设系统** — 新增 5 种角色预设（专利审查专家、OA 答复专家、权利要求分析师、发明人头脑风暴），用户可在 AI 对话侧边栏切换角色，AI 回复风格和专业知识自动适配。支持自定义 system_prompt 传入

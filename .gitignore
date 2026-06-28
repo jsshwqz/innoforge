@@ -17,6 +17,7 @@ server.log
 /main.rs
 # 工具脚本不提交到仓库
 /write_start.py
+/mineru.bat
 memory_store.json
 
 # 构建产物和临时文件

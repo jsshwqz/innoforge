@@ -110,8 +110,13 @@ docs/          # 文档和规划
 任何 AI Agent 接到任务后，按以下步骤顺序执行。不可跳步。
 
 ### Step 0: 读规约
-- 读取本文件（CLAUDE.md），理解项目定位、规范和禁忌
-- 如果是首次进入项目，同时读 `CHANGELOG.md` 和 `Cargo.toml` 了解当前版本
+- 读取本文件（`CLAUDE.md`），理解项目定位、规范和禁忌
+- 读取 `docs/plans/STATUS.md`，了解当前焦点、最近变更、已知问题（**每次必读**）
+- 如果是首次进入项目，同时读：
+  - `CHANGELOG.md` — 版本历史，了解改了什么
+  - `Cargo.toml` — 当前版本号和依赖
+  - `docs/errors.md` — 错误复盘数据库，避免重复踩坑
+- 其他文档（`docs/ARCHITECTURE.md`、`docs/API.md`）需要时再读
 
 ### Step 1: 理解任务
 - 明确用户要做什么（新功能 / bug 修复 / 重构 / 分析调研）

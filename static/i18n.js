@@ -570,3 +570,6 @@ function renderSidebar(extraHtml) {
   if (extraHtml) html += extraHtml;
   el.innerHTML = html;
 }
+
+// Apply i18n on page load
+document.addEventListener('DOMContentLoaded', function() { applyI18nCommon(); });

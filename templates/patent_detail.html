@@ -112,7 +112,24 @@
     </div>
     <script src="/static/i18n.js"></script>
     <script>
+    // Ensure DOMPurify never throws even if script failed to load
+    if (typeof DOMPurify === 'undefined' || typeof DOMPurify.sanitize !== 'function') {
+        window.DOMPurify = { sanitize: function(html) {
+            return html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+                       .replace(/on\w+="[^"]*"/gi, '').replace(/on\w+='[^']*'/gi, '');
+        }};
+    }
+
     function escapeHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+    // Safe sanitize wrapper (DOMPurify may not load on some systems)
+    function safeSanitize(html) {
+        if (typeof DOMPurify !== 'undefined' && DOMPurify.sanitize) {
+            return DOMPurify.sanitize(html);
+        }
+        return html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+                   .replace(/on\w+="[^"]*"/gi, '').replace(/on\w+='[^']*'/gi, '');
+    }
 
     function applyDetailI18n() {
         // Re-apply legal status label lookup for enrich
@@ -125,7 +142,12 @@
         document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
         var tabEl = document.getElementById('tab-' + name);
         if (tabEl) tabEl.classList.add('active');
-        if (event && event.target) event.target.classList.add('active');
+        // Activate the clicked tab button
+        document.querySelectorAll('.tab').forEach(function(btn) {
+            if (btn.getAttribute('onclick') === "showTab('" + name + "')") {
+                btn.classList.add('active');
+            }
+        });
     }
 
     async function aiSummarize() {

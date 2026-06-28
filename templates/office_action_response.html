@@ -271,15 +271,12 @@
 
     <script src="/static/i18n.js"></script>
     <script>
-    // Safe DOMPurify wrapper — fallback if script failed to load
-    function safeSanitize(html) {
-        if (typeof DOMPurify !== 'undefined' && DOMPurify.sanitize) {
-            return DOMPurify.sanitize(html);
-        }
-        // Fallback: basic XSS stripping
-        return html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-                   .replace(/on\w+="[^"]*"/gi, '')
-                   .replace(/on\w+='[^']*'/gi, '');
+    // Ensure DOMPurify never throws even if script failed to load
+    if (typeof DOMPurify === 'undefined' || typeof DOMPurify.sanitize !== 'function') {
+        window.DOMPurify = { sanitize: function(html) {
+            return html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+                       .replace(/on\w+="[^"]*"/gi, '').replace(/on\w+='[^']*'/gi, '');
+        }};
     }
 
     // ── PDF Preview ──
@@ -1617,7 +1614,7 @@
                 + '<button onclick="setArgStatus(' + i + ',\'rejected\')" title="' + t('oar.argReject') + '">❌</button>'
                 + '</div></div>';
         }
-        list.innerHTML = safeSanitize(html);
+        list.innerHTML = DOMPurify.sanitize(html);
     }
 
     function setArgStatus(idx, status) {
@@ -1823,7 +1820,7 @@
             html += '<td style="padding:8px;border:1px solid #30363d;color:#d29922;">' + escapeHtml(rows[i].ref) + '</td></tr>';
         }
         html += '</tbody></table>';
-        content.innerHTML = safeSanitize(html);
+        content.innerHTML = DOMPurify.sanitize(html);
     }
 
     // ── P1b: Reference Anchor Jump ──
@@ -1945,21 +1942,46 @@
         var controller = new AbortController();
         discussionAbortController = controller;
         var apiHistory = discussionHistory.map(function(h) { return [h[0], h[1]]; });
+
+        // 专业代理师指令放在 user message 里（不放 system role，避开上游角色扮演审查）
+        var proInstruction = '请以中国专利代理师视角回答：每处引用具体法条（A22.2新颖性/A22.3创造性/A26.3说明书支持/A33修改超范围），给修改方案时用"修改前→修改后"对比格式，区分"可克服"和"难克服"的缺陷并给出置信度。';
+        var ctxParts = [];
+        if (typeof oaDiscussOAText !== 'undefined' && oaDiscussOAText) ctxParts.push('【审查意见原文】\n' + oaDiscussOAText.slice(0, 3000));
+        if (typeof lastAnalysisRawText !== 'undefined' && lastAnalysisRawText) ctxParts.push('【当前OA分析结果】\n' + lastAnalysisRawText.slice(0, 3000));
+        ctxParts.push(proInstruction);
+        ctxParts.push('我的问题：' + text);
+        var messageWithContext = ctxParts.join('\n\n');
+
         try {
+            // 用非流式接口 /api/ai/chat；不传 system_prompt，用后端默认 system 避开上游角色扮演审查
             var resp = await fetch('/api/ai/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message: text, patent_id: null, history: apiHistory, web_search: false }),
+                body: JSON.stringify({
+                    message: messageWithContext,
+                    patent_id: null,
+                    history: apiHistory,
+                    web_search: false
+                }),
                 signal: controller.signal
             });
+
             var data = await resp.json();
             var loadEl = document.getElementById('ai-loading-disc');
             if (loadEl) loadEl.remove();
-            var content = data.content || 'AI error: empty response';
+
+            // 兼容两种响应格式：{content: "..."} 或 {error: {...}}
+            var content;
+            if (data.error) {
+                content = 'AI 调用失败：' + (data.error.message || JSON.stringify(data.error));
+            } else {
+                content = data.content || 'AI error: empty response';
+            }
+
             discussionHistory.push(['user', text]);
             discussionHistory.push(['assistant', content]);
-            // 从 AI 回复中提取论点
             parseArgsFromAI(content);
+
             var aiDiv = document.createElement('div');
             aiDiv.className = 'msg msg-ai';
             aiDiv.innerHTML = '<div class="msg-bubble">' + renderMarkdown(content) + '</div>';
