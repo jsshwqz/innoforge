@@ -1,9 +1,15 @@
 use super::AppState;
 use axum::{extract::State, Json};
 use serde_json::json;
+use std::time::Duration;
 
 const MAX_FILE_SIZE: usize = 10 * 1024 * 1024; // 10 MB
 const MAX_PDF_STORE_SIZE: usize = 20 * 1024 * 1024; // 20 MB
+
+/// Umi-OCR 默认 HTTP 地址（端口可在 Umi-OCR 全局设置中修改）
+const UMI_OCR_BASE_URL: &str = "http://127.0.0.1:1224";
+/// Umi-OCR HTTP 请求超时（秒）
+const UMI_OCR_TIMEOUT_SECS: u64 = 120;
 
 /// POST /api/upload/pdf-store — 上传 PDF 文件并存储，返回可预览的 URL
 pub async fn api_upload_pdf_store(
@@ -118,12 +124,12 @@ pub async fn api_upload_compare(
             .read()
             .unwrap_or_else(|e| e.into_inner())
             .ai_client();
-        match describe_image_with_ai(&ai_client, &file_bytes, &ext).await {
+        match describe_image_with_fallback(&ai_client, &file_bytes, &ext).await {
             Ok(description) => description,
             Err(e) => return Json(json!({"error": format!("图片识别失败: {}", e)})),
         }
     } else if ext == "pdf" {
-        match extract_pdf_text(&file_bytes) {
+        match extract_pdf_text(&file_bytes).await {
             Ok(t) if !t.trim().is_empty() => t,
             _ => {
                 // 文字提取失败，用 AI 视觉模型兜底
@@ -264,12 +270,12 @@ pub async fn api_upload_extract(
             .read()
             .unwrap_or_else(|e| e.into_inner())
             .ai_client();
-        match describe_image_with_ai(&ai_client, &file_bytes, &ext).await {
+        match describe_image_with_fallback(&ai_client, &file_bytes, &ext).await {
             Ok(desc) => desc,
             Err(e) => return Json(json!({"error": format!("图片识别失败: {}", e)})),
         }
     } else if ext == "pdf" {
-        match extract_pdf_text(&file_bytes) {
+        match extract_pdf_text(&file_bytes).await {
             Ok(t) if !t.trim().is_empty() => t,
             _ => {
                 // 文字提取失败，用 AI 视觉模型兜底
@@ -343,7 +349,7 @@ async fn extract_pdf_via_ai_vision(
 
     // Write PDF to temp file
     let mut f = std::fs::File::create(&tmp_pdf).map_err(|e| format!("创建临时文件失败: {}", e))?;
-    f.write_all(data)
+    f.write_all(&data)
         .map_err(|e| format!("写入临时文件失败: {}", e))?;
     drop(f);
 
@@ -392,7 +398,7 @@ async fn extract_pdf_via_ai_vision(
         };
         let _ = std::fs::remove_file(&png_path);
 
-        match describe_image_with_ai(ai_client, &png_bytes, "png").await {
+        match describe_image_with_fallback(ai_client, &png_bytes, "png").await {
             Ok(text) => {
                 if !all_text.is_empty() {
                     all_text.push_str("\n\n---\n\n");
@@ -419,7 +425,7 @@ async fn extract_pdf_via_ai_vision(
 }
 
 /// Extract text from a PDF file: pdf-extract → pdf-extract by-pages → pdftotext → PyMuPDF → Tesseract OCR
-fn extract_pdf_text(data: &[u8]) -> Result<String, String> {
+async fn extract_pdf_text(data: &[u8]) -> Result<String, String> {
     // Step 1: Rust pdf-extract (standard mode, good for simple layouts)
     if let Ok(text) = pdf_extract::extract_text_from_mem(data) {
         if !text.trim().is_empty() {
@@ -450,7 +456,14 @@ fn extract_pdf_text(data: &[u8]) -> Result<String, String> {
             return Ok(text);
         }
     }
-    // Step 6: MinerU 云端 API（OCR+版面还原，中文专利优化）
+    // Step 6: Umi-OCR 本地离线 OCR（高精度中文识别，替代依赖云端/外部 Python 环境的方案）
+    let data_vec = data.to_vec();
+    if let Ok(text) = extract_pdf_text_umi_ocr(data_vec).await {
+        if !text.trim().is_empty() {
+            return Ok(text);
+        }
+    }
+    // Step 7: MinerU 云端 API（OCR+版面还原，中文专利优化）
     if let Ok(text) = extract_pdf_text_mineru(data) {
         if !text.trim().is_empty() {
             return Ok(text);
@@ -492,7 +505,7 @@ fn extract_pdf_text_pdftotext(data: &[u8]) -> Result<String, String> {
 
     // Write PDF bytes to temp file
     let mut f = std::fs::File::create(&tmp_path).map_err(|e| format!("创建临时文件失败: {}", e))?;
-    f.write_all(data)
+    f.write_all(&data)
         .map_err(|e| format!("写入临时文件失败: {}", e))?;
     drop(f);
 
@@ -548,7 +561,7 @@ fn extract_pdf_text_pymupdf(data: &[u8]) -> Result<String, String> {
 
     // Write PDF bytes to temp file
     let mut f = std::fs::File::create(&tmp_path).map_err(|e| format!("创建临时文件失败: {}", e))?;
-    f.write_all(data)
+    f.write_all(&data)
         .map_err(|e| format!("写入临时文件失败: {}", e))?;
     drop(f);
 
@@ -591,7 +604,7 @@ fn extract_pdf_text_mineru(data: &[u8]) -> Result<String, String> {
     let tmp_pdf = tmp_dir.join(format!("innoforge_mineru_{}.pdf", std::process::id()));
     let tmp_pdf_str = tmp_pdf.to_string_lossy().to_string();
     let mut f = std::fs::File::create(&tmp_pdf).map_err(|e| format!("创建临时文件失败: {}", e))?;
-    f.write_all(data)
+    f.write_all(&data)
         .map_err(|e| format!("写入临时文件失败: {}", e))?;
     drop(f);
 
@@ -651,7 +664,7 @@ fn extract_pdf_text_ocr(data: &[u8]) -> Result<String, String> {
     let tmp_str = tmp_path.to_string_lossy().to_string();
 
     let mut f = std::fs::File::create(&tmp_path).map_err(|e| format!("创建临时文件失败: {}", e))?;
-    f.write_all(data)
+    f.write_all(&data)
         .map_err(|e| format!("写入临时文件失败: {}", e))?;
     drop(f);
 
@@ -747,6 +760,208 @@ async fn describe_image_with_ai(
         .describe_image(&data_url)
         .await
         .map_err(|e| format!("{}", e))
+}
+
+// ──────────────────────────────────────────────
+// Umi-OCR 集成：本地离线 OCR 引擎
+// 下载：https://github.com/hiroi-sora/Umi-OCR
+// 启动后默认监听 http://127.0.0.1:1224
+// ──────────────────────────────────────────────
+
+/// 通过 Umi-OCR HTTP API 识别 PDF 文档的文本内容（处理扫描件/不可选文字 PDF）
+///
+/// 使用 Umi-OCR 的文档识别接口：
+///   上传 → 轮询 → 获取结果
+async fn extract_pdf_text_umi_ocr(data: Vec<u8>) -> Result<String, String> {
+    use std::io::Write;
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(UMI_OCR_TIMEOUT_SECS))
+        .build()
+        .map_err(|e| format!("Umi-OCR 客户端创建失败: {}", e))?;
+
+    // Step 1: Write PDF to temp file
+    let tmp_dir = std::env::temp_dir();
+    let tmp_pdf = tmp_dir.join(format!("innoforge_umiocr_{}.pdf", std::process::id()));
+    let tmp_pdf_str = tmp_pdf.to_string_lossy().to_string();
+    {
+        let mut f = std::fs::File::create(&tmp_pdf)
+            .map_err(|e| format!("Umi-OCR 创建临时文件失败: {}", e))?;
+        f.write_all(&data)
+            .map_err(|e| format!("Umi-OCR 写入临时文件失败: {}", e))?;
+    }
+
+    // Step 2: Upload via multipart
+    let upload_url = format!("{}/api/doc/upload", UMI_OCR_BASE_URL);
+    let file_part = reqwest::multipart::Part::bytes(data)
+        .file_name("document.pdf")
+        .mime_str("application/pdf")
+        .map_err(|e| format!("Umi-OCR 创建 multipart 失败: {}", e))?;
+    let form = reqwest::multipart::Form::new()
+        .part("file", file_part)
+        .text("json", r#"{"doc.extractionMode":"fullPage","data.format":"text"}"#);
+
+    let upload_resp = client
+        .post(&upload_url)
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|e| format!("Umi-OCR 上传失败 (服务未启动?): {}", e))?;
+
+    let upload_json: serde_json::Value = upload_resp
+        .json()
+        .await
+        .map_err(|e| format!("Umi-OCR 响应解析失败: {}", e))?;
+
+    let task_id = match upload_json["code"].as_i64() {
+        Some(100) => upload_json["data"].as_str().map(|s| s.to_string()),
+        _ => {
+            let _ = std::fs::remove_file(&tmp_pdf);
+            return Err(format!(
+                "Umi-OCR 上传失败: code={}, msg={}",
+                upload_json["code"],
+                upload_json["data"]
+            ));
+        }
+    };
+
+    let task_id = match task_id {
+        Some(id) => id,
+        None => {
+            let _ = std::fs::remove_file(&tmp_pdf);
+            return Err("Umi-OCR 上传成功但未返回任务 ID".into());
+        }
+    };
+
+    // Step 3: Poll for result (wait up to ~90s)
+    let result_url = format!("{}/api/doc/result", UMI_OCR_BASE_URL);
+    let mut all_text = String::new();
+    let max_polls = 90; // 90 * 1s = 90s max wait
+    for _poll in 0..max_polls {
+        let poll_resp = client
+            .post(&result_url)
+            .json(&serde_json::json!({
+                "id": task_id,
+                "is_data": true,
+                "is_unread": true,
+                "format": "text"
+            }))
+            .send()
+            .await;
+
+        let poll_json: serde_json::Value = match poll_resp {
+            Ok(r) => r.json().await.unwrap_or_default(),
+            Err(_) => {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                continue;
+            }
+        };
+
+        if poll_json["code"] != 100 {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            continue;
+        }
+
+        let is_done = poll_json["is_done"].as_bool().unwrap_or(false);
+        let state = poll_json["state"].as_str().unwrap_or("");
+
+        // Collect incremental text
+        if let Some(data_str) = poll_json["data"].as_str() {
+            if !data_str.trim().is_empty() {
+                all_text.push_str(data_str);
+            }
+        }
+
+        if is_done {
+            break;
+        }
+
+        // state == "failure" — stop early
+        if state == "failure" {
+            break;
+        }
+
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+
+    // Step 4: Cleanup — clear task on Umi-OCR
+    let clear_url = format!("{}/api/doc/clear/{}", UMI_OCR_BASE_URL, task_id);
+    let _ = client.get(&clear_url).send().await;
+    let _ = std::fs::remove_file(&tmp_pdf);
+
+    if all_text.trim().is_empty() {
+        Err("Umi-OCR 未能识别 PDF 中的文字".into())
+    } else {
+        Ok(all_text)
+    }
+}
+
+/// 通过 Umi-OCR HTTP API 识别图片文字（替代 AI 视觉模型，免费且离线）
+///
+/// 使用 Umi-OCR 的图片 OCR 接口：POST /api/ocr
+async fn extract_image_text_umi_ocr(image_bytes: &[u8], _ext: &str) -> Result<String, String> {
+    use base64::Engine;
+
+    let b64 = base64::engine::general_purpose::STANDARD.encode(image_bytes);
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(UMI_OCR_TIMEOUT_SECS))
+        .build()
+        .map_err(|e| format!("Umi-OCR 客户端创建失败: {}", e))?;
+
+    let resp = client
+        .post(format!("{}/api/ocr", UMI_OCR_BASE_URL))
+        .json(&serde_json::json!({
+            "base64": b64,
+            "options": {
+                "data.format": "text",
+                "tbpu.parser": "multi_para",
+            }
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("Umi-OCR 请求失败 (服务未启动?): {}", e))?;
+
+    let result: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Umi-OCR 响应解析失败: {}", e))?;
+
+    match result["code"].as_i64() {
+        Some(100) => {
+            let text = result["data"].as_str().unwrap_or("");
+            if text.trim().is_empty() {
+                Err("Umi-OCR 图片识别结果为空".into())
+            } else {
+                Ok(text.to_string())
+            }
+        }
+        Some(101) => Err("Umi-OCR 图片中未识别到文字".into()),
+        _ => Err(format!(
+            "Umi-OCR 识别失败: code={}",
+            result["code"]
+        )),
+    }
+}
+
+/// Try Umi-OCR for image text extraction; fall back to AI vision on failure.
+async fn describe_image_with_fallback(
+    ai_client: &crate::ai::AiClient,
+    image_bytes: &[u8],
+    ext: &str,
+) -> Result<String, String> {
+    // 优先尝试本地 Umi-OCR（免费、离线、快速）
+    match extract_image_text_umi_ocr(image_bytes, ext).await {
+        Ok(text) => {
+            tracing::info!("[Umi-OCR] 图片 OCR 成功，提取 {} 字符", text.len());
+            return Ok(text);
+        }
+        Err(e) => {
+            tracing::warn!("[Umi-OCR] 图片识别失败，回退到 AI 视觉模型: {}", e);
+        }
+    }
+    // 回退：云端 AI 视觉模型
+    describe_image_with_ai(ai_client, image_bytes, ext).await
 }
 
 /// POST /api/patent/pdf/extract-text — 针对专利 PDF 的专用文本提取，返回按页分段结果
