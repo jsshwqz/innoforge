@@ -582,3 +582,29 @@ if (typeof DOMPurify === 'undefined' || typeof DOMPurify.sanitize !== 'function'
                    .replace(/on\w+="[^"]*"/gi, '').replace(/on\w+='[^']*'/gi, '');
     }};
 }
+
+// Global JS error barrier — catch runtime errors and show a visible banner
+// Prevents silent page death where errors cause buttons/functions to not respond.
+(function() {
+    var banner = null;
+    function showError(msg) {
+        if (!banner) {
+            banner = document.createElement('div');
+            banner.id = 'js-error-banner';
+            banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#f85149;color:#fff;padding:8px 16px;font-size:13px;font-family:sans-serif;text-align:center;display:none;cursor:pointer;';
+            banner.onclick = function() { this.style.display = 'none'; };
+            document.body && document.body.appendChild(banner);
+        }
+        if (banner) {
+            banner.textContent = '⚠ ' + msg;
+            banner.style.display = '';
+        }
+    }
+    window.addEventListener('error', function(e) {
+        var msg = e.message || '';
+        // Suppress noisy but harmless errors from third-party libs
+        if (msg.includes('ResizeObserver') || msg.includes('ResizeObserver loop')) return;
+        if (msg.includes('purify.min.js')) return; // UMD wrapper harmless warning
+        showError(msg.length > 120 ? msg.substring(0, 120) + '...' : msg);
+    });
+})();

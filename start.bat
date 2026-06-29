@@ -11,7 +11,6 @@ if not defined CARGO_EXE (
 )
 if not defined CARGO_EXE (
     echo [ERROR] Cannot find cargo.exe. Please install Rust from https://rustup.rs
-    echo [ERROR] If already installed, add %%USERPROFILE%%\.cargo\bin to your system PATH.
     pause
     exit /b 1
 )
@@ -20,27 +19,54 @@ REM ---- kill existing ----
 taskkill /F /IM innoforge.exe >nul 2>&1
 timeout /t 1 /nobreak >nul
 
-REM ---- build if needed ----
-if exist ".\target\release\innoforge.exe" (
-    echo [InnoForge] Using existing binary, skipping build...
+REM ---- check args ----
+set "BUILD_MODE="
+set "BUILD_DIR="
+set "BIN_PATH="
+if "%1"=="--release" (
+    set BUILD_MODE=--release
+    set BUILD_DIR=.\target\release
+    set BIN_PATH=.\target\release\innoforge.exe
+) else (
+    set BUILD_MODE=
+    set BUILD_DIR=.\target\debug
+    set BIN_PATH=.\target\debug\innoforge.exe
+)
+
+REM ---- use existing binary if found ----
+if exist "%BIN_PATH%" (
+    echo [InnoForge] Using existing %BUILD_DIR% binary, skipping build...
     goto :run
 )
 
-echo [InnoForge] Building release binary (first time may take 5-10 min)...
+REM ---- try debug first (fast), fall back to release ----
+if not "%1"=="--release" (
+    echo [InnoForge] Building (debug mode, ~1 min)...
+    "%CARGO_EXE%" build --bin innoforge
+    if not errorlevel 1 (
+        set "BIN_PATH=.\target\debug\innoforge.exe"
+        echo [InnoForge] Debug build done.
+        goto :run
+    )
+    echo [InnoForge] Debug build failed, trying release...
+)
+
+echo [InnoForge] Building (release mode, optimized, ~5 min)...
 "%CARGO_EXE%" build --release --bin innoforge
 if errorlevel 1 (
-    echo [InnoForge] Build FAILED! Check error messages above.
-    echo [InnoForge] Try running dev.bat instead (faster debug build).
+    echo [InnoForge] Build FAILED!
     pause
     exit /b 1
 )
+set "BIN_PATH=.\target\release\innoforge.exe"
 
 :run
 echo [InnoForge] Starting server at http://127.0.0.1:3000
+echo [InnoForge] Pass --release on command line to force release mode.
 echo [InnoForge] Press Ctrl+C or close window to stop.
 echo.
 start "" http://127.0.0.1:3000 2>nul
-".\target\release\innoforge.exe"
+"%BIN_PATH%"
 echo.
 echo [InnoForge] Server stopped (exit code: %ERRORLEVEL%).
 pause

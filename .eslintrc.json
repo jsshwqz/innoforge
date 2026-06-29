@@ -1,0 +1,16 @@
+{
+  "root": true,
+  "env": { "browser": true, "es2021": true },
+  "parserOptions": { "ecmaVersion": "latest" },
+  "rules": {
+    "no-redeclare": ["error", { "builtinGlobals": true }],
+    "no-var": "off",
+    "no-const-assign": "error",
+    "no-undef": "warn",
+    "no-unused-vars": "warn",
+    "no-unexpected-multiline": "error",
+    "no-extra-semi": "error",
+    "no-useless-escape": "warn"
+  },
+  "ignorePatterns": ["node_modules/", "target/", "*.min.js"]
+}
