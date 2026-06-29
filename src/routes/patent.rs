@@ -738,9 +738,6 @@ pub async fn api_patent_pdf(
                             patent.claims = claims;
                         }
                     }
-                    if !patent.description.is_empty() || !patent.claims.is_empty() {
-                        let _ = s.db.insert_patent(&patent);
-                    }
                 }
             }
         }
@@ -834,7 +831,20 @@ pub async fn api_patent_pdf(
     let images_html = {
         let imgs: Vec<String> = serde_json::from_str(&patent.images).unwrap_or_default();
         if imgs.is_empty() {
-            String::new()
+            // No image URLs available — embed PDF directly via iframe (browser renders first page)
+            if !patent.pdf_url.is_empty() {
+                format!(
+                    "<h2>附图</h2>\n\
+                     <div style='text-align:center;margin:20px 0;'>\
+                     <embed src='{pdf}' type='application/pdf' width='100%' height='700px'>\
+                     <p style='color:#666;font-size:12px;margin-top:8px;'>\
+                     <a href='{pdf}' target='_blank'>📥 下载完整 PDF 文件</a></p>\
+                     </div>",
+                    pdf = patent.pdf_url
+                )
+            } else {
+                String::new()
+            }
         } else {
             let mut html = String::from("<h2>附图</h2>\n");
             for (i, url) in imgs.iter().enumerate() {
@@ -846,6 +856,16 @@ pub async fn api_patent_pdf(
                     proxy_url,
                     i + 1,
                     i + 1
+                ));
+            }
+            // Also add PDF download link if available
+            if !patent.pdf_url.is_empty() {
+                html.push_str(&format!(
+                    "<div style='text-align:center;margin:20px 0;'>\
+                     <p style='color:#666;font-size:12px;'>\
+                     <a href='{pdf}' target='_blank'>📥 下载完整 PDF 文件</a></p>\
+                     </div>",
+                    pdf = patent.pdf_url
                 ));
             }
             html
