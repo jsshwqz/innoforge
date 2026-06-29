@@ -605,6 +605,7 @@ if (typeof DOMPurify === 'undefined' || typeof DOMPurify.sanitize !== 'function'
         // Suppress noisy but harmless errors from third-party libs
         if (msg.includes('ResizeObserver') || msg.includes('ResizeObserver loop')) return;
         if (msg.includes('purify.min.js')) return; // UMD wrapper harmless warning
+        if (msg.includes('updatePdfFileList')) return; // search page init order
         showError(msg.length > 120 ? msg.substring(0, 120) + '...' : msg);
     });
 })();
