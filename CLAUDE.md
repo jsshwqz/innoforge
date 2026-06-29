@@ -39,16 +39,7 @@
 - 纯 HTML/CSS/JS，禁止引入构建工具（webpack/vite 等）
 - 所有面向用户的文本必须通过 `static/i18n.js` 做中英双语
 - XSS 防护：禁止 `innerHTML = 用户输入`，使用 `createElement + textContent`；需要渲染富文本时必须经 DOMPurify 过滤
-- **DOMPurify 是必选依赖，不是可选增强**：所有 `innerHTML` 赋值必须调用 `DOMPurify.sanitize()`。DOMPurify 加载可能失败（网络/CDN/编译嵌入问题），因此每个页面都必须加全局保护：
-  ```javascript
-  if (typeof DOMPurify === 'undefined' || typeof DOMPurify.sanitize !== 'function') {
-      window.DOMPurify = { sanitize: function(html) {
-          return html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-                     .replace(/on\w+="[^"]*"/gi, '').replace(/on\w+='[^']*'/gi, '');
-      }};
-  }
-  ```
-  这条保护必须放在页面 `<script>` 块的第一行，**禁止在任何页面直接调用 `DOMPurify.sanitize()` 而不先设全局保护**。
+- **DOMPurify 是必选依赖，不是可选增强**：所有 `innerHTML` 赋值必须调用 `DOMPurify.sanitize()`。DOMPurify 加载可能失败（网络/CDN/编译嵌入问题），因此在 `static/i18n.js` 中已设置全局保护（自动 fallback）。如需在其他 JS 中使用 DOMPurify，必须确保 `i18n.js` 已加载在先。**禁止在任何页面直接调用 `DOMPurify.sanitize()` 而不依赖全局保护**。
 - **截断不得破坏数据完整性**：凡是截断文本（`substring`/`slice`/`safe_truncate`/`chars().take()`），必须确认被截的是显示用途而非数据用途。用于提交给后端或传给 AI 的数据，必须保留全文，禁止为了省 token 或省空间而截断数据内容。
 
 ### 2.6 AI 提示词
