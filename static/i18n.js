@@ -573,3 +573,12 @@ function renderSidebar(extraHtml) {
 
 // Apply i18n on page load
 document.addEventListener('DOMContentLoaded', function() { applyI18nCommon(); });
+
+// Global DOMPurify safety guard — must run before any page code that calls DOMPurify.sanitize()
+// This ensures purify.min.js loading failure never crashes any page.
+if (typeof DOMPurify === 'undefined' || typeof DOMPurify.sanitize !== 'function') {
+    window.DOMPurify = { sanitize: function(html) {
+        return html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+                   .replace(/on\w+="[^"]*"/gi, '').replace(/on\w+='[^']*'/gi, '');
+    }};
+}
