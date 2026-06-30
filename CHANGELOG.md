@@ -5,6 +5,54 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 
+## [v0.7.2] - 2026-06-30
+
+### 新增 / Added
+- **SenseNova V6.7 Flash Lite / DeepSeek V4 Flash 模型支持** — 设置页新增 SenseNova 6.7 Flash Lite 和 DeepSeek V4 Flash 模型选项，同时更新 SenseNova 模型标签（Flash/Turbo/Pro/Ultra → Flash Lite/Flash/Turbo/Pro）
+  New model support: SenseNova 6.7 Flash Lite, DeepSeek V4 Flash; SenseNova model labels updated
+- **OA 答复 Markdown 无分隔行表格支持** — `office_action_response.html` 模板升级 Markdown 渲染器，支持不含分隔行的表格语法，兼容更多 AI 输出格式
+  OA response template: Markdown renderer enhanced to support separator-less tables
+
+### 改进 / Improved
+- **JS 错误屏障系统** — 全站 8 个页面引入全局 JS 错误屏障，统一拦截运行时错误并显示友好提示，杜绝白屏/黑屏
+  Global JS error barrier across all 8 pages — catches runtime errors with user-friendly messages, no more blank screens
+- **DOMPurify 全局保护** — 将 DOMPurify 初始化移至 `i18n.js` 全局模块，覆盖全部 8 个页面，新页面不再需要单独加保护
+  DOMPurify protection centralized in `i18n.js`, covers all 8 pages automatically
+- **Puppeteer 端到端测试** — 新增 Puppeteer 测试框架 + 基础页面加载测试，为后续自动化回归测试奠基
+  New Puppeteer test framework with basic page-load tests for E2E regression testing
+- **ESLint 代码规范** — 新增 package.json + ESLint 配置，JS 代码规范检查工具链
+  ESLint config added for JavaScript code quality enforcement
+- **start.bat debug 加速** — 调试模式使用 `cargo run` 而非 `cargo build --release`，启动速度大幅提升
+  start.bat debug mode uses `cargo run` instead of `cargo build --release` for faster startup
+- **AI 上下文预览大幅提升** — claims 预览上限从 3K→8K、content 从 2K→15K、description 从 3K→30K，让 AI 获取更完整的专利上下文提高分析质量
+  AI context window expanded: claims 3K→8K, content 2K→15K, description 3K→30K for richer patent context
+- **流式 debug 日志** — `chat.rs` 新增首块日志和 total_chars 追踪，便于排查流式响应异常
+  Streaming debug logging: first-chunk log + total_chars tracking for easier streaming diagnostics
+- **区别特征标记优化** — 专利分析结果中区别特征标记从 ✅ 改为 ★，更醒目直观
+  Distinguishing feature marker changed from ✅ to ★ for better visual clarity
+- **Google Patents 回捞增强** — 回捞逻辑优化，专利号提取和格式化更加健壮
+  Google Patents refetch improvements: more robust patent number extraction and formatting
+
+### 修复 / Fixed
+- **patent_detail 页全部按钮失效** — `const box` 与 `var box` 命名冲突导致 JS 整块不执行，修复后按钮正常响应
+  All patent_detail page buttons were dead due to `const box` vs `var box` naming conflict; fixed
+- **patent_detail 标签页与按钮全部失效** — JavaScript 加载顺序问题导致标签页切换和操作按钮全部失灵，修复 DOM 就绪检测
+  Fixed JavaScript load order issue causing tab switching and action buttons to fail
+- **PDF 导出图片兜底** — 专利 PDF 导出时若图片 URL 不存在，不再崩溃，改为嵌入 PDF 链接文本
+  PDF export image fallback: when image URL is missing, embeds PDF link text instead of crashing
+- **Umi-OCR 异步 + 所有权修复** — Umi-OCR 调用中异步处理不当导致所有权错误，修复 reqwest multipart 特性补全
+  Umi-OCR async + ownership fix; reqwest multipart feature flag completed
+- **search 页 PDF 上传错误屏障** — `updatePdfFileList` 未定义时加入错误屏障忽略，防止干扰其他功能
+  Error barrier for undefined `updatePdfFileList` on search page
+- **未使用变量警告** — `upload.rs` 中 `tmp_pdf_str` 加 `_` 前缀消除 clippy 警告
+  Unused variable warning in upload.rs fixed (`tmp_pdf_str` → `_tmp_pdf_str`)
+
+### 文档 / Documentation
+- **防回退机制** — CLAUDE.md 验证强化 + errors.md 复盘补录，防止已修复问题重新出现
+  Anti-regression documentation: enhanced CLAUDE.md verification rules + errors.md retrospective records
+
+---
+
 ## [v0.7.0] - 2026-06-26
 
 ### 新增 / Added
