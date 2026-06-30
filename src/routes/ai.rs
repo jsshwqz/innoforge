@@ -518,7 +518,7 @@ fn resolve_compare_item(
                 .and_then(|v| v.as_str())
                 .unwrap_or("上传文件");
             let content = obj.get("content").and_then(|v| v.as_str()).unwrap_or("");
-            let preview: String = content.chars().take(15000).collect();
+            let preview: String = content.chars().take(150000).collect();
             return Ok(format!("【{}】\n标题：{}\n内容：{}", label, title, preview));
         }
     }
@@ -529,8 +529,8 @@ fn resolve_compare_item(
     }
     match db.get_patent(id) {
         Ok(Some(p)) => {
-            let abs: String = p.abstract_text.chars().take(2000).collect();
-            let claims: String = p.claims.chars().take(5000).collect();
+            let abs: String = p.abstract_text.chars().take(20000).collect();
+            let claims: String = p.claims.chars().take(50000).collect();
             Ok(format!(
                 "【{}】\n专利号：{}\n标题：{}\n申请人：{}\n摘要：{}\n权利要求（前部分）：{}",
                 label, p.patent_number, p.title, p.applicant, abs, claims
@@ -727,7 +727,7 @@ pub async fn api_ai_risk_assessment(
     let mut not_found: Vec<String> = Vec::new();
     for (i, id) in ids.iter().enumerate() {
         if let Ok(Some(p)) = s.db.get_patent(id) {
-            let claims_preview: String = p.claims.chars().take(5000).collect();
+            let claims_preview: String = p.claims.chars().take(50000).collect();
             patents_info.push_str(&format!(
                 "### 专利 {} - {}\n专利号：{}\n申请人：{}\n摘要：{}\n权利要求：{}\n\n",
                 i + 1,
@@ -786,7 +786,7 @@ pub async fn api_ai_compare_matrix(
                     .and_then(|v| v.as_str())
                     .unwrap_or("上传文件");
                 let content = obj.get("content").and_then(|v| v.as_str()).unwrap_or("");
-                let preview: String = content.chars().take(15000).collect();
+                let preview: String = content.chars().take(150000).collect();
                 patents_info.push_str(&format!(
                     "### 文件 {}\n标题：{}\n内容：{}\n\n",
                     i + 1,
@@ -798,7 +798,7 @@ pub async fn api_ai_compare_matrix(
         }
         let id = item.as_str().unwrap_or("");
         if let Ok(Some(p)) = s.db.get_patent(id) {
-            let claims_preview: String = p.claims.chars().take(600).collect();
+            let claims_preview: String = p.claims.chars().take(6000).collect();
             patents_info.push_str(&format!(
                 "### 专利 {}\n专利号：{}\n标题：{}\n申请人：{}\n摘要：{}\n权利要求：{}\n\n",
                 i + 1,
@@ -918,7 +918,7 @@ fn resolve_references(
                     .and_then(|v| v.as_str())
                     .unwrap_or("上传文件");
                 let content = obj.get("content").and_then(|v| v.as_str()).unwrap_or("");
-                let preview: String = content.chars().take(15000).collect();
+                let preview: String = content.chars().take(150000).collect();
                 refs_info.push_str(&format!(
                     "### 对比文件 {} — {}\n\n文件全文：\n{}\n\n",
                     i + 1,
@@ -934,8 +934,8 @@ fn resolve_references(
             continue;
         }
         if let Ok(Some(p)) = db.get_patent(id) {
-            let claims_preview: String = p.claims.chars().take(5000).collect();
-            let abs_preview: String = p.abstract_text.chars().take(3000).collect();
+            let claims_preview: String = p.claims.chars().take(50000).collect();
+            let abs_preview: String = p.abstract_text.chars().take(30000).collect();
             refs_info.push_str(&format!(
                 "### 对比文件 {} — {}\n专利号：{}\n标题：{}\n申请人：{}\n\n摘要：{}\n\n权利要求（前部分）：\n{}\n\n",
                 i + 1, p.patent_number, p.patent_number, p.title, p.applicant,
@@ -1067,7 +1067,7 @@ pub async fn api_ai_office_action_response(
                             "### 对比文献 {} — {}\n专利号：{}\n标题：{}\n摘要：{}\n权利要求：\n{}\n说明书（前部分）：\n{}\n\n",
                             i + 1, p.patent_number, p.patent_number, p.title,
                             p.abstract_text, p.claims,
-                            p.description.chars().take(20000).collect::<String>()
+                            p.description.chars().take(200000).collect::<String>()
                         ));
                     }
                 }
@@ -1196,7 +1196,7 @@ pub async fn api_ai_office_action_response_stream(
                                 "### 对比文献 {} — {}\n专利号：{}\n标题：{}\n摘要：{}\n权利要求：\n{}\n说明书（前部分）：\n{}\n\n",
                                 i + 1, p.patent_number, p.patent_number, p.title,
                                 p.abstract_text, p.claims,
-                                p.description.chars().take(20000).collect::<String>()
+                                p.description.chars().take(200000).collect::<String>()
                             ));
                         }
                     }

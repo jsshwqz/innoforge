@@ -990,7 +990,7 @@
                 showChecklist();
                 // 刷新历史列表
                 loadOaHistory();
-            } else {
+            } else if (!errored) {
                 showError(t('oar.fail'));
             }
         } catch (e) {

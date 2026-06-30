@@ -7,9 +7,9 @@
 
 ## 当前焦点 / Current Focus
 
-**v0.7.1 — PDF 提取 MinerU 云端 API 兜底**
+**v0.7.2 — AI 上下文 10 倍扩容 + OA 答复增强规划**
 
-当前版本 v0.7.1（Cargo.toml 已同步）。本版在 v0.7.0 基础上新增 MinerU 云端 API 作为 PDF 文本提取的第 6 级降级，专门优化中文专利扫描件 / 复杂版式的提取质量；原有 5 级降级链保持不变。
+当前版本 v0.7.2（Cargo.toml 已同步）。本版在 v0.7.1 基础上将 AI 上下文截断上限提升 10 倍（专利全文 30 万 / OA 20 万 / 引用 30 万字），让 AI 获取更完整的专利上下文；同时新增 JS 全局错误屏障系统根治白屏黑屏。下一阶段工作重心为 OA 答复增强（docx 导出 / 全流程持久化 / 统一讨论逻辑），详见 `docs/plans/oa-response-enhancement.md`。
 
 v0.7.0（2026-06-26，此前 STATUS 未同步）已落地：
 - **AI 对话角色预设系统** + 自定义 system_prompt
@@ -24,8 +24,8 @@ v0.7.0（2026-06-26，此前 STATUS 未同步）已落地：
 - 一批上下文与截断修复（截断字节→字数、上下文限制放宽、DOMPurify 安全包装器、讨论历史对话格式）
 
 ### ⚠️ 已知遗留问题
-1. **工作树有 4 个未提交改动**：`.gitignore`、`CLAUDE.md`、`docs/plans/pdf-extraction-enhancement.md`、`templates/office_action_response.html`。其中 `office_action_response.html` 是把 OA 讨论改走 `/api/ai/chat` 以避开角色扮演审查的功能改动，需用户本地执行 `cargo fmt && cargo clippy && cargo test` 后再提交（见 CLAUDE.md Step 1 强制检查）。
-2. v0.6.2 / v0.6.3 / v0.7.0 / v0.7.1 均未打 git tag（tags 仍停留在 v0.6.1），仅 CHANGELOG 记录版本。如需严格发布管理，可补打 tag。
+1. **工作树有 4 个未提交改动**：`src/ai/patent.rs`（6 处 AI 上下文 10 倍扩容）、`src/routes/ai.rs`（10 处预览截断 10 倍扩容）、`templates/office_action_response.html`（JS 错误屏障守卫修复）、`docs/plans/oa-response-enhancement.md`（OA 答复增强规划新文件）。需本地执行 `cargo fmt && cargo clippy && cargo test` 后再提交（见 CLAUDE.md Step 1 强制检查）。
+2. v0.6.2 / v0.6.3 / v0.7.0 / v0.7.1 / v0.7.2 均未打 git tag（tags 仍停留在 v0.6.1），仅 CHANGELOG 记录版本。如需严格发布管理，可补打 tag。
 
 ---
 
@@ -33,6 +33,7 @@ v0.7.0（2026-06-26，此前 STATUS 未同步）已落地：
 
 | 日期 | 变更 | 类型 |
 |------|------|------|
+| 2026-06-30 | v0.7.2：AI 上下文 10 倍扩容（摘要/权利要求/说明书 30K→300K）+ JS 错误屏障修复 + OA 答复增强规划 `bcd38a3` + 工作树待提交 | feat |
 | 2026-06-27 | v0.7.1：PDF 提取新增 MinerU 云端 API 兜底（第 6 级降级，中文专利扫描件/复杂版式优化）`4780356` | feat |
 | 2026-06-26 | v0.7.0：角色预设/MCP 3 工具/威胁评估+权利要求对照 API/流水线第16步/PDF逐页端点 + Claude 服务商/OA讨论增强/OA prompt升级/上下文截断修复 `e058803` | feat |
 | 2026-06-25 | OA prompt 深度升级（多维对比/组合动机/AI 痕迹规避）`df0b3f9` | feat |
@@ -88,6 +89,20 @@ v0.7.0（2026-06-26，此前 STATUS 未同步）已落地：
 
 ## 下一步 / Next Steps
 
+### v0.7.2 已完成
+- [x] AI 上下文 10 倍扩容：`src/ai/patent.rs` 3 函数 6 处（30K→300K / 20K→200K / 60K→600K）✅
+- [x] 预览截断 10 倍扩容：`src/routes/ai.rs` 6 函数 10 处（3K→8K→80K / 2K→15K→150K 等）✅
+- [x] JS 错误屏障守卫：OA 页 `if (!errored)` 防止误报 ✅
+- [x] OA 答复增强规划文档：`docs/plans/oa-response-enhancement.md` ✅
+
+### v0.7.2+ 待开始（详见 OA 答复增强规划）
+- [ ] P0-1：Word (docx) 格式意见陈述书导出
+- [ ] P0-2：全流程持久化（分析记录→答复草稿版次管理）
+- [ ] P0-3：统一前端讨论逻辑（使用通用 `send_chat_stream`）
+- [ ] P1：结构化拆条 + 案件时间线 + 逐条超范围检测 + OCR
+- [ ] P2：段落级编辑 + 论据动态化
+- [ ] P3：协作 + 多轮期限 + 策略统计
+
 ### v0.7.1 已完成
 - [x] PDF 提取 MinerU 云端 API 兜底（第 6 级降级 `extract_pdf_text_mineru`，OCR+版面还原，中文专利优化）✅ `4780356`
 - [x] 文档同步：CHANGELOG/STATUS/Cargo.toml 到 v0.7.1 + errors.md 补录 ✅ 本轮治理
@@ -128,6 +143,7 @@ v0.7.0（2026-06-26，此前 STATUS 未同步）已落地：
 
 ## 版本规划蓝图 / Roadmap
 
+详见 `docs/plans/oa-response-enhancement.md`（OA 答复增强规划，v0.7.2+）
 详见 `docs/plans/2026-06-22-v0.6.3-plan.md`（v0.6.3）
 详见 `docs/plans/pdf-extraction-enhancement.md`（PDF 提取增强，含 v0.7.0/v0.7.1 落地状态）
 详见 `docs/plans/2026-05-23-v0.6.0-plan.md`（v0.6.0）
@@ -143,6 +159,7 @@ v0.7.0（2026-06-26，此前 STATUS 未同步）已落地：
 | `CHANGELOG.md` | 版本历史：改了什么、加了什么 | 首次必读 |
 | `docs/errors.md` | 错误复盘数据库：以前犯过什么错 | 首次必读 |
 | `docs/plans/STATUS.md` | 本文档：当前焦点、下一步 | 每次必读 |
+| `docs/plans/oa-response-enhancement.md` | OA 答复增强规划（v0.7.2+ P0-P3） | 需要时读 |
 | `docs/ARCHITECTURE.md` | 架构决策记录 | 需要时读 |
 | `docs/API.md` | API 文档 | 需要时读 |
 
