@@ -715,17 +715,28 @@ pub async fn api_patent_pdf(
         let is_cn = patent.country == "CN" || patent.patent_number.starts_with("CN");
         let cn_needs_refetch = is_cn
             && patent.claims.len() > 50
-            && !patent.claims.chars().any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c));
+            && !patent
+                .claims
+                .chars()
+                .any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c));
         if patent.description.len() <= 50 || patent.claims.len() <= 50 || cn_needs_refetch {
             let lang = if is_cn { "zh" } else { "en" };
-            let gp_url = format!("https://patents.google.com/patent/{}/{}", patent.patent_number, lang);
+            let gp_url = format!(
+                "https://patents.google.com/patent/{}/{}",
+                patent.patent_number, lang
+            );
             let client = reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(20))
                 .build()
                 .unwrap_or_default();
-            if let Ok(resp) = client.get(&gp_url)
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-                .send().await
+            if let Ok(resp) = client
+                .get(&gp_url)
+                .header(
+                    "User-Agent",
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                )
+                .send()
+                .await
             {
                 if let Ok(html) = resp.text().await {
                     if patent.description.is_empty() || patent.description.len() < 50 {

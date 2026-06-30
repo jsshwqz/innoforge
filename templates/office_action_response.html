@@ -834,6 +834,7 @@
             return '\x00CB' + (codeBlocks.length - 1) + '\x00';
         });
         var tableBlocks = [];
+        // Match standard markdown tables: header | sep | body
         text = text.replace(/(?:^|\n)(\|.+\|)\n(\|[\s:|-]+\|)\n((?:\|.+\|\n?)+)/gm, function(_, header, sep, body) {
             var ths = header.split('|').filter(function(c) { return c.trim() !== ''; });
             var rows = body.trim().split('\n');
@@ -842,6 +843,27 @@
             html += '</tr></thead><tbody>';
             for (var r = 0; r < rows.length; r++) {
                 var cells = rows[r].split('|').filter(function(c) { return c.trim() !== ''; });
+                html += '<tr>';
+                for (var c = 0; c < cells.length; c++) html += '<td style="padding:8px 10px;border:1px solid #30363d;">' + escapeHtml(cells[c].trim()).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>') + '</td>';
+                html += '</tr>';
+            }
+            html += '</tbody></table>';
+            tableBlocks.push(html);
+            return '\n\x00TB' + (tableBlocks.length - 1) + '\x00\n';
+        });
+        // Match tables without separator row (>=2 pipe-delimited lines, each starts with |)
+        text = text.replace(/(?:^|\n)((?:\|.+\|\n?){2,})/gm, function(_, block) {
+            var lines = block.trim().split('\n').filter(function(l) { return l.trim().startsWith('|'); });
+            if (lines.length < 2) return _; // need at least header + 1 row
+            // Check if any line looks like a separator (mostly dashes between pipes)
+            var dataLines = lines.filter(function(l) { return !/^\|[\s:|-]+\|$/.test(l.trim()); });
+            if (dataLines.length < 2) return _; // after removing separators, need at least header + 1 row
+            var ths = dataLines[0].split('|').filter(function(c) { return c.trim() !== ''; });
+            var html = '<table style="width:100%;border-collapse:collapse;margin:12px 0;font-size:14px;"><thead><tr>';
+            for (var i = 0; i < ths.length; i++) html += '<th style="background:#21262d;color:#c9d1d9;padding:8px 10px;border:1px solid #30363d;">' + escapeHtml(ths[i].trim()) + '</th>';
+            html += '</tr></thead><tbody>';
+            for (var r = 1; r < dataLines.length; r++) {
+                var cells = dataLines[r].split('|').filter(function(c) { return c.trim() !== ''; });
                 html += '<tr>';
                 for (var c = 0; c < cells.length; c++) html += '<td style="padding:8px 10px;border:1px solid #30363d;">' + escapeHtml(cells[c].trim()).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>') + '</td>';
                 html += '</tr>';

@@ -783,7 +783,7 @@ async fn extract_pdf_text_umi_ocr(data: Vec<u8>) -> Result<String, String> {
     // Step 1: Write PDF to temp file
     let tmp_dir = std::env::temp_dir();
     let tmp_pdf = tmp_dir.join(format!("innoforge_umiocr_{}.pdf", std::process::id()));
-    let tmp_pdf_str = tmp_pdf.to_string_lossy().to_string();
+    let _tmp_pdf_str = tmp_pdf.to_string_lossy().to_string();
     {
         let mut f = std::fs::File::create(&tmp_pdf)
             .map_err(|e| format!("Umi-OCR 创建临时文件失败: {}", e))?;
@@ -799,7 +799,10 @@ async fn extract_pdf_text_umi_ocr(data: Vec<u8>) -> Result<String, String> {
         .map_err(|e| format!("Umi-OCR 创建 multipart 失败: {}", e))?;
     let form = reqwest::multipart::Form::new()
         .part("file", file_part)
-        .text("json", r#"{"doc.extractionMode":"fullPage","data.format":"text"}"#);
+        .text(
+            "json",
+            r#"{"doc.extractionMode":"fullPage","data.format":"text"}"#,
+        );
 
     let upload_resp = client
         .post(&upload_url)
@@ -819,8 +822,7 @@ async fn extract_pdf_text_umi_ocr(data: Vec<u8>) -> Result<String, String> {
             let _ = std::fs::remove_file(&tmp_pdf);
             return Err(format!(
                 "Umi-OCR 上传失败: code={}, msg={}",
-                upload_json["code"],
-                upload_json["data"]
+                upload_json["code"], upload_json["data"]
             ));
         }
     };
@@ -937,10 +939,7 @@ async fn extract_image_text_umi_ocr(image_bytes: &[u8], _ext: &str) -> Result<St
             }
         }
         Some(101) => Err("Umi-OCR 图片中未识别到文字".into()),
-        _ => Err(format!(
-            "Umi-OCR 识别失败: code={}",
-            result["code"]
-        )),
+        _ => Err(format!("Umi-OCR 识别失败: code={}", result["code"])),
     }
 }
 

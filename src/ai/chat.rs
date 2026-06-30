@@ -235,11 +235,21 @@ impl AiClient {
                     }
 
                     let mut buf = String::new();
+                    let mut total_chars: usize = 0;
 
                     loop {
                         match resp.chunk().await {
                             Ok(Some(chunk)) => {
-                                buf.push_str(&String::from_utf8_lossy(&chunk));
+                                let chunk_str = String::from_utf8_lossy(&chunk);
+                                if total_chars == 0 && chunk_str.trim().len() > 10 {
+                                    tracing::info!(
+                                        "[AI STREAM] first chunk raw preview: {:?} | decoded: {:?}",
+                                        &chunk[..chunk.len().min(60)],
+                                        &chunk_str[..chunk_str.trim().len().min(80)]
+                                    );
+                                }
+                                total_chars += chunk_str.trim().len();
+                                buf.push_str(&chunk_str);
 
                                 while let Some(pos) = buf.find('\n') {
                                     let line = buf[..pos].trim().to_string();
