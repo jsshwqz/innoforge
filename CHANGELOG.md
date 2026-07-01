@@ -5,13 +5,15 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 
-## [v0.7.2] - 2026-06-30
+## [v0.7.2] - 2026-07-01
 
 ### 新增 / Added
 - **SenseNova V6.7 Flash Lite / DeepSeek V4 Flash 模型支持** — 设置页新增 SenseNova 6.7 Flash Lite 和 DeepSeek V4 Flash 模型选项，同时更新 SenseNova 模型标签（Flash/Turbo/Pro/Ultra → Flash Lite/Flash/Turbo/Pro）
   New model support: SenseNova 6.7 Flash Lite, DeepSeek V4 Flash; SenseNova model labels updated
 - **OA 答复 Markdown 无分隔行表格支持** — `office_action_response.html` 模板升级 Markdown 渲染器，支持不含分隔行的表格语法，兼容更多 AI 输出格式
   OA response template: Markdown renderer enhanced to support separator-less tables
+- **OA 答复增强规划文档** — `docs/plans/oa-response-enhancement.md` 新增 P0-P3 规划（docx 导出 / 全流程持久化 / 拆条分析等）
+  OA enhancement roadmap document added (P0-P3 planning for docx export, persistence, structured analysis)
 
 ### 改进 / Improved
 - **JS 错误屏障系统** — 全站 8 个页面引入全局 JS 错误屏障，统一拦截运行时错误并显示友好提示，杜绝白屏/黑屏
@@ -32,6 +34,12 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
   Distinguishing feature marker changed from ✅ to ★ for better visual clarity
 - **Google Patents 回捞增强** — 回捞逻辑优化，专利号提取和格式化更加健壮
   Google Patents refetch improvements: more robust patent number extraction and formatting
+- **AI 上下文 10 倍扩容** — `patent.rs` 3 函数 6 处 `safe_truncate` 上限提升（30K→300K / 20K→200K / 60K→600K），`ai.rs` 10 处 `.take()` 预览上限同步放大（5K→50K / 15K→150K / 20K→200K），AI 能获取完整专利全文
+  AI context expanded 10x across patent analysis pipeline (30K→300K chars etc.) for complete patent document access
+- **GitFlow 分支策略** — 切换为 main/dev/feature 分支模型，main 受保护需 PR 合并，CI 覆盖 dev 分支
+  GitFlow branch strategy adopted: main protected (PR only), dev with CI, feature branches
+- **分离 Gitee remote** — 修复 origin 同时推 GitHub+Gitee 的配置问题，origin 专推 GitHub
+  Separated Gitee remote from origin to fix dual-push configuration issues
 
 ### 修复 / Fixed
 - **patent_detail 页全部按钮失效** — `const box` 与 `var box` 命名冲突导致 JS 整块不执行，修复后按钮正常响应
@@ -46,6 +54,8 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
   Error barrier for undefined `updatePdfFileList` on search page
 - **未使用变量警告** — `upload.rs` 中 `tmp_pdf_str` 加 `_` 前缀消除 clippy 警告
   Unused variable warning in upload.rs fixed (`tmp_pdf_str` → `_tmp_pdf_str`)
+- **OA 错误信息被覆盖** — SSE 流式错误后 `showError` 被通用"分析失败"覆盖，改 `} else if (!errored)` 保留详细错误
+  OA error message overwrite bug fixed: detailed error no longer replaced by generic "分析失败"
 
 ### 文档 / Documentation
 - **防回退机制** — CLAUDE.md 验证强化 + errors.md 复盘补录，防止已修复问题重新出现

@@ -24,8 +24,31 @@ v0.7.0（2026-06-26，此前 STATUS 未同步）已落地：
 - 一批上下文与截断修复（截断字节→字数、上下文限制放宽、DOMPurify 安全包装器、讨论历史对话格式）
 
 ### ⚠️ 已知遗留问题
-1. **工作树有 4 个未提交改动**：`src/ai/patent.rs`（6 处 AI 上下文 10 倍扩容）、`src/routes/ai.rs`（10 处预览截断 10 倍扩容）、`templates/office_action_response.html`（JS 错误屏障守卫修复）、`docs/plans/oa-response-enhancement.md`（OA 答复增强规划新文件）。需本地执行 `cargo fmt && cargo clippy && cargo test` 后再提交（见 CLAUDE.md Step 1 强制检查）。
-2. v0.6.2 / v0.6.3 / v0.7.0 / v0.7.1 / v0.7.2 均未打 git tag（tags 仍停留在 v0.6.1），仅 CHANGELOG 记录版本。如需严格发布管理，可补打 tag。
+1. **已全部提交**，工作区干净 ✅
+2. v0.6.2 / v0.6.3 / v0.7.0 / v0.7.1 未打 git tag（tags 停留在 v0.6.1），v0.7.2 已补打并推送双仓库。如需可补打历史 tag。
+3. `experiment::sandbox::tests::test_simple_python_experiment` 因本地无 Python 沙箱环境，cargo test 恒失败（37/38 通过）。
+
+---
+
+## 分支策略 / Branch Strategy
+
+**2026-07-01 起切换为 GitFlow 简化版：**
+
+| 分支 | 用途 | 保护 |
+|------|------|------|
+| `main` | 稳定发布版 | ✅ GitHub 受保护，仅 PR 合并 |
+| `dev` | 开发主分支，CI 自动跑测试 | 一般 |
+| `feature/*` | 功能分支，基于 dev 创建 | 临时 |
+
+**工作流：**
+```
+用户提需求 → 基于 dev 创建 feature 分支 → 开发 → PR 到 dev → review → 合并 dev
+→ 稳定后 PR dev→main → 打 tag → GitHub Actions 自动构建三平台 Release
+```
+
+**CI 触发：** 推 `dev` / PR 到 `dev` 或 `main` → 自动 `cargo fmt + clippy + test`
+
+**发布：** 推 tag `v*` → GitHub Actions 自动构建 win/linux/macos 三平台二进制并上传 Release
 
 ---
 
@@ -33,7 +56,10 @@ v0.7.0（2026-06-26，此前 STATUS 未同步）已落地：
 
 | 日期 | 变更 | 类型 |
 |------|------|------|
-| 2026-06-30 | v0.7.2：AI 上下文 10 倍扩容（摘要/权利要求/说明书 30K→300K）+ JS 错误屏障修复 + OA 答复增强规划 `bcd38a3` + 工作树待提交 | feat |
+| 2026-07-01 | 切换 GitFlow 分支策略（main/dev/feature）+ CI 更新 + 分离 Gitee remote `4e9ebf9` | chore |
+| 2026-07-01 | v0.7.2 正式发布：git tag 补打 + 双仓库推送 + 打包 `innoforge-v0.7.2.zip` | release |
+| 2026-07-01 | 商汤模型添加 `sensenova-6.7-flash-lite` + `deepseek-v4-flash`（设置页）`8c1b486` | feat |
+| 2026-06-30 | v0.7.2：AI 上下文 10 倍扩容（30K→300K）+ JS 错误屏障修复 + OA 答复增强规划 `c57ed8d` | feat |
 | 2026-06-27 | v0.7.1：PDF 提取新增 MinerU 云端 API 兜底（第 6 级降级，中文专利扫描件/复杂版式优化）`4780356` | feat |
 | 2026-06-26 | v0.7.0：角色预设/MCP 3 工具/威胁评估+权利要求对照 API/流水线第16步/PDF逐页端点 + Claude 服务商/OA讨论增强/OA prompt升级/上下文截断修复 `e058803` | feat |
 | 2026-06-25 | OA prompt 深度升级（多维对比/组合动机/AI 痕迹规避）`df0b3f9` | feat |
@@ -165,4 +191,4 @@ v0.7.0（2026-06-26，此前 STATUS 未同步）已落地：
 
 ---
 
-*最后更新: 2026-06-28*
+*最后更新: 2026-07-01*
