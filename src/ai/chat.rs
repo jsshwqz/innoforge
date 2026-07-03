@@ -248,6 +248,13 @@ impl AiClient {
                                         &chunk_str[..chunk_str.trim().len().min(80)]
                                     );
                                 }
+                                if total_chars == 0 && chunk_str.trim().len() <= 10 {
+                                    tracing::warn!(
+                                        "[AI STREAM] first chunk suspiciously short: raw={:?} decoded={:?}",
+                                        &chunk[..chunk.len().min(40)],
+                                        &chunk_str[..chunk_str.trim().len().min(40)]
+                                    );
+                                }
                                 total_chars += chunk_str.trim().len();
                                 buf.push_str(&chunk_str);
 
@@ -271,7 +278,10 @@ impl AiClient {
                                     }
                                 }
                             }
-                            Ok(None) => break,
+                            Ok(None) => {
+                                tracing::info!("[AI STREAM] stream complete, total chars received: {}", total_chars);
+                                break;
+                            }
                             Err(_) => break,
                         }
                     }
