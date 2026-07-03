@@ -349,7 +349,7 @@ async fn extract_pdf_via_ai_vision(
 
     // Write PDF to temp file
     let mut f = std::fs::File::create(&tmp_pdf).map_err(|e| format!("创建临时文件失败: {}", e))?;
-    f.write_all(&data)
+    f.write_all(data)
         .map_err(|e| format!("写入临时文件失败: {}", e))?;
     drop(f);
 
@@ -505,7 +505,7 @@ fn extract_pdf_text_pdftotext(data: &[u8]) -> Result<String, String> {
 
     // Write PDF bytes to temp file
     let mut f = std::fs::File::create(&tmp_path).map_err(|e| format!("创建临时文件失败: {}", e))?;
-    f.write_all(&data)
+    f.write_all(data)
         .map_err(|e| format!("写入临时文件失败: {}", e))?;
     drop(f);
 
@@ -561,7 +561,7 @@ fn extract_pdf_text_pymupdf(data: &[u8]) -> Result<String, String> {
 
     // Write PDF bytes to temp file
     let mut f = std::fs::File::create(&tmp_path).map_err(|e| format!("创建临时文件失败: {}", e))?;
-    f.write_all(&data)
+    f.write_all(data)
         .map_err(|e| format!("写入临时文件失败: {}", e))?;
     drop(f);
 
@@ -604,7 +604,7 @@ fn extract_pdf_text_mineru(data: &[u8]) -> Result<String, String> {
     let tmp_pdf = tmp_dir.join(format!("innoforge_mineru_{}.pdf", std::process::id()));
     let tmp_pdf_str = tmp_pdf.to_string_lossy().to_string();
     let mut f = std::fs::File::create(&tmp_pdf).map_err(|e| format!("创建临时文件失败: {}", e))?;
-    f.write_all(&data)
+    f.write_all(data)
         .map_err(|e| format!("写入临时文件失败: {}", e))?;
     drop(f);
 
@@ -664,7 +664,7 @@ fn extract_pdf_text_ocr(data: &[u8]) -> Result<String, String> {
     let tmp_str = tmp_path.to_string_lossy().to_string();
 
     let mut f = std::fs::File::create(&tmp_path).map_err(|e| format!("创建临时文件失败: {}", e))?;
-    f.write_all(&data)
+    f.write_all(data)
         .map_err(|e| format!("写入临时文件失败: {}", e))?;
     drop(f);
 
