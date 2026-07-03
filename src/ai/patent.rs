@@ -224,9 +224,9 @@ impl AiClient {
         depth: &str,
         discuss: bool,
     ) -> Result<String> {
-        let my_patent = safe_truncate(my_patent_info, 300000);
-        let oa = safe_truncate(office_action, 200000);
-        let refs = safe_truncate(references_info, 300000);
+        let my_patent = safe_truncate(my_patent_info, 120000);
+        let oa = safe_truncate(office_action, 80000);
+        let refs = safe_truncate(references_info, 120000);
         let is_deep = depth == "deep";
 
         let (system_role, prompt) = match oa_type {
@@ -669,9 +669,9 @@ impl AiClient {
     ) -> tokio::sync::mpsc::Receiver<String> {
         let (tx, rx) = tokio::sync::mpsc::channel::<String>(64);
 
-        let my_patent_str = safe_truncate(my_patent_info, 300000);
-        let oa_str = safe_truncate(office_action, 200000).to_string();
-        let refs_str = safe_truncate(references_info, 300000);
+        let my_patent_str = safe_truncate(my_patent_info, 120000);
+        let oa_str = safe_truncate(office_action, 80000).to_string();
+        let refs_str = safe_truncate(references_info, 120000);
         let is_deep = depth == "deep";
 
         let (system_role, prompt) = match oa_type {
@@ -683,6 +683,15 @@ impl AiClient {
             }
             _ => Self::build_first_exam_prompt(&my_patent_str, &oa_str, &refs_str, depth, discuss),
         };
+
+        let total_bytes = system_role.len() + prompt.len();
+        tracing::info!(
+            "[OA STREAM] prompt size: system_role={}B, user_prompt={}B, total={}B (~{}K tokens)",
+            system_role.len(),
+            prompt.len(),
+            total_bytes,
+            total_bytes / 3
+        );
 
         let messages = vec![
             Message {
