@@ -5,6 +5,31 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 
+## [v0.7.3] - 2026-07-04
+
+### 修复 / Fixed
+- **OA 渲染乱码根因修复** — DeepSeek API 请求缺失 `max_tokens` 导致默认 4K 截断，流式输出被切断后浏览器显示 `*`/`D`/`★` 乱码。`src/ai/chat.rs` 流式请求补全 `"max_tokens": 16384`，彻底解决截断问题
+  OA garbled text root cause fixed: missing `max_tokens` in DeepSeek requests caused 4K truncation; added `max_tokens: 16384` to all streaming calls
+
+- **DOMPurify 崩溃修复** — `static/purify.min.js` 文件损坏（18KB，缺少函数体）导致 `DOMPurify.sanitize()` 调用报 `Uncaught SyntaxError`，OA 页面 JS 整块不执行。重新下载完整版（21KB + sourcemap）替换
+  DOMPurify crash fixed: corrupted `purify.min.js` (18KB, missing function body) caused `SyntaxError` on entire OA page JS; replaced with complete version (21KB + sourcemap)
+
+- **OA 上下文扩容** — `src/ai/patent.rs` OA 分析与讨论截断上限从 120K/80K/120K 提升到 300K/200K/300K，确保长 OA 分析不丢上下文
+  OA context expanded: truncation limits raised from 120K/80K/120K to 300K/200K/300K for complete analysis
+
+### 改进 / Improved
+- **讨论 SSE 解析增强** — `sendOADiscussion()` 统一使用 `event:` 行解析模式（与 `doOAAnalysis()` 一致），更稳定地处理 SSE error/done 事件
+  Discussion SSE parser enhanced: consistent `event:` line handling across all streaming functions
+
+- **讨论传入 `oa_type`** — 讨论 API 请求增加 `oa_type` 字段，提供更丰富的上下文给 AI
+  `oa_type` field added to discussion API requests for richer AI context
+
+### 新增 / Added
+- **Fusion 多模型辩论引擎** — 支持多模型协同辩论，流水线每步独立模型配置，输出格式校验，S.U.P.E.R 架构规范写入 CLAUDE.md
+  Fusion multi-model debate engine: multi-model collaboration, per-step model config, output format validation, S.U.P.E.R architecture spec in CLAUDE.md
+
+---
+
 ## [v0.7.2] - 2026-07-01
 
 ### 新增 / Added
