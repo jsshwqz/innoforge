@@ -210,6 +210,7 @@ impl AiClient {
                             "model": provider.model,
                             "messages": messages.iter().map(|m| serde_json::json!({"role": m.role, "content": m.content})).collect::<Vec<_>>(),
                             "temperature": temperature,
+                            "max_tokens": 16384,
                             "stream": true,
                         });
 
