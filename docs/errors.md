@@ -277,6 +277,27 @@
 ### [2026-04-01] cargo build access denied — 进程锁住二进制
 - **严重程度**: LOW
 - **涉及文件**: （构建环境）
+
+---
+
+## [2026-07-04] OA 流式输出乱码 `*` / `D` / `★`
+- **严重程度**: HIGH
+- **涉及文件**: `src/ai/chat.rs` `static/purify.min.js`
+- **现象**: OA 分析结果中文字全变为 `*` 字符，表格内容变为 `D`/`A`/`★`/`—` 单字符缩写。AI 讨论回复全是 `*`。
+- **根因**: 双重原因——
+  1. DeepSeek API 请求缺 `max_tokens` 参数，模型默认输出 token 过少（约 4K），生成到一半被截断。
+  2. `static/purify.min.js` 文件损坏（18KB vs 正确 21KB），导致 `Uncaught SyntaxError`，`DOMPurify.sanitize()` 不可用。虽 i18n.js 有回退守卫，但部分 `innerHTML` 赋值行为异常。
+- **修复**: 
+  1. `src/ai/chat.rs` → OpenAI 兼容流式请求添加 `"max_tokens": 16384`
+  2. `static/purify.min.js` → 从 CDN 重新下载完整版（20931 字节）
+  3. 服务已重启（PID 4860）
+- **未确认**: 修复后 API 层（curl 测试）返回正确中文，但用户浏览器仍显示 `*`。需排查：
+  - 浏览器是否缓存旧页面 HTML（编译嵌入的模板）
+  - 前端 `renderMarkdown()` 函数是否有未发现的字符转换
+  - SSE 流式拼接时是否有数据丢失
+  - `parseOASections()` 切分逻辑是否误切
+- **预防**: 每次变更模板文件后用 Puppeteer 全量 e2e 测试
+- **提交**: dev 分支 `7fc1aec` + 本地未提交的 purify.min.js 替换
 - **现象**: `cargo build` 失败，提示"拒绝访问"（Access Denied）。
 - **根因**: `innoforge.exe` 正在运行中，Windows 锁定文件导致编译无法覆写。
 - **修复**: 执行 `taskkill //F //IM innoforge.exe` 后重新编译。
