@@ -88,7 +88,16 @@ v0.7.0（2026-06-26，此前 STATUS 未同步）已落地：
 
 ## 已知问题 / Known Issues
 
-当前无 HIGH/MEDIUM 未解决项（代码层面）。
+### 🔴 HIGH — OA 分析结果浏览器端显示乱码
+- 现象：API 层（curl 测试）返回正确中文，但用户浏览器显示 `*` 替代中文字符
+- 已修：`max_tokens: 16384` 补全（DeepSeek 截断）、`purify.min.js` 重新下载（SyntaxError 修复）
+- 服务器 PID 4860 运行中
+- **待排查**：
+  1. 前端 `renderMarkdown()` → `showOAAnalysisDiscuss()` 链路是否有字符转换异常
+  2. `parseOASections()` 切分后 `s.text` 内容是否正常
+  3. SSE 流式 `fullText` 拼接后是否丢失中文
+  4. 浏览器缓存旧版编译嵌入的 HTML（Ctrl+F5 强制刷新）
+  5. 因无法在 Puppeteer 无头浏览器中复现（输入框 ID 不匹配），需在真实浏览器中打开 F12 → Console 查看错误
 
 ### 本轮文档治理已修复（2026-06-28）
 - ~~**STATUS.md 落后两个版本**（停留在 v0.6.3，实际已到 v0.7.1）~~ — ✅ 同步至 v0.7.1
