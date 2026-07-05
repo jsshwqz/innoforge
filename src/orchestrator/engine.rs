@@ -106,7 +106,11 @@ impl Orchestrator {
             // 3. 发送 Running 进度
             self.send_progress(&progress_tx, &step, StepStatus::Running);
 
-            // 4. 执行步骤
+            // 4. 执行步骤（前置快照 + 失败回滚）
+            // Execute step with pre-snapshot for rollback on failure.
+            // R2 fix: PipelineContext is cloned before step execution so that
+            // any partial-mutation caused by a failing step is discarded.
+            let ctx_before_step = ctx.clone();
             let result = self.execute_step(&mut ctx, &progress_tx).await;
             let duration_ms = step_start.elapsed().as_millis() as u64;
 
@@ -121,7 +125,7 @@ impl Orchestrator {
                 error: result.as_ref().err().map(|e| e.to_string()),
             });
 
-            // 5. 处理结果
+            // 5. 处理结果（含回滚）
             match &result {
                 Ok(()) => {
                     self.send_progress(&progress_tx, &step, StepStatus::Done);
@@ -141,11 +145,27 @@ impl Orchestrator {
                     super::save_version_snapshot(&self.db, &ctx, step);
                 }
                 Err(e) => {
+                    // R2 修复: 步骤失败时回滚到执行前快照，防止半成品污染上下文
+                    // Rollback to pre-step ctx so downstream resume sees a clean state.
+                    tracing::warn!(
+                        "Pipeline step {:?} failed, rolling back to pre-step snapshot",
+                        step
+                    );
+                    ctx = ctx_before_step;
+
                     if step.is_critical() {
                         self.send_progress(&progress_tx, &step, StepStatus::Error);
                         super::record_failure(&self.db, &ctx, step, &e.to_string());
+                        // 关键步骤失败后保存回滚快照，供 resume 续跑起点
+                        if let Ok(json) = serde_json::to_string(&ctx) {
+                            let _ = self.db.save_pipeline_snapshot(
+                                &ctx.idea_id,
+                                &json,
+                                &format!("{:?}_rollback", step),
+                            );
+                        }
                         return Err(anyhow::anyhow!(
-                            "关键步骤「{}」失败: {}",
+                            "关键步骤「{}」失败: {}（已回滚到执行前状态，可续跑）",
                             step.description(),
                             e
                         ));

@@ -1,6 +1,6 @@
 //! 聊天接口 / Chat interface methods
 
-use super::client::{safe_truncate, AiClient, AiProviderMode, Message};
+use super::client::{safe_truncate, timeouts, AiClient, AiProviderMode, Message};
 use anyhow::Result;
 use std::time::Duration;
 
@@ -122,7 +122,11 @@ impl AiClient {
         }
 
         let provider = self.primary.clone();
-        let client = self.client.clone();
+        let client = reqwest::Client::builder()
+            .timeout(timeouts::CHAT)
+            .no_proxy()
+            .build()
+            .unwrap_or_else(|_| self.client.clone());
         let is_anthropic = provider.base_url.contains("anthropic");
 
         tokio::spawn(async move {

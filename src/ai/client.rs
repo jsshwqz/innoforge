@@ -6,7 +6,31 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::time::Duration;
 
-const PROVIDER_HTTP_TIMEOUT_SECS: u64 = 180;
+/// 分级超时策略 / Graded timeout strategy
+///
+/// 不同 AI 操作使用不同超时（之前全局写死 180s），避免聊天等轻量操作被
+/// 分析类的长时间超时所影响，也能为分析类操作提供更充裕的处理窗口。
+///
+/// Different timeout thresholds per operation type:
+/// - Chat/discussion: fast, interactive
+/// - Patent/idea analysis: complex, long reasoning chains
+/// - File enrichment/PDF: longest, multi-step processing
+pub mod timeouts {
+    use std::time::Duration;
+
+    /// 聊天 / Chat & discussion (interactive, should feel snappy)
+    pub const CHAT: Duration = Duration::from_secs(90);
+
+    /// 分析 / Patent analysis, idea analysis (complex prompts, long reasoning)
+    pub const ANALYSIS: Duration = Duration::from_secs(180);
+
+    /// 增强处理 / Enrichment, batch processing, office action (multi-step, longest)
+    #[allow(dead_code)] // 公共 API 常量，供外部使用
+    pub const ENRICHMENT: Duration = Duration::from_secs(300);
+}
+
+// 向后兼容别名 / Backward-compatible alias for existing callers
+const PROVIDER_HTTP_TIMEOUT_SECS: u64 = 300; // = timeouts::ENRICHMENT (300s)
 const PROVIDER_MAX_RETRIES: usize = 3;
 
 /// AI 提供者模式 / AI provider operation mode.
@@ -39,6 +63,8 @@ pub struct AiClient {
     pub provider_mode: AiProviderMode,
     /// Path to the Gemini CLI executable (e.g. gemini.cmd)
     pub gemini_cli_path: Option<String>,
+    /// 当前生效的超时时间 / Current effective timeout duration
+    pub(super) timeout: Duration,
 }
 
 #[derive(Serialize)]
@@ -54,11 +80,19 @@ pub struct Message {
     pub content: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 struct ResponseMessage {
     content: Option<String>,
-    /// DeepSeek v4-flash 将可见输出放在 reasoning_content 而非 content
+    /// DeepSeek v4-flash 将可见输出放在 reasoning_content 而非 content。
+    /// DeepSeek v4-flash places visible output in reasoning_content instead of content.
     reasoning_content: Option<String>,
+    /// 捕获未知字段 / Catch unknown fields.
+    ///
+    /// 当新 Provider 使用非标准字段传输内容时（如 future_provider.output_text），
+    /// 不会静默丢失数据，而是被记录到日志中供排查。
+    /// When a new Provider uses non-standard fields, data won't be silently lost.
+    #[serde(flatten)]
+    _unknown: std::collections::HashMap<String, serde_json::Value>,
 }
 
 // Flexible response parser for different AI providers
@@ -261,7 +295,43 @@ impl AiClient {
             fallbacks: Vec::new(),
             provider_mode: AiProviderMode::Http,
             gemini_cli_path: None,
+            timeout: Duration::from_secs(PROVIDER_HTTP_TIMEOUT_SECS),
         }
+    }
+
+    /// Create a new AiClient with a shorter timeout (for interactive chat).
+    /// Shorthand for `clone_with_timeout(timeouts::CHAT)`.
+    pub fn with_chat_timeout(&self) -> Self {
+        self.clone_with_timeout(timeouts::CHAT)
+    }
+
+    /// Create a new AiClient with analysis timeout (for patent/idea analysis).
+    /// Shorthand for `clone_with_timeout(timeouts::ANALYSIS)`.
+    pub fn with_analysis_timeout(&self) -> Self {
+        self.clone_with_timeout(timeouts::ANALYSIS)
+    }
+
+    /// 创建新的 AiClient 实例并指定超时 / Clone with a different timeout.
+    ///
+    /// reqwest Client 的超时在构建时固定，此方法重建 HTTP 客户端。
+    /// The reqwest Client timeout is baked in at construction, so this rebuilds the client.
+    ///
+    /// # 使用分级超时 / Using graded timeouts
+    /// ```ignore
+    /// let chat_client = client.clone_with_timeout(timeouts::CHAT);
+    /// let analysis_client = client.clone_with_timeout(timeouts::ANALYSIS);
+    /// ```
+    pub fn clone_with_timeout(&self, timeout: Duration) -> Self {
+        let mut new = self.clone();
+        new.timeout = timeout;
+        new.client = Client::builder()
+            .timeout(timeout)
+            .pool_max_idle_per_host(2)
+            .pool_idle_timeout(Duration::from_secs(90))
+            .no_proxy()
+            .build()
+            .unwrap_or_else(|_| Client::new());
+        new
     }
 
     /// Switch to Gemini CLI subprocess mode.
