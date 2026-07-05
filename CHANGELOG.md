@@ -8,6 +8,9 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 ## [v0.7.3] - 2026-07-04
 
 ### 修复 / Fixed
+- **DeepSeek reasoning_content 兼容** — DeepSeek v4-flash 流式 SSE 将文本放在 `delta.reasoning_content` 而非 `delta.content`，服务端 SSE 解析器只读取 `content`，导致讨论/分析等流式调用返回空内容。`ResponseMessage` 新增 `reasoning_content` 字段，SSE 解析器增加 `reasoning_content` 兜底
+  DeepSeek streaming SSE compatibility: added `reasoning_content` fallback in both struct deserialization and streaming parser
+
 - **OA 渲染乱码根因修复** — DeepSeek API 请求缺失 `max_tokens` 导致默认 4K 截断，流式输出被切断后浏览器显示 `*`/`D`/`★` 乱码。`src/ai/chat.rs` 流式请求补全 `"max_tokens": 16384`，彻底解决截断问题
   OA garbled text root cause fixed: missing `max_tokens` in DeepSeek requests caused 4K truncation; added `max_tokens: 16384` to all streaming calls
 
