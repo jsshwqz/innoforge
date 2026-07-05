@@ -1,411 +1,119 @@
-//! # 创研台 InnoForge 核心库 / Core Library
+//! # 创研台 InnoForge 移动端 FFI 接口 / Mobile FFI Interface
 //!
-//! 从想法到落地的研发验证平台核心模块。
-//! Core modules for turning ideas into decisions, plans, products, and IP protection.
+//! 为 Android/iOS/HarmonyOS 提供 FFI 入口，通过 `uniffi` 导出原生函数。
+//! FFI entry point for Android/iOS/HarmonyOS, using `uniffi` to export native functions.
 //!
-//! ## 模块 / Modules
-//! - [`ai`] — AI 多模型容灾客户端 / Multi-provider AI client with failover
-//! - [`db`] — SQLite 数据库操作 / SQLite database operations
-//! - [`experiment`] — 实验验证引擎 / Experiment verification engine
-//! - [`orchestrator`] — 状态机编排器 / State machine orchestrator
-//! - [`patent`] — 专利数据结构 / Patent data structures
-//! - [`pipeline`] — 15 步创新验证流水线 / 15-step innovation validation pipeline
+//! 与 `main.rs` 共享初始化逻辑（`common.rs`），消除双入口同步维护风险。
+//! Shared initialization with `main.rs` via `common.rs` to eliminate dual-entry sync risk.
 
-pub mod ai;
-pub mod db;
-pub mod experiment;
-pub mod orchestrator;
-pub mod patent;
-pub mod pipeline;
-
+mod ai;
+pub mod common;
+mod db;
 mod error;
+mod experiment;
+mod orchestrator;
+mod patent;
+pub mod pipeline;
 mod routes;
 
-use axum::{
-    body::Body,
-    extract::DefaultBodyLimit,
-    http::{HeaderValue, Response, StatusCode},
-    routing::{get, post},
-    Router,
-};
-use rust_embed::Embed;
-use std::net::SocketAddr;
-use std::os::raw::c_char;
-use std::sync::{Arc, RwLock};
-use std::thread;
-use tower_http::cors::{Any, CorsLayer};
-use tower_http::services::ServeDir;
-use tower_http::set_header::SetResponseHeaderLayer;
+use common::{build_router, init_app_state};
 
-#[derive(Embed)]
-#[folder = "static/"]
-struct StaticAssets;
+/// 启动内嵌 axum 服务器（移动端用，与桌面端共享构建逻辑）。
+/// Start embedded axum server for mobile, sharing router/init with desktop.
+fn start_server(
+    db_path: String,
+) -> Result<(std::thread::JoinHandle<()>, tokio::sync::oneshot::Sender<()>), Box<dyn std::error::Error>> {
+    let state = init_app_state(&db_path)?;
+    let app = build_router(state);
 
-#[allow(dead_code)]
-#[derive(Embed)]
-#[folder = "templates/"]
-struct TemplateAssets;
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
-async fn serve_static_embedded(
-    axum::extract::Path(path): axum::extract::Path<String>,
-) -> Response<Body> {
-    match StaticAssets::get(&path) {
-        Some(content) => {
-            let mime = mime_guess::from_path(&path).first_or_octet_stream();
-            // 使用 match 替代 unwrap，遵循 CLAUDE.md 2.7（禁止生产路径 unwrap/expect）
-            match Response::builder()
-                .status(StatusCode::OK)
-                .header("Content-Type", mime.as_ref())
-                .header("Cache-Control", "public, max-age=3600")
-                .body(Body::from(content.data.to_vec()))
-            {
-                Ok(resp) => resp,
-                Err(_) => Response::new(Body::from(content.data.to_vec())),
+    let handle = std::thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async move {
+            let addr: std::net::SocketAddr = ([127, 0, 0, 1], 3000).into();
+            tracing::info!("InnoForge mobile server starting on http://{}", addr);
+
+            let server = axum::Server::bind(&addr).serve(app.into_make_service());
+
+            tokio::select! {
+                _ = shutdown_rx => {
+                    tracing::info!("InnoForge mobile server shutting down gracefully");
+                }
+                result = server => {
+                    if let Err(e) = result {
+                        tracing::error!("InnoForge mobile server error: {}", e);
+                    }
+                }
             }
-        }
-        None => match Response::builder()
-            .status(StatusCode::NOT_FOUND)
-            .body(Body::from("Not found"))
-        {
-            Ok(resp) => resp,
-            Err(_) => Response::new(Body::from("Not found")),
-        },
-    }
-}
-
-/// Start the InnoForge web server with embedded assets.
-/// db_path: path to SQLite database (use app data dir on Android)
-pub async fn start_server(db_path: &str) -> anyhow::Result<()> {
-    let db = db::Database::init(db_path)?;
-
-    // 启动时将卡在 analyzing 的创意重置为 error（上次 pipeline 中断）
-    match db.reset_stale_analyzing() {
-        Ok(n) if n > 0 => tracing::warn!("Reset {} stale analyzing ideas to error", n),
-        Ok(_) => {}
-        Err(e) => tracing::error!("Failed to reset stale analyzing ideas: {}", e),
-    }
-
-    let config = routes::AppConfig::from_db_and_env(Some(&db));
-    let state = routes::AppState {
-        db: Arc::new(db),
-        config: Arc::new(RwLock::new(config)),
-        pipeline_channels: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-    };
-
-    // 创建上传目录 / Create uploads directory
-    let _ = std::fs::create_dir_all("data/uploads");
-
-    // 启动管道通道超时清理
-    state.spawn_channel_cleaner();
-
-    let app = Router::new()
-        .route("/", get(routes::index_page))
-        .route("/search", get(routes::search_page))
-        .route("/patent/:id", get(routes::patent_detail_page))
-        .route("/ai", get(routes::ai_page))
-        .route("/compare", get(routes::compare_page))
-        .route("/idea", get(routes::idea_page))
-        .route("/settings", get(routes::settings_page))
-        .route("/oa-response", get(routes::office_action_response_page))
-        .route("/api/settings", get(routes::api_get_settings))
-        .route("/api/settings/serpapi", post(routes::api_save_serpapi))
-        .route("/api/settings/ai", post(routes::api_save_ai))
-        .route(
-            "/api/settings/serpapi/balance",
-            get(routes::api_serpapi_balance),
-        )
-        // 聊天记录 API / Chat Records API
-        .route("/api/chat/:session_key", get(routes::api_chat_get_messages))
-        .route(
-            "/api/chat/:session_key/save",
-            post(routes::api_chat_save_message),
-        )
-        .route(
-            "/api/chat/:session_key/delete",
-            post(routes::api_chat_delete_messages),
-        )
-        .route("/api/search", post(routes::api_search))
-        .route("/api/search/stats", post(routes::api_search_stats))
-        .route("/api/search/export", post(routes::api_export_csv))
-        .route("/api/search/export/xlsx", post(routes::api_export_xlsx))
-        .route("/api/search/online", post(routes::api_search_online))
-        .route("/api/search/analyze", post(routes::api_ai_analyze_results))
-        .route("/api/patent/fetch", post(routes::api_fetch_patent))
-        .route("/api/patent/enrich/:id", get(routes::api_enrich_patent))
-        .route(
-            "/api/patent/enrich-free/:id",
-            get(routes::api_enrich_patent_free),
-        )
-        .route("/api/patent/pdf/:id", get(routes::api_patent_pdf))
-        .route(
-            "/api/patent/pdf/extract-text",
-            post(routes::api_patent_pdf_extract_text),
-        )
-        .route(
-            "/api/patent/image-proxy",
-            get(routes::api_patent_image_proxy),
-        )
-        .route("/api/patent/lookup/:number", get(routes::api_patent_lookup))
-        .route(
-            "/api/patent/lookup-or-fetch",
-            post(routes::api_patent_lookup_and_fetch),
-        )
-        .route(
-            "/api/patent/similar/:id",
-            get(routes::api_recommend_similar),
-        )
-        .route(
-            "/api/patent/:id/legal-status",
-            get(routes::api_patent_legal_status),
-        )
-        .route("/api/ai/chat", post(routes::api_ai_chat))
-        .route("/api/ai/chat/stream", post(routes::api_ai_chat_stream))
-        .route(
-            "/api/ai/chat/conclusions",
-            post(routes::api_ai_chat_conclusions),
-        )
-        .route("/api/ai/summarize", post(routes::api_ai_summarize))
-        .route("/api/ai/compare", post(routes::api_ai_compare))
-        .route("/api/ai/claims", post(routes::api_ai_claims_analysis))
-        .route("/api/ai/risk", post(routes::api_ai_risk_assessment))
-        .route(
-            "/api/ai/compare-matrix",
-            post(routes::api_ai_compare_matrix),
-        )
-        .route(
-            "/api/ai/batch-summarize",
-            post(routes::api_ai_batch_summarize),
-        )
-        .route(
-            "/api/ai/inventiveness-analysis",
-            post(routes::api_ai_inventiveness_analysis),
-        )
-        .route(
-            "/api/ai/office-action-response",
-            post(routes::api_ai_office_action_response),
-        )
-        .route(
-            "/api/ai/office-action-response/stream",
-            post(routes::api_ai_office_action_response_stream),
-        )
-        .route(
-            "/api/ai/oa-generate-response-letter",
-            post(routes::api_ai_oa_generate_response_letter),
-        )
-        .route("/api/ai/oa-discuss", post(routes::api_ai_oa_discuss))
-        // OA 分析历史 API / OA History API
-        .route("/api/oa/history/all", get(routes::api_oa_history_all))
-        .route(
-            "/api/oa/history/:patent_number",
-            get(routes::api_oa_history),
-        )
-        .route(
-            "/api/oa/history/detail/:id",
-            get(routes::api_oa_history_get),
-        )
-        .route(
-            "/api/oa/history/:id/delete",
-            post(routes::api_oa_history_delete),
-        )
-        .route(
-            "/api/ai/check-amendments",
-            post(routes::api_ai_check_amendments),
-        )
-        // 专利威胁评估 / Patent Threat Assessment
-        .route(
-            "/api/ai/threat-assessment",
-            post(routes::api_ai_threat_assessment),
-        )
-        .route("/api/ai/claim-chart", post(routes::api_ai_claim_chart))
-        // Google OAuth
-        .route("/api/auth/google/url", get(routes::api_google_auth_url))
-        .route(
-            "/api/auth/google/callback",
-            get(routes::api_google_callback),
-        )
-        .route(
-            "/api/auth/google/exchange",
-            post(routes::api_google_exchange_handler),
-        )
-        .route(
-            "/api/auth/google/status",
-            get(routes::api_google_oauth_status),
-        )
-        // gcloud CLI auth
-        .route("/api/auth/gcloud/status", get(routes::api_gcloud_status))
-        .route("/api/auth/gcloud/login", post(routes::api_gcloud_login))
-        .route("/api/idea/submit", post(routes::api_idea_submit))
-        .route("/api/idea/analyze", post(routes::api_idea_analyze))
-        .route("/api/idea/pipeline", post(routes::api_idea_pipeline))
-        .route(
-            "/api/ideas/batch-compare",
-            post(routes::api_ideas_batch_compare),
-        )
-        .route("/api/idea/list", get(routes::api_idea_list))
-        .route("/api/idea/:id", get(routes::api_idea_get))
-        .route("/api/idea/:id/delete", post(routes::api_idea_delete))
-        .route("/api/idea/:id/progress", get(routes::api_idea_progress))
-        .route("/api/idea/:id/resume", post(routes::api_idea_resume))
-        .route(
-            "/api/idea/:id/research-state",
-            get(routes::api_idea_research_state).post(routes::api_idea_research_state_update),
-        )
-        .route("/api/idea/:id/redirect", post(routes::api_idea_redirect))
-        .route("/api/idea/:id/report", get(routes::api_idea_report))
-        .route(
-            "/api/idea/:id/report.html",
-            get(routes::api_idea_report_html),
-        )
-        .route("/api/idea/:id/evidence", get(routes::api_idea_evidence))
-        .route("/api/idea/:id/chat", post(routes::api_idea_chat))
-        .route("/api/idea/:id/messages", get(routes::api_idea_messages))
-        .route(
-            "/api/idea/:id/chat/conclusions",
-            get(routes::api_idea_chat_conclusions),
-        )
-        .route(
-            "/api/idea/:id/summarize",
-            post(routes::api_idea_summarize_discussion),
-        )
-        // 特征卡片 API / Feature cards API
-        .route(
-            "/api/ideas/:id/feature-cards",
-            get(routes::api_get_feature_cards).post(routes::api_create_feature_card),
-        )
-        .route(
-            "/api/feature-cards/diff",
-            get(routes::api_feature_card_diff),
-        )
-        // 版本管理 + 迭代 API / Version management + iterate API
-        .route("/api/idea/:id/claim-tree", get(routes::api_idea_claim_tree))
-        .route("/api/idea/:id/iterate", post(routes::api_idea_iterate))
-        .route("/api/idea/:id/versions", get(routes::api_idea_versions))
-        .route("/api/idea/:id/branches", get(routes::api_idea_branches))
-        .route("/api/idea/:id/findings", get(routes::api_idea_findings))
-        .route("/api/ipc/tree", get(routes::api_ipc_tree))
-        .route("/api/ipc/:code/patents", get(routes::api_ipc_patents))
-        .route("/api/patents/import", post(routes::api_import_patents))
-        .route(
-            "/api/collections",
-            get(routes::api_list_collections).post(routes::api_create_collection),
-        )
-        .route(
-            "/api/collections/:id",
-            axum::routing::delete(routes::api_delete_collection),
-        )
-        .route(
-            "/api/collections/:id/patents",
-            get(routes::api_get_collection_patents),
-        )
-        .route(
-            "/api/collections/:id/add",
-            post(routes::api_add_to_collection),
-        )
-        .route(
-            "/api/collections/:id/remove/:patent_id",
-            axum::routing::delete(routes::api_remove_from_collection),
-        )
-        .route(
-            "/api/patents/:id/tags",
-            get(routes::api_get_patent_tags).post(routes::api_add_tag),
-        )
-        .route(
-            "/api/patents/:id/tags/:tag",
-            axum::routing::delete(routes::api_remove_tag),
-        )
-        .route(
-            "/api/patents/:id/collections",
-            get(routes::api_get_patent_collections),
-        )
-        .route("/api/tags", get(routes::api_list_all_tags))
-        .route("/api/upload/compare", post(routes::api_upload_compare))
-        .route("/api/upload/extract", post(routes::api_upload_extract))
-        .route("/api/upload/pdf-store", post(routes::api_upload_pdf_store))
-        // 上传文件静态服务（PDF 预览等）/ Serve uploaded files
-        .nest_service("/uploads", ServeDir::new("data/uploads"))
-        // Serve embedded static files
-        .route("/static/*path", get(serve_static_embedded))
-        .layer(DefaultBodyLimit::max(20 * 1024 * 1024))
-        .layer(
-            CorsLayer::new()
-                .allow_origin(Any)
-                .allow_methods(Any)
-                .allow_headers(Any),
-        )
-        .layer(SetResponseHeaderLayer::overriding(
-            axum::http::header::X_FRAME_OPTIONS,
-            HeaderValue::from_static("DENY"),
-        ))
-        .layer(SetResponseHeaderLayer::overriding(
-            axum::http::header::X_CONTENT_TYPE_OPTIONS,
-            HeaderValue::from_static("nosniff"),
-        ))
-        .layer(SetResponseHeaderLayer::overriding(
-            axum::http::header::REFERRER_POLICY,
-            HeaderValue::from_static("strict-origin-when-cross-origin"),
-        ))
-        .with_state(state);
-
-    let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
-    println!("InnoForge server starting at http://{addr}");
-    axum::Server::bind(&addr)
-        .serve(app.into_make_service())
-        .await?;
-    Ok(())
-}
-
-/// Start the InnoForge server in a background thread.
-///
-/// # Safety
-/// - `db_path` must be a valid pointer to a null-terminated UTF-8 C string
-/// - The pointed string must be valid for the duration of this call
-///
-/// # Returns
-/// - 0: success (server started in background thread)
-/// - 1: db_path is null
-/// - 2: db_path is not valid UTF-8
-#[no_mangle]
-pub unsafe extern "C" fn innoforge_start_server(db_path: *const c_char) -> i32 {
-    if db_path.is_null() {
-        eprintln!("Error: db_path is null");
-        return 1;
-    }
-
-    let db_path_string = match unsafe { std::ffi::CStr::from_ptr(db_path).to_str() } {
-        Ok(s) => s.to_string(),
-        Err(_) => {
-            eprintln!("Error: db_path is not valid UTF-8");
-            return 2;
-        }
-    };
-
-    thread::spawn(move || {
-        let rt = match tokio::runtime::Runtime::new() {
-            Ok(r) => r,
-            Err(e) => {
-                eprintln!("Failed to create Tokio runtime: {}", e);
-                return;
-            }
-        };
-        if let Err(e) = rt.block_on(start_server(&db_path_string)) {
-            eprintln!("Server error: {}", e);
-        }
+        });
     });
 
-    0
+    Ok((handle, shutdown_tx))
 }
 
-/// Alias for [`innoforge_start_server`] with patent_hub branding.
-///
-/// # Safety
-/// - `db_path` must be a valid pointer to a null-terminated UTF-8 C string
-/// - The pointed string must be valid for the duration of this call
-///
-/// # Returns
-/// - 0: success (server started in background thread)
-/// - 1: db_path is null
-/// - 2: db_path is not valid UTF-8
-#[no_mangle]
-pub unsafe extern "C" fn patent_hub_start_server(db_path: *const c_char) -> i32 {
-    innoforge_start_server(db_path)
+/// 关闭服务器 / Shutdown server.
+fn shutdown_server(handle: std::thread::JoinHandle<()>, tx: tokio::sync::oneshot::Sender<()>) {
+    let _ = tx.send(());
+    let _ = handle.join();
 }
+
+// ================================================================
+//  FFI 导出函数（Android / iOS 通过 uniffi 调用）
+//  FFI export functions (called via uniffi on Android / iOS)
+// ================================================================
+
+/// 启动创研台服务器 / Start InnoForge server.
+#[no_mangle]
+pub extern "C" fn innoforge_start_server() -> i32 {
+    let _ = dotenvy::dotenv_override();
+    let _ = tracing_subscriber::fmt::try_init();
+
+    let db_path = if cfg!(target_os = "android") {
+        let data_dir = std::env::var("HOME").unwrap_or_else(|_| "/data/local/tmp".to_string());
+        format!("{}/innoforge.db", data_dir)
+    } else {
+        "innoforge.db".to_string()
+    };
+
+    match start_server(db_path) {
+        Ok((handle, tx)) => {
+            unsafe {
+                SERVER_HANDLE = Some((handle, tx));
+            }
+            0
+        }
+        Err(e) => {
+            eprintln!("Failed to start server: {}", e);
+            1
+        }
+    }
+}
+
+/// 关闭创研台服务器 / Shutdown InnoForge server.
+#[no_mangle]
+pub extern "C" fn innoforge_shutdown_server() -> i32 {
+    #[allow(static_mut_refs)]
+    unsafe {
+        if let Some((handle, tx)) = SERVER_HANDLE.take() {
+            shutdown_server(handle, tx);
+            0
+        } else {
+            eprintln!("No server to shut down");
+            1
+        }
+    }
+}
+
+/// 启动专利 Hub 服务器（兼容旧接口）/ Legacy entry point for patent_hub.
+#[no_mangle]
+pub extern "C" fn patent_hub_start_server() -> i32 {
+    innoforge_start_server()
+}
+
+#[no_mangle]
+pub extern "C" fn patent_hub_shutdown_server() -> i32 {
+    innoforge_shutdown_server()
+}
+
+static mut SERVER_HANDLE: Option<(std::thread::JoinHandle<()>, tokio::sync::oneshot::Sender<()>)> = None;
