@@ -782,10 +782,10 @@
             html += '<button onclick="exportResultMarkdown()" title="' + t('oar.export') + '">📥 ' + t('oar.export') + '</button>';
         }
         if (options.showDiscussion) {
-            html += '<button onclick="startDiscussion()">💬 ' + t('oar.discussBtn') + '</button>';
+            html += '<button onclick="startDiscussion()">' + t('oar.discussBtn') + '</button>';
         }
         if (options.amend) {
-            html += '<button onclick="showAmendmentEditor(getContentForAmend())">✏️ ' + t('oar.amendBtn') + '</button>';
+            html += '<button onclick="showAmendmentEditor(getContentForAmend())">' + t('oar.amendBtn') + '</button>';
         }
         html += '</div>';
         return html;
