@@ -57,6 +57,8 @@ pub struct Message {
 #[derive(Deserialize)]
 struct ResponseMessage {
     content: Option<String>,
+    /// DeepSeek v4-flash 将可见输出放在 reasoning_content 而非 content
+    reasoning_content: Option<String>,
 }
 
 // Flexible response parser for different AI providers
@@ -83,12 +85,26 @@ pub(crate) fn extract_chat_content(raw_text: &str) -> String {
                 if let Some(content) = choice
                     .message
                     .as_ref()
-                    .and_then(|message| message.content.as_ref())
-                    .or_else(|| {
-                        choice
-                            .delta
+                    .and_then(|message| {
+                        // 优先取 content；若为 None/空，尝试 reasoning_content（DeepSeek）
+                        message
+                            .content
                             .as_ref()
-                            .and_then(|delta| delta.content.as_ref())
+                            .filter(|c| !c.is_empty())
+                            .or_else(|| {
+                                message.reasoning_content.as_ref().filter(|c| !c.is_empty())
+                            })
+                    })
+                    .or_else(|| {
+                        choice.delta.as_ref().and_then(|delta| {
+                            delta
+                                .content
+                                .as_ref()
+                                .filter(|c| !c.is_empty())
+                                .or_else(|| {
+                                    delta.reasoning_content.as_ref().filter(|c| !c.is_empty())
+                                })
+                        })
                     })
                 {
                     all_empty = false;

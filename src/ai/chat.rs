@@ -268,7 +268,11 @@ impl AiClient {
                                     }
                                     if let Some(json_str) = line.strip_prefix("data: ") {
                                         if let Ok(val) = serde_json::from_str::<serde_json::Value>(json_str) {
-                                            if let Some(content) = val["choices"][0]["delta"]["content"].as_str() {
+                                            // DeepSeek v4-flash 将可见文本放在 reasoning_content
+                                            let delta = &val["choices"][0]["delta"];
+                                            let content = delta["content"].as_str()
+                                                .or_else(|| delta["reasoning_content"].as_str());
+                                            if let Some(content) = content {
                                                 if !content.is_empty()
                                                     && tx.send(content.to_string()).await.is_err()
                                                 {
