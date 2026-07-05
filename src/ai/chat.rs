@@ -10,7 +10,7 @@ impl AiClient {
     pub async fn chat_expert(&self, user_msg: &str, context: Option<&str>) -> Result<String> {
         let mut messages = vec![Message {
             role: "system".into(),
-            content: "你是资深专利与研发战略专家。请使用“结论→证据→反证→风险→下一步”的结构回答，\
+            content: "你是资深专利与研发战略专家。请使用\u{201C}结论\u{2192}证据\u{2192}反证\u{2192}风险\u{2192}下一步\u{201D}的结构回答，\
                       并明确给出置信度（高/中/低）与依据。"
                 .into(),
         }];
@@ -107,6 +107,9 @@ impl AiClient {
     }
 
     /// 通用流式消息发送：返回 SSE chunk 接收端 / Generic streaming: send messages, get chunk Receiver
+    ///
+    /// OA 讨论等大上下文场景使用 ANALYSIS 超时（180s），确保超长 prompt 不会被截断。
+    /// Uses ANALYSIS timeout (180s) for OA discussions and other large-context scenarios.
     pub fn send_chat_stream(
         &self,
         messages: Vec<Message>,
@@ -122,8 +125,9 @@ impl AiClient {
         }
 
         let provider = self.primary.clone();
+        // R6: OA 讨论和分析使用 180s 超时（prompt 常含大量上下文，90s 不够）
         let client = reqwest::Client::builder()
-            .timeout(timeouts::CHAT)
+            .timeout(timeouts::ANALYSIS)
             .no_proxy()
             .build()
             .unwrap_or_else(|_| self.client.clone());
@@ -139,10 +143,15 @@ impl AiClient {
                         let mut chat_messages: Vec<serde_json::Value> = Vec::new();
                         for msg in &messages {
                             if msg.role == "system" {
-                                if !system_prompt.is_empty() { system_prompt.push('\n'); }
+                                if !system_prompt.is_empty() {
+                                    system_prompt.push('\n');
+                                }
                                 system_prompt.push_str(&msg.content);
                             } else {
-                                chat_messages.push(serde_json::json!({"role": msg.role, "content": msg.content}));
+                                chat_messages.push(serde_json::json!({
+                                    "role": msg.role,
+                                    "content": msg.content
+                                }));
                             }
                         }
                         let mut body = serde_json::json!({
@@ -165,12 +174,21 @@ impl AiClient {
                             .await
                         {
                             Ok(r) => r,
-                            Err(e) => { let _ = tx.send(format!("[ERROR] {}", e)).await; return; }
+                            Err(e) => {
+                                let _ = tx.send(format!("[ERROR] {}", e)).await;
+                                return;
+                            }
                         };
                         if !resp.status().is_success() {
                             let status = resp.status();
                             let b = resp.text().await.unwrap_or_default();
-                            let _ = tx.send(format!("[ERROR] Anthropic HTTP {}: {}", status, safe_truncate(&b, 200))).await;
+                            let _ = tx
+                                .send(format!(
+                                    "[ERROR] Anthropic HTTP {}: {}",
+                                    status,
+                                    safe_truncate(&b, 200)
+                                ))
+                                .await;
                             return;
                         }
 
@@ -183,19 +201,35 @@ impl AiClient {
                                         let line = buf[..pos].trim().to_string();
                                         buf = buf[pos + 1..].to_string();
                                         if let Some(json_str) = line.strip_prefix("data: ") {
-                                            if let Ok(val) = serde_json::from_str::<serde_json::Value>(json_str) {
+                                            if let Ok(val) =
+                                                serde_json::from_str::<serde_json::Value>(json_str)
+                                            {
                                                 match val["type"].as_str() {
                                                     Some("content_block_delta") => {
-                                                        if let Some(text) = val["delta"]["text"].as_str() {
-                                                            if !text.is_empty() && tx.send(text.to_string()).await.is_err() {
+                                                        if let Some(text) =
+                                                            val["delta"]["text"].as_str()
+                                                        {
+                                                            if !text.is_empty()
+                                                                && tx
+                                                                    .send(text.to_string())
+                                                                    .await
+                                                                    .is_err()
+                                                            {
                                                                 return;
                                                             }
                                                         }
                                                     }
                                                     Some("message_stop") => return,
                                                     Some("error") => {
-                                                        let msg = val["error"]["message"].as_str().unwrap_or("unknown");
-                                                        let _ = tx.send(format!("[ERROR] Anthropic: {}", msg)).await;
+                                                        let msg = val["error"]["message"]
+                                                            .as_str()
+                                                            .unwrap_or("unknown");
+                                                        let _ = tx
+                                                            .send(format!(
+                                                                "[ERROR] Anthropic: {}",
+                                                                msg
+                                                            ))
+                                                            .await;
                                                         return;
                                                     }
                                                     _ => {}
@@ -209,91 +243,142 @@ impl AiClient {
                             }
                         }
                     } else {
-                        // ── OpenAI-compatible streaming (DeepSeek, OpenAI, etc.) ──
+                        // ── OpenAI-compatible streaming (DeepSeek, OpenAI, Zhipu, etc.) ──
                         let request_body = serde_json::json!({
                             "model": provider.model,
-                            "messages": messages.iter().map(|m| serde_json::json!({"role": m.role, "content": m.content})).collect::<Vec<_>>(),
+                            "messages": messages.iter().map(|m| serde_json::json!({
+                                "role": m.role,
+                                "content": m.content
+                            })).collect::<Vec<_>>(),
                             "temperature": temperature,
                             "max_tokens": 16384,
                             "stream": true,
                         });
 
-                    let mut resp = match client
-                        .post(format!("{}/chat/completions", provider.base_url))
-                        .header("Authorization", format!("Bearer {}", provider.api_key))
-                        .json(&request_body)
-                        .send()
-                        .await
-                    {
-                        Ok(r) => r,
-                        Err(e) => {
-                            let _ = tx.send(format!("[ERROR] {}", e)).await;
+                        let mut resp = match client
+                            .post(format!("{}/chat/completions", provider.base_url))
+                            .header("Authorization", format!("Bearer {}", provider.api_key))
+                            .json(&request_body)
+                            .send()
+                            .await
+                        {
+                            Ok(r) => r,
+                            Err(e) => {
+                                let _ = tx.send(format!("[ERROR] {}", e)).await;
+                                return;
+                            }
+                        };
+
+                        if !resp.status().is_success() {
+                            let status = resp.status();
+                            let body = resp.text().await.unwrap_or_default();
+                            let _ = tx
+                                .send(format!(
+                                    "[ERROR] HTTP {} — {}",
+                                    status,
+                                    safe_truncate(&body, 200)
+                                ))
+                                .await;
                             return;
                         }
-                    };
 
-                    if !resp.status().is_success() {
-                        let status = resp.status();
-                        let body = resp.text().await.unwrap_or_default();
-                        let _ = tx.send(format!("[ERROR] HTTP {} — {}", status, safe_truncate(&body, 200))).await;
-                        return;
-                    }
+                        let mut buf = String::new();
+                        let mut total_chars: usize = 0;
 
-                    let mut buf = String::new();
-                    let mut total_chars: usize = 0;
-
-                    loop {
-                        match resp.chunk().await {
-                            Ok(Some(chunk)) => {
-                                let chunk_str = String::from_utf8_lossy(&chunk);
-                                if total_chars == 0 && chunk_str.trim().len() > 10 {
-                                    tracing::info!(
-                                        "[AI STREAM] first chunk raw preview: {:?} | decoded: {:?}",
-                                        &chunk[..chunk.len().min(60)],
-                                        &chunk_str[..chunk_str.trim().len().min(80)]
-                                    );
-                                }
-                                if total_chars == 0 && chunk_str.trim().len() <= 10 {
-                                    tracing::warn!(
-                                        "[AI STREAM] first chunk suspiciously short: raw={:?} decoded={:?}",
-                                        &chunk[..chunk.len().min(40)],
-                                        &chunk_str[..chunk_str.trim().len().min(40)]
-                                    );
-                                }
-                                total_chars += chunk_str.trim().len();
-                                buf.push_str(&chunk_str);
-
-                                while let Some(pos) = buf.find('\n') {
-                                    let line = buf[..pos].trim().to_string();
-                                    buf = buf[pos + 1..].to_string();
-
-                                    if line == "data: [DONE]" {
-                                        return;
+                        loop {
+                            match resp.chunk().await {
+                                Ok(Some(chunk)) => {
+                                    let chunk_str = String::from_utf8_lossy(&chunk);
+                                    if total_chars == 0 && chunk_str.trim().len() > 10 {
+                                        tracing::info!(
+                                            "[AI STREAM] first chunk raw preview: {:?} | decoded: {:?}",
+                                            &chunk[..chunk.len().min(60)],
+                                            &chunk_str[..chunk_str.trim().len().min(80)]
+                                        );
                                     }
-                                    if let Some(json_str) = line.strip_prefix("data: ") {
-                                        if let Ok(val) = serde_json::from_str::<serde_json::Value>(json_str) {
-                                            // DeepSeek v4-flash 将可见文本放在 reasoning_content
-                                            let delta = &val["choices"][0]["delta"];
-                                            let content = delta["content"].as_str()
-                                                .or_else(|| delta["reasoning_content"].as_str());
-                                            if let Some(content) = content {
-                                                if !content.is_empty()
-                                                    && tx.send(content.to_string()).await.is_err()
+                                    if total_chars == 0 && chunk_str.trim().len() <= 10 {
+                                        tracing::warn!(
+                                            "[AI STREAM] first chunk suspiciously short: raw={:?} decoded={:?}",
+                                            &chunk[..chunk.len().min(40)],
+                                            &chunk_str[..chunk_str.trim().len().min(40)]
+                                        );
+                                    }
+                                    total_chars += chunk_str.trim().len();
+                                    buf.push_str(&chunk_str);
+
+                                    while let Some(pos) = buf.find('\n') {
+                                        let line = buf[..pos].trim().to_string();
+                                        buf = buf[pos + 1..].to_string();
+
+                                        if line == "data: [DONE]" {
+                                            return;
+                                        }
+                                        if let Some(json_str) = line.strip_prefix("data: ") {
+                                            if let Ok(val) =
+                                                serde_json::from_str::<serde_json::Value>(json_str)
+                                            {
+                                                let delta = &val["choices"][0]["delta"];
+
+                                                // DeepSeek v4-flash: 可见文本在 reasoning_content 字段
+                                                // 优先 content，回退 reasoning_content
+                                                let content = delta["content"]
+                                                    .as_str()
+                                                    .or_else(|| {
+                                                        delta["reasoning_content"].as_str()
+                                                    });
+
+                                                if let Some(content) = content {
+                                                    if !content.is_empty()
+                                                        && tx
+                                                            .send(content.to_string())
+                                                            .await
+                                                            .is_err()
+                                                    {
+                                                        return;
+                                                    }
+                                                } else if let Some(delta_obj) = delta.as_object()
                                                 {
-                                                    return;
+                                                    // 兜底：content 和 reasoning_content 都为空
+                                                    // 但 delta 有其他字段 → 尝试捕获任何非空字符串
+                                                    // Fallback: catch any non-empty string field
+                                                    // (future-proof against new Provider formats)
+                                                    let fallback = delta_obj.iter().find_map(
+                                                        |(k, v)| {
+                                                            v.as_str()
+                                                                .filter(|s| !s.is_empty())
+                                                                .map(|s| (k, s))
+                                                        },
+                                                    );
+                                                    if let Some((field_name, text)) = fallback {
+                                                        tracing::warn!(
+                                                            "[AI STREAM] content & reasoning_content both empty, \
+                                                             captured '{}' field with {} chars",
+                                                            field_name,
+                                                            text.len()
+                                                        );
+                                                        if tx
+                                                            .send(text.to_string())
+                                                            .await
+                                                            .is_err()
+                                                        {
+                                                            return;
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
                                     }
                                 }
+                                Ok(None) => {
+                                    tracing::info!(
+                                        "[AI STREAM] stream complete, total chars: {}",
+                                        total_chars
+                                    );
+                                    break;
+                                }
+                                Err(_) => break,
                             }
-                            Ok(None) => {
-                                tracing::info!("[AI STREAM] stream complete, total chars received: {}", total_chars);
-                                break;
-                            }
-                            Err(_) => break,
                         }
-                    }
                     } // end OpenAI-compatible branch
                 },
             )
