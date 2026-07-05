@@ -37,8 +37,10 @@ pub async fn settings_page() -> Html<String> {
     Html(include_str!("../../templates/settings.html").to_string())
 }
 
-pub async fn office_action_response_page() -> Html<String> {
-    Html(include_str!("../../templates/office_action_response.html").to_string())
+pub async fn office_action_response_page() -> Response {
+    let html = include_str!("../../templates/office_action_response.html").to_string();
+    let headers = [("Cache-Control", "no-cache, no-store, must-revalidate")];
+    (headers, Html(html)).into_response()
 }
 
 pub async fn patent_detail_page(Path(id): Path<String>, State(s): State<AppState>) -> Response {
