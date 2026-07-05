@@ -84,6 +84,7 @@
 - [x] OA 渲染乱码 3 根因修复：max_tokens + DOMPurify + 上下文扩容 `c39dd20` ✅
 - [x] 讨论 SSE 解析增强：统一 event: 行处理模式 ✅
 - [x] 讨论传入 oa_type 增强上下文感知 ✅
+- [x] **DeepSeek reasoning_content 兼容修复** — SSE 解析器补读 `reasoning_content` 字段，解决讨论/分析流式空内容 `8a50d8d` ✅
 - [x] Fusion 多模型辩论引擎 + 每步模型配置 + 输出格式校验 `3aa1934` ✅
 - [x] S.U.P.E.R 架构规范 `3aa1934` ✅
 

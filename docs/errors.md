@@ -290,8 +290,13 @@
 - **修复**: 
   1. `src/ai/chat.rs` → OpenAI 兼容流式请求添加 `"max_tokens": 16384`
   2. `static/purify.min.js` → 从 CDN 重新下载完整版（20931 字节）
-  3. 服务已重启（PID 4860）
-- **修复确认**: 修复已部署，curl 测试返回完整正确中文 ✅。**待浏览器端确认**（Ctrl+F5 后可正常显示）。需在真实业务场景验证：
+  3. `src/ai/patent.rs` → OA 上下文截断从 120K/80K/120K → 300K/200K/300K
+  4. 服务已重启（PID 4860）
+- **二次修复** (2026-07-05):
+  - 发现 DeepSeek v4-flash 流式 SSE 将可见文本放在 `delta.reasoning_content` 而非 `delta.content`，服务端 SSE 解析器漏读所有 `reasoning_content` 块，导致讨论 API 一直返回空内容（仅 `event:done`）
+  - `ResponseMessage` 结构体新增 `reasoning_content: Option<String>`
+  - SSE 流式解析器新增 `reasoning_content` 读取兜底（优先 `content`，回退 `reasoning_content`）
+  - 提交: `8a50d8d`
   - 浏览器是否缓存旧页面 HTML（编译嵌入的模板）
   - 前端 `renderMarkdown()` 函数是否有未发现的字符转换
   - SSE 流式拼接时是否有数据丢失
