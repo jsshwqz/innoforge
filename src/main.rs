@@ -13,6 +13,7 @@
 //! See `common.rs` for shared initialization, route registration, and asset serving.
 
 mod ai;
+mod docx_export;
 pub mod common;
 mod db;
 mod error;

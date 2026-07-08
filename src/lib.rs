@@ -7,6 +7,7 @@
 //! Shared initialization with `main.rs` via `common.rs` to eliminate dual-entry sync risk.
 
 mod ai;
+mod docx_export;
 pub mod common;
 mod db;
 mod error;
