@@ -247,7 +247,9 @@ pub async fn api_ai_chat_stream(
                 yield Ok(Event::default().event("error").data(chunk));
                 break;
             }
-            yield Ok(Event::default().data(chunk));
+            // SSE safety: sanitize \n/\r to prevent protocol breakage
+            let sanitized = chunk.replace('\n', " ").replace('\r', " ");
+            yield Ok(Event::default().data(sanitized));
         }
         yield Ok(Event::default().event("done").data("[DONE]"));
     };
@@ -1253,8 +1255,10 @@ pub async fn api_ai_office_action_response_stream(
                 yield Ok(Event::default().event("error").data(chunk));
                 return;
             }
-            full_text.push_str(&chunk);
-            yield Ok(Event::default().data(chunk));
+            // SSE safety: sanitize \n/\r to prevent protocol breakage
+            let sanitized = chunk.replace('\n', " ").replace('\r', " ");
+            full_text.push_str(&sanitized);
+            yield Ok(Event::default().data(sanitized));
         }
         yield Ok(Event::default().event("done").data("[DONE]"));
 
@@ -1319,7 +1323,9 @@ pub async fn api_ai_oa_generate_response_letter(
                 yield Ok(Event::default().event("error").data(chunk));
                 return;
             }
-            yield Ok(Event::default().data(chunk));
+            // SSE safety: sanitize \n/\r to prevent protocol breakage
+            let sanitized = chunk.replace('\n', " ").replace('\r', " ");
+            yield Ok(Event::default().data(sanitized));
         }
         yield Ok(Event::default().event("done").data("[DONE]"));
     };
@@ -1453,7 +1459,9 @@ pub async fn api_ai_oa_discuss(
                 yield Ok(Event::default().event("error").data(chunk));
                 return;
             }
-            yield Ok(Event::default().data(chunk));
+            // SSE safety: sanitize \n/\r to prevent protocol breakage
+            let sanitized = chunk.replace('\n', " ").replace('\r', " ");
+            yield Ok(Event::default().data(sanitized));
         }
         yield Ok(Event::default().event("done").data("[DONE]"));
     };

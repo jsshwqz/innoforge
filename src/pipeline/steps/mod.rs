@@ -13,3 +13,4 @@ pub mod rank;
 pub mod scoring;
 pub mod search;
 pub mod similarity;
+pub mod text_util;

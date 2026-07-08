@@ -740,7 +740,9 @@ impl AiClient {
             // Deep mode: phase 2 — self-critique from examiner perspective
             let response_part = AiClient::extract_oa_response_section(&full_text);
             let separator = "\n\n---\n\n## 审查员视角预判（AI 自检）\n";
-            if tx.send(separator.to_string()).await.is_err() {
+            // SSE safety: sanitize \n/\r to prevent protocol breakage
+            let sanitized = separator.replace('\n', " ").replace('\r', " ");
+            if tx.send(sanitized).await.is_err() {
                 return;
             }
 
