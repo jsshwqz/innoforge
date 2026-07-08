@@ -265,6 +265,8 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
             "/api/oa/history/:id/delete",
             post(routes::api_oa_history_delete),
         )
+        // OA 答复书 docx 导出
+        .route("/api/oa/export-docx", post(routes::api_oa_export_docx))
         .route(
             "/api/ai/check-amendments",
             post(routes::api_ai_check_amendments),

@@ -7,6 +7,7 @@ use axum::{
     response::sse::{Event, Sse},
     Json,
 };
+use base64::Engine;
 use futures::stream::Stream;
 use reqwest::Client;
 use serde_json::json;
@@ -1585,5 +1586,38 @@ pub async fn api_ai_claim_chart(
     match ai.claim_chart(my_claims, prior_art).await {
         Ok(content) => Json(json!({"status": "ok", "analysis": content})),
         Err(e) => Json(json!({"error": format!("权利要求对照表生成失败: {}", e)})),
+    }
+}
+
+/// POST /api/oa/export-docx — 导出意见陈述书为 docx 文件
+pub async fn api_oa_export_docx(
+    State(_s): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let response_text = req["response_text"].as_str().unwrap_or("");
+    let patent_number = req["patent_number"].as_str().unwrap_or("");
+    let applicant = req["applicant"].as_str().unwrap_or("");
+    let oa_type = req["oa_type"].as_str().unwrap_or("");
+
+    if response_text.is_empty() {
+        return Json(json!({"error": "答复内容不能为空"}));
+    }
+
+    if response_text.len() > 50000 {
+        return Json(json!({"error": "答复内容过长，请分段导出"}));
+    }
+
+    let params = crate::docx_export::ExportParams {
+        response_text: response_text.to_string(),
+        patent_number: patent_number.to_string(),
+        applicant: applicant.to_string(),
+        oa_type: oa_type.to_string(),
+    };
+
+    match crate::docx_export::generate_docx(&params) {
+        docx_bytes => {
+            let base64_docx = base64::engine::general_purpose::STANDARD.encode(docx_bytes);
+            Json(json!({"status": "ok", "docx": base64_docx}))
+        }
     }
 }

@@ -1386,19 +1386,57 @@
         }
     }
 
-    function exportGeneratedResponse() {
+    async function exportGeneratedResponse() {
         var text = window._generatedResponseText || '';
         if (!text) { alert('请先生成答复书'); return; }
         text = text.replace(/^#+\s*/gm, '').replace(/\*+/g, '');
-        var blob = new Blob([(t('oar.responseDraftTitle') || '意见陈述书') + '\n\n' + text + '\n\n\n' + (t('oar.responseDraftApplicant') || '申请人') + '：\n' + (t('oar.responseDraftDate') || '日期') + '：\n'], { type: 'text/plain;charset=utf-8' });
-        var a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = (t('oar.responseDraftFilename') || '意见陈述书') + '_' + new Date().toISOString().slice(0, 10) + '.txt';
-        a.click();
-        URL.revokeObjectURL(a.href);
+
+        var btn = event.target;
+        var orig = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = '📦 导出中...';
+
+        try {
+            var oaType = document.querySelector('input[name="oa_type"]:checked');
+            oaType = oaType ? oaType.value : 'unknown';
+            var patentNum = uploadedData['patent_number'] || '';
+            var applicant = uploadedData['applicant_name'] || '';
+
+            var resp = await fetch('/api/oa/export-docx', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    response_text: text,
+                    patent_number: patentNum,
+                    applicant: applicant,
+                    oa_type: oaType
+                })
+            });
+            var data = await resp.json();
+            if (data.error) {
+                alert(data.error);
+            } else {
+                var byteCharacters = atob(data.docx);
+                var byteNumbers = new Array(byteCharacters.length);
+                for (var i = 0; i < byteCharacters.length; i++) {
+                    byteNumbers[i] = byteCharacters.charCodeAt(i);
+                }
+                var byteArray = new Uint8Array(byteNumbers);
+                var blob = new Blob([byteArray], {type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'});
+                var link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = 'OA答复_' + patentNum + '_' + new Date().toISOString().slice(0, 10) + '.docx';
+                link.click();
+                URL.revokeObjectURL(link.href);
+            }
+        } catch (e) {
+            alert('导出失败: ' + e.message);
+        }
+        btn.disabled = false;
+        btn.textContent = orig;
     }
 
-    function exportResponseDraft() {
+    async function exportResponseDraft() {
         var sections = parseOASections(lastAnalysisRawText);
         var responseSection = null;
         for (var i = 0; i < sections.length; i++) {
@@ -1407,14 +1445,51 @@
         if (!responseSection) { alert(t('oar.noResponseDraft')); return; }
 
         var text = responseSection.text;
-        // Strip markdown markers for clean export
         text = text.replace(/^#+\s*/gm, '').replace(/\*+/g, '');
-        var blob = new Blob([t('oar.responseDraftTitle') + '\n\n' + text + '\n\n\n' + t('oar.responseDraftApplicant') + '：\n' + t('oar.responseDraftDate') + '：\n'], { type: 'text/plain;charset=utf-8' });
-        var a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = t('oar.responseDraftFilename') + '_' + new Date().toISOString().slice(0, 10) + '.txt';
-        a.click();
-        URL.revokeObjectURL(a.href);
+
+        var btn = event.target;
+        var orig = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = '📦 导出中...';
+
+        try {
+            var oaType = document.querySelector('input[name="oa_type"]:checked');
+            oaType = oaType ? oaType.value : 'unknown';
+            var patentNum = uploadedData['patent_number'] || '';
+            var applicant = uploadedData['applicant_name'] || '';
+
+            var resp = await fetch('/api/oa/export-docx', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    response_text: text,
+                    patent_number: patentNum,
+                    applicant: applicant,
+                    oa_type: oaType
+                })
+            });
+            var data = await resp.json();
+            if (data.error) {
+                alert(data.error);
+            } else {
+                var byteCharacters = atob(data.docx);
+                var byteNumbers = new Array(byteCharacters.length);
+                for (var i = 0; i < byteCharacters.length; i++) {
+                    byteNumbers[i] = byteCharacters.charCodeAt(i);
+                }
+                var byteArray = new Uint8Array(byteNumbers);
+                var blob = new Blob([byteArray], {type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'});
+                var link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = 'OA答复草稿_' + patentNum + '_' + new Date().toISOString().slice(0, 10) + '.docx';
+                link.click();
+                URL.revokeObjectURL(link.href);
+            }
+        } catch (e) {
+            alert('导出失败: ' + e.message);
+        }
+        btn.disabled = false;
+        btn.textContent = orig;
     }
 
     // ── Helper: extract content for amendment editor ──
