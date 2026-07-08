@@ -4,22 +4,9 @@
 
 use crate::pipeline::context::{PipelineContext, SimilarityEntry};
 use crate::pipeline::steps::parse::tokenize;
+use crate::pipeline::steps::text_util::jaccard;
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
-
-/// 计算 Jaccard 相似系数
-fn jaccard(a: &HashSet<String>, b: &HashSet<String>) -> f64 {
-    if a.is_empty() && b.is_empty() {
-        return 0.0;
-    }
-    let intersection = a.intersection(b).count() as f64;
-    let union = a.union(b).count() as f64;
-    if union == 0.0 {
-        0.0
-    } else {
-        intersection / union
-    }
-}
 
 /// 计算 IDF（逆文档频率）
 fn compute_idf(documents: &[Vec<String>]) -> HashMap<String, f64> {

@@ -908,6 +908,10 @@
             body.my_patent_id = my;
         } else {
             body.my_patent = my;
+            // Extract patent number from uploaded content for auto-save (e.g. CN202310123456)
+            var content = my.content || my.title || '';
+            var pn = content.match(/\b((?:CN|US|EP|JP|KR|WO)\d{7,12}(?:[.]?\d)?)\b/i);
+            if (pn) body.my_patent_id = pn[1];
         }
 
         // Show streaming-friendly UI
@@ -916,8 +920,29 @@
         if (btn) btn.disabled = true;
         container.innerHTML = '<div class="result-box" style="border-color:#30363d;"><div class="result-content" id="streaming-result" style="padding:16px;font-size:13px;line-height:1.8;color:#c9d1d9;white-space:pre-wrap;word-break:break-word;max-height:70vh;overflow-y:auto;font-family:Consolas,monospace;"></div></div>';
 
-        // Try SSE streaming first
+        // Try non-streaming POST first (DeepSeek 流式返回内容不同)
         try {
+            var resp2 = await fetch('/api/ai/office-action-response', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(body)
+            });
+            var data2 = await resp2.json();
+            if (data2.error) throw new Error(data2.error);
+            lastAnalysisRawText = data2.analysis || '';
+            showOAAnalysisSections(data2.analysis);
+
+            numberRefParagraphs();
+            extractMappingMatrix(data2.analysis);
+
+            var content2 = (uploadedData['my'] && uploadedData['my'].content) || document.getElementById('my-patent').value || '';
+            if (content2) showAmendmentEditor(content2);
+            showChecklist();
+            loadOaHistory();
+        } catch (e) {
+            // Fallback: try SSE streaming
+            console.warn('Non-streaming POST failed, falling back to SSE streaming:', e.message);
+            try {
             var resp = await fetch('/api/ai/office-action-response/stream', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},

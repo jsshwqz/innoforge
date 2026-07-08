@@ -6,21 +6,9 @@
 //! 这意味着该领域技术路线尚未收敛，存在创新空间
 
 use crate::pipeline::context::{Contradiction, Evidence, PipelineContext};
+use crate::pipeline::steps::text_util::jaccard;
 use anyhow::Result;
 use std::collections::HashSet;
-
-/// 计算两个 token 集合的 Jaccard 系数
-fn token_jaccard(a: &[String], b: &[String]) -> f64 {
-    let set_a: HashSet<&String> = a.iter().collect();
-    let set_b: HashSet<&String> = b.iter().collect();
-    let intersection = set_a.intersection(&set_b).count() as f64;
-    let union = set_a.union(&set_b).count() as f64;
-    if union == 0.0 {
-        0.0
-    } else {
-        intersection / union
-    }
-}
 
 /// 提取两个结果之间的差异关键词
 fn difference_keywords(a: &[String], b: &[String]) -> Vec<String> {
@@ -54,7 +42,9 @@ pub async fn execute(ctx: &mut PipelineContext) -> Result<()> {
             }
 
             // 计算两者之间的相似度
-            let mutual_sim = token_jaccard(&a.tokens, &b.tokens);
+            let set_a: HashSet<&String> = a.tokens.iter().collect();
+            let set_b: HashSet<&String> = b.tokens.iter().collect();
+            let mutual_sim = jaccard(&set_a, &set_b);
 
             // 如果两者之间相似度很低（< 0.15），说明技术路线不同
             if mutual_sim < 0.15 {

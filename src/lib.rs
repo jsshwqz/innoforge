@@ -18,6 +18,9 @@ mod routes;
 
 use common::{build_router, init_app_state};
 
+/// 全局服务器句柄（移动端 FFI 单例） / Global server handle (mobile FFI singleton).
+static SERVER_HANDLE: std::sync::Mutex<Option<(std::thread::JoinHandle<()>, tokio::sync::oneshot::Sender<()>)>> = std::sync::Mutex::new(None);
+
 /// 启动内嵌 axum 服务器（移动端用，与桌面端共享构建逻辑）。
 /// Start embedded axum server for mobile, sharing router/init with desktop.
 fn start_server(
@@ -78,9 +81,7 @@ pub extern "C" fn innoforge_start_server() -> i32 {
 
     match start_server(db_path) {
         Ok((handle, tx)) => {
-            unsafe {
-                SERVER_HANDLE = Some((handle, tx));
-            }
+            SERVER_HANDLE.lock().unwrap().replace((handle, tx));
             0
         }
         Err(e) => {
@@ -93,15 +94,12 @@ pub extern "C" fn innoforge_start_server() -> i32 {
 /// 关闭创研台服务器 / Shutdown InnoForge server.
 #[no_mangle]
 pub extern "C" fn innoforge_shutdown_server() -> i32 {
-    #[allow(static_mut_refs)]
-    unsafe {
-        if let Some((handle, tx)) = SERVER_HANDLE.take() {
-            shutdown_server(handle, tx);
-            0
-        } else {
-            eprintln!("No server to shut down");
-            1
-        }
+    if let Some((handle, tx)) = SERVER_HANDLE.lock().unwrap().take() {
+        shutdown_server(handle, tx);
+        0
+    } else {
+        eprintln!("No server to shut down");
+        1
     }
 }
 
@@ -116,4 +114,3 @@ pub extern "C" fn patent_hub_shutdown_server() -> i32 {
     innoforge_shutdown_server()
 }
 
-static mut SERVER_HANDLE: Option<(std::thread::JoinHandle<()>, tokio::sync::oneshot::Sender<()>)> = None;

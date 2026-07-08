@@ -6,22 +6,12 @@
 //! 以便下游分析可以按现有技术主题（而非单个专利）进行推理。
 
 use crate::pipeline::context::{PipelineContext, PriorArtCluster};
+use crate::pipeline::steps::text_util::jaccard;
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
 
 /// Jaccard similarity threshold for assigning a result to an existing cluster.
 const CLUSTER_SIMILARITY_THRESHOLD: f64 = 0.25;
-
-/// Compute Jaccard similarity between two token sets.
-fn jaccard_similarity(a: &HashSet<&str>, b: &HashSet<&str>) -> f64 {
-    let intersection = a.intersection(b).count() as f64;
-    let union = a.union(b).count() as f64;
-    if union == 0.0 {
-        0.0
-    } else {
-        intersection / union
-    }
-}
 
 /// Derive a topic label from the most frequent tokens across all members.
 fn derive_topic(all_tokens: &[Vec<String>], max_words: usize) -> String {
@@ -63,7 +53,7 @@ pub async fn execute(ctx: &mut PipelineContext) -> Result<()> {
         let mut best_cluster: Option<(usize, f64)> = None;
 
         for (ci, (rep_idx, _, _)) in clusters.iter().enumerate() {
-            let sim = jaccard_similarity(token_set, &token_sets[*rep_idx]);
+            let sim = jaccard(token_set, &token_sets[*rep_idx]);
             if sim >= CLUSTER_SIMILARITY_THRESHOLD
                 && best_cluster.is_none_or(|(_, sim_best)| sim > sim_best)
             {

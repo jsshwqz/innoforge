@@ -156,7 +156,7 @@ impl AiClient {
                         }
                         let mut body = serde_json::json!({
                             "model": provider.model,
-                            "max_tokens": 8192,
+                            "max_tokens": 16384,
                             "messages": chat_messages,
                             "temperature": temperature,
                             "stream": true,
@@ -209,13 +209,12 @@ impl AiClient {
                                                         if let Some(text) =
                                                             val["delta"]["text"].as_str()
                                                         {
-                                                            if !text.is_empty()
-                                                                && tx
-                                                                    .send(text.to_string())
-                                                                    .await
-                                                                    .is_err()
-                                                            {
-                                                                return;
+                                                            if !text.is_empty() {
+                                                                // SSE safety: sanitize \n/\r to prevent protocol breakage
+                                                                let sanitized = text.replace('\n', " ").replace('\r', " ");
+                                                                if tx.send(sanitized).await.is_err() {
+                                                                    return;
+                                                                }
                                                             }
                                                         }
                                                     }
@@ -243,7 +242,7 @@ impl AiClient {
                             }
                         }
                     } else {
-                        // ── OpenAI-compatible streaming (DeepSeek, OpenAI, Zhipu, etc.) ──
+                        // ── OpenAI-compatible streaming (DeepSeek, OpenAI, etc.) ──
                         let request_body = serde_json::json!({
                             "model": provider.model,
                             "messages": messages.iter().map(|m| serde_json::json!({
@@ -254,6 +253,13 @@ impl AiClient {
                             "max_tokens": 16384,
                             "stream": true,
                         });
+
+                        let body_json = serde_json::to_string(&request_body).unwrap_or_default();
+                        tracing::info!(
+                            "[AI STREAM REQUEST] provider={} model={} body_len={}B body_preview={}",
+                            provider.name, provider.model, body_json.len(),
+                            safe_truncate(&body_json, 200)
+                        );
 
                         let mut resp = match client
                             .post(format!("{}/chat/completions", provider.base_url))
@@ -328,13 +334,12 @@ impl AiClient {
                                                     });
 
                                                 if let Some(content) = content {
-                                                    if !content.is_empty()
-                                                        && tx
-                                                            .send(content.to_string())
-                                                            .await
-                                                            .is_err()
-                                                    {
-                                                        return;
+                                                    if !content.is_empty() {
+                                                        // SSE safety: sanitize \n/\r to prevent protocol breakage
+                                                        let sanitized = content.replace('\n', " ").replace('\r', " ");
+                                                        if tx.send(sanitized).await.is_err() {
+                                                            return;
+                                                        }
                                                     }
                                                 } else if let Some(delta_obj) = delta.as_object()
                                                 {
@@ -356,11 +361,9 @@ impl AiClient {
                                                             field_name,
                                                             text.len()
                                                         );
-                                                        if tx
-                                                            .send(text.to_string())
-                                                            .await
-                                                            .is_err()
-                                                        {
+                                                        // SSE safety: sanitize \n/\r to prevent protocol breakage
+                                                        let sanitized = text.replace('\n', " ").replace('\r', " ");
+                                                        if tx.send(sanitized).await.is_err() {
                                                             return;
                                                         }
                                                     }
