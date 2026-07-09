@@ -1,4 +1,4 @@
-//! 专利分析方法 / Patent analysis methods
+﻿//! 专利分析方法 / Patent analysis methods
 
 #![allow(clippy::needless_borrow)]
 
@@ -237,6 +237,32 @@ impl AiClient {
             _ => Self::build_first_exam_prompt(my_patent, oa, refs, depth, discuss),
         };
 
+        // Deep mode: inject self-review + revision into a single prompt.
+        // No extra API calls — the model critiques and revises internally.
+        let prompt = if is_deep { format!("{}{}", prompt, "
+
+---
+
+## 深度模式：自我审查与修正
+完成上述分析后，请立即进行以下自查（无需等待，在同一回复中完成）：
+
+### 第一步：自我审查
+以审查员视角审视你的分析。逐条检查：
+1. 论证中是否存在逻辑跳跃或证据不足？
+2. 审查员最可能从哪个角度反驳？
+3. 是否遗漏了关键论据？
+4. 对对比文献公开内容的认定是否准确？
+
+### 第二步：修正分析
+基于上述自查结果，对原始分析进行修正。重点关注：
+- 修复自查发现的逻辑漏洞
+- 补充遗漏的关键论据
+- 加强容易被反驳的论证点
+输出修正后的完整分析。
+
+### 第三步：修正摘要
+在末尾列出本次修正与原始分析之间的 3-5 个关键差异。") } else { prompt };
+
         let messages = vec![
             Message {
                 role: "system".into(),
@@ -247,24 +273,7 @@ impl AiClient {
                 content: prompt,
             },
         ];
-
-        let step1 = self.send_chat(messages, 0.3).await?;
-
-        if !is_deep {
-            return Ok(step1);
-        }
-
-        // Deep mode: second pass — self-critique from examiner perspective
-        // Focus critique on the response draft (第五部分) specifically
-        let response_part = Self::extract_oa_response_section(&step1);
-        let critique = self.oa_critique(&response_part, oa).await?;
-
-        // Deep mode: third pass — revise analysis based on self-critique
-        let revised = self.oa_revise(&step1, &critique, oa, my_patent, refs).await?;
-        Ok(format!(
-            "{}\n\n---\n\n## 审查员视角预判（AI 自检）\n{}\n\n---\n\n## 改进答复分析（基于自检反馈修正后）\n{}",
-            step1, critique, revised
-        ))
+        self.send_chat(messages, 0.3).await
     }
 
     /// Self-critique step: review the proposed response from an examiner's perspective

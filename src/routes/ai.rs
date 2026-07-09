@@ -1,4 +1,4 @@
-use super::AppState;
+﻿use super::AppState;
 use crate::ai::{safe_truncate_chars, Message};
 use crate::patent::*;
 use axum::{
@@ -1080,6 +1080,52 @@ pub async fn api_ai_office_action_response(
         _ => String::new(),
     };
 
+    // 从请求中提取专利号，用于缓存命中判断
+    let patent_number = req
+        .get("my_patent_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let force_reanalyze = req
+        .get("force")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    // 缓存命中：同一专利号 + 同一 OA 类型 + 同深度 → 直接返回
+    if !patent_number.is_empty() && !force_reanalyze {
+        let oa_type_hint = req
+            .get("oa_type")
+            .and_then(|v| v.as_str())
+            .filter(|&v| v == "abnormal" || v == "reject_review" || v == "first_exam")
+            .unwrap_or("first_exam");
+        let depth_hint = req
+            .get("depth")
+            .and_then(|v| v.as_str())
+            .filter(|&v| v == "shallow" || v == "deep")
+            .unwrap_or("deep");
+        let depth_key = if depth_hint == "shallow" { "shallow" } else { "deep" };
+        if let Ok(existing) = s.db.list_oa_analyses(patent_number) {
+            if let Some(cached) = existing
+                .iter()
+                .find(|a| a.oa_type == oa_type_hint && a.depth == depth_key)
+            {
+                let patent_title = req
+                    .get("my_patent")
+                    .and_then(|v| v.as_object())
+                    .and_then(|o| o.get("title"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(patent_number);
+                return Json(json!({
+                    "status": "ok",
+                    "analysis": cached.analysis_text,
+                    "cached": true,
+                    "version": cached.version,
+                    "patent_number": patent_number,
+                    "patent_title": patent_title
+                }));
+            }
+        }
+    }
+
     let ai = s
         .config
         .read()
@@ -1105,10 +1151,6 @@ pub async fn api_ai_office_action_response(
     {
         Ok(content) => {
             // 自动保存到历史
-            let patent_number = req
-                .get("my_patent_id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
             let patent_title = req
                 .get("my_patent")
                 .and_then(|v| v.as_object())
