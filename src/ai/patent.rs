@@ -258,9 +258,12 @@ impl AiClient {
         // Focus critique on the response draft (第五部分) specifically
         let response_part = Self::extract_oa_response_section(&step1);
         let critique = self.oa_critique(&response_part, oa).await?;
+
+        // Deep mode: third pass — revise analysis based on self-critique
+        let revised = self.oa_revise(&step1, &critique, oa, my_patent, refs).await?;
         Ok(format!(
-            "{}\n\n---\n\n## 审查员视角预判（AI 自检）\n{}",
-            step1, critique
+            "{}\n\n---\n\n## 审查员视角预判（AI 自检）\n{}\n\n---\n\n## 改进答复分析（基于自检反馈修正后）\n{}",
+            step1, critique, revised
         ))
     }
 
@@ -293,6 +296,67 @@ impl AiClient {
                          你会毫不留情地指出。\
                          请用挑剔、专业的眼光审阅，不需要客气。"
                     .into(),
+            },
+            Message {
+                role: "user".into(),
+                content: prompt,
+            },
+        ];
+
+        self.send_chat(messages, 0.3).await
+    }
+
+    /// Revise analysis based on self-critique feedback (third pass of deep mode).
+    /// Takes the original step1 analysis, the examiner critique, and all
+    /// original materials, then produces an improved version that addresses
+    /// every weakness identified.
+    async fn oa_revise(
+        &self,
+        original_analysis: &str,
+        critique: &str,
+        office_action: &str,
+        my_patent: &str,
+        refs: &str,
+    ) -> Result<String> {
+        let prompt = format!(
+            "你是一位资深中国专利代理师（执业20年+）。你的同事刚完成了一份审查意见答复分析，\
+             然后一位资深审查员对这份答复进行了预判批评，指出了若干问题。\
+             现在请你基于审查员的批评反馈，对原始分析进行修正和改进。\n\n\
+             ## 你的任务\n\
+             1. 逐条审查审查员指出的问题，判断哪些是合理的、哪些可以反驳\n\
+             2. 对合理的批评，修改原始分析中的相应部分\n\
+             3. 对可以反驳的批评，在原分析基础上加强论证\n\
+             4. 补充审查员指出遗漏的关键论据\n\
+             5. 输出修正后的完整分析\n\n\
+             ## 输出要求\n\
+             - 保持原始分析的四部分结构（权利要求逐项解析 / 审查员驳回逻辑还原 / 特征对比总表 / 逐权利要求反驳论点）\n\
+             - 不要完全照搬原始分析——每个被批评的点都必须有实质性改进\n\
+             - 如果审查员的某项批评不成立，明确指出并说明理由（而不是默默忽略）\n\
+             - 在末尾附加一个「修正说明」小节，简要列出做了哪些关键修改\n\n\
+             ## 原始分析（同事的初稿）\n{}\n\n\
+             ## 审查员预判批评（需要据此修正）\n{}",
+            safe_truncate(original_analysis, 30000),
+            safe_truncate(critique, 20000),
+        );
+
+        let oa_summary = safe_truncate(office_action, 6000);
+        let patent_summary = safe_truncate(my_patent, 4000);
+        let refs_summary = safe_truncate(refs, 4000);
+        let messages = vec![
+            Message {
+                role: "system".into(),
+                content: format!(
+                    "你是一位资深中国专利代理师（执业20年+），精通中国专利法及审查指南。\
+                     你的专长是审阅和修正同事的审查意见答复方案——你能快速识别论证中的薄弱环节，\
+                     并从审查员角度预判反驳点后加以加固。\
+                     你的修改必须基于审查员的批评反馈，不能简单地复述原始内容。\
+                     对于审查员的每一项批评，你都要给出明确的回应（接受并修改 / 反驳并加固）。\
+                     请用严谨、专业的语言输出。\n\n\
+                     ## 背景材料\n\
+                     ### 审查意见通知书摘要\n{oa_summary}\n\
+                     ### 本专利摘要\n{patent_summary}\n\
+                     ### 对比文献摘要\n{refs_summary}"
+                ),
             },
             Message {
                 role: "user".into(),
