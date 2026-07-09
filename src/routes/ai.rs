@@ -18,7 +18,7 @@ use std::time::Instant;
 const QUICK_WEB_UPSTREAM_TIMEOUT_SECS: u64 = 6;
 const QUICK_WEB_TOTAL_BUDGET_SECS: u64 = 8;
 const AI_CHAT_ROUTE_TIMEOUT_SECS_WEB: u64 = 35;
-const AI_CHAT_ROUTE_TIMEOUT_SECS_NORMAL: u64 = 60;
+const AI_CHAT_ROUTE_TIMEOUT_SECS_NORMAL: u64 = 120;
 
 /// Quick web search: SerpAPI → Sogou free fallback. Returns formatted context string.
 async fn quick_web_search(query: &str, serpapi_key: &str) -> Option<String> {
