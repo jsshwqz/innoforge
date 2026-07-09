@@ -130,6 +130,22 @@ fn find_python() -> String {
     "python".to_string()
 }
 
+/// 检测当前环境是否有可用的 Python 解释器（供测试判断是否跳过）
+#[cfg(test)]
+fn python_available() -> bool {
+    for name in &["python3", "python"] {
+        if Command::new(name)
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+        {
+            return true;
+        }
+    }
+    false
+}
+
 /// 截断字符串
 fn truncate(s: &str, max: usize) -> String {
     if s.len() <= max {
@@ -145,6 +161,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_simple_python_experiment() {
+        // 该测试依赖运行环境中的 Python 解释器。
+        // 若环境未安装 Python，则优雅跳过（不标记为失败）。
+        if !python_available() {
+            eprintln!(
+                "ℹ️  跳过 test_simple_python_experiment：当前环境未检测到 Python 解释器。\n\
+                 沙箱执行器本身为 Rust 实现，此测试仅验证 Python 脚本执行路径。\n\
+                 安装 Python 3 后可恢复运行。"
+            );
+            return;
+        }
+
         let spec = ExperimentSpec {
             title: "test".to_string(),
             language: "python".to_string(),
@@ -155,8 +182,12 @@ mod tests {
             timeout_secs: 10,
         };
         let result = run_experiment(&spec).await.unwrap();
-        assert!(result.success);
-        assert!(result.stdout.contains("EXPERIMENT_DONE"));
+        assert!(result.success, "脚本应成功执行: {}", result.stderr);
+        assert!(
+            result.stdout.contains("EXPERIMENT_DONE"),
+            "stdout 应包含完成标记: {}",
+            result.stdout
+        );
     }
 
     #[test]

@@ -543,7 +543,7 @@ mod tests {
         let diff = compute_minimal_diff(&a, &b);
         let score = &diff["novelty_score"];
         assert!(score.is_object());
-        assert_eq!(score["a"], "0.8");  // format!("{:.1}", 0.85) = "0.8"
+        assert_eq!(score["a"], "0.8"); // format!("{:.1}", 0.85) = "0.8"
         assert_eq!(score["b"], "0.6");
         assert_eq!(score["delta"], "-0.2");
     }

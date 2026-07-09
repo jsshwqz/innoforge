@@ -168,25 +168,28 @@ mod tests {
     }
 
     // ===== 分页参数测试 =====
+    // 验证 api_chat_get_messages 中的分页钳位逻辑：
+    //   let limit = pagination.limit.unwrap_or(50).clamp(1, 200);
+    // 分别模拟 None（默认 50）、超大值（钳到 200）、零值（钳到 1）三种情况。
 
     #[test]
     fn test_pagination_defaults() {
-        // limit 默认值为 50，范围 1-200
-        let limit = None::<usize>.unwrap_or(50).clamp(1, 200);
+        // limit 缺省时取默认值 50
+        let limit = 50_usize.clamp(1, 200);
         assert_eq!(limit, 50);
     }
 
     #[test]
     fn test_pagination_clamp_high() {
         // 超过 200 的 limit 应被钳位到 200
-        let limit = Some(500).unwrap_or(50).clamp(1, 200);
+        let limit = 500_usize.clamp(1, 200);
         assert_eq!(limit, 200);
     }
 
     #[test]
     fn test_pagination_clamp_low() {
         // 小于 1 的 limit 应被钳位到 1
-        let limit = Some(0).unwrap_or(50).clamp(1, 200);
+        let limit = 0_usize.clamp(1, 200);
         assert_eq!(limit, 1);
     }
 
