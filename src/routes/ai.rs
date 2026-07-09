@@ -249,7 +249,7 @@ pub async fn api_ai_chat_stream(
                 break;
             }
             // SSE safety: sanitize \n/\r to prevent protocol breakage
-            let sanitized = chunk.replace('\n', " ").replace('\r', " ");
+            let sanitized = chunk.replace(['\n', '\r'], " ");
             yield Ok(Event::default().data(sanitized));
         }
         yield Ok(Event::default().event("done").data("[DONE]"));
@@ -1257,7 +1257,7 @@ pub async fn api_ai_office_action_response_stream(
                 return;
             }
             // SSE safety: sanitize \n/\r to prevent protocol breakage
-            let sanitized = chunk.replace('\n', " ").replace('\r', " ");
+            let sanitized = chunk.replace(['\n', '\r'], " ");
             full_text.push_str(&sanitized);
             yield Ok(Event::default().data(sanitized));
         }
@@ -1325,7 +1325,7 @@ pub async fn api_ai_oa_generate_response_letter(
                 return;
             }
             // SSE safety: sanitize \n/\r to prevent protocol breakage
-            let sanitized = chunk.replace('\n', " ").replace('\r', " ");
+            let sanitized = chunk.replace(['\n', '\r'], " ");
             yield Ok(Event::default().data(sanitized));
         }
         yield Ok(Event::default().event("done").data("[DONE]"));
@@ -1358,6 +1358,27 @@ pub async fn api_ai_oa_discuss(
         .to_string();
     let message = req
         .get("message")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    // P0-2/P0-3: 新增讨论会话元数据参数
+    let discussion_id = req
+        .get("discussion_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let patent_number = req
+        .get("patent_number")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let applicant_name = req
+        .get("applicant_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let oa_type = req
+        .get("oa_type")
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
@@ -1454,6 +1475,15 @@ pub async fn api_ai_oa_discuss(
     // Higher temperature for discussion — more natural and flexible
     let mut rx = ai.send_chat_stream(messages, 0.7);
 
+    // P0-2: 持久化讨论会话
+    let db = s.db.clone();
+    let discussion_id_final = if discussion_id.is_empty() {
+        uuid::Uuid::new_v4().to_string()
+    } else {
+        discussion_id.clone()
+    };
+    let mut accumulated_response = String::new();
+
     let stream = async_stream::stream! {
         while let Some(chunk) = rx.recv().await {
             if chunk.starts_with("[ERROR]") {
@@ -1461,10 +1491,24 @@ pub async fn api_ai_oa_discuss(
                 return;
             }
             // SSE safety: sanitize \n/\r to prevent protocol breakage
-            let sanitized = chunk.replace('\n', " ").replace('\r', " ");
+            let sanitized = chunk.replace(['\n', '\r'], " ");
+            accumulated_response.push_str(&sanitized);
             yield Ok(Event::default().data(sanitized));
         }
         yield Ok(Event::default().event("done").data("[DONE]"));
+
+        // P0-2: 流结束后持久化讨论记录
+        let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+        let _ = db.save_oa_discussion(&crate::db::OaDiscussion {
+            id: discussion_id_final,
+            patent_number: patent_number.clone(),
+            applicant_name: if applicant_name.is_empty() { None } else { Some(applicant_name.clone()) },
+            oa_type: if oa_type.is_empty() { None } else { Some(oa_type.clone()) },
+            analysis_snapshot: if analysis_text.is_empty() { None } else { Some(analysis_text.clone()) },
+            discussion_history: accumulated_response,
+            created_at: now.clone(),
+            updated_at: now,
+        });
     };
 
     Sse::new(Box::pin(stream))
@@ -1614,10 +1658,9 @@ pub async fn api_oa_export_docx(
         oa_type: oa_type.to_string(),
     };
 
-    match crate::docx_export::generate_docx(&params) {
-        docx_bytes => {
-            let base64_docx = base64::engine::general_purpose::STANDARD.encode(docx_bytes);
-            Json(json!({"status": "ok", "docx": base64_docx}))
-        }
+    let docx_bytes = crate::docx_export::generate_docx(&params);
+    {
+        let base64_docx = base64::engine::general_purpose::STANDARD.encode(docx_bytes);
+        Json(json!({"status": "ok", "docx": base64_docx}))
     }
 }

@@ -397,6 +397,30 @@ pub(crate) fn run(conn: &Connection, current_version: i32, target_version: i32) 
         tracing::info!("Database migrated to version 15 (oa_analyses version)");
     }
 
+    if current_version < 16 {
+        conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS oa_discussions (
+                id TEXT PRIMARY KEY,
+                patent_number TEXT NOT NULL,
+                applicant_name TEXT,
+                oa_type TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                analysis_snapshot TEXT,
+                discussion_history TEXT,
+                oa_snippet TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_oa_discussions_patent ON oa_discussions(patent_number);
+            CREATE INDEX IF NOT EXISTS idx_oa_discussions_created ON oa_discussions(created_at DESC);
+
+            DELETE FROM schema_version;
+            INSERT INTO schema_version (version) VALUES (16);
+        ",
+        )?;
+        tracing::info!("Database migrated to version 16 (oa_discussions)");
+    }
+
     if current_version > 0 && current_version < target_version {
         tracing::info!(
             "Database migrated from version {} to {}",

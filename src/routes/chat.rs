@@ -197,7 +197,9 @@ mod tests {
         // 保存消息后应能正确读取
         let db = Database::init(":memory:").unwrap();
         let id1 = db.save_chat_message("session-1", "user", "Hello").unwrap();
-        let id2 = db.save_chat_message("session-1", "assistant", "Hi there!").unwrap();
+        let id2 = db
+            .save_chat_message("session-1", "assistant", "Hi there!")
+            .unwrap();
         assert!(id1 > 0);
         assert!(id2 > 0);
         let (messages, total) = db.get_chat_messages_paginated("session-1", 50, 0).unwrap();
@@ -211,7 +213,8 @@ mod tests {
         // 分页 limit 应正确限制返回条数
         let db = Database::init(":memory:").unwrap();
         for i in 0..5 {
-            db.save_chat_message("session-2", "user", &format!("msg {}", i)).unwrap();
+            db.save_chat_message("session-2", "user", &format!("msg {}", i))
+                .unwrap();
         }
         let (messages, total) = db.get_chat_messages_paginated("session-2", 2, 0).unwrap();
         assert_eq!(total, 5);
@@ -223,7 +226,8 @@ mod tests {
         // 分页 offset 应正确跳过指定条数
         let db = Database::init(":memory:").unwrap();
         for i in 0..5 {
-            db.save_chat_message("session-3", "user", &format!("msg {}", i)).unwrap();
+            db.save_chat_message("session-3", "user", &format!("msg {}", i))
+                .unwrap();
         }
         let (messages, total) = db.get_chat_messages_paginated("session-3", 2, 3).unwrap();
         assert_eq!(total, 5);
@@ -235,7 +239,8 @@ mod tests {
         // 删除消息后应返回正确数量且查询为空
         let db = Database::init(":memory:").unwrap();
         db.save_chat_message("session-4", "user", "Hello").unwrap();
-        db.save_chat_message("session-4", "assistant", "Bye").unwrap();
+        db.save_chat_message("session-4", "assistant", "Bye")
+            .unwrap();
         let count = db.delete_chat_messages("session-4").unwrap();
         assert_eq!(count, 2);
         let (_, total) = db.get_chat_messages_paginated("session-4", 50, 0).unwrap();

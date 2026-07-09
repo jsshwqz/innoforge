@@ -211,7 +211,7 @@ impl AiClient {
                                                         {
                                                             if !text.is_empty() {
                                                                 // SSE safety: sanitize \n/\r to prevent protocol breakage
-                                                                let sanitized = text.replace('\n', " ").replace('\r', " ");
+                                                                let sanitized = text.replace(['\r', '\n'], " ");
                                                                 if tx.send(sanitized).await.is_err() {
                                                                     return;
                                                                 }
@@ -336,7 +336,7 @@ impl AiClient {
                                                 if let Some(content) = content {
                                                     if !content.is_empty() {
                                                         // SSE safety: sanitize \n/\r to prevent protocol breakage
-                                                        let sanitized = content.replace('\n', " ").replace('\r', " ");
+                                                        let sanitized = content.replace(['\r', '\n'], " ");
                                                         if tx.send(sanitized).await.is_err() {
                                                             return;
                                                         }
@@ -362,7 +362,7 @@ impl AiClient {
                                                             text.len()
                                                         );
                                                         // SSE safety: sanitize \n/\r to prevent protocol breakage
-                                                        let sanitized = text.replace('\n', " ").replace('\r', " ");
+                                                        let sanitized = text.replace(['\n', '\r'], " ");
                                                         if tx.send(sanitized).await.is_err() {
                                                             return;
                                                         }

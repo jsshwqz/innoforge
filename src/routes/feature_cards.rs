@@ -372,3 +372,189 @@ fn diff_strings(a: &str, b: &str) -> Vec<serde_json::Value> {
 
     ops
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::patent::FeatureCard;
+
+    /// 构造测试用特征卡片
+    fn sample_card(id: &str, title: &str) -> FeatureCard {
+        FeatureCard {
+            id: id.to_string(),
+            idea_id: "idea-1".to_string(),
+            title: title.to_string(),
+            description: format!("Description for {}", title),
+            novelty_score: Some(0.85),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            technical_problem: "technical problem".to_string(),
+            core_structure: "core structure".to_string(),
+            key_relations: "key relations".to_string(),
+            process_steps: "process steps".to_string(),
+            application_scenarios: "application scenarios".to_string(),
+        }
+    }
+
+    // ── diff_strings 测试 ──
+
+    #[test]
+    fn test_diff_strings_identical() {
+        let ops = diff_strings("hello", "hello");
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0]["type"], "equal");
+        assert_eq!(ops[0]["text"], "hello");
+    }
+
+    #[test]
+    fn test_diff_strings_empty_vs_nonempty() {
+        let ops = diff_strings("", "hello");
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0]["type"], "add");
+        assert_eq!(ops[0]["text"], "hello");
+    }
+
+    #[test]
+    fn test_diff_strings_nonempty_vs_empty() {
+        let ops = diff_strings("hello", "");
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0]["type"], "remove");
+        assert_eq!(ops[0]["text"], "hello");
+    }
+
+    #[test]
+    fn test_diff_strings_simple_replacement() {
+        // "abc" vs "adc" — 'b' 移除, 'd' 添加
+        let ops = diff_strings("abc", "adc");
+        let types: Vec<&str> = ops.iter().map(|o| o["type"].as_str().unwrap()).collect();
+        assert!(types.contains(&"remove"), "应有 remove 操作");
+        assert!(types.contains(&"add"), "应有 add 操作");
+    }
+
+    #[test]
+    fn test_diff_strings_completely_different() {
+        // "abc" vs "xyz" — 全部替换
+        let ops = diff_strings("abc", "xyz");
+        let has_remove = ops.iter().any(|o| o["type"] == "remove");
+        let has_add = ops.iter().any(|o| o["type"] == "add");
+        assert!(has_remove, "完全不同时应包含 remove");
+        assert!(has_add, "完全不同时应包含 add");
+    }
+
+    #[test]
+    fn test_diff_strings_long_text_truncation() {
+        // 超过 5000 字符时直接返回 remove + add（避免 O(m*n) 爆内存）
+        let long_a = "A".repeat(5001);
+        let long_b = "B".repeat(5001);
+        let ops = diff_strings(&long_a, &long_b);
+        assert_eq!(ops.len(), 2);
+        assert_eq!(ops[0]["type"], "remove");
+        assert_eq!(ops[1]["type"], "add");
+    }
+
+    // ── classify_diff 测试 ──
+
+    #[test]
+    fn test_classify_diff_no_difference() {
+        let card = sample_card("c1", "Same Title");
+        let (diff_type, significance, reason) = classify_diff(&card, &card);
+        assert_eq!(diff_type, "none");
+        assert!(!significance);
+        assert_eq!(reason, "无显著差异");
+    }
+
+    #[test]
+    fn test_classify_diff_structure_changed() {
+        let a = sample_card("a1", "Card A");
+        let mut b = sample_card("b1", "Card B");
+        b.core_structure = "different structure".to_string();
+        let (diff_type, significance, reason) = classify_diff(&a, &b);
+        assert_eq!(diff_type, "structure");
+        assert!(significance);
+        assert_eq!(reason, "核心结构采用了不同的技术方案");
+    }
+
+    #[test]
+    fn test_classify_diff_method_changed() {
+        let a = sample_card("a2", "Card A");
+        let mut b = sample_card("b2", "Card B");
+        b.process_steps = "different steps".to_string();
+        let (diff_type, significance, reason) = classify_diff(&a, &b);
+        assert_eq!(diff_type, "method");
+        assert!(significance);
+        assert_eq!(reason, "工艺/实施步骤存在差异");
+    }
+
+    #[test]
+    fn test_classify_diff_parameter_changed() {
+        let a = sample_card("a3", "Card A");
+        let mut b = sample_card("b3", "Card B");
+        // core_structure 和 process_steps 相同，仅 technical_problem 不同
+        b.technical_problem = "different problem".to_string();
+        let (diff_type, significance, reason) = classify_diff(&a, &b);
+        assert_eq!(diff_type, "parameter");
+        assert!(!significance);
+        assert_eq!(reason, "参数级差异，新颖性意义较低");
+    }
+
+    #[test]
+    fn test_classify_diff_structure_takes_priority_over_method() {
+        // 同时变更 core_structure 和 process_steps，应归类为 structure
+        let a = sample_card("a4", "Card A");
+        let mut b = sample_card("b4", "Card B");
+        b.core_structure = "new structure".to_string();
+        b.process_steps = "new steps".to_string();
+        let (diff_type, significance, _) = classify_diff(&a, &b);
+        assert_eq!(diff_type, "structure");
+        assert!(significance);
+    }
+
+    // ── compute_minimal_diff 测试 ──
+
+    #[test]
+    fn test_compute_minimal_diff_identical_cards() {
+        let card = sample_card("x1", "Same Title");
+        let diff = compute_minimal_diff(&card, &card);
+        // title diff 应为单个 equal 操作
+        assert_eq!(diff["title"].as_array().unwrap().len(), 1);
+        assert_eq!(diff["title"][0]["type"], "equal");
+    }
+
+    #[test]
+    fn test_compute_minimal_diff_title_difference() {
+        let a = sample_card("t1", "方案A");
+        let b = sample_card("t2", "方案B");
+        let diff = compute_minimal_diff(&a, &b);
+        let title_ops = diff["title"].as_array().unwrap();
+        let types: Vec<&str> = title_ops
+            .iter()
+            .map(|o| o["type"].as_str().unwrap())
+            .collect();
+        assert!(
+            types.contains(&"remove") || types.contains(&"add"),
+            "标题不同时应有差异操作"
+        );
+    }
+
+    #[test]
+    fn test_compute_minimal_diff_novelty_score_delta() {
+        let a = sample_card("s1", "Card A");
+        let mut b = sample_card("s2", "Card B");
+        b.novelty_score = Some(0.6);
+        let diff = compute_minimal_diff(&a, &b);
+        let score = &diff["novelty_score"];
+        assert!(score.is_object());
+        assert_eq!(score["a"], "0.8");  // format!("{:.1}", 0.85) = "0.8"
+        assert_eq!(score["b"], "0.6");
+        assert_eq!(score["delta"], "-0.2");
+    }
+
+    #[test]
+    fn test_compute_minimal_diff_no_novelty_score() {
+        let mut a = sample_card("n1", "Card A");
+        a.novelty_score = None;
+        let mut b = sample_card("n2", "Card B");
+        b.novelty_score = None;
+        let diff = compute_minimal_diff(&a, &b);
+        assert!(diff["novelty_score"].is_null());
+    }
+}

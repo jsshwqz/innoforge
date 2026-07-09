@@ -70,9 +70,7 @@ pub async fn serve_static_embedded(
 ///
 /// 注意：这里直接调用 `crate::routes::*`，因为 `common` 模块在 crate 内部，
 /// 而 `main.rs` 和 `lib.rs` 都以 `mod routes` 暴露了 routes 模块。
-pub fn init_app_state(
-    db_path: &str,
-) -> anyhow::Result<crate::routes::AppState> {
+pub fn init_app_state(db_path: &str) -> anyhow::Result<crate::routes::AppState> {
     use crate::db;
     use crate::routes::{AppConfig, AppState};
 
