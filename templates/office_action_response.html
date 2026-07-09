@@ -1784,26 +1784,28 @@
         btn.textContent = '⏳ ' + t('oar.extracting');
         btn.style.pointerEvents = 'none';
         try {
+            // 调用已有 /api/ai/chat，让 AI 总结讨论中的核心论点
             var messages = [];
             for (var i = 1; i < discussionHistory.length; i++) {
                 messages.push({ role: discussionHistory[i][0], content: discussionHistory[i][1] });
             }
-            var resp = await fetch('/api/ai/chat/conclusions', {
+            var conclusionPrompt = '请总结以上讨论中的核心论点和结论。请用以下格式输出：\n✅ 确认的论点：（具体描述）\n⚠️ 有风险或需关注的点：（具体描述）\n📌 建议或待办：（具体描述）';
+            var resp = await fetch('/api/ai/chat', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ history: messages })
+                body: JSON.stringify({
+                    history: messages,
+                    message: conclusionPrompt
+                })
             });
             var data = await resp.json();
-            if (data.status === 'ok' && data.conclusions) {
-                var lines = data.conclusions.split('\n');
-                for (var i = 0; i < lines.length; i++) {
-                    var line = lines[i].trim();
-                    if (!line) continue;
-                    if (line.length > 10) addArgCard(line, 'confirmed');
-                }
-                renderArgBoard();
+            if (data.content) {
+                parseArgsFromAI(data.content);
+                if (argList.length > 0) showArgBoard();
             }
-        } catch (e) {}
+        } catch (e) {
+            console.error('Extract args failed:', e);
+        }
         btn.textContent = '📝 ' + t('oar.extractArgs');
         btn.style.pointerEvents = '';
     }
