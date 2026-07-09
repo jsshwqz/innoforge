@@ -17,9 +17,6 @@ use std::time::Instant;
 
 const QUICK_WEB_UPSTREAM_TIMEOUT_SECS: u64 = 6;
 const QUICK_WEB_TOTAL_BUDGET_SECS: u64 = 8;
-const AI_CHAT_ROUTE_TIMEOUT_SECS_WEB: u64 = 35;
-const AI_CHAT_ROUTE_TIMEOUT_SECS_NORMAL: u64 = 120;
-
 /// Quick web search: SerpAPI → Sogou free fallback. Returns formatted context string.
 async fn quick_web_search(query: &str, serpapi_key: &str) -> Option<String> {
     let start = Instant::now();
@@ -314,12 +311,8 @@ pub async fn api_ai_chat(
     };
 
     let ai_start = Instant::now();
-    let route_timeout_secs = if req.web_search {
-        AI_CHAT_ROUTE_TIMEOUT_SECS_WEB
-    } else {
-        AI_CHAT_ROUTE_TIMEOUT_SECS_NORMAL
-    };
-    let result = tokio::time::timeout(std::time::Duration::from_secs(route_timeout_secs), async {
+    // 不设路由超时，由 AI provider 自己的 timeout 兜底
+    let result = async {
         let has_images = !req.images.is_empty();
 
         if has_images {
@@ -364,8 +357,7 @@ pub async fn api_ai_chat(
             let history = compress_history(&ai, history, 8000).await;
             ai.chat_with_history(&system_prompt, history, 0.7).await
         }
-    })
-    .await;
+    }.await;
     let ai_ms = ai_start.elapsed().as_millis();
     let total_ms = req_start.elapsed().as_millis();
     tracing::info!(
@@ -377,15 +369,9 @@ pub async fn api_ai_chat(
     );
 
     match result {
-        Ok(Ok(content)) => Json(AiResponse { content }),
-        Ok(Err(e)) => Json(AiResponse {
-            content: format!("AI error: {e}"),
-        }),
-        Err(_) => Json(AiResponse {
-            content: format!(
-                "AI 响应超时（>{}s），请重试或切换模型后再试。",
-                route_timeout_secs
-            ),
+        Ok(content) => Json(AiResponse { content }),
+        Err(e) => Json(AiResponse {
+            content: format!("AI 调用失败: {e}"),
         }),
     }
 }
