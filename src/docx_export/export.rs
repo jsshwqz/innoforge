@@ -1,5 +1,6 @@
-/// OA 答复书 docx 导出模块
-/// 使用纯手写 XML 生成简单 docx，依赖已有的 zip crate
+//! OA 答复书 docx 导出模块
+//!
+//! 使用纯手写 XML 生成简单 docx，依赖已有的 zip crate
 
 use std::io::{Cursor, Write};
 use zip::write::SimpleFileOptions;
@@ -26,7 +27,8 @@ pub fn generate_docx(params: &ExportParams) -> Vec<u8> {
   <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
   <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
 </Types>"#;
-    zip.start_file("[Content_Types].xml", SimpleFileOptions::default()).unwrap();
+    zip.start_file("[Content_Types].xml", SimpleFileOptions::default())
+        .unwrap();
     zip.write_all(content_types.as_bytes()).unwrap();
 
     // 2. _rels/.rels
@@ -34,11 +36,13 @@ pub fn generate_docx(params: &ExportParams) -> Vec<u8> {
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
 </Relationships>"#;
-    zip.start_file("_rels/.rels", SimpleFileOptions::default()).unwrap();
+    zip.start_file("_rels/.rels", SimpleFileOptions::default())
+        .unwrap();
     zip.write_all(rels.as_bytes()).unwrap();
 
     // 3. word/document.xml
-    let document = format!(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    let document = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
   <w:body>
     <w:p>
@@ -58,13 +62,14 @@ pub fn generate_docx(params: &ExportParams) -> Vec<u8> {
       <w:r><w:t>日期：________年____月____日</w:r></w:p>
     </w:p>
   </w:body>
-</w:document>"#, 
+</w:document>"#,
         patent_number = params.patent_number,
         applicant = params.applicant,
         oa_type = params.oa_type,
         content = format_paragraphs(&params.response_text)
     );
-    zip.start_file("word/document.xml", SimpleFileOptions::default()).unwrap();
+    zip.start_file("word/document.xml", SimpleFileOptions::default())
+        .unwrap();
     zip.write_all(document.as_bytes()).unwrap();
 
     // 4. word/_rels/document.xml.rels
@@ -72,7 +77,8 @@ pub fn generate_docx(params: &ExportParams) -> Vec<u8> {
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
 </Relationships>"#;
-    zip.start_file("word/_rels/document.xml.rels", SimpleFileOptions::default()).unwrap();
+    zip.start_file("word/_rels/document.xml.rels", SimpleFileOptions::default())
+        .unwrap();
     zip.write_all(doc_rels.as_bytes()).unwrap();
 
     // 5. word/styles.xml
@@ -101,7 +107,8 @@ pub fn generate_docx(params: &ExportParams) -> Vec<u8> {
     </w:rPr>
   </w:style>
 </w:styles>"#;
-    zip.start_file("word/styles.xml", SimpleFileOptions::default()).unwrap();
+    zip.start_file("word/styles.xml", SimpleFileOptions::default())
+        .unwrap();
     zip.write_all(styles.as_bytes()).unwrap();
 
     zip.finish().unwrap();
@@ -117,18 +124,19 @@ fn format_paragraphs(text: &str) -> String {
             paragraphs.push("<w:p/>".to_string());
         } else {
             // 简单处理标题（以"一、""二、"等开头）
-            let is_heading = trimmed.starts_with("一、") || trimmed.starts_with("二、") 
-                || trimmed.starts_with("三、") || trimmed.starts_with("四、")
-                || trimmed.starts_with("五、") || trimmed.starts_with("（一）")
-                || trimmed.starts_with("（二）") || trimmed.starts_with("（三）");
-            
-            if is_heading {
-                paragraphs.push(format!(r#"<w:p><w:r><w:t xml:space="preserve">{}</w:t></w:r></w:p>"#, 
-                    sanitize_xml(trimmed)));
-            } else {
-                paragraphs.push(format!(r#"<w:p><w:r><w:t xml:space="preserve">{}</w:t></w:r></w:p>"#, 
-                    sanitize_xml(trimmed)));
-            }
+            let _is_heading = trimmed.starts_with("一、")
+                || trimmed.starts_with("二、")
+                || trimmed.starts_with("三、")
+                || trimmed.starts_with("四、")
+                || trimmed.starts_with("五、")
+                || trimmed.starts_with("（一）")
+                || trimmed.starts_with("（二）")
+                || trimmed.starts_with("（三）");
+
+            paragraphs.push(format!(
+                r#"<w:p><w:r><w:t xml:space="preserve">{}</w:t></w:r></w:p>"#,
+                sanitize_xml(trimmed)
+            ));
         }
     }
     paragraphs.join("\n    ")
@@ -137,6 +145,6 @@ fn format_paragraphs(text: &str) -> String {
 /// 转义 XML 特殊字符
 fn sanitize_xml(s: &str) -> String {
     s.replace('&', "&amp;")
-     .replace('<', "&lt;")
-     .replace('>', "&gt;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }

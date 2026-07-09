@@ -741,7 +741,7 @@ impl AiClient {
             let response_part = AiClient::extract_oa_response_section(&full_text);
             let separator = "\n\n---\n\n## 审查员视角预判（AI 自检）\n";
             // SSE safety: sanitize \n/\r to prevent protocol breakage
-            let sanitized = separator.replace('\n', " ").replace('\r', " ");
+            let sanitized = separator.replace(['\n', '\r'], " ");
             if tx.send(sanitized).await.is_err() {
                 return;
             }

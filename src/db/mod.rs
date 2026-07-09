@@ -16,6 +16,7 @@ mod settings;
 #[cfg(test)]
 mod tests;
 pub mod version;
+pub use oa::OaDiscussion;
 
 use anyhow::Result;
 use rusqlite::Connection;
