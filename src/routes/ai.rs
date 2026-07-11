@@ -1,4 +1,4 @@
-﻿use super::AppState;
+use super::AppState;
 use crate::ai::{safe_truncate_chars, Message};
 use crate::patent::*;
 use axum::{
@@ -357,7 +357,8 @@ pub async fn api_ai_chat(
             let history = compress_history(&ai, history, 8000).await;
             ai.chat_with_history(&system_prompt, history, 0.7).await
         }
-    }.await;
+    }
+    .await;
     let ai_ms = ai_start.elapsed().as_millis();
     let total_ms = req_start.elapsed().as_millis();
     tracing::info!(
@@ -1071,10 +1072,7 @@ pub async fn api_ai_office_action_response(
         .get("my_patent_id")
         .and_then(|v| v.as_str())
         .unwrap_or("");
-    let force_reanalyze = req
-        .get("force")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+    let force_reanalyze = req.get("force").and_then(|v| v.as_bool()).unwrap_or(false);
 
     // 缓存命中：同一专利号 + 同一 OA 类型 + 同深度 → 直接返回
     if !patent_number.is_empty() && !force_reanalyze {
@@ -1088,7 +1086,11 @@ pub async fn api_ai_office_action_response(
             .and_then(|v| v.as_str())
             .filter(|&v| v == "shallow" || v == "deep")
             .unwrap_or("deep");
-        let depth_key = if depth_hint == "shallow" { "shallow" } else { "deep" };
+        let depth_key = if depth_hint == "shallow" {
+            "shallow"
+        } else {
+            "deep"
+        };
         if let Ok(existing) = s.db.list_oa_analyses(patent_number) {
             if let Some(cached) = existing
                 .iter()

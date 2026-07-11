@@ -29,8 +29,9 @@ server.log
 /fix_template.js
 /2
 
-# .reasonix 配置目录（AI Agent 工作文件）
+# .reasonix / .codex 配置目录（AI Agent 工作文件）
 .reasonix/
+.codex/
 
 # 测试适配器 / Test adapters
 testaionui-adapters/

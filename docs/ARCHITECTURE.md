@@ -147,7 +147,7 @@ PipelineStep 枚举（16 步固定序列）:
 - AI 生成 Python 验证脚本 → 子进程隔离执行 → 提取 JSON 指标
 - 失败不中断流水线
 
-### 7. bin/mcp-server.rs — MCP Server
+### 7a. bin/mcp-server.rs — MCP Server
 
 独立二进制，通过 stdio JSON-RPC 暴露 9 个专利/创意工具，代理到 localhost:3000。
 
