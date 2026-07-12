@@ -8,6 +8,8 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 ## [Unreleased]
 
 ### 修复 / Fixed
+- **OA 后端数据完整性** — OA 讨论和答复书生成不再为控制上下文而静默截断原文；超出明确容量时返回带字段、实际字符数和上限的可见错误，并按 Unicode 字符计数
+  OA backend integrity: discussion and response-letter flows no longer silently truncate source material; oversized inputs return a visible field-specific Unicode-character capacity error
 - **OA AI 上下文数据完整性** — 移除 OA 修改校验和讨论流程中 6 个前端正文截断表达式，覆盖审查意见、本专利、对比文件和既有分析结果，避免长材料在提交 AI 前静默丢失
   OA AI context integrity: removed six frontend body truncations from amendment checking and discussion flows so office actions, the subject patent, references, and existing analysis reach AI requests intact
 - **Windows 启动脚本解析** — 修复 `start.bat` debug 构建分支中未转义圆括号导致的 CMD 解析错误，快捷方式现在可以完成编译并启动服务

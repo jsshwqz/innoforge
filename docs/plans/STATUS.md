@@ -8,6 +8,15 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-07-13 — OA 后端数据完整性加固 / OA backend data integrity hardening
+
+- **状态 / Status**: ✅ 已完成 / Completed
+- **提交 / Commit**: `ce303d2`
+- **修复 / Fix**: OA 讨论及答复书生成路径改为保留完整输入；超过容量时按 Unicode 字符计数返回用户可见的字段级错误，不再静默截断 OA 原文、分析或讨论历史。
+  Discussion and response-letter paths now retain complete input and return visible field-specific Unicode-character capacity errors rather than silently truncating OA material, analysis, or discussion history.
+- **验证 / Verification**: `cargo fmt --check`、`cargo clippy -- -D warnings` 与 `cargo test` 通过（245 项通过，1 项文档测试按设计忽略）。
+  `cargo fmt --check`, `cargo clippy -- -D warnings`, and `cargo test` passed (245 passed; one doc test intentionally ignored).
+
 ### 2026-07-13 — Windows 启动脚本修复 / Windows launcher fix
 
 - **状态 / Status**: ✅ 已完成 / Completed
@@ -128,8 +137,7 @@
 1. **OA 数据库存储方案**: 长期，当前 OA 数据仅存储在 `case_documents` 中，未来可扩展专用 OA 数据库表
 2. **OCR 性能优化**: 异步处理，避免阻塞主线程
 3. **文件解析器错误处理**: 需要更完善的错误处理和用户提示
-4. **OA 讨论端到端数据完整性**: `src/routes/ai.rs` 对分析、讨论历史和 OA 原文仍做 60k/40k/15k 字符静默截断，应改为显式容量策略或可见错误
-5. **前端验证基线**: 补齐 `e2e_test.mjs`，并清理 `office_action_response.html` 现有 16 个 ESLint `no-redeclare` 错误
+4. **前端验证基线**: 补齐 `e2e_test.mjs`，并清理 `office_action_response.html` 现有 16 个 ESLint `no-redeclare` 错误
 
 ---
 

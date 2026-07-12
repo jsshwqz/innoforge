@@ -508,6 +508,19 @@
   Reworded the message without parentheses; build and launch logic is unchanged.
 - **验证 / Verification**: 实际运行 `start.bat`，debug 编译完成，服务启动，首页和 OA 页面均 HTTP 200。
   Ran `start.bat` end to end; debug build completed, the server started, and both the home and OA pages returned HTTP 200.
-- **提交 / Commit**: 待提交 / Pending
+- **提交 / Commit**: `fec45b9`
+
+### [2026-07-13] OA 后端静默截断 / OA backend silent truncation
+- **严重程度 / Severity**: HIGH
+- **涉及文件 / Files**: `src/routes/ai.rs`, `src/ai/patent.rs`, `src/ai/client.rs`
+- **现象 / Symptom**: 超长 OA 分析、讨论历史或 OA 原文在讨论和答复书生成前被静默截掉尾部，用户无法知道 AI 未看到完整材料。
+  Oversized OA analysis, discussion history, or office-action text lost its tail before discussion or response-letter generation without user visibility.
+- **根因 / Root cause**: 服务端把 provider 容量保护实现为 `safe_truncate_chars`，将“可显示的容量限制”误实现为数据丢弃。
+  Provider capacity protection used `safe_truncate_chars`, turning a visible capacity limit into data loss.
+- **修复 / Fix**: 改为按 Unicode 字符数的显式容量校验；超限时通过既有 JSON/SSE 错误通道返回字段名、实际字符数和上限，且不启动 AI 请求。
+  Replaced truncation with Unicode-character capacity validation; oversized input returns field, actual count, and limit through the existing JSON/SSE error path without starting an AI request.
+- **预防 / Prevention**: 数据用途文本禁止截断；所有新增 AI 上下文上限必须提供可见错误或可追踪分段，并覆盖 Unicode 边界测试。
+  Data-bearing text must not be truncated; new AI context limits require visible errors or traceable chunking and Unicode-boundary tests.
+- **提交 / Commit**: `ce303d2`
 
 *最后更新 / Last updated: 2026-07-13*
