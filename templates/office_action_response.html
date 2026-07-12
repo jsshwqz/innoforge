@@ -1523,7 +1523,7 @@
 
         var oaText = '';
         if (uploadedData['oa'] && uploadedData['oa'].content) {
-            oaText = uploadedData['oa'].content.slice(0, 3000);
+            oaText = uploadedData['oa'].content;
         }
 
         var btn = document.getElementById('btn-check-amendments');
@@ -2011,7 +2011,7 @@
             ctx += '专利号/ID: ' + my + '\n';
         } else if (my && my.content) {
             ctx += '标题: ' + (my.title || '') + '\n';
-            ctx += '内容:\n' + my.content.slice(0, 2000) + '\n';
+            ctx += '内容:\n' + my.content + '\n';
         }
         ctx += '\n== 对比文件 ==\n';
         for (var i = 0; i < refs.length; i++) {
@@ -2021,12 +2021,12 @@
                 ctx += r + '\n';
             } else if (r && r.content) {
                 ctx += (r.title || '未命名') + '\n';
-                ctx += r.content.slice(0, 1500) + '\n';
+                ctx += r.content + '\n';
             }
         }
         if (lastAnalysisRawText) {
             ctx += '\n== 当前分析结果 ==\n';
-            ctx += lastAnalysisRawText.slice(0, 3000) + '\n';
+            ctx += lastAnalysisRawText + '\n';
         }
         discussionHistory = [['system', ctx]];
         var panel = document.getElementById('discussion-panel');
@@ -2081,8 +2081,8 @@
         // 专业代理师指令放在 user message 里（不放 system role，避开上游角色扮演审查）
         var proInstruction = '请以中国专利代理师视角回答：每处引用具体法条（A22.2新颖性/A22.3创造性/A26.3说明书支持/A33修改超范围），给修改方案时用"修改前→修改后"对比格式，区分"可克服"和"难克服"的缺陷并给出置信度。';
         var ctxParts = [];
-        if (typeof oaDiscussOAText !== 'undefined' && oaDiscussOAText) ctxParts.push('【审查意见原文】\n' + oaDiscussOAText.slice(0, 3000));
-        if (typeof lastAnalysisRawText !== 'undefined' && lastAnalysisRawText) ctxParts.push('【当前OA分析结果】\n' + lastAnalysisRawText.slice(0, 3000));
+        if (typeof oaDiscussOAText !== 'undefined' && oaDiscussOAText) ctxParts.push('【审查意见原文】\n' + oaDiscussOAText);
+        if (typeof lastAnalysisRawText !== 'undefined' && lastAnalysisRawText) ctxParts.push('【当前OA分析结果】\n' + lastAnalysisRawText);
         ctxParts.push(proInstruction);
         ctxParts.push('我的问题：' + text);
         var messageWithContext = ctxParts.join('\n\n');
