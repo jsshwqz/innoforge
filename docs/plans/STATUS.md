@@ -8,6 +8,15 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-07-13 — Windows 启动脚本修复 / Windows launcher fix
+
+- **状态 / Status**: ✅ 已完成 / Completed
+- **文件 / File**: `start.bat`
+- **修复 / Fix**: 移除 debug 构建括号代码块内 `echo` 文本的未转义圆括号，避免 CMD 报“此时不应有 ...”。
+  Removed unescaped parentheses from the debug-build echo inside a CMD block.
+- **验证 / Verification**: 通过 `start.bat` 完成 debug 编译和后台启动；`/` 与 `/oa-response` 均 HTTP 200。
+  `start.bat` compiled and started the server; both `/` and `/oa-response` returned HTTP 200.
+
 ### 2026-07-13 — OA 前端数据完整性修复 / OA frontend data integrity remediation
 
 - **状态 / Status**: ✅ 已完成 / Completed

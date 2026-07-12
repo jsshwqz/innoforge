@@ -497,4 +497,17 @@
   Label every new truncation as display-only or data-bearing; enforce capacity on the backend with visible validation errors instead of silent truncation.
 - **提交 / Commit**: `f496648`
 
+### [2026-07-13] Windows start.bat CMD 解析失败 / Windows start.bat CMD parse failure
+- **严重程度 / Severity**: HIGH
+- **涉及文件 / File**: `start.bat`
+- **现象 / Symptom**: 从桌面快捷方式启动时，在 debug 构建分支报“此时不应有 ...”，服务未启动。
+  Launching from the desktop shortcut failed in the debug build branch with a CMD parse error before the server started.
+- **根因 / Root cause**: 括号代码块内的 `echo` 文本包含未转义圆括号，CMD 将其解释为控制语法。
+  An `echo` line inside a parenthesized block contained unescaped parentheses that CMD parsed as control syntax.
+- **修复 / Fix**: 将该提示改为不含圆括号的文本；未改变构建和启动逻辑。
+  Reworded the message without parentheses; build and launch logic is unchanged.
+- **验证 / Verification**: 实际运行 `start.bat`，debug 编译完成，服务启动，首页和 OA 页面均 HTTP 200。
+  Ran `start.bat` end to end; debug build completed, the server started, and both the home and OA pages returned HTTP 200.
+- **提交 / Commit**: 待提交 / Pending
+
 *最后更新 / Last updated: 2026-07-13*

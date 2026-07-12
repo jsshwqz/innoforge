@@ -48,7 +48,7 @@ if "%NEED_BUILD%"=="0" (
 :build
 REM ---- try debug first (incremental -- fast if no changes), fall back to release ----
 if not "%1"=="--release" (
-    echo [InnoForge] Building (debug, incremental -- fast if no changes)...
+    echo [InnoForge] Building debug, incremental - fast if no changes...
     "%CARGO_EXE%" build --bin innoforge
     if not errorlevel 1 (
         set "BIN_PATH=.\target\debug\innoforge.exe"
