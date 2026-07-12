@@ -16,6 +16,11 @@ mod idea;
 mod patent;
 mod tests;
 
+pub(crate) use client::{
+    oa_capacity_error, OA_DISCUSSION_ANALYSIS_MAX_CHARS, OA_DISCUSSION_HISTORY_MAX_CHARS,
+    OA_DISCUSSION_OA_MAX_CHARS,
+};
+#[allow(unused_imports)]
 pub use client::{safe_truncate_chars, AiClient, Message};
 // Note: fact_check is a预留 layer — currently not wired into the main OA flow.
 // The functions are still public; downstream code can use them when ready.

@@ -1,5 +1,8 @@
 use super::AppState;
-use crate::ai::{safe_truncate_chars, Message};
+use crate::ai::{
+    oa_capacity_error, Message, OA_DISCUSSION_ANALYSIS_MAX_CHARS, OA_DISCUSSION_HISTORY_MAX_CHARS,
+    OA_DISCUSSION_OA_MAX_CHARS,
+};
 use crate::patent::*;
 use axum::{
     extract::Path,
@@ -1417,9 +1420,34 @@ pub async fn api_ai_oa_discuss(
         return Sse::new(error_sse("[ERROR] 请输入讨论内容".into()));
     }
 
-    // Safety nets: DeepSeek V4 has 128K tokens (~400K Chinese chars). These limits are far below that.
-    let analysis = safe_truncate_chars(&analysis_text, 60000);
-    let disc_raw = safe_truncate_chars(&discussion_json, 40000).to_string();
+    // Explicit capacity guard: preserve the complete input and fail visibly when
+    // the provider-safe budget is exceeded. No OA data is silently truncated.
+    for (field, value, max_chars) in [
+        (
+            "analysis",
+            analysis_text.as_str(),
+            OA_DISCUSSION_ANALYSIS_MAX_CHARS,
+        ),
+        (
+            "discussion",
+            discussion_json.as_str(),
+            OA_DISCUSSION_HISTORY_MAX_CHARS,
+        ),
+        (
+            "office_action",
+            req.get("office_action")
+                .and_then(|v| v.as_str())
+                .unwrap_or(""),
+            OA_DISCUSSION_OA_MAX_CHARS,
+        ),
+    ] {
+        if let Some(error) = oa_capacity_error(field, value, max_chars) {
+            return Sse::new(error_sse(error));
+        }
+    }
+
+    let analysis = analysis_text.as_str();
+    let disc_raw = discussion_json.to_string();
 
     // Format discussion history as readable dialogue (input is JSON array)
     let disc_formatted = if disc_raw.len() > 10 && disc_raw != "[]" {
@@ -1443,12 +1471,10 @@ pub async fn api_ai_oa_discuss(
         String::new()
     };
 
-    let oa_snippet = safe_truncate_chars(
-        req.get("office_action")
-            .and_then(|v| v.as_str())
-            .unwrap_or(""),
-        15000,
-    );
+    let oa_snippet = req
+        .get("office_action")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
 
     let system_prompt = format!(
         "你是一位资深中国专利代理师（执业20年+），精通中国专利法、审查指南（2023修订版）及复审无效程序。\n\n\

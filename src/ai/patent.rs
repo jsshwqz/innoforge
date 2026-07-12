@@ -2,7 +2,10 @@
 
 #![allow(clippy::needless_borrow)]
 
-use super::client::{safe_truncate, safe_truncate_chars, AiClient, Message};
+use super::client::{
+    oa_capacity_error, safe_truncate, AiClient, Message, OA_RESPONSE_ANALYSIS_MAX_CHARS,
+    OA_RESPONSE_DISCUSSION_MAX_CHARS, OA_RESPONSE_OA_MAX_CHARS,
+};
 use anyhow::Result;
 
 impl AiClient {
@@ -776,9 +779,28 @@ impl AiClient {
     ) -> tokio::sync::mpsc::Receiver<String> {
         let (tx, rx) = tokio::sync::mpsc::channel::<String>(64);
 
-        let analysis = safe_truncate_chars(analysis_text, 600000); // 60万中文字
-        let oa = safe_truncate_chars(office_action, 150000); // 15万字 OA
-        let discussion = safe_truncate_chars(discussion_json, 400000); // 40万讨论
+        // Keep all user-provided material intact. If a provider-safe capacity is
+        // exceeded, send a structured SSE error through the existing stream path.
+        for (field, value, max_chars) in [
+            ("analysis", analysis_text, OA_RESPONSE_ANALYSIS_MAX_CHARS),
+            (
+                "discussion",
+                discussion_json,
+                OA_RESPONSE_DISCUSSION_MAX_CHARS,
+            ),
+            ("office_action", office_action, OA_RESPONSE_OA_MAX_CHARS),
+        ] {
+            if let Some(error) = oa_capacity_error(field, value, max_chars) {
+                tokio::spawn(async move {
+                    let _ = tx.send(error).await;
+                });
+                return rx;
+            }
+        }
+
+        let analysis = analysis_text;
+        let oa = office_action;
+        let discussion = discussion_json;
 
         let doc_type = match oa_type {
             "abnormal" => "意见陈述书（非正常申请答辩）",

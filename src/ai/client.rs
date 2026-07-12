@@ -215,7 +215,9 @@ pub fn safe_truncate(s: &str, max_bytes: usize) -> &str {
 }
 
 /// Safely truncate a UTF-8 string to at most `max_chars` characters.
-/// Much more intuitive for CJK text where 1 char = 3 bytes.
+/// Kept for compatibility with existing library consumers; OA request paths
+/// use explicit capacity validation instead of truncating user-provided data.
+#[allow(dead_code)]
 pub fn safe_truncate_chars(s: &str, max_chars: usize) -> &str {
     if s.chars().count() <= max_chars {
         return s;
@@ -229,12 +231,31 @@ pub fn safe_truncate_chars(s: &str, max_chars: usize) -> &str {
         byte_pos = i;
         char_count += 1;
     }
-    // Include the last character fully
     if char_count >= max_chars {
         &s[..byte_pos]
     } else {
         s
     }
+}
+
+// OA request limits are measured in Unicode scalar values, never UTF-8 bytes.
+// These are explicit capacity guards; callers return the resulting error instead
+// of silently dropping the tail of user-provided patent material.
+pub(crate) const OA_DISCUSSION_ANALYSIS_MAX_CHARS: usize = 60_000;
+pub(crate) const OA_DISCUSSION_HISTORY_MAX_CHARS: usize = 40_000;
+pub(crate) const OA_DISCUSSION_OA_MAX_CHARS: usize = 15_000;
+pub(crate) const OA_RESPONSE_ANALYSIS_MAX_CHARS: usize = 600_000;
+pub(crate) const OA_RESPONSE_DISCUSSION_MAX_CHARS: usize = 400_000;
+pub(crate) const OA_RESPONSE_OA_MAX_CHARS: usize = 150_000;
+
+pub(crate) fn oa_capacity_error(field: &str, value: &str, max_chars: usize) -> Option<String> {
+    let actual_chars = value.chars().count();
+    (actual_chars > max_chars).then(|| {
+        format!(
+            "[ERROR] OA_INPUT_TOO_LARGE field={field} actual_chars={actual_chars} max_chars={max_chars} \
+             请缩短该字段后重试（按 Unicode 字符计数，未丢弃任何原文）。"
+        )
+    })
 }
 
 fn extract_content_from_data(data: &Value) -> Option<String> {
