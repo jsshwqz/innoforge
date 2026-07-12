@@ -482,4 +482,19 @@
 
 ---
 
-*最后更新: 2026-06-29*
+### [2026-07-13] OA 前端上下文被静默截断 / OA frontend context silently truncated
+- **严重程度 / Severity**: HIGH
+- **涉及文件 / File**: `templates/office_action_response.html`
+- **现象 / Symptom**: 修改校验与讨论流程只向 AI 发送 OA、本专利、对比文件或既有分析结果的前 1500~3000 字，长材料尾部证据静默丢失。
+  Amendment checking and discussion sent only the first 1,500–3,000 characters of OA and patent context, silently dropping evidence near the end of long documents.
+- **根因 / Root cause**: 为控制请求体大小在数据构造处直接使用 `.slice(0, N)`，混淆了显示截断与数据截断。
+  Request-size control was implemented with `.slice(0, N)` inside data construction, conflating display truncation with data truncation.
+- **修复 / Fix**: 移除 6 个进入 AI 请求的正文截断表达式；保留日期、协议解析等非数据用途的 `slice`。
+  Removed six body truncations that feed AI requests while retaining slices used only for dates and protocol parsing.
+- **验证 / Verification**: 定制 Puppeteer 回归确认长文本尾部标记完整进入修改校验请求、讨论初始上下文和讨论消息；245 项 Rust 测试通过。
+  A focused Puppeteer regression confirmed end markers survive in amendment and discussion payloads; all 245 Rust tests passed.
+- **预防 / Prevention**: 对所有新增截断标注数据用途或显示用途；数据容量限制应在后端显式校验并返回用户可见错误，禁止静默截断。
+  Label every new truncation as display-only or data-bearing; enforce capacity on the backend with visible validation errors instead of silent truncation.
+- **提交 / Commit**: `f496648`
+
+*最后更新 / Last updated: 2026-07-13*

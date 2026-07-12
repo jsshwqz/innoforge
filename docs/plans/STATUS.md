@@ -8,6 +8,20 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-07-13 — OA 前端数据完整性修复 / OA frontend data integrity remediation
+
+- **状态 / Status**: ✅ 已完成 / Completed
+- **提交 / Commit**: `f496648`
+- **核心改动 / Core changes**:
+  - `templates/office_action_response.html`: 移除修改校验与讨论上下文中的 6 个正文截断表达式，覆盖 5 个逻辑问题组
+    Removed six body truncations across five logical issue groups in amendment checking and discussion context construction
+  - 保留日期、SSE 协议解析、消息数组和选区操作等非数据用途的 `slice`
+    Preserved non-data slices used for dates, SSE parsing, message arrays, and text selection
+- **验证 / Verification**: `cargo fmt --check`、clippy、245 项 Rust 测试及定制 Puppeteer 数据完整性回归通过
+  `cargo fmt --check`, clippy, 245 Rust tests, and a focused Puppeteer integrity regression passed
+- **已知后续项 / Follow-ups**: OA 讨论后端仍有 60k/40k/15k 字符静默截断；模板存在与 HEAD 相同的 16 个历史 ESLint `no-redeclare` 错误；仓库缺少规约引用的 `e2e_test.mjs`
+  The OA discussion backend still silently truncates at 60k/40k/15k characters; the template retains 16 baseline `no-redeclare` errors identical to HEAD; the referenced `e2e_test.mjs` is absent
+
 ### 2026-07-09 — OA 分析模块：三步→一步+缓存+超时移除 (v0.7.4)
 
 - **PR**: 三步→一步 prompt 重构、OA 缓存、超时移除、论点看板修复
@@ -105,6 +119,8 @@
 1. **OA 数据库存储方案**: 长期，当前 OA 数据仅存储在 `case_documents` 中，未来可扩展专用 OA 数据库表
 2. **OCR 性能优化**: 异步处理，避免阻塞主线程
 3. **文件解析器错误处理**: 需要更完善的错误处理和用户提示
+4. **OA 讨论端到端数据完整性**: `src/routes/ai.rs` 对分析、讨论历史和 OA 原文仍做 60k/40k/15k 字符静默截断，应改为显式容量策略或可见错误
+5. **前端验证基线**: 补齐 `e2e_test.mjs`，并清理 `office_action_response.html` 现有 16 个 ESLint `no-redeclare` 错误
 
 ---
 

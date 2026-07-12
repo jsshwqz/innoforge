@@ -5,6 +5,12 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 
+## [Unreleased]
+
+### 修复 / Fixed
+- **OA AI 上下文数据完整性** — 移除 OA 修改校验和讨论流程中 6 个前端正文截断表达式，覆盖审查意见、本专利、对比文件和既有分析结果，避免长材料在提交 AI 前静默丢失
+  OA AI context integrity: removed six frontend body truncations from amendment checking and discussion flows so office actions, the subject patent, references, and existing analysis reach AI requests intact
+
 ## [v0.7.3] - 2026-07-04
 
 ### 修复 / Fixed
