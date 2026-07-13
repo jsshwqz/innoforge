@@ -109,8 +109,25 @@ pub async fn api_enrich_patent(
                                         .replace("<p>", "\n")
                                         .replace("</p>", "\n");
                                     // Strip remaining HTML tags
-                                    let re = regex::Regex::new(r"<[^>]+>")
-                                        .expect("valid html tag regex");
+                                    static HTML_TAG_REGEX: std::sync::OnceLock<
+                                        Result<regex::Regex, regex::Error>,
+                                    > = std::sync::OnceLock::new();
+                                    let re = match HTML_TAG_REGEX
+                                        .get_or_init(|| regex::Regex::new(r"<[^>]+>"))
+                                        .as_ref()
+                                    {
+                                        Ok(regex) => regex,
+                                        Err(error) => {
+                                            tracing::error!(
+                                                error = %error,
+                                                "Failed to initialize patent description HTML regex"
+                                            );
+                                            return Json(json!({
+                                                "status":"error",
+                                                "message":"Failed to process patent description"
+                                            }));
+                                        }
+                                    };
                                     description = re.replace_all(&clean, "").trim().to_string();
                                     println!("[ENRICH] Got description len={}", description.len());
                                 }
@@ -1426,16 +1443,39 @@ async fn fetch_legal_from_sogou(patent_number: &str) -> anyhow::Result<LegalStat
     // 从整个页面中提取法律状态关键词（搜索词已限定专利号，结果都是相关的）
     // 先移除 script/style 标签及其内容，避免 JS/CSS 噪声（预编译 regex 避免重复开销）
     use std::sync::OnceLock;
-    static RE_SCRIPT: OnceLock<regex::Regex> = OnceLock::new();
-    static RE_STYLE: OnceLock<regex::Regex> = OnceLock::new();
-    static RE_TAG: OnceLock<regex::Regex> = OnceLock::new();
-    let re_script = RE_SCRIPT.get_or_init(|| {
-        regex::Regex::new(r"(?is)<script[^>]*>.*?</script>").expect("valid script regex")
-    });
-    let re_style = RE_STYLE.get_or_init(|| {
-        regex::Regex::new(r"(?is)<style[^>]*>.*?</style>").expect("valid style regex")
-    });
-    let re_tag = RE_TAG.get_or_init(|| regex::Regex::new(r"<[^>]*>").expect("valid tag regex"));
+    static RE_SCRIPT: OnceLock<Result<regex::Regex, regex::Error>> = OnceLock::new();
+    static RE_STYLE: OnceLock<Result<regex::Regex, regex::Error>> = OnceLock::new();
+    static RE_TAG: OnceLock<Result<regex::Regex, regex::Error>> = OnceLock::new();
+    let re_script = match RE_SCRIPT
+        .get_or_init(|| regex::Regex::new(r"(?is)<script[^>]*>.*?</script>"))
+        .as_ref()
+    {
+        Ok(regex) => regex,
+        Err(error) => {
+            tracing::error!(error = %error, "Failed to initialize Sogou script regex");
+            return Err(anyhow::anyhow!("无法初始化法律状态页面解析器"));
+        }
+    };
+    let re_style = match RE_STYLE
+        .get_or_init(|| regex::Regex::new(r"(?is)<style[^>]*>.*?</style>"))
+        .as_ref()
+    {
+        Ok(regex) => regex,
+        Err(error) => {
+            tracing::error!(error = %error, "Failed to initialize Sogou style regex");
+            return Err(anyhow::anyhow!("无法初始化法律状态页面解析器"));
+        }
+    };
+    let re_tag = match RE_TAG
+        .get_or_init(|| regex::Regex::new(r"<[^>]*>"))
+        .as_ref()
+    {
+        Ok(regex) => regex,
+        Err(error) => {
+            tracing::error!(error = %error, "Failed to initialize Sogou HTML tag regex");
+            return Err(anyhow::anyhow!("无法初始化法律状态页面解析器"));
+        }
+    };
     let no_script = re_script.replace_all(&html, " ");
     let no_style = re_style.replace_all(&no_script, " ");
     // Strip HTML tags for clean text matching

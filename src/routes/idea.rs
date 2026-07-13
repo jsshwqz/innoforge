@@ -1338,7 +1338,7 @@ fn simple_md_to_html(md: &str) -> String {
         } else if let Some(item) = trimmed.strip_prefix("- ") {
             out.push_str(&format!(
                 "<li style='margin:4px 0;'>{}</li>",
-                inline_md(&html_escape(item))
+                inline_md(item)
             ));
         } else if trimmed.starts_with("1. ")
             || trimmed.starts_with("2. ")
@@ -1348,13 +1348,13 @@ fn simple_md_to_html(md: &str) -> String {
                 let item = &trimmed[pos + 2..];
                 out.push_str(&format!(
                     "<li style='margin:4px 0;'>{}</li>",
-                    inline_md(&html_escape(item))
+                    inline_md(item)
                 ));
             }
         } else {
             out.push_str(&format!(
                 "<p style='margin:6px 0;'>{}</p>",
-                inline_md(&html_escape(trimmed))
+                inline_md(trimmed)
             ));
         }
     }
@@ -1367,21 +1367,74 @@ fn simple_md_to_html(md: &str) -> String {
 
 /// 行内 Markdown: **bold**, *italic*, `code`
 fn inline_md(s: &str) -> String {
-    use std::borrow::Cow;
-    let s: Cow<str> = Cow::Borrowed(s);
-    // Bold
-    let re_bold = regex::Regex::new(r"\*\*(.+?)\*\*").expect("valid bold regex");
-    let s = re_bold.replace_all(&s, "<strong>$1</strong>");
-    // Italic
-    let re_italic = regex::Regex::new(r"\*(.+?)\*").expect("valid italic regex");
+    use std::sync::OnceLock;
+
+    static RE_BOLD: OnceLock<Result<regex::Regex, regex::Error>> = OnceLock::new();
+    static RE_ITALIC: OnceLock<Result<regex::Regex, regex::Error>> = OnceLock::new();
+    static RE_CODE: OnceLock<Result<regex::Regex, regex::Error>> = OnceLock::new();
+
+    let escaped = html_escape(s);
+    let re_bold = match RE_BOLD
+        .get_or_init(|| regex::Regex::new(r"\*\*(.+?)\*\*"))
+        .as_ref()
+    {
+        Ok(regex) => regex,
+        Err(error) => {
+            tracing::error!(error = %error, "Failed to initialize inline Markdown bold regex");
+            return escaped;
+        }
+    };
+    let s = re_bold.replace_all(&escaped, "<strong>$1</strong>");
+    let re_italic = match RE_ITALIC
+        .get_or_init(|| regex::Regex::new(r"\*(.+?)\*"))
+        .as_ref()
+    {
+        Ok(regex) => regex,
+        Err(error) => {
+            tracing::error!(error = %error, "Failed to initialize inline Markdown italic regex");
+            return escaped;
+        }
+    };
     let s = re_italic.replace_all(&s, "<em>$1</em>");
-    // Inline code
-    let re_code = regex::Regex::new(r"`([^`]+)`").expect("valid code regex");
+    let re_code = match RE_CODE
+        .get_or_init(|| regex::Regex::new(r"`([^`]+)`"))
+        .as_ref()
+    {
+        Ok(regex) => regex,
+        Err(error) => {
+            tracing::error!(error = %error, "Failed to initialize inline Markdown code regex");
+            return escaped;
+        }
+    };
     let s = re_code.replace_all(
         &s,
         "<code style='background:#f3f4f6;padding:1px 4px;border-radius:3px;'>$1</code>",
     );
     s.into_owned()
+}
+
+#[cfg(test)]
+mod idea_markdown_tests {
+    use super::inline_md;
+
+    #[test]
+    fn inline_markdown_renders_bold_italic_and_code() {
+        let rendered = inline_md("**bold** *italic* `code`");
+
+        assert!(rendered.contains("<strong>bold</strong>"));
+        assert!(rendered.contains("<em>italic</em>"));
+        assert!(rendered.contains(
+            "<code style='background:#f3f4f6;padding:1px 4px;border-radius:3px;'>code</code>"
+        ));
+    }
+
+    #[test]
+    fn inline_markdown_escapes_html_input() {
+        let rendered = inline_md("<script>alert(1)</script>");
+
+        assert!(rendered.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
+        assert!(!rendered.contains("<script>"));
+    }
 }
 
 /// Export structured conclusions from the idea discussion.
