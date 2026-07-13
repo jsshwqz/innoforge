@@ -126,6 +126,12 @@ pub async fn api_upload_pdf_store(
     if ext != "pdf" {
         return Json(json!({"status": "error", "message": "仅支持 PDF 文件"}));
     }
+    if !has_pdf_header(&file_bytes) {
+        return Json(json!({
+            "status": "error",
+            "message": "文件不是有效 PDF，未检测到 %PDF- 文件签名"
+        }));
+    }
 
     // 确保上传目录存在
     let upload_dir = "data/uploads";
@@ -184,14 +190,19 @@ pub async fn api_upload_compare(
         return Json(json!({"error": "缺少文件或专利 ID"}));
     }
 
+    let ext = file_name.rsplit('.').next().unwrap_or("").to_lowercase();
+    if ext == "pdf" && !has_pdf_header(&file_bytes) {
+        return Json(json!({
+            "error": "文件不是有效 PDF，未检测到 %PDF- 文件签名"
+        }));
+    }
+
     let patent = match s.db.get_patent(&patent_id) {
         Ok(Some(p)) => p,
         _ => return Json(json!({"error": "专利不存在"})),
     };
 
     // Extract text content based on file type
-    let ext = file_name.rsplit('.').next().unwrap_or("").to_lowercase();
-
     let is_image = matches!(
         ext.as_str(),
         "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp"
@@ -339,6 +350,11 @@ pub async fn api_upload_extract(
     }
 
     let ext = file_name.rsplit('.').next().unwrap_or("").to_lowercase();
+    if ext == "pdf" && !has_pdf_header(&file_bytes) {
+        return Json(json!({
+            "error": "文件不是有效 PDF，未检测到 %PDF- 文件签名"
+        }));
+    }
     let is_image = matches!(
         ext.as_str(),
         "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp"
@@ -1025,6 +1041,11 @@ pub async fn api_patent_pdf_extract_text(
     if file_bytes.is_empty() {
         return Json(json!({"error": "缺少文件或 patent_id"}));
     }
+    if !has_pdf_header(&file_bytes) {
+        return Json(json!({
+            "error": "文件不是有效 PDF，未检测到 %PDF- 文件签名"
+        }));
+    }
 
     // Extract text using page-by-page extraction
     let pages = match pdf_extract::extract_text_from_mem_by_pages(&file_bytes) {
@@ -1341,6 +1362,7 @@ mod remote_pdf_download_tests {
         pdf_after_header_window.extend_from_slice(b"%PDF-1.7\n");
         assert!(!has_pdf_header(&pdf_after_header_window));
         assert!(!has_pdf_header(b"<html>not a PDF"));
+        assert!(!has_pdf_header(b"plain text disguised as a PDF"));
         assert!(validate_pdf_content_length(Some(MAX_PDF_STORE_SIZE as u64)).is_ok());
         assert!(validate_pdf_content_length(Some(MAX_PDF_STORE_SIZE as u64 + 1)).is_err());
 
