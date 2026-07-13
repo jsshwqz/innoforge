@@ -83,5 +83,7 @@
 
 ## 完成记录 / Completion
 
-- **状态 / Status**: ⏳ 实施中 / In progress
-- **代码提交 / Code commit**: 待完成后填写 / To be filled after completion
+- **状态 / Status**: ✅ 已完成 / Completed
+- **代码提交 / Code commit**: `1efef3d` (2026-07-14)
+- **验证 / Verification**: `cargo fmt --check` ✅, `cargo clippy -- -D warnings` ✅, `cargo test --lib` ✅ (135 passed), JS `--check` ✅
+- **备注 / Notes**: 超时层级恢复（全局300s/分析180s/富化300s）与 Google 认证原子化持久化一并提交
