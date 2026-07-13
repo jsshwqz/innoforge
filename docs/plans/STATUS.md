@@ -8,6 +8,14 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-07-13 — 本地上传 PDF 文件签名校验 / Local PDF-upload signature validation
+
+- **状态 / Status**: ✅ 已完成 / Completed
+- **提交 / Commit**: `8170576`
+- **修复 / Fix**: `api_upload_pdf_store`、文档对比上传、通用文本提取和专利 PDF 专用提取现在都会在写入磁盘或调用 PDF 解析、OCR、AI 视觉兜底前检查首 1024 字节内的 `%PDF-` 文件签名。仅把文本或 HTML 改名为 `.pdf` 的请求会得到用户可见的错误；专利专用入口还会对直传和远程下载在汇合后的字节统一复检。
+  `api_upload_pdf_store`, document comparison upload, general text extraction, and patent-specific PDF extraction now inspect the `%PDF-` signature in the first 1024 bytes before disk writes, PDF parsing, OCR, or AI vision fallback. Text or HTML merely renamed to `.pdf` receives a user-visible error, and the patent-specific endpoint rechecks both direct and remote bytes at their shared boundary.
+- **验证 / Verification**: 纯函数回归覆盖有效签名、前导空白、HTML、普通文本伪装和 1024 字节边界；`cargo fmt --check`、`cargo clippy -- -D warnings`、`cargo test`（285 passed, 1 ignored）以及正式二进制 HTTP 回归均通过。伪造 PDF 被 `/api/upload/pdf-store` 明确拒绝，`/` 与 `/oa-response` 均返回 HTTP 200。
+
 ### 2026-07-13 — AI 单次调用 60 秒上限 / AI single-call 60-second ceiling
 
 - **状态 / Status**: ✅ 已完成 / Completed

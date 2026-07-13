@@ -12,6 +12,8 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
   OA full discussion-record export: a local-only Markdown export preserves the initial context, every user/AI source message, role, and ISO timestamp; it makes no AI request and safely retains source text containing Markdown backticks
 
 ### 安全修复 / Security Fixes
+- **本地上传 PDF 文件签名校验** — 四个本地 PDF 上传入口现在都会在保存文件、调用解析器、OCR 或视觉兜底前验证首 1024 字节内的 `%PDF-` 签名，拒绝仅伪装为 `.pdf` 的文本或 HTML；专利专用提取入口对直传和远程下载汇合后的内容统一复检
+  Local PDF-upload signature validation: all four local PDF ingress paths now require a `%PDF-` signature within the first 1024 bytes before storage, parsing, OCR, or vision fallback. Text or HTML merely named `.pdf` is rejected, and the patent-specific extractor revalidates both direct-upload and remote-download bytes at their shared boundary
 - **AI 提示词输入边界** — 聊天历史现仅接受 `user` 和 `assistant` 角色，拒绝客户端伪造的 `system`/未知角色；专利记录、联网搜索、OA 材料、讨论记录和用户自定义角色偏好均以不可逃逸的 `<user_input>` 数据边界传给 AI。原始自定义角色不再拥有系统指令权限，服务端预设角色保持可用
   AI prompt input boundaries: chat history now accepts only `user` and `assistant`, rejecting client-forged `system` or unknown roles. Patent records, web results, OA material, discussion records, and raw custom role preferences use non-escapable `<user_input>` data boundaries; raw custom roles no longer have system-instruction authority while server presets remain available
 
