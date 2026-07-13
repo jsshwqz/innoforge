@@ -8,29 +8,25 @@ use std::time::Duration;
 
 /// 分级超时策略 / Graded timeout strategy
 ///
-/// 不同 AI 操作使用不同超时（之前全局写死 180s），避免聊天等轻量操作被
-/// 分析类的长时间超时所影响，也能为分析类操作提供更充裕的处理窗口。
+/// 所有单次 AI 操作统一受 60 秒上限约束，避免单个上游请求长期占用会话和服务资源。
 ///
-/// Different timeout thresholds per operation type:
-/// - Chat/discussion: fast, interactive
-/// - Patent/idea analysis: complex, long reasoning chains
-/// - File enrichment/PDF: longest, multi-step processing
+/// Every single AI operation has a 60-second upper bound.
 pub mod timeouts {
     use std::time::Duration;
 
-    /// 聊天 / Chat & discussion (interactive, should feel snappy)
-    pub const CHAT: Duration = Duration::from_secs(90);
+    /// 聊天 / Chat & discussion
+    pub const CHAT: Duration = Duration::from_secs(60);
 
-    /// 分析 / Patent analysis, idea analysis (complex prompts, long reasoning)
-    pub const ANALYSIS: Duration = Duration::from_secs(180);
+    /// 分析 / Patent analysis, idea analysis
+    pub const ANALYSIS: Duration = Duration::from_secs(60);
 
-    /// 增强处理 / Enrichment, batch processing, office action (multi-step, longest)
+    /// 增强处理 / Enrichment, batch processing, office action
     #[allow(dead_code)] // 公共 API 常量，供外部使用
-    pub const ENRICHMENT: Duration = Duration::from_secs(300);
+    pub const ENRICHMENT: Duration = Duration::from_secs(60);
 }
 
 // 向后兼容别名 / Backward-compatible alias for existing callers
-const PROVIDER_HTTP_TIMEOUT_SECS: u64 = 300; // = timeouts::ENRICHMENT (300s)
+const PROVIDER_HTTP_TIMEOUT_SECS: u64 = 60; // = timeouts::ENRICHMENT (60s)
 const PROVIDER_MAX_RETRIES: usize = 3;
 
 /// AI 提供者模式 / AI provider operation mode.
@@ -647,8 +643,8 @@ impl AiClient {
         Err(last_err.unwrap_or_else(|| anyhow::anyhow!("Anthropic provider failed")))
     }
 
-    /// 全局超时上限
-    pub(crate) const GLOBAL_TIMEOUT_SECS: u64 = 300;
+    /// 单次 AI 调用的全局超时上限。
+    pub(crate) const GLOBAL_TIMEOUT_SECS: u64 = 60;
 
     /// Get the current model name.
     pub fn model_name(&self) -> &str {
@@ -1050,5 +1046,35 @@ impl AiClient {
                 Self::GLOBAL_TIMEOUT_SECS
             )),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{timeouts, AiClient, PROVIDER_HTTP_TIMEOUT_SECS};
+    use std::time::Duration;
+
+    #[test]
+    fn single_ai_call_timeouts_do_not_exceed_sixty_seconds() {
+        for (name, timeout) in [
+            ("chat", timeouts::CHAT),
+            ("analysis", timeouts::ANALYSIS),
+            ("enrichment", timeouts::ENRICHMENT),
+        ] {
+            assert!(
+                timeout <= Duration::from_secs(60),
+                "{name} timeout must not exceed 60 seconds"
+            );
+        }
+
+        assert_eq!(
+            PROVIDER_HTTP_TIMEOUT_SECS, 60,
+            "default provider HTTP timeout must be 60 seconds"
+        );
+        assert_eq!(
+            AiClient::GLOBAL_TIMEOUT_SECS,
+            60,
+            "global AI timeout must be 60 seconds"
+        );
     }
 }

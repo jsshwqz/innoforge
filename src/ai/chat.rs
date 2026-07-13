@@ -108,8 +108,8 @@ impl AiClient {
 
     /// 通用流式消息发送：返回 SSE chunk 接收端 / Generic streaming: send messages, get chunk Receiver
     ///
-    /// OA 讨论等大上下文场景使用 ANALYSIS 超时（180s），确保超长 prompt 不会被截断。
-    /// Uses ANALYSIS timeout (180s) for OA discussions and other large-context scenarios.
+    /// OA 讨论等大上下文场景使用 ANALYSIS 超时（60s），并继续受全局 60 秒守卫。
+    /// Uses the 60-second ANALYSIS timeout and the global 60-second guard.
     pub fn send_chat_stream(
         &self,
         messages: Vec<Message>,
@@ -125,7 +125,7 @@ impl AiClient {
         }
 
         let provider = self.primary.clone();
-        // R6: OA 讨论和分析使用 180s 超时（prompt 常含大量上下文，90s 不够）
+        // OA 讨论和分析使用 60 秒 HTTP 超时；异步任务仍由全局 60 秒守卫包裹。
         let client = reqwest::Client::builder()
             .timeout(timeouts::ANALYSIS)
             .no_proxy()
