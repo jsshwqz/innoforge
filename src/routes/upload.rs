@@ -1,7 +1,10 @@
 use super::AppState;
 use axum::{extract::State, Json};
 use serde_json::json;
-use std::time::Duration;
+use std::{
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    time::Duration,
+};
 
 const MAX_FILE_SIZE: usize = 10 * 1024 * 1024; // 10 MB
 const MAX_PDF_STORE_SIZE: usize = 20 * 1024 * 1024; // 20 MB
@@ -1000,7 +1003,11 @@ pub async fn api_patent_pdf_extract_text(
             if !patent.pdf_url.is_empty() {
                 match download_pdf(&patent.pdf_url).await {
                     Ok(bytes) => file_bytes = bytes,
-                    Err(e) => tracing::warn!("下载专利 PDF 失败: {}", e),
+                    Err(error) => tracing::warn!(
+                        patent_id = %patent_id,
+                        error = %error,
+                        "Remote patent PDF download was rejected or failed"
+                    ),
                 }
             }
         }
@@ -1077,20 +1084,270 @@ pub async fn api_patent_pdf_extract_text(
     }))
 }
 
-/// Download a PDF from a URL (for patent PDFs from enrichment)
-async fn download_pdf(url: &str) -> Result<Vec<u8>, String> {
+/// Validate a remotely stored patent PDF URL before resolving or downloading it.
+///
+/// This accepts only host names so the subsequent DNS result can be checked and
+/// pinned to the request. IP-literal URLs bypass that protection and are refused.
+fn validate_pdf_download_url(raw_url: &str) -> Result<reqwest::Url, String> {
+    let url = reqwest::Url::parse(raw_url).map_err(|_| "invalid PDF URL".to_string())?;
+
+    if url.scheme() != "https" {
+        return Err("PDF URL must use HTTPS".to_string());
+    }
+    if url.port_or_known_default() != Some(443) {
+        return Err("PDF URL must use port 443".to_string());
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err("PDF URL must not include user credentials".to_string());
+    }
+
+    let host = url
+        .host_str()
+        .ok_or_else(|| "PDF URL must include a host name".to_string())?;
+    if is_ip_literal(host) {
+        return Err("PDF URL must use a host name instead of an IP literal".to_string());
+    }
+
+    Ok(url)
+}
+
+fn is_ip_literal(host: &str) -> bool {
+    let unbracketed = host
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+        .unwrap_or(host);
+    unbracketed.parse::<IpAddr>().is_ok()
+}
+
+async fn resolve_public_pdf_host(host: &str) -> Result<Vec<SocketAddr>, String> {
+    let addresses: Vec<SocketAddr> = tokio::net::lookup_host((host, 443))
+        .await
+        .map_err(|error| format!("DNS lookup failed: {error}"))?
+        .collect();
+
+    if addresses.is_empty() {
+        return Err("DNS lookup returned no addresses".to_string());
+    }
+    if addresses.iter().any(|address| !is_public_ip(address.ip())) {
+        return Err("DNS lookup returned a non-public address".to_string());
+    }
+
+    Ok(addresses)
+}
+
+fn is_public_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ipv4) => is_public_ipv4(ipv4),
+        IpAddr::V6(ipv6) => is_public_ipv6(ipv6),
+    }
+}
+
+fn is_public_ipv4(ip: Ipv4Addr) -> bool {
+    let [first, second, third, _fourth] = ip.octets();
+
+    !matches!(
+        (first, second, third),
+        (0, _, _)
+            | (10, _, _)
+            | (100, 64..=127, _)
+            | (127, _, _)
+            | (169, 254, _)
+            | (172, 16..=31, _)
+            | (192, 0, _)
+            | (192, 88, 99)
+            | (192, 168, _)
+            | (198, 18..=19, _)
+            | (198, 51, 100)
+            | (203, 0, 113)
+            | (224..=255, _, _)
+    )
+}
+
+fn is_public_ipv6(ip: Ipv6Addr) -> bool {
+    if ip.is_unspecified() || ip.is_loopback() || ip.is_multicast() {
+        return false;
+    }
+
+    let octets = ip.octets();
+    if octets[0] & 0xfe == 0xfc
+        || (octets[0] == 0xfe && (octets[1] & 0xc0 == 0x80 || octets[1] & 0xc0 == 0xc0))
+        || octets.starts_with(&[0x20, 0x01, 0x0d, 0xb8])
+        || octets.starts_with(&[0x20, 0x01, 0x00, 0x00])
+        || octets.starts_with(&[0x20, 0x02])
+    {
+        return false;
+    }
+
+    let embedded_ipv4 =
+        if octets[..10].iter().all(|byte| *byte == 0) && octets[10] == 0xff && octets[11] == 0xff {
+            Some(Ipv4Addr::new(
+                octets[12], octets[13], octets[14], octets[15],
+            ))
+        } else if octets[..12].iter().all(|byte| *byte == 0) {
+            Some(Ipv4Addr::new(
+                octets[12], octets[13], octets[14], octets[15],
+            ))
+        } else {
+            None
+        };
+
+    embedded_ipv4.map(is_public_ipv4).unwrap_or(true)
+}
+
+fn validate_pdf_content_length(content_length: Option<u64>) -> Result<(), &'static str> {
+    if let Some(length) = content_length {
+        if length > MAX_PDF_STORE_SIZE as u64 {
+            return Err("PDF response exceeds the 20 MB limit");
+        }
+    }
+    Ok(())
+}
+
+fn append_pdf_chunk(buffer: &mut Vec<u8>, chunk: &[u8]) -> Result<(), &'static str> {
+    if buffer.len().saturating_add(chunk.len()) > MAX_PDF_STORE_SIZE {
+        return Err("PDF response exceeds the 20 MB limit");
+    }
+    buffer.extend_from_slice(chunk);
+    Ok(())
+}
+
+fn has_pdf_header(data: &[u8]) -> bool {
+    data[..data.len().min(1024)]
+        .windows(b"%PDF-".len())
+        .any(|window| window == b"%PDF-")
+}
+
+/// Download a PDF from a URL (for patent PDFs from enrichment).
+///
+/// DNS is resolved once, checked for public addresses, and pinned to this request
+/// to prevent redirect and DNS-rebinding based SSRF.
+async fn download_pdf(raw_url: &str) -> Result<Vec<u8>, String> {
+    let url = validate_pdf_download_url(raw_url)?;
+    let host = url
+        .host_str()
+        .ok_or_else(|| "validated PDF URL has no host".to_string())?
+        .to_string();
+    let addresses = resolve_public_pdf_host(&host).await?;
+
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
+        .timeout(Duration::from_secs(30))
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .resolve_to_addrs(&host, &addresses)
         .build()
-        .map_err(|e| format!("HTTP 客户端创建失败: {}", e))?;
+        .map_err(|error| format!("HTTP client setup failed: {error}"))?;
     let resp = client
         .get(url)
         .send()
         .await
-        .map_err(|e| format!("下载失败: {}", e))?;
-    let bytes = resp
-        .bytes()
+        .map_err(|error| format!("PDF download request failed: {error}"))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("PDF upstream returned HTTP {}", resp.status()));
+    }
+    validate_pdf_content_length(resp.content_length()).map_err(str::to_string)?;
+
+    let mut data = Vec::new();
+    let mut response = resp;
+    while let Some(chunk) = response
+        .chunk()
         .await
-        .map_err(|e| format!("读取响应失败: {}", e))?;
-    Ok(bytes.to_vec())
+        .map_err(|error| format!("PDF response stream failed: {error}"))?
+    {
+        append_pdf_chunk(&mut data, &chunk).map_err(str::to_string)?;
+    }
+
+    if !has_pdf_header(&data) {
+        return Err(
+            "PDF response did not contain a valid %PDF- header in its first 1024 bytes".to_string(),
+        );
+    }
+
+    Ok(data)
+}
+
+#[cfg(test)]
+mod remote_pdf_download_tests {
+    use super::{
+        append_pdf_chunk, has_pdf_header, is_public_ip, is_public_ipv4, is_public_ipv6,
+        resolve_public_pdf_host, validate_pdf_content_length, validate_pdf_download_url,
+        MAX_PDF_STORE_SIZE,
+    };
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    #[test]
+    fn accepts_only_https_hostname_pdf_urls_without_credentials() {
+        assert!(validate_pdf_download_url("https://example.com/patent.pdf").is_ok());
+
+        for url in [
+            "http://example.com/patent.pdf",
+            "https://example.com:8443/patent.pdf",
+            "https://user@example.com/patent.pdf",
+            "https://127.0.0.1/patent.pdf",
+            "https://[::1]/patent.pdf",
+            "not a URL",
+        ] {
+            assert!(
+                validate_pdf_download_url(url).is_err(),
+                "should reject {url}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_private_loopback_shared_and_reserved_ip_ranges() {
+        for raw_ip in [
+            "127.0.0.1",
+            "10.0.0.1",
+            "100.64.0.1",
+            "169.254.1.1",
+            "172.16.0.1",
+            "192.168.0.1",
+            "192.0.2.1",
+            "198.18.0.1",
+            "203.0.113.1",
+            "255.255.255.255",
+            "::1",
+            "fc00::1",
+            "fe80::1",
+            "2001:db8::1",
+            "::ffff:127.0.0.1",
+        ] {
+            let ip = raw_ip
+                .parse::<IpAddr>()
+                .expect("test input must be an IP address");
+            assert!(!is_public_ip(ip), "should reject {raw_ip}");
+        }
+
+        assert!(is_public_ipv4(Ipv4Addr::new(1, 1, 1, 1)));
+        assert!(is_public_ipv6(
+            "2606:4700:4700::1111"
+                .parse::<Ipv6Addr>()
+                .expect("test input must be an IPv6 address")
+        ));
+    }
+
+    #[test]
+    fn validates_pdf_header_and_response_size_for_streaming_downloads() {
+        assert!(has_pdf_header(b"%PDF-1.7\n"));
+        let mut pdf_with_leading_bytes = vec![b' '; 128];
+        pdf_with_leading_bytes.extend_from_slice(b"%PDF-1.7\n");
+        assert!(has_pdf_header(&pdf_with_leading_bytes));
+
+        let mut pdf_after_header_window = vec![b' '; 1024];
+        pdf_after_header_window.extend_from_slice(b"%PDF-1.7\n");
+        assert!(!has_pdf_header(&pdf_after_header_window));
+        assert!(!has_pdf_header(b"<html>not a PDF"));
+        assert!(validate_pdf_content_length(Some(MAX_PDF_STORE_SIZE as u64)).is_ok());
+        assert!(validate_pdf_content_length(Some(MAX_PDF_STORE_SIZE as u64 + 1)).is_err());
+
+        let mut data = vec![0; MAX_PDF_STORE_SIZE - 1];
+        assert!(append_pdf_chunk(&mut data, &[1]).is_ok());
+        assert!(append_pdf_chunk(&mut data, &[2]).is_err());
+    }
+
+    #[tokio::test]
+    async fn rejects_localhost_dns_before_any_download_request() {
+        assert!(resolve_public_pdf_host("localhost").await.is_err());
+    }
 }
