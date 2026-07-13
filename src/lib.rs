@@ -40,29 +40,31 @@ fn start_server(
 > {
     let state = init_app_state(&db_path)?;
     let app = build_router(state);
+    let runtime = tokio::runtime::Runtime::new()?;
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
-    let handle = std::thread::spawn(move || {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async move {
-            let addr: std::net::SocketAddr = ([127, 0, 0, 1], 3000).into();
-            tracing::info!("InnoForge mobile server starting on http://{}", addr);
+    let handle = std::thread::Builder::new()
+        .name("innoforge-mobile-server".to_string())
+        .spawn(move || {
+            runtime.block_on(async move {
+                let addr: std::net::SocketAddr = ([127, 0, 0, 1], 3000).into();
+                tracing::info!("InnoForge mobile server starting on http://{}", addr);
 
-            let server = axum::Server::bind(&addr).serve(app.into_make_service());
+                let server = axum::Server::bind(&addr).serve(app.into_make_service());
 
-            tokio::select! {
-                _ = shutdown_rx => {
-                    tracing::info!("InnoForge mobile server shutting down gracefully");
-                }
-                result = server => {
-                    if let Err(e) = result {
-                        tracing::error!("InnoForge mobile server error: {}", e);
+                tokio::select! {
+                    _ = shutdown_rx => {
+                        tracing::info!("InnoForge mobile server shutting down gracefully");
+                    }
+                    result = server => {
+                        if let Err(e) = result {
+                            tracing::error!("InnoForge mobile server error: {}", e);
+                        }
                     }
                 }
-            }
-        });
-    });
+            });
+        })?;
 
     Ok((handle, shutdown_tx))
 }
@@ -91,9 +93,22 @@ pub extern "C" fn innoforge_start_server() -> i32 {
         "innoforge.db".to_string()
     };
 
+    let mut server_handle = match SERVER_HANDLE.lock() {
+        Ok(server_handle) => server_handle,
+        Err(_) => {
+            eprintln!("Unable to start server because the server state is unavailable");
+            return 1;
+        }
+    };
+
+    if server_handle.is_some() {
+        eprintln!("InnoForge server is already running");
+        return 1;
+    }
+
     match start_server(db_path) {
         Ok((handle, tx)) => {
-            SERVER_HANDLE.lock().unwrap().replace((handle, tx));
+            *server_handle = Some((handle, tx));
             0
         }
         Err(e) => {
@@ -106,7 +121,15 @@ pub extern "C" fn innoforge_start_server() -> i32 {
 /// 关闭创研台服务器 / Shutdown InnoForge server.
 #[no_mangle]
 pub extern "C" fn innoforge_shutdown_server() -> i32 {
-    if let Some((handle, tx)) = SERVER_HANDLE.lock().unwrap().take() {
+    let server = match SERVER_HANDLE.lock() {
+        Ok(mut server_handle) => server_handle.take(),
+        Err(_) => {
+            eprintln!("Unable to shut down server because the server state is unavailable");
+            return 1;
+        }
+    };
+
+    if let Some((handle, tx)) = server {
         shutdown_server(handle, tx);
         0
     } else {
