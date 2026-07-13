@@ -133,7 +133,7 @@ Design an immutable chain for original OA, analysis versions, discussion, user e
 
 状态：✅ 已完成 / Completed
 
-- **代码提交 / Code commit**: 待提交 / Pending
+- **代码提交 / Code commit**: `d03c975` (`test: 补齐 OA 端到端回归`)
 - **结果 / Result**: 新增根目录 `e2e_test.mjs`，默认连接本地服务并可用环境变量覆盖；6 项回归覆盖页面、接口和长请求体尾部完整性，真实 AI 请求被浏览器拦截。
   Added root `e2e_test.mjs` with an overridable local-server URL; six regressions cover page, endpoint, and long-payload-tail integrity while real AI requests are intercepted in the browser.
 - **验证 / Verification**: `node --check`、ESLint 无配置模式、E2E 6/6 与 Rust 全量门禁通过。
