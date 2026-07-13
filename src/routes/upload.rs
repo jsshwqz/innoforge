@@ -2,7 +2,10 @@ use super::AppState;
 use axum::{extract::State, Json};
 use serde_json::json;
 use std::{
+    fs::{self, File, OpenOptions},
+    io::Write,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    path::PathBuf,
     time::Duration,
 };
 
@@ -11,6 +14,80 @@ const MAX_PDF_STORE_SIZE: usize = 20 * 1024 * 1024; // 20 MB
 
 /// Umi-OCR 默认 HTTP 地址（端口可在 Umi-OCR 全局设置中修改）
 const UMI_OCR_BASE_URL: &str = "http://127.0.0.1:1224";
+
+/// Files created for external PDF tools. They stay under the application
+/// working directory so the Windows launcher keeps them on the project drive.
+/// The guard owns both input files and subprocess output paths, including
+/// paths created immediately before a subprocess fails.
+#[derive(Debug, Default)]
+struct RuntimeTempFiles {
+    paths: Vec<PathBuf>,
+}
+
+impl RuntimeTempFiles {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn create_file(&mut self, extension: &str) -> Result<(PathBuf, File), String> {
+        let extension = extension.trim_start_matches('.');
+        if extension.is_empty() {
+            return Err("temporary file extension must not be empty".to_string());
+        }
+
+        let directory = runtime_temp_dir()?;
+        for _ in 0..16 {
+            let path = directory.join(format!("innoforge-{}.{}", uuid::Uuid::new_v4(), extension));
+            match OpenOptions::new().write(true).create_new(true).open(&path) {
+                Ok(file) => {
+                    self.paths.push(path.clone());
+                    return Ok((path, file));
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => {
+                    return Err(format!("failed to create runtime temporary file: {error}"));
+                }
+            }
+        }
+
+        Err("failed to allocate a unique runtime temporary file".to_string())
+    }
+
+    fn write_file(&mut self, extension: &str, data: &[u8]) -> Result<PathBuf, String> {
+        let (path, mut file) = self.create_file(extension)?;
+        file.write_all(data)
+            .map_err(|error| format!("failed to write runtime temporary file: {error}"))?;
+        file.flush()
+            .map_err(|error| format!("failed to flush runtime temporary file: {error}"))?;
+        Ok(path)
+    }
+
+    fn track_output(&mut self, path: PathBuf) {
+        self.paths.push(path);
+    }
+}
+
+impl Drop for RuntimeTempFiles {
+    fn drop(&mut self) {
+        for path in self.paths.iter().rev() {
+            if let Err(error) = fs::remove_file(path) {
+                if error.kind() != std::io::ErrorKind::NotFound {
+                    tracing::warn!(path = %path.display(), %error, "failed to remove runtime temporary file");
+                }
+            }
+        }
+    }
+}
+
+fn runtime_temp_dir() -> Result<PathBuf, String> {
+    let directory = std::env::current_dir()
+        .map_err(|error| format!("failed to resolve application working directory: {error}"))?
+        .join("data")
+        .join("runtime-temp");
+    fs::create_dir_all(&directory)
+        .map_err(|error| format!("failed to create runtime temporary directory: {error}"))?;
+    Ok(directory)
+}
 /// Umi-OCR HTTP 请求超时（秒）
 const UMI_OCR_TIMEOUT_SECS: u64 = 120;
 
@@ -341,20 +418,16 @@ async fn extract_pdf_via_ai_vision(
     data: &[u8],
     ai_client: &crate::ai::AiClient,
 ) -> Result<String, String> {
-    use std::io::Write;
-
-    let tmp_dir = std::env::temp_dir();
-    let session_id = uuid::Uuid::new_v4().to_string();
-    let tmp_pdf = tmp_dir.join(format!("innoforge_vision_{}.pdf", session_id));
+    let mut temp_files = RuntimeTempFiles::new();
+    let tmp_pdf = temp_files
+        .write_file("pdf", data)
+        .map_err(|error| format!("failed to prepare PDF for vision fallback: {error}"))?;
     let tmp_pdf_str = tmp_pdf.to_string_lossy().to_string();
-    let out_prefix = tmp_dir.join(format!("innoforge_vision_{}", session_id));
+    let out_prefix = tmp_pdf.with_extension("");
     let out_prefix_str = out_prefix.to_string_lossy().to_string();
-
-    // Write PDF to temp file
-    let mut f = std::fs::File::create(&tmp_pdf).map_err(|e| format!("创建临时文件失败: {}", e))?;
-    f.write_all(data)
-        .map_err(|e| format!("写入临时文件失败: {}", e))?;
-    drop(f);
+    for page in 0..10 {
+        temp_files.track_output(PathBuf::from(format!("{}_{}.png", out_prefix_str, page)));
+    }
 
     // Convert PDF pages to PNG using PyMuPDF (max 10 pages)
     let python = r"C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe";
@@ -369,8 +442,6 @@ async fn extract_pdf_via_ai_vision(
     let output = std::process::Command::new(python)
         .args(["-c", &script, &tmp_pdf_str, &out_prefix_str])
         .output();
-
-    let _ = std::fs::remove_file(&tmp_pdf);
 
     let page_count: usize = match output {
         Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout)
@@ -399,7 +470,6 @@ async fn extract_pdf_via_ai_vision(
             Ok(b) => b,
             Err(_) => continue,
         };
-        let _ = std::fs::remove_file(&png_path);
 
         match describe_image_with_fallback(ai_client, &png_bytes, "png").await {
             Ok(text) => {
@@ -412,12 +482,6 @@ async fn extract_pdf_via_ai_vision(
                 tracing::warn!("AI 视觉识别第 {} 页失败: {}", i + 1, e);
             }
         }
-    }
-
-    // Clean up any remaining PNG files
-    for i in 0..page_count {
-        let png_path = format!("{}_{}.png", out_prefix_str, i);
-        let _ = std::fs::remove_file(&png_path);
     }
 
     if all_text.trim().is_empty() {
@@ -498,19 +562,11 @@ fn extract_pdf_text_by_pages(data: &[u8]) -> Result<String, String> {
 
 /// Fallback: use pdftotext (poppler) to extract text from PDF
 fn extract_pdf_text_pdftotext(data: &[u8]) -> Result<String, String> {
-    use std::io::Write;
-
-    let tmp_dir = std::env::temp_dir();
-    let tmp_path = tmp_dir.join(format!("innoforge_pdftotext_{}.pdf", std::process::id()));
+    let mut temp_files = RuntimeTempFiles::new();
+    let tmp_path = temp_files
+        .write_file("pdf", data)
+        .map_err(|error| format!("failed to prepare PDF for pdftotext: {error}"))?;
     let tmp_str = tmp_path.to_string_lossy().to_string();
-    let out_txt = tmp_dir.join(format!("innoforge_pdftotext_{}.txt", std::process::id()));
-    let out_str = out_txt.to_string_lossy().to_string();
-
-    // Write PDF bytes to temp file
-    let mut f = std::fs::File::create(&tmp_path).map_err(|e| format!("创建临时文件失败: {}", e))?;
-    f.write_all(data)
-        .map_err(|e| format!("写入临时文件失败: {}", e))?;
-    drop(f);
 
     // Try common pdftotext locations
     let pdftotext_candidates = [
@@ -520,53 +576,37 @@ fn extract_pdf_text_pdftotext(data: &[u8]) -> Result<String, String> {
         "/mingw64/bin/pdftotext",
     ];
 
-    let mut result = Ok(String::new());
     for pdftotext in &pdftotext_candidates {
         if !std::path::Path::new(pdftotext).exists() {
             continue;
         }
         let output = std::process::Command::new(pdftotext)
-            .args(["-nopgbrk", "-enc", "UTF-8", &tmp_str, &out_str])
+            .args(["-nopgbrk", "-enc", "UTF-8", &tmp_str, "-"])
             .output();
 
         match output {
             Ok(o) if o.status.success() => {
-                let text = std::fs::read_to_string(&out_str).unwrap_or_default();
-                let _ = std::fs::remove_file(&out_txt);
-                let _ = std::fs::remove_file(&tmp_path);
+                let text = String::from_utf8_lossy(&o.stdout).into_owned();
                 if !text.trim().is_empty() {
                     return Ok(text);
                 }
-                result = Ok(String::new());
                 break;
             }
-            Ok(_) => {
-                // pdftotext failed, try next candidate
-                let _ = std::fs::remove_file(&out_txt);
-                continue;
-            }
+            Ok(_) => continue,
             Err(_) => continue,
         }
     }
 
-    let _ = std::fs::remove_file(&tmp_path);
-    let _ = std::fs::remove_file(&out_txt);
-    result
+    Ok(String::new())
 }
 
 /// Fallback: use Python PyMuPDF (fitz) to extract text from PDF
 fn extract_pdf_text_pymupdf(data: &[u8]) -> Result<String, String> {
-    use std::io::Write;
-
-    let tmp_dir = std::env::temp_dir();
-    let tmp_path = tmp_dir.join(format!("innoforge_pdf_{}.pdf", std::process::id()));
+    let mut temp_files = RuntimeTempFiles::new();
+    let tmp_path = temp_files
+        .write_file("pdf", data)
+        .map_err(|error| format!("failed to prepare PDF for PyMuPDF: {error}"))?;
     let tmp_str = tmp_path.to_string_lossy().to_string();
-
-    // Write PDF bytes to temp file
-    let mut f = std::fs::File::create(&tmp_path).map_err(|e| format!("创建临时文件失败: {}", e))?;
-    f.write_all(data)
-        .map_err(|e| format!("写入临时文件失败: {}", e))?;
-    drop(f);
 
     let python = r"C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe";
     let script = "import fitz,sys\nsys.stdout.reconfigure(encoding='utf-8')\ndoc=fitz.open(sys.argv[1])\nfor p in doc:\n print(p.get_text())".to_string();
@@ -574,9 +614,6 @@ fn extract_pdf_text_pymupdf(data: &[u8]) -> Result<String, String> {
     let output = std::process::Command::new(python)
         .args(["-c", &script, &tmp_str])
         .output();
-
-    // Clean up temp file
-    let _ = std::fs::remove_file(&tmp_path);
 
     match output {
         Ok(o) if o.status.success() => {
@@ -595,21 +632,16 @@ fn extract_pdf_text_pymupdf(data: &[u8]) -> Result<String, String> {
 /// 免费 token：https://mineru.net/apiManage/token
 /// 通过 Python mineru-open-sdk 调用，已在环境中安装
 fn extract_pdf_text_mineru(data: &[u8]) -> Result<String, String> {
-    use std::io::Write;
-
     let token = std::env::var("MINERU_API_TOKEN").unwrap_or_default();
     if token.is_empty() {
         return Err("MINERU_API_TOKEN 未配置".into());
     }
 
-    // Write PDF to temp file
-    let tmp_dir = std::env::temp_dir();
-    let tmp_pdf = tmp_dir.join(format!("innoforge_mineru_{}.pdf", std::process::id()));
+    let mut temp_files = RuntimeTempFiles::new();
+    let tmp_pdf = temp_files
+        .write_file("pdf", data)
+        .map_err(|error| format!("failed to prepare PDF for MinerU: {error}"))?;
     let tmp_pdf_str = tmp_pdf.to_string_lossy().to_string();
-    let mut f = std::fs::File::create(&tmp_pdf).map_err(|e| format!("创建临时文件失败: {}", e))?;
-    f.write_all(data)
-        .map_err(|e| format!("写入临时文件失败: {}", e))?;
-    drop(f);
 
     // Python script to call mineru-open-sdk and output markdown
     let script = format!(
@@ -630,9 +662,6 @@ else:
     let output = std::process::Command::new(python)
         .args(["-c", &script])
         .output();
-
-    // Clean up temp file
-    let _ = std::fs::remove_file(&tmp_pdf);
 
     match output {
         Ok(o) if o.status.success() => {
@@ -660,16 +689,11 @@ else:
 
 /// Fallback: use Tesseract OCR via Python to extract text from scanned PDFs
 fn extract_pdf_text_ocr(data: &[u8]) -> Result<String, String> {
-    use std::io::Write;
-
-    let tmp_dir = std::env::temp_dir();
-    let tmp_path = tmp_dir.join(format!("innoforge_ocr_{}.pdf", std::process::id()));
+    let mut temp_files = RuntimeTempFiles::new();
+    let tmp_path = temp_files
+        .write_file("pdf", data)
+        .map_err(|error| format!("failed to prepare PDF for OCR: {error}"))?;
     let tmp_str = tmp_path.to_string_lossy().to_string();
-
-    let mut f = std::fs::File::create(&tmp_path).map_err(|e| format!("创建临时文件失败: {}", e))?;
-    f.write_all(data)
-        .map_err(|e| format!("写入临时文件失败: {}", e))?;
-    drop(f);
 
     let python = r"C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe";
     let script = r#"
@@ -691,8 +715,6 @@ for page in doc:
     let output = std::process::Command::new(python)
         .args(["-c", script, &tmp_str])
         .output();
-
-    let _ = std::fs::remove_file(&tmp_path);
 
     match output {
         Ok(o) if o.status.success() => {
@@ -776,25 +798,12 @@ async fn describe_image_with_ai(
 /// 使用 Umi-OCR 的文档识别接口：
 ///   上传 → 轮询 → 获取结果
 async fn extract_pdf_text_umi_ocr(data: Vec<u8>) -> Result<String, String> {
-    use std::io::Write;
-
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(UMI_OCR_TIMEOUT_SECS))
         .build()
         .map_err(|e| format!("Umi-OCR 客户端创建失败: {}", e))?;
 
-    // Step 1: Write PDF to temp file
-    let tmp_dir = std::env::temp_dir();
-    let tmp_pdf = tmp_dir.join(format!("innoforge_umiocr_{}.pdf", std::process::id()));
-    let _tmp_pdf_str = tmp_pdf.to_string_lossy().to_string();
-    {
-        let mut f = std::fs::File::create(&tmp_pdf)
-            .map_err(|e| format!("Umi-OCR 创建临时文件失败: {}", e))?;
-        f.write_all(&data)
-            .map_err(|e| format!("Umi-OCR 写入临时文件失败: {}", e))?;
-    }
-
-    // Step 2: Upload via multipart
+    // Upload via multipart; the request body already owns the PDF bytes.
     let upload_url = format!("{}/api/doc/upload", UMI_OCR_BASE_URL);
     let file_part = reqwest::multipart::Part::bytes(data)
         .file_name("document.pdf")
@@ -822,7 +831,6 @@ async fn extract_pdf_text_umi_ocr(data: Vec<u8>) -> Result<String, String> {
     let task_id = match upload_json["code"].as_i64() {
         Some(100) => upload_json["data"].as_str().map(|s| s.to_string()),
         _ => {
-            let _ = std::fs::remove_file(&tmp_pdf);
             return Err(format!(
                 "Umi-OCR 上传失败: code={}, msg={}",
                 upload_json["code"], upload_json["data"]
@@ -833,7 +841,6 @@ async fn extract_pdf_text_umi_ocr(data: Vec<u8>) -> Result<String, String> {
     let task_id = match task_id {
         Some(id) => id,
         None => {
-            let _ = std::fs::remove_file(&tmp_pdf);
             return Err("Umi-OCR 上传成功但未返回任务 ID".into());
         }
     };
@@ -892,7 +899,6 @@ async fn extract_pdf_text_umi_ocr(data: Vec<u8>) -> Result<String, String> {
     // Step 4: Cleanup — clear task on Umi-OCR
     let clear_url = format!("{}/api/doc/clear/{}", UMI_OCR_BASE_URL, task_id);
     let _ = client.get(&clear_url).send().await;
-    let _ = std::fs::remove_file(&tmp_pdf);
 
     if all_text.trim().is_empty() {
         Err("Umi-OCR 未能识别 PDF 中的文字".into())
@@ -1178,18 +1184,15 @@ fn is_public_ipv6(ip: Ipv6Addr) -> bool {
         return false;
     }
 
-    let embedded_ipv4 =
-        if octets[..10].iter().all(|byte| *byte == 0) && octets[10] == 0xff && octets[11] == 0xff {
-            Some(Ipv4Addr::new(
-                octets[12], octets[13], octets[14], octets[15],
-            ))
-        } else if octets[..12].iter().all(|byte| *byte == 0) {
-            Some(Ipv4Addr::new(
-                octets[12], octets[13], octets[14], octets[15],
-            ))
-        } else {
-            None
-        };
+    let is_ipv4_embedded = octets[..12].iter().all(|byte| *byte == 0)
+        || (octets[..10].iter().all(|byte| *byte == 0) && octets[10] == 0xff && octets[11] == 0xff);
+    let embedded_ipv4 = if is_ipv4_embedded {
+        Some(Ipv4Addr::new(
+            octets[12], octets[13], octets[14], octets[15],
+        ))
+    } else {
+        None
+    };
 
     embedded_ipv4.map(is_public_ipv4).unwrap_or(true)
 }
@@ -1349,5 +1352,55 @@ mod remote_pdf_download_tests {
     #[tokio::test]
     async fn rejects_localhost_dns_before_any_download_request() {
         assert!(resolve_public_pdf_host("localhost").await.is_err());
+    }
+}
+
+#[cfg(test)]
+mod runtime_temp_file_tests {
+    use super::{runtime_temp_dir, RuntimeTempFiles};
+
+    #[test]
+    fn runtime_temp_files_are_unique_under_project_data_and_removed_on_drop() {
+        let expected_directory = std::env::current_dir()
+            .expect("test working directory should be available")
+            .join("data")
+            .join("runtime-temp");
+        assert_eq!(
+            runtime_temp_dir().expect("runtime temp directory"),
+            expected_directory
+        );
+
+        let paths = {
+            let mut temp_files = RuntimeTempFiles::new();
+            let first = temp_files
+                .write_file("pdf", b"first")
+                .expect("first temporary file");
+            let second = temp_files
+                .write_file("pdf", b"second")
+                .expect("second temporary file");
+
+            assert_ne!(first, second);
+            for path in [&first, &second] {
+                assert!(path.starts_with(&expected_directory));
+                assert!(path.is_file());
+            }
+            assert_eq!(
+                std::fs::read(&first).expect("read first temporary file"),
+                b"first"
+            );
+            assert_eq!(
+                std::fs::read(&second).expect("read second temporary file"),
+                b"second"
+            );
+            vec![first, second]
+        };
+
+        for path in paths {
+            assert!(
+                !path.exists(),
+                "temporary file should be removed: {}",
+                path.display()
+            );
+        }
     }
 }
