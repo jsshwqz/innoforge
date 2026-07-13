@@ -35,6 +35,15 @@
 - **验证 / Verification**: 允许来源预检返回对应 `access-control-allow-origin`，不受信任来源无该响应头；fmt、clippy、245 项 Rust 测试和 E2E 6/6 通过。
   The allowed-origin preflight returns its `access-control-allow-origin`, while an untrusted origin receives none; fmt, clippy, 245 Rust tests, and E2E 6/6 passed.
 
+### 2026-07-13 — 专利图片代理 SSRF 加固 / Patent image-proxy SSRF hardening
+
+- **状态 / Status**: ✅ 已完成 / Completed
+- **提交 / Commit**: `1ee38f1`
+- **修复 / Fix**: 图片代理改为结构化 URL 校验，仅允许 HTTPS、精确白名单主机、默认端口且不含凭据；禁用自动重定向，防止借白名单主机跳转到内网。
+  The image proxy now validates structured URLs: HTTPS, exact allowlisted host, default port, and no credentials; redirects are disabled to prevent allowlisted hosts from reaching internal targets.
+- **验证 / Verification**: 协议、子域、用户名伪装与非默认端口均 HTTP 403；新增 4 项 URL 回归测试，Rust 全量门禁与 E2E 6/6 通过。
+  HTTP, subdomain, username-spoofing, and non-default-port inputs all return 403; four URL regressions, full Rust gates, and E2E 6/6 passed.
+
 ### 2026-07-13 — Windows 启动脚本修复 / Windows launcher fix
 
 - **状态 / Status**: ✅ 已完成 / Completed

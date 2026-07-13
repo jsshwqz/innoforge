@@ -536,4 +536,17 @@
   Do not reintroduce `allow_origin(Any)`; new WebView/mobile origins must be added explicitly through the environment variable and covered by allowed/rejected-origin preflight checks.
 - **提交 / Commit**: `15f134a`
 
+### [2026-07-13] 图片代理主机字符串匹配可被伪装 / Image-proxy host string matching was spoofable
+- **严重程度 / Severity**: HIGH
+- **涉及文件 / Files**: `src/routes/patent.rs`
+- **现象 / Symptom**: 图片代理通过字符串前缀判断 URL，无法明确限制 URL 凭据、端口与重定向；如未加固，白名单主机可能成为访问非预期目标的跳板。
+  The image proxy used URL string-prefix checks and did not explicitly constrain credentials, ports, or redirects; without hardening, an allowlisted host could become a pivot to unintended targets.
+- **根因 / Root cause**: 未对 URL 进行结构化解析，且 reqwest 默认可跟随重定向。
+  URLs were not parsed structurally, and reqwest followed redirects by default.
+- **修复 / Fix**: 使用现有 `reqwest::Url` 校验 HTTPS、精确白名单主机、默认端口和无凭据；禁用重定向，客户端构建失败返回友好 502。
+  Use existing `reqwest::Url` to validate HTTPS, exact allowlisted hosts, default port, and no credentials; disable redirects and return a friendly 502 on client construction failure.
+- **预防 / Prevention**: 任何外部 URL 代理必须做结构化 scheme/host/port/credential 校验，白名单请求默认禁止重定向，并测试伪装 URL。
+  Every external URL proxy must structurally validate scheme/host/port/credentials, disable redirects by default for allowlisted requests, and test spoofed URLs.
+- **提交 / Commit**: `1ee38f1`
+
 *最后更新 / Last updated: 2026-07-13*

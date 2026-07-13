@@ -168,3 +168,22 @@ Design an immutable chain for original OA, analysis versions, discussion, user e
 
 - 图片代理目前已有域名白名单，但仍使用字符串前缀解析主机；下一阶段应改用结构化 URL 解析并明确端口/重定向策略。
   The image proxy has a domain allowlist but still parses the host with string prefixes; a follow-up should use structured URL parsing and define port/redirect policy.
+
+### P0-C.2 图片代理 SSRF 加固计划 / Image-proxy SSRF hardening plan
+
+1. 只修改 `src/routes/patent.rs`，使用现有 `reqwest` 的 URL 类型解析请求地址；不新增依赖、路由或数据库变更。
+   Modify only `src/routes/patent.rs`, using the existing `reqwest` URL type to parse request URLs; add no dependencies, routes, or database changes.
+2. 仅允许 HTTPS、精确白名单主机、默认 HTTPS 端口；拒绝用户名/密码和非默认端口。保留图片 URL 的路径与查询参数，以免破坏合法的签名图片链接。
+   Allow only HTTPS, exact allowlisted hosts, and the default HTTPS port; reject credentials and non-default ports. Preserve paths and query strings for valid signed image links.
+3. 禁止自动跟随重定向，防止白名单域名重定向到内网地址；请求客户端构建失败返回友好 502，不使用生产 `unwrap`。
+   Disable automatic redirects so an allowlisted host cannot redirect to an internal address; return a friendly 502 if client construction fails, with no production `unwrap`.
+4. 增加同文件测试覆盖合法 URL、大小写/子域/用户名伪装、HTTP、非默认端口和无效 URL；运行 HTTP 验证、Rust 门禁和 E2E。
+   Add same-file tests for valid URLs, case/subdomain/credential impersonation, HTTP, non-default ports, and malformed URLs; run HTTP verification, Rust gates, and E2E.
+
+状态：✅ 已完成 / Completed
+
+- **代码提交 / Code commit**: `1ee38f1` (`fix: 加固专利图片代理 SSRF 防护`)
+- **结果 / Result**: 图片代理仅接受合法 HTTPS 白名单 URL，拒绝子域和用户名伪装、HTTP、非默认端口与无效地址；关闭重定向，防止 DNS/上游重定向绕过。
+  The image proxy accepts only valid HTTPS allowlisted URLs and rejects subdomain/credential spoofing, HTTP, non-default ports, and malformed input; redirects are disabled to prevent DNS/upstream bypasses.
+- **验证 / Verification**: 4 个 URL 单元回归、4 个恶意 URL 的 HTTP 403、Rust 全量门禁和 E2E 6/6 全部通过。
+  Four URL unit regressions, HTTP 403 for four malicious URLs, full Rust gates, and E2E 6/6 all passed.

@@ -8,6 +8,8 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 ## [Unreleased]
 
 ### 修复 / Fixed
+- **专利图片代理 SSRF 防护** — 图片 URL 改用结构化解析，限制 HTTPS、精确白名单主机和默认端口，禁止凭据与自动重定向；保留合法签名图片链接的路径和查询参数
+  Patent image-proxy SSRF hardening: image URLs now use structured parsing with HTTPS, exact-host, and default-port restrictions; credentials and redirects are blocked while valid signed-image paths and queries are preserved
 - **本地服务 CORS 边界** — 移除全开放跨域来源；默认仅允许本机 `127.0.0.1:3000` 与 `localhost:3000`，移动端或桌面壳的额外来源可通过 `INNOFORGE_CORS_ORIGINS` 显式配置
   Local-service CORS boundary: removed open cross-origin access; only local `127.0.0.1:3000` and `localhost:3000` are allowed by default, while mobile/desktop-shell origins can be explicitly configured with `INNOFORGE_CORS_ORIGINS`
 - **OA 后端数据完整性** — OA 讨论和答复书生成不再为控制上下文而静默截断原文；超出明确容量时返回带字段、实际字符数和上限的可见错误，并按 Unicode 字符计数
