@@ -510,6 +510,19 @@
   Verify declaration order across script blocks; browser regressions must fail on `pageerror` and console errors rather than checking HTTP 200 alone.
 - **提交 / Commit**: `aad56d5`
 
+### [2026-07-13] OA “导出结论”语义与可审计性不足 / OA “Export Conclusions” lacked clear semantics and auditability
+- **严重程度 / Severity**: MEDIUM
+- **涉及文件 / File**: `templates/office_action_response.html`
+- **现象 / Symptom**: 按钮名称暗示会导出最终结论，但实际会向 AI 提交讨论消息并在页面追加二次摘要；用户无法下载完整讨论过程交给其他 AI 或人工复核。
+  The button name implied exporting a final conclusion, but it actually submitted discussion messages to AI and appended a second summary in the page; users could not download the complete discussion for external AI or human review.
+- **根因 / Root cause**: “AI 摘要”和“原始讨论记录”两类不同证据等级的产物共用“导出结论”这一模糊文案，且不存在本地记录导出实现。
+  Two outputs with different evidentiary value—an AI summary and the original discussion record—shared the ambiguous “Export Conclusions” label, and no local-record export existed.
+- **修复 / Fix**: 将既有功能更名为“AI 总结结论”，并新增本地 UTF-8 Markdown 完整记录导出；记录包含完整上下文、角色、ISO 时间、原文和“未经 AI 二次改写”声明，且不调用 AI。
+  Relabelled the existing function “AI Summary” and added a local UTF-8 Markdown full-record export containing full context, roles, ISO time, source text, and a “not AI-rewritten” statement without calling AI.
+- **预防 / Prevention**: 面向复核的功能必须区分“原始记录”和“模型摘要”；任何可审计导出都必须保留全文、标记生成方式，并由浏览器测试验证导出内容和零外部 AI 请求。
+  Features intended for review must distinguish “original record” from “model summary”; any auditable export must preserve full text, label its generation method, and be browser-tested for content and zero external AI requests.
+- **提交 / Commit**: `5588968`
+
 ### [2026-07-13] Windows start.bat CMD 解析失败 / Windows start.bat CMD parse failure
 - **严重程度 / Severity**: HIGH
 - **涉及文件 / File**: `start.bat`

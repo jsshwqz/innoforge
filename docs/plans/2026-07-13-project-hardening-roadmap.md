@@ -159,6 +159,11 @@ Design an immutable chain for original OA, analysis versions, discussion, user e
 
 ### P0-B.3 OA 可审计讨论记录导出 / OA auditable discussion transcript export
 
+- **状态 / Status**: ✅ 已完成 / Completed
+- **代码提交 / Code commit**: `5588968` (`feat: 支持导出 OA 完整讨论记录`)
+- **验证 / Verification**: `node --check`、ESLint 无配置模式、Puppeteer E2E 48/48、`cargo fmt --check`、`cargo clippy -- -D warnings` 与 `cargo test`（265 passed，1 个文档测试按设计忽略）通过。
+  `node --check`, ESLint without repository config, Puppeteer E2E 48/48, `cargo fmt --check`, `cargo clippy -- -D warnings`, and `cargo test` (265 passed; one doc test intentionally ignored) passed.
+
 1. 明确分离两种产物：现有 `exportDiscussionConclusions()` 保留其调用 AI 生成摘要的行为，但按钮改名为“AI 总结结论”；新增“导出完整讨论记录”按钮，避免用户把摘要误当成最终答复或完整过程。
    Clearly separate the two outputs: retain `exportDiscussionConclusions()` as an AI-generated summary but relabel it “AI Summary”; add an “Export Full Discussion Record” button so a summary is not mistaken for a final response or complete process.
 2. 仅修改 `templates/office_action_response.html` 与 `static/i18n.js`，不新增依赖、API、数据库迁移或 AI 调用。导出在浏览器本地以 UTF-8 Markdown 下载，完整保留发给讨论的起始上下文及每一轮用户/助手原文；严禁 `slice`、`substring` 或其他数据截断。

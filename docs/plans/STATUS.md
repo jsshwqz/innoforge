@@ -8,6 +8,17 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-07-13 — OA 可审计完整讨论记录导出 / OA auditable full discussion-record export
+
+- **状态 / Status**: ✅ 已完成 / Completed
+- **提交 / Commit**: `5588968`
+- **新增 / Added**: OA 讨论区新增“导出完整讨论记录”，在浏览器本地下载 UTF-8 Markdown，不调用 AI 或新增后端接口。记录保留起始系统上下文、每轮用户/AI 原文、角色、ISO 时间戳和导出时间；含反引号的原文会使用动态 Markdown 代码围栏完整保存。
+  The OA discussion panel now provides “Export Full Discussion Record”, a local UTF-8 Markdown download with no AI call or new backend endpoint. It preserves the initial system context, every user/AI source message, role, ISO timestamp, and export time; source text with backticks is retained using dynamic Markdown fences.
+- **改进 / Improvement**: 原“导出结论”明确更名为“AI 总结结论”，避免把二次 AI 摘要误认为最终答复或讨论全过程。
+  The former “Export Conclusions” action is explicitly relabelled “AI Summary” so a second AI summary is not mistaken for a final response or the complete discussion.
+- **验证 / Verification**: Puppeteer E2E 48/48 真实点击导出按钮并读取受控 Blob 内容，确认全文尾部、反引号、角色、时间戳、原始记录声明和零 AI 请求；JS/Rust 门禁全部通过。
+  Puppeteer E2E 48/48 clicks the export button and reads the controlled Blob content, verifying full tails, backticks, roles, timestamps, the original-record notice, and zero AI requests; all JS/Rust gates passed.
+
 ### 2026-07-13 — 八页面浏览器回归与搜索页初始化修复 / Eight-page browser regression and search initialization fix
 
 - **状态 / Status**: ✅ 已完成 / Completed

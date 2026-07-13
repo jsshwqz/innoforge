@@ -7,7 +7,13 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ## [Unreleased]
 
+### 新增 / Added
+- **OA 完整讨论记录导出** — OA 讨论区新增纯本地 Markdown 导出，保留起始上下文、每轮用户/AI 原文、角色和 ISO 时间戳；导出不发起 AI 请求，且能安全保留含 Markdown 反引号的原文
+  OA full discussion-record export: a local-only Markdown export preserves the initial context, every user/AI source message, role, and ISO timestamp; it makes no AI request and safely retains source text containing Markdown backticks
+
 ### 修复 / Fixed
+- **OA 导出语义澄清** — 原“导出结论”实际会调用 AI 生成二次摘要，现改名为“AI 总结结论”，并与可审计的完整原始记录导出分开
+  OA export semantics clarified: the former “Export Conclusions” action actually invokes AI to generate a second summary; it is now labelled “AI Summary” and separated from the auditable full-source-record export
 - **搜索页 PDF 初始化顺序** — 将 `updatePdfFileList()` 移至其定义之后执行，消除搜索页加载时的 `ReferenceError`，不改变已保存 PDF 元数据的恢复逻辑
   Search-page PDF initialization order: `updatePdfFileList()` now runs after its definition, eliminating the load-time `ReferenceError` without changing persisted-PDF restoration
 - **专利图片代理 SSRF 防护** — 图片 URL 改用结构化解析，限制 HTTPS、精确白名单主机和默认端口，禁止凭据与自动重定向；保留合法签名图片链接的路径和查询参数
