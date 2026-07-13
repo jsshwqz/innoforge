@@ -603,13 +603,13 @@ mod tests {
         );
     }
 
-    /// 验证单次 AI 调用的全局超时上限为 60 秒。
+    /// 验证单次 AI 调用的全局超时上限为 300 秒。
     #[test]
-    fn global_timeout_is_60_seconds() {
+    fn global_timeout_is_300_seconds() {
         assert_eq!(
             crate::ai::AiClient::GLOBAL_TIMEOUT_SECS,
-            60,
-            "Global timeout must cap every single AI call at 60 seconds"
+            300,
+            "Global timeout must be 300 seconds to allow OA analysis with full context"
         );
     }
 }

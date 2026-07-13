@@ -104,7 +104,7 @@ PipelineStep 枚举（16 步固定序列）:
 | `idea.rs` | 创意验证/流水线/版本/分支/讨论/报告 | ~30 |
 | `search.rs` | 本地+在线专利搜索/统计/CSV/XLSX 导出 | ~6 |
 | `patent.rs` | 专利抓取/富化/PDF/法律状态/相似推荐 | ~12 |
-| `auth.rs` | Google OAuth/gcloud CLI 认证 | ~6 |
+| `auth.rs` | Google OAuth/gcloud CLI/ADC 认证；Token 状态先 SQLite 事务持久化再更新运行时内存 | ~6 |
 | `chat.rs` | 跨设备聊天同步 | ~3 |
 | `collections.rs` | 收藏夹+标签 CRUD | ~10 |
 | `feature_cards.rs` | 特征卡片 CRUD + LCS diff | ~3 |
@@ -115,12 +115,12 @@ PipelineStep 枚举（16 步固定序列）:
 
 ### 4. db/ — 数据层（13 个子模块）
 
-`Database` 结构（`Mutex<Connection>`），schema 版本 15，WAL 模式。
+`Database` 结构（`Mutex<Connection>`），schema 版本 16，WAL 模式。
 
 | 子模块 | 职责 |
 |---|---|
 | `mod.rs` | Database 结构、init()、schema_version 追踪 |
-| `migrations.rs` | 版本化迁移引擎（v1→v15，21 张表，幂等） |
+| `migrations.rs` | 版本化迁移引擎（v1→v16，22 张表，幂等） |
 | `version.rs` | idea_versions / idea_branches / findings CRUD |
 | `patent.rs` | 专利 CRUD、FTS5+BM25 搜索、智能类型检测 |
 | `relevance.rs` | 相关性评分（字段匹配、中文 bigram、姓名检测） |
@@ -130,17 +130,17 @@ PipelineStep 枚举（16 步固定序列）:
 | `collection.rs` | 收藏夹 + 标签 |
 | `evidence.rs` | 证据链批量操作 |
 | `research_state.rs` | 研发状态机快照 |
-| `settings.rs` | 键值设置 + 搜索缓存（24h TTL） |
+| `settings.rs` | 键值设置 + 搜索缓存（24h TTL）+ 多项设置原子事务保存（`set_settings_batch()`） |
 | `tests.rs` | DB 层单元测试 |
 
-**21 张表**：`patents` + `patents_fts`(FTS5) / `ideas` / `idea_messages` / `idea_research_state` / `feature_cards` / `pipeline_snapshots` / `evidence_chain` / `idea_versions` / `idea_branches` / `findings` / `claim_nodes` / `technical_features` / `collections` / `patent_collections` / `patent_tags` / `oa_analyses` / `chat_records` / `app_settings` / `search_cache` / `schema_version`
+**22 张表**：`patents` + `patents_fts`(FTS5) / `ideas` / `idea_messages` / `idea_research_state` / `feature_cards` / `pipeline_snapshots` / `evidence_chain` / `idea_versions` / `idea_branches` / `findings` / `claim_nodes` / `technical_features` / `collections` / `patent_collections` / `patent_tags` / `oa_analyses` / `oa_discussions` / `chat_records` / `app_settings` / `search_cache` / `schema_version`
 
 ### 5. ai/ — 多 AI 服务商容灾客户端
 
 - 支持 6+ provider 自动 failover（DeepSeek / Gemini / Zhipu / OpenAI / OpenRouter / NVIDIA / SenseNova / 小米）
 - 区分普通模型和专家模型
 - SSE 流式输出、多模态图片、历史压缩
-- 全局超时 60s、`safe_truncate_chars`
+- 全局超时分级：聊天 60s / OA 分析 180s / 增强处理 300s，HTTP 客户端 300s
 
 ### 6. experiment/ — AI 驱动的实验沙箱
 

@@ -1198,6 +1198,17 @@
         html += '</div>';
         html += '</div>';
 
+        // ── Discussion history panel ──
+        html += '<div id="oa-discuss-history-panel" style="margin-top:12px;padding:12px 16px;border-radius:8px;border:1px solid #30363d;background:#0d1117;">';
+        html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">';
+        html += '<span style="color:#58a6ff;font-weight:600;font-size:13px;">📂 ' + (t('oar.discussHistoryTitle') || '历史讨论') + '</span>';
+        html += '<button onclick="startNewOADiscuss()" style="padding:4px 12px;font-size:12px;background:#238636;color:#fff;border:none;border-radius:6px;cursor:pointer;" data-i18n="oar.discussHistoryNew">新讨论</button>';
+        html += '</div>';
+        html += '<div style="font-size:12px;color:#8b949e;margin-bottom:8px;" data-i18n="oar.discussHistoryDesc">选择历史讨论继续，或开始新讨论</div>';
+        html += '<div id="oa-history-list" style="max-height:200px;overflow-y:auto;">';
+        html += '<div style="padding:12px;color:#8b949e;text-align:center;" data-i18n="oar.discussHistoryEmpty">暂无历史讨论记录</div>';
+        html += '</div></div>';
+
         // ── Generate button ──
         html += '<div style="margin-top:16px;text-align:center;">';
         html += '<button id="btn-generate-response" onclick="generateResponseLetter()" style="background:#f0883e;color:#fff;border:none;border-radius:8px;padding:12px 32px;cursor:pointer;font-size:15px;font-weight:600;">';
@@ -1209,6 +1220,7 @@
         html += '</div>'; // end result-box
 
         container.innerHTML = html;
+        loadOADiscussionHistory();
         clearLoading();
     }
 
@@ -1219,6 +1231,20 @@
         if (!msg) return;
         input.value = '';
         input.disabled = true;
+
+        // 获取当前专利信息
+        var patentNumber = document.getElementById('patent-number-value');
+        var applicantName = document.getElementById('applicant-value');
+        var patentNum = patentNumber ? patentNumber.textContent.trim() : '';
+        var applicantNm = applicantName ? applicantName.textContent.trim() : '';
+
+        // 生成或获取稳定的 discussion_id（localStorage 持久化）
+        var discussionId = localStorage.getItem('oa-discuss-id');
+        if (!discussionId) {
+            discussionId = 'disc-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+            localStorage.setItem('oa-discuss-id', discussionId);
+        }
+        var lsKeyPatent = patentNum ? ('oa-discuss-history-' + patentNum) : '';
 
         // Add user message
         addDiscussionMessage('user', msg);
@@ -1237,6 +1263,10 @@
             };
             // 传入 OA 类型增强上下文
             if (oaDiscussOAType) payload.oa_type = oaDiscussOAType;
+            // 传入专利号和讨论 ID
+            if (patentNum) payload.patent_number = patentNum;
+            if (applicantNm) payload.applicant_name = applicantNm;
+            payload.discussion_id = discussionId;
 
             var resp = await fetch('/api/ai/oa-discuss', {
                 method: 'POST',
@@ -1253,6 +1283,7 @@
             var aiText = '';
             var done = false;
             var currentEvent = '';
+            var capturedDiscId = discussionId;
 
             while (true) {
                 var { done: sd, value } = await reader.read();
@@ -1272,6 +1303,14 @@
                             break;
                         }
                         if (currentEvent === 'done' || data === '[DONE]') {
+                            // 从 done 事件中提取后端生成的 discussion_id
+                            try {
+                                var doneObj = JSON.parse(data);
+                                if (doneObj && doneObj.discussion_id) {
+                                    capturedDiscId = doneObj.discussion_id;
+                                    localStorage.setItem('oa-discuss-id', capturedDiscId);
+                                }
+                            } catch (_) { /* 忽略解析错误 */ }
                             done = true;
                             break;
                         }
@@ -1286,6 +1325,15 @@
 
             oaDiscussMessages.push({ role: 'assistant', content: aiText });
             if (aiDiv) aiDiv.innerHTML = renderMarkdown(aiText);
+            // 持久化完整讨论记录到 localStorage
+            var history = {
+                discussion_id: capturedDiscId,
+                patent_number: patentNum,
+                messages: JSON.stringify(oaDiscussMessages),
+                oa_text: oaDiscussOAText || '',
+                oa_type: oaDiscussOAType || ''
+            };
+            if (lsKeyPatent) localStorage.setItem(lsKeyPatent, JSON.stringify(history));
         } catch (e) {
             if (aiDiv) aiDiv.innerHTML = '<span style="color:#f85149;">讨论失败: ' + escapeHtml(e.message) + '</span>';
         }
@@ -1326,7 +1374,8 @@
                     analysis: lastAnalysisRawText,
                     discussion: JSON.stringify(oaDiscussMessages),
                     office_action: oaDiscussOAText,
-                    oa_type: oaDiscussOAType
+                    oa_type: oaDiscussOAType,
+                    discussion_id: localStorage.getItem('oa-discuss-id') || ''
                 })
             });
 
@@ -2371,6 +2420,109 @@
             if (e.target && e.target.closest && e.target.closest('.quote-btn')) return;
             hideDiscQuoteBtn();
         });
+    }
+
+    // ========== OA 讨论历史管理 ==========
+    function escapeHtml(str) {
+        if (!str) return '';
+        var div = document.createElement('div');
+        div.appendChild(document.createTextNode(String(str)));
+        return div.innerHTML;
+    }
+
+    async function loadOADiscussionHistory() {
+        var listEl = document.getElementById('oa-history-list');
+        if (!listEl) return;
+        var patentNum = getPatentNumberFromUrl();
+        if (!patentNum) {
+            listEl.innerHTML = '<div style="padding:12px;color:#8b949e;text-align:center;">请先打开一个专利</div>';
+            return;
+        }
+        listEl.innerHTML = '<div style="padding:12px;color:#8b949e;text-align:center;">加载中...</div>';
+        try {
+            var resp = await fetch('/api/ai/oas/' + encodeURIComponent(patentNum) + '/discussions');
+            var data = await resp.json();
+            if (!resp.ok || !data.ok) {
+                listEl.innerHTML = '<div style="padding:12px;color:#8b949e;text-align:center;">' + escapeHtml(data.error || '加载失败') + '</div>';
+                return;
+            }
+            var discussions = data.discussions || [];
+            if (discussions.length === 0) {
+                var t = window.__t || function(k) { return k; };
+                listEl.innerHTML = '<div style="padding:12px;color:#8b949e;text-align:center;">' + (t('oar.discussHistoryEmpty') || '暂无历史讨论记录') + '</div>';
+                return;
+            }
+            var html = '';
+            discussions.forEach(function(d) {
+                var msgs = d.message_count || 0;
+                var created = d.created_at || '';
+                var displayId = (d.discussion_id || '').substring(0, 12);
+                html += '<div style="padding:8px 12px;border-bottom:1px solid #30363d;cursor:pointer;display:flex;justify-content:space-between;align-items:center;" '
+                      + 'onclick="recoverOADiscussion(\'' + escapeHtml(d.discussion_id) + '\')" '
+                      + 'onmouseenter="this.style.background=\'rgba(255,255,255,0.05)\'" '
+                      + 'onmouseleave="this.style.background=\'transparent\ '">';
+                html += '<div><span style="font-family:monospace;font-size:12px;color:#58a6ff;">' + escapeHtml(displayId) + '</span> ';
+                html += '<span style="font-size:11px;color:#8b949e;margin-left:8px;">' + escapeHtml(created) + '</span></div>';
+                html += '<span style="font-size:11px;color:#8b949e;">' + msgs + ' 条</span></div>';
+            });
+            listEl.innerHTML = html;
+        } catch (e) {
+            listEl.innerHTML = '<div style="padding:12px;color:#8b949e;text-align:center;">加载失败</div>';
+        }
+    }
+
+    function startNewOADiscuss() {
+        localStorage.removeItem('oa-discuss-id');
+        oaDiscussMessages = [];
+        var patentNum = getPatentNumberFromUrl();
+        if (patentNum) {
+            Object.keys(localStorage).forEach(function(k) {
+                if (k.startsWith('oa-discuss-history-')) {
+                    localStorage.removeItem(k);
+                }
+            });
+        }
+        var container = document.getElementById('oa-discuss-messages');
+        if (container) {
+            var t = window.__t || function(k) { return k; };
+            container.innerHTML = '<div style="color:#8b949e;font-size:13px;padding:8px;text-align:center;">🤖 ' + (t('oar.discussReady') || 'AI 分析已完成，请审阅。有任何疑问可以在此讨论。确认无误后点击下方按钮生成答复书。') + '</div>';
+        }
+    }
+
+    async function recoverOADiscussion(discussionId) {
+        if (!discussionId) return;
+        var patentNum = getPatentNumberFromUrl();
+        if (!patentNum) {
+            alert('请先打开一个专利');
+            return;
+        }
+        try {
+            var resp = await fetch('/api/ai/oas/' + encodeURIComponent(patentNum) + '/discussions/' + encodeURIComponent(discussionId));
+            var data = await resp.json();
+            if (!resp.ok || !data.ok) {
+                alert('恢复讨论失败: ' + (data.error || '未知错误'));
+                return;
+            }
+            var d = data.discussion || {};
+            var msgs = d.messages || [];
+            oaDiscussMessages = msgs;
+            if (d.oa_text) oaDiscussOAText = d.oa_text;
+            if (d.oa_type) oaDiscussOAType = d.oa_type;
+            localStorage.setItem('oa-discuss-id', d.discussion_id || discussionId);
+            var container = document.getElementById('oa-discuss-messages');
+            if (container) {
+                container.innerHTML = '';
+                msgs.forEach(function(m) {
+                    addDiscussionMessage(m.role, m.content);
+                });
+            }
+            if (container) container.scrollTop = container.scrollHeight;
+            var t = window.__t || function(k) { return k; };
+            var input = document.getElementById('oa-discuss-input');
+            if (input) input.placeholder = t('oar.discussRecovered') || '已恢复讨论，继续输入...';
+        } catch (e) {
+            alert('恢复讨论失败: ' + e.message);
+        }
     }
 
     // ── Apply i18n for dynamic text ──

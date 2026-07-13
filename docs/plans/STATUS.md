@@ -8,6 +8,24 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-07-13 — AI 超时分级恢复 / AI timeout tier restoration (reverted from 60s ceiling)
+
+- **状态 / Status**: ✅ 已完成 / Completed
+- **提交 / Commit**: 待用户终审后填写 / To be filled after user final review
+- **修复 / Fix**: `cade390` 将 `CHAT`、`ANALYSIS`、`ENRICHMENT`、`PROVIDER_HTTP_TIMEOUT_SECS`、`GLOBAL_TIMEOUT_SECS` 统一为 60 秒，导致 OA 三步→一步合并后的单步大上下文分析超时失败。已恢复分级：`CHAT` 60s、`ANALYSIS` 180s、`ENRICHMENT` 300s、HTTP 客户端 300s、全局守卫 300s。
+  Reverted the 60-second ceiling introduced by `cade390`. Restored tiered timeouts: `CHAT` 60s, `ANALYSIS` 180s, `ENRICHMENT` 300s, provider HTTP client 300s, global `tokio` guard 300s. OA analysis no longer times out.
+- **验证 / Verification**: `cargo fmt --check` ✅, `cargo clippy --all-targets -- -D warnings` ✅, `cargo test` ✅ (137 unit + 6 orchestration + 37 integration passed; 1 doctest ignored). `git diff --check` ✅.
+  已同步 `src/ai/client.rs` 模块注释、`src/ai/chat.rs` 注释、`src/routes/mod.rs` 测试断言。
+  `src/ai/client.rs` module comment, `src/ai/chat.rs` comments, and `src/routes/mod.rs` test assertions synchronized.
+
+### 2026-07-13 — Google 认证状态原子持久化 / Google authentication-state atomic persistence
+
+- **状态 / Status**: ✅ 已完成，待用户终审与提交 / Completed, pending user final review and commit
+- **提交 / Commit**: 待用户终审后填写 / To be filled after user final review
+- **修复 / Fix**: gcloud CLI、ADC 文件、OAuth 授权码交换及三类后台 Token 刷新统一通过 `persist_google_auth_state()` 写入 SQLite 批量事务；事务成功后才更新运行时内存。OAuth 初次授权原子保存 access token、expiry、refresh token 与 `oauth` 模式；gcloud/ADC 初次认证明确清空旧 refresh token 并写入 `gcloud` 模式；后台刷新只替换 access token/expiry，保留既有 refresh token 与认证模式。
+  gcloud CLI, ADC-file, OAuth authorization-code exchange, and all three background token-refresh paths now use `persist_google_auth_state()` to write a SQLite batch transaction before updating runtime memory. Initial OAuth atomically saves access token, expiry, refresh token, and `oauth` mode; initial gcloud/ADC explicitly clears a stale refresh token and writes `gcloud` mode; background refresh replaces only access token/expiry while retaining the existing refresh token and mode.
+- **验证 / Verification**: `cargo fmt --check`、`cargo clippy --all-targets -- -D warnings`、`cargo test`（137 单元测试 + 6 编排集成测试 + 37 集成测试通过；1 个 doctest 按设计忽略）及 `git diff --check` 通过。新增 OAuth 完整保存、OAuth→gcloud 模式切换和后台刷新字段保留测试。
+
 ### 2026-07-13 — SerpAPI 多 Key 原子保存 / Atomic multi-key SerpAPI saves
 
 - **状态 / Status**: ✅ 已完成 / Completed

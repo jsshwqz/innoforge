@@ -296,11 +296,20 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
         )
         .route(
             "/api/oa/history/detail/:id",
-            get(routes::api_oa_history_get),
+            get(routes::api_oa_history_all),
         )
         .route(
             "/api/oa/history/:id/delete",
             post(routes::api_oa_history_delete),
+        )
+        // OA 讨论会话列表与详情 / OA Discussion Sessions API
+        .route(
+            "/api/oa/discussions/:patent_number",
+            get(routes::api_oa_discussion_list),
+        )
+        .route(
+            "/api/oa/discussions/:patent_number/:discussion_id",
+            get(routes::api_oa_discussion_get),
         )
         // OA 答复书 docx 导出
         .route("/api/oa/export-docx", post(routes::api_oa_export_docx))

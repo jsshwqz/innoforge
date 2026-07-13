@@ -21,6 +21,33 @@ const GOOGLE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_SCOPE: &str = "openid email https://www.googleapis.com/auth/generative-language";
 const REDIRECT_URI: &str = "http://localhost:3000/api/auth/google/callback";
 
+/// Atomically persist Google token state before it becomes active in memory.
+///
+/// Token values are deliberately never included in caller logs; callers log only the
+/// database error if this transaction cannot be committed.
+fn persist_google_auth_state(
+    db: &crate::db::Database,
+    access_token: &str,
+    expiry: i64,
+    refresh_token: Option<&str>,
+    auth_mode: Option<&str>,
+) -> anyhow::Result<()> {
+    let expiry = expiry.to_string();
+    let mut settings = vec![
+        ("google_access_token", access_token),
+        ("google_token_expiry", expiry.as_str()),
+    ];
+
+    if let Some(refresh_token) = refresh_token {
+        settings.push(("google_refresh_token", refresh_token));
+    }
+    if let Some(auth_mode) = auth_mode {
+        settings.push(("google_auth_mode", auth_mode));
+    }
+
+    db.set_settings_batch(&settings)
+}
+
 // ===== gcloud CLI (ADC) 认证 =====
 
 /// gcloud SDK 内置的 OAuth 客户端凭据（公有已知值）
@@ -96,7 +123,21 @@ pub async fn api_gcloud_login(State(s): State<AppState>) -> Json<serde_json::Val
                 let now = chrono::Utc::now().timestamp();
                 let expiry = now + 3600; // gcloud 令牌通常 1 小时有效
 
-                // 存储到内存
+                // Persist the complete state before changing the active configuration.
+                if let Err(error) = persist_google_auth_state(
+                    s.db.as_ref(),
+                    &token,
+                    expiry,
+                    Some(""),
+                    Some("gcloud"),
+                ) {
+                    tracing::error!(%error, "failed to persist gcloud authentication state");
+                    return Json(json!({
+                        "status": "error",
+                        "message": "无法保存 Google 认证状态，请稍后重试。",
+                    }));
+                }
+
                 {
                     let mut cfg = s.config.write().unwrap_or_else(|e| e.into_inner());
                     cfg.google_access_token = token.clone();
@@ -106,10 +147,6 @@ pub async fn api_gcloud_login(State(s): State<AppState>) -> Json<serde_json::Val
                 }
 
                 // 持久化到 DB
-                let _ = s.db.set_setting("google_access_token", &token);
-                let _ = s.db.set_setting("google_token_expiry", &expiry.to_string());
-                let _ = s.db.set_setting("google_refresh_token", "");
-                let _ = s.db.set_setting("google_auth_mode", "gcloud");
 
                 tracing::info!("gcloud CLI 认证成功，令牌有效期至 {}", expiry);
 
@@ -133,6 +170,20 @@ pub async fn api_gcloud_login(State(s): State<AppState>) -> Json<serde_json::Val
                 let now = chrono::Utc::now().timestamp();
                 let expiry = now + 3600;
 
+                if let Err(error) = persist_google_auth_state(
+                    s.db.as_ref(),
+                    &token,
+                    expiry,
+                    Some(""),
+                    Some("gcloud"),
+                ) {
+                    tracing::error!(%error, "failed to persist ADC authentication state");
+                    return Json(json!({
+                        "status": "error",
+                        "message": "无法保存 Google 认证状态，请稍后重试。",
+                    }));
+                }
+
                 {
                     let mut cfg = s.config.write().unwrap_or_else(|e| e.into_inner());
                     cfg.google_access_token = token.clone();
@@ -140,11 +191,6 @@ pub async fn api_gcloud_login(State(s): State<AppState>) -> Json<serde_json::Val
                     cfg.google_refresh_token = String::new();
                     cfg.google_auth_mode = "gcloud".to_string();
                 }
-
-                let _ = s.db.set_setting("google_access_token", &token);
-                let _ = s.db.set_setting("google_token_expiry", &expiry.to_string());
-                let _ = s.db.set_setting("google_refresh_token", "");
-                let _ = s.db.set_setting("google_auth_mode", "gcloud");
 
                 tracing::info!("ADC 文件认证成功");
                 return Json(json!({
@@ -453,7 +499,20 @@ pub async fn api_google_exchange_handler(
                         let expires_in = token_data["expires_in"].as_i64().unwrap_or(3600);
                         let expiry = chrono::Utc::now().timestamp() + expires_in;
 
-                        // 存储到内存 vs DB
+                        // Commit the complete token state before changing the active configuration.
+                        if let Err(error) = persist_google_auth_state(
+                            s.db.as_ref(),
+                            &access_token,
+                            expiry,
+                            Some(&refresh_token),
+                            Some("oauth"),
+                        ) {
+                            tracing::error!(%error, "failed to persist OAuth authentication state");
+                            return Json(json!({
+                                "error": "无法保存 Google 认证状态，请稍后重试。",
+                            }));
+                        }
+
                         {
                             let mut cfg = s.config.write().unwrap_or_else(|e| e.into_inner());
                             cfg.google_access_token = access_token.clone();
@@ -461,11 +520,6 @@ pub async fn api_google_exchange_handler(
                             cfg.google_token_expiry = Some(expiry);
                             cfg.google_auth_mode = "oauth".to_string();
                         }
-
-                        let _ = s.db.set_setting("google_refresh_token", &refresh_token);
-                        let _ = s.db.set_setting("google_access_token", &access_token);
-                        let _ = s.db.set_setting("google_token_expiry", &expiry.to_string());
-                        let _ = s.db.set_setting("google_auth_mode", "oauth");
 
                         Json(json!({
                             "status": "ok",
@@ -543,13 +597,15 @@ pub(crate) async fn refresh_google_token_background(
                     .flatten();
                 if let Some(token) = token {
                     let expiry = chrono::Utc::now().timestamp() + 3600;
+                    if let Err(error) = persist_google_auth_state(db, &token, expiry, None, None) {
+                        tracing::warn!(%error, "failed to persist refreshed gcloud authentication state");
+                        return;
+                    }
                     {
                         let mut cfg = config.write().unwrap_or_else(|e| e.into_inner());
                         cfg.google_access_token = token.clone();
                         cfg.google_token_expiry = Some(expiry);
                     }
-                    let _ = db.set_setting("google_access_token", &token);
-                    let _ = db.set_setting("google_token_expiry", &expiry.to_string());
                     tracing::info!("后台 gcloud 令牌已刷新");
                     return;
                 }
@@ -559,13 +615,17 @@ pub(crate) async fn refresh_google_token_background(
                 if adc_path.exists() {
                     if let Some(token) = refresh_token_from_adc(&adc_path).await {
                         let expiry = chrono::Utc::now().timestamp() + 3600;
+                        if let Err(error) =
+                            persist_google_auth_state(db, &token, expiry, None, None)
+                        {
+                            tracing::warn!(%error, "failed to persist refreshed ADC authentication state");
+                            return;
+                        }
                         {
                             let mut cfg = config.write().unwrap_or_else(|e| e.into_inner());
                             cfg.google_access_token = token.clone();
                             cfg.google_token_expiry = Some(expiry);
                         }
-                        let _ = db.set_setting("google_access_token", &token);
-                        let _ = db.set_setting("google_token_expiry", &expiry.to_string());
                         tracing::info!("后台 ADC 令牌已刷新");
                     }
                 }
@@ -599,13 +659,17 @@ pub(crate) async fn refresh_google_token_background(
                         if let Some(access_token) = token_data["access_token"].as_str() {
                             let expires_in = token_data["expires_in"].as_i64().unwrap_or(3600);
                             let expiry = chrono::Utc::now().timestamp() + expires_in;
+                            if let Err(error) =
+                                persist_google_auth_state(db, access_token, expiry, None, None)
+                            {
+                                tracing::warn!(%error, "failed to persist refreshed OAuth authentication state");
+                                return;
+                            }
                             {
                                 let mut cfg = config.write().unwrap_or_else(|e| e.into_inner());
                                 cfg.google_access_token = access_token.to_string();
                                 cfg.google_token_expiry = Some(expiry);
                             }
-                            let _ = db.set_setting("google_access_token", access_token);
-                            let _ = db.set_setting("google_token_expiry", &expiry.to_string());
                             tracing::info!("后台 OAuth 令牌已刷新");
                         }
                     }
@@ -613,5 +677,118 @@ pub(crate) async fn refresh_google_token_background(
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::persist_google_auth_state;
+    use crate::db::Database;
+
+    #[test]
+    fn persist_google_auth_state_saves_complete_oauth_state() {
+        let db = Database::init(":memory:").expect("test database should initialize");
+        db.set_setting("google_refresh_token", "stale-refresh-token")
+            .expect("initial token should save");
+
+        persist_google_auth_state(
+            &db,
+            "access-token",
+            1_800_000_000,
+            Some("refresh-token"),
+            Some("oauth"),
+        )
+        .expect("authentication state should save as a batch");
+
+        assert_eq!(
+            db.get_setting("google_access_token")
+                .expect("access token should be readable"),
+            Some("access-token".to_string())
+        );
+        assert_eq!(
+            db.get_setting("google_refresh_token")
+                .expect("refresh token should be readable"),
+            Some("refresh-token".to_string())
+        );
+        assert_eq!(
+            db.get_setting("google_token_expiry")
+                .expect("expiry should be readable"),
+            Some("1800000000".to_string())
+        );
+        assert_eq!(
+            db.get_setting("google_auth_mode")
+                .expect("authentication mode should be readable"),
+            Some("oauth".to_string())
+        );
+    }
+
+    #[test]
+    fn gcloud_authentication_clears_stale_oauth_refresh_token() {
+        let db = Database::init(":memory:").expect("test database should initialize");
+        persist_google_auth_state(
+            &db,
+            "oauth-access-token",
+            1_800_000_000,
+            Some("oauth-refresh-token"),
+            Some("oauth"),
+        )
+        .expect("oauth state should save");
+
+        persist_google_auth_state(
+            &db,
+            "gcloud-access-token",
+            1_900_000_000,
+            Some(""),
+            Some("gcloud"),
+        )
+        .expect("gcloud state should replace oauth state");
+
+        assert_eq!(
+            db.get_setting("google_refresh_token")
+                .expect("refresh token should be readable"),
+            Some(String::new())
+        );
+        assert_eq!(
+            db.get_setting("google_auth_mode")
+                .expect("authentication mode should be readable"),
+            Some("gcloud".to_string())
+        );
+    }
+
+    #[test]
+    fn background_refresh_preserves_existing_mode_and_refresh_token() {
+        let db = Database::init(":memory:").expect("test database should initialize");
+        persist_google_auth_state(
+            &db,
+            "old-access-token",
+            1_800_000_000,
+            Some("oauth-refresh-token"),
+            Some("oauth"),
+        )
+        .expect("initial oauth state should save");
+
+        persist_google_auth_state(&db, "refreshed-access-token", 1_900_000_000, None, None)
+            .expect("background refresh should save the new token");
+
+        assert_eq!(
+            db.get_setting("google_access_token")
+                .expect("access token should be readable"),
+            Some("refreshed-access-token".to_string())
+        );
+        assert_eq!(
+            db.get_setting("google_token_expiry")
+                .expect("expiry should be readable"),
+            Some("1900000000".to_string())
+        );
+        assert_eq!(
+            db.get_setting("google_refresh_token")
+                .expect("refresh token should be readable"),
+            Some("oauth-refresh-token".to_string())
+        );
+        assert_eq!(
+            db.get_setting("google_auth_mode")
+                .expect("authentication mode should be readable"),
+            Some("oauth".to_string())
+        );
     }
 }

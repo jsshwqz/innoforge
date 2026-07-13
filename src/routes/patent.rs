@@ -1175,103 +1175,6 @@ pub async fn api_patent_image_proxy(
     }
 }
 
-#[cfg(test)]
-mod patent_image_proxy_tests {
-    use super::{
-        allowed_patent_image_mime, image_body_can_accept_chunk,
-        image_content_length_is_within_limit, validate_patent_image_url, MAX_PATENT_IMAGE_BYTES,
-    };
-
-    #[test]
-    fn accepts_allowlisted_https_url_and_preserves_path_and_query() {
-        let url = validate_patent_image_url(
-            "https://patentimages.storage.googleapis.com/path/image.png?download=1",
-        )
-        .expect("allowlisted HTTPS URL should be valid");
-
-        assert_eq!(
-            url.as_str(),
-            "https://patentimages.storage.googleapis.com/path/image.png?download=1"
-        );
-    }
-
-    #[test]
-    fn accepts_case_insensitive_allowlisted_host() {
-        assert!(
-            validate_patent_image_url("https://PATENTIMAGES.STORAGE.GOOGLEAPIS.COM/image.png")
-                .is_ok()
-        );
-    }
-
-    #[test]
-    fn rejects_host_spoofing_variants() {
-        for url in [
-            "https://patentimages.storage.googleapis.com.evil.example/image.png",
-            "https://attacker@patentimages.storage.googleapis.com/image.png",
-            "https://patentimages.storage.googleapis.com@attacker.example/image.png",
-        ] {
-            assert!(
-                validate_patent_image_url(url).is_err(),
-                "should reject {url}"
-            );
-        }
-    }
-
-    #[test]
-    fn rejects_non_https_non_default_port_and_invalid_urls() {
-        for url in [
-            "http://patentimages.storage.googleapis.com/image.png",
-            "https://patentimages.storage.googleapis.com:8443/image.png",
-            "not a URL",
-        ] {
-            assert!(
-                validate_patent_image_url(url).is_err(),
-                "should reject {url}"
-            );
-        }
-    }
-
-    #[test]
-    fn accepts_allowed_image_mime_types_case_insensitively_with_parameters() {
-        assert_eq!(
-            allowed_patent_image_mime(Some("IMAGE/JPEG; charset=binary")),
-            Some("image/jpeg")
-        );
-        assert_eq!(
-            allowed_patent_image_mime(Some(" image/WEBP ; q=1 ")),
-            Some("image/webp")
-        );
-    }
-
-    #[test]
-    fn rejects_missing_and_unsafe_image_mime_types() {
-        for content_type in [None, Some("image/svg+xml"), Some("text/html")] {
-            assert_eq!(
-                allowed_patent_image_mime(content_type),
-                None,
-                "should reject {content_type:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn rejects_content_length_larger_than_image_limit() {
-        assert!(image_content_length_is_within_limit(Some(
-            MAX_PATENT_IMAGE_BYTES as u64
-        )));
-        assert!(!image_content_length_is_within_limit(Some(
-            MAX_PATENT_IMAGE_BYTES as u64 + 1
-        )));
-        assert!(image_content_length_is_within_limit(None));
-    }
-
-    #[test]
-    fn rejects_streams_that_exceed_image_limit() {
-        assert!(image_body_can_accept_chunk(MAX_PATENT_IMAGE_BYTES - 1, 1));
-        assert!(!image_body_can_accept_chunk(MAX_PATENT_IMAGE_BYTES, 1));
-    }
-}
-
 // ── 法律状态查询（三级降级链）/ Legal Status Query (3-level degradation chain) ──
 
 /// GET /api/patent/:id/legal-status — 查询专利法律状态
@@ -1555,4 +1458,101 @@ fn infer_current_status(events: &[LegalEvent]) -> String {
         }
     }
     "未知".to_string()
+}
+
+#[cfg(test)]
+mod patent_image_proxy_tests {
+    use super::{
+        allowed_patent_image_mime, image_body_can_accept_chunk,
+        image_content_length_is_within_limit, validate_patent_image_url, MAX_PATENT_IMAGE_BYTES,
+    };
+
+    #[test]
+    fn accepts_allowlisted_https_url_and_preserves_path_and_query() {
+        let url = validate_patent_image_url(
+            "https://patentimages.storage.googleapis.com/path/image.png?download=1",
+        )
+        .expect("allowlisted HTTPS URL should be valid");
+
+        assert_eq!(
+            url.as_str(),
+            "https://patentimages.storage.googleapis.com/path/image.png?download=1"
+        );
+    }
+
+    #[test]
+    fn accepts_case_insensitive_allowlisted_host() {
+        assert!(
+            validate_patent_image_url("https://PATENTIMAGES.STORAGE.GOOGLEAPIS.COM/image.png")
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn rejects_host_spoofing_variants() {
+        for url in [
+            "https://patentimages.storage.googleapis.com.evil.example/image.png",
+            "https://attacker@patentimages.storage.googleapis.com/image.png",
+            "https://patentimages.storage.googleapis.com@attacker.example/image.png",
+        ] {
+            assert!(
+                validate_patent_image_url(url).is_err(),
+                "should reject {url}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_non_https_non_default_port_and_invalid_urls() {
+        for url in [
+            "http://patentimages.storage.googleapis.com/image.png",
+            "https://patentimages.storage.googleapis.com:8443/image.png",
+            "not a URL",
+        ] {
+            assert!(
+                validate_patent_image_url(url).is_err(),
+                "should reject {url}"
+            );
+        }
+    }
+
+    #[test]
+    fn accepts_allowed_image_mime_types_case_insensitively_with_parameters() {
+        assert_eq!(
+            allowed_patent_image_mime(Some("IMAGE/JPEG; charset=binary")),
+            Some("image/jpeg")
+        );
+        assert_eq!(
+            allowed_patent_image_mime(Some(" image/WEBP ; q=1 ")),
+            Some("image/webp")
+        );
+    }
+
+    #[test]
+    fn rejects_missing_and_unsafe_image_mime_types() {
+        for content_type in [None, Some("image/svg+xml"), Some("text/html")] {
+            assert_eq!(
+                allowed_patent_image_mime(content_type),
+                None,
+                "should reject {content_type:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_content_length_larger_than_image_limit() {
+        assert!(image_content_length_is_within_limit(Some(
+            MAX_PATENT_IMAGE_BYTES as u64
+        )));
+        assert!(!image_content_length_is_within_limit(Some(
+            MAX_PATENT_IMAGE_BYTES as u64 + 1
+        )));
+        assert!(image_content_length_is_within_limit(None));
+    }
+
+    #[test]
+    fn rejects_streams_that_exceed_image_limit() {
+        assert!(image_body_can_accept_chunk(MAX_PATENT_IMAGE_BYTES - 1, 1));
+        assert!(!image_body_can_accept_chunk(MAX_PATENT_IMAGE_BYTES, 1));
+    }
 }

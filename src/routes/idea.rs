@@ -1413,30 +1413,6 @@ fn inline_md(s: &str) -> String {
     s.into_owned()
 }
 
-#[cfg(test)]
-mod idea_markdown_tests {
-    use super::inline_md;
-
-    #[test]
-    fn inline_markdown_renders_bold_italic_and_code() {
-        let rendered = inline_md("**bold** *italic* `code`");
-
-        assert!(rendered.contains("<strong>bold</strong>"));
-        assert!(rendered.contains("<em>italic</em>"));
-        assert!(rendered.contains(
-            "<code style='background:#f3f4f6;padding:1px 4px;border-radius:3px;'>code</code>"
-        ));
-    }
-
-    #[test]
-    fn inline_markdown_escapes_html_input() {
-        let rendered = inline_md("<script>alert(1)</script>");
-
-        assert!(rendered.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
-        assert!(!rendered.contains("<script>"));
-    }
-}
-
 /// Export structured conclusions from the idea discussion.
 /// 从讨论中导出结构化结论（已定决策 / 达成的结论 / 待解决问题 / 风险项）。
 pub async fn api_idea_chat_conclusions(
@@ -2011,5 +1987,29 @@ pub async fn api_idea_findings(
     match s.db.get_findings_by_idea(&idea_id) {
         Ok(findings) => Json(serde_json::json!({"status": "ok", "findings": findings})),
         Err(e) => Json(serde_json::json!({"status": "error", "message": e.to_string()})),
+    }
+}
+
+#[cfg(test)]
+mod idea_markdown_tests {
+    use super::inline_md;
+
+    #[test]
+    fn inline_markdown_renders_bold_italic_and_code() {
+        let rendered = inline_md("**bold** *italic* `code`");
+
+        assert!(rendered.contains("<strong>bold</strong>"));
+        assert!(rendered.contains("<em>italic</em>"));
+        assert!(rendered.contains(
+            "<code style='background:#f3f4f6;padding:1px 4px;border-radius:3px;'>code</code>"
+        ));
+    }
+
+    #[test]
+    fn inline_markdown_escapes_html_input() {
+        let rendered = inline_md("<script>alert(1)</script>");
+
+        assert!(rendered.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
+        assert!(!rendered.contains("<script>"));
     }
 }

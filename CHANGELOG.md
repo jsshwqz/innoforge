@@ -1,3 +1,6 @@
+- **Google 认证状态原子持久化** — gcloud CLI、ADC 文件、OAuth 授权码交换及后台 Token 刷新统一通过 persist_google_auth_state() 在单个 SQLite 批量事务中持久化认证状态，事务提交成功后才更新运行时内存。OAuth 初次授权原子保存 access token、expiry、refresh token 与 oauth 认证模式；gcloud/ADC 模式切换会明确清除遗留的 OAuth refresh token 并写入 gcloud 模式；后台 Token 刷新仅替换 access token 和 expiry，不更改 refresh token 或认证模式。
+  Google authentication-state atomic persistence: gcloud CLI, ADC-file, OAuth authorization-code exchange, and background token refresh now persist authentication state in one SQLite batch transaction via persist_google_auth_state() before updating runtime memory. Initial OAuth atomically saves access token, expiry, refresh token, and oauth mode; gcloud/ADC mode switches clear a stale OAuth refresh token and write gcloud mode; background refresh replaces only access token and expiry, preserving refresh token and mode.
+
 # 更新日志 / Changelog
 
 所有重要变更都会记录在此文件中。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
