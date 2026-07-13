@@ -8,6 +8,14 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-07-13 — SerpAPI Key 保存完整性 / SerpAPI Key save integrity
+
+- **状态 / Status**: ✅ 已完成 / Completed
+- **提交 / Commit**: `6be94b6`
+- **修复 / Fix**: SerpAPI Key 保存改为先完整解析和校验、再执行清空/写入/内存更新。缺失或非数组、超过 5 项、空白或超长项、短 Key、非法字符和无法唯一还原的掩码均在任何持久化前返回用户友好错误；空数组仍代表用户明确清空。合法完整 Key 与唯一掩码保持原成功响应。
+  SerpAPI Key saves now fully parse and validate before clearing, writing, or updating memory. Missing/non-array input, more than five entries, blank/oversized entries, short or malformed keys, and masks that cannot be uniquely restored return friendly errors before persistence; an empty array remains an explicit clear. Valid full keys and unique masks retain the prior success response.
+- **验证 / Verification**: `cargo fmt --check`、`cargo clippy -- -D warnings`、`cargo test`（305 passed, 1 ignored）和正式二进制构建通过；实际 `POST /api/settings/serpapi` 提交短 Key 返回受控错误，未写入配置；`/`、`/settings`、`/oa-response` 均返回 HTTP 200。
+
 ### 2026-07-13 — 正则初始化 panic 加固 / Regex initialization panic hardening
 
 - **状态 / Status**: ✅ 已完成 / Completed

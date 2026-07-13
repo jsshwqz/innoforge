@@ -20,6 +20,8 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
   AI prompt input boundaries: chat history now accepts only `user` and `assistant`, rejecting client-forged `system` or unknown roles. Patent records, web results, OA material, discussion records, and raw custom role preferences use non-escapable `<user_input>` data boundaries; raw custom roles no longer have system-instruction authority while server presets remain available
 
 ### 修复 / Fixed
+- **SerpAPI Key 保存的数据完整性** — 设置页不再静默丢弃无效 SerpAPI Key 后清空既有配置。缺失/非数组、超过 5 个、空白、过短、非法字符、未知或歧义掩码会在任何清空或写入前返回可理解的错误；空数组仍明确表示用户主动清空，合法掩码可安全还原。
+  SerpAPI Key save integrity: settings no longer silently drop invalid SerpAPI keys and then clear the existing configuration. Missing/non-array, over-limit, blank, short, malformed, unknown-mask, or ambiguous-mask input returns a clear error before any clearing or write; an empty array remains an explicit user-requested clear, and valid masks are safely restored.
 - **正则初始化的受控错误处理** — 创意报告的行内 Markdown、专利说明书 HTML 清理和法律状态页面解析不再使用生产路径 `expect()`。正则继续缓存；若内部初始化异常则记录诊断并返回已转义文本或受控错误，避免请求 panic。补充 Markdown 格式渲染与 HTML 输入转义回归，防止调整转义职责时引入 XSS 回退。
   Controlled regex-initialization failures: inline Markdown in idea reports, patent-description HTML cleanup, and legal-status page parsing no longer use production-path `expect()`. Regexes remain cached; an unexpected initialization failure is logged and returns escaped text or a controlled error instead of panicking. Markdown rendering and HTML-escaping regressions prevent an XSS fallback while moving escaping responsibility.
 - **DOCX 导出错误处理与 XML 转义** — OA 意见陈述书导出不再在 ZIP 写入失败时 panic；所有写入失败会记录服务端诊断信息并向用户返回可理解的导出失败提示。专利号、申请人、审查意见类型和答复正文均会按 XML 文本节点转义，避免特殊字符损坏 Word 文档结构。
