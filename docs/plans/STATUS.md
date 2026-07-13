@@ -8,6 +8,23 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-07-13 — 远程专利 PDF 下载安全加固 / Remote patent-PDF download hardening
+
+- **状态 / Status**: ✅ 已完成 / Completed
+- **提交 / Commit**: `2fd64ab`
+- **修复 / Fix**: 专利记录中的远程 `pdf_url` 现在仅允许 HTTPS 主机名、默认 443
+  端口和无凭据 URL。服务端解析并固定全部公网 DNS 地址，关闭环境代理和重定向，
+  拒绝非 2xx、超过 20 MB、流式超限和无有效 PDF 签名的响应，防止 SSRF、DNS
+  重绑定及内存耗尽。
+  Remote `pdf_url` values now require an HTTPS hostname on the default port with no credentials.
+  The server resolves and pins only public DNS addresses, disables proxies and redirects, and
+  rejects non-2xx, oversized, streaming-overlimit, and invalid-PDF responses to prevent SSRF,
+  DNS rebinding, and memory exhaustion.
+- **验证 / Verification**: 新增 URL/IP/大小/PDF 签名/localhost DNS 回归；`cargo fmt
+  --check`、`cargo clippy -- -D warnings` 和 `cargo test`（273 passed, 1 ignored）通过；
+  新版服务的 `/` 与 `/oa-response` 均返回 HTTP 200。
+
+
 ### 2026-07-13 — OA 可审计完整讨论记录导出 / OA auditable full discussion-record export
 
 - **状态 / Status**: ✅ 已完成 / Completed

@@ -12,6 +12,13 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
   OA full discussion-record export: a local-only Markdown export preserves the initial context, every user/AI source message, role, and ISO timestamp; it makes no AI request and safely retains source text containing Markdown backticks
 
 ### 修复 / Fixed
+- **远程专利 PDF 下载安全** — 从专利记录下载 PDF 时，现仅允许 HTTPS 主机名、默认
+  443 端口和无凭据 URL；服务会校验并固定公网 DNS 结果、禁用代理和重定向、拒绝非
+  2xx/超过 20 MB/非 PDF 响应，防止 SSRF、DNS 重绑定和内存耗尽
+  Remote patent-PDF download security: only HTTPS hostname URLs on the default port without
+  credentials are accepted; public DNS answers are validated and pinned, proxies and redirects
+  are disabled, and non-2xx, oversized, or non-PDF responses are rejected to prevent SSRF,
+  DNS rebinding, and memory exhaustion
 - **OA 导出语义澄清** — 原“导出结论”实际会调用 AI 生成二次摘要，现改名为“AI 总结结论”，并与可审计的完整原始记录导出分开
   OA export semantics clarified: the former “Export Conclusions” action actually invokes AI to generate a second summary; it is now labelled “AI Summary” and separated from the auditable full-source-record export
 - **搜索页 PDF 初始化顺序** — 将 `updatePdfFileList()` 移至其定义之后执行，消除搜索页加载时的 `ReferenceError`，不改变已保存 PDF 元数据的恢复逻辑
