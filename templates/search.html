@@ -348,7 +348,6 @@ renderSidebar(
 );
 	applyI18nCommon();
 	loadSearchPdfMeta();
-	updatePdfFileList();
 	if (restoredSearchPdf) {
 	    const zone = document.getElementById('pdf-upload-zone');
 	    if (zone) {
@@ -813,6 +812,8 @@ function updatePdfFileList() {
         `;
     }
 }
+
+updatePdfFileList();
 
 function formatFileSize(bytes) {
     if (!bytes) return '0 B';
