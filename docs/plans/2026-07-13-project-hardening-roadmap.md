@@ -117,3 +117,28 @@ Design an immutable chain for original OA, analysis versions, discussion, user e
 ## 下一执行任务 / Next execution task
 
 **P0-B：可重复前端回归 / Reproducible frontend regression。** 恢复仓库内可执行的 `e2e_test.mjs`，不新增 npm 依赖，覆盖服务健康检查、OA 页面加载和关键请求连通性。
+
+### P0-B 实施计划 / Implementation plan
+
+1. 新建仓库根目录 `e2e_test.mjs`（项目规约指定的入口），仅使用现有 `puppeteer`。
+   Create the required repository-root `e2e_test.mjs` using only the existing `puppeteer` dependency.
+2. 测试脚本只连接已运行的本地服务，不负责停止用户服务；默认地址为 `http://127.0.0.1:3000`，可用环境变量覆盖。
+   The script connects to a running local server and never stops a user-owned service; default to `http://127.0.0.1:3000` with an environment override.
+3. 覆盖首页与 OA 页 HTTP/页面加载、前端控制台异常、`/api/ai/check-amendments` 的参数校验连通性，以及 OA 长文本提交体尾标记不被前端截断。
+   Cover home/OA HTTP and page loading, frontend console exceptions, amendment-check connectivity, and preservation of a long-text end marker in OA request payload construction.
+4. 失败时输出请求 URL、HTTP 状态、页面错误；成功时给出稳定的通过计数。不得调用真实 AI Provider 或写入数据库。
+   On failure report request URL, HTTP status, and page errors; on success report stable pass counts. Do not call a real AI provider or write to the database.
+5. CODEX 实现后由主代理运行脚本、ESLint（新增 JS）和全部 Rust 门禁；验证完成才提交。
+   After CODEX implements it, the primary agent runs the script, ESLint for the new JS, and all Rust gates before committing.
+
+状态：✅ 已完成 / Completed
+
+- **代码提交 / Code commit**: 待提交 / Pending
+- **结果 / Result**: 新增根目录 `e2e_test.mjs`，默认连接本地服务并可用环境变量覆盖；6 项回归覆盖页面、接口和长请求体尾部完整性，真实 AI 请求被浏览器拦截。
+  Added root `e2e_test.mjs` with an overridable local-server URL; six regressions cover page, endpoint, and long-payload-tail integrity while real AI requests are intercepted in the browser.
+- **验证 / Verification**: `node --check`、ESLint 无配置模式、E2E 6/6 与 Rust 全量门禁通过。
+  `node --check`, ESLint without repository config, E2E 6/6, and full Rust gates passed.
+
+## 下一执行任务 / Next execution task
+
+**P0-C：安全基线 / Security baseline。** 先做只读审计与最小变更方案；CORS 策略或任何影响移动端来源的改动需要在实施前单独确认。

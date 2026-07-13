@@ -17,6 +17,15 @@
 - **验证 / Verification**: `cargo fmt --check`、`cargo clippy -- -D warnings` 与 `cargo test` 通过（245 项通过，1 项文档测试按设计忽略）。
   `cargo fmt --check`, `cargo clippy -- -D warnings`, and `cargo test` passed (245 passed; one doc test intentionally ignored).
 
+### 2026-07-13 — OA 可重复端到端回归 / OA reproducible end-to-end regression
+
+- **状态 / Status**: ✅ 已完成 / Completed
+- **文件 / File**: `e2e_test.mjs`
+- **覆盖 / Coverage**: 首页与 OA 页面加载、浏览器页面异常/失败请求、审核修改方案接口参数校验，以及超长请求体三字段尾标记保留；不调用真实 AI 服务。
+  Home/OA page loading, browser page errors/request failures, amendment-check parameter validation, and tail-marker preservation across all three long-payload fields; no real AI call.
+- **验证 / Verification**: `node --check e2e_test.mjs`、ESLint 无配置模式、`node e2e_test.mjs`（6/6）及 Rust 全量门禁通过。
+  `node --check e2e_test.mjs`, ESLint without repository config, `node e2e_test.mjs` (6/6), and the full Rust gates passed.
+
 ### 2026-07-13 — Windows 启动脚本修复 / Windows launcher fix
 
 - **状态 / Status**: ✅ 已完成 / Completed

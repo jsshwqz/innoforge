@@ -15,6 +15,10 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 - **Windows 启动脚本解析** — 修复 `start.bat` debug 构建分支中未转义圆括号导致的 CMD 解析错误，快捷方式现在可以完成编译并启动服务
   Windows launcher parsing: removed unescaped parentheses from the debug build echo line so the `start.bat` shortcut can compile and start the server
 
+### 测试 / Tests
+- **OA 可重复端到端回归** — 新增仓库内 `e2e_test.mjs`，覆盖首页/OA 页面加载、审核修改方案接口连通性，以及超长 OA 请求体尾部标记保留；脚本不调用真实 AI 服务
+  Reproducible OA E2E regression: added repository-owned `e2e_test.mjs` covering home/OA loading, amendment-check connectivity, and long-payload tail preservation without calling a real AI service
+
 ## [v0.7.3] - 2026-07-04
 
 ### 修复 / Fixed
