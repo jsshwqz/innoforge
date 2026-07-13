@@ -8,6 +8,14 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-07-13 — DOCX 导出安全加固 / DOCX export safety hardening
+
+- **状态 / Status**: ✅ 已完成 / Completed
+- **提交 / Commit**: `b8b6e89`
+- **修复 / Fix**: OA 意见陈述书的 DOCX 生成改为返回受控 `Result`；所有 ZIP 写入和收尾失败均不再触发生产路径 panic。专利号、申请人、审查意见类型和答复正文均经 XML 文本转义，避免 `&`、`<`、`>` 损坏 `word/document.xml`。接口在导出失败时记录详细错误并返回用户友好提示，成功响应格式保持不变。
+  OA response-letter DOCX generation now returns a controlled `Result`; every ZIP write/finalization failure avoids production-path panic. Patent number, applicant, office-action type, and response text are XML-text escaped so `&`, `<`, and `>` cannot corrupt `word/document.xml`. The API logs detailed failures and returns a friendly message while preserving the successful response shape.
+- **验证 / Verification**: `cargo fmt --check`、`cargo clippy -- -D warnings`、`cargo test`（295 passed, 1 ignored）和正式二进制构建通过；`/`、`/oa-response` 及携带特殊字符的本地 `POST /api/oa/export-docx` 均返回 HTTP 200。内存 DOCX 回归测试解压并验证所有四个非可信字段的 XML 转义。
+
 ### 2026-07-13 — 移动端嵌入服务生命周期加固 / Mobile embedded-server lifecycle hardening
 
 - **状态 / Status**: ✅ 已完成 / Completed

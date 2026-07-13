@@ -20,6 +20,8 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
   AI prompt input boundaries: chat history now accepts only `user` and `assistant`, rejecting client-forged `system` or unknown roles. Patent records, web results, OA material, discussion records, and raw custom role preferences use non-escapable `<user_input>` data boundaries; raw custom roles no longer have system-instruction authority while server presets remain available
 
 ### 修复 / Fixed
+- **DOCX 导出错误处理与 XML 转义** — OA 意见陈述书导出不再在 ZIP 写入失败时 panic；所有写入失败会记录服务端诊断信息并向用户返回可理解的导出失败提示。专利号、申请人、审查意见类型和答复正文均会按 XML 文本节点转义，避免特殊字符损坏 Word 文档结构。
+  DOCX export error handling and XML escaping: OA response-letter export no longer panics when ZIP writing fails; failures are logged server-side and returned as a friendly export error. Patent number, applicant, office-action type, and response text are XML-escaped as text nodes so special characters cannot corrupt the Word document.
 - **移动端嵌入服务生命周期** — Android/iOS FFI 启停入口不再因 Tokio 运行时创建、线程创建或服务器状态锁失败而 panic；重复启动会明确拒绝且保留原服务句柄，关闭操作在释放状态锁后再等待线程退出
   Mobile embedded-server lifecycle: Android/iOS FFI start and shutdown no longer panic on Tokio runtime creation, thread creation, or server-state lock failure. Duplicate starts are explicitly refused without replacing the original handle, and shutdown waits for the thread only after releasing the state lock
 - **AI 单次调用时限** — 聊天、分析、增强处理、默认 HTTP、多模态与流式 OA 调用现统一受 60 秒上限约束；现有重试与用户友好的超时错误保留，但不会让一次请求等待数分钟

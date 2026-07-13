@@ -20,6 +20,15 @@
 
 ---
 
+## [2026-07-13] DOCX 导出在 ZIP 写入失败时可能 panic，非可信字段可破坏 Word XML
+- **严重程度**: HIGH
+- **涉及文件**: `src/docx_export/export.rs`, `src/routes/ai.rs`
+- **现象**: OA 答复书导出在任何 `ZipWriter::start_file`、`write_all` 或 `finish` I/O 失败时会调用 `unwrap()`，使请求处理路径崩溃；专利号、申请人和审查意见类型直接插入 `word/document.xml`，其中的 `&`、`<`、`>` 会使导出的 Word 文件 XML 无效。
+- **根因**: DOCX 写入实现将内存 ZIP 操作误当作不会失败，且只对答复正文进行 XML 文本转义，遗漏了同一 XML 模板中的其余外部字段。
+- **修复**: `generate_docx` 改为返回 `Result<Vec<u8>, String>`，统一传播 ZIP 写入与收尾错误；复用 XML 转义函数处理四个外部文本字段。API 记录内部错误并返回用户友好的导出失败消息；新增内存 ZIP 回归测试校验 `word/document.xml` 的四字段转义。
+- **预防**: 所有文件格式导出必须将 I/O 失败作为正常错误分支处理，生产路径不得 `unwrap`/`expect`；每个插值进 XML/HTML/CSV 等结构化格式的外部字段都必须按其上下文转义，并用实际解包后的产物验证。
+- **提交**: `b8b6e89`
+
 ## [2026-07-13] 移动端 FFI 服务生命周期在失败或重复调用时可能 panic 或丢失句柄
 - **严重程度**: HIGH
 - **涉及文件**: `src/lib.rs`
