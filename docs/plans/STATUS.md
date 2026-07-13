@@ -8,6 +8,14 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-07-13 — 专利图片代理响应边界 / Patent image-proxy response boundaries
+
+- **状态 / Status**: ✅ 已完成 / Completed
+- **提交 / Commit**: `421df26`
+- **修复 / Fix**: 既有的可信 HTTPS 域名校验之外，图片代理现在关闭环境代理，限制上游响应为 PNG/JPEG/GIF/WebP/BMP/AVIF 等安全栅格 MIME，拒绝缺失类型、SVG、HTML 和其它类型。通过 `Content-Length` 预检与 `chunk()` 流式累计双重检查，将单张图片限制为 20 MiB；同时移除每次响应 `leak()` MIME 字符串的内存泄漏。
+  In addition to existing allowlisted-HTTPS URL validation, the image proxy now disables environment proxies and accepts only safe raster MIME types (PNG/JPEG/GIF/WebP/BMP/AVIF), rejecting missing types, SVG, HTML, and other types. A `Content-Length` precheck plus streamed `chunk()` accumulation limits each image to 20 MiB and removes the per-response MIME-string memory leak.
+- **验证 / Verification**: 新增 MIME 正规化/危险类型、声明长度和流式边界回归；`cargo fmt --check`、`cargo clippy -- -D warnings`、`cargo test`（293 passed, 1 ignored）通过。正式二进制的 `/` 和 `/oa-response` 返回 HTTP 200；不可信 HTTP 图片 URL 返回 HTTP 403。
+
 ### 2026-07-13 — 本地上传 PDF 文件签名校验 / Local PDF-upload signature validation
 
 - **状态 / Status**: ✅ 已完成 / Completed
