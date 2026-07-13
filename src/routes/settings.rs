@@ -80,6 +80,80 @@ pub async fn api_get_settings(State(s): State<AppState>) -> Json<serde_json::Val
     }))
 }
 
+fn parse_serpapi_keys(
+    req: &serde_json::Value,
+    current_keys: &[String],
+) -> Result<Vec<String>, String> {
+    let values = req
+        .get("api_keys")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| "请提供 SerpAPI Key 数组".to_string())?;
+
+    if values.len() > 5 {
+        return Err("最多可保存 5 个 SerpAPI Key".to_string());
+    }
+
+    values
+        .iter()
+        .enumerate()
+        .map(|(index, value)| {
+            let key = value
+                .as_str()
+                .ok_or_else(|| format!("第 {} 个 SerpAPI Key 必须是文本", index + 1))?
+                .trim();
+
+            if key.is_empty() {
+                return Err(format!("第 {} 个 SerpAPI Key 不能为空", index + 1));
+            }
+            if key.len() > 200 {
+                return Err(format!(
+                    "第 {} 个 SerpAPI Key 不能超过 200 个字符",
+                    index + 1
+                ));
+            }
+
+            if key.contains("****") {
+                let mut parts = key.split("****");
+                let prefix = parts.next().unwrap_or_default();
+                let suffix = parts.next().unwrap_or_default();
+                if parts.next().is_some() {
+                    return Err(format!("第 {} 个 SerpAPI Key 掩码格式无效", index + 1));
+                }
+
+                let matches: Vec<&String> = current_keys
+                    .iter()
+                    .filter(|current| current.starts_with(prefix) && current.ends_with(suffix))
+                    .collect();
+                return match matches.as_slice() {
+                    [current] => Ok((*current).clone()),
+                    [] => Err(format!(
+                        "第 {} 个 SerpAPI Key 掩码无法匹配当前配置，请输入完整 Key",
+                        index + 1
+                    )),
+                    _ => Err(format!(
+                        "第 {} 个 SerpAPI Key 掩码匹配多个当前配置，请输入完整 Key",
+                        index + 1
+                    )),
+                };
+            }
+
+            if key.len() < 20 {
+                return Err(format!(
+                    "第 {} 个 SerpAPI Key 至少需要 20 个字符",
+                    index + 1
+                ));
+            }
+            if !key.chars().all(|character| {
+                character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.')
+            }) {
+                return Err(format!("第 {} 个 SerpAPI Key 包含无效字符", index + 1));
+            }
+
+            Ok(key.to_string())
+        })
+        .collect()
+}
+
 pub async fn api_save_serpapi(
     State(s): State<AppState>,
     Json(req): Json<serde_json::Value>,
@@ -90,46 +164,10 @@ pub async fn api_save_serpapi(
         config.serpapi_keys.clone()
     };
 
-    let keys: Vec<String> = req["api_keys"]
-        .as_array()
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| {
-                    let k = v.as_str()?.trim().to_string();
-                    if k.is_empty() || k.len() > 200 {
-                        return None;
-                    }
-                    // 如果是掩码值（前端 GET 后再 PUT），反查原始 Key
-                    if k.contains("****") {
-                        // 去掉 **** 后取前后缀，匹配当前有效的 Key
-                        let parts: Vec<&str> = k.split("****").collect();
-                        if parts.len() == 2 {
-                            let prefix = parts[0];
-                            let suffix = parts[1];
-                            for current in &current_keys {
-                                if current.starts_with(prefix) && current.ends_with(suffix) {
-                                    return Some(current.clone());
-                                }
-                            }
-                        }
-                        // 未匹配到原始 Key，跳过
-                        return None;
-                    }
-                    // 非掩码 Key：正常校验
-                    if k.len() < 20 {
-                        return None;
-                    }
-                    if !k
-                        .chars()
-                        .all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.')
-                    {
-                        return None;
-                    }
-                    Some(k)
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+    let keys = match parse_serpapi_keys(&req, &current_keys) {
+        Ok(keys) => keys,
+        Err(message) => return Json(json!({"status": "error", "message": message})),
+    };
 
     // 先清除 DB 和 .env 中旧的单 key 和多 key 记录
     for suffix in ["", "_1", "_2", "_3", "_4", "_5"] {
@@ -457,5 +495,60 @@ fn extract_domain(url: &str) -> Option<String> {
         ))
     } else {
         Some(domain.to_string())
+    }
+}
+
+#[cfg(test)]
+mod serpapi_key_parsing_tests {
+    use super::parse_serpapi_keys;
+    use serde_json::json;
+
+    const VALID_KEY: &str = "abcdEFGHijklMNOPqrstUVWX";
+
+    fn request(api_keys: serde_json::Value) -> serde_json::Value {
+        json!({"api_keys": api_keys})
+    }
+
+    #[test]
+    fn empty_array_is_an_explicit_request_to_clear_keys() {
+        let parsed = parse_serpapi_keys(&request(json!([])), &[VALID_KEY.to_string()]).unwrap();
+
+        assert!(parsed.is_empty());
+    }
+
+    #[test]
+    fn invalid_requests_are_rejected_without_partial_results() {
+        assert!(parse_serpapi_keys(&request(json!("not-an-array")), &[]).is_err());
+        assert!(parse_serpapi_keys(
+            &request(json!([
+                VALID_KEY, VALID_KEY, VALID_KEY, VALID_KEY, VALID_KEY, VALID_KEY
+            ])),
+            &[]
+        )
+        .is_err());
+        assert!(parse_serpapi_keys(&request(json!(["too-short"])), &[]).is_err());
+        assert!(parse_serpapi_keys(&request(json!(["unknown****mask"])), &[]).is_err());
+        assert!(parse_serpapi_keys(
+            &request(json!(["abcd****UVWX"])),
+            &[
+                "abcdEFGHijklMNOPqrstUVWX".to_string(),
+                "abcdZYXWvutsRQPOnmlkUVWX".to_string(),
+            ]
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn valid_keys_and_unique_masks_are_accepted() {
+        let current_keys = vec![VALID_KEY.to_string()];
+
+        assert_eq!(
+            parse_serpapi_keys(&request(json!([VALID_KEY])), &current_keys).unwrap(),
+            current_keys
+        );
+        assert_eq!(
+            parse_serpapi_keys(&request(json!(["abcd****UVWX"])), &current_keys).unwrap(),
+            current_keys
+        );
     }
 }
