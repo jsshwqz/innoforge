@@ -210,6 +210,7 @@
                 <button id="discussion-send-btn" onclick="sendDiscussionMessage()" data-i18n="oar.send"></button>
                 <button id="discussion-stop-btn" onclick="stopDiscussionGeneration()" style="display:none;padding:8px 10px;background:#21262d;color:#f85149;border:1px solid #f85149;border-radius:6px;cursor:pointer;font-size:13px;white-space:nowrap;" data-i18n="oar.stop"></button>
                 <button id="discussion-export-btn" onclick="exportDiscussionConclusions()" style="display:none;padding:8px 10px;background:#21262d;color:#c9d1d9;border:1px solid #6e7681;border-radius:6px;cursor:pointer;font-size:13px;white-space:nowrap;" data-i18n="oar.exportConclusions"></button>
+                <button id="discussion-transcript-export-btn" onclick="exportDiscussionTranscript()" style="display:none;padding:8px 10px;background:#21262d;color:#c9d1d9;border:1px solid #6e7681;border-radius:6px;cursor:pointer;font-size:13px;white-space:nowrap;" data-i18n="oar.exportTranscript"></button>
             </div>
         </div>
 
@@ -2028,7 +2029,7 @@
             ctx += '\n== 当前分析结果 ==\n';
             ctx += lastAnalysisRawText + '\n';
         }
-        discussionHistory = [['system', ctx]];
+        discussionHistory = [['system', ctx, new Date().toISOString()]];
         var panel = document.getElementById('discussion-panel');
         panel.classList.remove('hidden');
         document.getElementById('discussion-messages').innerHTML =
@@ -2113,8 +2114,8 @@
                 content = data.content || 'AI error: empty response';
             }
 
-            discussionHistory.push(['user', text]);
-            discussionHistory.push(['assistant', content]);
+            discussionHistory.push(['user', text, new Date().toISOString()]);
+            discussionHistory.push(['assistant', content, new Date().toISOString()]);
             parseArgsFromAI(content);
 
             var aiDiv = document.createElement('div');
@@ -2161,13 +2162,88 @@
     }
 
     function showDiscussionExportButton() {
-        var btn = document.getElementById('discussion-export-btn');
-        if (btn && discussionHistory.length > 1) btn.style.display = '';
+        var buttonIds = ['discussion-export-btn', 'discussion-transcript-export-btn'];
+        for (var i = 0; i < buttonIds.length; i++) {
+            var btn = document.getElementById(buttonIds[i]);
+            if (btn && discussionHistory.length > 1) btn.style.display = '';
+        }
     }
 
     function hideDiscussionExportButton() {
-        var btn = document.getElementById('discussion-export-btn');
-        if (btn) btn.style.display = 'none';
+        var buttonIds = ['discussion-export-btn', 'discussion-transcript-export-btn'];
+        for (var i = 0; i < buttonIds.length; i++) {
+            var btn = document.getElementById(buttonIds[i]);
+            if (btn) btn.style.display = 'none';
+        }
+    }
+
+    function discussionTranscriptRoleLabel(role) {
+        if (role === 'system') return t('oar.transcriptRoleSystem');
+        if (role === 'assistant') return t('oar.transcriptRoleAssistant');
+        return t('oar.transcriptRoleUser');
+    }
+
+    function discussionTranscriptCodeBlock(content) {
+        var text = String(content == null ? '' : content);
+        var backtickRuns = text.match(/`+/g) || [];
+        var fenceLength = 3;
+        for (var i = 0; i < backtickRuns.length; i++) {
+            if (backtickRuns[i].length >= fenceLength) fenceLength = backtickRuns[i].length + 1;
+        }
+        var fence = '`'.repeat(fenceLength);
+        return fence + 'text\n' + text + '\n' + fence;
+    }
+
+    function discussionTranscriptTime(entry) {
+        return entry[2] || t('oar.transcriptTimeUnknown');
+    }
+
+    function buildDiscussionTranscript() {
+        var exportedAt = new Date().toISOString();
+        var systemEntry = discussionHistory[0] || ['system', '', ''];
+        var lines = [
+            '# ' + t('oar.transcriptTitle'),
+            '',
+            '> ' + t('oar.transcriptNotice'),
+            '',
+            '- ' + t('oar.transcriptGeneratedAt') + ': ' + exportedAt,
+            '',
+            '## ' + t('oar.transcriptContext'),
+            '',
+            '### ' + discussionTranscriptRoleLabel(systemEntry[0]),
+            '- ' + t('oar.transcriptTime') + ': ' + discussionTranscriptTime(systemEntry),
+            '',
+            discussionTranscriptCodeBlock(systemEntry[1]),
+            '',
+            '## ' + t('oar.transcriptMessages')
+        ];
+
+        for (var i = 1; i < discussionHistory.length; i++) {
+            var entry = discussionHistory[i];
+            lines.push(
+                '',
+                '### ' + discussionTranscriptRoleLabel(entry[0]),
+                '- ' + t('oar.transcriptTime') + ': ' + discussionTranscriptTime(entry),
+                '',
+                discussionTranscriptCodeBlock(entry[1])
+            );
+        }
+        return lines.join('\n');
+    }
+
+    function exportDiscussionTranscript() {
+        if (discussionHistory.length < 2) { hideDiscussionExportButton(); return; }
+        var transcript = buildDiscussionTranscript();
+        var blob = new Blob([transcript], { type: 'text/markdown;charset=utf-8' });
+        var url = URL.createObjectURL(blob);
+        var link = document.createElement('a');
+        var filenameTime = new Date().toISOString().replace(/[:.]/g, '-');
+        link.href = url;
+        link.download = 'innoforge-oa-discussion-' + filenameTime + '.md';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.setTimeout(function() { URL.revokeObjectURL(url); }, 0);
     }
 
     async function exportDiscussionConclusions() {

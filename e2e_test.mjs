@@ -2,7 +2,7 @@ import puppeteer from 'puppeteer';
 import { existsSync } from 'node:fs';
 
 const baseUrl = (process.env.INNOFORGE_E2E_BASE_URL || 'http://127.0.0.1:3000').replace(/\/$/, '');
-const expectedPasses = 42;
+const expectedPasses = 48;
 const failures = [];
 let passed = 0;
 
@@ -295,6 +295,124 @@ async function checkLongPayloadIntegrity(oaPage) {
     );
 }
 
+async function checkDiscussionTranscriptExport(oaPage) {
+    const aiRequests = [];
+    const trackAiRequest = request => {
+        if (request.url().includes('/api/ai/')) aiRequests.push(request.url());
+    };
+    oaPage.on('request', trackAiRequest);
+
+    try {
+        const prepared = await oaPage.evaluate(() => {
+            const markers = {
+                context: 'INNOFORGE_E2E_TRANSCRIPT_CONTEXT_TAIL_5d8a11',
+                user: 'INNOFORGE_E2E_TRANSCRIPT_USER_TAIL_5d8a11',
+                assistant: 'INNOFORGE_E2E_TRANSCRIPT_ASSISTANT_TAIL_5d8a11',
+            };
+            const timestamps = [
+                '2026-07-13T01:02:03.000Z',
+                '2026-07-13T01:02:04.000Z',
+                '2026-07-13T01:02:05.000Z',
+            ];
+            const codeFence = '```original markdown source```';
+            const state = {
+                originalCreateObjectURL: URL.createObjectURL,
+                originalRevokeObjectURL: URL.revokeObjectURL,
+                originalAnchorClick: HTMLAnchorElement.prototype.click,
+                blob: null,
+                filename: null,
+            };
+            window.__innoforgeE2eTranscriptState = state;
+            URL.createObjectURL = blob => {
+                state.blob = blob;
+                return 'blob:innoforge-e2e-transcript';
+            };
+            URL.revokeObjectURL = () => {};
+            HTMLAnchorElement.prototype.click = function() {
+                state.filename = this.download;
+            };
+            discussionHistory = [
+                ['system', `Initial context\n${markers.context}\n${codeFence}`, timestamps[0]],
+                ['user', `User question\n${markers.user}`, timestamps[1]],
+                ['assistant', `Assistant answer\n${markers.assistant}`, timestamps[2]],
+            ];
+            document.getElementById('discussion-panel').classList.remove('hidden');
+            showDiscussionExportButton();
+            return {
+                markers,
+                timestamps,
+                codeFence,
+                labels: [
+                    discussionTranscriptRoleLabel('system'),
+                    discussionTranscriptRoleLabel('user'),
+                    discussionTranscriptRoleLabel('assistant'),
+                ],
+                notice: t('oar.transcriptNotice'),
+                isVisible: document.getElementById('discussion-transcript-export-btn').style.display !== 'none',
+            };
+        });
+
+        requireCondition(
+            prepared.isVisible,
+            'Full discussion export becomes visible after a discussion exchange',
+            'page=/oa-response selector=#discussion-transcript-export-btn visibility=hidden',
+        );
+        await oaPage.click('#discussion-transcript-export-btn');
+        const exported = await oaPage.evaluate(async () => {
+            const state = window.__innoforgeE2eTranscriptState;
+            const result = {
+                filename: state.filename,
+                content: state.blob ? await state.blob.text() : '',
+            };
+            URL.createObjectURL = state.originalCreateObjectURL;
+            URL.revokeObjectURL = state.originalRevokeObjectURL;
+            HTMLAnchorElement.prototype.click = state.originalAnchorClick;
+            delete window.__innoforgeE2eTranscriptState;
+            return result;
+        });
+
+        requireCondition(
+            typeof exported.filename === 'string' && exported.filename.endsWith('.md'),
+            'Full discussion export uses a Markdown filename',
+            `page=/oa-response filename=${exported.filename || 'missing'}`,
+        );
+        requireCondition(
+            exported.content.includes(prepared.markers.context)
+                && exported.content.includes(prepared.markers.user)
+                && exported.content.includes(prepared.markers.assistant),
+            'Full discussion export preserves context and every message tail marker',
+            'page=/oa-response transcript_tail_marker=missing',
+        );
+        requireCondition(
+            exported.content.includes(prepared.codeFence),
+            'Full discussion export preserves original Markdown backticks',
+            'page=/oa-response transcript_backticks=missing',
+        );
+        requireCondition(
+            prepared.timestamps.every(timestamp => exported.content.includes(timestamp))
+                && prepared.labels.every(label => exported.content.includes(label))
+                && exported.content.includes(prepared.notice),
+            'Full discussion export includes roles, timestamps, and original-record notice',
+            'page=/oa-response transcript_metadata=missing',
+        );
+        requireCondition(
+            aiRequests.length === 0,
+            'Full discussion export makes no AI request',
+            `page=/oa-response ai_requests=${aiRequests.join(',') || 'none'}`,
+        );
+    } finally {
+        oaPage.off('request', trackAiRequest);
+        await oaPage.evaluate(() => {
+            const state = window.__innoforgeE2eTranscriptState;
+            if (!state) return;
+            URL.createObjectURL = state.originalCreateObjectURL;
+            URL.revokeObjectURL = state.originalRevokeObjectURL;
+            HTMLAnchorElement.prototype.click = state.originalAnchorClick;
+            delete window.__innoforgeE2eTranscriptState;
+        });
+    }
+}
+
 async function main() {
     const pageErrors = [];
     const requestFailures = [];
@@ -312,6 +430,7 @@ async function main() {
         const oaPage = openedPages.get('/oa-response');
         if (oaPage) {
             await checkAmendmentEndpoint(oaPage);
+            await checkDiscussionTranscriptExport(oaPage);
             await checkLongPayloadIntegrity(oaPage);
         } else {
             fail('OA regression page is available', `page=${baseUrl}/oa-response missing_page_instance=true`);
