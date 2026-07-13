@@ -12,6 +12,8 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
   OA full discussion-record export: a local-only Markdown export preserves the initial context, every user/AI source message, role, and ISO timestamp; it makes no AI request and safely retains source text containing Markdown backticks
 
 ### 修复 / Fixed
+- **D 盘运行期 PDF 临时文件** — PDF 解析、视觉回退、OCR 和 MinerU 不再使用 Windows 系统临时目录；文件现在以不可预测的 UUID 名称在项目 `data/runtime-temp` 下独占创建，并由作用域守卫在成功、失败和提前返回时清理。`pdftotext` 直接捕获标准输出，Umi-OCR 不再写入未使用的副本
+  D-drive runtime PDF temporary files: PDF extraction, vision fallback, OCR, and MinerU no longer use the Windows system temp directory. UUID-named files are created exclusively under project `data/runtime-temp` and cleaned by a scope guard on success, failure, and early return; `pdftotext` captures stdout directly and Umi-OCR no longer writes an unused copy
 - **远程专利 PDF 下载安全** — 从专利记录下载 PDF 时，现仅允许 HTTPS 主机名、默认
   443 端口和无凭据 URL；服务会校验并固定公网 DNS 结果、禁用代理和重定向、拒绝非
   2xx/超过 20 MB/非 PDF 响应，防止 SSRF、DNS 重绑定和内存耗尽

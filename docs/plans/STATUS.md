@@ -8,6 +8,14 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-07-13 — D 盘运行期 PDF 临时文件治理 / D-drive runtime PDF temporary-file remediation
+
+- **状态 / Status**: ✅ 已完成 / Completed
+- **提交 / Commit**: `dcb446d`
+- **修复 / Fix**: 所有外部 PDF 提取路径（视觉回退、pdftotext、PyMuPDF、MinerU、OCR）现将临时输入及视觉 PNG 输出限制在项目工作目录的 `data/runtime-temp`。文件使用 UUID 和 `create_new` 独占创建，并由 RAII 守卫覆盖成功、失败和提前返回的清理；`pdftotext` 改为捕获标准输出，Umi-OCR 删除未使用的磁盘副本。
+  External PDF extraction paths (vision fallback, pdftotext, PyMuPDF, MinerU, and OCR) now keep temporary inputs and vision PNG outputs under project-working-directory `data/runtime-temp`. UUID plus `create_new` prevents collisions, while an RAII guard cleans on success, failure, and early returns; pdftotext captures stdout and Umi-OCR no longer writes an unused disk copy.
+- **验证 / Verification**: `cargo fmt --check`、`cargo clippy -- -D warnings` 和 `cargo test`（275 passed, 1 ignored）全部通过；临时文件回归确认路径和清理行为，目录无残留；新二进制的 `/` 与 `/oa-response` 均返回 HTTP 200。
+
 ### 2026-07-13 — 远程专利 PDF 下载安全加固 / Remote patent-PDF download hardening
 
 - **状态 / Status**: ✅ 已完成 / Completed
