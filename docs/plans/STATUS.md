@@ -26,6 +26,15 @@
 - **验证 / Verification**: `node --check e2e_test.mjs`、ESLint 无配置模式、`node e2e_test.mjs`（6/6）及 Rust 全量门禁通过。
   `node --check e2e_test.mjs`, ESLint without repository config, `node e2e_test.mjs` (6/6), and the full Rust gates passed.
 
+### 2026-07-13 — 本地服务 CORS 收紧 / Local-service CORS hardening
+
+- **状态 / Status**: ✅ 已完成 / Completed
+- **提交 / Commit**: `15f134a`
+- **修复 / Fix**: 默认跨域来源从全开放改为本机 `http://127.0.0.1:3000` 与 `http://localhost:3000`；通过 `INNOFORGE_CORS_ORIGINS` 可安全添加 HTTP/HTTPS 来源，无效配置项被忽略。
+  Default CORS changed from open access to local `http://127.0.0.1:3000` and `http://localhost:3000`; `INNOFORGE_CORS_ORIGINS` can safely add HTTP/HTTPS origins while invalid entries are ignored.
+- **验证 / Verification**: 允许来源预检返回对应 `access-control-allow-origin`，不受信任来源无该响应头；fmt、clippy、245 项 Rust 测试和 E2E 6/6 通过。
+  The allowed-origin preflight returns its `access-control-allow-origin`, while an untrusted origin receives none; fmt, clippy, 245 Rust tests, and E2E 6/6 passed.
+
 ### 2026-07-13 — Windows 启动脚本修复 / Windows launcher fix
 
 - **状态 / Status**: ✅ 已完成 / Completed

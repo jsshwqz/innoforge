@@ -523,4 +523,17 @@
   Data-bearing text must not be truncated; new AI context limits require visible errors or traceable chunking and Unicode-boundary tests.
 - **提交 / Commit**: `ce303d2`
 
+### [2026-07-13] 本地服务 CORS 全开放 / Local-service CORS was open to all origins
+- **严重程度 / Severity**: HIGH
+- **涉及文件 / Files**: `src/common.rs`
+- **现象 / Symptom**: 本地服务对任意 Origin 返回跨域许可，局域网或嵌入式来源一旦可访问服务即可从浏览器发起 API 请求。
+  The local service granted CORS access to every Origin, allowing any browser origin that could reach it to issue API requests.
+- **根因 / Root cause**: 路由中直接使用 `CorsLayer::allow_origin(Any)`，未区分本机桌面服务与显式受信任的扩展来源。
+  The router used `CorsLayer::allow_origin(Any)` directly, without distinguishing local desktop access from explicitly trusted additional origins.
+- **修复 / Fix**: 默认限制为两个本机来源；额外来源仅由 `INNOFORGE_CORS_ORIGINS` 提供，并验证为无路径/查询/片段/用户信息的 HTTP/HTTPS Origin。
+  Restricted defaults to two local origins; additional origins come only from `INNOFORGE_CORS_ORIGINS` and are validated as HTTP/HTTPS origins with no path/query/fragment/user-info.
+- **预防 / Prevention**: 不得重新引入 `allow_origin(Any)`；新增 WebView 或移动端来源须显式加入环境变量，并覆盖允许与拒绝来源预检。
+  Do not reintroduce `allow_origin(Any)`; new WebView/mobile origins must be added explicitly through the environment variable and covered by allowed/rejected-origin preflight checks.
+- **提交 / Commit**: `15f134a`
+
 *最后更新 / Last updated: 2026-07-13*

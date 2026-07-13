@@ -8,6 +8,8 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 ## [Unreleased]
 
 ### 修复 / Fixed
+- **本地服务 CORS 边界** — 移除全开放跨域来源；默认仅允许本机 `127.0.0.1:3000` 与 `localhost:3000`，移动端或桌面壳的额外来源可通过 `INNOFORGE_CORS_ORIGINS` 显式配置
+  Local-service CORS boundary: removed open cross-origin access; only local `127.0.0.1:3000` and `localhost:3000` are allowed by default, while mobile/desktop-shell origins can be explicitly configured with `INNOFORGE_CORS_ORIGINS`
 - **OA 后端数据完整性** — OA 讨论和答复书生成不再为控制上下文而静默截断原文；超出明确容量时返回带字段、实际字符数和上限的可见错误，并按 Unicode 字符计数
   OA backend integrity: discussion and response-letter flows no longer silently truncate source material; oversized inputs return a visible field-specific Unicode-character capacity error
 - **OA AI 上下文数据完整性** — 移除 OA 修改校验和讨论流程中 6 个前端正文截断表达式，覆盖审查意见、本专利、对比文件和既有分析结果，避免长材料在提交 AI 前静默丢失

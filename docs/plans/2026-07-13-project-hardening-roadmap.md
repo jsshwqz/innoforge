@@ -142,3 +142,29 @@ Design an immutable chain for original OA, analysis versions, discussion, user e
 ## 下一执行任务 / Next execution task
 
 **P0-C：安全基线 / Security baseline。** 先做只读审计与最小变更方案；CORS 策略或任何影响移动端来源的改动需要在实施前单独确认。
+
+### P0-C.1 CORS 实施计划 / CORS implementation plan
+
+1. 只修改 `src/common.rs`：移除 `CorsLayer::allow_origin(Any)`，不改路由、数据库或公开 API。
+   Modify only `src/common.rs`: remove `CorsLayer::allow_origin(Any)` without changing routes, database, or public APIs.
+2. 默认 allowlist 固定包含 `http://127.0.0.1:3000` 与 `http://localhost:3000`，保证桌面本地服务可用。
+   The default allowlist includes `http://127.0.0.1:3000` and `http://localhost:3000` to preserve desktop local access.
+3. 额外来源由 `INNOFORGE_CORS_ORIGINS` 提供（逗号分隔）；仅接受有效 HTTP Header 值，非法项忽略且不扩大默认权限。
+   Additional origins come from comma-separated `INNOFORGE_CORS_ORIGINS`; accept only valid HTTP header values and ignore invalid values without widening default permissions.
+4. 保留现有允许的方法和请求头；增加单元测试，验证默认来源、有效额外来源和非法来源处理。
+   Preserve the existing allowed methods/headers; add unit tests for defaults, valid additional origins, and invalid-origin handling.
+5. 完成后运行 CORS preflight/拒绝来源的本地 HTTP 验证、完整 Rust 门禁及 E2E；不新增 crate。
+   Afterward run local HTTP checks for CORS preflight/denied origins, full Rust gates, and E2E; add no crates.
+
+状态：✅ 已完成 / Completed
+
+- **代码提交 / Code commit**: `15f134a` (`fix: 收紧本地服务 CORS 来源`)
+- **结果 / Result**: CORS 默认仅放行两个本机来源；`INNOFORGE_CORS_ORIGINS` 支持以逗号分隔添加经过校验的 HTTP/HTTPS 来源，路径、查询、片段、用户信息、通配符和 `file:` 等无效值会被忽略。
+  CORS now permits only two local origins by default; `INNOFORGE_CORS_ORIGINS` adds validated comma-separated HTTP/HTTPS origins, while paths, queries, fragments, user-info, wildcards, and `file:` values are ignored.
+- **验证 / Verification**: 3 项 CORS 单元测试、允许/拒绝来源预检、Rust 全量门禁与 E2E 6/6 均通过。
+  Three CORS unit tests, allowed/rejected-origin preflight checks, full Rust gates, and E2E 6/6 passed.
+
+## 后续审计项 / Follow-up audit items
+
+- 图片代理目前已有域名白名单，但仍使用字符串前缀解析主机；下一阶段应改用结构化 URL 解析并明确端口/重定向策略。
+  The image proxy has a domain allowlist but still parses the host with string prefixes; a follow-up should use structured URL parsing and define port/redirect policy.

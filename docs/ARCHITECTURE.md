@@ -197,7 +197,7 @@ docker run -p 3000:3000 -v ./innoforge.db:/app/innoforge.db innoforge
 | SQL 注入防护 | 全参数化查询 + FTS5 查询消毒 |
 | XSS 防护 | DOMPurify（前端）+ `html_escape`（后端）+ X-Frame-Options: DENY |
 | SSRF 防护 | 图片代理 allowlist（3 个专利图片域名） |
-| CORS | tower-http（当前 Any，本地工具可接受） |
+| CORS | tower-http 默认本机 allowlist；额外来源通过 `INNOFORGE_CORS_ORIGINS` 显式配置 |
 | 提示注入防护 | CLAUDE.md 规范：超时 + 错误处理 + 注入防护 |
 | 请求体限制 | 20MB |
 | API 密钥 | .env 文件（gitignored） |
