@@ -8,6 +8,14 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-07-13 — AI 配置原子保存 / AI configuration atomic persistence
+
+- **状态 / Status**: ✅ 已完成 / Completed
+- **提交 / Commit**: `7628984`
+- **修复 / Fix**: `api_save_ai` 先把 AI 地址、服务商与通用 Key、模型、Google 凭据和 Gemini CLI 开关共 8 项设置写入一个 SQLite 事务；任何执行或提交错误都会回滚、记录服务端诊断并返回友好 JSON，运行中的内存配置不会被提前切换。事务成功后才更新内存，`.env` 只保留为失败可记录的桌面后备。
+  `api_save_ai` now writes the base URL, provider/general keys, models, Google credentials, and Gemini CLI switch as eight SQLite settings in one transaction. Any execution or commit error rolls back, logs server diagnostics, returns friendly JSON, and never switches the running configuration early. Memory updates only after success; `.env` is a warning-logged desktop backup.
+- **验证 / Verification**: `cargo fmt --check`、`cargo clippy -- -D warnings`、`cargo test`（307 passed, 1 ignored）和正式二进制构建通过；`/`、`/settings`、`/oa-response` 均返回 HTTP 200，向 `POST /api/settings/ai` 提交无效协议返回受控错误且不写入配置。
+
 ### 2026-07-13 — SerpAPI Key 保存完整性 / SerpAPI Key save integrity
 
 - **状态 / Status**: ✅ 已完成 / Completed

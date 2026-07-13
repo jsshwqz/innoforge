@@ -20,6 +20,8 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
   AI prompt input boundaries: chat history now accepts only `user` and `assistant`, rejecting client-forged `system` or unknown roles. Patent records, web results, OA material, discussion records, and raw custom role preferences use non-escapable `<user_input>` data boundaries; raw custom roles no longer have system-instruction authority while server presets remain available
 
 ### 修复 / Fixed
+- **AI 配置原子保存** — 设置页保存 AI 配置时，全部 8 个主存储项现在在同一 SQLite 事务中写入；任一写入失败会回滚、返回友好错误，并保持当前运行中的内存配置不变。仅在事务成功后更新内存配置；`.env` 继续作为可失败但会记录日志的桌面备份。
+  AI configuration atomic persistence: all eight primary settings now save in one SQLite transaction. A failed write rolls back, returns a friendly error, and leaves the running in-memory configuration unchanged. Memory updates only after commit; `.env` remains a best-effort desktop backup with warning logs on failure.
 - **SerpAPI Key 保存的数据完整性** — 设置页不再静默丢弃无效 SerpAPI Key 后清空既有配置。缺失/非数组、超过 5 个、空白、过短、非法字符、未知或歧义掩码会在任何清空或写入前返回可理解的错误；空数组仍明确表示用户主动清空，合法掩码可安全还原。
   SerpAPI Key save integrity: settings no longer silently drop invalid SerpAPI keys and then clear the existing configuration. Missing/non-array, over-limit, blank, short, malformed, unknown-mask, or ambiguous-mask input returns a clear error before any clearing or write; an empty array remains an explicit user-requested clear, and valid masks are safely restored.
 - **正则初始化的受控错误处理** — 创意报告的行内 Markdown、专利说明书 HTML 清理和法律状态页面解析不再使用生产路径 `expect()`。正则继续缓存；若内部初始化异常则记录诊断并返回已转义文本或受控错误，避免请求 panic。补充 Markdown 格式渲染与 HTML 输入转义回归，防止调整转义职责时引入 XSS 回退。
