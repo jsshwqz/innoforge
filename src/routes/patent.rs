@@ -977,6 +977,40 @@ const ALLOWED_PATENT_IMAGE_HOSTS: &[&str] = &[
     "worldwide.espacenet.com",
     "image.patent.k.sogou.com",
 ];
+const MAX_PATENT_IMAGE_BYTES: usize = 20 * 1024 * 1024;
+
+fn allowed_patent_image_mime(content_type: Option<&str>) -> Option<&'static str> {
+    let mime = content_type?.split(';').next()?.trim();
+
+    if mime.eq_ignore_ascii_case("image/png") {
+        Some("image/png")
+    } else if mime.eq_ignore_ascii_case("image/jpeg") {
+        Some("image/jpeg")
+    } else if mime.eq_ignore_ascii_case("image/gif") {
+        Some("image/gif")
+    } else if mime.eq_ignore_ascii_case("image/webp") {
+        Some("image/webp")
+    } else if mime.eq_ignore_ascii_case("image/bmp") {
+        Some("image/bmp")
+    } else if mime.eq_ignore_ascii_case("image/avif") {
+        Some("image/avif")
+    } else {
+        None
+    }
+}
+
+fn image_content_length_is_within_limit(content_length: Option<u64>) -> bool {
+    content_length
+        .map(|length| length <= MAX_PATENT_IMAGE_BYTES as u64)
+        .unwrap_or(true)
+}
+
+fn image_body_can_accept_chunk(current_len: usize, chunk_len: usize) -> bool {
+    match current_len.checked_add(chunk_len) {
+        Some(total_len) => total_len <= MAX_PATENT_IMAGE_BYTES,
+        None => false,
+    }
+}
 
 /// Validate an upstream patent-image URL before proxying it.
 ///
@@ -1032,6 +1066,7 @@ pub async fn api_patent_image_proxy(
 
     let client = match reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
+        .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
         .build()
     {
@@ -1051,7 +1086,7 @@ pub async fn api_patent_image_proxy(
         .send()
         .await
     {
-        Ok(resp) => {
+        Ok(mut resp) => {
             if !resp.status().is_success() {
                 return (
                     StatusCode::BAD_GATEWAY,
@@ -1059,36 +1094,76 @@ pub async fn api_patent_image_proxy(
                     format!("Upstream: {}", resp.status()).into_bytes(),
                 );
             }
-            let content_type = resp
-                .headers()
-                .get("content-type")
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("image/png")
-                .to_string();
-            match resp.bytes().await {
-                Ok(bytes) => (
-                    StatusCode::OK,
-                    [(header::CONTENT_TYPE, content_type.leak() as &'static str)],
-                    bytes.to_vec(),
-                ),
-                Err(_) => (
+            let content_type = match allowed_patent_image_mime(
+                resp.headers()
+                    .get(header::CONTENT_TYPE)
+                    .and_then(|value| value.to_str().ok()),
+            ) {
+                Some(content_type) => content_type,
+                None => {
+                    return (
+                        StatusCode::BAD_GATEWAY,
+                        [(header::CONTENT_TYPE, "text/plain")],
+                        b"Upstream returned an unsupported image type".to_vec(),
+                    );
+                }
+            };
+            if !image_content_length_is_within_limit(resp.content_length()) {
+                return (
                     StatusCode::BAD_GATEWAY,
                     [(header::CONTENT_TYPE, "text/plain")],
-                    b"Failed to read image".to_vec(),
-                ),
+                    b"Image exceeds the 20 MiB limit".to_vec(),
+                );
             }
+
+            let mut image = Vec::with_capacity(
+                resp.content_length()
+                    .unwrap_or_default()
+                    .min(MAX_PATENT_IMAGE_BYTES as u64) as usize,
+            );
+            loop {
+                match resp.chunk().await {
+                    Ok(Some(chunk)) => {
+                        if !image_body_can_accept_chunk(image.len(), chunk.len()) {
+                            return (
+                                StatusCode::BAD_GATEWAY,
+                                [(header::CONTENT_TYPE, "text/plain")],
+                                b"Image exceeds the 20 MiB limit".to_vec(),
+                            );
+                        }
+                        image.extend_from_slice(&chunk);
+                    }
+                    Ok(None) => break,
+                    Err(_) => {
+                        return (
+                            StatusCode::BAD_GATEWAY,
+                            [(header::CONTENT_TYPE, "text/plain")],
+                            b"Failed to read image".to_vec(),
+                        );
+                    }
+                }
+            }
+
+            (
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, content_type)],
+                image,
+            )
         }
-        Err(e) => (
+        Err(_) => (
             StatusCode::BAD_GATEWAY,
             [(header::CONTENT_TYPE, "text/plain")],
-            format!("Proxy error: {}", e).into_bytes(),
+            b"Failed to fetch image".to_vec(),
         ),
     }
 }
 
 #[cfg(test)]
 mod patent_image_proxy_tests {
-    use super::validate_patent_image_url;
+    use super::{
+        allowed_patent_image_mime, image_body_can_accept_chunk,
+        image_content_length_is_within_limit, validate_patent_image_url, MAX_PATENT_IMAGE_BYTES,
+    };
 
     #[test]
     fn accepts_allowlisted_https_url_and_preserves_path_and_query() {
@@ -1137,6 +1212,46 @@ mod patent_image_proxy_tests {
                 "should reject {url}"
             );
         }
+    }
+
+    #[test]
+    fn accepts_allowed_image_mime_types_case_insensitively_with_parameters() {
+        assert_eq!(
+            allowed_patent_image_mime(Some("IMAGE/JPEG; charset=binary")),
+            Some("image/jpeg")
+        );
+        assert_eq!(
+            allowed_patent_image_mime(Some(" image/WEBP ; q=1 ")),
+            Some("image/webp")
+        );
+    }
+
+    #[test]
+    fn rejects_missing_and_unsafe_image_mime_types() {
+        for content_type in [None, Some("image/svg+xml"), Some("text/html")] {
+            assert_eq!(
+                allowed_patent_image_mime(content_type),
+                None,
+                "should reject {content_type:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_content_length_larger_than_image_limit() {
+        assert!(image_content_length_is_within_limit(Some(
+            MAX_PATENT_IMAGE_BYTES as u64
+        )));
+        assert!(!image_content_length_is_within_limit(Some(
+            MAX_PATENT_IMAGE_BYTES as u64 + 1
+        )));
+        assert!(image_content_length_is_within_limit(None));
+    }
+
+    #[test]
+    fn rejects_streams_that_exceed_image_limit() {
+        assert!(image_body_can_accept_chunk(MAX_PATENT_IMAGE_BYTES - 1, 1));
+        assert!(!image_body_can_accept_chunk(MAX_PATENT_IMAGE_BYTES, 1));
     }
 }
 
