@@ -28,6 +28,23 @@ impl super::Database {
         Ok(())
     }
 
+    /// Batch-save settings. Any failed write rolls back the entire batch.
+    pub fn set_settings_batch(&self, settings: &[(&str, &str)]) -> Result<()> {
+        let mut c = self.conn();
+        let transaction = c.transaction()?;
+
+        for (key, value) in settings {
+            transaction.execute(
+                "INSERT INTO app_settings (key, value, updated_at) VALUES (?1, ?2, datetime('now'))
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+                params![key, value],
+            )?;
+        }
+
+        transaction.commit()?;
+        Ok(())
+    }
+
     /// 获取所有设置项
     pub fn get_all_settings(&self) -> Result<std::collections::HashMap<String, String>> {
         let c = self.conn();
@@ -81,5 +98,40 @@ impl super::Database {
             [],
         )?;
         Ok(deleted)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::Database;
+
+    #[test]
+    fn set_settings_batch_persists_all_values_together() {
+        let db = Database::init(":memory:").expect("test database should initialize");
+        db.set_setting("AI_BASE_URL", "https://old.example.com")
+            .expect("initial setting should save");
+
+        db.set_settings_batch(&[
+            ("AI_BASE_URL", "https://api.example.com"),
+            ("AI_MODEL", "example-model"),
+            ("GEMINI_CLI_ENABLED", "true"),
+        ])
+        .expect("settings batch should save");
+
+        assert_eq!(
+            db.get_setting("AI_BASE_URL")
+                .expect("saved setting should be readable"),
+            Some("https://api.example.com".to_string())
+        );
+        assert_eq!(
+            db.get_setting("AI_MODEL")
+                .expect("saved setting should be readable"),
+            Some("example-model".to_string())
+        );
+        assert_eq!(
+            db.get_setting("GEMINI_CLI_ENABLED")
+                .expect("saved setting should be readable"),
+            Some("true".to_string())
+        );
     }
 }

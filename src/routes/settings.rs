@@ -302,8 +302,27 @@ pub async fn api_save_ai(
     // Gemini CLI 模式设置
     let gemini_cli_enabled = req["gemini_cli_enabled"].as_bool().unwrap_or(false);
     let gemini_cli_path = find_gemini_cli().unwrap_or_default();
+    let gemini_cli_val = if gemini_cli_enabled { "true" } else { "false" };
 
-    // 先更新内存配置（立即生效）
+    let settings = [
+        ("AI_BASE_URL", base_url),
+        (db_key_name, api_key.as_str()),
+        ("AI_API_KEY", api_key.as_str()),
+        ("AI_MODEL", model),
+        ("AI_MODEL_EXPERT", model_expert),
+        ("GOOGLE_CLIENT_ID", google_client_id.as_str()),
+        ("GOOGLE_CLIENT_SECRET", google_client_secret.as_str()),
+        ("GEMINI_CLI_ENABLED", gemini_cli_val),
+    ];
+    if let Err(e) = s.db.set_settings_batch(&settings) {
+        tracing::error!("Failed to save AI settings to the database: {}", e);
+        return Json(json!({
+            "status": "error",
+            "message": "保存 AI 配置失败，请稍后重试"
+        }));
+    }
+
+    // SQLite 主存储成功后，再更新内存配置以保持一致。
     {
         let mut config = s.config.write().unwrap_or_else(|e| e.into_inner());
         config.ai_base_url = base_url.to_string();
@@ -337,32 +356,12 @@ pub async fn api_save_ai(
         config.gemini_cli_path = gemini_cli_path.clone();
     }
 
-    // SQLite 持久化（主存储，Android 友好）
-    for (k, v) in [
-        ("AI_BASE_URL", base_url),
-        (db_key_name, &api_key),  // 服务商独立 Key
-        ("AI_API_KEY", &api_key), // 通用 Key（向后兼容）
-        ("AI_MODEL", model),
-        ("AI_MODEL_EXPERT", model_expert),
-        ("GOOGLE_CLIENT_ID", &google_client_id),
-        ("GOOGLE_CLIENT_SECRET", &google_client_secret),
-    ] {
-        if let Err(e) = s.db.set_setting(k, v) {
-            tracing::warn!("保存设置 {} 到数据库失败: {}", k, e);
+    // .env is an optional desktop backup; SQLite remains the source of truth.
+    for (key, value) in settings {
+        if let Err(e) = update_env_file(key, value) {
+            tracing::warn!("Failed to update AI setting .env backup for {}: {}", key, e);
         }
     }
-    // Gemini CLI 设置持久化
-    let gemini_cli_val = if gemini_cli_enabled { "true" } else { "false" };
-    let _ = s.db.set_setting("GEMINI_CLI_ENABLED", gemini_cli_val);
-    let _ = update_env_file("GEMINI_CLI_ENABLED", gemini_cli_val);
-    // .env 持久化为可选（桌面端后备）
-    let _ = update_env_file("AI_BASE_URL", base_url);
-    let _ = update_env_file(db_key_name, &api_key);
-    let _ = update_env_file("AI_API_KEY", &api_key);
-    let _ = update_env_file("AI_MODEL", model);
-    let _ = update_env_file("AI_MODEL_EXPERT", model_expert);
-    let _ = update_env_file("GOOGLE_CLIENT_ID", &google_client_id);
-    let _ = update_env_file("GOOGLE_CLIENT_SECRET", &google_client_secret);
 
     Json(json!({"status": "ok"}))
 }
