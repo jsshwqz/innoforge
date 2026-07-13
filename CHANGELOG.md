@@ -20,6 +20,8 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
   AI prompt input boundaries: chat history now accepts only `user` and `assistant`, rejecting client-forged `system` or unknown roles. Patent records, web results, OA material, discussion records, and raw custom role preferences use non-escapable `<user_input>` data boundaries; raw custom roles no longer have system-instruction authority while server presets remain available
 
 ### 修复 / Fixed
+- **正则初始化的受控错误处理** — 创意报告的行内 Markdown、专利说明书 HTML 清理和法律状态页面解析不再使用生产路径 `expect()`。正则继续缓存；若内部初始化异常则记录诊断并返回已转义文本或受控错误，避免请求 panic。补充 Markdown 格式渲染与 HTML 输入转义回归，防止调整转义职责时引入 XSS 回退。
+  Controlled regex-initialization failures: inline Markdown in idea reports, patent-description HTML cleanup, and legal-status page parsing no longer use production-path `expect()`. Regexes remain cached; an unexpected initialization failure is logged and returns escaped text or a controlled error instead of panicking. Markdown rendering and HTML-escaping regressions prevent an XSS fallback while moving escaping responsibility.
 - **DOCX 导出错误处理与 XML 转义** — OA 意见陈述书导出不再在 ZIP 写入失败时 panic；所有写入失败会记录服务端诊断信息并向用户返回可理解的导出失败提示。专利号、申请人、审查意见类型和答复正文均会按 XML 文本节点转义，避免特殊字符损坏 Word 文档结构。
   DOCX export error handling and XML escaping: OA response-letter export no longer panics when ZIP writing fails; failures are logged server-side and returned as a friendly export error. Patent number, applicant, office-action type, and response text are XML-escaped as text nodes so special characters cannot corrupt the Word document.
 - **移动端嵌入服务生命周期** — Android/iOS FFI 启停入口不再因 Tokio 运行时创建、线程创建或服务器状态锁失败而 panic；重复启动会明确拒绝且保留原服务句柄，关闭操作在释放状态锁后再等待线程退出

@@ -20,6 +20,15 @@
 
 ---
 
+## [2026-07-13] 静态正则初始化失败会在生产路径 panic，转义职责迁移需防止 XSS 回退
+- **严重程度**: HIGH
+- **涉及文件**: `src/routes/idea.rs`, `src/routes/patent.rs`
+- **现象**: 创意报告行内 Markdown、专利说明书 HTML 清理和 Sogou 法律状态页面解析将 `Regex::new` 直接接 `expect()`；若正则定义被后续改坏，请求会 panic。将 HTML 转义从调用处收拢到行内 Markdown 函数时，若首个替换仍读取原始文本，还会重新输出未转义 HTML。
+- **根因**: 代码假定静态正则永远有效，并把初始化错误排除在 API 的正常错误分支之外；转义职责从多个调用点迁移到公共函数时，缺少同时覆盖格式渲染和危险 HTML 输入的回归测试。
+- **修复**: `OnceLock` 缓存 `Result<Regex, regex::Error>` 而非仅缓存 `Regex`。Markdown 初始化异常记录日志并保留已转义原文；专利富文本清理返回友好 JSON；法律状态解析返回受控错误进入既有降级链。新增 Markdown 标签渲染和 `<script>` 转义测试。
+- **预防**: 生产路径的编译器、正则、模板和文件格式初始化均须显式处理 `Result`，不得 `unwrap`/`expect`；任何安全职责（如转义）迁移都必须以正常功能测试和攻击性输入测试成对验证。
+- **提交**: `26e20b2`
+
 ## [2026-07-13] DOCX 导出在 ZIP 写入失败时可能 panic，非可信字段可破坏 Word XML
 - **严重程度**: HIGH
 - **涉及文件**: `src/docx_export/export.rs`, `src/routes/ai.rs`

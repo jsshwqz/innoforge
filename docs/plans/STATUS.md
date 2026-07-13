@@ -8,6 +8,14 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-07-13 — 正则初始化 panic 加固 / Regex initialization panic hardening
+
+- **状态 / Status**: ✅ 已完成 / Completed
+- **提交 / Commit**: `26e20b2`
+- **修复 / Fix**: 创意报告行内 Markdown、专利说明书 HTML 清理与 Sogou 法律状态页面解析的静态正则均改为缓存 `Result`，删除生产路径 `expect()`。异常时分别保留已转义原文、返回用户友好 JSON 或传递受控错误以触发既有降级链；诊断仅写入服务端日志。行内 Markdown 统一在函数入口转义用户文本，并新增格式和 XSS 回归。
+  Static regexes used by idea-report inline Markdown, patent-description HTML cleanup, and Sogou legal-status parsing now cache a `Result`, removing production-path `expect()`. Failures respectively preserve escaped source text, return friendly JSON, or propagate a controlled error into the existing fallback chain; diagnostics stay server-side. Inline Markdown now consistently escapes user text at its entry point, with rendering and XSS regressions added.
+- **验证 / Verification**: `cargo fmt --check`、`cargo clippy -- -D warnings`、`cargo test`（299 passed, 1 ignored）与正式二进制构建通过；`/`、`/idea`、`/oa-response` 均返回 HTTP 200。
+
 ### 2026-07-13 — DOCX 导出安全加固 / DOCX export safety hardening
 
 - **状态 / Status**: ✅ 已完成 / Completed
