@@ -972,12 +972,55 @@ h2 {{ color: #1a5276; border-bottom: 1px solid #ccc; padding-bottom: 5px; margin
     )
 }
 
+const ALLOWED_PATENT_IMAGE_HOSTS: &[&str] = &[
+    "patentimages.storage.googleapis.com",
+    "worldwide.espacenet.com",
+    "image.patent.k.sogou.com",
+];
+
+/// Validate an upstream patent-image URL before proxying it.
+///
+/// The parsed URL is returned so callers preserve its path and query while avoiding
+/// string-prefix parsing mistakes such as user-info or subdomain host spoofing.
+fn validate_patent_image_url(raw_url: &str) -> Result<reqwest::Url, &'static str> {
+    let url = reqwest::Url::parse(raw_url).map_err(|_| "Invalid image URL")?;
+
+    if url.scheme() != "https" {
+        return Err("Only HTTPS patent image URLs are allowed");
+    }
+
+    let Some(host) = url.host_str() else {
+        return Err("Only patent image URLs from allowed domains are allowed");
+    };
+    if !ALLOWED_PATENT_IMAGE_HOSTS.contains(&host) {
+        return Err("Only patent image URLs from allowed domains are allowed");
+    }
+
+    if url.port_or_known_default() != Some(443) {
+        return Err("Only default HTTPS ports are allowed");
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err("Image URLs must not include user credentials");
+    }
+
+    Ok(url)
+}
+
 /// Proxy for patent images (bypass GFW blocking of patentimages.storage.googleapis.com)
 pub async fn api_patent_image_proxy(
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
     let url = match params.get("url") {
-        Some(u) => u.clone(),
+        Some(raw_url) => match validate_patent_image_url(raw_url) {
+            Ok(url) => url,
+            Err(message) => {
+                return (
+                    StatusCode::FORBIDDEN,
+                    [(header::CONTENT_TYPE, "text/plain")],
+                    message.as_bytes().to_vec(),
+                );
+            }
+        },
         None => {
             return (
                 StatusCode::BAD_REQUEST,
@@ -987,32 +1030,23 @@ pub async fn api_patent_image_proxy(
         }
     };
 
-    // SSRF 防护：仅允许已知专利图片域名 / SSRF protection: allowlist of patent image domains
-    const ALLOWED_DOMAINS: &[&str] = &[
-        "patentimages.storage.googleapis.com",
-        "worldwide.espacenet.com",
-        "image.patent.k.sogou.com",
-    ];
-    let allowed = url
-        .strip_prefix("https://")
-        .and_then(|rest| rest.split('/').next())
-        .map(|host| ALLOWED_DOMAINS.contains(&host))
-        .unwrap_or(false);
-    if !allowed {
-        return (
-            StatusCode::FORBIDDEN,
-            [(header::CONTENT_TYPE, "text/plain")],
-            b"Only patent image URLs from allowed domains".to_vec(),
-        );
-    }
-
-    let client = reqwest::Client::builder()
+    let client = match reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
+        .redirect(reqwest::redirect::Policy::none())
         .build()
-        .unwrap_or_default();
+    {
+        Ok(client) => client,
+        Err(_) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                [(header::CONTENT_TYPE, "text/plain")],
+                b"Image proxy is temporarily unavailable".to_vec(),
+            );
+        }
+    };
 
     match client
-        .get(&url)
+        .get(url)
         .header("User-Agent", "Mozilla/5.0")
         .send()
         .await
@@ -1049,6 +1083,60 @@ pub async fn api_patent_image_proxy(
             [(header::CONTENT_TYPE, "text/plain")],
             format!("Proxy error: {}", e).into_bytes(),
         ),
+    }
+}
+
+#[cfg(test)]
+mod patent_image_proxy_tests {
+    use super::validate_patent_image_url;
+
+    #[test]
+    fn accepts_allowlisted_https_url_and_preserves_path_and_query() {
+        let url = validate_patent_image_url(
+            "https://patentimages.storage.googleapis.com/path/image.png?download=1",
+        )
+        .expect("allowlisted HTTPS URL should be valid");
+
+        assert_eq!(
+            url.as_str(),
+            "https://patentimages.storage.googleapis.com/path/image.png?download=1"
+        );
+    }
+
+    #[test]
+    fn accepts_case_insensitive_allowlisted_host() {
+        assert!(
+            validate_patent_image_url("https://PATENTIMAGES.STORAGE.GOOGLEAPIS.COM/image.png")
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn rejects_host_spoofing_variants() {
+        for url in [
+            "https://patentimages.storage.googleapis.com.evil.example/image.png",
+            "https://attacker@patentimages.storage.googleapis.com/image.png",
+            "https://patentimages.storage.googleapis.com@attacker.example/image.png",
+        ] {
+            assert!(
+                validate_patent_image_url(url).is_err(),
+                "should reject {url}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_non_https_non_default_port_and_invalid_urls() {
+        for url in [
+            "http://patentimages.storage.googleapis.com/image.png",
+            "https://patentimages.storage.googleapis.com:8443/image.png",
+            "not a URL",
+        ] {
+            assert!(
+                validate_patent_image_url(url).is_err(),
+                "should reject {url}"
+            );
+        }
     }
 }
 
