@@ -497,6 +497,19 @@
   Label every new truncation as display-only or data-bearing; enforce capacity on the backend with visible validation errors instead of silent truncation.
 - **提交 / Commit**: `f496648`
 
+### [2026-07-13] 搜索页在函数定义前调用 / Search called a function before its definition
+- **严重程度 / Severity**: MEDIUM
+- **涉及文件 / File**: `templates/search.html`
+- **现象 / Symptom**: 搜索页面初始化时在后续脚本块定义 `updatePdfFileList()` 前调用它，浏览器报 `ReferenceError`，使该页面的加载期错误屏障触发。
+  Search initialization called `updatePdfFileList()` before a later script block defined it, producing a browser `ReferenceError` and triggering the page's load-time error barrier.
+- **根因 / Root cause**: 模板将一个依赖后续 `<script>` 声明的函数调用放在前一个 `<script>` 的同步执行路径中。
+  The template placed a call that depends on a later `<script>` declaration on an earlier script's synchronous execution path.
+- **修复 / Fix**: 将调用移至函数声明之后，未改变 PDF 元数据恢复或上传逻辑。
+  Moved the call after the function declaration without altering PDF metadata restoration or upload logic.
+- **预防 / Prevention**: 跨脚本块调用前确认声明顺序；浏览器回归必须把 `pageerror` 与 console error 视为失败，而不是只检查 HTTP 200。
+  Verify declaration order across script blocks; browser regressions must fail on `pageerror` and console errors rather than checking HTTP 200 alone.
+- **提交 / Commit**: `aad56d5`
+
 ### [2026-07-13] Windows start.bat CMD 解析失败 / Windows start.bat CMD parse failure
 - **严重程度 / Severity**: HIGH
 - **涉及文件 / File**: `start.bat`

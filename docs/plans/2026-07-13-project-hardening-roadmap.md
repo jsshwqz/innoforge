@@ -139,6 +139,51 @@ Design an immutable chain for original OA, analysis versions, discussion, user e
 - **验证 / Verification**: `node --check`、ESLint 无配置模式、E2E 6/6 与 Rust 全量门禁通过。
   `node --check`, ESLint without repository config, E2E 6/6, and full Rust gates passed.
 
+### P0-B.2 浏览器回归矩阵（第一批）/ Browser regression matrix (first batch)
+
+- **状态 / Status**: ✅ 已完成 / Completed
+- **代码提交 / Code commit**: `aad56d5` (`fix: 修复搜索页初始化并扩展浏览器回归`)
+- **验证 / Verification**: `node --check`、ESLint 无配置模式、Puppeteer E2E 42/42、`cargo fmt --check`、`cargo clippy -- -D warnings` 与 `cargo test`（265 passed，1 个文档测试按设计忽略）通过。
+  `node --check`, ESLint without repository config, Puppeteer E2E 42/42, `cargo fmt --check`, `cargo clippy -- -D warnings`, and `cargo test` (265 passed; one doc test intentionally ignored) passed.
+
+1. 只扩展已有 `e2e_test.mjs`，继续使用现有 Puppeteer；不新增依赖、后端路由、数据库写入或真实 AI 调用。
+   Extend only the existing `e2e_test.mjs` with the current Puppeteer dependency; add no dependencies, backend routes, database writes, or real AI calls.
+2. 对 8 个用户页面逐一验证 HTTP 成功、关键根节点存在、页面错误和失败请求为空：`/`、`/search`、`/patent/1`、`/idea`、`/ai`、`/compare`、`/settings`、`/oa-response`。
+   Verify HTTP success, a critical root element, no page errors, and no failed requests for all eight user pages: `/`, `/search`, `/patent/1`, `/idea`, `/ai`, `/compare`, `/settings`, and `/oa-response`.
+3. 只执行无需外部服务且不写数据库的关键交互，例如导航、标签切换、输入校验与本地渲染；AI、上传、删除、保存等有副作用的操作使用拦截或留给单独的受控用例。
+   Execute only safe, side-effect-free key interactions such as navigation, tab switching, input validation, and local rendering; intercept or defer AI, uploads, deletion, and persistence to separate controlled cases.
+4. 将失败信息统一为页面 URL、HTTP 状态、缺失选择器、浏览器异常和失败请求，成功计数可重复；在本机 Chrome/Edge 未自动下载 Chromium 时继续使用现有浏览器。
+   Standardize failure output around page URL, HTTP status, missing selector, browser errors, and failed requests, with a repeatable pass count; keep using installed Chrome/Edge when Puppeteer Chromium is absent.
+5. CODEX 实现后由主代理复跑语法、ESLint、浏览器 E2E 和完整 Rust 门禁；通过后提交与归档。
+   After CODEX implements it, the primary agent reruns syntax, ESLint, browser E2E, and full Rust gates before committing and documenting.
+
+### P0-B.3 OA 可审计讨论记录导出 / OA auditable discussion transcript export
+
+1. 明确分离两种产物：现有 `exportDiscussionConclusions()` 保留其调用 AI 生成摘要的行为，但按钮改名为“AI 总结结论”；新增“导出完整讨论记录”按钮，避免用户把摘要误当成最终答复或完整过程。
+   Clearly separate the two outputs: retain `exportDiscussionConclusions()` as an AI-generated summary but relabel it “AI Summary”; add an “Export Full Discussion Record” button so a summary is not mistaken for a final response or complete process.
+2. 仅修改 `templates/office_action_response.html` 与 `static/i18n.js`，不新增依赖、API、数据库迁移或 AI 调用。导出在浏览器本地以 UTF-8 Markdown 下载，完整保留发给讨论的起始上下文及每一轮用户/助手原文；严禁 `slice`、`substring` 或其他数据截断。
+   Change only `templates/office_action_response.html` and `static/i18n.js`; add no dependencies, APIs, migrations, or AI calls. Export a UTF-8 Markdown file locally in the browser, preserving the full initial discussion context and every original user/assistant message; prohibit `slice`, `substring`, or any other data truncation.
+3. 为每条讨论历史消息记录 ISO 时间戳；保持发送到现有聊天和总结 API 的载荷为既有 `[role, content]` 双元组，确保兼容性。导出文件包含生成时间、产品提示、完整上下文、按顺序排列的角色/时间/原文，并明确标记为“原始记录，未由 AI 二次改写”。
+   Record an ISO timestamp for each discussion-history message; preserve the existing `[role, content]` payload sent to chat and summary APIs for compatibility. The export contains generation time, product note, complete context, ordered role/timestamp/source text, and an explicit “original record, not AI-rewritten” marker.
+4. 在 `e2e_test.mjs` 增加受控浏览器验证：构造本地讨论记录，点击导出按钮，读取下载内容并确认尾部标记、消息原文、角色与时间均完整；拦截所有网络下载以外的副作用，不调用真实 AI。
+   Add a controlled browser test in `e2e_test.mjs`: construct a local discussion record, click the export button, inspect the download, and verify tail markers, full message source text, roles, and timestamps; intercept all effects except the local download and never call real AI.
+5. CODEX 完成后由主代理依次执行 `node --check`、ESLint、浏览器 E2E、`cargo fmt --check`、`cargo clippy -- -D warnings` 与 `cargo test`；通过后更新 CHANGELOG、STATUS、errors 与本计划，再提交。
+   After CODEX completes implementation, the primary agent runs `node --check`, ESLint, browser E2E, `cargo fmt --check`, `cargo clippy -- -D warnings`, and `cargo test`; after passing, update CHANGELOG, STATUS, errors, and this plan before committing.
+
+### P0-B.2.1 浏览器矩阵基线修复 / Browser-matrix baseline remediation
+
+- **状态 / Status**: ✅ 已完成 / Completed
+- **代码提交 / Code commit**: `aad56d5` (`fix: 修复搜索页初始化并扩展浏览器回归`)
+- **结果 / Result**: 修复搜索页 `updatePdfFileList()` 的加载顺序；专利详情在有数据时测试详情交互，空库时验证明确 404 提示，二者均不写入测试数据。
+  Fixed the `updatePdfFileList()` load order on search; patent detail exercises interactions with data and verifies the explicit 404 prompt in an empty library, without writing test data in either case.
+
+1. 修复 `templates/search.html` 的初始化顺序：不得在后续 `<script>` 中定义 `updatePdfFileList()` 前调用它；保留既有 PDF 元数据恢复与文件列表渲染语义，不改动上传、存储或网络请求。
+   Fix the initialization order in `templates/search.html`: do not call `updatePdfFileList()` before its later `<script>` definition; preserve the existing PDF metadata restoration and file-list rendering behavior without changing uploads, storage, or network requests.
+2. 调整 `e2e_test.mjs` 的专利详情页断言：数据库中存在目标专利时验证 HTTP 200、页面根节点和标签切换；空数据库时把 `/patent/1` 的明确 HTTP 404 视为受控无数据分支，验证其“专利未找到”提示并跳过详情 DOM 交互。两种分支均保持固定、可读的断言计数，绝不写入测试数据。
+   Adjust the patent-detail assertion in `e2e_test.mjs`: when the target patent exists, verify HTTP 200, its root node, and tab switching; in an empty database, treat the explicit HTTP 404 from `/patent/1` as a controlled no-data branch, verify its “not found” message, and skip detail-DOM interaction. Both paths keep a fixed, readable assertion count and never seed test data.
+3. 仅修改 `templates/search.html` 与 `e2e_test.mjs`，不新增依赖、后端路由、数据库 schema 或真实 AI 调用。CODEX 完成后，主代理复跑 JS 语法、ESLint、全量浏览器 E2E 和 Rust 三项门禁，再进入 P0-B.3。
+   Change only `templates/search.html` and `e2e_test.mjs`; add no dependencies, backend routes, database schema, or real AI calls. After CODEX completes, the primary agent reruns JS syntax, ESLint, full browser E2E, and all three Rust gates before proceeding to P0-B.3.
+
 ## 下一执行任务 / Next execution task
 
 **P0-C：安全基线 / Security baseline。** 先做只读审计与最小变更方案；CORS 策略或任何影响移动端来源的改动需要在实施前单独确认。

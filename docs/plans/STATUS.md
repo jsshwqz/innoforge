@@ -8,6 +8,17 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-07-13 — 八页面浏览器回归与搜索页初始化修复 / Eight-page browser regression and search initialization fix
+
+- **状态 / Status**: ✅ 已完成 / Completed
+- **提交 / Commit**: `aad56d5`
+- **修复 / Fix**: 搜索页在定义 `updatePdfFileList()` 前调用它，导致页面加载时出现 `ReferenceError`；现已保持原有 PDF 恢复语义并在函数声明后调用。
+  Search called `updatePdfFileList()` before defining it and produced a load-time `ReferenceError`; it now preserves the original PDF-restoration behavior and invokes it after the declaration.
+- **测试 / Tests**: `e2e_test.mjs` 扩展为 42 项真实浏览器回归：8 个页面的 HTTP/关键节点/浏览器异常/失败请求/无副作用交互，并保留 OA 参数校验与长文本尾标记完整性。专利详情在有数据时验证标签交互，空库时验证明确的 404 提示；不写入测试数据或调用真实 AI。
+  `e2e_test.mjs` now has 42 real-browser regressions: HTTP/critical node/browser-error/failed-request/side-effect-free interaction checks across eight pages, plus OA validation and long-payload tail integrity. Patent detail exercises tabs with data and validates the explicit 404 prompt in an empty library; it neither seeds data nor calls real AI.
+- **验证 / Verification**: `node --check`、ESLint 无配置模式、Puppeteer 42/42、`cargo fmt --check`、`cargo clippy -- -D warnings`、`cargo test`（265 passed，1 ignored）通过。
+  `node --check`, ESLint without repository config, Puppeteer 42/42, `cargo fmt --check`, `cargo clippy -- -D warnings`, and `cargo test` (265 passed, 1 ignored) passed.
+
 ### 2026-07-13 — OA 后端数据完整性加固 / OA backend data integrity hardening
 
 - **状态 / Status**: ✅ 已完成 / Completed

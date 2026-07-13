@@ -8,6 +8,8 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 ## [Unreleased]
 
 ### 修复 / Fixed
+- **搜索页 PDF 初始化顺序** — 将 `updatePdfFileList()` 移至其定义之后执行，消除搜索页加载时的 `ReferenceError`，不改变已保存 PDF 元数据的恢复逻辑
+  Search-page PDF initialization order: `updatePdfFileList()` now runs after its definition, eliminating the load-time `ReferenceError` without changing persisted-PDF restoration
 - **专利图片代理 SSRF 防护** — 图片 URL 改用结构化解析，限制 HTTPS、精确白名单主机和默认端口，禁止凭据与自动重定向；保留合法签名图片链接的路径和查询参数
   Patent image-proxy SSRF hardening: image URLs now use structured parsing with HTTPS, exact-host, and default-port restrictions; credentials and redirects are blocked while valid signed-image paths and queries are preserved
 - **本地服务 CORS 边界** — 移除全开放跨域来源；默认仅允许本机 `127.0.0.1:3000` 与 `localhost:3000`，移动端或桌面壳的额外来源可通过 `INNOFORGE_CORS_ORIGINS` 显式配置
@@ -20,6 +22,8 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
   Windows launcher parsing: removed unescaped parentheses from the debug build echo line so the `start.bat` shortcut can compile and start the server
 
 ### 测试 / Tests
+- **八页面浏览器回归矩阵** — `e2e_test.mjs` 扩展至 42 项无副作用真实浏览器检查，覆盖 8 个用户页面的 HTTP、关键节点、浏览器异常、失败请求和本地交互；专利详情同时支持有数据与空库 404 的受控分支，OA 长文本完整性和接口参数校验仍受覆盖
+  Eight-page browser regression matrix: `e2e_test.mjs` now has 42 side-effect-free browser checks covering HTTP, critical nodes, browser errors, failed requests, and local interactions across all eight user pages; patent detail supports both populated and empty-library 404 branches while OA long-payload integrity and endpoint validation remain covered
 - **OA 可重复端到端回归** — 新增仓库内 `e2e_test.mjs`，覆盖首页/OA 页面加载、审核修改方案接口连通性，以及超长 OA 请求体尾部标记保留；脚本不调用真实 AI 服务
   Reproducible OA E2E regression: added repository-owned `e2e_test.mjs` covering home/OA loading, amendment-check connectivity, and long-payload tail preservation without calling a real AI service
 
