@@ -15,9 +15,9 @@ pub struct ExportParams {
 }
 
 /// 生成 docx 字节流
-pub fn generate_docx(params: &ExportParams) -> Vec<u8> {
-    let mut cursor = Cursor::new(Vec::new());
-    let mut zip = ZipWriter::new(&mut cursor);
+pub fn generate_docx(params: &ExportParams) -> Result<Vec<u8>, String> {
+    let cursor = Cursor::new(Vec::new());
+    let mut zip = ZipWriter::new(cursor);
 
     // 1. [Content_Types].xml
     let content_types = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -27,18 +27,14 @@ pub fn generate_docx(params: &ExportParams) -> Vec<u8> {
   <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
   <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
 </Types>"#;
-    zip.start_file("[Content_Types].xml", SimpleFileOptions::default())
-        .unwrap();
-    zip.write_all(content_types.as_bytes()).unwrap();
+    write_docx_file(&mut zip, "[Content_Types].xml", content_types)?;
 
     // 2. _rels/.rels
     let rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
 </Relationships>"#;
-    zip.start_file("_rels/.rels", SimpleFileOptions::default())
-        .unwrap();
-    zip.write_all(rels.as_bytes()).unwrap();
+    write_docx_file(&mut zip, "_rels/.rels", rels)?;
 
     // 3. word/document.xml
     let document = format!(
@@ -63,23 +59,19 @@ pub fn generate_docx(params: &ExportParams) -> Vec<u8> {
     </w:p>
   </w:body>
 </w:document>"#,
-        patent_number = params.patent_number,
-        applicant = params.applicant,
-        oa_type = params.oa_type,
+        patent_number = sanitize_xml(&params.patent_number),
+        applicant = sanitize_xml(&params.applicant),
+        oa_type = sanitize_xml(&params.oa_type),
         content = format_paragraphs(&params.response_text)
     );
-    zip.start_file("word/document.xml", SimpleFileOptions::default())
-        .unwrap();
-    zip.write_all(document.as_bytes()).unwrap();
+    write_docx_file(&mut zip, "word/document.xml", &document)?;
 
     // 4. word/_rels/document.xml.rels
     let doc_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
 </Relationships>"#;
-    zip.start_file("word/_rels/document.xml.rels", SimpleFileOptions::default())
-        .unwrap();
-    zip.write_all(doc_rels.as_bytes()).unwrap();
+    write_docx_file(&mut zip, "word/_rels/document.xml.rels", doc_rels)?;
 
     // 5. word/styles.xml
     let styles = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -107,12 +99,23 @@ pub fn generate_docx(params: &ExportParams) -> Vec<u8> {
     </w:rPr>
   </w:style>
 </w:styles>"#;
-    zip.start_file("word/styles.xml", SimpleFileOptions::default())
-        .unwrap();
-    zip.write_all(styles.as_bytes()).unwrap();
+    write_docx_file(&mut zip, "word/styles.xml", styles)?;
 
-    zip.finish().unwrap();
-    cursor.into_inner()
+    let cursor = zip
+        .finish()
+        .map_err(|error| format!("无法完成 DOCX 文件: {error}"))?;
+    Ok(cursor.into_inner())
+}
+
+fn write_docx_file(
+    zip: &mut ZipWriter<Cursor<Vec<u8>>>,
+    path: &str,
+    contents: &str,
+) -> Result<(), String> {
+    zip.start_file(path, SimpleFileOptions::default())
+        .map_err(|error| format!("无法创建 DOCX 文件 {path}: {error}"))?;
+    zip.write_all(contents.as_bytes())
+        .map_err(|error| format!("无法写入 DOCX 文件 {path}: {error}"))
 }
 
 /// 将文本转换为 docx 段落 XML
@@ -147,4 +150,44 @@ fn sanitize_xml(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{generate_docx, ExportParams};
+    use std::io::{Cursor, Read};
+    use zip::ZipArchive;
+
+    #[test]
+    fn generated_docx_escapes_all_untrusted_xml_text() {
+        let params = ExportParams {
+            response_text: "正文&<RESPONSE>".to_string(),
+            patent_number: "PATENT&<NUMBER>".to_string(),
+            applicant: "APPLICANT&<NAME>".to_string(),
+            oa_type: "OA&<TYPE>".to_string(),
+        };
+
+        let docx = generate_docx(&params).expect("DOCX should be generated");
+        let mut archive = ZipArchive::new(Cursor::new(docx)).expect("DOCX should be a valid ZIP");
+        let mut document = archive
+            .by_name("word/document.xml")
+            .expect("DOCX document XML should exist");
+        let mut document_xml = String::new();
+        document
+            .read_to_string(&mut document_xml)
+            .expect("DOCX document XML should be readable");
+
+        for escaped_value in [
+            "正文&amp;&lt;RESPONSE&gt;",
+            "PATENT&amp;&lt;NUMBER&gt;",
+            "APPLICANT&amp;&lt;NAME&gt;",
+            "OA&amp;&lt;TYPE&gt;",
+        ] {
+            assert!(document_xml.contains(escaped_value));
+        }
+        assert!(!document_xml.contains("PATENT&<NUMBER>"));
+        assert!(!document_xml.contains("APPLICANT&<NAME>"));
+        assert!(!document_xml.contains("OA&<TYPE>"));
+        assert!(!document_xml.contains("正文&<RESPONSE>"));
+    }
 }

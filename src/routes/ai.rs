@@ -1838,9 +1838,14 @@ pub async fn api_oa_export_docx(
         oa_type: oa_type.to_string(),
     };
 
-    let docx_bytes = crate::docx_export::generate_docx(&params);
-    {
-        let base64_docx = base64::engine::general_purpose::STANDARD.encode(docx_bytes);
-        Json(json!({"status": "ok", "docx": base64_docx}))
+    match crate::docx_export::generate_docx(&params) {
+        Ok(docx_bytes) => {
+            let base64_docx = base64::engine::general_purpose::STANDARD.encode(docx_bytes);
+            Json(json!({"status": "ok", "docx": base64_docx}))
+        }
+        Err(error) => {
+            tracing::error!(error = %error, "OA DOCX export failed");
+            Json(json!({"error": "DOCX 导出失败，请稍后重试"}))
+        }
     }
 }
