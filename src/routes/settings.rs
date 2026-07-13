@@ -154,6 +154,27 @@ fn parse_serpapi_keys(
         .collect()
 }
 
+/// Build the complete persisted SerpAPI configuration replacement.
+///
+/// Keeping every legacy and numbered slot in one batch means an explicit key
+/// removal cannot leave an older key available after a partial update.
+fn serpapi_settings_batch(keys: &[String]) -> Vec<(String, String)> {
+    let mut settings = vec![
+        ("SERPAPI_KEY".to_string(), String::new()),
+        ("SERPAPI_KEY_1".to_string(), String::new()),
+        ("SERPAPI_KEY_2".to_string(), String::new()),
+        ("SERPAPI_KEY_3".to_string(), String::new()),
+        ("SERPAPI_KEY_4".to_string(), String::new()),
+        ("SERPAPI_KEY_5".to_string(), String::new()),
+    ];
+
+    for (setting, key) in settings.iter_mut().skip(1).zip(keys) {
+        setting.1 = key.clone();
+    }
+
+    settings
+}
+
 pub async fn api_save_serpapi(
     State(s): State<AppState>,
     Json(req): Json<serde_json::Value>,
@@ -169,26 +190,31 @@ pub async fn api_save_serpapi(
         Err(message) => return Json(json!({"status": "error", "message": message})),
     };
 
-    // 先清除 DB 和 .env 中旧的单 key 和多 key 记录
-    for suffix in ["", "_1", "_2", "_3", "_4", "_5"] {
-        let db_key = format!("SERPAPI_KEY{}", suffix);
-        let _ = s.db.set_setting(&db_key, "");
-        let _ = update_env_file(&db_key, "");
+    let settings = serpapi_settings_batch(&keys);
+    let settings_refs: Vec<(&str, &str)> = settings
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+
+    if let Err(error) = s.db.set_settings_batch(&settings_refs) {
+        tracing::error!("保存 SerpAPI 配置到数据库失败: {error}");
+        return Json(json!({
+            "status": "error",
+            "message": "保存 SerpAPI 配置失败，请稍后重试"
+        }));
     }
 
-    for (i, k) in keys.iter().enumerate() {
-        let idx = i + 1;
-        let db_key = format!("SERPAPI_KEY_{}", idx);
-        if let Err(e) = s.db.set_setting(&db_key, k) {
-            tracing::warn!("保存设置 {} 到数据库失败: {}", db_key, e);
-        }
-        let _ = update_env_file(&db_key, k);
-    }
-
-    // 更新内存配置（立即生效）
     {
         let mut config = s.config.write().unwrap_or_else(|e| e.into_inner());
         config.serpapi_keys = keys.clone();
+    }
+
+    // .env is only a desktop backup. Keep every legacy and numbered slot in
+    // sync after the primary SQLite transaction has succeeded.
+    for (db_key, value) in &settings {
+        if let Err(error) = update_env_file(db_key, value) {
+            tracing::warn!("保存 SerpAPI 配置备份失败，key: {db_key}，error: {error}");
+        }
     }
 
     Json(json!({
@@ -499,7 +525,7 @@ fn extract_domain(url: &str) -> Option<String> {
 
 #[cfg(test)]
 mod serpapi_key_parsing_tests {
-    use super::parse_serpapi_keys;
+    use super::{parse_serpapi_keys, serpapi_settings_batch};
     use serde_json::json;
 
     const VALID_KEY: &str = "abcdEFGHijklMNOPqrstUVWX";
@@ -548,6 +574,29 @@ mod serpapi_key_parsing_tests {
         assert_eq!(
             parse_serpapi_keys(&request(json!(["abcd****UVWX"])), &current_keys).unwrap(),
             current_keys
+        );
+    }
+
+    #[test]
+    fn persistence_batch_replaces_all_legacy_and_numbered_slots() {
+        let keys = vec![
+            VALID_KEY.to_string(),
+            "ZYXWvutsRQPOnmlkjihgfedc".to_string(),
+        ];
+
+        assert_eq!(
+            serpapi_settings_batch(&keys),
+            vec![
+                ("SERPAPI_KEY".to_string(), String::new()),
+                ("SERPAPI_KEY_1".to_string(), VALID_KEY.to_string()),
+                (
+                    "SERPAPI_KEY_2".to_string(),
+                    "ZYXWvutsRQPOnmlkjihgfedc".to_string(),
+                ),
+                ("SERPAPI_KEY_3".to_string(), String::new()),
+                ("SERPAPI_KEY_4".to_string(), String::new()),
+                ("SERPAPI_KEY_5".to_string(), String::new()),
+            ]
         );
     }
 }
