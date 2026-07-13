@@ -29,6 +29,45 @@ use tower_http::set_header::SetResponseHeaderLayer;
 #[folder = "static/"]
 pub struct StaticAssets;
 
+const DEFAULT_CORS_ORIGINS: [&str; 2] = ["http://127.0.0.1:3000", "http://localhost:3000"];
+
+/// Returns the local defaults plus explicitly configured, syntactically valid origins.
+/// Invalid configuration is ignored so it can never broaden the CORS policy.
+fn cors_allowed_origins(configured_origins: Option<&str>) -> Vec<HeaderValue> {
+    let mut origins = DEFAULT_CORS_ORIGINS
+        .iter()
+        .map(|origin| HeaderValue::from_static(origin))
+        .collect::<Vec<_>>();
+
+    if let Some(configured_origins) = configured_origins {
+        for origin in configured_origins.split(',').map(str::trim) {
+            if let Some(origin) = parse_cors_origin(origin) {
+                origins.push(origin);
+            } else if !origin.is_empty() {
+                tracing::warn!("Ignoring invalid INNOFORGE_CORS_ORIGINS entry");
+            }
+        }
+    }
+
+    origins
+}
+
+fn parse_cors_origin(origin: &str) -> Option<HeaderValue> {
+    let uri = origin.parse::<axum::http::Uri>().ok()?;
+    let scheme = uri.scheme_str()?;
+    let authority = uri.authority()?;
+    if !matches!(scheme, "http" | "https")
+        || authority.as_str().contains('@')
+        || uri.path() != "/"
+        || uri.query().is_some()
+        || origin.contains('#')
+    {
+        return None;
+    }
+
+    origin.parse::<HeaderValue>().ok()
+}
+
 /// 统一的静态文件服务函数 / Unified static file serving function.
 /// 从编译进二进制的静态资源中读取并返回。
 pub async fn serve_static_embedded(
@@ -376,7 +415,9 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
         .layer(DefaultBodyLimit::max(20 * 1024 * 1024))
         .layer(
             CorsLayer::new()
-                .allow_origin(Any)
+                .allow_origin(cors_allowed_origins(
+                    std::env::var("INNOFORGE_CORS_ORIGINS").ok().as_deref(),
+                ))
                 .allow_methods(Any)
                 .allow_headers(Any),
         )
@@ -393,4 +434,53 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
             HeaderValue::from_static("strict-origin-when-cross-origin"),
         ))
         .with_state(state)
+}
+
+#[cfg(test)]
+mod cors_tests {
+    use super::*;
+
+    fn origin_strings(origins: Vec<HeaderValue>) -> Vec<String> {
+        origins
+            .into_iter()
+            .filter_map(|origin| origin.to_str().ok().map(str::to_owned))
+            .collect()
+    }
+
+    #[test]
+    fn cors_uses_local_defaults_without_configuration() {
+        assert_eq!(
+            origin_strings(cors_allowed_origins(None)),
+            ["http://127.0.0.1:3000", "http://localhost:3000"]
+        );
+    }
+
+    #[test]
+    fn cors_adds_valid_configured_origins() {
+        assert_eq!(
+            origin_strings(cors_allowed_origins(Some(
+                "https://desktop.innoforge.example, http://192.168.1.10:3000",
+            ))),
+            [
+                "http://127.0.0.1:3000",
+                "http://localhost:3000",
+                "https://desktop.innoforge.example",
+                "http://192.168.1.10:3000",
+            ]
+        );
+    }
+
+    #[test]
+    fn cors_ignores_invalid_configured_origins() {
+        assert_eq!(
+            origin_strings(cors_allowed_origins(Some(
+                "*, null, file:///tmp, https://safe.example/path, https://safe.example?query, https://safe.example#fragment, https://safe.example",
+            ))),
+            [
+                "http://127.0.0.1:3000",
+                "http://localhost:3000",
+                "https://safe.example",
+            ]
+        );
+    }
 }
