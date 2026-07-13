@@ -16,6 +16,8 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
   AI prompt input boundaries: chat history now accepts only `user` and `assistant`, rejecting client-forged `system` or unknown roles. Patent records, web results, OA material, discussion records, and raw custom role preferences use non-escapable `<user_input>` data boundaries; raw custom roles no longer have system-instruction authority while server presets remain available
 
 ### 修复 / Fixed
+- **AI 单次调用时限** — 聊天、分析、增强处理、默认 HTTP、多模态与流式 OA 调用现统一受 60 秒上限约束；现有重试与用户友好的超时错误保留，但不会让一次请求等待数分钟
+  AI single-call timeout: chat, analysis, enrichment, default HTTP, multimodal, and streaming OA calls now share a 60-second ceiling. Existing retries and user-friendly timeout errors remain, but a request can no longer wait for minutes
 - **D 盘运行期 PDF 临时文件** — PDF 解析、视觉回退、OCR 和 MinerU 不再使用 Windows 系统临时目录；文件现在以不可预测的 UUID 名称在项目 `data/runtime-temp` 下独占创建，并由作用域守卫在成功、失败和提前返回时清理。`pdftotext` 直接捕获标准输出，Umi-OCR 不再写入未使用的副本
   D-drive runtime PDF temporary files: PDF extraction, vision fallback, OCR, and MinerU no longer use the Windows system temp directory. UUID-named files are created exclusively under project `data/runtime-temp` and cleaned by a scope guard on success, failure, and early return; `pdftotext` captures stdout directly and Umi-OCR no longer writes an unused copy
 - **远程专利 PDF 下载安全** — 从专利记录下载 PDF 时，现仅允许 HTTPS 主机名、默认

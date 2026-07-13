@@ -8,6 +8,14 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-07-13 — AI 单次调用 60 秒上限 / AI single-call 60-second ceiling
+
+- **状态 / Status**: ✅ 已完成 / Completed
+- **提交 / Commit**: `cade390`
+- **修复 / Fix**: Chat、Analysis、Enrichment 的调用时钟、默认提供商 HTTP 客户端、全局 `tokio` 守卫和 OA 流式调用均统一为 60 秒。保留原有重试和错误降级，但全局守卫确保单次调用不会因重试超出上限。
+  Chat, Analysis, and Enrichment clocks, the default provider HTTP client, the global `tokio` guard, and OA streaming now use 60 seconds. Existing retries and error fallback remain, while the global guard prevents a single call from exceeding the ceiling.
+- **验证 / Verification**: 新增常量回归并更新全局守卫回归；`cargo fmt --check`、`cargo clippy -- -D warnings` 和 `cargo test`（285 passed, 1 ignored）通过。正式二进制重建后 `/` 与 `/oa-response` 均返回 HTTP 200。
+
 ### 2026-07-13 — AI 提示词输入边界加固 / AI prompt-input boundary hardening
 
 - **状态 / Status**: ✅ 已完成 / Completed
