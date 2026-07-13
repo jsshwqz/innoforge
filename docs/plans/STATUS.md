@@ -8,6 +8,14 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-07-13 — SerpAPI 多 Key 原子保存 / Atomic multi-key SerpAPI saves
+
+- **状态 / Status**: ✅ 已完成 / Completed
+- **提交 / Commit**: `5bbedbc`
+- **修复 / Fix**: SerpAPI 请求完成全量输入验证后，现在把兼容单 Key 槽位和编号 `_1` 至 `_5` 槽位作为一次完整替换提交给 SQLite 事务；写入或提交失败时不会清空旧配置、不会改变内存，并返回友好错误。提交成功后才更新运行时 Key，`.env` 后备逐项失败会记录 warning 而不会泄露 Key 内容。
+  After complete request validation, SerpAPI saves now submit legacy and numbered `_1` through `_5` slots as one SQLite transaction. A write or commit failure cannot clear the old configuration or change memory, and returns a friendly error. Runtime keys update only after commit; each failed `.env` backup is warned without exposing key material.
+- **验证 / Verification**: `cargo fmt --check`、`cargo clippy -- -D warnings`、`cargo test`（309 passed, 1 ignored）和正式二进制构建通过；`/`、`/settings`、`/oa-response` 返回 HTTP 200，向 `POST /api/settings/serpapi` 提交非数组值得到受控错误且不写入配置。
+
 ### 2026-07-13 — AI 配置原子保存 / AI configuration atomic persistence
 
 - **状态 / Status**: ✅ 已完成 / Completed

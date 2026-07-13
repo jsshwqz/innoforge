@@ -20,6 +20,8 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
   AI prompt input boundaries: chat history now accepts only `user` and `assistant`, rejecting client-forged `system` or unknown roles. Patent records, web results, OA material, discussion records, and raw custom role preferences use non-escapable `<user_input>` data boundaries; raw custom roles no longer have system-instruction authority while server presets remain available
 
 ### 修复 / Fixed
+- **SerpAPI 多 Key 原子保存** — 验证后的 SerpAPI Key 替换现在在同一 SQLite 事务中清空旧的兼容键位并写入全部新键；任一数据库失败会回滚、返回友好错误，并保持运行时搜索配置不变。事务成功后，`.env` 仅作逐项告警的桌面备份。
+  Atomic multi-key SerpAPI saves: validated replacements now clear legacy slots and write all new keys in one SQLite transaction. Any database failure rolls back, returns a friendly error, and leaves the running search configuration unchanged. After commit, `.env` is only a per-key warning-logged desktop backup.
 - **AI 配置原子保存** — 设置页保存 AI 配置时，全部 8 个主存储项现在在同一 SQLite 事务中写入；任一写入失败会回滚、返回友好错误，并保持当前运行中的内存配置不变。仅在事务成功后更新内存配置；`.env` 继续作为可失败但会记录日志的桌面备份。
   AI configuration atomic persistence: all eight primary settings now save in one SQLite transaction. A failed write rolls back, returns a friendly error, and leaves the running in-memory configuration unchanged. Memory updates only after commit; `.env` remains a best-effort desktop backup with warning logs on failure.
 - **SerpAPI Key 保存的数据完整性** — 设置页不再静默丢弃无效 SerpAPI Key 后清空既有配置。缺失/非数组、超过 5 个、空白、过短、非法字符、未知或歧义掩码会在任何清空或写入前返回可理解的错误；空数组仍明确表示用户主动清空，合法掩码可安全还原。
