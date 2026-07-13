@@ -8,6 +8,14 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-07-13 — 移动端嵌入服务生命周期加固 / Mobile embedded-server lifecycle hardening
+
+- **状态 / Status**: ✅ 已完成 / Completed
+- **提交 / Commit**: `6f193ec`
+- **修复 / Fix**: FFI 启动路径将 Tokio runtime 和线程创建错误传播回调用方，返回码为 `1` 而非 panic；服务器状态 Mutex 中毒同样返回受控错误。重复启动不会再替换或丢弃已有句柄，关闭流程先在短锁作用域取出句柄，再在锁外发送关闭信号并等待线程退出。
+  The FFI start path now propagates Tokio runtime and thread-creation failures to the caller as return code `1` rather than panicking; a poisoned server-state mutex also returns a controlled error. Duplicate starts no longer replace or lose an existing handle, and shutdown takes the handle in a short lock scope before signalling and joining outside the lock.
+- **验证 / Verification**: `cargo fmt --check`、`cargo clippy -- -D warnings` 和 `cargo test`（293 passed, 1 ignored）通过。正式二进制重新构建后，`/` 与 `/oa-response` 均返回 HTTP 200。
+
 ### 2026-07-13 — 专利图片代理响应边界 / Patent image-proxy response boundaries
 
 - **状态 / Status**: ✅ 已完成 / Completed
