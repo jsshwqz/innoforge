@@ -8,6 +8,14 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-07-13 — AI 提示词输入边界加固 / AI prompt-input boundary hardening
+
+- **状态 / Status**: ✅ 已完成 / Completed
+- **提交 / Commit**: `be815cb`
+- **修复 / Fix**: `/api/ai/chat` 现在仅接受 `user` 与 `assistant` 历史角色，伪造的 `system`/未知角色会在请求上游前得到友好错误。专利记录、联网搜索、OA 分析与审查意见、讨论、最新意见和结论导出材料均用转义后的 `<user_input>` 边界隔离；原始自定义角色只作为受限偏好，服务端预设仍可作为可信角色。
+  `/api/ai/chat` now accepts only `user` and `assistant` history roles; forged `system` or unknown roles receive a friendly error before any upstream request. Patent records, web results, OA analysis/office actions/discussion/latest input, and conclusion-export material use escaped `<user_input>` boundaries; raw custom roles are bounded preferences while server presets remain trusted roles.
+- **验证 / Verification**: 新增 4 条边界/角色回归；`cargo fmt --check`、`cargo clippy -- -D warnings` 和 `cargo test`（283 passed, 1 ignored）通过。重新构建后 `/` 与 `/oa-response` 均为 HTTP 200；真实 POST 请求携带伪造 `system` 历史时返回本地友好错误且不调用 AI。
+
 ### 2026-07-13 — D 盘运行期 PDF 临时文件治理 / D-drive runtime PDF temporary-file remediation
 
 - **状态 / Status**: ✅ 已完成 / Completed

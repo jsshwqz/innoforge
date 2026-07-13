@@ -11,6 +11,10 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 - **OA 完整讨论记录导出** — OA 讨论区新增纯本地 Markdown 导出，保留起始上下文、每轮用户/AI 原文、角色和 ISO 时间戳；导出不发起 AI 请求，且能安全保留含 Markdown 反引号的原文
   OA full discussion-record export: a local-only Markdown export preserves the initial context, every user/AI source message, role, and ISO timestamp; it makes no AI request and safely retains source text containing Markdown backticks
 
+### 安全修复 / Security Fixes
+- **AI 提示词输入边界** — 聊天历史现仅接受 `user` 和 `assistant` 角色，拒绝客户端伪造的 `system`/未知角色；专利记录、联网搜索、OA 材料、讨论记录和用户自定义角色偏好均以不可逃逸的 `<user_input>` 数据边界传给 AI。原始自定义角色不再拥有系统指令权限，服务端预设角色保持可用
+  AI prompt input boundaries: chat history now accepts only `user` and `assistant`, rejecting client-forged `system` or unknown roles. Patent records, web results, OA material, discussion records, and raw custom role preferences use non-escapable `<user_input>` data boundaries; raw custom roles no longer have system-instruction authority while server presets remain available
+
 ### 修复 / Fixed
 - **D 盘运行期 PDF 临时文件** — PDF 解析、视觉回退、OCR 和 MinerU 不再使用 Windows 系统临时目录；文件现在以不可预测的 UUID 名称在项目 `data/runtime-temp` 下独占创建，并由作用域守卫在成功、失败和提前返回时清理。`pdftotext` 直接捕获标准输出，Umi-OCR 不再写入未使用的副本
   D-drive runtime PDF temporary files: PDF extraction, vision fallback, OCR, and MinerU no longer use the Windows system temp directory. UUID-named files are created exclusively under project `data/runtime-temp` and cleaned by a scope guard on success, failure, and early return; `pdftotext` captures stdout directly and Umi-OCR no longer writes an unused copy
