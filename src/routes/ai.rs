@@ -1477,8 +1477,24 @@ pub async fn api_ai_oa_discuss(
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
+    // 文件上传字段
+    let file_name = req
+        .get("file_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let file_type = req
+        .get("file_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let file_base64 = req
+        .get("file_base64")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
 
-    if message.trim().is_empty() {
+    if message.trim().is_empty() && file_base64.is_empty() {
         return Sse::new(error_sse("[ERROR] 请输入讨论内容".into()));
     }
 
@@ -1582,6 +1598,42 @@ pub async fn api_ai_oa_discuss(
          {discussion_context}"
     );
 
+    // 处理上传的文件
+    let file_attachment = if !file_base64.is_empty() && !file_name.is_empty() {
+        if file_type.starts_with("image/") {
+            format!(
+                "\n\n[附件] 用户上传了一张图片：{}，请参考图片内容进行分析。",
+                file_name
+            )
+        } else {
+            // 尝试 base64 decode 文本文件
+            match base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &file_base64) {
+                Ok(bytes) => {
+                    if let Ok(text) = String::from_utf8(bytes) {
+                        if text.len() < 20000 {
+                            format!(
+                                "\n\n[附件] 用户上传了文件：{}\n内容：\n```\n{}\n```",
+                                file_name, text
+                            )
+                        } else {
+                            format!(
+                                "\n\n[附件] 用户上传了文件：{}（文件过大，仅显示前20000字符）",
+                                file_name
+                            )
+                        }
+                    } else {
+                        format!("\n\n[附件] 用户上传了文件：{}（二进制文件）", file_name)
+                    }
+                }
+                Err(_) => format!("\n\n[附件] 用户上传了文件：{}（无法解析）", file_name),
+            }
+        }
+    } else {
+        String::new()
+    };
+
+    let final_user_prompt = format!("{}{}", user_prompt, file_attachment);
+
     let messages = vec![
         Message {
             role: "system".into(),
@@ -1589,7 +1641,7 @@ pub async fn api_ai_oa_discuss(
         },
         Message {
             role: "user".into(),
-            content: user_prompt,
+            content: final_user_prompt,
         },
     ];
 
@@ -1707,6 +1759,56 @@ pub async fn api_oa_discussion_get(
             Json(json!({"status": "error", "message": "讨论不存在 / Discussion not found."}))
         }
         Err(e) => Json(json!({"status": "error", "message": format!("查询失败: {}", e)})),
+    }
+}
+
+/// 导入讨论记录（POST /api/ai/oas/{patent_number}/discussions）
+pub async fn api_oa_discussion_import(
+    Path(patent_number): Path<String>,
+    State(s): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let messages = match req["messages"].as_array() {
+        Some(arr) => arr
+            .iter()
+            .map(|m| {
+                let role = m["role"].as_str().unwrap_or("user");
+                let content = m["content"].as_str().unwrap_or("");
+                serde_json::json!({"role": role, "content": content})
+            })
+            .collect::<Vec<_>>(),
+        None => return Json(json!({"status": "error", "message": "messages 字段缺失或格式错误"})),
+    };
+
+    if messages.is_empty() {
+        return Json(json!({"status": "error", "message": "messages 不能为空"}));
+    }
+
+    let history_json = serde_json::to_string(&messages).unwrap_or_else(|_| "[]".to_string());
+    let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    let discussion_id = format!(
+        "disc-{}-import",
+        chrono::Local::now().timestamp_millis() % 1_000_000
+    );
+
+    let discussion = crate::db::OaDiscussion {
+        id: discussion_id.clone(),
+        patent_number,
+        oa_type: None,
+        applicant_name: None,
+        analysis_snapshot: None,
+        discussion_history: history_json,
+        created_at: now.clone(),
+        updated_at: now,
+    };
+
+    match s.db.save_oa_discussion(&discussion) {
+        Ok(_) => Json(json!({
+            "status": "ok",
+            "discussion_id": discussion_id,
+            "message": "导入成功 / Import successful"
+        })),
+        Err(e) => Json(json!({"status": "error", "message": format!("保存失败: {}", e)})),
     }
 }
 

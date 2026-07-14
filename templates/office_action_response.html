@@ -1194,6 +1194,8 @@
         html += '</div>';
         html += '<div style="border-top:1px solid #30363d;padding:8px 12px;display:flex;gap:8px;">';
         html += '<input id="oa-discuss-input" type="text" placeholder="' + (t('oar.discussPlaceholder') || '输入讨论内容...') + '" style="flex:1;background:#161b22;border:1px solid #30363d;border-radius:6px;padding:8px 12px;color:#c9d1d9;font-size:13px;" onkeydown="if(event.key===\'Enter\')sendOADiscussion()">';
+        html += '<label style="cursor:pointer;color:#58a6ff;font-size:18px;padding:4px 8px;border-radius:6px;user-select:none;" title="上传截图/文件"><input type="file" id="oa-discuss-file" accept="image/*,.pdf,.doc,.docx,.txt" style="display:none;" onchange="attachDiscussFile()"></label>';
+        html += '<span id="oa-discuss-file-label" style="color:#8b949e;font-size:12px;padding:8px 0;display:none;"></span>';
         html += '<button onclick="sendOADiscussion()" style="background:#238636;color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-size:13px;white-space:nowrap;">' + (t('oar.discussSend') || '发送') + '</button>';
         html += '</div>';
         html += '</div>';
@@ -1203,6 +1205,7 @@
         html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">';
         html += '<span style="color:#58a6ff;font-weight:600;font-size:13px;">📂 ' + (t('oar.discussHistoryTitle') || '历史讨论') + '</span>';
         html += '<button onclick="startNewOADiscuss()" style="padding:4px 12px;font-size:12px;background:#238636;color:#fff;border:none;border-radius:6px;cursor:pointer;" data-i18n="oar.discussHistoryNew">新讨论</button>';
+        html += '<button onclick="showOADiscussImportDialog()" style="padding:4px 12px;font-size:12px;background:#8957e5;color:#fff;border:none;border-radius:6px;cursor:pointer;" data-i18n="oar.discussImport">导入</button>';
         html += '</div>';
         html += '<div style="font-size:12px;color:#8b949e;margin-bottom:8px;" data-i18n="oar.discussHistoryDesc">选择历史讨论继续，或开始新讨论</div>';
         html += '<div id="oa-history-list" style="max-height:200px;overflow-y:auto;">';
@@ -1221,6 +1224,7 @@
 
         container.innerHTML = html;
         loadOADiscussionHistory();
+        initDiscQuoteEvents(); // 重新绑定引用按钮到新的 #oa-discuss-messages
         clearLoading();
     }
 
@@ -1254,6 +1258,28 @@
         var aiMsgId = addDiscussionMessage('ai', '⏳ ...');
         var aiDiv = document.getElementById(aiMsgId);
 
+        // 如果有上传的文件，也显示到用户消息中
+        var pendingFile = window._oaDiscussPendingFile;
+        if (pendingFile) {
+            var lastUserMsg = document.querySelector('#oa-discuss-messages .msg-bubble:last-of-type');
+            if (pendingFile.type && pendingFile.type.startsWith('image/')) {
+                if (lastUserMsg) {
+                    var img = document.createElement('img');
+                    img.src = pendingFile.dataUrl;
+                    img.style.cssText = 'max-width:300px;max-height:200px;border-radius:6px;margin-top:8px;display:block;';
+                    lastUserMsg.appendChild(img);
+                }
+            } else {
+                if (lastUserMsg) {
+                    var fileNote = document.createElement('div');
+                    fileNote.style.cssText = 'color:#58a6ff;font-size:12px;margin-top:4px;';
+                    fileNote.textContent = '📎 ' + pendingFile.name;
+                    lastUserMsg.appendChild(fileNote);
+                }
+            }
+            window._oaDiscussPendingFile = null;
+        }
+
         try {
             var payload = {
                 analysis: lastAnalysisRawText,
@@ -1267,6 +1293,15 @@
             if (patentNum) payload.patent_number = patentNum;
             if (applicantNm) payload.applicant_name = applicantNm;
             payload.discussion_id = discussionId;
+            // 如果有上传的文件，把 base64 内容传给 AI
+            var pf = window._oaDiscussPendingFile;
+            if (pf && pf.base64) {
+                payload.file_name = pf.name;
+                payload.file_base64 = pf.base64;
+                payload.file_type = pf.type;
+                // 清空待发送文件
+                window._oaDiscussPendingFile = null;
+            }
 
             var resp = await fetch('/api/ai/oa-discuss', {
                 method: 'POST',
@@ -2393,29 +2428,35 @@
 
     // ── Discussion quote button event handlers ──
     function initDiscQuoteEvents() {
-        var container = document.getElementById('discussion-messages');
-        if (!container) return;
-        container.addEventListener('mouseup', function(e) {
-            var target = e.target;
-            if (target && target.nodeType === 3) target = target.parentNode;
-            if (target && target.closest && target.closest('.quote-btn')) return;
-            setTimeout(function() {
-                var sel = window.getSelection();
-                var text = sel ? sel.toString().trim() : '';
-                if (!text) { hideDiscQuoteBtn(); return; }
-                var node = sel.anchorNode;
-                if (node) {
-                    if (node.nodeType === 3) node = node.parentNode;
-                    if (!node.closest('.msg-bubble')) { hideDiscQuoteBtn(); return; }
-                }
-                if (!sel.rangeCount) return;
-                var range = sel.getRangeAt(0);
-                var rect = range.getBoundingClientRect();
-                if (!rect || (rect.width === 0 && rect.height === 0)) { hideDiscQuoteBtn(); return; }
-                showDiscQuoteBtn(text, rect);
-            }, 10);
+        // 同时绑定新旧两个讨论容器
+        var containers = [
+            document.getElementById('discussion-messages'),
+            document.getElementById('oa-discuss-messages')
+        ].filter(function(el) { return el; });
+
+        containers.forEach(function(container) {
+            container.addEventListener('mouseup', function(e) {
+                var target = e.target;
+                if (target && target.nodeType === 3) target = target.parentNode;
+                if (target && target.closest && target.closest('.quote-btn')) return;
+                setTimeout(function() {
+                    var sel = window.getSelection();
+                    var text = sel ? sel.toString().trim() : '';
+                    if (!text) { hideDiscQuoteBtn(); return; }
+                    var node = sel.anchorNode;
+                    if (node) {
+                        if (node.nodeType === 3) node = node.parentNode;
+                        if (!node.closest('.msg-bubble')) { hideDiscQuoteBtn(); return; }
+                    }
+                    if (!sel.rangeCount) return;
+                    var range = sel.getRangeAt(0);
+                    var rect = range.getBoundingClientRect();
+                    if (!rect || (rect.width === 0 && rect.height === 0)) { hideDiscQuoteBtn(); return; }
+                    showDiscQuoteBtn(text, rect);
+                }, 10);
+            });
+            container.addEventListener('scroll', function() { hideDiscQuoteBtn(); });
         });
-        container.addEventListener('scroll', function() { hideDiscQuoteBtn(); });
         document.addEventListener('mousedown', function(e) {
             if (e.target && e.target.closest && e.target.closest('.quote-btn')) return;
             hideDiscQuoteBtn();
@@ -2522,6 +2563,132 @@
             if (input) input.placeholder = t('oar.discussRecovered') || '已恢复讨论，继续输入...';
         } catch (e) {
             alert('恢复讨论失败: ' + e.message);
+        }
+    }
+
+    // ========== OA 讨论文件上传 ==========
+    function attachDiscussFile() {
+        var fileInput = document.getElementById('oa-discuss-file');
+        var labelEl = document.getElementById('oa-discuss-file-label');
+        if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+            if (labelEl) labelEl.style.display = 'none';
+            return;
+        }
+        var file = fileInput.files[0];
+        var maxSize = 10 * 1024 * 1024; // 10MB
+        if (file.size > maxSize) {
+            alert('文件过大（最大 10MB）');
+            fileInput.value = '';
+            return;
+        }
+
+        // 读取文件并存储为 base64
+        var reader = new FileReader();
+        reader.onload = function(e) {
+            var dataUrl = e.target.result;
+            window._oaDiscussPendingFile = {
+                name: file.name,
+                type: file.type,
+                size: file.size,
+                dataUrl: dataUrl,
+                base64: dataUrl.split(',')[1] || ''
+            };
+            if (labelEl) {
+                labelEl.textContent = '📎 ' + file.name;
+                labelEl.style.display = 'inline';
+            }
+        };
+        reader.readAsDataURL(file);
+    }
+
+    // 移除上传的文件
+    function removeDiscussFile() {
+        var fileInput = document.getElementById('oa-discuss-file');
+        var labelEl = document.getElementById('oa-discuss-file-label');
+        if (fileInput) fileInput.value = '';
+        if (labelEl) labelEl.style.display = 'none';
+        window._oaDiscussPendingFile = null;
+    }
+
+    // ========== OA 讨论导入功能 ==========
+    function showOADiscussImportDialog() {
+        var t = window.__t || function(k) { return k; };
+        var title = t('oar.discussImportTitle') || '导入讨论记录';
+        var desc = t('oar.discussImportDesc') || '粘贴已有的讨论内容（纯文本即可），将保存为一条历史讨论';
+        var placeholder = t('oar.discussImportPlaceholder') || '在此粘贴讨论文本...';
+        var btnText = t('oar.discussImportConfirm') || '导入';
+
+        var dialog = document.createElement('div');
+        dialog.id = 'oa-import-dialog';
+        dialog.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
+
+        dialog.innerHTML = ''
+            + '<div style="background:#161b22;border:1px solid #30363d;border-radius:12px;padding:24px;max-width:600px;width:100%;max-height:80vh;display:flex;flex-direction:column;">'
+            + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">'
+            + '<h3 style="margin:0;color:#c9d1d9;">' + title + '</h3>'
+            + '<button onclick="document.getElementById(\'oa-import-dialog\').remove()" style="background:none;border:none;color:#8b949e;font-size:20px;cursor:pointer;padding:0 4px;">&times;</button>'
+            + '</div>'
+            + '<p style="margin:0 0 12px 0;color:#8b949e;font-size:13px;line-height:1.5;">' + desc + '</p>'
+            + '<textarea id="oa-import-textarea" style="width:100%;min-height:200px;flex:1;background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:12px;color:#c9d1d9;font-family:monospace;font-size:13px;resize:vertical;" placeholder="' + placeholder + '"></textarea>'
+            + '<div style="margin-top:16px;display:flex;justify-content:flex-end;gap:8px;">'
+            + '<button onclick="document.getElementById(\'oa-import-dialog\').remove()" style="padding:8px 16px;background:#21262d;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;cursor:pointer;font-size:13px;">取消</button>'
+            + '<button onclick="doOADiscussImport()" style="padding:8px 16px;background:#8957e5;border:none;border-radius:6px;color:#fff;cursor:pointer;font-size:13px;">' + btnText + '</button>'
+            + '</div>'
+            + '</div>';
+
+        document.body.appendChild(dialog);
+        document.getElementById('oa-import-textarea').focus();
+    }
+
+    async function doOADiscussImport() {
+        var textarea = document.getElementById('oa-import-textarea');
+        var text = textarea ? textarea.value.trim() : '';
+        if (!text) {
+            alert('请先粘贴讨论内容');
+            return;
+        }
+
+        var patentNum = getPatentNumberFromUrl();
+        if (!patentNum) {
+            alert('请先打开一个专利');
+            return;
+        }
+
+        var dialog = document.getElementById('oa-import-dialog');
+        if (dialog) dialog.remove();
+
+        // 将纯文本解析为消息列表：按段落分割，交替为用户/AI 消息
+        var lines = text.split(/\n\s*\n/).map(function(s) { return s.trim(); }).filter(function(s) { return s.length > 0; });
+        var messages = [];
+
+        lines.forEach(function(line, idx) {
+            var role = (idx % 2 === 0) ? 'user' : 'assistant';
+            messages.push({ role: role, content: line });
+        });
+
+        if (messages.length === 0) {
+            alert('未解析到有效内容');
+            return;
+        }
+
+        try {
+            var resp = await fetch('/api/ai/oas/' + encodeURIComponent(patentNum) + '/discussions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    patent_number: patentNum,
+                    messages: messages
+                })
+            });
+            var data = await resp.json();
+            if (!resp.ok || !data.ok) {
+                alert('导入失败: ' + (data.error || '未知错误'));
+                return;
+            }
+            // 导入成功，自动恢复该讨论
+            recoverOADiscussion(data.discussion_id);
+        } catch (e) {
+            alert('导入失败: ' + e.message);
         }
     }
 

@@ -311,6 +311,10 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
             "/api/oa/discussions/:patent_number/:discussion_id",
             get(routes::api_oa_discussion_get),
         )
+        .route(
+            "/api/oa/discussions/import",
+            post(routes::api_oa_discussion_import),
+        )
         // OA 答复书 docx 导出
         .route("/api/oa/export-docx", post(routes::api_oa_export_docx))
         .route(
