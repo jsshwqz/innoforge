@@ -244,7 +244,7 @@ pub fn safe_truncate_chars(s: &str, max_chars: usize) -> &str {
 // These are explicit capacity guards; callers return the resulting error instead
 // of silently dropping the tail of user-provided patent material.
 pub(crate) const OA_DISCUSSION_ANALYSIS_MAX_CHARS: usize = 60_000;
-pub(crate) const OA_DISCUSSION_HISTORY_MAX_CHARS: usize = 40_000;
+pub(crate) const OA_DISCUSSION_HISTORY_MAX_CHARS: usize = 2_000_000; // 保存：允许完整持久化（用户讨论可达 1M+）
 pub(crate) const OA_DISCUSSION_OA_MAX_CHARS: usize = 15_000;
 pub(crate) const OA_RESPONSE_ANALYSIS_MAX_CHARS: usize = 600_000;
 pub(crate) const OA_RESPONSE_DISCUSSION_MAX_CHARS: usize = 400_000;

@@ -1528,10 +1528,34 @@ pub async fn api_ai_oa_discuss(
     let disc_raw = discussion_json.to_string();
 
     // Format discussion history as readable dialogue (input is JSON array)
-    let disc_formatted = if disc_raw.len() > 10 && disc_raw != "[]" {
+    // 数据库保存不受限（2M）；发给 AI 时从数组层面移除最老消息，保留最新的讨论
+    // 上限 120K 字符（接近主流 AI context window），避免超出限制
+    const MAX_DISCUSSION_FOR_AI: usize = 120_000;
+
+    let formatted_discussion: String;
+    if disc_raw.len() > 10 && disc_raw != "[]" {
         if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(&disc_raw) {
+            // 计算每则消息的字符量，从最老的开始移除，直到总长度 <= MAX_DISCUSSION_FOR_AI
+            let trimmed: Vec<serde_json::Value> = arr.into_iter().collect();
+            let total_chars = trimmed.iter().map(|m| m.to_string().len()).sum::<usize>();
+            // 如果只剩一条消息且还是超限，截断该消息本身
+            let final_messages = if trimmed.len() == 1 && total_chars > MAX_DISCUSSION_FOR_AI {
+                let mut msg = trimmed[0].clone();
+                if let Some(content) = msg["content"].as_str() {
+                    let max_content = MAX_DISCUSSION_FOR_AI - msg["role"].to_string().len() - 20;
+                    if content.len() > max_content {
+                        msg["content"] = serde_json::Value::String(
+                            content.chars().take(max_content).collect::<String>()
+                                + "...\n[讨论内容已被截断以适配 AI 上下文窗口]",
+                        );
+                    }
+                }
+                vec![msg]
+            } else {
+                trimmed
+            };
             let mut text = String::new();
-            for item in &arr {
+            for item in &final_messages {
                 let role = item["role"].as_str().unwrap_or("unknown");
                 let content = item["content"].as_str().unwrap_or("");
                 let label = match role {
@@ -1541,13 +1565,17 @@ pub async fn api_ai_oa_discuss(
                 };
                 text.push_str(&format!("【{label}】{content}\n\n"));
             }
-            text
+            formatted_discussion = text;
         } else {
-            disc_raw.clone()
+            formatted_discussion = if disc_raw.len() > MAX_DISCUSSION_FOR_AI {
+                disc_raw[..MAX_DISCUSSION_FOR_AI].to_string() + "\n\n[讨论内容已被截断]"
+            } else {
+                disc_raw.clone()
+            };
         }
     } else {
-        String::new()
-    };
+        formatted_discussion = String::new();
+    }
 
     let oa_snippet = req
         .get("office_action")
@@ -1576,10 +1604,10 @@ pub async fn api_ai_oa_discuss(
         bounded_reference_material("原始审查意见通知书", oa_snippet),
     );
 
-    let discussion_context = if !disc_formatted.is_empty() {
+    let discussion_context = if !formatted_discussion.is_empty() {
         format!(
             "\n\n## 之前的讨论记录\n{}\n## 发明人的最新意见\n{}",
-            bounded_reference_material("之前的讨论记录", &disc_formatted),
+            bounded_reference_material("之前的讨论记录", &formatted_discussion),
             bounded_reference_material("发明人的最新意见", &message)
         )
     } else {

@@ -1253,6 +1253,10 @@
         // Add user message
         addDiscussionMessage('user', msg);
         oaDiscussMessages.push({ role: 'user', content: msg });
+        // 同步更新 discussionHistory（用于导出）
+        if (typeof discussionHistory !== 'undefined') {
+            discussionHistory.push(['user', msg, new Date().toISOString()]);
+        }
 
         // Add AI placeholder
         var aiMsgId = addDiscussionMessage('ai', '⏳ ...');
@@ -1360,6 +1364,10 @@
 
             oaDiscussMessages.push({ role: 'assistant', content: aiText });
             if (aiDiv) aiDiv.innerHTML = renderMarkdown(aiText);
+            // 同步更新 discussionHistory（用于导出）
+            if (typeof discussionHistory !== 'undefined') {
+                discussionHistory.push(['assistant', aiText, new Date().toISOString()]);
+            }
             // 持久化完整讨论记录到 localStorage
             var history = {
                 discussion_id: capturedDiscId,
