@@ -1790,12 +1790,16 @@ pub async fn api_oa_discussion_get(
     }
 }
 
-/// 导入讨论记录（POST /api/ai/oas/{patent_number}/discussions）
+/// 导入讨论记录（POST /api/oa/discussions/import）
 pub async fn api_oa_discussion_import(
-    Path(patent_number): Path<String>,
     State(s): State<AppState>,
     Json(req): Json<serde_json::Value>,
 ) -> Json<serde_json::Value> {
+    let patent_number = match req["patent_number"].as_str() {
+        Some(pn) => pn.to_string(),
+        None => return Json(json!({"status": "error", "message": "patent_number 字段缺失"})),
+    };
+
     let messages = match req["messages"].as_array() {
         Some(arr) => arr
             .iter()
