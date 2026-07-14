@@ -2510,7 +2510,7 @@
                 html += '<div style="padding:8px 12px;border-bottom:1px solid #30363d;cursor:pointer;display:flex;justify-content:space-between;align-items:center;" '
                       + 'onclick="recoverOADiscussion(\'' + escapeHtml(d.discussion_id) + '\')" '
                       + 'onmouseenter="this.style.background=\'rgba(255,255,255,0.05)\'" '
-                      + 'onmouseleave="this.style.background=\'transparent\ '">';
+                      + 'onmouseleave="this.style.background=\'transparent\'>"';
                 html += '<div><span style="font-family:monospace;font-size:12px;color:#58a6ff;">' + escapeHtml(displayId) + '</span> ';
                 html += '<span style="font-size:11px;color:#8b949e;margin-left:8px;">' + escapeHtml(created) + '</span></div>';
                 html += '<span style="font-size:11px;color:#8b949e;">' + msgs + ' 条</span></div>';
@@ -2681,7 +2681,7 @@
         }
 
         try {
-            var resp = await fetch('/api/ai/oas/' + encodeURIComponent(patentNum) + '/discussions', {
+            var resp = await fetch('/api/oa/discussions/import', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
