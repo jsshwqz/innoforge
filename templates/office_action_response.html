@@ -394,8 +394,26 @@
     function escapeHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
     function getPatentNumberFromUrl() {
+        // 优先从 URL 参数读取
         var params = new URLSearchParams(window.location.search);
-        return params.get('patent_id') || '';
+        var pn = params.get('patent_id');
+        if (pn) return pn;
+        // 其次从页面 DOM 读取（专利详情页跳转过来时会有 patent-number 元素）
+        var el = document.getElementById('patent-number-value');
+        if (el && el.textContent) return el.textContent.trim();
+        // 最后从 localStorage 读取（OA 页面上保存的专利号）
+        if (typeof uploadedData !== 'undefined' && uploadedData['patent_number']) return uploadedData['patent_number'];
+        // 从 localStorage OA 数据中读取
+        try {
+            var oaData = JSON.parse(localStorage.getItem('innoforge_oa_data') || '{}');
+            if (oaData['my']) {
+                var title = oaData['my'].title || '';
+                // 从标题中提取专利号（格式："CN1234567 — 标题"）
+                var parts = title.split('—');
+                if (parts.length > 0) return parts[0].trim();
+            }
+        } catch (e) {}
+        return '';
     }
 
     function triggerFileSelect(callback) {
