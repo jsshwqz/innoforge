@@ -8,6 +8,13 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-07-15 — OA 答复书流式生成与导出修复
+
+- **状态 / Status**: ✅ 已完成 / Completed
+- **提交 / Commit**: `cc5bfba`
+- **修复 / Fix**: 前端 SSE 解析兼容标准 `data:` 事件格式并保留正文换行；导入讨论流程恢复 OA 原文、讨论记录与讨论 ID；生成结果不足时阻止空白 DOCX 导出并提示用户；OA 讨论数据库 v17 迁移改为幂等执行。
+- **验证 / Verification**: 浏览器实测生成 2,748 字符中文答复并成功导出有效 DOCX；Puppeteer E2E 48/48；`cargo fmt --check`、`cargo clippy --all-targets -- -D warnings`、`cargo test`（135 + 137 + 6 + 37 项）全部通过。AI 全局超时保持 300 秒。
+
 ### 2026-07-14 — OA 讨论持久化（讨论历史面板 + 后端 API + 超时恢复 + Google 认证原子化）
 
 - **状态 / Status**: ✅ 已完成 / Completed
