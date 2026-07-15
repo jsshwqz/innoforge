@@ -1,7 +1,7 @@
 use super::AppState;
 use crate::ai::{
-    oa_capacity_error, Message, OA_DISCUSSION_ANALYSIS_MAX_CHARS, OA_DISCUSSION_HISTORY_MAX_CHARS,
-    OA_DISCUSSION_OA_MAX_CHARS,
+    check_oa_analysis, format_report, oa_capacity_error, Message, OA_DISCUSSION_ANALYSIS_MAX_CHARS,
+    OA_DISCUSSION_HISTORY_MAX_CHARS, OA_DISCUSSION_OA_MAX_CHARS,
 };
 use crate::patent::*;
 use axum::{
@@ -1344,6 +1344,8 @@ pub async fn api_ai_office_action_response_stream(
         .unwrap_or(&patent_number)
         .to_string();
     let db = s.db.clone();
+    let fact_references = refs_info.clone();
+    let fact_my_patent = my_info.clone();
 
     let stream = async_stream::stream! {
         let mut full_text = String::new();
@@ -1357,6 +1359,11 @@ pub async fn api_ai_office_action_response_stream(
             full_text.push_str(&sanitized);
             yield Ok(Event::default().data(sanitized));
         }
+        let fact_report = check_oa_analysis(&full_text, &fact_references, &fact_my_patent);
+        let fact_text = format!("\n\n## AI 事实核查（请人工复核）\n{}", format_report(&fact_report));
+        let fact_sse = fact_text.replace(['\n', '\r'], " ");
+        full_text.push_str(&fact_text);
+        yield Ok(Event::default().data(fact_sse));
         yield Ok(Event::default().event("done").data("[DONE]"));
 
         if !patent_number.is_empty() && !full_text.is_empty() {
