@@ -11,6 +11,8 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 ## [Unreleased]
 
 ### 新增 / Added
+- **OA 答复书专业论证约束** — 答复书生成现实际启用中国专利代理师级系统指令，逐项按“审查意见概述—申请人答复—证据出处—论证结论”组织；创造性论述须明确区别特征、技术效果、技术问题和缺少结合动机。讨论记录只作为待核对证据，材料不足时标注待申请人/代理人确认，禁止编造技术特征、对比文件记载、页段号或法条。
+  OA response-letter professional reasoning constraints: generation now actually enables a China patent-agent-level system instruction and structures each response as “examiner position — applicant response — evidence source — conclusion.” Inventiveness arguments must identify distinguishing features, technical effects, technical problems, and why there was no motivation to combine. Discussion records are only evidence to be verified; insufficient material is marked for applicant/agent confirmation, and the model must not invent technical features, prior-art disclosures, page/paragraph references, or legal provisions.
 - **OA 完整讨论记录导出** — OA 讨论区新增纯本地 Markdown 导出，保留起始上下文、每轮用户/AI 原文、角色和 ISO 时间戳；导出不发起 AI 请求，且能安全保留含 Markdown 反引号的原文
   OA full discussion-record export: a local-only Markdown export preserves the initial context, every user/AI source message, role, and ISO timestamp; it makes no AI request and safely retains source text containing Markdown backticks
 

@@ -8,6 +8,13 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-07-16 — OA 答复书专业论证与反幻觉约束
+
+- **状态 / Status**: ✅ 已完成 / Completed
+- **提交 / Commit**: `2aa8633` (`feat: 提升OA答复书专业约束`)
+- **改进 / Improvement**: 修复了答复书生成阶段丢弃既有专业 system prompt 的问题。现实际使用专利代理师级指令，要求逐项按“审查意见概述—申请人答复—证据出处—论证结论”写作；创造性论证须交代区别特征、技术效果、技术问题及缺少结合动机。讨论记录降为待核验证据，无法支撑的内容明确标为【需申请人确认】，禁止虚构技术特征、对比文件内容、页段号和法条。
+- **验证 / Verification**: `cargo fmt --all --check`、`cargo clippy --all-targets -- -D warnings` 及 `cargo test --lib`（136 项）通过。
+
 ### 2026-07-15 — OA Word 导出正文空白修复
 
 - **状态 / Status**: ✅ 已完成 / Completed
