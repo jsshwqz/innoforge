@@ -23,6 +23,8 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
   AI prompt input boundaries: chat history now accepts only `user` and `assistant`, rejecting client-forged `system` or unknown roles. Patent records, web results, OA material, discussion records, and raw custom role preferences use non-escapable `<user_input>` data boundaries; raw custom roles no longer have system-instruction authority while server presets remain available
 
 ### 修复 / Fixed
+- **OA 正常讨论流程的答复书入口**：分析完成后的“生成意见陈述书”改为在分析摘要下方固定可见，同时保留第五部分和讨论区后的入口；生成成功后可在第五部分直接导出 Word。
+  OA response-letter entry in the normal discussion flow: “Generate Response Letter” is now sticky below the analysis summary while retaining the Section 5 and post-discussion entries; after generation, Word export is directly available in Section 5.
 - **OA 答复书流式正文与导出**：前端现兼容标准 SSE `data:` 事件格式并保留换行，避免完整 AI 答复在浏览器中被丢弃而显示空白或无法导出；生成结果过短时会阻止空白导出并提示用户。OA 讨论 v17 迁移同时改为幂等执行，重复初始化数据库不再因 `oa_text` 列重复而失败。
   OA response-letter streaming and export: the frontend now accepts standard SSE `data:` events and preserves line breaks, preventing complete AI responses from being discarded in the browser and exported blank. An undersized result is blocked with a user-facing message. The v17 OA-discussion migration is also idempotent, so database reinitialization no longer fails on a duplicate `oa_text` column.
 - **SerpAPI 多 Key 原子保存** — 验证后的 SerpAPI Key 替换现在在同一 SQLite 事务中清空旧的兼容键位并写入全部新键；任一数据库失败会回滚、返回友好错误，并保持运行时搜索配置不变。事务成功后，`.env` 仅作逐项告警的桌面备份。

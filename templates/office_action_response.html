@@ -1184,6 +1184,10 @@
         html += '<div style="margin-bottom:12px;padding:8px 12px;background:#0d1117;border:1px solid #30363d;border-radius:6px;font-size:13px;color:#8b949e;">';
         html += '📊 ' + t('oar.analysisInfo').replace('{n}', Math.max(sections.length, 1)) + ' — ' + t('oar.discussHint') || '请审阅分析结果，讨论确认无误后再生成答复书';
         html += '</div>';
+        html += '<div style="position:sticky;top:12px;z-index:20;margin-bottom:12px;padding:10px 12px;text-align:right;background:#161b22;border:1px solid #f0883e66;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.25);">';
+        html += '<button onclick="generateResponseLetter()" style="background:#f0883e;color:#fff;border:none;border-radius:7px;padding:10px 20px;cursor:pointer;font-size:14px;font-weight:600;">';
+        html += '📝 ' + (t('oar.btnGenerateResponse') || '生成意见陈述书');
+        html += '</button></div>';
         html += '<div class="result-content">';
 
         // Show sections (typically 1-4, no section 5)
@@ -1214,7 +1218,11 @@
         html += '<span style="color:#f0883e;font-weight:600;font-size:14px;">📝 ' + (sections.length + 1) + '. ' + (t('oar.section5') || '意见陈述书草稿') + '</span>';
         html += '<span style="color:#8b949e;font-size:12px;margin-left:8px;">— ' + (t('oar.section5Pending') || '待讨论确认后生成') + '</span>';
         html += '</div>';
-        html += '<div id="section5-content" style="padding:16px;text-align:center;"></div>';
+        html += '<div id="section5-content" style="padding:16px;text-align:center;">';
+        html += '<div style="color:#8b949e;font-size:13px;margin-bottom:12px;">' + (t('oar.generateHint') || '确认分析无误后可生成正式答复书') + '</div>';
+        html += '<button onclick="generateResponseLetter()" style="background:#f0883e;color:#fff;border:none;border-radius:8px;padding:12px 32px;cursor:pointer;font-size:15px;font-weight:600;">';
+        html += '📝 ' + (t('oar.btnGenerateResponse') || '生成意见陈述书');
+        html += '</button></div>';
         html += '</div>';
 
         // ── Discussion panel ──
