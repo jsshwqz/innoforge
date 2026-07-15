@@ -84,10 +84,11 @@ pub fn generate_docx(params: &ExportParams) -> Result<Vec<u8>, String> {
     <w:basedOn w:val="Normal"/>
     <w:next w:val="Normal"/>
     <w:pPr>
-      <w:spacing w:before="0" w:after="0" w:line="1.5"/>
+      <w:spacing w:before="0" w:after="0" w:line="360" w:lineRule="auto"/>
       <w:justify w:val="center"/>
     </w:pPr>
     <w:rPr>
+      <w:rFonts w:ascii="SimSun" w:hAnsi="SimSun" w:eastAsia="宋体"/>
       <w:b w:val="true"/>
       <w:sz w:val="32"/>
     </w:rPr>
@@ -95,9 +96,10 @@ pub fn generate_docx(params: &ExportParams) -> Result<Vec<u8>, String> {
   <w:style w:type="paragraph" w:styleId="Normal">
     <w:name w:val="Normal"/>
     <w:pPr>
-      <w:spacing w:before="0" w:after="0" w:line="1.5"/>
+      <w:spacing w:before="0" w:after="0" w:line="360" w:lineRule="auto"/>
     </w:pPr>
     <w:rPr>
+      <w:rFonts w:ascii="SimSun" w:hAnsi="SimSun" w:eastAsia="宋体"/>
       <w:sz w:val="24"/>
     </w:rPr>
   </w:style>
