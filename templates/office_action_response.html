@@ -1530,6 +1530,7 @@
 
             // Store before rendering any action button, so export is immediately available.
             window._generatedResponseText = fullText;
+            showPersistentResponseExportButton();
 
             // Update section 5 area with rendered markdown
             if (section5Area) {
@@ -1615,6 +1616,18 @@
                 btn.disabled = false;
                 btn.textContent = orig;
             }
+    }
+
+    function showPersistentResponseExportButton() {
+        var existing = document.getElementById('oa-persistent-export-response');
+        if (existing) existing.remove();
+        var button = document.createElement('button');
+        button.id = 'oa-persistent-export-response';
+        button.type = 'button';
+        button.textContent = '📥 导出 Word 答复书';
+        button.style.cssText = 'position:fixed;right:24px;bottom:24px;z-index:10001;background:#f0883e;color:#fff;border:none;border-radius:8px;padding:12px 20px;cursor:pointer;font-size:14px;font-weight:600;box-shadow:0 4px 14px rgba(0,0,0,0.35);';
+        button.onclick = function() { exportGeneratedResponse(button); };
+        document.body.appendChild(button);
     }
 
     async function exportResponseDraft() {
