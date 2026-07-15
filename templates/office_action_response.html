@@ -964,7 +964,9 @@
             var data2 = await resp2.json();
             if (data2.error) throw new Error(data2.error);
             lastAnalysisRawText = data2.analysis || '';
-            showOAAnalysisSections(data2.analysis);
+            // Keep every successful analysis path in discussion mode so the
+            // response-letter action is always visible after analysis.
+            showOAAnalysisDiscuss(data2.analysis);
 
             numberRefParagraphs();
             extractMappingMatrix(data2.analysis);
