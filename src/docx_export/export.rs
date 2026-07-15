@@ -220,7 +220,13 @@ mod tests {
         assert!(document_xml.contains("<w:sectPr>"));
         assert!(document_xml.contains("</w:sectPr>\n  </w:body>"));
         assert!(!document_xml.contains("</w:p>\n    </w:p>\n  </w:body>"));
-        assert_eq!(document_xml.matches("<w:t").count(), document_xml.matches("</w:t>").count());
-        assert_eq!(document_xml.matches("<w:r>").count(), document_xml.matches("</w:r>").count());
+        assert_eq!(
+            document_xml.matches("<w:t").count(),
+            document_xml.matches("</w:t>").count()
+        );
+        assert_eq!(
+            document_xml.matches("<w:r>").count(),
+            document_xml.matches("</w:r>").count()
+        );
     }
 }
