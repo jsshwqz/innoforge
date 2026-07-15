@@ -15,6 +15,8 @@
 - **修复 / Fix**: 前端 SSE 解析兼容标准 `data:` 事件格式并保留正文换行；导入讨论流程恢复 OA 原文、讨论记录与讨论 ID；生成结果不足时阻止空白 DOCX 导出并提示用户；OA 讨论数据库 v17 迁移改为幂等执行。
 - **界面补充 / UI follow-up**: 正常“分析 → 讨论”流程在分析摘要下方提供固定可见的“生成意见陈述书”入口；生成后在第五部分直接显示 Word 导出按钮。
 - **补充提交 / Follow-up commit**: `a49116b` (`fix: 显示OA答复书生成入口`)
+- **后续修复 / Follow-up fix**: 导入讨论的 AI 回复容器、可关闭生成面板及非空 Word 导出已修复；生成内容新增逐项权利要求修改建议，并要求对证据不足处明确标示待确认。
+- **后续提交 / Follow-up commit**: `c326f45` (`fix: 修复OA讨论回显与Word导出`)
 - **验证 / Verification**: 浏览器实测生成 2,748 字符中文答复并成功导出有效 DOCX；Puppeteer E2E 48/48；`cargo fmt --check`、`cargo clippy --all-targets -- -D warnings`、`cargo test`（135 + 137 + 6 + 37 项）全部通过。AI 全局超时保持 300 秒。
 
 ### 2026-07-14 — OA 讨论持久化（讨论历史面板 + 后端 API + 超时恢复 + Google 认证原子化）
