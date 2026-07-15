@@ -921,7 +921,7 @@ impl AiClient {
 
         let _legacy_prompt_shape = (system_prompt, user_prompt);
         let user_prompt = format!(
-            "请立即撰写完整中文意见陈述书，必须包含：一、对审查意见的答复；二、权利要求修改说明；三、创造性论述；四、结论。每一部分都必须写出完整中文段落，禁止只输出标题、符号或占位符。\n\n<office_action>\n{oa}\n</office_action>\n\n<confirmed_analysis>\n{analysis}\n</confirmed_analysis>\n\n<discussion>\n{discussion}\n</discussion>"
+            "请立即撰写完整中文意见陈述书，必须包含：一、对审查意见的答复；二、权利要求修改说明；三、创造性论述；四、结论；五、权利要求修改建议。第五部分必须按权利要求逐项给出“修改前要点、建议修改文本、修改理由及依据”，让发明人无需自行起草；若现有材料不足以安全提出具体文字，必须明确写“需申请人确认”，不得编造技术特征或法条。每一部分都必须写出完整中文段落，禁止只输出标题、符号或占位符。\n\n<office_action>\n{oa}\n</office_action>\n\n<confirmed_analysis>\n{analysis}\n</confirmed_analysis>\n\n<discussion>\n{discussion}\n</discussion>"
         );
 
         let self_clone = self.clone();

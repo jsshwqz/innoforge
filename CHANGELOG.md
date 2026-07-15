@@ -23,6 +23,10 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
   AI prompt input boundaries: chat history now accepts only `user` and `assistant`, rejecting client-forged `system` or unknown roles. Patent records, web results, OA material, discussion records, and raw custom role preferences use non-escapable `<user_input>` data boundaries; raw custom roles no longer have system-instruction authority while server presets remain available
 
 ### 修复 / Fixed
+- **OA 导入讨论、结果面板与 Word 导出**：导入讨论面板补回 AI 消息容器，AI 回复不再无声丢失；生成结果遮罩提供明确关闭按钮；Word 导出改为保留完整正文、显式传入触发按钮并延后释放下载文件，避免空白导出。
+  OA imported discussion, result panel, and Word export: the imported-discussion panel restores its AI-message container so replies are no longer silently lost; generated-result overlays have an explicit close button; Word export preserves the full body, receives its triggering button explicitly, and delays URL cleanup to avoid blank downloads.
+- **OA 权利要求修改建议**：生成意见陈述书时会附带逐项“修改前要点、建议修改文本、修改理由及依据”；材料不足时明确要求申请人确认，不编造技术特征或法条。
+  OA claim-amendment suggestions: generated response letters now include per-claim prior points, suggested text, reasons, and basis; insufficient material is marked for applicant confirmation rather than inventing technical features or legal provisions.
 - **OA 正常讨论流程的答复书入口**：分析完成后的“生成意见陈述书”改为在分析摘要下方固定可见，同时保留第五部分和讨论区后的入口；生成成功后可在第五部分直接导出 Word。
   OA response-letter entry in the normal discussion flow: “Generate Response Letter” is now sticky below the analysis summary while retaining the Section 5 and post-discussion entries; after generation, Word export is directly available in Section 5.
 - **OA 答复书流式正文与导出**：前端现兼容标准 SSE `data:` 事件格式并保留换行，避免完整 AI 答复在浏览器中被丢弃而显示空白或无法导出；生成结果过短时会阻止空白导出并提示用户。OA 讨论 v17 迁移同时改为幂等执行，重复初始化数据库不再因 `oa_text` 列重复而失败。
