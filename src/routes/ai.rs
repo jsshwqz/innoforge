@@ -293,9 +293,9 @@ pub async fn api_ai_chat_stream(
                 yield Ok(Event::default().event("error").data(chunk));
                 break;
             }
-            // SSE safety: sanitize \n/\r to prevent protocol breakage
-            let sanitized = chunk.replace(['\n', '\r'], " ");
-            yield Ok(Event::default().data(sanitized));
+            // Keep paragraph boundaries while preserving a single SSE data line.
+            let escaped = chunk.replace('\r', "").replace('\n', "\\n");
+            yield Ok(Event::default().data(escaped));
         }
         yield Ok(Event::default().event("done").data("[DONE]"));
     };
@@ -1310,6 +1310,7 @@ pub async fn api_ai_office_action_response_stream(
         .filter(|&v| v == "abnormal" || v == "reject_review" || v == "first_exam")
         .unwrap_or("first_exam")
         .to_string();
+
     let depth = req
         .get("depth")
         .and_then(|v| v.as_str())
@@ -1377,17 +1378,17 @@ pub async fn api_ai_oa_generate_response_letter(
         }))
     }
 
-    let analysis_text = req
+    let mut analysis_text = req
         .get("analysis")
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
-    let discussion = req
+    let mut discussion = req
         .get("discussion")
         .and_then(|v| v.as_str())
         .unwrap_or("[]")
         .to_string();
-    let office_action = req
+    let mut office_action = req
         .get("office_action")
         .and_then(|v| v.as_str())
         .unwrap_or("")
@@ -1399,19 +1400,62 @@ pub async fn api_ai_oa_generate_response_letter(
         .unwrap_or("first_exam")
         .to_string();
 
-    if analysis_text.trim().len() < 50 {
-        return Sse::new(error_sse(
-            "[ERROR] 缺少分析结果，请先完成分析后再生成答复书".into(),
-        ));
+    let discussion_id = req
+        .get("discussion_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if !discussion_id.is_empty() {
+        match s.db.get_oa_discussion(discussion_id) {
+            Ok(Some(saved)) => {
+                if analysis_text.trim().is_empty() {
+                    if let Some(snapshot) = saved.analysis_snapshot {
+                        if !snapshot.trim().is_empty() {
+                            analysis_text = snapshot;
+                        }
+                    }
+                }
+                if discussion.trim().is_empty() || discussion == "[]" {
+                    discussion = saved.discussion_history;
+                }
+                if office_action.trim().is_empty() {
+                    office_action = saved.oa_text;
+                }
+            }
+            Ok(None) => tracing::warn!(
+                discussion_id,
+                "OA discussion was not found while generating response letter"
+            ),
+            Err(error) => {
+                tracing::warn!(%error, discussion_id, "Failed to restore OA discussion while generating response letter")
+            }
+        }
     }
+
+    // 无分析结果时，用 OA 文本 + 讨论历史作为上下文（支持导入后直接生成）
+    let is_import_flow = analysis_text.trim().is_empty();
+    let final_analysis = if analysis_text.trim().len() >= 50 {
+        analysis_text
+    } else if !office_action.is_empty() {
+        // 降级：用 OA 文本作为伪分析上下文，AI 仍可基于 OA + 讨论生成答复书
+        format!("[从审查意见通知书提取]\n{}", office_action)
+    } else {
+        return Sse::new(error_sse(
+            "[ERROR] 缺少分析结果和 OA 文本，请先上传 OA 或完成分析后再生成答复书".into(),
+        ));
+    };
 
     let ai = s
         .config
         .read()
         .unwrap_or_else(|e| e.into_inner())
-        .ai_client_expert();
-    let mut rx =
-        ai.generate_response_letter_stream(&analysis_text, &discussion, &office_action, &oa_type);
+        .ai_client();
+    let mut rx = ai.generate_response_letter_stream(
+        &final_analysis,
+        &discussion,
+        &office_action,
+        &oa_type,
+        is_import_flow,
+    );
 
     let stream = async_stream::stream! {
         while let Some(chunk) = rx.recv().await {
@@ -1419,9 +1463,9 @@ pub async fn api_ai_oa_generate_response_letter(
                 yield Ok(Event::default().event("error").data(chunk));
                 return;
             }
-            // SSE safety: sanitize \n/\r to prevent protocol breakage
-            let sanitized = chunk.replace(['\n', '\r'], " ");
-            yield Ok(Event::default().data(sanitized));
+            // Keep paragraph boundaries while preserving a single SSE data line.
+            let escaped = chunk.replace('\r', "").replace('\n', "\\n");
+            yield Ok(Event::default().data(escaped));
         }
         yield Ok(Event::default().event("done").data("[DONE]"));
     };
@@ -1474,6 +1518,12 @@ pub async fn api_ai_oa_discuss(
         .to_string();
     let oa_type = req
         .get("oa_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let oa_text = req
+        .get("oa_text")
+        .or_else(|| req.get("office_action"))
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
@@ -1729,6 +1779,7 @@ pub async fn api_ai_oa_discuss(
             applicant_name: if applicant_name.is_empty() { None } else { Some(applicant_name.clone()) },
             oa_type: if oa_type.is_empty() { None } else { Some(oa_type.clone()) },
             analysis_snapshot: if analysis_text.is_empty() { None } else { Some(analysis_text.clone()) },
+            oa_text: oa_text.clone(),
             discussion_history: history_json, // 完整 JSON 历史，不再只是 AI 回复
             created_at: now.clone(),
             updated_at: now,
@@ -1800,6 +1851,8 @@ pub async fn api_oa_discussion_import(
         None => return Json(json!({"status": "error", "message": "patent_number 字段缺失"})),
     };
 
+    let oa_text = req["oa_text"].as_str().unwrap_or("").to_string();
+
     let messages = match req["messages"].as_array() {
         Some(arr) => arr
             .iter()
@@ -1829,6 +1882,7 @@ pub async fn api_oa_discussion_import(
         oa_type: None,
         applicant_name: None,
         analysis_snapshot: None,
+        oa_text,
         discussion_history: history_json,
         created_at: now.clone(),
         updated_at: now,
@@ -1837,6 +1891,7 @@ pub async fn api_oa_discussion_import(
     match s.db.save_oa_discussion(&discussion) {
         Ok(_) => Json(json!({
             "status": "ok",
+            "ok": true,
             "discussion_id": discussion_id,
             "message": "导入成功 / Import successful"
         })),

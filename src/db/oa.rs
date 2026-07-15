@@ -27,6 +27,7 @@ pub struct OaDiscussion {
     pub oa_type: Option<String>,
     pub applicant_name: Option<String>,
     pub analysis_snapshot: Option<String>,
+    pub oa_text: String,
     pub discussion_history: String,
     pub created_at: String,
     pub updated_at: String,
@@ -156,10 +157,11 @@ impl super::Database {
 
         if exists {
             c.execute(
-                "UPDATE oa_discussions SET discussion_history = ?2, updated_at = ?3 \
+                "UPDATE oa_discussions SET oa_text = ?2, discussion_history = ?3, updated_at = ?4 \
                  WHERE id = ?1",
                 params![
                     discussion.id,
+                    discussion.oa_text,
                     discussion.discussion_history,
                     discussion.updated_at
                 ],
@@ -167,15 +169,16 @@ impl super::Database {
         } else {
             c.execute(
                 "INSERT INTO oa_discussions \
-                 (id, patent_number, applicant_name, oa_type, analysis_snapshot, \
+                 (id, patent_number, applicant_name, oa_type, analysis_snapshot, oa_text, \
                   discussion_history, created_at, updated_at) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 params![
                     discussion.id,
                     discussion.patent_number,
                     discussion.applicant_name,
                     discussion.oa_type,
                     discussion.analysis_snapshot,
+                    discussion.oa_text,
                     discussion.discussion_history,
                     discussion.created_at,
                     discussion.updated_at,
@@ -189,7 +192,7 @@ impl super::Database {
     pub fn get_oa_discussion(&self, discussion_id: &str) -> Result<Option<OaDiscussion>> {
         let c = self.conn();
         let mut stmt = c.prepare(
-            "SELECT id, patent_number, applicant_name, oa_type, analysis_snapshot, \
+            "SELECT id, patent_number, applicant_name, oa_type, analysis_snapshot, oa_text, \
              discussion_history, created_at, updated_at \
              FROM oa_discussions WHERE id = ?1",
         )?;
@@ -200,9 +203,10 @@ impl super::Database {
                 applicant_name: r.get(2)?,
                 oa_type: r.get(3)?,
                 analysis_snapshot: r.get(4)?,
-                discussion_history: r.get(5)?,
-                created_at: r.get(6)?,
-                updated_at: r.get(7)?,
+                oa_text: r.get(5)?,
+                discussion_history: r.get(6)?,
+                created_at: r.get(7)?,
+                updated_at: r.get(8)?,
             })
         })?;
         Ok(rows.next().transpose()?)
@@ -212,7 +216,7 @@ impl super::Database {
     pub fn list_oa_discussions(&self, patent_number: &str) -> Result<Vec<OaDiscussion>> {
         let c = self.conn();
         let mut stmt = c.prepare(
-            "SELECT id, patent_number, applicant_name, oa_type, analysis_snapshot, \
+            "SELECT id, patent_number, applicant_name, oa_type, analysis_snapshot, oa_text, \
              discussion_history, created_at, updated_at \
              FROM oa_discussions WHERE patent_number = ?1 ORDER BY updated_at DESC",
         )?;
@@ -223,9 +227,10 @@ impl super::Database {
                 applicant_name: r.get(2)?,
                 oa_type: r.get(3)?,
                 analysis_snapshot: r.get(4)?,
-                discussion_history: r.get(5)?,
-                created_at: r.get(6)?,
-                updated_at: r.get(7)?,
+                oa_text: r.get(5)?,
+                discussion_history: r.get(6)?,
+                created_at: r.get(7)?,
+                updated_at: r.get(8)?,
             })
         })?;
         let mut discussions = Vec::new();

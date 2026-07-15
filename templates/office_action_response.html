@@ -413,6 +413,15 @@
                 if (parts.length > 0) return parts[0].trim();
             }
         } catch (e) {}
+        // 从 OA 文件标题中提取专利号（格式："王青芝 2022104773249 二审.pdf"）
+        if (typeof uploadedData !== 'undefined' && uploadedData['oa']) {
+            var oaTitle = uploadedData['oa'].title || '';
+            var numMatch = oaTitle.match(/\b\d{10,}\b/);
+            if (numMatch) return numMatch[0];
+        }
+        // 从本申请输入框读取
+        var myInput = document.getElementById('my-patent');
+        if (myInput && myInput.value.trim().length > 3) return myInput.value.trim();
         return '';
     }
 
@@ -759,13 +768,13 @@
 
     // ── get input data ──
     function getMyPatent() {
-        if (_uploadedData['my']) return _uploadedData['my'];
+        if (uploadedData['my']) return uploadedData['my'];
         var val = document.getElementById('my-patent').value.trim();
         return val || null;
     }
 
     function getOA() {
-        if (_uploadedData['oa']) return _uploadedData['oa'];
+        if (uploadedData['oa']) return uploadedData['oa'];
         var val = document.getElementById('oa-input').value.trim();
         return val || null;
     }
@@ -776,8 +785,8 @@
         var rows = document.querySelectorAll('.ref-row');
         for (var i = 0; i < rows.length; i++) {
             var idx = rows[i].getAttribute('data-idx');
-            if (_uploadedData['ref_' + idx]) {
-                refs.push(_uploadedData['ref_' + idx]);
+            if (uploadedData['ref_' + idx]) {
+                refs.push(uploadedData['ref_' + idx]);
             } else {
                 var val = inputs[i] ? inputs[i].value.trim() : '';
                 if (val) refs.push(val);
@@ -999,8 +1008,8 @@
                     var line = lines[i];
                     if (line.startsWith('event: ')) {
                         currentEvent = line.slice(7).trim();
-                    } else if (line.startsWith('data: ')) {
-                        var data = line.slice(6);
+                    } else if (line.startsWith('data:')) {
+                        var data = line.slice(5).replace(/^ /, '');
                         if (currentEvent === 'error' || data.startsWith('[ERROR]')) {
                             showError(data.replace('[ERROR] ', ''));
                             errored = true;
@@ -1055,7 +1064,8 @@
                 var data2 = await resp2.json();
                 if (data2.error) { showError(data2.error); return; }
                 lastAnalysisRawText = data2.analysis || '';
-                showOAAnalysisSections(data2.analysis);
+                // 统一走 Discuss 模式：显示分析结果 + 讨论区 + 生成按钮（不再无按钮）
+                showOAAnalysisDiscuss(data2.analysis);
 
                 numberRefParagraphs();
                 extractMappingMatrix(data2.analysis);
@@ -1313,7 +1323,8 @@
                 analysis: lastAnalysisRawText,
                 discussion: JSON.stringify(oaDiscussMessages.slice(0, -1)),
                 message: msg,
-                office_action: oaDiscussOAText
+                office_action: oaDiscussOAText,
+                oa_text: oaDiscussOAText
             };
             // 传入 OA 类型增强上下文
             if (oaDiscussOAType) payload.oa_type = oaDiscussOAType;
@@ -1358,8 +1369,8 @@
                     var line = lines[i];
                     if (line.startsWith('event: ')) {
                         currentEvent = line.slice(7).trim();
-                    } else if (line.startsWith('data: ')) {
-                        var data = line.slice(6);
+                    } else if (line.startsWith('data:')) {
+                        var data = line.slice(5).replace(/^ /, '');
                         if (currentEvent === 'error' || data.startsWith('[ERROR]')) {
                             aiText = '⚠️ ' + data.replace('[ERROR] ', '');
                             done = true;
@@ -1429,8 +1440,17 @@
         if (btn) { btn.disabled = true; btn.textContent = '⏳ ' + (t('oar.generating') || '生成中...'); }
 
         var section5Area = document.getElementById('section5-content');
+        var overlayDiv = null;
         if (section5Area) {
             section5Area.innerHTML = '<div style="color:#8b949e;padding:16px;font-family:Consolas,monospace;font-size:13px;white-space:pre-wrap;" id="section5-stream"></div>';
+        } else {
+            overlayDiv = document.createElement('div');
+            overlayDiv.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);z-index:10000;display:flex;align-items:center;justify-content:center;padding:40px;overflow:auto;';
+            overlayDiv.innerHTML = '<div style="background:#161b22;border:1px solid #30363d;border-radius:12px;padding:24px;max-width:900px;width:100%;max-height:90vh;overflow-y:auto;">'
+                + '<h3 style="margin:0 0 16px 0;color:#58a6ff;">📝 生成中...</h3>'
+                + '<div id="overlay-stream" style="color:#c9d1d9;font-family:Consolas,monospace;font-size:14px;white-space:pre-wrap;line-height:1.7;"></div>'
+                + '</div>';
+            document.body.appendChild(overlayDiv);
         }
 
         try {
@@ -1454,7 +1474,7 @@
             var buffer = '';
             var fullText = '';
             var done = false;
-            var streamDiv = document.getElementById('section5-stream');
+            var streamDiv = document.getElementById('section5-stream') || document.getElementById('overlay-stream');
 
             while (true) {
                 var { done: sd, value } = await reader.read();
@@ -1464,22 +1484,38 @@
                 buffer = lines.pop();
                 for (var i = 0; i < lines.length; i++) {
                     var line = lines[i];
-                    if (line.startsWith('data: ')) {
-                        var data = line.slice(6);
+                    if (line.startsWith('data:')) {
+                        var data = line.slice(5).replace(/^ /, '');
                         if (data.startsWith('[ERROR]')) {
                             if (section5Area) section5Area.innerHTML = '<div style="color:#f85149;padding:16px;">' + escapeHtml(data) + '</div>';
+                            if (overlayDiv) { overlayDiv.querySelector('h3').textContent = '❌ 生成失败'; overlayDiv.querySelector('#overlay-stream').textContent = data; }
                             if (btn) { btn.disabled = false; btn.textContent = '📝 ' + (t('oar.btnGenerateResponse') || '生成意见陈述书'); }
                             return;
                         }
                         if (data === '[DONE]') { done = true; break; }
-                        fullText += data;
+                        fullText += data.replace(/\\n/g, '\n');
                         if (streamDiv) {
                             streamDiv.textContent = fullText;
-                            streamDiv.parentElement.scrollTop = streamDiv.parentElement.scrollHeight;
+                            if (overlayDiv) { overlayDiv.scrollTop = overlayDiv.scrollHeight; }
                         }
                     }
                 }
                 if (done) break;
+            }
+
+            // A response made only of Markdown or decorative characters becomes
+            // blank after DOCX cleanup. Keep it out of the export path and tell
+            // the user to correct the OCR source instead of exporting a blank file.
+            var meaningfulChars = (fullText.match(/[\u3400-\u9fffa-zA-Z0-9]/g) || []).length;
+            if (meaningfulChars < 80) {
+                var qualityError = t('oar.generationQualityError') || '未生成可用的答复书正文。请检查 OA 原文是否可读，必要时粘贴或修正 OA 全文后重试。';
+                if (section5Area) section5Area.innerHTML = '<div style="color:#f85149;padding:16px;">' + escapeHtml(qualityError) + '</div>';
+                if (overlayDiv) {
+                    overlayDiv.querySelector('h3').textContent = '生成内容不可用';
+                    overlayDiv.querySelector('#overlay-stream').textContent = qualityError;
+                }
+                if (btn) { btn.disabled = false; btn.textContent = '📝 ' + (t('oar.btnGenerateResponse') || '生成意见陈述书'); }
+                return;
             }
 
             // Update section 5 area with rendered markdown
@@ -1488,6 +1524,19 @@
                 // Add export button
                 section5Area.innerHTML += '<div style="padding:8px 14px;border-top:1px solid #30363d;text-align:right;">' +
                     '<button onclick="exportGeneratedResponse()" style="background:#f0883e;color:#fff;border:none;border-radius:4px;padding:4px 12px;cursor:pointer;font-size:12px;">📥 ' + (t('oar.exportResponse') || '导出答复书') + '</button></div>';
+            } else if (overlayDiv) {
+                overlayDiv.querySelector('h3').textContent = '✅ 答复书已生成';
+                var contentDiv = overlayDiv.querySelector('#overlay-stream');
+                contentDiv.innerHTML = renderMarkdown(fullText);
+                contentDiv.style.whiteSpace = 'normal';
+                contentDiv.style.fontFamily = 'system-ui, sans-serif';
+                contentDiv.style.fontSize = '14px';
+                contentDiv.style.lineHeight = '1.8';
+                var exportBtn = document.createElement('button');
+                exportBtn.textContent = '📥 导出答复书';
+                exportBtn.style.cssText = 'margin-top:20px;padding:10px 24px;background:#f0883e;color:#fff;border:none;border-radius:8px;font-size:14px;cursor:pointer;';
+                exportBtn.onclick = function() { exportGeneratedResponse(); };
+                overlayDiv.appendChild(exportBtn);
             }
 
             // Update section 5 border to solid
@@ -1500,6 +1549,7 @@
             if (btn) { btn.disabled = true; btn.textContent = '✅ ' + (t('oar.generated') || '已生成'); }
         } catch (e) {
             if (section5Area) section5Area.innerHTML = '<div style="color:#f85149;padding:16px;">生成失败: ' + escapeHtml(e.message) + '</div>';
+            if (overlayDiv) { overlayDiv.querySelector('h3').textContent = '❌ 生成失败'; overlayDiv.querySelector('#overlay-stream').textContent = e.message; }
             if (btn) { btn.disabled = false; btn.textContent = '📝 ' + (t('oar.btnGenerateResponse') || '生成意见陈述书'); }
         }
     }
@@ -2513,9 +2563,9 @@
         }
         listEl.innerHTML = '<div style="padding:12px;color:#8b949e;text-align:center;">加载中...</div>';
         try {
-            var resp = await fetch('/api/ai/oas/' + encodeURIComponent(patentNum) + '/discussions');
+            var resp = await fetch('/api/oa/discussions/' + encodeURIComponent(patentNum));
             var data = await resp.json();
-            if (!resp.ok || !data.ok) {
+            if (!resp.ok || data.status !== 'ok') {
                 listEl.innerHTML = '<div style="padding:12px;color:#8b949e;text-align:center;">' + escapeHtml(data.error || '加载失败') + '</div>';
                 return;
             }
@@ -2570,14 +2620,20 @@
             return;
         }
         try {
-            var resp = await fetch('/api/ai/oas/' + encodeURIComponent(patentNum) + '/discussions/' + encodeURIComponent(discussionId));
+            var resp = await fetch('/api/oa/discussions/' + encodeURIComponent(patentNum) + '/' + encodeURIComponent(discussionId));
             var data = await resp.json();
-            if (!resp.ok || !data.ok) {
+            if (!resp.ok || data.status !== 'ok') {
                 alert('恢复讨论失败: ' + (data.error || '未知错误'));
                 return;
             }
             var d = data.discussion || {};
-            var msgs = d.messages || [];
+            // discussion_history 是 JSON 字符串，需要解析
+            var msgs = [];
+            try {
+                msgs = JSON.parse(d.discussion_history || '[]');
+            } catch (e) {
+                msgs = [];
+            }
             oaDiscussMessages = msgs;
             if (d.oa_text) oaDiscussOAText = d.oa_text;
             if (d.oa_type) oaDiscussOAType = d.oa_type;
@@ -2704,11 +2760,17 @@
         }
 
         try {
+            // 如果 oaDiscussOAText 为空（未走分析流程），从已上传的 OA 文件中提取
+            var oaTextForImport = oaDiscussOAText || '';
+            if (!oaTextForImport && typeof uploadedData !== 'undefined' && uploadedData['oa']) {
+                oaTextForImport = uploadedData['oa'].content || '';
+            }
             var resp = await fetch('/api/oa/discussions/import', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     patent_number: patentNum,
+                    oa_text: oaTextForImport,
                     messages: messages
                 })
             });
@@ -2717,11 +2779,110 @@
                 alert('导入失败: ' + (data.error || '未知错误'));
                 return;
             }
-            // 导入成功，自动恢复该讨论
+            // 导入成功，自动恢复该讨论（recoverOADiscussion 会解析 oa_text）
+            // 同时确保 oaDiscussOAText 被填充（后端返回的 oa_text 可能为空时从 OA 文件补）
+            if (!oaTextForImport) {
+                // 降级：从已上传的 OA 文件提取
+                if (typeof uploadedData !== 'undefined' && uploadedData['oa']) {
+                    oaDiscussOAText = uploadedData['oa'].content || '';
+                }
+            }
             recoverOADiscussion(data.discussion_id);
+            // 导入后直接渲染讨论区 + 生成按钮（不弹窗，用户可先讨论再生成）
+            setTimeout(function() {
+                renderImportDiscussionPanel();
+            }, 300);
         } catch (e) {
             alert('导入失败: ' + e.message);
         }
+    }
+
+    function showGenerateResponseDialog() {
+        var dialog = document.createElement('div');
+        dialog.id = 'oa-generate-dialog';
+        dialog.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
+        dialog.innerHTML = ''
+            + '<div style="background:#161b22;border:1px solid #30363d;border-radius:12px;padding:24px;max-width:400px;width:100%;text-align:center;">'
+            + '<h3 style="margin:0 0 16px 0;color:#c9d1d9;">✅ 讨论导入成功</h3>'
+            + '<p style="margin:0 0 20px 0;color:#8b949e;font-size:13px;line-height:1.6;">讨论内容已恢复，可立即生成答复书提交。</p>'
+            + '<button id="oa-gen-btn" style="padding:10px 24px;background:#238636;color:#fff;border:none;border-radius:8px;font-size:14px;cursor:pointer;" data-i18n="oar.btnGenerate">📝 生成答复书</button>'
+            + '</div>';
+        document.body.appendChild(dialog);
+        document.getElementById('oa-gen-btn').addEventListener('click', function() {
+            dialog.remove();
+            // 检查生成答复书所需上下文
+            if (!oaDiscussOAText || oaDiscussOAText.trim().length < 10) {
+                alert('⚠️ 请先在「审查意见通知书」框中粘贴 OA 全文，再生成答复书。');
+                return;
+            }
+            generateResponseLetter();
+        });
+    }
+
+    // ── 导入后渲染讨论面板（替代弹窗，允许用户先讨论再生成） ──
+    function renderImportDiscussionPanel() {
+        var container = document.getElementById('result');
+        if (!container) return;
+
+        // 渲染讨论消息
+        var html = '<div class="result-box" style="margin-top:8px;">';
+        html += '<div style="margin-bottom:12px;padding:8px 12px;background:#0d1117;border:1px solid #30363d;border-radius:6px;font-size:13px;color:#58a6ff;">';
+        html += '📋 ' + (t('oar.importSuccess') || '讨论已恢复') + ' — ' + (t('oar.importHint') || '可继续讨论完善论点，确认无误后点击下方按钮生成答复书');
+        html += '</div>';
+
+        // 讨论消息区
+        html += '<div style="border:1px solid #30363d;border-radius:8px;background:#0d1117;margin-bottom:16px;">';
+        html += '<div style="background:#1a2332;padding:8px 12px;border-bottom:1px solid #30363d;border-radius:8px 8px 0 0;">';
+        html += '<span style="color:#58a6ff;font-weight:600;font-size:14px;">💬 ' + (t('oar.discussTitle') || '讨论区') + '</span>';
+        html += '</div>';
+        html += '<div style="max-height:500px;overflow-y:auto;padding:16px;">';
+
+        if (oaDiscussMessages.length === 0) {
+            html += '<div style="color:#8b949e;font-size:13px;text-align:center;padding:24px;">暂无讨论内容，请继续添加</div>';
+        } else {
+            for (var i = 0; i < oaDiscussMessages.length; i++) {
+                var msg = oaDiscussMessages[i];
+                var isUser = msg.role === 'user';
+                var isAssistant = msg.role === 'assistant';
+                if (isUser) {
+                    html += '<div style="display:flex;justify-content:flex-end;margin-bottom:16px;">';
+                    html += '<div style="max-width:75%;background:#1f6feb;border-radius:8px;padding:10px 14px;font-size:13px;line-height:1.7;color:#c9d1d9;">';
+                    html += escapeHtml(msg.content || '');
+                    html += '</div></div>';
+                } else if (isAssistant) {
+                    html += '<div style="display:flex;justify-content:flex-start;margin-bottom:16px;">';
+                    html += '<div style="max-width:75%;background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:10px 14px;font-size:13px;line-height:1.7;color:#c9d1d9;">';
+                    html += renderMarkdown(msg.content || '');
+                    html += '</div></div>';
+                }
+            }
+        }
+        html += '</div></div>';
+
+        // 输入框
+        html += '<div style="border:1px solid #30363d;border-radius:8px;background:#0d1117;margin-bottom:16px;">';
+        html += '<div style="background:#1a2332;padding:8px 12px;border-bottom:1px solid #30363d;border-radius:8px 8px 0 0;">';
+        html += '<span style="color:#58a6ff;font-weight:600;font-size:14px;">✏️ ' + (t('oar.discussAdd') || '继续讨论') + '</span>';
+        html += '</div>';
+        html += '<div style="padding:8px 12px;display:flex;gap:8px;">';
+        html += '<textarea id="oa-discuss-input" rows="2" placeholder="输入讨论内容..." style="flex:1;background:#161b22;border:1px solid #30363d;border-radius:6px;padding:8px 12px;color:#c9d1d9;font-size:13px;resize:vertical;" onkeydown="if(event.key===\'Enter\'&&event.shiftKey){}else if(event.key===\'Enter\'){event.preventDefault();sendOADiscussion();}"></textarea>';
+        html += '<button onclick="sendOADiscussion()" style="background:#238636;color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-size:13px;white-space:nowrap;height:fit-content;margin-top:4px;">' + (t('oar.discussSend') || '发送') + '</button>';
+        html += '</div></div>';
+
+        // ── 生成答复书按钮 ──
+        html += '<div style="margin-top:8px;text-align:center;">';
+        html += '<button id="btn-generate-response" onclick="generateResponseLetter()" style="background:#f0883e;color:#fff;border:none;border-radius:8px;padding:14px 40px;cursor:pointer;font-size:16px;font-weight:600;box-shadow:0 2px 8px rgba(240,136,62,0.3);">';
+        html += '📝 ' + (t('oar.btnGenerateResponse') || '生成意见陈述书');
+        html += '</button>';
+        html += '<div style="color:#8b949e;font-size:12px;margin-top:8px;">' + (t('oar.generateHint') || '确认讨论无误后可生成正式答复书') + '</div>';
+        html += '</div>';
+
+        html += '</div>';
+        container.innerHTML = html;
+
+        // 聚焦输入框
+        var input = document.getElementById('oa-discuss-input');
+        if (input) input.focus();
     }
 
     // ── Apply i18n for dynamic text ──

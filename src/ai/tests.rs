@@ -51,7 +51,8 @@ mod oa_capacity_tests {
     async fn response_letter_stream_emits_visible_overflow_error() {
         let client = AiClient::with_config("http://127.0.0.1:1", "", "test");
         let analysis = "中".repeat(OA_RESPONSE_ANALYSIS_MAX_CHARS + 1);
-        let mut stream = client.generate_response_letter_stream(&analysis, "[]", "", "first_exam");
+        let mut stream =
+            client.generate_response_letter_stream(&analysis, "[]", "", "first_exam", false);
         let error = stream.recv().await.expect("overflow should emit an error");
         assert!(error.starts_with("[ERROR] OA_INPUT_TOO_LARGE"));
         assert!(error.contains("actual_chars=600001"));

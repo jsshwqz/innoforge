@@ -409,7 +409,8 @@ pub(crate) fn run(conn: &Connection, current_version: i32, target_version: i32) 
                 updated_at TEXT NOT NULL,
                 analysis_snapshot TEXT,
                 discussion_history TEXT,
-                oa_snippet TEXT
+                oa_snippet TEXT,
+                oa_text TEXT NOT NULL DEFAULT ''
             );
             CREATE INDEX IF NOT EXISTS idx_oa_discussions_patent ON oa_discussions(patent_number);
             CREATE INDEX IF NOT EXISTS idx_oa_discussions_created ON oa_discussions(created_at DESC);
@@ -419,6 +420,32 @@ pub(crate) fn run(conn: &Connection, current_version: i32, target_version: i32) 
         ",
         )?;
         tracing::info!("Database migrated to version 16 (oa_discussions)");
+    }
+
+    // v17: 为 oa_discussions 表增加 oa_text 字段（用于导入讨论后直接生成答复书）
+    if current_version < 17 {
+        let mut columns = conn.prepare("PRAGMA table_info(oa_discussions)")?;
+        let mut rows = columns.query([])?;
+        let mut has_oa_text = false;
+        while let Some(row) = rows.next()? {
+            let name: String = row.get(1)?;
+            if name == "oa_text" {
+                has_oa_text = true;
+                break;
+            }
+        }
+        if !has_oa_text {
+            conn.execute_batch(
+                "ALTER TABLE oa_discussions ADD COLUMN oa_text TEXT NOT NULL DEFAULT '';",
+            )?;
+        }
+        conn.execute_batch(
+            "
+            DELETE FROM schema_version;
+            INSERT INTO schema_version (version) VALUES (17);
+            ",
+        )?;
+        tracing::info!("Database migrated to version 17 (oa_text column)");
     }
 
     if current_version > 0 && current_version < target_version {
