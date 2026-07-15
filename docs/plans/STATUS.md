@@ -8,6 +8,13 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-07-16 — OA 普通分析路径答复书入口回归
+
+- **状态 / Status**: ✅ 已完成 / Completed
+- **提交 / Commit**: `69a82ea` (`fix: 恢复OA分析后的答复书入口`)
+- **修复 / Fix**: 普通分析接口成功时误调用旧的只读分析渲染函数，导致“生成意见陈述书”入口消失；现统一调用讨论视图渲染函数，分析完成后固定展示生成入口、第五部分入口和讨论区入口。
+- **验证 / Verification**: 浏览器 E2E 48/48 通过；`cargo fmt --all --check`、`cargo clippy --all-targets -- -D warnings` 与 `cargo test --lib`（136 项）通过。
+
 ### 2026-07-16 — OA 答复书专业论证与反幻觉约束
 
 - **状态 / Status**: ✅ 已完成 / Completed

@@ -25,6 +25,8 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
   AI prompt input boundaries: chat history now accepts only `user` and `assistant`, rejecting client-forged `system` or unknown roles. Patent records, web results, OA material, discussion records, and raw custom role preferences use non-escapable `<user_input>` data boundaries; raw custom roles no longer have system-instruction authority while server presets remain available
 
 ### 修复 / Fixed
+- **OA 分析后答复书入口回归**：普通分析接口成功时现在与流式分支统一进入讨论视图，分析完成后固定显示“生成意见陈述书”按钮；不再因接口路径不同而遗漏入口。
+  OA response-letter entry regression: successful regular analysis now enters the same discussion view as the streaming branch, keeping the “Generate Response Letter” button visible after analysis regardless of which API path returned.
 - **OA Word 正文空白**：修复 DOCX 主文档 XML 多余段落闭合标签导致 Word 修复后丢弃正文的问题，补充标准页面节属性，并增加正文保留回归测试。
   OA blank Word body: fixed an extra paragraph-closing tag that caused Word repair to discard the body, added standard section properties, and added a regression test that verifies response text remains in the DOCX document XML.
 - **OA 导入讨论、结果面板与 Word 导出**：导入讨论面板补回 AI 消息容器，AI 回复不再无声丢失；生成结果遮罩提供明确关闭按钮；Word 导出改为保留完整正文、显式传入触发按钮并延后释放下载文件，避免空白导出。
