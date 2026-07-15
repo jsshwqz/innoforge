@@ -56,7 +56,10 @@ pub fn generate_docx(params: &ExportParams) -> Result<Vec<u8>, String> {
       <w:r><w:t>申请人（签字）：_________________</w:r></w:p>
     <w:p>
       <w:r><w:t>日期：________年____月____日</w:r></w:p>
-    </w:p>
+    <w:sectPr>
+      <w:pgSz w:w="11906" w:h="16838"/>
+      <w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/>
+    </w:sectPr>
   </w:body>
 </w:document>"#,
         patent_number = sanitize_xml(&params.patent_number),
@@ -189,5 +192,31 @@ mod tests {
         assert!(!document_xml.contains("APPLICANT&<NAME>"));
         assert!(!document_xml.contains("OA&<TYPE>"));
         assert!(!document_xml.contains("正文&<RESPONSE>"));
+    }
+
+    #[test]
+    fn generated_docx_keeps_response_body_in_document_xml() {
+        let params = ExportParams {
+            response_text: "一、答复意见\n\n申请人认为，本申请具备创造性。".to_string(),
+            patent_number: "202610000001.0".to_string(),
+            applicant: "测试申请人".to_string(),
+            oa_type: "第一次审查意见通知书".to_string(),
+        };
+
+        let docx = generate_docx(&params).expect("DOCX should be generated");
+        let mut archive = ZipArchive::new(Cursor::new(docx)).expect("DOCX should be a valid ZIP");
+        let mut document = archive
+            .by_name("word/document.xml")
+            .expect("DOCX document XML should exist");
+        let mut document_xml = String::new();
+        document
+            .read_to_string(&mut document_xml)
+            .expect("DOCX document XML should be readable");
+
+        assert!(document_xml.contains("一、答复意见"));
+        assert!(document_xml.contains("本申请具备创造性。"));
+        assert!(document_xml.contains("<w:sectPr>"));
+        assert!(document_xml.contains("</w:sectPr>\n  </w:body>"));
+        assert!(!document_xml.contains("</w:p>\n    </w:p>\n  </w:body>"));
     }
 }

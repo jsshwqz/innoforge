@@ -8,6 +8,12 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-07-15 — OA Word 导出正文空白修复
+
+- **状态 / Status**: ✅ 已完成 / Completed
+- **修复 / Fix**: 修正 `word/document.xml` 多余的 `</w:p>`，补齐 `w:sectPr` 页面节属性，避免 Word 修复文档时丢弃正文。
+- **验证 / Verification**: DOCX 导出模块回归测试 2 项通过；`cargo fmt --check`、`cargo test --lib`（136 项）通过；完整构建通过。
+
 ### 2026-07-15 — OA 答复书流式生成与导出修复
 
 - **状态 / Status**: ✅ 已完成 / Completed

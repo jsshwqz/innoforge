@@ -23,6 +23,8 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
   AI prompt input boundaries: chat history now accepts only `user` and `assistant`, rejecting client-forged `system` or unknown roles. Patent records, web results, OA material, discussion records, and raw custom role preferences use non-escapable `<user_input>` data boundaries; raw custom roles no longer have system-instruction authority while server presets remain available
 
 ### 修复 / Fixed
+- **OA Word 正文空白**：修复 DOCX 主文档 XML 多余段落闭合标签导致 Word 修复后丢弃正文的问题，补充标准页面节属性，并增加正文保留回归测试。
+  OA blank Word body: fixed an extra paragraph-closing tag that caused Word repair to discard the body, added standard section properties, and added a regression test that verifies response text remains in the DOCX document XML.
 - **OA 导入讨论、结果面板与 Word 导出**：导入讨论面板补回 AI 消息容器，AI 回复不再无声丢失；生成结果遮罩提供明确关闭按钮；Word 导出改为保留完整正文、显式传入触发按钮并延后释放下载文件，避免空白导出。
   OA imported discussion, result panel, and Word export: the imported-discussion panel restores its AI-message container so replies are no longer silently lost; generated-result overlays have an explicit close button; Word export preserves the full body, receives its triggering button explicitly, and delays URL cleanup to avoid blank downloads.
 - **OA 权利要求修改建议**：生成意见陈述书时会附带逐项“修改前要点、建议修改文本、修改理由及依据”；材料不足时明确要求申请人确认，不编造技术特征或法条。
