@@ -43,19 +43,19 @@ pub fn generate_docx(params: &ExportParams) -> Result<Vec<u8>, String> {
   <w:body>
     <w:p>
       <w:pPr><w:pStyle w:val="Title"/></w:pPr>
-      <w:r><w:t>意见陈述书</w:r></w:p>
+      <w:r><w:t>意见陈述书</w:t></w:r></w:p>
     <w:p>
-      <w:r><w:t>申请号：{patent_number}</w:r></w:p>
+      <w:r><w:t>申请号：{patent_number}</w:t></w:r></w:p>
     <w:p>
-      <w:r><w:t>申请人：{applicant}</w:r></w:p>
+      <w:r><w:t>申请人：{applicant}</w:t></w:r></w:p>
     <w:p>
-      <w:r><w:t>OA类型：{oa_type}</w:r></w:p>
+      <w:r><w:t>OA类型：{oa_type}</w:t></w:r></w:p>
     <w:p/>
     {content}
     <w:p>
-      <w:r><w:t>申请人（签字）：_________________</w:r></w:p>
+      <w:r><w:t>申请人（签字）：_________________</w:t></w:r></w:p>
     <w:p>
-      <w:r><w:t>日期：________年____月____日</w:r></w:p>
+      <w:r><w:t>日期：________年____月____日</w:t></w:r></w:p>
     <w:sectPr>
       <w:pgSz w:w="11906" w:h="16838"/>
       <w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/>
@@ -218,5 +218,7 @@ mod tests {
         assert!(document_xml.contains("<w:sectPr>"));
         assert!(document_xml.contains("</w:sectPr>\n  </w:body>"));
         assert!(!document_xml.contains("</w:p>\n    </w:p>\n  </w:body>"));
+        assert_eq!(document_xml.matches("<w:t").count(), document_xml.matches("</w:t>").count());
+        assert_eq!(document_xml.matches("<w:r>").count(), document_xml.matches("</w:r>").count());
     }
 }
