@@ -8,6 +8,13 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-07-16 — OA 表格显示与 Word 原生表格导出
+
+- **状态 / Status**: ✅ 已完成 / Completed
+- **提交 / Commit**: `6bf1e46` (`fix: 完整显示OA表格并导出Word表格`)
+- **修复 / Fix**: OA 结果区的 Markdown 表格改为独立横向滚动容器，长单元格可换行且不被裁剪。DOCX 导出器会把规范的 Markdown 表格转换为带表头底纹、边框和自动换行的 Word 原生表格，保留长依据文本。
+- **验证 / Verification**: DOCX 原生表格专项测试通过；浏览器 E2E 48/48 通过；`cargo fmt --all --check`、`cargo clippy --all-targets -- -D warnings` 和 `cargo test`（137 + 139 + 6 + 37 项）通过。
+
 ### 2026-07-16 — OA 普通分析路径答复书入口回归
 
 - **状态 / Status**: ✅ 已完成 / Completed

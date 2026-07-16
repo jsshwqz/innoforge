@@ -25,6 +25,8 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
   AI prompt input boundaries: chat history now accepts only `user` and `assistant`, rejecting client-forged `system` or unknown roles. Patent records, web results, OA material, discussion records, and raw custom role preferences use non-escapable `<user_input>` data boundaries; raw custom roles no longer have system-instruction authority while server presets remain available
 
 ### 修复 / Fixed
+- **OA 表格完整显示与 Word 原生表格导出**：OA 分析/讨论结果中的长 Markdown 表格改为置于独立横向滚动区，单元格支持自动换行，不再被结果面板裁剪；导出 Word 时会识别规范的 Markdown 表头、分隔行和数据行，生成带表头底纹、自动换行的原生 Word 表格，而非竖线文本。
+  OA complete table display and native Word-table export: long Markdown tables in OA analysis/discussion results now use a dedicated horizontal scroll area with wrapping cells, preventing clipping. Word export recognizes standard Markdown headers, separators, and rows and creates a native Word table with shaded headers and wrapping cells instead of pipe-delimited text.
 - **OA 分析后答复书入口回归**：普通分析接口成功时现在与流式分支统一进入讨论视图，分析完成后固定显示“生成意见陈述书”按钮；不再因接口路径不同而遗漏入口。
   OA response-letter entry regression: successful regular analysis now enters the same discussion view as the streaming branch, keeping the “Generate Response Letter” button visible after analysis regardless of which API path returned.
 - **OA Word 正文空白**：修复 DOCX 主文档 XML 多余段落闭合标签导致 Word 修复后丢弃正文的问题，补充标准页面节属性，并增加正文保留回归测试。
