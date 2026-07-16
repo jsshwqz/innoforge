@@ -126,7 +126,36 @@ fn write_docx_file(
 /// 将文本转换为 docx 段落 XML
 fn format_paragraphs(text: &str) -> String {
     let mut paragraphs = Vec::new();
-    for line in text.lines() {
+    let lines: Vec<&str> = text.lines().collect();
+    let mut line_index = 0;
+
+    while line_index < lines.len() {
+        if line_index + 1 < lines.len() {
+            if let Some(header_cells) = markdown_table_cells(lines[line_index]) {
+                if is_markdown_table_separator(lines[line_index + 1], header_cells.len()) {
+                    let mut rows = Vec::new();
+                    let mut data_index = line_index + 2;
+                    while data_index < lines.len() {
+                        let Some(cells) = markdown_table_cells(lines[data_index]) else {
+                            break;
+                        };
+                        if cells.len() != header_cells.len() {
+                            break;
+                        }
+                        rows.push(cells);
+                        data_index += 1;
+                    }
+
+                    if !rows.is_empty() {
+                        paragraphs.push(format_markdown_table(&header_cells, &rows));
+                        line_index = data_index;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        let line = lines[line_index];
         let trimmed = line.trim();
         if trimmed.is_empty() {
             paragraphs.push("<w:p/>".to_string());
@@ -146,8 +175,65 @@ fn format_paragraphs(text: &str) -> String {
                 sanitize_xml(trimmed)
             ));
         }
+        line_index += 1;
     }
     paragraphs.join("\n    ")
+}
+
+fn markdown_table_cells(line: &str) -> Option<Vec<&str>> {
+    let trimmed = line.trim();
+    if !trimmed.starts_with('|') || !trimmed.ends_with('|') {
+        return None;
+    }
+
+    let cells: Vec<&str> = trimmed[1..trimmed.len() - 1]
+        .split('|')
+        .map(str::trim)
+        .collect();
+    (cells.len() >= 2).then_some(cells)
+}
+
+fn is_markdown_table_separator(line: &str, expected_columns: usize) -> bool {
+    let Some(cells) = markdown_table_cells(line) else {
+        return false;
+    };
+    cells.len() == expected_columns
+        && cells.iter().all(|cell| {
+            let marker = cell.trim_matches(':').trim();
+            marker.len() >= 3 && marker.chars().all(|character| character == '-')
+        })
+}
+
+fn format_markdown_table(header_cells: &[&str], rows: &[Vec<&str>]) -> String {
+    let column_width = 9000 / header_cells.len().max(1);
+    let mut table = String::from(
+        r#"<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/><w:tblLayout w:type="autofit"/><w:tblBorders><w:top w:val="single" w:sz="4" w:color="808080"/><w:left w:val="single" w:sz="4" w:color="808080"/><w:bottom w:val="single" w:sz="4" w:color="808080"/><w:right w:val="single" w:sz="4" w:color="808080"/><w:insideH w:val="single" w:sz="4" w:color="B0B0B0"/><w:insideV w:val="single" w:sz="4" w:color="B0B0B0"/></w:tblBorders></w:tblPr>"#,
+    );
+
+    table.push_str(&format_docx_table_row(header_cells, column_width, true));
+    for row in rows {
+        table.push_str(&format_docx_table_row(row, column_width, false));
+    }
+    table.push_str("</w:tbl>");
+    table
+}
+
+fn format_docx_table_row(cells: &[&str], column_width: usize, is_header: bool) -> String {
+    let mut row = String::from("<w:tr>");
+    for cell in cells {
+        let shading = if is_header {
+            r#"<w:shd w:val="clear" w:fill="D9EAF7"/>"#
+        } else {
+            ""
+        };
+        let bold = if is_header { "<w:b/>" } else { "" };
+        row.push_str(&format!(
+            r#"<w:tc><w:tcPr><w:tcW w:w="{column_width}" w:type="dxa"/>{shading}</w:tcPr><w:p><w:r><w:rPr>{bold}</w:rPr><w:t xml:space="preserve">{}</w:t></w:r></w:p></w:tc>"#,
+            sanitize_xml(cell)
+        ));
+    }
+    row.push_str("</w:tr>");
+    row
 }
 
 /// 转义 XML 特殊字符
@@ -228,5 +314,31 @@ mod tests {
             document_xml.matches("<w:r>").count(),
             document_xml.matches("</w:r>").count()
         );
+    }
+
+    #[test]
+    fn generated_docx_converts_markdown_table_to_native_word_table() {
+        let params = ExportParams {
+            response_text: "| 特征 | 原始申请文件依据 | 合规性 |\n| :--- | :--- | :--- |\n| 电动执行器为电缸 | 说明书第[0025]段：所述电缸的伸缩轴与阀芯连接。 | ✅ |\n| 智能模块控制电缸行程 | 说明书第[0028]段：使用智能算法控制电动执行器行程。 | ✅ |".to_string(),
+            patent_number: "202610000001.0".to_string(),
+            applicant: "测试申请人".to_string(),
+            oa_type: "第一次审查意见通知书".to_string(),
+        };
+
+        let docx = generate_docx(&params).expect("DOCX should be generated");
+        let mut archive = ZipArchive::new(Cursor::new(docx)).expect("DOCX should be a valid ZIP");
+        let mut document = archive
+            .by_name("word/document.xml")
+            .expect("DOCX document XML should exist");
+        let mut document_xml = String::new();
+        document
+            .read_to_string(&mut document_xml)
+            .expect("DOCX document XML should be readable");
+
+        assert!(document_xml.contains("<w:tbl>"));
+        assert!(document_xml.contains("<w:shd w:val=\"clear\" w:fill=\"D9EAF7\"/>"));
+        assert!(document_xml.contains("原始申请文件依据"));
+        assert!(document_xml.contains("说明书第[0028]段：使用智能算法控制电动执行器行程。"));
+        assert!(!document_xml.contains("| :--- | :--- | :--- |"));
     }
 }

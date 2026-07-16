@@ -31,9 +31,10 @@
 .btn-row { display:flex; gap:12px; margin-top:16px; flex-wrap:wrap; align-items:center; }
 .result-box { margin-top:20px; background:#161b22; border:1px solid #30363d; border-radius:8px; padding:20px; color:#c9d1d9; line-height:1.8; }
 .result-box h3, .result-box h2 { color:#58a6ff; }
-.result-box table { width:100%; border-collapse:collapse; margin:12px 0; font-size:14px; }
-.result-box th { background:#21262d; color:#c9d1d9; padding:8px 10px; border:1px solid #30363d; text-align:left; }
-.result-box td { padding:8px 10px; border:1px solid #30363d; vertical-align:top; }
+.result-box .oa-table-scroll { width:100%; overflow-x:auto; overscroll-behavior-x:contain; margin:12px 0; border:1px solid #30363d; border-radius:6px; }
+.result-box table { width:100%; min-width:680px; border-collapse:collapse; margin:0; font-size:14px; }
+.result-box th { background:#21262d; color:#c9d1d9; padding:8px 10px; border:1px solid #30363d; text-align:left; white-space:normal; overflow-wrap:anywhere; }
+.result-box td { padding:8px 10px; border:1px solid #30363d; vertical-align:top; white-space:normal; overflow-wrap:anywhere; word-break:break-word; }
 .result-box tr:nth-child(even) { background:#0d1117; }
 .result-box strong { color:#f0883e; }
 .result-box code { background:#21262d; padding:1px 5px; border-radius:3px; font-size:0.9em; }
@@ -872,7 +873,7 @@
         text = text.replace(/(?:^|\n)(\|.+\|)\n(\|[\s:|-]+\|)\n((?:\|.+\|\n?)+)/gm, function(_, header, sep, body) {
             var ths = header.split('|').filter(function(c) { return c.trim() !== ''; });
             var rows = body.trim().split('\n');
-            var html = '<table style="width:100%;border-collapse:collapse;margin:12px 0;font-size:14px;"><thead><tr>';
+            var html = '<div class="oa-table-scroll"><table><thead><tr>';
             for (var i = 0; i < ths.length; i++) html += '<th style="background:#21262d;color:#c9d1d9;padding:8px 10px;border:1px solid #30363d;">' + escapeHtml(ths[i].trim()) + '</th>';
             html += '</tr></thead><tbody>';
             for (var r = 0; r < rows.length; r++) {
@@ -881,7 +882,7 @@
                 for (var c = 0; c < cells.length; c++) html += '<td style="padding:8px 10px;border:1px solid #30363d;">' + escapeHtml(cells[c].trim()).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>') + '</td>';
                 html += '</tr>';
             }
-            html += '</tbody></table>';
+            html += '</tbody></table></div>';
             tableBlocks.push(html);
             return '\n\x00TB' + (tableBlocks.length - 1) + '\x00\n';
         });
@@ -893,7 +894,7 @@
             var dataLines = lines.filter(function(l) { return !/^\|[\s:|-]+\|$/.test(l.trim()); });
             if (dataLines.length < 2) return _; // after removing separators, need at least header + 1 row
             var ths = dataLines[0].split('|').filter(function(c) { return c.trim() !== ''; });
-            var html = '<table style="width:100%;border-collapse:collapse;margin:12px 0;font-size:14px;"><thead><tr>';
+            var html = '<div class="oa-table-scroll"><table><thead><tr>';
             for (var i = 0; i < ths.length; i++) html += '<th style="background:#21262d;color:#c9d1d9;padding:8px 10px;border:1px solid #30363d;">' + escapeHtml(ths[i].trim()) + '</th>';
             html += '</tr></thead><tbody>';
             for (var r = 1; r < dataLines.length; r++) {
@@ -902,7 +903,7 @@
                 for (var c = 0; c < cells.length; c++) html += '<td style="padding:8px 10px;border:1px solid #30363d;">' + escapeHtml(cells[c].trim()).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>') + '</td>';
                 html += '</tr>';
             }
-            html += '</tbody></table>';
+            html += '</tbody></table></div>';
             tableBlocks.push(html);
             return '\n\x00TB' + (tableBlocks.length - 1) + '\x00\n';
         });
