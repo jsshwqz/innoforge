@@ -25,6 +25,8 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
   AI prompt input boundaries: chat history now accepts only `user` and `assistant`, rejecting client-forged `system` or unknown roles. Patent records, web results, OA material, discussion records, and raw custom role preferences use non-escapable `<user_input>` data boundaries; raw custom roles no longer have system-instruction authority while server presets remain available
 
 ### 修复 / Fixed
+- **OA 讨论记录导出入口回归**：分析后动态讨论面板现在直接提供“导出完整讨论记录”按钮；完成一轮 AI 回复后自动显示。导出包含 OA 原文、已确认分析、每轮用户/AI 原文及时间，不再依赖旧讨论面板中隐藏的按钮。
+  OA discussion-record export entry regression: the post-analysis dynamic discussion panel now directly offers an “Export Full Discussion Record” button, appearing after the first AI reply. The export includes the OA source, confirmed analysis, every user/AI message, and timestamps without relying on buttons hidden in the legacy discussion panel.
 - **OA 表格完整显示与 Word 原生表格导出**：OA 分析/讨论结果中的长 Markdown 表格改为置于独立横向滚动区，单元格支持自动换行，不再被结果面板裁剪；导出 Word 时会识别规范的 Markdown 表头、分隔行和数据行，生成带表头底纹、自动换行的原生 Word 表格，而非竖线文本。
   OA complete table display and native Word-table export: long Markdown tables in OA analysis/discussion results now use a dedicated horizontal scroll area with wrapping cells, preventing clipping. Word export recognizes standard Markdown headers, separators, and rows and creates a native Word table with shaded headers and wrapping cells instead of pipe-delimited text.
 - **OA 分析后答复书入口回归**：普通分析接口成功时现在与流式分支统一进入讨论视图，分析完成后固定显示“生成意见陈述书”按钮；不再因接口路径不同而遗漏入口。

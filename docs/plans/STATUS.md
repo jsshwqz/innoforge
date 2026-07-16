@@ -8,6 +8,13 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-07-16 — OA 动态讨论面板完整记录导出入口
+
+- **状态 / Status**: ✅ 已完成 / Completed
+- **提交 / Commit**: `df23b92` (`fix: 恢复OA讨论记录导出入口`)
+- **修复 / Fix**: 分析后动态讨论面板缺少完整记录导出按钮，原有功能仅存在于被隐藏的旧面板。现将按钮直接置入动态讨论面板；完成一轮 AI 回复后可导出 OA 原文、已确认分析、全部讨论原文与时间戳。
+- **验证 / Verification**: `cargo fmt --all --check`、`cargo clippy --all-targets -- -D warnings` 与 `cargo test --lib`（137 项）通过；服务重启后执行浏览器下载内容验证。
+
 ### 2026-07-16 — OA 表格显示与 Word 原生表格导出
 
 - **状态 / Status**: ✅ 已完成 / Completed
