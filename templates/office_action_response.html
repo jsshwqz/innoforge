@@ -1178,6 +1178,7 @@
         var container = document.getElementById('result');
 
         // Init discussion state
+        lastAnalysisRawText = analysisText || lastAnalysisRawText;
         oaDiscussMessages = [];
         oaDiscussOAText = getOA() ? (getOA().content || getOA()) : '';
         oaDiscussOAType = document.querySelector('input[name="oa_type"]:checked').value;
