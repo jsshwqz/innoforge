@@ -1233,6 +1233,7 @@
         html += '<div style="background:#1a2332;padding:8px 12px;border-bottom:1px solid #30363d;border-radius:8px 8px 0 0;">';
         html += '<span style="color:#58a6ff;font-weight:600;font-size:14px;">💬 ' + (t('oar.discussTitle') || '讨论区') + '</span>';
         html += '<span style="color:#8b949e;font-size:12px;margin-left:8px;">' + (t('oar.discussDesc') || '对分析内容有疑问或修改意见？在此与 AI 讨论') + '</span>';
+        html += '<button id="oa-discuss-transcript-export" onclick="exportCurrentOADiscussionTranscript()" style="display:none;float:right;padding:4px 10px;background:#21262d;color:#c9d1d9;border:1px solid #6e7681;border-radius:5px;cursor:pointer;font-size:12px;">' + (t('oar.exportTranscript') || '📥 导出完整讨论记录') + '</button>';
         html += '</div>';
         html += '<div id="oa-discuss-messages" style="max-height:400px;overflow-y:auto;padding:12px;">';
         html += '<div style="color:#8b949e;font-size:13px;padding:8px;text-align:center;">🤖 ' + (t('oar.discussReady') || 'AI 分析已完成，请审阅。有任何疑问可以在此讨论。确认无误后点击下方按钮生成答复书。') + '</div>';
@@ -1268,6 +1269,7 @@
         html += '</div>'; // end result-box
 
         container.innerHTML = html;
+        updateCurrentOADiscussionExportButton();
         loadOADiscussionHistory();
         initDiscQuoteEvents(); // 重新绑定引用按钮到新的 #oa-discuss-messages
         clearLoading();
@@ -1297,7 +1299,7 @@
 
         // Add user message
         addDiscussionMessage('user', msg);
-        oaDiscussMessages.push({ role: 'user', content: msg });
+        oaDiscussMessages.push({ role: 'user', content: msg, timestamp: new Date().toISOString() });
         // 同步更新 discussionHistory（用于导出）
         if (typeof discussionHistory !== 'undefined') {
             discussionHistory.push(['user', msg, new Date().toISOString()]);
@@ -1408,12 +1410,13 @@
                 if (done) break;
             }
 
-            oaDiscussMessages.push({ role: 'assistant', content: aiText });
+            oaDiscussMessages.push({ role: 'assistant', content: aiText, timestamp: new Date().toISOString() });
             if (aiDiv) aiDiv.innerHTML = renderMarkdown(aiText);
             // 同步更新 discussionHistory（用于导出）
             if (typeof discussionHistory !== 'undefined') {
                 discussionHistory.push(['assistant', aiText, new Date().toISOString()]);
             }
+            updateCurrentOADiscussionExportButton();
             // 持久化完整讨论记录到 localStorage
             var history = {
                 discussion_id: capturedDiscId,
@@ -1428,6 +1431,68 @@
         }
         input.disabled = false;
         input.focus();
+    }
+
+    function updateCurrentOADiscussionExportButton() {
+        var button = document.getElementById('oa-discuss-transcript-export');
+        if (button) button.style.display = oaDiscussMessages.length >= 2 ? '' : 'none';
+    }
+
+    function exportCurrentOADiscussionTranscript() {
+        if (oaDiscussMessages.length < 2) {
+            alert(t('oar.exportFail') || '没有足够的讨论内容');
+            return;
+        }
+
+        var lines = [
+            '# ' + (t('oar.transcriptTitle') || 'OA 完整讨论记录'),
+            '',
+            '> ' + (t('oar.transcriptNotice') || '以下为原始讨论记录，未经 AI 二次改写。'),
+            '',
+            '## ' + (t('oar.transcriptContext') || '起始讨论上下文'),
+            '',
+            '### 审查意见通知书',
+            '',
+            '```text',
+            oaDiscussOAText || '【未提供】',
+            '```',
+            '',
+            '### 已确认分析结果',
+            '',
+            '```text',
+            lastAnalysisRawText || '【未提供】',
+            '```',
+            '',
+            '## ' + (t('oar.transcriptMessages') || '讨论消息'),
+            ''
+        ];
+
+        for (var i = 0; i < oaDiscussMessages.length; i++) {
+            var message = oaDiscussMessages[i];
+            var roleLabel = message.role === 'assistant'
+                ? (t('oar.transcriptRoleAssistant') || 'AI 助手')
+                : (t('oar.transcriptRoleUser') || '用户');
+            lines.push(
+                '### ' + roleLabel + '（第 ' + (i + 1) + ' 条）',
+                '',
+                '- ' + (t('oar.transcriptTime') || '时间') + ': ' + (message.timestamp || (t('oar.transcriptTimeUnknown') || '未记录')),
+                '',
+                '```text',
+                message.content || '',
+                '```',
+                ''
+            );
+        }
+
+        var blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' });
+        var url = URL.createObjectURL(blob);
+        var link = document.createElement('a');
+        link.href = url;
+        link.download = 'innoforge-oa-discussion-' + new Date().toISOString().replace(/[:.]/g, '-') + '.md';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
     }
 
     function addDiscussionMessage(role, content) {
