@@ -8,12 +8,14 @@
 
 ## 状态变更日志 (Status Change Log)
 
-### 2026-07-17 — v0.7.4 发布审计与准备
+### 2026-07-17 — v0.7.4 双平台发布完成
 
-- **状态 / Status**: ⏳ 执行中 / In progress
+- **状态 / Status**: ✅ 已完成 / Completed
 - **范围 / Scope**: 将 `feat/oa-fact-check` 中尚未进入 `main` 的 OA 事实核查、讨论持久化、完整记录导出、DOCX 修复、数据完整性和安全加固整理为 `v0.7.4`。
 - **版本决策 / Version decision**: 既有 `v0.7.3` 已在 GitHub/Gitee 发布且指向旧 `dev` 提交；本次主要是 OA 模块的连续修复和增强，没有形成新的产品阶段，按用户确认采用补丁版本 `0.7.4`，不移动旧标签。
-- **当前门禁 / Current gates**: Forge 记录、Rust 格式/Clippy/测试/正式构建、JS/ESLint、Puppeteer 48/48、核心流程 17/17 和真实 AI 深度门禁 4/4 已通过；双端 main/tag/Release 与五资产完整性仍待完成，核验前不得宣布发布。
+- **门禁 / Gates**: Forge 记录、Rust 格式/Clippy/测试/正式构建、JS/ESLint、Puppeteer 48/48、核心流程 17/17 和真实 AI 深度门禁 4/4 全部通过。
+- **发布 / Release**: 发布提交 `0ff7fc9` 与标签 `v0.7.4` 已同步 GitHub/Gitee；GitHub Actions `29546527695` 成功，两个 Release 均反查确认 Linux 双架构、macOS 双架构和 Windows x86_64 共 5 个附件。
+- **发布修复 / Release fix**: `528416d` 补齐 Gitee Release 的 `target_commitish`、附件 `release_id` 参数，并为缺失 `GITEE_TOKEN` 提供明确失败提示；Actions Secret 已配置。
 - **记录 / Records**: `docs/records/2026-07-17-v0.7.4-release-forge-worklog.md`；`docs/plans/2026-07-17-v0.7.4-release-plan.md`。
 
 ### 2026-07-16 — OA 动态讨论面板完整记录导出入口
