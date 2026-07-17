@@ -175,6 +175,15 @@ jobs:
     needs: release
     runs-on: ubuntu-latest
     steps:
+      - name: Require Gitee token
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        run: |
+          if [ -z "$GITEE_TOKEN" ]; then
+            echo "::error::Repository secret GITEE_TOKEN is required for Gitee release synchronization."
+            exit 1
+          fi
+
       - name: Download GitHub release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -195,7 +204,7 @@ jobs:
           release_id=$(echo "$response" | jq -r '.id')
           if [ -z "$release_id" ] || [ "$release_id" = "null" ]; then
             payload=$(jq -n --arg token "$GITEE_TOKEN" --arg tag "$TAG" \
-              '{access_token:$token,tag_name:$tag,name:$tag,body:"详细更新日志见 CHANGELOG.md",prerelease:false}')
+              '{access_token:$token,tag_name:$tag,target_commitish:$tag,name:$tag,body:"详细更新日志见 CHANGELOG.md",prerelease:false}')
             response=$(curl --fail-with-body -sS -X POST \
               "https://gitee.com/api/v5/repos/jsshwqz/innoforge/releases" \
               -H "Content-Type: application/json" \
@@ -212,5 +221,6 @@ jobs:
             curl --fail-with-body -sS -X POST \
               "https://gitee.com/api/v5/repos/jsshwqz/innoforge/releases/${release_id}/attach_files" \
               -F "access_token=${GITEE_TOKEN}" \
+              -F "release_id=${release_id}" \
               -F "file=@${file}"
           done
