@@ -641,7 +641,10 @@ pub async fn api_ai_compare(
          3. 技术方案的异同点\n\
          4. 创新点对比\n\
          5. 保护范围对比\n\
-         6. 是否存在侵权风险（初步判断）",
+         6. 是否存在侵权风险（初步判断）\n\
+         7. 至少列出5条有材料支撑的对比依据，每条以“依据N：”开头\n\
+         8. 至少列出3条可执行建议，每条以“建议N：”开头\n\
+         9. 最后使用“结论：”给出综合判断",
         info1, info2
     );
 
@@ -931,6 +934,21 @@ pub async fn api_ai_batch_summarize(
 /// Resolve "my patent" input: either patent ID/number from DB, or uploaded text object.
 /// Returns formatted patent info string.
 fn resolve_my_patent(db: &crate::db::Database, req: &serde_json::Value) -> Result<String, String> {
+    if let Some(obj) = req["my_patent"].as_object() {
+        let content = obj
+            .get("content")
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .trim();
+        if content.chars().count() >= 10 {
+            let title = obj
+                .get("title")
+                .and_then(|value| value.as_str())
+                .unwrap_or("我的专利");
+            return Ok(format!("标题：{}\n\n{}", title, content));
+        }
+    }
+
     // Treat as patent ID/number
     let my_id = req["my_patent_id"].as_str().unwrap_or("").trim();
     if my_id.is_empty() {

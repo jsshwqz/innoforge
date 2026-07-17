@@ -186,7 +186,7 @@ impl AiClient {
              - **证据**: 具体引用对比文件内容\n\
              - **反论**: 可能存在的相反观点或证据\n\
              - **下一步**: 建议的应对策略\n\
-             最后给出「综合答辩策略建议」。",
+             最后给出「综合答辩策略建议」，并单列至少3项“风险N：”及对应的缓解措施。",
             my_patent = safe_truncate(my_patent_info, 5000),
             references = safe_truncate(references_info, 5000),
         );
@@ -239,6 +239,11 @@ impl AiClient {
             }
             _ => Self::build_first_exam_prompt(my_patent, oa, refs, depth, discuss),
         };
+
+        let prompt = format!(
+            "{}\n\n## 风险与行动清单\n请在正文末尾单列至少3项风险和至少3项可执行建议，分别使用“风险N：”和“建议N：”标记，并确保每项均有前文材料依据。",
+            prompt
+        );
 
         // Deep mode: inject self-review + revision into a single prompt.
         // No extra API calls — the model critiques and revises internally.

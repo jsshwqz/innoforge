@@ -5,7 +5,7 @@ on:
     inputs:
       tag:
         description: 'Git tag to build (e.g. v0.6.0)'
-        required: false
+        required: true
         type: string
   push:
     tags:
@@ -14,14 +14,57 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
+  validate:
+    name: Validate release metadata
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+          fetch-depth: 0
+      - name: Validate tag, Cargo version, and changelog
+        shell: bash
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          version="${TAG#v}"
+          grep -Fqx "version = \"${version}\"" Cargo.toml
+          grep -Fq "## [${TAG}]" CHANGELOG.md
+          git rev-parse --verify "${TAG}^{commit}"
+
   build:
-    name: Build ${{ matrix.os }}
+    name: Build ${{ matrix.target }}
+    needs: validate
     runs-on: ${{ matrix.os }}
     strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
       fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            asset: innoforge-linux-x86_64.tar.gz
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            asset: innoforge-linux-aarch64.tar.gz
+            cross: true
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            asset: innoforge-windows-x86_64.zip
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            asset: innoforge-macos-x86_64.tar.gz
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            asset: innoforge-macos-aarch64.tar.gz
 
     steps:
       - uses: actions/checkout@v4
@@ -30,21 +73,49 @@ jobs:
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
       - name: Cache cargo dependencies
         uses: Swatinem/rust-cache@v2
 
-      - name: Build release
-        run: cargo build --release
+      - name: Install cross
+        if: matrix.cross == true
+        run: cargo install cross --version 0.2.5 --locked
+
+      - name: Build release (native)
+        if: matrix.cross != true
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Build release (cross)
+        if: matrix.cross == true
+        run: cross build --release --target ${{ matrix.target }}
+
+      - name: Package Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p pkg
+          cp "target/${{ matrix.target }}/release/innoforge" pkg/
+          cp README.md LICENSE pkg/ 2>/dev/null || true
+          tar czf "${{ matrix.asset }}" -C pkg .
+
+      - name: Package Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path pkg -Force | Out-Null
+          Copy-Item "target\${{ matrix.target }}\release\innoforge.exe" pkg\
+          if (Test-Path README.md) { Copy-Item README.md pkg\ }
+          if (Test-Path LICENSE) { Copy-Item LICENSE pkg\ }
+          Compress-Archive -Path pkg\* -DestinationPath "${{ matrix.asset }}" -Force
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: innoforge-${{ matrix.os }}
-          path: |
-            target/release/innoforge
-            target/release/innoforge.exe
-          if-no-files-found: warn
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}
+          if-no-files-found: error
 
   release:
     name: Create GitHub Release
@@ -66,36 +137,80 @@ jobs:
         run: find artifacts -type f | head -20
 
       - name: Generate release notes
-        id: release_notes
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
-          if [ -f CHANGELOG.md ]; then
-            # Extract the latest version section from CHANGELOG
-            awk '/^## /{if(++c==2) exit} c==1' CHANGELOG.md > release_notes.md
-          else
-            echo "Release $(echo ${{ github.ref_name }} | sed 's/^v//')" > release_notes.md
-          fi
+          awk -v tag="$TAG" '
+            index($0, "## [" tag "]") == 1 { found=1; print; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > release_notes.md
+          test -s release_notes.md
 
       - name: Create Release
         env:
           TAG: ${{ inputs.tag || github.ref_name }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Create release (may already exist — ignore 422)
-          gh release create "$TAG" \
-            --notes-file release_notes.md \
-            --latest 2>/dev/null || true
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --verify-tag \
+              --draft \
+              --notes-file release_notes.md \
+              --title "$TAG"
+          fi
 
-          # Find and upload all built binaries (rename to avoid Linux/macOS name conflict)
-          find artifacts -type f \( -name "innoforge" -o -name "innoforge.exe" \) | while read f; do
-            # Derive platform from parent directory name
-            dir=$(basename "$(dirname "$f")")
-            case "$dir" in
-              *ubuntu*)   dest="innoforge-linux-x86_64" ;;
-              *macos*)    dest="innoforge-macos-aarch64" ;;
-              *windows*)  dest="innoforge-windows-x86_64.exe" ;;
-              *)          dest="$(basename "$f")" ;;
-            esac
-            cp "$f" "/tmp/$dest"
-            echo "Uploading $dest..."
-            gh release upload "$TAG" "/tmp/$dest" --clobber 2>&1 || echo "FAILED: $dest"
+          find artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' \) | while read f; do
+            echo "Uploading $(basename "$f")..."
+            gh release upload "$TAG" "$f" --clobber
+          done
+
+          expected='innoforge-linux-aarch64.tar.gz innoforge-linux-x86_64.tar.gz innoforge-macos-aarch64.tar.gz innoforge-macos-x86_64.tar.gz innoforge-windows-x86_64.zip'
+          actual=$(gh release view "$TAG" --json assets --jq '.assets[].name' | sort | xargs)
+          test "$actual" = "$expected"
+          gh release edit "$TAG" --draft=false --latest
+
+  sync-gitee:
+    name: Sync Release to Gitee
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download GitHub release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          mkdir -p assets
+          gh release download "$TAG" --repo "${{ github.repository }}" --dir assets
+
+      - name: Create Gitee release and upload assets
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          test -n "$GITEE_TOKEN"
+          test -n "$(git ls-remote https://gitee.com/jsshwqz/innoforge.git "refs/tags/${TAG}")"
+          response=$(curl --fail-with-body -sS \
+            "https://gitee.com/api/v5/repos/jsshwqz/innoforge/releases/tags/${TAG}?access_token=${GITEE_TOKEN}" || true)
+          release_id=$(echo "$response" | jq -r '.id')
+          if [ -z "$release_id" ] || [ "$release_id" = "null" ]; then
+            payload=$(jq -n --arg token "$GITEE_TOKEN" --arg tag "$TAG" \
+              '{access_token:$token,tag_name:$tag,name:$tag,body:"详细更新日志见 CHANGELOG.md",prerelease:false}')
+            response=$(curl --fail-with-body -sS -X POST \
+              "https://gitee.com/api/v5/repos/jsshwqz/innoforge/releases" \
+              -H "Content-Type: application/json" \
+              -d "$payload")
+            release_id=$(echo "$response" | jq -r '.id')
+          fi
+          test -n "$release_id" && test "$release_id" != "null"
+          for file in assets/*; do
+            name=$(basename "$file")
+            if echo "$response" | jq -e --arg name "$name" '.attach_files[]? | select(.name == $name)' >/dev/null; then
+              echo "Skipping existing Gitee asset: $name"
+              continue
+            fi
+            curl --fail-with-body -sS -X POST \
+              "https://gitee.com/api/v5/repos/jsshwqz/innoforge/releases/${release_id}/attach_files" \
+              -F "access_token=${GITEE_TOKEN}" \
+              -F "file=@${file}"
           done

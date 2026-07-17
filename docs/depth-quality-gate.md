@@ -23,8 +23,8 @@
 
 ## 执行命令
 ```powershell
-python tools/depth_gate_test.py `
-  --worktree D:\test\innoforge-v053 `
+py -3 tools/depth_gate_test.py `
+  --worktree D:\test\patent-hub-backup `
   --bin innoforge `
   --out docs/depth-gate-runs/run-<timestamp>
 ```

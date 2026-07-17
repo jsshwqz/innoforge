@@ -1,6 +1,3 @@
-- **Google 认证状态原子持久化** — gcloud CLI、ADC 文件、OAuth 授权码交换及后台 Token 刷新统一通过 persist_google_auth_state() 在单个 SQLite 批量事务中持久化认证状态，事务提交成功后才更新运行时内存。OAuth 初次授权原子保存 access token、expiry、refresh token 与 oauth 认证模式；gcloud/ADC 模式切换会明确清除遗留的 OAuth refresh token 并写入 gcloud 模式；后台 Token 刷新仅替换 access token 和 expiry，不更改 refresh token 或认证模式。
-  Google authentication-state atomic persistence: gcloud CLI, ADC-file, OAuth authorization-code exchange, and background token refresh now persist authentication state in one SQLite batch transaction via persist_google_auth_state() before updating runtime memory. Initial OAuth atomically saves access token, expiry, refresh token, and oauth mode; gcloud/ADC mode switches clear a stale OAuth refresh token and write gcloud mode; background refresh replaces only access token and expiry, preserving refresh token and mode.
-
 # 更新日志 / Changelog
 
 所有重要变更都会记录在此文件中。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
@@ -9,6 +6,8 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 ---
 
 ## [Unreleased]
+
+## [v0.7.4] - 2026-07-17
 
 ### 新增 / Added
 - **OA 答复书专业论证约束** — 答复书生成现实际启用中国专利代理师级系统指令，逐项按“审查意见概述—申请人答复—证据出处—论证结论”组织；创造性论述须明确区别特征、技术效果、技术问题和缺少结合动机。讨论记录只作为待核对证据，材料不足时标注待申请人/代理人确认，禁止编造技术特征、对比文件记载、页段号或法条。
@@ -25,6 +24,12 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
   AI prompt input boundaries: chat history now accepts only `user` and `assistant`, rejecting client-forged `system` or unknown roles. Patent records, web results, OA material, discussion records, and raw custom role preferences use non-escapable `<user_input>` data boundaries; raw custom roles no longer have system-instruction authority while server presets remain available
 
 ### 修复 / Fixed
+- **发布门禁与五平台资产** — Release workflow 恢复 Linux x86_64/ARM64、macOS x86_64/ARM64、Windows x86_64 五目标打包，校验标签、Cargo 版本与 CHANGELOG 一致性，按标签精确生成发布说明，并在五项资产齐全后公开 GitHub Release；Gitee 同步支持已有 Release 复用。深度门禁同步修复 HTTP 状态遗漏、旧工作树路径、超时过短和过宽失败词判断。
+  Release gates and five-platform assets: the workflow restores Linux x86_64/ARM64, macOS x86_64/ARM64, and Windows x86_64 packages; validates tag/Cargo/changelog consistency; extracts notes for the exact tag; and publishes the GitHub Release only after all five assets exist. Gitee synchronization reuses an existing release. The depth gate now includes HTTP status, uses the current worktree, allows production timeout tiers, and avoids overly broad failure tokens.
+- **创造性分析上传文本兼容** — `/api/ai/inventiveness-analysis` 现在与接口约定一致，可直接接收上传文本形式的“我的专利”，不再错误地只接受本地数据库专利 ID；专利对比、创造性分析和 OA 答复输出补充可核验的依据、风险、建议与结论要求。
+  Inventiveness uploaded-text compatibility: `/api/ai/inventiveness-analysis` now accepts uploaded subject-patent text as documented instead of incorrectly requiring a local database ID. Compare, inventiveness, and OA outputs also require auditable evidence, risks, recommendations, and conclusions.
+- **Google 认证状态原子持久化** — gcloud CLI、ADC 文件、OAuth 授权码交换及后台 Token 刷新统一通过 `persist_google_auth_state()` 在单个 SQLite 批量事务中持久化认证状态，事务提交成功后才更新运行时内存。OAuth 初次授权原子保存 access token、expiry、refresh token 与 oauth 认证模式；gcloud/ADC 模式切换会明确清除遗留的 OAuth refresh token 并写入 gcloud 模式；后台 Token 刷新仅替换 access token 和 expiry，不更改 refresh token 或认证模式。
+  Google authentication-state atomic persistence: gcloud CLI, ADC-file, OAuth authorization-code exchange, and background token refresh now persist authentication state in one SQLite batch transaction via `persist_google_auth_state()` before updating runtime memory. Initial OAuth atomically saves access token, expiry, refresh token, and oauth mode; gcloud/ADC mode switches clear a stale OAuth refresh token and write gcloud mode; background refresh replaces only access token and expiry, preserving refresh token and mode.
 - **OA 讨论记录导出入口回归**：分析后动态讨论面板现在直接提供“导出完整讨论记录”按钮；完成一轮 AI 回复后自动显示。导出包含 OA 原文、已确认分析、每轮用户/AI 原文及时间，不再依赖旧讨论面板中隐藏的按钮。
   OA discussion-record export entry regression: the post-analysis dynamic discussion panel now directly offers an “Export Full Discussion Record” button, appearing after the first AI reply. The export includes the OA source, confirmed analysis, every user/AI message, and timestamps without relying on buttons hidden in the legacy discussion panel.
 - **OA 表格完整显示与 Word 原生表格导出**：OA 分析/讨论结果中的长 Markdown 表格改为置于独立横向滚动区，单元格支持自动换行，不再被结果面板裁剪；导出 Word 时会识别规范的 Markdown 表头、分隔行和数据行，生成带表头底纹、自动换行的原生 Word 表格，而非竖线文本。

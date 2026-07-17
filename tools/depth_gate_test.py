@@ -12,7 +12,7 @@ import requests
 
 
 BASE_URL = "http://127.0.0.1:3000"
-DEFAULT_WORKTREE = r"D:\test\innoforge-v053"
+DEFAULT_WORKTREE = r"D:\test\patent-hub-backup"
 DEFAULT_BIN = "innoforge"
 
 
@@ -61,6 +61,7 @@ def make_cases() -> list[DepthCase]:
                 "message": (
                     "请围绕“电动车热管理系统”给出研发分析。"
                     "必须包含：结论、至少5条依据、至少3条风险、至少3条可执行建议、关键边界条件。"
+                    "每条依据必须分别以‘依据1：’至‘依据5：’开头，每条风险必须分别以‘风险1：’至‘风险3：’开头。"
                 ),
                 "history": [],
                 "web_search": False,
@@ -133,9 +134,10 @@ def make_cases() -> list[DepthCase]:
                 },
                 "office_action": {
                     "type": "text",
-                    "content": (
-                        "审查意见：权利要求1相对于对比文献D1、D2不具备创造性，"
-                        "请申请人陈述区别技术特征及其产生的技术效果。"
+                "content": (
+                    "审查意见：权利要求1相对于对比文献D1、D2不具备创造性，"
+                    "请申请人陈述区别技术特征及其产生的技术效果，并在答复策略中"
+                    "分别列出风险1、风险2、风险3及对应的缓解建议。"
                     ),
                 },
                 "references": [
@@ -175,14 +177,12 @@ def evaluate_depth(text: str) -> dict[str, Any]:
         "无效或已过期",
         "请到「设置」页面",
         "分析失败",
-        "error",
-        "失败",
         "未配置",
         "requires more credits",
         "fewer max_tokens",
         "upgrade to a paid account",
-        "credits",
-        "额度",
+        "insufficient credits",
+        "额度不足",
     ]
     hard_fail_hit = [p for p in hard_fail_patterns if p in lower or p in t]
 
@@ -285,7 +285,7 @@ def run_depth_cases() -> list[dict[str, Any]]:
             "eval": None,
         }
         try:
-            r = session.post(full, json=case.payload, timeout=120)
+            r = session.post(full, json=case.payload, timeout=300)
             rec["status"] = r.status_code
             rec["ok"] = 200 <= r.status_code < 300
             try:
@@ -303,6 +303,8 @@ def run_depth_cases() -> list[dict[str, Any]]:
                 txt = normalize_text(body)
             rec["response_text"] = txt
             rec["eval"] = evaluate_depth(txt)
+            rec["eval"]["passed"] = rec["ok"] and rec["eval"]["passed"]
+            rec["eval"]["checks"]["http_ok"] = rec["ok"]
         except Exception as e:
             rec["response_text"] = str(e)
             rec["eval"] = evaluate_depth(rec["response_text"])

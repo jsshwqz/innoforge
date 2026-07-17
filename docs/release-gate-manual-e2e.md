@@ -42,7 +42,7 @@
 3. `cargo clippy --tests -- -D warnings` 通过。
 4. 启动后日志无连续报错（同类错误连续 3 次视为失败）。
 5. 深度门禁必须通过（见 `docs/depth-quality-gate.md`）：
-- 执行：`python tools/depth_gate_test.py --worktree D:\test\innoforge-v053 --bin innoforge --out docs/depth-gate-runs/run-<timestamp>`
+- 执行：`py -3 tools/depth_gate_test.py --worktree D:\test\patent-hub-backup --bin innoforge --out D:\tmp\innoforge-depth-gate-<timestamp>`
 - 要求：4 个 AI 深度用例全部通过，且 `gate_pass=true`
 - 失败即不可发布，不允许以“HTTP 200/有回复”替代通过
 
