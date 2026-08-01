@@ -10,107 +10,16 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
-<style>
-.cmp-input { width:100%; padding:10px; background:#0d1117; border:1px solid #30363d; border-radius:6px; color:#c9d1d9; }
-.cmp-label { display:block; margin-bottom:6px; color:#8b949e; font-size:13px; }
-.cmp-section { background:#161b22; border:1px solid #30363d; border-radius:8px; padding:16px; margin-bottom:16px; }
-.cmp-my { border-left:3px solid #f0883e; }
-.cmp-ref { border-left:3px solid #58a6ff; }
-.ref-row { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
-.ref-row input { flex:1; }
-.btn-add { background:#21262d; border:1px solid #30363d; color:#58a6ff; padding:6px 14px; border-radius:6px; cursor:pointer; font-size:13px; }
-.btn-add:hover { background:#30363d; }
-.btn-remove { background:none; border:none; color:#f85149; cursor:pointer; font-size:18px; padding:4px 8px; }
-.btn-remove:hover { color:#ff7b72; }
-.btn-upload { background:#21262d; border:1px solid #30363d; color:#c9d1d9; padding:6px 10px; border-radius:6px; cursor:pointer; font-size:13px; white-space:nowrap; }
-.btn-upload:hover { background:#30363d; color:#58a6ff; }
-.btn-primary { padding:12px 24px; background:#58a6ff; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:15px; font-weight:600; }
-.btn-primary:hover { background:#79c0ff; }
-.btn-inventive { padding:12px 24px; background:#f0883e; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:15px; font-weight:600; }
-.btn-inventive:hover { background:#f4a261; }
-.btn-primary:disabled, .btn-inventive:disabled { opacity:0.5; cursor:not-allowed; }
-.btn-row { display:flex; gap:12px; margin-top:16px; flex-wrap:wrap; }
-.result-box { margin-top:20px; background:#161b22; border:1px solid #30363d; border-radius:8px; padding:20px; color:#c9d1d9; line-height:1.8; }
-.result-box h3, .result-box h2 { color:#58a6ff; }
-.result-box table { width:100%; border-collapse:collapse; margin:12px 0; font-size:14px; }
-.result-box th { background:#21262d; color:#c9d1d9; padding:8px 10px; border:1px solid #30363d; text-align:left; }
-.result-box td { padding:8px 10px; border:1px solid #30363d; vertical-align:top; }
-.result-box tr:nth-child(even) { background:#0d1117; }
-.result-box strong { color:#f0883e; }
-.result-box code { background:#21262d; padding:1px 5px; border-radius:3px; font-size:0.9em; }
-.result-box li { margin-bottom:4px; }
-.result-box pre { background:#0d1117; border:1px solid #30363d; border-radius:6px; padding:10px; overflow-x:auto; font-size:0.85em; }
-.file-tag { display:inline-flex; align-items:center; gap:4px; background:#1f6feb22; border:1px solid #1f6feb; color:#58a6ff; padding:4px 10px; border-radius:999px; font-size:12px; margin-top:4px; }
-.file-tag .tag-remove { cursor:pointer; color:#f85149; margin-left:4px; font-size:14px; }
-.file-tag .tag-remove:hover { color:#ff7b72; }
-.my-input-row { display:flex; gap:8px; align-items:center; }
-.my-input-row input { flex:1; }
-.btn-paste { background:#21262d; border:1px solid #30363d; color:#c9d1d9; padding:6px 10px; border-radius:6px; cursor:pointer; font-size:13px; white-space:nowrap; }
-.btn-paste:hover { background:#30363d; color:#f0883e; }
-.paste-modal-overlay { display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.6); z-index:1000; justify-content:center; align-items:center; }
-.paste-modal-overlay.show { display:flex; }
-.paste-modal { background:#161b22; border:1px solid #30363d; border-radius:10px; padding:20px; width:90%; max-width:700px; max-height:80vh; display:flex; flex-direction:column; }
-.paste-modal h3 { color:#c9d1d9; margin:0 0 8px 0; font-size:16px; }
-.paste-modal textarea { flex:1; min-height:260px; background:#0d1117; border:1px solid #30363d; border-radius:6px; color:#c9d1d9; padding:10px; font-size:13px; resize:vertical; line-height:1.6; }
-.paste-modal .modal-btns { display:flex; gap:8px; margin-top:12px; justify-content:flex-end; }
-.paste-modal .modal-btns button { padding:8px 18px; border-radius:6px; border:none; cursor:pointer; font-size:14px; }
-.paste-modal .btn-modal-ok { background:#58a6ff; color:#fff; }
-.paste-modal .btn-modal-ok:hover { background:#79c0ff; }
-.paste-modal .btn-modal-cancel { background:#21262d; color:#c9d1d9; border:1px solid #30363d; }
-.paste-modal .btn-modal-cancel:hover { background:#30363d; }
-.paste-title-input { width:100%; padding:8px; background:#0d1117; border:1px solid #30363d; border-radius:6px; color:#c9d1d9; font-size:13px; margin-bottom:8px; }
-/* Result toolbar */
-.result-toolbar { display:flex; gap:8px; margin-bottom:12px; padding-bottom:12px; border-bottom:1px solid #30363d; }
-.result-toolbar button { background:#21262d; border:1px solid #30363d; color:#c9d1d9; padding:6px 14px; border-radius:6px; cursor:pointer; font-size:13px; }
-.result-toolbar button:hover { background:#30363d; color:#58a6ff; }
-.result-toolbar .btn-followup { background:#f0883e22; border-color:#f0883e; color:#f0883e; font-weight:600; }
-.result-toolbar .btn-followup:hover { background:#f0883e44; }
-/* Collapsible sections */
-.collapsible-header { display:flex; align-items:center; gap:8px; cursor:pointer; user-select:none; padding:8px 0; }
-.collapsible-header:hover { color:#58a6ff; }
-.collapsible-header .toggle-icon { transition:transform 0.2s; font-size:12px; color:#8b949e; }
-.collapsible-header.collapsed .toggle-icon { transform:rotate(-90deg); }
-.collapsible-body { overflow:hidden; transition:max-height 0.3s ease; }
-.collapsible-body.collapsed { max-height:0 !important; overflow:hidden; }
-/* Ref counter badge */
-.ref-counter { display:inline-block; background:#21262d; color:#8b949e; font-size:12px; padding:2px 8px; border-radius:999px; margin-left:8px; }
-/* PDF Preview Modal */
-.pdf-modal-overlay { display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.8); z-index:2000; justify-content:center; align-items:center; }
-.pdf-modal-overlay.show { display:flex; }
-.pdf-modal { width:90vw; height:85vh; background:#161b22; border:1px solid #30363d; border-radius:8px; display:flex; flex-direction:column; position:relative; }
-.pdf-modal-close { position:absolute; top:8px; right:12px; background:none; border:none; color:#c9d1d9; font-size:24px; cursor:pointer; z-index:1; padding:4px 8px; }
-.pdf-modal-close:hover { color:#f85149; }
-.pdf-modal iframe { flex:1; border:none; border-radius:0 0 8px 8px; }
-.btn-preview { background:#21262d; border:1px solid #30363d; color:#58a6ff; padding:3px 8px; border-radius:4px; cursor:pointer; font-size:12px; margin-left:4px; }
-.btn-preview:hover { background:#30363d; color:#79c0ff; }
-/* Discussion panel */
-.discussion-panel { margin-top:16px; border-top:1px solid #30363d; padding-top:16px; }
-.discussion-panel.hidden { display:none; }
-.discussion-header { display:flex; align-items:center; gap:8px; margin-bottom:12px; color:#8b949e; font-weight:600; font-size:14px; }
-.discussion-messages { max-height:400px; overflow-y:auto; display:flex; flex-direction:column; gap:10px; margin-bottom:12px; padding-right:4px; position:relative; }
-.msg { display:flex; }
-.msg-user { justify-content:flex-end; }
-.msg-ai { justify-content:flex-start; }
-.msg-bubble { max-width:80%; padding:10px 14px; border-radius:10px; font-size:13px; line-height:1.6; word-break:break-word; }
-.msg-user .msg-bubble { background:#1f6feb; color:#fff; border-bottom-right-radius:4px; }
-.msg-ai .msg-bubble { background:#21262d; color:#c9d1d9; border:1px solid #30363d; border-bottom-left-radius:4px; }
-.discussion-input-row { display:flex; gap:8px; }
-.discussion-input-row input { flex:1; padding:10px; background:#0d1117; border:1px solid #30363d; border-radius:6px; color:#c9d1d9; font-size:13px; }
-.discussion-input-row input:focus { border-color:#58a6ff; outline:none; }
-.discussion-input-row button { padding:8px 18px; background:#21262d; color:#c9d1d9; border:1px solid #30363d; border-radius:6px; cursor:pointer; font-size:13px; font-weight:500; white-space:nowrap; }
-.discussion-input-row button:hover { background:#30363d; color:#58a6ff; }
-.discussion-input-row button:disabled { opacity:0.5; cursor:not-allowed; }
-</style>
 </head>
 <body>
-    <nav id="global-nav"></nav>
     <div class="page-with-sidebar">
+    <aside id="page-sidebar" class="page-sidebar"></aside>
     <main class="container page-main" style="max-width:1100px;">
         <h2 data-i18n="compare.title" style="margin-bottom:16px;"></h2>
 
         <!-- My Patent -->
         <div class="cmp-section cmp-my">
-            <label class="cmp-label" style="color:#f0883e; font-weight:600;">我的专利（本申请）</label>
+            <label class="cmp-label my">我的专利（本申请）</label>
             <div class="my-input-row">
                 <input type="text" id="my-patent" class="cmp-input" placeholder="输入专利号或内部 ID（如 CN115076688A）">
                 <button class="btn-upload" onclick="uploadMyPatent()">📎 上传</button>
@@ -121,7 +30,7 @@
 
         <!-- Reference Documents -->
         <div class="cmp-section cmp-ref">
-            <label class="cmp-label" style="color:#58a6ff; font-weight:600;">对比文件 <span class="ref-counter" id="ref-counter">1 篇</span></label>
+            <label class="cmp-label ref">对比文件 <span class="ref-counter" id="ref-counter">1 篇</span></label>
             <div id="ref-list">
                 <div class="ref-row" data-idx="0">
                     <input type="text" class="cmp-input ref-input" placeholder="对比文件 1 — 专利号或 ID">
@@ -134,8 +43,8 @@
         </div>
 
         <!-- Office Action (审查意见书) -->
-        <div class="cmp-section" style="border-left:3px solid #f85149;">
-            <label class="cmp-label" style="color:#f85149; font-weight:600;">审查意见通知书（可选 — 一审答复专用）</label>
+        <div class="cmp-section cmp-oa">
+            <label class="cmp-label oa">审查意见通知书（可选 — 一审答复专用）</label>
             <div class="my-input-row">
                 <input type="text" id="oa-input" class="cmp-input" disabled placeholder="请上传 PDF 或粘贴审查意见全文" style="flex:1;">
                 <button class="btn-upload" onclick="uploadOA()">📎 上传</button>
@@ -147,8 +56,8 @@
         <!-- Action Buttons -->
         <div class="btn-row">
             <button class="btn-primary" id="btn-compare" onclick="doCompare()">通用对比</button>
-            <button class="btn-inventive" id="btn-inventive" onclick="doInventiveness()">创造性分析（三步法） <span style="font-size:11px;background:#f0883e44;border:1px solid #f0883e;border-radius:4px;padding:1px 6px;margin-left:4px;vertical-align:middle;">Reasoner</span></button>
-            <button class="btn-inventive" id="btn-oa" onclick="doOfficeAction()" style="background:#f85149;">一审答复分析 <span style="font-size:11px;background:#f8514944;border:1px solid #f85149;border-radius:4px;padding:1px 6px;margin-left:4px;vertical-align:middle;">Reasoner</span></button>
+            <button class="btn-inventive" id="btn-inventive" onclick="doInventiveness()">创造性分析（三步法） <span class="reasoner-badge" style="background:rgba(219,109,40,0.25);border-color:#db6d28;">Reasoner</span></button>
+            <button class="btn-danger" id="btn-oa" onclick="doOfficeAction()">一审答复分析 <span class="reasoner-badge" style="background:rgba(248,81,73,0.25);border-color:var(--red);">Reasoner</span></button>
         </div>
 
         <div id="result"></div>
@@ -160,12 +69,11 @@
             <div class="discussion-input-row">
                 <input type="text" id="discussion-input" placeholder="输入你的问题..." onkeydown="if(event.key==='Enter') sendDiscussionMessage()">
                 <button id="discussion-send-btn" onclick="sendDiscussionMessage()">发送</button>
-                <button id="discussion-stop-btn" onclick="stopDiscussionGeneration()" style="display:none;padding:8px 10px;background:#21262d;color:#f85149;border:1px solid #f85149;border-radius:6px;cursor:pointer;font-size:13px;white-space:nowrap;" data-i18n="compare.stop"></button>
-                <button id="discussion-export-btn" onclick="exportDiscussionConclusions()" style="display:none;padding:8px 10px;background:#21262d;color:#c9d1d9;border:1px solid #6e7681;border-radius:6px;cursor:pointer;font-size:13px;white-space:nowrap;" data-i18n="compare.exportConclusions"></button>
+                <button id="discussion-stop-btn" class="btn-stop" style="display:none" onclick="stopDiscussionGeneration()" data-i18n="compare.stop"></button>
+                <button id="discussion-export-btn" class="btn-export-ghost" style="display:none" onclick="exportDiscussionConclusions()" data-i18n="compare.exportConclusions"></button>
             </div>
         </div>
     </main>
-    <aside id="page-sidebar" class="page-sidebar"></aside>
     </div>
     <!-- PDF Preview Modal -->
     <div class="pdf-modal-overlay" id="pdf-preview-modal">

@@ -11,41 +11,13 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
     <script src="/static/purify.min.js"></script>
-    <style>
-    .quote-btn {
-        position: absolute;
-        background: #238636;
-        color: #fff;
-        padding: 4px 10px;
-        border-radius: 4px;
-        font-size: 12px;
-        cursor: pointer;
-        z-index: 100;
-        display: none;
-        white-space: nowrap;
-        user-select: none;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-        pointer-events: auto;
-        line-height: 1.4;
-    }
-    .quote-btn:hover {
-        background: #2ea043;
-    }
-    .quote-line {
-        border-left: 3px solid #58a6ff;
-        padding-left: 10px;
-        margin: 4px 0;
-        color: #8b949e;
-        font-style: italic;
-    }
-    </style>
 </head>
 <body>
-    <nav id="global-nav"></nav>
     <div class="page-with-sidebar">
+    <aside id="page-sidebar" class="page-sidebar"></aside>
     <main class="container page-main">
         <div class="chat-container">
-            <h2 style="margin-bottom:8px;" data-i18n="ai.title"></h2>
+            <h2 data-i18n="ai.title"></h2>
             <p class="hint" data-i18n="ai.hint"></p>
             <div class="chat-box" id="chat-messages" style="position:relative;"></div>
             <button class="scroll-bottom-btn" id="scroll-bottom-btn" onclick="scrollChatToBottom()">↓</button>
@@ -55,12 +27,11 @@
                     <div id="image-preview-area" class="image-preview-area" style="display:none;"></div>
                 </div>
                 <button onclick="sendChat()" data-i18n="ai.send"></button>
-                <button id="btn-stop" onclick="stopGeneration()" style="display:none;margin-left:4px;padding:6px 10px;border:1px solid #f85149;background:#21262d;color:#f85149;border-radius:4px;cursor:pointer;font-size:0.85em;" data-i18n="ai.stop"></button>
-                <button id="btn-export" onclick="exportConclusions()" style="display:none;margin-left:4px;padding:6px 10px;border:1px solid #6e7681;background:#21262d;color:#c9d1d9;border-radius:4px;cursor:pointer;font-size:0.85em;" data-i18n="ai.exportConclusions"></button>
+                <button id="btn-stop" class="btn-stop" style="display:none" onclick="stopGeneration()" data-i18n="ai.stop"></button>
+                <button id="btn-export" class="btn-export-ghost" style="display:none" onclick="exportConclusions()" data-i18n="ai.exportConclusions"></button>
             </div>
         </div>
     </main>
-    <aside id="page-sidebar" class="page-sidebar"></aside>
     </div>
     <script src="/static/i18n.js"></script>
     <script>
@@ -75,14 +46,14 @@
       + '</div>'
       + '<div class="sidebar-section">'
       + '<div class="sidebar-label">' + (i18nLang === 'zh' ? '角色预设' : 'Role Preset') + '</div>'
-      + '<select id="role-select" style="width:100%;padding:6px 8px;background:#21262d;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;font-size:0.85em;margin-bottom:4px;">'
+      + '<select id="role-select">'
       + '<option value="general">' + (i18nLang === 'zh' ? '通用助手' : 'General Assistant') + '</option>'
       + '<option value="patent_examiner">' + (i18nLang === 'zh' ? '专利审查专家' : 'Patent Examiner') + '</option>'
       + '<option value="oa_expert">' + (i18nLang === 'zh' ? 'OA 答复专家' : 'OA Response Expert') + '</option>'
       + '<option value="claim_analyst">' + (i18nLang === 'zh' ? '权利要求分析师' : 'Claim Analyst') + '</option>'
       + '<option value="inventor_brainstorm">' + (i18nLang === 'zh' ? '发明人头脑风暴' : 'Inventor Brainstorm') + '</option>'
       + '</select>'
-      + '<div style="font-size:0.78em;color:#8b949e;margin-top:2px;">' + (i18nLang === 'zh' ? '选择角色以定制 AI 回复风格和专业知识' : 'Select role to customize AI response style') + '</div>'
+      + '<div class="sidebar-hint">' + (i18nLang === 'zh' ? '选择角色以定制 AI 回复风格和专业知识' : 'Select role to customize AI response style') + '</div>'
       + '</div>'
     );
     </script>
@@ -159,7 +130,7 @@
                 container.style.cssText = 'text-align:center;padding:8px;';
                 var btn = document.createElement('button');
                 btn.textContent = t('ai.loadMore');
-                btn.style.cssText = 'background:#f0f0f0;border:1px solid #ddd;border-radius:4px;padding:4px 12px;cursor:pointer;font-size:13px;';
+                btn.style.cssText = 'background:#1c2128;border:1px solid #30363d;border-radius:6px;padding:6px 16px;cursor:pointer;font-size:13px;color:#c9d1d9;';
                 btn.onclick = loadMoreMessages;
                 container.appendChild(btn);
                 box.insertBefore(container, box.firstChild);

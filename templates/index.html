@@ -11,127 +11,15 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
     <script src="/static/purify.min.js"></script>
-    <style>
-        .hero { text-align: center; padding: 40px 20px 20px; position: relative;}
-        .hero h1 { font-size: 3.2em; font-weight: 800; margin-bottom: 12px; letter-spacing: -0.5px;
-            background: linear-gradient(135deg, #e2e8f0 0%, #94a3b8 100%);
-            -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-        .hero .subtitle { color: var(--text-muted); font-size: 1.15em; margin-bottom: 24px; letter-spacing: 0.5px;}
-
-        /* 主入口区域 Glassmorphism */
-        .main-entry { max-width: 760px; margin: 0 auto 40px; position: relative;}
-        .main-entry::before {
-            content:''; position: absolute; top: -30px; left: 50%; transform: translateX(-50%);
-            width: 80%; height: 80%; background: var(--accent-primary); filter: blur(120px);
-            opacity: 0.15; z-index: -1; border-radius: 50%;
-        }
-        .idea-input-area {
-            background: var(--bg-surface); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
-            border: 1px solid var(--border-subtle); border-radius: var(--radius-lg);
-            padding: 32px; margin-bottom: 24px; box-shadow: var(--shadow-card);
-            transition: var(--transition-smooth);
-        }
-        .idea-input-area:hover { border-color: rgba(255,255,255,0.15); box-shadow: 0 12px 40px rgba(0,0,0,0.6); }
-        .idea-input-area label {
-            display: inline-block; color: var(--text-main); font-size: 1.1em;
-            margin-bottom: 16px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px;
-            text-shadow: 0 0 10px rgba(59,130,246,0.3);
-        }
-        .idea-input-area textarea {
-            width: 100%; min-height: 120px; background: rgba(0,0,0,0.3);
-            border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
-            color: var(--text-main); padding: 16px; font-size: 1.05em; resize: vertical;
-            font-family: inherit; line-height: 1.6; transition: var(--transition-smooth);
-        }
-        .idea-input-area textarea:focus { outline: none; border-color: var(--border-glow); box-shadow: inset 0 0 0 1px var(--border-glow), 0 0 15px rgba(59,130,246,0.2); background: rgba(0,0,0,0.5); }
-        .idea-input-area textarea::placeholder { color: rgba(148, 163, 184, 0.5); }
-
-        .start-buttons { display: flex; gap: 16px; justify-content: center; margin-top: 24px; flex-wrap: wrap; }
-
-        /* 流程指引美化 */
-        .workflow-hint {
-            display: flex; align-items: center; justify-content: center;
-            gap: 12px; color: var(--text-muted); font-size: 0.9em; margin: 0 0 32px 0;
-            flex-wrap: wrap; font-weight: 500;
-        }
-        .workflow-hint .step {
-            background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle);
-            border-radius: 20px; padding: 6px 16px; white-space: nowrap;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.2); transition: var(--transition-smooth);
-        }
-        .workflow-hint .step:hover { background: rgba(255,255,255,0.08); border-color: var(--border-glow); color: var(--text-main); transform: translateY(-2px); }
-        .workflow-hint .arrow { color: var(--accent-primary); opacity: 0.7; font-weight: bold; }
-
-        /* 快速抓取 */
-        .quick-fetch { max-width: 760px; margin: 0 auto 40px; padding: 0 20px; }
-        .quick-fetch details { background: var(--bg-surface); backdrop-filter: blur(12px); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 12px 20px; transition: var(--transition-smooth); }
-        .quick-fetch details[open] { padding-bottom: 20px; }
-        .quick-fetch summary { color: var(--text-muted); cursor: pointer; font-size: 0.95em; font-weight: 500; user-select: none; display: flex; align-items: center; outline: none; }
-        .quick-fetch summary:hover { color: var(--text-highlight); }
-        .fetch-box { display: flex; gap: 12px; margin-top: 16px; flex-wrap: wrap; }
-        .fetch-box input, .fetch-box select {
-            background: rgba(0,0,0,0.3); border: 1px solid var(--border-subtle); color: var(--text-main);
-            padding: 10px 16px; border-radius: var(--radius-sm); font-size: 0.95em; transition: var(--transition-smooth);
-        }
-        .fetch-box input { flex: 1; min-width: 200px; }
-        .fetch-box input:focus { border-color: var(--accent-primary); outline:none; }
-        .fetch-box button { background: rgba(255,255,255,0.05); color: var(--text-main); border: 1px solid var(--border-subtle); padding: 10px 20px; border-radius: var(--radius-sm); cursor: pointer; transition: var(--transition-smooth); font-weight: 500; }
-        .fetch-box button:hover { background: var(--accent-primary); border-color: var(--accent-primary); box-shadow: var(--shadow-glow); }
-
-        /* 文件上传区 */
-        .upload-zone {
-            border: 2px dashed rgba(255,255,255,0.15); border-radius: var(--radius-md); padding: 24px;
-            text-align: center; color: var(--text-muted); font-size: 0.9em; font-weight: 500;
-            cursor: pointer; transition: var(--transition-smooth); margin-top: 16px;
-            background: rgba(0,0,0,0.1);
-        }
-        .upload-zone:hover { border-color: var(--accent-primary); color: var(--text-highlight); background: rgba(37,99,235,0.05); }
-        .upload-zone.dragover { border-color: var(--accent-primary); background: rgba(37,99,235,0.1); transform: scale(1.02); }
-        .upload-zone input[type="file"] { display: none; }
-        .file-list { margin-top: 12px; text-align: left; font-size: 0.9em; display: flex; flex-direction: column; gap: 8px;}
-        .file-item {
-            display: flex; align-items: center; justify-content: space-between;
-            background: rgba(0,0,0,0.4); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
-            padding: 8px 12px; color: var(--text-muted); animation: slideIn 0.3s ease;
-        }
-        .file-item .remove { color: #ef4444; cursor: pointer; font-size: 1.1em; background: none; border: none; padding: 2px 8px; border-radius: 4px; transition: var(--transition-smooth); }
-        .file-item .remove:hover { background: rgba(239,68,68,0.1); }
-        .file-item .preview-btn { color: var(--text-highlight); cursor: pointer; font-size: 0.95em; background: none; border: none; padding: 2px 8px; border-radius: 4px; transition: var(--transition-smooth); }
-        .file-item .preview-btn:hover { background: rgba(56,189,248,0.1); }
-
-        /* PDF Preview Modal */
-        .pdf-modal-overlay { display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.85); backdrop-filter: blur(10px); z-index:2000; justify-content:center; align-items:center; }
-        .pdf-modal-overlay.show { display:flex; animation: fadeIn 0.3s; }
-        .pdf-modal { width:90vw; height:85vh; background: var(--bg-core); border:1px solid var(--border-subtle); border-radius:var(--radius-lg); display:flex; flex-direction:column; position:relative; box-shadow: var(--shadow-card); overflow:hidden;}
-        .pdf-modal-close { position:absolute; top:12px; right:16px; background:rgba(0,0,0,0.5); border:1px solid rgba(255,255,255,0.1); color:var(--text-main); border-radius: 50%; width: 32px; height: 32px; font-size:18px; line-height:30px; text-align:center; cursor:pointer; z-index:1; padding:0; transition: var(--transition-smooth); }
-        .pdf-modal-close:hover { background: #ef4444; border-color: #ef4444; box-shadow: 0 0 10px rgba(239,68,68,0.5); }
-        .pdf-modal iframe { flex:1; border:none; background: #fff;}
-
-        /* 模式选择 */
-        .mode-toggle {
-            display: flex; gap: 0; margin-bottom: 16px; border-radius: var(--radius-md);
-            overflow: hidden; border: 1px solid var(--border-subtle);
-            background: rgba(0,0,0,0.3); padding: 4px;
-        }
-        .mode-btn {
-            flex: 1; padding: 12px; text-align: center; cursor: pointer;
-            background: transparent; color: var(--text-muted); border: none; font-size: 0.95em;
-            font-weight: 500; transition: var(--transition-smooth); border-radius: var(--radius-sm);
-        }
-        .mode-btn.active { background: var(--bg-surface); color: var(--text-main); box-shadow: 0 2px 8px rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.05); }
-        .mode-btn:hover:not(.active) { color: var(--text-main); background: rgba(255,255,255,0.03); }
-        .mode-hint {
-            color: var(--text-highlight); font-size: 0.85em; text-align: center;
-            margin-bottom: 12px; min-height: 20px; font-weight: 500;
-        }
-    </style>
 </head>
 <body>
-    <nav id="global-nav"></nav>
     <div class="page-with-sidebar">
-    <main class="hero page-main">
-        <h1>创研台</h1>
-        <p class="subtitle">从想法到落地 · 决策依据 · 执行方案 · 知识产权保护</p>
+    <aside id="page-sidebar" class="page-sidebar"></aside>
+    <main class="page-main">
+        <div class="hero">
+            <h1>创研台</h1>
+            <p class="subtitle">从想法到落地 · 决策依据 · 执行方案 · 知识产权保护</p>
+        </div>
 
         <!-- 研发流程指引 -->
         <div class="workflow-hint">
@@ -175,17 +63,15 @@
         </div>
 
         <!-- 服务状态 -->
-        <div id="service-status" style="max-width:700px;margin:0 auto 20px;padding:0 20px;">
-            <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;font-size:0.85em;">
-                <a href="/settings?from=/" id="status-ai" style="text-decoration:none;color:#8b949e;background:#161b22;border:1px solid #21262d;border-radius:16px;padding:4px 14px;cursor:pointer;transition:all 0.2s;"></a>
-                <a href="/settings?from=/" id="status-search" style="text-decoration:none;color:#8b949e;background:#161b22;border:1px solid #21262d;border-radius:16px;padding:4px 14px;cursor:pointer;transition:all 0.2s;"></a>
-            </div>
+        <div class="service-status-bar" id="service-status">
+            <a href="/settings?from=/" id="status-ai" class="status-badge"></a>
+            <a href="/settings?from=/" id="status-search" class="status-badge"></a>
         </div>
 
         <!-- 最近项目 -->
-        <div id="recent-ideas" style="max-width:700px;margin:0 auto 30px;padding:0 20px;display:none;">
-            <h3 style="color:#c9d1d9;font-size:0.95em;margin-bottom:10px;">最近项目</h3>
-            <div id="recent-list" style="display:flex;flex-direction:column;gap:6px;"></div>
+        <div class="recent-section" id="recent-ideas">
+            <h3>最近项目</h3>
+            <div class="recent-list" id="recent-list"></div>
         </div>
 
         <!-- 快速抓取（折叠，不抢焦点） -->
@@ -200,10 +86,15 @@
                     </select>
                     <button onclick="fetchPatent()">抓取</button>
                 </div>
-                <div id="fetch-result"></div>
+                <div class="fetch-result" id="fetch-result"></div>
             </details>
         </div>
+
+        <footer class="page-footer">
+            v{{version}} · <a href="https://github.com/jsshwqz/innoforge" target="_blank" rel="noopener">GitHub</a> · <a href="https://gitee.com/jsshwqz/innoforge" target="_blank" rel="noopener">Gitee</a> · MIT License
+        </footer>
     </main>
+    </div>
 
     <!-- PDF Preview Modal -->
     <div class="pdf-modal-overlay" id="pdf-preview-modal">
@@ -211,13 +102,6 @@
             <button class="pdf-modal-close" onclick="closePdfPreview()">&times;</button>
             <iframe id="pdf-preview-iframe" src="about:blank"></iframe>
         </div>
-    </div>
-
-    <footer style="text-align:center;padding:20px;color:#484f58;font-size:0.75em;">
-        v{{version}} · <a href="https://github.com/jsshwqz/innoforge" target="_blank" rel="noopener" style="color:#484f58;">GitHub</a> · <a href="https://gitee.com/jsshwqz/innoforge" target="_blank" rel="noopener" style="color:#484f58;">Gitee</a> · MIT License
-    </footer>
-    </main>
-    <aside id="page-sidebar" class="page-sidebar"></aside>
     </div>
 
     <script src="/static/i18n.js"></script>
@@ -541,22 +425,21 @@
             ideas.forEach(function(idea) {
                 var a = document.createElement('a');
                 a.href = '/idea?id=' + idea.id;
-                a.style.cssText = 'display:flex;justify-content:space-between;align-items:center;background:#161b22;border:1px solid #21262d;border-radius:8px;padding:10px 14px;text-decoration:none;color:#c9d1d9;font-size:0.9em;transition:border-color 0.2s;';
-                a.onmouseenter = function() { a.style.borderColor = '#58a6ff'; };
-                a.onmouseleave = function() { a.style.borderColor = '#21262d'; };
+                a.className = 'recent-item';
                 var left = document.createElement('div');
-                left.style.cssText = 'display:flex;align-items:center;gap:8px;overflow:hidden;';
+                left.className = 'recent-left';
                 var statusDot = document.createElement('span');
                 var s = idea.status || '';
                 var dotColor = s === 'completed' ? '#3fb950' : s === 'analyzing' ? '#d29922' : s === 'failed' ? '#f85149' : '#8b949e';
-                statusDot.style.cssText = 'width:8px;height:8px;border-radius:50%;flex-shrink:0;background:' + dotColor;
+                statusDot.className = 'status-dot';
+                statusDot.style.background = dotColor;
                 var title = document.createElement('span');
-                title.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+                title.className = 'recent-title';
                 title.textContent = idea.title || '无标题';
                 left.appendChild(statusDot);
                 left.appendChild(title);
                 var time = document.createElement('span');
-                time.style.cssText = 'color:#484f58;font-size:0.85em;flex-shrink:0;margin-left:12px;';
+                time.className = 'recent-time';
                 if (idea.created_at) {
                     var d = new Date(idea.created_at);
                     time.textContent = d.toLocaleDateString();
@@ -576,7 +459,7 @@
         if (!num) return;
         el.innerHTML = '';
         var fetchingP = document.createElement('p');
-        fetchingP.style.cssText = 'color:#8b949e;margin-top:8px;';
+        fetchingP.className = 'muted';
         fetchingP.textContent = '正在抓取...';
         el.appendChild(fetchingP);
         try {
@@ -590,25 +473,24 @@
             if (data.status === 'ok') {
                 el.innerHTML = '';
                 var successP = document.createElement('p');
-                successP.style.cssText = 'color:#3fb950;margin-top:8px;';
+                successP.className = 'fetch-ok';
                 successP.textContent = '已抓取: ' + (data.patent.title || num) + ' ';
                 var detailLink = document.createElement('a');
                 detailLink.href = '/patent/' + data.patent.id;
-                detailLink.style.cssText = 'color:#58a6ff;margin-left:8px;';
                 detailLink.textContent = '查看详情';
                 successP.appendChild(detailLink);
                 el.appendChild(successP);
             } else {
                 el.innerHTML = '';
                 var errP = document.createElement('p');
-                errP.style.cssText = 'color:#f85149;margin-top:8px;';
+                errP.className = 'fetch-err';
                 errP.textContent = data.message;
                 el.appendChild(errP);
             }
         } catch(e) {
             el.innerHTML = '';
             var catchP = document.createElement('p');
-            catchP.style.cssText = 'color:#f85149;margin-top:8px;';
+            catchP.className = 'fetch-err';
             catchP.textContent = '请求失败: ' + e;
             el.appendChild(catchP);
         }

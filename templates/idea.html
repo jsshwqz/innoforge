@@ -11,131 +11,22 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
     <script src="/static/purify.min.js"></script>
-    <style>
-        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
-        /* Grid Layout */
-        .idea-layout { display: grid; grid-template-columns: 280px 1fr; gap: 0; height: 100vh; }
-        .idea-sidebar { 
-            background: rgba(11, 15, 23, 0.8); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
-            border-right: 1px solid var(--border-subtle); padding: 24px 20px; overflow-y: auto; height: 100vh; position: sticky; top: 0; 
-            box-shadow: 10px 0 30px rgba(0,0,0,0.2);
-        }
-        .idea-main { padding: 32px; max-width: 1000px; overflow-y: auto; margin:0 auto; }
-        
-        /* Forms */
-        .idea-form textarea { width: 100%; min-height: 150px; padding: 16px; border-radius: var(--radius-md); border: 1px solid var(--border-subtle); background: rgba(0,0,0,0.3); color: var(--text-main); font-size: 1.05em; resize: vertical; font-family: inherit; line-height: 1.6; transition: var(--transition-smooth); }
-        .idea-form textarea:focus { outline:none; border-color: var(--border-glow); box-shadow: inset 0 0 0 1px var(--border-glow), 0 0 15px rgba(59,130,246,0.2); background: rgba(0,0,0,0.5); }
-        .idea-form input[type="text"] { width: 100%; padding: 14px 16px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); background: rgba(0,0,0,0.3); color: var(--text-main); font-size: 1.05em; margin-bottom: 16px; transition: var(--transition-smooth); }
-        .idea-form input[type="text"]:focus { outline:none; border-color: var(--border-glow); box-shadow: 0 0 15px rgba(59,130,246,0.2); background: rgba(0,0,0,0.5); }
-        .idea-form label { display: block; color: var(--text-muted); margin-bottom: 8px; font-size: 0.95em; font-weight: 500; }
-        .form-group { margin-bottom: 20px; }
-        .btn-row { display: flex; gap: 12px; margin-top: 24px; }
-        
-        /* History Sidebar */
-        .history-item { padding: 12px 14px; border-radius: var(--radius-sm); cursor: pointer; margin-bottom: 8px; border: 1px solid transparent; background: rgba(255,255,255,0.02); transition: var(--transition-smooth); }
-        .history-item:hover { background: rgba(255,255,255,0.05); transform: translateX(2px); }
-        .history-item.active { border-color: var(--border-glow); background: rgba(59,130,246,0.1); box-shadow: inset 4px 0 0 var(--accent-primary); }
-        .history-title { font-size: 0.95em; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-main); }
-        .history-meta { font-size: 0.8em; color: var(--text-muted); margin-top: 6px; display: flex; justify-content: space-between; align-items: center; }
-        
-        /* Badges */
-        .score-badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 0.75em; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
-        .score-high { background: rgba(35,134,54,0.2); color: #3fb950; border: 1px solid rgba(35,134,54,0.4); }
-        .score-mid { background: rgba(158,106,3,0.2); color: #d29922; border: 1px solid rgba(158,106,3,0.4); }
-        .score-low { background: rgba(218,54,51,0.2); color: #f85149; border: 1px solid rgba(218,54,51,0.4); }
-        
-        /* Results & Analysis */
-        .analysis-result { background: var(--bg-surface); backdrop-filter: blur(12px); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 24px; margin-top: 24px; line-height: 1.7; box-shadow: var(--shadow-card); }
-        .analysis-result h3 { color: var(--text-highlight); margin: 20px 0 12px; display: flex; align-items: center; gap: 8px; }
-        .analysis-result h3::before { content:''; display:inline-block; width:4px; height:16px; background:var(--accent-primary); border-radius:2px; }
-        .analysis-result h3:first-child { margin-top: 0; }
-        .analysis-result ul { margin-left: 20px; margin-bottom: 12px; }
-        .analysis-result li { margin-bottom: 6px; }
-        .analysis-result strong { color: var(--text-main); font-weight: 600;}
-        
-        /* Status */
-        .status-bar { padding: 14px 20px; border-radius: var(--radius-md); margin-top: 20px; font-weight: 500; display: flex; align-items: center; gap: 10px; }
-        .status-analyzing { background: rgba(31,111,235,0.1); border: 1px solid rgba(31,111,235,0.3); color: var(--accent-primary-hover); }
-        .status-done { background: rgba(35,134,54,0.1); border: 1px solid rgba(35,134,54,0.3); color: #3fb950; }
-        .status-error { background: rgba(218,54,51,0.1); border: 1px solid rgba(218,54,51,0.3); color: #f85149; }
-        
-        /* Settings & Pipeline */
-        .findings-section h3 { margin-bottom: 16px; color: var(--text-highlight); }
-        .finding-card { background: rgba(0,0,0,0.3); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 16px; margin-bottom: 12px; transition: var(--transition-smooth); }
-        .finding-card:hover { border-color: rgba(255,255,255,0.15); background: rgba(0,0,0,0.5); transform: translateY(-2px); }
-        .finding-card .title { font-weight: 600; margin-bottom: 6px; color: var(--text-main); font-size: 1.05em; }
-        .score-display { text-align: center; padding: 40px; margin: 20px 0; background: radial-gradient(circle, rgba(59,130,246,0.1) 0%, transparent 60%); border-radius: 50%; }
-        .score-number { font-size: 4em; font-weight: 800; background: var(--accent-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-        .spinner { display: inline-block; width: 18px; height: 18px; border: 2px solid rgba(255,255,255,0.1); border-top-color: var(--accent-primary); border-radius: 50%; animation: spin 0.8s linear infinite; }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        
-        .pipeline-progress { background: var(--bg-surface); backdrop-filter: blur(12px); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 24px; margin-top: 24px; box-shadow: var(--shadow-card); }
-        .pipeline-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; font-weight: 600;}
-        .pipeline-bar { height: 8px; background: rgba(0,0,0,0.5); border-radius: 4px; overflow: hidden; box-shadow: inset 0 1px 3px rgba(0,0,0,0.3); }
-        .pipeline-bar-fill { height: 100%; background: var(--accent-gradient); border-radius: 4px; transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: var(--shadow-glow); }
-        .progress-steps { margin-top: 16px; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; font-size: 0.9em;}
-        .progress-steps .step { padding: 10px 14px; border-radius: 6px; display: flex; align-items: center; gap: 10px; background: rgba(0,0,0,0.2); border: 1px solid transparent; transition: var(--transition-smooth); }
-        .progress-steps .step.active { border-color: rgba(59,130,246,0.3); background: rgba(59,130,246,0.1); box-shadow: inset 2px 0 0 var(--accent-primary); color: var(--text-highlight);}
-        .progress-steps .step.done { color: #3fb950; }
-        .progress-steps .step.skipped { color: #d29922; text-decoration: line-through; }
-        .progress-steps .step.error { color: #f85149; }
-        
-        /* Tabs */
-        .tab-btn { background: none; border: none; border-bottom: 2px solid transparent; color: var(--text-muted); padding: 12px 16px; cursor: pointer; font-size: 0.95em; white-space: nowrap; transition: var(--transition-smooth); }
-        .tab-btn:hover { color: var(--text-main); background: rgba(255,255,255,0.02); }
-        .tab-btn.active { border-bottom-color: #f78166; color: var(--text-main); font-weight: 600; text-shadow: 0 0 10px rgba(247,129,102,0.3); }
-        .tab-panel { display: none; padding-top: 20px; animation: fadeIn 0.3s ease; }
-        .tab-panel.active { display: block; }
-        
-        @media (max-width: 768px) {
-            .idea-layout { grid-template-columns: 1fr; height: auto; }
-            .idea-sidebar { height: auto; max-height: 300px; border-right: none; border-bottom: 1px solid var(--border-subtle); position: static; box-shadow: none; }
-            .progress-steps { grid-template-columns: 1fr; }
-        }
-    
-.quote-btn {
-    position: absolute;
-    background: #238636;
-    color: #fff;
-    padding: 4px 10px;
-    border-radius: 4px;
-    font-size: 12px;
-    cursor: pointer;
-    z-index: 100;
-    display: none;
-    white-space: nowrap;
-    user-select: none;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-    pointer-events: auto;
-    line-height: 1.4;
-}
-.quote-btn:hover {
-    background: #2ea043;
-}
-.quote-line {
-    border-left: 3px solid #58a6ff;
-    padding-left: 10px;
-    margin: 4px 0;
-    color: #8b949e;
-    font-style: italic;
-}
-</style>
 </head>
 <body>
-    <nav id="global-nav"></nav>
     <div class="page-with-sidebar">
+    <aside id="page-sidebar" class="page-sidebar"></aside>
     <div class="idea-layout page-main">
         <div class="idea-sidebar">
-            <h3 data-i18n="idea.history" style="margin-bottom:12px;"></h3>
-            <div id="history-list"><p class="hint" style="font-size:0.85em;" data-i18n="idea.historyEmpty"></p></div>
+            <h3 data-i18n="idea.history"></h3>
+            <div id="history-list"><p class="hint" data-i18n="idea.historyEmpty"></p></div>
         </div>
 
         <div class="idea-main">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-                <h2 style="margin:0;" data-i18n="idea.title"></h2>
+            <div class="page-header-row">
+                <h2 data-i18n="idea.title"></h2>
                 <div style="display:flex;gap:8px;">
-                    <a href="/" style="color:#8b949e;text-decoration:none;font-size:0.85em;padding:4px 10px;border:1px solid #30363d;border-radius:6px;">首页</a>
-                    <button onclick="showNewIdeaForm()" style="background:#238636;color:#fff;border:none;padding:4px 12px;border-radius:6px;font-size:0.85em;cursor:pointer;">+ 新建</button>
+                    <a href="/" class="link-pill">首页</a>
+                    <button class="btn-success-sm" onclick="showNewIdeaForm()">+ 新建</button>
                 </div>
             </div>
             <p class="hint" data-i18n="idea.hint"></p>
@@ -149,23 +40,23 @@
                     <label data-i18n="idea.descLabel"></label>
                     <textarea id="idea-desc" data-i18n-placeholder="idea.descPlaceholder"></textarea>
                 </div>
-                <div class="form-group" style="display:flex;align-items:center;gap:12px;">
+                <div class="form-group" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
                     <label style="margin:0;white-space:nowrap;">推演模式:</label>
-                    <div style="display:flex;border:1px solid #30363d;border-radius:6px;overflow:hidden;">
-                        <button type="button" id="mode-quick" onclick="setAnalysisMode('quick')"
-                            style="padding:6px 14px;font-size:0.85em;border:none;cursor:pointer;background:#21262d;color:#8b949e;">
+                    <div class="mode-pills">
+                        <button type="button" id="mode-quick" class="mode-pill" onclick="setAnalysisMode('quick')"
+                            style="background:#21262d;color:#8b949e;">
                             快速推演
                         </button>
-                        <button type="button" id="mode-deep" onclick="setAnalysisMode('deep')"
-                            style="padding:6px 14px;font-size:0.85em;border:none;cursor:pointer;background:#1f6feb;color:#fff;">
+                        <button type="button" id="mode-deep" class="mode-pill" onclick="setAnalysisMode('deep')"
+                            style="background:#1f6feb;color:#fff;">
                             深度推演
                         </button>
                     </div>
-                    <span id="mode-hint" style="font-size:0.8em;color:#8b949e;">13 步流水线 + 多角度 AI 分析</span>
+                    <span class="muted" id="mode-hint">13 步流水线 + 多角度 AI 分析</span>
                 </div>
                 <div class="btn-row">
                     <button class="btn-primary" id="submit-btn" onclick="submitIdea()" data-i18n="idea.submit"></button>
-                    <button onclick="clearForm()" style="background:#21262d;" data-i18n="idea.clear"></button>
+                    <button class="btn-secondary" onclick="clearForm()" data-i18n="idea.clear"></button>
                 </div>
             </div>
 
@@ -173,7 +64,7 @@
             <div id="score-area"></div>
 
             <!-- Tab 导航 -->
-            <div id="result-tabs" style="display:none; border-bottom:1px solid #30363d; margin-top:12px;">
+            <div id="result-tabs" class="result-tabs" style="display:none;">
                 <button class="tab-btn active" data-tab="overview" onclick="switchTab('overview')">📊 概览</button>
                 <button class="tab-btn" data-tab="evidence" onclick="switchTab('evidence')">🔍 证据链</button>
                 <button class="tab-btn" data-tab="features" onclick="switchTab('features')">🧩 特征卡片</button>
@@ -192,72 +83,72 @@
 
             <!-- Tab: 证据链 -->
             <div id="tab-evidence" class="tab-panel">
-                <div id="evidence-panel" style="padding:16px; background:#161b22; border-radius:8px; border:1px solid #30363d;">
-                    <h3 style="color:#58a6ff; margin:0 0 12px;">🔗 证据链 / Evidence Chain (<span id="evidence-count">0</span> 条)</h3>
+                <div id="evidence-panel" class="panel-box">
+                    <h3>🔗 证据链 / Evidence Chain (<span id="evidence-count">0</span> 条)</h3>
                     <div id="evidence-list"></div>
                 </div>
             </div>
 
             <!-- Tab: 特征卡片 -->
             <div id="tab-features" class="tab-panel">
-                <div id="feature-cards-area" style="padding:16px; background:#161b22; border-radius:8px; border:1px solid #30363d;">
-                    <h3 style="color:#58a6ff; margin:0 0 12px;">🧩 特征卡片 / Feature Cards</h3>
-                    <div id="feature-cards-list"><p style="color:#8b949e;">暂无特征卡片</p></div>
+                <div id="feature-cards-area" class="panel-box">
+                    <h3>🧩 特征卡片 / Feature Cards</h3>
+                    <div id="feature-cards-list"><p class="muted">暂无特征卡片</p></div>
                 </div>
             </div>
 
             <!-- Tab: 权利要求树 -->
             <div id="tab-claims" class="tab-panel">
-                <div id="claim-tree-area" style="padding:16px; background:#161b22; border-radius:8px; border:1px solid #30363d;">
-                    <h3 style="color:#d2a8ff; margin:0 0 12px;">🌳 权利要求树 / Claim Tree</h3>
-                    <div id="claim-tree-content"><p style="color:#8b949e;">暂无权利要求树数据</p></div>
+                <div id="claim-tree-area" class="panel-box">
+                    <h3 class="violet-title">🌳 权利要求树 / Claim Tree</h3>
+                    <div id="claim-tree-content"><p class="muted">暂无权利要求树数据</p></div>
                 </div>
             </div>
 
             <!-- Tab: 关键发现 -->
             <div id="tab-findings" class="tab-panel">
-                <div id="key-findings-panel" style="padding:16px; background:#161b22; border-radius:8px; border:1px solid #30363d;">
-                    <h3 style="color:#58a6ff; margin:0 0 12px;">🔑 关键发现 / Key Findings (<span id="key-findings-count">0</span>)</h3>
-                    <div id="key-findings-list"><p style="color:#8b949e;">暂无发现记录</p></div>
+                <div id="key-findings-panel" class="panel-box">
+                    <h3>🔑 关键发现 / Key Findings (<span id="key-findings-count">0</span>)</h3>
+                    <div id="key-findings-list"><p class="muted">暂无发现记录</p></div>
                 </div>
             </div>
 
             <!-- Tab: 讨论 -->
             <div id="tab-chat" class="tab-panel">
-                <div id="discussion-panel" style="padding:20px; background:#161b22; border-radius:8px; border:1px solid #30363d;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-                        <h3 style="margin:0; color:#58a6ff;" id="disc-title" data-i18n="idea.discussTitle"></h3>
-                        <div style="display:flex; gap:6px; align-items:center;">
-                            <span style="font-size:0.82em; color:#8b949e;" id="chat-depth-label" data-i18n="idea.chatDepth"></span>
-                            <select id="chat-depth-select" onchange="chatDepth=this.value" style="background:#21262d; color:#c9d1d9; border:1px solid #30363d; border-radius:6px; padding:4px 8px; font-size:0.82em;">
+                <div id="discussion-panel" class="panel-box">
+                    <div class="discussion-toolbar">
+                        <h3 id="disc-title" data-i18n="idea.discussTitle"></h3>
+                        <div class="toolbar-right">
+                            <span class="muted" id="chat-depth-label" data-i18n="idea.chatDepth"></span>
+                            <select id="chat-depth-select" class="depth-select" onchange="chatDepth=this.value">
                                 <option value="shallow" data-i18n="idea.depthShallow">浅度（探索）</option>
                                 <option value="medium" selected data-i18n="idea.depthMedium">中度（收敛）</option>
                                 <option value="deep" data-i18n="idea.depthDeep">深度（苏格拉底）</option>
                             </select>
-                            <button onclick="exportConclusions()" style="background:#6e7681; padding:4px 12px; font-size:0.85em; white-space:nowrap;" id="export-conclusions-btn" data-i18n="idea.exportConclusions"></button>
-                            <button onclick="summarizeDiscussion()" style="background:#238636; padding:4px 12px; font-size:0.85em;" id="summary-btn" data-i18n="idea.generateSummary"></button>
+                            <button class="btn-secondary" style="padding:4px 12px;" onclick="exportConclusions()" id="export-conclusions-btn" data-i18n="idea.exportConclusions"></button>
+                            <button class="btn-success-sm" onclick="summarizeDiscussion()" id="summary-btn" data-i18n="idea.generateSummary"></button>
                         </div>
                     </div>
-                    <div id="discussion-summary" style="display:none; margin-bottom:12px; padding:12px; background:#0d1117; border-radius:6px; border-left:3px solid #58a6ff;">
+                    <div id="discussion-summary" class="discussion-summary">
                     </div>
                     <div style="position:relative;">
-                        <div id="chat-messages" style="max-height:400px; overflow-y:auto; margin-bottom:12px;">
+                        <div id="chat-messages" class="chat-messages-idea">
                         </div>
                         <button class="scroll-bottom-btn" id="scroll-bottom-btn-idea" onclick="scrollIdeaChatToBottom()">↓</button>
                     </div>
-                    <div id="chat-attachments" style="display:none; margin-bottom:6px; font-size:0.85em;"></div>
-                    <div style="display:flex; gap:8px; align-items:flex-end;">
-                        <div style="flex:1; position:relative;">
-                            <textarea id="chat-input" data-i18n-placeholder="idea.chatPlaceholder" rows="3" style="width:100%; padding:8px 12px; background:#0d1117; border:1px solid #30363d; border-radius:6px; color:#c9d1d9; resize:vertical; min-height:60px; max-height:300px; font-size:0.95em; font-family:inherit;" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMessage();}"></textarea>
+                    <div id="chat-attachments" class="muted" style="display:none; margin-bottom:6px;"></div>
+                    <div class="chat-input-row">
+                        <div class="chat-input-box">
+                            <textarea id="chat-input" data-i18n-placeholder="idea.chatPlaceholder" rows="3" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMessage();}"></textarea>
                             <div id="idea-image-preview-area" style="display:none; gap:6px; flex-wrap:wrap; padding:4px 0;"></div>
                         </div>
-                        <div style="display:flex; flex-direction:column; gap:4px;">
-                            <label style="background:#21262d; padding:8px 10px; border-radius:6px; cursor:pointer; text-align:center; border:1px solid #30363d; font-size:0.85em; color:#8b949e;" title="上传图片或文件">
+                        <div class="chat-actions-col">
+                            <label class="file-upload-label" title="上传图片或文件">
                                 📎
                                 <input type="file" id="chat-file-input" multiple accept=".pdf,.docx,.doc,.txt,.png,.jpg,.jpeg,.gif,.webp" style="display:none;" onchange="handleChatFileSelect(this)">
                             </label>
-                            <button id="idea-send-btn" onclick="sendChatMessage()" style="background:#238636; padding:8px 16px; white-space:nowrap; border-radius:6px;" data-i18n="idea.send"></button>
-                            <button id="idea-stop-btn" onclick="stopIdeaGeneration()" style="display:none;background:#21262d; padding:8px 12px; white-space:nowrap; border-radius:6px; border:1px solid #f85149; color:#f85149; font-size:0.9em;" data-i18n="idea.stop"></button>
+                            <button class="btn-success-sm" id="idea-send-btn" onclick="sendChatMessage()" data-i18n="idea.send"></button>
+                            <button class="btn-stop" style="display:none" id="idea-stop-btn" onclick="stopIdeaGeneration()" data-i18n="idea.stop"></button>
                         </div>
                     </div>
                 </div>
@@ -265,35 +156,34 @@
 
             <!-- Tab: 报告 -->
             <div id="tab-report" class="tab-panel">
-                <div id="report-panel" style="padding:16px; background:#161b22; border-radius:8px; border:1px solid #30363d;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-                        <h3 style="color:#58a6ff; margin:0;">📄 报告 / Report</h3>
-                        <div id="report-type-switcher" style="display:flex; border:1px solid #30363d; border-radius:6px; overflow:hidden;">
-                            <button class="report-type-btn active" data-rtype="full" onclick="switchReportType('full')" style="padding:5px 12px;font-size:0.82em;border:none;cursor:pointer;background:#1f6feb;color:#fff;">完整版</button>
-                            <button class="report-type-btn" data-rtype="technical" onclick="switchReportType('technical')" style="padding:5px 12px;font-size:0.82em;border:none;cursor:pointer;background:#21262d;color:#8b949e;">技术版</button>
-                            <button class="report-type-btn" data-rtype="executive" onclick="switchReportType('executive')" style="padding:5px 12px;font-size:0.82em;border:none;cursor:pointer;background:#21262d;color:#8b949e;">精简版</button>
+                <div id="report-panel" class="panel-box">
+                    <div class="page-header-row">
+                        <h3 style="margin:0;">📄 报告 / Report</h3>
+                        <div id="report-type-switcher" class="mode-pills">
+                            <button class="report-type-btn active" data-rtype="full" onclick="switchReportType('full')">完整版</button>
+                            <button class="report-type-btn" data-rtype="technical" onclick="switchReportType('technical')">技术版</button>
+                            <button class="report-type-btn" data-rtype="executive" onclick="switchReportType('executive')">精简版</button>
                         </div>
                     </div>
-                    <div id="report-content" style="line-height:1.7; color:#c9d1d9;"><p style="color:#8b949e;">完成推演后可查看报告</p></div>
+                    <div id="report-content" style="line-height:1.7; color:var(--text-secondary);"><p class="muted">完成推演后可查看报告</p></div>
                     <div style="margin-top:12px; text-align:right;">
-                        <button id="report-open-btn" onclick="openReportInNewTab()" style="display:none; padding:6px 14px; background:#8b5cf6; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:0.85em;">在新窗口打开</button>
+                        <button id="report-open-btn" class="ai-btn violet" style="display:none; width:auto; padding:6px 14px; font-size:0.85em;" onclick="openReportInNewTab()">在新窗口打开</button>
                     </div>
                 </div>
             </div>
 
             <!-- Tab: 版本历史 -->
             <div id="tab-versions" class="tab-panel">
-                <div id="version-history-panel" style="padding:16px; background:#161b22; border-radius:8px; border:1px solid #30363d;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-                        <h3 style="color:#d2a8ff; margin:0;">📜 版本历史 / Version History (<span id="version-count">0</span>)</h3>
-                        <button id="iterate-from-versions-btn" onclick="if(currentIdeaId) startIterate(currentIdeaId);" style="display:none; padding:5px 14px; background:#1f6feb; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:0.85em;">继续迭代</button>
+                <div id="version-history-panel" class="panel-box">
+                    <div class="page-header-row">
+                        <h3 class="violet-title" style="margin:0;">📜 版本历史 / Version History (<span id="version-count">0</span>)</h3>
+                        <button id="iterate-from-versions-btn" class="btn-primary" style="display:none; padding:5px 14px; font-size:0.85em;" onclick="if(currentIdeaId) startIterate(currentIdeaId);">继续迭代</button>
                     </div>
-                    <div id="version-list"><p style="color:#8b949e;">暂无版本历史</p></div>
+                    <div id="version-list"><p class="muted">暂无版本历史</p></div>
                 </div>
             </div>
         </div>
     </div>
-    <aside id="page-sidebar" class="page-sidebar"></aside>
     </div>
 
     <script src="/static/i18n.js"></script>

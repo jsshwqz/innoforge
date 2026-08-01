@@ -589,26 +589,45 @@ function renderNavbar(activePage) {
   if (nav) nav.style.display = 'none';
 }
 
-// Render right sidebar: navigation + language switch + page-specific controls
+// 导航图标（内联 SVG，随 currentColor 变色）
+var _NAV_ICONS = {
+  home: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 7.5 8 3l5.5 4.5V13a1.5 1.5 0 0 1-1.5 1.5H4A1.5 1.5 0 0 1 2.5 13Z"/><path d="M6.5 14.5v-4h3v4"/></svg>',
+  idea: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.5a4.5 4.5 0 0 0-2.6 8.2c.5.4.9 1 .9 1.6v.2a1 1 0 0 0 1 1h1.4a1 1 0 0 0 1-1v-.2c0-.6.4-1.2.9-1.6A4.5 4.5 0 0 0 8 1.5Z"/><path d="M6.5 13.5h3M7.5 11v2.5"/></svg>',
+  search: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3.5 3.5"/></svg>',
+  compare: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="1.5" y="2.5" width="5.5" height="9" rx="1"/><rect x="9" y="2.5" width="5.5" height="9" rx="1"/><path d="M4.25 14v-2.5M11.75 14v-2.5"/></svg>',
+  oar: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 1.5h4.5L12 5v9a.5.5 0 0 1-.5.5h-7A.5.5 0 0 1 4 14Z"/><path d="M8.5 1.5V5H12M6 9.5h4M6 11.5h2.5"/></svg>',
+  ai: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3.5A1.5 1.5 0 0 1 3.5 2h9A1.5 1.5 0 0 1 14 3.5V9a1.5 1.5 0 0 1-1.5 1.5H7l-3.2 2.7V10.5H3.5A1.5 1.5 0 0 1 2 9Z"/><path d="M5.5 6h5M5.5 8h3"/></svg>',
+  settings: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="2.3"/><path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M12.4 3.6l-1.1 1.1M4.7 11.3l-1.1 1.1"/></svg>'
+};
+
+// Render right sidebar: brand + navigation + language switch + page-specific controls
 function renderSidebar(extraHtml) {
   var el = document.getElementById('page-sidebar');
   if (!el) return;
   var fromPath = location.pathname;
   var links = [
-    { href: '/', key: 'nav.home', id: 'home' },
-    { href: '/idea', key: 'nav.idea', id: 'idea' },
-    { href: '/search', key: 'nav.search', id: 'search' },
-    { href: '/compare', key: 'nav.compare', id: 'compare' },
-    { href: '/oa-response', key: 'nav.oar', id: 'oar' },
-    { href: '/ai', key: 'nav.ai', id: 'ai' },
-    { href: '/settings?from=' + encodeURIComponent(fromPath), key: 'nav.settings', id: 'settings' }
+    { href: '/', key: 'nav.home', id: 'home', icon: 'home' },
+    { href: '/idea', key: 'nav.idea', id: 'idea', icon: 'idea' },
+    { href: '/search', key: 'nav.search', id: 'search', icon: 'search' },
+    { href: '/compare', key: 'nav.compare', id: 'compare', icon: 'compare' },
+    { href: '/oa-response', key: 'nav.oar', id: 'oar', icon: 'oar' },
+    { href: '/ai', key: 'nav.ai', id: 'ai', icon: 'ai' },
+    { href: '/settings?from=' + encodeURIComponent(fromPath), key: 'nav.settings', id: 'settings', icon: 'settings' }
   ];
+  // Brand
+  var html = '<div class="sidebar-brand">'
+    + '<div class="brand-mark">IF</div>'
+    + '<div><div class="brand-name">InnoForge</div>'
+    + '<span class="brand-sub">创研台</span></div>'
+    + '</div>';
   // Navigation section
-  var html = '<div class="sidebar-section">';
+  html += '<div class="sidebar-section">';
+  html += '<div class="sidebar-label">' + (i18nLang === 'zh' ? '导航' : 'Navigation') + '</div>';
   html += '<div class="sidebar-nav">';
   for (var i = 0; i < links.length; i++) {
     var cls = (links[i].id === _activePage) ? ' class="active"' : '';
-    html += '<a href="' + links[i].href + '"' + cls + ' data-i18n="' + links[i].key + '">' + t(links[i].key) + '</a>';
+    html += '<a href="' + links[i].href + '"' + cls + ' data-i18n="' + links[i].key + '">'
+      + _NAV_ICONS[links[i].icon] + '<span>' + t(links[i].key) + '</span></a>';
   }
   html += '</div></div>';
   // Language section

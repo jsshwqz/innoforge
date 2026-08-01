@@ -11,94 +11,10 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
     <script src="/static/purify.min.js"></script>
-    <style>
-        .settings-container {
-            max-width: 900px;
-            margin: 24px auto;
-            padding: 30px;
-            background: #1e1e1e;
-            border-radius: 8px;
-        }
-        .setting-group {
-            margin-bottom: 30px;
-            padding: 20px;
-            background: #2a2a2a;
-            border-radius: 6px;
-        }
-        .setting-group h3 {
-            margin-top: 0;
-            color: #4a9eff;
-            font-size: 18px;
-        }
-        .setting-group p {
-            color: #999;
-            font-size: 14px;
-            margin: 10px 0;
-        }
-        .form-group {
-            margin: 15px 0;
-        }
-        .form-group label {
-            display: block;
-            margin-bottom: 8px;
-            color: #ccc;
-            font-weight: 500;
-        }
-        .form-group input, .form-group select {
-            width: 100%;
-            padding: 10px;
-            background: #1a1a1a;
-            border: 1px solid #444;
-            border-radius: 4px;
-            color: #fff;
-            font-size: 14px;
-        }
-        .form-group input:focus, .form-group select:focus {
-            outline: none;
-            border-color: #4a9eff;
-        }
-        .btn-save {
-            background: #4a9eff;
-            color: white;
-            padding: 12px 30px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 16px;
-            margin-top: 10px;
-        }
-        .btn-save:hover {
-            background: #3a8eef;
-        }
-        .status-message {
-            margin-top: 15px;
-            padding: 10px;
-            border-radius: 4px;
-            display: none;
-        }
-        .status-message.success {
-            background: #1a4d2e;
-            color: #4ade80;
-            border: 1px solid #4ade80;
-        }
-        .status-message.error {
-            background: #4d1a1a;
-            color: #f87171;
-            border: 1px solid #f87171;
-        }
-        .help-link {
-            color: #4a9eff;
-            text-decoration: none;
-            font-size: 13px;
-        }
-        .help-link:hover {
-            text-decoration: underline;
-        }
-    </style>
 </head>
 <body>
-    <nav id="global-nav"></nav>
     <div class="page-with-sidebar">
+    <aside id="page-sidebar" class="page-sidebar"></aside>
     <div class="settings-container page-main">
         <h2>系统设置</h2>
 
@@ -106,18 +22,20 @@
             <h3>🔑 SerpAPI 搜索配置（多 Key 轮询）</h3>
 
             <p>配置多个 SerpAPI Key 自动轮询，突破单账号每月 250 次限制。未配置时自动回退本地数据库。</p>
-            <p style="color:#f0ad4e;font-size:13px;">注册地址：<a href="https://serpapi.com/manage-api-key" target="_blank">https://serpapi.com/manage-api-key</a></p>
+            <p class="warn-text">注册地址：<a href="https://serpapi.com/manage-api-key" target="_blank">https://serpapi.com/manage-api-key</a></p>
             <div id="serpapi-key-list"></div>
-            <button class="btn-save" style="background:#21262d;margin-top:8px;" onclick="addSerpapiKeyRow()">+ 添加 SerpAPI Key</button>
-            <button class="btn-save" onclick="saveSerpApiKey()">保存</button>
+            <div class="btn-row" style="margin-top:8px;">
+                <button class="btn-gray btn-save" onclick="addSerpapiKeyRow()">+ 添加 SerpAPI Key</button>
+                <button class="btn-save" onclick="saveSerpApiKey()">保存</button>
+            </div>
             <div id="serpapi-status" class="status-message"></div>
 
-            <div style="margin-top:15px;padding:12px;background:#161b22;border:1px solid #30363d;border-radius:6px;">
-                <strong style="color:#58a6ff;">📊 SerpAPI 余额 / 用量</strong>
-                <div id="serpapi-balance-content" style="margin-top:8px;color:#c9d1d9;font-size:14px;">
+            <div class="sub-box">
+                <strong style="color:var(--accent-hover);">📊 SerpAPI 余额 / 用量</strong>
+                <div id="serpapi-balance-content" style="margin-top:8px;color:var(--text-secondary);font-size:var(--fs-base);">
                     点击查询加载...
                 </div>
-                <button class="btn-save" style="background:#21262d;margin-top:8px;padding:6px 16px;font-size:13px;" onclick="fetchSerpapiBalance()">🔄 刷新余额</button>
+                <button class="btn-gray btn-save" style="margin-top:8px;padding:6px 16px;font-size:13px;" onclick="fetchSerpapiBalance()">🔄 刷新余额</button>
             </div>
         </div>
 
@@ -127,7 +45,7 @@
 
             <div class="form-group">
                 <label>AI 服务商</label>
-                <select id="ai-provider" style="width:100%;padding:10px;background:#1a1a1a;border:1px solid #444;border-radius:4px;color:#fff;font-size:14px;">
+                <select id="ai-provider">
                     <option value="deepseek">DeepSeek（当前）</option>
                     <option value="anthropic">Anthropic Claude（法律推理最强）</option>
                     <option value="xiaomi">小米 MiMo（支持看图）</option>
@@ -149,29 +67,29 @@
             <div class="form-group">
                 <label>API Base URL</label>
                 <input type="text" id="ai-base-url" value="https://api.deepseek.com/v1" placeholder="https://api.deepseek.com/v1">
-                <span style="color:#999;font-size:13px;" id="ai-base-hint">兼容 OpenAI 格式的 API 地址</span>
+                <span class="form-hint" id="ai-base-hint">兼容 OpenAI 格式的 API 地址</span>
             </div>
 
             <div class="form-group">
                 <label>AI 模型（默认）</label>
-                <select id="ai-model" style="width:100%;padding:10px;background:#1a1a1a;border:1px solid #444;border-radius:4px;color:#fff;font-size:14px;">
+                <select id="ai-model">
                 </select>
                 <div id="custom-model-group" class="form-group" style="display:none;margin-top:8px;">
                     <label>自定义模型名称</label>
                     <input type="text" id="ai-model-custom" placeholder="输入模型名称">
                 </div>
-                <span style="color:#999;font-size:13px;" id="ai-model-hint">选择模型或切换至自定义输入</span>
+                <span class="form-hint" id="ai-model-hint">选择模型或切换至自定义输入</span>
             </div>
 
             <div class="form-group">
                 <label>专家模型（深度分析）</label>
-                <select id="ai-model-expert" style="width:100%;padding:10px;background:#1a1a1a;border:1px solid #444;border-radius:4px;color:#fff;font-size:14px;">
+                <select id="ai-model-expert">
                 </select>
                 <div id="custom-expert-model-group" class="form-group" style="display:none;margin-top:8px;">
                     <label>自定义专家模型名称</label>
                     <input type="text" id="ai-model-expert-custom" placeholder="输入模型名称">
                 </div>
-                <span style="color:#999;font-size:13px;">用于创新推演、创造性分析、侵权评估等高推理任务</span>
+                <span class="form-hint">用于创新推演、创造性分析、侵权评估等高推理任务</span>
             </div>
 
             <button class="btn-save" onclick="saveAiConfig()">保存</button>
@@ -183,31 +101,31 @@
             <p>Google 账号认证后可获得比免费 API Key 更好的频率限制和配额。</p>
 
             <!-- ── gcloud CLI 方式（推荐）── -->
-            <div style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:15px;margin-bottom:16px;">
-                <h4 style="margin:0 0 8px 0;color:#58a6ff;">方式一：gcloud CLI 自动识别 <span style="font-size:12px;color:#8b949e;font-weight:normal;">（推荐，无需配置 OAuth 同意屏幕）</span></h4>
-                <p style="color:#c9d1d9;font-size:14px;margin:8px 0;">
-                    需要先安装 <a href="https://cloud.google.com/sdk/docs/install" target="_blank" style="color:#58a6ff;">gcloud CLI</a>，
+            <div class="sub-box" style="margin-bottom:16px;">
+                <h4>方式一：gcloud CLI 自动识别 <span style="font-size:12px;color:var(--text-muted);font-weight:normal;">（推荐，无需配置 OAuth 同意屏幕）</span></h4>
+                <p style="color:var(--text-secondary);font-size:var(--fs-base);margin:8px 0;">
+                    需要先安装 <a href="https://cloud.google.com/sdk/docs/install" target="_blank" style="color:var(--accent-hover);">gcloud CLI</a>，
                     然后运行以下命令登录：
                 </p>
-                <pre style="background:#0d1117;padding:10px;border-radius:4px;color:#c9d1d9;font-size:13px;overflow-x:auto;white-space:pre-wrap;word-break:break-all;">gcloud auth application-default login --scopes=https://www.googleapis.com/auth/generative-language,openid,email</pre>
-                <p style="color:#8b949e;font-size:13px;">执行后浏览器将打开 Google 授权页面，登录即可。</p>
+                <pre style="background:var(--bg-inset);padding:10px;border-radius:var(--r-sm);color:var(--text-secondary);font-size:13px;overflow-x:auto;white-space:pre-wrap;word-break:break-all;">gcloud auth application-default login --scopes=https://www.googleapis.com/auth/generative-language,openid,email</pre>
+                <p class="muted" style="font-size:13px;">执行后浏览器将打开 Google 授权页面，登录即可。</p>
 
-                <div id="gcloud-status" style="margin-top:10px;padding:10px;background:#0d1117;border:1px solid #30363d;border-radius:6px;font-size:13px;color:#8b949e;">检测 gcloud 状态中...</div>
+                <div id="gcloud-status" class="status-pill">检测 gcloud 状态中...</div>
 
-                <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
-                    <button class="btn-save" id="gcloud-detect-btn" onclick="detectGcloud()" style="background:#21262d;padding:8px 16px;font-size:13px;">🔄 检测 gcloud 状态</button>
-                    <button class="btn-save" id="gcloud-login-btn" onclick="loginWithGcloud()" style="background:#4285f4;padding:8px 16px;font-size:13px;">🔑 通过 gcloud CLI 登录</button>
+                <div class="btn-row">
+                    <button class="btn-gray btn-save" id="gcloud-detect-btn" onclick="detectGcloud()" style="padding:8px 16px;font-size:13px;">🔄 检测 gcloud 状态</button>
+                    <button class="btn-google btn-save" id="gcloud-login-btn" onclick="loginWithGcloud()" style="padding:8px 16px;font-size:13px;">🔑 通过 gcloud CLI 登录</button>
                 </div>
                 <div id="gcloud-msg" class="status-message"></div>
             </div>
 
             <!-- ── 浏览器 OAuth 方式（备选）── -->
-            <details style="margin-top:8px;">
-                <summary style="cursor:pointer;color:#8b949e;font-size:14px;padding:8px;background:#1e1e1e;border-radius:4px;">
+            <details class="details-box">
+                <summary>
                     ⚙️ 备用方式：浏览器 OAuth（需配置 OAuth 同意屏幕）
                 </summary>
-                <div style="padding:12px;background:#161b22;border:1px solid #30363d;border-radius:6px;margin-top:8px;">
-                    <p style="color:#f0ad4e;font-size:13px;">⚠️ 此方式需要 Google Cloud Console 中正确配置 OAuth 同意屏幕并添加 generative-language 作用域。</p>
+                <div class="sub-box" style="margin-top:8px;">
+                    <p class="warn-text">⚠️ 此方式需要 Google Cloud Console 中正确配置 OAuth 同意屏幕并添加 generative-language 作用域。</p>
 
                     <div class="form-group">
                         <label>Google Client ID</label>
@@ -222,29 +140,31 @@
                         <input type="password" id="google-client-secret" placeholder="GOCSPX-xxxxxxxxxxxx">
                     </div>
 
-                    <div id="google-oauth-status" style="margin-bottom:12px;padding:10px;background:#0d1117;border:1px solid #30363d;border-radius:6px;font-size:14px;"></div>
+                    <div id="google-oauth-status" class="status-pill" style="font-size:var(--fs-base);"></div>
 
-                    <button class="btn-save" onclick="saveGoogleCredentials()" style="background:#21262d;margin-right:8px;padding:8px 16px;font-size:13px;">保存凭据</button>
-                    <button class="btn-save" id="google-connect-btn" onclick="connectGoogle()" disabled style="background:#4285f4;padding:8px 16px;font-size:13px;">
-                        <span id="google-btn-text">🔗 使用 Google 账号登录</span>
-                    </button>
+                    <div class="btn-row">
+                        <button class="btn-gray btn-save" onclick="saveGoogleCredentials()" style="padding:8px 16px;font-size:13px;">保存凭据</button>
+                        <button class="btn-google btn-save" id="google-connect-btn" onclick="connectGoogle()" disabled style="padding:8px 16px;font-size:13px;">
+                            <span id="google-btn-text">🔗 使用 Google 账号登录</span>
+                        </button>
+                    </div>
                     <div id="google-oauth-msg" class="status-message"></div>
                 </div>
             </details>
 
-            <div id="google-auth-status-line" style="margin-top:12px;padding:10px;background:#161b22;border:1px solid #30363d;border-radius:6px;font-size:14px;"></div>
+            <div id="google-auth-status-line" class="status-pill" style="font-size:var(--fs-base);"></div>
 
             <!-- ── Gemini CLI 方式（新增）── -->
-            <div style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:15px;margin-top:16px;">
-                <h4 style="margin:0 0 8px 0;color:#58a6ff;">方式三：Gemini CLI 子进程模式 <span style="font-size:12px;color:#8b949e;font-weight:normal;">（无需 API Key）</span></h4>
-                <p style="color:#c9d1d9;font-size:14px;margin:8px 0;">
-                    使用已安装的 <code style="background:#1e1e1e;padding:1px 4px;border-radius:2px;">gemini</code> CLI 工具进行 AI 推理，
+            <div class="sub-box" style="margin-top:16px;">
+                <h4>方式三：Gemini CLI 子进程模式 <span style="font-size:12px;color:var(--text-muted);font-weight:normal;">（无需 API Key）</span></h4>
+                <p style="color:var(--text-secondary);font-size:var(--fs-base);margin:8px 0;">
+                    使用已安装的 <code style="background:var(--bg-elevated);padding:1px 4px;border-radius:2px;">gemini</code> CLI 工具进行 AI 推理，
                     完全绕过 API Key 和 OAuth 作用域限制。启用后所有 AI 请求将改由 Gemini CLI 子进程处理。
                 </p>
-                <div id="gemini-cli-status" style="margin-top:10px;padding:10px;background:#0d1117;border:1px solid #30363d;border-radius:6px;font-size:13px;color:#8b949e;">检测 Gemini CLI 状态中...</div>
-                <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-                    <button class="btn-save" onclick="detectGeminiCli()" style="background:#21262d;padding:8px 16px;font-size:13px;">🔄 检测 Gemini CLI</button>
-                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#c9d1d9;font-size:14px;margin-left:8px;">
+                <div id="gemini-cli-status" class="status-pill">检测 Gemini CLI 状态中...</div>
+                <div class="btn-row" style="align-items:center;">
+                    <button class="btn-gray btn-save" onclick="detectGeminiCli()" style="padding:8px 16px;font-size:13px;">🔄 检测 Gemini CLI</button>
+                    <label class="sidebar-toggle" style="margin-left:8px;">
                         <input type="checkbox" id="gemini-cli-toggle" onchange="toggleGeminiCliMode()">
                         <span>启用 Gemini CLI 模式</span>
                     </label>
@@ -260,7 +180,6 @@
             <p id="config-status">加载中...</p>
         </div>
     </div>
-    <aside id="page-sidebar" class="page-sidebar"></aside>
     </div>
 
     <script src="/static/i18n.js"></script>
