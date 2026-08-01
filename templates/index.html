@@ -49,9 +49,21 @@
 
                 <!-- 模式选择 -->
                 <div class="mode-toggle">
-                    <button class="mode-btn active" onclick="setMode('chat')" id="mode-chat">AI 对话梳理</button>
-                    <button class="mode-btn" onclick="setMode('quick')" id="mode-quick">快速推演</button>
-                    <button class="mode-btn" onclick="setMode('deep')" id="mode-deep">深度推演</button>
+                    <button class="mode-btn active" onclick="setMode('chat')" id="mode-chat">
+                        <span class="mode-icon">💬</span>
+                        <span class="mode-name">AI 对话梳理</span>
+                        <span class="mode-desc">先与 AI 讨论，梳理技术方案后再验证</span>
+                    </button>
+                    <button class="mode-btn" onclick="setMode('quick')" id="mode-quick">
+                        <span class="mode-icon">⚡</span>
+                        <span class="mode-name">快速推演</span>
+                        <span class="mode-desc">6 步快速验证可行性，约 30 秒</span>
+                    </button>
+                    <button class="mode-btn" onclick="setMode('deep')" id="mode-deep">
+                        <span class="mode-icon">🧠</span>
+                        <span class="mode-name">深度推演</span>
+                        <span class="mode-desc">13 步全链路调研，约 2-5 分钟</span>
+                    </button>
                 </div>
                 <div class="mode-hint" id="mode-hint">先与 AI 对话，梳理技术方案、拆解创新点，确认后再验证</div>
 
