@@ -8,6 +8,23 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-08-02 — 前端全面重新设计 + Linear 式高级深色视觉升级
+
+- **状态 / Status**: ✅ 已完成 / Completed
+- **范围 / Scope**: 前端从赛博毛玻璃风全面重设计为 Linear/Raycast 式高级科技深色；导航移回页面右侧；修复 OA 讨论既有问题（附件随消息发送、历史讨论 onclick/data-id 注入面、onmouseleave 语法与 DOM 闭合）
+- **提交 / Commits**:
+  - `42c726e` feat: 前端全面重新设计为精致深色专业风（设计系统 token + 组件库、8 页模板重构、内联样式收敛）
+  - `5f365d6` feat: 增强前端视觉辨识度（渐变品牌/模式卡片/页面标题区）
+  - `6bc537a` feat: 首页功能卡入口与检索详情视觉细节增强
+  - `5465371` feat: 升级 Linear 式高级深色视觉并将导航移回右侧
+  - `d091dd8` fix: 清除 Linear 主题残留的旧蓝色硬编码
+  - `56f10e4` fix: 专利详情导航激活态映射与论点看板初始隐藏修复
+  - `00c9e9a` docs: 记录专利详情激活态与论点看板显示修复
+  - `e7defd4` fix: OA讨论附件随消息发送与历史讨论入口安全修复
+  - `51388ec` fix: 彻底消除历史讨论 data-id 属性注入面并修复 DOM 闭合
+- **验证 / Verification**: Puppeteer E2E 48/48（release 实测）；`cargo test --lib` 137 passed；`cargo fmt --check`/`cargo clippy -D warnings` 通过；security_review 与 review 无阻断；浏览器冒烟确认右侧导航与 Linear token 生效
+- **记录 / Records**: `docs/plans/2026-08-02-frontend-redesign.md`
+
 ### 2026-07-17 — v0.7.4 双平台发布完成
 
 - **状态 / Status**: ✅ 已完成 / Completed
