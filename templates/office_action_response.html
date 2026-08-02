@@ -2553,6 +2553,11 @@
         return div.innerHTML;
     }
 
+    // HTML 属性上下文转义：在 escapeHtml 基础上额外转义双引号，防止属性逃逸注入
+    function escapeAttr(str) {
+        return escapeHtml(String(str == null ? '' : str)).replace(/"/g, '&quot;');
+    }
+
     async function loadOADiscussionHistory() {
         var listEl = document.getElementById('oa-history-list');
         if (!listEl) return;
@@ -2581,10 +2586,10 @@
                 var created = d.created_at || '';
                 var displayId = (d.discussion_id || '').substring(0, 12);
                 html += '<div style="padding:8px 12px;border-bottom:1px solid #30363d;cursor:pointer;display:flex;justify-content:space-between;align-items:center;" '
-                      + 'data-id="' + escapeHtml(d.discussion_id) + '" '
+                      + 'data-id="' + escapeAttr(d.discussion_id) + '" '
                       + 'onclick="recoverOADiscussion(this.getAttribute(\'data-id\'))" '
                       + 'onmouseenter="this.style.background=\'rgba(255,255,255,0.05)\'" '
-                      + 'onmouseleave="this.style.background=\'transparent\'"';
+                      + 'onmouseleave="this.style.background=\'transparent\'">';
                 html += '<div><span style="font-family:monospace;font-size:12px;color:#58a6ff;">' + escapeHtml(displayId) + '</span> ';
                 html += '<span style="font-size:11px;color:#8b949e;margin-left:8px;">' + escapeHtml(created) + '</span></div>';
                 html += '<span style="font-size:11px;color:#8b949e;">' + msgs + ' 条</span></div>';
