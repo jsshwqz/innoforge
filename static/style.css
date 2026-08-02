@@ -757,7 +757,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); curso
 .cmp-label.blue { color: var(--accent-hover); font-weight: 600; }
 .oa-inline-row { display: flex; gap: var(--sp-3); align-items: center; flex-wrap: wrap; }
 .oa-inline-row .muted { font-size: var(--fs-md); }
-.arg-board { display: none; margin-bottom: var(--sp-3); padding: var(--sp-3); background: var(--bg-inset); border: 1px solid var(--border-muted); border-radius: var(--r-md); }
+.arg-board { margin-bottom: var(--sp-3); padding: var(--sp-3); background: var(--bg-inset); border: 1px solid var(--border-muted); border-radius: var(--r-md); }
 .arg-board-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--sp-2); }
 .arg-board-header .arg-title { color: var(--accent-hover); font-weight: 600; font-size: var(--fs-md); }
 .arg-board-header .arg-extract { color: var(--text-muted); font-size: var(--fs-xs); cursor: pointer; transition: var(--t); }
