@@ -8,6 +8,8 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 ## [Unreleased]
 
 ### 改进 / Improved
+- **Linear 式高级深色视觉升级** — 设计体系换用 Linear/Raycast 风：底色改为纯黑紫调（`#08080f`）、主色改为靛蓝紫（`#6366f1 → #a855f7` 渐变），圆角加大、新增紫调柔光，主按钮/卡片 hover/激活态全面同步；导航栏移回页面右侧。
+  Linear-style premium dark visual upgrade: deep black-violet canvas (`#08080f`), indigo-violet accent gradient (`#6366f1 → #a855f7`), larger radii, violet glow shadows across buttons/cards/active states; sidebar navigation moved back to the right side.
 - **前端全面重新设计** — 视觉风格从赛博毛玻璃改为精致深色专业风（GitHub/Linear 式克制深色 UI）：重写 `static/style.css` 为统一设计系统（色板/间距/圆角/阴影/字体 token + 公共组件库）；8 个页面模板（首页/搜索/专利详情/研创台/AI 对话/对比/设置/OA 答复）全部重构 HTML 骨架并删除散落的内联 `<style>`（样式收敛进公共 CSS）；侧边导航升级为品牌区 + SVG 图标 + 激活态；JS 依赖的 id 与功能 class 钩子全部保留，i18n/DOMPurify 机制不变。
   Full frontend redesign: replaced the cyber-glassmorphism look with a refined dark professional UI (GitHub/Linear style). Rewrote `static/style.css` as a unified design system (color/spacing/radius/shadow/type tokens plus a component library); refactored all 8 page templates (home/search/patent-detail/idea/AI-chat/compare/settings/OA-response) and removed scattered inline `<style>` blocks into shared CSS; upgraded the sidebar navigation with a brand header, SVG icons, and active states. All JS-dependent ids and functional class hooks were preserved; i18n/DOMPurify mechanisms unchanged.
 - **搜索页 CDN 健壮性** — Chart.js 改为 `async` 加载，CDN 不可达时不再阻塞页面主体加载（统计图表仍按需可用）。
