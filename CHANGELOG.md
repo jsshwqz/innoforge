@@ -19,7 +19,11 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 - **专利详情导航激活态** — 详情页无独立导航项时，侧边导航激活态映射到「搜索」页，避免无高亮。
   Patent-detail nav active state: the sidebar now highlights "Search" on detail pages that have no dedicated nav entry.
 - **论点看板初始隐藏** — OA 页论点看板初始隐藏改由内联 `display` 控制，与 JS 显隐逻辑一致，避免 CSS `display:none` 覆盖 JS 的显示操作。
-  Argument-board initial visibility: the OA argument board is now hidden via inline `display` so JS visibility toggles are not overridden by CSS. 
+  Argument-board initial visibility: the OA argument board is now hidden via inline `display` so JS visibility toggles are not overridden by CSS.
+- **OA 讨论附件随消息发送** — 修复附件在发送前被提前清空导致图片/base64 永不随消息传给 AI 的问题，改为使用缓存值构建请求。
+  OA discussion attachments now send with messages: pending file data is read from the cached value instead of a slot cleared before the request is built.
+- **历史讨论恢复入口安全化** — 历史讨论列表的 `discussion_id` 改为 `data-id` 属性 + `getAttribute` 读取，不再拼接进 `onclick` JS 字符串字面量，消除注入面；同时修复悬停事件 `onmouseleave` 的语法错误。
+  History-discussion recovery hardened: `discussion_id` now travels via a `data-id` attribute read with `getAttribute` instead of being interpolated into an inline `onclick` string, removing the injection surface; the `onmouseleave` attribute syntax error was also fixed.
 
 ## [v0.7.4] - 2026-07-17
 
