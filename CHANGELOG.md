@@ -15,6 +15,12 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 - **搜索页 CDN 健壮性** — Chart.js 改为 `async` 加载，CDN 不可达时不再阻塞页面主体加载（统计图表仍按需可用）。
   Search-page CDN robustness: Chart.js now loads `async`, so an unreachable CDN no longer blocks page body rendering (charts remain available on demand).
 
+### 修复 / Fixed
+- **专利详情导航激活态** — 详情页无独立导航项时，侧边导航激活态映射到「搜索」页，避免无高亮。
+  Patent-detail nav active state: the sidebar now highlights "Search" on detail pages that have no dedicated nav entry.
+- **论点看板初始隐藏** — OA 页论点看板初始隐藏改由内联 `display` 控制，与 JS 显隐逻辑一致，避免 CSS `display:none` 覆盖 JS 的显示操作。
+  Argument-board initial visibility: the OA argument board is now hidden via inline `display` so JS visibility toggles are not overridden by CSS. 
+
 ## [v0.7.4] - 2026-07-17
 
 ### 新增 / Added
