@@ -67,6 +67,7 @@
     var retryMsg = '';
     var retryImages = [];
     var currentAbortController = null;
+    var chatQueue = initChatQueue('chat-msg');
     var chatOffset = 0;
     var chatTotal = 0;
     var chatPageSize = 50;
@@ -222,7 +223,7 @@
             e.stopPropagation();
             insertQuote();
         });
-        document.getElementById('chat-messages').appendChild(btn);
+        document.body.appendChild(btn);
         return btn;
     }
 
@@ -236,16 +237,16 @@
     function showQuoteButton(text, rect) {
         var btn = getQuoteBtn();
         selectedQuoteText = text;
-        var container = document.getElementById('chat-messages');
-        var cr = container.getBoundingClientRect();
-        var left = rect.right - cr.left - btn.offsetWidth / 2;
-        var top = rect.top - cr.top - 36;
-        // 确保不溢出容器边界
-        left = Math.max(4, Math.min(left, cr.width - btn.offsetWidth - 4));
+        btn.style.position = 'fixed';
+        btn.style.display = 'block';
+        var w = btn.offsetWidth;
+        var h = btn.offsetHeight;
+        var left = rect.right - w / 2;
+        var top = rect.top - h - 8;
+        left = Math.max(4, Math.min(left, window.innerWidth - w - 4));
         top = Math.max(4, top);
         btn.style.left = left + 'px';
         btn.style.top = top + 'px';
-        btn.style.display = 'block';
     }
 
     function hideQuoteButton() {
@@ -367,9 +368,11 @@
     document.getElementById('chat-msg').addEventListener('keydown', function(e) {
         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
     });
+    var aiInputHistory = initChatHistory('chat-msg');
 
     // ── 图片粘贴支持 ──
     var pastedImages = [];
+    var uploadingImage = false;  // 标记是否有图片正在上传
 
     document.getElementById('chat-msg').addEventListener('paste', function(e) {
         var items = (e.clipboardData || window.clipboardData).items;
@@ -378,11 +381,17 @@
                 e.preventDefault();
                 var file = items[i].getAsFile();
                 if (!file) continue;
+                uploadingImage = true;  // 标记开始上传
                 var reader = new FileReader();
                 reader.onload = function(ev) {
                     var base64 = ev.target.result.split(',')[1];
                     pastedImages.push(base64);
+                    uploadingImage = false;  // 标记上传完成
                     showImagePreview();
+                };
+                reader.onerror = function() {
+                    uploadingImage = false;  // 标记上传失败
+                    console.warn('[ai] 图片读取失败');
                 };
                 reader.readAsDataURL(file);
                 break;
@@ -415,33 +424,42 @@
     async function sendChat() {
         var input = document.getElementById('chat-msg');
         var msg = input.value.trim();
+        // 等待图片上传完成（如果有图片正在上传）
+        while (uploadingImage) {
+            await new Promise(function(r) { setTimeout(r, 100); });
+        }
         var images = pastedImages.slice();
         if ((!msg || !msg.trim()) && images.length === 0) return;
-        if (chatSending) {
-            if (currentAbortController) {
-                currentAbortController.abort();
-                currentAbortController = null;
-            }
-            var box = document.getElementById('chat-messages');
-            var last = box.lastChild;
-            if (last && last.classList.contains('msg') && last.classList.contains('ai') && last.id && last.id.startsWith('ai-')) {
-                box.removeChild(last);
-            }
-        }
         input.value = '';
+        aiInputHistory.push(msg);
         pastedImages = [];
         showImagePreview();
+        if (chatSending) {
+            // 排队插入：不打断当前回复，等完成后自动发送
+            chatQueue.enqueue({ msg: msg, images: images });
+            return;
+        }
+        await sendChatCore(msg, images);
+    }
+
+    async function sendChatCore(msg, images) {
         var box = document.getElementById('chat-messages');
         var userDiv = document.createElement('div');
         renderUserMessage(userDiv, msg, images);
         box.appendChild(userDiv);
         chatSending = true;
         showStopButton();
-        await doSend(msg, images);
-        chatSending = false;
-        hideStopButton();
-        input.focus();
-        box.scrollTop = box.scrollHeight;
+        try {
+            await doSend(msg, images);
+        } finally {
+            chatSending = false;
+            hideStopButton();
+            document.getElementById('chat-msg').focus();
+            box.scrollTop = box.scrollHeight;
+            // 发送完成后处理队列
+            var next = chatQueue.dequeue();
+            if (next) await sendChatCore(next.msg, next.images);
+        }
     }
 
     async function doSend(msg, images) {
