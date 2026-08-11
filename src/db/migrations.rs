@@ -448,6 +448,37 @@ pub(crate) fn run(conn: &Connection, current_version: i32, target_version: i32) 
         tracing::info!("Database migrated to version 17 (oa_text column)");
     }
 
+    // v18: persistent FreeCAD artifact revision history.
+    if current_version < 18 {
+        let tx = conn.unchecked_transaction()?;
+        tx.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS cad_artifacts (
+                id TEXT PRIMARY KEY,
+                context_kind TEXT NOT NULL CHECK(context_kind IN ('idea','patent','oa')),
+                context_id TEXT NOT NULL,
+                parent_artifact_id TEXT,
+                revision INTEGER NOT NULL,
+                prompt TEXT NOT NULL,
+                assumptions_json TEXT NOT NULL DEFAULT '[]',
+                preview_rel_path TEXT NOT NULL,
+                fcstd_rel_path TEXT NOT NULL,
+                step_rel_path TEXT,
+                validation_json TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY(parent_artifact_id) REFERENCES cad_artifacts(id),
+                UNIQUE(context_kind, context_id, revision)
+            );
+            CREATE INDEX IF NOT EXISTS idx_cad_artifacts_context_created
+            ON cad_artifacts(context_kind, context_id, created_at DESC);
+            DELETE FROM schema_version;
+            INSERT INTO schema_version (version) VALUES (18);
+            ",
+        )?;
+        tx.commit()?;
+        tracing::info!("Database migrated to version 18 (cad_artifacts)");
+    }
+
     if current_version > 0 && current_version < target_version {
         tracing::info!(
             "Database migrated from version {} to {}",

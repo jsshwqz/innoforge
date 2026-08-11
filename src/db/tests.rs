@@ -1,5 +1,59 @@
 use super::Database;
-use crate::patent::{Patent, SearchType};
+use crate::patent::{CadArtifact, CadContextKind, CadValidation, Patent, SearchType};
+
+#[test]
+fn cad_schema_v18_is_created_and_idempotent() {
+    let file = tempfile::NamedTempFile::new().expect("temp database");
+    let path = file.path().to_string_lossy().to_string();
+    let db = Database::init(&path).expect("initialize v18 database");
+    assert_eq!(db.query_schema_version().expect("schema version"), 18);
+    let table_count: i64 = db
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='cad_artifacts'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("query CAD table");
+    assert_eq!(table_count, 1);
+    drop(db);
+    let reopened = Database::init(&path).expect("reopen migrated database");
+    assert_eq!(reopened.query_schema_version().expect("schema version"), 18);
+}
+
+#[test]
+fn cad_artifacts_keep_full_prompts_and_increment_revisions() {
+    let db = Database::init(":memory:").expect("initialize database");
+    let prompt = "完整机械结构说明".repeat(500);
+    for id in ["cad-1", "cad-2"] {
+        db.insert_cad_artifact(&CadArtifact {
+            id: id.to_string(),
+            context_kind: CadContextKind::Idea,
+            context_id: "idea-1".to_string(),
+            parent_artifact_id: None,
+            revision: 0,
+            prompt: prompt.clone(),
+            assumptions: vec!["默认单位为毫米".to_string()],
+            preview_rel_path: format!("cad/{id}/preview.png"),
+            fcstd_rel_path: format!("cad/{id}/model.FCStd"),
+            step_rel_path: None,
+            validation: CadValidation {
+                valid: true,
+                fixed: false,
+                issues: Vec::new(),
+            },
+            created_at: String::new(),
+        })
+        .expect("insert artifact");
+    }
+    let artifacts = db
+        .list_cad_artifacts(&CadContextKind::Idea, "idea-1")
+        .expect("list artifacts");
+    assert_eq!(artifacts.len(), 2);
+    assert_eq!(artifacts[0].revision, 2);
+    assert_eq!(artifacts[1].revision, 1);
+    assert_eq!(artifacts[0].prompt, prompt);
+}
 
 fn sample_patent(id: &str, title: &str, filing_date: &str) -> Patent {
     Patent {
