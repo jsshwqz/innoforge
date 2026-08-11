@@ -78,6 +78,10 @@ const I18N_COMMON = {
     'idea.depthMedium': '中度（收敛）',
     'idea.depthDeep': '深度（苏格拉底）',
     'idea.exportConclusions': '📝 导出结论',
+    'idea.unsupportedChatFile': '讨论附件只支持纯文本文档（.txt/.md/.csv/.json/.xml/.yaml 等）和图片文件，不支持 PDF/DOCX。',
+    'idea.fileReadFailed': '读取文件失败：{name}，请确认后重新添加。',
+    'idea.imageTooLarge': '图片文件 {name} 超过 10MB 限制',
+    'idea.textFileTooLarge': '文本文档 {name} 超过 200KB 限制，请精简内容后再试。',
     // Patent detail
     'detail.analyze': 'AI 智能分析',
     'detail.analyzing': 'AI 正在分析...',
@@ -348,6 +352,10 @@ const I18N_COMMON = {
     'idea.depthMedium': 'Medium (Converge)',
     'idea.depthDeep': 'Deep (Socratic)',
     'idea.exportConclusions': '📝 Export Conclusions',
+    'idea.unsupportedChatFile': 'Chat attachments only support plain text files (.txt/.md/.csv/.json/.xml/.yaml etc.) and images. PDF/DOCX not supported.',
+    'idea.fileReadFailed': 'Failed to read file: {name}. Please re-add it.',
+    'idea.imageTooLarge': 'Image file {name} exceeds 10MB limit',
+    'idea.textFileTooLarge': 'Text file {name} exceeds 200KB limit. Please shorten and try again.',
     'detail.analyze': 'AI Analysis',
     'detail.analyzing': 'AI is analyzing...',
     'detail.result': 'AI Analysis Result',
@@ -642,6 +650,107 @@ function renderSidebar(extraHtml) {
   html += '</div>';
   if (extraHtml) html += extraHtml;
   el.innerHTML = html;
+}
+
+// Terminal-style chat history: ↑↓ keys recall previously sent messages.
+// ArrowUp is only hijacked when the caret is on the first line (or a single-line
+// input); ArrowDown only when on the last line. Returns { push(text) } used to
+// record each sent message. State is keyed per inputId so each page/panel keeps
+// its own independent history.
+function initChatHistory(inputId) {
+  if (!window.__chatHistoryStore) window.__chatHistoryStore = {};
+  if (!window.__chatHistoryStore[inputId]) {
+    window.__chatHistoryStore[inputId] = { history: [], idx: -1, saved: '' };
+  }
+  var store = window.__chatHistoryStore[inputId];
+  var input = document.getElementById(inputId);
+  if (!input) return { push: function() {} };
+  if (input._chatHistoryListener) {
+    input.removeEventListener('keydown', input._chatHistoryListener);
+  }
+  function handler(e) {
+    var singleLine = input.tagName === 'INPUT' && input.type === 'text';
+    if (e.key === 'ArrowUp') {
+      if (singleLine || input.selectionStart === 0) {
+        e.preventDefault();
+        if (store.idx === -1) store.saved = input.value;
+        if (store.idx < store.history.length - 1) {
+          store.idx++;
+          input.value = store.history[store.history.length - 1 - store.idx];
+          var len = input.value.length;
+          input.setSelectionRange(len, len);
+        }
+      }
+    } else if (e.key === 'ArrowDown') {
+      var atEnd = singleLine || input.selectionStart === input.value.length;
+      if (atEnd) {
+        e.preventDefault();
+        if (store.idx > 0) {
+          store.idx--;
+          input.value = store.history[store.history.length - 1 - store.idx];
+          var len = input.value.length;
+          input.setSelectionRange(len, len);
+        } else if (store.idx === 0) {
+          store.idx = -1;
+          input.value = store.saved;
+          var len = input.value.length;
+          input.setSelectionRange(len, len);
+        }
+      }
+    }
+  }
+  input.addEventListener('keydown', handler);
+  input._chatHistoryListener = handler;
+  return {
+    push: function(text) {
+      if (!text || !text.trim()) return;
+      store.history.push(text.trim());
+      store.idx = -1;
+      store.saved = '';
+    }
+  };
+}
+
+// Chat queue insert: messages typed while AI is responding are queued and
+// auto-sent when the current response finishes. Returns { enqueue, dequeue, size }.
+// A visual badge shows the number of queued messages.
+function initChatQueue(inputId) {
+  if (!window.__chatQueueStore) window.__chatQueueStore = {};
+  if (!window.__chatQueueStore[inputId]) {
+    window.__chatQueueStore[inputId] = { queue: [] };
+  }
+  var store = window.__chatQueueStore[inputId];
+  return {
+    enqueue: function(item) {
+      store.queue.push(item);
+      updateQueueBadge(inputId, store.queue.length);
+    },
+    dequeue: function() {
+      var item = store.queue.shift();
+      updateQueueBadge(inputId, store.queue.length);
+      return item;
+    },
+    size: function() { return store.queue.length; },
+    clear: function() { store.queue = []; updateQueueBadge(inputId, 0); }
+  };
+}
+
+function updateQueueBadge(inputId, count) {
+  var badge = document.getElementById(inputId + '-queue-badge');
+  if (!badge) {
+    var input = document.getElementById(inputId);
+    if (!input) return;
+    badge = document.createElement('span');
+    badge.id = inputId + '-queue-badge';
+    badge.style.cssText = 'position:absolute;top:-8px;right:-8px;background:#f0883e;color:#fff;border-radius:10px;padding:1px 6px;font-size:11px;font-weight:bold;min-width:16px;text-align:center;z-index:10;display:none;';
+    var parent = input.parentNode;
+    if (parent && getComputedStyle(parent).position === 'static') {
+      parent.style.position = 'relative';
+    }
+    if (parent) parent.appendChild(badge);
+  }
+  badge.style.display = count > 0 ? '' : 'none';
+  badge.textContent = count > 99 ? '99+' : String(count);
 }
 
 // Apply i18n on page load

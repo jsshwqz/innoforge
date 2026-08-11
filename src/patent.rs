@@ -311,6 +311,23 @@ pub struct IdeaSubmitRequest {
     pub input_type: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TextAttachment {
+    pub name: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IdeaChatRequest {
+    pub message: String,
+    #[serde(default)]
+    pub depth: String,
+    #[serde(default)]
+    pub images: Vec<String>,
+    #[serde(default)]
+    pub attachments: Vec<TextAttachment>,
+}
+
 fn default_text() -> String {
     "text".to_string()
 }

@@ -145,7 +145,7 @@
                         <div class="chat-actions-col">
                             <label class="file-upload-label" title="上传图片或文件">
                                 📎
-                                <input type="file" id="chat-file-input" multiple accept=".pdf,.docx,.doc,.txt,.png,.jpg,.jpeg,.gif,.webp" style="display:none;" onchange="handleChatFileSelect(this)">
+                                <input type="file" id="chat-file-input" multiple accept=".txt,.md,.csv,.json,.log,.xml,.yaml,.yml,.png,.jpg,.jpeg,.gif,.webp" style="display:none;" onchange="handleChatFileSelect(this)">
                             </label>
                             <button class="btn-success-sm" id="idea-send-btn" onclick="sendChatMessage()" data-i18n="idea.send"></button>
                             <button class="btn-stop" style="display:none" id="idea-stop-btn" onclick="stopIdeaGeneration()" data-i18n="idea.stop"></button>
@@ -1606,27 +1606,29 @@
             e.stopPropagation();
             ideaInsertQuote();
         });
-        document.getElementById('chat-messages').appendChild(btn);
+        document.body.appendChild(btn);
         return btn;
     }
 
     function getIdeaQuoteBtn() {
-        if (!ideaQuoteBtn) ideaQuoteBtn = createIdeaQuoteButton();
+        if (!ideaQuoteBtn || !document.body.contains(ideaQuoteBtn)) ideaQuoteBtn = createIdeaQuoteButton();
         return ideaQuoteBtn;
     }
 
     function showIdeaQuoteButton(text, rect) {
         var btn = getIdeaQuoteBtn();
         ideaSelectedQuoteText = text;
-        var container = document.getElementById('chat-messages');
-        var cr = container.getBoundingClientRect();
-        var left = rect.right - cr.left - btn.offsetWidth / 2;
-        var top = rect.top - cr.top - 36;
-        left = Math.max(4, Math.min(left, cr.width - btn.offsetWidth - 4));
+        // 追加到 body，用 fixed 定位，避免被 #chat-messages 的 overflow 裁剪
+        btn.style.position = 'fixed';
+        btn.style.display = 'block';
+        var w = btn.offsetWidth;
+        var h = btn.offsetHeight;
+        var left = rect.right - w / 2;
+        var top = rect.top - h - 8;
+        left = Math.max(4, Math.min(left, window.innerWidth - w - 4));
         top = Math.max(4, top);
         btn.style.left = left + 'px';
         btn.style.top = top + 'px';
-        btn.style.display = 'block';
     }
 
     function hideIdeaQuoteButton() {
@@ -1731,16 +1733,52 @@ function removeIdeaImage(idx) {
     }
 
     function handleChatFileSelect(input) {
+        var supportedTextExtensions = /\.(txt|md|csv|json|log|xml|ya?ml)$/i;
         var files = Array.from(input.files);
+        var unsupported = files.filter(function(f) {
+            return !f.type.startsWith('image/') && !supportedTextExtensions.test(f.name);
+        });
+        if (unsupported.length > 0) {
+            alert(t('idea.unsupportedChatFile'));
+            input.value = '';
+            return;
+        }
         files.forEach(function(f) {
-            if (f.size > 10 * 1024 * 1024) {
-                alert('文件 ' + f.name + ' 超过 10MB 限制');
+            var maxSize = f.type.startsWith('image/') ? 10 * 1024 * 1024 : 200 * 1024;
+            if (f.size > maxSize) {
+                alert(t(f.type.startsWith('image/') ? 'idea.imageTooLarge' : 'idea.textFileTooLarge').replace('{name}', f.name));
                 return;
             }
             chatAttachedFiles.push(f);
         });
         renderChatAttachments();
         input.value = '';
+    }
+
+    function readChatFile(file, asImage) {
+        return new Promise(function(resolve, reject) {
+            var reader = new FileReader();
+            reader.onload = function() { resolve(String(reader.result || '')); };
+            reader.onerror = function() {
+                reject(new Error(t('idea.fileReadFailed').replace('{name}', file.name)));
+            };
+            if (asImage) reader.readAsDataURL(file);
+            else reader.readAsText(file);
+        });
+    }
+
+    async function prepareChatAttachments(files) {
+        var images = [];
+        var attachments = [];
+        for (var i = 0; i < files.length; i++) {
+            var file = files[i];
+            if (file.type.startsWith('image/')) {
+                images.push(await readChatFile(file, true));
+            } else {
+                attachments.push({ name: file.name, content: await readChatFile(file, false) });
+            }
+        }
+        return { images: images, attachments: attachments };
     }
 
     function removeChatFile(idx) {
@@ -1750,6 +1788,7 @@ function removeIdeaImage(idx) {
 
     var ideaRetryMsg = '';
     var ideaRetryImages = [];
+    var ideaRetryAttachments = [];
     var ideaAbortController = null;
     var ideaChatSending = false;
 
@@ -1770,28 +1809,38 @@ function removeIdeaImage(idx) {
         }
     }
 
+    var ideaChatHistory = initChatHistory('chat-input');
+    var ideaChatQueue = initChatQueue('chat-input');
+
     async function sendChatMessage() {
         var input = document.getElementById('chat-input');
         var msg = input.value.trim();
-        var hasFiles = chatAttachedFiles.length > 0;
-        var images = ideaPastedImages.slice();
-        if ((!msg && !hasFiles && images.length === 0) || !currentIdeaId) return;
-        if (ideaChatSending) {
-            if (ideaAbortController) {
-                ideaAbortController.abort();
-                ideaAbortController = null;
-            }
-            var ind = document.getElementById('thinking-indicator');
-            if (ind) ind.remove();
+        var files = chatAttachedFiles.slice();
+        var images = ideaPastedImages.map(function(base64) { return 'data:image/png;base64,' + base64; });
+        if ((!msg && files.length === 0 && images.length === 0) || !currentIdeaId) return;
+        var prepared;
+        try {
+            prepared = await prepareChatAttachments(files);
+        } catch (e) {
+            alert(e.message);
+            return;
         }
+        images = images.concat(prepared.images);
         input.value = '';
-        input.disabled = true;
+        ideaChatHistory.push(msg);
         ideaPastedImages = [];
+        chatAttachedFiles = [];
         showIdeaImagePreview();
-        ideaChatSending = true;
-        showIdeaStopButton();
+        renderChatAttachments();
+        var queueItem = { msg: msg, images: images, attachments: prepared.attachments };
+        if (ideaChatSending) {
+            ideaChatQueue.enqueue(queueItem);
+            return;
+        }
+        await sendIdeaChatCore(queueItem.msg, queueItem.images, queueItem.attachments);
+    }
 
-        // Show user message immediately
+    async function sendIdeaChatCore(msg, images, attachments) {
         var container = document.getElementById('chat-messages');
         var placeholder = container.querySelector('p');
         if (placeholder) placeholder.remove();
@@ -1802,22 +1851,30 @@ function removeIdeaImage(idx) {
         userLabel.textContent = '👤 你';
         var userBody = document.createElement('div');
         userBody.style.cssText = 'color:#c9d1d9; margin-top:4px; white-space:pre-wrap;';
-        userBody.textContent = msg;
+        var attachmentNames = (attachments || []).map(function(item) { return item.name; });
+        userBody.textContent = msg + (attachmentNames.length > 0 ? '\n📎 ' + attachmentNames.join('、') : '');
         userMsgDiv.appendChild(userLabel);
         userMsgDiv.appendChild(userBody);
         container.appendChild(userMsgDiv);
-
-        await doIdeaSend(msg, images);
-        ideaChatSending = false;
-        hideIdeaStopButton();
-        input.disabled = false;
-        input.focus();
+        ideaChatSending = true;
+        showIdeaStopButton();
+        try {
+            await doIdeaSend(msg, images, attachments);
+        } finally {
+            ideaChatSending = false;
+            hideIdeaStopButton();
+            document.getElementById('chat-input').focus();
+            var next = ideaChatQueue.dequeue();
+            if (next) await sendIdeaChatCore(next.msg, next.images, next.attachments);
+        }
     }
 
-    async function doIdeaSend(msg, images) {
+    async function doIdeaSend(msg, images, attachments) {
         images = images || [];
+        attachments = attachments || [];
         ideaRetryMsg = msg;
         ideaRetryImages = images;
+        ideaRetryAttachments = attachments;
         var container = document.getElementById('chat-messages');
 
         // Show thinking indicator
@@ -1836,6 +1893,7 @@ function removeIdeaImage(idx) {
         try {
             var bodyObj = { message: msg, depth: chatDepth };
             if (images.length > 0) bodyObj.images = images;
+            if (attachments.length > 0) bodyObj.attachments = attachments;
             var res = await fetch('/api/idea/' + currentIdeaId + '/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -1918,14 +1976,16 @@ function removeIdeaImage(idx) {
     function retryIdeaSend() {
         var msg = ideaRetryMsg;
         var images = ideaRetryImages || [];
-        if (!msg && images.length === 0) return;
+        var attachments = ideaRetryAttachments || [];
+        if (!msg && images.length === 0 && attachments.length === 0) return;
         ideaRetryMsg = '';
         ideaRetryImages = [];
+        ideaRetryAttachments = [];
         // 移除最后一条错误消息
         var container = document.getElementById('chat-messages');
         var last = container.lastChild;
         if (last) container.removeChild(last);
-        doIdeaSend(msg, images);
+        doIdeaSend(msg, images, attachments);
     }
 
     async function exportConclusions() {
