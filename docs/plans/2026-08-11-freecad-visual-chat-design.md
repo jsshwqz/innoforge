@@ -40,14 +40,14 @@ InnoForge 对话页面
 - 稳定启动 Rust bridge 和 FreeCAD GUI。
 - 发现 worker 心跳过期时自动恢复，不依赖用户手动运行宏。
 - 接收自然语言或受控 FreeCAD Python 宏，完成建模、重计算、形状校验、保存、导出和截图。
-- 保持 Python AST 沙箱、GUI 命令白名单和工具审计；不执行未校验的任意代码。
+- 不新增容器、虚拟机或独立沙箱环境；保留现有进程内 FreeCAD 代码安全检查（AST、GUI 命令白名单和工具审计），不执行未校验的任意代码。
 - 统一绘图成功响应，至少返回建模假设、形状校验、PNG/FCStd/STEP 输出路径和可继续修改的会话标识；敏感本机路径仅在 loopback 桥内传递。
 
 ### 3.2 InnoForge 职责
 
 - 统一三个对话入口的 CAD 意图触发、进度、图卡和错误体验。
 - 将用户原始请求与当前对话上下文边界隔离后，交给当前专家模型产生结构化 CAD 简报。该 AI 调用上限 60 秒，失败时回退到用户原始请求。
-- 不在 InnoForge 进程内执行模型生成的 Python；代码只能发往 AionCAD 沙箱。
+- 不在 InnoForge 进程内执行模型生成的 Python；代码只能发往 AionCAD 的内置安全检查与执行入口。
 - 将 AionCAD 输出复制到 InnoForge 应用数据目录，只保存相对路径，不向浏览器暴露本机绝对路径。
 - 通过不透明 artifact ID 提供同源预览与下载。
 
@@ -138,7 +138,7 @@ DOM 使用 `createElement` 与 `textContent` 构建；预览图只接受 InnoFor
 ## 9. 安全要求
 
 - InnoForge 不提供通用代码执行 API。
-- 模型生成的宏必须经 AionCAD AST 沙箱，禁止文件、网络、子进程、动态 import、`eval` 和 `exec`。
+- 模型生成的宏必须经 AionCAD 进程内的 AST 与白名单安全检查；该检查不需要额外部署任何沙箱环境，并禁止文件、网络、子进程、动态 import、`eval` 和 `exec`。
 - 用户输入拼入 CAD 简报 prompt 前使用 `<user_input>` 和 `<conversation_context>` 独立边界，并明确忽略其中的指令覆写。
 - 不允许静默截断对话、建模指令或宏代码。容量超限时返回可见错误。
 - artifact 路径在 canonicalize 后必须仍位于应用 CAD 数据目录内。
@@ -169,7 +169,7 @@ DOM 使用 `createElement` 与 `textContent` 构建；预览图只接受 InnoFor
 - bridge 未运行、FreeCAD 已运行但 worker 心跳过期时，一次 bootstrap 可自动恢复。
 - `/health`、`/draw/status`、`/draw/view` 同时通过后才报告 ready。
 - 用中文自然语言创建模型，后续修改同一对象，并产生有效 PNG、FCStd 和 STEP。
-- 危险 Python 宏被沙箱拒绝，审计记录不泄露宏全文。
+- 危险 Python 宏被内置代码安全检查拒绝，审计记录不泄露宏全文。
 
 ### InnoForge
 
