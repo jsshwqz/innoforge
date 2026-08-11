@@ -332,7 +332,7 @@ git add templates/idea.html templates/patent_detail.html templates/office_action
 git commit -m "feat: 在三处AI对话接入FreeCAD绘图"
 ```
 
-## Task 6: Full regression, documentation and PR handoff
+## Task 6: Full regression, documentation and PR handoff ✅ `1a91180`
 
 **Files:**
 
