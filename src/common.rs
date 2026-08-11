@@ -123,8 +123,24 @@ pub fn init_app_state(db_path: &str) -> anyhow::Result<crate::routes::AppState> 
     }
 
     let config = AppConfig::from_db_and_env(Some(&db));
+    let workspace = std::env::var_os("INNOFORGE_AIONCAD_WORKSPACE")
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            db.get_setting("aioncad_workspace")
+                .ok()
+                .flatten()
+                .map(Into::into)
+        })
+        .or_else(|| Some(std::path::PathBuf::from(r"D:\test\aionui\aioncad")));
+    let db_parent = std::path::Path::new(db_path)
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_else(|| std::path::PathBuf::from("data"));
+    let cad = crate::cad::CadService::new(db_parent.join("cad"), workspace)?;
     let state = AppState {
         db: Arc::new(db),
+        cad: Arc::new(cad),
         config: Arc::new(RwLock::new(config)),
         pipeline_channels: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     };

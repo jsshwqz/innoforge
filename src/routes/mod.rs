@@ -345,6 +345,7 @@ pub(crate) fn find_gemini_cli() -> Option<String> {
 #[derive(Clone)]
 pub struct AppState {
     pub db: Arc<Database>,
+    pub cad: Arc<crate::cad::CadService>,
     pub config: Arc<RwLock<AppConfig>>,
     /// 管道进度通道（SSE 推送），附带超时清理 / Pipeline progress channels with stale cleanup
     pub pipeline_channels: Arc<Mutex<HashMap<String, PipelineChannelEntry>>>,
