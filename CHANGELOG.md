@@ -7,6 +7,10 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ## [Unreleased]
 
+### 新增 / Added
+- **FreeCAD 可视化对话** — 研创台、专利详情 AI 对话和 OA 讨论现可直接用自然语言创建或继续修改 FreeCAD 模型；图卡保留版本历史、默认假设和形状校验，并提供 PNG 预览及 FCStd/STEP 下载。设置页可检查和启动本机 FreeCAD；AionCAD 仍作为独立的本机 Rust HTTP 控制桥，不并入 InnoForge 仓库。
+  FreeCAD visual chat: the idea workbench, patent-detail AI chat, and OA discussion can now create or explicitly continue revising FreeCAD models from natural language. Cards preserve revision history, assumptions, and shape validation, with PNG previews plus FCStd/STEP downloads. Settings can check and start the local FreeCAD installation; AionCAD remains a separate local Rust HTTP control bridge and is not copied into this repository.
+
 ### 改进 / Improved
 - **Linear 式高级深色视觉升级** — 设计体系换用 Linear/Raycast 风：底色改为纯黑紫调（`#08080f`）、主色改为靛蓝紫（`#6366f1 → #a855f7` 渐变），圆角加大、新增紫调柔光，主按钮/卡片 hover/激活态全面同步；导航栏移回页面右侧。
   Linear-style premium dark visual upgrade: deep black-violet canvas (`#08080f`), indigo-violet accent gradient (`#6366f1 → #a855f7`), larger radii, violet glow shadows across buttons/cards/active states; sidebar navigation moved back to the right side.
@@ -16,6 +20,8 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
   Search-page CDN robustness: Chart.js now loads `async`, so an unreachable CDN no longer blocks page body rendering (charts remain available on demand).
 
 ### 修复 / Fixed
+- **FreeCAD 启动与续改可靠性** — InnoForge 会串行化并发启动、校验 AionCAD API 身份和产物导入根目录，并在专家 CAD 简报失败时保留完整原始指令回退；新绘图不再误接到上一模型，只有用户点击“继续修改”才建立父版本关系。
+  FreeCAD startup and revision reliability: InnoForge serializes concurrent startup, verifies the AionCAD API identity and artifact import root, and preserves the complete original instruction as fallback when an expert CAD brief fails. A new drawing no longer attaches to the previous model; only an explicit “Continue” action creates a parent revision.
 - **专利详情导航激活态** — 详情页无独立导航项时，侧边导航激活态映射到「搜索」页，避免无高亮。
   Patent-detail nav active state: the sidebar now highlights "Search" on detail pages that have no dedicated nav entry.
 - **论点看板初始隐藏** — OA 页论点看板初始隐藏改由内联 `display` 控制，与 JS 显隐逻辑一致，避免 CSS `display:none` 覆盖 JS 的显示操作。

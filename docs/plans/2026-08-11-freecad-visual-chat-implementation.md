@@ -10,7 +10,7 @@
 
 ---
 
-## Task 1: Add schema v18 and CAD domain types
+## Task 1: Add schema v18 and CAD domain types ✅ `f0cbc80`
 
 **Files:**
 
@@ -78,7 +78,7 @@ git add src/patent.rs src/db/mod.rs src/db/migrations.rs src/db/cad.rs src/db/te
 git commit -m "feat: 增加FreeCAD产物版本存储"
 ```
 
-## Task 2: Build the loopback-only AionCAD adapter
+## Task 2: Build the loopback-only AionCAD adapter ✅ `59cc1cd`
 
 **Files:**
 
@@ -152,7 +152,7 @@ git add src/cad.rs src/main.rs src/lib.rs src/common.rs
 git commit -m "feat: 接入AionCAD本地绘图桥"
 ```
 
-## Task 3: Add the CAD API and expert-model brief
+## Task 3: Add the CAD API and expert-model brief ✅ `c54ac46`
 
 **Files:**
 
@@ -222,7 +222,7 @@ git add src/routes/cad.rs src/routes/mod.rs src/common.rs src/ai/client.rs tests
 git commit -m "feat: 增加FreeCAD绘图与产物接口"
 ```
 
-## Task 4: Build one safe reusable CAD card controller
+## Task 4: Build one safe reusable CAD card controller ✅ `2de4e8b`
 
 **Files:**
 
@@ -281,7 +281,7 @@ git add static/cad.js static/style.css static/i18n.js tests/cad_ui_contract.rs
 git commit -m "feat: 增加FreeCAD对话图卡组件"
 ```
 
-## Task 5: Integrate the three existing chat flows
+## Task 5: Integrate the three existing chat flows ✅ `757643a`, `036191f`
 
 **Files:**
 
