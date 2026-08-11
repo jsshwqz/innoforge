@@ -45,5 +45,6 @@
 
 - review Nit：OA 历史讨论 `msgs` 计数拼接未做数字兜底（服务端计数数据源，低风险）
 - review Nit：`--cyan` token 未引用、`.sidebar-nav a.active` 指示条方向（`inset 3px` → `-3px` 贴右）
-- 深层防御建议（既有代码）：DOMPurify 兜底弱正则、`escapeHtml` 不转义单引号
+- ✅ 深层防御建议（既有代码）：DOMPurify 兜底弱正则、`escapeHtml` 不转义单引号
+- ✅ 创意讨论 TXT 附件正文传入 AI（修复链路断裂）— `b214c65`
 - 版本号未提升（仍 v0.7.4 + [Unreleased]）；是否发版由发布流程决策
