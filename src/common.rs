@@ -197,6 +197,18 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
         .route("/idea", get(routes::idea_page))
         .route("/settings", get(routes::settings_page))
         .route("/oa-response", get(routes::office_action_response_page))
+        // FreeCAD visual artifact API
+        .route("/api/cad/status", get(routes::api_cad_status))
+        .route("/api/cad/draw", post(routes::api_cad_draw))
+        .route("/api/cad/artifacts", get(routes::api_cad_artifacts))
+        .route(
+            "/api/cad/artifacts/:id/preview",
+            get(routes::api_cad_preview),
+        )
+        .route(
+            "/api/cad/artifacts/:id/download/:format",
+            get(routes::api_cad_download),
+        )
         // 设置 API / Settings API
         .route("/api/settings", get(routes::api_get_settings))
         .route("/api/settings/serpapi", post(routes::api_save_serpapi))

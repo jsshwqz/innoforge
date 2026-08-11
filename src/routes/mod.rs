@@ -15,6 +15,7 @@
 
 mod ai;
 mod auth;
+mod cad;
 mod chat;
 mod collections;
 mod feature_cards;
@@ -28,6 +29,7 @@ mod upload;
 
 pub use ai::*;
 pub use auth::*;
+pub use cad::*;
 pub use chat::*;
 pub use collections::*;
 pub use feature_cards::*;
