@@ -1,6 +1,8 @@
 use super::AppState;
 use crate::cad::resolve_artifact_path;
-use crate::patent::{CadArtifact, CadContextKind, CadDrawRequest, CadDrawResponse};
+use crate::patent::{
+    CadArtifact, CadAvailability, CadContextKind, CadDrawRequest, CadDrawResponse,
+};
 use axum::{
     body::Body,
     extract::{Path, Query, State},
@@ -67,17 +69,36 @@ pub async fn api_cad_draw(
         None => None,
     };
 
+    let readiness = state.cad.ensure_ready().await;
+    if !matches!(readiness.availability, CadAvailability::Ready) {
+        return Err(CadApiError(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "FreeCAD 暂时无法启动，文字对话仍可继续",
+        ));
+    }
     let (instruction, assumptions) = cad_brief(&state, prompt, &request.conversation_context).await;
-    let imported = state
+    let first_attempt = state
         .cad
         .draw_artifact(&instruction, &assumptions, parent.as_ref())
-        .await
-        .map_err(|_| {
-            CadApiError(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "FreeCAD 暂时无法完成绘图，文字对话仍可继续",
-            )
-        })?;
+        .await;
+    let imported = match first_attempt {
+        Ok(imported) => Ok(imported),
+        Err(error) if instruction != prompt => {
+            tracing::warn!(error = %error, "Enhanced AionCAD draw request failed; retrying original input");
+            state
+                .cad
+                .draw_artifact(prompt, &assumptions, parent.as_ref())
+                .await
+        }
+        Err(error) => Err(error),
+    }
+    .map_err(|error| {
+        tracing::warn!(error = %error, "AionCAD draw request failed");
+        CadApiError(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "FreeCAD 暂时无法完成绘图，文字对话仍可继续",
+        )
+    })?;
     let artifact = CadArtifact {
         id: Uuid::new_v4().to_string(),
         context_kind: request.context_kind,
@@ -210,8 +231,18 @@ async fn cad_brief(state: &AppState, prompt: &str, context: &str) -> (String, Ve
         Err(_) => None,
     };
     parsed
-        .map(|brief| (brief.instruction, brief.assumptions))
+        .map(|brief| combine_cad_brief(prompt, brief))
         .unwrap_or_else(|| (prompt.to_string(), Vec::new()))
+}
+
+fn combine_cad_brief(prompt: &str, brief: CadBrief) -> (String, Vec<String>) {
+    (
+        format!(
+            "{prompt}\n\nAdditional complete CAD brief:\n{}",
+            brief.instruction
+        ),
+        brief.assumptions,
+    )
 }
 
 fn parse_cad_brief(raw: &str) -> Option<CadBrief> {
@@ -237,5 +268,18 @@ mod tests {
         .expect("brief");
         assert_eq!(parsed.instruction, "画完整支架");
         assert!(parse_cad_brief("{\"instruction\":\"\",\"assumptions\":[]}").is_none());
+    }
+
+    #[test]
+    fn expert_brief_keeps_the_complete_original_prompt_first() {
+        let prompt = "draw a box length 40 width 30 height 10";
+        let (instruction, _) = combine_cad_brief(
+            prompt,
+            CadBrief {
+                instruction: "Use millimetres".to_string(),
+                assumptions: Vec::new(),
+            },
+        );
+        assert!(instruction.starts_with(prompt));
     }
 }

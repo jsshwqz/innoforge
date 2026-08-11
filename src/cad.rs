@@ -4,7 +4,9 @@ use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::Mutex;
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
@@ -43,6 +45,7 @@ pub struct CadService {
     origin: BridgeOrigin,
     cad_root: PathBuf,
     workspace: Option<PathBuf>,
+    startup_lock: Arc<Mutex<()>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,11 +76,15 @@ impl CadService {
             .timeout(Duration::from_secs(120))
             .build()?;
         std::fs::create_dir_all(&cad_root)?;
+        let cad_root = cad_root
+            .canonicalize()
+            .context("failed to resolve the CAD artifact root")?;
         Ok(Self {
             client,
             origin,
             cad_root,
             workspace,
+            startup_lock: Arc::new(Mutex::new(())),
         })
     }
 
@@ -91,9 +98,9 @@ impl CadService {
                 availability: CadAvailability::Ready,
                 message: "FreeCAD ready".to_string(),
             },
-            Err(error) => CadStatus {
+            Err(_) => CadStatus {
                 availability: CadAvailability::Unavailable,
-                message: error.to_string(),
+                message: "FreeCAD is not ready".to_string(),
             },
         }
     }
@@ -107,8 +114,27 @@ impl CadService {
             .error_for_status()?
             .json()
             .await?;
-        if health.get("status").and_then(Value::as_str) != Some("ok") {
-            bail!("AionCAD bridge is not healthy");
+        if !is_compatible_health(&health) {
+            bail!("AionCAD bridge does not expose the required API identity");
+        }
+        let expected_import_root = self.cad_root.canonicalize()?;
+        let actual_import_root = health
+            .get("artifact_import_root")
+            .and_then(Value::as_str)
+            .filter(|path| !path.is_empty())
+            .map(PathBuf::from)
+            .context("AionCAD bridge has no artifact import root")?
+            .canonicalize()?;
+        if actual_import_root != expected_import_root {
+            bail!("AionCAD bridge is bound to another artifact import root");
+        }
+        let artifact_route = self
+            .client
+            .get(self.origin.endpoint("/draw/artifact"))
+            .send()
+            .await?;
+        if artifact_route.status() != reqwest::StatusCode::METHOD_NOT_ALLOWED {
+            bail!("AionCAD bridge does not support artifact bundles");
         }
         let status: Value = self
             .client
@@ -144,12 +170,6 @@ impl CadService {
     }
 
     pub async fn ensure_ready(&self) -> CadStatus {
-        if self.check_ready().await.is_ok() {
-            return CadStatus {
-                availability: CadAvailability::Ready,
-                message: "FreeCAD ready".to_string(),
-            };
-        }
         #[cfg(not(target_os = "windows"))]
         {
             return CadStatus {
@@ -159,6 +179,19 @@ impl CadService {
         }
         #[cfg(target_os = "windows")]
         {
+            if self.check_ready().await.is_ok() {
+                return CadStatus {
+                    availability: CadAvailability::Ready,
+                    message: "FreeCAD ready".to_string(),
+                };
+            }
+            let _startup_guard = self.startup_lock.lock().await;
+            if self.check_ready().await.is_ok() {
+                return CadStatus {
+                    availability: CadAvailability::Ready,
+                    message: "FreeCAD ready".to_string(),
+                };
+            }
             let Some(workspace) = self.workspace.as_deref() else {
                 return CadStatus {
                     availability: CadAvailability::Unavailable,
@@ -185,6 +218,7 @@ impl CadService {
                     ])
                     .arg(&script)
                     .args(["-Port", "8010", "-ReadyTimeoutSeconds", "90"])
+                    .env("AIONCAD_ARTIFACT_IMPORT_ROOT", &self.cad_root)
                     .current_dir(workspace)
                     .output(),
             )
@@ -259,6 +293,12 @@ impl CadService {
     }
 }
 
+fn is_compatible_health(health: &Value) -> bool {
+    health.get("status").and_then(Value::as_str) == Some("ok")
+        && health.get("backend").and_then(Value::as_str) == Some("rust-live")
+        && health.get("api_schema").and_then(Value::as_str) == Some("aioncad.rust-bridge.v2")
+}
+
 fn required_source_path(value: &Value, key: &str) -> Result<PathBuf> {
     let path = value
         .get(key)
@@ -313,5 +353,31 @@ mod tests {
         let root = std::env::temp_dir().join(format!("innoforge-cad-{}", Uuid::new_v4()));
         assert!(resolve_artifact_path(&root, "abc/preview.png").is_ok());
         assert!(resolve_artifact_path(&root, "../secret.txt").is_err());
+    }
+
+    #[test]
+    fn bridge_health_requires_the_artifact_api_identity() {
+        assert!(is_compatible_health(&serde_json::json!({
+            "status": "ok",
+            "backend": "rust-live",
+            "version": "0.4.0",
+            "api_schema": "aioncad.rust-bridge.v2"
+        })));
+        assert!(!is_compatible_health(&serde_json::json!({
+            "status": "ok",
+            "backend": "rust-live",
+            "version": "0.3.0"
+        })));
+    }
+
+    #[test]
+    fn cad_service_resolves_the_artifact_root_to_an_absolute_path() {
+        let root = std::env::temp_dir().join(format!("innoforge-cad-root-{}", Uuid::new_v4()));
+        let service = CadService::new(root.clone(), None).expect("CAD service");
+        assert!(service.cad_root().is_absolute());
+        assert_eq!(
+            service.cad_root(),
+            root.canonicalize().expect("canonical CAD root")
+        );
     }
 }

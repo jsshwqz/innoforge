@@ -19,7 +19,7 @@
   }
 
   function createController(options) {
-    const state = { busy: false, latest: null, originalPrompt: '' };
+    const state = { busy: false, latest: null, parentForNext: null, originalPrompt: '' };
 
     function shouldHandle(prompt) {
       return INTENT_PATTERNS.some((pattern) => pattern.test(prompt || ''));
@@ -93,6 +93,7 @@
       const actions = el('div', 'cad-actions');
       actions.appendChild(button(tr('cad.continue', 'Continue modifying'), () => {
         state.latest = artifact;
+        state.parentForNext = artifact.id;
         if (typeof options.onContinue === 'function') options.onContinue(artifact);
       }));
       actions.appendChild(button(tr('cad.fullscreen', 'Fullscreen'), () => openFullscreen(artifact)));
@@ -134,12 +135,13 @@
             context_id: context.id,
             prompt: prompt,
             conversation_context: typeof options.history === 'function' ? options.history() : '',
-            parent_artifact_id: parentArtifactId || (state.latest && state.latest.id) || null
+            parent_artifact_id: parentArtifactId || state.parentForNext || null
           })
         });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error || tr('cad.failed', 'Drawing failed'));
         state.latest = payload.artifact;
+        state.parentForNext = null;
         renderArtifact(progress.card, payload.artifact, payload.warnings || []);
       } catch (error) {
         renderDegraded(progress.card, error.message);
@@ -173,7 +175,7 @@
       draw: draw,
       drawFromInput: () => {
         const input = typeof options.input === 'function' ? options.input() : options.input;
-        return draw(input ? input.value : '', state.latest && state.latest.id);
+        return draw(input ? input.value : '');
       },
       intercept: (prompt) => shouldHandle(prompt) ? draw(prompt) : false,
       restore: restore,
