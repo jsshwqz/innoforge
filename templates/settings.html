@@ -173,6 +173,13 @@
             </div>
         </div>
 
+        <div class="setting-group" id="freecad-settings">
+            <h3 data-i18n="cad.settingsTitle"></h3>
+            <p data-i18n="cad.settingsHint"></p>
+            <div id="freecad-status" class="status-pill" data-i18n="cad.checking"></div>
+            <button class="btn-save" type="button" onclick="checkAndStartFreeCad()" data-i18n="cad.detectStart"></button>
+        </div>
+
         <!-- 备用搜索源（Firecrawl/Bing/CNIPR）和备用 AI 已屏蔽，仅保留 SerpAPI + DeepSeek -->
 
         <div class="setting-group">
@@ -925,6 +932,21 @@
                 element.style.display = 'none';
             }, 3000);
         }
+
+        async function checkAndStartFreeCad() {
+            var status = document.getElementById('freecad-status');
+            status.textContent = t('cad.starting');
+            try {
+                var response = await fetch('/api/cad/status');
+                var data = await response.json();
+                status.textContent = data.message || data.availability;
+                status.className = 'status-pill ' + (data.availability === 'ready' ? 'success' : 'warning');
+            } catch (error) {
+                status.textContent = t('cad.unavailable');
+                status.className = 'status-pill error';
+            }
+        }
+        checkAndStartFreeCad();
 
         // 备用 AI 管理已移除（仅保留 DeepSeek）
     </script>

@@ -90,6 +90,7 @@
                 <div class="chat-input">
                     <input type="text" id="chat-msg" data-i18n-placeholder="detail.chatPlaceholder">
                     <button id="patent-send-btn" onclick="sendChat()" data-i18n="detail.send"></button>
+                    <button id="patent-cad-btn" type="button" onclick="drawPatentCad()" data-i18n="cad.draw"></button>
                     <button id="patent-stop-btn" class="btn-stop" style="display:none" onclick="stopPatentGeneration()" data-i18n="detail.stop"></button>
                     <button id="patent-export-btn" class="btn-export-ghost" style="display:none" onclick="exportPatentConclusions()" data-i18n="detail.exportConclusions"></button>
                 </div>
@@ -111,6 +112,7 @@
     </main>
     </div>
     <script src="/static/i18n.js"></script>
+    <script src="/static/cad.js"></script>
     <script>
     // Ensure DOMPurify never throws even if script failed to load
     if (typeof DOMPurify === 'undefined' || typeof DOMPurify.sanitize !== 'function') {
@@ -185,6 +187,18 @@
     var patentChatOffset = 0;
     var patentChatTotal = 0;
     var patentChatPageSize = 50;
+    var patentCadController = window.InnoForgeCad.createController({
+        context: function() { return { kind: 'patent', id: '{{id}}' }; },
+        input: function() { return document.getElementById('chat-msg'); },
+        messages: function() { return document.getElementById('chat-messages'); },
+        history: function() { return JSON.stringify(patentChatHistory); },
+        onContinue: function() {
+            var input = document.getElementById('chat-msg');
+            input.value = t('cad.continuePrompt'); input.focus();
+        }
+    });
+    function drawPatentCad() { patentCadController.drawFromInput(); }
+    patentCadController.restore();
 
     // 一次性迁移：将旧 localStorage 中的聊天记录导入后端
     function migrateOldPatentChat(key) {
@@ -315,6 +329,11 @@
         const input = document.getElementById('chat-msg');
         const msg = input.value.trim();
         if (!msg) return;
+        if (patentCadController.shouldHandle(msg)) {
+            input.value = '';
+            await patentCadController.draw(msg);
+            return;
+        }
         if (patentChatSending) {
             if (patentAbortController) {
                 patentAbortController.abort();
