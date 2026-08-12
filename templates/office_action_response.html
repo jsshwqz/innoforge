@@ -2222,6 +2222,7 @@
         panel.classList.remove('hidden');
         document.getElementById('discussion-messages').innerHTML =
             '<div class="msg msg-ai"><div class="msg-bubble">' + t('oar.discussHint') + '</div></div>';
+        oaCadController.renderHistory();
         panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
         document.getElementById('discussion-input').focus();
         showDiscussionExportButton();

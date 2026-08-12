@@ -125,7 +125,7 @@ Implement `CadService` with:
 - an application CAD root derived from the database parent/application-data directory, never the Git repository or `/static`;
 - a 120-second Reqwest timeout for the FreeCAD pipeline;
 - `status()` that checks `/health`, `/draw/status`, and `/draw/view` before returning `ready`;
-- Windows-only `ensure_ready()` which resolves the AionCAD workspace from `INNOFORGE_AIONCAD_WORKSPACE`, then the `aioncad_workspace` setting, then the known local default;
+- Windows-only `ensure_ready()` which resolves the AionCAD workspace from `INNOFORGE_AIONCAD_WORKSPACE`, then the `aioncad_workspace` setting, without embedding a developer-machine path;
 - `Command::new("powershell")` arguments passed individually to `bootstrap_bridge.ps1`, with no constructed shell string and a bounded startup wait;
 - `unsupported` on Android/iOS/non-Windows and `unavailable` on local startup failure.
 

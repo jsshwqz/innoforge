@@ -12,9 +12,9 @@
 
 - **状态 / Status**: ✅ 已完成并进入 PR 交付 / Completed and ready for PR handoff
 - **范围 / Scope**: 在研创台、专利详情 AI 对话和 OA 讨论接入共享 FreeCAD 图卡；支持自然语言创建、显式继续修改、历史恢复、PNG 预览及 FCStd/STEP 下载。InnoForge 只调用独立 AionCAD Rust HTTP 桥，不引入 Python 服务、额外沙箱或 FreeCAD Skill 代码。
-- **InnoForge 提交 / Commits**: `f0cbc80`（v18 产物存储）、`59cc1cd`（AionCAD 适配层）、`c54ac46`（CAD API）、`2de4e8b`（共享图卡）、`757643a`（三处对话与设置页）、`036191f`（启动、桥身份和续改加固）。
+- **InnoForge 提交 / Commits**: `f0cbc80`（v18 产物存储）、`59cc1cd`（AionCAD 适配层）、`c54ac46`（CAD API）、`2de4e8b`（共享图卡）、`757643a`（三处对话与设置页）、`036191f`（启动、桥身份和续改加固）；审查阻断项修复见 PR #8 最新提交。
 - **AionCAD / Bridge**: PR #3 已合并，merge commit `039eac9`；Rust bridge schema 为 `aioncad.rust-bridge.v2`，bootstrap 支持分阶段切换、旧桥恢复和同 PID 端口回收验证。
-- **验证 / Verification**: `cargo fmt --check`、`cargo clippy -- -D warnings` 通过；`cargo test` 338 passed / 1 ignored；ESLint 0 errors；Puppeteer 48/48；真实 AionCAD/FreeCAD 冒烟完成创建、二次打孔修订、历史排序、PNG/FCStd/STEP 下载和图像目检。
+- **验证 / Verification**: `cargo fmt --check`、`cargo clippy --all-targets --all-features -- -D warnings` 通过；Rust 全量测试通过；ESLint 0 errors；Puppeteer 51/51；Forge 脱敏核心审查 10/10；真实 AionCAD/FreeCAD 冒烟完成创建、二次打孔修订、历史排序、PNG/FCStd/STEP 下载、自动启动关闭回退和图像目检。
 - **版本 / Version**: 保持 `0.7.4`，按用户要求不放大版本号；变更记录保留在 `[Unreleased]`。
 - **记录 / Records**: `docs/plans/2026-08-11-freecad-visual-chat-design.md`；`docs/plans/2026-08-11-freecad-visual-chat-implementation.md`。
 

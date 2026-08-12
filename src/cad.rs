@@ -4,10 +4,17 @@ use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Component, Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
-use tokio::sync::Mutex;
+#[cfg(target_os = "windows")]
+use std::time::Instant;
 use uuid::Uuid;
+
+#[cfg(target_os = "windows")]
+use tokio::sync::Mutex;
+
+#[cfg(target_os = "windows")]
+const STARTUP_RETRY_COOLDOWN: Duration = Duration::from_secs(300);
 
 #[derive(Debug, Clone)]
 pub struct BridgeOrigin(String);
@@ -44,8 +51,9 @@ pub struct CadService {
     client: reqwest::Client,
     origin: BridgeOrigin,
     cad_root: PathBuf,
-    workspace: Option<PathBuf>,
-    startup_lock: Arc<Mutex<()>>,
+    workspace: Arc<RwLock<Option<PathBuf>>>,
+    #[cfg(target_os = "windows")]
+    startup_lock: Arc<Mutex<Option<Instant>>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -83,13 +91,22 @@ impl CadService {
             client,
             origin,
             cad_root,
-            workspace,
-            startup_lock: Arc::new(Mutex::new(())),
+            workspace: Arc::new(RwLock::new(workspace)),
+            #[cfg(target_os = "windows")]
+            startup_lock: Arc::new(Mutex::new(None)),
         })
     }
 
     pub fn cad_root(&self) -> &Path {
         &self.cad_root
+    }
+
+    pub fn set_workspace(&self, workspace: Option<PathBuf>) {
+        let mut current = self
+            .workspace
+            .write()
+            .unwrap_or_else(|error| error.into_inner());
+        *current = workspace;
     }
 
     pub async fn status(&self) -> CadStatus {
@@ -172,10 +189,10 @@ impl CadService {
     pub async fn ensure_ready(&self) -> CadStatus {
         #[cfg(not(target_os = "windows"))]
         {
-            return CadStatus {
+            CadStatus {
                 availability: CadAvailability::Unsupported,
                 message: "FreeCAD auto-start is supported on Windows desktop".to_string(),
-            };
+            }
         }
         #[cfg(target_os = "windows")]
         {
@@ -185,14 +202,26 @@ impl CadService {
                     message: "FreeCAD ready".to_string(),
                 };
             }
-            let _startup_guard = self.startup_lock.lock().await;
+            let mut last_startup = self.startup_lock.lock().await;
             if self.check_ready().await.is_ok() {
+                *last_startup = None;
                 return CadStatus {
                     availability: CadAvailability::Ready,
                     message: "FreeCAD ready".to_string(),
                 };
             }
-            let Some(workspace) = self.workspace.as_deref() else {
+            if startup_retry_blocked(*last_startup) {
+                return CadStatus {
+                    availability: CadAvailability::Starting,
+                    message: "FreeCAD is still starting".to_string(),
+                };
+            }
+            let workspace = self
+                .workspace
+                .read()
+                .unwrap_or_else(|error| error.into_inner())
+                .clone();
+            let Some(workspace) = workspace.as_deref() else {
                 return CadStatus {
                     availability: CadAvailability::Unavailable,
                     message: "AionCAD workspace is not configured".to_string(),
@@ -205,6 +234,7 @@ impl CadService {
                     message: "AionCAD bootstrap script was not found".to_string(),
                 };
             }
+            *last_startup = Some(Instant::now());
             let result = tokio::time::timeout(
                 Duration::from_secs(105),
                 tokio::process::Command::new("powershell")
@@ -220,6 +250,7 @@ impl CadService {
                     .args(["-Port", "8010", "-ReadyTimeoutSeconds", "90"])
                     .env("AIONCAD_ARTIFACT_IMPORT_ROOT", &self.cad_root)
                     .current_dir(workspace)
+                    .kill_on_drop(true)
                     .output(),
             )
             .await;
@@ -229,7 +260,11 @@ impl CadService {
                     message: "FreeCAD could not be started".to_string(),
                 };
             }
-            self.status().await
+            let status = self.status().await;
+            if matches!(status.availability, CadAvailability::Ready) {
+                *last_startup = None;
+            }
+            status
         }
     }
 
@@ -297,6 +332,11 @@ fn is_compatible_health(health: &Value) -> bool {
     health.get("status").and_then(Value::as_str) == Some("ok")
         && health.get("backend").and_then(Value::as_str) == Some("rust-live")
         && health.get("api_schema").and_then(Value::as_str) == Some("aioncad.rust-bridge.v2")
+}
+
+#[cfg(target_os = "windows")]
+fn startup_retry_blocked(last_startup: Option<Instant>) -> bool {
+    last_startup.is_some_and(|started| started.elapsed() < STARTUP_RETRY_COOLDOWN)
 }
 
 fn required_source_path(value: &Value, key: &str) -> Result<PathBuf> {
@@ -379,5 +419,15 @@ mod tests {
             service.cad_root(),
             root.canonicalize().expect("canonical CAD root")
         );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn startup_retry_is_blocked_only_during_the_cooldown() {
+        assert!(!startup_retry_blocked(None));
+        assert!(startup_retry_blocked(Some(Instant::now())));
+        assert!(!startup_retry_blocked(Some(
+            Instant::now() - STARTUP_RETRY_COOLDOWN
+        )));
     }
 }

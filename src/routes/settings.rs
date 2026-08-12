@@ -1,6 +1,14 @@
 use super::{find_gemini_cli, AppState};
 use axum::{extract::State, Json};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::path::PathBuf;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CadSettingsRequest {
+    workspace: String,
+    auto_start: bool,
+}
 
 /// 根据 base_url 返回该服务商对应的 DB/.env Key 名称
 fn provider_db_key(base_url: &str) -> &'static str {
@@ -50,6 +58,8 @@ pub async fn api_get_settings(State(s): State<AppState>) -> Json<serde_json::Val
     // 让前端能区分"已配置"和"未配置"，避免回退值误导
     let db_settings = s.db.get_all_settings().ok().unwrap_or_default();
     let raw_key = |db_key: &str| -> String { db_settings.get(db_key).cloned().unwrap_or_default() };
+    let aioncad_workspace = raw_key("aioncad_workspace");
+    let freecad_auto_start = raw_key("freecad_auto_start") != "false";
 
     // 仅保留 SerpAPI + AI 配置，其他搜索源（Firecrawl/Bing/Lens/CNIPR）和备用 AI 已屏蔽
 
@@ -77,7 +87,56 @@ pub async fn api_get_settings(State(s): State<AppState>) -> Json<serde_json::Val
         "gemini_cli_enabled": config.gemini_cli_enabled,
         "gemini_cli_available": !config.gemini_cli_path.is_empty(),
         "gemini_cli_path": config.gemini_cli_path,
+        "aioncad_workspace": aioncad_workspace,
+        "freecad_auto_start": freecad_auto_start,
+        "freecad_platform_supported": cfg!(target_os = "windows"),
     }))
+}
+
+pub async fn api_save_cad_settings(
+    State(s): State<AppState>,
+    Json(req): Json<CadSettingsRequest>,
+) -> Json<serde_json::Value> {
+    let workspace = req.workspace.trim();
+    if workspace.chars().count() > 1024 {
+        return Json(json!({"status": "error", "code": "workspace_too_long"}));
+    }
+
+    let resolved_workspace = if workspace.is_empty() {
+        None
+    } else {
+        let path = PathBuf::from(workspace);
+        if !path.is_absolute() {
+            return Json(json!({"status": "error", "code": "workspace_not_absolute"}));
+        }
+        let canonical = match path.canonicalize() {
+            Ok(path) => path,
+            Err(_) => {
+                return Json(json!({"status": "error", "code": "workspace_not_found"}));
+            }
+        };
+        if !canonical.join("bootstrap_bridge.ps1").is_file() {
+            return Json(json!({"status": "error", "code": "workspace_invalid"}));
+        }
+        Some(canonical)
+    };
+
+    let workspace_value = if resolved_workspace.is_some() {
+        workspace.to_string()
+    } else {
+        String::new()
+    };
+    let auto_start_value = if req.auto_start { "true" } else { "false" };
+    if let Err(error) = s.db.set_settings_batch(&[
+        ("aioncad_workspace", workspace_value.as_str()),
+        ("freecad_auto_start", auto_start_value),
+    ]) {
+        tracing::error!(error = %error, "Failed to save FreeCAD settings");
+        return Json(json!({"status": "error", "code": "save_failed"}));
+    }
+
+    s.cad.set_workspace(resolved_workspace);
+    Json(json!({"status": "ok"}))
 }
 
 fn parse_serpapi_keys(

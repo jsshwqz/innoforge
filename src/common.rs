@@ -130,8 +130,7 @@ pub fn init_app_state(db_path: &str) -> anyhow::Result<crate::routes::AppState> 
                 .ok()
                 .flatten()
                 .map(Into::into)
-        })
-        .or_else(|| Some(std::path::PathBuf::from(r"D:\test\aionui\aioncad")));
+        });
     let db_parent = std::path::Path::new(db_path)
         .parent()
         .filter(|path| !path.as_os_str().is_empty())
@@ -199,6 +198,7 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
         .route("/oa-response", get(routes::office_action_response_page))
         // FreeCAD visual artifact API
         .route("/api/cad/status", get(routes::api_cad_status))
+        .route("/api/cad/start", post(routes::api_cad_start))
         .route("/api/cad/draw", post(routes::api_cad_draw))
         .route("/api/cad/artifacts", get(routes::api_cad_artifacts))
         .route(
@@ -211,6 +211,7 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
         )
         // 设置 API / Settings API
         .route("/api/settings", get(routes::api_get_settings))
+        .route("/api/settings/cad", post(routes::api_save_cad_settings))
         .route("/api/settings/serpapi", post(routes::api_save_serpapi))
         .route("/api/settings/ai", post(routes::api_save_ai))
         .route(

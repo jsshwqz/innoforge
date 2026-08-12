@@ -19,7 +19,7 @@
   }
 
   function createController(options) {
-    const state = { busy: false, latest: null, parentForNext: null, originalPrompt: '' };
+    const state = { busy: false, latest: null, parentForNext: null, artifacts: [] };
 
     function shouldHandle(prompt) {
       return INTENT_PATTERNS.some((pattern) => pattern.test(prompt || ''));
@@ -27,6 +27,20 @@
 
     function messageContainer() {
       return typeof options.messages === 'function' ? options.messages() : options.messages;
+    }
+
+    function localizedError(payload, fallback) {
+      if (payload && payload.code) {
+        return tr(`cad.error.${payload.code}`, payload.error || fallback);
+      }
+      return (payload && payload.error) || fallback;
+    }
+
+    function cacheArtifact(artifact) {
+      const existing = state.artifacts.findIndex((item) => item.id === artifact.id);
+      if (existing >= 0) state.artifacts[existing] = artifact;
+      else state.artifacts.push(artifact);
+      state.artifacts.sort((left, right) => left.revision - right.revision);
     }
 
     function addProgress(prompt) {
@@ -66,6 +80,7 @@
 
     function renderArtifact(holder, artifact, warnings) {
       holder.className = 'cad-card cad-card-complete';
+      holder.dataset.cadArtifactId = artifact.id;
       while (holder.firstChild) holder.removeChild(holder.firstChild);
       const heading = el('div', 'cad-card-title', `${tr('cad.revision', 'Revision')} ${artifact.revision}`);
       const image = el('img', 'cad-preview');
@@ -110,45 +125,66 @@
       holder.appendChild(actions);
     }
 
-    function renderDegraded(holder, error) {
+    function renderDegraded(holder, error, retryRequest) {
       holder.className = 'cad-card cad-card-degraded';
       while (holder.firstChild) holder.removeChild(holder.firstChild);
       holder.appendChild(el('div', 'cad-card-title', tr('cad.unavailable', 'FreeCAD unavailable')));
       holder.appendChild(el('div', 'cad-warning', error || tr('cad.textContinues', 'Text chat is still available.')));
-      holder.appendChild(button(tr('cad.retry', 'Retry'), () => draw(state.originalPrompt, state.latest && state.latest.id)));
+      holder.appendChild(button(tr('cad.retry', 'Retry'), () => submit(retryRequest)));
     }
 
-    async function draw(prompt, parentArtifactId) {
-      if (state.busy || !(prompt || '').trim()) return false;
+    async function submit(request) {
+      if (state.busy || !(request.prompt || '').trim()) return false;
       state.busy = true;
-      state.originalPrompt = prompt;
-      const progress = addProgress(prompt);
+      const progress = addProgress(request.prompt);
       try {
         progress.phase.textContent = tr('cad.starting', 'Starting FreeCAD…');
-        const context = options.context();
         progress.phase.textContent = tr('cad.briefing', 'Preparing complete drawing brief…');
         const response = await fetch('/api/cad/draw', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            context_kind: context.kind,
-            context_id: context.id,
-            prompt: prompt,
-            conversation_context: typeof options.history === 'function' ? options.history() : '',
-            parent_artifact_id: parentArtifactId || state.parentForNext || null
+            context_kind: request.context.kind,
+            context_id: request.context.id,
+            prompt: request.prompt,
+            conversation_context: request.conversationContext,
+            parent_artifact_id: request.parentArtifactId
           })
         });
         const payload = await response.json();
-        if (!response.ok) throw new Error(payload.error || tr('cad.failed', 'Drawing failed'));
+        if (!response.ok) throw new Error(localizedError(payload, tr('cad.failed', 'Drawing failed')));
         state.latest = payload.artifact;
         state.parentForNext = null;
+        cacheArtifact(payload.artifact);
         renderArtifact(progress.card, payload.artifact, payload.warnings || []);
       } catch (error) {
-        renderDegraded(progress.card, error.message);
+        renderDegraded(progress.card, error.message, request);
       } finally {
         state.busy = false;
       }
       return true;
+    }
+
+    function draw(prompt, parentArtifactId) {
+      const context = options.context();
+      const effectiveParent = parentArtifactId === undefined ? state.parentForNext : parentArtifactId;
+      return submit({
+        prompt: prompt,
+        context: { kind: context.kind, id: context.id },
+        conversationContext: typeof options.history === 'function' ? options.history() : '',
+        parentArtifactId: effectiveParent || null
+      });
+    }
+
+    function renderHistory() {
+      const container = messageContainer();
+      if (!container) return;
+      container.querySelectorAll('[data-cad-artifact-id]').forEach((card) => card.remove());
+      state.artifacts.forEach((artifact) => {
+        const holder = el('section', 'cad-card');
+        container.appendChild(holder);
+        renderArtifact(holder, artifact, []);
+      });
     }
 
     async function restore() {
@@ -159,12 +195,9 @@
         const response = await fetch(url);
         if (!response.ok) return;
         const payload = await response.json();
-        (payload.artifacts || []).slice().reverse().forEach((artifact) => {
-          const holder = el('section', 'cad-card');
-          messageContainer().appendChild(holder);
-          renderArtifact(holder, artifact, []);
-          state.latest = artifact;
-        });
+        state.artifacts = (payload.artifacts || []).slice().reverse();
+        state.latest = state.artifacts.length ? state.artifacts[state.artifacts.length - 1] : null;
+        renderHistory();
       } catch (_) {
         // History restoration is best-effort and never blocks ordinary chat.
       }
@@ -179,6 +212,7 @@
       },
       intercept: (prompt) => shouldHandle(prompt) ? draw(prompt) : false,
       restore: restore,
+      renderHistory: renderHistory,
       latest: () => state.latest
     };
   }

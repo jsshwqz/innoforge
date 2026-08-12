@@ -22,6 +22,8 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 ### 修复 / Fixed
 - **FreeCAD 启动与续改可靠性** — InnoForge 会串行化并发启动、校验 AionCAD API 身份和产物导入根目录，并在专家 CAD 简报失败时保留完整原始指令回退；新绘图不再误接到上一模型，只有用户点击“继续修改”才建立父版本关系。
   FreeCAD startup and revision reliability: InnoForge serializes concurrent startup, verifies the AionCAD API identity and artifact import root, and preserves the complete original instruction as fallback when an expert CAD brief fails. A new drawing no longer attaches to the previous model; only an explicit “Continue” action creates a parent revision.
+- **FreeCAD 审查阻断项** — 启动超时后增加冷却状态，防止后台 FreeCAD 尚在连接时重复拉起；重试固定使用失败请求的完整快照，聊天区域重绘后恢复 CAD 历史；CAD 提示词边界转义，设置页不再因状态检查自动启动程序，并支持保存 AionCAD 工作目录与自动启动开关。
+  FreeCAD review blockers: startup cooldown prevents duplicate launches while a timed-out background FreeCAD is still connecting; retry uses the immutable failed-request snapshot; CAD history survives chat re-rendering; prompt boundaries are escaped; status checks no longer start local processes; and the settings page persists the AionCAD workspace plus auto-start preference.
 - **专利详情导航激活态** — 详情页无独立导航项时，侧边导航激活态映射到「搜索」页，避免无高亮。
   Patent-detail nav active state: the sidebar now highlights "Search" on detail pages that have no dedicated nav entry.
 - **论点看板初始隐藏** — OA 页论点看板初始隐藏改由内联 `display` 控制，与 JS 显隐逻辑一致，避免 CSS `display:none` 覆盖 JS 的显示操作。

@@ -135,7 +135,7 @@ fn build_user_context(ctx: &PipelineContext) -> String {
                 m.source_title,
                 m.combined_score * 100.0,
                 if m.snippet.len() > 120 {
-                    format!("{}...", &m.snippet.chars().take(120).collect::<String>())
+                    format!("{}...", m.snippet.chars().take(120).collect::<String>())
                 } else {
                     m.snippet.clone()
                 }

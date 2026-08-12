@@ -176,8 +176,19 @@
         <div class="setting-group" id="freecad-settings">
             <h3 data-i18n="cad.settingsTitle"></h3>
             <p data-i18n="cad.settingsHint"></p>
+            <label for="aioncad-workspace" data-i18n="cad.workspaceLabel"></label>
+            <input id="aioncad-workspace" type="text" data-i18n-placeholder="cad.workspacePlaceholder" autocomplete="off">
+            <p class="muted" data-i18n="cad.workspaceHint"></p>
+            <label class="sidebar-toggle" style="margin:12px 0;">
+                <input type="checkbox" id="freecad-auto-start">
+                <span data-i18n="cad.autoStart"></span>
+            </label>
+            <p class="muted" data-i18n="cad.autoStartHint"></p>
             <div id="freecad-status" class="status-pill" data-i18n="cad.checking"></div>
-            <button class="btn-save" type="button" onclick="checkAndStartFreeCad()" data-i18n="cad.detectStart"></button>
+            <div class="btn-row">
+                <button class="btn-save" type="button" onclick="saveFreeCadSettings()" data-i18n="cad.saveSettings"></button>
+                <button class="btn-gray" id="freecad-start-btn" type="button" onclick="checkAndStartFreeCad()" data-i18n="cad.detectStart"></button>
+            </div>
         </div>
 
         <!-- 备用搜索源（Firecrawl/Bing/CNIPR）和备用 AI 已屏蔽，仅保留 SerpAPI + DeepSeek -->
@@ -467,6 +478,14 @@
                     updateGoogleAuthStatus(config);
                     detectGcloud();
                     detectGeminiCli();
+                    document.getElementById('aioncad-workspace').value = config.aioncad_workspace || '';
+                    document.getElementById('freecad-auto-start').checked = config.freecad_auto_start !== false;
+                    if (!config.freecad_platform_supported) {
+                        document.getElementById('aioncad-workspace').disabled = true;
+                        document.getElementById('freecad-auto-start').disabled = true;
+                        document.getElementById('freecad-start-btn').disabled = true;
+                    }
+                    refreshFreeCadStatus();
                 }
             } catch (e) {
                 console.error('Failed to load config:', e);
@@ -933,20 +952,61 @@
             }, 3000);
         }
 
+        function renderFreeCadStatus(data) {
+            var status = document.getElementById('freecad-status');
+            var availability = (data && data.availability) || 'unavailable';
+            status.textContent = t('cad.status.' + availability);
+            status.className = 'status-pill ' + (availability === 'ready' ? 'success' : (availability === 'unsupported' ? 'warning' : 'error'));
+        }
+
+        async function refreshFreeCadStatus() {
+            var status = document.getElementById('freecad-status');
+            status.textContent = t('cad.checking');
+            try {
+                var response = await fetch('/api/cad/status');
+                renderFreeCadStatus(await response.json());
+            } catch (error) {
+                renderFreeCadStatus({ availability: 'unavailable' });
+            }
+        }
+
+        async function saveFreeCadSettings() {
+            var status = document.getElementById('freecad-status');
+            status.textContent = t('cad.saving');
+            try {
+                var response = await fetch('/api/settings/cad', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        workspace: document.getElementById('aioncad-workspace').value,
+                        auto_start: document.getElementById('freecad-auto-start').checked
+                    })
+                });
+                var data = await response.json();
+                if (!response.ok || data.status !== 'ok') {
+                    status.textContent = t('cad.settingsError.' + (data.code || 'save_failed'));
+                    status.className = 'status-pill error';
+                    return;
+                }
+                status.textContent = t('cad.saved');
+                status.className = 'status-pill success';
+            } catch (error) {
+                status.textContent = t('cad.settingsError.save_failed');
+                status.className = 'status-pill error';
+            }
+        }
+
         async function checkAndStartFreeCad() {
             var status = document.getElementById('freecad-status');
             status.textContent = t('cad.starting');
             try {
-                var response = await fetch('/api/cad/status');
+                var response = await fetch('/api/cad/start', { method: 'POST' });
                 var data = await response.json();
-                status.textContent = data.message || data.availability;
-                status.className = 'status-pill ' + (data.availability === 'ready' ? 'success' : 'warning');
+                renderFreeCadStatus(data);
             } catch (error) {
-                status.textContent = t('cad.unavailable');
-                status.className = 'status-pill error';
+                renderFreeCadStatus({ availability: 'unavailable' });
             }
         }
-        checkAndStartFreeCad();
 
         // 备用 AI 管理已移除（仅保留 DeepSeek）
     </script>

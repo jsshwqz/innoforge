@@ -311,6 +311,7 @@
             aiDiv.innerHTML = DOMPurify.sanitize(escapeHtml(patentChatHistory[i+1][1]).replace(/\n/g, '<br>'));
             box.appendChild(aiDiv);
         }
+        patentCadController.renderHistory();
         box.scrollTop = box.scrollHeight;
         showPatentExportButton();
     }

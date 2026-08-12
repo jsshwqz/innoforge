@@ -18,6 +18,18 @@ fn all_conversation_pages_load_the_shared_cad_controller_and_button() {
 #[test]
 fn settings_can_detect_and_start_freecad() {
     assert!(SETTINGS.contains("id=\"freecad-status\""));
+    assert!(SETTINGS.contains("id=\"aioncad-workspace\""));
+    assert!(SETTINGS.contains("id=\"freecad-auto-start\""));
+    assert!(SETTINGS.contains("saveFreeCadSettings"));
     assert!(SETTINGS.contains("checkAndStartFreeCad"));
     assert!(SETTINGS.contains("/api/cad/status"));
+    assert!(SETTINGS.contains("/api/cad/start"));
+    assert!(SETTINGS.contains("/api/settings/cad"));
+}
+
+#[test]
+fn conversation_pages_render_cad_history_after_chat_rebuilds() {
+    for page in [IDEA, PATENT, OA] {
+        assert!(page.contains(".renderHistory()"));
+    }
 }

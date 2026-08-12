@@ -121,7 +121,7 @@ DOM 使用 `createElement` 与 `textContent` 构建；预览图只接受 InnoFor
 ## 7. 自动启动与配置
 
 - bridge URL 默认 `http://127.0.0.1:8010`，只允许 loopback HTTP。
-- AionCAD workspace 优先从 `INNOFORGE_AIONCAD_WORKSPACE` 读取，其次读取设置页保存值，最后在 Windows 检查已知默认路径。
+- AionCAD workspace 优先从 `INNOFORGE_AIONCAD_WORKSPACE` 读取，其次读取设置页保存值；不内置开发机绝对路径。
 - 自动启动仅在 Windows 桌面环境启用。使用 `Command` 直接调用经规范化的 `bootstrap_bridge.ps1`，参数逐项传递，不构造 shell 命令字符串。
 - 启动后轮询 `/health`、worker 心跳和 `/draw/view`，只有三者就绪才声称 FreeCAD 可视控制。
 - Android、iOS、Docker 或无 FreeCAD 环境返回结构化 `unsupported`/`unavailable`，不影响其他 AI 功能。
