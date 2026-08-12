@@ -28,7 +28,7 @@ pub async fn generate_experiment(ctx: &PipelineContext, ai: &AiClient) -> Result
         ctx.description,
         ctx.technical_domain,
         ctx.novelty_score,
-        &ctx.ai_analysis.chars().take(500).collect::<String>(),
+        ctx.ai_analysis.chars().take(500).collect::<String>(),
     );
 
     let response = ai.chat(&prompt, None).await?;

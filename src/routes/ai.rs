@@ -26,7 +26,7 @@ const DEFAULT_CHAT_SYSTEM_PROMPT: &str =
     "你是创研台的 AI 助手，擅长专利分析、技术方案评估、可行性验证和知识产权保护。请用中文回答。";
 
 /// Escape externally supplied prompt material so it cannot terminate the data boundary.
-fn escape_prompt_material(value: &str) -> String {
+pub(crate) fn escape_prompt_material(value: &str) -> String {
     value
         .replace('&', "&amp;")
         .replace('<', "&lt;")
