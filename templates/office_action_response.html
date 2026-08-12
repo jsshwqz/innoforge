@@ -116,6 +116,7 @@
             <div class="discussion-input-row">
                 <input type="text" id="discussion-input" data-i18n-placeholder="oar.discussInput" onkeydown="if(event.key==='Enter') sendDiscussionMessage()">
                 <button id="discussion-send-btn" onclick="sendDiscussionMessage()" data-i18n="oar.send"></button>
+                <button id="discussion-cad-btn" type="button" onclick="drawOaCad()" data-i18n="cad.draw"></button>
                 <button id="discussion-stop-btn" class="btn-stop" style="display:none" onclick="stopDiscussionGeneration()" data-i18n="oar.stop"></button>
                 <button id="discussion-export-btn" class="btn-export-ghost" style="display:none" onclick="exportDiscussionConclusions()" data-i18n="oar.exportConclusions"></button>
                 <button id="discussion-transcript-export-btn" class="btn-export-ghost" style="display:none" onclick="exportDiscussionTranscript()" data-i18n="oar.exportTranscript"></button>
@@ -178,6 +179,7 @@
     </div>
 
     <script src="/static/i18n.js"></script>
+    <script src="/static/cad.js"></script>
     <script>
     // Ensure DOMPurify never throws even if script failed to load
     if (typeof DOMPurify === 'undefined' || typeof DOMPurify.sanitize !== 'function') {
@@ -234,6 +236,26 @@
     var discussionHistory = [];
     var discussionAbortController = null;
     var discussionSending = false;
+    function oaCadContextId() {
+        var id = localStorage.getItem('oa-discuss-id');
+        if (!id) {
+            id = 'disc-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+            localStorage.setItem('oa-discuss-id', id);
+        }
+        return id;
+    }
+    var oaCadController = window.InnoForgeCad.createController({
+        context: function() { return { kind: 'oa', id: oaCadContextId() }; },
+        input: function() { return document.getElementById('discussion-input'); },
+        messages: function() { return document.getElementById('discussion-messages'); },
+        history: function() { return JSON.stringify(discussionHistory); },
+        onContinue: function() {
+            var input = document.getElementById('discussion-input');
+            input.value = t('cad.continuePrompt'); input.focus();
+        }
+    });
+    function drawOaCad() { oaCadController.drawFromInput(); }
+    oaCadController.restore();
 
     function saveOaState() {
         try { localStorage.setItem(OA_STORAGE_KEY, JSON.stringify(_uploadedData)); } catch (e) { /* ignore */ }
@@ -2220,6 +2242,7 @@
         panel.classList.remove('hidden');
         document.getElementById('discussion-messages').innerHTML =
             '<div class="msg msg-ai"><div class="msg-bubble">' + t('oar.discussHint') + '</div></div>';
+        oaCadController.renderHistory();
         panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
         document.getElementById('discussion-input').focus();
         showDiscussionExportButton();
@@ -2229,6 +2252,11 @@
         var input = document.getElementById('discussion-input');
         var text = input.value.trim();
         if (!text) return;
+        if (oaCadController.shouldHandle(text)) {
+            input.value = '';
+            await oaCadController.draw(text);
+            return;
+        }
         if (discussionSending) {
             if (discussionAbortController) {
                 discussionAbortController.abort();

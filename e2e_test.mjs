@@ -2,7 +2,7 @@ import puppeteer from 'puppeteer';
 import { existsSync } from 'node:fs';
 
 const baseUrl = (process.env.INNOFORGE_E2E_BASE_URL || 'http://127.0.0.1:3000').replace(/\/$/, '');
-const expectedPasses = 48;
+const expectedPasses = 51;
 const failures = [];
 let passed = 0;
 
@@ -413,6 +413,130 @@ async function checkDiscussionTranscriptExport(oaPage) {
     }
 }
 
+async function checkCadControllerStateIsolation(ideaPage) {
+    const result = await ideaPage.evaluate(async () => {
+        const host = document.createElement('div');
+        host.id = 'innoforge-e2e-cad-host';
+        document.body.appendChild(host);
+        const requests = [];
+        const originalFetch = window.fetch;
+        let drawAttempt = 0;
+        let contextId = 'cad-context-original';
+        let history = 'cad-history-original';
+        const artifacts = [
+            {
+                id: 'cad-history-2', revision: 2, assumptions: [],
+                validation: { valid: true }, created_at: '2026-08-12T00:00:02Z',
+                step_rel_path: 'two.step',
+            },
+            {
+                id: 'cad-history-1', revision: 1, assumptions: [],
+                validation: { valid: true }, created_at: '2026-08-12T00:00:01Z',
+                step_rel_path: null,
+            },
+        ];
+
+        window.fetch = async (url, options = {}) => {
+            if (String(url).startsWith('/api/cad/artifacts?')) {
+                return new Response(JSON.stringify({ artifacts }), {
+                    status: 200,
+                    headers: { 'Content-Type': 'application/json' },
+                });
+            }
+            if (url === '/api/cad/draw') {
+                const body = JSON.parse(options.body);
+                requests.push(body);
+                drawAttempt += 1;
+                if (drawAttempt === 1) {
+                    return new Response(JSON.stringify({ code: 'draw_failed', error: 'mock failure' }), {
+                        status: 503,
+                        headers: { 'Content-Type': 'application/json' },
+                    });
+                }
+                const artifact = {
+                    id: `cad-created-${drawAttempt}`,
+                    revision: drawAttempt,
+                    assumptions: [],
+                    validation: { valid: true },
+                    created_at: '2026-08-12T00:00:03Z',
+                    step_rel_path: null,
+                };
+                return new Response(JSON.stringify({ artifact, warnings: [] }), {
+                    status: 200,
+                    headers: { 'Content-Type': 'application/json' },
+                });
+            }
+            return originalFetch(url, options);
+        };
+
+        try {
+            const controller = window.InnoForgeCad.createController({
+                context: () => ({ kind: 'idea', id: contextId }),
+                messages: host,
+                history: () => history,
+            });
+            await controller.draw('failed original drawing');
+            const retryButton = host.querySelector('.cad-card-degraded button');
+            await controller.draw('new independent drawing');
+            contextId = 'cad-context-changed';
+            history = 'cad-history-changed';
+            retryButton.click();
+            for (let attempt = 0; attempt < 20 && requests.length < 3; attempt += 1) {
+                await new Promise(resolve => setTimeout(resolve, 10));
+            }
+            const retried = requests[2] || {};
+            const retryIsIsolated = retried.prompt === 'failed original drawing'
+                && retried.parent_artifact_id === null
+                && retried.context_id === 'cad-context-original'
+                && retried.conversation_context === 'cad-history-original';
+
+            await controller.restore();
+            host.replaceChildren();
+            controller.renderHistory();
+            const renderedIds = [...host.querySelectorAll('[data-cad-artifact-id]')]
+                .map(card => card.dataset.cadArtifactId);
+            return {
+                retryIsIsolated,
+                historyRestored: renderedIds.join(',') === 'cad-history-1,cad-history-2',
+                requestCount: requests.length,
+            };
+        } finally {
+            window.fetch = originalFetch;
+            host.remove();
+        }
+    });
+
+    requireCondition(
+        result.retryIsIsolated,
+        'CAD retry preserves the failed request prompt, context, history, and parent',
+        `page=/idea request_count=${result.requestCount} retry_snapshot=changed`,
+    );
+    requireCondition(
+        result.historyRestored,
+        'CAD history can be rendered again after chat rebuilds its message container',
+        'page=/idea CAD history order or cards were lost after container rebuild',
+    );
+}
+
+async function checkSettingsDoesNotAutoStartFreeCad(settingsPage) {
+    const startRequests = [];
+    const observer = request => {
+        if (request.url() === `${baseUrl}/api/cad/start`) startRequests.push(request.method());
+    };
+    settingsPage.on('request', observer);
+    try {
+        await settingsPage.reload({ waitUntil: 'domcontentloaded', timeout: 20_000 });
+        await new Promise(resolve => setTimeout(resolve, 1_000));
+        requireCondition(
+            startRequests.length === 0,
+            'Settings page checks FreeCAD status without starting it automatically',
+            `page=/settings start_requests=${startRequests.join(',') || 'none'}`,
+        );
+    } finally {
+        settingsPage.off('request', observer);
+    }
+}
+
 async function main() {
     const pageErrors = [];
     const requestFailures = [];
@@ -427,6 +551,10 @@ async function main() {
         });
 
         openedPages = await runPageMatrix(browser, pageErrors, requestFailures);
+        const ideaPage = openedPages.get('/idea');
+        if (ideaPage) await checkCadControllerStateIsolation(ideaPage);
+        const settingsPage = openedPages.get('/settings');
+        if (settingsPage) await checkSettingsDoesNotAutoStartFreeCad(settingsPage);
         const oaPage = openedPages.get('/oa-response');
         if (oaPage) {
             await checkAmendmentEndpoint(oaPage);

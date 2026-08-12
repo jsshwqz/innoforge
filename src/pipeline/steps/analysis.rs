@@ -47,7 +47,7 @@ pub async fn deep_analysis_simple(ctx: &mut PipelineContext, ai: &AiClient) -> R
                 m.source_title,
                 m.combined_score * 100.0,
                 if m.snippet.len() > 150 {
-                    format!("{}...", &m.snippet.chars().take(150).collect::<String>())
+                    format!("{}...", m.snippet.chars().take(150).collect::<String>())
                 } else {
                     m.snippet.clone()
                 },

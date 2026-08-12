@@ -123,8 +123,23 @@ pub fn init_app_state(db_path: &str) -> anyhow::Result<crate::routes::AppState> 
     }
 
     let config = AppConfig::from_db_and_env(Some(&db));
+    let workspace = std::env::var_os("INNOFORGE_AIONCAD_WORKSPACE")
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            db.get_setting("aioncad_workspace")
+                .ok()
+                .flatten()
+                .map(Into::into)
+        });
+    let db_parent = std::path::Path::new(db_path)
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_else(|| std::path::PathBuf::from("data"));
+    let cad = crate::cad::CadService::new(db_parent.join("cad"), workspace)?;
     let state = AppState {
         db: Arc::new(db),
+        cad: Arc::new(cad),
         config: Arc::new(RwLock::new(config)),
         pipeline_channels: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     };
@@ -181,8 +196,22 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
         .route("/idea", get(routes::idea_page))
         .route("/settings", get(routes::settings_page))
         .route("/oa-response", get(routes::office_action_response_page))
+        // FreeCAD visual artifact API
+        .route("/api/cad/status", get(routes::api_cad_status))
+        .route("/api/cad/start", post(routes::api_cad_start))
+        .route("/api/cad/draw", post(routes::api_cad_draw))
+        .route("/api/cad/artifacts", get(routes::api_cad_artifacts))
+        .route(
+            "/api/cad/artifacts/:id/preview",
+            get(routes::api_cad_preview),
+        )
+        .route(
+            "/api/cad/artifacts/:id/download/:format",
+            get(routes::api_cad_download),
+        )
         // 设置 API / Settings API
         .route("/api/settings", get(routes::api_get_settings))
+        .route("/api/settings/cad", post(routes::api_save_cad_settings))
         .route("/api/settings/serpapi", post(routes::api_save_serpapi))
         .route("/api/settings/ai", post(routes::api_save_ai))
         .route(

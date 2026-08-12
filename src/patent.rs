@@ -5,6 +5,81 @@
 
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum CadContextKind {
+    Idea,
+    Patent,
+    Oa,
+}
+
+impl CadContextKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Idea => "idea",
+            Self::Patent => "patent",
+            Self::Oa => "oa",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CadValidation {
+    pub valid: bool,
+    #[serde(default)]
+    pub fixed: bool,
+    #[serde(default)]
+    pub issues: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CadArtifact {
+    pub id: String,
+    pub context_kind: CadContextKind,
+    pub context_id: String,
+    pub parent_artifact_id: Option<String>,
+    pub revision: i64,
+    pub prompt: String,
+    pub assumptions: Vec<String>,
+    pub preview_rel_path: String,
+    pub fcstd_rel_path: String,
+    pub step_rel_path: Option<String>,
+    pub validation: CadValidation,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CadDrawRequest {
+    pub context_kind: CadContextKind,
+    pub context_id: String,
+    pub prompt: String,
+    #[serde(default)]
+    pub conversation_context: String,
+    pub parent_artifact_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CadAvailability {
+    Ready,
+    Starting,
+    Unavailable,
+    Unsupported,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CadStatus {
+    pub availability: CadAvailability,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CadDrawResponse {
+    pub artifact: CadArtifact,
+    #[serde(default)]
+    pub warnings: Vec<String>,
+}
+
 /// 专利数据 / Patent data
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Patent {

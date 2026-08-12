@@ -1039,6 +1039,20 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); curso
 .page-footer a { color: var(--text-faint); }
 .page-footer a:hover { color: var(--text-muted); }
 
+/* ---------- FreeCAD conversation cards ---------- */
+.cad-card { margin: var(--sp-3) 0; padding: var(--sp-4); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-raised); }
+.cad-card-title { color: var(--text); font-weight: 650; margin-bottom: var(--sp-3); }
+.cad-progress-text, .cad-time { color: var(--text-muted); font-size: var(--fs-sm); }
+.cad-preview { display: block; width: 100%; max-height: 440px; object-fit: contain; border-radius: var(--radius-md); background: #fff; cursor: zoom-in; }
+.cad-assumptions, .cad-validation, .cad-warning { margin-top: var(--sp-3); font-size: var(--fs-sm); }
+.cad-assumptions ul { margin: var(--sp-2) 0 0 var(--sp-4); }
+.cad-validation { color: var(--green); }
+.cad-warning { color: var(--orange); }
+.cad-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-3); }
+.cad-fullscreen { position: fixed; inset: 0; z-index: 100000; display: grid; place-items: center; padding: 48px; background: rgba(0, 0, 0, .88); }
+.cad-fullscreen-image { max-width: 100%; max-height: 100%; object-fit: contain; background: #fff; }
+.cad-fullscreen-close { position: absolute; top: 16px; right: 20px; border: 0; background: transparent; color: #fff; font-size: 36px; cursor: pointer; }
+
 /* ---------- 22. 响应式 ---------- */
 @media (max-width: 1024px) {
   .detail-grid { grid-template-columns: 1fr; }

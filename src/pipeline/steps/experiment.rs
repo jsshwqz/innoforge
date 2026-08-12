@@ -52,7 +52,7 @@ pub async fn execute(ctx: &mut PipelineContext, ai: &AiClient, db: &Arc<Database
         result.duration_ms,
         result.exit_code,
         serde_json::to_string_pretty(&result.metrics).unwrap_or_default(),
-        &result.stdout.chars().take(500).collect::<String>(),
+        result.stdout.chars().take(500).collect::<String>(),
     );
 
     record_finding(ctx, db, finding_type, &title, &content);
