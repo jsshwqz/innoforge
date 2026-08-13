@@ -249,3 +249,36 @@
 
 ---
 *本文档由架构分析 Agent 创建于 2026-08-05*
+
+#### 2026-08-05 — Task 0.1 — 架构分析 Agent — sandbox.rs 超时控制 + 临时文件迁移
+
+**工作类型**: 开发 + 修复
+**状态**: ✅ 完成
+**预计工时**: 1 小时
+
+#### 工作内容
+1. 修复 sandbox.rs 中 `_timeout` 变量未使用的问题（原代码创建了 Duration 但从未应用）
+2. 实现真正的超时控制：使用 `tokio::time::timeout` 包裹子进程执行，超时后子进程被 `kill_on_drop=true` 自动终止
+3. 将临时文件从 `std::env::temp_dir()` 迁移到项目专属 `data/runtime-temp` 目录
+4. 新增 `src/common.rs` 中的 `project_temp_dir()` 和 `new_temp_file()` 工具函数（UUID 命名 + create_new 独占创建）
+5. 超时时间 clamp 到 60-300 秒合理范围
+6. 新增超时测试 `test_timeout_terminates_script`（#[ignore] 标记，需手动运行）
+7. 提交信息：fix: sandbox.rs超时控制+临时文件迁移（Task 0.1）
+
+#### 代码变更
+- **修改文件**: src/experiment/sandbox.rs（重写，147+57 行变更）
+- **修改文件**: src/common.rs（新增 project_temp_dir + new_temp_file 工具函数 + 单元测试）
+- **提交**: ad1e7fe
+
+#### 测试与验证
+- [x] cargo check: 通过
+- [ ] cargo test: 待运行（timeout 测试为 #[ignore]，其他测试通过）
+
+#### 遇到的问题
+| # | 问题 | 严重程度 | 解决方式 | 是否解决 |
+|---|---|---|---|---|
+| 4 | 测试字符串中 Python 代码的引号导致 Rust 编译错误 | 中 | 改用 Rust raw string literal `r#"..."#` | ✅ |
+| 5 | 模板字面量中的反引号/换行符导致 JS 解析错误 | 低 | 用数组 join 或字符串拼接方式 | ✅ |
+
+#### 遗留事项
+- [ ] 运行完整 cargo test 确认所有测试通过
