@@ -175,6 +175,7 @@
     document.getElementById('chat-msg').addEventListener('keydown', e => {
         if (e.key === 'Enter') sendChat();
     });
+    var chatHistory = initChatHistory('chat-msg');
 
     // ── 持久化存储（后端 SQLite 替代 localStorage）──
     var PATENT_CHAT_KEY = 'innoforge_chat_patent_{{patent_number}}';
@@ -182,6 +183,7 @@
     var patentRetryMsg = '';
     var patentChatSending = false;
     var patentAbortController = null;
+    var patentChatQueue = initChatQueue('chat-msg');
     var patentChatOffset = 0;
     var patentChatTotal = 0;
     var patentChatPageSize = 50;
@@ -315,18 +317,16 @@
         const input = document.getElementById('chat-msg');
         const msg = input.value.trim();
         if (!msg) return;
-        if (patentChatSending) {
-            if (patentAbortController) {
-                patentAbortController.abort();
-                patentAbortController = null;
-            }
-            var box = document.getElementById('chat-messages');
-            var last = box.lastChild;
-            if (last && last.classList.contains('msg') && last.classList.contains('ai') && last.id === 'ai-loading') {
-                box.removeChild(last);
-            }
-        }
         input.value = '';
+        chatHistory.push(msg);
+        if (patentChatSending) {
+            patentChatQueue.enqueue(msg);
+            return;
+        }
+        await sendPatentChatCore(msg);
+    }
+
+    async function sendPatentChatCore(msg) {
         var box = document.getElementById('chat-messages');
         var userMsgDiv = document.createElement('div');
         userMsgDiv.className = 'msg user';
@@ -334,10 +334,15 @@
         box.appendChild(userMsgDiv);
         patentChatSending = true;
         showPatentStopButton();
-        await doPatentSend(msg);
-        patentChatSending = false;
-        hidePatentStopButton();
-        box.scrollTop = box.scrollHeight;
+        try {
+            await doPatentSend(msg);
+        } finally {
+            patentChatSending = false;
+            hidePatentStopButton();
+            box.scrollTop = box.scrollHeight;
+            var next = patentChatQueue.dequeue();
+            if (next) await sendPatentChatCore(next);
+        }
     }
 
     async function doPatentSend(msg) {
@@ -445,7 +450,7 @@
                 pQuoteText = '';
                 b.style.display = 'none';
             });
-            chatMessages.appendChild(b);
+            document.body.appendChild(b);
             return b;
         }
         function getBtn() {
@@ -471,14 +476,16 @@
                 if (!rect || (rect.width === 0 && rect.height === 0)) { getBtn().style.display = 'none'; return; }
                 var btn = getBtn();
                 pQuoteText = text;
-                var cr = chatMessages.getBoundingClientRect();
-                var left = rect.right - cr.left - btn.offsetWidth / 2;
-                var top = rect.top - cr.top - 36;
-                left = Math.max(4, Math.min(left, cr.width - btn.offsetWidth - 4));
+                btn.style.position = 'fixed';
+                btn.style.display = 'block';
+                var w = btn.offsetWidth;
+                var h = btn.offsetHeight;
+                var left = rect.right - w / 2;
+                var top = rect.top - h - 8;
+                left = Math.max(4, Math.min(left, window.innerWidth - w - 4));
                 top = Math.max(4, top);
                 btn.style.left = left + 'px';
                 btn.style.top = top + 'px';
-                btn.style.display = 'block';
             }, 10);
         });
         chatMessages.addEventListener('scroll', function() { getBtn().style.display = 'none'; });
