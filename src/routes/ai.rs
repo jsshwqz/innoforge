@@ -379,12 +379,25 @@ pub async fn api_ai_chat(
         let has_images = !req.images.is_empty();
 
         if has_images {
-            // Multimodal: build raw JSON request with image content parts
+            // Multimodal: build raw JSON request with image content parts.
+            //
+            // Image format: OpenAI-compatible APIs (including DeepSeek, Zhipu, OpenRouter,
+            // NVIDIA, Anthropic-bridge, etc.) all expect data:image/png;base64,<b64> in the
+            // image_url.url field per the OpenAI Multimodal spec. We ALWAYS include
+            // the data URI prefix — do NOT conditionally strip it based on model name.
+            //
+            // History compression is applied to multimodal requests too, to prevent token
+            // overflow in long conversations with images.
             let mut json_messages: Vec<serde_json::Value> =
                 vec![serde_json::json!({"role": "system", "content": system_prompt})];
 
-            // Add history messages
-            for (role, content) in &req.history {
+            // Add history messages (compressed if long)
+            let compressed_history = if req.history.len() > 5 {
+                compress_history(&ai, req.history.clone(), 8000).await
+            } else {
+                req.history.clone()
+            };
+            for (role, content) in &compressed_history {
                 json_messages.push(serde_json::json!({"role": role, "content": content}));
             }
 
