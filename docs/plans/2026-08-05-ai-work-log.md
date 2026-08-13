@@ -282,3 +282,30 @@
 
 #### 遗留事项
 - [ ] 运行完整 cargo test 确认所有测试通过
+
+#### 2026-08-05 — Task 0.2 + 0.3 — 架构分析 Agent — search N+1修复 + MCP健壮性
+
+**工作类型**: 开发 + 修复
+**状态**: ✅ 完成
+
+#### 工作内容
+1. Task 0.2: 在 `src/db/patent.rs` 新增 `get_patents_by_ids()` 批量查询方法（WHERE id IN (...)，每批 500 条）
+2. Task 0.2: 修复 `src/routes/search.rs` 中 IPC/CPC 过滤循环逐条查询，改用批量查询
+3. Task 0.3: 重写 `src/bin/mcp-server.rs` — 修复 `unwrap_or_default()`（生产路径禁止）、JSON-RPC id 缺失时正确跳过响应、JSON 解析失败时记录日志
+
+#### 代码变更
+- **新增**: src/db/patent.rs 中 `get_patents_by_ids()` 方法（~30 行）
+- **修改**: src/routes/search.rs（N+1 → 批量查询）
+- **重写**: src/bin/mcp-server.rs（健壮性增强）
+- **提交**: 625ac82
+
+#### 测试与验证
+- [x] cargo check: 通过（exit 0）
+- [ ] cargo test: 待运行
+
+#### 遇到的问题
+| # | 问题 | 严重程度 | 解决方式 | 是否解决 |
+|---|---|---|---|---|
+| 6 | rusqlite `params!` 宏不支持 `[..vec]` 展开 | 中 | 改用 `rusqlite::params_from_iter()` | ✅ |
+| 7 | MCP server 正则替换导致 `?` 操作符大量编译错误 | 高 | 整体重写 MCP server 而非增量修复 | ✅ |
+| 8 | MCP server 中 `json!({{}})` 双花括号转义问题 | 低 | 用正则和精确字符串替换修复 | ✅ |
