@@ -312,14 +312,27 @@
 | 8 | MCP server 中 `json!({{}})` 双花括号转义问题 | 低 | 用正则和精确字符串替换修复 | ✅ |
 ---
 
-#### 2026-08-05 - Task 1.A - Fact-Check
+#### 2026-08-05 - Task 1.A - 架构分析 Agent - Fact-Check 接入主流程
 
-**Status**: Completed
+**工作类型**: 代码清理 + 验证
+**状态**: ✅ 完成
+**预计工时**: 30 分钟（实际发现已在运行，仅清理标记）
 
-Found Fact-Check already wired into main flow at ai.rs:1393-1394
-Removed #![allow(dead_code)] from fact_check.rs
-Cleaned outdated comments in ai/mod.rs
+#### 工作内容
+1. 发现 Fact-Check 已在主流程中工作 — src/routes/ai.rs 第 1393-1394 行已有调用
+2. 移除 src/ai/fact_check.rs 的 #![allow(dead_code)]
+3. 清理 src/ai/mod.rs 中"预留层"的过时注释
+4. 验证 Fact-Check 已覆盖 4 类校验（技术领域/段落引用/无来源数据/A33风险）
 
-Commit: c2d3c3c
+#### 代码变更
+- 修改: src/ai/mod.rs（注释清理）
+- 修改: src/ai/fact_check.rs（移除 dead_code）
+- 提交: c2d3c3c
+- 代码行数: +3 / -6
 
-cargo check: PASS; Fact-Check has 14 unit tests
+#### 测试与验证
+- [x] cargo check: 通过
+- [x] Fact-Check 已有 14 个单元测试
+
+#### 发现的问题
+- ai/mod.rs 注释说"预留未接入"，与实际情况不符（已在 ai.rs:1393 调用）
