@@ -13,7 +13,6 @@
 //!
 //! 注：本模块为 OA 分析增强功能的预留层，当前未接入主流程，已标记 #[allow(dead_code)]
 
-#![allow(dead_code)]
 
 use serde::{Deserialize, Serialize};
 
