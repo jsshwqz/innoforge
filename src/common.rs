@@ -478,6 +478,54 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
         .with_state(state)
 }
 
+// ============================================================================
+// 项目临时文件工具 / Project Temp File Utilities
+//
+// 按 AGENTS.md 规范：运行时临时文件统一放在 data/runtime-temp 下，
+// 使用 UUID 文件名 + create_new 独占创建，避免系统临时目录污染和竞态。
+// ============================================================================
+
+/// 获取项目专属运行时临时目录。
+/// 按 AGENTS.md 规范，不使用系统 temp 目录。
+pub fn project_temp_dir() -> std::path::PathBuf {
+    let base = std::path::PathBuf::from("data").join("runtime-temp");
+    let _ = std::fs::create_dir_all(&base);
+    base
+}
+
+/// 创建 UUID 命名的独占临时文件。
+/// 使用 create_new 防止竞态（文件已存在则失败）。
+pub fn new_temp_file(prefix: &str, ext: &str) -> std::io::Result<std::path::PathBuf> {
+    let dir = project_temp_dir();
+    let name = format!("{}_{}.{}", prefix, uuid::Uuid::new_v4(), ext);
+    let path = dir.join(name);
+    std::fs::File::create_new(&path)?;
+    Ok(path)
+}
+
+#[cfg(test)]
+mod temp_file_tests {
+    use super::*;
+
+    #[test]
+    fn project_temp_dir_exists() {
+        let dir = project_temp_dir();
+        assert!(dir.exists());
+        assert!(dir.to_string_lossy().contains("runtime-temp"));
+    }
+
+    #[test]
+    fn new_temp_file_unique_and_exclusive() {
+        let path1 = new_temp_file("test", "tmp").unwrap();
+        let path2 = new_temp_file("test", "tmp").unwrap();
+        assert_ne!(path1, path2);
+        assert!(path1.exists());
+        assert!(path2.exists());
+        let _ = std::fs::remove_file(&path1);
+        let _ = std::fs::remove_file(&path2);
+    }
+}
+
 #[cfg(test)]
 mod cors_tests {
     use super::*;

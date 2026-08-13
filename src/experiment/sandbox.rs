@@ -1,21 +1,25 @@
 //! 沙箱执行器 / Sandbox runner
 //!
 //! 在隔离的子进程中执行验证脚本，捕获输出，强制超时。
+//! 临时文件统一放在 data/runtime-temp 下（不污染系统临时目录）。
+//! 超时通过 tokio::time::timeout 实现，超时后子进程自动终止。
 
+use crate::common::new_temp_file;
 use crate::experiment::types::ExperimentSpec;
 use crate::pipeline::context::ExperimentResult;
 use anyhow::Result;
 use std::io::Write;
 use std::process::Command;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+use tokio::process::Command as AsyncCommand;
+
+/// 最大超时上限（防止 timeout_secs 被设为过大）
+const MAX_TIMEOUT_SECS: u64 = 300;
 
 /// 在沙箱中运行实验脚本
 pub async fn run_experiment(spec: &ExperimentSpec) -> Result<ExperimentResult> {
     let start = Instant::now();
 
-    // 写脚本到临时文件
-    let tmp_dir = std::env::temp_dir().join("innoforge_experiments");
-    std::fs::create_dir_all(&tmp_dir)?;
     let script_id = uuid::Uuid::new_v4().to_string();
 
     let (ext, interpreter) = match spec.language.as_str() {
@@ -24,54 +28,88 @@ pub async fn run_experiment(spec: &ExperimentSpec) -> Result<ExperimentResult> {
         _ => ("py", find_python()),
     };
 
-    let script_path = tmp_dir.join(format!("exp_{}.{}", script_id, ext));
+    // 使用项目专属临时目录 + UUID 文件名
+    let script_path = new_temp_file("exp", ext)?;
+
     {
         let mut file = std::fs::File::create(&script_path)?;
         file.write_all(spec.script_content.as_bytes())?;
     }
 
-    // 执行脚本（带超时）
-    let _timeout = std::time::Duration::from_secs(spec.timeout_secs);
+    // 实际超时时间：clamp 到合理范围
+    let timeout_secs = spec.timeout_secs
+        .max(10)
+        .min(MAX_TIMEOUT_SECS)
+        .max(60);
+    let timeout = Duration::from_secs(timeout_secs);
 
-    let result = tokio::task::spawn_blocking(move || {
-        let output = if ext == "py" {
-            Command::new(&interpreter)
-                .arg(&script_path)
-                .env("PYTHONDONTWRITEBYTECODE", "1")
-                .output()
+    // 使用 tokio::time::timeout 实现真正的超时控制。
+    // 超时后子进程会被 tokio 自动终止（kill_on_drop=true）。
+    let output = tokio::time::timeout(timeout, async {
+        if ext == "py" {
+            let mut cmd = AsyncCommand::new(&interpreter);
+            cmd.arg(&script_path);
+            cmd.env("PYTHONDONTWRITEBYTECODE", "1");
+            cmd.kill_on_drop(true);
+            cmd.output().await
         } else {
-            // Rust: 先编译再运行
             let bin_path = script_path.with_extension("exe");
-            let compile = Command::new("rustc")
+            let mut compile_cmd = AsyncCommand::new("rustc");
+            compile_cmd
                 .arg(&script_path)
                 .arg("-o")
                 .arg(&bin_path)
-                .output();
+                .kill_on_drop(true);
+            let compile = compile_cmd.output().await;
             match compile {
-                Ok(c) if c.status.success() => Command::new(&bin_path).output(),
-                Ok(c) => Ok(c), // 编译失败，返回编译输出
+                Ok(c) if c.status.success() => {
+                    let mut run_cmd = AsyncCommand::new(&bin_path);
+                    run_cmd.kill_on_drop(true);
+                    run_cmd.output().await
+                }
+                Ok(c) => Ok(c),
                 Err(e) => Err(e),
             }
-        };
+        }
+    }).await;
 
-        // 清理临时文件
-        let _ = std::fs::remove_file(&script_path);
-        let _ = std::fs::remove_file(script_path.with_extension("exe"));
-
-        output
-    })
-    .await?;
+    // 无论成功/超时/失败，清理临时文件
+    let _ = std::fs::remove_file(&script_path);
+    let _ = std::fs::remove_file(script_path.with_extension("exe"));
 
     let duration_ms = start.elapsed().as_millis() as u64;
 
-    match result {
-        Ok(output) => {
+    match output {
+        Err(_) => {
+            Ok(ExperimentResult {
+                script_path: format!("exp_{}.{}", script_id, ext),
+                language: spec.language.clone(),
+                exit_code: -1,
+                stdout: String::new(),
+                stderr: format!(
+                    "实验脚本执行超时（超过 {} 秒）。请缩短脚本或增加超时设置。",
+                    timeout_secs
+                ),
+                metrics: serde_json::Value::Null,
+                duration_ms,
+                success: false,
+            })
+        }
+        Ok(Err(e)) => Ok(ExperimentResult {
+            script_path: format!("exp_{}.{}", script_id, ext),
+            language: spec.language.clone(),
+            exit_code: -1,
+            stdout: String::new(),
+            stderr: format!("Failed to execute: {}", e),
+            metrics: serde_json::Value::Null,
+            duration_ms,
+            success: false,
+        }),
+        Ok(Ok(output)) => {
             let stdout = String::from_utf8_lossy(&output.stdout).to_string();
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
             let exit_code = output.status.code().unwrap_or(-1);
             let success = output.status.success();
-
-            // 从 stdout 提取 JSON 指标
             let metrics = extract_json_metrics(&stdout);
 
             Ok(ExperimentResult {
@@ -85,16 +123,6 @@ pub async fn run_experiment(spec: &ExperimentSpec) -> Result<ExperimentResult> {
                 success,
             })
         }
-        Err(e) => Ok(ExperimentResult {
-            script_path: format!("exp_{}.{}", script_id, ext),
-            language: spec.language.clone(),
-            exit_code: -1,
-            stdout: String::new(),
-            stderr: format!("Failed to execute: {}", e),
-            metrics: serde_json::Value::Null,
-            duration_ms,
-            success: false,
-        }),
     }
 }
 
@@ -130,7 +158,6 @@ fn find_python() -> String {
     "python".to_string()
 }
 
-/// 检测当前环境是否有可用的 Python 解释器（供测试判断是否跳过）
 #[cfg(test)]
 fn python_available() -> bool {
     for name in &["python3", "python"] {
@@ -146,7 +173,6 @@ fn python_available() -> bool {
     false
 }
 
-/// 截断字符串
 fn truncate(s: &str, max: usize) -> String {
     if s.len() <= max {
         s.to_string()
@@ -161,23 +187,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_simple_python_experiment() {
-        // 该测试依赖运行环境中的 Python 解释器。
-        // 若环境未安装 Python，则优雅跳过（不标记为失败）。
         if !python_available() {
-            eprintln!(
-                "ℹ️  跳过 test_simple_python_experiment：当前环境未检测到 Python 解释器。\n\
-                 沙箱执行器本身为 Rust 实现，此测试仅验证 Python 脚本执行路径。\n\
-                 安装 Python 3 后可恢复运行。"
-            );
+            eprintln!("Skipping test: Python not available");
             return;
         }
 
         let spec = ExperimentSpec {
             title: "test".to_string(),
             language: "python".to_string(),
-            script_content:
-                "import json\nprint(json.dumps({\"accuracy\": 0.95}))\nprint(\"EXPERIMENT_DONE\")"
-                    .to_string(),
+            script_content: r#"import json
+print(json.dumps({"accuracy": 0.95}))
+print("EXPERIMENT_DONE")"#.to_string(),
             hypothesis: "test hypothesis".to_string(),
             timeout_secs: 10,
         };
@@ -190,9 +210,29 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    #[ignore]
+    async fn test_timeout_terminates_script() {
+        let spec = ExperimentSpec {
+            title: "timeout_test".to_string(),
+            language: "python".to_string(),
+            script_content: r#"import time
+time.sleep(300)"#.to_string(),
+            hypothesis: "timeout test".to_string(),
+            timeout_secs: 5,
+        };
+        let result = run_experiment(&spec).await.unwrap();
+        assert!(!result.success, "超时脚本应失败");
+        assert!(result.stderr.contains("超时"), "应报告超时错误: {}", result.stderr);
+    }
+
     #[test]
     fn test_extract_json_metrics() {
-        let stdout = "Starting...\n{\"accuracy\": 0.95}\n{\"latency_ms\": 12.3}\nDone\n";
+        let stdout = r#"Starting...
+{"accuracy": 0.95}
+{"latency_ms": 12.3}
+Done
+"#;
         let metrics = extract_json_metrics(stdout);
         assert_eq!(metrics["accuracy"], 0.95);
         assert_eq!(metrics["latency_ms"], 12.3);
@@ -200,7 +240,9 @@ mod tests {
 
     #[test]
     fn test_extract_no_metrics() {
-        let stdout = "Hello world\nNo JSON here\n";
+        let stdout = r#"Hello world
+No JSON here
+"#;
         let metrics = extract_json_metrics(stdout);
         assert!(metrics.is_null());
     }
