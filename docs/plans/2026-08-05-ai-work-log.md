@@ -147,7 +147,7 @@
 
 | ID | 日期 | 关联 Task | 问题 | 严重程度 | 发现者 | 状态 | 备注 |
 |---|---|---|---|---|---|---|---|
-| | | | | | | ⬜ 待分类 | |
+| IR-004 | 2026-08-05 | 全局 | GitHub HTTPS 推送超时（443），Gitee 正常 | 中 | 架构分析 Agent | ⏸ 待其它AI处理 | 需要网络恢复或配置代理后执行 `git push --force-with-lease origin main` |
 
 ### 3.3 已知技术债务 / Known Technical Debt（来自 Roadmap 附录 A）
 
@@ -279,6 +279,7 @@
 |---|---|---|---|---|
 | 4 | 测试字符串中 Python 代码的引号导致 Rust 编译错误 | 中 | 改用 Rust raw string literal `r#"..."#` | ✅ |
 | 5 | 模板字面量中的反引号/换行符导致 JS 解析错误 | 低 | 用数组 join 或字符串拼接方式 | ✅ |
+| 9 | GitHub 推送 443 端口超时（Gitee 正常） | 中 | 等待其它 AI Agent 或网络恢复后手动推送 | ⏸ 待其它AI处理 |
 
 #### 遗留事项
 - [ ] 运行完整 cargo test 确认所有测试通过
