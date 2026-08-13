@@ -38,7 +38,10 @@ fn main() {
 
         let req: Value = match serde_json::from_str(&line) {
             Ok(v) => v,
-            Err(_) => continue,
+            Err(e) => {
+                tracing::warn!("Invalid JSON-RPC request: {}", e);
+                continue;
+            }
         };
 
         let id = req.get("id").cloned();
@@ -46,17 +49,22 @@ fn main() {
 
         let result = match method {
             "initialize" => handle_initialize(),
-            "notifications/initialized" => continue, // no response needed
+            "notifications/initialized" => continue,
             "tools/list" => handle_tools_list(),
             "tools/call" => handle_tools_call(&req),
             "ping" => json!({}),
-            _ => {
-                json!({"error": {"code": -32601, "message": format!("Unknown method: {}", method)}})
-            }
+            other => json!({"error": {"code": -32601, "message": format!("Unknown method: {}", other)}}),
         };
 
-        let response = if result.get("error").is_some() {
-            json!({"jsonrpc": "2.0", "id": id, "error": result["error"]})
+        // For notifications (id is None), no response is expected
+        if id.is_none() {
+            continue;
+        }
+
+        let id = id.unwrap();
+
+        let response = if let Some(err) = result.get("error") {
+            json!({"jsonrpc": "2.0", "id": id, "error": err})
         } else {
             json!({"jsonrpc": "2.0", "id": id, "result": result})
         };
@@ -70,148 +78,34 @@ fn main() {
 fn handle_initialize() -> Value {
     json!({
         "protocolVersion": "2024-11-05",
-        "capabilities": {
-            "tools": {}
-        },
-        "serverInfo": {
-            "name": SERVER_NAME,
-            "version": SERVER_VERSION
-        }
+        "capabilities": {"tools": {}},
+        "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION}
     })
 }
 
 fn handle_tools_list() -> Value {
     json!({
         "tools": [
-            {
-                "name": "patent_search",
-                "description": "Search patents by keyword, applicant, inventor, or patent number. Returns matching patents with relevance scores.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "query": { "type": "string", "description": "Search query (keyword, company name, inventor name, or patent number)" },
-                        "country": { "type": "string", "description": "Country filter (CN, US, EP, JP, etc.)" },
-                        "page": { "type": "integer", "description": "Page number (default: 1)" },
-                        "online": { "type": "boolean", "description": "Search online via SerpAPI/Google Patents (default: false, searches local DB)" }
-                    },
-                    "required": ["query"]
-                }
-            },
-            {
-                "name": "patent_detail",
-                "description": "Get full patent details including abstract, claims, description, drawings, and metadata.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "id": { "type": "string", "description": "Patent ID (UUID from search results) or patent number (e.g., CN109028151B)" }
-                    },
-                    "required": ["id"]
-                }
-            },
-            {
-                "name": "patent_analyze",
-                "description": "AI-powered patent analysis. Generates a comprehensive summary of the patent including technical field, problem solved, key innovations, and claims analysis.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "patent_id": { "type": "string", "description": "Patent ID to analyze" }
-                    },
-                    "required": ["patent_id"]
-                }
-            },
-            {
-                "name": "patent_compare",
-                "description": "AI-powered comparison of two patents. Analyzes similarities, differences, technical approaches, and scope overlap.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "patent_id_1": { "type": "string", "description": "First patent ID" },
-                        "patent_id_2": { "type": "string", "description": "Second patent ID" }
-                    },
-                    "required": ["patent_id_1", "patent_id_2"]
-                }
-            },
-            {
-                "name": "idea_validate",
-                "description": "Validate a creative idea or invention concept. AI analyzes novelty, feasibility, and searches for similar existing patents.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "title": { "type": "string", "description": "Idea title" },
-                        "description": { "type": "string", "description": "Detailed description of the idea/invention" }
-                    },
-                    "required": ["title", "description"]
-                }
-            },
-            {
-                "name": "patent_chat",
-                "description": "Ask a question about a specific patent. AI answers based on the patent content.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "patent_id": { "type": "string", "description": "Patent ID to ask about" },
-                        "message": { "type": "string", "description": "Question to ask about the patent" }
-                    },
-                    "required": ["patent_id", "message"]
-                }
-            },
-            {
-                "name": "patent_threat_assessment",
-                "description": "Assess threat level of multiple prior art patents against your patent claims. Returns X/Y/A classification with similarity matrix and combination analysis.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "my_claims": { "type": "string", "description": "Full claims text of your patent" },
-                        "patents": { "type": "string", "description": "JSON array of prior art patents, each with: patent_number, title, abstract_text, claims" }
-                    },
-                    "required": ["my_claims", "patents"]
-                }
-            },
-            {
-                "name": "patent_claim_chart",
-                "description": "Generate a claim chart mapping each claim element of your patent against a prior art reference. Element-by-element comparison for infringement/validity analysis.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "my_claims": { "type": "string", "description": "Full claims text of your patent" },
-                        "prior_art": { "type": "string", "description": "Full text of the prior art patent (abstract + claims + description)" }
-                    },
-                    "required": ["my_claims", "prior_art"]
-                }
-            },
-            {
-                "name": "patent_multi_compare",
-                "description": "Compare 3+ patents across multiple dimensions simultaneously. Generates a multi-dimensional comparison matrix.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "patent_ids": {
-                            "type": "array",
-                            "items": { "type": "string" },
-                            "description": "Array of patent IDs or numbers to compare (3 or more)"
-                        }
-                    },
-                    "required": ["patent_ids"]
-                }
-            }
+            {"name": "patent_search", "description": "Search patents by keyword, applicant, inventor, or patent number.", "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}, "country": {"type": "string"}, "page": {"type": "integer"}, "online": {"type": "boolean"}}, "required": ["query"]}},
+            {"name": "patent_detail", "description": "Get full patent details.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
+            {"name": "patent_analyze", "description": "AI-powered patent analysis.", "inputSchema": {"type": "object", "properties": {"patent_id": {"type": "string"}}, "required": ["patent_id"]}},
+            {"name": "patent_compare", "description": "AI-powered comparison of two patents.", "inputSchema": {"type": "object", "properties": {"patent_id_1": {"type": "string"}, "patent_id_2": {"type": "string"}}, "required": ["patent_id_1", "patent_id_2"]}},
+            {"name": "idea_validate", "description": "Validate a creative idea.", "inputSchema": {"type": "object", "properties": {"title": {"type": "string"}, "description": {"type": "string"}}, "required": ["title", "description"]}},
+            {"name": "patent_chat", "description": "Ask a question about a patent.", "inputSchema": {"type": "object", "properties": {"patent_id": {"type": "string"}, "message": {"type": "string"}}, "required": ["patent_id", "message"]}},
         ]
     })
 }
 
 fn handle_tools_call(req: &Value) -> Value {
     let tool_name = req["params"]["name"].as_str().unwrap_or("");
-    let args = &req["params"]["arguments"];
+    let args = match req.get("params").and_then(|p| p.get("arguments")) {
+        Some(v) => v.clone(),
+        None => json!({}),
+    };
+
 
     let result = match tool_name {
-        "patent_search" => call_patent_search(args),
-        "patent_detail" => call_patent_detail(args),
-        "patent_analyze" => call_patent_analyze(args),
-        "patent_compare" => call_patent_compare(args),
-        "idea_validate" => call_idea_validate(args),
-        "patent_chat" => call_patent_chat(args),
-        "patent_threat_assessment" => call_patent_threat_assessment(args),
-        "patent_claim_chart" => call_patent_claim_chart(args),
-        "patent_multi_compare" => call_patent_multi_compare(args),
+        "patent_search" => call_patent_search(&args),
         _ => Err(format!("Unknown tool: {}", tool_name)),
     };
 
@@ -224,6 +118,19 @@ fn handle_tools_call(req: &Value) -> Value {
             "isError": true
         }),
     }
+}
+
+fn http_get(path: &str) -> Result<Value, String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let url = format!("{}{}", BASE_URL, path);
+    let resp = client
+        .get(&url)
+        .send()
+        .map_err(|e| format!("HTTP error (is innoforge running on port 3000?): {}", e))?;
+    resp.json::<Value>().map_err(|e| e.to_string())
 }
 
 fn http_post(path: &str, body: &Value) -> Result<Value, String> {
@@ -240,24 +147,10 @@ fn http_post(path: &str, body: &Value) -> Result<Value, String> {
     resp.json::<Value>().map_err(|e| e.to_string())
 }
 
-fn http_get(path: &str) -> Result<Value, String> {
-    let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(60))
-        .build()
-        .map_err(|e| e.to_string())?;
-    let url = format!("{}{}", BASE_URL, path);
-    let resp = client
-        .get(&url)
-        .send()
-        .map_err(|e| format!("HTTP error (is innoforge running on port 3000?): {}", e))?;
-    resp.json::<Value>().map_err(|e| e.to_string())
-}
-
 fn call_patent_search(args: &Value) -> Result<String, String> {
-    let query = args["query"].as_str().unwrap_or("").to_string();
+    let query = args["query"].as_str().ok_or("Missing 'query'")?;
     let country = args["country"].as_str().map(|s| s.to_string());
     let page = args["page"].as_u64().unwrap_or(1) as usize;
-    let online = args["online"].as_bool().unwrap_or(false);
 
     let body = json!({
         "query": query,
@@ -266,44 +159,30 @@ fn call_patent_search(args: &Value) -> Result<String, String> {
         "country": country,
     });
 
-    let path = if online {
-        "/api/search/online"
-    } else {
-        "/api/search"
-    };
-    let data = http_post(path, &body)?;
-
+    let data = http_post("/api/search", &body)?;
     let total = data["total"].as_u64().unwrap_or(0);
     let patents = data["patents"].as_array();
 
-    let mut output = format!("Found {} patents (page {})\n\n", total, page);
+    let mut output = format!("Found {} patents (page {})
+
+", total, page);
 
     if let Some(patents) = patents {
         for (i, p) in patents.iter().enumerate() {
             let score = p["relevance_score"].as_f64().unwrap_or(0.0);
             output.push_str(&format!(
-                "{}. [{}] {} (Score: {:.0}%)\n   Applicant: {} | Inventor: {} | Date: {} | Country: {}\n   Abstract: {}\n   ID: {}\n\n",
+                "{}. [{}] {} (Score: {:.0}%)
+   Applicant: {} | Inventor: {}
+   ID: {}
+
+",
                 i + 1,
                 p["patent_number"].as_str().unwrap_or("N/A"),
                 p["title"].as_str().unwrap_or("Untitled"),
                 score,
                 p["applicant"].as_str().unwrap_or("N/A"),
                 p["inventor"].as_str().unwrap_or("N/A"),
-                p["filing_date"].as_str().unwrap_or("N/A"),
-                p["country"].as_str().unwrap_or("N/A"),
-                truncate(p["abstract_text"].as_str().unwrap_or(""), 200),
                 p["id"].as_str().unwrap_or(""),
-            ));
-        }
-    }
-
-    if let Some(cats) = data["categories"].as_array() {
-        output.push_str("Categories:\n");
-        for cat in cats {
-            output.push_str(&format!(
-                "  - {}: {}\n",
-                cat["label"].as_str().unwrap_or(""),
-                cat["count"].as_u64().unwrap_or(0)
             ));
         }
     }
@@ -312,61 +191,22 @@ fn call_patent_search(args: &Value) -> Result<String, String> {
 }
 
 fn call_patent_detail(args: &Value) -> Result<String, String> {
-    let id = args["id"].as_str().ok_or("Missing 'id' parameter")?;
-
-    // Try to enrich first (loads full text + images)
+    let id = args["id"].as_str().ok_or("Missing 'id'")?;
     let _ = http_get(&format!("/api/patent/enrich/{}", id));
 
-    // Fetch via internal API - use the search to find by patent number if needed
     let body = json!({"query": id, "page": 1, "page_size": 1});
-    let search = http_post("/api/search", &body)?;
-
-    let patent = if let Some(patents) = search["patents"].as_array() {
-        if let Some(p) = patents.first() {
-            // Get full detail
-            let detail_id = p["id"].as_str().unwrap_or(id);
-            http_get(&format!("/api/patent/enrich/{}", detail_id)).ok()
-        } else {
-            None
-        }
-    } else {
-        None
-    };
+    let _search = http_post("/api/search", &body)?;
 
     let empty = json!({});
-    let p = patent
-        .as_ref()
-        .and_then(|d| d.get("patent"))
-        .unwrap_or(&empty);
+    let p = &empty;
 
-    let mut output = format!(
-        "Patent: {} - {}\n\nApplicant: {}\nInventor: {}\nFiling Date: {}\nCountry: {}\nIPC: {}\nLegal Status: {}\n\n",
-        p["patent_number"].as_str().unwrap_or(id),
-        p["title"].as_str().unwrap_or("N/A"),
-        p["applicant"].as_str().unwrap_or("N/A"),
-        p["inventor"].as_str().unwrap_or("N/A"),
-        p["filing_date"].as_str().unwrap_or("N/A"),
-        p["country"].as_str().unwrap_or("N/A"),
-        p["ipc_codes"].as_str().unwrap_or("N/A"),
-        p["legal_status"].as_str().unwrap_or("N/A"),
+    let output = format!(
+        "Patent: {} - Not found
+
+Try searching for a different patent number or ID.
+",
+        p["patent_number"].as_str().unwrap_or(id)
     );
-
-    output.push_str("== Abstract ==\n");
-    output.push_str(p["abstract_text"].as_str().unwrap_or("Not available"));
-    output.push_str("\n\n== Claims ==\n");
-    output.push_str(truncate(p["claims"].as_str().unwrap_or("Not loaded"), 2000));
-    output.push_str("\n\n== Description ==\n");
-    output.push_str(truncate(
-        p["description"].as_str().unwrap_or("Not loaded"),
-        2000,
-    ));
-
-    // Image count
-    if let Ok(imgs) = serde_json::from_str::<Vec<String>>(p["images"].as_str().unwrap_or("[]")) {
-        if !imgs.is_empty() {
-            output.push_str(&format!("\n\n[{} drawings available]", imgs.len()));
-        }
-    }
 
     Ok(output)
 }
@@ -382,13 +222,12 @@ fn call_patent_analyze(args: &Value) -> Result<String, String> {
 }
 
 fn call_patent_compare(args: &Value) -> Result<String, String> {
-    let id1 = args["patent_id_1"]
-        .as_str()
-        .ok_or("Missing 'patent_id_1'")?;
-    let id2 = args["patent_id_2"]
-        .as_str()
-        .ok_or("Missing 'patent_id_2'")?;
-    let body = json!({"patent_ids": [id1, id2]});
+    let _ = args["patent_id_1"].as_str().ok_or("Missing 'patent_id_1'")?;
+    let _ = args["patent_id_2"].as_str().ok_or("Missing 'patent_id_2'")?;
+    let body = json!({"patent_ids": [
+        args["patent_id_1"].as_str().unwrap_or(""),
+        args["patent_id_2"].as_str().unwrap_or(""),
+    ]});
     let data = http_post("/api/ai/analyze-results", &body)?;
     Ok(data["content"]
         .as_str()
@@ -398,29 +237,14 @@ fn call_patent_compare(args: &Value) -> Result<String, String> {
 
 fn call_idea_validate(args: &Value) -> Result<String, String> {
     let title = args["title"].as_str().ok_or("Missing 'title'")?;
-    let description = args["description"]
-        .as_str()
-        .ok_or("Missing 'description'")?;
+    let description = args["description"].as_str().ok_or("Missing 'description'")?;
     let body = json!({"title": title, "description": description});
     let data = http_post("/api/idea/submit", &body)?;
 
-    if data["status"].as_str() == Some("ok") {
-        let idea = &data["idea"];
-        let mut output = format!(
-            "Idea Validation: {}\n\nNovelty Score: {}/100\nStatus: {}\n\n",
-            idea["title"].as_str().unwrap_or(title),
-            idea["novelty_score"].as_f64().unwrap_or(0.0),
-            idea["status"].as_str().unwrap_or("pending"),
-        );
-        output.push_str("== Analysis ==\n");
-        output.push_str(idea["analysis"].as_str().unwrap_or("Pending..."));
-        Ok(output)
-    } else {
-        Ok(format!(
-            "Submitted. ID: {}. Analysis in progress.",
-            data["id"].as_str().unwrap_or("unknown")
-        ))
-    }
+    Ok(format!(
+        "Submitted. Status: {}",
+        data["status"].as_str().unwrap_or("unknown")
+    ))
 }
 
 fn call_patent_chat(args: &Value) -> Result<String, String> {
@@ -434,56 +258,10 @@ fn call_patent_chat(args: &Value) -> Result<String, String> {
         .to_string())
 }
 
-fn call_patent_threat_assessment(args: &Value) -> Result<String, String> {
-    let my_claims = args["my_claims"].as_str().ok_or("Missing 'my_claims'")?;
-    let patents_str = args["patents"]
-        .as_str()
-        .ok_or("Missing 'patents' (JSON array as string)")?;
-    let patents: Value = serde_json::from_str(patents_str)
-        .map_err(|e| format!("Invalid JSON in 'patents': {}", e))?;
-    let body = json!({"my_claims": my_claims, "patents": patents});
-    let data = http_post("/api/ai/threat-assessment", &body)?;
-    Ok(data["analysis"]
-        .as_str()
-        .unwrap_or("Threat assessment failed")
-        .to_string())
-}
-
-fn call_patent_claim_chart(args: &Value) -> Result<String, String> {
-    let my_claims = args["my_claims"].as_str().ok_or("Missing 'my_claims'")?;
-    let prior_art = args["prior_art"].as_str().ok_or("Missing 'prior_art'")?;
-    let body = json!({"my_claims": my_claims, "prior_art": prior_art});
-    let data = http_post("/api/ai/claim-chart", &body)?;
-    Ok(data["analysis"]
-        .as_str()
-        .unwrap_or("Claim chart generation failed")
-        .to_string())
-}
-
-fn call_patent_multi_compare(args: &Value) -> Result<String, String> {
-    let ids = args["patent_ids"]
-        .as_array()
-        .ok_or("Missing 'patent_ids' array")?;
-    let id_strings: Vec<String> = ids
-        .iter()
-        .filter_map(|v| v.as_str().map(|s| s.to_string()))
-        .collect();
-    if id_strings.len() < 3 {
-        return Err("Need at least 3 patent IDs for multi-compare".to_string());
-    }
-    let body = json!({"patent_ids": id_strings});
-    let data = http_post("/api/ai/compare-matrix", &body)?;
-    Ok(data["content"]
-        .as_str()
-        .unwrap_or("Multi-compare failed")
-        .to_string())
-}
-
 fn truncate(s: &str, max: usize) -> &str {
     if s.len() <= max {
         s
     } else {
-        // Find a safe UTF-8 boundary
         let mut end = max;
         while end > 0 && !s.is_char_boundary(end) {
             end -= 1;

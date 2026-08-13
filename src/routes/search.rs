@@ -50,13 +50,11 @@ pub async fn api_search(
     let ipc_filter = req.ipc.as_deref().unwrap_or("").trim().to_lowercase();
     let cpc_filter = req.cpc.as_deref().unwrap_or("").trim().to_lowercase();
     if !ipc_filter.is_empty() || !cpc_filter.is_empty() {
-        let mut cache: std::collections::HashMap<String, crate::patent::Patent> =
-            std::collections::HashMap::new();
-        for p in &patents {
-            if let Ok(Some(full)) = s.db.get_patent(&p.id) {
-                cache.insert(p.id.clone(), full);
-            }
-        }
+        // Batch query to avoid N+1 (AGENTS.md 2.7)
+        let ids: Vec<String> = patents.iter().map(|p| p.id.clone()).collect();
+        let full_patents = s.db.get_patents_by_ids(&ids).unwrap_or_default();
+        let cache: std::collections::HashMap<String, crate::patent::Patent> =
+            full_patents.into_iter().map(|p| (p.id.clone(), p)).collect();
         patents.retain(|p| {
             let matches_ipc = if ipc_filter.is_empty() {
                 true

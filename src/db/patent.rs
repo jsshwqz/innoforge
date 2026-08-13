@@ -57,6 +57,37 @@ impl super::Database {
             .optional()?;
         Ok(result)
     }
+    /// 批量查询专利完整信息（WHERE id IN (...)），避免 N+1 查询。
+    /// Batch query patents by IDs using WHERE id IN (...) to avoid N+1 queries.
+    /// Chunks to 500 per batch due to SQLite parameter limit.
+    pub fn get_patents_by_ids(&self, ids: &[String]) -> Result<Vec<Patent>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let c = self.conn();
+        let mut result = Vec::new();
+        const CHUNK_SIZE: usize = 500;
+
+        for chunk in ids.chunks(CHUNK_SIZE) {
+            let placeholders = vec!["?"; chunk.len()].join(",");
+            let sql = format!(
+                "SELECT id,patent_number,title,abstract_text,description,claims,applicant,inventor,                  filing_date,publication_date,grant_date,ipc_codes,cpc_codes,priority_date,                  country,kind_code,family_id,legal_status,citations,cited_by,source,raw_json,                  created_at,images,pdf_url FROM patents WHERE id IN ({}) LIMIT {}",
+                placeholders,
+                chunk.len()
+            );
+
+            let mut stmt = c.prepare(&sql)?;
+            let params: Vec<&str> = chunk.iter().map(|id| id.as_str()).collect();
+            let rows = stmt.query_map(rusqlite::params_from_iter(params.iter().copied()), |r| Ok(Self::row_to_patent(r)))?;
+
+            for row in rows.flatten() {
+                result.push(row);
+            }
+        }
+
+        Ok(result)
+    }
 
     /// 按专利号模糊查找（归一化后匹配），支持带空格/点的输入
     /// Flexible patent number lookup with normalization (handles spaces, dots, kind codes)
