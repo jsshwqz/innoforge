@@ -661,9 +661,10 @@ impl AiClient {
 
     /// Send a simple chat request for RAG (public API for external modules).
     pub async fn send_rag_chat(&self, prompt: &str, temperature: f32) -> Result<String> {
-        let messages: Vec<Message> = vec![
-            Message { role: "system".to_string(), content: prompt.to_string() },
-        ];
+        let messages: Vec<Message> = vec![Message {
+            role: "system".to_string(),
+            content: prompt.to_string(),
+        }];
         self.send_chat(messages, temperature).await
     }
 

@@ -37,10 +37,7 @@ pub async fn run_experiment(spec: &ExperimentSpec) -> Result<ExperimentResult> {
     }
 
     // 实际超时时间：clamp 到合理范围
-    let timeout_secs = spec.timeout_secs
-        .max(10)
-        .min(MAX_TIMEOUT_SECS)
-        .max(60);
+    let timeout_secs = spec.timeout_secs.max(10).min(MAX_TIMEOUT_SECS).max(60);
     let timeout = Duration::from_secs(timeout_secs);
 
     // 使用 tokio::time::timeout 实现真正的超时控制。
@@ -71,7 +68,8 @@ pub async fn run_experiment(spec: &ExperimentSpec) -> Result<ExperimentResult> {
                 Err(e) => Err(e),
             }
         }
-    }).await;
+    })
+    .await;
 
     // 无论成功/超时/失败，清理临时文件
     let _ = std::fs::remove_file(&script_path);
@@ -80,21 +78,19 @@ pub async fn run_experiment(spec: &ExperimentSpec) -> Result<ExperimentResult> {
     let duration_ms = start.elapsed().as_millis() as u64;
 
     match output {
-        Err(_) => {
-            Ok(ExperimentResult {
-                script_path: format!("exp_{}.{}", script_id, ext),
-                language: spec.language.clone(),
-                exit_code: -1,
-                stdout: String::new(),
-                stderr: format!(
-                    "实验脚本执行超时（超过 {} 秒）。请缩短脚本或增加超时设置。",
-                    timeout_secs
-                ),
-                metrics: serde_json::Value::Null,
-                duration_ms,
-                success: false,
-            })
-        }
+        Err(_) => Ok(ExperimentResult {
+            script_path: format!("exp_{}.{}", script_id, ext),
+            language: spec.language.clone(),
+            exit_code: -1,
+            stdout: String::new(),
+            stderr: format!(
+                "实验脚本执行超时（超过 {} 秒）。请缩短脚本或增加超时设置。",
+                timeout_secs
+            ),
+            metrics: serde_json::Value::Null,
+            duration_ms,
+            success: false,
+        }),
         Ok(Err(e)) => Ok(ExperimentResult {
             script_path: format!("exp_{}.{}", script_id, ext),
             language: spec.language.clone(),
@@ -197,7 +193,8 @@ mod tests {
             language: "python".to_string(),
             script_content: r#"import json
 print(json.dumps({"accuracy": 0.95}))
-print("EXPERIMENT_DONE")"#.to_string(),
+print("EXPERIMENT_DONE")"#
+                .to_string(),
             hypothesis: "test hypothesis".to_string(),
             timeout_secs: 10,
         };
@@ -217,13 +214,18 @@ print("EXPERIMENT_DONE")"#.to_string(),
             title: "timeout_test".to_string(),
             language: "python".to_string(),
             script_content: r#"import time
-time.sleep(300)"#.to_string(),
+time.sleep(300)"#
+                .to_string(),
             hypothesis: "timeout test".to_string(),
             timeout_secs: 5,
         };
         let result = run_experiment(&spec).await.unwrap();
         assert!(!result.success, "超时脚本应失败");
-        assert!(result.stderr.contains("超时"), "应报告超时错误: {}", result.stderr);
+        assert!(
+            result.stderr.contains("超时"),
+            "应报告超时错误: {}",
+            result.stderr
+        );
     }
 
     #[test]

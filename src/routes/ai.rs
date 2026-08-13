@@ -2062,11 +2062,8 @@ pub async fn api_oa_export_docx(
     }
 }
 
-
 /// GET /api/ai/cost — AI 调用成本摘要
-pub async fn api_ai_cost_summary(
-    State(s): State<AppState>,
-) -> Json<serde_json::Value> {
+pub async fn api_ai_cost_summary(State(s): State<AppState>) -> Json<serde_json::Value> {
     let days = 30i64;
     match s.db.get_cost_summary(days) {
         Ok(summary) => Json(summary),
@@ -2075,9 +2072,7 @@ pub async fn api_ai_cost_summary(
 }
 
 /// GET /api/ai/cost/records — AI 调用成本记录列表
-pub async fn api_ai_cost_records(
-    State(s): State<AppState>,
-) -> Json<serde_json::Value> {
+pub async fn api_ai_cost_records(State(s): State<AppState>) -> Json<serde_json::Value> {
     let limit = 100i64;
     match s.db.get_recent_cost_records(limit) {
         Ok(records) => Json(json!({

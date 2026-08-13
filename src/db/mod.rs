@@ -4,21 +4,21 @@
 //! Local data persistence with SQLite + FTS5, supporting full-text search, ideas, collections, tags.
 
 mod cad;
-mod cost;
-mod vector;
-pub mod rag;
 mod chat;
 mod collection;
+mod cost;
 mod evidence;
 mod idea;
 mod migrations;
 mod oa;
 mod patent;
+pub mod rag;
 pub(crate) mod relevance;
 mod research_state;
 mod settings;
 #[cfg(test)]
 mod tests;
+mod vector;
 pub mod version;
 pub use oa::OaDiscussion;
 

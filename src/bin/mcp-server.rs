@@ -53,7 +53,9 @@ fn main() {
             "tools/list" => handle_tools_list(),
             "tools/call" => handle_tools_call(&req),
             "ping" => json!({}),
-            other => json!({"error": {"code": -32601, "message": format!("Unknown method: {}", other)}}),
+            other => {
+                json!({"error": {"code": -32601, "message": format!("Unknown method: {}", other)}})
+            }
         };
 
         // For notifications (id is None), no response is expected
@@ -102,7 +104,6 @@ fn handle_tools_call(req: &Value) -> Value {
         Some(v) => v.clone(),
         None => json!({}),
     };
-
 
     let result = match tool_name {
         "patent_search" => call_patent_search(&args),
@@ -163,9 +164,12 @@ fn call_patent_search(args: &Value) -> Result<String, String> {
     let total = data["total"].as_u64().unwrap_or(0);
     let patents = data["patents"].as_array();
 
-    let mut output = format!("Found {} patents (page {})
+    let mut output = format!(
+        "Found {} patents (page {})
 
-", total, page);
+",
+        total, page
+    );
 
     if let Some(patents) = patents {
         for (i, p) in patents.iter().enumerate() {
@@ -222,8 +226,12 @@ fn call_patent_analyze(args: &Value) -> Result<String, String> {
 }
 
 fn call_patent_compare(args: &Value) -> Result<String, String> {
-    let _ = args["patent_id_1"].as_str().ok_or("Missing 'patent_id_1'")?;
-    let _ = args["patent_id_2"].as_str().ok_or("Missing 'patent_id_2'")?;
+    let _ = args["patent_id_1"]
+        .as_str()
+        .ok_or("Missing 'patent_id_1'")?;
+    let _ = args["patent_id_2"]
+        .as_str()
+        .ok_or("Missing 'patent_id_2'")?;
     let body = json!({"patent_ids": [
         args["patent_id_1"].as_str().unwrap_or(""),
         args["patent_id_2"].as_str().unwrap_or(""),
@@ -237,7 +245,9 @@ fn call_patent_compare(args: &Value) -> Result<String, String> {
 
 fn call_idea_validate(args: &Value) -> Result<String, String> {
     let title = args["title"].as_str().ok_or("Missing 'title'")?;
-    let description = args["description"].as_str().ok_or("Missing 'description'")?;
+    let description = args["description"]
+        .as_str()
+        .ok_or("Missing 'description'")?;
     let body = json!({"title": title, "description": description});
     let data = http_post("/api/idea/submit", &body)?;
 

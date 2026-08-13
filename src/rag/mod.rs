@@ -8,10 +8,10 @@ pub mod assembler;
 pub mod chunker;
 pub mod retriever;
 
+use self::chunker::{chunk_summary, chunk_text, compute_chunk_embedding};
+use crate::ai::AiClient;
 use crate::db::Database;
 use crate::pipeline::context::ReferenceChunk;
-use crate::ai::AiClient;
-use self::chunker::{chunk_text, compute_chunk_embedding, chunk_summary};
 
 const CHUNK_SIZE: usize = 800;
 const CHUNK_OVERLAP: usize = 100;
@@ -103,7 +103,7 @@ pub async fn rag_search(
     let prompt = assembler::assemble_rag_prompt(query, &chunks, system_prompt, max_tokens);
 
     // Step 3: Call AI
-        let ai_result = match ai_client.send_rag_chat(&prompt, 0.5).await {
+    let ai_result = match ai_client.send_rag_chat(&prompt, 0.5).await {
         Ok(r) => r,
         Err(e) => {
             tracing::warn!("RAG AI call failed: {}", e);
@@ -134,7 +134,14 @@ fn build_fallback_citations(chunks: &[ReferenceChunk]) -> Vec<String> {
     chunks
         .iter()
         .take(TOP_K)
-        .map(|c| format!("[引用{}] ({}): {}", c.chunk_index + 1, c.source_type, chunk_summary(&c.content)))
+        .map(|c| {
+            format!(
+                "[引用{}] ({}): {}",
+                c.chunk_index + 1,
+                c.source_type,
+                chunk_summary(&c.content)
+            )
+        })
         .collect()
 }
 

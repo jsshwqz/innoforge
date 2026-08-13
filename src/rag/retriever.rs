@@ -1,8 +1,8 @@
 //! RAG 检索器 / RAG Retriever
 
+use super::chunker;
 use crate::db::Database;
 use crate::pipeline::context::ReferenceChunk;
-use super::chunker;
 
 /// Retrieve relevant chunks from a patent for a given query.
 pub fn retrieve_chunks(

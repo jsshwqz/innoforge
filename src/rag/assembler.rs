@@ -10,17 +10,23 @@ pub fn assemble_rag_prompt(
     max_tokens: usize,
 ) -> String {
     if chunks.is_empty() {
-        return format!("{}
+        return format!(
+            "{}
 
 <user_query>
 {}
-</user_query>", system_prompt, query);
+</user_query>",
+            system_prompt, query
+        );
     }
 
     let mut context = String::new();
-    context.push_str(&format!("以下是检索到的相关文档片段（共 {} 段），请按顺序引用：
+    context.push_str(&format!(
+        "以下是检索到的相关文档片段（共 {} 段），请按顺序引用：
 
-", chunks.len()));
+",
+        chunks.len()
+    ));
 
     let mut remaining = max_tokens;
     for (i, chunk) in chunks.iter().enumerate() {
@@ -35,7 +41,10 @@ pub fn assemble_rag_prompt(
 {}
 
 ",
-                i + 1, chunk.source_type, chunk.relevance_score, truncated
+                i + 1,
+                chunk.source_type,
+                chunk.relevance_score,
+                truncated
             ));
             break;
         }
@@ -44,21 +53,33 @@ pub fn assemble_rag_prompt(
 {}
 
 ",
-            i + 1, chunk.source_type, chunk.relevance_score, chunk.content
+            i + 1,
+            chunk.source_type,
+            chunk.relevance_score,
+            chunk.content
         ));
         remaining -= chunk_len;
     }
 
-    let query_section = format!("<user_query>
+    let query_section = format!(
+        "<user_query>
 {}
-</user_query>", query);
-    let ref_instruction = format!("
+</user_query>",
+        query
+    );
+    let ref_instruction = format!(
+        "
 
 请基于以上文档片段回答问题。引用格式：[引用N] 表示第N个片段。
-{}", query_section);
+{}",
+        query_section
+    );
 
-    format!("{}
-{}{}", system_prompt, context, ref_instruction)
+    format!(
+        "{}
+{}{}",
+        system_prompt, context, ref_instruction
+    )
 }
 
 /// Build citation list from referenced chunks.
@@ -66,10 +87,17 @@ pub fn build_citations(chunks: &[ReferenceChunk]) -> String {
     if chunks.is_empty() {
         return "无引用".to_string();
     }
-    let refs: Vec<String> = chunks.iter().take(5).enumerate().map(|(i, c)| {
-        let preview: String = c.content.chars().take(50).collect();
-        format!("[{}] {} ({}): {}", i + 1, c.id, c.source_type, preview)
-    }).collect();
-    refs.join("
-")
+    let refs: Vec<String> = chunks
+        .iter()
+        .take(5)
+        .enumerate()
+        .map(|(i, c)| {
+            let preview: String = c.content.chars().take(50).collect();
+            format!("[{}] {} ({}): {}", i + 1, c.id, c.source_type, preview)
+        })
+        .collect();
+    refs.join(
+        "
+",
+    )
 }

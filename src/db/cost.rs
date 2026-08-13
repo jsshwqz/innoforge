@@ -1,5 +1,5 @@
-use crate::pipeline::context::AiCostRecord;
 use super::Database;
+use crate::pipeline::context::AiCostRecord;
 use anyhow::Result;
 
 impl Database {
@@ -43,12 +43,15 @@ impl Database {
                 total_output += out_t;
                 total_cost += cost;
                 total_calls += cnt;
-                by_model.insert(model, serde_json::json!({
-                    "input_tokens": in_t,
-                    "output_tokens": out_t,
-                    "cost_cents": cost,
-                    "calls": cnt,
-                }));
+                by_model.insert(
+                    model,
+                    serde_json::json!({
+                        "input_tokens": in_t,
+                        "output_tokens": out_t,
+                        "cost_cents": cost,
+                        "calls": cnt,
+                    }),
+                );
             }
         }
 
@@ -64,7 +67,10 @@ impl Database {
     }
 
     /// Get recent cost records.
-    pub fn get_recent_cost_records(&self, limit: i64) -> Result<Vec<AiCostRecord>, rusqlite::Error> {
+    pub fn get_recent_cost_records(
+        &self,
+        limit: i64,
+    ) -> Result<Vec<AiCostRecord>, rusqlite::Error> {
         let c = self.conn();
         let mut stmt = c.prepare(
             "SELECT id, pipeline_run_id, step, model, provider, timestamp, input_tokens, output_tokens, estimated_cost_cents, duration_ms

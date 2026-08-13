@@ -303,7 +303,4 @@ impl PipelineContext {
             step_results: Vec::new(),
         }
     }
-
-
-
 }

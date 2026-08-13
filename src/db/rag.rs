@@ -12,8 +12,6 @@ pub struct PatentChunk {
 
 use super::Database;
 
-
-
 impl Database {
     /// Save all chunks for a patent.
     pub fn save_patent_chunks(
@@ -61,9 +59,7 @@ impl Database {
         limit: usize,
     ) -> Result<Vec<(String, f32)>, rusqlite::Error> {
         let c = self.conn();
-        let mut stmt = c.prepare(
-            "SELECT id, content FROM patent_chunks WHERE patent_id = ?1"
-        )?;
+        let mut stmt = c.prepare("SELECT id, content FROM patent_chunks WHERE patent_id = ?1")?;
         let rows = stmt.query_map(rusqlite::params![patent_id], |row: &rusqlite::Row| {
             let id: String = row.get(0)?;
             let content: String = row.get(1)?;

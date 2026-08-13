@@ -11,9 +11,9 @@ impl Database {
     ) -> Result<(), rusqlite::Error> {
         let c = self.conn();
         let bytes: Vec<u8> = embedding.iter().flat_map(|f| f.to_le_bytes()).collect();
-        let hash: u64 = embedding
-            .iter()
-            .fold(0u64, |acc, f| acc.wrapping_add(f.to_bits() as u64) ^ 0x9E3779B9u64);
+        let hash: u64 = embedding.iter().fold(0u64, |acc, f| {
+            acc.wrapping_add(f.to_bits() as u64) ^ 0x9E3779B9u64
+        });
         let hash_str = hash.to_string();
 
         c.execute(
@@ -29,9 +29,7 @@ impl Database {
         patent_id: &str,
     ) -> Result<Option<Vec<f32>>, rusqlite::Error> {
         let c = self.conn();
-        let mut stmt = c.prepare(
-            "SELECT embedding FROM patents_embedding WHERE patent_id = ?1"
-        )?;
+        let mut stmt = c.prepare("SELECT embedding FROM patents_embedding WHERE patent_id = ?1")?;
         let rows = stmt.query_map(rusqlite::params![patent_id], |row: &rusqlite::Row| {
             let blob: rusqlite::types::Value = row.get(0)?;
             match blob {
@@ -65,7 +63,7 @@ impl Database {
              LEFT JOIN patents_embedding pe ON p.id = pe.patent_id
              WHERE pe.patent_id IS NULL
              AND (p.description IS NOT NULL OR p.abstract_text IS NOT NULL)
-             LIMIT 500"
+             LIMIT 500",
         )?;
         let rows = stmt.query_map(rusqlite::params![], |row: &rusqlite::Row| {
             let id: String = row.get(0)?;

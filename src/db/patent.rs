@@ -79,7 +79,9 @@ impl super::Database {
 
             let mut stmt = c.prepare(&sql)?;
             let params: Vec<&str> = chunk.iter().map(|id| id.as_str()).collect();
-            let rows = stmt.query_map(rusqlite::params_from_iter(params.iter().copied()), |r| Ok(Self::row_to_patent(r)))?;
+            let rows = stmt.query_map(rusqlite::params_from_iter(params.iter().copied()), |r| {
+                Ok(Self::row_to_patent(r))
+            })?;
 
             for row in rows.flatten() {
                 result.push(row);

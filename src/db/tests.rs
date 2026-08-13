@@ -9,23 +9,43 @@ fn schema_v21_is_created_and_idempotent() {
     assert_eq!(db.query_schema_version().expect("schema version"), 21);
 
     // Verify all new tables exist: cad_artifacts, ai_cost_ledger, patents_embedding
-    let cad_count: i64 = db.conn()
-        .query_row("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='cad_artifacts'", [], |row| row.get(0))
+    let cad_count: i64 = db
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='cad_artifacts'",
+            [],
+            |row| row.get(0),
+        )
         .expect("query CAD table");
     assert_eq!(cad_count, 1);
 
-    let cost_count: i64 = db.conn()
-        .query_row("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='ai_cost_ledger'", [], |row| row.get(0))
+    let cost_count: i64 = db
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='ai_cost_ledger'",
+            [],
+            |row| row.get(0),
+        )
         .expect("query cost table");
     assert_eq!(cost_count, 1);
 
-    let emb_count: i64 = db.conn()
-        .query_row("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='patents_embedding'", [], |row| row.get(0))
+    let emb_count: i64 = db
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='patents_embedding'",
+            [],
+            |row| row.get(0),
+        )
         .expect("query embedding table");
     assert_eq!(emb_count, 1);
 
-    let chunk_count: i64 = db.conn()
-        .query_row("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='patent_chunks'", [], |row| row.get(0))
+    let chunk_count: i64 = db
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='patent_chunks'",
+            [],
+            |row| row.get(0),
+        )
         .expect("query chunk table");
     assert_eq!(chunk_count, 1);
 

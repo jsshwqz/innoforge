@@ -53,8 +53,10 @@ pub async fn api_search(
         // Batch query to avoid N+1 (AGENTS.md 2.7)
         let ids: Vec<String> = patents.iter().map(|p| p.id.clone()).collect();
         let full_patents = s.db.get_patents_by_ids(&ids).unwrap_or_default();
-        let cache: std::collections::HashMap<String, crate::patent::Patent> =
-            full_patents.into_iter().map(|p| (p.id.clone(), p)).collect();
+        let cache: std::collections::HashMap<String, crate::patent::Patent> = full_patents
+            .into_iter()
+            .map(|p| (p.id.clone(), p))
+            .collect();
         patents.retain(|p| {
             let matches_ipc = if ipc_filter.is_empty() {
                 true
@@ -546,7 +548,6 @@ pub async fn api_search_online(
     Json(out)
 }
 
-
 /// Vector hybrid search endpoint — RRF fuse BM25 + vector similarity.
 pub async fn api_search_vector(
     State(s): State<AppState>,
@@ -563,34 +564,36 @@ pub async fn api_search_vector(
     }
 
     // BM25 layer
-    let bm25_result: Vec<(String, f64)> = match s.db.search_smart(
-        query,
-        Some(&SearchType::Mixed),
-        None, None, None,
-        1,
-        limit,
-    ) {
-        Ok((patents, _total, _detected)) => {
-            patents.into_iter().enumerate()
+    let bm25_result: Vec<(String, f64)> =
+        match s
+            .db
+            .search_smart(query, Some(&SearchType::Mixed), None, None, None, 1, limit)
+        {
+            Ok((patents, _total, _detected)) => patents
+                .into_iter()
+                .enumerate()
                 .map(|(i, p)| (p.id, (limit as f64 - i as f64) / limit as f64))
-                .collect()
-        }
-        Err(e) => {
-            tracing::warn!("BM25 search failed: {}", e);
-            vec![]
-        }
-    };
+                .collect(),
+            Err(e) => {
+                tracing::warn!("BM25 search failed: {}", e);
+                vec![]
+            }
+        };
 
     // Vector layer: compute query embedding and search cached embeddings
     let vector_results: Vec<(String, f32)> = {
         let query_embedding = compute_char_tfidf_embedding(query);
-        let count = match s.db.count_embeddings() { Ok(c) => c, Err(_) => 0 };
+        let count = match s.db.count_embeddings() {
+            Ok(c) => c,
+            Err(_) => 0,
+        };
         let mut results = Vec::new();
 
         if count > 0 {
-            if let Ok(mut stmt) = s.db.conn().prepare(
-                "SELECT patent_id, embedding FROM patents_embedding"
-            ) {
+            if let Ok(mut stmt) =
+                s.db.conn()
+                    .prepare("SELECT patent_id, embedding FROM patents_embedding")
+            {
                 if let Ok(rows) = stmt.query_map(rusqlite::params![], |row: &rusqlite::Row| {
                     let pid: String = row.get(0)?;
                     let blob_val: rusqlite::types::Value = row.get(1)?;
@@ -599,7 +602,7 @@ pub async fn api_search_vector(
                             let mut emb = Vec::with_capacity(bytes.len() / 4);
                             for i in (0..bytes.len()).step_by(4) {
                                 if i + 3 < bytes.len() {
-                                    let b = [bytes[i], bytes[i+1], bytes[i+2], bytes[i+3]];
+                                    let b = [bytes[i], bytes[i + 1], bytes[i + 2], bytes[i + 3]];
                                     emb.push(f32::from_le_bytes(b));
                                 }
                             }
@@ -695,18 +698,26 @@ fn compute_char_tfidf_embedding(text: &str) -> Vec<f32> {
     let mut emb: Vec<f32> = tf.values().map(|v| v / norm).collect();
     emb.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
     const FIXED: usize = 512;
-    if emb.len() < FIXED { emb.resize(FIXED, 0.0); } else { emb.truncate(FIXED); }
+    if emb.len() < FIXED {
+        emb.resize(FIXED, 0.0);
+    } else {
+        emb.truncate(FIXED);
+    }
     emb
 }
 
 /// Cosine similarity between two vectors.
 fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     let len = a.len().min(b.len());
-    if len == 0 { return 0.0; }
+    if len == 0 {
+        return 0.0;
+    }
     let dot: f32 = (0..len).map(|i| a[i] * b[i]).sum();
     let na: f32 = (0..len).map(|i| a[i] * a[i]).sum::<f32>().sqrt();
     let nb: f32 = (0..len).map(|i| b[i] * b[i]).sum::<f32>().sqrt();
-    if na < 1e-8 || nb < 1e-8 { return 0.0; }
+    if na < 1e-8 || nb < 1e-8 {
+        return 0.0;
+    }
     (dot / (na * nb)).max(0.0).min(1.0)
 }
 pub async fn api_search_stats(

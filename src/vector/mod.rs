@@ -25,10 +25,7 @@ impl Default for CharNGramTokenizer {
 impl CharNGramTokenizer {
     /// Tokenize text into character n-grams.
     fn tokenize(&self, text: &str) -> Vec<String> {
-        let cleaned: String = text
-            .chars()
-            .filter(|c| !c.is_whitespace())
-            .collect();
+        let cleaned: String = text.chars().filter(|c| !c.is_whitespace()).collect();
         let mut grams = Vec::new();
         for n in self.min_n..=self.max_n {
             if cleaned.len() >= n {
@@ -82,10 +79,7 @@ impl VectorIndex {
         let norm = if norm_sq > 0.0 { norm_sq.sqrt() } else { 1.0 };
 
         // Return as sorted values (for consistent embedding length)
-        let mut embedding: Vec<f32> = tf
-            .values()
-            .map(|v| v / norm)
-            .collect();
+        let mut embedding: Vec<f32> = tf.values().map(|v| v / norm).collect();
         embedding.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
 
         // Pad/truncate to a fixed size for storage
@@ -127,9 +121,7 @@ impl VectorIndex {
 
         let mut scores: Vec<(String, f32)> = embeddings
             .iter()
-            .map(|(id, emb)| {
-                (id.clone(), Self::cosine_similarity(&query_embedding, emb))
-            })
+            .map(|(id, emb)| (id.clone(), Self::cosine_similarity(&query_embedding, emb)))
             .filter(|(_, score)| *score > 0.1) // threshold
             .collect();
 
