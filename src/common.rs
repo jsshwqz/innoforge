@@ -234,6 +234,7 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
         .route("/api/search/export", post(routes::api_export_csv))
         .route("/api/search/export/xlsx", post(routes::api_export_xlsx))
         .route("/api/search/online", post(routes::api_search_online))
+        .route("/api/search/vector", post(routes::api_search_vector))
         .route("/api/search/analyze", post(routes::api_ai_analyze_results))
         // 专利 API / Patent API
         .route("/api/patent/fetch", post(routes::api_fetch_patent))

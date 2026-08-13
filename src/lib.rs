@@ -17,6 +17,7 @@ mod orchestrator;
 pub mod patent;
 pub mod pipeline;
 mod routes;
+pub mod vector;
 
 use common::{build_router, init_app_state};
 

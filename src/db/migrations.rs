@@ -504,6 +504,28 @@ pub(crate) fn run(conn: &Connection, current_version: i32, target_version: i32) 
         tracing::info!("Database migrated to version 19 (ai_cost_ledger)");
     }
 
+    // v20: 向量嵌入表 — 存储专利文本的嵌入向量用于混合语义搜索
+    if current_version < 20 {
+        conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS patents_embedding (
+                patent_id TEXT NOT NULL UNIQUE,
+                embedding BLOB NOT NULL,
+                model_name TEXT NOT NULL DEFAULT 'doc2vec-patent',
+                text_hash TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY(patent_id) REFERENCES patents(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_embedding_model ON patents_embedding(model_name);
+            CREATE INDEX IF NOT EXISTS idx_embedding_hash ON patents_embedding(text_hash);
+            DELETE FROM schema_version;
+            INSERT INTO schema_version (version) VALUES (20);
+            ",
+        )?;
+        tracing::info!("Database migrated to version 20 (patents_embedding)");
+    }
+
     if current_version > 0 && current_version < target_version {
         tracing::info!(
             "Database migrated from version {} to {}",

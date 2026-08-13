@@ -546,6 +546,169 @@ pub async fn api_search_online(
     Json(out)
 }
 
+
+/// Vector hybrid search endpoint — RRF fuse BM25 + vector similarity.
+pub async fn api_search_vector(
+    State(s): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    use crate::patent::SearchType;
+
+    let query = req["query"].as_str().unwrap_or("");
+    let limit = req["limit"].as_u64().unwrap_or(20) as usize;
+    let k = req["rrf_k"].as_u64().unwrap_or(60) as usize;
+
+    if query.is_empty() {
+        return Json(json!({"error": "查询不能为空"}));
+    }
+
+    // BM25 layer
+    let bm25_result: Vec<(String, f64)> = match s.db.search_smart(
+        query,
+        Some(&SearchType::Mixed),
+        None, None, None,
+        1,
+        limit,
+    ) {
+        Ok((patents, _total, _detected)) => {
+            patents.into_iter().enumerate()
+                .map(|(i, p)| (p.id, (limit as f64 - i as f64) / limit as f64))
+                .collect()
+        }
+        Err(e) => {
+            tracing::warn!("BM25 search failed: {}", e);
+            vec![]
+        }
+    };
+
+    // Vector layer: compute query embedding and search cached embeddings
+    let vector_results: Vec<(String, f32)> = {
+        let query_embedding = compute_char_tfidf_embedding(query);
+        let count = match s.db.count_embeddings() { Ok(c) => c, Err(_) => 0 };
+        let mut results = Vec::new();
+
+        if count > 0 {
+            if let Ok(mut stmt) = s.db.conn().prepare(
+                "SELECT patent_id, embedding FROM patents_embedding"
+            ) {
+                if let Ok(rows) = stmt.query_map(rusqlite::params![], |row: &rusqlite::Row| {
+                    let pid: String = row.get(0)?;
+                    let blob_val: rusqlite::types::Value = row.get(1)?;
+                    match blob_val {
+                        rusqlite::types::Value::Blob(bytes) => {
+                            let mut emb = Vec::with_capacity(bytes.len() / 4);
+                            for i in (0..bytes.len()).step_by(4) {
+                                if i + 3 < bytes.len() {
+                                    let b = [bytes[i], bytes[i+1], bytes[i+2], bytes[i+3]];
+                                    emb.push(f32::from_le_bytes(b));
+                                }
+                            }
+                            Ok((pid, emb))
+                        }
+                        _ => Ok((pid, vec![])),
+                    }
+                }) {
+                    for row in rows {
+                        if let Ok((pid, emb)) = row {
+                            let sim = cosine_similarity(&query_embedding, &emb);
+                            if sim > 0.1 {
+                                results.push((pid, sim));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        results.truncate(limit);
+        results
+    };
+
+    // RRF fuse
+    let fused: Vec<(String, f64)> = {
+        use std::collections::HashMap;
+        let mut scores: HashMap<String, f64> = HashMap::new();
+        for (i, (id, _)) in bm25_result.iter().enumerate() {
+            let rank = i + 1;
+            *scores.entry(id.clone()).or_insert(0.0) += 1.0 / (k as f64 + rank as f64);
+        }
+        for (i, (id, _)) in vector_results.iter().enumerate() {
+            let rank = i + 1;
+            *scores.entry(id.clone()).or_insert(0.0) += 1.0 / (k as f64 + rank as f64);
+        }
+        let mut sorted: Vec<(String, f64)> = scores.into_iter().collect();
+        sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        sorted
+    };
+
+    let mut top_patents: Vec<serde_json::Value> = Vec::new();
+    for (id, fused_score) in fused.into_iter().take(limit) {
+        if let Ok(Some(patent)) = s.db.get_patent(&id) {
+            let score_percent = (fused_score * 100.0).round() * 100.0 / 100.0;
+            top_patents.push(json!({
+                "id": patent.id,
+                "patent_number": patent.patent_number,
+                "title": patent.title,
+                "applicant": patent.applicant,
+                "inventor": patent.inventor,
+                "relevance_score": score_percent,
+                "fused_score": fused_score,
+            }));
+        }
+    }
+
+    Json(json!({
+        "patents": top_patents,
+        "total": top_patents.len(),
+        "source": "hybrid",
+        "method": "rrf",
+        "rrf_k": k,
+        "bm25_count": bm25_result.len(),
+        "vector_count": vector_results.len(),
+    }))
+}
+
+/// Character n-gram TF-IDF embedding computation.
+fn compute_char_tfidf_embedding(text: &str) -> Vec<f32> {
+    use std::collections::HashMap;
+
+    let cleaned: String = text.chars().filter(|c| !c.is_whitespace()).collect();
+    let mut tf: HashMap<String, f32> = HashMap::new();
+    for n in 2..=4 {
+        if cleaned.len() >= n {
+            for i in 0..=cleaned.len() - n {
+                let gram: String = cleaned[i..i + n].chars().collect();
+                *tf.entry(gram).or_insert(0.0) += 1.0;
+            }
+        }
+    }
+    if tf.is_empty() {
+        return vec![0.0f32];
+    }
+    let doc_len = (tf.values().sum::<f32>()) as f32;
+    for (_, count) in tf.iter_mut() {
+        *count = 1.0 + (*count / doc_len).log2();
+    }
+    let norm_sq: f32 = tf.values().map(|v| v * v).sum();
+    let norm = if norm_sq > 0.0 { norm_sq.sqrt() } else { 1.0 };
+    let mut emb: Vec<f32> = tf.values().map(|v| v / norm).collect();
+    emb.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+    const FIXED: usize = 512;
+    if emb.len() < FIXED { emb.resize(FIXED, 0.0); } else { emb.truncate(FIXED); }
+    emb
+}
+
+/// Cosine similarity between two vectors.
+fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+    let len = a.len().min(b.len());
+    if len == 0 { return 0.0; }
+    let dot: f32 = (0..len).map(|i| a[i] * b[i]).sum();
+    let na: f32 = (0..len).map(|i| a[i] * a[i]).sum::<f32>().sqrt();
+    let nb: f32 = (0..len).map(|i| b[i] * b[i]).sum::<f32>().sqrt();
+    if na < 1e-8 || nb < 1e-8 { return 0.0; }
+    (dot / (na * nb)).max(0.0).min(1.0)
+}
 pub async fn api_search_stats(
     State(s): State<AppState>,
     Json(req): Json<SearchRequest>,
