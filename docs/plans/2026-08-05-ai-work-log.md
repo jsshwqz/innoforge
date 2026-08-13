@@ -310,3 +310,16 @@
 | 6 | rusqlite `params!` 宏不支持 `[..vec]` 展开 | 中 | 改用 `rusqlite::params_from_iter()` | ✅ |
 | 7 | MCP server 正则替换导致 `?` 操作符大量编译错误 | 高 | 整体重写 MCP server 而非增量修复 | ✅ |
 | 8 | MCP server 中 `json!({{}})` 双花括号转义问题 | 低 | 用正则和精确字符串替换修复 | ✅ |
+---
+
+#### 2026-08-05 - Task 1.A - Fact-Check
+
+**Status**: Completed
+
+Found Fact-Check already wired into main flow at ai.rs:1393-1394
+Removed #![allow(dead_code)] from fact_check.rs
+Cleaned outdated comments in ai/mod.rs
+
+Commit: c2d3c3c
+
+cargo check: PASS; Fact-Check has 14 unit tests
