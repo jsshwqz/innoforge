@@ -2062,6 +2062,68 @@ pub async fn api_oa_export_docx(
     }
 }
 
+
+/// GET /api/ai/cost — AI 调用成本摘要
+pub async fn api_ai_cost_summary(
+    State(s): State<AppState>,
+) -> Json<serde_json::Value> {
+    let days = 30i64;
+    match s.db.get_cost_summary(days) {
+        Ok(summary) => Json(summary),
+        Err(e) => Json(json!({"error": format!("Failed to get cost summary: {}", e)})),
+    }
+}
+
+/// GET /api/ai/cost/records — AI 调用成本记录列表
+pub async fn api_ai_cost_records(
+    State(s): State<AppState>,
+) -> Json<serde_json::Value> {
+    let limit = 100i64;
+    match s.db.get_recent_cost_records(limit) {
+        Ok(records) => Json(json!({
+            "status": "ok",
+            "count": records.len(),
+            "records": records,
+        })),
+        Err(e) => Json(json!({"error": format!("Failed to get cost records: {}", e)})),
+    }
+}
+
+/// POST /api/ai/cost/record — 保存单条 AI 调用成本记录
+pub async fn api_ai_cost_save(
+    State(s): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    use crate::pipeline::context::AiCostRecord;
+    use uuid::Uuid;
+
+    let model = req["model"].as_str().unwrap_or("unknown").to_string();
+    let provider = req["provider"].as_str().unwrap_or("unknown").to_string();
+    let pipeline_run_id = req["pipeline_run_id"].as_str().unwrap_or("").to_string();
+    let step = req["step"].as_str().unwrap_or("unknown").to_string();
+    let input_tokens = req["input_tokens"].as_i64().unwrap_or(0);
+    let output_tokens = req["output_tokens"].as_i64().unwrap_or(0);
+    let estimated_cost_cents = req["estimated_cost_cents"].as_f64().unwrap_or(0.0);
+    let duration_ms = req["duration_ms"].as_i64().unwrap_or(0);
+
+    let record = AiCostRecord {
+        id: Uuid::new_v4().to_string(),
+        pipeline_run_id,
+        step,
+        model,
+        provider,
+        timestamp: chrono::Utc::now().to_rfc3339(),
+        input_tokens,
+        output_tokens,
+        estimated_cost_cents,
+        duration_ms,
+    };
+
+    match s.db.save_cost_record(&record) {
+        Ok(_) => Json(json!({"status": "ok", "id": record.id})),
+        Err(e) => Json(json!({"error": format!("Failed to save cost record: {}", e)})),
+    }
+}
 #[cfg(test)]
 mod prompt_boundary_tests {
     use super::{

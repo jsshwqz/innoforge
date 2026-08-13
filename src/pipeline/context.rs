@@ -5,6 +5,21 @@ fn default_branch() -> String {
     "main".to_string()
 }
 
+/// AI 调用成本记录 — 追踪每次 AI 调用的 token 消耗和估算成本
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiCostRecord {
+    pub id: String,
+    pub pipeline_run_id: String,
+    pub step: String,
+    pub model: String,
+    pub provider: String,
+    pub timestamp: String,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub estimated_cost_cents: f64,
+    pub duration_ms: i64,
+}
+
 /// 实验执行结果
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ExperimentResult {
@@ -277,4 +292,7 @@ impl PipelineContext {
             step_results: Vec::new(),
         }
     }
+
+
+
 }

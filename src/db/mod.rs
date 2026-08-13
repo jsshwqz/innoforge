@@ -4,6 +4,7 @@
 //! Local data persistence with SQLite + FTS5, supporting full-text search, ideas, collections, tags.
 
 mod cad;
+mod cost;
 mod chat;
 mod collection;
 mod evidence;
@@ -38,7 +39,7 @@ impl Database {
     }
 
     /// Current schema version. Increment when adding migrations.
-    pub(crate) const SCHEMA_VERSION: i32 = 18;
+    pub(crate) const SCHEMA_VERSION: i32 = 19;
 
     pub fn init(path: &str) -> Result<Self> {
         let conn = Connection::open(path)?;

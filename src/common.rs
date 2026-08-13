@@ -356,6 +356,9 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
             post(routes::api_ai_threat_assessment),
         )
         .route("/api/ai/claim-chart", post(routes::api_ai_claim_chart))
+        .route("/api/ai/cost", get(routes::api_ai_cost_summary))
+        .route("/api/ai/cost/records", get(routes::api_ai_cost_records))
+        .route("/api/ai/cost/record", post(routes::api_ai_cost_save))
         // 创意验证 API / Idea API
         .route("/api/idea/submit", post(routes::api_idea_submit))
         .route("/api/idea/analyze", post(routes::api_idea_analyze))

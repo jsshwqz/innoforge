@@ -479,6 +479,31 @@ pub(crate) fn run(conn: &Connection, current_version: i32, target_version: i32) 
         tracing::info!("Database migrated to version 18 (cad_artifacts)");
     }
 
+    // v19: AI 调用成本账本 — 追踪每次 AI 调用的 token 消耗和估算成本
+    if current_version < 19 {
+        conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS ai_cost_ledger (
+                id TEXT PRIMARY KEY,
+                pipeline_run_id TEXT NOT NULL,
+                step TEXT NOT NULL,
+                model TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                input_tokens INTEGER NOT NULL DEFAULT 0,
+                output_tokens INTEGER NOT NULL DEFAULT 0,
+                estimated_cost_cents REAL NOT NULL DEFAULT 0.0,
+                duration_ms INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS idx_ai_cost_pipeline ON ai_cost_ledger(pipeline_run_id);
+            CREATE INDEX IF NOT EXISTS idx_ai_cost_timestamp ON ai_cost_ledger(timestamp);
+            DELETE FROM schema_version;
+            INSERT INTO schema_version (version) VALUES (19);
+            ",
+        )?;
+        tracing::info!("Database migrated to version 19 (ai_cost_ledger)");
+    }
+
     if current_version > 0 && current_version < target_version {
         tracing::info!(
             "Database migrated from version {} to {}",
