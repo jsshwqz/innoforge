@@ -658,6 +658,16 @@ impl AiClient {
     }
 
     /// Send a raw JSON body to the AI provider (used for multimodal/vision requests).
+
+    /// Send a simple chat request for RAG (public API for external modules).
+    pub async fn send_rag_chat(&self, prompt: &str, temperature: f32) -> Result<String> {
+        let messages: Vec<Message> = vec![
+            Message { role: "system".to_string(), content: prompt.to_string() },
+        ];
+        self.send_chat(messages, temperature).await
+    }
+
+    /// Send a raw JSON body to the AI provider.
     pub async fn send_json_body(&self, body: serde_json::Value) -> Result<String> {
         match tokio::time::timeout(
             Duration::from_secs(Self::GLOBAL_TIMEOUT_SECS),

@@ -20,6 +20,17 @@ pub struct AiCostRecord {
     pub duration_ms: i64,
 }
 
+/// RAG 参考切片 — 检索到的专利文档片段
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReferenceChunk {
+    pub id: String,
+    pub patent_id: String,
+    pub chunk_index: i32,
+    pub source_type: String,
+    pub content: String,
+    pub relevance_score: f32,
+}
+
 /// 实验执行结果
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ExperimentResult {

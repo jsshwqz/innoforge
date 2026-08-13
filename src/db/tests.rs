@@ -2,11 +2,11 @@ use super::Database;
 use crate::patent::{CadArtifact, CadContextKind, CadValidation, Patent, SearchType};
 
 #[test]
-fn schema_v20_is_created_and_idempotent() {
+fn schema_v21_is_created_and_idempotent() {
     let file = tempfile::NamedTempFile::new().expect("temp database");
     let path = file.path().to_string_lossy().to_string();
     let db = Database::init(&path).expect("initialize v20 database");
-    assert_eq!(db.query_schema_version().expect("schema version"), 20);
+    assert_eq!(db.query_schema_version().expect("schema version"), 21);
 
     // Verify all new tables exist: cad_artifacts, ai_cost_ledger, patents_embedding
     let cad_count: i64 = db.conn()
@@ -24,9 +24,14 @@ fn schema_v20_is_created_and_idempotent() {
         .expect("query embedding table");
     assert_eq!(emb_count, 1);
 
+    let chunk_count: i64 = db.conn()
+        .query_row("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='patent_chunks'", [], |row| row.get(0))
+        .expect("query chunk table");
+    assert_eq!(chunk_count, 1);
+
     drop(db);
     let reopened = Database::init(&path).expect("reopen migrated database");
-    assert_eq!(reopened.query_schema_version().expect("schema version"), 20);
+    assert_eq!(reopened.query_schema_version().expect("schema version"), 21);
 }
 
 #[test]

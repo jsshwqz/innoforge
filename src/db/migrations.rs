@@ -526,6 +526,30 @@ pub(crate) fn run(conn: &Connection, current_version: i32, target_version: i32) 
         tracing::info!("Database migrated to version 20 (patents_embedding)");
     }
 
+    // v21: RAG 管道 — 专利全文切片存储
+    if current_version < 21 {
+        conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS patent_chunks (
+                id TEXT PRIMARY KEY,
+                patent_id TEXT NOT NULL,
+                chunk_index INTEGER NOT NULL,
+                source_type TEXT NOT NULL DEFAULT 'description' CHECK(source_type IN ('abstract', 'claim', 'description')),
+                content TEXT NOT NULL,
+                embedding BLOB NOT NULL,
+                model_name TEXT NOT NULL DEFAULT 'char-tfidf-v1',
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY(patent_id) REFERENCES patents(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_chunk_patent ON patent_chunks(patent_id);
+            CREATE INDEX IF NOT EXISTS idx_chunk_source ON patent_chunks(source_type);
+            DELETE FROM schema_version;
+            INSERT INTO schema_version (version) VALUES (21);
+            ",
+        )?;
+        tracing::info!("Database migrated to version 21 (patent_chunks)");
+    }
+
     if current_version > 0 && current_version < target_version {
         tracing::info!(
             "Database migrated from version {} to {}",

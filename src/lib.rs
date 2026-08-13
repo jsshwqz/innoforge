@@ -18,6 +18,7 @@ pub mod patent;
 pub mod pipeline;
 mod routes;
 pub mod vector;
+pub mod rag;
 
 use common::{build_router, init_app_state};
 
