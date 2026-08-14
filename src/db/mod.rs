@@ -9,6 +9,7 @@ mod collection;
 mod cost;
 mod evidence;
 mod idea;
+pub mod memory;
 mod migrations;
 mod oa;
 mod patent;
@@ -41,7 +42,7 @@ impl Database {
     }
 
     /// Current schema version. Increment when adding migrations.
-    pub(crate) const SCHEMA_VERSION: i32 = 21;
+    pub(crate) const SCHEMA_VERSION: i32 = 22;
 
     pub fn init(path: &str) -> Result<Self> {
         let conn = Connection::open(path)?;

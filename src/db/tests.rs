@@ -2,13 +2,13 @@ use super::Database;
 use crate::patent::{CadArtifact, CadContextKind, CadValidation, Patent, SearchType};
 
 #[test]
-fn schema_v21_is_created_and_idempotent() {
+fn schema_v22_is_created_and_idempotent() {
     let file = tempfile::NamedTempFile::new().expect("temp database");
     let path = file.path().to_string_lossy().to_string();
     let db = Database::init(&path).expect("initialize v20 database");
-    assert_eq!(db.query_schema_version().expect("schema version"), 21);
+    assert_eq!(db.query_schema_version().expect("schema version"), 22);
 
-    // Verify all new tables exist: cad_artifacts, ai_cost_ledger, patents_embedding
+    // Verify all new tables exist: cad_artifacts, ai_cost_ledger, patents_embedding, patent_chunks, idea_memory
     let cad_count: i64 = db
         .conn()
         .query_row(
@@ -51,7 +51,18 @@ fn schema_v21_is_created_and_idempotent() {
 
     drop(db);
     let reopened = Database::init(&path).expect("reopen migrated database");
-    assert_eq!(reopened.query_schema_version().expect("schema version"), 21);
+    assert_eq!(reopened.query_schema_version().expect("schema version"), 22);
+
+    // Verify idea_memory table exists
+    let mem_count: i64 = reopened
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='idea_memory'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("query memory table");
+    assert_eq!(mem_count, 1);
 }
 
 #[test]

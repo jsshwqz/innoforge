@@ -15,7 +15,7 @@ use axum::{
     body::Body,
     extract::DefaultBodyLimit,
     http::{HeaderValue, Response, StatusCode},
-    routing::{get, post},
+    routing::{delete, get, post},
     Router,
 };
 use rust_embed::Embed;
@@ -409,6 +409,15 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
         .route("/api/idea/:id/versions", get(routes::api_idea_versions))
         .route("/api/idea/:id/branches", get(routes::api_idea_branches))
         .route("/api/idea/:id/findings", get(routes::api_idea_findings))
+        // 记忆 API / Memory API
+        .route(
+            "/api/idea/:id/memory",
+            get(routes::api_idea_memory).post(routes::api_idea_memory_add),
+        )
+        .route(
+            "/api/idea/:id/memory/:entry_id",
+            delete(routes::api_idea_memory_delete),
+        )
         // IPC 分类 API
         .route("/api/ipc/tree", get(routes::api_ipc_tree))
         .route("/api/ipc/:code/patents", get(routes::api_ipc_patents))

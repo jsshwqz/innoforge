@@ -257,7 +257,7 @@ impl Orchestrator {
         progress_tx: &Option<tokio::sync::broadcast::Sender<PipelineProgress>>,
     ) -> Result<()> {
         match ctx.current_step {
-            PipelineStep::ParseInput => steps::parse::execute(ctx).await,
+            PipelineStep::ParseInput => steps::parse::execute(ctx, &self.db).await,
             PipelineStep::ExpandQuery => steps::expand::execute(ctx, &self.ai_client).await,
             PipelineStep::SearchWeb => {
                 steps::search::search_web(ctx, &self.serpapi_key, &self.db).await

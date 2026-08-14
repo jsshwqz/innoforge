@@ -248,6 +248,10 @@ pub struct PipelineContext {
     #[serde(default)]
     pub evidence_chain: Vec<Evidence>,
 
+    // 持久化记忆条目 / Persistent memory entries extracted from this pipeline run
+    #[serde(default)]
+    pub memory_entries: Vec<crate::db::memory::IdeaMemory>,
+
     // 研发状态机 / Research state machine
     #[serde(default)]
     pub research_state: ResearchState,
@@ -294,6 +298,7 @@ impl PipelineContext {
             oa_response: String::new(),
             deep_reasoning: DeepReasoningResult::default(),
             evidence_chain: Vec::new(),
+            memory_entries: Vec::new(),
             research_state: ResearchState::default(),
             branch_id: "main".to_string(),
             iteration_count: 0,

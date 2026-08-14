@@ -550,6 +550,34 @@ pub(crate) fn run(conn: &Connection, current_version: i32, target_version: i32) 
         tracing::info!("Database migrated to version 21 (patent_chunks)");
     }
 
+    // Migration 21 -> 22: Idea memory table for persistent RAG-style recall.
+    // Stores domain concepts, decisions, patterns, and open questions extracted
+    // from completed pipeline runs, so future runs can inject prior context.
+    if current_version < 22 {
+        conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS idea_memory (
+                id TEXT PRIMARY KEY,
+                idea_id TEXT NOT NULL,
+                concept_name TEXT NOT NULL,
+                concept_type TEXT NOT NULL DEFAULT 'domain_concept'
+                    CHECK(concept_type IN ('domain_concept', 'decision', 'pattern', 'question')),
+                content TEXT NOT NULL,
+                confidence REAL DEFAULT 0.5,
+                source_step TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY(idea_id) REFERENCES ideas(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_idea_memory_idea ON idea_memory(idea_id);
+            CREATE INDEX IF NOT EXISTS idx_idea_memory_type ON idea_memory(concept_type);
+            DELETE FROM schema_version;
+            INSERT INTO schema_version (version) VALUES (22);
+            ",
+        )?;
+        tracing::info!("Database migrated to version 22 (idea_memory)");
+    }
+
     if current_version > 0 && current_version < target_version {
         tracing::info!(
             "Database migrated from version {} to {}",

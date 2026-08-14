@@ -70,6 +70,7 @@
                 <button class="tab-btn" data-tab="features" onclick="switchTab('features')">🧩 特征卡片</button>
                 <button class="tab-btn" data-tab="claims" onclick="switchTab('claims')">🌳 权利要求树</button>
                 <button class="tab-btn" data-tab="findings" onclick="switchTab('findings')">🔑 关键发现</button>
+                <button class="tab-btn" data-tab="memory" onclick="switchTab('memory'); loadMemory()">🧠 记忆</button>
                 <button class="tab-btn" data-tab="chat" onclick="switchTab('chat')">💬 讨论</button>
                 <button class="tab-btn" data-tab="report" onclick="switchTab('report')">📄 报告</button>
                 <button class="tab-btn" data-tab="versions" onclick="switchTab('versions')">📜 版本历史</button>
@@ -110,6 +111,51 @@
                 <div id="key-findings-panel" class="panel-box">
                     <h3>🔑 关键发现 / Key Findings (<span id="key-findings-count">0</span>)</h3>
                     <div id="key-findings-list"><p class="muted">暂无发现记录</p></div>
+                </div>
+            </div>
+
+            <!-- Tab: 记忆 -->
+            <div id="tab-memory" class="tab-panel">
+                <div id="memory-panel" class="panel-box">
+                    <div class="page-header-row">
+                        <h3 style="margin:0;">🧠 记忆 / Memory (<span id="memory-count">0</span>)</h3>
+                        <div style="display:flex;gap:8px;align-items:center;">
+                            <select id="memory-filter" style="padding:4px 8px;background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;font-size:13px;">
+                                <option value="all">全部类型</option>
+                                <option value="domain_concept">领域概念</option>
+                                <option value="decision">决策</option>
+                                <option value="pattern">创新模式</option>
+                                <option value="question">开放问题</option>
+                            </select>
+                            <button class="btn-success-sm" onclick="showMemoryForm()">+ 新增</button>
+                        </div>
+                    </div>
+                    <div id="memory-add-form" style="display:none; padding:12px; background:#161b22; border:1px solid #30363d; border-radius:6px; margin-bottom:12px;">
+                        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-bottom:8px;">
+                            <input type="text" id="mem-concept-name" placeholder="概念名称" style="padding:6px 8px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;">
+                            <select id="mem-concept-type" style="padding:6px 8px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;">
+                                <option value="domain_concept">领域概念</option>
+                                <option value="decision">决策</option>
+                                <option value="pattern">创新模式</option>
+                                <option value="question">开放问题</option>
+                            </select>
+                            <input type="number" id="mem-confidence" placeholder="置信度" value="0.5" min="0" max="1" step="0.1" style="padding:6px 8px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;">
+                            <div style="display:flex;gap:6px;">
+                                <button onclick="addMemoryEntry()" style="flex:1;padding:6px;background:#238636;color:#fff;border:none;border-radius:4px;cursor:pointer;">保存</button>
+                                <button onclick="hideMemoryForm()" style="flex:1;padding:6px;background:#30363d;color:#c9d1d9;border:none;border-radius:4px;cursor:pointer;">取消</button>
+                            </div>
+                        </div>
+                        <div>
+                            <textarea id="mem-content" placeholder="详细描述..." rows="2" style="width:100%;padding:6px 8px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;font-size:13px;resize:vertical;"></textarea>
+                        </div>
+                    </div>
+                    <div id="memory-stats" style="display:flex;gap:16px;padding:8px 12px;background:#0d1117;border:1px solid #21262d;border-radius:6px;margin-bottom:12px;font-size:13px;">
+                        <span>📊 领域概念: <span id="mem-stat-concept">0</span></span>
+                        <span>🔖 决策: <span id="mem-stat-decision">0</span></span>
+                        <span>⚡ 创新模式: <span id="mem-stat-pattern">0</span></span>
+                        <span>❓ 开放问题: <span id="mem-stat-question">0</span></span>
+                    </div>
+                    <div id="memory-list"><p class="muted">暂无记忆条目（完成推演后自动生成）</p></div>
                 </div>
             </div>
 
@@ -923,3 +969,111 @@
         if (idea.analysis) {
             // 检测是否为多维推演报告（包含维度标记）
             var isDeepReasoning = idea.analysis.indexOf('多维深度推演报告') >= 0;
+
+    // ========== Memory (记忆) functions ==========
+
+    function getTypeLabel(type) {
+        var map = {
+            'domain_concept': '<span style="color:#58a6ff">📊 领域概念</span>',
+            'decision': '<span style="color:#3fb950">🔖 决策</span>',
+            'pattern': '<span style="color:#f85149">⚡ 创新模式</span>',
+            'question': '<span style="color:#f0883e">❓ 开放问题</span>'
+        };
+        return map[type] || '<span>' + type + '</span>';
+    }
+
+    function getTypeIcon(type) {
+        var map = { 'domain_concept': '📊', 'decision': '🔖', 'pattern': '⚡', 'question': '❓' };
+        return map[type] || '📄';
+    }
+
+    function showMemoryForm() {
+        document.getElementById('memory-add-form').style.display = 'block';
+    }
+
+    function hideMemoryForm() {
+        document.getElementById('memory-add-form').style.display = 'none';
+        document.getElementById('mem-concept-name').value = '';
+        document.getElementById('mem-content').value = '';
+        document.getElementById('mem-confidence').value = '0.5';
+    }
+
+    async function addMemoryEntry() {
+        var name = document.getElementById('mem-concept-name').value.trim();
+        var type = document.getElementById('mem-concept-type').value;
+        var confidence = parseFloat(document.getElementById('mem-confidence').value) || 0.5;
+        var content = document.getElementById('mem-content').value.trim();
+        if (!name || !content) { alert('concept name and description required'); return; }
+        if (!currentIdeaId) return;
+
+        var resp = await fetch('/api/idea/' + encodeURIComponent(currentIdeaId) + '/memory', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ concept_name: name, concept_type: type, confidence: confidence, content: content })
+        });
+        var data = await resp.json();
+        if (data.status === 'ok') { hideMemoryForm(); loadMemory(); }
+        else { alert('Failed: ' + data.message); }
+    }
+
+    async function loadMemory() {
+        if (!currentIdeaId) return;
+        var listEl = document.getElementById('memory-list');
+        listEl.innerHTML = '<p class="muted">Loading...</p>';
+
+        try {
+            var resp = await fetch('/api/idea/' + encodeURIComponent(currentIdeaId) + '/memory');
+            if (!resp.ok) { listEl.innerHTML = '<p class="muted">Load failed</p>'; return; }
+            var data = await resp.json();
+            if (data.status !== 'ok' || !data.entries) { listEl.innerHTML = '<p class="muted">No memory</p>'; return; }
+
+            var filter = document.getElementById('memory-filter').value;
+            var filtered = filter === 'all' ? data.entries : data.entries.filter(function(e) { return e.concept_type === filter; });
+
+            document.getElementById('memory-count').textContent = data.entries.length;
+            var counts = data.counts && data.counts.by_type ? data.counts.by_type : {};
+            document.getElementById('mem-stat-concept').textContent = counts.domain_concept || 0;
+            document.getElementById('mem-stat-decision').textContent = counts.decision || 0;
+            document.getElementById('mem-stat-pattern').textContent = counts.pattern || 0;
+            document.getElementById('mem-stat-question').textContent = counts.question || 0;
+
+            if (filtered.length === 0) { listEl.innerHTML = '<p class="muted">No entries</p>'; return; }
+
+            listEl.innerHTML = '';
+            filtered.forEach(function(entry) {
+                var row = document.createElement('div');
+                row.style.cssText = 'padding:10px 14px;margin-bottom:6px;background:#161b22;border:1px solid #30363d;border-radius:6px;';
+                var delBtn = '<button style="padding:3px 8px;background:#f85149;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:11px;" onclick="deleteMemory(\'' + currentIdeaId + '\',\'' + entry.id.replace(/\'/g, "\\\\'") + '\')">Delete</button>';
+                row.innerHTML = DOMPurify.sanitize(
+                    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">' +
+                    '<div style="display:flex;align-items:center;gap:8px;">' +
+                    '<span style="font-size:1.1em;">' + getTypeIcon(entry.concept_type) + '</span>' +
+                    '<span style="font-weight:600;color:#f0f6fc;">' + esc(entry.concept_name) + '</span>' +
+                    '<span style="font-size:0.8em;">' + getTypeLabel(entry.concept_type) + '</span>' +
+                    '</div>' +
+                    '<div style="display:flex;align-items:center;gap:10px;">' +
+                    '<span style="font-size:0.8em;color:#8b949e;">confidence ' + (entry.confidence || 0).toFixed(2) + '</span>' +
+                    '<span style="font-size:0.75em;color:#484f58;">' + (entry.source_step || '') + '</span>' +
+                    delBtn +
+                    '</div></div>' +
+                    '<div style="color:#c9d1d9;line-height:1.6;font-size:0.9em;padding-left:24px;">' + esc(entry.content) + '</div>' +
+                    '<div style="font-size:0.75em;color:#484f58;padding-left:24px;margin-top:4px;">' + (entry.created_at ? entry.created_at.substring(0, 16).replace('T', ' ') : '') + '</div>'
+                );
+                listEl.appendChild(row);
+            });
+        } catch(e) {
+            listEl.innerHTML = '<p class="muted">Load failed: ' + e.message + '</p>';
+        }
+    }
+
+    async function deleteMemory(ideaId, entryId) {
+        if (!confirm('Delete this memory?')) return;
+        var resp = await fetch('/api/idea/' + encodeURIComponent(ideaId) + '/memory/' + encodeURIComponent(entryId), { method: 'DELETE' });
+        if (resp.ok) { loadMemory(); } else { alert('Delete failed'); }
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        var filterEl = document.getElementById('memory-filter');
+        if (filterEl) filterEl.onchange = function() { loadMemory(); };
+    });
+</script>

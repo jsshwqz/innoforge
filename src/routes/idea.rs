@@ -2029,6 +2029,76 @@ pub async fn api_idea_findings(
     }
 }
 
+/// GET /api/idea/:id/memory — 列出创意记忆条目 / List memory entries for an idea
+pub async fn api_idea_memory(
+    State(s): State<AppState>,
+    Path(idea_id): Path<String>,
+) -> Json<serde_json::Value> {
+    match s.db.get_memory_entries(&idea_id) {
+        Ok(entries) => {
+            let counts = match s.db.get_memory_counts(&idea_id) {
+                Ok(c) => c,
+                Err(_) => serde_json::json!({"total": 0, "by_type": {}}),
+            };
+            Json(serde_json::json!({
+                "status": "ok",
+                "entries": entries,
+                "counts": counts,
+            }))
+        }
+        Err(e) => Json(serde_json::json!({"status": "error", "message": e.to_string()})),
+    }
+}
+
+/// POST /api/idea/:id/memory — 新增记忆条目 / Add a memory entry
+pub async fn api_idea_memory_add(
+    State(s): State<AppState>,
+    Path(idea_id): Path<String>,
+    Json(payload): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let concept_name = payload.get("concept_name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let concept_type = payload.get("concept_type").and_then(|v| v.as_str()).unwrap_or("domain_concept").to_string();
+    let content = payload.get("content").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let confidence = payload.get("confidence").and_then(|v| v.as_f64()).unwrap_or(0.5);
+
+    if concept_name.is_empty() || content.is_empty() {
+        return Json(serde_json::json!({"status": "error", "message": "concept_name and content are required"}));
+    }
+    if !matches!(concept_type.as_str(), "domain_concept" | "decision" | "pattern" | "question") {
+        return Json(serde_json::json!({"status": "error", "message": "invalid concept_type"}));
+    }
+
+    let id = format!("{}-user-{}", idea_id, uuid::Uuid::new_v4());
+    let now = chrono::Utc::now().to_rfc3339();
+    let entry = crate::db::memory::IdeaMemory {
+        id,
+        idea_id,
+        concept_name,
+        concept_type,
+        content,
+        confidence: confidence.clamp(0.0, 1.0),
+        source_step: Some("UserManual".to_string()),
+        created_at: now.clone(),
+        updated_at: now,
+    };
+
+    match s.db.save_memory(&entry) {
+        Ok(()) => Json(serde_json::json!({"status": "ok", "id": entry.id})),
+        Err(e) => Json(serde_json::json!({"status": "error", "message": e.to_string()})),
+    }
+}
+
+/// DELETE /api/idea/:id/memory/:entry_id — 删除记忆条目 / Delete a memory entry
+pub async fn api_idea_memory_delete(
+    State(s): State<AppState>,
+    Path((idea_id, entry_id)): Path<(String, String)>,
+) -> Json<serde_json::Value> {
+    match s.db.delete_memory(&idea_id, &entry_id) {
+        Ok(()) => Json(serde_json::json!({"status": "ok"})),
+        Err(e) => Json(serde_json::json!({"status": "error", "message": e.to_string()})),
+    }
+}
+
 #[cfg(test)]
 mod idea_markdown_tests {
     use super::inline_md;
