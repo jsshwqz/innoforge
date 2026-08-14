@@ -430,10 +430,10 @@
             var data = await resp.json();
             var msgs = data.messages || [];
             if (msgs.length === 0) {
-                chatEl.innerHTML = '<div style="text-align:center;padding:40px;color:#484f58;font-size:13px;">
-                    <div style="font-size:2em;margin-bottom:8px;">💬</div>
-                    ' + (i18nLang === 'en' ? 'No discussion yet' : '暂无讨论记录') + '
-                </div>';
+                                chatEl.innerHTML = '<div style="text-align:center;padding:40px;color:#484f58;font-size:13px;">' +
+                    '<div style="font-size:2em;margin-bottom:8px;">💬</div>' +
+                    (i18nLang === 'en' ? 'No discussion yet' : '暂无讨论记录') +
+                    '</div>';
                 return;
             }
             chatEl.innerHTML = '';
