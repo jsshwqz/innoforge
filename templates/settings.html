@@ -74,6 +74,7 @@
                 <label>AI 模型（默认）</label>
                 <select id="ai-model">
                 </select>
+                <button class="btn-gray btn-save" id="ai-models-btn" style="margin-top:8px;padding:6px 16px;font-size:13px;" onclick="fetchAiModels()">🔍 查询可用模型</button>
                 <div id="custom-model-group" class="form-group" style="display:none;margin-top:8px;">
                     <label>自定义模型名称</label>
                     <input type="text" id="ai-model-custom" placeholder="输入模型名称">
@@ -1009,6 +1010,34 @@
         }
 
         // 备用 AI 管理已移除（仅保留 DeepSeek）
-    </script>
+    
+        async function fetchAiModels() {
+            var btn = document.getElementById('ai-models-btn');
+            if (btn) btn.disabled = true;
+            if (btn) btn.textContent = '⏳ 查询中...';
+            try {
+                const res = await fetch('/api/ai/models');
+                const data = await res.json();
+                if (data.status === 'ok' && data.models && data.models.length > 0) {
+                    var curModel = document.getElementById('ai-model').value;
+                    var curExpert = document.getElementById('ai-model-expert').value;
+                    populateSelect('ai-model', data.models.map(function(m) { return {value: m.id, label: m.id}; }), curModel);
+                    populateSelect('ai-model-expert', data.models.map(function(m) { return {value: m.id, label: m.id}; }), curExpert);
+                    btn.textContent = '✅ ' + data.models.length + ' 个模型';
+                    btn.style.color = '#4ade80';
+                    setTimeout(function() { btn.textContent = '🔍 查询可用模型'; btn.style.color = ''; }, 3000);
+                } else {
+                    btn.textContent = '❌ ' + (data.message || '无可用模型');
+                    btn.style.color = '#f85149';
+                    setTimeout(function() { btn.textContent = '🔍 查询可用模型'; btn.style.color = ''; }, 3000);
+                }
+            } catch(e) {
+                if (btn) btn.textContent = '❌ 网络错误';
+                setTimeout(function() { btn.textContent = '🔍 查询可用模型'; }, 3000);
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        }
+</script>
 </body>
 </html>

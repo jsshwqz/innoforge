@@ -753,6 +753,10 @@ pub async fn api_idea_chat(
         }
     };
 
+    // Save user message first so it appears in chronological order
+    let user_msg_id = uuid::Uuid::new_v4().to_string();
+    let _ = s.db.add_idea_message(&user_msg_id, &idea_id, "user", user_msg);
+
     // Save AI response to DB
     let ai_msg_id = uuid::Uuid::new_v4().to_string();
     let _ =
@@ -2120,5 +2124,57 @@ mod idea_markdown_tests {
 
         assert!(rendered.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
         assert!(!rendered.contains("<script>"));
+    }
+}
+
+
+// ── AI models auto-detect ─────────────────────────────────────────────
+pub async fn list_ai_models(State(s): State<AppState>) -> Json<serde_json::Value> {
+    let base_url = {
+        let cfg = s.config.read().unwrap_or_else(|e| e.into_inner());
+        cfg.ai_base_url.clone().trim_end_matches('/').to_string()
+    };
+    let api_key = {
+        let cfg = s.config.read().unwrap_or_else(|e| e.into_inner());
+        cfg.ai_api_key.clone()
+    };
+    if base_url.is_empty() || api_key.is_empty() {
+        return Json(json!({"status": "ok", "models": [], "message": "AI provider not configured"}));
+    }
+    let url = format!("{}/models", base_url);
+    let join_handle = tokio::spawn(async move {
+        let resp = match reqwest::Client::new().get(&url)
+            .header("Authorization", format!("Bearer {}", api_key))
+            .header("Content-Type", "application/json")
+            .send().await
+        {
+            Ok(r) => r,
+            Err(_) => return None,
+        };
+        if !resp.status().is_success() {
+            return None;
+        }
+        let bytes_data = match resp.bytes().await {
+            Ok(b) => b,
+            Err(_) => return None,
+        };
+        let data: serde_json::Value = match serde_json::from_slice(&bytes_data) {
+            Ok(d) => d,
+            Err(_) => json!({}),
+        };
+        let arr = data["data"].as_array().or_else(|| data.as_array());
+        let models: Vec<serde_json::Value> = match arr {
+            Some(ml) => ml.iter()
+                .filter_map(|m| Some(json!({"id": m["id"].as_str()?.to_string()})))
+                .collect(),
+            None => Vec::new(),
+        };
+        Some(json!({"status": "ok", "models": models, "count": models.len()}))
+    });
+    match tokio::time::timeout(std::time::Duration::from_secs(15), join_handle).await {
+        Ok(Ok(Some(result))) => Json(result),
+        Ok(Ok(None)) => Json(json!({"status": "ok", "models": [], "message": "AI provider returned non-200"})),
+        Ok(Err(_)) => Json(json!({"status": "ok", "models": [], "message": "Request failed"})),
+        Err(_) => Json(json!({"status": "ok", "models": [], "message": "Request timed out"})),
     }
 }
