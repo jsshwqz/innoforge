@@ -417,7 +417,7 @@ pub async fn api_ai_chat(
             let body = serde_json::json!({
                 "model": ai.model_name(),
                 "messages": json_messages,
-                "temperature": 0.7
+                "temperature": 0.5
             });
             ai.send_json_body(body).await
         } else if req.history.is_empty() {
@@ -435,7 +435,7 @@ pub async fn api_ai_chat(
             history.push(("user".to_string(), req.message));
             // 超过 ~8000 token 时自动压缩早期对话为摘要
             let history = compress_history(&ai, history, 8000).await;
-            ai.chat_with_history(&system_prompt, history, 0.7).await
+            ai.chat_with_history(&system_prompt, history, 0.5).await
         }
     }
     .await;
@@ -1683,6 +1683,14 @@ pub async fn api_ai_oa_discuss(
          4. **主动引导**：如果分析中有些地方可能有争议或薄弱，主动指出并询问发明人的意见。\n\
          5. **法条引用**：每处法律论断必须引用具体法条（A22.2/A22.3/A26.3/A33 等），不可空泛。\n\
          6. **技术依据**：每处技术论断必须引用分析中的具体特征或对比文献段落。\n\n\
+         ## 事实纪律（最高优先级，优先于一切）\n\n\
+         1. 你只能依据上方提供的 OA 分析结果和原始审查意见通知书作答，禁止引入材料之外的信息。\n\
+         2. 材料中没有的内容，必须明确回答「材料中未提供」，禁止推测、补全或编造。\n\
+         3. 引用法条时，只允许引用你确定存在的法条条号（如 A22.3、A26.4、A33）；\n\
+         不确定条号时写「相关法律条文」，禁止编造条号。\n\
+         4. 引用审查意见或对比文献时，只能引用上方材料中出现的原文段落，禁止自行扩写。\n\
+         5. 任何数字、日期、百分比必须来自材料原文，否则标注「材料未给出」。\n\
+         6. 发明人引用的法条或事实与材料矛盾时，明确指出矛盾，不要附和错误观点。\n\n\
          ## 已有的 OA 分析结果\n{}\n\n\
          ## 原始审查意见通知书（供参考）\n{}\n\n\
          请严格遵守以上规则，用专业但易懂的语言与发明人沟通。\
@@ -1767,8 +1775,8 @@ pub async fn api_ai_oa_discuss(
         .unwrap_or_else(|e| e.into_inner())
         .ai_client_expert();
 
-    // Higher temperature for discussion — more natural and flexible
-    let mut rx = ai.send_chat_stream(messages, 0.7);
+    // 事实类讨论：低温抑制幻觉，同时保留条理清晰的专业表达
+    let mut rx = ai.send_chat_stream(messages, 0.35);
 
     // P0-2: 持久化讨论会话
     let db = s.db.clone();
