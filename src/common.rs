@@ -385,6 +385,7 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
         )
         .route("/api/ai/models", get(routes::list_ai_models))
         .route("/api/idea/:id/chat", post(routes::api_idea_chat))
+        .route("/api/idea/:id/evidence", get(routes::api_idea_evidence))
         .route("/api/idea/:id/messages", get(routes::api_idea_messages))
         .route(
             "/api/idea/:id/chat/conclusions",

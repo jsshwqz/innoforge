@@ -415,8 +415,171 @@
             loadVersionHistory(ideaId);
             loadMemory();
             loadMessages(ideaId);
+            loadEvidence(ideaId);
+            loadClaimTree(ideaId);
+            loadFindings(ideaId);
+            loadFeatureCards(ideaId);
             showDiscussionPanel && showDiscussionPanel();
         } catch(e) {}
+    }
+
+    // 加载证据链 / Load evidence chain
+    async function loadEvidence(ideaId) {
+        var listEl = document.getElementById('evidence-list');
+        var countEl = document.getElementById('evidence-count');
+        if (!listEl) return;
+        listEl.innerHTML = '<p class="muted">Loading...</p>';
+        try {
+            var resp = await fetch('/api/idea/' + encodeURIComponent(ideaId) + '/evidence');
+            if (!resp.ok) { listEl.innerHTML = '<p class="muted">Load failed</p>'; return; }
+            var data = await resp.json();
+            var evs = data.evidence || [];
+            if (countEl) countEl.textContent = evs.length;
+            if (evs.length === 0) { listEl.innerHTML = '<p class="muted">暂无证据记录</p>'; return; }
+            listEl.innerHTML = '';
+            evs.forEach(function(ev) {
+                var row = document.createElement('div');
+                row.style.cssText = 'padding:10px 14px;margin-bottom:6px;background:#161b22;border:1px solid #30363d;border-radius:6px;';
+                var conf = (ev.confidence || 0);
+                var confColor = conf >= 0.8 ? '#3fb950' : conf >= 0.5 ? '#f0883e' : '#f85149';
+                row.innerHTML = DOMPurify.sanitize(
+                    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">' +
+                    '<span style="font-weight:600;color:#f0f6fc;">' + esc(ev.claim || ev.source_title || ev.source_type || '') + '</span>' +
+                    '<span style="color:' + confColor + ';font-weight:600;font-size:0.85em;">置信度 ' + (conf * 100).toFixed(0) + '%</span>' +
+                    '</div>' +
+                    '<div style="color:#c9d1d9;line-height:1.6;font-size:0.9em;">' + esc(ev.excerpt || ev.source_id || '') + '</div>' +
+                    '<div style="font-size:0.75em;color:#484f58;margin-top:4px;">来源: ' + esc(ev.source_type || '') +
+                    (ev.source_id ? ' · ' + esc(ev.source_id) : '') +
+                    (ev.produced_by ? ' · ' + esc(ev.produced_by) : '') +
+                    (ev.relation ? ' · ' + esc(ev.relation) : '') + '</div>'
+                );
+                listEl.appendChild(row);
+            });
+        } catch(e) {
+            listEl.innerHTML = '<p class="muted">Load failed: ' + e.message + '</p>';
+        }
+    }
+
+    // 加载权利要求树 / Load claim tree
+    async function loadClaimTree(ideaId) {
+        var contentEl = document.getElementById('claim-tree-content');
+        if (!contentEl) return;
+        contentEl.innerHTML = '<p class="muted">Loading...</p>';
+        try {
+            var resp = await fetch('/api/idea/' + encodeURIComponent(ideaId) + '/claim-tree');
+            if (!resp.ok) { contentEl.innerHTML = '<p class="muted">Load failed</p>'; return; }
+            var data = await resp.json();
+            var claims = data.claims || [];
+            if (claims.length === 0) { contentEl.innerHTML = '<p class="muted">暂无权利要求树数据</p>'; return; }
+            contentEl.innerHTML = '';
+            // 构建树：独立权利要求为根，从属权利要求挂到父节点
+            claims.forEach(function(c) {
+                var row = document.createElement('div');
+                var isIndependent = c.claim_type === 'independent' || c.claim_type === 'main';
+                var indent = isIndependent ? '0' : '24px';
+                var borderLeft = isIndependent ? '3px solid #8b5cf6' : '3px solid #30363d';
+                row.style.cssText = 'padding:10px 12px;margin:6px 0 6px ' + indent + ';background:#161b22;border-left:' + borderLeft + ';border-radius:4px;';
+                var typeLabel = isIndependent ? '独立权利要求' : ('从属权利要求' + (c.parent_claim_id ? '' : ''));
+                var html = '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">' +
+                    '<span style="font-weight:700;color:#d2a8ff;">权' + c.claim_number + '</span>' +
+                    '<span style="font-size:0.8em;color:#8b949e;">' + typeLabel + '</span></div>' +
+                    '<div style="color:#c9d1d9;line-height:1.6;font-size:0.9em;">' + esc(c.content || '') + '</div>';
+                if (c.features && c.features.length > 0) {
+                    html += '<div style="margin-top:8px;padding:8px;background:#0d1117;border-radius:4px;">';
+                    c.features.forEach(function(f) {
+                        var flag = f.novelty_flag ? '<span style="color:#3fb950;font-size:0.75em;">★ 新颖</span>' : '<span style="color:#8b949e;font-size:0.75em;">已有</span>';
+                        html += '<div style="display:flex;align-items:flex-start;gap:8px;padding:3px 0;font-size:0.85em;color:#c9d1d9;">' +
+                            '<span style="flex-shrink:0;">' + flag + '</span>' +
+                            '<span>' + esc(f.description || '') + '</span></div>';
+                    });
+                    html += '</div>';
+                }
+                row.innerHTML = DOMPurify.sanitize(html);
+                contentEl.appendChild(row);
+            });
+        } catch(e) {
+            contentEl.innerHTML = '<p class="muted">Load failed: ' + e.message + '</p>';
+        }
+    }
+
+    // 加载关键发现 / Load key findings
+    async function loadFindings(ideaId) {
+        var listEl = document.getElementById('key-findings-list');
+        var countEl = document.getElementById('key-findings-count');
+        if (!listEl) return;
+        listEl.innerHTML = '<p class="muted">Loading...</p>';
+        try {
+            var resp = await fetch('/api/idea/' + encodeURIComponent(ideaId) + '/findings');
+            if (!resp.ok) { listEl.innerHTML = '<p class="muted">Load failed</p>'; return; }
+            var data = await resp.json();
+            var findings = data.findings || [];
+            if (countEl) countEl.textContent = findings.length;
+            if (findings.length === 0) { listEl.innerHTML = '<p class="muted">暂无发现记录</p>'; return; }
+            listEl.innerHTML = '';
+            findings.forEach(function(f) {
+                var row = document.createElement('div');
+                row.style.cssText = 'padding:10px 14px;margin-bottom:6px;background:#161b22;border:1px solid #30363d;border-radius:6px;';
+                var typeLabel = { dead_end: '⚠️ 失败路径', success: '✅ 成功', hypothesis: '🔬 假设', info: '📌 信息', experimental: '🧪 实验' };
+                var label = typeLabel[f.finding_type] || (f.finding_type || '发现');
+                var titleHtml = f.title ? '<div style="font-weight:600;color:#f0f6fc;margin-bottom:4px;">' + esc(f.title) + '</div>' : '';
+                row.innerHTML = DOMPurify.sanitize(
+                    titleHtml +
+                    '<div style="color:#c9d1d9;line-height:1.6;font-size:0.9em;white-space:pre-wrap;">' + esc(f.content || '') + '</div>' +
+                    '<div style="font-size:0.75em;color:#484f58;margin-top:4px;">' + label +
+                    (f.source_step ? ' · ' + esc(f.source_step) : '') +
+                    (f.created_at ? ' · ' + f.created_at.substring(0, 16).replace('T', ' ') : '') + '</div>'
+                );
+                listEl.appendChild(row);
+            });
+        } catch(e) {
+            listEl.innerHTML = '<p class="muted">Load failed: ' + e.message + '</p>';
+        }
+    }
+
+    // 加载特征卡片 / Load feature cards
+    async function loadFeatureCards(ideaId) {
+        var listEl = document.getElementById('feature-cards-list');
+        if (!listEl) return;
+        listEl.innerHTML = '<p class="muted">Loading...</p>';
+        try {
+            var resp = await fetch('/api/ideas/' + encodeURIComponent(ideaId) + '/feature-cards');
+            if (!resp.ok) { listEl.innerHTML = '<p class="muted">Load failed</p>'; return; }
+            var data = await resp.json();
+            var cards = data.cards || [];
+            if (cards.length === 0) { listEl.innerHTML = '<p class="muted">暂无特征卡片</p>'; return; }
+            listEl.innerHTML = '';
+            cards.forEach(function(card) {
+                var row = document.createElement('div');
+                row.style.cssText = 'padding:12px 14px;margin-bottom:8px;background:#161b22;border:1px solid #30363d;border-radius:6px;';
+                var score = card.novelty_score;
+                var scoreHtml = '';
+                if (score != null) {
+                    var sc = Math.round(score);
+                    var scColor = sc >= 80 ? '#3fb950' : sc >= 50 ? '#f0883e' : '#f85149';
+                    scoreHtml = '<span style="color:' + scColor + ';font-weight:700;font-size:0.9em;">★ ' + sc + '</span>';
+                }
+                var sections = [
+                    { label: '技术问题', val: card.technical_problem },
+                    { label: '核心结构', val: card.core_structure },
+                    { label: '关键关系', val: card.key_relations },
+                    { label: '工艺步骤', val: card.process_steps },
+                    { label: '应用场景', val: card.application_scenarios }
+                ];
+                var body = sections.filter(function(s) { return s.val; }).map(function(s) {
+                    return '<div style="margin-top:6px;"><span style="color:#58a6ff;font-weight:600;font-size:0.8em;">' + s.label + ':</span> <span style="color:#c9d1d9;font-size:0.9em;line-height:1.6;">' + esc(s.val) + '</span></div>';
+                }).join('');
+                row.innerHTML = DOMPurify.sanitize(
+                    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">' +
+                    '<span style="font-weight:600;color:#f0f6fc;">' + esc(card.title || card.description || '') + '</span>' +
+                    scoreHtml + '</div>' +
+                    (card.description ? '<div style="color:#8b949e;font-size:0.85em;line-height:1.5;">' + esc(card.description) + '</div>' : '') +
+                    body
+                );
+                listEl.appendChild(row);
+            });
+        } catch(e) {
+            listEl.innerHTML = '<p class="muted">Load failed: ' + e.message + '</p>';
+        }
     }
 
     // 加载聊天记录 / Load chat messages
