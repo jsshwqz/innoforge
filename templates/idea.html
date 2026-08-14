@@ -347,24 +347,55 @@
             ideas.slice(0, 50).forEach(function(item) {
                 var row = document.createElement('div');
                 row.className = 'idea-history-item';
-                row.style.cssText = 'padding:8px 12px;margin-bottom:4px;background:#161b22;border:1px solid #21262d;border-radius:6px;cursor:pointer;transition:border-color 0.2s;font-size:0.85em;';
-                var title = item.title || '';
-                if (title.length > 30) title = title.substring(0, 30) + '…';
-                var desc = (item.description || '').replace(/\n/g, ' ');
-                if (desc.length > 60) desc = desc.substring(0, 60) + '…';
-                var status = item.status || '';
-                var score = item.novelty_score != null ? ' ★' + Math.round(item.novelty_score) : '';
+                row.style.cssText = 'padding:10px 14px;margin-bottom:6px;background:#161b22;border:1px solid #21262d;border-left:3px solid #58a6ff;border-radius:6px;cursor:pointer;transition:all 0.2s;font-size:0.85em;';
+                var title = item.title || (item.description || '').substring(0, 30) || (i18nLang === 'en' ? 'Untitled' : '未命名');
+                var desc = (item.description || '').replace(/\n/g, ' ').trim();
+                if (desc === title) desc = '';
+                if (desc.length > 80) desc = desc.substring(0, 80) + '…';
+                var status = item.status || 'pending';
+                var mc = item.message_count || 0;
+                var score = item.novelty_score;
                 var created = item.created_at ? item.created_at.substring(0, 10) : '';
-                var openFn = function() {
-                    currentIdeaId = item.id;
-                    loadIdea(item.id);
-                };
-                row.onmouseover = function() { row.style.borderColor = '#58a6ff'; };
-                row.onmouseout = function() { row.style.borderColor = '#21262d'; };
-                row.onclick = openFn;
-                row.innerHTML = '<div style="color:#f0f6fc;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(title) + score + '</div>' +
-                    (desc ? '<div style="color:#8b949e;font-size:0.85em;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(desc) + '</div>' : '') +
-                    (created ? '<div style="color:#484f58;font-size:0.75em;margin-top:2px;">' + created + '</div>' : '');
+                // Status badge
+                var badge = '<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:0.8em;font-weight:600;margin-left:4px;';
+                if (status === 'done') badge += 'background:#0f5132;color:#3fb950;">' + (i18nLang === 'en' ? '✓ Done' : '✓ 完成');
+                else if (status === 'running') badge += 'background:#1c3a5f;color:#58a6ff;">⟳ ' + (i18nLang === 'en' ? 'Running' : '进行中');
+                else badge += 'background:#21262d;color:#8b949e;">' + (i18nLang === 'en' ? 'Pending' : '待推演');
+                badge += '</span>';
+                // Score
+                var scoreHtml = '';
+                if (score != null) {
+                    var sc = Math.round(score);
+                    var scColor = sc >= 80 ? '#3fb950' : sc >= 50 ? '#f0883e' : '#f85149';
+                    scoreHtml = '<span style="color:' + scColor + ';font-weight:700;font-size:0.95em;margin-left:6px;">★ ' + sc + '</span>';
+                }
+                // Message count
+                var msgHtml = '';
+                if (mc > 0) {
+                    msgHtml = '<span style="color:#8b949e;font-size:0.8em;margin-left:4px;">💬 ' + mc + '</span>';
+                }
+                // Render
+                var html = '';
+                html += '<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;overflow:hidden;">';
+                html += '<span style="color:#f0f6fc;font-weight:600;font-size:1.05em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;">' + esc(title) + '</span>';
+                html += '<span style="display:inline-flex;align-items:center;flex-shrink:0;gap:4px;">' + scoreHtml + msgHtml + badge + '</span>';
+                html += '</div>';
+                if (desc) {
+                    html += '<div style="color:#c9d1d9;font-size:0.9em;margin-top:4px;line-height:1.5;">' + esc(desc) + '</div>';
+                }
+                if (created) {
+                    html += '<div style="color:#484f58;font-size:0.75em;margin-top:6px;display:flex;justify-content:space-between;align-items:center;">';
+                    html += '<span>' + created + '</span>';
+                    if (score != null) {
+                        var sc = Math.round(score);
+                        html += '<div style="width:80px;height:4px;background:#21262d;border-radius:2px;overflow:hidden;"><div style="width:' + sc + '%;height:100%;background:' + (sc >= 80 ? '#3fb950' : sc >= 50 ? '#f0883e' : '#f85149') + ';"></div></div>';
+                    }
+                    html += '</div>';
+                }
+                row.innerHTML = html;
+                row.onmouseover = function() { row.style.borderColor = '#58a6ff'; row.style.background = '#1c2129'; };
+                row.onmouseout = function() { row.style.borderColor = '#21262d'; row.style.background = '#161b22'; };
+                row.onclick = function() { currentIdeaId = item.id; loadIdea(item.id); };
                 list.appendChild(row);
             });
         } catch(e) {
