@@ -46,11 +46,14 @@
             <div class="form-group">
                 <label>AI 服务商</label>
                 <select id="ai-provider">
-                    <option value="deepseek">DeepSeek（当前）</option>
-                    <option value="anthropic">Anthropic Claude（法律推理最强）</option>
+                    <option value="deepseek">DeepSeek（国内第一）</option>
+                    <option value="openai">OpenAI GPT-4o（国际最强）</option>
+                    <option value="anthropic">Anthropic Claude（法律推理）</option>
+                    <option value="qwen">通义千问 Qwen（阿里）</option>
                     <option value="xiaomi">小米 MiMo（支持看图）</option>
                     <option value="sensetime">商汤 SenseNova</option>
-                    <option value="openrouter">OpenRouter（GPT-4o 等）</option>
+                    <option value="zhipu">智谱 GLM</option>
+                    <option value="openrouter">OpenRouter（统一网关）</option>
                     <option value="gemini">Google Gemini（支持看图）</option>
                     <option value="custom">自定义</option>
                 </select>
@@ -320,6 +323,39 @@
                     {value: 'glm-4-flash', label: 'GLM-4-Flash（免费）'},
                 ],
                 hint: '智谱 GLM OpenAI 兼容接口'
+            },
+            openai: {
+                title: 'OpenAI GPT',
+                base_url: 'https://api.openai.com/v1',
+                key_link: 'https://platform.openai.com/api-keys',
+                models: [
+                    {value: 'gpt-4o', label: 'GPT-4o（最强，支持看图）'},
+                    {value: 'gpt-4o-mini', label: 'GPT-4o Mini（快速，推荐）'},
+                    {value: 'gpt-5', label: 'GPT-5（最新旗舰）'},
+                    {value: 'gpt-5-mini', label: 'GPT-5 Mini（快速）'},
+                ],
+                expert_models: [
+                    {value: 'gpt-5', label: 'GPT-5（最新旗舰）'},
+                    {value: 'gpt-4o', label: 'GPT-4o（最强）'},
+                ],
+                hint: 'OpenAI 官方 API，全球最强模型'
+            },
+            qwen: {
+                title: '通义千问 Qwen',
+                base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+                key_link: 'https://bailian.console.aliyun.com/',
+                models: [
+                    {value: 'qwen-max', label: 'Qwen-Max（最强）'},
+                    {value: 'qwen-plus', label: 'Qwen-Plus（均衡，推荐）'},
+                    {value: 'qwen-turbo', label: 'Qwen-Turbo（快速，推荐）'},
+                    {value: 'qwen-long', label: 'Qwen-Long（超长上下文）'},
+                    {value: 'qwen-vl-max', label: 'Qwen-VL-Max（多模态）'},
+                ],
+                expert_models: [
+                    {value: 'qwen-max', label: 'Qwen-Max（最强）'},
+                    {value: 'qwen-plus', label: 'Qwen-Plus（均衡）'},
+                ],
+                hint: '阿里通义千问，国内最强模型之一'
             }
         };
 
@@ -327,12 +363,14 @@
         function detectProvider(baseUrl) {
             baseUrl = (baseUrl || '').toLowerCase();
             if (baseUrl.includes('deepseek')) return 'deepseek';
+            if (baseUrl.includes('api.openai.com')) return 'openai';
             if (baseUrl.includes('anthropic')) return 'anthropic';
             if (baseUrl.includes('xiaomimimo')) return 'xiaomi';
             if (baseUrl.includes('sensenova')) return 'sensetime';
             if (baseUrl.includes('openrouter')) return 'openrouter';
             if (baseUrl.includes('googleapis')) return 'gemini';
             if (baseUrl.includes('bigmodel')) return 'zhipu';
+            if (baseUrl.includes('dashscope')) return 'qwen';
             return 'custom';
         }
 
@@ -355,7 +393,9 @@
             // 切换服务商时自动更新 API Key 输入框
             var keyMap = {
                 deepseek: 'ai_api_key_deepseek',
+                openai: 'ai_api_key_openai',
                 anthropic: 'ai_api_key_anthropic',
+                qwen: 'ai_api_key_qwen',
                 xiaomi: 'ai_api_key_xiaomi',
                 sensetime: 'ai_api_key_sensetime',
                 openrouter: 'ai_api_key_openrouter',
@@ -1018,14 +1058,47 @@
             try {
                 const res = await fetch('/api/ai/models');
                 const data = await res.json();
-                if (data.status === 'ok' && data.models && data.models.length > 0) {
-                    var curModel = document.getElementById('ai-model').value;
-                    var curExpert = document.getElementById('ai-model-expert').value;
-                    populateSelect('ai-model', data.models.map(function(m) { return {value: m.id, label: m.id}; }), curModel);
-                    populateSelect('ai-model-expert', data.models.map(function(m) { return {value: m.id, label: m.id}; }), curExpert);
-                    btn.textContent = '✅ ' + data.models.length + ' 个模型';
-                    btn.style.color = '#4ade80';
-                    setTimeout(function() { btn.textContent = '🔍 查询可用模型'; btn.style.color = ''; }, 3000);
+                if (data.status === 'ok') {
+                    var allModels = [];
+                    var providerSummary = [];
+                    // Handle multi-provider response: { providers: [{name, models: [...]}] }
+                    if (data.providers && data.providers.length > 0) {
+                        data.providers.forEach(function(p) {
+                            if (p.models && p.models.length > 0) {
+                                p.models.forEach(function(m) {
+                                    allModels.push({ value: m.id, label: p.name + ' / ' + m.id });
+                                });
+                                providerSummary.push(p.name + ': ' + p.models.length);
+                            } else if (p.status === 'ok') {
+                                providerSummary.push(p.name + ': 0');
+                            } else {
+                                providerSummary.push(p.name + ': ' + (p.error || 'error'));
+                            }
+                        });
+                    } else if (data.models && data.models.length > 0) {
+                        // Fallback: legacy flat format { models: [...] }
+                        data.models.forEach(function(m) {
+                            allModels.push({ value: m.id, label: m.id });
+                        });
+                        providerSummary.push('unknown: ' + data.models.length);
+                    }
+
+                    if (allModels.length > 0) {
+                        var curModel = document.getElementById('ai-model').value;
+                        var curExpert = document.getElementById('ai-model-expert').value;
+                        populateSelect('ai-model', allModels, curModel);
+                        populateSelect('ai-model-expert', allModels, curExpert);
+                        var totalCount = data.total_count || allModels.length;
+                        var summary = providerSummary.join(', ');
+                        btn.textContent = '✅ ' + totalCount + ' 个 (' + summary + ')';
+                        btn.style.color = '#4ade80';
+                        btn.title = '服务商详情: ' + summary;
+                        setTimeout(function() { btn.textContent = '🔍 查询可用模型'; btn.style.color = ''; }, 5000);
+                    } else {
+                        btn.textContent = '❌ ' + (data.message || '无可用模型（请配置至少一个 AI 服务商的 API Key）');
+                        btn.style.color = '#f85149';
+                        setTimeout(function() { btn.textContent = '🔍 查询可用模型'; btn.style.color = ''; }, 3000);
+                    }
                 } else {
                     btn.textContent = '❌ ' + (data.message || '无可用模型');
                     btn.style.color = '#f85149';

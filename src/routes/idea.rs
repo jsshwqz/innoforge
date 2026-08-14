@@ -2128,53 +2128,122 @@ mod idea_markdown_tests {
 }
 
 
-// ── AI models auto-detect ─────────────────────────────────────────────
+// ── AI models auto-detect (multi-provider) ──────────────────────────────
+/// 已知 AI 服务商列表，用于多服务商模型自动检测
+/// Each entry: (display_name, base_url, config_key_name)
+const KNOWN_AI_PROVIDERS: &[(&str, &str, &str)] = &[
+    ("DeepSeek", "https://api.deepseek.com/v1", "AI_API_KEY_DEEPSEEK"),
+    ("OpenRouter", "https://openrouter.ai/api/v1", "AI_API_KEY_OPENROUTER"),
+    ("OpenAI", "https://api.openai.com/v1", "AI_API_KEY_OPENAI"),
+    ("Qwen", "https://dashscope.aliyuncs.com/compatible-mode/v1", "AI_API_KEY_QWEN"),
+    ("Gemini", "https://generativelanguage.googleapis.com/v1beta/openai/", "AI_API_KEY_GEMINI"),
+    ("Zhipu", "https://open.bigmodel.cn/api/paas/v4", "AI_API_KEY_ZHIPU"),
+    ("Xiaomi", "https://xiaomi-api.example.com/v1", "AI_API_KEY_XIAOMI"),
+    ("SenseTime", "https://sensenova-api.example.com/v1", "AI_API_KEY_SENSENOVA"),
+    ("Anthropic", "https://api.anthropic.com", "AI_API_KEY_ANTHROPIC"),
+    ("Ollama", "http://localhost:11434/v1", "AI_API_KEY"),
+];
+
 pub async fn list_ai_models(State(s): State<AppState>) -> Json<serde_json::Value> {
-    let base_url = {
-        let cfg = s.config.read().unwrap_or_else(|e| e.into_inner());
-        cfg.ai_base_url.clone().trim_end_matches('/').to_string()
-    };
-    let api_key = {
-        let cfg = s.config.read().unwrap_or_else(|e| e.into_inner());
-        cfg.ai_api_key.clone()
-    };
-    if base_url.is_empty() || api_key.is_empty() {
-        return Json(json!({"status": "ok", "models": [], "message": "AI provider not configured"}));
-    }
-    let url = format!("{}/models", base_url);
-    let join_handle = tokio::spawn(async move {
-        let resp = match reqwest::Client::new().get(&url)
-            .header("Authorization", format!("Bearer {}", api_key))
-            .header("Content-Type", "application/json")
-            .send().await
-        {
-            Ok(r) => r,
-            Err(_) => return None,
-        };
-        if !resp.status().is_success() {
-            return None;
+    let db_settings = s.db.get_all_settings().ok().unwrap_or_default();
+    let mut provider_results: Vec<serde_json::Value> = Vec::new();
+    let mut tasks: Vec<(String, String, tokio::task::JoinHandle<Option<serde_json::Value>>)> = Vec::new();
+
+    for (name, base_url, db_key) in KNOWN_AI_PROVIDERS {
+        let api_key = db_settings.get(*db_key).cloned().unwrap_or_default();
+        let is_ollama = *base_url == "http://localhost:11434/v1";
+        // Skip providers without keys (Ollama needs no key)
+        if !is_ollama && (api_key.is_empty() || api_key == "your-serpapi-key-here") {
+            continue;
         }
-        let bytes_data = match resp.bytes().await {
-            Ok(b) => b,
-            Err(_) => return None,
-        };
-        let data: serde_json::Value = match serde_json::from_slice(&bytes_data) {
-            Ok(d) => d,
-            Err(_) => json!({}),
-        };
-        let arr = data["data"].as_array().or_else(|| data.as_array());
-        let models: Vec<serde_json::Value> = match arr {
-            Some(ml) => ml.iter()
-                .filter_map(|m| Some(json!({"id": m["id"].as_str()?.to_string()})))
-                .collect(),
-            None => Vec::new(),
-        };
-        Some(json!({"status": "ok", "models": models, "count": models.len()}))
-    });
-    match tokio::time::timeout(std::time::Duration::from_secs(15), join_handle).await {
-        Ok(Ok(Some(result))) => Json(result),
-        Ok(Ok(None)) => Json(json!({"status": "ok", "models": [], "message": "AI provider returned non-200"})),
-        Ok(Err(_)) => Json(json!({"status": "ok", "models": [], "message": "Request failed"})),
-        Err(_) => Json(json!({"status": "ok", "models": [], "message": "Request timed out"})),
+        let key = if is_ollama { String::new() } else { api_key.clone() };
+
+        let base_url_clone = base_url.trim_end_matches('/').to_string();
+        let url = format!("{}/models", base_url_clone);
+        let key_clone = key.clone();
+        let name_clone = name.to_string();
+        let base_url_resp = base_url.to_string();
+
+        let join_handle = tokio::spawn(async move {
+            let resp = match reqwest::Client::new().get(&url)
+                .header("Authorization", format!("Bearer {}", key_clone))
+                .header("Content-Type", "application/json")
+                .send()
+                .await
+            {
+                Ok(r) => r,
+                Err(_) => return None,
+            };
+            if !resp.status().is_success() {
+                return None;
+            }
+            let bytes_data = match resp.bytes().await {
+                Ok(b) => b,
+                Err(_) => return None,
+            };
+            let data: serde_json::Value = match serde_json::from_slice(&bytes_data) {
+                Ok(d) => d,
+                Err(_) => json!({}),
+            };
+            let arr = data["data"].as_array().or_else(|| data.as_array());
+            let models: Vec<serde_json::Value> = match arr {
+                Some(ml) => ml.iter()
+                    .filter_map(|m| Some(json!({"id": m["id"].as_str()?.to_string()})))
+                    .collect(),
+                None => Vec::new(),
+            };
+            Some(json!({
+                "status": "ok",
+                "models": models,
+                "count": models.len()
+            }))
+        });
+
+        tasks.push((name_clone, base_url_resp, join_handle));
     }
+
+    for (name, base_url, handle) in tasks {
+        match tokio::time::timeout(std::time::Duration::from_secs(12), handle).await {
+            Ok(Ok(Some(result))) => {
+                let models = result["models"].as_array().cloned().unwrap_or_default();
+                provider_results.push(json!({
+                    "name": name,
+                    "base_url": base_url,
+                    "status": "ok",
+                    "models": models,
+                    "count": models.len()
+                }));
+            }
+            Ok(Ok(None)) | Ok(Err(_)) => {
+                provider_results.push(json!({
+                    "name": name,
+                    "base_url": base_url,
+                    "status": "error",
+                    "error": "Query failed",
+                    "models": Vec::<serde_json::Value>::new(),
+                    "count": 0
+                }));
+            }
+            Err(_) => {
+                provider_results.push(json!({
+                    "name": name,
+                    "base_url": base_url,
+                    "status": "timeout",
+                    "error": "Query timed out",
+                    "models": Vec::<serde_json::Value>::new(),
+                    "count": 0
+                }));
+            }
+        }
+    }
+
+    let total_count: usize = provider_results.iter()
+        .map(|p| p["count"].as_u64().unwrap_or(0) as usize)
+        .sum();
+
+    Json(json!({
+        "status": "ok",
+        "providers": provider_results,
+        "total_count": total_count
+    }))
 }

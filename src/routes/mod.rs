@@ -75,6 +75,8 @@ pub struct AppConfig {
     pub ai_api_key_openrouter: String,
     pub ai_api_key_gemini: String,
     pub ai_api_key_zhipu: String,
+    pub ai_api_key_qwen: String,
+    pub ai_api_key_openai: String,
     pub ai_model: String,
     /// 专家模型（用于创新推演、深分析等高推理任务，默认 deepseek-reasoner）
     pub ai_model_expert: String,
@@ -171,6 +173,8 @@ impl AppConfig {
             ai_api_key_openrouter: load_provider_key("AI_API_KEY_OPENROUTER"),
             ai_api_key_gemini: load_provider_key("AI_API_KEY_GEMINI"),
             ai_api_key_zhipu: load_provider_key("AI_API_KEY_ZHIPU"),
+            ai_api_key_qwen: load_provider_key("AI_API_KEY_QWEN"),
+            ai_api_key_openai: load_provider_key("AI_API_KEY_OPENAI"),
             ai_model: get("AI_MODEL", "qwen2.5:7b"),
             ai_model_expert: get("AI_MODEL_EXPERT", "deepseek-reasoner"),
 
@@ -249,6 +253,10 @@ impl AppConfig {
             &self.ai_api_key_gemini
         } else if base_url.contains("bigmodel") {
             &self.ai_api_key_zhipu
+        } else if base_url.contains("dashscope") || base_url.contains("qwen") {
+            &self.ai_api_key_qwen
+        } else if base_url.contains("api.openai.com") {
+            &self.ai_api_key_openai
         } else {
             &self.ai_api_key
         };
