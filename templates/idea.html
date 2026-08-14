@@ -329,6 +329,63 @@
         document.querySelectorAll('.tab-btn[data-tab="' + tabId + '"]').forEach(function(b) { b.classList.add('active'); });
     }
 
+    // 加载创意历史列表 / Load idea history sidebar
+    async function loadHistory() {
+        var list = document.getElementById('history-list');
+        if (!list) return;
+        try {
+            var resp = await fetch('/api/idea/list');
+            if (!resp.ok) return;
+            var data = await resp.json();
+            var ideas = data.ideas || data.list || [];
+            if (!Array.isArray(ideas)) { ideas = []; }
+            if (ideas.length === 0) {
+                list.innerHTML = '<p class="hint">' + (i18nLang === 'en' ? 'No ideas yet' : '暂无创意记录') + '</p>';
+                return;
+            }
+            list.innerHTML = '';
+            ideas.slice(0, 50).forEach(function(item) {
+                var row = document.createElement('div');
+                row.className = 'idea-history-item';
+                row.style.cssText = 'padding:8px 12px;margin-bottom:4px;background:#161b22;border:1px solid #21262d;border-radius:6px;cursor:pointer;transition:border-color 0.2s;font-size:0.85em;';
+                var title = item.title || '';
+                if (title.length > 30) title = title.substring(0, 30) + '…';
+                var desc = (item.description || '').replace(/\n/g, ' ');
+                if (desc.length > 60) desc = desc.substring(0, 60) + '…';
+                var status = item.status || '';
+                var score = item.novelty_score != null ? ' ★' + Math.round(item.novelty_score) : '';
+                var created = item.created_at ? item.created_at.substring(0, 10) : '';
+                var openFn = function() {
+                    currentIdeaId = item.id;
+                    loadIdea(item.id);
+                };
+                row.onmouseover = function() { row.style.borderColor = '#58a6ff'; };
+                row.onmouseout = function() { row.style.borderColor = '#21262d'; };
+                row.onclick = openFn;
+                row.innerHTML = '<div style="color:#f0f6fc;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(title) + score + '</div>' +
+                    (desc ? '<div style="color:#8b949e;font-size:0.85em;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(desc) + '</div>' : '') +
+                    (created ? '<div style="color:#484f58;font-size:0.75em;margin-top:2px;">' + created + '</div>' : '');
+                list.appendChild(row);
+            });
+        } catch(e) {
+            if (list) list.innerHTML = '<p class="hint" style="color:#f85149;">' + (i18nLang === 'en' ? 'Failed to load history' : '加载历史失败') + '</p>';
+        }
+    }
+
+    async function loadIdea(ideaId) {
+        try {
+            var resp = await fetch('/api/idea/' + encodeURIComponent(ideaId));
+            if (!resp.ok) return;
+            var data = await resp.json();
+            var idea = data.idea || data;
+            if (!idea) return;
+            currentIdeaId = ideaId;
+            displayResults(idea);
+            loadVersionHistory(ideaId);
+            showDiscussionPanel && showDiscussionPanel();
+        } catch(e) {}
+    }
+
     function reapplyPage() {
         applyI18nCommon();
         loadHistory();
@@ -969,6 +1026,8 @@
         if (idea.analysis) {
             // 检测是否为多维推演报告（包含维度标记）
             var isDeepReasoning = idea.analysis.indexOf('多维深度推演报告') >= 0;
+        }
+    }
 
     // ========== Memory (记忆) functions ==========
 
