@@ -2140,7 +2140,7 @@ const KNOWN_AI_PROVIDERS: &[(&str, &str, &str)] = &[
     ("Gemini", "https://generativelanguage.googleapis.com/v1beta/openai/", "AI_API_KEY_GEMINI"),
     ("Zhipu", "https://open.bigmodel.cn/api/paas/v4", "AI_API_KEY_ZHIPU"),
     ("Xiaomi", "https://xiaomi-api.example.com/v1", "AI_API_KEY_XIAOMI"),
-    ("SenseTime", "https://api.sensenova.cn/v1/llm", "AI_API_KEY_SENSENOVA"),
+    ("SenseTime", "https://token.sensenova.cn/v1", "AI_API_KEY_SENSENOVA"),
     ("Anthropic", "https://api.anthropic.com", "AI_API_KEY_ANTHROPIC"),
     ("Ollama", "http://localhost:11434/v1", "AI_API_KEY"),
 ];
