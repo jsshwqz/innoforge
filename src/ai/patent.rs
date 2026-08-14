@@ -8,6 +8,14 @@ use super::client::{
 };
 use anyhow::Result;
 
+/// 追加到各分析任务 system prompt 的共享事实纪律条款
+const FACT_DISCIPLINE: &str = "\n\n## 事实纪律（最高优先级）\n\
+     1. 只能依据上方提供的专利文本、权利要求、对比文件等内容作答，禁止引入材料之外的信息。\n\
+     2. 材料中没有的信息，必须明确标注【材料未提供】或【需核实】，禁止推测、补全或编造。\n\
+     3. 引用权利要求、对比文件时，只能引用原文中出现的特征，禁止自行扩写或捏造。\n\
+     4. 任何数字、日期、百分比必须来自材料原文，否则标注【材料未给出】。\n\
+     5. 判断不确定时，明确给出置信度（高/中/低），不要用肯定的语气掩盖不确定性。";
+
 impl AiClient {
     pub async fn summarize_patent(
         &self,
@@ -57,9 +65,10 @@ impl AiClient {
         let messages = vec![
             Message {
                 role: "system".into(),
-                content: "你是一位资深专利代理人和知识产权律师。你擅长解读专利权利要求书，\
-                         分析保护范围，识别关键技术特征。请用专业、严谨的语言分析。"
-                    .into(),
+                content: format!(
+                    "你是一位资深专利代理人和知识产权律师。你擅长解读专利权利要求书，\
+                         分析保护范围，识别关键技术特征。请用专业、严谨的语言分析。{FACT_DISCIPLINE}"
+                ),
             },
             Message {
                 role: "user".into(),
@@ -102,8 +111,10 @@ impl AiClient {
         let messages = vec![
             Message {
                 role: "system".into(),
-                content: "你是一位资深知识产权律师和专利侵权分析专家。你擅长评估产品的专利侵权风险，\
-                         对比技术方案与专利权利要求的对应关系。请客观、专业地分析，并提供可操作的建议。".into(),
+                content: format!(
+                    "你是一位资深知识产权律师和专利侵权分析专家。你擅长评估产品的专利侵权风险，\
+                         对比技术方案与专利权利要求的对应关系。请客观、专业地分析，并提供可操作的建议。{FACT_DISCIPLINE}"
+                ),
             },
             Message {
                 role: "user".into(),
@@ -194,9 +205,11 @@ impl AiClient {
         let messages = vec![
             Message {
                 role: "system".into(),
-                content: "你是一位资深中国专利代理师（执业15年+），精通中国专利法及审查指南中的创造性判断标准（三步法）。\
+                content: format!(
+                    "你是一位资深中国专利代理师（执业15年+），精通中国专利法及审查指南中的创造性判断标准（三步法）。\
                          你擅长答复审查意见通知书，尤其是创造性驳回（A22.3）的答辩。\
-                         请用严谨、专业的语言分析，结论要有理有据。".into(),
+                         请用严谨、专业的语言分析，结论要有理有据。{FACT_DISCIPLINE}"
+                ),
             },
             Message {
                 role: "user".into(),
