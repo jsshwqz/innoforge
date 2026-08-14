@@ -1397,6 +1397,10 @@
         if (idea.analysis) {
             // 检测是否为多维推演报告（包含维度标记）
             var isDeepReasoning = idea.analysis.indexOf('多维深度推演报告') >= 0;
+            // 渲染概览页正文（分析报告 + 检索结果）
+            renderOverview(idea);
+        } else {
+            renderOverview(idea);
         }
     }
 
@@ -1500,6 +1504,284 @@
         if (!confirm('Delete this memory?')) return;
         var resp = await fetch('/api/idea/' + encodeURIComponent(ideaId) + '/memory/' + encodeURIComponent(entryId), { method: 'DELETE' });
         if (resp.ok) { loadMemory(); } else { alert('Delete failed'); }
+    }
+
+    // ── 通用工具函数（恢复自历史版本 3a50c49，被 9f1a14b 误删）──
+
+    function showStatus(type, msg) {
+        document.getElementById('status-area').innerHTML = DOMPurify.sanitize(
+            '<div class="status-bar status-' + type + '">' + msg + '</div>');
+    }
+
+    function clearResults() {
+        var scoreArea = document.getElementById('score-area');
+        var analysisArea = document.getElementById('analysis-area');
+        var findingsArea = document.getElementById('findings-area');
+        var resultTabs = document.getElementById('result-tabs');
+        if (scoreArea) scoreArea.innerHTML = '';
+        if (analysisArea) analysisArea.innerHTML = '';
+        if (findingsArea) findingsArea.innerHTML = '';
+        if (resultTabs) resultTabs.style.display = 'none';
+    }
+
+    function clearForm() {
+        var titleEl = document.getElementById('idea-title');
+        var descEl = document.getElementById('idea-desc');
+        var statusArea = document.getElementById('status-area');
+        if (titleEl) titleEl.value = '';
+        if (descEl) descEl.value = '';
+        if (statusArea) statusArea.innerHTML = '';
+        clearResults();
+        currentIdeaId = null;
+    }
+
+    function showNewIdeaForm() {
+        clearForm();
+        document.getElementById('idea-form').style.display = '';
+        var titleEl = document.getElementById('idea-title');
+        if (titleEl) titleEl.focus();
+        window.history.pushState({}, '', '/idea');
+    }
+
+    function renderMarkdown(text) {
+        // 先提取代码块，避免内部被其他规则破坏
+        var codeBlocks = [];
+        text = text.replace(/```(\w*)\n?([\s\S]*?)```/g, function(_, lang, code) {
+            codeBlocks.push('<pre style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:10px;overflow-x:auto;font-size:0.85em;"><code>' + code.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</code></pre>');
+            return '\x00CB' + (codeBlocks.length - 1) + '\x00';
+        });
+        // 提取表格
+        var tables = [];
+        text = text.replace(/((?:^\|.+\|[ \t]*\n)+)/gm, function(block) {
+            var rows = block.trim().split('\n');
+            if (rows.length < 2) return block;
+            var html = '<table style="border-collapse:collapse;width:100%;margin:8px 0;font-size:0.9em;">';
+            rows.forEach(function(row, ri) {
+                if (row.replace(/[\|\-\s:]/g, '') === '') return; // skip separator row
+                var tag = ri === 0 ? 'th' : 'td';
+                var cells = row.split('|').filter(function(c, i, a) { return i > 0 && i < a.length - 1; });
+                html += '<tr>';
+                cells.forEach(function(c) {
+                    var st = 'border:1px solid #30363d;padding:6px 10px;' + (ri === 0 ? 'background:#161b22;color:#58a6ff;font-weight:600;' : '');
+                    html += '<' + tag + ' style="' + st + '">' + c.trim() + '</' + tag + '>';
+                });
+                html += '</tr>';
+            });
+            html += '</table>';
+            tables.push(html);
+            return '\x00TB' + (tables.length - 1) + '\x00';
+        });
+        var result = text
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+            .replace(/^## (.+)$/gm, '<h3 style="font-size:1.1em">$1</h3>')
+            .replace(/^# (.+)$/gm, '<h2>$1</h2>')
+            .replace(/`([^`]+)`/g, '<code style="background:#21262d;padding:1px 5px;border-radius:3px;font-size:0.9em;">$1</code>')
+            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+            .replace(/\*(.+?)\*/g, '<em>$1</em>')
+            .replace(/^\- (.+)$/gm, '<li>$1</li>')
+            .replace(/^(\d+)\. (.+)$/gm, '<li>$2</li>')
+            .replace(/\n{2,}/g, '</p><p>')
+            .replace(/\n/g, '<br>')
+            .replace(/^/, '<p>').replace(/$/, '</p>');
+        // 恢复代码块和表格
+        result = result.replace(/\x00CB(\d+)\x00/g, function(_, i) { return codeBlocks[parseInt(i)]; });
+        result = result.replace(/\x00TB(\d+)\x00/g, function(_, i) { return tables[parseInt(i)]; });
+        return result;
+    }
+
+    function esc(s) { return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+    function showDiscussionPanel() {
+        if (!currentIdeaId) return;
+        loadMessages(currentIdeaId);
+    }
+
+    // ── 报告 Tab 功能（恢复）──
+
+    var currentReportType = 'full';
+
+    async function openReport(ideaId, reportType) {
+        if (reportType === 'full') {
+            window.open('/api/idea/' + ideaId + '/report.html', '_blank');
+            return;
+        }
+        try {
+            var resp = await fetch('/api/idea/' + ideaId + '/report?type=' + reportType);
+            if (!resp.ok) { alert('获取报告失败'); return; }
+            var data = await resp.json();
+            if (data.status !== 'ok') { alert(data.message || '获取报告失败'); return; }
+            var typeLabel = reportType === 'executive' ? '精简版报告' : '技术版报告';
+            var w = window.open('', '_blank');
+            w.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8">' +
+                '<title>' + typeLabel + '</title>' +
+                '<style>body{font-family:-apple-system,sans-serif;max-width:800px;margin:40px auto;padding:0 20px;background:#0d1117;color:#c9d1d9;line-height:1.7;}' +
+                'h1,h2,h3{color:#58a6ff;}h1{border-bottom:1px solid #30363d;padding-bottom:8px;}' +
+                'strong{color:#f0f6fc;}p{margin:8px 0;}' +
+                '@media print{body{background:#fff;color:#000;}h1,h2,h3{color:#1f2937;}strong{color:#000;}}</style></head><body>');
+            var md = data.report || '';
+            var html = md.replace(/^### (.+)$/gm, '<h3>$1</h3>')
+                .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+                .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+                .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                .replace(/^- (.+)$/gm, '<li>$1</li>')
+                .replace(/\n/g, '<br>');
+            w.document.write(html);
+            w.document.write('<hr style="border-color:#30363d;margin-top:30px;"><p style="color:#6e7681;font-size:0.85em;">InnoForge 创研台 · ' + typeLabel + ' · ' + new Date().toLocaleDateString() + '</p>');
+            w.document.write('</body></html>');
+            w.document.close();
+        } catch(e) {
+            alert('获取报告失败: ' + e.message);
+        }
+    }
+
+    function switchReportType(rtype) {
+        currentReportType = rtype;
+        document.querySelectorAll('.report-type-btn').forEach(function(btn) {
+            if (btn.getAttribute('data-rtype') === rtype) {
+                btn.style.background = '#1f6feb';
+                btn.style.color = '#fff';
+                btn.classList.add('active');
+            } else {
+                btn.style.background = '#21262d';
+                btn.style.color = '#8b949e';
+                btn.classList.remove('active');
+            }
+        });
+        if (currentIdeaId) loadReportTab(currentIdeaId, rtype);
+    }
+
+    async function loadReportTab(ideaId, reportType) {
+        var content = document.getElementById('report-content');
+        var openBtn = document.getElementById('report-open-btn');
+        if (!content) return;
+        content.innerHTML = '<p style="color:#58a6ff;"><span class="spinner"></span> 加载中...</p>';
+        try {
+            var url = '/api/idea/' + encodeURIComponent(ideaId) + '/report';
+            if (reportType && reportType !== 'full') url += '?type=' + reportType;
+            var resp = await fetch(url);
+            if (!resp.ok) { content.innerHTML = '<p style="color:#f85149;">获取报告失败 (' + resp.status + ')</p>'; return; }
+            var data = await resp.json();
+            if (data.status === 'ok') {
+                var reportText = data.report || data.analysis || '';
+                if (reportType === 'full' && typeof data.report === 'object') {
+                    reportText = data.report.analysis || '';
+                }
+                content.innerHTML = DOMPurify.sanitize('<div class="analysis-result">' + renderMarkdown(reportText) + '</div>');
+                if (openBtn) openBtn.style.display = 'inline-block';
+            } else {
+                content.innerHTML = '<p style="color:#8b949e;">' + (data.message || '暂无报告') + '</p>';
+                if (openBtn) openBtn.style.display = 'none';
+            }
+        } catch(e) {
+            content.innerHTML = '<p style="color:#f85149;">加载失败: ' + esc(e.message) + '</p>';
+        }
+    }
+
+    function openReportInNewTab() {
+        if (!currentIdeaId) return;
+        if (currentReportType === 'full') {
+            window.open('/api/idea/' + encodeURIComponent(currentIdeaId) + '/report.html', '_blank');
+        } else {
+            openReport(currentIdeaId, currentReportType);
+        }
+    }
+
+    // ── 讨论导出/总结（恢复）──
+
+    async function exportConclusions() {
+        if (!currentIdeaId) return;
+        var btn = document.getElementById('export-conclusions-btn');
+        btn.textContent = '⏳ 导出中...';
+        btn.disabled = true;
+        try {
+            var res = await fetch('/api/idea/' + currentIdeaId + '/chat/conclusions');
+            var data = await res.json();
+            var sumDiv = document.getElementById('discussion-summary');
+            sumDiv.style.display = 'block';
+            if (data.status === 'ok' && data.conclusions) {
+                sumDiv.innerHTML = DOMPurify.sanitize('<div style="font-size:0.8em; color:#58a6ff; margin-bottom:4px; font-weight:bold;">📝 讨论结论导出</div>' +
+                    '<div style="color:#c9d1d9; font-size:0.9em; line-height:1.6;">' + renderMarkdown(data.conclusions) + '</div>');
+            } else {
+                var errDiv = document.createElement('div');
+                errDiv.style.cssText = 'color:#f0ad4e; font-size:0.85em; padding:8px;';
+                errDiv.textContent = '💡 ' + (data.error || '暂无足够的讨论内容可以导出结论。请先与 AI 讨论几轮后再试。');
+                sumDiv.innerHTML = '';
+                sumDiv.appendChild(errDiv);
+            }
+        } catch(e) {
+            alert('请求失败: ' + e.message);
+        }
+        btn.textContent = '📝 导出结论';
+        btn.disabled = false;
+    }
+
+    async function summarizeDiscussion() {
+        if (!currentIdeaId) return;
+        var btn = document.getElementById('summary-btn');
+        btn.textContent = '⏳ 生成中...';
+        btn.disabled = true;
+        try {
+            var res = await fetch('/api/idea/' + currentIdeaId + '/summarize', { method: 'POST' });
+            var data = await res.json();
+            if (data.status === 'ok') {
+                var sumDiv = document.getElementById('discussion-summary');
+                sumDiv.style.display = 'block';
+                sumDiv.innerHTML = DOMPurify.sanitize('<div style="font-size:0.8em; color:#58a6ff; margin-bottom:4px; font-weight:bold;">📋 讨论总结</div>' +
+                    '<div style="color:#c9d1d9; font-size:0.9em; line-height:1.6;">' + renderMarkdown(data.summary) + '</div>');
+            } else {
+                var sumDiv = document.getElementById('discussion-summary');
+                sumDiv.style.display = 'block';
+                var sumErrDiv = document.createElement('div');
+                sumErrDiv.style.cssText = 'color:#f0ad4e; font-size:0.85em; padding:8px;';
+                sumErrDiv.textContent = '💡 ' + (data.error || '生成总结失败') + '，请先在下方输入框和 AI 讨论几轮后再生成总结。';
+                sumDiv.innerHTML = '';
+                sumDiv.appendChild(sumErrDiv);
+            }
+        } catch(e) {
+            alert('请求失败: ' + e.message);
+        }
+        btn.textContent = '📋 生成总结';
+        btn.disabled = false;
+    }
+
+    // ── 概览页渲染分析报告（恢复 displayResults 缺失的正文渲染）──
+
+    function renderOverview(idea) {
+        var analysisArea = document.getElementById('analysis-area');
+        var findingsArea = document.getElementById('findings-area');
+        if (analysisArea && idea.analysis) {
+            analysisArea.innerHTML = DOMPurify.sanitize('<div class="analysis-result">' + renderMarkdown(idea.analysis) + '</div>');
+        }
+        if (findingsArea) {
+            var webResults = idea.web_results || [];
+            var patentResults = idea.patent_results || [];
+            var html = '';
+            if (webResults.length || patentResults.length) {
+                html += '<div class="panel-box" style="margin-top:12px;"><h3>🔎 检索结果</h3>';
+                if (webResults.length) {
+                    html += '<h4 style="color:#58a6ff;margin:8px 0 4px;">网络结果 (' + webResults.length + ')</h4>';
+                    html += webResults.slice(0, 10).map(function(r) {
+                        return '<div style="padding:6px 0;border-bottom:1px solid #21262d;font-size:0.9em;">' +
+                            '<div style="color:#f0f6fc;">' + esc(r.title || '') + '</div>' +
+                            (r.snippet ? '<div style="color:#8b949e;font-size:0.85em;">' + esc(r.snippet) + '</div>' : '') +
+                            (r.link ? '<a href="' + esc(r.link) + '" target="_blank" style="color:#58a6ff;font-size:0.8em;">' + esc(r.link) + '</a>' : '') +
+                            '</div>';
+                    }).join('');
+                }
+                if (patentResults.length) {
+                    html += '<h4 style="color:#58a6ff;margin:8px 0 4px;">专利结果 (' + patentResults.length + ')</h4>';
+                    html += patentResults.slice(0, 10).map(function(p) {
+                        return '<div style="padding:6px 0;border-bottom:1px solid #21262d;font-size:0.9em;">' +
+                            '<div style="color:#f0f6fc;">' + esc(p.patent_number || p.id || '') + ' - ' + esc(p.title || '') + '</div>' +
+                            (p.abstract ? '<div style="color:#8b949e;font-size:0.85em;">' + esc(p.abstract) + '</div>' : '') +
+                            '</div>';
+                    }).join('');
+                }
+                html += '</div>';
+            }
+            findingsArea.innerHTML = html;
+        }
     }
 
     document.addEventListener('DOMContentLoaded', function() {
