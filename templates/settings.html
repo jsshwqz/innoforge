@@ -1055,47 +1055,35 @@
             var btn = document.getElementById('ai-models-btn');
             if (btn) btn.disabled = true;
             if (btn) btn.textContent = '⏳ 查询中...';
+            // Get currently selected provider
+            var selectedProvider = document.getElementById('ai-provider').value;
+            var url = '/api/ai/models?provider=' + encodeURIComponent(selectedProvider);
             try {
-                const res = await fetch('/api/ai/models');
+                const res = await fetch(url);
                 const data = await res.json();
                 if (data.status === 'ok') {
-                    var allModels = [];
-                    var providerSummary = [];
-                    // Handle multi-provider response: { providers: [{name, models: [...]}] }
-                    if (data.providers && data.providers.length > 0) {
-                        data.providers.forEach(function(p) {
-                            if (p.models && p.models.length > 0) {
-                                p.models.forEach(function(m) {
-                                    allModels.push({ value: m.id, label: p.name + ' / ' + m.id });
-                                });
-                                providerSummary.push(p.name + ': ' + p.models.length);
-                            } else if (p.status === 'ok') {
-                                providerSummary.push(p.name + ': 0');
-                            } else {
-                                providerSummary.push(p.name + ': ' + (p.error || 'error'));
-                            }
+                    var models = [];
+                    // Handle per-provider response: { provider: {name, models: [...]} }
+                    if (data.provider && data.provider.models && data.provider.models.length > 0) {
+                        data.provider.models.forEach(function(m) {
+                            models.push({ value: m.id, label: m.id });
                         });
                     } else if (data.models && data.models.length > 0) {
-                        // Fallback: legacy flat format { models: [...] }
+                        // Fallback: flat format { models: [...] }
                         data.models.forEach(function(m) {
-                            allModels.push({ value: m.id, label: m.id });
+                            models.push({ value: m.id, label: m.id });
                         });
-                        providerSummary.push('unknown: ' + data.models.length);
                     }
-
-                    if (allModels.length > 0) {
+                    if (models.length > 0) {
                         var curModel = document.getElementById('ai-model').value;
                         var curExpert = document.getElementById('ai-model-expert').value;
-                        populateSelect('ai-model', allModels, curModel);
-                        populateSelect('ai-model-expert', allModels, curExpert);
-                        var totalCount = data.total_count || allModels.length;
-                        var summary = providerSummary.join(', ');
-                        btn.textContent = '✅ ' + totalCount + ' 个 (' + summary + ')';
+                        populateSelect('ai-model', models, curModel);
+                        populateSelect('ai-model-expert', models, curExpert);
+                        btn.textContent = '✅ ' + models.length + ' 个模型';
                         btn.style.color = '#4ade80';
-                        btn.title = '服务商详情: ' + summary;
-                        setTimeout(function() { btn.textContent = '🔍 查询可用模型'; btn.style.color = ''; }, 5000);
+                        setTimeout(function() { btn.textContent = '🔍 查询可用模型'; btn.style.color = ''; }, 3000);
                     } else {
-                        btn.textContent = '❌ ' + (data.message || '无可用模型（请配置至少一个 AI 服务商的 API Key）');
+                        btn.textContent = '❌ ' + (data.message || '无可用模型（请确认 API Key 已配置）');
                         btn.style.color = '#f85149';
                         setTimeout(function() { btn.textContent = '🔍 查询可用模型'; btn.style.color = ''; }, 3000);
                     }
