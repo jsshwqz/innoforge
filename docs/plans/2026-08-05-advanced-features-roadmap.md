@@ -431,7 +431,8 @@ pub struct ReflectionResult {
 
 ### Task 2.F — 持久化记忆系统
 
-**状态**: ⬜ 待办  **优先级**: P1  **工作量**: 2 周（与 2.E 并行）
+**状态**: ✅ 已完成  **优先级**: P1  **工作量**: 2 周（与 2.E 并行）
+**提交**: `81cbd8b` feat: Task 2.F 持久化记忆系统
 
 **修改文件**:
 - `src/db/migrations.rs` — v22: `idea_memory` 表
