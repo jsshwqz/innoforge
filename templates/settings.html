@@ -261,21 +261,26 @@
             },
             sensetime: {
                 title: '商汤 SenseNova',
-                base_url: 'https://token.sensenova.cn/v1',
+                base_url: 'https://api.sensenova.cn/v1/llm',
                 key_link: 'https://platform.sensenova.cn/',
                 models: [
-                    {value: 'sensenova-6.7-flash-lite', label: 'SenseNova 6.7 Flash Lite'},
-                    {value: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash'},
-                    {value: 'glm-5.2', label: 'GLM 5.2'},
-                    {value: 'sensenova-u1-fast', label: 'SenseNova U1 Fast'},
+                    {value: 'sensenova-6.7', label: 'SenseNova 6.7（最新，支持看图）'},
+                    {value: 'sensenova-6.7-flash-lite', label: 'SenseNova 6.7 Flash Lite（快速，支持看图）'},
+                    {value: 'sensenova-6.5-hd', label: 'SenseNova 6.5 HD（高清看图）'},
+                    {value: 'sensenova-6.5', label: 'SenseNova 6.5（支持看图）'},
+                    {value: 'sensenova-6.5-turbo', label: 'SenseNova 6.5 Turbo（快速，支持看图）'},
+                    {value: 'sensenova-6.5-turbo-lite', label: 'SenseNova 6.5 Turbo Lite'},
+                    {value: 'sensenova-u1', label: 'SenseNova U1（推理）'},
+                    {value: 'sensenova-u1-fast', label: 'SenseNova U1 Fast（快速推理）'},
                 ],
                 expert_models: [
+                    {value: 'sensenova-6.7', label: 'SenseNova 6.7（最新，支持看图）'},
+                    {value: 'sensenova-6.5-hd', label: 'SenseNova 6.5 HD（高清看图）'},
                     {value: 'sensenova-6.7-flash-lite', label: 'SenseNova 6.7 Flash Lite'},
-                    {value: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash'},
-                    {value: 'glm-5.2', label: 'GLM 5.2'},
-                    {value: 'sensenova-u1-fast', label: 'SenseNova U1 Fast'},
+                    {value: 'sensenova-6.5-turbo', label: 'SenseNova 6.5 Turbo'},
+                    {value: 'sensenova-u1', label: 'SenseNova U1（推理）'},
                 ],
-                hint: '商汤日日新 API'
+                hint: '商汤日日新 API，支持图文多模态'
             },
             openrouter: {
                 title: 'OpenRouter',
