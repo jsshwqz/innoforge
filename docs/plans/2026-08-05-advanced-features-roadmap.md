@@ -361,7 +361,8 @@ CREATE INDEX idx_chunk_source ON patent_chunks(source_type);
 
 ### Task 2.E — 多智能体 Pipeline 升级
 
-**状态**: ⬜ 待办  **优先级**: P1（架构级升级）  **工作量**: 3 周
+**状态**: ✅ 已完成  **优先级**: P1（架构级升级）  **工作量**: 3 周
+**提交**: `883d9f6` feat: Task 2.E 多智能体 Pipeline 升级
 
 **目标架构**:
 
