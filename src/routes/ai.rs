@@ -352,6 +352,13 @@ pub async fn api_ai_chat(
             None => DEFAULT_CHAT_SYSTEM_PROMPT.to_string(),
         },
     };
+    // 注入项目记忆上下文
+    let agent_ctx = crate::context::build_agent_context();
+    let base_prompt = if !agent_ctx.is_empty() {
+        format!("{}\n\n## 项目记忆上下文\n{}\n", base_prompt, agent_ctx)
+    } else {
+        base_prompt
+    };
     let base_prompt = if !req.preset_mode {
         match req.system_prompt.as_deref() {
             Some(raw_role) => format!(
@@ -442,6 +449,20 @@ pub async fn api_ai_chat(
     }
     .await;
     let ai_ms = ai_start.elapsed().as_millis();
+    // 记录 AI 调用成本（仅记录成功的调用）
+    if result.is_ok() {
+        if let Some(usage) = ai.take_last_usage() {
+            let _ = s.db.save_cost_record_from_client(
+                usage.input_tokens,
+                usage.output_tokens,
+                &ai.model_name().to_string(),
+                &ai.provider_name().to_string(),
+                "ai-chat",
+                None,
+                None,
+            );
+        }
+    }
     let total_ms = req_start.elapsed().as_millis();
     tracing::info!(
         "api_ai_chat timing: web_search={} web_ms={} ai_ms={} total_ms={}",
@@ -2122,6 +2143,8 @@ pub async fn api_ai_cost_save(
         output_tokens,
         estimated_cost_cents,
         duration_ms,
+        idea_id: None,
+        session_id: None,
     };
 
     match s.db.save_cost_record(&record) {

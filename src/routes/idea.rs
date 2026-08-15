@@ -586,6 +586,12 @@ pub async fn api_idea_chat(
         }
     }
 
+    // 注入项目记忆上下文（反馈/复盘/状态）
+    let agent_ctx = crate::context::build_agent_context();
+    if !agent_ctx.is_empty() {
+        system_context.push_str(&format!("\n## 项目记忆上下文\n{}\n", agent_ctx));
+    }
+
     if let Some(score) = idea.novelty_score {
         system_context.push_str(&format!("\n**新颖性评分：** {:.1}/100\n", score));
     }
@@ -738,6 +744,20 @@ pub async fn api_idea_chat(
         ai.chat_with_history_expert(&system_context, chat_history, 0.6)
             .await
     };
+    // 记录 AI 调用成本（仅记录成功的调用）
+    if ai_result.is_ok() {
+        if let Some(usage) = ai.take_last_usage() {
+            let _ = s.db.save_cost_record_from_client(
+                usage.input_tokens,
+                usage.output_tokens,
+                &ai.model_name().to_string(),
+                "idea-chat",
+                "chat",
+                Some(&idea_id),
+                None,
+            );
+        }
+    }
     let ai_response = match ai_result {
         Ok(content) => content,
         Err(e) => {

@@ -13,6 +13,7 @@
 //! See `common.rs` for shared initialization, route registration, and asset serving.
 
 mod ai;
+pub(crate) mod context;
 mod cad;
 pub mod common;
 mod db;
