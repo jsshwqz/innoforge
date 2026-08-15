@@ -5,36 +5,44 @@ use axum::{
     response::{Html, IntoResponse, Response},
 };
 
-pub async fn index_page() -> Html<String> {
-    let html = include_str!("../../templates/index.html")
-        .replace("{{version}}", env!("CARGO_PKG_VERSION"));
-    Html(html)
+fn no_cache_headers() -> [(String, String); 3] {
+    [
+        ("Cache-Control".to_string(), "no-cache, no-store, must-revalidate".to_string()),
+        ("Pragma".to_string(), "no-cache".to_string()),
+        ("Expires".to_string(), "0".to_string()),
+    ]
 }
 
-pub async fn search_page() -> Html<String> {
+pub async fn index_page() -> Response {
+    let html = include_str!("../../templates/index.html")
+        .replace("{{version}}", env!("CARGO_PKG_VERSION"));
+    (no_cache_headers(), Html(html)).into_response()
+}
+
+pub async fn search_page() -> Response {
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
     let html = include_str!("../../templates/search.html")
         .replace("{{timestamp}}", &timestamp.to_string());
-    Html(html)
+    (no_cache_headers(), Html(html)).into_response()
 }
 
-pub async fn ai_page() -> Html<String> {
-    Html(include_str!("../../templates/ai.html").to_string())
+pub async fn ai_page() -> Response {
+    (no_cache_headers(), Html(include_str!("../../templates/ai.html").to_string())).into_response()
 }
 
-pub async fn compare_page() -> Html<String> {
-    Html(include_str!("../../templates/compare.html").to_string())
+pub async fn compare_page() -> Response {
+    (no_cache_headers(), Html(include_str!("../../templates/compare.html").to_string())).into_response()
 }
 
-pub async fn idea_page() -> Html<String> {
-    Html(include_str!("../../templates/idea.html").to_string())
+pub async fn idea_page() -> Response {
+    (no_cache_headers(), Html(include_str!("../../templates/idea.html").to_string())).into_response()
 }
 
-pub async fn settings_page() -> Html<String> {
-    Html(include_str!("../../templates/settings.html").to_string())
+pub async fn settings_page() -> Response {
+    (no_cache_headers(), Html(include_str!("../../templates/settings.html").to_string())).into_response()
 }
 
 pub async fn office_action_response_page() -> Response {

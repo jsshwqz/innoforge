@@ -221,7 +221,7 @@ pub async fn api_upload_compare(
         }
     } else if ext == "pdf" {
         match extract_pdf_text(&file_bytes).await {
-            Ok(t) if !t.trim().is_empty() => t,
+            Ok(t) if t.trim().len() >= 100 => t,
             _ => {
                 // 文字提取失败，用 AI 视觉模型兜底
                 let is_deepseek = {
@@ -233,7 +233,6 @@ pub async fn api_upload_compare(
                         json!({"error": "PDF 文字提取失败。当前 AI 为 DeepSeek 不支持图片识别，\n建议：1) 上传可编辑的文本文件(.txt/.docx) 2) 在设置页切换至 Gemini 后重试 3) 直接粘贴文字内容"}),
                     );
                 }
-                tracing::info!("[UPLOAD] PDF 文字提取失败，尝试 AI 视觉识别...");
                 let ai_client = s
                     .config
                     .read()
@@ -349,6 +348,10 @@ pub async fn api_upload_extract(
         return Json(json!({"error": "缺少文件"}));
     }
 
+    tracing::info!("[EXTRACT] file_name={}, size={}, has_pdf_header={}", 
+        file_name, file_bytes.len(), 
+        if file_name.to_lowercase().ends_with(".pdf") { has_pdf_header(&file_bytes).to_string() } else { "N/A".to_string() });
+
     let ext = file_name.rsplit('.').next().unwrap_or("").to_lowercase();
     if ext == "pdf" && !has_pdf_header(&file_bytes) {
         return Json(json!({
@@ -372,7 +375,7 @@ pub async fn api_upload_extract(
         }
     } else if ext == "pdf" {
         match extract_pdf_text(&file_bytes).await {
-            Ok(t) if !t.trim().is_empty() => t,
+            Ok(t) if t.trim().len() >= 100 => t,
             _ => {
                 // 文字提取失败，用 AI 视觉模型兜底
                 let is_deepseek = {
@@ -384,7 +387,6 @@ pub async fn api_upload_extract(
                         json!({"error": "PDF 文字提取失败。当前 AI 为 DeepSeek 不支持图片识别，\n建议：1) 上传可编辑的文本文件(.txt/.docx) 2) 在设置页切换至 Gemini 后重试 3) 直接粘贴文字内容"}),
                     );
                 }
-                tracing::info!("[UPLOAD] PDF 文字提取失败，尝试 AI 视觉识别...");
                 let ai_client = s
                     .config
                     .read()
@@ -402,7 +404,7 @@ pub async fn api_upload_extract(
         }
     } else if ext == "docx" {
         match extract_docx_text(&file_bytes) {
-            Ok(t) if !t.trim().is_empty() => t,
+            Ok(t) if t.trim().len() >= 100 => t,
             Ok(_) => return Json(json!({"error": "DOCX 无可提取文字"})),
             Err(e) => return Json(json!({"error": format!("DOCX 解析失败: {}", e)})),
         }
@@ -421,6 +423,8 @@ pub async fn api_upload_extract(
         }
     };
 
+    tracing::info!("[EXTRACT] result: file_type={}, text_len={}, preview={}", 
+        ext, text.len(), text.chars().take(80).collect::<String>());
     Json(json!({
         "text": text.chars().take(50000).collect::<String>(),
         "file_type": ext,
@@ -447,23 +451,17 @@ async fn extract_pdf_via_ai_vision(
 
     // Convert PDF pages to PNG using PyMuPDF (max 10 pages)
     let python = r"C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe";
-    let script = "import fitz,sys\n\
-         doc=fitz.open(sys.argv[1])\n\
-         n=min(len(doc),10)\n\
-         for i in range(n):\n\
-             doc[i].get_pixmap(dpi=200).save(f'{sys.argv[2]}_{i}.png')\n\
-         print(n)"
-        .to_string();
+    let script = r"D:\test\patent-hub-backup\convert_pdf.py";
 
     let output = std::process::Command::new(python)
-        .args(["-c", &script, &tmp_pdf_str, &out_prefix_str])
+        .args([script, &tmp_pdf_str, &out_prefix_str])
         .output();
 
     let page_count: usize = match output {
-        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout)
-            .trim()
-            .parse()
-            .unwrap_or(0),
+        Ok(o) if o.status.success() => {
+            let n = String::from_utf8_lossy(&o.stdout).trim().parse().unwrap_or(0);
+            n
+        },
         Ok(o) => {
             let stderr = String::from_utf8_lossy(&o.stderr);
             return Err(format!(
@@ -511,31 +509,46 @@ async fn extract_pdf_via_ai_vision(
 async fn extract_pdf_text(data: &[u8]) -> Result<String, String> {
     // Step 1: Rust pdf-extract (standard mode, good for simple layouts)
     if let Ok(text) = pdf_extract::extract_text_from_mem(data) {
-        if !text.trim().is_empty() {
+        let trimmed = text.trim().to_string();
+        let is_error = trimmed.contains("MuPDF error") || trimmed.contains("mupdf error")
+            || trimmed.contains("zlib error") || trimmed.contains("PDF error");
+        if !trimmed.is_empty() && !is_error {
             return Ok(text);
         }
     }
     // Step 2: Rust pdf-extract by-pages (better for multi-column Chinese patents)
     if let Ok(text) = extract_pdf_text_by_pages(data) {
-        if !text.trim().is_empty() {
+        let trimmed = text.trim().to_string();
+        let is_error = trimmed.contains("MuPDF error") || trimmed.contains("mupdf error")
+            || trimmed.contains("zlib error") || trimmed.contains("PDF error");
+        if !trimmed.is_empty() && !is_error {
             return Ok(text);
         }
     }
     // Step 3: pdftotext (poppler, handles malformed PDFs well)
     if let Ok(text) = extract_pdf_text_pdftotext(data) {
-        if !text.trim().is_empty() {
+        let trimmed = text.trim();
+        let is_error = trimmed.contains("MuPDF error") || trimmed.contains("mupdf error")
+            || trimmed.contains("zlib error") || trimmed.contains("PDF error");
+        if !trimmed.is_empty() && !is_error {
             return Ok(text);
         }
     }
     // Step 4: PyMuPDF (Python fitz)
     if let Ok(text) = extract_pdf_text_pymupdf(data) {
-        if !text.trim().is_empty() {
+        let trimmed = text.trim();
+        let is_error = trimmed.contains("MuPDF error") || trimmed.contains("mupdf error")
+            || trimmed.contains("zlib error") || trimmed.contains("PDF error");
+        if !trimmed.is_empty() && !is_error {
             return Ok(text);
         }
     }
     // Step 5: Tesseract OCR (handles scanned/special font PDFs)
     if let Ok(text) = extract_pdf_text_ocr(data) {
-        if !text.trim().is_empty() {
+        let trimmed = text.trim();
+        let is_error = trimmed.contains("MuPDF error") || trimmed.contains("mupdf error")
+            || trimmed.contains("zlib error") || trimmed.contains("PDF error");
+        if !trimmed.is_empty() && !is_error {
             return Ok(text);
         }
     }

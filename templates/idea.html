@@ -192,7 +192,7 @@
                         <div class="chat-actions-col">
                             <label class="file-upload-label" title="上传图片或文件">
                                 📎
-                                <input type="file" id="chat-file-input" multiple accept=".txt,.md,.csv,.json,.log,.xml,.yaml,.yml,.png,.jpg,.jpeg,.gif,.webp" style="display:none;" onchange="handleChatFileSelect(this)">
+                                <input type="file" id="chat-file-input" multiple accept=".txt,.md,.csv,.json,.log,.xml,.yaml,.yml,.pdf,.png,.jpg,.jpeg,.gif,.webp" style="display:none;" onchange="handleChatFileSelect(this)">
                             </label>
                             <button class="btn-success-sm" id="idea-send-btn" onclick="sendChatMessage()" data-i18n="idea.send"></button>
                             <button class="btn-secondary" id="idea-cad-btn" type="button" onclick="drawIdeaCad()" data-i18n="cad.draw"></button>
@@ -754,19 +754,32 @@
     }
 
     function stopIdeaGeneration() { ideaSendBusy = false; }
-
-    function handleChatFileSelect(input) {
+    async function handleChatFileSelect(input) {
         var files = input.files;
         if (!files) return;
         var preview = document.getElementById('idea-image-preview-area');
-        Array.from(files).forEach(function(f) {
+        Array.from(files).forEach(async function(f) {
             var isImage = f.type.indexOf('image/') === 0;
             if (isImage) {
                 var reader = new FileReader();
                 reader.onload = function(e) { ideaImages.push(e.target.result); if (preview) { preview.style.display = 'flex'; preview.innerHTML += '<img src="' + e.target.result + '" style="max-width:80px;max-height:60px;border-radius:4px;">'; } };
                 reader.readAsDataURL(f);
+            } else if (f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf')) {
+                var form = new FormData();
+                form.append('file', f);
+                try {
+                    var resp = await fetch('/api/upload/extract', { method: 'POST', body: form });
+                    var data = await resp.json();
+                    if (data.text) {
+                        ideaAttachedText.push({ name: f.name, content: data.text });
+                        renderChatAttachments();
+                    } else {
+                        alert('PDF extract failed: ' + (data.error || 'unknown'));
+                    }
+                } catch(e) {
+                    alert('PDF upload failed: ' + e.message);
+                }
             } else {
-                // 文本附件：读取内容并拼到附件区
                 var reader = new FileReader();
                 reader.onload = function(e) {
                     ideaAttachedText.push({ name: f.name, content: e.target.result });

@@ -18,6 +18,8 @@ pub struct AiCostRecord {
     pub output_tokens: i64,
     pub estimated_cost_cents: f64,
     pub duration_ms: i64,
+    pub idea_id: Option<String>,
+    pub session_id: Option<String>,
 }
 
 /// RAG 参考切片 — 检索到的专利文档片段

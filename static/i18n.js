@@ -188,6 +188,11 @@ const I18N_COMMON = {
     'alert.searchFail': '搜索失败',
     // Settings
     'settings.title': '系统设置',
+    'ai.costTitle': 'AI 使用统计（近30天）',
+    'ai.totalCalls': '总调用次数',
+    'ai.totalInputTokens': '输入 Token',
+    'ai.totalOutputTokens': '输出 Token',
+    'ai.totalCost': '估算花费',
     // OA Response page
     'oar.title': 'OA答复分析',
     'oar.typeLabel': '答复类型',
@@ -514,6 +519,11 @@ const I18N_COMMON = {
     'stats.title': 'Statistics',
     'alert.searchFail': 'Search failed',
     'settings.title': 'System Settings',
+    'ai.costTitle': 'AI Usage Stats (Last 30 Days)',
+    'ai.totalCalls': 'Total Calls',
+    'ai.totalInputTokens': 'Input Tokens',
+    'ai.totalOutputTokens': 'Output Tokens',
+    'ai.totalCost': 'Estimated Cost',
     // OA Response page
     'oar.title': 'OA Response Analysis',
     'oar.typeLabel': 'Response Type',

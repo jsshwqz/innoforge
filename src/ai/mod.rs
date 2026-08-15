@@ -21,6 +21,6 @@ pub(crate) use client::{
     OA_DISCUSSION_OA_MAX_CHARS,
 };
 #[allow(unused_imports)]
-pub use client::{safe_truncate_chars, AiClient, Message};
+pub use client::{safe_truncate_chars, AiClient, AiUsageInfo, Message};
 #[allow(unused_imports)]
 pub use fact_check::{check_oa_analysis, format_report, FactCheckReport, FactWarning};

@@ -578,6 +578,21 @@ pub(crate) fn run(conn: &Connection, current_version: i32, target_version: i32) 
         tracing::info!("Database migrated to version 22 (idea_memory)");
     }
 
+    // v23: 扩展 ai_cost_ledger — 添加 idea_id / session_id 列，覆盖聊天与创意场景的 AI 成本
+    // Extend ai_cost_ledger with idea_id / session_id to cover chat & idea AI calls.
+    if current_version < 23 {
+        conn.execute_batch(
+            "
+            ALTER TABLE ai_cost_ledger ADD COLUMN idea_id TEXT NULL;
+            ALTER TABLE ai_cost_ledger ADD COLUMN session_id TEXT NULL;
+            CREATE INDEX IF NOT EXISTS idx_ai_cost_idea ON ai_cost_ledger(idea_id);
+            DELETE FROM schema_version;
+            INSERT INTO schema_version (version) VALUES (23);
+            ",
+        )?;
+        tracing::info!("Database migrated to version 23 (ai_cost_idea_session)");
+    }
+
     if current_version > 0 && current_version < target_version {
         tracing::info!(
             "Database migrated from version {} to {}",
