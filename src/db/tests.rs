@@ -2,11 +2,12 @@ use super::Database;
 use crate::patent::{CadArtifact, CadContextKind, CadValidation, Patent, SearchType};
 
 #[test]
-fn schema_v22_is_created_and_idempotent() {
+fn schema_v23_is_created_and_idempotent() {
+    // v23: 成本台账扩展 idea_id/session_id 列（见 migrations.rs）
     let file = tempfile::NamedTempFile::new().expect("temp database");
     let path = file.path().to_string_lossy().to_string();
-    let db = Database::init(&path).expect("initialize v20 database");
-    assert_eq!(db.query_schema_version().expect("schema version"), 22);
+    let db = Database::init(&path).expect("initialize database to latest schema");
+    assert_eq!(db.query_schema_version().expect("schema version"), 23);
 
     // Verify all new tables exist: cad_artifacts, ai_cost_ledger, patents_embedding, patent_chunks, idea_memory
     let cad_count: i64 = db
@@ -51,7 +52,7 @@ fn schema_v22_is_created_and_idempotent() {
 
     drop(db);
     let reopened = Database::init(&path).expect("reopen migrated database");
-    assert_eq!(reopened.query_schema_version().expect("schema version"), 22);
+    assert_eq!(reopened.query_schema_version().expect("schema version"), 23);
 
     // Verify idea_memory table exists
     let mem_count: i64 = reopened
