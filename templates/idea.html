@@ -173,6 +173,7 @@
                             </select>
                             <button class="btn-secondary" style="padding:4px 12px;" onclick="exportConclusions()" id="export-conclusions-btn" data-i18n="idea.exportConclusions"></button>
                             <button class="btn-success-sm" onclick="summarizeDiscussion()" id="summary-btn" data-i18n="idea.generateSummary"></button>
+                            <button class="btn-primary-sm" style="padding:4px 12px;background:#8957e5;" onclick="exportConversation()" id="export-conversation-btn" data-i18n="idea.exportConversation"></button>
                         </div>
                     </div>
                     <div id="discussion-summary" class="discussion-summary">
@@ -1821,8 +1822,18 @@
             var sumDiv = document.getElementById('discussion-summary');
             sumDiv.style.display = 'block';
             if (data.status === 'ok' && data.conclusions) {
-                sumDiv.innerHTML = DOMPurify.sanitize('<div style="font-size:0.8em; color:#58a6ff; margin-bottom:4px; font-weight:bold;">📝 讨论结论导出</div>' +
-                    '<div style="color:#c9d1d9; font-size:0.9em; line-height:1.6;">' + renderMarkdown(data.conclusions) + '</div>');
+                var conclHtml = '<div style="font-size:0.8em; color:#58a6ff; margin-bottom:4px; font-weight:bold;">📝 讨论结论导出</div>' +
+                    '<div style="color:#c9d1d9; font-size:0.9em; line-height:1.6;">' + renderMarkdown(data.conclusions) + '</div>';
+                sumDiv.innerHTML = DOMPurify.sanitize(conclHtml);
+                var hintDiv = document.createElement('div');
+                hintDiv.style.cssText = 'font-size:0.75em; color:#8b949e; margin-top:8px;';
+                hintDiv.textContent = i18nLang === 'en' ? '💡 These conclusions will seed the next iteration' : '💡 这些结论将作为下一轮「继续迭代」的研究种子';
+                sumDiv.appendChild(hintDiv);
+                var iterBtn = document.createElement('button');
+                iterBtn.textContent = i18nLang === 'en' ? '🔄 Iterate from these conclusions' : '🔄 基于这些结论继续迭代';
+                iterBtn.style.cssText = 'margin-top:6px; padding:5px 14px; background:#1f6feb; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:0.85em;';
+                iterBtn.onclick = function() { startIterate(currentIdeaId); };
+                sumDiv.appendChild(iterBtn);
             } else {
                 var errDiv = document.createElement('div');
                 errDiv.style.cssText = 'color:#f0ad4e; font-size:0.85em; padding:8px;';
@@ -1834,6 +1845,54 @@
             alert('请求失败: ' + e.message);
         }
         btn.textContent = '📝 导出结论';
+        btn.disabled = false;
+    }
+
+    async function exportConversation() {
+        if (!currentIdeaId) return;
+        var btn = document.getElementById("export-conversation-btn");
+        btn.textContent = "⏳ 导出中...";
+        btn.disabled = true;
+        try {
+            var res = await fetch("/api/idea/" + currentIdeaId + "/chat/conversation");
+            var data = await res.json();
+            if (data.status !== "ok" || !data.idea || !data.messages) {
+                alert((data.error || "导出失败") + ",请确认已有讨论记录。");
+                btn.textContent = "📥 导出对话";
+                btn.disabled = false;
+                return;
+            }
+            if (data.messages.length === 0) {
+                alert("还没有讨论记录，请先与 AI 讨论几轮。");
+                btn.textContent = "📥 导出对话";
+                btn.disabled = false;
+                return;
+            }
+            var lines = [];
+            lines.push("# " + data.idea.title + " — 讨论记录");
+            if (data.idea.description) lines.push("\n**创意描述：**\n" + data.idea.description);
+            lines.push("\n**消息数：** " + data.messages.length + "\n---\n");
+            for (var i = 0; i < data.messages.length; i++) {
+                var m = data.messages[i];
+                var role = (m.role === "user" ? "**用户** " : "**AI** ");
+                var ts = m.created_at || "";
+                lines.push("\n### " + role + (ts ? "（" + ts + "）" : ""));
+                lines.push("\n" + (m.content || ""));
+            }
+            var md = lines.join("\n");
+            var blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+            var a = document.createElement("a");
+            a.href = URL.createObjectURL(blob);
+            a.download = (data.idea.title || "discussion") + ".md";
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(a.href);
+            alert("已导出 " + data.messages.length + " 条聊天记录（含用户提问与 AI 回复），可导入其它 AI 核对。");
+        } catch(e) {
+            alert("请求失败: " + e.message);
+        }
+        btn.textContent = "📥 导出对话";
         btn.disabled = false;
     }
 

@@ -392,6 +392,10 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
             get(routes::api_idea_chat_conclusions),
         )
         .route(
+            "/api/idea/:id/chat/conversation",
+            get(routes::api_idea_chat_conversation),
+        )
+        .route(
             "/api/idea/:id/summarize",
             post(routes::api_idea_summarize_discussion),
         )

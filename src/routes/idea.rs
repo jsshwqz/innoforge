@@ -1465,6 +1465,28 @@ fn inline_md(s: &str) -> String {
     s.into_owned()
 }
 
+/// 导出创意页讨论的原始聊天记录（供另一个人工智能核对/复核）。
+/// 返回干净的 JSON：标题、描述、按时间排序的消息数组（角色 + 内容 + 时间）。
+/// 不含 AI 内部推理或图片 base64 等噪音，可直接喂给其它 AI。
+pub async fn api_idea_chat_conversation(
+    State(s): State<AppState>,
+    Path(idea_id): Path<String>,
+) -> Json<serde_json::Value> {
+    let idea = match s.db.get_idea(&idea_id) {
+        Ok(Some(i)) => i,
+        _ => return Json(json!({"error": "创意不存在"})),
+    };
+    let messages = s.db.get_idea_messages(&idea_id).unwrap_or_default();
+    let out: Vec<serde_json::Value> = messages.iter().map(|(_id, role, content, created_at)| {
+        json!({"role": role, "content": content, "created_at": created_at})
+    }).collect();
+    Json(json!({
+        "status": "ok",
+        "idea": { "id": idea.id, "title": idea.title, "description": idea.description },
+        "messages": out,
+    }))
+}
+
 /// Export structured conclusions from the idea discussion.
 /// 从讨论中导出结构化结论（已定决策 / 达成的结论 / 待解决问题 / 风险项）。
 pub async fn api_idea_chat_conclusions(
@@ -1729,6 +1751,16 @@ pub async fn api_idea_iterate(
             .map(|q| q.chars().take(50).collect())
             .collect();
         ctx.expanded_queries.extend(extra_queries);
+    }
+
+    // 将用户已导出确认的讨论定论作为下一轮研究的种子（讨论->定论->迭代的桥）。
+    if let Some(ref idea) = s.db.get_idea(&idea_id).ok().flatten() {
+        if !idea.discussion_summary.is_empty() {
+            let summary: String = idea.discussion_summary.chars().take(700).collect();
+            ctx.expanded_queries.push(format!(
+                "讨论已得出定论（请基于此继续深入研究）:\n{}", summary
+            ));
+        }
     }
 
     let iteration = ctx.iteration_count;
