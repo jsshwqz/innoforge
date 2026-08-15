@@ -120,6 +120,12 @@ docs/          # 文档和规划
   - `Cargo.toml` — 当前版本号和依赖
   - `docs/errors.md` — 错误复盘数据库，避免重复踩坑
 - 其他文档（`docs/ARCHITECTURE.md`、`docs/API.md`）需要时再读
+- **首次克隆/进入项目后，设置 git 钩子**（防忘记跑检查）：
+  ```bash
+  git config core.hooksPath .githooks      # 或运行 sh .githooks/setup-githooks.sh
+  ```
+  钩子用 `core.hooksPath` 指向 `.githooks/`，随仓库提交、跨机器共享；每次 `git commit` 自动跑 `check_html_functions.mjs`。
+- **硬关卡（强制）**：本地钩子可被 `git commit --no-verify` 跳过，它只是方便层；真正的强制关卡是远端 **CI**（`.github/workflows/ci.yml`），push/PR 后自动跑 fmt/clippy/test + HTML 函数完整性扫描 + e2e，不过关无法合并——任何 AI 或开发者想绕过本地检查都拦不住远端。
 
 ### Step 1: 理解任务
 - 明确用户要做什么（新功能 / bug 修复 / 重构 / 分析调研）
@@ -178,8 +184,11 @@ docs/          # 文档和规划
   ```bash
   node check_html_functions.mjs
   ```
-  该扫描检查每个 `onclick`/`onchange` 等内联事件引用的函数是否都有定义。
-  **任何"按钮在、函数没了"的情况（如历史事故 42c726e / 9f1a14b 两次重构误删函数）都会被拦截在编译前。**
+  该扫描**自动发现 `templates/` 下所有 `*.html`（包括未来新增页面）**，不靠硬编码页面清单。它执行两条规则：
+  1. 任何 `on*` 引用的函数未定义（按钮在、函数没了）→ 拦截
+  2. 基线中存在的引用/定义在当前被移除（整块功能消失）→ 拦截（补齐静态扫描的原理盲区）
+  **任何"按钮在、函数没了"或"整块功能消失"的情况（如历史事故 42c726e / 9f1a14b 两次重构误删函数）都会被拦截在编译前。**
+  基线文件为 `docs/functions-manifest.json`（随代码提交）；新增页面/新增函数后，跑一次 `node check_html_functions.mjs --refresh` 更新基线，并把基线变更与模板变更一起提交（基线变更在 code review 中可审计）。
   退出码非 0 时必须先补齐函数定义再继续。
 
 - **重构模板时的功能清单核对**：重写/重构任何页面模板前，先列出该页所有功能点（按钮 → 对应函数 → 对应 API），重构后逐项核对，禁止"删了再说"式重构。函数级删除必须先确认无引用。
@@ -213,6 +222,7 @@ docs/          # 文档和规划
 - 禁止在仓库根目录创建临时文件
 - 禁止删除或覆盖用户未提交的工作
 - 禁止跳过 Step 5 验证直接提交
+- 禁止删除或篡改 `check_html_functions.mjs` 的扫描规则、或静默删除 `docs/functions-manifest.json` 基线。如需更改扫描规则或基线，必须在同一提交中说明原因并提交完整的 `--refresh` 更新结果，以便 code review 审查。
 - 禁止在生产路径使用 `unwrap()` / `expect()`（见 2.7）
 
 ---
