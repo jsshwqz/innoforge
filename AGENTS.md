@@ -172,7 +172,17 @@ docs/          # 文档和规划
   export PATH="/c/Users/Administrator/AppData/Local/ms-playwright-go/1.57.0:/c/Users/Administrator/AppData/Roaming/npm:$PATH"
   cd D:\\test\\patent-hub-backup && node e2e_test.mjs
   ```
-  确保全部测试通过（41/41 PASSED）。如果有失败项必须修复后才能提交。
+  确保全部测试通过（54/54 PASSED）。如果有失败项必须修复后才能提交。
+
+- **HTML 模板函数完整性扫描（强制）**：每次修改 `templates/` 下任何 HTML 文件，编译前必须运行：
+  ```bash
+  node check_html_functions.mjs
+  ```
+  该扫描检查每个 `onclick`/`onchange` 等内联事件引用的函数是否都有定义。
+  **任何"按钮在、函数没了"的情况（如历史事故 42c726e / 9f1a14b 两次重构误删函数）都会被拦截在编译前。**
+  退出码非 0 时必须先补齐函数定义再继续。
+
+- **重构模板时的功能清单核对**：重写/重构任何页面模板前，先列出该页所有功能点（按钮 → 对应函数 → 对应 API），重构后逐项核对，禁止"删了再说"式重构。函数级删除必须先确认无引用。
 
 ### Step 6: 提交
 - 提交信息格式：`feat/fix/refactor/chore/docs: 中文简要描述`
