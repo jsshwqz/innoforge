@@ -1,4 +1,4 @@
-use super::AppState;
+use super::{AppState, image_data_uri};
 use crate::patent::*;
 use crate::pipeline::context::{PipelineContext, PipelineProgress, ResearchState};
 use crate::pipeline::runner::PipelineRunner;
@@ -716,10 +716,12 @@ pub async fn api_idea_chat(
         let mut content_parts =
             vec![serde_json::json!({"type": "text", "text": current_user_content})];
         for img in &images {
-            content_parts.push(serde_json::json!({
-                "type": "image_url",
-                "image_url": {"url": format!("data:image/png;base64,{}", img)}
-            }));
+            if let Some(uri) = image_data_uri(img) {
+                content_parts.push(serde_json::json!({
+                    "type": "image_url",
+                    "image_url": {"url": uri}
+                }));
+            }
         }
         json_messages.push(serde_json::json!({
             "role": "user",

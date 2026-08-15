@@ -1,4 +1,4 @@
-use super::AppState;
+use super::{AppState, image_data_uri};
 use crate::ai::{
     check_oa_analysis, format_report, oa_capacity_error, Message, OA_DISCUSSION_ANALYSIS_MAX_CHARS,
     OA_DISCUSSION_HISTORY_MAX_CHARS, OA_DISCUSSION_OA_MAX_CHARS,
@@ -404,10 +404,12 @@ pub async fn api_ai_chat(
             // User message with text + images as multimodal content array
             let mut content_parts = vec![serde_json::json!({"type": "text", "text": req.message})];
             for img in &req.images {
-                content_parts.push(serde_json::json!({
-                    "type": "image_url",
-                    "image_url": {"url": format!("data:image/png;base64,{}", img)}
-                }));
+                if let Some(uri) = image_data_uri(img) {
+                    content_parts.push(serde_json::json!({
+                        "type": "image_url",
+                        "image_url": {"url": uri}
+                    }));
+                }
             }
             json_messages.push(serde_json::json!({
                 "role": "user",

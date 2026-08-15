@@ -307,7 +307,7 @@
         if (images && images.length > 0) {
             for (var i = 0; i < images.length; i++) {
                 var img = document.createElement('img');
-                img.src = 'data:image/png;base64,' + images[i];
+                img.src = images[i];
                 img.style.cssText = 'max-width:120px;max-height:120px;border-radius:4px;margin-top:4px;display:block;';
                 container.appendChild(img);
             }
@@ -384,8 +384,7 @@
                 uploadingImage = true;  // 标记开始上传
                 var reader = new FileReader();
                 reader.onload = function(ev) {
-                    var base64 = ev.target.result.split(',')[1];
-                    pastedImages.push(base64);
+                    pastedImages.push(ev.target.result);
                     uploadingImage = false;  // 标记上传完成
                     showImagePreview();
                 };
@@ -410,7 +409,7 @@
         for (var i = 0; i < pastedImages.length; i++) {
             var thumb = document.createElement('div');
             thumb.className = 'image-preview-thumb';
-            thumb.innerHTML = '<img src="data:image/png;base64,' + pastedImages[i] + '">'
+            thumb.innerHTML = '<img src="' + pastedImages[i] + '">'
                 + '<span class="image-preview-remove" onclick="removeImage(' + i + ')">&times;</span>';
             area.appendChild(thumb);
         }
