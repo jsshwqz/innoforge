@@ -8,6 +8,18 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-08-12 — 多服务商模型检测 + 抗幻觉策略 + 创意页功能完整性恢复
+
+- **状态 / Status**: ✅ 已完成 / Completed
+- **范围 / Scope**:
+  - 内置 10 家主流 AI 服务商，模型列表改为按选中服务商 API 实时查询（不再硬编码）；商汤端点修正为 `https://token.sensenova.cn/v1`，5 个真实模型（含看图模型）可检出
+  - 抗幻觉：分场景温度策略（创作 0.6 / 普通 0.5 / OA 0.35 / 专利分析 0.2–0.3）+ 创意与事实分离 / 事实纪律条款
+  - 创意页功能完整性恢复：12 个核心函数、会话删除、滚动到底、粘贴图片、TXT 附件、4 个标签页数据加载、概览页正文渲染、证据 API 路由
+  - 防再犯硬保障：`check_html_functions.mjs` 静态扫描（编译前拦截"按钮在、函数没了"）+ e2e 创意页功能完整性用例（54/54）+ AGENTS.md 强制流程
+- **提交 / Commits**: `e28a787` `835e039` `fa10d97` `6116277` `d4ab6dd` `a2d6e71` `3886970` `04f5887` `7a8f268` `9a908af` `414140f` `956b8b0`
+- **验证 / Verification**: Puppeteer E2E 54/54；`check_html_functions.mjs` 8/8 模板通过（含破坏性灵敏度验证）；Rust fmt/clippy/test 通过
+- **记录 / Records**: `docs/errors.md` 已记录 42c726e / 9f1a14b 两次误删事故复盘
+
 ### 2026-08-12 — FreeCAD 可视化对话与 AionCAD Rust 桥交付
 
 - **状态 / Status**: ✅ 已完成并进入 PR 交付 / Completed and ready for PR handoff

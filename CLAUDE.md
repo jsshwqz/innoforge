@@ -172,7 +172,7 @@ docs/          # 文档和规划
   export PATH="/c/Users/Administrator/AppData/Local/ms-playwright-go/1.57.0:/c/Users/Administrator/AppData/Roaming/npm:$PATH"
   cd D:\\test\\patent-hub-backup && node e2e_test.mjs
   ```
-  确保全部测试通过（41/41 PASSED）。如果有失败项必须修复后才能提交。
+  确保全部测试通过（54/54 PASSED）。如果有失败项必须修复后才能提交。
 
 ### Step 6: 提交
 - 提交信息格式：`feat/fix/refactor/chore/docs: 中文简要描述`
