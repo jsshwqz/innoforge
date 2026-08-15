@@ -1,4 +1,0 @@
-2026-08-15T05:44:31.539900Z  INFO innoforge::common: [CONFIG] AI provider=Custom, mode=HTTP API, timeout=300s, base_url=https://token.sensenova.cn/v1, model=sensenova-6.8-flash-lite
-创研台 InnoForge running at http://0.0.0.0:3000
-Local access: http://127.0.0.1:3000
-Mobile access: http://192.168.2.190:3000
