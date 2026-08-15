@@ -603,9 +603,12 @@ async function main() {
 
     try {
         const executablePath = findBrowserExecutable();
+        // --no-sandbox 仅 Linux（CI 容器以 root 运行常需）；--disable-dev-shm-usage 全平台无害，防 shm 不足。
+        const isLinux = process.platform === 'linux';
         browser = await puppeteer.launch({
             headless: true,
             ...(executablePath ? { executablePath } : {}),
+            args: ['--disable-dev-shm-usage', ...(isLinux ? ['--no-sandbox'] : [])],
         });
 
         openedPages = await runPageMatrix(browser, pageErrors, requestFailures);
