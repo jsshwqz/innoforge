@@ -3,6 +3,10 @@
 //! Exposes InnoForge capabilities as MCP tools via stdio JSON-RPC.
 //! Requires InnoForge web server running on localhost:3000.
 //!
+// TODO(refactor T6.4): tools/list 声明了 6 个工具但分发目前仅接线 patent_search，
+// 未接线的 call_* 函数暂以 allow(dead_code) 保留；T6.4 决断补全或裁剪后移除本允许。
+#![allow(dead_code)]
+//!
 //! Usage in MCP config:
 //! ```json
 //! {

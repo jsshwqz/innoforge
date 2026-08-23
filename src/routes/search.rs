@@ -583,10 +583,7 @@ pub async fn api_search_vector(
     // Vector layer: compute query embedding and search cached embeddings
     let vector_results: Vec<(String, f32)> = {
         let query_embedding = compute_char_tfidf_embedding(query);
-        let count = match s.db.count_embeddings() {
-            Ok(c) => c,
-            Err(_) => 0,
-        };
+        let count = s.db.count_embeddings().unwrap_or_default();
         let mut results = Vec::new();
 
         if count > 0 {
@@ -611,12 +608,10 @@ pub async fn api_search_vector(
                         _ => Ok((pid, vec![])),
                     }
                 }) {
-                    for row in rows {
-                        if let Ok((pid, emb)) = row {
-                            let sim = cosine_similarity(&query_embedding, &emb);
-                            if sim > 0.1 {
-                                results.push((pid, sim));
-                            }
+                    for (pid, emb) in rows.flatten() {
+                        let sim = cosine_similarity(&query_embedding, &emb);
+                        if sim > 0.1 {
+                            results.push((pid, sim));
                         }
                     }
                 }
@@ -689,7 +684,7 @@ fn compute_char_tfidf_embedding(text: &str) -> Vec<f32> {
     if tf.is_empty() {
         return vec![0.0f32];
     }
-    let doc_len = (tf.values().sum::<f32>()) as f32;
+    let doc_len = tf.values().sum::<f32>();
     for (_, count) in tf.iter_mut() {
         *count = 1.0 + (*count / doc_len).log2();
     }
@@ -718,7 +713,7 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     if na < 1e-8 || nb < 1e-8 {
         return 0.0;
     }
-    (dot / (na * nb)).max(0.0).min(1.0)
+    (dot / (na * nb)).clamp(0.0, 1.0)
 }
 pub async fn api_search_stats(
     State(s): State<AppState>,

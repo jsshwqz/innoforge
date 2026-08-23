@@ -80,12 +80,10 @@ impl Database {
         })?;
 
         let mut scores: Vec<(String, f32)> = Vec::new();
-        for row in rows {
-            if let Ok((id, _content, emb)) = row {
-                let sim = cosine_similarity(query, &emb);
-                if sim > 0.05 {
-                    scores.push((id, sim));
-                }
+        for (id, _content, emb) in rows.flatten() {
+            let sim = cosine_similarity(query, &emb);
+            if sim > 0.05 {
+                scores.push((id, sim));
             }
         }
 
@@ -129,10 +127,8 @@ impl Database {
             })
         })?;
 
-        for row in rows {
-            if let Ok(chunk) = row {
-                return Ok(Some(chunk));
-            }
+        if let Some(chunk) = rows.flatten().next() {
+            return Ok(Some(chunk));
         }
         Ok(None)
     }
@@ -161,5 +157,5 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     if na < 1e-8 || nb < 1e-8 {
         return 0.0;
     }
-    (dot / (na * nb)).max(0.0).min(1.0)
+    (dot / (na * nb)).clamp(0.0, 1.0)
 }

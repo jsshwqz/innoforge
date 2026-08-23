@@ -105,7 +105,7 @@ impl VectorIndex {
         if norm_a < 1e-8 || norm_b < 1e-8 {
             return 0.0;
         }
-        (dot / (norm_a * norm_b)).max(0.0).min(1.0)
+        (dot / (norm_a * norm_b)).clamp(0.0, 1.0)
     }
 
     /// Search for similar documents using cosine similarity.

@@ -13,13 +13,10 @@ use std::fs;
 use std::path::PathBuf;
 
 /// 上下文总字符上限，防止 token 膨胀。
-
 const CONTEXT_MAX_CHARS: usize = 6000;
 
 /// 汇总项目记忆，返回可直接拼进系统提示词的 markdown 字符串。
-
 /// 文件缺失/不可读时静默返回空字符串。
-
 pub fn build_agent_context() -> String {
     let mut parts: Vec<String> = Vec::new();
 
@@ -77,7 +74,6 @@ pub fn build_agent_context() -> String {
 }
 
 /// 取文件末尾 n 行。
-
 fn tail_lines(path: PathBuf, n: usize) -> String {
     let content = match fs::read_to_string(&path) {
         Ok(c) => c,
@@ -95,7 +91,6 @@ fn tail_lines(path: PathBuf, n: usize) -> String {
 }
 
 /// 取文件开头 n 行。
-
 fn head_lines(path: PathBuf, n: usize) -> String {
     let content = match fs::read_to_string(&path) {
         Ok(c) => c,

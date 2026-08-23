@@ -222,14 +222,21 @@ pub(crate) fn extract_usage(raw_text: &str) -> Option<AiUsageInfo> {
     // 直接 JSON 解析 usage 块
     if let Ok(json) = serde_json::from_str::<Value>(raw_text) {
         if let Some(usage) = json.get("usage") {
-            let input = usage.get("input_tokens").and_then(|v| v.as_i64())
+            let input = usage
+                .get("input_tokens")
+                .and_then(|v| v.as_i64())
                 .or(usage.get("prompt_tokens").and_then(|v| v.as_i64()))
                 .unwrap_or(0);
-            let output = usage.get("output_tokens").and_then(|v| v.as_i64())
+            let output = usage
+                .get("output_tokens")
+                .and_then(|v| v.as_i64())
                 .or(usage.get("completion_tokens").and_then(|v| v.as_i64()))
                 .unwrap_or(0);
             if input > 0 || output > 0 {
-                return Some(AiUsageInfo { input_tokens: input, output_tokens: output });
+                return Some(AiUsageInfo {
+                    input_tokens: input,
+                    output_tokens: output,
+                });
             }
         }
     }
@@ -708,8 +715,6 @@ impl AiClient {
     pub fn model_name(&self) -> &str {
         &self.primary.model
     }
-
-    /// Send a raw JSON body to the AI provider (used for multimodal/vision requests).
 
     /// Send a simple chat request for RAG (public API for external modules).
     pub async fn send_rag_chat(&self, prompt: &str, temperature: f32) -> Result<String> {

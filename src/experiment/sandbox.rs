@@ -37,7 +37,7 @@ pub async fn run_experiment(spec: &ExperimentSpec) -> Result<ExperimentResult> {
     }
 
     // 实际超时时间：clamp 到合理范围
-    let timeout_secs = spec.timeout_secs.max(10).min(MAX_TIMEOUT_SECS).max(60);
+    let timeout_secs = spec.timeout_secs.clamp(10, MAX_TIMEOUT_SECS).max(60);
     let timeout = Duration::from_secs(timeout_secs);
 
     // 使用 tokio::time::timeout 实现真正的超时控制。

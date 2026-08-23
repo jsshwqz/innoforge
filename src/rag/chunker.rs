@@ -7,8 +7,8 @@ pub fn chunk_text(text: &str, chunk_size: usize, overlap: usize) -> Vec<String> 
     if text.is_empty() {
         return vec![];
     }
-    let window = chunk_size - overlap;
-    if window <= 0 || chunk_size <= 0 {
+    let window = chunk_size.saturating_sub(overlap);
+    if window == 0 {
         return vec![text.to_string()];
     }
     let mut chunks = Vec::new();
@@ -68,7 +68,7 @@ pub fn compute_chunk_embedding(text: &str) -> Vec<f32> {
     if tf.is_empty() {
         return vec![0.0f32];
     }
-    let doc_len = (tf.values().sum::<f32>()) as f32;
+    let doc_len = tf.values().sum::<f32>();
     for (_, count) in tf.iter_mut() {
         *count = 1.0 + (*count / doc_len).log2();
     }

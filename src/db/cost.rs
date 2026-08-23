@@ -70,6 +70,7 @@ impl Database {
     /// 模型单价：input 0.001 / output 0.002 美元 per 1K tokens（默认估算）。
     /// Log cost from the AI client's last usage info.
     /// Default pricing: input $0.001 / output $0.002 per 1K tokens.
+    #[allow(clippy::too_many_arguments)]
     pub fn save_cost_record_from_client(
         &self,
         input_tokens: i64,
@@ -81,7 +82,11 @@ impl Database {
         session_id: Option<&str>,
     ) -> Result<(), rusqlite::Error> {
         let id = uuid::Uuid::new_v4().to_string();
-        let estimated_cost_cents = {((input_tokens as f64 * 0.001 + output_tokens as f64 * 0.002) / 1000.0 * 100.0 * 100.0).round() / 100.0}; // round to 2 decimal places
+        let estimated_cost_cents = {
+            ((input_tokens as f64 * 0.001 + output_tokens as f64 * 0.002) / 1000.0 * 100.0 * 100.0)
+                .round()
+                / 100.0
+        }; // round to 2 decimal places
         let record = crate::pipeline::context::AiCostRecord {
             id,
             pipeline_run_id: "".to_string(),
@@ -102,16 +107,14 @@ impl Database {
 
     /// 按时间范围统计成本。
     /// Cost summary grouped by model.
-    pub fn get_cost_stats(
-        &self,
-        days: i64,
-    ) -> Result<serde_json::Value, rusqlite::Error> {
+    pub fn get_cost_stats(&self, days: i64) -> Result<serde_json::Value, rusqlite::Error> {
         let c = self.conn();
         let mut total_input = 0i64;
         let mut total_output = 0i64;
         let mut total_cost = 0.0f64;
         let mut total_calls = 0i64;
-        let mut by_model: std::collections::HashMap<String, serde_json::Value> = std::collections::HashMap::new();
+        let mut by_model: std::collections::HashMap<String, serde_json::Value> =
+            std::collections::HashMap::new();
         let mut by_day: Vec<(String, f64)> = Vec::new();
 
         {
@@ -154,17 +157,15 @@ impl Database {
                  FROM ai_cost_ledger
                  WHERE CAST(julianday(timestamp) - julianday('now') AS INTEGER) >= ?1
                  GROUP BY substr(timestamp, 1, 10)
-                 ORDER BY day ASC"
+                 ORDER BY day ASC",
             )?;
             let rows = stmt.query_map(rusqlite::params![days], |row: &rusqlite::Row| {
                 let day: String = row.get(0)?;
                 let cost: f64 = row.get(1)?;
                 Ok((day, cost))
             })?;
-            for row in rows {
-                if let Ok((day, cost)) = row {
-                    by_day.push((day, cost));
-                }
+            for (day, cost) in rows.flatten() {
+                by_day.push((day, cost));
             }
         }
 
