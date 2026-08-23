@@ -131,9 +131,11 @@ pub fn init_app_state(db_path: &str) -> anyhow::Result<crate::routes::AppState> 
                 .flatten()
                 .map(Into::into)
         });
-    let db_parent = std::path::Path::new(db_path)
+    let db_path_abs = std::path::Path::new(db_path)
+        .canonicalize()
+        .unwrap_or_else(|_| std::path::PathBuf::from(db_path));
+    let db_parent = db_path_abs
         .parent()
-        .filter(|path| !path.as_os_str().is_empty())
         .map(std::path::Path::to_path_buf)
         .unwrap_or_else(|| std::path::PathBuf::from("data"));
     let cad = crate::cad::CadService::new(db_parent.join("cad"), workspace)?;
