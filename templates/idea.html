@@ -644,6 +644,7 @@
                 row.appendChild(bubble);
                 chatEl.appendChild(row);
             });
+            if (typeof ideaCadController !== 'undefined' && ideaCadController.renderHistory) ideaCadController.renderHistory();
             // Scroll to bottom
             chatEl.scrollTop = chatEl.scrollHeight;
         } catch(e) {}
@@ -660,6 +661,11 @@
         if (!input) return;
         var msg = input.value.trim();
         if (!msg && ideaImages.length === 0) return;
+        if (msg && typeof ideaCadController !== 'undefined' && ideaCadController.shouldHandle(msg)) {
+            input.value = '';
+            await ideaCadController.draw(msg);
+            return;
+        }
         ideaSendBusy = true;
         input.value = '';
         var images = ideaImages.slice();

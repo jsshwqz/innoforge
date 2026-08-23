@@ -332,25 +332,11 @@
         const input = document.getElementById('chat-msg');
         const msg = input.value.trim();
         if (!msg) return;
-<<<<<<< HEAD
-=======
         if (patentCadController.shouldHandle(msg)) {
             input.value = '';
             await patentCadController.draw(msg);
             return;
         }
-        if (patentChatSending) {
-            if (patentAbortController) {
-                patentAbortController.abort();
-                patentAbortController = null;
-            }
-            var box = document.getElementById('chat-messages');
-            var last = box.lastChild;
-            if (last && last.classList.contains('msg') && last.classList.contains('ai') && last.id === 'ai-loading') {
-                box.removeChild(last);
-            }
-        }
->>>>>>> 3a50c49 (feat: 接入FreeCAD可视化对话 (#8))
         input.value = '';
         chatHistory.push(msg);
         if (patentChatSending) {
