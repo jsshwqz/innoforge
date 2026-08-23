@@ -19,13 +19,14 @@
 
 ## M2 — 端口贯通（Phase 2 完成）⭐ 核心里程碑
 - SearchProvider / Embedder / PdfExtractor / ProviderMode adapter 四大端口落地
-- SerpAPI 实现 ×3→×1；TF-IDF ×3→×1；服务商知识 ×3→×1（表驱动）
-- ai/client.rs ≤400 行且容灾循环测试 ≥8 个
-- **意义**：此后所有拆分都是"把调用方接到已有端口上"，不再产生新轮子
+- SerpAPI 实现 ×3→×1；TF-IDF ×3→×1（char-boundary 安全版）；服务商知识 ×3→×1（表驱动）
+- ai/client.rs 语义拆为 FailoverClient + 三 adapter，容灾循环测试 ≥8 个
+- **意义**：此后所有新写都是"把调用方接到已有端口上"，不再产生新轮子
 
-## M3 — 后端瘦身（Phase 3+4 完成）
-- routes/ 最大文件 ≤600 行；idea.rs 测试 ≥15 个
-- rag/vector/fact_check 三块 ~1200 行死代码有明确归宿【依赖用户决策】
+## M3 — 新骨架成型（Phase 3+4 完成）
+- **workspace 化完成**：crates/{types,config,db,ai,search,pipeline,server} 就位，src/routes/ 整体消失
+- routes 万能层被薄 handler + service 层替代；idea 域测试 ≥15 个
+- rag/vector/fact_check 三块死代码有明确归宿并接线【裁决已定】
 - db 层无 pipeline 类型反向依赖；Pipeline 写入侧强类型化
 
 ## M4 — 前端收敛（Phase 5 完成）

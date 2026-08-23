@@ -24,7 +24,8 @@
 2. 死代码按质量裁决：fact_check=保留接线；rag=重写并入；vector/search 内联版=重写合一（详见 task-breakdown Phase 0.5）
 3. 分支：**直接在 dev 上做**（dev 需先合并 main 最新状态）
 4. 版本号：全新版本线，发布 **0.1.0**
-5. 执行方式：其它 agent 依据本方案自动执行，无需逐项请示；仅在验收标准无法达成或发现方案性错误时上报
+5. **重构路线：A 重建式重构**——终态为 workspace 多 crate 全新架构（crates/{types,config,db,ai,search,pipeline,server}），病变代码一律新写替代而非搬运，旧结构零残留后发 0.1.0；workspace 物理化一次性放在 T3.0
+6. 执行方式：其它 agent 依据本方案自动执行，无需逐项请示；仅在验收标准无法达成或发现方案性错误时上报
 
 ## 3. 阶段总览
 

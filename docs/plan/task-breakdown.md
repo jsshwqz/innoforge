@@ -1,8 +1,24 @@
 # InnoForge 完整重构任务分解 / Task Breakdown
 
-> 版本：v2（已纳入用户四项决策与 2026-08-15 全量扫描/修复结果）
-> 策略总纲：**原地分层重组（Strangler Fig 渐进式）** —— 保持 axum + SQLite + 纯静态前端技术栈与全部既有功能不变，先立端口抽象、再拆巨型文件、最后治理前端。每阶段结束都是"可发布状态"。
-> 用户决策记录：①未提交改动审阅后提交（已完成）；②死代码按质量裁决（见 Phase 0.5）；③**直接在 dev 分支执行**；④版本号走**全新版本线，发布 0.1.0**（若实意为 1.0.0，仅影响 M5 发布时的 Cargo.toml/tag，不影响任何前置任务）。
+> 版本：v3（路线 A「重建式重构」已获用户确认）
+> 策略总纲：**重建式重构** —— 同一仓库内先立全新骨架，病变部分一律**新写替代**（不搬运），健康部分平移；每落一块删一块旧代码，全程被现有测试/e2e 护住；旧结构零残留后发布 **v0.1.0 全新版本线**。
+>
+> ### 终态蓝图（完成时无人能说这不是完整重构）
+> ```text
+> Cargo.toml            ← [workspace] resolver=2
+> crates/
+> ├── types/            ← 领域类型按域分文件（patent/search/idea/cad/chat/legal）
+> ├── config/           ← PathConfig/EndpointConfig/表驱动 ProviderConfig
+> ├── db/               ← Database 门面 + Repository 分域 trait + v23 迁移链原样平移
+> ├── ai/               ← FailoverClient 编排 + HttpOpenAI/AnthropicApi/GeminiCli 三 adapter + StreamParser
+> ├── search/           ← SearchProvider(SerpAPI 唯一实现) + Embedder(char-boundary 安全唯一 TF-IDF)
+> ├── pipeline/         ← 强类型 StepOutput 状态机 + steps 平移 + orchestrator 平移
+> └── server/           ← 薄 handler 新写层 + bin(innoforge-server/innoforge-mcp) + cdylib(FFI 符号不变)
+> templates/ static/    ← 留仓库根（check_html_functions/e2e 工具链零改动），crates 以相对路径引用
+> ```
+> 关键裁决：①**物理 workspace 化放在 Phase 3 一次完成**（Phase 1/2 先以模块形式建骨架并靠依赖方向门禁约束，避免 include_str!/rust-embed 路径二度折腾）；②axum 升级与新 server 层绑定评估（handler 本就新写，若 0.6→0.8 迁移摩擦大则留在 0.6，不阻塞主线）；③迁移链与 DB 数据是资产，任何情况下不动 schema 兼容性。
+>
+> 用户决策记录：①未提交改动审阅后提交（已完成）；②死代码按质量裁决（见 Phase 0.5）；③直接在 dev 分支执行；④版本号全新版本线发布 0.1.0；⑤**重构路线选 A 重建式重构**（2026-08-15）。
 > **本文档是自动执行的唯一权威输入**：执行 agent 按阶段顺序认领任务，逐条对照验收标准，全程遵守下方"总原则"。
 
 ---
@@ -63,16 +79,18 @@
 | T2.4 | ProviderConfig 表驱动：服务商元数据（id/名称/base_url/key 字段名/默认模型）收为单一注册表，AppConfig 的 10 个 per-provider Key 字段改为 map；settings.rs provider_db_key 与 idea.rs 注册表副本删除 | P0 | L | P/E | 新增服务商仅需在注册表加一行 + DB 一条 key |
 | T2.5 | upload.rs 提取器策略化：六路 PDF 提取各自独立文件实现 `PdfExtractor` trait，注册表顺序降级；SSRF 防护独立 `net_guard.rs` 纯函数模块 | P1 | L | S/P/E | upload.rs 缩至 <400 行；net_guard 单测覆盖现有回归 |
 
-## Phase 3 — routes 巨型文件拆分（预计 4-6 天，部分可与 Phase 5 并行）
+## Phase 3 — server 新写层与 workspace 化（预计 4-6 天，部分可与 Phase 5 并行）
+
+> 路线 A 核心：本阶段不是"把巨型文件拆小"，而是**在 crates/server 里新写薄 handler 层替代 routes 万能层**。每个 API 族新写完成并通过 e2e 后，删除对应旧代码——旧文件只减不增，Phase 3 结束时 src/routes/ 不复存在。
 
 | # | 任务 | 优先级 | 工作量 | S.U.P.E.R 约束 | 验收标准 |
 |---|------|--------|--------|----------------|----------|
-| T3.1 | idea.rs(2194) 五拆：idea_crud / idea_chat(压缩算法下沉 service) / research_state / report_render(Markdown 渲染器独立 util) / claim_tree(SQL 下沉 db 层) | P0 | XL | S/U | 单文件 ≤500 行；idea.rs 测试 2→≥15；e2e 创意页 54 项全过 |
-| T3.2 | ai.rs(2038) 分组拆：oa.rs(OA 分析/讨论/答复书) / chat.rs / compare_analyze.rs；prompt 文本集中各文件头部常量区（遵守规约 prompt 放 handler 所在模块） | P0 | L | S/U | 单文件 ≤600 行；OA e2e 全过 |
-| T3.3 | patent.rs 外部客户端外迁 `patent_sources/{epo,uspto,google_patents}.rs` 实现 trait；路由只剩编排 | P1 | L | P/U | patent.rs 缩至 <500 行；SSRF 回归保持绿 |
-| T3.4 | search.rs 导出职责独立 export.rs（CSV/XLSX）；向量检索改调 Embedder port | P1 | M | S | 导出单测保留通过 |
-| T3.5 | common.rs 减负：build_router 按 API 族拆 register_xxx(router) 私有函数群（仍在 common.rs 内分组即可，不强拆文件） | P1 | M | U/S | build_router 主函数可读性恢复；118 条路由数量断言测试防丢路由 |
-| T3.6 | pages.rs 渲染统一：通用 render_template(path, &[(k,v)]) 函数替代逐字段 replace 链 | P2 | S | P | patent_detail 16 字段渲染行为不变 |
+| T3.0 | **workspace 化（一次性机械操作）**：根 Cargo.toml 转 [workspace]；src/ 迁入 crates/server/src；templates/static 留仓库根并修正 rust-embed folder 与 include_str! 相对路径；FFI 导出符号（innoforge_start_server 等 4 个）逐一验证；e2e/函数扫描器路径核对 | P0 | L | R/E | cargo test 全绿 + e2e 全过 + 移动端 FFI 符号契约测试通过 |
+| T3.1 | idea 域新写：idea_crud/idea_chat(压缩算法下沉 service)/research_state/report_render(Markdown 渲染器独立 util)/claim_tree(SQL 下沉 db) 五个子模块的薄 handler + service 层，替代 idea.rs 全部端点后删除该文件；测试 2→≥15 | P0 | XL | S/U/P | 单 handler ≤80 行；单文件 ≤500 行；创意页 e2e 54 项全过 |
+| T3.2 | ai 域新写：oa/chat/compare_analyze 分组薄层调用 T2.3 的 FailoverClient；prompt 按域集中到 crates/ai prompts 模块（规约"prompt 放 handler 所在模块"更新为放对应 service 模块头部常量区） | P0 | L | S/U | OA 全链路 e2e 过；旧 routes/ai.rs 删除 |
+| T3.3 | patent/search/upload 域新写：外部客户端已在 patent_sources(T2.x)，此处只剩编排薄层；导出独立 export 模块；提取链走 PdfExtractor 注册表 | P0 | M-L | S/U/P | 对应 e2e 过；三个旧巨型文件删除 |
+| T3.4 | common.rs 消灭：路由注册按 API 族拆到各域模块的 router() 函数，server crate 组装；118 条路由数量断言测试防丢 | P0 | M | U/S | build_router 仅做组装；grep 无手写 (StatusCode, Json) |
+| T3.5 | pages.rs 渲染统一 render_template + axum 升级决策落地（0.8 或留 0.6，二选一写死进文档） | P1 | S-M | P | patent_detail 17 字段渲染不变 |
 
 ## Phase 4 — 数据层与死代码决断（预计 2-3 天）⚠️ 含需用户决策项
 

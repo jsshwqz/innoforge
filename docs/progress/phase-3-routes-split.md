@@ -1,15 +1,17 @@
-# Phase 3 — routes 巨型文件拆分（可与 Phase 5 并行）
+# Phase 3 — server 新写层与 workspace 化（泳道 A 核心，可与 Phase 5 并行）
 
-> 前置阅读：task-breakdown.md Phase 3 表格；module-inventory.md §2 行号级证据（拆分的地图）
-> 铁律：只搬不写。每搬一个函数群跑一次相关 e2e。
+> 前置阅读：task-breakdown.md 头部「终态蓝图」+ Phase 3 表格；module-inventory.md §2 行号级证据
+> 路线 A 铁律：**不是拆小旧文件，而是新写替代**——每个 API 族在 crates/server 新写薄 handler 并过 e2e 后，删除对应旧代码。旧文件只减不增，本阶段结束时 src/routes/ 不复存在。
 
-- [ ] T3.1 idea.rs(2194) 五拆：idea_crud / idea_chat(压缩算法下沉) / research_state / report_render(Markdown渲染器独立) / claim_tree(SQL 下沉 db)；测试 2→≥15
-- [ ] T3.2 ai.rs(2038) 分组拆：oa / chat / compare_analyze；prompt 集中各文件头部常量区
-- [ ] T3.3 patent.rs 外部客户端外迁 patent_sources/{epo,uspto,google_patents}（实现 trait）
-- [ ] T3.4 search.rs 导出独立 export.rs；向量检索改调 Embedder port
-- [ ] T3.5 common.rs 减负：build_router 按 API 族分组 + 路由数量断言测试（防丢路由，现 118 条）
-- [ ] T3.6 pages.rs 统一 render_template 替代逐字段 replace 链
+- [ ] T3.0 workspace 化：根 Cargo.toml 转 [workspace]；src→crates/server/src；templates/static 留根修相对路径；FFI 四符号验证；e2e/扫描器路径核对
+- [ ] T3.1 idea 域新写（crud/chat/research_state/report_render/claim_tree 五模块）→ 删 idea.rs；测试 ≥15
+- [ ] T3.2 ai 域新写（oa/chat/compare_analyze 薄层 + prompt 入 crates/ai prompts 模块）→ 删 routes/ai.rs
+- [ ] T3.3 patent/search/upload 域新写（编排薄层 + export 模块 + 提取注册表）→ 删三个旧文件
+- [ ] T3.4 common.rs 消灭：路由按域 router() 组装 + 118 条数量断言测试
+- [ ] T3.5 pages.rs render_template 统一 + axum 0.6/0.8 决策落地写死文档
 
-验收门禁：全套 DoD；单文件 ≤600 行；idea.rs 测试 ≥15
+验收门禁：全套 DoD；单 handler ≤80 行、单文件 ≤500 行；每删一个旧文件跑全量 e2e
 Notes:
-- idea.html/patent_detail/OA 三页的 CAD 契约测试（tests/cad_template_contract.rs）是本阶段安全网，动聊天相关 handler 后必须跑
+- T3.0 是唯一允许"纯机械移动"的步骤；T3.1 起一律新写，禁止把旧函数体原样复制进新模块了事——对照 module-inventory §2 的职责清单逐项落实 service 化
+- tests/cad_template_contract 与 e2e 是安全网；聊天/OA 相关域落地后必跑
+- FFI 符号契约：innoforge_start_server/innoforge_shutdown_server/patent_hub_start_server/patent_hub_shutdown_server 必须原签名保留（外部 desktop/ios/harmony 仓库依赖）
