@@ -28,7 +28,7 @@
 
 ## 3. 阶段总览
 
-- [x] Phase 0 地基与卫生 (9/12 — T0.1✅+三项预处理✅；剩 T0.2/T0.6/T0.7/T0.8/T0.9) → [details](./phase-0-foundation.md)
+- [ ] Phase 0 地基与卫生 (5/13 — T0.1✅ T0.10✅ +三项预处理✅；剩 T0.2-T0.9) → [details](./phase-0-foundation.md)
 - [ ] Phase 1 类型与错误地基 (0/5) → [details](./phase-1-types-errors.md)
 - [ ] Phase 2 端口层建设 (0/5) ⭐枢纽里程碑 M2 → [details](./phase-2-ports.md)
 - [ ] Phase 3 routes 巨型文件拆分 (0/6) → [details](./phase-3-routes-split.md)
@@ -63,17 +63,18 @@
 
 ## 5. 当前状态（每 session 开始/结束更新此节）
 
-- **日期**：2026-08-15
-- **已完成**：全量扫描与三份分析文档；完整方案 v2；预处理修复三项（patent_detail 冲突解决、idea.html CAD 接线恢复、cad.rs 调试代码剥离）；HTML 函数扫描通过
-- **⚠️ 环境警报**：
-  1. **D 盘仅剩 ~0.7GB，target/ 占 8.4GB——已执行 cargo clean 释放**。执行 agent 开工前先查 `Get-PSDrive D`，低于 5GB 先 clean
-  2. 门禁实测三红：fmt 漂移（已应用格式化）、clippy 32 错误（多在待重写的 vector/dead 区）、test 链接因磁盘满失败——**全部是既有问题**（60 个未推送提交从未过 CI），不是预处理修复引入
+- **日期**：2026-08-15（第二次更新）
+- **已完成**：
+  1. 全量扫描与三份分析文档 + 完整方案 v2（commits 7f7d5be）
+  2. 预处理修复并入库：模板冲突解决 + idea 页 CAD 接线恢复（c6e3139）、cad.rs 调试代码剥离（620b263）
+  3. **本地门禁全绿恢复**（413db81）：fmt=0、clippy --all-targets=0（32 项清零）、cargo test **369 通过/0 失败**、HTML 函数扫描通过
+- **⚠️ 环境警报**：D 盘曾剩 0.7GB（target 占 8.4GB，已 cargo clean → 7.5GB）。**执行 agent 开工前必查 `Get-PSDrive D`，<5GB 先 clean**
 - **下一步（按序）**：
-  1. 执行 T0.10：恢复本地门禁全绿（clippy 清零 + cargo test 通过）
-  2. 按 commit 提交预处理修复（fix: 模板冲突与CAD接线恢复；refactor: cad.rs 清理）
-  3. T0.5 切 dev 合 main → T0.6 推送双远端激活 CI → T0.2/T0.7/T0.8
-  4. 进入 Phase 1（T1.1 types/ 拆域起步）
-- **已知风险提醒**：/api/search/vector 中文查询 panic（T2.2 修）；Docker 出口损坏（T0.7 修）；.env 含明文密钥（T0.9 用户动作）
+  1. T0.5 切 dev 合 main（dev 落后 main，先 `git checkout dev && git merge main`）
+  2. T0.6 推送 main+dev 双远端激活 CI（领先远端 60+/36 提交从未过 CI）
+  3. T0.2 / T0.3 / T0.4 / T0.7 / T0.8 并行认领；T0.9 提醒用户
+  4. Phase 1 启动：T1.1 types/ 拆域
+- **已知风险提醒**：/api/search/vector 中文查询 panic（T2.2 修）；Docker 出口损坏（T0.7 修）；.env 明文密钥（T0.9 用户动作）；mcp-server 未接线函数带 allow(dead_code)+T6.4 标注
 
 ## 6. 会话记录（追加式，保留历史）
 

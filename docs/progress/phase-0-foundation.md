@@ -4,14 +4,15 @@
 
 ## 任务清单
 
-- [x] T0.1 处置未提交改动（审阅→剥离调试→保留三处真修复）
-- [x] 预处理：patent_detail.html 合并冲突标记解决（CAD 拦截保留/旧中止块舍弃）
-- [x] 预处理：idea.html FreeCAD 接线恢复（shouldHandle 拦截 + renderHistory 历史重绘）
+- [x] T0.1 处置未提交改动（审阅→剥离调试→保留三处真修复）✅ commit 620b263
+- [x] 预处理：patent_detail.html 合并冲突标记解决 ✅ commit c6e3139
+- [x] 预处理：idea.html FreeCAD 接线恢复 ✅ commit c6e3139
+- [x] T0.10 恢复本地门禁全绿 ✅ commit 413db81（fmt 应用/clippy 32→0/三处陈旧版本断言 18→23/mcp 暂允许+T6.4 标注；最终验证 fmt=0 clippy=0 test 369 通过 0 失败 HTML 扫描过）
 - [ ] T0.2 工作区垃圾清理（4.1GB db / 118MB zip 先归档仓库外；游离 main.rs 删除；~250 临时文件直删）
 - [ ] T0.3 SCHEMA_VERSION 22→23 对齐 + target 参数 warn 断言
 - [ ] T0.4 文档漂移修正（AGENTS.md 双入口/16步/v11/AI超时/8页面 + ARCHITECTURE.md 模板引擎）
 - [ ] T0.5 分支切换：checkout dev → merge main → 确认绿
-- [ ] T0.6 推送 main+dev 至 GitHub/Gitee 双远端，CI 三 job 全绿（当前领先远端 60+ 提交未经 CI！）
+- [ ] T0.6 推送 main+dev 至 GitHub/Gitee 双远端，CI 三 job 全绿（当前领先远端 60+/36 提交未经 CI！）
 - [ ] T0.7 Dockerfile 修复：bin 名 innoforge→innoforge-server（两处）；删冗余 COPY；docker build 验证
 - [ ] T0.8 functions-manifest --refresh（settings.html: formatNumber/loadAiCostStats 入基线）
 - [ ] T0.9 【用户动作】.env 密钥轮换提醒与泄露扫描
