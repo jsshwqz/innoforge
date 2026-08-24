@@ -1,8 +1,12 @@
 # InnoForge 完整重构 — 主控文档 / MASTER
 
 > **本文件是所有执行 agent 的唯一入口。每次会话开始必读本文档，从"当前状态"继续，禁止重开炉灶。**
-> 任务：InnoForge（D:\test\patent-hub-backup）整体重构 —— 原地分层重组，功能零变化
+> 任务：InnoForge（D:\test\patent-hub-backup）整体重构 —— 路线 A 重建式重构，终态 workspace 全新多 crate 架构
 > 制定日期：2026-08-15 ｜ 分支策略：直接在 dev ｜ 发布版本：0.1.0（全新版本线）
+>
+> ## 角色分工（硬约束）
+> - **规划会话**：只写/维护方案与文档，不写产品代码；方案变更以 docs commit 形式下发
+> - **执行 agent**：按本文件与 phase 清单施工，只勾选进度、追加 Notes，**不得改写任务定义或验收标准**；发现方案与现实冲突时停下上报，由规划会话修订
 
 ---
 
@@ -10,12 +14,15 @@
 
 | 文档 | 内容 | 何时读 |
 |------|------|--------|
-| `docs/plan/task-breakdown.md` | 27+ 项任务、验收标准、用户决策记录 | **每个任务开工前** |
+| `docs/plan/task-breakdown.md` | 终态蓝图 + 六阶段任务 + 验收标准 + 用户决策 | **每个任务开工前** |
+| `docs/progress/GATES.md` | 门禁速查卡（可复制命令） | **每个任务收尾时** |
 | `docs/plan/milestones.md` | M0-M5 客观判定标准 | 每阶段收尾时 |
 | `docs/plan/dependency-graph.md` | 阶段依赖与并行泳道 | 认领任务前 |
+| `docs/analysis/routes-inventory.md` | **118 条路由防丢失基准表** | T3.0/T3.4 及任何动路由的任务 |
+| `docs/analysis/types-migration-map.md` | **类型迁移施工图纸**（49 类型落位+销账清单） | T1.1/T2.x/T3.x 动类型前 |
 | `docs/analysis/module-inventory.md` | 模块评分、行号级病灶证据 | 动对应模块前 |
-| `docs/analysis/risk-assessment.md` | 风险 Top10 与缓解措施 | 每阶段开工前 |
-| `docs/analysis/project-overview.md` | 架构全景、技术栈、118 路由、26 表清单 | 首次进入项目时 |
+| `docs/analysis/risk-assessment.md` | 风险 Top10 与缓解措施 + 已复核缺陷清单 | 每阶段开工前 |
+| `docs/analysis/project-overview.md` | 架构全景、技术栈、26 表清单 | 首次进入项目时 |
 | `AGENTS.md` | 项目强制规约（提交格式/验证流程/禁止行为） | **始终有效** |
 
 ## 2. 用户已拍板的决策（不得重新讨论）
@@ -64,17 +71,18 @@
 
 ## 5. 当前状态（每 session 开始/结束更新此节）
 
-- **日期**：2026-08-15（第二次更新）
+- **日期**：2026-08-15（第三次更新）
 - **已完成**：
-  1. 全量扫描与三份分析文档 + 完整方案 v2（commits 7f7d5be）
-  2. 预处理修复并入库：模板冲突解决 + idea 页 CAD 接线恢复（c6e3139）、cad.rs 调试代码剥离（620b263）
-  3. **本地门禁全绿恢复**（413db81）：fmt=0、clippy --all-targets=0（32 项清零）、cargo test **369 通过/0 失败**、HTML 函数扫描通过
+  1. 全量扫描 + 分析四件套（新增 routes-inventory 路由防丢基准、types-migration-map 类型施工图纸）
+  2. 方案 v3（路线 A 重建式重构，用户确认；commit 4875ffd）
+  3. 基线修复入库（c6e3139/620b263/413db81/7f7d5be/d076ff5）：本地门禁全绿 fmt=0、clippy=0、cargo test 369 通过
+  4. GATES.md 门禁速查卡落盘；MASTER 增加规划/执行角色分工硬约束
 - **⚠️ 环境警报**：D 盘曾剩 0.7GB（target 占 8.4GB，已 cargo clean → 7.5GB）。**执行 agent 开工前必查 `Get-PSDrive D`，<5GB 先 clean**
-- **下一步（按序）**：
+- **执行 agent 下一步（按序）**：
   1. T0.5 切 dev 合 main（dev 落后 main，先 `git checkout dev && git merge main`）
   2. T0.6 推送 main+dev 双远端激活 CI（领先远端 60+/36 提交从未过 CI）
   3. T0.2 / T0.3 / T0.4 / T0.7 / T0.8 并行认领；T0.9 提醒用户
-  4. Phase 1 启动：T1.1 types/ 拆域
+  4. Phase 1 启动：T1.1 按 types-migration-map 施工
 - **已知风险提醒**：/api/search/vector 中文查询 panic（T2.2 修）；Docker 出口损坏（T0.7 修）；.env 明文密钥（T0.9 用户动作）；mcp-server 未接线函数带 allow(dead_code)+T6.4 标注
 
 ## 6. 会话记录（追加式，保留历史）
