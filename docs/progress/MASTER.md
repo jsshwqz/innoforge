@@ -14,16 +14,17 @@
 
 | 文档 | 内容 | 何时读 |
 |------|------|--------|
-| `docs/plan/task-breakdown.md` | 终态蓝图 + 六阶段任务 + 验收标准 + 用户决策 | **每个任务开工前** |
+| **`docs/plan/prd-v1.md`** | **产品需求与验收口径（最高依据）** | **任何施工前** |
+| `docs/plan/task-breakdown.md` | v4 功能里程碑主轴（M-A/B/C 任务+验收）+ 结构支撑件挂载表 | **每个任务开工前** |
 | `docs/progress/GATES.md` | 门禁速查卡（可复制命令） | **每个任务收尾时** |
-| `docs/plan/milestones.md` | M0-M5 客观判定标准 | 每阶段收尾时 |
-| `docs/plan/dependency-graph.md` | 阶段依赖与并行泳道 | 认领任务前 |
-| `docs/analysis/routes-inventory.md` | **118 条路由防丢失基准表** | T3.0/T3.4 及任何动路由的任务 |
-| `docs/analysis/types-migration-map.md` | **类型迁移施工图纸**（49 类型落位+销账清单） | T1.1/T2.x/T3.x 动类型前 |
+| `docs/plan/milestones.md` | 里程碑判定（M0-M5，结构版措辞以 v4 为准） | 每里程碑收尾时 |
+| `docs/plan/delivery-boundary.md` | 0.1.0 交付边界声明 | 发布前 |
+| `docs/analysis/routes-inventory.md` | 118 条路由防丢失基准表 | 动路由的任务 |
+| `docs/analysis/types-migration-map.md` | 类型迁移施工图纸 | T1.1 及动类型前 |
 | `docs/analysis/module-inventory.md` | 模块评分、行号级病灶证据 | 动对应模块前 |
-| `docs/analysis/risk-assessment.md` | 风险 Top10 与缓解措施 + 已复核缺陷清单 | 每阶段开工前 |
+| `docs/analysis/risk-assessment.md` | 风险 Top10 + 已复核缺陷清单 | 每里程碑开工前 |
 | `docs/analysis/project-overview.md` | 架构全景、技术栈、26 表清单 | 首次进入项目时 |
-| `AGENTS.md` | 项目强制规约（提交格式/验证流程/禁止行为） | **始终有效** |
+| `AGENTS.md` | 项目强制规约 | **始终有效** |
 
 ## 2. 用户已拍板的决策（不得重新讨论）
 
@@ -31,18 +32,17 @@
 2. 死代码按质量裁决：fact_check=保留接线；rag=重写并入；vector/search 内联版=重写合一（详见 task-breakdown Phase 0.5）
 3. 分支：**直接在 dev 上做**（dev 需先合并 main 最新状态）
 4. 版本号：全新版本线，发布 **0.1.0**
-5. **重构路线：A 重建式重构**——终态为 workspace 多 crate 全新架构（crates/{types,config,db,ai,search,pipeline,server}），病变代码一律新写替代而非搬运，旧结构零残留后发 0.1.0；workspace 物理化一次性放在 T3.0
-6. 执行方式：其它 agent 依据本方案自动执行，无需逐项请示；仅在验收标准无法达成或发现方案性错误时上报
+5. 结构路线：A 重建式重构——**但 2026-08-15 方向修正后降级为支撑件**：用户澄清重构动机是产品功能不达预期（检索失败/中文给英文/召回不全；分析浅/幻觉/丢上下文），目标形态=个人本地利器，全流程主线全要
+6. **最高依据：`docs/plan/prd-v1.md`** —— 一切施工以 PRD 验收口径为准绳；task-breakdown v4 为功能里程碑主轴（M-A 可信中文检索 → M-B 可信深度分析 → M-C 全流程贯通）；v3 结构任务除挂载件外全部归档
+7. 执行方式：其它 agent 依据本方案自动执行，无需逐项请示；仅在验收标准无法达成或发现方案性错误时上报
 
-## 3. 阶段总览
+## 3. 阶段总览（v4 功能主轴）
 
-- [ ] Phase 0 地基与卫生 (5/13 — T0.1✅ T0.10✅ +三项预处理✅；剩 T0.2-T0.9) → [details](./phase-0-foundation.md)
-- [ ] Phase 1 类型与错误地基 (0/5) → [details](./phase-1-types-errors.md)
-- [ ] Phase 2 端口层建设 (0/5) ⭐枢纽里程碑 M2 → [details](./phase-2-ports.md)
-- [ ] Phase 3 routes 巨型文件拆分 (0/6) → [details](./phase-3-routes-split.md)
-- [ ] Phase 4 数据层与死代码收尾 (0/4) → [details](./phase-4-data-deadcode.md)
-- [ ] Phase 5 前端重构 (0/6，可与 Phase 3 并行) → [details](./phase-5-frontend.md)
-- [ ] Phase 6 收尾发布 v0.1.0 (0/5) → [details](./phase-6-release.md)
+- [ ] **M-A 可信中文检索**（0/6，PRD N1-N4）→ 施工明细见 task-breakdown.md「里程碑 M-A」表
+- [ ] **M-B 可信深度分析**（0/6，PRD N5-N8）→ 见 task-breakdown.md「里程碑 M-B」
+- [ ] **M-C 全流程贯通与交付**（0/5）→ 见 task-breakdown.md「里程碑 M-C」
+- [ ] Phase 0 地基与卫生（5/13，继续有效）→ [details](./phase-0-foundation.md)
+- 📦 归档：phase-1~6 结构版文件保留作参考，**以 task-breakdown v4 为准**；结构支撑件挂载关系见其"结构支撑件"表
 
 ## 4. 执行协议（每个 agent 必须遵守）
 
@@ -71,19 +71,18 @@
 
 ## 5. 当前状态（每 session 开始/结束更新此节）
 
-- **日期**：2026-08-15（第三次更新）
+- **日期**：2026-08-15（第四次更新：主轴切换为产品能力）
 - **已完成**：
-  1. 全量扫描 + 分析四件套（新增 routes-inventory 路由防丢基准、types-migration-map 类型施工图纸）
-  2. 方案 v3（路线 A 重建式重构，用户确认；commit 4875ffd）
-  3. 基线修复入库（c6e3139/620b263/413db81/7f7d5be/d076ff5）：本地门禁全绿 fmt=0、clippy=0、cargo test 369 通过
-  4. GATES.md 门禁速查卡落盘；MASTER 增加规划/执行角色分工硬约束
+  1. 扫描分析五件套（含 routes-inventory/types-migration-map）+ 基线修复入库 + 门禁全绿（fmt=0/clippy=0/test 369 通过）
+  2. **方向修正落地**：用户痛点口述存档 feedback.md → `docs/plan/prd-v1.md`（痛点根因诊断+可测验收口径）→ task-breakdown v4 功能里程碑主轴（M-A 可信中文检索 / M-B 可信深度分析 / M-C 全流程贯通）；v3 结构任务归档或挂载
+  3. GATES.md 门禁速查卡；规划/执行角色分工硬约束
 - **⚠️ 环境警报**：D 盘曾剩 0.7GB（target 占 8.4GB，已 cargo clean → 7.5GB）。**执行 agent 开工前必查 `Get-PSDrive D`，<5GB 先 clean**
 - **执行 agent 下一步（按序）**：
   1. T0.5 切 dev 合 main（dev 落后 main，先 `git checkout dev && git merge main`）
   2. T0.6 推送 main+dev 双远端激活 CI（领先远端 60+/36 提交从未过 CI）
   3. T0.2 / T0.3 / T0.4 / T0.7 / T0.8 并行认领；T0.9 提醒用户
-  4. Phase 1 启动：T1.1 按 types-migration-map 施工
-- **已知风险提醒**：/api/search/vector 中文查询 panic（T2.2 修）；Docker 出口损坏（T0.7 修）；.env 明文密钥（T0.9 用户动作）；mcp-server 未接线函数带 allow(dead_code)+T6.4 标注
+  4. **M-A 开工**：MA1 SearchProvider 多源框架（前置：T1.1 缩水版类型地基，只拆 search/patent/chat/idea 四域）
+- **已知风险提醒**：/api/search/vector 中文 panic（MB3 修）；Docker 出口损坏（T0.7 修）；.env 明文密钥（T0.9 用户动作）；mcp-server 未接线函数带 allow(dead_code) 标注保留
 
 ## 6. 会话记录（追加式，保留历史）
 
