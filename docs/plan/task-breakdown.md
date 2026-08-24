@@ -9,14 +9,16 @@
 
 ## 里程碑 M-A 可信中文检索（承载 PRD N1-N4）
 
+> **施工规格书：`docs/analysis/search-sources-spec.md`**（统一契约/各源端点与坑位/执行链策略/冒烟清单）——MA1/MA2/MA3/MA5 开工前必读，规格中 ⚠️ 实证项必须逐条附证据。
+
 | # | 任务 | 内容与验收标准 | 依赖 |
 |---|------|----------------|------|
-| MA1 | SearchProvider 多源框架 | 落地 SearchProvider trait（原 T2.1）：SerpAPI 迁入为首个实现；定义统一的 SearchQuery{keyword, country, language, assignee, …}/SearchResult 契约 | T1 地基 |
-| MA2 | 备用源接入 ≥2 个 | EPO OPS（biblio 已有雏形）+ Google Patents 直抓（patents.google.com 支持 cn），各自实现 trait；**验收：人为禁用 SerpAPI 后自动降级仍出结果，诊断面板标红失败源** | MA1 |
-| MA3 | 中文/CN 一等公民 | query 构造显式 country/language 参数；检索页新增辖区+语言过滤（默认 CN+zh）；**验收：默认配置中文关键词首页以中文专利为主** | MA1 |
-| MA4 | 召回增强 | 申请人精确匹配模式（assignee 精确 vs 模糊开关）；结果强制入库+FTS 自动同步（修手动同步脆弱点）；**验收：本人姓名可搜到自己名下专利；检索过的专利断网可复检** | MA1 |
-| MA5 | 检索诊断面板 | 每次检索返回各源状态（成功/失败/耗时/命中数），前端展示；**验收：任一次失败可在面板看到哪个源为什么失败** | MA2 |
-| MA6 | SerpAPI 稳健化 | 多 Key 轮询已有，补充配额耗尽预警、超时分级、错误信息用户可读化 | MA1 |
+| MA1 | SearchProvider 多源框架 | 落地 SearchProvider trait（原 T2.1）：按规格书§1 契约建模；SerpAPI 迁入为首个实现（从 routes/search.rs 抽出，行为保持） | T1 地基 |
+| MA2 | 备用源接入 ≥2 个 | Google Patents XHR 直抓（免费无 Key，规格书§2，含限速退避）+ EPO OPS（规格书§4）；**验收：人为禁用 SerpAPI 后自动降级仍出结果，诊断面板标红失败源** | MA1 |
+| MA3 | 中文/CN 一等公民 | query 渲染显式 country/language；检索页新增辖区+语言过滤（默认 CN+zh）；**验收：默认配置中文关键词首页以中文专利为主** | MA1 |
+| MA4 | 召回增强 | 申请人精确匹配模式；结果强制入库+FTS 自动同步（单一写入口，规格书§7）；**验收：本人姓名可搜到自己名下专利；检索过的专利断网可复检** | MA1 |
+| MA5 | 检索诊断面板 | AttemptReport 全量展示（源/状态/耗时/命中/用户可读错误）；前端新增面板；**验收：任一次失败可看到哪个源为什么失败** | MA2 |
+| MA6 | SerpAPI 稳健化 | 配额预警接诊断面板、超时分级、错误信息用户可读化、熔断冷却（规格书§1 FailKind） | MA1 |
 
 ## 里程碑 M-B 可信深度分析（承载 PRD N5-N8，依赖 M-A 全文获取）
 

@@ -19,6 +19,7 @@
 | `docs/progress/GATES.md` | 门禁速查卡（可复制命令） | **每个任务收尾时** |
 | `docs/plan/milestones.md` | 里程碑判定（M0-M5，结构版措辞以 v4 为准） | 每里程碑收尾时 |
 | `docs/plan/delivery-boundary.md` | 0.1.0 交付边界声明 | 发布前 |
+| `docs/analysis/search-sources-spec.md` | **M-A 施工规格书**（统一契约/各源端点与坑位/执行链策略/冒烟清单） | **M-A 任何任务开工前** |
 | `docs/analysis/routes-inventory.md` | 118 条路由防丢失基准表 | 动路由的任务 |
 | `docs/analysis/types-migration-map.md` | 类型迁移施工图纸 | T1.1 及动类型前 |
 | `docs/analysis/module-inventory.md` | 模块评分、行号级病灶证据 | 动对应模块前 |
