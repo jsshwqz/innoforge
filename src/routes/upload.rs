@@ -348,9 +348,16 @@ pub async fn api_upload_extract(
         return Json(json!({"error": "缺少文件"}));
     }
 
-    tracing::info!("[EXTRACT] file_name={}, size={}, has_pdf_header={}", 
-        file_name, file_bytes.len(), 
-        if file_name.to_lowercase().ends_with(".pdf") { has_pdf_header(&file_bytes).to_string() } else { "N/A".to_string() });
+    tracing::info!(
+        "[EXTRACT] file_name={}, size={}, has_pdf_header={}",
+        file_name,
+        file_bytes.len(),
+        if file_name.to_lowercase().ends_with(".pdf") {
+            has_pdf_header(&file_bytes).to_string()
+        } else {
+            "N/A".to_string()
+        }
+    );
 
     let ext = file_name.rsplit('.').next().unwrap_or("").to_lowercase();
     if ext == "pdf" && !has_pdf_header(&file_bytes) {
@@ -423,8 +430,12 @@ pub async fn api_upload_extract(
         }
     };
 
-    tracing::info!("[EXTRACT] result: file_type={}, text_len={}, preview={}", 
-        ext, text.len(), text.chars().take(80).collect::<String>());
+    tracing::info!(
+        "[EXTRACT] result: file_type={}, text_len={}, preview={}",
+        ext,
+        text.len(),
+        text.chars().take(80).collect::<String>()
+    );
     Json(json!({
         "text": text.chars().take(50000).collect::<String>(),
         "file_type": ext,
@@ -459,9 +470,12 @@ async fn extract_pdf_via_ai_vision(
 
     let page_count: usize = match output {
         Ok(o) if o.status.success() => {
-            let n = String::from_utf8_lossy(&o.stdout).trim().parse().unwrap_or(0);
+            let n = String::from_utf8_lossy(&o.stdout)
+                .trim()
+                .parse()
+                .unwrap_or(0);
             n
-        },
+        }
         Ok(o) => {
             let stderr = String::from_utf8_lossy(&o.stderr);
             return Err(format!(
@@ -510,8 +524,10 @@ async fn extract_pdf_text(data: &[u8]) -> Result<String, String> {
     // Step 1: Rust pdf-extract (standard mode, good for simple layouts)
     if let Ok(text) = pdf_extract::extract_text_from_mem(data) {
         let trimmed = text.trim().to_string();
-        let is_error = trimmed.contains("MuPDF error") || trimmed.contains("mupdf error")
-            || trimmed.contains("zlib error") || trimmed.contains("PDF error");
+        let is_error = trimmed.contains("MuPDF error")
+            || trimmed.contains("mupdf error")
+            || trimmed.contains("zlib error")
+            || trimmed.contains("PDF error");
         if !trimmed.is_empty() && !is_error {
             return Ok(text);
         }
@@ -519,8 +535,10 @@ async fn extract_pdf_text(data: &[u8]) -> Result<String, String> {
     // Step 2: Rust pdf-extract by-pages (better for multi-column Chinese patents)
     if let Ok(text) = extract_pdf_text_by_pages(data) {
         let trimmed = text.trim().to_string();
-        let is_error = trimmed.contains("MuPDF error") || trimmed.contains("mupdf error")
-            || trimmed.contains("zlib error") || trimmed.contains("PDF error");
+        let is_error = trimmed.contains("MuPDF error")
+            || trimmed.contains("mupdf error")
+            || trimmed.contains("zlib error")
+            || trimmed.contains("PDF error");
         if !trimmed.is_empty() && !is_error {
             return Ok(text);
         }
@@ -528,8 +546,10 @@ async fn extract_pdf_text(data: &[u8]) -> Result<String, String> {
     // Step 3: pdftotext (poppler, handles malformed PDFs well)
     if let Ok(text) = extract_pdf_text_pdftotext(data) {
         let trimmed = text.trim();
-        let is_error = trimmed.contains("MuPDF error") || trimmed.contains("mupdf error")
-            || trimmed.contains("zlib error") || trimmed.contains("PDF error");
+        let is_error = trimmed.contains("MuPDF error")
+            || trimmed.contains("mupdf error")
+            || trimmed.contains("zlib error")
+            || trimmed.contains("PDF error");
         if !trimmed.is_empty() && !is_error {
             return Ok(text);
         }
@@ -537,8 +557,10 @@ async fn extract_pdf_text(data: &[u8]) -> Result<String, String> {
     // Step 4: PyMuPDF (Python fitz)
     if let Ok(text) = extract_pdf_text_pymupdf(data) {
         let trimmed = text.trim();
-        let is_error = trimmed.contains("MuPDF error") || trimmed.contains("mupdf error")
-            || trimmed.contains("zlib error") || trimmed.contains("PDF error");
+        let is_error = trimmed.contains("MuPDF error")
+            || trimmed.contains("mupdf error")
+            || trimmed.contains("zlib error")
+            || trimmed.contains("PDF error");
         if !trimmed.is_empty() && !is_error {
             return Ok(text);
         }
@@ -546,8 +568,10 @@ async fn extract_pdf_text(data: &[u8]) -> Result<String, String> {
     // Step 5: Tesseract OCR (handles scanned/special font PDFs)
     if let Ok(text) = extract_pdf_text_ocr(data) {
         let trimmed = text.trim();
-        let is_error = trimmed.contains("MuPDF error") || trimmed.contains("mupdf error")
-            || trimmed.contains("zlib error") || trimmed.contains("PDF error");
+        let is_error = trimmed.contains("MuPDF error")
+            || trimmed.contains("mupdf error")
+            || trimmed.contains("zlib error")
+            || trimmed.contains("PDF error");
         if !trimmed.is_empty() && !is_error {
             return Ok(text);
         }

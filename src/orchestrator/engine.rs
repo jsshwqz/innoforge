@@ -134,7 +134,9 @@ impl Orchestrator {
                         &serde_json::to_string(&ctx).unwrap_or_default(),
                         &format!("{:?}", step),
                     );
-                    let _ = self.db.upsert_research_state(&ctx.idea_id, &ctx.research_state);
+                    let _ = self
+                        .db
+                        .upsert_research_state(&ctx.idea_id, &ctx.research_state);
                     super::save_version_snapshot(&self.db, &ctx, step);
 
                     // Run reflection + debate for LLM steps (multi-agent pipeline)
@@ -147,18 +149,27 @@ impl Orchestrator {
                     }
 
                     // Run debate after ScoreNovelty or DetectContradictions
-                    if step == PipelineStep::ScoreNovelty || step == PipelineStep::DetectContradictions {
+                    if step == PipelineStep::ScoreNovelty
+                        || step == PipelineStep::DetectContradictions
+                    {
                         let debate = steps::debate::run_debate(&ctx);
                         ctx.debate_results.push(debate);
                     }
 
                     // Auto-retry if reflection says quality too low
-                    let needs_retry = ctx.reflection_history.last()
+                    let needs_retry = ctx
+                        .reflection_history
+                        .last()
                         .map(|r| r.needs_retry && r.evaluated_step == format!("{:?}", step))
                         .unwrap_or(false);
-                    if needs_retry && ctx.retry_count < 3 && step_clone.step_type() == StepType::Llm {
+                    if needs_retry && ctx.retry_count < 3 && step_clone.step_type() == StepType::Llm
+                    {
                         ctx.retry_count += 1;
-                        tracing::info!("Reflection triggered auto-retry of {:?} (attempt {})", step_clone, ctx.retry_count);
+                        tracing::info!(
+                            "Reflection triggered auto-retry of {:?} (attempt {})",
+                            step_clone,
+                            ctx.retry_count
+                        );
                         self.inject_command(OrchestratorCommand::Retry { max_attempts: 3 });
                         continue;
                     }
@@ -358,8 +369,15 @@ fn should_fallback_diversity(
 }
 
 /// Get the latest reflection result for a specific step.
-fn last_reflection_for_step(ctx: &PipelineContext, step: &PipelineStep) -> Option<crate::pipeline::context::ReflectionResult> {
-    ctx.reflection_history.iter().rev().find(|r| r.evaluated_step == format!("{:?}", step)).cloned()
+fn last_reflection_for_step(
+    ctx: &PipelineContext,
+    step: &PipelineStep,
+) -> Option<crate::pipeline::context::ReflectionResult> {
+    ctx.reflection_history
+        .iter()
+        .rev()
+        .find(|r| r.evaluated_step == format!("{:?}", step))
+        .cloned()
 }
 
 #[cfg(test)]

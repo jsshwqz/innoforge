@@ -7,7 +7,10 @@ use axum::{
 
 fn no_cache_headers() -> [(String, String); 3] {
     [
-        ("Cache-Control".to_string(), "no-cache, no-store, must-revalidate".to_string()),
+        (
+            "Cache-Control".to_string(),
+            "no-cache, no-store, must-revalidate".to_string(),
+        ),
         ("Pragma".to_string(), "no-cache".to_string()),
         ("Expires".to_string(), "0".to_string()),
     ]
@@ -30,19 +33,35 @@ pub async fn search_page() -> Response {
 }
 
 pub async fn ai_page() -> Response {
-    (no_cache_headers(), Html(include_str!("../../templates/ai.html").to_string())).into_response()
+    (
+        no_cache_headers(),
+        Html(include_str!("../../templates/ai.html").to_string()),
+    )
+        .into_response()
 }
 
 pub async fn compare_page() -> Response {
-    (no_cache_headers(), Html(include_str!("../../templates/compare.html").to_string())).into_response()
+    (
+        no_cache_headers(),
+        Html(include_str!("../../templates/compare.html").to_string()),
+    )
+        .into_response()
 }
 
 pub async fn idea_page() -> Response {
-    (no_cache_headers(), Html(include_str!("../../templates/idea.html").to_string())).into_response()
+    (
+        no_cache_headers(),
+        Html(include_str!("../../templates/idea.html").to_string()),
+    )
+        .into_response()
 }
 
 pub async fn settings_page() -> Response {
-    (no_cache_headers(), Html(include_str!("../../templates/settings.html").to_string())).into_response()
+    (
+        no_cache_headers(),
+        Html(include_str!("../../templates/settings.html").to_string()),
+    )
+        .into_response()
 }
 
 pub async fn office_action_response_page() -> Response {

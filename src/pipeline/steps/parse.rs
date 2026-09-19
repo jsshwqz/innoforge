@@ -24,7 +24,11 @@ const EN_STOPWORDS: &[&str] = &[
 ];
 
 pub fn tokenize(text: &str) -> Vec<String> {
-    let stopwords: HashSet<&str> = ZH_STOPWORDS.iter().chain(EN_STOPWORDS.iter()).copied().collect();
+    let stopwords: HashSet<&str> = ZH_STOPWORDS
+        .iter()
+        .chain(EN_STOPWORDS.iter())
+        .copied()
+        .collect();
     let mut tokens = Vec::new();
     let mut current_ascii = String::new();
     let chars: Vec<char> = text.chars().collect();
@@ -81,26 +85,112 @@ fn extract_keywords(text: &str, max_keywords: usize) -> Vec<String> {
     }
     let mut sorted: Vec<_> = freq.into_iter().collect();
     sorted.sort_by_key(|item| std::cmp::Reverse(item.1));
-    sorted.into_iter().take(max_keywords).map(|(k, _)| k).collect()
+    sorted
+        .into_iter()
+        .take(max_keywords)
+        .map(|(k, _)| k)
+        .collect()
 }
 
 fn infer_domain(keywords: &[String]) -> String {
     let domain_indicators: &[(&[&str], &str)] = &[
-        (&["电池", "锂", "充电", "能量", "储能", "电极", "battery", "lithium", "energy"], "新能源/电池技术"),
-        (&["芯片", "半导体", "晶圆", "集成电路", "chip", "semiconductor", "wafer"], "半导体/集成电路"),
-        (&["算法", "模型", "神经网络", "深度学习", "ai", "machine", "learning", "neural"], "人工智能/机器学习"),
-        (&["药物", "蛋白", "基因", "细胞", "抗体", "drug", "protein", "gene", "cell"], "生物医药"),
-        (&["机器人", "传感器", "控制", "自动", "robot", "sensor", "control", "autonomous"], "机器人/自动化"),
-        (&["通信", "信号", "频率", "天线", "5g", "6g", "wireless", "antenna"], "通信技术"),
-        (&["材料", "合金", "涂层", "纳米", "material", "alloy", "coating", "nano"], "新材料"),
-        (&["发动机", "飞行", "航空", "推进", "engine", "flight", "aviation", "propulsion"], "航空航天"),
-        (&["阀门", "流量", "管道", "液压", "valve", "flow", "pipe", "hydraulic"], "流体控制/阀门"),
+        (
+            &[
+                "电池", "锂", "充电", "能量", "储能", "电极", "battery", "lithium", "energy",
+            ],
+            "新能源/电池技术",
+        ),
+        (
+            &[
+                "芯片",
+                "半导体",
+                "晶圆",
+                "集成电路",
+                "chip",
+                "semiconductor",
+                "wafer",
+            ],
+            "半导体/集成电路",
+        ),
+        (
+            &[
+                "算法",
+                "模型",
+                "神经网络",
+                "深度学习",
+                "ai",
+                "machine",
+                "learning",
+                "neural",
+            ],
+            "人工智能/机器学习",
+        ),
+        (
+            &[
+                "药物", "蛋白", "基因", "细胞", "抗体", "drug", "protein", "gene", "cell",
+            ],
+            "生物医药",
+        ),
+        (
+            &[
+                "机器人",
+                "传感器",
+                "控制",
+                "自动",
+                "robot",
+                "sensor",
+                "control",
+                "autonomous",
+            ],
+            "机器人/自动化",
+        ),
+        (
+            &[
+                "通信", "信号", "频率", "天线", "5g", "6g", "wireless", "antenna",
+            ],
+            "通信技术",
+        ),
+        (
+            &[
+                "材料", "合金", "涂层", "纳米", "material", "alloy", "coating", "nano",
+            ],
+            "新材料",
+        ),
+        (
+            &[
+                "发动机",
+                "飞行",
+                "航空",
+                "推进",
+                "engine",
+                "flight",
+                "aviation",
+                "propulsion",
+            ],
+            "航空航天",
+        ),
+        (
+            &[
+                "阀门",
+                "流量",
+                "管道",
+                "液压",
+                "valve",
+                "flow",
+                "pipe",
+                "hydraulic",
+            ],
+            "流体控制/阀门",
+        ),
     ];
     let keywords_lower: Vec<String> = keywords.iter().map(|k| k.to_lowercase()).collect();
     let mut best_domain = "通用技术";
     let mut best_score = 0;
     for (indicators, domain) in domain_indicators {
-        let score = indicators.iter().filter(|ind| keywords_lower.iter().any(|k| k.contains(*ind))).count();
+        let score = indicators
+            .iter()
+            .filter(|ind| keywords_lower.iter().any(|k| k.contains(*ind)))
+            .count();
         if score > best_score {
             best_score = score;
             best_domain = domain;

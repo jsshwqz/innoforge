@@ -13,9 +13,9 @@
 //! See `common.rs` for shared initialization, route registration, and asset serving.
 
 mod ai;
-pub(crate) mod context;
 mod cad;
 pub mod common;
+pub(crate) mod context;
 mod db;
 mod docx_export;
 mod error;
