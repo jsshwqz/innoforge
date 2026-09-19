@@ -42,11 +42,11 @@ pub use settings::*;
 pub use upload::*;
 
 use crate::{ai::AiClient, db::Database, pipeline::context::PipelineProgress};
+use base64::Engine;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
-use base64::Engine;
 use tokio::sync::broadcast;
 
 /// Round-robin counter for SerpAPI multi-key rotation.
@@ -535,14 +535,16 @@ pub(crate) fn image_data_uri(b64: &str) -> Option<String> {
         return Some(trimmed.to_string());
     }
     // 解码并检测 MIME
-    let decoded = base64::engine::general_purpose::STANDARD.decode(trimmed).ok()?;
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(trimmed)
+        .ok()?;
     if decoded.len() < 4 {
         return None;
     }
-    let mime = match (&decoded[0..4]) {
-        [0x89, 0x50, 0x4E, 0x47] => "png",      // PNG: 89 50 4E 47
-        [0xFF, 0xD8, 0xFF, _] => "jpeg",        // JPEG: FF D8 FF xx
-        [0x47, 0x49, 0x46, _] => "gif",         // GIF: 47 49 46 38/89a
+    let mime = match &decoded[0..4] {
+        [0x89, 0x50, 0x4E, 0x47] => "png", // PNG: 89 50 4E 47
+        [0xFF, 0xD8, 0xFF, _] => "jpeg",   // JPEG: FF D8 FF xx
+        [0x47, 0x49, 0x46, _] => "gif",    // GIF: 47 49 46 38/89a
         _ => {
             // WebP: RIFF....WEBP（第 8–11 字节为 "WEBP"）
             if decoded.len() >= 12 && &decoded[8..12] == b"WEBP" {

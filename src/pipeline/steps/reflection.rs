@@ -1,5 +1,5 @@
 /// Reflection Agent - deterministic quality scorer
-use crate::pipeline::context::{ReflectionResult, AgentOutput, PipelineContext};
+use crate::pipeline::context::{AgentOutput, PipelineContext, ReflectionResult};
 
 const RETRY_THRESHOLD: f64 = 0.5;
 const MAX_RETRIES: u32 = 2;
@@ -19,22 +19,29 @@ pub fn evaluate(ctx: &PipelineContext) -> ReflectionResult {
     let completeness = score_completeness(ctx);
     result.completeness_score = completeness;
     if completeness < 0.4 {
-        result.improvement_suggestions.push("Analysis lacks key dimensions - consider more diverse sources".to_string());
+        result
+            .improvement_suggestions
+            .push("Analysis lacks key dimensions - consider more diverse sources".to_string());
     }
 
     let consistency = score_consistency(ctx);
     result.consistency_score = consistency;
     if consistency < 0.4 {
-        result.improvement_suggestions.push("AI analysis contains contradictions - cross-validate claims".to_string());
+        result
+            .improvement_suggestions
+            .push("AI analysis contains contradictions - cross-validate claims".to_string());
     }
 
     let evidence = score_evidence(ctx);
     result.evidence_score = evidence;
     if evidence < 0.4 {
-        result.improvement_suggestions.push("Insufficient evidence support - add more patent/web references".to_string());
+        result
+            .improvement_suggestions
+            .push("Insufficient evidence support - add more patent/web references".to_string());
     }
 
-    result.quality_score = (completeness * 0.35 + consistency * 0.35 + evidence * 0.30).clamp(0.0, 1.0);
+    result.quality_score =
+        (completeness * 0.35 + consistency * 0.35 + evidence * 0.30).clamp(0.0, 1.0);
 
     result.needs_retry = result.quality_score < RETRY_THRESHOLD;
     if result.needs_retry {
@@ -75,7 +82,9 @@ fn score_completeness(ctx: &PipelineContext) -> f64 {
     }
     total += 0.5;
 
-    if total == 0.0 { return 0.0; }
+    if total == 0.0 {
+        return 0.0;
+    }
     (filled / total).clamp(0.0, 1.0)
 }
 
@@ -83,19 +92,24 @@ fn score_consistency(ctx: &PipelineContext) -> f64 {
     let mut score = 1.0;
 
     for c in &ctx.contradictions {
-        if c.signal_strength > 0.7 { score -= 0.2; }
-        else if c.signal_strength > 0.3 { score -= 0.1; }
+        if c.signal_strength > 0.7 {
+            score -= 0.2;
+        } else if c.signal_strength > 0.3 {
+            score -= 0.1;
+        }
     }
 
-    if ctx.novelty_score < 20.0 && !ctx.ai_analysis.is_empty() {
-        if ctx.ai_analysis.contains("高度新颖") || ctx.ai_analysis.contains("highly novel") {
-            score -= 0.3;
-        }
+    if ctx.novelty_score < 20.0
+        && !ctx.ai_analysis.is_empty()
+        && (ctx.ai_analysis.contains("高度新颖") || ctx.ai_analysis.contains("highly novel"))
+    {
+        score -= 0.3;
     }
-    if ctx.novelty_score > 80.0 && !ctx.ai_analysis.is_empty() {
-        if ctx.ai_analysis.contains("新颖性很低") || ctx.ai_analysis.contains("very low novelty") {
-            score -= 0.3;
-        }
+    if ctx.novelty_score > 80.0
+        && !ctx.ai_analysis.is_empty()
+        && (ctx.ai_analysis.contains("新颖性很低") || ctx.ai_analysis.contains("very low novelty"))
+    {
+        score -= 0.3;
     }
 
     for ao in &ctx.agent_outputs {
@@ -111,7 +125,8 @@ fn score_evidence(ctx: &PipelineContext) -> f64 {
     let mut total = 1.0;
 
     if !ctx.evidence_chain.is_empty() {
-        let avg = ctx.evidence_chain.iter().map(|e| e.confidence).sum::<f64>() / ctx.evidence_chain.len() as f64;
+        let avg = ctx.evidence_chain.iter().map(|e| e.confidence).sum::<f64>()
+            / ctx.evidence_chain.len() as f64;
         score += avg.min(1.0);
     }
     total += 1.0;
@@ -121,19 +136,27 @@ fn score_evidence(ctx: &PipelineContext) -> f64 {
     }
     total += 0.8;
 
-    if !ctx.prior_art_clusters.is_empty() { score += 0.5; }
+    if !ctx.prior_art_clusters.is_empty() {
+        score += 0.5;
+    }
     total += 0.5;
 
     score += ctx.diversity_score.min(1.0) * 0.5;
     total += 0.5;
 
-    if total == 0.0 { return 0.0; }
+    if total == 0.0 {
+        return 0.0;
+    }
     (score / total).clamp(0.0, 1.0)
 }
 
 pub fn should_retry(ctx: &PipelineContext, step: &crate::pipeline::state::PipelineStep) -> bool {
-    if ctx.retry_count >= MAX_RETRIES { return false; }
-    if step.step_type() != crate::pipeline::state::StepType::Llm { return false; }
+    if ctx.retry_count >= MAX_RETRIES {
+        return false;
+    }
+    if step.step_type() != crate::pipeline::state::StepType::Llm {
+        return false;
+    }
     if let Some(refr) = ctx.reflection_history.last() {
         if refr.evaluated_step == format!("{:?}", step) {
             return refr.needs_retry;
@@ -142,7 +165,11 @@ pub fn should_retry(ctx: &PipelineContext, step: &crate::pipeline::state::Pipeli
     false
 }
 
-pub fn record_agent_output(ctx: &mut PipelineContext, step: &crate::pipeline::state::PipelineStep, content: &str) -> AgentOutput {
+pub fn record_agent_output(
+    ctx: &mut PipelineContext,
+    step: &crate::pipeline::state::PipelineStep,
+    content: &str,
+) -> AgentOutput {
     let output = AgentOutput {
         content: content.to_string(),
         confidence: estimate_confidence(ctx, content),
@@ -160,8 +187,12 @@ pub fn record_agent_output(ctx: &mut PipelineContext, step: &crate::pipeline::st
 fn estimate_confidence(ctx: &PipelineContext, content: &str) -> f64 {
     let mut conf = 0.5;
     conf += (content.chars().count() as f64 / 500.0).min(0.3);
-    if !ctx.top_matches.is_empty() { conf += 0.1; }
-    if content.chars().any(|c| c.is_ascii_digit()) { conf += 0.05; }
+    if !ctx.top_matches.is_empty() {
+        conf += 0.1;
+    }
+    if content.chars().any(|c| c.is_ascii_digit()) {
+        conf += 0.05;
+    }
     if content.contains("可能") || content.contains("也许") || content.contains("might") {
         conf -= 0.1;
     }
@@ -170,14 +201,25 @@ fn estimate_confidence(ctx: &PipelineContext, content: &str) -> f64 {
 
 fn extract_evidence_refs(ctx: &PipelineContext) -> Vec<String> {
     let mut refs = Vec::new();
-    for e in &ctx.evidence_chain { refs.push(e.id.clone()); }
+    for e in &ctx.evidence_chain {
+        refs.push(e.id.clone());
+    }
     refs.truncate(20);
     refs
 }
 
 fn detect_uncertainty(content: &str) -> Vec<String> {
     let mut uncertainties = Vec::new();
-    let markers = ["可能", "也许", "尚不确定", "需要进一步验证", "有待商榷", "不确定", "perhaps", "uncertain"];
+    let markers = [
+        "可能",
+        "也许",
+        "尚不确定",
+        "需要进一步验证",
+        "有待商榷",
+        "不确定",
+        "perhaps",
+        "uncertain",
+    ];
     for marker in &markers {
         if content.contains(marker) {
             uncertainties.push(format!("Hedging: '{}' ", marker));
@@ -187,7 +229,10 @@ fn detect_uncertainty(content: &str) -> Vec<String> {
     if content.contains("局限性") || content.contains("limitations") {
         uncertainties.push("Limitations mentioned".to_string());
     }
-    if content.contains("数据不足") || content.contains("证据不足") || content.contains("insufficient data") {
+    if content.contains("数据不足")
+        || content.contains("证据不足")
+        || content.contains("insufficient data")
+    {
         uncertainties.push("Insufficient data warning".to_string());
     }
     uncertainties
@@ -196,8 +241,8 @@ fn detect_uncertainty(content: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pipeline::state::PipelineStep;
     use crate::pipeline::context::Contradiction;
+    use crate::pipeline::state::PipelineStep;
 
     #[test]
     fn empty_context_low_score() {
@@ -208,7 +253,8 @@ mod tests {
     #[test]
     fn filled_context_higher_score() {
         let mut ctx = PipelineContext::new("1", "test", "test");
-        ctx.ai_analysis = "This is a comprehensive analysis covering all aspects of the technology".to_string();
+        ctx.ai_analysis =
+            "This is a comprehensive analysis covering all aspects of the technology".to_string();
         ctx.action_plan = "Implement in phases".to_string();
         ctx.novelty_score = 75.0;
         ctx.diversity_score = 0.8;
@@ -219,8 +265,10 @@ mod tests {
     fn contradictions_lower_consistency() {
         let mut ctx = PipelineContext::new("1", "test", "test");
         ctx.contradictions.push(Contradiction {
-            source_a: "A".into(), source_b: "B".into(),
-            dimension: "Test".into(), signal_strength: 0.9,
+            source_a: "A".into(),
+            source_b: "B".into(),
+            dimension: "Test".into(),
+            signal_strength: 0.9,
             opportunity: "High".into(),
         });
         assert!((evaluate(&ctx).consistency_score) < 1.0);

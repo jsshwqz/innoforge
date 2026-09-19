@@ -1,4 +1,4 @@
-use super::{AppState, image_data_uri};
+use super::{image_data_uri, AppState};
 use crate::patent::*;
 use crate::pipeline::context::{PipelineContext, PipelineProgress, ResearchState};
 use crate::pipeline::runner::PipelineRunner;
@@ -750,7 +750,7 @@ pub async fn api_idea_chat(
             let _ = s.db.save_cost_record_from_client(
                 usage.input_tokens,
                 usage.output_tokens,
-                &ai.model_name().to_string(),
+                ai.model_name(),
                 "idea-chat",
                 "chat",
                 Some(&idea_id),
@@ -784,7 +784,8 @@ pub async fn api_idea_chat(
 
     // Save user message first so it appears in chronological order
     let user_msg_id = uuid::Uuid::new_v4().to_string();
-    let _ = s.db.add_idea_message(&user_msg_id, &idea_id, "user", user_msg);
+    let _ =
+        s.db.add_idea_message(&user_msg_id, &idea_id, "user", user_msg);
 
     // Save AI response to DB
     let ai_msg_id = uuid::Uuid::new_v4().to_string();
@@ -1778,7 +1779,8 @@ pub async fn api_idea_iterate(
         if !idea.discussion_summary.is_empty() {
             let summary: String = idea.discussion_summary.chars().take(700).collect();
             ctx.expanded_queries.push(format!(
-                "讨论已得出定论（请基于此继续深入研究）:\n{}", summary
+                "讨论已得出定论（请基于此继续深入研究）:\n{}",
+                summary
             ));
         }
     }
@@ -2121,15 +2123,35 @@ pub async fn api_idea_memory_add(
     Path(idea_id): Path<String>,
     Json(payload): Json<serde_json::Value>,
 ) -> Json<serde_json::Value> {
-    let concept_name = payload.get("concept_name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let concept_type = payload.get("concept_type").and_then(|v| v.as_str()).unwrap_or("domain_concept").to_string();
-    let content = payload.get("content").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let confidence = payload.get("confidence").and_then(|v| v.as_f64()).unwrap_or(0.5);
+    let concept_name = payload
+        .get("concept_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let concept_type = payload
+        .get("concept_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("domain_concept")
+        .to_string();
+    let content = payload
+        .get("content")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let confidence = payload
+        .get("confidence")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.5);
 
     if concept_name.is_empty() || content.is_empty() {
-        return Json(serde_json::json!({"status": "error", "message": "concept_name and content are required"}));
+        return Json(
+            serde_json::json!({"status": "error", "message": "concept_name and content are required"}),
+        );
     }
-    if !matches!(concept_type.as_str(), "domain_concept" | "decision" | "pattern" | "question") {
+    if !matches!(
+        concept_type.as_str(),
+        "domain_concept" | "decision" | "pattern" | "question"
+    ) {
         return Json(serde_json::json!({"status": "error", "message": "invalid concept_type"}));
     }
 
@@ -2164,44 +2186,51 @@ pub async fn api_idea_memory_delete(
     }
 }
 
-#[cfg(test)]
-mod idea_markdown_tests {
-    use super::inline_md;
-
-    #[test]
-    fn inline_markdown_renders_bold_italic_and_code() {
-        let rendered = inline_md("**bold** *italic* `code`");
-
-        assert!(rendered.contains("<strong>bold</strong>"));
-        assert!(rendered.contains("<em>italic</em>"));
-        assert!(rendered.contains(
-            "<code style='background:#f3f4f6;padding:1px 4px;border-radius:3px;'>code</code>"
-        ));
-    }
-
-    #[test]
-    fn inline_markdown_escapes_html_input() {
-        let rendered = inline_md("<script>alert(1)</script>");
-
-        assert!(rendered.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
-        assert!(!rendered.contains("<script>"));
-    }
-}
-
-
 // ── AI models auto-detect (multi-provider) ──────────────────────────────
 /// 已知 AI 服务商列表，用于多服务商模型自动检测
 /// Each entry: (display_name, base_url, config_key_name)
 const KNOWN_AI_PROVIDERS: &[(&str, &str, &str)] = &[
-    ("DeepSeek", "https://api.deepseek.com/v1", "AI_API_KEY_DEEPSEEK"),
-    ("OpenRouter", "https://openrouter.ai/api/v1", "AI_API_KEY_OPENROUTER"),
+    (
+        "DeepSeek",
+        "https://api.deepseek.com/v1",
+        "AI_API_KEY_DEEPSEEK",
+    ),
+    (
+        "OpenRouter",
+        "https://openrouter.ai/api/v1",
+        "AI_API_KEY_OPENROUTER",
+    ),
     ("OpenAI", "https://api.openai.com/v1", "AI_API_KEY_OPENAI"),
-    ("Qwen", "https://dashscope.aliyuncs.com/compatible-mode/v1", "AI_API_KEY_QWEN"),
-    ("Gemini", "https://generativelanguage.googleapis.com/v1beta/openai/", "AI_API_KEY_GEMINI"),
-    ("Zhipu", "https://open.bigmodel.cn/api/paas/v4", "AI_API_KEY_ZHIPU"),
-    ("Xiaomi", "https://xiaomi-api.example.com/v1", "AI_API_KEY_XIAOMI"),
-    ("SenseTime", "https://token.sensenova.cn/v1", "AI_API_KEY_SENSENOVA"),
-    ("Anthropic", "https://api.anthropic.com", "AI_API_KEY_ANTHROPIC"),
+    (
+        "Qwen",
+        "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "AI_API_KEY_QWEN",
+    ),
+    (
+        "Gemini",
+        "https://generativelanguage.googleapis.com/v1beta/openai/",
+        "AI_API_KEY_GEMINI",
+    ),
+    (
+        "Zhipu",
+        "https://open.bigmodel.cn/api/paas/v4",
+        "AI_API_KEY_ZHIPU",
+    ),
+    (
+        "Xiaomi",
+        "https://xiaomi-api.example.com/v1",
+        "AI_API_KEY_XIAOMI",
+    ),
+    (
+        "SenseTime",
+        "https://token.sensenova.cn/v1",
+        "AI_API_KEY_SENSENOVA",
+    ),
+    (
+        "Anthropic",
+        "https://api.anthropic.com",
+        "AI_API_KEY_ANTHROPIC",
+    ),
     ("Ollama", "http://localhost:11434/v1", "AI_API_KEY"),
 ];
 
@@ -2210,21 +2239,19 @@ pub async fn list_ai_models(
     Query(query): Query<HashMap<String, String>>,
 ) -> Json<serde_json::Value> {
     let db_settings = s.db.get_all_settings().ok().unwrap_or_default();
-    let requested_provider: &str = query
-        .get("provider")
-        .map(|s| s.as_str())
-        .unwrap_or("");
+    let requested_provider: &str = query.get("provider").map(|s| s.as_str()).unwrap_or("");
 
     // Helper: create a model-query task for one provider
     fn make_task(
-        name: &str,
+        _name: &str,
         base_url: &str,
         api_key: &str,
     ) -> tokio::task::JoinHandle<Option<serde_json::Value>> {
         let url = format!("{}/models", base_url.trim_end_matches('/'));
         let key = api_key.to_string();
         tokio::spawn(async move {
-            let resp = match reqwest::Client::new().get(&url)
+            let resp = match reqwest::Client::new()
+                .get(&url)
                 .header("Authorization", format!("Bearer {}", key))
                 .header("Content-Type", "application/json")
                 .send()
@@ -2246,7 +2273,8 @@ pub async fn list_ai_models(
             };
             let arr = data["data"].as_array().or_else(|| data.as_array());
             let models: Vec<serde_json::Value> = match arr {
-                Some(ml) => ml.iter()
+                Some(ml) => ml
+                    .iter()
                     .filter_map(|m| Some(json!({"id": m["id"].as_str()?.to_string()})))
                     .collect(),
                 None => Vec::new(),
@@ -2262,9 +2290,9 @@ pub async fn list_ai_models(
     if !requested_provider.is_empty() {
         // Single-provider mode: query only the requested provider
         let provider_lower = requested_provider.to_lowercase();
-        let match_result = KNOWN_AI_PROVIDERS.iter().find(|(name, _, _)| {
-            name.to_lowercase() == provider_lower
-        });
+        let match_result = KNOWN_AI_PROVIDERS
+            .iter()
+            .find(|(name, _, _)| name.to_lowercase() == provider_lower);
 
         if let Some((name, base_url, db_key)) = match_result {
             let api_key = db_settings.get(*db_key).cloned().unwrap_or_default();
@@ -2313,7 +2341,11 @@ pub async fn list_ai_models(
     } else {
         // Multi-provider mode: query all configured providers
         let mut provider_results: Vec<serde_json::Value> = Vec::new();
-        let mut tasks: Vec<(String, String, tokio::task::JoinHandle<Option<serde_json::Value>>)> = Vec::new();
+        let mut tasks: Vec<(
+            String,
+            String,
+            tokio::task::JoinHandle<Option<serde_json::Value>>,
+        )> = Vec::new();
 
         for (name, base_url, db_key) in KNOWN_AI_PROVIDERS {
             let api_key = db_settings.get(*db_key).cloned().unwrap_or_default();
@@ -2321,7 +2353,11 @@ pub async fn list_ai_models(
             if !is_ollama && (api_key.is_empty() || api_key == "your-serpapi-key-here") {
                 continue;
             }
-            let key = if is_ollama { String::new() } else { api_key.clone() };
+            let key = if is_ollama {
+                String::new()
+            } else {
+                api_key.clone()
+            };
 
             let name_clone = name.to_string();
             let base_url_resp = base_url.to_string();
@@ -2364,7 +2400,8 @@ pub async fn list_ai_models(
             }
         }
 
-        let total_count: usize = provider_results.iter()
+        let total_count: usize = provider_results
+            .iter()
             .map(|p| p["count"].as_u64().unwrap_or(0) as usize)
             .sum();
 
@@ -2373,5 +2410,29 @@ pub async fn list_ai_models(
             "providers": provider_results,
             "total_count": total_count
         }))
+    }
+}
+
+#[cfg(test)]
+mod idea_markdown_tests {
+    use super::inline_md;
+
+    #[test]
+    fn inline_markdown_renders_bold_italic_and_code() {
+        let rendered = inline_md("**bold** *italic* `code`");
+
+        assert!(rendered.contains("<strong>bold</strong>"));
+        assert!(rendered.contains("<em>italic</em>"));
+        assert!(rendered.contains(
+            "<code style='background:#f3f4f6;padding:1px 4px;border-radius:3px;'>code</code>"
+        ));
+    }
+
+    #[test]
+    fn inline_markdown_escapes_html_input() {
+        let rendered = inline_md("<script>alert(1)</script>");
+
+        assert!(rendered.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
+        assert!(!rendered.contains("<script>"));
     }
 }

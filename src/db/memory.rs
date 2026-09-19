@@ -33,7 +33,9 @@ impl Database {
     }
 
     pub fn save_memory_batch(&self, entries: &[IdeaMemory]) -> Result<(), rusqlite::Error> {
-        if entries.is_empty() { return Ok(()); }
+        if entries.is_empty() {
+            return Ok(());
+        }
         let mut c = self.conn();
         let tx = c.transaction()?;
         for entry in entries {
@@ -59,38 +61,64 @@ impl Database {
         )?;
         let rows = stmt.query_map(rusqlite::params![idea_id], |row: &rusqlite::Row| {
             Ok(IdeaMemory {
-                id: row.get(0)?, idea_id: row.get(1)?, concept_name: row.get(2)?,
-                concept_type: row.get(3)?, content: row.get(4)?, confidence: row.get(5)?,
-                source_step: row.get(6)?, created_at: row.get(7)?, updated_at: row.get(8)?,
+                id: row.get(0)?,
+                idea_id: row.get(1)?,
+                concept_name: row.get(2)?,
+                concept_type: row.get(3)?,
+                content: row.get(4)?,
+                confidence: row.get(5)?,
+                source_step: row.get(6)?,
+                created_at: row.get(7)?,
+                updated_at: row.get(8)?,
             })
         })?;
         let mut entries = Vec::new();
-        for row in rows { entries.push(row?); }
+        for row in rows {
+            entries.push(row?);
+        }
         Ok(entries)
     }
 
-    pub fn get_memory_by_type(&self, idea_id: &str, concept_type: &str) -> Result<Vec<IdeaMemory>, rusqlite::Error> {
+    pub fn get_memory_by_type(
+        &self,
+        idea_id: &str,
+        concept_type: &str,
+    ) -> Result<Vec<IdeaMemory>, rusqlite::Error> {
         let c = self.conn();
         let mut stmt = c.prepare(
             "SELECT id, idea_id, concept_name, concept_type, content, confidence, source_step, created_at, updated_at
              FROM idea_memory WHERE idea_id = ?1 AND concept_type = ?2
              ORDER BY updated_at DESC",
         )?;
-        let rows = stmt.query_map(rusqlite::params![idea_id, concept_type], |row: &rusqlite::Row| {
-            Ok(IdeaMemory {
-                id: row.get(0)?, idea_id: row.get(1)?, concept_name: row.get(2)?,
-                concept_type: row.get(3)?, content: row.get(4)?, confidence: row.get(5)?,
-                source_step: row.get(6)?, created_at: row.get(7)?, updated_at: row.get(8)?,
-            })
-        })?;
+        let rows = stmt.query_map(
+            rusqlite::params![idea_id, concept_type],
+            |row: &rusqlite::Row| {
+                Ok(IdeaMemory {
+                    id: row.get(0)?,
+                    idea_id: row.get(1)?,
+                    concept_name: row.get(2)?,
+                    concept_type: row.get(3)?,
+                    content: row.get(4)?,
+                    confidence: row.get(5)?,
+                    source_step: row.get(6)?,
+                    created_at: row.get(7)?,
+                    updated_at: row.get(8)?,
+                })
+            },
+        )?;
         let mut entries = Vec::new();
-        for row in rows { entries.push(row?); }
+        for row in rows {
+            entries.push(row?);
+        }
         Ok(entries)
     }
 
     pub fn delete_memory(&self, idea_id: &str, entry_id: &str) -> Result<(), rusqlite::Error> {
         let c = self.conn();
-        c.execute("DELETE FROM idea_memory WHERE idea_id = ?1 AND id = ?2", rusqlite::params![idea_id, entry_id])?;
+        c.execute(
+            "DELETE FROM idea_memory WHERE idea_id = ?1 AND id = ?2",
+            rusqlite::params![idea_id, entry_id],
+        )?;
         Ok(())
     }
 
@@ -106,8 +134,8 @@ impl Database {
             Ok((t, cnt))
         })?;
         let mut map = serde_json::Map::new();
-        for row in rows {
-            if let Ok((t, cnt)) = row { map.insert(t, serde_json::json!(cnt)); }
+        for (t, cnt) in rows.flatten() {
+            map.insert(t, serde_json::json!(cnt));
         }
         let total: i64 = map.values().map(|v| v.as_i64().unwrap_or(0)).sum();
         Ok(serde_json::json!({ "total": total, "by_type": serde_json::Value::Object(map) }))
@@ -119,11 +147,15 @@ mod tests {
     use super::*;
     fn make_entry(id: &str) -> IdeaMemory {
         IdeaMemory {
-            id: id.to_string(), idea_id: "idea-1".to_string(),
-            concept_name: "固态电解质".to_string(), concept_type: "domain_concept".to_string(),
+            id: id.to_string(),
+            idea_id: "idea-1".to_string(),
+            concept_name: "固态电解质".to_string(),
+            concept_type: "domain_concept".to_string(),
             content: "硫化物基固态电解质具有高离子电导率".to_string(),
-            confidence: 0.85, source_step: Some("AiDeepAnalysis".to_string()),
-            created_at: "2026-01-01".to_string(), updated_at: "2026-01-01".to_string(),
+            confidence: 0.85,
+            source_step: Some("AiDeepAnalysis".to_string()),
+            created_at: "2026-01-01".to_string(),
+            updated_at: "2026-01-01".to_string(),
         }
     }
     #[test]
@@ -156,7 +188,9 @@ mod tests {
         db.save_memory_batch(&entries).expect("save");
         let all = db.get_memory_entries("idea-1").expect("get");
         assert_eq!(all.len(), 2);
-        let concepts = db.get_memory_by_type("idea-1", "domain_concept").expect("filter");
+        let concepts = db
+            .get_memory_by_type("idea-1", "domain_concept")
+            .expect("filter");
         assert_eq!(concepts.len(), 1);
     }
 }

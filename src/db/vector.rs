@@ -47,10 +47,8 @@ impl Database {
             }
         })?;
 
-        for row in rows {
-            if let Ok(emb) = row {
-                return Ok(Some(emb));
-            }
+        if let Some(emb) = rows.flatten().next() {
+            return Ok(Some(emb));
         }
         Ok(None)
     }
