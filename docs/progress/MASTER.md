@@ -74,9 +74,9 @@
 
 ## 5. 当前状态（每 session 开始/结束更新此节）
 
-> **🤝 交接状态（2026-09-19 第六次更新）：第 0 段清场已完成并以 [PR #9](https://github.com/jsshwqz/innoforge/pull/9) 交付（分支 `exec/stage0-triage`，base main），合并由用户审阅决定，执行 agent 未自行合并、未 push main。下一位执行 agent 从"下一步"第 1 项（T0.5 切 dev 合 main）接手；M-A 施工须等 PR #9 合并后从含清场提交的主干开分支，否则分支上仍带着 main 的 178 处 fmt 漂移（clippy 门禁红项见"已知风险"）。**
+> **🤝 交接状态（2026-09-19 第七次更新）：第 0 段清场已完成并以 [PR #9](https://github.com/jsshwqz/innoforge/pull/9) 交付（分支 `exec/stage0-triage`，base main）；同分支已追加 origin/main 血统对齐 merge `844143f`，PR #9 由 CONFLICTING 转 **MERGEABLE**。两次交付均由用户审阅决定合并，执行 agent 未自行合并、未 push main。下一位执行 agent 从"下一步"第 1 项（T0.5 切 dev 合 main）接手；M-A 施工须等 PR #9 合并后从含清场提交的主干开分支，否则分支上仍带着 main 的 178 处 fmt 漂移（clippy 门禁红项见"已知风险"）。**
 
-- **日期**：2026-09-19（第六次更新：第 0 段清场完成，PR #9 待审）
+- **日期**：2026-09-19（第七次更新：第 0 段清场 + main 血统对齐完成，PR #9 待审）
 - **已完成**：
   1. 扫描分析五件套（含 routes-inventory/types-migration-map）+ 基线修复入库 + 门禁全绿（fmt=0/clippy=0/test 369 通过）
   2. **方向修正落地**：用户痛点口述存档 feedback.md → `docs/plan/prd-v1.md`（痛点根因诊断+可测验收口径）→ task-breakdown v4 功能里程碑主轴（M-A 可信中文检索 / M-B 可信深度分析 / M-C 全流程贯通）；v3 结构任务归档或挂载
@@ -95,6 +95,7 @@
        | `148d4a8` docs: 错误复盘 | docs/errors.md ×3 条 | gh PR 权限绕行 / clippy 1.98 工具链漂移 / 分诊只读取证法 |
      - **零 WIP 保存**：三处担心的"上百行实质改动"（reflection 自动重试 / debate / parse）实测**全部是 fmt 展开造成的行数放大**（如 parse.rs 把领域指标数组一项一行展开）；reflection 自动重试逻辑在 HEAD 内已完整存在。14 个文件无一例业务逻辑/API 形状变化，因此无"WIP 原样保存"commit、无需用户定夺的半成品；未跟踪的 226 个 `_*.txt` / `.firecrawl/` 调试产物按约定未碰未提交。
      - **门禁数字（分支已提交态，rustc/clippy 1.98.0）**：`cargo fmt --check` **绿**（exit 0；对照 main@4f316a2 **红**，178 处 diff / 13 文件）｜ `cargo test` **绿**（369 passed / 0 failed / 3 ignored，8 个测试二进制含 doc-test）｜ `node check_html_functions.mjs` **绿**（8 模板，基线一致，1 条非阻断待刷新提示）｜ `cargo clippy --all-targets -- -D warnings` **红**（4 处，全部为存量，见已知风险）
+     - **✅ main 血统对齐（2026-09-19 追加，merge commit `844143f`，父：`fe9705f` + `3a50c49`）**：把 `origin/main`（PR #8 GitHub 合并提交）并入 `exec/stage0-triage`，PR #9 由 CONFLICTING 转 **MERGEABLE**。实际冲突 **12 处**（`merge-tree` 预演记 14，本轮 `src/lib.rs`/`src/main.rs` 自动合并），逐文件 `git diff HEAD...origin/main -- <file>` 核查后**全取本地侧**：远端独有内容本地均已存在——CHANGELOG 3 条 FreeCAD 条目逐字已在（:13/:49/:51）、STATUS `2026-08-12 FreeCAD` 条目已在、`e2e_test.mjs` 两个 CAD 用例已在且本地 `expectedPasses=54 > 远端 51`（取远端即回退）、`src/cad.rs`(add/add) 的端口 `8010`/preview 强校验/无告警系 `9f1a14b` 旧态（本地 `620b263` 刻意改为 `8080` + warn 日志 + 无头 preview 放宽，见 `docs/analysis/risk-assessment.md:128`）、`db/mod.rs` `mod cad;` 已有且 `SCHEMA_VERSION` 22/断言 23 > 远端 18、`db/migrations.rs` v18 已含、两模板 CAD 接线与两处测试断言均已含。**零内容变化的铁证**：合并后树哈希 == 合并前本地树（`627a03f9672fd06fa66927b1dde2213d7fa5a9d6`），`git diff fe9705f HEAD` 输出 0 行。**门禁复跑（merge 态）**：fmt 绿 ｜ test 369 passed/0 failed/3 ignored（持平基线）｜ HTML 扫描绿 ｜ clippy 仍 4 处存量红（未新增、未修、未 allow）。处置明细已贴 PR #9 评论。
   1. T0.5 切 dev 合 main（dev 落后 main，先 `git checkout dev && git merge main`）
   2. T0.6 推送 main+dev 双远端激活 CI（领先远端 60+/36 提交从未过 CI）
   3. **M-A 开工（顺序按能力提升方案调整）**：MA1 SearchProvider 契约+SerpAPI 迁入（前置：T1.1 缩水版类型地基）→ MA2 Google Patents XHR 直抓 → MA5 诊断面板 → MA3 补半程（language/辖区过滤/默认 CN+zh）→ MA4 召回增强 → MA6 SerpAPI 稳健化；**同步建"用户名下专利号"中文检索回归用例集**
@@ -103,10 +104,13 @@
 - **🆕 第 0 段清场新增风险（2026-09-19，PR #9）**：
   1. **clippy 门禁在 main 上就是红的（存量 4 处，工具链漂移所致）**：`rag/chunker.rs:22`（unnecessary_min_or_max）、`rag/chunker.rs:72`、`routes/search.rs:688`、`vector/mod.rs:73`（for_kv_map×3）。当前工具链 rustc/clippy **1.98.0**（2026-08-18），本节上方"已完成"第 1 条记的"clippy=0"是旧工具链结论；仓库无 `rust-toolchain` 钉版。清场**未修也未加 allow 掩盖**（越界 + 违禁），修复建议留用户定夺：search.rs 属 MA3/MA4 施工对象、rag/ 属 MB2 重写对象，顺势修比孤立补丁更划算。
   2. **GitHub main 与本地 main 已分叉**：`origin/main=3a50c49`（PR #8 接入 FreeCAD 可视化对话，本地无此提交），本地 `main=4f316a2` 领先远端 60+ 提交。合并 PR #9 会在 11 个文件冲突（CHANGELOG.md、docs/plans/STATUS.md、e2e_test.mjs、src/cad.rs（add/add）、src/common.rs、src/db/{migrations,mod,tests}.rs、templates/{idea,patent_detail}.html、tests/{orchestrator_integration,patent_hub_integration}.rs）；**冲突源是两条 main 的分叉，不是本 PR 的施工**（本 PR 的 lib.rs/main.rs/routes/mod.rs/ai.rs 均可自动合并）。复核命令：`git merge-tree --write-tree exec/stage0-triage origin/main`。处置属用户动作（先对齐 main 或先在 GitHub 上处理 #8 线）。
+     **→ ✅ 2026-09-19 已在分支侧消解（本项原文保留）**：`exec/stage0-triage` 追加 merge `844143f` 并入 `origin/main`，PR #9 转 MERGEABLE；核查证明远端侧无独有内容（合并后树哈希不变），**但本地 `main` 与 GitHub `main` 的分叉仍未解**——合并 PR #9 时 GitHub 侧会一次性把 PR#8 血统对齐收进 main，此后 `main` 才与本地同线；T0.5/T0.6（dev 合 main、双远端推送）仍按序执行。
   3. **HTML 函数基线待刷新（非阻断）**：`settings.html` 有 2 个新定义（`formatNumber`、`loadAiCostStats`）未纳入 `docs/functions-manifest.json`；扫描仍绿，需与模板变更同提交时跑 `--refresh`，本次未动模板故不改基线。
+  4. **🆕 CI `npm ci` 缺锁文件（2026-09-19 血统对齐实测发现，非本分支引起）**：lint job 9 秒即挂（`npm error code EUSAGE`），因 `package-lock.json` 在本地存在但**从未提交**（`git log --all -- package-lock.json` 为空）；test job 的 node deps 与 e2e 亦走 `npm ci`，同样受影响。修法与 AGENTS.md §4.3「Node.js 相关文件不应出现在本仓库」相互冲突（提交锁文件 vs 改 CI 用 `npm install`），**属用户决策，执行 agent 未擅自处理**。详见 `docs/errors.md` 同名条目。
 
 ## 6. 会话记录（追加式，保留历史）
 
 - 2026-08-15：扫描+方案制定+预处理修复。分析产物 docs/analysis/*，计划产物 docs/plan/*。
 - 2026-09-19：规划会话实测复核（git log/代码 grep/磁盘/工作区四处取证），下发 docs/plan/2026-09-19-capability-uplift-plan.md（清场前置+MA3/MB1 半程校准+M-A/M-B 顺序调整+防停摆机制），再交棒执行 agent。
 - 2026-09-19：执行 agent 完成第 0 段清场（分支 `exec/stage0-triage` → PR #9，未合并待审）。取证方式：`git archive HEAD` 导出副本 + 副本内 `cargo fmt` + 逐文件 `diff` 证明"纯 fmt"；`git merge-tree` 预演与 GitHub main 的合并冲突。结论：未提交工作区不含金银——是一次未提交的全量 fmt + 局部 clippy 清理，"完成即止"未触碰 M-A。
+- 2026-09-19：执行 agent 完成 main 血统对齐（同分支 merge `844143f`，父 `fe9705f` + `3a50c49`；PR #9 CONFLICTING → MERGEABLE，处置表见 PR 评论）。任务单一，未合并任何 PR、未写 main、未碰 gitee/dev/226 个未跟踪产物。取证方式：逐冲突文件 `git diff HEAD...origin/main -- <file>` 看远端独有内容 + `git log -S` 定代际（cad.rs 的 `8010→8080`/warn 日志/preview 放宽 系本地 `620b263`(08-24) 对远端 `3a50c49`(08-12) 的后继修复）+ `git cat-file` 比 blob + 合并前后**树哈希全等**（`627a03f`，`git diff fe9705f HEAD` 0 行）。结论：远端侧零可取内容，12 处冲突取 ours 无任何丢失；门禁 fmt 绿 / test 369 持平 / HTML 绿 / clippy 仍 4 处存量。新查出处环境事实：CI lint job 因 `npm ci` 无锁文件必挂（见风险 4），另 `gh` 写操作须 `env -u GITHUB_TOKEN`。

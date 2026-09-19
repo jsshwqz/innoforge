@@ -716,4 +716,13 @@
 - **预防 / Prevention**: 分诊未提交工作一律优先"副本对比 / `git show HEAD:file`"这类只读取证；`git stash` 只在必须切换树状态时用，且用完立刻 pop 并核对 `git stash list` 未新增。另：单次 diff 行数大不等于实质改动，判断实质要看能否被 rustfmt 复现。
 - **提交 / Commit**: 本条（PR #9 附带）
 
+### [2026-09-19] CI lint job 9 秒即挂：`npm ci` 找不到已提交的锁文件
+- **严重程度 / Severity**: MEDIUM
+- **涉及文件 / Files**: `.github/workflows/ci.yml`（lint job `npm ci`、test job `Install node deps`）、未跟踪的 `package-lock.json`
+- **现象 / Symptom**: PR #9 血统对齐后 `mergeable=MERGEABLE` 但 `mergeStateStatus=UNSTABLE`；`gh pr checks` 显示 lint **fail 9s**、test **pending**。拉 `gh run view --log-failed` 见 lint 在 "Install deps" 步 `npm error code EUSAGE`——"`npm ci` can only install with an existing package-lock.json"。本地 `node check_html_functions.mjs` / `node e2e_test.mjs` 却一切正常，容易误判成合并引入的回归。
+- **根因 / Root cause**: `npm ci` 严格要求仓库里有已提交的 `package-lock.json`（或 shrinkwrap）。本项目 `package.json` 入库、锁文件只在本地存在，`git log --all -- package-lock.json` 全空 → 干净 runner 上必然装不出来。与合并内容、与 Rust 门禁均无关；同 job 另一处 fail 才是 clippy 1.98 的 4 处存量红。
+- **修复 / Fix**: 本次**未修**——两条路相互冲突：① 提交 `package-lock.json`（但 AGENTS.md §4.3 规定「Node.js 相关文件不应出现在本仓库」）；② 把 CI 改成 `npm install`/`--no-package-lock`（削弱可复现性）。属用户决策项，已在 PR #9 评论与 MASTER §5 风险 4 列明取证与利弊，不擅自取舍。
+- **预防 / Prevention**: 判断"CI 红了是不是我这次改的"，先看**挂在第几步、几秒挂**：安装/依赖步秒挂 ≈ 环境或配置问题，编译/测试步才可能是内容问题；配 `--log-failed` + `git log --all -- <file>` 确认依赖文件历史上是否入库，再下结论。本地跑得绿不等于 CI 能装出依赖，`npm ci` 尤其如此。
+- **提交 / Commit**: 本条（PR #9 血统对齐附带）
+
 *最后更新 / Last updated: 2026-09-19*
