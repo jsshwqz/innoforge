@@ -16,6 +16,7 @@
 |------|------|--------|
 | **`docs/plan/product-vision.md`** | **产品愿景与九段旅程到位标准（验收解释基准）** | **任何验收判断时** |
 | **`docs/plan/prd-v1.md`** | **产品需求与验收口径** | **任何施工前** |
+| **`docs/plan/2026-09-19-capability-uplift-plan.md`** | **实测复核版开工指令**：清场前置、MA3/MB1 半程校准、M-A/M-B 顺序调整、防停摆机制 | **接手第一步（先于 task-breakdown 原序）** |
 | `docs/plan/task-breakdown.md` | v4 功能里程碑主轴（M-A/B/C 任务+验收）+ 结构支撑件挂载表 | **每个任务开工前** |
 | `docs/progress/GATES.md` | 门禁速查卡（可复制命令） | **每个任务收尾时** |
 | `docs/plan/milestones.md` | 里程碑判定（M0-M5，结构版措辞以 v4 为准） | 每里程碑收尾时 |
@@ -73,21 +74,24 @@
 
 ## 5. 当前状态（每 session 开始/结束更新此节）
 
-> **🤝 交接状态（2026-08-15）：规划会话已交棒。PRD 已确认、图纸齐备，执行 agent 从下方"下一步"第 1 项开始接手。规划会话仅保留三项职责：M-B 规格书补发（MA2 落地后）、里程碑验收审计、方案冲突修订。**
+> **🤝 交接状态（2026-09-19 再交棒）：规划会话完成实测复核并下发《能力提升方案》（docs/plan/2026-09-19-capability-uplift-plan.md）。执行 agent 从下方"下一步"第 0 项开始接手，禁止重开炉灶、禁止重复施工已校准为半程完成的 MA3/MB1。规划会话保留职责：M-B 规格书补发（MA2 落地后）、里程碑验收审计、方案冲突修订。**
 
-- **日期**：2026-08-15（第四次更新：主轴切换为产品能力）
+- **日期**：2026-09-19（第五次更新：开工基线实测校准）
 - **已完成**：
   1. 扫描分析五件套（含 routes-inventory/types-migration-map）+ 基线修复入库 + 门禁全绿（fmt=0/clippy=0/test 369 通过）
   2. **方向修正落地**：用户痛点口述存档 feedback.md → `docs/plan/prd-v1.md`（痛点根因诊断+可测验收口径）→ task-breakdown v4 功能里程碑主轴（M-A 可信中文检索 / M-B 可信深度分析 / M-C 全流程贯通）；v3 结构任务归档或挂载
   3. GATES.md 门禁速查卡；规划/执行角色分工硬约束
-- **⚠️ 环境警报**：D 盘曾剩 0.7GB（target 占 8.4GB，已 cargo clean → 7.5GB）。**执行 agent 开工前必查 `Get-PSDrive D`，<5GB 先 clean**
-- **执行 agent 下一步（按序）**：
+  4. **2026-09-19 实测复核（能力提升方案下发）**：交棒后零实现提交确认；发现文档进度双向失真——**MA3 半程**（SerpAPI 已带 country 透传+auto_cn，`routes/search.rs:259/:315`）、**MB1 半程**（OA 路径 fact_check 已接线，`routes/ai.rs:1416`；idea/流水线仍零调用）；rag 确认仍无调用方；D 盘 25GB 警报解除
+- **⚠️ 环境警报**：D 盘剩 25GB（2026-09-19 实测，警报解除但保留规则）。**执行 agent 开工前必查 `Get-PSDrive D`，<5GB 先 clean**
+- **执行 agent 下一步（按序，详细依据见能力提升方案 §3）**：
+  0. **第 0 段清场（一切施工前置）**：工作区 14 个未提交 src 文件分诊（pipeline 四步+routes 五处含实质改动与 fmt 漂移混杂——保守处理，宁可分支/stash 保存不丢弃）→ 五套门禁全绿回归 → 本文件与 task-breakdown 回写 MA3/MB1 半程状态（附证据，勾"完成"必须附验证记录）
   1. T0.5 切 dev 合 main（dev 落后 main，先 `git checkout dev && git merge main`）
   2. T0.6 推送 main+dev 双远端激活 CI（领先远端 60+/36 提交从未过 CI）
-  3. T0.2 / T0.3 / T0.4 / T0.7 / T0.8 并行认领；T0.9 提醒用户
-  4. **M-A 开工**：MA1 SearchProvider 多源框架（前置：T1.1 缩水版类型地基，只拆 search/patent/chat/idea 四域）
+  3. **M-A 开工（顺序按能力提升方案调整）**：MA1 SearchProvider 契约+SerpAPI 迁入（前置：T1.1 缩水版类型地基）→ MA2 Google Patents XHR 直抓 → MA5 诊断面板 → MA3 补半程（language/辖区过滤/默认 CN+zh）→ MA4 召回增强 → MA6 SerpAPI 稳健化；**同步建"用户名下专利号"中文检索回归用例集**
+  4. T0.2 / T0.3 / T0.4 / T0.7 / T0.8 穿插并行认领；T0.9 提醒用户
 - **已知风险提醒**：/api/search/vector 中文 panic（MB3 修）；Docker 出口损坏（T0.7 修）；.env 明文密钥（T0.9 用户动作）；mcp-server 未接线函数带 allow(dead_code) 标注保留
 
 ## 6. 会话记录（追加式，保留历史）
 
 - 2026-08-15：扫描+方案制定+预处理修复。分析产物 docs/analysis/*，计划产物 docs/plan/*。
+- 2026-09-19：规划会话实测复核（git log/代码 grep/磁盘/工作区四处取证），下发 docs/plan/2026-09-19-capability-uplift-plan.md（清场前置+MA3/MB1 半程校准+M-A/M-B 顺序调整+防停摆机制），再交棒执行 agent。
