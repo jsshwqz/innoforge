@@ -84,7 +84,7 @@
   4. **2026-09-19 实测复核（能力提升方案下发）**：交棒后零实现提交确认；发现文档进度双向失真——**MA3 半程**（SerpAPI 已带 country 透传+auto_cn，`routes/search.rs:259/:315`）、**MB1 半程**（OA 路径 fact_check 已接线，`routes/ai.rs:1416`；idea/流水线仍零调用）；rag 确认仍无调用方；D 盘 25GB 警报解除
 - **⚠️ 环境警报**：D 盘剩 25GB（2026-09-19 实测，警报解除但保留规则）。**执行 agent 开工前必查 `Get-PSDrive D`，<5GB 先 clean**
 - **执行 agent 下一步（按序，详细依据见能力提升方案 §3）**：
-  0. **第 0 段清场（一切施工前置）**：工作区 14 个未提交 src 文件分诊（pipeline 四步+routes 五处含实质改动与 fmt 漂移混杂——保守处理，宁可分支/stash 保存不丢弃）→ 五套门禁全绿回归 → 本文件与 task-breakdown 回写 MA3/MB1 半程状态（附证据，勾"完成"必须附验证记录）
+  0. **第 0 段清场（一切施工前置）——2026-09-19 用户改定：以 PR 方式执行**：分支 `exec/stage0-triage`（自 main 开出，未提交工作随 checkout -b 带入）→ 分诊/门禁回归/回写全部提交在分支上 → push origin + 开 PR 到 main，**合并由用户审阅决定，执行 agent 禁止自行合并**；期间 main 保持 `684a1da` 不动。内容：工作区 14 个未提交 src 文件分诊（pipeline 四步+routes 五处含实质改动与 fmt 漂移混杂——保守处理，判断不了的以"WIP 原样保存"commit 收进分支，绝不丢弃）→ 五套门禁全绿回归 → 本文件与 task-breakdown 回写 MA3/MB1 半程状态（附证据，勾"完成"必须附验证记录）
   1. T0.5 切 dev 合 main（dev 落后 main，先 `git checkout dev && git merge main`）
   2. T0.6 推送 main+dev 双远端激活 CI（领先远端 60+/36 提交从未过 CI）
   3. **M-A 开工（顺序按能力提升方案调整）**：MA1 SearchProvider 契约+SerpAPI 迁入（前置：T1.1 缩水版类型地基）→ MA2 Google Patents XHR 直抓 → MA5 诊断面板 → MA3 补半程（language/辖区过滤/默认 CN+zh）→ MA4 召回增强 → MA6 SerpAPI 稳健化；**同步建"用户名下专利号"中文检索回归用例集**
