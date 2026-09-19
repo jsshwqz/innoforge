@@ -86,12 +86,13 @@
 - **⚠️ 环境警报**：D 盘剩 25GB（2026-09-19 实测，警报解除但保留规则）。**执行 agent 开工前必查 `Get-PSDrive D`，<5GB 先 clean**
 - **执行 agent 下一步（按序，详细依据见能力提升方案 §3）**：
   0. **第 0 段清场（一切施工前置）——✅ 已完成（PR #9，分支 `exec/stage0-triage`）**
-     - **处置清单（14 个未提交 src 文件 → 3 个 commit，全在分支上，main 未动）**：
+     - **处置清单（14 个未提交 src 文件 → 2 个 chore commit；另有 docs commit 若干，全在分支上，main 未动）**：PR #9 的 commit 清单见下表的 `ef647cd` / `9ba1473` / `848eb59` / `148d4a8`，以及本行所在的 hash 补记提交；净增量对比 https://github.com/jsshwqz/innoforge/compare/4f316a2...exec/stage0-triage
        | commit | 文件 | 判定 |
        |---|---|---|
        | `ef647cd` chore: 清场分诊(1/2) | lib.rs / main.rs / orchestrator/engine.rs / pipeline/steps/{finalize,parse}.rs / routes/{pages,upload}.rs（7 个） | **纯 fmt**：与 `rustfmt(HEAD)` 逐字节一致（git archive HEAD → cargo fmt → diff=0 证明） |
        | `9ba1473` chore: 清场分诊(2/2) | db/{memory,vector}.rs / pipeline/steps/{debate,reflection}.rs / routes/{ai,idea,mod}.rs（7 个） | **fmt + clippy 惯用法**：manual_flatten×2、collapsible_if×4、删未用导入×3、去多余 `&….to_string()`×3、`name`→`_name`、测试模块整体移至文件末尾 |
-       | 本 docs commit | task-breakdown.md（MA3/MB1 半程加注）、MASTER §5/§6 | 进度回写 |
+       | `848eb59` docs: 进度回写 | task-breakdown.md（MA3/MB1 半程加注）、MASTER §5/§6 | 进度回写 |
+       | `148d4a8` docs: 错误复盘 | docs/errors.md ×3 条 | gh PR 权限绕行 / clippy 1.98 工具链漂移 / 分诊只读取证法 |
      - **零 WIP 保存**：三处担心的"上百行实质改动"（reflection 自动重试 / debate / parse）实测**全部是 fmt 展开造成的行数放大**（如 parse.rs 把领域指标数组一项一行展开）；reflection 自动重试逻辑在 HEAD 内已完整存在。14 个文件无一例业务逻辑/API 形状变化，因此无"WIP 原样保存"commit、无需用户定夺的半成品；未跟踪的 226 个 `_*.txt` / `.firecrawl/` 调试产物按约定未碰未提交。
      - **门禁数字（分支已提交态，rustc/clippy 1.98.0）**：`cargo fmt --check` **绿**（exit 0；对照 main@4f316a2 **红**，178 处 diff / 13 文件）｜ `cargo test` **绿**（369 passed / 0 failed / 3 ignored，8 个测试二进制含 doc-test）｜ `node check_html_functions.mjs` **绿**（8 模板，基线一致，1 条非阻断待刷新提示）｜ `cargo clippy --all-targets -- -D warnings` **红**（4 处，全部为存量，见已知风险）
   1. T0.5 切 dev 合 main（dev 落后 main，先 `git checkout dev && git merge main`）
