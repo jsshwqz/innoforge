@@ -539,8 +539,7 @@ pub fn filter_by_publication_window(
                 // 该条没有任何可用日期：不做判断，保留
                 None => true,
                 Some(day) => {
-                    from.as_ref().map_or(true, |f| day >= *f)
-                        && to.as_ref().map_or(true, |t| day <= *t)
+                    from.as_ref().is_none_or(|f| day >= *f) && to.as_ref().is_none_or(|t| day <= *t)
                 }
             }
         })
@@ -567,9 +566,7 @@ fn normalize_date(s: &str) -> Option<String> {
         };
     }
     // 分隔符形态：年-月-日 / 年/月/日 / 年.月.日，月日可不补零
-    let parts: Vec<&str> = trimmed
-        .split(|c| c == '-' || c == '/' || c == '.')
-        .collect();
+    let parts: Vec<&str> = trimmed.split(['-', '/', '.']).collect();
     if parts.len() != 3 {
         return None;
     }
@@ -1131,7 +1128,7 @@ pub(crate) mod tests {
         );
         // 退避确实发生，且时长恰是 BASE_BACKOFF（抖动 ≤700ms，不可能贡献一个整 2s 的 sleep）
         assert!(
-            clock.recorded().iter().any(|d| *d == BASE_BACKOFF),
+            clock.recorded().contains(&BASE_BACKOFF),
             "未见退避: {:?}",
             clock.recorded()
         );
@@ -1219,7 +1216,7 @@ pub(crate) mod tests {
         assert!(err.contains("网络故障"), "错误文案要带分类: {err}");
         assert!(outcome.results.is_empty());
         assert!(
-            clock.recorded().iter().any(|d| *d == BASE_BACKOFF),
+            clock.recorded().contains(&BASE_BACKOFF),
             "网络故障同样要退避: {:?}",
             clock.recorded()
         );

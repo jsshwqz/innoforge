@@ -591,7 +591,8 @@ fn fail_kind_for_error(err_lower: &str) -> FailKind {
     }
 }
 
-/// 诊断字段用的安全截断已上提到 `model::report_excerpt`（MA2a 起两个在线源共用一份取值规则）。
+// 诊断字段用的安全截断已上提到 `model::report_excerpt`（MA2a 起两个在线源共用一份取值规则）。
+// （刻意写成普通注释：它描述的是「这里曾经有什么」，不是下面那个函数。）
 
 /// SerpAPI `organic_results[]` 单条 → 域内 `Patent`（旧 `serp_to_patent`，字段映射未改）。
 fn serp_to_patent(r: &serde_json::Value) -> Patent {

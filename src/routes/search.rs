@@ -2,11 +2,14 @@ use super::{escape_csv, parse_search_type, AppState};
 use crate::patent::*;
 // MA1：q 串渲染 / 相关性判定 / 排序去重 / 上游调用链均已抽到 `crate::search`，
 // 本文件只保留「端点」职责：请求解析、响应形状、超时预算与本地兜底。
+// MA2a：多源降级由 `crate::search::chain::SourceChain` 承担，本文件只负责登记源的优先级顺序。
+use crate::search::chain::SourceChain;
 use crate::search::merge::{dedup_patent_summaries, sort_by_relevance};
 use crate::search::model::{
     AttemptReport, AttemptStatus, Lang, SearchOutcome, SearchQuery, SourceKind,
 };
 use crate::search::provider::SearchProvider;
+use crate::search::providers::google_patents_xhr::GooglePatentsXhrProvider;
 use crate::search::providers::serpapi::{exact_lookup_response, SerpApiProvider};
 use crate::search::query::resolve_lang;
 use axum::{
@@ -16,6 +19,7 @@ use axum::{
     Json,
 };
 use serde_json::json;
+use std::sync::Arc;
 use std::time::Instant;
 
 const ONLINE_TOTAL_BUDGET_SECS: u64 = 60;
@@ -209,8 +213,12 @@ pub async fn api_search(
 
 /// `POST /api/search/online` — 在线检索端点。
 ///
-/// 端点职责：请求解析 → 区域判定 → 取 Key → 交给 [`SerpApiProvider`] → 按旧形状出参 →
-/// 超时预算 → 本地库兜底。上游调用与结果映射见 `crate::search::providers::serpapi`。
+/// 端点职责：请求解析 → 区域判定 → 取 Key → 交给 [`SourceChain`]（SerpAPI 主源 + MA2a 新增的
+/// Google Patents XHR 免费降级源）→ 按旧形状出参 → 超时预算 → 本地库兜底。
+/// 上游调用与结果映射见 `crate::search::providers::{serpapi, google_patents_xhr}`。
+///
+/// MA2a 起的响应差异：`source` 字段不再恒为 `"serpapi"`，降级命中时为 `"google_patents_xhr"`
+/// （旧代码只有一个在线源，故无需区分）。其余字段集合与本地兜底路径逐字未变。
 pub async fn api_search_online(
     State(s): State<AppState>,
     Json(req): Json<SearchRequest>,
@@ -268,33 +276,48 @@ pub async fn api_search_online(
         .unwrap_or_else(|e| e.into_inner())
         .next_serpapi_key();
 
-    let outcome = match api_key_opt {
-        Some(api_key) => {
-            let provider = SerpApiProvider::new(api_key, s.db.clone());
-            // ── 精确专利号查询：当检测为 PatentNumber 时，先尝试 SerpAPI Details 精确抓取 ──
-            if matches!(online_search_type.as_ref(), Some(SearchType::PatentNumber)) {
-                if let Some(summary) = provider.lookup_exact(req.query.clone()).await {
-                    return Json(exact_lookup_response(summary));
-                }
+    // ── 精确专利号查询：SerpAPI Details 是本源独占能力，命中即按旧形状直接返回 ──
+    // 保持「在降级链之前」的位置：MA2a 没有给 XHR 源做 details 端点（spec §2 只有 query 一个端点）。
+    if matches!(online_search_type.as_ref(), Some(SearchType::PatentNumber)) {
+        if let Some(api_key) = api_key_opt.as_ref() {
+            let provider = SerpApiProvider::new(api_key.clone(), s.db.clone());
+            if let Some(summary) = provider.lookup_exact(req.query.clone()).await {
+                return Json(exact_lookup_response(summary));
             }
-            provider.search(search_query).await
         }
-        None => {
-            println!("[ONLINE] No SERPAPI_KEY configured");
-            serpapi_skipped_outcome("未配置有效 SerpAPI Key，已自动尝试下游回退。")
-        }
-    };
+    }
+
+    // ── MA2a 执行链（spec §6）：SerpAPI 为主、Google Patents XHR 直抓为免费降级 ──
+    // 两源并行发起、各带独立超时（SerpAPI 沿用旧 30s，XHR 15s），按登记顺序择胜。
+    // 没配 Key 时不把 SerpAPI 登记进链路，而是把它的 `Skipped` 记账**前置**到 attempts，
+    // 这样旧的 hint 文案与「首个非空生效」语义逐字不变，控制流也不必分叉成两条。
+    let mut providers: Vec<Arc<dyn SearchProvider>> = Vec::new();
+    if let Some(api_key) = api_key_opt.clone() {
+        providers.push(Arc::new(SerpApiProvider::new(api_key, s.db.clone())));
+    } else {
+        println!("[ONLINE] No SERPAPI_KEY configured");
+    }
+    providers.push(Arc::new(GooglePatentsXhrProvider::new(s.db.clone())));
+
+    let mut outcome = SourceChain::new(providers).run(search_query).await;
+    if api_key_opt.is_none() {
+        let skipped = serpapi_skipped_outcome("未配置有效 SerpAPI Key，已自动尝试下游回退。");
+        let mut attempts = skipped.attempts;
+        attempts.append(&mut outcome.attempts);
+        outcome.attempts = attempts;
+    }
 
     let mut upstream_hint = outcome.hint();
 
-    // 上游成功且有命中 → 按旧形状直接返回（旧代码是在 SerpAPI 分支内提前 return）。
-    if outcome.succeeded_from(SourceKind::SerpApi) {
+    // 在线源成功且有命中 → 按旧形状直接返回；`source` 自 MA2a 起如实反映胜出源
+    // （旧代码恒为 "serpapi"，因为那时只有一个在线源）。
+    if let Some(winner) = outcome.winning_source() {
         let mut out = json!({
             "patents": outcome.summaries(),
             "total": outcome.upstream_total.unwrap_or(0),
             "page": req.page,
             "page_size": 10,
-            "source": SourceKind::SerpApi.as_str()
+            "source": winner.as_str()
         });
         if let Some(h) = upstream_hint.take() {
             out["hint"] = json!(h);
@@ -312,10 +335,11 @@ pub async fn api_search_online(
         }
     }
 
-    // 仅使用 SerpAPI 搜索，所有其他搜索源（Firecrawl/Google Patents直连/Bing/CNIPR/搜狗）已屏蔽
-    // 在线搜索无结果时直接回退本地数据库
+    // MA2a 起在线链路为 [SerpAPI → Google Patents XHR 直抓]（见上方的 SourceChain），
+    // 其余历史源（Firecrawl / Bing / CNIPR / 搜狗）仍处于屏蔽状态。
+    // 两个在线源都没有可用结果时，回退本地数据库。
 
-    // Fallback 2: local DB search
+    // Fallback（最后一档）: local DB search
     println!("[ONLINE] Falling back to local DB");
     let local =
         s.db.search_smart(

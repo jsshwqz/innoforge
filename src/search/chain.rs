@@ -321,7 +321,7 @@ mod tests {
             "首发 503 + 退避后重试 1 发，共 2 发"
         );
         assert!(
-            clock.recorded().iter().any(|d| *d == xhr::BASE_BACKOFF),
+            clock.recorded().contains(&xhr::BASE_BACKOFF),
             "退避未发生: {:?}",
             clock.recorded()
         );
