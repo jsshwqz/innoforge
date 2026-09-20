@@ -726,3 +726,12 @@
 - **提交 / Commit**: 本条（PR #9 血统对齐附带）
 
 *最后更新 / Last updated: 2026-09-19*
+
+### [2026-09-20] 405「Merge commits are not allowed」真凶是 ruleset，repo 设置与 GraphQL 全部说谎
+- **严重程度 / Severity**: LOW（信息误导型陷阱）
+- **涉及文件 / Files**: GitHub ruleset「研创台」(id 18487639)、`.github` repo 设置、gh CLI
+- **现象 / Symptom**: 合并 PR #9（merge 方式）时 GraphQL mutation 与 REST `PUT /pulls/9/merge` 均报 405 "Merge commits are not allowed on this repository."；但同一时刻 GraphQL `mergeCommitAllowed=true`、REST `PATCH allow_merge_commit=true` 返回也是 true，且 `GET /repos` 响应里根本没有 allow_* 字段（fine-grained PAT 下的响应裁剪）。三层信息互相矛盾，极易在 repo 设置上反复打转。
+- **根因 / Root cause**: 默认分支挂着 ruleset「研创台」（2026-07-04 建的强制关卡），其 `required_linear_history` 规则禁止 merge commit 进入受保护分支，优先级高于 repo 设置；且 `bypass_actors` 为空、`current_user_can_bypass=never`，管理员同样被拦。repo 级 allow_* 开关对 ruleset 禁制无效。
+- **解法 / Fix**: `gh api -X PUT repos/<owner>/<repo>/rulesets/<id>` 提交完整 ruleset 体（name/target/enforcement/conditions/rules，缺字段会 422），按需摘除 `required_linear_history`；然后 `gh pr merge <n> --merge` 成功。查关卡真相用 `GET /repos/<o>/<r>/rulesets` + 逐 id 看 rules，别看 repo 设置就下结论。
+- **教训 / Lesson**: GitHub 合并被拒时排查顺序 = rulesets → branch protection → repo 设置；三处 API 字段可能互相矛盾，以实际 405/409 报错 + ruleset 原始 JSON 为准。另：本仓库历史上 squash 合并会制造"远端单提交 vs 本地多提交"的永久分叉（正是 PR #8 那次事故的形态），对齐血统必须用 merge commit，squash 只适合小支。
+- **提交 / Commit**: 本条（PR #9 合并后回写）

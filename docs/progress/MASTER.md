@@ -74,7 +74,7 @@
 
 ## 5. 当前状态（每 session 开始/结束更新此节）
 
-> **🤝 交接状态（2026-09-19 第七次更新）：第 0 段清场已完成并以 [PR #9](https://github.com/jsshwqz/innoforge/pull/9) 交付（分支 `exec/stage0-triage`，base main）；同分支已追加 origin/main 血统对齐 merge `844143f`，PR #9 由 CONFLICTING 转 **MERGEABLE**。两次交付均由用户审阅决定合并，执行 agent 未自行合并、未 push main。下一位执行 agent 从"下一步"第 1 项（T0.5 切 dev 合 main）接手；M-A 施工须等 PR #9 合并后从含清场提交的主干开分支，否则分支上仍带着 main 的 178 处 fmt 漂移（clippy 门禁红项见"已知风险"）。**
+> **🤝 交接状态（2026-09-20 第八次更新）：PR #9 已由用户授权、规划会话代为合并（merge commit `4ed7f3e`，GitHub 记录 2026-09-20T01:21Z）。main 血统彻底收编：origin/main == 本地 main == `4ed7f3e`（含 74 提交 + 清场分诊 + PR#8 对齐），fmt 绿基线，工作区干净。合并前经用户裁决修改了 ruleset「研创台」：移除 `required_linear_history`（它禁 merge commit 且无人可 bypass，与"保留完整历史"规约冲突），保留 deletion/non_fast_forward/creation/code_quality 四条。下一位执行 agent 从"下一步"第 1 项（T0.5 切 dev 合 main）接手；M-A 分支从现在的 main 开出即带干净基线。CI 仍有两个存量红（npm ci 缺锁文件、clippy 4 项）待用户裁决修法，见风险 1/4。**
 
 - **日期**：2026-09-19（第七次更新：第 0 段清场 + main 血统对齐完成，PR #9 待审）
 - **已完成**：
@@ -114,3 +114,4 @@
 - 2026-09-19：规划会话实测复核（git log/代码 grep/磁盘/工作区四处取证），下发 docs/plan/2026-09-19-capability-uplift-plan.md（清场前置+MA3/MB1 半程校准+M-A/M-B 顺序调整+防停摆机制），再交棒执行 agent。
 - 2026-09-19：执行 agent 完成第 0 段清场（分支 `exec/stage0-triage` → PR #9，未合并待审）。取证方式：`git archive HEAD` 导出副本 + 副本内 `cargo fmt` + 逐文件 `diff` 证明"纯 fmt"；`git merge-tree` 预演与 GitHub main 的合并冲突。结论：未提交工作区不含金银——是一次未提交的全量 fmt + 局部 clippy 清理，"完成即止"未触碰 M-A。
 - 2026-09-19：执行 agent 完成 main 血统对齐（同分支 merge `844143f`，父 `fe9705f` + `3a50c49`；PR #9 CONFLICTING → MERGEABLE，处置表见 PR 评论）。任务单一，未合并任何 PR、未写 main、未碰 gitee/dev/226 个未跟踪产物。取证方式：逐冲突文件 `git diff HEAD...origin/main -- <file>` 看远端独有内容 + `git log -S` 定代际（cad.rs 的 `8010→8080`/warn 日志/preview 放宽 系本地 `620b263`(08-24) 对远端 `3a50c49`(08-12) 的后继修复）+ `git cat-file` 比 blob + 合并前后**树哈希全等**（`627a03f`，`git diff fe9705f HEAD` 0 行）。结论：远端侧零可取内容，12 处冲突取 ours 无任何丢失；门禁 fmt 绿 / test 369 持平 / HTML 绿 / clippy 仍 4 处存量。新查出处环境事实：CI lint job 因 `npm ci` 无锁文件必挂（见风险 4），另 `gh` 写操作须 `env -u GITHUB_TOKEN`。
+- 2026-09-20：用户授权规划会话代执行合并：PR #9 以 merge commit 合并（`4ed7f3e`），本地 main fast-forward 拉齐，origin/main == main，血统分叉终结。合并路径排障：repo 设置与 GraphQL 均显示允许 merge commit 但 REST/GraphQL 合并仍 405——真凶是 ruleset「研创台」的 `required_linear_history`（bypass_actors 空，无人可绕）。经用户裁决 PUT rulesets/18487639 移除该条（保留 deletion/non_fast_forward/creation/code_quality）。gitee/main 落后 50 提交，待 T0.6 一并处理。
