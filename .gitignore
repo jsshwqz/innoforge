@@ -10,7 +10,7 @@ mcp_stderr.txt
 # docs/plans/ — 版本规划文档需要入库，不再忽略
 *.zip
 node_modules
-package-lock.json
+# package-lock.json 必须入库：CI 的 `npm ci` 依赖它才能在干净 runner 上复现依赖（见 AGENTS.md §4.3）
 server.log
 
 # 根目录不放置源代码文件（所有源码在 src/ 下）
@@ -32,6 +32,13 @@ server.log
 # .reasonix / .codex 配置目录（AI Agent 工作文件）
 .reasonix/
 .codex/
+
+# 调试产物 / Debug artifacts（排障时落到根目录的请求体、日志、抓取结果）
+# 2026-09-20 核实：239 个已跟踪文件中无任何路径命中下列模式，故不会屏蔽真实源码
+_*.txt
+_*.json
+_*.py
+.firecrawl/
 
 # 测试适配器 / Test adapters
 testaionui-adapters/

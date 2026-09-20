@@ -115,7 +115,9 @@ docs/          # 文档和规划
 - iOS → [`innoforge-ios`](https://gitee.com/jsshwqz/innoforge-ios) 独立仓库
 - 鸿蒙 → [`innoforge-harmony`](https://gitee.com/jsshwqz/innoforge-harmony) 独立仓库
 - MCP 技能/插件 → 独立仓库，不放在本项目中
-- Node.js 相关文件（package.json 等）不应出现在本仓库
+- 本条本意是**禁止引入前端构建工具链**（webpack / vite / 打包器等），产品前端仍为纯 HTML/CSS/JS。
+- **开发工具的依赖清单属于例外，必须入库**：`package.json`、`package-lock.json` 等（供 ESLint / Puppeteer / 扫描脚本等开发工具使用）应当提交，其中**锁文件必须与 `package.json` 同步提交**，否则 CI 的 `npm ci` 在干净 runner 上必然失败（`npm error code EUSAGE`），依赖版本也无法复现。提交前用 `npm ci --dry-run` 自检。
+- 仍禁止入库的是：`node_modules/`、构建产物、以及任何真正的构建工具链配置（webpack/vite 配置与插件）。
 
 ---
 

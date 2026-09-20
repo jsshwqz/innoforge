@@ -1,0 +1,8 @@
+# 钉住工具链版本，消除 CI / 本机漂移。
+# 背景：rustc/clippy 1.98（2026-08-18）新增/收紧了 `unnecessary_min_or_max`、`for_kv_map` 等 lint，
+# 未钉版时 `-D warnings` 门禁会随工具链自动升级而凭空变红（见 docs/errors.md 2026-09-19 复盘）。
+# 升级方式：主动把 channel 改到新的 stable 版本，并在同一提交里修完新增的 lint 警告。
+[toolchain]
+channel = "1.98.0"
+components = ["clippy", "rustfmt"]
+profile = "minimal"
