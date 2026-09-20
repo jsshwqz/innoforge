@@ -7,6 +7,17 @@
 //! 注意：`src/pipeline/steps/search.rs::contains_cjk` 是 types-migration-map.md §4 第 3 项登记的
 //! 另一份实现，但它**多覆盖了扩展 A 区 `U+3400..U+4DBF`**，与本函数并非同形；
 //! 归并会改变流水线分支走向，属 T2.2 的裁决项，MA1 不动。
+//!
+//! **MA2a 追加** [`rank_and_gate_hits`]：把原先内联在 `SerpApiProvider::outcome_patents` 里的
+//! 「映射 → 入库缓存 → hybrid 打分 → 放行 → 中文过滤 → 去重排序」整段抽成单一出处，
+//! 供 Google Patents XHR 源共用（AGENTS.md 2.2 禁止同类实现出现第二份）。
+//! 打分公式、阈值、过滤先后次序与 MA1 逐字相同，等价性由 `providers::serpapi` 的
+//! `outcome_patents_match_legacy_mapping`（对**迁移前**参照实现逐字段比对）继续锁死。
+
+use crate::db::Database;
+use crate::patent::Patent;
+use crate::search::merge::dedup_patent_summaries;
+use crate::types::search::PatentSummary;
 
 /// 检查字符串是否包含中文字符
 pub fn contains_cjk(s: &str) -> bool {
@@ -201,6 +212,103 @@ pub fn is_online_result_relevant(
     }
 
     content_score >= 40.0
+}
+
+/// 在线源命中行的统一处理链路（MA2a 自 `SerpApiProvider::outcome_patents` 抽出，逐步骤等价）：
+///
+/// 1. `to_patent` 把该源的一条原始记录映射为域内 [`Patent`]（各源字段名不同，映射归各源自己）；
+/// 2. 空标题丢弃（旧行为）；
+/// 3. `db.insert_patent` 缓存入库，用**真实 stored id** 回填 `summary.id`（入库失败降级用原 uuid 并 warn）；
+/// 4. 位置分 `(98 - idx*3).max(30)`、内容分 [`calculate_online_relevance`]、
+///    放行判定 [`is_online_result_relevant`]（CN 阈值 45/62）、
+///    混合分 `pos*0.4 + content*0.6`（封顶 100）、`score_source` 文案 `hybrid(pos:{:.0}+content:{:.0})`；
+/// 5. 中文语境下若存在标题/摘要含 CJK 的条目，则只保留它们（PRD N2「要中文给中文」）；
+/// 6. [`dedup_patent_summaries`] 规范化公开号去重并按分数降序。
+///
+/// `source_label` 只进日志，不进任何对外字段。
+pub fn rank_and_gate_hits<F>(
+    db: &Database,
+    source_label: &str,
+    keyword: &str,
+    cn_query: bool,
+    rows: &[serde_json::Value],
+    to_patent: F,
+) -> Vec<PatentSummary>
+where
+    F: Fn(&serde_json::Value) -> Patent,
+{
+    let mut patents: Vec<PatentSummary> = Vec::new();
+    for (idx, row) in rows.iter().enumerate() {
+        let p = to_patent(row);
+        if p.title.is_empty() {
+            continue;
+        }
+        let saved_id = db.insert_patent(&p).unwrap_or_else(|e| {
+            tracing::warn!(
+                "Failed to cache {} patent {}: {}",
+                source_label,
+                p.patent_number,
+                e
+            );
+            p.id.clone()
+        });
+        // Hybrid relevance: position + content matching
+        let position_score = (98.0 - idx as f64 * 3.0).max(30.0);
+        let content_score = calculate_online_relevance(
+            keyword,
+            &p.title,
+            &p.abstract_text,
+            &p.applicant,
+            &p.inventor,
+        );
+        tracing::debug!(
+            "{} filter: query={}, title={}, applicant={}, inventor={}, content_score={:.1}",
+            source_label,
+            keyword,
+            &p.title,
+            &p.applicant,
+            &p.inventor,
+            content_score
+        );
+        if !is_online_result_relevant(
+            keyword,
+            &p.title,
+            &p.abstract_text,
+            content_score,
+            cn_query,
+            &p.inventor,
+        ) {
+            continue;
+        }
+        let score = (position_score * 0.4 + content_score * 0.6).min(100.0);
+        let source = format!(
+            "hybrid(pos:{:.0}+content:{:.0})",
+            position_score, content_score
+        );
+        patents.push(PatentSummary {
+            id: saved_id,
+            patent_number: p.patent_number.clone(),
+            title: p.title.clone(),
+            abstract_text: p.abstract_text.clone(),
+            applicant: p.applicant.clone(),
+            inventor: p.inventor.clone(),
+            filing_date: p.filing_date.clone(),
+            country: p.country.clone(),
+            relevance_score: Some(score),
+            score_source: Some(source),
+        });
+    }
+    if cn_query {
+        let zh_patents: Vec<PatentSummary> = patents
+            .iter()
+            .filter(|p| contains_cjk(&p.title) || contains_cjk(&p.abstract_text))
+            .cloned()
+            .collect();
+        if !zh_patents.is_empty() {
+            patents = zh_patents;
+        }
+    }
+    dedup_patent_summaries(patents)
 }
 
 #[cfg(test)]

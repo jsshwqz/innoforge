@@ -61,16 +61,50 @@ pub enum FailKind {
 
 impl FailKind {
     /// 是否应切换下一源（spec §1：Parse 记 bug 不切换，直接报错）。
-    /// MA2 执行链消费；MA1 只有一个在线源，控制流仍走旧链路，故不在此调用。
-    #[allow(dead_code)] // MA1 单源不消费：见 docs/progress/MASTER.md §6 MA1 记录
+    /// **MA2a 起由执行链 [`crate::search::chain`] 消费**：主源以 Parse 失败时不再降级。
     pub fn switches_source(self) -> bool {
         !matches!(self, FailKind::Parse)
     }
 
     /// 是否进入源级冷却（spec §1：Quota/Auth → 冷却；spec §6：连续 3 次后冷却 10 分钟）。
-    #[allow(dead_code)] // MA2 熔断器消费
+    #[allow(dead_code)] // MA2b/MA5 熔断器消费
     pub fn cools_down(self) -> bool {
         matches!(self, FailKind::Quota | FailKind::Auth)
+    }
+
+    /// HTTP 状态码 → 失败分类（spec §1）。仅用于 `AttemptReport` 记账，不决定 HTTP 响应码。
+    ///
+    /// MA2a 自 `providers/serpapi.rs` 的私有 `fail_kind_for_status` 上提为契约层单一出处
+    /// （AGENTS.md 2.2：禁止同一判定规则出现第二份实现），**取值逐字未改**；
+    /// SerpAPI 侧保留一个同签名的转发薄壳，其旧单测继续锁死行为。
+    ///
+    /// 注：503 在此归 `Network`。Google Patents XHR 的反爬 503 属「配额文案」而非普通网络故障，
+    /// 该源在自己的调用点上用 [`FailKind::for_xhr_reply`] 做二次改判，不改本函数的公共语义。
+    pub fn for_http_status(status: u16) -> FailKind {
+        match status {
+            401 | 403 => FailKind::Auth,
+            402 | 429 => FailKind::Quota,
+            408 => FailKind::Network,
+            500..=599 => FailKind::Network,
+            _ => FailKind::Parse,
+        }
+    }
+
+    /// XHR 直抓源的反爬改判（spec §1「配额文案」分支 + spec §2 已知坑 1 的实证结论）。
+    ///
+    /// **实证**：连续 3 次请求（间隔 <8s）后 `patents.google.com/xhr/query` 返回
+    /// `HTTP 503` + **HTML**（`<title>Sorry...</title>`），而非 JSON。若只看状态码会落到
+    /// `Network`，只看响应体会落到 `Parse`（§1 规定 Parse **不降级**），两者都错：
+    /// 这是限流，正确处置是 `Quota` → 退避重试 + 冷却该源。
+    /// 因此判定顺序必须是「先按状态码+文案识别反爬，再考虑 JSON 解析失败」。
+    pub fn for_xhr_reply(status: u16, body: &str) -> FailKind {
+        const BOT_SIGNALS: [&str; 4] = ["sorry", "unusual traffic", "abuse", "captcha"];
+        let probe = body.get(..2048).unwrap_or(body).to_ascii_lowercase();
+        if matches!(status, 429 | 503) && BOT_SIGNALS.iter().any(|s| probe.contains(s)) {
+            FailKind::Quota
+        } else {
+            FailKind::for_http_status(status)
+        }
     }
 }
 
@@ -109,12 +143,13 @@ impl AttemptReport {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MergedPatent {
     /// 规范化 publication_number（`crate::patent::canonical_patent_key`），空号退化为标题键。
-    #[allow(dead_code)] // MA2 多源合并消费；MA1 单源仅写入
+    #[allow(dead_code)] // MA2a 仍只有单源胜出（无跨源合并），MA2b 多源合并时消费
     pub key: String,
     /// 复用既有对外结构，保证 `/api/search/online` 的 patents[] 字段一字不变。
     pub summary: PatentSummary,
     /// 命中该条的源集合（MA1 恒为单元素，由 `merge::merged_from` 写入）。
-    #[allow(dead_code)] // MA2 起由多源合并（`merge::merged_from` 的扩展）填充多源
+    /// **MA2a 起被读取**：[`SearchOutcome::winning_source`] 用它决定 `/api/search/online`
+    /// 的 `source` 字段值；MA2b 多源合并后同一条目可能挂多个源。
     pub sources: Vec<SourceKind>,
 }
 
@@ -146,6 +181,30 @@ impl SearchOutcome {
             .iter()
             .any(|a| a.source == source && a.produced_hits())
     }
+
+    /// **MA2a 追加**：结果实际出自哪个源（spec §6「先到先得」后需要对外如实标源）。
+    ///
+    /// 取首个带源的合并条目的第一个源。执行链只把「胜出源」的结果装进 `results`，
+    /// 因此本函数等价于「本次返回内容出自哪一路」；`results` 为空时返回 `None`
+    /// （此时 `routes/search.rs` 继续走本地兜底，与 MA1 行为一致）。
+    pub fn winning_source(&self) -> Option<SourceKind> {
+        self.results.iter().find_map(|m| m.sources.first().copied())
+    }
+}
+
+/// [`AttemptReport::error`] / 日志片段的安全截断：**仅用于展示**，
+/// 绝不用于任何送往上游、入库或传给 AI 的数据（AGENTS.md 2.5 截断纪律）。
+///
+/// MA1 时它是 `providers/serpapi.rs` 的私有函数；MA2a 接入第二个在线源时上提到契约模块，
+/// 避免同一取值规则出现第二份实现（AGENTS.md 2.2）。
+pub fn report_excerpt(s: &str) -> String {
+    const MAX: usize = 200;
+    if s.chars().count() <= MAX {
+        return s.to_string();
+    }
+    let mut out: String = s.chars().take(MAX).collect();
+    out.push('…');
+    out
 }
 
 /// 统一检索入参（spec §1）。
@@ -164,7 +223,9 @@ pub struct SearchQuery {
     pub date_from: Option<String>,
     pub date_to: Option<String>,
     /// 返回条数上限。MA1 不消费（SerpAPI 固定 10 条/页，与旧链路一致）。
-    #[allow(dead_code)] // MA2 起渲染 num 参数
+    /// **MA2a 起由 Google Patents XHR 源消费**（`limit > 0` 时截断该源返回条数）。
+    /// 注：spec §2 列出的 XHR 参数集中没有条数参数（存档证据里亦无），故在上游已分页的
+    /// 结果内做**客户端截断**，不伪造 `num=` 参数。
     pub limit: usize,
     /// **MA1 追加**：旧链路的分页语义（`page` 直接进 URL，且带 `<1 → 1` 钳制）。
     pub page: usize,
@@ -294,5 +355,53 @@ mod tests {
         assert_eq!(vec![summary], outcome.summaries());
         assert!(outcome.succeeded_from(SourceKind::SerpApi));
         assert!(!outcome.succeeded_from(SourceKind::EpoOps));
+    }
+
+    /// MA2a：`/api/search/online` 的 `source` 字段改由合并条目上挂的源决定，
+    /// 因此「哪个源胜出」必须如实可读，且空结果时不得凭空标源（否则会跳过本地兜底）。
+    #[test]
+    fn winning_source_reads_merged_sources() {
+        let outcome = SearchOutcome {
+            results: vec![MergedPatent {
+                key: "CN123456A".to_string(),
+                summary: PatentSummary {
+                    id: "p1".to_string(),
+                    patent_number: "CN123456A".to_string(),
+                    title: "固态电池".to_string(),
+                    abstract_text: String::new(),
+                    applicant: String::new(),
+                    inventor: String::new(),
+                    filing_date: String::new(),
+                    country: "CN".to_string(),
+                    relevance_score: None,
+                    score_source: None,
+                },
+                sources: vec![SourceKind::GooglePatentsXhr],
+            }],
+            attempts: vec![],
+            upstream_total: None,
+        };
+        assert_eq!(Some(SourceKind::GooglePatentsXhr), outcome.winning_source());
+        assert!(SearchOutcome {
+            results: vec![],
+            attempts: vec![],
+            upstream_total: None,
+        }
+        .winning_source()
+        .is_none());
+    }
+
+    /// 诊断截断只用于展示：200 字以内原样、超出加省略号，且**按字符**截断
+    /// （按字节截会在中文中间炸出非法 UTF-8 边界）。
+    #[test]
+    fn report_excerpt_is_display_only_and_char_safe() {
+        assert_eq!("短文本", report_excerpt("短文本"));
+        let exactly_max = "汉".repeat(200);
+        assert_eq!(exactly_max, report_excerpt(&exactly_max));
+        let long = "汉".repeat(250);
+        let out = report_excerpt(&long);
+        assert_eq!(201, out.chars().count());
+        assert!(out.ends_with('…'));
+        assert!(out.starts_with("汉汉汉"));
     }
 }
