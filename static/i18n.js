@@ -795,7 +795,7 @@ function initChatHistory(inputId) {
         if (store.idx < store.history.length - 1) {
           store.idx++;
           input.value = store.history[store.history.length - 1 - store.idx];
-          var len = input.value.length;
+          let len = input.value.length;
           input.setSelectionRange(len, len);
         }
       }
@@ -806,12 +806,12 @@ function initChatHistory(inputId) {
         if (store.idx > 0) {
           store.idx--;
           input.value = store.history[store.history.length - 1 - store.idx];
-          var len = input.value.length;
+          let len = input.value.length;
           input.setSelectionRange(len, len);
         } else if (store.idx === 0) {
           store.idx = -1;
           input.value = store.saved;
-          var len = input.value.length;
+          let len = input.value.length;
           input.setSelectionRange(len, len);
         }
       }
