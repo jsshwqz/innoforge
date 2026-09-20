@@ -5,7 +5,7 @@
 //! 搜索仅使用 SerpAPI，其他搜索源（Bing/搜狗/Lens.org）已全部屏蔽。
 
 use crate::db::Database;
-use crate::pipeline::context::{PipelineContext, SearchResult};
+use crate::pipeline::context::{PipelineContext, PipelinePatentHit};
 use anyhow::Result;
 use reqwest::Client;
 use std::collections::hash_map::DefaultHasher;
@@ -40,11 +40,11 @@ fn query_hash(query: &str, source: &str) -> String {
 }
 
 /// 尝试从缓存加载搜索结果 / Try loading search results from cache
-fn try_cache(db: &Database, queries: &[String], source: &str) -> Option<Vec<SearchResult>> {
+fn try_cache(db: &Database, queries: &[String], source: &str) -> Option<Vec<PipelinePatentHit>> {
     let combined = queries.join("|");
     let hash = query_hash(&combined, source);
     if let Ok(Some(json)) = db.get_search_cache(&hash) {
-        if let Ok(results) = serde_json::from_str::<Vec<SearchResult>>(&json) {
+        if let Ok(results) = serde_json::from_str::<Vec<PipelinePatentHit>>(&json) {
             tracing::info!("搜索缓存命中: {} ({} 条结果)", source, results.len());
             return Some(results);
         }
@@ -53,7 +53,7 @@ fn try_cache(db: &Database, queries: &[String], source: &str) -> Option<Vec<Sear
 }
 
 /// 写入搜索缓存 / Save search results to cache
-fn save_cache(db: &Database, queries: &[String], source: &str, results: &[SearchResult]) {
+fn save_cache(db: &Database, queries: &[String], source: &str, results: &[PipelinePatentHit]) {
     let combined = queries.join("|");
     let hash = query_hash(&combined, source);
     if let Ok(json) = serde_json::to_string(results) {
@@ -111,7 +111,7 @@ pub async fn search_web(ctx: &mut PipelineContext, serpapi_key: &str, db: &Datab
                             continue;
                         }
                         seen_urls.insert(link.clone());
-                        all_results.push(SearchResult {
+                        all_results.push(PipelinePatentHit {
                             id: format!("web_{}", all_results.len()),
                             title: r["title"].as_str().unwrap_or("").to_string(),
                             snippet: r["snippet"].as_str().unwrap_or("").to_string(),
@@ -158,7 +158,7 @@ pub async fn search_patents(
                     continue;
                 }
                 seen_titles.insert(title_key);
-                all_results.push(SearchResult {
+                all_results.push(PipelinePatentHit {
                     id: format!("patent_local_{}", p.patent_number),
                     title: p.title,
                     snippet: p.abstract_text,
@@ -202,7 +202,7 @@ pub async fn search_patents(
                                 continue;
                             }
                             seen_titles.insert(title_key);
-                            all_results.push(SearchResult {
+                            all_results.push(PipelinePatentHit {
                                 id: format!("patent_online_{}", all_results.len()),
                                 title,
                                 snippet: r["snippet"].as_str().unwrap_or("").to_string(),

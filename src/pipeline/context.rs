@@ -23,15 +23,10 @@ pub struct AiCostRecord {
 }
 
 /// RAG 参考切片 — 检索到的专利文档片段
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReferenceChunk {
-    pub id: String,
-    pub patent_id: String,
-    pub chunk_index: i32,
-    pub source_type: String,
-    pub content: String,
-    pub relevance_score: f32,
-}
+///
+/// 定义已归位 `crate::types::search`（T1.1 缩水版）。此处 `pub use` 保持
+/// `crate::pipeline::context::ReferenceChunk` 既有路径可用。
+pub use crate::types::search::ReferenceChunk;
 
 /// 实验执行结果
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -110,14 +105,13 @@ pub struct StepResult {
 }
 
 /// 搜索结果（通用）
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SearchResult {
-    pub id: String,
-    pub title: String,
-    pub snippet: String,
-    pub link: String,
-    pub source: String,
-}
+///
+/// 曾用名 `pipeline::context::SearchResult`。它与检索响应 `patent::SearchResult`
+/// 同形异义（本类型是「一条命中」、后者是「一次检索的完整响应」），
+/// 是 types-migration-map.md §4 第 1 项登记的 **SearchResult 双定义**。
+/// T1.1 缩水版按该表给的选项改名 `PipelinePatentHit` 并归位 `crate::types::search`，
+/// 字段与 serde 形状逐字不变（DB `search_cache` 内的历史 JSON 仍可反序列化）。
+pub use crate::types::search::PipelinePatentHit;
 
 /// 单个维度的推演结果
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -218,39 +212,16 @@ pub struct DebateResult {
 }
 
 /// 证据条目 — 从结论到原始来源的可追溯链 / Evidence entry — traceable link from conclusion to source
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Evidence {
-    pub id: String,
-    pub idea_id: String,
-    /// 结论描述 / Claim description
-    pub claim: String,
-    /// "patent" | "web" | "contradiction" | "scoring"
-    pub source_type: String,
-    pub source_id: String,
-    pub source_title: String,
-    pub source_url: String,
-    /// 权利要求编号（预留）/ Patent claim number (reserved for future)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub claim_number: Option<String>,
-    /// 原文摘录 / Original text excerpt
-    pub excerpt: String,
-    /// "supports" | "contradicts" | "partial"
-    pub relation: String,
-    /// 0.0-1.0，算法计算非 AI 生成 / Algorithmic confidence, not AI-generated
-    pub confidence: f64,
-    /// 生成该证据的 pipeline 步骤 / Pipeline step that produced this evidence
-    pub produced_by: String,
-    pub created_at: String,
-}
+///
+/// 定义已归位 `crate::types::idea`（T1.1 缩水版）。此处 `pub use` 保持
+/// `crate::pipeline::context::Evidence` 既有路径可用（db/evidence.rs 等反向引用者不受影响）。
+pub use crate::types::idea::Evidence;
 
 /// 研发状态机 — 跟踪研究过程中的假设、排除路径和开放问题
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ResearchState {
-    pub current_hypothesis: String,
-    pub excluded_paths: Vec<String>,
-    pub open_questions: Vec<String>,
-    pub verified_claims: Vec<String>,
-}
+///
+/// 定义已归位 `crate::types::idea`（T1.1 缩水版）。此处 `pub use` 保持
+/// `crate::pipeline::context::ResearchState` 既有路径可用（含集成测试的引用路径）。
+pub use crate::types::idea::ResearchState;
 
 /// 流水线上下文 — 在步骤间传递的数据载体
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -267,8 +238,8 @@ pub struct PipelineContext {
     pub expanded_queries: Vec<String>,
 
     // Step 3-4: Search
-    pub web_results: Vec<SearchResult>,
-    pub patent_results: Vec<SearchResult>,
+    pub web_results: Vec<PipelinePatentHit>,
+    pub patent_results: Vec<PipelinePatentHit>,
 
     // Step 5: DiversityGate
     pub diversity_score: f64,
