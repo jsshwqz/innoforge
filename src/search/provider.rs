@@ -22,10 +22,11 @@ pub trait SearchProvider: Send + Sync {
         query: SearchQuery,
     ) -> Pin<Box<dyn Future<Output = SearchOutcome> + Send + 'a>>;
 
-    /// 精确专利号直查（可选能力，spec §1 未列，MA1 按现役 `/api/search/online` 行为保留）。
-    /// 默认 `None` = 该源没有 details 形态的端点；`Vec<Box<dyn SearchProvider>>` 要求方法
-    /// 在所有实现上同签名，故用默认实现而非 `Option<...>` 字段表达「可选」。
-    #[allow(dead_code)] // MA2 起 Google Patents XHR 走默认实现；MA1 只有 SerpAPI 覆写
+    /// 精确专利号直查（可选能力，spec §1 未列，MA1 按现役 `/api/search/online` 行为保留并**已接线**：
+    /// `routes/search.rs` 的 `SearchType::PatentNumber` 分支调用 `SerpApiProvider` 的覆写实现）。
+    /// 默认 `None` = 该源没有 details 形态的端点，MA2 起 Google Patents XHR 即用此默认实现；
+    /// `Vec<Box<dyn SearchProvider>>` 要求方法在所有实现上同签名，故用默认方法而非
+    /// `Option<...>` 字段表达「可选」。
     fn lookup_exact<'a>(
         &'a self,
         _query: String,

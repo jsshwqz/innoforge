@@ -26,6 +26,9 @@ mod orchestrator;
 pub mod patent;
 pub mod pipeline;
 mod routes;
+// 与 lib.rs 保持同一份模块清单（AGENTS.md 2.4 双入口一致）：
+// `routes/search.rs` 依赖 `crate::search`，缺一侧声明即另一侧编译失败。
+pub mod search;
 pub mod types;
 
 use std::net::SocketAddr;

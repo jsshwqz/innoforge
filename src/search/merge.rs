@@ -139,7 +139,10 @@ mod tests {
 
     #[test]
     fn merged_entries_carry_key_and_source() {
-        let merged = merged_from(SourceKind::SerpApi, vec![summary("cn 2024 101234 A", "t", Some(1.0), 1)]);
+        let merged = merged_from(
+            SourceKind::SerpApi,
+            vec![summary("cn 2024 101234 A", "t", Some(1.0), 1)],
+        );
         assert_eq!(1, merged.len());
         let first = &merged[0];
         assert_eq!(vec![SourceKind::SerpApi], first.sources);

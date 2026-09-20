@@ -113,8 +113,8 @@ pub struct MergedPatent {
     pub key: String,
     /// 复用既有对外结构，保证 `/api/search/online` 的 patents[] 字段一字不变。
     pub summary: PatentSummary,
-    /// 命中该条的源集合（MA1 恒为单元素）。
-    #[allow(dead_code)] // MA2 起由 merge::merge_outcomes 填充多源
+    /// 命中该条的源集合（MA1 恒为单元素，由 `merge::merged_from` 写入）。
+    #[allow(dead_code)] // MA2 起由多源合并（`merge::merged_from` 的扩展）填充多源
     pub sources: Vec<SourceKind>,
 }
 
@@ -132,9 +132,7 @@ pub struct SearchOutcome {
 impl SearchOutcome {
     /// 首个非空 hint（等价于旧 `upstream_hint` 的实际取值规则）。
     pub fn hint(&self) -> Option<String> {
-        self.attempts
-            .iter()
-            .find_map(|a| a.hint.clone())
+        self.attempts.iter().find_map(|a| a.hint.clone())
     }
 
     /// 还原对外 `patents` 数组（只读视图，形状与旧代码逐字一致）。

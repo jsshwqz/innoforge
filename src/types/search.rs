@@ -65,7 +65,11 @@ pub struct CategoryGroup {
     pub count: usize,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+/// MA1 追加 `PartialEq`：`search::model::MergedPatent` / `SearchOutcome` 按 spec §1 派生
+/// `PartialEq`（多源合并结果需要可比较、可断言），其字段 `summary` 要求本类型可比；
+/// 同时检索层的「改造前后逐字段等价」单测直接比对 `PatentSummary`。
+/// serde 形状与字段均未变，属纯派生扩展。
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct PatentSummary {
     pub id: String,
     pub patent_number: String,

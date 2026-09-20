@@ -321,9 +321,6 @@ mod tests {
             calculate_online_relevance("固态电池", "固态电池", "固态电池", "固态电池", "固态电池")
         );
         // 空 inventor 的既有行为：`q.contains(&inv)` 对空串恒真 → +15
-        assert_eq!(
-            45.0,
-            calculate_online_relevance("abc", "xyz", "", "", "")
-        );
+        assert_eq!(45.0, calculate_online_relevance("abc", "xyz", "", "", ""));
     }
 }

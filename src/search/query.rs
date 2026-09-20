@@ -3,7 +3,12 @@
 //! spec §3 改造点 2 要求「q 构造统一由 [`SearchQuery`] 渲染」。本模块把原先散在
 //! `routes/mod.rs::build_online_query` 与 `routes/search.rs::api_search_online` 里的
 //! q 串 / 国内外判定逻辑集中到一处，**渲染规则逐字保持**：
-//! 同一条用户输入产出的 `q` 串与 URL 参数必须与迁移前完全相同（由 `query_url_golden_*` 单测锁死）。
+//! 同一条用户输入产出的 `q` 串与 URL 参数必须与迁移前完全相同。
+//!
+//! 「行为保持」的证明方式：本文件末尾的 `test_support` 里保留了**迁移前的两份实现**
+//! （只编译于 test cfg），`render_q_matches_pre_migration_implementation` 与
+//! `resolve_lang_matches_pre_migration_region_flags` 对同一批输入与之逐用例比对。
+//! 旧入口 `routes/mod.rs::build_online_query` 已随之删除，全仓只剩这一份实现。
 
 use crate::search::model::{Lang, SearchQuery};
 use crate::types::search::SearchType;
@@ -24,8 +29,7 @@ fn looks_like_cn_patent_number(query_trimmed: &str) -> bool {
 
 /// 是否含中日韩统一表意文字（旧 `api_search_online` 的内联判定）。
 fn contains_cjk_char(s: &str) -> bool {
-    s.chars()
-        .any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c))
+    s.chars().any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c))
 }
 
 /// 搜索区域判定：用户明确选择 > 自动检测（迁自 `routes/search.rs`）。
@@ -40,7 +44,7 @@ pub fn resolve_lang(region: Option<&str>, country: Option<&str>, query_trimmed: 
         || looks_like_cn_patent_number(query_trimmed)
         || contains_cjk_char(query_trimmed);
     match region {
-        Some("cn") => Lang::Chinese, // 用户明确选国内
+        Some("cn") => Lang::Chinese,   // 用户明确选国内
         Some("intl") => Lang::English, // 用户明确选国外
         _ => {
             if auto_cn {
@@ -110,27 +114,108 @@ pub fn render_q(query: &SearchQuery) -> String {
     search_query
 }
 
-/// 旧位置签名（`routes/mod.rs::build_online_query`）的兼容包装：
-/// 只做参数装箱，随后交给 [`render_q`]，确保两条入口渲染结果恒等。
-pub fn build_online_query(
-    query: &str,
-    search_type: Option<&SearchType>,
-    date_from: Option<&str>,
-    date_to: Option<&str>,
-) -> String {
-    render_q(&SearchQuery {
-        keyword: query.to_string(),
-        country: None,
-        language: None,
-        assignee: None,
-        exact_assignee: false,
-        date_from: date_from.map(|s| s.to_string()),
-        date_to: date_to.map(|s| s.to_string()),
-        limit: 0,
-        page: 1,
-        sort_by: None,
-        search_type: search_type.cloned(),
-    })
+/// 迁移前的 q 串渲染实现，**逐字符复制**自 `src/routes/mod.rs::build_online_query`
+/// （`git show b08f1c5:src/routes/mod.rs`，原 443-500 行）。
+///
+/// 只在 `cfg(test)` 下编译，专供「改造前后等价」的参照对比：
+/// - [`crate::search::query::render_q`] 对同一批输入的产出必须与之完全相同；
+/// - `providers::serpapi` 的上游 URL 也基于它构造参照值。
+///
+/// 生产代码不得调用本函数（旧入口 `routes/mod.rs::build_online_query` 已删除，
+/// 避免出现两份可独立演化的实现）。
+#[cfg(test)]
+pub mod test_support {
+    use crate::types::search::SearchType;
+
+    pub fn legacy_build_online_query(
+        query: &str,
+        search_type: Option<&SearchType>,
+        date_from: Option<&str>,
+        date_to: Option<&str>,
+    ) -> String {
+        let q = query.trim().replace('"', "");
+        let mut search_query = match search_type {
+            Some(SearchType::Applicant) => format!("assignee:\"{}\"", q),
+            Some(SearchType::Inventor) => format!("inventor:\"{}\"", q),
+            Some(SearchType::PatentNumber) => {
+                let digits: String = q.chars().filter(|c| c.is_ascii_digit()).collect();
+                let has_dot = q.contains('.');
+                let is_cn_app = digits.len() >= 10
+                    && digits.len() <= 15
+                    && (q.chars().all(|c| c.is_ascii_digit() || c == '.')
+                        || (q.starts_with("CN") && q.contains('.')));
+                if is_cn_app {
+                    let core = if has_dot {
+                        let dot_pos = q.find('.').unwrap_or(q.len());
+                        let pre_dot: String = q[..dot_pos]
+                            .chars()
+                            .filter(|c| c.is_ascii_digit())
+                            .collect();
+                        pre_dot
+                    } else if digits.len() == 13 {
+                        digits[..12].to_string()
+                    } else {
+                        digits
+                    };
+                    format!("\"{}\" OR \"{}\"", q, core)
+                } else {
+                    format!("\"{}\"", q)
+                }
+            }
+            _ => q,
+        };
+        if let Some(from) = date_from {
+            if !from.is_empty() {
+                search_query.push_str(&format!(" after:{from}"));
+            }
+        }
+        if let Some(to) = date_to {
+            if !to.is_empty() {
+                search_query.push_str(&format!(" before:{to}"));
+            }
+        }
+        search_query
+    }
+
+    /// 迁移前的国内/国外判定，**逐字符复制**自 `src/routes/search.rs::api_search_online`
+    /// （`git show b08f1c5:src/routes/search.rs`，原 248-276 行）。
+    /// 返回旧代码的 `(is_cn_query, is_intl_query)` 二元组。
+    pub fn legacy_region_flags(
+        region: Option<&str>,
+        country: Option<&str>,
+        query_trimmed: &str,
+    ) -> (bool, bool) {
+        let looks_like_cn_patent_number = {
+            let digits_only: String = query_trimmed
+                .chars()
+                .filter(|c| c.is_ascii_digit())
+                .collect();
+            digits_only.len() >= 10
+                && digits_only.len() <= 15
+                && query_trimmed
+                    .chars()
+                    .all(|c| c.is_ascii_digit() || c == '.')
+        };
+        let auto_cn = matches!(country, Some("CN"))
+            || query_trimmed.starts_with("CN")
+            || query_trimmed.starts_with("ZL")
+            || looks_like_cn_patent_number
+            || query_trimmed
+                .chars()
+                .any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c));
+
+        let is_cn_query = match region {
+            Some("cn") => true,
+            Some("intl") => false,
+            _ => auto_cn,
+        };
+        let is_intl_query = match region {
+            Some("intl") => true,
+            Some("cn") => false,
+            _ => !auto_cn,
+        };
+        (is_cn_query, is_intl_query)
+    }
 }
 
 #[cfg(test)]
@@ -164,30 +249,78 @@ mod tests {
         }
     }
 
-    /// 兼容包装与 SearchQuery 渲染必须恒等（spec §3 改造点 2 的「行为保持」面）。
+    /// 一条 q 渲染用例：`(关键词, 检索域, date_from, date_to)`
+    type RenderCase = (
+        &'static str,
+        Option<SearchType>,
+        Option<&'static str>,
+        Option<&'static str>,
+    );
+
+    /// 与**迁移前实现**逐字符等价（spec §3 改造点 2 的「行为保持」证据）。
+    /// 覆盖自 `routes/mod.rs` 测试迁来的两条（applicant 域、inventor + 日期区间）。
     #[test]
-    fn legacy_wrapper_and_render_q_are_identical() {
-        let cases: &[(&str, Option<SearchType>, Option<&str>, Option<&str>)] = &[
+    fn render_q_matches_pre_migration_implementation() {
+        use crate::search::query::test_support::legacy_build_online_query;
+        let cases: &[RenderCase] = &[
             ("Alice Zhang", Some(SearchType::Applicant), None, None),
+            (
+                "Alice Zhang",
+                Some(SearchType::Inventor),
+                Some("2024-01-01"),
+                Some("2024-12-31"),
+            ),
             ("张三", Some(SearchType::Inventor), Some("20200101"), None),
-            ("CN202420009882.7", Some(SearchType::PatentNumber), None, Some("20250101")),
-            ("202210835143.9", Some(SearchType::PatentNumber), Some("20190101"), Some("20240101")),
+            (
+                "CN202420009882.7",
+                Some(SearchType::PatentNumber),
+                None,
+                Some("20250101"),
+            ),
+            (
+                "202210835143.9",
+                Some(SearchType::PatentNumber),
+                Some("20190101"),
+                Some("20240101"),
+            ),
+            ("2022108351439", Some(SearchType::PatentNumber), None, None),
+            ("20221083", Some(SearchType::PatentNumber), None, None),
             ("固态 电池", None, None, None),
             ("带\"引号\"的查询", Some(SearchType::Keyword), None, None),
+            (
+                "  首尾空格  ",
+                Some(SearchType::Applicant),
+                Some(""),
+                Some(""),
+            ),
+            ("", None, None, None),
         ];
         for (keyword, st, from, to) in cases {
-            let legacy = build_online_query(keyword, st.as_ref(), *from, *to);
-            let rendered = render_q(&q(
-                keyword,
-                st.clone(),
-            ));
+            let legacy = legacy_build_online_query(keyword, st.as_ref(), *from, *to);
+            let rendered = render_q(&SearchQuery {
+                keyword: (*keyword).to_string(),
+                search_type: st.clone(),
+                date_from: (*from).map(|s| s.to_string()),
+                date_to: (*to).map(|s| s.to_string()),
+                ..blank()
+            });
             assert_eq!(legacy, rendered, "keyword={keyword}");
         }
     }
 
-    /// 旧代码的具体渲染结果（golden），证明迁移没顺手改语法。
+    /// 单条 golden（含日期区间形态），钉住可读的具体产出。
     #[test]
     fn render_q_golden_cases() {
+        assert_eq!(
+            "inventor:\"Alice Zhang\" after:2024-01-01 before:2024-12-31",
+            render_q(&SearchQuery {
+                keyword: "Alice Zhang".to_string(),
+                search_type: Some(SearchType::Inventor),
+                date_from: Some("2024-01-01".to_string()),
+                date_to: Some("2024-12-31".to_string()),
+                ..q("", None)
+            })
+        );
         assert_eq!(
             "assignee:\"Alice Zhang\"",
             render_q(&q("Alice Zhang", Some(SearchType::Applicant)))
@@ -210,7 +343,20 @@ mod tests {
             "\"CN202420009882.7\" OR \"202420009882\"",
             render_q(&q("CN202420009882.7", Some(SearchType::PatentNumber)))
         );
-        assert_eq!("\"iPhone 15\"", render_q(&q("iPhone 15", Some(SearchType::Keyword))));
+        // Keyword / Mixed / 未指定 三种取值都不加检索语法（旧 `_ => q` 分支），
+        // 只保留 trim + 去引号；`"iPhone 15"` 这类带引号的写法会被剥掉而非转义。
+        assert_eq!(
+            "iPhone 15",
+            render_q(&q("  iPhone 15  ", Some(SearchType::Keyword)))
+        );
+        assert_eq!(
+            "iPhone 15",
+            render_q(&q("iPhone 15", Some(SearchType::Mixed)))
+        );
+        assert_eq!(
+            "带iPhone 15的查询",
+            render_q(&q("带\"iPhone 15\"的查询", Some(SearchType::Keyword)))
+        );
         assert_eq!("iPhone 15", render_q(&q("iPhone 15", None)));
     }
 
@@ -232,5 +378,50 @@ mod tests {
         // 非中文且像专利号但位数不足 → 国外
         assert_eq!(Lang::English, resolve_lang(None, Some("US"), "1234567"));
         assert_eq!(Lang::English, resolve_lang(None, None, "dustproof hinge"));
+    }
+
+    /// 与**迁移前判定**逐用例等价：`Lang::Chinese` ⇔ 旧 `is_cn_query`，
+    /// `Lang::English` ⇔ 旧 `is_intl_query`（旧代码里两者在所有分支互补，一个枚举即可无损替代）。
+    #[test]
+    fn resolve_lang_matches_pre_migration_region_flags() {
+        use crate::search::query::test_support::legacy_region_flags;
+        let regions = [None, Some("cn"), Some("intl"), Some("other")];
+        let countries = [None, Some("CN"), Some("US"), Some("")];
+        let queries = [
+            "",
+            "  ",
+            "hinge",
+            "dustproof hinge",
+            "固态电池",
+            "CN1098765A",
+            "ZL202410123456.7",
+            "202210835143.9",
+            "202210835143",
+            "1234567890",
+            "1234567890123456789",
+            "CN202420009882.7",
+            "混合 mixed 关键词",
+            "日本語の特許",
+        ];
+        for region in regions {
+            for country in countries {
+                for keyword in queries {
+                    let (legacy_cn, legacy_intl) = legacy_region_flags(region, country, keyword);
+                    match resolve_lang(region, country, keyword) {
+                        Lang::Chinese => assert_eq!(
+                            (true, false),
+                            (legacy_cn, legacy_intl),
+                            "region={region:?} country={country:?} q={keyword}"
+                        ),
+                        Lang::English => assert_eq!(
+                            (false, true),
+                            (legacy_cn, legacy_intl),
+                            "region={region:?} country={country:?} q={keyword}"
+                        ),
+                        Lang::All => panic!("MA1 不产出 All"),
+                    }
+                }
+            }
+        }
     }
 }
