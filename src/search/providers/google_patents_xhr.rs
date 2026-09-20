@@ -547,14 +547,39 @@ pub fn filter_by_publication_window(
         .collect()
 }
 
-/// `2024-01-05` / `2024/1/5` / `20240105` → `"20240105"`；不足 8 位数字则 `None`。
+/// `2024-01-05` / `2024/1/5` / `20240105` → `"20240105"`；认不出来则 `None`。
+///
+/// 用户侧日期串形态不统一（前端传 `YYYY-MM-DD`，历史数据里见过 `YYYY/M/D`），
+/// 而归一失败的处理原则是**当作「无边界」**（见 `filter_by_publication_window`），
+/// 所以这里宁可返回 `None` 也不要瞎猜一个数。
 fn normalize_date(s: &str) -> Option<String> {
-    let digits: String = s.chars().filter(|c| c.is_ascii_digit()).collect();
-    if digits.len() >= 8 {
-        Some(digits[..8].to_string())
-    } else {
-        None
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return None;
     }
+    // 纯数字形态：至少要有 8 位才可能是完整年月日
+    if trimmed.chars().all(|c| c.is_ascii_digit()) {
+        let digits: String = trimmed.chars().collect();
+        return if digits.len() >= 8 {
+            Some(digits[..8].to_string())
+        } else {
+            None
+        };
+    }
+    // 分隔符形态：年-月-日 / 年/月/日 / 年.月.日，月日可不补零
+    let parts: Vec<&str> = trimmed
+        .split(|c| c == '-' || c == '/' || c == '.')
+        .collect();
+    if parts.len() != 3 {
+        return None;
+    }
+    let year = parts[0].parse::<u32>().ok()?;
+    let month = parts[1].parse::<u32>().ok()?;
+    let day = parts[2].parse::<u32>().ok()?;
+    if !(1000..=9999).contains(&year) || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+    Some(format!("{year:04}{month:02}{day:02}"))
 }
 
 /// 从 `results.cluster[*].result[*]` 摊平出命中行。
@@ -624,4 +649,626 @@ impl SearchProvider for GooglePatentsXhrProvider {
 fn backoff_for(attempt: usize) -> Duration {
     let factor = 1u32 << (attempt.saturating_sub(1).min(4)) as u32;
     BASE_BACKOFF.saturating_mul(factor)
+}
+
+#[cfg(test)]
+//
+// `pub(crate)` 是刻意的：`search::chain` 的降级链三用例复用本模块的假传输/假时钟与
+// 真实冒烟 fixture（见 chain::tests），避免在两个模块里各写一份同源测试脚手架。
+// 除测试外无人可见（整块受 #[cfg(test)] 保护），不会泄漏进生产 API。
+pub(crate) mod tests {
+    use super::*;
+    use crate::types::search::SearchType;
+    use std::collections::VecDeque;
+    use std::sync::Mutex;
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // ⚠️ 实证材料（spec §2 / §8）
+    //
+    // 冒烟命令（只读 GET，无副作用）：
+    //   curl -s -o xhr_cn.json -w "HTTP %{http_code} size=%{size_download} time=%{time_total}\n" \
+    //     "https://patents.google.com/xhr/query?url=q%3D%28%E5%9B%BA%E6%80%81%E7%94%B5%E6%B1%A0%29\
+    // %26country%3DCN%26language%3DCHINESE%26sort%3Dnew"
+    //   → HTTP 200  size=22006  time=6.43s   （2026-09-20，本机住宅/办公出口 IP）
+    //   首条 title = 「 一种动车组电池健康状态评估与寿命预测方法及系统」
+    //   total_num_results = 14627, total_num_pages = 77, num_page = 0
+    //   patent 键集 = title,snippet,priority_date,filing_date,grant_date,publication_date,
+    //                  inventor,assignee,publication_number,language,thumbnail,pdf,family_metadata
+    //
+    //   反爬现场：紧随其后连打 3 发（间隔 <8s）
+    //     → HTTP 503  size=1103  body = `<html>…<title>Sorry...</title>…`（**不是 JSON**）
+    //     随后 20s / 8s 间隔的探测仍全部 503（封禁持续数分钟以上）
+    //   → 这条现场就是「限速 + 退避 + 503 判 Quota 而非 Parse/Network」三件事的直接依据。
+    //
+    // 下面两个常量是那次 200 响应的**逐字段摘录**（snippet 为控制篇幅做了截断，
+    // 只用于喂解析器，不参与任何被断言的数据完整性；其余字段值原样保留）。
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    pub(crate) const REAL_CN_REPLY: &str = r#"{
+ "results": {
+  "total_num_results": 14627,
+  "total_num_pages": 77,
+  "many_results": false,
+  "num_page": 0,
+  "cluster": [
+   {
+    "result": [
+     {
+      "id": "patent/CN120275837B/zh",
+      "rank": 0,
+      "patent": {
+       "title": " 一种动车组电池健康状态评估与寿命预测方法及系统",
+       "snippet": " 本申请涉及动车电池组评估技术领域，提供了一种动车组电池健康状态评估与寿命预测方法及系统，包括通过浮充状态下的电压波动和…[截断，仅测试用]",
+       "priority_date": "2025-06-11",
+       "filing_date": "2025-06-11",
+       "grant_date": "2025-09-05",
+       "publication_date": "2025-09-05",
+       "inventor": "陈奎",
+       "assignee": "西南交通大学",
+       "publication_number": "CN120275837B",
+       "language": "zh",
+       "thumbnail": "",
+       "pdf": "",
+       "family_metadata": { "aggregated": { "country_status": [ { "country_code": "CN" } ] } }
+      }
+     },
+     {
+      "id": "patent/CN120598460A/zh",
+      "rank": 1,
+      "patent": {
+       "title": " 一种多模态融合的agv动态路径规划与集群调度系统",
+       "snippet": " 本发明公开了一种多模态融合的AGV动态路径规划与集群调度系统，涉及多模态感知与数据融合技术领域，包括多模态感知模块：通…[截断，仅测试用]",
+       "priority_date": "2025-05-23",
+       "filing_date": "2025-05-23",
+       "publication_date": "2025-09-05",
+       "inventor": "刘徐丞",
+       "assignee": "华东交通大学",
+       "publication_number": "CN120598460A",
+       "language": "zh",
+       "thumbnail": "",
+       "pdf": "",
+       "family_metadata": { "aggregated": { "country_status": [ { "country_code": "CN" } ] } }
+      }
+     }
+    ]
+   }
+  ],
+  "chem_exhausted": false,
+  "summary": {}
+ }
+}"#;
+
+    /// ⚠️ 零命中形态：实测 `{"results":{"total_num_results":0,…,"cluster":[{}],…}}`
+    /// —— `cluster` 里那个对象**没有 `result` 键**。映射若直取即 panic。
+    pub(crate) const REAL_EMPTY_REPLY: &str = r#"{"results":{"total_num_results":0,"total_num_pages":0,"many_results":false,"num_page":0,"cluster":[{}],"chem_exhausted":false,"summary":{}}}"#;
+
+    /// ⚠️ 反爬页形态（实测 503 响应体的开头，HTML 而非 JSON）。
+    pub(crate) const REAL_503_BODY: &str = "<html><head><meta http-equiv=\"content-type\" content=\"text/html; charset=utf-8\"/><title>Sorry...</title><style> body { font-family: verdana, arial, sans-serif; }</style></head><body><div><table><tr><td><b><font face=sans-serif size=10><font color=#4285f4>G</font>";
+
+    pub(crate) fn query(keyword: &str) -> SearchQuery {
+        SearchQuery {
+            keyword: keyword.to_string(),
+            country: Some("CN".to_string()),
+            language: Some(Lang::Chinese),
+            assignee: None,
+            exact_assignee: false,
+            date_from: None,
+            date_to: None,
+            limit: 20,
+            page: 1,
+            sort_by: Some("new".to_string()),
+            search_type: None,
+        }
+    }
+
+    pub(crate) fn db() -> Arc<Database> {
+        Arc::new(Database::init(":memory:").expect("in-memory db"))
+    }
+
+    // ── 假时钟 / 假传输（离线注入点） ────────────────────────────────────────────
+
+    /// 假时钟：`sleep` 直接推进虚拟时间并留痕，使限速/退避断言在毫秒级完成。
+    pub(crate) struct FakeClock {
+        now: AtomicU64,
+        sleeps: Mutex<Vec<Duration>>,
+    }
+
+    impl FakeClock {
+        pub(crate) fn new() -> Arc<Self> {
+            Arc::new(FakeClock {
+                now: AtomicU64::new(0),
+                sleeps: Mutex::new(Vec::new()),
+            })
+        }
+        pub(crate) fn recorded(&self) -> Vec<Duration> {
+            self.sleeps.lock().expect("lock").clone()
+        }
+    }
+
+    impl XhrClock for FakeClock {
+        fn now_ms(&self) -> u64 {
+            self.now.load(Ordering::SeqCst)
+        }
+        fn sleep(&self, dur: Duration) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+            Box::pin(async move {
+                self.now.fetch_add(dur.as_millis() as u64, Ordering::SeqCst);
+                self.sleeps.lock().expect("push").push(dur);
+            })
+        }
+    }
+
+    /// 假传输：按脚本逐发返回，并记录每次请求的 URL（用于断言发出次数与 URL 形状）。
+    pub(crate) struct FakeTransport {
+        script: Mutex<VecDeque<XhrReply>>,
+        /// 兜底：脚本耗尽后的固定回复（避免测试里出现「无脚本可用」的 panic）。
+        fallback: XhrReply,
+        urls: Mutex<Vec<String>>,
+    }
+
+    impl FakeTransport {
+        pub(crate) fn new(script: Vec<XhrReply>) -> Arc<Self> {
+            let mut queue = VecDeque::from(script);
+            let fallback = queue
+                .pop_back()
+                .unwrap_or_else(|| reply(200, REAL_EMPTY_REPLY));
+            Arc::new(FakeTransport {
+                script: Mutex::new(queue),
+                fallback,
+                urls: Mutex::new(Vec::new()),
+            })
+        }
+        pub(crate) fn fetch_count(&self) -> usize {
+            self.urls.lock().expect("lock").len()
+        }
+        pub(crate) fn urls(&self) -> Vec<String> {
+            self.urls.lock().expect("lock").clone()
+        }
+    }
+
+    pub(crate) fn reply(status: u16, body: &str) -> XhrReply {
+        XhrReply {
+            status,
+            body: body.to_string(),
+            retry_after: None,
+        }
+    }
+
+    impl XhrTransport for FakeTransport {
+        fn fetch(
+            &self,
+            url: String,
+        ) -> Pin<Box<dyn Future<Output = Result<XhrReply, XhrFault>> + Send + '_>> {
+            Box::pin(async move {
+                self.urls.lock().expect("push").push(url);
+                let next = self.script.lock().expect("pop").pop_front();
+                Ok(next.unwrap_or_else(|| self.fallback.clone()))
+            })
+        }
+    }
+
+    /// 组一个完全离线的源实例：假传输 + 假时钟，绝不出网。
+    pub(crate) fn provider(
+        script: Vec<XhrReply>,
+    ) -> (GooglePatentsXhrProvider, Arc<FakeTransport>, Arc<FakeClock>) {
+        let clock = FakeClock::new();
+        let transport = FakeTransport::new(script);
+        let p = GooglePatentsXhrProvider::with_transport(db(), transport.clone(), clock.clone());
+        (p, transport, clock)
+    }
+
+    // ── 内层串 / 完整 URL（spec §2 参数集） ──────────────────────────────────────
+
+    #[test]
+    fn inner_url_emits_spec_2_param_set() {
+        let mut q = query("固态电池");
+        q.assignee = Some(" 张三 ".to_string());
+        let inner = GooglePatentsXhrProvider::inner_url(&q);
+        assert_eq!(
+            "q=固态电池&country=CN&language=CHINESE&assignee=张三&sort=new",
+            inner
+        );
+    }
+
+    #[test]
+    fn language_maps_to_upper_token_and_all_omits_param() {
+        let mut en = query("battery");
+        en.language = Some(Lang::English);
+        assert!(GooglePatentsXhrProvider::inner_url(&en).contains("language=ENGLISH"));
+
+        let mut all = query("battery");
+        all.language = Some(Lang::All);
+        assert!(
+            !GooglePatentsXhrProvider::inner_url(&all).contains("language="),
+            "All = 不限语种，不该下发 language 参数"
+        );
+
+        let none = query("battery");
+        assert!(GooglePatentsXhrProvider::inner_url(&none).contains("language=CHINESE"));
+    }
+
+    #[test]
+    fn country_is_uppercased_and_blank_dropped() {
+        let mut q = query("x");
+        q.country = Some(" us ".to_string());
+        assert!(GooglePatentsXhrProvider::inner_url(&q).contains("country=US"));
+        q.country = Some("".to_string());
+        assert!(!GooglePatentsXhrProvider::inner_url(&q).contains("country="));
+    }
+
+    #[test]
+    fn sort_only_accepts_new_and_old() {
+        let mut q = query("x");
+        for (value, expect) in [("new", true), ("old", true), ("relevance", false)] {
+            q.sort_by = Some(value.to_string());
+            assert_eq!(
+                expect,
+                GooglePatentsXhrProvider::inner_url(&q).contains("sort="),
+                "sort={value}"
+            );
+        }
+        q.sort_by = None;
+        assert!(!GooglePatentsXhrProvider::inner_url(&q).contains("sort="));
+    }
+
+    /// ⚠️ 已知坑 2 的落点：日期**绝不进**内层串（服务端过滤会静默返回空集），
+    /// 但 q 串里也不能出现 `after:`/`before:`（那是同一类服务端过滤）。
+    #[test]
+    fn date_filters_are_never_sent_upstream() {
+        let mut q = query("固态电池");
+        q.date_from = Some("2024-01-01".to_string());
+        q.date_to = Some("2024-12-31".to_string());
+        let inner = GooglePatentsXhrProvider::inner_url(&q);
+        assert!(!inner.contains("after"), "{inner}");
+        assert!(!inner.contains("before"), "{inner}");
+        assert!(!inner.contains("2024"), "{inner}");
+        // q 本身仍应保留关键词（摘日期不摘词）
+        assert!(inner.starts_with("q=固态电池"), "{inner}");
+    }
+
+    #[test]
+    fn request_url_single_encodes_inner_string() {
+        let url = GooglePatentsXhrProvider::request_url(&query("固态电池"));
+        assert!(
+            url.starts_with("https://patents.google.com/xhr/query?url="),
+            "{url}"
+        );
+        let inner = url
+            .strip_prefix("https://patents.google.com/xhr/query?url=")
+            .expect("prefix");
+        // 内层串被**一次**编码：`=` → %3D、`&` → %26，且没有 %2525 这类双重编码痕迹
+        assert!(inner.contains("%3D"), "{inner}");
+        assert!(inner.contains("%26country%3DCN"), "{inner}");
+        assert!(!inner.contains("%2525"), "出现双重编码: {inner}");
+    }
+
+    #[test]
+    fn patent_number_search_type_still_flows_through_render_q() {
+        let mut q = query("CN202420009882.7");
+        q.search_type = Some(SearchType::PatentNumber);
+        let inner = GooglePatentsXhrProvider::inner_url(&q);
+        assert!(
+            inner.starts_with("q=\"CN202420009882.7\" OR \"202420009882\""),
+            "{inner}"
+        );
+    }
+
+    // ── 响应建模（⚠️ 真实结构） ──────────────────────────────────────────────────
+
+    #[test]
+    fn flatten_rows_reads_real_cluster_shape() {
+        let json: serde_json::Value = serde_json::from_str(REAL_CN_REPLY).expect("real reply");
+        let rows = flatten_rows(&json);
+        assert_eq!(2, rows.len());
+        assert_eq!(
+            "CN120275837B",
+            rows[0]["patent"]["publication_number"]
+                .as_str()
+                .expect("pub")
+        );
+    }
+
+    /// ⚠️ 真实反例：零命中时 `cluster: [{}]`（没有 result 键）。必须摊成空而非 panic。
+    #[test]
+    fn empty_cluster_object_is_tolerated() {
+        let json: serde_json::Value = serde_json::from_str(REAL_EMPTY_REPLY).expect("empty reply");
+        assert!(flatten_rows(&json).is_empty());
+    }
+
+    #[test]
+    fn maps_real_row_to_patent_fields() {
+        let json: serde_json::Value = serde_json::from_str(REAL_CN_REPLY).expect("real reply");
+        let row = json["results"]["cluster"][0]["result"][0].clone();
+        let p = xhr_to_patent(&row);
+        assert_eq!("CN120275837B", p.patent_number);
+        assert_eq!("CN", p.country, "国家码取公开号前缀字母");
+        assert_eq!(
+            "一种动车组电池健康状态评估与寿命预测方法及系统", p.title,
+            "首尾空格应清掉"
+        );
+        assert_eq!("西南交通大学", p.applicant);
+        assert_eq!("陈奎", p.inventor);
+        assert_eq!("2025-06-11", p.filing_date);
+        assert_eq!("2025-09-05", p.publication_date);
+        assert_eq!(Some("2025-09-05".to_string()), p.grant_date);
+        assert_eq!(SOURCE_LABEL, p.source);
+        assert!(p.raw_json.contains("CN120275837B"), "原文完整入库");
+
+        // 第 2 条上游就没有 grant_date → 必须是 None，不能是 Some("")
+        let row2 = json["results"]["cluster"][0]["result"][1].clone();
+        assert_eq!(None, xhr_to_patent(&row2).grant_date);
+    }
+
+    /// 缺字段/畸形结构一律降级为空串，不 panic（spec §2 已知坑 3 的健壮性底线）。
+    #[test]
+    fn missing_fields_degrade_to_empty_strings() {
+        let p = xhr_to_patent(&serde_json::json!({"patent": {"title": "只有标题"}}));
+        assert_eq!("只有标题", p.title);
+        assert_eq!("", p.patent_number);
+        assert_eq!("", p.country);
+        assert_eq!(None, p.grant_date);
+        // 连 patent 键都没有也不能炸
+        assert_eq!("", xhr_to_patent(&serde_json::json!({})).title);
+    }
+
+    #[test]
+    fn strip_highlight_tags_removes_b_and_collapses_spaces() {
+        // 存档证据称命中词会被 <b> 包住；实测这批响应里没有，故只做兼容。
+        assert_eq!(
+            "固态 电池 装置",
+            strip_highlight_tags("  <b>固态</b> <b>电池</b> 装置 ")
+        );
+        assert_eq!("无标签", strip_highlight_tags(" 无标签 "));
+        // 小于号出现在非标签场合也不吞字（只做标签剔除，不做 HTML 解析）
+        assert_eq!("a & b", strip_highlight_tags("a & b"));
+    }
+
+    // ── 客户端日期过滤（已知坑 2 的修法） ────────────────────────────────────────
+
+    fn row_with(pubdate: &str) -> serde_json::Value {
+        serde_json::json!({ "patent": { "publication_number": "CN1", "title": "t", "publication_date": pubdate } })
+    }
+
+    #[test]
+    fn client_side_date_window_filters_by_publication_date() {
+        let rows = vec![
+            row_with("2023-12-31"),
+            row_with("2024-06-15"),
+            row_with("2025-01-01"),
+        ];
+        let kept = filter_by_publication_window(rows, Some("2024-01-01"), Some("2024-12-31"));
+        assert_eq!(1, kept.len());
+        assert_eq!(
+            "2024-06-15",
+            kept[0]["patent"]["publication_date"].as_str().expect("d")
+        );
+    }
+
+    /// 日期写法不统一（`2024/1/5`、`20240105`）也要能比，否则过滤形同失效。
+    #[test]
+    fn date_window_normalizes_loose_formats() {
+        let rows = vec![row_with("2024-01-05")];
+        assert_eq!(
+            1,
+            filter_by_publication_window(rows.clone(), Some("2024/1/5"), Some("20240105")).len()
+        );
+        assert_eq!(
+            0,
+            filter_by_publication_window(rows.clone(), Some("2024-01-06"), None).len()
+        );
+        // 无法归一的边界（垃圾串）→ 不过滤，保留全部：过滤失效不能变成结果消失
+        assert_eq!(
+            1,
+            filter_by_publication_window(rows, Some("not-a-date"), None).len()
+        );
+    }
+
+    #[test]
+    fn date_window_keeps_rows_without_any_date() {
+        let rows = vec![
+            serde_json::json!({ "patent": { "title": "无日期", "publication_number": "CN1" } }),
+        ];
+        assert_eq!(
+            1,
+            filter_by_publication_window(rows, Some("1999-01-01"), None).len()
+        );
+    }
+
+    // ── 限速 / 退避 / 失败分类 ───────────────────────────────────────────────────
+
+    /// ⚠️ 已知坑 1（实测）：503 + HTML「Sorry…」页必须判 **Quota**，
+    /// 既不是 Network（只看状态码的结果）也不是 Parse（只试 JSON 解析的结果，而 Parse 不降级）。
+    #[test]
+    fn real_503_bot_page_classifies_as_quota() {
+        assert_eq!(FailKind::Quota, FailKind::for_xhr_reply(503, REAL_503_BODY));
+        assert_eq!(
+            FailKind::Quota,
+            FailKind::for_xhr_reply(429, "Too Many Requests")
+        );
+        assert_eq!(
+            FailKind::Quota,
+            FailKind::for_xhr_reply(503, "we detected unusual traffic from your network")
+        );
+        // 改判只作用于 429/503：500 仍走公共表 → Network；404 仍 → Parse
+        assert_eq!(
+            FailKind::Network,
+            FailKind::for_xhr_reply(500, REAL_503_BODY)
+        );
+        assert_eq!(FailKind::Parse, FailKind::for_xhr_reply(404, "sorry"));
+        // 5xx 里没有反爬文案时不得被误判成 Quota（否则真故障会被当成限流去退避）
+        assert_eq!(FailKind::Network, FailKind::for_xhr_reply(503, ""));
+    }
+
+    /// spec §1 + §2：命中限流 → 退避 → 重试成功（**降级链用例 ②** 的单源视角）。
+    #[tokio::test]
+    async fn rate_limited_503_backs_off_then_succeeds() {
+        let (p, transport, clock) = provider(vec![
+            XhrReply {
+                status: 503,
+                body: REAL_503_BODY.to_string(),
+                retry_after: None,
+            },
+            reply(200, REAL_CN_REPLY),
+        ]);
+
+        let outcome = p.search(query("动车组电池健康状态")).await;
+
+        assert_eq!(
+            2,
+            transport.fetch_count(),
+            "应发出 2 发：首发 503 + 退避后重试 1 发"
+        );
+        let report = &outcome.attempts[0];
+        assert_eq!(
+            AttemptStatus::Success,
+            report.status,
+            "重试成功后不得留下失败态"
+        );
+        assert!(report.produced_hits(), "hits={}", report.hits);
+        assert_eq!(
+            Some(14627),
+            outcome.upstream_total,
+            "total_num_results 应透传成 API 的 total"
+        );
+        // 退避确实发生，且时长恰是 BASE_BACKOFF（抖动 ≤700ms，不可能贡献一个整 2s 的 sleep）
+        assert!(
+            clock.recorded().iter().any(|d| *d == BASE_BACKOFF),
+            "未见退避: {:?}",
+            clock.recorded()
+        );
+        assert_eq!(2, transport.urls().len(), "两发打的是同一个 URL");
+    }
+
+    /// spec §1：429 带 `Retry-After` 时以上游为准，不用本地指数值。
+    #[tokio::test]
+    async fn retry_after_header_overrides_local_backoff() {
+        let (p, _transport, clock) = provider(vec![
+            XhrReply {
+                status: 429,
+                body: "Too Many Requests".to_string(),
+                retry_after: Some(Duration::from_secs(7)),
+            },
+            reply(200, REAL_EMPTY_REPLY),
+        ]);
+        p.search(query("固态电池")).await;
+        assert!(
+            clock
+                .recorded()
+                .iter()
+                .any(|d| *d == Duration::from_secs(7)),
+            "未尊重 Retry-After: {:?}",
+            clock.recorded()
+        );
+    }
+
+    /// 连续两发之间必须拉开最小间隔（防「连打 3 发即 503」的实测形态在本机重演）。
+    #[tokio::test]
+    async fn consecutive_searches_respect_min_interval() {
+        let (p, transport, clock) = provider(vec![reply(200, REAL_EMPTY_REPLY)]);
+        p.search(query("a")).await;
+        p.search(query("b")).await;
+        assert_eq!(2, transport.fetch_count());
+        // 第二发必须等满 min gap：记到的 sleep 里必然有一个 ≥ 2s（其余只会是 ≤700ms 的抖动）
+        assert!(
+            clock.recorded().iter().any(|d| *d >= MIN_REQUEST_INTERVAL),
+            "两次请求之间没有触发最小间隔等待: {:?}",
+            clock.recorded()
+        );
+    }
+
+    /// Parse（2xx 但正文非 JSON）不重试、不降级：只发一发。
+    #[tokio::test]
+    async fn parse_failure_stops_retrying() {
+        let (p, transport, clock) = provider(vec![reply(200, "<html>not json at all")]);
+        let outcome = p.search(query("固态电池")).await;
+        assert_eq!(1, transport.fetch_count(), "Parse 不该触发重试");
+        assert_eq!(
+            AttemptStatus::Failed(FailKind::Parse),
+            outcome.attempts[0].status
+        );
+        assert!(outcome.results.is_empty());
+        // 除抖动外没有退避 sleep
+        assert!(
+            clock.recorded().iter().all(|d| *d < MIN_REQUEST_INTERVAL),
+            "{:?}",
+            clock.recorded()
+        );
+    }
+
+    /// 网络故障重试一次后如实报告 Network，且仍只发两发（spec §1「单次重试」）。
+    #[tokio::test]
+    async fn network_fault_retries_once_then_reports_network() {
+        #[derive(Default)]
+        struct AlwaysDown;
+        impl XhrTransport for AlwaysDown {
+            fn fetch(
+                &self,
+                _url: String,
+            ) -> Pin<Box<dyn Future<Output = Result<XhrReply, XhrFault>> + Send + '_>> {
+                Box::pin(async { Err(XhrFault::Network("connection timed out".to_string())) })
+            }
+        }
+        let clock = FakeClock::new();
+        let p = GooglePatentsXhrProvider::with_transport(db(), Arc::new(AlwaysDown), clock.clone());
+        let outcome = p.search(query("固态电池")).await;
+        assert_eq!(
+            AttemptStatus::Failed(FailKind::Network),
+            outcome.attempts[0].status
+        );
+        let err = outcome.attempts[0].error.clone().expect("error note");
+        assert!(err.contains(SOURCE_LABEL), "错误文案要带源名: {err}");
+        assert!(err.contains("网络故障"), "错误文案要带分类: {err}");
+        assert!(outcome.results.is_empty());
+        assert!(
+            clock.recorded().iter().any(|d| *d == BASE_BACKOFF),
+            "网络故障同样要退避: {:?}",
+            clock.recorded()
+        );
+    }
+
+    #[tokio::test]
+    async fn limit_truncates_without_inventing_upstream_param() {
+        let mut q = query("动车组电池健康状态");
+        q.limit = 1;
+        let (p, transport, _clock) = provider(vec![reply(200, REAL_CN_REPLY)]);
+        let outcome = p.search(q).await;
+        assert_eq!(
+            1,
+            outcome.results.len(),
+            "limit=1 应截断到 1 条（上游 2 条）"
+        );
+        // 截断只发生在客户端：URL 里不得出现伪造的条数参数
+        let url = transport
+            .urls()
+            .into_iter()
+            .next()
+            .expect("one request issued");
+        let decoded = urlencoding::decode(&url)
+            .ok()
+            .map(|s| s.to_string())
+            .unwrap_or(url);
+        assert!(!decoded.contains("num="), "不得凭空发明条数参数: {decoded}");
+    }
+
+    #[tokio::test]
+    async fn page_gt_one_returns_first_page_with_honest_hint() {
+        let mut q = query("动车组电池健康状态");
+        q.page = 3;
+        let (p, _transport, _clock) = provider(vec![reply(200, REAL_CN_REPLY)]);
+        let outcome = p.search(q).await;
+        let hint = outcome.attempts[0].hint.clone().expect("pagination hint");
+        assert!(hint.contains("翻页"), "{hint}");
+        assert!(
+            !outcome.results.is_empty(),
+            "提示不等于把结果清空——数据完整性优先（AGENTS.md 2.5）"
+        );
+    }
+
+    #[tokio::test]
+    async fn kind_and_lookup_exact_defaults() {
+        let (p, _transport, _clock) = provider(vec![]);
+        assert_eq!(SourceKind::GooglePatentsXhr, p.kind());
+        assert_eq!("google_patents_xhr", SourceKind::GooglePatentsXhr.as_str());
+        // 本源没有 details 端点 → 用 trait 默认实现，返回 None（见 provider.rs 注释）
+        assert!(p.lookup_exact("CN1".to_string()).await.is_none());
+    }
 }
