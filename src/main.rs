@@ -15,6 +15,7 @@
 mod ai;
 mod cad;
 pub mod common;
+pub(crate) mod context;
 mod db;
 mod docx_export;
 mod error;

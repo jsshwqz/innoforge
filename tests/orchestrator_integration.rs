@@ -149,7 +149,7 @@ fn orchestrator_next_version_number() {
 fn latest_migrations_preserve_orchestrator_tables() {
     let db = Database::init(":memory:").unwrap();
     let version = db.query_schema_version().unwrap();
-    assert_eq!(version, 18);
+    assert_eq!(version, 23);
 
     // 验证 idea_versions/idea_branches/findings/research_state 表都可用（通过 CRUD 方法）
     assert!(db.get_idea_versions("nonexistent").unwrap().is_empty());

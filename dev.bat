@@ -16,7 +16,7 @@ if not defined CARGO_EXE (
 )
 
 echo [InnoForge Dev] Building debug binary (fast)...
-"%CARGO_EXE%" build --bin innoforge
+"%CARGO_EXE%" build --bin innoforge-server
 if errorlevel 1 (
     echo [InnoForge Dev] Build FAILED!
     pause
@@ -25,7 +25,7 @@ if errorlevel 1 (
 
 echo [InnoForge Dev] Starting server at http://127.0.0.1:3000
 start "" http://127.0.0.1:3000 2>nul
-".\target\debug\innoforge.exe"
+".\target\debug\innoforge-server.exe" < NUL
 echo.
 echo [InnoForge Dev] Server stopped (exit code: %ERRORLEVEL%).
 pause

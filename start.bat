@@ -16,7 +16,7 @@ if not defined CARGO_EXE (
 )
 
 REM ---- kill existing ----
-taskkill /F /IM innoforge.exe >nul 2>&1
+taskkill /F /IM innoforge-server.exe >nul 2>&1
 timeout /t 2 /nobreak >nul
 
 REM ---- check args ----
@@ -26,11 +26,11 @@ set "BIN_PATH="
 if "%1"=="--release" (
     set BUILD_MODE=--release
     set BUILD_DIR=.\target\release
-    set BIN_PATH=.\target\release\innoforge.exe
+    set BIN_PATH=.\target\release\innoforge-server.exe
 ) else (
     set BUILD_MODE=
     set BUILD_DIR=.\target\debug
-    set BIN_PATH=.\target\debug\innoforge.exe
+    set BIN_PATH=.\target\debug\innoforge-server.exe
 )
 
 REM ---- smart rebuild: compare binary timestamp with latest git commit ----
@@ -49,9 +49,9 @@ if "%NEED_BUILD%"=="0" (
 REM ---- try debug first (incremental -- fast if no changes), fall back to release ----
 if not "%1"=="--release" (
     echo [InnoForge] Building debug, incremental - fast if no changes...
-    "%CARGO_EXE%" build --bin innoforge
+    "%CARGO_EXE%" build --bin innoforge-server
     if not errorlevel 1 (
-        set "BIN_PATH=.\target\debug\innoforge.exe"
+        set "BIN_PATH=.\target\debug\innoforge-server.exe"
         echo [InnoForge] Debug build done.
         goto :run
     )
@@ -59,20 +59,20 @@ if not "%1"=="--release" (
 )
 
 echo [InnoForge] Building (release mode, optimized)...
-"%CARGO_EXE%" build --release --bin innoforge
+"%CARGO_EXE%" build --release --bin innoforge-server
 if errorlevel 1 (
     echo [InnoForge] Build FAILED!
     pause
     exit /b 1
 )
-set "BIN_PATH=.\target\release\innoforge.exe"
+set "BIN_PATH=.\target\release\innoforge-server.exe"
 
 :run
 echo [InnoForge] Starting server at http://127.0.0.1:3000
 echo [InnoForge] Press Ctrl+C or close window to stop.
 echo.
 REM Start server in background, wait for it to be ready, then open browser once
-start /b "" "%BIN_PATH%" >nul 2>&1
+start "" "%BIN_PATH%" < NUL
 timeout /t 4 /nobreak >nul
 start "" http://127.0.0.1:3000 2>nul
 echo [InnoForge] Server running. Press Ctrl+C in this window to stop, or close to force-quit.
@@ -80,7 +80,7 @@ echo [InnoForge] Server running. Press Ctrl+C in this window to stop, or close t
 REM Wait for server to exit
 :waitloop
 timeout /t 2 /nobreak >nul
-tasklist /FI "IMAGENAME eq innoforge.exe" 2>nul | find /i "innoforge.exe" >nul
+tasklist /FI "IMAGENAME eq innoforge-server.exe" 2>nul | find /i "innoforge-server.exe" >nul
 if errorlevel 1 goto :stopped
 goto :waitloop
 

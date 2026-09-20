@@ -5,6 +5,34 @@ fn default_branch() -> String {
     "main".to_string()
 }
 
+/// AI 调用成本记录 — 追踪每次 AI 调用的 token 消耗和估算成本
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiCostRecord {
+    pub id: String,
+    pub pipeline_run_id: String,
+    pub step: String,
+    pub model: String,
+    pub provider: String,
+    pub timestamp: String,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub estimated_cost_cents: f64,
+    pub duration_ms: i64,
+    pub idea_id: Option<String>,
+    pub session_id: Option<String>,
+}
+
+/// RAG 参考切片 — 检索到的专利文档片段
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReferenceChunk {
+    pub id: String,
+    pub patent_id: String,
+    pub chunk_index: i32,
+    pub source_type: String,
+    pub content: String,
+    pub relevance_score: f32,
+}
+
 /// 实验执行结果
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ExperimentResult {
@@ -132,6 +160,63 @@ pub enum StepStatus {
     Error,
 }
 
+/// 智能体输出 — 带置信度和证据引用的 Agent 结果 / Agent output with confidence and evidence refs
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AgentOutput {
+    /// 输出内容（字符串化存储，JSON 序列化）
+    pub content: String,
+    /// 置信度 0.0-1.0 / Confidence score
+    pub confidence: f64,
+    /// 证据引用 ID 列表 / Evidence reference IDs
+    pub evidence_refs: Vec<String>,
+    /// 自述不确定点 / Self-reported uncertainties
+    pub uncertainty: Vec<String>,
+    /// 自检反思结果 / Self-reflection result
+    pub self_reflection: Option<String>,
+    /// 执行耗时 / Duration in ms
+    pub duration_ms: u64,
+    /// Token 用量 / Token count used
+    pub tokens_used: u64,
+    /// 来源步骤 / Source pipeline step
+    pub source_step: String,
+}
+
+/// 反思评估结果 — 多智能体 Pipeline 的质量评分 / Reflection result - quality scoring
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ReflectionResult {
+    /// 整体质量分 0.0-1.0 / Overall quality score
+    pub quality_score: f64,
+    /// 完整性得分 / Completeness score
+    pub completeness_score: f64,
+    /// 一致性得分 / Consistency score
+    pub consistency_score: f64,
+    /// 证据充分性得分 / Evidence score
+    pub evidence_score: f64,
+    /// 是否需要重试 / Whether retry is needed
+    pub needs_retry: bool,
+    /// 重试原因 / Retry reason
+    pub retry_reason: Option<String>,
+    /// 改进建议 / Improvement suggestions
+    pub improvement_suggestions: Vec<String>,
+    /// 评估来源步骤 / Source step that was evaluated
+    pub evaluated_step: String,
+}
+
+/// 辩论合成分结果 — 多智能体分歧的合并结论 / Debate synthesis result
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DebateResult {
+    /// 合成分结论 / Synthesized conclusion
+    pub conclusion: String,
+    /// 各方观点摘要 / Summary of each side
+    pub perspectives: Vec<String>,
+    /// 共识点 / Consensus points
+    pub consensus: Vec<String>,
+    /// 分歧点 / Divergence points
+    pub divergences: Vec<String>,
+    /// 最终推荐的决策 / Recommended decision
+    pub recommendation: String,
+}
+
 /// 证据条目 — 从结论到原始来源的可追溯链 / Evidence entry — traceable link from conclusion to source
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Evidence {
@@ -222,6 +307,22 @@ pub struct PipelineContext {
     #[serde(default)]
     pub evidence_chain: Vec<Evidence>,
 
+    // 持久化记忆条目 / Persistent memory entries extracted from this pipeline run
+    #[serde(default)]
+    pub memory_entries: Vec<crate::db::memory::IdeaMemory>,
+
+    // 多智能体反思历史 / Multi-agent reflection history
+    #[serde(default)]
+    pub reflection_history: Vec<ReflectionResult>,
+
+    // 辩论合成分结果 / Debate synthesis results
+    #[serde(default)]
+    pub debate_results: Vec<DebateResult>,
+
+    // 智能体输出记录 / Agent output records
+    #[serde(default)]
+    pub agent_outputs: Vec<AgentOutput>,
+
     // 研发状态机 / Research state machine
     #[serde(default)]
     pub research_state: ResearchState,
@@ -268,6 +369,10 @@ impl PipelineContext {
             oa_response: String::new(),
             deep_reasoning: DeepReasoningResult::default(),
             evidence_chain: Vec::new(),
+            memory_entries: Vec::new(),
+            reflection_history: Vec::new(),
+            debate_results: Vec::new(),
+            agent_outputs: Vec::new(),
             research_state: ResearchState::default(),
             branch_id: "main".to_string(),
             iteration_count: 0,

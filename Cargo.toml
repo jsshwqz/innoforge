@@ -15,7 +15,7 @@ path = "src/lib.rs"
 crate-type = ["lib", "cdylib", "staticlib"]
 
 [[bin]]
-name = "innoforge"
+name = "innoforge-server"
 path = "src/main.rs"
 
 [[bin]]

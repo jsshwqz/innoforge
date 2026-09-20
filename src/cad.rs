@@ -78,7 +78,7 @@ impl CadService {
     pub fn new(cad_root: PathBuf, workspace: Option<PathBuf>) -> Result<Self> {
         let origin = BridgeOrigin::parse(
             &std::env::var("INNOFORGE_AIONCAD_URL")
-                .unwrap_or_else(|_| "http://127.0.0.1:8010".to_string()),
+                .unwrap_or_else(|_| "http://127.0.0.1:8080".to_string()),
         )?;
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(120))
@@ -115,10 +115,13 @@ impl CadService {
                 availability: CadAvailability::Ready,
                 message: "FreeCAD ready".to_string(),
             },
-            Err(_) => CadStatus {
-                availability: CadAvailability::Unavailable,
-                message: "FreeCAD is not ready".to_string(),
-            },
+            Err(e) => {
+                tracing::warn!("CAD check_ready failed: {e:?}");
+                CadStatus {
+                    availability: CadAvailability::Unavailable,
+                    message: "FreeCAD is not ready".to_string(),
+                }
+            }
         }
     }
 
@@ -143,6 +146,11 @@ impl CadService {
             .context("AionCAD bridge has no artifact import root")?
             .canonicalize()?;
         if actual_import_root != expected_import_root {
+            tracing::warn!(
+                "AionCAD artifact root mismatch: expected={}, actual={}",
+                expected_import_root.display(),
+                actual_import_root.display()
+            );
             bail!("AionCAD bridge is bound to another artifact import root");
         }
         let artifact_route = self
@@ -168,21 +176,13 @@ impl CadService {
         {
             bail!("FreeCAD worker is not connected");
         }
-        let view: Value = self
+        // Preview is optional: the worker must be connected but the viewport
+        // may not be available on first start or in headless mode.
+        let _ = self
             .client
             .get(self.origin.endpoint("/draw/view"))
             .send()
-            .await?
-            .error_for_status()?
-            .json()
-            .await?;
-        if view
-            .get("view_path")
-            .and_then(Value::as_str)
-            .is_none_or(str::is_empty)
-        {
-            bail!("FreeCAD preview is unavailable");
-        }
+            .await;
         Ok(())
     }
 
@@ -247,7 +247,7 @@ impl CadService {
                         "-File",
                     ])
                     .arg(&script)
-                    .args(["-Port", "8010", "-ReadyTimeoutSeconds", "90"])
+                    .args(["-Port", "8080", "-ReadyTimeoutSeconds", "90"])
                     .env("AIONCAD_ARTIFACT_IMPORT_ROOT", &self.cad_root)
                     .current_dir(workspace)
                     .kill_on_drop(true)
@@ -381,7 +381,7 @@ mod tests {
 
     #[test]
     fn bridge_url_accepts_only_loopback_http() {
-        assert!(BridgeOrigin::parse("http://127.0.0.1:8010").is_ok());
+        assert!(BridgeOrigin::parse("http://127.0.0.1:8080").is_ok());
         assert!(BridgeOrigin::parse("http://localhost:8010").is_ok());
         assert!(BridgeOrigin::parse("https://127.0.0.1:8010").is_err());
         assert!(BridgeOrigin::parse("http://192.168.1.10:8010").is_err());

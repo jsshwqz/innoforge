@@ -15,7 +15,7 @@ use axum::{
     body::Body,
     extract::DefaultBodyLimit,
     http::{HeaderValue, Response, StatusCode},
-    routing::{get, post},
+    routing::{delete, get, post},
     Router,
 };
 use rust_embed::Embed;
@@ -131,9 +131,11 @@ pub fn init_app_state(db_path: &str) -> anyhow::Result<crate::routes::AppState> 
                 .flatten()
                 .map(Into::into)
         });
-    let db_parent = std::path::Path::new(db_path)
+    let db_path_abs = std::path::Path::new(db_path)
+        .canonicalize()
+        .unwrap_or_else(|_| std::path::PathBuf::from(db_path));
+    let db_parent = db_path_abs
         .parent()
-        .filter(|path| !path.as_os_str().is_empty())
         .map(std::path::Path::to_path_buf)
         .unwrap_or_else(|| std::path::PathBuf::from("data"));
     let cad = crate::cad::CadService::new(db_parent.join("cad"), workspace)?;
@@ -234,6 +236,7 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
         .route("/api/search/export", post(routes::api_export_csv))
         .route("/api/search/export/xlsx", post(routes::api_export_xlsx))
         .route("/api/search/online", post(routes::api_search_online))
+        .route("/api/search/vector", post(routes::api_search_vector))
         .route("/api/search/analyze", post(routes::api_ai_analyze_results))
         // 专利 API / Patent API
         .route("/api/patent/fetch", post(routes::api_fetch_patent))
@@ -356,6 +359,9 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
             post(routes::api_ai_threat_assessment),
         )
         .route("/api/ai/claim-chart", post(routes::api_ai_claim_chart))
+        .route("/api/ai/cost", get(routes::api_ai_cost_summary))
+        .route("/api/ai/cost/records", get(routes::api_ai_cost_records))
+        .route("/api/ai/cost/record", post(routes::api_ai_cost_save))
         // 创意验证 API / Idea API
         .route("/api/idea/submit", post(routes::api_idea_submit))
         .route("/api/idea/analyze", post(routes::api_idea_analyze))
@@ -379,12 +385,17 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
             "/api/idea/:id/report.html",
             get(routes::api_idea_report_html),
         )
-        .route("/api/idea/:id/evidence", get(routes::api_idea_evidence))
+        .route("/api/ai/models", get(routes::list_ai_models))
         .route("/api/idea/:id/chat", post(routes::api_idea_chat))
+        .route("/api/idea/:id/evidence", get(routes::api_idea_evidence))
         .route("/api/idea/:id/messages", get(routes::api_idea_messages))
         .route(
             "/api/idea/:id/chat/conclusions",
             get(routes::api_idea_chat_conclusions),
+        )
+        .route(
+            "/api/idea/:id/chat/conversation",
+            get(routes::api_idea_chat_conversation),
         )
         .route(
             "/api/idea/:id/summarize",
@@ -405,6 +416,15 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
         .route("/api/idea/:id/versions", get(routes::api_idea_versions))
         .route("/api/idea/:id/branches", get(routes::api_idea_branches))
         .route("/api/idea/:id/findings", get(routes::api_idea_findings))
+        // 记忆 API / Memory API
+        .route(
+            "/api/idea/:id/memory",
+            get(routes::api_idea_memory).post(routes::api_idea_memory_add),
+        )
+        .route(
+            "/api/idea/:id/memory/:entry_id",
+            delete(routes::api_idea_memory_delete),
+        )
         // IPC 分类 API
         .route("/api/ipc/tree", get(routes::api_ipc_tree))
         .route("/api/ipc/:code/patents", get(routes::api_ipc_patents))
@@ -476,6 +496,54 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
             HeaderValue::from_static("strict-origin-when-cross-origin"),
         ))
         .with_state(state)
+}
+
+// ============================================================================
+// 项目临时文件工具 / Project Temp File Utilities
+//
+// 按 AGENTS.md 规范：运行时临时文件统一放在 data/runtime-temp 下，
+// 使用 UUID 文件名 + create_new 独占创建，避免系统临时目录污染和竞态。
+// ============================================================================
+
+/// 获取项目专属运行时临时目录。
+/// 按 AGENTS.md 规范，不使用系统 temp 目录。
+pub fn project_temp_dir() -> std::path::PathBuf {
+    let base = std::path::PathBuf::from("data").join("runtime-temp");
+    let _ = std::fs::create_dir_all(&base);
+    base
+}
+
+/// 创建 UUID 命名的独占临时文件。
+/// 使用 create_new 防止竞态（文件已存在则失败）。
+pub fn new_temp_file(prefix: &str, ext: &str) -> std::io::Result<std::path::PathBuf> {
+    let dir = project_temp_dir();
+    let name = format!("{}_{}.{}", prefix, uuid::Uuid::new_v4(), ext);
+    let path = dir.join(name);
+    std::fs::File::create_new(&path)?;
+    Ok(path)
+}
+
+#[cfg(test)]
+mod temp_file_tests {
+    use super::*;
+
+    #[test]
+    fn project_temp_dir_exists() {
+        let dir = project_temp_dir();
+        assert!(dir.exists());
+        assert!(dir.to_string_lossy().contains("runtime-temp"));
+    }
+
+    #[test]
+    fn new_temp_file_unique_and_exclusive() {
+        let path1 = new_temp_file("test", "tmp").unwrap();
+        let path2 = new_temp_file("test", "tmp").unwrap();
+        assert_ne!(path1, path2);
+        assert!(path1.exists());
+        assert!(path2.exists());
+        let _ = std::fs::remove_file(&path1);
+        let _ = std::fs::remove_file(&path2);
+    }
 }
 
 #[cfg(test)]

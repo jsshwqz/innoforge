@@ -12,7 +12,11 @@ pub struct CadSettingsRequest {
 
 /// 根据 base_url 返回该服务商对应的 DB/.env Key 名称
 fn provider_db_key(base_url: &str) -> &'static str {
-    if base_url.contains("deepseek") {
+    if base_url.contains("qwen") || base_url.contains("dashscope") {
+        "AI_API_KEY_QWEN"
+    } else if base_url.contains("api.openai.com") {
+        "AI_API_KEY_OPENAI"
+    } else if base_url.contains("deepseek") {
         "AI_API_KEY_DEEPSEEK"
     } else if base_url.contains("xiaomimimo") {
         "AI_API_KEY_XIAOMI"
@@ -77,6 +81,8 @@ pub async fn api_get_settings(State(s): State<AppState>) -> Json<serde_json::Val
         "ai_api_key_openrouter": mask(&raw_key("AI_API_KEY_OPENROUTER")),
         "ai_api_key_gemini": mask(&raw_key("AI_API_KEY_GEMINI")),
         "ai_api_key_zhipu": mask(&raw_key("AI_API_KEY_ZHIPU")),
+        "ai_api_key_qwen": mask(&raw_key("AI_API_KEY_QWEN")),
+        "ai_api_key_openai": mask(&raw_key("AI_API_KEY_OPENAI")),
         "ai_model": config.ai_model,
         "ai_model_expert": config.ai_model_expert,
         "google_client_id": config.google_client_id.clone(),
@@ -421,6 +427,8 @@ pub async fn api_save_ai(
             "AI_API_KEY_OPENROUTER" => &mut config.ai_api_key_openrouter,
             "AI_API_KEY_GEMINI" => &mut config.ai_api_key_gemini,
             "AI_API_KEY_ZHIPU" => &mut config.ai_api_key_zhipu,
+            "AI_API_KEY_QWEN" => &mut config.ai_api_key_qwen,
+            "AI_API_KEY_OPENAI" => &mut config.ai_api_key_openai,
             _ => &mut config.ai_api_key, // custom → 通用 Key
         } = api_key.clone();
 

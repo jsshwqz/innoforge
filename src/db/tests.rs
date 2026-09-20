@@ -2,12 +2,15 @@ use super::Database;
 use crate::patent::{CadArtifact, CadContextKind, CadValidation, Patent, SearchType};
 
 #[test]
-fn cad_schema_v18_is_created_and_idempotent() {
+fn schema_v23_is_created_and_idempotent() {
+    // v23: 成本台账扩展 idea_id/session_id 列（见 migrations.rs）
     let file = tempfile::NamedTempFile::new().expect("temp database");
     let path = file.path().to_string_lossy().to_string();
-    let db = Database::init(&path).expect("initialize v18 database");
-    assert_eq!(db.query_schema_version().expect("schema version"), 18);
-    let table_count: i64 = db
+    let db = Database::init(&path).expect("initialize database to latest schema");
+    assert_eq!(db.query_schema_version().expect("schema version"), 23);
+
+    // Verify all new tables exist: cad_artifacts, ai_cost_ledger, patents_embedding, patent_chunks, idea_memory
+    let cad_count: i64 = db
         .conn()
         .query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='cad_artifacts'",
@@ -15,10 +18,52 @@ fn cad_schema_v18_is_created_and_idempotent() {
             |row| row.get(0),
         )
         .expect("query CAD table");
-    assert_eq!(table_count, 1);
+    assert_eq!(cad_count, 1);
+
+    let cost_count: i64 = db
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='ai_cost_ledger'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("query cost table");
+    assert_eq!(cost_count, 1);
+
+    let emb_count: i64 = db
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='patents_embedding'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("query embedding table");
+    assert_eq!(emb_count, 1);
+
+    let chunk_count: i64 = db
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='patent_chunks'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("query chunk table");
+    assert_eq!(chunk_count, 1);
+
     drop(db);
     let reopened = Database::init(&path).expect("reopen migrated database");
-    assert_eq!(reopened.query_schema_version().expect("schema version"), 18);
+    assert_eq!(reopened.query_schema_version().expect("schema version"), 23);
+
+    // Verify idea_memory table exists
+    let mem_count: i64 = reopened
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='idea_memory'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("query memory table");
+    assert_eq!(mem_count, 1);
 }
 
 #[test]

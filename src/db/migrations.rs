@@ -479,6 +479,120 @@ pub(crate) fn run(conn: &Connection, current_version: i32, target_version: i32) 
         tracing::info!("Database migrated to version 18 (cad_artifacts)");
     }
 
+    // v19: AI 调用成本账本 — 追踪每次 AI 调用的 token 消耗和估算成本
+    if current_version < 19 {
+        conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS ai_cost_ledger (
+                id TEXT PRIMARY KEY,
+                pipeline_run_id TEXT NOT NULL,
+                step TEXT NOT NULL,
+                model TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                input_tokens INTEGER NOT NULL DEFAULT 0,
+                output_tokens INTEGER NOT NULL DEFAULT 0,
+                estimated_cost_cents REAL NOT NULL DEFAULT 0.0,
+                duration_ms INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS idx_ai_cost_pipeline ON ai_cost_ledger(pipeline_run_id);
+            CREATE INDEX IF NOT EXISTS idx_ai_cost_timestamp ON ai_cost_ledger(timestamp);
+            DELETE FROM schema_version;
+            INSERT INTO schema_version (version) VALUES (19);
+            ",
+        )?;
+        tracing::info!("Database migrated to version 19 (ai_cost_ledger)");
+    }
+
+    // v20: 向量嵌入表 — 存储专利文本的嵌入向量用于混合语义搜索
+    if current_version < 20 {
+        conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS patents_embedding (
+                patent_id TEXT NOT NULL UNIQUE,
+                embedding BLOB NOT NULL,
+                model_name TEXT NOT NULL DEFAULT 'doc2vec-patent',
+                text_hash TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY(patent_id) REFERENCES patents(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_embedding_model ON patents_embedding(model_name);
+            CREATE INDEX IF NOT EXISTS idx_embedding_hash ON patents_embedding(text_hash);
+            DELETE FROM schema_version;
+            INSERT INTO schema_version (version) VALUES (20);
+            ",
+        )?;
+        tracing::info!("Database migrated to version 20 (patents_embedding)");
+    }
+
+    // v21: RAG 管道 — 专利全文切片存储
+    if current_version < 21 {
+        conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS patent_chunks (
+                id TEXT PRIMARY KEY,
+                patent_id TEXT NOT NULL,
+                chunk_index INTEGER NOT NULL,
+                source_type TEXT NOT NULL DEFAULT 'description' CHECK(source_type IN ('abstract', 'claim', 'description')),
+                content TEXT NOT NULL,
+                embedding BLOB NOT NULL,
+                model_name TEXT NOT NULL DEFAULT 'char-tfidf-v1',
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY(patent_id) REFERENCES patents(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_chunk_patent ON patent_chunks(patent_id);
+            CREATE INDEX IF NOT EXISTS idx_chunk_source ON patent_chunks(source_type);
+            DELETE FROM schema_version;
+            INSERT INTO schema_version (version) VALUES (21);
+            ",
+        )?;
+        tracing::info!("Database migrated to version 21 (patent_chunks)");
+    }
+
+    // Migration 21 -> 22: Idea memory table for persistent RAG-style recall.
+    // Stores domain concepts, decisions, patterns, and open questions extracted
+    // from completed pipeline runs, so future runs can inject prior context.
+    if current_version < 22 {
+        conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS idea_memory (
+                id TEXT PRIMARY KEY,
+                idea_id TEXT NOT NULL,
+                concept_name TEXT NOT NULL,
+                concept_type TEXT NOT NULL DEFAULT 'domain_concept'
+                    CHECK(concept_type IN ('domain_concept', 'decision', 'pattern', 'question')),
+                content TEXT NOT NULL,
+                confidence REAL DEFAULT 0.5,
+                source_step TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY(idea_id) REFERENCES ideas(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_idea_memory_idea ON idea_memory(idea_id);
+            CREATE INDEX IF NOT EXISTS idx_idea_memory_type ON idea_memory(concept_type);
+            DELETE FROM schema_version;
+            INSERT INTO schema_version (version) VALUES (22);
+            ",
+        )?;
+        tracing::info!("Database migrated to version 22 (idea_memory)");
+    }
+
+    // v23: 扩展 ai_cost_ledger — 添加 idea_id / session_id 列，覆盖聊天与创意场景的 AI 成本
+    // Extend ai_cost_ledger with idea_id / session_id to cover chat & idea AI calls.
+    if current_version < 23 {
+        conn.execute_batch(
+            "
+            ALTER TABLE ai_cost_ledger ADD COLUMN idea_id TEXT NULL;
+            ALTER TABLE ai_cost_ledger ADD COLUMN session_id TEXT NULL;
+            CREATE INDEX IF NOT EXISTS idx_ai_cost_idea ON ai_cost_ledger(idea_id);
+            DELETE FROM schema_version;
+            INSERT INTO schema_version (version) VALUES (23);
+            ",
+        )?;
+        tracing::info!("Database migrated to version 23 (ai_cost_idea_session)");
+    }
+
     if current_version > 0 && current_version < target_version {
         tracing::info!(
             "Database migrated from version {} to {}",

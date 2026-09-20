@@ -4,6 +4,7 @@ use anyhow::Result;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 /// 分级超时策略 / Graded timeout strategy
@@ -55,6 +56,13 @@ pub(super) struct AiProvider {
     pub model: String,
 }
 
+/// AI 调用用量信息 / Usage info from a single AI call.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AiUsageInfo {
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+}
+
 /// AI client with automatic failover across multiple providers.
 #[derive(Clone)]
 pub struct AiClient {
@@ -67,6 +75,8 @@ pub struct AiClient {
     pub gemini_cli_path: Option<String>,
     /// 当前生效的超时时间 / Current effective timeout duration
     pub(super) timeout: Duration,
+    /// 最近一次 AI 调用的用量信息（用于成本记录）
+    pub(super) last_usage: Arc<RwLock<Option<AiUsageInfo>>>,
 }
 
 #[derive(Serialize)]
@@ -203,6 +213,37 @@ pub(crate) fn extract_chat_content(raw_text: &str) -> String {
     )
 }
 
+/// 从 AI 响应原文中提取 token 用量信息。
+/// 兼容 OpenAI 兼容格式（usage.input_tokens / usage.output_tokens）
+/// 和 Anthropic 格式（usage.input_tokens / usage.output_tokens）。
+/// 解析失败时返回 None，不影响主流程。
+pub(crate) fn extract_usage(raw_text: &str) -> Option<AiUsageInfo> {
+    // 优先从 JSON 解析 usage 块
+    // 直接 JSON 解析 usage 块
+    if let Ok(json) = serde_json::from_str::<Value>(raw_text) {
+        if let Some(usage) = json.get("usage") {
+            let input = usage
+                .get("input_tokens")
+                .and_then(|v| v.as_i64())
+                .or(usage.get("prompt_tokens").and_then(|v| v.as_i64()))
+                .unwrap_or(0);
+            let output = usage
+                .get("output_tokens")
+                .and_then(|v| v.as_i64())
+                .or(usage.get("completion_tokens").and_then(|v| v.as_i64()))
+                .unwrap_or(0);
+            if input > 0 || output > 0 {
+                return Some(AiUsageInfo {
+                    input_tokens: input,
+                    output_tokens: output,
+                });
+            }
+        }
+    }
+
+    None
+}
+
 /// Safely truncate a UTF-8 string to at most `max_bytes` bytes
 /// without splitting multi-byte characters.
 pub fn safe_truncate(s: &str, max_bytes: usize) -> &str {
@@ -319,6 +360,7 @@ impl AiClient {
             provider_mode: AiProviderMode::Http,
             gemini_cli_path: None,
             timeout: Duration::from_secs(PROVIDER_HTTP_TIMEOUT_SECS),
+            last_usage: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -366,6 +408,17 @@ impl AiClient {
     /// Check if this client is in Gemini CLI subprocess mode.
     pub fn is_gemini_cli_mode(&self) -> bool {
         self.provider_mode == AiProviderMode::GeminiCli
+    }
+
+    /// 获取最近一次 AI 调用的用量信息，读取后清空。
+    /// Returns last call's usage info and clears it.
+    pub fn take_last_usage(&self) -> Option<AiUsageInfo> {
+        self.last_usage.write().map_or(None, |mut w| w.take())
+    }
+
+    /// 当前主服务商名称 / Primary provider name.
+    pub fn provider_name(&self) -> &str {
+        &self.primary.name
     }
 
     /// Add a fallback AI provider.
@@ -494,6 +547,12 @@ impl AiClient {
                         safe_truncate(&raw_text, 120)
                     );
                     let content = extract_chat_content(&raw_text);
+                    // 解析并存储用量信息，供成本追踪使用
+                    if let Some(usage) = extract_usage(&raw_text) {
+                        let _ = self.last_usage.write().map(|mut w| {
+                            *w = Some(usage);
+                        });
+                    }
 
                     if status.is_server_error() && attempt < max_retries - 1 {
                         last_err = Some(anyhow::anyhow!("Server error {}", status));
@@ -657,7 +716,16 @@ impl AiClient {
         &self.primary.model
     }
 
-    /// Send a raw JSON body to the AI provider (used for multimodal/vision requests).
+    /// Send a simple chat request for RAG (public API for external modules).
+    pub async fn send_rag_chat(&self, prompt: &str, temperature: f32) -> Result<String> {
+        let messages: Vec<Message> = vec![Message {
+            role: "system".to_string(),
+            content: prompt.to_string(),
+        }];
+        self.send_chat(messages, temperature).await
+    }
+
+    /// Send a raw JSON body to the AI provider.
     pub async fn send_json_body(&self, body: serde_json::Value) -> Result<String> {
         match tokio::time::timeout(
             Duration::from_secs(Self::GLOBAL_TIMEOUT_SECS),
@@ -782,6 +850,12 @@ impl AiClient {
                         }
                     };
                     let content = extract_chat_content(&raw_text);
+                    // 解析并存储用量信息，供成本追踪使用
+                    if let Some(usage) = extract_usage(&raw_text) {
+                        let _ = self.last_usage.write().map(|mut w| {
+                            *w = Some(usage);
+                        });
+                    }
                     if status.is_server_error() && attempt < max_retries - 1 {
                         last_err = Some(anyhow::anyhow!("Server error {}", status));
                         continue;

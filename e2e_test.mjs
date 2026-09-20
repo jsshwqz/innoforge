@@ -2,7 +2,7 @@ import puppeteer from 'puppeteer';
 import { existsSync } from 'node:fs';
 
 const baseUrl = (process.env.INNOFORGE_E2E_BASE_URL || 'http://127.0.0.1:3000').replace(/\/$/, '');
-const expectedPasses = 51;
+const expectedPasses = 54;
 const failures = [];
 let passed = 0;
 
@@ -537,6 +537,64 @@ async function checkSettingsDoesNotAutoStartFreeCad(settingsPage) {
     }
 }
 
+// 创意页功能完整性：防止"按钮在、函数没了"的静默丢失（历史事故 42c726e / 9f1a14b）
+async function checkIdeaPageFunctionIntegrity(ideaPage) {
+    const result = await ideaPage.evaluate(() => {
+        const requiredFunctions = [
+            // 核心交互
+            'sendChatMessage', 'stopIdeaGeneration', 'handleChatFileSelect',
+            'loadMessages', 'scrollIdeaChatToBottom', 'deleteIdea',
+            // 工具函数（曾被误删）
+            'showStatus', 'clearResults', 'clearForm', 'showNewIdeaForm',
+            'renderMarkdown', 'showDiscussionPanel',
+            // 报告功能（曾被误删）
+            'openReport', 'switchReportType', 'loadReportTab', 'openReportInNewTab',
+            // 讨论导出（曾被误删）
+            'exportConclusions', 'summarizeDiscussion',
+            // 标签页数据加载（曾被遗漏）
+            'loadEvidence', 'loadClaimTree', 'loadFindings', 'loadFeatureCards',
+            'loadVersionHistory', 'loadMemory', 'renderOverview',
+            // 附件（恢复自 v0.7.2）
+            'renderChatAttachments',
+        ];
+        const missing = requiredFunctions.filter(name => typeof window[name] !== 'function');
+
+        // 删除按钮：历史列表条目应有 ✕
+        const historyRows = document.querySelectorAll('.idea-history-item');
+        let deleteButtons = 0;
+        historyRows.forEach(row => {
+            if (row.textContent.includes('✕')) deleteButtons += 1;
+        });
+
+        // 滚动按钮存在
+        const scrollBtn = !!document.getElementById('scroll-bottom-btn-idea');
+
+        return {
+            missing,
+            totalHistoryRows: historyRows.length,
+            deleteButtons,
+            scrollBtn,
+            deleteBtnAll: historyRows.length === 0 || deleteButtons === historyRows.length,
+        };
+    });
+
+    requireCondition(
+        result.missing.length === 0,
+        'Idea page keeps all critical functions defined',
+        `page=/idea missing=${result.missing.join(',') || 'none'}`,
+    );
+    requireCondition(
+        result.scrollBtn,
+        'Idea page keeps the scroll-to-bottom button in the chat panel',
+        'page=/idea selector=#scroll-bottom-btn-idea missing=true',
+    );
+    requireCondition(
+        result.deleteBtnAll,
+        'Idea history entries keep a delete button',
+        `page=/idea rows=${result.totalHistoryRows} with_delete=${result.deleteButtons}`,
+    );
+}
+
 async function main() {
     const pageErrors = [];
     const requestFailures = [];
@@ -545,14 +603,20 @@ async function main() {
 
     try {
         const executablePath = findBrowserExecutable();
+        // --no-sandbox 仅 Linux（CI 容器以 root 运行常需）；--disable-dev-shm-usage 全平台无害，防 shm 不足。
+        const isLinux = process.platform === 'linux';
         browser = await puppeteer.launch({
             headless: true,
             ...(executablePath ? { executablePath } : {}),
+            args: ['--disable-dev-shm-usage', ...(isLinux ? ['--no-sandbox'] : [])],
         });
 
         openedPages = await runPageMatrix(browser, pageErrors, requestFailures);
         const ideaPage = openedPages.get('/idea');
-        if (ideaPage) await checkCadControllerStateIsolation(ideaPage);
+        if (ideaPage) {
+            await checkCadControllerStateIsolation(ideaPage);
+            await checkIdeaPageFunctionIntegrity(ideaPage);
+        }
         const settingsPage = openedPages.get('/settings');
         if (settingsPage) await checkSettingsDoesNotAutoStartFreeCad(settingsPage);
         const oaPage = openedPages.get('/oa-response');

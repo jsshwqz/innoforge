@@ -1,6 +1,7 @@
 pub mod analysis;
 pub mod claim_tree;
 pub mod contradiction;
+pub mod debate;
 pub mod deep_reasoning;
 pub mod diversity;
 pub mod expand;
@@ -10,6 +11,7 @@ pub mod oa_response;
 pub mod parse;
 pub mod prior_art_cluster;
 pub mod rank;
+pub mod reflection;
 pub mod scoring;
 pub mod search;
 pub mod similarity;

@@ -42,6 +42,7 @@ pub use settings::*;
 pub use upload::*;
 
 use crate::{ai::AiClient, db::Database, pipeline::context::PipelineProgress};
+use base64::Engine;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
@@ -75,6 +76,8 @@ pub struct AppConfig {
     pub ai_api_key_openrouter: String,
     pub ai_api_key_gemini: String,
     pub ai_api_key_zhipu: String,
+    pub ai_api_key_qwen: String,
+    pub ai_api_key_openai: String,
     pub ai_model: String,
     /// 专家模型（用于创新推演、深分析等高推理任务，默认 deepseek-reasoner）
     pub ai_model_expert: String,
@@ -171,6 +174,8 @@ impl AppConfig {
             ai_api_key_openrouter: load_provider_key("AI_API_KEY_OPENROUTER"),
             ai_api_key_gemini: load_provider_key("AI_API_KEY_GEMINI"),
             ai_api_key_zhipu: load_provider_key("AI_API_KEY_ZHIPU"),
+            ai_api_key_qwen: load_provider_key("AI_API_KEY_QWEN"),
+            ai_api_key_openai: load_provider_key("AI_API_KEY_OPENAI"),
             ai_model: get("AI_MODEL", "qwen2.5:7b"),
             ai_model_expert: get("AI_MODEL_EXPERT", "deepseek-reasoner"),
 
@@ -249,6 +254,10 @@ impl AppConfig {
             &self.ai_api_key_gemini
         } else if base_url.contains("bigmodel") {
             &self.ai_api_key_zhipu
+        } else if base_url.contains("dashscope") || base_url.contains("qwen") {
+            &self.ai_api_key_qwen
+        } else if base_url.contains("api.openai.com") {
+            &self.ai_api_key_openai
         } else {
             &self.ai_api_key
         };
@@ -506,6 +515,46 @@ pub(crate) fn escape_csv(s: &str) -> String {
     } else {
         s.to_string()
     }
+}
+
+/// 从 base64 字符串构建正确的 image data URI（用于多模态视觉请求）。
+/// - 若输入已是 data URI（以 `data:` 开头），原样返回（兼容前端直接发送完整 data URL）
+/// - 否则将 base64 解码，按文件头魔数检测真实 MIME（PNG / JPEG / GIF / WebP），
+///   再拼接 `data:image/<mime>;base64,<b64>`
+/// - 若 base64 为空或无法解码，返回 `None`（调用方应跳过该图片，避免向模型发送乱码）
+///
+/// 修复历史问题：此前硬编码 `image/png`，导致 JPEG/WebP 图片被模型以 "invalid image
+/// base64 content" 拒收；以及 idea.html 已发送完整 data URI 时服务端又追加前缀形成双重 data URI。
+pub(crate) fn image_data_uri(b64: &str) -> Option<String> {
+    let trimmed = b64.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    // 已是完整 data URI：原样使用（保留前端检测到的真实 MIME）
+    if trimmed.starts_with("data:") {
+        return Some(trimmed.to_string());
+    }
+    // 解码并检测 MIME
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(trimmed)
+        .ok()?;
+    if decoded.len() < 4 {
+        return None;
+    }
+    let mime = match &decoded[0..4] {
+        [0x89, 0x50, 0x4E, 0x47] => "png", // PNG: 89 50 4E 47
+        [0xFF, 0xD8, 0xFF, _] => "jpeg",   // JPEG: FF D8 FF xx
+        [0x47, 0x49, 0x46, _] => "gif",    // GIF: 47 49 46 38/89a
+        _ => {
+            // WebP: RIFF....WEBP（第 8–11 字节为 "WEBP"）
+            if decoded.len() >= 12 && &decoded[8..12] == b"WEBP" {
+                "webp"
+            } else {
+                "png" // 兜底
+            }
+        }
+    };
+    Some(format!("data:image/{};base64,{}", mime, trimmed))
 }
 
 /// Recursively extract a named field from a JSON value (for EPO responses).

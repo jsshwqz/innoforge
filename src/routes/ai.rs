@@ -1,4 +1,4 @@
-use super::AppState;
+use super::{image_data_uri, AppState};
 use crate::ai::{
     check_oa_analysis, format_report, oa_capacity_error, Message, OA_DISCUSSION_ANALYSIS_MAX_CHARS,
     OA_DISCUSSION_HISTORY_MAX_CHARS, OA_DISCUSSION_OA_MAX_CHARS,
@@ -352,6 +352,13 @@ pub async fn api_ai_chat(
             None => DEFAULT_CHAT_SYSTEM_PROMPT.to_string(),
         },
     };
+    // 注入项目记忆上下文
+    let agent_ctx = crate::context::build_agent_context();
+    let base_prompt = if !agent_ctx.is_empty() {
+        format!("{}\n\n## 项目记忆上下文\n{}\n", base_prompt, agent_ctx)
+    } else {
+        base_prompt
+    };
     let base_prompt = if !req.preset_mode {
         match req.system_prompt.as_deref() {
             Some(raw_role) => format!(
@@ -379,22 +386,37 @@ pub async fn api_ai_chat(
         let has_images = !req.images.is_empty();
 
         if has_images {
-            // Multimodal: build raw JSON request with image content parts
+            // Multimodal: build raw JSON request with image content parts.
+            //
+            // Image format: OpenAI-compatible APIs (including DeepSeek, Zhipu, OpenRouter,
+            // NVIDIA, Anthropic-bridge, etc.) all expect data:image/png;base64,<b64> in the
+            // image_url.url field per the OpenAI Multimodal spec. We ALWAYS include
+            // the data URI prefix — do NOT conditionally strip it based on model name.
+            //
+            // History compression is applied to multimodal requests too, to prevent token
+            // overflow in long conversations with images.
             let mut json_messages: Vec<serde_json::Value> =
                 vec![serde_json::json!({"role": "system", "content": system_prompt})];
 
-            // Add history messages
-            for (role, content) in &req.history {
+            // Add history messages (compressed if long)
+            let compressed_history = if req.history.len() > 5 {
+                compress_history(&ai, req.history.clone(), 8000).await
+            } else {
+                req.history.clone()
+            };
+            for (role, content) in &compressed_history {
                 json_messages.push(serde_json::json!({"role": role, "content": content}));
             }
 
             // User message with text + images as multimodal content array
             let mut content_parts = vec![serde_json::json!({"type": "text", "text": req.message})];
             for img in &req.images {
-                content_parts.push(serde_json::json!({
-                    "type": "image_url",
-                    "image_url": {"url": format!("data:image/png;base64,{}", img)}
-                }));
+                if let Some(uri) = image_data_uri(img) {
+                    content_parts.push(serde_json::json!({
+                        "type": "image_url",
+                        "image_url": {"url": uri}
+                    }));
+                }
             }
             json_messages.push(serde_json::json!({
                 "role": "user",
@@ -404,7 +426,7 @@ pub async fn api_ai_chat(
             let body = serde_json::json!({
                 "model": ai.model_name(),
                 "messages": json_messages,
-                "temperature": 0.7
+                "temperature": 0.5
             });
             ai.send_json_body(body).await
         } else if req.history.is_empty() {
@@ -422,11 +444,25 @@ pub async fn api_ai_chat(
             history.push(("user".to_string(), req.message));
             // 超过 ~8000 token 时自动压缩早期对话为摘要
             let history = compress_history(&ai, history, 8000).await;
-            ai.chat_with_history(&system_prompt, history, 0.7).await
+            ai.chat_with_history(&system_prompt, history, 0.5).await
         }
     }
     .await;
     let ai_ms = ai_start.elapsed().as_millis();
+    // 记录 AI 调用成本（仅记录成功的调用）
+    if result.is_ok() {
+        if let Some(usage) = ai.take_last_usage() {
+            let _ = s.db.save_cost_record_from_client(
+                usage.input_tokens,
+                usage.output_tokens,
+                ai.model_name(),
+                ai.provider_name(),
+                "ai-chat",
+                None,
+                None,
+            );
+        }
+    }
     let total_ms = req_start.elapsed().as_millis();
     tracing::info!(
         "api_ai_chat timing: web_search={} web_ms={} ai_ms={} total_ms={}",
@@ -1670,6 +1706,14 @@ pub async fn api_ai_oa_discuss(
          4. **主动引导**：如果分析中有些地方可能有争议或薄弱，主动指出并询问发明人的意见。\n\
          5. **法条引用**：每处法律论断必须引用具体法条（A22.2/A22.3/A26.3/A33 等），不可空泛。\n\
          6. **技术依据**：每处技术论断必须引用分析中的具体特征或对比文献段落。\n\n\
+         ## 事实纪律（最高优先级，优先于一切）\n\n\
+         1. 你只能依据上方提供的 OA 分析结果和原始审查意见通知书作答，禁止引入材料之外的信息。\n\
+         2. 材料中没有的内容，必须明确回答「材料中未提供」，禁止推测、补全或编造。\n\
+         3. 引用法条时，只允许引用你确定存在的法条条号（如 A22.3、A26.4、A33）；\n\
+         不确定条号时写「相关法律条文」，禁止编造条号。\n\
+         4. 引用审查意见或对比文献时，只能引用上方材料中出现的原文段落，禁止自行扩写。\n\
+         5. 任何数字、日期、百分比必须来自材料原文，否则标注「材料未给出」。\n\
+         6. 发明人引用的法条或事实与材料矛盾时，明确指出矛盾，不要附和错误观点。\n\n\
          ## 已有的 OA 分析结果\n{}\n\n\
          ## 原始审查意见通知书（供参考）\n{}\n\n\
          请严格遵守以上规则，用专业但易懂的语言与发明人沟通。\
@@ -1754,8 +1798,8 @@ pub async fn api_ai_oa_discuss(
         .unwrap_or_else(|e| e.into_inner())
         .ai_client_expert();
 
-    // Higher temperature for discussion — more natural and flexible
-    let mut rx = ai.send_chat_stream(messages, 0.7);
+    // 事实类讨论：低温抑制幻觉，同时保留条理清晰的专业表达
+    let mut rx = ai.send_chat_stream(messages, 0.35);
 
     // P0-2: 持久化讨论会话
     let db = s.db.clone();
@@ -2049,6 +2093,65 @@ pub async fn api_oa_export_docx(
     }
 }
 
+/// GET /api/ai/cost — AI 调用成本摘要
+pub async fn api_ai_cost_summary(State(s): State<AppState>) -> Json<serde_json::Value> {
+    let days = 30i64;
+    match s.db.get_cost_summary(days) {
+        Ok(summary) => Json(summary),
+        Err(e) => Json(json!({"error": format!("Failed to get cost summary: {}", e)})),
+    }
+}
+
+/// GET /api/ai/cost/records — AI 调用成本记录列表
+pub async fn api_ai_cost_records(State(s): State<AppState>) -> Json<serde_json::Value> {
+    let limit = 100i64;
+    match s.db.get_recent_cost_records(limit) {
+        Ok(records) => Json(json!({
+            "status": "ok",
+            "count": records.len(),
+            "records": records,
+        })),
+        Err(e) => Json(json!({"error": format!("Failed to get cost records: {}", e)})),
+    }
+}
+
+/// POST /api/ai/cost/record — 保存单条 AI 调用成本记录
+pub async fn api_ai_cost_save(
+    State(s): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    use crate::pipeline::context::AiCostRecord;
+    use uuid::Uuid;
+
+    let model = req["model"].as_str().unwrap_or("unknown").to_string();
+    let provider = req["provider"].as_str().unwrap_or("unknown").to_string();
+    let pipeline_run_id = req["pipeline_run_id"].as_str().unwrap_or("").to_string();
+    let step = req["step"].as_str().unwrap_or("unknown").to_string();
+    let input_tokens = req["input_tokens"].as_i64().unwrap_or(0);
+    let output_tokens = req["output_tokens"].as_i64().unwrap_or(0);
+    let estimated_cost_cents = req["estimated_cost_cents"].as_f64().unwrap_or(0.0);
+    let duration_ms = req["duration_ms"].as_i64().unwrap_or(0);
+
+    let record = AiCostRecord {
+        id: Uuid::new_v4().to_string(),
+        pipeline_run_id,
+        step,
+        model,
+        provider,
+        timestamp: chrono::Utc::now().to_rfc3339(),
+        input_tokens,
+        output_tokens,
+        estimated_cost_cents,
+        duration_ms,
+        idea_id: None,
+        session_id: None,
+    };
+
+    match s.db.save_cost_record(&record) {
+        Ok(_) => Json(json!({"status": "ok", "id": record.id})),
+        Err(e) => Json(json!({"error": format!("Failed to save cost record: {}", e)})),
+    }
+}
 #[cfg(test)]
 mod prompt_boundary_tests {
     use super::{

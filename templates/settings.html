@@ -46,11 +46,14 @@
             <div class="form-group">
                 <label>AI 服务商</label>
                 <select id="ai-provider">
-                    <option value="deepseek">DeepSeek（当前）</option>
-                    <option value="anthropic">Anthropic Claude（法律推理最强）</option>
+                    <option value="deepseek">DeepSeek（国内第一）</option>
+                    <option value="openai">OpenAI GPT-4o（国际最强）</option>
+                    <option value="anthropic">Anthropic Claude（法律推理）</option>
+                    <option value="qwen">通义千问 Qwen（阿里）</option>
                     <option value="xiaomi">小米 MiMo（支持看图）</option>
                     <option value="sensetime">商汤 SenseNova</option>
-                    <option value="openrouter">OpenRouter（GPT-4o 等）</option>
+                    <option value="zhipu">智谱 GLM</option>
+                    <option value="openrouter">OpenRouter（统一网关）</option>
                     <option value="gemini">Google Gemini（支持看图）</option>
                     <option value="custom">自定义</option>
                 </select>
@@ -74,6 +77,7 @@
                 <label>AI 模型（默认）</label>
                 <select id="ai-model">
                 </select>
+                <button class="btn-gray btn-save" id="ai-models-btn" style="margin-top:8px;padding:6px 16px;font-size:13px;" onclick="fetchAiModels(null, false)">🔍 查询可用模型</button>
                 <div id="custom-model-group" class="form-group" style="display:none;margin-top:8px;">
                     <label>自定义模型名称</label>
                     <input type="text" id="ai-model-custom" placeholder="输入模型名称">
@@ -197,6 +201,31 @@
             <h3>ℹ️ 当前配置状态</h3>
             <p id="config-status">加载中...</p>
         </div>
+
+        <div class="setting-group" id="ai-cost-group" style="display:none;">
+            <h3>💰 <span data-i18n="ai.costTitle">AI 使用统计（近30天）</span></h3>
+            <div id="ai-cost-summary" class="form-section">
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:12px;">
+                    <div style="background:var(--bg-elevated);padding:12px 16px;border-radius:8px;">
+                        <div style="font-size:13px;color:var(--text-muted);" data-i18n="ai.totalCalls">总调用次数</div>
+                        <div style="font-size:24px;font-weight:700;margin-top:4px;" id="ai-cost-calls">--</div>
+                    </div>
+                    <div style="background:var(--bg-elevated);padding:12px 16px;border-radius:8px;">
+                        <div style="font-size:13px;color:var(--text-muted);" data-i18n="ai.totalInputTokens">输入 Token</div>
+                        <div style="font-size:24px;font-weight:700;margin-top:4px;" id="ai-cost-input">--</div>
+                    </div>
+                    <div style="background:var(--bg-elevated);padding:12px 16px;border-radius:8px;">
+                        <div style="font-size:13px;color:var(--text-muted);" data-i18n="ai.totalOutputTokens">输出 Token</div>
+                        <div style="font-size:24px;font-weight:700;margin-top:4px;" id="ai-cost-output">--</div>
+                    </div>
+                    <div style="background:var(--bg-elevated);padding:12px 16px;border-radius:8px;">
+                        <div style="font-size:13px;color:var(--text-muted);" data-i18n="ai.totalCost">估算花费</div>
+                        <div style="font-size:24px;font-weight:700;margin-top:4px;color:#a855f7;" id="ai-cost-amount">--</div>
+                    </div>
+                </div>
+                <div id="ai-cost-by-model" style="font-size:13px;color:var(--text-muted);"></div>
+            </div>
+        </div>
     </div>
     </div>
 
@@ -257,21 +286,22 @@
             },
             sensetime: {
                 title: '商汤 SenseNova',
-                base_url: 'https://api.sensenova.cn/v1',
+                base_url: 'https://token.sensenova.cn/v1',
                 key_link: 'https://platform.sensenova.cn/',
                 models: [
-                    {value: 'sensechat-5', label: 'SenseChat 5'},
-                    {value: 'sensechat-turbo', label: 'SenseChat Turbo'},
-                    {value: 'sensenova-6.7-flash-lite', label: 'SenseNova 6.7 Flash Lite'},
-                    {value: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash'},
+                    {value: 'sensenova-6.7-flash-lite', label: 'SenseNova 6.7 Flash Lite（最新，支持看图+推理）'},
+                    {value: 'sensenova-6.8-flash-lite', label: 'SenseNova 6.8 Flash Lite（最新，支持看图）'},
+                    {value: 'glm-5.2', label: 'GLM 5.2（商汤通道）'},
+                    {value: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash（商汤通道，免费）'},
+                    {value: 'sensenova-u1-fast', label: 'SenseNova U1 Fast（快速推理）'},
                 ],
                 expert_models: [
-                    {value: 'sensechat-5', label: 'SenseChat 5'},
-                    {value: 'sensechat-turbo', label: 'SenseChat Turbo'},
-                    {value: 'sensenova-6.7-flash-lite', label: 'SenseNova 6.7 Flash Lite'},
-                    {value: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash'},
+                    {value: 'sensenova-6.7-flash-lite', label: 'SenseNova 6.7 Flash Lite（支持看图+推理）'},
+                    {value: 'sensenova-6.8-flash-lite', label: 'SenseNova 6.8 Flash Lite（最新）'},
+                    {value: 'glm-5.2', label: 'GLM 5.2（商汤通道）'},
+                    {value: 'sensenova-u1-fast', label: 'SenseNova U1 Fast（推理）'},
                 ],
-                hint: '商汤日日新 API'
+                hint: '商汤日日新 API，兼容 OpenAI 格式，支持多模态看图'
             },
             openrouter: {
                 title: 'OpenRouter',
@@ -319,6 +349,39 @@
                     {value: 'glm-4-flash', label: 'GLM-4-Flash（免费）'},
                 ],
                 hint: '智谱 GLM OpenAI 兼容接口'
+            },
+            openai: {
+                title: 'OpenAI GPT',
+                base_url: 'https://api.openai.com/v1',
+                key_link: 'https://platform.openai.com/api-keys',
+                models: [
+                    {value: 'gpt-4o', label: 'GPT-4o（最强，支持看图）'},
+                    {value: 'gpt-4o-mini', label: 'GPT-4o Mini（快速，推荐）'},
+                    {value: 'gpt-5', label: 'GPT-5（最新旗舰）'},
+                    {value: 'gpt-5-mini', label: 'GPT-5 Mini（快速）'},
+                ],
+                expert_models: [
+                    {value: 'gpt-5', label: 'GPT-5（最新旗舰）'},
+                    {value: 'gpt-4o', label: 'GPT-4o（最强）'},
+                ],
+                hint: 'OpenAI 官方 API，全球最强模型'
+            },
+            qwen: {
+                title: '通义千问 Qwen',
+                base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+                key_link: 'https://bailian.console.aliyun.com/',
+                models: [
+                    {value: 'qwen-max', label: 'Qwen-Max（最强）'},
+                    {value: 'qwen-plus', label: 'Qwen-Plus（均衡，推荐）'},
+                    {value: 'qwen-turbo', label: 'Qwen-Turbo（快速，推荐）'},
+                    {value: 'qwen-long', label: 'Qwen-Long（超长上下文）'},
+                    {value: 'qwen-vl-max', label: 'Qwen-VL-Max（多模态）'},
+                ],
+                expert_models: [
+                    {value: 'qwen-max', label: 'Qwen-Max（最强）'},
+                    {value: 'qwen-plus', label: 'Qwen-Plus（均衡）'},
+                ],
+                hint: '阿里通义千问，国内最强模型之一'
             }
         };
 
@@ -326,12 +389,14 @@
         function detectProvider(baseUrl) {
             baseUrl = (baseUrl || '').toLowerCase();
             if (baseUrl.includes('deepseek')) return 'deepseek';
+            if (baseUrl.includes('api.openai.com')) return 'openai';
             if (baseUrl.includes('anthropic')) return 'anthropic';
             if (baseUrl.includes('xiaomimimo')) return 'xiaomi';
             if (baseUrl.includes('sensenova')) return 'sensetime';
             if (baseUrl.includes('openrouter')) return 'openrouter';
             if (baseUrl.includes('googleapis')) return 'gemini';
             if (baseUrl.includes('bigmodel')) return 'zhipu';
+            if (baseUrl.includes('dashscope')) return 'qwen';
             return 'custom';
         }
 
@@ -347,14 +412,24 @@
                 document.getElementById('ai-key-link').href = provider.key_link;
                 document.getElementById('ai-key-link').textContent = '\u2192 \u83b7\u53d6 ' + provider.title + ' Key';
                 document.getElementById('ai-base-hint').textContent = provider.hint;
-                populateSelect('ai-model', provider.models, '');
-                populateSelect('ai-model-expert', provider.expert_models, '');
+            } else {
+                document.getElementById('ai-base-hint').textContent = '自定义 API 地址';
             }
+
+            // 清空模型下拉，等待自动查询填充
+            var modelSel = document.getElementById('ai-model');
+            modelSel.innerHTML = '<option value="">加载中...</option>';
+            document.getElementById('ai-model-expert').innerHTML = '<option value="">加载中...</option>';
+
+            // 自动从 API 查询真实模型列表
+            fetchAiModels(providerKey, true);
 
             // 切换服务商时自动更新 API Key 输入框
             var keyMap = {
                 deepseek: 'ai_api_key_deepseek',
+                openai: 'ai_api_key_openai',
                 anthropic: 'ai_api_key_anthropic',
+                qwen: 'ai_api_key_qwen',
                 xiaomi: 'ai_api_key_xiaomi',
                 sensetime: 'ai_api_key_sensetime',
                 openrouter: 'ai_api_key_openrouter',
@@ -529,6 +604,39 @@
             }
 
             document.getElementById('config-status').innerHTML = DOMPurify.sanitize(status.join('<br>'));
+
+            // 加载 AI 使用统计
+            loadAiCostStats();
+        }
+
+        async function loadAiCostStats() {
+            try {
+                var res = await fetch('/api/ai/cost');
+                if (!res.ok) return;
+                var data = await res.json();
+                if (data.total_calls === 0) return;
+                document.getElementById('ai-cost-group').style.display = 'block';
+                document.getElementById('ai-cost-calls').textContent = data.total_calls || '--';
+                document.getElementById('ai-cost-input').textContent = formatNumber(data.total_input_tokens || 0);
+                document.getElementById('ai-cost-output').textContent = formatNumber(data.total_output_tokens || 0);
+                var dollars = data.total_cost_dollars || 0;
+                document.getElementById('ai-cost-amount').textContent = '$' + dollars.toFixed(4);
+                var byModel = data.by_model || {};
+                var modelLines = [];
+                Object.keys(byModel).forEach(function(m) {
+                    var v = byModel[m];
+                    modelLines.push('<span style="margin-right:16px;">' + m + ': ' + (v.calls||0) + '次 / $' + (v.cost_cents/100||0).toFixed(4) + '</span>');
+                });
+                document.getElementById('ai-cost-by-model').innerHTML = DOMPurify.sanitize(modelLines.join(''));
+            } catch(e) {
+                console.warn('loadAiCostStats failed:', e);
+            }
+        }
+
+        function formatNumber(n) {
+            if (n >= 1000000) return (n/1000000).toFixed(1) + 'M';
+            if (n >= 1000) return (n/1000).toFixed(1) + 'K';
+            return String(n);
         }
 
         // 以下功能已屏蔽（仅保留 SerpAPI + DeepSeek）：
@@ -1009,6 +1117,78 @@
         }
 
         // 备用 AI 管理已移除（仅保留 DeepSeek）
-    </script>
+    
+        async function fetchAiModels(providerKey, silent) {
+            var btn = document.getElementById('ai-models-btn');
+            var isManual = !silent;
+            if (btn && isManual) {
+                btn.disabled = true;
+                btn.textContent = '\u23f3\ufe0f 查询中...';
+            }
+            var selectedProvider = providerKey || document.getElementById('ai-provider').value;
+            if (selectedProvider === 'custom') {
+                if (isManual) {
+                    btn.textContent = '\u274c 自定义模式不支持自动查询';
+                    btn.style.color = '#f85149';
+                    setTimeout(function() { btn.textContent = '\ud83d\udd0d 查询可用模型'; btn.style.color = ''; }, 3000);
+                    btn.disabled = false;
+                }
+                return;
+            }
+            var url = '/api/ai/models?provider=' + encodeURIComponent(selectedProvider);
+            try {
+                const res = await fetch(url);
+                const data = await res.json();
+                if (data.status === 'ok') {
+                    var models = [];
+                    if (data.provider && data.provider.models && data.provider.models.length > 0) {
+                        data.provider.models.forEach(function(m) {
+                            models.push({ value: m.id, label: m.id });
+                        });
+                    } else if (data.models && data.models.length > 0) {
+                        data.models.forEach(function(m) {
+                            models.push({ value: m.id, label: m.id });
+                        });
+                    }
+                    if (models.length > 0) {
+                        var curModel = document.getElementById('ai-model').value;
+                        var curExpert = document.getElementById('ai-model-expert').value;
+                        populateSelect('ai-model', models, curModel);
+                        populateSelect('ai-model-expert', models, curExpert);
+                        if (isManual) {
+                            btn.textContent = '\u2705 ' + models.length + ' 个模型';
+                            btn.style.color = '#4ade80';
+                            setTimeout(function() { btn.textContent = '\ud83d\udd0d 查询可用模型'; btn.style.color = ''; }, 3000);
+                        }
+                    } else {
+                        populateSelect('ai-model', [{ value: '', label: '无可用模型' }], '');
+                        populateSelect('ai-model-expert', [{ value: '', label: '无可用模型' }], '');
+                        if (isManual) {
+                            btn.textContent = '\u274c 无可用模型（请确认 API Key 已配置）';
+                            btn.style.color = '#f85149';
+                            setTimeout(function() { btn.textContent = '\ud83d\udd0d 查询可用模型'; btn.style.color = ''; }, 3000);
+                        }
+                    }
+                } else {
+                    populateSelect('ai-model', [{ value: '', label: '查询失败' }], '');
+                    populateSelect('ai-model-expert', [{ value: '', label: '查询失败' }], '');
+                    if (isManual) {
+                        btn.textContent = '\u274c ' + (data.message || '查询失败');
+                        btn.style.color = '#f85149';
+                        setTimeout(function() { btn.textContent = '\ud83d\udd0d 查询可用模型'; btn.style.color = ''; }, 3000);
+                    }
+                }
+            } catch(e) {
+                populateSelect('ai-model', [{ value: '', label: '网络错误' }], '');
+                populateSelect('ai-model-expert', [{ value: '', label: '网络错误' }], '');
+                if (isManual) {
+                    btn.textContent = '\u274c 网络错误';
+                    setTimeout(function() { btn.textContent = '\ud83d\udd0d 查询可用模型'; }, 3000);
+                }
+            } finally {
+                if (btn && isManual) btn.disabled = false;
+            }
+        }
+</script>
 </body>
 </html>

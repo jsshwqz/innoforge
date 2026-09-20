@@ -70,6 +70,7 @@
                 <button class="tab-btn" data-tab="features" onclick="switchTab('features')">🧩 特征卡片</button>
                 <button class="tab-btn" data-tab="claims" onclick="switchTab('claims')">🌳 权利要求树</button>
                 <button class="tab-btn" data-tab="findings" onclick="switchTab('findings')">🔑 关键发现</button>
+                <button class="tab-btn" data-tab="memory" onclick="switchTab('memory'); loadMemory()">🧠 记忆</button>
                 <button class="tab-btn" data-tab="chat" onclick="switchTab('chat')">💬 讨论</button>
                 <button class="tab-btn" data-tab="report" onclick="switchTab('report')">📄 报告</button>
                 <button class="tab-btn" data-tab="versions" onclick="switchTab('versions')">📜 版本历史</button>
@@ -113,6 +114,51 @@
                 </div>
             </div>
 
+            <!-- Tab: 记忆 -->
+            <div id="tab-memory" class="tab-panel">
+                <div id="memory-panel" class="panel-box">
+                    <div class="page-header-row">
+                        <h3 style="margin:0;">🧠 记忆 / Memory (<span id="memory-count">0</span>)</h3>
+                        <div style="display:flex;gap:8px;align-items:center;">
+                            <select id="memory-filter" style="padding:4px 8px;background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;font-size:13px;">
+                                <option value="all">全部类型</option>
+                                <option value="domain_concept">领域概念</option>
+                                <option value="decision">决策</option>
+                                <option value="pattern">创新模式</option>
+                                <option value="question">开放问题</option>
+                            </select>
+                            <button class="btn-success-sm" onclick="showMemoryForm()">+ 新增</button>
+                        </div>
+                    </div>
+                    <div id="memory-add-form" style="display:none; padding:12px; background:#161b22; border:1px solid #30363d; border-radius:6px; margin-bottom:12px;">
+                        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-bottom:8px;">
+                            <input type="text" id="mem-concept-name" placeholder="概念名称" style="padding:6px 8px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;">
+                            <select id="mem-concept-type" style="padding:6px 8px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;">
+                                <option value="domain_concept">领域概念</option>
+                                <option value="decision">决策</option>
+                                <option value="pattern">创新模式</option>
+                                <option value="question">开放问题</option>
+                            </select>
+                            <input type="number" id="mem-confidence" placeholder="置信度" value="0.5" min="0" max="1" step="0.1" style="padding:6px 8px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;">
+                            <div style="display:flex;gap:6px;">
+                                <button onclick="addMemoryEntry()" style="flex:1;padding:6px;background:#238636;color:#fff;border:none;border-radius:4px;cursor:pointer;">保存</button>
+                                <button onclick="hideMemoryForm()" style="flex:1;padding:6px;background:#30363d;color:#c9d1d9;border:none;border-radius:4px;cursor:pointer;">取消</button>
+                            </div>
+                        </div>
+                        <div>
+                            <textarea id="mem-content" placeholder="详细描述..." rows="2" style="width:100%;padding:6px 8px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;font-size:13px;resize:vertical;"></textarea>
+                        </div>
+                    </div>
+                    <div id="memory-stats" style="display:flex;gap:16px;padding:8px 12px;background:#0d1117;border:1px solid #21262d;border-radius:6px;margin-bottom:12px;font-size:13px;">
+                        <span>📊 领域概念: <span id="mem-stat-concept">0</span></span>
+                        <span>🔖 决策: <span id="mem-stat-decision">0</span></span>
+                        <span>⚡ 创新模式: <span id="mem-stat-pattern">0</span></span>
+                        <span>❓ 开放问题: <span id="mem-stat-question">0</span></span>
+                    </div>
+                    <div id="memory-list"><p class="muted">暂无记忆条目（完成推演后自动生成）</p></div>
+                </div>
+            </div>
+
             <!-- Tab: 讨论 -->
             <div id="tab-chat" class="tab-panel">
                 <div id="discussion-panel" class="panel-box">
@@ -127,6 +173,7 @@
                             </select>
                             <button class="btn-secondary" style="padding:4px 12px;" onclick="exportConclusions()" id="export-conclusions-btn" data-i18n="idea.exportConclusions"></button>
                             <button class="btn-success-sm" onclick="summarizeDiscussion()" id="summary-btn" data-i18n="idea.generateSummary"></button>
+                            <button class="btn-primary-sm" style="padding:4px 12px;background:#8957e5;" onclick="exportConversation()" id="export-conversation-btn" data-i18n="idea.exportConversation"></button>
                         </div>
                     </div>
                     <div id="discussion-summary" class="discussion-summary">
@@ -145,7 +192,7 @@
                         <div class="chat-actions-col">
                             <label class="file-upload-label" title="上传图片或文件">
                                 📎
-                                <input type="file" id="chat-file-input" multiple accept=".pdf,.docx,.doc,.txt,.png,.jpg,.jpeg,.gif,.webp" style="display:none;" onchange="handleChatFileSelect(this)">
+                                <input type="file" id="chat-file-input" multiple accept=".txt,.md,.csv,.json,.log,.xml,.yaml,.yml,.pdf,.png,.jpg,.jpeg,.gif,.webp" style="display:none;" onchange="handleChatFileSelect(this)">
                             </label>
                             <button class="btn-success-sm" id="idea-send-btn" onclick="sendChatMessage()" data-i18n="idea.send"></button>
                             <button class="btn-secondary" id="idea-cad-btn" type="button" onclick="drawIdeaCad()" data-i18n="cad.draw"></button>
@@ -198,7 +245,7 @@
     window._onI18nLangChange.push(function() { if (typeof reapplyPage === 'function') reapplyPage(); });
     </script>
     <script>
-    let currentIdeaId = null;
+    var currentIdeaId = null;
     const ideaCadController = window.InnoForgeCad.createController({
         context: function() { return { kind: 'idea', id: currentIdeaId || '' }; },
         input: function() { return document.getElementById('chat-input'); },
@@ -282,6 +329,574 @@
         if (panel) panel.classList.add('active');
         document.querySelectorAll('.tab-btn[data-tab="' + tabId + '"]').forEach(function(b) { b.classList.add('active'); });
     }
+
+    // 加载创意历史列表 / Load idea history sidebar
+    async function loadHistory() {
+        var list = document.getElementById('history-list');
+        if (!list) return;
+        try {
+            var resp = await fetch('/api/idea/list');
+            if (!resp.ok) return;
+            var data = await resp.json();
+            var ideas = data.ideas || data.list || [];
+            if (!Array.isArray(ideas)) { ideas = []; }
+            if (ideas.length === 0) {
+                list.innerHTML = '<p class="hint">' + (i18nLang === 'en' ? 'No ideas yet' : '暂无创意记录') + '</p>';
+                return;
+            }
+            list.innerHTML = '';
+            ideas.slice(0, 50).forEach(function(item) {
+                var row = document.createElement('div');
+                row.className = 'idea-history-item';
+                row.style.cssText = 'padding:10px 14px;margin-bottom:6px;background:#161b22;border:1px solid #21262d;border-left:3px solid #58a6ff;border-radius:6px;cursor:pointer;transition:all 0.2s;font-size:0.85em;';
+                var title = item.title || (item.description || '').substring(0, 30) || (i18nLang === 'en' ? 'Untitled' : '未命名');
+                var desc = (item.description || '').replace(/\n/g, ' ').trim();
+                if (desc === title) desc = '';
+                if (desc.length > 80) desc = desc.substring(0, 80) + '…';
+                var status = item.status || 'pending';
+                var mc = item.message_count || 0;
+                var score = item.novelty_score;
+                var created = item.created_at ? item.created_at.substring(0, 10) : '';
+                // Status badge
+                var badge = '<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:0.8em;font-weight:600;margin-left:4px;';
+                if (status === 'done') badge += 'background:#0f5132;color:#3fb950;">' + (i18nLang === 'en' ? '✓ Done' : '✓ 完成');
+                else if (status === 'running') badge += 'background:#1c3a5f;color:#58a6ff;">⟳ ' + (i18nLang === 'en' ? 'Running' : '进行中');
+                else badge += 'background:#21262d;color:#8b949e;">' + (i18nLang === 'en' ? 'Pending' : '待推演');
+                badge += '</span>';
+                // Score
+                var scoreHtml = '';
+                if (score != null) {
+                    var sc = Math.round(score);
+                    var scColor = sc >= 80 ? '#3fb950' : sc >= 50 ? '#f0883e' : '#f85149';
+                    scoreHtml = '<span style="color:' + scColor + ';font-weight:700;font-size:0.95em;margin-left:6px;">★ ' + sc + '</span>';
+                }
+                // Message count
+                var msgHtml = '';
+                if (mc > 0) {
+                    msgHtml = '<span style="color:#8b949e;font-size:0.8em;margin-left:4px;">💬 ' + mc + '</span>';
+                }
+                // Render
+                var html = '';
+                html += '<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;overflow:hidden;">';
+                html += '<span style="color:#f0f6fc;font-weight:600;font-size:1.05em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;">' + esc(title) + '</span>';
+                html += '<span style="display:inline-flex;align-items:center;flex-shrink:0;gap:4px;">' + scoreHtml + msgHtml + badge + '</span>';
+                html += '</div>';
+                if (desc) {
+                    html += '<div style="color:#c9d1d9;font-size:0.9em;margin-top:4px;line-height:1.5;">' + esc(desc) + '</div>';
+                }
+                if (created) {
+                    html += '<div style="color:#484f58;font-size:0.75em;margin-top:6px;display:flex;justify-content:space-between;align-items:center;">';
+                    html += '<span>' + created + '</span>';
+                    if (score != null) {
+                        var sc = Math.round(score);
+                        html += '<div style="width:80px;height:4px;background:#21262d;border-radius:2px;overflow:hidden;"><div style="width:' + sc + '%;height:100%;background:' + (sc >= 80 ? '#3fb950' : sc >= 50 ? '#f0883e' : '#f85149') + ';"></div></div>';
+                    }
+                    html += '</div>';
+                }
+                row.innerHTML = html;
+                // 删除会话按钮（恢复自 v0.7.2）
+                row.style.position = 'relative';
+                var delBtn = document.createElement('button');
+                delBtn.style.cssText = 'position:absolute;top:4px;right:4px;background:none;border:none;color:#484f58;cursor:pointer;font-size:0.8em;padding:2px 6px;z-index:2;';
+                delBtn.title = i18nLang === 'en' ? 'Delete' : '删除';
+                delBtn.textContent = '✕';
+                delBtn.addEventListener('click', function(e) { e.stopPropagation(); deleteIdea(item.id, item.title); });
+                row.appendChild(delBtn);
+                row.onmouseover = function() { row.style.borderColor = '#58a6ff'; row.style.background = '#1c2129'; };
+                row.onmouseout = function() { row.style.borderColor = '#21262d'; row.style.background = '#161b22'; };
+                row.onclick = function() { currentIdeaId = item.id; loadIdea(item.id); };
+                list.appendChild(row);
+            });
+        } catch(e) {
+            if (list) list.innerHTML = '<p class="hint" style="color:#f85149;">' + (i18nLang === 'en' ? 'Failed to load history' : '加载历史失败') + '</p>';
+        }
+    }
+
+    async function loadIdea(ideaId) {
+        try {
+            var resp = await fetch('/api/idea/' + encodeURIComponent(ideaId));
+            if (!resp.ok) return;
+            var data = await resp.json();
+            var idea = data.idea || data;
+            if (!idea) return;
+            currentIdeaId = ideaId;
+            displayResults(idea);
+            loadVersionHistory(ideaId);
+            loadMemory();
+            loadMessages(ideaId);
+            loadEvidence(ideaId);
+            loadClaimTree(ideaId);
+            loadFindings(ideaId);
+            loadFeatureCards(ideaId);
+            showDiscussionPanel && showDiscussionPanel();
+        } catch(e) {}
+    }
+
+    // 加载证据链 / Load evidence chain
+    async function loadEvidence(ideaId) {
+        var listEl = document.getElementById('evidence-list');
+        var countEl = document.getElementById('evidence-count');
+        if (!listEl) return;
+        listEl.innerHTML = '<p class="muted">Loading...</p>';
+        try {
+            var resp = await fetch('/api/idea/' + encodeURIComponent(ideaId) + '/evidence');
+            if (!resp.ok) { listEl.innerHTML = '<p class="muted">Load failed</p>'; return; }
+            var data = await resp.json();
+            var evs = data.evidence || [];
+            if (countEl) countEl.textContent = evs.length;
+            if (evs.length === 0) { listEl.innerHTML = '<p class="muted">暂无证据记录</p>'; return; }
+            listEl.innerHTML = '';
+            evs.forEach(function(ev) {
+                var row = document.createElement('div');
+                row.style.cssText = 'padding:10px 14px;margin-bottom:6px;background:#161b22;border:1px solid #30363d;border-radius:6px;';
+                var conf = (ev.confidence || 0);
+                var confColor = conf >= 0.8 ? '#3fb950' : conf >= 0.5 ? '#f0883e' : '#f85149';
+                row.innerHTML = DOMPurify.sanitize(
+                    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">' +
+                    '<span style="font-weight:600;color:#f0f6fc;">' + esc(ev.claim || ev.source_title || ev.source_type || '') + '</span>' +
+                    '<span style="color:' + confColor + ';font-weight:600;font-size:0.85em;">置信度 ' + (conf * 100).toFixed(0) + '%</span>' +
+                    '</div>' +
+                    '<div style="color:#c9d1d9;line-height:1.6;font-size:0.9em;">' + esc(ev.excerpt || ev.source_id || '') + '</div>' +
+                    '<div style="font-size:0.75em;color:#484f58;margin-top:4px;">来源: ' + esc(ev.source_type || '') +
+                    (ev.source_id ? ' · ' + esc(ev.source_id) : '') +
+                    (ev.produced_by ? ' · ' + esc(ev.produced_by) : '') +
+                    (ev.relation ? ' · ' + esc(ev.relation) : '') + '</div>'
+                );
+                listEl.appendChild(row);
+            });
+        } catch(e) {
+            listEl.innerHTML = '<p class="muted">Load failed: ' + e.message + '</p>';
+        }
+    }
+
+    // 加载权利要求树 / Load claim tree
+    async function loadClaimTree(ideaId) {
+        var contentEl = document.getElementById('claim-tree-content');
+        if (!contentEl) return;
+        contentEl.innerHTML = '<p class="muted">Loading...</p>';
+        try {
+            var resp = await fetch('/api/idea/' + encodeURIComponent(ideaId) + '/claim-tree');
+            if (!resp.ok) { contentEl.innerHTML = '<p class="muted">Load failed</p>'; return; }
+            var data = await resp.json();
+            var claims = data.claims || [];
+            if (claims.length === 0) { contentEl.innerHTML = '<p class="muted">暂无权利要求树数据</p>'; return; }
+            contentEl.innerHTML = '';
+            // 构建树：独立权利要求为根，从属权利要求挂到父节点
+            claims.forEach(function(c) {
+                var row = document.createElement('div');
+                var isIndependent = c.claim_type === 'independent' || c.claim_type === 'main';
+                var indent = isIndependent ? '0' : '24px';
+                var borderLeft = isIndependent ? '3px solid #8b5cf6' : '3px solid #30363d';
+                row.style.cssText = 'padding:10px 12px;margin:6px 0 6px ' + indent + ';background:#161b22;border-left:' + borderLeft + ';border-radius:4px;';
+                var typeLabel = isIndependent ? '独立权利要求' : ('从属权利要求' + (c.parent_claim_id ? '' : ''));
+                var html = '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">' +
+                    '<span style="font-weight:700;color:#d2a8ff;">权' + c.claim_number + '</span>' +
+                    '<span style="font-size:0.8em;color:#8b949e;">' + typeLabel + '</span></div>' +
+                    '<div style="color:#c9d1d9;line-height:1.6;font-size:0.9em;">' + esc(c.content || '') + '</div>';
+                if (c.features && c.features.length > 0) {
+                    html += '<div style="margin-top:8px;padding:8px;background:#0d1117;border-radius:4px;">';
+                    c.features.forEach(function(f) {
+                        var flag = f.novelty_flag ? '<span style="color:#3fb950;font-size:0.75em;">★ 新颖</span>' : '<span style="color:#8b949e;font-size:0.75em;">已有</span>';
+                        html += '<div style="display:flex;align-items:flex-start;gap:8px;padding:3px 0;font-size:0.85em;color:#c9d1d9;">' +
+                            '<span style="flex-shrink:0;">' + flag + '</span>' +
+                            '<span>' + esc(f.description || '') + '</span></div>';
+                    });
+                    html += '</div>';
+                }
+                row.innerHTML = DOMPurify.sanitize(html);
+                contentEl.appendChild(row);
+            });
+        } catch(e) {
+            contentEl.innerHTML = '<p class="muted">Load failed: ' + e.message + '</p>';
+        }
+    }
+
+    // 加载关键发现 / Load key findings
+    async function loadFindings(ideaId) {
+        var listEl = document.getElementById('key-findings-list');
+        var countEl = document.getElementById('key-findings-count');
+        if (!listEl) return;
+        listEl.innerHTML = '<p class="muted">Loading...</p>';
+        try {
+            var resp = await fetch('/api/idea/' + encodeURIComponent(ideaId) + '/findings');
+            if (!resp.ok) { listEl.innerHTML = '<p class="muted">Load failed</p>'; return; }
+            var data = await resp.json();
+            var findings = data.findings || [];
+            if (countEl) countEl.textContent = findings.length;
+            if (findings.length === 0) { listEl.innerHTML = '<p class="muted">暂无发现记录</p>'; return; }
+            listEl.innerHTML = '';
+            findings.forEach(function(f) {
+                var row = document.createElement('div');
+                row.style.cssText = 'padding:10px 14px;margin-bottom:6px;background:#161b22;border:1px solid #30363d;border-radius:6px;';
+                var typeLabel = { dead_end: '⚠️ 失败路径', success: '✅ 成功', hypothesis: '🔬 假设', info: '📌 信息', experimental: '🧪 实验' };
+                var label = typeLabel[f.finding_type] || (f.finding_type || '发现');
+                var titleHtml = f.title ? '<div style="font-weight:600;color:#f0f6fc;margin-bottom:4px;">' + esc(f.title) + '</div>' : '';
+                row.innerHTML = DOMPurify.sanitize(
+                    titleHtml +
+                    '<div style="color:#c9d1d9;line-height:1.6;font-size:0.9em;white-space:pre-wrap;">' + esc(f.content || '') + '</div>' +
+                    '<div style="font-size:0.75em;color:#484f58;margin-top:4px;">' + label +
+                    (f.source_step ? ' · ' + esc(f.source_step) : '') +
+                    (f.created_at ? ' · ' + f.created_at.substring(0, 16).replace('T', ' ') : '') + '</div>'
+                );
+                listEl.appendChild(row);
+            });
+        } catch(e) {
+            listEl.innerHTML = '<p class="muted">Load failed: ' + e.message + '</p>';
+        }
+    }
+
+    // 加载特征卡片 / Load feature cards
+    async function loadFeatureCards(ideaId) {
+        var listEl = document.getElementById('feature-cards-list');
+        if (!listEl) return;
+        listEl.innerHTML = '<p class="muted">Loading...</p>';
+        try {
+            var resp = await fetch('/api/ideas/' + encodeURIComponent(ideaId) + '/feature-cards');
+            if (!resp.ok) { listEl.innerHTML = '<p class="muted">Load failed</p>'; return; }
+            var data = await resp.json();
+            var cards = data.cards || [];
+            if (cards.length === 0) { listEl.innerHTML = '<p class="muted">暂无特征卡片</p>'; return; }
+            listEl.innerHTML = '';
+            cards.forEach(function(card) {
+                var row = document.createElement('div');
+                row.style.cssText = 'padding:12px 14px;margin-bottom:8px;background:#161b22;border:1px solid #30363d;border-radius:6px;';
+                var score = card.novelty_score;
+                var scoreHtml = '';
+                if (score != null) {
+                    var sc = Math.round(score);
+                    var scColor = sc >= 80 ? '#3fb950' : sc >= 50 ? '#f0883e' : '#f85149';
+                    scoreHtml = '<span style="color:' + scColor + ';font-weight:700;font-size:0.9em;">★ ' + sc + '</span>';
+                }
+                var sections = [
+                    { label: '技术问题', val: card.technical_problem },
+                    { label: '核心结构', val: card.core_structure },
+                    { label: '关键关系', val: card.key_relations },
+                    { label: '工艺步骤', val: card.process_steps },
+                    { label: '应用场景', val: card.application_scenarios }
+                ];
+                var body = sections.filter(function(s) { return s.val; }).map(function(s) {
+                    return '<div style="margin-top:6px;"><span style="color:#58a6ff;font-weight:600;font-size:0.8em;">' + s.label + ':</span> <span style="color:#c9d1d9;font-size:0.9em;line-height:1.6;">' + esc(s.val) + '</span></div>';
+                }).join('');
+                row.innerHTML = DOMPurify.sanitize(
+                    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">' +
+                    '<span style="font-weight:600;color:#f0f6fc;">' + esc(card.title || card.description || '') + '</span>' +
+                    scoreHtml + '</div>' +
+                    (card.description ? '<div style="color:#8b949e;font-size:0.85em;line-height:1.5;">' + esc(card.description) + '</div>' : '') +
+                    body
+                );
+                listEl.appendChild(row);
+            });
+        } catch(e) {
+            listEl.innerHTML = '<p class="muted">Load failed: ' + e.message + '</p>';
+        }
+    }
+
+    // 加载聊天记录 / Load chat messages
+    async function loadMessages(ideaId) {
+        if (!ideaId) return;
+        var chatEl = document.getElementById('chat-messages');
+        if (!chatEl) return;
+        try {
+            var resp = await fetch('/api/idea/' + encodeURIComponent(ideaId) + '/messages');
+            if (!resp.ok) return;
+            var data = await resp.json();
+            var msgs = data.messages || [];
+            if (msgs.length === 0) {
+                                chatEl.innerHTML = '<div style="text-align:center;padding:40px;color:#484f58;font-size:13px;">' +
+                    '<div style="font-size:2em;margin-bottom:8px;">💬</div>' +
+                    (i18nLang === 'en' ? 'No discussion yet' : '暂无讨论记录') +
+                    '</div>';
+                return;
+            }
+            chatEl.innerHTML = '';
+            msgs.forEach(function(m) {
+                var row = document.createElement('div');
+                var isUser = (m.role === 'user');
+                var isSystem = (m.role === 'system' || m.role === 'error');
+                var align = isUser ? 'flex-end' : 'flex-start';
+                var bgColor = isUser ? '#1f6feb' : '#161b22';
+                var textColor = isUser ? '#fff' : '#c9d1d9';
+                var borderColor = isUser ? '#388bfd' : '#21262d';
+                var avatar = isUser ? '👤' : (isSystem ? '⚠️' : '🤖');
+                row.style.cssText = 'display:flex;flex-direction:' + (isUser ? 'row-reverse' : 'row') + ';align-items:flex-start;margin-bottom:12px;gap:8px;';
+
+                var avatarDiv = document.createElement('div');
+                avatarDiv.style.cssText = 'flex-shrink:0;width:32px;height:32px;display:flex;align-items:center;justify-content:center;background:#21262d;border-radius:50%;font-size:16px;';
+                avatarDiv.textContent = avatar;
+
+                var bubble = document.createElement('div');
+                bubble.style.cssText = 'max-width:80%;padding:10px 14px;background:' + bgColor + ';color:' + textColor + ';border:1px solid ' + borderColor + ';border-radius:' + (isUser ? '12px 12px 4px 12px' : '12px 12px 12px 4px') + ';font-size:13px;line-height:1.6;word-break:break-word;';
+                var content = m.content || '';
+                // Render markdown-like content
+                content = content.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+                content = content.replace(/`([^`]+)`/g, '<code style="background:#0d1117;padding:1px 5px;border-radius:3px;font-size:0.9em;">$1</code>');
+                content = content.replace(/\n/g, '<br>');
+                bubble.innerHTML = DOMPurify.sanitize(content);
+
+                var metaDiv = document.createElement('div');
+                metaDiv.style.cssText = 'display:flex;align-items:center;gap:6px;margin-top:4px;opacity:0.7;font-size:11px;';
+                var timeSpan = document.createElement('span');
+                timeSpan.textContent = m.created_at ? m.created_at.substring(0, 19).replace('T', ' ') : '';
+                metaDiv.appendChild(timeSpan);
+                bubble.appendChild(metaDiv);
+
+                row.appendChild(avatarDiv);
+                row.appendChild(bubble);
+                chatEl.appendChild(row);
+            });
+            if (typeof ideaCadController !== 'undefined' && ideaCadController.renderHistory) ideaCadController.renderHistory();
+            // Scroll to bottom
+            chatEl.scrollTop = chatEl.scrollHeight;
+        } catch(e) {}
+    }
+
+    // 发送聊天消息 / Send chat message to idea discussion
+    var ideaSendBusy = false;
+    var ideaPendingNext = null;
+    var ideaImages = [];
+
+    async function sendChatMessage() {
+        if (ideaSendBusy) { ideaPendingNext = true; return; }
+        var input = document.getElementById('chat-input');
+        if (!input) return;
+        var msg = input.value.trim();
+        if (!msg && ideaImages.length === 0) return;
+        if (msg && typeof ideaCadController !== 'undefined' && ideaCadController.shouldHandle(msg)) {
+            input.value = '';
+            await ideaCadController.draw(msg);
+            return;
+        }
+        ideaSendBusy = true;
+        input.value = '';
+        var images = ideaImages.slice();
+        ideaImages = [];
+        var preview = document.getElementById('idea-image-preview-area');
+        if (preview) preview.innerHTML = '';
+
+        if (!currentIdeaId) { alert(i18nLang === 'en' ? 'No idea selected' : '请先选择一个创意'); ideaSendBusy = false; return; }
+        var chatEl = document.getElementById('chat-messages');
+        if (!chatEl) { alert('chat area not found'); ideaSendBusy = false; return; }
+
+        // Append user bubble
+        var row = document.createElement('div');
+        row.style.cssText = 'display:flex;flex-direction:row-reverse;align-items:flex-start;margin-bottom:12px;gap:8px;';
+        var av = document.createElement('div');
+        av.style.cssText = 'flex-shrink:0;width:32px;height:32px;display:flex;align-items:center;justify-content:center;background:#21262d;border-radius:50%;font-size:16px;';
+        av.textContent = '👤';
+        var bubble = document.createElement('div');
+        bubble.style.cssText = 'max-width:80%;padding:10px 14px;background:#1f6feb;color:#fff;border:1px solid #388bfd;border-radius:12px 12px 4px 12px;font-size:13px;line-height:1.6;word-break:break-word;';
+        var content = msg;
+        content = content.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+        content = content.replace(/`([^`]+)`/g, '<code style="background:#0d1117;padding:1px 5px;border-radius:3px;font-size:0.9em;">$1</code>');
+        content = content.replace(/\n/g, '<br>');
+        if (images.length > 0) {
+            images.forEach(function(img) { content += '<br><img src="' + img + '" style="max-width:200px;border-radius:6px;margin-top:4px;">'; });
+        }
+        bubble.innerHTML = DOMPurify.sanitize(content);
+        row.appendChild(av);
+        row.appendChild(bubble);
+        chatEl.appendChild(row);
+        chatEl.scrollTop = chatEl.scrollHeight;
+
+        // Show stop button
+        var sendBtn = document.getElementById('idea-send-btn');
+        var stopBtn = document.getElementById('idea-stop-btn');
+        if (sendBtn) sendBtn.disabled = true;
+        if (stopBtn) stopBtn.style.display = 'inline-flex';
+
+        try {
+            var body = { message: msg, depth: chatDepth };
+            if (images.length > 0) body.images = images;
+            if (ideaAttachedText.length > 0) body.attachments = ideaAttachedText.slice();
+            var resp = await fetch('/api/idea/' + encodeURIComponent(currentIdeaId) + '/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            if (!resp.ok) {
+                var errData = await resp.json().catch(function() { return {}; });
+                throw new Error(errData.error || 'API error ' + resp.status);
+            }
+            var data = await resp.json();
+            var aiText = data.message ? data.message.content : (data.content || data.result || '');
+
+            // Append AI bubble
+            var aiRow = document.createElement('div');
+            aiRow.style.cssText = 'display:flex;align-items:flex-start;margin-bottom:12px;gap:8px;';
+            var aiAv = document.createElement('div');
+            aiAv.style.cssText = 'flex-shrink:0;width:32px;height:32px;display:flex;align-items:center;justify-content:center;background:#21262d;border-radius:50%;font-size:16px;';
+            aiAv.textContent = '🤖';
+            var aiBubble = document.createElement('div');
+            aiBubble.style.cssText = 'max-width:80%;padding:10px 14px;background:#161b22;color:#c9d1d9;border:1px solid #21262d;border-radius:12px 12px 12px 4px;font-size:13px;line-height:1.6;word-break:break-word;';
+            var aiContent = aiText;
+            aiContent = aiContent.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+            aiContent = aiContent.replace(/`([^`]+)`/g, '<code style="background:#0d1117;padding:1px 5px;border-radius:3px;font-size:0.9em;">$1</code>');
+            aiContent = aiContent.replace(/\n/g, '<br>');
+            aiBubble.innerHTML = DOMPurify.sanitize(aiContent);
+            aiRow.appendChild(aiAv);
+            aiRow.appendChild(aiBubble);
+            chatEl.appendChild(aiRow);
+        } catch(e) {
+            var errRow = document.createElement('div');
+            errRow.style.cssText = 'display:flex;align-items:flex-start;margin-bottom:12px;gap:8px;';
+            var errAv = document.createElement('div');
+            errAv.style.cssText = 'flex-shrink:0;width:32px;height:32px;display:flex;align-items:center;justify-content:center;background:#21262d;border-radius:50%;font-size:16px;';
+            errAv.textContent = '⚠️';
+            var errBubble = document.createElement('div');
+            errBubble.style.cssText = 'max-width:80%;padding:10px 14px;background:#3d1f1f;color:#f85149;border:1px solid #f85149;border-radius:12px;font-size:13px;line-height:1.6;';
+            errBubble.textContent = (i18nLang === 'en' ? 'Send failed: ' : '发送失败：') + e.message;
+            errRow.appendChild(errAv);
+            errRow.appendChild(errBubble);
+            chatEl.appendChild(errRow);
+        }
+        finally {
+            ideaSendBusy = false;
+            if (sendBtn) sendBtn.disabled = false;
+            if (stopBtn) stopBtn.style.display = 'none';
+            chatEl.scrollTop = chatEl.scrollHeight;
+            loadMessages(currentIdeaId);
+            if (ideaPendingNext) { ideaPendingNext = false; sendChatMessage(); }
+        }
+    }
+
+    function stopIdeaGeneration() { ideaSendBusy = false; }
+    async function handleChatFileSelect(input) {
+        var files = input.files;
+        if (!files) return;
+        var preview = document.getElementById('idea-image-preview-area');
+        Array.from(files).forEach(async function(f) {
+            var isImage = f.type.indexOf('image/') === 0;
+            if (isImage) {
+                var reader = new FileReader();
+                reader.onload = function(e) { ideaImages.push(e.target.result); if (preview) { preview.style.display = 'flex'; preview.innerHTML += '<img src="' + e.target.result + '" style="max-width:80px;max-height:60px;border-radius:4px;">'; } };
+                reader.readAsDataURL(f);
+            } else if (f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf')) {
+                var form = new FormData();
+                form.append('file', f);
+                try {
+                    var resp = await fetch('/api/upload/extract', { method: 'POST', body: form });
+                    var data = await resp.json();
+                    if (data.text) {
+                        ideaAttachedText.push({ name: f.name, content: data.text });
+                        renderChatAttachments();
+                    } else {
+                        alert('PDF extract failed: ' + (data.error || 'unknown'));
+                    }
+                } catch(e) {
+                    alert('PDF upload failed: ' + e.message);
+                }
+            } else {
+                var reader = new FileReader();
+                reader.onload = function(e) {
+                    ideaAttachedText.push({ name: f.name, content: e.target.result });
+                    renderChatAttachments();
+                };
+                reader.readAsText(f);
+            }
+        });
+        input.value = '';
+    }
+
+    // 文本附件（恢复自 v0.7.2）
+    var ideaAttachedText = [];
+
+    function renderChatAttachments() {
+        var container = document.getElementById('chat-attachments');
+        if (!container) return;
+        if (ideaAttachedText.length === 0) {
+            container.style.display = 'none';
+            return;
+        }
+        container.style.display = 'block';
+        container.innerHTML = '';
+        ideaAttachedText.forEach(function(att, idx) {
+            var chip = document.createElement('span');
+            chip.style.cssText = 'display:inline-flex;align-items:center;gap:6px;background:#161b22;border:1px solid #30363d;border-radius:4px;padding:3px 10px;margin:2px 4px 2px 0;font-size:0.85em;';
+            var name = document.createElement('span');
+            name.textContent = '📄 ' + att.name;
+            var x = document.createElement('button');
+            x.style.cssText = 'background:none;border:none;color:#8b949e;cursor:pointer;font-size:1em;padding:0 2px;';
+            x.textContent = '×';
+            x.onclick = function() { ideaAttachedText.splice(idx, 1); renderChatAttachments(); };
+            chip.appendChild(name);
+            chip.appendChild(x);
+            container.appendChild(chip);
+        });
+    }
+
+    // 粘贴图片支持（恢复自 v0.7.2）
+    document.addEventListener('DOMContentLoaded', function() {
+        var chatInput = document.getElementById('chat-input');
+        if (chatInput) {
+            chatInput.addEventListener('paste', function(e) {
+                var items = (e.clipboardData || window.clipboardData).items;
+                for (var i = 0; i < items.length; i++) {
+                    if (items[i].type.indexOf('image') === 0) {
+                        e.preventDefault();
+                        var file = items[i].getAsFile();
+                        if (!file) continue;
+                        var reader = new FileReader();
+                        reader.onload = function(ev) {
+                            ideaImages.push(ev.target.result);
+                            var preview = document.getElementById('idea-image-preview-area');
+                            if (preview) { preview.style.display = 'flex'; preview.innerHTML += '<img src="' + ev.target.result + '" style="max-width:80px;max-height:60px;border-radius:4px;">'; }
+                        };
+                        reader.readAsDataURL(file);
+                        break;
+                    }
+                }
+            });
+        }
+    });
+
+    // 删除会话（恢复自 v0.7.2）
+    async function deleteIdea(id, title) {
+        if (!confirm(i18nLang === 'en' ? 'Delete "' + title + '" and all its discussions?' : '确定删除「' + title + '」及其所有讨论记录？')) return;
+        try {
+            const resp = await fetch('/api/idea/' + encodeURIComponent(id) + '/delete', { method: 'POST' });
+            let data = null;
+            try {
+                data = await resp.json();
+            } catch (_) {
+                data = { status: 'error', message: await resp.text() };
+            }
+            if (data.status === 'ok') {
+                if (currentIdeaId === id) {
+                    currentIdeaId = null;
+                    document.getElementById('idea-title').value = '';
+                    document.getElementById('idea-desc').value = '';
+                    document.getElementById('score-area').innerHTML = '';
+                    document.getElementById('analysis-area').innerHTML = '';
+                    document.getElementById('chat-messages').innerHTML = '';
+                }
+                loadHistory();
+            } else {
+                alert((data && data.message) ? data.message : ('删除失败（HTTP ' + resp.status + '）'));
+            }
+        } catch(e) {
+            alert('请求失败: ' + e.message);
+        }
+    }
+
+    // 滚到底部按钮（恢复自 v0.7.2）
+    function scrollIdeaChatToBottom() {
+        var chatBox = document.getElementById('chat-messages');
+        var scrollBtn = document.getElementById('scroll-bottom-btn-idea');
+        if (chatBox) chatBox.scrollTo({ top: chatBox.scrollHeight, behavior: 'smooth' });
+        if (scrollBtn) scrollBtn.classList.remove('visible');
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        var chatBox = document.getElementById('chat-messages');
+        var scrollBtn = document.getElementById('scroll-bottom-btn-idea');
+        if (chatBox && scrollBtn) {
+            chatBox.addEventListener('scroll', function() {
+                var threshold = 200;
+                var atBottom = chatBox.scrollHeight - chatBox.scrollTop - chatBox.clientHeight < threshold;
+                scrollBtn.classList.toggle('visible', !atBottom);
+            });
+        }
+    });
 
     function reapplyPage() {
         applyI18nCommon();
@@ -923,338 +1538,116 @@
         if (idea.analysis) {
             // 检测是否为多维推演报告（包含维度标记）
             var isDeepReasoning = idea.analysis.indexOf('多维深度推演报告') >= 0;
-            if (isDeepReasoning) {
-                document.getElementById('analysis-area').innerHTML = DOMPurify.sanitize(renderDeepReasoningUI(idea.analysis));
-            } else {
-                document.getElementById('analysis-area').innerHTML = DOMPurify.sanitize(
-                    '<div class="analysis-result">' + renderMarkdown(idea.analysis) + '</div>');
-            }
-        }
-
-        // T17: 权利要求树渲染 — 从 API 加载 claim_nodes 数据
-        if (idea.id) {
-            fetch('/api/idea/' + idea.id + '/claim-tree')
-                .then(function(r) { return r.json(); })
-                .then(function(data) {
-                    if (data.status === 'ok' && data.claims && data.claims.length > 0) {
-                        var html = '<div style="margin-top:20px;border:1px solid #30363d;border-radius:8px;overflow:hidden;">';
-                        html += '<div style="padding:12px 16px;background:#161b22;border-bottom:1px solid #30363d;">';
-                        html += '<h3 style="margin:0;color:#d2a8ff;">📋 ' + (i18nLang === 'en' ? 'Claim Tree Analysis' : '权利要求树分析') + '</h3></div>';
-                        html += '<div style="padding:16px;">';
-                        data.claims.forEach(function(claim) {
-                            var typeLabel = claim.claim_type === 'independent'
-                                ? '<span style="color:#3fb950;font-size:0.8em;">独立</span>'
-                                : '<span style="color:#8b949e;font-size:0.8em;">从属</span>';
-                            html += '<div style="margin-bottom:12px;padding:10px;background:#0d1117;border-radius:6px;">';
-                            html += '<div style="font-weight:600;color:#f0f6fc;">权利要求 ' + claim.claim_number + ' ' + typeLabel + '</div>';
-                            html += '<div style="color:#c9d1d9;margin-top:4px;line-height:1.6;">' + esc(claim.content) + '</div>';
-                            if (claim.features && claim.features.length > 0) {
-                                html += '<div style="margin-top:8px;padding-left:12px;border-left:2px solid #30363d;">';
-                                html += '<div style="color:#8b949e;font-size:0.85em;margin-bottom:4px;">必要技术特征：</div>';
-                                claim.features.forEach(function(f) {
-                                    var flag = f.novelty_flag ? '<span style="color:#f85149;font-weight:600;">[新] </span>' : '';
-                                    html += '<div style="color:#c9d1d9;padding:2px 0;">' + flag + esc(f.description) + '</div>';
-                                });
-                                html += '</div>';
-                            }
-                            html += '</div>';
-                        });
-                        html += '</div></div>';
-                        var claimArea = document.getElementById('claim-tree-content');
-                        if (claimArea) claimArea.innerHTML = DOMPurify.sanitize(html);
-                    }
-                })
-                .catch(function() { /* claim-tree API 不存在或出错，静默忽略 */ });
-        }
-
-        let findingsHtml = '';
-        const webResults = idea.web_results || [];
-        if (webResults.length > 0) {
-            findingsHtml += '<div class="findings-section"><h3>' + t('idea.webResults') + '</h3>';
-            webResults.forEach(function(r) {
-                findingsHtml += '<div class="finding-card">' +
-                    '<div class="title">' + esc(r.title) + '</div>' +
-                    '<div class="snippet">' + esc(r.snippet) + '</div>' +
-                    (r.link ? '<a href="' + esc(r.link) + '" target="_blank" rel="noopener">🔗</a>' : '') +
-                    '</div>';
-            });
-            findingsHtml += '</div>';
-        }
-
-        const patentResults = idea.patent_results || [];
-        if (patentResults.length > 0) {
-            findingsHtml += '<div class="findings-section"><h3>' + t('idea.patentResults') + '</h3>';
-            patentResults.forEach(function(p) {
-                const sourceTag = p.source === 'google_patents'
-                    ? '<span class="source-tag">Google Patents</span>'
-                    : p.source === 'local'
-                    ? '<span class="source-tag">Local</span>'
-                    : '';
-                findingsHtml += '<div class="finding-card">' +
-                    '<div class="title">[' + esc(p.patent_number) + '] ' + esc(p.title) + ' ' + sourceTag + '</div>' +
-                    '<div class="snippet">' + esc(p.applicant || '') + ' | ' + esc(p.filing_date || '') + '<br>' + esc((p.abstract || '').substring(0, 200)) + '</div>' +
-                    '</div>';
-            });
-            findingsHtml += '</div>';
-        }
-        document.getElementById('findings-area').innerHTML = DOMPurify.sanitize(findingsHtml);
-
-        // 加载证据链 / Load evidence chain
-        loadEvidenceChain(idea.id);
-        // 加载关键发现 / Load key findings
-        loadKeyFindings(idea.id);
-        // 加载特征卡片 / Load feature cards
-        loadFeatureCards(idea.id);
-        // 加载报告 Tab / Load report tab
-        loadReportTab(idea.id, currentReportType);
-    }
-
-    async function loadEvidenceChain(ideaId) {
-        var panel = document.getElementById('evidence-panel');
-        var list = document.getElementById('evidence-list');
-        var countEl = document.getElementById('evidence-count');
-        try {
-            var resp = await fetch('/api/idea/' + ideaId + '/evidence');
-            if (!resp.ok) { list.innerHTML = '<p style="color:#8b949e;">暂无证据链数据</p>'; return; }
-            var data = await resp.json();
-            if (data.status !== 'ok' || !data.evidence || data.evidence.length === 0) {
-                list.innerHTML = '<p style="color:#8b949e;">暂无证据链数据</p>';
-                return;
-            }
-            countEl.textContent = data.evidence.length;
-            list.innerHTML = '';
-            data.evidence.forEach(function(ev) {
-                var card = document.createElement('div');
-                card.style.cssText = 'margin-bottom:8px;padding:10px;background:#0d1117;border:1px solid #30363d;border-radius:6px;';
-
-                // 置信度标签颜色
-                var confColor = ev.confidence >= 0.7 ? '#3fb950' : ev.confidence >= 0.3 ? '#d29922' : '#f85149';
-                var confPct = Math.round(ev.confidence * 100);
-
-                // 关系标签
-                var relLabel = ev.relation === 'supports' ? '支撑' : ev.relation === 'contradicts' ? '矛盾' : '部分相关';
-                var relColor = ev.relation === 'supports' ? '#3fb950' : ev.relation === 'contradicts' ? '#f85149' : '#d29922';
-
-                var header = document.createElement('div');
-                header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;';
-
-                var claimSpan = document.createElement('span');
-                claimSpan.style.cssText = 'color:#c9d1d9;font-size:0.9em;font-weight:bold;flex:1;';
-                claimSpan.textContent = ev.claim;
-
-                var badges = document.createElement('span');
-                badges.style.cssText = 'display:flex;gap:6px;flex-shrink:0;';
-                badges.innerHTML = DOMPurify.sanitize(
-                    '<span style="background:' + confColor + '22;color:' + confColor + ';padding:1px 6px;border-radius:3px;font-size:0.75em;">' + confPct + '%</span>' +
-                    '<span style="background:' + relColor + '22;color:' + relColor + ';padding:1px 6px;border-radius:3px;font-size:0.75em;">' + relLabel + '</span>'
-                );
-
-                header.appendChild(claimSpan);
-                header.appendChild(badges);
-                card.appendChild(header);
-
-                // 摘录
-                if (ev.excerpt) {
-                    var excerptDiv = document.createElement('div');
-                    excerptDiv.style.cssText = 'color:#8b949e;font-size:0.82em;line-height:1.4;margin-bottom:4px;';
-                    excerptDiv.textContent = ev.excerpt.length > 200 ? ev.excerpt.substring(0, 200) + '...' : ev.excerpt;
-                    card.appendChild(excerptDiv);
-                }
-
-                // 来源
-                var meta = document.createElement('div');
-                meta.style.cssText = 'color:#6e7681;font-size:0.75em;';
-                if (ev.source_url) {
-                    var link = document.createElement('a');
-                    link.href = ev.source_url;
-                    link.target = '_blank';
-                    link.style.color = '#58a6ff';
-                    link.textContent = ev.source_title;
-                    meta.appendChild(link);
-                } else {
-                    meta.textContent = ev.source_title;
-                }
-                var stepSpan = document.createElement('span');
-                stepSpan.textContent = ' | ' + ev.produced_by;
-                meta.appendChild(stepSpan);
-                card.appendChild(meta);
-
-                list.appendChild(card);
-            });
-        } catch(e) {
-            panel.style.display = 'none';
-        }
-    }
-
-    async function openReport(ideaId, reportType) {
-        if (reportType === 'full') {
-            window.open('/api/idea/' + ideaId + '/report.html', '_blank');
-            return;
-        }
-        try {
-            var resp = await fetch('/api/idea/' + ideaId + '/report?type=' + reportType);
-            if (!resp.ok) { alert('获取报告失败'); return; }
-            var data = await resp.json();
-            if (data.status !== 'ok') { alert(data.message || '获取报告失败'); return; }
-            var typeLabel = reportType === 'executive' ? '精简版报告' : '技术版报告';
-            var w = window.open('', '_blank');
-            w.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8">' +
-                '<title>' + typeLabel + '</title>' +
-                '<style>body{font-family:-apple-system,sans-serif;max-width:800px;margin:40px auto;padding:0 20px;background:#0d1117;color:#c9d1d9;line-height:1.7;}' +
-                'h1,h2,h3{color:#58a6ff;}h1{border-bottom:1px solid #30363d;padding-bottom:8px;}' +
-                'strong{color:#f0f6fc;}p{margin:8px 0;}' +
-                '@media print{body{background:#fff;color:#000;}h1,h2,h3{color:#1f2937;}strong{color:#000;}}</style></head><body>');
-            // Simple markdown to HTML: headers, bold, list items
-            var md = data.report || '';
-            var html = md.replace(/^### (.+)$/gm, '<h3>$1</h3>')
-                .replace(/^## (.+)$/gm, '<h2>$1</h2>')
-                .replace(/^# (.+)$/gm, '<h1>$1</h1>')
-                .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-                .replace(/^- (.+)$/gm, '<li>$1</li>')
-                .replace(/\n/g, '<br>');
-            w.document.write(html);
-            w.document.write('<hr style="border-color:#30363d;margin-top:30px;"><p style="color:#6e7681;font-size:0.85em;">InnoForge 创研台 · ' + typeLabel + ' · ' + new Date().toLocaleDateString() + '</p>');
-            w.document.write('</body></html>');
-            w.document.close();
-        } catch(e) {
-            alert('获取报告失败: ' + e.message);
-        }
-    }
-
-    // ── 报告 Tab 功能 ──────────────────────────────────────
-    var currentReportType = 'full';
-
-    function switchReportType(rtype) {
-        currentReportType = rtype;
-        document.querySelectorAll('.report-type-btn').forEach(function(btn) {
-            if (btn.getAttribute('data-rtype') === rtype) {
-                btn.style.background = '#1f6feb';
-                btn.style.color = '#fff';
-                btn.classList.add('active');
-            } else {
-                btn.style.background = '#21262d';
-                btn.style.color = '#8b949e';
-                btn.classList.remove('active');
-            }
-        });
-        if (currentIdeaId) loadReportTab(currentIdeaId, rtype);
-    }
-
-    async function loadReportTab(ideaId, reportType) {
-        var content = document.getElementById('report-content');
-        var openBtn = document.getElementById('report-open-btn');
-        if (!content) return;
-        content.innerHTML = '<p style="color:#58a6ff;"><span class="spinner"></span> 加载中...</p>';
-        try {
-            var url = '/api/idea/' + encodeURIComponent(ideaId) + '/report';
-            if (reportType && reportType !== 'full') url += '?type=' + reportType;
-            var resp = await fetch(url);
-            if (!resp.ok) { content.innerHTML = '<p style="color:#f85149;">获取报告失败 (' + resp.status + ')</p>'; return; }
-            var data = await resp.json();
-            if (data.status === 'ok') {
-                var reportText = data.report || data.analysis || '';
-                content.innerHTML = DOMPurify.sanitize('<div class="analysis-result">' + renderMarkdown(reportText) + '</div>');
-                if (openBtn) openBtn.style.display = 'inline-block';
-            } else {
-                content.innerHTML = '<p style="color:#8b949e;">' + (data.message || '暂无报告') + '</p>';
-                if (openBtn) openBtn.style.display = 'none';
-            }
-        } catch(e) {
-            content.innerHTML = '<p style="color:#f85149;">加载失败: ' + esc(e.message) + '</p>';
-        }
-    }
-
-    function openReportInNewTab() {
-        if (!currentIdeaId) return;
-        if (currentReportType === 'full') {
-            window.open('/api/idea/' + encodeURIComponent(currentIdeaId) + '/report.html', '_blank');
+            // 渲染概览页正文（分析报告 + 检索结果）
+            renderOverview(idea);
         } else {
-            openReport(currentIdeaId, currentReportType);
+            renderOverview(idea);
         }
     }
 
-    async function loadKeyFindings(ideaId) {
-        var panel = document.getElementById('key-findings-panel');
-        var list = document.getElementById('key-findings-list');
-        var countEl = document.getElementById('key-findings-count');
+    // ========== Memory (记忆) functions ==========
+
+    function getTypeLabel(type) {
+        var map = {
+            'domain_concept': '<span style="color:#58a6ff">📊 领域概念</span>',
+            'decision': '<span style="color:#3fb950">🔖 决策</span>',
+            'pattern': '<span style="color:#f85149">⚡ 创新模式</span>',
+            'question': '<span style="color:#f0883e">❓ 开放问题</span>'
+        };
+        return map[type] || '<span>' + type + '</span>';
+    }
+
+    function getTypeIcon(type) {
+        var map = { 'domain_concept': '📊', 'decision': '🔖', 'pattern': '⚡', 'question': '❓' };
+        return map[type] || '📄';
+    }
+
+    function showMemoryForm() {
+        document.getElementById('memory-add-form').style.display = 'block';
+    }
+
+    function hideMemoryForm() {
+        document.getElementById('memory-add-form').style.display = 'none';
+        document.getElementById('mem-concept-name').value = '';
+        document.getElementById('mem-content').value = '';
+        document.getElementById('mem-confidence').value = '0.5';
+    }
+
+    async function addMemoryEntry() {
+        var name = document.getElementById('mem-concept-name').value.trim();
+        var type = document.getElementById('mem-concept-type').value;
+        var confidence = parseFloat(document.getElementById('mem-confidence').value) || 0.5;
+        var content = document.getElementById('mem-content').value.trim();
+        if (!name || !content) { alert('concept name and description required'); return; }
+        if (!currentIdeaId) return;
+
+        var resp = await fetch('/api/idea/' + encodeURIComponent(currentIdeaId) + '/memory', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ concept_name: name, concept_type: type, confidence: confidence, content: content })
+        });
+        var data = await resp.json();
+        if (data.status === 'ok') { hideMemoryForm(); loadMemory(); }
+        else { alert('Failed: ' + data.message); }
+    }
+
+    async function loadMemory() {
+        if (!currentIdeaId) return;
+        var listEl = document.getElementById('memory-list');
+        listEl.innerHTML = '<p class="muted">Loading...</p>';
+
         try {
-            var resp = await fetch('/api/idea/' + ideaId + '/findings');
-            if (!resp.ok) { panel.style.display = 'none'; return; }
+            var resp = await fetch('/api/idea/' + encodeURIComponent(currentIdeaId) + '/memory');
+            if (!resp.ok) { listEl.innerHTML = '<p class="muted">Load failed</p>'; return; }
             var data = await resp.json();
-            if (data.status !== 'ok' || !data.findings || data.findings.length === 0) {
-                panel.style.display = 'none';
-                return;
-            }
-            panel.style.display = 'block';
-            countEl.textContent = data.findings.length;
-            list.innerHTML = '';
+            if (data.status !== 'ok' || !data.entries) { listEl.innerHTML = '<p class="muted">No memory</p>'; return; }
 
-            var typeIcons = { discovery: '💡', dead_end: '🚫', insight: '🧠', experiment_result: '🧪' };
-            var typeLabels = { discovery: '发现', dead_end: '死胡同', insight: '洞察', experiment_result: '实验结果' };
-            var typeColors = { discovery: '#3fb950', dead_end: '#f85149', insight: '#d2a8ff', experiment_result: '#58a6ff' };
+            var filter = document.getElementById('memory-filter').value;
+            var filtered = filter === 'all' ? data.entries : data.entries.filter(function(e) { return e.concept_type === filter; });
 
-            data.findings.forEach(function(f) {
-                var card = document.createElement('div');
-                card.className = 'finding-card';
+            document.getElementById('memory-count').textContent = data.entries.length;
+            var counts = data.counts && data.counts.by_type ? data.counts.by_type : {};
+            document.getElementById('mem-stat-concept').textContent = counts.domain_concept || 0;
+            document.getElementById('mem-stat-decision').textContent = counts.decision || 0;
+            document.getElementById('mem-stat-pattern').textContent = counts.pattern || 0;
+            document.getElementById('mem-stat-question').textContent = counts.question || 0;
 
-                var icon = typeIcons[f.finding_type] || '📌';
-                var label = typeLabels[f.finding_type] || f.finding_type;
-                var color = typeColors[f.finding_type] || '#8b949e';
+            if (filtered.length === 0) { listEl.innerHTML = '<p class="muted">No entries</p>'; return; }
 
-                var header = document.createElement('div');
-                header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;';
-                var titleSpan = document.createElement('span');
-                titleSpan.className = 'title';
-                titleSpan.textContent = icon + ' ' + (f.title || '');
-                var badge = document.createElement('span');
-                badge.style.cssText = 'background:' + color + '22;color:' + color + ';padding:1px 8px;border-radius:3px;font-size:0.75em;';
-                badge.textContent = label;
-                header.appendChild(titleSpan);
-                header.appendChild(badge);
-                card.appendChild(header);
-
-                if (f.content) {
-                    var contentDiv = document.createElement('div');
-                    contentDiv.className = 'snippet';
-                    contentDiv.textContent = f.content.length > 300 ? f.content.substring(0, 300) + '...' : f.content;
-                    card.appendChild(contentDiv);
-                }
-
-                if (f.source_step) {
-                    var meta = document.createElement('div');
-                    meta.style.cssText = 'color:#6e7681;font-size:0.75em;margin-top:4px;';
-                    meta.textContent = '来源步骤: ' + f.source_step;
-                    card.appendChild(meta);
-                }
-
-                list.appendChild(card);
+            listEl.innerHTML = '';
+            filtered.forEach(function(entry) {
+                var row = document.createElement('div');
+                row.style.cssText = 'padding:10px 14px;margin-bottom:6px;background:#161b22;border:1px solid #30363d;border-radius:6px;';
+                var delBtn = '<button style="padding:3px 8px;background:#f85149;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:11px;" onclick="deleteMemory(\'' + currentIdeaId + '\',\'' + entry.id.replace(/\'/g, "\\\\'") + '\')">Delete</button>';
+                row.innerHTML = DOMPurify.sanitize(
+                    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">' +
+                    '<div style="display:flex;align-items:center;gap:8px;">' +
+                    '<span style="font-size:1.1em;">' + getTypeIcon(entry.concept_type) + '</span>' +
+                    '<span style="font-weight:600;color:#f0f6fc;">' + esc(entry.concept_name) + '</span>' +
+                    '<span style="font-size:0.8em;">' + getTypeLabel(entry.concept_type) + '</span>' +
+                    '</div>' +
+                    '<div style="display:flex;align-items:center;gap:10px;">' +
+                    '<span style="font-size:0.8em;color:#8b949e;">confidence ' + (entry.confidence || 0).toFixed(2) + '</span>' +
+                    '<span style="font-size:0.75em;color:#484f58;">' + (entry.source_step || '') + '</span>' +
+                    delBtn +
+                    '</div></div>' +
+                    '<div style="color:#c9d1d9;line-height:1.6;font-size:0.9em;padding-left:24px;">' + esc(entry.content) + '</div>' +
+                    '<div style="font-size:0.75em;color:#484f58;padding-left:24px;margin-top:4px;">' + (entry.created_at ? entry.created_at.substring(0, 16).replace('T', ' ') : '') + '</div>'
+                );
+                listEl.appendChild(row);
             });
         } catch(e) {
-            panel.style.display = 'none';
+            listEl.innerHTML = '<p class="muted">Load failed: ' + e.message + '</p>';
         }
     }
 
-    async function loadFeatureCards(ideaId) {
-        var list = document.getElementById('feature-cards-list');
-        try {
-            var resp = await fetch('/api/ideas/' + ideaId + '/feature-cards');
-            if (!resp.ok) return;
-            var data = await resp.json();
-            if (data.status !== 'ok' || !data.cards || data.cards.length === 0) {
-                list.innerHTML = '<p style="color:#8b949e;">暂无特征卡片</p>';
-                return;
-            }
-            list.innerHTML = '';
-            data.cards.forEach(function(c) {
-                var card = document.createElement('div');
-                card.style.cssText = 'margin-bottom:8px;padding:10px;background:#0d1117;border:1px solid #30363d;border-radius:6px;';
-                var scoreHtml = c.novelty_score != null ? '<span style="color:#3fb950;font-size:0.8em;float:right;">新颖性: ' + Math.round(c.novelty_score) + '</span>' : '';
-                card.innerHTML = DOMPurify.sanitize('<div style="font-weight:600;color:#f0f6fc;">' + esc(c.title) + scoreHtml + '</div>' +
-                    '<div style="color:#8b949e;font-size:0.85em;margin-top:4px;">' + esc(c.description || '') + '</div>');
-                list.appendChild(card);
-            });
-        } catch(e) {}
+    async function deleteMemory(ideaId, entryId) {
+        if (!confirm('Delete this memory?')) return;
+        var resp = await fetch('/api/idea/' + encodeURIComponent(ideaId) + '/memory/' + encodeURIComponent(entryId), { method: 'DELETE' });
+        if (resp.ok) { loadMemory(); } else { alert('Delete failed'); }
     }
+
+    // ── 通用工具函数（恢复自历史版本 3a50c49，被 9f1a14b 误删）──
 
     function showStatus(type, msg) {
         document.getElementById('status-area').innerHTML = DOMPurify.sanitize(
@@ -1286,185 +1679,9 @@
     function showNewIdeaForm() {
         clearForm();
         document.getElementById('idea-form').style.display = '';
-        var resultsArea = document.getElementById('results-area');
-        if (resultsArea) resultsArea.style.display = 'none';
         var titleEl = document.getElementById('idea-title');
         if (titleEl) titleEl.focus();
-        // Update URL without reload
         window.history.pushState({}, '', '/idea');
-    }
-
-    async function loadHistory() {
-        try {
-            const resp = await fetch('/api/idea/list');
-            if (!resp.ok) return;
-            const data = await resp.json();
-            if (data.status !== 'ok' || !data.ideas || !data.ideas.length) {
-                var emptyHint = document.createElement('p');
-                emptyHint.className = 'hint';
-                emptyHint.style.fontSize = '0.85em';
-                emptyHint.textContent = t('idea.historyEmpty');
-                var histList = document.getElementById('history-list');
-                histList.innerHTML = '';
-                histList.appendChild(emptyHint);
-                return;
-            }
-
-            const list = document.getElementById('history-list');
-            list.innerHTML = '';
-            data.ideas.forEach(function(idea) {
-                const scoreClass = idea.novelty_score == null ? '' :
-                    idea.novelty_score >= 70 ? 'score-high' : idea.novelty_score >= 40 ? 'score-mid' : 'score-low';
-                const scoreText = idea.novelty_score != null ? idea.novelty_score : '-';
-                const active = idea.id === currentIdeaId ? ' active' : '';
-                var dt = toCST(idea.created_at);
-                var dateStr = dt.substring(0, 10);
-                var timeStr = dt.substring(11, 16);
-                var snippet = (idea.description || '').substring(0, 40);
-                if ((idea.description || '').length > 40) snippet += '…';
-                var chatBadge = idea.message_count > 0 ? ' 💬' + idea.message_count : '';
-
-                var item = document.createElement('div');
-                item.className = 'history-item' + active;
-                item.style.position = 'relative';
-
-                var clickDiv = document.createElement('div');
-                clickDiv.style.cursor = 'pointer';
-                clickDiv.setAttribute('data-idea-id', idea.id);
-                clickDiv.addEventListener('click', function() { loadIdea(idea.id); });
-
-                var titleDiv = document.createElement('div');
-                titleDiv.className = 'history-title';
-                titleDiv.style.display = 'flex';
-                titleDiv.style.alignItems = 'center';
-                titleDiv.style.gap = '6px';
-                var statusDot = document.createElement('span');
-                var st = idea.status || '';
-                var dotColor = st === 'completed' ? '#3fb950' : st === 'analyzing' ? '#d29922' : st === 'failed' ? '#f85149' : '#8b949e';
-                statusDot.style.cssText = 'width:7px;height:7px;border-radius:50%;flex-shrink:0;background:' + dotColor;
-                if (st === 'analyzing') statusDot.style.animation = 'pulse 1.5s infinite';
-                titleDiv.appendChild(statusDot);
-                var titleText = document.createElement('span');
-                titleText.textContent = idea.title;
-                titleText.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
-                titleDiv.appendChild(titleText);
-                clickDiv.appendChild(titleDiv);
-
-                if (snippet) {
-                    var snippetDiv = document.createElement('div');
-                    snippetDiv.style.cssText = 'font-size:0.78em;color:#8b949e;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
-                    snippetDiv.textContent = snippet;
-                    clickDiv.appendChild(snippetDiv);
-                }
-
-                var metaDiv = document.createElement('div');
-                metaDiv.className = 'history-meta';
-                var dateSpan = document.createElement('span');
-                dateSpan.textContent = dateStr + ' ' + timeStr;
-                var scoreSpan = document.createElement('span');
-                scoreSpan.innerHTML = DOMPurify.sanitize(chatBadge + ' <span class="score-badge ' + scoreClass + '">' + scoreText + '</span>');
-                metaDiv.appendChild(dateSpan);
-                metaDiv.appendChild(scoreSpan);
-                clickDiv.appendChild(metaDiv);
-
-                item.appendChild(clickDiv);
-
-                var delBtn = document.createElement('button');
-                delBtn.style.cssText = 'position:absolute;top:4px;right:4px;background:none;border:none;color:#484f58;cursor:pointer;font-size:0.8em;padding:2px 6px;';
-                delBtn.title = '删除';
-                delBtn.textContent = '✕';
-                delBtn.addEventListener('click', function(e) { e.stopPropagation(); deleteIdea(idea.id, idea.title); });
-                item.appendChild(delBtn);
-
-                list.appendChild(item);
-            });
-        } catch (e) {
-            console.error('Failed to load history:', e);
-        }
-    }
-
-    async function deleteIdea(id, title) {
-        if (!confirm('确定删除「' + title + '」及其所有讨论记录？')) return;
-        try {
-            const resp = await fetch('/api/idea/' + encodeURIComponent(id) + '/delete', { method: 'POST' });
-            let data = null;
-            try {
-                data = await resp.json();
-            } catch (_) {
-                data = { status: 'error', message: await resp.text() };
-            }
-            if (data.status === 'ok') {
-                if (currentIdeaId === id) {
-                    currentIdeaId = null;
-                    document.getElementById('idea-title').value = '';
-                    document.getElementById('idea-desc').value = '';
-                    document.getElementById('score-area').innerHTML = '';
-                    document.getElementById('analysis-area').innerHTML = '';
-                    document.getElementById('chat-messages').innerHTML = '';
-                }
-                loadHistory();
-            } else {
-                alert((data && data.message) ? data.message : ('删除失败（HTTP ' + resp.status + '）'));
-            }
-        } catch(e) {
-            alert('请求失败: ' + e.message);
-        }
-    }
-
-    async function loadIdea(id) {
-        try {
-            const resp = await fetch('/api/idea/' + encodeURIComponent(id));
-            if (!resp.ok) return;
-            const data = await resp.json();
-            if (data.status !== 'ok') return;
-
-            currentIdeaId = id;
-            await ideaCadController.restore();
-            const idea = data.idea;
-            var titleInput = document.getElementById('idea-title');
-            var descInput = document.getElementById('idea-desc');
-            if (titleInput) titleInput.value = idea.title || '';
-            if (descInput) descInput.value = idea.description || '';
-
-            if (idea.status === 'done') {
-                showStatus('done', t('idea.done'));
-                displayResults(idea);
-                loadVersionHistory(id);
-                showDiscussionPanel();
-            } else if (idea.status === 'error') {
-                showStatus('error', idea.analysis || t('idea.analyzeFail'));
-                // 按钮容器
-                var btnContainer = document.createElement('div');
-                btnContainer.style.cssText = 'display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;';
-                // "恢复推演"按钮（断点续跑）
-                var resumeBtn = document.createElement('button');
-                resumeBtn.textContent = i18nLang === 'en' ? 'Resume Pipeline' : '恢复推演';
-                resumeBtn.style.cssText = 'padding:8px 20px;background:#238636;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;';
-                resumeBtn.onclick = function() { resumePipeline(idea.id); };
-                btnContainer.appendChild(resumeBtn);
-                // "重新推演"按钮（从头开始）
-                var retryBtn = document.createElement('button');
-                retryBtn.textContent = i18nLang === 'en' ? 'Re-run Pipeline' : '重新推演';
-                retryBtn.style.cssText = 'padding:8px 20px;background:#1f6feb;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;';
-                retryBtn.onclick = function() { runExistingIdea(idea.id, 'deep'); };
-                btnContainer.appendChild(retryBtn);
-                document.getElementById('status-area').appendChild(btnContainer);
-                showDiscussionPanel();
-            } else {
-                showStatus('analyzing', '<span class="spinner"></span>' + t('idea.analyzing'));
-            }
-
-            document.querySelectorAll('.history-item').forEach(function(el) { el.classList.remove('active'); });
-            var clickTarget = (typeof event !== 'undefined' && event && event.target) ? event.target : null;
-            if (clickTarget) {
-                var item = clickTarget.closest('.history-item');
-                if (item) item.classList.add('active');
-            }
-
-            // 不再自动滚动，用户通过 Tab 切换查看讨论
-        } catch (e) {
-            console.error('Failed to load idea:', e);
-        }
     }
 
     function renderMarkdown(text) {
@@ -1499,6 +1716,7 @@
             .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
             .replace(/^### (.+)$/gm, '<h3>$1</h3>')
             .replace(/^## (.+)$/gm, '<h3 style="font-size:1.1em">$1</h3>')
+            .replace(/^# (.+)$/gm, '<h2>$1</h2>')
             .replace(/`([^`]+)`/g, '<code style="background:#21262d;padding:1px 5px;border-radius:3px;font-size:0.9em;">$1</code>')
             .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
             .replace(/\*(.+?)\*/g, '<em>$1</em>')
@@ -1513,443 +1731,104 @@
         return result;
     }
 
-    // ── Multi-round discussion ──────────────────────────────────────
+    function esc(s) { return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
     function showDiscussionPanel() {
         if (!currentIdeaId) return;
-        loadChatMessages();
+        loadMessages(currentIdeaId);
     }
 
-    async function loadChatMessages() {
-        if (!currentIdeaId) return;
-        try {
-            var res = await fetch('/api/idea/' + currentIdeaId + '/messages');
-            var data = await res.json();
-            var container = document.getElementById('chat-messages');
-            if (!data.messages || data.messages.length === 0) {
-                var chatHintP = document.createElement('p');
-                chatHintP.style.cssText = 'color:#8b949e; font-size:0.9em; text-align:center;';
-                chatHintP.textContent = '提出你的问题，开始讨论这个创意';
-                container.innerHTML = '';
-                container.appendChild(chatHintP);
-                ideaCadController.renderHistory();
-                return;
-            }
-            var html = '';
-            data.messages.forEach(function(msg) {
-                var isUser = msg.role === 'user';
-                var bg = isUser ? '#1f2937' : '#0d1117';
-                var border = isUser ? '#30363d' : '#1f6feb';
-                var label = isUser ? '👤 你' : '🤖 AI';
-                var time = msg.created_at ? toCST(msg.created_at).substring(5, 16) : '';
-                html += '<div class="msg" style="margin-bottom:10px; padding:10px 14px; background:' + bg + '; border-radius:8px; border-left:3px solid ' + border + ';">' +
-                    '<div style="display:flex; justify-content:space-between; margin-bottom:4px;">' +
-                    '<span style="font-size:0.8em; color:#58a6ff; font-weight:bold;">' + label + '</span>' +
-                    '<span style="font-size:0.75em; color:#8b949e;">' + esc(time) + '</span></div>' +
-                    '<div style="color:#c9d1d9; white-space:pre-wrap; line-height:1.6; font-size:0.92em;">' + renderMarkdown(msg.content) + '</div></div>';
-            });
-            container.innerHTML = DOMPurify.sanitize(html);
-            ideaCadController.renderHistory();
-            container.scrollTop = container.scrollHeight;
-        } catch (e) {
-            console.error('Failed to load messages:', e);
-        }
+    // ── 报告 Tab 功能（恢复）──
 
-        // Also load summary if exists
-        try {
-            var ideaRes = await fetch('/api/idea/' + currentIdeaId);
-            var ideaData = await ideaRes.json();
-            var sumDiv = document.getElementById('discussion-summary');
-            if (ideaData.discussion_summary && ideaData.discussion_summary.length > 0) {
-                sumDiv.style.display = 'block';
-                sumDiv.innerHTML = DOMPurify.sanitize('<div style="font-size:0.8em; color:#58a6ff; margin-bottom:4px; font-weight:bold;">📋 讨论总结</div>' +
-                    '<div style="color:#c9d1d9; font-size:0.9em; line-height:1.6;">' + renderMarkdown(ideaData.discussion_summary) + '</div>');
-            } else {
-                sumDiv.style.display = 'none';
-            }
-        } catch(e) {}
-    }
+    var currentReportType = 'full';
 
-    var chatAttachedFiles = [];
-
-    // 粘贴图片支持（读取为 base64 用于多模态 AI）
-    var ideaPastedImages = [];
-
-    document.getElementById('chat-input').addEventListener('paste', function(e) {
-        var items = (e.clipboardData || window.clipboardData).items;
-        for (var i = 0; i < items.length; i++) {
-            if (items[i].type.indexOf('image') === 0) {
-                e.preventDefault();
-                var file = items[i].getAsFile();
-                if (!file) continue;
-                var reader = new FileReader();
-                reader.onload = function(ev) {
-                    var base64 = ev.target.result.split(',')[1];
-                    ideaPastedImages.push(base64);
-                    showIdeaImagePreview();
-                };
-                reader.readAsDataURL(file);
-                break;
-            }
-        }
-    });
-
-    function showIdeaImagePreview() {
-        var area = document.getElementById('idea-image-preview-area');
-        area.innerHTML = '';
-        if (ideaPastedImages.length === 0) {
-            area.style.display = 'none';
+    async function openReport(ideaId, reportType) {
+        if (reportType === 'full') {
+            window.open('/api/idea/' + ideaId + '/report.html', '_blank');
             return;
         }
-        area.style.display = 'flex';
-        for (var i = 0; i < ideaPastedImages.length; i++) {
-            var thumb = document.createElement('div');
-            thumb.style.cssText = 'position:relative; display:inline-block;';
-            thumb.innerHTML = '<img src="data:image/png;base64,' + ideaPastedImages[i] + '" style="max-width:80px; max-height:80px; border-radius:6px; border:1px solid rgba(255,255,255,0.08); object-fit:cover;">'
-                + '<span onclick="removeIdeaImage(' + i + ')" style="position:absolute; top:-6px; right:-6px; width:18px; height:18px; border-radius:50%; background:#f85149; color:#fff; font-size:14px; line-height:18px; text-align:center; cursor:pointer; border:2px solid #0d1117;">&times;</span>';
-            area.appendChild(thumb);
+        try {
+            var resp = await fetch('/api/idea/' + ideaId + '/report?type=' + reportType);
+            if (!resp.ok) { alert('获取报告失败'); return; }
+            var data = await resp.json();
+            if (data.status !== 'ok') { alert(data.message || '获取报告失败'); return; }
+            var typeLabel = reportType === 'executive' ? '精简版报告' : '技术版报告';
+            var w = window.open('', '_blank');
+            w.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8">' +
+                '<title>' + typeLabel + '</title>' +
+                '<style>body{font-family:-apple-system,sans-serif;max-width:800px;margin:40px auto;padding:0 20px;background:#0d1117;color:#c9d1d9;line-height:1.7;}' +
+                'h1,h2,h3{color:#58a6ff;}h1{border-bottom:1px solid #30363d;padding-bottom:8px;}' +
+                'strong{color:#f0f6fc;}p{margin:8px 0;}' +
+                '@media print{body{background:#fff;color:#000;}h1,h2,h3{color:#1f2937;}strong{color:#000;}}</style></head><body>');
+            var md = data.report || '';
+            var html = md.replace(/^### (.+)$/gm, '<h3>$1</h3>')
+                .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+                .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+                .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                .replace(/^- (.+)$/gm, '<li>$1</li>')
+                .replace(/\n/g, '<br>');
+            w.document.write(html);
+            w.document.write('<hr style="border-color:#30363d;margin-top:30px;"><p style="color:#6e7681;font-size:0.85em;">InnoForge 创研台 · ' + typeLabel + ' · ' + new Date().toLocaleDateString() + '</p>');
+            w.document.write('</body></html>');
+            w.document.close();
+        } catch(e) {
+            alert('获取报告失败: ' + e.message);
         }
     }
 
-    
-    // ── 选中文字引用功能 ──
-    var ideaQuoteBtn = null;
-    var ideaSelectedQuoteText = '';
-
-    function createIdeaQuoteButton() {
-        var btn = document.createElement('div');
-        btn.className = 'quote-btn';
-        btn.textContent = t('ai.quote');
-        btn.addEventListener('click', function(e) {
-            e.stopPropagation();
-            ideaInsertQuote();
+    function switchReportType(rtype) {
+        currentReportType = rtype;
+        document.querySelectorAll('.report-type-btn').forEach(function(btn) {
+            if (btn.getAttribute('data-rtype') === rtype) {
+                btn.style.background = '#1f6feb';
+                btn.style.color = '#fff';
+                btn.classList.add('active');
+            } else {
+                btn.style.background = '#21262d';
+                btn.style.color = '#8b949e';
+                btn.classList.remove('active');
+            }
         });
-        document.getElementById('chat-messages').appendChild(btn);
-        return btn;
+        if (currentIdeaId) loadReportTab(currentIdeaId, rtype);
     }
 
-    function getIdeaQuoteBtn() {
-        if (!ideaQuoteBtn) ideaQuoteBtn = createIdeaQuoteButton();
-        return ideaQuoteBtn;
-    }
-
-    function showIdeaQuoteButton(text, rect) {
-        var btn = getIdeaQuoteBtn();
-        ideaSelectedQuoteText = text;
-        var container = document.getElementById('chat-messages');
-        var cr = container.getBoundingClientRect();
-        var left = rect.right - cr.left - btn.offsetWidth / 2;
-        var top = rect.top - cr.top - 36;
-        left = Math.max(4, Math.min(left, cr.width - btn.offsetWidth - 4));
-        top = Math.max(4, top);
-        btn.style.left = left + 'px';
-        btn.style.top = top + 'px';
-        btn.style.display = 'block';
-    }
-
-    function hideIdeaQuoteButton() {
-        var btn = getIdeaQuoteBtn();
-        btn.style.display = 'none';
-        ideaSelectedQuoteText = '';
-    }
-
-    function ideaInsertQuote() {
-        if (!ideaSelectedQuoteText) return;
-        var textarea = document.getElementById('chat-input');
-        var quoted = ideaSelectedQuoteText.split('\n').map(function(line) {
-            return '> ' + line;
-        }).join('\n') + '\n\n';
-        var start = textarea.selectionStart;
-        var end = textarea.selectionEnd;
-        var before = textarea.value.substring(0, start);
-        var after = textarea.value.substring(end);
-        textarea.value = before + quoted + after;
-        var newPos = start + quoted.length;
-        textarea.selectionStart = textarea.selectionEnd = newPos;
-        textarea.focus();
-        hideIdeaQuoteButton();
-    }
-
-    // 文本选择检测
-    var ideaChatMsgContainer = document.getElementById('chat-messages');
-    if (ideaChatMsgContainer) {
-        ideaChatMsgContainer.addEventListener('mouseup', function(e) {
-            var target = e.target;
-            if (target && target.nodeType === 3) target = target.parentNode;
-            if (target && target.closest && target.closest('.quote-btn')) return;
-            setTimeout(function() {
-                var sel = window.getSelection();
-                var text = sel ? sel.toString().trim() : '';
-                if (!text) { hideIdeaQuoteButton(); return; }
-                var node = sel.anchorNode;
-                if (node) {
-                    if (node.nodeType === 3) node = node.parentNode;
-                    if (!node.closest('.msg')) { hideIdeaQuoteButton(); return; }
+    async function loadReportTab(ideaId, reportType) {
+        var content = document.getElementById('report-content');
+        var openBtn = document.getElementById('report-open-btn');
+        if (!content) return;
+        content.innerHTML = '<p style="color:#58a6ff;"><span class="spinner"></span> 加载中...</p>';
+        try {
+            var url = '/api/idea/' + encodeURIComponent(ideaId) + '/report';
+            if (reportType && reportType !== 'full') url += '?type=' + reportType;
+            var resp = await fetch(url);
+            if (!resp.ok) { content.innerHTML = '<p style="color:#f85149;">获取报告失败 (' + resp.status + ')</p>'; return; }
+            var data = await resp.json();
+            if (data.status === 'ok') {
+                var reportText = data.report || data.analysis || '';
+                if (reportType === 'full' && typeof data.report === 'object') {
+                    reportText = data.report.analysis || '';
                 }
-                if (!sel.rangeCount) return;
-                var range = sel.getRangeAt(0);
-                var rect = range.getBoundingClientRect();
-                if (!rect || (rect.width === 0 && rect.height === 0)) { hideIdeaQuoteButton(); return; }
-                showIdeaQuoteButton(text, rect);
-            }, 10);
-        });
-    }
-
-    document.addEventListener('mousedown', function(e) {
-        if (e.target && e.target.closest && e.target.closest('.quote-btn')) return;
-        hideIdeaQuoteButton();
-    });
-
-    document.addEventListener('keydown', function(e) {
-        if (e.key === 'Escape') hideIdeaQuoteButton();
-    });
-
-    // 滚动时隐藏引用按钮
-    var ideaScrollContainer = document.getElementById('chat-messages');
-    if (ideaScrollContainer) {
-        ideaScrollContainer.addEventListener('scroll', function() {
-            hideIdeaQuoteButton();
-        });
-    }
-
-function removeIdeaImage(idx) {
-        ideaPastedImages.splice(idx, 1);
-        showIdeaImagePreview();
-    }
-
-    function renderChatAttachments() {
-        var container = document.getElementById('chat-attachments');
-        if (chatAttachedFiles.length === 0) {
-            container.style.display = 'none';
-            container.innerHTML = '';
-            return;
-        }
-        container.style.display = 'block';
-        container.innerHTML = '';
-        chatAttachedFiles.forEach(function(f, i) {
-            var icon = f.type.startsWith('image/') ? '🖼️' : '📄';
-            var size = (f.size / 1024).toFixed(1) + 'KB';
-            var span = document.createElement('span');
-            span.style.cssText = 'display:inline-flex;align-items:center;gap:4px;background:#21262d;padding:3px 8px;border-radius:4px;margin:2px;color:#8b949e;';
-            span.textContent = icon + ' ' + f.name + ' (' + size + ')';
-            // 图片预览缩略图
-            if (f.type.startsWith('image/')) {
-                var thumb = document.createElement('img');
-                thumb.style.cssText = 'height:20px;border-radius:2px;margin-right:2px;';
-                thumb.src = URL.createObjectURL(f);
-                span.insertBefore(thumb, span.firstChild);
-            }
-            var removeBtn = document.createElement('button');
-            removeBtn.style.cssText = 'background:none;border:none;color:#f85149;cursor:pointer;padding:0 2px;';
-            removeBtn.textContent = '×';
-            removeBtn.setAttribute('onclick', 'removeChatFile(' + i + ')');
-            span.appendChild(removeBtn);
-            container.appendChild(span);
-        });
-    }
-
-    function handleChatFileSelect(input) {
-        var files = Array.from(input.files);
-        files.forEach(function(f) {
-            if (f.size > 10 * 1024 * 1024) {
-                alert('文件 ' + f.name + ' 超过 10MB 限制');
-                return;
-            }
-            chatAttachedFiles.push(f);
-        });
-        renderChatAttachments();
-        input.value = '';
-    }
-
-    function removeChatFile(idx) {
-        chatAttachedFiles.splice(idx, 1);
-        renderChatAttachments();
-    }
-
-    var ideaRetryMsg = '';
-    var ideaRetryImages = [];
-    var ideaAbortController = null;
-    var ideaChatSending = false;
-
-    // ── 滚到底部按钮 ──
-    var ideaChatBox = document.getElementById('chat-messages');
-    var ideaScrollBtn = document.getElementById('scroll-bottom-btn-idea');
-    if (ideaChatBox && ideaScrollBtn) {
-        ideaChatBox.addEventListener('scroll', function() {
-            var threshold = 200;
-            var atBottom = ideaChatBox.scrollHeight - ideaChatBox.scrollTop - ideaChatBox.clientHeight < threshold;
-            ideaScrollBtn.classList.toggle('visible', !atBottom);
-        });
-    }
-    function scrollIdeaChatToBottom() {
-        if (ideaChatBox) {
-            ideaChatBox.scrollTo({ top: ideaChatBox.scrollHeight, behavior: 'smooth' });
-            ideaScrollBtn.classList.remove('visible');
-        }
-    }
-
-    async function sendChatMessage() {
-        var input = document.getElementById('chat-input');
-        var msg = input.value.trim();
-        var hasFiles = chatAttachedFiles.length > 0;
-        var images = ideaPastedImages.slice();
-        if ((!msg && !hasFiles && images.length === 0) || !currentIdeaId) return;
-        if (!hasFiles && images.length === 0 && ideaCadController.shouldHandle(msg)) {
-            input.value = '';
-            await ideaCadController.draw(msg);
-            return;
-        }
-        if (ideaChatSending) {
-            if (ideaAbortController) {
-                ideaAbortController.abort();
-                ideaAbortController = null;
-            }
-            var ind = document.getElementById('thinking-indicator');
-            if (ind) ind.remove();
-        }
-        input.value = '';
-        input.disabled = true;
-        ideaPastedImages = [];
-        showIdeaImagePreview();
-        ideaChatSending = true;
-        showIdeaStopButton();
-
-        // Show user message immediately
-        var container = document.getElementById('chat-messages');
-        var placeholder = container.querySelector('p');
-        if (placeholder) placeholder.remove();
-        var userMsgDiv = document.createElement('div');
-        userMsgDiv.className = 'msg'; userMsgDiv.style.cssText = 'margin-bottom:10px; padding:10px 14px; background:#1f2937; border-radius:8px; border-left:3px solid #30363d;';
-        var userLabel = document.createElement('span');
-        userLabel.style.cssText = 'font-size:0.8em; color:#58a6ff; font-weight:bold;';
-        userLabel.textContent = '👤 你';
-        var userBody = document.createElement('div');
-        userBody.style.cssText = 'color:#c9d1d9; margin-top:4px; white-space:pre-wrap;';
-        userBody.textContent = msg;
-        userMsgDiv.appendChild(userLabel);
-        userMsgDiv.appendChild(userBody);
-        container.appendChild(userMsgDiv);
-
-        await doIdeaSend(msg, images);
-        ideaChatSending = false;
-        hideIdeaStopButton();
-        input.disabled = false;
-        input.focus();
-    }
-
-    async function doIdeaSend(msg, images) {
-        images = images || [];
-        ideaRetryMsg = msg;
-        ideaRetryImages = images;
-        var container = document.getElementById('chat-messages');
-
-        // Show thinking indicator
-        var thinkDiv = document.createElement('div');
-        thinkDiv.id = 'thinking-indicator';
-        thinkDiv.style.cssText = 'margin-bottom:10px; padding:10px 14px; background:#0d1117; border-radius:8px; border-left:3px solid #1f6feb;';
-        var thinkSpan = document.createElement('span');
-        thinkSpan.style.cssText = 'color:#58a6ff; font-size:0.9em;';
-        thinkSpan.textContent = '🤖 思考中...';
-        thinkDiv.appendChild(thinkSpan);
-        container.appendChild(thinkDiv);
-        container.scrollTop = container.scrollHeight;
-
-        var controller = new AbortController();
-        ideaAbortController = controller;
-        try {
-            var bodyObj = { message: msg, depth: chatDepth };
-            if (images.length > 0) bodyObj.images = images;
-            var res = await fetch('/api/idea/' + currentIdeaId + '/chat', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(bodyObj),
-                signal: controller.signal
-            });
-            if (!res.ok) throw new Error('服务器错误 (' + res.status + ')');
-            var data = await res.json();
-            var indicator = document.getElementById('thinking-indicator');
-            if (indicator) indicator.remove();
-
-            if (data.status === 'ok' && data.message) {
-                var aiMsgDiv = document.createElement('div');
-                aiMsgDiv.className = 'msg'; aiMsgDiv.style.cssText = 'margin-bottom:10px; padding:10px 14px; background:#0d1117; border-radius:8px; border-left:3px solid #1f6feb;';
-                var aiLabel = document.createElement('span');
-                aiLabel.style.cssText = 'font-size:0.8em; color:#58a6ff; font-weight:bold;';
-                aiLabel.textContent = '🤖 AI';
-                var aiBody = document.createElement('div');
-                aiBody.style.cssText = 'color:#c9d1d9; margin-top:4px; white-space:pre-wrap; line-height:1.6;';
-                aiBody.innerHTML = DOMPurify.sanitize(renderMarkdown(data.message.content));
-                aiMsgDiv.appendChild(aiLabel);
-                aiMsgDiv.appendChild(aiBody);
-                container.appendChild(aiMsgDiv);
-                ideaRetryMsg = '';
-                ideaRetryImages = [];
+                content.innerHTML = DOMPurify.sanitize('<div class="analysis-result">' + renderMarkdown(reportText) + '</div>');
+                if (openBtn) openBtn.style.display = 'inline-block';
             } else {
-                var indicator2 = document.getElementById('thinking-indicator');
-                if (indicator2) indicator2.remove();
-                var errDiv = document.createElement('div');
-                errDiv.style.cssText = 'padding:10px; color:#f85149;';
-                errDiv.textContent = '错误: ' + (data.error || '未知错误');
-                container.appendChild(errDiv);
+                content.innerHTML = '<p style="color:#8b949e;">' + (data.message || '暂无报告') + '</p>';
+                if (openBtn) openBtn.style.display = 'none';
             }
-            container.scrollTop = container.scrollHeight;
-        } catch (e) {
-            if (e.name === 'AbortError') {
-                var ind2 = document.getElementById('thinking-indicator');
-                if (ind2) ind2.remove();
-                return;
-            }
-            var ind = document.getElementById('thinking-indicator');
-            if (ind) ind.remove();
-            var ideaErrDiv = document.createElement('div');
-            ideaErrDiv.id = 'idea-error-' + Date.now();
-            ideaErrDiv.style.cssText = 'margin-bottom:10px; padding:10px 14px; background:#0d1117; border-radius:8px; border-left:3px solid #da3633;';
-            ideaErrDiv.innerHTML = DOMPurify.sanitize(
-                '<div style="color:#f85149; font-size:0.9em;">请求失败: ' + escapeHtml(e.message) + '</div>' +
-                '<button onclick="retryIdeaSend()" class="btn-retry" style="background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:4px 12px;border-radius:4px;cursor:pointer;margin-top:8px;font-size:0.85em;">' + t('ai.retry') + '</button>'
-            );
-            container.appendChild(ideaErrDiv);
-        } finally {
-            if (ideaAbortController === controller) {
-                ideaAbortController = null;
-            }
-        }
-        container.scrollTop = container.scrollHeight;
-    }
-
-    function stopIdeaGeneration() {
-        if (ideaAbortController) {
-            ideaAbortController.abort();
-            ideaAbortController = null;
+        } catch(e) {
+            content.innerHTML = '<p style="color:#f85149;">加载失败: ' + esc(e.message) + '</p>';
         }
     }
 
-    function showIdeaStopButton() {
-        var btn = document.getElementById('idea-stop-btn');
-        if (btn) btn.style.display = '';
-        var sendBtn = document.getElementById('idea-send-btn');
-        if (sendBtn) sendBtn.style.display = 'none';
+    function openReportInNewTab() {
+        if (!currentIdeaId) return;
+        if (currentReportType === 'full') {
+            window.open('/api/idea/' + encodeURIComponent(currentIdeaId) + '/report.html', '_blank');
+        } else {
+            openReport(currentIdeaId, currentReportType);
+        }
     }
 
-    function hideIdeaStopButton() {
-        var btn = document.getElementById('idea-stop-btn');
-        if (btn) btn.style.display = 'none';
-        var sendBtn = document.getElementById('idea-send-btn');
-        if (sendBtn) sendBtn.style.display = '';
-    }
-
-    function retryIdeaSend() {
-        var msg = ideaRetryMsg;
-        var images = ideaRetryImages || [];
-        if (!msg && images.length === 0) return;
-        ideaRetryMsg = '';
-        ideaRetryImages = [];
-        // 移除最后一条错误消息
-        var container = document.getElementById('chat-messages');
-        var last = container.lastChild;
-        if (last) container.removeChild(last);
-        doIdeaSend(msg, images);
-    }
+    // ── 讨论导出/总结（恢复）──
 
     async function exportConclusions() {
         if (!currentIdeaId) return;
@@ -1962,8 +1841,18 @@ function removeIdeaImage(idx) {
             var sumDiv = document.getElementById('discussion-summary');
             sumDiv.style.display = 'block';
             if (data.status === 'ok' && data.conclusions) {
-                sumDiv.innerHTML = DOMPurify.sanitize('<div style="font-size:0.8em; color:#58a6ff; margin-bottom:4px; font-weight:bold;">📝 讨论结论导出</div>' +
-                    '<div style="color:#c9d1d9; font-size:0.9em; line-height:1.6;">' + renderMarkdown(data.conclusions) + '</div>');
+                var conclHtml = '<div style="font-size:0.8em; color:#58a6ff; margin-bottom:4px; font-weight:bold;">📝 讨论结论导出</div>' +
+                    '<div style="color:#c9d1d9; font-size:0.9em; line-height:1.6;">' + renderMarkdown(data.conclusions) + '</div>';
+                sumDiv.innerHTML = DOMPurify.sanitize(conclHtml);
+                var hintDiv = document.createElement('div');
+                hintDiv.style.cssText = 'font-size:0.75em; color:#8b949e; margin-top:8px;';
+                hintDiv.textContent = i18nLang === 'en' ? '💡 These conclusions will seed the next iteration' : '💡 这些结论将作为下一轮「继续迭代」的研究种子';
+                sumDiv.appendChild(hintDiv);
+                var iterBtn = document.createElement('button');
+                iterBtn.textContent = i18nLang === 'en' ? '🔄 Iterate from these conclusions' : '🔄 基于这些结论继续迭代';
+                iterBtn.style.cssText = 'margin-top:6px; padding:5px 14px; background:#1f6feb; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:0.85em;';
+                iterBtn.onclick = function() { startIterate(currentIdeaId); };
+                sumDiv.appendChild(iterBtn);
             } else {
                 var errDiv = document.createElement('div');
                 errDiv.style.cssText = 'color:#f0ad4e; font-size:0.85em; padding:8px;';
@@ -1975,6 +1864,54 @@ function removeIdeaImage(idx) {
             alert('请求失败: ' + e.message);
         }
         btn.textContent = '📝 导出结论';
+        btn.disabled = false;
+    }
+
+    async function exportConversation() {
+        if (!currentIdeaId) return;
+        var btn = document.getElementById("export-conversation-btn");
+        btn.textContent = "⏳ 导出中...";
+        btn.disabled = true;
+        try {
+            var res = await fetch("/api/idea/" + currentIdeaId + "/chat/conversation");
+            var data = await res.json();
+            if (data.status !== "ok" || !data.idea || !data.messages) {
+                alert((data.error || "导出失败") + ",请确认已有讨论记录。");
+                btn.textContent = "📥 导出对话";
+                btn.disabled = false;
+                return;
+            }
+            if (data.messages.length === 0) {
+                alert("还没有讨论记录，请先与 AI 讨论几轮。");
+                btn.textContent = "📥 导出对话";
+                btn.disabled = false;
+                return;
+            }
+            var lines = [];
+            lines.push("# " + data.idea.title + " — 讨论记录");
+            if (data.idea.description) lines.push("\n**创意描述：**\n" + data.idea.description);
+            lines.push("\n**消息数：** " + data.messages.length + "\n---\n");
+            for (var i = 0; i < data.messages.length; i++) {
+                var m = data.messages[i];
+                var role = (m.role === "user" ? "**用户** " : "**AI** ");
+                var ts = m.created_at || "";
+                lines.push("\n### " + role + (ts ? "（" + ts + "）" : ""));
+                lines.push("\n" + (m.content || ""));
+            }
+            var md = lines.join("\n");
+            var blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+            var a = document.createElement("a");
+            a.href = URL.createObjectURL(blob);
+            a.download = (data.idea.title || "discussion") + ".md";
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(a.href);
+            alert("已导出 " + data.messages.length + " 条聊天记录（含用户提问与 AI 回复），可导入其它 AI 核对。");
+        } catch(e) {
+            alert("请求失败: " + e.message);
+        }
+        btn.textContent = "📥 导出对话";
         btn.disabled = false;
     }
 
@@ -2007,27 +1944,48 @@ function removeIdeaImage(idx) {
         btn.disabled = false;
     }
 
-    // Init
-    applyI18nCommon();
-    loadHistory();
+    // ── 概览页渲染分析报告（恢复 displayResults 缺失的正文渲染）──
 
-    // Handle URL params from index.html redirect (?id=xxx&autostart=quick|deep)
-    (async function() {
-        var params = new URLSearchParams(window.location.search);
-        var ideaId = params.get('id');
-        var autostart = params.get('autostart');
-        if (ideaId) {
-            await loadIdea(ideaId);
-            if (autostart === 'quick' || autostart === 'deep') {
-                setAnalysisMode(autostart);
-                // Auto-trigger analysis if idea is not already done/error
-                var statusEl = document.querySelector('#status-area .status-done, #status-area .status-error');
-                if (!statusEl && !isAnalyzing && currentIdeaId) {
-                    runExistingIdea(currentIdeaId, autostart);
-                }
-            }
+    function renderOverview(idea) {
+        var analysisArea = document.getElementById('analysis-area');
+        var findingsArea = document.getElementById('findings-area');
+        if (analysisArea && idea.analysis) {
+            analysisArea.innerHTML = DOMPurify.sanitize('<div class="analysis-result">' + renderMarkdown(idea.analysis) + '</div>');
         }
-    })();
-    </script>
-</body>
-</html>
+        if (findingsArea) {
+            var webResults = idea.web_results || [];
+            var patentResults = idea.patent_results || [];
+            var html = '';
+            if (webResults.length || patentResults.length) {
+                html += '<div class="panel-box" style="margin-top:12px;"><h3>🔎 检索结果</h3>';
+                if (webResults.length) {
+                    html += '<h4 style="color:#58a6ff;margin:8px 0 4px;">网络结果 (' + webResults.length + ')</h4>';
+                    html += webResults.slice(0, 10).map(function(r) {
+                        return '<div style="padding:6px 0;border-bottom:1px solid #21262d;font-size:0.9em;">' +
+                            '<div style="color:#f0f6fc;">' + esc(r.title || '') + '</div>' +
+                            (r.snippet ? '<div style="color:#8b949e;font-size:0.85em;">' + esc(r.snippet) + '</div>' : '') +
+                            (r.link ? '<a href="' + esc(r.link) + '" target="_blank" style="color:#58a6ff;font-size:0.8em;">' + esc(r.link) + '</a>' : '') +
+                            '</div>';
+                    }).join('');
+                }
+                if (patentResults.length) {
+                    html += '<h4 style="color:#58a6ff;margin:8px 0 4px;">专利结果 (' + patentResults.length + ')</h4>';
+                    html += patentResults.slice(0, 10).map(function(p) {
+                        return '<div style="padding:6px 0;border-bottom:1px solid #21262d;font-size:0.9em;">' +
+                            '<div style="color:#f0f6fc;">' + esc(p.patent_number || p.id || '') + ' - ' + esc(p.title || '') + '</div>' +
+                            (p.abstract ? '<div style="color:#8b949e;font-size:0.85em;">' + esc(p.abstract) + '</div>' : '') +
+                            '</div>';
+                    }).join('');
+                }
+                html += '</div>';
+            }
+            findingsArea.innerHTML = html;
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        var filterEl = document.getElementById('memory-filter');
+        if (filterEl) filterEl.onchange = function() { loadMemory(); };
+        loadHistory();
+    });
+</script>

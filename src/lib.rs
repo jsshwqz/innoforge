@@ -9,6 +9,7 @@
 mod ai;
 mod cad;
 pub mod common;
+pub(crate) mod context;
 pub mod db;
 mod docx_export;
 mod error;
@@ -16,7 +17,9 @@ mod experiment;
 mod orchestrator;
 pub mod patent;
 pub mod pipeline;
+pub mod rag;
 mod routes;
+pub mod vector;
 
 use common::{build_router, init_app_state};
 
