@@ -33,6 +33,13 @@ server.log
 .reasonix/
 .codex/
 
+# 调试产物 / Debug artifacts（排障时落到根目录的请求体、日志、抓取结果）
+# 2026-09-20 核实：239 个已跟踪文件中无任何路径命中下列模式，故不会屏蔽真实源码
+_*.txt
+_*.json
+_*.py
+.firecrawl/
+
 # 测试适配器 / Test adapters
 testaionui-adapters/
 testpatent-hub-backup.skill-routermanifest.json
