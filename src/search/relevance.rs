@@ -314,7 +314,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
 
     #[test]
     fn intl_relevance_rejects_generic_phone_results_for_specific_hinge_query() {
