@@ -117,6 +117,7 @@ mod tests {
     use super::*;
     use crate::patent::canonical_patent_key;
     use crate::search::model::{FailKind, MergedPatent, SearchQuery};
+    use crate::search::providers::epo_ops as epo;
     use crate::search::providers::google_patents_xhr as xhr;
     use crate::search::providers::google_patents_xhr::GooglePatentsXhrProvider;
     use crate::types::search::PatentSummary;
@@ -207,6 +208,27 @@ mod tests {
     /// 真 XHR provider，但上游恒返 503 反爬页（假传输，不出网）。
     fn xhr_permanent_503() -> Arc<dyn SearchProvider> {
         let (p, _transport, _clock) = xhr::tests::provider(vec![XhrReplyOf::bot_blocked()]);
+        Arc::new(p)
+    }
+
+    /// 真 EPO OPS provider + 官方样例转写件（假 token 传输 / 假检索传输 / 假时钟，全程不出网）。
+    /// 与 [`xhr_ok`] 同一手法：链用例吃真 provider，才能证明降级内容确实走完了
+    /// 「取 token → 映射 → 打分 → 放行 → 去重」全链，而不是桩函数自证。
+    fn epo_ok() -> Arc<dyn SearchProvider> {
+        let (p, _transport, _clock) = epo::tests::provider(
+            vec![epo::tests::token_reply("TOK", "1199")],
+            vec![epo::tests::reply(200, epo::tests::SEARCH_BIBLIO_REPLY)],
+        );
+        Arc::new(p)
+    }
+
+    /// 真 EPO OPS provider，但取 token 就撞 401（凭证无效，L1 现场件）。
+    /// 该形态下本源**一发数据请求都不发**（省配额），故失败原因必定是 `Auth`。
+    fn epo_auth_failed() -> Arc<dyn SearchProvider> {
+        let (p, _transport, _clock) = epo::tests::provider(
+            vec![epo::tests::reply(401, epo::tests::REAL_401_TOKEN_BODY)],
+            vec![epo::tests::reply(200, epo::tests::SEARCH_BIBLIO_REPLY)],
+        );
         Arc::new(p)
     }
 
@@ -385,6 +407,184 @@ mod tests {
             AttemptStatus::Failed(kind) => kind,
             other => panic!("期望失败状态，实得 {other:?}"),
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // MA2b：第三源 EPO OPS 进链（spec §4 + §6）
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// **用例 ④（MA2b 验收锚点 / 任务清单 2-①）**：前两源都拿不到可用结果时，
+    /// 链尾的 EPO OPS 顶上，且 `winning_source` 如实标成 `epo_ops`。
+    ///
+    /// 为什么 EPO 用例吃英文查询：OPS 的 `ti`/`ab` 只有英文著录索引（spec §4 +
+    /// `providers/epo_ops.rs` 的 L7），中文查询下它本就零命中 —— 那是能力边界，
+    /// 由 provider 侧的 `chinese_query_on_english_fixture_is_success_with_zero_hits` 锁死，
+    /// 不能拿它来证明降级链路通不通。
+    #[tokio::test]
+    async fn case4_first_two_sources_down_degrades_to_epo() {
+        let chain = SourceChain::new(vec![
+            stub(
+                SourceKind::SerpApi,
+                AttemptStatus::Failed(FailKind::Network),
+                false,
+            ),
+            xhr_permanent_503(),
+            epo_ok(),
+        ]);
+        assert_eq!(
+            vec![
+                SourceKind::SerpApi,
+                SourceKind::GooglePatentsXhr,
+                SourceKind::EpoOps
+            ],
+            chain.kinds(),
+            "登记顺序即优先级：EPO 排链尾（spec §4「对中文检索贡献有限」）"
+        );
+
+        let outcome = chain.run(epo::tests::en_query("battery")).await;
+
+        assert!(
+            !outcome.results.is_empty(),
+            "前两源全挂时必须由第三源顶上（MA2b 验收锚点）"
+        );
+        assert_eq!(
+            Some(SourceKind::EpoOps),
+            outcome.winning_source(),
+            "胜出源必须如实标注，否则 /api/search/online 的 source 字段会错报"
+        );
+        assert!(outcome.succeeded_from(SourceKind::EpoOps));
+        assert!(!outcome.succeeded_from(SourceKind::SerpApi));
+        assert!(!outcome.succeeded_from(SourceKind::GooglePatentsXhr));
+        let statuses: Vec<(SourceKind, AttemptStatus)> = outcome
+            .attempts
+            .iter()
+            .map(|a| (a.source, a.status))
+            .collect();
+        assert_eq!(
+            vec![
+                (
+                    SourceKind::SerpApi,
+                    AttemptStatus::Failed(FailKind::Network)
+                ),
+                (
+                    SourceKind::GooglePatentsXhr,
+                    AttemptStatus::Failed(FailKind::Quota)
+                ),
+                (SourceKind::EpoOps, AttemptStatus::Success),
+            ],
+            statuses,
+            "三源全量记账，没被采用的那两路也不能从面板上消失"
+        );
+        assert_eq!(
+            Some(10000),
+            outcome.upstream_total,
+            "total 取胜出源（EPO 上游的 total-result-count）"
+        );
+        assert_eq!(
+            vec![SourceKind::EpoOps],
+            outcome.results[0].sources,
+            "结果条目要挂得上真正的命中源"
+        );
+        assert_eq!("EP3445287B1", outcome.summaries()[0].patent_number);
+    }
+
+    /// **用例 ⑤（任务清单 2-②）**：三源全挂 → 空结果，但 `attempts` 三源各带自己的
+    /// `FailKind`，且 error 点名来源（上层据此区分「该本地兜底」与「上游改版要报 bug」）。
+    #[tokio::test]
+    async fn case5_all_three_sources_down_reports_each_fail_kind() {
+        let chain = SourceChain::new(vec![
+            stub(
+                SourceKind::SerpApi,
+                AttemptStatus::Failed(FailKind::Auth),
+                false,
+            ),
+            xhr_permanent_503(),
+            epo_auth_failed(),
+        ]);
+
+        let outcome = chain.run(epo::tests::en_query("battery")).await;
+
+        assert!(outcome.results.is_empty(), "三挂不得凭空造结果");
+        assert_eq!(None, outcome.winning_source());
+        assert!(outcome.upstream_total.is_none());
+        assert_eq!(3, outcome.attempts.len(), "{:?}", outcome.attempts);
+
+        let kinds: Vec<(SourceKind, FailKind)> = outcome
+            .attempts
+            .iter()
+            .map(|a| (a.source, fail_of(a)))
+            .collect();
+        assert_eq!(
+            vec![
+                (SourceKind::SerpApi, FailKind::Auth),
+                (SourceKind::GooglePatentsXhr, FailKind::Quota),
+                (SourceKind::EpoOps, FailKind::Auth),
+            ],
+            kinds,
+            "三源的失败原因各归各的：误判成 Parse 会掐断降级，误判成 Network 会把限流显示成断网"
+        );
+        for a in &outcome.attempts {
+            let err = a.error.clone().expect("失败必须带可读原因，禁止 None");
+            assert!(!err.trim().is_empty(), "禁止空 error");
+            assert!(
+                err.contains(a.source.as_str()),
+                "error 要点明是哪个源: {err}"
+            );
+            assert_eq!(0, a.hits, "失败的那一路不得带命中数");
+        }
+        let epo_report = &outcome.attempts[2];
+        assert!(
+            epo_report.error.clone().expect("note").contains("鉴权"),
+            "EPO 的 401 要说清是凭证问题：{:?}",
+            epo_report.error
+        );
+    }
+
+    /// **用例 ⑥（任务清单 2-③ 的另一半）**：链上「未配 EPO Key」的正常处置是**压根不登记**
+    /// （见 `routes/search.rs::online_chain_registers_epo_only_with_credentials`）。
+    /// 这里锁死万一被登记进来时的形状：不发任何请求、记 `Skipped`、不伪造结果。
+    #[tokio::test]
+    async fn case6_epo_without_credentials_skips_and_sends_nothing() {
+        let (provider, transport, _clock) = epo::tests::provider_with(
+            "",
+            "",
+            vec![epo::tests::token_reply("TOK", "1199")],
+            vec![epo::tests::reply(200, epo::tests::SEARCH_BIBLIO_REPLY)],
+        );
+        let chain = SourceChain::new(vec![
+            stub(
+                SourceKind::SerpApi,
+                AttemptStatus::Failed(FailKind::Network),
+                false,
+            ),
+            xhr_permanent_503(),
+            Arc::new(provider),
+        ]);
+
+        let outcome = chain.run(epo::tests::en_query("battery")).await;
+
+        assert!(outcome.results.is_empty(), "没凭证的源不得凭空顶结果");
+        assert_eq!(None, outcome.winning_source());
+        let epo_report = outcome
+            .attempts
+            .iter()
+            .find(|a| a.source == SourceKind::EpoOps)
+            .expect("这一条用例是「已登记但没凭证」，故必须留痕");
+        assert_eq!(AttemptStatus::Skipped, epo_report.status);
+        assert_eq!(0, epo_report.latency_ms, "压根没发出请求，耗时不能凭空记账");
+        let err = epo_report
+            .error
+            .clone()
+            .expect("Skipped 也要说明为什么没跑");
+        assert!(
+            err.contains("EPO_KEY") && err.contains("EPO_SECRET"),
+            "{err}"
+        );
+        assert_eq!(
+            0,
+            transport.total_calls(),
+            "未配凭证时 token 与检索一发都不能发（token 也算配额）"
+        );
     }
 
     /// spec §1：主源 Parse（上游改版）时**不降级**，但并行已发出的尝试仍全量记账。

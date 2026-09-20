@@ -1,14 +1,17 @@
 use super::{escape_csv, parse_search_type, AppState};
+use crate::db::Database;
 use crate::patent::*;
 // MA1：q 串渲染 / 相关性判定 / 排序去重 / 上游调用链均已抽到 `crate::search`，
 // 本文件只保留「端点」职责：请求解析、响应形状、超时预算与本地兜底。
 // MA2a：多源降级由 `crate::search::chain::SourceChain` 承担，本文件只负责登记源的优先级顺序。
+// MA2b：链尾追加 EPO OPS 英文域补源（规格书 §4），同样「未配 Key 即不登记」。
 use crate::search::chain::SourceChain;
 use crate::search::merge::{dedup_patent_summaries, sort_by_relevance};
 use crate::search::model::{
     AttemptReport, AttemptStatus, Lang, SearchOutcome, SearchQuery, SourceKind,
 };
 use crate::search::provider::SearchProvider;
+use crate::search::providers::epo_ops::EpoOpsProvider;
 use crate::search::providers::google_patents_xhr::GooglePatentsXhrProvider;
 use crate::search::providers::serpapi::{exact_lookup_response, SerpApiProvider};
 use crate::search::query::resolve_lang;
@@ -42,6 +45,39 @@ fn serpapi_skipped_outcome(hint: &str) -> SearchOutcome {
         }],
         upstream_total: None,
     }
+}
+
+/// 按 spec §6 的优先级装配在线执行链的源集合（MA2b 起三源）：
+/// `[SerpAPI(有 Key) → GooglePatentsXhr → EpoOps(有 Key)]`。
+///
+/// 抽成独立函数是因为**链的形状**本身就是需要被断言的语义：
+/// SerpAPI 与 EPO 都遵循「未配置 Key 即不登记」（该源压根不参与，`attempts` 里不会出现它，
+/// 与「跑了但零命中」不同），而登记顺序即降级优先级。留在 handler 里只能靠人读代码保证。
+///
+/// SerpAPI 的 Key 由调用方传入 —— round-robin 选取属配置层既有职责（MA1 起即不上提到 provider）。
+/// EPO 排链尾的依据见 `docs/analysis/search-sources-spec.md` §4 与
+/// `providers/epo_ops.rs` 的 CQL 索引一节（`ti`/`ab` 只有英文著录数据）。
+fn online_chain_providers(
+    db: &Arc<Database>,
+    serpapi_key: Option<String>,
+    epo_credentials: Option<(String, String)>,
+) -> Vec<Arc<dyn SearchProvider>> {
+    let mut providers: Vec<Arc<dyn SearchProvider>> = Vec::new();
+    match serpapi_key {
+        Some(api_key) => providers.push(Arc::new(SerpApiProvider::new(api_key, db.clone()))),
+        None => println!("[ONLINE] No SERPAPI_KEY configured"),
+    }
+    // 免费无 Key 的降级源，恒登记（MA2a）。
+    providers.push(Arc::new(GooglePatentsXhrProvider::new(db.clone())));
+    match epo_credentials {
+        Some((epo_key, epo_secret)) => providers.push(Arc::new(EpoOpsProvider::new(
+            epo_key,
+            epo_secret,
+            db.clone(),
+        ))),
+        None => println!("[ONLINE] No EPO_KEY/EPO_SECRET configured, skipping epo_ops"),
+    }
+    providers
 }
 
 pub async fn api_search(
@@ -214,11 +250,13 @@ pub async fn api_search(
 /// `POST /api/search/online` — 在线检索端点。
 ///
 /// 端点职责：请求解析 → 区域判定 → 取 Key → 交给 [`SourceChain`]（SerpAPI 主源 + MA2a 新增的
-/// Google Patents XHR 免费降级源）→ 按旧形状出参 → 超时预算 → 本地库兜底。
-/// 上游调用与结果映射见 `crate::search::providers::{serpapi, google_patents_xhr}`。
+/// Google Patents XHR 免费降级源 + MA2b 新增的 EPO OPS 英文域补源）→ 按旧形状出参 →
+/// 超时预算 → 本地库兜底。
+/// 上游调用与结果映射见 `crate::search::providers::{serpapi, google_patents_xhr, epo_ops}`。
 ///
 /// MA2a 起的响应差异：`source` 字段不再恒为 `"serpapi"`，降级命中时为 `"google_patents_xhr"`
-/// （旧代码只有一个在线源，故无需区分）。其余字段集合与本地兜底路径逐字未变。
+/// （旧代码只有一个在线源，故无需区分）；MA2b 起再追加一档 `"epo_ops"`。
+/// 其余字段集合与本地兜底路径逐字未变。
 pub async fn api_search_online(
     State(s): State<AppState>,
     Json(req): Json<SearchRequest>,
@@ -287,17 +325,17 @@ pub async fn api_search_online(
         }
     }
 
-    // ── MA2a 执行链（spec §6）：SerpAPI 为主、Google Patents XHR 直抓为免费降级 ──
-    // 两源并行发起、各带独立超时（SerpAPI 沿用旧 30s，XHR 15s），按登记顺序择胜。
+    // ── MA2a/MA2b 执行链（spec §6）：SerpAPI 为主、Google Patents XHR 直抓为免费降级、
+    // EPO OPS 为英文域补源（spec §4）。三源并行发起、各带独立超时（SerpAPI 沿用旧 30s，
+    // XHR 与 EPO 15s），按登记顺序择胜；装配规则见 [`online_chain_providers`]。
     // 没配 Key 时不把 SerpAPI 登记进链路，而是把它的 `Skipped` 记账**前置**到 attempts，
     // 这样旧的 hint 文案与「首个非空生效」语义逐字不变，控制流也不必分叉成两条。
-    let mut providers: Vec<Arc<dyn SearchProvider>> = Vec::new();
-    if let Some(api_key) = api_key_opt.clone() {
-        providers.push(Arc::new(SerpApiProvider::new(api_key, s.db.clone())));
-    } else {
-        println!("[ONLINE] No SERPAPI_KEY configured");
-    }
-    providers.push(Arc::new(GooglePatentsXhrProvider::new(s.db.clone())));
+    let epo_credentials = s
+        .config
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .epo_credentials();
+    let providers = online_chain_providers(&s.db, api_key_opt.clone(), epo_credentials);
 
     let mut outcome = SourceChain::new(providers).run(search_query).await;
     if api_key_opt.is_none() {
@@ -335,9 +373,9 @@ pub async fn api_search_online(
         }
     }
 
-    // MA2a 起在线链路为 [SerpAPI → Google Patents XHR 直抓]（见上方的 SourceChain），
+    // MA2b 起在线链路为 [SerpAPI → Google Patents XHR 直抓 → EPO OPS]（见上方的 SourceChain），
     // 其余历史源（Firecrawl / Bing / CNIPR / 搜狗）仍处于屏蔽状态。
-    // 两个在线源都没有可用结果时，回退本地数据库。
+    // 三个在线源都没有可用结果时，回退本地数据库。
 
     // Fallback（最后一档）: local DB search
     println!("[ONLINE] Falling back to local DB");
@@ -773,6 +811,54 @@ mod tests {
     // `query::resolve_lang_matches_pre_migration_region_flags`、
     // `providers::serpapi::search_url_matches_legacy_builder`、
     // `providers::serpapi::outcome_patents_match_legacy_mapping`。
+
+    /// **MA2b 链形状（任务清单 2-③）**：未配 `EPO_KEY/EPO_SECRET` 时链里**压根不登记** EpoOps，
+    /// 因此 `attempts` 里不会出现该源（与「登记了但 Skipped」是两种形状，后者见
+    /// `search::chain::case6_epo_without_credentials_skips_and_sends_nothing`）。
+    /// 配齐后才追加在链尾，顺序即降级优先级（spec §6）。
+    #[test]
+    fn online_chain_registers_epo_only_with_credentials() {
+        let db = Arc::new(Database::init(":memory:").expect("in-memory db"));
+        let creds = || Some(("ck".to_string(), "cs".to_string()));
+
+        let with_epo = SourceChain::new(online_chain_providers(
+            &db,
+            Some("serp-key".to_string()),
+            creds(),
+        ));
+        assert_eq!(
+            vec![
+                SourceKind::SerpApi,
+                SourceKind::GooglePatentsXhr,
+                SourceKind::EpoOps
+            ],
+            with_epo.kinds(),
+            "三源齐配时的链形状 = 优先级顺序"
+        );
+
+        let without_epo = SourceChain::new(online_chain_providers(
+            &db,
+            Some("serp-key".to_string()),
+            None,
+        ));
+        assert_eq!(
+            vec![SourceKind::SerpApi, SourceKind::GooglePatentsXhr],
+            without_epo.kinds(),
+            "未配 EPO 凭证即不登记该源（与 SerpAPI 同语义），链保持 MA2a 形状"
+        );
+
+        // SerpAPI 缺 Key 只摘掉它自己，不影响 EPO 的登记与相对顺序。
+        let without_serpapi = SourceChain::new(online_chain_providers(&db, None, creds()));
+        assert_eq!(
+            vec![SourceKind::GooglePatentsXhr, SourceKind::EpoOps],
+            without_serpapi.kinds()
+        );
+
+        // 三源全不可用（两 Key 皆无）时链仍非空：免费的 XHR 直抓恒登记，兜底才轮得到本地库。
+        let bare = SourceChain::new(online_chain_providers(&db, None, None));
+        assert_eq!(vec![SourceKind::GooglePatentsXhr], bare.kinds());
+        assert!(!bare.is_empty());
+    }
 
     /// 未配置 Key 的路径必须与「源跑过但零命中」走同一条后续控制流：
     /// hint 文案逐字保持旧值，且不得被误判为在线命中。

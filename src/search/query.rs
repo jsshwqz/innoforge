@@ -114,6 +114,43 @@ pub fn render_q(query: &SearchQuery) -> String {
     search_query
 }
 
+/// `2024-01-05` / `2024/1/5` / `20240105` → `"20240105"`；认不出来则 `None`。
+///
+/// MA2a 时它是 `providers/google_patents_xhr.rs` 的私有函数；MA2b 接入 EPO OPS 时
+/// 该源同样要把用户侧日期串归一为上游格式（CQL 的 `pd="YYYYMMDD YYYYMMDD"`），
+/// 故按 AGENTS.md 2.2 上提到本模块单一出处，**函数体逐字未改**。
+///
+/// 用户侧日期串形态不统一（前端传 `YYYY-MM-DD`，历史数据里见过 `YYYY/M/D`），
+/// 而调用方的处理原则是**归一失败当作「无边界」**（见各源的日期过滤 / CQL 渲染），
+/// 所以这里宁可返回 `None` 也不要瞎猜一个数。
+pub fn normalize_date(s: &str) -> Option<String> {
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    // 纯数字形态：至少要有 8 位才可能是完整年月日
+    if trimmed.chars().all(|c| c.is_ascii_digit()) {
+        let digits: String = trimmed.chars().collect();
+        return if digits.len() >= 8 {
+            Some(digits[..8].to_string())
+        } else {
+            None
+        };
+    }
+    // 分隔符形态：年-月-日 / 年/月/日 / 年.月.日，月日可不补零
+    let parts: Vec<&str> = trimmed.split(['-', '/', '.']).collect();
+    if parts.len() != 3 {
+        return None;
+    }
+    let year = parts[0].parse::<u32>().ok()?;
+    let month = parts[1].parse::<u32>().ok()?;
+    let day = parts[2].parse::<u32>().ok()?;
+    if !(1000..=9999).contains(&year) || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+    Some(format!("{year:04}{month:02}{day:02}"))
+}
+
 /// 迁移前的 q 串渲染实现，**逐字符复制**自 `src/routes/mod.rs::build_online_query`
 /// （`git show b08f1c5:src/routes/mod.rs`，原 443-500 行）。
 ///

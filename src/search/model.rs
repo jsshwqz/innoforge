@@ -67,7 +67,9 @@ impl FailKind {
     }
 
     /// 是否进入源级冷却（spec §1：Quota/Auth → 冷却；spec §6：连续 3 次后冷却 10 分钟）。
-    #[allow(dead_code)] // MA2b/MA5 熔断器消费
+    /// MA2b 对账：本包只交付「第三源进链」，熔断器按 MA1 起就写定的归属仍留在面板/稳健化两棒，
+    /// **未伪造消费点**（判定链路上任何一处都没调它）。
+    #[allow(dead_code)] // MA5/MA6 熔断器消费（口径同 chain.rs 模块头与 providers/epo_ops.rs 未做清单）
     pub fn cools_down(self) -> bool {
         matches!(self, FailKind::Quota | FailKind::Auth)
     }
@@ -143,13 +145,15 @@ impl AttemptReport {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MergedPatent {
     /// 规范化 publication_number（`crate::patent::canonical_patent_key`），空号退化为标题键。
-    #[allow(dead_code)] // MA2a 仍只有单源胜出（无跨源合并），MA2b 多源合并时消费
+    /// MA2b 对账：本包按 spec §6 仍是**择胜**（首个有结果的源整份返回），不做跨源拼接，
+    /// 故这个去重键至今只有 provider 侧断言在读、没有生产消费点 —— **未伪造消费**，如实留给 MA4。
+    #[allow(dead_code)] // MA4 跨源合并去重消费（MA2a/MA2b 均为单源胜出）
     pub key: String,
     /// 复用既有对外结构，保证 `/api/search/online` 的 patents[] 字段一字不变。
     pub summary: PatentSummary,
     /// 命中该条的源集合（MA1 恒为单元素，由 `merge::merged_from` 写入）。
     /// **MA2a 起被读取**：[`SearchOutcome::winning_source`] 用它决定 `/api/search/online`
-    /// 的 `source` 字段值；MA2b 多源合并后同一条目可能挂多个源。
+    /// 的 `source` 字段值；MA4 多源合并后同一条目可能挂多个源。
     pub sources: Vec<SourceKind>,
 }
 

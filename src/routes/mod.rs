@@ -65,6 +65,12 @@ pub struct AppConfig {
     /// SerpAPI multi-key support (round-robin) — 最多 5 个 Key，自动轮询
     pub serpapi_keys: Vec<String>,
 
+    // ── EPO OPS（MA2b，规格书 §4）──
+    /// OPS 消费者 Key（app_settings `EPO_KEY`，环境变量后备）。与 Secret **成对**才可用。
+    pub epo_key: String,
+    /// OPS 消费者 Secret（app_settings `EPO_SECRET`，环境变量后备）。
+    pub epo_secret: String,
+
     pub ai_base_url: String,
     /// 通用 AI API Key（自定义服务商使用 + 向后兼容）
     pub ai_api_key: String,
@@ -141,6 +147,11 @@ impl AppConfig {
             }
         }
 
+        // EPO OPS 凭证（MA2b，spec §4）：与 SerpAPI 同一把尺子 —— app_settings 优先、
+        // 环境变量后备。设置页的两个配置位属 MA5（本包只做读取与登记，不加 UI）。
+        let epo_key = get("EPO_KEY", "");
+        let epo_secret = get("EPO_SECRET", "");
+
         // 解析 google_token_expiry（存储在 DB 中的字符串），
         // 环境变量 GOOGLE_TOKEN_EXPIRY 作为后备
         let google_token_expiry = db_settings
@@ -164,6 +175,8 @@ impl AppConfig {
 
         Self {
             serpapi_keys,
+            epo_key,
+            epo_secret,
 
             ai_base_url: get("AI_BASE_URL", "http://localhost:11434/v1"),
             ai_api_key: get("AI_API_KEY", "ollama"),
@@ -308,6 +321,21 @@ impl AppConfig {
         }
         let idx = SERPAPI_KEY_INDEX.fetch_add(1, Ordering::Relaxed) % self.serpapi_keys.len();
         Some(self.serpapi_keys[idx].clone())
+    }
+
+    /// EPO OPS 的成对凭证（MA2b，spec §4）。
+    ///
+    /// 语义与 [`Self::next_serpapi_key`] 对齐：**缺任一半即按未配置处理**返回 `None`，
+    /// `routes/search.rs` 据此决定要不要把 EpoOps 登记进执行链
+    /// （不登记 = 该源压根不参与，`attempts` 里不会出现它，与 SerpAPI 缺 Key 同形）。
+    /// 返回前已 `trim`：app_settings 里手粘贴带空格的 Key 是常态。
+    pub fn epo_credentials(&self) -> Option<(String, String)> {
+        let key = self.epo_key.trim();
+        let secret = self.epo_secret.trim();
+        if key.is_empty() || secret.is_empty() {
+            return None;
+        }
+        Some((key.to_string(), secret.to_string()))
     }
 }
 
@@ -531,7 +559,55 @@ pub(crate) fn efld(json: &serde_json::Value, field: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::Database;
     use crate::routes::AppConfig;
+
+    /// MA2b：EPO OPS 凭证按「成对才算配置」裁决 —— 只填一半时 `routes/search.rs`
+    /// 不会把该源登记进链路，用户不至于以为英文域补源在跑。
+    #[test]
+    fn epo_credentials_require_both_halves_and_ignore_padding() {
+        let empty = AppConfig::default();
+        assert_eq!(None, empty.epo_credentials(), "未配置即 None（不登记该源）");
+
+        let only_key = AppConfig {
+            epo_key: "ck".into(),
+            ..AppConfig::default()
+        };
+        assert_eq!(None, only_key.epo_credentials(), "缺 Secret 不算配置");
+        let only_secret = AppConfig {
+            epo_secret: "cs".into(),
+            ..AppConfig::default()
+        };
+        assert_eq!(None, only_secret.epo_credentials(), "缺 Key 不算配置");
+
+        let padded = AppConfig {
+            epo_key: "  ck ".into(),
+            epo_secret: "\tcs\n".into(),
+            ..AppConfig::default()
+        };
+        assert_eq!(
+            Some(("ck".to_string(), "cs".to_string())),
+            padded.epo_credentials(),
+            "粘贴进来的空白要清掉，否则 Basic 头带着空格撞 OPS 401"
+        );
+    }
+
+    /// MA2b 的读取口径：SQLite `app_settings` 是主存储、环境变量只是后备
+    /// （与 SerpAPI 完全同一条 `get()` 路径）。这里锁死「写进设置库就能被链读到」，
+    /// MA5 的设置页配置位只要落库即可生效，不必再动检索侧代码。
+    #[test]
+    fn epo_credentials_load_from_app_settings() {
+        let db = Database::init(":memory:").expect("in-memory db");
+        db.set_settings_batch(&[("EPO_KEY", "db-ck"), ("EPO_SECRET", "db-cs")])
+            .expect("write settings");
+
+        let config = AppConfig::from_db_and_env(Some(&db));
+        assert_eq!(
+            Some(("db-ck".to_string(), "db-cs".to_string())),
+            config.epo_credentials(),
+            "app_settings 里的 EPO 凭证必须被链读到（spec §4 的配置位）"
+        );
+    }
 
     /// 验证非 Google 服务商不会启用 Gemini CLI 模式
     /// 这是对赌的核心保护——防止未来代码修改 reintroduce 此 bug
