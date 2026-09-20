@@ -39,7 +39,7 @@ use crate::search::model::{
     SourceKind,
 };
 use crate::search::provider::SearchProvider;
-use crate::search::query::render_q;
+use crate::search::query::{normalize_date, render_q};
 use crate::search::relevance::rank_and_gate_hits;
 use crate::types::search::PatentSummary;
 use std::future::Future;
@@ -544,39 +544,6 @@ pub fn filter_by_publication_window(
             }
         })
         .collect()
-}
-
-/// `2024-01-05` / `2024/1/5` / `20240105` → `"20240105"`；认不出来则 `None`。
-///
-/// 用户侧日期串形态不统一（前端传 `YYYY-MM-DD`，历史数据里见过 `YYYY/M/D`），
-/// 而归一失败的处理原则是**当作「无边界」**（见 `filter_by_publication_window`），
-/// 所以这里宁可返回 `None` 也不要瞎猜一个数。
-fn normalize_date(s: &str) -> Option<String> {
-    let trimmed = s.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    // 纯数字形态：至少要有 8 位才可能是完整年月日
-    if trimmed.chars().all(|c| c.is_ascii_digit()) {
-        let digits: String = trimmed.chars().collect();
-        return if digits.len() >= 8 {
-            Some(digits[..8].to_string())
-        } else {
-            None
-        };
-    }
-    // 分隔符形态：年-月-日 / 年/月/日 / 年.月.日，月日可不补零
-    let parts: Vec<&str> = trimmed.split(['-', '/', '.']).collect();
-    if parts.len() != 3 {
-        return None;
-    }
-    let year = parts[0].parse::<u32>().ok()?;
-    let month = parts[1].parse::<u32>().ok()?;
-    let day = parts[2].parse::<u32>().ok()?;
-    if !(1000..=9999).contains(&year) || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
-        return None;
-    }
-    Some(format!("{year:04}{month:02}{day:02}"))
 }
 
 /// 从 `results.cluster[*].result[*]` 摊平出命中行。
