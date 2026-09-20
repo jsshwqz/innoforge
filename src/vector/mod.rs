@@ -70,7 +70,7 @@ impl VectorIndex {
             *tf.entry(token.clone()).or_insert(0.0) += 1.0;
         }
         let doc_len = tokens.len() as f32;
-        for (_, count) in tf.iter_mut() {
+        for count in tf.values_mut() {
             *count = 1.0 + (*count / doc_len).log2();
         }
 

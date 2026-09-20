@@ -685,7 +685,7 @@ fn compute_char_tfidf_embedding(text: &str) -> Vec<f32> {
         return vec![0.0f32];
     }
     let doc_len = tf.values().sum::<f32>();
-    for (_, count) in tf.iter_mut() {
+    for count in tf.values_mut() {
         *count = 1.0 + (*count / doc_len).log2();
     }
     let norm_sq: f32 = tf.values().map(|v| v * v).sum();

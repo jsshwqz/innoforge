@@ -19,7 +19,7 @@ pub fn chunk_text(text: &str, chunk_size: usize, overlap: usize) -> Vec<String> 
         if end >= text.len() {
             break;
         }
-        let search_start = (end - overlap).max(0);
+        let search_start = end - overlap;
         let mut boundary = end;
         for i in (search_start..end).rev() {
             if i < text.len() {
@@ -69,7 +69,7 @@ pub fn compute_chunk_embedding(text: &str) -> Vec<f32> {
         return vec![0.0f32];
     }
     let doc_len = tf.values().sum::<f32>();
-    for (_, count) in tf.iter_mut() {
+    for count in tf.values_mut() {
         *count = 1.0 + (*count / doc_len).log2();
     }
     let norm_sq: f32 = tf.values().map(|v| v * v).sum();
