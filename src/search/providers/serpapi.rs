@@ -15,15 +15,14 @@
 
 use crate::db::Database;
 use crate::patent::Patent;
-use crate::search::merge::{dedup_patent_summaries, merged_from};
+use crate::search::merge::merged_from;
 use crate::search::model::{
-    AttemptReport, AttemptStatus, FailKind, Lang, SearchOutcome, SearchQuery, SourceKind,
+    report_excerpt, AttemptReport, AttemptStatus, FailKind, Lang, SearchOutcome, SearchQuery,
+    SourceKind,
 };
 use crate::search::provider::SearchProvider;
 use crate::search::query::render_q;
-use crate::search::relevance::{
-    calculate_online_relevance, contains_cjk, is_online_result_relevant,
-};
+use crate::search::relevance::rank_and_gate_hits;
 use crate::types::search::PatentSummary;
 use std::future::Future;
 use std::pin::Pin;
@@ -154,83 +153,24 @@ impl SerpApiProvider {
 
     /// `organic_results[] → PatentSummary[]`，随后套用中文二次过滤与去重。
     ///
-    /// 这条链路就是旧 `api_search_online` 里那段最长的内联代码，逐步等价搬来：
-    /// 位置分 `(98 - idx*3).max(30)`、内容分 `calculate_online_relevance`、
-    /// 放行判定 `is_online_result_relevant`（含 CN 阈值 45/62）、
-    /// 混合分 `pos*0.4 + content*0.6`（封顶 100）、`score_source` 文案
-    /// `hybrid(pos:{:.0}+content:{:.0})` 全部未改。
+    /// 这条链路的**实现自 MA2a 起住在 [`rank_and_gate_hits`]**（与 Google Patents XHR 源共用，
+    /// AGENTS.md 2.2 禁止同一打分链路存在第二份实现）。本方法只剩「注入本源的字段映射器
+    /// [`serp_to_patent`]」这一层职责，行为与 MA1 逐字一致，
+    /// 等价性继续由 `outcome_patents_match_legacy_mapping` 对**迁移前**参照实现逐字段比对锁死。
     fn outcome_patents(
         &self,
         keyword: &str,
         cn_query: bool,
         results: &[serde_json::Value],
     ) -> Vec<PatentSummary> {
-        let mut patents: Vec<PatentSummary> = Vec::new();
-        for (idx, r) in results.iter().enumerate() {
-            let p = serp_to_patent(r);
-            if p.title.is_empty() {
-                continue;
-            }
-            let saved_id = self.db.insert_patent(&p).unwrap_or_else(|e| {
-                tracing::warn!("Failed to cache online patent {}: {}", p.patent_number, e);
-                p.id.clone()
-            });
-            // Hybrid relevance: position + content matching
-            let position_score = (98.0 - idx as f64 * 3.0).max(30.0);
-            let content_score = calculate_online_relevance(
-                keyword,
-                &p.title,
-                &p.abstract_text,
-                &p.applicant,
-                &p.inventor,
-            );
-            tracing::debug!(
-                "SerpAPI filter: query={}, title={}, applicant={}, inventor={}, content_score={:.1}",
-                keyword,
-                &p.title,
-                &p.applicant,
-                &p.inventor,
-                content_score
-            );
-            if !is_online_result_relevant(
-                keyword,
-                &p.title,
-                &p.abstract_text,
-                content_score,
-                cn_query,
-                &p.inventor,
-            ) {
-                continue;
-            }
-            let score = (position_score * 0.4 + content_score * 0.6).min(100.0);
-            let source = format!(
-                "hybrid(pos:{:.0}+content:{:.0})",
-                position_score, content_score
-            );
-            patents.push(PatentSummary {
-                id: saved_id,
-                patent_number: p.patent_number.clone(),
-                title: p.title.clone(),
-                abstract_text: p.abstract_text.clone(),
-                applicant: p.applicant.clone(),
-                inventor: p.inventor.clone(),
-                filing_date: p.filing_date.clone(),
-                country: p.country.clone(),
-                relevance_score: Some(score),
-                score_source: Some(source),
-            });
-        }
-        if cn_query {
-            let zh_patents: Vec<PatentSummary> = patents
-                .iter()
-                .filter(|p| contains_cjk(&p.title) || contains_cjk(&p.abstract_text))
-                .cloned()
-                .collect();
-            if !zh_patents.is_empty() {
-                patents = zh_patents;
-            }
-        }
-        dedup_patent_summaries(patents)
+        rank_and_gate_hits(
+            self.db.as_ref(),
+            SourceKind::SerpApi.as_str(),
+            keyword,
+            cn_query,
+            results,
+            serp_to_patent,
+        )
     }
 }
 
@@ -278,7 +218,7 @@ impl SearchProvider for SerpApiProvider {
                                     );
                                     error_note = Some(format!(
                                         "SerpAPI 上游返回 HTTP 429（限流/额度受限）：{}",
-                                        truncated(&body)
+                                        report_excerpt(&body)
                                     ));
                                     status = AttemptStatus::Failed(FailKind::Quota);
                                 } else {
@@ -289,7 +229,7 @@ impl SearchProvider for SerpApiProvider {
                                     error_note = Some(format!(
                                         "SerpAPI 上游返回 HTTP {}：{}",
                                         resp_status,
-                                        truncated(&body)
+                                        report_excerpt(&body)
                                     ));
                                     status =
                                         AttemptStatus::Failed(fail_kind_for_status(resp_status));
@@ -302,7 +242,7 @@ impl SearchProvider for SerpApiProvider {
                                     let err_l = err.to_lowercase();
                                     error_note = Some(format!(
                                         "SerpAPI 上游报错（engine=google_patents）：{}",
-                                        truncated(err)
+                                        report_excerpt(err)
                                     ));
                                     if err_l.contains("too many requests")
                                         || err_l.contains("rate limit")
@@ -362,7 +302,7 @@ impl SearchProvider for SerpApiProvider {
                                 );
                                 error_note = Some(format!(
                                     "SerpAPI 响应不是合法 JSON（上游结构可能已变化），片段：{}",
-                                    truncated(&body)
+                                    report_excerpt(&body)
                                 ));
                                 status = AttemptStatus::Failed(FailKind::Parse);
                             }
@@ -653,17 +593,7 @@ fn fail_kind_for_error(err_lower: &str) -> FailKind {
     }
 }
 
-/// 诊断字段用的安全截断：**仅用于展示**（`AttemptReport.error` / 日志），
-/// 绝不用于任何送往上游或入库的数据（AGENTS.md 2.5 截断纪律）。
-fn truncated(s: &str) -> String {
-    const MAX: usize = 200;
-    if s.chars().count() <= MAX {
-        return s.to_string();
-    }
-    let mut out: String = s.chars().take(MAX).collect();
-    out.push('…');
-    out
-}
+/// 诊断字段用的安全截断已上提到 `model::report_excerpt`（MA2a 起两个在线源共用一份取值规则）。
 
 /// SerpAPI `organic_results[]` 单条 → 域内 `Patent`（旧 `serp_to_patent`，字段映射未改）。
 fn serp_to_patent(r: &serde_json::Value) -> Patent {
@@ -715,7 +645,13 @@ pub(crate) fn exact_lookup_response(summary: PatentSummary) -> serde_json::Value
 #[cfg(test)]
 mod tests {
     use super::*;
+    // MA2a 起这些判定只在 `cfg(test)` 下被本模块用到（生产侧改走 `rank_and_gate_hits`）。
+    // 留在父模块的 `use` 会让非 test 构建报 unused_imports，故在此就地导入。
+    use crate::search::merge::dedup_patent_summaries;
     use crate::search::model::Lang;
+    use crate::search::relevance::{
+        calculate_online_relevance, contains_cjk, is_online_result_relevant,
+    };
     use serde_json::json;
 
     fn db() -> Arc<Database> {
