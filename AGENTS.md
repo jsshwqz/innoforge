@@ -192,7 +192,7 @@ docs/          # 文档和规划
 - 如果修改了模板（`templates/`）或 JS 文件（`static/`），运行 ESLint 检查 JS 语法：
   ```bash
   export PATH="/c/Users/Administrator/AppData/Local/ms-playwright-go/1.57.0:/c/Users/Administrator/AppData/Roaming/npm:$PATH"
-  node node_modules/.bin/eslint templates/static/i18n.js 2>&1 | grep -v "node_modules"
+  node node_modules/.bin/eslint static/i18n.js 2>&1 | grep -v "node_modules"
   ```
   无 `error` 级别报错
 - 三项全过才算完成，任一失败必须修复后重跑
