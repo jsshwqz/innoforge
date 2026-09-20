@@ -6,11 +6,13 @@
 //! - [`relevance`]：在线结果相关性打分与放行判定（原 `routes/search.rs` 私有函数）
 //! - [`merge`]：排序与去重（原 `routes/search.rs` 私有函数）
 //! - [`provider`]：[`SearchProvider`](provider::SearchProvider) trait 本体
-//! - [`providers`]：具体源的实现（MA2a 起为 `serpapi` + `google_patents_xhr`）
+//! - [`providers`]：具体源的实现（MA2a 起 `serpapi` + `google_patents_xhr`，
+//!   MA2b 起追加 `epo_ops`；MA4 的本地 FTS 兜底源在此追加）
 //! - [`chain`]：[`SourceChain`](chain::SourceChain) 多源并行执行链与降级择胜规则（MA2a）
 //!
 //! ## MA1 边界（有意不做的事）
-//! - ~~不做新源接入（Google Patents XHR / EPO OPS 属 MA2）~~ **MA2a 已接入 Google Patents XHR**；
+//! - ~~不做新源接入（Google Patents XHR / EPO OPS 属 MA2）~~
+//!   **MA2a 已接入 Google Patents XHR、MA2b 已接入 EPO OPS（执行链第三源）**；
 //! - ~~不做并行执行链与源级熔断（spec §6 属 MA2），故本层部分判定方法（`FailKind::switches_source`
 //!   等）尚无消费方，已就地标注 `#[allow(dead_code)]` 并说明归属里程碑~~
 //!   **MA2a 起 `switches_source` 已被消费**（`providers::google_patents_xhr` 的重试判定 +
