@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-08-15T06:10:30.135Z",
+  "generatedAt": "2026-09-20T02:06:41.958Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -531,7 +531,9 @@
         "detectProvider",
         "fetchAiModels",
         "fetchSerpapiBalance",
+        "formatNumber",
         "goBack",
+        "loadAiCostStats",
         "loginWithGcloud",
         "onAuth",
         "onProviderChange",
