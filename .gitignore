@@ -10,7 +10,7 @@ mcp_stderr.txt
 # docs/plans/ — 版本规划文档需要入库，不再忽略
 *.zip
 node_modules
-package-lock.json
+# package-lock.json 必须入库：CI 的 `npm ci` 依赖它才能在干净 runner 上复现依赖（见 AGENTS.md §4.3）
 server.log
 
 # 根目录不放置源代码文件（所有源码在 src/ 下）
