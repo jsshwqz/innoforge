@@ -1,5 +1,14 @@
-use super::{build_online_query, escape_csv, parse_search_type, AppState};
+use super::{escape_csv, parse_search_type, AppState};
 use crate::patent::*;
+// MA1：q 串渲染 / 相关性判定 / 排序去重 / 上游调用链均已抽到 `crate::search`，
+// 本文件只保留「端点」职责：请求解析、响应形状、超时预算与本地兜底。
+use crate::search::merge::{dedup_patent_summaries, sort_by_relevance};
+use crate::search::model::{
+    AttemptReport, AttemptStatus, Lang, SearchOutcome, SearchQuery, SourceKind,
+};
+use crate::search::provider::SearchProvider;
+use crate::search::providers::serpapi::{exact_lookup_response, SerpApiProvider};
+use crate::search::query::resolve_lang;
 use axum::{
     extract::State,
     http::{header, StatusCode},
@@ -9,8 +18,27 @@ use axum::{
 use serde_json::json;
 use std::time::Instant;
 
-const ONLINE_UPSTREAM_TIMEOUT_SECS: u64 = 30;
 const ONLINE_TOTAL_BUDGET_SECS: u64 = 60;
+
+/// 没有可用 Key 时的「本源未参与」结果。
+///
+/// 旧代码在 `api_key_opt` 为 `None` 时只设一句 `upstream_hint` 然后落到本地兜底；
+/// 这里用同一份文案构造等价的 [`SearchOutcome`]，使后续控制流（hint / 预算 / 兜底）
+/// 与在线源真正跑过之后完全走同一条路径，避免两份分支各自演化。
+fn serpapi_skipped_outcome(hint: &str) -> SearchOutcome {
+    SearchOutcome {
+        results: vec![],
+        attempts: vec![AttemptReport {
+            source: SourceKind::SerpApi,
+            status: AttemptStatus::Skipped,
+            latency_ms: 0,
+            hits: 0,
+            error: Some("未配置 SERPAPI_KEY，本轮未发起在线请求".to_string()),
+            hint: Some(hint.to_string()),
+        }],
+        upstream_total: None,
+    }
+}
 
 pub async fn api_search(
     State(s): State<AppState>,
@@ -179,50 +207,10 @@ pub async fn api_search(
     })
 }
 
-fn sort_by_relevance(patents: &mut [PatentSummary]) {
-    patents.sort_by(|a, b| {
-        let sa = a.relevance_score.unwrap_or(0.0);
-        let sb = b.relevance_score.unwrap_or(0.0);
-        sb.partial_cmp(&sa).unwrap_or(std::cmp::Ordering::Equal)
-    });
-}
-
-fn dedup_patent_summaries(items: Vec<PatentSummary>) -> Vec<PatentSummary> {
-    let mut best_by_key: std::collections::HashMap<String, PatentSummary> =
-        std::collections::HashMap::new();
-    for item in items {
-        let key = crate::patent::canonical_patent_key(&item.patent_number);
-        let dedup_key = if key.is_empty() {
-            format!("TITLE::{}", item.title.trim().to_uppercase())
-        } else {
-            key
-        };
-        match best_by_key.get_mut(&dedup_key) {
-            None => {
-                best_by_key.insert(dedup_key, item);
-            }
-            Some(existing) => {
-                let old_score = existing.relevance_score.unwrap_or(0.0);
-                let new_score = item.relevance_score.unwrap_or(0.0);
-                let old_info = existing.title.len()
-                    + existing.abstract_text.len()
-                    + existing.applicant.len()
-                    + existing.inventor.len();
-                let new_info = item.title.len()
-                    + item.abstract_text.len()
-                    + item.applicant.len()
-                    + item.inventor.len();
-                if new_score > old_score || (new_score == old_score && new_info > old_info) {
-                    *existing = item;
-                }
-            }
-        }
-    }
-    let mut out: Vec<PatentSummary> = best_by_key.into_values().collect();
-    sort_by_relevance(&mut out);
-    out
-}
-
+/// `POST /api/search/online` — 在线检索端点。
+///
+/// 端点职责：请求解析 → 区域判定 → 取 Key → 交给 [`SerpApiProvider`] → 按旧形状出参 →
+/// 超时预算 → 本地库兜底。上游调用与结果映射见 `crate::search::providers::serpapi`。
 pub async fn api_search_online(
     State(s): State<AppState>,
     Json(req): Json<SearchRequest>,
@@ -234,7 +222,7 @@ pub async fn api_search_online(
     let online_search_type = parse_search_type(req.search_type.as_deref())
         .or_else(|| Some(s.db.detect_search_type(&req.query)));
 
-    // 搜索区域判定：用户明确选择 > 自动检测
+    // 空查询：不发上游请求，直接返回（形状与旧代码逐字一致）
     let query_trimmed = req.query.trim();
     if query_trimmed.is_empty() {
         return Json(json!({
@@ -245,253 +233,76 @@ pub async fn api_search_online(
             "message": "查询词为空，已跳过在线检索"
         }));
     }
-    let looks_like_cn_patent_number = {
-        let digits_only: String = query_trimmed
-            .chars()
-            .filter(|c| c.is_ascii_digit())
-            .collect();
-        digits_only.len() >= 10
-            && digits_only.len() <= 15
-            && query_trimmed
-                .chars()
-                .all(|c| c.is_ascii_digit() || c == '.')
-    };
-    let auto_cn = matches!(req.country.as_deref(), Some("CN"))
-        || query_trimmed.starts_with("CN")
-        || query_trimmed.starts_with("ZL")
-        || looks_like_cn_patent_number
-        || query_trimmed
-            .chars()
-            .any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c));
-
-    let is_cn_query = match req.region.as_deref() {
-        Some("cn") => true,    // 用户明确选国内
-        Some("intl") => false, // 用户明确选国外
-        _ => auto_cn,          // 自动检测
-    };
-    let is_intl_query = match req.region.as_deref() {
-        Some("intl") => true,
-        Some("cn") => false,
-        _ => !auto_cn,
-    };
+    // 搜索区域判定：用户明确选择 > 自动检测。
+    // 判定规则已迁至 `search::query::resolve_lang`（`Lang::Chinese` ⇔ 旧 `is_cn_query`，
+    // `Lang::English` ⇔ 旧 `is_intl_query`），与旧实现逐用例等价，
+    // 由 `resolve_lang_matches_pre_migration_region_flags` 锁死。
+    let lang = resolve_lang(req.region.as_deref(), req.country.as_deref(), query_trimmed);
+    let is_cn_query = matches!(lang, Lang::Chinese);
     println!(
         "[ONLINE] region resolve: is_cn={} is_intl={}",
-        is_cn_query, is_intl_query
+        is_cn_query, !is_cn_query
     );
-    let mut upstream_hint: Option<String> = None;
     let online_start = Instant::now();
-    let mut _remote_budget_exhausted = false;
 
     // 当前策略：在线检索仅走国外数据源链路（SerpAPI / Google Patents）
     // 不再进入 CNIPR / 百度 / 搜狗 分支。
+    let search_query = SearchQuery {
+        keyword: req.query.clone(),
+        country: req.country.clone(),
+        language: Some(lang),
+        assignee: None,
+        exact_assignee: false,
+        date_from: req.date_from.clone(),
+        date_to: req.date_to.clone(),
+        limit: req.page_size,
+        page: req.page,
+        sort_by: req.sort_by.clone(),
+        search_type: online_search_type.clone(),
+    };
 
-    // ── 精确专利号查询：当检测为 PatentNumber 时，先尝试 SerpAPI Details 精确抓取 ──
-    // Round-robin 选取一个可用 Key
+    // Round-robin 选取一个可用 Key —— 属配置层既有职责，MA1 不上提到 provider。
     let api_key_opt = s
         .config
         .read()
         .unwrap_or_else(|e| e.into_inner())
         .next_serpapi_key();
-    if matches!(online_search_type.as_ref(), Some(SearchType::PatentNumber)) {
-        if let Some(ref api_key) = api_key_opt {
-            if let Some(result) = try_exact_patent_lookup(&req.query, api_key, &s).await {
-                return Json(result);
-            }
-        }
-    }
 
-    if let Some(ref api_key) = api_key_opt {
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(ONLINE_UPSTREAM_TIMEOUT_SECS))
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
-        let serp_page = if req.page < 1 { 1 } else { req.page };
-        let search_query = build_online_query(
-            &req.query,
-            online_search_type.as_ref(),
-            req.date_from.as_deref(),
-            req.date_to.as_deref(),
-        );
-        let country_param = match req.country.as_deref() {
-            Some(c) if !c.is_empty() => format!("&country={}", c),
-            _ => String::new(),
-        };
-        let sort_param = match req.sort_by.as_deref() {
-            Some("new") => "&sort=new",
-            Some("old") => "&sort=old",
-            _ => "",
-        };
-        // 中文查询时请求中文结果（地理 + 语种约束）
-        let lang_param = if is_cn_query {
-            "&hl=zh-cn&gl=cn&lr=lang_zh-CN"
-        } else {
-            ""
-        };
-        let url = format!(
-            "https://serpapi.com/search.json?engine=google_patents&q={}&page={}{}{}{}&api_key={}",
-            urlencoding::encode(&search_query),
-            serp_page,
-            country_param,
-            sort_param,
-            lang_param,
-            api_key
-        );
-        println!(
-            "[ONLINE] SerpAPI query='{}' page={} country_param='{}'",
-            search_query, serp_page, country_param
-        );
-        match client.get(&url).send().await {
-            Ok(resp) => {
-                let status = resp.status();
-                println!("[ONLINE] SerpAPI status: {}", status);
-                if let Ok(body) = resp.text().await {
-                    println!("[ONLINE] SerpAPI body len={}", body.len());
-                    if !status.is_success() {
-                        if status.as_u16() == 429 {
-                            upstream_hint = Some(
-                                "SerpAPI 触发限流/额度限制（429），已自动尝试下游回退。"
-                                    .to_string(),
-                            );
-                        } else {
-                            upstream_hint = Some(format!(
-                                "SerpAPI 请求失败（HTTP {}），已自动尝试下游回退。",
-                                status
-                            ));
-                        }
-                    } else if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) {
-                        if let Some(err) = json.get("error").and_then(|v| v.as_str()) {
-                            println!("[ONLINE] SerpAPI error: {}", err);
-                            let err_l = err.to_lowercase();
-                            if err_l.contains("too many requests")
-                                || err_l.contains("rate limit")
-                                || err_l.contains("quota")
-                            {
-                                upstream_hint = Some(
-                                    "SerpAPI 配额或频率受限，已自动尝试下游回退。".to_string(),
-                                );
-                            } else {
-                                let short = err.chars().take(120).collect::<String>();
-                                upstream_hint = Some(format!(
-                                    "SerpAPI 返回错误：{}，已自动尝试下游回退。",
-                                    short
-                                ));
-                            }
-                        } else {
-                            let total = json["search_information"]["total_results"]
-                                .as_u64()
-                                .unwrap_or(0) as usize;
-                            let mut patents = Vec::new();
-                            if let Some(results) = json["organic_results"].as_array() {
-                                println!(
-                                    "[ONLINE] SerpAPI results: {}, total: {}",
-                                    results.len(),
-                                    total
-                                );
-                                for (idx, r) in results.iter().enumerate() {
-                                    let p = serp_to_patent(r);
-                                    if !p.title.is_empty() {
-                                        let saved_id = s.db.insert_patent(&p).unwrap_or_else(|e| {
-                                            tracing::warn!(
-                                                "Failed to cache online patent {}: {}",
-                                                p.patent_number,
-                                                e
-                                            );
-                                            p.id.clone()
-                                        });
-                                        // Hybrid relevance: position + content matching
-                                        let position_score = (98.0 - idx as f64 * 3.0).max(30.0);
-                                        let content_score = calculate_online_relevance(
-                                            &req.query,
-                                            &p.title,
-                                            &p.abstract_text,
-                                            &p.applicant,
-                                            &p.inventor,
-                                        );
-                                        tracing::debug!(
-                                            "SerpAPI filter: query={}, title={}, applicant={}, inventor={}, content_score={:.1}",
-                                            &req.query, &p.title, &p.applicant, &p.inventor, content_score
-                                        );
-                                        if !is_online_result_relevant(
-                                            &req.query,
-                                            &p.title,
-                                            &p.abstract_text,
-                                            content_score,
-                                            is_cn_query,
-                                            &p.inventor,
-                                        ) {
-                                            continue;
-                                        }
-                                        let score =
-                                            (position_score * 0.4 + content_score * 0.6).min(100.0);
-                                        let source = format!(
-                                            "hybrid(pos:{:.0}+content:{:.0})",
-                                            position_score, content_score
-                                        );
-                                        patents.push(PatentSummary {
-                                            id: saved_id,
-                                            patent_number: p.patent_number.clone(),
-                                            title: p.title.clone(),
-                                            abstract_text: p.abstract_text.clone(),
-                                            applicant: p.applicant.clone(),
-                                            inventor: p.inventor.clone(),
-                                            filing_date: p.filing_date.clone(),
-                                            country: p.country.clone(),
-                                            relevance_score: Some(score),
-                                            score_source: Some(source),
-                                        });
-                                    }
-                                }
-                            }
-                            if is_cn_query {
-                                let zh_patents: Vec<PatentSummary> = patents
-                                    .iter()
-                                    .filter(|p| {
-                                        contains_cjk(&p.title) || contains_cjk(&p.abstract_text)
-                                    })
-                                    .cloned()
-                                    .collect();
-                                if !zh_patents.is_empty() {
-                                    patents = zh_patents;
-                                }
-                            }
-                            patents = dedup_patent_summaries(patents);
-                            if !patents.is_empty() {
-                                let mut out = json!({
-                                    "patents": patents,
-                                    "total": total,
-                                    "page": req.page,
-                                    "page_size": 10,
-                                    "source": "serpapi"
-                                });
-                                if let Some(h) = upstream_hint.take() {
-                                    out["hint"] = json!(h);
-                                }
-                                return Json(out);
-                            }
-                            println!("[ONLINE] SerpAPI returned empty; fallback to local DB");
-                            if upstream_hint.is_none() {
-                                upstream_hint =
-                                    Some("SerpAPI 无结果，已自动尝试下游回退。".to_string());
-                            }
-                        }
-                    } else if upstream_hint.is_none() {
-                        upstream_hint =
-                            Some("SerpAPI 返回内容无法解析，已自动尝试下游回退。".to_string());
-                    }
+    let outcome = match api_key_opt {
+        Some(api_key) => {
+            let provider = SerpApiProvider::new(api_key, s.db.clone());
+            // ── 精确专利号查询：当检测为 PatentNumber 时，先尝试 SerpAPI Details 精确抓取 ──
+            if matches!(online_search_type.as_ref(), Some(SearchType::PatentNumber)) {
+                if let Some(summary) = provider.lookup_exact(req.query.clone()).await {
+                    return Json(exact_lookup_response(summary));
                 }
             }
-            Err(e) => {
-                println!("[ONLINE] SerpAPI request error: {}", e);
-                upstream_hint = Some(format!("SerpAPI 请求异常：{}，已自动尝试下游回退。", e));
-            }
+            provider.search(search_query).await
         }
-    } else {
-        println!("[ONLINE] No SERPAPI_KEY configured");
-        upstream_hint = Some("未配置有效 SerpAPI Key，已自动尝试下游回退。".to_string());
+        None => {
+            println!("[ONLINE] No SERPAPI_KEY configured");
+            serpapi_skipped_outcome("未配置有效 SerpAPI Key，已自动尝试下游回退。")
+        }
+    };
+
+    let mut upstream_hint = outcome.hint();
+
+    // 上游成功且有命中 → 按旧形状直接返回（旧代码是在 SerpAPI 分支内提前 return）。
+    if outcome.succeeded_from(SourceKind::SerpApi) {
+        let mut out = json!({
+            "patents": outcome.summaries(),
+            "total": outcome.upstream_total.unwrap_or(0),
+            "page": req.page,
+            "page_size": 10,
+            "source": SourceKind::SerpApi.as_str()
+        });
+        if let Some(h) = upstream_hint.take() {
+            out["hint"] = json!(h);
+        }
+        return Json(out);
     }
 
     if online_start.elapsed().as_secs() >= ONLINE_TOTAL_BUDGET_SECS {
-        _remote_budget_exhausted = true;
         let msg = format!(
             "在线检索超时预算已用尽（{}s），已跳过后续远端回退并改走本地兜底。",
             ONLINE_TOTAL_BUDGET_SECS
@@ -919,531 +730,91 @@ pub async fn api_export_xlsx(
     }
 }
 
-/// 计算文本相似度分数（用于在线搜索排序和过滤）
-fn calculate_online_relevance(
-    query: &str,
-    title: &str,
-    abstract_text: &str,
-    applicant: &str,
-    inventor: &str,
-) -> f64 {
-    let q = query.trim().to_lowercase();
-    let t = title.trim().to_lowercase();
-    let a = abstract_text.trim().to_lowercase();
-    let app = applicant.trim().to_lowercase();
-    let inv = inventor.trim().to_lowercase();
-
-    let mut score = 30.0;
-
-    // Title matching (most important, max +50)
-    if t == q {
-        score += 50.0;
-    } else if t.contains(&q) {
-        score += 35.0;
-    } else {
-        // Word-level matching in title
-        let q_words: Vec<&str> = q.split_whitespace().filter(|w| w.len() > 1).collect();
-        if !q_words.is_empty() {
-            let matches = q_words.iter().filter(|w| t.contains(*w)).count();
-            score += (matches as f64 / q_words.len() as f64) * 30.0;
-        }
-        // Chinese bigram matching
-        let q_chars: Vec<char> = q
-            .chars()
-            .filter(|c| ('\u{4E00}'..='\u{9FFF}').contains(c))
-            .collect();
-        if q_chars.len() >= 2 {
-            let q_bigrams: Vec<String> = q_chars.windows(2).map(|w| w.iter().collect()).collect();
-            let t_chars: Vec<char> = t
-                .chars()
-                .filter(|c| ('\u{4E00}'..='\u{9FFF}').contains(c))
-                .collect();
-            let t_bigrams: Vec<String> = if t_chars.len() >= 2 {
-                t_chars.windows(2).map(|w| w.iter().collect()).collect()
-            } else {
-                vec![]
-            };
-            if !q_bigrams.is_empty() && !t_bigrams.is_empty() {
-                let matches = q_bigrams.iter().filter(|bg| t_bigrams.contains(bg)).count();
-                score += (matches as f64 / q_bigrams.len() as f64) * 25.0;
-            }
-        } else if !q_chars.is_empty() {
-            let matches = q_chars.iter().filter(|c| t.contains(**c)).count();
-            score += (matches as f64 / q_chars.len() as f64) * 20.0;
-        }
-    }
-
-    // Abstract matching (secondary, max +15)
-    if a.contains(&q) {
-        score += 15.0;
-    } else {
-        let q_words: Vec<&str> = q.split_whitespace().filter(|w| w.len() > 1).collect();
-        if !q_words.is_empty() {
-            let matches = q_words.iter().filter(|w| a.contains(*w)).count();
-            score += (matches as f64 / q_words.len() as f64) * 10.0;
-        }
-        let q_chars: Vec<char> = q
-            .chars()
-            .filter(|c| ('\u{4E00}'..='\u{9FFF}').contains(c))
-            .collect();
-        if q_chars.len() >= 2 {
-            let q_bigrams: Vec<String> = q_chars.windows(2).map(|w| w.iter().collect()).collect();
-            let a_chars: Vec<char> = a
-                .chars()
-                .filter(|c| ('\u{4E00}'..='\u{9FFF}').contains(c))
-                .collect();
-            let a_bigrams: Vec<String> = if a_chars.len() >= 2 {
-                a_chars.windows(2).map(|w| w.iter().collect()).collect()
-            } else {
-                vec![]
-            };
-            if !q_bigrams.is_empty() && !a_bigrams.is_empty() {
-                let matches = q_bigrams.iter().filter(|bg| a_bigrams.contains(bg)).count();
-                score += (matches as f64 / q_bigrams.len() as f64) * 8.0;
-            }
-        }
-    }
-
-    // Applicant matching (bonus, max +5)
-    if app.contains(&q) {
-        score += 5.0;
-    }
-
-    // Inventor matching (bonus, max +15) — 用于中文发明人姓名搜索
-    if inv.contains(&q) || q.contains(&inv) {
-        score += 15.0;
-    }
-
-    score.min(100.0)
-}
-
-/// 检查字符串是否包含中文字符
-fn contains_cjk(s: &str) -> bool {
-    s.chars().any(|c| ('\u{4E00}'..='\u{9FFF}').contains(&c))
-}
-
-/// 判断在线搜索结果的关联性，发明人姓名匹配时直接放行
-fn is_online_result_relevant(
-    query: &str,
-    title: &str,
-    abstract_text: &str,
-    content_score: f64,
-    is_cn_query: bool,
-    inventor: &str,
-) -> bool {
-    let q = query.trim();
-    if q.is_empty() {
-        return false;
-    }
-    let t = title.to_lowercase();
-    let a = abstract_text.to_lowercase();
-    let ql = q.to_lowercase();
-
-    // 发明人姓名直接匹配：查询词命中的发明人姓名，直接放行
-    let inv_lower = inventor.to_lowercase();
-    if !inv_lower.is_empty()
-        && q.chars()
-            .all(|c| c.is_ascii_alphabetic() || c.is_whitespace())
-    {
-        // 英文姓名：双向包含检查（查询包含发明人，或发明人包含查询）
-        if inv_lower.contains(&ql) || ql.contains(&inv_lower) {
-            return true;
-        }
-    }
-    // 中文姓名/拼音：查询词中的每个字都出现在发明人字段中
-    if !inv_lower.is_empty() {
-        let q_clean: String = q.chars().filter(|c| !c.is_ascii_punctuation()).collect();
-        if q_clean.chars().all(|c| {
-            c.is_ascii_alphabetic() || c.is_ascii_digit() || ('\u{4E00}'..='\u{9FFF}').contains(&c)
-        }) && q_clean.len() >= 2
-        {
-            let all_in_inventor = q_clean.chars().all(|c| inv_lower.contains(c));
-            if all_in_inventor {
-                return true;
-            }
-        }
-    }
-
-    // 直接匹配优先保留
-    if t.contains(&ql) || a.contains(&ql) {
-        return true;
-    }
-
-    // 中文查询：门槛更高，避免无关英文噪声
-    if is_cn_query {
-        if contains_cjk(title) || contains_cjk(abstract_text) {
-            return content_score >= 45.0;
-        }
-        return content_score >= 62.0;
-    }
-
-    // 英文/国际查询：多词技术查询至少命中两个查询词
-    let query_terms: Vec<&str> = ql
-        .split(|c: char| !c.is_ascii_alphanumeric())
-        .filter(|w| w.len() >= 3)
-        .filter(|w| {
-            !matches!(
-                *w,
-                "patent"
-                    | "device"
-                    | "method"
-                    | "system"
-                    | "apparatus"
-                    | "mobile"
-                    | "phone"
-                    | "electronic"
-            )
-        })
-        .collect();
-    if query_terms.len() >= 2 {
-        let haystack = format!("{t} {a}");
-        let matched = query_terms
-            .iter()
-            .filter(|term| haystack.contains(**term))
-            .count();
-        let required_matches = if query_terms.len() <= 3 {
-            query_terms.len()
-        } else {
-            (query_terms.len() * 2).div_ceil(3)
-        };
-        if matched < required_matches {
-            return false;
-        }
-    }
-
-    content_score >= 40.0
-}
-
-pub(crate) fn serp_to_patent(r: &serde_json::Value) -> Patent {
-    let pub_num = r["publication_number"].as_str().unwrap_or("").to_string();
-    let country = pub_num.chars().take(2).collect::<String>();
-    Patent {
-        id: uuid::Uuid::new_v4().to_string(),
-        patent_number: pub_num,
-        title: r["title"].as_str().unwrap_or("").to_string(),
-        abstract_text: r["snippet"].as_str().unwrap_or("").to_string(),
-        description: String::new(),
-        claims: String::new(),
-        applicant: r["assignee"].as_str().unwrap_or("").to_string(),
-        inventor: r["inventor"].as_str().unwrap_or("").to_string(),
-        filing_date: r["filing_date"].as_str().unwrap_or("").to_string(),
-        publication_date: r["publication_date"].as_str().unwrap_or("").to_string(),
-        grant_date: r["grant_date"].as_str().map(|s| s.to_string()),
-        ipc_codes: String::new(),
-        cpc_codes: String::new(),
-        priority_date: r["priority_date"].as_str().unwrap_or("").to_string(),
-        country,
-        kind_code: String::new(),
-        family_id: None,
-        legal_status: String::new(),
-        citations: "[]".into(),
-        cited_by: "[]".into(),
-        source: "serpapi".into(),
-        raw_json: r.to_string(),
-        created_at: chrono::Utc::now().to_rfc3339(),
-        images: "[]".into(),
-        pdf_url: String::new(),
-    }
-}
-
-// 以下搜索源（Firecrawl/Bing/Google Patents直连/搜狗/CNIPR）已全部屏蔽，仅保留 SerpAPI
-
-async fn try_exact_patent_lookup(
-    query: &str,
-    api_key: &str,
-    state: &super::AppState,
-) -> Option<serde_json::Value> {
-    let q = query.trim();
-    let digits: String = q.chars().filter(|c| c.is_ascii_digit()).collect();
-
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(ONLINE_UPSTREAM_TIMEOUT_SECS))
-        .build()
-        .ok()?;
-
-    // Step 1: Determine patent_id to look up
-    let patent_id: String;
-
-    let is_bare_cn_app = digits.len() >= 10
-        && digits.len() <= 15
-        && q.chars().all(|c| c.is_ascii_digit() || c == '.');
-
-    let is_cn_app_with_prefix =
-        q.starts_with("CN") && q.contains('.') && digits.len() >= 10 && digits.len() <= 15;
-
-    if q.starts_with("CN")
-        || q.starts_with("US")
-        || q.starts_with("EP")
-        || q.starts_with("WO")
-        || q.starts_with("JP")
-        || q.starts_with("KR")
-    {
-        if is_cn_app_with_prefix {
-            // CN APPLICATION number with CN prefix (e.g., CN202420009882.7)
-            // Google Patents indexes by PUBLICATION number, not application number.
-            // We must first search to discover the publication number.
-            let mut candidates = vec![q.to_string(), q.replace('.', "")];
-            let dot_pos = q.find('.').unwrap_or(q.len());
-            let pre_dot_digits: String = q[..dot_pos]
-                .chars()
-                .filter(|c| c.is_ascii_digit())
-                .collect();
-            if !pre_dot_digits.is_empty() {
-                candidates.push(pre_dot_digits.clone());
-                if pre_dot_digits.len() > 1 {
-                    candidates.push(format!("CN{}", pre_dot_digits));
-                }
-            }
-
-            println!(
-                "[EXACT] CN app number with prefix detected, trying candidates: {:?}",
-                candidates
-            );
-            let found_id = find_publication_patent_id(&client, api_key, &candidates).await;
-            if let Some(id) = found_id {
-                let id = if id.contains("/CN") {
-                    id.replace("/en", "/zh")
-                } else {
-                    id
-                };
-                println!("[EXACT] Found publication via keyword search: {}", id);
-                patent_id = id;
-            } else {
-                println!(
-                    "[EXACT] Keyword search returned no results for {:?}",
-                    candidates
-                );
-                return None;
-            }
-        } else {
-            // Already has country prefix — publication number, try directly
-            let no_dot = q.replace('.', "");
-            let lang = if q.starts_with("CN") { "zh" } else { "en" };
-            patent_id = format!("patent/{}/{}", no_dot, lang);
-        }
-    } else if is_bare_cn_app {
-        // Bare Chinese APPLICATION number (e.g. 202210835143.9)
-        // Google Patents indexes by PUBLICATION number, not application number.
-        // We must first search to discover the publication number.
-        let mut candidates = Vec::new();
-        candidates.push(q.to_string());
-        candidates.push(digits.clone());
-        if digits.len() >= 13 {
-            candidates.push(digits[..digits.len() - 1].to_string());
-            candidates.push(format!("CN{}", &digits[..digits.len() - 1]));
-        }
-        if digits.len() >= 12 {
-            candidates.push(format!("CN{}", &digits[..12]));
-        }
-        println!(
-            "[EXACT] Bare CN app number detected, trying candidates: {:?}",
-            candidates
-        );
-
-        match find_publication_patent_id(&client, api_key, &candidates).await {
-            Some(id) => {
-                // For CN patents, use /zh to get Chinese results
-                let id = if id.contains("/CN") {
-                    id.replace("/en", "/zh")
-                } else {
-                    id
-                };
-                println!("[EXACT] Found publication via keyword search: {}", id);
-                patent_id = id;
-            }
-            None => {
-                println!(
-                    "[EXACT] Keyword search returned no results for {:?}",
-                    candidates
-                );
-                return None;
-            }
-        }
-    } else {
-        // Default: use /en for non-CN patents
-        patent_id = format!("patent/{}/en", q);
-    }
-
-    // Step 2: Fetch full details via google_patents_details
-    let url = format!(
-        "https://serpapi.com/search.json?engine=google_patents_details&patent_id={}&api_key={}",
-        urlencoding::encode(&patent_id),
-        api_key
-    );
-    println!("[EXACT] Fetching details for: {}", patent_id);
-
-    let resp = client.get(&url).send().await.ok()?;
-    let body = resp.text().await.ok()?;
-    let json: serde_json::Value = serde_json::from_str(&body).ok()?;
-
-    if json.get("error").is_some() {
-        println!("[EXACT] Details API error: {}", json["error"]);
-        return None;
-    }
-
-    let title = json["title"].as_str().unwrap_or("");
-    if title.is_empty() {
-        println!("[EXACT] Details returned empty title");
-        return None;
-    }
-
-    // Extract inventors/assignees from arrays
-    let inventor = json["inventors"]
-        .as_array()
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v["name"].as_str())
-                .collect::<Vec<_>>()
-                .join("; ")
-        })
-        .unwrap_or_default();
-    let assignee = json["assignees"]
-        .as_array()
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str())
-                .collect::<Vec<_>>()
-                .join("; ")
-        })
-        .unwrap_or_default();
-
-    let pub_number = json["publication_number"].as_str().unwrap_or(q).to_string();
-    let country = pub_number.chars().take(2).collect::<String>();
-    let patent = Patent {
-        id: uuid::Uuid::new_v4().to_string(),
-        patent_number: pub_number.clone(),
-        title: title.to_string(),
-        abstract_text: json["abstract"].as_str().unwrap_or("").to_string(),
-        description: json["description"].as_str().unwrap_or("").to_string(),
-        claims: json["claims"]
-            .as_array()
-            .map(|a| {
-                a.iter()
-                    .filter_map(|v| v.as_str())
-                    .collect::<Vec<_>>()
-                    .join("\n\n")
-            })
-            .unwrap_or_default(),
-        applicant: assignee.clone(),
-        inventor: inventor.clone(),
-        filing_date: json["filing_date"].as_str().unwrap_or("").to_string(),
-        publication_date: json["publication_date"].as_str().unwrap_or("").to_string(),
-        grant_date: json["grant_date"].as_str().map(|s| s.to_string()),
-        ipc_codes: String::new(),
-        cpc_codes: String::new(),
-        priority_date: json["priority_date"].as_str().unwrap_or("").to_string(),
-        country: country.clone(),
-        kind_code: String::new(),
-        family_id: None,
-        legal_status: String::new(),
-        citations: "[]".into(),
-        cited_by: "[]".into(),
-        source: "serpapi_exact".into(),
-        raw_json: body,
-        created_at: chrono::Utc::now().to_rfc3339(),
-        images: "[]".into(),
-        pdf_url: json["pdf"].as_str().unwrap_or("").to_string(),
-    };
-
-    // Cache to local DB, use actual stored id
-    let saved_id = state.db.insert_patent(&patent).unwrap_or(patent.id.clone());
-
-    let summary = PatentSummary {
-        id: saved_id,
-        patent_number: patent.patent_number.clone(),
-        title: patent.title.clone(),
-        abstract_text: patent.abstract_text.clone(),
-        applicant: patent.applicant.clone(),
-        inventor: patent.inventor.clone(),
-        filing_date: patent.filing_date.clone(),
-        country,
-        relevance_score: Some(100.0),
-        score_source: Some("exact_lookup".to_string()),
-    };
-
-    println!(
-        "[EXACT] Found patent: {} — {}",
-        summary.patent_number, summary.title
-    );
-    Some(serde_json::json!({
-        "patents": [summary],
-        "total": 1,
-        "page": 1,
-        "page_size": 10,
-        "source": "serpapi_exact"
-    }))
-}
-
-async fn find_publication_patent_id(
-    client: &reqwest::Client,
-    api_key: &str,
-    candidates: &[String],
-) -> Option<String> {
-    for candidate in candidates {
-        let c = candidate.trim();
-        if c.is_empty() {
-            continue;
-        }
-        let search_url = format!(
-            "https://serpapi.com/search.json?engine=google_patents&q={}&page=1&api_key={}",
-            urlencoding::encode(c),
-            api_key
-        );
-        let resp = client.get(&search_url).send().await.ok()?;
-        let body = resp.text().await.ok()?;
-        let json: serde_json::Value = serde_json::from_str(&body).ok()?;
-        if let Some(id) = json["organic_results"]
-            .as_array()
-            .and_then(|arr| arr.first())
-            .and_then(|r| r["patent_id"].as_str())
-            .map(|s| s.to_string())
-        {
-            return Some(id);
-        }
-    }
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    // ── `/api/search/online` 的四条终态响应形状（MA1 抽出前后对照，逐字来自
+    // `git show b08f1c5:src/routes/search.rs` 的 `api_search_online`）──
+    //
+    // | 路径 | 字段 | 锁定该形状的测试 |
+    // |---|---|---|
+    // | 空查询 | `patents/total/page/page_size/message` | `api_search_online` 的 early-return（未改） |
+    // | 精确直查命中 | `patents/total=1/page=1/page_size=10/source=serpapi_exact` | `providers::serpapi::exact_lookup_response_shape_is_locked` |
+    // | 在线命中 | `patents/total/page/page_size=10/source=serpapi(+hint)` | `online_hit_response_keeps_legacy_shape` |
+    // | 本地兜底 | `patents/total/page/page_size/source=local/hint` | 兜底段（未改） |
+    //
+    // 上游请求参数与结果映射的一致性证据在 `src/search/` 侧：
+    // `query::render_q_matches_pre_migration_implementation`、
+    // `query::resolve_lang_matches_pre_migration_region_flags`、
+    // `providers::serpapi::search_url_matches_legacy_builder`、
+    // `providers::serpapi::outcome_patents_match_legacy_mapping`。
+
+    /// 未配置 Key 的路径必须与「源跑过但零命中」走同一条后续控制流：
+    /// hint 文案逐字保持旧值，且不得被误判为在线命中。
     #[test]
-    fn intl_relevance_rejects_generic_phone_results_for_specific_hinge_query() {
-        let query = "foldable phone hinge dustproof patent";
-        assert!(!is_online_result_relevant(
-            query,
-            "mobile phone",
-            "A mobile phone includes a touch screen and a camera.",
-            42.0,
-            false,
-            "",
-        ));
+    fn no_key_outcome_keeps_legacy_hint_and_falls_back() {
+        let outcome = serpapi_skipped_outcome("未配置有效 SerpAPI Key，已自动尝试下游回退。");
+        assert_eq!(
+            Some("未配置有效 SerpAPI Key，已自动尝试下游回退。".to_string()),
+            outcome.hint()
+        );
+        assert!(!outcome.succeeded_from(SourceKind::SerpApi));
+        assert!(outcome.summaries().is_empty());
+        assert_eq!(None, outcome.upstream_total);
     }
 
+    /// 在线命中时 `SearchOutcome` 能还原出与旧代码同形的 JSON 片段
+    /// （`total` 取上游 `search_information.total_results`，`page_size` 恒为 10）。
     #[test]
-    fn intl_relevance_rejects_results_missing_specific_constraint_terms() {
-        let query = "foldable phone hinge dustproof patent";
-        assert!(!is_online_result_relevant(
-            query,
-            "mobile phone",
-            "A foldable mobile communication terminal has a biaxial hinge device.",
-            60.0,
-            false,
-            "",
-        ));
-    }
+    fn online_hit_response_keeps_legacy_shape() {
+        let summary = PatentSummary {
+            id: "saved-1".to_string(),
+            patent_number: "CN1123456A".to_string(),
+            title: "固态电池".to_string(),
+            abstract_text: "一种全固态电池结构。".to_string(),
+            applicant: "某研究院".to_string(),
+            inventor: "张三".to_string(),
+            filing_date: "2024-01-01".to_string(),
+            country: "CN".to_string(),
+            relevance_score: Some(87.2),
+            score_source: Some("hybrid(pos:98+content:80)".to_string()),
+        };
+        let outcome = SearchOutcome {
+            results: crate::search::merge::merged_from(SourceKind::SerpApi, vec![summary.clone()]),
+            attempts: vec![AttemptReport {
+                source: SourceKind::SerpApi,
+                status: AttemptStatus::Success,
+                latency_ms: 120,
+                hits: 1,
+                error: None,
+                hint: None,
+            }],
+            upstream_total: Some(1427),
+        };
 
-    #[test]
-    fn intl_relevance_keeps_specific_hinge_results() {
-        let query = "foldable phone hinge dustproof patent";
-        assert!(is_online_result_relevant(
-            query,
-            "Dustproof hinge for a foldable electronic device",
-            "The hinge blocks dust ingress while the foldable phone opens and closes.",
-            52.0,
-            false,
-            "",
-        ));
+        assert!(outcome.succeeded_from(SourceKind::SerpApi));
+        let mut out = json!({
+            "patents": outcome.summaries(),
+            "total": outcome.upstream_total.unwrap_or(0),
+            "page": 2usize,
+            "page_size": 10,
+            "source": SourceKind::SerpApi.as_str()
+        });
+        if let Some(h) = outcome.hint() {
+            out["hint"] = json!(h);
+        }
+        assert_eq!(
+            json!({
+                "patents": [summary],
+                "total": 1427,
+                "page": 2,
+                "page_size": 10,
+                "source": "serpapi"
+            }),
+            out
+        );
+        // hint 缺失时不得凭空多出该键（旧代码只在 Some 时插入）
+        assert!(out.get("hint").is_none());
     }
 }

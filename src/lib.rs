@@ -19,6 +19,10 @@ pub mod patent;
 pub mod pipeline;
 pub mod rag;
 mod routes;
+/// 统一检索层（MA1）：`pub` 与 `types` 同理——bin 入口 `main.rs` 也声明本模块，
+/// 若判为私有会让仅被 bin 侧不可达的 `pub` 项在 dead_code 上语义不一致。
+pub mod search;
+pub mod types;
 pub mod vector;
 
 use common::{build_router, init_app_state};

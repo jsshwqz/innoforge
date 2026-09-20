@@ -440,65 +440,6 @@ pub(crate) fn parse_search_type(search_type: Option<&str>) -> Option<SearchType>
     })
 }
 
-pub(crate) fn build_online_query(
-    query: &str,
-    search_type: Option<&SearchType>,
-    date_from: Option<&str>,
-    date_to: Option<&str>,
-) -> String {
-    let q = query.trim().replace('"', "");
-    let mut search_query = match search_type {
-        Some(SearchType::Applicant) => format!("assignee:\"{}\"", q),
-        Some(SearchType::Inventor) => format!("inventor:\"{}\"", q),
-        Some(SearchType::PatentNumber) => {
-            // For Chinese application numbers (e.g. "CN202420009882.7" or "202210835143.9"),
-            // Google Patents indexes by PUBLICATION number, not application number.
-            // CN application number format: YYYYMMNNNNNN.X (12 digits + check digit)
-            let digits: String = q.chars().filter(|c| c.is_ascii_digit()).collect();
-            let has_dot = q.contains('.');
-            let is_cn_app = digits.len() >= 10
-                && digits.len() <= 15
-                && (q.chars().all(|c| c.is_ascii_digit() || c == '.')
-                    || (q.starts_with("CN") && q.contains('.')));
-            if is_cn_app {
-                // If the original query has a dot (e.g. "202210835143.9"),
-                // strip the check digit after dot → use 12-digit core number.
-                // If no dot but 13 digits, the last digit is likely the check digit.
-                let core = if has_dot {
-                    // Take only digits before the dot position
-                    let dot_pos = q.find('.').unwrap_or(q.len());
-                    let pre_dot: String = q[..dot_pos]
-                        .chars()
-                        .filter(|c| c.is_ascii_digit())
-                        .collect();
-                    pre_dot
-                } else if digits.len() == 13 {
-                    // 13 digits without dot: last digit is check digit
-                    digits[..12].to_string()
-                } else {
-                    digits
-                };
-                // 同时保留原始申请号与核心位数，提升 SerpAPI 在不同索引形态下的命中率
-                format!("\"{}\" OR \"{}\"", q, core)
-            } else {
-                format!("\"{}\"", q)
-            }
-        }
-        _ => q,
-    };
-    if let Some(from) = date_from {
-        if !from.is_empty() {
-            search_query.push_str(&format!(" after:{from}"));
-        }
-    }
-    if let Some(to) = date_to {
-        if !to.is_empty() {
-            search_query.push_str(&format!(" before:{to}"));
-        }
-    }
-    search_query
-}
-
 /// HTML-escape to prevent XSS in template interpolation.
 pub(crate) fn html_escape(s: &str) -> String {
     s.replace('&', "&amp;")
@@ -590,29 +531,7 @@ pub(crate) fn efld(json: &serde_json::Value, field: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::build_online_query;
-    use crate::patent::SearchType;
     use crate::routes::AppConfig;
-
-    #[test]
-    fn online_query_uses_applicant_scope() {
-        let q = build_online_query("Alice Zhang", Some(&SearchType::Applicant), None, None);
-        assert_eq!(q, "assignee:\"Alice Zhang\"");
-    }
-
-    #[test]
-    fn online_query_uses_inventor_scope_and_dates() {
-        let q = build_online_query(
-            "Alice Zhang",
-            Some(&SearchType::Inventor),
-            Some("2024-01-01"),
-            Some("2024-12-31"),
-        );
-        assert_eq!(
-            q,
-            "inventor:\"Alice Zhang\" after:2024-01-01 before:2024-12-31"
-        );
-    }
 
     /// 验证非 Google 服务商不会启用 Gemini CLI 模式
     /// 这是对赌的核心保护——防止未来代码修改 reintroduce 此 bug

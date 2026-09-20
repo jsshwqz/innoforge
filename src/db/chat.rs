@@ -6,14 +6,10 @@
 use anyhow::Result;
 use rusqlite::params;
 
-/// 单条聊天消息 / Single chat message
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ChatMessage {
-    pub id: i64,
-    pub role: String,
-    pub content: String,
-    pub created_at: String,
-}
+// `ChatMessage` 的类型定义已按 types-migration-map.md §1「AI 对话族」归位到
+// `crate::types::chat`（T1.1 缩水版）。此处 `pub use` 保持 `crate::db::chat::ChatMessage`
+// 这一既有路径可用，字段与 serde 形状逐字未变。
+pub use crate::types::chat::ChatMessage;
 
 impl super::Database {
     /// 获取指定会话的全部消息（按时间正序）

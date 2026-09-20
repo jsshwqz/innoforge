@@ -14,7 +14,7 @@
 
 | # | 任务 | 内容与验收标准 | 依赖 |
 |---|------|----------------|------|
-| MA1 | SearchProvider 多源框架 | 落地 SearchProvider trait（原 T2.1）：按规格书§1 契约建模；SerpAPI 迁入为首个实现（从 routes/search.rs 抽出，行为保持） | T1 地基 |
+| MA1 | SearchProvider 多源框架 | ✅ **2026-09-20 完成**（分支 `exec/ma1-searchprovider`，前置 T1.1 `b08f1c5` + 接手 WIP `07bab1b` + 续建 WIP `fdbaf11`）：落地 SearchProvider trait（原 T2.1）：按规格书§1 契约建模；SerpAPI 迁入为首个实现（从 routes/search.rs 抽出，行为保持）。**证据**：契约六类型 + trait 见 `src/search/model.rs`/`provider.rs`，实现见 `src/search/providers/serpapi.rs`，`routes/search.rs` 1449→820 行、8 个函数迁入单一出处；行为保持由 `#[cfg(test)]` 内的**迁移前参考实现**逐用例对拍（`src/search/query.rs` `test_support::legacy_build_online_query`/`legacy_region_flags`、`src/search/providers/serpapi.rs` `legacy_url_from_q`/`legacy_map`）+ 端点四条终止响应形状快照测试；**门禁复跑（收尾 agent，tip `fdbaf11`，rustc/clippy 1.98.0）**：`cargo fmt --check` exit 0 ｜ `cargo clippy --all-targets -- -D warnings` exit 0 ｜ `cargo test` **457 passed / 0 failed / 3 ignored**（main 基线 369 → 457）｜ 端点形状对 main 逐条比对 **71/71 `.route()` 全等** ｜ templates/ 与 static/ 零改动 ⇒ HTML 扫描与 Puppeteer e2e 不适用；**已开 PR #11 待审**，接手取证与两处测试 bug 处置见 MASTER §5/§6。**⚠️ 下表 MA3 的证据行号已因本次迁移失效**（新位置：`auto_cn`→`src/search/query.rs::resolve_lang`、`country_param`→`src/search/providers/serpapi.rs:61`、`hl/gl/lr`→同文件 `:78`） | T1 地基 |
 | MA2 | 备用源接入 ≥2 个 | Google Patents XHR 直抓（免费无 Key，规格书§2，含限速退避）+ EPO OPS（规格书§4）；**验收：人为禁用 SerpAPI 后自动降级仍出结果，诊断面板标红失败源** | MA1 |
 | MA3 | 中文/CN 一等公民 | ⚠️ **2026-09-19 实测半程**（证据 `src/routes/search.rs:259` `auto_cn`、`:315` `country_param`——SerpAPI 已带 country 透传与 CN 自动判定），剩余口径见能力提升方案；query 渲染显式 country/language；检索页新增辖区+语言过滤（默认 CN+zh）；**验收：默认配置中文关键词首页以中文专利为主** | MA1 |
 | MA4 | 召回增强 | 申请人精确匹配模式；结果强制入库+FTS 自动同步（单一写入口，规格书§7）；**验收：本人姓名可搜到自己名下专利；检索过的专利断网可复检** | MA1 |
