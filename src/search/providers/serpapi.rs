@@ -571,14 +571,12 @@ impl SearchProvider for SerpApiProvider {
 }
 
 /// HTTP 状态码 → 失败分类（spec §1）。仅用于 `AttemptReport` 记账。
+///
+/// MA2a 起判定规则本身已上提到 [`FailKind::for_http_status`]（两个在线源共用一份出处，
+/// AGENTS.md 2.2），此处只保留 `reqwest::StatusCode` 的解包薄壳，
+/// 让既有单测 `fail_kind_classification_does_not_affect_hints` 继续锁死旧行为。
 fn fail_kind_for_status(status: reqwest::StatusCode) -> FailKind {
-    match status.as_u16() {
-        401 | 403 => FailKind::Auth,
-        402 | 429 => FailKind::Quota,
-        408 => FailKind::Network,
-        500..=599 => FailKind::Network,
-        _ => FailKind::Parse,
-    }
+    FailKind::for_http_status(status.as_u16())
 }
 
 /// 上游 error 文案 → 失败分类（spec §1）。仅用于 `AttemptReport` 记账。

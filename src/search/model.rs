@@ -61,15 +61,50 @@ pub enum FailKind {
 
 impl FailKind {
     /// 是否应切换下一源（spec §1：Parse 记 bug 不切换，直接报错）。
-    /// **MA2a 起由执行链 [`crate::search::chain::SourceChain`] 消费**：主源以 Parse 失败时不再降级。
+    /// **MA2a 起由执行链 [`crate::search::chain`] 消费**：主源以 Parse 失败时不再降级。
     pub fn switches_source(self) -> bool {
         !matches!(self, FailKind::Parse)
     }
 
     /// 是否进入源级冷却（spec §1：Quota/Auth → 冷却；spec §6：连续 3 次后冷却 10 分钟）。
-    #[allow(dead_code)] // MA2 熔断器消费
+    #[allow(dead_code)] // MA2b/MA5 熔断器消费
     pub fn cools_down(self) -> bool {
         matches!(self, FailKind::Quota | FailKind::Auth)
+    }
+
+    /// HTTP 状态码 → 失败分类（spec §1）。仅用于 `AttemptReport` 记账，不决定 HTTP 响应码。
+    ///
+    /// MA2a 自 `providers/serpapi.rs` 的私有 `fail_kind_for_status` 上提为契约层单一出处
+    /// （AGENTS.md 2.2：禁止同一判定规则出现第二份实现），**取值逐字未改**；
+    /// SerpAPI 侧保留一个同签名的转发薄壳，其旧单测继续锁死行为。
+    ///
+    /// 注：503 在此归 `Network`。Google Patents XHR 的反爬 503 属「配额文案」而非普通网络故障，
+    /// 该源在自己的调用点上用 [`FailKind::for_xhr_reply`] 做二次改判，不改本函数的公共语义。
+    pub fn for_http_status(status: u16) -> FailKind {
+        match status {
+            401 | 403 => FailKind::Auth,
+            402 | 429 => FailKind::Quota,
+            408 => FailKind::Network,
+            500..=599 => FailKind::Network,
+            _ => FailKind::Parse,
+        }
+    }
+
+    /// XHR 直抓源的反爬改判（spec §1「配额文案」分支 + spec §2 已知坑 1 的实证结论）。
+    ///
+    /// **实证**：连续 3 次请求（间隔 <8s）后 `patents.google.com/xhr/query` 返回
+    /// `HTTP 503` + **HTML**（`<title>Sorry...</title>`），而非 JSON。若只看状态码会落到
+    /// `Network`，只看响应体会落到 `Parse`（§1 规定 Parse **不降级**），两者都错：
+    /// 这是限流，正确处置是 `Quota` → 退避重试 + 冷却该源。
+    /// 因此判定顺序必须是「先按状态码+文案识别反爬，再考虑 JSON 解析失败」。
+    pub fn for_xhr_reply(status: u16, body: &str) -> FailKind {
+        const BOT_SIGNALS: [&str; 4] = ["sorry", "unusual traffic", "abuse", "captcha"];
+        let probe = body.get(..2048).unwrap_or(body).to_ascii_lowercase();
+        if matches!(status, 429 | 503) && BOT_SIGNALS.iter().any(|s| probe.contains(s)) {
+            FailKind::Quota
+        } else {
+            FailKind::for_http_status(status)
+        }
     }
 }
 
@@ -346,10 +381,7 @@ mod tests {
             attempts: vec![],
             upstream_total: None,
         };
-        assert_eq!(
-            Some(SourceKind::GooglePatentsXhr),
-            outcome.winning_source()
-        );
+        assert_eq!(Some(SourceKind::GooglePatentsXhr), outcome.winning_source());
         assert!(SearchOutcome {
             results: vec![],
             attempts: vec![],
