@@ -40,6 +40,32 @@
         </div>
 
         <div class="setting-group">
+            <h3 data-i18n="settings.epoTitle"></h3>
+            <p data-i18n="settings.epoHint"></p>
+            <p class="warn-text"><span data-i18n="settings.epoRegister"></span>：<a href="https://developers.epo.org/" target="_blank" rel="noopener">https://developers.epo.org/</a></p>
+
+            <div class="form-group">
+                <label for="epo-key" data-i18n="settings.epoKeyLabel"></label>
+                <input type="text" id="epo-key" data-i18n-placeholder="settings.epoKeyPlaceholder" autocomplete="off" oninput="updateEpoPairHint()">
+                <span class="form-hint" data-i18n="settings.epoKeyHint"></span>
+            </div>
+
+            <div class="form-group">
+                <label for="epo-secret" data-i18n="settings.epoSecretLabel"></label>
+                <input type="password" id="epo-secret" data-i18n-placeholder="settings.epoSecretPlaceholder" autocomplete="off" oninput="updateEpoPairHint()">
+                <span class="form-hint" data-i18n="settings.epoSecretHint"></span>
+            </div>
+
+            <div id="epo-pair-hint" class="warn-text" style="display:none;"></div>
+
+            <div class="btn-row" style="margin-top:8px;">
+                <button class="btn-save" type="button" onclick="saveEpoCredentials()" data-i18n="settings.epoSave"></button>
+            </div>
+            <div id="epo-status" class="status-message"></div>
+            <div id="epo-current" class="status-pill" style="margin-top:8px;"></div>
+        </div>
+
+        <div class="setting-group">
             <h3>🤖 <span id="ai-provider-title">AI</span> 配置</h3>
             <p>当前默认 AI 服务商，用于专利分析、创意验证等。</p>
 
@@ -508,6 +534,9 @@
                         addSerpapiKeyRow('');
                     }
 
+                    // 回填 EPO OPS 凭证（脱敏掩码回显，MA5a）
+                    fillEpoCredentials(config);
+
                     document.getElementById('ai-base-url').value = config.ai_base_url || 'https://api.deepseek.com/v1';
                     document.getElementById('ai-api-key').value = config.ai_api_key || '';
                     // 保存各服务商独立 Key，供切换服务商时自动更新
@@ -583,6 +612,15 @@
                 status.push('✅ SerpAPI 已配置（Google Patents）');
             } else {
                 status.push('⚠️ SerpAPI 未配置，将仅搜索本地数据库');
+            }
+
+            // EPO OPS 三态（MA5a）：成对才算已配置，只填一半单独提示
+            if (config.epo_configured) {
+                status.push(t('settings.epoStatusOn'));
+            } else if (config.epo_key_configured || config.epo_secret_configured) {
+                status.push(t('settings.epoStatusHalf'));
+            } else {
+                status.push(t('settings.epoStatusOff'));
             }
 
             if (config.ai_api_key_configured) {
@@ -747,6 +785,75 @@
                 }
             } catch (e) {
                 showStatus(statusEl, 'error', '网络错误：' + e.message);
+            }
+        }
+
+        // ── EPO OPS 凭证（MA5a）──
+        // 与 SerpAPI 同属「搜索源凭证」，共用 /api/settings/serpapi 端点：
+        // 请求体只带 epo_key/epo_secret 时后端不动 SerpAPI Key，反之亦然。
+        // 回显是脱敏掩码（前4****后4）；原样提交回来时后端会反查成真实值，
+        // 因此「只改 Secret」不会把 Key 写成掩码。
+        function fillEpoCredentials(config) {
+            document.getElementById('epo-key').value = config.epo_key || '';
+            document.getElementById('epo-secret').value = config.epo_secret || '';
+            updateEpoStatus(config);
+            updateEpoPairHint();
+        }
+
+        function updateEpoStatus(config) {
+            var el = document.getElementById('epo-current');
+            var text;
+            if (config.epo_configured) {
+                text = t('settings.epoStatusOn');
+            } else if (config.epo_key_configured || config.epo_secret_configured) {
+                text = t('settings.epoStatusHalf');
+            } else {
+                text = t('settings.epoStatusOff');
+            }
+            // 回显与 i18n 文案都按纯文本写入，不拼 HTML，无注入面
+            el.textContent = text;
+            el.className = 'status-pill ' + (config.epo_configured ? 'success' : 'warning');
+        }
+
+        // 成对语义：只填一半时提示「需成对配置才生效」——只提示，不阻止保存
+        function updateEpoPairHint() {
+            var hintEl = document.getElementById('epo-pair-hint');
+            var hasKey = document.getElementById('epo-key').value.trim() !== '';
+            var hasSecret = document.getElementById('epo-secret').value.trim() !== '';
+            var halfDone = hasKey !== hasSecret;
+            hintEl.textContent = halfDone ? t('settings.epoPairHint') : '';
+            hintEl.style.display = halfDone ? 'block' : 'none';
+        }
+
+        async function saveEpoCredentials() {
+            var statusEl = document.getElementById('epo-status');
+            var payload = {
+                epo_key: document.getElementById('epo-key').value.trim(),
+                epo_secret: document.getElementById('epo-secret').value.trim()
+            };
+            try {
+                const res = await fetch('/api/settings/serpapi', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (res.ok && data.status === 'ok') {
+                    showStatus(statusEl, 'success', '✅ ' + t('settings.epoSaved'));
+                    // 回读一次：让页面显示的「已配置」与检索链真正读到的那份配置同源
+                    try {
+                        const refreshRes = await fetch('/api/settings');
+                        if (refreshRes.ok) {
+                            const refreshed = await refreshRes.json();
+                            fillEpoCredentials(refreshed);
+                            updateConfigStatus(refreshed);
+                        }
+                    } catch (_) {}
+                } else {
+                    showStatus(statusEl, 'error', data.message || t('settings.epoSaveFail'));
+                }
+            } catch (e) {
+                showStatus(statusEl, 'error', t('settings.epoNetworkFail') + '：' + e.message);
             }
         }
 

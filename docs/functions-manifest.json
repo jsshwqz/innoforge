@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-09-20T02:06:41.958Z",
+  "generatedAt": "2026-09-21T01:15:05.776Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -517,10 +517,12 @@
         "fetchSerpapiBalance",
         "loginWithGcloud",
         "saveAiConfig",
+        "saveEpoCredentials",
         "saveFreeCadSettings",
         "saveGoogleCredentials",
         "saveSerpApiKey",
-        "toggleGeminiCliMode"
+        "toggleGeminiCliMode",
+        "updateEpoPairHint"
       ],
       "definitions": [
         "addSerpapiKeyRow",
@@ -531,6 +533,7 @@
         "detectProvider",
         "fetchAiModels",
         "fetchSerpapiBalance",
+        "fillEpoCredentials",
         "formatNumber",
         "goBack",
         "loadAiCostStats",
@@ -541,12 +544,15 @@
         "refreshFreeCadStatus",
         "renderFreeCadStatus",
         "saveAiConfig",
+        "saveEpoCredentials",
         "saveFreeCadSettings",
         "saveGoogleCredentials",
         "saveSerpApiKey",
         "showStatus",
         "toggleGeminiCliMode",
         "updateConfigStatus",
+        "updateEpoPairHint",
+        "updateEpoStatus",
         "updateGoogleAuthStatus",
         "updateGoogleOAuthUI",
         "updateProviderUI"
