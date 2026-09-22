@@ -40,10 +40,7 @@
 - 新增表/字段必须在迁移注释中说明用途
 
 ### 2.4 路由注册
-- 所有 API 端点必须同时在 `src/main.rs` 和 `src/lib.rs` 中注册
-  - `main.rs`：桌面端 / Docker 独立运行入口
-  - `lib.rs`：Android / iOS FFI 共享库入口
-  - 两处路由必须保持一致，新增 API 时不可遗漏任一
+- 所有 API 端点统一在 `src/common.rs` 的 `build_router` 函数中注册；`src/main.rs`（桌面端 / Docker 独立运行入口）与 `src/lib.rs`（Android / iOS FFI 共享库入口）都通过调用同一个 `build_router` 获得路由，禁止在两处各自重复注册导致漂移
 - 路由命名规范：`/api/{模块}/{动作}`，RESTful 风格
 
 ### 2.5 前端
@@ -261,9 +258,9 @@ docs/          # 文档和规划
 
 - **版本**：见 `Cargo.toml` 的 `version` 字段（以此为准）
 - **DB Schema**：见 `src/db/migrations.rs` 中最新迁移版本号
-- **Pipeline 步骤**：15 步（见 `src/pipeline/state.rs` 的 `PipelineStep` 枚举）
-- **AI 服务商**：支持多服务商（DeepSeek 为主，Gemini 为副，可在设置页切换）
-- **搜索源**：2 个（SerpAPI / 本地 SQLite FTS5）
+- **Pipeline 步骤**：16 步（见 `src/pipeline/state.rs` 的 `PipelineStep` 枚举）
+- **AI 服务商**：内置 10 家主流服务商（DeepSeek 为主，可在设置页切换，模型列表按服务商 API 实时查询）
+- **搜索源**：在线 3 源降级链（SerpAPI → EPO OPS → Google Patents XHR，见 `src/search/chain.rs`）+ 本地 SQLite FTS5 + 向量语义搜索（`/api/search/vector`）
 - **前端页面**：8 个（index/search/patent_detail/idea/ai/compare/settings/oa-response）
 
 > 注意：版本号、Schema 版本等数字会随开发变化，请以源码文件为准，不要依赖本节的静态数字。
