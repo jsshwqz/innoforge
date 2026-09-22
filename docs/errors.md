@@ -672,6 +672,16 @@
 - **根因 / Root cause**: 本机 IDE 终端是 Windows PowerShell，不是 Git Bash；类 Unix 命令习惯不可用
 - **解法 / Fix**: 对照表：`grep -c pat file` → `(Select-String -Path file -Pattern 'pat').Count`；`tail -n` → `... | Select-Object -Last n`；`grep -r` → `Select-String -Path 'src\*' -Pattern ...`；注意正则需对 PowerShell 双引号内的 `$`、反引号转义，优先用单引号
 - **预防 / Prevention**: 在本仓库跑 shell 命令前先按 PowerShell 语法写，一次写对，不要用 `bash -lc` 假设类 Unix 环境
+
+### [2026-09-22] 子代理（team teammate）派活三坑：模型日配额 429、并发 run 冲突、范围过大必超时
+- **严重程度 / Severity**: MEDIUM（影响并行分工可行性，误判为任务太难）
+- **涉及文件 / Files**: team_* 工具调用、`docs/plans/2026-09-22-gap-analysis-improvement-plan.md` §八执行记录
+- **现象 / Symptom**: ① 派发大范围只读核实任务（5 个子项一起做）连续两次 10–14 分钟超时失败；② 缩小到单子项后成功（48–97 秒）；③ 同一 teammate 上一个 run 未结束时再派发，直接报 `Cannot start a new run while another run is already in progress`；④ 后续 run 报 `INFERENCE_CAP_ERROR ... Error 429: Daily free limit reached on model vmc/fireworks-cline-k3-contributor-fallbacks. Try again in 13h 42m`
+- **根因 / Root cause**: ① 子代理单 run 有时限，读大文件（如 114KB 的 idea.html、156KB 的 office_action_response.html）会烧掉大量 token/时间；② teammate 串行执行，必须前一个 run 结束后再派；③ 子代理走的是受限的免费模型池，有**每日配额**，配额耗尽当天不可用（与主会话模型不同池）
+- **解法 / Fix**: ① 派活按「一 run 一件事」切分，单个子项单独派发并用 `continueConversation` 续接上下文（实测成功率高、耗时 1–2 分钟）；② 严格串行派发，先 `team_list_runs` 确认无 running 再发下一个；③ 命中 429 时立即改用主会话自行完成（本次 4.3/4.4/4.5 即由命令行检索补齐），不要反复重试同一 teammate
+- **预防 / Prevention**: 把子代理定位为「可并行的窄任务执行者」，不要用来做大范围全仓审计；关键结论必须主会话复核证据（file:line），子代理报告只作线索
+- **提交 / Commit**: 本条
+
 - **提交 / Commit**: 本条
 
 - **严重程度 / Severity**: HIGH
