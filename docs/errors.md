@@ -664,6 +664,16 @@
 - **提交 / Commit**: `ce303d2`
 
 ### [2026-07-13] 本地服务 CORS 全开放 / Local-service CORS was open to all origins
+
+### [2026-09-22] Windows 终端是 PowerShell：grep/tail/wc 不存在，调查命令全部要改写
+- **严重程度 / Severity**: LOW（环境认知型陷阱，浪费往返）
+- **涉及文件 / Files**: 任意调查命令（本次：路由统计、迁移版本、模板扫描输出截取）
+- **现象 / Symptom**: `grep -c` / `tail -5` / `wc -l` 直接报 `CommandNotFoundException`；`Select-String` 没有 `-Recurse` 参数（递归用 `-Path src\*` 或 `Get-ChildItem -Recurse | Select-String`）
+- **根因 / Root cause**: 本机 IDE 终端是 Windows PowerShell，不是 Git Bash；类 Unix 命令习惯不可用
+- **解法 / Fix**: 对照表：`grep -c pat file` → `(Select-String -Path file -Pattern 'pat').Count`；`tail -n` → `... | Select-Object -Last n`；`grep -r` → `Select-String -Path 'src\*' -Pattern ...`；注意正则需对 PowerShell 双引号内的 `$`、反引号转义，优先用单引号
+- **预防 / Prevention**: 在本仓库跑 shell 命令前先按 PowerShell 语法写，一次写对，不要用 `bash -lc` 假设类 Unix 环境
+- **提交 / Commit**: 本条
+
 - **严重程度 / Severity**: HIGH
 - **涉及文件 / Files**: `src/common.rs`
 - **现象 / Symptom**: 本地服务对任意 Origin 返回跨域许可，局域网或嵌入式来源一旦可访问服务即可从浏览器发起 API 请求。
