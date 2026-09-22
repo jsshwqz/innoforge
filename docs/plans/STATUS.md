@@ -8,6 +8,13 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-09-22 — MA5a EPO OPS 凭证设置 + PR #14 合并 + 查漏补缺计划
+
+- **状态 / Status**: ✅ 已完成 / Completed
+- **范围 / Scope**: MA5a（EPO OPS 凭证后端读写复用搜索源端点 ba8d56f + 设置页配置位 5fe9558）经 PR #14 合并，CI lint/test/e2e 全绿；新增查漏补缺提升计划 docs/plans/2026-09-22-gap-analysis-improvement-plan.md（含远端审计：双远端无本地缺失工作）；docs/errors.md 记录 PowerShell 环境踩坑
+- **同步 / Sync**: origin/main、origin/dev、gitee/main、gitee/dev、本地 main 五端全部对齐到 1a101f1
+- **发现 / Finding**: RAG 模块（src/rag/）代码完整但全链路未接通（建块/检索/注入/前端提示四环节断链），属死代码，已记入提升计划 §四待办
+
 ### 2026-08-12 — 多服务商模型检测 + 抗幻觉策略 + 创意页功能完整性恢复
 
 - **状态 / Status**: ✅ 已完成 / Completed
@@ -393,7 +400,7 @@
 
 ## 当前版本 (Current Version)
 
-**版本**: v0.7.4 (开发中)
+**版本**: v0.7.4（已发布）；main 已积压 MA1/MA2a/MA2b/MA5a 等未发版变更，拟发 v0.8.0（见 docs/plans/2026-09-22-gap-analysis-improvement-plan.md §七）
 **发布日期**: 2026-07-09
 **主要特性**:
 - OA 分析三步→一步重构，消除超时风险
