@@ -22,6 +22,50 @@ mod extraction_tests {
 }
 
 #[cfg(test)]
+mod ai_data_truncation_tests {
+    use crate::ai::client::truncate_for_ai;
+
+    #[test]
+    fn short_text_passes_through_untouched() {
+        assert_eq!(truncate_for_ai("短文本", 100), "短文本");
+    }
+
+    #[test]
+    fn text_at_limit_is_not_rewritten() {
+        let text = "中".repeat(100);
+        assert_eq!(truncate_for_ai(&text, 100), text);
+    }
+
+    #[test]
+    fn overflow_keeps_head_and_marks_omission_explicitly() {
+        let text = "中".repeat(120);
+        let out = truncate_for_ai(&text, 100);
+        assert!(out.starts_with(&"中".repeat(100)));
+        assert!(out.contains("原文共 120 个字符"));
+        assert!(out.contains("只送入前 100 个字符"));
+        assert!(out.contains("其余 20 个字符未包含"));
+        assert!(out.contains("禁止推测"));
+    }
+
+    #[test]
+    fn limit_counts_characters_not_bytes() {
+        // 每个 emoji 占 4 字节；按字节截断会切坏字符，按字符截断不会。
+        let text = "🦀".repeat(60);
+        assert_eq!(truncate_for_ai(&text, 60), text);
+        let out = truncate_for_ai(&text, 59);
+        assert!(out.contains("原文共 60 个字符"));
+        assert!(out.starts_with(&"🦀".repeat(59)));
+    }
+
+    #[test]
+    fn zero_budget_returns_only_the_notice() {
+        let out = truncate_for_ai("abc", 0);
+        assert!(out.starts_with("\n\n【数据完整性提示"));
+        assert!(out.contains("原文共 3 个字符"));
+    }
+}
+
+#[cfg(test)]
 mod oa_capacity_tests {
     use crate::ai::client::{
         oa_capacity_error, AiClient, OA_DISCUSSION_ANALYSIS_MAX_CHARS,

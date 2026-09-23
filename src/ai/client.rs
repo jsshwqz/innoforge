@@ -257,6 +257,26 @@ pub fn safe_truncate(s: &str, max_bytes: usize) -> &str {
     &s[..end]
 }
 
+/// 数据用途截断：超限时把「已截断」这件事显式写进文本，避免静默丢失。
+///
+/// 与 [`safe_truncate`] / [`safe_truncate_chars`] 的分工：
+/// - 显示、日志、错误消息等**展示用途**用 `safe_truncate*`，截断后无需告知读者；
+/// - 任何**要交给 AI 的数据**（prompt 拼装）必须用本函数，
+///   超限时会在末尾追加「原文共 N 字符、实际送入 M 字符」的说明，
+///   让模型知道材料不完整，而不是默认自己拿到了全文（AGENTS.md §2.5）。
+pub fn truncate_for_ai(s: &str, max_chars: usize) -> String {
+    let total = s.chars().count();
+    if total <= max_chars {
+        return s.to_string();
+    }
+    let mut out: String = s.chars().take(max_chars).collect();
+    out.push_str(&format!(
+        "\n\n【数据完整性提示：本段原文共 {total} 个字符，受单次 AI 调用上下文限制，此处只送入前 {max_chars} 个字符，其余 {} 个字符未包含。凡涉及被省略内容的问题，请明确说明材料不完整，禁止推测或补全。】",
+        total - max_chars
+    ));
+    out
+}
+
 /// Safely truncate a UTF-8 string to at most `max_chars` characters.
 /// Kept for compatibility with existing library consumers; OA request paths
 /// use explicit capacity validation instead of truncating user-provided data.

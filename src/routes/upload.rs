@@ -1,4 +1,5 @@
 use super::AppState;
+use crate::ai::truncate_for_ai;
 use axum::{extract::State, Json};
 use serde_json::json;
 use std::{
@@ -304,9 +305,9 @@ pub async fn api_upload_compare(
         5. 主要差异点",
         patent.title,
         patent.abstract_text,
-        patent.claims.chars().take(2000).collect::<String>(),
+        truncate_for_ai(&patent.claims, 2_000),
         file_type_label,
-        file_content.chars().take(3000).collect::<String>()
+        truncate_for_ai(&file_content, 3_000)
     );
 
     match ai_client.chat(&prompt, None).await {
@@ -436,10 +437,17 @@ pub async fn api_upload_extract(
         text.len(),
         text.chars().take(80).collect::<String>()
     );
+    // 提取结果会被前端（compare/idea/index/oa/search 五个页面）再送去 AI 分析，
+    // 因此这里是数据路径而非显示路径：超限时必须显式告知，不能静默截断。
+    const MAX_EXTRACT_CHARS: usize = 50_000;
+    let total_chars = text.chars().count();
+    let truncated = total_chars > MAX_EXTRACT_CHARS;
     Json(json!({
-        "text": text.chars().take(50000).collect::<String>(),
+        "text": truncate_for_ai(&text, MAX_EXTRACT_CHARS),
         "file_type": ext,
-        "length": text.len()
+        "length": text.len(),
+        "char_length": total_chars,
+        "truncated": truncated
     }))
 }
 
