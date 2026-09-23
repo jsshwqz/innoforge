@@ -1,4 +1,5 @@
 use super::{image_data_uri, AppState};
+use crate::ai::truncate_for_ai;
 use crate::patent::*;
 use crate::pipeline::context::{PipelineContext, PipelineProgress, ResearchState};
 use crate::pipeline::runner::PipelineRunner;
@@ -1539,7 +1540,7 @@ pub async fn api_idea_chat_conclusions(
     conv.push_str("完整讨论记录：\n");
     for (_id, role, content, _ts) in &history {
         let role_label = if role == "user" { "用户" } else { "AI" };
-        let preview: String = content.chars().take(800).collect();
+        let preview = truncate_for_ai(content, 800);
         conv.push_str(&format!("\n【{}】{}\n", role_label, preview));
     }
 
@@ -1556,7 +1557,7 @@ pub async fn api_idea_chat_conclusions(
          - 需要验证：列出需要实验或数据验证的中等风险\n\
          - 可接受风险：列出已评估可接受的低风险\n\n\
          要求：结论要具体、有依据，不写泛泛的空话。",
-        conv.chars().take(5000).collect::<String>()
+        truncate_for_ai(&conv, 5_000)
     );
 
     let ai = s
@@ -1596,7 +1597,7 @@ pub async fn api_idea_summarize_discussion(
     );
     for (_id, role, content, _ts) in &history {
         let role_label = if role == "user" { "用户" } else { "AI" };
-        let content_preview: String = content.chars().take(500).collect();
+        let content_preview = truncate_for_ai(content, 500);
         conversation.push_str(&format!("\n【{}】{}\n", role_label, content_preview));
     }
 
@@ -1607,7 +1608,7 @@ pub async fn api_idea_summarize_discussion(
          3. **待解决问题**：还有哪些未决问题\n\
          4. **行动建议**：下一步应该做什么\n\n\
          总结要简洁，重点突出。",
-        conversation.chars().take(4000).collect::<String>()
+        truncate_for_ai(&conversation, 4_000)
     );
 
     let ai = s

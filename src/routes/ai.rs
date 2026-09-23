@@ -1,7 +1,7 @@
 use super::{image_data_uri, AppState};
 use crate::ai::{
-    check_oa_analysis, format_report, oa_capacity_error, Message, OA_DISCUSSION_ANALYSIS_MAX_CHARS,
-    OA_DISCUSSION_HISTORY_MAX_CHARS, OA_DISCUSSION_OA_MAX_CHARS,
+    check_oa_analysis, format_report, oa_capacity_error, truncate_for_ai, Message,
+    OA_DISCUSSION_ANALYSIS_MAX_CHARS, OA_DISCUSSION_HISTORY_MAX_CHARS, OA_DISCUSSION_OA_MAX_CHARS,
 };
 use crate::patent::*;
 use axum::{
@@ -609,7 +609,7 @@ fn resolve_compare_item(
                 .and_then(|v| v.as_str())
                 .unwrap_or("上传文件");
             let content = obj.get("content").and_then(|v| v.as_str()).unwrap_or("");
-            let preview: String = content.chars().take(150000).collect();
+            let preview = truncate_for_ai(content, 150_000);
             return Ok(format!("【{}】\n标题：{}\n内容：{}", label, title, preview));
         }
     }
@@ -620,8 +620,8 @@ fn resolve_compare_item(
     }
     match db.get_patent(id) {
         Ok(Some(p)) => {
-            let abs: String = p.abstract_text.chars().take(20000).collect();
-            let claims: String = p.claims.chars().take(50000).collect();
+            let abs = truncate_for_ai(&p.abstract_text, 20_000);
+            let claims = truncate_for_ai(&p.claims, 50_000);
             Ok(format!(
                 "【{}】\n专利号：{}\n标题：{}\n申请人：{}\n摘要：{}\n权利要求（前部分）：{}",
                 label, p.patent_number, p.title, p.applicant, abs, claims
@@ -715,7 +715,7 @@ pub async fn api_ai_analyze_results(
         let title = p["title"].as_str().unwrap_or("");
         let abstract_text = p["abstract_text"].as_str().unwrap_or("");
         let applicant = p["applicant"].as_str().unwrap_or("");
-        let preview: String = abstract_text.chars().take(100).collect();
+        let preview = truncate_for_ai(abstract_text, 100);
         patent_list.push_str(&format!(
             "{}. 标题：{}\n   申请人：{}\n   摘要：{}\n\n",
             i + 1,
@@ -821,7 +821,7 @@ pub async fn api_ai_risk_assessment(
     let mut not_found: Vec<String> = Vec::new();
     for (i, id) in ids.iter().enumerate() {
         if let Ok(Some(p)) = s.db.get_patent(id) {
-            let claims_preview: String = p.claims.chars().take(50000).collect();
+            let claims_preview = truncate_for_ai(&p.claims, 50_000);
             patents_info.push_str(&format!(
                 "### 专利 {} - {}\n专利号：{}\n申请人：{}\n摘要：{}\n权利要求：{}\n\n",
                 i + 1,
@@ -880,7 +880,7 @@ pub async fn api_ai_compare_matrix(
                     .and_then(|v| v.as_str())
                     .unwrap_or("上传文件");
                 let content = obj.get("content").and_then(|v| v.as_str()).unwrap_or("");
-                let preview: String = content.chars().take(150000).collect();
+                let preview = truncate_for_ai(content, 150_000);
                 patents_info.push_str(&format!(
                     "### 文件 {}\n标题：{}\n内容：{}\n\n",
                     i + 1,
@@ -892,7 +892,7 @@ pub async fn api_ai_compare_matrix(
         }
         let id = item.as_str().unwrap_or("");
         if let Ok(Some(p)) = s.db.get_patent(id) {
-            let claims_preview: String = p.claims.chars().take(6000).collect();
+            let claims_preview = truncate_for_ai(&p.claims, 6_000);
             patents_info.push_str(&format!(
                 "### 专利 {}\n专利号：{}\n标题：{}\n申请人：{}\n摘要：{}\n权利要求：{}\n\n",
                 i + 1,
@@ -1002,7 +1002,7 @@ fn resolve_my_patent(db: &crate::db::Database, req: &serde_json::Value) -> Resul
         return Err("我的专利缺少权利要求数据，请先在详情页加载全文".into());
     }
 
-    let desc_preview: String = patent.description.chars().take(30000).collect();
+    let desc_preview = truncate_for_ai(&patent.description, 30_000);
     Ok(format!(
         "专利号：{}\n标题：{}\n申请人：{}\n\n摘要：{}\n\n权利要求书全文：\n{}\n\n说明书（前部分）：\n{}",
         patent.patent_number, patent.title, patent.applicant,
@@ -1027,7 +1027,7 @@ fn resolve_references(
                     .and_then(|v| v.as_str())
                     .unwrap_or("上传文件");
                 let content = obj.get("content").and_then(|v| v.as_str()).unwrap_or("");
-                let preview: String = content.chars().take(150000).collect();
+                let preview = truncate_for_ai(content, 150_000);
                 refs_info.push_str(&format!(
                     "### 对比文件 {} — {}\n\n文件全文：\n{}\n\n",
                     i + 1,
@@ -1043,8 +1043,8 @@ fn resolve_references(
             continue;
         }
         if let Ok(Some(p)) = db.get_patent(id) {
-            let claims_preview: String = p.claims.chars().take(50000).collect();
-            let abs_preview: String = p.abstract_text.chars().take(30000).collect();
+            let claims_preview = truncate_for_ai(&p.claims, 50_000);
+            let abs_preview = truncate_for_ai(&p.abstract_text, 30_000);
             refs_info.push_str(&format!(
                 "### 对比文件 {} — {}\n专利号：{}\n标题：{}\n申请人：{}\n\n摘要：{}\n\n权利要求（前部分）：\n{}\n\n",
                 i + 1, p.patent_number, p.patent_number, p.title, p.applicant,
@@ -1176,7 +1176,7 @@ pub async fn api_ai_office_action_response(
                             "### 对比文献 {} — {}\n专利号：{}\n标题：{}\n摘要：{}\n权利要求：\n{}\n说明书（前部分）：\n{}\n\n",
                             i + 1, p.patent_number, p.patent_number, p.title,
                             p.abstract_text, p.claims,
-                            p.description.chars().take(200000).collect::<String>()
+                            truncate_for_ai(&p.description, 200_000)
                         ));
                     }
                 }
@@ -1348,7 +1348,7 @@ pub async fn api_ai_office_action_response_stream(
                                 "### 对比文献 {} — {}\n专利号：{}\n标题：{}\n摘要：{}\n权利要求：\n{}\n说明书（前部分）：\n{}\n\n",
                                 i + 1, p.patent_number, p.patent_number, p.title,
                                 p.abstract_text, p.claims,
-                                p.description.chars().take(200000).collect::<String>()
+                                truncate_for_ai(&p.description, 200_000)
                             ));
                         }
                     }
