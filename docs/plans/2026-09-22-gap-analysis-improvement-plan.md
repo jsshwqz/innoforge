@@ -93,7 +93,7 @@
 | **4.1 RAG 提示词注入** | ❌ **缺失（死代码）** | `src/rag/` 四文件齐全（`mod.rs:21` build_chunks_from_patent、`retriever.rs:8` retrieve_chunks、`assembler.rs:6` assemble_rag_prompt、`chunker.rs:6/57`），但全仓除模块内自调（`mod.rs:92/103`）外**零外部调用**：建块、检索、注入、前端提示四环节全部断链 |
 | **4.2 语义搜索闭环** | ❌ **缺失（三重断链）** | ① 前端零调用：`templates/*.html` 与 `static/*.js` 中无任何 `/api/search/vector` 引用；② 设置页无 B6 要求的任何配置项（无开关/权重/嵌入服务商）；③ 向量层无数据：`src/vector/mod.rs:137 build_index` 为骨架（仅插入 `vec![0.0f32]` 占位），`mod.rs:159 compute_and_save_embedding` 全仓零调用 → `/api/search/vector`（`search.rs:425`）读 `count_embeddings()==0` 恒空转 |
 | **4.3 AI 成本追踪** | 🟡 **半拉子** | ✅ `client.rs:217–237` usage 解析兼容 OpenAI(prompt/completion) 与 Anthropic(input/output)；✅ 设置页汇总 UI `settings.html:231–252/652`；❌ 落账仅 2 处调用点（`ai.rs:455` 对话、`idea.rs:750` 创意），OA/对比/创新分析/pipeline 等大量 AI 调用**不落账**；❌ 估算系数硬编码于 `db/cost.rs:85–89`（`(in*0.001+out*0.002)/1000*100*100`），**无 per-model 单价、单位可疑**；❌ 创意页无「本创意花费」chip；❌ 无模型单价编辑表 |
-| **4.4 创意记忆系统** | 🟡 **半拉子** | ✅ API 三件套 + 创意页记忆标签页 UI（`idea.html:73/117–123` memory-panel/filter/loadMemory）；❌ **记忆条目未注入 AI 对话 prompt**——`get_memory_entries` 仅出现在 API handler（`idea.rs:2104`），prompt 构造（`idea.rs:589–602`）只注入项目记忆（`context.rs`）与讨论压缩摘要。记忆写了不参与推理，等于只读档案 |
+| **4.4 创意记忆系统** | ✅ **已修复** | ✅ API 三件套 + 创意页记忆标签页 UI（`idea.html:73/117–123`）；✅ **本批补齐**：记忆条目注入 `api_idea_chat` system context（`idea.rs` `build_memory_context()`，≤20 条/≤2000 字符预算、按更新时间倒序、`<idea_memory>` 边界隔离 + 转义防注入、失败静默降级）；✅ 写入侧已有 pipeline finalize 自动沉淀（`finalize.rs:29`） |
 | **4.5 嵌入失败降级** | ❌ **不存在该机制** | 无任何走服务商 `/embeddings` 的路径，故无「服务商不支持」提示；无数据时静默空转返回纯 BM25 结果，用户完全无法感知语义搜索未生效 |
 
 ### 新发现：架构决策漂移（需用户确认，属 §三 决策类）
