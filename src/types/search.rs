@@ -44,6 +44,17 @@ pub struct SearchRequest {
     /// 缺省（不发此键）时为 `None`，行为与 MA3 之前逐字一致。
     #[serde(default)]
     pub language: Option<Lang>,
+    /// MA4b 独立申请人过滤器（规格书 §7「assignee 精确匹配」的请求侧入口）：
+    /// 在线侧由 Google Patents XHR 源渲染为**独立 `assignee=` 参数**
+    /// （裸值/引号形态与真实过滤性见 `providers/google_patents_xhr.rs` 模块头实测结论）；
+    /// SerpAPI / EPO 不消费该键（两家上游入参语法不同，禁止串语法）。
+    /// 缺省（不发此键）为 `None`，出网 URL 与请求体与 MA4b 之前逐字一致。
+    #[serde(default)]
+    pub assignee: Option<String>,
+    /// MA4b 精确匹配开关：`true` 时在线侧用引号精确形态、本地侧走 `applicant = ?` 等值通道；
+    /// `false`（缺省）时在线裸值、本地仍为 `LIKE %词%` 模糊匹配——旧行为逐字不变。
+    #[serde(default)]
+    pub exact_assignee: bool,
 }
 
 fn d1() -> usize {
