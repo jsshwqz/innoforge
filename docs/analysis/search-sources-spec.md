@@ -89,9 +89,9 @@ pub struct SearchOutcome {
 
 ## 8. 冒烟清单（执行 agent 在合入前必须逐条实证并附证据到任务 Notes）
 
-1. ⚠️ XHR 端点带 `country=CN&language=CHINESE` 搜中文关键词，确认响应含中文标题
-2. ⚠️ XHR 端点 `assignee=<本人姓名>` 精确性验证（引号 vs 裸值对比）
-3. SerpAPI q 内嵌 `(country=CN)` 后中文命中率对比
+1. ✅ **2026-09-27 MA3 补半程实测通过（免费 XHR，真实出网）**：`{"query":"固态电池"}` 默认配置 → XHR 胜出，实际出网 URL `https://patents.google.com/xhr/query?url=q%3D%E5%9B%BA…%E6%B1%A0%26language%3DCHINESE`，首页 5/5 CN 号 + 中文标题；显式 `language:"english"` 同词 → URL 变 `…%26language%3DENGLISH`、`"all"` → 省略 language 参数。⚠️ 形态修正：URL 实际只带 `language=`，**`country=` 仅当请求显式传 country 时出现**（默认配置 country=None 不下发；CN 语义由 language=CHINESE 闸门承担）。证据见分支 `exec/ma3-lang-filter` PR 描述
+2. ⚠️ XHR 端点 `assignee=<本人姓名>` 精确性验证（引号 vs 裸值对比）——**2026-09-27 MA3 复核：属 MA4 assignee 过滤范围，仍开放**
+3. ⚠️ SerpAPI q 内嵌 `(country=CN)` 后中文命中率对比——**2026-09-27 MA3 冒烟如实记录环境阻塞：本机未配置 SERPAPI_KEY，免费降级链下 SerpAPI 恒为 Skipped，无法做命中率对比**（配置 Key 后由凭证侧执行）
 4. 断网模拟：禁用两在线源后本地 FTS 兜底路径可用
 5. 503 场景退避生效（连续请求间隔 <1s 应触发限速保护而非打满错误）
 
