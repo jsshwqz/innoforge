@@ -8,6 +8,14 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-09-27 — AI 成本落账闭环（gap 4.3 本批收口）+ PR #19 合并
+
+- **状态 / Status**: ✅ 已完成 / Completed（本批范围内）
+- **范围 / Scope**: `exec/cost-closure` 未提交 WIP 经收尾棒核实交付（PR #19，merge `0350c8b`）。`Database::log_ai_call` 成为唯一落账入口（`save_cost_record_from_client` 收敛为其内部封装），落账点 2→21（ai.rs 14 / idea.rs 5 / upload.rs 1 / claim_tree.rs 1；19 新增 + 2 存量改接）。收尾棒真实增量：修复 `compress_history` 长历史压缩调用漏账、修 idea-chat 把调用类型误填 provider 字段的错账、补 3 条锁定测试（读后即清 / 缺 usage 静默跳过 / 单路径 provider 与类型正确性）；并把前任文档口径（"22 处 / ai.rs 21"，分项加总不自洽）修正为逐处核实真值。并发语义经核实无跨请求串账（client 每请求新建、任务内串行 await）。
+- **验证 / Verification**: 本地 fmt / clippy --all-targets / test 全绿（lib 299→302；清 `target/debug/incremental` 解掉前任遗留的 rustc 0xc0000409 增量产物损坏崩溃）；GitHub CI lint/test/e2e 三绿（run `36306173156`）；红线零 diff（common.rs / Cargo / migrations / templates / static）
+- **仍开放 / Remaining**: 流式 SSE 不解析 usage 无法落账（需 client 层随响应返回 usage 的架构改法）、批量摘要单次近似、pipeline 其余 6 个 LLM 步骤未接线、per-model 单价编辑表、创意页「本创意花费」chip——均登记于 gap 计划 4.3「仍开放」
+- **同步 / Sync**: origin/main、origin/dev、gitee/main、gitee/dev、本地 main 五端对齐 `0350c8b`
+
 ### 2026-09-22 — MA5a EPO OPS 凭证设置 + PR #14 合并 + 查漏补缺计划
 
 - **状态 / Status**: ✅ 已完成 / Completed
