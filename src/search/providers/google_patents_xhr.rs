@@ -30,6 +30,25 @@
 //! 3. **结构不同于 DOM** → 按上面的实测结构建模。
 //! 4. `<b>` 高亮标签（存档原文称字段会带）→ [`strip_highlight_tags`] 防御性剥离；
 //!    本次 CN 冒烟响应中实测 0 处，故剥离只做兼容不做依据。
+//!
+//! ## assignee 独立参数实测（MA4b 收尾棒 2026-09-27，真实出网，原始证据存仓库外 `D:\Temp\ma4b-probe\`）
+//!
+//! `inner_url` 按 `exact_assignee` 渲染独立参数 `assignee=` 两种形态（false ⇒ 裸值、
+//! true ⇒ 引号）。真实过滤性结论**严格限定为已实测到的两类形态**：
+//! - **q 内嵌引号形态**（`q=assignee:"西南交通大学"`）与**独立裸值参数形态**
+//!   （`q=固态电池&assignee=西南交通大学`，即 `exact_assignee=false` 缺省下发形状）
+//!   均拿到真 JSON 且确证**上游真过滤**：前者 `total_num_results=542`、首页 10/10 行
+//!   `patent.assignee` 全等「西南交通大学」；后者 `total=58`（远小于该词全量的十万级）、
+//!   10/10 行 assignee 为 `<b>西南交通大学</b>`（上游给命中字段包 `<b>` 高亮），
+//!   标题全部固态电池相关。
+//! - **未取证（如实保留，禁止过度结论）**：引号独立参数形态（`exact_assignee=true`
+//!   下发的 `assignee="…"`）与英文机构名四形态均只拿到 1103 字节 Google `Sorry...`
+//!   反爬 HTML（多次重试同果），须在限频窗口外或换 IP 后重测；在此之前**不得**据此
+//!   声称引号形态生效或不生效。
+//! - `<b>` 高亮标签**不构成入库脏数据隐患**：[`xhr_to_patent`] 对 title/snippet/assignee
+//!   统一走 [`strip_highlight_tags`]（用例 `strip_highlight_tags_removes_b_and_collapses_spaces` 锁行为）。
+//!
+//! 出网 URL 逐字符与 JSON 对账细节见规格书 §8 第 2 项。
 
 use crate::db::Database;
 use crate::patent::Patent;
@@ -238,7 +257,15 @@ impl GooglePatentsXhrProvider {
         }
         if let Some(a) = query.assignee.as_deref() {
             if !a.trim().is_empty() {
-                parts.push(format!("assignee={}", a.trim()));
+                // MA4b：exact_assignee 开关在此落地——true ⇒ 引号精确形态，
+                // false ⇒ 裸值形态（自 MA2a 起即为此形状，`inner_url_emits_spec_2_param_set`
+                // 逐字符锁未动）。两种形态的真实过滤性见模块头「assignee 独立参数实测」与
+                // 规格书 §8 第 2 项。
+                if query.exact_assignee {
+                    parts.push(format!("assignee=\"{}\"", a.trim()));
+                } else {
+                    parts.push(format!("assignee={}", a.trim()));
+                }
             }
         }
         match query.sort_by.as_deref() {
@@ -831,6 +858,53 @@ pub(crate) mod tests {
             "q=固态电池&country=CN&language=CHINESE&assignee=张三&sort=new",
             inner
         );
+    }
+
+    /// **MA4b 精确形态锁**：`exact_assignee = true` 时独立参数必须是引号形态
+    /// `assignee="…"`；false（默认）保持裸值——上方 `inner_url_emits_spec_2_param_set`
+    /// 即旧形状锁，本用例只增不改。
+    #[test]
+    fn inner_url_exact_assignee_quotes_the_independent_param() {
+        let mut q = query("固态电池");
+        q.assignee = Some(" 西南交通大学 ".to_string());
+        q.exact_assignee = true;
+        assert_eq!(
+            "q=固态电池&country=CN&language=CHINESE&assignee=\"西南交通大学\"&sort=new",
+            GooglePatentsXhrProvider::inner_url(&q)
+        );
+    }
+
+    /// MA4b 边界：开关为 true 但值为空/全空白时仍不下发参数（与裸值形态同规则）。
+    #[test]
+    fn exact_assignee_blank_value_still_omits_param() {
+        let mut q = query("固态电池");
+        q.assignee = Some("   ".to_string());
+        q.exact_assignee = true;
+        assert!(
+            !GooglePatentsXhrProvider::inner_url(&q).contains("assignee"),
+            "{}",
+            GooglePatentsXhrProvider::inner_url(&q)
+        );
+    }
+
+    /// **MA4b 出网逐字符锁（假传输，零联网）**：完整请求 URL 中引号形态必须
+    /// 恰好被「一次百分号编码」包进 `url=` 参数（`"` → `%22`，不得出现 `%2522`）。
+    #[tokio::test]
+    async fn exact_assignee_request_url_encodes_quotes_exactly_once() {
+        let mut q = query("固态电池");
+        q.assignee = Some("西南交通大学".to_string());
+        q.exact_assignee = true;
+        let (p, transport, _clock) = provider(vec![reply(200, REAL_EMPTY_REPLY)]);
+        p.search(q).await;
+        let url = transport
+            .urls()
+            .into_iter()
+            .next()
+            .expect("one request issued");
+        let school_pct = urlencoding::encode("西南交通大学");
+        let expect_tail = format!("assignee%3D%22{}%22%26sort%3Dnew", school_pct);
+        assert!(url.ends_with(&expect_tail), "出网 URL 尾部不符: {url}");
+        assert!(!url.contains("%2522"), "引号被双重编码: {url}");
     }
 
     #[test]

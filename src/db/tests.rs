@@ -229,3 +229,168 @@ fn mixed_search_routes_patent_like_query_to_patent_number_search() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].patent_number, "CN 123456789 A");
 }
+
+// ── MA4b：申请人精确匹配通道（search_smart_exact，全部离线内存库）────────────────
+
+/// 夹具：指定申请人的入库专利。
+fn patent_by_applicant(id: &str, applicant: &str) -> Patent {
+    let mut p = sample_patent(id, &format!("{id} 的专利"), "2024-01-10");
+    p.applicant = applicant.to_string();
+    p
+}
+
+/// 收集命中行的申请人（排序后便于逐字断言，与 SQL 返回顺序无关）。
+fn applicants(rows: &[crate::patent::PatentSummary]) -> Vec<String> {
+    let mut v: Vec<String> = rows.iter().map(|r| r.applicant.clone()).collect();
+    v.sort();
+    v
+}
+
+/// **MA4b 核心断言 1（中文，验收锚点形态）**：「张三」exact=true 只命中张三名下的专利，
+/// 不得命中「张三丰」名下专利。
+#[test]
+fn applicant_exact_match_excludes_longer_name() {
+    let db = Database::init(":memory:").expect("init db");
+    db.insert_patent(&patent_by_applicant("zs1", "张三"))
+        .expect("insert 张三 patent");
+    db.insert_patent(&patent_by_applicant("zsf1", "张三丰"))
+        .expect("insert 张三丰 patent");
+
+    let (rows, total, detected) = db
+        .search_smart_exact(
+            "张三",
+            Some(&SearchType::Applicant),
+            None,
+            None,
+            None,
+            1,
+            10,
+            true,
+        )
+        .expect("exact applicant search succeeds");
+
+    assert_eq!(detected, SearchType::Applicant);
+    assert_eq!(total, 1);
+    assert_eq!(vec!["张三".to_string()], applicants(&rows));
+    // 等值通道的行仍走共用相关性打分：申请人完全等值 = 100 分
+    assert_eq!(Some(100.0), rows[0].relevance_score);
+}
+
+/// **MA4b 核心断言 2（未破坏旧行为）**：同库同词，exact=false（含旧 `search_smart`
+/// 兼容入口）仍是 `LIKE %词%` 模糊命中，「张三」与「张三丰」两条都出。
+#[test]
+fn applicant_fuzzy_match_still_includes_both_new_and_legacy_entry() {
+    let db = Database::init(":memory:").expect("init db");
+    db.insert_patent(&patent_by_applicant("zs1", "张三"))
+        .expect("insert 张三 patent");
+    db.insert_patent(&patent_by_applicant("zsf1", "张三丰"))
+        .expect("insert 张三丰 patent");
+
+    let expected = vec!["张三".to_string(), "张三丰".to_string()];
+
+    let (rows, total, _) = db
+        .search_smart_exact(
+            "张三",
+            Some(&SearchType::Applicant),
+            None,
+            None,
+            None,
+            1,
+            10,
+            false,
+        )
+        .expect("fuzzy applicant search succeeds");
+    assert_eq!(total, 2);
+    assert_eq!(expected, applicants(&rows));
+
+    // 旧公开入口 = exact false 的特化：行为必须与新入口 false 分支逐字一致
+    let (legacy_rows, legacy_total, _) = db
+        .search_smart(
+            "张三",
+            Some(&SearchType::Applicant),
+            None,
+            None,
+            None,
+            1,
+            10,
+        )
+        .expect("legacy entry still fuzzy-matches");
+    assert_eq!(legacy_total, 2);
+    assert_eq!(applicants(&legacy_rows), applicants(&rows));
+}
+
+/// **MA4b 核心断言 3（英文机构同形态）**：`Acme Corp` 精确不吞 `Acme Corp International`，
+/// 模糊两条全中。
+#[test]
+fn applicant_exact_vs_fuzzy_for_english_org_names() {
+    let db = Database::init(":memory:").expect("init db");
+    db.insert_patent(&patent_by_applicant("ac1", "Acme Corp"))
+        .expect("insert Acme Corp patent");
+    db.insert_patent(&patent_by_applicant("ac2", "Acme Corp International"))
+        .expect("insert Acme Corp International patent");
+
+    let (rows, total, _) = db
+        .search_smart_exact(
+            "Acme Corp",
+            Some(&SearchType::Applicant),
+            None,
+            None,
+            None,
+            1,
+            10,
+            true,
+        )
+        .expect("exact search succeeds");
+    assert_eq!(total, 1);
+    assert_eq!(vec!["Acme Corp".to_string()], applicants(&rows));
+
+    let (fuzzy, fuzzy_total, _) = db
+        .search_smart_exact(
+            "Acme Corp",
+            Some(&SearchType::Applicant),
+            None,
+            None,
+            None,
+            1,
+            10,
+            false,
+        )
+        .expect("fuzzy search succeeds");
+    assert_eq!(fuzzy_total, 2);
+    assert_eq!(
+        vec![
+            "Acme Corp".to_string(),
+            "Acme Corp International".to_string()
+        ],
+        applicants(&fuzzy)
+    );
+}
+
+/// **MA4b 边界（开关误用不得外溢）**：exact_assignee=true 只作用于申请人域；
+/// 发明人/混合路由即使传 true 也保持旧模糊行为（防止开关语义被读成「全局精确」）。
+#[test]
+fn exact_flag_does_not_leak_to_other_search_types() {
+    let db = Database::init(":memory:").expect("init db");
+    let mut p = patent_by_applicant("iv1", "某研究院");
+    p.inventor = "李雷".to_string();
+    db.insert_patent(&p).expect("insert patent");
+    let mut p2 = patent_by_applicant("iv2", "某研究院");
+    p2.inventor = "李雷雷".to_string();
+    db.insert_patent(&p2).expect("insert second patent");
+
+    let (rows, total, detected) = db
+        .search_smart_exact(
+            "李雷",
+            Some(&SearchType::Inventor),
+            None,
+            None,
+            None,
+            1,
+            10,
+            true,
+        )
+        .expect("inventor search with exact flag set must still work");
+    assert_eq!(detected, SearchType::Inventor);
+    assert_eq!(total, 2, "发明人域不消费精确开关，仍是 LIKE 模糊");
+    assert_eq!(2, rows.len());
+}

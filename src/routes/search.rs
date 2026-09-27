@@ -85,7 +85,9 @@ fn local_fallback_json(
 ) -> serde_json::Value {
     println!("[ONLINE] Falling back to local DB");
     let local_start = Instant::now();
-    let local_result = db.search_smart(
+    // MA4b：本地兜底同样消费请求侧精确开关——`exact_assignee=true` 且路由到申请人域时
+    // 走 `applicant = ?` 等值通道（见 db::search_smart_exact）；false/缺省 = 旧 LIKE 模糊，逐字不变。
+    let local_result = db.search_smart_exact(
         &req.query,
         online_search_type.as_ref(),
         req.country.as_deref(),
@@ -93,6 +95,7 @@ fn local_fallback_json(
         req.date_to.as_deref(),
         req.page,
         req.page_size,
+        req.exact_assignee,
     );
     let latency_ms = local_start.elapsed().as_millis() as u64;
     let (local, error_text) = match local_result {
@@ -216,7 +219,7 @@ pub async fn api_search(
     }
 
     let search_type = parse_search_type(req.search_type.as_deref());
-    let (mut patents, total, detected_type) = match s.db.search_smart(
+    let (mut patents, total, detected_type) = match s.db.search_smart_exact(
         &req.query,
         search_type.as_ref(),
         req.country.as_deref(),
@@ -224,6 +227,8 @@ pub async fn api_search(
         req.date_to.as_deref(),
         req.page,
         req.page_size,
+        // MA4b：本地检索端点同享精确开关（false/缺省 = 旧 LIKE 行为逐字不变）
+        req.exact_assignee,
     ) {
         Ok((patents, total, search_type)) => (patents, total, search_type),
         Err(e) => {
@@ -422,8 +427,10 @@ pub async fn api_search_online(
         keyword: req.query.clone(),
         country: req.country.clone(),
         language: Some(lang),
-        assignee: None,
-        exact_assignee: false,
+        // MA4b：请求侧独立申请人过滤透传（此前恒为 None/false，出网 URL 不含 assignee 段；
+        // 缺省仍与旧行为逐字一致，语义见 types::search::SearchRequest 字段注释）
+        assignee: req.assignee.clone(),
+        exact_assignee: req.exact_assignee,
         date_from: req.date_from.clone(),
         date_to: req.date_to.clone(),
         limit: req.page_size,
@@ -1161,6 +1168,8 @@ mod tests {
             cpc: None,
             region: None,
             language: None,
+            assignee: None,
+            exact_assignee: false,
         }
     }
 
@@ -1361,5 +1370,79 @@ mod tests {
             "upstream_hint 为 None 时末档不凭空造 hint"
         );
         assert!(out.get("google_url").is_some());
+    }
+
+    /// 夹具：指定申请人的入库专利（MA4b 精确通道用例用；字段形状与 [`seed_patent`] 一致）。
+    fn seed_patent_applicant(db: &Database, id: &str, title: &str, applicant: &str) {
+        let p = Patent {
+            id: id.to_string(),
+            patent_number: format!("CN{}000000A", id),
+            title: title.to_string(),
+            abstract_text: format!("一种{title}及其制备方法"),
+            description: String::new(),
+            claims: String::new(),
+            applicant: applicant.to_string(),
+            inventor: "李四".to_string(),
+            filing_date: "2024-01-01".to_string(),
+            publication_date: "2024-07-01".to_string(),
+            grant_date: None,
+            ipc_codes: "H01M".to_string(),
+            cpc_codes: "H01M".to_string(),
+            priority_date: String::new(),
+            country: "CN".to_string(),
+            kind_code: "A".to_string(),
+            family_id: None,
+            legal_status: String::new(),
+            citations: "[]".to_string(),
+            cited_by: "[]".to_string(),
+            source: "test".to_string(),
+            raw_json: "{}".to_string(),
+            created_at: "2026-01-01 00:00:00".to_string(),
+            images: "[]".to_string(),
+            pdf_url: String::new(),
+        };
+        db.insert_patent(&p).expect("seed insert");
+    }
+
+    /// **MA4b 核心断言（路由级透传）**：`exact_assignee=true` 时本地兜底必须走等值通道——
+    /// 「张三」不得带回「张三丰」名下专利；同一请求 `exact_assignee=false` 时两条款全回
+    /// （旧 LIKE 行为逐字不变）。attempts 的 local_fts 行如实反映 hits 差异。
+    #[test]
+    fn local_fallback_exact_assignee_switches_the_equal_channel() {
+        let db = Database::init(":memory:").expect("in-memory db");
+        seed_patent_applicant(&db, "zs1", "固态电池正极材料", "张三");
+        seed_patent_applicant(&db, "zsf1", "固态电池隔膜", "张三丰");
+
+        // exact=true：只回等值行
+        let mut exact = fallback_req("张三");
+        exact.exact_assignee = true;
+        let mut outcome = chain_exhausted_outcome();
+        let out = local_fallback_json(
+            &db,
+            &exact,
+            &Some(SearchType::Applicant),
+            None,
+            &mut outcome,
+        );
+        let patents = out["patents"].as_array().expect("patents");
+        assert_eq!(1, patents.len(), "精确通道不得命中张三丰: {out}");
+        assert_eq!("张三", out["patents"][0]["applicant"]);
+        assert_eq!("CNzs1000000A", out["patents"][0]["patent_number"]);
+        assert_eq!(
+            1, out["attempts"][2]["hits"],
+            "local_fts 记账必须如实反映精确通道 hits"
+        );
+
+        // exact=false（缺省形状）：旧模糊行为不变，两条都回
+        let fuzzy = fallback_req("张三");
+        let mut outcome2 = chain_exhausted_outcome();
+        let out2 = local_fallback_json(
+            &db,
+            &fuzzy,
+            &Some(SearchType::Applicant),
+            None,
+            &mut outcome2,
+        );
+        assert_eq!(2, out2["patents"].as_array().expect("patents").len());
     }
 }

@@ -189,6 +189,10 @@ impl super::Database {
     }
 
     /// Smart search: choose strategy by detected or requested search type.
+    ///
+    /// 兼容入口：申请人一律走既有 `LIKE %词%` 模糊匹配（与 MA4b 之前逐字一致）。
+    /// 需要精确等值通道（规格书 §7「本人姓名精确搜索」）的调用方使用
+    /// [`Self::search_smart_exact`]，本函数是其 `exact_assignee = false` 的特化。
     #[allow(clippy::too_many_arguments)]
     pub fn search_smart(
         &self,
@@ -199,6 +203,36 @@ impl super::Database {
         date_to: Option<&str>,
         page: usize,
         page_size: usize,
+    ) -> Result<(Vec<PatentSummary>, usize, SearchType)> {
+        self.search_smart_exact(
+            query,
+            search_type,
+            country,
+            date_from,
+            date_to,
+            page,
+            page_size,
+            false,
+        )
+    }
+
+    /// MA4b：带**申请人精确匹配开关**的智能检索。
+    ///
+    /// `exact_assignee = true` 且实际路由到 [`SearchType::Applicant`] 时，本地 SQL 从
+    /// `applicant LIKE %词%` 切换为 `applicant = ?`（等值，参数化，白名单不变）；
+    /// 其余类型（发明人/专利号/关键词/混合）**不受本开关影响**，与
+    /// [`Self::search_smart`] 逐字同路径——默认值即旧行为。
+    #[allow(clippy::too_many_arguments)]
+    pub fn search_smart_exact(
+        &self,
+        query: &str,
+        search_type: Option<&SearchType>,
+        country: Option<&str>,
+        date_from: Option<&str>,
+        date_to: Option<&str>,
+        page: usize,
+        page_size: usize,
+        exact_assignee: bool,
     ) -> Result<(Vec<PatentSummary>, usize, SearchType)> {
         let detected_type = if let Some(st) = search_type {
             let auto_detected = self.detect_search_type(query);
@@ -225,11 +259,12 @@ impl super::Database {
                     date_to,
                     page,
                     page_size,
+                    exact_assignee,
                 )
                 .map(|(p, t)| (p, t, SearchType::Applicant)),
             SearchType::Inventor => self
                 .search_by_field(
-                    query, "inventor", country, date_from, date_to, page, page_size,
+                    query, "inventor", country, date_from, date_to, page, page_size, false,
                 )
                 .map(|(p, t)| (p, t, SearchType::Inventor)),
             SearchType::Keyword => {
@@ -326,6 +361,10 @@ impl super::Database {
     }
 
     /// Generic search by a single field (applicant or inventor) with optional country filter.
+    ///
+    /// `exact = true`（仅申请人通道由 [`Self::search_smart_exact`] 置真）时谓词从
+    /// `LIKE %词%` 切换为 `= 词` 等值匹配——两者都继续用 `?1` 参数绑定，字段名仍走
+    /// 白名单常量，SQL 注入面不增（AGENTS.md 2.7 / 既有白名单不削弱）。
     #[allow(clippy::too_many_arguments)]
     fn search_by_field(
         &self,
@@ -336,6 +375,7 @@ impl super::Database {
         date_to: Option<&str>,
         page: usize,
         page_size: usize,
+        exact: bool,
     ) -> Result<(Vec<PatentSummary>, usize)> {
         // Whitelist field names to prevent SQL injection
         let field = match field {
@@ -345,25 +385,35 @@ impl super::Database {
         };
         let c = self.conn();
         let offset = page.saturating_sub(1) * page_size;
-        let q = format!("%{}%", query);
+        // 精确通道绑定原词（trim 后等值）；模糊通道保持旧 `%词%` 形态逐字不变。
+        let q = if exact {
+            query.trim().to_string()
+        } else {
+            format!("%{}%", query)
+        };
+        let pred = if exact {
+            format!("{} = ?1", field)
+        } else {
+            format!("{} LIKE ?1", field)
+        };
         let date_from = date_from.unwrap_or("");
         let date_to = date_to.unwrap_or("");
 
         // Build WHERE clause dynamically based on whether country filter is present
         let (count_sql, data_sql) = if let Some(country_val) = country.filter(|s| !s.is_empty()) {
             let count = format!(
-                "SELECT COUNT(*) FROM patents WHERE {} LIKE ?1 AND country = ?2
+                "SELECT COUNT(*) FROM patents WHERE {} AND country = ?2
                  AND (?3 = '' OR filing_date >= ?3)
                  AND (?4 = '' OR filing_date <= ?4)",
-                field
+                pred
             );
             let data = format!(
                 "SELECT id,patent_number,title,abstract_text,applicant,inventor,filing_date,country
-                 FROM patents WHERE {} LIKE ?1 AND country = ?2
+                 FROM patents WHERE {} AND country = ?2
                  AND (?3 = '' OR filing_date >= ?3)
                  AND (?4 = '' OR filing_date <= ?4)
                  ORDER BY filing_date DESC LIMIT ?5 OFFSET ?6",
-                field
+                pred
             );
 
             let total: usize = c
@@ -389,18 +439,18 @@ impl super::Database {
             return Ok((rows, total));
         } else {
             let count = format!(
-                "SELECT COUNT(*) FROM patents WHERE {} LIKE ?1
+                "SELECT COUNT(*) FROM patents WHERE {}
                  AND (?2 = '' OR filing_date >= ?2)
                  AND (?3 = '' OR filing_date <= ?3)",
-                field
+                pred
             );
             let data = format!(
                 "SELECT id,patent_number,title,abstract_text,applicant,inventor,filing_date,country
-                 FROM patents WHERE {} LIKE ?1
+                 FROM patents WHERE {}
                  AND (?2 = '' OR filing_date >= ?2)
                  AND (?3 = '' OR filing_date <= ?3)
                  ORDER BY filing_date DESC LIMIT ?4 OFFSET ?5",
-                field
+                pred
             );
             (count, data)
         };
