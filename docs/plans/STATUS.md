@@ -18,7 +18,7 @@
 - **过程止损 / Relay discipline**: 第十五棒实现全部落地但**零 commit、423 行未保存**，且反复重打被限频的上游端点（命中已知失败模式 #5「活着空转」）。处置：`git stash create` 生成 WIP commit `24e2da3`（**不触碰 agent 工作树**）+ `refs/wip/exec/ma4b-assignee` + bundle + 推远端做异地保护 → TaskStop → 派**极窄收尾棒**（brief 直接交出已核实数字、**明令禁止再出网重试**、范围限定「文档 + 门禁 + PR」）。收尾棒 110 轮 / 64 分钟完成「文档 + 门禁 + PR」四件事，未触顶、无需二次止损——验证了「交出已核实数字 + 明令禁止再出网」的收窄派包对「活着空转」型失败有效。第十六棒完成后自述「前任 WIP 逐字保留、本棒未做任何修正」，与 `24e2da3` 对 `src/` 零 diff 已由规划会话核对。
 - **新踩坑（已入库 docs/errors.md）**: 规划会话与执行 agent **共用同一 `target/`** 并发跑 cargo → `incremental/` 缓存写坏，表现为 `cargo test` rustc `0xc0000409`（首跑 exit 101）。清理后单进程复跑全绿，**未改一行代码**。预防条款：独立门禁复跑必须等 agent 结束（判据 = 树干净 + 无 cargo/rustc + 无 server 进程），否则用 worktree + 独立 `CARGO_TARGET_DIR`。
 - **仍开放 / Remaining**: ① 形态 (c) `exact_assignee=true` 的**在线**引号形态仍未取证（反爬阻断，非代码缺陷）；② 「在线命中→本实例入库→断网复检」**全链路**仍缺（收尾时点上游 503），本地等值半边已实证；③ MA4 的**跨源合并去重**——`MergedPatent.key` 仍无消费点，且现行「链按登记顺序择单一胜者」架构是否需要跨源合并本身待 MA6 前重估；④ M-A 系列（MA5b/MA3/MA4a/MA4b）用户可见变更**尚未合并写入 CHANGELOG**，按约定在 MA6 收口时一次性补记。
-- **同步 / Sync**: origin/main、origin/dev、gitee/main、gitee/dev、本地 main 五端对齐 `2679c36`（PR #23 merge commit；gitee dev 由 Gitee 自动同步，已 `git ls-remote` 复核）
+- **同步 / Sync**: origin/main、origin/dev、gitee/main、gitee/dev、本地 main 五端对齐 `962f1a5`（PR #23 merge commit `2679c36` + 本条文档回写）。**同步手法更正（实测）**：`dev` 两端都**必须显式 `git push <remote> main:dev`**——`git push origin dev` 会被本地陈旧 `dev` ref（`aeb0b7a`）撞 non-fast-forward 拒绝，Gitee 侧本轮也未自动跟上（首次只到 `2679c36`，显式推后才对齐），不可假定镜像自动同步。
 
 ### 2026-09-27 — MA4a 本地 FTS 兜底链上记账 + PR #22 合并
 
