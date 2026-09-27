@@ -8,6 +8,14 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-09-27 — MA5b 检索诊断面板 + PR #20 合并
+
+- **状态 / Status**: ✅ 已完成 / Completed
+- **范围 / Scope**: 第十棒执行 agent 单包直出（86 轮未触顶，无需中继）。**关键前置发现（规划会话实测）**：`/api/search/online` 一直只在链内记账 `outcome.attempts`，四个 return 分支的 JSON 从未带出该键——诊断面板的真正缺口是后端序列化，而非前端渲染。交付：`91e31b8` 后端三条链后 return 路径（在线命中/本地兜底/空结果）纯新增 `attempts` 键 + 出参字面量锁单测 `attempts_json_locks_frontend_panel_literals`（serde 外部标签形状：`"Success"` / `"Skipped"` / `{"Failed":"quota"}`）；`0372fac` 前端 search 页折叠诊断面板（逐源徽标/耗时/命中/error+hint 摘要，全程 createElement+textContent，截断仅展示、title 保全全文；`diag.*` 15 键 zh/en 双字典；quota|auth「冷却中」徽标为后端 `FailKind::cools_down()` 的展示镜像，注释指向 model.rs）+ SerpAPI 行复用既有 `/api/settings/serpapi/balance` 静默降级；`1868312` 规格书 ✅ 注记。空查询早退路径刻意不带 attempts（链未跑），前端零 attempts 即不渲染。
+- **验证 / Verification**: GitHub CI lint/test/e2e 三绿（run `36311268138`）；规划会话独立复跑 fmt/clippy（touch 后真编译 2m05s）/test 全绿，**659 = lib 304 + bin 306 + 集成 49 对账闭合**（656 passed + 3 ignored）；`check_html_functions.mjs` 独立扫描「基线一致」（6 新函数已随 `--refresh` 与模板同提交入基线）；e2e 54/54；红线零 diff（common.rs 118 条 `.route()` / Cargo / src/db / 其余模板）；生产路径无 unwrap（新 helper `unwrap_or_else` 受控降级）；agent 另做真实降级链冒烟（SerpAPI network 失败 → XHR 胜出，面板徽标/耗时正确）。本地 test 曾被 D: 盘满（os error 112）阻断，清 `target/debug/incremental`（3.3GB，可再生）后复跑通过
+- **仍开放 / Remaining**: 真实凭证成功路冒烟（SerpAPI/EPO）仍缺（凭证侧为用户动作）；服务端熔断（`cools_down()` 生产消费点 + SerpAPI 30s 收紧）归 MA6；下一棒按 M-A 顺序为 **MA3 补半程**（language/辖区过滤，默认 CN+zh）
+- **同步 / Sync**: origin/main、origin/dev、gitee/main、gitee/dev、本地 main 五端对齐 `aeb0b7a`
+
 ### 2026-09-27 — AI 成本落账闭环（gap 4.3 本批收口）+ PR #19 合并
 
 - **状态 / Status**: ✅ 已完成 / Completed（本批范围内）
