@@ -77,12 +77,16 @@ fn attempts_json(outcome: &SearchOutcome) -> serde_json::Value {
 ///
 /// 空结果末档（在线与本地都零命中 → `patents: []` + `google_url`）同样带上这条记账：
 /// 本地跑过就如实记 Success（hits 可为 0），本地查询炸了就记 Failed——禁止伪造「跑过」。
+///
+/// MA6b 追加 `cooled` 参数：非空时两档出参带顶层 `cooldowns` 键（见 [`cooldowns_json`]，
+/// 纯新增、空则省略），其余键的「零改动」承诺按上述口径不变。
 fn local_fallback_json(
     db: &Database,
     req: &SearchRequest,
     online_search_type: &Option<SearchType>,
     upstream_hint: Option<String>,
     outcome: &mut SearchOutcome,
+    cooled: &[(SourceKind, Duration)],
 ) -> serde_json::Value {
     println!("[ONLINE] Falling back to local DB");
     let local_start = Instant::now();
@@ -145,7 +149,7 @@ fn local_fallback_json(
                     .to_string()
             });
             let dedup_total = total.max(patents.len());
-            return json!({
+            let mut out = json!({
                 "patents": patents,
                 "total": dedup_total,
                 "page": req.page,
@@ -154,6 +158,11 @@ fn local_fallback_json(
                 "hint": hint_text,
                 "attempts": attempts_json(outcome)
             });
+            // MA6b：纯新增键，冷却为空时整键省略（见 [`cooldowns_json`]）
+            if let Some(cd) = cooldowns_json(cooled) {
+                out["cooldowns"] = cd;
+            }
+            return out;
         }
     }
     let enc = urlencoding::encode(&req.query);
@@ -165,6 +174,10 @@ fn local_fallback_json(
     });
     if let Some(h) = upstream_hint {
         out["hint"] = json!(h);
+    }
+    // MA6b：纯新增键，冷却为空时整键省略（见 [`cooldowns_json`]）
+    if let Some(cd) = cooldowns_json(cooled) {
+        out["cooldowns"] = cd;
     }
     out
 }
@@ -202,6 +215,36 @@ fn online_chain_providers(
     providers
 }
 
+/// MA6b：冷却剩余时长的展示口径——**向上取整**（冷却行显示 0s 是自相矛盾）。
+/// [`cooldown_skipped_report`] 的 error 文案与 `cooldowns` 出参键共用此单一判据，
+/// 保证面板徽标（结构化 `cooldowns`）与织回记账（error 文案）里的秒数永远一致。
+fn cooldown_remaining_secs(remaining: Duration) -> u64 {
+    remaining.as_secs() + u64::from(remaining.subsec_nanos() > 0)
+}
+
+/// MA6b：把链前过滤得到的 `(源, 剩余时长)` 序列化为出参顶层 `cooldowns` 键。
+///
+/// 形状 `[{"source":"serpapi","remaining_secs":297}, ...]`，顺序 = 原登记顺序，
+/// `source` 串与 `attempts` 行的 `source` 同一约定（`SourceKind::as_str()`，前端
+/// `DIAG_SOURCE_LABELS` 按同一键表解析）。**空则返回 `None`，调用方整键省略**——
+/// 无冷却时旧响应逐字节不变（与 MA5b「空查询早退不带 attempts」同一取向）。
+/// 前端判据只认这个结构化键，禁止正则匹配中文 error 文案（隐式契约随文案腐烂）。
+fn cooldowns_json(cooled: &[(SourceKind, Duration)]) -> Option<serde_json::Value> {
+    if cooled.is_empty() {
+        return None;
+    }
+    let items: Vec<serde_json::Value> = cooled
+        .iter()
+        .map(|(source, remaining)| {
+            json!({
+                "source": source.as_str(),
+                "remaining_secs": cooldown_remaining_secs(*remaining),
+            })
+        })
+        .collect();
+    Some(serde_json::Value::Array(items))
+}
+
 /// MA6a 的冷却记账注入形状：`Skipped` 的原因放 **`error`**、`hint` 恒为 `None`。
 /// 取证依据（不是猜的）：
 /// - `templates/search.html::renderSearchDiagnostics`（:626-634）对**每条** attempt
@@ -213,8 +256,8 @@ fn online_chain_providers(
 ///   `hint` 键——冷却文案混进去会**改变响应形状与既有提示语义**。
 /// - 本包禁止改 templates/static，故沿用「Skipped → error 带原因」的现役约定零风险。
 fn cooldown_skipped_report(source: SourceKind, remaining: Duration) -> AttemptReport {
-    // 向上取整：剩余 0.5s 显示 0s 会让面板出现「冷却中，剩余 0 秒」的自相矛盾。
-    let secs = remaining.as_secs() + u64::from(remaining.subsec_nanos() > 0);
+    // 向上取整口径与 `cooldowns` 出参键共用（见 [`cooldown_remaining_secs`]）。
+    let secs = cooldown_remaining_secs(remaining);
     AttemptReport {
         source,
         status: AttemptStatus::Skipped,
@@ -602,6 +645,10 @@ pub async fn api_search_online(
         if let Some(h) = upstream_hint.take() {
             out["hint"] = json!(h);
         }
+        // MA6b：与本地兜底两档对称的纯新增键（三处共用 [`cooldowns_json`]，空则省略）
+        if let Some(cd) = cooldowns_json(&cooled) {
+            out["cooldowns"] = cd;
+        }
         return Json(out);
     }
 
@@ -626,6 +673,7 @@ pub async fn api_search_online(
         &online_search_type,
         upstream_hint,
         &mut outcome,
+        &cooled,
     ))
 }
 
@@ -1206,6 +1254,7 @@ mod tests {
             &Some(SearchType::Mixed),
             outcome.hint(),
             &mut outcome,
+            &cooled,
         );
 
         // 兜底出参既有键逐字不变（MA4a 口径）：source 仍为 "local"；顶层 hint 是
@@ -1225,6 +1274,17 @@ mod tests {
         assert_eq!(json!("Success"), attempts[3]["status"]);
         assert_eq!(json!(1), attempts[3]["hits"]);
         assert_eq!(json!("Skipped"), attempts[0]["status"]);
+        // MA6b：全冷却兜底档同样带出 `cooldowns` 键，顺序 = 原登记序、秒数 = 向上取整。
+        // （此用例同时是「冷却不改变既有键」的证明：上面各既有键断言逐字未动。）
+        assert_eq!(
+            json!([
+                {"source": "serpapi", "remaining_secs": 300},
+                {"source": "google_patents_xhr", "remaining_secs": 120},
+                {"source": "epo_ops", "remaining_secs": 900}
+            ]),
+            out["cooldowns"],
+            "cooldowns 必须走真实 local_fallback_json 出参，而不是测试里复刻的假形状"
+        );
     }
 
     /// 无冷却时 weave 必须是纯直通（不复制重排也不改顺序）——保证 MA6a 对
@@ -1434,6 +1494,89 @@ mod tests {
         assert!(fallback.get("message").is_some());
     }
 
+    // ── MA6b：`cooldowns` 顶层出参键（诊断面板冷却可视化的结构化判据）────────────
+
+    /// **MA6b 字面量锁**：`cooldowns` 的 JSON 形状逐字段冻结——`source` 用与 `attempts`
+    /// 行同源的 `SourceKind::as_str()` 小写稳定串（前端 `DIAG_SOURCE_LABELS` 按同一键表
+    /// 解析），`remaining_secs` 向上取整（296.5s → 297，与 `cooldown_skipped_report` 的
+    /// error 文案共用 [`cooldown_remaining_secs`]，两处秒数永不移位）；顺序 = 原登记顺序；
+    /// **空 = `None`（调用方整键省略，无冷却时旧响应逐字节不变）**。
+    /// 前端判据只认这个结构化键，不用正则匹配中文 error 文案（隐式契约随文案腐烂）。
+    #[test]
+    fn cooldowns_json_locks_shape_order_and_ceil_secs() {
+        assert_eq!(None, cooldowns_json(&[]), "空冷却必须整键省略");
+        let cooled = vec![
+            (SourceKind::SerpApi, Duration::from_millis(296_500)),
+            (SourceKind::GooglePatentsXhr, Duration::from_millis(119_001)),
+            (SourceKind::EpoOps, Duration::from_secs(900)),
+        ];
+        assert_eq!(
+            json!([
+                {"source": "serpapi", "remaining_secs": 297},
+                {"source": "google_patents_xhr", "remaining_secs": 120},
+                {"source": "epo_ops", "remaining_secs": 900}
+            ]),
+            cooldowns_json(&cooled).expect("非空冷却必须出键"),
+            "形状/取整/顺序三重锁定：数组元素顺序即原登记顺序"
+        );
+        // 与织回记账的 error 文案同源：同一 Duration 在两处必须给出同一秒数
+        let report = cooldown_skipped_report(SourceKind::SerpApi, Duration::from_millis(296_500));
+        let err = report.error.expect("冷却 Skipped 必带原因");
+        assert!(
+            err.contains("剩余 297s"),
+            "error 文案与 cooldowns 键同口径: {err}"
+        );
+    }
+
+    /// **MA6b 三路径对称（在线命中档）**：命中档与兜底两档共用同一
+    /// [`cooldowns_json`] helper（源码三处 `if let Some(cd) = ...`，MA5b「四个 return
+    /// 分支漏一个」教训的针对性防御）；兜底两档的真实出参形状已由
+    /// `all_sources_cooled_yields_empty_chain_and_identical_local_shape`（带冷却）与
+    /// `local_fallback_*`（无冷却省略键）直接经真函数锁定，本用例按 MA5b
+    /// `attempts_key_is_additive_on_all_online_paths` 先例复刻命中档构造并冻结键集合。
+    #[test]
+    fn cooldowns_key_on_online_hit_path_freezes_key_set() {
+        let outcome = SearchOutcome {
+            results: vec![],
+            attempts: vec![],
+            upstream_total: Some(3),
+        };
+        let cooled = vec![(SourceKind::SerpApi, Duration::from_secs(297))];
+        let mut out = json!({
+            "patents": outcome.summaries(),
+            "total": outcome.upstream_total.unwrap_or(0),
+            "page": 1,
+            "page_size": 10,
+            "source": SourceKind::GooglePatentsXhr.as_str(),
+            "attempts": attempts_json(&outcome)
+        });
+        if let Some(cd) = cooldowns_json(&cooled) {
+            out["cooldowns"] = cd;
+        }
+        let mut keys: Vec<&str> = out
+            .as_object()
+            .map(|m| m.keys().map(|k| k.as_str()).collect())
+            .unwrap_or_default();
+        keys.sort_unstable();
+        assert_eq!(
+            vec![
+                "attempts",
+                "cooldowns",
+                "page",
+                "page_size",
+                "patents",
+                "source",
+                "total"
+            ],
+            keys,
+            "命中档 = MA5b 六键 + cooldowns，不许多出或更少键"
+        );
+        assert_eq!(
+            json!([{"source": "serpapi", "remaining_secs": 297}]),
+            out["cooldowns"]
+        );
+    }
+
     // ── MA4a：本地 FTS 兜底的链上记账（attempts 末条 = local_fts）──────────────
     //
     // 直接测 [`local_fallback_json`]：内存库 + 手工构造 outcome，不经网络，形状可锁死。
@@ -1531,6 +1674,7 @@ mod tests {
             &Some(SearchType::Mixed),
             None,
             &mut outcome,
+            &[],
         );
 
         let attempts = out["attempts"].as_array().expect("attempts 是数组");
@@ -1580,6 +1724,8 @@ mod tests {
         assert_eq!(1, out["patents"].as_array().expect("patents").len());
         assert_eq!("CN111000000A", out["patents"][0]["patent_number"]);
         assert_eq!("固态电池", out["patents"][0]["title"]);
+        // MA6b：无冷却时 `cooldowns` 整键省略（上面键集合冻结即证明——多出该键会直接红）
+        assert!(out.get("cooldowns").is_none());
     }
 
     /// **MA4a 核心断言 2（本地也零命中）**：末档（`patents: []` + `google_url`）里
@@ -1595,6 +1741,7 @@ mod tests {
             &Some(SearchType::Mixed),
             Some("在线预算提示".to_string()),
             &mut outcome,
+            &[],
         );
 
         let attempts = out["attempts"].as_array().expect("attempts");
@@ -1614,6 +1761,8 @@ mod tests {
         );
         assert_eq!("未找到结果，可尝试在 Google Patents 上搜索", out["message"]);
         assert_eq!("在线预算提示", out["hint"]);
+        // MA6b：空结果末档同样「无冷却 ⇒ 整键省略」
+        assert!(out.get("cooldowns").is_none());
     }
 
     /// **MA4a 核心断言 3（本地查询失败）**：`search_smart` 报错时记
@@ -1634,6 +1783,7 @@ mod tests {
             &Some(SearchType::Mixed),
             None,
             &mut outcome,
+            &[],
         );
 
         let attempts = out["attempts"].as_array().expect("attempts");
@@ -1708,6 +1858,7 @@ mod tests {
             &Some(SearchType::Applicant),
             None,
             &mut outcome,
+            &[],
         );
         let patents = out["patents"].as_array().expect("patents");
         assert_eq!(1, patents.len(), "精确通道不得命中张三丰: {out}");
@@ -1727,6 +1878,7 @@ mod tests {
             &Some(SearchType::Applicant),
             None,
             &mut outcome2,
+            &[],
         );
         assert_eq!(2, out2["patents"].as_array().expect("patents").len());
     }

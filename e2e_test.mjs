@@ -2,7 +2,7 @@ import puppeteer from 'puppeteer';
 import { existsSync } from 'node:fs';
 
 const baseUrl = (process.env.INNOFORGE_E2E_BASE_URL || 'http://127.0.0.1:3000').replace(/\/$/, '');
-const expectedPasses = 56;
+const expectedPasses = 60;
 const failures = [];
 let passed = 0;
 
@@ -639,6 +639,120 @@ async function checkSearchLanguageFilter(searchPage) {
     );
 }
 
+// MA6b：检索诊断面板（此前 e2e 零覆盖）——冷却徽标、本地模式回归、结构化判据、截断纪律。
+// 直接调用页内 renderSearchDiagnostics(假 payload) 断言 DOM，无需真出网、无需真 Key。
+async function checkSearchDiagnosticsAndCooldown(searchPage) {
+    // ① cooldowns 键命中 → 出现含剩余秒数的冷却徽标，面板可见
+    const cooldown = await searchPage.evaluate(() => {
+        renderSearchDiagnostics({
+            attempts: [
+                {
+                    source: 'serpapi',
+                    status: 'Skipped',
+                    latency_ms: 0,
+                    hits: 0,
+                    error: 'serpapi 上游熔断冷却中，剩余 297s（本次不再发起请求）',
+                    hint: null,
+                },
+                {
+                    source: 'google_patents_xhr',
+                    status: 'Success',
+                    latency_ms: 450,
+                    hits: 5,
+                    error: null,
+                    hint: null,
+                },
+            ],
+            cooldowns: [{ source: 'serpapi', remaining_secs: 297 }],
+        });
+        const box = document.getElementById('search-diagnostics');
+        const badges = [...box.querySelectorAll('span')].filter(s => s.style.borderRadius === '10px');
+        const secondsBadge = badges.find(s => s.textContent.includes('297'));
+        return { visible: box.style.display === 'block', hasSecondsBadge: !!secondsBadge };
+    });
+    requireCondition(
+        cooldown.visible && cooldown.hasSecondsBadge,
+        'Search diagnostics renders cooldown badge with remaining seconds from structured cooldowns key',
+        `page=/search visible=${cooldown.visible} seconds_badge=${cooldown.hasSecondsBadge}`,
+    );
+
+    // ② 本地模式回归：无 attempts / attempts 空数组 → 面板不渲染、清空内容、不抛错
+    const localMode = await searchPage.evaluate(() => {
+        let threw = false;
+        try {
+            renderSearchDiagnostics({ patents: [], total: 0, source: 'local' });
+            renderSearchDiagnostics({ attempts: [] });
+        } catch (error) {
+            threw = true;
+        }
+        const box = document.getElementById('search-diagnostics');
+        return { threw, hidden: box.style.display === 'none', empty: box.textContent === '' };
+    });
+    requireCondition(
+        !localMode.threw && localMode.hidden && localMode.empty,
+        'Search diagnostics stays hidden and throws nothing without attempts (local mode)',
+        `page=/search threw=${localMode.threw} hidden=${localMode.hidden} empty=${localMode.empty}`,
+    );
+
+    // ③ 判据是结构化的：error 文案里伪装「冷却中 剩余 480s」字样、但无 cooldowns 键，
+    //    不得长出带秒数的冷却徽标（隐式文案匹配被 MA6b 明确禁止）
+    const structural = await searchPage.evaluate(() => {
+        renderSearchDiagnostics({
+            attempts: [
+                {
+                    source: 'local_fts',
+                    status: 'Success',
+                    latency_ms: 3,
+                    hits: 1,
+                    error: '字样伪装：冷却中 剩余 480s',
+                    hint: null,
+                },
+            ],
+        });
+        const box = document.getElementById('search-diagnostics');
+        const badges = [...box.querySelectorAll('span')].filter(s => s.style.borderRadius === '10px');
+        const fakeBadge = badges.find(s => s.textContent.includes('480'));
+        return { visible: box.style.display === 'block', hasFakeBadge: !!fakeBadge };
+    });
+    requireCondition(
+        structural.visible && !structural.hasFakeBadge,
+        'Search diagnostics ignores error-text wording for cooldown badges (structured key only)',
+        `page=/search visible=${structural.visible} fake_badge=${structural.hasFakeBadge}`,
+    );
+
+    // ④ 截断纪律（AGENTS.md 2.5）：长 error 显示截断但 title 保留全文
+    const truncation = await searchPage.evaluate(() => {
+        const long = 'x'.repeat(80);
+        renderSearchDiagnostics({
+            attempts: [
+                {
+                    source: 'epo_ops',
+                    status: { Failed: 'network' },
+                    latency_ms: 2000,
+                    hits: 0,
+                    error: long,
+                    hint: null,
+                },
+            ],
+        });
+        const box = document.getElementById('search-diagnostics');
+        const errSpan = [...box.querySelectorAll('span')].find(s => s.getAttribute('title') === long);
+        return {
+            found: !!errSpan,
+            truncated: !!errSpan && errSpan.textContent.length < long.length,
+            ellipsis: !!errSpan && errSpan.textContent.includes('…'),
+        };
+    });
+    requireCondition(
+        truncation.found && truncation.truncated && truncation.ellipsis,
+        'Search diagnostics truncates long errors for display but keeps full text in title',
+        `page=/search found=${truncation.found} truncated=${truncation.truncated} ellipsis=${truncation.ellipsis}`,
+    );
+
+    // 复位：不让假数据面板残留在 DOM 里影响其它用例
+    await searchPage.evaluate(() => renderSearchDiagnostics({}));
+}
+
 async function main() {
     const pageErrors = [];
     const requestFailures = [];
@@ -657,7 +771,10 @@ async function main() {
 
         openedPages = await runPageMatrix(browser, pageErrors, requestFailures);
         const searchPage = openedPages.get('/search');
-        if (searchPage) await checkSearchLanguageFilter(searchPage);
+        if (searchPage) {
+            await checkSearchLanguageFilter(searchPage);
+            await checkSearchDiagnosticsAndCooldown(searchPage);
+        }
         const ideaPage = openedPages.get('/idea');
         if (ideaPage) {
             await checkCadControllerStateIsolation(ideaPage);

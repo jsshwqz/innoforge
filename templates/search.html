@@ -207,6 +207,8 @@ function clearSearchPdfMeta() {
     'diag.error': '错误',
     'diag.hint': '提示',
     'diag.balance': 'SerpAPI 本月剩余 {remaining} / {limit}（{plan}）',
+    'diag.cooldown_remaining': '剩余 {s}s',
+    'diag.balance_low': '配额即将耗尽，建议尽快补充或改用本地检索',
     'alert.emptyQuery': '请输入搜索内容',
     'alert.searchFirst': '请先执行一次搜索',
     'alert.searchFail': '搜索失败',
@@ -288,6 +290,8 @@ function clearSearchPdfMeta() {
     'diag.error': 'Error',
     'diag.hint': 'Hint',
     'diag.balance': 'SerpAPI {remaining} / {limit} left this month ({plan})',
+    'diag.cooldown_remaining': '{s}s remaining',
+    'diag.balance_low': 'quota running low, refill soon or switch to local search',
     'alert.emptyQuery': 'Please enter a query',
     'alert.searchFirst': 'Please run a search first',
     'alert.searchFail': 'Search failed',
@@ -521,11 +525,13 @@ function renderResults(data, page, pageSize) {
 }
 
 // ── MA5b 检索诊断面板 ─────────────────────────────────────────────────────────
-// 数据源：/api/search/online 出参新增的 attempts 键。序列化字面量由后端单测
-// routes/search.rs::attempts_json_locks_frontend_panel_literals 锁死，形状：
+// 数据源：/api/search/online 出参的 attempts 键 + MA6b 新增顶层 cooldowns 键：
 //   { source: 'serpapi'|'google_patents_xhr'|'epo_ops'|'local_fts',
 //     status: 'Success' | 'Skipped' | { Failed: 'network'|'quota'|'auth'|'parse' },
 //     latency_ms: number, hits: number, error: string|null, hint: string|null }
+//   cooldowns: [{ source: 同上小写稳定串, remaining_secs: number }, ...]
+//   ——顺序=源登记顺序，无冷却时整键省略；两个键的字面量分别由后端单测
+//   attempts_json_locks_frontend_panel_literals / cooldowns_json_locks_shape_order_and_ceil_secs 锁死。
 // 本地模式（/api/search）出参没有 attempts → 面板整体不渲染，不得报错。
 // 全程 createElement + textContent（AGENTS.md 2.5：禁止 innerHTML 直插动态文本）。
 
@@ -537,8 +543,10 @@ const DIAG_SOURCE_LABELS = {
 };
 const DIAG_FAIL_KEYS = ['network', 'quota', 'auth', 'parse'];
 
-// 「冷却中」判据是后端 FailKind::cools_down()（src/search/model.rs：Quota|Auth → true）
-// 的展示镜像，服务端熔断归 MA6，前端刻意不发明新规则。
+// 「冷却中」展示镜像：后端 FailKind::cools_down()（src/search/model.rs：Quota|Auth → true）
+// 的判据副本。MA6a 已落地服务端熔断（src/search/breaker.rs），本镜像仍服务「本次失败、
+// 刚触发冷却」的 quota/auth 行；**下一请求**的真实冷却状态以结构化 `cooldowns` 键为准
+// （见 renderSearchDiagnostics 内 MA6b 注释），前端依旧不发明第二套冷却判定规则。
 function diagCoolsDown(failKind) {
     return failKind === 'quota' || failKind === 'auth';
 }
@@ -588,6 +596,16 @@ function renderSearchDiagnostics(data) {
     var attempts = data && Array.isArray(data.attempts) ? data.attempts : [];
     if (!attempts.length) return;
 
+    // MA6b：`cooldowns` 结构化映射（源名 → 剩余秒数）。冷却徽标只认这个键，
+    // 禁止正则解析中文 error 文案（隐式契约随文案腐烂）。缺键时下方所有分支
+    // 走不到冷却徽标，面板行为与 MA6a 逐字一致。
+    var cooldownBySource = {};
+    if (data && Array.isArray(data.cooldowns)) {
+        data.cooldowns.forEach(function(c) {
+            if (c && c.source) cooldownBySource[c.source] = Number(c.remaining_secs || 0);
+        });
+    }
+
     var details = document.createElement('details');
     details.style.cssText = 'margin-bottom:12px;padding:8px 12px;background:#161b22;border:1px solid #30363d;border-radius:8px;';
     var summary = document.createElement('summary');
@@ -619,6 +637,14 @@ function renderSearchDiagnostics(data) {
         if (st.kind === 'failed' && diagCoolsDown(st.fail)) {
             row.appendChild(diagBadgeSpan(t('diag.cooling'), '#d29922'));
         }
+        // MA6b：链前被摘链的冷却源（结构化 cooldowns 键命中）→ 专属「冷却中 · 剩余 Ns」徽标。
+        // 与上面的失败镜像徽标语义不同：这条是「本次没发起请求、上游仍在冷却窗口」。
+        if (Object.prototype.hasOwnProperty.call(cooldownBySource, a.source)) {
+            row.appendChild(diagBadgeSpan(
+                t('diag.cooling') + ' · ' + t('diag.cooldown_remaining', { s: cooldownBySource[a.source] }),
+                '#d29922'
+            ));
+        }
         row.appendChild(diagMutedSpan(t('diag.latency', { ms: Number(a.latency_ms || 0) })));
         row.appendChild(diagMutedSpan(t('diag.hits', { n: Number(a.hits || 0) })));
 
@@ -645,11 +671,24 @@ function renderSearchDiagnostics(data) {
                 if (bal.parentNode) bal.parentNode.removeChild(bal);
                 return;
             }
+            var remaining = Number(balData.remaining || 0);
+            var limit = Number(balData.searches_per_month || 0);
             bal.textContent = t('diag.balance', {
-                remaining: Number(balData.remaining || 0),
-                limit: Number(balData.searches_per_month || 0),
+                remaining: remaining,
+                limit: limit,
                 plan: String(balData.plan_name || 'Free')
             });
+            // MA6b 配额预警：阈值取「月度配额 10%」与固定 100 的宽者（按月的付费套餐
+            // 要按比例提前预警；低配额/无月限信息时要兜底的绝对量预警）。remaining
+            // 缺失或为 0 不预警——那是「没配 Key 的静默降级」常见形态，禁止误报成
+            // 「配额耗尽」。任何失败仍走上方 null 分支静默移除占位，不阻塞面板。
+            if (remaining > 0 && remaining <= (limit > 0 ? Math.max(limit * 0.1, 100) : 100)) {
+                bal.style.color = '#d29922';
+                var warn = document.createElement('span');
+                warn.textContent = ' · ' + t('diag.balance_low');
+                warn.style.color = '#d29922';
+                serpapiRow.appendChild(warn);
+            }
         });
     }
     box.appendChild(details);
