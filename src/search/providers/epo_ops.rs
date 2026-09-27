@@ -90,8 +90,11 @@
 //! 3. **匿名请求**（无 Authorization 头）实测返回 **403** 而非 401（见 EVIDENCE_LIVE 第 2 条），
 //!    所以「token 过期」与「压根没带 token」都可能落到 403：两者的正确处置都是
 //!    「重取 token 再试一发」，故 auth 重试判定为 **401 或 403**（口径见 [`FailKind::for_http_status`]）。
-//! 4. **未做**：跨源结果拼接（`MergedPatent.key` 的合并消费）属 MA4；熔断冷却
-//!    （`FailKind::cools_down` 消费）属 MA5/MA6。
+//! 4. **未做**：跨源结果拼接（`MergedPatent.key` 的合并消费）属 MA4 剩余项。
+//!    ~~熔断冷却（`FailKind::cools_down` 消费）属 MA5/MA6~~
+//!    **MA6a 已落地**：本源 Quota 300s / Auth 900s 的源级冷却由
+//!    [`crate::search::breaker`] 在 `routes/search.rs` 链前/链后接线消费；
+//!    本源内的 `Retry-After` 单次退避保持不变（源内重试优先上游值，冷却是重试后的兜底窗口）。
 
 use crate::db::Database;
 use crate::patent::Patent;

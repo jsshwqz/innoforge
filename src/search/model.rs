@@ -73,10 +73,13 @@ impl FailKind {
         !matches!(self, FailKind::Parse)
     }
 
-    /// 是否进入源级冷却（spec §1：Quota/Auth → 冷却；spec §6：连续 3 次后冷却 10 分钟）。
+    /// 是否进入源级冷却（spec §1：Quota/Auth → 冷却；口径见 §6 的 MA6a 落地说明）。
     /// MA2b 对账：本包只交付「第三源进链」，熔断器按 MA1 起就写定的归属仍留在面板/稳健化两棒，
     /// **未伪造消费点**（判定链路上任何一处都没调它）。
-    #[allow(dead_code)] // MA5/MA6 熔断器消费（口径同 chain.rs 模块头与 providers/epo_ops.rs 未做清单）
+    /// **MA6a 收口**：首个生产消费点已落地——`routes/search.rs::api_search_online` 链后回写经
+    /// [`crate::search::breaker::CooldownTable::note_attempts`] →
+    /// [`crate::search::breaker::cooldown_duration`] 调用本判定登记冷却
+    /// （`src/search/breaker.rs`，测试锁于 `breaker::tests::quota_and_auth_cool_down_but_network_and_parse_do_not`）。
     pub fn cools_down(self) -> bool {
         matches!(self, FailKind::Quota | FailKind::Auth)
     }

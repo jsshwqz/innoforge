@@ -22,8 +22,10 @@
 //! 代价与收益的取舍放在这里说明白：本源的进程内最小间隔 + 抖动限速
 //! （[`crate::search::providers::google_patents_xhr::MIN_REQUEST_INTERVAL`]）
 //! 是把它压在「个人本地工具自用频率」这条合规边界内的手段；
-//! 若后续观测到常态性 503，应在 MA5 的面板上暴露冷却状态（`FailKind::cools_down` 的消费点），
-//! 而不是回到串行瀑布。
+//! 常态性 503 的处置**已落地**（MA6a）：`FailKind::cools_down` 的消费点在
+//! [`crate::search::breaker`]（单次 Quota/Auth 即源级冷却，接入 `routes/search.rs`
+//! 链前过滤），冷却源在 attempts 中如实留 `Skipped` 记账；诊断面板展示「剩余 Ns」
+//! 属 MA6b。回到串行瀑布仍是禁止项。
 
 use crate::search::model::{AttemptReport, SearchOutcome};
 use crate::search::model::{AttemptStatus, SourceKind};
