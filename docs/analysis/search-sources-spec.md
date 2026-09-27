@@ -56,7 +56,7 @@ pub struct SearchOutcome {
 - **改造点**：
   1. 迁入 trait 实现（从 routes/search.rs 抽出，逻辑保持）；
   2. q 构造统一由 SearchQuery 渲染（含 CN/language 注入——**修复"要中文给英文"的直接动作**）；
-  3. 配额耗尽预警（余额接口已有 api_serpapi_balance，接入诊断面板）。
+  3. 配额耗尽预警（余额接口已有 api_serpapi_balance，接入诊断面板）。 ✅ MA5b（search.html 诊断面板 SerpAPI 行复用该端点，失败静默降级）
 
 ## 4. 源三：EPO OPS（免费注册，英文域权威）
 
@@ -78,7 +78,7 @@ pub struct SearchOutcome {
 合并去重键：publication_number 规范化（去空格/统一大小写）
 ```
 
-- 不做严格串行瀑布（太慢）；并行+先到先得，AttemptReport 全量记录进诊断面板
+- 不做严格串行瀑布（太慢）；并行+先到先得，AttemptReport 全量记录进诊断面板 ✅ MA5b（`/api/search/online` 出参 `attempts` 键 + search 页诊断折叠面板；下方「每源独立熔断」仍归 MA6）
 - 每源独立熔断：连续 3 次 FailKind∈{Quota,Auth} 后冷却 10 分钟不再尝试
 
 ## 7. 本地库兜底与索引同步（MA4）
