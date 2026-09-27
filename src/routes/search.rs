@@ -47,6 +47,17 @@ fn serpapi_skipped_outcome(hint: &str) -> SearchOutcome {
     }
 }
 
+/// MA5b：把 [`SearchOutcome::attempts`] 序列化为出参 `attempts` 键的值。
+///
+/// **纯新增键**：`patents/total/page/page_size/source/hint` 等既有键的形状与文案逐字不变，
+/// 本函数只负责把链上已算好的诊断报告带出去，不参与任何判定。
+/// 序列化字面量（`source` 小写稳定串、`status` 的外部标签表示、`latency_ms` 蛇形字段名）
+/// 由 `attempts_json_locks_frontend_panel_literals` 锁死，前端诊断面板按同一约定解析。
+/// 理论上 `Vec<AttemptReport>` 不可能序列化失败，仍按规约 2.7 用受控降级替代 unwrap。
+fn attempts_json(outcome: &SearchOutcome) -> serde_json::Value {
+    serde_json::to_value(&outcome.attempts).unwrap_or_else(|_| json!([]))
+}
+
 /// 按 spec §6 的优先级装配在线执行链的源集合（MA2b 起三源）：
 /// `[SerpAPI(有 Key) → GooglePatentsXhr → EpoOps(有 Key)]`。
 ///
@@ -355,7 +366,8 @@ pub async fn api_search_online(
             "total": outcome.upstream_total.unwrap_or(0),
             "page": req.page,
             "page_size": 10,
-            "source": winner.as_str()
+            "source": winner.as_str(),
+            "attempts": attempts_json(&outcome)
         });
         if let Some(h) = upstream_hint.take() {
             out["hint"] = json!(h);
@@ -405,7 +417,8 @@ pub async fn api_search_online(
                 "page": req.page,
                 "page_size": req.page_size,
                 "source": "local",
-                "hint": hint_text
+                "hint": hint_text,
+                "attempts": attempts_json(&outcome)
             }));
         }
     }
@@ -413,7 +426,8 @@ pub async fn api_search_online(
     let mut out = json!({
         "patents": [], "total": 0, "page": 1, "page_size": 20,
         "google_url": format!("https://patents.google.com/?q={enc}&oq={enc}"),
-        "message": "未找到结果，可尝试在 Google Patents 上搜索"
+        "message": "未找到结果，可尝试在 Google Patents 上搜索",
+        "attempts": attempts_json(&outcome)
     });
     if let Some(h) = upstream_hint {
         out["hint"] = json!(h);
@@ -926,5 +940,127 @@ mod tests {
         );
         // hint 缺失时不得凭空多出该键（旧代码只在 Some 时插入）
         assert!(out.get("hint").is_none());
+    }
+
+    /// **MA5b 出参字面量锁（前端诊断面板的对账依据）**：`attempts` 键的 JSON 形状
+    /// 逐字段冻结在此——前端 `templates/search.html` 的 `renderSearchDiagnostics` 按同一约定解析：
+    /// - `source`：小写稳定串（`serpapi` / `google_patents_xhr` / `epo_ops` / `local_fts`）
+    /// - `status`：serde 外部标签表示 —— 单元变体是裸字符串 `"Success"` / `"Skipped"`，
+    ///   带值变体是单键对象 `{"Failed":"quota"}`（`FailKind` 为 snake_case）
+    /// - 字段名：`latency_ms` / `hits` / `error` / `hint`（后两个可为 null）
+    ///
+    /// 改动 `AttemptStatus`/`FailKind` 的 serde 表示会红，前端必须同步。
+    #[test]
+    fn attempts_json_locks_frontend_panel_literals() {
+        use crate::search::model::FailKind;
+        let outcome = SearchOutcome {
+            results: vec![],
+            attempts: vec![
+                AttemptReport {
+                    source: SourceKind::SerpApi,
+                    status: AttemptStatus::Failed(FailKind::Quota),
+                    latency_ms: 812,
+                    hits: 0,
+                    error: Some("HTTP 429 配额耗尽".to_string()),
+                    hint: Some("请配置 SerpAPI Key".to_string()),
+                },
+                AttemptReport {
+                    source: SourceKind::GooglePatentsXhr,
+                    status: AttemptStatus::Success,
+                    latency_ms: 2330,
+                    hits: 10,
+                    error: None,
+                    hint: None,
+                },
+                AttemptReport {
+                    source: SourceKind::SerpApi,
+                    status: AttemptStatus::Skipped,
+                    latency_ms: 0,
+                    hits: 0,
+                    error: None,
+                    hint: None,
+                },
+            ],
+            upstream_total: None,
+        };
+        assert_eq!(
+            json!([
+                {
+                    "source": "serpapi",
+                    "status": {"Failed": "quota"},
+                    "latency_ms": 812,
+                    "hits": 0,
+                    "error": "HTTP 429 配额耗尽",
+                    "hint": "请配置 SerpAPI Key"
+                },
+                {
+                    "source": "google_patents_xhr",
+                    "status": "Success",
+                    "latency_ms": 2330,
+                    "hits": 10,
+                    "error": null,
+                    "hint": null
+                },
+                {
+                    "source": "serpapi",
+                    "status": "Skipped",
+                    "latency_ms": 0,
+                    "hits": 0,
+                    "error": null,
+                    "hint": null
+                }
+            ]),
+            attempts_json(&outcome)
+        );
+    }
+
+    /// **MA5b 总开关（只增键、不改键）**：命中/兜底/空结果三条 return 路径都追加
+    /// `attempts` 键，其余既有键的集合与取值口径逐字不变。空链（理论上不可达，但
+    /// 面板要能区分「没有 attempts」与「数组为空」）序列化为 `[]`。
+    #[test]
+    fn attempts_key_is_additive_on_all_online_paths() {
+        let outcome = SearchOutcome {
+            results: vec![],
+            attempts: vec![],
+            upstream_total: None,
+        };
+        assert_eq!(json!([]), attempts_json(&outcome));
+
+        // 在线命中路径：旧五键逐字保留 + 新增 attempts（键集合显式冻结）
+        let winner = json!({
+            "patents": outcome.summaries(),
+            "total": outcome.upstream_total.unwrap_or(0),
+            "page": 1,
+            "page_size": 10,
+            "source": SourceKind::SerpApi.as_str(),
+            "attempts": attempts_json(&outcome)
+        });
+        let mut keys: Vec<&str> = winner
+            .as_object()
+            .map(|m| m.keys().map(|k| k.as_str()).collect())
+            .unwrap_or_default();
+        // serde_json::Map 不保证插入序（未开 preserve_order），按键集合冻结
+        keys.sort_unstable();
+        assert_eq!(
+            vec![
+                "attempts",
+                "page",
+                "page_size",
+                "patents",
+                "source",
+                "total"
+            ],
+            keys
+        );
+
+        // 本地兜底与空结果路径同样只增 attempts，不动 source/hint/message/google_url
+        let fallback = json!({
+            "patents": [], "total": 0, "page": 1, "page_size": 20,
+            "google_url": "https://patents.google.com/?q=x&oq=x",
+            "message": "未找到结果，可尝试在 Google Patents 上搜索",
+            "attempts": attempts_json(&outcome)
+        });
+        assert_eq!(json!([]), fallback["attempts"]);
+        assert!(fallback.get("message").is_some());
     }
 }
