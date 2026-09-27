@@ -23,6 +23,9 @@
 //!    不引入新依赖），只加锁转发，无任何判定逻辑。
 //!
 //! 生产接入点在 `routes/search.rs::api_search_online`（链前过滤 + 链后回写）。
+//! **MA6c 追加第二处只读接入点**：专利号精确直查在出网前先读同一张表
+//! （`routes/search.rs::exact_lookup_allowed`）——直查不在链上、没有真实 attempts，
+//! 故按「`Skipped` 不构成信号」的同一纪律**只读不写**（不登记、不清零）。
 
 use crate::search::model::{AttemptReport, AttemptStatus, FailKind, SourceKind};
 use std::collections::HashMap;
