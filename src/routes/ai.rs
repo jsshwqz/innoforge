@@ -195,6 +195,7 @@ fn estimate_tokens(s: &str) -> usize {
 /// Uses structured compression to preserve key decisions, conclusions, and parameters.
 async fn compress_history(
     ai: &crate::ai::AiClient,
+    db: &crate::db::Database,
     history: Vec<(String, String)>,
     max_tokens: usize,
 ) -> Vec<(String, String)> {
@@ -234,6 +235,9 @@ async fn compress_history(
 
     match summary {
         Ok(summary_text) => {
+            // 压缩本身是一次真实计费调用，必须紧跟落账：否则其 usage 会被
+            // 随后的主对话调用覆盖，导致这笔成本永久丢账（漏点修复）。
+            let _ = db.log_ai_call(ai, "ai-chat-compress", None, None);
             let mut result = Vec::with_capacity(1 + recent_part.len());
             result.push((
                 "assistant".to_string(),
@@ -400,7 +404,7 @@ pub async fn api_ai_chat(
 
             // Add history messages (compressed if long)
             let compressed_history = if req.history.len() > 5 {
-                compress_history(&ai, req.history.clone(), 8000).await
+                compress_history(&ai, &s.db, req.history.clone(), 8000).await
             } else {
                 req.history.clone()
             };
@@ -443,7 +447,7 @@ pub async fn api_ai_chat(
             let mut history = req.history;
             history.push(("user".to_string(), req.message));
             // 超过 ~8000 token 时自动压缩早期对话为摘要
-            let history = compress_history(&ai, history, 8000).await;
+            let history = compress_history(&ai, &s.db, history, 8000).await;
             ai.chat_with_history(&system_prompt, history, 0.5).await
         }
     }
@@ -451,17 +455,7 @@ pub async fn api_ai_chat(
     let ai_ms = ai_start.elapsed().as_millis();
     // 记录 AI 调用成本（仅记录成功的调用）
     if result.is_ok() {
-        if let Some(usage) = ai.take_last_usage() {
-            let _ = s.db.save_cost_record_from_client(
-                usage.input_tokens,
-                usage.output_tokens,
-                ai.model_name(),
-                ai.provider_name(),
-                "ai-chat",
-                None,
-                None,
-            );
-        }
+        let _ = s.db.log_ai_call(&ai, "ai-chat", None, None);
     }
     let total_ms = req_start.elapsed().as_millis();
     tracing::info!(
@@ -565,7 +559,10 @@ pub async fn api_ai_chat_conclusions(
         .unwrap_or_else(|e| e.into_inner())
         .ai_client();
     match ai.chat(&prompt, None).await {
-        Ok(conclusions) => Json(json!({"status": "ok", "conclusions": conclusions})),
+        Ok(conclusions) => {
+            let _ = s.db.log_ai_call(&ai, "ai-chat-conclusions", None, None);
+            Json(json!({"status": "ok", "conclusions": conclusions}))
+        }
         Err(e) => Json(json!({"error": format!("导出结论失败: {}", e)})),
     }
 }
@@ -690,7 +687,10 @@ pub async fn api_ai_compare(
         .unwrap_or_else(|e| e.into_inner())
         .ai_client();
     match ai.chat(&prompt, None).await {
-        Ok(content) => Json(AiResponse { content }),
+        Ok(content) => {
+            let _ = s.db.log_ai_call(&ai, "ai-compare", None, None);
+            Json(AiResponse { content })
+        }
         Err(e) => Json(AiResponse {
             content: format!("AI error: {e}"),
         }),
@@ -750,6 +750,7 @@ pub async fn api_ai_analyze_results(
         .ai_client();
     match ai.chat(&prompt, None).await {
         Ok(content) => {
+            let _ = s.db.log_ai_call(&ai, "ai-analyze-results", None, None);
             let trimmed = content.trim();
             let json_str = if let Some(start) = trimmed.find('{') {
                 if let Some(end) = trimmed.rfind('}') {
@@ -791,7 +792,10 @@ pub async fn api_ai_claims_analysis(
         .unwrap_or_else(|e| e.into_inner())
         .ai_client_expert();
     match ai.analyze_claims(&patent.title, &patent.claims).await {
-        Ok(content) => Json(json!({"status": "ok", "analysis": content})),
+        Ok(content) => {
+            let _ = s.db.log_ai_call(&ai, "ai-claims-analysis", None, None);
+            Json(json!({"status": "ok", "analysis": content}))
+        }
         Err(e) => Json(json!({"error": format!("分析失败: {}", e)})),
     }
 }
@@ -849,7 +853,10 @@ pub async fn api_ai_risk_assessment(
         .unwrap_or_else(|e| e.into_inner())
         .ai_client_expert();
     match ai.assess_infringement(product_desc, &patents_info).await {
-        Ok(content) => Json(json!({"status": "ok", "analysis": content})),
+        Ok(content) => {
+            let _ = s.db.log_ai_call(&ai, "ai-risk-assessment", None, None);
+            Json(json!({"status": "ok", "analysis": content}))
+        }
         Err(e) => Json(json!({"error": format!("评估失败: {}", e)})),
     }
 }
@@ -911,7 +918,10 @@ pub async fn api_ai_compare_matrix(
         .unwrap_or_else(|e| e.into_inner())
         .ai_client();
     match ai.compare_multiple(&patents_info).await {
-        Ok(content) => Json(json!({"status": "ok", "analysis": content})),
+        Ok(content) => {
+            let _ = s.db.log_ai_call(&ai, "ai-compare-matrix", None, None);
+            Json(json!({"status": "ok", "analysis": content}))
+        }
         Err(e) => Json(json!({"error": format!("对比失败: {}", e)})),
     }
 }
@@ -949,6 +959,9 @@ pub async fn api_ai_batch_summarize(
         .unwrap_or_else(|e| e.into_inner())
         .ai_client();
     let results = ai.batch_summarize(&patents_data).await;
+    // 批量摘要内部逐条串行调用 AI，usage 槽只保留最后一次调用的用量，
+    // 故此处仅记一笔（批量总成本被低估，属已知限制，见 PR/计划文档登记）
+    let _ = s.db.log_ai_call(&ai, "ai-batch-summarize", None, None);
 
     let summaries: Vec<serde_json::Value> = results
         .into_iter()
@@ -1098,7 +1111,10 @@ pub async fn api_ai_inventiveness_analysis(
         .unwrap_or_else(|e| e.into_inner())
         .ai_client_expert();
     match ai.inventiveness_analysis(&my_info, &refs_info).await {
-        Ok(content) => Json(json!({"status": "ok", "analysis": content})),
+        Ok(content) => {
+            let _ = s.db.log_ai_call(&ai, "ai-inventiveness", None, None);
+            Json(json!({"status": "ok", "analysis": content}))
+        }
         Err(e) => Json(json!({"error": format!("创造性分析失败: {}", e)})),
     }
 }
@@ -1257,6 +1273,7 @@ pub async fn api_ai_office_action_response(
         .await
     {
         Ok(content) => {
+            let _ = s.db.log_ai_call(&ai, "ai-oa-response", None, None);
             // 自动保存到历史
             let patent_title = req
                 .get("my_patent")
@@ -1999,7 +2016,10 @@ pub async fn api_ai_check_amendments(
         .ai_client_expert();
 
     match ai.check_claim_amendments(original, amended, oa).await {
-        Ok(content) => Json(json!({"status": "ok", "analysis": content})),
+        Ok(content) => {
+            let _ = s.db.log_ai_call(&ai, "ai-claim-amendments", None, None);
+            Json(json!({"status": "ok", "analysis": content}))
+        }
         Err(e) => Json(json!({"error": format!("审查失败: {}", e)})),
     }
 }
@@ -2027,7 +2047,10 @@ pub async fn api_ai_threat_assessment(
         .ai_client_expert();
 
     match ai.threat_assessment(&patents_json, my_claims).await {
-        Ok(content) => Json(json!({"status": "ok", "analysis": content})),
+        Ok(content) => {
+            let _ = s.db.log_ai_call(&ai, "ai-threat-assessment", None, None);
+            Json(json!({"status": "ok", "analysis": content}))
+        }
         Err(e) => Json(json!({"error": format!("威胁评估失败: {}", e)})),
     }
 }
@@ -2051,7 +2074,10 @@ pub async fn api_ai_claim_chart(
         .ai_client_expert();
 
     match ai.claim_chart(my_claims, prior_art).await {
-        Ok(content) => Json(json!({"status": "ok", "analysis": content})),
+        Ok(content) => {
+            let _ = s.db.log_ai_call(&ai, "ai-claim-chart", None, None);
+            Json(json!({"status": "ok", "analysis": content}))
+        }
         Err(e) => Json(json!({"error": format!("权利要求对照表生成失败: {}", e)})),
     }
 }

@@ -311,12 +311,15 @@ pub async fn api_upload_compare(
     );
 
     match ai_client.chat(&prompt, None).await {
-        Ok(response) => Json(json!({
-            "success": true,
-            "analysis": response,
-            "file_type": ext,
-            "content_length": file_content.len()
-        })),
+        Ok(response) => {
+            let _ = s.db.log_ai_call(&ai_client, "upload-compare", None, None);
+            Json(json!({
+                "success": true,
+                "analysis": response,
+                "file_type": ext,
+                "content_length": file_content.len()
+            }))
+        }
         Err(e) => Json(json!({"error": format!("AI 分析失败: {}", e)})),
     }
 }

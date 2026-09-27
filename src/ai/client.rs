@@ -436,6 +436,18 @@ impl AiClient {
         self.last_usage.write().map_or(None, |mut w| w.take())
     }
 
+    /// 测试专用：预置 last_usage 槽，用于验证 `take_last_usage` /
+    /// `Database::log_ai_call` 的读后即清与落账语义，不经网络调用。
+    #[cfg(test)]
+    pub(crate) fn set_last_usage_for_tests(&self, input: i64, output: i64) {
+        if let Ok(mut w) = self.last_usage.write() {
+            *w = Some(AiUsageInfo {
+                input_tokens: input,
+                output_tokens: output,
+            });
+        }
+    }
+
     /// 当前主服务商名称 / Primary provider name.
     pub fn provider_name(&self) -> &str {
         &self.primary.name

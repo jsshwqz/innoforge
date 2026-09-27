@@ -25,7 +25,10 @@ pub async fn execute(ctx: &mut PipelineContext, ai: &AiClient, db: &Arc<Database
     );
 
     let response = match ai.chat(&prompt, None).await {
-        Ok(r) => r,
+        Ok(r) => {
+            let _ = db.log_ai_call(ai, "pipeline:claim-tree", Some(&ctx.idea_id), None);
+            r
+        }
         Err(e) => {
             tracing::warn!("ClaimTree AI 生成失败: {}", e);
             return Ok(());

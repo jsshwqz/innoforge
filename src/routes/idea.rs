@@ -541,6 +541,8 @@ pub async fn api_idea_chat(
                     .unwrap_or_else(|e| e.into_inner())
                     .ai_client();
                 if let Ok(compressed) = ai_tmp.chat(&compress_prompt, None).await {
+                    let _ =
+                        s.db.log_ai_call(&ai_tmp, "idea-history-compress", Some(&idea_id), None);
                     // 追加新段到已有摘要（不覆盖）
                     let new_segment = format!(
                         "\n【第 {}-{} 轮摘要】\n{}",
@@ -556,6 +558,12 @@ pub async fn api_idea_chat(
                             updated_summary
                         );
                         if let Ok(merged) = ai_tmp.chat(&merge_prompt, None).await {
+                            let _ = s.db.log_ai_call(
+                                &ai_tmp,
+                                "idea-summary-merge",
+                                Some(&idea_id),
+                                None,
+                            );
                             tracing::info!(
                                 "[CHAT] L2 merge: {} chars → {} chars",
                                 updated_summary.chars().count(),
@@ -791,19 +799,9 @@ pub async fn api_idea_chat(
         ai.chat_with_history_expert(&system_context, chat_history, 0.6)
             .await
     };
-    // 记录 AI 调用成本（仅记录成功的调用）
+    // 记录 AI 调用成本（仅记录成功的调用；provider 取真实服务商名，不再误填为调用类型）
     if ai_result.is_ok() {
-        if let Some(usage) = ai.take_last_usage() {
-            let _ = s.db.save_cost_record_from_client(
-                usage.input_tokens,
-                usage.output_tokens,
-                ai.model_name(),
-                "idea-chat",
-                "chat",
-                Some(&idea_id),
-                None,
-            );
-        }
+        let _ = s.db.log_ai_call(&ai, "idea-chat", Some(&idea_id), None);
     }
     let ai_response = match ai_result {
         Ok(content) => content,
@@ -1613,6 +1611,8 @@ pub async fn api_idea_chat_conclusions(
         .ai_client();
     match ai.chat(&prompt, None).await {
         Ok(conclusions) => {
+            let _ =
+                s.db.log_ai_call(&ai, "idea-conclusions", Some(&idea_id), None);
             // Also update the idea summary with conclusions for future reference
             let _ = s.db.update_idea_summary(&idea_id, &conclusions);
             Json(json!({"status": "ok", "conclusions": conclusions}))
@@ -1664,6 +1664,8 @@ pub async fn api_idea_summarize_discussion(
         .ai_client();
     match ai.chat(&prompt, None).await {
         Ok(summary) => {
+            let _ =
+                s.db.log_ai_call(&ai, "idea-summarize", Some(&idea_id), None);
             // Save summary to DB
             let _ = s.db.update_idea_summary(&idea_id, &summary);
             Json(json!({"status": "ok", "summary": summary}))
