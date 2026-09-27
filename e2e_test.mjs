@@ -2,7 +2,7 @@ import puppeteer from 'puppeteer';
 import { existsSync } from 'node:fs';
 
 const baseUrl = (process.env.INNOFORGE_E2E_BASE_URL || 'http://127.0.0.1:3000').replace(/\/$/, '');
-const expectedPasses = 54;
+const expectedPasses = 56;
 const failures = [];
 let passed = 0;
 
@@ -595,6 +595,50 @@ async function checkIdeaPageFunctionIntegrity(ideaPage) {
     );
 }
 
+async function checkSearchLanguageFilter(searchPage) {
+    // MA3 语言过滤器：#language-filter 存在且默认「自动」（空值），不选时 buildRequest 不下发 language 键
+    const defaults = await searchPage.evaluate(() => {
+        const select = document.getElementById('language-filter');
+        if (!select || typeof window.buildRequest !== 'function') return { exists: false };
+        const options = [...select.options].map(option => option.value);
+        const body = buildRequest(1);
+        return {
+            exists: true,
+            value: select.value,
+            options,
+            hasLanguageKey: Object.prototype.hasOwnProperty.call(body, 'language'),
+        };
+    });
+    requireCondition(
+        defaults.exists
+            && defaults.value === ''
+            && defaults.options.join('|') === '|chinese|english|all'
+            && !defaults.hasLanguageKey,
+        'Search language filter defaults to auto and omits language key',
+        `page=/search exists=${defaults.exists} value=${defaults.value} options=${defaults.options && defaults.options.join(',')} language_key=${defaults.hasLanguageKey}`,
+    );
+
+    // 显式选择 chinese 后 buildRequest 返回值必须含 language: "chinese"；检查后恢复默认值，避免污染其它用例
+    const explicit = await searchPage.evaluate(() => {
+        const select = document.getElementById('language-filter');
+        if (!select || typeof window.buildRequest !== 'function') return { exists: false };
+        select.value = 'chinese';
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        const body = buildRequest(1);
+        const language = body.language;
+        select.value = '';
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        return { exists: true, language, restored: !('language' in buildRequest(1)) };
+    });
+    requireCondition(
+        explicit.exists
+            && explicit.language === 'chinese'
+            && explicit.restored,
+        'Search language filter sends explicit chinese selection',
+        `page=/search exists=${explicit.exists} language=${explicit.language} restored=${explicit.restored}`,
+    );
+}
+
 async function main() {
     const pageErrors = [];
     const requestFailures = [];
@@ -612,6 +656,8 @@ async function main() {
         });
 
         openedPages = await runPageMatrix(browser, pageErrors, requestFailures);
+        const searchPage = openedPages.get('/search');
+        if (searchPage) await checkSearchLanguageFilter(searchPage);
         const ideaPage = openedPages.get('/idea');
         if (ideaPage) {
             await checkCadControllerStateIsolation(ideaPage);

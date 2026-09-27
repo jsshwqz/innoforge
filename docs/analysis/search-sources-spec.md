@@ -92,7 +92,7 @@ pub struct SearchOutcome {
 1. ✅ **2026-09-27 MA3 补半程实测通过（免费 XHR，真实出网）**：`{"query":"固态电池"}` 默认配置 → XHR 胜出，实际出网 URL `https://patents.google.com/xhr/query?url=q%3D%E5%9B%BA…%E6%B1%A0%26language%3DCHINESE`，首页 5/5 CN 号 + 中文标题；显式 `language:"english"` 同词 → URL 变 `…%26language%3DENGLISH`、`"all"` → 省略 language 参数。⚠️ 形态修正：URL 实际只带 `language=`，**`country=` 仅当请求显式传 country 时出现**（默认配置 country=None 不下发；CN 语义由 language=CHINESE 闸门承担）。证据见分支 `exec/ma3-lang-filter` PR 描述
 2. ⚠️ XHR 端点 `assignee=<本人姓名>` 精确性验证（引号 vs 裸值对比）——**2026-09-27 MA3 复核：属 MA4 assignee 过滤范围，仍开放**
 3. ⚠️ SerpAPI q 内嵌 `(country=CN)` 后中文命中率对比——**2026-09-27 MA3 冒烟如实记录环境阻塞：本机未配置 SERPAPI_KEY，免费降级链下 SerpAPI 恒为 Skipped，无法做命中率对比**（配置 Key 后由凭证侧执行）
-4. 断网模拟：禁用两在线源后本地 FTS 兜底路径可用
+4. ✅ **2026-09-27 MA4a 实测（断网兜底形态 + attempts 记账取证）**：临时全新空库实例（`D:\Temp\innoforge-e2e-run`，不触碰用户 `innoforge.db`）起服后打 `/api/search/online`，生僻词 `zzyyxx_offline_probe_qwertyuiop9x` 在线零命中自然回退，attempts 末条如实记 `{"source":"local_fts","status":"Success","hits":0,"latency_ms":0}`（前置 `serpapi Skipped`→`google_patents_xhr Success hits=0`），出参 `source:"local"`/hint/`patents[]/total/google_url/message` 与 MA4a 前逐字一致。完整 JSON 见分支 `exec/ma4a-localfts` PR body。注：本机未注入网络故障，取证形态为「在线零命中→本地兜底」，与「禁用两在线源」等价落在同一兜底分支；本地命中档（hits>0）由 `68ff948` 内存库单测锁形状。
 5. 503 场景退避生效（连续请求间隔 <1s 应触发限速保护而非打满错误）
 
 ## 参考来源
