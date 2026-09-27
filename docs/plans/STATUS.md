@@ -8,6 +8,16 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-09-28 — MA6c 跨源去重裁决销账 + 专利号直查纳入熔断冷却 + PR #26 合并（M-A 只剩取证包）
+
+- **状态 / Status**: ✅ 已完成（本包两项）/ Completed
+- **范围 / Scope**: 第二十棒单包直出（90 分钟 / 119 次工具调用，两个任务各自里程碑 commit，**未止损**）。**① `MergedPatent.key` 裁决=删除销账**：规划会话派包前已裁决「不做跨源拼接」（依据实测：链是并行发起 + 按登记顺序**择单一胜者**，胜出源整份返回，结构上不存在第二份结果可拼，`chain.rs` 的 `primary_wins_when_both_produce_hits` 断言的正是这件事；该键自 MA1 起零生产消费点，只有 2 条 provider/merge 测试在读；且 `MergedPatent`/`SearchOutcome` **从不上 wire 也不入库**——`/api/search/online` 只发 `summaries()` 与 `attempts`，故删字段不动 API 形状、不触 MA5b 字面量锁）。落地 `397093f`：字段与其 `#[allow(dead_code)]` 删除、`merged_from` 不再算规范化键（**import 保留**，`dedup_patent_summaries` 仍在用，同源去重的真实需求继续由它服务本地 `/api/search`）、三处测试构造点去掉 `key`、两处断言**改判据不减强度**（EPO 那条改为 `canonical_patent_key(&summary.patent_number) == "EP3445287"`，规范化公开号锁逐字同值；merge 那条扩成「每条打源 + summary 原样透传」两条契约）、`mod.rs`/`epo_ops.rs` 两处「属 MA4 剩余项」与规格书 §1/§6 同批删除线回写。**② `lookup_exact` 纳入熔断冷却** `a0a5659`：新增纯函数判据 `routes/search.rs::exact_lookup_allowed(专利号直查?, 有 Key?, &CooldownTable, now)`——前两条判据是原 handler 两层 `if` 的逐字搬迁，第三条与链前过滤**同表同函数**（禁止第二套冷却标准）；handler 出网前在 `let … = { 取锁 → 求值 }` 块内读一次，**guard 块内析构、绝不跨 `.await`**；冷却中 ⇒ 跳过直查、自然落入降级链（面板已由 `cooldowns` 键 + 织回 `Skipped` 呈现，故**不为直查路径伪造任何记账**）；**只读不写**（直查不在链上、无真实 attempts，沿 MA6a「Skipped 不构成信号」同一纪律），取舍理由写进函数文档。修掉的真缺陷：专利号直查此前完全绕过冷却表，SerpAPI 刚被摘链仍会先替它白撞一发**付费** details，且与面板上「serpapi 冷却中」自相矛盾。
+- **验证 / Verification（规划会话独立复跑）**：CI lint/test/e2e 三绿（run `36353751839`）；tip `41067bf` 上 fmt exit 0、`clippy --all-targets -- -D warnings` exit 0（touch 7 文件后真编译 3m05s）、`cargo test` exit 0 **721 = lib 335 + bin 337 + 集成 49**，与执行棒声明逐字对账（= 基线 715 + 3×2）。**门禁日志完整性自证**：本次 `cargo test` 输出全量落盘 `D:\Temp\ma6c-test.log` 后按**每个二进制逐行**统计（不 `| head`），避免踩上本棒在 `docs/errors.md` 记的「管道退出码来自 head ⇒ 721 无证据」。**审计另核**：`MergedPatent.key` 全仓零残留引用；`exact_lookup_*` 三条用例实名存在且含「未冷却档逐字等价旧判据 + 到期自动放行」（防精确查号被永久下线）；新增 `unwrap/expect` **空集**；红线含 `AGENTS.md` 全零 diff（agent 按 Step 0c 只写了 `docs/errors.md`）；templates/static 零 diff ⇒ e2e/HTML 扫描按 DoD 不适用（沿用上包 60/60）。
+- **brief 前提被实测纠正 2 处（有效行为，未假合规）**：① 我要求「`merge.rs:149` 改断言 `sources == vec![SerpApi]`」——该断言**同用例 :148 已存在**，照做只会加一条重复装饰性断言，执行棒改为「打源覆盖面扩大 + summary 不被规范化改写」两条真契约；② 我要求「检查规格书 §8 待办清单标状态」——§8 无跨源去重条目可标，需销账的规划条目实际在 `task-breakdown.md`（MA4/MA6 行），已改。另主动披露一处微小代价：非专利号请求也会为判据取一次全局锁（微秒级，MA6a 本就每请求两次取锁），换来判据只有一处——复核后接受。
+- **合并通道更正（推翻我上一条的结论）**: 本包合并用 `env -u GITHUB_TOKEN gh pr merge 26 --merge` **成功**（GitHub 原生 merge `8b5045b`，PR 状态 `MERGED`）。原因是 `gh` 优先用环境变量里的 fine-grained PAT（无 PR 写 scope），去掉后回落 keyring 中带 `repo` 的 classic token。我上一包写的「403 只能走本地 `--no-ff` 替代」结论**不完整**——本地合并可用但不是首选，已在 `docs/errors.md` 把主路径改回 `env -u GITHUB_TOKEN`、本地 `--no-ff` 降为兜底。
+- **仍开放 / Remaining（M-A 收口只剩取证包 MA6d）**：① 形态 (c) 在线取证**规划会话已趁反爬窗口补到**（`assignee="西南交通大学"` 独立引号参数：HTTP 200 / 24429 字节真 JSON / `total_num_results=58` / 首页 **10/10 assignee 严格全等**，与裸值形态 total 同值 ⇒ 引号只改语法形态不改命中集；原始件与结论文本存仓库外 `D:\Temp\ma6d-probe\`，**尚未写入规格书 §8 与 provider 模块头**）；② 「在线命中→本实例入库→断网复检」**全链路取证**仍缺；③ SerpAPI/EPO **真实凭证冒烟**仍受本机无 Key 阻断（配额预警的真实数据触发同项）；④ M-A 用户可见变更（MA5b/MA3/MA4a/MA4b/MA6a/MA6b/MA6c）**仍未写入 CHANGELOG**，`[Unreleased]` 现在只到成本落账那批。
+- **同步 / Sync**: origin/main、origin/dev、gitee/main、gitee/dev、本地 main 五端对齐 `8b5045b`（PR #26 原生 merge commit）。
+
 ### 2026-09-28 — MA6b 诊断面板冷却可视化（`cooldowns` 结构化键）+ SerpAPI 配额预警 + PR #25 合并
 
 - **状态 / Status**: ✅ 已完成（MA6 第二片）/ Completed

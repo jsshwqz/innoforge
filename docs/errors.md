@@ -796,14 +796,14 @@
 - **预防 / Prevention**: ① 规划会话的独立门禁复跑，**必须在执行 agent 结束后进行**（判定信号：`git status --porcelain` 为空 + `tasklist` 无 cargo/rustc + 无 `innoforge-server.exe`）；树仍被 agent 持有时改用 `git worktree add D:/Temp/<name> <tip>` + `CARGO_TARGET_DIR=D:/Temp/<name>-target` 隔离，绝不在同一 target dir 上抢锁。② 见到 `0xc0000409` 先问「刚才有没有第二个 cargo 在跑」，再决定是环境问题还是代码问题——直接归因代码会让 agent 去"修"一个不存在的 bug。③ 门禁结论以**同一次单进程复跑**的输出为准，跨进程拼接的日志不作为验收证据。
 - **提交 / Commit**: 本条（MA4b 合并后文档回写附带）
 
-### [2026-09-28] `gh pr merge` 403「Resource not accessible by personal access token」：用本地 no-ff 合并替代
+### [2026-09-28] `gh pr merge` 403「Resource not accessible by personal access token」：去掉 `GITHUB_TOKEN` 回落 keyring，本地 no-ff 为兜底
 
 - **严重程度 / Severity**: MEDIUM（交付通道：合并动作整批不可用会卡住所有 PR）
 - **涉及文件 / Files**: 无代码改动；`gh` CLI（fine-grained PAT）、GitHub PR #25
 - **现象 / Symptom**: MA6b 审计通过后代执行合并，`gh pr merge 25 --merge` 与 REST `gh api -X PUT repos/.../pulls/25/merge` **都返回 403** `Resource not accessible by personal access token`（GraphQL 侧为 `mergePullRequest` 字段无权限）。此前 PR #23/#24 同一条命令可用，故易被误判为「瞬时故障」或「仓库权限被改」。
 - **根因 / Root cause**: 当前 `GITHUB_TOKEN` 是 fine-grained PAT，其权限集不含 merge pull request（`gh auth status` 只显示 token 掩码，不显示 scope，权限缺失只能从 403 文案判定）。这与本仓已记录的「`gh pr merge` graphql EOF（瞬时错误，重试即可）」是**两种不同失败**：EOF 重试有效，403 重试必然无效。
-- **解法 / Fix**: 本地等价合并——`git fetch origin <head>` → `git merge --no-ff FETCH_HEAD -m "Merge pull request #25 from ..."` → `git push origin main` + `git push origin main:dev` + gitee 两推。GitHub 依据 main 已包含 PR head 提交，**自动把 PR 标为 MERGED**（实测 `mergedAt` 落值），无需 token 权限，merge commit 与 PR 编号照常保留在历史里。
-- **预防 / Prevention**: ① 见到 403 文案含 `Resource not accessible` **立刻改走本地合并**，不要重复 `gh pr merge`（与 EOF 区分开：EOF 才值得重试）；② 本地合并必须带 `--no-ff` 与 `Merge pull request #N from <branch>` 抬头，保持与 GitHub 原生 merge commit 同形，便于日后审计溯源；③ 合并后仍要 `gh pr view N --json state,mergedAt` 复核 PR 状态，不能只看 push 成功。
+- **解法 / Fix**: **首选（同日由 MA6c 更正并实测）**——`gh` 优先读环境变量 `GITHUB_TOKEN`（那枚 fine-grained PAT 无 PR 写 scope），去掉它即回落 keyring 中带 `repo` 的 classic token：`env -u GITHUB_TOKEN gh pr merge <N> --repo <owner>/<repo> --merge`，PR #26 用此法拿到 GitHub 原生 merge commit。**兜底（PR #25 当时所用，仍然有效）**：本地 `git merge --no-ff FETCH_HEAD -m "Merge pull request #N from <branch>"` + 推 main，GitHub 依据 main 已含 PR head 提交**自动把 PR 标为 MERGED**（实测 `mergedAt` 落值），merge commit 与 PR 编号照常留在历史里。REST `PUT /pulls/N/merge` 与 GraphQL 受同一枚 env token 阻挡（见本文件 2026-09 那条 gh 权限条目及其 MA6c 补充），不必再试。
+- **预防 / Prevention**: ① 见到 403 文案含 `Resource not accessible`，**先换 token 来源**（`env -u GITHUB_TOKEN gh …`），无效再走本地合并；不要重复同一条 `gh pr merge`（与 EOF 区分开：EOF 才值得原地重试）；② 本地兜底合并必须带 `--no-ff` 与 `Merge pull request #N from <branch>` 抬头，保持与 GitHub 原生 merge commit 同形，便于日后审计溯源；③ 合并后仍要 `gh pr view N --json state,mergedAt` 复核 PR 状态，不能只看 push 成功；④ **本仓任何 `gh` 写操作**（PR 创建/编辑/合并）默认加 `env -u GITHUB_TOKEN` 前缀。
 - **提交 / Commit**: 本条（MA6b 合并后文档回写附带）
 
 ### [2026-09-28] AGENTS.md Step 5 的 `node node_modules/.bin/eslint` 在 Windows/Git-Bash 下必崩
