@@ -151,6 +151,8 @@ fn search_request_field_snapshot_is_unchanged() {
         ipc: Some("H01M".into()),
         cpc: Some("Y02E".into()),
         region: Some("cn".into()),
+        // MA3 新增键：显式语言过滤器（Option<Lang>，serde snake_case）
+        language: Some(crate::search::model::Lang::Chinese),
     };
     assert_eq!(
         expected_fields(&[
@@ -165,6 +167,7 @@ fn search_request_field_snapshot_is_unchanged() {
             "ipc",
             "cpc",
             "region",
+            "language",
         ]),
         json_field_names(&req)
     );
@@ -181,6 +184,24 @@ fn search_request_keeps_page_defaults_when_fields_absent() {
     assert_eq!(None, req.ipc);
     assert_eq!(None, req.cpc);
     assert_eq!(None, req.region);
+    // MA3 language 同样 #[serde(default)]：不发键 = None = 旧行为逐字一致
+    assert_eq!(None, req.language);
+}
+
+/// MA3：显式 `language` 取值即 `Lang` 的 snake_case 串（与前端 select value 逐字对齐）。
+#[test]
+fn search_request_language_accepts_lang_snake_case() {
+    use crate::search::model::Lang;
+    let parse = |v: &str| -> Option<Lang> {
+        serde_json::from_str::<SearchRequest>(&format!(r#"{{"query":"x","language":"{v}"}}"#))
+            .map(|r| r.language)
+            .expect("valid request json")
+    };
+    assert_eq!(Some(Lang::Chinese), parse("chinese"));
+    assert_eq!(Some(Lang::English), parse("english"));
+    assert_eq!(Some(Lang::All), parse("all"));
+    // 非法取值必须报错而非静默降级（前端只发上述三值）
+    assert!(serde_json::from_str::<SearchRequest>(r#"{"query":"x","language":"zh"}"#).is_err());
 }
 
 #[test]

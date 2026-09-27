@@ -56,6 +56,27 @@ pub fn resolve_lang(region: Option<&str>, country: Option<&str>, query_trimmed: 
     }
 }
 
+/// MA3：带**显式语言过滤器**的语言判定，优先级（spec §7 / 本包定义，逐字记录）：
+///
+/// **显式 `language` > `region`("cn"/"intl") > 自动判定(`auto_cn`)**
+///
+/// - `explicit = Some(l)`：直接采用 `l`（含 `Lang::All`「不限语种」，此枚举值自 MA1 起
+///   就预留了该消费场景，见 [`resolve_lang`] 注释）；
+/// - `explicit = None`：**原样委托** [`resolve_lang`]，即三级中的后两级语义与 MA3 之前
+///   逐字一致——旧函数与其 `resolve_lang_matches_legacy_region_flags` /
+///   `..._pre_migration_region_flags` 逐用例等价对拍测试因此不受影响。
+///
+/// 生产消费点：`routes/search.rs::api_search_online`（请求体 `language` 字段，见
+/// [`crate::types::search::SearchRequest`]）。
+pub fn resolve_lang_with_explicit(
+    explicit: Option<Lang>,
+    region: Option<&str>,
+    country: Option<&str>,
+    query_trimmed: &str,
+) -> Lang {
+    explicit.unwrap_or_else(|| resolve_lang(region, country, query_trimmed))
+}
+
 /// 由 [`SearchQuery`] 渲染在线引擎的 `q` 串（Google Patents / SerpAPI 共用同一套语法）。
 ///
 /// 函数体逐字迁自 `src/routes/mod.rs::build_online_query`，仅把四个散装参数换成 SearchQuery；
@@ -395,6 +416,62 @@ mod tests {
             render_q(&q("带\"iPhone 15\"的查询", Some(SearchType::Keyword)))
         );
         assert_eq!("iPhone 15", render_q(&q("iPhone 15", None)));
+    }
+
+    /// MA3 显式语言过滤器的三种情形（本包验收单测）：
+    /// 1. 显式 chinese 覆盖英文关键词的自动判定；
+    /// 2. 显式 english 覆盖中文关键词的自动判定（并压过 region=cn）；
+    /// 3. 不传（None）时与今天的 [`resolve_lang`] 逐用例一致。
+    #[test]
+    fn resolve_lang_with_explicit_priority_contract() {
+        // 1) 显式 chinese：关键词纯英文（auto 本会判 English）也给 Chinese
+        assert_eq!(
+            Lang::Chinese,
+            resolve_lang_with_explicit(Some(Lang::Chinese), None, None, "dustproof hinge")
+        );
+        // 显式值同样压过 region=intl（第一优先级最高）
+        assert_eq!(
+            Lang::Chinese,
+            resolve_lang_with_explicit(Some(Lang::Chinese), Some("intl"), Some("US"), "hinge")
+        );
+        // 2) 显式 english：关键词含中文（auto 本会判 Chinese）也给 English；
+        //    并压过 region=cn
+        assert_eq!(
+            Lang::English,
+            resolve_lang_with_explicit(Some(Lang::English), None, None, "固态电池")
+        );
+        assert_eq!(
+            Lang::English,
+            resolve_lang_with_explicit(Some(Lang::English), Some("cn"), Some("CN"), "固态电池")
+        );
+        // 显式 all（不限语种）：Lang::All 自此有了生产消费点
+        assert_eq!(
+            Lang::All,
+            resolve_lang_with_explicit(Some(Lang::All), Some("cn"), Some("CN"), "固态电池")
+        );
+        // 3) None 分支逐用例委托 resolve_lang（覆盖 region×country×keyword 矩阵）
+        let regions = [None, Some("cn"), Some("intl"), Some("other")];
+        let countries = [None, Some("CN"), Some("US"), Some("")];
+        let queries = [
+            "",
+            "hinge",
+            "固态电池",
+            "CN1098765A",
+            "ZL202410123456.7",
+            "202210835143.9",
+            "混合 mixed 关键词",
+        ];
+        for region in regions {
+            for country in countries {
+                for keyword in queries {
+                    assert_eq!(
+                        resolve_lang(region, country, keyword),
+                        resolve_lang_with_explicit(None, region, country, keyword),
+                        "None 分支必须与 resolve_lang 一致: region={region:?} country={country:?} q={keyword}"
+                    );
+                }
+            }
+        }
     }
 
     /// 国内/国外判定与旧 `auto_cn`/`region` 分支等价。
