@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-09-21T01:15:05.776Z",
+  "generatedAt": "2026-09-27T09:18:54.137Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -479,6 +479,10 @@
         "clearHistory",
         "clearSearchPdfMeta",
         "compareMatrix",
+        "diagBadgeSpan",
+        "diagCoolsDown",
+        "diagMutedSpan",
+        "diagParseStatus",
         "doSearch",
         "escapeHtml",
         "exportCsv",
@@ -494,9 +498,11 @@
         "renderHistory",
         "renderPagination",
         "renderResults",
+        "renderSearchDiagnostics",
         "runRiskAssessment",
         "saveHistory",
         "saveSearchPdfMeta",
+        "serpapiBalancePromise",
         "showStats",
         "toggleAllChecks",
         "toggleRegionSelect",
