@@ -238,7 +238,15 @@ impl GooglePatentsXhrProvider {
         }
         if let Some(a) = query.assignee.as_deref() {
             if !a.trim().is_empty() {
-                parts.push(format!("assignee={}", a.trim()));
+                // MA4b：exact_assignee 开关在此落地——true ⇒ 引号精确形态，
+                // false ⇒ 裸值形态（自 MA2a 起即为此形状，`inner_url_emits_spec_2_param_set`
+                // 逐字符锁未动）。两种形态的真实过滤性见模块头「assignee 独立参数实测」与
+                // 规格书 §8 第 2 项。
+                if query.exact_assignee {
+                    parts.push(format!("assignee=\"{}\"", a.trim()));
+                } else {
+                    parts.push(format!("assignee={}", a.trim()));
+                }
             }
         }
         match query.sort_by.as_deref() {
@@ -831,6 +839,53 @@ pub(crate) mod tests {
             "q=固态电池&country=CN&language=CHINESE&assignee=张三&sort=new",
             inner
         );
+    }
+
+    /// **MA4b 精确形态锁**：`exact_assignee = true` 时独立参数必须是引号形态
+    /// `assignee="…"`；false（默认）保持裸值——上方 `inner_url_emits_spec_2_param_set`
+    /// 即旧形状锁，本用例只增不改。
+    #[test]
+    fn inner_url_exact_assignee_quotes_the_independent_param() {
+        let mut q = query("固态电池");
+        q.assignee = Some(" 西南交通大学 ".to_string());
+        q.exact_assignee = true;
+        assert_eq!(
+            "q=固态电池&country=CN&language=CHINESE&assignee=\"西南交通大学\"&sort=new",
+            GooglePatentsXhrProvider::inner_url(&q)
+        );
+    }
+
+    /// MA4b 边界：开关为 true 但值为空/全空白时仍不下发参数（与裸值形态同规则）。
+    #[test]
+    fn exact_assignee_blank_value_still_omits_param() {
+        let mut q = query("固态电池");
+        q.assignee = Some("   ".to_string());
+        q.exact_assignee = true;
+        assert!(
+            !GooglePatentsXhrProvider::inner_url(&q).contains("assignee"),
+            "{}",
+            GooglePatentsXhrProvider::inner_url(&q)
+        );
+    }
+
+    /// **MA4b 出网逐字符锁（假传输，零联网）**：完整请求 URL 中引号形态必须
+    /// 恰好被「一次百分号编码」包进 `url=` 参数（`"` → `%22`，不得出现 `%2522`）。
+    #[tokio::test]
+    async fn exact_assignee_request_url_encodes_quotes_exactly_once() {
+        let mut q = query("固态电池");
+        q.assignee = Some("西南交通大学".to_string());
+        q.exact_assignee = true;
+        let (p, transport, _clock) = provider(vec![reply(200, REAL_EMPTY_REPLY)]);
+        p.search(q).await;
+        let url = transport
+            .urls()
+            .into_iter()
+            .next()
+            .expect("one request issued");
+        let school_pct = urlencoding::encode("西南交通大学");
+        let expect_tail = format!("assignee%3D%22{}%22%26sort%3Dnew", school_pct);
+        assert!(url.ends_with(&expect_tail), "出网 URL 尾部不符: {url}");
+        assert!(!url.contains("%2522"), "引号被双重编码: {url}");
     }
 
     #[test]

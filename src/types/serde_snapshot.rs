@@ -153,6 +153,9 @@ fn search_request_field_snapshot_is_unchanged() {
         region: Some("cn".into()),
         // MA3 新增键：显式语言过滤器（Option<Lang>，serde snake_case）
         language: Some(crate::search::model::Lang::Chinese),
+        // MA4b 新增键：独立申请人过滤 + 精确匹配开关
+        assignee: Some("某科技有限公司".into()),
+        exact_assignee: true,
     };
     assert_eq!(
         expected_fields(&[
@@ -168,6 +171,8 @@ fn search_request_field_snapshot_is_unchanged() {
             "cpc",
             "region",
             "language",
+            "assignee",
+            "exact_assignee",
         ]),
         json_field_names(&req)
     );
@@ -186,6 +191,32 @@ fn search_request_keeps_page_defaults_when_fields_absent() {
     assert_eq!(None, req.region);
     // MA3 language 同样 #[serde(default)]：不发键 = None = 旧行为逐字一致
     assert_eq!(None, req.language);
+    // MA4b assignee/exact_assignee 同样 #[serde(default)]：不发键 = None/false = 旧行为逐字一致
+    assert_eq!(None, req.assignee);
+    assert!(!req.exact_assignee, "exact_assignee 缺省必须为 false");
+}
+
+/// **MA4b**：assignee/exact_assignee 接受 snake_case 入参；缺省即 None/false。
+/// 前端/脚本请求体键名与本断言逐字对账（键名无 rename，serde 默认即字段名）。
+#[test]
+fn search_request_accepts_assignee_keys_with_snake_case_defaults() {
+    let req: SearchRequest =
+        serde_json::from_str(r#"{"query":"x","assignee":"西南交通大学","exact_assignee":true}"#)
+            .expect("assignee keys request json");
+    assert_eq!(Some("西南交通大学".to_string()), req.assignee);
+    assert!(req.exact_assignee);
+
+    // 只发 assignee 不发开关：exact 缺省 false（裸值形态，非精确）
+    let bare: SearchRequest =
+        serde_json::from_str(r#"{"query":"x","assignee":"Acme"}"#).expect("ok");
+    assert_eq!(Some("Acme".to_string()), bare.assignee);
+    assert!(!bare.exact_assignee);
+
+    // 序列化方向同样带出两个键（Option None 仍是 null，与 language 键同规则）
+    let minimal: SearchRequest = serde_json::from_str(r#"{"query":"x"}"#).expect("ok");
+    let names = json_field_names(&minimal);
+    assert!(names.contains("assignee") && names.contains("exact_assignee"));
+    assert_roundtrip_stable(&minimal);
 }
 
 /// MA3：显式 `language` 取值即 `Lang` 的 snake_case 串（与前端 select value 逐字对齐）。

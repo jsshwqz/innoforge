@@ -223,11 +223,17 @@ pub struct SearchQuery {
     pub keyword: String,
     pub country: Option<String>,
     pub language: Option<Lang>,
-    /// MA4 预留：申请人过滤。
-    #[allow(dead_code)] // MA4 精确匹配消费
+    /// **MA4b 接线完成**：申请人过滤。唯一生产读点是
+    /// `providers/google_patents_xhr.rs::inner_url`——非空时以内层**独立参数**追加：
+    /// `exact_assignee=true` 渲染为引号精确形态 `assignee="<值>"`，
+    /// `false` 渲染为裸值 `assignee=<值>`（两种形态的真实过滤性以规格书 §8 第 2 项
+    /// 实测结论为准）。SerpAPI/EPO 不消费本键（上游入参语法不同，禁止串语法）。
+    /// 请求侧入口：`types::search::SearchRequest.assignee`（`routes/search.rs` 透传）。
     pub assignee: Option<String>,
-    /// MA4 预留：精确匹配开关。
-    #[allow(dead_code)] // MA4 精确匹配消费
+    /// **MA4b 接线完成**：精确匹配开关。在线侧消费点同
+    /// `providers/google_patents_xhr.rs::inner_url`（true ⇒ 引号形态）；
+    /// 本地侧消费点 `db::patent.rs::search_smart_exact`
+    /// （true 且路由到申请人域 ⇒ `applicant = ?` 等值，false ⇒ 旧 `LIKE %词%`）。
     pub exact_assignee: bool,
     pub date_from: Option<String>,
     pub date_to: Option<String>,
