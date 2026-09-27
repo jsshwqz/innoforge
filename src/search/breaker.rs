@@ -20,7 +20,7 @@
 //! 1. [`CooldownTable`]：**纯结构**，所有涉及时间的方法显式收 `now`，测试零 sleep 零真时钟；
 //! 2. [`cooldown_duration`]：`SourceKind × FailKind` 的**命名常量表**，依据写在每个常量上；
 //! 3. [`global_table`] / [`note_attempts`]：**全局薄壳**（进程内共享，`OnceLock<Mutex<..>>`，
-//!   不引入新依赖），只加锁转发，无任何判定逻辑。
+//!    不引入新依赖），只加锁转发，无任何判定逻辑。
 //!
 //! 生产接入点在 `routes/search.rs::api_search_online`（链前过滤 + 链后回写）。
 

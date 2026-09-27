@@ -229,6 +229,10 @@ fn cooldown_skipped_report(source: SourceKind, remaining: Duration) -> AttemptRe
     }
 }
 
+/// MA6a：链前过滤的出参形状（clippy type_complexity 要求收拢命名）。
+/// `(未冷却可进链的源, 被冷却摘出的 (源, 剩余时长)——按原登记序)`。
+type CooldownFilterResult = (Vec<Arc<dyn SearchProvider>>, Vec<(SourceKind, Duration)>);
+
 /// MA6a：链前按冷却表过滤源。**纯函数**（表与时钟显式传入），配合
 /// [`weave_cooled_attempts`] 可在路由层离线锁定「冷却源不出链、但 attempts 留痕」。
 ///
@@ -238,7 +242,7 @@ fn filter_cooled_providers(
     providers: Vec<Arc<dyn SearchProvider>>,
     table: &CooldownTable,
     now: Instant,
-) -> (Vec<Arc<dyn SearchProvider>>, Vec<(SourceKind, Duration)>) {
+) -> CooldownFilterResult {
     let mut active = Vec::with_capacity(providers.len());
     let mut cooled = Vec::new();
     for provider in providers {
@@ -1164,6 +1168,9 @@ mod tests {
     #[test]
     fn all_sources_cooled_yields_empty_chain_and_identical_local_shape() {
         let db = Database::init(":memory:").expect("in-memory db");
+        // 兜底要有命中才走「source:local」出参档（零命中会落到 google_url 空结果末档，
+        // 那是另一条既有形状）——本用例锁的是「冷却不改变兜底形状」，故种一条可命中专利。
+        seed_patent(&db, "999", "固态电池");
         let now = Instant::now();
         let mut table = CooldownTable::new();
         table.record(SourceKind::SerpApi, FailKind::Quota, now);
@@ -1193,21 +1200,30 @@ mod tests {
         }
 
         let req = fallback_req("固态电池");
-        let search_type: Option<SearchType> = None;
-        let out = local_fallback_json(&db, &req, &search_type, outcome.hint(), &mut outcome);
+        let out = local_fallback_json(
+            &db,
+            &req,
+            &Some(SearchType::Mixed),
+            outcome.hint(),
+            &mut outcome,
+        );
 
-        // 兜底出参既有键逐字不变（MA4a 口径）：source 仍为 "local"，hint 仍不被冷却记账污染
+        // 兜底出参既有键逐字不变（MA4a 口径）：source 仍为 "local"；顶层 hint 是
+        // 既有默认文案——冷却 Skipped 的 hint 恒 None，不得把它带进顶层键（现状即默认文案）
         assert_eq!(json!("local"), out["source"]);
-        assert_eq!(json!(0), out["total"]);
-        assert!(
-            out.get("hint").is_none(),
-            "冷却 Skipped 不带 hint，顶层 hint 键不得凭空出现"
+        assert_eq!(json!(1), out["total"], "种入的可命中专利必须照常返回");
+        assert_eq!(1, out["patents"].as_array().expect("patents").len());
+        assert_eq!(
+            json!("国外在线源暂时未返回结果，已回退本地缓存。建议配置 SerpAPI 提升命中率。"),
+            out["hint"],
+            "冷却记账不得经 hint() 通道改写顶层提示"
         );
         // 本地兜底自身照常追加为末条（MA4a 记账逻辑与 MA6a 过滤互不干扰）
         let attempts = out["attempts"].as_array().expect("attempts 键照旧存在");
         assert_eq!(4, attempts.len());
         assert_eq!(json!("local_fts"), attempts[3]["source"]);
         assert_eq!(json!("Success"), attempts[3]["status"]);
+        assert_eq!(json!(1), attempts[3]["hits"]);
         assert_eq!(json!("Skipped"), attempts[0]["status"]);
     }
 
