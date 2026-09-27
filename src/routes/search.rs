@@ -14,7 +14,7 @@ use crate::search::provider::SearchProvider;
 use crate::search::providers::epo_ops::EpoOpsProvider;
 use crate::search::providers::google_patents_xhr::GooglePatentsXhrProvider;
 use crate::search::providers::serpapi::{exact_lookup_response, SerpApiProvider};
-use crate::search::query::resolve_lang;
+use crate::search::query::resolve_lang_with_explicit;
 use axum::{
     extract::State,
     http::{header, StatusCode},
@@ -294,7 +294,14 @@ pub async fn api_search_online(
     // 判定规则已迁至 `search::query::resolve_lang`（`Lang::Chinese` ⇔ 旧 `is_cn_query`，
     // `Lang::English` ⇔ 旧 `is_intl_query`），与旧实现逐用例等价，
     // 由 `resolve_lang_matches_pre_migration_region_flags` 锁死。
-    let lang = resolve_lang(req.region.as_deref(), req.country.as_deref(), query_trimmed);
+    // MA3：请求体可带显式 `language`，优先级为 显式 language > region > 自动判定
+    // （见 `resolve_lang_with_explicit`；不传时委托旧判定，行为与之前逐字一致）。
+    let lang = resolve_lang_with_explicit(
+        req.language,
+        req.region.as_deref(),
+        req.country.as_deref(),
+        query_trimmed,
+    );
     let is_cn_query = matches!(lang, Lang::Chinese);
     println!(
         "[ONLINE] region resolve: is_cn={} is_intl={}",

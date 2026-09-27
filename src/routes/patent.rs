@@ -591,6 +591,8 @@ pub async fn api_recommend_similar(
         ipc: None,
         cpc: None,
         region: None,
+        // MA3：推荐位不做显式语言过滤，None = 走 region/自动判定旧路径
+        language: None,
     };
 
     match super::api_search_online(State(s), Json(req)).await {

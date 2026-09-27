@@ -7,6 +7,7 @@
 //! 原 `src/pipeline/context.rs` 中与检索响应同名的第二条定义（`id/title/snippet/link/source`）
 //! 已按该表给的选项改名为 [`PipelinePatentHit`] 并归位到此，字段与 serde 形状不变。
 
+use crate::search::model::Lang;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -36,6 +37,13 @@ pub struct SearchRequest {
     pub cpc: Option<String>, // CPC classification filter (prefix match)
     #[serde(default)]
     pub region: Option<String>, // "cn" (国内) | "intl" (国外) | None (auto)
+    /// MA3 显式语言过滤器：取值即 [`Lang`] 的 snake_case 序列化形式
+    /// （"chinese" / "english" / "all"，与前端 select 的 value 逐字对齐）。
+    /// 优先级在 `search::query::resolve_lang_with_explicit` 定义：
+    /// **显式 language > region(cn/intl) > 自动判定(auto_cn)**；
+    /// 缺省（不发此键）时为 `None`，行为与 MA3 之前逐字一致。
+    #[serde(default)]
+    pub language: Option<Lang>,
 }
 
 fn d1() -> usize {
