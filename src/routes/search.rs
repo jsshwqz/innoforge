@@ -335,6 +335,42 @@ fn weave_cooled_attempts(
     out
 }
 
+/// MA6c：专利号精确直查（`SerpApiProvider::lookup_exact`）本次**是否允许出网**。
+///
+/// 三条判据，前两条是 MA6c 之前 handler 里那两层 `if` 的原样搬迁（逐字等价、无新增判定）：
+/// 1. `search_type == Some(SearchType::PatentNumber)`——只有专利号直查才有 details 形态；
+/// 2. `has_serpapi_key`——details 是 SerpAPI 独占能力（XHR/EPO 的 `lookup_exact` 恒 `None`）；
+/// 3. **SerpAPI 不在熔断冷却中**——本包补的缺口，判据直接读 [`CooldownTable::remaining`]，
+///    与链前过滤 [`filter_cooled_providers`] 同一张表、同一个函数，禁止第二套标准。
+///
+/// 为什么第 3 条必须补：直查路径排在降级链**之前**，此前完全不查冷却表——SerpAPI 刚因
+/// Quota/Auth 被摘链，同一个请求仍会先替它打一发 details：白烧一次**付费**配额，
+/// 还和用户刚在面板上看到的「serpapi 冷却中」自相矛盾。
+///
+/// 返回 `false` 时 handler 跳过直查、**自然落到下面的降级链**——链前过滤会把 SerpAPI
+/// 摘链，冷却事实由 MA6b 的 `cooldowns` 出参键与织回的 `Skipped` 记账如实呈现，
+/// 因此这里**不需要也不允许**为直查路径伪造任何 attempts / `cooldowns` 数据。
+///
+/// **只读不写**（刻意取舍）：直查不在链上、跑完也没有真实 [`AttemptReport`]，
+/// 按 MA6a「`Skipped` 不构成信号」的同一纪律，直查成功不清零冷却、失败也不登记冷却。
+/// 曾考虑「把直查结果也记进 attempts 并回写冷却表」，但那要么新增一条合成记账
+/// （污染面板：用户会看到一条链上没跑过的 serpapi 行），要么改 `AttemptReport` 形状
+/// （动 MA5b 字面量锁 + 前端），都不是本缺口所需——缺的是「别多打一发白弹」，不是「多记一笔账」。
+fn exact_lookup_allowed(
+    search_type: Option<&SearchType>,
+    has_serpapi_key: bool,
+    table: &CooldownTable,
+    now: Instant,
+) -> bool {
+    if !matches!(search_type, Some(SearchType::PatentNumber)) {
+        return false;
+    }
+    if !has_serpapi_key {
+        return false;
+    }
+    table.remaining(SourceKind::SerpApi, now).is_none()
+}
+
 pub async fn api_search(
     State(s): State<AppState>,
     Json(req): Json<SearchRequest>,
@@ -582,7 +618,23 @@ pub async fn api_search_online(
 
     // ── 精确专利号查询：SerpAPI Details 是本源独占能力，命中即按旧形状直接返回 ──
     // 保持「在降级链之前」的位置：MA2a 没有给 XHR 源做 details 端点（spec §2 只有 query 一个端点）。
-    if matches!(online_search_type.as_ref(), Some(SearchType::PatentNumber)) {
+    // MA6c：出网前先问一次熔断冷却表（判据与取舍见 [`exact_lookup_allowed`]）——SerpAPI 在
+    // 冷却期内这一发直查会被跳过并自然落入下面的降级链，不再白撞一次付费配额。
+    // 全局锁的 guard 在块尾析构，**绝不跨 `.await`**（MA6a 不变量：std Mutex 不可重入，
+    // 持着它再进链前过滤会当场死锁；本块只做一次 `remaining` 读，不写冷却表）。
+    let may_exact_lookup = {
+        let table = breaker::global_table()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        exact_lookup_allowed(
+            online_search_type.as_ref(),
+            api_key_opt.is_some(),
+            &table,
+            Instant::now(),
+        )
+    };
+    if may_exact_lookup {
+        // 上面已覆盖「是专利号直查」+「配了 Key」两条判据，此处只取原 Key 构造 provider。
         if let Some(api_key) = api_key_opt.as_ref() {
             let provider = SerpApiProvider::new(api_key.clone(), s.db.clone());
             if let Some(summary) = provider.lookup_exact(req.query.clone()).await {
@@ -1058,7 +1110,7 @@ mod tests {
     // | 路径 | 字段 | 锁定该形状的测试 |
     // |---|---|---|
     // | 空查询 | `patents/total/page/page_size/message` | `api_search_online` 的 early-return（未改） |
-    // | 精确直查命中 | `patents/total=1/page=1/page_size=10/source=serpapi_exact` | `providers::serpapi::exact_lookup_response_shape_is_locked` |
+    // | 精确直查命中 | `patents/total=1/page=1/page_size=10/source=serpapi_exact` | `providers::serpapi::exact_lookup_response_shape_is_locked`；**MA6c 起进入该分支前多一道熔断冷却判据**（`exact_lookup_allowed`：SerpAPI 冷却中 ⇒ 跳过直查、落入降级链），由本文件 `exact_lookup_*` 三条用例锁 |
     // | 在线命中 | `patents/total/page/page_size=10/source=serpapi(+hint)` | `online_hit_response_keeps_legacy_shape` |
     // | 本地兜底 | `patents/total/page/page_size/source=local/hint` | 兜底段（未改） |
     //
@@ -1302,6 +1354,135 @@ mod tests {
         ];
         let merged = weave_cooled_attempts(&order, &[], chain_attempts.clone());
         assert_eq!(chain_attempts, merged);
+    }
+
+    /// **MA6c 用例①**：SerpAPI 处于熔断冷却时，专利号直查判据必须为 `false`
+    /// （handler 据此跳过 details、自然落入降级链——链前过滤会把它摘链，冷却事实由
+    /// `cooldowns` 键与织回的 `Skipped` 如实呈现，直查路径不重复记账）。
+    /// 同一用例锁「未冷却时判据逐字等于 MA6c 之前的两层 `if`」：
+    /// 非 PatentNumber ⇒ false、没配 Key ⇒ false、两者齐备且未冷却 ⇒ true。
+    #[test]
+    fn exact_lookup_is_blocked_while_serpapi_is_cooling() {
+        let t0 = Instant::now();
+        let pn = Some(SearchType::PatentNumber);
+        let mut table = CooldownTable::new();
+
+        // 未冷却档：旧的两条判据行为逐字不变
+        assert!(
+            exact_lookup_allowed(pn.as_ref(), true, &table, t0),
+            "没冷却 ⇒ 专利号直查照旧出网（本包不得改变这一档）"
+        );
+        assert!(
+            !exact_lookup_allowed(None, true, &table, t0),
+            "不是专利号直查 ⇒ 判据为 false（旧判据①，来自 handler 的 matches! 那层）"
+        );
+        assert!(
+            !exact_lookup_allowed(pn.as_ref(), false, &table, t0),
+            "没配 SerpAPI Key ⇒ 判据为 false（旧判据②）"
+        );
+
+        // 冷却档：本包补的缺口
+        table.record(SourceKind::SerpApi, FailKind::Quota, t0);
+        assert!(
+            !exact_lookup_allowed(pn.as_ref(), true, &table, t0 + Duration::from_secs(1)),
+            "冷却中的 SerpAPI 不得再被直查白撞一发付费配额（还和面板上「serpapi 冷却中」自相矛盾）"
+        );
+        // 到期自动放行：冷却必须有终点，否则精确查号永久下线
+        assert!(
+            exact_lookup_allowed(
+                pn.as_ref(),
+                true,
+                &table,
+                t0 + breaker::SERPAPI_QUOTA_COOLDOWN
+            ),
+            "冷却到期即恢复直查（与链前过滤同一时长常量，禁止第二套标准）"
+        );
+    }
+
+    /// **MA6c 用例②**：只挡该挡的源。details 是 SerpAPI 独占能力（XHR/EPO 的
+    /// `lookup_exact` 恒 `None`），别的源冷却不得连带掐掉专利号直查；
+    /// 反证 SerpAPI 自己一进冷却同一入参立刻为 `false`。
+    #[test]
+    fn exact_lookup_gating_is_serpapi_only() {
+        let t0 = Instant::now();
+        let mut table = CooldownTable::new();
+        table.record(SourceKind::GooglePatentsXhr, FailKind::Quota, t0);
+        table.record(SourceKind::EpoOps, FailKind::Auth, t0);
+        assert!(
+            exact_lookup_allowed(Some(&SearchType::PatentNumber), true, &table, t0),
+            "冷却是源级的：无关源在冷却不能把 SerpAPI 独占的查号能力一起下线"
+        );
+        table.record(SourceKind::SerpApi, FailKind::Auth, t0);
+        assert!(
+            !exact_lookup_allowed(Some(&SearchType::PatentNumber), true, &table, t0),
+            "同源（SerpApi）一冷却，同一入参立刻被挡"
+        );
+    }
+
+    /// **MA6c 用例③（真接线）**：handler 读的是 `breaker::global_table()` 这张进程内共享表，
+    /// 不是本地复刻的表。用链后回写的**同一个入口** `breaker::note_attempts` 往全局表
+    /// 写一次 SerpAPI `Failed(Quota)`，再走 handler 用的同一条「加锁 + `exact_lookup_allowed`」
+    /// 路径，必须读到 `false`。
+    ///
+    /// 纪律：全局表跨用例共享（std Mutex 不可重入，guard 也不得出块），故本用例
+    /// **先把取值收进局部变量、恢复现场之后再断言**，保证即便断言失败也不会把
+    /// 300s 的 SerpAPI 冷却留给同一进程里的并行用例。
+    #[test]
+    fn exact_lookup_gate_reads_the_shared_global_table() {
+        let before = {
+            let guard = breaker::global_table()
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            guard.remaining(SourceKind::SerpApi, Instant::now())
+        };
+
+        breaker::note_attempts(&[brk_report(
+            SourceKind::SerpApi,
+            AttemptStatus::Failed(FailKind::Quota),
+        )]);
+
+        let (gate_during_cooldown, table_says_cooling) = {
+            let guard = breaker::global_table()
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            (
+                exact_lookup_allowed(
+                    Some(&SearchType::PatentNumber),
+                    true,
+                    &guard,
+                    Instant::now(),
+                ),
+                guard
+                    .remaining(SourceKind::SerpApi, Instant::now())
+                    .is_some(),
+            )
+        };
+
+        if before.is_none() {
+            let mut guard = breaker::global_table()
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            guard.success(SourceKind::SerpApi);
+        }
+
+        assert!(
+            !gate_during_cooldown,
+            "链后回写的真实失败必须同时挡住降级链与直查（否则本包接线是假接线）"
+        );
+        assert!(table_says_cooling, "note_attempts 必须真的写进了共享表");
+        let restored = {
+            let guard = breaker::global_table()
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            guard
+                .remaining(SourceKind::SerpApi, Instant::now())
+                .is_some()
+        };
+        assert_eq!(
+            before.is_some(),
+            restored,
+            "现场必须恢复：不给并行用例留下 SerpAPI 冷却"
+        );
     }
 
     /// 未配置 Key 的路径必须与「源跑过但零命中」走同一条后续控制流：
