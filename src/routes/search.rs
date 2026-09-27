@@ -8,7 +8,8 @@ use crate::patent::*;
 use crate::search::chain::SourceChain;
 use crate::search::merge::{dedup_patent_summaries, sort_by_relevance};
 use crate::search::model::{
-    AttemptReport, AttemptStatus, Lang, SearchOutcome, SearchQuery, SourceKind,
+    report_excerpt, AttemptReport, AttemptStatus, FailKind, Lang, SearchOutcome, SearchQuery,
+    SourceKind,
 };
 use crate::search::provider::SearchProvider;
 use crate::search::providers::epo_ops::EpoOpsProvider;
@@ -56,6 +57,112 @@ fn serpapi_skipped_outcome(hint: &str) -> SearchOutcome {
 /// 理论上 `Vec<AttemptReport>` 不可能序列化失败，仍按规约 2.7 用受控降级替代 unwrap。
 fn attempts_json(outcome: &SearchOutcome) -> serde_json::Value {
     serde_json::to_value(&outcome.attempts).unwrap_or_else(|_| json!([]))
+}
+
+/// MA4a：本地 FTS 兜底的「链上记账 + 旧形状出参」。
+///
+/// 自 MA1 起本地兜底就是在线三源全部无结果后的最后一档，但它从未进过 `attempts`——
+/// 诊断面板因此看不到「本地兜底跑没跑、命中几条、耗时多少」，「断网可复检」缺一条实证。
+/// 本函数把这趟兜底补记为一条 [`SourceKind::LocalFts`] 的 [`AttemptReport`]，
+/// **追加在 attempts 尾部**（与 [`serpapi_skipped_outcome`] 的「链外造一条、前置」是对称先例）。
+///
+/// 出参形状零改动（历史单测与 e2e 逐字锁死）：
+/// - `source` 键仍恒为字符串 `"local"`——**故意不把 LocalFts 注册进 [`online_chain_providers`]
+///   当第四源**，那会让 `winning_source().as_str()` 直接吐出 `"local_fts"` 破坏出参，
+///   且「四种 Key 组合的链形状」用例会集体变红。`"local_fts"` 只作为 attempts 行的源名，
+///   前端 `DIAG_SOURCE_LABELS`（MA5b）已识别，面板无需改动即可长出这一行。
+/// - `hint` 文案、`patents[]` / `total` / `page` / `page_size` / `google_url` / `message`
+///   的键集合与取值口径逐字不变，仅 attempts 多一条。
+///
+/// 空结果末档（在线与本地都零命中 → `patents: []` + `google_url`）同样带上这条记账：
+/// 本地跑过就如实记 Success（hits 可为 0），本地查询炸了就记 Failed——禁止伪造「跑过」。
+fn local_fallback_json(
+    db: &Database,
+    req: &SearchRequest,
+    online_search_type: &Option<SearchType>,
+    upstream_hint: Option<String>,
+    outcome: &mut SearchOutcome,
+) -> serde_json::Value {
+    println!("[ONLINE] Falling back to local DB");
+    let local_start = Instant::now();
+    let local_result = db.search_smart(
+        &req.query,
+        online_search_type.as_ref(),
+        req.country.as_deref(),
+        req.date_from.as_deref(),
+        req.date_to.as_deref(),
+        req.page,
+        req.page_size,
+    );
+    let latency_ms = local_start.elapsed().as_millis() as u64;
+    let (local, error_text) = match local_result {
+        Ok((patents, total, _)) => (Some((dedup_patent_summaries(patents), total)), None),
+        Err(e) => {
+            tracing::error!("local fallback search failed: {}", e);
+            (
+                None,
+                Some(format!(
+                    "本地 FTS 兜底查询失败（local_fts）：{}",
+                    report_excerpt(&e.to_string())
+                )),
+            )
+        }
+    };
+
+    // Failed 分支的分类选择（本包的设计点，结论进 PR）：复用既有的 `FailKind::Parse`，不扩枚举。
+    // 理由：Network/Quota/Auth 在 spec §1 里都是「远端源」语义（超时/配额/鉴权），本地 SQLite
+    // 查询故障三者皆非；而 Parse 的处置恰是「记 bug、不切换、直接把错抛出」——与这里的事实
+    // 控制流完全一致（本地兜底是最后一档，失败后已无下一源可切，错误原样进面板供复检方定位）。
+    // 为记账去扩 FailKind 会破坏 MA5b 的字面量锁测试与前端 DIAG_FAIL_KEYS，故不动，留待 MA6 前再议。
+    let attempt = match &local {
+        Some((patents, _total)) => AttemptReport {
+            source: SourceKind::LocalFts,
+            status: AttemptStatus::Success,
+            latency_ms,
+            hits: patents.len(),
+            error: None,
+            hint: None,
+        },
+        None => AttemptReport {
+            source: SourceKind::LocalFts,
+            status: AttemptStatus::Failed(FailKind::Parse),
+            latency_ms,
+            hits: 0,
+            error: error_text,
+            hint: None,
+        },
+    };
+    outcome.attempts.push(attempt);
+
+    if let Some((patents, total)) = local {
+        if total > 0 {
+            let hint_text = upstream_hint.unwrap_or_else(|| {
+                "国外在线源暂时未返回结果，已回退本地缓存。建议配置 SerpAPI 提升命中率。"
+                    .to_string()
+            });
+            let dedup_total = total.max(patents.len());
+            return json!({
+                "patents": patents,
+                "total": dedup_total,
+                "page": req.page,
+                "page_size": req.page_size,
+                "source": "local",
+                "hint": hint_text,
+                "attempts": attempts_json(outcome)
+            });
+        }
+    }
+    let enc = urlencoding::encode(&req.query);
+    let mut out = json!({
+        "patents": [], "total": 0, "page": 1, "page_size": 20,
+        "google_url": format!("https://patents.google.com/?q={enc}&oq={enc}"),
+        "message": "未找到结果，可尝试在 Google Patents 上搜索",
+        "attempts": attempts_json(outcome)
+    });
+    if let Some(h) = upstream_hint {
+        out["hint"] = json!(h);
+    }
+    out
 }
 
 /// 按 spec §6 的优先级装配在线执行链的源集合（MA2b 起三源）：
@@ -395,51 +502,15 @@ pub async fn api_search_online(
     // MA2b 起在线链路为 [SerpAPI → Google Patents XHR 直抓 → EPO OPS]（见上方的 SourceChain），
     // 其余历史源（Firecrawl / Bing / CNIPR / 搜狗）仍处于屏蔽状态。
     // 三个在线源都没有可用结果时，回退本地数据库。
-
-    // Fallback（最后一档）: local DB search
-    println!("[ONLINE] Falling back to local DB");
-    let local =
-        s.db.search_smart(
-            &req.query,
-            online_search_type.as_ref(),
-            req.country.as_deref(),
-            req.date_from.as_deref(),
-            req.date_to.as_deref(),
-            req.page,
-            req.page_size,
-        )
-        .ok()
-        .map(|(p, t, _)| (p, t));
-    if let Some((patents, total)) = local {
-        let patents = dedup_patent_summaries(patents);
-        if total > 0 {
-            let hint_text = upstream_hint.unwrap_or_else(|| {
-                "国外在线源暂时未返回结果，已回退本地缓存。建议配置 SerpAPI 提升命中率。"
-                    .to_string()
-            });
-            let dedup_total = total.max(patents.len());
-            return Json(json!({
-                "patents": patents,
-                "total": dedup_total,
-                "page": req.page,
-                "page_size": req.page_size,
-                "source": "local",
-                "hint": hint_text,
-                "attempts": attempts_json(&outcome)
-            }));
-        }
-    }
-    let enc = urlencoding::encode(&req.query);
-    let mut out = json!({
-        "patents": [], "total": 0, "page": 1, "page_size": 20,
-        "google_url": format!("https://patents.google.com/?q={enc}&oq={enc}"),
-        "message": "未找到结果，可尝试在 Google Patents 上搜索",
-        "attempts": attempts_json(&outcome)
-    });
-    if let Some(h) = upstream_hint {
-        out["hint"] = json!(h);
-    }
-    Json(out)
+    // MA4a：本地兜底本身也是链上的一次尝试——记账与出参组装抽到 [`local_fallback_json`]，
+    // 便于用内存库离线锁定形状（不经网络），出参各键逐字不变。
+    Json(local_fallback_json(
+        &s.db,
+        &req,
+        &online_search_type,
+        upstream_hint,
+        &mut outcome,
+    ))
 }
 
 /// Vector hybrid search endpoint — RRF fuse BM25 + vector similarity.
@@ -1069,5 +1140,226 @@ mod tests {
         });
         assert_eq!(json!([]), fallback["attempts"]);
         assert!(fallback.get("message").is_some());
+    }
+
+    // ── MA4a：本地 FTS 兜底的链上记账（attempts 末条 = local_fts）──────────────
+    //
+    // 直接测 [`local_fallback_json`]：内存库 + 手工构造 outcome，不经网络，形状可锁死。
+
+    /// 测试夹具：最小可用的 `SearchRequest`（page/page_size 用端点默认语义）。
+    fn fallback_req(query: &str) -> SearchRequest {
+        SearchRequest {
+            query: query.to_string(),
+            page: 1,
+            page_size: 20,
+            country: None,
+            date_from: None,
+            date_to: None,
+            search_type: None,
+            sort_by: None,
+            ipc: None,
+            cpc: None,
+            region: None,
+            language: None,
+        }
+    }
+
+    /// 测试夹具：一条「链已跑完、三源皆墨」的 outcome（SerpAPI 未配 Key 前置 Skipped，
+    /// XHR 真实失败），本地兜底应**追加**在其后而非混入在线源之间。
+    fn chain_exhausted_outcome() -> SearchOutcome {
+        SearchOutcome {
+            results: vec![],
+            attempts: vec![
+                AttemptReport {
+                    source: SourceKind::SerpApi,
+                    status: AttemptStatus::Skipped,
+                    latency_ms: 0,
+                    hits: 0,
+                    error: Some("未配置 SERPAPI_KEY，本轮未发起在线请求".to_string()),
+                    hint: Some("未配置有效 SerpAPI Key，已自动尝试下游回退。".to_string()),
+                },
+                AttemptReport {
+                    source: SourceKind::GooglePatentsXhr,
+                    status: AttemptStatus::Failed(FailKind::Network),
+                    latency_ms: 41,
+                    hits: 0,
+                    error: Some("google_patents_xhr 模拟断网失败".to_string()),
+                    hint: None,
+                },
+            ],
+            upstream_total: None,
+        }
+    }
+
+    /// 测试夹具：可被 search_like（Mixed 路径）以「固态电池」命中的入库专利。
+    fn seed_patent(db: &Database, id: &str, title: &str) {
+        let p = Patent {
+            id: id.to_string(),
+            patent_number: format!("CN{}000000A", id),
+            title: title.to_string(),
+            abstract_text: format!("一种{title}及其制备方法"),
+            description: String::new(),
+            claims: String::new(),
+            applicant: "测试研究院".to_string(),
+            inventor: "张三".to_string(),
+            filing_date: "2024-01-01".to_string(),
+            publication_date: "2024-07-01".to_string(),
+            grant_date: None,
+            ipc_codes: "H01M".to_string(),
+            cpc_codes: "H01M".to_string(),
+            priority_date: String::new(),
+            country: "CN".to_string(),
+            kind_code: "A".to_string(),
+            family_id: None,
+            legal_status: String::new(),
+            citations: "[]".to_string(),
+            cited_by: "[]".to_string(),
+            source: "test".to_string(),
+            raw_json: "{}".to_string(),
+            created_at: "2026-01-01 00:00:00".to_string(),
+            images: "[]".to_string(),
+            pdf_url: String::new(),
+        };
+        db.insert_patent(&p).expect("seed insert");
+    }
+
+    /// **MA4a 核心断言 1（本地兜底命中）**：在线链全部失败后本地库有结果时，
+    /// attempts 末条必须是 `local_fts` + Success + hits>0 + latency_ms 已计时；
+    /// 且出参 `source=="local"`、默认 hint 文案、`patents[]` 内容逐字不变（旧形状快照）。
+    #[test]
+    fn local_fallback_hit_appends_local_fts_attempt_and_keeps_legacy_shape() {
+        let db = Database::init(":memory:").expect("in-memory db");
+        seed_patent(&db, "111", "固态电池");
+        let mut outcome = chain_exhausted_outcome();
+        let out = local_fallback_json(
+            &db,
+            &fallback_req("固态电池"),
+            &Some(SearchType::Mixed),
+            None,
+            &mut outcome,
+        );
+
+        let attempts = out["attempts"].as_array().expect("attempts 是数组");
+        assert_eq!(3, attempts.len(), "链上两条 + 本地兜底追加一条");
+        let local = &attempts[2];
+        assert_eq!(
+            json!({"source": "local_fts", "status": "Success", "hits": 1, "error": null, "hint": null}),
+            json!({
+                "source": local["source"], "status": local["status"], "hits": local["hits"],
+                "error": local["error"], "hint": local["hint"],
+            }),
+            "本地兜底行：local_fts + Success + hits>0，且不携带 hint（不得污染首个非空 hint 语义）"
+        );
+        assert!(local["latency_ms"].is_number(), "latency_ms 必须计时落账");
+        // 追加在尾部而非混入在线源之间
+        assert_eq!(
+            vec!["serpapi", "google_patents_xhr", "local_fts"],
+            attempts
+                .iter()
+                .map(|a| a["source"].as_str().unwrap_or("?").to_string())
+                .collect::<Vec<_>>()
+        );
+
+        // 旧形状逐字锁：键集合、source、hint 文案、patents 内容
+        let mut keys: Vec<&str> = out
+            .as_object()
+            .map(|m| m.keys().map(|k| k.as_str()).collect())
+            .unwrap_or_default();
+        keys.sort_unstable();
+        assert_eq!(
+            vec![
+                "attempts",
+                "hint",
+                "page",
+                "page_size",
+                "patents",
+                "source",
+                "total"
+            ],
+            keys
+        );
+        assert_eq!("local", out["source"]);
+        assert_eq!(
+            "国外在线源暂时未返回结果，已回退本地缓存。建议配置 SerpAPI 提升命中率。",
+            out["hint"]
+        );
+        assert_eq!(1, out["patents"].as_array().expect("patents").len());
+        assert_eq!("CN111000000A", out["patents"][0]["patent_number"]);
+        assert_eq!("固态电池", out["patents"][0]["title"]);
+    }
+
+    /// **MA4a 核心断言 2（本地也零命中）**：末档（`patents: []` + `google_url`）里
+    /// 仍要能看出「本地兜底跑过、命中 0 条」——如实记 Success + hits=0，禁止伪造。
+    #[test]
+    fn local_fallback_zero_hits_records_the_run_on_tail_path() {
+        let db = Database::init(":memory:").expect("in-memory db");
+        seed_patent(&db, "111", "固态电池");
+        let mut outcome = chain_exhausted_outcome();
+        let out = local_fallback_json(
+            &db,
+            &fallback_req("不存在的检索词xyz"),
+            &Some(SearchType::Mixed),
+            Some("在线预算提示".to_string()),
+            &mut outcome,
+        );
+
+        let attempts = out["attempts"].as_array().expect("attempts");
+        assert_eq!(3, attempts.len());
+        let local = &attempts[2];
+        assert_eq!("local_fts", local["source"]);
+        assert_eq!("Success", local["status"], "跑过但零命中仍是 Success");
+        assert_eq!(0, local["hits"]);
+        assert!(local["error"].is_null());
+
+        // 末档旧形状：google_url/message 逐字不变，hint 沿用上游文案（非默认兜底文案）
+        assert_eq!(json!([]), out["patents"]);
+        assert_eq!(0, out["total"]);
+        assert_eq!(
+            "https://patents.google.com/?q=%E4%B8%8D%E5%AD%98%E5%9C%A8%E7%9A%84%E6%A3%80%E7%B4%A2%E8%AF%8Dxyz&oq=%E4%B8%8D%E5%AD%98%E5%9C%A8%E7%9A%84%E6%A3%80%E7%B4%A2%E8%AF%8Dxyz",
+            out["google_url"]
+        );
+        assert_eq!("未找到结果，可尝试在 Google Patents 上搜索", out["message"]);
+        assert_eq!("在线预算提示", out["hint"]);
+    }
+
+    /// **MA4a 核心断言 3（本地查询失败）**：`search_smart` 报错时记
+    /// Failed(Parse)（分类理由见 [`local_fallback_json`] 注释，不扩枚举），
+    /// error 非空且点名来源（风格对齐 chain case5），出参仍走末档旧形状。
+    #[test]
+    fn local_fallback_db_error_records_failed_parse_attempt() {
+        let db = Database::init(":memory:").expect("in-memory db");
+        seed_patent(&db, "111", "固态电池");
+        // 制造真实查询故障：删掉内容表，search_like 的 prepare 必然报 no such table。
+        db.conn()
+            .execute("DROP TABLE patents", [])
+            .expect("drop for failure fixture");
+        let mut outcome = chain_exhausted_outcome();
+        let out = local_fallback_json(
+            &db,
+            &fallback_req("固态电池"),
+            &Some(SearchType::Mixed),
+            None,
+            &mut outcome,
+        );
+
+        let attempts = out["attempts"].as_array().expect("attempts");
+        assert_eq!(3, attempts.len());
+        let local = &attempts[2];
+        assert_eq!("local_fts", local["source"]);
+        assert_eq!(
+            json!({"Failed": "parse"}),
+            local["status"],
+            "本地库故障复用 Parse（记 bug 不降级），字面量受 MA5b 锁约束"
+        );
+        assert_eq!(0, local["hits"]);
+        let err = local["error"].as_str().expect("失败必须带非空 error");
+        assert!(err.contains("local_fts"), "error 要点名来源: {err}");
+        // 失败即无兜底结果，落末档形状
+        assert_eq!(json!([]), out["patents"]);
+        assert!(
+            out.get("hint").is_none(),
+            "upstream_hint 为 None 时末档不凭空造 hint"
+        );
+        assert!(out.get("google_url").is_some());
     }
 }
