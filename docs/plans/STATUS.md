@@ -8,6 +8,16 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-09-27 — MA3 补半程（显式语言/辖区过滤）+ PR #21 合并
+
+- **状态 / Status**: ✅ 已完成 / Completed
+- **范围 / Scope**: 第十二棒单包直出（99 轮 / 34 分钟，未触顶）。**缺口定位（规划会话派包前实测）**：MA3 的「半程」实际已被 MA1/MA2a/MA2b 顺做掉——`resolve_lang` 已生产消费、三源都已带 language 闸门；真缺口是 `SearchRequest` 没有显式 `language` 字段、检索页没有语言过滤器。交付：`e747b44` 后端 `SearchRequest.language: Option<Lang>`（`#[serde(default)]`，`chinese|english|all` 与前端 select value 逐字对齐）+ 新函数 `resolve_lang_with_explicit(explicit, region, country, query_trimmed)`，优先级 **显式 language > region(cn/intl) > 自动判定(auto_cn)**，`None` 分支一行委托旧 `resolve_lang`（旧函数与其两条迁移前逐用例等价对拍测试零改动）+ 优先级契约单测；`83f5577` 前端 `#language-filter`（自动/中文/英文/不限，默认「自动」）+ zh/en 双字典各 5 键，`buildRequest` 仅在显式选择时下发键（不选=不发，旧请求体逐字不变）；`5351bfb` task-breakdown MA3 行 ✅ + 规格书 §8 冒烟回写。
+- **验收 / Acceptance**: MA3 验收口径「默认配置中文关键词首页以中文专利为主」由**真实出网免费源取证**（同时收掉 MA2a 遗留的 XHR 真实 IP 冒烟）：`{"query":"固态电池"}` → SerpAPI Skipped → XHR 胜出，出网 URL 带 `language=CHINESE`，首页 5/5 CN 号 + 中文标题（total=123942 量级）；显式值可反向覆盖（英文词给 CHINESE、中文词给 ENGLISH、`all` 省略参数）。
+- **一处有意取舍**: 未把 `country` 硬默认为 `CN`（规格书 §1 原设想），而是保留「空值=不发」+ `auto_cn` 判定——硬默认会全局改变既有英文用户检索形状，与「不传时行为逐字一致」红线冲突；`§8` 冒烟第 1 项按实测形态记录该差异，未改规格语义。
+- **验证 / Verification**: CI lint/test/e2e 三绿（run `36315601516`）；规划会话独立复跑 fmt/clippy（touch 后真编译 2m）/test 全绿，**663 = lib 306 + bin 308 + 集成 49 对账闭合**；HTML 函数扫描「基线一致」（无新增 on* 函数，基线不需 refresh）；`src/common.rs`（118 条 `.route()`）/`Cargo.*`/`src/db`/`static/` 对 main 零 diff；新增 `unwrap/expect` 仅 1 处且落在 `#[cfg(test)] mod serde_snapshot`（整文件测试专用）；`api_recommend_similar` 构造点补 `language: None` 属字段新增的必要连带，非范围外改动
+- **仍开放 / Remaining**: 规格书 §8 第 3 项 SerpAPI 命中率对比仍受本机无 `SERPAPI_KEY` 阻塞（凭证侧为用户动作）；§8 第 2 项 `assignee` 精确性验证归 MA4；**新语言过滤器无 e2e 用例覆盖**（`e2e_test.mjs` 零引用），已并入下一包（MA4）的前端门禁要求
+- **同步 / Sync**: origin/main、origin/dev、gitee/main、gitee/dev、本地 main 五端对齐 `50c5265`
+
 ### 2026-09-27 — MA5b 检索诊断面板 + PR #20 合并
 
 - **状态 / Status**: ✅ 已完成 / Completed
