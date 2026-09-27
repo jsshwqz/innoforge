@@ -344,10 +344,12 @@ mod tests {
             "全局薄壳必须真的写进共享表（否则 routes 接线是假接线）"
         );
         // 恢复现场，别把 900s 的 EPO 冷却留给并行用例。
-        let mut guard = global_table().lock().unwrap_or_else(|p| p.into_inner());
-        match before {
-            Some(_) => {}
-            None => guard.success(SourceKind::EpoOps),
+        // 注意：清零必须走无锁路径——std Mutex 不可重入，持 guard 再调 remaining() 即死锁。
+        {
+            let mut guard = global_table().lock().unwrap_or_else(|p| p.into_inner());
+            if before.is_none() {
+                guard.success(SourceKind::EpoOps);
+            }
         }
         assert_eq!(before, remaining(SourceKind::EpoOps));
     }
