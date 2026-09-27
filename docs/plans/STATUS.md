@@ -8,6 +8,16 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-09-27 — MA4a 本地 FTS 兜底链上记账 + PR #22 合并
+
+- **状态 / Status**: ✅ 已完成 / Completed（本包范围内；MA4 整体转 ◐）
+- **范围 / Scope**: 第十三棒触顶后由第十四棒收尾（同一分支续跑，零返工）。交付：`68ff948` 把 `/api/search/online` 的本地兜底从内联块抽成 `local_fallback_json()`，每次兜底**追加**一条 `SourceKind::LocalFts` 的 `AttemptReport` 到 attempts 末位——本地跑过即如实记 `Success`（hits 可为 0），`search_smart` 报错记 `Failed(FailKind::Parse)`；**出参逐字不变**（`source:"local"`、hint 文案、`patents[]/total/page/page_size/google_url/message` 键集合与取值口径全部由新增 3 条内存库单测锁死），MA5b 的 `attempts_json_locks_frontend_panel_literals` 未红；`6043e72` dead_code 对账；`310b07f` 补 MA3 语言过滤器的 2 条 e2e 用例（54→56）；`bdd084c` 文档回写。**两个有意设计**：① `LocalFts` 故意**不**注册进 `online_chain_providers`——注册会让 `winning_source().as_str()` 吐 `"local_fts"`，破坏出参 `source` 且集体变红「四源链形状」用例；② 不扩 `FailKind`（Network/Quota/Auth 是远端源语义，Parse 的「记 bug、不切换、错误原样抛出」恰与「最后一档无源可切」一致；扩枚举会破坏 MA5b 字面量锁与前端 `DIAG_FAIL_KEYS`）。
+- **验收 / Acceptance**: 「检索过的专利断网可复检」的 **attempts 记账半边**已在真实实例取证（非内存库单测冒充）：临时全新空库 `D:\Temp\innoforge-e2e-run`（未触碰用户 4.3GB `innoforge.db`）起服，生僻词 `zzyyxx_offline_probe_qwertyuiop9x` 在线零命中自然回退 → attempts 末条 `{"source":"local_fts","status":"Success","hits":0,"latency_ms":0}`，前置 `serpapi Skipped` → `google_patents_xhr Success hits=0`。取证形态说明：未注入网络故障，走的是与「禁用两在线源」同一兜底代码路径。
+- **一处任务书前提被纠正（agent 做对了）**: 派包时我写了「撤掉 `SourceKind::LocalFts` 的 `#[allow(dead_code)]`」——实测该枚举**从未有**该属性（lib crate 的 pub 变体不触发 dead_code lint）。agent 未做假改动、未静默删除，而是在 `6043e72` 注释与 PR 中如实对账。同类：`SearchQuery.assignee` 的 `allow` 亦已陈旧（`google_patents_xhr.rs:239` 早有生产读点），MA4b 派包前须核实。
+- **验证 / Verification**: CI lint/test/e2e 三绿（run `36319845393`）；规划会话独立复跑 fmt exit 0 / clippy `--all-targets -D warnings` exit 0（touch 后真编译 59s）/ test 全绿，**669 = lib 309 + bin 311 + 集成 49 对账闭合**（基线 663 + 3 新单测 × lib/bin 双计，与 PR 口径逐项一致）；红线零 diff（`src/common.rs` 118 条 `.route()` / `Cargo.toml`+`lock` / `src/db/` / `templates/` / `static/` 对 main 全等，6 文件 +397/−50）；新增 `unwrap/expect` 全部 10 处经行号映射落在 `#[cfg(test)]`（marker 887）之后；`templates/static` 零改动 ⇒ 无需 `--refresh`，且 `DIAG_SOURCE_LABELS.local_fts` 已在 main 存在（MA5b 交付），面板无需改动即可长出该行；e2e 新增 2 用例经核实为真实页面求值（读 `#language-filter` + 调 `buildRequest`，检查后恢复默认，非空断言）。本地复跑前按已知处置清 `target/debug/incremental`（D: 余 1.8G→5.2G）。
+- **仍开放 / Remaining**: MA4 剩三项如实标未完成——**申请人精确匹配**（规格书 §8 第 2 项 XHR `assignee=` 引号 vs 裸值精确性验证仍开放）、**跨源合并去重**（`MergedPatent.key` 无消费点）、**结果强制入库 + FTS 自动同步（§7 单一写入口）**；验收锚点「本人姓名可搜到自己名下专利」**未达成**。本地命中档（hits>0）只有单测形状、无真实实例取证。下一包按 M-A 顺序为 **MA4b**（assignee 精确匹配 + §8 第 2 项实测 + 回归用例集），**MA6**（SerpAPI 超时收紧 + 服务端熔断消费 `cools_down()`）随后；M-B 规格书补发未启动。
+- **同步 / Sync**: origin/main、origin/dev、gitee/main、gitee/dev、本地 main 五端对齐 `3edade2`
+
 ### 2026-09-27 — MA3 补半程（显式语言/辖区过滤）+ PR #21 合并
 
 - **状态 / Status**: ✅ 已完成 / Completed
