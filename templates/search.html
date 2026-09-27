@@ -88,6 +88,8 @@
 </div>
 
 <div class="panel">
+<!-- MA5b 检索诊断面板：仅在线链路（/api/search/online 返回 attempts）时由 renderSearchDiagnostics 渲染 -->
+<div id="search-diagnostics" style="display:none;"></div>
 <div id="search-hint" class="search-hint" style="display:none;"></div>
 <div id="results-info"></div>
 <div id="results"></div>
@@ -177,6 +179,21 @@ function clearSearchPdfMeta() {
     'results.source': '来源',
     'results.google': 'Google Patents',
     'results.score': '相关性评分',
+    'diag.title': '检索诊断',
+    'diag.summary': '{n} 次数据源尝试',
+    'diag.status.success': '成功',
+    'diag.status.failed': '失败',
+    'diag.status.skipped': '跳过',
+    'diag.fail.network': '网络',
+    'diag.fail.quota': '配额',
+    'diag.fail.auth': '认证',
+    'diag.fail.parse': '解析',
+    'diag.cooling': '冷却中',
+    'diag.latency': '耗时 {ms}ms',
+    'diag.hits': '命中 {n}',
+    'diag.error': '错误',
+    'diag.hint': '提示',
+    'diag.balance': 'SerpAPI 本月剩余 {remaining} / {limit}（{plan}）',
     'alert.emptyQuery': '请输入搜索内容',
     'alert.searchFirst': '请先执行一次搜索',
     'alert.searchFail': '搜索失败',
@@ -238,6 +255,21 @@ function clearSearchPdfMeta() {
     'results.source': 'source',
     'results.google': 'Google Patents',
     'results.score': 'Relevance',
+    'diag.title': 'Search diagnostics',
+    'diag.summary': '{n} source attempts',
+    'diag.status.success': 'Success',
+    'diag.status.failed': 'Failed',
+    'diag.status.skipped': 'Skipped',
+    'diag.fail.network': 'network',
+    'diag.fail.quota': 'quota',
+    'diag.fail.auth': 'auth',
+    'diag.fail.parse': 'parse',
+    'diag.cooling': 'Cooling down',
+    'diag.latency': '{ms} ms',
+    'diag.hits': '{n} hits',
+    'diag.error': 'Error',
+    'diag.hint': 'Hint',
+    'diag.balance': 'SerpAPI {remaining} / {limit} left this month ({plan})',
     'alert.emptyQuery': 'Please enter a query',
     'alert.searchFirst': 'Please run a search first',
     'alert.searchFail': 'Search failed',
@@ -376,6 +408,7 @@ async function doSearch(page) {
 }
 
 function renderResults(data, page, pageSize) {
+    renderSearchDiagnostics(data);
     const total = Number(data.total || 0);
     const source = data.source ? ` | ${t('results.source')}: ${escapeHtml(data.source)}` : '';
     document.getElementById('results-info').innerHTML = t('results.info', {
@@ -464,6 +497,142 @@ function renderResults(data, page, pageSize) {
 
     document.getElementById('results').innerHTML = html + '<div id="batch-result" style="margin-top:16px;"></div>';
     renderPagination(total, page, pageSize);
+}
+
+// ── MA5b 检索诊断面板 ─────────────────────────────────────────────────────────
+// 数据源：/api/search/online 出参新增的 attempts 键。序列化字面量由后端单测
+// routes/search.rs::attempts_json_locks_frontend_panel_literals 锁死，形状：
+//   { source: 'serpapi'|'google_patents_xhr'|'epo_ops'|'local_fts',
+//     status: 'Success' | 'Skipped' | { Failed: 'network'|'quota'|'auth'|'parse' },
+//     latency_ms: number, hits: number, error: string|null, hint: string|null }
+// 本地模式（/api/search）出参没有 attempts → 面板整体不渲染，不得报错。
+// 全程 createElement + textContent（AGENTS.md 2.5：禁止 innerHTML 直插动态文本）。
+
+const DIAG_SOURCE_LABELS = {
+    serpapi: 'SerpAPI',
+    google_patents_xhr: 'Google Patents XHR',
+    epo_ops: 'EPO OPS',
+    local_fts: 'Local FTS'
+};
+const DIAG_FAIL_KEYS = ['network', 'quota', 'auth', 'parse'];
+
+// 「冷却中」判据是后端 FailKind::cools_down()（src/search/model.rs：Quota|Auth → true）
+// 的展示镜像，服务端熔断归 MA6，前端刻意不发明新规则。
+function diagCoolsDown(failKind) {
+    return failKind === 'quota' || failKind === 'auth';
+}
+
+function diagParseStatus(status) {
+    if (status === 'Success') return { kind: 'success', fail: null };
+    if (status === 'Skipped') return { kind: 'skipped', fail: null };
+    if (status && typeof status === 'object' && typeof status.Failed === 'string') {
+        return { kind: 'failed', fail: status.Failed };
+    }
+    return { kind: 'unknown', fail: null };
+}
+
+function diagBadgeSpan(text, color) {
+    var span = document.createElement('span');
+    span.textContent = text;
+    span.style.cssText = 'padding:1px 8px;border-radius:10px;font-size:0.8em;border:1px solid ' + color + ';color:' + color + ';';
+    return span;
+}
+
+function diagMutedSpan(text, title) {
+    var span = document.createElement('span');
+    span.textContent = text;
+    span.style.color = '#8b949e';
+    if (title) span.title = title;
+    return span;
+}
+
+// SerpAPI 余额（spec §3 改造点 3：复用既有 GET /api/settings/serpapi/balance）。
+// 模块级缓存只请求一次；任何失败静默降级（移除占位），不阻塞面板渲染。
+let serpapiBalanceRequest = null;
+function serpapiBalancePromise() {
+    if (!serpapiBalanceRequest) {
+        serpapiBalanceRequest = fetch('/api/settings/serpapi/balance')
+            .then(function(res) { return res.ok ? res.json() : null; })
+            .then(function(data) { return data && data.status === 'ok' ? data : null; })
+            .catch(function() { return null; });
+    }
+    return serpapiBalanceRequest;
+}
+
+function renderSearchDiagnostics(data) {
+    var box = document.getElementById('search-diagnostics');
+    if (!box) return;
+    box.textContent = '';
+    box.style.display = 'none';
+    var attempts = data && Array.isArray(data.attempts) ? data.attempts : [];
+    if (!attempts.length) return;
+
+    var details = document.createElement('details');
+    details.style.cssText = 'margin-bottom:12px;padding:8px 12px;background:#161b22;border:1px solid #30363d;border-radius:8px;';
+    var summary = document.createElement('summary');
+    summary.style.cssText = 'cursor:pointer;color:#8b949e;font-size:0.85em;user-select:none;';
+    summary.textContent = t('diag.title') + ' · ' + t('diag.summary', { n: attempts.length });
+    details.appendChild(summary);
+
+    var serpapiRow = null;
+    attempts.forEach(function(raw) {
+        var a = raw || {};
+        var st = diagParseStatus(a.status);
+        var row = document.createElement('div');
+        row.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px;font-size:0.9em;';
+
+        var name = document.createElement('strong');
+        name.textContent = DIAG_SOURCE_LABELS[a.source] || String(a.source || '?');
+        name.style.color = '#c9d1d9';
+        row.appendChild(name);
+
+        var badgeColor = st.kind === 'success' ? '#3fb950' : st.kind === 'failed' ? '#f85149' : '#8b949e';
+        var badgeText;
+        if (st.kind === 'success') badgeText = t('diag.status.success');
+        else if (st.kind === 'skipped') badgeText = t('diag.status.skipped');
+        else if (st.kind === 'failed') {
+            badgeText = t('diag.status.failed') + ' · ' +
+                (DIAG_FAIL_KEYS.indexOf(st.fail) >= 0 ? t('diag.fail.' + st.fail) : st.fail);
+        } else badgeText = '—';
+        row.appendChild(diagBadgeSpan(badgeText, badgeColor));
+        if (st.kind === 'failed' && diagCoolsDown(st.fail)) {
+            row.appendChild(diagBadgeSpan(t('diag.cooling'), '#d29922'));
+        }
+        row.appendChild(diagMutedSpan(t('diag.latency', { ms: Number(a.latency_ms || 0) })));
+        row.appendChild(diagMutedSpan(t('diag.hits', { n: Number(a.hits || 0) })));
+
+        // 截断仅用于展示：error/hint 全文完整保留在 title 提示里（AGENTS.md 2.5 截断纪律）
+        if (a.error) {
+            var errText = String(a.error);
+            var errShown = errText.length > 48 ? errText.slice(0, 48) + '…' : errText;
+            row.appendChild(diagMutedSpan(t('diag.error') + ': ' + errShown, errText));
+        }
+        if (a.hint) {
+            var hintText = String(a.hint);
+            var hintShown = hintText.length > 48 ? hintText.slice(0, 48) + '…' : hintText;
+            row.appendChild(diagMutedSpan(t('diag.hint') + ': ' + hintShown, hintText));
+        }
+        if (a.source === 'serpapi') serpapiRow = row;
+        details.appendChild(row);
+    });
+
+    if (serpapiRow) {
+        var bal = diagMutedSpan('…');
+        serpapiRow.appendChild(bal);
+        serpapiBalancePromise().then(function(balData) {
+            if (!balData) {
+                if (bal.parentNode) bal.parentNode.removeChild(bal);
+                return;
+            }
+            bal.textContent = t('diag.balance', {
+                remaining: Number(balData.remaining || 0),
+                limit: Number(balData.searches_per_month || 0),
+                plan: String(balData.plan_name || 'Free')
+            });
+        });
+    }
+    box.appendChild(details);
+    box.style.display = 'block';
 }
 
 function renderPagination(total, page, pageSize) {
