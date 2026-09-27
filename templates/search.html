@@ -45,6 +45,14 @@
 <option value="JP">JP</option>
 <option value="KR">KR</option>
 </select>
+<!-- MA3 显式语言过滤器：value 与后端 Lang 的 snake_case 串逐字对齐；
+     「自动」= 空值 = 不下发 language 键，请求体与 MA3 之前逐字一致 -->
+<select id="language-filter" data-i18n-title="lang.title">
+<option value="" data-i18n="lang.auto" selected></option>
+<option value="chinese" data-i18n="lang.chinese"></option>
+<option value="english" data-i18n="lang.english"></option>
+<option value="all" data-i18n="lang.all"></option>
+</select>
 <input type="text" id="ipc-filter" placeholder="IPC" title="IPC 分类号过滤（如 G06F、A61B）">
 <select id="sort-by">
 <option value="relevance" data-i18n="sort.relevance"></option>
@@ -155,6 +163,11 @@ function clearSearchPdfMeta() {
     'type.patentNumber': '专利号',
     'type.keyword': '关键词',
     'country.all': '全部地区',
+    'lang.title': '检索语言（显式指定优先于区域/自动判定）',
+    'lang.auto': '语言·自动',
+    'lang.chinese': '中文',
+    'lang.english': '英文',
+    'lang.all': '不限语种',
     'sort.relevance': '相关度',
     'sort.new': '最新',
     'sort.old': '最早',
@@ -231,6 +244,11 @@ function clearSearchPdfMeta() {
     'type.patentNumber': 'Patent Number',
     'type.keyword': 'Keyword',
     'country.all': 'All Regions',
+    'lang.title': 'Search language (explicit choice overrides region/auto)',
+    'lang.auto': 'Lang·Auto',
+    'lang.chinese': 'Chinese',
+    'lang.english': 'English',
+    'lang.all': 'Any Language',
     'sort.relevance': 'Relevance',
     'sort.new': 'Newest',
     'sort.old': 'Oldest',
@@ -370,6 +388,9 @@ function buildRequest(page) {
     if (dateFrom) body.date_from = dateFrom;
     if (dateTo) body.date_to = dateTo;
     if (region && region !== 'auto') body.region = region;
+    // MA3：仅在用户显式选择语言时下发 language 键（空值=自动=不发，保持旧请求体逐字不变）
+    const language = document.getElementById('language-filter').value;
+    if (language) body.language = language;
     const ipc = document.getElementById('ipc-filter').value.trim();
     if (ipc) body.ipc = ipc;
     return body;
