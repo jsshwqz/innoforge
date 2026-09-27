@@ -18,7 +18,11 @@
 //!   **MA2a 起 `switches_source` 已被消费**（`providers::google_patents_xhr` 的重试判定 +
 //!   `chain` 的 Parse 截断）；源级熔断（连续 3 次 Quota/Auth 冷却 10 分钟）
 //!   仍属 MA5/MA6；
-//! - 不做本地 FTS provider（本地兜底链路仍留在 `routes/search.rs`，单一写入口改造属 MA4）；
+//! - ~~不做本地 FTS provider（本地兜底链路仍留在 `routes/search.rs`，单一写入口改造属 MA4）~~
+//!   **MA4a 已交付本地兜底的链上记账**（`routes/search.rs::local_fallback_json` 把每次
+//!   兜底补记为 attempts 末条 `local_fts`，`SourceKind::LocalFts` 自此有真实生产消费点）；
+//!   「兜底改造为 provider 进链」仍不做——那会让出参 `source` 变 `"local_fts"` 破坏旧形状，
+//!   跨源合并去重（`MergedPatent.key`）与 assignee 精确匹配仍属 MA4 剩余项；
 //! - 不改任何对外 API 形状：`/api/search/online` 的响应字段、上游请求参数、结果映射
 //!   与迁移前逐字一致，由 `providers::serpapi` 与 `query` 的参照实现单测锁死。
 

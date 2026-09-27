@@ -28,6 +28,11 @@ pub enum SourceKind {
     GooglePatentsXhr,
     #[serde(rename = "epo_ops")]
     EpoOps,
+    /// 本地 FTS 兜底。**MA4a 起有真实生产消费点**：`routes/search.rs::local_fallback_json`
+    /// 把每次本地兜底补记为 attempts 末条的 `local_fts` 行（仅记账，不进在线链、
+    /// 不参与 `winning_source`，出参 `source` 仍为 `"local"`）。
+    /// 注：lib crate 的 pub 变体本就不触发 dead_code lint，故此处从未有 `#[allow(dead_code)]`
+    /// 可撤（任务书预期与实际代码的差异，已在 PR 中如实对账）。
     #[serde(rename = "local_fts")]
     LocalFts,
 }
