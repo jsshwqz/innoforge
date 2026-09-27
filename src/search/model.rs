@@ -20,7 +20,9 @@ pub enum Lang {
 }
 
 /// 数据源标识（spec §1）。序列化用小写稳定串，供 MA5 诊断面板与日志复用。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// `Hash` 为 MA6a 追加（`search::breaker::CooldownTable` 以之为键）：**仅加 derive**，
+/// 变体集合与 serde 表示逐字未动，出参/前端字面量锁不受影响。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SourceKind {
     #[serde(rename = "serpapi")]
     SerpApi,
