@@ -777,3 +777,11 @@
 - **解法 / Fix**: ① 规则逐条等价迁移到 `eslint.config.js`（8 条规则 + 等级 + ignorePatterns 原样搬，`env.browser` 展开成显式 globals 表；`ignorePatterns` 在 flat config 里必须单独成项才全局生效，配置对象里带 `root: true` 会直接报错）；② 三处 `var len` 改 `let`（各在其块内，声明后紧邻唯一读取，零行为变化）；③ 删除 `.eslintrc.json`，避免后续 agent 误以为门禁生效。结果：`npx eslint static/i18n.js` exit 0，0 error / 5 warn。
 - **预防 / Prevention**: 判断"某道门禁是否真的在保护我们"，要看**它有没有真的执行过**——CI 步骤被前一步的失败掩盖时会形成长期假绿；补上前一道红之后必须复跑后续步骤。另记：AGENTS.md Step 5 写的本地命令路径 `templates/static/i18n.js` 不存在（实际是 `static/i18n.js`，模板内联在 `templates/*.html` 里、静态资源在 `static/`），照抄会得到"文件不存在"的假结论。
 - **提交 / Commit**: 本条（CI 绿色基线包附带）
+
+### [2026-09-27] cargo 构建报「磁盘空间不足 (os error 112)」：target/ 膨胀塞满 D 盘
+- **严重程度 / Severity**: MEDIUM（门禁阻断：fmt/clippy 可过，test/link 阶段必然失败）
+- **涉及文件 / Files**: `target/debug/incremental/`（3.3GB）、`target/debug/deps/*.pdb`（2.2GB / 74 个）
+- **现象 / Symptom**: PR #20 合并前规划会话本地复跑 `cargo test` 失败：`error: failed to build archive at target\debug\deps\innoforge.lib: 磁盘空间不足。(os error 112)`；`Get-PSDrive D` 显示仅剩 0.6GB / 693GB，而 `target/` 独占 12GB。
+- **根因 / Root cause**: 长期多批执行 agent 反复构建，增量缓存与 PDB 只增不减（二者都是可再生产物，cargo 没有自动回收策略）；用户 DB `innoforge.db`（4.3GB）不可动，所以只能从构建产物侧腾。
+- **解法 / Fix**: `rm -rf target/debug/incremental`（+3.3GB）与 `rm -f target/debug/deps/*.pdb`（再 +1.6GB），D 盘回到 3.8GB 后 `cargo test` 复跑通过（659 对账闭合）。
+- **预防 / Prevention**: ① **禁止 `cargo clean`**——全量重建既慢又会在下一轮再次塞盘，只删 `incremental/` 与 `deps/*.pdb` 这两类可再生缓存；② rustc 崩溃 `0xc0000409`（STATUS_STACK_BUFFER_OVERRUN）同样是增量产物损坏的症状，处置动作一致，不要误判为代码问题；③ 派包前监工应先 `Get-PSDrive D` 确认 ≥3GB 空闲，不足则先清理再启动，否则执行 agent 会把轮次浪费在复现一个环境错误上（本包已在 brief 里预写处置步骤）。
