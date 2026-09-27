@@ -716,6 +716,7 @@
 - **根因 / Root cause**: `gh` 优先使用环境变量 `GITHUB_TOKEN`，该 fine-grained PAT 有 contents 写权限但没有 pull-request 写 scope；本机 keyring 里另有一枚带 `repo` 的 classic token 处于 inactive 状态。EOF 那条是瞬时网络抖动，与权限无关。
 - **修复 / Fix**: 单条命令绕开 env token、回落 keyring：`env -u GITHUB_TOKEN gh pr create ...` / `gh pr edit ...`。EOF 类失败先 `gh pr list --head <branch> --state all --json number` 确认没建出半成品，再重试，避免重复开 PR。
 - **预防 / Prevention**: 本项目任何 `gh pr` 写操作一律 `env -u GITHUB_TOKEN` 前缀（或改 `gh auth switch` 激活 keyring 账号）；不要为绕权限去改全局 git 配置。push 成功不代表该 token 能开 PR。
+- **补充（MA6c，2026-09-28 复现）**: 同一枚 env token 下 **REST 路径 `gh api -X POST repos/<owner>/<repo>/pulls` 也返回 403** `Resource not accessible by personal access token`（不是只有 GraphQL mutation 受限），所以「改用 REST 绕一绕」这条路不通、不要浪费轮次；有效动作仍只有一条：`env -u GITHUB_TOKEN gh pr create --body-file <D:\Temp 下的正文文件>`（正文里含引号/反引号时用 `--body-file` 比 shell heredoc 稳，后者会因内容里的引号把整条命令打成 `unexpected EOF`）。
 - **提交 / Commit**: 本条（PR #9 附带）
 
 ### [2026-09-19] clippy 工具链漂移把"门禁全绿"基线变红
@@ -824,3 +825,15 @@
 - **解法 / Fix**: 手动 `taskkill` 残留 server 进程后复跑全绿。执行棒已在 PR body 如实留痕「未捕获名、杀进程后 6 轮不复现」。
 - **预防 / Prevention**: ① 门禁顺序建议 **`cargo test` 在 e2e 之前**，或 e2e 之后固定 `tasklist | grep innoforge-server` 检查回收；② 见到「单发失败 + 复跑消失」先查残留进程与端口占用，再怀疑代码；③ 若要在 e2e 脚本里根治，需给 server 起停加 `finally` 回收与端口断言——属独立小包，不在 MA6b 范围。
 - **提交 / Commit**: 本条（MA6b 合并后文档回写附带）
+
+### [2026-09-28] 门禁日志被 `| head` 截断 + clippy 后 `cargo test` 需重链 DLL 撞满工具时限：两处「差点假报全绿」
+
+- **严重程度 / Severity**: MEDIUM（证据完整性；不是代码缺陷）
+- **涉及文件 / Files**: 无（工具链：cargo 1.98 + Windows 链接器 + 单条命令 600s 上限）
+- **现象 / Symptom**: MA6c 门禁连跑时踩到同一类坑两处：
+  1. `cargo test 2>&1 | grep -E "^test result" -A2 | head -50` 的后台输出文件里**缺最后一条 `test result` 行**（37 项那个集成测试二进制被截掉）。若照这份日志汇报「721 全绿 / exit 0」其实是**无证据的**——管道退出码来自 `head`，不是 `cargo`；
+  2. 紧接 `cargo clippy --all-targets -- -D warnings`（2m10s）之后再跑 `cargo test`，test 侧要重新链接 `innoforge.dll.lib` 与 7 个测试二进制，实测 **>10 分钟**，撞满单次命令时限被转后台（哪怕本次只改了注释）。
+- **根因 / Root cause**: ① 截断管道让「我看到的日志」不等于「cargo 真的产出」；② clippy 与 cargo test 的产物不完全复用（clippy 产校验元数据、test 需真实链接），Windows 上链接 DLL/.lib 是分钟级开销。
+- **解法 / Fix**: 门禁输出**全量落盘再统计**：`cargo test > /d/Temp/ma6c-test2.log 2>&1; echo EXIT=$?`，之后 `grep -E "^test result"` 求和 —— 本次得 `335 + 337 + 3 + 3 + 6 + 37 = 721` 且 `EXIT=0`，与对账公式（基线 715 + 净新增 3×2）闭合，才写进 PR body。
+- **预防 / Prevention**: ① **任何要报总数的门禁命令禁止接 `head` 或小值 `-A` 截断**；② 汇报「N passed」时必须能贴出该数字来源的完整 `test result` 行集合；③ 时限预算：clippy 之后的 `cargo test` 按「可能 10 分钟以上」安排（后台跑 + 等完成通知），或把顺序调成 fmt → test → clippy 让 test 先复用已链接产物；④ 纯注释/文档改动也走完整三道门禁，但要把「重链时间」算进预算，不要因为一次超时就改用截断命令求快。
+- **提交 / Commit**: MA6c 分支 `exec/ma6-dedup-ruling`（PR #26）文档追加
