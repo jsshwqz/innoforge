@@ -165,15 +165,10 @@ pub fn note_attempts(attempts: &[AttemptReport]) {
     guard.note_attempts(attempts, Instant::now());
 }
 
-/// 全局薄壳：查询某源当前剩余冷却时长（真时钟）。`None` = 可用。
-#[allow(dead_code)] // 生产路径经 CooldownTable::remaining 直接读表（routes 持锁批量过滤）；
-                    // 本单源查询留给 MA6b 诊断面板展示「剩余 Ns」消费（届时撤掉本标注）。
-pub fn remaining(source: SourceKind) -> Option<Duration> {
-    let guard = global_table()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    guard.remaining(source, Instant::now())
-}
+// MA6b 销账：这里曾有一个 `remaining(source) -> Option<Duration>` 全局薄壳（MA6a 预留、
+// 带 `#[allow(dead_code)]`）。MA6b 的「冷却中·剩余 Ns」面板数据取自请求内链前过滤已算好
+// 的 `cooled` 列表（routes/search.rs::filter_cooled_providers），不需要二次加锁单源查询，
+// 按本仓「不留装饰性 API」纪律删除；表读取统一走 `global_table()` + `CooldownTable::remaining`。
 
 #[cfg(test)]
 mod tests {
@@ -329,28 +324,39 @@ mod tests {
         );
     }
 
-    /// 全局薄壳与纯结构走同一张表：note_attempts 写全局后 remaining 读得到。
+    /// 全局薄壳与纯结构走同一张表：note_attempts 写全局后，持锁读表（`CooldownTable::remaining`）
+    /// 必须查得到。MA6b 删除单源查询薄壳 `remaining()` 后，这是全局表唯一的读路径断言。
     /// （刻意只测「写→读」一对动作，不在并行测试里断言其他源的表状态——全局表跨用例共享。）
     #[test]
     fn global_shell_roundtrips_through_the_shared_table() {
-        let before = remaining(SourceKind::EpoOps);
+        let now = Instant::now();
+        let before = {
+            let guard = global_table().lock().unwrap_or_else(|p| p.into_inner());
+            guard.remaining(SourceKind::EpoOps, now)
+        };
         note_attempts(&[report(
             SourceKind::EpoOps,
             AttemptStatus::Failed(FailKind::Auth),
         )]);
-        let after = remaining(SourceKind::EpoOps);
+        let after = {
+            let guard = global_table().lock().unwrap_or_else(|p| p.into_inner());
+            guard.remaining(SourceKind::EpoOps, Instant::now())
+        };
         assert!(
             after.is_some(),
             "全局薄壳必须真的写进共享表（否则 routes 接线是假接线）"
         );
         // 恢复现场，别把 900s 的 EPO 冷却留给并行用例。
-        // 注意：清零必须走无锁路径——std Mutex 不可重入，持 guard 再调 remaining() 即死锁。
         {
             let mut guard = global_table().lock().unwrap_or_else(|p| p.into_inner());
             if before.is_none() {
                 guard.success(SourceKind::EpoOps);
             }
         }
-        assert_eq!(before, remaining(SourceKind::EpoOps));
+        let restored = {
+            let guard = global_table().lock().unwrap_or_else(|p| p.into_inner());
+            guard.remaining(SourceKind::EpoOps, now)
+        };
+        assert_eq!(before.is_some(), restored.is_some());
     }
 }
