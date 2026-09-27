@@ -785,3 +785,12 @@
 - **根因 / Root cause**: 长期多批执行 agent 反复构建，增量缓存与 PDB 只增不减（二者都是可再生产物，cargo 没有自动回收策略）；用户 DB `innoforge.db`（4.3GB）不可动，所以只能从构建产物侧腾。
 - **解法 / Fix**: `rm -rf target/debug/incremental`（+3.3GB）与 `rm -f target/debug/deps/*.pdb`（再 +1.6GB），D 盘回到 3.8GB 后 `cargo test` 复跑通过（659 对账闭合）。
 - **预防 / Prevention**: ① **禁止 `cargo clean`**——全量重建既慢又会在下一轮再次塞盘，只删 `incremental/` 与 `deps/*.pdb` 这两类可再生缓存；② rustc 崩溃 `0xc0000409`（STATUS_STACK_BUFFER_OVERRUN）同样是增量产物损坏的症状，处置动作一致，不要误判为代码问题；③ 派包前监工应先 `Get-PSDrive D` 确认 ≥3GB 空闲，不足则先清理再启动，否则执行 agent 会把轮次浪费在复现一个环境错误上（本包已在 brief 里预写处置步骤）。
+
+### [2026-09-28] 规划会话与执行 agent 共用 `target/` 并发构建：rustc `0xc0000409` 与门禁输出丢失
+- **严重程度 / Severity**: MEDIUM（门禁可信度：一次真红被误读成代码问题的风险）
+- **涉及文件 / Files**: `target/debug/incremental/`（共享缓存目录）、`D:\Temp\ma4b-test.log`
+- **现象 / Symptom**: MA4b 合并前，规划会话在 tip `9f80156` 复跑门禁：`cargo fmt --check` 与 `cargo clippy --all-targets` 均 exit 0，紧接着 `cargo test` 以 exit 101 失败——`error: could not compile innoforge (bin "innoforge-server" test) … (exit code: 0xc0000409, STATUS_STACK_BUFFER_OVERRUN)`，并伴随 rustc backtrace 里成对重复的帧（同一查询出现两次）。同一时段执行 agent（收尾棒）报告「三个后台 cargo 任务互抢构建锁致输出丢失」。
+- **根因 / Root cause**: 两台 cargo 进程共享同一 `D:\test\patent-hub-backup\target` 时，`incremental/` 缓存目录会被并发写坏（file lock 只保护单个 invocation 内的调度，不保护跨进程复用同一 target dir）；`0xc0000409` 与「日志被截断/丢输出」都是同一并发写损坏的症状，而不是 MA4b 代码的问题——该 run 的远端 CI 与 agent 自家复跑都是绿的。
+- **解法 / Fix**: ① 确认 `tasklist` 无残留 `rustc.exe`/`cargo.exe`（本次为 0，说明损坏已落盘而非仍在并发）；② 按本文件 2026-09-27 条目清 `target/debug/incremental` + `target/debug/deps/*.pdb`（D 盘 3.5GB→5.1GB）；③ **单进程**复跑 `cargo test` → exit 0，**687 = lib 318 + bin 320 + 集成 49** 与执行 agent 声明逐字对账闭合。整个处置只动可再生缓存，未改一行代码。
+- **预防 / Prevention**: ① 规划会话的独立门禁复跑，**必须在执行 agent 结束后进行**（判定信号：`git status --porcelain` 为空 + `tasklist` 无 cargo/rustc + 无 `innoforge-server.exe`）；树仍被 agent 持有时改用 `git worktree add D:/Temp/<name> <tip>` + `CARGO_TARGET_DIR=D:/Temp/<name>-target` 隔离，绝不在同一 target dir 上抢锁。② 见到 `0xc0000409` 先问「刚才有没有第二个 cargo 在跑」，再决定是环境问题还是代码问题——直接归因代码会让 agent 去"修"一个不存在的 bug。③ 门禁结论以**同一次单进程复跑**的输出为准，跨进程拼接的日志不作为验收证据。
+- **提交 / Commit**: 本条（MA4b 合并后文档回写附带）
