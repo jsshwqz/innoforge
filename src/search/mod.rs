@@ -26,7 +26,11 @@
 //!   **MA4a 已交付本地兜底的链上记账**（`routes/search.rs::local_fallback_json` 把每次
 //!   兜底补记为 attempts 末条 `local_fts`，`SourceKind::LocalFts` 自此有真实生产消费点）；
 //!   「兜底改造为 provider 进链」仍不做——那会让出参 `source` 变 `"local_fts"` 破坏旧形状，
-//!   跨源合并去重（`MergedPatent.key`）与 assignee 精确匹配仍属 MA4 剩余项；
+//!   ~~跨源合并去重（`MergedPatent.key`）仍属 MA4 剩余项~~ **MA6c 已裁决不做**
+//!   （2026-09-28：执行链按登记顺序择单一胜者、胜出源整份返回，结构上无第二个源的输入
+//!   可拼接，该键从未有生产消费点，字段已删除；去重由 [`merge::dedup_patent_summaries`]
+//!   服务本地 `/api/search` 路径，依据见规格书 §6）；
+//!   assignee 精确匹配 ~~仍属 MA4 剩余项~~ **MA4b 已交付**；
 //! - 不改任何对外 API 形状：`/api/search/online` 的响应字段、上游请求参数、结果映射
 //!   与迁移前逐字一致，由 `providers::serpapi` 与 `query` 的参照实现单测锁死。
 

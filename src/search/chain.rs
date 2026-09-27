@@ -117,7 +117,6 @@ pub(crate) fn resolve_by_precedence(outcomes: Vec<SearchOutcome>) -> SearchOutco
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::patent::canonical_patent_key;
     use crate::search::model::{FailKind, MergedPatent, SearchQuery};
     use crate::search::providers::epo_ops as epo;
     use crate::search::providers::google_patents_xhr as xhr;
@@ -173,7 +172,6 @@ mod tests {
             outcome: SearchOutcome {
                 results: if with_results {
                     vec![MergedPatent {
-                        key: canonical_patent_key("CN900000000A"),
                         sources: vec![source],
                         summary: summary("CN900000000A", "主源桩结果"),
                     }]
@@ -629,7 +627,7 @@ mod tests {
         assert_eq!(
             1,
             outcome.results.len(),
-            "只取胜出源，不做跨源拼接（那是 MA2b）"
+            "只取胜出源，不做跨源拼接（MA6c 据此裁决删除 `MergedPatent.key`，见规格书 §6）"
         );
         assert_eq!(2, outcome.attempts.len());
     }

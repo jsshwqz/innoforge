@@ -30,7 +30,7 @@ pub struct AttemptReport {          // MA5 诊断面板数据源
 }
 
 pub struct SearchOutcome {
-    pub results: Vec<MergedPatent>, // 多源合并去重后（publication_number 为键）
+    pub results: Vec<MergedPatent>, // 多源合并去重后（publication_number 为键）—— ❌ MA6c 裁决不做跨源拼接，`MergedPatent.key` 已删除，理由见 §6
     pub attempts: Vec<AttemptReport>,
 }
 ```
@@ -75,10 +75,11 @@ pub struct SearchOutcome {
 ```
 用户检索 → 并行发起 [SerpApi, GooglePatentsXhr]（各自 15s 超时）
          → 任一成功即开始返回；全部失败 → EPO OPS → 仍无 → 本地 FTS 兜底并明示"仅本地库"
-合并去重键：publication_number 规范化（去空格/统一大小写）
+合并去重键：publication_number 规范化（去空格/统一大小写）   ← ❌ MA6c 裁决不做，见本节末条
 ```
 
 - 不做严格串行瀑布（太慢）；并行+先到先得，AttemptReport 全量记录进诊断面板 ✅ MA5b（`/api/search/online` 出参 `attempts` 键 + search 页诊断折叠面板；下方「每源独立熔断」✅ MA6a）
+- ~~合并去重键：publication_number 规范化（去空格/统一大小写），跨源结果按该键合并~~ ❌ **MA6c 裁决：不做跨源拼接，`MergedPatent.key` 字段已删除（2026-09-28，分支 `exec/ma6-dedup-ruling`）**。**裁决依据**：① 现行执行链是「并行发起 + 按登记顺序择单一胜者」（`src/search/chain.rs::resolve_by_precedence`），胜出源整份返回，架构上不存在「第二个源的结果」可供拼接（链级用例 `primary_wins_when_both_produce_hits` 断言的就是这件事）；② 该字段自 MA1 写定起只有 provider 侧断言在读、**零生产消费点**（`/api/search/online` 只发 `outcome.summaries()`，`MergedPatent`/`SearchOutcome` 从不上 wire、从不入库），属为规格书一句话保留的装饰性字段；③ 规范化去重能力已在真正需要它的路径落地并有生产消费点——`src/search/merge.rs::dedup_patent_summaries`（键 = `canonical_patent_key`，空号退化 `TITLE::<大写标题>`）服务本地 `/api/search`。**保留的真实锁**：EPO 著录公开号规范化后等于 `EP3445287`（原断言读 `key`，改为对 `summary.patent_number` 就地求值，语义一字未减）。**未来若要真做多源合并**：需先给链加「多源结果保留」的出参语义，届时按本节重建键，而不是复活一个没人读的字段。
 - 每源独立熔断 ~~：连续 3 次 FailKind∈{Quota,Auth} 后冷却 10 分钟不再尝试~~ ✅ **MA6a 已落地，实现口径修正**：单次 `cools_down()`（Quota/Auth）失败即冷却该源，时长按 `SourceKind × FailKind` 常量表（SerpAPI/EPO Quota 300s、Auth 900s；XHR Quota 120s，见 `src/search/breaker.rs`）。**放弃「连续 3 次」阈值的实证理由**：本仓实测同 IP 连打 3 发（<8s 间隔）即触发 Google 503 封禁——第 2、3 次「确认性」计数恰好落在恶性循环最疼的位置，且上游已返回 Quota/Auth 时限流即成立，多打两发省不下任何封禁时长。冷却为进程内状态（重启清零）、键为源级（换查询词不解锁），设计依据见 `breaker.rs` 模块头。
 
 ## 7. 本地库兜底与索引同步（MA4）

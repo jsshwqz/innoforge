@@ -90,7 +90,13 @@
 //! 3. **匿名请求**（无 Authorization 头）实测返回 **403** 而非 401（见 EVIDENCE_LIVE 第 2 条），
 //!    所以「token 过期」与「压根没带 token」都可能落到 403：两者的正确处置都是
 //!    「重取 token 再试一发」，故 auth 重试判定为 **401 或 403**（口径见 [`FailKind::for_http_status`]）。
-//! 4. **未做**：跨源结果拼接（`MergedPatent.key` 的合并消费）属 MA4 剩余项。
+//! 4. ~~**未做**：跨源结果拼接（`MergedPatent.key` 的合并消费）属 MA4 剩余项~~
+//!    **MA6c 已裁决：不做跨源拼接（2026-09-28）**。执行链按登记顺序择单一胜者、胜出源整份
+//!    返回（`chain.rs::resolve_by_precedence`），架构上没有第二个源的输入可供拼接，
+//!    该合并键因此始终只有测试在读、零生产消费点，`MergedPatent.key` 已随之删除；
+//!    去重能力由 `merge::dedup_patent_summaries` 在真正需要它的本地 `/api/search` 路径提供。
+//!    依据与销账记录见规格书 §6 与 `crate::search::model::MergedPatent` 文档。
+//!    本源侧保留的真实锁是「著录公开号规范化后等于 `EP3445287`」（见 `tests` 内断言）。
 //!    ~~熔断冷却（`FailKind::cools_down` 消费）属 MA5/MA6~~
 //!    **MA6a 已落地**：本源 Quota 300s / Auth 900s 的源级冷却由
 //!    [`crate::search::breaker`] 在 `routes/search.rs` 链前/链后接线消费；
@@ -2410,9 +2416,15 @@ pub(crate) mod tests {
                 .results
                 .iter()
                 .all(|m| m.sources == vec![SourceKind::EpoOps]),
-            "每条都标了本源，为 MA4 的跨源合并留好位"
+            "每条都标了本源（出参 source 字段与诊断面板读的就是它）"
         );
-        assert_eq!("EP3445287", outcome.results[0].key, "去重键 = 规范化公开号");
+        assert_eq!(
+            "EP3445287",
+            crate::patent::canonical_patent_key(&outcome.results[0].summary.patent_number),
+            "EPO 著录的公开号规范化后仍是 EP3445287（去空格/去 kind code）——\
+             MA6c 前这条断言读的是 MergedPatent.key，字段按裁决删除后改为就地求值，\
+             锁的语义（本源输出的规范化公开号形状）一字未减"
+        );
     }
 
     #[tokio::test]

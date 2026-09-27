@@ -151,19 +151,24 @@ impl AttemptReport {
     }
 }
 
-/// 合并后的单条专利（spec §1；去重键见 spec §6 = 规范化 publication_number）。
+/// 合并后的单条专利（spec §1）。
+///
+/// **MA6c 裁决（2026-09-28）：本类型不携带跨源合并去重键。**
+/// spec §6 早期设想「多源结果按规范化 publication_number 合并去重」，故 MA1 起此处曾有
+/// `key: String` 字段。现行执行链是**并行 + 按登记顺序择单一胜者**
+/// （[`SourceChain`](crate::search::chain::SourceChain) / `chain.rs::resolve_by_precedence`），
+/// 胜出源整份返回，架构上根本不存在「第二个源的结果」可供拼接——该字段自写定起
+/// 只有 provider 侧断言在读、零生产消费点。真正的去重能力已由
+/// [`dedup_patent_summaries`](crate::search::merge::dedup_patent_summaries)
+/// 在需要它的本地 `/api/search` 路径落地。裁决与依据已回写规格书 §6（原文删除线保留）。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MergedPatent {
-    /// 规范化 publication_number（`crate::patent::canonical_patent_key`），空号退化为标题键。
-    /// MA2b 对账：本包按 spec §6 仍是**择胜**（首个有结果的源整份返回），不做跨源拼接，
-    /// 故这个去重键至今只有 provider 侧断言在读、没有生产消费点 —— **未伪造消费**，如实留给 MA4。
-    #[allow(dead_code)] // MA4 跨源合并去重消费（MA2a/MA2b 均为单源胜出）
-    pub key: String,
     /// 复用既有对外结构，保证 `/api/search/online` 的 patents[] 字段一字不变。
     pub summary: PatentSummary,
     /// 命中该条的源集合（MA1 恒为单元素，由 `merge::merged_from` 写入）。
     /// **MA2a 起被读取**：[`SearchOutcome::winning_source`] 用它决定 `/api/search/online`
-    /// 的 `source` 字段值；MA4 多源合并后同一条目可能挂多个源。
+    /// 的 `source` 字段值。MA6c 已裁决不做跨源拼接（见结构体文档），故本字段在可预见
+    /// 期内继续恒为单元素——它承担的是「如实标源」，不是「合并溯源」。
     pub sources: Vec<SourceKind>,
 }
 
@@ -358,7 +363,6 @@ mod tests {
         };
         let outcome = SearchOutcome {
             results: vec![MergedPatent {
-                key: "CN123456A".to_string(),
                 sources: vec![SourceKind::SerpApi],
                 summary: summary.clone(),
             }],
@@ -383,7 +387,6 @@ mod tests {
     fn winning_source_reads_merged_sources() {
         let outcome = SearchOutcome {
             results: vec![MergedPatent {
-                key: "CN123456A".to_string(),
                 summary: PatentSummary {
                     id: "p1".to_string(),
                     patent_number: "CN123456A".to_string(),
