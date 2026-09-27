@@ -29,9 +29,12 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-/// 上游单次请求超时。**保持旧值 30s**（`ONLINE_UPSTREAM_TIMEOUT_SECS`）：
-/// spec §1 建议收紧到 15s，但那属于 MA2 执行链的行为变更，MA1 只做「行为保持」的抽出。
-const UPSTREAM_TIMEOUT_SECS: u64 = 30;
+/// 上游单次请求超时。**MA6a 已收紧到 15s**（spec §1「所有源调用必须带独立超时（建议 15s）」）：
+/// XHR（`google_patents_xhr.rs`）与 EPO（`epo_ops.rs`）自 MA2 起即为 15s，本源是最后一处偏离值；
+/// 旧值 30s（`ONLINE_UPSTREAM_TIMEOUT_SECS`）会让 SerpAPI 慢响应吃满
+/// `ONLINE_TOTAL_BUDGET_SECS`（60s）预算并拖住整条并行链的择胜返回。
+/// 常量值由单测 `upstream_timeout_is_tightened_to_spec_1` 锁死，防止无声回退成 30s。
+const UPSTREAM_TIMEOUT_SECS: u64 = 15;
 
 /// SerpAPI `google_patents` 引擎封装（付费主源，spec §3）。
 pub struct SerpApiProvider {
@@ -87,7 +90,7 @@ impl SerpApiProvider {
         SerpApiProvider { api_key, db }
     }
 
-    /// 与旧代码一致的客户端构造：超时 30s，builder 失败时退回默认客户端。
+    /// 客户端构造：超时 15s（MA6a 收紧，见 `UPSTREAM_TIMEOUT_SECS` 注释），builder 失败时退回默认客户端。
     fn client() -> reqwest::Client {
         reqwest::Client::builder()
             .timeout(Duration::from_secs(UPSTREAM_TIMEOUT_SECS))
@@ -1052,5 +1055,16 @@ mod tests {
         assert_eq!(FailKind::Network, fail_kind_for_status(code(503)));
         assert_eq!(FailKind::Auth, fail_kind_for_error("invalid api key"));
         assert_eq!(FailKind::Parse, fail_kind_for_error("something odd"));
+    }
+
+    /// **MA6a 超时收紧锁**：spec §1 要求所有源独立超时建议 15s，XHR/EPO 早已达标，
+    /// SerpAPI 是本包收口的最后一处。该常量同时喂给检索客户端（`client()`）与
+    /// 精确直查客户端（`lookup_exact`），两处共用一份，锁常量即锁两处。
+    #[test]
+    fn upstream_timeout_is_tightened_to_spec_1() {
+        assert_eq!(
+            15, UPSTREAM_TIMEOUT_SECS,
+            "SerpAPI 超时必须保持 spec §1 的 15s（旧值 30s 属 MA6a 前的遗留，禁止回退）"
+        );
     }
 }

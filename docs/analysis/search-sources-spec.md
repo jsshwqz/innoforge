@@ -35,7 +35,7 @@ pub struct SearchOutcome {
 }
 ```
 
-**FailKind 分类（决定是否切下一源）**：Network(超时/DNS) → 切换；Quota(402/429/配额文案) → 标记冷却并切换；Auth(key 无效) → 冷却该源并切换；Parse(结构变化) → 记 bug 不切换直接报错。所有源调用必须带独立超时（建议 15s）+ 单次重试（指数退避，429 尊重 Retry-After）。
+**FailKind 分类（决定是否切下一源）**：Network(超时/DNS) → 切换；Quota(402/429/配额文案) → 标记冷却并切换；Auth(key 无效) → 冷却该源并切换；Parse(结构变化) → 记 bug 不切换直接报错。所有源调用必须带独立超时（建议 15s）+ 单次重试（指数退避，429 尊重 Retry-After）。**✅ MA6a 已落地**：三源超时统一 15s（SerpAPI 由旧 30s 收紧，`providers/serpapi.rs::UPSTREAM_TIMEOUT_SECS` 常量锁用例防回退；XHR/EPO 自 MA2 起即 15s）；Retry-After 在 XHR/EPO 源内单次重试中优先采用；Quota/Auth 的源级冷却消费点见 `src/search/breaker.rs`（`FailKind::cools_down()` 自 MA1 写定后首个生产消费点，接入 `routes/search.rs::api_search_online` 链前过滤 + 链后回写）。
 
 ## 2. 源一：Google Patents 直抓（免费，无 Key）——推荐作为第一备用
 
@@ -78,8 +78,8 @@ pub struct SearchOutcome {
 合并去重键：publication_number 规范化（去空格/统一大小写）
 ```
 
-- 不做严格串行瀑布（太慢）；并行+先到先得，AttemptReport 全量记录进诊断面板 ✅ MA5b（`/api/search/online` 出参 `attempts` 键 + search 页诊断折叠面板；下方「每源独立熔断」仍归 MA6）
-- 每源独立熔断：连续 3 次 FailKind∈{Quota,Auth} 后冷却 10 分钟不再尝试
+- 不做严格串行瀑布（太慢）；并行+先到先得，AttemptReport 全量记录进诊断面板 ✅ MA5b（`/api/search/online` 出参 `attempts` 键 + search 页诊断折叠面板；下方「每源独立熔断」✅ MA6a）
+- 每源独立熔断 ~~：连续 3 次 FailKind∈{Quota,Auth} 后冷却 10 分钟不再尝试~~ ✅ **MA6a 已落地，实现口径修正**：单次 `cools_down()`（Quota/Auth）失败即冷却该源，时长按 `SourceKind × FailKind` 常量表（SerpAPI/EPO Quota 300s、Auth 900s；XHR Quota 120s，见 `src/search/breaker.rs`）。**放弃「连续 3 次」阈值的实证理由**：本仓实测同 IP 连打 3 发（<8s 间隔）即触发 Google 503 封禁——第 2、3 次「确认性」计数恰好落在恶性循环最疼的位置，且上游已返回 Quota/Auth 时限流即成立，多打两发省不下任何封禁时长。冷却为进程内状态（重启清零）、键为源级（换查询词不解锁），设计依据见 `breaker.rs` 模块头。
 
 ## 7. 本地库兜底与索引同步（MA4）
 

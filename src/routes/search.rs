@@ -5,6 +5,7 @@ use crate::patent::*;
 // 本文件只保留「端点」职责：请求解析、响应形状、超时预算与本地兜底。
 // MA2a：多源降级由 `crate::search::chain::SourceChain` 承担，本文件只负责登记源的优先级顺序。
 // MA2b：链尾追加 EPO OPS 英文域补源（规格书 §4），同样「未配 Key 即不登记」。
+use crate::search::breaker::{self, CooldownTable};
 use crate::search::chain::SourceChain;
 use crate::search::merge::{dedup_patent_summaries, sort_by_relevance};
 use crate::search::model::{
@@ -24,7 +25,7 @@ use axum::{
 };
 use serde_json::json;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 const ONLINE_TOTAL_BUDGET_SECS: u64 = 60;
 
@@ -199,6 +200,96 @@ fn online_chain_providers(
         None => println!("[ONLINE] No EPO_KEY/EPO_SECRET configured, skipping epo_ops"),
     }
     providers
+}
+
+/// MA6a 的冷却记账注入形状：`Skipped` 的原因放 **`error`**、`hint` 恒为 `None`。
+/// 取证依据（不是猜的）：
+/// - `templates/search.html::renderSearchDiagnostics`（:626-634）对**每条** attempt
+///   都显示 `a.error`（"错误: …"）与 `a.hint`（"提示: …"），不分状态——既有 `Skipped`
+///   一直用 `error` 说明「为什么没跑」（本文件 `serpapi_skipped_outcome` 的
+///   「未配置 SERPAPI_KEY…」、EPO provider 的缺凭证 Skipped，且
+///   `chain::case6` 明确断言「Skipped 也要说明为什么没跑」读的就是 error）。
+/// - `hint` 更不能用：`SearchOutcome::hint()` 取「首个非空 hint」并写进出参顶层
+///   `hint` 键——冷却文案混进去会**改变响应形状与既有提示语义**。
+/// - 本包禁止改 templates/static，故沿用「Skipped → error 带原因」的现役约定零风险。
+fn cooldown_skipped_report(source: SourceKind, remaining: Duration) -> AttemptReport {
+    // 向上取整：剩余 0.5s 显示 0s 会让面板出现「冷却中，剩余 0 秒」的自相矛盾。
+    let secs = remaining.as_secs() + u64::from(remaining.subsec_nanos() > 0);
+    AttemptReport {
+        source,
+        status: AttemptStatus::Skipped,
+        latency_ms: 0,
+        hits: 0,
+        error: Some(format!(
+            "{} 上游熔断冷却中，剩余 {}s（本次不再发起请求）",
+            source.as_str(),
+            secs
+        )),
+        hint: None,
+    }
+}
+
+/// MA6a：链前过滤的出参形状（clippy type_complexity 要求收拢命名）。
+/// `(未冷却可进链的源, 被冷却摘出的 (源, 剩余时长)——按原登记序)`。
+type CooldownFilterResult = (Vec<Arc<dyn SearchProvider>>, Vec<(SourceKind, Duration)>);
+
+/// MA6a：链前按冷却表过滤源。**纯函数**（表与时钟显式传入），配合
+/// [`weave_cooled_attempts`] 可在路由层离线锁定「冷却源不出链、但 attempts 留痕」。
+///
+/// 被过滤的源不构造请求、不进 [`SourceChain`]；返回的 `(源, 剩余时长)` 保持
+/// 原登记顺序，供后续织回 `Skipped` 记账。
+fn filter_cooled_providers(
+    providers: Vec<Arc<dyn SearchProvider>>,
+    table: &CooldownTable,
+    now: Instant,
+) -> CooldownFilterResult {
+    let mut active = Vec::with_capacity(providers.len());
+    let mut cooled = Vec::new();
+    for provider in providers {
+        match table.remaining(provider.kind(), now) {
+            Some(remaining) => cooled.push((provider.kind(), remaining)),
+            None => active.push(provider),
+        }
+    }
+    (active, cooled)
+}
+
+/// MA6a：把冷却源的 `Skipped` 记账按**原登记顺序**织回链上 attempts。
+///
+/// 链只跑了未冷却的源，其 attempts 天然保持登记序的相对顺序；本函数按 `order`
+/// （装配时的完整登记序）逐位恢复：冷却位织入 [`cooldown_skipped_report`]，
+/// 非冷却位从链上该源的尝试原样搬回（同源多条时保持组内顺序）。
+/// 动机：被冷却的源**不能从面板消失**——用户会误读成「没配 Key」。
+fn weave_cooled_attempts(
+    order: &[SourceKind],
+    cooled: &[(SourceKind, Duration)],
+    chain_attempts: Vec<AttemptReport>,
+) -> Vec<AttemptReport> {
+    if cooled.is_empty() {
+        return chain_attempts;
+    }
+    // 按源分组（保持组内顺序；现行 provider 每路恒 1 条，分组是为防御未来多页源）
+    let mut grouped: Vec<(SourceKind, std::collections::VecDeque<AttemptReport>)> = Vec::new();
+    for a in chain_attempts {
+        match grouped.iter_mut().find(|(s, _)| *s == a.source) {
+            Some(slot) => slot.1.push_back(a),
+            None => grouped.push((a.source, std::collections::VecDeque::from([a]))),
+        }
+    }
+    let mut out = Vec::with_capacity(order.len());
+    for kind in order {
+        if let Some((_, remaining)) = cooled.iter().find(|(s, _)| s == kind) {
+            out.push(cooldown_skipped_report(*kind, *remaining));
+        }
+        if let Some(slot) = grouped.iter_mut().find(|(s, _)| s == kind) {
+            out.extend(slot.1.drain(..));
+        }
+    }
+    // 防御：attempts 里出现了登记表之外的源（理论上不可达）也必须留痕，不得静默吞掉
+    for (_, rest) in grouped.iter_mut().filter(|(s, _)| !order.contains(s)) {
+        out.extend(rest.drain(..));
+    }
+    out
 }
 
 pub async fn api_search(
@@ -458,8 +549,9 @@ pub async fn api_search_online(
     }
 
     // ── MA2a/MA2b 执行链（spec §6）：SerpAPI 为主、Google Patents XHR 直抓为免费降级、
-    // EPO OPS 为英文域补源（spec §4）。三源并行发起、各带独立超时（SerpAPI 沿用旧 30s，
-    // XHR 与 EPO 15s），按登记顺序择胜；装配规则见 [`online_chain_providers`]。
+    // EPO OPS 为英文域补源（spec §4）。三源并行发起、各带独立超时（MA6a 起三源统一
+    // 15s：SerpAPI 由旧 30s 收紧，见 providers/serpapi.rs 常量注释），按登记顺序择胜；
+    // 装配规则见 [`online_chain_providers`]。
     // 没配 Key 时不把 SerpAPI 登记进链路，而是把它的 `Skipped` 记账**前置**到 attempts，
     // 这样旧的 hint 文案与「首个非空生效」语义逐字不变，控制流也不必分叉成两条。
     let epo_credentials = s
@@ -469,7 +561,24 @@ pub async fn api_search_online(
         .epo_credentials();
     let providers = online_chain_providers(&s.db, api_key_opt.clone(), epo_credentials);
 
+    // ── MA6a 源级熔断冷却（`FailKind::cools_down()` 的生产消费点，见 search/breaker.rs）：
+    // 1) 链前过滤——冷却中的源不进链（一发请求都不发），但稍后按原登记序织回 `Skipped`
+    //    记账，面板不得因此「少一行」让用户误读成没配 Key；
+    // 2) 链后回写——只依据本次链上**真实** attempts（此刻尚未织入任何合成记账），
+    //    Failed(Quota|Auth) → 登记冷却，Success → 清零，Skipped → 不动（不构成信号）；
+    // 3) 全部源都在冷却 → providers 为空 → 现有本地兜底路径接管，出参形状零改动。
+    let chain_kinds: Vec<SourceKind> = providers.iter().map(|p| p.kind()).collect();
+    let (providers, cooled) = {
+        let table = breaker::global_table()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        filter_cooled_providers(providers, &table, Instant::now())
+    };
+
     let mut outcome = SourceChain::new(providers).run(search_query).await;
+    breaker::note_attempts(&outcome.attempts);
+    outcome.attempts = weave_cooled_attempts(&chain_kinds, &cooled, outcome.attempts);
+
     if api_key_opt.is_none() {
         let skipped = serpapi_skipped_outcome("未配置有效 SerpAPI Key，已自动尝试下游回退。");
         let mut attempts = skipped.attempts;
@@ -957,6 +1066,182 @@ mod tests {
         let bare = SourceChain::new(online_chain_providers(&db, None, None));
         assert_eq!(vec![SourceKind::GooglePatentsXhr], bare.kinds());
         assert!(!bare.is_empty());
+    }
+
+    // ── MA6a：源级熔断冷却的路由层接线（链前过滤 + Skipped 织回，假时钟零联网）──
+
+    /// 测试夹具：一条最简 attempt 报告（weave/过滤用例只关心 source+status 的走向）。
+    fn brk_report(source: SourceKind, status: AttemptStatus) -> AttemptReport {
+        AttemptReport {
+            source,
+            status,
+            latency_ms: 7,
+            hits: 0,
+            error: None,
+            hint: None,
+        }
+    }
+
+    /// **MA6a 用例③**：处于冷却的源被摘出链（`SourceChain` 拿不到它 → 结构上不可能出网），
+    /// 但其 `Skipped` 记账按**原登记序**织回 attempts 原位；其余源不受牵连、正常择胜。
+    /// 同时锁定「冷却原因放 error、hint 恒 None」——hint 会经 `SearchOutcome::hint()`
+    /// 泄漏到出参顶层 `hint` 键，改动响应形状（取证见 `cooldown_skipped_report` 注释）。
+    #[test]
+    fn cooled_source_leaves_chain_but_keeps_skipped_attempt_in_place() {
+        let db = Arc::new(Database::init(":memory:").expect("in-memory db"));
+        let now = Instant::now();
+        let mut table = CooldownTable::new();
+        table.record(SourceKind::SerpApi, FailKind::Quota, now);
+
+        let providers = online_chain_providers(
+            &db,
+            Some("serp-key".to_string()),
+            Some(("ck".to_string(), "cs".to_string())),
+        );
+        let order: Vec<SourceKind> = providers.iter().map(|p| p.kind()).collect();
+        assert_eq!(
+            vec![
+                SourceKind::SerpApi,
+                SourceKind::GooglePatentsXhr,
+                SourceKind::EpoOps
+            ],
+            order
+        );
+
+        let (active, cooled) = filter_cooled_providers(providers, &table, now);
+        assert_eq!(
+            vec![SourceKind::GooglePatentsXhr, SourceKind::EpoOps],
+            active.iter().map(|p| p.kind()).collect::<Vec<_>>(),
+            "冷却源必须摘到链外——链只跑手里的 providers，摘掉即零请求"
+        );
+        assert_eq!(
+            vec![(SourceKind::SerpApi, Duration::from_secs(300))],
+            cooled
+        );
+
+        // 链只跑了 XHR（成功）与 EPO（网络失败），attempts 本里没有 SerpAPI 的位置
+        let chain_attempts = vec![
+            brk_report(SourceKind::GooglePatentsXhr, AttemptStatus::Success),
+            brk_report(SourceKind::EpoOps, AttemptStatus::Failed(FailKind::Network)),
+        ];
+        let merged = weave_cooled_attempts(&order, &cooled, chain_attempts);
+
+        assert_eq!(
+            3,
+            merged.len(),
+            "冷却源不能从面板消失（伪装成没配 Key 是误读）"
+        );
+        assert_eq!(
+            SourceKind::SerpApi,
+            merged[0].source,
+            "织回位置 = 原登记序第一位"
+        );
+        assert_eq!(AttemptStatus::Skipped, merged[0].status);
+        assert_eq!(0, merged[0].latency_ms, "没发请求不得凭空记耗时");
+        assert_eq!(0, merged[0].hits);
+        let err = merged[0]
+            .error
+            .clone()
+            .expect("Skipped 必须说明原因（error 字段，口径同缺 Key Skipped）");
+        assert!(err.contains("serpapi"), "error 要点名源: {err}");
+        assert!(err.contains("冷却"), "要说清是熔断冷却: {err}");
+        assert!(err.contains("300s"), "剩余时长向上取整进文案: {err}");
+        assert_eq!(
+            None, merged[0].hint,
+            "hint 必须留空，否则会污染出参顶层 hint 键"
+        );
+        // 真跑过的那两路原样保留、顺序不变
+        assert_eq!(
+            vec![
+                (SourceKind::GooglePatentsXhr, AttemptStatus::Success),
+                (SourceKind::EpoOps, AttemptStatus::Failed(FailKind::Network)),
+            ],
+            merged[1..]
+                .iter()
+                .map(|a| (a.source, a.status))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// **MA6a 用例④**：全部源都在冷却 → 链为空 → 本地兜底接管，
+    /// 出参 `source:"local"` 等既有键与现状逐字一致，attempts 为「三源 Skipped + local_fts」。
+    #[test]
+    fn all_sources_cooled_yields_empty_chain_and_identical_local_shape() {
+        let db = Database::init(":memory:").expect("in-memory db");
+        // 兜底要有命中才走「source:local」出参档（零命中会落到 google_url 空结果末档，
+        // 那是另一条既有形状）——本用例锁的是「冷却不改变兜底形状」，故种一条可命中专利。
+        seed_patent(&db, "999", "固态电池");
+        let now = Instant::now();
+        let mut table = CooldownTable::new();
+        table.record(SourceKind::SerpApi, FailKind::Quota, now);
+        table.record(SourceKind::GooglePatentsXhr, FailKind::Quota, now);
+        table.record(SourceKind::EpoOps, FailKind::Auth, now);
+
+        let order = vec![
+            SourceKind::SerpApi,
+            SourceKind::GooglePatentsXhr,
+            SourceKind::EpoOps,
+        ];
+        let cooled: Vec<(SourceKind, Duration)> = order
+            .iter()
+            .filter_map(|k| table.remaining(*k, now).map(|d| (*k, d)))
+            .collect();
+        assert_eq!(3, cooled.len());
+
+        // 空链 = `SourceChain::new(vec![])` 的既有合法形状（chain.rs 文档已锁），零请求零 attempts
+        let mut outcome = SearchOutcome {
+            results: vec![],
+            attempts: weave_cooled_attempts(&order, &cooled, vec![]),
+            upstream_total: None,
+        };
+        assert_eq!(3, outcome.attempts.len());
+        for a in &outcome.attempts {
+            assert_eq!(AttemptStatus::Skipped, a.status);
+        }
+
+        let req = fallback_req("固态电池");
+        let out = local_fallback_json(
+            &db,
+            &req,
+            &Some(SearchType::Mixed),
+            outcome.hint(),
+            &mut outcome,
+        );
+
+        // 兜底出参既有键逐字不变（MA4a 口径）：source 仍为 "local"；顶层 hint 是
+        // 既有默认文案——冷却 Skipped 的 hint 恒 None，不得把它带进顶层键（现状即默认文案）
+        assert_eq!(json!("local"), out["source"]);
+        assert_eq!(json!(1), out["total"], "种入的可命中专利必须照常返回");
+        assert_eq!(1, out["patents"].as_array().expect("patents").len());
+        assert_eq!(
+            json!("国外在线源暂时未返回结果，已回退本地缓存。建议配置 SerpAPI 提升命中率。"),
+            out["hint"],
+            "冷却记账不得经 hint() 通道改写顶层提示"
+        );
+        // 本地兜底自身照常追加为末条（MA4a 记账逻辑与 MA6a 过滤互不干扰）
+        let attempts = out["attempts"].as_array().expect("attempts 键照旧存在");
+        assert_eq!(4, attempts.len());
+        assert_eq!(json!("local_fts"), attempts[3]["source"]);
+        assert_eq!(json!("Success"), attempts[3]["status"]);
+        assert_eq!(json!(1), attempts[3]["hits"]);
+        assert_eq!(json!("Skipped"), attempts[0]["status"]);
+    }
+
+    /// 无冷却时 weave 必须是纯直通（不复制重排也不改顺序）——保证 MA6a 对
+    /// 「一切正常」的热路径零行为差异。
+    #[test]
+    fn weave_is_passthrough_without_cooldowns() {
+        let order = vec![
+            SourceKind::SerpApi,
+            SourceKind::GooglePatentsXhr,
+            SourceKind::EpoOps,
+        ];
+        let chain_attempts = vec![
+            brk_report(SourceKind::SerpApi, AttemptStatus::Success),
+            brk_report(SourceKind::GooglePatentsXhr, AttemptStatus::Success),
+        ];
+        let merged = weave_cooled_attempts(&order, &[], chain_attempts.clone());
+        assert_eq!(chain_attempts, merged);
     }
 
     /// 未配置 Key 的路径必须与「源跑过但零命中」走同一条后续控制流：
