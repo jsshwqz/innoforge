@@ -794,3 +794,33 @@
 - **解法 / Fix**: ① 确认 `tasklist` 无残留 `rustc.exe`/`cargo.exe`（本次为 0，说明损坏已落盘而非仍在并发）；② 按本文件 2026-09-27 条目清 `target/debug/incremental` + `target/debug/deps/*.pdb`（D 盘 3.5GB→5.1GB）；③ **单进程**复跑 `cargo test` → exit 0，**687 = lib 318 + bin 320 + 集成 49** 与执行 agent 声明逐字对账闭合。整个处置只动可再生缓存，未改一行代码。
 - **预防 / Prevention**: ① 规划会话的独立门禁复跑，**必须在执行 agent 结束后进行**（判定信号：`git status --porcelain` 为空 + `tasklist` 无 cargo/rustc + 无 `innoforge-server.exe`）；树仍被 agent 持有时改用 `git worktree add D:/Temp/<name> <tip>` + `CARGO_TARGET_DIR=D:/Temp/<name>-target` 隔离，绝不在同一 target dir 上抢锁。② 见到 `0xc0000409` 先问「刚才有没有第二个 cargo 在跑」，再决定是环境问题还是代码问题——直接归因代码会让 agent 去"修"一个不存在的 bug。③ 门禁结论以**同一次单进程复跑**的输出为准，跨进程拼接的日志不作为验收证据。
 - **提交 / Commit**: 本条（MA4b 合并后文档回写附带）
+
+### [2026-09-28] `gh pr merge` 403「Resource not accessible by personal access token」：用本地 no-ff 合并替代
+
+- **严重程度 / Severity**: MEDIUM（交付通道：合并动作整批不可用会卡住所有 PR）
+- **涉及文件 / Files**: 无代码改动；`gh` CLI（fine-grained PAT）、GitHub PR #25
+- **现象 / Symptom**: MA6b 审计通过后代执行合并，`gh pr merge 25 --merge` 与 REST `gh api -X PUT repos/.../pulls/25/merge` **都返回 403** `Resource not accessible by personal access token`（GraphQL 侧为 `mergePullRequest` 字段无权限）。此前 PR #23/#24 同一条命令可用，故易被误判为「瞬时故障」或「仓库权限被改」。
+- **根因 / Root cause**: 当前 `GITHUB_TOKEN` 是 fine-grained PAT，其权限集不含 merge pull request（`gh auth status` 只显示 token 掩码，不显示 scope，权限缺失只能从 403 文案判定）。这与本仓已记录的「`gh pr merge` graphql EOF（瞬时错误，重试即可）」是**两种不同失败**：EOF 重试有效，403 重试必然无效。
+- **解法 / Fix**: 本地等价合并——`git fetch origin <head>` → `git merge --no-ff FETCH_HEAD -m "Merge pull request #25 from ..."` → `git push origin main` + `git push origin main:dev` + gitee 两推。GitHub 依据 main 已包含 PR head 提交，**自动把 PR 标为 MERGED**（实测 `mergedAt` 落值），无需 token 权限，merge commit 与 PR 编号照常保留在历史里。
+- **预防 / Prevention**: ① 见到 403 文案含 `Resource not accessible` **立刻改走本地合并**，不要重复 `gh pr merge`（与 EOF 区分开：EOF 才值得重试）；② 本地合并必须带 `--no-ff` 与 `Merge pull request #N from <branch>` 抬头，保持与 GitHub 原生 merge commit 同形，便于日后审计溯源；③ 合并后仍要 `gh pr view N --json state,mergedAt` 复核 PR 状态，不能只看 push 成功。
+- **提交 / Commit**: 本条（MA6b 合并后文档回写附带）
+
+### [2026-09-28] AGENTS.md Step 5 的 `node node_modules/.bin/eslint` 在 Windows/Git-Bash 下必崩
+
+- **严重程度 / Severity**: LOW（门禁可信度：ESLint 步骤被误当成「检查跑过」）
+- **涉及文件 / Files**: `node_modules/.bin/eslint`（sh shim）、`node_modules/eslint/bin/eslint.js`、AGENTS.md §Step 5 / §2.5
+- **现象 / Symptom**: MA6b（第十九棒）执行 `node node_modules/.bin/eslint static/i18n.js` 直接崩溃（Node 把 shell shim 当 JS 解析），并非 lint 报错。
+- **根因 / Root cause**: npm 在 Windows 下同时生成 `.bin/eslint`（cmd `.cmd`）与 sh shim；Git-Bash 里 `node` 拿到的是 **shell 脚本**而非 JS 入口，于是 SyntaxError。这与 2026-09-20 那条「ESLint 10 不读 .eslintrc.json」是配置层的另一回事，本条纯是启动路径问题。
+- **解法 / Fix**: 用真实入口等价执行——`node node_modules/eslint/bin/eslint.js <file>`，本次得 0 error / 5 条既有 warning。CI 侧继续用 `npx eslint`（Linux runner 无此问题）。
+- **预防 / Prevention**: ① Windows/Git-Bash 下**不要用 `node node_modules/.bin/<bin>` 启动任何 npm 可执行**，改 `<bin>.js` 真实入口或直接 `npx`；② brief 里写给执行 agent 的门禁命令若含该形态，执行棒应按本条替换并在 PR body 留痕，而不是把「命令崩」报成「门禁红」。
+- **提交 / Commit**: 本条（MA6b 合并后文档回写附带）
+
+### [2026-09-28] e2e 残留 server 占 3000 端口，导致随后 `cargo test` 单发用例竞争失败
+
+- **严重程度 / Severity**: LOW（假红：容易被误读成刚提交的代码有并发缺陷）
+- **涉及文件 / Files**: `e2e_test.mjs`（自建 server 起停）、`target/debug/innoforge-server.exe`
+- **现象 / Symptom**: MA6b 门禁顺序跑完后，`cargo test` 出现**一次**单发失败；杀掉残留 `innoforge-server.exe` 后连复跑 6 轮 **715/715** 不复现。
+- **根因 / Root cause**: `e2e_test.mjs` 自行拉起本地 server 占 `127.0.0.1:3000`，脚本退出后进程未被回收；随后的测试轮里有绑定/读写同一端口与实例路径的用例与之相撞。
+- **解法 / Fix**: 手动 `taskkill` 残留 server 进程后复跑全绿。执行棒已在 PR body 如实留痕「未捕获名、杀进程后 6 轮不复现」。
+- **预防 / Prevention**: ① 门禁顺序建议 **`cargo test` 在 e2e 之前**，或 e2e 之后固定 `tasklist | grep innoforge-server` 检查回收；② 见到「单发失败 + 复跑消失」先查残留进程与端口占用，再怀疑代码；③ 若要在 e2e 脚本里根治，需给 server 起停加 `finally` 回收与端口断言——属独立小包，不在 MA6b 范围。
+- **提交 / Commit**: 本条（MA6b 合并后文档回写附带）
