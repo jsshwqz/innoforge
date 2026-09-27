@@ -837,3 +837,13 @@
 - **解法 / Fix**: 门禁输出**全量落盘再统计**：`cargo test > /d/Temp/ma6c-test2.log 2>&1; echo EXIT=$?`，之后 `grep -E "^test result"` 求和 —— 本次得 `335 + 337 + 3 + 3 + 6 + 37 = 721` 且 `EXIT=0`，与对账公式（基线 715 + 净新增 3×2）闭合，才写进 PR body。
 - **预防 / Prevention**: ① **任何要报总数的门禁命令禁止接 `head` 或小值 `-A` 截断**；② 汇报「N passed」时必须能贴出该数字来源的完整 `test result` 行集合；③ 时限预算：clippy 之后的 `cargo test` 按「可能 10 分钟以上」安排（后台跑 + 等完成通知），或把顺序调成 fmt → test → clippy 让 test 先复用已链接产物；④ 纯注释/文档改动也走完整三道门禁，但要把「重链时间」算进预算，不要因为一次超时就改用截断命令求快。
 - **提交 / Commit**: MA6c 分支 `exec/ma6-dedup-ruling`（PR #26）文档追加
+
+### [2026-09-28] Git-Bash 下 curl 传中文参数被本地编码打成 400；Google XHR 响应结果数组在 `results.cluster[0].result`
+
+- **严重程度 / Severity**: LOW（取证工具链，不影响产品代码）
+- **涉及文件 / Files**: 无（临时取证脚本 / `docs/analysis/search-sources-spec.md` §8 取证口径）
+- **现象 / Symptom**: MA6d 全链路取证时用 `curl -d '{"query":"固态电池","assignee":"西南交通大学"}'` 打 `/api/search/online`，服务端返回 400（JSON 解析失败）；同一份 body 用文件方式发送即 200。另：想从抓回的 XHR 原始 JSON 里取命中行时，按 `results.patents` / `results.results` 取均为空。
+- **根因 / Root cause**: ① Git-Bash 的命令行参数按本地码页（GBK/CP936）传给 curl，UTF-8 中文在 shell 层已被改写，`--data` 收到的不是合法 UTF-8 JSON，axum + serde 直接拒；② Google Patents XHR 的真实结构是 `results.cluster[].result[]`（分簇返回），没有 `results.patents` 这个键——解析代码在 `google_patents_xhr.rs` 里读的就是 cluster 路径。
+- **解法 / Fix**: 中文请求体**一律先落 UTF-8 文件再发**：`curl --data-binary @req.json -H 'Content-Type: application/json' …`（`--data-binary` 而非 `--data`，避免 curl 吞换行/做编码转换）；解析上游响应按 `results.cluster[0].result` 取行，`results.total_num_results` 取总数（MA6d 的 `form_c.json` 复核即按此路径：10 行、`total=58`）。
+- **预防 / Prevention**: ① 凡涉及非 ASCII 请求体的冒烟/取证，禁止在命令行内联，统一 `--data-binary @utf8文件`；② 写取证脚本前先 `node -e` 打印响应顶层键结构，不要凭直觉猜数组名；③ 取证产物（请求文件、响应 JSON、结论文本）留在仓库外 `D:\Temp\*-probe\`，仓内只提交结论。
+- **提交 / Commit**: MA6d 分支 `exec/ma6d-evidence`（PR #27）由规划会话代记（该棒白名单不含 `docs/errors.md`，未越界写入）

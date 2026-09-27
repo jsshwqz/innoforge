@@ -8,6 +8,15 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-09-28 — **M-A 里程碑收口**：MA6d 取证包完成 + PR #27 合并（形态 (c) 入档 / 在线命中全链路真闭合 / CHANGELOG 补账 7 条）
+
+- **状态 / Status**: ✅ 已完成 / Completed —— **M-A（检索员上岗）MA1→MA6 全部子项交付，仅「错误信息再润色」作为体验打磨开放项登记**
+- **范围 / Scope**: 第二十一棒单包直出（35 分钟 / 66 次工具调用，三个任务各自里程碑 commit `d4a0b6c`→`f5268ad`→`f9bcfe5`，纯文档 + 注释改动，**零逻辑代码**）。**① 形态 (c) 取证入档**：规格书 §8 第 2 项由「未取证」改为「已取证（上游真过滤）」并附 caveat（`total=58` 与裸值形态 (b) 同值 ⇒ 引号只改语法形态不改命中集），`google_patents_xhr.rs` 模块头同步为「三类形态」，`task-breakdown.md` MA4 行同批改写；**英文机构名形态如实保留未取证**。**② 「在线命中→本实例入库→断网复检」全链路闭合**（M-A 最后一块缺口）：临时全新空库实例（`D:\Temp\ma6d-hit-probe`，`INNOFORGE_PORT=3917`、`INNOFORGE_NO_OPEN=1`、CWD 相对 `db_path` 自然新建库）真实出网 `/api/search/online` `{"query":"固态电池","assignee":"西南交通大学"}` → `google_patents_xhr Success`（`total=58`、`latency_ms=1818`），同页 10 行整页入库，随后**只走本地端点** `/api/search` 复检 `total=10` 一致、`exact_assignee=true` 10/10 申请人全等、专利号 `CN113224379A` 直查命中；断网取证口径为**通道级**（复检零出网 + 实例无任何在线凭据），未注入 OS 级网络故障，此诚实边界已写入规格书与本表。**③ CHANGELOG `[Unreleased]` 一次性补账 M-A 用户可见变更 7 条**（新增 3：MA5b 诊断面板 / MA3 语言过滤 / MA6b 冷却徽标+配额预警；改进 4：MA4a 本地库进链 / MA4b 申请人精确匹配 / MA6a 熔断冷却+15s 超时 / MA6c 直查不白烧配额+去重销账），中英双语、逐条附 PR 号。
+- **验证 / Verification（规划会话独立复核，关键在「入库到底是谁做的」）**：执行棒声明「在线命中档真闭合，非注入替代路径」——这是本包最需要外部证据的一句话，因为 MA4b 那次的 10 行是靠 `/api/patents/import` 手动喂进去的。我在 `relevance.rs:241-246` 独立查证：`rank_and_gate_hits` 对**每一行上游命中先 `db.insert_patent` 缓存入库**，`is_online_result_relevant` 的 `continue`（`:273-283`）在其**之后**，故「响应显示档 hits=1、库内真实 10 行」是产品既有单一写入口的行为，不需要任何人工导入 ⇒ 声明成立。另核：`form_c.json` 原始件我自己重解析（`results.cluster[0].result` 路径、`total_num_results=58`、10/10 assignee 去 `<b>` 后严格全等、公开号与临时库复检出的 10 个号同源）；用户库 `innoforge.db` mtime 停在 2026-08-20，未被触碰；红线 13 个文件/目录（含 `src/routes/search.rs`/`chain.rs`/`breaker.rs`）逐文件 diff=0，provider 文件 diff 全部为 `//!` 注释行；CHANGELOG 里 7 个 PR 号与 `git log --grep="Merge pull request"` 的 #20/#21/#22/#23/#24/#25/#26 逐一映射正确。门禁：CI lint/test/e2e 三绿（run `36357519177`）；tip `f9bcfe5` 独立复跑 fmt exit 0 / `clippy --all-targets -- -D warnings` exit 0 / `cargo test` exit 0，全量日志 `D:\Temp\ma6d-audit-test.log` 逐二进制清点 **721 = lib 335 + bin 337 + 集成 49**，与 MA6c 基线**逐字相等**（零新用例，符合纯文档包的预期）。
+- **brief 前提被执行棒纠正 1 处（有效行为）**：我写的 `docs/plans/task-breakdown.md` 不存在，实际路径 `docs/plan/task-breakdown.md`（`plans/` 目录放 STATUS，`plan/` 目录放任务表），已按现实施工。
+- **仍开放 / Remaining**：① 英文机构名 assignee 形态仍受上游反爬阻断未取证；② SerpAPI/EPO 真实凭证冒烟与配额预警真实触发仍受本机无 Key 阻断（需用户配置凭证）；③ OS 级断网注入未做（以通道级证据替代并如实入文）；④ MA6「错误信息再润色」。**M-A 至此收口，下一包 = M-B 施工规格书（任务 #11）**。
+- **同步 / Sync**: origin/main、origin/dev、gitee/main、gitee/dev、本地 main 五端对齐 `a6130bb`（PR #27 GitHub 原生 merge，`env -u GITHUB_TOKEN gh pr merge` 连续第二包有效）。
+
 ### 2026-09-28 — MA6c 跨源去重裁决销账 + 专利号直查纳入熔断冷却 + PR #26 合并（M-A 只剩取证包）
 
 - **状态 / Status**: ✅ 已完成（本包两项）/ Completed
