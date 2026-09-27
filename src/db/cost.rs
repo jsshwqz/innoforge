@@ -105,6 +105,46 @@ impl Database {
         Ok(())
     }
 
+    /// 记录一次 AI 调用的成本：在 AI 调用成功后立即调用一次。
+    ///
+    /// usage 由 [`crate::ai::AiClient::take_last_usage`] 暂存，读取后即清空。
+    /// 正确性前提（当前代码库均满足）：
+    /// 1. 调用点必须紧跟自己那一次 AI 调用、在下一次调用同一 client 之前落账，
+    ///    否则前一次的 usage 会被覆盖丢账；
+    /// 2. AiClient 实例须为单任务独占（routes 每次请求经 `ai_client()` 新建、
+    ///    pipeline 每次运行经 `Orchestrator::new` 新建，均满足）；若未来改为
+    ///    跨并发任务共享同一实例，last_usage 槽会互相错配，须改为随响应返回。
+    /// 3. 流式（SSE）调用路径不解析 usage，无法经此方法落账（已知限制）。
+    ///
+    /// 服务商未返回用量（或调用失败）时静默跳过，不影响主流程。
+    ///
+    /// Record one AI call's cost right after a successful call. Usage is taken
+    /// from the client's last-call slot and cleared on read. Correctness assumes
+    /// each site logs before the next call on the same client, the client is
+    /// task-owned (true today: fresh instance per request / per pipeline run),
+    /// and note streaming (SSE) paths never populate usage. Missing usage is
+    /// silently skipped.
+    pub fn log_ai_call(
+        &self,
+        ai: &crate::ai::AiClient,
+        call_type: &str,
+        idea_id: Option<&str>,
+        session_id: Option<&str>,
+    ) -> Result<(), rusqlite::Error> {
+        let Some(usage) = ai.take_last_usage() else {
+            return Ok(());
+        };
+        self.save_cost_record_from_client(
+            usage.input_tokens,
+            usage.output_tokens,
+            ai.model_name(),
+            ai.provider_name(),
+            call_type,
+            idea_id,
+            session_id,
+        )
+    }
+
     /// 按时间范围统计成本。
     /// Cost summary grouped by model.
     pub fn get_cost_stats(&self, days: i64) -> Result<serde_json::Value, rusqlite::Error> {
@@ -218,5 +258,67 @@ impl Database {
             records.push(row?);
         }
         Ok(records)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Database;
+    use crate::ai::AiClient;
+
+    fn test_client() -> AiClient {
+        AiClient::with_config("https://api.example.com/v1", "test-key", "example-model")
+    }
+
+    #[test]
+    fn take_last_usage_clears_slot_after_read() {
+        let ai = test_client();
+        assert!(ai.take_last_usage().is_none(), "fresh client has no usage");
+        ai.set_last_usage_for_tests(100, 50);
+        let usage = ai.take_last_usage().expect("usage should be present");
+        assert_eq!(usage.input_tokens, 100);
+        assert_eq!(usage.output_tokens, 50);
+        assert!(
+            ai.take_last_usage().is_none(),
+            "take must clear the slot so one call is only accounted once"
+        );
+    }
+
+    #[test]
+    fn log_ai_call_skips_silently_when_usage_missing() {
+        let db = Database::init(":memory:").expect("in-memory db");
+        let ai = test_client();
+        db.log_ai_call(&ai, "ai-chat", None, None)
+            .expect("missing usage must be a silent no-op");
+        let records = db.get_recent_cost_records(10).expect("query records");
+        assert!(
+            records.is_empty(),
+            "no ledger row may be written without usage"
+        );
+    }
+
+    #[test]
+    fn log_ai_call_writes_one_row_with_real_provider_and_clears_slot() {
+        let db = Database::init(":memory:").expect("in-memory db");
+        let ai = test_client();
+        ai.set_last_usage_for_tests(1234, 567);
+        db.log_ai_call(&ai, "idea-chat", Some("idea-1"), None)
+            .expect("ledger write");
+        // 读后即清：第二次落账必须无记录（锁定「每调用点各记各的」语义）
+        db.log_ai_call(&ai, "idea-chat", Some("idea-1"), None)
+            .expect("second call is a no-op");
+
+        let records = db.get_recent_cost_records(10).expect("query records");
+        assert_eq!(records.len(), 1, "exactly one ledger row expected");
+        let r = &records[0];
+        assert_eq!(r.step, "idea-chat");
+        assert_eq!(r.model, "example-model");
+        // 回归锁定：provider 必须是真实服务商名，不得被调用类型误填
+        // （历史错账：idea-chat 曾把 "idea-chat" 写进 provider 列）
+        assert_eq!(r.provider, "primary");
+        assert_ne!(r.provider, r.step);
+        assert_eq!(r.input_tokens, 1234);
+        assert_eq!(r.output_tokens, 567);
+        assert_eq!(r.idea_id.as_deref(), Some("idea-1"));
     }
 }
