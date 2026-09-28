@@ -8,6 +8,14 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-09-28 — **M-B 施工规格书下发**（`docs/plan/2026-09-28-mb-construction-spec.md`），两条产品决策由用户拍板
+
+- **状态 / Status**: 🚧 开工条件就绪 / Ready to dispatch（第一棒 = MB0）
+- **用户已拍板（写入规格书 §0，M-B 全程适用）**：① **嵌入路线走 gap 4.6 的 B 案「保留本地 TF-IDF、先修对，不上嵌入模型」**——gap 4.6 的 A/B 二选一在 M-A 收口后落定，M-B 期间**禁止新 crate 依赖**（`AiClient::embed()` / ONNX / candle / 外部 embedding API 一律不派包），语义能力的对外口径降级为「本地相似度补充」，其「向量丢 term 映射 ⇒ 相似度不构成语义能力」这一局限**写明不修**，禁止伪造分数。⚠️ **对 B 案原文的有意偏离**：B 案的「补 IDF / 语料统计」本轮不做（在 `patents_embedding` 生产恒 0 行、全文供给未落地时补 IDF 等于给空表调权重，收益不可验证），理由已登记在 gap 计划 §4.6，用户如要求 B 案全量落地须另派 MB0b；② **只测免费链、SerpAPI/EPO 留占位**——每个 M-B 包的 DoD 必须在无 `SERPAPI_KEY`、无 `EPO_KEY/EPO_SECRET` 的环境下闭环。4.1 RAG 接线、4.2 语义断链收口、4.5 嵌入降级提示三项解冻为规格书的 MB3 / MB0 / MB0+MB3 三包。
+- **规格书的现状取证要点（规划会话亲自复核过，非转抄）**：全文供给是 M-B 的真地基而非 RAG 本身——M-A 在线命中入库的专利 `description/claims` **恒为空**（`google_patents_xhr.rs:498-500`、`epo_ops.rs:1021-1022` 硬编码空串），免费侧唯一全文来源是 `routes/patent.rs:221` 的 `enrich-free` 直抓 Google Patents HTML，而它**不查 MA6a 冷却表**（同 Host 反爬旁路，故 MB2 必须先于 MB3）。另核三处硬缺陷：TF-IDF **三份拷贝全部按字节索引切 UTF-8**（`vector/mod.rs:32`、`rag/chunker.rs:62`、`routes/search.rs:859`）⇒ 中文一喂即 panic；`compute_and_save_embedding` **零调用方** ⇒ `patents_embedding` 生产恒 0 行、`/api/search/vector` 的向量档被 `count_embeddings()>0` 门控永久关闭；`src/rag/` 的 `save_patent_chunks` **零调用点** ⇒ RAG 彻底未接线，深度分析只喂摘要且两处 `chars().take(150/120)` 不走 `truncate_for_ai`（违 AGENTS.md §2.5）。
+- **包序（同仓禁止并行开两棒：共享 `target/` 会损坏 `incremental/`，D 盘余量长期 4-7GB）**：MB0（embedder 归一 + 边界安全 + 写入链接通，**禁止全表回填**）→ MB2（免费全文 + 冷却表共用，单次上限 N 篇默认 5、只发结构化诊断键）→ MB3（RAG 接线，验收 ≥5 篇全文切片引用）→ MB4（出处标注 + 决策建议段）；MB1（幻觉防线扩面，`check_oa_analysis` 现只在 OA 流式一处 `routes/ai.rs:1433`、pipeline 零调用）可任一空档插入；MB5（上下文治理）收口。
+- **同步 / Sync**: 本条与规格书同 commit 落 main，五端对齐。
+
 ### 2026-09-28 — **M-A 里程碑收口**：MA6d 取证包完成 + PR #27 合并（形态 (c) 入档 / 在线命中全链路真闭合 / CHANGELOG 补账 7 条）
 
 - **状态 / Status**: ✅ 已完成 / Completed —— **M-A（检索员上岗）MA1→MA6 全部子项交付，仅「错误信息再润色」作为体验打磨开放项登记**
