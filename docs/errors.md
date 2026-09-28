@@ -794,6 +794,7 @@
 - **根因 / Root cause**: 两台 cargo 进程共享同一 `D:\test\patent-hub-backup\target` 时，`incremental/` 缓存目录会被并发写坏（file lock 只保护单个 invocation 内的调度，不保护跨进程复用同一 target dir）；`0xc0000409` 与「日志被截断/丢输出」都是同一并发写损坏的症状，而不是 MA4b 代码的问题——该 run 的远端 CI 与 agent 自家复跑都是绿的。
 - **解法 / Fix**: ① 确认 `tasklist` 无残留 `rustc.exe`/`cargo.exe`（本次为 0，说明损坏已落盘而非仍在并发）；② 按本文件 2026-09-27 条目清 `target/debug/incremental` + `target/debug/deps/*.pdb`（D 盘 3.5GB→5.1GB）；③ **单进程**复跑 `cargo test` → exit 0，**687 = lib 318 + bin 320 + 集成 49** 与执行 agent 声明逐字对账闭合。整个处置只动可再生缓存，未改一行代码。
 - **预防 / Prevention**: ① 规划会话的独立门禁复跑，**必须在执行 agent 结束后进行**（判定信号：`git status --porcelain` 为空 + `tasklist` 无 cargo/rustc + 无 `innoforge-server.exe`）；树仍被 agent 持有时改用 `git worktree add D:/Temp/<name> <tip>` + `CARGO_TARGET_DIR=D:/Temp/<name>-target` 隔离，绝不在同一 target dir 上抢锁。② 见到 `0xc0000409` 先问「刚才有没有第二个 cargo 在跑」，再决定是环境问题还是代码问题——直接归因代码会让 agent 去"修"一个不存在的 bug。③ 门禁结论以**同一次单进程复跑**的输出为准，跨进程拼接的日志不作为验收证据。
+- **补充实测（2026-09-28 MB0 会话，单进程也会间歇崩）**: 本轮**无任何第二个 cargo 进程**（`tasklist` 核实），rustc 仍在编译 lib / 链接阶段间歇崩 `0xc0000409`——主项目、`D:\Temp` 独立 cargo 工程、裸 `rustc` 直调全部中招，同一命令原样重试即可通过（非确定性损坏，疑似沙箱内存限制杀进程）。有效处置：**`cargo -j 2` 降并行重试**（默认并行下 lib 编译崩过 2 次，`-j 2` 后连续全绿）；`CARGO_INCREMENTAL=0` 顺带排除增量因素。**注意 `-j` 必须放在 `--` 之前**：`cargo clippy --all-targets -- -D warnings -j 2` 会把 `-j` 传给 clippy-driver 报 `Unrecognized option: 'j'`（exit 101 假象），正确写法 `cargo clippy -j 2 --all-targets -- -D warnings`。另：裸 `rustc` 直调在本环境**不可用作取证工具**（连 hello.rs 都崩），红→绿证据改走主项目 `tests/` 临时测试文件（暖构建、跑完即删）。
 - **提交 / Commit**: 本条（MA4b 合并后文档回写附带）
 
 ### [2026-09-28] `gh pr merge` 403「Resource not accessible by personal access token」：去掉 `GITHUB_TOKEN` 回落 keyring，本地 no-ff 为兜底
@@ -847,3 +848,23 @@
 - **解法 / Fix**: 中文请求体**一律先落 UTF-8 文件再发**：`curl --data-binary @req.json -H 'Content-Type: application/json' …`（`--data-binary` 而非 `--data`，避免 curl 吞换行/做编码转换）；解析上游响应按 `results.cluster[0].result` 取行，`results.total_num_results` 取总数（MA6d 的 `form_c.json` 复核即按此路径：10 行、`total=58`）。
 - **预防 / Prevention**: ① 凡涉及非 ASCII 请求体的冒烟/取证，禁止在命令行内联，统一 `--data-binary @utf8文件`；② 写取证脚本前先 `node -e` 打印响应顶层键结构，不要凭直觉猜数组名；③ 取证产物（请求文件、响应 JSON、结论文本）留在仓库外 `D:\Temp\*-probe\`，仓内只提交结论。
 - **提交 / Commit**: MA6d 分支 `exec/ma6d-evidence`（PR #27）由规划会话代记（该棒白名单不含 `docs/errors.md`，未越界写入）
+
+### [2026-09-28] 仓库外临时 crate 做红→绿取证触发 rustc `0xc0000409`；中文 locale 下 linker 输出 GBK 非 UTF-8 告警
+
+- **严重程度 / Severity**: LOW（取证工具链，不影响产品代码与门禁结论）
+- **涉及文件 / Files**: 无（`D:\Temp\mb0-red-proof\red_proof` 独立 crate + stable-msvc 工具链 + VS2019 link.exe）
+- **现象 / Symptom**: MB0 想在仓外建独立 cargo crate 复刻旧的字节切片实现来证明「旧实现必 panic」，两次 `cargo build` 均报 `error: could not compile red_proof (bin "red_proof")`，底层进程退出码 **`0xc0000409 STATUS_STACK_BUFFER_OVERRUN`**（rustc 自身中止，不是被测代码的编译错误）；去掉 `-C incremental` 复现相同，连最小 `fn main(){println!("hello");}` 也进入同一失败路径。另有独立现象：仓内每次 `cargo test`/`cargo clippy` 都出现 `warning: linker stdout: Non-UTF-8 output: \xd5\xfd\xd4\xda…`（GBK 的「正在创建库 … 和对象 …」）。
+- **根因 / Root cause**: ① 该机的 MSVC/链接器组合在仓外空目录建 crate 时 rustc 以栈保护码中止（与 D 盘已用 100%、余量仅 5.9GB 的环境压力同向），属**环境级崩溃**而非代码问题——把它当编译错误去改源码就是假服从；② 中文 Windows 下 `link.exe` 的 stdout 是 CP936，rustc 按 UTF-8 打印 linker 提示即告编码不匹配。
+- **解法 / Fix**: 红→绿取证**一律写在仓内**：`tests/mb0_red_proof_tmp.rs` 里用 `git show HEAD:src/vector/mod.rs` 的实现逐字复刻为测试模块（红：旧实现对中文 panic；绿：新实现零 panic 且 512 维），实测 2 passed。GBK 告警**忽略即可**——`cargo clippy --all-targets -- -D warnings` 本机实测 exit 0、零告警，未受该 warning 影响。
+- **预防 / Prevention**: ① 需要「证明旧代码坏」的取证，优先仓内 `tests/*.rs` 或 `#[cfg(test)]`，**禁止另建临时 crate、禁止手敲 rustc 命令行**（仓外 crate 崩了没有可诊断信号）；② 见到 linker Non-UTF-8 告警先复跑 `clippy -D warnings` 确认结论，**禁止**为消警告去加 `#[allow(linker_messages)]` 或改门禁；③ 门禁时间预算按本机实测排：`cargo test` 冷编 5m48s、`clippy --all-targets` 3m27s（后台跑 + 等完成通知，勿用截断命令求快，见同日 head 条目）；④ 仓外取证件统一放 `D:\Temp\*-probe\` 或 `D:\Temp\mb*-red-proof\`，仓内只留结论，取证完的文件去留由规格书 DoD 事先写明，避免执行会话擅自移动用户工作区文件。
+- **提交 / Commit**: MB0 棒 `exec/mb0-embedder`（工作区未提交），由规划会话代记
+
+### [2026-09-28] 沙箱内 git/gh 连 GitHub 走 `127.0.0.1` 代理必拒连：显式清代理即直连可达
+
+- **严重程度 / Severity**: MEDIUM（交付通道：推分支 / 开 PR 整段不可用，容易误判为「GitHub 不可达」而把动作推给用户手动做）
+- **涉及文件 / Files**: 无代码改动；`git push`、`gh pr create`
+- **现象 / Symptom**: MB0 收尾推送，`git push -u origin exec/mb0-embedder` 报 `Failed to connect to github.com port 443 via 127.0.0.1 after 2075 ms`（exit 128）；`gh pr create` 报 `proxyconnect tcp: dial tcp 127.0.0.1:7890: connectex: No connection could be made`（exit 1）。两个工具读到的代理指向不同端口（git 读 git config http.proxy，gh 读 `HTTP_PROXY/HTTPS_PROXY` 环境变量），但代理进程都没在跑。
+- **根因 / Root cause**: 沙箱环境注入了指向本机回环的代理配置（git config 与环境变量两路），而代理服务本身不在线；GitHub 直连（443）实际是可达的，拒连发生在代理这一跳，不是网络出口问题。
+- **解法 / Fix**: ① `git push`：`git -c http.proxy= -c https.proxy= push …`（空值覆盖配置，实测一次成功推上 `exec/mb0-embedder`）；② `gh`：`$env:HTTP_PROXY=''; $env:HTTPS_PROXY=''; $env:http_proxy=''; $env:https_proxy=''; $env:ALL_PROXY='';` 清空全部代理变量后再 `gh pr create`（实测成功开出 PR #28）。
+- **预防 / Prevention**: ① 遇 `via 127.0.0.1` / `proxyconnect` 字样先试清代理直连，不要直接下「网络不通」结论；② git 与 gh 的代理来源不同（config vs 环境变量），一个清了另一个未必清，两路都要处理；③ `GITHUB_TOKEN` 环境变量仍须 `Remove-Item Env:GITHUB_TOKEN` 去掉（见 2026-09-28 gh pr merge 403 条目），两件事叠加时先清 token 再清代理。
+- **提交 / Commit**: MB0 分支 `exec/mb0-embedder`（PR #28）文档回写附带
