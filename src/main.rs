@@ -30,6 +30,10 @@ mod routes;
 // `routes/search.rs` 依赖 `crate::search`，缺一侧声明即另一侧编译失败。
 pub mod search;
 pub mod types;
+// 与 lib.rs 保持同一份模块清单（AGENTS.md 2.4 双入口一致）：
+// MB0 后 `db/patent.rs`（写入侧）与 `routes/search.rs`（查询侧）都调
+// `crate::vector::*`，bin 侧缺声明即 innoforge-server 编译失败。
+pub mod vector;
 
 use std::net::SocketAddr;
 

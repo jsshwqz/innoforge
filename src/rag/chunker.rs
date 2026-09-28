@@ -1,7 +1,5 @@
 //! Semantic Chunker
 
-use std::collections::HashMap;
-
 /// Split text into semantic chunks.
 pub fn chunk_text(text: &str, chunk_size: usize, overlap: usize) -> Vec<String> {
     if text.is_empty() {
@@ -54,33 +52,33 @@ pub fn chunk_summary(chunk: &str) -> String {
     }
 }
 
+/// 切片嵌入——MB0 归一后**委托** [`crate::vector::compute_char_tfidf_embedding`]（全仓单一出处）。
+///
+/// 此处原有第三份 n-gram/TF-IDF 拷贝（按字节索引切 UTF-8，中文必 panic），已删除：
+/// 写入侧、查询侧、切片侧共用同一个函数，不留第二套标准。
 pub fn compute_chunk_embedding(text: &str) -> Vec<f32> {
-    let cleaned: String = text.chars().filter(|c| !c.is_whitespace()).collect();
-    let mut tf: HashMap<String, f32> = HashMap::new();
-    for n in 2..=4 {
-        if cleaned.len() >= n {
-            for i in 0..=cleaned.len() - n {
-                let gram: String = cleaned[i..i + n].chars().collect();
-                *tf.entry(gram).or_insert(0.0) += 1.0;
-            }
+    crate::vector::compute_char_tfidf_embedding(text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// MB0 归一验证：切片侧拷贝已删除，委托后与全仓单一实现共用**同一个函数**，
+    /// 且中文（3 字节/字）零 panic（旧拷贝在此必 panic）。
+    #[test]
+    fn compute_chunk_embedding_delegates_to_single_vector_impl() {
+        let text = "本发明公开了一种固态电池及其制备方法，属于新能源技术领域。";
+        let via_chunker = compute_chunk_embedding(text);
+        let via_vector = crate::vector::compute_char_tfidf_embedding(text);
+        assert_eq!(via_chunker.len(), via_vector.len());
+        // 浮点求和顺序随 HashMap 迭代抖动（既有行为，见 vector 侧同名注释），锁 1e-6 容差。
+        for (x, y) in via_chunker.iter().zip(via_vector.iter()) {
+            assert!(
+                (x - y).abs() < 1e-6,
+                "两处必须共用同一个函数，不允许第二套标准"
+            );
         }
+        assert_eq!(via_chunker.len(), 512);
     }
-    if tf.is_empty() {
-        return vec![0.0f32];
-    }
-    let doc_len = tf.values().sum::<f32>();
-    for count in tf.values_mut() {
-        *count = 1.0 + (*count / doc_len).log2();
-    }
-    let norm_sq: f32 = tf.values().map(|v| v * v).sum();
-    let norm = if norm_sq > 0.0 { norm_sq.sqrt() } else { 1.0 };
-    let mut emb: Vec<f32> = tf.values().map(|v| v / norm).collect();
-    emb.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
-    const FIXED: usize = 512;
-    if emb.len() < FIXED {
-        emb.resize(FIXED, 0.0);
-    } else {
-        emb.truncate(FIXED);
-    }
-    emb
 }

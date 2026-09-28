@@ -8,6 +8,14 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-09-28 — **MB0 施工完成**（embedder 归一 + UTF-8 边界安全 + 写入链接通），待 PR 合并
+
+- **状态 / Status**: ✅ 施工完成 / Built——门禁三绿，红→绿锚真跑，待 PR 合并回 main
+- **范围 / Scope**: 规格书 MB0 五项全交付：① TF-IDF 三份拷贝收敛为单一出处 `src/vector/mod.rs::compute_char_tfidf_embedding`；② `CharNGramTokenizer::tokenize` 改 `Vec<char>::windows` 字符窗口（中文不再 panic）；③ 写入链接通——`db/patent.rs::insert_patent` 单一写入口顺手算向量（drop MutexGuard 后再算、失败静默降级 warn、**无全表回填**）；④ 查询侧 `routes/search.rs` 删第二套实现改调 vector 模块，新增 `vector_hybrid_search_json` 抽取 + 门控两档测试锁定；`rag/chunker.rs::compute_chunk_embedding` 改委托 + 测试锁。**新增测试 12 条**（vector 5 + chunker 1 + db wiring 3 + perf 1 + search 门控 2）。
+- **验证 / Verification**: `cargo fmt --check` exit 0；`cargo clippy -j 2 --all-targets -- -D warnings` exit 0（零告警，含 bin 侧）；`cargo test -j 2` 全绿 **744 passed / 0 failed / 2 ignored**（lib 347 + bin 348 + 集成 49），对账 `721 + 2×12 − 1 = 744`（差的 1 条 = chunker 委托用例仅在 lib 侧跑，`main.rs` 模块清单本无 `mod rag`，属 AGENTS.md 2.4 双入口既有漂移，MB3 接线时自然消失）。**红→绿锚**：临时副本 `tests/mb0_red_proof_tmp.rs`（逐字复刻 HEAD 旧字节切片实现）2 passed——旧实现对中文专利文本 panic（`end byte index 2 is not a char boundary; it is inside '一'`），新实现零 panic 且 dim=512；输出落 `D:\Temp\mb0-verify-red.txt`，副本按约定不入提交。**验收口径（偏离②已登记规格书）**：入库→向量→查询链路由 `mb0_wiring_tests` 4 条 + 门控 2 条（`:memory:` 空库双档，`vector_count` 0 档/翻转档 + 出参 7 键形状锁）覆盖，未另起真实 HTTP server 冒烟。
+- **偏离登记（规格书 §前言「以证据为准」处理）**：① `src/main.rs` +4 行 `pub mod vector;` 破了「main.rs 零 diff」红线——MB0 后 bin 侧 `db/patent.rs`/`routes/search.rs` 调 `crate::vector::*`，缺声明即 `innoforge-server` 编译失败（首轮 `clippy --all-targets` 实测复现 E0433 ×4）；② 验收见上。另：首轮全量 `cargo test` 曾出 `google_patents_xhr::consecutive_searches_respect_min_interval` 1 例失败（并行负载下计时抖动，实测 405ms < 阈值），单独复跑通过、复跑全量绿，与 MB0 改动面无关，不修。
+- **同步 / Sync**: 本条与规格书落地记录同 commit 落 `exec/mb0-embedder`，PR 合并后随 M-B 流程对齐五端。
+
 ### 2026-09-28 — **M-B 施工规格书下发**（`docs/plan/2026-09-28-mb-construction-spec.md`），两条产品决策由用户拍板
 
 - **状态 / Status**: 🚧 开工条件就绪 / Ready to dispatch（第一棒 = MB0）
