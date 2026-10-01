@@ -5,7 +5,7 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 
-## [0.9.0] - 2026-10-01
+## [v0.9.0] - 2026-10-01
 
 ### 新增 / Added
 - 检索↔创意验证全链路贯通（MC1）：SourceChain 多源检索 + RAG 全文切片聚类 + 结构化引用编号
