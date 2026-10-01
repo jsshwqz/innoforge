@@ -183,3 +183,44 @@ pub struct TechnicalFeature {
     pub novelty_flag: bool,
     pub evidence_ids: Vec<String>,
 }
+
+// ── MB4: 出处标注体系 ────────────────────────────────────────────────────────
+
+/// 出处标注 — 对 AI 分析中每条事实性结论的来源追溯 / Provenance annotation for each
+/// factual conclusion in the AI analysis report.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ProvenanceAnnotation {
+    /// 结论原文 / Original conclusion text
+    pub conclusion_text: String,
+    /// 匹配到的证据链条目 ID / Matched evidence chain entry ID (None = speculation)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence_id: Option<String>,
+    /// 是否为推测（无来源标注）/ Is speculation (no source attached)
+    pub is_speculation: bool,
+    /// 专利号（如能从结论中提取）/ Patent number extracted from conclusion
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub patent_number: Option<String>,
+    /// 段/权号引用（如 "claims[1]" / "para[3]"）/ Section/claim reference
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub section_ref: Option<String>,
+}
+
+/// 决策理由 — 引用已有证据编号 / Decision reason referencing existing evidence
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DecisionReason {
+    /// 引用的证据链条目 ID / Referenced evidence chain entry ID
+    pub evidence_id: String,
+    /// 理由文本 / Reason text
+    pub text: String,
+}
+
+/// 决策建议段 — 申请/放弃/转向 + ≥3 条理由 / Decision recommendation section
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DecisionRecommendation {
+    /// "申请" | "放弃" | "转向" / "apply" | "abandon" | "pivot"
+    pub recommendation: String,
+    /// ≥3 条理由，每条引用已有证据编号 / ≥3 reasons, each referencing an evidence ID
+    pub reasons: Vec<DecisionReason>,
+    /// 综合置信度 / Overall confidence
+    pub confidence: f64,
+}

@@ -319,6 +319,14 @@ pub struct PipelineContext {
     #[serde(default)]
     pub rag_chunks: Vec<ReferenceChunk>,
 
+    // MB4: 出处标注 — 对 AI 分析中每条事实性结论的来源追溯
+    #[serde(default)]
+    pub provenance_annotations: Vec<crate::types::idea::ProvenanceAnnotation>,
+
+    // MB4: 决策建议段 — 申请/放弃/转向 + ≥3 条理由
+    #[serde(default)]
+    pub decision: Option<crate::types::idea::DecisionRecommendation>,
+
     // 元数据
     pub current_step: PipelineStep,
     pub step_results: Vec<StepResult>,
@@ -360,6 +368,8 @@ impl PipelineContext {
             experiment_results: Vec::new(),
             enrichment_results: Vec::new(),
             rag_chunks: Vec::new(),
+            provenance_annotations: Vec::new(),
+            decision: None,
             current_step: PipelineStep::ParseInput,
             step_results: Vec::new(),
         }
