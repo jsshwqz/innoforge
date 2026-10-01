@@ -3,8 +3,8 @@
 #![allow(clippy::needless_borrow)]
 
 use super::client::{
-    oa_capacity_error, safe_truncate, truncate_for_ai, AiClient, Message, OA_RESPONSE_ANALYSIS_MAX_CHARS,
-    OA_RESPONSE_DISCUSSION_MAX_CHARS, OA_RESPONSE_OA_MAX_CHARS,
+    oa_capacity_error, safe_truncate, truncate_for_ai, AiClient, Message,
+    OA_RESPONSE_ANALYSIS_MAX_CHARS, OA_RESPONSE_DISCUSSION_MAX_CHARS, OA_RESPONSE_OA_MAX_CHARS,
 };
 use anyhow::Result;
 
@@ -998,7 +998,9 @@ impl AiClient {
                 {
                     Ok(content) => {
                         // UA2: 拼接提交前清单（静态文案，不经过 AI 生成）
-                        let _ = tx.send(format!("{content}{REEXAM_PRE_SUBMIT_CHECKLIST}")).await;
+                        let _ = tx
+                            .send(format!("{content}{REEXAM_PRE_SUBMIT_CHECKLIST}"))
+                            .await;
                     }
                     Err(error) => {
                         let _ = tx.send(format!("[ERROR] {error}")).await;
@@ -1265,13 +1267,8 @@ mod ua_tests {
     #[test]
     fn ua5_reject_review_prompt_contains_citation_anchors() {
         let client = AiClient::with_config("http://127.0.0.1:1", "", "test");
-        let (_system, user) = client.build_reject_review_prompt(
-            "专利",
-            "驳回",
-            "对比",
-            "deep",
-            false,
-        );
+        let (_system, user) =
+            client.build_reject_review_prompt("专利", "驳回", "对比", "deep", false);
         // UA6: 出处锚点格式
         assert!(user.contains("出处锚点纪律"));
         assert!(user.contains("【依据"));
@@ -1290,13 +1287,8 @@ mod ua_tests {
     #[test]
     fn ua5_shallow_mode_unchanged() {
         let client = AiClient::with_config("http://127.0.0.1:1", "", "test");
-        let (system, user) = client.build_reject_review_prompt(
-            "专利",
-            "驳回",
-            "对比",
-            "shallow",
-            false,
-        );
+        let (system, user) =
+            client.build_reject_review_prompt("专利", "驳回", "对比", "shallow", false);
         // shallow 模式不注入六角度
         assert!(!user.contains("## 一、事实对照"));
         assert!(system.contains("复审"));
@@ -1308,7 +1300,10 @@ mod ua_tests {
         let checklist = super::REEXAM_PRE_SUBMIT_CHECKLIST;
         assert!(checklist.contains("提交前清单"));
         for i in 1..=8 {
-            assert!(checklist.contains(&format!("□ {i}.")), "missing checklist item {i}");
+            assert!(
+                checklist.contains(&format!("□ {i}.")),
+                "missing checklist item {i}"
+            );
         }
         assert!(checklist.contains("复审请求期限"));
         assert!(checklist.contains("前置审查"));
