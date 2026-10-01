@@ -10,6 +10,7 @@ pub mod finalize;
 pub mod oa_response;
 pub mod parse;
 pub mod prior_art_cluster;
+pub mod provenance;
 pub mod rank;
 pub mod reflection;
 pub mod scoring;
