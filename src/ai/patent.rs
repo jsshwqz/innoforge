@@ -1240,8 +1240,7 @@ mod ua_tests {
 
     #[test]
     fn ua5_reject_review_prompt_contains_six_angles() {
-        let client = AiClient::with_config("http://127.0.0.1:1", "", "test");
-        let (system, user) = client.build_reject_review_prompt(
+        let (system, user) = AiClient::build_reject_review_prompt(
             "我的专利内容",
             "驳回决定内容",
             "对比文献内容",
@@ -1266,9 +1265,8 @@ mod ua_tests {
 
     #[test]
     fn ua5_reject_review_prompt_contains_citation_anchors() {
-        let client = AiClient::with_config("http://127.0.0.1:1", "", "test");
         let (_system, user) =
-            client.build_reject_review_prompt("专利", "驳回", "对比", "deep", false);
+            AiClient::build_reject_review_prompt("专利", "驳回", "对比", "deep", false);
         // UA6: 出处锚点格式
         assert!(user.contains("出处锚点纪律"));
         assert!(user.contains("【依据"));
@@ -1286,9 +1284,8 @@ mod ua_tests {
 
     #[test]
     fn ua5_shallow_mode_unchanged() {
-        let client = AiClient::with_config("http://127.0.0.1:1", "", "test");
         let (system, user) =
-            client.build_reject_review_prompt("专利", "驳回", "对比", "shallow", false);
+            AiClient::build_reject_review_prompt("专利", "驳回", "对比", "shallow", false);
         // shallow 模式不注入六角度
         assert!(!user.contains("## 一、事实对照"));
         assert!(system.contains("复审"));
