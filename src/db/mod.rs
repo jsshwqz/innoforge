@@ -19,7 +19,7 @@ mod research_state;
 mod settings;
 #[cfg(test)]
 mod tests;
-mod vector;
+pub mod vector;
 pub mod version;
 pub use oa::OaDiscussion;
 

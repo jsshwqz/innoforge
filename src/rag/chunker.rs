@@ -1,37 +1,38 @@
 //! Semantic Chunker
 
-use std::collections::HashMap;
-
 /// Split text into semantic chunks.
+///
+/// Operates on `Vec<char>` to guarantee char-boundary safety. The previous
+/// byte-index approach (`text[start..end]`) could split multi-byte characters
+/// and produce invalid UTF-8 or panic on Chinese text.
 pub fn chunk_text(text: &str, chunk_size: usize, overlap: usize) -> Vec<String> {
     if text.is_empty() {
         return vec![];
     }
+    let chars: Vec<char> = text.chars().collect();
+    let total = chars.len();
     let window = chunk_size.saturating_sub(overlap);
     if window == 0 {
         return vec![text.to_string()];
     }
     let mut chunks = Vec::new();
     let mut start = 0;
-    while start < text.len() {
-        let end = (start + chunk_size).min(text.len());
-        chunks.push(text[start..end].to_string());
-        if end >= text.len() {
+    while start < total {
+        let end = (start + chunk_size).min(total);
+        let chunk: String = chars[start..end].iter().collect();
+        chunks.push(chunk);
+        if end >= total {
             break;
         }
-        let search_start = end - overlap;
+        let search_start = end.saturating_sub(overlap);
         let mut boundary = end;
         for i in (search_start..end).rev() {
-            if i < text.len() {
-                if let Some(c) = text.chars().nth(i) {
-                    let is_boundary = c == '。' || c == ';' || c == '.';
-                    let byte_val = text.as_bytes().get(i).copied();
-                    let is_newline = byte_val == Some(10);
-                    if (is_boundary || is_newline) && i > start + window / 2 {
-                        boundary = i;
-                        break;
-                    }
-                }
+            let c = chars[i];
+            let is_boundary = c == '。' || c == ';' || c == '.';
+            let is_newline = c == '\n';
+            if (is_boundary || is_newline) && i > start + window / 2 {
+                boundary = i;
+                break;
             }
         }
         start = boundary + 1;
@@ -54,33 +55,11 @@ pub fn chunk_summary(chunk: &str) -> String {
     }
 }
 
+/// Compute TF-IDF embedding for a chunk of text.
+///
+/// Delegates to [`crate::db::vector::compute_tfidf_embedding`] — the single
+/// canonical implementation. The previous inline copy had the same
+/// byte-slicing bug as the other two copies (panicked on Chinese text).
 pub fn compute_chunk_embedding(text: &str) -> Vec<f32> {
-    let cleaned: String = text.chars().filter(|c| !c.is_whitespace()).collect();
-    let mut tf: HashMap<String, f32> = HashMap::new();
-    for n in 2..=4 {
-        if cleaned.len() >= n {
-            for i in 0..=cleaned.len() - n {
-                let gram: String = cleaned[i..i + n].chars().collect();
-                *tf.entry(gram).or_insert(0.0) += 1.0;
-            }
-        }
-    }
-    if tf.is_empty() {
-        return vec![0.0f32];
-    }
-    let doc_len = tf.values().sum::<f32>();
-    for count in tf.values_mut() {
-        *count = 1.0 + (*count / doc_len).log2();
-    }
-    let norm_sq: f32 = tf.values().map(|v| v * v).sum();
-    let norm = if norm_sq > 0.0 { norm_sq.sqrt() } else { 1.0 };
-    let mut emb: Vec<f32> = tf.values().map(|v| v / norm).collect();
-    emb.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
-    const FIXED: usize = 512;
-    if emb.len() < FIXED {
-        emb.resize(FIXED, 0.0);
-    } else {
-        emb.truncate(FIXED);
-    }
-    emb
+    crate::db::vector::compute_tfidf_embedding(text)
 }

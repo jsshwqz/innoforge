@@ -763,7 +763,7 @@ pub async fn api_search_vector(
 
     // Vector layer: compute query embedding and search cached embeddings
     let vector_results: Vec<(String, f32)> = {
-        let query_embedding = compute_char_tfidf_embedding(query);
+        let query_embedding = crate::db::vector::compute_tfidf_embedding(query);
         let count = s.db.count_embeddings().unwrap_or_default();
         let mut results = Vec::new();
 
@@ -790,7 +790,7 @@ pub async fn api_search_vector(
                     }
                 }) {
                     for (pid, emb) in rows.flatten() {
-                        let sim = cosine_similarity(&query_embedding, &emb);
+                        let sim = crate::db::vector::cosine_similarity(&query_embedding, &emb);
                         if sim > 0.1 {
                             results.push((pid, sim));
                         }
@@ -848,54 +848,6 @@ pub async fn api_search_vector(
     }))
 }
 
-/// Character n-gram TF-IDF embedding computation.
-fn compute_char_tfidf_embedding(text: &str) -> Vec<f32> {
-    use std::collections::HashMap;
-
-    let cleaned: String = text.chars().filter(|c| !c.is_whitespace()).collect();
-    let mut tf: HashMap<String, f32> = HashMap::new();
-    for n in 2..=4 {
-        if cleaned.len() >= n {
-            for i in 0..=cleaned.len() - n {
-                let gram: String = cleaned[i..i + n].chars().collect();
-                *tf.entry(gram).or_insert(0.0) += 1.0;
-            }
-        }
-    }
-    if tf.is_empty() {
-        return vec![0.0f32];
-    }
-    let doc_len = tf.values().sum::<f32>();
-    for count in tf.values_mut() {
-        *count = 1.0 + (*count / doc_len).log2();
-    }
-    let norm_sq: f32 = tf.values().map(|v| v * v).sum();
-    let norm = if norm_sq > 0.0 { norm_sq.sqrt() } else { 1.0 };
-    let mut emb: Vec<f32> = tf.values().map(|v| v / norm).collect();
-    emb.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
-    const FIXED: usize = 512;
-    if emb.len() < FIXED {
-        emb.resize(FIXED, 0.0);
-    } else {
-        emb.truncate(FIXED);
-    }
-    emb
-}
-
-/// Cosine similarity between two vectors.
-fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
-    let len = a.len().min(b.len());
-    if len == 0 {
-        return 0.0;
-    }
-    let dot: f32 = (0..len).map(|i| a[i] * b[i]).sum();
-    let na: f32 = (0..len).map(|i| a[i] * a[i]).sum::<f32>().sqrt();
-    let nb: f32 = (0..len).map(|i| b[i] * b[i]).sum::<f32>().sqrt();
-    if na < 1e-8 || nb < 1e-8 {
-        return 0.0;
-    }
-    (dot / (na * nb)).clamp(0.0, 1.0)
-}
 pub async fn api_search_stats(
     State(s): State<AppState>,
     Json(req): Json<SearchRequest>,

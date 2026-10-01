@@ -16,8 +16,13 @@ pub async fn api_fetch_patent(
     let src = req.source.as_deref().unwrap_or("epo");
     match fetch_patent(&req.patent_number, src).await {
         Ok(p) => {
-            if let Err(e) = s.db.insert_patent(&p) {
-                tracing::warn!("Failed to cache patent {}: {}", p.patent_number, e);
+            match s.db.insert_patent(&p) {
+                Ok(id) => crate::db::vector::try_compute_and_save_embedding(
+                    &s.db,
+                    &id,
+                    &format!("{} {}", p.title, p.abstract_text),
+                ),
+                Err(e) => tracing::warn!("Failed to cache patent {}: {}", p.patent_number, e),
             }
             Json(json!({"status":"ok","patent":p}))
         }
@@ -195,12 +200,17 @@ pub async fn api_enrich_patent(
                     if let Some(pdf) = json["pdf"].as_str() {
                         updated.pdf_url = pdf.to_string();
                     }
-                    if let Err(e) = s.db.insert_patent(&updated) {
-                        tracing::warn!(
+                    match s.db.insert_patent(&updated) {
+                        Ok(id) => crate::db::vector::try_compute_and_save_embedding(
+                            &s.db,
+                            &id,
+                            &format!("{} {}", updated.title, updated.abstract_text),
+                        ),
+                        Err(e) => tracing::warn!(
                             "Failed to save enriched patent {}: {}",
                             updated.patent_number,
                             e
-                        );
+                        ),
                     }
                     println!(
                         "[ENRICH] Updated patent {} with claims_len={} desc_len={}",
@@ -311,12 +321,17 @@ pub async fn api_enrich_patent_free(
     }
 
     // Save enriched data
-    if let Err(e) = s.db.insert_patent(&updated) {
-        tracing::warn!(
+    match s.db.insert_patent(&updated) {
+        Ok(id) => crate::db::vector::try_compute_and_save_embedding(
+            &s.db,
+            &id,
+            &format!("{} {}", updated.title, updated.abstract_text),
+        ),
+        Err(e) => tracing::warn!(
             "Failed to save enriched patent {}: {}",
             updated.patent_number,
             e
-        );
+        ),
     }
 
     println!(
@@ -458,8 +473,13 @@ pub async fn api_patent_lookup(
         match fetch_patent(&patent_number, "epo").await {
             Ok(p) => {
                 let pn = p.patent_number.clone();
-                if let Err(e) = s.db.insert_patent(&p) {
-                    tracing::warn!("Failed to cache patent {}: {}", pn, e);
+                match s.db.insert_patent(&p) {
+                    Ok(id) => crate::db::vector::try_compute_and_save_embedding(
+                        &s.db,
+                        &id,
+                        &format!("{} {}", p.title, p.abstract_text),
+                    ),
+                    Err(e) => tracing::warn!("Failed to cache patent {}: {}", pn, e),
                 }
                 if let Ok(Some(fp)) = s.db.find_patent_by_number(&patent_number) {
                     return Json(json!({
@@ -526,8 +546,13 @@ pub async fn api_patent_lookup_and_fetch(
     match fetch_patent(patent_number, "epo").await {
         Ok(p) => {
             let pn = p.patent_number.clone();
-            if let Err(e) = s.db.insert_patent(&p) {
-                tracing::warn!("Failed to cache fetched patent {}: {}", pn, e);
+            match s.db.insert_patent(&p) {
+                Ok(id) => crate::db::vector::try_compute_and_save_embedding(
+                    &s.db,
+                    &id,
+                    &format!("{} {}", p.title, p.abstract_text),
+                ),
+                Err(e) => tracing::warn!("Failed to cache fetched patent {}: {}", pn, e),
             }
             // Try enriched lookup after caching
             if let Ok(Some(fp)) = s.db.find_patent_by_number(patent_number) {
@@ -830,7 +855,13 @@ pub async fn api_patent_pdf(
                                 patent.pdf_url = pdf.to_string();
                             }
                             // Save enriched data
-                            let _ = s.db.insert_patent(&patent);
+                            if let Ok(id) = s.db.insert_patent(&patent) {
+                                crate::db::vector::try_compute_and_save_embedding(
+                                    &s.db,
+                                    &id,
+                                    &format!("{} {}", patent.title, patent.abstract_text),
+                                );
+                            }
                             println!(
                                 "[PDF] Enriched: desc={} claims={}",
                                 patent.description.len(),
