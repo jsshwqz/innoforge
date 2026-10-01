@@ -1382,9 +1382,6 @@ pub async fn api_ai_office_action_response_stream(
         if auto_pubs.is_empty() {
             refs_info
         } else {
-            // 提取用户已提供的公开号（去重用）
-            let user_pubs: std::collections::HashSet<&str> =
-                auto_pubs.iter().map(|(p, _)| p.as_str()).collect();
             // 实际上需要检查 refs_info 中已有的公开号
             let mut supplemented = refs_info.clone();
             let mut idx = 1;
