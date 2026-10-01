@@ -1,4 +1,5 @@
 use super::state::PipelineStep;
+use crate::search::enrichment::EnrichmentStatus;
 use serde::{Deserialize, Serialize};
 
 fn default_branch() -> String {
@@ -53,7 +54,7 @@ pub struct SimilarityEntry {
 }
 
 /// 排序后的匹配结果
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RankedMatch {
     pub rank: usize,
     pub source_id: String,
@@ -310,6 +311,30 @@ pub struct PipelineContext {
     #[serde(default)]
     pub experiment_results: Vec<ExperimentResult>,
 
+    // MB2: 富化状态 / Enrichment status for top-N patents
+    #[serde(default)]
+    pub enrichment_results: Vec<EnrichmentStatus>,
+
+    // MB3: RAG 检索到的专利全文切片 / Retrieved patent chunks for citation
+    #[serde(default)]
+    pub rag_chunks: Vec<ReferenceChunk>,
+
+    // MB4: 出处标注 — 对 AI 分析中每条事实性结论的来源追溯
+    #[serde(default)]
+    pub provenance_annotations: Vec<crate::types::idea::ProvenanceAnnotation>,
+
+    // MB4: 决策建议段 — 申请/放弃/转向 + ≥3 条理由
+    #[serde(default)]
+    pub decision: Option<crate::types::idea::DecisionRecommendation>,
+
+    // MB1: 事实校验报告（幻觉防线）
+    #[serde(default)]
+    pub fact_check_report: Option<crate::ai::FactCheckReport>,
+
+    // MB1: 事实校验是否拒绝（致命档扣分 ≥35）
+    #[serde(default)]
+    pub fact_check_rejected: bool,
+
     // 元数据
     pub current_step: PipelineStep,
     pub step_results: Vec<StepResult>,
@@ -349,6 +374,12 @@ impl PipelineContext {
             iteration_count: 0,
             parent_version_id: String::new(),
             experiment_results: Vec::new(),
+            enrichment_results: Vec::new(),
+            rag_chunks: Vec::new(),
+            provenance_annotations: Vec::new(),
+            decision: None,
+            fact_check_report: None,
+            fact_check_rejected: false,
             current_step: PipelineStep::ParseInput,
             step_results: Vec::new(),
         }

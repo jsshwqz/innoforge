@@ -252,6 +252,11 @@ where
             );
             p.id.clone()
         });
+        crate::db::vector::try_compute_and_save_embedding(
+            db,
+            &saved_id,
+            &format!("{} {}", p.title, p.abstract_text),
+        );
         // Hybrid relevance: position + content matching
         let position_score = (98.0 - idx as f64 * 3.0).max(30.0);
         let content_score = calculate_online_relevance(

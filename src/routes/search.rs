@@ -734,6 +734,8 @@ pub async fn api_search_vector(
     State(s): State<AppState>,
     Json(req): Json<serde_json::Value>,
 ) -> Json<serde_json::Value> {
+    use crate::patent::SearchType;
+
     let query = req["query"].as_str().unwrap_or("");
     let limit = req["limit"].as_u64().unwrap_or(20) as usize;
     let k = req["rrf_k"].as_u64().unwrap_or(60) as usize;
@@ -742,27 +744,12 @@ pub async fn api_search_vector(
         return Json(json!({"error": "查询不能为空"}));
     }
 
-    Json(vector_hybrid_search_json(&s.db, query, limit, k))
-}
-
-/// BM25 + 向量 RRF 混合检索核心（MB0：自 `api_search_vector` **逐字搬迁**，出参形状
-/// 逐键不变；抽出只为让「`count_embeddings` 门控两档」可以用一个 `Database` 离线锁定，
-/// 不经 HTTP、不出网）。
-///
-/// 查询向量与写入侧（`Database::insert_patent` 顺手算 embedding）调用**同一个**
-/// [`crate::vector::compute_char_tfidf_embedding`]——MB0 归一后全仓单一出处，
-/// 原有的第二份查询侧拷贝已删除。
-pub(crate) fn vector_hybrid_search_json(
-    db: &Database,
-    query: &str,
-    limit: usize,
-    k: usize,
-) -> serde_json::Value {
-    use crate::patent::SearchType;
-
     // BM25 layer
     let bm25_result: Vec<(String, f64)> =
-        match db.search_smart(query, Some(&SearchType::Mixed), None, None, None, 1, limit) {
+        match s
+            .db
+            .search_smart(query, Some(&SearchType::Mixed), None, None, None, 1, limit)
+        {
             Ok((patents, _total, _detected)) => patents
                 .into_iter()
                 .enumerate()
@@ -776,14 +763,14 @@ pub(crate) fn vector_hybrid_search_json(
 
     // Vector layer: compute query embedding and search cached embeddings
     let vector_results: Vec<(String, f32)> = {
-        let query_embedding = crate::vector::compute_char_tfidf_embedding(query);
-        let count = db.count_embeddings().unwrap_or_default();
+        let query_embedding = crate::db::vector::compute_tfidf_embedding(query);
+        let count = s.db.count_embeddings().unwrap_or_default();
         let mut results = Vec::new();
 
         if count > 0 {
-            if let Ok(mut stmt) = db
-                .conn()
-                .prepare("SELECT patent_id, embedding FROM patents_embedding")
+            if let Ok(mut stmt) =
+                s.db.conn()
+                    .prepare("SELECT patent_id, embedding FROM patents_embedding")
             {
                 if let Ok(rows) = stmt.query_map(rusqlite::params![], |row: &rusqlite::Row| {
                     let pid: String = row.get(0)?;
@@ -803,8 +790,7 @@ pub(crate) fn vector_hybrid_search_json(
                     }
                 }) {
                     for (pid, emb) in rows.flatten() {
-                        let sim =
-                            crate::vector::VectorIndex::cosine_similarity(&query_embedding, &emb);
+                        let sim = crate::db::vector::cosine_similarity(&query_embedding, &emb);
                         if sim > 0.1 {
                             results.push((pid, sim));
                         }
@@ -837,7 +823,7 @@ pub(crate) fn vector_hybrid_search_json(
 
     let mut top_patents: Vec<serde_json::Value> = Vec::new();
     for (id, fused_score) in fused.into_iter().take(limit) {
-        if let Ok(Some(patent)) = db.get_patent(&id) {
+        if let Ok(Some(patent)) = s.db.get_patent(&id) {
             let score_percent = (fused_score * 100.0).round() * 100.0 / 100.0;
             top_patents.push(json!({
                 "id": patent.id,
@@ -851,7 +837,7 @@ pub(crate) fn vector_hybrid_search_json(
         }
     }
 
-    json!({
+    Json(json!({
         "patents": top_patents,
         "total": top_patents.len(),
         "source": "hybrid",
@@ -859,8 +845,9 @@ pub(crate) fn vector_hybrid_search_json(
         "rrf_k": k,
         "bm25_count": bm25_result.len(),
         "vector_count": vector_results.len(),
-    })
+    }))
 }
+
 pub async fn api_search_stats(
     State(s): State<AppState>,
     Json(req): Json<SearchRequest>,
@@ -2027,123 +2014,5 @@ mod tests {
             &[],
         );
         assert_eq!(2, out2["patents"].as_array().expect("patents").len());
-    }
-
-    // ── MB0：`/api/search/vector` 的 `count_embeddings` 门控两档 ──
-    //
-    // 接线前 `patents_embedding` 生产恒 0 行 ⇒ 向量档被永久关闭；MB0 打通写入链后
-    // 这道门控**第一次真的会翻转**。两档各一条用例：0 档锁「既有行为逐字不变」
-    // （这是防回归的关键），>0 档锁「向量档真的参与融合」。
-
-    fn mb0_vector_patent(id: &str) -> Patent {
-        Patent {
-            id: id.to_string(),
-            patent_number: format!("US2024{id}B2"),
-            // 注意：`search_smart(Mixed)` 的路由是 `search_like`（整串 `LIKE %query%`），
-            // 故标题必须**连串**包含查询短语，BM25 档才会真实命中（两档对照的前提）。
-            title: "battery electrolyte interface layer for solid state cells".to_string(),
-            abstract_text: "A solid state battery comprising a sulfide electrolyte layer and \
-                            an interface modification reducing impedance."
-                .to_string(),
-            description: "The battery uses a sulfide electrolyte and an interface modification \
-                          to improve cycle life."
-                .to_string(),
-            claims: "1. A solid state battery comprising a sulfide electrolyte layer.".to_string(),
-            applicant: "Test Corp".to_string(),
-            inventor: "Alice".to_string(),
-            filing_date: "2024-01-10".to_string(),
-            publication_date: "2024-07-15".to_string(),
-            grant_date: None,
-            ipc_codes: "H01M10/0562".to_string(),
-            cpc_codes: String::new(),
-            priority_date: "2024-01-10".to_string(),
-            country: "US".to_string(),
-            kind_code: "B2".to_string(),
-            family_id: None,
-            legal_status: "granted".to_string(),
-            citations: "[]".to_string(),
-            cited_by: "[]".to_string(),
-            source: "test".to_string(),
-            raw_json: "{}".to_string(),
-            created_at: "2026-09-28T00:00:00Z".to_string(),
-            images: "[]".to_string(),
-            pdf_url: String::new(),
-        }
-    }
-
-    /// 门控关档（`count_embeddings()==0`）：逐字锁定接线前的既有行为——只回 BM25 RRF、
-    /// `vector_count: 0` 如实上报、出参键集合不变、fused 分数不超过单档 RRF 上限 `1/(k+1)`。
-    #[test]
-    fn mb0_vector_layer_gated_off_when_no_embeddings() {
-        let db = Database::init(":memory:").expect("in-memory db");
-        db.insert_patent(&mb0_vector_patent("mb0g1"))
-            .expect("insert patent");
-        // 还原「接线前生产恒 0 行」的状态：抹掉顺手算写入的 embedding。
-        db.conn()
-            .execute("DELETE FROM patents_embedding", rusqlite::params![])
-            .expect("clear embeddings");
-        assert_eq!(db.count_embeddings().expect("count"), 0);
-
-        let resp = vector_hybrid_search_json(&db, "battery electrolyte interface", 20, 60);
-
-        // 出参键集合逐字不变（7 键，接线前形状）。
-        let obj = resp.as_object().expect("object response");
-        assert_eq!(obj.len(), 7, "响应键集合不得因接线增减: {obj:?}");
-        for key in [
-            "patents",
-            "total",
-            "source",
-            "method",
-            "rrf_k",
-            "bm25_count",
-            "vector_count",
-        ] {
-            assert!(obj.contains_key(key), "缺少既有键 {key}");
-        }
-        assert_eq!(resp["source"], json!("hybrid"));
-        assert_eq!(resp["method"], json!("rrf"));
-        assert_eq!(resp["rrf_k"], json!(60));
-        assert_eq!(
-            resp["vector_count"],
-            json!(0),
-            "0 行档必须如实上报 vector_count: 0"
-        );
-        assert!(
-            resp["bm25_count"].as_u64().expect("bm25_count") >= 1,
-            "BM25 档必须真实命中，否则两档对照失去意义"
-        );
-        let patents = resp["patents"].as_array().expect("patents");
-        assert_eq!(patents.len(), 1);
-        // 只走 BM25 单档时 fused == 1/(k+rank) ≤ 1/61；若向量档偷跑必然越界。
-        let fused = patents[0]["fused_score"].as_f64().expect("fused");
-        assert!(
-            fused <= 1.0 / 61.0 + 1e-12,
-            "0 行档 fused 必须是纯 BM25 单档分数，got {fused}"
-        );
-    }
-
-    /// 门控开档（`count_embeddings()>0`）：MB0 接线后向量档真的产出命中并参与 RRF 融合
-    /// （fused 分数越出单档上限 `1/(k+1)` ⇒ 两条档都在贡献）。
-    #[test]
-    fn mb0_vector_layer_engages_when_embeddings_exist() {
-        let db = Database::init(":memory:").expect("in-memory db");
-        db.insert_patent(&mb0_vector_patent("mb0g2"))
-            .expect("insert patent");
-        assert!(
-            db.count_embeddings().expect("count") >= 1,
-            "写入链接通后新入库专利必须有 embedding"
-        );
-
-        let resp = vector_hybrid_search_json(&db, "battery electrolyte interface", 20, 60);
-        assert!(
-            resp["vector_count"].as_u64().expect("vector_count") >= 1,
-            "门控翻转后向量档必须真实命中: {resp}"
-        );
-        let patents = resp["patents"].as_array().expect("patents");
-        let fused = patents[0]["fused_score"].as_f64().expect("fused");
-        assert!(
-            fused > 1.0 / 61.0 + 1e-12,
-            "fused 越出单档上限 ⇒ 向量档确实参与融合，got {fused}"
-        );
     }
 }

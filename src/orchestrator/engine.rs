@@ -308,7 +308,7 @@ impl Orchestrator {
             PipelineStep::DetectContradictions => steps::contradiction::execute(ctx).await,
             PipelineStep::ScoreNovelty => steps::scoring::execute(ctx).await,
             PipelineStep::AiDeepAnalysis => {
-                steps::analysis::deep_analysis(ctx, &self.ai_client, progress_tx).await
+                steps::analysis::deep_analysis(ctx, &self.ai_client, &self.db, progress_tx).await
             }
             PipelineStep::AiActionPlan => {
                 let result = steps::analysis::action_plan(ctx, &self.ai_client).await;

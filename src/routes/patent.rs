@@ -1,5 +1,6 @@
 use super::{efld, AppState};
 use crate::patent::*;
+use crate::search::enrichment::extract_section;
 use axum::{
     extract::{Path, Query, State},
     http::{header, StatusCode},
@@ -16,8 +17,13 @@ pub async fn api_fetch_patent(
     let src = req.source.as_deref().unwrap_or("epo");
     match fetch_patent(&req.patent_number, src).await {
         Ok(p) => {
-            if let Err(e) = s.db.insert_patent(&p) {
-                tracing::warn!("Failed to cache patent {}: {}", p.patent_number, e);
+            match s.db.insert_patent(&p) {
+                Ok(id) => crate::db::vector::try_compute_and_save_embedding(
+                    &s.db,
+                    &id,
+                    &format!("{} {}", p.title, p.abstract_text),
+                ),
+                Err(e) => tracing::warn!("Failed to cache patent {}: {}", p.patent_number, e),
             }
             Json(json!({"status":"ok","patent":p}))
         }
@@ -195,12 +201,17 @@ pub async fn api_enrich_patent(
                     if let Some(pdf) = json["pdf"].as_str() {
                         updated.pdf_url = pdf.to_string();
                     }
-                    if let Err(e) = s.db.insert_patent(&updated) {
-                        tracing::warn!(
+                    match s.db.insert_patent(&updated) {
+                        Ok(id) => crate::db::vector::try_compute_and_save_embedding(
+                            &s.db,
+                            &id,
+                            &format!("{} {}", updated.title, updated.abstract_text),
+                        ),
+                        Err(e) => tracing::warn!(
                             "Failed to save enriched patent {}: {}",
                             updated.patent_number,
                             e
-                        );
+                        ),
                     }
                     println!(
                         "[ENRICH] Updated patent {} with claims_len={} desc_len={}",
@@ -218,211 +229,43 @@ pub async fn api_enrich_patent(
 }
 
 /// Free patent detail fetch from Google Patents (no API key, no VPN needed)
+///
+/// MB2: 实际逻辑委托给 [`crate::search::enrichment::enrich_patent_free`]，
+/// 本函数只做 HTTP 响应格式转换。冷却表共用、HTML 解析唯一出处均在 enrichment 模块。
 pub async fn api_enrich_patent_free(
     Path(id): Path<String>,
     State(s): State<AppState>,
 ) -> Json<serde_json::Value> {
     println!("[ENRICH-FREE] patent id={}", id);
-    let patent = match s.db.get_patent(&id) {
-        Ok(Some(p)) => p,
-        _ => return Json(json!({"status":"error","message":"Patent not found"})),
-    };
-    // Already has full text — but for CN patents, re-fetch if content is in English
-    let is_cn = patent.country == "CN" || patent.patent_number.starts_with("CN");
-    let cn_needs_refetch = is_cn
-        && patent.claims.len() > 50
-        && !patent
-            .claims
-            .chars()
-            .any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c));
-    if patent.description.len() > 50 && patent.claims.len() > 50 && !cn_needs_refetch {
-        return Json(json!({"status":"ok","message":"Already enriched","patent":patent}));
-    }
-
-    let pn = &patent.patent_number;
-    let lang = if patent.country == "CN" || pn.starts_with("CN") {
-        "zh"
-    } else {
-        "en"
-    };
-
-    // Try Google Patents HTML page directly
-    let url = format!("https://patents.google.com/patent/{}/{}", pn, lang);
-    println!("[ENRICH-FREE] Fetching {}", url);
-
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(20))
-        .build()
-        .unwrap_or_default();
-
-    let resp = match client
-        .get(&url)
-        .header(
-            "User-Agent",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        )
-        .send()
-        .await
-    {
-        Ok(r) => r,
-        Err(e) => return Json(json!({"status":"error","message":format!("请求失败: {}", e)})),
-    };
-
-    if !resp.status().is_success() {
-        return Json(json!({"status":"error","message":format!("HTTP {}", resp.status())}));
-    }
-
-    let html = match resp.text().await {
-        Ok(t) => t,
-        Err(e) => return Json(json!({"status":"error","message":format!("读取失败: {}", e)})),
-    };
-
-    println!("[ENRICH-FREE] HTML len={}", html.len());
-
-    // Parse sections from Google Patents HTML
-    let mut updated = patent.clone();
-
-    // Extract abstract
-    if patent.abstract_text.is_empty() {
-        if let Some(abs) = extract_section(&html, "abstract") {
-            updated.abstract_text = abs;
-        }
-    }
-
-    // Extract claims
-    if patent.claims.is_empty() || patent.claims.len() < 50 {
-        if let Some(claims) = extract_section(&html, "claims") {
-            updated.claims = claims;
-        }
-    }
-
-    // Extract description
-    if patent.description.is_empty() || patent.description.len() < 50 {
-        if let Some(desc) = extract_section(&html, "description") {
-            updated.description = desc;
-        }
-    }
-
-    // Extract classifications
-    if patent.ipc_codes.is_empty() {
-        if let Some(ipc) = extract_classifications(&html) {
-            updated.ipc_codes = ipc;
-        }
-    }
-
-    // Save enriched data
-    if let Err(e) = s.db.insert_patent(&updated) {
-        tracing::warn!(
-            "Failed to save enriched patent {}: {}",
-            updated.patent_number,
-            e
-        );
-    }
-
-    println!(
-        "[ENRICH-FREE] Updated {} | abstract={} claims={} desc={}",
-        updated.patent_number,
-        updated.abstract_text.len(),
-        updated.claims.len(),
-        updated.description.len()
-    );
-
-    Json(json!({"status":"ok","patent":updated}))
-}
-
-/// Extract a section from Google Patents HTML
-fn extract_section(html: &str, section: &str) -> Option<String> {
-    // Google Patents uses <section itemprop="abstract/claims/description">
-    let marker = format!("itemprop=\"{}\"", section);
-    let start = html.find(&marker)?;
-    let section_html = &html[start..];
-
-    // Find the closing </section>
-    let end = section_html
-        .find("</section>")
-        .unwrap_or(section_html.len().min(200_000));
-    let content = &section_html[..end];
-
-    // Extract text from <div class="abstract">, <claim-text>, or <div class="description-paragraph">
-    let mut parts: Vec<String> = Vec::new();
-
-    // Generic: extract text between > and < for content divs
-    let mut pos = 0;
-    let bytes = content.as_bytes();
-    while pos < bytes.len() {
-        // Look for text content between tags
-        if bytes[pos] == b'>' {
-            pos += 1;
-            let text_start = pos;
-            while pos < bytes.len() && bytes[pos] != b'<' {
-                pos += 1;
-            }
-            if pos > text_start {
-                let text = &content[text_start..pos].trim();
-                if !text.is_empty() && text.len() > 1 {
-                    // Skip tag attributes and class names
-                    if !text.starts_with("class=")
-                        && !text.starts_with("itemprop=")
-                        && !text.contains("data-")
-                    {
-                        parts.push(text.to_string());
-                    }
-                }
-            }
-        } else {
-            pos += 1;
-        }
-    }
-
-    if parts.is_empty() {
-        return None;
-    }
-
-    let result = parts.join("\n\n");
-    if result.len() < 10 {
-        return None;
-    }
-    Some(result)
-}
-
-/// Extract IPC/CPC classifications from HTML
-fn extract_classifications(html: &str) -> Option<String> {
-    let mut codes = Vec::new();
-    let marker = "itemprop=\"Code\"";
-    let mut search_start = 0;
-    while let Some(pos) = html[search_start..].find(marker) {
-        let abs_pos = search_start + pos;
-        // Look for content="..." after the marker
-        if let Some(content_pos) = html[abs_pos..].find("content=\"") {
-            let val_start = abs_pos + content_pos + 9;
-            if let Some(val_end) = html[val_start..].find('"') {
-                let code = &html[val_start..val_start + val_end];
-                // Valid IPC/CPC codes contain letters and digits (e.g., F02K7/06)
-                let is_valid = !code.is_empty()
-                    && code.len() >= 3
-                    && code != "true"
-                    && code != "false"
-                    && code.chars().any(|c| c.is_ascii_alphabetic())
-                    && code.chars().any(|c| c.is_ascii_digit());
-                if is_valid && !codes.contains(&code.to_string()) {
-                    codes.push(code.to_string());
-                }
+    let result = crate::search::enrichment::enrich_patent_free(&s.db, &id).await;
+    match result {
+        crate::search::enrichment::EnrichResult::AlreadyEnriched => {
+            // 查库返回已有全文的专利
+            match s.db.get_patent(&id) {
+                Ok(Some(p)) => Json(json!({"status":"ok","message":"Already enriched","patent":p})),
+                _ => Json(json!({"status":"ok","message":"Already enriched"})),
             }
         }
-        search_start = abs_pos + marker.len();
-        if codes.len() >= 20 {
-            break;
+        crate::search::enrichment::EnrichResult::Enriched { .. } => match s.db.get_patent(&id) {
+            Ok(Some(p)) => Json(json!({"status":"ok","patent":p})),
+            _ => Json(json!({"status":"ok","message":"Enriched but patent not found on re-read"})),
+        },
+        crate::search::enrichment::EnrichResult::CooldownSkipped { remaining_secs } => {
+            Json(json!({
+                "status": "cooldown",
+                "message": format!("Source in cooldown, {remaining_secs}s remaining"),
+                "remaining_secs": remaining_secs,
+            }))
         }
-    }
-    if codes.is_empty() {
-        None
-    } else {
-        Some(codes.join(", "))
+        crate::search::enrichment::EnrichResult::Failed { reason } => {
+            Json(json!({"status":"error","message":reason}))
+        }
+        crate::search::enrichment::EnrichResult::NotFound => {
+            Json(json!({"status":"error","message":"Patent not found"}))
+        }
     }
 }
 
-/// 按专利号从本地 DB 查找专利（用于 OA 页面自动补全）
-/// Lookup patent by number from local DB (for OA auto-fill)
 /// Optional query param `?fetch=true` triggers online fetch if not found locally
 pub async fn api_patent_lookup(
     Path(patent_number): Path<String>,
@@ -458,8 +301,13 @@ pub async fn api_patent_lookup(
         match fetch_patent(&patent_number, "epo").await {
             Ok(p) => {
                 let pn = p.patent_number.clone();
-                if let Err(e) = s.db.insert_patent(&p) {
-                    tracing::warn!("Failed to cache patent {}: {}", pn, e);
+                match s.db.insert_patent(&p) {
+                    Ok(id) => crate::db::vector::try_compute_and_save_embedding(
+                        &s.db,
+                        &id,
+                        &format!("{} {}", p.title, p.abstract_text),
+                    ),
+                    Err(e) => tracing::warn!("Failed to cache patent {}: {}", pn, e),
                 }
                 if let Ok(Some(fp)) = s.db.find_patent_by_number(&patent_number) {
                     return Json(json!({
@@ -526,8 +374,13 @@ pub async fn api_patent_lookup_and_fetch(
     match fetch_patent(patent_number, "epo").await {
         Ok(p) => {
             let pn = p.patent_number.clone();
-            if let Err(e) = s.db.insert_patent(&p) {
-                tracing::warn!("Failed to cache fetched patent {}: {}", pn, e);
+            match s.db.insert_patent(&p) {
+                Ok(id) => crate::db::vector::try_compute_and_save_embedding(
+                    &s.db,
+                    &id,
+                    &format!("{} {}", p.title, p.abstract_text),
+                ),
+                Err(e) => tracing::warn!("Failed to cache fetched patent {}: {}", pn, e),
             }
             // Try enriched lookup after caching
             if let Ok(Some(fp)) = s.db.find_patent_by_number(patent_number) {
@@ -830,7 +683,13 @@ pub async fn api_patent_pdf(
                                 patent.pdf_url = pdf.to_string();
                             }
                             // Save enriched data
-                            let _ = s.db.insert_patent(&patent);
+                            if let Ok(id) = s.db.insert_patent(&patent) {
+                                crate::db::vector::try_compute_and_save_embedding(
+                                    &s.db,
+                                    &id,
+                                    &format!("{} {}", patent.title, patent.abstract_text),
+                                );
+                            }
                             println!(
                                 "[PDF] Enriched: desc={} claims={}",
                                 patent.description.len(),

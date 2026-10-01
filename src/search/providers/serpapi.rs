@@ -550,6 +550,11 @@ impl SearchProvider for SerpApiProvider {
                 .db
                 .insert_patent(&patent)
                 .unwrap_or_else(|_| patent.id.clone());
+            crate::db::vector::try_compute_and_save_embedding(
+                &self.db,
+                &saved_id,
+                &format!("{} {}", patent.title, patent.abstract_text),
+            );
 
             let summary = PatentSummary {
                 id: saved_id,

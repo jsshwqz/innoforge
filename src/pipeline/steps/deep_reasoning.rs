@@ -124,6 +124,9 @@ const SYNTHESIS_SYSTEM: &str = "你是一位跨学科整合大师。你收到了
 
 /// 构建用户上下文（所有维度共用的输入数据）
 fn build_user_context(ctx: &PipelineContext) -> String {
+    // MB2: snippet 可能已被 enrich_top_n 替换为全文（description+claims）。
+    // MB3: 已改走 truncate_for_ai（带数据完整性提示），
+    // 本包不修截断，但富化结果已完整存入 ctx.enrichment_results（结构化、不截断）。
     let top_matches: String = ctx
         .top_matches
         .iter()
@@ -134,11 +137,7 @@ fn build_user_context(ctx: &PipelineContext) -> String {
                 m.source_type,
                 m.source_title,
                 m.combined_score * 100.0,
-                if m.snippet.len() > 120 {
-                    format!("{}...", m.snippet.chars().take(120).collect::<String>())
-                } else {
-                    m.snippet.clone()
-                }
+                crate::ai::truncate_for_ai(&m.snippet, 120)
             )
         })
         .collect::<Vec<_>>()
@@ -161,6 +160,25 @@ fn build_user_context(ctx: &PipelineContext) -> String {
             .join("\n")
     };
 
+    // MB3: RAG 全文切片引用上下文
+    let rag_context = if ctx.rag_chunks.is_empty() {
+        // 无切片时如实标注（不得静默把「没取到」变成「没有相关内容」）
+        "\n## 专利全文切片\n（暂无全文切片，以下分析基于摘要档。）\n".to_string()
+    } else {
+        let mut rag_ctx = String::from("\n## 专利全文切片（可回溯引用）\n");
+        for (i, chunk) in ctx.rag_chunks.iter().enumerate() {
+            rag_ctx.push_str(&format!(
+                "### [引用{}]（专利: {}, 来源: {}, 相似度: {:.2})\n{}\n\n",
+                i + 1,
+                chunk.patent_id,
+                chunk.source_type,
+                chunk.relevance_score,
+                chunk.content
+            ));
+        }
+        rag_ctx
+    };
+
     format!(
         "## 待分析的创意\n\
          **标题：** {title}\n\
@@ -168,13 +186,16 @@ fn build_user_context(ctx: &PipelineContext) -> String {
          **技术领域：** {domain}\n\
          **新颖性评分：** {score:.0}/100\n\n\
          ## 已发现的相关现有技术\n{matches}\n\n\
+         {rag}\n\
          ## 已检测到的技术路线矛盾\n{contras}\n\n\
-         基于以上信息，按你的思维框架进行分析。",
+         基于以上信息，按你的思维框架进行分析。\
+         如引用了全文切片，请在相关结论后标注 [引用N]。",
         title = ctx.title,
         desc = ctx.description,
         domain = ctx.technical_domain,
         score = ctx.novelty_score,
         matches = top_matches,
+        rag = rag_context,
         contras = contradictions,
     )
 }

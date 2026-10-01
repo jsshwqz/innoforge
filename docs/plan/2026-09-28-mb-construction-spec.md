@@ -29,7 +29,7 @@
 ### 1.2 嵌入 / 向量（MB0 的对象）
 
 - TF-IDF / n-gram 实现**三份互不共享的拷贝**：`src/vector/mod.rs:26-40`（`CharNGramTokenizer::tokenize`）、`src/rag/chunker.rs:57-66`、`src/routes/search.rs:852-863`。三者都是 `cleaned[i..i+n]` **按字节索引切 String**，而 `cleaned.len()` 是字节长度 ⇒ 中文（3 字节/字）必然踩非字符边界，**panic**。全仓无 `char_indices` / `floor_char_boundary` 防护。
-- `patents_embedding`（迁移 v20）的写入函数 `db::save_patent_embedding`（`db/vector.rs:6`）唯一调用方是 `vector/mod.rs:166` 的 `compute_and_save_embedding`，而后者**全仓零调用** ⇒ 生产库该表恒 0 行。
+- `patents_embedding`（迁移 v20）的写入函数 `db::save_patent_embedding`（`db/vector.rs:6`）唯一调用方是 `vector/mod.rs:159` 的 `compute_and_save_embedding`，而后者**全仓零调用** ⇒ 生产库该表恒 0 行。
 - `/api/search/vector`（`common.rs:239` 注册）全表扫 blob 算 cosine（`routes/search.rs:771-799`），且 `count_embeddings()`（`:767`）**>0 才启用向量档**，0 行时静默只回 BM25 RRF 并如实带 `vector_count: 0`（`:847`）。
 - 现「向量」是把 term 分数排序后填充 512 维、**丢弃 term→维度映射**（`vector/mod.rs:77` 自注 "no IDF without corpus"，`:81-91`）⇒ 查询向量与文档向量不在同一可比空间，相似度数值不构成语义相关性。**这是已知局限，本轮不修，但必须写明。**
 
@@ -37,7 +37,13 @@
 
 - `src/rag/` 四文件（`mod.rs` `build_chunks_from_patent` / `rag_search`；`chunker.rs`；`retriever.rs` `retrieve_chunks` + `retrieve_chunks_by_keyword`（空占位）；`assembler.rs`）。`patent_chunks`（迁移 v21）的写入口 `db::save_patent_chunks`（`db/rag.rs:17`）**全仓零调用点**；`rag::` 在 `src/rag` 之外零引用（仅 `lib.rs:20` 声明）；`build_router` 无任何 rag 路由。
 - 深度分析喂给 AI 的内容**不含专利全文**：`pipeline/steps/analysis.rs:37 deep_analysis_simple`（拼装 `:77-113`）与 `pipeline/steps/deep_reasoning.rs:126 build_user_context`（`:164-179`）只喂用户创意的 title/description + `top_matches` 的摘要（snippet 源自 `pipeline/steps/search.rs:164` 的 `p.abstract_text`）。
-- 两处截断**违反 AGENTS.md §2.5 的数据完整性纪律**：`analysis.rs:50` 与 `deep_reasoning.rs:138` 用 `chars().take(150/120)`，不走 `ai::client::truncate_for_ai`（`:267`，带完整性提示的既有工具）。
+- **八处** `chars().take` 截断**违反 AGENTS.md §2.5 的数据完整性纪律**（不走 `ai::client::truncate_for_ai`（`:267`，带完整性提示的既有工具））：
+  - `analysis.rs:50`（snippet→AI prompt，150 字符）、`:156`（ai_analysis→AI prompt，500）、`:180`（snippet→FeatureCard description，300）、`:193`（snippet→core_structure，200）、`:250`（ai_analysis→AI prompt，2000）
+  - `deep_reasoning.rs:138`（snippet→AI prompt，120）
+  - `oa_response.rs:137`（snippet→AI prompt，80）
+  - `claim_tree.rs:24`（ai_analysis→AI prompt，800）
+  
+  其中 `analysis.rs:50`/`:180`/`:193`、`deep_reasoning.rs:138`、`oa_response.rs:137` 截断的是专利摘要喂给 AI 的内容；`analysis.rs:156`/`:250`、`claim_tree.rs:24` 截断的是 AI 自身产出再喂回。两类都违反 §2.5「传给 AI 的数据必须保留全文」纪律。
 
 ### 1.4 幻觉防线与出处（MB1 / MB4 的对象）
 
@@ -96,7 +102,8 @@
 
 ### MB0 · Embedder 归一 + char-boundary 安全 + 写入链接通（第一棒，无前置）
 
-- **范围**：① 三份 n-gram/TF 拷贝收敛为**单一出处**（建议留在 `src/vector/mod.rs`，另两处改为调用它；删除重复实现而不是加 `#[allow(dead_code)]`）；② 字节切片全部改字符边界安全（`Vec<char>` 窗口或 `char_indices`）；③ `compute_and_save_embedding` 接上真实调用点——**只接「新入库顺手算」**（挂在 `db/patent.rs::insert_patent` 之后的单一写入口侧），**禁止**在本包做全表批量回填（4.3GB 用户库，风险与耗时都不可控）；④ `/api/search/vector` 的查询向量与写入端**同函数同实现**（不留第二套标准）；⑤ 更正 `vector/mod.rs:77` 一带注释与规格书：写清「当前向量丢弃 term 映射 ⇒ 相似度不构成语义能力，本轮有意不修」。
+- **范围**：① 三份 n-gram/TF 拷贝收敛为**单一出处**（建议留在 `src/vector/mod.rs`，另两处改为调用它；删除重复实现而不是加 `#[allow(dead_code)]`）；② 字节切片全部改字符边界安全（`Vec<char>` 窗口或 `char_indices`）；③ `compute_and_save_embedding` 接上真实调用点——**只接「新入库顺手算」**（挂在 `db/patent.rs::insert_patent` 之后的单一写入口侧），**禁止**在本包做全表批量回填（4.3GB 用户库，风险与耗时都不可控）；
+  - ⚠️ **架构提示**：`compute_and_save_embedding` 签名需要 `&VectorIndex`，而 `insert_patent`（`db/patent.rs:7`）只有 `&self`（Database），`AppState`（`routes/mod.rs:385`）也不持有 `VectorIndex`。执行棒须在以下方案中选一并落注释：(a) 在调用方（如 `routes/patent.rs` / `search/providers/serpapi.rs`）于 `insert_patent` 返回后用默认参数构造 `VectorIndex` 再调 `compute_and_save_embedding`——**推荐**，不改 `insert_patent` 签名、不碰红线文件；(b) 在 `insert_patent` 内部内联嵌入计算——需让 `db/patent.rs` 依赖 `vector` 模块，且 tokenizer 参数硬编码在 DB 层。无论选哪个，embedding 失败**不得回滚**专利入库（embedding 是附带优化，不是入库前提），失败只 `tracing::warn!` 记账；④ `/api/search/vector` 的查询向量与写入端**同函数同实现**（不留第二套标准）；⑤ 更正 `vector/mod.rs:77` 一带注释与规格书：写清「当前向量丢弃 term 映射 ⇒ 相似度不构成语义能力，本轮有意不修」。
 - **必做取证**：中文 panic 回归用例（纯中文 3 字节 / 中英混排 / emoji / 对 `0..len` 全起点切片的循环用例），**先在旧实现上跑红、新实现跑绿**，把红→绿证据写进 PR body（这是本包唯一的「证明我改对了」的锚）。
 - **验收**：临时空库实例入库一条中文专利 → `count_embeddings()` 由 0 变 ≥1、`/api/search/vector` 的 `vector_count` 如实翻转（此前恒 0）；同一中文长文本反复 tokenize 零 panic；`routes/search.rs:852` 与 `rag/chunker.rs:57` 两处拷贝消失。
 - **门禁**：fmt / `clippy --all-targets -D warnings` / `cargo test`（基线 721，本包新增 N 条 ⇒ 721 + 2N 对账）；templates/static 零改动 ⇒ e2e 与 HTML 扫描按 DoD 不适用。
@@ -122,19 +129,8 @@
 
 ### MB3 · RAG 接线（切片→检索→组装→引用）（第三棒，依赖 MB0 + MB2）
 
-- **现状锚点**：`rag/mod.rs:16-18` 常量 `CHUNK_SIZE=800`/`CHUNK_OVERLAP=100`/`TOP_K=3`；`:21 build_chunks_from_patent(patent_id, _title, abstract_text, claims, description) -> Vec<PatentChunk>`（三段循环 abstract `:32` / claim `:48` / description `:64`，chunk id 形如 `{patent_id}-{index}`，`_title` 未用）；`:83 async rag_search(&AiClient,&Database,patent_id,query,system_prompt,max_tokens) -> Result<RagResult,String>`，`RagResult(:150)` = answer/citations/chunk_count/rag_enabled/rag_failed，AI 失败降级 `:111`；`chunker.rs:4 chunk_text(text,chunk_size,overlap)`（**按字节 `text[start..end]`**，边界回退找 `。/；/./\n`）、`:46 chunk_summary`、`:59 compute_chunk_embedding` 已委托 MB0 单一出处；`retriever.rs:8 retrieve_chunks(db,patent_id,query,top_k)`（走 `db.search_chunks`+`get_chunk`，错误 `Ok(vec![]) :20`）、`:49-56 retrieve_chunks_by_keyword` 参数全带 `_` 前缀、函数体只有 `Ok(vec![])`、注释 "placeholder for future use"、**连 TODO 都没有**；`assembler.rs:6 assemble_rag_prompt(query,&[ReferenceChunk],system_prompt,max_tokens)`（每条 `### [引用 N]（来源: X, 相似度: 0.xx）` `:40/:52`，剩余预算 <100 早停 `:33`）、`:86 build_citations`（取前 5、预览 50 字，孤儿函数）。表：`patent_chunks` 迁移 **v21**（`db/migrations.rs:529-551`；现最新 v23），列 `id/patent_id/chunk_index/source_type CHECK('abstract','claim','description')/content/embedding/model_name DEFAULT 'char-tfidf-v1'/created_at` + FK CASCADE，索引 `idx_chunk_patent`/`idx_chunk_source`；`db/rag.rs:17 save_patent_chunks(&self,patent_id,&[PatentChunk],model_name)`（先 DELETE 再事务 INSERT，blob 为 f32 LE）、`:96 get_chunk`、`:137 count_chunks`、`:149` 私有 `cosine_similarity`。引用类型 `types/search.rs:127 ReferenceChunk{id,patent_id,chunk_index,source_type,content,relevance_score}`（经 `pipeline/context.rs:29` re-export）。挂点候选：`pipeline/state.rs:6-24` 16 步，`ScoreNovelty(9)` 为 critical 且 quick 模式不跳（`is_critical :108`、`skipped_in_quick_mode :116-129`），派发在 `orchestrator/engine.rs:284-333`（`:309` ScoreNovelty、`:310` AiDeepAnalysis）；`PipelineContext` 定义 `pipeline/context.rs:228-316`，**现成字段无一可承载切片**（`evidence_chain :279`、`memory_entries :283`、`agent_outputs :295` 语义都不对）。检索复用：`routes/search.rs:755 vector_hybrid_search_json`（BM25 `:764`、向量 `:778-819`、cosine `:807`、RRF `:822-836`）、`vector/mod.rs:118 cosine_similarity`/`:133 search`/`:184 compute_and_save_embedding`/`:198 rrf_fuse`、`db/patent.rs:547 search_fts`（`:565 bm25(...)` 权重表）；`patents_fts` **无触发器**，同步只发生在 `db/patent.rs:35/:44` ⇒ 任何绕过 `insert_patent` 的全文 UPDATE 都会让 FTS 漂移。
-- **前置缺陷（必须先修，否则接线即运行错误，见 §1.6 f）**：`db/rag.rs:55 search_chunks` 的 SELECT 未取 `embedding` 却在 `:66 row.get(2)` 读第三列；`PatentChunk`（`db/rag.rs:4-11`）缺 `model_name`/`created_at`，与 v21 表列不对齐。修法是补 SELECT 列或改 row 索引 + struct 字段补齐，**禁止动迁移**（表已存在，加列即破红线）。
-- **范围**：
-  ① 写入：`db/patent.rs::insert_patent` 收尾（MB0 embedding 顺手算之后、`Ok(final_id)` 之前——守卫已 `drop`，可再取锁）调 `build_chunks_from_patent` + `save_patent_chunks`；失败静默降级只 `warn`；**禁止全表批量回填**（与 MB0 同纪律，用户库 4.3GB）。富化路径更新全文也会走到这里（`routes/patent.rs:314`/`:198` 均调 `insert_patent`），**无需另设挂点**；`save_patent_chunks` 的「先 DELETE 再建块」天然幂等。
-  ② 引用可反查（§1.6 h）：给 `RankedMatch`（`pipeline/context.rs:57-66`）加 `#[serde(default)] patent_id: Option<String>`，本地命中从 `steps/search.rs:162` 的 `patent_local_{patent_number}` 反解或直接取库 id；在线/SerpAPI 命中（`steps/search.rs:117/:208`）无库 id 时如实留 `None`，**禁止伪造**。新增字段若进对外 JSON，必须 `skip_serializing_if` 或保证既有键集合不变（沿 MB0「出参 7 键形状锁定」单测的做法）。
-  ③ 检索 + 组装：在 `steps/scoring.rs:13 execute`（critical、quick 不跳、此时 `ctx.top_matches` 已就绪）取 top-N 专利切片，塞进 `PipelineContext` 新字段 `#[serde(default)] rag_chunks: Vec<ReferenceChunk>`；prompt 组装**必须走 `assembler::assemble_rag_prompt`（`assembler.rs:6`）**，相似度**必须复用 `vector::VectorIndex::cosine_similarity`（`vector/mod.rs:118`）**——禁止在 rag 侧或 pipeline 侧新写第二套拼装/打分（`db/rag.rs:149` 那份私有 cosine 本包一并收敛或注明为何保留）。不想动 scoring 的替代挂点是 `engine.rs:310` 分支前取切片，**二选一写进 PR body，禁止两处都接**。
-  ④ 空占位与孤儿销账：`retriever::retrieve_chunks_by_keyword`（`:49-56`）要么真实现要么删除并连带删调用点，**禁止留装饰性空函数**；`assembler::build_citations :86` 与 `mod.rs:133 build_fallback_citations` 二者取一（建议 assembler 转正、fallback 退役），禁止留孤儿。
-  ⑤ 截断同批改：`analysis.rs:49-50`（`snippet.len() > 150` 后 `chars().take(150)`，注意 `len()` 是字节）与 `deep_reasoning.rs:137-138`（120）→ `ai::client::truncate_for_ai`（`:267`，超限自动追加「原文共 N 字符…禁止推测补全」提示 `:273-276`）。**两处同改**，但按 §1.6 e，`analysis.rs:37 deep_analysis_simple` 是零调用点死码，验收只以 `deep_reasoning` 侧为准；死码**本包禁止顺手删除**（删了改变门禁计数），登记进 §4 另议。
-  ⑥ 无全文降级：取不到切片时退回摘要档并在上下文如实标注「未取到全文的原因」（沿用 MB2 的 `reason_code`），**禁止把「没取到」写成「没有相关内容」**。
-  ⑦ 红线破口预告：`src/main.rs` 加 `pub mod rag;`（§1.6 g + §2.1 授权，仅限模块声明行）。
-- **必做取证**：红→绿锚 = 接线前深度模式 prompt 字符串断言**不含**任何 `### [引用 N]` 切片段，接线后含 ≥5 段且逐条能 `db.get_chunk(id)` 反查到 `patent_chunks` 行（`:memory:` 实例即可）；切片端中文 panic 回归（`chunk_text` 仍是字节切法 + 边界回退，须跑纯中文/中英混排/emoji 与「越界起点」循环用例，证明本包没引入 MB0 同类缺陷）；`count_chunks` 接线前后对账（0 → >0）。
-- **验收（无 Key 环境）**：① 深度模式报告上下文出现 ≥5 篇专利全文片段引用，每条引用能反查到 `patent_chunks` 的行且带专利号 + 段/权号；② 一条专利入库 ⇒ 同时产生 embedding **和** chunks（两档都在单一写入口顺手算）；③ 空占位/孤儿函数 grep 为零；④ rag 侧无第二套 cosine/拼装实现；⑤ `analysis.rs` + `deep_reasoning.rs` 两处 `chars().take` 全部消失（grep 断言）。其余 `chars().take(300/500/2000)`（`analysis.rs:156/:180/:193/:250`）**本包不动**，登记进 MB5 改造面。
-- **门禁**：fmt / clippy / `cargo test`；**基线跳变须逐条归因**：加了 `mod rag` 后，`rag/` 既有单测（含 MB0 那条委托用例）会在 bin 侧现身 ⇒ 计数出现「非新增测试导致的 +N」，按 §3.1 口径写明，**禁止为凑基线增删测试**。templates/static 零改动 ⇒ e2e / HTML 扫描不适用。
+- **范围**：把已有但未接线的 `src/rag/` 真正挂上：① 入库/富化时写 `patent_chunks`（单一写入口侧，与 MB0 同一挂点纪律）；② 深度分析前自动取 top-N 专利的全文切片进 prompt，每条切片带**可回溯引用编号**（专利号 + 段/权号）；③ **全部八处** `chars().take` 截断改走 `truncate_for_ai`（`analysis.rs:50/156/180/193/250`、`deep_reasoning.rs:138`、`oa_response.rs:137`、`claim_tree.rs:24`），**八处同批改**（少改一处则该处仍违规）；④ 无全文时降级为摘要档并在上下文里如实标注（不得静默把「没取到」变成「没有相关内容」）。
+- **验收（无 Key 环境）**：一份真实中文专利库状态下，深度模式报告上下文里出现 **≥5 篇专利全文片段引用**，每条引用能反查到 `patent_chunks` 的行；`retriever::retrieve_chunks_by_keyword` 的空占位要么实现要么删除并销账（**禁止留装饰性空函数**）。
 
 ### MB4 · 出处标注体系（第四棒，依赖 MB3 的引用编号；**唯一获准破前端红线的包**）
 
