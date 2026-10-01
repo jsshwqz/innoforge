@@ -8,12 +8,14 @@
 //! - patent: 专利分析（摘要/权利要求/侵权/对比/批量）
 //! - fact_check: OA 分析事实校验层（防幻觉/A33合规/数据来源）
 //! - idea: 创意分析与图片描述
+//! - providers: 御三家预设配置（OpenAI + Claude + Gemini）
 
 mod chat;
 mod client;
 mod fact_check;
 mod idea;
 pub mod patent;
+mod providers;
 mod tests;
 
 pub(crate) use client::{
@@ -25,3 +27,5 @@ pub(crate) use client::{
 pub use client::{safe_truncate_chars, truncate_for_ai, AiClient, AiUsageInfo, Message};
 #[allow(unused_imports)]
 pub use fact_check::{check_oa_analysis, format_report, FactCheckReport, FactWarning};
+#[allow(unused_imports)]
+pub use providers::{find_preset, preset_ids, ProviderPreset, TOP3_PRESETS};
