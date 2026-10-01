@@ -1,6 +1,5 @@
 use super::{efld, AppState};
 use crate::patent::*;
-use crate::search::enrichment::extract_section;
 use axum::{
     extract::{Path, Query, State},
     http::{header, StatusCode},
@@ -586,46 +585,11 @@ pub async fn api_patent_pdf(
             patent.patent_number
         );
 
-        // Try free Google Patents HTML scrape first (no API key needed)
-        let is_cn = patent.country == "CN" || patent.patent_number.starts_with("CN");
-        let cn_needs_refetch = is_cn
-            && patent.claims.len() > 50
-            && !patent
-                .claims
-                .chars()
-                .any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c));
-        if patent.description.len() <= 50 || patent.claims.len() <= 50 || cn_needs_refetch {
-            let lang = if is_cn { "zh" } else { "en" };
-            let gp_url = format!(
-                "https://patents.google.com/patent/{}/{}",
-                patent.patent_number, lang
-            );
-            let client = reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(20))
-                .build()
-                .unwrap_or_default();
-            if let Ok(resp) = client
-                .get(&gp_url)
-                .header(
-                    "User-Agent",
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                )
-                .send()
-                .await
-            {
-                if let Ok(html) = resp.text().await {
-                    if patent.description.is_empty() || patent.description.len() < 50 {
-                        if let Some(desc) = extract_section(&html, "description") {
-                            patent.description = desc;
-                        }
-                    }
-                    if patent.claims.is_empty() || patent.claims.len() < 50 {
-                        if let Some(claims) = extract_section(&html, "claims") {
-                            patent.claims = claims;
-                        }
-                    }
-                }
-            }
+        // MB2: 调用统一富化核心（合并第三份复制实现）
+        let _ = crate::search::enrichment::enrich_patent_free(&s.db, &id).await;
+        // 重新读取富化后的专利
+        if let Ok(Some(p)) = s.db.get_patent(&id) {
+            patent = p;
         }
 
         // Try SerpAPI for richer data if free scrape didn't get enough
