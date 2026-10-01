@@ -392,7 +392,7 @@
     function uploadMyPatent() {
         triggerFileSelect(async function(file) {
             var tagEl = document.getElementById('my-file-tag');
-            tagEl.innerHTML = '<span style="color:#8b949e;font-size:12px;">' + t('common.extracting') + '</span>';
+            tagEl.innerHTML = DOMPurify.sanitize('<span style="color:#8b949e;font-size:12px;">' + t('common.extracting') + '</span>');
             uploadedFileObjects['my'] = file;
             try {
                 var result = await extractFile(file);
@@ -405,7 +405,7 @@
                     + '<span class="tag-remove" onclick="clearMyPatent()">&times;</span></span>' + previewBtn;
                 document.getElementById('my-patent').disabled = true;
             } catch (e) {
-                tagEl.innerHTML = '<span style="color:#f85149;font-size:12px;">' + escapeHtml(e.message) + '</span>';
+                tagEl.innerHTML = DOMPurify.sanitize('<span style="color:#f85149;font-size:12px;">' + escapeHtml(e.message) + '</span>');
             }
         });
     }
@@ -555,7 +555,7 @@
     function uploadOA() {
         triggerFileSelect(async function(file) {
             var tagEl = document.getElementById('oa-file-tag');
-            tagEl.innerHTML = '<span style="color:#8b949e;font-size:12px;">' + t('common.extracting') + '</span>';
+            tagEl.innerHTML = DOMPurify.sanitize('<span style="color:#8b949e;font-size:12px;">' + t('common.extracting') + '</span>');
             try {
                 var result = await extractFile(file);
                 uploadedData['oa'] = result;
@@ -566,7 +566,7 @@
                 // Auto-detect patent number from OA text
                 autoDetectPatentFromOA(result.content);
             } catch (e) {
-                tagEl.innerHTML = '<span style="color:#f85149;font-size:12px;">' + escapeHtml(e.message) + '</span>';
+                tagEl.innerHTML = DOMPurify.sanitize('<span style="color:#f85149;font-size:12px;">' + escapeHtml(e.message) + '</span>');
             }
         });
     }
@@ -666,7 +666,7 @@
         triggerFileSelect(async function(file) {
             var existing = row.querySelector('.file-tag-container') || document.createElement('span');
             existing.className = 'file-tag-container';
-            existing.innerHTML = '<span style="color:#8b949e;font-size:12px;">' + t('common.extracting') + '</span>';
+            existing.innerHTML = DOMPurify.sanitize('<span style="color:#8b949e;font-size:12px;">' + t('common.extracting') + '</span>');
             row.appendChild(existing);
             try {
                 var result = await extractFile(file);
@@ -676,7 +676,7 @@
                     + '<span class="tag-remove" onclick="clearRefUpload(\'' + idx + '\')">&times;</span></span>';
                 row.querySelector('.ref-input').disabled = true;
             } catch (e) {
-                existing.innerHTML = '<span style="color:#f85149;font-size:12px;">' + escapeHtml(e.message) + '</span>';
+                existing.innerHTML = DOMPurify.sanitize('<span style="color:#f85149;font-size:12px;">' + escapeHtml(e.message) + '</span>');
             }
         });
     }
@@ -931,7 +931,7 @@
         var container = document.getElementById('result');
         var btn = document.getElementById('btn-analyze');
         if (btn) btn.disabled = true;
-        container.innerHTML = '<div class="result-box" style="border-color:#30363d;"><div class="result-content" id="streaming-result" style="padding:16px;font-size:13px;line-height:1.8;color:#c9d1d9;white-space:pre-wrap;word-break:break-word;max-height:70vh;overflow-y:auto;font-family:Consolas,monospace;"></div></div>';
+        container.innerHTML = DOMPurify.sanitize('<div class="result-box" style="border-color:#30363d;"><div class="result-content" id="streaming-result" style="padding:16px;font-size:13px;line-height:1.8;color:#c9d1d9;white-space:pre-wrap;word-break:break-word;max-height:70vh;overflow-y:auto;font-family:Consolas,monospace;"></div></div>');
 
         // Try non-streaming POST first (DeepSeek 流式返回内容不同)
         try {
@@ -1142,7 +1142,7 @@
         }
 
         html += '</div></div>';
-        container.innerHTML = html;
+        container.innerHTML = DOMPurify.sanitize(html);
         clearLoading();
     }
 
@@ -1250,7 +1250,7 @@
 
         html += '</div>'; // end result-box
 
-        container.innerHTML = html;
+        container.innerHTML = DOMPurify.sanitize(html);
         updateCurrentOADiscussionExportButton();
         loadOADiscussionHistory();
         initDiscQuoteEvents(); // 重新绑定引用按钮到新的 #oa-discuss-messages
@@ -1502,7 +1502,7 @@
         var div = document.createElement('div');
         div.id = id;
         div.style.cssText = 'margin-bottom:12px;padding:10px 12px;background:' + bg + ';border:1px solid #30363d;border-radius:6px;font-size:13px;line-height:1.7;';
-        div.innerHTML = '<div style="color:' + color + ';font-weight:600;margin-bottom:4px;font-size:12px;">' + label + '</div><div style="color:#c9d1d9;">' + escapeHtml(content) + '</div>';
+        div.innerHTML = DOMPurify.sanitize('<div style="color:' + color + ';font-weight:600;margin-bottom:4px;font-size:12px;">' + label + '</div><div style="color:#c9d1d9;">' + escapeHtml(content) + '</div>');
         container.appendChild(div);
         container.scrollTop = container.scrollHeight;
         return id;
@@ -1515,7 +1515,7 @@
         var section5Area = document.getElementById('section5-content');
         var overlayDiv = null;
         if (section5Area) {
-            section5Area.innerHTML = '<div style="color:#8b949e;padding:16px;font-family:Consolas,monospace;font-size:13px;white-space:pre-wrap;" id="section5-stream"></div>';
+            section5Area.innerHTML = DOMPurify.sanitize('<div style="color:#8b949e;padding:16px;font-family:Consolas,monospace;font-size:13px;white-space:pre-wrap;" id="section5-stream"></div>');
         } else {
             overlayDiv = document.createElement('div');
             overlayDiv.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);z-index:10000;display:flex;align-items:center;justify-content:center;padding:40px;overflow:auto;';
@@ -1599,14 +1599,14 @@
 
             // Update section 5 area with rendered markdown
             if (section5Area) {
-                section5Area.innerHTML = '<div style="padding:12px 14px;font-size:13px;line-height:1.8;color:#c9d1d9;">' + renderMarkdown(fullText) + '</div>';
+                section5Area.innerHTML = DOMPurify.sanitize('<div style="padding:12px 14px;font-size:13px;line-height:1.8;color:#c9d1d9;">' + renderMarkdown(fullText) + '</div>');
                 // Add export button
                 section5Area.innerHTML += '<div style="padding:8px 14px;border-top:1px solid #30363d;text-align:right;">' +
                     '<button onclick="exportGeneratedResponse(this)" style="background:#f0883e;color:#fff;border:none;border-radius:6px;padding:9px 18px;cursor:pointer;font-size:14px;font-weight:600;">📥 导出 Word 答复书</button></div>';
             } else if (overlayDiv) {
                 overlayDiv.querySelector('h3').textContent = '✅ 答复书已生成';
                 var contentDiv = overlayDiv.querySelector('#overlay-stream');
-                contentDiv.innerHTML = renderMarkdown(fullText);
+                contentDiv.innerHTML = DOMPurify.sanitize(renderMarkdown(fullText));
                 contentDiv.style.whiteSpace = 'normal';
                 contentDiv.style.fontFamily = 'system-ui, sans-serif';
                 contentDiv.style.fontSize = '14px';
@@ -1787,7 +1787,7 @@
         var btn = document.getElementById('btn-check-amendments');
         btn.disabled = true;
         var resultDiv = document.getElementById('amendment-result');
-        resultDiv.innerHTML = '<div style="color:#8b949e;text-align:center;padding:20px;">⏳ 审查中...</div>';
+        resultDiv.innerHTML = DOMPurify.sanitize('<div style="color:#8b949e;text-align:center;padding:20px;">⏳ 审查中...</div>');
 
         try {
             var resp = await fetch('/api/ai/check-amendments', {
@@ -1797,12 +1797,12 @@
             });
             var data = await resp.json();
             if (data.error) {
-                resultDiv.innerHTML = '<div style="color:#f85149;">' + escapeHtml(data.error) + '</div>';
+                resultDiv.innerHTML = DOMPurify.sanitize('<div style="color:#f85149;">' + escapeHtml(data.error) + '</div>');
             } else {
-                resultDiv.innerHTML = '<div class="result-box" style="margin-top:12px;">' + renderMarkdown(data.analysis) + '</div>';
+                resultDiv.innerHTML = DOMPurify.sanitize('<div class="result-box" style="margin-top:12px;">' + renderMarkdown(data.analysis) + '</div>');
             }
         } catch (e) {
-            resultDiv.innerHTML = '<div style="color:#f85149;">' + escapeHtml(e.message) + '</div>';
+            resultDiv.innerHTML = DOMPurify.sanitize('<div style="color:#f85149;">' + escapeHtml(e.message) + '</div>');
         }
         btn.disabled = false;
     }
@@ -1816,7 +1816,7 @@
         argLibVisible = !argLibVisible;
         if (argLibVisible) {
             toggle.textContent = '▲';
-            content.innerHTML = buildArgLibrary();
+            content.innerHTML = DOMPurify.sanitize(buildArgLibrary());
         } else {
             toggle.textContent = '▼';
             content.innerHTML = '';
@@ -2102,7 +2102,7 @@
         if (daysLeft > 0) text += '（剩余 ' + daysLeft + ' 天）';
         else if (daysLeft === 0) text += '（今天截止！）';
         else text += '（已逾期 ' + Math.abs(daysLeft) + ' 天）';
-        info.innerHTML = '📅 ' + text;
+        info.innerHTML = DOMPurify.sanitize('📅 ' + text);
         info.style.color = color;
         // 进度条
         var bar = document.getElementById('deadline-bar') || (function(){
@@ -2166,7 +2166,7 @@
         }
         html += '</div>';
         var resultDiv = document.getElementById('amendment-result');
-        resultDiv.innerHTML = html;
+        resultDiv.innerHTML = DOMPurify.sanitize(html);
     }
 
     // ── P1a: Mapping Matrix ──
@@ -2329,14 +2329,14 @@
         var container = document.getElementById('discussion-messages');
         var userDiv = document.createElement('div');
         userDiv.className = 'msg msg-user';
-        userDiv.innerHTML = '<div class="msg-bubble">' + escapeHtml(text) + '</div>';
+        userDiv.innerHTML = DOMPurify.sanitize('<div class="msg-bubble">' + escapeHtml(text) + '</div>');
         container.appendChild(userDiv);
 
         // loading indicator
         var loadDiv = document.createElement('div');
         loadDiv.className = 'msg msg-ai';
         loadDiv.id = 'ai-loading-disc';
-        loadDiv.innerHTML = '<div class="msg-bubble">' + t('common.thinking') + '</div>';
+        loadDiv.innerHTML = DOMPurify.sanitize('<div class="msg-bubble">' + t('common.thinking') + '</div>');
         container.appendChild(loadDiv);
         container.scrollTop = container.scrollHeight;
 
@@ -2385,7 +2385,7 @@
 
             var aiDiv = document.createElement('div');
             aiDiv.className = 'msg msg-ai';
-            aiDiv.innerHTML = '<div class="msg-bubble">' + renderMarkdown(content) + '</div>';
+            aiDiv.innerHTML = DOMPurify.sanitize('<div class="msg-bubble">' + renderMarkdown(content) + '</div>');
             container.appendChild(aiDiv);
             container.scrollTop = container.scrollHeight;
             showDiscussionExportButton();
@@ -2395,7 +2395,7 @@
             if (e.name === 'AbortError') return;
             var errDiv = document.createElement('div');
             errDiv.className = 'msg msg-ai';
-            errDiv.innerHTML = '<div class="msg-bubble" style="color:#f85149;">' + t('oar.fail') + ': ' + escapeHtml(e.message) + '</div>';
+            errDiv.innerHTML = DOMPurify.sanitize('<div class="msg-bubble" style="color:#f85149;">' + t('oar.fail') + ': ' + escapeHtml(e.message) + '</div>');
             container.appendChild(errDiv);
         } finally {
             if (discussionAbortController === controller) {
@@ -2591,7 +2591,7 @@
         if (existing) existing.remove();
         var wrapper = document.createElement('div');
         wrapper.className = 'oa-history-section';
-        wrapper.innerHTML = html;
+        wrapper.innerHTML = DOMPurify.sanitize(html);
         sidebar.appendChild(wrapper);
     }
 
@@ -2662,21 +2662,21 @@
         if (!listEl) return;
         var patentNum = getPatentNumberFromUrl();
         if (!patentNum) {
-            listEl.innerHTML = '<div style="padding:12px;color:#8b949e;text-align:center;">请先打开一个专利</div>';
+            listEl.innerHTML = DOMPurify.sanitize('<div style="padding:12px;color:#8b949e;text-align:center;">请先打开一个专利</div>');
             return;
         }
-        listEl.innerHTML = '<div style="padding:12px;color:#8b949e;text-align:center;">加载中...</div>';
+        listEl.innerHTML = DOMPurify.sanitize('<div style="padding:12px;color:#8b949e;text-align:center;">加载中...</div>');
         try {
             var resp = await fetch('/api/oa/discussions/' + encodeURIComponent(patentNum));
             var data = await resp.json();
             if (!resp.ok || data.status !== 'ok') {
-                listEl.innerHTML = '<div style="padding:12px;color:#8b949e;text-align:center;">' + escapeHtml(data.error || '加载失败') + '</div>';
+                listEl.innerHTML = DOMPurify.sanitize('<div style="padding:12px;color:#8b949e;text-align:center;">' + escapeHtml(data.error || '加载失败') + '</div>');
                 return;
             }
             var discussions = data.discussions || [];
             if (discussions.length === 0) {
                 var t = window.__t || function(k) { return k; };
-                listEl.innerHTML = '<div style="padding:12px;color:#8b949e;text-align:center;">' + (t('oar.discussHistoryEmpty') || '暂无历史讨论记录') + '</div>';
+                listEl.innerHTML = DOMPurify.sanitize('<div style="padding:12px;color:#8b949e;text-align:center;">' + (t('oar.discussHistoryEmpty') || '暂无历史讨论记录') + '</div>');
                 return;
             }
             var html = '';
@@ -2693,9 +2693,9 @@
                 html += '<span style="font-size:11px;color:#8b949e;margin-left:8px;">' + escapeHtml(created) + '</span></div>';
                 html += '<span style="font-size:11px;color:#8b949e;">' + msgs + ' 条</span></div>';
             });
-            listEl.innerHTML = html;
+            listEl.innerHTML = DOMPurify.sanitize(html);
         } catch (e) {
-            listEl.innerHTML = '<div style="padding:12px;color:#8b949e;text-align:center;">加载失败</div>';
+            listEl.innerHTML = DOMPurify.sanitize('<div style="padding:12px;color:#8b949e;text-align:center;">加载失败</div>');
         }
     }
 
@@ -2713,7 +2713,7 @@
         var container = document.getElementById('oa-discuss-messages');
         if (container) {
             var t = window.__t || function(k) { return k; };
-            container.innerHTML = '<div style="color:#8b949e;font-size:13px;padding:8px;text-align:center;">🤖 ' + (t('oar.discussReady') || 'AI 分析已完成，请审阅。有任何疑问可以在此讨论。确认无误后点击下方按钮生成答复书。') + '</div>';
+            container.innerHTML = DOMPurify.sanitize('<div style="color:#8b949e;font-size:13px;padding:8px;text-align:center;">🤖 ' + (t('oar.discussReady') || 'AI 分析已完成，请审阅。有任何疑问可以在此讨论。确认无误后点击下方按钮生成答复书。') + '</div>');
         }
     }
 
@@ -2983,7 +2983,7 @@
         html += '</div>';
 
         html += '</div>';
-        container.innerHTML = html;
+        container.innerHTML = DOMPurify.sanitize(html);
         oaInputHistory = initChatHistory('oa-discuss-input');
 
         // 聚焦输入框

@@ -1624,6 +1624,16 @@ pub async fn api_ai_oa_generate_response_letter(
         .read()
         .unwrap_or_else(|e| e.into_inner())
         .ai_client();
+    // MC2: 生成答复书前做事实核查——致命档拒绝生成
+    let pre_check = check_oa_analysis(&final_analysis, &office_action, &final_analysis);
+    if pre_check.score <= 65.0 {
+        let reason = format_report(&pre_check);
+        return Sse::new(error_sse(format!(
+            "[ERROR] 事实核查未通过（得分 {}/100），拒绝生成含编造内容的答复书。\n\n{}",
+            pre_check.score, reason
+        )));
+    }
+
     let mut rx = ai.generate_response_letter_stream(
         &final_analysis,
         &discussion,
@@ -1633,6 +1643,7 @@ pub async fn api_ai_oa_generate_response_letter(
     );
 
     let stream = async_stream::stream! {
+        let mut full_text = String::new();
         while let Some(chunk) = rx.recv().await {
             if chunk.starts_with("[ERROR]") {
                 yield Ok(Event::default().event("error").data(chunk));
@@ -1640,8 +1651,13 @@ pub async fn api_ai_oa_generate_response_letter(
             }
             // Keep paragraph boundaries while preserving a single SSE data line.
             let escaped = chunk.replace('\r', "").replace('\n', "\\n");
+            full_text.push_str(&escaped);
             yield Ok(Event::default().data(escaped));
         }
+        // MC2: 答复书生成后追加事实核查报告
+        let post_check = check_oa_analysis(&full_text, &office_action, &full_text);
+        let fact_text = format!("\\n\\n## AI 事实核查（请人工复核）\\n{}", format_report(&post_check));
+        yield Ok(Event::default().data(fact_text));
         yield Ok(Event::default().event("done").data("[DONE]"));
     };
 
@@ -1942,6 +1958,14 @@ pub async fn api_ai_oa_discuss(
             let sanitized = chunk.replace(['\n', '\r'], " ");
             accumulated_response.push_str(&sanitized);
             yield Ok(Event::default().data(sanitized));
+        }
+
+        // MC2: 讨论回复事实核查——附到讨论消息后
+        let disc_fact_report = check_oa_analysis(&accumulated_response, &analysis_text, &accumulated_response);
+        if !disc_fact_report.warnings.is_empty() {
+            let fact_text = format!("\n\n## AI 事实核查（请人工复核）\n{}", format_report(&disc_fact_report));
+            let fact_sse = fact_text.replace(['\n', '\r'], " ");
+            yield Ok(Event::default().data(fact_sse));
         }
 
         // P0: done 事件携带 discussion_id，确保前端可捕获

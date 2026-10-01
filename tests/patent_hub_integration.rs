@@ -856,7 +856,8 @@ async fn prior_art_cluster_integration_with_sample_ranked_results() {
         },
     ];
 
-    prior_art_cluster::execute(&mut ctx).await.unwrap();
+    let db = std::sync::Arc::new(Database::init(":memory:").unwrap());
+    prior_art_cluster::execute(&mut ctx, &db).await.unwrap();
 
     // p1 and p2 share many tokens (neural, deep, learning, parking, detection) — should cluster
     // p3 is blockchain-related — separate cluster

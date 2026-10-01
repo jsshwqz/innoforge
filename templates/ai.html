@@ -300,7 +300,7 @@
         container.className = 'msg user';
         var formatted = formatUserContent(text);
         if (formatted) {
-            container.innerHTML = formatted;
+            container.innerHTML = DOMPurify.sanitize(formatted);
         } else {
             container.textContent = text;
         }

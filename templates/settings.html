@@ -444,7 +444,7 @@
 
             // 清空模型下拉，等待自动查询填充
             var modelSel = document.getElementById('ai-model');
-            modelSel.innerHTML = '<option value="">加载中...</option>';
+            modelSel.innerHTML = DOMPurify.sanitize('<option value="">加载中...</option>');
             document.getElementById('ai-model-expert').innerHTML = '<option value="">加载中...</option>';
 
             // 自动从 API 查询真实模型列表
@@ -1041,7 +1041,7 @@
         async function detectGcloud() {
             var statusEl = document.getElementById('gcloud-status');
             var loginBtn = document.getElementById('gcloud-login-btn');
-            statusEl.innerHTML = '检测中...';
+            statusEl.innerHTML = DOMPurify.sanitize('检测中...');
             try {
                 const res = await fetch('/api/auth/gcloud/status');
                 const data = await res.json();
@@ -1072,7 +1072,7 @@
                 } else if (data.is_gcloud_mode && data.has_token && data.token_expired) {
                     html += '<span style="color:#f0ad4e;">🔄 令牌已过期，点击"通过 gcloud CLI 登录"刷新</span>';
                 }
-                statusEl.innerHTML = html;
+                statusEl.innerHTML = DOMPurify.sanitize(html);
             } catch (e) {
                 statusEl.innerHTML = '<span style="color:#f87171;">❌ 检测失败: ' + DOMPurify.sanitize(e.message) + '</span>';
             }
@@ -1110,7 +1110,7 @@
         async function detectGeminiCli() {
             var statusEl = document.getElementById('gemini-cli-status');
             var toggle = document.getElementById('gemini-cli-toggle');
-            statusEl.innerHTML = '检测中...';
+            statusEl.innerHTML = DOMPurify.sanitize('检测中...');
             try {
                 const res = await fetch('/api/settings');
                 const data = await res.json();
