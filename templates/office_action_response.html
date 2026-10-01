@@ -707,6 +707,41 @@
         return val || null;
     }
 
+    // UA1: 从 OA 文本中自动抽取对比文件公开号
+    function autoExtractPublicationNumbers(text) {
+        var patterns = [
+            /CN\d{8,12}[A-Z]\d?/g,
+            /US\d{6,12}[A-Z]\d?/g,
+            /EP\d{6,8}[A-Z]\d?/g,
+            /JP\d{4,8}[A-Z]/g,
+            /KR\d{6,10}[A-Z]/g,
+            /WO\d{4}\/\d{4,6}[A-Z]\d?/g
+        ];
+        var contextPattern = /(?:对比文件|引证文献|D|参考文献)\s*[1-9]\s*[:：]/g;
+        var contextPositions = [];
+        var m;
+        while ((m = contextPattern.exec(text)) !== null) {
+            contextPositions.push(m.index);
+        }
+        var results = [];
+        var seen = {};
+        patterns.forEach(function(pat) {
+            pat.lastIndex = 0;
+            while ((m = pat.exec(text)) !== null) {
+                var pubNum = m[0];
+                var pubStart = m.index;
+                var nearContext = contextPositions.some(function(cp) {
+                    return Math.abs(pubStart - cp) < 80;
+                });
+                if (nearContext && !seen[pubNum]) {
+                    seen[pubNum] = true;
+                    results.push(pubNum);
+                }
+            }
+        });
+        return results;
+    }
+
     function getRefs() {
         var refs = [];
         var inputs = document.querySelectorAll('.ref-input');
@@ -719,6 +754,22 @@
                 var val = inputs[i] ? inputs[i].value.trim() : '';
                 if (val) refs.push(val);
             }
+        }
+        // UA1: 自动检测 OA 文本中的公开号，补充用户未手贴的对比文件
+        var oaText = '';
+        var oaInput = document.getElementById('oa-text');
+        if (oaInput) oaText = oaInput.value || '';
+        if (oaText.length > 50) {
+            var autoPubs = autoExtractPublicationNumbers(oaText);
+            autoPubs.forEach(function(pub) {
+                // 仅添加用户未手贴的公开号
+                var alreadyIncluded = refs.some(function(r) {
+                    return typeof r === 'string' && r.indexOf(pub) >= 0;
+                });
+                if (!alreadyIncluded) {
+                    refs.push(pub);
+                }
+            });
         }
         return refs;
     }

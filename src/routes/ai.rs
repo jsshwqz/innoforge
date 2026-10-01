@@ -1,6 +1,7 @@
 use super::{image_data_uri, AppState};
 use crate::ai::{
     check_oa_analysis, format_report, oa_capacity_error, truncate_for_ai, Message,
+    patent::extract_publication_numbers,
     OA_DISCUSSION_ANALYSIS_MAX_CHARS, OA_DISCUSSION_HISTORY_MAX_CHARS, OA_DISCUSSION_OA_MAX_CHARS,
 };
 use crate::patent::*;
@@ -1373,6 +1374,53 @@ pub async fn api_ai_office_action_response_stream(
             }
         }
         info
+    };
+
+    // UA1: 自动抽取 OA 文本中的对比文件公开号，补充用户未手贴的对比文献
+    let refs_info = {
+        let auto_pubs = extract_publication_numbers(&oa_text);
+        if auto_pubs.is_empty() {
+            refs_info
+        } else {
+            // 提取用户已提供的公开号（去重用）
+            let user_pubs: std::collections::HashSet<&str> = auto_pubs
+                .iter()
+                .map(|(p, _)| p.as_str())
+                .collect();
+            // 实际上需要检查 refs_info 中已有的公开号
+            let mut supplemented = refs_info.clone();
+            let mut idx = 1;
+            for (pub_num, label) in &auto_pubs {
+                // 如果用户已手贴该公开号，跳过（手贴优先级更高）
+                if refs_info.contains(pub_num) {
+                    continue;
+                }
+                // 尝试从数据库获取
+                match s.db.get_patent(pub_num) {
+                    Ok(Some(p)) => {
+                        supplemented.push_str(&format!(
+                            "### 自动抓取对比文献 D{idx} — {pub_num}（{label}）\n                             专利号：{}\n标题：{}\n摘要：{}\n权利要求：\n{}\n说明书（前部分）：\n{}\n\n",
+                            p.patent_number, p.title, p.abstract_text, p.claims,
+                            truncate_for_ai(&p.description, 200_000)
+                        ));
+                        idx += 1;
+                    }
+                    Ok(None) => {
+                        supplemented.push_str(&format!(
+                            "### 自动抓取对比文献 D{idx} — {pub_num}（{label}）\n                             [reason_code: not_found] 未在数据库中找到该公开号，请手贴全文\n\n"
+                        ));
+                        idx += 1;
+                    }
+                    Err(_) => {
+                        supplemented.push_str(&format!(
+                            "### 自动抓取对比文献 D{idx} — {pub_num}（{label}）\n                             [reason_code: network_error] 数据库查询失败，请手贴全文\n\n"
+                        ));
+                        idx += 1;
+                    }
+                }
+            }
+            supplemented
+        }
     };
 
     let oa_type = req

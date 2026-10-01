@@ -102,3 +102,70 @@ mod oa_capacity_tests {
         assert!(error.contains("actual_chars=600001"));
     }
 }
+
+#[cfg(test)]
+mod ua4_refs_truncation_tests {
+    use crate::ai::client::truncate_for_ai;
+
+    /// V4 验收：references_info 超 5000 字符时，AI 输入含数据完整性尾注（选 A）
+    #[test]
+    fn ua4_refs_over_5000_gets_integrity_tail() {
+        let refs = "对比文件1：CN113224379A ".repeat(300); // ~6000 chars
+        assert!(refs.chars().count() > 5000);
+        let out = truncate_for_ai(&refs, 5000);
+        assert!(out.chars().count() > 5000);
+        assert!(out.contains("【数据完整性提示"));
+        assert!(out.contains("禁止推测"));
+    }
+
+    /// V4 边界：恰好 5000 字符不截断
+    #[test]
+    fn ua4_refs_exactly_5000_no_truncation() {
+        let refs = "a".repeat(5000);
+        let out = truncate_for_ai(&refs, 5000);
+        assert_eq!(out, refs);
+    }
+}
+
+#[cfg(test)]
+mod ua1_publication_number_tests {
+    use crate::ai::patent::extract_publication_numbers;
+
+    #[test]
+    fn ua1_extracts_cn_publication_number() {
+        let oa = "对比文件1：CN113224379A\n本申请涉及一种存储装置。";
+        let result = extract_publication_numbers(oa);
+        assert!(!result.is_empty());
+        assert_eq!(result[0].0, "CN113224379A");
+    }
+
+    #[test]
+    fn ua1_extracts_multiple_numbers() {
+        let oa = "对比文件1：CN113224379A\n对比文件2：US20210345678A1\nD3：EP3445287B1";
+        let result = extract_publication_numbers(oa);
+        assert_eq!(result.len(), 3);
+    }
+
+    #[test]
+    fn ua1_ignores_numbers_without_context() {
+        // 公开号出现在正文中但无引出语上下文
+        let oa = "本申请与CN113224379A不同，因为增加了特征X。";
+        let result = extract_publication_numbers(oa);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn ua1_deduplicates_same_number() {
+        let oa = "对比文件1：CN113224379A\n对比文件2：CN113224379A";
+        let result = extract_publication_numbers(oa);
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn ua1_extracts_wo_format() {
+        let oa = "D1：WO2021/123456A1\n本申请的区别特征在于...";
+        let result = extract_publication_numbers(oa);
+        assert!(!result.is_empty());
+        assert_eq!(result[0].0, "WO2021/123456A1");
+    }
+}
