@@ -1,6 +1,6 @@
 use super::{image_data_uri, AppState};
 use crate::ai::{
-    check_oa_analysis, format_report, oa_capacity_error, patent::extract_publication_numbers,
+    check_oa_analysis, extract_publication_numbers, format_report, oa_capacity_error,
     truncate_for_ai, Message, OA_DISCUSSION_ANALYSIS_MAX_CHARS, OA_DISCUSSION_HISTORY_MAX_CHARS,
     OA_DISCUSSION_OA_MAX_CHARS,
 };
