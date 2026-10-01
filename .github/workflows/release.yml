@@ -96,7 +96,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p pkg
-          cp "target/${{ matrix.target }}/release/innoforge" pkg/
+          cp "target/${{ matrix.target }}/release/innoforge-server" pkg/
           cp README.md LICENSE pkg/ 2>/dev/null || true
           tar czf "${{ matrix.asset }}" -C pkg .
 
@@ -105,7 +105,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path pkg -Force | Out-Null
-          Copy-Item "target\${{ matrix.target }}\release\innoforge.exe" pkg\
+          Copy-Item "target\${{ matrix.target }}\release\innoforge-server.exe" pkg\
           if (Test-Path README.md) { Copy-Item README.md pkg\ }
           if (Test-Path LICENSE) { Copy-Item LICENSE pkg\ }
           Compress-Archive -Path pkg\* -DestinationPath "${{ matrix.asset }}" -Force
