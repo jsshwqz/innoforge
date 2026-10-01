@@ -317,7 +317,7 @@
     }
 
     function restoreOaUi() {
-        for (var key in _uploadedData) {
+        for (let key in _uploadedData) {
             if (key === 'my') {
                 document.getElementById('my-patent').disabled = true;
                 var d = uploadedData[key];
@@ -333,7 +333,7 @@
             } else if (key.startsWith('ref_')) {
                 var idx = key.replace('ref_', '');
                 var rows = document.querySelectorAll('.ref-row');
-                for (var i = 0; i < rows.length; i++) {
+                for (let i = 0; i < rows.length; i++) {
                     if (rows[i].getAttribute('data-idx') === idx) {
                         rows[i].querySelector('.ref-input').disabled = true;
                         var d = uploadedData[key];
@@ -567,7 +567,7 @@
             var idx = pasteTarget.replace('ref_', '');
             uploadedData['ref_' + idx] = result;
             var rows = document.querySelectorAll('.ref-row');
-            for (var i = 0; i < rows.length; i++) {
+            for (let i = 0; i < rows.length; i++) {
                 if (rows[i].getAttribute('data-idx') === idx) {
                     rows[i].querySelector('.ref-input').disabled = true;
                     var existing = rows[i].querySelector('.file-tag-container') || document.createElement('span');
@@ -622,7 +622,7 @@
             /(\d{13}(?:\.\d)?)/,
         ];
         var patentNum = null;
-        for (var i = 0; i < patterns.length; i++) {
+        for (let i = 0; i < patterns.length; i++) {
             var m = oaText.match(patterns[i]);
             if (m && m[1]) { patentNum = m[1].replace(/\s/g, ''); break; }
         }
@@ -640,7 +640,7 @@
             /(\d{4})\s*[年\-]\s*(\d{1,2})\s*[月\-]\s*(\d{1,2})\s*日?/,
             /(\d{4})-(\d{1,2})-(\d{1,2})/,
         ];
-        for (var j = 0; j < datePatterns.length; j++) {
+        for (let j = 0; j < datePatterns.length; j++) {
             var dm = oaText.match(datePatterns[j]);
             if (dm && dm[1]) {
                 var year = dm[1];
@@ -685,7 +685,7 @@
 
     function reindexPlaceholders() {
         var inputs = document.querySelectorAll('.ref-input');
-        for (var i = 0; i < inputs.length; i++) {
+        for (let i = 0; i < inputs.length; i++) {
             if (!inputs[i].disabled) {
                 inputs[i].placeholder = t('oar.refPlaceholder').replace('{n}', i + 1);
             }
@@ -716,7 +716,7 @@
     function clearRefUpload(idx) {
         delete uploadedData['ref_' + idx];
         var rows = document.querySelectorAll('.ref-row');
-        for (var i = 0; i < rows.length; i++) {
+        for (let i = 0; i < rows.length; i++) {
             if (rows[i].getAttribute('data-idx') === idx) {
                 rows[i].querySelector('.ref-input').disabled = false;
                 var container = rows[i].querySelector('.file-tag-container');
@@ -778,7 +778,7 @@
         var refs = [];
         var inputs = document.querySelectorAll('.ref-input');
         var rows = document.querySelectorAll('.ref-row');
-        for (var i = 0; i < rows.length; i++) {
+        for (let i = 0; i < rows.length; i++) {
             var idx = rows[i].getAttribute('data-idx');
             if (uploadedData['ref_' + idx]) {
                 refs.push(uploadedData['ref_' + idx]);
@@ -884,12 +884,12 @@
             var ths = header.split('|').filter(function(c) { return c.trim() !== ''; });
             var rows = body.trim().split('\n');
             var html = '<div class="oa-table-scroll"><table><thead><tr>';
-            for (var i = 0; i < ths.length; i++) html += '<th style="background:#21262d;color:#c9d1d9;padding:8px 10px;border:1px solid #30363d;">' + escapeHtml(ths[i].trim()) + '</th>';
+            for (let i = 0; i < ths.length; i++) html += '<th style="background:#21262d;color:#c9d1d9;padding:8px 10px;border:1px solid #30363d;">' + escapeHtml(ths[i].trim()) + '</th>';
             html += '</tr></thead><tbody>';
-            for (var r = 0; r < rows.length; r++) {
+            for (let r = 0; r < rows.length; r++) {
                 var cells = rows[r].split('|').filter(function(c) { return c.trim() !== ''; });
                 html += '<tr>';
-                for (var c = 0; c < cells.length; c++) html += '<td style="padding:8px 10px;border:1px solid #30363d;">' + escapeHtml(cells[c].trim()).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>') + '</td>';
+                for (let c = 0; c < cells.length; c++) html += '<td style="padding:8px 10px;border:1px solid #30363d;">' + escapeHtml(cells[c].trim()).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>') + '</td>';
                 html += '</tr>';
             }
             html += '</tbody></table></div>';
@@ -905,12 +905,12 @@
             if (dataLines.length < 2) return _; // after removing separators, need at least header + 1 row
             var ths = dataLines[0].split('|').filter(function(c) { return c.trim() !== ''; });
             var html = '<div class="oa-table-scroll"><table><thead><tr>';
-            for (var i = 0; i < ths.length; i++) html += '<th style="background:#21262d;color:#c9d1d9;padding:8px 10px;border:1px solid #30363d;">' + escapeHtml(ths[i].trim()) + '</th>';
+            for (let i = 0; i < ths.length; i++) html += '<th style="background:#21262d;color:#c9d1d9;padding:8px 10px;border:1px solid #30363d;">' + escapeHtml(ths[i].trim()) + '</th>';
             html += '</tr></thead><tbody>';
-            for (var r = 1; r < dataLines.length; r++) {
+            for (let r = 1; r < dataLines.length; r++) {
                 var cells = dataLines[r].split('|').filter(function(c) { return c.trim() !== ''; });
                 html += '<tr>';
-                for (var c = 0; c < cells.length; c++) html += '<td style="padding:8px 10px;border:1px solid #30363d;">' + escapeHtml(cells[c].trim()).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>') + '</td>';
+                for (let c = 0; c < cells.length; c++) html += '<td style="padding:8px 10px;border:1px solid #30363d;">' + escapeHtml(cells[c].trim()).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>') + '</td>';
                 html += '</tr>';
             }
             html += '</tbody></table></div>';
@@ -1017,7 +1017,7 @@
                 var lines = buffer.split('\n');
                 buffer = lines.pop(); // Keep incomplete line
 
-                for (var i = 0; i < lines.length; i++) {
+                for (let i = 0; i < lines.length; i++) {
                     var line = lines[i];
                     if (line.startsWith('event: ')) {
                         currentEvent = line.slice(7).trim();
@@ -1107,11 +1107,11 @@
         var sections = [];
         var remaining = text;
 
-        for (var i = 0; i < sectionMarkers.length; i++) {
+        for (let i = 0; i < sectionMarkers.length; i++) {
             var marker = sectionMarkers[i];
             var startIdx = -1;
             // Find the first matching pattern
-            for (var p = 0; p < marker.patterns.length; p++) {
+            for (let p = 0; p < marker.patterns.length; p++) {
                 var idx = remaining.indexOf(marker.patterns[p]);
                 if (idx >= 0) { startIdx = idx; break; }
             }
@@ -1119,8 +1119,8 @@
 
             // Find where this section ends (next marker or end of string)
             var endIdx = remaining.length;
-            for (var j = i + 1; j < sectionMarkers.length; j++) {
-                for (var p = 0; p < sectionMarkers[j].patterns.length; p++) {
+            for (let j = i + 1; j < sectionMarkers.length; j++) {
+                for (let p = 0; p < sectionMarkers[j].patterns.length; p++) {
                     var nextIdx = remaining.indexOf(sectionMarkers[j].patterns[p], startIdx + 1);
                     if (nextIdx >= 0 && nextIdx < endIdx) { endIdx = nextIdx; break; }
                 }
@@ -1157,7 +1157,7 @@
         html += '</div>';
         html += '<div class="result-content">';
 
-        for (var i = 0; i < sections.length; i++) {
+        for (let i = 0; i < sections.length; i++) {
             var s = sections[i];
             var sectionColor = s.color;
             var isResponse = (s.key === 'part5');
@@ -1208,7 +1208,7 @@
         html += '<div class="result-content">';
 
         // Show sections (typically 1-4, no section 5)
-        for (var i = 0; i < sections.length; i++) {
+        for (let i = 0; i < sections.length; i++) {
             var s = sections[i];
             var sectionColor = s.color;
             html += '<div style="border:1px solid ' + sectionColor + '44;border-radius:8px;margin-bottom:12px;background:#0d1117;">';
@@ -1403,7 +1403,7 @@
                 buffer += decoder.decode(value, { stream: true });
                 var lines = buffer.split('\n');
                 buffer = lines.pop();
-                for (var i = 0; i < lines.length; i++) {
+                for (let i = 0; i < lines.length; i++) {
                     var line = lines[i];
                     if (line.startsWith('event: ')) {
                         currentEvent = line.slice(7).trim();
@@ -1496,7 +1496,7 @@
             ''
         ];
 
-        for (var i = 0; i < oaDiscussMessages.length; i++) {
+        for (let i = 0; i < oaDiscussMessages.length; i++) {
             var message = oaDiscussMessages[i];
             var roleLabel = message.role === 'assistant'
                 ? (t('oar.transcriptRoleAssistant') || 'AI 助手')
@@ -1589,7 +1589,7 @@
                 buffer += decoder.decode(value, { stream: true });
                 var lines = buffer.split('\n');
                 buffer = lines.pop();
-                for (var i = 0; i < lines.length; i++) {
+                for (let i = 0; i < lines.length; i++) {
                     var line = lines[i];
                     if (line.startsWith('data:')) {
                         var data = line.slice(5).replace(/^ /, '');
@@ -1695,7 +1695,7 @@
             } else {
                 var byteCharacters = atob(data.docx);
                 var byteNumbers = new Array(byteCharacters.length);
-                for (var i = 0; i < byteCharacters.length; i++) {
+                for (let i = 0; i < byteCharacters.length; i++) {
                     byteNumbers[i] = byteCharacters.charCodeAt(i);
                 }
                 var byteArray = new Uint8Array(byteNumbers);
@@ -1730,7 +1730,7 @@
     async function exportResponseDraft() {
         var sections = parseOASections(lastAnalysisRawText);
         var responseSection = null;
-        for (var i = 0; i < sections.length; i++) {
+        for (let i = 0; i < sections.length; i++) {
             if (sections[i].key === 'part5') { responseSection = sections[i]; break; }
         }
         if (!responseSection) { alert(t('oar.noResponseDraft')); return; }
@@ -1765,7 +1765,7 @@
             } else {
                 var byteCharacters = atob(data.docx);
                 var byteNumbers = new Array(byteCharacters.length);
-                for (var i = 0; i < byteCharacters.length; i++) {
+                for (let i = 0; i < byteCharacters.length; i++) {
                     byteNumbers[i] = byteCharacters.charCodeAt(i);
                 }
                 var byteArray = new Uint8Array(byteNumbers);
@@ -1877,7 +1877,7 @@
         };
         var items = libs[oaType] || libs['first_exam'];
         var html = '';
-        for (var i = 0; i < items.length; i++) {
+        for (let i = 0; i < items.length; i++) {
             html += '<div style="margin-bottom:10px;padding:10px 12px;background:#0d1117;border:1px solid #21262d;border-radius:6px;">'
                 + '<div style="font-weight:600;color:#d29922;margin-bottom:4px;cursor:pointer;" onclick="fillArgTemplate(' + i + ')">' + items[i].h + '</div>'
                 + '<div style="color:#8b949e;font-size:12px;line-height:1.6;white-space:pre-wrap;">' + items[i].c + '</div>'
@@ -1933,7 +1933,7 @@
             { label: t('oar.check6'), done: false },
         ];
         var html = '';
-        for (var i = 0; i < items.length; i++) {
+        for (let i = 0; i < items.length; i++) {
             html += '<label style="display:flex;align-items:center;gap:8px;padding:6px 0;cursor:pointer;">'
                 + '<input type="checkbox" style="accent-color:#58a6ff;" onchange="updateChecklistProgress()">'
                 + '<span>' + items[i].label + '</span></label>';
@@ -1945,7 +1945,7 @@
     function updateChecklistProgress() {
         var checks = document.querySelectorAll('#checklist-content input[type=checkbox]');
         var done = 0;
-        for (var i = 0; i < checks.length; i++) { if (checks[i].checked) done++; }
+        for (let i = 0; i < checks.length; i++) { if (checks[i].checked) done++; }
         var el = document.getElementById('checklist-progress');
         if (el) el.textContent = done + '/' + checks.length + ' ' + t('oar.checklistProgress');
     }
@@ -2013,7 +2013,7 @@
         // type: 'confirmed' | 'pending' | 'risk'
         if (!text || text.length < 5) return;
         // 去重
-        for (var i = 0; i < argList.length; i++) {
+        for (let i = 0; i < argList.length; i++) {
             if (argList[i].text === text) return;
         }
         argList.push({ text: text, type: type || 'pending', status: 'active' });
@@ -2027,7 +2027,7 @@
         if (active.length === 0) { list.innerHTML = ''; return; }
         showArgBoard();
         var html = '';
-        for (var i = 0; i < active.length; i++) {
+        for (let i = 0; i < active.length; i++) {
             var a = active[i];
             var typeClass = a.type === 'confirmed' ? 'arg-type-confirmed' : a.type === 'risk' ? 'arg-type-risk' : 'arg-type-pending';
             var typeLabel = a.type === 'confirmed' ? '✅ ' + t('oar.argConfirmed') : a.type === 'risk' ? '⚠️ ' + t('oar.argRisk') : '📌 ' + t('oar.argPending');
@@ -2053,7 +2053,7 @@
         // 从 AI 回复中提取可能的论点
         var lines = content.split('\n');
         var currentType = 'pending';
-        for (var i = 0; i < lines.length; i++) {
+        for (let i = 0; i < lines.length; i++) {
             var line = lines[i].trim();
             if (!line) continue;
             // 检测类型标记
@@ -2078,7 +2078,7 @@
         try {
             // 调用已有 /api/ai/chat，让 AI 总结讨论中的核心论点
             var messages = [];
-            for (var i = 1; i < discussionHistory.length; i++) {
+            for (let i = 1; i < discussionHistory.length; i++) {
                 messages.push({ role: discussionHistory[i][0], content: discussionHistory[i][1] });
             }
             var conclusionPrompt = '请总结以上讨论中的核心论点和结论。请用以下格式输出：\n✅ 确认的论点：（具体描述）\n⚠️ 有风险或需关注的点：（具体描述）\n📌 建议或待办：（具体描述）';
@@ -2156,8 +2156,8 @@
         // Simple LCS-based line diff
         var m = oldLines.length, n = newLines.length;
         var dp = Array(m + 1).fill(null).map(function() { return Array(n + 1).fill(0); });
-        for (var i = 1; i <= m; i++) {
-            for (var j = 1; j <= n; j++) {
+        for (let i = 1; i <= m; i++) {
+            for (let j = 1; j <= n; j++) {
                 dp[i][j] = oldLines[i - 1] === newLines[j - 1] ? dp[i - 1][j - 1] + 1 : Math.max(dp[i - 1][j], dp[i][j - 1]);
             }
         }
@@ -2186,7 +2186,7 @@
         var newLines = amended.split('\n');
         var diff = computeLineDiff(oldLines, newLines);
         var html = '<div style="font-family:monospace;font-size:13px;line-height:1.6;background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:10px;margin-top:8px;max-height:400px;overflow-y:auto;">';
-        for (var i = 0; i < diff.length; i++) {
+        for (let i = 0; i < diff.length; i++) {
             var d = diff[i];
             if (d.type === 'same') {
                 html += '<div style="color:#8b949e;padding:1px 8px;">' + escapeHtml(d.text) + '</div>';
@@ -2210,7 +2210,7 @@
         var rows = [];
         var lines = analysisText.split('\n');
         var currentClaim = '', currentReason = '', currentArticle = '', currentRef = '';
-        for (var i = 0; i < lines.length; i++) {
+        for (let i = 0; i < lines.length; i++) {
             var line = lines[i].trim();
             if (!line) continue;
             // Extract claim numbers
@@ -2240,7 +2240,7 @@
         html += '<th style="background:#21262d;color:#c9d1d9;padding:8px;border:1px solid #30363d;">驳回理由</th>';
         html += '<th style="background:#21262d;color:#c9d1d9;padding:8px;border:1px solid #30363d;">法条</th>';
         html += '<th style="background:#21262d;color:#c9d1d9;padding:8px;border:1px solid #30363d;">对比文件</th></tr><tbody>';
-        for (var i = 0; i < rows.length; i++) {
+        for (let i = 0; i < rows.length; i++) {
             html += '<tr><td style="padding:8px;border:1px solid #30363d;color:#c9d1d9;">' + escapeHtml(rows[i].claim) + '</td>';
             html += '<td style="padding:8px;border:1px solid #30363d;color:#c9d1d9;">' + escapeHtml(rows[i].reason) + '</td>';
             html += '<td style="padding:8px;border:1px solid #30363d;color:#58a6ff;">' + escapeHtml(rows[i].article) + '</td>';
@@ -2253,13 +2253,13 @@
     // ── P1b: Reference Anchor Jump ──
     function numberRefParagraphs() {
         // Add paragraph numbers to reference content display
-        for (var key in _uploadedData) {
+        for (let key in _uploadedData) {
             if (key.startsWith('ref_')) {
                 var ref = _uploadedData[key];
                 if (ref && ref.content) {
                     var paras = ref.content.split('\n\n').filter(function(p) { return p.trim().length > 20; });
                     var numbered = '';
-                    for (var i = 0; i < paras.length; i++) {
+                    for (let i = 0; i < paras.length; i++) {
                         numbered += '[§' + (i + 1) + '] ' + paras[i].trim() + '\n\n';
                     }
                     ref.content = numbered;
@@ -2282,7 +2282,7 @@
     function scrollToRef(num) {
         // Find the reference content in the page and scroll to it
         var rows = document.querySelectorAll('.ref-row');
-        for (var i = 0; i < rows.length; i++) {
+        for (let i = 0; i < rows.length; i++) {
             var idx = rows[i].getAttribute('data-idx');
             if (_uploadedData['ref_' + idx]) {
                 rows[i].style.border = '2px solid #58a6ff';
@@ -2306,7 +2306,7 @@
             ctx += '内容:\n' + my.content + '\n';
         }
         ctx += '\n== 对比文件 ==\n';
-        for (var i = 0; i < refs.length; i++) {
+        for (let i = 0; i < refs.length; i++) {
             var r = refs[i];
             ctx += '文件' + (i + 1) + ': ';
             if (typeof r === 'string') {
@@ -2460,7 +2460,7 @@
 
     function showDiscussionExportButton() {
         var buttonIds = ['discussion-export-btn', 'discussion-transcript-export-btn'];
-        for (var i = 0; i < buttonIds.length; i++) {
+        for (let i = 0; i < buttonIds.length; i++) {
             var btn = document.getElementById(buttonIds[i]);
             if (btn && discussionHistory.length > 1) btn.style.display = '';
         }
@@ -2468,7 +2468,7 @@
 
     function hideDiscussionExportButton() {
         var buttonIds = ['discussion-export-btn', 'discussion-transcript-export-btn'];
-        for (var i = 0; i < buttonIds.length; i++) {
+        for (let i = 0; i < buttonIds.length; i++) {
             var btn = document.getElementById(buttonIds[i]);
             if (btn) btn.style.display = 'none';
         }
@@ -2484,7 +2484,7 @@
         var text = String(content == null ? '' : content);
         var backtickRuns = text.match(/`+/g) || [];
         var fenceLength = 3;
-        for (var i = 0; i < backtickRuns.length; i++) {
+        for (let i = 0; i < backtickRuns.length; i++) {
             if (backtickRuns[i].length >= fenceLength) fenceLength = backtickRuns[i].length + 1;
         }
         var fence = '`'.repeat(fenceLength);
@@ -2515,7 +2515,7 @@
             '## ' + t('oar.transcriptMessages')
         ];
 
-        for (var i = 1; i < discussionHistory.length; i++) {
+        for (let i = 1; i < discussionHistory.length; i++) {
             var entry = discussionHistory[i];
             lines.push(
                 '',
@@ -2550,7 +2550,7 @@
         btn.disabled = true;
         try {
             var messages = [];
-            for (var i = 1; i < discussionHistory.length; i++) {
+            for (let i = 1; i < discussionHistory.length; i++) {
                 messages.push({ role: discussionHistory[i][0], content: discussionHistory[i][1] });
             }
             var resp = await fetch('/api/ai/chat/conclusions', {
@@ -2600,7 +2600,7 @@
             + '<div class="sidebar-label" style="display:flex;justify-content:space-between;align-items:center;">'
             + '📋 ' + t('oar.historyLabel')
             + '<span style="color:#8b949e;font-size:11px;font-weight:400;">' + oaHistory.length + ' 件</span></div>';
-        for (var i = 0; i < Math.min(oaHistory.length, 30); i++) {
+        for (let i = 0; i < Math.min(oaHistory.length, 30); i++) {
             var h = oaHistory[i];
             var ver = h.version || '-';
             var typeLabel = h.oa_type === 'first_exam' ? '一审/二审'
@@ -2977,7 +2977,7 @@
         if (oaDiscussMessages.length === 0) {
             html += '<div style="color:#8b949e;font-size:13px;text-align:center;padding:24px;">暂无讨论内容，请继续添加</div>';
         } else {
-            for (var i = 0; i < oaDiscussMessages.length; i++) {
+            for (let i = 0; i < oaDiscussMessages.length; i++) {
                 var msg = oaDiscussMessages[i];
                 var isUser = msg.role === 'user';
                 var isAssistant = msg.role === 'assistant';
