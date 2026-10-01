@@ -287,15 +287,49 @@ pub async fn enrich_patent_free(db: &Database, patent_id: &str) -> EnrichResult 
     }
 
     // 6. 保存
-    if let Err(e) = db.insert_patent(&updated) {
-        tracing::warn!(
-            "Failed to save enriched patent {}: {}",
-            updated.patent_number,
-            e
-        );
-        return EnrichResult::Failed {
-            reason: format!("保存失败: {e}"),
-        };
+    let saved_id = match db.insert_patent(&updated) {
+        Ok(id) => id,
+        Err(e) => {
+            tracing::warn!(
+                "Failed to save enriched patent {}: {}",
+                updated.patent_number,
+                e
+            );
+            return EnrichResult::Failed {
+                reason: format!("保存失败: {e}"),
+            };
+        }
+    };
+
+    // MB0: 顺手算 TF-IDF 向量（静默降级，不阻塞富化）
+    crate::db::vector::try_compute_and_save_embedding(
+        db,
+        &saved_id,
+        &format!("{} {}", updated.title, updated.abstract_text),
+    );
+
+    // MB3: 切片入库（单一写入口，与 MB0 同一挂点纪律）
+    // 把全文切成 chunks 存入 patent_chunks 表，供 RAG 检索使用
+    let chunks = crate::rag::build_chunks_from_patent(
+        &saved_id,
+        &updated.title,
+        &updated.abstract_text,
+        &updated.claims,
+        &updated.description,
+    );
+    if !chunks.is_empty() {
+        match db.save_patent_chunks(&saved_id, &chunks, "char-tfidf-v1") {
+            Ok(n) => tracing::info!(
+                "[MB3] Saved {} chunks for patent {}",
+                n,
+                updated.patent_number
+            ),
+            Err(e) => tracing::warn!(
+                "[MB3] Failed to save chunks for patent {}: {}",
+                updated.patent_number,
+                e
+            ),
+        }
     }
 
     // 7. 成功 → 清零冷却表

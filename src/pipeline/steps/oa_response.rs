@@ -133,11 +133,7 @@ fn build_prior_art_summary(ctx: &PipelineContext) -> String {
                 m.rank,
                 m.source_title,
                 m.combined_score * 100.0,
-                if m.snippet.len() > 80 {
-                    format!("{}...", m.snippet.chars().take(80).collect::<String>())
-                } else {
-                    m.snippet.clone()
-                },
+                crate::ai::truncate_for_ai(&m.snippet, 80),
             ));
         }
         summary.push('\n');
