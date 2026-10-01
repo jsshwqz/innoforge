@@ -421,6 +421,146 @@ pub fn enrich_result_to_status(
     }
 }
 
+// ─── MB2: 批量富化（分析前自动补全文）──────────────────────────────────
+
+/// 批量富化单条结果中失败项的稳定原因码。
+///
+/// 禁止把中文文案塞进此枚举——前端按 `as_str()` 匹配结构化键，不猜文案。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EnrichFailReason {
+    Cooldown,
+    Blocked,
+    Timeout,
+    NotFound,
+    ParseEmpty,
+    Other,
+}
+
+impl EnrichFailReason {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Cooldown => "cooldown",
+            Self::Blocked => "blocked",
+            Self::Timeout => "timeout",
+            Self::NotFound => "not_found",
+            Self::ParseEmpty => "parse_empty",
+            Self::Other => "other",
+        }
+    }
+}
+
+/// 批量富化中单条失败记录。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct EnrichFailEntry {
+    pub patent_id: String,
+    pub reason_code: EnrichFailReason,
+    pub remaining_secs: Option<u64>,
+}
+
+/// 批量富化结构化出参。
+///
+/// 沿 MA6b 范式：空则整键省略（`failed` 为空时序列化端省略）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct BatchEnrichOutcome {
+    pub requested: usize,
+    pub enriched: usize,
+    pub full_text_available_count: usize,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub failed: Vec<EnrichFailEntry>,
+}
+
+impl BatchEnrichOutcome {
+    /// 序列化为 JSON Value，空 `failed` 键省略（MA6b 范式）。
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::to_value(self).unwrap_or_else(|_| serde_json::json!({}))
+    }
+}
+
+/// 将单条 `EnrichResult` 转换为 `EnrichFailReason`（仅失败时）。
+fn enrich_result_to_fail_reason(result: &EnrichResult) -> Option<(EnrichFailReason, Option<u64>)> {
+    match result {
+        EnrichResult::AlreadyEnriched | EnrichResult::Enriched { .. } => None,
+        EnrichResult::CooldownSkipped { remaining_secs } => {
+            Some((EnrichFailReason::Cooldown, Some(*remaining_secs)))
+        }
+        EnrichResult::Failed { reason } => {
+            let r = reason.to_lowercase();
+            let code = if r.contains("timeout") {
+                EnrichFailReason::Timeout
+            } else if r.contains("block") || r.contains("403") || r.contains("429") {
+                EnrichFailReason::Blocked
+            } else if r.contains("parse") || r.contains("empty") {
+                EnrichFailReason::ParseEmpty
+            } else {
+                EnrichFailReason::Other
+            };
+            Some((code, None))
+        }
+        EnrichResult::NotFound => Some((EnrichFailReason::NotFound, None)),
+    }
+}
+
+/// 批量富化：为分析前的 top-N 专利自动补全文。
+///
+/// - `db`：数据库连接
+/// - `patent_ids`：待富化专利 ID 列表（已按相关性排序）
+/// - `top_n`：最多富化前 N 条（默认 5）
+///
+/// 每条沿用 20s 超时（由 `enrich_patent_free` 内部控制）。
+/// 冷却中 → 零出网，如实返回 `Cooldown` 原因码。
+/// **禁止无界循环里逐条出网**（AGENTS.md 2.7）。
+pub async fn enrich_batch(
+    db: &crate::db::Database,
+    patent_ids: &[String],
+    top_n: usize,
+) -> BatchEnrichOutcome {
+    let ids: Vec<&String> = patent_ids.iter().take(top_n).collect();
+    let requested = ids.len();
+    let mut enriched = 0usize;
+    let mut full_text_available_count = 0usize;
+    let mut failed = Vec::new();
+
+    for id in ids {
+        let result = enrich_patent_free(db, id).await;
+        match &result {
+            EnrichResult::Enriched {
+                description_len,
+                claims_len,
+            } => {
+                enriched += 1;
+                if *description_len > 50 && *claims_len > 50 {
+                    full_text_available_count += 1;
+                }
+            }
+            EnrichResult::AlreadyEnriched => {
+                // 已有全文，计入 full_text_available_count
+                if let Ok(Some(p)) = db.get_patent(id) {
+                    if p.description.len() > 50 && p.claims.len() > 50 {
+                        full_text_available_count += 1;
+                    }
+                }
+            }
+            _ => {
+                if let Some((reason_code, remaining_secs)) = enrich_result_to_fail_reason(&result) {
+                    failed.push(EnrichFailEntry {
+                        patent_id: id.clone(),
+                        reason_code,
+                        remaining_secs,
+                    });
+                }
+            }
+        }
+    }
+
+    BatchEnrichOutcome {
+        requested,
+        enriched,
+        full_text_available_count,
+        failed,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -577,5 +717,135 @@ mod tests {
         };
         let s = enrich_result_to_status("id1", "CN123", &r);
         assert!(!s.has_full_text);
+    }
+
+    // ── MB2 测试 ──────────────────────────────────────────────
+
+    #[test]
+    fn mb2_extract_section_chinese_long_text_no_panic() {
+        // 中文长文用例：证明 extract_section 字节扫描不会因中文越界 panic
+        let html = r#"<meta itemprop="description" content="">
+            <div class="description">
+            本发明涉及一种基于深度学习的专利文本分析方法及系统。该方法包括以下步骤：
+            首先获取专利文本数据，对所述文本数据进行预处理，包括分词、去停用词及词向量映射；
+            然后构建专利文本的语义表示模型，利用注意力机制捕获上下文依赖关系；
+            接着通过对比学习策略优化模型参数，使相似专利的语义表示在向量空间中相互靠近；
+            最后基于训练好的模型对目标专利进行创新点识别和相似度检索。
+            所述系统包括数据采集模块、预处理模块、语义建模模块、对比优化模块和检索输出模块。
+            在一个优选实施例中，所述注意力机制采用多头自注意力结构，头数为8，隐藏层维度为512。
+            在另一个实施例中，所述对比学习策略采用InfoNCE损失函数，温度参数设置为0.07。
+            </div>"#;
+        let result = extract_section(html, "description");
+        assert!(result.is_some(), "Chinese long text should be extracted");
+        let desc = result.unwrap();
+        assert!(desc.contains("深度学习"), "Should contain Chinese content");
+        assert!(desc.len() > 100, "Should extract substantial content");
+    }
+
+    #[test]
+    fn mb2_enrich_fail_reason_as_str_stable() {
+        // 原因码字符串稳定枚举锁定——前端按此匹配，禁止变更
+        assert_eq!(EnrichFailReason::Cooldown.as_str(), "cooldown");
+        assert_eq!(EnrichFailReason::Blocked.as_str(), "blocked");
+        assert_eq!(EnrichFailReason::Timeout.as_str(), "timeout");
+        assert_eq!(EnrichFailReason::NotFound.as_str(), "not_found");
+        assert_eq!(EnrichFailReason::ParseEmpty.as_str(), "parse_empty");
+        assert_eq!(EnrichFailReason::Other.as_str(), "other");
+    }
+
+    #[test]
+    fn mb2_enrich_result_to_fail_reason_mapping() {
+        // EnrichResult → EnrichFailReason 映射锁定
+        let cooldown = EnrichResult::CooldownSkipped {
+            remaining_secs: 120,
+        };
+        let (code, secs) = enrich_result_to_fail_reason(&cooldown).unwrap();
+        assert_eq!(code, EnrichFailReason::Cooldown);
+        assert_eq!(secs, Some(120));
+
+        let not_found = EnrichResult::NotFound;
+        let (code, _) = enrich_result_to_fail_reason(&not_found).unwrap();
+        assert_eq!(code, EnrichFailReason::NotFound);
+
+        let enriched = EnrichResult::Enriched {
+            description_len: 5000,
+            claims_len: 3000,
+        };
+        assert!(enrich_result_to_fail_reason(&enriched).is_none());
+
+        let already = EnrichResult::AlreadyEnriched;
+        assert!(enrich_result_to_fail_reason(&already).is_none());
+
+        let timeout_fail = EnrichResult::Failed {
+            reason: "timeout after 20s".to_string(),
+        };
+        let (code, _) = enrich_result_to_fail_reason(&timeout_fail).unwrap();
+        assert_eq!(code, EnrichFailReason::Timeout);
+
+        let blocked_fail = EnrichResult::Failed {
+            reason: "HTTP 403 Forbidden".to_string(),
+        };
+        let (code, _) = enrich_result_to_fail_reason(&blocked_fail).unwrap();
+        assert_eq!(code, EnrichFailReason::Blocked);
+    }
+
+    #[test]
+    fn mb2_batch_enrich_outcome_serialization_skips_empty_failed() {
+        // MA6b 范式：空 failed 键省略
+        let outcome = BatchEnrichOutcome {
+            requested: 5,
+            enriched: 3,
+            full_text_available_count: 2,
+            failed: vec![],
+        };
+        let json = outcome.to_json();
+        assert!(
+            json.get("failed").is_none(),
+            "Empty failed key should be omitted"
+        );
+        assert_eq!(json["requested"], 5);
+        assert_eq!(json["enriched"], 3);
+        assert_eq!(json["full_text_available_count"], 2);
+    }
+
+    #[test]
+    fn mb2_batch_enrich_outcome_serialization_with_failures() {
+        let outcome = BatchEnrichOutcome {
+            requested: 3,
+            enriched: 1,
+            full_text_available_count: 1,
+            failed: vec![
+                EnrichFailEntry {
+                    patent_id: "p1".to_string(),
+                    reason_code: EnrichFailReason::Cooldown,
+                    remaining_secs: Some(120),
+                },
+                EnrichFailEntry {
+                    patent_id: "p2".to_string(),
+                    reason_code: EnrichFailReason::Blocked,
+                    remaining_secs: None,
+                },
+            ],
+        };
+        let json = outcome.to_json();
+        assert!(
+            json.get("failed").is_some(),
+            "Non-empty failed key should be present"
+        );
+        let failed = json["failed"].as_array().unwrap();
+        assert_eq!(failed.len(), 2);
+        assert_eq!(failed[0]["reason_code"], "cooldown");
+        assert_eq!(failed[0]["remaining_secs"], 120);
+        assert_eq!(failed[1]["reason_code"], "blocked");
+        assert!(failed[1].get("remaining_secs").is_none() || failed[1]["remaining_secs"].is_null());
+    }
+
+    #[test]
+    fn mb2_enrich_fail_reason_serde_snake_case() {
+        // serde rename_all = "snake_case" 锁定
+        let json = serde_json::to_string(&EnrichFailReason::ParseEmpty).unwrap();
+        assert_eq!(json, "\"parse_empty\"");
+        let json = serde_json::to_string(&EnrichFailReason::NotFound).unwrap();
+        assert_eq!(json, "\"not_found\"");
     }
 }
