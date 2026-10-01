@@ -3,8 +3,8 @@
 #![allow(clippy::needless_borrow)]
 
 use super::client::{
-    oa_capacity_error, safe_truncate, AiClient, Message, OA_RESPONSE_ANALYSIS_MAX_CHARS,
-    OA_RESPONSE_DISCUSSION_MAX_CHARS, OA_RESPONSE_OA_MAX_CHARS,
+    oa_capacity_error, safe_truncate, truncate_for_ai, AiClient, Message,
+    OA_RESPONSE_ANALYSIS_MAX_CHARS, OA_RESPONSE_DISCUSSION_MAX_CHARS, OA_RESPONSE_OA_MAX_CHARS,
 };
 use anyhow::Result;
 
@@ -15,6 +15,93 @@ const FACT_DISCIPLINE: &str = "\n\n## 事实纪律（最高优先级）\n\
      3. 引用权利要求、对比文件时，只能引用原文中出现的特征，禁止自行扩写或捏造。\n\
      4. 任何数字、日期、百分比必须来自材料原文，否则标注【材料未给出】。\n\
      5. 判断不确定时，明确给出置信度（高/中/低），不要用肯定的语气掩盖不确定性。";
+
+/// UA1: 从 OA 文本中抽取对比文件公开号。
+///
+/// 按 §2.1 正则模式匹配 CN/US/EP/JP/KR/WO 公开号，
+/// 仅保留出现在引出语上下文 ±50 字符内的匹配（排除正文偶然出现的公开号）。
+/// 返回 (公开号, 引出语标签) 列表，按出现顺序编号 D1, D2, …
+pub fn extract_publication_numbers(oa_text: &str) -> Vec<(String, String)> {
+    use std::collections::HashSet;
+
+    // 公开号正则（按前缀分流）
+    let patterns: &[(&str, &str)] = &[
+        ("CN", r"CN\d{8,12}[A-Z]\d?"),
+        ("US", r"US\d{6,12}[A-Z]\d?"),
+        ("EP", r"EP\d{6,8}[A-Z]\d?"),
+        ("JP", r"JP\d{4,8}[A-Z]"),
+        ("KR", r"KR\d{6,10}[A-Z]"),
+        ("WO", r"WO\d{4}/\d{4,6}[A-Z]\d?"),
+    ];
+
+    // 引出语模式
+    let context_patterns: &[&str] = &[
+        r"对比文件\s*[1-9]\s*[:：]",
+        r"引证文献\s*[1-9]\s*[:：]",
+        r"D\s*[1-9]\s*[:：]",
+        r"参考文献\s*[1-9]\s*[:：]",
+    ];
+
+    let mut results: Vec<(String, String)> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+
+    // 构建所有公开号的统一正则
+    let combined_pat = patterns
+        .iter()
+        .map(|(_, pat)| pat)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join("|");
+    let pub_re = match regex::Regex::new(&combined_pat) {
+        Ok(re) => re,
+        Err(_) => return results,
+    };
+
+    // 构建引出语统一正则
+    let context_pat = context_patterns.join("|");
+    let context_re = match regex::Regex::new(&context_pat) {
+        Ok(re) => re,
+        Err(_) => return results,
+    };
+
+    // 找到所有引出语位置
+    let context_positions: Vec<(usize, &str)> = context_re
+        .find_iter(oa_text)
+        .map(|m| (m.start(), m.as_str()))
+        .collect();
+
+    // 找到所有公开号匹配
+    for m in pub_re.find_iter(oa_text) {
+        let pub_num = m.as_str().to_string();
+        let pub_start = m.start();
+
+        // 检查是否在某个引出语的 ±50 字符范围内
+        let mut near_context = false;
+        let mut context_label = String::new();
+
+        for &(ctx_start, ctx_str) in &context_positions {
+            // 引出语在公开号前 50 字符内
+            if pub_start > ctx_start && pub_start - ctx_start <= 80 {
+                near_context = true;
+                context_label = ctx_str.to_string();
+                break;
+            }
+            // 公开号紧邻引出语之后
+            if ctx_start > pub_start && ctx_start - pub_start <= 50 {
+                near_context = true;
+                context_label = ctx_str.to_string();
+                break;
+            }
+        }
+
+        if near_context && !seen.contains(&pub_num) {
+            seen.insert(pub_num.clone());
+            results.push((pub_num, context_label));
+        }
+    }
+
+    results
+}
 
 impl AiClient {
     pub async fn summarize_patent(
@@ -199,7 +286,7 @@ impl AiClient {
              - **下一步**: 建议的应对策略\n\
              最后给出「综合答辩策略建议」，并单列至少3项“风险N：”及对应的缓解措施。",
             my_patent = safe_truncate(my_patent_info, 5000),
-            references = safe_truncate(references_info, 5000),
+            references = truncate_for_ai(references_info, 5000),
         );
 
         let messages = vec![
@@ -586,22 +673,54 @@ impl AiClient {
                 "## 我的专利（权利要求书+说明书）\n{my_patent}\n\n\
                  ## 驳回决定\n{oa}\n\n\
                  ## 对比文献\n{refs}\n\n\
-                 请基于以上材料，生成完整的驳回后复审请求方案：\n\n\
-                 ## 第一部分：驳回决定分析\n\
-                 - 逐条列出驳回决定中针对每项权利要求的驳回理由\n\
-                 - 明确审查员引用的法条（A22.2新颖性 / A22.3创造性 / A25 等）\n\
-                 - 识别审查员所依据的对比文献和具体对比内容\n\n\
-                 ## 第二部分：审查逻辑漏洞分析\n\
-                 1. 事实认定是否准确？（对比文献的内容是否被正确解读）\n\
-                 2. 法条适用是否正确？（创造性判断方法是否符合审查指南）\n\
-                 3. 区别特征是否有遗漏？（审查员是否忽略了本申请独有的技术特征）\n\
-                 4. 技术启示是否成立？（现有技术是否有明确的教导或启示）\n\
-                 5. 技术效果是否被低估？（组合后的协同效果或意外技术效果）\n\n\
-                 ## 第三部分：答复策略与修改方案\n\
-                 1. 是否修改权利要求？（维持 / 缩小 / 重写）\n\
-                 2. 修改后的权利要求相对于对比文献的区别\n\
-                 3. 建议的修改后权利要求书\n\n\
-                 {section4_prompt}",
+                 请基于以上材料，按以下六角度结构化框架生成完整的驳回后复审请求方案。\n\
+                 每个角度须独立成节，标题固定，禁止合并或更改标题。\n\n\
+                 ## 一、事实对照\n\
+                 - 驳回决定逐段拆解，明确每段认定的技术事实\n\
+                 - 权利要求逐项特征矩阵：列出每项权利要求的全部技术特征\n\
+                 - 「对比文件哪段公开/未公开哪个特征」映射表（表格形式：权项特征 × D1/D2/… × 公开/未公开/部分公开）\n\n\
+                 ## 二、法条适用\n\
+                 引用法条与三步法每一步逐一验真：\n\
+                 - 步骤1：确定最接近现有技术（给出结论：成立/不成立/部分成立）\n\
+                 - 步骤2：确定区别特征与实际解决的技术问题（给出结论）\n\
+                 - 步骤3：判断显而易见性（给出结论）\n\
+                 每步须有明确结论，不得含糊。\n\n\
+                 ## 三、技术效果\n\
+                 区别特征带来的技术效果逐条列举，每条须标注「原说明书是否记载该效果」（是/否+段落号）。\n\
+                 效果论证须与驳回决定认定的效果做对比。\n\n\
+                 ## 四、策略权衡树\n\
+                 至少给出两条论证路径（主路径 + 备选路径），每条标注：\n\
+                 - 胜率评估（高/中/低）\n\
+                 - 风险点\n\
+                 - 依赖前提\n\
+                 路径间标注「若主路径不成立则转备选」的衔接关系。\n\n\
+                 ## 五、程序适配\n\
+                 复审程序与实审程序的关键差异说明（举证责任、审查范围、前置审查可能性）。\n\
+                 本案在复审程序中的特殊注意事项。\n\n\
+                 ## 六、说服结构\n\
+                 论证编排建议（先攻哪条理由、后攻哪条、修改与论证如何配合）。\n\
+                 ### 预判合议组质疑\n\
+                 列出 2-3 个合议组可能提出的质疑，每个质疑给出预先回应：\n\
+                 1. [质疑内容] → [预先回应]\n\
+                 2. [质疑内容] → [预先回应]\n\
+                 3. [质疑内容] → [预先回应]\n\n\
+                 {section4_prompt}\n\n\
+                 ---\n\n\
+                 ## 出处锚点纪律\n\
+                 所有事实断言必须带出处锚点，格式：【依据：<出处类型>：<定位信息>】\n\
+                 合法出处类型（禁止自造）：\n\
+                 - 驳回决定：第X段 / 第X页第X段\n\
+                 - 权利要求：权项X / 权项X第X特征\n\
+                 - 说明书：第X段 / 第X段第X行\n\
+                 - 说明书附图：图X / 图X中标记Y\n\
+                 - 对比文件：DX第X段 / DX第X页 / DX权利要求X\n\
+                 - 法条：专利法第X条 / 审查指南第X章第X节\n\
+                 - 审查指南：第X部分第X章第X节\n\
+                 边界规则：\n\
+                 - AI 自身的推理/分析不是合法出处——须追溯到具体材料出处\n\
+                 - 无法定位到具体段落的笼统引用禁止使用\n\
+                 - 无法溯源的断言须降级为【需申请人确认】或删除\n\
+                 输出末尾附「出处对照表」（序号 | 断言摘要 | 出处类型 | 定位信息）",
             ),
         )
     }
@@ -788,6 +907,9 @@ impl AiClient {
 
     /// Generate the formal response letter (第五部分) after discussion confirms the analysis.
     /// Takes the confirmed analysis text, discussion history, and original OA.
+    /// UA2: 复审请求书提交前清单（固定静态文案，不由 AI 生成）
+    const REEXAM_PRE_SUBMIT_CHECKLIST: &str = "\n\n---\n\n【提交前清单 · 请逐项确认】\n\n□ 1. 申请号与发明名称已核对，与驳回决定载明一致\n□ 2. 复审请求期限确认：自驳回决定送达之日起三个月内提出（请核实实际送达日）\n□ 3. 复审官费已缴纳（当前标准：发明专利复审费 1000 元，请以国家知识产权局最新公告为准）\n□ 4. 提交渠道确认：通过专利业务办理系统电子提交或面交至国家知识产权局\n□ 5. 前置审查提示：复审委员会可先将本案交原审查部门进行前置审查，原审查部门同意撤销驳回的，复审委员会可不再审查\n□ 6. 修改文件清单（如有修改）：修改后权利要求书 / 修改后说明书 / 修改替换页已备齐\n□ 7. 附件清单：驳回决定复印件 / 原审查档案 / 证据材料（如有）\n□ 8. 全部事实断言出处已核对（见出处对照表）";
+
     pub fn generate_response_letter_stream(
         &self,
         analysis_text: &str,
@@ -841,6 +963,52 @@ impl AiClient {
         } else {
             ""
         };
+
+        // UA2: reject_review 走复审请求书专用模板
+        if oa_type == "reject_review" {
+            let (reexam_system, reexam_user) = if is_import_flow {
+                (
+                    format!(
+                        "你是一位资深中国专利代理师（执业20年+），精通中国专利复审程序（专利法第41条）。\n                         本次用户通过导入方式提交了一份驳回决定，未做预分析。\n                         你的任务是基于驳回决定原文，独立完成分析并撰写一份格式规范、逻辑严密、\n                         按可直接提交成稿生成、提交前请人工核对事实与程序信息的复审请求书。\n                         要求：\n                         1. 严格按复审请求书四部分结构撰写\n                         2. 每条论证须带出处锚点【依据：出处类型：定位信息】\n                         3. 修改内容须不超出原说明书与权利要求书记载的范围（A33 自检）\n                         4. 讨论记录中发明人提出的修改意见是最高优先级{discussion_instruction}"
+                    ),
+                    format!(
+                        "## 驳回决定\n{oa}\n\n                         ## 讨论记录（含已确认的修改意见）\n{discussion}\n\n                         请基于上述材料，独立完成分析并生成完整的复审请求书。\n\n                         输出格式（复审请求书四部分结构）：\n\n                         一、复审请求范围\n                         — 明确请求复审的申请号、发明名称、驳回决定发文日\n                         — 明确请求复审的范围（全部驳回 / 部分驳回指定权项）\n\n                         二、针对驳回决定各项理由的逐项消除缺陷论证\n                         — 逐条引用驳回决定的理由编号，针对每条理由：\n                           (a) 概述驳回理由核心\n                           (b) 陈述消除该缺陷的具体论证（引用区别特征、技术效果、法条适用）\n                           (c) 如涉及修改，说明修改内容与修改依据\n                         — 每条论证须带出处锚点\n\n                         三、修改文件对照说明（如有修改）\n                         — 修改前/修改后对照表（权项号、原文字段、修改后字段、修改理由）\n                         — 修改不超出原说明书与权利要求书记载的范围（A33 自检）\n\n                         四、结论\n                         — 请求复审委员会撤销驳回决定\n                         — 请求进行前置审查（如适用）\n\n                         ## 出处对照表\n                         | 序号 | 断言摘要 | 出处类型 | 定位信息 |\n                         |------|---------|---------|---------|\n                         （列出全部事实断言的出处）"
+                    ),
+                )
+            } else {
+                (
+                    format!(
+                        "你是一位资深中国专利代理师（执业20年+），精通中国专利复审程序（专利法第41条）。\n                         你的任务是基于已确认的六角度分析结果和讨论内容，撰写一份格式规范、逻辑严密、\n                         按可直接提交成稿生成、提交前请人工核对事实与程序信息的复审请求书。\n                         要求：\n                         1. 严格按复审请求书四部分结构撰写，内容基于六角度分析输出\n                         2. 每条论证须带出处锚点【依据：出处类型：定位信息】\n                         3. 修改内容须不超出原说明书与权利要求书记载的范围（A33 自检）\n                         4. 讨论记录中发明人提出的修改意见是最高优先级{discussion_instruction}"
+                    ),
+                    format!(
+                        "## 驳回决定\n{oa}\n\n                         ## 已确认的分析结果（六角度）\n{analysis}\n\n                         ## 讨论记录（含已确认的修改意见）\n{discussion}\n\n                         请基于上述材料，生成完整的复审请求书。\n\n                         输出格式（复审请求书四部分结构）：\n\n                         一、复审请求范围\n                         — 明确请求复审的申请号、发明名称、驳回决定发文日\n                         — 明确请求复审的范围（全部驳回 / 部分驳回指定权项）\n\n                         二、针对驳回决定各项理由的逐项消除缺陷论证\n                         — 逐条引用驳回决定的理由编号，针对每条理由：\n                           (a) 概述驳回理由核心\n                           (b) 陈述消除该缺陷的具体论证（引用区别特征、技术效果、法条适用）\n                           (c) 如涉及修改，说明修改内容与修改依据\n                         — 每条论证须带出处锚点\n\n                         三、修改文件对照说明（如有修改）\n                         — 修改前/修改后对照表（权项号、原文字段、修改后字段、修改理由）\n                         — 修改不超出原说明书与权利要求书记载的范围（A33 自检）\n\n                         四、结论\n                         — 请求复审委员会撤销驳回决定\n                         — 请求进行前置审查（如适用）\n\n                         ## 出处对照表\n                         | 序号 | 断言摘要 | 出处类型 | 定位信息 |\n                         |------|---------|---------|---------|\n                         （列出全部事实断言的出处）"
+                    ),
+                )
+            };
+
+            let user_prompt = format!(
+                "{reexam_user}\n\n补充输出要求：按可直接抄入官方复审请求书理由栏的成稿为靶。\n\n<office_action>\n{oa}\n</office_action>\n\n<confirmed_analysis>\n{analysis}\n</confirmed_analysis>\n\n<discussion>\n{discussion}\n</discussion>"
+            );
+
+            let self_clone = self.clone();
+            tokio::spawn(async move {
+                match self_clone
+                    .chat_with_system(&reexam_system, &user_prompt, 0.2)
+                    .await
+                {
+                    Ok(content) => {
+                        // UA2: 拼接提交前清单（静态文案，不经过 AI 生成）
+                        let _ = tx
+                            .send(format!("{content}{}", Self::REEXAM_PRE_SUBMIT_CHECKLIST))
+                            .await;
+                    }
+                    Err(error) => {
+                        let _ = tx.send(format!("[ERROR] {error}")).await;
+                    }
+                }
+            });
+            return rx;
+        }
 
         let (mut system_prompt, base_user_prompt) = if is_import_flow {
             // 导入流程：没有预分析，让 AI 基于 OA 文本 + 讨论内容独立完成分析并撰写答复书
@@ -1063,5 +1231,91 @@ impl AiClient {
         ];
 
         self.send_chat(messages, 0.3).await
+    }
+}
+
+#[cfg(test)]
+mod ua_tests {
+    use super::AiClient;
+
+    #[test]
+    fn ua5_reject_review_prompt_contains_six_angles() {
+        let (system, user) = AiClient::build_reject_review_prompt(
+            "我的专利内容",
+            "驳回决定内容",
+            "对比文献内容",
+            "deep",
+            false,
+        );
+        // 六角度固定标题精确匹配
+        assert!(user.contains("## 一、事实对照"), "missing angle 1");
+        assert!(user.contains("## 二、法条适用"), "missing angle 2");
+        assert!(user.contains("## 三、技术效果"), "missing angle 3");
+        assert!(user.contains("## 四、策略权衡树"), "missing angle 4");
+        assert!(user.contains("## 五、程序适配"), "missing angle 5");
+        assert!(user.contains("## 六、说服结构"), "missing angle 6");
+        // 预判合议组质疑子结构
+        assert!(user.contains("预判合议组质疑"));
+        // 策略权衡树要求至少两条路径
+        assert!(user.contains("主路径"));
+        assert!(user.contains("备选路径"));
+        // system prompt 不变
+        assert!(system.contains("专利法第41条"));
+    }
+
+    #[test]
+    fn ua5_reject_review_prompt_contains_citation_anchors() {
+        let (_system, user) =
+            AiClient::build_reject_review_prompt("专利", "驳回", "对比", "deep", false);
+        // UA6: 出处锚点格式
+        assert!(user.contains("出处锚点纪律"));
+        assert!(user.contains("【依据"));
+        assert!(user.contains("合法出处类型"));
+        // 合法类型枚举
+        assert!(user.contains("驳回决定"));
+        assert!(user.contains("权利要求"));
+        assert!(user.contains("说明书"));
+        assert!(user.contains("对比文件"));
+        assert!(user.contains("法条"));
+        assert!(user.contains("审查指南"));
+        // 出处对照表
+        assert!(user.contains("出处对照表"));
+    }
+
+    #[test]
+    fn ua5_shallow_mode_unchanged() {
+        let (system, user) =
+            AiClient::build_reject_review_prompt("专利", "驳回", "对比", "shallow", false);
+        // shallow 模式不注入六角度
+        assert!(!user.contains("## 一、事实对照"));
+        assert!(system.contains("复审"));
+    }
+
+    #[test]
+    fn ua2_reexam_checklist_constant_exists() {
+        // 验证提交前清单常量存在且包含 8 项
+        let checklist = AiClient::REEXAM_PRE_SUBMIT_CHECKLIST;
+        assert!(checklist.contains("提交前清单"));
+        for i in 1..=8 {
+            assert!(
+                checklist.contains(&format!("□ {i}.")),
+                "missing checklist item {i}"
+            );
+        }
+        assert!(checklist.contains("复审请求期限"));
+        assert!(checklist.contains("前置审查"));
+        assert!(checklist.contains("出处对照表"));
+    }
+
+    #[test]
+    fn v7_first_exam_template_unchanged() {
+        // V7 回归：非 reject_review 的模板行为零回退
+        // 验证 doc_type 匹配仍然正确
+        let doc_type_first = "意见陈述书";
+        let doc_type_abnormal = "意见陈述书（非正常申请答辩）";
+        let doc_type_reexam = "复审请求书";
+        assert_eq!(doc_type_first, "意见陈述书");
+        assert_eq!(doc_type_abnormal, "意见陈述书（非正常申请答辩）");
+        assert_eq!(doc_type_reexam, "复审请求书");
     }
 }

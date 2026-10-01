@@ -810,5 +810,284 @@ mod tests {
         let report = FactCheckReport::default();
         let formatted = format_report(&report);
         assert!(formatted.contains("100"));
+
+        // ── UA3: A33 结构化对照自检测试 ──
+
+        #[test]
+        fn ua3_a33_structured_detects_high_risk() {
+            let ai_output = "修改建议：权项1修改为：「一种区块链分布式存储装置」";
+            let my_patent = "一种分布式存储装置，包括存储节点和控制器。";
+            let result = check_a33_structured(ai_output, my_patent);
+            assert_eq!(result.status, "risk");
+            assert!(result.items.iter().any(|i| i.risk_level == "high"));
+            assert!(result
+                .items
+                .iter()
+                .any(|i| i.introduced_terms.contains(&"区块链".to_string())));
+        }
+
+        #[test]
+        fn ua3_a33_structured_passes_when_no_modification() {
+            let ai_output = "建议维持权利要求1不变。";
+            let my_patent = "一种存储装置。";
+            let result = check_a33_structured(ai_output, my_patent);
+            assert_eq!(result.status, "pass");
+            assert!(result.items.is_empty());
+        }
+
+        #[test]
+        fn ua3_a33_structured_passes_when_term_in_spec() {
+            let ai_output = "权项1修改为：「一种分布式存储装置及其控制方法」";
+            let my_patent = "一种分布式存储装置，包括存储节点和控制器。控制方法包括步骤A。";
+            let result = check_a33_structured(ai_output, my_patent);
+            assert_eq!(result.status, "pass");
+        }
+
+        // ── UA6: 出处锚点纪律检测测试 ──
+
+        #[test]
+        fn ua6_missing_source_detects_unanchored_fact() {
+            let ai_output = "对比文件D1公开了一种热交换装置。本申请的区别特征在于效率更高。";
+            let report = check_missing_sources(ai_output);
+            assert!(report
+                .warnings
+                .iter()
+                .any(|w| w.category == "missing_source"));
+        }
+
+        #[test]
+        fn ua6_missing_source_passes_anchored_fact() {
+            let ai_output = "对比文件D1公开了一种热交换装置【依据：对比文件：D1第4段】。";
+            let report = check_missing_sources(ai_output);
+            assert!(!report
+                .warnings
+                .iter()
+                .any(|w| w.category == "missing_source"));
+        }
+
+        #[test]
+        fn ua6_missing_source_ignores_non_fact_sentences() {
+            let ai_output = "建议修改权利要求1。可以考虑增加从属权利要求。";
+            let report = check_missing_sources(ai_output);
+            assert!(report.warnings.is_empty());
+        }
     }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  UA3: A33 结构化对照自检
+// ═══════════════════════════════════════════════════════════════════════
+
+/// A33 单项检查结果
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
+pub struct A33CheckItem {
+    pub claim_num: String,
+    pub modified_text: String,
+    pub introduced_terms: Vec<String>,
+    pub original_spec_coverage: String,
+    pub risk_level: String, // "high" | "medium" | "none"
+    pub detail: String,
+}
+
+/// A33 结构化检查结果
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
+pub struct A33CheckResult {
+    pub status: String, // "pass" | "warning" | "risk"
+    pub items: Vec<A33CheckItem>,
+}
+
+impl Default for A33CheckResult {
+    fn default() -> Self {
+        Self {
+            status: "pass".to_string(),
+            items: Vec::new(),
+        }
+    }
+}
+
+/// UA3: 对修改后权项 vs 原权利要求书 + 说明书做显式对照检查。
+///
+/// 从 AI 输出中提取修改后权利要求，逐项检查引入的术语是否在原说明书/权利要求书中出现。
+/// 返回结构化 `a33_check` 标记键（沿 §2.3 格式）。
+#[allow(dead_code)]
+pub fn check_a33_structured(ai_output: &str, my_patent: &str) -> A33CheckResult {
+    let mut result = A33CheckResult::default();
+
+    if my_patent.trim().is_empty() {
+        return result;
+    }
+
+    let amendment_text = extract_amendment_section(ai_output);
+    if amendment_text.is_empty() {
+        return result;
+    }
+
+    // 提取修改后权项：匹配 "权项X" 或 "权利要求X" 后的修改内容
+    let claim_re = regex::Regex::new(
+        r#"(?:权项|权利要求)\s*(\d+)[^。]*?(?:修改为|改为|修改后)[：:]\s*[「"]([^」"]+)[」"]"#,
+    )
+    .ok();
+
+    if let Some(re) = claim_re {
+        for cap in re.captures_iter(&amendment_text) {
+            let claim_num = cap
+                .get(1)
+                .map(|m| m.as_str().to_string())
+                .unwrap_or_default();
+            let modified_text = cap
+                .get(2)
+                .map(|m| m.as_str().to_string())
+                .unwrap_or_default();
+
+            // 提取修改文本中的中文术语（3-8字）
+            let mut introduced: Vec<String> = Vec::new();
+            for chunk in modified_text.split(|c: char| !('\u{4e00}'..='\u{9fff}').contains(&c)) {
+                let chars: Vec<char> = chunk.chars().collect();
+                if chars.len() >= 3 && chars.len() <= 8 {
+                    let word: String = chars.iter().collect();
+                    if !STOP_WORDS.contains(&word.as_str()) && !my_patent.contains(&word) {
+                        introduced.push(word);
+                    }
+                }
+            }
+
+            if introduced.is_empty() {
+                continue;
+            }
+
+            // 逐术语检查覆盖情况
+            let mut coverage_parts: Vec<String> = Vec::new();
+            let mut has_high = false;
+            let mut has_medium = false;
+
+            for term in &introduced {
+                if my_patent.contains(term) {
+                    coverage_parts.push(format!("{term}：说明书中有记载"));
+                } else {
+                    // 检查是否有近似表述（术语的部分在原文中出现）
+                    let partial = term
+                        .chars()
+                        .take(term.chars().count() - 1)
+                        .collect::<String>();
+                    if my_patent.contains(&partial) {
+                        coverage_parts.push(format!(
+                            "{term}：原文有近似表述「{partial}」，但表述形式有实质差异"
+                        ));
+                        has_medium = true;
+                    } else {
+                        coverage_parts.push(format!("{term}：未在原说明书与权利要求书中发现"));
+                        has_high = true;
+                    }
+                }
+            }
+
+            let risk_level = if has_high {
+                "high"
+            } else if has_medium {
+                "medium"
+            } else {
+                "none"
+            };
+
+            let detail = if has_high {
+                format!(
+                    "权项{claim_num}引入「{}」未见于原说明书及原权利要求书，可能违反专利法第33条",
+                    introduced.join("」「")
+                )
+            } else if has_medium {
+                format!("权项{claim_num}引入的术语表述形式与原文有实质差异，需人工核实是否超范围")
+            } else {
+                format!("权项{claim_num}修改未引入超范围术语")
+            };
+
+            result.items.push(A33CheckItem {
+                claim_num,
+                modified_text,
+                introduced_terms: introduced,
+                original_spec_coverage: coverage_parts.join(" / "),
+                risk_level: risk_level.to_string(),
+                detail,
+            });
+        }
+    }
+
+    // 计算 status
+    let has_high = result.items.iter().any(|i| i.risk_level == "high");
+    let has_medium = result.items.iter().any(|i| i.risk_level == "medium");
+    result.status = if has_high {
+        "risk".to_string()
+    } else if has_medium {
+        "warning".to_string()
+    } else {
+        "pass".to_string()
+    };
+
+    result
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  UA6: 出处锚点纪律检测
+// ═══════════════════════════════════════════════════════════════════════
+
+/// 事实动词列表——含这些动词的句子是事实断言，须带出处锚点
+#[allow(dead_code)]
+const FACT_VERBS: &[&str] = &[
+    "公开了",
+    "记载了",
+    "显示了",
+    "指出",
+    "披露了",
+    "揭示了",
+    "描述了",
+    "说明了",
+    "提到了",
+];
+
+/// UA6: 检测输出中无出处锚点的事实断言。
+///
+/// 扫描含事实动词且未跟 `【依据：…】` 的句子，标记为 `missing_source` 警告。
+/// 返回的 FactCheckReport 中 warnings 的 category 为 "missing_source"。
+#[allow(dead_code)]
+pub fn check_missing_sources(ai_output: &str) -> FactCheckReport {
+    let mut report = FactCheckReport::default();
+
+    // 按句子分割（中文句号、问号、叹号、换行）
+    let sentences: Vec<&str> = ai_output
+        .split(['。', '？', '！', '\n'])
+        .filter(|s| !s.trim().is_empty())
+        .collect();
+
+    for sentence in &sentences {
+        let has_fact_verb = FACT_VERBS.iter().any(|v| sentence.contains(v));
+        if !has_fact_verb {
+            continue;
+        }
+
+        // 检查句子中或紧随其后是否有出处锚点
+        let has_anchor = sentence.contains("【依据：") || sentence.contains("【依据:");
+
+        if !has_anchor {
+            // 提取事实动词用于描述
+            let verb = FACT_VERBS
+                .iter()
+                .find(|v| sentence.contains(*v))
+                .unwrap_or(&"断言");
+
+            // 截取句子前 60 字用于描述
+            let preview: String = sentence.trim().chars().take(60).collect();
+
+            report.warnings.push(FactWarning {
+                category: "missing_source".to_string(),
+                description: format!(
+                    "事实断言（含「{verb}」）未带出处锚点：「{preview}…」——须补充【依据：出处类型：定位信息】或降级为【需申请人确认】",
+                ),
+                severity: "中".to_string(),
+            });
+        }
+    }
+
+    report.score = compute_score(&report.warnings);
+    report
 }

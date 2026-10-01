@@ -13,7 +13,7 @@ mod chat;
 mod client;
 mod fact_check;
 mod idea;
-mod patent;
+pub mod patent;
 mod tests;
 
 pub(crate) use client::{
