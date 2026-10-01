@@ -5,6 +5,17 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 
+## [Unreleased]
+
+### 新增 / Added
+- §6.3 真实 AI 冒烟测试（DeepSeek 主路径，7 个端到端场景）
+- §6.1 单元测试加强（OA/parser/upload 覆盖率提升）
+
+### 修复 / Fixed
+- §3.3 OCR 异步化 — spawn_blocking 避免阻塞 Tokio 运行时
+
+---
+
 ## [v0.9.2] - 2026-10-02
 
 ### 修复 / Fixed
@@ -30,7 +41,7 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 
-## [Unreleased]
+## [v0.8.0] - 2026-09-22
 
 ### 新增 / Added
 - **检索↔创意验证全链路贯通**（M-C / MC1）— pipeline 检索步骤改用 SourceChain 多源链（SerpAPI + GooglePatentsXhr + EpoOps），PriorArtCluster 聚类集成 RAG 全文切片，创意报告引用对齐 MB3 的 {ref_no, patent_id} 结构化形状。
