@@ -5,6 +5,14 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 
+## [v0.9.1] - 2026-10-02
+
+### 修复 / Fixed
+- **OA 类型标签不随选择变化**：选择「驳回后复审」时按钮文字和章节标题现在正确显示为「生成复审请求书」和「复审请求书草稿」，不再固定显示「生成意见陈述书」
+- **AI 讨论发送无反应**：DOMPurify.sanitize() 默认剥离 onclick/onkeydown 事件处理器属性，导致动态生成的讨论面板发送按钮点击无反应。添加 DOMPurify.setConfig({ADD_ATTR: [...]}]) 全局配置允许内联事件处理器
+
+---
+
 ## [v0.9.0] - 2026-10-01
 
 ### 新增 / Added
