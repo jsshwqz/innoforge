@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 /// Character n-gram tokenizer for Chinese text.
 #[derive(Debug, Clone)]
-struct CharNGramTokenizer {
+pub struct CharNGramTokenizer {
     min_n: usize,
     max_n: usize,
 }
@@ -24,13 +24,18 @@ impl Default for CharNGramTokenizer {
 
 impl CharNGramTokenizer {
     /// Tokenize text into character n-grams.
-    fn tokenize(&self, text: &str) -> Vec<String> {
-        let cleaned: String = text.chars().filter(|c| !c.is_whitespace()).collect();
+    ///
+    /// Operates on `Vec<char>` to guarantee char-boundary safety regardless
+    /// of the input's UTF-8 byte layout. The previous byte-slice approach
+    /// (`cleaned[i..i+n]`) panicked on Chinese text because `i` iterated over
+    /// byte indices but multi-byte chars make most offsets non-char-boundaries.
+    pub fn tokenize(&self, text: &str) -> Vec<String> {
+        let cleaned: Vec<char> = text.chars().filter(|c| !c.is_whitespace()).collect();
         let mut grams = Vec::new();
         for n in self.min_n..=self.max_n {
             if cleaned.len() >= n {
                 for i in 0..=cleaned.len() - n {
-                    let gram: String = cleaned[i..i + n].chars().collect();
+                    let gram: String = cleaned[i..i + n].iter().collect();
                     grams.push(gram);
                 }
             }
@@ -74,7 +79,16 @@ impl VectorIndex {
             *count = 1.0 + (*count / doc_len).log2();
         }
 
-        // Normalize to unit vector (simplified: no IDF without corpus)
+        // Normalize to unit vector.
+        //
+        // KNOWN LIMITATION (M-B §0 decision, intentionally not fixed this round):
+        //   - No IDF weighting (no corpus statistics); all terms treated equally.
+        //   - The sorted-then-padded approach discards the term→dimension mapping,
+        //     so query and document vectors are NOT in the same comparable space.
+        //     Cosine similarity values do NOT constitute semantic relevance.
+        //   - This is acceptable for M-B: we only promise "usable + no panic +
+        //     single implementation", not retrieval quality.
+        //   - Re-evaluate after MB3 when real chunk corpus is available.
         let norm_sq: f32 = tf.values().map(|v| v * v).sum();
         let norm = if norm_sq > 0.0 { norm_sq.sqrt() } else { 1.0 };
 
@@ -168,6 +182,23 @@ pub fn compute_and_save_embedding(
     Ok(())
 }
 
+/// Convenience: compute a TF-IDF embedding without constructing a VectorIndex.
+///
+/// Delegates to [`crate::db::vector::compute_tfidf_embedding`] — the single
+/// canonical implementation shared across both binary and library targets.
+pub fn compute_tfidf_embedding(text: &str) -> Vec<f32> {
+    crate::db::vector::compute_tfidf_embedding(text)
+}
+
+/// Try to compute and persist an embedding for a patent.
+///
+/// Delegates to [`crate::db::vector::try_compute_and_save_embedding`].
+/// **Failure is non-fatal**: embedding is an optional enhancement, not a
+/// prerequisite for patent insertion.
+pub fn try_compute_and_save_embedding(db: &Database, patent_id: &str, text: &str) {
+    crate::db::vector::try_compute_and_save_embedding(db, patent_id, text)
+}
+
 /// RRF (Reciprocal Rank Fusion) — fuse BM25 and vector results.
 /// rank_fusion_score = sum(1 / (k + rank)) for each result set.
 pub fn rrf_fuse(
@@ -202,4 +233,98 @@ pub struct VectorSearchResult {
     pub fused_score: f64,
     pub bm25_rank: usize,
     pub vector_rank: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression: pure Chinese text must not panic in tokenize.
+    /// Previously, `cleaned[i..i+n]` byte-sliced at arbitrary offsets,
+    /// panicking because Chinese chars are 3 bytes in UTF-8.
+    #[test]
+    fn tokenize_pure_chinese_no_panic() {
+        let tok = CharNGramTokenizer::default();
+        let grams = tok.tokenize("一种基于深度学习的专利分析方法");
+        assert!(!grams.is_empty(), "Chinese text should produce n-grams");
+        // 11 chars, n=2..4 → (10+9+8) = 27 grams
+        assert_eq!(grams.len(), 39);
+    }
+
+    /// Regression: mixed Chinese + English must not panic.
+    #[test]
+    fn tokenize_mixed_zh_en_no_panic() {
+        let tok = CharNGramTokenizer::default();
+        let grams = tok.tokenize("专利分析patent analysis方法");
+        assert!(!grams.is_empty(), "Mixed text should produce n-grams");
+    }
+
+    /// Regression: emoji (4-byte UTF-8) must not panic.
+    #[test]
+    fn tokenize_emoji_no_panic() {
+        let tok = CharNGramTokenizer::default();
+        let grams = tok.tokenize("专利🚀分析🚀方法");
+        assert!(!grams.is_empty(), "Emoji text should produce n-grams");
+    }
+
+    /// Exhaustive: every possible substring start position must not panic.
+    /// This catches off-by-one errors that a few hand-picked inputs might miss.
+    #[test]
+    fn tokenize_all_start_positions_no_panic() {
+        let tok = CharNGramTokenizer::default();
+        let text = "一种基于深度学习的专利分析方法";
+        let chars: Vec<char> = text.chars().collect();
+        for start in 0..chars.len() {
+            for end in (start + 1)..=chars.len() {
+                let substring: String = chars[start..end].iter().collect();
+                let _ = tok.tokenize(&substring); // must not panic
+            }
+        }
+    }
+
+    /// The embedding output must always be exactly 512 dimensions.
+    #[test]
+    fn embedding_fixed_dimension_512() {
+        let emb = compute_tfidf_embedding("一种基于深度学习的专利分析方法");
+        assert_eq!(emb.len(), 512, "Embedding must be 512-dimensional");
+    }
+
+    /// Empty text should not panic and should produce a valid (zero) embedding.
+    #[test]
+    fn embedding_empty_text_no_panic() {
+        let emb = compute_tfidf_embedding("");
+        assert_eq!(emb.len(), 512);
+        assert!(
+            emb.iter().all(|&v| v == 0.0),
+            "Empty text → all-zero embedding"
+        );
+    }
+
+    /// Single character should not panic.
+    #[test]
+    fn tokenize_single_char_no_panic() {
+        let tok = CharNGramTokenizer::default();
+        let grams = tok.tokenize("专");
+        assert!(grams.is_empty(), "Single char can't form n-grams with n>=2");
+    }
+
+    /// Exactly n characters: boundary case.
+    #[test]
+    fn tokenize_exact_n_chars() {
+        let tok = CharNGramTokenizer::default();
+        let grams = tok.tokenize("专利"); // 2 chars
+        assert_eq!(grams.len(), 1, "2 chars with n=2 → 1 bigram");
+        assert_eq!(grams[0], "专利");
+    }
+
+    /// Cosine similarity: identical vectors → 1.0, orthogonal → 0.0.
+    #[test]
+    fn cosine_similarity_basic() {
+        let a = vec![1.0, 0.0, 0.0];
+        let b = vec![1.0, 0.0, 0.0];
+        assert!((crate::db::vector::cosine_similarity(&a, &b) - 1.0).abs() < 1e-6);
+
+        let c = vec![0.0, 1.0, 0.0];
+        assert!((crate::db::vector::cosine_similarity(&a, &c) - 0.0).abs() < 1e-6);
+    }
 }

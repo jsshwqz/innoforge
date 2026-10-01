@@ -684,7 +684,12 @@ pub async fn api_import_patents(
 ) -> Json<serde_json::Value> {
     let mut n = 0;
     for p in &req.patents {
-        if s.db.insert_patent(p).is_ok() {
+        if let Ok(id) = s.db.insert_patent(p) {
+            crate::db::vector::try_compute_and_save_embedding(
+                &s.db,
+                &id,
+                &format!("{} {}", p.title, p.abstract_text),
+            );
             n += 1;
         }
     }
