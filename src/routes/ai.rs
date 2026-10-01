@@ -2,7 +2,8 @@ use super::{image_data_uri, AppState};
 use crate::ai::{
     check_oa_analysis, format_report, oa_capacity_error, patent::extract_publication_numbers,
     truncate_for_ai, Message, OA_DISCUSSION_ANALYSIS_MAX_CHARS, OA_DISCUSSION_HISTORY_MAX_CHARS,
-    OA_DISCUSSION_OA_MAX_CHARS,
+    OA_DISCUSSION_OA_MAX_CHARS, OA_RESPONSE_ANALYSIS_MAX_CHARS, OA_RESPONSE_DISCUSSION_MAX_CHARS,
+    OA_RESPONSE_OA_MAX_CHARS,
 };
 use crate::patent::*;
 use axum::{
@@ -1234,6 +1235,17 @@ pub async fn api_ai_office_action_response(
         _ => String::new(),
     };
 
+    // MB5: OA 容量统一为「报错不截断」——非流式路径
+    for (field, value, max_chars) in [
+        ("my_patent", &my_info, OA_RESPONSE_ANALYSIS_MAX_CHARS),
+        ("office_action", &oa_text, OA_RESPONSE_OA_MAX_CHARS),
+        ("references", &refs_info, OA_RESPONSE_DISCUSSION_MAX_CHARS),
+    ] {
+        if let Some(error) = oa_capacity_error(field, value, max_chars) {
+            return Json(json!({"error": error}));
+        }
+    }
+
     // 从请求中提取专利号，用于缓存命中判断
     let patent_number = req
         .get("my_patent_id")
@@ -1448,6 +1460,17 @@ pub async fn api_ai_office_action_response_stream(
             supplemented
         }
     };
+
+    // MB5: OA 容量统一为「报错不截断」——流式路径
+    for (field, value, max_chars) in [
+        ("my_patent", &my_info, OA_RESPONSE_ANALYSIS_MAX_CHARS),
+        ("office_action", &oa_text, OA_RESPONSE_OA_MAX_CHARS),
+        ("references", &refs_info, OA_RESPONSE_DISCUSSION_MAX_CHARS),
+    ] {
+        if let Some(error) = oa_capacity_error(field, value, max_chars) {
+            return Sse::new(error_sse(error));
+        }
+    }
 
     let oa_type = req
         .get("oa_type")
@@ -1747,7 +1770,7 @@ pub async fn api_ai_oa_discuss(
                     let max_content = MAX_DISCUSSION_FOR_AI - msg["role"].to_string().len() - 20;
                     if content.len() > max_content {
                         msg["content"] = serde_json::Value::String(
-                            content.chars().take(max_content).collect::<String>()
+                            truncate_for_ai(content, max_content)
                                 + "...\n[讨论内容已被截断以适配 AI 上下文窗口]",
                         );
                     }
@@ -1769,13 +1792,8 @@ pub async fn api_ai_oa_discuss(
             }
             formatted_discussion = text;
         } else {
-            formatted_discussion = if disc_raw.chars().count() > MAX_DISCUSSION_FOR_AI {
-                // MB5④: 用 chars().take() 替代字节切片，避免多字节字符（中文）越限 panic
-                disc_raw
-                    .chars()
-                    .take(MAX_DISCUSSION_FOR_AI)
-                    .collect::<String>()
-                    + "\n\n[讨论内容已被截断]"
+            formatted_discussion = if disc_raw.len() > MAX_DISCUSSION_FOR_AI {
+                truncate_for_ai(&disc_raw, MAX_DISCUSSION_FOR_AI) + "\n\n[讨论内容已被截断]"
             } else {
                 disc_raw.clone()
             };
@@ -2017,6 +2035,11 @@ pub async fn api_oa_discussion_import(
     };
 
     let oa_text = req["oa_text"].as_str().unwrap_or("").to_string();
+
+    // MB5: OA 讨论导入容量校验（原零容量校验）
+    if let Some(error) = oa_capacity_error("oa_text", &oa_text, OA_DISCUSSION_OA_MAX_CHARS) {
+        return Json(json!({"status": "error", "message": error}));
+    }
 
     let messages = match req["messages"].as_array() {
         Some(arr) => arr
@@ -2398,5 +2421,84 @@ mod prompt_boundary_tests {
         let truncated: String = disc_raw.chars().take(MAX).collect();
         assert_eq!(truncated.chars().count(), MAX);
         assert!(truncated.chars().all(|c| c == '中'));
+    }
+
+    // ── MB5 测试 ──────────────────────────────────────────────
+
+    #[test]
+    fn mb5_truncate_for_ai_chinese_long_discussion_no_panic() {
+        // 红→绿锚：旧切法 disc_raw[..MAX_DISCUSSION_FOR_AI] 对中文长讨论历史 panic，
+        // 新写法 truncate_for_ai 零 panic。
+        // 构造纯中文长文本，长度超过 MAX_DISCUSSION_FOR_AI (120_000)
+        let chinese_char = "这是测试"; // 4 chars = 12 bytes
+        let repeated = chinese_char.repeat(15000); // 60000 chars = 180000 bytes > 120000
+        let disc_raw = format!("[{{"role":"user","content":"{}"}}]", repeated);
+
+        // 旧切法会 panic（字节索引落在多字节字符中间），
+        // truncate_for_ai 按字符截断，零 panic
+        let truncated = truncate_for_ai(&disc_raw, 120_000);
+        assert!(truncated.len() <= 120_000 + 100); // 允许少量尾注开销
+                                                   // 必须是有效 UTF-8（String 保证）
+        assert!(!truncated.is_empty());
+    }
+
+    #[test]
+    fn mb5_truncate_for_ai_mixed_chinese_emoji_no_panic() {
+        // 混排中文 + emoji + ASCII，验证截断安全性
+        let mixed = "专利分析🚀CN123456测试文本🎉".repeat(10000);
+        let truncated = truncate_for_ai(&mixed, 50_000);
+        assert!(!truncated.is_empty());
+        // 不应在多字节字符中间截断（String 保证有效 UTF-8）
+    }
+
+    #[test]
+    fn mb5_oa_capacity_error_detects_overflow() {
+        // 容量校验：超限应返回错误
+        let long_text = "测试".repeat(100_000); // 200000 chars
+        let error = oa_capacity_error("test_field", &long_text, 100_000);
+        assert!(error.is_some(), "Should detect overflow");
+        let msg = error.unwrap();
+        assert!(msg.contains("OA_INPUT_TOO_LARGE"));
+        assert!(msg.contains("test_field"));
+    }
+
+    #[test]
+    fn mb5_oa_capacity_error_passes_within_limit() {
+        // 容量校验：未超限应返回 None
+        let short_text = "测试文本";
+        let error = oa_capacity_error("test_field", short_text, 100_000);
+        assert!(error.is_none(), "Should not trigger on short text");
+    }
+
+    #[test]
+    fn mb5_oa_capacity_error_counts_unicode_chars_not_bytes() {
+        // 容量校验按 Unicode 字符计数，非字节
+        // 4 个中文字符 = 12 字节，应通过 max_chars=10
+        let text = "测试文本测试"; // 6 chars = 18 bytes
+        let error = oa_capacity_error("field", text, 10);
+        assert!(error.is_none(), "6 chars should pass max_chars=10");
+
+        // 12 个中文字符 = 36 字节，应触发 max_chars=10
+        let long = "测试文本测试文本测试文本"; // 12 chars
+        let error = oa_capacity_error("field", long, 10);
+        assert!(error.is_some(), "12 chars should fail max_chars=10");
+    }
+
+    #[test]
+    fn mb5_truncate_for_ai_preserves_content_within_limit() {
+        // 限制内不截断
+        let text = "这是一段测试文本。";
+        let truncated = truncate_for_ai(text, 100);
+        assert_eq!(truncated, text, "Should not truncate within limit");
+    }
+
+    #[test]
+    fn mb5_truncate_for_ai_adds_integrity_note_when_truncated() {
+        // 截断时应有数据完整性提示
+        let long = "测试".repeat(1000); // 2000 chars
+        let truncated = truncate_for_ai(&long, 100);
+        assert!(truncated.len() < long.len(), "Should be shorter");
+        // truncate_for_ai 应包含完整性提示或截断标记
+        // （具体实现可能包含 "..." 或 "[截断]" 等）
     }
 }

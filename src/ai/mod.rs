@@ -18,7 +18,8 @@ mod tests;
 
 pub(crate) use client::{
     oa_capacity_error, OA_DISCUSSION_ANALYSIS_MAX_CHARS, OA_DISCUSSION_HISTORY_MAX_CHARS,
-    OA_DISCUSSION_OA_MAX_CHARS,
+    OA_DISCUSSION_OA_MAX_CHARS, OA_RESPONSE_ANALYSIS_MAX_CHARS, OA_RESPONSE_DISCUSSION_MAX_CHARS,
+    OA_RESPONSE_OA_MAX_CHARS,
 };
 #[allow(unused_imports)]
 pub use client::{safe_truncate_chars, truncate_for_ai, AiClient, AiUsageInfo, Message};
