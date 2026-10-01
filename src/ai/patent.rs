@@ -1342,3 +1342,119 @@ mod ua_tests {
         assert_eq!(doc_type_reexam, "复审请求书");
     }
 }
+
+    // ── §6.1 新增测试：extract_oa_response_section ──
+
+    #[test]
+    fn extract_oa_response_section_finds_explicit_marker() {
+        let output = "## 第一部分\n分析内容\n\n=== 第五部分：意见陈述书草稿 ===\n这是答复书内容。";
+        let result = AiClient::extract_oa_response_section(output);
+        assert!(result.contains("意见陈述书草稿"));
+        assert!(result.contains("这是答复书内容。"));
+    }
+
+    #[test]
+    fn extract_oa_response_section_finds_md_marker() {
+        let output = "分析内容\n## 第五部分：意见陈述书草稿\n正式答复。";
+        let result = AiClient::extract_oa_response_section(output);
+        assert!(result.contains("正式答复。"));
+    }
+
+    #[test]
+    fn extract_oa_response_section_finds_short_marker() {
+        let output = "分析\n=== 第五部分\n草稿内容";
+        let result = AiClient::extract_oa_response_section(output);
+        assert!(result.contains("草稿内容"));
+    }
+
+    #[test]
+    fn extract_oa_response_section_falls_back_to_second_half() {
+        let output = "AAAAABBBBBCCCCCDDDDDEEEEEFFFFF";
+        let result = AiClient::extract_oa_response_section(output);
+        // 无标记时回退到后半段
+        assert!(!result.is_empty());
+        assert!(result.len() <= output.len());
+    }
+
+    #[test]
+    fn extract_oa_response_section_empty_input() {
+        let result = AiClient::extract_oa_response_section("");
+        assert!(result.is_empty());
+    }
+
+    // ── §6.1 新增测试：build_first_exam_prompt 结构 ──
+
+    #[test]
+    fn first_exam_medium_prompt_contains_five_sections() {
+        let (_system, user) =
+            AiClient::build_first_exam_prompt("专利", "OA", "对比", "medium", false);
+        assert!(user.contains("第一部分"), "missing section 1");
+        assert!(user.contains("第二部分"), "missing section 2");
+        assert!(user.contains("第三部分"), "missing section 3");
+        assert!(user.contains("第四部分"), "missing section 4");
+        assert!(user.contains("第五部分"), "missing section 5");
+    }
+
+    #[test]
+    fn first_exam_deep_prompt_contains_section5_draft() {
+        let (_system, user) =
+            AiClient::build_first_exam_prompt("专利", "OA", "对比", "deep", false);
+        // 非 discuss 模式应包含意见陈述书草稿指令
+        assert!(user.contains("意见陈述书草稿"));
+        assert!(user.contains("关于审查意见的答复"));
+        assert!(user.contains("关于权利要求的修改"));
+        assert!(user.contains("关于创造性的论述"));
+    }
+
+    #[test]
+    fn first_exam_discuss_mode_omits_section5() {
+        let (_system, user) =
+            AiClient::build_first_exam_prompt("专利", "OA", "对比", "deep", true);
+        // discuss 模式仅输出第一至第四部分
+        assert!(user.contains("仅输出第一部分至第四部分"));
+    }
+
+    #[test]
+    fn first_exam_shallow_prompt_is_brief() {
+        let (system, user) =
+            AiClient::build_first_exam_prompt("专利", "OA", "对比", "shallow", false);
+        assert!(system.contains("简明扼要"));
+        assert!(user.contains("一句话概括"));
+        assert!(!user.contains("第一部分"));
+    }
+
+    // ── §6.1 新增测试：build_abnormal_prompt 结构 ──
+
+    #[test]
+    fn abnormal_medium_prompt_contains_four_sections() {
+        let (_system, user) =
+            AiClient::build_abnormal_prompt("专利", "OA", "参考", "medium", false);
+        assert!(user.contains("认定原因分析"), "missing section 1");
+        assert!(user.contains("技术方案真实性论证"), "missing section 2");
+        assert!(user.contains("研发过程合理性说明"), "missing section 3");
+        assert!(user.contains("逐条反驳"), "missing section 4");
+    }
+
+    #[test]
+    fn abnormal_shallow_prompt_is_brief() {
+        let (system, user) =
+            AiClient::build_abnormal_prompt("专利", "OA", "参考", "shallow", false);
+        assert!(system.contains("简要"));
+        assert!(user.contains("一句话概括"));
+        assert!(!user.contains("认定原因分析"));
+    }
+
+    #[test]
+    fn abnormal_deep_prompt_contains_section5() {
+        let (_system, user) =
+            AiClient::build_abnormal_prompt("专利", "OA", "参考", "deep", false);
+        assert!(user.contains("第五部分"));
+        assert!(user.contains("意见陈述书"));
+    }
+
+    #[test]
+    fn abnormal_discuss_mode_omits_section5() {
+        let (_system, user) =
+            AiClient::build_abnormal_prompt("专利", "OA", "参考", "deep", true);
+        assert!(user.contains("仅输出第一部分至第四部分"));
+    }

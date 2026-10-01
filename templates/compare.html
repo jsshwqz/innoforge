@@ -97,6 +97,10 @@
     </div>
     <script src="/static/i18n.js"></script>
     <script>
+    // Allow inline event handlers in sanitized HTML
+    if (typeof DOMPurify !== 'undefined' && DOMPurify.setConfig) {
+        DOMPurify.setConfig({ADD_ATTR: ['onclick', 'onkeydown', 'onchange', 'oninput', 'onload', 'onfocus', 'onblur']});
+    }
     // ── PDF Preview ──
     // Store original File objects for PDF preview
     var uploadedFileObjects = {};
