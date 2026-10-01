@@ -6,6 +6,7 @@ pub mod deep_reasoning;
 pub mod diversity;
 pub mod expand;
 pub mod experiment;
+pub mod fact_check;
 pub mod finalize;
 pub mod oa_response;
 pub mod parse;

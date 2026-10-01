@@ -23,7 +23,13 @@ pub async fn execute(ctx: &mut PipelineContext, db: &Arc<Database>) -> Result<()
         }
     }
 
-    // MB4: 出处标注 + 决策建议段（在证据链持久化之后、记忆提取之前执行）
+    // MB1: 幻觉防线——事实校验（在 ai_analysis 确定后、provenance 之前执行）
+    super::fact_check::run_fact_check(ctx);
+    if ctx.fact_check_rejected {
+        tracing::warn!("Fact check rejected: score below threshold");
+    }
+
+    // MB4: 出处标注 + 决策建议段（在事实校验之后、记忆提取之前执行）
     super::provenance::run_provenance_pipeline(ctx);
     if !ctx.provenance_annotations.is_empty() {
         let speculation_count = ctx

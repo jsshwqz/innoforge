@@ -54,7 +54,7 @@ pub struct SimilarityEntry {
 }
 
 /// 排序后的匹配结果
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RankedMatch {
     pub rank: usize,
     pub source_id: String,
@@ -327,6 +327,14 @@ pub struct PipelineContext {
     #[serde(default)]
     pub decision: Option<crate::types::idea::DecisionRecommendation>,
 
+    // MB1: 事实校验报告（幻觉防线）
+    #[serde(default)]
+    pub fact_check_report: Option<crate::ai::FactCheckReport>,
+
+    // MB1: 事实校验是否拒绝（致命档扣分 ≥35）
+    #[serde(default)]
+    pub fact_check_rejected: bool,
+
     // 元数据
     pub current_step: PipelineStep,
     pub step_results: Vec<StepResult>,
@@ -370,6 +378,8 @@ impl PipelineContext {
             rag_chunks: Vec::new(),
             provenance_annotations: Vec::new(),
             decision: None,
+            fact_check_report: None,
+            fact_check_rejected: false,
             current_step: PipelineStep::ParseInput,
             step_results: Vec::new(),
         }
