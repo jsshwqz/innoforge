@@ -8,6 +8,16 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 ## [Unreleased]
 
 ### 新增 / Added
+- **深度分析自动抓取全文并引用原文片段**（M-B / MB2+MB3，PR #44+#33）— 深度分析现在会自动为最相关的若干篇专利抓取公开全文（无需付费 API Key），并在报告中引用专利原文片段，每条引用可反查回库内该专利的切片原文。
+  Deep analysis now auto-fetches public full text for the top-N most relevant patents (no paid API Key needed) and cites patent original-text fragments in the report, each citation traceable back to the in-DB chunk.
+- **创意报告新增决策建议段**（M-B / MB4，PR #34）— 明确给出申请 / 放弃 / 转向，并附不少于 3 条可溯源理由。
+  Idea analysis reports now include a decision-recommendation section: file / abandon / redirect with ≥3 traceable rationales.
+- **事实性结论强制附来源**（M-B / MB4，PR #34）— 分析报告的事实性结论附来源（专利号 + 段落/权利要求号），无来源的结论标注为推测。
+  Factual conclusions in analysis reports must carry a source (patent number + section/claim); unsourced conclusions are marked as speculative.
+- **AI 事实核查扩展到创意分析**（M-B / MB1，PR #35）— 编造法条、页码、引用或无来源数据会被标注，达到致命档时中止并给出可读原因。
+  AI fact-checking extended from OA replies to idea analysis: fabricated statutes, page numbers, citations, or unsourced data are flagged; fatal-severity issues abort with a human-readable reason.
+- **新入库专利自动生成检索向量与文本切片**（M-B / MB0+MB3，PR #38+#33）— 入库时自动生成字符 n-gram 向量与文本切片，无需手动触发。
+  Newly imported patents auto-generate character n-gram vectors and text chunks at insert time, no manual trigger needed.
 - **检索诊断面板**（M-A / MA5b，PR #20）— `/api/search/online` 响应新增 `attempts` 键，逐源记录尝试状态（成功/失败/跳过）、耗时、命中数与用户可读的错误原因；检索页新增折叠诊断面板展示这些记账（SerpAPI 未配 Key 的静默降级从此可见，降级不再是黑盒）。面板全程 `createElement + textContent` 安全渲染，摘要截断仅用于显示、悬停保留全文。
   Search diagnostics panel: `/api/search/online` now returns an `attempts` key recording per-source status (success/failure/skipped), latency, hit counts and human-readable error reasons, surfaced in a collapsible panel on the search page — the silent "no SERPAPI_KEY" degradation is now visible instead of a black box. Rendered safely via `createElement + textContent`; display truncation never touches the underlying data.
 - **检索语言/辖区过滤器**（M-A / MA3，PR #21）— 检索页新增「自动 / 中文 / 英文 / 不限」语言下拉（默认「自动」，不选时请求与旧版逐字一致）；显式选择优先级最高（显式 language > 辖区 > 关键词自动判定），中文关键词默认命中以 CN 专利为主，英文用户可反向覆盖。
@@ -23,7 +33,26 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 - **HTML 模板函数完整性静态扫描** — 新增 `check_html_functions.mjs`：编译前扫描所有模板内联事件（onclick 等）引用的函数是否都有定义，把「按钮在、函数没了」这类回归（42c726e / 9f1a14b 两次重构事故）拦截在编译前；配套 e2e 新增创意页功能完整性用例，AGENTS.md 固化为强制流程。
   HTML template function-integrity static scanner: `check_html_functions.mjs` verifies every inline event handler in all templates has a defined function before compiling, catching "button exists, function gone" regressions (the 42c726e / 9f1a14b redesign incidents) at build time; an e2e idea-page integrity case and AGENTS.md rules back it up.
 
+### 修复 / Fixed
+- **修复中文专利文本向量检索分词越界崩溃**（M-B / MB0，PR #38）— 旧实现对中文多字节字符按字节切片导致 panic，新实现按 Unicode 字符操作。
+  Fixed panic in vector-search tokenization on Chinese multi-byte text (byte-index slicing → char-boundary safe).
+- **修复超长中文 OA 讨论历史裁剪崩溃**（M-B / MB5，PR #45）— 旧切法按字节索引切片，对中文长讨论历史 panic；新写法按字符截断，零 panic。
+  Fixed panic when truncating long Chinese OA discussion history (byte-index slicing → char-safe truncation).
+
 ### 改进 / Improved
+- **OA 输入超长改为明确报错**（M-B / MB5，PR #45）— 超长时返回结构化错误并显示实际/上限字符数，不再静默丢弃超出部分。
+  Oversized OA input now returns a structured error with actual/max char counts instead of silently truncating.
+- **长对话关键事实走结构化传递**（M-B / MB5，PR #45）— 专利号、日期、权利要求等关键信息改走 system 层结构化字段，不再被历史摘要吞掉。
+  Key facts in long discussions (patent numbers, dates, claims) are passed via structured system-layer fields, no longer lost in history compression.
+- **全文抓取共用反爬冷却**（M-B / MB2，PR #44）— 富化与检索共用同一套冷却判断，被限流时不再重复出网。
+  Full-text fetch and search share the same anti-scrape cooldown, preventing repeated outbound requests when rate-limited.
+
+### 已知限制 / Known limitations
+- 本地向量检索为字符 n-gram 相似度补充档，不构成语义理解能力；0 行向量时该档自动关闭并如实上报。
+  Local vector search is a character n-gram similarity supplement, not semantic understanding; auto-disables and reports honestly when 0 embeddings exist.
+- 历史存量专利未做向量与切片批量回填，仅新入库与新富化的记录生效。
+  Historical patents are not batch-backfilled with vectors/chunks; only newly imported/enriched records are affected.
+
 - **本地检索库进入在线降级链（断网可复检）**（M-A / MA4a，PR #22）— `/api/search/online` 的本地 FTS 兜底从此在 `attempts` 中如实记账（跑过即记 Success 并带命中数，本地查询出错记 Failed），诊断面板可见「本地库这一档」；在线全部失败或零命中时，此前检索/导入过的专利在断网状态下仍可经本地兜底复检。
   Local library joins the degradation chain (offline re-check): the local FTS fallback of `/api/search/online` is now honestly booked in `attempts` (Success with hit counts, or Failed on local errors) and visible in the diagnostics panel; when all online sources fail or return nothing, previously searched/imported patents remain re-checkable offline through the local tier.
 - **申请人精确匹配**（M-A / MA4b，PR #23）— 检索请求新增 `assignee`（独立申请人过滤）与 `exact_assignee`（精确开关）：在线侧 Google Patents XHR 按开关下发裸值或引号精确参数（实测均上游真过滤），本地侧精确档把申请人模糊 `LIKE` 切换为等值匹配，可排除「XX研究院」类变体；两键缺省时出网 URL 与本地 SQL 与旧版逐字一致。「本人姓名可搜到自己名下专利」已有真实实例端到端取证（在线命中→入库→断网复检，MA6d）。
