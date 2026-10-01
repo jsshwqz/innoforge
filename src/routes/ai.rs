@@ -2430,16 +2430,17 @@ mod prompt_boundary_tests {
     fn mb5_truncate_for_ai_chinese_long_discussion_no_panic() {
         // 红→绿锚：旧切法 disc_raw[..MAX_DISCUSSION_FOR_AI] 对中文长讨论历史 panic，
         // 新写法 truncate_for_ai 零 panic。
-        // 构造纯中文长文本，长度超过 MAX_DISCUSSION_FOR_AI (120_000)
+        // 构造纯中文长文本，字符数超过 120_000 以触发截断
         let chinese_char = "这是测试"; // 4 chars = 12 bytes
-        let repeated = chinese_char.repeat(15000); // 60000 chars = 180000 bytes > 120000
-        let disc_raw = format!("[{{"role":"user","content":"{}"}}]", repeated);
+        let repeated = chinese_char.repeat(40000); // 160000 chars > 120000
+        let disc_raw = format!("[{{\"role\":\"user\",\"content\":\"{}\"}}]", repeated);
 
         // 旧切法会 panic（字节索引落在多字节字符中间），
         // truncate_for_ai 按字符截断，零 panic
         let truncated = truncate_for_ai(&disc_raw, 120_000);
-        assert!(truncated.len() <= 120_000 + 100); // 允许少量尾注开销
-                                                   // 必须是有效 UTF-8（String 保证）
+        // 截断后字符数应 > 120_000（含尾注）但 < 原文 160000
+        assert!(truncated.chars().count() > 120_000); // 包含尾注
+        assert!(truncated.chars().count() < 160_000); // 确实被截断
         assert!(!truncated.is_empty());
     }
 
