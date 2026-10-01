@@ -880,6 +880,7 @@ mod tests {
 
 /// A33 单项检查结果
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct A33CheckItem {
     pub claim_num: String,
     pub modified_text: String,
@@ -891,6 +892,7 @@ pub struct A33CheckItem {
 
 /// A33 结构化检查结果
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct A33CheckResult {
     pub status: String, // "pass" | "warning" | "risk"
     pub items: Vec<A33CheckItem>,
@@ -909,6 +911,7 @@ impl Default for A33CheckResult {
 ///
 /// 从 AI 输出中提取修改后权利要求，逐项检查引入的术语是否在原说明书/权利要求书中出现。
 /// 返回结构化 `a33_check` 标记键（沿 §2.3 格式）。
+#[allow(dead_code)]
 pub fn check_a33_structured(ai_output: &str, my_patent: &str) -> A33CheckResult {
     let mut result = A33CheckResult::default();
 
@@ -1029,6 +1032,7 @@ pub fn check_a33_structured(ai_output: &str, my_patent: &str) -> A33CheckResult 
 // ═══════════════════════════════════════════════════════════════════════
 
 /// 事实动词列表——含这些动词的句子是事实断言，须带出处锚点
+#[allow(dead_code)]
 const FACT_VERBS: &[&str] = &[
     "公开了",
     "记载了",
@@ -1045,12 +1049,13 @@ const FACT_VERBS: &[&str] = &[
 ///
 /// 扫描含事实动词且未跟 `【依据：…】` 的句子，标记为 `missing_source` 警告。
 /// 返回的 FactCheckReport 中 warnings 的 category 为 "missing_source"。
+#[allow(dead_code)]
 pub fn check_missing_sources(ai_output: &str) -> FactCheckReport {
     let mut report = FactCheckReport::default();
 
     // 按句子分割（中文句号、问号、叹号、换行）
     let sentences: Vec<&str> = ai_output
-        .split(|c: char| c == '。' || c == '？' || c == '！' || c == '\n')
+        .split(['。', '？', '！', '\n'])
         .filter(|s| !s.trim().is_empty())
         .collect();
 
