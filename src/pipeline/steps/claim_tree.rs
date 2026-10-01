@@ -21,7 +21,7 @@ pub async fn execute(ctx: &mut PipelineContext, ai: &AiClient, db: &Arc<Database
         ctx.description,
         ctx.technical_domain,
         ctx.novelty_score,
-        ctx.ai_analysis.chars().take(800).collect::<String>(),
+        crate::ai::truncate_for_ai(&ctx.ai_analysis, 800),
     );
 
     let response = match ai.chat(&prompt, None).await {

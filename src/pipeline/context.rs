@@ -315,6 +315,10 @@ pub struct PipelineContext {
     #[serde(default)]
     pub enrichment_results: Vec<EnrichmentStatus>,
 
+    // MB3: RAG 检索到的专利全文切片 / Retrieved patent chunks for citation
+    #[serde(default)]
+    pub rag_chunks: Vec<ReferenceChunk>,
+
     // 元数据
     pub current_step: PipelineStep,
     pub step_results: Vec<StepResult>,
@@ -355,6 +359,7 @@ impl PipelineContext {
             parent_version_id: String::new(),
             experiment_results: Vec::new(),
             enrichment_results: Vec::new(),
+            rag_chunks: Vec::new(),
             current_step: PipelineStep::ParseInput,
             step_results: Vec::new(),
         }
