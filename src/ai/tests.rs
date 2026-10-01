@@ -169,3 +169,71 @@ mod ua1_publication_number_tests {
         assert_eq!(result[0].0, "WO2021/123456A1");
     }
 }
+
+    // ── §6.1 新增：JP / KR 格式、空输入、边界情况 ──
+
+    #[test]
+    fn ua1_extracts_jp_format() {
+        let oa = "引证文献1：JP20051234A\n本申请与之不同。";
+        let result = extract_publication_numbers(oa);
+        assert!(!result.is_empty());
+        assert_eq!(result[0].0, "JP20051234A");
+    }
+
+    #[test]
+    fn ua1_extracts_kr_format() {
+        let oa = "参考文献1：KR102021012345A\n区别特征在于...";
+        let result = extract_publication_numbers(oa);
+        assert!(!result.is_empty());
+        assert_eq!(result[0].0, "KR102021012345A");
+    }
+
+    #[test]
+    fn ua1_empty_input_returns_empty() {
+        let result = extract_publication_numbers("");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn ua1_no_context_returns_empty() {
+        let oa = "这是一段普通文字，没有引出语，也没有公开号。";
+        let result = extract_publication_numbers(oa);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn ua1_deduplication_keeps_first_occurrence() {
+        let oa = "对比文件1：CN113224379A\n对比文件2：CN113224379A\n对比文件3：US20210345678A1";
+        let result = extract_publication_numbers(oa);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].0, "CN113224379A");
+        assert_eq!(result[1].0, "US20210345678A1");
+    }
+
+    #[test]
+    fn ua1_extracts_all_six_country_formats() {
+        let oa = "\
+对比文件1：CN113224379A\n\
+对比文件2：US20210345678A1\n\
+对比文件3：EP3445287B1\n\
+对比文件4：JP20051234A\n\
+对比文件5：KR102021012345A\n\
+对比文件6：WO2021/123456A1\n\
+";
+        let result = extract_publication_numbers(oa);
+        assert_eq!(result.len(), 6, "should extract all 6 country formats");
+        assert_eq!(result[0].0, "CN113224379A");
+        assert_eq!(result[1].0, "US20210345678A1");
+        assert_eq!(result[2].0, "EP3445287B1");
+        assert_eq!(result[3].0, "JP20051234A");
+        assert_eq!(result[4].0, "KR102021012345A");
+        assert_eq!(result[5].0, "WO2021/123456A1");
+    }
+
+    #[test]
+    fn ua1_context_label_captured() {
+        let oa = "对比文件1：CN113224379A";
+        let result = extract_publication_numbers(oa);
+        assert!(!result.is_empty());
+        assert!(!result[0].1.is_empty(), "context label should be captured");
+    }

@@ -5,6 +5,14 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 
+## [v0.9.2] - 2026-10-02
+
+### 修复 / Fixed
+- **OA 页面多个功能失效**：v0.9.1 的 DOMPurify.setConfig 修复仅应用于 office_action_response.html，其他页面（compare/ai/idea/patent_detail/search/settings）的 DOMPurify.sanitize() 仍默认剥离 onclick 事件处理器，导致这些页面中动态生成的按钮（复制、导出、讨论、生成答复书等）点击无反应。现已统一为所有使用 DOMPurify 的模板添加 setConfig({ADD_ATTR: ['onclick', 'onkeydown', ...]}) 全局配置
+- 影响范围：分析结果区域的 15 个动态按钮（复制结果、导出 Markdown、开始讨论、修改权利要求、导出答复草稿、生成答复书、导出讨论记录、发送讨论、新讨论、导入讨论、加载历史分析等）此前全部失效，现已修复
+
+---
+
 ## [v0.9.1] - 2026-10-02
 
 ### 修复 / Fixed

@@ -108,6 +108,10 @@
 
 <script src="/static/i18n.js"></script>
 <script>
+    // Allow inline event handlers in sanitized HTML
+    if (typeof DOMPurify !== '"'"'undefined'"'"' && DOMPurify.setConfig) {
+        DOMPurify.setConfig({ADD_ATTR: ['"'"'onclick'"'"', '"'"'onkeydown'"'"', '"'"'onchange'"'"', '"'"'oninput'"'"', '"'"'onload'"'"', '"'"'onfocus'"'"', '"'"'onblur'"'"']});
+    }
 const HISTORY_KEY = 'innoforge_search_history_v1';
 let currentRequest = null;
 let lastResponse = null;

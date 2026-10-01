@@ -237,6 +237,10 @@
     <script src="/static/i18n.js"></script>
     <script src="/static/cad.js"></script>
     <script>
+    // Allow inline event handlers in sanitized HTML
+    if (typeof DOMPurify !== 'undefined' && DOMPurify.setConfig) {
+        DOMPurify.setConfig({ADD_ATTR: ['onclick', 'onkeydown', 'onchange', 'oninput', 'onload', 'onfocus', 'onblur']});
+    }
     renderNavbar('idea');
     renderSidebar();
     applyI18nCommon();

@@ -1474,3 +1474,97 @@ mod runtime_temp_file_tests {
         }
     }
 }
+
+/// §6.1 新增：文件解析器纯函数测试
+#[cfg(test)]
+mod file_parser_tests {
+    use super::{has_pdf_header, is_ip_literal, validate_pdf_content_length,
+        append_pdf_chunk, MAX_PDF_STORE_SIZE};
+
+    #[test]
+    fn is_ip_literal_recognizes_ipv4() {
+        assert!(is_ip_literal("1.2.3.4"));
+        assert!(is_ip_literal("255.255.255.255"));
+    }
+
+    #[test]
+    fn is_ip_literal_recognizes_ipv6_bracketed() {
+        assert!(is_ip_literal("[::1]"));
+        assert!(is_ip_literal("[2001:db8::1]"));
+    }
+
+    #[test]
+    fn is_ip_literal_recognizes_ipv6_unbracketed() {
+        assert!(is_ip_literal("::1"));
+        assert!(is_ip_literal("2001:db8::1"));
+    }
+
+    #[test]
+    fn is_ip_literal_rejects_hostname() {
+        assert!(!is_ip_literal("example.com"));
+        assert!(!is_ip_literal("patent.google.com"));
+        assert!(!is_ip_literal("localhost"));
+    }
+
+    #[test]
+    fn is_ip_literal_rejects_empty() {
+        assert!(!is_ip_literal(""));
+    }
+
+    #[test]
+    fn has_pdf_header_empty_input() {
+        assert!(!has_pdf_header(b""));
+    }
+
+    #[test]
+    fn has_pdf_header_exact_boundary() {
+        // %PDF- 正好在 1024 字节窗口末尾
+        let mut data = vec![b' '; 1020];
+        data.extend_from_slice(b"%PDF-");
+        assert!(has_pdf_header(&data));
+    }
+
+    #[test]
+    fn has_pdf_header_just_past_boundary() {
+        // %PDF- 超出 1024 字节窗口
+        let mut data = vec![b' '; 1021];
+        data.extend_from_slice(b"%PDF-");
+        assert!(!has_pdf_header(&data));
+    }
+
+    #[test]
+    fn validate_pdf_content_length_none_is_ok() {
+        assert!(validate_pdf_content_length(None).is_ok());
+    }
+
+    #[test]
+    fn validate_pdf_content_length_zero_is_ok() {
+        assert!(validate_pdf_content_length(Some(0)).is_ok());
+    }
+
+    #[test]
+    fn validate_pdf_content_length_exactly_max_is_ok() {
+        assert!(validate_pdf_content_length(Some(MAX_PDF_STORE_SIZE as u64)).is_ok());
+    }
+
+    #[test]
+    fn validate_pdf_content_length_over_max_is_err() {
+        assert!(validate_pdf_content_length(Some(MAX_PDF_STORE_SIZE as u64 + 1)).is_err());
+    }
+
+    #[test]
+    fn append_pdf_chunk_empty_buffer() {
+        let mut buf = Vec::new();
+        assert!(append_pdf_chunk(&mut buf, b"%PDF-1.7").is_ok());
+        assert_eq!(buf, b"%PDF-1.7");
+    }
+
+    #[test]
+    fn append_pdf_chunk_overflow_rejected() {
+        let mut buf = vec![0u8; MAX_PDF_STORE_SIZE - 1];
+        // 恰好填满
+        assert!(append_pdf_chunk(&mut buf, &[1]).is_ok());
+        // 超出
+        assert!(append_pdf_chunk(&mut buf, &[2]).is_err());
+    }
+}
