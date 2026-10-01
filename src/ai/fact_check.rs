@@ -811,57 +811,66 @@ mod tests {
         let formatted = format_report(&report);
         assert!(formatted.contains("100"));
 
-    // ── UA3: A33 结构化对照自检测试 ──
+        // ── UA3: A33 结构化对照自检测试 ──
 
-    #[test]
-    fn ua3_a33_structured_detects_high_risk() {
-        let ai_output = "修改建议：权项1修改为：「一种区块链分布式存储装置」";
-        let my_patent = "一种分布式存储装置，包括存储节点和控制器。";
-        let result = check_a33_structured(ai_output, my_patent);
-        assert_eq!(result.status, "risk");
-        assert!(result.items.iter().any(|i| i.risk_level == "high"));
-        assert!(result.items.iter().any(|i| i.introduced_terms.contains(&"区块链".to_string())));
-    }
+        #[test]
+        fn ua3_a33_structured_detects_high_risk() {
+            let ai_output = "修改建议：权项1修改为：「一种区块链分布式存储装置」";
+            let my_patent = "一种分布式存储装置，包括存储节点和控制器。";
+            let result = check_a33_structured(ai_output, my_patent);
+            assert_eq!(result.status, "risk");
+            assert!(result.items.iter().any(|i| i.risk_level == "high"));
+            assert!(result
+                .items
+                .iter()
+                .any(|i| i.introduced_terms.contains(&"区块链".to_string())));
+        }
 
-    #[test]
-    fn ua3_a33_structured_passes_when_no_modification() {
-        let ai_output = "建议维持权利要求1不变。";
-        let my_patent = "一种存储装置。";
-        let result = check_a33_structured(ai_output, my_patent);
-        assert_eq!(result.status, "pass");
-        assert!(result.items.is_empty());
-    }
+        #[test]
+        fn ua3_a33_structured_passes_when_no_modification() {
+            let ai_output = "建议维持权利要求1不变。";
+            let my_patent = "一种存储装置。";
+            let result = check_a33_structured(ai_output, my_patent);
+            assert_eq!(result.status, "pass");
+            assert!(result.items.is_empty());
+        }
 
-    #[test]
-    fn ua3_a33_structured_passes_when_term_in_spec() {
-        let ai_output = "权项1修改为：「一种分布式存储装置及其控制方法」";
-        let my_patent = "一种分布式存储装置，包括存储节点和控制器。控制方法包括步骤A。";
-        let result = check_a33_structured(ai_output, my_patent);
-        assert_eq!(result.status, "pass");
-    }
+        #[test]
+        fn ua3_a33_structured_passes_when_term_in_spec() {
+            let ai_output = "权项1修改为：「一种分布式存储装置及其控制方法」";
+            let my_patent = "一种分布式存储装置，包括存储节点和控制器。控制方法包括步骤A。";
+            let result = check_a33_structured(ai_output, my_patent);
+            assert_eq!(result.status, "pass");
+        }
 
-    // ── UA6: 出处锚点纪律检测测试 ──
+        // ── UA6: 出处锚点纪律检测测试 ──
 
-    #[test]
-    fn ua6_missing_source_detects_unanchored_fact() {
-        let ai_output = "对比文件D1公开了一种热交换装置。本申请的区别特征在于效率更高。";
-        let report = check_missing_sources(ai_output);
-        assert!(report.warnings.iter().any(|w| w.category == "missing_source"));
-    }
+        #[test]
+        fn ua6_missing_source_detects_unanchored_fact() {
+            let ai_output = "对比文件D1公开了一种热交换装置。本申请的区别特征在于效率更高。";
+            let report = check_missing_sources(ai_output);
+            assert!(report
+                .warnings
+                .iter()
+                .any(|w| w.category == "missing_source"));
+        }
 
-    #[test]
-    fn ua6_missing_source_passes_anchored_fact() {
-        let ai_output = "对比文件D1公开了一种热交换装置【依据：对比文件：D1第4段】。";
-        let report = check_missing_sources(ai_output);
-        assert!(!report.warnings.iter().any(|w| w.category == "missing_source"));
-    }
+        #[test]
+        fn ua6_missing_source_passes_anchored_fact() {
+            let ai_output = "对比文件D1公开了一种热交换装置【依据：对比文件：D1第4段】。";
+            let report = check_missing_sources(ai_output);
+            assert!(!report
+                .warnings
+                .iter()
+                .any(|w| w.category == "missing_source"));
+        }
 
-    #[test]
-    fn ua6_missing_source_ignores_non_fact_sentences() {
-        let ai_output = "建议修改权利要求1。可以考虑增加从属权利要求。";
-        let report = check_missing_sources(ai_output);
-        assert!(report.warnings.is_empty());
-    }
+        #[test]
+        fn ua6_missing_source_ignores_non_fact_sentences() {
+            let ai_output = "建议修改权利要求1。可以考虑增加从属权利要求。";
+            let report = check_missing_sources(ai_output);
+            assert!(report.warnings.is_empty());
+        }
     }
 }
 
@@ -914,13 +923,20 @@ pub fn check_a33_structured(ai_output: &str, my_patent: &str) -> A33CheckResult 
 
     // 提取修改后权项：匹配 "权项X" 或 "权利要求X" 后的修改内容
     let claim_re = regex::Regex::new(
-        r"(?:权项|权利要求)\s*(\d+)[^。]*?(?:修改为|改为|修改后)[：:]\s*[「"]([^」"]+)[」"]",
-    ).ok();
+        r#"(?:权项|权利要求)\s*(\d+)[^。]*?(?:修改为|改为|修改后)[：:]\s*[「"]([^」"]+)[」"]"#,
+    )
+    .ok();
 
     if let Some(re) = claim_re {
         for cap in re.captures_iter(&amendment_text) {
-            let claim_num = cap.get(1).map(|m| m.as_str().to_string()).unwrap_or_default();
-            let modified_text = cap.get(2).map(|m| m.as_str().to_string()).unwrap_or_default();
+            let claim_num = cap
+                .get(1)
+                .map(|m| m.as_str().to_string())
+                .unwrap_or_default();
+            let modified_text = cap
+                .get(2)
+                .map(|m| m.as_str().to_string())
+                .unwrap_or_default();
 
             // 提取修改文本中的中文术语（3-8字）
             let mut introduced: Vec<String> = Vec::new();
@@ -945,19 +961,20 @@ pub fn check_a33_structured(ai_output: &str, my_patent: &str) -> A33CheckResult 
 
             for term in &introduced {
                 if my_patent.contains(term) {
-                    coverage_parts.push(format!("{term}: 说明书中有记载"));
+                    coverage_parts.push(format!("{term}：说明书中有记载"));
                 } else {
                     // 检查是否有近似表述（术语的部分在原文中出现）
-                    let partial = term.chars().take(term.chars().count() - 1).collect::<String>();
+                    let partial = term
+                        .chars()
+                        .take(term.chars().count() - 1)
+                        .collect::<String>();
                     if my_patent.contains(&partial) {
                         coverage_parts.push(format!(
-                            "{term}: 原文有近似表述「{partial}」，但表述形式有实质差异"
+                            "{term}：原文有近似表述「{partial}」，但表述形式有实质差异"
                         ));
                         has_medium = true;
                     } else {
-                        coverage_parts.push(format!(
-                            "{term}: 未在原说明书与权利要求书中发现"
-                        ));
+                        coverage_parts.push(format!("{term}：未在原说明书与权利要求书中发现"));
                         has_high = true;
                     }
                 }
@@ -977,9 +994,7 @@ pub fn check_a33_structured(ai_output: &str, my_patent: &str) -> A33CheckResult 
                     introduced.join("」「")
                 )
             } else if has_medium {
-                format!(
-                    "权项{claim_num}引入的术语表述形式与原文有实质差异，需人工核实是否超范围"
-                )
+                format!("权项{claim_num}引入的术语表述形式与原文有实质差异，需人工核实是否超范围")
             } else {
                 format!("权项{claim_num}修改未引入超范围术语")
             };
