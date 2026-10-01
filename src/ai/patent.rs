@@ -16,6 +16,93 @@ const FACT_DISCIPLINE: &str = "\n\n## 事实纪律（最高优先级）\n\
      4. 任何数字、日期、百分比必须来自材料原文，否则标注【材料未给出】。\n\
      5. 判断不确定时，明确给出置信度（高/中/低），不要用肯定的语气掩盖不确定性。";
 
+/// UA1: 从 OA 文本中抽取对比文件公开号。
+///
+/// 按 §2.1 正则模式匹配 CN/US/EP/JP/KR/WO 公开号，
+/// 仅保留出现在引出语上下文 ±50 字符内的匹配（排除正文偶然出现的公开号）。
+/// 返回 (公开号, 引出语标签) 列表，按出现顺序编号 D1, D2, …
+pub fn extract_publication_numbers(oa_text: &str) -> Vec<(String, String)> {
+    use std::collections::HashSet;
+
+    // 公开号正则（按前缀分流）
+    let patterns: &[(&str, &str)] = &[
+        ("CN", r"CN\d{8,12}[A-Z]\d?"),
+        ("US", r"US\d{6,12}[A-Z]\d?"),
+        ("EP", r"EP\d{6,8}[A-Z]\d?"),
+        ("JP", r"JP\d{4,8}[A-Z]"),
+        ("KR", r"KR\d{6,10}[A-Z]"),
+        ("WO", r"WO\d{4}/\d{4,6}[A-Z]\d?"),
+    ];
+
+    // 引出语模式
+    let context_patterns: &[&str] = &[
+        r"对比文件\s*[1-9]\s*[:：]",
+        r"引证文献\s*[1-9]\s*[:：]",
+        r"D\s*[1-9]\s*[:：]",
+        r"参考文献\s*[1-9]\s*[:：]",
+    ];
+
+    let mut results: Vec<(String, String)> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+
+    // 构建所有公开号的统一正则
+    let combined_pat = patterns
+        .iter()
+        .map(|(_, pat)| pat)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join("|");
+    let pub_re = match regex::Regex::new(&combined_pat) {
+        Ok(re) => re,
+        Err(_) => return results,
+    };
+
+    // 构建引出语统一正则
+    let context_pat = context_patterns.join("|");
+    let context_re = match regex::Regex::new(&context_pat) {
+        Ok(re) => re,
+        Err(_) => return results,
+    };
+
+    // 找到所有引出语位置
+    let context_positions: Vec<(usize, &str)> = context_re
+        .find_iter(oa_text)
+        .map(|m| (m.start(), m.as_str()))
+        .collect();
+
+    // 找到所有公开号匹配
+    for m in pub_re.find_iter(oa_text) {
+        let pub_num = m.as_str().to_string();
+        let pub_start = m.start();
+
+        // 检查是否在某个引出语的 ±50 字符范围内
+        let mut near_context = false;
+        let mut context_label = String::new();
+
+        for &(ctx_start, ctx_str) in &context_positions {
+            // 引出语在公开号前 50 字符内
+            if pub_start > ctx_start && pub_start - ctx_start <= 80 {
+                near_context = true;
+                context_label = ctx_str.to_string();
+                break;
+            }
+            // 公开号紧邻引出语之后
+            if ctx_start > pub_start && ctx_start - pub_start <= 50 {
+                near_context = true;
+                context_label = ctx_str.to_string();
+                break;
+            }
+        }
+
+        if near_context && !seen.contains(&pub_num) {
+            seen.insert(pub_num.clone());
+            results.push((pub_num, context_label));
+        }
+    }
+
+    results
+}
+
 impl AiClient {
     pub async fn summarize_patent(
         &self,
@@ -537,93 +624,6 @@ impl AiClient {
                  {section5_prompt}",
             ),
         )
-    }
-
-    /// UA1: 从 OA 文本中抽取对比文件公开号。
-    ///
-    /// 按 §2.1 正则模式匹配 CN/US/EP/JP/KR/WO 公开号，
-    /// 仅保留出现在引出语上下文 ±50 字符内的匹配（排除正文偶然出现的公开号）。
-    /// 返回 (公开号, 引出语标签) 列表，按出现顺序编号 D1, D2, …
-    pub fn extract_publication_numbers(oa_text: &str) -> Vec<(String, String)> {
-        use std::collections::HashSet;
-
-        // 公开号正则（按前缀分流）
-        let patterns: &[(&str, &str)] = &[
-            ("CN", r"CN\d{8,12}[A-Z]\d?"),
-            ("US", r"US\d{6,12}[A-Z]\d?"),
-            ("EP", r"EP\d{6,8}[A-Z]\d?"),
-            ("JP", r"JP\d{4,8}[A-Z]"),
-            ("KR", r"KR\d{6,10}[A-Z]"),
-            ("WO", r"WO\d{4}/\d{4,6}[A-Z]\d?"),
-        ];
-
-        // 引出语模式
-        let context_patterns: &[&str] = &[
-            r"对比文件\s*[1-9]\s*[:：]",
-            r"引证文献\s*[1-9]\s*[:：]",
-            r"D\s*[1-9]\s*[:：]",
-            r"参考文献\s*[1-9]\s*[:：]",
-        ];
-
-        let mut results: Vec<(String, String)> = Vec::new();
-        let mut seen: HashSet<String> = HashSet::new();
-
-        // 构建所有公开号的统一正则
-        let combined_pat = patterns
-            .iter()
-            .map(|(_, pat)| pat)
-            .cloned()
-            .collect::<Vec<_>>()
-            .join("|");
-        let pub_re = match regex::Regex::new(&combined_pat) {
-            Ok(re) => re,
-            Err(_) => return results,
-        };
-
-        // 构建引出语统一正则
-        let context_pat = context_patterns.join("|");
-        let context_re = match regex::Regex::new(&context_pat) {
-            Ok(re) => re,
-            Err(_) => return results,
-        };
-
-        // 找到所有引出语位置
-        let context_positions: Vec<(usize, &str)> = context_re
-            .find_iter(oa_text)
-            .map(|m| (m.start(), m.as_str()))
-            .collect();
-
-        // 找到所有公开号匹配
-        for m in pub_re.find_iter(oa_text) {
-            let pub_num = m.as_str().to_string();
-            let pub_start = m.start();
-
-            // 检查是否在某个引出语的 ±50 字符范围内
-            let mut near_context = false;
-            let mut context_label = String::new();
-
-            for &(ctx_start, ctx_str) in &context_positions {
-                // 引出语在公开号前 50 字符内
-                if pub_start > ctx_start && pub_start - ctx_start <= 80 {
-                    near_context = true;
-                    context_label = ctx_str.to_string();
-                    break;
-                }
-                // 公开号紧邻引出语之后
-                if ctx_start > pub_start && ctx_start - pub_start <= 50 {
-                    near_context = true;
-                    context_label = ctx_str.to_string();
-                    break;
-                }
-            }
-
-            if near_context && !seen.contains(&pub_num) {
-                seen.insert(pub_num.clone());
-                results.push((pub_num, context_label));
-            }
-        }
-
-        results
     }
 
     fn build_reject_review_prompt(
