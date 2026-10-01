@@ -129,7 +129,7 @@ mod ua4_refs_truncation_tests {
 
 #[cfg(test)]
 mod ua1_publication_number_tests {
-    use crate::ai::extract_publication_numbers;
+    use crate::ai::patent::extract_publication_numbers;
 
     #[test]
     fn ua1_extracts_cn_publication_number() {
