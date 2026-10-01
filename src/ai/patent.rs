@@ -999,7 +999,7 @@ impl AiClient {
                     Ok(content) => {
                         // UA2: 拼接提交前清单（静态文案，不经过 AI 生成）
                         let _ = tx
-                            .send(format!("{content}{REEXAM_PRE_SUBMIT_CHECKLIST}"))
+                            .send(format!("{content}{}", Self::REEXAM_PRE_SUBMIT_CHECKLIST))
                             .await;
                     }
                     Err(error) => {
@@ -1297,7 +1297,7 @@ mod ua_tests {
     #[test]
     fn ua2_reexam_checklist_constant_exists() {
         // 验证提交前清单常量存在且包含 8 项
-        let checklist = super::REEXAM_PRE_SUBMIT_CHECKLIST;
+        let checklist = AiClient::REEXAM_PRE_SUBMIT_CHECKLIST;
         assert!(checklist.contains("提交前清单"));
         for i in 1..=8 {
             assert!(
