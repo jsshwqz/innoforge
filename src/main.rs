@@ -21,6 +21,8 @@ mod docx_export;
 mod error;
 mod experiment;
 mod orchestrator;
+// MB3: RAG 管道接线，深度分析前检索专利全文切片
+pub mod rag;
 // `pub` 与 lib.rs 保持一致：src/patent.rs 是域类型的公共门面，
 // 若在本入口声明为私有模块，门面里的 `pub use` 会被 rustc 判为 unused_imports。
 pub mod patent;
@@ -30,10 +32,6 @@ mod routes;
 // `routes/search.rs` 依赖 `crate::search`，缺一侧声明即另一侧编译失败。
 pub mod search;
 pub mod types;
-// 与 lib.rs 保持同一份模块清单（AGENTS.md 2.4 双入口一致）：
-// MB0 后 `db/patent.rs`（写入侧）与 `routes/search.rs`（查询侧）都调
-// `crate::vector::*`，bin 侧缺声明即 innoforge-server 编译失败。
-pub mod vector;
 
 use std::net::SocketAddr;
 
