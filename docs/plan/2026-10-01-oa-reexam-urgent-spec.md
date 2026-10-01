@@ -4,7 +4,7 @@
 
 ## 0 硬约束（每条都有出处，执行棒开工前逐条自认）
 
-1. **串行纪律**：本包开工前，**MB0 必须先合并进 main**。收口棒已提交（`f66912c` 代码 + `667064a` docs，**PR #28** OPEN、远端 CI `test`/`lint`/`e2e` 三绿、`mergeable=MERGEABLE`），余下动作是规划会话按 M-B §16 九步审计后合并；未合并前本包不得开工——同仓禁止并行两棒，共享 `target/` 会损坏 incremental（M-B §3.2）。
+1. **串行纪律**：本包开工前，**MB0 必须先合并进 main**。收口棒已提交代码 `f66912c`（**PR #28** 远端 head；docs 提交 `667064a` 未推入 #28），PR OPEN、远端 CI `test`/`lint`/`e2e` 三绿、`mergeable=MERGEABLE`），余下动作是规划会话按 M-B §16 九步审计后合并；未合并前本包不得开工——同仓禁止并行两棒，共享 `target/` 会损坏 incremental（M-B §3.2）。
 2. 禁止新 crate 依赖（`Cargo.*` 零 diff）；`migrations/`、`common.rs`、`lib.rs` 零 diff；不碰用户库 `innoforge.db`；生产路径禁 `unwrap()/expect()`。
 3. 改 `templates/` 则必须跑 HTML 函数扫描 + eslint + e2e（60/60，`expectedPasses` 不得变）。
 4. 对外口径沿 M-B §9：AI 产出是**起草辅助**，注释/UI/CHANGELOG 禁止出现「复审必过」「代理师意见」「法律保证」类承诺。**但产出形态按「终稿」为靶**（用户 2026-10-01 拍板）：文案写「按可直接提交成稿生成、提交前请人工核对事实与程序信息」，禁止写成「生成初稿供人工改写」类的降级表述。

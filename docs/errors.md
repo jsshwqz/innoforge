@@ -859,6 +859,15 @@
 - **预防 / Prevention**: ① 遇 `via 127.0.0.1` / `proxyconnect` 字样先试清代理直连，不要直接下「网络不通」结论；② git 与 gh 的代理来源不同（config vs 环境变量），一个清了另一个未必清，两路都要处理；③ `GITHUB_TOKEN` 环境变量仍须 `Remove-Item Env:GITHUB_TOKEN` 去掉（见 2026-09-28 gh pr merge 403 条目），两件事叠加时先清 token 再清代理。
 - **提交 / Commit**: MB0 分支 `exec/mb0-embedder`（PR #28）文档回写附带
 
+### [2026-10-01] `github.com` git 传输间歇 reset / 443 拒连，但 `api.github.com` 与 `gitee.com` 同时可达
+
+- **严重程度 / Severity**: MEDIUM（推送通道：`git push` 连续失败时极易误判为「GitHub 不可达 / 凭证问题」，从而把动作推给用户手动做）
+- **涉及文件 / Files**: 无代码改动；`git push`、`gh pr create`、`git ls-remote`
+- **现象 / Symptom**: 推送 `docs/oa-u-dispatch` 时 `git -c http.proxy= -c https.proxy= push origin` 连续三次失败，报 `Recv failure: Connection was reset` 与 `Failed to connect to github.com port 443 after 21107 ms`；同一时刻 `gh api repos/jsshwqz/innoforge` 正常返回、`git ls-remote gitee` 正常返回。即 **只有 github.com 的 git-over-HTTPS 通道在抖**，API 与另一远端都通。
+- **解法 / Fix**: ① 先分清三条独立通道：`github.com`（git 传输）≠ `api.github.com`（gh REST）≠ `gitee.com`（备远端），任一失败不代表 GitHub 不可用；② 首选**直接重试**（本次第 4 次 `ls-remote` 即恢复，随后 push 一次成功），每次探测 `timeout 45 git -c http.proxy= ls-remote origin`，别在探测上花超过两三次；③ 若必须立刻交付，先 `git push gitee <branch>` 走通另一侧（本次 Gitee 一次成功），GitHub 侧恢复后补推；④ 最后手段才是走 REST API 造 blob/tree/commit/ref——**慎用**：API 重放出的 commit SHA 与本地不同（parent/时间戳变），会在跟踪该分支的 PR 上造成历史分叉，只适合「新建分支且父提交已在远端」的场景（本次曾因此踩到 `git/commits/667064a` 404：本地比远端多一个未推的 docs 提交，PR #28 head 仍是 `f66912c`）。
+- **预防 / Prevention**: ① 推送前用 `gh api repos/<o>/<r>/branches/<branch> --jq .commit.sha` 与本地 `git rev-parse` 比对，先确认「远端到底有没有这个父提交」，再决定推送或 API 重放路径；② 清代理只解决「`via 127.0.0.1` / `proxyconnect`」类错误（见上一条 2026-09-28「沙箱内 git/gh 连 GitHub 走 `127.0.0.1` 代理必拒连」），`Connection was reset` / `Failed to connect … port 443` 属通道抖动，清代理无用，要重试或换远端；③ 临时产物（PR body、脚本）一律落 `D:\Temp\`，禁止落在仓库根目录。
+- **提交 / Commit**: 本条随 `docs/oa-u-dispatch`（PR #29）文档下发附带
+
 ### [2026-09-28] 仓库外临时 crate 做红→绿取证触发 rustc `0xc0000409`；中文 locale 下 linker 输出 GBK 非 UTF-8 告警
 
 - **严重程度 / Severity**: LOW（取证工具链，不影响产品代码与门禁结论）
@@ -867,7 +876,7 @@
 - **根因 / Root cause**: ① 该机的 MSVC/链接器组合在仓外空目录建 crate 时 rustc 以栈保护码中止（与 D 盘已用 100%、余量仅 5.9GB 的环境压力同向），属**环境级崩溃**而非代码问题——把它当编译错误去改源码就是假服从；② 中文 Windows 下 `link.exe` 的 stdout 是 CP936，rustc 按 UTF-8 打印 linker 提示即告编码不匹配。
 - **解法 / Fix**: 红→绿取证**一律写在仓内**：`tests/mb0_red_proof_tmp.rs` 里用 `git show HEAD:src/vector/mod.rs` 的实现逐字复刻为测试模块（红：旧实现对中文 panic；绿：新实现零 panic 且 512 维），实测 2 passed。GBK 告警**忽略即可**——`cargo clippy --all-targets -- -D warnings` 本机实测 exit 0、零告警，未受该 warning 影响。
 - **预防 / Prevention**: ① 需要「证明旧代码坏」的取证，优先仓内 `tests/*.rs` 或 `#[cfg(test)]`，**禁止另建临时 crate、禁止手敲 rustc 命令行**（仓外 crate 崩了没有可诊断信号）；② 见到 linker Non-UTF-8 告警先复跑 `clippy -D warnings` 确认结论，**禁止**为消警告去加 `#[allow(linker_messages)]` 或改门禁；③ 门禁时间预算按本机实测排：`cargo test` 冷编 5m48s、`clippy --all-targets` 3m27s（后台跑 + 等完成通知，勿用截断命令求快，见同日 head 条目）；④ 仓外取证件统一放 `D:\Temp\*-probe\` 或 `D:\Temp\mb*-red-proof\`，仓内只留结论，取证完的文件去留由规格书 DoD 事先写明，避免执行会话擅自移动用户工作区文件。
-- **提交 / Commit**: MB0 棒 `exec/mb0-embedder`（`f66912c` 代码 + `667064a` docs，PR #28），由规划会话代记
+- **提交 / Commit**: MB0 棒 `exec/mb0-embedder` 的代码提交 `f66912c`（PR #28 远端 head）；本 docs 提交 `667064a` 未推入 #28，随 PR #29 入库。由规划会话代记
 
 ### [2026-09-28] 沙箱内 git/gh 连 GitHub 走 `127.0.0.1` 代理必拒连：显式清代理即直连可达
 
