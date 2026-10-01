@@ -555,36 +555,56 @@ async fn extract_pdf_text(data: &[u8]) -> Result<String, String> {
         }
     }
     // Step 3: pdftotext (poppler, handles malformed PDFs well)
-    if let Ok(text) = extract_pdf_text_pdftotext(data) {
-        let trimmed = text.trim();
-        let is_error = trimmed.contains("MuPDF error")
-            || trimmed.contains("mupdf error")
-            || trimmed.contains("zlib error")
-            || trimmed.contains("PDF error");
-        if !trimmed.is_empty() && !is_error {
-            return Ok(text);
+    // §3.3: 外部进程调用用 spawn_blocking 避免阻塞 Tokio 异步运行时
+    {
+        let data_vec = data.to_vec();
+        let result = tokio::task::spawn_blocking(move || extract_pdf_text_pdftotext(&data_vec))
+            .await
+            .unwrap_or_else(|_| Err("pdftotext task panicked".into()));
+        if let Ok(text) = result {
+            let trimmed = text.trim();
+            let is_error = trimmed.contains("MuPDF error")
+                || trimmed.contains("mupdf error")
+                || trimmed.contains("zlib error")
+                || trimmed.contains("PDF error");
+            if !trimmed.is_empty() && !is_error {
+                return Ok(text);
+            }
         }
     }
     // Step 4: PyMuPDF (Python fitz)
-    if let Ok(text) = extract_pdf_text_pymupdf(data) {
-        let trimmed = text.trim();
-        let is_error = trimmed.contains("MuPDF error")
-            || trimmed.contains("mupdf error")
-            || trimmed.contains("zlib error")
-            || trimmed.contains("PDF error");
-        if !trimmed.is_empty() && !is_error {
-            return Ok(text);
+    {
+        let data_vec = data.to_vec();
+        let result = tokio::task::spawn_blocking(move || extract_pdf_text_pymupdf(&data_vec))
+            .await
+            .unwrap_or_else(|_| Err("PyMuPDF task panicked".into()));
+        if let Ok(text) = result {
+            let trimmed = text.trim();
+            let is_error = trimmed.contains("MuPDF error")
+                || trimmed.contains("mupdf error")
+                || trimmed.contains("zlib error")
+                || trimmed.contains("PDF error");
+            if !trimmed.is_empty() && !is_error {
+                return Ok(text);
+            }
         }
     }
     // Step 5: Tesseract OCR (handles scanned/special font PDFs)
-    if let Ok(text) = extract_pdf_text_ocr(data) {
-        let trimmed = text.trim();
-        let is_error = trimmed.contains("MuPDF error")
-            || trimmed.contains("mupdf error")
-            || trimmed.contains("zlib error")
-            || trimmed.contains("PDF error");
-        if !trimmed.is_empty() && !is_error {
-            return Ok(text);
+    // §3.3: OCR 是最耗时的阻塞调用，必须用 spawn_blocking 移出异步线程
+    {
+        let data_vec = data.to_vec();
+        let result = tokio::task::spawn_blocking(move || extract_pdf_text_ocr(&data_vec))
+            .await
+            .unwrap_or_else(|_| Err("OCR task panicked".into()));
+        if let Ok(text) = result {
+            let trimmed = text.trim();
+            let is_error = trimmed.contains("MuPDF error")
+                || trimmed.contains("mupdf error")
+                || trimmed.contains("zlib error")
+                || trimmed.contains("PDF error");
+            if !trimmed.is_empty() && !is_error {
+                return Ok(text);
+            }
         }
     }
     // Step 6: Umi-OCR 本地离线 OCR（高精度中文识别，替代依赖云端/外部 Python 环境的方案）
@@ -595,9 +615,15 @@ async fn extract_pdf_text(data: &[u8]) -> Result<String, String> {
         }
     }
     // Step 7: MinerU 云端 API（OCR+版面还原，中文专利优化）
-    if let Ok(text) = extract_pdf_text_mineru(data) {
-        if !text.trim().is_empty() {
-            return Ok(text);
+    {
+        let data_vec = data.to_vec();
+        let result = tokio::task::spawn_blocking(move || extract_pdf_text_mineru(&data_vec))
+            .await
+            .unwrap_or_else(|_| Err("MinerU task panicked".into()));
+        if let Ok(text) = result {
+            if !text.trim().is_empty() {
+                return Ok(text);
+            }
         }
     }
     Err("所有 PDF 提取方法均失败".into())
