@@ -810,67 +810,67 @@ mod tests {
         let report = FactCheckReport::default();
         let formatted = format_report(&report);
         assert!(formatted.contains("100"));
+    }
 
-        // ── UA3: A33 结构化对照自检测试 ──
+    // ── UA3: A33 结构化对照自检测试 ──
 
-        #[test]
-        fn ua3_a33_structured_detects_high_risk() {
-            let ai_output = "修改建议：权项1修改为：「一种区块链分布式存储装置」";
-            let my_patent = "一种分布式存储装置，包括存储节点和控制器。";
-            let result = check_a33_structured(ai_output, my_patent);
-            assert_eq!(result.status, "risk");
-            assert!(result.items.iter().any(|i| i.risk_level == "high"));
-            assert!(result
-                .items
-                .iter()
-                .any(|i| i.introduced_terms.contains(&"区块链".to_string())));
-        }
+    #[test]
+    fn ua3_a33_structured_detects_high_risk() {
+        let ai_output = "建议修改：权项1修改为：「区块链存储装置」";
+        let my_patent = "一种分布式存储装置，包括存储节点和控制器。";
+        let result = check_a33_structured(ai_output, my_patent);
+        assert_eq!(result.status, "risk");
+        assert!(result.items.iter().any(|i| i.risk_level == "high"));
+        assert!(result
+            .items
+            .iter()
+            .any(|i| i.introduced_terms.contains(&"区块链存储装置".to_string())));
+    }
 
-        #[test]
-        fn ua3_a33_structured_passes_when_no_modification() {
-            let ai_output = "建议维持权利要求1不变。";
-            let my_patent = "一种存储装置。";
-            let result = check_a33_structured(ai_output, my_patent);
-            assert_eq!(result.status, "pass");
-            assert!(result.items.is_empty());
-        }
+    #[test]
+    fn ua3_a33_structured_passes_when_no_modification() {
+        let ai_output = "建议维持权利要求1不变。";
+        let my_patent = "一种存储装置。";
+        let result = check_a33_structured(ai_output, my_patent);
+        assert_eq!(result.status, "pass");
+        assert!(result.items.is_empty());
+    }
 
-        #[test]
-        fn ua3_a33_structured_passes_when_term_in_spec() {
-            let ai_output = "权项1修改为：「一种分布式存储装置及其控制方法」";
-            let my_patent = "一种分布式存储装置，包括存储节点和控制器。控制方法包括步骤A。";
-            let result = check_a33_structured(ai_output, my_patent);
-            assert_eq!(result.status, "pass");
-        }
+    #[test]
+    fn ua3_a33_structured_passes_when_term_in_spec() {
+        let ai_output = "权项1修改为：「一种分布式存储装置及其控制方法」";
+        let my_patent = "一种分布式存储装置，包括存储节点和控制器。控制方法包括步骤A。";
+        let result = check_a33_structured(ai_output, my_patent);
+        assert_eq!(result.status, "pass");
+    }
 
-        // ── UA6: 出处锚点纪律检测测试 ──
+    // ── UA6: 出处锚点纪律检测测试 ──
 
-        #[test]
-        fn ua6_missing_source_detects_unanchored_fact() {
-            let ai_output = "对比文件D1公开了一种热交换装置。本申请的区别特征在于效率更高。";
-            let report = check_missing_sources(ai_output);
-            assert!(report
-                .warnings
-                .iter()
-                .any(|w| w.category == "missing_source"));
-        }
+    #[test]
+    fn ua6_missing_source_detects_unanchored_fact() {
+        let ai_output = "对比文件D1公开了一种热交换装置。本申请的区别特征在于效率更高。";
+        let report = check_missing_sources(ai_output);
+        assert!(report
+            .warnings
+            .iter()
+            .any(|w| w.category == "missing_source"));
+    }
 
-        #[test]
-        fn ua6_missing_source_passes_anchored_fact() {
-            let ai_output = "对比文件D1公开了一种热交换装置【依据：对比文件：D1第4段】。";
-            let report = check_missing_sources(ai_output);
-            assert!(!report
-                .warnings
-                .iter()
-                .any(|w| w.category == "missing_source"));
-        }
+    #[test]
+    fn ua6_missing_source_passes_anchored_fact() {
+        let ai_output = "对比文件D1公开了一种热交换装置【依据：对比文件：D1第4段】。";
+        let report = check_missing_sources(ai_output);
+        assert!(!report
+            .warnings
+            .iter()
+            .any(|w| w.category == "missing_source"));
+    }
 
-        #[test]
-        fn ua6_missing_source_ignores_non_fact_sentences() {
-            let ai_output = "建议修改权利要求1。可以考虑增加从属权利要求。";
-            let report = check_missing_sources(ai_output);
-            assert!(report.warnings.is_empty());
-        }
+    #[test]
+    fn ua6_missing_source_ignores_non_fact_sentences() {
+        let ai_output = "建议修改权利要求1。可以考虑增加从属权利要求。";
+        let report = check_missing_sources(ai_output);
+        assert!(report.warnings.is_empty());
     }
 }
 
