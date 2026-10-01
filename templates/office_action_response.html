@@ -188,6 +188,38 @@
                        .replace(/on\w+="[^"]*"/gi, '').replace(/on\w+='[^']*'/gi, '');
         }};
     }
+    // Allow inline event handlers in sanitized HTML (needed for dynamically generated UI buttons)
+    if (typeof DOMPurify !== 'undefined' && DOMPurify.setConfig) {
+        DOMPurify.setConfig({ADD_ATTR: ['onclick', 'onkeydown', 'onchange', 'oninput', 'onload', 'onfocus', 'onblur']});
+    }
+
+    // ── OA Type Label Helpers ──
+    function getResponseButtonText() {
+        var checked = document.querySelector('input[name="oa_type"]:checked');
+        var oaType = checked ? checked.value : 'first_exam';
+        if (oaType === 'reject_review') {
+            return '📝 ' + (t('oar.btnGenerateReexam') || '生成复审请求书');
+        }
+        return getResponseButtonText();
+    }
+
+    function getSection5Title() {
+        var checked = document.querySelector('input[name="oa_type"]:checked');
+        var oaType = checked ? checked.value : 'first_exam';
+        if (oaType === 'reject_review') {
+            return t('oar.section5Reexam') || '复审请求书草稿';
+        }
+        return t('oar.section5') || '意见陈述书草稿';
+    }
+
+    function getGenerateHintText() {
+        var checked = document.querySelector('input[name="oa_type"]:checked');
+        var oaType = checked ? checked.value : 'first_exam';
+        if (oaType === 'reject_review') {
+            return t('oar.generateHintReexam') || '确认分析无误后可生成正式复审请求书';
+        }
+        return t('oar.generateHint') || '确认分析无误后可生成正式答复书';
+    }
 
     // ── PDF Preview ──
     var uploadedFileObjects = {};
@@ -1171,7 +1203,7 @@
         html += '</div>';
         html += '<div style="position:sticky;top:12px;z-index:20;margin-bottom:12px;padding:10px 12px;text-align:right;background:#161b22;border:1px solid #f0883e66;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.25);">';
         html += '<button onclick="generateResponseLetter()" style="background:#f0883e;color:#fff;border:none;border-radius:7px;padding:10px 20px;cursor:pointer;font-size:14px;font-weight:600;">';
-        html += '📝 ' + (t('oar.btnGenerateResponse') || '生成意见陈述书');
+        html += getResponseButtonText();
         html += '</button></div>';
         html += '<div class="result-content">';
 
@@ -1200,13 +1232,13 @@
         // ── Section 5 placeholder + Generate button ──
         html += '<div id="section5-area" style="border:2px dashed #f0883e44;border-radius:8px;margin-top:16px;background:#0d1117;">';
         html += '<div style="background:#f0883e15;padding:8px 12px;border-bottom:1px dashed #f0883e44;">';
-        html += '<span style="color:#f0883e;font-weight:600;font-size:14px;">📝 ' + (sections.length + 1) + '. ' + (t('oar.section5') || '意见陈述书草稿') + '</span>';
+        html += '<span style="color:#f0883e;font-weight:600;font-size:14px;">📝 ' + (sections.length + 1) + '. ' + getSection5Title() + '</span>';
         html += '<span style="color:#8b949e;font-size:12px;margin-left:8px;">— ' + (t('oar.section5Pending') || '待讨论确认后生成') + '</span>';
         html += '</div>';
         html += '<div id="section5-content" style="padding:16px;text-align:center;">';
-        html += '<div style="color:#8b949e;font-size:13px;margin-bottom:12px;">' + (t('oar.generateHint') || '确认分析无误后可生成正式答复书') + '</div>';
+        html += '<div style="color:#8b949e;font-size:13px;margin-bottom:12px;">' + getGenerateHintText() + '</div>';
         html += '<button onclick="generateResponseLetter()" style="background:#f0883e;color:#fff;border:none;border-radius:8px;padding:12px 32px;cursor:pointer;font-size:15px;font-weight:600;">';
-        html += '📝 ' + (t('oar.btnGenerateResponse') || '生成意见陈述书');
+        html += getResponseButtonText();
         html += '</button></div>';
         html += '</div>';
 
@@ -1243,9 +1275,9 @@
         // ── Generate button ──
         html += '<div style="margin-top:16px;text-align:center;">';
         html += '<button id="btn-generate-response" onclick="generateResponseLetter()" style="background:#f0883e;color:#fff;border:none;border-radius:8px;padding:12px 32px;cursor:pointer;font-size:15px;font-weight:600;">';
-        html += '📝 ' + (t('oar.btnGenerateResponse') || '生成意见陈述书');
+        html += getResponseButtonText();
         html += '</button>';
-        html += '<div style="color:#8b949e;font-size:12px;margin-top:6px;">' + (t('oar.generateHint') || '确认分析无误后可生成正式答复书') + '</div>';
+        html += '<div style="color:#8b949e;font-size:12px;margin-top:6px;">' + getGenerateHintText() + '</div>';
         html += '</div>';
 
         html += '</div>'; // end result-box
@@ -1564,7 +1596,7 @@
                         if (data.startsWith('[ERROR]')) {
                             if (section5Area) section5Area.innerHTML = '<div style="color:#f85149;padding:16px;">' + escapeHtml(data) + '</div>';
                             if (overlayDiv) { overlayDiv.querySelector('h3').textContent = '❌ 生成失败'; overlayDiv.querySelector('#overlay-stream').textContent = data; }
-                            if (btn) { btn.disabled = false; btn.textContent = '📝 ' + (t('oar.btnGenerateResponse') || '生成意见陈述书'); }
+                            if (btn) { btn.disabled = false; btn.textContent = getResponseButtonText(); }
                             return;
                         }
                         if (data === '[DONE]') { done = true; break; }
@@ -1589,7 +1621,7 @@
                     overlayDiv.querySelector('h3').textContent = '生成内容不可用';
                     overlayDiv.querySelector('#overlay-stream').textContent = qualityError;
                 }
-                if (btn) { btn.disabled = false; btn.textContent = '📝 ' + (t('oar.btnGenerateResponse') || '生成意见陈述书'); }
+                if (btn) { btn.disabled = false; btn.textContent = getResponseButtonText(); }
                 return;
             }
 
@@ -1626,7 +1658,7 @@
         } catch (e) {
             if (section5Area) section5Area.innerHTML = '<div style="color:#f85149;padding:16px;">生成失败: ' + escapeHtml(e.message) + '</div>';
             if (overlayDiv) { overlayDiv.querySelector('h3').textContent = '❌ 生成失败'; overlayDiv.querySelector('#overlay-stream').textContent = e.message; }
-            if (btn) { btn.disabled = false; btn.textContent = '📝 ' + (t('oar.btnGenerateResponse') || '生成意见陈述书'); }
+            if (btn) { btn.disabled = false; btn.textContent = getResponseButtonText(); }
         }
     }
 
@@ -2977,9 +3009,9 @@
         // ── 生成答复书按钮 ──
         html += '<div style="margin-top:8px;text-align:center;">';
         html += '<button id="btn-generate-response" onclick="generateResponseLetter()" style="background:#f0883e;color:#fff;border:none;border-radius:8px;padding:14px 40px;cursor:pointer;font-size:16px;font-weight:600;box-shadow:0 2px 8px rgba(240,136,62,0.3);">';
-        html += '📝 ' + (t('oar.btnGenerateResponse') || '生成意见陈述书');
+        html += getResponseButtonText();
         html += '</button>';
-        html += '<div style="color:#8b949e;font-size:12px;margin-top:8px;">' + (t('oar.generateHint') || '确认讨论无误后可生成正式答复书') + '</div>';
+        html += '<div style="color:#8b949e;font-size:12px;margin-top:8px;">' + getGenerateHintText() + '</div>';
         html += '</div>';
 
         html += '</div>';
