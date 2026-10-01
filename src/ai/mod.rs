@@ -13,8 +13,7 @@ mod chat;
 mod client;
 mod fact_check;
 mod idea;
-mod patent;
-pub use patent::extract_publication_numbers;
+pub mod patent;
 mod tests;
 
 pub(crate) use client::{
