@@ -2283,7 +2283,8 @@ pub async fn api_ai_cost_save(
 #[cfg(test)]
 mod prompt_boundary_tests {
     use super::{
-        bounded_reference_material, has_only_allowed_history_roles, raw_role_preference_material,
+        bounded_reference_material, has_only_allowed_history_roles, oa_capacity_error,
+        raw_role_preference_material, truncate_for_ai,
     };
 
     #[test]
