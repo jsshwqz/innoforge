@@ -3,8 +3,8 @@
 #![allow(clippy::needless_borrow)]
 
 use super::client::{
-    oa_capacity_error, safe_truncate, truncate_for_ai, AiClient, Message,
-    OA_RESPONSE_ANALYSIS_MAX_CHARS, OA_RESPONSE_DISCUSSION_MAX_CHARS, OA_RESPONSE_OA_MAX_CHARS,
+    oa_capacity_error, safe_truncate, AiClient, Message, OA_RESPONSE_ANALYSIS_MAX_CHARS,
+    OA_RESPONSE_DISCUSSION_MAX_CHARS, OA_RESPONSE_OA_MAX_CHARS,
 };
 use anyhow::Result;
 
@@ -121,7 +121,7 @@ impl AiClient {
              3. 创新点\n\
              4. 应用场景\n\
              5. 关键权利要求解读",
-            claims_preview = safe_truncate(claims, 2000)
+            claims_preview = crate::ai::client::truncate_for_ai(claims, 2000)
         );
         self.chat(&prompt, None).await
     }
@@ -146,7 +146,7 @@ impl AiClient {
              提取最核心的限定性技术特征（决定保护范围的关键要素）\n\n\
              ### 5. 保护强度评估\n\
              综合评估该专利权利要求的保护强度（强/中/弱），并说明原因",
-            claims_text = safe_truncate(claims, 4000)
+            claims_text = crate::ai::client::truncate_for_ai(claims, 4000)
         );
 
         let messages = vec![
@@ -191,8 +191,8 @@ impl AiClient {
              3. 具体的规避设计建议\n\n\
              ### 综合建议\n\
              整体风险评估和应对策略建议",
-            product = safe_truncate(product_description, 2000),
-            patents = safe_truncate(patents_info, 4000),
+            product = crate::ai::client::truncate_for_ai(product_description, 2000),
+            patents = crate::ai::client::truncate_for_ai(patents_info, 4000),
         );
 
         let messages = vec![
@@ -235,7 +235,7 @@ impl AiClient {
              - 技术演进趋势\n\
              - 最具创新性的方案\n\
              - 互补性分析",
-            patents = safe_truncate(patents_info, 6000),
+            patents = crate::ai::client::truncate_for_ai(patents_info, 6000),
         );
 
         let messages = vec![
@@ -285,8 +285,8 @@ impl AiClient {
              - **反论**: 可能存在的相反观点或证据\n\
              - **下一步**: 建议的应对策略\n\
              最后给出「综合答辩策略建议」，并单列至少3项“风险N：”及对应的缓解措施。",
-            my_patent = safe_truncate(my_patent_info, 5000),
-            references = truncate_for_ai(references_info, 5000),
+            my_patent = crate::ai::client::truncate_for_ai(my_patent_info, 5000),
+            references = crate::ai::client::truncate_for_ai(references_info, 5000),
         );
 
         let messages = vec![
@@ -327,9 +327,19 @@ impl AiClient {
         depth: &str,
         discuss: bool,
     ) -> Result<String> {
-        let my_patent = safe_truncate(my_patent_info, 300000);
-        let oa = safe_truncate(office_action, 200000);
-        let refs = safe_truncate(references_info, 300000);
+        // MB5③: OA 容量统一为「报错不截断」——超限即返回错误，不静默丢内容
+        if let Some(e) = oa_capacity_error("my_patent", my_patent_info, 300_000) {
+            return Err(anyhow::anyhow!("{}", e));
+        }
+        if let Some(e) = oa_capacity_error("office_action", office_action, 200_000) {
+            return Err(anyhow::anyhow!("{}", e));
+        }
+        if let Some(e) = oa_capacity_error("references", references_info, 300_000) {
+            return Err(anyhow::anyhow!("{}", e));
+        }
+        let my_patent = my_patent_info;
+        let oa = office_action;
+        let refs = references_info;
         let is_deep = depth == "deep";
 
         let (system_role, prompt) = match oa_type {
@@ -402,9 +412,9 @@ impl AiClient {
              3. **修改后的创造性**：修改后的区别特征是否具备创造性（A22.3）\n\
              4. **修改策略评分**：评分为 A（方案强）/ B（方案可接受）/ C（方案需加强）/ D（方案不可行）\n\
              5. **改进建议**：如方案有风险，给出具体的修改建议",
-            safe_truncate(office_action, 6000),
-            safe_truncate(original_claims, 8000),
-            safe_truncate(amended_claims, 8000),
+            crate::ai::client::truncate_for_ai(office_action, 6000),
+            crate::ai::client::truncate_for_ai(original_claims, 8000),
+            crate::ai::client::truncate_for_ai(amended_claims, 8000),
         );
 
         let messages = vec![
@@ -782,9 +792,22 @@ impl AiClient {
     ) -> tokio::sync::mpsc::Receiver<String> {
         let (tx, rx) = tokio::sync::mpsc::channel::<String>(64);
 
-        let my_patent_str = safe_truncate(my_patent_info, 300000);
-        let oa_str = safe_truncate(office_action, 200000).to_string();
-        let refs_str = safe_truncate(references_info, 300000);
+        // MB5③: OA 容量统一为「报错不截断」
+        if let Some(e) = oa_capacity_error("my_patent", my_patent_info, 300_000) {
+            let _ = tx.blocking_send(e);
+            return rx;
+        }
+        if let Some(e) = oa_capacity_error("office_action", office_action, 200_000) {
+            let _ = tx.blocking_send(e);
+            return rx;
+        }
+        if let Some(e) = oa_capacity_error("references", references_info, 300_000) {
+            let _ = tx.blocking_send(e);
+            return rx;
+        }
+        let my_patent_str = my_patent_info;
+        let oa_str = office_action.to_string();
+        let refs_str = references_info;
         let is_deep = depth == "deep";
 
         let (system_role, prompt) = match oa_type {
@@ -872,8 +895,8 @@ impl AiClient {
                  如果方案中引用了对比文献的具体段落号，请特别注意核实其准确性。\n\n\
                  ## 审查意见通知书\n{}\n\n\
                  ## 拟提交的答复方案\n{}",
-                safe_truncate(&oa_str, 8000),
-                safe_truncate(&response_part, 12000),
+                crate::ai::client::truncate_for_ai(&oa_str, 8000),
+                crate::ai::client::truncate_for_ai(&response_part, 12000),
             );
 
             let critique_messages = vec![
@@ -1165,8 +1188,8 @@ impl AiClient {
              - 整体授权前景评估（高/中/低）\n\
              - 建议的答辩策略（修改权利要求/争辩/两者结合）\n\
              - 建议重点防御的对比文件",
-            claims = safe_truncate(my_claims, 4000),
-            patents = safe_truncate(patents_json, 6000),
+            claims = crate::ai::client::truncate_for_ai(my_claims, 4000),
+            patents = crate::ai::client::truncate_for_ai(patents_json, 6000),
         );
 
         let messages = vec![
@@ -1211,8 +1234,8 @@ impl AiClient {
              - 这些技术效果是否构成预料不到的技术效果\n\n\
              ### 综合结论\n\
              - 基于该对比文件，本申请的新颖性/创造性前景",
-            claims = safe_truncate(my_claims, 4000),
-            prior_art = safe_truncate(prior_art, 6000),
+            claims = crate::ai::client::truncate_for_ai(my_claims, 4000),
+            prior_art = crate::ai::client::truncate_for_ai(prior_art, 6000),
         );
 
         let messages = vec![
