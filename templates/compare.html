@@ -170,7 +170,7 @@
     function uploadMyPatent() {
         triggerFileSelect(async function(file) {
             var tagEl = document.getElementById('my-file-tag');
-            tagEl.innerHTML = '<span style="color:#8b949e; font-size:12px;">正在提取文本...</span>';
+            tagEl.innerHTML = DOMPurify.sanitize('<span style="color:#8b949e; font-size:12px;">正在提取文本...</span>');
             try {
                 var result = await extractFile(file);
                 uploadedData['my'] = result;
@@ -184,7 +184,7 @@
                     + ' (' + result.content.length + '字)'
                     + '<span class="tag-remove" onclick="clearMyUpload()">&times;</span></span>' + previewBtn;
             } catch(e) {
-                tagEl.innerHTML = '<span style="color:#f85149; font-size:12px;">' + escapeHtml(e.message) + '</span>';
+                tagEl.innerHTML = DOMPurify.sanitize('<span style="color:#f85149; font-size:12px;">' + escapeHtml(e.message) + '</span>');
             }
         });
     }
@@ -208,7 +208,7 @@
                 row.parentElement.insertBefore(existing, row.nextSibling);
                 existing.setAttribute('data-for', idx);
             }
-            existing.innerHTML = '<span style="color:#8b949e; font-size:12px; margin-left:8px;">正在提取文本...</span>';
+            existing.innerHTML = DOMPurify.sanitize('<span style="color:#8b949e; font-size:12px; margin-left:8px;">正在提取文本...</span>');
             try {
                 var result = await extractFile(file);
                 uploadedData['ref_' + idx] = result;
@@ -222,7 +222,7 @@
                     + ' (' + result.content.length + '字)'
                     + '<span class="tag-remove" onclick="clearRefUpload(\'' + idx + '\')">&times;</span></span>' + previewBtn;
             } catch(e) {
-                existing.innerHTML = '<span style="color:#f85149; font-size:12px; margin-left:8px;">' + escapeHtml(e.message) + '</span>';
+                existing.innerHTML = DOMPurify.sanitize('<span style="color:#f85149; font-size:12px; margin-left:8px;">' + escapeHtml(e.message) + '</span>');
             }
         });
     }
@@ -370,7 +370,7 @@
     function uploadOA() {
         triggerFileSelect(async function(file) {
             var tagEl = document.getElementById('oa-file-tag');
-            tagEl.innerHTML = '<span style="color:#8b949e; font-size:12px;">正在提取文本...</span>';
+            tagEl.innerHTML = DOMPurify.sanitize('<span style="color:#8b949e; font-size:12px;">正在提取文本...</span>');
             try {
                 var result = await extractFile(file);
                 uploadedData['oa'] = result;
@@ -382,7 +382,7 @@
                     + ' (' + result.content.length + '字)'
                     + '<span class="tag-remove" onclick="clearOA()">&times;</span></span>' + previewBtn;
             } catch(e) {
-                tagEl.innerHTML = '<span style="color:#f85149; font-size:12px;">' + escapeHtml(e.message) + '</span>';
+                tagEl.innerHTML = DOMPurify.sanitize('<span style="color:#f85149; font-size:12px;">' + escapeHtml(e.message) + '</span>');
             }
         });
     }
@@ -829,7 +829,7 @@
         var loadDiv = document.createElement('div');
         loadDiv.className = 'msg msg-ai';
         loadDiv.id = 'ai-loading-disc';
-        loadDiv.innerHTML = '<div class="msg-bubble">思考中...</div>';
+        loadDiv.innerHTML = DOMPurify.sanitize('<div class="msg-bubble">思考中...</div>');
         container.appendChild(loadDiv);
         container.scrollTop = container.scrollHeight;
 
@@ -873,7 +873,7 @@
         var div = document.createElement('div');
         div.className = 'msg msg-' + role;
         var bubbleContent = escapeHtml(content).replace(/\n/g, '<br>');
-        div.innerHTML = '<div class="msg-bubble">' + bubbleContent + '</div>';
+        div.innerHTML = DOMPurify.sanitize('<div class="msg-bubble">' + bubbleContent + '</div>');
         container.appendChild(div);
         container.scrollTop = container.scrollHeight;
     }

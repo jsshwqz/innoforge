@@ -5,9 +5,24 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 
+## [0.9.0] - 2026-10-01
+
+### 新增 / Added
+- 检索↔创意验证全链路贯通（MC1）：SourceChain 多源检索 + RAG 全文切片聚类 + 结构化引用编号
+- OA 链路事实核查全覆盖（MC2）：答复书生成前预检 + 讨论回复后追检
+- innerHTML XSS 防护加固（MC3）：72 处 innerHTML 赋值补加 DOMPurify.sanitize()
+
+---
+
 ## [Unreleased]
 
 ### 新增 / Added
+- **检索↔创意验证全链路贯通**（M-C / MC1）— pipeline 检索步骤改用 SourceChain 多源链（SerpAPI + GooglePatentsXhr + EpoOps），PriorArtCluster 聚类集成 RAG 全文切片，创意报告引用对齐 MB3 的 {ref_no, patent_id} 结构化形状。
+  Search↔idea-validation pipeline integration: pipeline search now uses SourceChain multi-source chain, PriorArtCluster clusters incorporate RAG full-text chunks, and idea report citations align with MB3's structured {ref_no, patent_id} shape.
+- **OA 链路事实核查全覆盖**（M-C / MC2）— OA 答复书生成前做事实核查（致命档拒绝生成），OA 讨论回复后追加事实核查报告，与 OA 分析共用 check_oa_analysis 函数。
+  OA fact-check full coverage: response-letter generation pre-checks facts (fatal-level rejects generation), discussion replies append fact-check reports, all sharing the same check_oa_analysis function.
+- **innerHTML XSS 防护加固**（M-C / MC3）— 全模板 72 处未保护的 innerHTML 赋值补加 DOMPurify.sanitize() 包裹，i18n.js 全局 DOMPurify fallback 确保加载失败时仍有保护。
+  innerHTML XSS hardening: 72 unprotected innerHTML assignments across templates wrapped with DOMPurify.sanitize(), with i18n.js global DOMPurify fallback ensuring protection even on load failure.
 - **深度分析自动抓取全文并引用原文片段**（M-B / MB2+MB3，PR #44+#33）— 深度分析现在会自动为最相关的若干篇专利抓取公开全文（无需付费 API Key），并在报告中引用专利原文片段，每条引用可反查回库内该专利的切片原文。
   Deep analysis now auto-fetches public full text for the top-N most relevant patents (no paid API Key needed) and cites patent original-text fragments in the report, each citation traceable back to the in-DB chunk.
 - **创意报告新增决策建议段**（M-B / MB4，PR #34）— 明确给出申请 / 放弃 / 转向，并附不少于 3 条可溯源理由。

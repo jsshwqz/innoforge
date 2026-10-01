@@ -34,7 +34,10 @@ fn derive_topic(all_tokens: &[Vec<String>], max_words: usize) -> String {
 }
 
 /// 执行 Step 8: PriorArtCluster
-pub async fn execute(ctx: &mut PipelineContext) -> Result<()> {
+pub async fn execute(
+    ctx: &mut PipelineContext,
+    db: &std::sync::Arc<crate::db::Database>,
+) -> Result<()> {
     let matches = &ctx.top_matches;
     if matches.is_empty() {
         return Ok(());
@@ -91,7 +94,22 @@ pub async fn execute(ctx: &mut PipelineContext) -> Result<()> {
             patent_indices: member_indices,
             representative_title: matches[rep_idx].source_title.clone(),
             avg_similarity,
+            chunks: Vec::new(),
         });
+    }
+
+    // MC1: 对每个 cluster 的 top-1 专利调 retrieve_chunks 取回全文切片
+    for cluster in &mut result {
+        if let Some(&top_idx) = cluster.patent_indices.first() {
+            let patent_id = &matches[top_idx].source_id;
+            let query_text = &cluster.topic;
+            let chunks = crate::rag::retriever::retrieve_chunks(db, patent_id, query_text, 3);
+            if let Ok(ref c) = chunks {
+                if !c.is_empty() {
+                    cluster.chunks = c.clone();
+                }
+            }
+        }
     }
 
     ctx.prior_art_clusters = result;
@@ -126,6 +144,10 @@ mod tests {
         let mut ctx = PipelineContext::new("test-idea", "Test Idea", "desc");
         ctx.top_matches = matches;
         ctx
+    }
+
+    fn test_db() -> std::sync::Arc<crate::db::Database> {
+        std::sync::Arc::new(crate::db::Database::init(":memory:").unwrap())
     }
 
     #[tokio::test]
@@ -178,7 +200,7 @@ mod tests {
             ),
         ];
         let mut ctx = make_ctx(matches);
-        execute(&mut ctx).await.unwrap();
+        execute(&mut ctx, &test_db()).await.unwrap();
 
         // Neural network items should cluster together, blockchain separate
         assert_eq!(ctx.prior_art_clusters.len(), 2);
@@ -196,7 +218,7 @@ mod tests {
     #[tokio::test]
     async fn test_empty_input() {
         let mut ctx = make_ctx(vec![]);
-        execute(&mut ctx).await.unwrap();
+        execute(&mut ctx, &test_db()).await.unwrap();
         assert!(ctx.prior_art_clusters.is_empty());
     }
 
@@ -210,7 +232,7 @@ mod tests {
             0.9,
         )];
         let mut ctx = make_ctx(matches);
-        execute(&mut ctx).await.unwrap();
+        execute(&mut ctx, &test_db()).await.unwrap();
 
         assert_eq!(ctx.prior_art_clusters.len(), 1);
         assert_eq!(ctx.prior_art_clusters[0].patent_indices, vec![0]);
@@ -225,7 +247,7 @@ mod tests {
             make_match(3, "C", "c", vec!["epsilon", "zeta"], 0.3),
         ];
         let mut ctx = make_ctx(matches);
-        execute(&mut ctx).await.unwrap();
+        execute(&mut ctx, &test_db()).await.unwrap();
 
         // Each item in its own cluster
         assert_eq!(ctx.prior_art_clusters.len(), 3);
@@ -250,7 +272,7 @@ mod tests {
             ),
         ];
         let mut ctx = make_ctx(matches);
-        execute(&mut ctx).await.unwrap();
+        execute(&mut ctx, &test_db()).await.unwrap();
 
         // They share "专利" and "分析", Jaccard = 2/(5+6-2) = 2/9 ≈ 0.22 < 0.25
         // Actually let's check: union of all tokens is 9, intersection is 2 => 0.222
@@ -295,7 +317,7 @@ mod tests {
         // union: {智能, 停车, 系统, 自动, 泊车, 辅助} = 6
         // Jaccard = 5/6 ≈ 0.83 — will cluster with match 1
         let mut ctx = make_ctx(matches);
-        execute(&mut ctx).await.unwrap();
+        execute(&mut ctx, &test_db()).await.unwrap();
 
         // Match 1 and 3 should cluster together
         // Match 2: {智能,停车,场,管理,车位,检测} vs match 1: {智能,停车,系统,自动,泊车}

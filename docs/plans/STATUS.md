@@ -8,6 +8,14 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-10-01 — **M-C 全流程贯通与交付完成**（v0.9.0）
+
+- **状态 / Status**: 🎉 **M-C 全部完成** — MC1（检索↔创意验证贯通）、MC2（OA 链路事实核查全覆盖）、MC3（innerHTML XSS 防护加固）、MC4（文档与版本升 0.9.0）
+- **MC1**: pipeline search.rs 改用 SourceChain 多源链；PriorArtCluster 集成 RAG retrieve_chunks 全文切片；创意报告引用对齐 MB3 {ref_no, patent_id} 形状
+- **MC2**: OA 答复书生成前做 check_oa_analysis 预检（score ≤ 65 拒绝生成）；OA 讨论回复后追加事实核查报告；与 OA 分析共用同一 check_oa_analysis 函数
+- **MC3**: 全模板 72 处未保护 innerHTML 赋值补加 DOMPurify.sanitize()；i18n.js:806 也已 sanitize；HTML 函数完整性基线已刷新
+- **MC4**: 版本号 0.8.0 → 0.9.0；CHANGELOG.md 新增 [0.9.0] 段
+
 ### 2026-10-01 — **M-B 五包合并回写 + OA-U v2 重测 + 两份新规划书下发**（同日第三条目）
 
 - **状态 / Status**: 🎉 **M-B 五包全部合并进 main**（`7ca6d19`），MB5 为唯一剩余包；OA-U v2 就绪待派（前置已满足）

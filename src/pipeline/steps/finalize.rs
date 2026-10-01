@@ -221,14 +221,23 @@ fn generate_code_only_report(ctx: &PipelineContext) -> String {
 ",
         );
         for m in ctx.top_matches.iter().take(5) {
+            // MC1: 引用编号对齐 MB3 的 {ref_no, patent_id} 形状
+            let ref_no = format!("[引用{}]", m.rank);
+            let patent_ref = if m.source_id.is_empty() {
+                String::new()
+            } else {
+                format!(" (patent_id={})", m.source_id)
+            };
             report.push_str(&format!(
-                "{}. **{}** (相似度 {:.1}%)
+                "{}. **{}** (相似度 {:.1}%) {}{}
    {}
 
 ",
                 m.rank,
                 m.source_title,
                 m.combined_score * 100.0,
+                ref_no,
+                patent_ref,
                 if m.snippet.len() > 100 {
                     format!("{}...", m.snippet.chars().take(100).collect::<String>())
                 } else {

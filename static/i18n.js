@@ -803,7 +803,7 @@ function renderSidebar(extraHtml) {
   html += '</select>';
   html += '</div>';
   if (extraHtml) html += extraHtml;
-  el.innerHTML = html;
+  el.innerHTML = DOMPurify.sanitize(html);
 }
 
 // Terminal-style chat history: ↑↓ keys recall previously sent messages.

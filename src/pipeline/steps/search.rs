@@ -2,10 +2,19 @@
 //!
 //! 类型：CODE（HTTP 请求，不调用 LLM）
 //!
-//! 搜索仅使用 SerpAPI，其他搜索源（Bing/搜狗/Lens.org）已全部屏蔽。
+//! MC1 起：SearchPatents 改走 M-A 多源检索链（SourceChain），
+//! 复用 routes/search.rs 的 online_chain_providers 装配逻辑。
+//! SearchWeb 仍走 SerpAPI（网络搜索与专利搜索语义不同）。
 
 use crate::db::Database;
 use crate::pipeline::context::{PipelineContext, PipelinePatentHit};
+use crate::search::chain::SourceChain;
+use crate::search::model::{Lang, SearchQuery};
+use crate::search::provider::SearchProvider;
+use crate::search::providers::epo_ops::EpoOpsProvider;
+use crate::search::providers::google_patents_xhr::GooglePatentsXhrProvider;
+use crate::search::providers::serpapi::SerpApiProvider;
+use crate::types::search::SearchType;
 use anyhow::Result;
 use reqwest::Client;
 use std::collections::hash_map::DefaultHasher;
@@ -58,6 +67,51 @@ fn save_cache(db: &Database, queries: &[String], source: &str, results: &[Pipeli
     let hash = query_hash(&combined, source);
     if let Ok(json) = serde_json::to_string(results) {
         let _ = db.set_search_cache(&hash, &combined, &json, source);
+    }
+}
+
+/// 构建在线多源检索链 providers（与 routes/search.rs::online_chain_providers 同逻辑）
+///
+/// MC1：pipeline 检索步骤复用 M-A 多源降级链。
+fn build_online_chain(
+    db: &Arc<Database>,
+    serpapi_key: Option<String>,
+    epo_credentials: Option<(String, String)>,
+) -> Vec<Arc<dyn SearchProvider>> {
+    let mut providers: Vec<Arc<dyn SearchProvider>> = Vec::new();
+    if let Some(api_key) = serpapi_key {
+        providers.push(Arc::new(SerpApiProvider::new(api_key, db.clone())));
+    }
+    // 免费无 Key 的降级源，恒登记（MA2a）
+    providers.push(Arc::new(GooglePatentsXhrProvider::new(db.clone())));
+    if let Some((epo_key, epo_secret)) = epo_credentials {
+        providers.push(Arc::new(EpoOpsProvider::new(
+            epo_key,
+            epo_secret,
+            db.clone(),
+        )));
+    }
+    providers
+}
+
+/// 将 PatentSummary 映射回 PipelinePatentHit
+fn summary_to_hit(summary: &crate::types::search::PatentSummary, idx: usize) -> PipelinePatentHit {
+    PipelinePatentHit {
+        id: format!("online_{}", idx),
+        title: summary.title.clone(),
+        snippet: if summary.abstract_text.is_empty() {
+            summary.applicant.clone()
+        } else {
+            summary.abstract_text.clone()
+        },
+        link: format!(
+            "https://patents.google.com/patent/{}",
+            summary.patent_number
+        ),
+        source: summary
+            .score_source
+            .clone()
+            .unwrap_or_else(|| "online".into()),
     }
 }
 
@@ -133,7 +187,10 @@ pub async fn search_web(ctx: &mut PipelineContext, serpapi_key: &str, db: &Datab
     Ok(())
 }
 
-/// 执行 Step 4: 专利搜索（仅 SerpAPI + 本地 DB，Lens.org 已屏蔽）
+/// 执行 Step 4: 专利搜索
+///
+/// MC1：改走 M-A 多源检索链（SourceChain），复用 SerpAPI + GooglePatentsXhr + EpoOps
+/// 三源并行发起、按优先级择胜的降级链。本地 DB FTS 兜底保留。
 pub async fn search_patents(
     ctx: &mut PipelineContext,
     serpapi_key: &str,
@@ -149,7 +206,7 @@ pub async fn search_patents(
     let mut all_results = Vec::new();
     let mut seen_titles: HashSet<String> = HashSet::new();
 
-    // 本地数据库搜索
+    // 本地数据库搜索（兜底，先跑保证有结果）
     for query in ctx.expanded_queries.iter().take(3) {
         if let Ok((local_results, _total)) = db.search_fts(query, 1, 20) {
             for p in local_results {
@@ -169,52 +226,57 @@ pub async fn search_patents(
         }
     }
 
-    // SerpAPI Google Patents 搜索
-    if !serpapi_key.is_empty() && serpapi_key != "your-serpapi-key-here" {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(SEARCH_UPSTREAM_TIMEOUT_SECS))
-            .build()
-            .unwrap_or_else(|_| Client::new());
-        for query in ctx.expanded_queries.iter().take(2) {
-            let mut params = vec![
-                ("engine", "google_patents".to_string()),
-                ("q", query.clone()),
-                ("api_key", serpapi_key.to_string()),
-            ];
-            // 中文查询添加语言和地理参数
-            for (k, v) in serpapi_cn_params(query) {
-                params.push((k, v));
-            }
-            let resp = client
-                .get("https://serpapi.com/search.json")
-                .query(&params)
-                .send()
-                .await;
+    // MC1: 在线多源检索链（SourceChain）
+    let serpapi_opt = if !serpapi_key.is_empty() && serpapi_key != "your-serpapi-key-here" {
+        Some(serpapi_key.to_string())
+    } else {
+        None
+    };
 
-            if let Ok(resp) = resp {
-                if let Ok(json) = resp.json::<serde_json::Value>().await {
-                    if let Some(results) = json["organic_results"].as_array() {
-                        for r in results {
-                            let title = r["title"].as_str().unwrap_or("").to_string();
-                            let title_key =
-                                title.chars().take(20).collect::<String>().to_lowercase();
-                            if seen_titles.contains(&title_key) {
-                                continue;
-                            }
-                            seen_titles.insert(title_key);
-                            all_results.push(PipelinePatentHit {
-                                id: format!("patent_online_{}", all_results.len()),
-                                title,
-                                snippet: r["snippet"].as_str().unwrap_or("").to_string(),
-                                link: r["patent_id"]
-                                    .as_str()
-                                    .map(|id| format!("https://patents.google.com/patent/{}", id))
-                                    .unwrap_or_default(),
-                                source: "google_patents".into(),
-                            });
-                        }
-                    }
+    // EPO 凭证暂不从 pipeline 获取（pipeline 无 config 读取），仅用 SerpAPI + GooglePatentsXhr
+    let providers = build_online_chain(db, serpapi_opt.clone(), None);
+
+    if !providers.is_empty() {
+        for query in ctx.expanded_queries.iter().take(2) {
+            let lang = if contains_cjk(query) {
+                Lang::Chinese
+            } else {
+                Lang::English
+            };
+            let search_query = SearchQuery {
+                keyword: query.clone(),
+                country: None,
+                language: Some(lang),
+                assignee: None,
+                exact_assignee: false,
+                date_from: None,
+                date_to: None,
+                limit: 20,
+                page: 1,
+                sort_by: None,
+                search_type: Some(SearchType::Keyword),
+            };
+
+            let outcome = SourceChain::new(providers.clone()).run(search_query).await;
+            let summaries = outcome.summaries();
+
+            for summary in &summaries {
+                let title_key = summary
+                    .title
+                    .chars()
+                    .take(20)
+                    .collect::<String>()
+                    .to_lowercase();
+                if seen_titles.contains(&title_key) || summary.title.is_empty() {
+                    continue;
                 }
+                seen_titles.insert(title_key);
+                all_results.push(summary_to_hit(summary, all_results.len()));
+            }
+
+            // 如果已有足够结果，不再多查
+            if all_results.len() >= 30 {
+                break;
             }
         }
     }

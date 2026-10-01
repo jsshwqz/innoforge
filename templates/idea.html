@@ -341,7 +341,7 @@
             var ideas = data.ideas || data.list || [];
             if (!Array.isArray(ideas)) { ideas = []; }
             if (ideas.length === 0) {
-                list.innerHTML = '<p class="hint">' + (i18nLang === 'en' ? 'No ideas yet' : '暂无创意记录') + '</p>';
+                list.innerHTML = DOMPurify.sanitize('<p class="hint">' + (i18nLang === 'en' ? 'No ideas yet' : '暂无创意记录') + '</p>');
                 return;
             }
             list.innerHTML = '';
@@ -393,7 +393,7 @@
                     }
                     html += '</div>';
                 }
-                row.innerHTML = html;
+                row.innerHTML = DOMPurify.sanitize(html);
                 // 删除会话按钮（恢复自 v0.7.2）
                 row.style.position = 'relative';
                 var delBtn = document.createElement('button');
@@ -437,7 +437,7 @@
         var listEl = document.getElementById('evidence-list');
         var countEl = document.getElementById('evidence-count');
         if (!listEl) return;
-        listEl.innerHTML = '<p class="muted">Loading...</p>';
+        listEl.innerHTML = DOMPurify.sanitize('<p class="muted">Loading...</p>');
         try {
             var resp = await fetch('/api/idea/' + encodeURIComponent(ideaId) + '/evidence');
             if (!resp.ok) { listEl.innerHTML = '<p class="muted">Load failed</p>'; return; }
@@ -465,7 +465,7 @@
                 listEl.appendChild(row);
             });
         } catch(e) {
-            listEl.innerHTML = '<p class="muted">Load failed: ' + e.message + '</p>';
+            listEl.innerHTML = DOMPurify.sanitize('<p class="muted">Load failed: ' + e.message + '</p>');
         }
     }
 
@@ -473,7 +473,7 @@
     async function loadClaimTree(ideaId) {
         var contentEl = document.getElementById('claim-tree-content');
         if (!contentEl) return;
-        contentEl.innerHTML = '<p class="muted">Loading...</p>';
+        contentEl.innerHTML = DOMPurify.sanitize('<p class="muted">Loading...</p>');
         try {
             var resp = await fetch('/api/idea/' + encodeURIComponent(ideaId) + '/claim-tree');
             if (!resp.ok) { contentEl.innerHTML = '<p class="muted">Load failed</p>'; return; }
@@ -507,7 +507,7 @@
                 contentEl.appendChild(row);
             });
         } catch(e) {
-            contentEl.innerHTML = '<p class="muted">Load failed: ' + e.message + '</p>';
+            contentEl.innerHTML = DOMPurify.sanitize('<p class="muted">Load failed: ' + e.message + '</p>');
         }
     }
 
@@ -516,7 +516,7 @@
         var listEl = document.getElementById('key-findings-list');
         var countEl = document.getElementById('key-findings-count');
         if (!listEl) return;
-        listEl.innerHTML = '<p class="muted">Loading...</p>';
+        listEl.innerHTML = DOMPurify.sanitize('<p class="muted">Loading...</p>');
         try {
             var resp = await fetch('/api/idea/' + encodeURIComponent(ideaId) + '/findings');
             if (!resp.ok) { listEl.innerHTML = '<p class="muted">Load failed</p>'; return; }
@@ -541,7 +541,7 @@
                 listEl.appendChild(row);
             });
         } catch(e) {
-            listEl.innerHTML = '<p class="muted">Load failed: ' + e.message + '</p>';
+            listEl.innerHTML = DOMPurify.sanitize('<p class="muted">Load failed: ' + e.message + '</p>');
         }
     }
 
@@ -549,7 +549,7 @@
     async function loadFeatureCards(ideaId) {
         var listEl = document.getElementById('feature-cards-list');
         if (!listEl) return;
-        listEl.innerHTML = '<p class="muted">Loading...</p>';
+        listEl.innerHTML = DOMPurify.sanitize('<p class="muted">Loading...</p>');
         try {
             var resp = await fetch('/api/ideas/' + encodeURIComponent(ideaId) + '/feature-cards');
             if (!resp.ok) { listEl.innerHTML = '<p class="muted">Load failed</p>'; return; }
@@ -587,7 +587,7 @@
                 listEl.appendChild(row);
             });
         } catch(e) {
-            listEl.innerHTML = '<p class="muted">Load failed: ' + e.message + '</p>';
+            listEl.innerHTML = DOMPurify.sanitize('<p class="muted">Load failed: ' + e.message + '</p>');
         }
     }
 
@@ -1594,7 +1594,7 @@
     async function loadMemory() {
         if (!currentIdeaId) return;
         var listEl = document.getElementById('memory-list');
-        listEl.innerHTML = '<p class="muted">Loading...</p>';
+        listEl.innerHTML = DOMPurify.sanitize('<p class="muted">Loading...</p>');
 
         try {
             var resp = await fetch('/api/idea/' + encodeURIComponent(currentIdeaId) + '/memory');
@@ -1637,7 +1637,7 @@
                 listEl.appendChild(row);
             });
         } catch(e) {
-            listEl.innerHTML = '<p class="muted">Load failed: ' + e.message + '</p>';
+            listEl.innerHTML = DOMPurify.sanitize('<p class="muted">Load failed: ' + e.message + '</p>');
         }
     }
 
@@ -1796,7 +1796,7 @@
         var content = document.getElementById('report-content');
         var openBtn = document.getElementById('report-open-btn');
         if (!content) return;
-        content.innerHTML = '<p style="color:#58a6ff;"><span class="spinner"></span> 加载中...</p>';
+        content.innerHTML = DOMPurify.sanitize('<p style="color:#58a6ff;"><span class="spinner"></span> 加载中...</p>');
         try {
             var url = '/api/idea/' + encodeURIComponent(ideaId) + '/report';
             if (reportType && reportType !== 'full') url += '?type=' + reportType;
@@ -1811,11 +1811,11 @@
                 content.innerHTML = DOMPurify.sanitize('<div class="analysis-result">' + renderMarkdown(reportText) + '</div>');
                 if (openBtn) openBtn.style.display = 'inline-block';
             } else {
-                content.innerHTML = '<p style="color:#8b949e;">' + (data.message || '暂无报告') + '</p>';
+                content.innerHTML = DOMPurify.sanitize('<p style="color:#8b949e;">' + (data.message || '暂无报告') + '</p>');
                 if (openBtn) openBtn.style.display = 'none';
             }
         } catch(e) {
-            content.innerHTML = '<p style="color:#f85149;">加载失败: ' + esc(e.message) + '</p>';
+            content.innerHTML = DOMPurify.sanitize('<p style="color:#f85149;">加载失败: ' + esc(e.message) + '</p>');
         }
     }
 
@@ -1979,7 +1979,7 @@
                 }
                 html += '</div>';
             }
-            findingsArea.innerHTML = html;
+            findingsArea.innerHTML = DOMPurify.sanitize(html);
         }
     }
 

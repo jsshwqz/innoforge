@@ -447,7 +447,7 @@ function renderResults(data, page, pageSize) {
     if (data.hint) {
         const hintEl = document.getElementById('search-hint');
         if (hintEl) {
-            hintEl.innerHTML = `💡 ${escapeHtml(data.hint)} <a href="/settings" style="color:#58a6ff;">去设置</a>`;
+            hintEl.innerHTML = DOMPurify.sanitize(`💡 ${escapeHtml(data.hint)} <a href="/settings" style="color:#58a6ff;">去设置</a>`);
             hintEl.style.display = 'block';
         }
     } else {
@@ -868,13 +868,13 @@ async function compareMatrix() {
     var resultDiv = document.getElementById('batch-result');
     if (ids.length < 2) { resultDiv.innerHTML = '<p style="color:#d29922;">请勾选 2-5 个专利进行对比</p>'; return; }
     if (ids.length > 5) { resultDiv.innerHTML = '<p style="color:#d29922;">最多选择 5 个专利</p>'; return; }
-    resultDiv.innerHTML = '<p style="color:#58a6ff;">⏳ 正在生成对比矩阵 (' + ids.length + '条)...</p>';
+    resultDiv.innerHTML = DOMPurify.sanitize('<p style="color:#58a6ff;">⏳ 正在生成对比矩阵 (' + ids.length + '条)...</p>');
     try {
         var resp = await fetch('/api/ai/compare-matrix', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({patent_ids: ids}) });
         if (!resp.ok) throw new Error('服务器错误 (' + resp.status + ')');
         var data = await resp.json();
         if (data.status === 'ok') {
-            resultDiv.innerHTML = '<h3 style="color:#8b5cf6;margin-bottom:12px;">📊 技术对比矩阵</h3><div style="padding:16px;background:#0d1117;border:1px solid #30363d;border-radius:8px;color:#c9d1d9;line-height:1.8;white-space:pre-wrap;">' + escapeHtml(data.analysis).replace(/\n/g, '<br>') + '</div>';
+            resultDiv.innerHTML = DOMPurify.sanitize('<h3 style="color:#8b5cf6;margin-bottom:12px;">📊 技术对比矩阵</h3><div style="padding:16px;background:#0d1117;border:1px solid #30363d;border-radius:8px;color:#c9d1d9;line-height:1.8;white-space:pre-wrap;">' + escapeHtml(data.analysis).replace(/\n/g, '<br>') + '</div>');
         } else { resultDiv.innerHTML = '<p style="color:#f85149;">❌ ' + escapeHtml(data.error || '对比失败') + '</p>'; }
     } catch(e) { resultDiv.innerHTML = '<p style="color:#f85149;">❌ ' + escapeHtml(e.message) + '</p>'; }
 }
@@ -904,13 +904,13 @@ async function runRiskAssessment() {
     var resultDiv = document.getElementById('risk-result');
     if (!productDesc) { resultDiv.innerHTML = '<p style="color:#d29922;">请输入产品描述</p>'; return; }
     if (patentIds.length === 0) { resultDiv.innerHTML = '<p style="color:#d29922;">请输入至少一个专利号</p>'; return; }
-    resultDiv.innerHTML = '<p style="color:#58a6ff;">⏳ 正在评估侵权风险...</p>';
+    resultDiv.innerHTML = DOMPurify.sanitize('<p style="color:#58a6ff;">⏳ 正在评估侵权风险...</p>');
     try {
         var resp = await fetch('/api/ai/risk', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({product_description: productDesc, patent_ids: patentIds}) });
         if (!resp.ok) throw new Error('服务器错误 (' + resp.status + ')');
         var data = await resp.json();
         if (data.status === 'ok') {
-            resultDiv.innerHTML = '<div style="padding:12px;background:#0d1117;border-radius:6px;color:#c9d1d9;line-height:1.8;white-space:pre-wrap;max-height:300px;overflow-y:auto;">' + escapeHtml(data.analysis).replace(/\n/g, '<br>') + '</div>';
+            resultDiv.innerHTML = DOMPurify.sanitize('<div style="padding:12px;background:#0d1117;border-radius:6px;color:#c9d1d9;line-height:1.8;white-space:pre-wrap;max-height:300px;overflow-y:auto;">' + escapeHtml(data.analysis).replace(/\n/g, '<br>') + '</div>');
         } else { resultDiv.innerHTML = '<p style="color:#f85149;">❌ ' + escapeHtml(data.error || '评估失败') + '</p>'; }
     } catch(e) { resultDiv.innerHTML = '<p style="color:#f85149;">❌ ' + escapeHtml(e.message) + '</p>'; }
 }
@@ -926,11 +926,11 @@ async function batchSummarize() {
     var resultDiv = document.getElementById('batch-result');
 
     if (ids.length === 0) {
-        resultDiv.innerHTML = '<p style="color:#d29922;">请先勾选要摘要的专利</p>';
+        resultDiv.innerHTML = DOMPurify.sanitize('<p style="color:#d29922;">请先勾选要摘要的专利</p>');
         return;
     }
 
-    resultDiv.innerHTML = '<p style="color:#58a6ff;">⏳ 正在批量生成摘要 (' + ids.length + '条)...</p>';
+    resultDiv.innerHTML = DOMPurify.sanitize('<p style="color:#58a6ff;">⏳ 正在批量生成摘要 (' + ids.length + '条)...</p>');
 
     try {
         var response = await fetch('/api/ai/batch-summarize', {
@@ -948,12 +948,12 @@ async function batchSummarize() {
                     '<p style="color:#c9d1d9;margin:8px 0 0;font-size:0.9em;line-height:1.6;">' +
                     escapeHtml(item.summary).replace(/\n/g, '<br>') + '</p></div>';
             }).join('');
-            resultDiv.innerHTML = '<h3 style="color:#58a6ff;margin-bottom:12px;">🤖 批量摘要结果</h3>' + cardsHtml;
+            resultDiv.innerHTML = DOMPurify.sanitize('<h3 style="color:#58a6ff;margin-bottom:12px;">🤖 批量摘要结果</h3>' + cardsHtml);
         } else {
-            resultDiv.innerHTML = '<p style="color:#f85149;">❌ ' + escapeHtml(data.error || data.message || '生成失败') + '</p>';
+            resultDiv.innerHTML = DOMPurify.sanitize('<p style="color:#f85149;">❌ ' + escapeHtml(data.error || data.message || '生成失败') + '</p>');
         }
     } catch(e) {
-        resultDiv.innerHTML = '<p style="color:#f85149;">❌ 请求失败: ' + escapeHtml(e.message) + '</p>';
+        resultDiv.innerHTML = DOMPurify.sanitize('<p style="color:#f85149;">❌ 请求失败: ' + escapeHtml(e.message) + '</p>');
     }
 }
 </script>

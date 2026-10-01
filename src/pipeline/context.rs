@@ -74,6 +74,9 @@ pub struct PriorArtCluster {
     pub patent_indices: Vec<usize>,
     pub representative_title: String,
     pub avg_similarity: f64,
+    /// MC1: RAG 切片引用——聚类时对 top-1 专利调 retrieve_chunks 取回的全文切片
+    #[serde(default)]
+    pub chunks: Vec<ReferenceChunk>,
 }
 
 /// 矛盾信号

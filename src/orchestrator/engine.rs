@@ -304,7 +304,7 @@ impl Orchestrator {
             }
             PipelineStep::ComputeSimilarity => steps::similarity::execute(ctx).await,
             PipelineStep::RankAndFilter => steps::rank::execute(ctx).await,
-            PipelineStep::PriorArtCluster => steps::prior_art_cluster::execute(ctx).await,
+            PipelineStep::PriorArtCluster => steps::prior_art_cluster::execute(ctx, &self.db).await,
             PipelineStep::DetectContradictions => steps::contradiction::execute(ctx).await,
             PipelineStep::ScoreNovelty => steps::scoring::execute(ctx).await,
             PipelineStep::AiDeepAnalysis => {
