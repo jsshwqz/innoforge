@@ -849,6 +849,16 @@
 - **预防 / Prevention**: ① 凡涉及非 ASCII 请求体的冒烟/取证，禁止在命令行内联，统一 `--data-binary @utf8文件`；② 写取证脚本前先 `node -e` 打印响应顶层键结构，不要凭直觉猜数组名；③ 取证产物（请求文件、响应 JSON、结论文本）留在仓库外 `D:\Temp\*-probe\`，仓内只提交结论。
 - **提交 / Commit**: MA6d 分支 `exec/ma6d-evidence`（PR #27）由规划会话代记（该棒白名单不含 `docs/errors.md`，未越界写入）
 
+### [2026-09-28] 沙箱内 git/gh 连 GitHub 走 `127.0.0.1` 代理必拒连：显式清代理即直连可达
+
+- **严重程度 / Severity**: MEDIUM（交付通道：推分支 / 开 PR 整段不可用，容易误判为「GitHub 不可达」而把动作推给用户手动做）
+- **涉及文件 / Files**: 无代码改动；`git push`、`gh pr create`
+- **现象 / Symptom**: MB0 收尾推送，`git push -u origin exec/mb0-embedder` 报 `Failed to connect to github.com port 443 via 127.0.0.1 after 2075 ms`（exit 128）；`gh pr create` 报 `proxyconnect tcp: dial tcp 127.0.0.1:7890: connectex: No connection could be made`（exit 1）。两个工具读到的代理指向不同端口（git 读 git config http.proxy，gh 读 `HTTP_PROXY/HTTPS_PROXY` 环境变量），但代理进程都没在跑。
+- **根因 / Root cause**: 沙箱环境注入了指向本机回环的代理配置（git config 与环境变量两路），而代理服务本身不在线；GitHub 直连（443）实际是可达的，拒连发生在代理这一跳，不是网络出口问题。
+- **解法 / Fix**: ① `git push`：`git -c http.proxy= -c https.proxy= push …`（空值覆盖配置，实测一次成功推上 `exec/mb0-embedder`）；② `gh`：`$env:HTTP_PROXY=''; $env:HTTPS_PROXY=''; $env:http_proxy=''; $env:https_proxy=''; $env:ALL_PROXY='';` 清空全部代理变量后再 `gh pr create`（实测成功开出 PR #28）。
+- **预防 / Prevention**: ① 遇 `via 127.0.0.1` / `proxyconnect` 字样先试清代理直连，不要直接下「网络不通」结论；② git 与 gh 的代理来源不同（config vs 环境变量），一个清了另一个未必清，两路都要处理；③ `GITHUB_TOKEN` 环境变量仍须 `Remove-Item Env:GITHUB_TOKEN` 去掉（见 2026-09-28 gh pr merge 403 条目），两件事叠加时先清 token 再清代理。
+- **提交 / Commit**: MB0 分支 `exec/mb0-embedder`（PR #28）文档回写附带
+
 ### [2026-09-28] 仓库外临时 crate 做红→绿取证触发 rustc `0xc0000409`；中文 locale 下 linker 输出 GBK 非 UTF-8 告警
 
 - **严重程度 / Severity**: LOW（取证工具链，不影响产品代码与门禁结论）
@@ -857,7 +867,7 @@
 - **根因 / Root cause**: ① 该机的 MSVC/链接器组合在仓外空目录建 crate 时 rustc 以栈保护码中止（与 D 盘已用 100%、余量仅 5.9GB 的环境压力同向），属**环境级崩溃**而非代码问题——把它当编译错误去改源码就是假服从；② 中文 Windows 下 `link.exe` 的 stdout 是 CP936，rustc 按 UTF-8 打印 linker 提示即告编码不匹配。
 - **解法 / Fix**: 红→绿取证**一律写在仓内**：`tests/mb0_red_proof_tmp.rs` 里用 `git show HEAD:src/vector/mod.rs` 的实现逐字复刻为测试模块（红：旧实现对中文 panic；绿：新实现零 panic 且 512 维），实测 2 passed。GBK 告警**忽略即可**——`cargo clippy --all-targets -- -D warnings` 本机实测 exit 0、零告警，未受该 warning 影响。
 - **预防 / Prevention**: ① 需要「证明旧代码坏」的取证，优先仓内 `tests/*.rs` 或 `#[cfg(test)]`，**禁止另建临时 crate、禁止手敲 rustc 命令行**（仓外 crate 崩了没有可诊断信号）；② 见到 linker Non-UTF-8 告警先复跑 `clippy -D warnings` 确认结论，**禁止**为消警告去加 `#[allow(linker_messages)]` 或改门禁；③ 门禁时间预算按本机实测排：`cargo test` 冷编 5m48s、`clippy --all-targets` 3m27s（后台跑 + 等完成通知，勿用截断命令求快，见同日 head 条目）；④ 仓外取证件统一放 `D:\Temp\*-probe\` 或 `D:\Temp\mb*-red-proof\`，仓内只留结论，取证完的文件去留由规格书 DoD 事先写明，避免执行会话擅自移动用户工作区文件。
-- **提交 / Commit**: MB0 棒 `exec/mb0-embedder`（工作区未提交），由规划会话代记
+- **提交 / Commit**: MB0 棒 `exec/mb0-embedder`（`f66912c` 代码 + `667064a` docs，PR #28），由规划会话代记
 
 ### [2026-09-28] 沙箱内 git/gh 连 GitHub 走 `127.0.0.1` 代理必拒连：显式清代理即直连可达
 

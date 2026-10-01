@@ -242,7 +242,594 @@ MB5（上下文治理）：M-B 收口棒
 9. `routes/ai.rs:2000 api_ai_check_amendments` 的 LLM 判定与 `fact_check.rs` 确定性判定两层并存是否合并（§1.6 k 判定为不同层，暂不并）。
 10. MB0 实测的既有浮点求和顺序抖动（HashMap 迭代序 ⇒ 1 ulp 级差异，测试以 1e-6 容差锁定）：属打分公式既有行为，本轮不改；若要确定性需换 BTreeMap 或固定排序，另议。
 
-## 5. 变更记录
+## 5. M-B 跨包结构化出参契约（先定协议，再写包，禁止各包自造）
+
+### 5.1 命名与形状纪律
+
+沿用仓内既有范式，不新造风格：snake_case 顶层键；**空结果整键省略**（先例 `routes/search.rs:161-163/:178-180`）；秒数**向上取整**（先例 `:221`）；数组元素一律带稳定枚举 `reason_code`，**前端只认键不猜文案**（先例 `templates/search.html:599-605` 的 `cooldownBySource` 映射）；既有出参的键集合**必须被单测锁定**（MB0 已立此范：`routes/search.rs` 断「7 键不增减」）。反面教材：`routes/ai.rs:1434-1437` 把核查结果拼成「## AI 事实核查（请人工复核）」文本 + 匿名 data 事件让前端按文本识别——MB1 要消灭这种做法，**新增一律发键，存量按包内声明改造**。
+
+### 5.2 键与生产者/消费者对照表
+
+| 键（顶层/嵌套路径） | 生产者 | 消费者 | 形状 | 出处包 | 备注 |
+|---|---|---|---|---|---|
+| `cooldowns[]` | 既有 MA6b | `templates/search.html` | `[{source, remaining_secs}]` | — | 现网先例，本表仅作风格基线 |
+| `enrichment` | MB2 | 分析页 / pipeline 内部 | `{requested, enriched, failed:[{patent_id, reason_code, remaining_secs}]}` | MB2④ | 空则整键省略 |
+| `full_text_available_count` | MB2 | 报告与 UI | `u32` | MB2④ | 与 MB3 的「降级为摘要档」判据共用 |
+| `patent_id`（`RankedMatch` 字段） | MB3② | MB3③ 反查、MB4① 出处 | `Option<String>`，`#[serde(default)]` | MB3 | 在线命中无库 id 时如实 `None`，禁止伪造 |
+| `rag`（若外露） | MB3③ | UI（MB4 之后才渲染） | `{chunks_used, distinct_patents, citations:[{ref_no, patent_id, chunk_id, source_type, claim_number}]}` | MB3 | 本包默认只进 prompt 与 `ctx`，**不加路由**（§2.1 `common.rs` 零破口） |
+| `evidence[]` 的 `source_url` / `claim_number` | MB4① | `templates/idea.html:436-470` | 既有字段转正（非新增） | MB4 | 悬空 id 视为缺陷不是特性 |
+| `decision` | MB4③ | 报告三档 + UI 决策段 | `{stance: "file"\|"abandon"\|"redirect", rationale:[{text, evidence_ids[]}]}` | MB4 | 存 `idea_versions.context_json`，不加列 |
+| `speculative`（或 `has_source: false`） | MB4② | UI 打【推测】标签 | bool/键存在性 | MB4 | **禁止**把「无源」写进 `ai_analysis` 字符串 |
+| `fact_check` | MB1③ | UI（呈现留 MB4，键先行） | `{score, warnings:[{category, severity, description}], disposition: "annotated"\|"rejected", reject_reason_code}` | MB1 | 取代文本标记做法 |
+| `OA_INPUT_TOO_LARGE` → `{code, field, actual_chars, max_chars}` | MB5③ | 前端可读错误 | 结构化错误体 | MB5 | 现 `ai/client.rs:314-322` 已含 `actual/max` 文本，本包结构化它 |
+
+### 5.3 `reason_code` 统一枚举（跨包共享，新增取值必须同 PR 回写本表）
+
+`cooldown`（同 Host 冷却中，零出网）｜`blocked`（上游反爬/非 200）｜`timeout`（20s 抓取超时）｜`not_found`（号不存在）｜`parse_empty`（抓到但剥标签为空）｜`no_fulltext`（MB3 降级摘要档）｜`db_error`（写库失败）｜`already_enriched`（幂等命中 `routes/patent.rs:238-240`）。
+
+规则：**`not_found` 与 `parse_empty` 与 `cooldown` 三者不得混用**——把「没拿到」写成「没有相关内容」正是 MB3⑥ 禁止的假象；`cooldown` 必须同时带 `remaining_secs`；任何包新增 reason_code 而未回写本表，审计打回。
+
+---
+
+## 6. 逐包用例清单（执行棒可直接抄的测试名与断言点）
+
+> 计数规则：lib/bin 双入口 ⇒ 每条 `src/` 内单测计 2 次；`rag/` 侧在 MB3 前只计 1 次（§3.1）。断言点写的是**必须为真**的判据，不是实现提示。测试一律离线（`:memory:` 或临时文件库），**禁止真出网、禁止真调 AI、禁止碰 `innoforge.db`**。
+
+### MB2（新增 ≥6，计 12）
+
+| 测试名 | 位置 | 断言点 |
+|---|---|---|
+| `enrich_url_lang_selection_unchanged_for_cn_and_other` | `routes/patent.rs` tests | 抽出 `build_enrich_url(pn, lang)` 后 CN→`zh`、非 CN→`en` 行为与 `:243-250` 逐字一致；URL 构造点全仓唯一（配合源码 grep 自检） |
+| `cooldown_hit_short_circuits_before_request` | 同上 | 预置 `breaker::record(...)` 后，富化前置判定返回「不进网络」+ `reason_code=cooldown` + `remaining_secs>0`。**这是「零出网」的离线可证形态，比数请求次数更硬** |
+| `cooldown_source_matches_search_path_source` | 同上 | free 抓取用的 source 值必须与 `routes/search.rs:667-670` 过滤所用的同一档一致（防旁路，§1.6 a） |
+| `enrich_outcome_keys_snapshot` | 同上 | `enrichment` 键集合与 §5.2 逐字相等；`failed[]` 元素键集合锁定；空结果时整键省略 |
+| `enriched_text_not_truncated_on_write` | 同上 | stub 一段超长中文 description（≥6000 字），入库后 `get_patent` 取回字符数不减；断言写入路径未调用 `truncate_for_ai`/`safe_truncate` |
+| `extract_section_chinese_long_html_no_panic` | 同上 | 手写剥标签实现 `:334-386` 在超长中文 + emoji + 中英混排输入下零 panic（MB2 新引入风险，与 MB0 同类） |
+
+### MB3（新增 ≥11，计 22；`pub mod rag;` 落地后含 `rag/` 侧全部双计，见 §3.1 跳变说明）
+
+| 测试名 | 位置 | 断言点 |
+|---|---|---|
+| `search_chunks_reads_all_selected_columns` | `db/rag.rs` tests | **红→绿锚**：旧实现 SELECT 只有 `id,content` 却 `row.get(2)` 取 embedding（§1.6 f）⇒ 修前 Err/panic，修后 embedding 可反序列化为 `Vec<f32>` |
+| `patent_chunk_struct_covers_v21_columns` | 同上 | `PatentChunk` 与 v21 表列对齐（`model_name`/`created_at` 补齐），往返写入读出等值 |
+| `insert_patent_writes_chunks_for_chinese_patent` | `db/patent.rs` tests | `:memory:` 入一条中文专利 ⇒ `count_chunks` 0→≥3，且 `source_type` 覆盖 abstract/claim/description 三档 |
+| `insert_patent_skips_chunks_for_textless_patent` | 同上 | 无文本专利零切片，且不报错 |
+| `insert_patent_survives_chunk_write_failure` | 同上 | 切片写失败只 `warn`，`insert_patent` 仍返回 `Ok(final_id)`（静默降级纪律，同 MB0） |
+| `chunks_are_reverse_lookupable_by_id` | `rag/mod.rs` 或 `db/rag.rs` | `{patent_id}-{index}` 形态的每个 id 都能 `get_chunk` 取回，且 `patent_id` 一致 |
+| `rag_reuses_single_cosine_impl` | `rag/retriever.rs` tests | `retrieve_chunks` 的相似度与 `vector::VectorIndex::cosine_similarity`（`vector/mod.rs:118`）逐点相等（禁第二套，§1.6 f 的 `db/rag.rs:149` 私有份须收敛） |
+| `citation_blocks_appear_in_deep_prompt` | `pipeline/steps/deep_reasoning.rs` tests | **主红→绿锚**：接线前 prompt 内 `### [引用 ` 计数为 0，接线后 ≥5，且 **distinct `patent_id` ≥5**（见 §7 MB3-3 假绿） |
+| `downgrade_labels_reason_not_absence` | 同上 | 无全文时上下文里必须带 §5.3 的 reason_code，且全文里 grep 不到「没有相关内容」这类把未取到说成不存在的表述 |
+| `snippet_truncation_uses_truncate_for_ai` | 同上 + `analysis.rs` | 两处超限（`analysis.rs:49-50`/`deep_reasoning.rs:137-138`）改后：超限片段带 `truncate_for_ai` 的「数据完整性提示」尾注，未超限片段逐字不变 |
+| `chunk_text_all_char_starts_no_panic` | `rag/chunker.rs` tests | `chunk_text` 仍是字节切法 + 边界回退：对纯中文串做「全起点 × 全长度」切片循环零 panic，且切片边界只落在字符边界 |
+
+### MB4（新增 ≥6 + 前端四项）
+
+| 测试名 | 位置 | 断言点 |
+|---|---|---|
+| `evidence_ids_resolve_to_real_rows` | `db/evidence.rs` 或 `routes/idea.rs` tests | 每条 `TechnicalFeature.evidence_ids` 与 `decision.rationale[].evidence_ids` 都能在 `evidence_chain` 命中行；命中行再能反查 `patent_chunks`/`patents`（悬空即失败） |
+| `decision_struct_roundtrips_context_json` | `routes/idea.rs` tests | 写 `idea_versions.context_json` → `:1136-1138` 反序列化后 `stance` 与 ≥3 条理由完整无损 |
+| `executive_report_renders_decision_not_hardcoded` | 同上 | `routes/idea.rs:1176-1180` 的固定 3 条建议不再出现；决策段来自 `decision` 字段（§3.4 决策门 2 裁定后生效） |
+| `claim_without_evidence_is_flagged_structurally` | 同上 | 无源结论出参有 `speculative`/`has_source:false` 键；**断言 `ai_analysis` 字符串本身没被插入标注标记**（禁往纯字符串贴补丁） |
+| `evidence_api_key_set_locked` | 同上 | `api_idea_evidence`（`:400`）出参键集合快照锁定，新增键须显式登记 |
+| `i18n_keys_parity_zh_en` | Node 侧（沿 `check_html_functions.mjs` 风格，禁改该扫描器规则） | `static/i18n.js` zh 表与 en 表键集合相等；本包新增的 `idea.evidence*`/`idea.decision*` 两侧都有 |
+
+前端四项（非 cargo）：`cargo fmt`+`clippy`+`test`、`node node_modules/.bin/eslint static/i18n.js` 无 error、`node check_html_functions.mjs` 退出 0（**只加不减即无需 `--refresh`**）、`node e2e_test.mjs` 全过现有条数。
+
+### MB1（新增 ≥9 条测试；诱导编造用例按 OA/创意双路径参数化，实例总数 ≥16）
+
+| 测试名 | 位置 | 断言点 |
+|---|---|---|
+| `induce_fabricated_law_article_oa_flagged` / `..._idea_flagged` | `ai/fact_check.rs` tests | 编造法条在两条路径各 ≥1 条被标记或拒绝；`category` 命中期望值 |
+| `induce_fabricated_paragraph_ref_...` | 同上 | 编造段落/页码；**泛化后创意侧走「引用存在性」而非 OA 段落正则** |
+| `induce_fabricated_citation_url_...` | 同上 | 编造 URL：对 `ctx.top_matches` 的标题/URL 逐条验存在，命中不了即警告 |
+| `induce_unsourced_number_...` | 同上 | 无来源数字（校验③ `:405/:409` 通用，双路径同一实现） |
+| `idea_pipeline_invokes_analysis_check` | `pipeline/steps/finalize.rs` 或 `orchestrator` tests | **红→绿锚**：接线前同一输入下核查函数零调用（或 `fact_check` 字段恒默认），接线后必被调用 |
+| `fatal_score_aborts_with_readable_reason` | 同上 | 扣分 ≥35 走 `StepStatus::Error`/`Abort{reason}`（`engine.rs:186-205`/`:72-76`），`disposition="rejected"`；可读原因里 grep 不到 Rust panic/`Expect` 文本（AGENTS.md 2.7） |
+| `oa_and_idea_share_single_verdict` | 同上 | 判定入口唯一：泛化后的 `check_analysis` 被 OA 薄壳与创意侧共同调用；grep 断言 `routes/idea.rs`/`pipeline/` 内无本地新写的校验逻辑 |
+| `oa_stream_emits_structured_factcheck_keys` | `routes/ai.rs` tests | 流式尾包改为发 `fact_check` 键；现有 15 条 `fact_check.rs:621-814` 单测**零删改**且仍全绿 |
+| `non_applicable_not_counted_as_pass` | `ai/fact_check.rs` tests | 创意场景缺「D1/对比文件」句式时，校验① 返回 `not_applicable` 而**不是**「0 警告 = 通过」（§7 MB1-1 假绿） |
+
+### MB5（新增 ≥7）
+
+| 测试名 | 位置 | 断言点 |
+|---|---|---|
+| `compress_history_byte_slice_no_panic_on_chinese` | `routes/ai.rs` tests | **红→绿锚**：`ai.rs:1698-1699` 旧写法对超长中文讨论历史 panic，改后零 panic；全起点循环用例形状沿 MB0 |
+| `first_turn_constraint_survives_compression` | 同上 | 40 条消息 + 估算 >8000 token（必须真触发压缩，见下条）后，发给 AI 的 messages 里 system 层仍含首轮约束/专利号/日期/claims 的结构化字段 |
+| `compression_actually_triggered_in_test` | 同上 | 同一用例断言压缩**确实发生**（mock client 调用计数 ≥1 或摘要事件存在）；否则上一条是假绿 |
+| `oa_entries_reject_oversized_not_truncate` | `src/ai/tests.rs`（沿 `:95` 范式） | §1.5③ 缺口清单逐入口参数化：超限返回 `OA_INPUT_TOO_LARGE`，且 body 不再被 `safe_truncate` 静默裁剪 |
+| `oa_discussion_import_capacity_guarded` | `routes/ai.rs` tests | `api_oa_discussion_import`（`:1931`）超限被拒（现零校验） |
+| `discussion_history_not_double_truncated` | 同上 | capacity 通过后不再二次截（`:1661`/`:1670-1684`）：断言送入内容字符数 = 校验通过时的字符数 |
+| `idea_and_ai_summary_policy_consistent` | `routes/idea.rs` tests | 两套摘要（`idea.rs:500-501` vs `ai.rs:202-205`）在「首轮约束不丢」上同结论；若故意保留差异，测试须断言差异被文档化（§2 MB5②） |
+
+---
+
+## 7. 反假绿清单（每包最可能的「看起来过了」，审计逐条识破）
+
+**MB0（已合并前须防）**：只把 tokenize 改安全却没删两份拷贝 → `grep -rn "cleaned\[i\.\.i" src/` 必须为空；用 `#[allow(dead_code)]` 保留旧实现冒充「收敛」；用全表回填冒充「写入链接通」（MB0 明令禁止）；给分数加归一化让相似度「看起来更准」（§0 决策禁止）。
+
+**MB2**：
+1. **先抓后判**：代码调了 `remaining()` 但放在出网之后，冷却形同虚设——审计看调用顺序，要求「判据在 `reqwest` 发起之前」且 `cooldown_hit_short_circuits_before_request` 用的是纯判定函数而非整链 handler。
+2. 用**另一个 source 值**查冷却表（等价于没查，就是 §1.1 第 27 行的旁路本体）——`cooldown_source_matches_search_path_source` 专治此条。
+3. 把「未拿到全文的原因」写成中文字符串塞进 message，前端 `includes('冷却')` 猜——出参键快照断言。
+4. 幂等判据 `>50` 字符被放宽成「只要有内容就跳过」，导致半截 HTML 冒充全文——要求 `enriched_text_not_truncated_on_write` 与 `parse_empty` reason 同时存在。
+
+**MB3**：
+1. `retrieve_chunks` 错误时返回 `Ok(vec![])`（现状 `retriever.rs:20`）被当作「降级成功」——要求降级带 reason_code，不得静默变空。
+2. 切片只写 `abstract` 一档（`source_type CHECK` 允许三档）就宣称接线——`insert_patent_writes_chunks_for_chinese_patent` 断三档齐全。
+3. **≥5 篇引用被实现成同一片专利的 5 个 chunk**——`citation_blocks_appear_in_deep_prompt` 必须断 **distinct `patent_id` ≥5**，这条是 MB3 最容易蒙混的验收点。
+4. 测试里手搓 `PatentChunk` 塞进内存库，绕过 `insert_patent` 挂点，冒充「写入链接通」——要求同时有「入库即自动切片」路径的用例。
+5. 只改 `deep_reasoning.rs` 不改 `analysis.rs`，拿死码 `deep_analysis_simple` 说「两处都改过了」——grep 两处 `chars().take` 均消失。
+
+**MB4**：
+1. `evidence.source_id` 指向不存在行（悬空引用看起来很美）——`evidence_ids_resolve_to_real_rows` 逐级反查到 `patents`。
+2. 【推测】写进 `ai_analysis` Markdown（省事但违反 MB4②）——断言字符串未被插入标记、结构化键存在。
+3. 后端键齐了但 UI 一个像素没变（「接口已支持」式交付）——要求 DOM 渲染取证，且 §2 MB4⑤ 授权范围就是这个目的。
+4. i18n 只加 zh 键（en 走 fallback 也能跑）——键集合相等断言。
+5. `functions-manifest.json` 被顺手 `--refresh` 掩盖函数删除——本包只加不减，出现基线变更即视为红旗，要求说明。
+
+**MB1**：
+1. **`not_applicable` 当通过**：泛化校验① 后创意侧因缺「D1」句式恒 0 命中，报告「无幻觉」——`non_applicable_not_counted_as_pass` 专治。
+2. 致命档只标不改：`is_critical` 若为假，失败会被 `engine.rs:203-205` 吞成 `Skipped` 继续跑，等于没拒——要求断言状态机真的进 `Error`/`Abort`。
+3. 在 idea 侧另写一份校验函数冒充「接入」——`oa_and_idea_share_single_verdict`。
+4. 删改现有 15 条 OA 单测来让改造通过——用例数对账 + 逐条名比对。
+
+**MB5**：
+1. **压缩没触发就断「约束仍在」**：消息写得太短，`:203` 双条件不满足，`compress_history` 根本没跑，测试自然全绿——必须同测断言压缩真发生。
+2. 用真 AI 调用跑压缩（花钱且不确定）——一律 mock；本包禁止真实计费。
+3. capacity 报错修了，但后续 `:1670-1684`/`:1698-1699` 仍二次截断——`discussion_history_not_double_truncated`。
+4. 只改 `ai.rs` 不碰 `idea.rs`，留两套行为——两包同断言。
+5. 验收口径被偷偷改回「首轮原文仍在 history」（不可能达成，会被判为假实现）——本包口径是「结构化字段仍进上下文」。
+
+**通用（审计会话自查）**：门禁统计禁止 `| head`/小值 `-A`（已记 `docs/errors.md` 2026-09-28，退出码来自 `head` 不是 cargo）；`#[ignore]` 数量必须与基线一致（现 lib 1 / bin 1 / doc 1）；「测试数涨了但没写测试」按 §3.1 归因，不得为此删测试；行号断言以符号名为准（§3.2 行号漂移）。
+
+---
+
+## 8. 审计复跑命令卡（规划会话只读核验用，执行棒无需照抄但结果必须可复现）
+
+```bash
+df -h /d | tail -1                       # 先确认余量 ≥5GB，否则先清 target/debug/incremental（禁 cargo clean）
+cargo fmt --check                                  > D:/Temp/<包>-fmt.txt     2>&1; echo EXIT=$?
+cargo clippy --all-targets -- -D warnings           > D:/Temp/<包>-clippy.txt 2>&1; echo EXIT=$?
+cargo test                                          > D:/Temp/<包>-test.txt   2>&1; echo EXIT=$?
+grep "^test result" D:/Temp/<包>-test.txt          # 全量逐行求和，禁止 head；同时记录 ignored 数
+git diff main..<branch> -- src/common.rs Cargo.toml Cargo.lock src/db/migrations.rs src/lib.rs  # 红线自检
+git diff main..<branch> -- src/main.rs             # 只允许模块声明行（§2.1）
+git diff main..<branch> -- templates/ static/ e2e_test.mjs check_html_functions.mjs docs/functions-manifest.json  # 非 MB4 必须为空
+```
+
+MB4 额外：`node node_modules/.bin/eslint static/i18n.js`、`node check_html_functions.mjs`、`node e2e_test.mjs`（现有条数全过）。时间预算：本机实测冷编 `cargo test` **5m48s**、`clippy --all-targets` **3m27s**，clippy 之后 test 需重链 DLL（见 `docs/errors.md`）⇒ 顺序建议 fmt → clippy → test 全后台跑，勿用截断命令求快。**审计结论必须能贴出 `test result` 行集合的原文**，否则不写「N passed」。
+
+---
+
+## 9. M-B 期间的对外口径边界（写进注释、UI 文案、CHANGELOG 的承诺上限）
+
+| 能力 | 可以承诺 | 禁止承诺 | 依据 |
+|---|---|---|---|
+| 向量/语义检索 | 本地字符 n-gram TF 相似度补充档：可用、不 panic、全仓单一实现、0 行时如实关闭 | 「语义检索」「相似专利识别」「向量召回质量」 | §0 决策；`vector/mod.rs` 函数头注释（丢 term→维度映射 ⇒ 相似度不构成语义相关性） |
+| 全文供给（MB2 后） | 「分析前尽力从公开源补全文；补不到会告诉你为什么」 | 「所有专利都有全文」「支持 EPO/SerpAPI 全文」（付费链未冒烟） | §1.1、§0 决策 B |
+| RAG（MB3 后） | 报告里的引用可逐条反查到库内切片行 | 「引用即正确」「模型不会编造」；引用相似度数值不得当语义分数展示 | §5.3、`assembler.rs:40/:52` 引用编号形状 |
+| 出处与决策段（MB4 后） | 事实性结论有源、无源标【推测】、建议可反查编号 | 「律师意见」「授权/无效结论」——项目面向研发用户不是代理人 | AGENTS.md §一 |
+| 幻觉核查（MB1 后） | 确定性判定（法条/段落/无来源数据/术语）+ 致命档处置 | 「已消除幻觉」「零误报」 | `fact_check.rs:105-116` 是启发式扣分非证明 |
+| 上下文治理（MB5 后） | 关键事实结构化直传、超限报错不静默截 | 「任意长度 OA 都能处理」 | `client.rs:307-312` 上限是硬阈值 |
+
+补充纪律：① 新增/修改面向用户文案必须 `static/i18n.js` zh+en 双键（AGENTS.md 2.5），且用词不得超出上表右列；② CHANGELOG 只写用户可感知项，M-B 内部收敛（拷贝删除、挂点接通）归「改进」且措辞按上表；③ 代码注释里凡写了「本轮有意不修」的局限，**禁止**在 UI/文档用乐观措辞覆盖它——口径冲突时以代码注释与本表为准，并回写 §1.6 校正。
+
+---
+
+## 10. 派单卡（执行棒直接复制：分支 / 白名单 / DoD 勾选 / PR body 模板）
+
+### 10.1 统一 PR body 六段模板（缺任一段 = 审计不打回也先补齐再看）
+
+```markdown
+## 1 包号与范围
+M-B / MB<n> · 一句话说明本包改了什么、为什么改（对照规格书 §2 对应包）
+
+## 2 红→绿取证原文
+命令 + 输出原文粘贴（禁止只写"已验证"）。红侧必须是旧实现失败的真实报错文本，
+绿侧必须是新实现通过的 `test result` 行原文。
+
+## 3 门禁全量统计
+fmt / clippy --all-targets -D warnings / cargo test 三条命令的 exit code，
++ `grep "^test result"` 的**全部行**（逐二进制），+ ignored 计数。
+对账公式：基线 <上一包合并后数字> + 2N ± 已归因跳变 = <本次实测>
+
+## 4 红线自检
+逐文件 `git diff main..HEAD --stat -- <红线文件>` 输出为空的证据；
+若命中 §2.1 预授权破口，贴出 diff 原文并标注"授权项：§2.1 第 n 行"。
+
+## 5 偏离登记
+本包与规格书写不一致之处（含反驳，见 §13）。无偏离写"无"。
+
+## 6 验收逐条对照
+引用规格书 §2 MB<n> 验收条目 + §6 用例名，逐条标 ✅/⚠️/❌ 与证据位置。
+```
+
+### 10.2 各包派单卡
+
+**MB0 收口卡（特殊：代码已在 `exec/mb0-embedder` 工作区，未提交）** ✅ **已执行完毕（2026-10-01 回写）**：收口棒已按本卡提交 `f66912c`（代码 + 12 测试）与 `667064a`（errors 代记），开出 **PR #28**，远端 CI `test` / `lint` / `e2e` 三项 SUCCESS、`mergeable=MERGEABLE`，取证件 `tests/mb0_red_proof_tmp.rs` 未入库。本卡转为留档，余下动作 = 规划会话按 §16 九步审计后合并。
+
+| 项 | 内容 |
+|---|---|
+| 可提交白名单 | `src/vector/mod.rs`、`src/rag/chunker.rs`、`src/routes/search.rs`、`src/db/patent.rs`、`src/main.rs`（**仅 `pub mod vector;` 声明行**）、`docs/plan/2026-09-28-mb-construction-spec.md`、`docs/plans/STATUS.md`、`docs/feedback.md`、`docs/errors.md`、`CHANGELOG.md` |
+| 取证件处置 | `tests/mb0_red_proof_tmp.rs` **不入提交**（包约定：临时文件）。但删除前必须把它 `cargo test --test mb0_red_proof_tmp` 的**两条 test 结果行原文**贴进 PR body 第 2 段；删除动作用 `git status` 证明工作区干净 |
+| 禁止 | 全表回填；给向量分数加归一化/伪 IDF；`#[allow(dead_code)]` 保留旧拷贝；为消 GBK 链接器告警加 `#[allow]` |
+| DoD | §2 MB0 验收 5 条 + §7 MB0 段 4 条假绿自查 |
+| 门禁预算 | fmt 秒级 / clippy `--all-targets` **3m27s** / test **5m48s**（本机冷编实测，`-j 2` 更稳） |
+
+**MB2 卡**｜分支 `exec/mb2-fulltext-chain`｜白名单：`src/routes/patent.rs`、`src/search/breaker.rs`（**只读调用，禁改表结构与时长常量**）、`src/routes/search.rs`（仅为 source 判据对齐所需的最小改动，须在 PR body 声明）、新增测试同文件内｜禁改：`Cargo.*`、`src/db/migrations.rs`、`src/common.rs`、`templates/`、`static/`、`src/main.rs`｜关键决策点（须在 PR body 二选一写明）：富化核心放 `routes/patent.rs` 内还是抽 `src/search/enrich.rs` 新模块（抽新模块须同步 `lib.rs`/`main.rs` 模块清单 ⇒ **会破 §2.1 授权范围，默认不抽**）｜DoD：§2 MB2 五条验收 + §6 六条用例全绿。
+
+**MB3 卡**｜分支 `exec/mb3-rag-wiring`｜白名单：`src/db/rag.rs`（前置缺陷修复）、`src/rag/*.rs`、`src/db/patent.rs`（切片挂点）、`src/pipeline/context.rs`（`patent_id` + `rag_chunks` 两个 `#[serde(default)]` 字段）、`src/pipeline/steps/{scoring,deep_reasoning,analysis}.rs`、`src/main.rs`（**仅 `pub mod rag;`**）｜禁改：`src/common.rs`（**禁止新增 rag 路由**）、migrations、`templates/`、`static/`、`Cargo.*`｜三个必须显式裁定的点（写进 PR body）：切片取数挂点选 `scoring.rs:13` 还是 `engine.rs:310` 之前（**只能选一个**）；`retrieve_chunks_by_keyword` 实现还是删除；`build_citations` 与 `build_fallback_citations` 留哪个｜门禁特殊：基线跳变须按 §3.1 逐条归因｜DoD：§2 MB3 五条验收 + §6 十一条用例。
+
+**MB4 卡**｜分支 `exec/mb4-provenance`｜白名单（**唯一放开前端的包**）：`src/pipeline/context.rs`、`src/pipeline/steps/finalize.rs`、`src/routes/idea.rs`、`src/db/evidence.rs`、`templates/idea.html`（限 `loadEvidence` 函数体 + 报告面板渲染）、`static/i18n.js`（zh/en 双表加键）｜禁改：`e2e_test.mjs`、`check_html_functions.mjs`、`docs/functions-manifest.json`（新增函数引用扫描只 INFO，不需 `--refresh`；若出现需要 `--refresh` 的情形 = 你动了函数增删，须专门说明）、migrations（决策段走 `idea_versions.context_json`，**不加列**）｜硬纪律：新 DOM 一律 `createElement + textContent`，富文本走 `i18n.js` 全局 DOMPurify 保护；截断只能用于显示，出处/AI 输入数据保留全文（AGENTS.md 2.5）｜门禁额外四项：ESLint、HTML 扫描、`node e2e_test.mjs` 现有条数、fmt/clippy/test｜前置：**§3.4 决策门 1、2 已由用户裁定**，未裁定不得开工。
+
+**MB1 卡**｜分支 `exec/mb1-factcheck-breadth`｜白名单：`src/ai/fact_check.rs`、`src/routes/ai.rs`（流式出参改结构化键）、`src/pipeline/steps/finalize.rs` 或 `src/orchestrator/engine.rs`（核查挂点二选一）、`src/routes/idea.rs`（Err/进度事件透传）｜禁改：templates/static（呈现留 MB4）、migrations、`Cargo.*`｜硬约束：不新增中止机制（复用 `engine.rs:186-205`/`:72-76`）；OA 与非 OA 共用同一判定；现有 15 条单测零删改；`:14` 过时注释顺手更正｜前置：**§3.4 决策门 3 已裁定**｜DoD：§6 十条用例（≥16 条新测试）。
+
+**MB5 卡**｜分支 `exec/mb5-context`｜白名单：`src/routes/ai.rs`（`compress_history`、讨论历史截断、OA 入口 capacity）、`src/routes/idea.rs`（第二套摘要策略）、`src/ai/patent.rs`（`safe_truncate` → `oa_capacity_error`）、`src/ai/client.rs`（capacity 错误结构化，**不动上限常量值**）、`src/pipeline/steps/analysis.rs`（MB3 遗留截断余量）｜禁改：`Cargo.*`、migrations、`e2e_test.mjs`（除非 §3.4 决策门 4 放行）、templates/static（错误文案只发键）｜两条不可让步项：`ai.rs:1698-1699` 中文 panic 必须有红→绿锚；20 轮用例必须**同测断言压缩真触发**｜一律 mock，禁止真调 AI 计费。
+
+---
+
+## 11. 用户视角走查剧本（M-B 收口必跑；对应 AGENTS.md Step 5「改了什么就测什么」）
+
+> 环境准备（硬条件）：**无 `SERPAPI_KEY`、无 `EPO_KEY/EPO_SECRET`**；数据库用临时空库实例（`D:\Temp\mb-probe\`，禁碰 `D:\test\patent-hub-backup\innoforge.db`）；端口用 `INNOFORGE_PORT=3921` 避让；浏览器走查产物（截图/结论）留仓外，仓内只提交结论行。
+
+| # | 步骤 | 必须看到 | 看不到时对应哪个包的缺陷 |
+|---|---|---|---|
+| 1 | 首页 → 检索（本地库 FTS + `/api/search/vector`） | 中文关键词能出结果、页面不报错；`vector_count` 与实际入库量一致（0 行时如实 0） | MB0（若向量档恒 0 或 panic） |
+| 2 | 上传一份中文 PDF 专利 → 详情页「加载全文」 | 5 个标签页全文完整、**末尾不被截断** | 非 M-B 范围（`upload.rs` 不回写 `patents`，见 §1.1）——登记不假装通过 |
+| 3 | 详情页点「免费富化」（`enrich-free`） | `description/claims` 由空变非空，**或**明确显示「未拿到的原因」徽标（走 `reason_code`） | MB2 |
+| 4 | 冷却期内再点一次富化 | **零出网**、UI 显示剩余冷却秒数、不白烧配额 | MB2（旁路就是 §1.1 第 27 行那个洞） |
+| 5 | idea 页创建创意 → 跑深度分析（长文本，≥150 字创意描述） | 报告里出现 ≥5 条专利全文切片引用，每条可点开反查 | MB3 |
+| 6 | 同份报告逐条看结论 | 事实性结论带（专利号 + 段/权号）；无源的显示【推测】标签而非编造来源；`source_url`/`claim_number` 在 UI 可见 | MB4 |
+| 7 | 报告末尾 | 决策建议段：申请/放弃/转向 + ≥3 条理由，理由编号能反查回上文证据 | MB4 |
+| 8 | 故意在创意描述里塞诱导句（如「参见专利法实施细则第 84 条第 2 款，见说明书第 999 段」） | 核查标记或拒绝，且拒绝给的是**可读原因**不是 Rust panic 文本 | MB1 |
+| 9 | OA 答复页粘贴超长中文 OA（超过 `client.rs:307-312` 上限） | 明确报错「超长 + 实际/上限字符数」，**不是**静默吃掉后半段 | MB5 |
+| 10 | OA 讨论连打 20 轮（每轮正文写长到能触发压缩） | 首轮设定的专利号/日期约束在第 20 轮回答里仍生效 | MB5 |
+| 11 | 技术调研导出报告 | 导出全文完整（不得为省 token 截数据） | MB3/MB4 的截断改造若误伤数据用途即在此暴露 |
+| 12 | 切换英文界面重复步骤 5-7 | 新增文案中英双语，无裸中文/无 `undefined` 键 | MB4（i18n 双表纪律） |
+
+**关键原则**：走查是「收口判据」第 4 条（milestones.md M-B），不是可选加分项；任何一步失败必须在 STATUS 记为未收口，禁止用「单测全绿」替代。
+
+---
+
+## 12. 收口回写责任表（防止上一棒的账漏到下一棒）
+
+| 时机 | 谁写 | 写什么 |
+|---|---|---|
+| 施工完成 | 执行棒 | PR（六段 body，§10.1）+ 代码 + 测试；`CHANGELOG.md` 的 `[Unreleased]` 条目（用户可见项才写） |
+| 审计与合并 | 规划会话 | 独立复跑门禁（§8 命令卡）+ 逐文件红线 diff + §6 用例名与 §2 验收逐条对照；核验通过后 `env -u GITHUB_TOKEN gh pr merge`（merge commit，用户 2026-09-20 授权） |
+| 合并后 | 规划会话 | 规格书对应包补「落地记录」+ §1.6 校正条目关闭；`docs/plans/STATUS.md` 新条；`docs/plan/task-breakdown.md` 行标 ✅ + commit hash；`milestones.md` M-B 判据打勾；五端推送对齐 |
+| 踩坑 | 命中谁谁写 | `docs/errors.md`（工具/构建/CI）；执行棒白名单若不含该文件，由规划会话代记（既有惯例） |
+| 反馈 | 规划会话 | `docs/feedback.md`（用户纠正/认可/边界澄清，含 why） |
+
+> 历史教训（MA6d 曾一次性补账 M-A 全部 CHANGELOG 条目）：**每包合并当天就把用户可见项写进 `[Unreleased]`**，不留到里程碑收口时回忆式补写。草案见 §14。
+
+---
+
+## 13. 反驳与仲裁流程（执行棒发现规格书与现实冲突时怎么走，禁止假服从）
+
+1. **不许假服从**。规格书前言已写死：现实与本文冲突时以证据为准并反驳本文。遇到「按规格书写了编译不过 / 判据不可能成立 / 授权范围不够」三类情况，**停下来登记偏离**，不要静默改方案，也不要硬凑一个能过的测试。
+2. **证据门槛（三选一即可采信）**：① 编译器/测试的真实错误原文（含文件:行）；② grep 结果证明规格书点名的符号/行号不存在或已移位；③ 一条红→绿反向用例（照规格书写法跑红、按替代方案跑绿）。截图、口头描述、「我觉得」不算。
+3. **登记位置**：PR body 第 5 段「偏离登记」，写清「规格书 §x 说 A，实测是 B，我按 B 做了 C，影响是 D」。规划会话在合并前把该偏离回写进 §1.6 校正表或 §2.1 授权表，**再合并**——避免同一坑被下一棒再踩。
+4. **升级给用户的判定线**（只有这三类才打断用户，其余规划会话自行裁定）：改变包的验收口径｜改变红线范围（新增破线文件）｜需要新依赖/schema/对外 API 变更。其余按 §10.2 卡内「二选一/三选一」自行择一并在 PR body 声明。
+5. **不可协商项**（任何反驳都不接受）：新 crate 依赖、schema 变更、全表回填、`unwrap/expect` 进生产路径、伪造 reason_code 或相似度分数、删改既有测试来让门禁变绿、动 `check_html_functions.mjs` 规则或静默删基线。
+
+---
+
+## 14. CHANGELOG `[Unreleased]` 草案（合并当天由执行棒搬运，措辞受 §9 口径约束）
+
+> 版本动作：M-B 收口时按 **MINOR** 递增（新功能、非破坏性），`Cargo.toml` 的 version 同步。中文在前、英文随后（AGENTS.md 3.1）。以下措辞已刻意避开「语义检索」「已消除幻觉」等超出实现的表述。
+
+```markdown
+## [未发布] / [Unreleased]
+
+### 新增 / Added
+- 深度分析现在会自动为最相关的若干篇专利抓取公开全文（无需付费 API Key），并在报告中引用专利原文片段，每条引用可反查回库内该专利的切片原文（M-B / MB2、MB3）
+- 创意分析报告新增「决策建议段」：明确给出申请 / 放弃 / 转向，并附不少于 3 条可溯源理由（M-B / MB4）
+- 分析报告的事实性结论强制附来源（专利号 + 段落/权利要求号），无来源的结论标注为推测（M-B / MB4）
+- AI 事实核查从 OA 答复扩展到创意分析：编造法条、页码、引用或无来源数据会被标注，达到致命档时中止并给出可读原因（M-B / MB1）
+- 新入库专利自动生成检索向量与文本切片（M-B / MB0、MB3）
+
+### 修复 / Fixed
+- 修复中文专利文本在向量检索时分词越界导致的服务崩溃（M-B / MB0）
+- 修复超长中文 OA 讨论历史在裁剪时导致的服务崩溃（M-B / MB5）
+
+### 改进 / Improved
+- OA 输入超长时改为明确报错并显示实际/上限字符数，不再静默丢弃超出部分（M-B / MB5）
+- 长对话中的关键事实（专利号、日期、权利要求）改走结构化传递，不再被历史摘要吞掉（M-B / MB5）
+- 全文抓取与检索共用同一套反爬冷却判断，被限流时不再重复出网（M-B / MB2）
+
+### 已知限制 / Known limitations
+- 本地向量检索为字符 n-gram 相似度补充档，不构成语义理解能力；0 行向量时该档自动关闭并如实上报（M-B §9）
+- 历史存量专利未做向量与切片批量回填，仅新入库与新富化的记录生效（M-B §4.6）
+```
+
+---
+
+## 15. M-B 施工看板（唯一进度事实源，状态变化当天更新）
+
+> 规则：`STATUS.md` 记事件流水，本表记状态快照；两者冲突时以本表为准并查因。状态枚举只有六个：`未开工` / `施工中` / `待审计` / `待裁定` / `打回重做` / `已合并`，**禁止**出现枚举外的词（「基本完成」「快了」「差不多」一律不算状态）。本表由规划会话维护，执行棒在 PR body 里自报的状态不直接改表，由审计落账。更新于 2026-10-01。
+
+| 包 | 分支 | 状态 | PR / merge | 门禁实测 | 基线对账 | 决策门 | 备注 |
+|---|---|---|---|---|---|---|---|
+| MB0 | `exec/mb0-embedder` | **待审计**（收口棒已提交 `f66912c` 代码 + `667064a` docs，取证件未入库） | **PR #28** OPEN，`mergeable=MERGEABLE` | 远端 CI `test`/`lint`/`e2e` 三项 SUCCESS；规划会话代跑 fmt 0 / clippy 0 / test 746（含仓外取证件 2 条） | 744 = 721 + 2×12 − 1 | 无 | 下一步 = §16 九步审计后合并；合并前 OA-U 不开工（§0.1） |
+| MB2 | 未建 | 未开工 | — | — | 公式 744 + 2N | 无 | 下一棒；串行纪律 §3.2 |
+| MB3 | 未建 | 未开工 | — | — | 744 + 2N + 1（`pub mod rag;` 跳变，§3.1） | 无 | 依赖 MB2 合并 |
+| MB4 | 未建 | 未开工 | — | — | 上一包合并值 + 2N | 门1、门2 | 门未裁不开工 |
+| MB1 | 未建 | 未开工 | — | — | 上一包合并值 + 2N | 门3 | 可插棒，任一空档 |
+| MB5 | 未建 | 未开工 | — | — | 上一包合并值 + 2N | 门4 | 收口棒 |
+| MB0b | 未建 | 未开工（**未立项**，等门5） | — | — | — | 门5 | 评估时点 = MB3 合并后首个规划会话 |
+
+## 16. 审计作业流程（规划会话收到执行棒 PR 后的固定 9 步，禁止跳步、禁止跳过失败步骤继续）
+
+每步带通过判据；任一步不过即停，直接走第 9 步出结论，**禁止**「先看完再综合判断」——综合判断是把缺陷摊薄成措辞的来路。
+
+1. **环境预检**：`df -h /d` 余量 ≥ 6GB；`git status` 无第二棒的工作区改动；确认无并行构建（§3.2）。不过 ⇒ 先清 `target/debug/incremental` 与 `deps/*.pdb`，仍不过 ⇒ 挂起审计。
+2. **改动面白名单审**：`git diff main...HEAD --stat` 逐文件与 §10.2 白名单比对，多一个少一个都不过；白名单内文件还要看 diff 是否越出该卡声明的能力面（如 MB0 的 `main.rs` 只许 +`pub mod vector;` 声明行）。
+3. **PR body 六段齐**（§10.1）：缺段 ⇒ 有条件通过，补齐前不进第 4 步之后的重活。
+4. **红→绿锚复核**：red 侧必须是旧实现可复现的真实报错原文（必要时在临时 worktree 检出旧代码单独验证，**禁止**动执行棒工作区）；green 侧必须是新实现的 `test result` 行原文。仓外 standalone crate 取证一律不认（§3.2 rustc `0xc0000409`）。
+5. **门禁独立复跑**（§8 命令卡）：全量落盘统计，`test result` 行逐二进制抄录，禁止 `| head`。本机预算：fmt <1min、clippy ~3.5min、test ~6min（冷编上限 8min，超时先查并行污染）。
+6. **计数对账**（§3.1 公式）：对不上且无 §3.1 预登记跳变归因 ⇒ 打回，**不得**「数字差不多就过」。
+7. **反假绿抽查**（§7）：该包「硬判据」级条目逐条验断言点写在测试里（如 MB3 的 distinct `patent_id` ≥5 是断言，不是口头）。
+8. **安全纪律抽查**：新增 `unwrap()/expect()` 全仓 diff 比对（必须全落 `#[cfg(test)]`）；生产路径新增 `panic!` 同查；动了 templates/static 则 eslint / HTML 扫描 / e2e 三件套齐跑。
+9. **结论（四态之一，写进 PR 审计评论 + §15 看板）**：**通过**（全步绿）｜**有条件通过**（仅文档/账面级缺口，限期补）｜**打回**（代码/测试级缺陷，列「文件:行 + 复现方式」清单回给执行棒，状态改打回重做）｜**升级用户**（命中 §13 三线之一）。
+
+## 17. 回归风险矩阵（每包「不许弄坏」的既有资产，具名到测试）
+
+> 用法：执行棒动手前过一遍本包行；审计第 7 步按本行抽查。以下名字全部现网存在（2026-10-01 复核），改名/删除走 §13 反驳。
+
+| 包 | 具名资产 | 破坏方式 | 必做验证 |
+|---|---|---|---|
+| MB2 | `inner_url_emits_spec_2_param_set`（XHR URL 形态锁） | 动 URL 构造时改了既有参数渲染 | 该测试零改动仍绿；真要改 URL 语义先走 §13 |
+| MB2 | `enrich-free` 幂等早退（`routes/patent.rs:238-240` "Already enriched"） | 把幂等判定挪到冷却判定之后，导致冷却中仍重复出网 | 早退必须保持在冷却判定**之前**；`reason_code=already_enriched` 只作记账不改早退语义 |
+| MB2 | `attempts_json_locks_frontend_panel_literals` / `online_chain_registers_epo_only_with_credentials` | 在 `routes/search.rs` 顺手改出参或链注册 | 两锁零改动仍绿 |
+| MB3 | `fts_search_finds_matching_patent`（集成） | 在 `insert_patent` 里把切片写入挪进 FTS 同步之间，破坏时序 | 集成全绿；切片写入沿 MB0 纪律：放既有写入全部落库**之后**、函数返回之前 |
+| MB3 | `insert_patent_writes_embedding_for_chinese_patent` / `..._skips_embedding_for_textless_patent` / `..._survives_when_embedding_write_fails`（`db/patent.rs:940/:966/:983`） | 改同一函数尾部 | 三条零改动仍绿 |
+| MB3 | `mb0_vector_layer_gated_off_when_no_embeddings` / `mb0_vector_layer_engages_when_embeddings_exist`（`routes/search.rs:2077/:2128`） | 动向量门控条件 | 两门控测试零改动仍绿；向量档 7 键形状不增减 |
+| MB4 | `e2e_test.mjs` 全量 60 条（`expectedPasses = 60`，`e2e_test.mjs:5`） | 改 `templates/idea.html` 结构破坏既有断言 | 60/60；任何计数变化属破线须升级用户——门4 只覆盖 MB5 的新增用例，不覆盖 MB4 |
+| MB4 | `docs/functions-manifest.json` 基线 | 新增 on* 函数忘 `--refresh`，或误删函数 | 扫描退出 0；基线只加不减，`--refresh` 与模板变更同提交 |
+| MB4 | `api_idea_evidence`（`routes/idea.rs:400`）出参既有消费方 | 改出参键名 | §6 `evidence_api_key_set_locked` 快照锁兜底；改键 = 破坏性变更须升级 |
+| MB1 | `fact_check.rs` 既有 15 条测试（2026-10-01 实测 `grep -c '#\[test\]'` = 15） | 泛化判定入口时改了既有判定语义 | 15 条零删改仍绿（§6 MB1 表已锁） |
+| MB1 | OA 流式旧前端消费（oa-response 页按「## AI 事实核查」文本识别，`routes/ai.rs:1434-1437`） | 直接删旧文本标记 | 新旧并行期：结构化键先行，旧文本标记保留至呈现层落地后由后续包删；跨包时两 PR 各声明半边 |
+| MB5 | `truncate_for_ai` 既有用例（`src/ai/tests.rs:29-62`：`short_text_passes_through_untouched` / `text_at_limit_is_not_rewritten` / `overflow_keeps_head_and_marks_omission_explicitly` / `limit_counts_characters_not_bytes` / `zero_budget_returns_only_the_notice`） | 「顺手统一」删掉数据完整性尾注 | 五条零改动仍绿；MB5 只增不减提示面 |
+| MB5 | OA 容量既有真报错用例（`src/ai/tests.rs:76-95`：`short_oa_input_passes_without_truncation` / `unicode_capacity_uses_character_count` / `response_letter_stream_emits_visible_overflow_error`） | 改容量错误响应形状 | 三条零改动仍绿；结构化错误体按 §5.2 增键不删键 |
+| 通用 | `git config core.hooksPath .githooks` + 远端 CI（fmt/clippy/test/扫描/e2e） | 本地 `--no-verify` 跳钩子 | CI 是硬关卡，本地绿不算数；审计以 §16 第 5 步独立复跑为准 |
+
+## 18. MB4 新增文案预审稿（zh/en 草案，执行棒照抄或走 §13 反驳，禁止自由发挥措辞）
+
+键名沿 `static/i18n.js` 既有风格（小写点分域前缀，zh/en 同键，先例 `cad.*`、`diag.*`）。措辞上限受 §9：不得出现「语义」「授权概率」「律师」「保证」；【推测】标签只说明「本条无出处」，不得写成「无相关内容」。
+
+| 键 | zh | en |
+|---|---|---|
+| `idea.evidence.speculative` | 【推测 · 本条未找到出处】 | [Speculative – no source found] |
+| `idea.evidence.refFormat` | 出处：{patent_id} {section} | Source: {patent_id} {section} |
+| `idea.decision.title` | 决策建议 | Decision recommendation |
+| `idea.decision.stance.file` | 建议申请 | Recommend filing |
+| `idea.decision.stance.abandon` | 建议放弃 | Recommend abandoning |
+| `idea.decision.stance.redirect` | 建议转向 | Recommend pivoting |
+| `idea.decision.rationaleTitle` | 理由（编号可在上方报告中反查） | Rationale (IDs traceable in the report above) |
+| `idea.decision.noEvidence` | 证据不足，暂不给出决策建议，仅列事实。 | Insufficient evidence; listing facts only instead of a recommendation. |
+
+约束：① 每键 zh/en 同 PR 同批次；② 决策段的存在性不因证据不足缺席——`noEvidence` 是**替代渲染**，不是删除段落；③ stance 三值与 §5.2 `decision.stance` 枚举逐字对应，前端不做第四种解释；④ 本表为预审稿，执行棒有更好措辞走 §13 反驳并附理由，**禁止**合并后私自换词。
+
+## 19. 术语表 + 接棒首查清单（给第一次进本仓的执行棒 AI）
+
+**术语**（AGENTS.md 未定义、本规格书与审计在用的都在这里）：
+
+- **棒 / 派单**：一个执行 AI 会话承接的一个包 = 一次分支 + 一次 PR + 一次审计。串行，禁止两棒同仓并行（§3.2）。
+- **门禁**：`cargo fmt --check`、`cargo clippy --all-targets -- -D warnings`、`cargo test`；动了 templates/static 再加 HTML 函数扫描 + eslint + e2e。CI 是硬关卡，本地绿不算数。
+- **红线**：声明「零 diff」的文件清单（逐包见 §10.2 卡；公共底线 `common.rs`/`Cargo.*`/migrations）。例外必须落在 §2.1 预授权表内。
+- **对账**：测试计数公式 `上一包合并值 + 2N（±已登记跳变）`，逐二进制核对（§3.1）。
+- **红→绿锚**：先证旧实现在真实输入上失败（报错原文），再证新实现通过（`test result` 原文）。防「测试写出来就是绿的」。
+- **假绿**：测试通过但断言的不是验收口径（§7 逐包清单）。
+- **形状锁 / 快照锁**：断言出参键集合或字面量不变的测试，防「顺手改接口」。
+- **静默降级**：可选增强失败时主流程继续 + `warn` 记账 + 出参如实（先例：embedding 写失败不阻断入库）。
+- **单一写入口**：`db/patent.rs::insert_patent` 是 `patents`/FTS/embedding/chunks 的唯一写路径，派生数据挂在它尾部，禁止旁路。
+
+**接棒首查（10 分钟，做完才有资格写代码）**：
+
+1. `git status` 干净、基于 main 最新；按 §10.2 卡建分支（分支名逐字照抄）。
+2. `git config core.hooksPath .githooks`（AGENTS.md Step 0）。
+3. `df -h /d` 查余量；确认无并行棒。
+4. 顺序读：AGENTS.md → STATUS.md 顶 3 条 → 本规格书 §0、§1.6、本包节、§10.2 本包卡、§13、§17 本包行。
+5. `node_modules/puppeteer` 不存在 ⇒ e2e 条件不适用（PR body 声明），**不得**现场安装（新依赖须升级）。
+
+## 20. 决策门裁定记录表（用户统一裁定后回填；裁定前对应包不得开工，与 §3.4 同源）
+
+| 门 | 主题 | 影响包 | 用户裁定（原文照录，禁止 AI 转述） | 日期 | 规格书回写位置 |
+|---|---|---|---|---|---|
+| 1 | MB4 前端最小破线放行否（`templates/idea.html` + `static/i18n.js`） | MB4 | ⏳ 待裁定 | — | §2.1 / §10.2 MB4 卡 |
+| 2 | executive 档硬编码 3 条建议被结构化决策段取代（用户可见文案变） | MB4 | ⏳ 待裁定 | — | §1.6 n / §18 |
+| 3 | MB1 致命档处置：中止流水线 vs 只标注+前端强提示 | MB1 | ⏳ 待裁定 | — | §2 MB1 / §5.2 `fact_check` |
+| 4 | MB5 是否新增 e2e 用例（破 `e2e_test.mjs` 线 + 同步 `expectedPasses`） | MB5 | ⏳ 待裁定 | — | §3.4 / §17 通用行 |
+| 5 | MB0b（B 案补 IDF/语料统计）是否立项 | MB0b | ⏳ 待裁定 | — | §0 / §3.4 |
+
+规则：裁定后本表为事实源，§3.4 相应条目加删除线并注明「已裁定，见 §20」；**本表只做记录不做解释**，裁定的解释权在用户。
+
+## 21. M-C 消费面预告（M-B 必须留对的缝，M-B 收口时逐条验）
+
+MC1（检索↔创意打通）与 MC2（OA 链路复用核查）将来直接消费 M-B 的产出。M-B 各包落地时把下面这些留成**函数级可复用**，禁止埋死在 idea 页 handler 内部：
+
+| M-C 任务 | 消费的 M-B 产物 | M-B 侧约束 |
+|---|---|---|
+| MC1 `SearchPatents`/`PriorArtCluster` 步骤替换 | MB2 `enrichment` / `full_text_available_count`（§5.2）；MB3 top-N 切片检索（`rag/retriever`） | 检索与富化保持「入参出参纯函数化」调用形态，pipeline 步骤替换时不需要重写查询逻辑 |
+| MC1 创意报告引用 | MB3 引用编号（`{ref_no, patent_id, chunk_id, ...}`） | 引用形状不加 idea 专属字段；MB4 的 `decision`/`evidence` 对 pipeline 透明（存 `context_json` 不加列） |
+| MC2 OA 分析/讨论/答复书全走核查 | MB1 `fact_check` 结构化键 + `check_analysis` 单一判定入口 | 判定入口必须是普通函数（可被 OA 流与答复书生成直接调用），禁止只活在流式 handler 里 |
+| MC2 出处体系复用 | MB4 `Evidence` 转正字段（`source_url`/`claim_number`） | OA 侧复用不需要改 `Evidence` 定义；缺字段场景走 `#[serde(default)]` |
+
+收口验法：M-B 收口走查（§11）通过后，规划会话另做一次「假想 MC1/MC2 接线走读」——只读代码，确认上表每行调用点存在且不依赖 UI 层；发现埋死即在 M-B 剩余包内顺手纠正（改函数位置不算扩包）。
+
+---
+
+## 22. 执行棒派单提示词（用户复制粘贴到执行棒 AI 会话，逐字用；占位符只有一处）
+
+> 用法：整段复制对应代码块，把开头 `{执行棒名}` 换成棒号即可（如「MB2 执行棒」）。六份共用同一纪律骨架，差异只在包号/分支/范围/决策门前置。**MB4/MB1/MB5 三份带决策门前置行：对应门未裁定（§20 仍 ⏳）时不得开工，提示词贴了也不行。**
+
+### 22.1 MB0 收口棒（特殊：接手工作区已有改动，只做提交收口，禁止重写）
+
+> ✅ **本份提示词已执行完毕（2026-10-01 回写）**：收口棒已提交 `f66912c` + `667064a`、开出 PR #28（CI `test`/`lint`/`e2e` 三绿、`mergeable=MERGEABLE`）。以下正文留档不再派发；下一份可用提示词是 §22.2（MB2），但其开工前置是 PR #28 审计合并。
+
+```text
+{执行棒名}：你是 InnoForge / patent-hub 仓库（D:\test\patent-hub-backup）的执行棒。
+使命：把工作区里上一棒已完成的 MB0 改动收口提交，禁止重写任何实现。
+必读（顺序）：AGENTS.md → docs/plans/STATUS.md 顶 3 条 → docs/plan/2026-09-28-mb-construction-spec.md 的 §0、§1.6、MB0 节（§2）、§10.2 MB0 收口卡、§13、§17 MB3 行（insert_patent 回归面）。
+操作：工作区改动已在 src/vector/mod.rs、src/rag/chunker.rs、src/routes/search.rs、src/db/patent.rs、src/main.rs（仅 pub mod vector;），先 cargo fmt --check / clippy --all-targets -- -D warnings / cargo test 全量落盘统计（禁止 | head）确认三绿；cargo test --test mb0_red_proof_tmp 跑临时取证件，把两条 test 结果行原文贴进 PR body 第 2 段，然后删除该文件并用 git status 证明工作区干净；按 §10.2 MB0 卡白名单逐文件提交（分支 exec/mb0-embedder），PR body 用规格书 §10.1 六段模板，对账公式 744 = 721 + 2×12 − 1。
+红线：不加 crate；不碰 innoforge.db；不新增测试；白名单外文件零 diff；全表回填与伪 IDF 禁止。
+与现实冲突时按规格书 §13 反驳并贴证据，禁止假服从。
+```
+
+### 22.2 MB2 执行棒
+
+```text
+{执行棒名}：你是 InnoForge / patent-hub 仓库（D:\test\patent-hub-backup）的执行棒。
+使命：完成规格书 MB2 包——免费全文供给链式化 + 冷却表共用（enrich-free 前置冷却判定、三份抓取拷贝收敛、§5.2 enrichment 出参键）。
+必读（顺序）：AGENTS.md → docs/plans/STATUS.md 顶 3 条 → docs/plan/2026-09-28-mb-construction-spec.md 的 §0、§1.6、MB2 节、§5.2/§5.3、§6 MB2 表、§10.2 MB2 卡、§13、§17 MB2 行。
+分支名：exec/mb2-fulltext-chain。测试按 §6 MB2 表实现（≥6 条，含红→绿锚），基线对账 744 + 2N。
+红线：Cargo.* 零 diff（禁新依赖）；migrations/common.rs/lib.rs 零 diff；不碰 innoforge.db；生产路径禁 unwrap/expect；幂等早退 routes/patent.rs:238-240 必须保持在冷却判定之前（§17）；门禁三绿全量落盘统计，禁止 | head。
+交付：PR body 用 §10.1 六段模板；在线取证按 §24 规程。与现实冲突按 §13 反驳，禁止假服从。
+```
+
+### 22.3 MB3 执行棒
+
+```text
+{执行棒名}：你是 InnoForge / patent-hub 仓库（D:\test\patent-hub-backup）的执行棒。
+使命：完成规格书 MB3 包——RAG 接线（insert_patent 写 chunks、db/rag.rs SELECT 缺列修对、深度分析 prompt 注入 ≥5 篇 distinct patent_id 全文切片、analysis.rs:50 与 deep_reasoning.rs:138 两处同批改走 truncate_for_ai、无全文降级如实标注 reason_code）。
+必读（顺序）：AGENTS.md → docs/plans/STATUS.md 顶 3 条 → docs/plan/2026-09-28-mb-construction-spec.md 的 §0、§1.6（f/g 两条必读）、MB3 节、§5.2/§5.3、§6 MB3 表、§10.2 MB3 卡、§13、§17 MB3 行。
+分支名：exec/mb3-rag-wiring。src/main.rs 补 pub mod rag;（§2.1 预授权，仅声明行），基线对账 744 + 2N + 1（mod rag 跳变 §3.1）。
+红线：Cargo.* 零 diff；migrations/common.rs/lib.rs 零 diff；不碰 innoforge.db；生产路径禁 unwrap/expect；insert_patent 尾部时序不得破坏 FTS 同步与 MB0 wiring 三条测试（§17）；门禁三绿全量落盘统计，禁止 | head。
+交付：PR body 用 §10.1 六段模板。与现实冲突按 §13 反驳，禁止假服从。
+```
+
+### 22.4 MB4 执行棒
+
+```text
+{执行棒名}：你是 InnoForge / patent-hub 仓库（D:\test\patent-hub-backup）的执行棒。
+使命：完成规格书 MB4 包——出处标注体系（Evidence 转正、无源标【推测】走结构化键、决策建议段取代 executive 档硬编码 3 条建议、idea.html + i18n.js 最小破线渲染，文案照抄 §18 预审稿）。
+前置条件：规格书 §20 门1、门2 必须已裁定（⏳ 未裁定则本包不开工，请退回派单方）。
+必读（顺序）：AGENTS.md → docs/plans/STATUS.md 顶 3 条 → docs/plan/2026-09-28-mb-construction-spec.md 的 §0、§1.6（l/m/n 三条必读）、MB4 节、§5.2、§6 MB4 表、§10.2 MB4 卡、§17 MB4 行、§13。
+分支名：exec/mb4-provenance。本包是唯一获准破前端红线的包：templates/idea.html 与 static/i18n.js 仅限 §10.2 卡白名单范围；e2e 60/60 必须保持（计数变化须升级用户）。
+红线：Cargo.* 零 diff；migrations/common.rs/lib.rs 零 diff；不碰 innoforge.db；生产路径禁 unwrap/expect；门禁三绿 + eslint + HTML 扫描 + e2e 全量落盘统计，禁止 | head。
+交付：PR body 用 §10.1 六段模板。与现实冲突按 §13 反驳，禁止假服从。
+```
+
+### 22.5 MB1 执行棒
+
+```text
+{执行棒名}：你是 InnoForge / patent-hub 仓库（D:\test\patent-hub-backup）的执行棒。
+使命：完成规格书 MB1 包——幻觉防线扩面（check_analysis 泛化为单一判定入口、创意 pipeline 真实接线、OA 流式改发 fact_check 结构化键、诱导编造用例 ≥16 实例，致命档处置按门3 裁定执行）。
+前置条件：规格书 §20 门3 必须已裁定（⏳ 未裁定则本包不开工，请退回派单方）。
+必读（顺序）：AGENTS.md → docs/plans/STATUS.md 顶 3 条 → docs/plan/2026-09-28-mb-construction-spec.md 的 §0、§1.4、MB1 节、§5.2、§6 MB1 表、§10.2 MB1 卡、§13、§17 MB1 行。
+分支名：exec/mb1-factcheck-breadth。fact_check.rs 既有 15 条测试零删改（§17）。
+红线：Cargo.* 零 diff；migrations/common.rs/lib.rs/templates/static 零 diff；不碰 innoforge.db；生产路径禁 unwrap/expect；门禁三绿全量落盘统计，禁止 | head。
+交付：PR body 用 §10.1 六段模板。与现实冲突按 §13 反驳，禁止假服从。
+```
+
+### 22.6 MB5 执行棒
+
+```text
+{执行棒名}：你是 InnoForge / patent-hub 仓库（D:\test\patent-hub-backup）的执行棒。
+使命：完成规格书 MB5 包——上下文治理（routes/ai.rs:1698-1699 字节切片红→绿修字符安全、首轮关键事实结构化直传、OA 容量全入口「报错不截断」、双套摘要策略对齐）。
+前置条件：规格书 §20 门4 已裁定（⏳ 未裁定则不加 e2e 用例，其余范围照常开工）。
+必读（顺序）：AGENTS.md → docs/plans/STATUS.md 顶 3 条 → docs/plan/2026-09-28-mb-construction-spec.md 的 §0、§1.5、MB5 节、§5.2、§6 MB5 表、§10.2 MB5 卡、§13、§17 MB5 行。
+分支名：exec/mb5-context。truncate_for_ai 五条与 OA 容量三条既有用例零删改（§17）。
+红线：Cargo.* 零 diff；migrations/common.rs/lib.rs 零 diff；不碰 innoforge.db；生产路径禁 unwrap/expect；门禁三绿全量落盘统计，禁止 | head。
+交付：PR body 用 §10.1 六段模板。与现实冲突按 §13 反驳，禁止假服从。
+```
+
+## 23. 审计评论四态模板（规划会话贴 PR 用，禁止写成散文）
+
+```text
+【审计结论：通过】
+门禁独立复跑：fmt exit 0 ｜ clippy --all-targets -D warnings exit 0 ｜ cargo test exit 0（逐二进制：<原文行>）。
+对账：<基线> + 2×<N> <±跳变归因> = <实测>，闭合。红→绿锚复核：通过（<一句话>）。
+反假绿抽查：§7 本包条目全过。白名单 diff：零越界。结论：可合并。
+
+【审计结论：有条件通过（限期补，合并前补齐）】
+仅账面缺口：1) <条目，如 PR body 缺第 4 段红线自检原文> 2) <条目>。
+门禁数字本身已闭合，代码不动。补齐后本会话复核即转「通过」。
+
+【审计结论：打回重做】
+缺陷清单（文件:行 + 复现方式）：1) <缺陷> 2) <缺陷>。
+对应规格书条目：§<节>. 修复后重新走 §16 流程，勿在旧 PR 上混合无关改动。
+
+【审计结论：升级用户】
+命中 §13 判定线：<三线之一 + 事实>。已暂停合并，等用户裁定后按 §20 回填继续。
+```
+
+## 24. 在线取证操作规程（免费链真实出网怎么做才合规；MB2/MB3 验收要用）
+
+- **实例纪律**：临时空库实例一律放 `D:\Temp\<包名>-probe\`，**禁止读写用户库 `innoforge.db`**；取证完实例可删，证据 JSON 留存至 PR 合并。
+- **证据落盘**：原始响应存仓库外 `D:\Temp\`，PR body 贴关键 JSON 原文（URL、状态码、字节数、首条结果字段），**禁止**截图代替文本、禁止「已验证」三个字代替证据。
+- **已知工具坑**（`docs/errors.md` 在案）：Git-Bash curl 中文体内联会被 GBK 编码打坏（实测 400）⇒ 一律 `--data-binary @utf8文件.json`；XHR 检索响应的结果数组在 `results.cluster[0].result`，不在 `results.patents`。
+- **反爬处置**：同 Host 批量动作前先看冷却状态；遇 `Sorry...`/503 ⇒ 停手等窗口外重测并登记开放项，**禁止**重试绕过、禁止伪造数据填充缺口。
+- **免费链边界**：SerpAPI/EPO 无 Key 环境**禁止**真调（§0 决策 B）；「断网复检」用通道级证据（实例无凭据 + 仅本地端点）并如实注明，OS 级断网注入属 §4 开放项，**不得**冒充已做。
+- **取证不改仓**：取证动作零改动仓库文件；需要临时验证代码行为时用仓内 `#[cfg(test)]` 或临时 worktree，**禁止** standalone crate（§3.2 rustc 崩溃）。
+
+## 25. 固定中文测试语料（各包测试共用的确定性 fixtures，字节级一致）
+
+> 用法：各包测试模块内联**同字节串**常量（不建共享 fixture 文件，避免动 lib 结构）；改一个字节都算改判定口径，走 §13。语料只进 `#[cfg(test)]`，禁止进生产路径。
+
+**`FIXTURE_CN_PATENT_TITLE`**（沿 MB0 红→绿锚同串）：
+
+```
+一种基于深度学习的图像识别方法及装置
+```
+
+**`FIXTURE_CN_PATENT_BODY`**（纯中文正文，覆盖 char-boundary / 切片 / chunk 场景）：
+
+```
+本发明公开了一种基于深度学习的图像识别方法及装置，涉及人工智能技术领域。所述方法包括：获取待识别图像；对所述待识别图像进行灰度化与归一化预处理，得到标准化图像；将所述标准化图像输入预先训练完成的卷积神经网络模型，提取图像特征向量；根据所述图像特征向量与预设分类阈值进行比较，输出识别结果；所述装置包括图像采集模块、预处理模块、特征提取模块与结果输出模块。本发明能够提升复杂背景下目标识别的准确率，降低误报率，适用于工业质检与安防监控场景。
+```
+
+**`FIXTURE_MIXED`**（中英混排 + emoji + 数字，测 UTF-8 边界与 token 窗口）：
+
+```
+The present invention relates to 一种图像处理装置（image processing apparatus），包括：GPU 加速模块 🚀、NPU 推理模块；所述 GPU 模块运行 CUDA 内核 v12.3，处理 4096×2160 分辨率输入；实验表明准确率提升 12.7%。
+```
+
+**`FIXTURE_LONG`**（超长语料，MB2 入库不截断 / MB5 压缩用）：**不落字面量**，由测试按确定规则生成——`FIXTURE_CN_PATENT_BODY` 整体重复拼接直至 ≥ 6200 字符（`chars()` 计数），末尾补「补」字至 6200 整。重复单元确定 ⇒ 字节确定。
+
+**`FIXTURE_OA`**（OA 决定文书样例，MB1 诱导编造 / MB5 容量用）：
+
+```
+应申请人于 2025 年 3 月 2 日提交的意见陈述，审查员认为：权利要求 1 相对于对比文件 1（CN110123456A，说明书第[0034]段）不具备专利法第 22 条第 3 款规定的创造性。对比文件 1 公开了图像特征提取步骤，权利要求 1 与其区别仅在于预处理参数的常规选择。
+```
+
+## 26. M-B 收口报告模板 + 发布 runbook
+
+**收口报告**（M-B 六包全合并后由规划会话产出，落 `docs/plan/`）：
+
+```markdown
+# M-B 收口报告（<日期>）
+## 1 六包终态
+拷贝规格书 §15 看板终态（逐包 merge hash + 门禁实测）。
+## 2 门禁数字演进链
+744 → <每包合并后实测，逐格挂 PR 号> → <最终值>；每步对账公式闭合证明。
+## 3 用户视角走查（规格书 §11 剧本）
+12 步逐行：现象 ✅/❌ + 证据（截图存仓外，文本摘录入报告）。
+## 4 假想 MC1/MC2 接线走读（规格书 §21）
+四行逐行结论：调用点存在且不依赖 UI 层 ✅/❌；发现埋死时的处置记录。
+## 5 开放项移交
+规格书 §4 未清项 + §20 裁定记录 → 作为 M-C 规划输入。
+## 6 对外口径终检
+CHANGELOG [Unreleased] 与规格书 §9 口径表逐条比对，零越界措辞。
+```
+
+**发布 runbook**（收口报告通过后执行）：
+
+1. `Cargo.toml` version 按语义化升 **MINOR**（M-B 新功能非破坏，AGENTS 3.2），并与 CHANGELOG 同步；
+2. CHANGELOG `[Unreleased]` 标题改为版本号 + 日期（内容按规格书 §14 草案定稿）；
+3. 全门禁三绿 + e2e 60/60 后打 tag `v<新版本>`（先例 `v0.7.4`，tag 打在 merge commit 上）；
+4. 五端推送对齐（沿 M-A PR #20→#27 同法：合并后同步各远端与平台仓）；
+5. STATUS / milestones / task-breakdown 的 M-B 行标 ✅ + 收口报告链接；dependency-graph 的 M-B 节点标完成。
+
+---
+
+## 27. 变更记录
 
 - 2026-09-28：规划会话依 M-A 收口后的 tip `1af09fd` 实测撰写；用户对嵌入路线（A：先修对 TF-IDF）与凭证（只测免费链）两项决策已记入 §0。现状事实由只读取证 + 规划会话亲自复核（`check_oa_analysis` 接线点 `routes/ai.rs:1433`、三处字节切片 `vector/mod.rs:32`/`rag/chunker.rs:62`/`routes/search.rs:859`、`enrich-free` 免费爬取 `routes/patent.rs:221`）逐条验证后写入。
 - 2026-09-28（同日第二轮，规划会话）：**MB1–MB5 逐包扩写到 MB0 同等粒度**（现状锚点 / 范围 / 不做 / 必做取证 / 验收 / 门禁），并新增 §1.5（MB5 现状：`compress_history`、双套摘要、OA 容量缺口、`ai.rs:1699` 字节切片 panic）、§1.6（**14 条现状校正 a–n**，其中 f/g/h/l 四条会改变施工面）、§2.1（红线例外预授权表）、§3.1（基线 721 → MB0 后 744、MB3 后 +1 的对账口径）、§3.2（风险：5.9GB 余量、5m48s 冷编、standalone crate rustc 崩溃、GBK 链接器告警）、§3.4（5 个待用户裁定的决策门）、§4.5–4.10（新发现 6 项登记不派包）。取证由只读子代理并行完成，MB0 未合并的工作区改动已排除在外。**本轮规划会话未修改任何产品代码**（`src/` 下 MB0 的 5 个文件改动属上一轮执行棒遗留，保持原样）。
+- 2026-09-28（同日第三轮，规划会话，追加可抄层）：新增 **§5 跨包结构化出参契约**（键/生产者/消费者对照表 + `reason_code` 统一枚举 `cooldown|blocked|timeout|not_found|parse_empty|no_fulltext|db_error|already_enriched`，禁各包自造）、**§6 逐包用例清单**（MB2 6 / MB3 11 / MB4 6 + 前端四项 / MB1 9 条·诱导编造双路径参数化 ≥16 / MB5 7 条测试名与断言点，全部离线、`:memory:` 或临时实例，含每条的红→绿锚归属）、**§7 反假绿清单**（逐包「看起来过了」的蒙混路径与审计识破手段，其中 MB3「≥5 篇引用被做成同一片专利的 5 个切片」、MB1「`not_applicable` 当通过」、MB5「压缩根本没触发就断言约束仍在」三条为本轮新立的硬判据）、**§8 审计复跑命令卡**（含 `df` 预检、全量落盘统计、逐文件红线 diff、MB4 额外四项、本机冷编时间预算）、**§9 对外口径边界**（六项能力「可承诺 / 禁止承诺 / 依据」对照，含 CHANGELOG 与 i18n 措辞纪律）。原 §5 变更记录顺延为 §10。**仍未改动任何产品代码**；`docs/feedback.md` 已登记「规划会话只写文档」分工边界，`docs/errors.md` 已代记仓外 crate rustc 崩溃与 GBK 链接器告警两条踩坑。
+- 2026-09-28（同日第四轮，规划会话，追加派单执行层）：新增 **§10 派单卡**（§10.1 统一 PR body 六段模板——包号与范围 / 红→绿取证原文 / 门禁全量统计 / 红线自检 / 偏离登记 / 验收逐条对照，缺段打回；§10.2 逐包派单卡——分支名、可提交白名单、禁止事项、DoD 勾选、MB0 收口卡含 `tests/mb0_red_proof_tmp.rs` 的「贴原文后删除」处置规则）、**§11 用户视角走查剧本**（12 步无 Key 走查，每步标注「不显示该现象⇒哪一包没做成」）、**§12 收口回写责任表**（施工完成 / 审计通过 / 合并 / 回写四态各有唯一责任人，CHANGELOG 当日入账不留收口回忆式补写）、**§13 反驳与仲裁流程**（证据阈值、三类必须升级用户的判定线、五条不可协商项，禁止假服从）、**§14 CHANGELOG `[Unreleased]` 草案**（措辞受 §9 约束，执行棒合并当天搬运）。同批把 §6 各包标题的计数改到与用例表逐行一致（MB3 11 / MB4 6 / MB1 9 条·参数化 ≥16），消除「标题 ≥N 表里 M 行」的可钻空子。**本节自 §16 重排为 §15**（上一轮追加时 §10 锚点被整段替换未重排号，本轮审计自查发现后统一顺延，正文交叉引用 §10.1/§10.2/§13/§14 已同批改齐）。仍未改动任何产品代码。
+- 2026-10-01（规划会话，追加执行层与收口层，用户指示「先不管杂碎事，继续写」）：新增 **§15 M-B 施工看板**（六态状态枚举 + 逐包快照，唯一进度事实源，STATUS 只记流水）、**§16 审计作业流程**（收到 PR 后固定 9 步，每步带通过判据，任一步不过即停出结论，结论四态：通过/有条件通过/打回/升级用户）、**§17 回归风险矩阵**（每包「不许弄坏」的既有资产具名到测试，全部 2026-10-01 现网复核：`inner_url_emits_spec_2_param_set`、幂等早退 `routes/patent.rs:238-240`、两把 attempts 形状锁、`fts_search_finds_matching_patent`、`mb0_wiring_tests` 三条（`db/patent.rs:940/:966/:983`）、向量双门控（`routes/search.rs:2077/:2128`）、e2e `expectedPasses=60`（`e2e_test.mjs:5`）、`fact_check.rs` 15 条、`truncate_for_ai` 五条 + OA 容量三条（`src/ai/tests.rs:29-95`）、`functions-manifest` 基线）、**§18 MB4 文案预审稿**（8 个 i18n 键 zh/en 草案，措辞受 §9 约束，`noEvidence` 是替代渲染不是删段落，stance 枚举与 §5.2 逐字对应）、**§19 术语表 + 接棒首查清单**（9 个术语定义 + 接棒 10 分钟 5 步，给首次进仓的执行棒 AI）、**§20 决策门裁定记录表**（门1–门5 占位 ⏳，裁定原文照录禁止 AI 转述，裁定后取代 §3.4 为事实源）、**§21 M-C 消费面预告**（MC1/MC2 将消费的 M-B 产物与「函数级可复用、禁止埋死在 idea handler」约束，收口时做假想接线走读）。**本节自 §15 重排为 §22**。写前锚点均经实测核实（测试名 grep、`e2e_test.mjs:5`、幂等早退原文），未改动任何产品代码；决策门仍全部待用户统一裁定。
+- 2026-10-01（同日第二轮，规划会话，用户指示「继续写」）：新增 **§22 执行棒派单提示词**（6 份可直接复制粘贴的开工指令——MB0 收口棒「只做提交收口禁止重写」、MB2/MB3 常规棒、MB4/MB1/MB5 带决策门前置行「门未裁定贴了也不开工」，共用纪律骨架：必读顺序 / 分支名 / 红线 / §10.1 六段交付 / §13 反驳）、**§23 审计评论四态模板**（通过/有条件通过/打回/升级用户的可粘贴骨架，禁止散文式审计评论）、**§24 在线取证操作规程**（临时空库实例纪律、证据落盘仓外、GBK curl 坑与 XHR 响应结构、反爬停手规则、免费链边界与通道级证据的诚实标注）、**§25 固定中文测试语料**（5 个确定性 fixtures：标题/纯中文正文/中英混排+emoji/6200 字生成规则/OA 样例，各包内联同字节串，改字节走 §13）、**§26 M-B 收口报告模板 + 发布 runbook**（六段收口报告骨架 + MINOR 升版/tag `v<新版本>` 沿 `v0.7.4` 先例/五端对齐/回写清单）。插入时一度吞掉「§22 变更记录」锚点造成 §21→§23 号断，自查发现后整体下移一号：**本节现编 §27**。tag 格式与「五端」惯例经 `git tag` 与 M-A 文档核实（`v0.7.0`–`v0.7.4`；PR #20→#27 merge 后同步法）。未改动任何产品代码。
+- 2026-10-01（同日第三轮，规划会话，回写 + 自查修号）：① **MB0 状态回写**——收口棒已按 §10.2 / §22.1 提交 `f66912c`（代码 + 12 测试）与 `667064a`（docs），PR **#28** OPEN、远端 CI `test`/`lint`/`e2e` 三项 SUCCESS、`mergeable=MERGEABLE`，取证件未入库；§15 看板 MB0 行由「施工中（未提交）」改「**待审计**」，§10.2 收口卡与 §22.1 提示词加 ✅ 已执行完毕标记转留档，下一份可派发提示词为 §22.2（前置 = #28 审计合并）。② **审计自查修三处**：§22 的六个子节标题沿用上轮误号 `23.1–23.6`（与真正的 §23 撞号）⇒ 改 `22.1–22.6`；§15 看板 `MB0b` 行用了枚举外的「未立项」⇒ 改「未开工（未立项，等门5）」；`docs/errors.md` 里「补充实测（MB0 会话）」一条被重复粘贴成两行 ⇒ 删重。③ **紧急包 OA-U 下发**（用户真实复审任务驱动）：新文件 `docs/plan/2026-10-01-oa-reexam-urgent-spec.md`，UA1–UA6 六项；用户同日拍板三条交付硬标准（专家级流程 / 零幻觉 / 可直接提交终稿）已软件化为 **UA5 六角度（含⑥预判合议组质疑并预先回应）**、**UA6 出处锚点纪律（逐断言【依据：…】+ 文末出处对照表 + 无出处断言禁写）**、**UA2 终稿形态（可直接抄入官方理由栏 + 文末固定「提交前清单」段）**，并改写 §0.4 口径纪律（禁止「初稿供人工改写」类降级表述）。未改动任何产品代码。
