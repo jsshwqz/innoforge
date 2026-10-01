@@ -788,7 +788,7 @@ function renderSidebar(extraHtml) {
   html += '<div class="sidebar-nav">';
   // patent_detail 页无独立导航项，映射到「搜索」保持激活态
   var activeId = (_activePage === 'detail') ? 'search' : _activePage;
-  for (var i = 0; i < links.length; i++) {
+  for (let i = 0; i < links.length; i++) {
     var cls = (links[i].id === activeId) ? ' class="active"' : '';
     html += '<a href="' + links[i].href + '"' + cls + ' data-i18n="' + links[i].key + '">'
       + _NAV_ICONS[links[i].icon] + '<span>' + t(links[i].key) + '</span></a>';

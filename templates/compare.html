@@ -231,7 +231,7 @@
         delete uploadedData['ref_' + idx];
         delete uploadedFileObjects['ref_' + idx];
         var rows = document.querySelectorAll('.ref-row');
-        for (var i = 0; i < rows.length; i++) {
+        for (let i = 0; i < rows.length; i++) {
             if (rows[i].getAttribute('data-idx') === idx) {
                 rows[i].querySelector('.ref-input').disabled = false;
                 break;
@@ -285,7 +285,7 @@
 
     function reindexPlaceholders() {
         var inputs = document.querySelectorAll('.ref-input');
-        for (var i = 0; i < inputs.length; i++) {
+        for (let i = 0; i < inputs.length; i++) {
             if (!inputs[i].disabled) {
                 inputs[i].placeholder = '对比文件 ' + (i + 1) + ' — 专利号或 ID';
             }
@@ -340,7 +340,7 @@
         } else {
             var idx = pasteTarget.replace('ref_', '');
             var rows = document.querySelectorAll('.ref-row');
-            for (var i = 0; i < rows.length; i++) {
+            for (let i = 0; i < rows.length; i++) {
                 if (rows[i].getAttribute('data-idx') === idx) {
                     rows[i].querySelector('.ref-input').value = '';
                     rows[i].querySelector('.ref-input').disabled = true;
@@ -421,7 +421,7 @@
     function getRefs() {
         var rows = document.querySelectorAll('.ref-row');
         var refs = [];
-        for (var i = 0; i < rows.length; i++) {
+        for (let i = 0; i < rows.length; i++) {
             var idx = rows[i].getAttribute('data-idx');
             if (uploadedData['ref_' + idx]) {
                 var d = uploadedData['ref_' + idx];
@@ -646,12 +646,12 @@
             var ths = header.split('|').filter(function(c) { return c.trim() !== ''; });
             var rows = body.trim().split('\n');
             var html = '<table><thead><tr>';
-            for (var i = 0; i < ths.length; i++) html += '<th>' + escapeHtml(ths[i].trim()) + '</th>';
+            for (let i = 0; i < ths.length; i++) html += '<th>' + escapeHtml(ths[i].trim()) + '</th>';
             html += '</tr></thead><tbody>';
-            for (var r = 0; r < rows.length; r++) {
+            for (let r = 0; r < rows.length; r++) {
                 var cells = rows[r].split('|').filter(function(c) { return c.trim() !== ''; });
                 html += '<tr>';
-                for (var c = 0; c < cells.length; c++) html += '<td>' + escapeHtml(cells[c].trim()).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>') + '</td>';
+                for (let c = 0; c < cells.length; c++) html += '<td>' + escapeHtml(cells[c].trim()).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>') + '</td>';
                 html += '</tr>';
             }
             html += '</tbody></table>';
@@ -710,7 +710,7 @@
             ctx += '内容:\n' + my.content.slice(0, 2000) + '\n';
         }
         ctx += '\n== 对比文件 ==\n';
-        for (var i = 0; i < refs.length; i++) {
+        for (let i = 0; i < refs.length; i++) {
             var r = refs[i];
             ctx += '文件' + (i + 1) + ': ';
             if (typeof r === 'string') {

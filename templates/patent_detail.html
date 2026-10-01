@@ -209,7 +209,7 @@
         try {
             var old = JSON.parse(saved);
             if (!old || old.length === 0) return;
-            for (var i = 0; i < old.length; i++) {
+            for (let i = 0; i < old.length; i++) {
                 var m = old[i];
                 fetch('/api/chat/' + encodeURIComponent(key) + '/save', {
                     method: 'POST',
@@ -228,7 +228,7 @@
             .then(function(r) { return r.json(); })
             .then(function(data) {
                 if (data.status === 'ok' && data.messages && data.messages.length > 0) {
-                    for (var i = data.messages.length - 1; i >= 0; i--) {
+                    for (let i = data.messages.length - 1; i >= 0; i--) {
                         var m = data.messages[i];
                         patentChatHistory.unshift([m.role, m.content]);
                     }
@@ -303,7 +303,7 @@
     function renderPatentMessages() {
         var box = document.getElementById('chat-messages');
         box.innerHTML = '';
-        for (var i = 0; i < patentChatHistory.length; i += 2) {
+        for (let i = 0; i < patentChatHistory.length; i += 2) {
             var userDiv = document.createElement('div');
             userDiv.className = 'msg user';
             userDiv.textContent = patentChatHistory[i][1];

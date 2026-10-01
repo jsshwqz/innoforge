@@ -485,7 +485,7 @@
         function populateSelect(selectId, options, currentValue) {
             var select = document.getElementById(selectId);
             select.innerHTML = '';
-            for (var i = 0; i < options.length; i++) {
+            for (let i = 0; i < options.length; i++) {
                 var opt = document.createElement('option');
                 opt.value = options[i].value;
                 opt.textContent = options[i].label;
@@ -767,7 +767,7 @@
             var statusEl = document.getElementById('serpapi-status');
             var keys = [];
             var inputs = document.querySelectorAll('#serpapi-key-list input[type="text"]');
-            for (var i = 0; i < inputs.length; i++) {
+            for (let i = 0; i < inputs.length; i++) {
                 var val = inputs[i].value.trim();
                 if (val) keys.push(val);
             }

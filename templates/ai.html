@@ -79,7 +79,7 @@
         try {
             var old = JSON.parse(saved);
             if (!old || old.length === 0) return;
-            for (var i = 0; i < old.length; i++) {
+            for (let i = 0; i < old.length; i++) {
                 var m = old[i];
                 fetch('/api/chat/' + encodeURIComponent(key) + '/save', {
                     method: 'POST',
@@ -100,7 +100,7 @@
                 if (data.status === 'ok' && data.messages && data.messages.length > 0) {
                     // 将更旧的消息插入到历史头部（保持时间正序）
                     var oldLen = chatHistory.length;
-                    for (var i = data.messages.length - 1; i >= 0; i--) {
+                    for (let i = data.messages.length - 1; i >= 0; i--) {
                         var m = data.messages[i];
                         chatHistory.unshift([m.role, m.content]);
                     }
@@ -183,7 +183,7 @@
     function renderAllMessages() {
         var box = document.getElementById('chat-messages');
         box.innerHTML = '';
-        for (var i = 0; i < chatHistory.length; i += 2) {
+        for (let i = 0; i < chatHistory.length; i += 2) {
             var userDiv = document.createElement('div');
             renderUserMessage(userDiv, chatHistory[i][1]);
             box.appendChild(userDiv);
@@ -282,7 +282,7 @@
         }
         var lines = text.split('\n');
         var parts = [];
-        for (var i = 0; i < lines.length; i++) {
+        for (let i = 0; i < lines.length; i++) {
             var line = lines[i];
             if (line.startsWith('> ')) {
                 parts.push('<div class="quote-line">' + escapeHtml(line.substring(2)) + '</div>');
@@ -305,7 +305,7 @@
             container.textContent = text;
         }
         if (images && images.length > 0) {
-            for (var i = 0; i < images.length; i++) {
+            for (let i = 0; i < images.length; i++) {
                 var img = document.createElement('img');
                 img.src = images[i];
                 img.style.cssText = 'max-width:120px;max-height:120px;border-radius:4px;margin-top:4px;display:block;';
@@ -376,7 +376,7 @@
 
     document.getElementById('chat-msg').addEventListener('paste', function(e) {
         var items = (e.clipboardData || window.clipboardData).items;
-        for (var i = 0; i < items.length; i++) {
+        for (let i = 0; i < items.length; i++) {
             if (items[i].type.indexOf('image') === 0) {
                 e.preventDefault();
                 var file = items[i].getAsFile();
@@ -406,7 +406,7 @@
             return;
         }
         area.style.display = 'flex';
-        for (var i = 0; i < pastedImages.length; i++) {
+        for (let i = 0; i < pastedImages.length; i++) {
             var thumb = document.createElement('div');
             thumb.className = 'image-preview-thumb';
             thumb.innerHTML = '<img src="' + pastedImages[i] + '">'

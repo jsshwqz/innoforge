@@ -830,7 +830,7 @@
         if (chatInput) {
             chatInput.addEventListener('paste', function(e) {
                 var items = (e.clipboardData || window.clipboardData).items;
-                for (var i = 0; i < items.length; i++) {
+                for (let i = 0; i < items.length; i++) {
                     if (items[i].type.indexOf('image') === 0) {
                         e.preventDefault();
                         var file = items[i].getAsFile();
@@ -1063,7 +1063,7 @@
                 });
                 // Poll for report readiness (pipeline may still be running after SSE disconnect)
                 var reportData = null;
-                for (var attempt = 0; attempt < 30; attempt++) {
+                for (let attempt = 0; attempt < 30; attempt++) {
                     var reportResp = await fetch('/api/idea/' + ideaId + '/report');
                     if (!reportResp.ok) { await new Promise(function(r) { setTimeout(r, 2000); }); continue; }
                     reportData = await reportResp.json();
@@ -1144,7 +1144,7 @@
 
             // Poll for report
             var reportData = null;
-            for (var attempt = 0; attempt < 30; attempt++) {
+            for (let attempt = 0; attempt < 30; attempt++) {
                 var reportResp = await fetch('/api/idea/' + ideaId + '/report');
                 if (!reportResp.ok) { await new Promise(function(r) { setTimeout(r, 2000); }); continue; }
                 reportData = await reportResp.json();
@@ -1193,7 +1193,7 @@
 
             // Poll for completion (iterate runs async via Orchestrator)
             var ideaData = null;
-            for (var attempt = 0; attempt < 90; attempt++) {
+            for (let attempt = 0; attempt < 90; attempt++) {
                 await new Promise(function(r) { setTimeout(r, 2000); });
                 var checkResp = await fetch('/api/idea/' + encodeURIComponent(ideaId));
                 if (!checkResp.ok) continue;
@@ -1397,7 +1397,7 @@
 
                 // Poll for report readiness (pipeline may still be running after SSE disconnect)
                 var reportData = null;
-                for (var _attempt = 0; _attempt < 30; _attempt++) {
+                for (let _attempt = 0; _attempt < 30; _attempt++) {
                     var reportResp = await fetch('/api/idea/' + submitData.id + '/report');
                     if (!reportResp.ok) { await new Promise(function(r) { setTimeout(r, 2000); }); continue; }
                     reportData = await reportResp.json();
@@ -1891,7 +1891,7 @@
             lines.push("# " + data.idea.title + " — 讨论记录");
             if (data.idea.description) lines.push("\n**创意描述：**\n" + data.idea.description);
             lines.push("\n**消息数：** " + data.messages.length + "\n---\n");
-            for (var i = 0; i < data.messages.length; i++) {
+            for (let i = 0; i < data.messages.length; i++) {
                 var m = data.messages[i];
                 var role = (m.role === "user" ? "**用户** " : "**AI** ");
                 var ts = m.created_at || "";
