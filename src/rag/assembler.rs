@@ -101,3 +101,70 @@ pub fn build_citations(chunks: &[ReferenceChunk]) -> String {
 ",
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::pipeline::context::ReferenceChunk;
+
+    fn make_chunk(id: &str, content: &str, score: f32) -> ReferenceChunk {
+        ReferenceChunk {
+            id: id.to_string(),
+            patent_id: "test-patent".to_string(),
+            chunk_index: 0,
+            source_type: "abstract".to_string(),
+            content: content.to_string(),
+            relevance_score: score,
+        }
+    }
+
+    #[test]
+    fn test_assemble_no_chunks_returns_plain_prompt() {
+        let result = assemble_rag_prompt("query", &[], "system", 1000);
+        assert!(result.contains("system"));
+        assert!(result.contains("query"));
+        assert!(!result.contains("引用"));
+    }
+
+    #[test]
+    fn test_assemble_with_chunks_includes_citations() {
+        let chunks = vec![
+            make_chunk("c1", "Content one", 0.9),
+            make_chunk("c2", "Content two", 0.8),
+        ];
+        let result = assemble_rag_prompt("query", &chunks, "system", 1000);
+        assert!(result.contains("[引用 1]"));
+        assert!(result.contains("[引用 2]"));
+        assert!(result.contains("Content one"));
+        assert!(result.contains("Content two"));
+    }
+
+    #[test]
+    fn test_assemble_respects_max_tokens() {
+        let long_content = "x".repeat(500);
+        let chunks = vec![make_chunk("c1", &long_content, 0.9)];
+        let result = assemble_rag_prompt("query", &chunks, "system", 200);
+        // The content should be truncated to fit max_tokens
+        assert!(result.contains("[引用 1]"));
+        // Should not contain the full 500-char content
+        assert!(!result.contains(&long_content));
+    }
+
+    #[test]
+    fn test_build_citations_empty() {
+        assert_eq!(build_citations(&[]), "无引用");
+    }
+
+    #[test]
+    fn test_build_citations_with_chunks() {
+        let chunks = vec![
+            make_chunk("c1", "First chunk content", 0.9),
+            make_chunk("c2", "Second chunk content", 0.8),
+        ];
+        let result = build_citations(&chunks);
+        assert!(result.contains("[1]"));
+        assert!(result.contains("[2]"));
+        assert!(result.contains("c1"));
+        assert!(result.contains("c2"));
+    }
+}

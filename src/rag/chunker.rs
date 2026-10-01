@@ -63,3 +63,62 @@ pub fn chunk_summary(chunk: &str) -> String {
 pub fn compute_chunk_embedding(text: &str) -> Vec<f32> {
     crate::db::vector::compute_tfidf_embedding(text)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_chunk_text_empty() {
+        assert!(chunk_text("", 100, 20).is_empty());
+    }
+
+    #[test]
+    fn test_chunk_text_short_text_single_chunk() {
+        let result = chunk_text("hello world", 100, 20);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], "hello world");
+    }
+
+    #[test]
+    fn test_chunk_text_chinese_no_panic() {
+        // Multi-byte Chinese text must not panic
+        let text = "这是一段中文测试文本，用于验证切片器在多字节字符上的安全性。".repeat(10);
+        let result = chunk_text(&text, 50, 10);
+        assert!(!result.is_empty());
+        // Every chunk must be valid UTF-8 (implicit — String is always valid UTF-8)
+        for chunk in &result {
+            assert!(!chunk.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_chunk_text_overlap_produces_multiple_chunks() {
+        let text = "Sentence one. Sentence two. Sentence three. Sentence four. Sentence five.";
+        let result = chunk_text(text, 30, 10);
+        assert!(
+            result.len() >= 2,
+            "Long text should produce multiple chunks"
+        );
+    }
+
+    #[test]
+    fn test_chunk_summary_short() {
+        let result = chunk_summary("short");
+        assert_eq!(result, "short");
+    }
+
+    #[test]
+    fn test_chunk_summary_long_truncates() {
+        let long = "a".repeat(100);
+        let result = chunk_summary(&long);
+        assert!(result.ends_with("..."));
+        assert!(result.len() < long.len());
+    }
+
+    #[test]
+    fn test_compute_chunk_embedding_returns_vector() {
+        let emb = compute_chunk_embedding("test text");
+        assert!(!emb.is_empty());
+    }
+}
