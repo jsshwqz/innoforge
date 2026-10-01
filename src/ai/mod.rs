@@ -14,6 +14,7 @@ mod client;
 mod fact_check;
 mod idea;
 mod patent;
+pub use patent::extract_publication_numbers;
 mod tests;
 
 pub(crate) use client::{
