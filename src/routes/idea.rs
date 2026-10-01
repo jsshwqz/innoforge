@@ -303,6 +303,8 @@ pub async fn api_idea_analyze(
                         "novelty_score": idea.novelty_score,
                         "web_results": serde_json::from_str::<serde_json::Value>(&idea.web_results).unwrap_or_default(),
                         "patent_results": serde_json::from_str::<serde_json::Value>(&idea.patent_results).unwrap_or_default(),
+                        // MB2: 富化状态结构化字段（哪些有全文/哪些没有/为什么没有）
+                        "enrichment_results": ctx.enrichment_results,
                     }
                 }))
             } else {

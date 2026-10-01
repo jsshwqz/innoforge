@@ -11,11 +11,18 @@ use crate::pipeline::context::{PipelineContext, PipelineProgress};
 use anyhow::Result;
 
 /// 执行 Step 11: AI 深度分析（多维推演引擎）
+///
+/// MB2: 在推演开始前，先对 top-N 专利做免费全文富化（共用冷却表）。
+/// 富化结果存入 `ctx.enrichment_results`，供 `build_user_context` 使用全文替代摘要。
 pub async fn deep_analysis(
     ctx: &mut PipelineContext,
     ai: &AiClient,
+    db: &Database,
     progress_tx: &Option<tokio::sync::broadcast::Sender<PipelineProgress>>,
 ) -> Result<()> {
+    // MB2: 富化 top-N 专利的全文（无付费 Key 可达，冷却表共用）
+    enrich_top_n(ctx, db).await;
+
     // 运行多维深度推演引擎
     let result = super::deep_reasoning::run_deep_reasoning(ctx, ai, progress_tx).await?;
 
@@ -311,4 +318,131 @@ pub async fn extract_feature_cards_ai(
     }
 
     Ok(())
+}
+
+/// MB2: 对 top-N 专利做免费全文富化。
+///
+/// - N = [`crate::search::enrichment::DEFAULT_ENRICH_TOP_N`]（默认 5）
+/// - 从 `top_matches` 提取专利号，调 [`enrich_patent_free`]
+/// - 结果存入 `ctx.enrichment_results`（结构化，供响应侧使用）
+/// - 若富化成功且专利有全文，更新 `RankedMatch.snippet` 为 description+claims
+/// - 冷却命中时零出网，如实记录原因
+async fn enrich_top_n(ctx: &mut PipelineContext, db: &Database) {
+    use crate::search::enrichment::{
+        enrich_patent_free, enrich_result_to_status, extract_patent_number, EnrichResult,
+        DEFAULT_ENRICH_TOP_N,
+    };
+
+    let n = DEFAULT_ENRICH_TOP_N;
+    let matches: Vec<_> = ctx.top_matches.iter().take(n).cloned().collect();
+    let mut statuses = Vec::with_capacity(matches.len());
+
+    for m in &matches {
+        let pn = extract_patent_number(&m.source_id, &m.source_url);
+        let pn_str = pn.as_deref().unwrap_or("");
+        if pn_str.is_empty() {
+            statuses.push(enrich_result_to_status(
+                &m.source_id,
+                "",
+                &EnrichResult::NotFound,
+            ));
+            continue;
+        }
+
+        tracing::info!("[MB2] Enriching patent {} ({})", pn_str, m.source_title);
+
+        let result = enrich_patent_free(db, pn_str).await;
+        let status = enrich_result_to_status(&m.source_id, pn_str, &result);
+        statuses.push(status);
+    }
+
+    // 更新 snippet：对富化成功的专利，用全文替代摘要
+    for m in &matches {
+        let pn = extract_patent_number(&m.source_id, &m.source_url);
+        let pn_str = pn.as_deref().unwrap_or("");
+        if pn_str.is_empty() {
+            continue;
+        }
+        if let Ok(Some(p)) = db.get_patent(pn_str) {
+            let full_text = if !p.description.is_empty() && !p.claims.is_empty() {
+                format!("{}\n\n## 权利要求\n\n{}", p.description, p.claims)
+            } else if !p.description.is_empty() {
+                p.description.clone()
+            } else if !p.claims.is_empty() {
+                format!("## 权利要求\n\n{}", p.claims)
+            } else {
+                continue;
+            };
+            // 只在全文比摘要更长时替换（避免用短全文替换长摘要）
+            if full_text.len() > m.snippet.len() {
+                if let Some(target) = ctx
+                    .top_matches
+                    .iter_mut()
+                    .find(|rm| rm.source_id == m.source_id)
+                {
+                    target.snippet = full_text;
+                }
+            }
+        }
+    }
+
+    ctx.enrichment_results = statuses;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::pipeline::context::RankedMatch;
+
+    #[test]
+    fn test_extract_patent_number_from_ranked_match() {
+        use crate::search::enrichment::extract_patent_number;
+        // Local patent
+        let pn = extract_patent_number("patent_local_CN116401354A", "");
+        assert_eq!(pn, Some("CN116401354A".to_string()));
+        // From URL
+        let pn = extract_patent_number(
+            "patent_online_0",
+            "https://patents.google.com/patent/US12345678B2/en",
+        );
+        assert_eq!(pn, Some("US12345678B2".to_string()));
+    }
+
+    #[test]
+    fn test_default_enrich_top_n_is_5() {
+        assert_eq!(crate::search::enrichment::DEFAULT_ENRICH_TOP_N, 5);
+    }
+
+    #[tokio::test]
+    async fn test_enrich_top_n_with_empty_matches() {
+        let db = crate::db::Database::init(":memory:").unwrap();
+        let mut ctx = PipelineContext::new("test", "title", "desc");
+        enrich_top_n(&mut ctx, &db).await;
+        assert!(ctx.enrichment_results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_enrich_top_n_respects_limit() {
+        let db = crate::db::Database::init(":memory:").unwrap();
+        let mut ctx = PipelineContext::new("test", "title", "desc");
+        // Create 10 matches — only 5 should be processed
+        for i in 0..10 {
+            ctx.top_matches.push(RankedMatch {
+                rank: i + 1,
+                source_id: format!("patent_online_{i}"),
+                source_title: format!("Patent {i}"),
+                source_type: "patent".to_string(),
+                source_url: String::new(),
+                snippet: "abstract".to_string(),
+                combined_score: 0.5,
+                tokens: Vec::new(),
+            });
+        }
+        enrich_top_n(&mut ctx, &db).await;
+        // Should have exactly 5 results (top-5), all NotFound since no patents in DB
+        assert_eq!(ctx.enrichment_results.len(), 5);
+        for s in &ctx.enrichment_results {
+            assert_eq!(s.reason, "not_found");
+        }
+    }
 }

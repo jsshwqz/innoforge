@@ -1,4 +1,5 @@
 use super::state::PipelineStep;
+use crate::search::enrichment::EnrichmentStatus;
 use serde::{Deserialize, Serialize};
 
 fn default_branch() -> String {
@@ -310,6 +311,10 @@ pub struct PipelineContext {
     #[serde(default)]
     pub experiment_results: Vec<ExperimentResult>,
 
+    // MB2: 富化状态 / Enrichment status for top-N patents
+    #[serde(default)]
+    pub enrichment_results: Vec<EnrichmentStatus>,
+
     // 元数据
     pub current_step: PipelineStep,
     pub step_results: Vec<StepResult>,
@@ -349,6 +354,7 @@ impl PipelineContext {
             iteration_count: 0,
             parent_version_id: String::new(),
             experiment_results: Vec::new(),
+            enrichment_results: Vec::new(),
             current_step: PipelineStep::ParseInput,
             step_results: Vec::new(),
         }
