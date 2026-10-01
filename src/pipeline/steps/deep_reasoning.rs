@@ -124,6 +124,9 @@ const SYNTHESIS_SYSTEM: &str = "你是一位跨学科整合大师。你收到了
 
 /// 构建用户上下文（所有维度共用的输入数据）
 fn build_user_context(ctx: &PipelineContext) -> String {
+    // MB2: snippet 可能已被 enrich_top_n 替换为全文（description+claims）。
+    // 此处的 120 字符截断属 MB3 待修的 8 处 chars().take 之一（改走 truncate_for_ai），
+    // 本包不修截断，但富化结果已完整存入 ctx.enrichment_results（结构化、不截断）。
     let top_matches: String = ctx
         .top_matches
         .iter()

@@ -36,6 +36,7 @@
 
 pub mod breaker;
 pub mod chain;
+pub mod enrichment;
 pub mod merge;
 pub mod model;
 pub mod provider;

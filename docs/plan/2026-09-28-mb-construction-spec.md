@@ -29,7 +29,7 @@
 ### 1.2 嵌入 / 向量（MB0 的对象）
 
 - TF-IDF / n-gram 实现**三份互不共享的拷贝**：`src/vector/mod.rs:26-40`（`CharNGramTokenizer::tokenize`）、`src/rag/chunker.rs:57-66`、`src/routes/search.rs:852-863`。三者都是 `cleaned[i..i+n]` **按字节索引切 String**，而 `cleaned.len()` 是字节长度 ⇒ 中文（3 字节/字）必然踩非字符边界，**panic**。全仓无 `char_indices` / `floor_char_boundary` 防护。
-- `patents_embedding`（迁移 v20）的写入函数 `db::save_patent_embedding`（`db/vector.rs:6`）唯一调用方是 `vector/mod.rs:166` 的 `compute_and_save_embedding`，而后者**全仓零调用** ⇒ 生产库该表恒 0 行。
+- `patents_embedding`（迁移 v20）的写入函数 `db::save_patent_embedding`（`db/vector.rs:6`）唯一调用方是 `vector/mod.rs:159` 的 `compute_and_save_embedding`，而后者**全仓零调用** ⇒ 生产库该表恒 0 行。
 - `/api/search/vector`（`common.rs:239` 注册）全表扫 blob 算 cosine（`routes/search.rs:771-799`），且 `count_embeddings()`（`:767`）**>0 才启用向量档**，0 行时静默只回 BM25 RRF 并如实带 `vector_count: 0`（`:847`）。
 - 现「向量」是把 term 分数排序后填充 512 维、**丢弃 term→维度映射**（`vector/mod.rs:77` 自注 "no IDF without corpus"，`:81-91`）⇒ 查询向量与文档向量不在同一可比空间，相似度数值不构成语义相关性。**这是已知局限，本轮不修，但必须写明。**
 
@@ -37,7 +37,13 @@
 
 - `src/rag/` 四文件（`mod.rs` `build_chunks_from_patent` / `rag_search`；`chunker.rs`；`retriever.rs` `retrieve_chunks` + `retrieve_chunks_by_keyword`（空占位）；`assembler.rs`）。`patent_chunks`（迁移 v21）的写入口 `db::save_patent_chunks`（`db/rag.rs:17`）**全仓零调用点**；`rag::` 在 `src/rag` 之外零引用（仅 `lib.rs:20` 声明）；`build_router` 无任何 rag 路由。
 - 深度分析喂给 AI 的内容**不含专利全文**：`pipeline/steps/analysis.rs:37 deep_analysis_simple`（拼装 `:77-113`）与 `pipeline/steps/deep_reasoning.rs:126 build_user_context`（`:164-179`）只喂用户创意的 title/description + `top_matches` 的摘要（snippet 源自 `pipeline/steps/search.rs:164` 的 `p.abstract_text`）。
-- 两处截断**违反 AGENTS.md §2.5 的数据完整性纪律**：`analysis.rs:50` 与 `deep_reasoning.rs:138` 用 `chars().take(150/120)`，不走 `ai::client::truncate_for_ai`（`:267`，带完整性提示的既有工具）。
+- **八处** `chars().take` 截断**违反 AGENTS.md §2.5 的数据完整性纪律**（不走 `ai::client::truncate_for_ai`（`:267`，带完整性提示的既有工具））：
+  - `analysis.rs:50`（snippet→AI prompt，150 字符）、`:156`（ai_analysis→AI prompt，500）、`:180`（snippet→FeatureCard description，300）、`:193`（snippet→core_structure，200）、`:250`（ai_analysis→AI prompt，2000）
+  - `deep_reasoning.rs:138`（snippet→AI prompt，120）
+  - `oa_response.rs:137`（snippet→AI prompt，80）
+  - `claim_tree.rs:24`（ai_analysis→AI prompt，800）
+  
+  其中 `analysis.rs:50`/`:180`/`:193`、`deep_reasoning.rs:138`、`oa_response.rs:137` 截断的是专利摘要喂给 AI 的内容；`analysis.rs:156`/`:250`、`claim_tree.rs:24` 截断的是 AI 自身产出再喂回。两类都违反 §2.5「传给 AI 的数据必须保留全文」纪律。
 
 ### 1.4 幻觉防线与出处（MB1 / MB4 的对象）
 
@@ -54,7 +60,8 @@
 
 ### MB0 · Embedder 归一 + char-boundary 安全 + 写入链接通（第一棒，无前置）
 
-- **范围**：① 三份 n-gram/TF 拷贝收敛为**单一出处**（建议留在 `src/vector/mod.rs`，另两处改为调用它；删除重复实现而不是加 `#[allow(dead_code)]`）；② 字节切片全部改字符边界安全（`Vec<char>` 窗口或 `char_indices`）；③ `compute_and_save_embedding` 接上真实调用点——**只接「新入库顺手算」**（挂在 `db/patent.rs::insert_patent` 之后的单一写入口侧），**禁止**在本包做全表批量回填（4.3GB 用户库，风险与耗时都不可控）；④ `/api/search/vector` 的查询向量与写入端**同函数同实现**（不留第二套标准）；⑤ 更正 `vector/mod.rs:77` 一带注释与规格书：写清「当前向量丢弃 term 映射 ⇒ 相似度不构成语义能力，本轮有意不修」。
+- **范围**：① 三份 n-gram/TF 拷贝收敛为**单一出处**（建议留在 `src/vector/mod.rs`，另两处改为调用它；删除重复实现而不是加 `#[allow(dead_code)]`）；② 字节切片全部改字符边界安全（`Vec<char>` 窗口或 `char_indices`）；③ `compute_and_save_embedding` 接上真实调用点——**只接「新入库顺手算」**（挂在 `db/patent.rs::insert_patent` 之后的单一写入口侧），**禁止**在本包做全表批量回填（4.3GB 用户库，风险与耗时都不可控）；
+  - ⚠️ **架构提示**：`compute_and_save_embedding` 签名需要 `&VectorIndex`，而 `insert_patent`（`db/patent.rs:7`）只有 `&self`（Database），`AppState`（`routes/mod.rs:385`）也不持有 `VectorIndex`。执行棒须在以下方案中选一并落注释：(a) 在调用方（如 `routes/patent.rs` / `search/providers/serpapi.rs`）于 `insert_patent` 返回后用默认参数构造 `VectorIndex` 再调 `compute_and_save_embedding`——**推荐**，不改 `insert_patent` 签名、不碰红线文件；(b) 在 `insert_patent` 内部内联嵌入计算——需让 `db/patent.rs` 依赖 `vector` 模块，且 tokenizer 参数硬编码在 DB 层。无论选哪个，embedding 失败**不得回滚**专利入库（embedding 是附带优化，不是入库前提），失败只 `tracing::warn!` 记账；④ `/api/search/vector` 的查询向量与写入端**同函数同实现**（不留第二套标准）；⑤ 更正 `vector/mod.rs:77` 一带注释与规格书：写清「当前向量丢弃 term 映射 ⇒ 相似度不构成语义能力，本轮有意不修」。
 - **必做取证**：中文 panic 回归用例（纯中文 3 字节 / 中英混排 / emoji / 对 `0..len` 全起点切片的循环用例），**先在旧实现上跑红、新实现跑绿**，把红→绿证据写进 PR body（这是本包唯一的「证明我改对了」的锚）。
 - **验收**：临时空库实例入库一条中文专利 → `count_embeddings()` 由 0 变 ≥1、`/api/search/vector` 的 `vector_count` 如实翻转（此前恒 0）；同一中文长文本反复 tokenize 零 panic；`routes/search.rs:852` 与 `rag/chunker.rs:57` 两处拷贝消失。
 - **门禁**：fmt / `clippy --all-targets -D warnings` / `cargo test`（基线 721，本包新增 N 条 ⇒ 721 + 2N 对账）；templates/static 零改动 ⇒ e2e 与 HTML 扫描按 DoD 不适用。
@@ -67,7 +74,7 @@
 
 ### MB3 · RAG 接线（切片→检索→组装→引用）（第三棒，依赖 MB0+MB2）
 
-- **范围**：把已有但未接线的 `src/rag/` 真正挂上：① 入库/富化时写 `patent_chunks`（单一写入口侧，与 MB0 同一挂点纪律）；② 深度分析前自动取 top-N 专利的全文切片进 prompt，每条切片带**可回溯引用编号**（专利号 + 段/权号）；③ `analysis.rs:50` / `deep_reasoning.rs:138` 的 `chars().take` 改走 `truncate_for_ai`，且**两处同批改**（改一处另一处仍违规）；④ 无全文时降级为摘要档并在上下文里如实标注（不得静默把「没取到」变成「没有相关内容」）。
+- **范围**：把已有但未接线的 `src/rag/` 真正挂上：① 入库/富化时写 `patent_chunks`（单一写入口侧，与 MB0 同一挂点纪律）；② 深度分析前自动取 top-N 专利的全文切片进 prompt，每条切片带**可回溯引用编号**（专利号 + 段/权号）；③ **全部八处** `chars().take` 截断改走 `truncate_for_ai`（`analysis.rs:50/156/180/193/250`、`deep_reasoning.rs:138`、`oa_response.rs:137`、`claim_tree.rs:24`），**八处同批改**（少改一处则该处仍违规）；④ 无全文时降级为摘要档并在上下文里如实标注（不得静默把「没取到」变成「没有相关内容」）。
 - **验收（无 Key 环境）**：一份真实中文专利库状态下，深度模式报告上下文里出现 **≥5 篇专利全文片段引用**，每条引用能反查到 `patent_chunks` 的行；`retriever::retrieve_chunks_by_keyword` 的空占位要么实现要么删除并销账（**禁止留装饰性空函数**）。
 
 ### MB4 · 出处标注体系（第四棒，依赖 MB3 的引用编号）
