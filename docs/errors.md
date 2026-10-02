@@ -887,3 +887,20 @@
 - **解法 / Fix**: ① `git push`：`git -c http.proxy= -c https.proxy= push …`（空值覆盖配置，实测一次成功推上 `exec/mb0-embedder`）；② `gh`：`$env:HTTP_PROXY=''; $env:HTTPS_PROXY=''; $env:http_proxy=''; $env:https_proxy=''; $env:ALL_PROXY='';` 清空全部代理变量后再 `gh pr create`（实测成功开出 PR #28）。
 - **预防 / Prevention**: ① 遇 `via 127.0.0.1` / `proxyconnect` 字样先试清代理直连，不要直接下「网络不通」结论；② git 与 gh 的代理来源不同（config vs 环境变量），一个清了另一个未必清，两路都要处理；③ `GITHUB_TOKEN` 环境变量仍须 `Remove-Item Env:GITHUB_TOKEN` 去掉（见 2026-09-28 gh pr merge 403 条目），两件事叠加时先清 token 再清代理。
 - **提交 / Commit**: MB0 分支 `exec/mb0-embedder`（PR #28）文档回写附带
+
+## 2026-10-03: glm-5.2 流式回复 content 为空
+
+**问题**: glm-5.2 推理模型流式返回时，`content` 字段前期为空字符串，`reasoning_content` 有值。
+旧代码 `delta["content"].as_str().or_else(|| delta["reasoning_content"].as_str())` 中，
+`as_str()` 返回 `Some("")` 而非 `None`，`or_else` 不执行，导致 `reasoning_content` 永远不被取到。
+同时兜底逻辑捕获了 `role` 和 `reasoning_content` 字段，把推理过程当成回复发出。
+
+**修复**: 
+1. `as_str()` 后加 `.filter(|c| !c.is_empty())` 过滤空字符串
+2. 兜底逻辑排除 `role`/`finish_reason`/`index`/`reasoning_content` 元数据字段
+3. `max_tokens` 从 16384 增至 32768（推理模型推理过程消耗大量 tokens）
+
+**教训**: 
+- `Option::as_str()` 对空字符串返回 `Some("")` 不是 `None`，`or_else` 不会触发
+- 推理模型（glm-5.2）的 `reasoning_content` 是推理过程，不应展示给用户
+- 推理模型需要更大的 `max_tokens`，推理过程可能消耗 10000+ tokens
