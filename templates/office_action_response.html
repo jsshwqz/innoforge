@@ -213,17 +213,29 @@
     function getResponseButtonText() {
         var checked = document.querySelector('input[name="oa_type"]:checked');
         var oaType = checked ? checked.value : 'first_exam';
-        if (oaType === 'reject_review') {
-            return '📝 ' + (t('oar.btnGenerateReexam') || '生成复审请求书');
+        if (oaType === 'reject_review' || oaType === 'reexamination_request') {
+            return '📝 ' + (t('oar.btnGenerateReexamReq') || '生成复审请求书');
         }
-        return getResponseButtonText();
+        if (oaType === 'reexamination_decision') {
+            return '📝 ' + (t('oar.btnGenerateReexamDecision') || '生成复审决定答复');
+        }
+        if (oaType === 'admin_lawsuit') {
+            return '📝 ' + (t('oar.btnGenerateAdminLawsuit') || '生成行政诉讼起诉状');
+        }
+        return '📝 ' + (t('oar.btnGenerateResponse') || '生成答复书');
     }
 
     function getSection5Title() {
         var checked = document.querySelector('input[name="oa_type"]:checked');
         var oaType = checked ? checked.value : 'first_exam';
-        if (oaType === 'reject_review') {
+        if (oaType === 'reject_review' || oaType === 'reexamination_request') {
             return t('oar.section5Reexam') || '复审请求书草稿';
+        }
+        if (oaType === 'reexamination_decision') {
+            return t('oar.section5ReexamDecision') || '复审决定答复草稿';
+        }
+        if (oaType === 'admin_lawsuit') {
+            return t('oar.section5AdminLawsuit') || '行政诉讼起诉状草稿';
         }
         return t('oar.section5') || '意见陈述书草稿';
     }
@@ -231,8 +243,14 @@
     function getGenerateHintText() {
         var checked = document.querySelector('input[name="oa_type"]:checked');
         var oaType = checked ? checked.value : 'first_exam';
-        if (oaType === 'reject_review') {
+        if (oaType === 'reject_review' || oaType === 'reexamination_request') {
             return t('oar.generateHintReexam') || '确认分析无误后可生成正式复审请求书';
+        }
+        if (oaType === 'reexamination_decision') {
+            return t('oar.generateHintReexamDecision') || '确认分析无误后可生成正式复审决定答复';
+        }
+        if (oaType === 'admin_lawsuit') {
+            return t('oar.generateHintAdminLawsuit') || '确认分析无误后可生成正式行政诉讼起诉状';
         }
         return t('oar.generateHint') || '确认分析无误后可生成正式答复书';
     }
@@ -2986,7 +3004,7 @@
             + '<div style="background:#161b22;border:1px solid #30363d;border-radius:12px;padding:24px;max-width:400px;width:100%;text-align:center;">'
             + '<h3 style="margin:0 0 16px 0;color:#c9d1d9;">✅ 讨论导入成功</h3>'
             + '<p style="margin:0 0 20px 0;color:#8b949e;font-size:13px;line-height:1.6;">讨论内容已恢复，可立即生成答复书提交。</p>'
-            + '<button id="oa-gen-btn" style="padding:10px 24px;background:#238636;color:#fff;border:none;border-radius:8px;font-size:14px;cursor:pointer;" data-i18n="oar.btnGenerate">📝 生成答复书</button>'
+            + '<button id="oa-gen-btn" style="padding:10px 24px;background:#238636;color:#fff;border:none;border-radius:8px;font-size:14px;cursor:pointer;" data-i18n="oar.btnGenerateResponse">📝 生成答复书</button>'
             + '</div>';
         document.body.appendChild(dialog);
         document.getElementById('oa-gen-btn').addEventListener('click', function() {
