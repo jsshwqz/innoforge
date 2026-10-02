@@ -10,6 +10,8 @@ on:
   push:
     tags:
       - 'v*'
+    branches:
+      - main
 
 env:
   CARGO_TERM_COLOR: always
@@ -174,7 +176,7 @@ jobs:
     name: Sync Release to Gitee
     needs: release
     runs-on: ubuntu-latest
-    if: ${{ secrets.GITEE_TOKEN != '' }}
+    if: needs.validate.outputs.should_run == 'true' && ${{ secrets.GITEE_TOKEN != '' }}
     steps:
       - name: Download GitHub release assets
         env:
