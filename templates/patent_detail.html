@@ -115,8 +115,8 @@
     <script src="/static/cad.js"></script>
     <script>
     // Allow inline event handlers in sanitized HTML
-    if (typeof DOMPurify !== '"'"'undefined'"'"' && DOMPurify.setConfig) {
-        DOMPurify.setConfig({ADD_ATTR: ['"'"'onclick'"'"', '"'"'onkeydown'"'"', '"'"'onchange'"'"', '"'"'oninput'"'"', '"'"'onload'"'"', '"'"'onfocus'"'"', '"'"'onblur'"'"']});
+    if (typeof DOMPurify !== 'undefined' && DOMPurify.setConfig) {
+        DOMPurify.setConfig({ADD_ATTR: ['onclick', 'onkeydown', 'onchange', 'oninput', 'onload', 'onfocus', 'onblur']});
     }
     // Ensure DOMPurify never throws even if script failed to load
     if (typeof DOMPurify === 'undefined' || typeof DOMPurify.sanitize !== 'function') {
