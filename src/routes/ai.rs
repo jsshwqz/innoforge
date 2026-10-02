@@ -549,7 +549,11 @@ pub async fn api_ai_chat_conclusions(
                     conv.push_str(&format!("\n【{}】{}\n", label, m.content));
                 }
             }
-            Err(e) => return Json(json!({"error": format!("查询聊天记录失败: {}", e)})),
+            Err(e) => {
+                return Json(json!({
+                    "error": format!("查询聊天记录失败: {}", e)
+                }))
+            }
         }
     } else if let Some(arr) = history_raw {
         if arr.is_empty() {
@@ -596,7 +600,7 @@ pub async fn api_ai_chat_conclusions(
             let _ = s.db.log_ai_call(&ai, "ai-chat-conclusions", None, None);
             Json(json!({"status": "ok", "conclusions": conclusions}))
         }
-        Err(e) => Json(json!({"error": format!("导出结论失败: {}", e)})),
+        Err(e) => Json(json!({ "error": format!("导出结论失败: {}", e) })),
     }
 }
 
@@ -800,7 +804,9 @@ pub async fn api_ai_analyze_results(
                 Err(_) => Json(json!({"status": "ok", "analysis": {"raw": content}})),
             }
         }
-        Err(e) => Json(json!({"error": format!("AI分析失败: {}。请在设置页面配置AI服务。", e)})),
+        Err(e) => Json(json!({
+            "error": format!("AI分析失败: {}。请在设置页面配置AI服务。", e)
+        })),
     }
 }
 
@@ -829,7 +835,7 @@ pub async fn api_ai_claims_analysis(
             let _ = s.db.log_ai_call(&ai, "ai-claims-analysis", None, None);
             Json(json!({"status": "ok", "analysis": content}))
         }
-        Err(e) => Json(json!({"error": format!("分析失败: {}", e)})),
+        Err(e) => Json(json!({ "error": format!("分析失败: {}", e) })),
     }
 }
 
@@ -874,10 +880,12 @@ pub async fn api_ai_risk_assessment(
     }
 
     if patents_info.is_empty() {
-        return Json(json!({"error": format!(
+        return Json(json!({
+            "error": format!(
             "未找到指定的专利「{}」。请确认这些专利已通过搜索页收录到本地库（支持专利号或内部 ID）。",
             not_found.join(", ")
-        )}));
+        )
+        }));
     }
 
     let ai = s
@@ -890,7 +898,7 @@ pub async fn api_ai_risk_assessment(
             let _ = s.db.log_ai_call(&ai, "ai-risk-assessment", None, None);
             Json(json!({"status": "ok", "analysis": content}))
         }
-        Err(e) => Json(json!({"error": format!("评估失败: {}", e)})),
+        Err(e) => Json(json!({ "error": format!("评估失败: {}", e) })),
     }
 }
 
@@ -955,7 +963,7 @@ pub async fn api_ai_compare_matrix(
             let _ = s.db.log_ai_call(&ai, "ai-compare-matrix", None, None);
             Json(json!({"status": "ok", "analysis": content}))
         }
-        Err(e) => Json(json!({"error": format!("对比失败: {}", e)})),
+        Err(e) => Json(json!({ "error": format!("对比失败: {}", e) })),
     }
 }
 
@@ -1120,7 +1128,7 @@ pub async fn api_ai_inventiveness_analysis(
 ) -> Json<serde_json::Value> {
     let my_info = match resolve_my_patent(&s.db, &req) {
         Ok(info) => info,
-        Err(e) => return Json(json!({"error": e})),
+        Err(e) => return Json(json!({ "error": e })),
     };
 
     let refs = req["references"]
@@ -1135,7 +1143,7 @@ pub async fn api_ai_inventiveness_analysis(
 
     let refs_info = match resolve_references(&s.db, &refs) {
         Ok(info) => info,
-        Err(e) => return Json(json!({"error": e})),
+        Err(e) => return Json(json!({ "error": e })),
     };
 
     let ai = s
@@ -1148,7 +1156,7 @@ pub async fn api_ai_inventiveness_analysis(
             let _ = s.db.log_ai_call(&ai, "ai-inventiveness", None, None);
             Json(json!({"status": "ok", "analysis": content}))
         }
-        Err(e) => Json(json!({"error": format!("创造性分析失败: {}", e)})),
+        Err(e) => Json(json!({ "error": format!("创造性分析失败: {}", e) })),
     }
 }
 
@@ -1173,13 +1181,13 @@ pub async fn api_ai_office_action_response(
         } else {
             match resolve_my_patent(&s.db, &req) {
                 Ok(info) => info,
-                Err(e) => return Json(json!({"error": e})),
+                Err(e) => return Json(json!({ "error": e })),
             }
         }
     } else {
         match resolve_my_patent(&s.db, &req) {
             Ok(info) => info,
-            Err(e) => return Json(json!({"error": e})),
+            Err(e) => return Json(json!({ "error": e })),
         }
     };
 
@@ -1242,7 +1250,7 @@ pub async fn api_ai_office_action_response(
         ("references", &refs_info, OA_RESPONSE_DISCUSSION_MAX_CHARS),
     ] {
         if let Some(error) = oa_capacity_error(field, value, max_chars) {
-            return Json(json!({"error": error}));
+            return Json(json!({ "error": error }));
         }
     }
 
@@ -1331,7 +1339,7 @@ pub async fn api_ai_office_action_response(
             }
             Json(json!({"status": "ok", "analysis": content}))
         }
-        Err(e) => Json(json!({"error": format!("分析失败: {}", e)})),
+        Err(e) => Json(json!({ "error": format!("分析失败: {}", e) })),
     }
 }
 
@@ -2146,7 +2154,7 @@ pub async fn api_ai_check_amendments(
             let _ = s.db.log_ai_call(&ai, "ai-claim-amendments", None, None);
             Json(json!({"status": "ok", "analysis": content}))
         }
-        Err(e) => Json(json!({"error": format!("审查失败: {}", e)})),
+        Err(e) => Json(json!({ "error": format!("审查失败: {}", e) })),
     }
 }
 
@@ -2177,7 +2185,7 @@ pub async fn api_ai_threat_assessment(
             let _ = s.db.log_ai_call(&ai, "ai-threat-assessment", None, None);
             Json(json!({"status": "ok", "analysis": content}))
         }
-        Err(e) => Json(json!({"error": format!("威胁评估失败: {}", e)})),
+        Err(e) => Json(json!({ "error": format!("威胁评估失败: {}", e) })),
     }
 }
 
@@ -2204,7 +2212,9 @@ pub async fn api_ai_claim_chart(
             let _ = s.db.log_ai_call(&ai, "ai-claim-chart", None, None);
             Json(json!({"status": "ok", "analysis": content}))
         }
-        Err(e) => Json(json!({"error": format!("权利要求对照表生成失败: {}", e)})),
+        Err(e) => Json(json!({
+            "error": format!("权利要求对照表生成失败: {}", e)
+        })),
     }
 }
 
@@ -2250,7 +2260,9 @@ pub async fn api_ai_cost_summary(State(s): State<AppState>) -> Json<serde_json::
     let days = 30i64;
     match s.db.get_cost_summary(days) {
         Ok(summary) => Json(summary),
-        Err(e) => Json(json!({"error": format!("Failed to get cost summary: {}", e)})),
+        Err(e) => Json(json!({
+            "error": format!("Failed to get cost summary: {}", e)
+        })),
     }
 }
 
@@ -2263,7 +2275,9 @@ pub async fn api_ai_cost_records(State(s): State<AppState>) -> Json<serde_json::
             "count": records.len(),
             "records": records,
         })),
-        Err(e) => Json(json!({"error": format!("Failed to get cost records: {}", e)})),
+        Err(e) => Json(json!({
+            "error": format!("Failed to get cost records: {}", e)
+        })),
     }
 }
 
@@ -2301,7 +2315,9 @@ pub async fn api_ai_cost_save(
 
     match s.db.save_cost_record(&record) {
         Ok(_) => Json(json!({"status": "ok", "id": record.id})),
-        Err(e) => Json(json!({"error": format!("Failed to save cost record: {}", e)})),
+        Err(e) => Json(json!({
+            "error": format!("Failed to save cost record: {}", e)
+        })),
     }
 }
 #[cfg(test)]

@@ -532,13 +532,15 @@ pub async fn api_google_exchange_handler(
                             .as_str()
                             .or_else(|| token_data["error"].as_str())
                             .unwrap_or("未知错误");
-                        Json(json!({"error": format!("令牌交换失败: {}", err_msg)}))
+                        Json(json!({
+                            "error": format!("令牌交换失败: {}", err_msg)
+                        }))
                     }
                 }
-                Err(e) => Json(json!({"error": format!("解析响应失败: {}", e)})),
+                Err(e) => Json(json!({ "error": format!("解析响应失败: {}", e) })),
             }
         }
-        Err(e) => Json(json!({"error": format!("网络请求失败: {}", e)})),
+        Err(e) => Json(json!({ "error": format!("网络请求失败: {}", e) })),
     }
 }
 

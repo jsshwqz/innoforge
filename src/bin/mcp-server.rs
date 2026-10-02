@@ -221,7 +221,7 @@ Try searching for a different patent number or ID.
 
 fn call_patent_analyze(args: &Value) -> Result<String, String> {
     let patent_id = args["patent_id"].as_str().ok_or("Missing 'patent_id'")?;
-    let body = json!({"patent_number": patent_id});
+    let body = json!({ "patent_number": patent_id });
     let data = http_post("/api/ai/summarize", &body)?;
     Ok(data["content"]
         .as_str()

@@ -759,7 +759,7 @@ mod serpapi_key_parsing_tests {
     const VALID_KEY: &str = "abcdEFGHijklMNOPqrstUVWX";
 
     fn request(api_keys: serde_json::Value) -> serde_json::Value {
-        json!({"api_keys": api_keys})
+        json!({ "api_keys": api_keys })
     }
 
     #[test]
@@ -932,7 +932,7 @@ mod epo_credential_settings_tests {
 
     #[test]
     fn masked_echo_submits_back_as_the_real_value() {
-        let req = json!({"epo_key": EPO_KEY_MASK});
+        let req = json!({ "epo_key": EPO_KEY_MASK });
         assert_eq!(
             Some(EPO_KEY_VALUE.to_string()),
             parse_epo_credential(&req, "epo_key", EPO_KEY_VALUE, "EPO Consumer Key")
@@ -971,7 +971,7 @@ mod epo_credential_settings_tests {
             "epo\tsecret",         // 带制表符
             too_long.as_str(),     // 太长
         ] {
-            let req = json!({"epo_key": bad});
+            let req = json!({ "epo_key": bad });
             assert!(
                 parse_epo_credential(&req, "epo_key", "", "EPO Consumer Key").is_err(),
                 "{bad:?} 应被拒"
@@ -982,7 +982,7 @@ mod epo_credential_settings_tests {
                 .is_err()
         );
         assert!(parse_epo_credential(
-            &json!({"epo_key": EPO_KEY_VALUE}),
+            &json!({ "epo_key": EPO_KEY_VALUE }),
             "epo_key",
             "",
             "EPO Consumer Key"
@@ -1113,7 +1113,7 @@ mod epo_credential_settings_tests {
         // ② 只保存 SerpAPI → EPO 两半都不动（SerpAPI 自己被换成新 Key 是本端点的既有语义）
         let serpapi_only = api_save_serpapi(
             State(state.clone()),
-            Json(json!({"api_keys": [NEW_SERPAPI_KEY]})),
+            Json(json!({ "api_keys": [NEW_SERPAPI_KEY] })),
         )
         .await;
         assert_eq!("ok", serpapi_only.0["status"], "{:?}", serpapi_only.0);

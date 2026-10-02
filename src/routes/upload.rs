@@ -218,7 +218,7 @@ pub async fn api_upload_compare(
             .ai_client();
         match describe_image_with_fallback(&ai_client, &file_bytes, &ext).await {
             Ok(description) => description,
-            Err(e) => return Json(json!({"error": format!("图片识别失败: {}", e)})),
+            Err(e) => return Json(json!({ "error": format!("图片识别失败: {}", e) })),
         }
     } else if ext == "pdf" {
         match extract_pdf_text(&file_bytes).await {
@@ -242,9 +242,9 @@ pub async fn api_upload_compare(
                 match extract_pdf_via_ai_vision(&file_bytes, &ai_client).await {
                     Ok(t) => t,
                     Err(e) => {
-                        return Json(
-                            json!({"error": format!("PDF 提取失败（含 AI 视觉兜底）: {}", e)}),
-                        )
+                        return Json(json!({
+                            "error": format!("PDF 提取失败（含 AI 视觉兜底）: {}", e)
+                        }))
                     }
                 }
             }
@@ -254,7 +254,7 @@ pub async fn api_upload_compare(
         match extract_docx_text(&file_bytes) {
             Ok(text) if !text.trim().is_empty() => text,
             Ok(_) => return Json(json!({"error": "DOCX 文件无可提取的文字内容"})),
-            Err(e) => return Json(json!({"error": format!("DOCX 解析失败: {}", e)})),
+            Err(e) => return Json(json!({ "error": format!("DOCX 解析失败: {}", e) })),
         }
     } else if ext == "doc" {
         return Json(
@@ -320,7 +320,7 @@ pub async fn api_upload_compare(
                 "content_length": file_content.len()
             }))
         }
-        Err(e) => Json(json!({"error": format!("AI 分析失败: {}", e)})),
+        Err(e) => Json(json!({ "error": format!("AI 分析失败: {}", e) })),
     }
 }
 
@@ -382,7 +382,7 @@ pub async fn api_upload_extract(
             .ai_client();
         match describe_image_with_fallback(&ai_client, &file_bytes, &ext).await {
             Ok(desc) => desc,
-            Err(e) => return Json(json!({"error": format!("图片识别失败: {}", e)})),
+            Err(e) => return Json(json!({ "error": format!("图片识别失败: {}", e) })),
         }
     } else if ext == "pdf" {
         match extract_pdf_text(&file_bytes).await {
@@ -406,9 +406,9 @@ pub async fn api_upload_extract(
                 match extract_pdf_via_ai_vision(&file_bytes, &ai_client).await {
                     Ok(t) => t,
                     Err(e) => {
-                        return Json(
-                            json!({"error": format!("PDF 提取失败（含 AI 视觉兜底）: {}", e)}),
-                        )
+                        return Json(json!({
+                            "error": format!("PDF 提取失败（含 AI 视觉兜底）: {}", e)
+                        }))
                     }
                 }
             }
@@ -417,7 +417,7 @@ pub async fn api_upload_extract(
         match extract_docx_text(&file_bytes) {
             Ok(t) if t.trim().len() >= 100 => t,
             Ok(_) => return Json(json!({"error": "DOCX 无可提取文字"})),
-            Err(e) => return Json(json!({"error": format!("DOCX 解析失败: {}", e)})),
+            Err(e) => return Json(json!({ "error": format!("DOCX 解析失败: {}", e) })),
         }
     } else if ext == "doc" {
         return Json(json!({"error": "暂不支持 .doc 格式，请另存为 .docx 或 .pdf"}));
@@ -1139,7 +1139,7 @@ pub async fn api_patent_pdf_extract_text(
                         "method": "standard_fallback"
                     }));
                 }
-                _ => return Json(json!({"error": format!("PDF 文本提取失败: {}", e)})),
+                _ => return Json(json!({ "error": format!("PDF 文本提取失败: {}", e) })),
             }
         }
     };
@@ -1504,8 +1504,10 @@ mod runtime_temp_file_tests {
 /// §6.1 新增：文件解析器纯函数测试
 #[cfg(test)]
 mod file_parser_tests {
-    use super::{has_pdf_header, is_ip_literal, validate_pdf_content_length,
-        append_pdf_chunk, MAX_PDF_STORE_SIZE};
+    use super::{
+        append_pdf_chunk, has_pdf_header, is_ip_literal, validate_pdf_content_length,
+        MAX_PDF_STORE_SIZE,
+    };
 
     #[test]
     fn is_ip_literal_recognizes_ipv4() {

@@ -458,7 +458,7 @@ pub async fn api_recommend_similar(
                     .filter(|p| p.get("id").and_then(|i| i.as_str()) != Some(&id))
                     .take(5)
                     .collect();
-                Json(json!({"similar": filtered}))
+                Json(json!({ "similar": filtered }))
             } else {
                 Json(json!({"similar": []}))
             }

@@ -19,7 +19,9 @@ pub async fn api_create_collection(
     let id = uuid::Uuid::new_v4().to_string();
     match s.db.create_collection(&id, name, description) {
         Ok(()) => Json(json!({"status": "ok", "id": id, "name": name})),
-        Err(e) => Json(json!({"error": format!("Failed to create collection: {}", e)})),
+        Err(e) => Json(json!({
+            "error": format!("Failed to create collection: {}", e)
+        })),
     }
 }
 
@@ -38,9 +40,9 @@ pub async fn api_list_collections(State(s): State<AppState>) -> Json<serde_json:
                     })
                 })
                 .collect();
-            Json(json!({"collections": list}))
+            Json(json!({ "collections": list }))
         }
-        Err(e) => Json(json!({"error": format!("{}", e)})),
+        Err(e) => Json(json!({ "error": format!("{}", e) })),
     }
 }
 
@@ -50,7 +52,7 @@ pub async fn api_delete_collection(
 ) -> Json<serde_json::Value> {
     match s.db.delete_collection(&id) {
         Ok(()) => Json(json!({"status": "ok"})),
-        Err(e) => Json(json!({"error": format!("{}", e)})),
+        Err(e) => Json(json!({ "error": format!("{}", e) })),
     }
 }
 
@@ -73,7 +75,7 @@ pub async fn api_add_to_collection(
 
     match s.db.add_to_collection(patent_id, &collection_id) {
         Ok(()) => Json(json!({"status": "ok"})),
-        Err(e) => Json(json!({"error": format!("{}", e)})),
+        Err(e) => Json(json!({ "error": format!("{}", e) })),
     }
 }
 
@@ -83,7 +85,7 @@ pub async fn api_remove_from_collection(
 ) -> Json<serde_json::Value> {
     match s.db.remove_from_collection(&patent_id, &collection_id) {
         Ok(()) => Json(json!({"status": "ok"})),
-        Err(e) => Json(json!({"error": format!("{}", e)})),
+        Err(e) => Json(json!({ "error": format!("{}", e) })),
     }
 }
 
@@ -92,8 +94,8 @@ pub async fn api_get_collection_patents(
     Path(id): Path<String>,
 ) -> Json<serde_json::Value> {
     match s.db.get_collection_patents(&id) {
-        Ok(patents) => Json(json!({"patents": patents})),
-        Err(e) => Json(json!({"error": format!("{}", e)})),
+        Ok(patents) => Json(json!({ "patents": patents })),
+        Err(e) => Json(json!({ "error": format!("{}", e) })),
     }
 }
 
@@ -109,7 +111,7 @@ pub async fn api_add_tag(
 
     match s.db.add_tag(&patent_id, tag) {
         Ok(()) => Json(json!({"status": "ok"})),
-        Err(e) => Json(json!({"error": format!("{}", e)})),
+        Err(e) => Json(json!({ "error": format!("{}", e) })),
     }
 }
 
@@ -119,7 +121,7 @@ pub async fn api_remove_tag(
 ) -> Json<serde_json::Value> {
     match s.db.remove_tag(&patent_id, &tag) {
         Ok(()) => Json(json!({"status": "ok"})),
-        Err(e) => Json(json!({"error": format!("{}", e)})),
+        Err(e) => Json(json!({ "error": format!("{}", e) })),
     }
 }
 
@@ -128,8 +130,8 @@ pub async fn api_get_patent_tags(
     Path(patent_id): Path<String>,
 ) -> Json<serde_json::Value> {
     match s.db.get_patent_tags(&patent_id) {
-        Ok(tags) => Json(json!({"tags": tags})),
-        Err(e) => Json(json!({"error": format!("{}", e)})),
+        Ok(tags) => Json(json!({ "tags": tags })),
+        Err(e) => Json(json!({ "error": format!("{}", e) })),
     }
 }
 
@@ -140,9 +142,9 @@ pub async fn api_list_all_tags(State(s): State<AppState>) -> Json<serde_json::Va
                 .into_iter()
                 .map(|(tag, count)| json!({"tag": tag, "count": count}))
                 .collect();
-            Json(json!({"tags": list}))
+            Json(json!({ "tags": list }))
         }
-        Err(e) => Json(json!({"error": format!("{}", e)})),
+        Err(e) => Json(json!({ "error": format!("{}", e) })),
     }
 }
 
@@ -151,8 +153,8 @@ pub async fn api_get_patent_collections(
     Path(patent_id): Path<String>,
 ) -> Json<serde_json::Value> {
     match s.db.get_patent_collections(&patent_id) {
-        Ok(collection_ids) => Json(json!({"collection_ids": collection_ids})),
-        Err(e) => Json(json!({"error": format!("{}", e)})),
+        Ok(collection_ids) => Json(json!({ "collection_ids": collection_ids })),
+        Err(e) => Json(json!({ "error": format!("{}", e) })),
     }
 }
 

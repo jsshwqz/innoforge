@@ -777,7 +777,7 @@ pub async fn api_idea_chat(
     if let Err(e) =
         s.db.add_idea_message(&user_msg_id, &idea_id, "user", &stored_user_message)
     {
-        return Json(json!({"error": format!("保存消息失败: {}", e)}));
+        return Json(json!({ "error": format!("保存消息失败: {}", e) }));
     }
 
     // Call AI with full message history (preserves multi-turn context)
@@ -889,9 +889,9 @@ pub async fn api_idea_messages(
                     })
                 })
                 .collect();
-            Json(json!({"messages": list}))
+            Json(json!({ "messages": list }))
         }
-        Err(e) => Json(json!({"error": format!("{}", e)})),
+        Err(e) => Json(json!({ "error": format!("{}", e) })),
     }
 }
 
@@ -1641,7 +1641,7 @@ pub async fn api_idea_chat_conclusions(
             let _ = s.db.update_idea_summary(&idea_id, &conclusions);
             Json(json!({"status": "ok", "conclusions": conclusions}))
         }
-        Err(e) => Json(json!({"error": format!("导出结论失败: {}", e)})),
+        Err(e) => Json(json!({ "error": format!("导出结论失败: {}", e) })),
     }
 }
 
@@ -1694,7 +1694,7 @@ pub async fn api_idea_summarize_discussion(
             let _ = s.db.update_idea_summary(&idea_id, &summary);
             Json(json!({"status": "ok", "summary": summary}))
         }
-        Err(e) => Json(json!({"error": format!("总结生成失败: {}", e)})),
+        Err(e) => Json(json!({ "error": format!("总结生成失败: {}", e) })),
     }
 }
 
