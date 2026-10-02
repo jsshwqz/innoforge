@@ -348,6 +348,18 @@ impl AiClient {
             "reject_review" => {
                 Self::build_reject_review_prompt(my_patent, oa, refs, depth, discuss)
             }
+            "second_rejection" => {
+                Self::build_second_rejection_prompt(my_patent, oa, refs, depth, discuss)
+            }
+            "reexamination_request" => {
+                Self::build_reexamination_request_prompt(my_patent, oa, refs, depth, discuss)
+            }
+            "reexamination_decision" => {
+                Self::build_reexamination_decision_prompt(my_patent, oa, refs, depth, discuss)
+            }
+            "admin_lawsuit" => {
+                Self::build_admin_lawsuit_prompt(my_patent, oa, refs, depth, discuss)
+            }
             _ => Self::build_first_exam_prompt(my_patent, oa, refs, depth, discuss),
         };
 
@@ -736,6 +748,126 @@ impl AiClient {
         )
     }
 
+    /// 二审驳回决定答复 prompt
+    fn build_second_rejection_prompt(
+        my_patent: &str,
+        oa: &str,
+        refs: &str,
+        depth: &str,
+        discuss: bool,
+    ) -> (String, String) {
+        if depth == "shallow" {
+            return (
+                "你是一位资深中国专利代理师，精通二审驳回答复。请提供简要答复思路。".into(),
+                format!(
+                    "## 我的专利\n{my_patent}\n\n## 二审驳回决定\n{oa}\n\n## 对比文献\n{refs}\n\n                     请生成简要的二审驳回答复方案：\n                     1. 二审驳回的核心问题（一句话概括）\n                     2. 与一审驳回的差异分析\n                     3. 答复的核心理由\n                     4. 答复意见书草稿（简要版）",
+                ),
+            );
+        }
+        let section4 = if discuss {
+            "\n\n---\n注意：**本次仅输出第一部分至第三部分的分析内容。**\n用户将在审阅后单独要求生成第四部分（答复意见书草稿）。"
+        } else {
+            "\n\n## 第四部分：答复意见书草稿\n生成可直接提交的答复意见书，包括：\n- 二审驳回决定的错误或不当之处\n- 本申请具备创造性的理由\n- 修改说明（如有）"
+        };
+        (
+            "你是一位资深中国专利代理师，精通中国专利二审程序及驳回答复。             你擅长分析二审驳回决定中的审查逻辑，找出与一审的差异和新的推理漏洞，             在维持或修改权利要求的基础上提出有说服力的答复理由。"
+                .into(),
+            format!(
+                "## 我的专利（权利要求书+说明书）\n{my_patent}\n\n                 ## 二审驳回决定\n{oa}\n\n                 ## 对比文献\n{refs}\n\n                 请基于以上材料，按以下结构化框架生成完整的二审驳回答复方案。\n\n                 ## 一、事实对照\n                 - 二审驳回决定逐段拆解，明确每段认定的技术事实\n                 - 与一审驳回决定的差异对比（新增理由/变更理由/维持理由）\n                 - 权利要求逐项特征矩阵\n\n                 ## 二、法条适用\n                 引用法条与三步法每一步逐一验真，标注与一审结论的差异。\n\n                 ## 三、技术效果\n                 区别特征带来的技术效果逐条列举，与驳回决定认定的效果做对比。\n\n                 ## 四、策略权衡树\n                 至少给出两条论证路径（主路径 + 备选路径），每条标注胜率评估和风险点。\n\n                 ## 五、程序适配\n                 二审程序特殊注意事项，前置审查驳回后的应对策略。\n\n                 ## 六、说服结构\n                 论证编排建议，预判合议组质疑并给出预先回应。\n\n                 {section4}",
+            ),
+        )
+    }
+
+    /// 复审请求书 prompt
+    fn build_reexamination_request_prompt(
+        my_patent: &str,
+        oa: &str,
+        refs: &str,
+        depth: &str,
+        discuss: bool,
+    ) -> (String, String) {
+        if depth == "shallow" {
+            return (
+                "你是一位资深中国专利代理师，精通专利复审请求程序（专利法第41条）。请提供简要复审请求思路。".into(),
+                format!(
+                    "## 我的专利\n{my_patent}\n\n## 驳回决定\n{oa}\n\n## 对比文献\n{refs}\n\n                     请生成简要的复审请求方案：\n                     1. 驳回决定的核心问题\n                     2. 复审请求的核心理由\n                     3. 复审请求书草稿（简要版）",
+                ),
+            );
+        }
+        let section4 = if discuss {
+            "\n\n---\n注意：**本次仅输出第一部分至第三部分的分析内容。**\n用户将在审阅后单独要求生成第四部分（复审请求书草稿）。"
+        } else {
+            "\n\n## 第四部分：复审请求书草稿\n生成可直接提交的复审请求书，包括：\n- 驳回决定的错误或不当之处\n- 本申请具备创造性的理由\n- 修改说明（如有）"
+        };
+        (
+            "你是一位资深中国专利代理师，精通中国专利复审程序（专利法第41条）。             你擅长深入分析驳回决定中的审查逻辑，找出推理漏洞，             在维持或修改权利要求的基础上提出有说服力的复审理由，             撰写符合专利复审委员会要求的复审请求书。"
+                .into(),
+            format!(
+                "## 我的专利（权利要求书+说明书）\n{my_patent}\n\n                 ## 驳回决定\n{oa}\n\n                 ## 对比文献\n{refs}\n\n                 请基于以上材料，按以下结构化框架生成完整的复审请求方案。\n\n                 ## 一、事实对照\n                 - 驳回决定逐段拆解，明确每段认定的技术事实\n                 - 权利要求逐项特征矩阵\n                 - 对比文件公开/未公开映射表\n\n                 ## 二、法条适用\n                 引用法条与三步法每一步逐一验真。\n\n                 ## 三、技术效果\n                 区别特征带来的技术效果逐条列举。\n\n                 ## 四、策略权衡树\n                 至少给出两条论证路径，标注胜率评估和风险点。\n\n                 ## 五、程序适配\n                 复审程序与实审程序的关键差异，举证责任、审查范围、前置审查可能性。\n\n                 ## 六、说服结构\n                 论证编排建议，预判合议组质疑并给出预先回应。\n\n                 {section4}",
+            ),
+        )
+    }
+
+    /// 复审决定答复 prompt
+    fn build_reexamination_decision_prompt(
+        my_patent: &str,
+        oa: &str,
+        refs: &str,
+        depth: &str,
+        discuss: bool,
+    ) -> (String, String) {
+        if depth == "shallow" {
+            return (
+                "你是一位资深中国专利代理师，精通复审决定答复程序。请提供简要答复思路。".into(),
+                format!(
+                    "## 我的专利\n{my_patent}\n\n## 复审决定\n{oa}\n\n## 对比文献\n{refs}\n\n                     请生成简要的复审决定答复方案：\n                     1. 复审决定的核心问题\n                     2. 答复的核心理由\n                     3. 答复意见书草稿（简要版）",
+                ),
+            );
+        }
+        let section4 = if discuss {
+            "\n\n---\n注意：**本次仅输出第一部分至第三部分的分析内容。**\n用户将在审阅后单独要求生成第四部分（答复意见书草稿）。"
+        } else {
+            "\n\n## 第四部分：答复意见书草稿\n生成可直接提交的答复意见书。"
+        };
+        (
+            "你是一位资深中国专利代理师，精通中国专利复审决定答复程序。             你擅长分析复审决定中的认定逻辑，针对复审委员会的审查意见提出有说服力的答复理由。"
+                .into(),
+            format!(
+                "## 我的专利（权利要求书+说明书）\n{my_patent}\n\n                 ## 复审决定\n{oa}\n\n                 ## 对比文献\n{refs}\n\n                 请基于以上材料，按以下结构化框架生成完整的复审决定答复方案。\n\n                 ## 一、事实对照\n                 - 复审决定逐段拆解，明确每段认定的技术事实\n                 - 权利要求逐项特征矩阵\n\n                 ## 二、法条适用\n                 引用法条与三步法逐一验真。\n\n                 ## 三、技术效果\n                 区别特征带来的技术效果逐条列举。\n\n                 ## 四、策略权衡树\n                 至少给出两条论证路径，标注胜率评估和风险点。\n\n                 ## 五、程序适配\n                 复审决定后的程序选择（答复/起诉/撤回），期限和形式要求。\n\n                 ## 六、说服结构\n                 论证编排建议，预判合议组质疑。\n\n                 {section4}",
+            ),
+        )
+    }
+
+    /// 行政诉讼 prompt
+    fn build_admin_lawsuit_prompt(
+        my_patent: &str,
+        oa: &str,
+        refs: &str,
+        depth: &str,
+        discuss: bool,
+    ) -> (String, String) {
+        if depth == "shallow" {
+            return (
+                "你是一位资深专利行政诉讼代理人，精通北京知识产权法院专利行政诉讼程序。请提供简要诉讼思路。".into(),
+                format!(
+                    "## 我的专利\n{my_patent}\n\n## 复审决定\n{oa}\n\n## 对比文献\n{refs}\n\n                     请生成简要的行政诉讼方案：\n                     1. 复审决定的核心错误\n                     2. 诉讼请求\n                     3. 起诉状草稿（简要版）",
+                ),
+            );
+        }
+        let section4 = if discuss {
+            "\n\n---\n注意：**本次仅输出第一部分至第三部分的分析内容。**\n用户将在审阅后单独要求生成第四部分（起诉状草稿）。"
+        } else {
+            "\n\n## 第四部分：起诉状草稿\n生成可直接提交的行政起诉状，包括：\n- 诉讼请求\n- 事实和理由\n- 证据清单"
+        };
+        (
+            "你是一位资深专利行政诉讼代理人，精通中国专利法及行政诉讼法，             擅长分析复审决定的合法性与合理性，撰写专利行政起诉状。"
+                .into(),
+            format!(
+                "## 我的专利（权利要求书+说明书）\n{my_patent}\n\n                 ## 复审决定\n{oa}\n\n                 ## 对比文献\n{refs}\n\n                 请基于以上材料，按以下结构化框架生成完整的行政诉讼方案。\n\n                 ## 一、事实对照\n                 - 复审决定逐段拆解，明确认定的事实和法律适用\n                 - 复审决定中的程序性问题和实体性问题\n\n                 ## 二、法律适用\n                 - 复审决定适用的法律条款逐一验真\n                 - 行政诉讼审查范围（合法性+合理性审查）\n                 - 举证责任分配\n\n                 ## 三、技术效果\n                 区别特征带来的技术效果，与复审决定认定的效果对比。\n\n                 ## 四、策略权衡树\n                 至少给出两条诉讼路径（主路径 + 备选路径），标注胜率评估和风险点。\n\n                 ## 五、程序适配\n                 行政诉讼程序要点：管辖法院（北京知识产权法院）、起诉期限（收到决定书之日起三个月内）、                 证据要求、庭审流程。\n\n                 ## 六、说服结构\n                 论证编排建议，预判法院可能的质疑。\n\n                 {section4}",
+            ),
+        )
+    }
+
     /// Helper: extract the response draft (第五部分) from the structured OA output.
     /// Falls back to the full text if the marker is not found.
     fn extract_oa_response_section(full_output: &str) -> String {
@@ -817,6 +949,30 @@ impl AiClient {
             }
             "reject_review" => {
                 Self::build_reject_review_prompt(&my_patent_str, &oa_str, &refs_str, depth, discuss)
+            }
+            "second_rejection" => Self::build_second_rejection_prompt(
+                &my_patent_str,
+                &oa_str,
+                &refs_str,
+                depth,
+                discuss,
+            ),
+            "reexamination_request" => Self::build_reexamination_request_prompt(
+                &my_patent_str,
+                &oa_str,
+                &refs_str,
+                depth,
+                discuss,
+            ),
+            "reexamination_decision" => Self::build_reexamination_decision_prompt(
+                &my_patent_str,
+                &oa_str,
+                &refs_str,
+                depth,
+                discuss,
+            ),
+            "admin_lawsuit" => {
+                Self::build_admin_lawsuit_prompt(&my_patent_str, &oa_str, &refs_str, depth, discuss)
             }
             _ => Self::build_first_exam_prompt(&my_patent_str, &oa_str, &refs_str, depth, discuss),
         };

@@ -1266,7 +1266,15 @@ pub async fn api_ai_office_action_response(
         let oa_type_hint = req
             .get("oa_type")
             .and_then(|v| v.as_str())
-            .filter(|&v| v == "abnormal" || v == "reject_review" || v == "first_exam")
+            .filter(|&v| {
+                v == "abnormal"
+                    || v == "reject_review"
+                    || v == "first_exam"
+                    || v == "second_rejection"
+                    || v == "reexamination_request"
+                    || v == "reexamination_decision"
+                    || v == "admin_lawsuit"
+            })
             .unwrap_or("first_exam");
         let depth_hint = req
             .get("depth")
@@ -1309,7 +1317,15 @@ pub async fn api_ai_office_action_response(
     let oa_type = req
         .get("oa_type")
         .and_then(|v| v.as_str())
-        .filter(|&v| v == "abnormal" || v == "reject_review" || v == "first_exam")
+        .filter(|&v| {
+            v == "abnormal"
+                || v == "reject_review"
+                || v == "first_exam"
+                || v == "second_rejection"
+                || v == "reexamination_request"
+                || v == "reexamination_decision"
+                || v == "admin_lawsuit"
+        })
         .unwrap_or("first_exam");
     let depth = req
         .get("depth")
@@ -1483,7 +1499,15 @@ pub async fn api_ai_office_action_response_stream(
     let oa_type = req
         .get("oa_type")
         .and_then(|v| v.as_str())
-        .filter(|&v| v == "abnormal" || v == "reject_review" || v == "first_exam")
+        .filter(|&v| {
+            v == "abnormal"
+                || v == "reject_review"
+                || v == "first_exam"
+                || v == "second_rejection"
+                || v == "reexamination_request"
+                || v == "reexamination_decision"
+                || v == "admin_lawsuit"
+        })
         .unwrap_or("first_exam")
         .to_string();
 
@@ -1579,7 +1603,15 @@ pub async fn api_ai_oa_generate_response_letter(
     let oa_type = req
         .get("oa_type")
         .and_then(|v| v.as_str())
-        .filter(|&v| v == "abnormal" || v == "reject_review" || v == "first_exam")
+        .filter(|&v| {
+            v == "abnormal"
+                || v == "reject_review"
+                || v == "first_exam"
+                || v == "second_rejection"
+                || v == "reexamination_request"
+                || v == "reexamination_decision"
+                || v == "admin_lawsuit"
+        })
         .unwrap_or("first_exam")
         .to_string();
 

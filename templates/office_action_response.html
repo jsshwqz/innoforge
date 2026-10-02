@@ -34,6 +34,22 @@
                     <input type="radio" name="oa_type" value="reject_review">
                     <span data-i18n="oar.typeRejectReview"></span>
                 </label>
+                <label class="oa-type-option" id="oa-type-second-rejection">
+                    <input type="radio" name="oa_type" value="second_rejection">
+                    <span data-i18n="oar.typeSecondRejection"></span>
+                </label>
+                <label class="oa-type-option" id="oa-type-reexamination-request">
+                    <input type="radio" name="oa_type" value="reexamination_request">
+                    <span data-i18n="oar.typeReexaminationRequest"></span>
+                </label>
+                <label class="oa-type-option" id="oa-type-reexamination-decision">
+                    <input type="radio" name="oa_type" value="reexamination_decision">
+                    <span data-i18n="oar.typeReexaminationDecision"></span>
+                </label>
+                <label class="oa-type-option" id="oa-type-admin-lawsuit">
+                    <input type="radio" name="oa_type" value="admin_lawsuit">
+                    <span data-i18n="oar.typeAdminLawsuit"></span>
+                </label>
             </div>
         </div>
 
@@ -118,8 +134,8 @@
                 <button id="discussion-send-btn" onclick="sendDiscussionMessage()" data-i18n="oar.send"></button>
                 <button id="discussion-cad-btn" type="button" onclick="drawOaCad()" data-i18n="cad.draw"></button>
                 <button id="discussion-stop-btn" class="btn-stop" style="display:none" onclick="stopDiscussionGeneration()" data-i18n="oar.stop"></button>
-                <button id="discussion-export-btn" class="btn-export-ghost" style="display:none" onclick="exportDiscussionConclusions()" data-i18n="oar.exportConclusions"></button>
-                <button id="discussion-transcript-export-btn" class="btn-export-ghost" style="display:none" onclick="exportDiscussionTranscript()" data-i18n="oar.exportTranscript"></button>
+                <button id="discussion-export-btn" class="btn-export-ghost" disabled style="opacity:0.4;cursor:not-allowed;" onclick="exportDiscussionConclusions()" data-i18n="oar.exportConclusions"></button>
+                <button id="discussion-transcript-export-btn" class="btn-export-ghost" disabled style="opacity:0.4;cursor:not-allowed;" onclick="exportDiscussionTranscript()" data-i18n="oar.exportTranscript"></button>
             </div>
         </div>
 
@@ -845,7 +861,15 @@
     }
 
     function showError(msg) {
-        document.getElementById('result').innerHTML = '<div class="result-box" style="border-color:#f85149;color:#f85149;">' + escapeHtml(msg) + '</div>';
+        var hint = '';
+        var lowerMsg = (msg || '').toLowerCase();
+        if (lowerMsg.indexOf('ai') >= 0 || msg.indexOf('未配置') >= 0 || msg.indexOf('服务') >= 0 || lowerMsg.indexOf('timeout') >= 0 || lowerMsg.indexOf('connect') >= 0) {
+            hint = '<div style="margin-top:12px;padding:10px 14px;background:#1c2128;border:1px solid #30363d;border-radius:6px;color:#8b949e;font-size:13px;">'
+                + '💡 ' + (t('oar.errorHint') || '请检查 AI 服务商配置：')
+                + ' <a href="/settings" style="color:#58a6ff;text-decoration:underline;">' + (t('oar.errorHintLink') || '前往设置页') + '</a>'
+                + '</div>';
+        }
+        document.getElementById('result').innerHTML = '<div class="result-box" style="border-color:#f85149;color:#f85149;">' + escapeHtml(msg) + hint + '</div>';
         clearLoading();
     }
 
@@ -1247,7 +1271,7 @@
         html += '<div style="background:#1a2332;padding:8px 12px;border-bottom:1px solid #30363d;border-radius:8px 8px 0 0;">';
         html += '<span style="color:#58a6ff;font-weight:600;font-size:14px;">💬 ' + (t('oar.discussTitle') || '讨论区') + '</span>';
         html += '<span style="color:#8b949e;font-size:12px;margin-left:8px;">' + (t('oar.discussDesc') || '对分析内容有疑问或修改意见？在此与 AI 讨论') + '</span>';
-        html += '<button id="oa-discuss-transcript-export" onclick="exportCurrentOADiscussionTranscript()" style="display:none;float:right;padding:4px 10px;background:#21262d;color:#c9d1d9;border:1px solid #6e7681;border-radius:5px;cursor:pointer;font-size:12px;">' + (t('oar.exportTranscript') || '📥 导出完整讨论记录') + '</button>';
+        html += '<button id="oa-discuss-transcript-export" onclick="exportCurrentOADiscussionTranscript()" disabled style="opacity:0.4;cursor:not-allowed;float:right;padding:4px 10px;background:#21262d;color:#c9d1d9;border:1px solid #6e7681;border-radius:5px;cursor:pointer;font-size:12px;">' + (t('oar.exportTranscript') || '📥 导出完整讨论记录') + '</button>';
         html += '</div>';
         html += '<div id="oa-discuss-messages" style="max-height:400px;overflow-y:auto;padding:12px;position:relative;">';
         html += '<div style="color:#8b949e;font-size:13px;padding:8px;text-align:center;">🤖 ' + (t('oar.discussReady') || 'AI 分析已完成，请审阅。有任何疑问可以在此讨论。确认无误后点击下方按钮生成答复书。') + '</div>';
@@ -1464,7 +1488,16 @@
 
     function updateCurrentOADiscussionExportButton() {
         var button = document.getElementById('oa-discuss-transcript-export');
-        if (button) button.style.display = oaDiscussMessages.length >= 2 ? '' : 'none';
+        if (!button) return;
+        if (oaDiscussMessages.length >= 2) {
+            button.disabled = false;
+            button.style.opacity = '';
+            button.style.cursor = '';
+        } else {
+            button.disabled = true;
+            button.style.opacity = '0.4';
+            button.style.cursor = 'not-allowed';
+        }
     }
 
     function exportCurrentOADiscussionTranscript() {
@@ -2462,7 +2495,16 @@
         var buttonIds = ['discussion-export-btn', 'discussion-transcript-export-btn'];
         for (let i = 0; i < buttonIds.length; i++) {
             var btn = document.getElementById(buttonIds[i]);
-            if (btn && discussionHistory.length > 1) btn.style.display = '';
+            if (!btn) continue;
+            if (discussionHistory.length > 1) {
+                btn.disabled = false;
+                btn.style.opacity = '';
+                btn.style.cursor = '';
+            } else {
+                btn.disabled = true;
+                btn.style.opacity = '0.4';
+                btn.style.cursor = 'not-allowed';
+            }
         }
     }
 
@@ -2470,7 +2512,10 @@
         var buttonIds = ['discussion-export-btn', 'discussion-transcript-export-btn'];
         for (let i = 0; i < buttonIds.length; i++) {
             var btn = document.getElementById(buttonIds[i]);
-            if (btn) btn.style.display = 'none';
+            if (!btn) continue;
+            btn.disabled = true;
+            btn.style.opacity = '0.4';
+            btn.style.cursor = 'not-allowed';
         }
     }
 
@@ -2603,9 +2648,8 @@
         for (let i = 0; i < Math.min(oaHistory.length, 30); i++) {
             var h = oaHistory[i];
             var ver = h.version || '-';
-            var typeLabel = h.oa_type === 'first_exam' ? '一审/二审'
-                : h.oa_type === 'abnormal' ? '非正常' : '复审';
-            var typeColor = h.oa_type === 'first_exam' ? '#d2a8ff' : h.oa_type === 'abnormal' ? '#d29922' : '#f0883e';
+            var typeLabel = ({first_exam:'一审/二审',abnormal:'非正常',reject_review:'复审',second_rejection:'二审驳回',reexamination_request:'复审请求',reexamination_decision:'复审决定',admin_lawsuit:'行政诉讼'})[h.oa_type] || '其他';
+            var typeColor = ({first_exam:'#d2a8ff',abnormal:'#d29922',reject_review:'#f0883e',second_rejection:'#da3633',reexamination_request:'#6e7681',reexamination_decision:'#1f6feb',admin_lawsuit:'#8957e5'})[h.oa_type] || '#8b949e';
             html += '<div style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:8px 10px;margin-bottom:6px;cursor:pointer;" onclick="loadOaAnalysis(' + h.id + ')">'
                 + '<div style="display:flex;align-items:center;gap:4px;margin-bottom:4px;">'
                 + '<span style="background:#1f6feb22;border:1px solid #1f6feb;color:#58a6ff;border-radius:3px;padding:0 5px;font-size:10px;font-weight:600;">v' + ver + '</span>'
