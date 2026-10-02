@@ -10,8 +10,6 @@ on:
   push:
     tags:
       - 'v*'
-    branches:
-      - main
 
 env:
   CARGO_TERM_COLOR: always
@@ -39,22 +37,12 @@ jobs:
         run: |
           if [ -n "${{ inputs.tag }}" ]; then
             TAG="${{ inputs.tag }}"
-            SHOULD_RUN=true
-          elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
-            TAG="${GITHUB_REF_NAME}"
-            SHOULD_RUN=true
           else
-            TAG=$(git tag --points-at HEAD --list 'v*' | head -1)
-            if [ -n "$TAG" ]; then
-              SHOULD_RUN=true
-            else
-              SHOULD_RUN=false
-              echo "No v* tag on HEAD, skipping release"
-            fi
+            TAG="${GITHUB_REF_NAME}"
           fi
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "should_run=${SHOULD_RUN}" >> "$GITHUB_OUTPUT"
-          echo "Release tag: ${TAG}, should_run: ${SHOULD_RUN}"
+          echo "should_run=true" >> "$GITHUB_OUTPUT"
+          echo "Release tag: ${TAG}"
       - name: Validate tag, Cargo version, and changelog
         if: steps.extract-tag.outputs.should_run == 'true'
         shell: bash
@@ -70,7 +58,6 @@ jobs:
   build:
     name: Build ${{ matrix.target }}
     needs: validate
-    if: needs.validate.outputs.should_run == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -201,7 +188,7 @@ jobs:
     name: Sync Release to Gitee
     needs: release
     runs-on: ubuntu-latest
-    if: needs.validate.outputs.should_run == 'true' && secrets.GITEE_TOKEN != ''
+    if: secrets.GITEE_TOKEN != ''
     steps:
       - name: Download GitHub release assets
         env:
