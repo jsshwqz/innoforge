@@ -737,7 +737,7 @@ function setI18nLang(lang) {
 function applyI18nCommon() {
   document.documentElement.lang = i18nLang === 'zh' ? 'zh-CN' : 'en';
   document.querySelectorAll('[data-i18n]').forEach(function(el) {
-    el.textContent = t(el.getAttribute('data-i18n'));
+    if (el.childElementCount === 0) { el.textContent = t(el.getAttribute("data-i18n")); }
   });
   document.querySelectorAll('[data-i18n-placeholder]').forEach(function(el) {
     el.placeholder = t(el.getAttribute('data-i18n-placeholder'));
@@ -796,8 +796,8 @@ function renderSidebar(extraHtml) {
   var activeId = (_activePage === 'detail') ? 'search' : _activePage;
   for (let i = 0; i < links.length; i++) {
     var cls = (links[i].id === activeId) ? ' class="active"' : '';
-    html += '<a href="' + links[i].href + '"' + cls + ' data-i18n="' + links[i].key + '">'
-      + _NAV_ICONS[links[i].icon] + '<span>' + t(links[i].key) + '</span></a>';
+    html += '<a href="' + links[i].href + '"' + cls + '>'
+      + _NAV_ICONS[links[i].icon] + '<span data-i18n="' + links[i].key + '">' + t(links[i].key) + '</span></a>';
   }
   html += '</div></div>';
   // Language section
