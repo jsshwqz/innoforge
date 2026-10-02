@@ -10,6 +10,8 @@ on:
   push:
     tags:
       - 'v*'
+    branches:
+      - main
 
 env:
   CARGO_TERM_COLOR: always
@@ -44,6 +46,7 @@ jobs:
   build:
     name: Build ${{ matrix.target }}
     needs: validate
+    if: needs.validate.outputs.should_run == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -174,16 +177,8 @@ jobs:
     name: Sync Release to Gitee
     needs: release
     runs-on: ubuntu-latest
+    if: needs.validate.outputs.should_run == 'true' && secrets.GITEE_TOKEN != ''
     steps:
-      - name: Require Gitee token
-        env:
-          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-        run: |
-          if [ -z "$GITEE_TOKEN" ]; then
-            echo "::error::Repository secret GITEE_TOKEN is required for Gitee release synchronization."
-            exit 1
-          fi
-
       - name: Download GitHub release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

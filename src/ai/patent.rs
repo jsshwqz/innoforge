@@ -30,7 +30,7 @@ pub fn extract_publication_numbers(oa_text: &str) -> Vec<(String, String)> {
         ("US", r"US\d{6,12}[A-Z]\d?"),
         ("EP", r"EP\d{6,8}[A-Z]\d?"),
         ("JP", r"JP\d{4,8}[A-Z]"),
-        ("KR", r"KR\d{6,10}[A-Z]"),
+        ("KR", r"KR\d{6,12}[A-Z]"),
         ("WO", r"WO\d{4}/\d{4,6}[A-Z]\d?"),
     ];
 
@@ -38,8 +38,9 @@ pub fn extract_publication_numbers(oa_text: &str) -> Vec<(String, String)> {
     let context_patterns: &[&str] = &[
         r"对比文件\s*[1-9]\s*[:：]",
         r"引证文献\s*[1-9]\s*[:：]",
-        r"D\s*[1-9]\s*[:：]",
+        r"D\s*[1-9]\s*[:：=]",
         r"参考文献\s*[1-9]\s*[:：]",
+        r"Reference\s*[1-9]\s*[:：]",
     ];
 
     let mut results: Vec<(String, String)> = Vec::new();

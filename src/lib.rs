@@ -6,7 +6,7 @@
 //! 与 `main.rs` 共享初始化逻辑（`common.rs`），消除双入口同步维护风险。
 //! Shared initialization with `main.rs` via `common.rs` to eliminate dual-entry sync risk.
 
-mod ai;
+pub mod ai;
 mod cad;
 pub mod common;
 pub(crate) mod context;

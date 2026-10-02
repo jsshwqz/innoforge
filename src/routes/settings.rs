@@ -33,6 +33,11 @@ fn provider_db_key(base_url: &str) -> &'static str {
     }
 }
 
+/// 返回当前版本号 / Return current version
+pub async fn api_get_version() -> Json<serde_json::Value> {
+    Json(json!({ "version": env!("CARGO_PKG_VERSION") }))
+}
+
 pub async fn api_get_settings(State(s): State<AppState>) -> Json<serde_json::Value> {
     let config = s.config.read().unwrap_or_else(|e| e.into_inner());
 

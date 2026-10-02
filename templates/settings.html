@@ -16,7 +16,7 @@
     <div class="page-with-sidebar">
     <aside id="page-sidebar" class="page-sidebar"></aside>
     <div class="settings-container page-main">
-        <div class="page-title-bar"><h2>系统设置</h2></div>
+        <div class="page-title-bar"><h2>系统设置</h2><span id="version-display" style="margin-left:auto;color:#8b949e;font-size:13px;"></span></div>
 
         <div class="setting-group">
             <h3>🔑 SerpAPI 搜索配置（多 Key 轮询）</h3>
@@ -538,6 +538,11 @@
                         addSerpapiKeyRow('');
                     }
 
+                    // 显示版本号
+                    if (config.version) {
+                        var vd = document.getElementById('version-display');
+                        if (vd) vd.textContent = 'v' + config.version;
+                    }
                     // 回填 EPO OPS 凭证（脱敏掩码回显，MA5a）
                     fillEpoCredentials(config);
 

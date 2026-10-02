@@ -810,6 +810,21 @@ function renderSidebar(extraHtml) {
   html += '</div>';
   if (extraHtml) html += extraHtml;
   el.innerHTML = DOMPurify.sanitize(html);
+  // 异步加载版本号显示在侧边栏底部
+  if (!window.__versionLoaded) {
+    window.__versionLoaded = true;
+    fetch('/api/version').then(function(r) { return r.json(); }).then(function(d) {
+      if (d.version) {
+        var s = document.getElementById('page-sidebar');
+        if (s) {
+          var v = document.createElement('div');
+          v.style.cssText = 'position:absolute;bottom:8px;left:0;right:0;text-align:center;color:#8b949e;font-size:12px;pointer-events:none;';
+          v.textContent = 'v' + d.version;
+          s.appendChild(v);
+        }
+      }
+    }).catch(function() {});
+  }
 }
 
 // Terminal-style chat history: ↑↓ keys recall previously sent messages.

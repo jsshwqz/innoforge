@@ -11,7 +11,7 @@
 //! - providers: 御三家预设配置（OpenAI + Claude + Gemini）
 
 mod chat;
-mod client;
+pub mod client;
 mod fact_check;
 mod idea;
 pub mod patent;

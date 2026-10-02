@@ -1547,7 +1547,7 @@ mod file_parser_tests {
     #[test]
     fn has_pdf_header_exact_boundary() {
         // %PDF- 正好在 1024 字节窗口末尾
-        let mut data = vec![b' '; 1020];
+        let mut data = vec![b' '; 1019];
         data.extend_from_slice(b"%PDF-");
         assert!(has_pdf_header(&data));
     }
