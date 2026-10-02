@@ -90,10 +90,6 @@ jobs:
             target: x86_64-pc-windows-msvc
             asset: innoforge-windows-x86_64.zip
           - os: macos-latest
-            target: x86_64-apple-darwin
-            asset: innoforge-macos-x86_64.tar.gz
-            cross: true
-          - os: macos-latest
             target: aarch64-apple-darwin
             asset: innoforge-macos-aarch64.tar.gz
 
@@ -197,7 +193,7 @@ jobs:
             gh release upload "$TAG" "$f" --clobber
           done
 
-          expected='innoforge-linux-aarch64.tar.gz innoforge-linux-x86_64.tar.gz innoforge-macos-aarch64.tar.gz innoforge-macos-x86_64.tar.gz innoforge-windows-x86_64.zip'
+          expected='innoforge-linux-aarch64.tar.gz innoforge-linux-x86_64.tar.gz innoforge-macos-aarch64.tar.gz innoforge-windows-x86_64.zip'
           actual=$(gh release view "$TAG" --json assets --jq '.assets[].name' | sort | xargs)
           test "$actual" = "$expected"
           gh release edit "$TAG" --draft=false --latest
