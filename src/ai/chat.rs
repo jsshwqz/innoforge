@@ -156,7 +156,7 @@ impl AiClient {
                         }
                         let mut body = serde_json::json!({
                             "model": provider.model,
-                            "max_tokens": 16384,
+                            "max_tokens": 32768,
                             "messages": chat_messages,
                             "temperature": temperature,
                             "stream": true,
@@ -250,7 +250,7 @@ impl AiClient {
                                 "content": m.content
                             })).collect::<Vec<_>>(),
                             "temperature": temperature,
-                            "max_tokens": 16384,
+                            "max_tokens": 32768,
                             "stream": true,
                         });
 
