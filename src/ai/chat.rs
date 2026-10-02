@@ -325,13 +325,11 @@ impl AiClient {
                                             {
                                                 let delta = &val["choices"][0]["delta"];
 
-                                                // DeepSeek v4-flash: 可见文本在 reasoning_content 字段
-                                                // 优先 content，回退 reasoning_content
+                                                // glm-5.2 等推理模型：reasoning_content 是推理过程，content 是最终回复
+                                                // 只取 content，不回退 reasoning_content（避免把推理过程当回复）
                                                 let content = delta["content"]
                                                     .as_str()
-                                                    .or_else(|| {
-                                                        delta["reasoning_content"].as_str()
-                                                    });
+                                                    .filter(|c| !c.is_empty());
 
                                                 if let Some(content) = content {
                                                     if !content.is_empty() {
@@ -349,6 +347,10 @@ impl AiClient {
                                                     // (future-proof against new Provider formats)
                                                     let fallback = delta_obj.iter().find_map(
                                                         |(k, v)| {
+                                                            // Skip metadata fields and reasoning_content (推理过程不是最终回复)
+                                                            if k == "role" || k == "finish_reason" || k == "index" || k == "reasoning_content" {
+                                                                return None;
+                                                            }
                                                             v.as_str()
                                                                 .filter(|s| !s.is_empty())
                                                                 .map(|s| (k, s))
