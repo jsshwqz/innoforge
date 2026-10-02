@@ -166,7 +166,7 @@ jobs:
 
       - name: Generate release notes
         env:
-          TAG: ${{ inputs.tag || github.ref_name }}
+          TAG: ${{ needs.validate.outputs.tag }}
         run: |
           awk -v tag="$TAG" '
             index($0, "## [" tag "]") == 1 { found=1; print; next }
@@ -177,7 +177,7 @@ jobs:
 
       - name: Create Release
         env:
-          TAG: ${{ inputs.tag || github.ref_name }}
+          TAG: ${{ needs.validate.outputs.tag }}
           GH_TOKEN: ${{ github.token }}
         run: |
           if ! gh release view "$TAG" >/dev/null 2>&1; then
@@ -206,7 +206,7 @@ jobs:
       - name: Download GitHub release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ inputs.tag || github.ref_name }}
+          TAG: ${{ needs.validate.outputs.tag }}
         run: |
           mkdir -p assets
           gh release download "$TAG" --repo "${{ github.repository }}" --dir assets
