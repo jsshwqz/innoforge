@@ -5,7 +5,8 @@
 //! 所有预设均走 OpenAI 兼容 API 格式，无需格式适配器。
 
 /// 单个 Provider 预设
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize)]
+#[allow(dead_code)]
 pub struct ProviderPreset {
     /// 预设 ID（英文标识）
     pub id: &'static str,
@@ -30,6 +31,7 @@ pub struct ProviderPreset {
 }
 
 /// 御三家预设列表
+#[allow(dead_code)]
 pub static TOP3_PRESETS: &[ProviderPreset] = &[
     // ── OpenAI ──
     ProviderPreset {
@@ -77,11 +79,13 @@ pub static TOP3_PRESETS: &[ProviderPreset] = &[
 ];
 
 /// 按 ID 查找预设
+#[allow(dead_code)]
 pub fn find_preset(id: &str) -> Option<&'static ProviderPreset> {
     TOP3_PRESETS.iter().find(|p| p.id == id)
 }
 
 /// 获取所有预设 ID
+#[allow(dead_code)]
 pub fn preset_ids() -> Vec<&'static str> {
     TOP3_PRESETS.iter().map(|p| p.id).collect()
 }

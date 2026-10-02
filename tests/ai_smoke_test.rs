@@ -17,34 +17,28 @@
 //! 7. 成本统计 — 多次调用后的 token 汇总
 
 use innoforge::ai::client::AiClient;
-use innoforge::ai::patent::AiClient as PatentClient;
+use innoforge::ai::client::AiClient as PatentClient;
 use innoforge::db::Database;
 use innoforge::patent::Patent;
-use innoforge::vector::{compute_tfidf_embedding, cosine_similarity, VectorIndex};
 use innoforge::rag::rag_search;
+use innoforge::vector::{compute_tfidf_embedding, VectorIndex};
 
 // ── 辅助函数 ──
 
 fn deepseek_key() -> Option<String> {
-    std::env::var("DEEPSEEK_API_KEY").ok().filter(|k| !k.is_empty())
+    std::env::var("DEEPSEEK_API_KEY")
+        .ok()
+        .filter(|k| !k.is_empty())
 }
 
 fn deepseek_client() -> AiClient {
     let key = deepseek_key().expect("DEEPSEEK_API_KEY must be set for smoke tests");
-    AiClient::with_config(
-        "https://api.deepseek.com/v1",
-        &key,
-        "deepseek-chat",
-    )
+    AiClient::with_config("https://api.deepseek.com/v1", &key, "deepseek-chat")
 }
 
 fn deepseek_patent_client() -> PatentClient {
     let key = deepseek_key().expect("DEEPSEEK_API_KEY must be set for smoke tests");
-    PatentClient::with_config(
-        "https://api.deepseek.com/v1",
-        &key,
-        "deepseek-chat",
-    )
+    PatentClient::with_config("https://api.deepseek.com/v1", &key, "deepseek-chat")
 }
 
 fn make_test_patent(id: &str) -> Patent {
@@ -65,6 +59,15 @@ fn make_test_patent(id: &str) -> Patent {
         priority_date: String::new(),
         country: "CN".to_string(),
         kind_code: String::new(),
+        family_id: None,
+        legal_status: String::new(),
+        citations: String::new(),
+        cited_by: String::new(),
+        source: String::new(),
+        raw_json: String::new(),
+        created_at: String::new(),
+        images: String::new(),
+        pdf_url: String::new(),
     }
 }
 
@@ -78,7 +81,11 @@ async fn deepseek_basic_chat_returns_content() {
         .send_rag_chat("请用一句话回答：1+1等于几？", 0.0)
         .await;
 
-    assert!(result.is_ok(), "DeepSeek chat should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "DeepSeek chat should succeed: {:?}",
+        result.err()
+    );
     let content = result.unwrap();
     assert!(!content.is_empty(), "response content should not be empty");
     assert!(
@@ -135,7 +142,11 @@ async fn deepseek_summarize_patent_produces_summary() {
         )
         .await;
 
-    assert!(result.is_ok(), "summarize_patent should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "summarize_patent should succeed: {:?}",
+        result.err()
+    );
     let summary = result.unwrap();
     assert!(!summary.is_empty(), "summary should not be empty");
     assert!(
@@ -164,7 +175,11 @@ async fn deepseek_oa_analysis_shallow_returns_sections() {
         )
         .await;
 
-    assert!(result.is_ok(), "OA analysis should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "OA analysis should succeed: {:?}",
+        result.err()
+    );
     let analysis = result.unwrap();
     assert!(!analysis.is_empty(), "analysis should not be empty");
     assert!(
@@ -193,8 +208,8 @@ fn tfidf_embedding_and_cosine_similarity_work() {
     assert!(!emb2.is_empty(), "embedding should not be empty");
     assert!(!emb3.is_empty(), "embedding should not be empty");
 
-    let sim_12 = cosine_similarity(&emb1, &emb2);
-    let sim_13 = cosine_similarity(&emb1, &emb3);
+    let sim_12 = VectorIndex::cosine_similarity(&emb1, &emb2);
+    let sim_13 = VectorIndex::cosine_similarity(&emb1, &emb3);
 
     // 相关文本相似度应高于不相关文本
     assert!(
@@ -202,9 +217,7 @@ fn tfidf_embedding_and_cosine_similarity_work() {
         "related texts should have higher similarity: sim(1,2)={sim_12} should > sim(1,3)={sim_13}"
     );
 
-    println!(
-        "[SMOKE] TF-IDF cosine similarity: related={sim_12:.4}, unrelated={sim_13:.4}"
-    );
+    println!("[SMOKE] TF-IDF cosine similarity: related={sim_12:.4}, unrelated={sim_13:.4}");
 }
 
 #[test]
@@ -220,15 +233,24 @@ fn embedding_persistence_with_database() {
     // 计算并保存 embedding
     let text = format!("{} {}", patent.title, patent.abstract_text);
     let result = innoforge::vector::compute_and_save_embedding(&index, &db, "smoke-001", &text);
-    assert!(result.is_ok(), "embedding save should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "embedding save should succeed: {:?}",
+        result.err()
+    );
 
     // 验证 embedding 已保存
-    let saved = db.get_patent_embedding("smoke-001").expect("embedding query should work");
+    let saved = db
+        .get_patent_embedding("smoke-001")
+        .expect("embedding query should work");
     assert!(saved.is_some(), "embedding should be saved in db");
     let saved_vec = saved.unwrap();
     assert!(!saved_vec.is_empty(), "saved embedding should not be empty");
 
-    println!("[SMOKE] Embedding persisted: {} dimensions", saved_vec.len());
+    println!(
+        "[SMOKE] Embedding persisted: {} dimensions",
+        saved_vec.len()
+    );
 }
 
 // ── 6. RAG 检索 ──
@@ -259,9 +281,16 @@ async fn rag_search_end_to_end() {
     )
     .await;
 
-    assert!(result.is_ok(), "RAG search should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "RAG search should succeed: {:?}",
+        result.err()
+    );
     let rag_result = result.unwrap();
-    assert!(!rag_result.answer.is_empty(), "RAG answer should not be empty");
+    assert!(
+        !rag_result.answer.is_empty(),
+        "RAG answer should not be empty"
+    );
 
     println!(
         "[SMOKE] RAG search: answer={} chars, chunks={}, rag_enabled={}",

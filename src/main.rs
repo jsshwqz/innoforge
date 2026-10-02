@@ -101,7 +101,10 @@ async fn main() -> anyhow::Result<()> {
             return Err(anyhow::anyhow!("no bind candidate ports configured"));
         }
     };
-    println!("创研台 InnoForge running at http://{addr}");
+    println!(
+        "创研台 InnoForge v{} running at http://{addr}",
+        env!("CARGO_PKG_VERSION")
+    );
     println!("Local access: http://127.0.0.1:{port}");
 
     // 自动打开浏览器（设置 INNOFORGE_NO_OPEN 可禁用）

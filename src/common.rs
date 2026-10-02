@@ -212,6 +212,7 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
             get(routes::api_cad_download),
         )
         // 设置 API / Settings API
+        .route("/api/version", get(routes::api_get_version))
         .route("/api/settings", get(routes::api_get_settings))
         .route("/api/settings/cad", post(routes::api_save_cad_settings))
         .route("/api/settings/serpapi", post(routes::api_save_serpapi))

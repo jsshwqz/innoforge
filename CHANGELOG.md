@@ -5,6 +5,17 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 
+## [v0.9.3] - 2026-10-02
+
+### 新增 / Added
+- 版本号可见化：启动时控制台打印版本号，新增 `/api/version` 端点，所有页面侧边栏底部显示版本号，设置页标题栏显示版本号
+
+### 修复 / Fixed
+- `cargo fmt` 格式化修复（tests/ai_smoke_test.rs），解决 CI `cargo fmt --check` 持续失败
+- release.yml Gitee 同步改为可选（未配置 `GITEE_TOKEN` 时跳过而非报错）
+
+---
+
 ## [Unreleased]
 
 ### 新增 / Added

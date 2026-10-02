@@ -174,16 +174,8 @@ jobs:
     name: Sync Release to Gitee
     needs: release
     runs-on: ubuntu-latest
+    if: ${{ secrets.GITEE_TOKEN != '' }}
     steps:
-      - name: Require Gitee token
-        env:
-          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-        run: |
-          if [ -z "$GITEE_TOKEN" ]; then
-            echo "::error::Repository secret GITEE_TOKEN is required for Gitee release synchronization."
-            exit 1
-          fi
-
       - name: Download GitHub release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
