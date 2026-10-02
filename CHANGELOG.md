@@ -5,6 +5,13 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 
+## [v0.9.5] - 2026-10-03
+
+### 修复 / Fixed
+- **OA 讨论 AI 回复为空/推理过程泄露**：glm-5.2 等推理模型流式返回时，`content` 为最终回复、`reasoning_content` 为推理过程。旧代码将 `reasoning_content` 当作回复发出，且 `max_tokens` 不足导致 `content` 为空。修复三处：(1) 流式取值加 `filter(!is_empty)` 避免空字符串阻塞回退 (2) 兜底逻辑排除 `reasoning_content`/`role`/`finish_reason` 元数据字段 (3) `max_tokens` 从 16384 增至 32768 适配推理模型
+
+---
+
 ## [v0.9.4] - 2026-10-03
 
 ### 修复 / Fixed
