@@ -44,12 +44,15 @@ jobs:
             TAG="${GITHUB_REF_NAME}"
             SHOULD_RUN=true
           else
-            TAG=$(git tag --points-at HEAD --list 'v*' | head -1)
-            if [ -n "$TAG" ]; then
+            # Branch push: derive tag from Cargo.toml version
+            VERSION=$(grep -m1 '^version = ' Cargo.toml | sed 's/version = "//;s/"//')
+            TAG="v${VERSION}"
+            if git rev-parse --verify "${TAG}^{commit}" >/dev/null 2>&1; then
               SHOULD_RUN=true
+              echo "Found tag ${TAG} in repo"
             else
               SHOULD_RUN=false
-              echo "No v* tag on HEAD, skipping release"
+              echo "Tag ${TAG} not found, skipping release"
             fi
           fi
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
