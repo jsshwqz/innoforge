@@ -27,15 +27,39 @@ jobs:
   validate:
     name: Validate release metadata
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.extract-tag.outputs.tag }}
+      should_run: ${{ steps.extract-tag.outputs.should_run }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag || github.ref_name }}
           fetch-depth: 0
+      - name: Extract tag name
+        id: extract-tag
+        run: |
+          if [ -n "${{ inputs.tag }}" ]; then
+            TAG="${{ inputs.tag }}"
+            SHOULD_RUN=true
+          elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF_NAME}"
+            SHOULD_RUN=true
+          else
+            TAG=$(git tag --points-at HEAD --list 'v*' | head -1)
+            if [ -n "$TAG" ]; then
+              SHOULD_RUN=true
+            else
+              SHOULD_RUN=false
+              echo "No v* tag on HEAD, skipping release"
+            fi
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "should_run=${SHOULD_RUN}" >> "$GITHUB_OUTPUT"
+          echo "Release tag: ${TAG}, should_run: ${SHOULD_RUN}"
       - name: Validate tag, Cargo version, and changelog
+        if: steps.extract-tag.outputs.should_run == 'true'
         shell: bash
         env:
-          TAG: ${{ inputs.tag || github.ref_name }}
+          TAG: ${{ steps.extract-tag.outputs.tag }}
         run: |
           [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
           version="${TAG#v}"
@@ -72,7 +96,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag || github.ref_name }}
+          ref: ${{ needs.validate.outputs.tag }}
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -129,7 +153,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag || github.ref_name }}
+          ref: ${{ needs.validate.outputs.tag }}
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -190,7 +214,7 @@ jobs:
       - name: Create Gitee release and upload assets
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-          TAG: ${{ inputs.tag || github.ref_name }}
+          TAG: ${{ needs.validate.outputs.tag }}
         run: |
           test -n "$GITEE_TOKEN"
           test -n "$(git ls-remote https://gitee.com/jsshwqz/innoforge.git "refs/tags/${TAG}")"
