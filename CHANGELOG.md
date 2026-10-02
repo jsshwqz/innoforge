@@ -5,6 +5,19 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 
+## [v0.9.4] - 2026-10-03
+
+### 修复 / Fixed
+- **致命 bug**：`getResponseButtonText()` 无限递归导致 OA 答复页分析功能完全崩溃（`Maximum call stack size exceeded`）。非 `reject_review` 分支递归调用自身，修复为返回默认文本
+- i18n key 不匹配：代码用 `oar.btnGenerate` 但 i18n 表定义为 `oar.btnGenerateResponse`，导致按钮显示原始 key 而非翻译文本
+- `data-i18n` 属性从 `oar.btnGenerate` 修正为 `oar.btnGenerateResponse`
+
+### 改进 / Changed
+- 为 `reexamination_request`（复审请求书）、`reexamination_decision`（复审决定答复）、`admin_lawsuit`（行政诉讼）三种 OA 类型添加专属按钮文本和 Section 5 标题
+- 添加对应中英文 i18n key（`btnGenerateReexamReq`/`btnGenerateReexamDecision`/`btnGenerateAdminLawsuit` 等）
+
+---
+
 ## [v0.9.3] - 2026-10-02
 
 ### 新增 / Added
