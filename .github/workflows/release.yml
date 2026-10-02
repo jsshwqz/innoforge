@@ -86,7 +86,7 @@ jobs:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             asset: innoforge-windows-x86_64.zip
-          - os: macos-15-intel
+          - os: macos-13
             target: x86_64-apple-darwin
             asset: innoforge-macos-x86_64.tar.gz
           - os: macos-latest
@@ -146,7 +146,7 @@ jobs:
 
   release:
     name: Create GitHub Release
-    needs: build
+    needs: [validate, build]
     if: needs.validate.outputs.should_run == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -200,9 +200,8 @@ jobs:
 
   sync-gitee:
     name: Sync Release to Gitee
-    needs: release
+    needs: [validate, release]
     runs-on: ubuntu-latest
-    if: secrets.GITEE_TOKEN != ''
     steps:
       - name: Download GitHub release assets
         env:
