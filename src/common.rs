@@ -323,6 +323,18 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
         .route("/api/ai/oa-discuss", post(routes::api_ai_oa_discuss))
         .route("/api/ai/oa-fetch-refs", post(routes::api_ai_oa_fetch_refs))
         .route("/api/ai/oa-panel", post(routes::api_ai_oa_panel))
+        .route(
+            "/api/ai/oa-history-compare",
+            post(routes::api_ai_oa_history_compare),
+        )
+        .route(
+            "/api/ai/oa-examiner-preview",
+            post(routes::api_ai_oa_examiner_preview),
+        )
+        .route(
+            "/api/ai/oa-defense-analysis",
+            post(routes::api_ai_oa_defense_analysis),
+        )
         // OA 分析历史 API / OA History API
         .route("/api/oa/history/all", get(routes::api_oa_history_all))
         .route(

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-10-03T04:09:45.288Z",
+  "generatedAt": "2026-10-03T04:31:20.315Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -242,9 +242,11 @@
         "closePdfPreview",
         "confirmPaste",
         "copyResultText",
+        "defenseAnalysis",
         "doOAAnalysis",
         "doOADiscussImport",
         "drawOaCad",
+        "examinerPreview",
         "exportCurrentOADiscussionTranscript",
         "exportDiscussionConclusions",
         "exportDiscussionTranscript",
@@ -305,6 +307,7 @@
         "context",
         "copyResultText",
         "createDiscQuoteBtn",
+        "defenseAnalysis",
         "deleteProperty",
         "discussionTranscriptCodeBlock",
         "discussionTranscriptRoleLabel",
@@ -316,6 +319,7 @@
         "enableAnchorJumps",
         "escapeAttr",
         "escapeHtml",
+        "examinerPreview",
         "exportCurrentOADiscussionTranscript",
         "exportDiscussionConclusions",
         "exportDiscussionTranscript",
@@ -352,6 +356,7 @@
         "messages",
         "numberRefParagraphs",
         "oaCadContextId",
+        "oaHistoryCompare",
         "onContinue",
         "parseArgsFromAI",
         "parseOASections",

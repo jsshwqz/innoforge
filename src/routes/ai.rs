@@ -2550,6 +2550,165 @@ pub async fn api_ai_oa_panel(
         "synthesis": synthesis
     }))
 }
+
+/// P1-T3: 一审-二审对比分析
+/// POST /api/ai/oa-history-compare  { patent_id, current_oa_type, current_oa_text }
+/// 按专利号关联历史 OA 记录，生成 diff
+pub async fn api_ai_oa_history_compare(
+    State(s): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let patent_id = req["patent_id"].as_str().unwrap_or("");
+    let current_oa_type = req["current_oa_type"]
+        .as_str()
+        .unwrap_or("second_rejection");
+    let current_oa_text = req["current_oa_text"].as_str().unwrap_or("");
+
+    if patent_id.is_empty() {
+        return Json(json!({ "error": "缺少专利ID / Missing patent_id" }));
+    }
+
+    // 查询该专利的历史 OA 记录
+    let history = match s.db.list_oa_analyses(patent_id) {
+        Ok(h) => h,
+        Err(e) => return Json(json!({ "error": format!("查询历史失败: {}", e) })),
+    };
+
+    if history.is_empty() {
+        return Json(json!({ "status": "no_history", "message": "无历史OA记录" }));
+    }
+
+    let ai = s
+        .config
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .ai_client_expert();
+
+    let sys = "你是一位资深专利代理师，正在对比分析同一专利的多轮审查意见。\n\
+        请对比一审和二审驳回决定，分析：\n\
+        1. **新增驳回理由**：二审比一审新增了哪些理由？\n\
+        2. **变更理由**：同样的理由，论据有什么变化？\n\
+        3. **维持理由**：一审和二审都坚持的理由\n\
+        4. **放弃理由**：一审有但二审没提的理由\n\
+        5. **对比文献变化**：新增/删除了哪些对比文件？\n\
+        6. **策略建议**：基于变化，答复策略应如何调整？\n\
+        请用中文回答。";
+
+    let mut history_text = String::new();
+    for (i, h) in history.iter().enumerate() {
+        history_text.push_str(&format!(
+            "### 第{}轮（类型：{}，日期：{}）\n{}\n\n",
+            i + 1,
+            h.oa_type,
+            h.created_at,
+            h.analysis_text
+        ));
+    }
+
+    let user_msg = format!(
+        "## 历史审查意见\n{history_text}\n## 当前审查意见（类型：{current_oa_type}）\n{current_oa_text}"
+    );
+
+    let result = ai
+        .chat_with_system(sys, &user_msg, 0.7)
+        .await
+        .unwrap_or_else(|e| format!("分析失败: {}", e));
+
+    Json(json!({
+        "status": "ok",
+        "history_count": history.len(),
+        "analysis": result
+    }))
+}
+/// P2-T2: 模拟审查员预判
+/// POST /api/ai/oa-examiner-preview  { my_patent, oa_text, response_text }
+pub async fn api_ai_oa_examiner_preview(
+    State(s): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let my_patent = req["my_patent"].as_str().unwrap_or("");
+    let oa_text = req["oa_text"].as_str().unwrap_or("");
+    let response_text = req["response_text"].as_str().unwrap_or("");
+
+    if response_text.is_empty() {
+        return Json(json!({ "error": "缺少答复文本 / Missing response text" }));
+    }
+
+    let ai = s
+        .config
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .ai_client_expert();
+
+    let sys = "你是一位中国专利审查员，刚刚收到了申请人对你发出的驳回决定的答复。\n\
+        请以审查员视角预判：\n\
+        1. **可能接受的论点**（标绿）：申请人说的哪些你有倾向接受？为什么？\n\
+        2. **可能反驳的论点**（标红）：哪些论点你仍要反驳？给出你的反驳理由。\n\
+        3. **下一轮可能新驳回理由**：如果进入下一轮，你可能提出什么新理由？\n\
+        4. **总体预判**：可能授权 / 可能部分授权 / 可能维持驳回\n\
+        5. **建议修改**：如果要授权，你建议申请人怎么修改？\n\
+        请用中文回答，态度专业客观。";
+
+    let user_msg = format!(
+        "## 我的专利\n{my_patent}\n\n## 我发出的驳回决定\n{oa_text}\n\n## 申请人提交的答复\n{response_text}"
+    );
+
+    let result = ai
+        .chat_with_system(sys, &user_msg, 0.7)
+        .await
+        .unwrap_or_else(|e| format!("预判失败: {}", e));
+
+    Json(json!({ "status": "ok", "preview": result }))
+}
+
+/// P2-T3: 对方视角防御分析
+/// POST /api/ai/oa-defense-analysis  { my_patent, claims }
+pub async fn api_ai_oa_defense_analysis(
+    State(s): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let my_patent = req["my_patent"].as_str().unwrap_or("");
+    let claims = req["claims"].as_str().unwrap_or("");
+
+    if my_patent.is_empty() {
+        return Json(json!({ "error": "缺少专利文本 / Missing patent text" }));
+    }
+
+    let ai = s
+        .config
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .ai_client_expert();
+
+    let sys = "你是一位专利诉讼律师，代表对方当事人。你的目标是在专利授权后无效它。\n\
+        请从对方视角分析三个维度：\n\n\
+        ## 一、无效宣告预判\n\
+        1. 权利要求有哪些潜在漏洞可以利用？\n\
+        2. 最有可能的无效理由是什么（新颖性/创造性/说明书充分公开/权利要求清楚）？\n\
+        3. 需要准备什么证据？\n\n\
+        ## 二、侵权可执行性\n\
+        1. 授权后是否容易检测侵权？\n\
+        2. 等同侵权范围有多大？\n\
+        3. 是否有规避设计空间？\n\n\
+        ## 三、商业价值评估\n\
+        1. 保护范围是否太窄无商业价值？\n\
+        2. 如果修改缩范围，哪些场景不受保护？\n\
+        3. 对竞争对手的实际威慑力如何？\n\n\
+        请用中文回答，从对抗视角出发。";
+
+    let user_msg = if claims.is_empty() {
+        format!("## 专利文本\n{my_patent}")
+    } else {
+        format!("## 专利文本\n{my_patent}\n\n## 权利要求\n{claims}")
+    };
+
+    let result = ai
+        .chat_with_system(sys, &user_msg, 0.7)
+        .await
+        .unwrap_or_else(|e| format!("分析失败: {}", e));
+
+    Json(json!({ "status": "ok", "analysis": result }))
+}
 #[cfg(test)]
 mod prompt_boundary_tests {
     use super::{

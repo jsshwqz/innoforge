@@ -109,6 +109,8 @@
             <button class="btn-primary" id="btn-analyze" onclick="doOAAnalysis()" data-i18n="oar.btnAnalyze"></button>
             <button class="btn-secondary" onclick="showOADiscussImportDialog()" style="margin-left:8px;" data-i18n="oar.discussImport">📥 导入讨论</button>
             <button class="btn-secondary" onclick="showOaPanel()" id="btn-oa-panel" style="margin-left:8px;">🎭 <span data-i18n="oa.panel.btn">多角色会诊</span></button>
+            <button class="btn-secondary" onclick="examinerPreview()" id="btn-examiner-preview" style="margin-left:8px;">🔍 <span data-i18n="oa.preview.btn">模拟审查员预判</span></button>
+            <button class="btn-secondary" onclick="defenseAnalysis()" id="btn-defense-analysis" style="margin-left:8px;">🛡️ <span data-i18n="oa.defense.btn">对方视角防御</span></button>
             <div style="display:flex;align-items:center;gap:8px;margin-left:auto;">
                 <span class="muted" data-i18n="oar.depthLabel"></span>
                 <select id="depth-select" class="depth-select">
@@ -867,6 +869,117 @@
     }
 
     function switchOaPanelTab(idx) {
+
+    // P1-T3: 一审-二审对比分析
+    async function oaHistoryCompare() {
+        var patent = getMyPatent();
+        var oa = getOA();
+        if (!patent || !patent.id) {
+            alert('请先选择专利');
+            return;
+        }
+        var btn = document.getElementById('btn-history-compare');
+        if (btn) { btn.disabled = true; btn.textContent = '⏳ 对比中...'; }
+        try {
+            var resp = await fetch('/api/ai/oa-history-compare', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    patent_id: patent.id,
+                    current_oa_type: document.getElementById('oa-type-select')?.value || 'second_rejection',
+                    current_oa_text: oa ? oa.content : ''
+                })
+            });
+            var data = await resp.json();
+            if (data.error) { alert(data.error); return; }
+            if (data.status === 'no_history') {
+                alert(data.message || '无历史OA记录');
+                return;
+            }
+            // 在结果区域追加对比分析
+            var result = document.getElementById('result');
+            var div = document.createElement('div');
+            div.innerHTML = '<h3 style="color:#d2a8ff;margin-top:20px;">📋 一审-二审对比分析</h3><div style="font-size:13px;line-height:1.8;color:#c9d1d9;">' + DOMPurify.sanitize(renderMarkdown(data.analysis || '')) + '</div>';
+            result.appendChild(div);
+        } catch(e) {
+            alert('对比分析失败: ' + e.message);
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = '📋 一审-二审对比'; }
+        }
+    }
+
+    // P2-T2: 模拟审查员预判
+    async function examinerPreview() {
+        var patent = getMyPatent();
+        var oa = getOA();
+        var responseText = getLastResponseText();
+        if (!responseText || responseText.length < 50) {
+            alert(t('oa.preview.needResponse') || '请先生成答复文本');
+            return;
+        }
+        var btn = document.getElementById('btn-examiner-preview');
+        btn.disabled = true;
+        btn.innerHTML = '⏳ ' + (t('oa.preview.loading') || '审查员预判中...');
+        try {
+            var resp = await fetch('/api/ai/oa-examiner-preview', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    my_patent: patent ? patent.content : '',
+                    oa_text: oa ? oa.content : '',
+                    response_text: responseText
+                })
+            });
+            var data = await resp.json();
+            if (data.error) { alert(data.error); return; }
+            // 渲染预判结果
+            var result = document.getElementById('result');
+            var div = document.createElement('div');
+            div.style.marginTop = '20px';
+            div.innerHTML = '<h3 style="color:#58a6ff;">🔍 模拟审查员预判</h3><div style="font-size:13px;line-height:1.8;color:#c9d1d9;padding:12px;border:1px solid #30363d;border-radius:8px;">' + DOMPurify.sanitize(renderMarkdown(data.preview || '')) + '</div>';
+            result.appendChild(div);
+        } catch(e) {
+            alert('预判失败: ' + e.message);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '🔍 <span data-i18n="oa.preview.btn">' + (t('oa.preview.btn') || '模拟审查员预判') + '</span>';
+        }
+    }
+
+    // P2-T3: 对方视角防御分析
+    async function defenseAnalysis() {
+        var patent = getMyPatent();
+        if (!patent || !patent.content || patent.content.length < 50) {
+            alert('请先上传或粘贴专利');
+            return;
+        }
+        var btn = document.getElementById('btn-defense-analysis');
+        btn.disabled = true;
+        btn.innerHTML = '⏳ ' + (t('oa.defense.loading') || '防御分析中...');
+        try {
+            var resp = await fetch('/api/ai/oa-defense-analysis', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    my_patent: patent.content,
+                    claims: ''
+                })
+            });
+            var data = await resp.json();
+            if (data.error) { alert(data.error); return; }
+            // 渲染防御分析结果
+            var result = document.getElementById('result');
+            var div = document.createElement('div');
+            div.style.marginTop = '20px';
+            div.innerHTML = '<h3 style="color:#f85149;">🛡️ 对方视角防御分析</h3><div style="font-size:13px;line-height:1.8;color:#c9d1d9;padding:12px;border:1px solid #30363d;border-radius:8px;">' + DOMPurify.sanitize(renderMarkdown(data.analysis || '')) + '</div>';
+            result.appendChild(div);
+        } catch(e) {
+            alert('分析失败: ' + e.message);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '🛡️ <span data-i18n="oa.defense.btn">' + (t('oa.defense.btn') || '对方视角防御') + '</span>';
+        }
+    }
         if (!window._oaPanelTabs) return;
         for (var i = 0; i < window._oaPanelTabs.length; i++) {
             var content = document.getElementById('oa-panel-content-' + i);
