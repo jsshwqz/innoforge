@@ -335,6 +335,10 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
             "/api/ai/oa-defense-analysis",
             post(routes::api_ai_oa_defense_analysis),
         )
+        .route(
+            "/api/ai/oa-strategy-recommend",
+            post(routes::api_ai_oa_strategy_recommend),
+        )
         // OA 分析历史 API / OA History API
         .route("/api/oa/history/all", get(routes::api_oa_history_all))
         .route(

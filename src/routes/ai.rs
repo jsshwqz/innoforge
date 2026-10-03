@@ -2709,6 +2709,62 @@ pub async fn api_ai_oa_defense_analysis(
 
     Json(json!({ "status": "ok", "analysis": result }))
 }
+
+/// P3-T1: 答复策略智能推荐
+/// POST /api/ai/oa-strategy-recommend  { oa_type, my_patent, refs, oa_text }
+pub async fn api_ai_oa_strategy_recommend(
+    State(s): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let oa_type = req["oa_type"].as_str().unwrap_or("second_rejection");
+    let my_patent = req["my_patent"].as_str().unwrap_or("");
+    let refs = req["refs"].as_str().unwrap_or("");
+    let oa_text = req["oa_text"].as_str().unwrap_or("");
+
+    if my_patent.is_empty() || oa_text.is_empty() {
+        return Json(json!({ "error": "缺少专利文本或OA文本 / Missing patent or OA text" }));
+    }
+
+    let ai = s
+        .config
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .ai_client_expert();
+
+    let sys = "你是一位专利答复策略专家，精通中国专利法及审查指南。\n\
+        请根据以下信息，推荐最优答复策略：\n\n\
+        分析维度：\n\
+        1. OA 类型 → 答复紧迫度（一审有修改机会 vs 二审受限 vs 复审最后机会）\n\
+        2. 对比文献数量和相关性 → 翻案难度评估\n\
+        3. 权利要求 vs 对比文献 → 哪些权项有救、哪些难救\n\
+        4. 技术领域 → 该领域审查标准宽严度\n\n\
+        输出格式（严格按此结构）：\n\
+        ## 推荐策略\n\
+        ### 策略1：[名称]\n\
+        - 成功概率：X%\n\
+        - 优先级：⭐⭐⭐\n\
+        - 理由：...\n\
+        - 具体操作：...\n\n\
+        ### 策略2：[名称]\n\
+        ...\n\n\
+        ## 不推荐的策略\n\
+        ### [名称]\n\
+        - 原因：...\n\n\
+        ## 综合建议\n\
+        ...\n\n\
+        请用中文回答。";
+
+    let user_msg = format!(
+        "## OA 类型\n{oa_type}\n\n## 我的专利\n{my_patent}\n\n## 审查意见\n{oa_text}\n\n## 对比文献\n{refs}"
+    );
+
+    let result = ai
+        .chat_with_system(sys, &user_msg, 0.7)
+        .await
+        .unwrap_or_else(|e| format!("策略推荐失败: {}", e));
+
+    Json(json!({ "status": "ok", "strategies": result }))
+}
 #[cfg(test)]
 mod prompt_boundary_tests {
     use super::{

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-10-03T04:31:20.315Z",
+  "generatedAt": "2026-10-03T04:34:34.011Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -263,6 +263,7 @@
         "pasteOA",
         "pasteRef",
         "previewPdfByKey",
+        "recommendStrategy",
         "recoverOADiscussion",
         "removeRef",
         "scrollToRef",
@@ -364,6 +365,7 @@
         "pasteOA",
         "pasteRef",
         "previewPdfByKey",
+        "recommendStrategy",
         "recoverOADiscussion",
         "reindexPlaceholders",
         "removeDiscussFile",

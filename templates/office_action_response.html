@@ -111,6 +111,7 @@
             <button class="btn-secondary" onclick="showOaPanel()" id="btn-oa-panel" style="margin-left:8px;">🎭 <span data-i18n="oa.panel.btn">多角色会诊</span></button>
             <button class="btn-secondary" onclick="examinerPreview()" id="btn-examiner-preview" style="margin-left:8px;">🔍 <span data-i18n="oa.preview.btn">模拟审查员预判</span></button>
             <button class="btn-secondary" onclick="defenseAnalysis()" id="btn-defense-analysis" style="margin-left:8px;">🛡️ <span data-i18n="oa.defense.btn">对方视角防御</span></button>
+            <button class="btn-secondary" onclick="recommendStrategy()" id="btn-strategy-recommend" style="margin-left:8px;">💡 <span data-i18n="oa.strategy.btn">智能推荐策略</span></button>
             <div style="display:flex;align-items:center;gap:8px;margin-left:auto;">
                 <span class="muted" data-i18n="oar.depthLabel"></span>
                 <select id="depth-select" class="depth-select">
@@ -954,6 +955,7 @@
             return;
         }
         var btn = document.getElementById('btn-defense-analysis');
+            <button class="btn-secondary" onclick="recommendStrategy()" id="btn-strategy-recommend" style="margin-left:8px;">💡 <span data-i18n="oa.strategy.btn">智能推荐策略</span></button>
         btn.disabled = true;
         btn.innerHTML = '⏳ ' + (t('oa.defense.loading') || '防御分析中...');
         try {
@@ -978,6 +980,55 @@
         } finally {
             btn.disabled = false;
             btn.innerHTML = '🛡️ <span data-i18n="oa.defense.btn">' + (t('oa.defense.btn') || '对方视角防御') + '</span>';
+        }
+    }
+
+    // P3-T1: 答复策略智能推荐
+    async function recommendStrategy() {
+        var patent = getMyPatent();
+        var oa = getOA();
+        if (!patent || !patent.content || patent.content.length < 50) {
+            alert('请先上传或粘贴专利');
+            return;
+        }
+        if (!oa || !oa.content || oa.content.length < 50) {
+            alert('请先输入OA文本');
+            return;
+        }
+        var btn = document.getElementById('btn-strategy-recommend');
+        btn.disabled = true;
+        btn.innerHTML = '⏳ ' + (t('oa.strategy.loading') || '策略推荐中...');
+        // 构建对比文献
+        var refsText = '';
+        var refs = getRefs();
+        for (var i = 0; i < refs.length; i++) {
+            if (refs[i] && refs[i].content) {
+                refsText += '### 对比文件' + (i+1) + '\n' + refs[i].content + '\n\n';
+            }
+        }
+        try {
+            var resp = await fetch('/api/ai/oa-strategy-recommend', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    oa_type: document.getElementById('oa-type-select')?.value || 'second_rejection',
+                    my_patent: patent.content,
+                    refs: refsText,
+                    oa_text: oa.content
+                })
+            });
+            var data = await resp.json();
+            if (data.error) { alert(data.error); return; }
+            var result = document.getElementById('result');
+            var div = document.createElement('div');
+            div.style.marginTop = '20px';
+            div.innerHTML = '<h3 style="color:#d29922;">💡 答复策略智能推荐</h3><div style="font-size:13px;line-height:1.8;color:#c9d1d9;padding:12px;border:1px solid #30363d;border-radius:8px;">' + DOMPurify.sanitize(renderMarkdown(data.strategies || '')) + '</div>';
+            result.appendChild(div);
+        } catch(e) {
+            alert('策略推荐失败: ' + e.message);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '💡 <span data-i18n="oa.strategy.btn">' + (t('oa.strategy.btn') || '智能推荐策略') + '</span>';
         }
     }
         if (!window._oaPanelTabs) return;
