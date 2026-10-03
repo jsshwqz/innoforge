@@ -1,0 +1,79 @@
+# Agent-2 交接文档 — T2 技术机制深度对比
+
+> 创建时间：2026-10-03
+> 作者：Agent-2
+> 状态：**T2 已完成，无需接手**。本文档供其他 AI 了解 T2 改了什么、怎么改的，避免冲突。
+
+---
+
+## 一、任务概况
+
+| 项目 | 内容 |
+|------|------|
+| 任务 ID | T2 技术机制深度对比 |
+| 分支 | `feat/oa-mechanism-compare` |
+| 提交 | `d3a9590` |
+| 状态 | ✅ 已完成，已合并进 main |
+| 改动量 | 2 文件，+28 -5 行 |
+
+## 二、改了什么
+
+### 文件 1：`src/ai/patent.rs`（+27 -4）
+
+1. **新增常量 `MECHANISM_ANALYSIS`**（第 19 行附近）：
+   - 一段 prompt 文本，要求 AI 从 4 个维度做技术机制深度分析：
+     - 技术领域分析（对比文件解决的技术问题属于什么领域）
+     - 工作原理对比（技术方案如何工作，与本申请有何本质区别）
+     - 结合动机分析（本领域技术人员是否有动机组合对比文件）
+     - 协同效应分析（本申请各技术特征之间是否存在协同关系）
+   - 还要求输出一个技术机制对比表
+
+2. **7 个 `build_*_prompt` 函数各插入 2 行**：
+   - `let mech = MECHANISM_ANALYSIS;`
+   - 在 format! 字符串中插入 `{mech}` 占位符
+   - 7 个函数：`build_first_exam_prompt`、`build_abnormal_prompt`、`build_reject_review_prompt`、`build_second_rejection_prompt`、`build_reexamination_request_prompt`、`build_reexamination_decision_prompt`、`build_admin_lawsuit_prompt`
+   - 插入位置：特征对比段之后、法条/反驳分析段之前
+
+### 文件 2：`templates/office_action_response.html`（+1 -1）
+
+- `parseOASections` 函数中，mechanism section 的标签从硬编码 `'技术机制深度对比'` 改为 `t('oa.mechanism.title')` i18n 调用
+
+### 未改动（但有关联）
+
+- `static/i18n.js` — `oa.mechanism.*` 系列 key 已由其他 AI 提前加入，T2 无需再加
+- `docs/functions-manifest.json` — T2 未改前端函数签名，基线无需刷新
+
+## 三、验证结果
+
+| 检查项 | 结果 |
+|--------|------|
+| `cargo fmt --check` | ✅ 通过 |
+| `cargo clippy -- -D warnings` | ✅ 零警告 |
+| `cargo test` | ✅ 37 passed, 0 failed |
+| `check_html_functions.mjs` | ✅ 8 模板全通过 |
+
+## 四、对其他 AI 的注意事项
+
+### T3（一审-二审对比分析）责任人
+
+T3 也需要改 `src/ai/patent.rs` 的 `build_second_rejection_prompt`。T2 已经在这个函数里加了 `{mech}` 占位符。T3 追加一审历史对比文本时，**请插在 `{mech}` 之后**，不要破坏机制分析段。
+
+### P2-T2（模拟审查员预判）责任人
+
+如果新建 prompt 函数，不需要关心 `MECHANISM_ANALYSIS`——它是已有 7 个函数的增强，新函数独立编写即可。
+
+### 任何人改 `src/ai/patent.rs`
+
+`MECHANISM_ANALYSIS` 常量在第 19 行附近，7 个函数里的 `let mech = MECHANISM_ANALYSIS;` 和 `{mech}` 占位符是配对使用的，删一个就要删另一个，别只删一半。
+
+## 五、未完成事项
+
+**无。** T2 范围内的所有工作已完成并验证通过。
+
+如果后续集成时发现 `MECHANISM_ANALYSIS` 的 prompt 文本需要调整（比如 AI 输出格式不理想），直接改 `src/ai/patent.rs` 第 19 行附近的常量内容即可，7 个函数会自动引用新内容。
+
+## 六、Agent-2 职责边界（用户明确要求）
+
+- Agent-2 只负责 T2 本身的代码和验证
+- 不负责更新任务看板、写对接说明、追踪其他任务状态
+- 需要其他 AI 配合时，向协调人提出需求，不自己代劳
