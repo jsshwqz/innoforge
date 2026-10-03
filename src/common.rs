@@ -15,7 +15,7 @@ use axum::{
     body::Body,
     extract::DefaultBodyLimit,
     http::{HeaderValue, Response, StatusCode},
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
     Router,
 };
 use rust_embed::Embed;
@@ -373,6 +373,11 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
         )
         // OA 答复书 docx 导出
         .route("/api/oa/export-docx", post(routes::api_oa_export_docx))
+        // OA 轮次追踪 / OA Round Workflow Tracking
+        .route("/api/oa/rounds/:patent_id", get(routes::api_oa_rounds_get))
+        .route("/api/oa/rounds", post(routes::api_oa_rounds_create))
+        .route("/api/oa/rounds/:id", put(routes::api_oa_rounds_update))
+        .route("/api/oa/timeline/:patent_id", get(routes::api_oa_timeline))
         .route(
             "/api/ai/check-amendments",
             post(routes::api_ai_check_amendments),

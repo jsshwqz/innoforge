@@ -593,6 +593,36 @@ pub(crate) fn run(conn: &Connection, current_version: i32, target_version: i32) 
         tracing::info!("Database migrated to version 23 (ai_cost_idea_session)");
     }
 
+    // v24: OA 轮次追踪表 — 记录每件专利从一审→二审→复审→授权/驳回的完整流程
+    // OA rounds tracking table — records the full lifecycle of each patent OA process.
+    if current_version < 24 {
+        conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS oa_rounds (
+                id TEXT PRIMARY KEY,
+                patent_id TEXT NOT NULL,
+                round_number INTEGER NOT NULL,
+                round_type TEXT NOT NULL,
+                oa_date TEXT,
+                oa_text TEXT,
+                response_date TEXT,
+                response_text TEXT,
+                result TEXT,
+                result_date TEXT,
+                strategy_used TEXT,
+                quality_score REAL,
+                notes TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_oa_rounds_patent ON oa_rounds(patent_id);
+            CREATE INDEX IF NOT EXISTS idx_oa_rounds_number ON oa_rounds(patent_id, round_number);
+            DELETE FROM schema_version;
+            INSERT INTO schema_version (version) VALUES (24);
+            ",
+        )?;
+        tracing::info!("Database migrated to version 24 (oa_rounds)");
+    }
     if current_version > 0 && current_version < target_version {
         tracing::info!(
             "Database migrated from version {} to {}",

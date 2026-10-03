@@ -65,6 +65,7 @@
                 <button class="tab" onclick="showTab('description', event)" data-i18n="detail.tabDesc"></button>
                 <button class="tab" onclick="showTab('drawings', event)" id="tab-drawings-btn">📐 图纸</button>
                 <button class="tab" onclick="showTab('ai-chat', event)" data-i18n="detail.tabAiChat"></button>
+                <button class="tab" onclick="showTab('oa-timeline', event)" data-i18n="oa.workflow.timeline"></button>
             </div>
 
             <div id="tab-abstract" class="tab-content active">
@@ -94,6 +95,18 @@
                     <button id="patent-stop-btn" class="btn-stop" style="display:none" onclick="stopPatentGeneration()" data-i18n="detail.stop"></button>
                     <button id="patent-export-btn" class="btn-export-ghost" style="display:none" onclick="exportPatentConclusions()" data-i18n="detail.exportConclusions"></button>
                 </div>
+            <div id="tab-oa-timeline" class="tab-content">
+                <div id="oa-timeline-container" style="padding: 16px 0;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                        <h3 data-i18n="oa.workflow.timeline" style="margin: 0;"></h3>
+                        <button class="btn-primary" onclick="createNewOaRound()" data-i18n="oa.workflow.newRound"></button>
+                    </div>
+                    <div id="oa-timeline-summary" style="margin-bottom: 16px; color: #666; font-size: 14px;"></div>
+                    <div id="oa-timeline-list" style="position: relative;">
+                        <p class="muted" data-i18n="oa.workflow.empty"></p>
+                    </div>
+                </div>
+            </div>
             </div>
         </div>
 
@@ -948,6 +961,122 @@
         await fetch('/api/patents/' + patentId + '/tags/' + encodeURIComponent(tag), {method:'DELETE'});
         loadTags();
     }
+
+    // ── OA 时间线功能 ─────────────────────────────────
+    async function loadOaTimeline() {
+        const container = document.getElementById('oa-timeline-list');
+        const summaryEl = document.getElementById('oa-timeline-summary');
+        if (!container) return;
+        container.innerHTML = '<p class="muted">' + t('oa.workflow.loading') + '</p>';
+        try {
+            const resp = await fetch('/api/oa/timeline/' + encodeURIComponent(patentId));
+            const data = await resp.json();
+            if (data.status !== 'ok' || !data.timeline || data.timeline.length === 0) {
+                container.innerHTML = '<p class="muted">' + t('oa.workflow.empty') + '</p>';
+                summaryEl.textContent = '';
+                return;
+            }
+            const s = data.summary;
+            summaryEl.textContent = t('oa.workflow.totalRounds', {n: s.total_rounds}) + ' · ' + t('oa.workflow.completed', {n: s.completed});
+            let html = "";
+            data.timeline.forEach(function(item) {
+                const round = item.round;
+                const resultColor = round.result === 'accepted' ? '#4caf50' :
+                    round.result === 'rejected' ? '#f44336' :
+                    round.result === 'partially_accepted' ? '#ff9800' : '#2196f3';
+                const resultKey = round.result ? round.result : 'pending';
+                const resultText = t('oa.workflow.' + resultKey);
+                const roundTypeMap = {
+                    'first_rejection': '一审驳回',
+                    'second_rejection': '二审驳回',
+                    'reexamination': '复审',
+                    'office_action': '审查意见'
+                };
+                const roundTypeLabel = roundTypeMap[round.round_type] || round.round_type;
+                html += '<div class="oa-timeline-item" style="border-left: 4px solid ' + resultColor + '; padding: 12px 16px; margin-bottom: 12px; background: #f9f9f9; border-radius: 4px;">';
+                html += '<div style="display: flex; justify-content: space-between; align-items: center;">';
+                html += '<strong>' + t('oa.workflow.round', {n: round.round_number}) + ' · ' + roundTypeLabel + '</strong>';
+                html += '<span style="color: ' + resultColor + '; font-weight: bold;">' + resultText + '</span>';
+                html += '</div>';
+                if (round.oa_date) html += '<div style="margin-top: 4px; font-size: 13px; color: #666;">' + t('oa.workflow.oaDate') + ': ' + escapeHtml(round.oa_date) + '</div>';
+                if (round.response_date) html += '<div style="font-size: 13px; color: #666;">' + t('oa.workflow.responseDate') + ': ' + escapeHtml(round.response_date) + '</div>';
+                if (round.strategy_used) html += '<div style="font-size: 13px; color: #666;">' + t('oa.workflow.strategy') + ': ' + escapeHtml(round.strategy_used) + '</div>';
+                if (round.quality_score != null) html += '<div style="font-size: 13px; color: #666;">' + t('oa.workflow.qualityScore') + ': ' + round.quality_score.toFixed(1) + '</div>';
+                html += '<button class="btn-link" onclick="toggleRoundDetail(\'' + round.id + '\')" data-i18n="oa.workflow.viewDetail" style="margin-top: 8px; font-size: 13px;"></button>';
+                html += '<div id="round-detail-' + round.id + '" style="display: none; margin-top: 12px; padding-top: 12px; border-top: 1px solid #ddd;">';
+                if (round.oa_text) html += '<div style="margin-bottom: 8px;"><strong>OA:</strong><pre style="white-space: pre-wrap; max-height: 200px; overflow-y: auto; font-size: 13px;">' + escapeHtml(round.oa_text) + '</pre></div>';
+                if (round.response_text) html += '<div style="margin-bottom: 8px;"><strong>答复:</strong><pre style="white-space: pre-wrap; max-height: 200px; overflow-y: auto; font-size: 13px;">' + escapeHtml(round.response_text) + '</pre></div>';
+                if (round.notes) html += '<div style="margin-bottom: 8px;"><strong>' + t('oa.workflow.notes') + ':</strong> ' + escapeHtml(round.notes) + '</div>';
+                html += '<div><label>' + t('oa.workflow.result') + ':</label> <select id="result-select-' + round.id + '" onchange="updateRoundResult(\'' + round.id + '\')">';
+                html += '<option value="">' + t('oa.workflow.pending') + '</option>';
+                html += '<option value="accepted"' + (round.result === 'accepted' ? ' selected' : '') + '>' + t('oa.workflow.accepted') + '</option>';
+                html += '<option value="rejected"' + (round.result === 'rejected' ? ' selected' : '') + '>' + t('oa.workflow.rejected') + '</option>';
+                html += '<option value="partially_accepted"' + (round.result === 'partially_accepted' ? ' selected' : '') + '>' + t('oa.workflow.partial') + '</option>';
+                html += '</select></div>';
+                html += '</div>';
+                html += '</div>';
+            });
+            container.innerHTML = html;
+            if (window.applyTranslations) applyTranslations();
+        } catch (e) {
+            container.innerHTML = '<p class="muted">Error: ' + escapeHtml(e.message) + '</p>';
+        }
+    }
+
+    function toggleRoundDetail(roundId) {
+        const el = document.getElementById('round-detail-' + roundId);
+        if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+    }
+
+    async function updateRoundResult(roundId) {
+        const select = document.getElementById('result-select-' + roundId);
+        if (!select) return;
+        const result = select.value;
+        try {
+            await fetch('/api/oa/rounds/' + encodeURIComponent(roundId), {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ result: result })
+            });
+            loadOaTimeline();
+        } catch (e) {
+            console.error('Failed to update round result:', e);
+        }
+    }
+
+    async function createNewOaRound() {
+        const roundType = prompt('OA 类型 (first_rejection/second_rejection/reexamination):', 'first_rejection');
+        if (!roundType) return;
+        const oaDate = prompt('发文日期 (YYYY-MM-DD):', new Date().toISOString().slice(0, 10));
+        try {
+            await fetch('/api/oa/rounds', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    patent_id: patentId,
+                    round_type: roundType,
+                    oa_date: oaDate || null
+                })
+            });
+            loadOaTimeline();
+        } catch (e) {
+            console.error('Failed to create OA round:', e);
+        }
+    }
+
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    // 当切换到 OA 时间线标签时加载数据
+    const origShowTab = showTab;
+    showTab = function(name, ev) {
+        origShowTab(name, ev);
+        if (name === 'oa-timeline') loadOaTimeline();
+    };
 
     loadCollectState();
     loadTags();

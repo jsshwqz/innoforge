@@ -18,6 +18,17 @@
     <main class="container page-main" style="max-width:1100px;">
         <div class="page-title-bar"><h2 data-i18n="oar.title"></h2></div>
 
+        <!-- OA 历史轮次选择器 -->
+        <div id="oa-round-selector" class="cmp-section" style="display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; margin-bottom: 8px; background: #f0f4ff; border-radius: 6px;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <label data-i18n="oa.workflow.round" style="font-weight: 500;"></label>
+                <select id="oa-round-select" onchange="loadSelectedRound()" style="padding: 4px 8px; border-radius: 4px; border: 1px solid #ccc;">
+                    <option value="">--</option>
+                </select>
+            </div>
+            <button class="btn-primary" onclick="createOaRoundFromPage()" data-i18n="oa.workflow.newRound" style="padding: 4px 12px; font-size: 13px;"></button>
+        </div>
+
         <!-- OA Type Selector -->
         <div class="cmp-section cmp-oa-violet">
             <label class="cmp-label violet" data-i18n="oar.typeLabel"></label>
@@ -3525,6 +3536,112 @@
     loadOaHistory();
     initDiscQuoteEvents();
     initDeadline();
+
+    // ── OA 历史轮次选择器 ─────────────────────────────────
+    async function loadOaRoundSelector() {
+        const select = document.getElementById('oa-round-select');
+        if (!select) return;
+        const patentNum = getCurrentPatentNumber();
+        if (!patentNum) return;
+        try {
+            const resp = await fetch('/api/oa/rounds/' + encodeURIComponent(patentNum));
+            const data = await resp.json();
+            if (data.status !== 'ok' || !data.rounds || data.rounds.length === 0) {
+                select.innerHTML = '<option value="">--</option>';
+                return;
+            }
+            let options = '<option value="">--</option>';
+            data.rounds.forEach(function(round) {
+                const typeLabel = {
+                    'first_rejection': '一审驳回',
+                    'second_rejection': '二审驳回',
+                    'reexamination': '复审',
+                    'office_action': '审查意见'
+                }[round.round_type] || round.round_type;
+                options += '<option value="' + round.id + '">第' + round.round_number + '轮 · ' + typeLabel + '</option>';
+            });
+            select.innerHTML = options;
+        } catch (e) {
+            console.error('Failed to load OA rounds:', e);
+        }
+    }
+
+    async function loadSelectedRound() {
+        const select = document.getElementById('oa-round-select');
+        if (!select || !select.value) return;
+        try {
+            const resp = await fetch('/api/oa/rounds/' + encodeURIComponent(select.value));
+            const data = await resp.json();
+            if (data.status !== 'ok' || !data.round) return;
+            const round = data.round;
+            // 如果有 OA 文本，填充到 OA 文本框
+            if (round.oa_text) {
+                const oaTextarea = document.getElementById('oa-text') || document.getElementById('oa_text');
+                if (oaTextarea) oaTextarea.value = round.oa_text;
+            }
+            // 如果有答复文本，显示在结果区
+            if (round.response_text) {
+                const resultArea = document.getElementById('analysis-result') || document.getElementById('oa-result');
+                if (resultArea) {
+                    resultArea.style.display = 'block';
+                    resultArea.innerHTML = '<pre style="white-space: pre-wrap;">' + escapeHtmlOa(round.response_text) + '</pre>';
+                }
+            }
+        } catch (e) {
+            console.error('Failed to load selected round:', e);
+        }
+    }
+
+    async function createOaRoundFromPage() {
+        const patentNum = getCurrentPatentNumber();
+        if (!patentNum) {
+            alert('请先输入专利号');
+            return;
+        }
+        const oaTypeMap = {
+            'first_exam': 'first_rejection',
+            'abnormal': 'second_rejection',
+            'reject_review': 'reexamination'
+        };
+        const selectedType = document.querySelector('input[name="oa_type"]:checked');
+        const roundType = selectedType ? (oaTypeMap[selectedType.value] || 'office_action') : 'office_action';
+        const oaDate = prompt('发文日期 (YYYY-MM-DD):', new Date().toISOString().slice(0, 10));
+        try {
+            const oaTextarea = document.getElementById('oa-text') || document.getElementById('oa_text');
+            const oaText = oaTextarea ? oaTextarea.value : '';
+            await fetch('/api/oa/rounds', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    patent_id: patentNum,
+                    round_type: roundType,
+                    oa_date: oaDate || null,
+                    oa_text: oaText || null
+                })
+            });
+            loadOaRoundSelector();
+        } catch (e) {
+            console.error('Failed to create OA round:', e);
+        }
+    }
+
+    function escapeHtmlOa(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    function getCurrentPatentNumber() {
+        const el = document.getElementById('patent-number-value');
+        if (el && el.textContent.trim()) return el.textContent.trim();
+        const input = document.getElementById('patent-number') || document.getElementById('patent_no');
+        if (input && input.value) return input.value;
+        return '';
+    }
+
+    // 初始加载轮次选择器
+    loadOaRoundSelector();
     </script>
 </body>
 </html>
