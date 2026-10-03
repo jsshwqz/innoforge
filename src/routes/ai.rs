@@ -16,6 +16,13 @@ use base64::Engine;
 use futures::stream::Stream;
 use reqwest::Client;
 use serde_json::json;
+// T1: 在线搜索链 fallback
+use crate::search::chain::SourceChain;
+use crate::search::model::{Lang, SearchQuery};
+use crate::search::provider::SearchProvider;
+use crate::search::providers::epo_ops::EpoOpsProvider;
+use crate::search::providers::google_patents_xhr::GooglePatentsXhrProvider;
+use crate::search::providers::serpapi::SerpApiProvider;
 use std::convert::Infallible;
 use std::pin::Pin;
 use std::time::Instant;
@@ -2449,15 +2456,10 @@ pub async fn api_ai_oa_fetch_refs(
                     }));
                 }
                 _ => {
-                    refs.push(json!({
-                        "pub_number": pub_num,
-                        "context": context,
-                        "title": "",
-                        "abstract": "",
-                        "full_text": "",
-                        "found": false,
-                        "source": ""
-                    }));
+                    // 本地未找到，尝试在线搜索链（SerpAPI → Google Patents → EPO OPS）
+                    let online_ref =
+                        try_online_search(s.db.clone(), s.config.clone(), pub_num, context).await;
+                    refs.push(online_ref);
                 }
             }
         }
@@ -2794,6 +2796,110 @@ pub async fn api_ai_oa_strategy_recommend(
 
     Json(json!({ "status": "ok", "strategies": result }))
 }
+/// T1: 在线搜索链 fallback — 当本地库未找到对比文献时，尝试在线搜索
+async fn try_online_search(
+    db: std::sync::Arc<crate::db::Database>,
+    config: std::sync::Arc<std::sync::RwLock<crate::routes::AppConfig>>,
+    pub_num: &str,
+    context: &str,
+) -> serde_json::Value {
+    let (serpapi_key, epo_credentials) = {
+        let cfg = config.read().unwrap_or_else(|e| e.into_inner());
+        let serpapi_key = cfg.next_serpapi_key();
+        let epo_credentials = {
+            let epo_key = cfg.epo_key.trim();
+            let epo_secret = cfg.epo_secret.trim();
+            if !epo_key.is_empty() && !epo_secret.is_empty() {
+                Some((epo_key.to_string(), epo_secret.to_string()))
+            } else {
+                None
+            }
+        };
+        (serpapi_key, epo_credentials)
+    };
+
+    // 构建在线搜索链（SerpAPI → Google Patents → EPO OPS）
+    let mut providers: Vec<std::sync::Arc<dyn SearchProvider>> = Vec::new();
+    if let Some(api_key) = serpapi_key {
+        providers.push(std::sync::Arc::new(SerpApiProvider::new(
+            api_key,
+            db.clone(),
+        )));
+    }
+    providers.push(std::sync::Arc::new(GooglePatentsXhrProvider::new(
+        db.clone(),
+    )));
+    if let Some((epo_key, epo_secret)) = epo_credentials {
+        providers.push(std::sync::Arc::new(EpoOpsProvider::new(
+            epo_key,
+            epo_secret,
+            db.clone(),
+        )));
+    }
+
+    if providers.is_empty() {
+        return json!({
+            "pub_number": pub_num,
+            "context": context,
+            "title": "",
+            "abstract": "",
+            "full_text": "",
+            "found": false,
+            "source": ""
+        });
+    }
+
+    let chain = SourceChain::new(providers);
+    let query = SearchQuery {
+        keyword: pub_num.to_string(),
+        country: None,
+        language: Some(Lang::English),
+        assignee: None,
+        exact_assignee: false,
+        date_from: None,
+        date_to: None,
+        limit: 1,
+        page: 0,
+        sort_by: None,
+        search_type: Some(crate::types::search::SearchType::PatentNumber),
+    };
+
+    // 超时保护：单次在线搜索最多 10 秒
+    match tokio::time::timeout(std::time::Duration::from_secs(10), chain.run(query)).await {
+        Ok(outcome) if !outcome.results.is_empty() => {
+            let m = &outcome.results[0];
+            let title = m.summary.title.clone();
+            let abstract_text = m.summary.abstract_text.clone();
+            let full_text = if title.is_empty() && abstract_text.is_empty() {
+                String::new()
+            } else {
+                format!("{}\n\n{}", title, abstract_text)
+            };
+            json!({
+                "pub_number": pub_num,
+                "context": context,
+                "title": title,
+                "abstract": abstract_text,
+                "full_text": full_text,
+                "found": true,
+                "source": "online"
+            })
+        }
+        _ => {
+            // 在线搜索也未找到或超时
+            json!({
+                "pub_number": pub_num,
+                "context": context,
+                "title": "",
+                "abstract": "",
+                "full_text": "",
+                "found": false,
+                "source": ""
+            })
+        }
+    }
+}
+
 #[cfg(test)]
 mod prompt_boundary_tests {
     use super::{
