@@ -107,3 +107,12 @@
 - ⚠️ 1 处 innerHTML 未用 DOMPurify（options 拼接数值 ID，无 XSS 风险，style 级别）
 
 **判定**：通过，合并到 main
+
+---
+
+### 19:15 — 审核 T3 遗留工作补完
+
+**提交**：`1a07c2e` on main
+**内容**：CHANGELOG.md + 15个oa_diff单元测试 + functions-manifest基线刷新
+**验证**：fmt ✅ | clippy ✅ | test ✅ | HTML扫描 ✅
+**判定**：通过，T3 全部遗留项已清零
