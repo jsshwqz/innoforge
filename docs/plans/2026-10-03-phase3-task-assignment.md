@@ -271,3 +271,112 @@ fn build_quality_score_prompt(
 - [ ] 总分和等级合理
 - [ ] 薄弱点分析具体
 - [ ] 改进建议可操作
+
+---
+
+## 附录：T3 一审-二审对比分析 — 交接记录
+
+> 原 `2026-10-03-T3-handoff.md`，已合并至本文档并删除原文件。
+> **交接时间**: 2026-10-03
+> **负责人**: AI-2 (Architecture Partner)
+> **状态**: ✅ 后端+前端代码完成并推送，遗留工作已由主AI补完（commit `1a07c2e`）
+
+### A.1 任务概述
+
+**T3 一审-二审对比分析**：当专利有多轮 OA 时，自动关联历史记录，展示一审/二审差异，并将历史上下文注入 AI 分析 prompt 用于二审驳回答复。
+
+### A.2 已完成的工作
+
+#### A.2.1 后端 — diff API 端点
+
+**新增文件**: `src/routes/oa_diff.rs`（258 行）
+
+- 端点: `GET /api/oa/history/:patent_number/diff`
+- 逻辑: 查询同一专利号的所有历史 OA 记录（按版本排序），生成相邻轮次差异对比
+- 差异维度: OA 类型变化、分析深度变化、驳回理由新增/消失、对比文件增减、权利要求变化
+- 返回 `first_exam_context` 字段：一审分析摘要，供前端注入 AI prompt
+- 辅助函数: `extract_rejection_reasons`, `extract_reference_numbers`, `extract_claim_changes`, `safe_preview`
+
+**路由注册**: `src/common.rs` 添加 `.route("/api/oa/history/:patent_number/diff", get(routes::api_oa_history_diff))`
+**模块注册**: `src/routes/mod.rs` 添加 `mod oa_diff;` 和 `pub use oa_diff::*;`
+
+#### A.2.2 AI Prompt 注入
+
+**修改文件**: `src/ai/patent.rs`
+
+- `build_second_rejection_prompt` 签名新增 `first_exam_context: Option<&str>` 参数
+- 新增 `build_first_exam_context_section` 辅助方法
+- 两个调用点均已更新（非流式 + SSE 流式）
+
+**修改文件**: `src/routes/ai.rs` — 两个 handler 提取 `first_exam_context` 字段并透传
+
+#### A.2.3 前端 UI
+
+**修改文件**: `templates/office_action_response.html`
+
+- `doOAAnalysis()` 中二审驳回时自动调用 diff API
+- 新增 `renderOaDiff(diffs)` 函数：差异对比 UI（新增驳回理由标红、已克服问题标绿）
+- 使用 `DOMPurify.sanitize()` 做 XSS 防护
+
+#### A.2.4 i18n
+
+**修改文件**: `static/i18n.js` — 新增 `oa.diff.*` 系列 keys（中英文）
+
+#### A.2.5 测试
+
+- `tests/ai_smoke_test.rs`：调用签名更新
+- **新增 15 个单元测试**（主AI补完，commit `1a07c2e`）：辅助函数 + API 端点全覆盖
+
+#### A.2.6 已通过的验证
+
+cargo check ✅ | cargo clippy -D warnings ✅ | cargo test 全通过 ✅ | cargo fmt ✅ | HTML 扫描 ✅ | ESLint 0 errors ✅
+
+### A.3 原未完成的工作（已全部补完）
+
+| 遗留事项 | 状态 | 补完者 | Commit |
+|----------|------|--------|--------|
+| CHANGELOG.md 未更新 | ✅ 已补 | 主AI | `1a07c2e` |
+| 无 oa_diff 单元测试 | ✅ 已补（15 个测试） | 主AI | `1a07c2e` |
+| HTML 函数完整性扫描未跑 | ✅ 已跑+基线刷新 | 主AI | `1a07c2e` |
+| ESLint 检查未跑 | ✅ 已跑（0 errors） | 主AI | `1a07c2e` |
+| Puppeteer e2e 未跑 | ⏭ 环境未安装，按规约跳过 | — | — |
+| 端到端手动测试 | ⏭ 需浏览器环境 | — | — |
+
+### A.4 重要注意事项
+
+#### A.4.1 签名变更影响
+
+`build_second_rejection_prompt` 和 `office_action_response` / `office_action_response_stream` 的签名都多了一个参数 `first_exam_context: Option<&str>`。如果其它 agent 也要改这些函数的调用点，注意要传此参数（通常传 `None`）。
+
+受影响的调用路径：
+```
+api_ai_office_action_response (ai.rs) → office_action_response (patent.rs) → build_second_rejection_prompt
+api_ai_office_action_response_stream (ai.rs) → office_action_response_stream (patent.rs) → build_second_rejection_prompt
+```
+
+#### A.4.2 rebase 冲突说明
+
+T3 commit `aa8d019` 在 rebase 时与远程已有的其它 agent 提交有冲突，已解决。冲突点:
+- `src/ai/patent.rs`: T2 的 `{mech}` 占位符与 T3 的 `{}` + `first_exam_context` 参数 → 合并保留两者
+- `static/i18n.js`: 其它 agent 的 `oa.panel.*` / `oa.deadline.*` keys 与 T3 的 `oa.diff.*` keys → 全部保留
+- `docs/plans/STATUS.md`: 任务看板更新 → 合并
+
+#### A.4.3 已知问题
+
+- 远程 `4010c0a` 提交标题含 "T3"，可能是另一个 agent 也做了 T3 的部分实现。以 `src/routes/oa_diff.rs` 为标志。
+- 前端 `renderOaDiff` 中专利号提取逻辑：正则匹配 `(CN|US|EP|JP|KR|WO)\d{7,12}`，格式不标准时静默 catch 不报错。
+
+### A.5 文件清单
+
+| 文件 | 状态 | 说明 |
+|------|------|------|
+| `src/routes/oa_diff.rs` | 新增 | diff API 端点 + 15 单元测试 |
+| `src/routes/mod.rs` | 修改 | 注册 oa_diff 模块 |
+| `src/common.rs` | 修改 | 注册路由 |
+| `src/ai/patent.rs` | 修改 | prompt 注入 first_exam_context |
+| `src/routes/ai.rs` | 修改 | 两个 handler 提取 first_exam_context |
+| `templates/office_action_response.html` | 修改 | 前端 diff UI + 自动获取 |
+| `static/i18n.js` | 修改 | 新增 oa.diff.* keys |
+| `tests/ai_smoke_test.rs` | 修改 | 测试签名更新 |
+| `CHANGELOG.md` | 修改 | v0.9.6 版本段（主AI补完） |
+| `docs/functions-manifest.json` | 修改 | HTML 基线刷新（主AI补完） |
