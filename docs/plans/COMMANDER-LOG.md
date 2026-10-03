@@ -70,3 +70,18 @@
 **问题**：AI-1 和 AI-3 完成 T2/T4 后空闲，我没有及时发现并派活
 **纠正**：建立主动巡查机制 — 持续监控 git fetch 结果
 **教训**：总指挥必须主动巡查，不能被动等待
+
+---
+
+### 16:04 — 通过 GitCode Issue 派活
+
+**操作**：创建 3 个 GitCode issue 直接给 AI 派任务
+
+| Issue | 任务 | 分配给 | URL |
+|-------|------|--------|-----|
+| #1 | P3-T2 权利要求修改模拟器 | AI-1 | https://gitcode.com/jsshwqz/innoforge/issues/1 |
+| #2 | P3-T3 答复质量量化评估 | AI-2 | https://gitcode.com/jsshwqz/innoforge/issues/2 |
+| #3 | P4-T1 证据自动收集与整理 | AI-3 | https://gitcode.com/jsshwqz/innoforge/issues/3 |
+
+**每个 issue 包含**：操作步骤、功能需求、验证标准、禁止事项
+**AI 完成后**：在 issue 评论报告 commit hash，我审核后合并
