@@ -116,3 +116,14 @@
 **内容**：CHANGELOG.md + 15个oa_diff单元测试 + functions-manifest基线刷新
 **验证**：fmt ✅ | clippy ✅ | test ✅ | HTML扫描 ✅
 **判定**：通过，T3 全部遗留项已清零
+
+---
+
+### 19:37 — 🚨 事故：AI 删除 templates/index.html
+
+**提交**：`bb8d8a8` "fix(T4): 准备更新 index.html — 颜色阈值修复"
+**问题**：该提交把 `templates/index.html`（首页，604行）整个删除了
+**影响**：如未发现，整个网站首页 404
+**处理**：已 `git revert` 恢复（`4aaf89a`），cargo check + HTML扫描通过
+**根因**：AI 提交标题写"颜色阈值修复"，实际却删了整个文件——可能是 git 操作失误（git rm 代替 git mv？）
+**教训**：每次 pull 后必须检查关键文件是否存在
