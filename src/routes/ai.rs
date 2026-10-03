@@ -1336,8 +1336,23 @@ pub async fn api_ai_office_action_response(
         .get("discuss")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
+    // T3: 提取一审历史上下文（可选）
+    let first_exam_context = req
+        .get("first_exam_context")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+
     match ai
-        .office_action_response(&my_info, &oa_text, &refs_info, oa_type, depth, discuss)
+        .office_action_response(
+            &my_info,
+            &oa_text,
+            &refs_info,
+            oa_type,
+            depth,
+            discuss,
+            first_exam_context.as_deref(),
+        )
         .await
     {
         Ok(content) => {
@@ -1527,8 +1542,22 @@ pub async fn api_ai_office_action_response_stream(
         .read()
         .unwrap_or_else(|e| e.into_inner())
         .ai_client_expert();
-    let mut rx =
-        ai.office_action_response_stream(&my_info, &oa_text, &refs_info, &oa_type, &depth, discuss);
+    // T3: 提取一审历史上下文（可选）
+    let first_exam_context = req
+        .get("first_exam_context")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+
+    let mut rx = ai.office_action_response_stream(
+        &my_info,
+        &oa_text,
+        &refs_info,
+        &oa_type,
+        &depth,
+        discuss,
+        first_exam_context.as_deref(),
+    );
 
     // Capture values for auto-save (must be before consuming s)
     let patent_number = req
