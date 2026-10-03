@@ -2445,6 +2445,111 @@ pub async fn api_ai_oa_fetch_refs(
         "found_count": found_count
     }))
 }
+
+/// P2-T1: 多角色 AI 会诊面板
+/// POST /api/ai/oa-panel  { my_patent, oa_text, refs }
+/// 并行调用 4 个角色 + 1 个综合报告
+pub async fn api_ai_oa_panel(
+    State(s): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let my_patent = req["my_patent"].as_str().unwrap_or("");
+    let oa_text = req["oa_text"].as_str().unwrap_or("");
+    let refs = req["refs"].as_str().unwrap_or("");
+
+    if my_patent.is_empty() || oa_text.is_empty() {
+        return Json(json!({ "error": "缺少专利文本或 OA 文本 / Missing patent or OA text" }));
+    }
+
+    let ai = s
+        .config
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .ai_client_expert();
+
+    // 4 个角色的系统提示
+    let examiner_sys = "你是一位中国专利审查员，刚刚发出了这份驳回决定。\
+        申请人即将提交答复。请从审查员视角分析：\n\
+        1. 申请人说什么会让你改变立场？\n\
+        2. 哪些论点你不会接受？为什么？\n\
+        3. 什么样的修改你会考虑授权？\n\
+        4. 你最担心被申请人指出什么错误？\n\
+        请用中文回答，态度专业客观。";
+
+    let agent_sys = "你是一位有 20 年经验的资深中国专利代理师。\
+        请从代理师视角分析：\n\
+        1. 翻案难度评分（1-10），并说明理由\n\
+        2. 最短翻案路径是什么？\n\
+        3. 如果修改权1，给出修改后的完整文本\n\
+        4. 这个案件的风险点在哪里？\n\
+        5. 你建议的策略是什么？\n\
+        请用中文回答，给出具体可操作的建议。";
+
+    let expert_sys = "你是一位技术专家，精通物理、化学、工程领域。\
+        请从技术视角分析：\n\
+        1. 本发明的技术实质是什么？\n\
+        2. 对比文件的技术方案与本申请在技术原理上有何本质区别？\n\
+        3. D1 的等离子体技术和本申请的低频交流电场在物理上是否等同？\n\
+        4. 这些对比文件的组合在技术上是否有矛盾？\n\
+        5. 本申请的技术贡献是否被低估？\n\
+        请用中文回答，深入到技术原理层面。";
+
+    let opponent_sys = "你是一位专利诉讼律师，代表对方当事人。\
+        你的目标是在专利授权后无效它。请从对方视角分析：\n\
+        1. 如果这件专利授权，你怎么发起无效宣告？\n\
+        2. 权利要求有哪些潜在漏洞可以利用？\n\
+        3. 怎样修改会使专利太窄无商业价值？\n\
+        4. 你最希望申请人做什么修改（对你有利）？\n\
+        5. 你最不希望申请人做什么修改（对你不利）？\n\
+        请用中文回答，从对抗视角出发。";
+
+    let user_msg =
+        format!("## 我的专利\n{my_patent}\n\n## 审查意见\n{oa_text}\n\n## 对比文献\n{refs}");
+
+    // 并行调用 4 个角色（各 60s 超时）
+    let (examiner_res, agent_res, expert_res, opponent_res) = tokio::join!(
+        ai.chat_with_system(examiner_sys, &user_msg, 0.7),
+        ai.chat_with_system(agent_sys, &user_msg, 0.7),
+        ai.chat_with_system(expert_sys, &user_msg, 0.7),
+        ai.chat_with_system(opponent_sys, &user_msg, 0.7),
+    );
+
+    let examiner = examiner_res.unwrap_or_else(|e| format!("分析失败: {}", e));
+    let agent = agent_res.unwrap_or_else(|e| format!("分析失败: {}", e));
+    let expert = expert_res.unwrap_or_else(|e| format!("分析失败: {}", e));
+    let opponent = opponent_res.unwrap_or_else(|e| format!("分析失败: {}", e));
+
+    // 第 5 个调用：综合报告
+    let synthesis_sys = "你是一位专利战略综合分析师。\
+        4 位专家分别从审查员、代理师、技术专家、对方律师视角分析了同一件专利的 OA 答复策略。\n\
+        请综合他们的观点，输出：\n\
+        1. **共识**：4 位专家一致同意的结论（绿色标记）\n\
+        2. **分歧**：专家之间观点冲突的地方（黄色标记）\n\
+        3. **推荐策略**：综合各方观点后的最优策略（蓝色标记）\n\
+        4. **风险提示**：需要特别注意的风险点\n\
+        5. **行动清单**：具体可操作的下一步行动\n\
+        请用中文回答。";
+
+    let synthesis_input = format!(
+        "## 审查员视角\n{examiner}\n\n## 代理师视角\n{agent}\n\n## 技术专家视角\n{expert}\n\n## 对方律师视角\n{opponent}"
+    );
+
+    let synthesis = ai
+        .chat_with_system(synthesis_sys, &synthesis_input, 0.7)
+        .await
+        .unwrap_or_else(|e| format!("综合分析失败: {}", e));
+
+    Json(json!({
+        "status": "ok",
+        "roles": {
+            "examiner": examiner,
+            "agent": agent,
+            "expert": expert,
+            "opponent": opponent
+        },
+        "synthesis": synthesis
+    }))
+}
 #[cfg(test)]
 mod prompt_boundary_tests {
     use super::{

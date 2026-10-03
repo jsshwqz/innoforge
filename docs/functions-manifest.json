@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-10-03T03:34:42.047Z",
+  "generatedAt": "2026-10-03T04:09:45.288Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -270,9 +270,11 @@
         "showAmendmentEditor",
         "showClaimDiff",
         "showOADiscussImportDialog",
+        "showOaPanel",
         "startDiscussion",
         "startNewOADiscuss",
         "stopDiscussionGeneration",
+        "switchOaPanelTab",
         "toggleArgLib",
         "updateChecklistProgress",
         "uploadMyPatent",
@@ -387,12 +389,14 @@
         "showOAAnalysisDiscuss",
         "showOAAnalysisSections",
         "showOADiscussImportDialog",
+        "showOaPanel",
         "showPdfPreview",
         "showPersistentResponseExportButton",
         "showResult",
         "startDiscussion",
         "startNewOADiscuss",
         "stopDiscussionGeneration",
+        "switchOaPanelTab",
         "toggleArgLib",
         "triggerFileSelect",
         "updateChecklistProgress",

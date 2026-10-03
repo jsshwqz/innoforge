@@ -108,6 +108,7 @@
         <div class="btn-row">
             <button class="btn-primary" id="btn-analyze" onclick="doOAAnalysis()" data-i18n="oar.btnAnalyze"></button>
             <button class="btn-secondary" onclick="showOADiscussImportDialog()" style="margin-left:8px;" data-i18n="oar.discussImport">📥 导入讨论</button>
+            <button class="btn-secondary" onclick="showOaPanel()" id="btn-oa-panel" style="margin-left:8px;">🎭 <span data-i18n="oa.panel.btn">多角色会诊</span></button>
             <div style="display:flex;align-items:center;gap:8px;margin-left:auto;">
                 <span class="muted" data-i18n="oar.depthLabel"></span>
                 <select id="depth-select" class="depth-select">
@@ -119,6 +120,8 @@
         </div>
 
         <div id="result"></div>
+        <!-- P2-T1: 多角色会诊面板 -->
+        <div id="oa-panel-container" style="display:none;margin-top:16px;"></div>
 
         <!-- AI Discussion Panel -->
         <div class="discussion-panel hidden" id="discussion-panel">
@@ -779,6 +782,102 @@
     // UA1: 从 OA 文本中自动抽取对比文件公开号
 
     // T1: 自动获取对比文献全文
+
+    // P2-T1: 多角色 AI 会诊面板
+    async function showOaPanel() {
+        var patent = getMyPatent();
+        var oa = getOA();
+        if (!patent || !patent.content || patent.content.length < 50) {
+            alert(t('oar.alertPatent') || '请先上传或粘贴专利');
+            return;
+        }
+        if (!oa || !oa.content || oa.content.length < 50) {
+            alert(t('oar.alertOA') || '请先输入 OA 文本');
+            return;
+        }
+
+        var btn = document.getElementById('btn-oa-panel');
+        var container = document.getElementById('oa-panel-container');
+        btn.disabled = true;
+        btn.innerHTML = '⏳ ' + (t('oa.panel.loading') || '4角色会诊中...');
+
+        // 构建对比文献文本
+        var refsText = '';
+        var refs = getRefs();
+        for (var i = 0; i < refs.length; i++) {
+            if (refs[i] && refs[i].content) {
+                refsText += '### 对比文件' + (i+1) + '\n' + refs[i].content + '\n\n';
+            }
+        }
+
+        try {
+            var resp = await fetch('/api/ai/oa-panel', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    my_patent: patent.content,
+                    oa_text: oa.content,
+                    refs: refsText
+                })
+            });
+            var data = await resp.json();
+
+            if (data.error) {
+                container.innerHTML = '<span style="color:#f85149;">' + escapeHtml(data.error) + '</span>';
+                container.style.display = '';
+                return;
+            }
+
+            // 渲染 5 tab 面板
+            var roles = data.roles || {};
+            var tabs = [
+                { key: 'examiner', label: '🔍 审查员', color: '#58a6ff', content: roles.examiner },
+                { key: 'agent', label: '⚖️ 代理师', color: '#d29922', content: roles.agent },
+                { key: 'expert', label: '🔬 技术专家', color: '#3fb950', content: roles.expert },
+                { key: 'opponent', label: '⚔️ 对方律师', color: '#f85149', content: roles.opponent },
+                { key: 'synthesis', label: '📋 综合报告', color: '#d2a8ff', content: data.synthesis }
+            ];
+
+            var html = '<div style="border:1px solid #30363d;border-radius:8px;overflow:hidden;">';
+            // Tab bar
+            html += '<div style="display:flex;background:#161b22;border-bottom:1px solid #30363d;">';
+            for (var i = 0; i < tabs.length; i++) {
+                html += '<button onclick="switchOaPanelTab(' + i + ')" id="oa-panel-tab-' + i + '" style="flex:1;padding:10px;background:none;border:none;color:#8b949e;cursor:pointer;font-size:13px;border-bottom:2px solid ' + (i===0 ? tabs[i].color : 'transparent') + ';"' + (i===0 ? ' class="active"' : '') + '>' + tabs[i].label + '</button>';
+            }
+            html += '</div>';
+            // Tab content
+            for (var i = 0; i < tabs.length; i++) {
+                html += '<div id="oa-panel-content-' + i + '" style="padding:16px;display:' + (i===0 ? 'block' : 'none') + ';max-height:600px;overflow-y:auto;font-size:13px;line-height:1.8;color:#c9d1d9;">';
+                html += renderMarkdown(tabs[i].content || '');
+                html += '</div>';
+            }
+            html += '</div>';
+            container.innerHTML = DOMPurify.sanitize(html);
+            container.style.display = '';
+
+            // Store tabs data for switching
+            window._oaPanelTabs = tabs;
+        } catch (e) {
+            container.innerHTML = '<span style="color:#f85149;">' + (t('oa.panel.fail') || '会诊失败') + ': ' + escapeHtml(e.message) + '</span>';
+            container.style.display = '';
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '🎭 <span data-i18n="oa.panel.btn">' + (t('oa.panel.btn') || '多角色会诊') + '</span>';
+        }
+    }
+
+    function switchOaPanelTab(idx) {
+        if (!window._oaPanelTabs) return;
+        for (var i = 0; i < window._oaPanelTabs.length; i++) {
+            var content = document.getElementById('oa-panel-content-' + i);
+            var tab = document.getElementById('oa-panel-tab-' + i);
+            if (content) content.style.display = i === idx ? 'block' : 'none';
+            if (tab) {
+                tab.style.borderBottom = '2px solid ' + (i === idx ? window._oaPanelTabs[i].color : 'transparent');
+                tab.style.color = i === idx ? '#c9d1d9' : '#8b949e';
+            }
+        }
+    }
     async function autoFetchRefs() {
         var oa = getOA();
         if (!oa || !oa.content || oa.content.length < 50) {
