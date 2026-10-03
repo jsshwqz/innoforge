@@ -585,7 +585,7 @@
         var html = '<h3 style="color:#c9d1d9;">📅 ' + (typeof t === 'function' ? t('oa.deadline.reminder') : 'OA 答复到期提醒') + '</h3>';
         for (var i = 0; i < items.length; i++) {
             var item = items[i];
-            var color = item.daysLeft < 0 ? '#f85149' : item.daysLeft < 30 ? '#d29922' : '#3fb950';
+            var color = item.daysLeft < 30 ? '#f85149' : item.daysLeft < 60 ? '#d29922' : '#3fb950';
             var status = item.daysLeft < 0 ? (typeof t === 'function' ? t('oa.deadline.expired', {days: Math.abs(item.daysLeft)}) : '已逾期 ' + Math.abs(item.daysLeft) + ' 天') : (typeof t === 'function' ? t('oa.deadline.urgent', {days: item.daysLeft}) : '剩余 ' + item.daysLeft + ' 天');
             html += '<div style="border-left:3px solid ' + color + ';padding:6px 12px;margin:6px 0;background:#161b22;border-radius:4px;">';
             html += '<span style="color:' + color + ';font-weight:600;">' + _escapeHtml(item.patentNumber) + '</span>';
