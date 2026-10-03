@@ -266,11 +266,22 @@ fn build_quality_score_prompt(
 - `oa.quality.suggestions` = "改进建议" / "Suggestions"
 
 ### 验收
-- [ ] 6 维度各有 0-10 评分
-- [ ] 雷达图正确展示
-- [ ] 总分和等级合理
-- [ ] 薄弱点分析具体
-- [ ] 改进建议可操作
+- [x] 6 维度各有 0-10 评分
+- [x] 雷达图正确展示
+- [x] 总分和等级合理
+- [x] 薄弱点分析具体
+- [x] 改进建议可操作
+
+### ✅ 完成记录（Agent-2 / AI-2，commit `5887599`）
+
+- **分支**：main（工作区已有其他AI写入的后端代码，直接在此基础上补完前端）
+- **改动**：4 文件，+549 -2 行
+  - `src/routes/ai.rs`：`api_ai_oa_quality_score` handler（其他AI已写）
+  - `src/common.rs`：路由注册（其他AI已写）
+  - `static/i18n.js`：`oa.quality.*` 中英文 key（其他AI已写）
+  - `templates/office_action_response.html`：**本次新增** `qualityScore()` JS 函数 + `renderRadarChart()` SVG 雷达图 + 评分卡片 UI + 修复 defenseAnalysis() 内误插入的按钮 HTML bug
+- **验证**：cargo fmt ✅ / cargo clippy ✅ / cargo test 37 passed ✅ / HTML 函数扫描 ✅
+- **未完成事项**：无
 
 ---
 
