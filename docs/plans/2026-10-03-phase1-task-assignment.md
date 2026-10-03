@@ -377,3 +377,262 @@ node check_html_functions.mjs
 # 2. 打开 OA 答复页
 # 3. 测试该任务的新功能
 ```
+
+
+---
+
+## 七、T5 集成任务详细操作手册
+
+> **前置条件**：T1/T2/T3/T4 全部完成（各分支已 push）
+> **执行者**：待分配
+> **预计工时**：0.5 天
+
+### 7.0 环境准备
+
+```bash
+cd /root/innoforge
+export PATH="$HOME/.cargo/bin:$PATH"
+
+# 确认在 main 分支
+git checkout main
+
+# 拉取最新
+git pull devspace main
+
+# 确认 main 上已有 T1+T2+T4（dedca85 提交）
+git log --oneline -5
+# 应看到：dedca85 feat: OA答复第一阶段 v0.9.6...
+```
+
+### 7.1 收集各分支代码
+
+```bash
+# 列出所有远程分支，确认临时 AI 们已 push
+git fetch --all
+git branch -r
+
+# 预期看到：
+#   devspace/main                    （我的 T1+T2+T4）
+#   devspace/feat/oa-mechanism-compare  （临时AI-1 的 T2）
+#   devspace/feat/oa-history-diff       （临时AI-2 的 T3）
+#   devspace/feat/oa-deadline-enhance   （临时AI-3 的 T4）
+```
+
+如果某个分支不存在，说明对应临时 AI 还没完成，**等待**，不要继续。
+
+### 7.2 合并 T3（一审-二审对比分析）— 唯一来源，直接合并
+
+```bash
+# T3 只有临时AI-2 的版本，直接 merge
+git merge devspace/feat/oa-history-diff --no-ff -m "merge: T3 一审-二审对比分析"
+
+# 如果有冲突，在以下文件解决：
+# - src/common.rs：T3 新增路由，追加到已有路由列表末尾
+# - templates/office_action_response.html：T3 改的是 diff 区域，不与其他区域冲突
+# - static/i18n.js：T3 的 key 前缀是 oa.diff.*，不与其他前缀冲突
+
+# 验证编译
+cargo check
+```
+
+### 7.3 对比 T2 双版本，选最优
+
+```bash
+# 我的 T2 已在 main（dedca85），临时AI-1 的 T2 在 feat/oa-mechanism-compare
+# 先看差异
+git diff main..devspace/feat/oa-mechanism-compare -- src/ai/patent.rs > /tmp/t2_diff_patent.txt
+git diff main..devspace/feat/oa-mechanism-compare -- templates/office_action_response.html > /tmp/t2_diff_html.txt
+git diff main..devspace/feat/oa-mechanism-compare -- static/i18n.js > /tmp/t2_diff_i18n.txt
+
+# 逐文件审查，判断标准：
+# 1. prompt 改造是否更完整（覆盖了几个 prompt 函数？7个全覆盖 > 只改2个）
+# 2. 前端机制对比表渲染是否有独立样式（比纯 markdown 渲染好）
+# 3. i18n 是否中英双语齐全
+# 4. 是否有额外亮点（如结合动机单独高亮区块）
+```
+
+**决策规则**：
+- 如果临时 AI-1 版本明显更优（覆盖更多 prompt、前端更完善）→ 用她的版本：
+  ```bash
+  git checkout devspace/feat/oa-mechanism-compare -- src/ai/patent.rs
+  # 注意：只取 patent.rs，不要覆盖其他文件（可能包含 T1/T4 的改动）
+  # i18n 和 html 需要手动合并 T2 部分
+  ```
+- 如果我的版本更优或差不多 → 保持 main 不变
+- 如果各有亮点 → 手动合并两者优点到 main
+
+### 7.4 对比 T4 双版本，选最优
+
+```bash
+# 我的 T4 已在 main（dedca85），临时AI-3 的 T4 在 feat/oa-deadline-enhance
+git diff main..devspace/feat/oa-deadline-enhance -- templates/index.html > /tmp/t4_diff_index.txt
+git diff main..devspace/feat/oa-deadline-enhance -- templates/office_action_response.html > /tmp/t4_diff_oa.txt
+git diff main..devspace/feat/oa-deadline-enhance -- static/i18n.js > /tmp/t4_diff_i18n.txt
+
+# 判断标准：
+# 1. 首页提醒是否支持多专利追踪（不只是当前 OA）
+# 2. 期限计算是否正确（二审2月/复审3月/一审4月）
+# 3. 颜色警告是否有进度条
+# 4. 是否有额外亮点（如到期前自动弹窗提醒）
+```
+
+**决策规则**：同 7.3，取最优或手动合并。
+
+### 7.5 统一注册路由
+
+检查 `src/common.rs` 是否包含所有新路由：
+
+```bash
+# 必须存在的路由：
+grep "oa-fetch-refs" src/common.rs          # T1
+grep "oa/history/:patent_number/diff" src/common.rs  # T3
+
+# 如果缺 T3 的路由，手动添加：
+# 在 .route("/api/ai/oa-discuss", ...) 附近追加
+# .route("/api/oa/history/:patent_number/diff", get(routes::api_oa_history_diff))
+```
+
+### 7.6 更新函数基线
+
+```bash
+node check_html_functions.mjs --refresh
+```
+
+### 7.7 全量验证（必须全过）
+
+```bash
+# 1. 格式
+cargo fmt --check
+# 如果失败：
+cargo fmt
+
+# 2. 静态分析（零警告）
+cargo clippy -- -D warnings
+# 如果有警告，逐个修复
+
+# 3. 测试
+cargo test
+# 全部必须通过
+
+# 4. HTML 函数完整性
+node check_html_functions.mjs
+# 必须通过
+
+# 5. ESLint（如果改了 JS）
+export PATH="/c/Users/Administrator/AppData/Local/ms-playwright-go/1.57.0:/c/Users/Administrator/AppData/Roaming/npm:$PATH"
+node node_modules/.bin/eslint static/i18n.js 2>&1 | grep -v "node_modules"
+# 无 error 级别报错
+```
+
+**任一失败必须修复后重跑，不可跳过。**
+
+### 7.8 端到端手动测试
+
+启动服务并测试完整 OA 流程：
+
+```bash
+cargo run &
+sleep 3
+
+# 测试 T1：对比文献自动获取
+# 1. 打开 http://localhost:8080/oa-response
+# 2. 粘贴含 CN103133144A 等公开号的 OA 文本
+# 3. 点击"自动获取对比文献"按钮
+# 4. 确认：文献卡片显示、标题/摘要可见、全文注入
+
+# 测试 T2：技术机制深度对比
+# 1. 点击"开始分析"
+# 2. 确认：AI 输出含"技术机制深度分析"段落
+# 3. 确认：技术机制对比表正确渲染
+
+# 测试 T3：一审-二审对比分析
+# 1. 同专利号有历史 OA 时
+# 2. 确认：自动显示一审-二审差异对比
+# 3. 确认：新增驳回理由标红
+
+# 测试 T4：答复期限管理
+# 1. 选择 OA 类型为"二审驳回答复"
+# 2. 选择发文日期
+# 3. 确认：期限为 2 个月（非 4 个月）
+# 4. 打开首页，确认：OA 到期提醒卡片显示
+```
+
+### 7.9 更新版本号和 CHANGELOG
+
+```bash
+# 确认 Cargo.toml 版本号
+grep "^version" Cargo.toml
+# 应为 version = "0.9.6"
+# 如果 T5 执行时版本已被临时 AI 改过，取最大值
+
+# 更新 CHANGELOG.md
+# 在文件顶部追加：
+```
+
+CHANGELOG 追加内容：
+
+```markdown
+## [0.9.6] - 2026-10-03
+
+### 新增 / Added
+- 对比文献自动获取与全文分析（T1）：从 OA 文本自动提取公开号，查本地库返回全文，注入后续 AI 分析
+- 技术机制深度对比（T2）：prompt 增加技术领域/工作原理/结合动机/协同效应四维分析
+- 一审-二审对比分析（T3）：按专利号关联历史 OA，生成驳回理由/对比文件/权利要求差异对比
+- 答复期限管理增强（T4）：修正二审期限为 2 个月，首页增加 OA 到期提醒卡片
+
+### 修复 / Fixed
+- 二审驳回答复期限错误（原设为 4 个月，实际为 2 个月）
+
+### Added
+- Auto-fetch reference documents from OA text (T1)
+- Technical mechanism deep comparison in AI prompts (T2)
+- First-second examination diff analysis (T3)
+- Deadline management enhancement with homepage reminders (T4)
+```
+
+### 7.10 提交并推送
+
+```bash
+git add -A
+
+# 排除临时文件
+git reset HEAD -- *.pdf *.db *.log
+
+git commit -m "feat: OA答复第一阶段 v0.9.6 集成完成（T1-T4全量合并+验证通过）
+
+T1 对比文献自动获取: POST /api/ai/oa-fetch-refs + 前端自动获取UI
+T2 技术机制深度对比: prompt四维分析 + 前端机制对比表
+T3 一审-二审对比分析: 历史关联 + 差异对比UI
+T4 答复期限管理: 二审2月修正 + 首页提醒
+
+验证: cargo fmt ✅ clippy ✅ test(37 passed) ✅ check_html ✅"
+
+git push devspace main
+```
+
+### 7.11 更新 STATUS.md
+
+在 `docs/plans/STATUS.md` 追加：
+
+```markdown
+### 2026-10-03 — **第一阶段 v0.9.6 集成完成**
+
+- **状态 / Status**: ✅ 完成 / Completed
+- **版本**: v0.9.6
+- **功能**: T1 对比文献自动获取 + T2 技术机制深度对比 + T3 一审二审对比 + T4 期限管理
+- **验证**: fmt ✅ clippy ✅ test(37) ✅ check_html ✅ e2e ✅
+- **提交**: `commit-hash`
+- **下一步**: 第二阶段 v0.9.7 — 多角色会诊面板
+```
+
+### 7.12 异常处理
+
+| 问题 | 处理 |
+|------|------|
+| 临时 AI 分支不存在 | 等待，不要跳过该任务 |
+| 合并冲突在 `src/common.rs` | 手动合并：把所有路由都保留，按字母序排列 |
+| 合并冲突在 `static/i18n.js` | 手动合并：各任务的 key 前缀不同（oa.refs.* / oa.mechanism.* / oa.diff.* / oa.deadline.*），不会真正冲突 |
+| 合并冲突在 `templates/office_action_response.html` | 手动合并：各任务改不同区域（对比文献/特征矩阵/diff/期限），用区域标记 `<!-- TX: xxx -->` 区分 |
+| `cargo test` 失败 | 看错误信息，大概率是合并引入的冲突导致；修复后重跑 |
+| `check_html_functions.mjs` 失败 | 先跑 `--refresh` 更新基线，如果仍失败说明函数真的缺失，需补齐 |
+| 端到端测试某功能不工作 | 检查对应任务是否真的合并进来了（`grep` 关键函数名） |
