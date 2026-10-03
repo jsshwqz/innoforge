@@ -20,7 +20,7 @@
 - **第一阶段任务看板 / Phase 1 Task Board** (v0.9.6):
   | 任务 | 状态 | Agent | 分支 | Commit |
   |------|------|-------|------|--------|
-  | T1 对比文献自动获取 | ✅ 完成 | 主AI | main | `dedca85` |
+  | T1 对比文献自动获取 | ✅ 完成+在线搜索链 | 主AI | feat/oa-deadline-enhance | `dedca85`+`6427a03` |
   | T2 技术机制深度对比 | ✅ 双版本 | AI-1+主AI | `feat/oa-mechanism-compare` | `d3a9590`/`dedca85` |
   | T3 一审-二审对比分析 | ✅ 完成 | AI-2 | main | `380e102` |
   | T4 答复期限管理增强 | ✅ 双版本 | AI-3+主AI | — | `dedca85` |
