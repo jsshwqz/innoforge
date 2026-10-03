@@ -2796,6 +2796,83 @@ pub async fn api_ai_oa_strategy_recommend(
 
     Json(json!({ "status": "ok", "strategies": result }))
 }
+
+/// POST /api/ai/oa-quality-score — P3-T3: 答复质量量化评估
+/// 对生成的答复文本进行多维度量化评分（逻辑严密性、证据引用、区别特征论证、修改合理性、措辞专业度、回复完整性）
+pub async fn api_ai_oa_quality_score(
+    State(s): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let response_text = req["response_text"].as_str().unwrap_or("");
+    let oa_text = req["oa_text"].as_str().unwrap_or("");
+    let my_patent = req["my_patent"].as_str().unwrap_or("");
+
+    if response_text.is_empty() || oa_text.is_empty() {
+        return Json(json!({ "error": "缺少答复文本或OA文本 / Missing response or OA text" }));
+    }
+
+    let ai = s
+        .config
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .ai_client_expert();
+
+    let sys = "你是一位专利答复质量评审专家，精通中国专利法及审查指南。\n        请对以下答复文本进行多维度量化评分（每项 0-10 分，保留一位小数）：\n\n        评分维度：\n        1. 逻辑严密性（logic）：论证链条是否完整，有无逻辑跳跃，因果关系是否成立\n        2. 证据引用充分性（evidence）：是否引用了具体段落、附图标记、对比文件编号\n        3. 区别技术特征论证（distinction）：是否清晰区分了本申请与对比文件的技术特征\n        4. 修改合理性（modification）：权利要求修改是否恰当，有无超出原说明书范围\n        5. 措辞专业度（tone）：用语是否符合专利答复规范，有无口语化或情绪化表达\n        6. 回复完整性（completeness）：是否逐一回应了所有驳回理由\n\n        输出格式（严格按此 JSON 结构，不要加 markdown 代码块标记）：\n        {\n          \"scores\": {\n            \"logic\": 8.5,\n            \"evidence\": 7.0,\n            \"distinction\": 9.0,\n            \"modification\": 8.0,\n            \"tone\": 7.5,\n            \"completeness\": 8.0\n          },\n          \"total\": 8.0,\n          \"grade\": \"B\",\n          \"weaknesses\": \"薄弱点分析...\",\n          \"suggestions\": \"改进建议...\",\n          \"detail\": \"详细评分说明...\",\n          \"not_applicable\": []\n        }\n\n        评分标准：\n        - 9-10: 优秀，该维度无明显缺陷\n        - 7-8: 良好，有小瑕疵但不影响整体\n        - 5-6: 一般，存在明显不足\n        - 3-4: 较差，严重缺失或错误\n        - 0-2: 极差，完全缺失\n\n        total = 加权平均（logic 20%, evidence 15%, distinction 25%, modification 15%, tone 10%, completeness 15%）\n        grade: A(≥9), B(≥7), C(≥5), D(<5)\n        not_applicable: 列出不适用的维度名称（如无权利要求修改则 modification 不适用）\n\n        请严格按 JSON 格式输出，不要加任何其他文字。";
+
+    let user_msg = format!(
+        "## 我的专利\n{my_patent}\n\n## 审查意见\n{oa_text}\n\n## 答复文本\n{response_text}"
+    );
+
+    let result = ai
+        .chat_with_system(sys, &user_msg, 0.3)
+        .await
+        .unwrap_or_else(|e| format!("{{\"error\": \"评分失败: {e}\"}}"));
+
+    // 尝试解析 JSON，如果失败则返回原始文本
+    let parsed: serde_json::Value =
+        serde_json::from_str(&result).unwrap_or_else(|_| json!({ "raw": result }));
+
+    Json(json!({ "status": "ok", "score": parsed }))
+}
+
+/// POST /api/ai/oa-claim-simulate — P3-T2: 权利要求修改模拟器
+/// 用户输入修改后的权利要求，AI 模拟审查员审查，判断是否可能授权
+pub async fn api_ai_oa_claim_simulate(
+    State(s): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let original_claims = req["original_claims"].as_str().unwrap_or("");
+    let modified_claims = req["modified_claims"].as_str().unwrap_or("");
+    let refs = req["refs"].as_str().unwrap_or("");
+    let oa_text = req["oa_text"].as_str().unwrap_or("");
+
+    if modified_claims.is_empty() {
+        return Json(json!({ "error": "缺少修改后权利要求 / Missing modified claims" }));
+    }
+
+    let ai = s
+        .config
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .ai_client_expert();
+
+    let sys = "你是一位专利审查员，申请人提交了修改后的权利要求。\n        请逐项检查并给出明确结论：\n\n        检查项目：\n        1. 说明书支持（support_check）：修改后的权项是否能在说明书中找到依据？有无超范围修改？\n        2. 新颖性（novelty_check）：对比各对比文件 D1/D2/...，修改后是否新颖？\n        3. 创造性（inventiveness_check）：对比文件组合能否显而易见得到修改后的方案？\n        4. 保护范围（scope_check）：修改后范围是否合理？是否过度缩小导致保护价值丧失？\n        5. 总体判断（overall）：可能授权 / 需要进一步修改 / 仍有问题\n        6. 修改建议（suggestions）：如果需要进一步修改，给出具体建议\n\n        输出格式（严格按此 JSON 结构，不要加 markdown 代码块标记）：\n        {\n          \"support_check\": \"通过/不通过：具体分析...\",\n          \"novelty_check\": \"通过/不通过：具体分析...\",\n          \"inventiveness_check\": \"通过/不通过：具体分析...\",\n          \"scope_check\": \"合理/过窄/过宽：具体分析...\",\n          \"overall\": \"可能授权/需要进一步修改/仍有问题\",\n          \"suggestions\": \"具体修改建议...\",\n          \"risk_level\": \"低/中/高\"\n        }\n\n        请严格按 JSON 格式输出，不要加任何其他文字。";
+
+    let user_msg = format!(
+        "## 原始权利要求\n{original_claims}\n\n## 修改后权利要求\n{modified_claims}\n\n## 审查意见\n{oa_text}\n\n## 对比文献\n{refs}"
+    );
+
+    let result = ai
+        .chat_with_system(sys, &user_msg, 0.3)
+        .await
+        .unwrap_or_else(|e| format!("{{\"error\": \"模拟审查失败: {e}\"}}"));
+
+    let parsed: serde_json::Value =
+        serde_json::from_str(&result).unwrap_or_else(|_| json!({ "raw": result }));
+
+    Json(json!({ "status": "ok", "simulation": parsed }))
+}
+
 /// T1: 在线搜索链 fallback — 当本地库未找到对比文献时，尝试在线搜索
 async fn try_online_search(
     db: std::sync::Arc<crate::db::Database>,

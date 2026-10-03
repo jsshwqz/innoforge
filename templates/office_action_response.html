@@ -123,6 +123,8 @@
             <button class="btn-secondary" onclick="examinerPreview()" id="btn-examiner-preview" style="margin-left:8px;">🔍 <span data-i18n="oa.preview.btn">模拟审查员预判</span></button>
             <button class="btn-secondary" onclick="defenseAnalysis()" id="btn-defense-analysis" style="margin-left:8px;">🛡️ <span data-i18n="oa.defense.btn">对方视角防御</span></button>
             <button class="btn-secondary" onclick="recommendStrategy()" id="btn-strategy-recommend" style="margin-left:8px;">💡 <span data-i18n="oa.strategy.btn">智能推荐策略</span></button>
+            <button class="btn-secondary" onclick="qualityScore()" id="btn-quality-score" style="margin-left:8px;">📊 <span data-i18n="oa.quality.btn">质量评估</span></button>
+            <button class="btn-secondary" onclick="openClaimSimulator()" id="btn-claim-sim" style="margin-left:8px;">🔧 <span data-i18n="oa.claimSim.title">权利要求修改模拟器</span></button>
             <div style="display:flex;align-items:center;gap:8px;margin-left:auto;">
                 <span class="muted" data-i18n="oar.depthLabel"></span>
                 <select id="depth-select" class="depth-select">
@@ -966,7 +968,6 @@
             return;
         }
         var btn = document.getElementById('btn-defense-analysis');
-            <button class="btn-secondary" onclick="recommendStrategy()" id="btn-strategy-recommend" style="margin-left:8px;">💡 <span data-i18n="oa.strategy.btn">智能推荐策略</span></button>
         btn.disabled = true;
         btn.innerHTML = '⏳ ' + (t('oa.defense.loading') || '防御分析中...');
         try {
@@ -1041,6 +1042,368 @@
             btn.disabled = false;
             btn.innerHTML = '💡 <span data-i18n="oa.strategy.btn">' + (t('oa.strategy.btn') || '智能推荐策略') + '</span>';
         }
+    }
+
+    // P3-T3: 答复质量量化评估
+    async function qualityScore() {
+        var patent = getMyPatent();
+        var oa = getOA();
+        var responseText = '';
+        var section5 = document.getElementById('section5-content');
+        if (section5) {
+            responseText = section5.textContent || section5.innerText || '';
+        }
+        if (!responseText || responseText.trim().length < 50) {
+            if (typeof lastAnalysisRawText !== 'undefined' && lastAnalysisRawText && lastAnalysisRawText.length > 50) {
+                responseText = lastAnalysisRawText;
+            } else {
+                alert(t('oa.quality.noResponse') || '请先生成答复文本');
+                return;
+            }
+        }
+        if (!oa || !oa.content || oa.content.length < 50) {
+            alert('请先输入OA文本');
+            return;
+        }
+        var btn = document.getElementById('btn-quality-score');
+        btn.disabled = true;
+        btn.innerHTML = '⏳ ' + (t('oa.quality.loading') || '评分中...');
+        try {
+            var resp = await fetch('/api/ai/oa-quality-score', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    response_text: responseText,
+                    oa_text: oa.content,
+                    my_patent: patent ? (patent.content || '') : ''
+                })
+            });
+            var data = await resp.json();
+            if (data.error) { alert(data.error); return; }
+            var score = data.score || data;
+            var result = document.getElementById('result');
+            var div = document.createElement('div');
+            div.style.marginTop = '20px';
+            div.id = 'quality-score-result';
+            var html = '<h3 style="color:#58a6ff;">📊 ' + (t('oa.quality.title') || '答复质量评估') + '</h3>';
+            if (score.scores) {
+                var scores = score.scores;
+                var dims = [
+                    {key:'logic', label: t('oa.quality.logic') || '逻辑严密性'},
+                    {key:'evidence', label: t('oa.quality.evidence') || '证据引用'},
+                    {key:'distinction', label: t('oa.quality.distinction') || '区别特征论证'},
+                    {key:'modification', label: t('oa.quality.modification') || '修改合理性'},
+                    {key:'tone', label: t('oa.quality.tone') || '措辞专业度'},
+                    {key:'completeness', label: t('oa.quality.completeness') || '回复完整性'}
+                ];
+                html += '<div style="display:flex;gap:24px;flex-wrap:wrap;margin:16px 0;">';
+                html += '<div style="flex-shrink:0;">' + renderRadarChart(dims, scores) + '</div>';
+                html += '<div style="flex:1;min-width:300px;">';
+                for (var i = 0; i < dims.length; i++) {
+                    var val = scores[dims[i].key];
+                    if (val === undefined || val === null) continue;
+                    var color = val >= 7 ? '#3fb950' : (val >= 5 ? '#d29922' : '#f85149');
+                    html += '<div style="margin-bottom:8px;"><span style="display:inline-block;width:140px;color:#8b949e;">' + escapeHtml(dims[i].label) + '</span>';
+                    html += '<span style="color:' + color + ';font-weight:600;">' + val + '</span>';
+                    html += '<div style="display:inline-block;width:120px;height:8px;background:#21262d;border-radius:4px;margin-left:8px;vertical-align:middle;overflow:hidden;">';
+                    html += '<div style="width:' + (val * 10) + '%;height:100%;background:' + color + ';border-radius:4px;"></div></div></div>';
+                }
+                html += '</div></div>';
+                if (score.total !== undefined) {
+                    var gradeColor = score.grade === 'A' ? '#3fb950' : (score.grade === 'B' ? '#58a6ff' : (score.grade === 'C' ? '#d29922' : '#f85149'));
+                    html += '<div style="display:flex;gap:24px;align-items:center;margin:16px 0;padding:12px;border:1px solid #30363d;border-radius:8px;">';
+                    html += '<div><span style="color:#8b949e;">' + (t('oa.quality.total') || '总分') + ': </span><span style="font-size:28px;font-weight:700;color:#58a6ff;">' + score.total + '</span><span style="color:#8b949e;">/10</span></div>';
+                    if (score.grade) {
+                        html += '<div><span style="color:#8b949e;">' + (t('oa.quality.grade') || '等级') + ': </span><span style="font-size:28px;font-weight:700;color:' + gradeColor + ';">' + escapeHtml(score.grade) + '</span></div>';
+                    }
+                    html += '</div>';
+                }
+                if (score.not_applicable && score.not_applicable.length > 0) {
+                    html += '<div style="color:#8b949e;margin:8px 0;">' + (t('oa.quality.notApplicable') || '不适用') + ': ' + escapeHtml(score.not_applicable.join(', ')) + '</div>';
+                }
+            }
+            if (score.weaknesses) {
+                html += '<div style="margin:12px 0;"><h4 style="color:#d29922;">' + (t('oa.quality.weaknesses') || '薄弱点') + '</h4><div style="color:#c9d1d9;font-size:13px;line-height:1.8;">' + DOMPurify.sanitize(renderMarkdown(score.weaknesses)) + '</div></div>';
+            }
+            if (score.suggestions) {
+                html += '<div style="margin:12px 0;"><h4 style="color:#3fb950;">' + (t('oa.quality.suggestions') || '改进建议') + '</h4><div style="color:#c9d1d9;font-size:13px;line-height:1.8;">' + DOMPurify.sanitize(renderMarkdown(score.suggestions)) + '</div></div>';
+            }
+            if (score.raw) {
+                html += '<div style="color:#c9d1d9;font-size:13px;line-height:1.8;padding:12px;border:1px solid #30363d;border-radius:8px;">' + DOMPurify.sanitize(renderMarkdown(score.raw)) + '</div>';
+            }
+            div.innerHTML = html;
+            result.appendChild(div);
+        } catch(e) {
+            alert((t('oa.quality.scoreError') || '评分失败') + ': ' + e.message);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '📊 <span data-i18n="oa.quality.btn">' + (t('oa.quality.btn') || '质量评估') + '</span>';
+        }
+    }
+
+    function renderRadarChart(dims, scores) {
+        var cx = 120, cy = 120, maxR = 90;
+        var n = dims.length;
+        var html = '<svg width="240" height="240" viewBox="0 0 240 240">';
+        for (var r = 1; r <= 5; r++) {
+            var rad = maxR * r / 5;
+            var points = [];
+            for (var i = 0; i < n; i++) {
+                var angle = -Math.PI / 2 + 2 * Math.PI * i / n;
+                points.push((cx + rad * Math.cos(angle)) + ',' + (cy + rad * Math.sin(angle)));
+            }
+            html += '<polygon points="' + points.join(' ') + '" fill="none" stroke="#30363d" stroke-width="1"/>';
+        }
+        for (var i = 0; i < n; i++) {
+            var angle = -Math.PI / 2 + 2 * Math.PI * i / n;
+            var x2 = cx + maxR * Math.cos(angle);
+            var y2 = cy + maxR * Math.sin(angle);
+            html += '<line x1="' + cx + '" y1="' + cy + '" x2="' + x2 + '" y2="' + y2 + '" stroke="#30363d" stroke-width="1"/>';
+            var lx = cx + (maxR + 15) * Math.cos(angle);
+            var ly = cy + (maxR + 15) * Math.sin(angle);
+            var label = dims[i].label;
+            if (label.length > 4) label = label.substring(0, 4);
+            html += '<text x="' + lx + '" y="' + ly + '" fill="#8b949e" font-size="10" text-anchor="middle" dominant-baseline="middle">' + escapeHtml(label) + '</text>';
+        }
+        var dataPoints = [];
+        for (var i = 0; i < n; i++) {
+            var val = scores[dims[i].key] || 0;
+            var rad = maxR * val / 10;
+            var angle = -Math.PI / 2 + 2 * Math.PI * i / n;
+            dataPoints.push((cx + rad * Math.cos(angle)) + ',' + (cy + rad * Math.sin(angle)));
+        }
+        html += '<polygon points="' + dataPoints.join(' ') + '" fill="rgba(88,166,255,0.2)" stroke="#58a6ff" stroke-width="2"/>';
+        for (var i = 0; i < n; i++) {
+            var val = scores[dims[i].key] || 0;
+            var rad = maxR * val / 10;
+            var angle = -Math.PI / 2 + 2 * Math.PI * i / n;
+            html += '<circle cx="' + (cx + rad * Math.cos(angle)) + '" cy="' + (cy + rad * Math.sin(angle)) + '" r="3" fill="#58a6ff"/>';
+        }
+        html += '</svg>';
+        return html;
+    }
+
+    // P3-T2: 权利要求修改模拟器
+    function openClaimSimulator() {
+        var patent = getMyPatent();
+        var oa = getOA();
+        var result = document.getElementById('result');
+        var div = document.createElement('div');
+        div.id = 'claim-simulator-panel';
+        div.style.cssText = 'margin-top:20px;padding:16px;border:1px solid #30363d;border-radius:8px;background:#0d1117;';
+        var originalClaims = patent ? (patent.content || '') : '';
+        var html = '<h3 style="color:#58a6ff;">🔧 ' + (t('oa.claimSim.title') || '权利要求修改模拟器') + '</h3>';
+        html += '<div style="display:flex;gap:16px;margin:12px 0;flex-wrap:wrap;">';
+        html += '<div style="flex:1;min-width:400px;"><label style="color:#8b949e;font-size:13px;">' + (t('oa.claimSim.original') || '原始权利要求') + '</label>';
+        html += '<textarea id="claim-sim-original" style="width:100%;height:200px;margin-top:4px;background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:8px;font-size:13px;font-family:Consolas,monospace;resize:vertical;" placeholder="粘贴原始权利要求...">' + escapeHtml(originalClaims.substring(0, 5000)) + '</textarea></div>';
+        html += '<div style="flex:1;min-width:400px;"><label style="color:#8b949e;font-size:13px;">' + (t('oa.claimSim.modified') || '修改后权利要求') + '</label>';
+        html += '<textarea id="claim-sim-modified" style="width:100%;height:200px;margin-top:4px;background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:8px;font-size:13px;font-family:Consolas,monospace;resize:vertical;" placeholder="输入修改后的权利要求..."></textarea></div>';
+        html += '</div>';
+        var refsText = '';
+        var refs = getRefs();
+        for (var i = 0; i < refs.length; i++) {
+            if (refs[i] && refs[i].content) {
+                refsText += '### 对比文件' + (i+1) + '\n' + refs[i].content + '\n\n';
+            }
+        }
+        html += '<input type="hidden" id="claim-sim-refs" value="' + escapeHtml(refsText) + '">';
+        html += '<input type="hidden" id="claim-sim-oa" value="' + escapeHtml(oa ? (oa.content || '') : '') + '">';
+        html += '<button onclick="runClaimSimulation()" id="btn-claim-sim-run" style="background:#238636;color:#fff;border:none;border-radius:8px;padding:10px 24px;cursor:pointer;font-size:14px;font-weight:600;margin-top:8px;">' + (t('oa.claimSim.simulate') || '模拟审查') + '</button>';
+        html += '<div id="claim-sim-result" style="margin-top:12px;"></div>';
+        div.innerHTML = html;
+        result.appendChild(div);
+    }
+
+    async function runClaimSimulation() {
+        var original = document.getElementById('claim-sim-original').value;
+        var modified = document.getElementById('claim-sim-modified').value;
+        var refs = document.getElementById('claim-sim-refs').value;
+        var oa = document.getElementById('claim-sim-oa').value;
+        if (!modified || modified.trim().length < 20) {
+            alert(t('oa.claimSim.noModified') || '请输入修改后的权利要求');
+            return;
+        }
+        var btn = document.getElementById('btn-claim-sim-run');
+        btn.disabled = true;
+        btn.textContent = '⏳ ' + (t('oa.claimSim.loading') || '模拟审查中...');
+        try {
+            var resp = await fetch('/api/ai/oa-claim-simulate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    original_claims: original,
+                    modified_claims: modified,
+                    refs: refs,
+                    oa_text: oa
+                })
+            });
+            var data = await resp.json();
+            if (data.error) { alert(data.error); return; }
+            var sim = data.simulation || data;
+            var resultDiv = document.getElementById('claim-sim-result');
+            var html = '';
+            var checks = [
+                {key: 'support_check', label: t('oa.claimSim.support') || '说明书支持'},
+                {key: 'novelty_check', label: t('oa.claimSim.novelty') || '新颖性'},
+                {key: 'inventiveness_check', label: t('oa.claimSim.inventiveness') || '创造性'},
+                {key: 'scope_check', label: t('oa.claimSim.scope') || '保护范围'}
+            ];
+            html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0;">';
+            for (var i = 0; i < checks.length; i++) {
+                var val = sim[checks[i].key] || '';
+                var isPass = val.indexOf('通过') >= 0 || val.indexOf('合理') >= 0;
+                var isFail = val.indexOf('不通过') >= 0 || val.indexOf('过窄') >= 0 || val.indexOf('过宽') >= 0;
+                var color = isPass ? '#3fb950' : (isFail ? '#f85149' : '#d29922');
+                var icon = isPass ? '✅' : (isFail ? '❌' : '⚠️');
+                html += '<div style="padding:10px;border:1px solid #30363d;border-radius:6px;background:#161b22;">';
+                html += '<div style="color:' + color + ';font-weight:600;margin-bottom:4px;">' + icon + ' ' + escapeHtml(checks[i].label) + '</div>';
+                html += '<div style="color:#c9d1d9;font-size:12px;line-height:1.6;">' + DOMPurify.sanitize(renderMarkdown(val)) + '</div>';
+                html += '</div>';
+            }
+            html += '</div>';
+            if (sim.overall) {
+                var overallColor = sim.overall.indexOf('可能授权') >= 0 ? '#3fb950' : (sim.overall.indexOf('仍有问题') >= 0 ? '#f85149' : '#d29922');
+                html += '<div style="margin:12px 0;padding:12px;border:1px solid #30363d;border-radius:8px;"><span style="color:#8b949e;">' + (t('oa.claimSim.overall') || '总体判断') + ': </span><span style="font-size:18px;font-weight:700;color:' + overallColor + ';">' + escapeHtml(sim.overall) + '</span></div>';
+            }
+            if (sim.risk_level) {
+                var riskColor = sim.risk_level === '低' ? '#3fb950' : (sim.risk_level === '高' ? '#f85149' : '#d29922');
+                html += '<div style="margin:8px 0;"><span style="color:#8b949e;">' + (t('oa.claimSim.risk') || '风险等级') + ': </span><span style="color:' + riskColor + ';font-weight:600;">' + escapeHtml(sim.risk_level) + '</span></div>';
+            }
+            if (sim.suggestions) {
+                html += '<div style="margin:12px 0;"><h4 style="color:#3fb950;">' + (t('oa.claimSim.suggestions') || '修改建议') + '</h4><div style="color:#c9d1d9;font-size:13px;line-height:1.8;">' + DOMPurify.sanitize(renderMarkdown(sim.suggestions)) + '</div></div>';
+            }
+            if (sim.raw) {
+                html += '<div style="color:#c9d1d9;font-size:13px;line-height:1.8;padding:12px;border:1px solid #30363d;border-radius:8px;">' + DOMPurify.sanitize(renderMarkdown(sim.raw)) + '</div>';
+            }
+            resultDiv.innerHTML = html;
+        } catch(e) {
+            alert('模拟审查失败: ' + e.message);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = t('oa.claimSim.simulate') || '模拟审查';
+        }
+    }
+
+    // P3-T3: 答复质量量化评估
+    async function qualityScore() {
+        var patent = getMyPatent();
+        var oa = getOA();
+        var responseText = lastAnalysisRawText || (document.querySelector('.result-content') || {}).innerText || '';
+        if (!responseText || responseText.length < 50) {
+            alert(t('oa.quality.noResponse') || '请先生成答复文本');
+            return;
+        }
+        var btn = document.getElementById('btn-quality-score');
+        btn.disabled = true;
+        btn.innerHTML = '⏳ ' + (t('oa.quality.loading') || '评分中...');
+        try {
+            var resp = await fetch('/api/ai/oa-quality-score', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    response_text: responseText,
+                    oa_text: oa ? oa.content : '',
+                    my_patent: patent ? patent.content : ''
+                })
+            });
+            var data = await resp.json();
+            if (data.error) { alert(data.error); return; }
+            var score = data.score || data;
+            var result = document.getElementById('result');
+            var div = document.createElement('div');
+            div.style.marginTop = '20px';
+
+            // 构建评分卡片 HTML
+            var scores = score.scores || {};
+            var scoreItems = [
+                { key: 'logic', label: t('oa.quality.logic') || '逻辑严密性', weight: '20%' },
+                { key: 'evidence', label: t('oa.quality.evidence') || '证据引用', weight: '15%' },
+                { key: 'distinction', label: t('oa.quality.distinction') || '区别特征论证', weight: '25%' },
+                { key: 'modification', label: t('oa.quality.modification') || '修改合理性', weight: '15%' },
+                { key: 'tone', label: t('oa.quality.tone') || '措辞专业度', weight: '10%' },
+                { key: 'completeness', label: t('oa.quality.completeness') || '回复完整性', weight: '15%' }
+            ];
+
+            var gradeColor = '#3fb950';
+            var grade = score.grade || 'N/A';
+            if (grade === 'C') gradeColor = '#d29922';
+            if (grade === 'D') gradeColor = '#f85149';
+
+            var html = '<h3 style="color:#58a6ff;">📊 ' + (t('oa.quality.title') || '答复质量评估') + '</h3>';
+
+            // 总分 + 等级
+            html += '<div style="display:flex;gap:24px;align-items:center;margin-bottom:16px;padding:12px;border:1px solid #30363d;border-radius:8px;background:#0d1117;">';
+            html += '<div style="text-align:center;"><div style="font-size:32px;font-weight:bold;color:#58a6ff;">' + escapeHtml(String(score.total || 'N/A')) + '</div><div style="font-size:12px;color:#8b949e;">' + (t('oa.quality.total') || '总分') + '</div></div>';
+            html += '<div style="text-align:center;"><div style="font-size:32px;font-weight:bold;color:' + gradeColor + ';">' + escapeHtml(grade) + '</div><div style="font-size:12px;color:#8b949e;">' + (t('oa.quality.grade') || '等级') + '</div></div>';
+            html += '</div>';
+
+            // 雷达图 (SVG)
+            var radarLabels = scoreItems.map(function(s) { return s.label; });
+            var radarValues = scoreItems.map(function(s) { return parseFloat(scores[s.key] || 0); });
+            html += '<div style="margin-bottom:16px;">' + renderRadarChart(radarLabels, radarValues) + '</div>';
+
+            // 评分明细
+            html += '<div style="margin-bottom:16px;">';
+            for (var i = 0; i < scoreItems.length; i++) {
+                var s = scoreItems[i];
+                var val = parseFloat(scores[s.key] || 0);
+                var barColor = val >= 7 ? '#3fb950' : (val >= 5 ? '#d29922' : '#f85149');
+                html += '<div style="margin-bottom:8px;">';
+                html += '<div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;"><span>' + escapeHtml(s.label) + ' <span style="color:#8b949e;font-size:11px;">(' + s.weight + ')</span></span><span style="font-weight:bold;color:' + barColor + ';">' + escapeHtml(String(scores[s.key] || '-')) + '</span></div>';
+                html += '<div style="height:6px;background:#21262d;border-radius:3px;overflow:hidden;"><div style="height:100%;width:' + (val * 10) + '%;background:' + barColor + ';border-radius:3px;"></div></div>';
+                html += '</div>';
+            }
+            html += '</div>';
+
+            // 薄弱点
+            if (score.weaknesses) {
+                html += '<div style="margin-bottom:12px;padding:10px 14px;border:1px solid #f85149;border-radius:6px;background:#1c0d0d;"><strong style="color:#f85149;">⚠️ ' + (t('oa.quality.weaknesses') || '薄弱点') + '</strong><div style="font-size:13px;line-height:1.6;color:#c9d1d9;margin-top:6px;">' + DOMPurify.sanitize(renderMarkdown(score.weaknesses)) + '</div></div>';
+            }
+            // 改进建议
+            if (score.suggestions) {
+                html += '<div style="margin-bottom:12px;padding:10px 14px;border:1px solid #3fb950;border-radius:6px;background:#0d1c0d;"><strong style="color:#3fb950;">💡 ' + (t('oa.quality.suggestions') || '改进建议') + '</strong><div style="font-size:13px;line-height:1.6;color:#c9d1d9;margin-top:6px;">' + DOMPurify.sanitize(renderMarkdown(score.suggestions)) + '</div></div>';
+            }
+
+            div.innerHTML = html;
+            result.appendChild(div);
+        } catch(e) {
+            alert((t('oa.quality.scoreError') || '评分失败') + ': ' + e.message);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '📊 <span data-i18n="oa.quality.btn">' + (t('oa.quality.btn') || '质量评估') + '</span>';
+        }
+    }
+
+    // 雷达图 SVG 渲染
+    function renderRadarChart(labels, values) {
+        var n = labels.length;
+        if (n < 3) return '';
+        var size = 240, cx = size / 2, cy = size / 2, r = 80;
+        var angle = function(i) { return -Math.PI / 2 + (2 * Math.PI * i / n); };
+        var point = function(i, radius) { return [cx + radius * Math.cos(angle(i)), cy + radius * Math.sin(angle(i))]; };
+        var svg = '<svg width="' + size + '" height="' + size + '" style="display:block;margin:0 auto;">';
+        // 网格
+        for (var g = 1; g <= 5; g++) {
+            var gr = r * g / 5;
+            var pts = [];
+            for (var i = 0; i < n; i++) { var p = point(i, gr); pts.push(p[0] + ',' + p[1]); }
+            svg += '<polygon points="' + pts.join(' ') + '" fill="none" stroke="#30363d" stroke-width="1"/>';
+        }
+        // 轴线 + 标签
+        for (var i = 0; i < n; i++) {
+            var p = point(i, r);
+            svg += '<line x1="' + cx + '" y1="' + cy + '" x2="' + p[0] + '" y2="' + p[1] + '" stroke="#30363d" stroke-width="1"/>';
+            var lp = point(i, r + 18);
+            svg += '<text x="' + lp[0] + '" y="' + lp[1] + '" text-anchor="middle" dominant-baseline="middle" fill="#8b949e" font-size="10">' + labels[i] + '</text>';
+        }
+        // 数据多边形
+        var dpts = [];
+        for (var i = 0; i < n; i++) { var p = point(i, r * Math.min(values[i] / 10, 1)); dpts.push(p[0] + ',' + p[1]); }
+        svg += '<polygon points="' + dpts.join(' ') + '" fill="rgba(88,166,255,0.2)" stroke="#58a6ff" stroke-width="2"/>';
+        // 数据点
+        for (var i = 0; i < n; i++) { var p = point(i, r * Math.min(values[i] / 10, 1)); svg += '<circle cx="' + p[0] + '" cy="' + p[1] + '" r="3" fill="#58a6ff"/>'; }
+        svg += '</svg>';
+        return svg;
     }
         if (!window._oaPanelTabs) return;
         for (var i = 0; i < window._oaPanelTabs.length; i++) {

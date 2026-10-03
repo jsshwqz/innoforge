@@ -339,6 +339,14 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
             "/api/ai/oa-strategy-recommend",
             post(routes::api_ai_oa_strategy_recommend),
         )
+        .route(
+            "/api/ai/oa-quality-score",
+            post(routes::api_ai_oa_quality_score),
+        )
+        .route(
+            "/api/ai/oa-claim-simulate",
+            post(routes::api_ai_oa_claim_simulate),
+        )
         // OA 分析历史 API / OA History API
         .route("/api/oa/history/all", get(routes::api_oa_history_all))
         .route(
