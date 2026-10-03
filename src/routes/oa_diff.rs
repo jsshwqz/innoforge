@@ -256,3 +256,389 @@ fn safe_preview(text: &str, max_chars: usize) -> String {
         format!("{}...(已截断)", truncated)
     }
 }
+
+// ── 单元测试 ──────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        extract_claim_changes, extract_reference_numbers, extract_rejection_reasons, safe_preview,
+    };
+    use crate::cad::CadService;
+    use crate::db::Database;
+    use crate::routes::{AppConfig, AppState};
+    use axum::extract::{Path, State};
+    use serde_json::Value;
+    use std::sync::{Arc, RwLock};
+
+    /// 构建测试用 AppState（内存数据库）
+    fn make_state() -> AppState {
+        let db = Database::init(":memory:").expect("in-memory db");
+        let cad_root =
+            std::env::temp_dir().join(format!("innoforge-oa-diff-test-{}", uuid::Uuid::new_v4()));
+        let cad = CadService::new(cad_root, None).expect("cad service");
+        let config = AppConfig::default();
+        AppState {
+            db: Arc::new(db),
+            cad: Arc::new(cad),
+            config: Arc::new(RwLock::new(config)),
+            pipeline_channels: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+        }
+    }
+
+    /// 调用 diff API 并返回 JSON 响应
+    async fn call_diff(state: &AppState, patent_number: &str) -> Value {
+        let result =
+            super::api_oa_history_diff(Path(patent_number.to_string()), State(state.clone())).await;
+        let axum::Json(val) = result;
+        val
+    }
+
+    // ── 辅助函数测试 ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_extract_rejection_reasons() {
+        let text = "该申请存在新颖性和创造性问题，且修改超范围。";
+        let reasons = extract_rejection_reasons(text);
+        assert!(reasons.contains(&"新颖性".to_string()));
+        assert!(reasons.contains(&"创造性".to_string()));
+        assert!(reasons.contains(&"修改超范围".to_string()));
+        assert!(!reasons.contains(&"实用性".to_string()));
+    }
+
+    #[test]
+    fn test_extract_rejection_reasons_empty() {
+        let reasons = extract_rejection_reasons("这是一段普通文本，没有驳回理由。");
+        assert!(reasons.is_empty());
+    }
+
+    #[test]
+    fn test_extract_reference_numbers() {
+        let text = "对比文件 CN11111111A 和 CN22222222B 公开了相关技术。";
+        let refs = extract_reference_numbers(text);
+        assert!(refs.contains(&"CN11111111A".to_string()));
+        assert!(refs.contains(&"CN22222222B".to_string()));
+    }
+
+    #[test]
+    fn test_extract_reference_numbers_dedup() {
+        let text = "CN11111111A 公开了技术。再次引用 CN11111111A。";
+        let refs = extract_reference_numbers(text);
+        assert_eq!(refs.len(), 1, "should deduplicate references");
+    }
+
+    #[test]
+    fn test_extract_reference_numbers_short_rejected() {
+        // CN + 6 digits = too short (< 7 digits), should not match
+        let text = "对比文件 CN123456 公开了技术。";
+        let refs = extract_reference_numbers(text);
+        assert!(refs.is_empty(), "CN123456 (6 digits) should be rejected");
+    }
+
+    #[test]
+    fn test_extract_claim_changes() {
+        let text = "权利要求1 修改为增加技术特征。权2 保持不变。";
+        let claims = extract_claim_changes(text);
+        assert!(claims.contains(&"权利要求1".to_string()));
+        assert!(claims.contains(&"修改为".to_string()));
+        assert!(claims.contains(&"增加".to_string()));
+        assert!(claims.contains(&"权2".to_string()));
+    }
+
+    #[test]
+    fn test_safe_preview_no_truncation() {
+        let text = "短文本";
+        assert_eq!(safe_preview(text, 100), "短文本");
+    }
+
+    #[test]
+    fn test_safe_preview_truncation() {
+        let text = "这是一段很长的文本，需要被截断处理。";
+        let preview = safe_preview(text, 5);
+        assert!(preview.contains("...(已截断)"));
+        let core = preview.strip_suffix("...(已截断)").unwrap();
+        assert!(core.chars().count() <= 5);
+    }
+
+    // ── API 端点测试 ──────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_no_history_returns_empty_diffs() {
+        let state = make_state();
+        let resp = call_diff(&state, "CN99999999A").await;
+
+        assert_eq!(resp["status"], "ok");
+        assert_eq!(resp["total_rounds"], 0);
+        assert_eq!(resp["diffs"].as_array().unwrap().len(), 0);
+        assert!(resp["message"].as_str().unwrap().contains("无历史"));
+    }
+
+    #[tokio::test]
+    async fn test_single_round_returns_cannot_compare() {
+        let state = make_state();
+
+        state
+            .db
+            .save_oa_analysis(
+                "CN12345678A",
+                "测试专利",
+                "first_exam",
+                "deep",
+                "一审分析：该申请缺乏新颖性，对比文件 CN11111111A 公开了相同技术方案。",
+            )
+            .expect("save oa analysis");
+
+        let resp = call_diff(&state, "CN12345678A").await;
+
+        assert_eq!(resp["status"], "ok");
+        assert_eq!(resp["total_rounds"], 1);
+        assert_eq!(resp["diffs"].as_array().unwrap().len(), 0);
+        assert!(resp["message"].as_str().unwrap().contains("仅有一轮"));
+        assert!(resp["analyses"].is_array());
+        assert_eq!(resp["analyses"][0]["oa_type"], "first_exam");
+    }
+
+    #[tokio::test]
+    async fn test_two_rounds_generates_diff() {
+        let state = make_state();
+
+        state
+            .db
+            .save_oa_analysis(
+                "CN22222222A",
+                "火焰燃烧装置",
+                "first_exam",
+                "deep",
+                "一审分析：\n1. 新颖性问题：对比文件 CN11111111A 公开了相同技术方案。\n\
+                 权利要求1 不具备新颖性。\n2. 创造性问题：缺乏技术启示。",
+            )
+            .expect("save first exam");
+
+        state
+            .db
+            .save_oa_analysis(
+                "CN22222222A",
+                "火焰燃烧装置",
+                "second_rejection",
+                "deep",
+                "二审驳回：\n1. 创造性问题：对比文件 CN11111111A 和 CN22222222B 结合，\
+                 缺乏技术启示。\n2. 修改超范围：权1 修改超出原说明书范围。\n\
+                 权利要求1 修改为增加技术特征。",
+            )
+            .expect("save second rejection");
+
+        let resp = call_diff(&state, "CN22222222A").await;
+
+        assert_eq!(resp["status"], "ok");
+        assert_eq!(resp["total_rounds"], 2);
+
+        let diffs = resp["diffs"].as_array().expect("diffs should be array");
+        assert_eq!(diffs.len(), 1, "should have 1 diff between 2 rounds");
+
+        let diff = &diffs[0];
+
+        assert_eq!(diff["from_oa_type"], "first_exam");
+        assert_eq!(diff["to_oa_type"], "second_rejection");
+        assert_eq!(diff["oa_type_changed"], true);
+        assert_eq!(diff["depth_changed"], false);
+
+        let new_reasons: Vec<&str> = diff["new_reasons"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        let overcome_reasons: Vec<&str> = diff["overcome_reasons"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+
+        assert!(
+            new_reasons.contains(&"修改超范围"),
+            "new_reasons should contain 修改超范围, got: {:?}",
+            new_reasons
+        );
+        assert!(
+            overcome_reasons.contains(&"新颖性"),
+            "overcome_reasons should contain 新颖性, got: {:?}",
+            overcome_reasons
+        );
+
+        let added_refs: Vec<&str> = diff["added_refs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert!(
+            added_refs.iter().any(|r| r.contains("CN2222")),
+            "added_refs should contain a CN2222* reference, got: {:?}",
+            added_refs
+        );
+    }
+
+    #[tokio::test]
+    async fn test_three_rounds_generates_two_diffs() {
+        let state = make_state();
+
+        state
+            .db
+            .save_oa_analysis(
+                "CN33333333A",
+                "三轮测试专利",
+                "first_exam",
+                "shallow",
+                "一审：新颖性问题。对比文件 CN44444444A。",
+            )
+            .expect("save round 1");
+
+        state
+            .db
+            .save_oa_analysis(
+                "CN33333333A",
+                "三轮测试专利",
+                "first_exam",
+                "deep",
+                "一审继续：创造性性问题。对比文件 CN44444444A。",
+            )
+            .expect("save round 2");
+
+        state
+            .db
+            .save_oa_analysis(
+                "CN33333333A",
+                "三轮测试专利",
+                "second_rejection",
+                "deep",
+                "二审驳回：创造性性问题和修改超范围。",
+            )
+            .expect("save round 3");
+
+        let resp = call_diff(&state, "CN33333333A").await;
+
+        assert_eq!(resp["total_rounds"], 3);
+        let diffs = resp["diffs"].as_array().unwrap();
+        assert_eq!(diffs.len(), 2, "3 rounds should produce 2 diffs");
+
+        // 第一个 diff：shallow → deep（深度变化）
+        assert_eq!(diffs[0]["depth_changed"], true);
+        // 第二个 diff：first_exam → second_rejection（类型变化）
+        assert_eq!(diffs[1]["oa_type_changed"], true);
+    }
+
+    #[tokio::test]
+    async fn test_first_exam_context_extraction() {
+        let state = make_state();
+
+        state
+            .db
+            .save_oa_analysis(
+                "CN55555555A",
+                "上下文测试专利",
+                "first_exam",
+                "deep",
+                "一审分析：该申请存在新颖性问题。对比文件 CN66666666A 公开了核心技术特征。",
+            )
+            .expect("save first exam");
+
+        state
+            .db
+            .save_oa_analysis(
+                "CN55555555A",
+                "上下文测试专利",
+                "second_rejection",
+                "deep",
+                "二审驳回：创造性性问题。",
+            )
+            .expect("save second rejection");
+
+        let resp = call_diff(&state, "CN55555555A").await;
+
+        assert!(
+            !resp["first_exam_context"].is_null(),
+            "first_exam_context should be extracted when first_exam record exists"
+        );
+        let ctx = resp["first_exam_context"].as_str().unwrap();
+        assert!(
+            ctx.contains("一审"),
+            "context should mention 一审, got: {}",
+            ctx
+        );
+        assert!(
+            ctx.contains("新颖性"),
+            "context should contain first exam analysis content, got: {}",
+            ctx
+        );
+    }
+
+    #[tokio::test]
+    async fn test_no_first_exam_context_when_absent() {
+        let state = make_state();
+
+        state
+            .db
+            .save_oa_analysis(
+                "CN77777777A",
+                "无一审测试",
+                "second_rejection",
+                "deep",
+                "二审驳回：创造性性问题。",
+            )
+            .expect("save second rejection");
+
+        state
+            .db
+            .save_oa_analysis(
+                "CN77777777A",
+                "无一审测试",
+                "second_rejection",
+                "deep",
+                "二审继续驳回。",
+            )
+            .expect("save another second rejection");
+
+        let resp = call_diff(&state, "CN77777777A").await;
+
+        assert!(
+            resp["first_exam_context"].is_null(),
+            "first_exam_context should be null when no first_exam record exists"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_history_summary_returned() {
+        let state = make_state();
+
+        state
+            .db
+            .save_oa_analysis(
+                "CN88888888A",
+                "历史摘要测试",
+                "first_exam",
+                "deep",
+                "一审分析内容。",
+            )
+            .expect("save round 1");
+
+        state
+            .db
+            .save_oa_analysis(
+                "CN88888888A",
+                "历史摘要测试",
+                "second_rejection",
+                "deep",
+                "二审驳回内容。",
+            )
+            .expect("save round 2");
+
+        let resp = call_diff(&state, "CN88888888A").await;
+
+        let history = resp["history"].as_array().expect("history should be array");
+        assert_eq!(history.len(), 2, "should have 2 history entries");
+        assert_eq!(history[0]["oa_type"], "first_exam");
+        assert_eq!(history[1]["oa_type"], "second_rejection");
+        assert!(history[0]["analysis_full"].is_string());
+    }
+}

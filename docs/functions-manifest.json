@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-10-03T08:05:30.252Z",
+  "generatedAt": "2026-10-03T11:09:31.269Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -243,6 +243,7 @@
         "closePdfPreview",
         "confirmPaste",
         "copyResultText",
+        "createOaRoundFromPage",
         "defenseAnalysis",
         "doOAAnalysis",
         "doOADiscussImport",
@@ -258,6 +259,7 @@
         "fillArgTemplate",
         "generateResponseLetter",
         "loadOaAnalysis",
+        "loadSelectedRound",
         "lookupMyPatent",
         "lookupRef",
         "pasteMyPatent",
@@ -309,6 +311,7 @@
         "context",
         "copyResultText",
         "createDiscQuoteBtn",
+        "createOaRoundFromPage",
         "defenseAnalysis",
         "deleteProperty",
         "discussionTranscriptCodeBlock",
@@ -321,6 +324,7 @@
         "enableAnchorJumps",
         "escapeAttr",
         "escapeHtml",
+        "escapeHtmlOa",
         "examinerPreview",
         "exportCurrentOADiscussionTranscript",
         "exportDiscussionConclusions",
@@ -334,6 +338,7 @@
         "fillArgTemplate",
         "generateResponseLetter",
         "getContentForAmend",
+        "getCurrentPatentNumber",
         "getDiscQuoteBtn",
         "getGenerateHintText",
         "getMyPatent",
@@ -352,7 +357,9 @@
         "loadOADiscussionHistory",
         "loadOaAnalysis",
         "loadOaHistory",
+        "loadOaRoundSelector",
         "loadOaState",
+        "loadSelectedRound",
         "lookupMyPatent",
         "lookupRef",
         "messages",
@@ -422,6 +429,7 @@
         "addTag",
         "aiSummarize",
         "analyzeClaims",
+        "createNewOaRound",
         "drawPatentCad",
         "exportPatentConclusions",
         "loadFullText",
@@ -430,6 +438,8 @@
         "showTab",
         "stopPatentGeneration",
         "toggleCollect",
+        "toggleRoundDetail",
+        "updateRoundResult",
         "uploadCompare"
       ],
       "definitions": [
@@ -440,6 +450,7 @@
         "applyEnrichedData",
         "context",
         "createBtn",
+        "createNewOaRound",
         "doPatentSend",
         "drawPatentCad",
         "escapeHtml",
@@ -451,6 +462,7 @@
         "loadCollectState",
         "loadFullText",
         "loadMorePatentChat",
+        "loadOaTimeline",
         "loadPatentChat",
         "loadSimilar",
         "loadTags",
@@ -472,7 +484,9 @@
         "showTab",
         "stopPatentGeneration",
         "toggleCollect",
+        "toggleRoundDetail",
         "updatePatentLoadMore",
+        "updateRoundResult",
         "uploadCompare"
       ]
     },

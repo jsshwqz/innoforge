@@ -5,6 +5,14 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 
+## [v0.9.6] - 2026-10-03
+
+### 新增 / Added
+- **一审-二审对比分析**：新增 `GET /api/oa/history/:patent_number/diff` 端点，自动关联同专利号历史 OA 记录，生成相邻轮次差异对比（OA 类型变化、分析深度变化、驳回理由新增/消失、对比文件增减、权利要求变化）。二审驳回分析时自动将一审历史上下文注入 AI prompt，为 AI 提供历史决策上下文。前端 OA 答复页二审驳回时自动调用 diff API 并展示差异对比 UI（新增驳回理由标红、已克服问题标绿）
+- **First-second examination diff analysis**: New `GET /api/oa/history/:patent_number/diff` endpoint that auto-correlates historical OA records by patent number, generating adjacent-round diffs. First-exam history context is auto-injected into AI prompt for second-rejection analysis.
+
+---
+
 ## [v0.9.5] - 2026-10-03
 
 ### 修复 / Fixed
