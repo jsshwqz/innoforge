@@ -173,12 +173,13 @@ fn extract_domain_keywords(text: &str) -> Vec<String> {
         if let Some(pos) = text.find(marker) {
             let start = pos;
             let end = (start + 500).min(text.len());
-            // 确保 UTF-8 边界安全
-            let safe_end = text[..end]
+            // 确保 UTF-8 边界安全：回退到最近的 char boundary
+            let safe_end = text
                 .char_indices()
+                .take_while(|(i, _)| *i <= end)
                 .last()
-                .map(|(i, _)| i + text[i..].chars().next().map(|c| c.len_utf8()).unwrap_or(1))
-                .unwrap_or(end);
+                .map(|(i, c)| i + c.len_utf8())
+                .unwrap_or(0);
             domain_text.push_str(&text[start..safe_end.min(text.len())]);
         }
     }

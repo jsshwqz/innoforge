@@ -9,6 +9,7 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ### 修复 / Fixed
 - **OA 讨论 AI 回复为空/推理过程泄露**：glm-5.2 等推理模型流式返回时，`content` 为最终回复、`reasoning_content` 为推理过程。旧代码将 `reasoning_content` 当作回复发出，且 `max_tokens` 不足导致 `content` 为空。修复三处：(1) 流式取值加 `filter(!is_empty)` 避免空字符串阻塞回退 (2) 兜底逻辑排除 `reasoning_content`/`role`/`finish_reason` 元数据字段 (3) `max_tokens` 从 16384 增至 32768 适配推理模型
+- **OA 讨论 `network error` 崩溃**：`src/ai/fact_check.rs` 第 177 行 `text[..end]` 在 `end` 落在 UTF-8 多字节字符中间时 panic（`byte index is not a char boundary`），导致讨论 API 返回 500。改用 `char_indices().take_while()` 安全计算 char boundary
 
 ---
 
