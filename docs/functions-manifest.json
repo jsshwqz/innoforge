@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-10-03T04:34:34.011Z",
+  "generatedAt": "2026-10-03T07:42:23.483Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -212,6 +212,7 @@
         "startFlow"
       ],
       "definitions": [
+        "_escapeHtml",
         "addFiles",
         "checkStatus",
         "closePdfPreview",
@@ -373,6 +374,7 @@
         "renderArgBoard",
         "renderImportDiscussionPanel",
         "renderMarkdown",
+        "renderOaDiff",
         "renderOaHistory",
         "restoreOaUi",
         "sanitize",
