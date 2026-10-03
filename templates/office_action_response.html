@@ -100,6 +100,9 @@
             </div>
             <button class="btn-add" onclick="addRef()" id="btn-add-ref">+ <span data-i18n="oar.addRef"></span></button>
         </div>
+            <!-- T1: 自动获取对比文献 -->
+            <button class="btn-secondary" onclick="autoFetchRefs()" id="btn-auto-fetch-refs" style="margin-left:8px;">🔍 <span data-i18n="oa.refs.autoFetch">自动获取对比文献</span></button>
+            <div id="auto-fetch-refs-result" style="margin-top:8px;"></div>
 
         <!-- Depth Selector + Action Buttons -->
         <div class="btn-row">
@@ -774,6 +777,76 @@
     }
 
     // UA1: 从 OA 文本中自动抽取对比文件公开号
+
+    // T1: 自动获取对比文献全文
+    async function autoFetchRefs() {
+        var oa = getOA();
+        if (!oa || !oa.content || oa.content.length < 50) {
+            alert(t('oar.alertOA') || '请先输入 OA 文本');
+            return;
+        }
+        var btn = document.getElementById('btn-auto-fetch-refs');
+        var resultDiv = document.getElementById('auto-fetch-refs-result');
+        btn.disabled = true;
+        btn.innerHTML = '⏳ ' + (t('oa.refs.fetching') || '正在获取对比文献全文...');
+        resultDiv.innerHTML = '';
+
+        try {
+            var resp = await fetch('/api/ai/oa-fetch-refs', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ oa_text: oa.content })
+            });
+            var data = await resp.json();
+
+            if (data.status === 'error') {
+                resultDiv.innerHTML = '<span style="color:#f85149;">' + escapeHtml(data.message) + '</span>';
+                return;
+            }
+
+            var refs = data.refs || [];
+            if (refs.length === 0) {
+                resultDiv.innerHTML = '<span class="muted">' + (t('oa.refs.notFound') || '未检测到对比文件公开号') + '</span>';
+                return;
+            }
+
+            // 渲染文献卡片
+            var html = '<div style="border:1px solid #30363d;border-radius:6px;padding:8px;margin-top:4px;">';
+            html += '<div style="font-weight:600;margin-bottom:6px;">' + (t('oa.refs.fetchSuccess') || '成功获取 {count} 篇').replace('{count}', data.found_count) + '/' + data.total + '</div>';
+            for (var i = 0; i < refs.length; i++) {
+                var r = refs[i];
+                var color = r.found ? '#3fb950' : '#f85149';
+                var icon = r.found ? '✅' : '❌';
+                html += '<div style="border-bottom:1px solid #21262d;padding:6px 0;">';
+                html += '<div style="color:' + color + ';">' + icon + ' <strong>' + escapeHtml(r.pub_number) + '</strong>';
+                if (r.context) html += ' <span class="muted">(' + escapeHtml(r.context) + ')</span>';
+                html += '</div>';
+                if (r.found && r.title) {
+                    html += '<div style="margin-top:2px;">' + escapeHtml(r.title) + '</div>';
+                    if (r.abstract) {
+                        var abs = r.abstract.length > 200 ? r.abstract.substring(0, 200) + '...' : r.abstract;
+                        html += '<div class="muted" style="margin-top:2px;font-size:0.9em;">' + escapeHtml(abs) + '</div>';
+                    }
+                    // 注入到 uploadedData 供后续分析使用
+                    var refIdx = String(i);
+                    uploadedData['ref_' + refIdx] = {
+                        title: r.pub_number + ' — ' + r.title,
+                        content: r.full_text || (r.title + '\n\n' + (r.abstract || ''))
+                    };
+                } else if (!r.found) {
+                    html += '<div class="muted" style="margin-top:2px;font-size:0.9em;">' + (t('oa.refs.notFound') || '未找到全文') + '</div>';
+                }
+                html += '</div>';
+            }
+            html += '</div>';
+            resultDiv.innerHTML = DOMPurify.sanitize(html);
+        } catch (e) {
+            resultDiv.innerHTML = '<span style="color:#f85149;">' + (t('oa.refs.fetchFail') || '获取失败，请手动上传') + ': ' + escapeHtml(e.message) + '</span>';
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '🔍 <span data-i18n="oa.refs.autoFetch">' + (t('oa.refs.autoFetch') || '自动获取对比文献') + '</span>';
+        }
+    }
     function autoExtractPublicationNumbers(text) {
         var patterns = [
             /CN\d{8,12}[A-Z]\d?/g,
@@ -1142,6 +1215,7 @@
         var sectionMarkers = [
             { key: 'part1', label: t('oar.section1'), color: '#58a6ff', patterns: ['=== 第一部分', '## 第一部分', '一、审查意见概述'] },
             { key: 'part2', label: t('oar.section2'), color: '#d29922', patterns: ['=== 第二部分', '## 第二部分'] },
+            { key: 'mechanism', label: '技术机制深度对比', color: '#39d353', patterns: ['技术机制深度分析', '技术机制对比', '## 一·五'] },
             { key: 'part3', label: t('oar.section3'), color: '#3fb950', patterns: ['=== 第三部分', '## 第三部分', '特征对比表', '特征对比总表'] },
             { key: 'part4', label: t('oar.section4'), color: '#d2a8ff', patterns: ['=== 第四部分', '## 第四部分', '分层反驳', '逐权利要求反驳'] },
             { key: 'part5', label: t('oar.section5'), color: '#f0883e', patterns: ['=== 第五部分', '## 第五部分', '意见陈述书草稿', '意见陈述书', '=== 第五部分'] },
@@ -2173,7 +2247,7 @@
         if (!val || !info) return;
         var d = new Date(val + 'T00:00:00');
         var oaType = document.querySelector('input[name="oa_type"]:checked').value;
-        var months = oaType === 'reject_review' ? 3 : 4; // 复审3个月，一审/二审4个月
+        var months = oaType === 'second_rejection' ? 2 : oaType === 'reject_review' ? 3 : 4; // 二审2个月，复审3个月，一审4个月
         var deadline = new Date(d);
         deadline.setMonth(deadline.getMonth() + months);
         var now = new Date();

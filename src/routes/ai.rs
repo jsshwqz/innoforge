@@ -2352,6 +2352,99 @@ pub async fn api_ai_cost_save(
         })),
     }
 }
+
+/// T1: 对比文献自动获取与全文分析
+/// POST /api/ai/oa-fetch-refs  { oa_text: String }
+/// 从 OA 文本提取公开号 -> 查本地库 -> 返回全文
+pub async fn api_ai_oa_fetch_refs(
+    State(s): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let oa_text = req["oa_text"].as_str().unwrap_or("");
+    if oa_text.is_empty() {
+        return Json(json!({ "status": "error", "message": "OA 文本为空 / OA text is empty" }));
+    }
+
+    // 1. 提取公开号（复用已有函数）
+    let pub_numbers = crate::ai::patent::extract_publication_numbers(oa_text);
+    if pub_numbers.is_empty() {
+        return Json(
+            json!({ "status": "ok", "refs": [], "message": "未检测到对比文件公开号 / No reference publication numbers detected" }),
+        );
+    }
+
+    // 2. 逐个查本地库
+    let mut refs = Vec::new();
+    for (context, pub_num) in &pub_numbers {
+        let found = match s.db.get_patent(pub_num) {
+            Ok(Some(p)) => {
+                refs.push(json!({
+                    "pub_number": pub_num,
+                    "context": context,
+                    "title": p.title,
+                    "abstract": p.abstract_text,
+                    "full_text": format!("{}\n\n{}", p.title, p.abstract_text),
+                    "found": true,
+                    "source": "local"
+                }));
+                true
+            }
+            Ok(None) => false,
+            Err(e) => {
+                tracing::warn!("查询专利 {} 失败: {}", pub_num, e);
+                false
+            }
+        };
+        if !found {
+            // 本地未找到，尝试用 search_smart_exact 搜索
+            match s.db.search_smart_exact(
+                pub_num,
+                Some(&crate::types::search::SearchType::PatentNumber),
+                None,
+                None,
+                None,
+                0,
+                1,
+                false,
+            ) {
+                Ok((patents, total, _)) if total > 0 && !patents.is_empty() => {
+                    let p = &patents[0];
+                    refs.push(json!({
+                        "pub_number": pub_num,
+                        "context": context,
+                        "title": p.title.clone(),
+                        "abstract": p.abstract_text.clone(),
+                        "full_text": format!("{}\n\n{}", p.title, p.abstract_text.clone()),
+                        "found": true,
+                        "source": "search"
+                    }));
+                }
+                _ => {
+                    refs.push(json!({
+                        "pub_number": pub_num,
+                        "context": context,
+                        "title": "",
+                        "abstract": "",
+                        "full_text": "",
+                        "found": false,
+                        "source": ""
+                    }));
+                }
+            }
+        }
+    }
+
+    let found_count = refs
+        .iter()
+        .filter(|r| r["found"].as_bool().unwrap_or(false))
+        .count();
+    Json(json!({
+        "status": "ok",
+        "refs": refs,
+        "total": pub_numbers.len(),
+        "found_count": found_count
+    }))
+}
 #[cfg(test)]
 mod prompt_boundary_tests {
     use super::{

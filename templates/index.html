@@ -31,6 +31,8 @@
             <span class="arrow">&rarr;</span>
             <span class="step">可行性报告</span>
         </div>
+        <!-- T4: OA 答复到期提醒 -->
+        <div id="oa-deadline-reminders" style="margin-bottom:16px;"></div>
 
         <!-- 主入口：描述你的想法 -->
         <div class="main-entry">
@@ -524,6 +526,73 @@
         }
     }
 
+
+    // T4: OA 答复到期提醒
+    function renderOaDeadlineReminders() {
+        var container = document.getElementById('oa-deadline-reminders');
+        if (!container) return;
+
+        // 从 localStorage 收集所有 OA 期限记录
+        var records = [];
+        for (var i = 0; i < localStorage.length; i++) {
+            var key = localStorage.key(i);
+            if (key && key.indexOf('innoforge_oa_') === 0) {
+                var data = localStorage.getItem(key);
+                if (data) {
+                    try {
+                        var parsed = JSON.parse(data);
+                        if (parsed.date && parsed.patentNumber) {
+                            records.push(parsed);
+                        }
+                    } catch(e) {
+                        // 可能是纯日期字符串
+                        if (typeof data === 'string' && data.match(/^\d{4}-\d{2}-\d{2}/)) {
+                            records.push({ date: data, patentNumber: key.replace('innoforge_oa_', ''), oaType: 'unknown' });
+                        }
+                    }
+                }
+            }
+        }
+
+        // 也检查 innoforge_oa_date（当前 OA）
+        var currentDate = localStorage.getItem('innoforge_oa_date');
+        if (currentDate) {
+            records.push({ date: currentDate, patentNumber: '当前OA', oaType: 'current' });
+        }
+
+        if (records.length === 0) {
+            container.style.display = 'none';
+            return;
+        }
+
+        // 计算剩余天数并排序
+        var now = new Date();
+        var items = records.map(function(r) {
+            var d = new Date(r.date + 'T00:00:00');
+            var months = r.oaType === 'second_rejection' ? 2 : r.oaType === 'reject_review' ? 3 : 4;
+            var deadline = new Date(d);
+            deadline.setMonth(deadline.getMonth() + months);
+            var daysLeft = Math.ceil((deadline - now) / (1000 * 60 * 60 * 24));
+            return { patentNumber: r.patentNumber, deadline: deadline, daysLeft: daysLeft };
+        }).sort(function(a, b) { return a.daysLeft - b.daysLeft; });
+
+        var html = '<h3 style="color:#c9d1d9;">📅 OA 答复到期提醒</h3>';
+        for (var i = 0; i < items.length; i++) {
+            var item = items[i];
+            var color = item.daysLeft < 0 ? '#f85149' : item.daysLeft < 30 ? '#d29922' : '#3fb950';
+            var status = item.daysLeft < 0 ? '已逾期 ' + Math.abs(item.daysLeft) + ' 天' : '剩余 ' + item.daysLeft + ' 天';
+            html += '<div style="border-left:3px solid ' + color + ';padding:6px 12px;margin:6px 0;background:#161b22;border-radius:4px;">';
+            html += '<span style="color:' + color + ';font-weight:600;">' + escapeHtml(item.patentNumber) + '</span>';
+            html += '<span style="color:#8b949e;margin-left:8px;">' + item.deadline.toLocaleDateString('zh-CN') + ' 截止</span>';
+            html += '<span style="color:' + color + ';margin-left:8px;">' + status + '</span>';
+            html += '</div>';
+        }
+        container.innerHTML = DOMPurify.sanitize(html);
+        container.style.display = '';
+    }
+
+    // 页面加载时渲染提醒
+    renderOaDeadlineReminders();
     </script>
 </body>
 </html>

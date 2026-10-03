@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-10-02T16:32:28.670Z",
+  "generatedAt": "2026-10-03T03:34:42.047Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -222,6 +222,7 @@
         "removeFile",
         "removeRestoredFile",
         "renderFileList",
+        "renderOaDeadlineReminders",
         "saveUploadedMeta",
         "setMode",
         "showPdfPreview",
@@ -232,6 +233,7 @@
       "references": [
         "addRef",
         "attachDiscussFile",
+        "autoFetchRefs",
         "checkAmendments",
         "clearMyPatent",
         "clearOA",
@@ -284,6 +286,7 @@
         "attachDiscussFile",
         "autoDetectPatentFromOA",
         "autoExtractPublicationNumbers",
+        "autoFetchRefs",
         "buildArgLibrary",
         "buildDiscussionTranscript",
         "buildToolbar",
