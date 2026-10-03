@@ -2550,6 +2550,20 @@
         else text += '（已逾期 ' + Math.abs(daysLeft) + ' 天）';
         info.innerHTML = DOMPurify.sanitize('📅 ' + text);
         info.style.color = color;
+
+        // T4: 结构化期限存储 — 支持多OA跟踪
+        var patentNumInput = document.getElementById('patent-number') || document.getElementById('patent_no');
+        var patentNumber = patentNumInput ? patentNumInput.value : '';
+        if (patentNumber) {
+            var deadlineKey = 'innoforge_oa_deadline_' + patentNumber;
+            localStorage.setItem(deadlineKey, JSON.stringify({
+                patentNumber: patentNumber,
+                oaType: oaType,
+                deadline: deadline.toISOString().split('T')[0],
+                daysLeft: daysLeft,
+                date: val
+            }));
+        }
         // 进度条
         var bar = document.getElementById('deadline-bar') || (function(){
             var b = document.createElement('div');
