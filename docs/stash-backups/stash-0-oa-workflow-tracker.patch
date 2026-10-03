@@ -1,0 +1,688 @@
+diff --git a/src/common.rs b/src/common.rs
+index e3cfff3..37c5f69 100755
+--- a/src/common.rs
++++ b/src/common.rs
+@@ -15,7 +15,7 @@ use axum::{
+     body::Body,
+     extract::DefaultBodyLimit,
+     http::{HeaderValue, Response, StatusCode},
+-    routing::{delete, get, post},
++    routing::{delete, get, post, put},
+     Router,
+ };
+ use rust_embed::Embed;
+@@ -373,6 +373,11 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
+         )
+         // OA 答复书 docx 导出
+         .route("/api/oa/export-docx", post(routes::api_oa_export_docx))
++        // OA 轮次追踪 / OA Round Workflow Tracking
++        .route("/api/oa/rounds/:patent_id", get(routes::api_oa_rounds_get))
++        .route("/api/oa/rounds", post(routes::api_oa_rounds_create))
++        .route("/api/oa/rounds/:id", put(routes::api_oa_rounds_update))
++        .route("/api/oa/timeline/:patent_id", get(routes::api_oa_timeline))
+         .route(
+             "/api/ai/check-amendments",
+             post(routes::api_ai_check_amendments),
+diff --git a/src/db/migrations.rs b/src/db/migrations.rs
+index 788c729..965f6ea 100755
+--- a/src/db/migrations.rs
++++ b/src/db/migrations.rs
+@@ -593,6 +593,36 @@ pub(crate) fn run(conn: &Connection, current_version: i32, target_version: i32)
+         tracing::info!("Database migrated to version 23 (ai_cost_idea_session)");
+     }
+ 
++    // v24: OA 轮次追踪表 — 记录每件专利从一审→二审→复审→授权/驳回的完整流程
++    // OA rounds tracking table — records the full lifecycle of each patent OA process.
++    if current_version < 24 {
++        conn.execute_batch(
++            "
++            CREATE TABLE IF NOT EXISTS oa_rounds (
++                id TEXT PRIMARY KEY,
++                patent_id TEXT NOT NULL,
++                round_number INTEGER NOT NULL,
++                round_type TEXT NOT NULL,
++                oa_date TEXT,
++                oa_text TEXT,
++                response_date TEXT,
++                response_text TEXT,
++                result TEXT,
++                result_date TEXT,
++                strategy_used TEXT,
++                quality_score REAL,
++                notes TEXT,
++                created_at TEXT NOT NULL,
++                updated_at TEXT NOT NULL
++            );
++            CREATE INDEX IF NOT EXISTS idx_oa_rounds_patent ON oa_rounds(patent_id);
++            CREATE INDEX IF NOT EXISTS idx_oa_rounds_number ON oa_rounds(patent_id, round_number);
++            DELETE FROM schema_version;
++            INSERT INTO schema_version (version) VALUES (24);
++            ",
++        )?;
++        tracing::info!("Database migrated to version 24 (oa_rounds)");
++    }
+     if current_version > 0 && current_version < target_version {
+         tracing::info!(
+             "Database migrated from version {} to {}",
+diff --git a/src/db/mod.rs b/src/db/mod.rs
+index e53ed1a..16fafe8 100755
+--- a/src/db/mod.rs
++++ b/src/db/mod.rs
+@@ -11,7 +11,7 @@ mod evidence;
+ mod idea;
+ pub mod memory;
+ mod migrations;
+-mod oa;
++pub mod oa;
+ mod patent;
+ pub mod rag;
+ pub(crate) mod relevance;
+@@ -42,7 +42,7 @@ impl Database {
+     }
+ 
+     /// Current schema version. Increment when adding migrations.
+-    pub(crate) const SCHEMA_VERSION: i32 = 22;
++    pub(crate) const SCHEMA_VERSION: i32 = 24;
+ 
+     pub fn init(path: &str) -> Result<Self> {
+         let conn = Connection::open(path)?;
+diff --git a/src/db/oa.rs b/src/db/oa.rs
+index 1a3789c..63c4b2e 100755
+--- a/src/db/oa.rs
++++ b/src/db/oa.rs
+@@ -33,6 +33,25 @@ pub struct OaDiscussion {
+     pub updated_at: String,
+ }
+ 
++/// OA 轮次记录 — 追踪一件专利从一审到授权/驳回的完整流程
++#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
++pub struct OaRound {
++    pub id: String,
++    pub patent_id: String,
++    pub round_number: i32,
++    pub round_type: String,
++    pub oa_date: Option<String>,
++    pub oa_text: Option<String>,
++    pub response_date: Option<String>,
++    pub response_text: Option<String>,
++    pub result: Option<String>,
++    pub result_date: Option<String>,
++    pub strategy_used: Option<String>,
++    pub quality_score: Option<f64>,
++    pub notes: Option<String>,
++    pub created_at: String,
++    pub updated_at: String,
++}
+ impl super::Database {
+     /// 保存 OA 分析结果（自动计算版本号）
+     pub fn save_oa_analysis(
+@@ -239,4 +258,169 @@ impl super::Database {
+         }
+         Ok(discussions)
+     }
++
++    // =========================================================
++    // OA 轮次追踪 / OA Round Tracking
++    // =========================================================
++
++    /// 创建新的 OA 轮次
++    pub fn save_oa_round(&self, round: &OaRound) -> Result<()> {
++        let c = self.conn();
++        c.execute(
++            "INSERT INTO oa_rounds \
++             (id, patent_id, round_number, round_type, oa_date, oa_text, response_date, \
++              response_text, result, result_date, strategy_used, quality_score, notes, \
++              created_at, updated_at) \
++             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
++            params![
++                round.id,
++                round.patent_id,
++                round.round_number,
++                round.round_type,
++                round.oa_date,
++                round.oa_text,
++                round.response_date,
++                round.response_text,
++                round.result,
++                round.result_date,
++                round.strategy_used,
++                round.quality_score,
++                round.notes,
++                round.created_at,
++                round.updated_at,
++            ],
++        )?;
++        Ok(())
++    }
++
++    /// 获取某专利的所有 OA 轮次（按轮次号正序）
++    pub fn list_oa_rounds(&self, patent_id: &str) -> Result<Vec<OaRound>> {
++        let c = self.conn();
++        let mut stmt = c.prepare(
++            "SELECT id, patent_id, round_number, round_type, oa_date, oa_text, \
++             response_date, response_text, result, result_date, strategy_used, \
++             quality_score, notes, created_at, updated_at \
++             FROM oa_rounds WHERE patent_id = ?1 ORDER BY round_number ASC",
++        )?;
++        let rows = stmt.query_map(params![patent_id], |r| {
++            Ok(OaRound {
++                id: r.get(0)?,
++                patent_id: r.get(1)?,
++                round_number: r.get(2)?,
++                round_type: r.get(3)?,
++                oa_date: r.get(4)?,
++                oa_text: r.get(5)?,
++                response_date: r.get(6)?,
++                response_text: r.get(7)?,
++                result: r.get(8)?,
++                result_date: r.get(9)?,
++                strategy_used: r.get(10)?,
++                quality_score: r.get(11)?,
++                notes: r.get(12)?,
++                created_at: r.get(13)?,
++                updated_at: r.get(14)?,
++            })
++        })?;
++        let mut rounds = Vec::new();
++        for row in rows {
++            rounds.push(row?);
++        }
++        Ok(rounds)
++    }
++
++    /// 按 ID 获取单个 OA 轮次
++    pub fn get_oa_round(&self, id: &str) -> Result<Option<OaRound>> {
++        let c = self.conn();
++        let mut stmt = c.prepare(
++            "SELECT id, patent_id, round_number, round_type, oa_date, oa_text, \
++             response_date, response_text, result, result_date, strategy_used, \
++             quality_score, notes, created_at, updated_at \
++             FROM oa_rounds WHERE id = ?1",
++        )?;
++        let mut rows = stmt.query_map(params![id], |r| {
++            Ok(OaRound {
++                id: r.get(0)?,
++                patent_id: r.get(1)?,
++                round_number: r.get(2)?,
++                round_type: r.get(3)?,
++                oa_date: r.get(4)?,
++                oa_text: r.get(5)?,
++                response_date: r.get(6)?,
++                response_text: r.get(7)?,
++                result: r.get(8)?,
++                result_date: r.get(9)?,
++                strategy_used: r.get(10)?,
++                quality_score: r.get(11)?,
++                notes: r.get(12)?,
++                created_at: r.get(13)?,
++                updated_at: r.get(14)?,
++            })
++        })?;
++        Ok(rows.next().transpose()?)
++    }
++
++    /// 更新 OA 轮次（部分字段）
++    #[allow(clippy::too_many_arguments)]
++    pub fn update_oa_round(
++        &self,
++        id: &str,
++        oa_date: Option<&str>,
++        oa_text: Option<&str>,
++        response_date: Option<&str>,
++        response_text: Option<&str>,
++        result: Option<&str>,
++        result_date: Option<&str>,
++        strategy_used: Option<&str>,
++        quality_score: Option<f64>,
++        notes: Option<&str>,
++    ) -> Result<usize> {
++        let c = self.conn();
++        let updated_at = chrono::Utc::now().to_rfc3339();
++        Ok(c.execute(
++            "UPDATE oa_rounds SET \
++             oa_date = COALESCE(?2, oa_date), \
++             oa_text = COALESCE(?3, oa_text), \
++             response_date = COALESCE(?4, response_date), \
++             response_text = COALESCE(?5, response_text), \
++             result = COALESCE(?6, result), \
++             result_date = COALESCE(?7, result_date), \
++             strategy_used = COALESCE(?8, strategy_used), \
++             quality_score = COALESCE(?9, quality_score), \
++             notes = COALESCE(?10, notes), \
++             updated_at = ?11 \
++             WHERE id = ?1",
++            params![
++                id,
++                oa_date,
++                oa_text,
++                response_date,
++                response_text,
++                result,
++                result_date,
++                strategy_used,
++                quality_score,
++                notes,
++                updated_at
++            ],
++        )?)
++    }
++
++    /// 删除 OA 轮次
++    pub fn delete_oa_round(&self, id: &str) -> Result<usize> {
++        let c = self.conn();
++        Ok(c.execute("DELETE FROM oa_rounds WHERE id = ?1", params![id])?)
++    }
++
++    /// 获取某专利的下一轮次号
++    pub fn next_round_number(&self, patent_id: &str) -> Result<i32> {
++        let c = self.conn();
++        let next: i32 = c
++            .query_row(
++                "SELECT COALESCE(MAX(round_number), 0) + 1 FROM oa_rounds WHERE patent_id = ?1",
++                params![patent_id],
++                |r| r.get(0),
++            )
++            .unwrap_or(1);
++        Ok(next)
++    }
+ }
+diff --git a/src/db/tests.rs b/src/db/tests.rs
+index ddc7e3c..e669768 100755
+--- a/src/db/tests.rs
++++ b/src/db/tests.rs
+@@ -3,11 +3,11 @@ use crate::patent::{CadArtifact, CadContextKind, CadValidation, Patent, SearchTy
+ 
+ #[test]
+ fn schema_v23_is_created_and_idempotent() {
+-    // v23: 成本台账扩展 idea_id/session_id 列（见 migrations.rs）
++    // v24: OA 轮次追踪表 idea_id/session_id 列（见 migrations.rs）
+     let file = tempfile::NamedTempFile::new().expect("temp database");
+     let path = file.path().to_string_lossy().to_string();
+     let db = Database::init(&path).expect("initialize database to latest schema");
+-    assert_eq!(db.query_schema_version().expect("schema version"), 23);
++    assert_eq!(db.query_schema_version().expect("schema version"), 24);
+ 
+     // Verify all new tables exist: cad_artifacts, ai_cost_ledger, patents_embedding, patent_chunks, idea_memory
+     let cad_count: i64 = db
+@@ -52,7 +52,7 @@ fn schema_v23_is_created_and_idempotent() {
+ 
+     drop(db);
+     let reopened = Database::init(&path).expect("reopen migrated database");
+-    assert_eq!(reopened.query_schema_version().expect("schema version"), 23);
++    assert_eq!(reopened.query_schema_version().expect("schema version"), 24);
+ 
+     // Verify idea_memory table exists
+     let mem_count: i64 = reopened
+diff --git a/src/routes/mod.rs b/src/routes/mod.rs
+index 495f2ca..5a6fc6e 100755
+--- a/src/routes/mod.rs
++++ b/src/routes/mod.rs
+@@ -22,6 +22,7 @@ mod feature_cards;
+ mod idea;
+ mod ipc;
+ mod oa_diff;
++mod oa_rounds;
+ mod pages;
+ mod patent;
+ mod search;
+@@ -37,6 +38,7 @@ pub use feature_cards::*;
+ pub use idea::*;
+ pub use ipc::*;
+ pub use oa_diff::*;
++pub use oa_rounds::*;
+ pub use pages::*;
+ pub use patent::*;
+ pub use search::*;
+diff --git a/static/i18n.js b/static/i18n.js
+index 84b5323..52e40e9 100755
+--- a/static/i18n.js
++++ b/static/i18n.js
+@@ -273,6 +273,29 @@ const I18N_COMMON = {
+     "oa.deadline.reminder": "OA 答复到期提醒",
+     "oa.deadline.urgent": "剩余 {days} 天",
+     "oa.deadline.expired": "已逾期 {days} 天",
++    "oa.workflow.timeline": "OA 时间线",
++    "oa.workflow.round": "第{n}轮",
++    "oa.workflow.newRound": "新建轮次",
++    "oa.workflow.result": "审查结果",
++    "oa.workflow.pending": "待回复",
++    "oa.workflow.accepted": "已授权",
++    "oa.workflow.rejected": "已驳回",
++    "oa.workflow.partial": "部分授权",
++    "oa.workflow.strategy": "使用策略",
++    "oa.workflow.compare": "轮次对比",
++    "oa.workflow.noRounds": "暂无 OA 轮次记录",
++    "oa.workflow.createRound": "创建新轮次",
++    "oa.workflow.roundType": "OA 类型",
++    "oa.workflow.oaDate": "发文日期",
++    "oa.workflow.responseDate": "答复日期",
++    "oa.workflow.qualityScore": "质量评分",
++    "oa.workflow.notes": "备注",
++    "oa.workflow.saveResult": "保存结果",
++    "oa.workflow.loading": "加载时间线...",
++    "oa.workflow.empty": "该专利尚无 OA 流程记录",
++    "oa.workflow.totalRounds": "共 {n} 轮",
++    "oa.workflow.completed": "已完成 {n} 轮",
++    "oa.workflow.viewDetail": "查看详情",
+     'oar.alertEmptyContent': '内容不能为空',
+     'oar.copy': '📋 复制全文',
+     'oar.export': '📥 导出 Markdown',
+@@ -675,6 +698,29 @@ const I18N_COMMON = {
+     "oa.deadline.reminder": "OA Response Deadline Reminders",
+     "oa.deadline.urgent": "{days} days remaining",
+     "oa.deadline.expired": "Overdue {days} days",
++    "oa.workflow.timeline": "OA Timeline",
++    "oa.workflow.round": "Round {n}",
++    "oa.workflow.newRound": "New Round",
++    "oa.workflow.result": "Result",
++    "oa.workflow.pending": "Pending",
++    "oa.workflow.accepted": "Accepted",
++    "oa.workflow.rejected": "Rejected",
++    "oa.workflow.partial": "Partially Accepted",
++    "oa.workflow.strategy": "Strategy",
++    "oa.workflow.compare": "Compare Rounds",
++    "oa.workflow.noRounds": "No OA rounds recorded",
++    "oa.workflow.createRound": "Create New Round",
++    "oa.workflow.roundType": "OA Type",
++    "oa.workflow.oaDate": "OA Date",
++    "oa.workflow.responseDate": "Response Date",
++    "oa.workflow.qualityScore": "Quality Score",
++    "oa.workflow.notes": "Notes",
++    "oa.workflow.saveResult": "Save Result",
++    "oa.workflow.loading": "Loading timeline...",
++    "oa.workflow.empty": "No OA workflow records for this patent",
++    "oa.workflow.totalRounds": "{n} rounds total",
++    "oa.workflow.completed": "{n} rounds completed",
++    "oa.workflow.viewDetail": "View Detail",
+     'oar.alertEmptyContent': 'Content cannot be empty',
+     'oar.copy': '📋 Copy Text',
+     'oar.export': '📥 Export Markdown',
+diff --git a/templates/office_action_response.html b/templates/office_action_response.html
+index 6501550..99df596 100755
+--- a/templates/office_action_response.html
++++ b/templates/office_action_response.html
+@@ -18,6 +18,17 @@
+     <main class="container page-main" style="max-width:1100px;">
+         <div class="page-title-bar"><h2 data-i18n="oar.title"></h2></div>
+ 
++        <!-- OA 历史轮次选择器 -->
++        <div id="oa-round-selector" class="cmp-section" style="display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; margin-bottom: 8px; background: #f0f4ff; border-radius: 6px;">
++            <div style="display: flex; align-items: center; gap: 12px;">
++                <label data-i18n="oa.workflow.round" style="font-weight: 500;"></label>
++                <select id="oa-round-select" onchange="loadSelectedRound()" style="padding: 4px 8px; border-radius: 4px; border: 1px solid #ccc;">
++                    <option value="">--</option>
++                </select>
++            </div>
++            <button class="btn-primary" onclick="createOaRoundFromPage()" data-i18n="oa.workflow.newRound" style="padding: 4px 12px; font-size: 13px;"></button>
++        </div>
++
+         <!-- OA Type Selector -->
+         <div class="cmp-section cmp-oa-violet">
+             <label class="cmp-label violet" data-i18n="oar.typeLabel"></label>
+@@ -3525,6 +3536,112 @@
+     loadOaHistory();
+     initDiscQuoteEvents();
+     initDeadline();
++
++    // ── OA 历史轮次选择器 ─────────────────────────────────
++    async function loadOaRoundSelector() {
++        const select = document.getElementById('oa-round-select');
++        if (!select) return;
++        const patentNum = getCurrentPatentNumber();
++        if (!patentNum) return;
++        try {
++            const resp = await fetch('/api/oa/rounds/' + encodeURIComponent(patentNum));
++            const data = await resp.json();
++            if (data.status !== 'ok' || !data.rounds || data.rounds.length === 0) {
++                select.innerHTML = '<option value="">--</option>';
++                return;
++            }
++            let options = '<option value="">--</option>';
++            data.rounds.forEach(function(round) {
++                const typeLabel = {
++                    'first_rejection': '一审驳回',
++                    'second_rejection': '二审驳回',
++                    'reexamination': '复审',
++                    'office_action': '审查意见'
++                }[round.round_type] || round.round_type;
++                options += '<option value="' + round.id + '">第' + round.round_number + '轮 · ' + typeLabel + '</option>';
++            });
++            select.innerHTML = options;
++        } catch (e) {
++            console.error('Failed to load OA rounds:', e);
++        }
++    }
++
++    async function loadSelectedRound() {
++        const select = document.getElementById('oa-round-select');
++        if (!select || !select.value) return;
++        try {
++            const resp = await fetch('/api/oa/rounds/' + encodeURIComponent(select.value));
++            const data = await resp.json();
++            if (data.status !== 'ok' || !data.round) return;
++            const round = data.round;
++            // 如果有 OA 文本，填充到 OA 文本框
++            if (round.oa_text) {
++                const oaTextarea = document.getElementById('oa-text') || document.getElementById('oa_text');
++                if (oaTextarea) oaTextarea.value = round.oa_text;
++            }
++            // 如果有答复文本，显示在结果区
++            if (round.response_text) {
++                const resultArea = document.getElementById('analysis-result') || document.getElementById('oa-result');
++                if (resultArea) {
++                    resultArea.style.display = 'block';
++                    resultArea.innerHTML = '<pre style="white-space: pre-wrap;">' + escapeHtmlOa(round.response_text) + '</pre>';
++                }
++            }
++        } catch (e) {
++            console.error('Failed to load selected round:', e);
++        }
++    }
++
++    async function createOaRoundFromPage() {
++        const patentNum = getCurrentPatentNumber();
++        if (!patentNum) {
++            alert('请先输入专利号');
++            return;
++        }
++        const oaTypeMap = {
++            'first_exam': 'first_rejection',
++            'abnormal': 'second_rejection',
++            'reject_review': 'reexamination'
++        };
++        const selectedType = document.querySelector('input[name="oa_type"]:checked');
++        const roundType = selectedType ? (oaTypeMap[selectedType.value] || 'office_action') : 'office_action';
++        const oaDate = prompt('发文日期 (YYYY-MM-DD):', new Date().toISOString().slice(0, 10));
++        try {
++            const oaTextarea = document.getElementById('oa-text') || document.getElementById('oa_text');
++            const oaText = oaTextarea ? oaTextarea.value : '';
++            await fetch('/api/oa/rounds', {
++                method: 'POST',
++                headers: {'Content-Type': 'application/json'},
++                body: JSON.stringify({
++                    patent_id: patentNum,
++                    round_type: roundType,
++                    oa_date: oaDate || null,
++                    oa_text: oaText || null
++                })
++            });
++            loadOaRoundSelector();
++        } catch (e) {
++            console.error('Failed to create OA round:', e);
++        }
++    }
++
++    function escapeHtmlOa(text) {
++        if (!text) return '';
++        const div = document.createElement('div');
++        div.textContent = text;
++        return div.innerHTML;
++    }
++
++    function getCurrentPatentNumber() {
++        const el = document.getElementById('patent-number-value');
++        if (el && el.textContent.trim()) return el.textContent.trim();
++        const input = document.getElementById('patent-number') || document.getElementById('patent_no');
++        if (input && input.value) return input.value;
++        return '';
++    }
++
++    // 初始加载轮次选择器
++    loadOaRoundSelector();
+     </script>
+ </body>
+ </html>
+diff --git a/templates/patent_detail.html b/templates/patent_detail.html
+index 77998c5..7ae10b7 100755
+--- a/templates/patent_detail.html
++++ b/templates/patent_detail.html
+@@ -65,6 +65,7 @@
+                 <button class="tab" onclick="showTab('description', event)" data-i18n="detail.tabDesc"></button>
+                 <button class="tab" onclick="showTab('drawings', event)" id="tab-drawings-btn">📐 图纸</button>
+                 <button class="tab" onclick="showTab('ai-chat', event)" data-i18n="detail.tabAiChat"></button>
++                <button class="tab" onclick="showTab('oa-timeline', event)" data-i18n="oa.workflow.timeline"></button>
+             </div>
+ 
+             <div id="tab-abstract" class="tab-content active">
+@@ -94,6 +95,18 @@
+                     <button id="patent-stop-btn" class="btn-stop" style="display:none" onclick="stopPatentGeneration()" data-i18n="detail.stop"></button>
+                     <button id="patent-export-btn" class="btn-export-ghost" style="display:none" onclick="exportPatentConclusions()" data-i18n="detail.exportConclusions"></button>
+                 </div>
++            <div id="tab-oa-timeline" class="tab-content">
++                <div id="oa-timeline-container" style="padding: 16px 0;">
++                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
++                        <h3 data-i18n="oa.workflow.timeline" style="margin: 0;"></h3>
++                        <button class="btn-primary" onclick="createNewOaRound()" data-i18n="oa.workflow.newRound"></button>
++                    </div>
++                    <div id="oa-timeline-summary" style="margin-bottom: 16px; color: #666; font-size: 14px;"></div>
++                    <div id="oa-timeline-list" style="position: relative;">
++                        <p class="muted" data-i18n="oa.workflow.empty"></p>
++                    </div>
++                </div>
++            </div>
+             </div>
+         </div>
+ 
+@@ -949,6 +962,122 @@
+         loadTags();
+     }
+ 
++    // ── OA 时间线功能 ─────────────────────────────────
++    async function loadOaTimeline() {
++        const container = document.getElementById('oa-timeline-list');
++        const summaryEl = document.getElementById('oa-timeline-summary');
++        if (!container) return;
++        container.innerHTML = '<p class="muted">' + t('oa.workflow.loading') + '</p>';
++        try {
++            const resp = await fetch('/api/oa/timeline/' + encodeURIComponent(patentId));
++            const data = await resp.json();
++            if (data.status !== 'ok' || !data.timeline || data.timeline.length === 0) {
++                container.innerHTML = '<p class="muted">' + t('oa.workflow.empty') + '</p>';
++                summaryEl.textContent = '';
++                return;
++            }
++            const s = data.summary;
++            summaryEl.textContent = t('oa.workflow.totalRounds', {n: s.total_rounds}) + ' · ' + t('oa.workflow.completed', {n: s.completed});
++            let html = "";
++            data.timeline.forEach(function(item) {
++                const round = item.round;
++                const resultColor = round.result === 'accepted' ? '#4caf50' :
++                    round.result === 'rejected' ? '#f44336' :
++                    round.result === 'partially_accepted' ? '#ff9800' : '#2196f3';
++                const resultKey = round.result ? round.result : 'pending';
++                const resultText = t('oa.workflow.' + resultKey);
++                const roundTypeMap = {
++                    'first_rejection': '一审驳回',
++                    'second_rejection': '二审驳回',
++                    'reexamination': '复审',
++                    'office_action': '审查意见'
++                };
++                const roundTypeLabel = roundTypeMap[round.round_type] || round.round_type;
++                html += '<div class="oa-timeline-item" style="border-left: 4px solid ' + resultColor + '; padding: 12px 16px; margin-bottom: 12px; background: #f9f9f9; border-radius: 4px;">';
++                html += '<div style="display: flex; justify-content: space-between; align-items: center;">';
++                html += '<strong>' + t('oa.workflow.round', {n: round.round_number}) + ' · ' + roundTypeLabel + '</strong>';
++                html += '<span style="color: ' + resultColor + '; font-weight: bold;">' + resultText + '</span>';
++                html += '</div>';
++                if (round.oa_date) html += '<div style="margin-top: 4px; font-size: 13px; color: #666;">' + t('oa.workflow.oaDate') + ': ' + escapeHtml(round.oa_date) + '</div>';
++                if (round.response_date) html += '<div style="font-size: 13px; color: #666;">' + t('oa.workflow.responseDate') + ': ' + escapeHtml(round.response_date) + '</div>';
++                if (round.strategy_used) html += '<div style="font-size: 13px; color: #666;">' + t('oa.workflow.strategy') + ': ' + escapeHtml(round.strategy_used) + '</div>';
++                if (round.quality_score != null) html += '<div style="font-size: 13px; color: #666;">' + t('oa.workflow.qualityScore') + ': ' + round.quality_score.toFixed(1) + '</div>';
++                html += '<button class="btn-link" onclick="toggleRoundDetail(\'' + round.id + '\')" data-i18n="oa.workflow.viewDetail" style="margin-top: 8px; font-size: 13px;"></button>';
++                html += '<div id="round-detail-' + round.id + '" style="display: none; margin-top: 12px; padding-top: 12px; border-top: 1px solid #ddd;">';
++                if (round.oa_text) html += '<div style="margin-bottom: 8px;"><strong>OA:</strong><pre style="white-space: pre-wrap; max-height: 200px; overflow-y: auto; font-size: 13px;">' + escapeHtml(round.oa_text) + '</pre></div>';
++                if (round.response_text) html += '<div style="margin-bottom: 8px;"><strong>答复:</strong><pre style="white-space: pre-wrap; max-height: 200px; overflow-y: auto; font-size: 13px;">' + escapeHtml(round.response_text) + '</pre></div>';
++                if (round.notes) html += '<div style="margin-bottom: 8px;"><strong>' + t('oa.workflow.notes') + ':</strong> ' + escapeHtml(round.notes) + '</div>';
++                html += '<div><label>' + t('oa.workflow.result') + ':</label> <select id="result-select-' + round.id + '" onchange="updateRoundResult(\'' + round.id + '\')">';
++                html += '<option value="">' + t('oa.workflow.pending') + '</option>';
++                html += '<option value="accepted"' + (round.result === 'accepted' ? ' selected' : '') + '>' + t('oa.workflow.accepted') + '</option>';
++                html += '<option value="rejected"' + (round.result === 'rejected' ? ' selected' : '') + '>' + t('oa.workflow.rejected') + '</option>';
++                html += '<option value="partially_accepted"' + (round.result === 'partially_accepted' ? ' selected' : '') + '>' + t('oa.workflow.partial') + '</option>';
++                html += '</select></div>';
++                html += '</div>';
++                html += '</div>';
++            });
++            container.innerHTML = html;
++            if (window.applyTranslations) applyTranslations();
++        } catch (e) {
++            container.innerHTML = '<p class="muted">Error: ' + escapeHtml(e.message) + '</p>';
++        }
++    }
++
++    function toggleRoundDetail(roundId) {
++        const el = document.getElementById('round-detail-' + roundId);
++        if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
++    }
++
++    async function updateRoundResult(roundId) {
++        const select = document.getElementById('result-select-' + roundId);
++        if (!select) return;
++        const result = select.value;
++        try {
++            await fetch('/api/oa/rounds/' + encodeURIComponent(roundId), {
++                method: 'PUT',
++                headers: {'Content-Type': 'application/json'},
++                body: JSON.stringify({ result: result })
++            });
++            loadOaTimeline();
++        } catch (e) {
++            console.error('Failed to update round result:', e);
++        }
++    }
++
++    async function createNewOaRound() {
++        const roundType = prompt('OA 类型 (first_rejection/second_rejection/reexamination):', 'first_rejection');
++        if (!roundType) return;
++        const oaDate = prompt('发文日期 (YYYY-MM-DD):', new Date().toISOString().slice(0, 10));
++        try {
++            await fetch('/api/oa/rounds', {
++                method: 'POST',
++                headers: {'Content-Type': 'application/json'},
++                body: JSON.stringify({
++                    patent_id: patentId,
++                    round_type: roundType,
++                    oa_date: oaDate || null
++                })
++            });
++            loadOaTimeline();
++        } catch (e) {
++            console.error('Failed to create OA round:', e);
++        }
++    }
++
++    function escapeHtml(text) {
++        if (!text) return '';
++        const div = document.createElement('div');
++        div.textContent = text;
++        return div.innerHTML;
++    }
++
++    // 当切换到 OA 时间线标签时加载数据
++    const origShowTab = showTab;
++    showTab = function(name, ev) {
++        origShowTab(name, ev);
++        if (name === 'oa-timeline') loadOaTimeline();
++    };
++
+     loadCollectState();
+     loadTags();
+     </script>
