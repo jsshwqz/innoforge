@@ -183,6 +183,28 @@ async function autoFetchRefs() {
 
 ### T3：一审-二审对比分析
 
+> **⚠️ T2 → T3 对接说明（Agent-2 留给 T3 责任人）**
+>
+> T2 已完成并合并进 main（commit `d3a9590`）。T3 需要注意以下对接点：
+>
+> 1. **`src/ai/patent.rs` 已被 T2 修改**：
+>    - 新增了 `MECHANISM_ANALYSIS` 常量（第 19 行附近）
+>    - 7 个 `build_*_prompt` 函数中都新增了 `let mech = MECHANISM_ANALYSIS;` 和 `{mech}` 占位符
+>    - T3 要改的 `build_second_rejection_prompt` 现在比计划书写的时候多了 `{mech}` 占位符
+>    - **T3 追加一审历史对比文本时，请插在 `{mech}` 之后**，不要破坏已有的机制分析段
+>    - 建议用 `{first_exam_history}` 之类的命名占位符，与 `{mech}` 风格一致
+>
+> 2. **前端 `templates/office_action_response.html` 已被 T2 修改**：
+>    - T2 改的是区域 B（特征矩阵/机制分析），T3 改区域 C（一审二审 diff），不冲突
+>    - T2 把 mechanism section 标签从硬编码改成了 `t('oa.mechanism.title')` i18n 调用
+>    - T3 的 i18n 前缀是 `oa.diff.*`，与 T2 的 `oa.mechanism.*` 不冲突
+>
+> 3. **i18n `static/i18n.js`**：
+>    - T2 已加入 `oa.mechanism.*` 系列 key
+>    - T3 加 `oa.diff.*` 系列 key，互不干扰
+>
+> 4. **合并建议**：T3 拉最新 main 后再开工，`src/ai/patent.rs` 以 main 当前版本为基准
+
 **分支**：`feat/oa-history-diff`
 
 #### 现有基础设施
