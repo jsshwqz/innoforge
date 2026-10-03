@@ -353,6 +353,11 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
             "/api/oa/history/:id/delete",
             post(routes::api_oa_history_delete),
         )
+        // OA 一审-二审对比分析 / OA First-Second Examination Diff
+        .route(
+            "/api/oa/history/:patent_number/diff",
+            get(routes::api_oa_history_diff),
+        )
         // OA 讨论会话列表与详情 / OA Discussion Sessions API
         .route(
             "/api/oa/discussions/:patent_number",

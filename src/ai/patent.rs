@@ -332,6 +332,7 @@ impl AiClient {
     /// - "shallow": 简要分析 / Quick overview
     /// - "medium": 特征对比表+分层策略 / Feature table + layered strategy (default)
     /// - "deep": medium + AI自检反驳 / medium + self-critique from examiner perspective
+    #[allow(clippy::too_many_arguments)]
     pub async fn office_action_response(
         &self,
         my_patent_info: &str,
@@ -340,6 +341,7 @@ impl AiClient {
         oa_type: &str,
         depth: &str,
         discuss: bool,
+        first_exam_context: Option<&str>,
     ) -> Result<String> {
         // MB5③: OA 容量统一为「报错不截断」——超限即返回错误，不静默丢内容
         if let Some(e) = oa_capacity_error("my_patent", my_patent_info, 300_000) {
@@ -361,9 +363,14 @@ impl AiClient {
             "reject_review" => {
                 Self::build_reject_review_prompt(my_patent, oa, refs, depth, discuss)
             }
-            "second_rejection" => {
-                Self::build_second_rejection_prompt(my_patent, oa, refs, depth, discuss)
-            }
+            "second_rejection" => Self::build_second_rejection_prompt(
+                my_patent,
+                oa,
+                refs,
+                depth,
+                discuss,
+                first_exam_context,
+            ),
             "reexamination_request" => {
                 Self::build_reexamination_request_prompt(my_patent, oa, refs, depth, discuss)
             }
@@ -767,6 +774,16 @@ impl AiClient {
         )
     }
 
+    /// 构建一审历史上下文注入段落（T3: 一审-二审对比分析）
+    fn build_first_exam_context_section(first_exam_context: Option<&str>) -> String {
+        match first_exam_context {
+            Some(ctx) if !ctx.is_empty() => {
+                format!("## 一审历史对比\n\n<user_input>\n{ctx}\n</user_input>\n\n")
+            }
+            _ => String::new(),
+        }
+    }
+
     /// 二审驳回决定答复 prompt
     fn build_second_rejection_prompt(
         my_patent: &str,
@@ -774,12 +791,14 @@ impl AiClient {
         refs: &str,
         depth: &str,
         discuss: bool,
+        first_exam_context: Option<&str>,
     ) -> (String, String) {
         if depth == "shallow" {
             return (
                 "你是一位资深中国专利代理师，精通二审驳回答复。请提供简要答复思路。".into(),
                 format!(
-                    "## 我的专利\n{my_patent}\n\n## 二审驳回决定\n{oa}\n\n## 对比文献\n{refs}\n\n                     请生成简要的二审驳回答复方案：\n                     1. 二审驳回的核心问题（一句话概括）\n                     2. 与一审驳回的差异分析\n                     3. 答复的核心理由\n                     4. 答复意见书草稿（简要版）",
+                    "## 我的专利\n{my_patent}\n\n## 二审驳回决定\n{oa}\n\n## 对比文献\n{refs}\n\n{}                     请生成简要的二审驳回答复方案：\n                     1. 二审驳回的核心问题（一句话概括）\n                     2. 与一审驳回的差异分析\n                     3. 答复的核心理由\n                     4. 答复意见书草稿（简要版）",
+                    Self::build_first_exam_context_section(first_exam_context),
                 ),
             );
         }
@@ -793,7 +812,8 @@ impl AiClient {
             "你是一位资深中国专利代理师，精通中国专利二审程序及驳回答复。             你擅长分析二审驳回决定中的审查逻辑，找出与一审的差异和新的推理漏洞，             在维持或修改权利要求的基础上提出有说服力的答复理由。"
                 .into(),
             format!(
-                "## 我的专利（权利要求书+说明书）\n{my_patent}\n\n                 ## 二审驳回决定\n{oa}\n\n                 ## 对比文献\n{refs}\n\n                 请基于以上材料，按以下结构化框架生成完整的二审驳回答复方案。\n\n                 ## 一、事实对照\n                 - 二审驳回决定逐段拆解，明确每段认定的技术事实\n                 - 与一审驳回决定的差异对比（新增理由/变更理由/维持理由）\n                 - 权利要求逐项特征矩阵\n\n                 {mech}\n\n                 ## 二、法条适用\n                 引用法条与三步法每一步逐一验真，标注与一审结论的差异。\n\n                 ## 三、技术效果\n                 区别特征带来的技术效果逐条列举，与驳回决定认定的效果做对比。\n\n                 ## 四、策略权衡树\n                 至少给出两条论证路径（主路径 + 备选路径），每条标注胜率评估和风险点。\n\n                 ## 五、程序适配\n                 二审程序特殊注意事项，前置审查驳回后的应对策略。\n\n                 ## 六、说服结构\n                 论证编排建议，预判合议组质疑并给出预先回应。\n\n                 {section4}",
+                "## 我的专利（权利要求书+说明书）\n{my_patent}\n\n                 ## 二审驳回决定\n{oa}\n\n                 ## 对比文献\n{refs}\n\n                 {}                 请基于以上材料，按以下结构化框架生成完整的二审驳回答复方案。\n\n                 ## 一、事实对照\n                 - 二审驳回决定逐段拆解，明确每段认定的技术事实\n                 - 与一审驳回决定的差异对比（新增理由/变更理由/维持理由）\n                 - 权利要求逐项特征矩阵\n\n                 {mech}\n\n                 ## 二、法条适用\n                 引用法条与三步法每一步逐一验真，标注与一审结论的差异。\n\n                 ## 三、技术效果\n                 区别特征带来的技术效果逐条列举，与驳回决定认定的效果做对比。\n\n                 ## 四、策略权衡树\n                 至少给出两条论证路径（主路径 + 备选路径），每条标注胜率评估和风险点。\n\n                 ## 五、程序适配\n                 二审程序特殊注意事项，前置审查驳回后的应对策略。\n\n                 ## 六、说服结构\n                 论证编排建议，预判合议组质疑并给出预先回应。\n\n                 {section4}",
+                Self::build_first_exam_context_section(first_exam_context),
             ),
         )
     }
@@ -937,6 +957,7 @@ impl AiClient {
 
     /// 流式 OA 分析：返回 SSE chunk 接收端 / Streaming OA analysis
     /// 对于 deep 模式，先输出主分析，再输出审查员视角预判。
+    #[allow(clippy::too_many_arguments)]
     pub fn office_action_response_stream(
         &self,
         my_patent_info: &str,
@@ -945,6 +966,7 @@ impl AiClient {
         oa_type: &str,
         depth: &str,
         discuss: bool,
+        first_exam_context: Option<&str>,
     ) -> tokio::sync::mpsc::Receiver<String> {
         let (tx, rx) = tokio::sync::mpsc::channel::<String>(64);
 
@@ -979,6 +1001,7 @@ impl AiClient {
                 &refs_str,
                 depth,
                 discuss,
+                first_exam_context,
             ),
             "reexamination_request" => Self::build_reexamination_request_prompt(
                 &my_patent_str,

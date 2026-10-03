@@ -172,6 +172,7 @@ async fn deepseek_oa_analysis_shallow_returns_sections() {
             "first_exam",
             "shallow",
             false,
+            None,
         )
         .await;
 

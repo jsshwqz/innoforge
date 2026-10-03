@@ -1327,6 +1327,32 @@
         var typeName = typeLabel ? typeLabel.textContent : oaType;
 
         var body = { references: refs, office_action: oa, oa_type: oaType, depth: depth, discuss: true };
+
+        // T3: 二审驳回时自动获取一审历史上下文
+        if (oaType === 'second_rejection') {
+            var pnForDiff = null;
+            if (typeof my === 'object' && my.patent_number) {
+                pnForDiff = my.patent_number;
+            } else if (typeof my === 'string') {
+                pnForDiff = my;
+            } else if (my && my.content) {
+                var m = my.content.match(/\b((?:CN|US|EP|JP|KR|WO)\d{7,12}(?:[.]?\d)?)\b/i);
+                if (m) pnForDiff = m[1];
+            }
+            if (pnForDiff) {
+                try {
+                    var diffResp = await fetch('/api/oa/history/' + encodeURIComponent(pnForDiff) + '/diff');
+                    var diffData = await diffResp.json();
+                    if (diffData.status === 'ok' && diffData.first_exam_context) {
+                        body.first_exam_context = diffData.first_exam_context;
+                    }
+                    if (diffData.status === 'ok' && diffData.diffs && diffData.diffs.length > 0) {
+                        renderOaDiff(diffData.diffs);
+                    }
+                } catch (e) { /* diff fetch failed, continue without */ }
+            }
+        }
+
         if (typeof my === 'string') {
             body.my_patent_id = my;
         } else {
@@ -2981,6 +3007,61 @@
 
     // ── OA History ──
     var oaHistory = [];
+
+    // T3: 渲染一审-二审对比分析
+    function renderOaDiff(diffs) {
+        var container = document.getElementById('result');
+        if (!container) return;
+        var diffHtml = '<div class="result-box" style="border-color:#da3633;margin-bottom:12px;">'
+            + '<div class="result-header" style="padding:8px 16px;background:#da363322;border-bottom:1px solid #da3633;display:flex;align-items:center;gap:6px;">'
+            + '<span style="color:#da3633;font-weight:600;">📋 ' + t('oa.diff.title') + '</span>'
+            + '</div><div style="padding:12px 16px;">';
+        for (var i = 0; i < diffs.length; i++) {
+            var d = diffs[i];
+            diffHtml += '<div style="margin-bottom:10px;padding:8px;border:1px solid #30363d;border-radius:6px;">';
+            diffHtml += '<div style="color:#8b949e;font-size:11px;margin-bottom:6px;">'
+                + t('oa.diff.from').replace('{n}', d.from_version || (i+1)) + ' → '
+                + t('oa.diff.to').replace('{n}', d.to_version || (i+2)) + '</div>';
+            // Type change
+            if (d.oa_type_changed) {
+                diffHtml += '<div style="color:#d29922;font-size:12px;margin-bottom:4px;">'
+                    + '⚠ ' + t('oa.diff.typeChange') + ': ' + escapeHtml(d.from_oa_type || '?') + ' → ' + escapeHtml(d.to_oa_type || '?') + '</div>';
+            }
+            // Depth change
+            if (d.depth_changed) {
+                diffHtml += '<div style="color:#8b949e;font-size:11px;margin-bottom:4px;">'
+                    + '深度: ' + escapeHtml(d.from_depth || '?') + ' → ' + escapeHtml(d.to_depth || '?') + '</div>';
+            }
+            // Analysis diff (新增驳回理由标红、消失标绿)
+            if (d.analysis_diff) {
+                diffHtml += '<div style="margin-top:6px;">';
+                if (d.analysis_diff.added && d.analysis_diff.added.length > 0) {
+                    diffHtml += '<div style="color:#da3633;font-size:12px;margin-bottom:2px;">'
+                        + '🔴 ' + t('oa.diff.newReasons') + ':</div>';
+                    for (var j = 0; j < Math.min(d.analysis_diff.added.length, 5); j++) {
+                        diffHtml += '<div style="color:#da3633;font-size:11px;padding-left:16px;">+ ' + escapeHtml(d.analysis_diff.added[j].slice(0, 100)) + '</div>';
+                    }
+                }
+                if (d.analysis_diff.removed && d.analysis_diff.removed.length > 0) {
+                    diffHtml += '<div style="color:#3fb950;font-size:12px;margin-bottom:2px;margin-top:4px;">'
+                        + '🟢 ' + t('oa.diff.overcome') + ':</div>';
+                    for (var j = 0; j < Math.min(d.analysis_diff.removed.length, 5); j++) {
+                        diffHtml += '<div style="color:#3fb950;font-size:11px;padding-left:16px;">- ' + escapeHtml(d.analysis_diff.removed[j].slice(0, 100)) + '</div>';
+                    }
+                }
+                diffHtml += '</div>';
+            }
+            diffHtml += '</div>';
+        }
+        diffHtml += '</div></div>';
+        // Insert diff before the analysis result
+        var existingDiff = container.querySelector('.oa-diff-section');
+        if (existingDiff) existingDiff.remove();
+        var diffWrapper = document.createElement('div');
+        diffWrapper.className = 'oa-diff-section';
+        diffWrapper.innerHTML = DOMPurify.sanitize(diffHtml);
+        container.insertBefore(diffWrapper, container.firstChild);
+    }
 
     async function loadOaHistory() {
         try {
