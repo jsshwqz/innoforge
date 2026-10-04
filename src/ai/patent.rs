@@ -911,6 +911,60 @@ impl AiClient {
         )
     }
 
+    /// P3-T1: 答复策略智能推荐 prompt
+    /// 根据 OA 类型、对比文献特征、专利技术领域，构建策略推荐 prompt
+    pub fn build_strategy_recommend_prompt(
+        oa_type: &str,
+        my_patent: &str,
+        refs: &str,
+        oa_text: &str,
+    ) -> (String, String) {
+        let system = "你是一位专利答复策略专家，精通中国专利法及审查指南。
+\n            请根据以下信息，推荐最优答复策略。
+
+\n            分析维度：
+\n            1. OA 类型 → 答复紧迫度（一审有修改机会 vs 二审受限 vs 复审最后机会）
+\n            2. 对比文献数量和相关性 → 翻案难度评估
+\n            3. 权利要求 vs 对比文献 → 哪些权项有救、哪些难救
+\n            4. 技术领域 → 该领域审查标准宽严度
+
+\n            输出格式（严格按此结构）：
+\n            ## 推荐策略
+\n            ### 策略1：[名称]
+\n            - 成功概率：X%
+\n            - 优先级：⭐⭐⭐
+\n            - 理由：...
+\n            - 具体操作：...
+
+\n            ### 策略2：[名称]
+\n            ...
+
+\n            ## 不推荐的策略
+\n            ### [名称]
+\n            - 原因：...
+
+\n            ## 综合建议
+\n            ...
+
+\n            请用中文回答。";
+
+        let user = format!(
+            "## OA 类型
+{oa_type}
+
+## 我的专利
+{my_patent}
+
+## 审查意见
+{oa_text}
+
+## 对比文献
+{refs}"
+        );
+
+        (system.into(), user)
+    }
+
     /// Helper: extract the response draft (第五部分) from the structured OA output.
     /// Falls back to the full text if the marker is not found.
     fn extract_oa_response_section(full_output: &str) -> String {
@@ -1652,4 +1706,65 @@ fn abnormal_deep_prompt_contains_section5() {
 fn abnormal_discuss_mode_omits_section5() {
     let (_system, user) = AiClient::build_abnormal_prompt("专利", "OA", "参考", "deep", true);
     assert!(user.contains("仅输出第一部分至第四部分"));
+}
+
+#[test]
+fn strategy_recommend_prompt_returns_system_and_user() {
+    let (system, user) = AiClient::build_strategy_recommend_prompt(
+        "second_rejection",
+        "专利内容",
+        "对比文献",
+        "OA文本",
+    );
+    assert!(!system.is_empty(), "system prompt should not be empty");
+    assert!(!user.is_empty(), "user prompt should not be empty");
+}
+
+#[test]
+fn strategy_recommend_prompt_user_contains_all_inputs() {
+    let (_system, user) = AiClient::build_strategy_recommend_prompt(
+        "first_exam",
+        "我的发明专利关于火焰燃烧",
+        "D1: CN123456",
+        "审查意见：缺乏创造性",
+    );
+    assert!(user.contains("first_exam"), "user should contain oa_type");
+    assert!(user.contains("火焰燃烧"), "user should contain patent text");
+    assert!(
+        user.contains("CN123456"),
+        "user should contain reference text"
+    );
+    assert!(user.contains("缺乏创造性"), "user should contain OA text");
+}
+
+#[test]
+fn strategy_recommend_prompt_system_mentions_analysis_dimensions() {
+    let (system, _user) =
+        AiClient::build_strategy_recommend_prompt("second_rejection", "p", "r", "o");
+    assert!(
+        system.contains("答复策略专家"),
+        "system should mention strategy expert role"
+    );
+    assert!(
+        system.contains("成功概率"),
+        "system should mention success probability"
+    );
+    assert!(system.contains("优先级"), "system should mention priority");
+    assert!(
+        system.contains("不推荐的策略"),
+        "system should mention not-recommended section"
+    );
+}
+
+#[test]
+fn strategy_recommend_prompt_handles_empty_inputs() {
+    let (system, user) = AiClient::build_strategy_recommend_prompt("", "", "", "");
+    assert!(
+        !system.is_empty(),
+        "system should still be provided for empty inputs"
+    );
+    assert!(
+        user.contains("## OA 类型\n\n"),
+        "user should handle empty oa_type"
+    );
 }
