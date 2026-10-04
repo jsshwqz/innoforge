@@ -1350,9 +1350,24 @@ pub async fn api_ai_office_action_response(
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string());
 
+    // P3-T1: 提取用户选择的策略提示（可选）
+    let strategy_hint = req
+        .get("strategy_hint")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+    let my_info_with_strategy = if let Some(ref hint) = strategy_hint {
+        format!(
+            "【用户选择的答复策略：{hint}】
+
+{my_info}"
+        )
+    } else {
+        my_info.clone()
+    };
     match ai
         .office_action_response(
-            &my_info,
+            &my_info_with_strategy,
             &oa_text,
             &refs_info,
             oa_type,
@@ -1556,8 +1571,24 @@ pub async fn api_ai_office_action_response_stream(
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string());
 
+    // P3-T1: 提取用户选择的策略提示（可选）
+    let strategy_hint = req
+        .get("strategy_hint")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+    let my_info_with_strategy = if let Some(ref hint) = strategy_hint {
+        format!(
+            "【用户选择的答复策略：{hint}】
+
+{my_info}"
+        )
+    } else {
+        my_info.clone()
+    };
+
     let mut rx = ai.office_action_response_stream(
-        &my_info,
+        &my_info_with_strategy,
         &oa_text,
         &refs_info,
         &oa_type,
@@ -2762,35 +2793,11 @@ pub async fn api_ai_oa_strategy_recommend(
         .unwrap_or_else(|e| e.into_inner())
         .ai_client_expert();
 
-    let sys = "你是一位专利答复策略专家，精通中国专利法及审查指南。\n\
-        请根据以下信息，推荐最优答复策略：\n\n\
-        分析维度：\n\
-        1. OA 类型 → 答复紧迫度（一审有修改机会 vs 二审受限 vs 复审最后机会）\n\
-        2. 对比文献数量和相关性 → 翻案难度评估\n\
-        3. 权利要求 vs 对比文献 → 哪些权项有救、哪些难救\n\
-        4. 技术领域 → 该领域审查标准宽严度\n\n\
-        输出格式（严格按此结构）：\n\
-        ## 推荐策略\n\
-        ### 策略1：[名称]\n\
-        - 成功概率：X%\n\
-        - 优先级：⭐⭐⭐\n\
-        - 理由：...\n\
-        - 具体操作：...\n\n\
-        ### 策略2：[名称]\n\
-        ...\n\n\
-        ## 不推荐的策略\n\
-        ### [名称]\n\
-        - 原因：...\n\n\
-        ## 综合建议\n\
-        ...\n\n\
-        请用中文回答。";
-
-    let user_msg = format!(
-        "## OA 类型\n{oa_type}\n\n## 我的专利\n{my_patent}\n\n## 审查意见\n{oa_text}\n\n## 对比文献\n{refs}"
-    );
+    let (sys, user_msg) =
+        crate::ai::AiClient::build_strategy_recommend_prompt(oa_type, my_patent, refs, oa_text);
 
     let result = ai
-        .chat_with_system(sys, &user_msg, 0.7)
+        .chat_with_system(&sys, &user_msg, 0.7)
         .await
         .unwrap_or_else(|e| format!("策略推荐失败: {}", e));
 
@@ -2974,6 +2981,67 @@ async fn try_online_search(
                 "source": ""
             })
         }
+    }
+}
+
+/// POST /api/ai/oa-collect-evidence — P4-T1: 证据自动收集与整理
+///
+/// 从专利全文、对比文献、OA 文本中自动提取证据段落，按类型分类整理。
+/// 请求: { my_patent, refs, oa_text }
+/// 响应: { status: "ok", evidence: [Evidence], summary: String, stats: {...} }
+pub async fn api_ai_oa_collect_evidence(
+    State(s): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let my_patent = req["my_patent"].as_str().unwrap_or("");
+    let refs = req["refs"].as_str().unwrap_or("");
+    let oa_text = req["oa_text"].as_str().unwrap_or("");
+
+    if my_patent.is_empty() || oa_text.is_empty() {
+        return Json(json!({
+            "status": "error",
+            "message": "缺少专利文本或OA文本 / Missing patent or OA text"
+        }));
+    }
+
+    let ai = s
+        .config
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .ai_client_expert();
+
+    match crate::ai::collect_evidence(&ai, my_patent, refs, oa_text).await {
+        Ok((evidence, summary)) => {
+            // 统计各类型数量
+            let mut stats = serde_json::Map::new();
+            let mut total_relevance = 0.0f32;
+            for e in &evidence {
+                let key = e.evidence_type.as_key();
+                let count = stats.get(key).and_then(|v| v.as_u64()).unwrap_or(0);
+                stats.insert(key.to_string(), json!(count + 1));
+                total_relevance += e.relevance;
+            }
+            let avg_relevance = if evidence.is_empty() {
+                0.0
+            } else {
+                total_relevance / evidence.len() as f32
+            };
+
+            Json(json!({
+                "status": "ok",
+                "evidence": evidence,
+                "summary": summary,
+                "stats": {
+                    "type_counts": stats,
+                    "total": evidence.len(),
+                    "avg_relevance": avg_relevance
+                }
+            }))
+        }
+        Err(e) => Json(json!({
+            "status": "error",
+            "message": format!("证据收集失败: {e}")
+        })),
     }
 }
 

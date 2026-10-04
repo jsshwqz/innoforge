@@ -125,6 +125,7 @@
             <button class="btn-secondary" onclick="recommendStrategy()" id="btn-strategy-recommend" style="margin-left:8px;">💡 <span data-i18n="oa.strategy.btn">智能推荐策略</span></button>
             <button class="btn-secondary" onclick="qualityScore()" id="btn-quality-score" style="margin-left:8px;">📊 <span data-i18n="oa.quality.btn">质量评估</span></button>
             <button class="btn-secondary" onclick="openClaimSimulator()" id="btn-claim-sim" style="margin-left:8px;">🔧 <span data-i18n="oa.claimSim.title">权利要求修改模拟器</span></button>
+            <button class="btn-secondary" onclick="collectEvidence()" id="btn-collect-evidence" style="margin-left:8px;">📁 <span data-i18n="oa.evidence.btn">自动收集证据</span></button>
             <div style="display:flex;align-items:center;gap:8px;margin-left:auto;">
                 <span class="muted" data-i18n="oar.depthLabel"></span>
                 <select id="depth-select" class="depth-select">
@@ -996,6 +997,8 @@
     }
 
     // P3-T1: 答复策略智能推荐
+    var selectedStrategy = null; // 存储用户选择的策略
+
     async function recommendStrategy() {
         var patent = getMyPatent();
         var oa = getOA();
@@ -1031,17 +1034,165 @@
             });
             var data = await resp.json();
             if (data.error) { alert(data.error); return; }
-            var result = document.getElementById('result');
-            var div = document.createElement('div');
-            div.style.marginTop = '20px';
-            div.innerHTML = '<h3 style="color:#d29922;">💡 答复策略智能推荐</h3><div style="font-size:13px;line-height:1.8;color:#c9d1d9;padding:12px;border:1px solid #30363d;border-radius:8px;">' + DOMPurify.sanitize(renderMarkdown(data.strategies || '')) + '</div>';
-            result.appendChild(div);
+            var rawText = data.strategies || '';
+            renderStrategyCards(rawText);
         } catch(e) {
             alert('策略推荐失败: ' + e.message);
         } finally {
             btn.disabled = false;
             btn.innerHTML = '💡 <span data-i18n="oa.strategy.btn">' + (t('oa.strategy.btn') || '智能推荐策略') + '</span>';
         }
+    }
+
+    // 解析 AI 返回的策略文本，渲染结构化策略卡片
+    function renderStrategyCards(rawText) {
+        var result = document.getElementById('result');
+        var div = document.createElement('div');
+        div.style.marginTop = '20px';
+        div.id = 'strategy-recommend-result';
+
+        // 解析策略文本
+        var strategies = [];
+        var notRecommended = [];
+        var generalAdvice = '';
+        var sections = rawText.split(/## (?=推荐策略|不推荐的策略|综合建议)/);
+        var recommendSection = '';
+        var notRecommendSection = '';
+        for (var si = 0; si < sections.length; si++) {
+            if (sections[si].indexOf('推荐策略') === 0) recommendSection = sections[si];
+            if (sections[si].indexOf('不推荐的策略') === 0) notRecommendSection = sections[si];
+            if (sections[si].indexOf('综合建议') === 0) generalAdvice = sections[si].replace('综合建议', '').trim();
+        }
+
+        // 解析推荐策略
+        var strategyBlocks = recommendSection.split(/### \s*/);
+        for (var bi = 1; bi < strategyBlocks.length; bi++) {
+            var block = strategyBlocks[bi].trim();
+            var nameMatch = block.match(/^(?:策略\d+[：:])?\s*(.+)/);
+            var name = nameMatch ? nameMatch[1].split('\n')[0].trim() : '策略' + bi;
+            var probMatch = block.match(/成功概率[：:]\s*(\d+)%/);
+            var prob = probMatch ? parseInt(probMatch[1]) : 0;
+            var prioMatch = block.match(/优先级[：:]\s*(⭐+)/);
+            var prio = prioMatch ? prioMatch[1].length : 0;
+            var reasonMatch = block.match(/理由[：:]\s*([^\n]+)/);
+            var reason = reasonMatch ? reasonMatch[1].trim() : '';
+            var opMatch = block.match(/具体操作[：:]\s*([^\n]+)/);
+            var operation = opMatch ? opMatch[1].trim() : '';
+            strategies.push({ name: name, probability: prob, priority: prio, reason: reason, operation: operation, raw: block });
+        }
+
+        // 解析不推荐策略
+        var notRecBlocks = notRecommendSection.split(/### \s*/);
+        for (var ni = 1; ni < notRecBlocks.length; ni++) {
+            var nrBlock = notRecBlocks[ni].trim();
+            var nrName = nrBlock.split('\n')[0].replace(/^(?:策略\d+[：:])?\s*/, '').trim();
+            var nrReasonMatch = nrBlock.match(/原因[：:]\s*([^\n]+)/);
+            var nrReason = nrReasonMatch ? nrReasonMatch[1].trim() : '';
+            notRecommended.push({ name: nrName, reason: nrReason });
+        }
+
+        // 按优先级排序（高→低）
+        strategies.sort(function(a, b) { return b.priority - a.priority || b.probability - a.probability; });
+
+        var html = '<h3 style="color:#d29922;">💡 ' + (t('oa.strategy.btn') || '智能推荐策略') + '</h3>';
+
+        // 渲染推荐策略卡片
+        if (strategies.length === 0) {
+            html += '<div style="color:#8b949e;padding:12px;">' + (t('oa.strategy.noStrategy') || '未找到策略') + '</div>';
+            // Fallback: show raw markdown
+            html += '<div style="font-size:13px;line-height:1.8;color:#c9d1d9;padding:12px;border:1px solid #30363d;border-radius:8px;">' + DOMPurify.sanitize(renderMarkdown(rawText)) + '</div>';
+        } else {
+            for (var si = 0; si < strategies.length; si++) {
+                var s = strategies[si];
+                var probColor = s.probability >= 70 ? '#3fb950' : s.probability >= 40 ? '#d29922' : '#f85149';
+                var stars = '';
+                for (var st = 0; st < 5; st++) {
+                    stars += st < s.priority ? '⭐' : '☆';
+                }
+                html += '<div class="strategy-card" data-name="' + s.name.replace(/"/g, '&quot;') + '" style="margin:8px 0;padding:12px;border:1px solid #30363d;border-radius:8px;background:#161b22;">';
+                html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">';
+                html += '<strong style="color:#d29922;font-size:14px;">' + s.name + '</strong>';
+                html += '<button class="btn-strategy-select" onclick="selectStrategy(\'' + s.name.replace(/'/g, "\'") + '\')" style="padding:4px 12px;border:1px solid #d29922;border-radius:4px;background:transparent;color:#d29922;cursor:pointer;font-size:12px;">' + (t('oa.strategy.select') || '采用此策略') + '</button>';
+                html += '</div>';
+                // 概率进度条
+                html += '<div style="margin-bottom:6px;"><span style="color:#8b949e;font-size:12px;">' + (t('oa.strategy.probability') || '成功概率') + ': </span><div style="display:inline-block;width:120px;height:8px;background:#21262d;border-radius:4px;vertical-align:middle;overflow:hidden;"><div style="width:' + s.probability + '%;height:100%;background:' + probColor + ';border-radius:4px;"></div></div> <span style="color:' + probColor + ';font-size:12px;">' + s.probability + '%</span></div>';
+                // 优先级星标
+                html += '<div style="margin-bottom:6px;"><span style="color:#8b949e;font-size:12px;">' + (t('oa.strategy.priority') || '优先级') + ': </span><span style="font-size:14px;">' + stars + '</span></div>';
+                // 推荐理由
+                if (s.reason) {
+                    html += '<div style="margin-bottom:4px;"><span style="color:#8b949e;font-size:12px;">' + (t('oa.strategy.reason') || '推荐理由') + ': </span><span style="color:#c9d1d9;font-size:13px;">' + s.reason + '</span></div>';
+                }
+                if (s.operation) {
+                    html += '<div style="color:#c9d1d9;font-size:13px;">具体操作: ' + s.operation + '</div>';
+                }
+                html += '</div>';
+            }
+        }
+
+        // 渲染不推荐策略（灰色折叠）
+        if (notRecommended.length > 0) {
+            html += '<details style="margin-top:12px;"><summary style="cursor:pointer;color:#8b949e;font-size:13px;">' + (t('oa.strategy.notRecommended') || '不推荐') + ' (' + notRecommended.length + ')</summary>';
+            for (var ni = 0; ni < notRecommended.length; ni++) {
+                var nr = notRecommended[ni];
+                html += '<div style="margin:6px 0;padding:8px;border:1px solid #21262d;border-radius:4px;background:#0d1117;opacity:0.6;">';
+                html += '<strong style="color:#6e7681;">' + nr.name + '</strong>';
+                if (nr.reason) {
+                    html += '<div style="color:#6e7681;font-size:12px;">原因: ' + nr.reason + '</div>';
+                }
+                html += '</div>';
+            }
+            html += '</details>';
+        }
+
+        // 综合建议
+        if (generalAdvice) {
+            html += '<div style="margin-top:12px;padding:12px;border:1px solid #30363d;border-radius:8px;background:#161b22;"><strong style="color:#58a6ff;">综合建议</strong><div style="color:#c9d1d9;font-size:13px;margin-top:6px;">' + DOMPurify.sanitize(renderMarkdown(generalAdvice)) + '</div></div>';
+        }
+
+        div.innerHTML = DOMPurify.sanitize(html, { ADD_ATTR: ['target', 'data-name'] });
+        result.appendChild(div);
+    }
+
+    // 选择策略后注入分析流程
+    function selectStrategy(strategyName) {
+        selectedStrategy = strategyName;
+        // 高亮选中卡片
+        var cards = document.querySelectorAll('.strategy-card');
+        for (var i = 0; i < cards.length; i++) {
+            var cardName = cards[i].getAttribute('data-name');
+            if (cardName === strategyName) {
+                cards[i].style.borderColor = '#d29922';
+                cards[i].style.borderWidth = '2px';
+                cards[i].style.background = '#1c2128';
+            } else {
+                cards[i].style.borderColor = '#30363d';
+                cards[i].style.borderWidth = '1px';
+                cards[i].style.background = '#161b22';
+            }
+        }
+        // 更新按钮文字
+        var buttons = document.querySelectorAll('.btn-strategy-select');
+        for (var i = 0; i < buttons.length; i++) {
+            if (buttons[i].getAttribute('onclick') && buttons[i].getAttribute('onclick').indexOf(strategyName) >= 0) {
+                buttons[i].textContent = (t('oa.strategy.selected') || '已选择') + ' ✓';
+                buttons[i].style.background = '#d29922';
+                buttons[i].style.color = '#0d1117';
+            } else {
+                buttons[i].textContent = (t('oa.strategy.select') || '采用此策略');
+                buttons[i].style.background = 'transparent';
+                buttons[i].style.color = '#d29922';
+            }
+        }
+        // 提示用户
+        var hint = document.getElementById('strategy-hint');
+        if (!hint) {
+            hint = document.createElement('div');
+            hint.id = 'strategy-hint';
+            hint.style.cssText = 'margin-top:8px;padding:8px 12px;border-radius:4px;background:#1c2128;color:#d29922;font-size:13px;';
+            var resultDiv = document.getElementById('strategy-recommend-result');
+            if (resultDiv) resultDiv.appendChild(hint);
+        }
+        hint.textContent = '已选择策略「' + strategyName + '」，点击"分析"时将自动注入此策略。';
     }
 
     // P3-T3: 答复质量量化评估
@@ -1701,6 +1852,10 @@
         var typeName = typeLabel ? typeLabel.textContent : oaType;
 
         var body = { references: refs, office_action: oa, oa_type: oaType, depth: depth, discuss: true };
+        // P3-T1: 注入用户选择的策略
+        if (selectedStrategy) {
+            body.strategy_hint = selectedStrategy;
+        }
 
         // T3: 二审驳回时自动获取一审历史上下文
         if (oaType === 'second_rejection') {
@@ -4005,6 +4160,165 @@
 
     // 初始加载轮次选择器
     loadOaRoundSelector();
+
+    // P4-T1: 证据自动收集与整理
+    var collectedEvidence = [];
+    var evidenceTypeLabels = {
+        specSupport: 'oa.evidence.specSupport',
+        distinction: 'oa.evidence.distinction',
+        techEffect: 'oa.evidence.techEffect',
+        priorArt: 'oa.evidence.priorArt',
+        experimental: 'oa.evidence.experimental'
+    };
+
+    async function collectEvidence() {
+        var btn = document.getElementById('btn-collect-evidence');
+        var myPatent = document.getElementById('my-patent') ? document.getElementById('my-patent').value : '';
+        var refs = document.getElementById('refs') ? document.getElementById('refs').value : '';
+        var oaText = document.getElementById('oa-text') ? document.getElementById('oa-text').value : '';
+
+        if (!myPatent || !oaText) {
+            alert(t('oa.evidence.noData') || '请先填写专利文本和OA文本');
+            return;
+        }
+
+        btn.disabled = true;
+        btn.innerHTML = '⏳ <span>' + (t('oa.evidence.loading') || '证据收集中...') + '</span>';
+
+        try {
+            var resp = await fetch('/api/ai/oa-collect-evidence', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ my_patent: myPatent, refs: refs, oa_text: oaText })
+            });
+            var data = await resp.json();
+
+            if (data.status === 'ok') {
+                collectedEvidence = data.evidence || [];
+                renderEvidenceCenter(data);
+            } else {
+                alert((data.message || '收集失败'));
+            }
+        } catch (e) {
+            alert('证据收集请求失败: ' + e.message);
+        }
+
+        btn.disabled = false;
+        btn.innerHTML = '📁 <span data-i18n="oa.evidence.btn">' + (t('oa.evidence.btn') || '自动收集证据') + '</span>';
+    }
+
+    function renderEvidenceCenter(data) {
+        var existing = document.getElementById('evidence-center');
+        if (existing) existing.remove();
+
+        var div = document.createElement('div');
+        div.id = 'evidence-center';
+        div.style.cssText = 'margin-top:16px;padding:16px;border:1px solid #30363d;border-radius:12px;background:#0d1117;';
+
+        var html = '<h3 style="color:#58a6ff;">📁 ' + (t('oa.evidence.title') || '证据中心') + '</h3>';
+
+        // Summary stats
+        var stats = data.stats || {};
+        var typeCounts = stats.type_counts || {};
+        html += '<div style="margin:8px 0;padding:8px;background:#161b22;border-radius:8px;font-size:13px;color:#8b949e;">';
+        html += '<span>' + (t('oa.evidence.total') || '共 {n} 条证据').replace('{n}', stats.total || 0) + '</span>';
+        html += ' | <span>' + (t('oa.evidence.avgRelevance') || '平均相关性') + ': ' + ((stats.avg_relevance || 0) * 100).toFixed(0) + '%</span>';
+        html += '</div>';
+
+        // Group by type
+        var groups = {};
+        for (var i = 0; i < collectedEvidence.length; i++) {
+            var e = collectedEvidence[i];
+            var key = e.evidence_type || e.evidenceType || 'specSupport';
+            if (!groups[key]) groups[key] = [];
+            groups[key].push(e);
+        }
+
+        var typeOrder = ['specSupport', 'distinction', 'techEffect', 'priorArt', 'experimental'];
+        for (var ti = 0; ti < typeOrder.length; ti++) {
+            var typeKey = typeOrder[ti];
+            if (!groups[typeKey] || groups[typeKey].length === 0) continue;
+
+            var label = t(evidenceTypeLabels[typeKey]) || typeKey;
+            var groupId = 'evidence-group-' + typeKey;
+            html += '<div style="margin-top:12px;">';
+            html += '<div onclick="toggleEvidenceGroup(\'' + groupId + '\')" style="cursor:pointer;font-weight:600;color:#c9d1d9;font-size:14px;padding:4px 0;">';
+            html += '<span id="' + groupId + '-arrow">▼</span> ' + label + ' (' + groups[typeKey].length + ')';
+            html += '</div>';
+            html += '<div id="' + groupId + '" style="margin-top:4px;">';
+
+            for (var j = 0; j < groups[typeKey].length; j++) {
+                var ev = groups[typeKey][j];
+                var evIdx = collectedEvidence.indexOf(ev);
+                var relPct = Math.round((ev.relevance || 0) * 100);
+                var relColor = relPct >= 70 ? '#238636' : (relPct >= 40 ? '#d29922' : '#f85149');
+
+                html += '<div style="margin:4px 0;padding:8px;background:#161b22;border-radius:6px;border-left:3px solid ' + relColor + ';">';
+                html += '<div style="display:flex;justify-content:space-between;align-items:center;">';
+                html += '<span style="font-size:12px;color:#8b949e;">📍 ' + DOMPurify.sanitize(ev.source || '') + '</span>';
+                html += '<label style="font-size:12px;cursor:pointer;"><input type="checkbox" onchange="toggleEvidenceUse(' + evIdx + ', this.checked)" /> ' + (t('oa.evidence.useInResponse') || '用于答复') + '</label>';
+                html += '</div>';
+                html += '<div style="margin:4px 0;font-size:13px;color:#c9d1d9;line-height:1.6;">' + DOMPurify.sanitize(ev.content || '') + '</div>';
+                html += '<div style="display:flex;align-items:center;gap:4px;">';
+                html += '<span style="font-size:11px;color:#8b949e;">' + (t('oa.evidence.relevance') || '相关性') + ':</span>';
+                html += '<div style="flex:1;height:6px;background:#21262d;border-radius:3px;overflow:hidden;">';
+                html += '<div style="width:' + relPct + '%;height:100%;background:' + relColor + ';"></div>';
+                html += '</div>';
+                html += '<span style="font-size:11px;color:' + relColor + ';">' + relPct + '%</span>';
+                html += '</div>';
+                html += '</div>';
+            }
+
+            html += '</div></div>';
+        }
+
+        if (collectedEvidence.length === 0) {
+            html += '<div style="color:#8b949e;padding:12px;">' + (t('oa.evidence.empty') || '暂无证据') + '</div>';
+        }
+
+        div.innerHTML = DOMPurify.sanitize(html, { ADD_ATTR: ['onchange', 'onclick'] });
+
+        // Insert after the button row
+        var btnRow = document.getElementById('btn-collect-evidence');
+        if (btnRow && btnRow.parentNode) {
+            btnRow.parentNode.parentNode.appendChild(div);
+        } else {
+            document.querySelector('.container').appendChild(div);
+        }
+    }
+
+    function toggleEvidenceGroup(groupId) {
+        var group = document.getElementById(groupId);
+        var arrow = document.getElementById(groupId + '-arrow');
+        if (!group) return;
+        if (group.style.display === 'none') {
+            group.style.display = '';
+            if (arrow) arrow.textContent = '▼';
+        } else {
+            group.style.display = 'none';
+            if (arrow) arrow.textContent = '▶';
+        }
+    }
+
+    function toggleEvidenceUse(idx, checked) {
+        if (idx < 0 || idx >= collectedEvidence.length) return;
+        collectedEvidence[idx].used_in_response = checked;
+        if (checked) {
+            // Insert evidence into OA text context
+            var ev = collectedEvidence[idx];
+            var oaText = document.getElementById('oa-text');
+            if (oaText) {
+                var note = '\n\n【证据支撑：' + ev.source + '】\n' + ev.content + '\n';
+                oaText.value += note;
+                var msg = document.createElement('div');
+                msg.style.cssText = 'position:fixed;top:20px;right:20px;background:#238636;color:#fff;padding:8px 16px;border-radius:8px;z-index:9999;font-size:14px;';
+                msg.textContent = t('oa.evidence.inserted') || '已插入答复上下文';
+                document.body.appendChild(msg);
+                setTimeout(function() { msg.remove(); }, 2000);
+            }
+        }
+    }
+
     </script>
 </body>
 </html>
