@@ -5,6 +5,20 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 
+## [v0.9.9] - 2026-10-03
+
+### 新增 / Added
+- **第三阶段智能决策支持**：P3-T1 答复策略智能推荐 + P3-T2 权利要求修改模拟器 + P3-T3 答复质量量化评估，全部完成并通过验证
+- **P3-T1 答复策略智能推荐**：新增 `POST /api/ai/oa-strategy-recommend` 端点，根据 OA 类型、对比文献特征、专利技术领域自动推荐最优答复策略（修改权项/增加从属权/争辩创造性/组合策略），每个策略有成功概率估计和优先级排序。前端 OA 答复页新增"💡 智能推荐策略"按钮
+- **P3-T2 权利要求修改模拟器**：新增 `POST /api/ai/oa-claim-simulate` 端点，用户输入修改后的权利要求，AI 模拟审查员逐项检查（说明书支持、新颖性、创造性、保护范围），输出总体判断和修改建议。前端左右分栏编辑，检查结果用 ✅/❌/⚠️ 颜色标注
+- **P3-T3 答复质量量化评估**：新增 `POST /api/ai/oa-quality-score` 端点，对生成的答复文本进行 6 维度量化评分（逻辑严密性、证据引用充分性、区别技术特征论证、修改合理性、措辞专业度、回复完整性），输出加权总分、A/B/C/D 等级、薄弱点分析、改进建议。前端展示 SVG 雷达图 + 评分进度条 + 总分等级卡片
+
+### 验证 / Verification
+- cargo fmt ✅ / cargo clippy -D warnings ✅ / cargo test 37 passed ✅
+- HTML 函数完整性扫描 ✅ / ESLint 0 errors ✅
+
+---
+
 ## [v0.9.7] - 2026-10-03
 
 ### 新增 / Added
