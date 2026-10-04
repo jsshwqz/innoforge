@@ -347,6 +347,10 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
             "/api/ai/oa-claim-simulate",
             post(routes::api_ai_oa_claim_simulate),
         )
+        .route(
+            "/api/ai/oa-collect-evidence",
+            post(routes::api_ai_oa_collect_evidence),
+        )
         // OA 分析历史 API / OA History API
         .route("/api/oa/history/all", get(routes::api_oa_history_all))
         .route(
