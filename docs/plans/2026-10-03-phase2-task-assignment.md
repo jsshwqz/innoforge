@@ -140,3 +140,34 @@ pub async fn api_ai_oa_defense_analysis(...)
 - [ ] 能从对方律师视角分析权利要求漏洞
 - [ ] 侵权可执行性评估检测难度
 - [ ] 商业价值评估权衡保护范围与授权概率
+
+---
+
+## Agent-2 (AI-2) 任务记录
+
+> 以下为 Agent-2 在各阶段的任务完成记录，统一放于此处。
+
+### T2 技术机制深度对比 — ✅ 完成
+
+- **Commit**: `d3a9590`
+- **分支**: `feat/oa-mechanism-compare`
+- **改动**: `src/ai/patent.rs` (+27 -4) + `templates/office_action_response.html` (+1 -1)
+- **内容**: 新增 `MECHANISM_ANALYSIS` 常量，7 个 `build_*_prompt` 函数各插入 `{mech}` 占位符；前端 mechanism section 标签改为 i18n 调用
+- **验证**: fmt ✅ / clippy ✅ / test 37 passed ✅ / HTML 扫描 ✅
+
+### T3 一审-二审对比分析 — ✅ 完成（后端，主AI补完测试）
+
+- **Commit**: `aa8d019`（后端）+ `1a07c2e`（主AI补完 CHANGELOG + 15 单元测试）
+- **改动**: `src/routes/oa_diff.rs`（新建 258 行）+ `src/ai/patent.rs` + `templates/office_action_response.html` + `static/i18n.js`
+- **内容**: diff API 端点 + 一审历史上下文注入 prompt + 前端差异对比 UI
+
+### P3-T3 答复质量量化评估 — ✅ 完成
+
+- **Commit**: `5887599`
+- **改动**: `templates/office_action_response.html` (+364) + `src/routes/ai.rs` (+77，其他AI已写) + `src/common.rs` (+8，其他AI已写) + `static/i18n.js` (+90，其他AI已写)
+- **我写的**: `qualityScore()` JS 函数 + `renderRadarChart()` SVG 雷达图 + 评分卡片 UI（总分/等级/6维度进度条/薄弱点/改进建议）+ 修复 defenseAnalysis() 内误插入的按钮 HTML bug
+- **验证**: fmt ✅ / clippy ✅ / test 37 passed ✅ / HTML 扫描 ✅
+
+### 当前状态
+
+全部四个阶段已完成，无分配给 AI-2 的未完成任务。
