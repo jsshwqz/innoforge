@@ -904,3 +904,12 @@
 - `Option::as_str()` 对空字符串返回 `Some("")` 不是 `None`，`or_else` 不会触发
 - 推理模型（glm-5.2）的 `reasoning_content` 是推理过程，不应展示给用户
 - 推理模型需要更大的 `max_tokens`，推理过程可能消耗 10000+ tokens
+
+### [2026-10-04] devspace 502 间歇失败，gitcode 代理通道稳定可用
+
+- **严重程度 / Severity**: LOW（知道方法后秒解）
+- **现象 / Symptom**: `git push devspace main` 返回 502，但同一时刻 `git push gitcode main` 成功。devspace 502 是间歇性，重试或换 gitcode 通道即可。
+- **根因 / Root cause**: devspace 代理（127.0.0.1:9800/git/github/）偶发 502，非代码问题。
+- **解法 / Fix**: 推送优先级：① `git push gitcode main`（最稳定）→ ② `git push devspace main`（重试或稍后）→ ③ `git -c http.proxy= -c https.proxy= push origin main`（GitHub 直连，需认证）。tag 同理。
+- **预防 / Prevention**: 遇 devspace 502 不要停，先试 gitcode；两个 127.0.0.1:9800 代理通道互为备份。
+- **提交 / Commit**: b3bf493
