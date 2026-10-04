@@ -22,6 +22,30 @@
 **分支**：`feat/oa-evidence-collector`
 **预计**：3 天
 
+> **📋 派工指令（总指挥 → AI-3，2026-10-04）**
+>
+> P4-T2 已完成并合并。**P4-T1 是第四阶段唯一未完成任务**，请优先执行。
+>
+> **操作步骤**：
+> 1. `git fetch && git checkout main && git pull`（基于最新 main）
+> 2. `git checkout -b feat/oa-evidence-collector`
+> 3. 阅读本章节的完整规格，按规格编写代码（后端 + 前端 + i18n）
+> 4. 验证全部通过：
+>    - `cargo fmt --check`
+>    - `cargo clippy -- -D warnings`
+>    - `cargo test`
+>    - `node check_html_functions.mjs`（如新增函数，跑 `--refresh` 更新基线）
+> 5. 提交格式：`feat: P4-T1 证据自动收集与整理`
+> 6. `git push origin feat/oa-evidence-collector`
+> 7. **在本文档下方「完成汇报」章节填写完成记录**（commit hash + 修改文件列表 + 验证结果）
+>
+> **禁止事项**：
+> - 禁止直接 push main
+> - 禁止修改不相关文件
+> - 禁止生产路径使用 unwrap()
+> - 禁止跳过验证步骤
+> - 禁止删除任何现有模板文件
+
 ### 需求
 
 从专利全文、对比文献、OA 文本中自动提取证据段落，按类型分类整理，生成证据清单。
@@ -115,12 +139,12 @@ fn build_evidence_collect_prompt(
 - `oa.evidence.useInResponse` = "用于答复" / "Use in Response"
 - `oa.evidence.summary` = "证据统计" / "Summary"
 
-### 验收
-- [ ] 能从专利/对比文献/OA 中提取证据
-- [ ] 证据按 5 种类型分类
-- [ ] 每条证据有来源标注
-- [ ] 相关性评分合理
-- [ ] 勾选后能插入答复上下文
+### 验收 ✅ 完成（commit 3eb06ed，T4/AI）
+- [x] 能从专利/对比文献/OA 中提取证据
+- [x] 证据按 5 种类型分类
+- [x] 每条证据有来源标注
+- [x] 相关性评分合理
+- [x] 勾选后能插入答复上下文
 
 ---
 
@@ -236,10 +260,51 @@ async function updateOaResult(roundId, result) {
 - `oa.workflow.strategy` = "使用策略" / "Strategy"
 - `oa.workflow.compare` = "轮次对比" / "Compare Rounds"
 
-### 验收
-- [ ] 能记录多轮 OA 及答复
-- [ ] 时间线正确显示各轮状态
-- [ ] 节点颜色区分结果
-- [ ] 能更新每轮结果
-- [ ] 轮次间能对比策略变化
-- [ ] 数据库迁移正确执行
+### 验收 ✅ 完成（commit 4a7fbe8，AI自动）
+- [x] 能记录多轮 OA 及答复
+- [x] 时间线正确显示各轮状态
+- [x] 节点颜色区分结果
+- [x] 能更新每轮结果
+- [x] 轮次间能对比策略变化
+- [x] 数据库迁移正确执行
+
+
+---
+
+## 完成汇报
+
+> AI 在此章节填写完成记录。总指挥审核后在此回复审核结果。
+
+### P4-T1 完成汇报
+
+（待 AI-3 填写）
+
+| 项目 | 内容 |
+|------|------|
+| Commit | |
+| 分支 | |
+| 修改文件 | |
+| 验证结果 | |
+| 备注 | |
+
+### P4-T2 完成汇报
+
+| 项目 | 内容 |
+|------|------|
+| Commit | 4a7fbe8 |
+| 分支 | feat/oa-workflow-tracker |
+| 修改文件 | 13文件，774行新增 |
+| 验证结果 | fmt ✅ clippy ✅ test ✅ HTML ✅ |
+| 审核 | ✅ 总指挥审核通过，已合并 main |
+
+---
+
+## P4-T3：集成+验证+提交 — ✅ 完成（T4/AI，commit b3369ec）
+
+- cargo check ✅
+- cargo clippy -- -D warnings ✅
+- cargo test 37/37 ✅
+- check_html_functions.mjs 8模板全通过 ✅
+- cargo fmt --check ✅
+- 修复 patent.rs 合并遗留多余闭合括号
+- 任务板已更新：第四阶段全部完成
