@@ -610,3 +610,21 @@
 2. **性能监控**: 为关键 API 端点添加性能监控和日志
 3. **测试覆盖**: 为 OA 分析模块和文件解析器添加单元测试
 4. **文档补全**: 为 OA 模块前端页面添加使用说明
+
+---
+
+## T4 遗留验证补完记录 (2026-10-03)
+
+**认领人**: IaC Architecture Partner（代替 AI-3 完成遗留验证）
+
+### 修复项
+- **颜色阈值 bug 修复**: `templates/index.html` `renderOaDeadlineReminders()` 颜色逻辑从 `<0 红/<30 黄/>=30 绿` 修正为 `<30 红/<60 黄/>=60 绿`，与任务规格 `<30 天红色，<60 天黄色` 一致
+
+### 验证结果
+- ✅ HTML 函数完整性扫描：8 模板，基线一致
+- ✅ ESLint：0 errors, 5 warnings（已有 no-unused-vars，与 T4 无关）
+- ⏭️ cargo fmt/clippy/test：环境无 Rust，T4 仅改前端，CI 自动检查
+- ⏭️ e2e 测试：环境无 Chrome，CI 自动运行
+
+### 交接文档
+- `docs/plans/2026-10-03-T4-handoff.md` 已创建，含完整验证记录
