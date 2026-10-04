@@ -5,6 +5,27 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 
+## [v0.9.10] - 2026-10-04
+
+### 修复 / Fixed
+- **关键修复：OA 轮次路由冲突导致服务器启动 panic** — GET /api/oa/rounds/:patent_id 与 PUT /api/oa/rounds/:id 路径模式冲突，axum 拒绝注册。PUT 路由改为 /api/oa/rounds/update/:id，前端同步修改。**这是 v0.9.5 无法启动的根因之一**
+- **Critical fix: OA rounds route conflict causing server panic on startup** — axum rejected duplicate path pattern. PUT route changed to /api/oa/rounds/update/:id.
+
+### 新增 / Added
+- **第四阶段全流程追踪与自动化**：P4-T1 证据自动收集 + P4-T2 多轮答复全流程追踪 + P4-T3 最终验证，全部完成
+- **P4-T1 证据自动收集与整理**：新增 POST /api/ai/oa-collect-evidence 端点，从专利全文、对比文献、OA 文本中自动提取证据段落，按 5 种类型分类（说明书支持/区别点/技术效果/现有技术缺陷/实验数据），每条证据标注来源、相关性评分。前端 OA 答复页新增"📁 证据中心"区域
+- **P4-T2 多轮答复全流程追踪**：新增 oa_rounds 数据库表（迁移 v24），记录每轮 OA 的发文、答复、审查结果。新增 4 个 API 端点。前端专利详情页新增 OA 时间线标签页
+- **P4-T3 最终验证**：全量验证通过
+
+### 验证 / Verification
+- cargo fmt ✅ / cargo clippy -D warnings ✅ / cargo test 508 passed ✅
+- HTML 函数完整性扫描 ✅ 8 模板全通过
+- **真实启动测试 ✅** 服务器正常启动，核心 API 响应正常
+- **OA 答复生成测试 ✅** 输入真实 OA 文本，AI 成功生成 3132 字专业答复书
+- **AI 聊天测试 ✅** 对话正常响应
+
+---
+
 ## [v0.9.9] - 2026-10-03
 
 ### 新增 / Added
