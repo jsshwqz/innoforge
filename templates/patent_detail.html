@@ -1033,7 +1033,7 @@
         if (!select) return;
         const result = select.value;
         try {
-            await fetch('/api/oa/rounds/' + encodeURIComponent(roundId), {
+            await fetch('/api/oa/rounds/update/' + encodeURIComponent(roundId), {
                 method: 'PUT',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ result: result })
