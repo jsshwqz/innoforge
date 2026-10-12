@@ -3,6 +3,8 @@ name: Template Hash Check
 # F3: 跨平台模板哈希一致性門禁
 # .gitattributes 已聲明 eol=lf，確保 Windows/Linux 檢出字節相同。
 # 本 workflow 在兩個平台各算一次 SHA256，再比對。
+# 修復：Windows 側 Out-File 默認寫 UTF-16LE 带 BOM，Linux 側 sha256sum 寫 UTF-8，
+# diff 比字節導致恒紅。改用 -Encoding ascii 消除 BOM，compare 側 tr -d '\r' 消除殘留 CRLF。
 
 on:
   push:
@@ -34,8 +36,8 @@ jobs:
           New-Item -ItemType Directory -Path artifact -Force | Out-Null
           $h1 = (Get-FileHash templates/compare.html -Algorithm SHA256).Hash.ToLower()
           $h2 = (Get-FileHash templates/office_action_response.html -Algorithm SHA256).Hash.ToLower()
-          "$h1  templates/compare.html" | Out-File artifact/hashes.txt
-          "$h2  templates/office_action_response.html" | Out-File artifact/hashes.txt -Append
+          "$h1  templates/compare.html" | Out-File artifact/hashes.txt -Encoding ascii
+          "$h2  templates/office_action_response.html" | Out-File artifact/hashes.txt -Append -Encoding ascii
           Get-Content artifact/hashes.txt
 
       - uses: actions/upload-artifact@v4
@@ -54,5 +56,6 @@ jobs:
         run: |
           echo "=== Linux ===" && cat artifacts/hashes-ubuntu-latest/hashes.txt
           echo "=== Windows ===" && cat artifacts/hashes-windows-latest/hashes.txt
-          diff artifacts/hashes-ubuntu-latest/hashes.txt artifacts/hashes-windows-latest/hashes.txt
+          # Normalize CRLF→LF before diffing; Windows Out-File may emit CRLF even with -Encoding ascii
+          diff <(tr -d '\r' < artifacts/hashes-ubuntu-latest/hashes.txt) <(tr -d '\r' < artifacts/hashes-windows-latest/hashes.txt)
           echo "✅ Template hashes match across platforms"
