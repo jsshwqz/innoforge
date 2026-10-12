@@ -1026,7 +1026,6 @@ mod tests {
         assert!(report.warnings.is_empty());
     }
 
-    use super::*;
     use std::path::PathBuf;
 
     fn project_root() -> PathBuf {

@@ -323,7 +323,7 @@ fn template_onclick_functions_must_be_declared() {
     let html_files: Vec<_> = fs::read_dir(&templates_dir)
         .expect("templates/ directory not found")
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map_or(false, |ext| ext == "html"))
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "html"))
         .collect();
 
     assert!(!html_files.is_empty(), "No .html files found in templates/");
@@ -332,6 +332,17 @@ fn template_onclick_functions_must_be_declared() {
     let whitelist: std::collections::HashSet<&str> = CROSS_FILE_WHITELIST.iter().copied().collect();
 
     let mut failures: Vec<String> = Vec::new();
+
+    // Pre-compile regexes outside the loop (clippy::regex_creation_in_loops)
+    let re_function = regex::Regex::new(r"\bfunction\s+(\w+)\s*\(").unwrap();
+    let re_const = regex::Regex::new(r"\b(?:const|let|var)\s+(\w+)\s*=").unwrap();
+    let re_window = regex::Regex::new(r"\bwindow\.(\w+)\s*=").unwrap();
+    let on_attr_re = regex::Regex::new(
+        r#"on(?:click|change|input|keyup|keydown|submit|load|focus|blur)="([^"]*)""#,
+    )
+    .unwrap();
+    let call_re = regex::Regex::new(r"(\w+)\s*\(").unwrap();
+    let inline_re = regex::Regex::new(r#"onclick=['"]?(\w+)\s*\("#).unwrap();
 
     for entry in &html_files {
         let path = entry.path();
@@ -343,36 +354,20 @@ fn template_onclick_functions_must_be_declared() {
         let mut declared: std::collections::HashSet<String> = std::collections::HashSet::new();
 
         // function foo(
-        for cap in regex::Regex::new(r"\bfunction\s+(\w+)\s*\(")
-            .unwrap()
-            .captures_iter(&content)
-        {
+        for cap in re_function.captures_iter(&content) {
             declared.insert(cap[1].to_string());
         }
         // const/let/var foo =
-        for cap in regex::Regex::new(r"\b(?:const|let|var)\s+(\w+)\s*=")
-            .unwrap()
-            .captures_iter(&content)
-        {
+        for cap in re_const.captures_iter(&content) {
             declared.insert(cap[1].to_string());
         }
         // window.foo =
-        for cap in regex::Regex::new(r"\bwindow\.(\w+)\s*=")
-            .unwrap()
-            .captures_iter(&content)
-        {
+        for cap in re_window.captures_iter(&content) {
             declared.insert(cap[1].to_string());
         }
 
         // Collect function calls from on* attributes
         let mut referenced: std::collections::HashSet<String> = std::collections::HashSet::new();
-
-        let on_attr_re = regex::Regex::new(
-            r#"on(?:click|change|input|keyup|keydown|submit|load|focus|blur)="([^"]*)""#,
-        )
-        .unwrap();
-
-        let call_re = regex::Regex::new(r"(\w+)\s*\(").unwrap();
 
         for cap in on_attr_re.captures_iter(&content) {
             let attr_value = &cap[1];
@@ -382,7 +377,6 @@ fn template_onclick_functions_must_be_declared() {
         }
 
         // Also check onclick=foo( patterns in template strings (without quotes)
-        let inline_re = regex::Regex::new(r#"onclick=['"]?(\w+)\s*\("#).unwrap();
         for cap in inline_re.captures_iter(&content) {
             referenced.insert(cap[1].to_string());
         }

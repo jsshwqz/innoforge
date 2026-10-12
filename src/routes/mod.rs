@@ -14,6 +14,8 @@
 //! - [`pages`] — 页面渲染 / Page rendering
 
 mod ai;
+mod audit;
+pub use audit::*;
 mod auth;
 mod cad;
 mod chat;

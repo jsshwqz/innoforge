@@ -112,10 +112,13 @@ pub fn check_citations(oa_text: &str, documents: &[(&str, &str)]) -> CitationChe
 fn extract_citations(stripped: &str) -> Vec<(String, String)> {
     let mut citations = Vec::new();
 
-    // 方式1：引号内容 — 使用 r#"..."# 避免引号转义问题
+    // 方式1：引号内容 — 同时匹配 ASCII " 和中文 \u{201c}\u{201d}
+    // CNIPA 正文使用中文引号“”，纯 ASCII " 正则对真实 OA 文本恒不命中。
     let re_quote = Some(
-        regex::Regex::new(r#"对比文件(\d+)(?:公开|披露|记载|描述)了[^"]*?"([^"]{4,})""#)
-            .expect("citation_check: 对比文件引用提取正则"),
+        regex::Regex::new(
+            r#"对比文件(\d+)(?:公开|披露|记载|描述)了[^"\u{201c}\u{201d}]*?["\u{201c}\u{201d}]([^"\u{201c}\u{201d}]{4,})["\u{201c}\u{201d}]"#,
+        )
+        .expect("citation_check: 对比文件引用提取正则（含中文引号）"),
     );
     if let Some(re) = re_quote {
         for cap in re.captures_iter(stripped) {
@@ -170,13 +173,44 @@ mod tests {
 
     #[test]
     fn citation_matches_original() {
+        // 中文引号“”是 CNIPA 正文的标准引号，正则必须匹配。
         let oa = "对比文件1公开了\u{201c}火焰喷嘴的圆周壁上固定连接有对角安装的电极\u{201d}。";
         let d1 = "一种燃烧器，火焰喷嘴的圆周壁上固定连接有对角安装的电极和下网状电极发生器。";
         let report = check_citations(oa, &[("对比文件1", d1)]);
-        // 注意：去空格后中文引号也会被保留，这里测试引号内容匹配
-        // 如果引号是中文引号，正则中的 " 可能不匹配
-        // 所以也测试方式2
-        assert!(report.citations.len() >= 0);
+        // 正向断言：引号内容被提取且在原文中找到
+        assert_eq!(
+            report.citations.len(),
+            1,
+            "应提取1条引文，实际提取{}条",
+            report.citations.len()
+        );
+        assert!(report.citations[0].found_in_original, "引文应在原文中找到");
+        assert_eq!(report.mismatch_count, 0);
+    }
+
+    #[test]
+    fn citation_chinese_quote_only() {
+        // 反例：只有中文引号，无 ASCII 引号——旧正则恒不命中。
+        let oa = "对比文件2披露了\u{201c}交错排列的电极组件\u{201d}以实现均匀放电。";
+        let d2 = "电极组件交错排列的电极组件用于均匀放电。";
+        let report = check_citations(oa, &[("对比文件2", d2)]);
+        assert_eq!(
+            report.citations.len(),
+            1,
+            "中文引号引文必须被提取，实际提取{}条",
+            report.citations.len()
+        );
+        assert!(report.citations[0].found_in_original);
+    }
+
+    #[test]
+    fn citation_ascii_quote_still_works() {
+        // 回归：ASCII 引号仍应匹配。
+        let oa = "对比文件1公开了\"火焰喷嘴的圆周壁上固定连接有对角安装的电极\"。";
+        let d1 = "一种燃烧器，火焰喷嘴的圆周壁上固定连接有对角安装的电极和下网状电极发生器。";
+        let report = check_citations(oa, &[("对比文件1", d1)]);
+        assert_eq!(report.citations.len(), 1);
+        assert!(report.citations[0].found_in_original);
     }
 
     #[test]
