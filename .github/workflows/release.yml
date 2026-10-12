@@ -68,6 +68,16 @@ jobs:
           grep -Fq "## [${TAG}]" CHANGELOG.md
           git rev-parse --verify "${TAG}^{commit}"
 
+      - name: Checkout tag for guard scan
+        if: steps.extract-tag.outputs.should_run == 'true'
+        run: git checkout "${{ steps.extract-tag.outputs.tag }}"
+      - name: Install Rust stable
+        if: steps.extract-tag.outputs.should_run == 'true'
+        uses: dtolnay/rust-toolchain@stable
+      - name: Case-data guard
+        if: steps.extract-tag.outputs.should_run == 'true'
+        run: cargo test --test no_case_data_in_repo
+
   build:
     name: Build ${{ matrix.target }}
     needs: validate
