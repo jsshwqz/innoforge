@@ -102,19 +102,23 @@ pub fn check_prohibitions(response_text: &str) -> ProhibitionCheckReport {
     }
 
     // 禁令3：禁止使用"公知常识"作为反驳论据
-    if stripped.contains("公知常识") {
-        // 检查是否在反驳语境中使用（"并非公知常识"不算违规）
-        let re = regex::Regex::new(r"(?<!并非)(?<!不是)(?<!不属于)公知常识").ok();
-        if let Some(re) = re {
-            if re.is_match(&stripped) {
-                violations.push(ProhibitionViolation {
-                    rule_id: "P3".into(),
-                    rule_description: "禁止使用'公知常识'作为反驳论据".into(),
-                    violating_text: "公知常识".into(),
-                    severity: ProhibitionSeverity::Warning,
-                });
-            }
-        }
+    //
+    // 历史缺陷：此处原写作后顾断言 `(?<!并非)(?<!不是)(?<!不属于)公知常识`，但 Rust 的
+    // regex crate 不支持 look-around，`Regex::new(...)` 恒返回 Err，`.ok()` 恒为 None，
+    // 于是整条 P3 在运行时从未触发过（旧测试 `not_gongzhichangshi_ok` 只是因为
+    // "永远不触发"才空过）。这里改为等价的字符扫描，并把否定前缀判断显式化。
+    const GZCS_NEEDLE: &str = "公知常识";
+    const GZCS_NEGATIONS: [&str; 3] = ["并非", "不是", "不属于"];
+    let gzcs_violated = stripped
+        .match_indices(GZCS_NEEDLE)
+        .any(|(idx, _)| !GZCS_NEGATIONS.iter().any(|n| stripped[..idx].ends_with(n)));
+    if gzcs_violated {
+        violations.push(ProhibitionViolation {
+            rule_id: "P3".into(),
+            rule_description: "禁止使用'公知常识'作为反驳论据".into(),
+            violating_text: GZCS_NEEDLE.into(),
+            severity: ProhibitionSeverity::Warning,
+        });
     }
 
     // 禁令4：禁止仅否定结论而不提供技术论据
@@ -265,6 +269,30 @@ mod tests {
         let response = "对角安装并非公知常识，因为对比文件均未公开。";
         let report = check_prohibitions(response);
         assert!(!report.violations.iter().any(|v| v.rule_id == "P3"));
+    }
+
+    #[test]
+    fn bare_gongzhichangshi_triggers_p3() {
+        // 反向断言：P3 必须真的会触发。旧实现里正则恒不可编译，这条规则其实是死的，
+        // 只有正向断言才能把它钉住——单靠 not_gongzhichangshi_ok 无法发现。
+        let report = check_prohibitions("该手段属于公知常识，无需进一步说明。");
+        assert!(
+            report.violations.iter().any(|v| v.rule_id == "P3"),
+            "裸用'公知常识'必须触发 P3"
+        );
+    }
+
+    #[test]
+    fn all_negation_prefixes_suppress_p3() {
+        for prefix in ["并非", "不是", "不属于"] {
+            let text = format!("本领域常规{}公知常识。", prefix);
+            let report = check_prohibitions(&text);
+            assert!(
+                !report.violations.iter().any(|v| v.rule_id == "P3"),
+                "'{}公知常识' 不应触发 P3",
+                prefix
+            );
+        }
     }
 
     // ── 示例申请人案回归 ──

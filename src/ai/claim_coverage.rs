@@ -66,10 +66,10 @@ fn extract_evaluated_claims(stripped: &str) -> Vec<usize> {
     let mut claims = std::collections::HashSet::new();
 
     // 匹配 "权利要求N"
-    if let Some(re) = regex::Regex::new(r"权利要求(\d+)").ok() {
+    if let Ok(re) = regex::Regex::new(r"权利要求(\d+)") {
         for cap in re.captures_iter(stripped) {
             if let Some(n) = cap.get(1).and_then(|m| m.as_str().parse().ok()) {
-                if n >= 1 && n <= 30 {
+                if (1..=30).contains(&n) {
                     claims.insert(n);
                 }
             }
@@ -77,10 +77,10 @@ fn extract_evaluated_claims(stripped: &str) -> Vec<usize> {
     }
 
     // 匹配 "权N" 简写
-    if let Some(re) = regex::Regex::new(r"权(\d+)").ok() {
+    if let Ok(re) = regex::Regex::new(r"权(\d+)") {
         for cap in re.captures_iter(stripped) {
             if let Some(n) = cap.get(1).and_then(|m| m.as_str().parse().ok()) {
-                if n >= 1 && n <= 30 {
+                if (1..=30).contains(&n) {
                     claims.insert(n);
                 }
             }

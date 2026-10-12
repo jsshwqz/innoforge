@@ -141,7 +141,7 @@ fn extract_citations(stripped: &str) -> Vec<(String, String)> {
                 .unwrap_or(0);
             let start = cap.get(0).unwrap().end();
             let remaining = &stripped[start..];
-            let end = remaining.find('。').map(|p| p).unwrap_or(200).min(200);
+            let end = remaining.find('。').unwrap_or(200).min(200);
             let quote = safe_slice(remaining, 0, end).to_string();
             if quote.len() >= 4 {
                 let doc_id = format!("对比文件{}", doc_num);

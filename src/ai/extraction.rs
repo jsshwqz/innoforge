@@ -254,7 +254,7 @@ fn extract_ocr(pdf_path: &Path, _n_pages: usize) -> Result<String, ExtractionErr
     let mut png_files: Vec<PathBuf> = std::fs::read_dir(&temp_dir)
         .map_err(|e| ExtractionError::IoError(e.to_string()))?
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map_or(false, |ext| ext == "png"))
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "png"))
         .map(|e| e.path())
         .collect();
     png_files.sort();

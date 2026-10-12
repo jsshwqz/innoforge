@@ -52,10 +52,11 @@ impl ExtractionResult {
     /// 生成风险提示
     pub fn risk_warning(&self) -> Option<String> {
         if !self.method.is_reliable() {
-            Some(format!(
+            Some(
                 "⚠️ OCR_FALLBACK：文本通过 OCR 提取，可能存在字符替换错误。\
                  C1/C2/C11 等计数断言不可信，需人工核对原文。"
-            ))
+                    .to_string(),
+            )
         } else {
             None
         }

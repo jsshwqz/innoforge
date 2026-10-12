@@ -401,14 +401,14 @@ fn extract_key_terms(text: &str, custom_stopwords: &[String]) -> Vec<String> {
                 current.push(c);
             } else {
                 let len = current.chars().count();
-                if len >= 2 && len <= 6 && !terms.contains(&current) {
+                if (2..=6).contains(&len) && !terms.contains(&current) {
                     terms.push(current.clone());
                 }
                 current.clear();
             }
         }
         let len = current.chars().count();
-        if len >= 2 && len <= 6 && !terms.contains(&current) {
+        if (2..=6).contains(&len) && !terms.contains(&current) {
             terms.push(current);
         }
     }
@@ -537,8 +537,8 @@ fn stage_c_rebut_features(
     let claims = input.claims_under_review.clone();
     let features_vec = features.to_vec();
     Box::pin(async move {
-        let graph = build_dependency_graph_with_features(&claims, &features_vec);
-        let mut rebuttals: Vec<FeatureRebuttal> = Vec::new();
+        let _graph = build_dependency_graph_with_features(&claims, &features_vec);
+        let _rebuttals: Vec<FeatureRebuttal> = Vec::new();
         let graph = build_dependency_graph_with_features(&claims, &features_vec);
         let mut rebuttals: Vec<FeatureRebuttal> = Vec::new();
 
@@ -632,6 +632,7 @@ fn stage_c_rebut_features(
 ///
 /// 裁决③：只统计特征词在权利要求原文的共现，不许AI凭空加边。
 /// 两个特征共现 = 它们在权利要求文本的同一从句（顿号/逗号分隔段）中同时出现。
+#[allow(dead_code)] // 占位实现（边表恒空）：依赖图裁决尚未接线，先保留形状不删
 fn build_dependency_graph(claims_text: &str) -> DependencyGraph {
     // 无特征列表时无法建边，返回空图
     let _ = claims_text;
@@ -653,9 +654,7 @@ fn build_dependency_graph_with_features(
     }
 
     // 按逗号、分号、句号切分从句（不按顿号切分——顿号连接的是同组特征）
-    let clauses: Vec<&str> = claims_text
-        .split(|c| c == '，' || c == '；' || c == '。' || c == ',')
-        .collect();
+    let clauses: Vec<&str> = claims_text.split(['，', '；', '。', ',']).collect();
 
     let mut edges = Vec::new();
 
@@ -955,9 +954,7 @@ fn auto_extract_effect_statements(spec_full_text: &str) -> Vec<String> {
         "实现", "避免", "防止", "减少", "降低", "增强", "提升",
     ];
 
-    let sentences: Vec<&str> = spec_full_text
-        .split(|c| c == '。' || c == '；' || c == '\n')
-        .collect();
+    let sentences: Vec<&str> = spec_full_text.split(['。', '；', '\n']).collect();
 
     let mut effects = Vec::new();
     for sent in sentences {
@@ -980,7 +977,6 @@ fn auto_extract_effect_statements(spec_full_text: &str) -> Vec<String> {
 /// 缺陷修复：Stage C 模板中的行连接（\）在 format! 展开后可能残留多余空格，
 /// 此函数在 Stage E 最终输出前调用，确保无连续2个以上空白字符。
 fn collapse_whitespace(s: &str) -> String {
-    use std::fmt::Write;
     let mut result = String::with_capacity(s.len());
     let mut prev_was_space = false;
     for ch in s.chars() {
@@ -1040,7 +1036,7 @@ fn stage_e_assemble(
         } else {
             text.push_str("根因：Stage A 提取到特征但 Stage B/C/D 均未生成论证段，检查 reference_documents 是否匹配。\n");
         }
-        text.push_str("\n");
+        text.push('\n');
     }
     for uc in unsupported_claims {
         text.push_str(&uc.rebuttal_text);

@@ -136,12 +136,13 @@ pub fn check_oa_analysis(ai_output: &str, references: &str, my_patent: &str) -> 
 /// - `reference_pdfs`: 对比文献 PDF 路径列表，每条含 (路径, 公开号, 关键术语列表, 来源注释)
 /// - `my_patent_pdf`: 本专利 PDF 路径（可选，None 则跳过 A33 校验）
 /// - `my_patent_terms`: 本专利关键术语列表（用于 C0 计数记录）
+#[allow(dead_code)] // 入口尚未接线（PDF 直读事实核验路径），保留定义以免能力丢失
 pub fn check_oa_analysis_from_pdfs(
     ai_output: &str,
     reference_pdfs: &[(&std::path::Path, &str, &[&str], &str)],
     my_patent_pdf: Option<(&std::path::Path, &str, &[&str], &str)>,
 ) -> FactCheckReport {
-    use crate::ai::extraction::{extract_pdf, ExtractionMethod};
+    use crate::ai::extraction::extract_pdf;
 
     let mut c0_extractions: Vec<C0ExtractionInfo> = Vec::new();
     let mut references_text = String::new();

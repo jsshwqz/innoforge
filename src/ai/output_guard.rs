@@ -60,9 +60,8 @@ fn extract_publication_numbers(text: &str) -> Vec<String> {
     let mut result = Vec::new();
     let prefixes = ["CN", "US", "EP", "JP", "WO", "KR", "DE", "FR", "GB"];
 
-    let mut i = 0;
     let chars: Vec<(usize, char)> = text.char_indices().collect();
-    for &(ci, c) in &chars {
+    for &(ci, _c) in &chars {
         let two_char: String = text[ci..].chars().take(2).collect();
         if prefixes.contains(&two_char.as_str()) {
             let rest: String = text[ci + 2..]
@@ -76,8 +75,6 @@ fn extract_publication_numbers(text: &str) -> Vec<String> {
                 }
             }
         }
-        let _ = (i, c);
-        i += 1;
     }
     result
 }

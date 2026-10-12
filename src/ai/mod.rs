@@ -25,28 +25,41 @@
 mod adversarial;
 pub mod case_input;
 mod chat;
+#[allow(dead_code)] // 见文件头说明：lib/bin 双份编译，bin 侧尚未触达
 pub mod citation_check;
+#[allow(dead_code)] // 见文件头说明：lib/bin 双份编译，bin 侧尚未触达
 pub mod claim_coverage;
 pub mod client;
 mod evidence;
+#[allow(dead_code)] // 见文件头说明：lib/bin 双份编译，bin 侧尚未触达
 pub mod extraction;
+#[allow(dead_code)] // 见文件头说明：lib/bin 双份编译，bin 侧尚未触达
 pub mod extraction_quality;
 mod fact_check;
+#[allow(dead_code)] // 见文件头说明：lib/bin 双份编译，bin 侧尚未触达
 pub mod feature_attribution;
+#[allow(dead_code)] // 见文件头说明：lib/bin 双份编译，bin 侧尚未触达
 pub mod golden_regression;
 mod idea;
 pub mod output_guard;
+#[allow(dead_code)] // 见文件头说明：lib/bin 双份编译，bin 侧尚未触达
 pub mod paraphrase_check;
 pub mod patent;
+#[allow(dead_code)] // 见文件头说明：lib/bin 双份编译，bin 侧尚未触达
 pub mod pre_submission_check;
 pub mod prohibition_check;
 mod providers;
 pub mod response_pipeline;
+#[allow(dead_code)] // 见文件头说明：lib/bin 双份编译，bin 侧尚未触达
 pub mod search_report;
+#[allow(dead_code)] // 见文件头说明：lib/bin 双份编译，bin 侧尚未触达
 pub mod strategy_arbitration;
+#[allow(dead_code)] // 见文件头说明：lib/bin 双份编译，bin 侧尚未触达
 pub mod targeted_claims;
+#[allow(dead_code)] // 见文件头说明：lib/bin 双份编译，bin 侧尚未触达
 pub mod tech_problem_check;
 mod tests;
+#[allow(dead_code)] // 见文件头说明：lib/bin 双份编译，bin 侧尚未触达
 pub mod whitespace_search;
 pub mod zero_evidence;
 

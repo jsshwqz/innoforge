@@ -58,7 +58,7 @@ fn main() {
         if let Ok(entries) = std::fs::read_dir(templates_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.extension().map_or(false, |e| e == "html") {
+                if path.extension().is_some_and(|e| e == "html") {
                     let filename = path.file_name().unwrap().to_string_lossy().to_string();
                     let sha256 = Command::new("sha256sum")
                         .arg(&path)

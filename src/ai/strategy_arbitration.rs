@@ -159,7 +159,7 @@ fn detect_carrier_incompatible(input: &CaseInput) -> Vec<StrategyItem> {
     let app_field = input.case_meta.applicant.as_str();
     for doc in &input.reference_documents {
         if let Some(field) = &doc.technical_field {
-            if !field.is_empty() && field != &app_field {
+            if !field.is_empty() && field != app_field {
                 items.push(StrategyItem {
                     line: AttackLine::CarrierIncompatible,
                     role: Role::Defense,

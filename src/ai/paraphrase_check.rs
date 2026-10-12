@@ -10,7 +10,7 @@
 //! 4. 若对比文件原文有某术语，但审查员转述中不存在 → 转述遗漏
 
 use crate::ai::whitespace_search::{
-    bidirectional_compare, floor_char_boundary, safe_slice, strip_whitespace, BidirectionalReport,
+    bidirectional_compare, floor_char_boundary, strip_whitespace, BidirectionalReport,
     DistortionKind,
 };
 

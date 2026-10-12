@@ -2732,7 +2732,7 @@ pub async fn api_ai_oa_panel(
     // 每个角色拿到其余三方的立论（truncate_for_ai_internal 12K 字），逐条点名反驳
     let rebuttal_sys_prefix = "你参与了刚才的专利 OA 答复策略讨论。现在你看到其他角色的立论。\n        请对每一方逐条回应：\n        1. 写「反驳 <角色名> <编号>：……」对你不认同的论点逐条点名反驳\n        2. 写「接受 <角色名> <编号>：……」承认被说服的点（如无，明确写「无」）\n        3. 抛出一个决定胜负的关键一问\n        禁止假设材料中未披露的技术特征。请用中文回答。\n\n";
 
-    let examiner_others = format!(
+    let _examiner_others = format!(
         "## 审查员的立论\n{}\n\n## 代理师的立论\n{}\n\n## 技术专家的立论\n{}\n\n## 对方律师的立论\n{}",
         truncate_for_ai_internal(&examiner, ROUND2_MAX_CHARS, "审查员立论"),
         truncate_for_ai_internal(&agent, ROUND2_MAX_CHARS, "代理师立论"),

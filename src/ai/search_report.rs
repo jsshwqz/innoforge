@@ -173,7 +173,7 @@ pub fn parse_dependent_claim_evaluations(oa_text: &str) -> Vec<DependentClaimEva
                 .and_then(|m| m.as_str().parse().ok())
                 .unwrap_or(0);
 
-            if claim_num < 2 || claim_num > 20 {
+            if !(2..=20).contains(&claim_num) {
                 continue;
             }
 

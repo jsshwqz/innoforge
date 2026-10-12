@@ -46,22 +46,14 @@ pub struct PreSubmissionChecklist {
 
 /// 运行递交前检查，返回完整清单
 pub fn run_pre_submission_check(input: &CaseInput, target: TargetSystem) -> PreSubmissionChecklist {
-    let mut items = Vec::new();
-
-    // 1. 申请人类型/证件类型
-    items.push(check_applicant_type(input));
-
-    // 2. 地址省市重复
-    items.push(check_address_dedup(input));
-
-    // 3. 驳回决定发文日
-    items.push(check_oa_date(input));
-
-    // 4. 意见书正文非空
-    items.push(check_opinion_text(input));
-
-    // 5. 附件清单
-    items.push(check_attachment_list(input));
+    // 1-5 为通用检查项，顺序即清单展示顺序
+    let mut items = vec![
+        check_applicant_type(input),
+        check_address_dedup(input),
+        check_oa_date(input),
+        check_opinion_text(input),
+        check_attachment_list(input),
+    ];
 
     // CNIPA 复审额外检查
     if matches!(target, TargetSystem::CnipaReexam) {

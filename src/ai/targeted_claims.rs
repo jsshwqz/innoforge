@@ -108,7 +108,7 @@ fn extract_rejected_claims(stripped: &str) -> Vec<usize> {
                 .and_then(|m| m.as_str().parse().ok())
                 .unwrap_or(0);
             for n in start..=end {
-                if n >= 1 && n <= 30 {
+                if (1..=30).contains(&n) {
                     claims.insert(n);
                 }
             }
@@ -141,7 +141,7 @@ fn extract_maintained_rejections(stripped: &str) -> Vec<usize> {
     for re in [re1, re2].into_iter().flatten() {
         for cap in re.captures_iter(stripped) {
             if let Some(n) = cap.get(1).and_then(|m| m.as_str().parse().ok()) {
-                if n >= 1 && n <= 30 {
+                if (1..=30).contains(&n) {
                     claims.insert(n);
                 }
             }
