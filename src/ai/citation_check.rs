@@ -113,8 +113,10 @@ fn extract_citations(stripped: &str) -> Vec<(String, String)> {
     let mut citations = Vec::new();
 
     // 方式1：引号内容 — 使用 r#"..."# 避免引号转义问题
-    let re_quote =
-        regex::Regex::new(r#"对比文件(\d+)(?:公开|披露|记载|描述)了[^"]*?"([^"]{4,})""#).ok();
+    let re_quote = Some(
+        regex::Regex::new(r#"对比文件(\d+)(?:公开|披露|记载|描述)了[^"]*?"([^"]{4,})""#)
+            .expect("citation_check: 对比文件引用提取正则"),
+    );
     if let Some(re) = re_quote {
         for cap in re.captures_iter(stripped) {
             let doc_num = cap
@@ -132,7 +134,9 @@ fn extract_citations(stripped: &str) -> Vec<(String, String)> {
     }
 
     // 方式2：记载了 + 到句号
-    let re_segment = regex::Regex::new(r"对比文件(\d+)记载了").ok();
+    let re_segment = Some(
+        regex::Regex::new(r"对比文件(\d+)记载了").expect("citation_check: 对比文件段落分割正则"),
+    );
     if let Some(re) = re_segment {
         for cap in re.captures_iter(stripped) {
             let doc_num = cap

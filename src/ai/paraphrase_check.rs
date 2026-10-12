@@ -106,7 +106,10 @@ pub fn extract_paraphrase_segments(oa_text: &str) -> Vec<(String, String)> {
     let stripped = strip_whitespace(oa_text);
     let mut segments = Vec::new();
 
-    let re = regex::Regex::new(r"对比文件(\d+)(公开|披露|记载|描述)了").ok();
+    let re = Some(
+        regex::Regex::new(r"对比文件(\d+)(公开|披露|记载|描述)了")
+            .expect("paraphrase_check: 对比文件转述匹配正则"),
+    );
     if let Some(re) = re {
         for cap in re.captures_iter(&stripped) {
             let doc_num = cap

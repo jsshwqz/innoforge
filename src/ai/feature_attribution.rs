@@ -118,7 +118,10 @@ fn find_claimed_source(stripped: &str, feature: &str) -> String {
     let feature_stripped = strip_whitespace(feature);
 
     // 方式1："对比文件N...公开了...特征X"
-    let re1 = regex::Regex::new(r"对比文件(\d+)[^。]*?(?:公开|披露|记载|描述)[^。]*?").ok();
+    let re1 = Some(
+        regex::Regex::new(r"对比文件(\d+)[^。]*?(?:公开|披露|记载|描述)[^。]*?")
+            .expect("feature_attribution: 对比文件特征归属正则1"),
+    );
     if let Some(re) = re1 {
         for cap in re.captures_iter(stripped) {
             let match_end = cap.get(0).unwrap().end();
@@ -140,7 +143,10 @@ fn find_claimed_source(stripped: &str, feature: &str) -> String {
 
         // 在上下文中找最近的"对比文件N"
         let ctx = safe_slice(stripped, ctx_start, ctx_end);
-        let re2 = regex::Regex::new(r"对比文件(\d+)").ok();
+        let re2 = Some(
+            regex::Regex::new(r"对比文件(\d+)")
+                .expect("feature_attribution: 对比文件编号提取正则2"),
+        );
         if let Some(re) = re2 {
             if let Some(cap) = re.captures(ctx) {
                 let n = cap

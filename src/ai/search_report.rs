@@ -165,7 +165,9 @@ pub fn parse_dependent_claim_evaluations(oa_text: &str) -> Vec<DependentClaimEva
     let mut evaluations = Vec::new();
 
     // 匹配 "对于权利要求N" 或 "权利要求N"
-    let re = regex::Regex::new(r"权利要求(\d+)[，,]").ok();
+    let re = Some(
+        regex::Regex::new(r"权利要求(\d+)[，,]").expect("search_report: 权利要求编号提取正则"),
+    );
     if let Some(re) = re {
         for cap in re.captures_iter(&stripped) {
             let claim_num: usize = cap
@@ -287,7 +289,8 @@ fn extract_serial(stripped: &str) -> Option<String> {
 
 fn extract_date(stripped: &str) -> Option<String> {
     // 匹配 "YYYY年M月D日" 格式
-    let re = regex::Regex::new(r"(\d{4}年\d{1,2}月\d{1,2}日)").ok()?;
+    let re =
+        regex::Regex::new(r"(\d{4}年\d{1,2}月\d{1,2}日)").expect("search_report: 日期提取正则");
     re.captures(stripped)
         .and_then(|cap| cap.get(1).map(|m| m.as_str().to_string()))
 }

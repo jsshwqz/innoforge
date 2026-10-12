@@ -80,7 +80,8 @@ pub fn check_prohibitions(response_text: &str) -> ProhibitionCheckReport {
     }
 
     // 禁令2：禁止放弃权项未标注理由
-    let re_abandon = regex::Regex::new(r"放弃权利要求(\d+)").ok();
+    let re_abandon =
+        Some(regex::Regex::new(r"放弃权利要求(\d+)").expect("prohibition_check: 放弃权利要求正则"));
     if let Some(re) = re_abandon {
         for cap in re.captures_iter(&stripped) {
             let claim_num = cap
