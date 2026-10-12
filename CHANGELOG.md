@@ -9,6 +9,26 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 _暂无条目。_
 
 ---
+## [v0.9.13] - 2026-10-13
+
+### 修复 / Fixed
+- **12 个审计模块接线**：POST /api/ai/audit-checks 端点接入全部审计模块
+- **8 处 Regex 静默失败改为显式 panic**：`.ok()` → `.expect()`，正则编译失败不再被吞
+- **修恒真断言与中文引号不匹配的引文正则**
+- **模板哈希 compare 恒红修复**：Out-File UTF-16LE BOM 导致比较永远失败，修复编码并加负向验证
+- **release 工作流改为仅由 tag 触发**
+
+### 新增 / Added
+- **494 条 sha256 摘要的长句守卫**：tests/no_case_data_in_repo.rs 内嵌 494 条案件长句的 sha256 摘要，按 12 字滑窗扫描 git ls-files 全树，命中即 panic
+- **guard-tag 工作流**：push tags v* 与 workflow_dispatch 触发，overlay main 守卫文件后扫描目标 ref，不构建不上传
+- **release validate 卡守卫**：release.yml 的 validate job 在构建前跑守卫测试，命中即阻止发版
+- **Cargo.lock 入库**
+- **.gitattributes 声明 eol=lf**
+
+### 验证 / Verification
+- cargo fmt ✅ / cargo clippy --all-targets -D warnings ✅ / cargo test ✅
+
+---
 ## [v0.9.11] - 2026-10-04
 
 ### 新增 / Added
