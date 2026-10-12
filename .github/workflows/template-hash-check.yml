@@ -1,0 +1,58 @@
+name: Template Hash Check
+
+# F3: 跨平台模板哈希一致性門禁
+# .gitattributes 已聲明 eol=lf，確保 Windows/Linux 檢出字節相同。
+# 本 workflow 在兩個平台各算一次 SHA256，再比對。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  compute:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute hashes (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p artifact
+          sha256sum templates/compare.html templates/office_action_response.html > artifact/hashes.txt
+          cat artifact/hashes.txt
+
+      - name: Compute hashes (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path artifact -Force | Out-Null
+          $h1 = (Get-FileHash templates/compare.html -Algorithm SHA256).Hash.ToLower()
+          $h2 = (Get-FileHash templates/office_action_response.html -Algorithm SHA256).Hash.ToLower()
+          "$h1  templates/compare.html" | Out-File artifact/hashes.txt
+          "$h2  templates/office_action_response.html" | Out-File artifact/hashes.txt -Append
+          Get-Content artifact/hashes.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hashes-${{ matrix.os }}
+          path: artifact/hashes.txt
+
+  compare:
+    needs: compute
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Compare hashes
+        run: |
+          echo "=== Linux ===" && cat artifacts/hashes-ubuntu-latest/hashes.txt
+          echo "=== Windows ===" && cat artifacts/hashes-windows-latest/hashes.txt
+          diff artifacts/hashes-ubuntu-latest/hashes.txt artifacts/hashes-windows-latest/hashes.txt
+          echo "✅ Template hashes match across platforms"
