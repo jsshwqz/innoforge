@@ -112,6 +112,13 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ### 修复 / Fixed
 - §3.3 OCR 异步化 — spawn_blocking 避免阻塞 Tokio 运行时
+- **Windows 构建下 `/api/version` 的模板哈希不可用**：`build.rs` 把 `templates\x.html` 这种带反斜杠的路径交给 GNU `sha256sum`，而后者对含反斜杠的文件名会在整行输出前加 `\` 作转义，于是取到的"哈希"是 65 字符脏串（形如 `\70fec…`）。后果是"用模板 sha256 认部署版本"这一用法在 Windows 产物上永远判不一致。现统一以正斜杠传参、并对 token 强制 64 位小写十六进制校验（不合规时打 `cargo:warning` 并记 `unknown`，不再静默接受）。新增测试 `version_template_hashes_are_clean_sha256`；已做反向对照验证——把 `build.rs` 退回旧写法后该测试红（报 `len=65`），修复后绿。
+- **禁令 P3 从未触发过**：`src/ai/prohibition_check.rs` 原用 `(?<!并非)(?<!不是)(?<!不属于)公知常识`，而 Rust 的 regex 不支持 look-around，`Regex::new(...)` 恒返回 Err → 规则恒不触发。既有测试只断言"不应触发"，恒不触发也能空过，因此缺陷长期不可见。改为等价的字符扫描（`match_indices` + 否定前缀判定），并补 `bare_gongzhichangshi_triggers_p3`（正向必须触发）与 `all_negation_prefixes_suppress_p3`（三个否定词各自豁免）。
+- **CI 门禁清零，且未降低强度**：`cargo fmt --check` 在原树有 61 处漂移；`cargo clippy -- -D warnings` 有 89 处 `dead_code`，根因是 `src/main.rs` 与 `src/lib.rs` 各自声明整棵 `mod` 树、同一份代码编译两次。后者按模块在 `src/ai/mod.rs` 逐条 `#[allow(dead_code)]` 并注明原因，使"尚未接线"仍是代码里可读可数的清单，而不是被静音消失。
+- **干净检出跑不动测试**：隐私守卫 `tests/no_case_data_in_repo.rs` 在没有 `.git` 的源码包上直接 panic（`git ls-files failed`），现回退为整树遍历并显式打印扫描方式与文件数（拒绝"拿不到清单就当满分"）；`tests/test_presubmit_r7.rs` 写入未创建的 `data/uploads/` 导致崩溃，现先 `create_dir_all`。实测全量：1393 passed / 0 failed / 42 ignored。
+
+### 文档 / Docs
+- 发布面对齐现实（多处"照说明走会失败"）：可执行名统一为 `innoforge-server`；删除不存在的 `start.sh`、未随包提供的 `start.bat` 说法、无构建产物的 Android APK、从未发布的 Docker Hub 镜像；`Dockerfile` 补齐编译期必需的 `build.rs` 与 `templates/static`（原写法编译不过）并改正 bin 名；AI 服务商清单按 `templates/settings.html` 实际内置的 9 个预设重写（删除代码中不存在的 NVIDIA/Ollama 与无法核实的收费断言）；监听地址如实写为 `0.0.0.0:3000` 且无鉴权，并提示勿裸暴露公网；流水线步数按 `PipelineStep::TOTAL_STEPS` 改为 16 步；移除 gitee 镜像入口与三个尚不存在的关联仓库链接；新增「已知限制」（图表依赖 jsDelivr CDN，离线不渲染）。
 
 ---
 

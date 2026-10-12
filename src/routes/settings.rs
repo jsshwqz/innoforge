@@ -848,6 +848,34 @@ mod serpapi_key_parsing_tests {
             ]
         );
     }
+
+    /// `/api/version` 公布的模板哈希必须是干净的 64 位小写十六进制。
+    /// 构建环境没有 sha256sum 时允许字面量 `unknown`，但不接受被转义符污染的形状——
+    /// Windows 下 `templates\x.html` 会让 GNU sha256sum 在整行前加 `\`，
+    /// 使哈希变成 65 字符脏串，任何"等值比对识别部署版本"的用法都会静默失效。
+    #[test]
+    fn version_template_hashes_are_clean_sha256() {
+        let cases = [
+            (
+                "office_action_response.html",
+                env!("TEMPLATE_SHA256_OFFICE_ACTION_RESPONSE_HTML"),
+            ),
+            ("compare.html", env!("TEMPLATE_SHA256_COMPARE_HTML")),
+        ];
+        for (name, sha) in cases {
+            let clean = sha == "unknown"
+                || (sha.len() == 64
+                    && sha
+                        .chars()
+                        .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)));
+            assert!(
+                clean,
+                "{} 的模板哈希形状非法（len={}），疑似被转义前缀污染",
+                name,
+                sha.len()
+            );
+        }
+    }
 }
 
 /// MA5a：设置页 EPO OPS 凭证位的后端侧取证。

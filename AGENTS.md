@@ -272,7 +272,11 @@ docs/          # 文档和规划
 3. **禁止 `git add -A` / `git add .`**，只允许显式列文件路径（防止误推 data/ 下用户数据到公网）。
 4. **部署完必须跑一遍页内按钮接线检查**（`typeof window[每个 on* 函数名] === 'function'`），因为旧函数把后面声明吞进局部作用域的 bug，cargo check / 构建 / 静态扫描全部发现不了。
 5. **改 `templates/*.html` 里的 JS 禁用 `sed`**，用 `python3` 或编辑器改（sed 对引号/转义/多行处理不可靠）。
-只允许推 devspace（→GitHub）的 main/dev。gitee、gitcode 一律禁止推送、禁止添加或使用这两个 remote、禁止重建镜像。原因：gitee 镜像内容级实测 main@fc102f0 仍含申请人姓名与案号，项目正在转私有，任何再次推送都会把脏历史放回公开面。
+6. **推送纪律**：只允许推 `jsshwqz/innoforge`（GitHub，`https://github.com/jsshwqz/innoforge`）的 `main` / `dev`。gitee、gitcode 一律禁止推送、禁止添加或使用这两个 remote、禁止重建镜像。
+   - **禁"新分支"比禁"禁推的远端"更要紧**：本仓是从 `innoforge-legacy` 全新重建的孤立历史（331 文件、无旧提交）。把 legacy（或任何带旧历史的克隆）的历史推到这里，等于把案件专有信息重新放回公开面——`push main` 会因 non-fast-forward 被拒，但 `push dev`、`push feature/*`、`push` 任何 legacy 分支都会被当作**新分支接受**。
+   - 因此：任何机器上的克隆在推送前必须先确认 `git log --oneline origin/main -1` 与本地历史的祖先后关系成立（`git merge-base --is-ancestor`）；不允许把旧仓库的 remote URL 原样指过来（改名后用同名新建仓库会使 `github.com/jsshwqz/innoforge` 的旧重定向**失效**，该 URL 现在就指向本公开仓）。云端 `/root/innoforge` 这类旧克隆应先 `git remote set-url --push origin no-push` 断写，再把 fetch URL 改指 `innoforge-legacy`。
+   - 禁止 force-push，禁止以 rebase/squash 名义重写已推送历史。
+   - 原因（事实依据）：gitee 镜像内容级实测 `main@fc102f0` 仍含申请人姓名与案号，任何再次推送都会把脏历史放回公开面。
 
 ## 案件数据一票否决 / Case Data Veto
 

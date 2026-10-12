@@ -60,22 +60,39 @@ fn main() {
                 let path = entry.path();
                 if path.extension().is_some_and(|e| e == "html") {
                     let filename = path.file_name().unwrap().to_string_lossy().to_string();
+                    // Windows 上 entry.path() 形如 `templates\compare.html`。GNU sha256sum
+                    // 对含反斜杠的文件名会在**整行输出开头**加一个 `\` 作为转义标记，于是
+                    // split_whitespace().next() 取到的是 `\7bf0…` 这种 65 字符脏串——
+                    // 结果是 Windows 构建出的二进制里 /api/version 报的模板哈希永远无法与
+                    // 真实文件相等（Linux 构建因用 `/` 分隔符而不受影响）。
+                    // 这里统一用正斜杠传参，并对取到的 token 做 64 位小写十六进制校验。
+                    let arg = path.to_string_lossy().replace('\\', "/");
                     let sha256 = Command::new("sha256sum")
-                        .arg(&path)
+                        .arg(&arg)
                         .output()
                         .ok()
                         .and_then(|o| {
                             if o.status.success() {
                                 let stdout = String::from_utf8_lossy(&o.stdout);
                                 // sha256sum output: "<hash>  <filename>"
-                                Some(
-                                    stdout
-                                        .split_whitespace()
-                                        .next()
-                                        .unwrap_or("unknown")
-                                        .to_string(),
-                                )
+                                let token = stdout.split_whitespace().next().unwrap_or("");
+                                let token = token.strip_prefix('\\').unwrap_or(token);
+                                let is_hex64 = token.len() == 64
+                                    && token
+                                        .chars()
+                                        .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c));
+                                if is_hex64 {
+                                    Some(token.to_string())
+                                } else {
+                                    println!(
+                                        "cargo:warning=sha256sum 对 {} 的输出不是 64 位小写十六进制，已记为 unknown（原始 token 长度 {}）",
+                                        filename,
+                                        token.len()
+                                    );
+                                    None
+                                }
                             } else {
+                                println!("cargo:warning=sha256sum 执行失败，模板哈希记为 unknown：{}", filename);
                                 None
                             }
                         })
