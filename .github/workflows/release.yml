@@ -71,6 +71,18 @@ jobs:
       - name: Checkout tag for guard scan
         if: steps.extract-tag.outputs.should_run == 'true'
         run: git checkout "${{ steps.extract-tag.outputs.tag }}"
+      - name: Overlay main guard
+        if: steps.extract-tag.outputs.should_run == 'true'
+        run: |
+          git fetch origin main
+          git show FETCH_HEAD:tests/no_case_data_in_repo.rs > tests/no_case_data_in_repo.rs
+          if ! grep -q 'sha2' Cargo.toml; then
+            if grep -q '\[dev-dependencies\]' Cargo.toml; then
+              sed -i '/\[dev-dependencies\]/a sha2 = "0.10"' Cargo.toml
+            else
+              printf '\n[dev-dependencies]\nsha2 = "0.10"\n' >> Cargo.toml
+            fi
+          fi
       - name: Install Rust stable
         if: steps.extract-tag.outputs.should_run == 'true'
         uses: dtolnay/rust-toolchain@stable
