@@ -55,8 +55,7 @@ fn sanitize_filename_component(raw: &str) -> String {
         .filter(|c| {
             // 保留：字母、数字、CJK、常见标点
             // 剥掉：路径分隔符 / \ 、控制字符、null
-            !matches!(c, '/' | '\\' | '\0' | '\n' | '\r' | '\t')
-                && !c.is_control()
+            !matches!(c, '/' | '\\' | '\0' | '\n' | '\r' | '\t') && !c.is_control()
         })
         .collect::<String>()
         .trim()
@@ -104,7 +103,13 @@ fn days_to_ymd(days: i64) -> (i64, i64, i64) {
 /// ASCII 回退文件名：非 ASCII 字符替换为 _
 fn ascii_fallback(name: &str) -> String {
     name.chars()
-        .map(|c| if c.is_ascii() && !c.is_control() { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii() && !c.is_control() {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
@@ -139,8 +144,7 @@ fn display_path(p: &StdPath) -> String {
 fn ensure_export_dir() -> Result<std::path::PathBuf, String> {
     let dir = StdPath::new(EXPORT_DIR);
     if !dir.exists() {
-        fs::create_dir_all(dir)
-            .map_err(|e| format!("创建导出目录失败: {}", e))?;
+        fs::create_dir_all(dir).map_err(|e| format!("创建导出目录失败: {}", e))?;
     }
     let canonical = dir
         .canonicalize()
@@ -158,16 +162,22 @@ fn oa_export_post_logic(req: &serde_json::Value) -> (StatusCode, serde_json::Val
 
     // 扩展名白名单检查
     if !ALLOWED_EXTS.contains(&ext.as_str()) {
-        return (StatusCode::BAD_REQUEST, json!({
-            "status": "error",
-            "error": format!("不允许的扩展名: {}，仅支持: {}", ext, ALLOWED_EXTS.join(", "))
-        }));
+        return (
+            StatusCode::BAD_REQUEST,
+            json!({
+                "status": "error",
+                "error": format!("不允许的扩展名: {}，仅支持: {}", ext, ALLOWED_EXTS.join(", "))
+            }),
+        );
     }
 
     // 获取内容：优先 text 字段，其次 binary(base64)
     let (content_bytes, char_count) = if let Some(binary_b64) = req["binary"].as_str() {
         if binary_b64.is_empty() {
-            return (StatusCode::BAD_REQUEST, json!({ "status": "error", "error": "内容为空" }));
+            return (
+                StatusCode::BAD_REQUEST,
+                json!({ "status": "error", "error": "内容为空" }),
+            );
         }
         let decoded = base64::engine::general_purpose::STANDARD
             .decode(binary_b64)
@@ -175,54 +185,86 @@ fn oa_export_post_logic(req: &serde_json::Value) -> (StatusCode, serde_json::Val
         match decoded {
             Ok(bytes) => {
                 if bytes.len() > BINARY_MAX_BYTES {
-                    return (StatusCode::BAD_REQUEST, json!({
-                        "status": "error",
-                        "error": format!("文件过大: {} 字节，上限 {} 字节", bytes.len(), BINARY_MAX_BYTES)
-                    }));
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        json!({
+                            "status": "error",
+                            "error": format!("文件过大: {} 字节，上限 {} 字节", bytes.len(), BINARY_MAX_BYTES)
+                        }),
+                    );
                 }
                 let chars = String::from_utf8_lossy(&bytes).chars().count();
                 (bytes, chars)
             }
-            Err(e) => return (StatusCode::BAD_REQUEST, json!({ "status": "error", "error": e })),
+            Err(e) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    json!({ "status": "error", "error": e }),
+                )
+            }
         }
     } else {
         let text = req["content"].as_str().unwrap_or("");
         if text.is_empty() {
-            return (StatusCode::BAD_REQUEST, json!({ "status": "error", "error": "内容为空" }));
+            return (
+                StatusCode::BAD_REQUEST,
+                json!({ "status": "error", "error": "内容为空" }),
+            );
         }
         let chars = text.chars().count();
         if is_text_ext(&ext) && chars > TEXT_MAX_CHARS {
-            return (StatusCode::BAD_REQUEST, json!({
-                "status": "error",
-                "error": format!("文本过长: {} 字，上限 {} 字", chars, TEXT_MAX_CHARS)
-            }));
+            return (
+                StatusCode::BAD_REQUEST,
+                json!({
+                    "status": "error",
+                    "error": format!("文本过长: {} 字，上限 {} 字", chars, TEXT_MAX_CHARS)
+                }),
+            );
         }
         if text.len() > BINARY_MAX_BYTES {
-            return (StatusCode::BAD_REQUEST, json!({
-                "status": "error",
-                "error": format!("内容过大: {} 字节，上限 {} 字节", text.len(), BINARY_MAX_BYTES)
-            }));
+            return (
+                StatusCode::BAD_REQUEST,
+                json!({
+                    "status": "error",
+                    "error": format!("内容过大: {} 字节，上限 {} 字节", text.len(), BINARY_MAX_BYTES)
+                }),
+            );
         }
         (text.as_bytes().to_vec(), chars)
     };
 
     // 清洗文件名主干
     let stem = sanitize_filename_component(raw_filename);
-    let stem = if stem.is_empty() { "OA分析报告".to_string() } else { stem };
+    let stem = if stem.is_empty() {
+        "OA分析报告".to_string()
+    } else {
+        stem
+    };
 
     // 组装最终文件名: <主干>_<时间戳>.<ext>
     let ts = timestamp_suffix();
     let final_filename = format!("{}_{}.{}", stem, ts, ext);
 
     // 路径穿越检查：文件名中不得包含 .. / \
-    if final_filename.contains("..") || final_filename.contains('/') || final_filename.contains('\\') {
-        return (StatusCode::BAD_REQUEST, json!({ "status": "error", "error": "文件名包含非法字符" }));
+    if final_filename.contains("..")
+        || final_filename.contains('/')
+        || final_filename.contains('\\')
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            json!({ "status": "error", "error": "文件名包含非法字符" }),
+        );
     }
 
     // 确保导出目录存在
     let export_dir = match ensure_export_dir() {
         Ok(d) => d,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, json!({ "status": "error", "error": e })),
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                json!({ "status": "error", "error": e }),
+            )
+        }
     };
 
     // 最终路径
@@ -232,27 +274,36 @@ fn oa_export_post_logic(req: &serde_json::Value) -> (StatusCode, serde_json::Val
     let parent_dir = file_path.parent().unwrap_or(&export_dir);
     if let Ok(canonical_parent) = parent_dir.canonicalize() {
         if !canonical_parent.starts_with(&export_dir) {
-            return (StatusCode::BAD_REQUEST, json!({ "status": "error", "error": "路径穿越检测失败" }));
+            return (
+                StatusCode::BAD_REQUEST,
+                json!({ "status": "error", "error": "路径穿越检测失败" }),
+            );
         }
     }
 
     // 落盘
     if let Err(e) = fs::write(&file_path, &content_bytes) {
-        return (StatusCode::INTERNAL_SERVER_ERROR, json!({ "status": "error", "error": format!("写入文件失败: {}", e) }));
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            json!({ "status": "error", "error": format!("写入文件失败: {}", e) }),
+        );
     }
 
     let abs_path = display_path(&file_path);
     let byte_count = content_bytes.len();
     let url = format!("/api/oa/export/{}", final_filename);
 
-    (StatusCode::OK, json!({
-        "status": "ok",
-        "filename": final_filename,
-        "url": url,
-        "path": abs_path,
-        "bytes": byte_count,
-        "chars": char_count
-    }))
+    (
+        StatusCode::OK,
+        json!({
+            "status": "ok",
+            "filename": final_filename,
+            "url": url,
+            "path": abs_path,
+            "bytes": byte_count,
+            "chars": char_count
+        }),
+    )
 }
 
 /// POST /api/oa/export
@@ -276,11 +327,7 @@ pub async fn api_oa_export_get(
 ) -> Response {
     // 路径穿越检查
     if filename.contains("..") || filename.contains('/') || filename.contains('\\') {
-        return (
-            StatusCode::BAD_REQUEST,
-            "非法文件名 / Invalid filename",
-        )
-            .into_response();
+        return (StatusCode::BAD_REQUEST, "非法文件名 / Invalid filename").into_response();
     }
 
     // 提取扩展名
@@ -323,11 +370,7 @@ pub async fn api_oa_export_get(
             }
         }
         Err(_) => {
-            return (
-                StatusCode::NOT_FOUND,
-                "文件不存在 / File not found",
-            )
-                .into_response();
+            return (StatusCode::NOT_FOUND, "文件不存在 / File not found").into_response();
         }
     }
 
@@ -335,11 +378,7 @@ pub async fn api_oa_export_get(
     let file_bytes = match fs::read(&file_path) {
         Ok(b) => b,
         Err(_) => {
-            return (
-                StatusCode::NOT_FOUND,
-                "文件不存在 / File not found",
-            )
-                .into_response();
+            return (StatusCode::NOT_FOUND, "文件不存在 / File not found").into_response();
         }
     };
 
@@ -360,9 +399,8 @@ pub async fn api_oa_export_get(
     );
     headers.insert(
         header::CONTENT_DISPOSITION,
-        HeaderValue::from_str(&disposition).unwrap_or_else(|_| {
-            HeaderValue::from_str("attachment").unwrap()
-        }),
+        HeaderValue::from_str(&disposition)
+            .unwrap_or_else(|_| HeaderValue::from_str("attachment").unwrap()),
     );
     headers.insert(
         header::CONTENT_LENGTH,
@@ -392,7 +430,10 @@ mod tests {
     fn test_content_type() {
         assert_eq!(content_type_for_ext("md"), "text/markdown; charset=utf-8");
         assert_eq!(content_type_for_ext("pdf"), "application/pdf");
-        assert_eq!(content_type_for_ext("docx"), "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+        assert_eq!(
+            content_type_for_ext("docx"),
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        );
         assert_eq!(content_type_for_ext("unknown"), "application/octet-stream");
     }
 
@@ -448,6 +489,10 @@ mod tests {
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(body["status"], "error");
         let err = body["error"].as_str().unwrap_or("");
-        assert!(err.contains("文件名包含非法字符"), "error should contain 文件名包含非法字符, got: {}", err);
+        assert!(
+            err.contains("文件名包含非法字符"),
+            "error should contain 文件名包含非法字符, got: {}",
+            err
+        );
     }
 }

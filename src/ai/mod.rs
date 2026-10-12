@@ -61,7 +61,9 @@ pub(crate) use client::{
     OA_RESPONSE_OA_MAX_CHARS,
 };
 #[allow(unused_imports)]
-pub use client::{safe_truncate_chars, truncate_for_ai, truncate_for_ai_internal, AiClient, AiUsageInfo, Message};
+pub use client::{
+    safe_truncate_chars, truncate_for_ai, truncate_for_ai_internal, AiClient, AiUsageInfo, Message,
+};
 #[allow(unused_imports)]
 pub use evidence::{collect_evidence, Evidence, EvidenceType};
 #[allow(unused_imports)]

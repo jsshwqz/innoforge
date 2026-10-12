@@ -1,9 +1,9 @@
 use super::{image_data_uri, AppState};
 use crate::ai::{
     check_oa_analysis, format_report, oa_capacity_error, patent::extract_publication_numbers,
-    truncate_for_ai, truncate_for_ai_internal, Message, OA_DISCUSSION_ANALYSIS_MAX_CHARS, OA_DISCUSSION_HISTORY_MAX_CHARS,
-    OA_DISCUSSION_OA_MAX_CHARS, OA_RESPONSE_ANALYSIS_MAX_CHARS, OA_RESPONSE_DISCUSSION_MAX_CHARS,
-    OA_RESPONSE_OA_MAX_CHARS,
+    truncate_for_ai, truncate_for_ai_internal, Message, OA_DISCUSSION_ANALYSIS_MAX_CHARS,
+    OA_DISCUSSION_HISTORY_MAX_CHARS, OA_DISCUSSION_OA_MAX_CHARS, OA_RESPONSE_ANALYSIS_MAX_CHARS,
+    OA_RESPONSE_DISCUSSION_MAX_CHARS, OA_RESPONSE_OA_MAX_CHARS,
 };
 use crate::patent::*;
 use axum::{
@@ -2765,10 +2765,22 @@ pub async fn api_ai_oa_panel(
         truncate_for_ai_internal(&expert, ROUND2_MAX_CHARS, "技术专家立论")
     );
 
-    let examiner_rebuttal_sys = format!("{}你是审查员，请针对其他三方的论点进行反驳。", rebuttal_sys_prefix);
-    let agent_rebuttal_sys = format!("{}你是代理师，请针对其他三方的论点进行反驳。", rebuttal_sys_prefix);
-    let expert_rebuttal_sys = format!("{}你是技术专家，请针对其他三方的论点进行反驳。", rebuttal_sys_prefix);
-    let opponent_rebuttal_sys = format!("{}你是对方律师，请针对其他三方的论点进行反驳。", rebuttal_sys_prefix);
+    let examiner_rebuttal_sys = format!(
+        "{}你是审查员，请针对其他三方的论点进行反驳。",
+        rebuttal_sys_prefix
+    );
+    let agent_rebuttal_sys = format!(
+        "{}你是代理师，请针对其他三方的论点进行反驳。",
+        rebuttal_sys_prefix
+    );
+    let expert_rebuttal_sys = format!(
+        "{}你是技术专家，请针对其他三方的论点进行反驳。",
+        rebuttal_sys_prefix
+    );
+    let opponent_rebuttal_sys = format!(
+        "{}你是对方律师，请针对其他三方的论点进行反驳。",
+        rebuttal_sys_prefix
+    );
 
     let (ex_rebuttal, ag_rebuttal, expt_rebuttal, opp_rebuttal) = tokio::join!(
         ai.chat_with_system(&examiner_rebuttal_sys, &examiner_rebuttal_input, 0.7),

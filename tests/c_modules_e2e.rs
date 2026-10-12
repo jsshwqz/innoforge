@@ -21,8 +21,7 @@ const OA_FIRST_NOTICE: &str = include_str!("../tests/fixtures/oa_sample/oa_first
 const D1: &str = include_str!("../tests/fixtures/oa_sample/d1_sample.txt");
 const D2: &str = include_str!("../tests/fixtures/oa_sample/d2_sample.txt");
 const D3: &str = include_str!("../tests/fixtures/oa_sample/d3_sample.txt");
-const SUBMITTED_CLAIMS: &str =
-    include_str!("../tests/fixtures/oa_sample/submitted_claims.txt");
+const SUBMITTED_CLAIMS: &str = include_str!("../tests/fixtures/oa_sample/submitted_claims.txt");
 const GOLDEN_REF: &str = include_str!("../tests/fixtures/oa_sample/golden_reference.txt");
 
 const KEY_FEATURES: &[&str] = &[

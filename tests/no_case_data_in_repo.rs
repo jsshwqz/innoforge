@@ -26,9 +26,7 @@ fn forbidden_name_cn() -> String {
 /// 申请人姓名拼音形态：用字符数组逐字符拼接构造。
 /// 守卫文件自身不含此拼音字面量。
 fn forbidden_name_pinyin() -> String {
-    let chars: [char; 11] = [
-        'w', 'a', 'n', 'g', 'q', 'i', 'n', 'g', 'z', 'h', 'i',
-    ];
+    let chars: [char; 11] = ['w', 'a', 'n', 'g', 'q', 'i', 'n', 'g', 'z', 'h', 'i'];
     chars.iter().collect()
 }
 
@@ -178,7 +176,9 @@ fn collect_files() -> (Vec<String>, &'static str) {
     let mut files: Vec<String> = Vec::new();
     let mut stack = vec![root.clone()];
     while let Some(dir) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
         for entry in entries.flatten() {
             let path = entry.path();
             let name = entry.file_name().to_string_lossy().to_string();
@@ -242,7 +242,9 @@ fn no_case_data_in_git_tracked_files() {
 
     eprintln!(
         "案件数据守卫：扫描方式={}，{} 个文件内容 + {} 个文件路径",
-        mode, scanned, files.len()
+        mode,
+        scanned,
+        files.len()
     );
 
     if !violations.is_empty() {
@@ -273,9 +275,7 @@ fn case_insensitive_pub_number_lowercase_is_caught() {
 fn case_insensitive_pinyin_mixed_case_is_caught() {
     // 混合大小写拼音（首字母大写形态）
     let pinyin_mixed: String = {
-        let chars: [char; 11] = [
-            'W', 'a', 'n', 'g', 'Q', 'i', 'n', 'g', 'Z', 'h', 'i',
-        ];
+        let chars: [char; 11] = ['W', 'a', 'n', 'g', 'Q', 'i', 'n', 'g', 'Z', 'h', 'i'];
         chars.iter().collect()
     };
     let sample = format!("作者：{}", pinyin_mixed);

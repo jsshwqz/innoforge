@@ -68,7 +68,13 @@ fn main() {
                             if o.status.success() {
                                 let stdout = String::from_utf8_lossy(&o.stdout);
                                 // sha256sum output: "<hash>  <filename>"
-                                Some(stdout.split_whitespace().next().unwrap_or("unknown").to_string())
+                                Some(
+                                    stdout
+                                        .split_whitespace()
+                                        .next()
+                                        .unwrap_or("unknown")
+                                        .to_string(),
+                                )
                             } else {
                                 None
                             }
@@ -77,8 +83,13 @@ fn main() {
 
                     let var_name = format!(
                         "TEMPLATE_SHA256_{}",
-                        filename.chars()
-                            .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_uppercase() } else { '_' })
+                        filename
+                            .chars()
+                            .map(|c| if c.is_ascii_alphanumeric() {
+                                c.to_ascii_uppercase()
+                            } else {
+                                '_'
+                            })
                             .collect::<String>()
                     );
                     println!("cargo:rustc-env={}={}", var_name, sha256);

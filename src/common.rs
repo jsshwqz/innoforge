@@ -399,8 +399,14 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
         // OA 答复书 docx 导出
         .route("/api/oa/export-docx", post(routes::api_oa_export_docx))
         // OA 分析结果服务端导出 (R10-A1)
-        .route("/api/oa/export", post(routes::oa_export::api_oa_export_post))
-        .route("/api/oa/export/:filename", get(routes::oa_export::api_oa_export_get))
+        .route(
+            "/api/oa/export",
+            post(routes::oa_export::api_oa_export_post),
+        )
+        .route(
+            "/api/oa/export/:filename",
+            get(routes::oa_export::api_oa_export_get),
+        )
         // OA 轮次追踪 / OA Round Workflow Tracking
         .route("/api/oa/rounds/:patent_id", get(routes::api_oa_rounds_get))
         .route("/api/oa/rounds", post(routes::api_oa_rounds_create))
