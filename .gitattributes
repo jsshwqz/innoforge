@@ -29,3 +29,29 @@ mobile/assets/*.css linguist-vendored
 *.ico binary
 *.icns binary
 *.jks binary
+
+# ===== 换行符一致性 / line-ending determinism =====
+# 为什么需要：本文件原先只有 linguist 与 binary 属性，没有任何 eol 规则。
+# Windows runner 检出时会按平台默认把文本转成 CRLF，于是 templates/*.html 的字节
+# 在 Windows 构建机上与仓库里的不一样；模板经 include_str! 烘进二进制，
+# 结果 Windows 产物 /api/version 报的模板 sha256 与任何人用仓库原文件（LF）算出的值
+# 永远不相等——"认版只认 git_commit＋模板 sha256"这条部署铁律跨平台静默失效。
+# 2026-10-12 实测取证：v0.9.12 的 Windows 包报 compare.html=75176f04…，
+# 等于本地 LF 文件转 CRLF 后的 sha256（LF 原值 70fec66f… 不等），且字节数 44688 对得上。
+# 这里按扩展名逐条声明，刻意不用 `* text=auto`——它会覆盖上面的 binary 规则。
+*.rs text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.js text eol=lf
+*.svg text eol=lf
+*.sql text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+Dockerfile text eol=lf
+*.dockerignore text eol=lf
+*.gitignore text eol=lf
+*.attributes text eol=lf
+*.env text eol=lf
