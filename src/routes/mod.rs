@@ -1,0 +1,682 @@
+//! API 路由层 / API Routes
+//!
+//! 所有 HTTP 端点的实现，按功能模块拆分。
+//! All HTTP endpoint implementations, organized by feature module.
+//!
+//! - [`ai`] — AI 聊天、摘要、对比 / AI chat, summary, comparison
+//! - [`search`] — 专利搜索 / Patent search
+//! - [`idea`] — 创意验证 + 多轮对话 / Idea validation + multi-round chat
+//! - [`patent`] — 专利详情 / Patent details
+//! - [`collections`] — 收藏夹管理 / Collections management
+//! - [`settings`] — 系统设置 / System settings
+//! - [`ipc`] — IPC 分类 / IPC classification
+//! - [`upload`] — 文件上传 / File upload
+//! - [`pages`] — 页面渲染 / Page rendering
+
+mod ai;
+mod auth;
+mod cad;
+mod chat;
+mod collections;
+mod feature_cards;
+mod idea;
+mod ipc;
+mod oa_diff;
+pub mod oa_export;
+mod oa_rounds;
+mod pages;
+mod patent;
+mod search;
+mod settings;
+mod upload;
+
+pub use ai::*;
+pub use auth::*;
+pub use cad::*;
+pub use chat::*;
+pub use collections::*;
+pub use feature_cards::*;
+pub use idea::*;
+pub use ipc::*;
+pub use oa_diff::*;
+pub use oa_rounds::*;
+pub use pages::*;
+pub use patent::*;
+pub use search::*;
+pub use settings::*;
+pub use upload::*;
+
+use crate::{ai::AiClient, db::Database, pipeline::context::PipelineProgress};
+use base64::Engine;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
+use std::time::Instant;
+use tokio::sync::broadcast;
+
+/// Round-robin counter for SerpAPI multi-key rotation.
+static SERPAPI_KEY_INDEX: AtomicUsize = AtomicUsize::new(0);
+
+/// 管道通道条目，附带创建时间用于超时清理
+/// Pipeline channel entry with creation timestamp for stale cleanup
+pub struct PipelineChannelEntry {
+    pub sender: broadcast::Sender<PipelineProgress>,
+    pub created_at: Instant,
+}
+
+/// Shared application configuration — 仅保留 SerpAPI + DeepSeek AI，其它搜索源和 AI 已屏蔽
+#[derive(Debug, Clone, Default)]
+pub struct AppConfig {
+    /// SerpAPI multi-key support (round-robin) — 最多 5 个 Key，自动轮询
+    pub serpapi_keys: Vec<String>,
+
+    // ── EPO OPS（MA2b，规格书 §4）──
+    /// OPS 消费者 Key（app_settings `EPO_KEY`，环境变量后备）。与 Secret **成对**才可用。
+    pub epo_key: String,
+    /// OPS 消费者 Secret（app_settings `EPO_SECRET`，环境变量后备）。
+    pub epo_secret: String,
+
+    pub ai_base_url: String,
+    /// 通用 AI API Key（自定义服务商使用 + 向后兼容）
+    pub ai_api_key: String,
+    /// 各服务商独立 Key：切换服务商不会丢失
+    pub ai_api_key_deepseek: String,
+    pub ai_api_key_anthropic: String,
+    pub ai_api_key_xiaomi: String,
+    pub ai_api_key_sensetime: String,
+    pub ai_api_key_openrouter: String,
+    pub ai_api_key_gemini: String,
+    pub ai_api_key_zhipu: String,
+    pub ai_api_key_qwen: String,
+    pub ai_api_key_openai: String,
+    pub ai_model: String,
+    /// 专家模型（用于创新推演、深分析等高推理任务，默认 deepseek-reasoner）
+    pub ai_model_expert: String,
+    /// 快速模型（用于 Stage A 特征提取等结构化输出任务，默认 deepseek-v4-flash）
+    pub ai_model_fast: String,
+
+    // ── Google OAuth for Gemini API ──
+    pub google_client_id: String,
+    pub google_client_secret: String,
+    pub google_refresh_token: String,
+    pub google_access_token: String,
+    pub google_token_expiry: Option<i64>,
+    /// 认证模式："oauth"（浏览器 OAuth）或 "gcloud"（gcloud CLI/ADC）
+    /// 空字符串表示未配置 Google 认证
+    pub google_auth_mode: String,
+
+    // ── Gemini CLI 子进程模式 ──
+    /// 是否启用 Gemini CLI 子进程模式（替代 HTTP API Key 方式）
+    pub gemini_cli_enabled: bool,
+    /// Gemini CLI 可执行文件路径（自动检测）
+    pub gemini_cli_path: String,
+}
+
+impl AppConfig {
+    /// Load from environment only (without DB). Kept for tests/fallback.
+    #[allow(dead_code)]
+    pub fn from_env() -> Self {
+        Self::from_db_and_env(None)
+    }
+
+    /// 从 SQLite 数据库加载设置，环境变量作为后备。
+    /// SQLite 是主存储（Android 友好），.env 是次要存储（桌面端后备）。
+    pub fn from_db_and_env(db: Option<&Database>) -> Self {
+        // 先从数据库加载所有设置
+        let db_settings = db
+            .and_then(|d| d.get_all_settings().ok())
+            .unwrap_or_default();
+
+        // 辅助：优先取 DB 值，其次取环境变量，最后用默认值
+        let get = |key: &str, default: &str| -> String {
+            if let Some(v) = db_settings.get(key) {
+                if !v.is_empty() {
+                    return v.clone();
+                }
+            }
+            std::env::var(key).unwrap_or_else(|_| default.to_string())
+        };
+
+        // Load SerpAPI multi-key (SERPAPI_KEY_1 ~ SERPAPI_KEY_5)
+        let mut serpapi_keys: Vec<String> = Vec::new();
+
+        for i in 1..=5 {
+            let k = get(&format!("SERPAPI_KEY_{}", i), "");
+            if !k.is_empty() && k != "your-serpapi-key-here" {
+                serpapi_keys.push(k);
+            }
+        }
+        // Backward compatibility: read old SERPAPI_KEY if no multi-key configured
+        if serpapi_keys.is_empty() {
+            let old = get("SERPAPI_KEY", "");
+            if !old.is_empty() && old != "your-serpapi-key-here" {
+                serpapi_keys.push(old);
+            }
+        }
+
+        // EPO OPS 凭证（MA2b，spec §4）：与 SerpAPI 同一把尺子 —— app_settings 优先、
+        // 环境变量后备。设置页的两个配置位属 MA5（本包只做读取与登记，不加 UI）。
+        let epo_key = get("EPO_KEY", "");
+        let epo_secret = get("EPO_SECRET", "");
+
+        // 解析 google_token_expiry（存储在 DB 中的字符串），
+        // 环境变量 GOOGLE_TOKEN_EXPIRY 作为后备
+        let google_token_expiry = db_settings
+            .get("google_token_expiry")
+            .and_then(|v| v.parse::<i64>().ok())
+            .or_else(|| {
+                std::env::var("GOOGLE_TOKEN_EXPIRY")
+                    .ok()
+                    .and_then(|v| v.parse::<i64>().ok())
+            });
+
+        // 加载各服务商独立 Key，优先使用独立 Key，其次回退到通用 AI_API_KEY
+        let load_provider_key = |specific_key: &str| -> String {
+            let v = get(specific_key, "");
+            if v.is_empty() {
+                get("AI_API_KEY", "") // 回退到通用 Key
+            } else {
+                v
+            }
+        };
+
+        Self {
+            serpapi_keys,
+            epo_key,
+            epo_secret,
+
+            ai_base_url: get("AI_BASE_URL", "http://localhost:11434/v1"),
+            ai_api_key: get("AI_API_KEY", "ollama"),
+            ai_api_key_deepseek: load_provider_key("AI_API_KEY_DEEPSEEK"),
+            ai_api_key_anthropic: load_provider_key("AI_API_KEY_ANTHROPIC"),
+            ai_api_key_xiaomi: load_provider_key("AI_API_KEY_XIAOMI"),
+            ai_api_key_sensetime: load_provider_key("AI_API_KEY_SENSENOVA"),
+            ai_api_key_openrouter: load_provider_key("AI_API_KEY_OPENROUTER"),
+            ai_api_key_gemini: load_provider_key("AI_API_KEY_GEMINI"),
+            ai_api_key_zhipu: load_provider_key("AI_API_KEY_ZHIPU"),
+            ai_api_key_qwen: load_provider_key("AI_API_KEY_QWEN"),
+            ai_api_key_openai: load_provider_key("AI_API_KEY_OPENAI"),
+            ai_model: get("AI_MODEL", "qwen2.5:7b"),
+            ai_model_expert: get("AI_MODEL_EXPERT", "deepseek-reasoner"),
+            ai_model_fast: get("AI_MODEL_FAST", "deepseek-v4-flash"),
+
+            google_client_id: get("GOOGLE_CLIENT_ID", ""),
+            google_client_secret: get("GOOGLE_CLIENT_SECRET", ""),
+            google_refresh_token: get("google_refresh_token", ""),
+            google_access_token: get("google_access_token", ""),
+            google_token_expiry,
+            google_auth_mode: get("google_auth_mode", ""),
+
+            gemini_cli_enabled: get("GEMINI_CLI_ENABLED", "") == "true",
+            gemini_cli_path: find_gemini_cli().unwrap_or_default(),
+        }
+    }
+
+    /// Build an AiClient from the current config.
+    /// 如果配置了 Google OAuth 且当前是 Gemini 端点，自动使用 OAuth access_token。
+    /// 如果启用了 Gemini CLI 模式，使用子进程调用 Gemini CLI。
+    /// 如果基础 URL 是 Google API，自动添加模型降级兜底（quota 不足时 fallback 到更便宜的模型）。
+    pub fn ai_client(&self) -> AiClient {
+        let api_key = self.effective_api_key();
+        let mut client = AiClient::with_config(&self.ai_base_url, &api_key, &self.ai_model);
+        self.add_gemini_model_fallback(&mut client, &self.ai_model);
+        let is_gemini = self.ai_base_url.contains("googleapis");
+        if is_gemini && self.gemini_cli_enabled && !self.gemini_cli_path.is_empty() {
+            client.set_gemini_cli(&self.gemini_cli_path);
+        }
+        client
+    }
+
+    /// Build an AiClient using the expert model for deep analysis tasks.
+    /// 同样自动添加模型降级兜底。
+    pub fn ai_client_expert(&self) -> AiClient {
+        let api_key = self.effective_api_key();
+        let mut client = AiClient::with_config(&self.ai_base_url, &api_key, &self.ai_model_expert);
+        self.add_gemini_model_fallback(&mut client, &self.ai_model_expert);
+        let is_gemini = self.ai_base_url.contains("googleapis");
+        if is_gemini && self.gemini_cli_enabled && !self.gemini_cli_path.is_empty() {
+            client.set_gemini_cli(&self.gemini_cli_path);
+        }
+        client
+    }
+
+    /// 创建使用快速模型的 AI 客户端（用于 Stage A 特征提取等结构化输出任务）。
+    pub fn ai_client_fast(&self) -> AiClient {
+        let api_key = self.effective_api_key();
+        let mut client = AiClient::with_config(&self.ai_base_url, &api_key, &self.ai_model_fast);
+        self.add_gemini_model_fallback(&mut client, &self.ai_model_fast);
+        let is_gemini = self.ai_base_url.contains("googleapis");
+        if is_gemini && self.gemini_cli_enabled && !self.gemini_cli_path.is_empty() {
+            client.set_gemini_cli(&self.gemini_cli_path);
+        }
+        client
+    }
+
+    /// 为 Gemini 端点添加模型降级兜底：从高到低，主模型 quota 用完后尝试更便宜的模型。
+    /// 非 Gemini 端点不添加降级。
+    fn add_gemini_model_fallback(&self, client: &mut AiClient, primary_model: &str) {
+        let is_gemini = self.ai_base_url.contains("googleapis");
+        if !is_gemini || self.gemini_cli_enabled {
+            return;
+        }
+        let api_key = self.effective_api_key();
+        // 降级优先级：从最新到最稳定（越靠前越新、quota 可能越紧）
+        let fallback_chain = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+        for fb_model in &fallback_chain {
+            if fb_model == &primary_model {
+                continue;
+            }
+            client.add_fallback(&self.ai_base_url, &api_key, fb_model, fb_model);
+        }
+    }
+
+    /// 根据 base_url 检测当前 AI 服务商、返回对应的 API Key。
+    /// custom/未识别服务商返回通用 `ai_api_key`（向后兼容）。
+    pub fn api_key_for_provider(&self, base_url: &str) -> String {
+        let key = if base_url.contains("deepseek") {
+            &self.ai_api_key_deepseek
+        } else if base_url.contains("anthropic") {
+            &self.ai_api_key_anthropic
+        } else if base_url.contains("xiaomimimo") {
+            &self.ai_api_key_xiaomi
+        } else if base_url.contains("sensenova") {
+            &self.ai_api_key_sensetime
+        } else if base_url.contains("openrouter") {
+            &self.ai_api_key_openrouter
+        } else if base_url.contains("googleapis") {
+            &self.ai_api_key_gemini
+        } else if base_url.contains("bigmodel") {
+            &self.ai_api_key_zhipu
+        } else if base_url.contains("dashscope") || base_url.contains("qwen") {
+            &self.ai_api_key_qwen
+        } else if base_url.contains("api.openai.com") {
+            &self.ai_api_key_openai
+        } else {
+            &self.ai_api_key
+        };
+        if key.is_empty() {
+            self.ai_api_key.clone()
+        } else {
+            key.clone()
+        }
+    }
+
+    /// 返回有效的 API Key：
+    /// - 先按服务商获取独立 Key
+    /// - 如果使用 Gemini 且配置了有效（未过期）的 OAuth token，优先返回 access_token
+    /// - 如果 OAuth token 已过期，回退到 Gemini 独立 Key
+    fn effective_api_key(&self) -> String {
+        let is_gemini = self.ai_base_url.contains("googleapis");
+        if is_gemini && !self.google_access_token.is_empty() {
+            let is_expired = self
+                .google_token_expiry
+                .map(|exp| {
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs() as i64;
+                    now >= exp
+                })
+                .unwrap_or(true);
+            if !is_expired {
+                return self.google_access_token.clone();
+            }
+            tracing::warn!(
+                "Google OAuth token expired (expiry={:?}), falling back to API Key",
+                self.google_token_expiry
+            );
+        }
+        self.api_key_for_provider(&self.ai_base_url)
+    }
+
+    /// Whether at least one SerpAPI key is configured.
+    pub fn has_serpapi(&self) -> bool {
+        !self.serpapi_keys.is_empty()
+    }
+
+    /// Round-robin: pick the next SerpAPI key.
+    pub fn next_serpapi_key(&self) -> Option<String> {
+        if self.serpapi_keys.is_empty() {
+            return None;
+        }
+        let idx = SERPAPI_KEY_INDEX.fetch_add(1, Ordering::Relaxed) % self.serpapi_keys.len();
+        Some(self.serpapi_keys[idx].clone())
+    }
+
+    /// EPO OPS 的成对凭证（MA2b，spec §4）。
+    ///
+    /// 语义与 [`Self::next_serpapi_key`] 对齐：**缺任一半即按未配置处理**返回 `None`，
+    /// `routes/search.rs` 据此决定要不要把 EpoOps 登记进执行链
+    /// （不登记 = 该源压根不参与，`attempts` 里不会出现它，与 SerpAPI 缺 Key 同形）。
+    /// 返回前已 `trim`：app_settings 里手粘贴带空格的 Key 是常态。
+    pub fn epo_credentials(&self) -> Option<(String, String)> {
+        let key = self.epo_key.trim();
+        let secret = self.epo_secret.trim();
+        if key.is_empty() || secret.is_empty() {
+            return None;
+        }
+        Some((key.to_string(), secret.to_string()))
+    }
+}
+
+/// 检测 Gemini CLI 是否可用 / Detect Gemini CLI installation.
+/// 返回可执行文件的完整路径，如果未安装则返回 None。
+pub(crate) fn find_gemini_cli() -> Option<String> {
+    // 检查常见安装路径
+    let candidates = [
+        // Windows npm global
+        r"C:\Users\Administrator\AppData\Roaming\npm\gemini.cmd",
+        // Windows npm global (alternative)
+        r"C:\Program Files\nodejs\gemini.cmd",
+        r"C:\Program Files (x86)\nodejs\gemini.cmd",
+        // PATH lookups
+        "gemini.cmd",
+        "gemini",
+    ];
+
+    // Check PATH candidates first
+    let found = candidates.iter().find(|cmd| {
+        std::process::Command::new(cmd)
+            .args(["--version"])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    });
+    if let Some(cmd) = found {
+        return Some(cmd.to_string());
+    }
+
+    // On Windows, also check USERPROFILE
+    if let Some(userprofile) = std::env::var_os("USERPROFILE") {
+        let npm_path = std::path::PathBuf::from(&userprofile)
+            .join("AppData")
+            .join("Roaming")
+            .join("npm")
+            .join("gemini.cmd");
+        if npm_path.exists() {
+            return Some(npm_path.to_string_lossy().to_string());
+        }
+    }
+
+    None
+}
+
+#[derive(Clone)]
+pub struct AppState {
+    pub db: Arc<Database>,
+    pub cad: Arc<crate::cad::CadService>,
+    pub config: Arc<RwLock<AppConfig>>,
+    /// 管道进度通道（SSE 推送），附带超时清理 / Pipeline progress channels with stale cleanup
+    pub pipeline_channels: Arc<Mutex<HashMap<String, PipelineChannelEntry>>>,
+}
+
+impl AppState {
+    /// 启动后台定时清理，移除超过 5 分钟的管道通道（防止 panic 导致泄漏）
+    /// Spawn background task to remove pipeline channels older than 5 minutes
+    pub fn spawn_channel_cleaner(&self) {
+        let channels = self.pipeline_channels.clone();
+        let db = self.db.clone();
+        let config = self.config.clone();
+        tokio::spawn(async move {
+            let stale_threshold = std::time::Duration::from_secs(300); // 5 分钟
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+
+                // 清理超时的管道通道
+                {
+                    let mut ch = channels.lock().unwrap_or_else(|e| e.into_inner());
+                    let before = ch.len();
+                    ch.retain(|id, entry| {
+                        let stale = entry.created_at.elapsed() > stale_threshold;
+                        if stale {
+                            tracing::info!(
+                                "清理超时管道通道: {} (已存在 {:?})",
+                                id,
+                                entry.created_at.elapsed()
+                            );
+                        }
+                        !stale
+                    });
+                    if ch.len() < before {
+                        tracing::info!("管道通道清理完成: 移除 {} 个", before - ch.len());
+                    }
+                } // ch dropped here
+
+                // 自动刷新 Google OAuth / gcloud 令牌（如需要）
+                refresh_google_token_background(&config, &db).await;
+
+                // 重置卡住超过 10 分钟的 analyzing 创意为 error
+                match db.reset_stuck_analyzing(10) {
+                    Ok(n) if n > 0 => {
+                        tracing::warn!("自动恢复: 重置 {} 个卡住的 analyzing 创意为 error", n)
+                    }
+                    Ok(_) => {}
+                    Err(e) => tracing::error!("自动恢复检查失败: {}", e),
+                }
+
+                // 清理超过 24 小时的上传文件
+                if let Ok(entries) = std::fs::read_dir("data/uploads") {
+                    let threshold = std::time::Duration::from_secs(24 * 3600);
+                    for entry in entries.flatten() {
+                        if let Ok(meta) = entry.metadata() {
+                            let age = meta
+                                .modified()
+                                .ok()
+                                .and_then(|t| t.elapsed().ok())
+                                .unwrap_or_default();
+                            if age > threshold {
+                                let _ = std::fs::remove_file(entry.path());
+                                tracing::info!("清理过期上传文件: {:?}", entry.file_name());
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+}
+
+use crate::patent::SearchType;
+
+pub(crate) fn parse_search_type(search_type: Option<&str>) -> Option<SearchType> {
+    search_type.map(|t| match t {
+        "applicant" => SearchType::Applicant,
+        "inventor" => SearchType::Inventor,
+        "patent_number" => SearchType::PatentNumber,
+        "keyword" => SearchType::Keyword,
+        _ => SearchType::Mixed,
+    })
+}
+
+/// HTML-escape to prevent XSS in template interpolation.
+pub(crate) fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#x27;")
+}
+
+/// Escape a CSV field.
+pub(crate) fn escape_csv(s: &str) -> String {
+    if s.contains(',') || s.contains('"') || s.contains('\n') {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s.to_string()
+    }
+}
+
+/// 从 base64 字符串构建正确的 image data URI（用于多模态视觉请求）。
+/// - 若输入已是 data URI（以 `data:` 开头），原样返回（兼容前端直接发送完整 data URL）
+/// - 否则将 base64 解码，按文件头魔数检测真实 MIME（PNG / JPEG / GIF / WebP），
+///   再拼接 `data:image/<mime>;base64,<b64>`
+/// - 若 base64 为空或无法解码，返回 `None`（调用方应跳过该图片，避免向模型发送乱码）
+///
+/// 修复历史问题：此前硬编码 `image/png`，导致 JPEG/WebP 图片被模型以 "invalid image
+/// base64 content" 拒收；以及 idea.html 已发送完整 data URI 时服务端又追加前缀形成双重 data URI。
+pub(crate) fn image_data_uri(b64: &str) -> Option<String> {
+    let trimmed = b64.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    // 已是完整 data URI：原样使用（保留前端检测到的真实 MIME）
+    if trimmed.starts_with("data:") {
+        return Some(trimmed.to_string());
+    }
+    // 解码并检测 MIME
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(trimmed)
+        .ok()?;
+    if decoded.len() < 4 {
+        return None;
+    }
+    let mime = match &decoded[0..4] {
+        [0x89, 0x50, 0x4E, 0x47] => "png", // PNG: 89 50 4E 47
+        [0xFF, 0xD8, 0xFF, _] => "jpeg",   // JPEG: FF D8 FF xx
+        [0x47, 0x49, 0x46, _] => "gif",    // GIF: 47 49 46 38/89a
+        _ => {
+            // WebP: RIFF....WEBP（第 8–11 字节为 "WEBP"）
+            if decoded.len() >= 12 && &decoded[8..12] == b"WEBP" {
+                "webp"
+            } else {
+                "png" // 兜底
+            }
+        }
+    };
+    Some(format!("data:image/{};base64,{}", mime, trimmed))
+}
+
+/// Recursively extract a named field from a JSON value (for EPO responses).
+pub(crate) fn efld(json: &serde_json::Value, field: &str) -> String {
+    if let Some(obj) = json.as_object() {
+        for (k, v) in obj {
+            if k == field {
+                return match v {
+                    serde_json::Value::String(s) => s.clone(),
+                    serde_json::Value::Array(a) => a
+                        .iter()
+                        .filter_map(|x| x.as_str().or_else(|| x["$"].as_str()))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    _ => v.to_string(),
+                };
+            }
+            let r = efld(v, field);
+            if !r.is_empty() {
+                return r;
+            }
+        }
+    } else if let Some(arr) = json.as_array() {
+        for v in arr {
+            let r = efld(v, field);
+            if !r.is_empty() {
+                return r;
+            }
+        }
+    }
+    String::new()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Database;
+    use crate::routes::AppConfig;
+
+    /// MA2b：EPO OPS 凭证按「成对才算配置」裁决 —— 只填一半时 `routes/search.rs`
+    /// 不会把该源登记进链路，用户不至于以为英文域补源在跑。
+    #[test]
+    fn epo_credentials_require_both_halves_and_ignore_padding() {
+        let empty = AppConfig::default();
+        assert_eq!(None, empty.epo_credentials(), "未配置即 None（不登记该源）");
+
+        let only_key = AppConfig {
+            epo_key: "ck".into(),
+            ..AppConfig::default()
+        };
+        assert_eq!(None, only_key.epo_credentials(), "缺 Secret 不算配置");
+        let only_secret = AppConfig {
+            epo_secret: "cs".into(),
+            ..AppConfig::default()
+        };
+        assert_eq!(None, only_secret.epo_credentials(), "缺 Key 不算配置");
+
+        let padded = AppConfig {
+            epo_key: "  ck ".into(),
+            epo_secret: "\tcs\n".into(),
+            ..AppConfig::default()
+        };
+        assert_eq!(
+            Some(("ck".to_string(), "cs".to_string())),
+            padded.epo_credentials(),
+            "粘贴进来的空白要清掉，否则 Basic 头带着空格撞 OPS 401"
+        );
+    }
+
+    /// MA2b 的读取口径：SQLite `app_settings` 是主存储、环境变量只是后备
+    /// （与 SerpAPI 完全同一条 `get()` 路径）。这里锁死「写进设置库就能被链读到」，
+    /// MA5 的设置页配置位只要落库即可生效，不必再动检索侧代码。
+    #[test]
+    fn epo_credentials_load_from_app_settings() {
+        let db = Database::init(":memory:").expect("in-memory db");
+        db.set_settings_batch(&[("EPO_KEY", "db-ck"), ("EPO_SECRET", "db-cs")])
+            .expect("write settings");
+
+        let config = AppConfig::from_db_and_env(Some(&db));
+        assert_eq!(
+            Some(("db-ck".to_string(), "db-cs".to_string())),
+            config.epo_credentials(),
+            "app_settings 里的 EPO 凭证必须被链读到（spec §4 的配置位）"
+        );
+    }
+
+    /// 验证非 Google 服务商不会启用 Gemini CLI 模式
+    /// 这是对赌的核心保护——防止未来代码修改 reintroduce 此 bug
+    #[test]
+    fn non_gemini_provider_does_not_enable_gemini_cli() {
+        // 模拟 DeepSeek 配置（仅设置关键字段，其余用默认值）
+        let config = AppConfig {
+            ai_base_url: "https://api.deepseek.com/v1".into(),
+            ai_model: "deepseek-chat".into(),
+            ai_api_key_deepseek: "test-key".into(),
+            gemini_cli_enabled: true, // 即使 .env 中有此标记…
+            gemini_cli_path: "gemini.cmd".into(),
+            ..AppConfig::default()
+        };
+
+        let client = config.ai_client();
+        // 断言：client 的 provider_mode 是 Http，不是 GeminiCli
+        assert!(
+            !client.is_gemini_cli_mode(),
+            "DeepSeek provider should NOT enable Gemini CLI mode, even when gemini_cli_enabled=true"
+        );
+    }
+
+    /// 验证 Gemini 服务商 + CLI 标记时确实启用 Gemini CLI 模式（正常功能不受影响）
+    #[test]
+    fn gemini_provider_with_cli_enables_gemini_cli() {
+        let config = AppConfig {
+            ai_base_url: "https://generativelanguage.googleapis.com/v1beta/openai/".into(),
+            ai_model: "gemini-2.0-flash".into(),
+            ai_api_key_gemini: "test-key".into(),
+            gemini_cli_enabled: true,
+            gemini_cli_path: "gemini.cmd".into(),
+            ..AppConfig::default()
+        };
+
+        let client = config.ai_client();
+        assert!(
+            client.is_gemini_cli_mode(),
+            "Gemini provider with gemini_cli_enabled=true SHOULD enable CLI mode"
+        );
+    }
+
+    /// 验证单次 AI 调用的全局超时上限为 300 秒。
+    #[test]
+    fn global_timeout_is_300_seconds() {
+        assert_eq!(
+            crate::ai::AiClient::GLOBAL_TIMEOUT_SECS,
+            300,
+            "Global timeout must be 300 seconds to allow OA analysis with full context"
+        );
+    }
+}

@@ -1,0 +1,959 @@
+# 更新日志 / Changelog
+
+所有重要变更都会记录在此文件中。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
+All notable changes are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/).
+
+---
+## [v0.9.11] - 2026-10-04
+
+### 新增 / Added
+- **多轮对抗推演（博弈推演）**：新增 POST /api/ai/oa-adversarial 端点。审查员与代理师多轮博弈交锋，输出经压力测试的终稿答复书
+  - 审查员角色：精通三步法/组合对比/公知常识判断，逐轮升级攻击深度（基础质疑→组合攻击→法理深攻→穷尽攻击），预判代理师辩法并提前封堵
+  - 代理师角色：精通技术效果法/技术偏见法/举证责任转移，逐轮升级防御深度（基础论证→多角度布防→体系论证→穷尽防御），预判审查员攻击方向并提前加固
+  - **目标驱动停止**：审查员评估 ≥ 85% 且无 high 质疑则达标停止，未达标诚实报告差距（不自欺欺人）
+  - 硬安全上限：最多 7 轮，1 轮够就 1 轮
+  - 输出：transcript + final_response + confidence_score + weak_points + goal_achieved + goal_threshold
+  - 前端 OA 答复页新增「🔄 多轮对抗推演」按钮与结果面板
+  - i18n 双语支持（oa.adversarial.* 共 34 keys）
+- **Multi-round adversarial deliberation**: POST /api/ai/oa-adversarial. Examiner vs agent multi-round debate with goal-driven stopping (threshold 85%, max 7 rounds). Escalating attack/defense depth per round. Honest gap reporting when goal not met.
+
+---
+
+## [v0.9.10] - 2026-10-04
+
+### 修复 / Fixed
+- **关键修复：OA 轮次路由冲突导致服务器启动 panic** — GET /api/oa/rounds/:patent_id 与 PUT /api/oa/rounds/:id 路径模式冲突，axum 拒绝注册。PUT 路由改为 /api/oa/rounds/update/:id，前端同步修改。**这是 v0.9.5 无法启动的根因之一**
+- **Critical fix: OA rounds route conflict causing server panic on startup** — axum rejected duplicate path pattern. PUT route changed to /api/oa/rounds/update/:id.
+
+### 新增 / Added
+- **第四阶段全流程追踪与自动化**：P4-T1 证据自动收集 + P4-T2 多轮答复全流程追踪 + P4-T3 最终验证，全部完成
+- **P4-T1 证据自动收集与整理**：新增 POST /api/ai/oa-collect-evidence 端点，从专利全文、对比文献、OA 文本中自动提取证据段落，按 5 种类型分类（说明书支持/区别点/技术效果/现有技术缺陷/实验数据），每条证据标注来源、相关性评分。前端 OA 答复页新增"📁 证据中心"区域
+- **P4-T2 多轮答复全流程追踪**：新增 oa_rounds 数据库表（迁移 v24），记录每轮 OA 的发文、答复、审查结果。新增 4 个 API 端点。前端专利详情页新增 OA 时间线标签页
+- **P4-T3 最终验证**：全量验证通过
+
+### 验证 / Verification
+- cargo fmt ✅ / cargo clippy -D warnings ✅ / cargo test 508 passed ✅
+- HTML 函数完整性扫描 ✅ 8 模板全通过
+- **真实启动测试 ✅** 服务器正常启动，核心 API 响应正常
+- **OA 答复生成测试 ✅** 输入真实 OA 文本，AI 成功生成 3132 字专业答复书
+- **AI 聊天测试 ✅** 对话正常响应
+
+---
+
+## [v0.9.9] - 2026-10-03
+
+### 新增 / Added
+- **第三阶段智能决策支持**：P3-T1 答复策略智能推荐 + P3-T2 权利要求修改模拟器 + P3-T3 答复质量量化评估，全部完成并通过验证
+- **P3-T1 答复策略智能推荐**：新增 `POST /api/ai/oa-strategy-recommend` 端点，根据 OA 类型、对比文献特征、专利技术领域自动推荐最优答复策略（修改权项/增加从属权/争辩创造性/组合策略），每个策略有成功概率估计和优先级排序。前端 OA 答复页新增"💡 智能推荐策略"按钮
+- **P3-T2 权利要求修改模拟器**：新增 `POST /api/ai/oa-claim-simulate` 端点，用户输入修改后的权利要求，AI 模拟审查员逐项检查（说明书支持、新颖性、创造性、保护范围），输出总体判断和修改建议。前端左右分栏编辑，检查结果用 ✅/❌/⚠️ 颜色标注
+- **P3-T3 答复质量量化评估**：新增 `POST /api/ai/oa-quality-score` 端点，对生成的答复文本进行 6 维度量化评分（逻辑严密性、证据引用充分性、区别技术特征论证、修改合理性、措辞专业度、回复完整性），输出加权总分、A/B/C/D 等级、薄弱点分析、改进建议。前端展示 SVG 雷达图 + 评分进度条 + 总分等级卡片
+
+### 验证 / Verification
+- cargo fmt ✅ / cargo clippy -D warnings ✅ / cargo test 37 passed ✅
+- HTML 函数完整性扫描 ✅ / ESLint 0 errors ✅
+
+---
+
+## [v0.9.7] - 2026-10-03
+
+### 新增 / Added
+- **答复质量量化评估**：新增 `POST /api/ai/oa-quality-score` 端点，对生成的答复文本进行 6 维度量化评分（逻辑严密性、证据引用充分性、区别技术特征论证、修改合理性、措辞专业度、回复完整性），输出加权总分、A/B/C/D 等级、薄弱点分析、改进建议。前端 OA 答复页新增"📊 质量评估"按钮，点击后展示 SVG 雷达图 + 评分进度条 + 总分等级卡片
+- **Response quality scoring**: New `POST /api/ai/oa-quality-score` endpoint with 6-dimension quantitative scoring (logic, evidence, distinction, modification, tone, completeness), weighted total, letter grade, weakness analysis, and improvement suggestions. Frontend shows SVG radar chart + score bars + grade card
+- **权利要求修改模拟器**：新增 `POST /api/ai/oa-claim-simulate` 端点，用户输入修改后的权利要求，AI 模拟审查员逐项检查（说明书支持、新颖性、创造性、保护范围），输出总体判断和修改建议。前端 OA 答复页新增"🔧 权利要求修改模拟器"按钮，左右分栏编辑（原始 vs 修改后），检查结果用 ✅/❌/⚠️ 颜色标注
+- **Claim modification simulator**: New `POST /api/ai/oa-claim-simulate` endpoint that simulates examiner review of modified claims (support, novelty, inventiveness, scope). Frontend shows side-by-side editor with pass/fail color-coded results
+
+---
+
+## [v0.9.6] - 2026-10-03
+
+### 新增 / Added
+- **一审-二审对比分析**：新增 `GET /api/oa/history/:patent_number/diff` 端点，自动关联同专利号历史 OA 记录，生成相邻轮次差异对比（OA 类型变化、分析深度变化、驳回理由新增/消失、对比文件增减、权利要求变化）。二审驳回分析时自动将一审历史上下文注入 AI prompt，为 AI 提供历史决策上下文。前端 OA 答复页二审驳回时自动调用 diff API 并展示差异对比 UI（新增驳回理由标红、已克服问题标绿）
+- **First-second examination diff analysis**: New `GET /api/oa/history/:patent_number/diff` endpoint that auto-correlates historical OA records by patent number, generating adjacent-round diffs. First-exam history context is auto-injected into AI prompt for second-rejection analysis.
+
+---
+
+## [v0.9.5] - 2026-10-03
+
+### 修复 / Fixed
+- **OA 讨论 AI 回复为空/推理过程泄露**：glm-5.2 等推理模型流式返回时，`content` 为最终回复、`reasoning_content` 为推理过程。旧代码将 `reasoning_content` 当作回复发出，且 `max_tokens` 不足导致 `content` 为空。修复三处：(1) 流式取值加 `filter(!is_empty)` 避免空字符串阻塞回退 (2) 兜底逻辑排除 `reasoning_content`/`role`/`finish_reason` 元数据字段 (3) `max_tokens` 从 16384 增至 32768 适配推理模型
+- **OA 讨论 `network error` 崩溃**：`src/ai/fact_check.rs` 第 177 行 `text[..end]` 在 `end` 落在 UTF-8 多字节字符中间时 panic（`byte index is not a char boundary`），导致讨论 API 返回 500。改用 `char_indices().take_while()` 安全计算 char boundary
+
+---
+
+## [v0.9.4] - 2026-10-03
+
+### 修复 / Fixed
+- **致命 bug**：`getResponseButtonText()` 无限递归导致 OA 答复页分析功能完全崩溃（`Maximum call stack size exceeded`）。非 `reject_review` 分支递归调用自身，修复为返回默认文本
+- i18n key 不匹配：代码用 `oar.btnGenerate` 但 i18n 表定义为 `oar.btnGenerateResponse`，导致按钮显示原始 key 而非翻译文本
+- `data-i18n` 属性从 `oar.btnGenerate` 修正为 `oar.btnGenerateResponse`
+
+### 改进 / Changed
+- 为 `reexamination_request`（复审请求书）、`reexamination_decision`（复审决定答复）、`admin_lawsuit`（行政诉讼）三种 OA 类型添加专属按钮文本和 Section 5 标题
+- 添加对应中英文 i18n key（`btnGenerateReexamReq`/`btnGenerateReexamDecision`/`btnGenerateAdminLawsuit` 等）
+
+---
+
+## [v0.9.3] - 2026-10-02
+
+### 新增 / Added
+- 版本号可见化：启动时控制台打印版本号，新增 `/api/version` 端点，所有页面侧边栏底部显示版本号，设置页标题栏显示版本号
+
+### 修复 / Fixed
+- `cargo fmt` 格式化修复（tests/ai_smoke_test.rs），解决 CI `cargo fmt --check` 持续失败
+- release.yml Gitee 同步改为可选（未配置 `GITEE_TOKEN` 时跳过而非报错）
+
+---
+
+## [Unreleased]
+
+### 新增 / Added
+- §6.3 真实 AI 冒烟测试（DeepSeek 主路径，7 个端到端场景）
+- §6.1 单元测试加强（OA/parser/upload 覆盖率提升）
+
+### 修复 / Fixed
+- §3.3 OCR 异步化 — spawn_blocking 避免阻塞 Tokio 运行时
+
+---
+
+## [v0.9.2] - 2026-10-02
+
+### 修复 / Fixed
+- **OA 页面多个功能失效**：v0.9.1 的 DOMPurify.setConfig 修复仅应用于 office_action_response.html，其他页面（compare/ai/idea/patent_detail/search/settings）的 DOMPurify.sanitize() 仍默认剥离 onclick 事件处理器，导致这些页面中动态生成的按钮（复制、导出、讨论、生成答复书等）点击无反应。现已统一为所有使用 DOMPurify 的模板添加 setConfig({ADD_ATTR: ['onclick', 'onkeydown', ...]}) 全局配置
+- 影响范围：分析结果区域的 15 个动态按钮（复制结果、导出 Markdown、开始讨论、修改权利要求、导出答复草稿、生成答复书、导出讨论记录、发送讨论、新讨论、导入讨论、加载历史分析等）此前全部失效，现已修复
+
+---
+
+## [v0.9.1] - 2026-10-02
+
+### 修复 / Fixed
+- **OA 类型标签不随选择变化**：选择「驳回后复审」时按钮文字和章节标题现在正确显示为「生成复审请求书」和「复审请求书草稿」，不再固定显示「生成意见陈述书」
+- **AI 讨论发送无反应**：DOMPurify.sanitize() 默认剥离 onclick/onkeydown 事件处理器属性，导致动态生成的讨论面板发送按钮点击无反应。添加 DOMPurify.setConfig({ADD_ATTR: [...]}]) 全局配置允许内联事件处理器
+
+---
+
+## [v0.9.0] - 2026-10-01
+
+### 新增 / Added
+- 检索↔创意验证全链路贯通（MC1）：SourceChain 多源检索 + RAG 全文切片聚类 + 结构化引用编号
+- OA 链路事实核查全覆盖（MC2）：答复书生成前预检 + 讨论回复后追检
+- innerHTML XSS 防护加固（MC3）：72 处 innerHTML 赋值补加 DOMPurify.sanitize()
+
+---
+
+## [v0.8.0] - 2026-09-22
+
+### 新增 / Added
+- **检索↔创意验证全链路贯通**（M-C / MC1）— pipeline 检索步骤改用 SourceChain 多源链（SerpAPI + GooglePatentsXhr + EpoOps），PriorArtCluster 聚类集成 RAG 全文切片，创意报告引用对齐 MB3 的 {ref_no, patent_id} 结构化形状。
+  Search↔idea-validation pipeline integration: pipeline search now uses SourceChain multi-source chain, PriorArtCluster clusters incorporate RAG full-text chunks, and idea report citations align with MB3's structured {ref_no, patent_id} shape.
+- **OA 链路事实核查全覆盖**（M-C / MC2）— OA 答复书生成前做事实核查（致命档拒绝生成），OA 讨论回复后追加事实核查报告，与 OA 分析共用 check_oa_analysis 函数。
+  OA fact-check full coverage: response-letter generation pre-checks facts (fatal-level rejects generation), discussion replies append fact-check reports, all sharing the same check_oa_analysis function.
+- **innerHTML XSS 防护加固**（M-C / MC3）— 全模板 72 处未保护的 innerHTML 赋值补加 DOMPurify.sanitize() 包裹，i18n.js 全局 DOMPurify fallback 确保加载失败时仍有保护。
+  innerHTML XSS hardening: 72 unprotected innerHTML assignments across templates wrapped with DOMPurify.sanitize(), with i18n.js global DOMPurify fallback ensuring protection even on load failure.
+- **深度分析自动抓取全文并引用原文片段**（M-B / MB2+MB3，PR #44+#33）— 深度分析现在会自动为最相关的若干篇专利抓取公开全文（无需付费 API Key），并在报告中引用专利原文片段，每条引用可反查回库内该专利的切片原文。
+  Deep analysis now auto-fetches public full text for the top-N most relevant patents (no paid API Key needed) and cites patent original-text fragments in the report, each citation traceable back to the in-DB chunk.
+- **创意报告新增决策建议段**（M-B / MB4，PR #34）— 明确给出申请 / 放弃 / 转向，并附不少于 3 条可溯源理由。
+  Idea analysis reports now include a decision-recommendation section: file / abandon / redirect with ≥3 traceable rationales.
+- **事实性结论强制附来源**（M-B / MB4，PR #34）— 分析报告的事实性结论附来源（专利号 + 段落/权利要求号），无来源的结论标注为推测。
+  Factual conclusions in analysis reports must carry a source (patent number + section/claim); unsourced conclusions are marked as speculative.
+- **AI 事实核查扩展到创意分析**（M-B / MB1，PR #35）— 编造法条、页码、引用或无来源数据会被标注，达到致命档时中止并给出可读原因。
+  AI fact-checking extended from OA replies to idea analysis: fabricated statutes, page numbers, citations, or unsourced data are flagged; fatal-severity issues abort with a human-readable reason.
+- **新入库专利自动生成检索向量与文本切片**（M-B / MB0+MB3，PR #38+#33）— 入库时自动生成字符 n-gram 向量与文本切片，无需手动触发。
+  Newly imported patents auto-generate character n-gram vectors and text chunks at insert time, no manual trigger needed.
+- **检索诊断面板**（M-A / MA5b，PR #20）— `/api/search/online` 响应新增 `attempts` 键，逐源记录尝试状态（成功/失败/跳过）、耗时、命中数与用户可读的错误原因；检索页新增折叠诊断面板展示这些记账（SerpAPI 未配 Key 的静默降级从此可见，降级不再是黑盒）。面板全程 `createElement + textContent` 安全渲染，摘要截断仅用于显示、悬停保留全文。
+  Search diagnostics panel: `/api/search/online` now returns an `attempts` key recording per-source status (success/failure/skipped), latency, hit counts and human-readable error reasons, surfaced in a collapsible panel on the search page — the silent "no SERPAPI_KEY" degradation is now visible instead of a black box. Rendered safely via `createElement + textContent`; display truncation never touches the underlying data.
+- **检索语言/辖区过滤器**（M-A / MA3，PR #21）— 检索页新增「自动 / 中文 / 英文 / 不限」语言下拉（默认「自动」，不选时请求与旧版逐字一致）；显式选择优先级最高（显式 language > 辖区 > 关键词自动判定），中文关键词默认命中以 CN 专利为主，英文用户可反向覆盖。
+  Language/jurisdiction filter: the search page gains an "Auto / Chinese / English / Any" selector (default Auto = byte-identical legacy requests). Explicit choice wins over region and auto-detection, so CN-keyword queries skew to Chinese patents by default while English users can override.
+- **「冷却中」徽标与 SerpAPI 配额预警**（M-A / MA6b，PR #25）— 检索响应新增顶层 `cooldowns` 结构化键（源名 + 剩余秒数，无冷却时整键省略、旧响应逐字节不变）；诊断面板据此显示「冷却中 · 剩余 Ns」专属徽标（只认结构化数据、不解析文案），SerpAPI 余额低于月度配额 10%（或 100 次）时给出预警，余额未知或是「未配 Key 的静默降级」时不误报。
+  Cooldown badges & SerpAPI quota alert: search responses may carry a top-level structured `cooldowns` key (source + remaining seconds; omitted entirely when nothing is cooling down, keeping legacy responses byte-identical). The diagnostics panel renders a "cooling down · Ns left" badge from it (structured data only, never parsed from text), and warns when the SerpAPI balance drops below 10% of the monthly quota (or 100 calls) — without false alarms for unknown balance or unconfigured-key degradation.
+- **导出聊天记录（供其它 AI 核对）** — 研创台讨论区新增「导出对话」按钮：把该创意的全部讨论记录（用户提问与 AI 回复，按时间排序，含标题/描述）导出为干净的 Markdown 文件，可导入其它 AI 做交叉核对；不再依赖「导出结论」，保留的是原始对话而非整理后的摘要。后端新增 `/api/idea/:id/chat/conversation`（GET）返回结构化 JSON，前端 `exportConversation()` 生成 `.md` 下载。同时把「导出结论」生成的讨论定论作为下一轮「继续迭代」的研究种子（讨论→定论→迭代闭环）。
+  Conversation export for external-AI validation: the idea discussion panel now has an "Export Conversation" button that dumps the full, chronological user↔AI chat (with idea title/description) as a clean Markdown file for feeding into another AI — raw dialogue, not a summarized digest (separate from the existing "Export Conclusions"). Backed by `GET /api/idea/:id/chat/conversation`; frontend `exportConversation()` builds the `.md` download. Also, the AI-derived discussion conclusions now seed the next "Continue Iteration" run, closing the discussion→conclusions→iteration loop.
+- **FreeCAD 可视化对话** — 研创台、专利详情 AI 对话和 OA 讨论现可直接用自然语言创建或继续修改 FreeCAD 模型；图卡保留版本历史、默认假设和形状校验，并提供 PNG 预览及 FCStd/STEP 下载。设置页可检查和启动本机 FreeCAD；AionCAD 仍作为独立的本机 Rust HTTP 控制桥，不并入 InnoForge 仓库。
+  FreeCAD visual chat: the idea workbench, patent-detail AI chat, and OA discussion can now create or explicitly continue revising FreeCAD models from natural language. Cards preserve revision history, assumptions, and shape validation, with PNG previews plus FCStd/STEP downloads. Settings can check and start the local FreeCAD installation; AionCAD remains a separate local Rust HTTP control bridge and is not copied into this repository.
+- **内置 10 家主流 AI 服务商 + API 实时模型检测** — 预置 DeepSeek、商汤、智谱、通义千问、OpenAI、Kimi、豆包等主流服务商，保留自定义添加与「自动检测」按钮；模型列表不再硬编码，改为按当前选中服务商经 API 实时查询（`/api/ai/models?provider=`），切换服务商只更新当前项，不再出现「切到 DeepSeek 后商汤模型消失」的问题。商汤使用真实端点 `https://token.sensenova.cn/v1`，可查出 5 个真实模型（含支持看图的多模态模型）。
+  Built-in 10 mainstream AI providers with API-driven model detection: presets for DeepSeek, SenseTime, Zhipu, Qwen, OpenAI, Kimi, Doubao and more, plus custom add and an "auto-detect" button. The model list is no longer hardcoded — it is fetched live per selected provider via `/api/ai/models?provider=`, so switching providers only updates the current one. SenseTime uses the real endpoint `https://token.sensenova.cn/v1` and returns 5 real models including vision-capable ones.
+- **HTML 模板函数完整性静态扫描** — 新增 `check_html_functions.mjs`：编译前扫描所有模板内联事件（onclick 等）引用的函数是否都有定义，把「按钮在、函数没了」这类回归（42c726e / 9f1a14b 两次重构事故）拦截在编译前；配套 e2e 新增创意页功能完整性用例，AGENTS.md 固化为强制流程。
+  HTML template function-integrity static scanner: `check_html_functions.mjs` verifies every inline event handler in all templates has a defined function before compiling, catching "button exists, function gone" regressions (the 42c726e / 9f1a14b redesign incidents) at build time; an e2e idea-page integrity case and AGENTS.md rules back it up.
+
+### 修复 / Fixed
+- **修复中文专利文本向量检索分词越界崩溃**（M-B / MB0，PR #38）— 旧实现对中文多字节字符按字节切片导致 panic，新实现按 Unicode 字符操作。
+  Fixed panic in vector-search tokenization on Chinese multi-byte text (byte-index slicing → char-boundary safe).
+- **修复超长中文 OA 讨论历史裁剪崩溃**（M-B / MB5，PR #45）— 旧切法按字节索引切片，对中文长讨论历史 panic；新写法按字符截断，零 panic。
+  Fixed panic when truncating long Chinese OA discussion history (byte-index slicing → char-safe truncation).
+
+### 改进 / Improved
+- **OA 输入超长改为明确报错**（M-B / MB5，PR #45）— 超长时返回结构化错误并显示实际/上限字符数，不再静默丢弃超出部分。
+  Oversized OA input now returns a structured error with actual/max char counts instead of silently truncating.
+- **长对话关键事实走结构化传递**（M-B / MB5，PR #45）— 专利号、日期、权利要求等关键信息改走 system 层结构化字段，不再被历史摘要吞掉。
+  Key facts in long discussions (patent numbers, dates, claims) are passed via structured system-layer fields, no longer lost in history compression.
+- **全文抓取共用反爬冷却**（M-B / MB2，PR #44）— 富化与检索共用同一套冷却判断，被限流时不再重复出网。
+  Full-text fetch and search share the same anti-scrape cooldown, preventing repeated outbound requests when rate-limited.
+
+### 已知限制 / Known limitations
+- 本地向量检索为字符 n-gram 相似度补充档，不构成语义理解能力；0 行向量时该档自动关闭并如实上报。
+  Local vector search is a character n-gram similarity supplement, not semantic understanding; auto-disables and reports honestly when 0 embeddings exist.
+- 历史存量专利未做向量与切片批量回填，仅新入库与新富化的记录生效。
+  Historical patents are not batch-backfilled with vectors/chunks; only newly imported/enriched records are affected.
+
+- **本地检索库进入在线降级链（断网可复检）**（M-A / MA4a，PR #22）— `/api/search/online` 的本地 FTS 兜底从此在 `attempts` 中如实记账（跑过即记 Success 并带命中数，本地查询出错记 Failed），诊断面板可见「本地库这一档」；在线全部失败或零命中时，此前检索/导入过的专利在断网状态下仍可经本地兜底复检。
+  Local library joins the degradation chain (offline re-check): the local FTS fallback of `/api/search/online` is now honestly booked in `attempts` (Success with hit counts, or Failed on local errors) and visible in the diagnostics panel; when all online sources fail or return nothing, previously searched/imported patents remain re-checkable offline through the local tier.
+- **申请人精确匹配**（M-A / MA4b，PR #23）— 检索请求新增 `assignee`（独立申请人过滤）与 `exact_assignee`（精确开关）：在线侧 Google Patents XHR 按开关下发裸值或引号精确参数（实测均上游真过滤），本地侧精确档把申请人模糊 `LIKE` 切换为等值匹配，可排除「XX研究院」类变体；两键缺省时出网 URL 与本地 SQL 与旧版逐字一致。「本人姓名可搜到自己名下专利」已有真实实例端到端取证（在线命中→入库→断网复检，MA6d）。
+  Exact applicant matching: search requests accept `assignee` plus an `exact_assignee` switch — online, Google Patents XHR emits the bare or quoted exact `assignee=` parameter (both verified to truly filter upstream); locally, the exact tier swaps fuzzy `LIKE` for equality on the applicant field, filtering out near-variants like "…Research Institute". Omitting both keys keeps outbound URLs and local SQL byte-identical to before.
+- **检索源级熔断冷却 + SerpAPI 超时收紧**（M-A / MA6a，PR #24）— 任一在线源命中配额/认证类失败即进入进程内冷却（Google XHR 120s、SerpAPI/EPO 300s、认证失败 900s），冷却期内该源被摘出降级链、零请求（打断「被 Google 封禁后越打封越久」的恶性循环），面板上按原登记顺序以 `Skipped` 原位呈现原因；全部源冷却时直接走本地兜底、出参形状不变。SerpAPI 单次超时 30s 收紧为 15s。
+  Per-source circuit-breaker cooldown + tighter SerpAPI timeout: any online source failing with quota/auth errors enters an in-process cooldown (Google XHR 120s, SerpAPI/EPO 300s, auth 900s) during which it is taken off the chain with zero requests—breaking the "hit Google's 503 more, get banned longer" spiral—while the panel still shows it in place as `Skipped` with a reason; if every source cools down, requests fall straight back to the local tier with an unchanged response shape. SerpAPI's per-call timeout tightened from 30s to 15s.
+- **专利号直查不再白烧付费配额；跨源拼接明确不做（裁决销账）**（M-A / MA6c，PR #26）— 专利号精确直查此前完全绕过冷却表：SerpAPI 刚被摘链仍会先替它白撞一发**付费** details；现与降级链同表同判据，SerpAPI 冷却中直查自动改走免费链路（只读冷却状态、不为直查伪造记账），诊断面板呈现与行为不再自相矛盾。同时裁决不做跨源结果拼接（现行链为并行发起、按登记顺序择单一胜者整份返回，结构上无第二份结果可合），同源去重能力保留在本地检索路径。
+  Patent-number lookup no longer burns paid quota; cross-source merging formally ruled out: exact patent-number lookups previously bypassed the cooldown table, so right after SerpAPI was taken off the chain a lookup would still fire a **paid** details call; it now consults the same table and criteria and, while SerpAPI cools down, transparently falls to the free chain (read-only, no fabricated bookkeeping for the lookup path), ending the contradiction with the panel. Meanwhile the "merge results across sources" spec item is ruled out and retired: the chain returns the single winning source wholesale, so there is structurally no second result set to merge; same-source dedup stays in the local search path.
+- **AI 成本落账闭环（routes 层 + claim_tree）** — 成本追踪此前仅 2 个落账点（通用对话、创意聊天），OA 答复、对比分析、创造性分析、风险评估、批量摘要、权利要求树等调用全部漏账。现统一经 `db.log_ai_call(&ai, 调用类型, idea_id, session_id)` 在每个成功调用点立即落账，落账点由 2 处扩至 **21 处**（`routes/ai.rs` 14、`routes/idea.rs` 5、`routes/upload.rs` 1、`pipeline/steps/claim_tree.rs` 1；其中 19 处新增——含补上 `compress_history` 历史压缩调用的漏记点，2 处为存量改接）。`save_cost_record_from_client` 收敛为 `log_ai_call` 的唯一内部封装，杜绝两条落账路径并存的串账风险；同时修复 idea-chat 把调用类型误填 provider 字段的错账，provider 现取真实服务商名。落账失败一律静默降级，不影响主流程。**已知限制**（登记于 4.3 计划文档）：流式 SSE 调用不解析 usage 无法落账；批量摘要按单次（最后一次调用）近似记账；pipeline 其余 LLM 步骤（扩展检索词、深度分析、行动计划、实验生成、OA 辅助答复）本批未接线。
+  AI cost ledger now covers every non-streaming call site in the routes layer plus the claim-tree pipeline step: success paths call `db.log_ai_call(&ai, call_type, idea_id, session_id)` immediately, growing coverage from 2 sites to **21** (ai.rs ×14, idea.rs ×5, upload.rs ×1, claim_tree ×1 — 19 brand-new, including a previously unaccounted history-compression call, and 2 existing sites rewired). `save_cost_record_from_client` is folded into `log_ai_call` as its only internal helper so a single path owns ledger writes; fixes idea-chat mis-filling the call type into the provider column (provider now comes from the real provider name). Ledger failures degrade silently. Known limitations (tracked in the 4.3 plan doc): streaming SSE calls do not parse usage and stay unaccounted; batch summarize books one approximate call; the remaining LLM pipeline steps are not wired in this batch.
+- **创意记忆接入对话推理** — 创意记忆（pipeline 自动沉淀 + 记忆面板手动维护的跨会话知识）此前只写不读，现已注入研创台对话的 system context：最多 20 条、共 2000 字符预算，按更新时间倒序截取；条目经转义并以 `<idea_memory>` 边界隔离，防止记忆内容被误认为用户指令。空记忆、无权限或读取失败时不注入，不影响原有对话流程。
+  Idea memory now feeds the chat: cross-session knowledge (auto-persisted by the pipeline finalize step plus manually curated entries) is injected into the idea chat system context — up to 20 entries within a 2000-character budget, most recently updated first. Entries are escaped and wrapped in an `<idea_memory>` boundary so memory content cannot be mistaken for user instructions; empty/unreadable memory changes nothing.
+- **静默截断显式化（数据完整性）** — 凡是要送入 AI 的文本（对比分析、创造性分析、OA 对比文件、创意讨论与结论、材料文本提取）在超出上下文上限时，不再静默截掉尾部，而是在送出的文本末尾追加「本段原文共 N 个字符，此处只送入前 M 个字符，其余 K 个字符未包含」的说明，并要求模型遇到被省略内容时明确说明材料不完整、禁止推测。新增 `truncate_for_ai()` 统一承担数据用途截断（显示/日志用途继续用 `safe_truncate*`）；`/api/upload/extract` 另外返回 `char_length` 与 `truncated` 字段，便于前端提示用户材料已被截断。
+  Explicit truncation for AI-bound data: text sent to the AI (comparison, inventiveness, OA reference documents, idea discussion/conclusions, extracted material) is no longer silently trimmed when it exceeds the context limit. The delivered text now ends with a notice stating the original character count, how many characters were sent, and how many were omitted, and the model is told to flag incomplete material instead of guessing. A new `truncate_for_ai()` helper owns data-path truncation (display/log paths keep using `safe_truncate*`), and `/api/upload/extract` returns `char_length` and `truncated` so the UI can warn users.
+- **抗幻觉：分场景温度策略 + 事实纪律** — 创作/发散讨论保持较高温度 0.6（不压抑创新）并加「创意与事实分离」条款（推测内容标注【推测】/【需核实】）；事实型任务降低温度（OA 讨论 0.35、普通对话 0.5、专利分析 0.2–0.3）并追加「事实纪律」条款：只引用材料中已有的内容，禁止编造法条、页码、对比文件记载。
+  Anti-hallucination via per-scenario temperature + fact discipline: creative/divergent discussion keeps a higher temperature (0.6) with a "separate creativity from facts" clause marking speculation as 【推测】/【需核实】; fact-based tasks use lower temperatures (OA discussion 0.35, generic chat 0.5, patent analysis 0.2–0.3) plus a fact-discipline clause: cite only material actually provided, never fabricate statutes, page numbers, or prior-art disclosures.
+- **Linear 式高级深色视觉升级** — 设计体系换用 Linear/Raycast 风：底色改为纯黑紫调（`#08080f`）、主色改为靛蓝紫（`#6366f1 → #a855f7` 渐变），圆角加大、新增紫调柔光，主按钮/卡片 hover/激活态全面同步；导航栏移回页面右侧。
+  Linear-style premium dark visual upgrade: deep black-violet canvas (`#08080f`), indigo-violet accent gradient (`#6366f1 → #a855f7`), larger radii, violet glow shadows across buttons/cards/active states; sidebar navigation moved back to the right side.
+- **前端全面重新设计** — 视觉风格从赛博毛玻璃改为精致深色专业风（GitHub/Linear 式克制深色 UI）：重写 `static/style.css` 为统一设计系统（色板/间距/圆角/阴影/字体 token + 公共组件库）；8 个页面模板（首页/搜索/专利详情/研创台/AI 对话/对比/设置/OA 答复）全部重构 HTML 骨架并删除散落的内联 `<style>`（样式收敛进公共 CSS）；侧边导航升级为品牌区 + SVG 图标 + 激活态；JS 依赖的 id 与功能 class 钩子全部保留，i18n/DOMPurify 机制不变。
+  Full frontend redesign: replaced the cyber-glassmorphism look with a refined dark professional UI (GitHub/Linear style). Rewrote `static/style.css` as a unified design system (color/spacing/radius/shadow/type tokens plus a component library); refactored all 8 page templates (home/search/patent-detail/idea/AI-chat/compare/settings/OA-response) and removed scattered inline `<style>` blocks into shared CSS; upgraded the sidebar navigation with a brand header, SVG icons, and active states. All JS-dependent ids and functional class hooks were preserved; i18n/DOMPurify mechanisms unchanged.
+- **搜索页 CDN 健壮性** — Chart.js 改为 `async` 加载，CDN 不可达时不再阻塞页面主体加载（统计图表仍按需可用）。
+  Search-page CDN robustness: Chart.js now loads `async`, so an unreachable CDN no longer blocks page body rendering (charts remain available on demand).
+- **防回归硬防线全量升级** — `check_html_functions.mjs` 升级为基线化扫描器，自动发现 `templates/` 下所有 HTML（未来新增页面零配置纳入），新增随代码提交的基线文件 `docs/functions-manifest.json`，拦截"整块功能消失"类回归（补齐静态扫描的原理盲区）；新增可提交的 `.githooks/`（pre-commit 钩子，core.hooksPath 指向、跨机器共享，克隆后一次设置生效）；CI（`.github/workflows/ci.yml`）新增 `lint`（HTML 扫描 + ESLint）和 `e2e`（Chromium + 起服务跑 54 项）强制关卡，push/PR 不过关无法合并；AGENTS.md 固化为强制流程并增加防扫描器/基线被篡改的禁止条款。
+  Regression-prevention hard gates overhauled: `check_html_functions.mjs` is now baseline-driven with the commit-tracked `docs/functions-manifest.json`, auto-discovers every `templates/*.html` (future pages included with zero config), and catches "entire feature disappeared" regressions the static scan alone cannot see. Added commit-tracked `.githooks/` (pre-commit hook via core.hooksPath, shared across clones, one-time setup). CI gains mandatory `lint` (HTML scan + ESLint) and `e2e` (Chromium + server + 54 cases) jobs that block merge on failure. AGENTS.md codifies the flow and bans tampering with the scanner or baseline.
+- **CI e2e 加固** — e2e 作业改为同时依赖 `test` 与 `lint`，避免 lint 红时白跑编译；chromium 在 CI 容器中以 root 运行时增加 `--no-sandbox`（仅 Linux）与 `--disable-dev-shm-usage` 参数，消除容器内浏览器起不来的隐患。
+  CI e2e hardening: the e2e job now depends on both `test` and `lint` to avoid wasted builds when lint fails; Chromium gains `--no-sandbox` (Linux only) and `--disable-dev-shm-usage` flags so headless Chrome launches reliably inside root CI containers.
+- **远端强制关卡闭环** — 新增 Gitee Actions 镜像（`.gitee/workflows/ci.yml`），与 GitHub 双远端同步运行 test/lint/e2e，杜绝只推 Gitee 时远端关卡失效；修复 schema 迁移版本测试（v23），让 `cargo test` 全量通过（159 通过 0 失败），远端 CI 真正变绿。
+  Remote gate closed: added a Gitee Actions mirror (`.gitee/workflows/ci.yml`) running test/lint/e2e in sync with GitHub, so pushing only to Gitee no longer bypasses the remote gate; fixed the schema migration version test (v23) so `cargo test` passes fully (159 passed, 0 failed) and the remote CI goes genuinely green.
+- **Agent 协作记忆体系** — 借鉴 taichuy/agentMemory 的方法论，在 AGENTS.md 新增协作记忆入口、Step 0b 记忆检索规则（只读与任务相关的记忆、检索到足够证据即停、与最新代码冲突时以可验证来源为准）和 Step 0c 记忆存储触发器（纠正/认可/边界澄清命中即记、既记纠正也记认可避免越来越保守）；新增 `docs/feedback.md` 承载用户反馈记忆，工具踩坑复用 `docs/errors.md`，与防篡改硬防线（CI + 钩子 + 基线）互补：硬防线防「改坏代码」，记忆规则防「重犯同类错误」。
+  Agent collaboration memory system: borrowed the methodology from taichuy/agentMemory. AGENTS.md now has a memory entry block, Step 0b retrieval rules (read only task-relevant memory, stop once enough evidence is found, prefer the latest verifiable source on conflict) and Step 0c storage triggers (record corrections, affirmations, and boundary clarifications on the fly, capturing both to avoid over-conservatism). Added `docs/feedback.md` for user feedback memory; tool-pitfalls reuse `docs/errors.md`. Complements the anti-tampering hard gates: hard gates prevent broken code, memory rules prevent repeating the same mistakes.
+- **Agent 记忆上下文自动注入** — 后端新增 `src/context.rs`，每次 AI 对话自动读取 `docs/feedback.md`、`docs/errors.md`、`docs/plans/STATUS.md`，汇编成有字符预算（≤6000 字符）的「项目记忆上下文」片段，注入 idea 聊天与通用聊天系统提示词；文件缺失时静默降级，不引入新依赖、不新增 unwrap。
+  Agent memory context auto-injection: new backend `src/context.rs` reads `docs/feedback.md`, `docs/errors.md`, and `docs/plans/STATUS.md` on each AI turn, assembles them into a bounded (≤6000 chars) "project memory context" section injected into the idea-chat and generic-chat system prompts; gracefully degrades when files are absent; no new dependencies, no unwrap.
+- **AI 使用统计与成本追踪** — 从 AI 响应自动解析 token 用量，按 idea / session / 模型 / 天四维统计调用次数、输入输出 token 与估算花费（v23 迁移扩展 `ai_cost_ledger` 表），设置页新增「AI 使用统计（近 30 天）」面板；同时修复 HEAD 处于「调用方已提交、被调用函数缺失」的非编译状态（补齐 `take_last_usage` / `save_cost_record_from_client` 等实现）。
+  AI usage and cost tracking: auto-parse token usage from AI responses, aggregate calls/input-output tokens/estimated cost by idea, session, model and day (v23 migration extends `ai_cost_ledger`), with a new "AI Usage Stats (Last 30 Days)" panel on the settings page; also fixes HEAD's non-compilable state where the callers were committed but the callee functions were missing (restores `take_last_usage`, `save_cost_record_from_client`, etc.).
+- **创意页附件 PDF 支持** — 聊天附件框新增 PDF 选择，上传后调用 `/api/upload/extract` 提取文本随消息发送给 AI。
+  Idea-page attachment PDF support: the chat file picker now accepts PDFs, which are uploaded and extracted via `/api/upload/extract` before being sent with the message.
+- **安全与质量加固** — 所有页面响应增加 `Cache-Control: no-cache` 等无缓存头（防浏览器缓存旧前端）；PDF/DOCX 提取增加 100 字符最低门槛（防空内容误判为成功）并记录提取日志。
+  Security and quality hardening: all page responses now include `Cache-Control: no-cache` headers to prevent stale frontend caching; PDF/DOCX extraction now enforces a 100-char minimum and logs extract results.
+
+### 修复 / Fixed
+- **CI 绿色基线** — 修掉 GitHub/Gitee 两条流水线"历来即红"的四处根因：① `package-lock.json` 入库（此前 `npm ci` 在干净 runner 上必然 EUSAGE 失败，lint/e2e 两个 job 全挂），并改写 AGENTS.md §4.3 该条本意（禁的是前端构建工具链，开发工具依赖清单必须提交）；② clippy 1.98 收紧后 main 上就存在的 4 处红按惯用法最小修复（`iter_mut()`→`values_mut()`×3、去恒真 `.max(0)`），零逻辑变化；③ 新增 `rust-toolchain.toml` 钉住 1.98.0，门禁不再随工具链自动升级漂移；④ ESLint 10 不再读取 `.eslintrc.json`（该步骤因①从未真的执行过），规则等价迁移到 flat config 并修掉 `static/i18n.js` 两处真实 `no-redeclare`。另附仓库卫生：根目录 226 个调试产物（`_*.txt`/`_*.json`/`_*.py`/`.firecrawl/`）纳入 `.gitignore`，HTML 函数基线刷新消除长期"待刷新"提示。
+  Green CI baseline: fixed the four root causes that had the GitHub/Gitee pipelines red since inception — (1) committed `package-lock.json` (`npm ci` was guaranteed to fail with EUSAGE on a clean runner, killing both the lint and e2e jobs) and reworded AGENTS.md §4.3 accordingly (what is banned is a frontend build toolchain; dev-tool manifests must be committed); (2) repaired the 4 clippy 1.98 findings already red on main via idiomatic minimal edits (`iter_mut()`→`values_mut()` ×3, dropped a tautological `.max(0)`), zero logic change; (3) added `rust-toolchain.toml` pinned to 1.98.0 so gates no longer drift with toolchain upgrades; (4) migrated ESLint to flat config (ESLint 10 ignores `.eslintrc.json`, and that step had never actually run because of (1)) plus fixed two genuine `no-redeclare` findings in `static/i18n.js`. Repo hygiene rides along: 226 root-level debug artifacts are now ignored and the HTML function baseline manifest refreshed with zero functions removed.
+- **创意页功能完整性恢复** — 两次前端重构误删的功能全部对比 v0.7.2 找回：12 个核心函数（状态显示/概览渲染/报告切换/讨论导出等）、会话删除、快速滚动到底、粘贴图片、TXT 文本附件随消息传给 AI；证据链/权利要求树/关键发现/特征卡片 4 个标签页恢复数据加载（字段名与 API 对齐）；概览标签页现在渲染完整分析正文与检索结果；证据 API 路由补齐（`/api/idea/:id/evidence` 曾在 `src/common.rs` 缺失导致 404）。e2e 全量 54/54 PASSED。
+  Idea-workbench feature restoration: everything lost in the two frontend redesigns was recovered by diffing against v0.7.2 — 12 core functions (status display/overview render/report switch/discussion export etc.), conversation delete, scroll-to-bottom, paste-image, and TXT text attachments reaching the AI. Evidence/claim-tree/findings/feature-card tabs load data again (field names aligned with the API); the Overview tab now renders the full analysis body and search results; the evidence route (`/api/idea/:id/evidence`) missing from `src/common.rs` (404) was re-registered. E2E suite: 54/54 PASSED.
+- **FreeCAD 启动与续改可靠性** — InnoForge 会串行化并发启动、校验 AionCAD API 身份和产物导入根目录，并在专家 CAD 简报失败时保留完整原始指令回退；新绘图不再误接到上一模型，只有用户点击“继续修改”才建立父版本关系。
+  FreeCAD startup and revision reliability: InnoForge serializes concurrent startup, verifies the AionCAD API identity and artifact import root, and preserves the complete original instruction as fallback when an expert CAD brief fails. A new drawing no longer attaches to the previous model; only an explicit “Continue” action creates a parent revision.
+- **FreeCAD 审查阻断项** — 启动超时后增加冷却状态，防止后台 FreeCAD 尚在连接时重复拉起；重试固定使用失败请求的完整快照，聊天区域重绘后恢复 CAD 历史；CAD 提示词边界转义，设置页不再因状态检查自动启动程序，并支持保存 AionCAD 工作目录与自动启动开关。
+  FreeCAD review blockers: startup cooldown prevents duplicate launches while a timed-out background FreeCAD is still connecting; retry uses the immutable failed-request snapshot; CAD history survives chat re-rendering; prompt boundaries are escaped; status checks no longer start local processes; and the settings page persists the AionCAD workspace plus auto-start preference.
+- **专利详情导航激活态** — 详情页无独立导航项时，侧边导航激活态映射到「搜索」页，避免无高亮。
+  Patent-detail nav active state: the sidebar now highlights "Search" on detail pages that have no dedicated nav entry.
+- **论点看板初始隐藏** — OA 页论点看板初始隐藏改由内联 `display` 控制，与 JS 显隐逻辑一致，避免 CSS `display:none` 覆盖 JS 的显示操作。
+  Argument-board initial visibility: the OA argument board is now hidden via inline `display` so JS visibility toggles are not overridden by CSS.
+- **OA 讨论附件随消息发送** — 修复附件在发送前被提前清空导致图片/base64 永不随消息传给 AI 的问题，改为使用缓存值构建请求。
+  OA discussion attachments now send with messages: pending file data is read from the cached value instead of a slot cleared before the request is built.
+- **创意讨论 TXT 附件正文传入 AI** — 修复创意工作台讨论区上传 TXT 文件后 AI 回复「没有收到文件内容」的链路断裂：前端发送前用 `FileReader` 读取 TXT 全文并放入 `attachments` 字段（含文件名与正文，队列/重试完整携带）；后端新增 `TextAttachment` 和 `IdeaChatRequest` 契约，用 `<user_input>`/`<untrusted_text_attachments>` 边界隔离防注入，校验附件数 ≤5、总大小 ≤200KB，聊天历史只存文件名不存正文（省 DB）；页面仅接受纯文本文档（.txt/.md/.csv/.json/.xml/.yaml）和图片，PDF/DOCX 明确拒绝避免假成功。
+  Idea-discussion TXT attachment now reaches AI: fixed the broken chain where uploading a TXT in the idea-workbench discussion yielded "no file content received". Frontend now reads the full TXT via FileReader and sends it in an `attachments` field (name + content, preserved across queue/retry); backend adds `TextAttachment` and `IdeaChatRequest` types, isolates content with `<user_input>`/`<untrusted_text_attachments>` tags to prevent prompt injection, enforces ≤5 files and ≤200KB total, and stores only file names in chat history. Only plain text and images are accepted; PDF/DOCX are explicitly rejected to avoid false-success.
+- **历史讨论恢复入口安全化** — 历史讨论列表的 `discussion_id` 改为 `data-id` 属性 + `getAttribute` 读取，不再拼接进 `onclick` JS 字符串字面量，消除注入面；同时修复悬停事件 `onmouseleave` 的语法错误。
+  History-discussion recovery hardened: `discussion_id` now travels via a `data-id` attribute read with `getAttribute` instead of being interpolated into an inline `onclick` string, removing the injection surface; the `onmouseleave` attribute syntax error was also fixed.
+
+## [v0.7.4] - 2026-07-17
+
+### 新增 / Added
+- **OA 答复书专业论证约束** — 答复书生成现实际启用中国专利代理师级系统指令，逐项按“审查意见概述—申请人答复—证据出处—论证结论”组织；创造性论述须明确区别特征、技术效果、技术问题和缺少结合动机。讨论记录只作为待核对证据，材料不足时标注待申请人/代理人确认，禁止编造技术特征、对比文件记载、页段号或法条。
+  OA response-letter professional reasoning constraints: generation now actually enables a China patent-agent-level system instruction and structures each response as “examiner position — applicant response — evidence source — conclusion.” Inventiveness arguments must identify distinguishing features, technical effects, technical problems, and why there was no motivation to combine. Discussion records are only evidence to be verified; insufficient material is marked for applicant/agent confirmation, and the model must not invent technical features, prior-art disclosures, page/paragraph references, or legal provisions.
+- **OA 完整讨论记录导出** — OA 讨论区新增纯本地 Markdown 导出，保留起始上下文、每轮用户/AI 原文、角色和 ISO 时间戳；导出不发起 AI 请求，且能安全保留含 Markdown 反引号的原文
+  OA full discussion-record export: a local-only Markdown export preserves the initial context, every user/AI source message, role, and ISO timestamp; it makes no AI request and safely retains source text containing Markdown backticks
+
+### 安全修复 / Security Fixes
+- **专利图片代理响应边界** — 图片代理现在禁用环境代理、仅接受 PNG/JPEG/GIF/WebP/BMP/AVIF 等安全栅格图片 MIME，拒绝缺失类型、SVG 与 HTML；通过声明长度预检和流式累计双重限制，将单张上游图片限制为 20 MiB，且不再为每次响应泄漏 MIME 字符串
+  Patent image-proxy response boundaries: the proxy now disables environment proxies, accepts only safe raster image MIME types (PNG/JPEG/GIF/WebP/BMP/AVIF), rejects missing types, SVG, and HTML, and enforces a 20 MiB per-image limit via both declared-length and streamed-body checks without leaking a MIME string per response
+- **本地上传 PDF 文件签名校验** — 四个本地 PDF 上传入口现在都会在保存文件、调用解析器、OCR 或视觉兜底前验证首 1024 字节内的 `%PDF-` 签名，拒绝仅伪装为 `.pdf` 的文本或 HTML；专利专用提取入口对直传和远程下载汇合后的内容统一复检
+  Local PDF-upload signature validation: all four local PDF ingress paths now require a `%PDF-` signature within the first 1024 bytes before storage, parsing, OCR, or vision fallback. Text or HTML merely named `.pdf` is rejected, and the patent-specific extractor revalidates both direct-upload and remote-download bytes at their shared boundary
+- **AI 提示词输入边界** — 聊天历史现仅接受 `user` 和 `assistant` 角色，拒绝客户端伪造的 `system`/未知角色；专利记录、联网搜索、OA 材料、讨论记录和用户自定义角色偏好均以不可逃逸的 `<user_input>` 数据边界传给 AI。原始自定义角色不再拥有系统指令权限，服务端预设角色保持可用
+  AI prompt input boundaries: chat history now accepts only `user` and `assistant`, rejecting client-forged `system` or unknown roles. Patent records, web results, OA material, discussion records, and raw custom role preferences use non-escapable `<user_input>` data boundaries; raw custom roles no longer have system-instruction authority while server presets remain available
+
+### 修复 / Fixed
+- **发布门禁与五平台资产** — Release workflow 恢复 Linux x86_64/ARM64、macOS x86_64/ARM64、Windows x86_64 五目标打包，校验标签、Cargo 版本与 CHANGELOG 一致性，按标签精确生成发布说明，并在五项资产齐全后公开 GitHub Release；Gitee 同步支持已有 Release 复用。深度门禁同步修复 HTTP 状态遗漏、旧工作树路径、超时过短和过宽失败词判断。
+  Release gates and five-platform assets: the workflow restores Linux x86_64/ARM64, macOS x86_64/ARM64, and Windows x86_64 packages; validates tag/Cargo/changelog consistency; extracts notes for the exact tag; and publishes the GitHub Release only after all five assets exist. Gitee synchronization reuses an existing release. The depth gate now includes HTTP status, uses the current worktree, allows production timeout tiers, and avoids overly broad failure tokens.
+- **创造性分析上传文本兼容** — `/api/ai/inventiveness-analysis` 现在与接口约定一致，可直接接收上传文本形式的“我的专利”，不再错误地只接受本地数据库专利 ID；专利对比、创造性分析和 OA 答复输出补充可核验的依据、风险、建议与结论要求。
+  Inventiveness uploaded-text compatibility: `/api/ai/inventiveness-analysis` now accepts uploaded subject-patent text as documented instead of incorrectly requiring a local database ID. Compare, inventiveness, and OA outputs also require auditable evidence, risks, recommendations, and conclusions.
+- **Google 认证状态原子持久化** — gcloud CLI、ADC 文件、OAuth 授权码交换及后台 Token 刷新统一通过 `persist_google_auth_state()` 在单个 SQLite 批量事务中持久化认证状态，事务提交成功后才更新运行时内存。OAuth 初次授权原子保存 access token、expiry、refresh token 与 oauth 认证模式；gcloud/ADC 模式切换会明确清除遗留的 OAuth refresh token 并写入 gcloud 模式；后台 Token 刷新仅替换 access token 和 expiry，不更改 refresh token 或认证模式。
+  Google authentication-state atomic persistence: gcloud CLI, ADC-file, OAuth authorization-code exchange, and background token refresh now persist authentication state in one SQLite batch transaction via `persist_google_auth_state()` before updating runtime memory. Initial OAuth atomically saves access token, expiry, refresh token, and oauth mode; gcloud/ADC mode switches clear a stale OAuth refresh token and write gcloud mode; background refresh replaces only access token and expiry, preserving refresh token and mode.
+- **OA 讨论记录导出入口回归**：分析后动态讨论面板现在直接提供“导出完整讨论记录”按钮；完成一轮 AI 回复后自动显示。导出包含 OA 原文、已确认分析、每轮用户/AI 原文及时间，不再依赖旧讨论面板中隐藏的按钮。
+  OA discussion-record export entry regression: the post-analysis dynamic discussion panel now directly offers an “Export Full Discussion Record” button, appearing after the first AI reply. The export includes the OA source, confirmed analysis, every user/AI message, and timestamps without relying on buttons hidden in the legacy discussion panel.
+- **OA 表格完整显示与 Word 原生表格导出**：OA 分析/讨论结果中的长 Markdown 表格改为置于独立横向滚动区，单元格支持自动换行，不再被结果面板裁剪；导出 Word 时会识别规范的 Markdown 表头、分隔行和数据行，生成带表头底纹、自动换行的原生 Word 表格，而非竖线文本。
+  OA complete table display and native Word-table export: long Markdown tables in OA analysis/discussion results now use a dedicated horizontal scroll area with wrapping cells, preventing clipping. Word export recognizes standard Markdown headers, separators, and rows and creates a native Word table with shaded headers and wrapping cells instead of pipe-delimited text.
+- **OA 分析后答复书入口回归**：普通分析接口成功时现在与流式分支统一进入讨论视图，分析完成后固定显示“生成意见陈述书”按钮；不再因接口路径不同而遗漏入口。
+  OA response-letter entry regression: successful regular analysis now enters the same discussion view as the streaming branch, keeping the “Generate Response Letter” button visible after analysis regardless of which API path returned.
+- **OA Word 正文空白**：修复 DOCX 主文档 XML 多余段落闭合标签导致 Word 修复后丢弃正文的问题，补充标准页面节属性，并增加正文保留回归测试。
+  OA blank Word body: fixed an extra paragraph-closing tag that caused Word repair to discard the body, added standard section properties, and added a regression test that verifies response text remains in the DOCX document XML.
+- **OA 导入讨论、结果面板与 Word 导出**：导入讨论面板补回 AI 消息容器，AI 回复不再无声丢失；生成结果遮罩提供明确关闭按钮；Word 导出改为保留完整正文、显式传入触发按钮并延后释放下载文件，避免空白导出。
+  OA imported discussion, result panel, and Word export: the imported-discussion panel restores its AI-message container so replies are no longer silently lost; generated-result overlays have an explicit close button; Word export preserves the full body, receives its triggering button explicitly, and delays URL cleanup to avoid blank downloads.
+- **OA 权利要求修改建议**：生成意见陈述书时会附带逐项“修改前要点、建议修改文本、修改理由及依据”；材料不足时明确要求申请人确认，不编造技术特征或法条。
+  OA claim-amendment suggestions: generated response letters now include per-claim prior points, suggested text, reasons, and basis; insufficient material is marked for applicant confirmation rather than inventing technical features or legal provisions.
+- **OA 正常讨论流程的答复书入口**：分析完成后的“生成意见陈述书”改为在分析摘要下方固定可见，同时保留第五部分和讨论区后的入口；生成成功后可在第五部分直接导出 Word。
+  OA response-letter entry in the normal discussion flow: “Generate Response Letter” is now sticky below the analysis summary while retaining the Section 5 and post-discussion entries; after generation, Word export is directly available in Section 5.
+- **OA 答复书流式正文与导出**：前端现兼容标准 SSE `data:` 事件格式并保留换行，避免完整 AI 答复在浏览器中被丢弃而显示空白或无法导出；生成结果过短时会阻止空白导出并提示用户。OA 讨论 v17 迁移同时改为幂等执行，重复初始化数据库不再因 `oa_text` 列重复而失败。
+  OA response-letter streaming and export: the frontend now accepts standard SSE `data:` events and preserves line breaks, preventing complete AI responses from being discarded in the browser and exported blank. An undersized result is blocked with a user-facing message. The v17 OA-discussion migration is also idempotent, so database reinitialization no longer fails on a duplicate `oa_text` column.
+- **SerpAPI 多 Key 原子保存** — 验证后的 SerpAPI Key 替换现在在同一 SQLite 事务中清空旧的兼容键位并写入全部新键；任一数据库失败会回滚、返回友好错误，并保持运行时搜索配置不变。事务成功后，`.env` 仅作逐项告警的桌面备份。
+  Atomic multi-key SerpAPI saves: validated replacements now clear legacy slots and write all new keys in one SQLite transaction. Any database failure rolls back, returns a friendly error, and leaves the running search configuration unchanged. After commit, `.env` is only a per-key warning-logged desktop backup.
+- **AI 配置原子保存** — 设置页保存 AI 配置时，全部 8 个主存储项现在在同一 SQLite 事务中写入；任一写入失败会回滚、返回友好错误，并保持当前运行中的内存配置不变。仅在事务成功后更新内存配置；`.env` 继续作为可失败但会记录日志的桌面备份。
+  AI configuration atomic persistence: all eight primary settings now save in one SQLite transaction. A failed write rolls back, returns a friendly error, and leaves the running in-memory configuration unchanged. Memory updates only after commit; `.env` remains a best-effort desktop backup with warning logs on failure.
+- **SerpAPI Key 保存的数据完整性** — 设置页不再静默丢弃无效 SerpAPI Key 后清空既有配置。缺失/非数组、超过 5 个、空白、过短、非法字符、未知或歧义掩码会在任何清空或写入前返回可理解的错误；空数组仍明确表示用户主动清空，合法掩码可安全还原。
+  SerpAPI Key save integrity: settings no longer silently drop invalid SerpAPI keys and then clear the existing configuration. Missing/non-array, over-limit, blank, short, malformed, unknown-mask, or ambiguous-mask input returns a clear error before any clearing or write; an empty array remains an explicit user-requested clear, and valid masks are safely restored.
+- **正则初始化的受控错误处理** — 创意报告的行内 Markdown、专利说明书 HTML 清理和法律状态页面解析不再使用生产路径 `expect()`。正则继续缓存；若内部初始化异常则记录诊断并返回已转义文本或受控错误，避免请求 panic。补充 Markdown 格式渲染与 HTML 输入转义回归，防止调整转义职责时引入 XSS 回退。
+  Controlled regex-initialization failures: inline Markdown in idea reports, patent-description HTML cleanup, and legal-status page parsing no longer use production-path `expect()`. Regexes remain cached; an unexpected initialization failure is logged and returns escaped text or a controlled error instead of panicking. Markdown rendering and HTML-escaping regressions prevent an XSS fallback while moving escaping responsibility.
+- **DOCX 导出错误处理与 XML 转义** — OA 意见陈述书导出不再在 ZIP 写入失败时 panic；所有写入失败会记录服务端诊断信息并向用户返回可理解的导出失败提示。专利号、申请人、审查意见类型和答复正文均会按 XML 文本节点转义，避免特殊字符损坏 Word 文档结构。
+  DOCX export error handling and XML escaping: OA response-letter export no longer panics when ZIP writing fails; failures are logged server-side and returned as a friendly export error. Patent number, applicant, office-action type, and response text are XML-escaped as text nodes so special characters cannot corrupt the Word document.
+- **移动端嵌入服务生命周期** — Android/iOS FFI 启停入口不再因 Tokio 运行时创建、线程创建或服务器状态锁失败而 panic；重复启动会明确拒绝且保留原服务句柄，关闭操作在释放状态锁后再等待线程退出
+  Mobile embedded-server lifecycle: Android/iOS FFI start and shutdown no longer panic on Tokio runtime creation, thread creation, or server-state lock failure. Duplicate starts are explicitly refused without replacing the original handle, and shutdown waits for the thread only after releasing the state lock
+- **AI 单次调用时限** — 聊天、分析、增强处理、默认 HTTP、多模态与流式 OA 调用现统一受 60 秒上限约束；现有重试与用户友好的超时错误保留，但不会让一次请求等待数分钟
+  AI single-call timeout: chat, analysis, enrichment, default HTTP, multimodal, and streaming OA calls now share a 60-second ceiling. Existing retries and user-friendly timeout errors remain, but a request can no longer wait for minutes
+- **D 盘运行期 PDF 临时文件** — PDF 解析、视觉回退、OCR 和 MinerU 不再使用 Windows 系统临时目录；文件现在以不可预测的 UUID 名称在项目 `data/runtime-temp` 下独占创建，并由作用域守卫在成功、失败和提前返回时清理。`pdftotext` 直接捕获标准输出，Umi-OCR 不再写入未使用的副本
+  D-drive runtime PDF temporary files: PDF extraction, vision fallback, OCR, and MinerU no longer use the Windows system temp directory. UUID-named files are created exclusively under project `data/runtime-temp` and cleaned by a scope guard on success, failure, and early return; `pdftotext` captures stdout directly and Umi-OCR no longer writes an unused copy
+- **远程专利 PDF 下载安全** — 从专利记录下载 PDF 时，现仅允许 HTTPS 主机名、默认
+  443 端口和无凭据 URL；服务会校验并固定公网 DNS 结果、禁用代理和重定向、拒绝非
+  2xx/超过 20 MB/非 PDF 响应，防止 SSRF、DNS 重绑定和内存耗尽
+  Remote patent-PDF download security: only HTTPS hostname URLs on the default port without
+  credentials are accepted; public DNS answers are validated and pinned, proxies and redirects
+  are disabled, and non-2xx, oversized, or non-PDF responses are rejected to prevent SSRF,
+  DNS rebinding, and memory exhaustion
+- **OA 导出语义澄清** — 原“导出结论”实际会调用 AI 生成二次摘要，现改名为“AI 总结结论”，并与可审计的完整原始记录导出分开
+  OA export semantics clarified: the former “Export Conclusions” action actually invokes AI to generate a second summary; it is now labelled “AI Summary” and separated from the auditable full-source-record export
+- **搜索页 PDF 初始化顺序** — 将 `updatePdfFileList()` 移至其定义之后执行，消除搜索页加载时的 `ReferenceError`，不改变已保存 PDF 元数据的恢复逻辑
+  Search-page PDF initialization order: `updatePdfFileList()` now runs after its definition, eliminating the load-time `ReferenceError` without changing persisted-PDF restoration
+- **专利图片代理 SSRF 防护** — 图片 URL 改用结构化解析，限制 HTTPS、精确白名单主机和默认端口，禁止凭据与自动重定向；保留合法签名图片链接的路径和查询参数
+  Patent image-proxy SSRF hardening: image URLs now use structured parsing with HTTPS, exact-host, and default-port restrictions; credentials and redirects are blocked while valid signed-image paths and queries are preserved
+- **本地服务 CORS 边界** — 移除全开放跨域来源；默认仅允许本机 `127.0.0.1:3000` 与 `localhost:3000`，移动端或桌面壳的额外来源可通过 `INNOFORGE_CORS_ORIGINS` 显式配置
+  Local-service CORS boundary: removed open cross-origin access; only local `127.0.0.1:3000` and `localhost:3000` are allowed by default, while mobile/desktop-shell origins can be explicitly configured with `INNOFORGE_CORS_ORIGINS`
+- **OA 后端数据完整性** — OA 讨论和答复书生成不再为控制上下文而静默截断原文；超出明确容量时返回带字段、实际字符数和上限的可见错误，并按 Unicode 字符计数
+  OA backend integrity: discussion and response-letter flows no longer silently truncate source material; oversized inputs return a visible field-specific Unicode-character capacity error
+- **OA AI 上下文数据完整性** — 移除 OA 修改校验和讨论流程中 6 个前端正文截断表达式，覆盖审查意见、本专利、对比文件和既有分析结果，避免长材料在提交 AI 前静默丢失
+  OA AI context integrity: removed six frontend body truncations from amendment checking and discussion flows so office actions, the subject patent, references, and existing analysis reach AI requests intact
+- **Windows 启动脚本解析** — 修复 `start.bat` debug 构建分支中未转义圆括号导致的 CMD 解析错误，快捷方式现在可以完成编译并启动服务
+  Windows launcher parsing: removed unescaped parentheses from the debug build echo line so the `start.bat` shortcut can compile and start the server
+
+### 测试 / Tests
+- **八页面浏览器回归矩阵** — `e2e_test.mjs` 扩展至 42 项无副作用真实浏览器检查，覆盖 8 个用户页面的 HTTP、关键节点、浏览器异常、失败请求和本地交互；专利详情同时支持有数据与空库 404 的受控分支，OA 长文本完整性和接口参数校验仍受覆盖
+  Eight-page browser regression matrix: `e2e_test.mjs` now has 42 side-effect-free browser checks covering HTTP, critical nodes, browser errors, failed requests, and local interactions across all eight user pages; patent detail supports both populated and empty-library 404 branches while OA long-payload integrity and endpoint validation remain covered
+- **OA 可重复端到端回归** — 新增仓库内 `e2e_test.mjs`，覆盖首页/OA 页面加载、审核修改方案接口连通性，以及超长 OA 请求体尾部标记保留；脚本不调用真实 AI 服务
+  Reproducible OA E2E regression: added repository-owned `e2e_test.mjs` covering home/OA loading, amendment-check connectivity, and long-payload tail preservation without calling a real AI service
+
+## [v0.7.3] - 2026-07-04
+
+### 修复 / Fixed
+- **DeepSeek reasoning_content 兼容** — DeepSeek v4-flash 流式 SSE 将文本放在 `delta.reasoning_content` 而非 `delta.content`，服务端 SSE 解析器只读取 `content`，导致讨论/分析等流式调用返回空内容。`ResponseMessage` 新增 `reasoning_content` 字段，SSE 解析器增加 `reasoning_content` 兜底
+  DeepSeek streaming SSE compatibility: added `reasoning_content` fallback in both struct deserialization and streaming parser
+
+- **OA 渲染乱码根因修复** — DeepSeek API 请求缺失 `max_tokens` 导致默认 4K 截断，流式输出被切断后浏览器显示 `*`/`D`/`★` 乱码。`src/ai/chat.rs` 流式请求补全 `"max_tokens": 16384`，彻底解决截断问题
+  OA garbled text root cause fixed: missing `max_tokens` in DeepSeek requests caused 4K truncation; added `max_tokens: 16384` to all streaming calls
+
+- **DOMPurify 崩溃修复** — `static/purify.min.js` 文件损坏（18KB，缺少函数体）导致 `DOMPurify.sanitize()` 调用报 `Uncaught SyntaxError`，OA 页面 JS 整块不执行。重新下载完整版（21KB + sourcemap）替换
+  DOMPurify crash fixed: corrupted `purify.min.js` (18KB, missing function body) caused `SyntaxError` on entire OA page JS; replaced with complete version (21KB + sourcemap)
+
+- **OA 上下文扩容** — `src/ai/patent.rs` OA 分析与讨论截断上限从 120K/80K/120K 提升到 300K/200K/300K，确保长 OA 分析不丢上下文
+  OA context expanded: truncation limits raised from 120K/80K/120K to 300K/200K/300K for complete analysis
+
+### 改进 / Improved
+- **讨论 SSE 解析增强** — `sendOADiscussion()` 统一使用 `event:` 行解析模式（与 `doOAAnalysis()` 一致），更稳定地处理 SSE error/done 事件
+  Discussion SSE parser enhanced: consistent `event:` line handling across all streaming functions
+
+- **讨论传入 `oa_type`** — 讨论 API 请求增加 `oa_type` 字段，提供更丰富的上下文给 AI
+  `oa_type` field added to discussion API requests for richer AI context
+
+### 新增 / Added
+- **Fusion 多模型辩论引擎** — 支持多模型协同辩论，流水线每步独立模型配置，输出格式校验，S.U.P.E.R 架构规范写入 CLAUDE.md
+  Fusion multi-model debate engine: multi-model collaboration, per-step model config, output format validation, S.U.P.E.R architecture spec in CLAUDE.md
+
+---
+
+## [v0.7.2] - 2026-07-01
+
+### 新增 / Added
+- **SenseNova V6.7 Flash Lite / DeepSeek V4 Flash 模型支持** — 设置页新增 SenseNova 6.7 Flash Lite 和 DeepSeek V4 Flash 模型选项，同时更新 SenseNova 模型标签（Flash/Turbo/Pro/Ultra → Flash Lite/Flash/Turbo/Pro）
+  New model support: SenseNova 6.7 Flash Lite, DeepSeek V4 Flash; SenseNova model labels updated
+- **OA 答复 Markdown 无分隔行表格支持** — `office_action_response.html` 模板升级 Markdown 渲染器，支持不含分隔行的表格语法，兼容更多 AI 输出格式
+  OA response template: Markdown renderer enhanced to support separator-less tables
+- **OA 答复增强规划文档** — `docs/plans/oa-response-enhancement.md` 新增 P0-P3 规划（docx 导出 / 全流程持久化 / 拆条分析等）
+  OA enhancement roadmap document added (P0-P3 planning for docx export, persistence, structured analysis)
+
+### 改进 / Improved
+- **JS 错误屏障系统** — 全站 8 个页面引入全局 JS 错误屏障，统一拦截运行时错误并显示友好提示，杜绝白屏/黑屏
+  Global JS error barrier across all 8 pages — catches runtime errors with user-friendly messages, no more blank screens
+- **DOMPurify 全局保护** — 将 DOMPurify 初始化移至 `i18n.js` 全局模块，覆盖全部 8 个页面，新页面不再需要单独加保护
+  DOMPurify protection centralized in `i18n.js`, covers all 8 pages automatically
+- **Puppeteer 端到端测试** — 新增 Puppeteer 测试框架 + 基础页面加载测试，为后续自动化回归测试奠基
+  New Puppeteer test framework with basic page-load tests for E2E regression testing
+- **ESLint 代码规范** — 新增 package.json + ESLint 配置，JS 代码规范检查工具链
+  ESLint config added for JavaScript code quality enforcement
+- **start.bat debug 加速** — 调试模式使用 `cargo run` 而非 `cargo build --release`，启动速度大幅提升
+  start.bat debug mode uses `cargo run` instead of `cargo build --release` for faster startup
+- **AI 上下文预览大幅提升** — claims 预览上限从 3K→8K、content 从 2K→15K、description 从 3K→30K，让 AI 获取更完整的专利上下文提高分析质量
+  AI context window expanded: claims 3K→8K, content 2K→15K, description 3K→30K for richer patent context
+- **流式 debug 日志** — `chat.rs` 新增首块日志和 total_chars 追踪，便于排查流式响应异常
+  Streaming debug logging: first-chunk log + total_chars tracking for easier streaming diagnostics
+- **区别特征标记优化** — 专利分析结果中区别特征标记从 ✅ 改为 ★，更醒目直观
+  Distinguishing feature marker changed from ✅ to ★ for better visual clarity
+- **Google Patents 回捞增强** — 回捞逻辑优化，专利号提取和格式化更加健壮
+  Google Patents refetch improvements: more robust patent number extraction and formatting
+- **AI 上下文 10 倍扩容** — `patent.rs` 3 函数 6 处 `safe_truncate` 上限提升（30K→300K / 20K→200K / 60K→600K），`ai.rs` 10 处 `.take()` 预览上限同步放大（5K→50K / 15K→150K / 20K→200K），AI 能获取完整专利全文
+  AI context expanded 10x across patent analysis pipeline (30K→300K chars etc.) for complete patent document access
+- **GitFlow 分支策略** — 切换为 main/dev/feature 分支模型，main 受保护需 PR 合并，CI 覆盖 dev 分支
+  GitFlow branch strategy adopted: main protected (PR only), dev with CI, feature branches
+- **分离 Gitee remote** — 修复 origin 同时推 GitHub+Gitee 的配置问题，origin 专推 GitHub
+  Separated Gitee remote from origin to fix dual-push configuration issues
+
+### 修复 / Fixed
+- **patent_detail 页全部按钮失效** — `const box` 与 `var box` 命名冲突导致 JS 整块不执行，修复后按钮正常响应
+  All patent_detail page buttons were dead due to `const box` vs `var box` naming conflict; fixed
+- **patent_detail 标签页与按钮全部失效** — JavaScript 加载顺序问题导致标签页切换和操作按钮全部失灵，修复 DOM 就绪检测
+  Fixed JavaScript load order issue causing tab switching and action buttons to fail
+- **PDF 导出图片兜底** — 专利 PDF 导出时若图片 URL 不存在，不再崩溃，改为嵌入 PDF 链接文本
+  PDF export image fallback: when image URL is missing, embeds PDF link text instead of crashing
+- **Umi-OCR 异步 + 所有权修复** — Umi-OCR 调用中异步处理不当导致所有权错误，修复 reqwest multipart 特性补全
+  Umi-OCR async + ownership fix; reqwest multipart feature flag completed
+- **search 页 PDF 上传错误屏障** — `updatePdfFileList` 未定义时加入错误屏障忽略，防止干扰其他功能
+  Error barrier for undefined `updatePdfFileList` on search page
+- **未使用变量警告** — `upload.rs` 中 `tmp_pdf_str` 加 `_` 前缀消除 clippy 警告
+  Unused variable warning in upload.rs fixed (`tmp_pdf_str` → `_tmp_pdf_str`)
+- **OA 错误信息被覆盖** — SSE 流式错误后 `showError` 被通用"分析失败"覆盖，改 `} else if (!errored)` 保留详细错误
+  OA error message overwrite bug fixed: detailed error no longer replaced by generic "分析失败"
+
+### 文档 / Documentation
+- **防回退机制** — CLAUDE.md 验证强化 + errors.md 复盘补录，防止已修复问题重新出现
+  Anti-regression documentation: enhanced CLAUDE.md verification rules + errors.md retrospective records
+
+---
+
+## [v0.7.0] - 2026-06-26
+
+### 新增 / Added
+- **AI 对话角色预设系统** — 新增 5 种角色预设（专利审查专家、OA 答复专家、权利要求分析师、发明人头脑风暴），用户可在 AI 对话侧边栏切换角色，AI 回复风格和专业知识自动适配。支持自定义 system_prompt 传入
+  AI chat role preset system: 5 presets (Patent Examiner, OA Expert, Claim Analyst, Inventor Brainstorm) with auto-adapted response style and expertise; custom system_prompt support
+- **MCP 服务器新增 3 个专利分析工具** — `patent_threat_assessment`（X/Y/A 威胁分类）、`patent_claim_chart`（权利要求逐项对照表）、`patent_multi_compare`（3+ 专利多维对比矩阵）
+  3 new MCP tools: threat assessment (X/Y/A classification), claim chart (element-by-element mapping), multi-compare (3+ patents)
+- **专利威胁评估 API** — 后端 `/api/ai/threat-assessment`，批量评估多篇对比专利的威胁等级，输出威胁矩阵 + 组合威胁分析 + 答辩策略
+  Threat assessment API: bulk X/Y/A classification with similarity matrix and response strategy
+- **权利要求对照图表 API** — 后端 `/api/ai/claim-chart`，逐元素映射权利要求到对比文件，含等效/等同分析
+  Claim chart API: element-by-element mapping with equivalency analysis
+- **流水线新增第 16 步：OA 答复辅助分析** — `GenerateOaResponse` 作为流水线最终步骤，整合权利要求分析、现有技术聚类、新颖性评分、AI 深度分析，自动生成 OA 答复辅助分析报告（5 部分结构化输出）
+  Pipeline step 16: GenerateOaResponse — integrates claim analysis, prior art clusters, novelty scoring, AI deep analysis to generate structured OA response report
+
+### 改进 / Improved
+- **AI 对话流式响应支持 system_prompt** — `api_ai_chat` 和 `api_ai_chat_stream` 均支持传入自定义 system_prompt，可覆盖默认角色设定
+  AI chat streaming now supports custom system_prompt override
+- **流水线进度条更新** — 从 15 步同步更新为 16 步，前端进度显示适配新步骤
+  Pipeline progress bar synced from 15 to 16 steps
+- **PDF 专利文本提取增强** — `extract_pdf_text()` 新增 Rust 原生逐页提取（`extract_text_from_mem_by_pages`）作为第二级降级，在多栏中文专利排版下比标准模式效果更好。新增 `/api/patent/pdf/extract-text` 端点，返回按页分段的 JSON 数组，方便 AI 逐页分析。零新依赖
+  PDF text extraction enhanced: added page-by-page extraction as 2nd fallback (better for multi-column Chinese patents); new `/api/patent/pdf/extract-text` endpoint returns per-page JSON array; zero new dependencies
+
+---
+
+## [v0.6.3] - 2026-06-22
+
+### 新增 / Added
+- **OA 一审结构化分析** — Prompt 重写，强制 AI 输出 5 部分固定结构：权利要求逐项解析 / 审查员驳回逻辑还原 / 特征对比总表 / 逐权利要求反驳论点 / 意见陈述书草稿。每项权利要求单独论述，引用对比文献具体段落
+  OA first exam structured analysis: 5-part fixed output (claim breakdown / examiner logic / feature comparison table / counter-arguments / response draft)
+- **分析结果分段展示** — 前端将 5 部分分析渲染为彩色卡片，特征对比表（绿色边框）突出显示，意见陈述书草稿可独立导出 `.txt` 直接粘贴提交
+  Analysis result displayed in 5 color-coded cards; response draft exportable as `.txt`
+- **深度模式增强** — `extract_oa_response_section` 辅助函数将 critique 审查范围缩小到第五部分意见陈述书，避免冗余分析
+  Deep mode: critique now targets only the response draft section
+
+### 改进 / Improved
+- **OA 审查员自检增强** — `oa_critique` prompt 增加特征对比准确性检查维度，要求 AI 从审查员视角核实对比文献公开内容认定的准确性
+  OA critique prompt enhanced with feature comparison accuracy verification
+- **OA 分析 SSE 流式支持** — 新增 `send_chat_stream` 通用流式方法 + `office_action_response_stream` OA 流式端点 `/api/ai/office-action-response/stream`。前端实时显示文本生成过程，deep 模式两阶段流式（主分析 + 审查员自检），失败自动回退普通 POST
+  SSE streaming support for OA analysis: real-time text display, two-phase streaming for deep mode (analysis + critique), automatic fallback to regular POST
+
+### 修复 / Fixed
+- **DOMPurify OA 页面遗漏** — `office_action_response.html` 仍使用 CDN 引用，导致断网时 JS 崩溃全黑。已替换为 `/static/purify.min.js`
+  DOMPurify CDN → local in OA page (was missed in v0.6.2)
+- **系统代理导致 API 连接失败** — Windows HTTP_PROXY 环境变量（`http://127.0.0.1:10808`）被 reqwest 库自动读取，拦截了 DeepSeek 请求。reqwest 客户端强制 `.no_proxy()` 绕过系统代理
+  Windows system proxy (`HTTP_PROXY=127.0.0.1:10808`) blocked DeepSeek API calls; fixed with `.no_proxy()` on reqwest client
+- **AI 请求超时 45s 过短** — `PROVIDER_HTTP_TIMEOUT_SECS` 从 45 秒提升至 180 秒，解决 DeepSeek v4-pro 推理模型处理长 prompt 超时问题
+  HTTP timeout increased from 45s to 180s for reasoning model response times
+- **start.bat 找不到 cargo** — `cargo` 不在 Windows 系统 PATH 中时编译失败。加入 `set "PATH=%USERPROFILE%\.cargo\bin;%PATH%"`
+  start.bat: added cargo to PATH for systems where it's not in Windows environment
+- **start.bat 启动慢** — 每次运行都执行 `cargo build --release`（3-4分钟）。改为检测到已有二进制时跳过编译直达启动
+  start.bat: skip build if release binary already exists (instant startup)
+- **getRefs 重复推送** — `refs.push()` 对同一数据推送两次（`_uploadedData` + `uploadedData` Proxy），删除重复行
+  Fixed duplicate refs.push() in getRefs function
+- **dev.bat 同样缺少 cargo 路径** — 加入相同的 PATH 修复
+  dev.bat: same cargo PATH fix
+
+---
+
+## [v0.6.2] - 2026-06-26
+
+### 新增 / Added
+- **搜索页 PDF 上传** — 搜索页新增 PDF 上传区，支持拖拽上传 + 点击选择，文件送至 `/api/upload/extract` 提取文本后结合搜索分析
+  Search page PDF upload zone with drag-and-drop, text extraction via backend API
+- **首页文件上传持久化** — 上传的文件信息通过 localStorage 持久化，页面刷新后自动恢复，不丢失文件引用
+  Homepage file upload persistence: files survive page refresh via localStorage
+
+### 改进 / Improved
+- **DOMPurify 本地化** — 6 个模板（index/idea/ai/settings/patent_detail/oa-response）从 CDN 引用替换为 `/static/purify.min.js`，编译进二进制，完全消除网络依赖和断网黑屏
+  DOMPurify localized: 6 templates use embedded `/static/purify.min.js`, no CDN dependency
+- **启动脚本重构** — `start.bat` 重写为始终编译（删除旧二进制跳过逻辑），新增 `dev.bat` 调试模式快速启动脚本
+  start.bat rewritten to always recompile; new dev.bat for debug-mode fast startup
+- **代码质量加固** — 修复 3 个 clippy 警告（`manual_flatten` / `unnecessary_map_or` × 2），零警告通过
+  3 clippy fixes: manual_flatten, 2x unnecessary_map_or → is_some_and
+- **.gitignore 增强** — 增加 `.reasonix/` / 临时工具脚本 / 测试适配器 / 备份文件等保护规则
+  .gitignore strengthened with entries for temp scripts, test adapters, backup files
+
+### 修复 / Fixed
+- **search.html CSS 重复** — 移除搜索页 PDF 上传区样式定义重复，修复多余 `</script>` 标签
+  Fixed duplicate CSS definitions and extra `</script>` tag in search page
+
+---
+
+## [v0.6.1] - 2026-05-23
+
+### 改进 / Improved
+- **代码质量加固** — 消除生产路径 14 处 `unwrap()` 调用（`idea.rs` / `pages.rs` / `patent.rs` / `db/patent.rs` / `upload.rs`）
+  Production code quality: eliminated 14 `unwrap()` calls across 5 source files
+- **Pipeline 步骤同步** — 前端进度条从 14 步更新为 15 步（补齐 PriorArtCluster），子步骤显示从 AiDeepAnalysis 独享泛化为所有步骤通用
+  Pipeline visualization: synced to 15 steps, sub-step progress generalized to all steps
+- **聊天消息分段加载** — 后端 `GET /api/chat/:key` 支持 `?limit=N&offset=M` 分页，前端默认加载最近 50 条，提供"加载更多"按钮
+  Chat pagination: backend paginated API + frontend load-more UI
+- **文档治理** — STATUS.md / CLAUDE.md / docs/plans 版本同步，根目录冗余文件清理
+  Documentation governance: STATUS.md, CLAUDE.md, plans synced to v0.6.1
+
+### 修复 / Fixed
+- **prior_art_cluster unwrap** — `best_cluster.unwrap().1` → `is_none_or()`（clippy 建议）
+  prior_art_cluster unwrap eliminated via is_none_or
+- **CI/CD release.yml** — 支持 `workflow_dispatch` 手动触发 + 按平台重命名二进制（解决 Linux/macOS 同名冲突）
+  CI/CD: workflow_dispatch support + platform-specific binary naming
+
+### 修复 / Fixed
+- **Gitee Release 同步** — 补齐 v0.5.9 tag，创建 v0.5.10 / v0.6.0 Release 条目
+  Gitee release sync: added missing v0.5.9 tag, created v0.5.10/v0.6.0 releases
+
+---
+
+## [v0.6.0] - 2026-05-23
+
+### 新增 / Added
+- **OA 答复分析页面** — 全新 `/oa-response` 独立页面，支持三种审查意见类型：一审/二审答复、非正常申请答辩、驳回后复审请求，各有专属 system prompt
+  New OA Response page (`/oa-response`): supports 3 office action types — 1st/2nd OA, abnormal application, re-examination after rejection
+- **三档分析深度** — OA 分析支持快速概览（单次简要）、标准分析（特征对比表+分层策略）、深度穷追（标准+AI 自检反驳，两次串行调用），用户按需选择
+  Three-level analysis depth: Quick (single-pass brief), Standard (feature table + layered strategy), Deep (Standard + AI self-critique, two-pass serial)
+- **AI 自检反驳机制** — 深度模式下 AI 先提答复方案，再换审查员视角逐条挑刺，输出「审查员视角预判」附在方案后
+  AI self-critique: Deep mode generates response first, then re-analyzes from examiner's perspective, outputting "examiner's predicted objections"
+- **特征对比表 + 分层策略** — 标准/深度模式下 AI 强制输出权利要求逐特征对比表，以及「否定技术启示→强调协同效果→保底修改」三层论证
+  Feature comparison table + layered strategy: Standard/Deep modes output claim-by-claim feature comparison table and 3-tier argument structure
+- **侧边栏导航 OA 入口** — 全局导航增加「OA答复」链接，方便快速访问
+  Sidebar nav: added "OA Reply" link for quick access
+
+### 改进 / Improved
+- **AI 通俗表达规则** — 深度/中度模式新增第 8/7 条规则，要求 AI 保留全部技术分析能力但用通俗语言呈现结论和推理过程，避免堆砌公式
+  Plain language rule added to deep/medium prompts: AI retains full analytical capability but explains conclusions in accessible language
+- **代码质量加固** — 消除生产路径 10+ 处 `unwrap()` 调用（`idea.rs` / `pages.rs` / `patent.rs` / `db/patent.rs` / `upload.rs`），包括 `Response::builder().unwrap()` → match 模式、`text_result.unwrap()` → 统一 match、`country.unwrap()` → `country_val` 提前绑定、`unwrap_or_default()` 替代
+  Production code quality: eliminated 10+ `unwrap()` calls across 5 source files, replaced with match/`unwrap_or_default()`/`expect()` patterns
+- **文档同步** — STATUS.md 版本同步到 v0.6.0、CLAUDE.md Pipeline 步数修正为 15 步、v0.6.0 计划文档创建
+  Documentation sync: STATUS.md updated to v0.6.0, CLAUDE.md pipeline step count corrected to 15, v0.6.0 plan doc created
+- **仓库清理** — 删除根目录冗余 `main.rs`（过时副本）和 `write_start.py` 工具脚本，`.gitignore` 增加防护
+  Repo cleanup: removed stale root `main.rs` and `write_start.py`, added .gitignore entries
+
+### 修复 / Fixed
+- **引用按钮不显示** — ai.html 的 getQuoteBtn 添加 document.body.contains 检测，修复 renderAllMessages 清空 DOM 后引用按钮丢失的问题
+  Fixed quote button disappearing after renderAllMessages clears DOM — added document.body.contains check in getQuoteBtn
+- **时间显示为中国时区** — idea.html 版本列表、侧边栏创意列表、对话消息三处时间从 UTC 改为 CST (UTC+8)，新增 toCST() 辅助函数
+  Fixed timezone: idea page timestamps (version list, sidebar, chat messages) now display in CST (UTC+8) via new toCST() helper
+
+### 新增 / Added
+- **讨论深度选择器** — IDEA 创意讨论支持浅度/中度/深度三档，控制 AI 回答的分析深度和严谨程度
+  Discussion depth selector: shallow/medium/deep modes for idea discussion, controls AI analysis depth
+- **全站暂停按钮** — AI 助手、专利详情、创意讨论、方案对比四个页面统一增加 ■ 停止按钮，可中止 AI 回复后立即输入新话题
+  Universal stop button: all 4 chat pages (AI Chat, Patent Detail, Idea Discussion, Compare) support AbortController-based stop
+- **全站导出结论** — 所有对话页面统一支持将讨论历史导出为结构化结论（已定决策/达成的结论/待解决问题/风险项及等级）
+  Universal export conclusions: all chat pages can export structured conclusions (decisions/conclusions/pending issues/risks)
+- **通用导出结论 API** — 新增 `POST /api/ai/chat/conclusions`，支持 session_key 和 history 双源
+  New API: POST /api/ai/chat/conclusions supporting session_key (DB) or history (in-memory) sources
+
+### 改进 / Improved
+- **深度模式 Prompt 重构** — AI 从「提问者」改为「深度回答者」，三档均不再向用户提问，改为控制回答深度
+  Depth prompt refactored: AI changed from questioner to deep-answerer across all 3 modes
+- **AI 超时提升至 300 秒** — 解决大上下文讨论超时问题
+  AI timeout increased from 60s to 300s to handle large context discussions
+- **Gemini CLI 误用修复** — 非 Gemini 服务商不再错误启用 Gemini CLI 模式
+  Gemini CLI no longer applies to non-Gemini providers via is_gemini guard
+- **启动日志增强** — 启动时输出 AI 服务商、模式、超时信息，便于排查
+  Startup config log: prints AI provider, mode, timeout for easier debugging
+
+### 修复 / Fixed
+- **DeepSeek 模型名称修正** — 前端模型下拉列表移除无效的 deepseek-chat-v4-flash，仅保留有效模型
+  Fixed DeepSeek model list: removed invalid model names, only deepseek-v4-flash and deepseek-v4-pro shown
+- **设置页 Gemini CLI 联动** — 切换非 Gemini 服务商时自动禁用 Gemini CLI 开关
+  Settings page: auto-disables Gemini CLI toggle when switching away from Gemini provider
+
+### 技术 / Technical
+- **新增自动化测试** — 3 个测试覆盖 Gemini CLI 模式保护和超时配置（共 121 测试通过）
+  3 automated tests for Gemini CLI guard and timeout config (121 total tests passing)
+
+## [v0.5.9] - 2026-05-14
+
+### 新增 / Added
+- **设置页 AI 服务商预设** — 支持 DeepSeek / 小米 MiMo / 商汤 SenseNova / OpenRouter / Google Gemini 一键切换，模型下拉随服务商动态变化
+  Settings page: AI provider presets (DeepSeek/Xiaomi/SenseTime/OpenRouter/Gemini) with dynamic model dropdowns
+- **聊天图片粘贴支持** — AI 助手页面支持 Ctrl+V 粘贴图片，基于 Gemini 等多模态模型识别图片内容
+  AI Chat: paste image support (Ctrl+V), uses multimodal models (Gemini) for image recognition
+- **专家模型配置（深度分析）** — 设置页新增"专家模型"下拉框，独立于默认模型，用于创造性分析、侵权评估等高推理任务
+  Expert model config: separate dropdown for deep analysis tasks (inventiveness, infringement, claims, office action)
+- **SerpAPI 余额/用量显示** — 设置页新增 SerpAPI 余额进度条，显示 plan_name、searches_per_month、当月用量、剩余次数
+  Settings page: SerpAPI balance indicator with progress bar (plan, quota, usage, remaining)
+- **对话跨设备同步** — AI 助手和专利详情页的聊天记录从 localStorage 迁移到后端 SQLite 持久化，换设备不丢失
+  Cross-device chat sync: chat history migrated from localStorage to backend SQLite persistence
+- **聊天记录 CRUD API** — 新增 `GET/POST /api/chat/:key` 和 `POST /api/chat/:key/delete` 三个端点
+  Chat records CRUD API: 3 new endpoints for get/save/delete chat messages
+- **CI/CD 自动化** — GitHub Actions: push/PR 到 main 自动运行 fmt + clippy + test；打 v* tag 自动构建全平台 Release
+  CI/CD: GitHub Actions CI (fmt + clippy + test) and Release (build for ubuntu/windows/macos, publish)
+
+### 改进 / Improved
+- **AI 专家深度增强** — 4 个深度分析端点（创造性三步法分析、权利要求分析、侵权评估、审查意见答复）自动使用专家模型（默认 deepseek-reasoner），提升分析质量；inventiveness_analysis 提示词增加结构化输出（结论/置信度/证据/反论/下一步）
+  AI expert enhancement: 4 deep analysis endpoints now use expert model (default deepseek-reasoner); inventiveness prompt enhanced with structured output (conclusion/confidence/evidence/counterargument/next-step)
+- **分析页面模型标识** — 创造性分析、一审答复、权利要求分析、侵权评估按钮添加 (Reasoner) 标签，明确标识使用深度推理模型
+  Analysis page model badges: (Reasoner) label added to inventiveness, OA, claims analysis, and risk assessment buttons
+- **SerpAPI 中文搜索精度** — 中文查询自动附加 `hl=zh-cn&gl=cn&lr=lang_zh-CN` 参数，提升中文专利搜索命中率
+  SerpAPI Chinese search accuracy: auto-attach hl/gl/lr params for Chinese queries
+- **本地 FTS5 排序权重** — BM25 权重调优：标题 10.0、专利号 5.0、摘要 5.0、权利要求 3.0、申请人 2.0、发明人 2.0、IPC 1.0
+  FTS5 BM25 ranking weights tuned: title 10.0, patent_number 5.0, abstract 5.0, claims 3.0, applicant 2.0, inventor 2.0, IPC 1.0
+- **数据库 schema 升级到 v13** — 新增 `chat_records` 表用于聊天记录持久化
+  Database schema upgraded to v13 (chat_records table)
+- **聊天输入框升级** — input 替换为 textarea，支持 Shift+Enter 换行、Enter 发送，支持图片粘贴预览
+  Chat input upgraded to textarea with Shift+Enter for newlines, Enter to send, image paste preview
+
+### 修复 / Fixed
+- **Gemini API 双斜杠 URL 导致 404** — AI client URL 拼接时 trim 尾斜杠，修复 Gemini base_url 尾部 `/` 导致 `openai//chat/completions` 404 问题
+  Fixed Gemini API 404 due to double-slash URL (trailing slash in base_url)
+- **Gemini 模型配额选择** — 默认模型从 gemini-2.0-flash（免费配额耗尽）改为 gemini-2.5-flash（有可用配额）
+  Default Gemini model changed from gemini-2.0-flash (quota=0) to gemini-2.5-flash (working)
+
+### 测试 / Tests
+- **聊天记录集成测试** — 新增 6 个测试覆盖 chat CRUD、会话隔离、边界条件
+  6 new chat record integration tests (CRUD, isolation, edge cases)
+- **Schema 版本断言更新** — 3 个集成测试中的版本断言从 12 更新为 13
+  3 integration tests updated schema version assertion from 12 to 13
+
+---
+
+## [v0.5.8] - 2026-05-11
+
+### 新增 / Added
+- **SerpAPI 多 Key 轮询** -- 支持配置最多 5 个 SerpAPI Key 自动轮询，突破单账号每月 250 次限制
+  SerpAPI multi-key round-robin -- supports up to 5 keys to bypass monthly 250-query limit
+- **设置页多 Key UI** -- 设置页面支持动态增删 SerpAPI Key 行
+  Settings page multi-key UI with dynamic add/delete rows
+- **AI 对话持久化** — AI 助手页 (`/ai`) 和专利详情页 (`/patent/:id`) 的聊天记录通过 localStorage 持久化保存，页面刷新后自动恢复
+  AI chat persistence via localStorage for AI Assistant and Patent Detail pages (survives page refresh)
+- **网络错误重试按钮** — 三个 AI 对话页面（AI 助手 / 专利详情 / 创意推演）在网络错误时显示 🔄 重试按钮，一键重发上一条消息，无需手动复制
+  Retry button on network errors for all 3 AI chat pages, one-click resend of last message
+
+### 改进 / Improved
+- **搜索源精简** — 仅保留 SerpAPI + 本地数据库，移除 Firecrawl/Bing/Lens.org/CNIPR/搜狗，代码减少约 1100 行
+  Search sources simplified to SerpAPI + local DB only (removed Firecrawl/Bing/Lens.org/CNIPR/Sogou, ~1100 lines removed)
+- **AI 服务商精简** — 仅保留 DeepSeek，移除 6 个备用 AI 服务商（智谱/OpenRouter/Gemini/OpenAI/NVIDIA/Ollama）
+  AI providers simplified to DeepSeek only (removed 6 fallback providers)
+- **设置页 UI 简化** — 只显示 SerpAPI 多 Key 管理和 DeepSeek 配置，删除已移除服务的配置项
+  Settings page UI simplified to show only SerpAPI + DeepSeek configuration
+- **`.claude/settings.local.json` 权限配置修正** — 删除无效的 `allowMode` 键，按官方文档使用 `defaultMode: "bypassPermissions"`
+  Fixed Claude Code permissions config: removed invalid `allowMode` key, uses official `defaultMode: "bypassPermissions"`
+
+### 修复 / Fixed
+- 设置页删除 Key 行后保存丢失数据（`querySelectorAll` 修复）
+  Fixed key loss after deleting a row on settings page (querySelectorAll fix)
+- AI 备用服务商自动启用 bug（`ai_client()` 回退到主 AI 优先）
+  Fixed auto-promotion of backup AI providers (ai_client() now prefers primary)
+- 生产路径 `unwrap()` 消除（search.rs 等）
+  Removed unwrap() from production code paths (search.rs, etc.)
+- `api_patent_pdf` Handler 编译错误（内联方法链拆解）
+  Fixed api_patent_pdf Handler trait compilation error
+
+### 移除 / Removed
+- 搜索源：Firecrawl / Bing / Lens.org / CNIPR / 搜狗（已移除全部代码）
+- AI 服务商：智谱 GLM / OpenRouter / Gemini / OpenAI / NVIDIA / Ollama（仅保留 DeepSeek）
+- 配置项：`bing_api_key` / `lens_api_key` / `firecrawl_api_key` / `cnipr_*` / `ai_fallbacks`
+
+---
+
+## [v0.5.7] - 2026-05-02
+
+### 新增 / Added
+- **Firecrawl 专利兜底搜索** -- 新增 Firecrawl 作为 SerpAPI 超时/无结果时的降级源
+  Added Firecrawl patent fallback search when SerpAPI times out or returns no results
+
+### 改进 / Improved
+- 启动与搜索质量优化
+  Startup and search quality improvements
+
+---
+
+## [v0.5.6] - 2026-04-18
+
+### 新增 / Added
+- **研发状态机持久化（ResearchState Persistence）** -- 新增 `idea_research_state` 表，研发假设/排除路径/开放问题/已验证结论可独立持久化并跨续跑保留
+  Added persistent `idea_research_state` table for hypothesis/excluded paths/open questions/verified claims across runs
+- **ResearchState API** -- 新增读取与更新接口（`GET/POST /api/idea/:id/research-state`）
+  Added read/update API for research state (`GET/POST /api/idea/:id/research-state`)
+- **中途重定向重跑（Redirect Run）** -- 新增 `POST /api/idea/:id/redirect`，支持注入新约束并从指定步骤跳转重跑
+  Added redirect endpoint to inject constraints and restart from a specified step (`POST /api/idea/:id/redirect`)
+
+### 改进 / Improved
+- Orchestrator 每步成功后自动落盘 `ResearchState`，删除创意时级联清理对应研发状态
+  Orchestrator now persists research state after each successful step and cleans it up on idea deletion
+- 数据库 schema 升级到 v12，并补齐集成测试覆盖 `research_state` CRUD
+  Database schema upgraded to v12 with integration coverage for `research_state` CRUD
+
+---
+
+## [v0.5.4] - 2026-04-18
+
+### 新增 / Added
+- **移动端 C ABI 启动入口** -- 主仓新增/补齐 innoforge_start_server + patent_hub_start_server 兼容别名
+  Mobile C ABI startup entry -- main repo adds/completes innoforge_start_server + patent_hub_start_server compatible aliases
+- **Desktop 壳入口对齐** -- 窗口入口改为本地 http://127.0.0.1:3000，核心品牌字段对齐
+  Desktop shell entry alignment -- window entry changed to local http://127.0.0.1:3000, core brand fields aligned
+- **iOS 壳对齐** -- 改用 innoforge.db 与 innoforge_start_server，Bundle Identifier/显示名对齐
+  iOS shell alignment -- switched to innoforge.db and innoforge_start_server, Bundle ID/display name aligned
+- **Harmony 品牌对齐** -- app 元数据与页面文案品牌版本对齐至 0.5.4
+  Harmony brand alignment -- app metadata and page text brand version aligned to 0.5.4
+
+---
+
+## [v0.4.4] - 2026-04-03
+
+### 新增 / Added
+- **多维深度推演引擎** -- AI 深度分析升级为 7 轮多维推演（科学推导/辩证批判/知识审计/本质还原/减法思维/跨域映射 + 跨维度合成）
+  Multi-dimensional deep reasoning engine -- 7-round analysis (scientific deduction / dialectical critique / knowledge audit / essence reduction / subtractive thinking / cross-domain mapping + synthesis)
+
+### 修复 / Fixed
+- 侵权评估结果字段名修正（assessment → analysis，前端可正确显示）
+  Risk assessment field name fix (assessment → analysis)
+- 创意删除级联清理特征卡片（FK constraint 修复）
+  Idea deletion cascades to feature cards (FK constraint fix)
+- 13 步文案全面修正（模板 + 注释中残留的 "12 步" 全部更新）
+  All "12-step" text updated to "13-step" across templates and comments
+- 设置页备用 AI 表单 XSS 加固（innerHTML → createElement）
+  Settings page fallback AI form XSS hardening
+- gitignore 清理（忽略临时测试文件）
+  gitignore cleanup for temp test files
+
+---
+
+## [v0.4.3] - 2026-04-02
+
+### 新增 / Added
+- **Pipeline 13 步** -- 新增 PriorArtCluster 步骤（现有技术按主题聚类），优化矛盾检测上游数据
+  Pipeline upgraded to 13 steps -- PriorArtCluster groups similar prior art by topic
+- **特征卡片系统** -- Feature Card CRUD + 差异对比 API（`/api/ideas/:id/feature-cards`, `/api/feature-cards/diff`）
+  Feature Cards system -- CRUD + diff comparison API for structured idea features
+- **AI 流式聊天** -- SSE 方式逐字返回 AI 回答（`/api/ai/chat/stream`）
+  AI streaming chat -- SSE-based token-by-token response
+- **Pipeline 断点续跑** -- 中断后可从快照恢复（`/api/idea/:id/resume`）
+  Pipeline resume -- restore from snapshot after interruption
+- **HTML 验证报告** -- 可视化验证结果页面（`/api/idea/:id/report.html`）
+  HTML validation report -- visual report page
+- **批量创意对比** -- 2-10 个创意同时对比（`/api/ideas/batch-compare`）
+  Batch idea comparison -- compare 2-10 ideas simultaneously
+- **CORS 中间件** -- 支持跨域 API 调用（MCP 客户端等）
+  CORS middleware -- enables cross-origin API calls for MCP clients
+
+### 安全修复 / Security Fixes
+- **XSS 防护** -- 全部 5 个 HTML 模板加入 DOMPurify，innerHTML 改为 createElement + textContent
+  XSS protection -- DOMPurify added to all 5 HTML templates, innerHTML replaced with safe DOM APIs
+- **SSRF 防护** -- 图片代理添加域名白名单（仅允许 googleapis.com / espacenet.com / sogou.com）
+  SSRF protection -- image proxy now validates URL against domain allowlist
+- **AI 全局超时** -- 从 24 分钟最坏情况降为 60 秒全局上限
+  AI global timeout -- worst case reduced from 24 min to 60s global cap
+
+### 改进 / Improved
+- Pipeline 通道自动清理（超 5 分钟自动移除，防止内存泄漏）
+  Pipeline channel auto-cleanup (removes stale entries after 5 min)
+- 数据库 schema 升级到 v6（新增 feature_cards 表）
+  Database schema upgraded to v6 (feature_cards table)
+- Skill Router 安全规则：允许代码审查类任务讨论漏洞
+  Skill Router security: allow code review tasks that discuss vulnerabilities
+
+---
+
+## [v0.4.2] - 2026-03-30
+
+### 新增 / Added
+- **历史记录增强** -- 显示精确时间（HH:MM）而非仅日期，同一天多条记录可清晰区分
+  History records enhancement -- show precise time (HH:MM), clearly distinguish same-day entries
+- **内容摘要预览** -- 历史列表显示创意描述前 40 字，快速识别每条记录
+  Description preview -- show first 40 chars in history list for quick identification
+- **对话计数标识** -- 显示每条创意的对话消息数，一目了然
+  Chat count indicator -- show conversation message count per idea
+- **自动滚动** -- 点击历史记录后自动滚动到对话区域
+  Auto-scroll to discussion panel when clicking history items
+
+### 改进 / Improved
+- IdeaSummary 增加 description 和 message_count 字段
+  IdeaSummary includes description and message_count fields
+- list_ideas 查询优化，子查询统计消息数
+  list_ideas query optimized with subquery for message count
+
+---
+
+## [v0.4.1] - 2026-03-30
+
+### 新增 / Added
+- **首页重塑** -- 从搜索框改为研发助手入口，三种模式（AI 对话 / 快速验证 / 深度验证）
+  Homepage redesign -- from search box to R&D assistant entry with 3 modes
+- **AI 对话增强** -- 专家级 prompt + 思维框架（第一性原理 / TRIZ / 逆向工程）
+  AI conversation enhancement -- expert-level prompt with thinking frameworks
+- **智能上下文管理** -- 超 8 轮自动压缩 + 摘要长记忆
+  Smart context management -- auto-compress after 8 rounds + summary long memory
+- **历史记录管理** -- 支持删除创意记录（级联清理对话）
+  History management -- delete ideas with cascading message cleanup
+- **文件上传** -- 首页拖拽上传 + 聊天区 📎 附件按钮（PDF/Word/图片）
+  File upload -- drag & drop on homepage + chat attachment button
+
+### 修复 / Fixed
+- 评分显示精度（97.19... → 97.2）/ Score display precision fix
+- AI 设置回显（不再重置为默认智谱）/ AI settings dropdown reflects saved value
+- SerpAPI 免费额度（100 → 250 次/月）/ SerpAPI free quota corrected
+- BAT 启动脚本中文编码 / BAT script Chinese encoding fix
+- 讨论总结错误改为友好内联提示 / Discussion summary error as inline message
+
+---
+
+## [v0.4.0] - 2026-03-30
+
+### 重大变更 / Breaking Changes
+- **Pipeline 统一** -- api_idea_analyze 改为 pipeline 快捷模式，删除 220 行重复代码
+  Pipeline unification -- api_idea_analyze uses quick_mode wrapper, removed 220 lines of duplicate code
+- **仓库架构重组** -- 主仓瘦身为纯 Rust 核心，iOS/鸿蒙/Tauri 拆至独立仓库
+  Repository restructuring -- core repo is pure Rust, iOS/HarmonyOS/Tauri split to independent repos
+
+### 新增 / Added
+- PipelineRunner 支持 quick_mode，跳过非必要步骤加速验证
+  PipelineRunner supports quick_mode, skipping non-essential steps
+- 前端「快速验证」（6 步）/ 「深度验证」（12 步）切换
+  Frontend quick validation (6 steps) / deep validation (12 steps) toggle
+- Android 固定签名证书，后续更新可直接覆盖安装
+  Android fixed signing certificate for seamless updates
+- CHANGELOG.md + CONTRIBUTING.md / Changelog and contributing guide
+
+### 改进 / Improved
+- cargo fmt 全量格式化 + cargo clippy 零警告 / Full formatting + zero clippy warnings
+- .gitattributes 优化 GitHub 语言统计（Rust 占比 90%+）/ GitHub language stats optimized
+- 清理冗余文件（Node.js 依赖、过时 CI、构建产物）/ Cleanup redundant files
+
+---
+
+## [v0.3.5] - 2026-03-29
+
+### 新增 / Added
+- 搜狗搜索内置免费方案，零配置开箱即用（国内无需 VPN 无需 Key）
+  Built-in Sogou search, zero-config for China (no VPN, no API key needed)
+- Bing Web Search API 支持（国内可用）/ Bing Web Search API support
+- Lens.org 专利搜索 API 支持 / Lens.org patent search API support
+- 搜索降级链：SerpAPI → Google Patents → Bing → Lens.org → 搜狗 → 本地 DB
+  Search degradation chain: SerpAPI → Google Patents → Bing → Lens.org → Sogou → Local DB
+- 设置页面新增「国内搜索配置」区域 / Settings page: domestic search configuration section
+- 使用免费搜索时自动提示升级 / Auto-prompt to upgrade when using free search
+
+---
+
+## [v0.3.4] - 2026-03-29
+
+### 修复 / Fixed
+- APP 端创意分析 AI 失败时降级评分 / Fallback scoring when AI analysis fails on APP
+- Tauri 前端浏览器测试路由 / Tauri frontend browser test routing
+- 文档上传支持 .docx + GBK 编码处理 / Document upload: .docx support + GBK encoding
+- AI 错误提示改善 / Improved AI error messages
+- Pipeline SSE 时序修复 / Pipeline SSE timing fix
+- 空 query 搜索校验 + 收藏专利 ID 验证 / Empty query validation + favorite patent ID check
+- 收藏标签前端 UI 优化 / Favorites tag UI polish
+
+---
+
+## [v0.3.3] - 2026-03-27
+
+### 新增 / Added
+- 12 步创新验证流水线（ParseInput → ScoreNovelty → AI 分析 → 报告生成）
+  12-step innovation validation pipeline
+- 设置持久化（SQLite 存储，重启不丢失）/ Settings persistence in SQLite
+- 鸿蒙 APP 构建配置 / HarmonyOS APP build configuration
+- 多平台 APP 支持框架 / Multi-platform APP framework
+- 全面中文化 / Full Chinese localization
+
+### 修复 / Fixed
+- 测试断言修复 / Test assertion fixes
+- 引用准确性提升 / Citation accuracy improvements
+- i18n 补全 / i18n completeness
+- Clippy 错误修复 / Clippy error fixes
+
+---
+
+## [v0.3.2] - 2026-03-26
+
+### 新增 / Added
+- 设置页面改造：多 AI 预设 + 注册引导 + 自定义支持
+  Settings page redesign: multi-AI presets + registration guide + custom support
+- 纯 Rust Android APP 方案（无 Java 依赖）
+  Pure Rust Android APP (no Java dependency)
+
+### 修复 / Fixed
+- 设置保存优化（先更新内存，.env 写入可选）/ Settings save optimization
+- AI 未配置时友好中文提示 / Friendly Chinese prompt when AI not configured
+- Android APK cdylib 共享库替代可执行文件 / Android APK: cdylib shared library
+- wry 0.46 API 变更适配 / wry 0.46 API changes adaptation
+
+---
+
+## [v0.3.1] - 2026-03-26
+
+### 新增 / Added
+- Android APP 支持（ARM64 + x86_64 双架构）
+  Android APP support (ARM64 + x86_64 dual architecture)
+- Dioxus Mobile 移动端方案 / Dioxus Mobile solution
+- 纯 Java WebView 方案（最终采用）/ Pure Java WebView approach (final choice)
+
+### 修复 / Fixed
+- APK 签名路径和上传条件 / APK signing path and upload conditions
+- Android APP 闪退和图标问题 / Android APP crash and icon issues
+- 静态文件内嵌二进制（Android 兼容）/ Static files embedded in binary
+- Android 9+ 允许 localhost 明文 HTTP / Android 9+ cleartext HTTP for localhost
+- CI 构建流程优化 / CI build workflow optimization
+
+---
+
+## [v0.3.0] - 2026-03-25
+
+### 新增 / Added
+- IPC 分类浏览 API / IPC classification browsing API
+- 混合相关性评分算法（TF-IDF + 位置加权）/ Hybrid relevance scoring (TF-IDF + position weighting)
+- Chart.js 可视化统计图表 / Chart.js visualization and statistics
+- 对比矩阵 + 侵权风险评估 UI / Comparison matrix + infringement risk assessment UI
+- 权利要求分析 + 批量摘要 / Claims analysis + batch summarize
+- PWA 支持（可安装为桌面/移动应用）/ PWA support (installable as app)
+- MCP Server（AI Agent 集成）/ MCP Server for AI Agent integration
+
+---
+
+## [v0.2.0] - 2026-03-24
+
+### 新增 / Added
+- AI 多服务商自动容灾切换（智谱 GLM、OpenRouter、Gemini、OpenAI、NVIDIA、DeepSeek）
+  AI multi-provider automatic failover (6 providers)
+- 专利技术附图查看 + 本地图片代理 / Patent drawings viewer + local image proxy
+- PDF 导出（含附图）/ PDF export with drawings
+- 中英双语国际化（i18n）/ Bilingual internationalization
+- 搜索结果智能去重 / Smart search result deduplication
+
+---
+
+## [v0.1.0] - 2026-02-24
+
+### 新增 / Added
+- 在线专利搜索（SerpAPI + Google Patents）/ Online patent search
+- 本地 SQLite 数据库 + FTS5 全文搜索 / Local SQLite + FTS5 full-text search
+- AI 智能分析（OpenAI 兼容 API）/ AI analysis (OpenAI compatible API)
+- 专利对比分析 / Patent comparison analysis
+- 相似专利推荐 / Similar patent recommendations
+- 文件上传对比 / File upload comparison
+- 搜索历史管理 / Search history management
+- 统计图表展示 / Statistics charts
+- Excel 数据导出 / Excel data export
+- 跨平台支持（Windows/Linux/macOS）/ Cross-platform support
+- 设置页面（网页配置 API Key）/ Settings page (web-based API key configuration)

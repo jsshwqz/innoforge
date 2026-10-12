@@ -1,0 +1,1085 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{title}} - 创研台</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#0d1117">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+    <script src="/static/purify.min.js"></script>
+</head>
+<body>
+    <div class="page-with-sidebar">
+    <aside id="page-sidebar" class="page-sidebar"></aside>
+    <main class="container page-main">
+        <div class="patent-detail">
+            <div class="detail-header">
+                <h1>{{title}}</h1>
+                <span class="patent-number-large">{{patent_number}}</span>
+                <div class="detail-actions">
+                    <button class="ai-btn" onclick="aiSummarize()">🤖 <span data-i18n="detail.analyze"></span></button>
+                    <button class="ai-btn" id="load-full-btn" onclick="loadFullText()">📄 加载全文</button>
+                    <button class="ai-btn violet" onclick="window.open('/api/patent/pdf/{{id}}','_blank')">📥 导出 PDF</button>
+                    <button class="ai-btn green" onclick="window.location.href='/compare?patent={{patent_number}}'">⚖️ 对比分析</button>
+                    <button class="ai-btn orange" id="collect-btn" onclick="toggleCollect()">⭐ 收藏</button>
+                </div>
+            </div>
+            <div id="ai-summary" class="ai-summary" style="display:none"></div>
+
+            <!-- 收藏夹 & 标签 -->
+            <div class="collect-tags-area">
+                <span id="collections-display"></span>
+                <span class="divider">|</span>
+                <span id="tags-display"></span>
+                <input type="text" id="new-tag-input" placeholder="添加标签..." onkeydown="if(event.key==='Enter')addTag()">
+            </div>
+
+            <div class="detail-grid">
+                <div class="detail-section">
+                    <h3 data-i18n="common.info.basicInfo"></h3>
+                    <table class="info-table">
+                        <tr><td data-i18n="common.info.patent"></td><td>{{patent_number}}</td></tr>
+                        <tr><td data-i18n="common.info.applicant"></td><td>{{applicant}}</td></tr>
+                        <tr><td data-i18n="common.info.inventor"></td><td>{{inventor}}</td></tr>
+                        <tr><td data-i18n="common.info.filingDate"></td><td>{{filing_date}}</td></tr>
+                        <tr><td data-i18n="common.info.pubDate"></td><td>{{publication_date}}</td></tr>
+                        <tr><td data-i18n="common.info.grantDate"></td><td>{{grant_date}}</td></tr>
+                        <tr><td data-i18n="common.info.country"></td><td>{{country}}</td></tr>
+                        <tr><td data-i18n="common.info.legalStatus" id="legal-status-label"></td><td>{{legal_status}}</td></tr>
+                    </table>
+                </div>
+                <div class="detail-section">
+                    <h3 data-i18n="common.info.classification"></h3>
+                    <p class="classify-row"><strong>IPC:</strong> <code class="ipc-chip">{{ipc_codes}}</code></p>
+                    <p class="classify-row"><strong>CPC:</strong> <code class="ipc-chip">{{cpc_codes}}</code></p>
+                </div>
+            </div>
+
+            <div class="detail-tabs">
+                <button class="tab active" onclick="showTab('abstract', event)" data-i18n="detail.tabAbstract"></button>
+                <button class="tab" onclick="showTab('claims', event)" data-i18n="detail.tabClaims"></button>
+                <button class="tab" onclick="showTab('description', event)" data-i18n="detail.tabDesc"></button>
+                <button class="tab" onclick="showTab('drawings', event)" id="tab-drawings-btn">📐 图纸</button>
+                <button class="tab" onclick="showTab('ai-chat', event)" data-i18n="detail.tabAiChat"></button>
+                <button class="tab" onclick="showTab('oa-timeline', event)" data-i18n="oa.workflow.timeline"></button>
+            </div>
+
+            <div id="tab-abstract" class="tab-content active">
+                <div class="content-box">{{abstract_text}}</div>
+            </div>
+            <div id="tab-claims" class="tab-content">
+                <div style="margin-bottom:12px;">
+                    <button class="btn-primary" onclick="analyzeClaims()" id="claims-analyze-btn">🔍 分析权利要求 <span class="reasoner-badge">Reasoner</span></button>
+                </div>
+                <div id="claims-analysis-result" class="analysis-result" style="display:none;margin-bottom:16px;"></div>
+                <div class="content-box"><pre>{{claims}}</pre></div>
+            </div>
+            <div id="tab-description" class="tab-content">
+                <div class="content-box"><pre>{{description}}</pre></div>
+            </div>
+            <div id="tab-drawings" class="tab-content">
+                <div id="drawings-container" style="text-align:center;">
+                    <p class="muted">加载全文后可查看图纸</p>
+                </div>
+            </div>
+            <div id="tab-ai-chat" class="tab-content">
+                <div class="chat-box" id="chat-messages"></div>
+                <div class="chat-input">
+                    <input type="text" id="chat-msg" data-i18n-placeholder="detail.chatPlaceholder">
+                    <button id="patent-send-btn" onclick="sendChat()" data-i18n="detail.send"></button>
+                    <button id="patent-cad-btn" type="button" onclick="drawPatentCad()" data-i18n="cad.draw"></button>
+                    <button id="patent-stop-btn" class="btn-stop" style="display:none" onclick="stopPatentGeneration()" data-i18n="detail.stop"></button>
+                    <button id="patent-export-btn" class="btn-export-ghost" style="display:none" onclick="exportPatentConclusions()" data-i18n="detail.exportConclusions"></button>
+                </div>
+            <div id="tab-oa-timeline" class="tab-content">
+                <div id="oa-timeline-container" style="padding: 16px 0;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                        <h3 data-i18n="oa.workflow.timeline" style="margin: 0;"></h3>
+                        <button class="btn-primary" onclick="createNewOaRound()" data-i18n="oa.workflow.newRound"></button>
+                    </div>
+                    <div id="oa-timeline-summary" style="margin-bottom: 16px; color: #666; font-size: 14px;"></div>
+                    <div id="oa-timeline-list" style="position: relative;">
+                        <p class="muted" data-i18n="oa.workflow.empty"></p>
+                    </div>
+                </div>
+            </div>
+            </div>
+        </div>
+
+        <div class="section-box">
+            <h3 data-i18n="detail.upload"></h3>
+            <p class="muted" data-i18n="detail.uploadHint"></p>
+            <input type="file" id="upload-file" accept=".txt,.doc,.docx,.pdf,.png,.jpg,.jpeg,.gif,.bmp,.webp">
+            <button class="btn-primary" onclick="uploadCompare()" data-i18n="detail.uploadBtn"></button>
+            <div id="upload-result" style="margin-top:16px;"></div>
+        </div>
+
+        <div class="section-box" id="similar-patents">
+            <h3 data-i18n="detail.similar"></h3>
+            <div id="similar-list" data-i18n="detail.similarLoading"></div>
+        </div>
+    </main>
+    </div>
+    <script src="/static/i18n.js"></script>
+    <script src="/static/cad.js"></script>
+    <script>
+    // Allow inline event handlers in sanitized HTML
+    if (typeof DOMPurify !== 'undefined' && DOMPurify.setConfig) {
+        DOMPurify.setConfig({ADD_ATTR: ['onclick', 'onkeydown', 'onchange', 'oninput', 'onload', 'onfocus', 'onblur']});
+    }
+    // Ensure DOMPurify never throws even if script failed to load
+    if (typeof DOMPurify === 'undefined' || typeof DOMPurify.sanitize !== 'function') {
+        window.DOMPurify = { sanitize: function(html) {
+            return html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+                       .replace(/on\w+="[^"]*"/gi, '').replace(/on\w+='[^']*'/gi, '');
+        }};
+    }
+
+    function escapeHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+    // Safe sanitize wrapper (DOMPurify may not load on some systems)
+    function safeSanitize(html) {
+        if (typeof DOMPurify !== 'undefined' && DOMPurify.sanitize) {
+            return DOMPurify.sanitize(html);
+        }
+        return html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+                   .replace(/on\w+="[^"]*"/gi, '').replace(/on\w+='[^']*'/gi, '');
+    }
+
+    function applyDetailI18n() {
+        // Re-apply legal status label lookup for enrich
+        var legalLabel = document.getElementById('legal-status-label');
+        if (legalLabel) legalLabel.textContent = t('common.info.legalStatus');
+    }
+
+    function showTab(name, ev) {
+        document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+        document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+        var tabEl = document.getElementById('tab-' + name);
+        if (tabEl) tabEl.classList.add('active');
+        // Activate clicked button via event (passed by onclick)
+        if (ev && ev.target) {
+            ev.target.classList.add('active');
+        } else {
+            // Fallback: find by onclick match
+            document.querySelectorAll('.tab').forEach(function(btn) {
+                var oc = btn.getAttribute('onclick') || '';
+                if (oc.indexOf("showTab('" + name + "')") >= 0 || oc.indexOf('showTab("' + name + '")') >= 0) {
+                    btn.classList.add('active');
+                }
+            });
+        }
+    }
+
+    async function aiSummarize() {
+        const el = document.getElementById('ai-summary');
+        el.style.display = 'block';
+        el.textContent = '🤖 ' + t('detail.analyzing');
+        try {
+            const resp = await fetch('/api/ai/summarize', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({patent_number: '{{id}}'})
+            });
+            if (!resp.ok) throw new Error('服务器错误 (' + resp.status + ')');
+            const data = await resp.json();
+            el.innerHTML = DOMPurify.sanitize('<h3>🤖 ' + t('detail.result') + '</h3><div>' + escapeHtml(data.content).replace(/\n/g, '<br>') + '</div>');
+        } catch(e) { el.textContent = t('detail.fail') + ': ' + e; }
+    }
+
+    document.getElementById('chat-msg').addEventListener('keydown', e => {
+        if (e.key === 'Enter') sendChat();
+    });
+    var chatHistory = initChatHistory('chat-msg');
+
+    // ── 持久化存储（后端 SQLite 替代 localStorage）──
+    var PATENT_CHAT_KEY = 'innoforge_chat_patent_{{patent_number}}';
+    var patentChatHistory = [];
+    var patentRetryMsg = '';
+    var patentChatSending = false;
+    var patentAbortController = null;
+    var patentChatQueue = initChatQueue('chat-msg');
+    var patentChatOffset = 0;
+    var patentChatTotal = 0;
+    var patentChatPageSize = 50;
+    var patentCadController = window.InnoForgeCad.createController({
+        context: function() { return { kind: 'patent', id: '{{id}}' }; },
+        input: function() { return document.getElementById('chat-msg'); },
+        messages: function() { return document.getElementById('chat-messages'); },
+        history: function() { return JSON.stringify(patentChatHistory); },
+        onContinue: function() {
+            var input = document.getElementById('chat-msg');
+            input.value = t('cad.continuePrompt'); input.focus();
+        }
+    });
+    function drawPatentCad() { patentCadController.drawFromInput(); }
+    patentCadController.restore();
+
+    // 一次性迁移：将旧 localStorage 中的聊天记录导入后端
+    function migrateOldPatentChat(key) {
+        var saved = localStorage.getItem(key);
+        if (!saved) return;
+        try {
+            var old = JSON.parse(saved);
+            if (!old || old.length === 0) return;
+            for (let i = 0; i < old.length; i++) {
+                var m = old[i];
+                fetch('/api/chat/' + encodeURIComponent(key) + '/save', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({role: m[0], content: m[1]})
+                }).catch(function(e) { console.warn('迁移旧聊天记录失败:', e); });
+            }
+            console.log('已迁移 ' + old.length + ' 条旧聊天记录到后端');
+        } catch(e) {}
+    }
+
+    // 加载更多专利聊天消息
+    function loadMorePatentChat() {
+        if (patentChatSending) return;
+        fetch('/api/chat/' + encodeURIComponent(PATENT_CHAT_KEY) + '?limit=' + patentChatPageSize + '&offset=' + patentChatOffset)
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.status === 'ok' && data.messages && data.messages.length > 0) {
+                    for (let i = data.messages.length - 1; i >= 0; i--) {
+                        var m = data.messages[i];
+                        patentChatHistory.unshift([m.role, m.content]);
+                    }
+                    patentChatOffset += data.messages.length;
+                    patentChatTotal = data.total;
+                    renderPatentMessages();
+                }
+                updatePatentLoadMore();
+            })
+            .catch(function(e) { console.warn('加载更多消息失败:', e); });
+    }
+
+    function updatePatentLoadMore() {
+        var existing = document.getElementById('patent-load-more');
+        if (patentChatOffset < patentChatTotal) {
+            if (!existing) {
+                var box = document.getElementById('patent-chat-messages');
+                var c = document.createElement('div');
+                c.id = 'patent-load-more';
+                c.style.cssText = 'text-align:center;padding:8px;';
+                var btn = document.createElement('button');
+                btn.textContent = t('ai.loadMore');
+                btn.style.cssText = 'background:#1c2128;border:1px solid #30363d;border-radius:6px;padding:6px 16px;cursor:pointer;font-size:13px;color:#c9d1d9;';
+                btn.onclick = loadMorePatentChat;
+                c.appendChild(btn);
+                box.insertBefore(c, box.firstChild);
+            }
+        } else {
+            if (existing) existing.remove();
+        }
+    }
+
+    // 页面加载时从后端恢复历史（分页加载最近 50 条）
+    (function loadPatentChat() {
+        fetch('/api/chat/' + encodeURIComponent(PATENT_CHAT_KEY) + '?limit=' + patentChatPageSize + '&offset=0')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.status === 'ok' && data.messages && data.messages.length > 0) {
+                    patentChatOffset = data.messages.length;
+                    patentChatTotal = data.total;
+                    patentChatHistory = [];
+                    data.messages.forEach(function(m) {
+                        patentChatHistory.push([m.role, m.content]);
+                    });
+                } else {
+                    // 后端无数据时，尝试从旧 localStorage 迁移
+                    migrateOldPatentChat(PATENT_CHAT_KEY);
+                    var saved = localStorage.getItem(PATENT_CHAT_KEY);
+                    if (saved) {
+                        try { patentChatHistory = JSON.parse(saved); } catch(e) {}
+                        patentChatTotal = patentChatHistory.length;
+                        patentChatOffset = patentChatHistory.length;
+                    }
+                }
+                renderPatentMessages();
+                updatePatentLoadMore();
+                showPatentExportButton();
+            })
+            .catch(function() {
+                // 后端不可用时降级到 localStorage
+                var saved = localStorage.getItem(PATENT_CHAT_KEY);
+                if (saved) {
+                    try { patentChatHistory = JSON.parse(saved); } catch(e) {}
+                    patentChatTotal = patentChatHistory.length;
+                    patentChatOffset = patentChatHistory.length;
+                }
+                renderPatentMessages();
+                showPatentExportButton();
+            });
+    })();
+
+    function renderPatentMessages() {
+        var box = document.getElementById('chat-messages');
+        box.innerHTML = '';
+        for (let i = 0; i < patentChatHistory.length; i += 2) {
+            var userDiv = document.createElement('div');
+            userDiv.className = 'msg user';
+            userDiv.textContent = patentChatHistory[i][1];
+            box.appendChild(userDiv);
+            var aiDiv = document.createElement('div');
+            aiDiv.className = 'msg ai';
+            aiDiv.innerHTML = DOMPurify.sanitize(escapeHtml(patentChatHistory[i+1][1]).replace(/\n/g, '<br>'));
+            box.appendChild(aiDiv);
+        }
+        patentCadController.renderHistory();
+        box.scrollTop = box.scrollHeight;
+        showPatentExportButton();
+    }
+
+    function savePatentMessage(role, content) {
+        fetch('/api/chat/' + encodeURIComponent(PATENT_CHAT_KEY) + '/save', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({role: role, content: content})
+        }).catch(function(e) {
+            console.warn('保存聊天记录失败:', e);
+        });
+    }
+
+    async function sendChat() {
+        const input = document.getElementById('chat-msg');
+        const msg = input.value.trim();
+        if (!msg) return;
+        if (patentCadController.shouldHandle(msg)) {
+            input.value = '';
+            await patentCadController.draw(msg);
+            return;
+        }
+        input.value = '';
+        chatHistory.push(msg);
+        if (patentChatSending) {
+            patentChatQueue.enqueue(msg);
+            return;
+        }
+        await sendPatentChatCore(msg);
+    }
+
+    async function sendPatentChatCore(msg) {
+        var box = document.getElementById('chat-messages');
+        var userMsgDiv = document.createElement('div');
+        userMsgDiv.className = 'msg user';
+        userMsgDiv.textContent = msg;
+        box.appendChild(userMsgDiv);
+        patentChatSending = true;
+        showPatentStopButton();
+        try {
+            await doPatentSend(msg);
+        } finally {
+            patentChatSending = false;
+            hidePatentStopButton();
+            box.scrollTop = box.scrollHeight;
+            var next = patentChatQueue.dequeue();
+            if (next) await sendPatentChatCore(next);
+        }
+    }
+
+    async function doPatentSend(msg) {
+        patentRetryMsg = msg;
+        var box = document.getElementById('chat-messages');
+        var aiLoadDiv = document.createElement('div');
+        aiLoadDiv.className = 'msg ai';
+        aiLoadDiv.id = 'ai-loading';
+        aiLoadDiv.textContent = t('ai.thinking');
+        box.appendChild(aiLoadDiv);
+        box.scrollTop = box.scrollHeight;
+        var controller = new AbortController();
+        patentAbortController = controller;
+        try {
+            const resp = await fetch('/api/ai/chat', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({message: msg, patent_id: '{{id}}', history: patentChatHistory}),
+                signal: controller.signal
+            });
+            if (!resp.ok) throw new Error('服务器错误 (' + resp.status + ')');
+            const data = await resp.json();
+            if (data.error || !data.content) {
+                var errMsg = data.error || 'AI 无响应';
+                if (errMsg.includes('unexpected end of file') || errMsg.includes('connection')) {
+                    errMsg += '\n\n💡 可能原因：API Key 无效或网络不稳定。请到「设置」页检查 AI 配置。';
+                }
+                showPatentError(errMsg);
+            } else {
+                var loadEl = document.getElementById('ai-loading');
+                var aiReplace = document.createElement('div');
+                aiReplace.className = 'msg ai';
+                aiReplace.innerHTML = DOMPurify.sanitize(escapeHtml(data.content).replace(/\n/g, '<br>'));
+                loadEl.parentNode.replaceChild(aiReplace, loadEl);
+                patentChatHistory.push(["user", msg]);
+                patentChatHistory.push(["assistant", data.content]);
+                savePatentMessage('user', msg);
+                savePatentMessage('assistant', data.content);
+                patentRetryMsg = '';
+            }
+        } catch(e) {
+            if (e.name === 'AbortError') return;
+            var errText = String(e);
+            if (errText.includes('unexpected end of file') || errText.includes('connection')) {
+                errText += '\n\n💡 请到「设置」页检查 AI API Key 是否正确配置。';
+            }
+            showPatentError(errText);
+        } finally {
+            if (patentAbortController === controller) {
+                patentAbortController = null;
+            }
+        }
+        box.scrollTop = box.scrollHeight;
+    }
+
+    function showPatentError(errText) {
+        var loadEl = document.getElementById('ai-loading');
+        var errDiv = document.createElement('div');
+        errDiv.className = 'msg ai error';
+        errDiv.style.color = '#f85149';
+        errDiv.innerHTML = DOMPurify.sanitize(
+            escapeHtml(errText).replace(/\n/g, '<br>') +
+            '<br><button onclick="retryPatentSend()" class="btn-retry" style="background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:4px 12px;border-radius:4px;cursor:pointer;margin-top:8px;font-size:0.85em;">' + t('ai.retry') + '</button>'
+        );
+        loadEl.parentNode.replaceChild(errDiv, loadEl);
+    }
+
+    function retryPatentSend() {
+        var msg = patentRetryMsg;
+        if (!msg) return;
+        patentRetryMsg = '';
+        // 移除最后一条错误消息
+        var box = document.getElementById('chat-messages');
+        var last = box.lastChild;
+        if (last && last.classList.contains('msg')) {
+            box.removeChild(last);
+        }
+        doPatentSend(msg);
+    }
+
+    function stopPatentGeneration() {
+        if (patentAbortController) {
+            patentAbortController.abort();
+            patentAbortController = null;
+        }
+    }
+
+    // ── 引用选中文字 / Quote selected text ──
+    (function() {
+        var chatMessages = document.getElementById('chat-messages');
+        if (!chatMessages) return;
+        var pQuoteBtn = null, pQuoteText = '';
+        function createBtn() {
+            var b = document.createElement('div');
+            b.className = 'quote-btn';
+            b.textContent = '引用';
+            b.addEventListener('click', function(e) {
+                e.stopPropagation();
+                var input = document.getElementById('chat-msg');
+                if (input && pQuoteText) {
+                    var pos = input.selectionStart || input.value.length;
+                    input.value = input.value.slice(0, pos) + '> ' + pQuoteText.replace(/\n/g, '\n> ') + '\n\n' + input.value.slice(pos);
+                    input.focus();
+                }
+                pQuoteText = '';
+                b.style.display = 'none';
+            });
+            document.body.appendChild(b);
+            return b;
+        }
+        function getBtn() {
+            if (!pQuoteBtn || !document.body.contains(pQuoteBtn)) pQuoteBtn = createBtn();
+            return pQuoteBtn;
+        }
+        chatMessages.addEventListener('mouseup', function(e) {
+            var t = e.target;
+            if (t && t.nodeType === 3) t = t.parentNode;
+            if (t && t.closest && t.closest('.quote-btn')) return;
+            setTimeout(function() {
+                var sel = window.getSelection();
+                var text = sel ? sel.toString().trim() : '';
+                if (!text) { getBtn().style.display = 'none'; return; }
+                var node = sel.anchorNode;
+                if (node) {
+                    if (node.nodeType === 3) node = node.parentNode;
+                    if (!node.closest('.msg')) { getBtn().style.display = 'none'; return; }
+                }
+                if (!sel.rangeCount) return;
+                var range = sel.getRangeAt(0);
+                var rect = range.getBoundingClientRect();
+                if (!rect || (rect.width === 0 && rect.height === 0)) { getBtn().style.display = 'none'; return; }
+                var btn = getBtn();
+                pQuoteText = text;
+                btn.style.position = 'fixed';
+                btn.style.display = 'block';
+                var w = btn.offsetWidth;
+                var h = btn.offsetHeight;
+                var left = rect.right - w / 2;
+                var top = rect.top - h - 8;
+                left = Math.max(4, Math.min(left, window.innerWidth - w - 4));
+                top = Math.max(4, top);
+                btn.style.left = left + 'px';
+                btn.style.top = top + 'px';
+            }, 10);
+        });
+        chatMessages.addEventListener('scroll', function() { getBtn().style.display = 'none'; });
+        document.addEventListener('mousedown', function(e) {
+            if (e.target && e.target.closest && e.target.closest('.quote-btn')) return;
+            var btn = getBtn();
+            if (btn) btn.style.display = 'none';
+        });
+    })();
+
+    function showPatentStopButton() {
+        var btn = document.getElementById('patent-stop-btn');
+        if (btn) btn.style.display = '';
+        var sendBtn = document.getElementById('patent-send-btn');
+        if (sendBtn) sendBtn.style.display = 'none';
+    }
+
+    function hidePatentStopButton() {
+        var btn = document.getElementById('patent-stop-btn');
+        if (btn) btn.style.display = 'none';
+        var sendBtn = document.getElementById('patent-send-btn');
+        if (sendBtn) sendBtn.style.display = '';
+    }
+
+    function showPatentExportButton() {
+        var btn = document.getElementById('patent-export-btn');
+        if (btn && patentChatHistory.length > 0) btn.style.display = '';
+    }
+
+    async function exportPatentConclusions() {
+        if (patentChatHistory.length === 0) return;
+        var btn = document.getElementById('patent-export-btn');
+        btn.textContent = t('detail.exporting');
+        btn.disabled = true;
+        try {
+            var resp = await fetch('/api/ai/chat/conclusions', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({session_key: PATENT_CHAT_KEY, patent_id: '{{id}}'})
+            });
+            var data = await resp.json();
+            if (data.status === 'ok' && data.conclusions) {
+                var box = document.getElementById('chat-messages');
+                var div = document.createElement('div');
+                div.className = 'msg ai';
+                div.innerHTML = DOMPurify.sanitize(
+                    '<div style="font-size:0.8em;color:#58a6ff;margin-bottom:4px;font-weight:bold;">📝 ' + t('detail.exportConclusions') + '</div>' +
+                    '<div style="color:#c9d1d9;font-size:0.9em;line-height:1.6;">' + escapeHtml(data.conclusions).replace(/\n/g, '<br>') + '</div>'
+                );
+                box.appendChild(div);
+                box.scrollTop = box.scrollHeight;
+            } else {
+                alert(data.error || '导出失败');
+            }
+        } catch(e) {
+            alert('请求失败: ' + e.message);
+        }
+        btn.textContent = t('detail.exportConclusions');
+        btn.disabled = false;
+    }
+
+    // Update page content from enriched patent data
+    function applyEnrichedData(p) {
+        var claimsEl = document.querySelector('#tab-claims .content-box pre');
+        var descEl = document.querySelector('#tab-description .content-box pre');
+        var absEl = document.querySelector('#tab-abstract .content-box');
+        if (claimsEl && p.claims) claimsEl.textContent = p.claims;
+        if (descEl && p.description) descEl.textContent = p.description;
+        if (absEl && p.abstract_text) absEl.textContent = p.abstract_text;
+        document.querySelectorAll('.detail-section p').forEach(function(el) {
+            // Only update if we have real classification codes (not boolean/empty)
+            if (el.innerHTML.indexOf('IPC:') >= 0 && p.ipc_codes && typeof p.ipc_codes === 'string' && p.ipc_codes.length > 2 && p.ipc_codes !== 'true') {
+                el.innerHTML = DOMPurify.sanitize('<strong>IPC:</strong> ' + escapeHtml(p.ipc_codes));
+            }
+            if (el.innerHTML.indexOf('CPC:') >= 0 && p.cpc_codes && typeof p.cpc_codes === 'string' && p.cpc_codes.length > 2 && p.cpc_codes !== 'true') {
+                el.innerHTML = DOMPurify.sanitize('<strong>CPC:</strong> ' + escapeHtml(p.cpc_codes));
+            }
+        });
+        if (p.legal_status) {
+            var lbl = document.getElementById('legal-status-label');
+            if (lbl) {
+                var cell = lbl.closest('tr');
+                if (cell) { var td = cell.querySelectorAll('td')[1]; if (td) td.textContent = p.legal_status; }
+            }
+        }
+        // Render patent drawings
+        renderImages(p.images, p.pdf_url);
+    }
+
+    function renderImages(imagesJson, pdfUrl) {
+        var container = document.getElementById('drawings-container');
+        var images = [];
+        try {
+            if (typeof imagesJson === 'string' && imagesJson.length > 2) {
+                images = JSON.parse(imagesJson);
+            } else if (Array.isArray(imagesJson)) {
+                images = imagesJson;
+            }
+        } catch(e) {}
+
+        if (images.length === 0) {
+            container.innerHTML = '';
+            var noDrawP = document.createElement('p');
+            noDrawP.style.color = '#8b949e';
+            noDrawP.textContent = '暂无图纸。点击「加载全文」获取。';
+            container.appendChild(noDrawP);
+            return;
+        }
+
+        var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">';
+        html += '<span style="color:#58a6ff;font-weight:bold;">共 ' + images.length + ' 张图纸</span>';
+        if (pdfUrl) {
+            var pdfProxyUrl = '/api/patent/image-proxy?url=' + encodeURIComponent(pdfUrl);
+            html += '<a href="' + pdfProxyUrl + '" target="_blank" style="color:#58a6ff;text-decoration:none;">📄 下载原始 PDF</a>';
+        }
+        html += '</div>';
+
+        html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;">';
+        images.forEach(function(url, idx) {
+            // Use local proxy to bypass GFW blocking of Google patent images
+            var proxyUrl = '/api/patent/image-proxy?url=' + encodeURIComponent(url);
+            html += '<div style="background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:8px;text-align:center;">';
+            html += '<a href="' + proxyUrl + '" target="_blank">';
+            html += '<img src="' + proxyUrl + '" alt="图 ' + (idx + 1) + '" style="max-width:100%;max-height:400px;border-radius:4px;" loading="lazy" onerror="this.parentElement.parentElement.style.display=\'none\'">';
+            html += '</a>';
+            html += '<div style="color:#8b949e;font-size:0.8em;margin-top:4px;">图 ' + (idx + 1) + '</div>';
+            html += '</div>';
+        });
+        html += '</div>';
+        container.innerHTML = DOMPurify.sanitize(html);
+
+        // Update tab button badge
+        var tabBtn = document.getElementById('tab-drawings-btn');
+        if (tabBtn) tabBtn.textContent = '📐 图纸 (' + images.length + ')';
+    }
+
+    // Load full text + images (manual button)
+    async function loadFullText() {
+        var btn = document.getElementById('load-full-btn');
+        btn.textContent = '⏳ 加载中...';
+        btn.disabled = true;
+        var hasImages = false;
+        try {
+            // Try free endpoint first (no API key needed)
+            var resp = await fetch('/api/patent/enrich-free/{{id}}');
+            var data = await resp.json();
+            if (data.status === 'ok' && data.patent) {
+                applyEnrichedData(data.patent);
+                // Check if we got images
+                var imgs = [];
+                try { imgs = JSON.parse(data.patent.images || '[]'); } catch(e) {}
+                hasImages = imgs.length > 0;
+            }
+
+            // Always try SerpAPI to get images + richer data (even if free succeeded for text)
+            if (!hasImages) {
+                btn.textContent = '⏳ 加载图纸...';
+                resp = await fetch('/api/patent/enrich/{{id}}');
+                data = await resp.json();
+                if (data.status === 'ok' && data.patent) {
+                    applyEnrichedData(data.patent);
+                    try { var i2 = JSON.parse(data.patent.images || '[]'); hasImages = i2.length > 0; } catch(e) {}
+                }
+            }
+
+            if (hasImages) {
+                btn.textContent = '✅ 已加载';
+                btn.style.background = '#238636';
+            } else {
+                // Still loaded text even without images
+                var descEl = document.querySelector('#tab-description .content-box pre');
+                if (descEl && descEl.textContent.trim().length > 10) {
+                    btn.textContent = '✅ 文本已加载';
+                    btn.style.background = '#238636';
+                } else {
+                    btn.textContent = '⚠️ 部分加载';
+                    btn.style.background = '#d29922';
+                }
+            }
+        } catch(e) {
+            btn.textContent = '❌ 加载失败';
+            btn.style.background = '#da3633';
+        }
+        setTimeout(function() {
+            btn.disabled = false;
+        }, 3000);
+    }
+
+    // Auto-enrich on page load
+    (async function() {
+        var claimsEl = document.querySelector('#tab-claims .content-box pre');
+        var descEl = document.querySelector('#tab-description .content-box pre');
+        var needsEnrich = (!claimsEl || claimsEl.textContent.trim().length < 5)
+                       || (!descEl || descEl.textContent.trim().length < 5);
+        if (needsEnrich) {
+            var enrichInfo = document.createElement('div');
+            enrichInfo.className = 'ai-summary';
+            enrichInfo.style.display = 'block';
+            enrichInfo.textContent = '正在加载专利全文和图纸...';
+            var detailEl = document.querySelector('.patent-detail');
+            var tabsEl = document.querySelector('.detail-tabs');
+            if (detailEl && tabsEl) detailEl.insertBefore(enrichInfo, tabsEl);
+            try {
+                // Always use SerpAPI for full data (text + images + IPC)
+                var resp = await fetch('/api/patent/enrich/{{id}}');
+                var data = await resp.json();
+                if (data.status === 'ok' && data.patent) {
+                    applyEnrichedData(data.patent);
+                    enrichInfo.textContent = '✅ 全文和图纸加载完成';
+                    document.getElementById('load-full-btn').textContent = '✅ 已加载';
+                    document.getElementById('load-full-btn').style.background = '#238636';
+                    setTimeout(function() { enrichInfo.style.display = 'none'; }, 3000);
+                } else {
+                    // Try free endpoint as fallback (text only)
+                    resp = await fetch('/api/patent/enrich-free/{{id}}');
+                    data = await resp.json();
+                    if (data.status === 'ok' && data.patent) {
+                        applyEnrichedData(data.patent);
+                        enrichInfo.textContent = '✅ 文本已加载（图纸需要 SerpAPI）';
+                    } else {
+                        enrichInfo.textContent = '点击「加载全文」按钮手动加载';
+                    }
+                    setTimeout(function() { enrichInfo.style.display = 'none'; }, 5000);
+                }
+            } catch(e) {
+                enrichInfo.textContent = '自动加载失败，请点击「加载全文」按钮';
+                setTimeout(function() { enrichInfo.style.display = 'none'; }, 5000);
+            }
+        } else {
+            // Already have full text
+            document.getElementById('load-full-btn').textContent = '✅ 已加载';
+            document.getElementById('load-full-btn').style.background = '#238636';
+        }
+    })();
+
+    async function loadSimilar() {
+        const patentId = window.location.pathname.split('/').pop();
+        try {
+            const res = await fetch('/api/patent/similar/' + patentId);
+            if (!res.ok) throw new Error('服务器错误 (' + res.status + ')');
+            const data = await res.json();
+            if (data.similar && data.similar.length > 0) {
+                let html = '';
+                data.similar.forEach(p => {
+                    html += '<div style="padding: 12px; background: #0d1117; border-radius: 6px; margin-bottom: 12px;">'
+                        + '<h4 style="margin: 0 0 8px 0;"><a href="/patent/' + encodeURIComponent(p.id) + '" style="color: #58a6ff;">' + escapeHtml(p.title || '无标题') + '</a></h4>'
+                        + '<div style="color: #8b949e; font-size: 13px;">'
+                        + '<span>' + escapeHtml(p.patent_number || '暂无') + '</span> | '
+                        + '<span>' + escapeHtml(p.applicant || '暂无') + '</span>'
+                        + '</div></div>';
+                });
+                document.getElementById('similar-list').innerHTML = DOMPurify.sanitize(html);
+            } else {
+                document.getElementById('similar-list').textContent = t('detail.similarNone');
+            }
+        } catch (err) {
+            document.getElementById('similar-list').textContent = t('detail.similarFail');
+        }
+    }
+
+    async function uploadCompare() {
+        const fileInput = document.getElementById('upload-file');
+        const file = fileInput.files[0];
+        if (!file) { alert(t('detail.selectFile')); return; }
+        const patentId = window.location.pathname.split('/').pop();
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('patent_id', patentId);
+        var uploadResultEl = document.getElementById('upload-result');
+        uploadResultEl.innerHTML = '';
+        var analyzingP = document.createElement('p');
+        analyzingP.style.color = '#58a6ff';
+        analyzingP.textContent = t('detail.uploadAnalyzing');
+        uploadResultEl.appendChild(analyzingP);
+        try {
+            const res = await fetch('/api/upload/compare', { method: 'POST', body: formData });
+            if (!res.ok) throw new Error('服务器错误 (' + res.status + ')');
+            const data = await res.json();
+            if (data.success) {
+                var resultDiv = document.createElement('div');
+                resultDiv.style.cssText = 'padding: 16px; background: #0d1117; border-radius: 6px; white-space: pre-wrap; line-height: 1.6;';
+                resultDiv.textContent = data.analysis;
+                document.getElementById('upload-result').innerHTML = '';
+                document.getElementById('upload-result').appendChild(resultDiv);
+            } else {
+                var errP2 = document.createElement('p');
+                errP2.style.color = '#f85149';
+                errP2.textContent = data.error;
+                document.getElementById('upload-result').innerHTML = '';
+                document.getElementById('upload-result').appendChild(errP2);
+            }
+        } catch (err) {
+            var errP3 = document.createElement('p');
+            errP3.style.color = '#f85149';
+            errP3.textContent = err.message;
+            document.getElementById('upload-result').innerHTML = '';
+            document.getElementById('upload-result').appendChild(errP3);
+        }
+    }
+
+    // Claims analysis (generated by aion-forge, refined)
+    async function analyzeClaims() {
+        var btn = document.getElementById('claims-analyze-btn');
+        var result = document.getElementById('claims-analysis-result');
+        btn.textContent = '⏳ 分析中...';
+        btn.disabled = true;
+        result.style.display = 'block';
+        result.textContent = '正在分析权利要求...';
+        try {
+            var resp = await fetch('/api/ai/claims', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({patent_id: '{{id}}'})
+            });
+            if (!resp.ok) throw new Error('服务器错误 (' + resp.status + ')');
+            var data = await resp.json();
+            if (data.status === 'ok') {
+                result.innerHTML = DOMPurify.sanitize('<h3 style="color:#58a6ff;margin:0 0 12px;">🔍 权利要求分析</h3><div style="color:#c9d1d9;line-height:1.8;white-space:pre-wrap;">' + escapeHtml(data.analysis).replace(/\n/g, '<br>') + '</div>');
+            } else {
+                var claimErrSpan = document.createElement('span');
+                claimErrSpan.style.color = '#f85149';
+                claimErrSpan.textContent = '❌ ' + (data.error || data.message || '分析失败');
+                result.innerHTML = '';
+                result.appendChild(claimErrSpan);
+            }
+        } catch(e) {
+            var claimCatchSpan = document.createElement('span');
+            claimCatchSpan.style.color = '#f85149';
+            claimCatchSpan.textContent = '❌ 请求失败: ' + e.message;
+            result.innerHTML = '';
+            result.appendChild(claimCatchSpan);
+        }
+        btn.textContent = '🔍 分析权利要求';
+        btn.disabled = false;
+    }
+
+    // Init
+    renderNavbar('detail');
+    renderSidebar(
+      '<div class="sidebar-section">'
+      + '<div class="sidebar-label">' + (i18nLang === 'zh' ? '操作' : 'Actions') + '</div>'
+      + '<button class="sidebar-btn primary" onclick="aiSummarize()">🤖 ' + t('detail.analyze') + '</button>'
+      + '<button class="sidebar-btn" id="sb-load-full" onclick="loadFullText()">📄 加载全文</button>'
+      + '<button class="sidebar-btn" onclick="window.open(\'/api/patent/pdf/{{id}}\',\'_blank\')">📥 导出 PDF</button>'
+      + '<button class="sidebar-btn" id="sb-collect" onclick="toggleCollect()">⭐ 收藏</button>'
+      + '</div>'
+    );
+    applyI18nCommon();
+    window._onI18nLangChange = window._onI18nLangChange || [];
+    window._onI18nLangChange.push(applyDetailI18n);
+    loadSimilar();
+    // Render initial images from server data
+    try {
+        var initialImages = {{images_json}};
+        var initialPdfUrl = '{{pdf_url}}';
+        renderImages(initialImages, initialPdfUrl);
+    } catch(e) {}
+
+    // ── 收藏 & 标签功能 ────────────────────────────
+    var patentId = '{{id}}';
+    var isCollected = false;
+    var defaultCollectionId = '';
+
+    async function loadCollectState() {
+        try {
+            var res = await fetch('/api/patents/' + patentId + '/collections');
+            var data = await res.json();
+            var cols = (data.collection_ids || data.collections || []).filter(function(c) { return c; });
+            isCollected = cols.length > 0;
+            if (isCollected) defaultCollectionId = cols[0];
+            var btn = document.getElementById('collect-btn');
+            btn.textContent = isCollected ? '⭐ 已收藏' : '⭐ 收藏';
+            btn.style.background = isCollected ? '#238636' : '#d29922';
+            document.getElementById('collections-display').textContent = isCollected ? '已加入 ' + cols.length + ' 个收藏夹' : '';
+        } catch(e) {}
+    }
+
+    async function toggleCollect() {
+        if (isCollected && defaultCollectionId) {
+            await fetch('/api/collections/' + defaultCollectionId + '/remove/' + patentId, {method:'DELETE'});
+        } else {
+            // Ensure default collection exists
+            var listRes = await fetch('/api/collections');
+            var listData = await listRes.json();
+            var cols = listData.collections || [];
+            var colId;
+            if (cols.length > 0) {
+                colId = cols[0].id;
+            } else {
+                var createRes = await fetch('/api/collections', {
+                    method:'POST', headers:{'Content-Type':'application/json'},
+                    body: JSON.stringify({name:'我的收藏', description:'默认收藏夹'})
+                });
+                var createData = await createRes.json();
+                colId = createData.id;
+            }
+            await fetch('/api/collections/' + colId + '/add', {
+                method:'POST', headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({patent_id: patentId})
+            });
+        }
+        loadCollectState();
+    }
+
+    async function loadTags() {
+        try {
+            var res = await fetch('/api/patents/' + patentId + '/tags');
+            var data = await res.json();
+            var tags = data.tags || [];
+            var tagsContainer = document.getElementById('tags-display');
+            tagsContainer.innerHTML = '';
+            tags.forEach(function(tagName) {
+                var tagSpan = document.createElement('span');
+                tagSpan.style.cssText = 'background:#1f6feb;color:white;padding:2px 8px;border-radius:10px;font-size:0.8em;cursor:pointer;';
+                tagSpan.textContent = tagName + ' ✕';
+                tagSpan.setAttribute('onclick', "removeTag('" + tagName.replace(/'/g, "\\'") + "')");
+                tagsContainer.appendChild(tagSpan);
+                tagsContainer.appendChild(document.createTextNode(' '));
+            });
+        } catch(e) {}
+    }
+
+    async function addTag() {
+        var input = document.getElementById('new-tag-input');
+        var tag = input.value.trim();
+        if (!tag) return;
+        await fetch('/api/patents/' + patentId + '/tags', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({tag: tag})
+        });
+        input.value = '';
+        loadTags();
+    }
+
+    async function removeTag(tag) {
+        await fetch('/api/patents/' + patentId + '/tags/' + encodeURIComponent(tag), {method:'DELETE'});
+        loadTags();
+    }
+
+    // ── OA 时间线功能 ─────────────────────────────────
+    async function loadOaTimeline() {
+        const container = document.getElementById('oa-timeline-list');
+        const summaryEl = document.getElementById('oa-timeline-summary');
+        if (!container) return;
+        container.innerHTML = '<p class="muted">' + t('oa.workflow.loading') + '</p>';
+        try {
+            const resp = await fetch('/api/oa/timeline/' + encodeURIComponent(patentId));
+            const data = await resp.json();
+            if (data.status !== 'ok' || !data.timeline || data.timeline.length === 0) {
+                container.innerHTML = '<p class="muted">' + t('oa.workflow.empty') + '</p>';
+                summaryEl.textContent = '';
+                return;
+            }
+            const s = data.summary;
+            summaryEl.textContent = t('oa.workflow.totalRounds', {n: s.total_rounds}) + ' · ' + t('oa.workflow.completed', {n: s.completed});
+            let html = "";
+            data.timeline.forEach(function(item) {
+                const round = item.round;
+                const resultColor = round.result === 'accepted' ? '#4caf50' :
+                    round.result === 'rejected' ? '#f44336' :
+                    round.result === 'partially_accepted' ? '#ff9800' : '#2196f3';
+                const resultKey = round.result ? round.result : 'pending';
+                const resultText = t('oa.workflow.' + resultKey);
+                const roundTypeMap = {
+                    'first_rejection': '一审驳回',
+                    'second_rejection': '二审驳回',
+                    'reexamination': '复审',
+                    'office_action': '审查意见'
+                };
+                const roundTypeLabel = roundTypeMap[round.round_type] || round.round_type;
+                html += '<div class="oa-timeline-item" style="border-left: 4px solid ' + resultColor + '; padding: 12px 16px; margin-bottom: 12px; background: #f9f9f9; border-radius: 4px;">';
+                html += '<div style="display: flex; justify-content: space-between; align-items: center;">';
+                html += '<strong>' + t('oa.workflow.round', {n: round.round_number}) + ' · ' + roundTypeLabel + '</strong>';
+                html += '<span style="color: ' + resultColor + '; font-weight: bold;">' + resultText + '</span>';
+                html += '</div>';
+                if (round.oa_date) html += '<div style="margin-top: 4px; font-size: 13px; color: #666;">' + t('oa.workflow.oaDate') + ': ' + escapeHtml(round.oa_date) + '</div>';
+                if (round.response_date) html += '<div style="font-size: 13px; color: #666;">' + t('oa.workflow.responseDate') + ': ' + escapeHtml(round.response_date) + '</div>';
+                if (round.strategy_used) html += '<div style="font-size: 13px; color: #666;">' + t('oa.workflow.strategy') + ': ' + escapeHtml(round.strategy_used) + '</div>';
+                if (round.quality_score != null) html += '<div style="font-size: 13px; color: #666;">' + t('oa.workflow.qualityScore') + ': ' + round.quality_score.toFixed(1) + '</div>';
+                html += '<button class="btn-link" onclick="toggleRoundDetail(\'' + round.id + '\')" data-i18n="oa.workflow.viewDetail" style="margin-top: 8px; font-size: 13px;"></button>';
+                html += '<div id="round-detail-' + round.id + '" style="display: none; margin-top: 12px; padding-top: 12px; border-top: 1px solid #ddd;">';
+                if (round.oa_text) html += '<div style="margin-bottom: 8px;"><strong>OA:</strong><pre style="white-space: pre-wrap; max-height: 200px; overflow-y: auto; font-size: 13px;">' + escapeHtml(round.oa_text) + '</pre></div>';
+                if (round.response_text) html += '<div style="margin-bottom: 8px;"><strong>答复:</strong><pre style="white-space: pre-wrap; max-height: 200px; overflow-y: auto; font-size: 13px;">' + escapeHtml(round.response_text) + '</pre></div>';
+                if (round.notes) html += '<div style="margin-bottom: 8px;"><strong>' + t('oa.workflow.notes') + ':</strong> ' + escapeHtml(round.notes) + '</div>';
+                html += '<div><label>' + t('oa.workflow.result') + ':</label> <select id="result-select-' + round.id + '" onchange="updateRoundResult(\'' + round.id + '\')">';
+                html += '<option value="">' + t('oa.workflow.pending') + '</option>';
+                html += '<option value="accepted"' + (round.result === 'accepted' ? ' selected' : '') + '>' + t('oa.workflow.accepted') + '</option>';
+                html += '<option value="rejected"' + (round.result === 'rejected' ? ' selected' : '') + '>' + t('oa.workflow.rejected') + '</option>';
+                html += '<option value="partially_accepted"' + (round.result === 'partially_accepted' ? ' selected' : '') + '>' + t('oa.workflow.partial') + '</option>';
+                html += '</select></div>';
+                html += '</div>';
+                html += '</div>';
+            });
+            container.innerHTML = html;
+            if (window.applyTranslations) applyTranslations();
+        } catch (e) {
+            container.innerHTML = '<p class="muted">Error: ' + escapeHtml(e.message) + '</p>';
+        }
+    }
+
+    function toggleRoundDetail(roundId) {
+        const el = document.getElementById('round-detail-' + roundId);
+        if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+    }
+
+    async function updateRoundResult(roundId) {
+        const select = document.getElementById('result-select-' + roundId);
+        if (!select) return;
+        const result = select.value;
+        try {
+            await fetch('/api/oa/rounds/update/' + encodeURIComponent(roundId), {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ result: result })
+            });
+            loadOaTimeline();
+        } catch (e) {
+            console.error('Failed to update round result:', e);
+        }
+    }
+
+    async function createNewOaRound() {
+        const roundType = prompt('OA 类型 (first_rejection/second_rejection/reexamination):', 'first_rejection');
+        if (!roundType) return;
+        const oaDate = prompt('发文日期 (YYYY-MM-DD):', new Date().toISOString().slice(0, 10));
+        try {
+            await fetch('/api/oa/rounds', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    patent_id: patentId,
+                    round_type: roundType,
+                    oa_date: oaDate || null
+                })
+            });
+            loadOaTimeline();
+        } catch (e) {
+            console.error('Failed to create OA round:', e);
+        }
+    }
+
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    // 当切换到 OA 时间线标签时加载数据
+    const origShowTab = showTab;
+    showTab = function(name, ev) {
+        origShowTab(name, ev);
+        if (name === 'oa-timeline') loadOaTimeline();
+    };
+
+    loadCollectState();
+    loadTags();
+    </script>
+</body>
+</html>

@@ -1,0 +1,105 @@
+use super::{html_escape, AppState};
+use axum::{
+    extract::{Path, State},
+    http::StatusCode,
+    response::{Html, IntoResponse, Response},
+};
+
+fn no_cache_headers() -> [(String, String); 3] {
+    [
+        (
+            "Cache-Control".to_string(),
+            "no-cache, no-store, must-revalidate".to_string(),
+        ),
+        ("Pragma".to_string(), "no-cache".to_string()),
+        ("Expires".to_string(), "0".to_string()),
+    ]
+}
+
+pub async fn index_page() -> Response {
+    let html = include_str!("../../templates/index.html")
+        .replace("{{version}}", env!("CARGO_PKG_VERSION"));
+    (no_cache_headers(), Html(html)).into_response()
+}
+
+pub async fn search_page() -> Response {
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let html = include_str!("../../templates/search.html")
+        .replace("{{timestamp}}", &timestamp.to_string());
+    (no_cache_headers(), Html(html)).into_response()
+}
+
+pub async fn ai_page() -> Response {
+    (
+        no_cache_headers(),
+        Html(include_str!("../../templates/ai.html").to_string()),
+    )
+        .into_response()
+}
+
+pub async fn compare_page() -> Response {
+    (
+        no_cache_headers(),
+        Html(include_str!("../../templates/compare.html").to_string()),
+    )
+        .into_response()
+}
+
+pub async fn idea_page() -> Response {
+    (
+        no_cache_headers(),
+        Html(include_str!("../../templates/idea.html").to_string()),
+    )
+        .into_response()
+}
+
+pub async fn settings_page() -> Response {
+    (
+        no_cache_headers(),
+        Html(include_str!("../../templates/settings.html").to_string()),
+    )
+        .into_response()
+}
+
+pub async fn office_action_response_page() -> Response {
+    let html = include_str!("../../templates/office_action_response.html").to_string();
+    let headers = [("Cache-Control", "no-cache, no-store, must-revalidate")];
+    (headers, Html(html)).into_response()
+}
+
+pub async fn patent_detail_page(Path(id): Path<String>, State(s): State<AppState>) -> Response {
+    let t = include_str!("../../templates/patent_detail.html");
+    match s.db.get_patent(&id) {
+        Ok(Some(p)) => Html(
+            t.replace("{{patent_number}}", &html_escape(&p.patent_number))
+                .replace("{{title}}", &html_escape(&p.title))
+                .replace("{{abstract_text}}", &html_escape(&p.abstract_text))
+                .replace("{{description}}", &html_escape(&p.description))
+                .replace("{{claims}}", &html_escape(&p.claims))
+                .replace("{{applicant}}", &html_escape(&p.applicant))
+                .replace("{{inventor}}", &html_escape(&p.inventor))
+                .replace("{{filing_date}}", &html_escape(&p.filing_date))
+                .replace("{{publication_date}}", &html_escape(&p.publication_date))
+                .replace(
+                    "{{grant_date}}",
+                    &html_escape(&p.grant_date.unwrap_or_default()),
+                )
+                .replace("{{ipc_codes}}", &html_escape(&p.ipc_codes))
+                .replace("{{cpc_codes}}", &html_escape(&p.cpc_codes))
+                .replace("{{country}}", &html_escape(&p.country))
+                .replace("{{legal_status}}", &html_escape(&p.legal_status))
+                .replace("{{id}}", &html_escape(&p.id))
+                .replace("{{images_json}}", &p.images)
+                .replace("{{pdf_url}}", &html_escape(&p.pdf_url)),
+        )
+        .into_response(),
+        _ => (
+            StatusCode::NOT_FOUND,
+            Html("<h1>专利未找到</h1><a href='/search'>返回搜索</a>".to_string()),
+        )
+            .into_response(),
+    }
+}

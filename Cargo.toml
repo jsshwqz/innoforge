@@ -1,0 +1,54 @@
+[package]
+name = "innoforge"
+version = "0.9.11"
+edition = "2021"
+license = "MIT"
+description = "InnoForge - Turn ideas into decisions, plans, products, and IP protection with AI-powered patent search and feasibility analysis"
+repository = "https://github.com/jsshwqz/innoforge"
+authors = ["jsshwqz"]
+keywords = ["patent", "search", "ai", "analysis", "innovation"]
+categories = ["command-line-utilities", "web-programming"]
+
+[lib]
+name = "innoforge"
+path = "src/lib.rs"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[[bin]]
+name = "innoforge-server"
+path = "src/main.rs"
+
+[[bin]]
+name = "innoforge-mcp"
+path = "src/bin/mcp-server.rs"
+
+[dependencies]
+anyhow = "1"
+axum = { version = "0.6", features = ["multipart"] }
+chrono = { version = "0.4", features = ["serde"] }
+dotenvy = "0.15"
+local-ip-address = "0.5"
+open = "5"
+reqwest = { version = "0.11", features = ["json", "rustls-tls", "blocking", "multipart", "stream"], default-features = false }
+rusqlite = { version = "0.31", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tower-http = { version = "0.4", features = ["fs", "cors", "set-header"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+urlencoding = "2"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+encoding_rs = "0.8"
+uuid = { version = "1", features = ["v4"] }
+pdf-extract = "0.7"
+base64 = "0.22"
+rust_xlsxwriter = "0.79"
+regex = "1.12.3"
+rust-embed = { version = "8.11.0", features = ["mime-guess"] }
+mime_guess = "2.0.5"
+futures = "0.3"
+async-stream = "0.3"
+
+[dev-dependencies]
+tempfile = "3"

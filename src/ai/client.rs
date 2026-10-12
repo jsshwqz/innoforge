@@ -1,0 +1,1292 @@
+//! AI 多模型容灾客户端核心 / Core AI client with multi-provider failover
+
+use anyhow::Result;
+use reqwest::Client;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::sync::{Arc, RwLock};
+use std::time::Duration;
+
+/// 分级超时策略 / Graded timeout strategy
+///
+/// 不同 AI 操作使用不同超时上限：
+/// - CHAT: 60s — 交互型聊天
+/// - ANALYSIS: 180s — OA 分析等大上下文场景
+/// - ENRICHMENT: 300s — 批量处理与增强
+///
+/// Each AI operation tier has its own ceiling:
+/// - CHAT: 60s for interactive chat
+/// - ANALYSIS: 180s for large-context OA analysis
+/// - ENRICHMENT: 300s for batch / enrichment tasks
+pub mod timeouts {
+    use std::time::Duration;
+
+    /// 聊天 / Chat & discussion
+    pub const CHAT: Duration = Duration::from_secs(60);
+
+    /// 分析 / Patent analysis, idea analysis
+    pub const ANALYSIS: Duration = Duration::from_secs(180);
+
+    /// 增强处理 / Enrichment, batch processing, office action
+    #[allow(dead_code)] // 公共 API 常量，供外部使用
+    pub const ENRICHMENT: Duration = Duration::from_secs(300);
+}
+
+// 向后兼容别名 / Backward-compatible alias for existing callers
+const PROVIDER_HTTP_TIMEOUT_SECS: u64 = 300; // = timeouts::ENRICHMENT (300s)
+const PROVIDER_MAX_RETRIES: usize = 3;
+
+/// AI 提供者模式 / AI provider operation mode.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AiProviderMode {
+    /// Standard HTTP-based AI provider (e.g. DeepSeek, OpenAI)
+    Http,
+    /// Anthropic Messages API (different auth, request format, streaming)
+    AnthropicApi,
+    /// Use Gemini CLI subprocess (bypasses API key / scope issues)
+    GeminiCli,
+}
+
+/// 单个 AI 服务商端点 / A single AI provider endpoint.
+#[derive(Clone)]
+pub(super) struct AiProvider {
+    pub name: String,
+    pub base_url: String,
+    pub api_key: String,
+    pub model: String,
+}
+
+/// AI 调用用量信息 / Usage info from a single AI call.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AiUsageInfo {
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+}
+
+/// AI client with automatic failover across multiple providers.
+#[derive(Clone)]
+pub struct AiClient {
+    pub(super) client: Client,
+    pub(super) primary: AiProvider,
+    pub(super) fallbacks: Vec<AiProvider>,
+    /// Provider mode: HTTP (default) or Gemini CLI subprocess
+    pub provider_mode: AiProviderMode,
+    /// Path to the Gemini CLI executable (e.g. gemini.cmd)
+    pub gemini_cli_path: Option<String>,
+    /// 当前生效的超时时间 / Current effective timeout duration
+    pub(super) timeout: Duration,
+    /// 最近一次 AI 调用的用量信息（用于成本记录）
+    pub(super) last_usage: Arc<RwLock<Option<AiUsageInfo>>>,
+}
+
+#[derive(Serialize)]
+pub(super) struct ChatRequest {
+    /// 最大输出 token 数。None 时不发送该字段，由 API 使用默认值。
+    /// 推理模型（如 glm-5.2、deepseek-reasoner）需要较大值，
+    /// 否则推理过程耗尽 token 额度后 content 为空。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u32>,
+    pub model: String,
+    pub messages: Vec<Message>,
+    pub temperature: f32,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Message {
+    pub role: String,
+    pub content: String,
+}
+
+#[derive(Deserialize, Debug)]
+struct ResponseMessage {
+    content: Option<String>,
+    /// DeepSeek v4-flash 将可见输出放在 reasoning_content 而非 content。
+    /// DeepSeek v4-flash places visible output in reasoning_content instead of content.
+    reasoning_content: Option<String>,
+    /// 捕获未知字段 / Catch unknown fields.
+    ///
+    /// 当新 Provider 使用非标准字段传输内容时（如 future_provider.output_text），
+    /// 不会静默丢失数据，而是被记录到日志中供排查。
+    /// When a new Provider uses non-standard fields, data won't be silently lost.
+    #[serde(flatten)]
+    _unknown: std::collections::HashMap<String, serde_json::Value>,
+}
+
+// Flexible response parser for different AI providers
+#[derive(Deserialize)]
+struct ChatResponse {
+    choices: Option<Vec<Choice>>,
+    data: Option<Value>,    // Zhipu format
+    result: Option<String>, // Some providers use this
+    error: Option<Value>,   // Provider error object (e.g. {"message": "..."})
+}
+
+#[derive(Deserialize)]
+struct Choice {
+    message: Option<ResponseMessage>,
+    delta: Option<ResponseMessage>, // Streaming format
+}
+
+pub(crate) fn extract_chat_content(raw_text: &str) -> String {
+    if let Ok(resp) = serde_json::from_str::<ChatResponse>(raw_text) {
+        // 先从 choices 中提取正常内容
+        if let Some(choices) = resp.choices {
+            let mut all_empty = true;
+            for choice in &choices {
+                if let Some(content) = choice
+                    .message
+                    .as_ref()
+                    .and_then(|message| {
+                        // 优先取 content；若为 None/空，尝试 reasoning_content（DeepSeek）
+                        message
+                            .content
+                            .as_ref()
+                            .filter(|c| !c.is_empty())
+                            .or_else(|| {
+                                message.reasoning_content.as_ref().filter(|c| !c.is_empty())
+                            })
+                    })
+                    .or_else(|| {
+                        choice.delta.as_ref().and_then(|delta| {
+                            delta
+                                .content
+                                .as_ref()
+                                .filter(|c| !c.is_empty())
+                                .or_else(|| {
+                                    delta.reasoning_content.as_ref().filter(|c| !c.is_empty())
+                                })
+                        })
+                    })
+                {
+                    all_empty = false;
+                    if !content.is_empty() {
+                        return content.clone();
+                    }
+                }
+            }
+            // choices 存在但全为空 → 尝试提取 error 中的错误信息
+            if all_empty && !choices.is_empty() {
+                if let Some(err) = &resp.error {
+                    if let Some(msg) = err["message"].as_str() {
+                        return format!("AI 错误：{}", msg);
+                    }
+                }
+            }
+        }
+
+        if let Some(data) = resp.data {
+            if let Some(content) = extract_content_from_data(&data) {
+                return content;
+            }
+        }
+
+        if let Some(result) = resp.result {
+            return result;
+        }
+
+        // ChatResponse 解析成功但无内容 → 检查 error 字段
+        if let Some(err) = &resp.error {
+            if let Some(msg) = err["message"].as_str() {
+                return format!("AI 错误：{}", msg);
+            }
+        }
+    }
+
+    if let Ok(json) = serde_json::from_str::<Value>(raw_text) {
+        if let Some(content) = extract_content_from_data(&json) {
+            return content;
+        }
+        if let Some(err) = json["error"]["message"].as_str() {
+            return format!("AI 错误：{}", err);
+        }
+        if let Some(msg) = json["msg"].as_str() {
+            return format!("AI 错误：{}", msg);
+        }
+        // Handle array response: [{"error": {"message": "...", ...}}]
+        if let Some(arr) = json.as_array() {
+            for item in arr {
+                if let Some(err) = item["error"]["message"].as_str() {
+                    return format!("AI 错误：{}", err);
+                }
+            }
+        }
+    }
+
+    format!(
+        "AI 响应解析失败，原始响应：{}",
+        raw_text.chars().take(200).collect::<String>()
+    )
+}
+
+/// 从 AI 响应原文中提取 token 用量信息。
+/// 兼容 OpenAI 兼容格式（usage.input_tokens / usage.output_tokens）
+/// 和 Anthropic 格式（usage.input_tokens / usage.output_tokens）。
+/// 解析失败时返回 None，不影响主流程。
+pub(crate) fn extract_usage(raw_text: &str) -> Option<AiUsageInfo> {
+    // 优先从 JSON 解析 usage 块
+    // 直接 JSON 解析 usage 块
+    if let Ok(json) = serde_json::from_str::<Value>(raw_text) {
+        if let Some(usage) = json.get("usage") {
+            let input = usage
+                .get("input_tokens")
+                .and_then(|v| v.as_i64())
+                .or(usage.get("prompt_tokens").and_then(|v| v.as_i64()))
+                .unwrap_or(0);
+            let output = usage
+                .get("output_tokens")
+                .and_then(|v| v.as_i64())
+                .or(usage.get("completion_tokens").and_then(|v| v.as_i64()))
+                .unwrap_or(0);
+            if input > 0 || output > 0 {
+                return Some(AiUsageInfo {
+                    input_tokens: input,
+                    output_tokens: output,
+                });
+            }
+        }
+    }
+
+    None
+}
+
+/// Safely truncate a UTF-8 string to at most `max_bytes` bytes
+/// without splitting multi-byte characters.
+pub fn safe_truncate(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+    let mut end = max_bytes;
+    while !s.is_char_boundary(end) && end > 0 {
+        end -= 1;
+    }
+    &s[..end]
+}
+
+/// 数据用途截断：超限时把「已截断」这件事显式写进文本，避免静默丢失。
+///
+/// 与 [`safe_truncate`] / [`safe_truncate_chars`] 的分工：
+/// - 显示、日志、错误消息等**展示用途**用 `safe_truncate*`，截断后无需告知读者；
+/// - 任何**要交给 AI 的数据**（prompt 拼装）必须用本函数，
+///   超限时会在末尾追加「原文共 N 字符、实际送入 M 字符」的说明，
+///   让模型知道材料不完整，而不是默认自己拿到了全文（AGENTS.md §2.5）。
+pub fn truncate_for_ai(s: &str, max_chars: usize) -> String {
+    let total = s.chars().count();
+    if total <= max_chars {
+        return s.to_string();
+    }
+    let mut out: String = s.chars().take(max_chars).collect();
+    out.push_str(&format!(
+        "\n\n【数据完整性提示：本段原文共 {total} 个字符，受单次 AI 调用上下文限制，此处只送入前 {max_chars} 个字符，其余 {} 个字符未包含。凡涉及被省略内容的问题，请明确说明材料不完整，禁止推测或补全。】",
+        total - max_chars
+    ));
+    out
+}
+
+/// 内部转述专用截断变体：用于角色间辩论稿的截断（非用户上传材料）。
+///
+/// 与 [`truncate_for_ai`] 的区别：提示语明确标注「系统内部转述」，
+/// 禁止模型在结论中出现「材料不完整」「材料存在多处截断」等措辞，
+/// 避免用户误以为自己上传的 PDF 没被识别全（AGENTS.md §2.5）。
+///
+/// - `label`：标注本段来自哪一方的发言（如「审查员立论」「代理师反驳」）。
+/// - 用户上传材料路径（my_patent／oa_text／refs）**不得**使用本函数。
+pub fn truncate_for_ai_internal(s: &str, max_chars: usize, label: &str) -> String {
+    let total = s.chars().count();
+    if total <= max_chars {
+        return s.to_string();
+    }
+    let mut out: String = s.chars().take(max_chars).collect();
+    out.push_str(&format!(
+        "\n\n【以下为{label}的发言节选（系统内部转述，非用户提交的原始材料）。本段完整版共 {total} 个字符，此处送入前 {max_chars} 个字符，其余 {} 个字符未包含。不得据此推断用户提交的原始材料存在问题，也不得在结论中使用「材料截断」「材料缺失」等表述。】",
+        total - max_chars
+    ));
+    out
+}
+
+/// Safely truncate a UTF-8 string to at most `max_chars` characters.
+/// Kept for compatibility with existing library consumers; OA request paths
+/// use explicit capacity validation instead of truncating user-provided data.
+#[allow(dead_code)]
+pub fn safe_truncate_chars(s: &str, max_chars: usize) -> &str {
+    if s.chars().count() <= max_chars {
+        return s;
+    }
+    let mut byte_pos = 0;
+    let mut char_count = 0;
+    for (i, _) in s.char_indices() {
+        if char_count >= max_chars {
+            break;
+        }
+        byte_pos = i;
+        char_count += 1;
+    }
+    if char_count >= max_chars {
+        &s[..byte_pos]
+    } else {
+        s
+    }
+}
+
+// OA request limits are measured in Unicode scalar values, never UTF-8 bytes.
+// These are explicit capacity guards; callers return the resulting error instead
+// of silently dropping the tail of user-provided patent material.
+pub(crate) const OA_DISCUSSION_ANALYSIS_MAX_CHARS: usize = 60_000;
+pub(crate) const OA_DISCUSSION_HISTORY_MAX_CHARS: usize = 2_000_000; // 保存：允许完整持久化（用户讨论可达 1M+）
+pub(crate) const OA_DISCUSSION_OA_MAX_CHARS: usize = 15_000;
+pub(crate) const OA_RESPONSE_ANALYSIS_MAX_CHARS: usize = 600_000;
+pub(crate) const OA_RESPONSE_DISCUSSION_MAX_CHARS: usize = 400_000;
+pub(crate) const OA_RESPONSE_OA_MAX_CHARS: usize = 150_000;
+
+pub(crate) fn oa_capacity_error(field: &str, value: &str, max_chars: usize) -> Option<String> {
+    let actual_chars = value.chars().count();
+    (actual_chars > max_chars).then(|| {
+        format!(
+            "[ERROR] OA_INPUT_TOO_LARGE field={field} actual_chars={actual_chars} max_chars={max_chars} \
+             请缩短该字段后重试（按 Unicode 字符计数，未丢弃任何原文）。"
+        )
+    })
+}
+
+fn extract_content_from_data(data: &Value) -> Option<String> {
+    if let Some(choices) = data["choices"].as_array() {
+        for choice in choices {
+            if let Some(content) = choice["message"]["content"].as_str() {
+                return Some(content.to_string());
+            }
+            if let Some(content) = choice["delta"]["content"].as_str() {
+                return Some(content.to_string());
+            }
+        }
+    }
+
+    if let Some(content) = data["data"]["content"].as_str() {
+        return Some(content.to_string());
+    }
+
+    if let Some(content) = data["data"]["choices"][0]["message"]["content"].as_str() {
+        return Some(content.to_string());
+    }
+
+    None
+}
+
+impl AiClient {
+    fn apply_model_override(provider: &AiProvider, model_override: Option<&str>) -> AiProvider {
+        if let Some(model) = model_override {
+            let m = model.trim();
+            if !m.is_empty() {
+                let mut p = provider.clone();
+                p.model = m.to_string();
+                return p;
+            }
+        }
+        provider.clone()
+    }
+
+    /// Create from explicit config values (preferred).
+    pub fn with_config(base_url: &str, api_key: &str, model: &str) -> Self {
+        Self {
+            client: Client::builder()
+                .timeout(Duration::from_secs(PROVIDER_HTTP_TIMEOUT_SECS))
+                .no_proxy()
+                .build()
+                .unwrap_or_else(|_| {
+                    Client::builder()
+                        .no_proxy()
+                        .build()
+                        .unwrap_or_else(|_| Client::new())
+                }),
+            primary: AiProvider {
+                name: "primary".to_string(),
+                base_url: base_url.to_string(),
+                api_key: api_key.to_string(),
+                model: model.to_string(),
+            },
+            fallbacks: Vec::new(),
+            provider_mode: AiProviderMode::Http,
+            gemini_cli_path: None,
+            timeout: Duration::from_secs(PROVIDER_HTTP_TIMEOUT_SECS),
+            last_usage: Arc::new(RwLock::new(None)),
+        }
+    }
+
+    /// Create a new AiClient with a shorter timeout (for interactive chat).
+    /// Shorthand for `clone_with_timeout(timeouts::CHAT)`.
+    pub fn with_chat_timeout(&self) -> Self {
+        self.clone_with_timeout(timeouts::CHAT)
+    }
+
+    /// Create a new AiClient with analysis timeout (for patent/idea analysis).
+    /// Shorthand for `clone_with_timeout(timeouts::ANALYSIS)`.
+    pub fn with_analysis_timeout(&self) -> Self {
+        self.clone_with_timeout(timeouts::ANALYSIS)
+    }
+
+    /// 创建新的 AiClient 实例并指定超时 / Clone with a different timeout.
+    ///
+    /// reqwest Client 的超时在构建时固定，此方法重建 HTTP 客户端。
+    /// The reqwest Client timeout is baked in at construction, so this rebuilds the client.
+    ///
+    /// # 使用分级超时 / Using graded timeouts
+    /// ```ignore
+    /// let chat_client = client.clone_with_timeout(timeouts::CHAT);
+    /// let analysis_client = client.clone_with_timeout(timeouts::ANALYSIS);
+    /// ```
+    pub fn clone_with_timeout(&self, timeout: Duration) -> Self {
+        let mut new = self.clone();
+        new.timeout = timeout;
+        new.client = Client::builder()
+            .timeout(timeout)
+            .pool_max_idle_per_host(2)
+            .pool_idle_timeout(Duration::from_secs(90))
+            .no_proxy()
+            .build()
+            .unwrap_or_else(|_| Client::new());
+        new
+    }
+
+    /// Switch to Gemini CLI subprocess mode.
+    pub fn set_gemini_cli(&mut self, path: &str) {
+        self.provider_mode = AiProviderMode::GeminiCli;
+        self.gemini_cli_path = Some(path.to_string());
+    }
+
+    /// Check if this client is in Gemini CLI subprocess mode.
+    pub fn is_gemini_cli_mode(&self) -> bool {
+        self.provider_mode == AiProviderMode::GeminiCli
+    }
+
+    /// 获取最近一次 AI 调用的用量信息，读取后清空。
+    /// Returns last call's usage info and clears it.
+    pub fn take_last_usage(&self) -> Option<AiUsageInfo> {
+        self.last_usage.write().map_or(None, |mut w| w.take())
+    }
+
+    /// 测试专用：预置 last_usage 槽，用于验证 `take_last_usage` /
+    /// `Database::log_ai_call` 的读后即清与落账语义，不经网络调用。
+    #[cfg(test)]
+    pub(crate) fn set_last_usage_for_tests(&self, input: i64, output: i64) {
+        if let Ok(mut w) = self.last_usage.write() {
+            *w = Some(AiUsageInfo {
+                input_tokens: input,
+                output_tokens: output,
+            });
+        }
+    }
+
+    /// 当前主服务商名称 / Primary provider name.
+    pub fn provider_name(&self) -> &str {
+        &self.primary.name
+    }
+
+    /// Add a fallback AI provider.
+    pub fn add_fallback(&mut self, base_url: &str, api_key: &str, model: &str, name: &str) {
+        self.fallbacks.push(AiProvider {
+            name: name.to_string(),
+            base_url: base_url.to_string(),
+            api_key: api_key.to_string(),
+            model: model.to_string(),
+        });
+    }
+
+    /// Try a single provider with retries.
+    pub(super) async fn try_provider(
+        &self,
+        provider: &AiProvider,
+        messages: &[Message],
+        temperature: f32,
+    ) -> Result<String> {
+        let is_anthropic = provider.base_url.contains("anthropic");
+
+        if is_anthropic {
+            return self
+                .try_provider_anthropic(provider, messages, temperature)
+                .await;
+        }
+
+        let request_body = ChatRequest {
+            max_tokens: Some(16384),
+            model: provider.model.clone(),
+            messages: messages.to_vec(),
+            temperature,
+        };
+
+        let max_retries = PROVIDER_MAX_RETRIES;
+        let mut last_err = None;
+        for attempt in 0..max_retries {
+            if attempt > 0 {
+                let delay = Duration::from_secs(2);
+                tokio::time::sleep(delay).await;
+            }
+
+            let req_url = format!(
+                "{}/chat/completions",
+                provider.base_url.trim_end_matches('/')
+            );
+            tracing::debug!(
+                "[{}] POST {} model={} messages={}",
+                provider.name,
+                req_url,
+                provider.model,
+                messages.len()
+            );
+            match self
+                .client
+                .post(&req_url)
+                .header("Authorization", format!("Bearer {}", provider.api_key))
+                .json(&request_body)
+                .send()
+                .await
+            {
+                Ok(resp) => {
+                    let status = resp.status();
+
+                    if status.as_u16() == 429 {
+                        let retry_after = resp
+                            .headers()
+                            .get("retry-after")
+                            .and_then(|v| v.to_str().ok())
+                            .and_then(|v| v.parse::<u64>().ok());
+                        let raw_text = resp.text().await.unwrap_or_default();
+                        tracing::warn!(
+                            "[{}] rate limited (429): {}",
+                            provider.name,
+                            safe_truncate(&raw_text, 100)
+                        );
+                        if attempt < max_retries - 1 {
+                            let delay = retry_after.map(Duration::from_secs).unwrap_or_else(|| {
+                                Duration::from_secs(2u64.pow(attempt as u32 + 1))
+                            });
+                            tracing::info!(
+                                "[{}] retrying after {}s due to rate limit...",
+                                provider.name,
+                                delay.as_secs()
+                            );
+                            tokio::time::sleep(delay).await;
+                            last_err = Some(anyhow::anyhow!("AI 频率限制，请稍后再试"));
+                            continue;
+                        }
+                        return Err(anyhow::anyhow!("AI 频率限制，请稍后再试"));
+                    }
+
+                    if status.as_u16() == 401 || status.as_u16() == 403 {
+                        let raw_text = resp.text().await.unwrap_or_default();
+                        tracing::warn!(
+                            "[{}] auth error ({}): {}",
+                            provider.name,
+                            status.as_u16(),
+                            safe_truncate(&raw_text, 200)
+                        );
+                        return Err(anyhow::anyhow!(
+                            "AI API Key 无效或已过期。请到「设置」页面检查 API Key 配置。"
+                        ));
+                    }
+
+                    let raw_text = match resp.text().await {
+                        Ok(text) => text,
+                        Err(e) => {
+                            if attempt < max_retries - 1 {
+                                last_err = Some(anyhow::anyhow!("AI 响应读取中断: {}", e));
+                                continue;
+                            }
+                            return Err(anyhow::anyhow!(
+                                "AI 响应读取失败（连接中断）。可能原因：\n\
+                                 1. API Key 无效或余额不足\n\
+                                 2. 网络不稳定\n\
+                                 3. AI 服务暂时不可用\n\
+                                 请到「设置」检查 AI 配置。"
+                            ));
+                        }
+                    };
+                    tracing::debug!(
+                        "[{}] status={} body_len={} body_preview={}",
+                        provider.name,
+                        status.as_u16(),
+                        raw_text.len(),
+                        safe_truncate(&raw_text, 120)
+                    );
+                    let content = extract_chat_content(&raw_text);
+                    // 解析并存储用量信息，供成本追踪使用
+                    if let Some(usage) = extract_usage(&raw_text) {
+                        let _ = self.last_usage.write().map(|mut w| {
+                            *w = Some(usage);
+                        });
+                    }
+
+                    if status.is_server_error() && attempt < max_retries - 1 {
+                        last_err = Some(anyhow::anyhow!("Server error {}", status));
+                        continue;
+                    }
+
+                    if content.starts_with("AI 错误") && attempt < max_retries - 1 {
+                        last_err = Some(anyhow::anyhow!("{}", content));
+                        continue;
+                    }
+
+                    return Ok(content);
+                }
+                Err(e) => {
+                    if e.is_connect() && provider.base_url.contains("localhost") {
+                        return Err(anyhow::anyhow!(
+                            "AI 未配置。请打开「设置」页面，配置云端 AI 服务（如智谱 GLM、OpenRouter 等）。\
+                             当前默认连接本地 Ollama (localhost:11434)，手机端不可用。"
+                        ));
+                    }
+                    if attempt < max_retries - 1 && (e.is_timeout() || e.is_connect()) {
+                        last_err = Some(e.into());
+                        continue;
+                    }
+                    return Err(e.into());
+                }
+            }
+        }
+
+        Err(last_err.unwrap_or_else(|| anyhow::anyhow!("Provider {} failed", provider.name)))
+    }
+
+    /// Anthropic Messages API: different auth, endpoint, and request/response format.
+    async fn try_provider_anthropic(
+        &self,
+        provider: &AiProvider,
+        messages: &[Message],
+        temperature: f32,
+    ) -> Result<String> {
+        // Separate system message from conversation messages
+        let mut system_prompt = String::new();
+        let mut chat_messages: Vec<serde_json::Value> = Vec::new();
+
+        for msg in messages {
+            if msg.role == "system" {
+                if !system_prompt.is_empty() {
+                    system_prompt.push('\n');
+                }
+                system_prompt.push_str(&msg.content);
+            } else {
+                chat_messages.push(serde_json::json!({
+                    "role": msg.role,
+                    "content": msg.content
+                }));
+            }
+        }
+
+        let mut body = serde_json::json!({
+            "model": provider.model,
+            "max_tokens": 8192,
+            "messages": chat_messages,
+            "temperature": temperature,
+        });
+        if !system_prompt.is_empty() {
+            body["system"] = serde_json::json!(system_prompt);
+        }
+
+        let req_url = format!("{}/messages", provider.base_url.trim_end_matches('/'));
+
+        let max_retries = PROVIDER_MAX_RETRIES;
+        let mut last_err = None;
+        for attempt in 0..max_retries {
+            if attempt > 0 {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
+
+            match self
+                .client
+                .post(&req_url)
+                .header("x-api-key", &provider.api_key)
+                .header("anthropic-version", "2023-06-01")
+                .json(&body)
+                .send()
+                .await
+            {
+                Ok(resp) => {
+                    let status = resp.status();
+                    if status.as_u16() == 429 {
+                        let raw = resp.text().await.unwrap_or_default();
+                        tracing::warn!("[{}] rate limited (429)", provider.name);
+                        if attempt < max_retries - 1 {
+                            tokio::time::sleep(Duration::from_secs(2u64.pow(attempt as u32 + 1)))
+                                .await;
+                            last_err = Some(anyhow::anyhow!("Anthropic 频率限制"));
+                            continue;
+                        }
+                        return Err(anyhow::anyhow!(
+                            "Anthropic 频率限制: {}",
+                            safe_truncate(&raw, 200)
+                        ));
+                    }
+                    if status.as_u16() == 401 || status.as_u16() == 403 {
+                        let raw = resp.text().await.unwrap_or_default();
+                        return Err(anyhow::anyhow!(
+                            "Anthropic API Key 无效: {}",
+                            safe_truncate(&raw, 200)
+                        ));
+                    }
+                    if !status.is_success() {
+                        let raw = resp.text().await.unwrap_or_default();
+                        return Err(anyhow::anyhow!(
+                            "Anthropic HTTP {}: {}",
+                            status.as_u16(),
+                            safe_truncate(&raw, 300)
+                        ));
+                    }
+
+                    let raw_text = resp.text().await?;
+                    // Anthropic response: { "content": [{"type": "text", "text": "..."}] }
+                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&raw_text) {
+                        if let Some(content_arr) = val["content"].as_array() {
+                            let mut text = String::new();
+                            for block in content_arr {
+                                if block["type"].as_str() == Some("text") {
+                                    if let Some(t) = block["text"].as_str() {
+                                        text.push_str(t);
+                                    }
+                                }
+                            }
+                            if !text.is_empty() {
+                                return Ok(text);
+                            }
+                        }
+                        // Check for error
+                        if let Some(err) = val["error"]["message"].as_str() {
+                            return Err(anyhow::anyhow!("Anthropic: {}", err));
+                        }
+                    }
+                    return Err(anyhow::anyhow!(
+                        "Anthropic 响应解析失败: {}",
+                        safe_truncate(&raw_text, 300)
+                    ));
+                }
+                Err(e) => {
+                    last_err = Some(anyhow::anyhow!("Anthropic 请求失败: {}", e));
+                    if attempt < max_retries - 1 {
+                        continue;
+                    }
+                }
+            }
+        }
+
+        Err(last_err.unwrap_or_else(|| anyhow::anyhow!("Anthropic provider failed")))
+    }
+
+    /// 单次 AI 调用的全局超时上限。
+    pub(crate) const GLOBAL_TIMEOUT_SECS: u64 = 300;
+
+    /// Get the current model name.
+    pub fn model_name(&self) -> &str {
+        &self.primary.model
+    }
+
+    /// Send a simple chat request for RAG (public API for external modules).
+    pub async fn send_rag_chat(&self, prompt: &str, temperature: f32) -> Result<String> {
+        let messages: Vec<Message> = vec![Message {
+            role: "system".to_string(),
+            content: prompt.to_string(),
+        }];
+        self.send_chat(messages, temperature).await
+    }
+
+    /// Send a raw JSON body to the AI provider.
+    pub async fn send_json_body(&self, body: serde_json::Value) -> Result<String> {
+        match tokio::time::timeout(
+            Duration::from_secs(Self::GLOBAL_TIMEOUT_SECS),
+            self.send_json_body_inner(body),
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(_) => Err(anyhow::anyhow!(
+                "AI 调用超时（全局上限 {}s）。请检查网络或更换 AI 服务商。",
+                Self::GLOBAL_TIMEOUT_SECS
+            )),
+        }
+    }
+
+    async fn send_json_body_inner(&self, body: serde_json::Value) -> Result<String> {
+        let mut last_err = anyhow::anyhow!("All providers failed");
+        let mut failed_chain: Vec<String> = Vec::new();
+        // Try primary
+        match self.try_provider_with_body(&self.primary, &body).await {
+            Ok(content) => return Ok(content),
+            Err(e) => {
+                failed_chain.push(format!("{}: {}", self.primary.name, e));
+                if self.fallbacks.is_empty() {
+                    return Err(e);
+                }
+                tracing::warn!("[{}] failed: {}, trying fallbacks...", self.primary.name, e);
+                last_err = e;
+            }
+        }
+        for fallback in &self.fallbacks {
+            match self.try_provider_with_body(fallback, &body).await {
+                Ok(content) => return Ok(content),
+                Err(e) => {
+                    failed_chain.push(format!("{}: {}", fallback.name, e));
+                    last_err = e;
+                }
+            }
+        }
+        if failed_chain.is_empty() {
+            Err(last_err)
+        } else {
+            Err(anyhow::anyhow!(
+                "AI 多通道均失败（{}）。请检查对应服务商 Key/额度/网络状态。",
+                failed_chain.join(" | ")
+            ))
+        }
+    }
+
+    /// Try a single provider with a raw JSON body (for multimodal etc.)
+    async fn try_provider_with_body(
+        &self,
+        provider: &AiProvider,
+        body: &serde_json::Value,
+    ) -> Result<String> {
+        let max_retries = PROVIDER_MAX_RETRIES;
+        let mut last_err = None;
+        for attempt in 0..max_retries {
+            if attempt > 0 {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
+            match self
+                .client
+                .post(format!(
+                    "{}/chat/completions",
+                    provider.base_url.trim_end_matches('/')
+                ))
+                .header("Authorization", format!("Bearer {}", provider.api_key))
+                .json(body)
+                .send()
+                .await
+            {
+                Ok(resp) => {
+                    let status = resp.status();
+                    if status.as_u16() == 429 {
+                        let retry_after = resp
+                            .headers()
+                            .get("retry-after")
+                            .and_then(|v| v.to_str().ok())
+                            .and_then(|v| v.parse::<u64>().ok());
+                        let raw_text = resp.text().await.unwrap_or_default();
+                        tracing::warn!(
+                            "[{}] rate limited (429): {}",
+                            provider.name,
+                            safe_truncate(&raw_text, 100)
+                        );
+                        if attempt < max_retries - 1 {
+                            let delay = retry_after.map(Duration::from_secs).unwrap_or_else(|| {
+                                Duration::from_secs(2u64.pow(attempt as u32 + 1))
+                            });
+                            tracing::info!(
+                                "[{}] retrying after {}s due to rate limit...",
+                                provider.name,
+                                delay.as_secs()
+                            );
+                            tokio::time::sleep(delay).await;
+                            last_err = Some(anyhow::anyhow!("AI 频率限制，请稍后再试"));
+                            continue;
+                        }
+                        return Err(anyhow::anyhow!("AI 频率限制，请稍后再试"));
+                    }
+                    if status.as_u16() == 401 || status.as_u16() == 403 {
+                        let raw_text = resp.text().await.unwrap_or_default();
+                        tracing::warn!(
+                            "[{}] auth error ({}): {}",
+                            provider.name,
+                            status.as_u16(),
+                            safe_truncate(&raw_text, 200)
+                        );
+                        return Err(anyhow::anyhow!(
+                            "AI API Key 无效或已过期。请到「设置」页面检查 API Key 配置。"
+                        ));
+                    }
+                    let raw_text = match resp.text().await {
+                        Ok(text) => text,
+                        Err(e) => {
+                            if attempt < max_retries - 1 {
+                                last_err = Some(anyhow::anyhow!("AI 响应读取中断: {}", e));
+                                continue;
+                            }
+                            return Err(anyhow::anyhow!("AI 响应读取失败（连接中断）。可能原因：\n 1. API Key 无效或余额不足\n 2. 网络不稳定\n 3. AI 服务暂时不可用\n 请到「设置」检查 AI 配置。"));
+                        }
+                    };
+                    let content = extract_chat_content(&raw_text);
+                    // 解析并存储用量信息，供成本追踪使用
+                    if let Some(usage) = extract_usage(&raw_text) {
+                        let _ = self.last_usage.write().map(|mut w| {
+                            *w = Some(usage);
+                        });
+                    }
+                    if status.is_server_error() && attempt < max_retries - 1 {
+                        last_err = Some(anyhow::anyhow!("Server error {}", status));
+                        continue;
+                    }
+                    if content.starts_with("AI 错误") && attempt < max_retries - 1 {
+                        last_err = Some(anyhow::anyhow!("{}", content));
+                        continue;
+                    }
+                    return Ok(content);
+                }
+                Err(e) => {
+                    if e.is_connect() && provider.base_url.contains("localhost") {
+                        return Err(anyhow::anyhow!(
+                            "AI 未配置。请打开「设置」页面，配置云端 AI 服务（如智谱 GLM、OpenRouter 等）。\
+                             当前默认连接本地 Ollama (localhost:11434)，手机端不可用。"
+                        ));
+                    }
+                    if attempt < max_retries - 1 && (e.is_timeout() || e.is_connect()) {
+                        last_err = Some(e.into());
+                        continue;
+                    }
+                    return Err(e.into());
+                }
+            }
+        }
+        Err(last_err.unwrap_or_else(|| anyhow::anyhow!("Provider {} failed", provider.name)))
+    }
+
+    /// 带全局超时的 AI 调用入口
+    pub(super) async fn send_chat(
+        &self,
+        messages: Vec<Message>,
+        temperature: f32,
+    ) -> Result<String> {
+        match tokio::time::timeout(
+            Duration::from_secs(Self::GLOBAL_TIMEOUT_SECS),
+            self.send_chat_inner(messages, temperature),
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(_) => Err(anyhow::anyhow!(
+                "AI 调用超时（全局上限 {}s）。请检查网络或更换 AI 服务商。",
+                Self::GLOBAL_TIMEOUT_SECS
+            )),
+        }
+    }
+
+    /// 调用 Gemini CLI 子进程进行 AI 推理 / Call Gemini CLI subprocess for AI inference.
+    async fn call_gemini_cli(messages: &[Message], gemini_path: Option<&str>) -> Result<String> {
+        let gemini_path = gemini_path.unwrap_or("gemini.cmd");
+
+        // Build the conversation text from messages
+        let mut prompt = String::new();
+        for msg in messages {
+            let label = match msg.role.as_str() {
+                "system" => "System",
+                "user" => "User",
+                "assistant" => "Assistant",
+                _ => &msg.role,
+            };
+            prompt.push_str(&format!("{}: {}\n", label, msg.content));
+        }
+
+        tracing::info!(
+            "Gemini CLI subprocess: path={} prompt_len={}",
+            gemini_path,
+            prompt.len()
+        );
+
+        // Spawn Gemini CLI subprocess
+        // On Windows, .cmd batch files are just wrappers for node scripts.
+        // We resolve the actual JS file and run `node` directly to avoid
+        // cmd.exe argument forwarding issues.
+        let (program, extra_args) = if gemini_path.ends_with(".cmd") {
+            // gemini.cmd resolves to:
+            //   %dp0%\node_modules\@google\gemini-cli\bundle\gemini.js
+            let dir = std::path::Path::new(gemini_path)
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new("."));
+            let js_path = dir
+                .join("node_modules")
+                .join("@google")
+                .join("gemini-cli")
+                .join("bundle")
+                .join("gemini.js");
+            (
+                "node".to_string(),
+                vec![js_path.to_string_lossy().to_string()],
+            )
+        } else {
+            (gemini_path.to_string(), vec![])
+        };
+        let output = tokio::process::Command::new(&program)
+            .env("GEMINI_CLI_TRUST_WORKSPACE", "true")
+            .args(&extra_args)
+            .args(["-p", &prompt, "--skip-trust", "--output-format", "json"])
+            .output()
+            .await
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "Gemini CLI 启动失败（{}）。请确认已安装 Gemini CLI（npm install -g @google/gemini-cli）。",
+                    e
+                )
+            })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stderr_trimmed: String = stderr.chars().take(500).collect();
+            return Err(anyhow::anyhow!(
+                "Gemini CLI 执行失败（exit code: {}）: {}",
+                output.status.code().unwrap_or(-1),
+                stderr_trimmed
+            ));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+
+        // Find JSON object in stdout (may have warnings/logs before it)
+        let json_start = stdout
+            .find('{')
+            .ok_or_else(|| anyhow::anyhow!("Gemini CLI 输出中没有找到 JSON 响应"))?;
+        let json_str = &stdout[json_start..];
+
+        // Find matching closing brace
+        let mut depth = 0;
+        let json_end = json_str
+            .char_indices()
+            .find(|&(_, c)| {
+                match c {
+                    '{' => depth += 1,
+                    '}' => depth -= 1,
+                    _ => {}
+                }
+                depth == 0 && c == '}'
+            })
+            .map(|(i, _)| i + 1)
+            .unwrap_or(json_str.len());
+        let json_str = &json_str[..json_end];
+
+        let json: serde_json::Value = serde_json::from_str(json_str).map_err(|e| {
+            anyhow::anyhow!(
+                "Gemini CLI 响应解析失败: {} (preview: {})",
+                e,
+                safe_truncate(json_str, 200)
+            )
+        })?;
+
+        json["response"]
+            .as_str()
+            .map(|s| s.to_string())
+            .ok_or_else(|| anyhow::anyhow!("Gemini CLI 响应中缺少 response 字段"))
+    }
+
+    /// 内部实现：Gemini CLI 模式或依次尝试 primary + fallbacks
+    async fn send_chat_inner(&self, messages: Vec<Message>, temperature: f32) -> Result<String> {
+        if self.provider_mode == AiProviderMode::GeminiCli {
+            return Self::call_gemini_cli(&messages, self.gemini_cli_path.as_deref()).await;
+        }
+
+        let mut failed_chain: Vec<String> = Vec::new();
+        match self
+            .try_provider(&self.primary, &messages, temperature)
+            .await
+        {
+            Ok(content) => return Ok(content),
+            Err(e) => {
+                failed_chain.push(format!("{}: {}", self.primary.name, e));
+                if self.fallbacks.is_empty() {
+                    return Err(e);
+                }
+                tracing::warn!("[{}] failed: {}, trying fallbacks...", self.primary.name, e);
+            }
+        }
+
+        let mut last_err = anyhow::anyhow!("All providers failed");
+        for fallback in &self.fallbacks {
+            tracing::info!("[failover] trying {}...", fallback.name);
+            match self.try_provider(fallback, &messages, temperature).await {
+                Ok(content) => {
+                    tracing::info!("[failover] {} succeeded", fallback.name);
+                    return Ok(content);
+                }
+                Err(e) => {
+                    tracing::warn!("[failover] {} failed: {}", fallback.name, e);
+                    failed_chain.push(format!("{}: {}", fallback.name, e));
+                    last_err = e;
+                }
+            }
+        }
+
+        if failed_chain.is_empty() {
+            Err(last_err)
+        } else {
+            Err(anyhow::anyhow!(
+                "AI 多通道均失败（{}）。请检查对应服务商 Key/额度/网络状态。",
+                failed_chain.join(" | ")
+            ))
+        }
+    }
+
+    async fn send_chat_inner_with_model(
+        &self,
+        messages: Vec<Message>,
+        temperature: f32,
+        model_override: Option<&str>,
+    ) -> Result<String> {
+        if self.provider_mode == AiProviderMode::GeminiCli {
+            return Self::call_gemini_cli(&messages, self.gemini_cli_path.as_deref()).await;
+        }
+
+        let mut failed_chain: Vec<String> = Vec::new();
+        let primary = Self::apply_model_override(&self.primary, model_override);
+        match self.try_provider(&primary, &messages, temperature).await {
+            Ok(content) => return Ok(content),
+            Err(e) => {
+                failed_chain.push(format!("{}: {}", primary.name, e));
+                if self.fallbacks.is_empty() {
+                    return Err(e);
+                }
+                tracing::warn!("[{}] failed: {}, trying fallbacks...", primary.name, e);
+            }
+        }
+
+        let mut last_err = anyhow::anyhow!("All providers failed");
+        for fallback in &self.fallbacks {
+            let fb = Self::apply_model_override(fallback, model_override);
+            tracing::info!("[failover] trying {}...", fb.name);
+            match self.try_provider(&fb, &messages, temperature).await {
+                Ok(content) => {
+                    tracing::info!("[failover] {} succeeded", fb.name);
+                    return Ok(content);
+                }
+                Err(e) => {
+                    tracing::warn!("[failover] {} failed: {}", fb.name, e);
+                    failed_chain.push(format!("{}: {}", fb.name, e));
+                    last_err = e;
+                }
+            }
+        }
+
+        if failed_chain.is_empty() {
+            Err(last_err)
+        } else {
+            Err(anyhow::anyhow!(
+                "AI 多通道均失败（{}）。请检查对应服务商 Key/额度/网络状态。",
+                failed_chain.join(" | ")
+            ))
+        }
+    }
+
+    pub(super) async fn send_chat_expert(
+        &self,
+        messages: Vec<Message>,
+        temperature: f32,
+    ) -> Result<String> {
+        // 使用 AiClient 已配置的模型（由 ai_client_expert 或 ai_client 决定），
+        // 不再通过 env var 覆盖，确保设置页的模型选择生效。
+        match tokio::time::timeout(
+            Duration::from_secs(Self::GLOBAL_TIMEOUT_SECS),
+            self.send_chat_inner_with_model(messages, temperature, None),
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(_) => Err(anyhow::anyhow!(
+                "AI 调用超时（全局上限 {}s）。请检查网络或更换 AI 服务商。",
+                Self::GLOBAL_TIMEOUT_SECS
+            )),
+        }
+    }
+
+    /// 使用指定模型发送聊天请求（用于结构化输出任务，如 Stage A 特征提取）。
+    /// model_override 为 None 时使用客户端配置的默认模型。
+    pub(super) async fn send_chat_expert_with_model(
+        &self,
+        messages: Vec<Message>,
+        temperature: f32,
+        model_override: Option<&str>,
+    ) -> Result<String> {
+        match tokio::time::timeout(
+            Duration::from_secs(Self::GLOBAL_TIMEOUT_SECS),
+            self.send_chat_inner_with_model(messages, temperature, model_override),
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(_) => Err(anyhow::anyhow!(
+                "AI 调用超时（全局上限 {}s）。请检查网络或更换 AI 服务商。",
+                Self::GLOBAL_TIMEOUT_SECS
+            )),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{timeouts, AiClient, PROVIDER_HTTP_TIMEOUT_SECS};
+    use std::time::Duration;
+
+    #[test]
+    fn truncate_for_ai_strict_contains_integrity_warning() {
+        // 严格变体（面向用户材料）必须包含「材料不完整」提示
+        let long = "测试".repeat(200);
+        let result = super::truncate_for_ai(&long, 100);
+        assert!(
+            result.contains("材料不完整"),
+            "strict variant must contain 材料不完整, got: {result}"
+        );
+    }
+
+    #[test]
+    fn truncate_for_ai_internal_does_not_contain_integrity_warning() {
+        // 内部转述变体不得包含「材料不完整」
+        let long = "测试".repeat(200);
+        let result = super::truncate_for_ai_internal(&long, 100, "审查员立论");
+        assert!(
+            !result.contains("材料不完整"),
+            "internal variant must NOT contain 材料不完整, got: {result}"
+        );
+        assert!(
+            result.contains("系统内部转述"),
+            "internal variant must contain 系统内部转述, got: {result}"
+        );
+        assert!(
+            result.contains("审查员立论"),
+            "internal variant must contain the label, got: {result}"
+        );
+    }
+
+    #[test]
+    fn truncate_for_ai_internal_no_truncation_returns_original() {
+        // 不超限时原样返回
+        let short = "短文本";
+        let result = super::truncate_for_ai_internal(short, 100, "代理师反驳");
+        assert_eq!(result, short);
+    }
+
+    #[test]
+    fn truncate_for_ai_no_truncation_returns_original() {
+        // 严格变体不超限时也原样返回
+        let short = "短文本";
+        let result = super::truncate_for_ai(short, 100);
+        assert_eq!(result, short);
+    }
+
+    #[test]
+    fn single_ai_call_timeouts_are_within_configured_bounds() {
+        // CHAT 保持 60 秒交互上限
+        assert!(
+            timeouts::CHAT <= Duration::from_secs(60),
+            "CHAT timeout must not exceed 60 seconds"
+        );
+        // ANALYSIS 允许 180 秒（OA 三步→一步合并后单次需要 70-90 秒）
+        assert!(
+            timeouts::ANALYSIS <= Duration::from_secs(180),
+            "ANALYSIS timeout must not exceed 180 seconds"
+        );
+        // ENRICHMENT 允许 300 秒
+        assert!(
+            timeouts::ENRICHMENT <= Duration::from_secs(300),
+            "ENRICHMENT timeout must not exceed 300 seconds"
+        );
+
+        assert_eq!(
+            PROVIDER_HTTP_TIMEOUT_SECS, 300,
+            "default provider HTTP timeout must be 300 seconds"
+        );
+        assert_eq!(
+            AiClient::GLOBAL_TIMEOUT_SECS,
+            300,
+            "global AI timeout must be 300 seconds"
+        );
+    }
+}

@@ -1,0 +1,1310 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>设置 - 创研台</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#0d1117">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+    <script src="/static/purify.min.js"></script>
+</head>
+<body>
+    <div class="page-with-sidebar">
+    <aside id="page-sidebar" class="page-sidebar"></aside>
+    <div class="settings-container page-main">
+        <div class="page-title-bar"><h2>系统设置</h2><span id="version-display" style="margin-left:auto;color:#8b949e;font-size:13px;"></span></div>
+
+        <div class="setting-group">
+            <h3>🔑 SerpAPI 搜索配置（多 Key 轮询）</h3>
+
+            <p>配置多个 SerpAPI Key 自动轮询，突破单账号每月 250 次限制。未配置时自动回退本地数据库。</p>
+            <p class="warn-text">注册地址：<a href="https://serpapi.com/manage-api-key" target="_blank">https://serpapi.com/manage-api-key</a></p>
+            <div id="serpapi-key-list"></div>
+            <div class="btn-row" style="margin-top:8px;">
+                <button class="btn-gray btn-save" onclick="addSerpapiKeyRow()">+ 添加 SerpAPI Key</button>
+                <button class="btn-save" onclick="saveSerpApiKey()">保存</button>
+            </div>
+            <div id="serpapi-status" class="status-message"></div>
+
+            <div class="sub-box">
+                <strong style="color:var(--accent-hover);">📊 SerpAPI 余额 / 用量</strong>
+                <div id="serpapi-balance-content" style="margin-top:8px;color:var(--text-secondary);font-size:var(--fs-base);">
+                    点击查询加载...
+                </div>
+                <button class="btn-gray btn-save" style="margin-top:8px;padding:6px 16px;font-size:13px;" onclick="fetchSerpapiBalance()">🔄 刷新余额</button>
+            </div>
+        </div>
+
+        <div class="setting-group">
+            <h3 data-i18n="settings.epoTitle"></h3>
+            <p data-i18n="settings.epoHint"></p>
+            <p class="warn-text"><span data-i18n="settings.epoRegister"></span>：<a href="https://developers.epo.org/" target="_blank" rel="noopener">https://developers.epo.org/</a></p>
+
+            <div class="form-group">
+                <label for="epo-key" data-i18n="settings.epoKeyLabel"></label>
+                <input type="text" id="epo-key" data-i18n-placeholder="settings.epoKeyPlaceholder" autocomplete="off" oninput="updateEpoPairHint()">
+                <span class="form-hint" data-i18n="settings.epoKeyHint"></span>
+            </div>
+
+            <div class="form-group">
+                <label for="epo-secret" data-i18n="settings.epoSecretLabel"></label>
+                <input type="password" id="epo-secret" data-i18n-placeholder="settings.epoSecretPlaceholder" autocomplete="off" oninput="updateEpoPairHint()">
+                <span class="form-hint" data-i18n="settings.epoSecretHint"></span>
+            </div>
+
+            <div id="epo-pair-hint" class="warn-text" style="display:none;"></div>
+
+            <div class="btn-row" style="margin-top:8px;">
+                <button class="btn-save" type="button" onclick="saveEpoCredentials()" data-i18n="settings.epoSave"></button>
+            </div>
+            <div id="epo-status" class="status-message"></div>
+            <div id="epo-current" class="status-pill" style="margin-top:8px;"></div>
+        </div>
+
+        <div class="setting-group">
+            <h3>🤖 <span id="ai-provider-title">AI</span> 配置</h3>
+            <p>当前默认 AI 服务商，用于专利分析、创意验证等。</p>
+
+            <div class="form-group">
+                <label>AI 服务商</label>
+                <select id="ai-provider">
+                    <option value="deepseek">DeepSeek（国内第一）</option>
+                    <option value="openai">OpenAI GPT-4o（国际最强）</option>
+                    <option value="anthropic">Anthropic Claude（法律推理）</option>
+                    <option value="qwen">通义千问 Qwen（阿里）</option>
+                    <option value="xiaomi">小米 MiMo（支持看图）</option>
+                    <option value="sensetime">商汤 SenseNova</option>
+                    <option value="zhipu">智谱 GLM</option>
+                    <option value="openrouter">OpenRouter（统一网关）</option>
+                    <option value="gemini">Google Gemini（支持看图）</option>
+                    <option value="custom">自定义</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label>API Key</label>
+                <input type="text" id="ai-api-key" placeholder="输入 API Key">
+                <a id="ai-key-link" href="https://platform.deepseek.com/" target="_blank" class="help-link">
+                    → 获取 API Key
+                </a>
+            </div>
+
+            <div class="form-group">
+                <label>API Base URL</label>
+                <input type="text" id="ai-base-url" value="https://api.deepseek.com/v1" placeholder="https://api.deepseek.com/v1">
+                <span class="form-hint" id="ai-base-hint">兼容 OpenAI 格式的 API 地址</span>
+            </div>
+
+            <div class="form-group">
+                <label>AI 模型（默认）</label>
+                <select id="ai-model">
+                </select>
+                <button class="btn-gray btn-save" id="ai-models-btn" style="margin-top:8px;padding:6px 16px;font-size:13px;" onclick="fetchAiModels(null, false)">🔍 查询可用模型</button>
+                <div id="custom-model-group" class="form-group" style="display:none;margin-top:8px;">
+                    <label>自定义模型名称</label>
+                    <input type="text" id="ai-model-custom" placeholder="输入模型名称">
+                </div>
+                <span class="form-hint" id="ai-model-hint">选择模型或切换至自定义输入</span>
+            </div>
+
+            <div class="form-group">
+                <label>专家模型（深度分析）</label>
+                <select id="ai-model-expert">
+                </select>
+                <div id="custom-expert-model-group" class="form-group" style="display:none;margin-top:8px;">
+                    <label>自定义专家模型名称</label>
+                    <input type="text" id="ai-model-expert-custom" placeholder="输入模型名称">
+                </div>
+                <span class="form-hint">用于创新推演、创造性分析、侵权评估等高推理任务</span>
+            </div>
+
+            <button class="btn-save" onclick="saveAiConfig()">保存</button>
+            <div id="ai-status" class="status-message"></div>
+        </div>
+
+        <div class="setting-group" id="google-oauth-section">
+            <h3>🔐 Google 高级认证（Gemini 更高额度）</h3>
+            <p>Google 账号认证后可获得比免费 API Key 更好的频率限制和配额。</p>
+
+            <!-- ── gcloud CLI 方式（推荐）── -->
+            <div class="sub-box" style="margin-bottom:16px;">
+                <h4>方式一：gcloud CLI 自动识别 <span style="font-size:12px;color:var(--text-muted);font-weight:normal;">（推荐，无需配置 OAuth 同意屏幕）</span></h4>
+                <p style="color:var(--text-secondary);font-size:var(--fs-base);margin:8px 0;">
+                    需要先安装 <a href="https://cloud.google.com/sdk/docs/install" target="_blank" style="color:var(--accent-hover);">gcloud CLI</a>，
+                    然后运行以下命令登录：
+                </p>
+                <pre style="background:var(--bg-inset);padding:10px;border-radius:var(--r-sm);color:var(--text-secondary);font-size:13px;overflow-x:auto;white-space:pre-wrap;word-break:break-all;">gcloud auth application-default login --scopes=https://www.googleapis.com/auth/generative-language,openid,email</pre>
+                <p class="muted" style="font-size:13px;">执行后浏览器将打开 Google 授权页面，登录即可。</p>
+
+                <div id="gcloud-status" class="status-pill">检测 gcloud 状态中...</div>
+
+                <div class="btn-row">
+                    <button class="btn-gray btn-save" id="gcloud-detect-btn" onclick="detectGcloud()" style="padding:8px 16px;font-size:13px;">🔄 检测 gcloud 状态</button>
+                    <button class="btn-google btn-save" id="gcloud-login-btn" onclick="loginWithGcloud()" style="padding:8px 16px;font-size:13px;">🔑 通过 gcloud CLI 登录</button>
+                </div>
+                <div id="gcloud-msg" class="status-message"></div>
+            </div>
+
+            <!-- ── 浏览器 OAuth 方式（备选）── -->
+            <details class="details-box">
+                <summary>
+                    ⚙️ 备用方式：浏览器 OAuth（需配置 OAuth 同意屏幕）
+                </summary>
+                <div class="sub-box" style="margin-top:8px;">
+                    <p class="warn-text">⚠️ 此方式需要 Google Cloud Console 中正确配置 OAuth 同意屏幕并添加 generative-language 作用域。</p>
+
+                    <div class="form-group">
+                        <label>Google Client ID</label>
+                        <input type="text" id="google-client-id" placeholder="xxxxxxxxxxxx.apps.googleusercontent.com">
+                        <a href="https://console.cloud.google.com/apis/credentials" target="_blank" class="help-link">
+                            → 在 Google Cloud Console 创建凭据
+                        </a>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Google Client Secret</label>
+                        <input type="password" id="google-client-secret" placeholder="GOCSPX-xxxxxxxxxxxx">
+                    </div>
+
+                    <div id="google-oauth-status" class="status-pill" style="font-size:var(--fs-base);"></div>
+
+                    <div class="btn-row">
+                        <button class="btn-gray btn-save" onclick="saveGoogleCredentials()" style="padding:8px 16px;font-size:13px;">保存凭据</button>
+                        <button class="btn-google btn-save" id="google-connect-btn" onclick="connectGoogle()" disabled style="padding:8px 16px;font-size:13px;">
+                            <span id="google-btn-text">🔗 使用 Google 账号登录</span>
+                        </button>
+                    </div>
+                    <div id="google-oauth-msg" class="status-message"></div>
+                </div>
+            </details>
+
+            <div id="google-auth-status-line" class="status-pill" style="font-size:var(--fs-base);"></div>
+
+            <!-- ── Gemini CLI 方式（新增）── -->
+            <div class="sub-box" style="margin-top:16px;">
+                <h4>方式三：Gemini CLI 子进程模式 <span style="font-size:12px;color:var(--text-muted);font-weight:normal;">（无需 API Key）</span></h4>
+                <p style="color:var(--text-secondary);font-size:var(--fs-base);margin:8px 0;">
+                    使用已安装的 <code style="background:var(--bg-elevated);padding:1px 4px;border-radius:2px;">gemini</code> CLI 工具进行 AI 推理，
+                    完全绕过 API Key 和 OAuth 作用域限制。启用后所有 AI 请求将改由 Gemini CLI 子进程处理。
+                </p>
+                <div id="gemini-cli-status" class="status-pill">检测 Gemini CLI 状态中...</div>
+                <div class="btn-row" style="align-items:center;">
+                    <button class="btn-gray btn-save" onclick="detectGeminiCli()" style="padding:8px 16px;font-size:13px;">🔄 检测 Gemini CLI</button>
+                    <label class="sidebar-toggle" style="margin-left:8px;">
+                        <input type="checkbox" id="gemini-cli-toggle" onchange="toggleGeminiCliMode()">
+                        <span>启用 Gemini CLI 模式</span>
+                    </label>
+                </div>
+                <div id="gemini-cli-msg" class="status-message"></div>
+            </div>
+        </div>
+
+        <div class="setting-group" id="freecad-settings">
+            <h3 data-i18n="cad.settingsTitle"></h3>
+            <p data-i18n="cad.settingsHint"></p>
+            <label for="aioncad-workspace" data-i18n="cad.workspaceLabel"></label>
+            <input id="aioncad-workspace" type="text" data-i18n-placeholder="cad.workspacePlaceholder" autocomplete="off">
+            <p class="muted" data-i18n="cad.workspaceHint"></p>
+            <label class="sidebar-toggle" style="margin:12px 0;">
+                <input type="checkbox" id="freecad-auto-start">
+                <span data-i18n="cad.autoStart"></span>
+            </label>
+            <p class="muted" data-i18n="cad.autoStartHint"></p>
+            <div id="freecad-status" class="status-pill" data-i18n="cad.checking"></div>
+            <div class="btn-row">
+                <button class="btn-save" type="button" onclick="saveFreeCadSettings()" data-i18n="cad.saveSettings"></button>
+                <button class="btn-gray" id="freecad-start-btn" type="button" onclick="checkAndStartFreeCad()" data-i18n="cad.detectStart"></button>
+            </div>
+        </div>
+
+        <!-- 备用搜索源（Firecrawl/Bing/CNIPR）和备用 AI 已屏蔽，仅保留 SerpAPI + DeepSeek -->
+
+        <div class="setting-group">
+            <h3>ℹ️ 当前配置状态</h3>
+            <p id="config-status">加载中...</p>
+        </div>
+
+        <div class="setting-group" id="ai-cost-group" style="display:none;">
+            <h3>💰 <span data-i18n="ai.costTitle">AI 使用统计（近30天）</span></h3>
+            <div id="ai-cost-summary" class="form-section">
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:12px;">
+                    <div style="background:var(--bg-elevated);padding:12px 16px;border-radius:8px;">
+                        <div style="font-size:13px;color:var(--text-muted);" data-i18n="ai.totalCalls">总调用次数</div>
+                        <div style="font-size:24px;font-weight:700;margin-top:4px;" id="ai-cost-calls">--</div>
+                    </div>
+                    <div style="background:var(--bg-elevated);padding:12px 16px;border-radius:8px;">
+                        <div style="font-size:13px;color:var(--text-muted);" data-i18n="ai.totalInputTokens">输入 Token</div>
+                        <div style="font-size:24px;font-weight:700;margin-top:4px;" id="ai-cost-input">--</div>
+                    </div>
+                    <div style="background:var(--bg-elevated);padding:12px 16px;border-radius:8px;">
+                        <div style="font-size:13px;color:var(--text-muted);" data-i18n="ai.totalOutputTokens">输出 Token</div>
+                        <div style="font-size:24px;font-weight:700;margin-top:4px;" id="ai-cost-output">--</div>
+                    </div>
+                    <div style="background:var(--bg-elevated);padding:12px 16px;border-radius:8px;">
+                        <div style="font-size:13px;color:var(--text-muted);" data-i18n="ai.totalCost">估算花费</div>
+                        <div style="font-size:24px;font-weight:700;margin-top:4px;color:#a855f7;" id="ai-cost-amount">--</div>
+                    </div>
+                </div>
+                <div id="ai-cost-by-model" style="font-size:13px;color:var(--text-muted);"></div>
+            </div>
+        </div>
+    </div>
+    </div>
+
+    <script src="/static/i18n.js"></script>
+    <script>
+    // Allow inline event handlers in sanitized HTML
+    if (typeof DOMPurify !== 'undefined' && DOMPurify.setConfig) {
+        DOMPurify.setConfig({ADD_ATTR: ['onclick', 'onkeydown', 'onchange', 'oninput', 'onload', 'onfocus', 'onblur']});
+    }
+        renderNavbar('settings');
+        renderSidebar();
+        applyI18nCommon();
+
+        // ── AI 服务商预设数据 ──
+        var AI_PROVIDERS = {
+            deepseek: {
+                title: 'DeepSeek',
+                base_url: 'https://api.deepseek.com/v1',
+                key_link: 'https://platform.deepseek.com/',
+                models: [
+                    {value: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash (快速，推荐)'},
+                    {value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro (最强)'},
+                    {value: 'deepseek-reasoner', label: 'DeepSeek Reasoner (R1，深度推理)'},
+                ],
+                expert_models: [
+                    {value: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash (快速，推荐)'},
+                    {value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro (最强)'},
+                    {value: 'deepseek-reasoner', label: 'DeepSeek Reasoner (R1，深度推理)'},
+                ],
+                hint: '兼容 OpenAI 格式的 API 地址'
+            },
+            anthropic: {
+                title: 'Anthropic Claude',
+                base_url: 'https://api.anthropic.com/v1',
+                key_link: 'https://console.anthropic.com/',
+                models: [
+                    {value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6 (最新推荐)'},
+                    {value: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4'},
+                    {value: 'claude-opus-4-20250514', label: 'Claude Opus 4 (最强)'},
+                    {value: 'claude-haiku-4-20250514', label: 'Claude Haiku 4 (最快)'},
+                ],
+                expert_models: [
+                    {value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6 (最新推荐)'},
+                    {value: 'claude-opus-4-20250514', label: 'Claude Opus 4 (最强法律推理)'},
+                ],
+                hint: 'Anthropic 官方 API，专利法律推理能力最强'
+            },
+            xiaomi: {
+                title: '小米 MiMo',
+                base_url: 'https://api.xiaomimimo.com/v1',
+                key_link: 'https://platform.xiaomimimo.com',
+                models: [
+                    {value: 'mimo-v2.5-pro', label: 'MiMo V2.5 Pro（推荐，支持看图）'},
+                    {value: 'mimo-v2.5', label: 'MiMo V2.5'},
+                    {value: 'mimo-v2-omni', label: 'MiMo V2 Omni'},
+                ],
+                expert_models: [
+                    {value: 'mimo-v2.5-pro', label: 'MiMo V2.5 Pro（推荐，支持看图）'},
+                    {value: 'mimo-v2.5', label: 'MiMo V2.5'},
+                ],
+                hint: '小米 MiMo API，支持图片多模态'
+            },
+            sensetime: {
+                title: '商汤 SenseNova',
+                base_url: 'https://token.sensenova.cn/v1',
+                key_link: 'https://platform.sensenova.cn/',
+                models: [
+                    {value: 'sensenova-6.7-flash-lite', label: 'SenseNova 6.7 Flash Lite（最新，支持看图+推理）'},
+                    {value: 'sensenova-6.8-flash-lite', label: 'SenseNova 6.8 Flash Lite（最新，支持看图）'},
+                    {value: 'glm-5.2', label: 'GLM 5.2（商汤通道）'},
+                    {value: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash（商汤通道，免费）'},
+                    {value: 'sensenova-u1-fast', label: 'SenseNova U1 Fast（快速推理）'},
+                ],
+                expert_models: [
+                    {value: 'sensenova-6.7-flash-lite', label: 'SenseNova 6.7 Flash Lite（支持看图+推理）'},
+                    {value: 'sensenova-6.8-flash-lite', label: 'SenseNova 6.8 Flash Lite（最新）'},
+                    {value: 'glm-5.2', label: 'GLM 5.2（商汤通道）'},
+                    {value: 'sensenova-u1-fast', label: 'SenseNova U1 Fast（推理）'},
+                ],
+                hint: '商汤日日新 API，兼容 OpenAI 格式，支持多模态看图'
+            },
+            openrouter: {
+                title: 'OpenRouter',
+                base_url: 'https://openrouter.ai/api/v1',
+                key_link: 'https://openrouter.ai/keys',
+                models: [
+                    {value: 'gpt-4o', label: 'GPT-4o（支持看图）'},
+                    {value: 'gpt-4o-mini', label: 'GPT-4o Mini'},
+                ],
+                expert_models: [
+                    {value: 'gpt-4o', label: 'GPT-4o（支持看图）'},
+                    {value: 'gpt-4o-mini', label: 'GPT-4o Mini'},
+                ],
+                hint: 'OpenRouter 统一 API 网关'
+            },
+            gemini: {
+                title: 'Google Gemini',
+                base_url: 'https://generativelanguage.googleapis.com/v1beta/openai',
+                key_link: 'https://aistudio.google.com/apikey',
+                models: [
+                    {value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash（推荐，支持看图）'},
+                    {value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro（最强，需付费）'},
+                    {value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash'},
+                    {value: 'gemini-2.0-flash-lite', label: 'Gemini 2.0 Flash Lite'},
+                ],
+                expert_models: [
+                    {value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro（最强）'},
+                    {value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash'},
+                    {value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash'},
+                ],
+                hint: 'Google Gemini API（OpenAI 兼容接口）'
+            },
+            zhipu: {
+                title: '智谱 GLM',
+                base_url: 'https://open.bigmodel.cn/api/paas/v4',
+                key_link: 'https://open.bigmodel.cn/usercenter/apikeys',
+                models: [
+                    {value: 'glm-4-plus', label: 'GLM-4-Plus（最强）'},
+                    {value: 'glm-4-flash', label: 'GLM-4-Flash（免费，推荐）'},
+                    {value: 'glm-4-air', label: 'GLM-4-Air（快速）'},
+                    {value: 'glm-4-flashx', label: 'GLM-4-FlashX（快速免费）'},
+                ],
+                expert_models: [
+                    {value: 'glm-4-plus', label: 'GLM-4-Plus（最强）'},
+                    {value: 'glm-4-flash', label: 'GLM-4-Flash（免费）'},
+                ],
+                hint: '智谱 GLM OpenAI 兼容接口'
+            },
+            openai: {
+                title: 'OpenAI GPT',
+                base_url: 'https://api.openai.com/v1',
+                key_link: 'https://platform.openai.com/api-keys',
+                models: [
+                    {value: 'gpt-4o', label: 'GPT-4o（最强，支持看图）'},
+                    {value: 'gpt-4o-mini', label: 'GPT-4o Mini（快速，推荐）'},
+                    {value: 'gpt-5', label: 'GPT-5（最新旗舰）'},
+                    {value: 'gpt-5-mini', label: 'GPT-5 Mini（快速）'},
+                ],
+                expert_models: [
+                    {value: 'gpt-5', label: 'GPT-5（最新旗舰）'},
+                    {value: 'gpt-4o', label: 'GPT-4o（最强）'},
+                ],
+                hint: 'OpenAI 官方 API，全球最强模型'
+            },
+            qwen: {
+                title: '通义千问 Qwen',
+                base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+                key_link: 'https://bailian.console.aliyun.com/',
+                models: [
+                    {value: 'qwen-max', label: 'Qwen-Max（最强）'},
+                    {value: 'qwen-plus', label: 'Qwen-Plus（均衡，推荐）'},
+                    {value: 'qwen-turbo', label: 'Qwen-Turbo（快速，推荐）'},
+                    {value: 'qwen-long', label: 'Qwen-Long（超长上下文）'},
+                    {value: 'qwen-vl-max', label: 'Qwen-VL-Max（多模态）'},
+                ],
+                expert_models: [
+                    {value: 'qwen-max', label: 'Qwen-Max（最强）'},
+                    {value: 'qwen-plus', label: 'Qwen-Plus（均衡）'},
+                ],
+                hint: '阿里通义千问，国内最强模型之一'
+            }
+        };
+
+        var providerKeys = {};
+        function detectProvider(baseUrl) {
+            baseUrl = (baseUrl || '').toLowerCase();
+            if (baseUrl.includes('deepseek')) return 'deepseek';
+            if (baseUrl.includes('api.openai.com')) return 'openai';
+            if (baseUrl.includes('anthropic')) return 'anthropic';
+            if (baseUrl.includes('xiaomimimo')) return 'xiaomi';
+            if (baseUrl.includes('sensenova')) return 'sensetime';
+            if (baseUrl.includes('openrouter')) return 'openrouter';
+            if (baseUrl.includes('googleapis')) return 'gemini';
+            if (baseUrl.includes('bigmodel')) return 'zhipu';
+            if (baseUrl.includes('dashscope')) return 'qwen';
+            return 'custom';
+        }
+
+        function updateProviderUI(providerKey) {
+            var provider = AI_PROVIDERS[providerKey];
+            if (!provider) providerKey = 'custom';
+
+            document.getElementById('ai-provider-title').textContent = provider ? provider.title : '自定义';
+            document.getElementById('ai-provider').value = providerKey;
+
+            if (provider) {
+                document.getElementById('ai-base-url').value = provider.base_url;
+                document.getElementById('ai-key-link').href = provider.key_link;
+                document.getElementById('ai-key-link').textContent = '\u2192 \u83b7\u53d6 ' + provider.title + ' Key';
+                document.getElementById('ai-base-hint').textContent = provider.hint;
+            } else {
+                document.getElementById('ai-base-hint').textContent = '自定义 API 地址';
+            }
+
+            // 清空模型下拉，等待自动查询填充
+            var modelSel = document.getElementById('ai-model');
+            modelSel.innerHTML = DOMPurify.sanitize('<option value="">加载中...</option>');
+            document.getElementById('ai-model-expert').innerHTML = '<option value="">加载中...</option>';
+
+            // 自动从 API 查询真实模型列表
+            fetchAiModels(providerKey, true);
+
+            // 切换服务商时自动更新 API Key 输入框
+            var keyMap = {
+                deepseek: 'ai_api_key_deepseek',
+                openai: 'ai_api_key_openai',
+                anthropic: 'ai_api_key_anthropic',
+                qwen: 'ai_api_key_qwen',
+                xiaomi: 'ai_api_key_xiaomi',
+                sensetime: 'ai_api_key_sensetime',
+                openrouter: 'ai_api_key_openrouter',
+                gemini: 'ai_api_key_gemini',
+                zhipu: 'ai_api_key_zhipu'
+            };
+            var keyField = keyMap[providerKey];
+            if (keyField && providerKeys[keyField] !== undefined) {
+                document.getElementById('ai-api-key').value = providerKeys[keyField] || '';
+            }
+
+            // 非 Gemini 服务商时自动关闭 Gemini CLI 模式
+            var geminiToggle = document.getElementById('gemini-cli-toggle');
+            if (providerKey !== 'gemini') {
+                geminiToggle.checked = false;
+                geminiToggle.disabled = true;
+                document.getElementById('gemini-cli-status').innerHTML =
+                    '<span style="color:#8b949e;">仅在 Gemini 作为 AI 服务商时可用</span>';
+            } else {
+                geminiToggle.disabled = false;
+            }
+
+            document.getElementById('custom-model-group').style.display = 'none';
+            document.getElementById('custom-expert-model-group').style.display = 'none';
+        }
+
+        function populateSelect(selectId, options, currentValue) {
+            var select = document.getElementById(selectId);
+            select.innerHTML = '';
+            for (let i = 0; i < options.length; i++) {
+                var opt = document.createElement('option');
+                opt.value = options[i].value;
+                opt.textContent = options[i].label;
+                select.appendChild(opt);
+            }
+            var custom = document.createElement('option');
+            custom.value = 'custom';
+            custom.textContent = '\u81ea\u5b9a\u4e49\u6a21\u578b...';
+            select.appendChild(custom);
+            if (currentValue) {
+                select.value = currentValue;
+                if (select.value !== currentValue) {
+                    select.value = 'custom';
+                }
+            }
+        }
+
+        function onProviderChange() {
+            var val = document.getElementById('ai-provider').value;
+            if (val === 'custom') {
+                document.getElementById('ai-provider-title').textContent = '\u81ea\u5b9a\u4e49';
+                return;
+            }
+            updateProviderUI(val);
+        }
+
+        // 页面加载时获取当前配置
+        let returnUrl = ''; // 记录返回地址
+
+        window.onload = async function() {
+            // 从 URL 参数获取返回地址
+            const urlParams = new URLSearchParams(window.location.search);
+            returnUrl = urlParams.get('from') || document.referrer || '';
+
+            try {
+                const res = await fetch('/api/settings');
+                if (res.ok) {
+                    const config = await res.json();
+
+                    // Load SerpAPI multi-key list
+                    if (config.serpapi_keys && config.serpapi_keys.length > 0) {
+                        config.serpapi_keys.forEach(function(k) {
+                            addSerpapiKeyRow(k);
+                        });
+                    } else {
+                        addSerpapiKeyRow('');
+                    }
+
+                    // 显示版本号
+                    if (config.version) {
+                        var vd = document.getElementById('version-display');
+                        if (vd) vd.textContent = 'v' + config.version;
+                    }
+                    // 回填 EPO OPS 凭证（脱敏掩码回显，MA5a）
+                    fillEpoCredentials(config);
+
+                    document.getElementById('ai-base-url').value = config.ai_base_url || 'https://api.deepseek.com/v1';
+                    document.getElementById('ai-api-key').value = config.ai_api_key || '';
+                    // 保存各服务商独立 Key，供切换服务商时自动更新
+                    providerKeys = {
+                        ai_api_key_deepseek: config.ai_api_key_deepseek || '',
+                        ai_api_key_xiaomi: config.ai_api_key_xiaomi || '',
+                        ai_api_key_sensetime: config.ai_api_key_sensetime || '',
+                        ai_api_key_openrouter: config.ai_api_key_openrouter || '',
+                        ai_api_key_gemini: config.ai_api_key_gemini || ''
+                    };
+
+                    // 根据 base_url 自动检测服务商并填充下拉
+                    var detectedProvider = detectProvider(config.ai_base_url);
+                    updateProviderUI(detectedProvider);
+
+                    // 设置模型下拉值
+                    var modelVal = config.ai_model || '';
+                    var modelSelect = document.getElementById('ai-model');
+                    if (modelVal) {
+                        modelSelect.value = modelVal;
+                        if (modelSelect.value !== modelVal) {
+                            modelSelect.value = 'custom';
+                            document.getElementById('custom-model-group').style.display = 'block';
+                            document.getElementById('ai-model-custom').value = modelVal;
+                        }
+                    }
+
+                    var expertVal = config.ai_model_expert || '';
+                    var expertSelect = document.getElementById('ai-model-expert');
+                    if (expertVal) {
+                        expertSelect.value = expertVal;
+                        if (expertSelect.value !== expertVal) {
+                            expertSelect.value = 'custom';
+                            document.getElementById('custom-expert-model-group').style.display = 'block';
+                            document.getElementById('ai-model-expert-custom').value = expertVal;
+                        }
+                    }
+
+                    // 初次加载刷新余额
+                    fetchSerpapiBalance();
+                    updateGoogleOAuthUI(config);
+                    updateConfigStatus(config);
+                    updateGoogleAuthStatus(config);
+                    detectGcloud();
+                    detectGeminiCli();
+                    document.getElementById('aioncad-workspace').value = config.aioncad_workspace || '';
+                    document.getElementById('freecad-auto-start').checked = config.freecad_auto_start !== false;
+                    if (!config.freecad_platform_supported) {
+                        document.getElementById('aioncad-workspace').disabled = true;
+                        document.getElementById('freecad-auto-start').disabled = true;
+                        document.getElementById('freecad-start-btn').disabled = true;
+                    }
+                    refreshFreeCadStatus();
+                }
+            } catch (e) {
+                console.error('Failed to load config:', e);
+            }
+        };
+        
+        // 返回上一页
+        function goBack() {
+            if (returnUrl && !returnUrl.includes('/settings')) {
+                window.location.href = returnUrl;
+            } else {
+                window.history.back();
+            }
+        }
+
+        function updateConfigStatus(config) {
+            const status = [];
+
+            if (config.serpapi_key_configured) {
+                status.push('✅ SerpAPI 已配置（Google Patents）');
+            } else {
+                status.push('⚠️ SerpAPI 未配置，将仅搜索本地数据库');
+            }
+
+            // EPO OPS 三态（MA5a）：成对才算已配置，只填一半单独提示
+            if (config.epo_configured) {
+                status.push(t('settings.epoStatusOn'));
+            } else if (config.epo_key_configured || config.epo_secret_configured) {
+                status.push(t('settings.epoStatusHalf'));
+            } else {
+                status.push(t('settings.epoStatusOff'));
+            }
+
+            if (config.ai_api_key_configured) {
+                status.push('✅ AI 服务已配置（DeepSeek）');
+            } else {
+                status.push('❌ AI 服务未配置（无法使用智能分析）');
+            }
+
+            if (config.google_oauth_connected) {
+                if (config.google_auth_mode === 'gcloud') {
+                    status.push('✅ Google 认证已连接（gcloud CLI 模式）');
+                } else {
+                    status.push('✅ Google OAuth 已连接（Gemini 高级额度）');
+                }
+            } else if (config.google_client_id_set) {
+                status.push('⚠️ Google 凭据已保存，尚未连接账号');
+            } else {
+                status.push('ℹ️ Google 认证未配置');
+            }
+
+            document.getElementById('config-status').innerHTML = DOMPurify.sanitize(status.join('<br>'));
+
+            // 加载 AI 使用统计
+            loadAiCostStats();
+        }
+
+        async function loadAiCostStats() {
+            try {
+                var res = await fetch('/api/ai/cost');
+                if (!res.ok) return;
+                var data = await res.json();
+                if (data.total_calls === 0) return;
+                document.getElementById('ai-cost-group').style.display = 'block';
+                document.getElementById('ai-cost-calls').textContent = data.total_calls || '--';
+                document.getElementById('ai-cost-input').textContent = formatNumber(data.total_input_tokens || 0);
+                document.getElementById('ai-cost-output').textContent = formatNumber(data.total_output_tokens || 0);
+                var dollars = data.total_cost_dollars || 0;
+                document.getElementById('ai-cost-amount').textContent = '$' + dollars.toFixed(4);
+                var byModel = data.by_model || {};
+                var modelLines = [];
+                Object.keys(byModel).forEach(function(m) {
+                    var v = byModel[m];
+                    modelLines.push('<span style="margin-right:16px;">' + m + ': ' + (v.calls||0) + '次 / $' + (v.cost_cents/100||0).toFixed(4) + '</span>');
+                });
+                document.getElementById('ai-cost-by-model').innerHTML = DOMPurify.sanitize(modelLines.join(''));
+            } catch(e) {
+                console.warn('loadAiCostStats failed:', e);
+            }
+        }
+
+        function formatNumber(n) {
+            if (n >= 1000000) return (n/1000000).toFixed(1) + 'M';
+            if (n >= 1000) return (n/1000).toFixed(1) + 'K';
+            return String(n);
+        }
+
+        // 以下功能已屏蔽（仅保留 SerpAPI + DeepSeek）：
+        // Firecrawl/Bing/CNIPR/搜狗搜索源、备用 AI 服务商 均已移除
+
+        // ── SerpAPI Multi-Key Management ──
+        var serpapiKeyCount = 0;
+        function addSerpapiKeyRow(key) {
+            if (serpapiKeyCount >= 5) return;
+            serpapiKeyCount++;
+            var i = serpapiKeyCount;
+            var container = document.getElementById('serpapi-key-list');
+            var row = document.createElement('div');
+            row.style.cssText = 'background:#161b22;border:1px solid #30363d;border-radius:6px;padding:10px;margin-bottom:8px;';
+
+            var header = document.createElement('div');
+            header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;';
+            var title = document.createElement('strong');
+            title.style.color = '#58a6ff';
+            title.textContent = 'SerpAPI Key #' + i;
+            var delBtn = document.createElement('button');
+            delBtn.style.cssText = 'background:#da3633;padding:2px 8px;font-size:0.8em;color:white;border:none;border-radius:4px;cursor:pointer;';
+            delBtn.textContent = '删除';
+            delBtn.addEventListener('click', function() { row.remove(); serpapiKeyCount--; });
+            header.appendChild(title);
+            header.appendChild(delBtn);
+            row.appendChild(header);
+
+            var input = document.createElement('input');
+            input.type = 'text';
+            input.id = 'serpapi-key-' + i;
+            input.placeholder = '输入 SerpAPI Key #' + i;
+            input.value = key || '';
+            input.style.cssText = 'width:100%;padding:8px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;font-size:0.9em;box-sizing:border-box;';
+            row.appendChild(input);
+            container.appendChild(row);
+        }
+
+
+        // ── AI 服务商/模型下拉切换 ──
+        document.addEventListener('change', function(e) {
+            if (e.target && e.target.id === 'ai-provider') {
+                onProviderChange();
+            }
+            if (e.target && e.target.id === 'ai-model') {
+                var customGroup = document.getElementById('custom-model-group');
+                customGroup.style.display = e.target.value === 'custom' ? 'block' : 'none';
+            }
+            if (e.target && e.target.id === 'ai-model-expert') {
+                var customGroup = document.getElementById('custom-expert-model-group');
+                customGroup.style.display = e.target.value === 'custom' ? 'block' : 'none';
+            }
+        });
+
+        // ── SerpAPI 余额查询 ──
+        async function fetchSerpapiBalance() {
+            var contentEl = document.getElementById('serpapi-balance-content');
+            contentEl.textContent = '查询中...';
+            try {
+                const res = await fetch('/api/settings/serpapi/balance');
+                const data = await res.json();
+                if (data.status === 'ok') {
+                    var used = data.this_month_usage || 0;
+                    var limit = data.searches_per_month || 250;
+                    var remaining = data.remaining || 0;
+                    var pct = limit > 0 ? Math.round(used / limit * 100) : 0;
+                    var barColor = pct > 80 ? '#f85149' : pct > 60 ? '#d29922' : '#3fb950';
+                    contentEl.innerHTML = DOMPurify.sanitize(
+                        '<div style="display:flex;justify-content:space-between;margin-bottom:4px;">' +
+                            '<span>已用：' + used + ' / ' + limit + '（' + pct + '%）</span>' +
+                            '<span>剩余：' + remaining + '</span>' +
+                        '</div>' +
+                        '<div style="background:#0d1117;border-radius:4px;height:8px;overflow:hidden;">' +
+                            '<div style="width:' + Math.min(pct, 100) + '%;background:' + barColor + ';height:100%;border-radius:4px;"></div>' +
+                        '</div>' +
+                        '<div style="margin-top:4px;color:#8b949e;font-size:12px;">' +
+                            '套餐：' + DOMPurify.sanitize(data.plan_name || 'Free') +
+                            ' | 配置 Key 数：' + data.key_count +
+                        '</div>'
+                    );
+                } else {
+                    contentEl.textContent = '❌ ' + (data.message || '查询失败');
+                }
+            } catch (e) {
+                contentEl.textContent = '❌ 网络错误：' + e.message;
+            }
+        }
+
+        async function saveSerpApiKey() {
+            var statusEl = document.getElementById('serpapi-status');
+            var keys = [];
+            var inputs = document.querySelectorAll('#serpapi-key-list input[type="text"]');
+            for (let i = 0; i < inputs.length; i++) {
+                var val = inputs[i].value.trim();
+                if (val) keys.push(val);
+            }
+            try {
+                const res = await fetch('/api/settings/serpapi', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ api_keys: keys })
+                });
+                const data = await res.json();
+                if (res.ok && data.status === 'ok') {
+                    showStatus(statusEl, 'success', '✅ 已保存 ' + keys.length + ' 个 SerpAPI Key（轮询模式）');
+                } else {
+                    showStatus(statusEl, 'error', data.message || '保存失败，请重试');
+                }
+            } catch (e) {
+                showStatus(statusEl, 'error', '网络错误：' + e.message);
+            }
+        }
+
+        // ── EPO OPS 凭证（MA5a）──
+        // 与 SerpAPI 同属「搜索源凭证」，共用 /api/settings/serpapi 端点：
+        // 请求体只带 epo_key/epo_secret 时后端不动 SerpAPI Key，反之亦然。
+        // 回显是脱敏掩码（前4****后4）；原样提交回来时后端会反查成真实值，
+        // 因此「只改 Secret」不会把 Key 写成掩码。
+        function fillEpoCredentials(config) {
+            document.getElementById('epo-key').value = config.epo_key || '';
+            document.getElementById('epo-secret').value = config.epo_secret || '';
+            updateEpoStatus(config);
+            updateEpoPairHint();
+        }
+
+        function updateEpoStatus(config) {
+            var el = document.getElementById('epo-current');
+            var text;
+            if (config.epo_configured) {
+                text = t('settings.epoStatusOn');
+            } else if (config.epo_key_configured || config.epo_secret_configured) {
+                text = t('settings.epoStatusHalf');
+            } else {
+                text = t('settings.epoStatusOff');
+            }
+            // 回显与 i18n 文案都按纯文本写入，不拼 HTML，无注入面
+            el.textContent = text;
+            el.className = 'status-pill ' + (config.epo_configured ? 'success' : 'warning');
+        }
+
+        // 成对语义：只填一半时提示「需成对配置才生效」——只提示，不阻止保存
+        function updateEpoPairHint() {
+            var hintEl = document.getElementById('epo-pair-hint');
+            var hasKey = document.getElementById('epo-key').value.trim() !== '';
+            var hasSecret = document.getElementById('epo-secret').value.trim() !== '';
+            var halfDone = hasKey !== hasSecret;
+            hintEl.textContent = halfDone ? t('settings.epoPairHint') : '';
+            hintEl.style.display = halfDone ? 'block' : 'none';
+        }
+
+        async function saveEpoCredentials() {
+            var statusEl = document.getElementById('epo-status');
+            var payload = {
+                epo_key: document.getElementById('epo-key').value.trim(),
+                epo_secret: document.getElementById('epo-secret').value.trim()
+            };
+            try {
+                const res = await fetch('/api/settings/serpapi', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (res.ok && data.status === 'ok') {
+                    showStatus(statusEl, 'success', '✅ ' + t('settings.epoSaved'));
+                    // 回读一次：让页面显示的「已配置」与检索链真正读到的那份配置同源
+                    try {
+                        const refreshRes = await fetch('/api/settings');
+                        if (refreshRes.ok) {
+                            const refreshed = await refreshRes.json();
+                            fillEpoCredentials(refreshed);
+                            updateConfigStatus(refreshed);
+                        }
+                    } catch (_) {}
+                } else {
+                    showStatus(statusEl, 'error', data.message || t('settings.epoSaveFail'));
+                }
+            } catch (e) {
+                showStatus(statusEl, 'error', t('settings.epoNetworkFail') + '：' + e.message);
+            }
+        }
+
+        async function saveAiConfig() {
+            const baseUrl = document.getElementById('ai-base-url').value.trim();
+            const apiKey = document.getElementById('ai-api-key').value.trim();
+            var modelSelect = document.getElementById('ai-model');
+            var model = modelSelect.value === 'custom'
+                ? document.getElementById('ai-model-custom').value.trim()
+                : modelSelect.value;
+            var expertSelect = document.getElementById('ai-model-expert');
+            var expertModel = expertSelect.value === 'custom'
+                ? document.getElementById('ai-model-expert-custom').value.trim()
+                : expertSelect.value;
+            var googleClientId = document.getElementById('google-client-id').value.trim();
+            var googleClientSecret = document.getElementById('google-client-secret').value.trim();
+            const statusEl = document.getElementById('ai-status');
+
+            if (!baseUrl || !apiKey || !model) {
+                showStatus(statusEl, 'error', '请填写完整的 AI 配置');
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/settings/ai', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        base_url: baseUrl,
+                        api_key: apiKey,
+                        model: model,
+                        ai_model_expert: expertModel,
+                        google_client_id: googleClientId,
+                        google_client_secret: googleClientSecret,
+                        gemini_cli_enabled: document.getElementById('gemini-cli-toggle').checked
+                    })
+                });
+
+                const data = await res.json();
+                if (res.ok && data.status === 'ok') {
+                    showStatus(statusEl, 'success', '✅ AI 配置已保存！');
+                    // 刷新配置状态
+                    try {
+                        const refreshRes = await fetch('/api/settings');
+                        if (refreshRes.ok) {
+                            const refreshed = await refreshRes.json();
+                            updateConfigStatus(refreshed);
+                        }
+                    } catch (_) {}
+                } else {
+                    showStatus(statusEl, 'error', data.message || '保存失败，请重试');
+                }
+            } catch (e) {
+                showStatus(statusEl, 'error', '网络错误：' + e.message);
+            }
+        }
+
+        // ── Google OAuth ──
+        function updateGoogleOAuthUI(config) {
+            document.getElementById('google-client-id').value = config.google_client_id || '';
+            document.getElementById('google-client-secret').value = '';
+
+            var statusDiv = document.getElementById('google-oauth-status');
+            var connectBtn = document.getElementById('google-connect-btn');
+
+            if (config.google_client_id_set && config.google_client_secret_set) {
+                if (config.google_oauth_connected) {
+                    statusDiv.innerHTML = DOMPurify.sanitize(
+                        '<span style="color:#4ade80;">✅ Google 账号已连接</span>' +
+                        (config.google_client_id ? '<br><span style="color:#8b949e;font-size:12px;">Client ID: ' +
+                            DOMPurify.sanitize(config.google_client_id) + '</span>' : '')
+                    );
+                    connectBtn.disabled = false;
+                    document.getElementById('google-btn-text').textContent = '🔄 重新连接 Google 账号';
+                } else {
+                    statusDiv.innerHTML = DOMPurify.sanitize(
+                        '<span style="color:#f0ad4e;">⚠️ Google 凭据已保存，尚未连接账号</span>'
+                    );
+                    connectBtn.disabled = false;
+                    document.getElementById('google-btn-text').textContent = '🔗 使用 Google 账号登录';
+                }
+            } else {
+                statusDiv.innerHTML = DOMPurify.sanitize(
+                    '<span style="color:#8b949e;">请先填写 Client ID 和 Client Secret 并保存</span>'
+                );
+                connectBtn.disabled = true;
+                document.getElementById('google-btn-text').textContent = '🔗 使用 Google 账号登录';
+            }
+        }
+
+        async function saveGoogleCredentials() {
+            var clientId = document.getElementById('google-client-id').value.trim();
+            var clientSecret = document.getElementById('google-client-secret').value.trim();
+            var msgEl = document.getElementById('google-oauth-msg');
+
+            if (!clientId || !clientSecret) {
+                showStatus(msgEl, 'error', '请填写 Client ID 和 Client Secret');
+                return;
+            }
+
+            // Reuse the AI settings save endpoint which also saves Google OAuth fields
+            var modelSelect = document.getElementById('ai-model');
+            var model = modelSelect.value === 'custom'
+                ? document.getElementById('ai-model-custom').value.trim()
+                : modelSelect.value;
+            var expertSelect = document.getElementById('ai-model-expert');
+            var expertModel = expertSelect.value === 'custom'
+                ? document.getElementById('ai-model-expert-custom').value.trim()
+                : expertSelect.value;
+
+            try {
+                const res = await fetch('/api/settings/ai', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        base_url: document.getElementById('ai-base-url').value.trim(),
+                        api_key: document.getElementById('ai-api-key').value.trim(),
+                        model: model,
+                        ai_model_expert: expertModel,
+                        google_client_id: clientId,
+                        google_client_secret: clientSecret
+                    })
+                });
+                const data = await res.json();
+                if (res.ok && data.status === 'ok') {
+                    showStatus(msgEl, 'success', '✅ Google OAuth 凭据已保存');
+                    // Refresh UI
+                    try {
+                        const refreshRes = await fetch('/api/settings');
+                        if (refreshRes.ok) {
+                            var refreshed = await refreshRes.json();
+                            updateGoogleOAuthUI(refreshed);
+                        }
+                    } catch (_) {}
+                } else {
+                    showStatus(msgEl, 'error', data.message || '保存失败');
+                }
+            } catch (e) {
+                showStatus(msgEl, 'error', '网络错误：' + e.message);
+            }
+        }
+
+        async function connectGoogle() {
+            var msgEl = document.getElementById('google-oauth-msg');
+            try {
+                const res = await fetch('/api/auth/google/url');
+                const data = await res.json();
+                if (data.url) {
+                    // Open consent window
+                    var w = window.open(data.url, 'google-auth', 'width=600,height=700');
+                    if (!w) {
+                        // Popup blocked — redirect directly
+                        window.location.href = data.url;
+                        return;
+                    }
+                    // Poll for auth completion via message listener
+                    window.addEventListener('message', function onAuth(e) {
+                        if (e.data === 'google-auth-ok') {
+                            showStatus(msgEl, 'success', '✅ Google 认证成功！');
+                            window.removeEventListener('message', onAuth);
+                            // Refresh status
+                            setTimeout(async function() {
+                                try {
+                                    var r = await fetch('/api/settings');
+                                    if (r.ok) {
+                                        var c = await r.json();
+                                        updateGoogleOAuthUI(c);
+                                        updateConfigStatus(c);
+                                        updateGoogleAuthStatus(c);
+                                    }
+                                } catch(_) {}
+                            }, 1000);
+                        }
+                    });
+                    showStatus(msgEl, 'success', '请在弹出窗口中完成 Google 授权...');
+                } else {
+                    showStatus(msgEl, 'error', data.error || '获取授权 URL 失败');
+                }
+            } catch (e) {
+                showStatus(msgEl, 'error', '网络错误：' + e.message);
+            }
+        }
+
+        // ── gcloud CLI 认证 ──
+        async function detectGcloud() {
+            var statusEl = document.getElementById('gcloud-status');
+            var loginBtn = document.getElementById('gcloud-login-btn');
+            statusEl.innerHTML = DOMPurify.sanitize('检测中...');
+            try {
+                const res = await fetch('/api/auth/gcloud/status');
+                const data = await res.json();
+                var html = '';
+                if (data.gcloud_available) {
+                    html += '<span style="color:#4ade80;">✅ gcloud CLI 已安装</span><br>';
+                } else {
+                    html += '<span style="color:#f0ad4e;">⚠️ gcloud CLI 未安装</span><br>';
+                }
+                if (data.adc_file_exists) {
+                    html += '<span style="color:#4ade80;">✅ ADC 凭据文件存在</span>';
+                    if (data.adc_type) {
+                        html += ' <span style="color:#8b949e;">(' + DOMPurify.sanitize(data.adc_type);
+                        if (data.adc_email) {
+                            html += ', ' + DOMPurify.sanitize(data.adc_email);
+                        }
+                        html += ')</span>';
+                    }
+                    html += '<br>';
+                    loginBtn.disabled = false;
+                } else {
+                    html += '<span style="color:#f0ad4e;">⚠️ ADC 凭据文件未找到</span><br>';
+                    html += '<span style="color:#8b949e;font-size:12px;">请运行: <code style="background:#1e1e1e;padding:1px 4px;border-radius:2px;">gcloud auth application-default login --scopes=https://www.googleapis.com/auth/generative-language,openid,email</code></span>';
+                    loginBtn.disabled = true;
+                }
+                if (data.is_gcloud_mode && data.has_token && !data.token_expired) {
+                    html += '<span style="color:#4ade80;">🔑 令牌有效</span>';
+                } else if (data.is_gcloud_mode && data.has_token && data.token_expired) {
+                    html += '<span style="color:#f0ad4e;">🔄 令牌已过期，点击"通过 gcloud CLI 登录"刷新</span>';
+                }
+                statusEl.innerHTML = DOMPurify.sanitize(html);
+            } catch (e) {
+                statusEl.innerHTML = '<span style="color:#f87171;">❌ 检测失败: ' + DOMPurify.sanitize(e.message) + '</span>';
+            }
+        }
+
+        async function loginWithGcloud() {
+            var msgEl = document.getElementById('gcloud-msg');
+            showStatus(msgEl, 'success', '正在获取 gcloud 令牌...');
+            try {
+                const res = await fetch('/api/auth/gcloud/login', { method: 'POST' });
+                const data = await res.json();
+                if (data.status === 'ok') {
+                    showStatus(msgEl, 'success', '✅ ' + data.message);
+                    // Refresh
+                    try {
+                        var r = await fetch('/api/settings');
+                        if (r.ok) {
+                            var c = await r.json();
+                            updateGoogleOAuthUI(c);
+                            updateConfigStatus(c);
+                            updateGoogleAuthStatus(c);
+                        }
+                    } catch(_) {}
+                    detectGcloud();
+                    detectGeminiCli();
+                } else {
+                    showStatus(msgEl, 'error', data.message || '认证失败');
+                }
+            } catch (e) {
+                showStatus(msgEl, 'error', '网络错误：' + e.message);
+            }
+        }
+
+        // ── Gemini CLI 子进程模式 ──
+        async function detectGeminiCli() {
+            var statusEl = document.getElementById('gemini-cli-status');
+            var toggle = document.getElementById('gemini-cli-toggle');
+            statusEl.innerHTML = DOMPurify.sanitize('检测中...');
+            try {
+                const res = await fetch('/api/settings');
+                const data = await res.json();
+                if (data.gemini_cli_available) {
+                    statusEl.innerHTML = DOMPurify.sanitize(
+                        '<span style="color:#4ade80;">✅ Gemini CLI 已安装</span>'
+                        + ' <span style="color:#8b949e;font-size:12px;">(' + data.gemini_cli_path + ')</span>'
+                    );
+                    toggle.disabled = false;
+                    toggle.checked = data.gemini_cli_enabled;
+                } else {
+                    statusEl.innerHTML = '<span style="color:#f0ad4e;">⚠️ Gemini CLI 未安装</span>'
+                        + '<br><span style="color:#8b949e;font-size:12px;">请运行: <code style="background:#1e1e1e;padding:1px 4px;border-radius:2px;">npm install -g @google/gemini-cli</code></span>';
+                    toggle.disabled = true;
+                    toggle.checked = false;
+                }
+            } catch (e) {
+                statusEl.innerHTML = '<span style="color:#f87171;">❌ 检测失败: ' + DOMPurify.sanitize(e.message) + '</span>';
+            }
+        }
+
+        async function toggleGeminiCliMode() {
+            // 切换 Gemini CLI 模式后自动保存 AI 配置
+            await saveAiConfig();
+        }
+
+        function updateGoogleAuthStatus(config) {
+            var el = document.getElementById('google-auth-status-line');
+            if (config.google_auth_mode === 'gcloud') {
+                el.innerHTML = DOMPurify.sanitize(
+                    '<span style="color:#4ade80;">✅ 当前使用 <strong>gcloud CLI</strong> 认证方式</span>'
+                );
+            } else if (config.google_auth_mode === 'oauth' && config.google_oauth_connected) {
+                el.innerHTML = DOMPurify.sanitize(
+                    '<span style="color:#4ade80;">✅ 当前使用 <strong>浏览器 OAuth</strong> 认证方式</span>'
+                );
+            } else if (config.google_client_id_set) {
+                el.innerHTML = DOMPurify.sanitize(
+                    '<span style="color:#f0ad4e;">⚠️ Google 凭据已保存，尚未连接账号</span>'
+                );
+            } else {
+                el.innerHTML = DOMPurify.sanitize(
+                    '<span style="color:#8b949e;">ℹ️ 未配置 Google 认证，将使用 API Key 调用 Gemini</span>'
+                );
+            }
+        }
+
+        function showStatus(element, type, message) {
+            element.className = 'status-message ' + type;
+            element.textContent = message;
+            element.style.display = 'block';
+            setTimeout(() => {
+                element.style.display = 'none';
+            }, 3000);
+        }
+
+        function renderFreeCadStatus(data) {
+            var status = document.getElementById('freecad-status');
+            var availability = (data && data.availability) || 'unavailable';
+            status.textContent = t('cad.status.' + availability);
+            status.className = 'status-pill ' + (availability === 'ready' ? 'success' : (availability === 'unsupported' ? 'warning' : 'error'));
+        }
+
+        async function refreshFreeCadStatus() {
+            var status = document.getElementById('freecad-status');
+            status.textContent = t('cad.checking');
+            try {
+                var response = await fetch('/api/cad/status');
+                renderFreeCadStatus(await response.json());
+            } catch (error) {
+                renderFreeCadStatus({ availability: 'unavailable' });
+            }
+        }
+
+        async function saveFreeCadSettings() {
+            var status = document.getElementById('freecad-status');
+            status.textContent = t('cad.saving');
+            try {
+                var response = await fetch('/api/settings/cad', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        workspace: document.getElementById('aioncad-workspace').value,
+                        auto_start: document.getElementById('freecad-auto-start').checked
+                    })
+                });
+                var data = await response.json();
+                if (!response.ok || data.status !== 'ok') {
+                    status.textContent = t('cad.settingsError.' + (data.code || 'save_failed'));
+                    status.className = 'status-pill error';
+                    return;
+                }
+                status.textContent = t('cad.saved');
+                status.className = 'status-pill success';
+            } catch (error) {
+                status.textContent = t('cad.settingsError.save_failed');
+                status.className = 'status-pill error';
+            }
+        }
+
+        async function checkAndStartFreeCad() {
+            var status = document.getElementById('freecad-status');
+            status.textContent = t('cad.starting');
+            try {
+                var response = await fetch('/api/cad/start', { method: 'POST' });
+                var data = await response.json();
+                renderFreeCadStatus(data);
+            } catch (error) {
+                renderFreeCadStatus({ availability: 'unavailable' });
+            }
+        }
+
+        // 备用 AI 管理已移除（仅保留 DeepSeek）
+    
+        async function fetchAiModels(providerKey, silent) {
+            var btn = document.getElementById('ai-models-btn');
+            var isManual = !silent;
+            if (btn && isManual) {
+                btn.disabled = true;
+                btn.textContent = '\u23f3\ufe0f 查询中...';
+            }
+            var selectedProvider = providerKey || document.getElementById('ai-provider').value;
+            if (selectedProvider === 'custom') {
+                if (isManual) {
+                    btn.textContent = '\u274c 自定义模式不支持自动查询';
+                    btn.style.color = '#f85149';
+                    setTimeout(function() { btn.textContent = '\ud83d\udd0d 查询可用模型'; btn.style.color = ''; }, 3000);
+                    btn.disabled = false;
+                }
+                return;
+            }
+            var url = '/api/ai/models?provider=' + encodeURIComponent(selectedProvider);
+            try {
+                const res = await fetch(url);
+                const data = await res.json();
+                if (data.status === 'ok') {
+                    var models = [];
+                    if (data.provider && data.provider.models && data.provider.models.length > 0) {
+                        data.provider.models.forEach(function(m) {
+                            models.push({ value: m.id, label: m.id });
+                        });
+                    } else if (data.models && data.models.length > 0) {
+                        data.models.forEach(function(m) {
+                            models.push({ value: m.id, label: m.id });
+                        });
+                    }
+                    if (models.length > 0) {
+                        var curModel = document.getElementById('ai-model').value;
+                        var curExpert = document.getElementById('ai-model-expert').value;
+                        populateSelect('ai-model', models, curModel);
+                        populateSelect('ai-model-expert', models, curExpert);
+                        if (isManual) {
+                            btn.textContent = '\u2705 ' + models.length + ' 个模型';
+                            btn.style.color = '#4ade80';
+                            setTimeout(function() { btn.textContent = '\ud83d\udd0d 查询可用模型'; btn.style.color = ''; }, 3000);
+                        }
+                    } else {
+                        populateSelect('ai-model', [{ value: '', label: '无可用模型' }], '');
+                        populateSelect('ai-model-expert', [{ value: '', label: '无可用模型' }], '');
+                        if (isManual) {
+                            btn.textContent = '\u274c 无可用模型（请确认 API Key 已配置）';
+                            btn.style.color = '#f85149';
+                            setTimeout(function() { btn.textContent = '\ud83d\udd0d 查询可用模型'; btn.style.color = ''; }, 3000);
+                        }
+                    }
+                } else {
+                    populateSelect('ai-model', [{ value: '', label: '查询失败' }], '');
+                    populateSelect('ai-model-expert', [{ value: '', label: '查询失败' }], '');
+                    if (isManual) {
+                        btn.textContent = '\u274c ' + (data.message || '查询失败');
+                        btn.style.color = '#f85149';
+                        setTimeout(function() { btn.textContent = '\ud83d\udd0d 查询可用模型'; btn.style.color = ''; }, 3000);
+                    }
+                }
+            } catch(e) {
+                populateSelect('ai-model', [{ value: '', label: '网络错误' }], '');
+                populateSelect('ai-model-expert', [{ value: '', label: '网络错误' }], '');
+                if (isManual) {
+                    btn.textContent = '\u274c 网络错误';
+                    setTimeout(function() { btn.textContent = '\ud83d\udd0d 查询可用模型'; }, 3000);
+                }
+            } finally {
+                if (btn && isManual) btn.disabled = false;
+            }
+        }
+</script>
+</body>
+</html>

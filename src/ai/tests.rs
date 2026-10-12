@@ -1,0 +1,237 @@
+#[cfg(test)]
+mod extraction_tests {
+    use crate::ai::client::extract_chat_content;
+
+    #[test]
+    fn extracts_openai_message_content() {
+        let raw = r#"{"choices":[{"message":{"role":"assistant","content":"hello"}}]}"#;
+        assert_eq!(extract_chat_content(raw), "hello");
+    }
+
+    #[test]
+    fn extracts_provider_result_field() {
+        let raw = r#"{"result":"provider text"}"#;
+        assert_eq!(extract_chat_content(raw), "provider text");
+    }
+
+    #[test]
+    fn formats_provider_error_message() {
+        let raw = r#"{"error":{"message":"bad request"}}"#;
+        assert_eq!(extract_chat_content(raw), "AI 错误：bad request");
+    }
+}
+
+#[cfg(test)]
+mod ai_data_truncation_tests {
+    use crate::ai::client::truncate_for_ai;
+
+    #[test]
+    fn short_text_passes_through_untouched() {
+        assert_eq!(truncate_for_ai("短文本", 100), "短文本");
+    }
+
+    #[test]
+    fn text_at_limit_is_not_rewritten() {
+        let text = "中".repeat(100);
+        assert_eq!(truncate_for_ai(&text, 100), text);
+    }
+
+    #[test]
+    fn overflow_keeps_head_and_marks_omission_explicitly() {
+        let text = "中".repeat(120);
+        let out = truncate_for_ai(&text, 100);
+        assert!(out.starts_with(&"中".repeat(100)));
+        assert!(out.contains("原文共 120 个字符"));
+        assert!(out.contains("只送入前 100 个字符"));
+        assert!(out.contains("其余 20 个字符未包含"));
+        assert!(out.contains("禁止推测"));
+    }
+
+    #[test]
+    fn limit_counts_characters_not_bytes() {
+        // 每个 emoji 占 4 字节；按字节截断会切坏字符，按字符截断不会。
+        let text = "🦀".repeat(60);
+        assert_eq!(truncate_for_ai(&text, 60), text);
+        let out = truncate_for_ai(&text, 59);
+        assert!(out.contains("原文共 60 个字符"));
+        assert!(out.starts_with(&"🦀".repeat(59)));
+    }
+
+    #[test]
+    fn zero_budget_returns_only_the_notice() {
+        let out = truncate_for_ai("abc", 0);
+        assert!(out.starts_with("\n\n【数据完整性提示"));
+        assert!(out.contains("原文共 3 个字符"));
+    }
+}
+
+#[cfg(test)]
+mod oa_capacity_tests {
+    use crate::ai::client::{
+        oa_capacity_error, AiClient, OA_DISCUSSION_ANALYSIS_MAX_CHARS,
+        OA_RESPONSE_ANALYSIS_MAX_CHARS,
+    };
+
+    #[test]
+    fn short_oa_input_passes_without_truncation() {
+        assert!(
+            oa_capacity_error("analysis", "短文本", OA_DISCUSSION_ANALYSIS_MAX_CHARS).is_none()
+        );
+    }
+
+    #[test]
+    fn unicode_capacity_uses_character_count() {
+        let within = "中".repeat(OA_DISCUSSION_ANALYSIS_MAX_CHARS);
+        assert!(oa_capacity_error("analysis", &within, OA_DISCUSSION_ANALYSIS_MAX_CHARS).is_none());
+
+        let over = format!("{}中", within);
+        let error = oa_capacity_error("analysis", &over, OA_DISCUSSION_ANALYSIS_MAX_CHARS)
+            .expect("Unicode overflow should be visible");
+        assert!(error.contains("actual_chars=60001"));
+        assert!(error.contains("max_chars=60000"));
+    }
+
+    #[tokio::test]
+    async fn response_letter_stream_emits_visible_overflow_error() {
+        let client = AiClient::with_config("http://127.0.0.1:1", "", "test");
+        let analysis = "中".repeat(OA_RESPONSE_ANALYSIS_MAX_CHARS + 1);
+        let mut stream = client.generate_response_letter_stream(
+            &analysis,
+            "[]",
+            "",
+            "first_exam",
+            false,
+            None,
+            None,
+        );
+        let error = stream.recv().await.expect("overflow should emit an error");
+        assert!(error.starts_with("[ERROR] OA_INPUT_TOO_LARGE"));
+        assert!(error.contains("actual_chars=600001"));
+    }
+}
+
+#[cfg(test)]
+mod ua4_refs_truncation_tests {
+    use crate::ai::client::truncate_for_ai;
+
+    /// V4 验收：references_info 超 5000 字符时，AI 输入含数据完整性尾注（选 A）
+    #[test]
+    fn ua4_refs_over_5000_gets_integrity_tail() {
+        let refs = "对比文件1：CN113224379A ".repeat(300); // ~6000 chars
+        assert!(refs.chars().count() > 5000);
+        let out = truncate_for_ai(&refs, 5000);
+        assert!(out.chars().count() > 5000);
+        assert!(out.contains("【数据完整性提示"));
+        assert!(out.contains("禁止推测"));
+    }
+
+    /// V4 边界：恰好 5000 字符不截断
+    #[test]
+    fn ua4_refs_exactly_5000_no_truncation() {
+        let refs = "a".repeat(5000);
+        let out = truncate_for_ai(&refs, 5000);
+        assert_eq!(out, refs);
+    }
+}
+
+#[cfg(test)]
+#[cfg(test)]
+mod ua1_publication_number_tests {
+    use crate::ai::patent::extract_publication_numbers;
+
+    #[test]
+    fn ua1_extracts_cn_publication_number() {
+        let oa = "对比文件1：CN113224379A\n本申请涉及一种存储装置。";
+        let result = extract_publication_numbers(oa);
+        assert!(!result.is_empty());
+        assert_eq!(result[0].0, "CN113224379A");
+    }
+
+    #[test]
+    fn ua1_extracts_us_format() {
+        let oa = "Reference 1: US20210345678A1\nThe present invention differs...";
+        let result = extract_publication_numbers(oa);
+        assert!(!result.is_empty());
+        assert_eq!(result[0].0, "US20210345678A1");
+    }
+
+    #[test]
+    fn ua1_extracts_ep_format() {
+        let oa = "D1 = EP3445287B1\n Unterscheidungsmerkmale...";
+        let result = extract_publication_numbers(oa);
+        assert!(!result.is_empty());
+        assert_eq!(result[0].0, "EP3445287B1");
+    }
+
+    #[test]
+    fn ua1_extracts_wo_format() {
+        let oa = "D1：WO2021/123456A1\n本申请的区别特征在于...";
+        let result = extract_publication_numbers(oa);
+        assert!(!result.is_empty());
+        assert_eq!(result[0].0, "WO2021/123456A1");
+    }
+
+    // ── §6.1 新增：JP / KR 格式、空输入、边界情况 ──
+
+    #[test]
+    fn ua1_extracts_jp_format() {
+        let oa = "引证文献1：JP20051234A\n本申请与之不同。";
+        let result = extract_publication_numbers(oa);
+        assert!(!result.is_empty());
+        assert_eq!(result[0].0, "JP20051234A");
+    }
+
+    #[test]
+    fn ua1_extracts_kr_format() {
+        let oa = "参考文献1：KR102021012345A\n区别特征在于...";
+        let result = extract_publication_numbers(oa);
+        assert!(!result.is_empty());
+        assert_eq!(result[0].0, "KR102021012345A");
+    }
+
+    #[test]
+    fn ua1_empty_input_returns_empty() {
+        let result = extract_publication_numbers("");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn ua1_no_context_returns_empty() {
+        let oa = "这是一段普通文字，没有引出语，也没有公开号。";
+        let result = extract_publication_numbers(oa);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn ua1_deduplication_keeps_first_occurrence() {
+        let oa = "对比文件1：CN113224379A\n对比文件2：CN113224379A";
+        let result = extract_publication_numbers(oa);
+        assert_eq!(
+            result.len(),
+            1,
+            "duplicate publication numbers should be deduplicated"
+        );
+    }
+
+    #[test]
+    fn ua1_extracts_all_country_formats() {
+        let oa = "\
+对比文件1：CN113224379A\n对比文件2：US20210345678A1\n对比文件3：EP3445287B1\n对比文件4：JP20051234A\n对比文件5：KR102021012345A\n对比文件6：WO2021/123456A1\n";
+        let result = extract_publication_numbers(oa);
+        assert_eq!(result.len(), 6, "should extract all 6 country formats");
+        assert_eq!(result[0].0, "CN113224379A");
+        assert_eq!(result[1].0, "US20210345678A1");
+        assert_eq!(result[2].0, "EP3445287B1");
+        assert_eq!(result[3].0, "JP20051234A");
+        assert_eq!(result[4].0, "KR102021012345A");
+        assert_eq!(result[5].0, "WO2021/123456A1");
+    }
+
+    #[test]
+    fn ua1_context_label_captured() {
+        let oa = "对比文件1：CN113224379A";
+        let result = extract_publication_numbers(oa);
+        assert!(!result.is_empty());
+        assert!(!result[0].1.is_empty(), "context label should be captured");
+    }
+}

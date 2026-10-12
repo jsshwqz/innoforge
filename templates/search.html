@@ -1,0 +1,1108 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>技术调研 - 创研台</title>
+<link rel="stylesheet" href="/static/style.css?v={{timestamp}}">
+<link rel="manifest" href="/static/manifest.json">
+<meta name="theme-color" content="#0d1117">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<!-- Chart.js v4 (MIT License) - https://www.chartjs.org/（async：统计图表专用，避免 CDN 不可达时阻塞页面加载） -->
+<script async src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+</head>
+<body>
+<div class="page-with-sidebar">
+<aside id="page-sidebar" class="page-sidebar"></aside>
+<main class="container search-container page-main">
+<div class="panel">
+<h3 data-i18n="search.title"></h3>
+<div class="search-grid">
+<input type="text" id="search-input" data-i18n-placeholder="search.placeholder">
+<select id="search-mode" onchange="toggleRegionSelect()">
+<option value="local" data-i18n="mode.local"></option>
+<option value="online" data-i18n="mode.online"></option>
+</select>
+<select id="search-region" style="display:none" title="搜索区域">
+<option value="auto" data-i18n="region.auto"></option>
+<option value="cn" data-i18n="region.cn"></option>
+<option value="intl" data-i18n="region.intl"></option>
+</select>
+<select id="search-type">
+<option value="auto" data-i18n="type.auto"></option>
+<option value="inventor" data-i18n="type.inventor"></option>
+<option value="applicant" data-i18n="type.applicant"></option>
+<option value="patent_number" data-i18n="type.patentNumber"></option>
+<option value="keyword" data-i18n="type.keyword"></option>
+</select>
+<select id="country-filter">
+<option value="" data-i18n="country.all"></option>
+<option value="CN">CN</option>
+<option value="US">US</option>
+<option value="EP">EP</option>
+<option value="JP">JP</option>
+<option value="KR">KR</option>
+</select>
+<!-- MA3 显式语言过滤器：value 与后端 Lang 的 snake_case 串逐字对齐；
+     「自动」= 空值 = 不下发 language 键，请求体与 MA3 之前逐字一致 -->
+<select id="language-filter" data-i18n-title="lang.title">
+<option value="" data-i18n="lang.auto" selected></option>
+<option value="chinese" data-i18n="lang.chinese"></option>
+<option value="english" data-i18n="lang.english"></option>
+<option value="all" data-i18n="lang.all"></option>
+</select>
+<input type="text" id="ipc-filter" placeholder="IPC" title="IPC 分类号过滤（如 G06F、A61B）">
+<select id="sort-by">
+<option value="relevance" data-i18n="sort.relevance"></option>
+<option value="new" data-i18n="sort.new"></option>
+<option value="old" data-i18n="sort.old"></option>
+</select>
+</div>
+<div class="search-grid-2">
+<input type="date" id="date-from" data-i18n-title="date.from">
+<input type="date" id="date-to" data-i18n-title="date.to">
+<select id="page-size">
+<option value="10">每页 10 条</option>
+<option value="20" selected>每页 20 条</option>
+<option value="50">每页 50 条</option>
+<option value="100">每页 100 条</option>
+</select>
+<button class="btn-primary" onclick="doSearch(1)" data-i18n="btn.search"></button>
+<button class="btn-secondary" onclick="showStats()" data-i18n="btn.stats"></button>
+<button class="btn-secondary" onclick="exportCsv()" data-i18n="btn.export"></button>
+</div>
+<!-- PDF Upload Zone -->
+<div id="pdf-upload-zone" class="upload-zone" onclick="document.getElementById('pdf-file-input').click()">
+    <span data-i18n="upload.dragDrop">拖拽PDF文件到此处，或点击上传</span>
+    <div class="upload-hint" data-i18n="upload.hint">支持单个PDF文件，用于提取技术方案进行检索分析</div>
+    <div class="file-list" id="pdf-file-list"></div>
+    <input type="file" id="pdf-file-input" accept=".pdf" multiple="false" style="display:none" onchange="handlePdfUpload(event)">
+</div>
+</div>
+
+<div class="panel">
+<div class="panel-header">
+<h3 style="margin:0;" data-i18n="history.title"></h3>
+<button class="btn-secondary btn-sm" onclick="clearHistory()" data-i18n="history.clear"></button>
+</div>
+<div id="history-list" class="history-list"></div>
+</div>
+
+<div class="panel" id="stats-panel" style="display:none;">
+<h3 data-i18n="stats.title"></h3>
+<div id="stats-content" class="muted"></div>
+</div>
+
+<div class="panel">
+<!-- MA5b 检索诊断面板：仅在线链路（/api/search/online 返回 attempts）时由 renderSearchDiagnostics 渲染 -->
+<div id="search-diagnostics" style="display:none;"></div>
+<div id="search-hint" class="search-hint" style="display:none;"></div>
+<div id="results-info"></div>
+<div id="results"></div>
+<div id="pagination" class="pagination"></div>
+</div>
+</main>
+</div>
+
+<script src="/static/i18n.js"></script>
+<script>
+    // Allow inline event handlers in sanitized HTML
+    if (typeof DOMPurify !== 'undefined' && DOMPurify.setConfig) {
+        DOMPurify.setConfig({ADD_ATTR: ['onclick', 'onkeydown', 'onchange', 'oninput', 'onload', 'onfocus', 'onblur']});
+    }
+const HISTORY_KEY = 'innoforge_search_history_v1';
+let currentRequest = null;
+let lastResponse = null;
+let lastPage = 1;
+let lastPageSize = 20;
+
+// PDF Upload State
+let currentPdfFile = null;
+let currentPdfContent = null;
+const SEARCH_PDF_STORAGE_KEY = 'innoforge_search_pdf';
+let restoredSearchPdf = null;
+
+function saveSearchPdfMeta() {
+    try {
+        if (currentPdfFile && currentPdfContent) {
+            const data = { name: currentPdfFile.name, size: currentPdfFile.size, content: currentPdfContent, timestamp: Date.now() };
+            localStorage.setItem(SEARCH_PDF_STORAGE_KEY, JSON.stringify(data));
+        }
+    } catch(e) { /* ignore */ }
+}
+
+function loadSearchPdfMeta() {
+    try {
+        const raw = localStorage.getItem(SEARCH_PDF_STORAGE_KEY);
+        if (raw) {
+            const data = JSON.parse(raw);
+            if (data && data.name && data.content) {
+                restoredSearchPdf = data;
+                currentPdfContent = data.content;
+            }
+        }
+    } catch(e) { restoredSearchPdf = null; }
+}
+
+function clearSearchPdfMeta() {
+    localStorage.removeItem(SEARCH_PDF_STORAGE_KEY);
+    restoredSearchPdf = null;
+}
+
+// Merge search-specific i18n keys into global I18N_COMMON
+(function() {
+  var searchZh = {
+    'search.title': '技术调研',
+    'search.placeholder': '输入关键词、文献号、申请人或发明人...',
+    'mode.local': '本地数据库',
+    'mode.online': '在线搜索',
+    'region.auto': '自动识别区域',
+    'region.cn': '国内（国知局/搜狗）',
+    'region.intl': '国外（SerpAPI/Google）',
+    'type.auto': '自动识别',
+    'type.inventor': '发明人',
+    'type.applicant': '申请人',
+    'type.patentNumber': '专利号',
+    'type.keyword': '关键词',
+    'country.all': '全部地区',
+    'lang.title': '检索语言（显式指定优先于区域/自动判定）',
+    'lang.auto': '语言·自动',
+    'lang.chinese': '中文',
+    'lang.english': '英文',
+    'lang.all': '不限语种',
+    'sort.relevance': '相关度',
+    'sort.new': '最新',
+    'sort.old': '最早',
+    'date.from': '开始日期',
+    'date.to': '结束日期',
+    'btn.search': '搜索',
+    'btn.stats': '统计',
+    'btn.export': '导出 CSV',
+    'history.title': '搜索历史',
+    'history.clear': '清空',
+    'history.empty': '暂无搜索历史',
+    'stats.title': '统计分析',
+    'stats.empty': '暂无统计数据',
+    'stats.loading': '统计计算中...',
+    'stats.total': '统计样本总数',
+    'stats.appTop': '申请人 TOP 10',
+    'stats.country': '国家分布',
+    'stats.year': '申请趋势（按年份）',
+    'results.searching': '搜索中...',
+    'results.noData': '未找到结果',
+    'results.info': '找到 {total} 条 | 第 {page} 页 | 每页 {size} 条{source}',
+    'results.source': '来源',
+    'results.google': 'Google Patents',
+    'results.score': '相关性评分',
+    'diag.title': '检索诊断',
+    'diag.summary': '{n} 次数据源尝试',
+    'diag.status.success': '成功',
+    'diag.status.failed': '失败',
+    'diag.status.skipped': '跳过',
+    'diag.fail.network': '网络',
+    'diag.fail.quota': '配额',
+    'diag.fail.auth': '认证',
+    'diag.fail.parse': '解析',
+    'diag.cooling': '冷却中',
+    'diag.latency': '耗时 {ms}ms',
+    'diag.hits': '命中 {n}',
+    'diag.error': '错误',
+    'diag.hint': '提示',
+    'diag.balance': 'SerpAPI 本月剩余 {remaining} / {limit}（{plan}）',
+    'diag.cooldown_remaining': '剩余 {s}s',
+    'diag.balance_low': '配额即将耗尽，建议尽快补充或改用本地检索',
+    'alert.emptyQuery': '请输入搜索内容',
+    'alert.searchFirst': '请先执行一次搜索',
+    'alert.searchFail': '搜索失败',
+    'alert.statsFail': '统计失败',
+    'alert.exportFail': '导出失败',
+    'page.prev': '上一页',
+    'page.next': '下一页',
+    'meta.patent': '专利号',
+    'meta.applicant': '申请人',
+    'meta.inventor': '发明人',
+    'meta.filing': '申请日',
+    'meta.country': '国家',
+    'upload.dragDrop': '拖拽PDF文件到此处，或点击上传',
+    'upload.hint': '支持单个PDF文件，用于提取技术方案进行检索分析',
+    'upload.removed': '已移除',
+    'upload.preview': '预览',
+    'upload.uploading': '上传中...',
+    'upload.success': '上传成功',
+    'upload.error': '上传失败',
+    'upload.extracting': 'PDF解析中...',
+    'upload.extractSuccess': '解析完成',
+    'upload.extractFail': '解析失败，请重试'
+  };
+  var searchEn = {
+    'search.title': 'Patent Search',
+    'search.placeholder': 'Enter keywords, patent number, applicant, or inventor...',
+    'mode.local': 'Local DB',
+    'mode.online': 'Online',
+    'region.auto': 'Auto Detect',
+    'region.cn': 'China (CNIPR/Sogou)',
+    'region.intl': 'International (SerpAPI/Google)',
+    'type.auto': 'Auto Detect',
+    'type.inventor': 'Inventor',
+    'type.applicant': 'Applicant',
+    'type.patentNumber': 'Patent Number',
+    'type.keyword': 'Keyword',
+    'country.all': 'All Regions',
+    'lang.title': 'Search language (explicit choice overrides region/auto)',
+    'lang.auto': 'Lang·Auto',
+    'lang.chinese': 'Chinese',
+    'lang.english': 'English',
+    'lang.all': 'Any Language',
+    'sort.relevance': 'Relevance',
+    'sort.new': 'Newest',
+    'sort.old': 'Oldest',
+    'date.from': 'Date from',
+    'date.to': 'Date to',
+    'btn.search': 'Search',
+    'btn.stats': 'Stats',
+    'btn.export': 'Export CSV',
+    'history.title': 'History',
+    'history.clear': 'Clear',
+    'history.empty': 'No history',
+    'stats.title': 'Statistics',
+    'stats.empty': 'No stats yet',
+    'stats.loading': 'Calculating...',
+    'stats.total': 'Total samples',
+    'stats.appTop': 'Applicants TOP 10',
+    'stats.country': 'Countries',
+    'stats.year': 'Year Trend',
+    'results.searching': 'Searching...',
+    'results.noData': 'No results',
+    'results.info': 'Found {total} | page {page} | {size}/page{source}',
+    'results.source': 'source',
+    'results.google': 'Google Patents',
+    'results.score': 'Relevance',
+    'diag.title': 'Search diagnostics',
+    'diag.summary': '{n} source attempts',
+    'diag.status.success': 'Success',
+    'diag.status.failed': 'Failed',
+    'diag.status.skipped': 'Skipped',
+    'diag.fail.network': 'network',
+    'diag.fail.quota': 'quota',
+    'diag.fail.auth': 'auth',
+    'diag.fail.parse': 'parse',
+    'diag.cooling': 'Cooling down',
+    'diag.latency': '{ms} ms',
+    'diag.hits': '{n} hits',
+    'diag.error': 'Error',
+    'diag.hint': 'Hint',
+    'diag.balance': 'SerpAPI {remaining} / {limit} left this month ({plan})',
+    'diag.cooldown_remaining': '{s}s remaining',
+    'diag.balance_low': 'quota running low, refill soon or switch to local search',
+    'alert.emptyQuery': 'Please enter a query',
+    'alert.searchFirst': 'Please run a search first',
+    'alert.searchFail': 'Search failed',
+    'alert.statsFail': 'Stats failed',
+    'alert.exportFail': 'Export failed',
+    'page.prev': 'Prev',
+    'page.next': 'Next',
+    'meta.patent': 'Patent',
+    'meta.applicant': 'Applicant',
+    'meta.inventor': 'Inventor',
+    'meta.filing': 'Filing',
+    'meta.country': 'Country',
+    'upload.dragDrop': 'Drag & drop PDF here, or click to upload',
+    'upload.hint': 'Single PDF file for extracting technical content for search analysis',
+    'upload.removed': 'Removed',
+    'upload.preview': 'Preview',
+    'upload.uploading': 'Uploading...',
+    'upload.success': 'Uploaded',
+    'upload.error': 'Upload failed',
+    'upload.extracting': 'Parsing PDF...',
+    'upload.extractSuccess': 'Parsed',
+    'upload.extractFail': 'Parse failed, retry'
+  };
+  Object.keys(searchZh).forEach(function(k) { if (!I18N_COMMON.zh[k]) I18N_COMMON.zh[k] = searchZh[k]; });
+  Object.keys(searchEn).forEach(function(k) { if (!I18N_COMMON.en[k]) I18N_COMMON.en[k] = searchEn[k]; });
+})();
+
+// Hook into global language switch to update search-specific dynamic content
+var _origSetI18nLang = setI18nLang;
+setI18nLang = function(lang) {
+    _origSetI18nLang(lang);
+    renderNavbar('search');
+    renderHistory();
+    if (lastResponse) {
+        renderResults(lastResponse, lastPage, lastPageSize);
+    }
+};
+
+// Initialize navbar, sidebar, and apply i18n after search keys are registered
+renderNavbar('search');
+renderSidebar(
+  '<div class="sidebar-section">'
+  + '<div class="sidebar-label">' + t('mode.local').split(' ')[0] + '</div>'
+  + '<select id="sidebar-search-mode" onchange="document.getElementById(\'search-mode\').value=this.value">'
+  + '<option value="local" data-i18n="mode.local">' + t('mode.local') + '</option>'
+  + '<option value="online" data-i18n="mode.online">' + t('mode.online') + '</option>'
+  + '</select>'
+  + '</div>'
+  + '<div class="sidebar-section">'
+  + '<div class="sidebar-label">' + (i18nLang === 'zh' ? '快捷操作' : 'Actions') + '</div>'
+  + '<button class="sidebar-btn" onclick="showStats()" data-i18n="btn.stats">' + t('btn.stats') + '</button>'
+  + '<button class="sidebar-btn" onclick="exportCsv()" data-i18n="btn.export">' + t('btn.export') + '</button>'
+  + '</div>'
+);
+	applyI18nCommon();
+	loadSearchPdfMeta();
+	if (restoredSearchPdf) {
+	    const zone = document.getElementById('pdf-upload-zone');
+	    if (zone) {
+	        const span = zone.querySelector('span[data-i18n="upload.dragDrop"]');
+	        if (span) span.textContent = t('upload.extractSuccess');
+	    }
+	}
+
+function escapeHtml(str) {
+    return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function toggleRegionSelect() {
+    var mode = document.getElementById('search-mode').value;
+    var regionEl = document.getElementById('search-region');
+    if (regionEl) regionEl.style.display = mode === 'online' ? '' : 'none';
+}
+
+function getSearchEndpoint() {
+    var mode = document.getElementById('search-mode').value;
+    return mode === 'online' ? '/api/search/online' : '/api/search';
+}
+
+function buildRequest(page) {
+    const query = document.getElementById('search-input').value.trim();
+    const country = document.getElementById('country-filter').value;
+    const searchType = document.getElementById('search-type').value;
+    const sortBy = document.getElementById('sort-by').value;
+    const dateFrom = document.getElementById('date-from').value;
+    const dateTo = document.getElementById('date-to').value;
+    const pageSize = parseInt(document.getElementById('page-size').value, 10);
+
+    const region = document.getElementById('search-region').value;
+    const body = { query, page, page_size: pageSize, sort_by: sortBy };
+    if (country) body.country = country;
+    if (searchType && searchType !== 'auto') body.search_type = searchType;
+    if (dateFrom) body.date_from = dateFrom;
+    if (dateTo) body.date_to = dateTo;
+    if (region && region !== 'auto') body.region = region;
+    // MA3：仅在用户显式选择语言时下发 language 键（空值=自动=不发，保持旧请求体逐字不变）
+    const language = document.getElementById('language-filter').value;
+    if (language) body.language = language;
+    const ipc = document.getElementById('ipc-filter').value.trim();
+    if (ipc) body.ipc = ipc;
+    return body;
+}
+
+async function doSearch(page) {
+    const body = buildRequest(page);
+    if (!body.query) {
+        alert(t('alert.emptyQuery'));
+        return;
+    }
+
+    currentRequest = body;
+    saveHistory(body.query);
+    renderHistory();
+    document.getElementById('results').innerHTML = `<p class="muted">${t('results.searching')}</p>`;
+    document.getElementById('pagination').innerHTML = '';
+
+    try {
+        const endpoint = getSearchEndpoint();
+        const res = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        if (!res.ok) throw new Error('服务器错误 (' + res.status + ')');
+        const data = await res.json();
+        lastResponse = data;
+        lastPage = page;
+        lastPageSize = body.page_size;
+        renderResults(data, page, body.page_size);
+    } catch (err) {
+        document.getElementById('results').innerHTML =
+            `<p style="color:#f85149;">${escapeHtml(t('alert.searchFail'))}: ${escapeHtml(err.message)}</p>`;
+    }
+}
+
+function renderResults(data, page, pageSize) {
+    renderSearchDiagnostics(data);
+    const total = Number(data.total || 0);
+    const source = data.source ? ` | ${t('results.source')}: ${escapeHtml(data.source)}` : '';
+    document.getElementById('results-info').innerHTML = t('results.info', {
+        total,
+        page,
+        size: pageSize,
+        source
+    });
+
+    // 显示搜索来源提示（如免费搜索时建议注册更好的服务）
+    if (data.hint) {
+        const hintEl = document.getElementById('search-hint');
+        if (hintEl) {
+            hintEl.innerHTML = DOMPurify.sanitize(`💡 ${escapeHtml(data.hint)} <a href="/settings" style="color:#58a6ff;">去设置</a>`);
+            hintEl.style.display = 'block';
+        }
+    } else {
+        const hintEl = document.getElementById('search-hint');
+        if (hintEl) hintEl.style.display = 'none';
+    }
+
+    const patents = Array.isArray(data.patents) ? data.patents : [];
+    if (!patents.length) {
+        const extra = data.google_url ? ` | <a href="${escapeHtml(data.google_url)}" target="_blank">${t('results.google')}</a>` : '';
+        document.getElementById('results').innerHTML = `<p class="muted">${t('results.noData')}${extra}</p>`;
+        document.getElementById('pagination').innerHTML = '';
+        return;
+    }
+
+    let html = '';
+    patents.forEach((p) => {
+        const score = Number(p.relevance_score || 0);
+        const scoreColor = score >= 90 ? '#3fb950' : score >= 70 ? '#58a6ff' : score >= 50 ? '#d29922' : '#8b949e';
+        html += `
+        <div class="patent-card">
+            <div class="patent-title-row">
+                <label style="display:flex;align-items:center;margin-right:8px;cursor:pointer;">
+                    <input type="checkbox" class="batch-check" data-id="${escapeHtml(p.id)}" style="width:16px;height:16px;cursor:pointer;">
+                </label>
+                <div style="flex:1;">
+                    <h3><a href="/patent/${escapeHtml(p.id)}">${escapeHtml(p.title || '无标题')}</a></h3>
+                    <div class="meta-row">
+                        <span>${t('meta.patent')}: ${escapeHtml(p.patent_number || '暂无')}</span>
+                        <span>${t('meta.applicant')}: ${escapeHtml(p.applicant || '暂无')}</span>
+                        <span>${t('meta.inventor')}: ${escapeHtml(p.inventor || '暂无')}</span>
+                        <span>${t('meta.filing')}: ${escapeHtml(p.filing_date || '暂无')}</span>
+                        <span>${t('meta.country')}: ${escapeHtml(p.country || '暂无')}</span>
+                    </div>
+                    <p class="patent-abstract">${escapeHtml((p.abstract_text || '').slice(0, 260))}${(p.abstract_text || '').length > 260 ? '...' : ''}</p>
+                </div>
+                <div class="score-tag">
+                    <div class="score-value" style="color:${scoreColor}">${score.toFixed(0)}%</div>
+                    <div class="score-source">${escapeHtml(p.score_source || t('results.score'))}</div>
+                </div>
+            </div>
+        </div>`;
+    });
+    // Show dedup info
+    if (data.dedup_removed && data.dedup_removed > 0) {
+        html = `<div style="padding:8px 12px;margin-bottom:12px;background:#1c2128;border-radius:6px;color:#8b949e;font-size:0.85em;">
+            🔄 已合并 ${data.dedup_removed} 条重复专利（同族不同版本）
+        </div>` + html;
+    }
+
+    // Show category statistics
+    if (data.categories && data.categories.length > 0) {
+        let catHtml = '<div style="padding:12px;margin-bottom:16px;background:#161b22;border-radius:8px;border:1px solid #30363d;">';
+        catHtml += '<div style="font-size:0.85em;color:#58a6ff;margin-bottom:8px;font-weight:bold;">📊 分类统计</div>';
+        catHtml += '<div style="display:flex;flex-wrap:wrap;gap:8px;">';
+        data.categories.forEach(function(cat) {
+            catHtml += '<span style="padding:4px 10px;background:#21262d;border-radius:12px;font-size:0.8em;color:#c9d1d9;">'
+                + escapeHtml(cat.label) + ' <strong style="color:#58a6ff;">' + cat.count + '</strong></span>';
+        });
+        catHtml += '</div></div>';
+        html = catHtml + html;
+    }
+
+    // Batch action bar
+    html = `<div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;padding:8px 12px;background:#161b22;border-radius:6px;">
+        <label style="color:#8b949e;font-size:0.85em;cursor:pointer;"><input type="checkbox" onchange="toggleAllChecks(this.checked)" style="margin-right:4px;">全选</label>
+        <button onclick="batchSummarize()" style="background:#1f6feb;padding:4px 12px;font-size:0.85em;border-radius:4px;color:white;border:none;cursor:pointer;">🤖 批量摘要</button>
+        <button onclick="compareMatrix()" style="background:#8b5cf6;padding:4px 12px;font-size:0.85em;border-radius:4px;color:white;border:none;cursor:pointer;">📊 对比矩阵</button>
+        <button onclick="toggleRiskModal()" style="background:#da3633;padding:4px 12px;font-size:0.85em;border-radius:4px;color:white;border:none;cursor:pointer;">⚠️ 侵权评估 <span style="font-size:10px;background:#da363344;border:1px solid #f85149;border-radius:3px;padding:1px 5px;margin-left:2px;vertical-align:middle;">Reasoner</span></button>
+        <span id="batch-count" style="color:#8b949e;font-size:0.8em;"></span>
+    </div>` + html;
+
+    document.getElementById('results').innerHTML = html + '<div id="batch-result" style="margin-top:16px;"></div>';
+    renderPagination(total, page, pageSize);
+}
+
+// ── MA5b 检索诊断面板 ─────────────────────────────────────────────────────────
+// 数据源：/api/search/online 出参的 attempts 键 + MA6b 新增顶层 cooldowns 键：
+//   { source: 'serpapi'|'google_patents_xhr'|'epo_ops'|'local_fts',
+//     status: 'Success' | 'Skipped' | { Failed: 'network'|'quota'|'auth'|'parse' },
+//     latency_ms: number, hits: number, error: string|null, hint: string|null }
+//   cooldowns: [{ source: 同上小写稳定串, remaining_secs: number }, ...]
+//   ——顺序=源登记顺序，无冷却时整键省略；两个键的字面量分别由后端单测
+//   attempts_json_locks_frontend_panel_literals / cooldowns_json_locks_shape_order_and_ceil_secs 锁死。
+// 本地模式（/api/search）出参没有 attempts → 面板整体不渲染，不得报错。
+// 全程 createElement + textContent（AGENTS.md 2.5：禁止 innerHTML 直插动态文本）。
+
+const DIAG_SOURCE_LABELS = {
+    serpapi: 'SerpAPI',
+    google_patents_xhr: 'Google Patents XHR',
+    epo_ops: 'EPO OPS',
+    local_fts: 'Local FTS'
+};
+const DIAG_FAIL_KEYS = ['network', 'quota', 'auth', 'parse'];
+
+// 「冷却中」展示镜像：后端 FailKind::cools_down()（src/search/model.rs：Quota|Auth → true）
+// 的判据副本。MA6a 已落地服务端熔断（src/search/breaker.rs），本镜像仍服务「本次失败、
+// 刚触发冷却」的 quota/auth 行；**下一请求**的真实冷却状态以结构化 `cooldowns` 键为准
+// （见 renderSearchDiagnostics 内 MA6b 注释），前端依旧不发明第二套冷却判定规则。
+function diagCoolsDown(failKind) {
+    return failKind === 'quota' || failKind === 'auth';
+}
+
+function diagParseStatus(status) {
+    if (status === 'Success') return { kind: 'success', fail: null };
+    if (status === 'Skipped') return { kind: 'skipped', fail: null };
+    if (status && typeof status === 'object' && typeof status.Failed === 'string') {
+        return { kind: 'failed', fail: status.Failed };
+    }
+    return { kind: 'unknown', fail: null };
+}
+
+function diagBadgeSpan(text, color) {
+    var span = document.createElement('span');
+    span.textContent = text;
+    span.style.cssText = 'padding:1px 8px;border-radius:10px;font-size:0.8em;border:1px solid ' + color + ';color:' + color + ';';
+    return span;
+}
+
+function diagMutedSpan(text, title) {
+    var span = document.createElement('span');
+    span.textContent = text;
+    span.style.color = '#8b949e';
+    if (title) span.title = title;
+    return span;
+}
+
+// SerpAPI 余额（spec §3 改造点 3：复用既有 GET /api/settings/serpapi/balance）。
+// 模块级缓存只请求一次；任何失败静默降级（移除占位），不阻塞面板渲染。
+let serpapiBalanceRequest = null;
+function serpapiBalancePromise() {
+    if (!serpapiBalanceRequest) {
+        serpapiBalanceRequest = fetch('/api/settings/serpapi/balance')
+            .then(function(res) { return res.ok ? res.json() : null; })
+            .then(function(data) { return data && data.status === 'ok' ? data : null; })
+            .catch(function() { return null; });
+    }
+    return serpapiBalanceRequest;
+}
+
+function renderSearchDiagnostics(data) {
+    var box = document.getElementById('search-diagnostics');
+    if (!box) return;
+    box.textContent = '';
+    box.style.display = 'none';
+    var attempts = data && Array.isArray(data.attempts) ? data.attempts : [];
+    if (!attempts.length) return;
+
+    // MA6b：`cooldowns` 结构化映射（源名 → 剩余秒数）。冷却徽标只认这个键，
+    // 禁止正则解析中文 error 文案（隐式契约随文案腐烂）。缺键时下方所有分支
+    // 走不到冷却徽标，面板行为与 MA6a 逐字一致。
+    var cooldownBySource = {};
+    if (data && Array.isArray(data.cooldowns)) {
+        data.cooldowns.forEach(function(c) {
+            if (c && c.source) cooldownBySource[c.source] = Number(c.remaining_secs || 0);
+        });
+    }
+
+    var details = document.createElement('details');
+    details.style.cssText = 'margin-bottom:12px;padding:8px 12px;background:#161b22;border:1px solid #30363d;border-radius:8px;';
+    var summary = document.createElement('summary');
+    summary.style.cssText = 'cursor:pointer;color:#8b949e;font-size:0.85em;user-select:none;';
+    summary.textContent = t('diag.title') + ' · ' + t('diag.summary', { n: attempts.length });
+    details.appendChild(summary);
+
+    var serpapiRow = null;
+    attempts.forEach(function(raw) {
+        var a = raw || {};
+        var st = diagParseStatus(a.status);
+        var row = document.createElement('div');
+        row.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px;font-size:0.9em;';
+
+        var name = document.createElement('strong');
+        name.textContent = DIAG_SOURCE_LABELS[a.source] || String(a.source || '?');
+        name.style.color = '#c9d1d9';
+        row.appendChild(name);
+
+        var badgeColor = st.kind === 'success' ? '#3fb950' : st.kind === 'failed' ? '#f85149' : '#8b949e';
+        var badgeText;
+        if (st.kind === 'success') badgeText = t('diag.status.success');
+        else if (st.kind === 'skipped') badgeText = t('diag.status.skipped');
+        else if (st.kind === 'failed') {
+            badgeText = t('diag.status.failed') + ' · ' +
+                (DIAG_FAIL_KEYS.indexOf(st.fail) >= 0 ? t('diag.fail.' + st.fail) : st.fail);
+        } else badgeText = '—';
+        row.appendChild(diagBadgeSpan(badgeText, badgeColor));
+        if (st.kind === 'failed' && diagCoolsDown(st.fail)) {
+            row.appendChild(diagBadgeSpan(t('diag.cooling'), '#d29922'));
+        }
+        // MA6b：链前被摘链的冷却源（结构化 cooldowns 键命中）→ 专属「冷却中 · 剩余 Ns」徽标。
+        // 与上面的失败镜像徽标语义不同：这条是「本次没发起请求、上游仍在冷却窗口」。
+        if (Object.prototype.hasOwnProperty.call(cooldownBySource, a.source)) {
+            row.appendChild(diagBadgeSpan(
+                t('diag.cooling') + ' · ' + t('diag.cooldown_remaining', { s: cooldownBySource[a.source] }),
+                '#d29922'
+            ));
+        }
+        row.appendChild(diagMutedSpan(t('diag.latency', { ms: Number(a.latency_ms || 0) })));
+        row.appendChild(diagMutedSpan(t('diag.hits', { n: Number(a.hits || 0) })));
+
+        // 截断仅用于展示：error/hint 全文完整保留在 title 提示里（AGENTS.md 2.5 截断纪律）
+        if (a.error) {
+            var errText = String(a.error);
+            var errShown = errText.length > 48 ? errText.slice(0, 48) + '…' : errText;
+            row.appendChild(diagMutedSpan(t('diag.error') + ': ' + errShown, errText));
+        }
+        if (a.hint) {
+            var hintText = String(a.hint);
+            var hintShown = hintText.length > 48 ? hintText.slice(0, 48) + '…' : hintText;
+            row.appendChild(diagMutedSpan(t('diag.hint') + ': ' + hintShown, hintText));
+        }
+        if (a.source === 'serpapi') serpapiRow = row;
+        details.appendChild(row);
+    });
+
+    if (serpapiRow) {
+        var bal = diagMutedSpan('…');
+        serpapiRow.appendChild(bal);
+        serpapiBalancePromise().then(function(balData) {
+            if (!balData) {
+                if (bal.parentNode) bal.parentNode.removeChild(bal);
+                return;
+            }
+            var remaining = Number(balData.remaining || 0);
+            var limit = Number(balData.searches_per_month || 0);
+            bal.textContent = t('diag.balance', {
+                remaining: remaining,
+                limit: limit,
+                plan: String(balData.plan_name || 'Free')
+            });
+            // MA6b 配额预警：阈值取「月度配额 10%」与固定 100 的宽者（按月的付费套餐
+            // 要按比例提前预警；低配额/无月限信息时要兜底的绝对量预警）。remaining
+            // 缺失或为 0 不预警——那是「没配 Key 的静默降级」常见形态，禁止误报成
+            // 「配额耗尽」。任何失败仍走上方 null 分支静默移除占位，不阻塞面板。
+            if (remaining > 0 && remaining <= (limit > 0 ? Math.max(limit * 0.1, 100) : 100)) {
+                bal.style.color = '#d29922';
+                var warn = document.createElement('span');
+                warn.textContent = ' · ' + t('diag.balance_low');
+                warn.style.color = '#d29922';
+                serpapiRow.appendChild(warn);
+            }
+        });
+    }
+    box.appendChild(details);
+    box.style.display = 'block';
+}
+
+function renderPagination(total, page, pageSize) {
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    if (totalPages <= 1) {
+        document.getElementById('pagination').innerHTML = '';
+        return;
+    }
+    const prevDisabled = page <= 1 ? 'disabled' : '';
+    const nextDisabled = page >= totalPages ? 'disabled' : '';
+    document.getElementById('pagination').innerHTML = `
+        <button class="btn-secondary" ${prevDisabled} onclick="doSearch(${page - 1})">${t('page.prev')}</button>
+        <span class="muted">${page} / ${totalPages}</span>
+        <button class="btn-secondary" ${nextDisabled} onclick="doSearch(${page + 1})">${t('page.next')}</button>
+    `;
+}
+
+function saveHistory(query) {
+    const cleaned = query.trim();
+    if (!cleaned) return;
+    const history = loadHistory().filter((item) => item !== cleaned);
+    history.unshift(cleaned);
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(0, 10)));
+}
+
+function loadHistory() {
+    try {
+        const parsed = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (_) {
+        return [];
+    }
+}
+
+function clearHistory() {
+    localStorage.removeItem(HISTORY_KEY);
+    renderHistory();
+}
+
+function useHistory(query) {
+    document.getElementById('search-input').value = query;
+    doSearch(1);
+}
+
+function useHistoryEncoded(encoded) {
+    useHistory(decodeURIComponent(encoded));
+}
+
+function renderHistory() {
+    const history = loadHistory();
+    if (!history.length) {
+        document.getElementById('history-list').innerHTML = `<span class="muted">${t('history.empty')}</span>`;
+        return;
+    }
+    document.getElementById('history-list').innerHTML = history
+        .map((item) => `<button class="history-item" onclick="useHistoryEncoded('${encodeURIComponent(item)}')">${escapeHtml(item)}</button>`)
+        .join('');
+}
+
+function renderBarList(items) {
+    if (!items.length) return `<p class="muted">${t('stats.empty')}</p>`;
+    const max = Math.max(...items.map((x) => Number(x[1] || 0)), 1);
+    return items.map((item) => {
+        const label = escapeHtml(item[0] || '未知');
+        const value = Number(item[1] || 0);
+        const width = Math.max(4, (value / max) * 100);
+        return `<div class="bar-item">
+            <span>${label}</span>
+            <div class="bar-track"><div class="bar-fill" style="width:${width}%"></div></div>
+            <strong>${value}</strong>
+        </div>`;
+    }).join('');
+}
+
+async function showStats() {
+    if (!currentRequest) {
+        alert(t('alert.searchFirst'));
+        return;
+    }
+    document.getElementById('stats-panel').style.display = 'block';
+    document.getElementById('stats-content').innerHTML = `<p class="muted">${t('stats.loading')}</p>`;
+    try {
+        const statsReq = { ...currentRequest, page: 1, page_size: 10000 };
+        const res = await fetch('/api/search/stats', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(statsReq)
+        });
+        if (!res.ok) throw new Error('服务器错误 (' + res.status + ')');
+        const data = await res.json();
+        const applicants = Array.isArray(data.applicants) ? data.applicants : [];
+        const countries = Array.isArray(data.countries) ? data.countries : [];
+        const years = Array.isArray(data.years) ? data.years : [];
+        document.getElementById('stats-content').innerHTML = `
+            <p class="muted" style="margin-bottom:10px;">${t('stats.total')}: <strong>${Number(data.total || 0)}</strong></p>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                <div style="background:#0d1117;padding:12px;border-radius:8px;">
+                    <h4 style="color:#58a6ff;margin:0 0 8px;">${t('stats.year')}</h4>
+                    <canvas id="chart-year" height="200"></canvas>
+                </div>
+                <div style="background:#0d1117;padding:12px;border-radius:8px;">
+                    <h4 style="color:#58a6ff;margin:0 0 8px;">${t('stats.country')}</h4>
+                    <canvas id="chart-country" height="200"></canvas>
+                </div>
+            </div>
+            <div style="background:#0d1117;padding:12px;border-radius:8px;margin-top:16px;">
+                <h4 style="color:#58a6ff;margin:0 0 8px;">${t('stats.appTop')}</h4>
+                <canvas id="chart-applicant" height="160"></canvas>
+            </div>
+        `;
+        // Render charts if Chart.js loaded
+        if (typeof Chart !== 'undefined') {
+            var chartOpts = {color:'#c9d1d9',borderColor:'#30363d'};
+            new Chart(document.getElementById('chart-year'),{type:'line',data:{labels:years.map(function(y){return y[0]}),datasets:[{label:t('stats.year'),data:years.map(function(y){return y[1]}),borderColor:'#58a6ff',backgroundColor:'rgba(88,166,255,0.1)',fill:true,tension:0.3}]},options:{plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#8b949e'}},y:{ticks:{color:'#8b949e'},beginAtZero:true}}}});
+            new Chart(document.getElementById('chart-country'),{type:'doughnut',data:{labels:countries.map(function(c){return c[0]}),datasets:[{data:countries.map(function(c){return c[1]}),backgroundColor:['#58a6ff','#3fb950','#d29922','#f85149','#8b5cf6','#f0883e','#33b3ae','#da3633']}]},options:{plugins:{legend:{position:'right',labels:{color:'#c9d1d9',font:{size:11}}}}}});
+            new Chart(document.getElementById('chart-applicant'),{type:'bar',data:{labels:applicants.map(function(a){return a[0].substring(0,15)}),datasets:[{label:t('stats.appTop'),data:applicants.map(function(a){return a[1]}),backgroundColor:'#3fb950'}]},options:{indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#8b949e'}},y:{ticks:{color:'#8b949e',font:{size:10}}}}}});
+        }
+    } catch (err) {
+        document.getElementById('stats-content').innerHTML =
+            `<p style="color:#f85149;">${t('alert.statsFail')}: ${escapeHtml(err.message)}</p>`;
+    }
+}
+
+async function exportCsv() {
+    if (!currentRequest) {
+        alert(t('alert.searchFirst'));
+        return;
+    }
+    try {
+        const res = await fetch('/api/search/export', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...currentRequest, page: 1, page_size: 10000 })
+        });
+        if (!res.ok) {
+            const errText = await res.text();
+            alert(`${t('alert.exportFail')}: ${errText}`);
+            return;
+        }
+        const blob = await res.blob();
+        const disposition = res.headers.get('Content-Disposition') || '';
+        const matched = disposition.match(/filename="([^"]+)"/);
+        const fileName = matched ? matched[1] : `patents_${Date.now()}.csv`;
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+    } catch (err) {
+        alert(`${t('alert.exportFail')}: ${err.message}`);
+    }
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+    renderHistory();
+
+    document.getElementById('search-input').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') doSearch(1);
+    });
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const q = urlParams.get('q');
+    if (q) {
+        document.getElementById('search-input').value = q;
+        doSearch(1);
+    }
+});
+async function compareMatrix() {
+    var ids = Array.from(document.querySelectorAll('.batch-check:checked')).map(function(cb) { return cb.dataset.id; });
+    var resultDiv = document.getElementById('batch-result');
+    if (ids.length < 2) { resultDiv.innerHTML = '<p style="color:#d29922;">请勾选 2-5 个专利进行对比</p>'; return; }
+    if (ids.length > 5) { resultDiv.innerHTML = '<p style="color:#d29922;">最多选择 5 个专利</p>'; return; }
+    resultDiv.innerHTML = DOMPurify.sanitize('<p style="color:#58a6ff;">⏳ 正在生成对比矩阵 (' + ids.length + '条)...</p>');
+    try {
+        var resp = await fetch('/api/ai/compare-matrix', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({patent_ids: ids}) });
+        if (!resp.ok) throw new Error('服务器错误 (' + resp.status + ')');
+        var data = await resp.json();
+        if (data.status === 'ok') {
+            resultDiv.innerHTML = DOMPurify.sanitize('<h3 style="color:#8b5cf6;margin-bottom:12px;">📊 技术对比矩阵</h3><div style="padding:16px;background:#0d1117;border:1px solid #30363d;border-radius:8px;color:#c9d1d9;line-height:1.8;white-space:pre-wrap;">' + escapeHtml(data.analysis).replace(/\n/g, '<br>') + '</div>');
+        } else { resultDiv.innerHTML = '<p style="color:#f85149;">❌ ' + escapeHtml(data.error || '对比失败') + '</p>'; }
+    } catch(e) { resultDiv.innerHTML = '<p style="color:#f85149;">❌ ' + escapeHtml(e.message) + '</p>'; }
+}
+
+function toggleRiskModal() {
+    var modal = document.getElementById('risk-modal');
+    if (modal) { modal.remove(); return; }
+    var ids = Array.from(document.querySelectorAll('.batch-check:checked')).map(function(cb) { return cb.dataset.id; }).join(', ');
+    var html = '<div id="risk-modal" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:999;display:flex;align-items:center;justify-content:center;">'
+        + '<div style="background:#161b22;border:1px solid #30363d;border-radius:12px;padding:24px;max-width:500px;width:90%;">'
+        + '<h3 style="color:#da3633;margin:0 0 16px;">⚠️ 侵权风险评估</h3>'
+        + '<label style="color:#8b949e;font-size:0.85em;">产品/技术描述</label>'
+        + '<textarea id="risk-product" rows="4" style="width:100%;padding:8px;background:#0d1117;border:1px solid #30363d;color:#c9d1d9;border-radius:6px;margin:4px 0 12px;" placeholder="描述你的产品或技术方案..."></textarea>'
+        + '<label style="color:#8b949e;font-size:0.85em;">已收录的专利号或 ID（逗号分隔，或先在搜索结果中勾选）</label>'
+        + '<input id="risk-patents" type="text" value="' + escapeHtml(ids) + '" style="width:100%;padding:8px;background:#0d1117;border:1px solid #30363d;color:#c9d1d9;border-radius:6px;margin:4px 0 16px;" placeholder="先在搜索结果中勾选，或输入已收录的专利号">'
+        + '<div style="display:flex;gap:8px;">'
+        + '<button onclick="runRiskAssessment()" style="background:#da3633;padding:8px 20px;border-radius:6px;color:white;border:none;cursor:pointer;flex:1;">开始评估</button>'
+        + '<button onclick="toggleRiskModal()" style="background:#21262d;padding:8px 20px;border-radius:6px;color:#c9d1d9;border:none;cursor:pointer;">取消</button></div>'
+        + '<div id="risk-result" style="margin-top:16px;"></div>'
+        + '</div></div>';
+    document.body.insertAdjacentHTML('beforeend', html);
+}
+
+async function runRiskAssessment() {
+    var productDesc = document.getElementById('risk-product').value.trim();
+    var patentIds = document.getElementById('risk-patents').value.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+    var resultDiv = document.getElementById('risk-result');
+    if (!productDesc) { resultDiv.innerHTML = '<p style="color:#d29922;">请输入产品描述</p>'; return; }
+    if (patentIds.length === 0) { resultDiv.innerHTML = '<p style="color:#d29922;">请输入至少一个专利号</p>'; return; }
+    resultDiv.innerHTML = DOMPurify.sanitize('<p style="color:#58a6ff;">⏳ 正在评估侵权风险...</p>');
+    try {
+        var resp = await fetch('/api/ai/risk', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({product_description: productDesc, patent_ids: patentIds}) });
+        if (!resp.ok) throw new Error('服务器错误 (' + resp.status + ')');
+        var data = await resp.json();
+        if (data.status === 'ok') {
+            resultDiv.innerHTML = DOMPurify.sanitize('<div style="padding:12px;background:#0d1117;border-radius:6px;color:#c9d1d9;line-height:1.8;white-space:pre-wrap;max-height:300px;overflow-y:auto;">' + escapeHtml(data.analysis).replace(/\n/g, '<br>') + '</div>');
+        } else { resultDiv.innerHTML = '<p style="color:#f85149;">❌ ' + escapeHtml(data.error || '评估失败') + '</p>'; }
+    } catch(e) { resultDiv.innerHTML = '<p style="color:#f85149;">❌ ' + escapeHtml(e.message) + '</p>'; }
+}
+
+function toggleAllChecks(checked) {
+    document.querySelectorAll('.batch-check').forEach(function(cb) { cb.checked = checked; });
+}
+
+// Generated by aion-forge (v2, passed review), integrated with minor edits
+async function batchSummarize() {
+    var checkboxes = document.querySelectorAll('.batch-check:checked');
+    var ids = Array.from(checkboxes).map(function(cb) { return cb.dataset.id; });
+    var resultDiv = document.getElementById('batch-result');
+
+    if (ids.length === 0) {
+        resultDiv.innerHTML = DOMPurify.sanitize('<p style="color:#d29922;">请先勾选要摘要的专利</p>');
+        return;
+    }
+
+    resultDiv.innerHTML = DOMPurify.sanitize('<p style="color:#58a6ff;">⏳ 正在批量生成摘要 (' + ids.length + '条)...</p>');
+
+    try {
+        var response = await fetch('/api/ai/batch-summarize', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({patent_ids: ids})
+        });
+        if (!response.ok) throw new Error('服务器错误 (' + response.status + ')');
+        var data = await response.json();
+        if (data.status === 'ok' && data.summaries) {
+            var cardsHtml = data.summaries.map(function(item) {
+                return '<div style="padding:12px;margin-bottom:8px;background:#0d1117;border:1px solid #30363d;border-radius:6px;">' +
+                    '<strong style="color:#58a6ff;">' + escapeHtml(item.patent_number) + '</strong> ' +
+                    escapeHtml(item.title) +
+                    '<p style="color:#c9d1d9;margin:8px 0 0;font-size:0.9em;line-height:1.6;">' +
+                    escapeHtml(item.summary).replace(/\n/g, '<br>') + '</p></div>';
+            }).join('');
+            resultDiv.innerHTML = DOMPurify.sanitize('<h3 style="color:#58a6ff;margin-bottom:12px;">🤖 批量摘要结果</h3>' + cardsHtml);
+        } else {
+            resultDiv.innerHTML = DOMPurify.sanitize('<p style="color:#f85149;">❌ ' + escapeHtml(data.error || data.message || '生成失败') + '</p>');
+        }
+    } catch(e) {
+        resultDiv.innerHTML = DOMPurify.sanitize('<p style="color:#f85149;">❌ 请求失败: ' + escapeHtml(e.message) + '</p>');
+    }
+}
+</script>
+<script>
+// PDF Upload Functions
+function updatePdfFileList() {
+    const listEl = document.getElementById('pdf-file-list');
+    if (!listEl) return;
+    if (!currentPdfFile && !restoredSearchPdf) {
+        listEl.innerHTML = '';
+        return;
+    }
+    if (currentPdfFile) {
+        listEl.innerHTML = `
+            <div class="file-item">
+                <span class="preview-btn" onclick="previewPdfContent()" title="${t('upload.preview')}">👁️</span>
+                <span style="color:#58a6ff;">${escapeHtml(currentPdfFile.name)}</span>
+                <span style="color:#8b949e;font-size:10px;">(${formatFileSize(currentPdfFile.size)})</span>
+                <span class="remove" onclick="removePdfFile()" title="${t('upload.removed')}">×</span>
+            </div>
+        `;
+    } else if (restoredSearchPdf) {
+        listEl.innerHTML = `
+            <div class="file-item">
+                <span class="preview-btn" onclick="previewPdfContent()" title="${t('upload.preview')}">👁️</span>
+                <span style="color:#58a6ff;">${escapeHtml(restoredSearchPdf.name)}</span>
+                <span style="color:#8b949e;font-size:10px;">(${formatFileSize(restoredSearchPdf.size)})</span>
+                <span style="color:#3fb950;font-size:0.75em;margin-left:6px;">已保存</span>
+                <span class="remove" onclick="removePdfFile()" title="${t('upload.removed')}">×</span>
+            </div>
+        `;
+    }
+}
+
+updatePdfFileList();
+
+function formatFileSize(bytes) {
+    if (!bytes) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return (bytes / Math.pow(k, i)).toFixed(1) + ' ' + sizes[i];
+}
+
+function handlePdfUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+        alert(t('upload.error') + ': 仅支持PDF文件');
+        return;
+    }
+    currentPdfFile = file;
+    updatePdfFileList();
+    // Auto-extract after upload
+    extractPdfContent();
+    event.target.value = ''; // Reset input
+}
+
+function removePdfFile() {
+    currentPdfFile = null;
+    currentPdfContent = null;
+    clearSearchPdfMeta();
+    const zone = document.getElementById('pdf-upload-zone');
+    if (zone) {
+        const span = zone.querySelector('span[data-i18n="upload.dragDrop"]');
+        if (span) span.textContent = t('upload.dragDrop');
+    }
+    updatePdfFileList();
+}
+
+function previewPdfContent() {
+    if (!currentPdfContent) {
+        alert('暂无解析内容');
+        return;
+    }
+    alert('PDF内容预览:\n\n' + currentPdfContent.slice(0, 500) + (currentPdfContent.length > 500 ? '...' : ''));
+}
+
+async function extractPdfContent() {
+    // If we already have restored content, skip re-upload
+    if (!currentPdfFile && currentPdfContent) {
+        const zone = document.getElementById('pdf-upload-zone');
+        if (zone) {
+            const span = zone.querySelector('span[data-i18n="upload.dragDrop"]');
+            if (span) span.textContent = t('upload.extractSuccess');
+        }
+        return;
+    }
+    if (!currentPdfFile) return;
+    const zone = document.getElementById('pdf-upload-zone');
+    const originalText = zone.querySelector('span[data-i18n="upload.dragDrop"]').textContent;
+    zone.querySelector('span[data-i18n="upload.dragDrop"]').textContent = t('upload.extracting');
+    zone.style.pointerEvents = 'none';
+    zone.style.opacity = '0.6';
+
+    try {
+        const formData = new FormData();
+        formData.append('file', currentPdfFile);
+        const res = await fetch('/api/upload/extract', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await res.json();
+        if (data.text) {
+            currentPdfContent = data.text;
+            saveSearchPdfMeta();
+            zone.querySelector('span[data-i18n="upload.dragDrop"]').textContent = t('upload.extractSuccess');
+        } else {
+            zone.querySelector('span[data-i18n="upload.dragDrop"]').textContent = t('upload.extractFail');
+        }
+    } catch (err) {
+        zone.querySelector('span[data-i18n="upload.dragDrop"]').textContent = t('upload.error') + ': ' + err.message;
+    } finally {
+        zone.style.pointerEvents = 'auto';
+        zone.style.opacity = '1';
+    }
+}
+
+// Drag & Drop support
+const uploadZone = document.getElementById('pdf-upload-zone');
+if (uploadZone) {
+    uploadZone.addEventListener('dragover', function(e) {
+        e.preventDefault();
+        uploadZone.classList.add('dragover');
+    });
+    uploadZone.addEventListener('dragleave', function(e) {
+        e.preventDefault();
+        uploadZone.classList.remove('dragover');
+    });
+    uploadZone.addEventListener('drop', function(e) {
+        e.preventDefault();
+        uploadZone.classList.remove('dragover');
+        const file = e.dataTransfer.files[0];
+        if (file) {
+            // Create a fake event
+            const fakeEvent = { target: { files: [file], value: '' } };
+            handlePdfUpload(fakeEvent);
+        }
+    });
+}
+</script>
+<script>
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/static/service-worker.js').catch(function(){});
+}
+</script>
+</body>
+</html>

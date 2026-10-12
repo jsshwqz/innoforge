@@ -1,0 +1,8 @@
+target/
+.git/
+*.db
+.env
+mcp_stderr.txt
+docs/plans/
+skills/
+tests/

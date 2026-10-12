@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 助手 - 创研台</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#0d1117">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+    <script src="/static/purify.min.js"></script>
+</head>
+<body>
+    <div class="page-with-sidebar">
+    <aside id="page-sidebar" class="page-sidebar"></aside>
+    <main class="container page-main">
+        <div class="chat-container">
+            <div class="page-title-bar"><h2 data-i18n="ai.title"></h2></div>
+            <p class="hint" data-i18n="ai.hint"></p>
+            <div class="chat-box" id="chat-messages" style="position:relative;"></div>
+            <button class="scroll-bottom-btn" id="scroll-bottom-btn" onclick="scrollChatToBottom()">↓</button>
+            <div class="chat-input">
+                <div class="chat-input-wrap">
+                    <textarea id="chat-msg" rows="1" data-i18n-placeholder="ai.placeholder" autofocus></textarea>
+                    <div id="image-preview-area" class="image-preview-area" style="display:none;"></div>
+                </div>
+                <button onclick="sendChat()" data-i18n="ai.send"></button>
+                <button id="btn-stop" class="btn-stop" style="display:none" onclick="stopGeneration()" data-i18n="ai.stop"></button>
+                <button id="btn-export" class="btn-export-ghost" style="display:none" onclick="exportConclusions()" data-i18n="ai.exportConclusions"></button>
+            </div>
+        </div>
+    </main>
+    </div>
+    <script src="/static/i18n.js"></script>
+    <script>
+    // Allow inline event handlers in sanitized HTML
+    if (typeof DOMPurify !== 'undefined' && DOMPurify.setConfig) {
+        DOMPurify.setConfig({ADD_ATTR: ['onclick', 'onkeydown', 'onchange', 'oninput', 'onload', 'onfocus', 'onblur']});
+    }
+    renderNavbar('ai');
+    renderSidebar(
+      '<div class="sidebar-section">'
+      + '<div class="sidebar-label">' + (i18nLang === 'zh' ? '搜索选项' : 'Search') + '</div>'
+      + '<label class="sidebar-toggle" title="开启后 AI 会先联网搜索最新资料再回答">'
+      + '<input type="checkbox" id="web-search-cb">'
+      + '<span data-i18n="ai.webSearch">' + t('ai.webSearch') + '</span>'
+      + '</label>'
+      + '</div>'
+      + '<div class="sidebar-section">'
+      + '<div class="sidebar-label">' + (i18nLang === 'zh' ? '角色预设' : 'Role Preset') + '</div>'
+      + '<select id="role-select">'
+      + '<option value="general">' + (i18nLang === 'zh' ? '通用助手' : 'General Assistant') + '</option>'
+      + '<option value="patent_examiner">' + (i18nLang === 'zh' ? '专利审查专家' : 'Patent Examiner') + '</option>'
+      + '<option value="oa_expert">' + (i18nLang === 'zh' ? 'OA 答复专家' : 'OA Response Expert') + '</option>'
+      + '<option value="claim_analyst">' + (i18nLang === 'zh' ? '权利要求分析师' : 'Claim Analyst') + '</option>'
+      + '<option value="inventor_brainstorm">' + (i18nLang === 'zh' ? '发明人头脑风暴' : 'Inventor Brainstorm') + '</option>'
+      + '</select>'
+      + '<div class="sidebar-hint">' + (i18nLang === 'zh' ? '选择角色以定制 AI 回复风格和专业知识' : 'Select role to customize AI response style') + '</div>'
+      + '</div>'
+    );
+    </script>
+    <script>
+    function escapeHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+    // ── 持久化存储（后端 SQLite 替代 localStorage）──
+    var AI_CHAT_KEY = 'innoforge_ai_chat';
+    var chatHistory = [];
+    var chatSending = false;
+    var retryMsg = '';
+    var retryImages = [];
+    var currentAbortController = null;
+    var chatQueue = initChatQueue('chat-msg');
+    var chatOffset = 0;
+    var chatTotal = 0;
+    var chatPageSize = 50;
+
+    // 一次性迁移：将旧 localStorage 中的聊天记录导入后端
+    function migrateOldChat(key) {
+        var saved = localStorage.getItem(key);
+        if (!saved) return;
+        try {
+            var old = JSON.parse(saved);
+            if (!old || old.length === 0) return;
+            for (let i = 0; i < old.length; i++) {
+                var m = old[i];
+                fetch('/api/chat/' + encodeURIComponent(key) + '/save', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({role: m[0], content: m[1]})
+                }).catch(function(e) { console.warn('迁移旧聊天记录失败:', e); });
+            }
+            console.log('已迁移 ' + old.length + ' 条旧聊天记录到后端');
+        } catch(e) {}
+    }
+
+    // 加载更多历史消息（追加到 chatHistory 头部）
+    function loadMoreMessages() {
+        if (chatSending) return;
+        fetch('/api/chat/' + encodeURIComponent(AI_CHAT_KEY) + '?limit=' + chatPageSize + '&offset=' + chatOffset)
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.status === 'ok' && data.messages && data.messages.length > 0) {
+                    // 将更旧的消息插入到历史头部（保持时间正序）
+                    var oldLen = chatHistory.length;
+                    for (let i = data.messages.length - 1; i >= 0; i--) {
+                        var m = data.messages[i];
+                        chatHistory.unshift([m.role, m.content]);
+                    }
+                    chatOffset += data.messages.length;
+                    chatTotal = data.total;
+                    renderAllMessages();
+                    // 滚动保持当前位置
+                    var box = document.getElementById('chat-messages');
+                    if (box && data.messages.length > 0) {
+                        box.scrollTop = (data.messages.length) * 36;
+                    }
+                }
+                updateLoadMoreButton();
+            })
+            .catch(function(e) {
+                console.warn('加载更多消息失败:', e);
+            });
+    }
+
+    // 更新"加载更多"按钮
+    function updateLoadMoreButton() {
+        var existing = document.getElementById('load-more-btn-container');
+        if (chatOffset < chatTotal) {
+            if (!existing) {
+                var box = document.getElementById('chat-messages');
+                var container = document.createElement('div');
+                container.id = 'load-more-btn-container';
+                container.style.cssText = 'text-align:center;padding:8px;';
+                var btn = document.createElement('button');
+                btn.textContent = t('ai.loadMore');
+                btn.style.cssText = 'background:#1c2128;border:1px solid #30363d;border-radius:6px;padding:6px 16px;cursor:pointer;font-size:13px;color:#c9d1d9;';
+                btn.onclick = loadMoreMessages;
+                container.appendChild(btn);
+                box.insertBefore(container, box.firstChild);
+            }
+        } else {
+            if (existing) existing.remove();
+        }
+    }
+
+    // 页面加载时从后端恢复历史（分页加载最近 50 条）
+    (function loadChatHistory() {
+        fetch('/api/chat/' + encodeURIComponent(AI_CHAT_KEY) + '?limit=' + chatPageSize + '&offset=0')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.status === 'ok' && data.messages && data.messages.length > 0) {
+                    chatOffset = data.messages.length;
+                    chatTotal = data.total;
+                    chatHistory = [];
+                    data.messages.forEach(function(m) {
+                        chatHistory.push([m.role, m.content]);
+                    });
+                } else {
+                    // 后端无数据时，尝试从旧 localStorage 迁移
+                    migrateOldChat(AI_CHAT_KEY);
+                    var saved = localStorage.getItem(AI_CHAT_KEY);
+                    if (saved) {
+                        try { chatHistory = JSON.parse(saved); } catch(e) {}
+                        chatTotal = chatHistory.length;
+                        chatOffset = chatHistory.length;
+                    }
+                }
+                renderAllMessages();
+                updateLoadMoreButton();
+                showExportButton();
+            })
+            .catch(function() {
+                // 后端不可用时降级到 localStorage
+                var saved = localStorage.getItem(AI_CHAT_KEY);
+                if (saved) {
+                    try { chatHistory = JSON.parse(saved); } catch(e) {}
+                    chatTotal = chatHistory.length;
+                    chatOffset = chatHistory.length;
+                }
+                renderAllMessages();
+                showExportButton();
+            });
+    })();
+
+    function renderAllMessages() {
+        var box = document.getElementById('chat-messages');
+        box.innerHTML = '';
+        for (let i = 0; i < chatHistory.length; i += 2) {
+            var userDiv = document.createElement('div');
+            renderUserMessage(userDiv, chatHistory[i][1]);
+            box.appendChild(userDiv);
+            var aiDiv = document.createElement('div');
+            aiDiv.className = 'msg ai';
+            aiDiv.innerHTML = DOMPurify.sanitize(escapeHtml(chatHistory[i+1][1]).replace(/\n/g, '<br>'));
+            box.appendChild(aiDiv);
+        }
+        box.scrollTop = box.scrollHeight;
+        showExportButton();
+    }
+    var chatBox = document.getElementById('chat-messages');
+    var scrollBtn = document.getElementById('scroll-bottom-btn');
+    if (chatBox && scrollBtn) {
+        chatBox.addEventListener('scroll', function() {
+            var threshold = 200;
+            var atBottom = chatBox.scrollHeight - chatBox.scrollTop - chatBox.clientHeight < threshold;
+            scrollBtn.classList.toggle('visible', !atBottom);
+        });
+    }
+    function scrollChatToBottom() {
+        if (chatBox) {
+            chatBox.scrollTo({ top: chatBox.scrollHeight, behavior: 'smooth' });
+            scrollBtn.classList.remove('visible');
+        }
+    }
+
+    // ── 引用选中文字 / Quote selected text ──
+    var quoteBtn = null;
+    var selectedQuoteText = '';
+
+    function createQuoteButton() {
+        var btn = document.createElement('div');
+        btn.className = 'quote-btn';
+        btn.textContent = t('ai.quote');
+        btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            insertQuote();
+        });
+        document.body.appendChild(btn);
+        return btn;
+    }
+
+    function getQuoteBtn() {
+        if (!quoteBtn || !document.body.contains(quoteBtn)) {
+            quoteBtn = createQuoteButton();
+        }
+        return quoteBtn;
+    }
+
+    function showQuoteButton(text, rect) {
+        var btn = getQuoteBtn();
+        selectedQuoteText = text;
+        btn.style.position = 'fixed';
+        btn.style.display = 'block';
+        var w = btn.offsetWidth;
+        var h = btn.offsetHeight;
+        var left = rect.right - w / 2;
+        var top = rect.top - h - 8;
+        left = Math.max(4, Math.min(left, window.innerWidth - w - 4));
+        top = Math.max(4, top);
+        btn.style.left = left + 'px';
+        btn.style.top = top + 'px';
+    }
+
+    function hideQuoteButton() {
+        var btn = getQuoteBtn();
+        btn.style.display = 'none';
+        selectedQuoteText = '';
+    }
+
+    function insertQuote() {
+        if (!selectedQuoteText) return;
+        var textarea = document.getElementById('chat-msg');
+        // 每行前加 "> "，末尾加两个换行
+        var quoted = selectedQuoteText.split('\n').map(function(line) {
+            return '> ' + line;
+        }).join('\n') + '\n\n';
+        var start = textarea.selectionStart;
+        var end = textarea.selectionEnd;
+        var before = textarea.value.substring(0, start);
+        var after = textarea.value.substring(end);
+        textarea.value = before + quoted + after;
+        var newPos = start + quoted.length;
+        textarea.selectionStart = textarea.selectionEnd = newPos;
+        textarea.style.height = 'auto';
+        textarea.style.height = textarea.scrollHeight + 'px';
+        textarea.focus();
+        hideQuoteButton();
+    }
+
+    // 格式化用户消息：将 > 前缀行渲染为 blockquote
+    function formatUserContent(text) {
+        if (!text || (text.indexOf('\n> ') === -1 && !text.startsWith('> '))) {
+            return null;
+        }
+        var lines = text.split('\n');
+        var parts = [];
+        for (let i = 0; i < lines.length; i++) {
+            var line = lines[i];
+            if (line.startsWith('> ')) {
+                parts.push('<div class="quote-line">' + escapeHtml(line.substring(2)) + '</div>');
+            } else if (line === '>') {
+                parts.push('<div class="quote-line"></div>');
+            } else {
+                parts.push(escapeHtml(line));
+            }
+        }
+        return DOMPurify.sanitize(parts.join('<br>'));
+    }
+
+    // 渲染用户消息（支持 blockquote + 图片）
+    function renderUserMessage(container, text, images) {
+        container.className = 'msg user';
+        var formatted = formatUserContent(text);
+        if (formatted) {
+            container.innerHTML = DOMPurify.sanitize(formatted);
+        } else {
+            container.textContent = text;
+        }
+        if (images && images.length > 0) {
+            for (let i = 0; i < images.length; i++) {
+                var img = document.createElement('img');
+                img.src = images[i];
+                img.style.cssText = 'max-width:120px;max-height:120px;border-radius:4px;margin-top:4px;display:block;';
+                container.appendChild(img);
+            }
+        }
+    }
+
+    // 文本选择检测：释放鼠标时若选中文字则显示引用按钮
+    document.getElementById('chat-messages').addEventListener('mouseup', function(e) {
+        var target = e.target;
+        if (target && target.nodeType === 3) target = target.parentNode;
+        if (target && target.closest && target.closest('.quote-btn')) return;
+        // 延迟让 selection 稳定
+        setTimeout(function() {
+            var sel = window.getSelection();
+            var text = sel ? sel.toString().trim() : '';
+            if (!text) { hideQuoteButton(); return; }
+            var node = sel.anchorNode;
+            if (node) {
+                if (node.nodeType === 3) node = node.parentNode;
+                if (!node.closest('.msg')) { hideQuoteButton(); return; }
+            }
+            if (!sel.rangeCount) return;
+            var range = sel.getRangeAt(0);
+            var rect = range.getBoundingClientRect();
+            if (!rect || (rect.width === 0 && rect.height === 0)) { hideQuoteButton(); return; }
+            showQuoteButton(text, rect);
+        }, 10);
+    });
+
+    // 引用按钮点击时不要关闭自己；点击其它区域则隐藏
+    document.addEventListener('mousedown', function(e) {
+        if (e.target && e.target.closest && e.target.closest('.quote-btn')) return;
+        hideQuoteButton();
+    });
+
+    // 滚动时隐藏引用按钮
+    document.getElementById('chat-messages').addEventListener('scroll', function() {
+        hideQuoteButton();
+    });
+
+    // Escape 隐藏
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') hideQuoteButton();
+    });
+
+    function saveMessage(role, content) {
+        fetch('/api/chat/' + encodeURIComponent(AI_CHAT_KEY) + '/save', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({role: role, content: content})
+        }).then(function() {
+            chatTotal++;
+        }).catch(function(e) {
+            console.warn('保存聊天记录失败:', e);
+        });
+    }
+
+    document.getElementById('chat-msg').addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
+    });
+    var aiInputHistory = initChatHistory('chat-msg');
+
+    // ── 图片粘贴支持 ──
+    var pastedImages = [];
+    var uploadingImage = false;  // 标记是否有图片正在上传
+
+    document.getElementById('chat-msg').addEventListener('paste', function(e) {
+        var items = (e.clipboardData || window.clipboardData).items;
+        for (let i = 0; i < items.length; i++) {
+            if (items[i].type.indexOf('image') === 0) {
+                e.preventDefault();
+                var file = items[i].getAsFile();
+                if (!file) continue;
+                uploadingImage = true;  // 标记开始上传
+                var reader = new FileReader();
+                reader.onload = function(ev) {
+                    pastedImages.push(ev.target.result);
+                    uploadingImage = false;  // 标记上传完成
+                    showImagePreview();
+                };
+                reader.onerror = function() {
+                    uploadingImage = false;  // 标记上传失败
+                    console.warn('[ai] 图片读取失败');
+                };
+                reader.readAsDataURL(file);
+                break;
+            }
+        }
+    });
+
+    function showImagePreview() {
+        var area = document.getElementById('image-preview-area');
+        area.innerHTML = '';
+        if (pastedImages.length === 0) {
+            area.style.display = 'none';
+            return;
+        }
+        area.style.display = 'flex';
+        for (let i = 0; i < pastedImages.length; i++) {
+            var thumb = document.createElement('div');
+            thumb.className = 'image-preview-thumb';
+            thumb.innerHTML = '<img src="' + pastedImages[i] + '">'
+                + '<span class="image-preview-remove" onclick="removeImage(' + i + ')">&times;</span>';
+            area.appendChild(thumb);
+        }
+    }
+
+    function removeImage(idx) {
+        pastedImages.splice(idx, 1);
+        showImagePreview();
+    }
+
+    async function sendChat() {
+        var input = document.getElementById('chat-msg');
+        var msg = input.value.trim();
+        // 等待图片上传完成（如果有图片正在上传）
+        while (uploadingImage) {
+            await new Promise(function(r) { setTimeout(r, 100); });
+        }
+        var images = pastedImages.slice();
+        if ((!msg || !msg.trim()) && images.length === 0) return;
+        input.value = '';
+        aiInputHistory.push(msg);
+        pastedImages = [];
+        showImagePreview();
+        if (chatSending) {
+            // 排队插入：不打断当前回复，等完成后自动发送
+            chatQueue.enqueue({ msg: msg, images: images });
+            return;
+        }
+        await sendChatCore(msg, images);
+    }
+
+    async function sendChatCore(msg, images) {
+        var box = document.getElementById('chat-messages');
+        var userDiv = document.createElement('div');
+        renderUserMessage(userDiv, msg, images);
+        box.appendChild(userDiv);
+        chatSending = true;
+        showStopButton();
+        try {
+            await doSend(msg, images);
+        } finally {
+            chatSending = false;
+            hideStopButton();
+            document.getElementById('chat-msg').focus();
+            box.scrollTop = box.scrollHeight;
+            // 发送完成后处理队列
+            var next = chatQueue.dequeue();
+            if (next) await sendChatCore(next.msg, next.images);
+        }
+    }
+
+    async function doSend(msg, images) {
+        images = images || [];
+        retryMsg = msg;
+        retryImages = images;
+        var box = document.getElementById('chat-messages');
+        var loadingId = 'ai-' + Date.now();
+        var aiDiv = document.createElement('div');
+        aiDiv.className = 'msg ai';
+        aiDiv.id = loadingId;
+        aiDiv.textContent = document.getElementById('web-search-cb').checked ? t('ai.searching') : t('ai.thinking');
+        box.appendChild(aiDiv);
+        box.scrollTop = box.scrollHeight;
+        var controller = new AbortController();
+        currentAbortController = controller;
+        try {
+            var bodyObj = { message: msg, history: chatHistory, web_search: document.getElementById('web-search-cb').checked };
+            if (images.length > 0) bodyObj.images = images;
+            // 角色预设
+            var roleSelect = document.getElementById('role-select');
+            if (roleSelect && roleSelect.value !== 'general') {
+                bodyObj.system_prompt = roleSelect.value;
+                bodyObj.preset_mode = true;
+            }
+            var resp = await fetch('/api/ai/chat', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(bodyObj),
+                signal: controller.signal
+            });
+            if (!resp.ok) throw new Error('服务器错误 (' + resp.status + ')');
+            var data = await resp.json();
+            document.getElementById(loadingId).innerHTML = DOMPurify.sanitize(escapeHtml(data.content).replace(/\n/g, '<br>'));
+            chatHistory.push(["user", msg]);
+            chatHistory.push(["assistant", data.content]);
+            saveMessage('user', msg);
+            saveMessage('assistant', data.content);
+            retryMsg = '';
+        } catch(e) {
+            if (e.name === 'AbortError') return;
+            var el = document.getElementById(loadingId);
+            if (!el) return;
+            el.innerHTML = DOMPurify.sanitize(
+                '<div style="color:#f85149;">' + escapeHtml(t('ai.fail') + ': ' + e.message) + '</div>' +
+                '<button onclick="retrySend()" class="btn-retry" style="background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:4px 12px;border-radius:4px;cursor:pointer;margin-top:8px;font-size:0.85em;">' + t('ai.retry') + '</button>'
+            );
+            el.classList.add('error');
+        } finally {
+            if (currentAbortController === controller) {
+                currentAbortController = null;
+            }
+        }
+    }
+
+    function stopGeneration() {
+        if (currentAbortController) {
+            currentAbortController.abort();
+            currentAbortController = null;
+        }
+    }
+
+    function showStopButton() {
+        var btn = document.getElementById('btn-stop');
+        if (btn) btn.style.display = '';
+    }
+
+    function hideStopButton() {
+        var btn = document.getElementById('btn-stop');
+        if (btn) btn.style.display = 'none';
+    }
+
+    function showExportButton() {
+        var btn = document.getElementById('btn-export');
+        if (btn && chatHistory.length > 0) btn.style.display = '';
+    }
+
+    function hideExportButton() {
+        var btn = document.getElementById('btn-export');
+        if (btn) btn.style.display = 'none';
+    }
+
+    async function exportConclusions() {
+        if (chatHistory.length === 0) return;
+        var btn = document.getElementById('btn-export');
+        btn.textContent = t('ai.exporting');
+        btn.disabled = true;
+        try {
+            var resp = await fetch('/api/ai/chat/conclusions', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({session_key: AI_CHAT_KEY})
+            });
+            var data = await resp.json();
+            if (data.status === 'ok' && data.conclusions) {
+                var box = document.getElementById('chat-messages');
+                var div = document.createElement('div');
+                div.className = 'msg ai';
+                div.innerHTML = DOMPurify.sanitize(
+                    '<div style="font-size:0.8em;color:#58a6ff;margin-bottom:4px;font-weight:bold;">📝 ' + t('ai.exportConclusions') + '</div>' +
+                    '<div style="color:#c9d1d9;font-size:0.9em;line-height:1.6;">' + escapeHtml(data.conclusions).replace(/\n/g, '<br>') + '</div>'
+                );
+                box.appendChild(div);
+                box.scrollTop = box.scrollHeight;
+            } else {
+                alert(data.error || '导出失败');
+            }
+        } catch(e) {
+            alert('请求失败: ' + e.message);
+        }
+        btn.textContent = t('ai.exportConclusions');
+        btn.disabled = false;
+    }
+
+    function retrySend() {
+        var msg = retryMsg;
+        var images = retryImages;
+        if (!msg && (!images || images.length === 0)) return;
+        retryMsg = '';
+        retryImages = [];
+        // 移除上一条错误消息
+        var box = document.getElementById('chat-messages');
+        var last = box.lastChild;
+        if (last && last.classList.contains('msg')) {
+            box.removeChild(last);
+        }
+        doSend(msg, images);
+    }
+
+    applyI18nCommon();
+    </script>
+</body>
+</html>

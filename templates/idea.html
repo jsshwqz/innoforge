@@ -1,0 +1,1995 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>创新推演 - 创研台</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#0d1117">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+    <script src="/static/purify.min.js"></script>
+</head>
+<body>
+    <div class="page-with-sidebar">
+    <aside id="page-sidebar" class="page-sidebar"></aside>
+    <div class="idea-layout page-main">
+        <div class="idea-sidebar">
+            <h3 data-i18n="idea.history"></h3>
+            <div id="history-list"><p class="hint" data-i18n="idea.historyEmpty"></p></div>
+        </div>
+
+        <div class="idea-main">
+            <div class="page-header-row">
+                <h2 data-i18n="idea.title"></h2>
+                <div style="display:flex;gap:8px;">
+                    <a href="/" class="link-pill">首页</a>
+                    <button class="btn-success-sm" onclick="showNewIdeaForm()">+ 新建</button>
+                </div>
+            </div>
+            <p class="hint" data-i18n="idea.hint"></p>
+
+            <div class="idea-form" id="idea-form">
+                <div class="form-group">
+                    <label data-i18n="idea.titleLabel"></label>
+                    <input type="text" id="idea-title" data-i18n-placeholder="idea.titlePlaceholder" autofocus>
+                </div>
+                <div class="form-group">
+                    <label data-i18n="idea.descLabel"></label>
+                    <textarea id="idea-desc" data-i18n-placeholder="idea.descPlaceholder"></textarea>
+                </div>
+                <div class="form-group" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                    <label style="margin:0;white-space:nowrap;">推演模式:</label>
+                    <div class="mode-pills">
+                        <button type="button" id="mode-quick" class="mode-pill" onclick="setAnalysisMode('quick')"
+                            style="background:#21262d;color:#8b949e;">
+                            快速推演
+                        </button>
+                        <button type="button" id="mode-deep" class="mode-pill" onclick="setAnalysisMode('deep')"
+                            style="background:#1f6feb;color:#fff;">
+                            深度推演
+                        </button>
+                    </div>
+                    <span class="muted" id="mode-hint">13 步流水线 + 多角度 AI 分析</span>
+                </div>
+                <div class="btn-row">
+                    <button class="btn-primary" id="submit-btn" onclick="submitIdea()" data-i18n="idea.submit"></button>
+                    <button class="btn-secondary" onclick="clearForm()" data-i18n="idea.clear"></button>
+                </div>
+            </div>
+
+            <div id="status-area"></div>
+            <div id="score-area"></div>
+
+            <!-- Tab 导航 -->
+            <div id="result-tabs" class="result-tabs" style="display:none;">
+                <button class="tab-btn active" data-tab="overview" onclick="switchTab('overview')">📊 概览</button>
+                <button class="tab-btn" data-tab="evidence" onclick="switchTab('evidence')">🔍 证据链</button>
+                <button class="tab-btn" data-tab="features" onclick="switchTab('features')">🧩 特征卡片</button>
+                <button class="tab-btn" data-tab="claims" onclick="switchTab('claims')">🌳 权利要求树</button>
+                <button class="tab-btn" data-tab="findings" onclick="switchTab('findings')">🔑 关键发现</button>
+                <button class="tab-btn" data-tab="memory" onclick="switchTab('memory'); loadMemory()">🧠 记忆</button>
+                <button class="tab-btn" data-tab="chat" onclick="switchTab('chat')">💬 讨论</button>
+                <button class="tab-btn" data-tab="report" onclick="switchTab('report')">📄 报告</button>
+                <button class="tab-btn" data-tab="versions" onclick="switchTab('versions')">📜 版本历史</button>
+            </div>
+
+            <!-- Tab: 概览 -->
+            <div id="tab-overview" class="tab-panel active">
+                <div id="analysis-area"></div>
+                <div id="findings-area"></div>
+            </div>
+
+            <!-- Tab: 证据链 -->
+            <div id="tab-evidence" class="tab-panel">
+                <div id="evidence-panel" class="panel-box">
+                    <h3>🔗 证据链 / Evidence Chain (<span id="evidence-count">0</span> 条)</h3>
+                    <div id="evidence-list"></div>
+                </div>
+            </div>
+
+            <!-- Tab: 特征卡片 -->
+            <div id="tab-features" class="tab-panel">
+                <div id="feature-cards-area" class="panel-box">
+                    <h3>🧩 特征卡片 / Feature Cards</h3>
+                    <div id="feature-cards-list"><p class="muted">暂无特征卡片</p></div>
+                </div>
+            </div>
+
+            <!-- Tab: 权利要求树 -->
+            <div id="tab-claims" class="tab-panel">
+                <div id="claim-tree-area" class="panel-box">
+                    <h3 class="violet-title">🌳 权利要求树 / Claim Tree</h3>
+                    <div id="claim-tree-content"><p class="muted">暂无权利要求树数据</p></div>
+                </div>
+            </div>
+
+            <!-- Tab: 关键发现 -->
+            <div id="tab-findings" class="tab-panel">
+                <div id="key-findings-panel" class="panel-box">
+                    <h3>🔑 关键发现 / Key Findings (<span id="key-findings-count">0</span>)</h3>
+                    <div id="key-findings-list"><p class="muted">暂无发现记录</p></div>
+                </div>
+            </div>
+
+            <!-- Tab: 记忆 -->
+            <div id="tab-memory" class="tab-panel">
+                <div id="memory-panel" class="panel-box">
+                    <div class="page-header-row">
+                        <h3 style="margin:0;">🧠 记忆 / Memory (<span id="memory-count">0</span>)</h3>
+                        <div style="display:flex;gap:8px;align-items:center;">
+                            <select id="memory-filter" style="padding:4px 8px;background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;font-size:13px;">
+                                <option value="all">全部类型</option>
+                                <option value="domain_concept">领域概念</option>
+                                <option value="decision">决策</option>
+                                <option value="pattern">创新模式</option>
+                                <option value="question">开放问题</option>
+                            </select>
+                            <button class="btn-success-sm" onclick="showMemoryForm()">+ 新增</button>
+                        </div>
+                    </div>
+                    <div id="memory-add-form" style="display:none; padding:12px; background:#161b22; border:1px solid #30363d; border-radius:6px; margin-bottom:12px;">
+                        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-bottom:8px;">
+                            <input type="text" id="mem-concept-name" placeholder="概念名称" style="padding:6px 8px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;">
+                            <select id="mem-concept-type" style="padding:6px 8px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;">
+                                <option value="domain_concept">领域概念</option>
+                                <option value="decision">决策</option>
+                                <option value="pattern">创新模式</option>
+                                <option value="question">开放问题</option>
+                            </select>
+                            <input type="number" id="mem-confidence" placeholder="置信度" value="0.5" min="0" max="1" step="0.1" style="padding:6px 8px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;">
+                            <div style="display:flex;gap:6px;">
+                                <button onclick="addMemoryEntry()" style="flex:1;padding:6px;background:#238636;color:#fff;border:none;border-radius:4px;cursor:pointer;">保存</button>
+                                <button onclick="hideMemoryForm()" style="flex:1;padding:6px;background:#30363d;color:#c9d1d9;border:none;border-radius:4px;cursor:pointer;">取消</button>
+                            </div>
+                        </div>
+                        <div>
+                            <textarea id="mem-content" placeholder="详细描述..." rows="2" style="width:100%;padding:6px 8px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;font-size:13px;resize:vertical;"></textarea>
+                        </div>
+                    </div>
+                    <div id="memory-stats" style="display:flex;gap:16px;padding:8px 12px;background:#0d1117;border:1px solid #21262d;border-radius:6px;margin-bottom:12px;font-size:13px;">
+                        <span>📊 领域概念: <span id="mem-stat-concept">0</span></span>
+                        <span>🔖 决策: <span id="mem-stat-decision">0</span></span>
+                        <span>⚡ 创新模式: <span id="mem-stat-pattern">0</span></span>
+                        <span>❓ 开放问题: <span id="mem-stat-question">0</span></span>
+                    </div>
+                    <div id="memory-list"><p class="muted">暂无记忆条目（完成推演后自动生成）</p></div>
+                </div>
+            </div>
+
+            <!-- Tab: 讨论 -->
+            <div id="tab-chat" class="tab-panel">
+                <div id="discussion-panel" class="panel-box">
+                    <div class="discussion-toolbar">
+                        <h3 id="disc-title" data-i18n="idea.discussTitle"></h3>
+                        <div class="toolbar-right">
+                            <span class="muted" id="chat-depth-label" data-i18n="idea.chatDepth"></span>
+                            <select id="chat-depth-select" class="depth-select" onchange="chatDepth=this.value">
+                                <option value="shallow" data-i18n="idea.depthShallow">浅度（探索）</option>
+                                <option value="medium" selected data-i18n="idea.depthMedium">中度（收敛）</option>
+                                <option value="deep" data-i18n="idea.depthDeep">深度（苏格拉底）</option>
+                            </select>
+                            <button class="btn-secondary" style="padding:4px 12px;" onclick="exportConclusions()" id="export-conclusions-btn" data-i18n="idea.exportConclusions"></button>
+                            <button class="btn-success-sm" onclick="summarizeDiscussion()" id="summary-btn" data-i18n="idea.generateSummary"></button>
+                            <button class="btn-primary-sm" style="padding:4px 12px;background:#8957e5;" onclick="exportConversation()" id="export-conversation-btn" data-i18n="idea.exportConversation"></button>
+                        </div>
+                    </div>
+                    <div id="discussion-summary" class="discussion-summary">
+                    </div>
+                    <div style="position:relative;">
+                        <div id="chat-messages" class="chat-messages-idea">
+                        </div>
+                        <button class="scroll-bottom-btn" id="scroll-bottom-btn-idea" onclick="scrollIdeaChatToBottom()">↓</button>
+                    </div>
+                    <div id="chat-attachments" class="muted" style="display:none; margin-bottom:6px;"></div>
+                    <div class="chat-input-row">
+                        <div class="chat-input-box">
+                            <textarea id="chat-input" data-i18n-placeholder="idea.chatPlaceholder" rows="3" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMessage();}"></textarea>
+                            <div id="idea-image-preview-area" style="display:none; gap:6px; flex-wrap:wrap; padding:4px 0;"></div>
+                        </div>
+                        <div class="chat-actions-col">
+                            <label class="file-upload-label" title="上传图片或文件">
+                                📎
+                                <input type="file" id="chat-file-input" multiple accept=".txt,.md,.csv,.json,.log,.xml,.yaml,.yml,.pdf,.png,.jpg,.jpeg,.gif,.webp" style="display:none;" onchange="handleChatFileSelect(this)">
+                            </label>
+                            <button class="btn-success-sm" id="idea-send-btn" onclick="sendChatMessage()" data-i18n="idea.send"></button>
+                            <button class="btn-secondary" id="idea-cad-btn" type="button" onclick="drawIdeaCad()" data-i18n="cad.draw"></button>
+                            <button class="btn-stop" style="display:none" id="idea-stop-btn" onclick="stopIdeaGeneration()" data-i18n="idea.stop"></button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab: 报告 -->
+            <div id="tab-report" class="tab-panel">
+                <div id="report-panel" class="panel-box">
+                    <div class="page-header-row">
+                        <h3 style="margin:0;">📄 报告 / Report</h3>
+                        <div id="report-type-switcher" class="mode-pills">
+                            <button class="report-type-btn active" data-rtype="full" onclick="switchReportType('full')">完整版</button>
+                            <button class="report-type-btn" data-rtype="technical" onclick="switchReportType('technical')">技术版</button>
+                            <button class="report-type-btn" data-rtype="executive" onclick="switchReportType('executive')">精简版</button>
+                        </div>
+                    </div>
+                    <div id="report-content" style="line-height:1.7; color:var(--text-secondary);"><p class="muted">完成推演后可查看报告</p></div>
+                    <div style="margin-top:12px; text-align:right;">
+                        <button id="report-open-btn" class="ai-btn violet" style="display:none; width:auto; padding:6px 14px; font-size:0.85em;" onclick="openReportInNewTab()">在新窗口打开</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab: 版本历史 -->
+            <div id="tab-versions" class="tab-panel">
+                <div id="version-history-panel" class="panel-box">
+                    <div class="page-header-row">
+                        <h3 class="violet-title" style="margin:0;">📜 版本历史 / Version History (<span id="version-count">0</span>)</h3>
+                        <button id="iterate-from-versions-btn" class="btn-primary" style="display:none; padding:5px 14px; font-size:0.85em;" onclick="if(currentIdeaId) startIterate(currentIdeaId);">继续迭代</button>
+                    </div>
+                    <div id="version-list"><p class="muted">暂无版本历史</p></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    </div>
+
+    <script src="/static/i18n.js"></script>
+    <script src="/static/cad.js"></script>
+    <script>
+    // Allow inline event handlers in sanitized HTML
+    if (typeof DOMPurify !== 'undefined' && DOMPurify.setConfig) {
+        DOMPurify.setConfig({ADD_ATTR: ['onclick', 'onkeydown', 'onchange', 'oninput', 'onload', 'onfocus', 'onblur']});
+    }
+    renderNavbar('idea');
+    renderSidebar();
+    applyI18nCommon();
+    // Hook reapplyPage into navbar language switch
+    if (typeof window._onI18nLangChange === 'undefined') window._onI18nLangChange = [];
+    window._onI18nLangChange.push(function() { if (typeof reapplyPage === 'function') reapplyPage(); });
+    </script>
+    <script>
+    var currentIdeaId = null;
+    const ideaCadController = window.InnoForgeCad.createController({
+        context: function() { return { kind: 'idea', id: currentIdeaId || '' }; },
+        input: function() { return document.getElementById('chat-input'); },
+        messages: function() { return document.getElementById('chat-messages'); },
+        history: function() { return document.getElementById('chat-messages').textContent || ''; },
+        onContinue: function() {
+            var input = document.getElementById('chat-input');
+            input.value = t('cad.continuePrompt'); input.focus();
+        }
+    });
+    function drawIdeaCad() {
+        if (currentIdeaId) ideaCadController.drawFromInput();
+    }
+    let isAnalyzing = false;
+    let analysisMode = 'deep'; // 'quick' or 'deep'
+    let chatDepth = 'medium';   // 'shallow' / 'medium' / 'deep'
+    let activeEventSource = null;   // 全局 SSE 连接引用，防止竞态
+    let activeSSEConnectionId = 0;  // SSE 连接 ID，确保只处理当前连接的事件
+
+    // UTC → 中国时间（UTC+8）
+    function toCST(utcStr) {
+        if (!utcStr) return '';
+        var d = new Date(utcStr);
+        if (isNaN(d.getTime())) return utcStr;
+        var cst = new Date(d.getTime() + 8 * 3600000);
+        return cst.toISOString();
+    }
+
+    // 关闭活跃的 SSE 连接
+    function closeActiveSSE() {
+        if (activeEventSource) {
+            try { activeEventSource.close(); } catch(e) {}
+            activeEventSource = null;
+        }
+    }
+
+    // 页面卸载时关闭 SSE
+    window.addEventListener('beforeunload', function() {
+        closeActiveSSE();
+    });
+
+    function setAnalysisMode(mode) {
+        analysisMode = mode;
+        var quickBtn = document.getElementById('mode-quick');
+        var deepBtn = document.getElementById('mode-deep');
+        var hint = document.getElementById('mode-hint');
+        if (mode === 'quick') {
+            quickBtn.style.background = '#1f6feb';
+            quickBtn.style.color = '#fff';
+            deepBtn.style.background = '#21262d';
+            deepBtn.style.color = '#8b949e';
+            hint.textContent = i18nLang === 'en' ? '6-step fast reasoning' : '6 步快速推演，同步返回';
+        } else {
+            deepBtn.style.background = '#1f6feb';
+            deepBtn.style.color = '#fff';
+            quickBtn.style.background = '#21262d';
+            quickBtn.style.color = '#8b949e';
+            hint.textContent = i18nLang === 'en' ? '15-step pipeline + multi-angle AI analysis' : '15 步流水线 + 多角度 AI 分析';
+        }
+    }
+
+    function esc(s) { return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+    function toggleDimension(id) {
+        var el = document.getElementById(id);
+        var arrow = document.getElementById(id + '-arrow');
+        if (!el) return;
+        if (el.style.display === 'none') {
+            el.style.display = 'block';
+            if (arrow) arrow.style.transform = 'rotate(90deg)';
+        } else {
+            el.style.display = 'none';
+            if (arrow) arrow.style.transform = 'rotate(0deg)';
+        }
+    }
+
+    function switchTab(tabId) {
+        document.querySelectorAll('.tab-panel').forEach(function(p) { p.classList.remove('active'); });
+        document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
+        var panel = document.getElementById('tab-' + tabId);
+        if (panel) panel.classList.add('active');
+        document.querySelectorAll('.tab-btn[data-tab="' + tabId + '"]').forEach(function(b) { b.classList.add('active'); });
+    }
+
+    // 加载创意历史列表 / Load idea history sidebar
+    async function loadHistory() {
+        var list = document.getElementById('history-list');
+        if (!list) return;
+        try {
+            var resp = await fetch('/api/idea/list');
+            if (!resp.ok) return;
+            var data = await resp.json();
+            var ideas = data.ideas || data.list || [];
+            if (!Array.isArray(ideas)) { ideas = []; }
+            if (ideas.length === 0) {
+                list.innerHTML = DOMPurify.sanitize('<p class="hint">' + (i18nLang === 'en' ? 'No ideas yet' : '暂无创意记录') + '</p>');
+                return;
+            }
+            list.innerHTML = '';
+            ideas.slice(0, 50).forEach(function(item) {
+                var row = document.createElement('div');
+                row.className = 'idea-history-item';
+                row.style.cssText = 'padding:10px 14px;margin-bottom:6px;background:#161b22;border:1px solid #21262d;border-left:3px solid #58a6ff;border-radius:6px;cursor:pointer;transition:all 0.2s;font-size:0.85em;';
+                var title = item.title || (item.description || '').substring(0, 30) || (i18nLang === 'en' ? 'Untitled' : '未命名');
+                var desc = (item.description || '').replace(/\n/g, ' ').trim();
+                if (desc === title) desc = '';
+                if (desc.length > 80) desc = desc.substring(0, 80) + '…';
+                var status = item.status || 'pending';
+                var mc = item.message_count || 0;
+                var score = item.novelty_score;
+                var created = item.created_at ? item.created_at.substring(0, 10) : '';
+                // Status badge
+                var badge = '<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:0.8em;font-weight:600;margin-left:4px;';
+                if (status === 'done') badge += 'background:#0f5132;color:#3fb950;">' + (i18nLang === 'en' ? '✓ Done' : '✓ 完成');
+                else if (status === 'running') badge += 'background:#1c3a5f;color:#58a6ff;">⟳ ' + (i18nLang === 'en' ? 'Running' : '进行中');
+                else badge += 'background:#21262d;color:#8b949e;">' + (i18nLang === 'en' ? 'Pending' : '待推演');
+                badge += '</span>';
+                // Score
+                var scoreHtml = '';
+                if (score != null) {
+                    var sc = Math.round(score);
+                    var scColor = sc >= 80 ? '#3fb950' : sc >= 50 ? '#f0883e' : '#f85149';
+                    scoreHtml = '<span style="color:' + scColor + ';font-weight:700;font-size:0.95em;margin-left:6px;">★ ' + sc + '</span>';
+                }
+                // Message count
+                var msgHtml = '';
+                if (mc > 0) {
+                    msgHtml = '<span style="color:#8b949e;font-size:0.8em;margin-left:4px;">💬 ' + mc + '</span>';
+                }
+                // Render
+                var html = '';
+                html += '<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;overflow:hidden;">';
+                html += '<span style="color:#f0f6fc;font-weight:600;font-size:1.05em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;">' + esc(title) + '</span>';
+                html += '<span style="display:inline-flex;align-items:center;flex-shrink:0;gap:4px;">' + scoreHtml + msgHtml + badge + '</span>';
+                html += '</div>';
+                if (desc) {
+                    html += '<div style="color:#c9d1d9;font-size:0.9em;margin-top:4px;line-height:1.5;">' + esc(desc) + '</div>';
+                }
+                if (created) {
+                    html += '<div style="color:#484f58;font-size:0.75em;margin-top:6px;display:flex;justify-content:space-between;align-items:center;">';
+                    html += '<span>' + created + '</span>';
+                    if (score != null) {
+                        var sc = Math.round(score);
+                        html += '<div style="width:80px;height:4px;background:#21262d;border-radius:2px;overflow:hidden;"><div style="width:' + sc + '%;height:100%;background:' + (sc >= 80 ? '#3fb950' : sc >= 50 ? '#f0883e' : '#f85149') + ';"></div></div>';
+                    }
+                    html += '</div>';
+                }
+                row.innerHTML = DOMPurify.sanitize(html);
+                // 删除会话按钮（恢复自 v0.7.2）
+                row.style.position = 'relative';
+                var delBtn = document.createElement('button');
+                delBtn.style.cssText = 'position:absolute;top:4px;right:4px;background:none;border:none;color:#484f58;cursor:pointer;font-size:0.8em;padding:2px 6px;z-index:2;';
+                delBtn.title = i18nLang === 'en' ? 'Delete' : '删除';
+                delBtn.textContent = '✕';
+                delBtn.addEventListener('click', function(e) { e.stopPropagation(); deleteIdea(item.id, item.title); });
+                row.appendChild(delBtn);
+                row.onmouseover = function() { row.style.borderColor = '#58a6ff'; row.style.background = '#1c2129'; };
+                row.onmouseout = function() { row.style.borderColor = '#21262d'; row.style.background = '#161b22'; };
+                row.onclick = function() { currentIdeaId = item.id; loadIdea(item.id); };
+                list.appendChild(row);
+            });
+        } catch(e) {
+            if (list) list.innerHTML = '<p class="hint" style="color:#f85149;">' + (i18nLang === 'en' ? 'Failed to load history' : '加载历史失败') + '</p>';
+        }
+    }
+
+    async function loadIdea(ideaId) {
+        try {
+            var resp = await fetch('/api/idea/' + encodeURIComponent(ideaId));
+            if (!resp.ok) return;
+            var data = await resp.json();
+            var idea = data.idea || data;
+            if (!idea) return;
+            currentIdeaId = ideaId;
+            displayResults(idea);
+            loadVersionHistory(ideaId);
+            loadMemory();
+            loadMessages(ideaId);
+            loadEvidence(ideaId);
+            loadClaimTree(ideaId);
+            loadFindings(ideaId);
+            loadFeatureCards(ideaId);
+            showDiscussionPanel && showDiscussionPanel();
+        } catch(e) {}
+    }
+
+    // 加载证据链 / Load evidence chain
+    async function loadEvidence(ideaId) {
+        var listEl = document.getElementById('evidence-list');
+        var countEl = document.getElementById('evidence-count');
+        if (!listEl) return;
+        listEl.innerHTML = DOMPurify.sanitize('<p class="muted">Loading...</p>');
+        try {
+            var resp = await fetch('/api/idea/' + encodeURIComponent(ideaId) + '/evidence');
+            if (!resp.ok) { listEl.innerHTML = '<p class="muted">Load failed</p>'; return; }
+            var data = await resp.json();
+            var evs = data.evidence || [];
+            if (countEl) countEl.textContent = evs.length;
+            if (evs.length === 0) { listEl.innerHTML = '<p class="muted">暂无证据记录</p>'; return; }
+            listEl.innerHTML = '';
+            evs.forEach(function(ev) {
+                var row = document.createElement('div');
+                row.style.cssText = 'padding:10px 14px;margin-bottom:6px;background:#161b22;border:1px solid #30363d;border-radius:6px;';
+                var conf = (ev.confidence || 0);
+                var confColor = conf >= 0.8 ? '#3fb950' : conf >= 0.5 ? '#f0883e' : '#f85149';
+                row.innerHTML = DOMPurify.sanitize(
+                    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">' +
+                    '<span style="font-weight:600;color:#f0f6fc;">' + esc(ev.claim || ev.source_title || ev.source_type || '') + '</span>' +
+                    '<span style="color:' + confColor + ';font-weight:600;font-size:0.85em;">置信度 ' + (conf * 100).toFixed(0) + '%</span>' +
+                    '</div>' +
+                    '<div style="color:#c9d1d9;line-height:1.6;font-size:0.9em;">' + esc(ev.excerpt || ev.source_id || '') + '</div>' +
+                    '<div style="font-size:0.75em;color:#484f58;margin-top:4px;">来源: ' + esc(ev.source_type || '') +
+                    (ev.source_id ? ' · ' + esc(ev.source_id) : '') +
+                    (ev.produced_by ? ' · ' + esc(ev.produced_by) : '') +
+                    (ev.relation ? ' · ' + esc(ev.relation) : '') + '</div>'
+                );
+                listEl.appendChild(row);
+            });
+        } catch(e) {
+            listEl.innerHTML = DOMPurify.sanitize('<p class="muted">Load failed: ' + e.message + '</p>');
+        }
+    }
+
+    // 加载权利要求树 / Load claim tree
+    async function loadClaimTree(ideaId) {
+        var contentEl = document.getElementById('claim-tree-content');
+        if (!contentEl) return;
+        contentEl.innerHTML = DOMPurify.sanitize('<p class="muted">Loading...</p>');
+        try {
+            var resp = await fetch('/api/idea/' + encodeURIComponent(ideaId) + '/claim-tree');
+            if (!resp.ok) { contentEl.innerHTML = '<p class="muted">Load failed</p>'; return; }
+            var data = await resp.json();
+            var claims = data.claims || [];
+            if (claims.length === 0) { contentEl.innerHTML = '<p class="muted">暂无权利要求树数据</p>'; return; }
+            contentEl.innerHTML = '';
+            // 构建树：独立权利要求为根，从属权利要求挂到父节点
+            claims.forEach(function(c) {
+                var row = document.createElement('div');
+                var isIndependent = c.claim_type === 'independent' || c.claim_type === 'main';
+                var indent = isIndependent ? '0' : '24px';
+                var borderLeft = isIndependent ? '3px solid #8b5cf6' : '3px solid #30363d';
+                row.style.cssText = 'padding:10px 12px;margin:6px 0 6px ' + indent + ';background:#161b22;border-left:' + borderLeft + ';border-radius:4px;';
+                var typeLabel = isIndependent ? '独立权利要求' : ('从属权利要求' + (c.parent_claim_id ? '' : ''));
+                var html = '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">' +
+                    '<span style="font-weight:700;color:#d2a8ff;">权' + c.claim_number + '</span>' +
+                    '<span style="font-size:0.8em;color:#8b949e;">' + typeLabel + '</span></div>' +
+                    '<div style="color:#c9d1d9;line-height:1.6;font-size:0.9em;">' + esc(c.content || '') + '</div>';
+                if (c.features && c.features.length > 0) {
+                    html += '<div style="margin-top:8px;padding:8px;background:#0d1117;border-radius:4px;">';
+                    c.features.forEach(function(f) {
+                        var flag = f.novelty_flag ? '<span style="color:#3fb950;font-size:0.75em;">★ 新颖</span>' : '<span style="color:#8b949e;font-size:0.75em;">已有</span>';
+                        html += '<div style="display:flex;align-items:flex-start;gap:8px;padding:3px 0;font-size:0.85em;color:#c9d1d9;">' +
+                            '<span style="flex-shrink:0;">' + flag + '</span>' +
+                            '<span>' + esc(f.description || '') + '</span></div>';
+                    });
+                    html += '</div>';
+                }
+                row.innerHTML = DOMPurify.sanitize(html);
+                contentEl.appendChild(row);
+            });
+        } catch(e) {
+            contentEl.innerHTML = DOMPurify.sanitize('<p class="muted">Load failed: ' + e.message + '</p>');
+        }
+    }
+
+    // 加载关键发现 / Load key findings
+    async function loadFindings(ideaId) {
+        var listEl = document.getElementById('key-findings-list');
+        var countEl = document.getElementById('key-findings-count');
+        if (!listEl) return;
+        listEl.innerHTML = DOMPurify.sanitize('<p class="muted">Loading...</p>');
+        try {
+            var resp = await fetch('/api/idea/' + encodeURIComponent(ideaId) + '/findings');
+            if (!resp.ok) { listEl.innerHTML = '<p class="muted">Load failed</p>'; return; }
+            var data = await resp.json();
+            var findings = data.findings || [];
+            if (countEl) countEl.textContent = findings.length;
+            if (findings.length === 0) { listEl.innerHTML = '<p class="muted">暂无发现记录</p>'; return; }
+            listEl.innerHTML = '';
+            findings.forEach(function(f) {
+                var row = document.createElement('div');
+                row.style.cssText = 'padding:10px 14px;margin-bottom:6px;background:#161b22;border:1px solid #30363d;border-radius:6px;';
+                var typeLabel = { dead_end: '⚠️ 失败路径', success: '✅ 成功', hypothesis: '🔬 假设', info: '📌 信息', experimental: '🧪 实验' };
+                var label = typeLabel[f.finding_type] || (f.finding_type || '发现');
+                var titleHtml = f.title ? '<div style="font-weight:600;color:#f0f6fc;margin-bottom:4px;">' + esc(f.title) + '</div>' : '';
+                row.innerHTML = DOMPurify.sanitize(
+                    titleHtml +
+                    '<div style="color:#c9d1d9;line-height:1.6;font-size:0.9em;white-space:pre-wrap;">' + esc(f.content || '') + '</div>' +
+                    '<div style="font-size:0.75em;color:#484f58;margin-top:4px;">' + label +
+                    (f.source_step ? ' · ' + esc(f.source_step) : '') +
+                    (f.created_at ? ' · ' + f.created_at.substring(0, 16).replace('T', ' ') : '') + '</div>'
+                );
+                listEl.appendChild(row);
+            });
+        } catch(e) {
+            listEl.innerHTML = DOMPurify.sanitize('<p class="muted">Load failed: ' + e.message + '</p>');
+        }
+    }
+
+    // 加载特征卡片 / Load feature cards
+    async function loadFeatureCards(ideaId) {
+        var listEl = document.getElementById('feature-cards-list');
+        if (!listEl) return;
+        listEl.innerHTML = DOMPurify.sanitize('<p class="muted">Loading...</p>');
+        try {
+            var resp = await fetch('/api/ideas/' + encodeURIComponent(ideaId) + '/feature-cards');
+            if (!resp.ok) { listEl.innerHTML = '<p class="muted">Load failed</p>'; return; }
+            var data = await resp.json();
+            var cards = data.cards || [];
+            if (cards.length === 0) { listEl.innerHTML = '<p class="muted">暂无特征卡片</p>'; return; }
+            listEl.innerHTML = '';
+            cards.forEach(function(card) {
+                var row = document.createElement('div');
+                row.style.cssText = 'padding:12px 14px;margin-bottom:8px;background:#161b22;border:1px solid #30363d;border-radius:6px;';
+                var score = card.novelty_score;
+                var scoreHtml = '';
+                if (score != null) {
+                    var sc = Math.round(score);
+                    var scColor = sc >= 80 ? '#3fb950' : sc >= 50 ? '#f0883e' : '#f85149';
+                    scoreHtml = '<span style="color:' + scColor + ';font-weight:700;font-size:0.9em;">★ ' + sc + '</span>';
+                }
+                var sections = [
+                    { label: '技术问题', val: card.technical_problem },
+                    { label: '核心结构', val: card.core_structure },
+                    { label: '关键关系', val: card.key_relations },
+                    { label: '工艺步骤', val: card.process_steps },
+                    { label: '应用场景', val: card.application_scenarios }
+                ];
+                var body = sections.filter(function(s) { return s.val; }).map(function(s) {
+                    return '<div style="margin-top:6px;"><span style="color:#58a6ff;font-weight:600;font-size:0.8em;">' + s.label + ':</span> <span style="color:#c9d1d9;font-size:0.9em;line-height:1.6;">' + esc(s.val) + '</span></div>';
+                }).join('');
+                row.innerHTML = DOMPurify.sanitize(
+                    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">' +
+                    '<span style="font-weight:600;color:#f0f6fc;">' + esc(card.title || card.description || '') + '</span>' +
+                    scoreHtml + '</div>' +
+                    (card.description ? '<div style="color:#8b949e;font-size:0.85em;line-height:1.5;">' + esc(card.description) + '</div>' : '') +
+                    body
+                );
+                listEl.appendChild(row);
+            });
+        } catch(e) {
+            listEl.innerHTML = DOMPurify.sanitize('<p class="muted">Load failed: ' + e.message + '</p>');
+        }
+    }
+
+    // 加载聊天记录 / Load chat messages
+    async function loadMessages(ideaId) {
+        if (!ideaId) return;
+        var chatEl = document.getElementById('chat-messages');
+        if (!chatEl) return;
+        try {
+            var resp = await fetch('/api/idea/' + encodeURIComponent(ideaId) + '/messages');
+            if (!resp.ok) return;
+            var data = await resp.json();
+            var msgs = data.messages || [];
+            if (msgs.length === 0) {
+                                chatEl.innerHTML = '<div style="text-align:center;padding:40px;color:#484f58;font-size:13px;">' +
+                    '<div style="font-size:2em;margin-bottom:8px;">💬</div>' +
+                    (i18nLang === 'en' ? 'No discussion yet' : '暂无讨论记录') +
+                    '</div>';
+                return;
+            }
+            chatEl.innerHTML = '';
+            msgs.forEach(function(m) {
+                var row = document.createElement('div');
+                var isUser = (m.role === 'user');
+                var isSystem = (m.role === 'system' || m.role === 'error');
+                var align = isUser ? 'flex-end' : 'flex-start';
+                var bgColor = isUser ? '#1f6feb' : '#161b22';
+                var textColor = isUser ? '#fff' : '#c9d1d9';
+                var borderColor = isUser ? '#388bfd' : '#21262d';
+                var avatar = isUser ? '👤' : (isSystem ? '⚠️' : '🤖');
+                row.style.cssText = 'display:flex;flex-direction:' + (isUser ? 'row-reverse' : 'row') + ';align-items:flex-start;margin-bottom:12px;gap:8px;';
+
+                var avatarDiv = document.createElement('div');
+                avatarDiv.style.cssText = 'flex-shrink:0;width:32px;height:32px;display:flex;align-items:center;justify-content:center;background:#21262d;border-radius:50%;font-size:16px;';
+                avatarDiv.textContent = avatar;
+
+                var bubble = document.createElement('div');
+                bubble.style.cssText = 'max-width:80%;padding:10px 14px;background:' + bgColor + ';color:' + textColor + ';border:1px solid ' + borderColor + ';border-radius:' + (isUser ? '12px 12px 4px 12px' : '12px 12px 12px 4px') + ';font-size:13px;line-height:1.6;word-break:break-word;';
+                var content = m.content || '';
+                // Render markdown-like content
+                content = content.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+                content = content.replace(/`([^`]+)`/g, '<code style="background:#0d1117;padding:1px 5px;border-radius:3px;font-size:0.9em;">$1</code>');
+                content = content.replace(/\n/g, '<br>');
+                bubble.innerHTML = DOMPurify.sanitize(content);
+
+                var metaDiv = document.createElement('div');
+                metaDiv.style.cssText = 'display:flex;align-items:center;gap:6px;margin-top:4px;opacity:0.7;font-size:11px;';
+                var timeSpan = document.createElement('span');
+                timeSpan.textContent = m.created_at ? m.created_at.substring(0, 19).replace('T', ' ') : '';
+                metaDiv.appendChild(timeSpan);
+                bubble.appendChild(metaDiv);
+
+                row.appendChild(avatarDiv);
+                row.appendChild(bubble);
+                chatEl.appendChild(row);
+            });
+            if (typeof ideaCadController !== 'undefined' && ideaCadController.renderHistory) ideaCadController.renderHistory();
+            // Scroll to bottom
+            chatEl.scrollTop = chatEl.scrollHeight;
+        } catch(e) {}
+    }
+
+    // 发送聊天消息 / Send chat message to idea discussion
+    var ideaSendBusy = false;
+    var ideaPendingNext = null;
+    var ideaImages = [];
+
+    async function sendChatMessage() {
+        if (ideaSendBusy) { ideaPendingNext = true; return; }
+        var input = document.getElementById('chat-input');
+        if (!input) return;
+        var msg = input.value.trim();
+        if (!msg && ideaImages.length === 0) return;
+        if (msg && typeof ideaCadController !== 'undefined' && ideaCadController.shouldHandle(msg)) {
+            input.value = '';
+            await ideaCadController.draw(msg);
+            return;
+        }
+        ideaSendBusy = true;
+        input.value = '';
+        var images = ideaImages.slice();
+        ideaImages = [];
+        var preview = document.getElementById('idea-image-preview-area');
+        if (preview) preview.innerHTML = '';
+
+        if (!currentIdeaId) { alert(i18nLang === 'en' ? 'No idea selected' : '请先选择一个创意'); ideaSendBusy = false; return; }
+        var chatEl = document.getElementById('chat-messages');
+        if (!chatEl) { alert('chat area not found'); ideaSendBusy = false; return; }
+
+        // Append user bubble
+        var row = document.createElement('div');
+        row.style.cssText = 'display:flex;flex-direction:row-reverse;align-items:flex-start;margin-bottom:12px;gap:8px;';
+        var av = document.createElement('div');
+        av.style.cssText = 'flex-shrink:0;width:32px;height:32px;display:flex;align-items:center;justify-content:center;background:#21262d;border-radius:50%;font-size:16px;';
+        av.textContent = '👤';
+        var bubble = document.createElement('div');
+        bubble.style.cssText = 'max-width:80%;padding:10px 14px;background:#1f6feb;color:#fff;border:1px solid #388bfd;border-radius:12px 12px 4px 12px;font-size:13px;line-height:1.6;word-break:break-word;';
+        var content = msg;
+        content = content.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+        content = content.replace(/`([^`]+)`/g, '<code style="background:#0d1117;padding:1px 5px;border-radius:3px;font-size:0.9em;">$1</code>');
+        content = content.replace(/\n/g, '<br>');
+        if (images.length > 0) {
+            images.forEach(function(img) { content += '<br><img src="' + img + '" style="max-width:200px;border-radius:6px;margin-top:4px;">'; });
+        }
+        bubble.innerHTML = DOMPurify.sanitize(content);
+        row.appendChild(av);
+        row.appendChild(bubble);
+        chatEl.appendChild(row);
+        chatEl.scrollTop = chatEl.scrollHeight;
+
+        // Show stop button
+        var sendBtn = document.getElementById('idea-send-btn');
+        var stopBtn = document.getElementById('idea-stop-btn');
+        if (sendBtn) sendBtn.disabled = true;
+        if (stopBtn) stopBtn.style.display = 'inline-flex';
+
+        try {
+            var body = { message: msg, depth: chatDepth };
+            if (images.length > 0) body.images = images;
+            if (ideaAttachedText.length > 0) body.attachments = ideaAttachedText.slice();
+            var resp = await fetch('/api/idea/' + encodeURIComponent(currentIdeaId) + '/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            if (!resp.ok) {
+                var errData = await resp.json().catch(function() { return {}; });
+                throw new Error(errData.error || 'API error ' + resp.status);
+            }
+            var data = await resp.json();
+            var aiText = data.message ? data.message.content : (data.content || data.result || '');
+
+            // Append AI bubble
+            var aiRow = document.createElement('div');
+            aiRow.style.cssText = 'display:flex;align-items:flex-start;margin-bottom:12px;gap:8px;';
+            var aiAv = document.createElement('div');
+            aiAv.style.cssText = 'flex-shrink:0;width:32px;height:32px;display:flex;align-items:center;justify-content:center;background:#21262d;border-radius:50%;font-size:16px;';
+            aiAv.textContent = '🤖';
+            var aiBubble = document.createElement('div');
+            aiBubble.style.cssText = 'max-width:80%;padding:10px 14px;background:#161b22;color:#c9d1d9;border:1px solid #21262d;border-radius:12px 12px 12px 4px;font-size:13px;line-height:1.6;word-break:break-word;';
+            var aiContent = aiText;
+            aiContent = aiContent.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+            aiContent = aiContent.replace(/`([^`]+)`/g, '<code style="background:#0d1117;padding:1px 5px;border-radius:3px;font-size:0.9em;">$1</code>');
+            aiContent = aiContent.replace(/\n/g, '<br>');
+            aiBubble.innerHTML = DOMPurify.sanitize(aiContent);
+            aiRow.appendChild(aiAv);
+            aiRow.appendChild(aiBubble);
+            chatEl.appendChild(aiRow);
+        } catch(e) {
+            var errRow = document.createElement('div');
+            errRow.style.cssText = 'display:flex;align-items:flex-start;margin-bottom:12px;gap:8px;';
+            var errAv = document.createElement('div');
+            errAv.style.cssText = 'flex-shrink:0;width:32px;height:32px;display:flex;align-items:center;justify-content:center;background:#21262d;border-radius:50%;font-size:16px;';
+            errAv.textContent = '⚠️';
+            var errBubble = document.createElement('div');
+            errBubble.style.cssText = 'max-width:80%;padding:10px 14px;background:#3d1f1f;color:#f85149;border:1px solid #f85149;border-radius:12px;font-size:13px;line-height:1.6;';
+            errBubble.textContent = (i18nLang === 'en' ? 'Send failed: ' : '发送失败：') + e.message;
+            errRow.appendChild(errAv);
+            errRow.appendChild(errBubble);
+            chatEl.appendChild(errRow);
+        }
+        finally {
+            ideaSendBusy = false;
+            if (sendBtn) sendBtn.disabled = false;
+            if (stopBtn) stopBtn.style.display = 'none';
+            chatEl.scrollTop = chatEl.scrollHeight;
+            loadMessages(currentIdeaId);
+            if (ideaPendingNext) { ideaPendingNext = false; sendChatMessage(); }
+        }
+    }
+
+    function stopIdeaGeneration() { ideaSendBusy = false; }
+    async function handleChatFileSelect(input) {
+        var files = input.files;
+        if (!files) return;
+        var preview = document.getElementById('idea-image-preview-area');
+        Array.from(files).forEach(async function(f) {
+            var isImage = f.type.indexOf('image/') === 0;
+            if (isImage) {
+                var reader = new FileReader();
+                reader.onload = function(e) { ideaImages.push(e.target.result); if (preview) { preview.style.display = 'flex'; preview.innerHTML += '<img src="' + e.target.result + '" style="max-width:80px;max-height:60px;border-radius:4px;">'; } };
+                reader.readAsDataURL(f);
+            } else if (f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf')) {
+                var form = new FormData();
+                form.append('file', f);
+                try {
+                    var resp = await fetch('/api/upload/extract', { method: 'POST', body: form });
+                    var data = await resp.json();
+                    if (data.text) {
+                        ideaAttachedText.push({ name: f.name, content: data.text });
+                        renderChatAttachments();
+                    } else {
+                        alert('PDF extract failed: ' + (data.error || 'unknown'));
+                    }
+                } catch(e) {
+                    alert('PDF upload failed: ' + e.message);
+                }
+            } else {
+                var reader = new FileReader();
+                reader.onload = function(e) {
+                    ideaAttachedText.push({ name: f.name, content: e.target.result });
+                    renderChatAttachments();
+                };
+                reader.readAsText(f);
+            }
+        });
+        input.value = '';
+    }
+
+    // 文本附件（恢复自 v0.7.2）
+    var ideaAttachedText = [];
+
+    function renderChatAttachments() {
+        var container = document.getElementById('chat-attachments');
+        if (!container) return;
+        if (ideaAttachedText.length === 0) {
+            container.style.display = 'none';
+            return;
+        }
+        container.style.display = 'block';
+        container.innerHTML = '';
+        ideaAttachedText.forEach(function(att, idx) {
+            var chip = document.createElement('span');
+            chip.style.cssText = 'display:inline-flex;align-items:center;gap:6px;background:#161b22;border:1px solid #30363d;border-radius:4px;padding:3px 10px;margin:2px 4px 2px 0;font-size:0.85em;';
+            var name = document.createElement('span');
+            name.textContent = '📄 ' + att.name;
+            var x = document.createElement('button');
+            x.style.cssText = 'background:none;border:none;color:#8b949e;cursor:pointer;font-size:1em;padding:0 2px;';
+            x.textContent = '×';
+            x.onclick = function() { ideaAttachedText.splice(idx, 1); renderChatAttachments(); };
+            chip.appendChild(name);
+            chip.appendChild(x);
+            container.appendChild(chip);
+        });
+    }
+
+    // 粘贴图片支持（恢复自 v0.7.2）
+    document.addEventListener('DOMContentLoaded', function() {
+        var chatInput = document.getElementById('chat-input');
+        if (chatInput) {
+            chatInput.addEventListener('paste', function(e) {
+                var items = (e.clipboardData || window.clipboardData).items;
+                for (let i = 0; i < items.length; i++) {
+                    if (items[i].type.indexOf('image') === 0) {
+                        e.preventDefault();
+                        var file = items[i].getAsFile();
+                        if (!file) continue;
+                        var reader = new FileReader();
+                        reader.onload = function(ev) {
+                            ideaImages.push(ev.target.result);
+                            var preview = document.getElementById('idea-image-preview-area');
+                            if (preview) { preview.style.display = 'flex'; preview.innerHTML += '<img src="' + ev.target.result + '" style="max-width:80px;max-height:60px;border-radius:4px;">'; }
+                        };
+                        reader.readAsDataURL(file);
+                        break;
+                    }
+                }
+            });
+        }
+    });
+
+    // 删除会话（恢复自 v0.7.2）
+    async function deleteIdea(id, title) {
+        if (!confirm(i18nLang === 'en' ? 'Delete "' + title + '" and all its discussions?' : '确定删除「' + title + '」及其所有讨论记录？')) return;
+        try {
+            const resp = await fetch('/api/idea/' + encodeURIComponent(id) + '/delete', { method: 'POST' });
+            let data = null;
+            try {
+                data = await resp.json();
+            } catch (_) {
+                data = { status: 'error', message: await resp.text() };
+            }
+            if (data.status === 'ok') {
+                if (currentIdeaId === id) {
+                    currentIdeaId = null;
+                    document.getElementById('idea-title').value = '';
+                    document.getElementById('idea-desc').value = '';
+                    document.getElementById('score-area').innerHTML = '';
+                    document.getElementById('analysis-area').innerHTML = '';
+                    document.getElementById('chat-messages').innerHTML = '';
+                }
+                loadHistory();
+            } else {
+                alert((data && data.message) ? data.message : ('删除失败（HTTP ' + resp.status + '）'));
+            }
+        } catch(e) {
+            alert('请求失败: ' + e.message);
+        }
+    }
+
+    // 滚到底部按钮（恢复自 v0.7.2）
+    function scrollIdeaChatToBottom() {
+        var chatBox = document.getElementById('chat-messages');
+        var scrollBtn = document.getElementById('scroll-bottom-btn-idea');
+        if (chatBox) chatBox.scrollTo({ top: chatBox.scrollHeight, behavior: 'smooth' });
+        if (scrollBtn) scrollBtn.classList.remove('visible');
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        var chatBox = document.getElementById('chat-messages');
+        var scrollBtn = document.getElementById('scroll-bottom-btn-idea');
+        if (chatBox && scrollBtn) {
+            chatBox.addEventListener('scroll', function() {
+                var threshold = 200;
+                var atBottom = chatBox.scrollHeight - chatBox.scrollTop - chatBox.clientHeight < threshold;
+                scrollBtn.classList.toggle('visible', !atBottom);
+            });
+        }
+    });
+
+    function reapplyPage() {
+        applyI18nCommon();
+        loadHistory();
+    }
+
+    // 15-step pipeline definitions (v0.6.0: +PriorArtCluster)
+    const PIPELINE_STEPS = [
+        { key: 'parse_input', zh: '解析输入，提取关键词', en: 'Parse input & extract keywords', type: 'code' },
+        { key: 'expand_query', zh: 'AI 扩展搜索词', en: 'AI query expansion', type: 'llm' },
+        { key: 'search_web', zh: '网络搜索', en: 'Web search', type: 'code' },
+        { key: 'search_patents', zh: '专利搜索', en: 'Patent search', type: 'code' },
+        { key: 'diversity_gate', zh: '多样性检查', en: 'Diversity gate', type: 'code' },
+        { key: 'compute_similarity', zh: '相似度计算', en: 'Compute similarity', type: 'code' },
+        { key: 'rank_and_filter', zh: '排序过滤', en: 'Rank & filter', type: 'code' },
+        { key: 'prior_art_cluster', zh: '现有技术聚类', en: 'Prior art clustering', type: 'code' },
+        { key: 'detect_contradictions', zh: '矛盾信号检测', en: 'Detect contradictions', type: 'code' },
+        { key: 'score_novelty', zh: '新颖性评分', en: 'Score novelty', type: 'code' },
+        { key: 'ai_deep_analysis', zh: 'AI 深度分析', en: 'AI deep analysis', type: 'llm' },
+        { key: 'ai_action_plan', zh: 'AI 行动方案', en: 'AI action plan', type: 'llm' },
+        { key: 'experiment_validation', zh: '实验验证', en: 'Experiment validation', type: 'llm' },
+        { key: 'build_claim_tree', zh: '权利要求树构建', en: 'Build claim tree', type: 'llm' },
+        { key: 'finalize', zh: '生成报告', en: 'Generate report', type: 'code' },
+    ];
+
+    function buildPipelineUI() {
+        let stepsHtml = PIPELINE_STEPS.map(function(s, i) {
+            var label = i18nLang === 'en' ? s.en : s.zh;
+            var typeTag = s.type === 'llm' ? ' <span style="font-size:0.75em;color:#d2a8ff;">[LLM]</span>' : '';
+            return '<div class="step" id="pipeline-step-' + i + '" data-key="' + s.key + '">' +
+                '<span class="step-icon">⏳</span>' +
+                '<span>' + (i+1) + '. ' + label + typeTag + '</span></div>';
+        }).join('');
+
+        return '<div class="pipeline-progress">' +
+            '<div class="pipeline-header">' +
+            '<span style="font-weight:600;color:#f0f6fc;">' + (i18nLang === 'en' ? 'Innovation Validation Pipeline' : '创新验证流水线') + '</span>' +
+            '<span id="pipeline-percent" style="color:#58a6ff;font-size:0.9em;">0%</span></div>' +
+            '<div class="pipeline-bar"><div class="pipeline-bar-fill" id="pipeline-bar-fill" style="width:0%"></div></div>' +
+            '<div class="progress-steps" id="pipeline-steps">' + stepsHtml + '</div></div>';
+    }
+
+    function updatePipelineStep(stepIndex, status, subStep, subProgress, message) {
+        var el = document.getElementById('pipeline-step-' + stepIndex);
+        if (!el) return;
+        el.className = 'step ' + status;
+        var icon = '⏳';
+        if (status === 'running') icon = '<span class="spinner" style="width:14px;height:14px;border-width:2px;"></span>';
+        else if (status === 'done') icon = '✅';
+        else if (status === 'skipped') icon = '⏭️';
+        else if (status === 'error') icon = '❌';
+        el.querySelector('.step-icon').innerHTML = DOMPurify.sanitize(icon);
+
+        // 通用子步骤显示（所有步骤通用，不限于 AiDeepAnalysis）
+        var subContainerId = 'sub-' + stepIndex;
+        var subEl = document.getElementById(subContainerId);
+        if (subStep) {
+            // 深度学习维度标签（step 10 特有）
+            var dimLabels = {
+                'scientific': '🔬 科学推导', 'dialectical': '⚡ 辩证批判',
+                'epistemological': '🔍 知识审计', 'phenomenological': '🌊 本质还原',
+                'eastern': '☯️ 减法思维', 'topological': '🔗 跨域映射',
+                'synthesis': '🔮 跨维度合成'
+            };
+            var label = dimLabels[subStep] || subStep;
+            if (!subEl) {
+                subEl = document.createElement('div');
+                subEl.id = subContainerId;
+                subEl.style.cssText = 'margin-top:8px;padding:8px 12px;background:#0d1117;border:1px solid #30363d;border-radius:6px;font-size:0.85em;';
+                el.appendChild(subEl);
+            }
+            var pctVal = subProgress ? Math.round(subProgress * 100) : 0;
+            subEl.innerHTML = DOMPurify.sanitize(
+                '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+                '<span style="color:' + (stepIndex === 10 ? '#d2a8ff' : '#58a6ff') + ';">' + label + '</span>' +
+                '<span style="color:#8b949e;">' + pctVal + '%</span></div>' +
+                '<div style="height:3px;background:#21262d;border-radius:2px;margin-top:4px;">' +
+                '<div style="height:100%;width:' + pctVal + '%;background:' + (stepIndex === 10 ? '#d2a8ff' : '#58a6ff') + ';border-radius:2px;transition:width 0.3s;"></div></div>'
+            );
+        } else if (subEl && status === 'done') {
+            subEl.remove();
+        }
+
+        // Update progress bar
+        var doneCount = document.querySelectorAll('#pipeline-steps .step.done, #pipeline-steps .step.skipped').length;
+        var pct = Math.round((doneCount / PIPELINE_STEPS.length) * 100);
+        var fill = document.getElementById('pipeline-bar-fill');
+        var pctEl = document.getElementById('pipeline-percent');
+        if (fill) fill.style.width = pct + '%';
+        if (pctEl) pctEl.textContent = pct + '%';
+    }
+
+    // Auto-start analysis on an existing (already submitted) idea
+    async function runExistingIdea(ideaId, mode) {
+        if (isAnalyzing) return;
+        isAnalyzing = true;
+        var btn = document.getElementById('submit-btn');
+        btn.disabled = true;
+        btn.textContent = t('idea.analyzing');
+        clearResults();
+
+        try {
+            if (mode === 'quick') {
+                showStatus('analyzing', '<span class="spinner"></span>' + (i18nLang === 'en' ? 'Quick validation in progress...' : '快速验证中...'));
+                var analyzeResp = await fetch('/api/idea/analyze', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ id: ideaId }),
+                });
+                if (!analyzeResp.ok) throw new Error('服务器错误 (' + analyzeResp.status + ')');
+                var analyzeData = await analyzeResp.json();
+                if (analyzeData.status === 'ok') {
+                    showStatus('done', i18nLang === 'en' ? 'Quick validation complete' : '快速验证完成');
+                    displayResults(analyzeData.idea);
+                    loadHistory();
+                    showDiscussionPanel();
+                } else {
+                    showStatus('error', analyzeData.message || t('idea.analyzeFail'));
+                }
+            } else {
+                document.getElementById('status-area').innerHTML = DOMPurify.sanitize(buildPipelineUI());
+                var sseErrorCount = 0;
+                closeActiveSSE();
+                var connId = ++activeSSEConnectionId;
+                await new Promise(function(resolve) {
+                    var eventSource = new EventSource('/api/idea/' + ideaId + '/progress');
+                    activeEventSource = eventSource;
+                    var pipelineStarted = false;
+                    var timeout = setTimeout(function() { eventSource.close(); if (activeEventSource === eventSource) activeEventSource = null; resolve(); }, 300000);
+
+                    eventSource.onopen = function() {
+                        if (connId !== activeSSEConnectionId) { eventSource.close(); return; }
+                        sseErrorCount = 0;
+                        if (!pipelineStarted) {
+                            pipelineStarted = true;
+                            fetch('/api/idea/pipeline', {
+                                method: 'POST', headers: {'Content-Type': 'application/json'},
+                                body: JSON.stringify({ id: ideaId }),
+                            }).catch(function(e) { console.error('pipeline start failed:', e); });
+                        }
+                    };
+                    eventSource.onmessage = function(e) {
+                        if (connId !== activeSSEConnectionId) { eventSource.close(); return; }
+                        try {
+                            var progress = JSON.parse(e.data);
+                            updatePipelineStep(progress.step_index, progress.status, progress.sub_step || null, progress.sub_progress || null, progress.message || null);
+                        } catch(err) {}
+                    };
+                    eventSource.addEventListener('done', function() { clearTimeout(timeout); eventSource.close(); if (activeEventSource === eventSource) activeEventSource = null; resolve(); });
+                    eventSource.onerror = function() {
+                        if (connId !== activeSSEConnectionId) { eventSource.close(); return; }
+                        sseErrorCount++;
+                        if (sseErrorCount <= 3) return;
+                        clearTimeout(timeout); eventSource.close();
+                        if (activeEventSource === eventSource) activeEventSource = null;
+                        if (!pipelineStarted) {
+                            pipelineStarted = true;
+                            fetch('/api/idea/pipeline', {
+                                method: 'POST', headers: {'Content-Type': 'application/json'},
+                                body: JSON.stringify({ id: ideaId }),
+                            }).catch(function(e) { console.error('pipeline start failed:', e); });
+                        }
+                        resolve();
+                    };
+                });
+                // Poll for report readiness (pipeline may still be running after SSE disconnect)
+                var reportData = null;
+                for (let attempt = 0; attempt < 30; attempt++) {
+                    var reportResp = await fetch('/api/idea/' + ideaId + '/report');
+                    if (!reportResp.ok) { await new Promise(function(r) { setTimeout(r, 2000); }); continue; }
+                    reportData = await reportResp.json();
+                    if (reportData.status === 'ok') break;
+                    await new Promise(function(r) { setTimeout(r, 2000); });
+                }
+                if (!reportData) reportData = { status: 'error', message: '获取报告超时' };
+                if (reportData.status === 'ok') {
+                    var fill = document.getElementById('pipeline-bar-fill');
+                    var pctEl = document.getElementById('pipeline-percent');
+                    if (fill) { fill.style.width = '100%'; fill.style.background = '#238636'; }
+                    if (pctEl) pctEl.textContent = '100% ✓';
+                    displayResults(reportData.report);
+                    loadHistory();
+                    showDiscussionPanel();
+                } else {
+                    showStatus('error', reportData.message || t('idea.analyzeFail'));
+                }
+            }
+        } catch(e) {
+            showStatus('error', t('idea.analyzeFail') + '：' + e.message);
+        } finally {
+            isAnalyzing = false;
+            btn.disabled = false;
+            btn.textContent = t('idea.submit');
+        }
+    }
+
+    // 断点续跑：从上次失败的步骤继续
+    async function resumePipeline(ideaId) {
+        if (isAnalyzing) return;
+        isAnalyzing = true;
+        var btn = document.getElementById('submit-btn');
+        btn.disabled = true;
+        btn.textContent = t('idea.analyzing');
+
+        document.getElementById('status-area').innerHTML = DOMPurify.sanitize(buildPipelineUI());
+
+        try {
+            var sseErrCount = 0;
+            closeActiveSSE();
+            var connId = ++activeSSEConnectionId;
+            await new Promise(function(resolve) {
+                var eventSource = new EventSource('/api/idea/' + ideaId + '/progress');
+                activeEventSource = eventSource;
+                var resumeStarted = false;
+                var timeout = setTimeout(function() { eventSource.close(); if (activeEventSource === eventSource) activeEventSource = null; resolve(); }, 300000);
+
+                eventSource.onopen = function() {
+                    if (connId !== activeSSEConnectionId) { eventSource.close(); return; }
+                    sseErrCount = 0;
+                    if (!resumeStarted) {
+                        resumeStarted = true;
+                        fetch('/api/idea/' + ideaId + '/resume', { method: 'POST' }).catch(function(e) { console.error('resume failed:', e); });
+                    }
+                };
+                eventSource.onmessage = function(e) {
+                    if (connId !== activeSSEConnectionId) { eventSource.close(); return; }
+                    try {
+                        var progress = JSON.parse(e.data);
+                        updatePipelineStep(progress.step_index, progress.status, progress.sub_step || null, progress.sub_progress || null, progress.message || null);
+                    } catch(err) {}
+                };
+                eventSource.addEventListener('done', function() { clearTimeout(timeout); eventSource.close(); if (activeEventSource === eventSource) activeEventSource = null; resolve(); });
+                eventSource.onerror = function() {
+                    if (connId !== activeSSEConnectionId) { eventSource.close(); return; }
+                    sseErrCount++;
+                    if (sseErrCount <= 3) return;
+                    clearTimeout(timeout); eventSource.close();
+                    if (activeEventSource === eventSource) activeEventSource = null;
+                    if (!resumeStarted) {
+                        resumeStarted = true;
+                        fetch('/api/idea/' + ideaId + '/resume', { method: 'POST' }).catch(function(e) { console.error('resume failed:', e); });
+                    }
+                    resolve();
+                };
+            });
+
+            // Poll for report
+            var reportData = null;
+            for (let attempt = 0; attempt < 30; attempt++) {
+                var reportResp = await fetch('/api/idea/' + ideaId + '/report');
+                if (!reportResp.ok) { await new Promise(function(r) { setTimeout(r, 2000); }); continue; }
+                reportData = await reportResp.json();
+                if (reportData.status === 'ok') break;
+                await new Promise(function(r) { setTimeout(r, 2000); });
+            }
+            if (!reportData) reportData = { status: 'error', message: '获取报告超时' };
+
+            if (reportData.status === 'ok') {
+                var fill = document.getElementById('pipeline-bar-fill');
+                var pctEl = document.getElementById('pipeline-percent');
+                if (fill) { fill.style.width = '100%'; fill.style.background = '#238636'; }
+                if (pctEl) pctEl.textContent = '100% ✓';
+                displayResults(reportData.report);
+                loadHistory();
+                showDiscussionPanel();
+            } else {
+                showStatus('error', reportData.message || t('idea.analyzeFail'));
+            }
+        } catch(e) {
+            showStatus('error', t('idea.analyzeFail') + '：' + e.message);
+        } finally {
+            isAnalyzing = false;
+            btn.disabled = false;
+            btn.textContent = t('idea.submit');
+        }
+    }
+
+    // 继续迭代：基于当前分析结果探索更多可能性
+    async function startIterate(ideaId) {
+        if (isAnalyzing) return;
+        isAnalyzing = true;
+        var btn = document.getElementById('submit-btn');
+        btn.disabled = true;
+        btn.textContent = t('idea.analyzing');
+
+        showStatus('analyzing', '<span class="spinner"></span>' + (i18nLang === 'en' ? 'Iterating...' : '迭代推演中...'));
+
+        try {
+            var resp = await fetch('/api/idea/' + ideaId + '/iterate', { method: 'POST' });
+            if (!resp.ok) throw new Error('服务器错误 (' + resp.status + ')');
+            var data = await resp.json();
+            if (data.status !== 'ok') throw new Error(data.message || '迭代启动失败');
+
+            showStatus('analyzing', '<span class="spinner"></span>' + (i18nLang === 'en' ? 'Iteration #' + data.iteration + ' running...' : '第 ' + data.iteration + ' 轮迭代运行中...'));
+
+            // Poll for completion (iterate runs async via Orchestrator)
+            var ideaData = null;
+            for (let attempt = 0; attempt < 90; attempt++) {
+                await new Promise(function(r) { setTimeout(r, 2000); });
+                var checkResp = await fetch('/api/idea/' + encodeURIComponent(ideaId));
+                if (!checkResp.ok) continue;
+                ideaData = await checkResp.json();
+                if (ideaData.status === 'ok' && ideaData.idea && (ideaData.idea.status === 'done' || ideaData.idea.status === 'error')) break;
+                ideaData = null;
+            }
+
+            if (ideaData && ideaData.idea && ideaData.idea.status === 'done') {
+                showStatus('done', i18nLang === 'en' ? 'Iteration complete' : '迭代完成');
+                displayResults(ideaData.idea);
+                loadHistory();
+                loadVersionHistory(ideaId);
+                showDiscussionPanel();
+            } else if (ideaData && ideaData.idea && ideaData.idea.status === 'error') {
+                showStatus('error', ideaData.idea.analysis || t('idea.analyzeFail'));
+            } else {
+                showStatus('error', i18nLang === 'en' ? 'Iteration timed out' : '迭代超时');
+            }
+        } catch(e) {
+            showStatus('error', t('idea.analyzeFail') + '：' + e.message);
+        } finally {
+            isAnalyzing = false;
+            btn.disabled = false;
+            btn.textContent = t('idea.submit');
+        }
+    }
+
+    // 版本历史加载
+    async function loadVersionHistory(ideaId) {
+        var panel = document.getElementById('version-history-panel');
+        var list = document.getElementById('version-list');
+        var countEl = document.getElementById('version-count');
+        var iterBtn = document.getElementById('iterate-from-versions-btn');
+        try {
+            var resp = await fetch('/api/idea/' + encodeURIComponent(ideaId) + '/versions');
+            if (!resp.ok) { if (panel) panel.style.display = 'none'; if (iterBtn) iterBtn.style.display = 'none'; return; }
+            var data = await resp.json();
+            if (data.status !== 'ok' || !data.versions || data.versions.length === 0) {
+                if (panel) panel.style.display = 'none';
+                if (iterBtn) iterBtn.style.display = 'none';
+                return;
+            }
+            if (panel) panel.style.display = 'block';
+            if (iterBtn) iterBtn.style.display = 'inline-block';
+            if (countEl) countEl.textContent = data.versions.length;
+            list.innerHTML = '';
+            data.versions.forEach(function(ver) {
+                var row = document.createElement('div');
+                row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px 12px;margin-bottom:4px;background:#0d1117;border:1px solid #21262d;border-radius:6px;cursor:pointer;transition:border-color 0.2s;';
+                row.onmouseover = function() { row.style.borderColor = '#58a6ff'; };
+                row.onmouseout = function() { row.style.borderColor = '#21262d'; };
+
+                var left = document.createElement('div');
+                var vLabel = document.createElement('span');
+                vLabel.style.cssText = 'color:#f0f6fc;font-weight:600;font-size:0.9em;';
+                vLabel.textContent = (i18nLang === 'en' ? 'v' : '版本 ') + ver.version_number;
+                left.appendChild(vLabel);
+
+                var stepSpan = document.createElement('span');
+                stepSpan.style.cssText = 'color:#8b949e;font-size:0.8em;margin-left:10px;';
+                stepSpan.textContent = ver.current_step || '';
+                left.appendChild(stepSpan);
+
+                var right = document.createElement('div');
+                right.style.cssText = 'color:#8b949e;font-size:0.8em;';
+                right.textContent = toCST(ver.created_at).substring(0, 16).replace('T', ' ');
+
+                row.appendChild(left);
+                row.appendChild(right);
+                row.onclick = function() {
+                    window.open('/api/idea/' + encodeURIComponent(ideaId) + '/report.html?version_id=' + encodeURIComponent(ver.id), '_blank');
+                };
+                list.appendChild(row);
+            });
+        } catch(e) {
+            if (panel) panel.style.display = 'none';
+            if (iterBtn) iterBtn.style.display = 'none';
+        }
+    }
+
+    async function submitIdea() {
+        const title = document.getElementById('idea-title').value.trim();
+        const desc = document.getElementById('idea-desc').value.trim();
+        if (!title) { alert(t('idea.alertTitle')); return; }
+        if (!desc) { alert(t('idea.alertDesc')); return; }
+        if (isAnalyzing) return;
+
+        isAnalyzing = true;
+        const btn = document.getElementById('submit-btn');
+        btn.disabled = true;
+        btn.textContent = t('idea.analyzing');
+        clearResults();
+
+        try {
+            // Step 1: Submit idea
+            const submitResp = await fetch('/api/idea/submit', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title, description: desc, input_type: 'text' }),
+            });
+            if (!submitResp.ok) throw new Error(t('idea.serverError') + ' (' + submitResp.status + ')');
+            const submitData = await submitResp.json();
+            if (submitData.status !== 'ok') throw new Error(submitData.message || t('idea.submitFail'));
+
+            currentIdeaId = submitData.id;
+
+            if (analysisMode === 'quick') {
+                // Quick mode: synchronous call to /api/idea/analyze
+                showStatus('analyzing', '<span class="spinner"></span>' + (i18nLang === 'en' ? 'Quick validation in progress...' : '快速验证中...'));
+
+                const analyzeResp = await fetch('/api/idea/analyze', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: submitData.id }),
+                });
+                if (!analyzeResp.ok) throw new Error('服务器错误 (' + analyzeResp.status + ')');
+                const analyzeData = await analyzeResp.json();
+
+                if (analyzeData.status === 'ok') {
+                    showStatus('done', i18nLang === 'en' ? 'Quick validation complete' : '快速验证完成');
+                    displayResults(analyzeData.idea);
+                    loadHistory();
+                    showDiscussionPanel();
+                } else {
+                    showStatus('error', analyzeData.message || t('idea.analyzeFail'));
+                }
+            } else {
+                // Deep mode: 13-step pipeline with SSE progress
+                // Show pipeline progress UI
+                document.getElementById('status-area').innerHTML = DOMPurify.sanitize(buildPipelineUI());
+
+                // Connect SSE FIRST, then start pipeline (avoids race condition)
+                var sseErrors = 0;
+                closeActiveSSE();
+                var connId = ++activeSSEConnectionId;
+                await new Promise(function(resolve, reject) {
+                    var eventSource = new EventSource('/api/idea/' + submitData.id + '/progress');
+                    activeEventSource = eventSource;
+                    var pipelineStarted = false;
+                    var timeout = setTimeout(function() {
+                        eventSource.close();
+                        if (activeEventSource === eventSource) activeEventSource = null;
+                        resolve();
+                    }, 300000); // 5 min max
+
+                    eventSource.onopen = function() {
+                        if (connId !== activeSSEConnectionId) { eventSource.close(); return; }
+                        // SSE connected — now safe to start pipeline
+                        sseErrors = 0;
+                        if (!pipelineStarted) {
+                            pipelineStarted = true;
+                            fetch('/api/idea/pipeline', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ id: submitData.id }),
+                            }).catch(function(e) { console.error('pipeline start failed:', e); });
+                        }
+                    };
+
+                    eventSource.onmessage = function(e) {
+                        if (connId !== activeSSEConnectionId) { eventSource.close(); return; }
+                        try {
+                            var progress = JSON.parse(e.data);
+                            updatePipelineStep(
+                                progress.step_index,
+                                progress.status,
+                                progress.sub_step || null,
+                                progress.sub_progress || null,
+                                progress.message || null
+                            );
+                        } catch(err) {}
+                    };
+
+                    eventSource.addEventListener('done', function() {
+                        clearTimeout(timeout);
+                        eventSource.close();
+                        if (activeEventSource === eventSource) activeEventSource = null;
+                        resolve();
+                    });
+
+                    eventSource.onerror = function() {
+                        if (connId !== activeSSEConnectionId) { eventSource.close(); return; }
+                        sseErrors++;
+                        if (sseErrors <= 3) return; // let browser auto-reconnect a few times
+                        clearTimeout(timeout);
+                        eventSource.close();
+                        if (activeEventSource === eventSource) activeEventSource = null;
+                        // If pipeline wasn't started yet, start it without SSE
+                        if (!pipelineStarted) {
+                            pipelineStarted = true;
+                            fetch('/api/idea/pipeline', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ id: submitData.id }),
+                            }).catch(function(e) { console.error('pipeline start failed:', e); });
+                        }
+                        resolve();
+                    };
+                });
+
+                // Poll for report readiness (pipeline may still be running after SSE disconnect)
+                var reportData = null;
+                for (let _attempt = 0; _attempt < 30; _attempt++) {
+                    var reportResp = await fetch('/api/idea/' + submitData.id + '/report');
+                    if (!reportResp.ok) { await new Promise(function(r) { setTimeout(r, 2000); }); continue; }
+                    reportData = await reportResp.json();
+                    if (reportData.status === 'ok') break;
+                    await new Promise(function(r) { setTimeout(r, 2000); });
+                }
+                if (!reportData) reportData = { status: 'error', message: '获取报告超时' };
+
+                if (reportData.status === 'ok') {
+                    // Update pipeline bar to 100%
+                    var fill = document.getElementById('pipeline-bar-fill');
+                    var pctEl = document.getElementById('pipeline-percent');
+                    if (fill) { fill.style.width = '100%'; fill.style.background = '#238636'; }
+                    if (pctEl) pctEl.textContent = '100% ✓';
+
+                    displayResults(reportData.report);
+                    loadHistory();
+                    showDiscussionPanel();
+                } else {
+                    showStatus('error', reportData.message || t('idea.analyzeFail'));
+                }
+            }
+        } catch (e) {
+            showStatus('error', t('idea.analyzeFail') + '：' + e.message);
+        } finally {
+            isAnalyzing = false;
+            btn.disabled = false;
+            btn.textContent = t('idea.submit');
+        }
+    }
+
+    // 多维推演结果渲染：手风琴 UI
+    function renderDeepReasoningUI(analysis) {
+        var dims = [
+            { key: 'scientific', icon: '🔬', label: '科学推导', color: '#58a6ff' },
+            { key: 'dialectical', icon: '⚡', label: '辩证批判', color: '#f85149' },
+            { key: 'epistemological', icon: '🔍', label: '知识审计', color: '#d2a8ff' },
+            { key: 'phenomenological', icon: '🌊', label: '本质还原', color: '#3fb950' },
+            { key: 'eastern', icon: '☯️', label: '减法思维', color: '#f0883e' },
+            { key: 'topological', icon: '🔗', label: '跨域映射', color: '#79c0ff' },
+        ];
+
+        // 按标记分割各部分
+        var sections = analysis.split('---');
+        var synthesisSection = '';
+        var dimSections = {};
+
+        sections.forEach(function(sec) {
+            sec = sec.trim();
+            if (sec.indexOf('跨维度合成') >= 0) {
+                synthesisSection = sec.replace(/^##\s*🔮\s*跨维度合成\s*/, '');
+            }
+            dims.forEach(function(d) {
+                if (sec.indexOf(d.label) >= 0 && sec.indexOf('(' + d.key + ')') >= 0) {
+                    dimSections[d.key] = sec.replace(new RegExp('^##\\s*' + d.icon + '\\s*' + d.label + '.*\\n*'), '');
+                }
+            });
+        });
+
+        var html = '<div class="analysis-result" style="padding:0;">';
+
+        // 合成结论（始终展开）
+        if (synthesisSection) {
+            html += '<div style="padding:16px;background:linear-gradient(135deg,#161b22,#1c2333);border:1px solid #d2a8ff33;border-radius:8px;margin-bottom:16px;">'
+                + '<h3 style="color:#d2a8ff;margin:0 0 12px;">🔮 跨维度合成</h3>'
+                + '<div style="color:#c9d1d9;line-height:1.8;">' + renderMarkdown(synthesisSection) + '</div></div>';
+        }
+
+        // 6 个维度手风琴（用 data-dim 属性替代 inline onclick，避免 DOMPurify 清除事件）
+        html += '<div style="display:flex;flex-direction:column;gap:4px;">';
+        dims.forEach(function(d, i) {
+            var content = dimSections[d.key] || '';
+            var id = 'dim-' + d.key;
+            html += '<div style="border:1px solid #30363d;border-radius:6px;overflow:hidden;">'
+                + '<div data-dim="' + id + '" style="padding:10px 14px;background:#161b22;cursor:pointer;display:flex;align-items:center;gap:8px;user-select:none;">'
+                + '<span style="color:' + d.color + ';font-size:1.1em;">' + d.icon + '</span>'
+                + '<span style="color:' + d.color + ';font-weight:600;">' + d.label + '</span>'
+                + '<span id="' + id + '-arrow" style="margin-left:auto;color:#484f58;transition:transform 0.2s;">▶</span>'
+                + '</div>'
+                + '<div id="' + id + '" style="display:none;padding:14px;background:#0d1117;color:#c9d1d9;line-height:1.8;max-height:500px;overflow-y:auto;">'
+                + (content ? renderMarkdown(content) : '<p style="color:#484f58;">此维度未产出结果</p>')
+                + '</div></div>';
+        });
+        html += '</div></div>';
+        return html;
+    }
+
+    // DOMPurify 会清除 inline onclick，所以用事件委托绑定手风琴点击
+    document.addEventListener('click', function(e) {
+        var target = e.target.closest('[data-dim]');
+        if (target) toggleDimension(target.getAttribute('data-dim'));
+    });
+
+    function displayResults(idea) {
+        var resultTabs = document.getElementById('result-tabs');
+        if (resultTabs) resultTabs.style.display = 'flex';
+        switchTab('overview');
+        if (idea.novelty_score != null) {
+            const scoreClass = idea.novelty_score >= 70 ? 'score-high' : idea.novelty_score >= 40 ? 'score-mid' : 'score-low';
+            const scoreLabel = idea.novelty_score >= 70 ? t('idea.scoreHigh') : idea.novelty_score >= 40 ? t('idea.scoreMid') : t('idea.scoreLow');
+            document.getElementById('score-area').innerHTML = DOMPurify.sanitize(
+                '<div class="score-display">' +
+                '<div class="score-number ' + scoreClass + '" style="background:transparent;">' + Math.round(idea.novelty_score * 10) / 10 + '</div>' +
+                '<div class="score-label">' + (i18nLang === 'en' ? 'Novelty Score / 100 — ' : '新颖性评分 / 100 — ') + scoreLabel + '</div>' +
+                '</div>');
+            // 操作按钮行：导出报告 + 继续迭代
+            if (idea.id) {
+                var actionRow = document.createElement('div');
+                actionRow.style.cssText = 'display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-bottom:12px;';
+                var reportTypes = [
+                    { type: 'executive', icon: '📋', zh: '精简版', en: 'Executive' },
+                    { type: 'technical', icon: '🔬', zh: '技术版', en: 'Technical' },
+                    { type: 'full',      icon: '📄', zh: '完整版', en: 'Full Report' }
+                ];
+                var _ideaId = idea.id;
+                reportTypes.forEach(function(rt) {
+                    var btn = document.createElement('button');
+                    btn.textContent = rt.icon + ' ' + (i18nLang === 'en' ? rt.en : rt.zh);
+                    btn.style.cssText = 'padding:6px 14px;background:#8b5cf6;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;';
+                    btn.onmouseenter = function() { btn.style.background = '#7c3aed'; };
+                    btn.onmouseleave = function() { btn.style.background = '#8b5cf6'; };
+                    btn.onclick = function() { openReport(_ideaId, rt.type); };
+                    actionRow.appendChild(btn);
+                });
+                var iterateBtn = document.createElement('button');
+                iterateBtn.textContent = i18nLang === 'en' ? 'Iterate' : '继续迭代';
+                iterateBtn.style.cssText = 'padding:8px 20px;background:#1f6feb;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;';
+                iterateBtn.onclick = function() { startIterate(idea.id); };
+                actionRow.appendChild(iterateBtn);
+                document.getElementById('score-area').appendChild(actionRow);
+                var iterateHint = document.createElement('div');
+                iterateHint.style.cssText = 'text-align:center;color:#8b949e;font-size:0.8em;margin-bottom:8px;';
+                iterateHint.textContent = i18nLang === 'en' ? 'Explore more possibilities based on current analysis' : '基于当前分析结果，探索更多可能性';
+                document.getElementById('score-area').appendChild(iterateHint);
+            }
+        }
+
+        if (idea.analysis) {
+            // 检测是否为多维推演报告（包含维度标记）
+            var isDeepReasoning = idea.analysis.indexOf('多维深度推演报告') >= 0;
+            // 渲染概览页正文（分析报告 + 检索结果）
+            renderOverview(idea);
+        } else {
+            renderOverview(idea);
+        }
+    }
+
+    // ========== Memory (记忆) functions ==========
+
+    function getTypeLabel(type) {
+        var map = {
+            'domain_concept': '<span style="color:#58a6ff">📊 领域概念</span>',
+            'decision': '<span style="color:#3fb950">🔖 决策</span>',
+            'pattern': '<span style="color:#f85149">⚡ 创新模式</span>',
+            'question': '<span style="color:#f0883e">❓ 开放问题</span>'
+        };
+        return map[type] || '<span>' + type + '</span>';
+    }
+
+    function getTypeIcon(type) {
+        var map = { 'domain_concept': '📊', 'decision': '🔖', 'pattern': '⚡', 'question': '❓' };
+        return map[type] || '📄';
+    }
+
+    function showMemoryForm() {
+        document.getElementById('memory-add-form').style.display = 'block';
+    }
+
+    function hideMemoryForm() {
+        document.getElementById('memory-add-form').style.display = 'none';
+        document.getElementById('mem-concept-name').value = '';
+        document.getElementById('mem-content').value = '';
+        document.getElementById('mem-confidence').value = '0.5';
+    }
+
+    async function addMemoryEntry() {
+        var name = document.getElementById('mem-concept-name').value.trim();
+        var type = document.getElementById('mem-concept-type').value;
+        var confidence = parseFloat(document.getElementById('mem-confidence').value) || 0.5;
+        var content = document.getElementById('mem-content').value.trim();
+        if (!name || !content) { alert('concept name and description required'); return; }
+        if (!currentIdeaId) return;
+
+        var resp = await fetch('/api/idea/' + encodeURIComponent(currentIdeaId) + '/memory', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ concept_name: name, concept_type: type, confidence: confidence, content: content })
+        });
+        var data = await resp.json();
+        if (data.status === 'ok') { hideMemoryForm(); loadMemory(); }
+        else { alert('Failed: ' + data.message); }
+    }
+
+    async function loadMemory() {
+        if (!currentIdeaId) return;
+        var listEl = document.getElementById('memory-list');
+        listEl.innerHTML = DOMPurify.sanitize('<p class="muted">Loading...</p>');
+
+        try {
+            var resp = await fetch('/api/idea/' + encodeURIComponent(currentIdeaId) + '/memory');
+            if (!resp.ok) { listEl.innerHTML = '<p class="muted">Load failed</p>'; return; }
+            var data = await resp.json();
+            if (data.status !== 'ok' || !data.entries) { listEl.innerHTML = '<p class="muted">No memory</p>'; return; }
+
+            var filter = document.getElementById('memory-filter').value;
+            var filtered = filter === 'all' ? data.entries : data.entries.filter(function(e) { return e.concept_type === filter; });
+
+            document.getElementById('memory-count').textContent = data.entries.length;
+            var counts = data.counts && data.counts.by_type ? data.counts.by_type : {};
+            document.getElementById('mem-stat-concept').textContent = counts.domain_concept || 0;
+            document.getElementById('mem-stat-decision').textContent = counts.decision || 0;
+            document.getElementById('mem-stat-pattern').textContent = counts.pattern || 0;
+            document.getElementById('mem-stat-question').textContent = counts.question || 0;
+
+            if (filtered.length === 0) { listEl.innerHTML = '<p class="muted">No entries</p>'; return; }
+
+            listEl.innerHTML = '';
+            filtered.forEach(function(entry) {
+                var row = document.createElement('div');
+                row.style.cssText = 'padding:10px 14px;margin-bottom:6px;background:#161b22;border:1px solid #30363d;border-radius:6px;';
+                var delBtn = '<button style="padding:3px 8px;background:#f85149;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:11px;" onclick="deleteMemory(\'' + currentIdeaId + '\',\'' + entry.id.replace(/\'/g, "\\\\'") + '\')">Delete</button>';
+                row.innerHTML = DOMPurify.sanitize(
+                    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">' +
+                    '<div style="display:flex;align-items:center;gap:8px;">' +
+                    '<span style="font-size:1.1em;">' + getTypeIcon(entry.concept_type) + '</span>' +
+                    '<span style="font-weight:600;color:#f0f6fc;">' + esc(entry.concept_name) + '</span>' +
+                    '<span style="font-size:0.8em;">' + getTypeLabel(entry.concept_type) + '</span>' +
+                    '</div>' +
+                    '<div style="display:flex;align-items:center;gap:10px;">' +
+                    '<span style="font-size:0.8em;color:#8b949e;">confidence ' + (entry.confidence || 0).toFixed(2) + '</span>' +
+                    '<span style="font-size:0.75em;color:#484f58;">' + (entry.source_step || '') + '</span>' +
+                    delBtn +
+                    '</div></div>' +
+                    '<div style="color:#c9d1d9;line-height:1.6;font-size:0.9em;padding-left:24px;">' + esc(entry.content) + '</div>' +
+                    '<div style="font-size:0.75em;color:#484f58;padding-left:24px;margin-top:4px;">' + (entry.created_at ? entry.created_at.substring(0, 16).replace('T', ' ') : '') + '</div>'
+                );
+                listEl.appendChild(row);
+            });
+        } catch(e) {
+            listEl.innerHTML = DOMPurify.sanitize('<p class="muted">Load failed: ' + e.message + '</p>');
+        }
+    }
+
+    async function deleteMemory(ideaId, entryId) {
+        if (!confirm('Delete this memory?')) return;
+        var resp = await fetch('/api/idea/' + encodeURIComponent(ideaId) + '/memory/' + encodeURIComponent(entryId), { method: 'DELETE' });
+        if (resp.ok) { loadMemory(); } else { alert('Delete failed'); }
+    }
+
+    // ── 通用工具函数（恢复自历史版本 3a50c49，被 9f1a14b 误删）──
+
+    function showStatus(type, msg) {
+        document.getElementById('status-area').innerHTML = DOMPurify.sanitize(
+            '<div class="status-bar status-' + type + '">' + msg + '</div>');
+    }
+
+    function clearResults() {
+        var scoreArea = document.getElementById('score-area');
+        var analysisArea = document.getElementById('analysis-area');
+        var findingsArea = document.getElementById('findings-area');
+        var resultTabs = document.getElementById('result-tabs');
+        if (scoreArea) scoreArea.innerHTML = '';
+        if (analysisArea) analysisArea.innerHTML = '';
+        if (findingsArea) findingsArea.innerHTML = '';
+        if (resultTabs) resultTabs.style.display = 'none';
+    }
+
+    function clearForm() {
+        var titleEl = document.getElementById('idea-title');
+        var descEl = document.getElementById('idea-desc');
+        var statusArea = document.getElementById('status-area');
+        if (titleEl) titleEl.value = '';
+        if (descEl) descEl.value = '';
+        if (statusArea) statusArea.innerHTML = '';
+        clearResults();
+        currentIdeaId = null;
+    }
+
+    function showNewIdeaForm() {
+        clearForm();
+        document.getElementById('idea-form').style.display = '';
+        var titleEl = document.getElementById('idea-title');
+        if (titleEl) titleEl.focus();
+        window.history.pushState({}, '', '/idea');
+    }
+
+    function renderMarkdown(text) {
+        // 先提取代码块，避免内部被其他规则破坏
+        var codeBlocks = [];
+        text = text.replace(/```(\w*)\n?([\s\S]*?)```/g, function(_, lang, code) {
+            codeBlocks.push('<pre style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:10px;overflow-x:auto;font-size:0.85em;"><code>' + code.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</code></pre>');
+            return '\x00CB' + (codeBlocks.length - 1) + '\x00';
+        });
+        // 提取表格
+        var tables = [];
+        text = text.replace(/((?:^\|.+\|[ \t]*\n)+)/gm, function(block) {
+            var rows = block.trim().split('\n');
+            if (rows.length < 2) return block;
+            var html = '<table style="border-collapse:collapse;width:100%;margin:8px 0;font-size:0.9em;">';
+            rows.forEach(function(row, ri) {
+                if (row.replace(/[\|\-\s:]/g, '') === '') return; // skip separator row
+                var tag = ri === 0 ? 'th' : 'td';
+                var cells = row.split('|').filter(function(c, i, a) { return i > 0 && i < a.length - 1; });
+                html += '<tr>';
+                cells.forEach(function(c) {
+                    var st = 'border:1px solid #30363d;padding:6px 10px;' + (ri === 0 ? 'background:#161b22;color:#58a6ff;font-weight:600;' : '');
+                    html += '<' + tag + ' style="' + st + '">' + c.trim() + '</' + tag + '>';
+                });
+                html += '</tr>';
+            });
+            html += '</table>';
+            tables.push(html);
+            return '\x00TB' + (tables.length - 1) + '\x00';
+        });
+        var result = text
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+            .replace(/^## (.+)$/gm, '<h3 style="font-size:1.1em">$1</h3>')
+            .replace(/^# (.+)$/gm, '<h2>$1</h2>')
+            .replace(/`([^`]+)`/g, '<code style="background:#21262d;padding:1px 5px;border-radius:3px;font-size:0.9em;">$1</code>')
+            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+            .replace(/\*(.+?)\*/g, '<em>$1</em>')
+            .replace(/^\- (.+)$/gm, '<li>$1</li>')
+            .replace(/^(\d+)\. (.+)$/gm, '<li>$2</li>')
+            .replace(/\n{2,}/g, '</p><p>')
+            .replace(/\n/g, '<br>')
+            .replace(/^/, '<p>').replace(/$/, '</p>');
+        // 恢复代码块和表格
+        result = result.replace(/\x00CB(\d+)\x00/g, function(_, i) { return codeBlocks[parseInt(i)]; });
+        result = result.replace(/\x00TB(\d+)\x00/g, function(_, i) { return tables[parseInt(i)]; });
+        return result;
+    }
+
+    function esc(s) { return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+    function showDiscussionPanel() {
+        if (!currentIdeaId) return;
+        loadMessages(currentIdeaId);
+    }
+
+    // ── 报告 Tab 功能（恢复）──
+
+    var currentReportType = 'full';
+
+    async function openReport(ideaId, reportType) {
+        if (reportType === 'full') {
+            window.open('/api/idea/' + ideaId + '/report.html', '_blank');
+            return;
+        }
+        try {
+            var resp = await fetch('/api/idea/' + ideaId + '/report?type=' + reportType);
+            if (!resp.ok) { alert('获取报告失败'); return; }
+            var data = await resp.json();
+            if (data.status !== 'ok') { alert(data.message || '获取报告失败'); return; }
+            var typeLabel = reportType === 'executive' ? '精简版报告' : '技术版报告';
+            var w = window.open('', '_blank');
+            w.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8">' +
+                '<title>' + typeLabel + '</title>' +
+                '<style>body{font-family:-apple-system,sans-serif;max-width:800px;margin:40px auto;padding:0 20px;background:#0d1117;color:#c9d1d9;line-height:1.7;}' +
+                'h1,h2,h3{color:#58a6ff;}h1{border-bottom:1px solid #30363d;padding-bottom:8px;}' +
+                'strong{color:#f0f6fc;}p{margin:8px 0;}' +
+                '@media print{body{background:#fff;color:#000;}h1,h2,h3{color:#1f2937;}strong{color:#000;}}</style></head><body>');
+            var md = data.report || '';
+            var html = md.replace(/^### (.+)$/gm, '<h3>$1</h3>')
+                .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+                .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+                .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                .replace(/^- (.+)$/gm, '<li>$1</li>')
+                .replace(/\n/g, '<br>');
+            w.document.write(html);
+            w.document.write('<hr style="border-color:#30363d;margin-top:30px;"><p style="color:#6e7681;font-size:0.85em;">InnoForge 创研台 · ' + typeLabel + ' · ' + new Date().toLocaleDateString() + '</p>');
+            w.document.write('</body></html>');
+            w.document.close();
+        } catch(e) {
+            alert('获取报告失败: ' + e.message);
+        }
+    }
+
+    function switchReportType(rtype) {
+        currentReportType = rtype;
+        document.querySelectorAll('.report-type-btn').forEach(function(btn) {
+            if (btn.getAttribute('data-rtype') === rtype) {
+                btn.style.background = '#1f6feb';
+                btn.style.color = '#fff';
+                btn.classList.add('active');
+            } else {
+                btn.style.background = '#21262d';
+                btn.style.color = '#8b949e';
+                btn.classList.remove('active');
+            }
+        });
+        if (currentIdeaId) loadReportTab(currentIdeaId, rtype);
+    }
+
+    async function loadReportTab(ideaId, reportType) {
+        var content = document.getElementById('report-content');
+        var openBtn = document.getElementById('report-open-btn');
+        if (!content) return;
+        content.innerHTML = DOMPurify.sanitize('<p style="color:#58a6ff;"><span class="spinner"></span> 加载中...</p>');
+        try {
+            var url = '/api/idea/' + encodeURIComponent(ideaId) + '/report';
+            if (reportType && reportType !== 'full') url += '?type=' + reportType;
+            var resp = await fetch(url);
+            if (!resp.ok) { content.innerHTML = '<p style="color:#f85149;">获取报告失败 (' + resp.status + ')</p>'; return; }
+            var data = await resp.json();
+            if (data.status === 'ok') {
+                var reportText = data.report || data.analysis || '';
+                if (reportType === 'full' && typeof data.report === 'object') {
+                    reportText = data.report.analysis || '';
+                }
+                content.innerHTML = DOMPurify.sanitize('<div class="analysis-result">' + renderMarkdown(reportText) + '</div>');
+                if (openBtn) openBtn.style.display = 'inline-block';
+            } else {
+                content.innerHTML = DOMPurify.sanitize('<p style="color:#8b949e;">' + (data.message || '暂无报告') + '</p>');
+                if (openBtn) openBtn.style.display = 'none';
+            }
+        } catch(e) {
+            content.innerHTML = DOMPurify.sanitize('<p style="color:#f85149;">加载失败: ' + esc(e.message) + '</p>');
+        }
+    }
+
+    function openReportInNewTab() {
+        if (!currentIdeaId) return;
+        if (currentReportType === 'full') {
+            window.open('/api/idea/' + encodeURIComponent(currentIdeaId) + '/report.html', '_blank');
+        } else {
+            openReport(currentIdeaId, currentReportType);
+        }
+    }
+
+    // ── 讨论导出/总结（恢复）──
+
+    async function exportConclusions() {
+        if (!currentIdeaId) return;
+        var btn = document.getElementById('export-conclusions-btn');
+        btn.textContent = '⏳ 导出中...';
+        btn.disabled = true;
+        try {
+            var res = await fetch('/api/idea/' + currentIdeaId + '/chat/conclusions');
+            var data = await res.json();
+            var sumDiv = document.getElementById('discussion-summary');
+            sumDiv.style.display = 'block';
+            if (data.status === 'ok' && data.conclusions) {
+                var conclHtml = '<div style="font-size:0.8em; color:#58a6ff; margin-bottom:4px; font-weight:bold;">📝 讨论结论导出</div>' +
+                    '<div style="color:#c9d1d9; font-size:0.9em; line-height:1.6;">' + renderMarkdown(data.conclusions) + '</div>';
+                sumDiv.innerHTML = DOMPurify.sanitize(conclHtml);
+                var hintDiv = document.createElement('div');
+                hintDiv.style.cssText = 'font-size:0.75em; color:#8b949e; margin-top:8px;';
+                hintDiv.textContent = i18nLang === 'en' ? '💡 These conclusions will seed the next iteration' : '💡 这些结论将作为下一轮「继续迭代」的研究种子';
+                sumDiv.appendChild(hintDiv);
+                var iterBtn = document.createElement('button');
+                iterBtn.textContent = i18nLang === 'en' ? '🔄 Iterate from these conclusions' : '🔄 基于这些结论继续迭代';
+                iterBtn.style.cssText = 'margin-top:6px; padding:5px 14px; background:#1f6feb; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:0.85em;';
+                iterBtn.onclick = function() { startIterate(currentIdeaId); };
+                sumDiv.appendChild(iterBtn);
+            } else {
+                var errDiv = document.createElement('div');
+                errDiv.style.cssText = 'color:#f0ad4e; font-size:0.85em; padding:8px;';
+                errDiv.textContent = '💡 ' + (data.error || '暂无足够的讨论内容可以导出结论。请先与 AI 讨论几轮后再试。');
+                sumDiv.innerHTML = '';
+                sumDiv.appendChild(errDiv);
+            }
+        } catch(e) {
+            alert('请求失败: ' + e.message);
+        }
+        btn.textContent = '📝 导出结论';
+        btn.disabled = false;
+    }
+
+    async function exportConversation() {
+        if (!currentIdeaId) return;
+        var btn = document.getElementById("export-conversation-btn");
+        btn.textContent = "⏳ 导出中...";
+        btn.disabled = true;
+        try {
+            var res = await fetch("/api/idea/" + currentIdeaId + "/chat/conversation");
+            var data = await res.json();
+            if (data.status !== "ok" || !data.idea || !data.messages) {
+                alert((data.error || "导出失败") + ",请确认已有讨论记录。");
+                btn.textContent = "📥 导出对话";
+                btn.disabled = false;
+                return;
+            }
+            if (data.messages.length === 0) {
+                alert("还没有讨论记录，请先与 AI 讨论几轮。");
+                btn.textContent = "📥 导出对话";
+                btn.disabled = false;
+                return;
+            }
+            var lines = [];
+            lines.push("# " + data.idea.title + " — 讨论记录");
+            if (data.idea.description) lines.push("\n**创意描述：**\n" + data.idea.description);
+            lines.push("\n**消息数：** " + data.messages.length + "\n---\n");
+            for (let i = 0; i < data.messages.length; i++) {
+                var m = data.messages[i];
+                var role = (m.role === "user" ? "**用户** " : "**AI** ");
+                var ts = m.created_at || "";
+                lines.push("\n### " + role + (ts ? "（" + ts + "）" : ""));
+                lines.push("\n" + (m.content || ""));
+            }
+            var md = lines.join("\n");
+            var blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+            var a = document.createElement("a");
+            a.href = URL.createObjectURL(blob);
+            a.download = (data.idea.title || "discussion") + ".md";
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(a.href);
+            alert("已导出 " + data.messages.length + " 条聊天记录（含用户提问与 AI 回复），可导入其它 AI 核对。");
+        } catch(e) {
+            alert("请求失败: " + e.message);
+        }
+        btn.textContent = "📥 导出对话";
+        btn.disabled = false;
+    }
+
+    async function summarizeDiscussion() {
+        if (!currentIdeaId) return;
+        var btn = document.getElementById('summary-btn');
+        btn.textContent = '⏳ 生成中...';
+        btn.disabled = true;
+        try {
+            var res = await fetch('/api/idea/' + currentIdeaId + '/summarize', { method: 'POST' });
+            var data = await res.json();
+            if (data.status === 'ok') {
+                var sumDiv = document.getElementById('discussion-summary');
+                sumDiv.style.display = 'block';
+                sumDiv.innerHTML = DOMPurify.sanitize('<div style="font-size:0.8em; color:#58a6ff; margin-bottom:4px; font-weight:bold;">📋 讨论总结</div>' +
+                    '<div style="color:#c9d1d9; font-size:0.9em; line-height:1.6;">' + renderMarkdown(data.summary) + '</div>');
+            } else {
+                var sumDiv = document.getElementById('discussion-summary');
+                sumDiv.style.display = 'block';
+                var sumErrDiv = document.createElement('div');
+                sumErrDiv.style.cssText = 'color:#f0ad4e; font-size:0.85em; padding:8px;';
+                sumErrDiv.textContent = '💡 ' + (data.error || '生成总结失败') + '，请先在下方输入框和 AI 讨论几轮后再生成总结。';
+                sumDiv.innerHTML = '';
+                sumDiv.appendChild(sumErrDiv);
+            }
+        } catch(e) {
+            alert('请求失败: ' + e.message);
+        }
+        btn.textContent = '📋 生成总结';
+        btn.disabled = false;
+    }
+
+    // ── 概览页渲染分析报告（恢复 displayResults 缺失的正文渲染）──
+
+    function renderOverview(idea) {
+        var analysisArea = document.getElementById('analysis-area');
+        var findingsArea = document.getElementById('findings-area');
+        if (analysisArea && idea.analysis) {
+            analysisArea.innerHTML = DOMPurify.sanitize('<div class="analysis-result">' + renderMarkdown(idea.analysis) + '</div>');
+        }
+        if (findingsArea) {
+            var webResults = idea.web_results || [];
+            var patentResults = idea.patent_results || [];
+            var html = '';
+            if (webResults.length || patentResults.length) {
+                html += '<div class="panel-box" style="margin-top:12px;"><h3>🔎 检索结果</h3>';
+                if (webResults.length) {
+                    html += '<h4 style="color:#58a6ff;margin:8px 0 4px;">网络结果 (' + webResults.length + ')</h4>';
+                    html += webResults.slice(0, 10).map(function(r) {
+                        return '<div style="padding:6px 0;border-bottom:1px solid #21262d;font-size:0.9em;">' +
+                            '<div style="color:#f0f6fc;">' + esc(r.title || '') + '</div>' +
+                            (r.snippet ? '<div style="color:#8b949e;font-size:0.85em;">' + esc(r.snippet) + '</div>' : '') +
+                            (r.link ? '<a href="' + esc(r.link) + '" target="_blank" style="color:#58a6ff;font-size:0.8em;">' + esc(r.link) + '</a>' : '') +
+                            '</div>';
+                    }).join('');
+                }
+                if (patentResults.length) {
+                    html += '<h4 style="color:#58a6ff;margin:8px 0 4px;">专利结果 (' + patentResults.length + ')</h4>';
+                    html += patentResults.slice(0, 10).map(function(p) {
+                        return '<div style="padding:6px 0;border-bottom:1px solid #21262d;font-size:0.9em;">' +
+                            '<div style="color:#f0f6fc;">' + esc(p.patent_number || p.id || '') + ' - ' + esc(p.title || '') + '</div>' +
+                            (p.abstract ? '<div style="color:#8b949e;font-size:0.85em;">' + esc(p.abstract) + '</div>' : '') +
+                            '</div>';
+                    }).join('');
+                }
+                html += '</div>';
+            }
+            findingsArea.innerHTML = DOMPurify.sanitize(html);
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        var filterEl = document.getElementById('memory-filter');
+        if (filterEl) filterEl.onchange = function() { loadMemory(); };
+        loadHistory();
+    });
+</script>

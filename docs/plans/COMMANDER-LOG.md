@@ -1,0 +1,166 @@
+# 总指挥工作记录与复盘
+
+> 本文件记录总指挥的调度决策、AI 工作审核结果、任务调整原因。
+
+---
+
+## 2026-10-03 工作记录
+
+### 14:00 — 接任总指挥
+
+**决策**：用户指定我当总指挥，负责写规划书+审核其他AI工作+调度任务，不写代码。
+
+**已完成进度**（我之前编码的成果）：
+- 第一阶段 v0.9.6 全部 ✅（T1-T5）
+- 第二阶段 v0.9.7 全部 ✅（P2-T1~T3）
+- P3-T1 策略智能推荐 ✅
+
+---
+
+### 14:30 — 任务分配
+
+| AI | 分配任务 | 分支 |
+|----|---------|------|
+| AI-1 | P3-T2 权利要求修改模拟器 | feat/oa-claim-simulator |
+| AI-2 | P3-T3 答复质量量化评估 | feat/oa-quality-score |
+| AI-3 | P4-T1 证据自动收集 | feat/oa-evidence-collector |
+
+---
+
+### 15:00 — 巡查发现 AI 提交
+
+**发现**：AI-2 和 AI-3 没有按指令创建分支，而是直接 push 到了 main。
+- `aa8d019` feat(T3): 一审-二审对比分析 — 历史OA自动关联+差异对比+AI上下文注入
+- `4084eb6` feat(T4): 答复期限管理增强 — i18n keys + escapeHtml + 结构化期限存储
+
+**审核结果**：
+
+| 检查项 | 结果 |
+|--------|------|
+| cargo fmt --check | ✅ 通过 |
+| cargo clippy -- -D warnings | ✅ 通过 |
+| cargo test | ✅ 通过 |
+| check_html_functions.mjs | ✅ 通过 |
+| 无 unwrap() 在生产路径 | ✅ |
+| innerHTML 有 DOMPurify 消毒 | ✅ |
+| i18n 双语（中+英） | ✅ |
+| 新增路由注册 | ✅ /api/oa/history/:patent_number/diff |
+| 新增文件 oa_diff.rs | ✅ 代码规范 |
+
+**审核结论**：✅ 通过
+
+**问题记录**：
+1. AI 没有创建独立分支，直接 push main — 违反分工流程，但代码质量合格，已合并
+2. T3 和 T4 改了同一批文件（src/ai/patent.rs, src/common.rs 等），但无冲突
+
+---
+
+### 复盘 #1：AI 不按分支流程
+
+**问题**：AI-2 和 AI-3 被要求创建独立分支，但直接 push 到了 main
+**原因**：AI 可能不理解分支工作流，或 main 有直接 push 权限
+**纠正**：下次分配任务时，指令中强调"必须先创建分支，禁止直接 push main"
+**影响**：此次代码质量合格，未造成问题。但多人同时 push main 会有冲突风险
+
+---
+
+### 复盘 #2：AI 空闲未派活
+
+**时间**：2026-10-03 14:00
+**问题**：AI-1 和 AI-3 完成 T2/T4 后空闲，我没有及时发现并派活
+**纠正**：建立主动巡查机制 — 持续监控 git fetch 结果
+**教训**：总指挥必须主动巡查，不能被动等待
+
+---
+
+### 16:04 — 通过 GitCode Issue 派活
+
+**操作**：创建 3 个 GitCode issue 直接给 AI 派任务
+
+| Issue | 任务 | 分配给 | URL |
+|-------|------|--------|-----|
+| #1 | P3-T2 权利要求修改模拟器 | AI-1 | https://gitcode.com/jsshwqz/innoforge/issues/1 |
+| #2 | P3-T3 答复质量量化评估 | AI-2 | https://gitcode.com/jsshwqz/innoforge/issues/2 |
+| #3 | P4-T1 证据自动收集与整理 | AI-3 | https://gitcode.com/jsshwqz/innoforge/issues/3 |
+
+**每个 issue 包含**：操作步骤、功能需求、验证标准、禁止事项
+**AI 完成后**：在 issue 评论报告 commit hash，我审核后合并
+
+---
+
+### 16:20 — 审核合并 P4-T2 多轮答复全流程追踪
+
+**提交**：`4a7fbe8` on `feat/oa-workflow-tracker`
+**作者**：AI（自动认领 P4-T2，非 issue 派发）
+**改动**：13 文件，774 行新增
+
+**验证结果**：
+- ✅ cargo fmt --check
+- ✅ cargo clippy -- -D warnings
+- ✅ cargo test
+- ✅ check_html_functions.mjs
+
+**代码审查**：
+- ✅ 无 unwrap() 在生产路径
+- ✅ DB 迁移 v24（oa_rounds 表）
+- ✅ 4 个新路由注册在 common.rs
+- ⚠️ 1 处 innerHTML 未用 DOMPurify（options 拼接数值 ID，无 XSS 风险，style 级别）
+
+**判定**：通过，合并到 main
+
+---
+
+### 19:15 — 审核 T3 遗留工作补完
+
+**提交**：`1a07c2e` on main
+**内容**：CHANGELOG.md + 15个oa_diff单元测试 + functions-manifest基线刷新
+**验证**：fmt ✅ | clippy ✅ | test ✅ | HTML扫描 ✅
+**判定**：通过，T3 全部遗留项已清零
+
+---
+
+### 19:37 — 🚨 事故：AI 删除 templates/index.html
+
+**提交**：`bb8d8a8` "fix(T4): 准备更新 index.html — 颜色阈值修复"
+**问题**：该提交把 `templates/index.html`（首页，604行）整个删除了
+**影响**：如未发现，整个网站首页 404
+**处理**：已 `git revert` 恢复（`4aaf89a`），cargo check + HTML扫描通过
+**根因**：AI 提交标题写"颜色阈值修复"，实际却删了整个文件——可能是 git 操作失误（git rm 代替 git mv？）
+**教训**：每次 pull 后必须检查关键文件是否存在
+
+---
+
+### 01:10 — 全面审核 5 个 AI 工作
+
+**当前 main HEAD**: `2a7ea02`
+
+**逐 AI 审核结果**：
+
+#### AI-1（T1 + T4增强）
+- T1 对比文献在线搜索链 fallback: ✅ 已合并 (6427a03)
+- T4 颜色阈值修复: ✅ (5021e63) — <30天红/<60天黄/>=60天绿
+
+#### AI-2（T2 + T3）
+- T2 技术机制深度对比: ✅ 已合并 (d3a9590)
+- T3 一审-二审对比分析: ✅ 已合并 (aa8d019)
+- T3 遗留补完(CHANGELOG+15单测): ✅ (1a07c2e)
+
+#### AI-3（T4 + 误删事故）
+- T4 答复期限管理: ✅ 已合并 (4084eb6)
+- ⚠️ 误删 index.html (bb8d8a8): 已 revert (4aaf89a)
+- T4 颜色修复: ✅ (5021e63)
+
+#### 主AI（P2 + P3 全部）
+- P2-T1 多角色面板: ✅ (e8c1126)
+- P2-T2 审查员预判: ✅ (4010c0a)
+- P2-T3 对方防御: ✅ (4010c0a)
+- P3-T1 策略推荐: ✅ (9f98c6b)
+- P3-T2 修改模拟器: ✅ (5887599) — 后端+前端+i18n 全部存在
+- P3-T3 质量评估: ✅ (5887599) — 雷达图+评分卡片
+
+#### AI自动认领（P4-T2）
+- P4-T2 多轮全流程追踪: ✅ 已合并 (4a7fbe8) — oa_rounds表+CRUD+时间线UI
+
+**main 全面验证**: fmt ✅ | clippy ✅ | test ✅ | HTML扫描 ✅ | index.html 604行 ✅
+
+**未完成**: P4-T1 证据自动收集（Issue #3 无人认领）

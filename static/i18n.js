@@ -1,0 +1,1291 @@
+// InnoForge shared i18n system
+const I18N_COMMON = {
+  zh: {
+    'cad.draw': 'FreeCAD 绘图',
+    'cad.drawing': 'FreeCAD 绘图',
+    'cad.checking': '正在检查 FreeCAD…',
+    'cad.starting': '正在启动 FreeCAD…',
+    'cad.briefing': '正在整理完整绘图要求…',
+    'cad.revision': '版本',
+    'cad.preview': 'FreeCAD 模型预览',
+    'cad.assumptions': '当前假设',
+    'cad.valid': '形状校验通过',
+    'cad.invalid': '形状需要检查',
+    'cad.continue': '继续修改',
+    'cad.fullscreen': '全屏查看',
+    'cad.close': '关闭',
+    'cad.unavailable': 'FreeCAD 暂不可用',
+    'cad.textContinues': '文字对话仍可继续。',
+    'cad.retry': '重试',
+    'cad.failed': '绘图失败',
+    'cad.continuePrompt': '继续修改上一个模型：',
+    'cad.settingsTitle': 'FreeCAD 可视化绘图',
+    'cad.settingsHint': '使用本机 AionCAD 桥自动启动 FreeCAD，并把模型预览直接返回到对话中。无需 Docker 或独立沙箱。',
+    'cad.detectStart': '检测并启动',
+    'cad.workspaceLabel': 'AionCAD 工作目录',
+    'cad.workspacePlaceholder': '例如 D:\\tools\\aioncad',
+    'cad.workspaceHint': '请选择包含 bootstrap_bridge.ps1 的 AionCAD 目录。留空时仅连接已运行的兼容桥。',
+    'cad.autoStart': '绘图时自动启动 FreeCAD',
+    'cad.autoStartHint': '关闭后，绘图不会启动本机程序；可在此页手动“检测并启动”。',
+    'cad.saveSettings': '保存 FreeCAD 设置',
+    'cad.saving': '正在保存 FreeCAD 设置…',
+    'cad.saved': 'FreeCAD 设置已保存',
+    'cad.status.ready': 'FreeCAD 已就绪',
+    'cad.status.starting': 'FreeCAD 正在启动',
+    'cad.status.unavailable': 'FreeCAD 暂不可用',
+    'cad.status.unsupported': '当前平台不支持自动启动 FreeCAD',
+    'cad.settingsError.workspace_too_long': 'AionCAD 目录路径过长',
+    'cad.settingsError.workspace_not_absolute': '请输入 AionCAD 的绝对路径',
+    'cad.settingsError.workspace_not_found': '找不到该 AionCAD 目录',
+    'cad.settingsError.workspace_invalid': '该目录不包含 bootstrap_bridge.ps1',
+    'cad.settingsError.save_failed': '保存 FreeCAD 设置失败，请稍后重试',
+    'cad.error.invalid_request': '绘图说明或上下文无效',
+    'cad.error.parent_read_failed': '无法读取要继续修改的版本',
+    'cad.error.parent_not_found': '要继续修改的版本不存在',
+    'cad.error.parent_context_mismatch': '该版本不属于当前对话',
+    'cad.error.freecad_unavailable': 'FreeCAD 暂时无法启动，文字对话仍可继续',
+    'cad.error.draw_failed': 'FreeCAD 暂时无法完成绘图，文字对话仍可继续',
+    'cad.error.save_failed': '无法保存 FreeCAD 版本',
+    'cad.error.history_failed': '无法读取 FreeCAD 历史',
+    'cad.error.step_unavailable': '该版本没有 STEP 文件',
+    'cad.error.invalid_format': '不支持该下载格式',
+    'cad.error.artifact_read_failed': '无法读取 FreeCAD 版本',
+    'cad.error.artifact_not_found': 'FreeCAD 版本不存在',
+    'cad.error.invalid_path': 'FreeCAD 产物路径无效',
+    'cad.error.root_unavailable': 'FreeCAD 产物目录不可用',
+    'cad.error.file_not_found': 'FreeCAD 产物文件不存在',
+    'cad.error.response_failed': '无法返回 FreeCAD 产物文件',
+    'nav.home': '创研台',
+    'nav.search': '技术调研',
+    'nav.idea': '创新推演',
+    'nav.compare': '方案对比',
+    'nav.oar': 'OA答复',
+    'nav.ai': 'AI 助手',
+    'nav.settings': '设置',
+    // AI page
+    'ai.title': 'AI 助手',
+    'ai.hint': '可以问我技术相关的问题：可行性分析、方案比较、专利解读、技术路线等。',
+    'ai.placeholder': '输入你的问题...',
+    'ai.send': '发送',
+    'ai.thinking': '思考中...',
+    'ai.fail': '请求失败',
+    'ai.webSearch': '联网搜索',
+    'ai.searching': '正在联网搜索...',
+    'ai.retry': '🔄 重试',
+    'ai.stop': '■ 停止',
+    'ai.viewImage': '[图片]',
+    'ai.quote': '引用',
+    'ai.exportConclusions': '📝 导出结论',
+    'ai.exporting': '导出中...',
+    'ai.loadMore': '加载更多消息',
+    // Compare page
+    'compare.title': '方案对比',
+    'compare.patent1': '专利1（ID 或专利号）',
+    'compare.patent2': '专利2（ID 或专利号）',
+    'compare.placeholder1': '输入专利 ID 或专利号',
+    'compare.placeholder2': '输入专利 ID 或专利号',
+    'compare.btn': '开始对比分析',
+    'compare.analyzing': 'AI 正在对比分析中，请稍候...',
+    'compare.result': '对比分析结果',
+    'compare.fail': '分析失败',
+    'compare.alert': '请输入两个专利的 ID 或专利号',
+    'compare.stop': '■ 停止',
+    'compare.exportConclusions': '📝 导出结论',
+    'compare.exporting': '导出中...',
+    // Idea page
+    'idea.title': '创新推演',
+    'idea.hint': '输入你的技术想法，AI 会多角度分析并检索相关专利文献，生成可行性报告。',
+    'idea.titleLabel': '想法标题',
+    'idea.titlePlaceholder': '用一句话概括你的想法...',
+    'idea.descLabel': '详细描述',
+    'idea.descPlaceholder': '详细描述你的想法，包括技术方案、应用场景、解决的问题等...',
+    'idea.submit': '提交并分析',
+    'idea.clear': '清空',
+    'idea.analyzing': '分析中...',
+    'idea.done': '分析完成',
+    'idea.timeout': '分析超时（超过 3 分钟）。请检查 AI 服务是否正常运行，或在设置页面更换 AI 服务。',
+    'idea.step1': '1. 搜索网络相关技术信息',
+    'idea.step2': '2. 检索全球技术文献库',
+    'idea.step3': '3. 搜索本地已收录文献',
+    'idea.step4': '4. AI 深度分析（可能需要 60-90 秒）',
+    'idea.submitting': '正在提交...',
+    'idea.webResults': '网络调研结果',
+    'idea.patentResults': '相关技术文献',
+    'idea.history': '历史记录',
+    'idea.historyEmpty': '提交想法后这里会显示历史记录',
+    'idea.scoreHigh': '高度原创',
+    'idea.scoreMid': '有一定新颖性',
+    'idea.scoreLow': '已有较多类似方案',
+    'idea.alertTitle': '请输入想法标题',
+    'idea.alertDesc': '请输入详细描述',
+    'idea.serverError': '服务器错误',
+    'idea.submitFail': '提交失败',
+    'idea.analyzeFail': '分析失败',
+    'idea.analyzeError': '分析服务错误',
+    'idea.discussTitle': '💬 继续讨论',
+    'idea.generateSummary': '📋 生成总结',
+    'idea.chatPlaceholder': '继续深入讨论这个方案...',
+    'idea.send': '发送',
+    'idea.stop': '■ 停止',
+    'idea.chatDepth': '讨论深度：',
+    'idea.depthShallow': '浅度（探索）',
+    'idea.depthMedium': '中度（收敛）',
+    'idea.depthDeep': '深度（苏格拉底）',
+    'idea.exportConclusions': '📝 导出结论','idea.exportConversation': '📥 导出对话',
+    'idea.unsupportedChatFile': '讨论附件只支持纯文本文档（.txt/.md/.csv/.json/.xml/.yaml 等）和图片文件，不支持 PDF/DOCX。',
+    'idea.fileReadFailed': '读取文件失败：{name}，请确认后重新添加。',
+    'idea.imageTooLarge': '图片文件 {name} 超过 10MB 限制',
+    'idea.textFileTooLarge': '文本文档 {name} 超过 200KB 限制，请精简内容后再试。',
+    // Patent detail
+    'detail.analyze': 'AI 智能分析',
+    'detail.analyzing': 'AI 正在分析...',
+    'detail.result': 'AI 分析结果',
+    'detail.fail': '分析失败',
+    'detail.tabAbstract': '摘要',
+    'detail.tabClaims': '权利要求',
+    'detail.tabDesc': '说明书',
+    'detail.tabAiChat': 'AI 问答',
+    'detail.chatPlaceholder': '问我关于这个专利的任何问题...',
+    'detail.send': '发送',
+    'detail.stop': '■ 停止',
+    'detail.exportConclusions': '📝 导出结论',
+    'detail.exporting': '导出中...',
+    'detail.upload': '上传文档对比',
+    'detail.uploadHint': '上传文件与本专利进行 AI 对比分析（支持 TXT、PDF、图片）',
+    'detail.uploadBtn': '开始对比',
+    'detail.similar': '相似专利推荐',
+    'detail.similarLoading': '加载中...',
+    'detail.similarNone': '暂无相似专利',
+    'detail.similarFail': '加载失败',
+    'detail.enriching': '正在从 Google Patents 获取完整专利信息...',
+    'detail.enrichDone': '已获取完整专利信息（权利要求、说明书等）',
+    'detail.enrichFail': '获取详情失败',
+    'detail.selectFile': '请选择文件',
+    'detail.uploadAnalyzing': '分析中...',
+    // Search page
+    'search.title': '技术调研',
+    'search.placeholder': '输入关键词、专利号、发明人或申请人',
+    'mode.local': '本地检索',
+    'mode.online': '在线搜索',
+    'region.auto': '自动',
+    'region.cn': '中国',
+    'region.intl': '国际',
+    'type.auto': '智能识别',
+    'type.inventor': '发明人',
+    'type.applicant': '申请人',
+    'type.patentNumber': '专利号',
+    'type.keyword': '关键词',
+    'country.all': '全部国家',
+    'sort.relevance': '相关度',
+    'sort.new': '最新优先',
+    'sort.old': '最早优先',
+    'btn.search': '搜索',
+    'btn.stats': '统计分析',
+    'btn.export': '导出',
+    'history.title': '搜索历史',
+    'history.clear': '清空',
+    'stats.title': '统计分析',
+    'alert.searchFail': '搜索失败',
+    // Settings
+    'settings.title': '系统设置',
+    'ai.costTitle': 'AI 使用统计（近30天）',
+    'ai.totalCalls': '总调用次数',
+    'ai.totalInputTokens': '输入 Token',
+    'ai.totalOutputTokens': '输出 Token',
+    'ai.totalCost': '估算花费',
+    // EPO OPS 凭证配置位（MA5a）
+    'settings.epoTitle': '🌐 EPO OPS 搜索配置（欧洲专利局开放数据）',
+    'settings.epoHint': '配置 EPO OPS 凭证后，在线检索会自动把 EPO 数据源加入链路；Key 与 Secret 需成对配置才会生效。未配置时自动回退本地数据库。',
+    'settings.epoRegister': '注册地址',
+    'settings.epoKeyLabel': 'EPO OPS Consumer Key',
+    'settings.epoKeyPlaceholder': '输入 EPO OPS Consumer Key',
+    'settings.epoKeyHint': '明文回显，便于核对；保存后接口仅返回脱敏掩码。',
+    'settings.epoSecretLabel': 'EPO OPS Consumer Secret',
+    'settings.epoSecretPlaceholder': '输入 EPO OPS Consumer Secret',
+    'settings.epoSecretHint': '密码框回显；保存后接口仅返回脱敏掩码。',
+    'settings.epoSave': '保存 EPO OPS 凭证',
+    'settings.epoPairHint': '需成对配置才生效 / Both Consumer Key and Consumer Secret are required to take effect',
+    'settings.epoSaved': 'EPO OPS 凭证已保存',
+    'settings.epoSaveFail': 'EPO OPS 凭证保存失败',
+    'settings.epoNetworkFail': 'EPO OPS 凭证请求失败',
+    'settings.epoStatusOn': '✅ EPO OPS 已配置（在线检索已启用）',
+    'settings.epoStatusHalf': '⚠️ EPO OPS 只配置了一半，需成对配置才生效',
+    'settings.epoStatusOff': 'ℹ️ EPO OPS 未配置',
+    // OA Response page
+    'oar.title': 'OA答复分析',
+    'oar.typeLabel': '答复类型',
+    'oar.typeFirstExam': '一审/二审答复',
+    'oar.typeAbnormal': '非正常申请答复',
+    'oar.typeRejectReview': '驳回后复审',
+    'oar.typeSecondRejection': '二审驳回答复',
+    'oar.typeReexaminationRequest': '复审请求书',
+    'oar.typeReexaminationDecision': '复审决定答复',
+    'oar.typeAdminLawsuit': '行政诉讼',
+    'oar.errorHint': '请检查 AI 服务商配置：',
+    'oar.errorHintLink': '前往设置页',
+    'oar.myPatent': '我的专利（本申请）',
+    'oar.myPatentPlaceholder': '输入专利号或内部 ID',
+    'oar.lookup': '查库',
+    'oar.lookupFail': '本地库中未找到该专利',
+    'oar.oaLabel': '审查意见通知书',
+    'oar.oaPlaceholder': '请粘贴审查意见全文或上传文件',
+    'oar.refLabel': '对比文献',
+    'oar.refPlaceholder': '对比文献 {n} — 专利号或 ID',
+    'oar.addRef': '添加对比文献',
+    'oar.btnAnalyze': '开始分析',
+    'oar.analyzing': '正在分析...',
+    'oar.analyzingHint': 'AI 正在分析，请耐心等待 1-3 分钟',
+    'oar.result': '分析结果',
+    'oar.fail': '分析失败',
+    'oar.alertPatent': '请填写我的专利或上传文件',
+    'oar.alertOA': '请上传或粘贴审查意见通知书',
+    "oa.refs.autoFetch": "自动获取对比文献",
+    "oa.refs.fetching": "正在获取对比文献全文...",
+    "oa.refs.fetchSuccess": "成功获取 {count} 篇",
+    "oa.refs.fetchFail": "获取失败，请手动上传",
+    "oa.refs.notFound": "未找到全文",
+    "oa.mechanism.title": "技术机制深度对比",
+    "oa.mechanism.domain": "技术领域",
+    "oa.mechanism.principle": "工作原理",
+    "oa.mechanism.motivation": "结合动机",
+    "oa.mechanism.synergy": "协同效应",
+    "oa.panel.btn": "多角色会诊",
+    "oa.panel.loading": "4角色会诊中...",
+    "oa.panel.fail": "会诊失败",
+    "oa.preview.btn": "模拟审查员预判",
+    "oa.preview.loading": "审查员预判中...",
+    "oa.preview.needResponse": "请先生成答复文本",
+    "oa.defense.btn": "对方视角防御",
+    "oa.defense.loading": "防御分析中...",
+    "oa.adversarial.title": "多轮对抗推演",
+    "oa.adversarial.rounds": "对抗轮数",
+    "oa.adversarial.focus": "焦点问题",
+    "oa.adversarial.start": "多轮对抗推演",
+    "oa.adversarial.progress": "推演中...",
+    "oa.adversarial.examiner": "审查员质疑",
+    "oa.adversarial.agent": "代理师回应",
+    "oa.adversarial.confidence": "信心度",
+    "oa.adversarial.final": "终稿答复书",
+    "oa.adversarial.weakPoints": "残留风险点",
+    "oa.adversarial.converged": "已收敛",
+    "oa.adversarial.notConverged": "未完全收敛",
+    "oa.adversarial.severity.high": "严重",
+    "oa.adversarial.severity.medium": "中等",
+    "oa.adversarial.severity.low": "轻微",
+    "oa.adversarial.copy": "复制终稿",
+    "oa.adversarial.export": "导出",
+    "oa.strategy.btn": "智能推荐策略",
+    "oa.strategy.loading": "策略推荐中...",
+    "oa.strategy.probability": "成功概率",
+    "oa.strategy.priority": "优先级",
+    "oa.strategy.reason": "推荐理由",
+    "oa.strategy.notRecommended": "不推荐",
+    "oa.strategy.select": "采用此策略",
+    "oa.strategy.selected": "已选择",
+    "oa.strategy.noStrategy": "未找到策略",
+    "oa.quality.btn": "质量评估",
+    "oa.quality.loading": "评分中...",
+    "oa.quality.title": "答复质量评估",
+    "oa.quality.total": "总分",
+    "oa.quality.grade": "等级",
+    "oa.quality.logic": "逻辑严密性",
+    "oa.quality.evidence": "证据引用",
+    "oa.quality.distinction": "区别特征论证",
+    "oa.quality.modification": "修改合理性",
+    "oa.quality.tone": "措辞专业度",
+    "oa.quality.completeness": "回复完整性",
+    "oa.quality.weaknesses": "薄弱点",
+    "oa.quality.suggestions": "改进建议",
+    "oa.quality.detail": "评分说明",
+    "oa.quality.notApplicable": "不适用维度",
+    "oa.quality.noResponse": "请先生成答复文本",
+    "oa.quality.scoreError": "评分失败",
+    "oa.claimSim.title": "权利要求修改模拟器",
+    "oa.claimSim.original": "原始权利要求",
+    "oa.claimSim.modified": "修改后权利要求",
+    "oa.claimSim.simulate": "模拟审查",
+    "oa.claimSim.loading": "模拟审查中...",
+    "oa.claimSim.support": "说明书支持",
+    "oa.claimSim.novelty": "新颖性",
+    "oa.claimSim.inventiveness": "创造性",
+    "oa.claimSim.scope": "保护范围",
+    "oa.claimSim.overall": "总体判断",
+    "oa.claimSim.suggestions": "修改建议",
+    "oa.claimSim.risk": "风险等级",
+    "oa.claimSim.noModified": "请输入修改后的权利要求",
+    "oa.diff.title": "一审-二审对比分析",
+    "oa.diff.newReasons": "新增驳回理由",
+    "oa.diff.overcome": "已克服问题",
+    "oa.diff.refChange": "对比文件变化",
+    "oa.diff.noHistory": "无历史 OA 记录",
+    "oa.diff.loading": "正在加载历史对比...",
+    "oa.diff.from": "第{n}轮",
+    "oa.diff.to": "第{n}轮",
+    "oa.diff.typeChange": "类型变化",
+    "oa.diff.claimChange": "权利要求变化",
+    "oa.diff.injectHistory": "已注入一审历史上下文",
+    "oa.diff.onlyOne": "仅有一轮 OA 记录，无法对比",
+    "oa.deadline.reminder": "OA 答复到期提醒",
+    "oa.deadline.urgent": "剩余 {days} 天",
+    "oa.deadline.expired": "已逾期 {days} 天",
+    "oa.workflow.timeline": "OA 时间线",
+    "oa.workflow.round": "第{n}轮",
+    "oa.workflow.newRound": "新建轮次",
+    "oa.workflow.result": "审查结果",
+    "oa.workflow.pending": "待回复",
+    "oa.workflow.accepted": "已授权",
+    "oa.workflow.rejected": "已驳回",
+    "oa.workflow.partial": "部分授权",
+    "oa.workflow.strategy": "使用策略",
+    "oa.workflow.compare": "轮次对比",
+    "oa.workflow.noRounds": "暂无 OA 轮次记录",
+    "oa.workflow.createRound": "创建新轮次",
+    "oa.workflow.roundType": "OA 类型",
+    "oa.workflow.oaDate": "发文日期",
+    "oa.workflow.responseDate": "答复日期",
+    "oa.workflow.qualityScore": "质量评分",
+    "oa.workflow.notes": "备注",
+    "oa.workflow.saveResult": "保存结果",
+    "oa.workflow.loading": "加载时间线...",
+    "oa.workflow.empty": "该专利尚无 OA 流程记录",
+    "oa.workflow.totalRounds": "共 {n} 轮",
+    "oa.workflow.completed": "已完成 {n} 轮",
+    "oa.workflow.viewDetail": "查看详情",
+    "oa.evidence.btn": "自动收集证据",
+    "oa.evidence.title": "证据中心",
+    "oa.evidence.specSupport": "说明书支持",
+    "oa.evidence.distinction": "区别点",
+    "oa.evidence.techEffect": "技术效果",
+    "oa.evidence.priorArt": "现有技术缺陷",
+    "oa.evidence.experimental": "实验数据",
+    "oa.evidence.relevance": "相关性",
+    "oa.evidence.useInResponse": "用于答复",
+    "oa.evidence.summary": "证据统计",
+    "oa.evidence.loading": "证据收集中...",
+    "oa.evidence.empty": "暂无证据，请点击「自动收集证据」",
+    "oa.evidence.total": "共 {n} 条证据",
+    "oa.evidence.avgRelevance": "平均相关性",
+    "oa.evidence.inserted": "已插入答复上下文",
+    "oa.evidence.noData": "请先填写专利文本和OA文本",
+    'oar.alertEmptyContent': '内容不能为空',
+    'oar.copy': '📋 复制全文',
+    'oar.export': '📥 导出 Markdown',
+    'oar.discussTitle': '💬 AI 讨论 — 基于当前 OA 上下文',
+    'oar.discussHint': '已加载 OA 答复上下文，请提出你的问题。',
+    'oar.discussBtn': '💬 AI 讨论',
+    'oar.discussInput': '输入你的问题...',
+    'oar.send': '发送',
+    'oar.stop': '■ 停止',
+    'oar.exportConclusions': '📝 AI 总结结论',
+    'oar.exportTranscript': '📥 导出完整讨论记录',
+    'oar.exporting': '导出中...',
+    'oar.exportFail': '没有足够的讨论内容',
+    'oar.discussHistoryTitle': '历史讨论',
+    'oar.discussHistoryDesc': '选择历史讨论继续，或开始新讨论',
+    'oar.discussHistoryEmpty': '暂无历史讨论记录',
+    'oar.discussHistoryContinue': '继续',
+    'oar.discussHistoryNew': '新讨论',
+    'oar.discussRecovered': '已从历史恢复讨论',
+    'oar.discussImport': '导入',
+    'oar.discussImportTitle': '导入讨论记录',
+    'oar.discussImportDesc': '粘贴已有的讨论内容（纯文本即可），将保存为一条历史讨论',
+    'oar.discussImportPlaceholder': '在此粘贴讨论文本...',
+    'oar.discussImportConfirm': '导入',
+    'oar.discussSession': '讨论会话',
+    'oar.discussSessionDate': '创建时间',
+    'oar.discussSessionMsgs': '消息数',
+    'oar.transcriptTitle': 'OA 完整讨论记录',
+    'oar.transcriptNotice': '以下为原始讨论记录，未经 AI 二次改写。',
+    'oar.transcriptGeneratedAt': '导出时间',
+    'oar.transcriptContext': '起始讨论上下文',
+    'oar.transcriptMessages': '讨论消息',
+    'oar.transcriptTime': '时间',
+    'oar.transcriptTimeUnknown': '未记录',
+    'oar.transcriptRoleSystem': '系统上下文',
+    'oar.transcriptRoleUser': '用户',
+    'oar.transcriptRoleAssistant': 'AI 助手',
+    'oar.depthLabel': '分析深度：',
+    'oar.depthShallow': '快速概览',
+    'oar.depthMedium': '标准分析',
+    'oar.depthDeep': '深度穷追',
+    'oar.pasteTitle': '粘贴文本',
+    'oar.pasteTitlePlaceholder': '文档标题',
+    'oar.pasteContentPlaceholder': '在此粘贴文本内容...',
+    'oar.pasteOATitle': '粘贴审查意见通知书',
+    'oar.pasteOADefaultTitle': '审查意见通知书',
+    'oar.pasteRefTitle': '粘贴对比文献',
+    'oar.pasteRefDefaultTitle': '对比文献',
+    'oar.myPatentDefaultTitle': '我的专利',
+    'oar.untitled': '未命名',
+    'oar.historyLabel': '分析历史',
+    'oar.amendTitle': '权利要求修改助手',
+    'oar.amendBtn': '✏️ 修改权利要求',
+    'oar.checkAmendments': '🔍 审查修改方案',
+    'oar.amendHint': '修改后点击「审查修改方案」检查是否克服驳回理由',
+    'oar.libTitle': '答复论据库（常用论点模板）',
+    'oar.checklistTitle': '提交前自检清单',
+    'oar.checklistProgress': '已完成',
+    'oar.check1': '已逐条回应审查员的每项驳回理由',
+    'oar.check2': '权利要求修改未超出原范围（A33）',
+    'oar.check3': '意见陈述书中引用了对比文献的具体段落',
+    'oar.check4': '修改方案具备创造性论述（A22.3）',
+    'oar.check5': '已包含修改说明和替换页（如需要）',
+    'oar.check6': '格式正确，可直接提交或转交代理师审查',
+    'oar.argTitle': '论点看板',
+    'oar.extractArgs': '萃取结论',
+    'oar.extracting': '萃取中...',
+    'oar.argConfirmed': '已确定',
+    'oar.argPending': '待补充',
+    'oar.argRisk': '有风险',
+    'oar.argAdopt': '采纳',
+    'oar.argReject': '否决',
+    'oar.deadlineTitle': '答复期限',
+    'oar.deadlineLabel': 'OA 发文日：',
+    'oar.showDiff': '📊 对比差异',
+    'oar.matrixTitle': '驳回理由映射表',
+    'oar.section1': '第一部分：权利要求逐项解析',
+    'oar.section2': '第二部分：审查员驳回逻辑逐条还原',
+    'oar.section3': '第三部分：特征对比总表',
+    'oar.section4': '第四部分：逐权利要求反驳论点',
+    'oar.section5': '第五部分：意见陈述书草稿',
+    'oar.section5Pending': '待讨论确认后生成',
+    'oar.discussDesc': '对分析内容有疑问或修改意见？在此与 AI 讨论',
+    'oar.discussReady': 'AI 分析已完成，请审阅。有任何疑问可以在此讨论。确认无误后点击下方按钮生成答复书。',
+    'oar.discussPlaceholder': '输入讨论内容...',
+    'oar.discussSend': '发送',
+    'oar.discussYou': '你',
+    'oar.btnGenerateResponse': '生成意见陈述书',
+    'oar.btnGenerateReexam': '生成复审请求书',
+    'oar.btnGenerateReexamReq': '生成复审请求书',
+    'oar.btnGenerateReexamDecision': '生成复审决定答复',
+    'oar.btnGenerateAdminLawsuit': '生成行政诉讼起诉状',
+    'oar.section5Reexam': '第五部分：复审请求书草稿',
+    'oar.section5ReexamDecision': '第五部分：复审决定答复草稿',
+    'oar.section5AdminLawsuit': '第五部分：行政诉讼起诉状草稿',
+    'oar.generateHintReexam': '确认分析无误后可生成正式复审请求书',
+    'oar.generateHintReexamDecision': '确认分析无误后可生成正式复审决定答复',
+    'oar.generateHintAdminLawsuit': '确认分析无误后可生成正式行政诉讼起诉状',
+    'oar.generateHint': '确认分析无误后可生成正式答复书',
+    'oar.generating': '生成中...',
+    'oar.generated': '已生成',
+    'oar.generationQualityError': '未生成可用的答复书正文。请检查 OA 原文是否可读，必要时粘贴或修正 OA 全文后重试。',
+    'oar.analysisInfo': '分析结果分为 {n} 个部分，请逐部分审阅。确认分析准确后，参考意见陈述书草稿撰写正式答复。',
+    'oar.exportResponse': '导出意见陈述书',
+    'oar.noResponseDraft': '未找到意见陈述书草稿',
+    'oar.responseDraftTitle': '意见陈述书',
+    'oar.responseDraftApplicant': '申请人',
+    'oar.responseDraftDate': '日期',
+    'oar.responseDraftFilename': '意见陈述书',
+    // Common utility
+    'common.upload': '上传',
+    'common.paste': '粘贴文本',
+    'common.cancel': '取消',
+    'common.confirm': '确定',
+    'common.copied': '已复制',
+    'common.thinking': '思考中...',
+    'common.extracting': '正在提取文本...',
+    'common.chars': '字',
+    'common.viewOriginal': '查看原文',
+    'common.remove': '移除',
+    // Common
+    'common.info.patent': '专利号',
+    'common.info.applicant': '申请人',
+    'common.info.inventor': '发明人',
+    'common.info.filingDate': '申请日',
+    'common.info.pubDate': '公开日',
+    'common.info.grantDate': '授权日',
+    'common.info.country': '国家/地区',
+    'common.info.legalStatus': '法律状态',
+    'common.info.basicInfo': '基本信息',
+    'common.info.classification': '分类号'
+  },
+  en: {
+    'cad.draw': 'FreeCAD Drawing',
+    'cad.drawing': 'FreeCAD Drawing',
+    'cad.checking': 'Checking FreeCAD…',
+    'cad.starting': 'Starting FreeCAD…',
+    'cad.briefing': 'Preparing the complete drawing brief…',
+    'cad.revision': 'Revision',
+    'cad.preview': 'FreeCAD model preview',
+    'cad.assumptions': 'Current assumptions',
+    'cad.valid': 'Shape validation passed',
+    'cad.invalid': 'Shape needs review',
+    'cad.continue': 'Continue modifying',
+    'cad.fullscreen': 'Fullscreen',
+    'cad.close': 'Close',
+    'cad.unavailable': 'FreeCAD unavailable',
+    'cad.textContinues': 'Text chat is still available.',
+    'cad.retry': 'Retry',
+    'cad.failed': 'Drawing failed',
+    'cad.continuePrompt': 'Continue modifying the previous model: ',
+    'cad.settingsTitle': 'FreeCAD Visual Drawing',
+    'cad.settingsHint': 'Use the local AionCAD bridge to start FreeCAD and return model previews directly to chat. No Docker or separate sandbox is required.',
+    'cad.detectStart': 'Detect and start',
+    'cad.workspaceLabel': 'AionCAD workspace',
+    'cad.workspacePlaceholder': 'For example, D:\\tools\\aioncad',
+    'cad.workspaceHint': 'Choose the AionCAD directory containing bootstrap_bridge.ps1. Leave it blank to connect only to an already-running compatible bridge.',
+    'cad.autoStart': 'Start FreeCAD automatically when drawing',
+    'cad.autoStartHint': 'When disabled, drawing will not launch local programs. Use “Detect and start” here when needed.',
+    'cad.saveSettings': 'Save FreeCAD settings',
+    'cad.saving': 'Saving FreeCAD settings…',
+    'cad.saved': 'FreeCAD settings saved',
+    'cad.status.ready': 'FreeCAD is ready',
+    'cad.status.starting': 'FreeCAD is starting',
+    'cad.status.unavailable': 'FreeCAD is unavailable',
+    'cad.status.unsupported': 'Automatic FreeCAD startup is unsupported on this platform',
+    'cad.settingsError.workspace_too_long': 'The AionCAD workspace path is too long',
+    'cad.settingsError.workspace_not_absolute': 'Enter an absolute AionCAD workspace path',
+    'cad.settingsError.workspace_not_found': 'The AionCAD workspace could not be found',
+    'cad.settingsError.workspace_invalid': 'This directory does not contain bootstrap_bridge.ps1',
+    'cad.settingsError.save_failed': 'Could not save FreeCAD settings. Please try again.',
+    'cad.error.invalid_request': 'The drawing request or context is invalid',
+    'cad.error.parent_read_failed': 'Could not read the model revision to continue',
+    'cad.error.parent_not_found': 'The model revision to continue does not exist',
+    'cad.error.parent_context_mismatch': 'That model revision does not belong to this conversation',
+    'cad.error.freecad_unavailable': 'FreeCAD could not be started. Text chat remains available.',
+    'cad.error.draw_failed': 'FreeCAD could not complete this drawing. Text chat remains available.',
+    'cad.error.save_failed': 'Could not save the FreeCAD revision',
+    'cad.error.history_failed': 'Could not load FreeCAD history',
+    'cad.error.step_unavailable': 'This revision has no STEP file',
+    'cad.error.invalid_format': 'That download format is unsupported',
+    'cad.error.artifact_read_failed': 'Could not read the FreeCAD revision',
+    'cad.error.artifact_not_found': 'The FreeCAD revision does not exist',
+    'cad.error.invalid_path': 'The FreeCAD artifact path is invalid',
+    'cad.error.root_unavailable': 'The FreeCAD artifact directory is unavailable',
+    'cad.error.file_not_found': 'The FreeCAD artifact file does not exist',
+    'cad.error.response_failed': 'Could not return the FreeCAD artifact file',
+    'nav.home': 'InnoForge',
+    'nav.search': 'Research',
+    'nav.idea': 'Deep Reasoning',
+    'nav.compare': 'Compare',
+    'nav.oar': 'OA Reply',
+    'nav.ai': 'AI Assistant',
+    'nav.settings': 'Settings',
+    'ai.title': 'AI Assistant',
+    'ai.hint': 'Ask me about technical topics: feasibility analysis, solution comparison, patent review, technology roadmaps, etc.',
+    'ai.placeholder': 'Enter your question...',
+    'ai.send': 'Send',
+    'ai.thinking': 'Thinking...',
+    'ai.fail': 'Request failed',
+    'ai.webSearch': 'Web Search',
+    'ai.searching': 'Searching the web...',
+    'ai.retry': '🔄 Retry',
+    'ai.stop': '■ Stop',
+    'ai.viewImage': '[Image]',
+    'ai.quote': 'Quote',
+    'ai.exportConclusions': '📝 Export Conclusions',
+    'ai.exporting': 'Exporting...',
+    'ai.loadMore': 'Load more messages',
+    'compare.title': 'Solution Comparison',
+    'compare.patent1': 'Patent 1 (ID or patent number)',
+    'compare.patent2': 'Patent 2 (ID or patent number)',
+    'compare.placeholder1': 'Enter patent ID or number',
+    'compare.placeholder2': 'Enter patent ID or number',
+    'compare.btn': 'Start Comparison',
+    'compare.analyzing': 'AI is analyzing, please wait...',
+    'compare.result': 'Comparison Results',
+    'compare.fail': 'Analysis failed',
+    'compare.alert': 'Please enter two patent IDs or numbers',
+    'compare.stop': '■ Stop',
+    'compare.exportConclusions': '📝 Export Conclusions',
+    'compare.exporting': 'Exporting...',
+    'idea.title': 'Innovation Reasoning',
+    'idea.hint': 'Enter your technical idea. AI will analyze it from multiple angles, search related patents and literature, and generate a feasibility report.',
+    'idea.titleLabel': 'Idea Title',
+    'idea.titlePlaceholder': 'Summarize your idea in one sentence...',
+    'idea.descLabel': 'Detailed Description',
+    'idea.descPlaceholder': 'Describe your idea, technical approach, use cases...',
+    'idea.submit': 'Submit & Analyze',
+    'idea.clear': 'Clear',
+    'idea.analyzing': 'Analyzing...',
+    'idea.done': 'Analysis Complete',
+    'idea.timeout': 'Analysis timed out (>3 min). Check AI service or switch provider in Settings.',
+    'idea.step1': '1. Searching web for related technologies',
+    'idea.step2': '2. Searching global technical literature',
+    'idea.step3': '3. Searching local knowledge base',
+    'idea.step4': '4. AI deep analysis (60-90 seconds)',
+    'idea.submitting': 'Submitting...',
+    'idea.webResults': 'Web Research Results',
+    'idea.patentResults': 'Related Technical Literature',
+    'idea.history': 'History',
+    'idea.historyEmpty': 'History will appear after submitting ideas',
+    'idea.scoreHigh': 'Highly Original',
+    'idea.scoreMid': 'Moderately Novel',
+    'idea.scoreLow': 'Many Similar Solutions Exist',
+    'idea.alertTitle': 'Please enter an idea title',
+    'idea.alertDesc': 'Please enter a description',
+    'idea.serverError': 'Server error',
+    'idea.submitFail': 'Submission failed',
+    'idea.analyzeFail': 'Analysis failed',
+    'idea.analyzeError': 'Analysis service error',
+    'idea.discussTitle': '💬 Continue Discussion',
+    'idea.generateSummary': '📋 Generate Summary',
+    'idea.chatPlaceholder': 'Continue discussing this solution...',
+    'idea.send': 'Send',
+    'idea.stop': '■ Stop',
+    'idea.chatDepth': 'Discussion Depth:',
+    'idea.depthShallow': 'Shallow (Explore)',
+    'idea.depthMedium': 'Medium (Converge)',
+    'idea.depthDeep': 'Deep (Socratic)',
+    'idea.exportConclusions': '📝 Export Conclusions','idea.exportConversation': '📥 Export Conversation',
+    'idea.unsupportedChatFile': 'Chat attachments only support plain text files (.txt/.md/.csv/.json/.xml/.yaml etc.) and images. PDF/DOCX not supported.',
+    'idea.fileReadFailed': 'Failed to read file: {name}. Please re-add it.',
+    'idea.imageTooLarge': 'Image file {name} exceeds 10MB limit',
+    'idea.textFileTooLarge': 'Text file {name} exceeds 200KB limit. Please shorten and try again.',
+    'detail.analyze': 'AI Analysis',
+    'detail.analyzing': 'AI is analyzing...',
+    'detail.result': 'AI Analysis Result',
+    'detail.fail': 'Analysis failed',
+    'detail.tabAbstract': 'Abstract',
+    'detail.tabClaims': 'Claims',
+    'detail.tabDesc': 'Description',
+    'detail.tabAiChat': 'AI Chat',
+    'detail.chatPlaceholder': 'Ask me anything about this patent...',
+    'detail.send': 'Send',
+    'detail.stop': '■ Stop',
+    'detail.exportConclusions': '📝 Export Conclusions',
+    'detail.exporting': 'Exporting...',
+    'detail.upload': 'Upload Document for Comparison',
+    'detail.uploadHint': 'Upload a file to compare with this patent via AI (TXT, PDF, images supported)',
+    'detail.uploadBtn': 'Start Comparison',
+    'detail.similar': 'Similar Patents',
+    'detail.similarLoading': 'Loading...',
+    'detail.similarNone': 'No similar patents found',
+    'detail.similarFail': 'Failed to load',
+    'detail.enriching': 'Fetching full patent details from Google Patents...',
+    'detail.enrichDone': 'Full patent details loaded (claims, description, etc.)',
+    'detail.enrichFail': 'Failed to fetch details',
+    'detail.selectFile': 'Please select a file',
+    'detail.uploadAnalyzing': 'Analyzing...',
+    // Search page
+    'search.title': 'Research',
+    'search.placeholder': 'Enter keywords, patent number, inventor or applicant',
+    'mode.local': 'Local',
+    'mode.online': 'Online',
+    'region.auto': 'Auto',
+    'region.cn': 'China',
+    'region.intl': 'International',
+    'type.auto': 'Smart',
+    'type.inventor': 'Inventor',
+    'type.applicant': 'Applicant',
+    'type.patentNumber': 'Patent No.',
+    'type.keyword': 'Keyword',
+    'country.all': 'All Countries',
+    'sort.relevance': 'Relevance',
+    'sort.new': 'Newest First',
+    'sort.old': 'Oldest First',
+    'btn.search': 'Search',
+    'btn.stats': 'Statistics',
+    'btn.export': 'Export',
+    'history.title': 'Search History',
+    'history.clear': 'Clear',
+    'stats.title': 'Statistics',
+    'alert.searchFail': 'Search failed',
+    'settings.title': 'System Settings',
+    'ai.costTitle': 'AI Usage Stats (Last 30 Days)',
+    'ai.totalCalls': 'Total Calls',
+    'ai.totalInputTokens': 'Input Tokens',
+    'ai.totalOutputTokens': 'Output Tokens',
+    'ai.totalCost': 'Estimated Cost',
+    // EPO OPS credential slots (MA5a)
+    'settings.epoTitle': '🌐 EPO OPS Search Settings (European Patent Office Open Data)',
+    'settings.epoHint': 'Once EPO OPS credentials are configured, online search adds the EPO source to the provider chain. Consumer Key and Consumer Secret must be configured as a pair; without them the app falls back to the local database.',
+    'settings.epoRegister': 'Register here',
+    'settings.epoKeyLabel': 'EPO OPS Consumer Key',
+    'settings.epoKeyPlaceholder': 'Enter EPO OPS Consumer Key',
+    'settings.epoKeyHint': 'Shown as plain text for verification; the API only returns a masked value after saving.',
+    'settings.epoSecretLabel': 'EPO OPS Consumer Secret',
+    'settings.epoSecretPlaceholder': 'Enter EPO OPS Consumer Secret',
+    'settings.epoSecretHint': 'Shown as a password field; the API only returns a masked value after saving.',
+    'settings.epoSave': 'Save EPO OPS Credentials',
+    'settings.epoPairHint': '需成对配置才生效 / Both Consumer Key and Consumer Secret are required to take effect',
+    'settings.epoSaved': 'EPO OPS credentials saved',
+    'settings.epoSaveFail': 'Failed to save EPO OPS credentials',
+    'settings.epoNetworkFail': 'EPO OPS credential request failed',
+    'settings.epoStatusOn': '✅ EPO OPS configured (online search enabled)',
+    'settings.epoStatusHalf': '⚠️ EPO OPS is half-configured; both halves must be set to take effect',
+    'settings.epoStatusOff': 'ℹ️ EPO OPS not configured',
+    // OA Response page
+    'oar.title': 'OA Response Analysis',
+    'oar.typeLabel': 'Response Type',
+    'oar.typeFirstExam': '1st/2nd Office Action',
+    'oar.typeAbnormal': 'Abnormal Application',
+    'oar.typeRejectReview': 'Re-examination',
+    'oar.typeSecondRejection': '2nd Rejection Response',
+    'oar.typeReexaminationRequest': 'Reexamination Request',
+    'oar.typeReexaminationDecision': 'Reexamination Decision',
+    'oar.typeAdminLawsuit': 'Administrative Lawsuit',
+    'oar.errorHint': 'Please check AI provider config:',
+    'oar.errorHintLink': 'Go to Settings',
+    'oar.myPatent': 'My Patent (This Application)',
+    'oar.myPatentPlaceholder': 'Enter patent number or internal ID',
+    'oar.lookup': 'Search DB',
+    'oar.lookupFail': 'Patent not found in local DB',
+    'oar.oaLabel': 'Office Action',
+    'oar.oaPlaceholder': 'Paste office action text or upload file',
+    'oar.refLabel': 'Reference Documents',
+    'oar.refPlaceholder': 'Reference {n} — patent number or ID',
+    'oar.addRef': 'Add Reference',
+    'oar.btnAnalyze': 'Start Analysis',
+    'oar.analyzing': 'Analyzing...',
+    'oar.analyzingHint': 'AI is analyzing, please wait 1-3 minutes',
+    'oar.result': 'Analysis Result',
+    'oar.fail': 'Analysis failed',
+    'oar.alertPatent': 'Please enter your patent or upload file',
+    'oar.alertOA': 'Please upload or paste office action',
+    "oa.refs.autoFetch": "Auto-fetch references",
+    "oa.refs.fetching": "Fetching reference full text...",
+    "oa.refs.fetchSuccess": "Fetched {count} references",
+    "oa.refs.fetchFail": "Fetch failed, please upload manually",
+    "oa.refs.notFound": "Full text not found",
+    "oa.mechanism.title": "Technical Mechanism Comparison",
+    "oa.mechanism.domain": "Technical Domain",
+    "oa.mechanism.principle": "Working Principle",
+    "oa.mechanism.motivation": "Combination Motivation",
+    "oa.mechanism.synergy": "Synergistic Effect",
+    "oa.panel.btn": "Multi-role Panel",
+    "oa.panel.loading": "4-role consultation in progress...",
+    "oa.panel.fail": "Panel failed",
+    "oa.preview.btn": "Examiner Preview",
+    "oa.preview.loading": "Examiner previewing...",
+    "oa.preview.needResponse": "Please generate response first",
+    "oa.defense.btn": "Defense Analysis",
+    "oa.defense.loading": "Defense analyzing...",
+    "oa.strategy.btn": "Recommend Strategy",
+    "oa.adversarial.title": "Adversarial Deliberation",
+    "oa.adversarial.rounds": "Rounds",
+    "oa.adversarial.focus": "Focus Issue",
+    "oa.adversarial.start": "Adversarial Deliberation",
+    "oa.adversarial.progress": "Deliberating...",
+    "oa.adversarial.examiner": "Examiner Challenge",
+    "oa.adversarial.agent": "Agent Response",
+    "oa.adversarial.confidence": "Confidence",
+    "oa.adversarial.final": "Final Response",
+    "oa.adversarial.weakPoints": "Remaining Weak Points",
+    "oa.adversarial.converged": "Converged",
+    "oa.adversarial.notConverged": "Not Fully Converged",
+    "oa.adversarial.severity.high": "High",
+    "oa.adversarial.severity.medium": "Medium",
+    "oa.adversarial.severity.low": "Low",
+    "oa.adversarial.copy": "Copy Final",
+    "oa.adversarial.export": "Export",
+    "oa.strategy.loading": "Recommending strategy...",
+    "oa.strategy.probability": "Success Probability",
+    "oa.strategy.priority": "Priority",
+    "oa.strategy.reason": "Reason",
+    "oa.strategy.notRecommended": "Not Recommended",
+    "oa.strategy.select": "Use This Strategy",
+    "oa.strategy.selected": "Selected",
+    "oa.strategy.noStrategy": "No strategy found",
+    "oa.quality.btn": "Quality Score",
+    "oa.quality.loading": "Scoring...",
+    "oa.quality.title": "Response Quality Assessment",
+    "oa.quality.total": "Total",
+    "oa.quality.grade": "Grade",
+    "oa.quality.logic": "Logic",
+    "oa.quality.evidence": "Evidence",
+    "oa.quality.distinction": "Distinction",
+    "oa.quality.modification": "Modification",
+    "oa.quality.tone": "Tone",
+    "oa.quality.completeness": "Completeness",
+    "oa.quality.weaknesses": "Weaknesses",
+    "oa.quality.suggestions": "Suggestions",
+    "oa.quality.detail": "Detail",
+    "oa.quality.notApplicable": "N/A",
+    "oa.quality.noResponse": "Please generate response first",
+    "oa.quality.scoreError": "Scoring failed",
+    "oa.claimSim.title": "Claim Modification Simulator",
+    "oa.claimSim.original": "Original Claims",
+    "oa.claimSim.modified": "Modified Claims",
+    "oa.claimSim.simulate": "Simulate Examination",
+    "oa.claimSim.loading": "Simulating...",
+    "oa.claimSim.support": "Spec Support",
+    "oa.claimSim.novelty": "Novelty",
+    "oa.claimSim.inventiveness": "Inventiveness",
+    "oa.claimSim.scope": "Scope",
+    "oa.claimSim.overall": "Overall",
+    "oa.claimSim.suggestions": "Suggestions",
+    "oa.claimSim.risk": "Risk Level",
+    "oa.claimSim.noModified": "Please enter modified claims",
+    "oa.strategy.btn": "智能推荐策略",
+    "oa.strategy.loading": "策略推荐中...",
+    "oa.strategy.probability": "成功概率",
+    "oa.strategy.priority": "优先级",
+    "oa.strategy.reason": "推荐理由",
+    "oa.strategy.notRecommended": "不推荐",
+    "oa.strategy.select": "采用此策略",
+    "oa.strategy.selected": "已选择",
+    "oa.strategy.noStrategy": "未找到策略",
+    "oa.quality.btn": "质量评估",
+    "oa.quality.loading": "评分中...",
+    "oa.quality.title": "答复质量评估",
+    "oa.quality.total": "总分",
+    "oa.quality.grade": "等级",
+    "oa.quality.logic": "逻辑严密性",
+    "oa.quality.evidence": "证据引用",
+    "oa.quality.distinction": "区别特征论证",
+    "oa.quality.modification": "修改合理性",
+    "oa.quality.tone": "措辞专业度",
+    "oa.quality.completeness": "回复完整性",
+    "oa.quality.weaknesses": "薄弱点",
+    "oa.quality.suggestions": "改进建议",
+    "oa.quality.detail": "评分说明",
+    "oa.quality.notApplicable": "不适用维度",
+    "oa.quality.noResponse": "请先生成答复文本",
+    "oa.quality.scoreError": "评分失败",
+    "oa.claimSim.title": "权利要求修改模拟器",
+    "oa.claimSim.original": "原始权利要求",
+    "oa.claimSim.modified": "修改后权利要求",
+    "oa.claimSim.simulate": "模拟审查",
+    "oa.claimSim.loading": "模拟审查中...",
+    "oa.claimSim.support": "说明书支持",
+    "oa.claimSim.novelty": "新颖性",
+    "oa.claimSim.inventiveness": "创造性",
+    "oa.claimSim.scope": "保护范围",
+    "oa.claimSim.overall": "总体判断",
+    "oa.claimSim.suggestions": "修改建议",
+    "oa.claimSim.risk": "风险等级",
+    "oa.claimSim.noModified": "请输入修改后的权利要求",
+    "oa.diff.title": "First-Second Examination Diff",
+    "oa.diff.newReasons": "New Rejection Reasons",
+    "oa.diff.overcome": "Overcome Issues",
+    "oa.diff.refChange": "Reference Changes",
+    "oa.diff.noHistory": "No History OA Records",
+    "oa.diff.loading": "Loading history comparison...",
+    "oa.diff.from": "Round {n}",
+    "oa.diff.to": "Round {n}",
+    "oa.diff.typeChange": "Type Change",
+    "oa.diff.claimChange": "Claim Changes",
+    "oa.diff.injectHistory": "First exam history context injected",
+    "oa.diff.onlyOne": "Only one OA round, cannot compare",
+    "oa.deadline.reminder": "OA Response Deadline Reminders",
+    "oa.deadline.urgent": "{days} days remaining",
+    "oa.deadline.expired": "Overdue {days} days",
+    "oa.workflow.timeline": "OA Timeline",
+    "oa.workflow.round": "Round {n}",
+    "oa.workflow.newRound": "New Round",
+    "oa.workflow.result": "Result",
+    "oa.workflow.pending": "Pending",
+    "oa.workflow.accepted": "Accepted",
+    "oa.workflow.rejected": "Rejected",
+    "oa.workflow.partial": "Partially Accepted",
+    "oa.workflow.strategy": "Strategy",
+    "oa.workflow.compare": "Compare Rounds",
+    "oa.workflow.noRounds": "No OA rounds recorded",
+    "oa.workflow.createRound": "Create New Round",
+    "oa.workflow.roundType": "OA Type",
+    "oa.workflow.oaDate": "OA Date",
+    "oa.workflow.responseDate": "Response Date",
+    "oa.workflow.qualityScore": "Quality Score",
+    "oa.workflow.notes": "Notes",
+    "oa.workflow.saveResult": "Save Result",
+    "oa.workflow.loading": "Loading timeline...",
+    "oa.workflow.empty": "No OA workflow records for this patent",
+    "oa.workflow.totalRounds": "{n} rounds total",
+    "oa.workflow.completed": "{n} rounds completed",
+    "oa.workflow.viewDetail": "View Detail",
+    "oa.evidence.btn": "Collect Evidence",
+    "oa.evidence.title": "Evidence Center",
+    "oa.evidence.specSupport": "Spec Support",
+    "oa.evidence.distinction": "Distinction",
+    "oa.evidence.techEffect": "Technical Effect",
+    "oa.evidence.priorArt": "Prior Art Deficiency",
+    "oa.evidence.experimental": "Experimental Data",
+    "oa.evidence.relevance": "Relevance",
+    "oa.evidence.useInResponse": "Use in Response",
+    "oa.evidence.summary": "Summary",
+    "oa.evidence.loading": "Collecting evidence...",
+    "oa.evidence.empty": "No evidence yet. Click \"Collect Evidence\" to start.",
+    "oa.evidence.total": "{n} evidence items",
+    "oa.evidence.avgRelevance": "Avg Relevance",
+    "oa.evidence.inserted": "Inserted into response context",
+    "oa.evidence.noData": "Please fill in patent text and OA text first",
+    'oar.alertEmptyContent': 'Content cannot be empty',
+    'oar.copy': '📋 Copy Text',
+    'oar.export': '📥 Export Markdown',
+    'oar.discussTitle': '💬 AI Discussion — Based on OA Context',
+    'oar.discussHint': 'OA context loaded. Ask your questions.',
+    'oar.discussBtn': '💬 AI Discussion',
+    'oar.discussInput': 'Enter your question...',
+    'oar.send': 'Send',
+    'oar.stop': '■ Stop',
+    'oar.exportConclusions': '📝 AI Summary',
+    'oar.exportTranscript': '📥 Export Full Discussion Record',
+    'oar.exporting': 'Exporting...',
+    'oar.exportFail': 'Not enough discussion content',
+    'oar.discussHistoryTitle': 'Discussion History',
+    'oar.discussHistoryDesc': 'Select a past discussion to continue, or start a new one',
+    'oar.discussHistoryEmpty': 'No discussion history found',
+    'oar.discussHistoryContinue': 'Continue',
+    'oar.discussHistoryNew': 'New Discussion',
+    'oar.discussRecovered': 'Discussion recovered from history',
+    'oar.discussImport': 'Import',
+    'oar.discussImportTitle': 'Import Discussion',
+    'oar.discussImportDesc': 'Paste your existing discussion text and it will be saved as a history session',
+    'oar.discussImportPlaceholder': 'Paste discussion text here...',
+    'oar.discussImportConfirm': 'Import',
+    'oar.discussSession': 'Session',
+    'oar.discussSessionDate': 'Created',
+    'oar.discussSessionMsgs': 'Messages',
+    'oar.transcriptTitle': 'OA Full Discussion Record',
+    'oar.transcriptNotice': 'This is the original discussion record and has not been rewritten by AI.',
+    'oar.transcriptGeneratedAt': 'Exported at',
+    'oar.transcriptContext': 'Initial Discussion Context',
+    'oar.transcriptMessages': 'Discussion Messages',
+    'oar.transcriptTime': 'Time',
+    'oar.transcriptTimeUnknown': 'Not recorded',
+    'oar.transcriptRoleSystem': 'System Context',
+    'oar.transcriptRoleUser': 'User',
+    'oar.transcriptRoleAssistant': 'AI Assistant',
+    'oar.depthLabel': 'Depth:',
+    'oar.depthShallow': 'Quick',
+    'oar.depthMedium': 'Standard',
+    'oar.depthDeep': 'Deep',
+    'oar.pasteTitle': 'Paste Text',
+    'oar.pasteTitlePlaceholder': 'Document title',
+    'oar.pasteContentPlaceholder': 'Paste text content here...',
+    'oar.pasteOATitle': 'Paste Office Action',
+    'oar.pasteOADefaultTitle': 'Office Action',
+    'oar.pasteRefTitle': 'Paste Reference Document',
+    'oar.pasteRefDefaultTitle': 'Reference Document',
+    'oar.myPatentDefaultTitle': 'My Patent',
+    'oar.untitled': 'Untitled',
+    'oar.historyLabel': 'Analysis History',
+    'oar.amendTitle': 'Claim Amendment Assistant',
+    'oar.amendBtn': '✏️ Amend Claims',
+    'oar.checkAmendments': '🔍 Review Amendments',
+    'oar.amendHint': 'Edit claims above then click "Review Amendments"',
+    'oar.libTitle': 'Argument Library (Common Templates)',
+    'oar.checklistTitle': 'Pre-filing Checklist',
+    'oar.checklistProgress': 'completed',
+    'oar.check1': 'Responded to each rejection ground',
+    'oar.check2': 'Amendments do not exceed original scope (A33)',
+    'oar.check3': 'Response cites specific passages from references',
+    'oar.check4': 'Amendment includes inventive step argument (A22.3)',
+    'oar.check5': 'Includes amendment explanation and replacement pages',
+    'oar.check6': 'Format ready for filing or attorney review',
+    'oar.argTitle': 'Argument Board',
+    'oar.extractArgs': 'Extract Conclusions',
+    'oar.extracting': 'Extracting...',
+    'oar.argConfirmed': 'Confirmed',
+    'oar.argPending': 'Needs Supplement',
+    'oar.argRisk': 'Has Risk',
+    'oar.argAdopt': 'Adopt',
+    'oar.argReject': 'Reject',
+    'oar.deadlineTitle': 'Deadline',
+    'oar.deadlineLabel': 'OA Date:',
+    'oar.showDiff': '📊 Show Diff',
+    'oar.matrixTitle': 'Rejection Mapping',
+    'oar.section1': 'Part 1: Claim Analysis',
+    'oar.section2': 'Part 2: Examiner Rejection Logic',
+    'oar.section3': 'Part 3: Feature Comparison Table',
+    'oar.section4': 'Part 4: Claim-by-Claim Counter-Arguments',
+    'oar.section5': 'Part 5: Response Draft',
+    'oar.section5Pending': 'Pending discussion confirmation',
+    'oar.discussDesc': 'Questions or suggestions about the analysis? Discuss with AI here',
+    'oar.discussReady': 'AI analysis complete. Please review. Ask any questions here. Click the button below to generate the response letter once confirmed.',
+    'oar.discussPlaceholder': 'Type your discussion...',
+    'oar.discussSend': 'Send',
+    'oar.discussYou': 'You',
+    'oar.btnGenerateResponse': 'Generate Response Letter',
+    'oar.btnGenerateReexam': 'Generate Reexamination Request',
+    'oar.btnGenerateReexamReq': 'Generate Reexamination Request',
+    'oar.btnGenerateReexamDecision': 'Generate Reexamination Decision Response',
+    'oar.btnGenerateAdminLawsuit': 'Generate Admin Lawsuit Complaint',
+    'oar.section5Reexam': 'Part 5: Reexamination Request Draft',
+    'oar.section5ReexamDecision': 'Part 5: Reexamination Decision Response Draft',
+    'oar.section5AdminLawsuit': 'Part 5: Admin Lawsuit Complaint Draft',
+    'oar.generateHintReexam': 'Generate formal reexamination request after confirming analysis',
+    'oar.generateHintReexamDecision': 'Generate formal reexamination decision response after confirming analysis',
+    'oar.generateHintAdminLawsuit': 'Generate formal admin lawsuit complaint after confirming analysis',
+    'oar.generateHint': 'Generate formal response after confirming the analysis',
+    'oar.generating': 'Generating...',
+    'oar.generated': 'Generated',
+    'oar.generationQualityError': 'No usable response text was generated. Check whether the OA text is readable, then paste or correct the full OA text and try again.',
+    'oar.analysisInfo': 'Analysis divided into {n} parts. Review each section, then use Part 5 to draft your formal response.',
+    'oar.exportResponse': 'Export Response Draft',
+    'oar.noResponseDraft': 'No response draft found',
+    'oar.responseDraftTitle': 'Response Statement',
+    'oar.responseDraftApplicant': 'Applicant',
+    'oar.responseDraftDate': 'Date',
+    'oar.responseDraftFilename': 'Response_Statement',
+    // Common utility
+    'common.upload': 'Upload',
+    'common.paste': 'Paste',
+    'common.cancel': 'Cancel',
+    'common.confirm': 'OK',
+    'common.copied': 'Copied',
+    'common.thinking': 'Thinking...',
+    'common.extracting': 'Extracting text...',
+    'common.chars': ' chars',
+    'common.viewOriginal': 'View Original',
+    'common.remove': 'Remove',
+    'common.info.patent': 'Patent No.',
+    'common.info.applicant': 'Applicant',
+    'common.info.inventor': 'Inventor',
+    'common.info.filingDate': 'Filing Date',
+    'common.info.pubDate': 'Publication Date',
+    'common.info.grantDate': 'Grant Date',
+    'common.info.country': 'Country/Region',
+    'common.info.legalStatus': 'Legal Status',
+    'common.info.basicInfo': 'Basic Information',
+    'common.info.classification': 'Classification'
+  }
+};
+
+const I18N_LANG_KEY = 'innoforge_ui_lang';
+let i18nLang = localStorage.getItem(I18N_LANG_KEY) || 'zh';
+
+function t(key, vars) {
+  const dict = I18N_COMMON[i18nLang] || I18N_COMMON.zh;
+  let value = dict[key] || key;
+  if (vars) {
+    Object.keys(vars).forEach(function(k) {
+      value = value.replace(new RegExp('\\{' + k + '\\}', 'g'), String(vars[k]));
+    });
+  }
+  return value;
+}
+
+function setI18nLang(lang) {
+  i18nLang = (lang === 'en') ? 'en' : 'zh';
+  localStorage.setItem(I18N_LANG_KEY, i18nLang);
+  applyI18nCommon();
+  // Notify page-specific hooks
+  if (window._onI18nLangChange) {
+    window._onI18nLangChange.forEach(function(fn) { fn(); });
+  }
+}
+
+function applyI18nCommon() {
+  document.documentElement.lang = i18nLang === 'zh' ? 'zh-CN' : 'en';
+  document.querySelectorAll('[data-i18n]').forEach(function(el) {
+    if (el.childElementCount === 0) { el.textContent = t(el.getAttribute("data-i18n")); }
+  });
+  document.querySelectorAll('[data-i18n-placeholder]').forEach(function(el) {
+    el.placeholder = t(el.getAttribute('data-i18n-placeholder'));
+  });
+  document.querySelectorAll('[data-i18n-title]').forEach(function(el) {
+    el.title = t(el.getAttribute('data-i18n-title'));
+  });
+  var sw = document.getElementById('lang-switch');
+  if (sw) sw.value = i18nLang;
+}
+
+// activePage is stored globally for renderSidebar to use
+var _activePage = '';
+function renderNavbar(activePage) {
+  _activePage = activePage;
+  var nav = document.getElementById('global-nav');
+  if (nav) nav.style.display = 'none';
+}
+
+// 导航图标（内联 SVG，随 currentColor 变色）
+var _NAV_ICONS = {
+  home: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 7.5 8 3l5.5 4.5V13a1.5 1.5 0 0 1-1.5 1.5H4A1.5 1.5 0 0 1 2.5 13Z"/><path d="M6.5 14.5v-4h3v4"/></svg>',
+  idea: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.5a4.5 4.5 0 0 0-2.6 8.2c.5.4.9 1 .9 1.6v.2a1 1 0 0 0 1 1h1.4a1 1 0 0 0 1-1v-.2c0-.6.4-1.2.9-1.6A4.5 4.5 0 0 0 8 1.5Z"/><path d="M6.5 13.5h3M7.5 11v2.5"/></svg>',
+  search: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3.5 3.5"/></svg>',
+  compare: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="1.5" y="2.5" width="5.5" height="9" rx="1"/><rect x="9" y="2.5" width="5.5" height="9" rx="1"/><path d="M4.25 14v-2.5M11.75 14v-2.5"/></svg>',
+  oar: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 1.5h4.5L12 5v9a.5.5 0 0 1-.5.5h-7A.5.5 0 0 1 4 14Z"/><path d="M8.5 1.5V5H12M6 9.5h4M6 11.5h2.5"/></svg>',
+  ai: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3.5A1.5 1.5 0 0 1 3.5 2h9A1.5 1.5 0 0 1 14 3.5V9a1.5 1.5 0 0 1-1.5 1.5H7l-3.2 2.7V10.5H3.5A1.5 1.5 0 0 1 2 9Z"/><path d="M5.5 6h5M5.5 8h3"/></svg>',
+  settings: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="2.3"/><path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M12.4 3.6l-1.1 1.1M4.7 11.3l-1.1 1.1"/></svg>'
+};
+
+// Render right sidebar: brand + navigation + language switch + page-specific controls
+function renderSidebar(extraHtml) {
+  var el = document.getElementById('page-sidebar');
+  if (!el) return;
+  var fromPath = location.pathname;
+  var links = [
+    { href: '/', key: 'nav.home', id: 'home', icon: 'home' },
+    { href: '/idea', key: 'nav.idea', id: 'idea', icon: 'idea' },
+    { href: '/search', key: 'nav.search', id: 'search', icon: 'search' },
+    { href: '/compare', key: 'nav.compare', id: 'compare', icon: 'compare' },
+    { href: '/oa-response', key: 'nav.oar', id: 'oar', icon: 'oar' },
+    { href: '/ai', key: 'nav.ai', id: 'ai', icon: 'ai' },
+    { href: '/settings?from=' + encodeURIComponent(fromPath), key: 'nav.settings', id: 'settings', icon: 'settings' }
+  ];
+  // Brand
+  var html = '<div class="sidebar-brand">'
+    + '<div class="brand-mark">IF</div>'
+    + '<div><div class="brand-name">InnoForge</div>'
+    + '<span class="brand-sub">创研台</span></div>'
+    + '</div>';
+  // Navigation section
+  html += '<div class="sidebar-section">';
+  html += '<div class="sidebar-label">' + (i18nLang === 'zh' ? '导航' : 'Navigation') + '</div>';
+  html += '<div class="sidebar-nav">';
+  // patent_detail 页无独立导航项，映射到「搜索」保持激活态
+  var activeId = (_activePage === 'detail') ? 'search' : _activePage;
+  for (let i = 0; i < links.length; i++) {
+    var cls = (links[i].id === activeId) ? ' class="active"' : '';
+    html += '<a href="' + links[i].href + '"' + cls + '>'
+      + _NAV_ICONS[links[i].icon] + '<span data-i18n="' + links[i].key + '">' + t(links[i].key) + '</span></a>';
+  }
+  html += '</div></div>';
+  // Language section
+  html += '<div class="sidebar-section">';
+  html += '<div class="sidebar-label">' + (i18nLang === 'zh' ? '语言' : 'Language') + '</div>';
+  html += '<select onchange="setI18nLang(this.value)" id="lang-switch">';
+  html += '<option value="zh"' + (i18nLang === 'zh' ? ' selected' : '') + '>中文</option>';
+  html += '<option value="en"' + (i18nLang === 'en' ? ' selected' : '') + '>EN</option>';
+  html += '</select>';
+  html += '</div>';
+  if (extraHtml) html += extraHtml;
+  el.innerHTML = DOMPurify.sanitize(html);
+  // 异步加载版本号显示在侧边栏底部
+  if (!window.__versionLoaded) {
+    window.__versionLoaded = true;
+    fetch('/api/version').then(function(r) { return r.json(); }).then(function(d) {
+      if (d.version) {
+        var s = document.getElementById('page-sidebar');
+        if (s) {
+          var v = document.createElement('div');
+          v.style.cssText = 'position:absolute;bottom:8px;left:0;right:0;text-align:center;color:#8b949e;font-size:12px;pointer-events:none;';
+          v.textContent = 'v' + d.version;
+          s.appendChild(v);
+        }
+      }
+    }).catch(function() {});
+  }
+}
+
+// Terminal-style chat history: ↑↓ keys recall previously sent messages.
+// ArrowUp is only hijacked when the caret is on the first line (or a single-line
+// input); ArrowDown only when on the last line. Returns { push(text) } used to
+// record each sent message. State is keyed per inputId so each page/panel keeps
+// its own independent history.
+function initChatHistory(inputId) {
+  if (!window.__chatHistoryStore) window.__chatHistoryStore = {};
+  if (!window.__chatHistoryStore[inputId]) {
+    window.__chatHistoryStore[inputId] = { history: [], idx: -1, saved: '' };
+  }
+  var store = window.__chatHistoryStore[inputId];
+  var input = document.getElementById(inputId);
+  if (!input) return { push: function() {} };
+  if (input._chatHistoryListener) {
+    input.removeEventListener('keydown', input._chatHistoryListener);
+  }
+  function handler(e) {
+    var singleLine = input.tagName === 'INPUT' && input.type === 'text';
+    if (e.key === 'ArrowUp') {
+      if (singleLine || input.selectionStart === 0) {
+        e.preventDefault();
+        if (store.idx === -1) store.saved = input.value;
+        if (store.idx < store.history.length - 1) {
+          store.idx++;
+          input.value = store.history[store.history.length - 1 - store.idx];
+          let len = input.value.length;
+          input.setSelectionRange(len, len);
+        }
+      }
+    } else if (e.key === 'ArrowDown') {
+      var atEnd = singleLine || input.selectionStart === input.value.length;
+      if (atEnd) {
+        e.preventDefault();
+        if (store.idx > 0) {
+          store.idx--;
+          input.value = store.history[store.history.length - 1 - store.idx];
+          let len = input.value.length;
+          input.setSelectionRange(len, len);
+        } else if (store.idx === 0) {
+          store.idx = -1;
+          input.value = store.saved;
+          let len = input.value.length;
+          input.setSelectionRange(len, len);
+        }
+      }
+    }
+  }
+  input.addEventListener('keydown', handler);
+  input._chatHistoryListener = handler;
+  return {
+    push: function(text) {
+      if (!text || !text.trim()) return;
+      store.history.push(text.trim());
+      store.idx = -1;
+      store.saved = '';
+    }
+  };
+}
+
+// Chat queue insert: messages typed while AI is responding are queued and
+// auto-sent when the current response finishes. Returns { enqueue, dequeue, size }.
+// A visual badge shows the number of queued messages.
+function initChatQueue(inputId) {
+  if (!window.__chatQueueStore) window.__chatQueueStore = {};
+  if (!window.__chatQueueStore[inputId]) {
+    window.__chatQueueStore[inputId] = { queue: [] };
+  }
+  var store = window.__chatQueueStore[inputId];
+  return {
+    enqueue: function(item) {
+      store.queue.push(item);
+      updateQueueBadge(inputId, store.queue.length);
+    },
+    dequeue: function() {
+      var item = store.queue.shift();
+      updateQueueBadge(inputId, store.queue.length);
+      return item;
+    },
+    size: function() { return store.queue.length; },
+    clear: function() { store.queue = []; updateQueueBadge(inputId, 0); }
+  };
+}
+
+function updateQueueBadge(inputId, count) {
+  var badge = document.getElementById(inputId + '-queue-badge');
+  if (!badge) {
+    var input = document.getElementById(inputId);
+    if (!input) return;
+    badge = document.createElement('span');
+    badge.id = inputId + '-queue-badge';
+    badge.style.cssText = 'position:absolute;top:-8px;right:-8px;background:#f0883e;color:#fff;border-radius:10px;padding:1px 6px;font-size:11px;font-weight:bold;min-width:16px;text-align:center;z-index:10;display:none;';
+    var parent = input.parentNode;
+    if (parent && getComputedStyle(parent).position === 'static') {
+      parent.style.position = 'relative';
+    }
+    if (parent) parent.appendChild(badge);
+  }
+  badge.style.display = count > 0 ? '' : 'none';
+  badge.textContent = count > 99 ? '99+' : String(count);
+}
+
+// Apply i18n on page load
+document.addEventListener('DOMContentLoaded', function() { applyI18nCommon(); });
+
+// Global DOMPurify safety guard — must run before any page code that calls DOMPurify.sanitize()
+// This ensures purify.min.js loading failure never crashes any page.
+if (typeof DOMPurify === 'undefined' || typeof DOMPurify.sanitize !== 'function') {
+    window.DOMPurify = { sanitize: function(html) {
+        return html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+                   .replace(/on\w+="[^"]*"/gi, '').replace(/on\w+='[^']*'/gi, '');
+    }};
+}
+
+// Global JS error barrier — catch runtime errors and show a visible banner
+// Prevents silent page death where errors cause buttons/functions to not respond.
+(function() {
+    var banner = null;
+    function showError(msg) {
+        if (!banner) {
+            banner = document.createElement('div');
+            banner.id = 'js-error-banner';
+            banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#f85149;color:#fff;padding:8px 16px;font-size:13px;font-family:sans-serif;text-align:center;display:none;cursor:pointer;';
+            banner.onclick = function() { this.style.display = 'none'; };
+            document.body && document.body.appendChild(banner);
+        }
+        if (banner) {
+            banner.textContent = '⚠ ' + msg;
+            banner.style.display = '';
+        }
+    }
+    window.addEventListener('error', function(e) {
+        var msg = e.message || '';
+        // Suppress noisy but harmless errors from third-party libs
+        if (msg.includes('ResizeObserver') || msg.includes('ResizeObserver loop')) return;
+        if (msg.includes('purify.min.js')) return; // UMD wrapper harmless warning
+        if (msg.includes('updatePdfFileList')) return; // search page init order
+        showError(msg.length > 120 ? msg.substring(0, 120) + '...' : msg);
+    });
+})();

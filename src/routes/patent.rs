@@ -1,0 +1,1386 @@
+use super::{efld, AppState};
+use crate::patent::*;
+use axum::{
+    extract::{Path, Query, State},
+    http::{header, StatusCode},
+    response::IntoResponse,
+    Json,
+};
+use serde_json::json;
+use std::sync::{Arc, RwLock};
+
+pub async fn api_fetch_patent(
+    State(s): State<AppState>,
+    Json(req): Json<FetchPatentRequest>,
+) -> Json<serde_json::Value> {
+    let src = req.source.as_deref().unwrap_or("epo");
+    match fetch_patent(&req.patent_number, src).await {
+        Ok(p) => {
+            match s.db.insert_patent(&p) {
+                Ok(id) => crate::db::vector::try_compute_and_save_embedding(
+                    &s.db,
+                    &id,
+                    &format!("{} {}", p.title, p.abstract_text),
+                ),
+                Err(e) => tracing::warn!("Failed to cache patent {}: {}", p.patent_number, e),
+            }
+            Json(json!({"status":"ok","patent":p}))
+        }
+        Err(e) => Json(json!({"status":"error","message":e.to_string()})),
+    }
+}
+
+pub async fn api_enrich_patent(
+    Path(id): Path<String>,
+    State(s): State<AppState>,
+) -> Json<serde_json::Value> {
+    println!("[ENRICH] patent id={}", id);
+    let patent = match s.db.get_patent(&id) {
+        Ok(Some(p)) => p,
+        _ => return Json(json!({"status":"error","message":"Patent not found"})),
+    };
+    // Only skip if we have claims AND images already
+    let has_images = patent.images.len() > 5;
+    let is_cn = patent.country == "CN" || patent.patent_number.starts_with("CN");
+    // For CN patents, force re-fetch if existing content has no CJK characters (was fetched in English)
+    let cn_needs_refetch = is_cn
+        && patent.claims.len() > 50
+        && !patent
+            .claims
+            .chars()
+            .any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c));
+    if patent.claims.len() > 50 && has_images && !cn_needs_refetch {
+        return Json(json!({"status":"ok","message":"Already enriched","patent":patent}));
+    }
+
+    let api_key = s
+        .config
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .next_serpapi_key();
+    let Some(ref api_key) = api_key else {
+        return Json(json!({"status":"error","message":"SERPAPI_KEY not configured"}));
+    };
+
+    let lang = if patent.country == "CN" || patent.patent_number.starts_with("CN") {
+        "zh"
+    } else {
+        "en"
+    };
+    let patent_id_param = format!("patent/{}/{}", patent.patent_number, lang);
+    let url = format!(
+        "https://serpapi.com/search.json?engine=google_patents_details&patent_id={}&api_key={}",
+        urlencoding::encode(&patent_id_param),
+        api_key
+    );
+    println!("[ENRICH] Fetching details for {}", patent.patent_number);
+    let client = reqwest::Client::new();
+    match client.get(&url).send().await {
+        Ok(resp) => {
+            if let Ok(body) = resp.text().await {
+                println!("[ENRICH] Response len={}", body.len());
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) {
+                    if let Some(err) = json.get("error") {
+                        return Json(
+                            json!({"status":"error","message":format!("SerpAPI: {}", err)}),
+                        );
+                    }
+                    let abstract_text = json["abstract"].as_str().unwrap_or("").to_string();
+                    let claims_arr = json["claims"].as_array();
+                    let claims = claims_arr
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|v| v.as_str())
+                                .collect::<Vec<_>>()
+                                .join("\n\n")
+                        })
+                        .unwrap_or_default();
+                    let mut description = json["description"].as_str().unwrap_or("").to_string();
+                    // SerpAPI returns description_link for long patents - try to fetch it
+                    if description.is_empty() {
+                        if let Some(desc_link) = json["description_link"].as_str() {
+                            println!("[ENRICH] Fetching description from link: {}", desc_link);
+                            if let Ok(desc_resp) = client
+                                .get(desc_link)
+                                .header("User-Agent", "Mozilla/5.0")
+                                .send()
+                                .await
+                            {
+                                if let Ok(desc_text) = desc_resp.text().await {
+                                    // The link returns HTML, extract text content
+                                    let clean = desc_text
+                                        .replace("<br>", "\n")
+                                        .replace("<br/>", "\n")
+                                        .replace("<p>", "\n")
+                                        .replace("</p>", "\n");
+                                    // Strip remaining HTML tags
+                                    static HTML_TAG_REGEX: std::sync::OnceLock<
+                                        Result<regex::Regex, regex::Error>,
+                                    > = std::sync::OnceLock::new();
+                                    let re = match HTML_TAG_REGEX
+                                        .get_or_init(|| regex::Regex::new(r"<[^>]+>"))
+                                        .as_ref()
+                                    {
+                                        Ok(regex) => regex,
+                                        Err(error) => {
+                                            tracing::error!(
+                                                error = %error,
+                                                "Failed to initialize patent description HTML regex"
+                                            );
+                                            return Json(json!({
+                                                "status":"error",
+                                                "message":"Failed to process patent description"
+                                            }));
+                                        }
+                                    };
+                                    description = re.replace_all(&clean, "").trim().to_string();
+                                    println!("[ENRICH] Got description len={}", description.len());
+                                }
+                            }
+                        }
+                    }
+                    let ipc_codes = json["classifications"]
+                        .as_array()
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|v| {
+                                    // Handle both string and object formats
+                                    v.as_str()
+                                        .map(|s| s.to_string())
+                                        .or_else(|| v["code"].as_str().map(|s| s.to_string()))
+                                })
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        })
+                        .unwrap_or_default();
+                    let family_id = json["family_id"].as_str().map(|s| s.to_string());
+                    let mut updated = patent.clone();
+                    if !abstract_text.is_empty() {
+                        updated.abstract_text = abstract_text;
+                    }
+                    if !claims.is_empty() {
+                        updated.claims = claims;
+                    }
+                    if !description.is_empty() {
+                        updated.description = description;
+                    }
+                    if !ipc_codes.is_empty() {
+                        updated.ipc_codes = ipc_codes;
+                    }
+                    if family_id.is_some() {
+                        updated.family_id = family_id;
+                    }
+                    if let Some(events) = json["legal_events"].as_array() {
+                        let status_parts: Vec<String> = events
+                            .iter()
+                            .take(3)
+                            .filter_map(|e| {
+                                let title = e["title"].as_str().unwrap_or("");
+                                let date = e["date"].as_str().unwrap_or("");
+                                if !title.is_empty() {
+                                    Some(format!("{} ({})", title, date))
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect();
+                        if !status_parts.is_empty() {
+                            updated.legal_status = status_parts.join("; ");
+                        }
+                    }
+                    // Extract images
+                    if let Some(images) = json["images"].as_array() {
+                        let img_urls: Vec<&str> =
+                            images.iter().filter_map(|v| v.as_str()).collect();
+                        if !img_urls.is_empty() {
+                            updated.images = serde_json::to_string(&img_urls).unwrap_or_default();
+                        }
+                    }
+                    // Extract PDF URL
+                    if let Some(pdf) = json["pdf"].as_str() {
+                        updated.pdf_url = pdf.to_string();
+                    }
+                    match s.db.insert_patent(&updated) {
+                        Ok(id) => crate::db::vector::try_compute_and_save_embedding(
+                            &s.db,
+                            &id,
+                            &format!("{} {}", updated.title, updated.abstract_text),
+                        ),
+                        Err(e) => tracing::warn!(
+                            "Failed to save enriched patent {}: {}",
+                            updated.patent_number,
+                            e
+                        ),
+                    }
+                    println!(
+                        "[ENRICH] Updated patent {} with claims_len={} desc_len={}",
+                        updated.patent_number,
+                        updated.claims.len(),
+                        updated.description.len()
+                    );
+                    return Json(json!({"status":"ok","patent":updated}));
+                }
+            }
+        }
+        Err(e) => println!("[ENRICH] Request error: {}", e),
+    }
+    Json(json!({"status":"error","message":"Failed to fetch patent details"}))
+}
+
+/// Free patent detail fetch from Google Patents (no API key, no VPN needed)
+///
+/// MB2: 实际逻辑委托给 [`crate::search::enrichment::enrich_patent_free`]，
+/// 本函数只做 HTTP 响应格式转换。冷却表共用、HTML 解析唯一出处均在 enrichment 模块。
+pub async fn api_enrich_patent_free(
+    Path(id): Path<String>,
+    State(s): State<AppState>,
+) -> Json<serde_json::Value> {
+    println!("[ENRICH-FREE] patent id={}", id);
+    let result = crate::search::enrichment::enrich_patent_free(&s.db, &id).await;
+    match result {
+        crate::search::enrichment::EnrichResult::AlreadyEnriched => {
+            // 查库返回已有全文的专利
+            match s.db.get_patent(&id) {
+                Ok(Some(p)) => Json(json!({"status":"ok","message":"Already enriched","patent":p})),
+                _ => Json(json!({"status":"ok","message":"Already enriched"})),
+            }
+        }
+        crate::search::enrichment::EnrichResult::Enriched { .. } => match s.db.get_patent(&id) {
+            Ok(Some(p)) => Json(json!({"status":"ok","patent":p})),
+            _ => Json(json!({"status":"ok","message":"Enriched but patent not found on re-read"})),
+        },
+        crate::search::enrichment::EnrichResult::CooldownSkipped { remaining_secs } => {
+            Json(json!({
+                "status": "cooldown",
+                "message": format!("Source in cooldown, {remaining_secs}s remaining"),
+                "remaining_secs": remaining_secs,
+            }))
+        }
+        crate::search::enrichment::EnrichResult::Failed { reason } => {
+            Json(json!({"status":"error","message":reason}))
+        }
+        crate::search::enrichment::EnrichResult::NotFound => {
+            Json(json!({"status":"error","message":"Patent not found"}))
+        }
+    }
+}
+
+/// Optional query param `?fetch=true` triggers online fetch if not found locally
+pub async fn api_patent_lookup(
+    Path(patent_number): Path<String>,
+    State(s): State<AppState>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
+) -> Json<serde_json::Value> {
+    let auto_fetch = params.get("fetch").is_some_and(|v| v == "true");
+
+    // Try normalized search first, then exact match as fallback
+    let result =
+        s.db.find_patent_by_number(&patent_number)
+            .ok()
+            .flatten()
+            .or_else(|| s.db.get_patent(&patent_number).ok().flatten());
+
+    if let Some(p) = result {
+        return Json(json!({
+            "status": "ok",
+            "patent": {
+                "patent_number": p.patent_number,
+                "title": p.title,
+                "abstract_text": p.abstract_text,
+                "description": p.description,
+                "claims": p.claims,
+                "applicant": p.applicant,
+                "inventor": p.inventor,
+            }
+        }));
+    }
+
+    // Auto-fetch from online if requested
+    if auto_fetch {
+        match fetch_patent(&patent_number, "epo").await {
+            Ok(p) => {
+                let pn = p.patent_number.clone();
+                match s.db.insert_patent(&p) {
+                    Ok(id) => crate::db::vector::try_compute_and_save_embedding(
+                        &s.db,
+                        &id,
+                        &format!("{} {}", p.title, p.abstract_text),
+                    ),
+                    Err(e) => tracing::warn!("Failed to cache patent {}: {}", pn, e),
+                }
+                if let Ok(Some(fp)) = s.db.find_patent_by_number(&patent_number) {
+                    return Json(json!({
+                        "status": "ok",
+                        "patent": {
+                            "patent_number": fp.patent_number,
+                            "title": fp.title,
+                            "abstract_text": fp.abstract_text,
+                            "description": fp.description,
+                            "claims": fp.claims,
+                            "applicant": fp.applicant,
+                            "inventor": fp.inventor,
+                        }
+                    }));
+                }
+            }
+            Err(e) => {
+                return Json(json!({
+                    "status": "error",
+                    "message": format!("本地未找到，在线抓取也失败: {}", e)
+                }));
+            }
+        }
+    }
+
+    Json(json!({"status": "error", "message": "Patent not found in local DB"}))
+}
+
+/// POST /api/patent/lookup-or-fetch — 先查本地库，找不到则在线抓取并缓存
+/// Lookup locally first, then fetch from online sources and cache
+pub async fn api_patent_lookup_and_fetch(
+    State(s): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let patent_number = req["patent_number"].as_str().unwrap_or("").trim();
+    if patent_number.is_empty() {
+        return Json(json!({"status": "error", "message": "请输入专利号"}));
+    }
+
+    // 1. Try local DB with normalized search
+    let local =
+        s.db.find_patent_by_number(patent_number)
+            .ok()
+            .flatten()
+            .or_else(|| s.db.get_patent(patent_number).ok().flatten());
+
+    if let Some(p) = local {
+        return Json(json!({
+            "status": "ok",
+            "source": "local",
+            "patent": {
+                "patent_number": p.patent_number,
+                "title": p.title,
+                "abstract_text": p.abstract_text,
+                "description": p.description,
+                "claims": p.claims,
+                "applicant": p.applicant,
+                "inventor": p.inventor,
+            }
+        }));
+    }
+
+    // 2. Fetch from EPO online
+    match fetch_patent(patent_number, "epo").await {
+        Ok(p) => {
+            let pn = p.patent_number.clone();
+            match s.db.insert_patent(&p) {
+                Ok(id) => crate::db::vector::try_compute_and_save_embedding(
+                    &s.db,
+                    &id,
+                    &format!("{} {}", p.title, p.abstract_text),
+                ),
+                Err(e) => tracing::warn!("Failed to cache fetched patent {}: {}", pn, e),
+            }
+            // Try enriched lookup after caching
+            if let Ok(Some(fp)) = s.db.find_patent_by_number(patent_number) {
+                return Json(json!({
+                    "status": "ok",
+                    "source": "online",
+                    "patent": {
+                        "patent_number": fp.patent_number,
+                        "title": fp.title,
+                        "abstract_text": fp.abstract_text,
+                        "description": fp.description,
+                        "claims": fp.claims,
+                        "applicant": fp.applicant,
+                        "inventor": fp.inventor,
+                    }
+                }));
+            }
+            // Return the raw fetched data even if caching failed
+            Json(json!({
+                "status": "ok",
+                "source": "online",
+                "patent": {
+                    "patent_number": p.patent_number,
+                    "title": p.title,
+                    "abstract_text": p.abstract_text,
+                    "description": p.description,
+                    "claims": p.claims,
+                    "applicant": p.applicant,
+                    "inventor": p.inventor,
+                }
+            }))
+        }
+        Err(e) => Json(json!({
+            "status": "error",
+            "message": format!("在线抓取失败: {}", e)
+        })),
+    }
+}
+
+pub async fn api_recommend_similar(
+    Path(id): Path<String>,
+    State(s): State<AppState>,
+) -> Json<serde_json::Value> {
+    let patent = match s.db.get_patent(&id) {
+        Ok(Some(p)) => p,
+        _ => return Json(json!({"error": "专利不存在"})),
+    };
+
+    let keywords: Vec<&str> = patent.title.split_whitespace().take(5).collect();
+    let query = keywords.join(" ");
+
+    let req = SearchRequest {
+        query,
+        page: 1,
+        page_size: 10,
+        country: None,
+        date_from: None,
+        date_to: None,
+        search_type: None,
+        sort_by: None,
+        ipc: None,
+        cpc: None,
+        region: None,
+        // MA3：推荐位不做显式语言过滤，None = 走 region/自动判定旧路径
+        language: None,
+        // MA4b：推荐位按标题关键词找相似，不带申请人过滤（None/false = 旧行为逐字不变）
+        assignee: None,
+        exact_assignee: false,
+    };
+
+    match super::api_search_online(State(s), Json(req)).await {
+        Json(result) => {
+            if let Some(patents) = result.get("patents").and_then(|p| p.as_array()) {
+                let filtered: Vec<_> = patents
+                    .iter()
+                    .filter(|p| p.get("id").and_then(|i| i.as_str()) != Some(&id))
+                    .take(5)
+                    .collect();
+                Json(json!({ "similar": filtered }))
+            } else {
+                Json(json!({"similar": []}))
+            }
+        }
+    }
+}
+
+async fn fetch_patent(num: &str, source: &str) -> anyhow::Result<Patent> {
+    let client = reqwest::Client::new();
+    match source {
+        "uspto" => fetch_uspto(&client, num).await,
+        _ => fetch_epo(&client, num).await,
+    }
+}
+
+async fn fetch_epo(client: &reqwest::Client, num: &str) -> anyhow::Result<Patent> {
+    let url = format!(
+        "https://ops.epo.org/3.2/rest-services/published-data/publication/epodoc/{num}/biblio"
+    );
+    let raw = client
+        .get(&url)
+        .header("Accept", "application/json")
+        .send()
+        .await?
+        .text()
+        .await?;
+    let json: serde_json::Value = serde_json::from_str(&raw).unwrap_or_default();
+    Ok(Patent {
+        id: uuid::Uuid::new_v4().to_string(),
+        patent_number: num.to_string(),
+        title: efld(&json, "invention-title"),
+        abstract_text: efld(&json, "abstract"),
+        description: String::new(),
+        claims: String::new(),
+        applicant: efld(&json, "applicant"),
+        inventor: efld(&json, "inventor"),
+        filing_date: efld(&json, "date-of-filing"),
+        publication_date: efld(&json, "date-of-publication"),
+        grant_date: None,
+        ipc_codes: efld(&json, "classification-ipc"),
+        cpc_codes: String::new(),
+        priority_date: String::new(),
+        country: num.chars().take(2).collect(),
+        kind_code: String::new(),
+        family_id: None,
+        legal_status: String::new(),
+        citations: "[]".into(),
+        cited_by: "[]".into(),
+        source: "epo".into(),
+        raw_json: raw,
+        created_at: chrono::Utc::now().to_rfc3339(),
+        images: "[]".into(),
+        pdf_url: String::new(),
+    })
+}
+
+async fn fetch_uspto(client: &reqwest::Client, num: &str) -> anyhow::Result<Patent> {
+    let clean = num.replace("US", "").replace('-', "");
+    let url = format!("https://api.patentsview.org/patents/query?q={{\"patent_number\":\"{clean}\"}}&f=[\"patent_number\",\"patent_title\",\"patent_abstract\",\"patent_date\",\"assignee_organization\"]");
+    let raw = client.get(&url).send().await?.text().await?;
+    let json: serde_json::Value = serde_json::from_str(&raw).unwrap_or_default();
+    let p = json["patents"].as_array().and_then(|a| a.first());
+    Ok(Patent {
+        id: uuid::Uuid::new_v4().to_string(),
+        patent_number: num.to_string(),
+        title: p
+            .and_then(|v| v["patent_title"].as_str())
+            .unwrap_or("")
+            .into(),
+        abstract_text: p
+            .and_then(|v| v["patent_abstract"].as_str())
+            .unwrap_or("")
+            .into(),
+        description: String::new(),
+        claims: String::new(),
+        applicant: p
+            .and_then(|v| v["assignee_organization"].as_str())
+            .unwrap_or("")
+            .into(),
+        inventor: String::new(),
+        filing_date: p
+            .and_then(|v| v["patent_date"].as_str())
+            .unwrap_or("")
+            .into(),
+        publication_date: String::new(),
+        grant_date: None,
+        ipc_codes: String::new(),
+        cpc_codes: String::new(),
+        priority_date: String::new(),
+        country: "US".into(),
+        kind_code: String::new(),
+        family_id: None,
+        legal_status: String::new(),
+        citations: "[]".into(),
+        cited_by: "[]".into(),
+        source: "uspto".into(),
+        raw_json: raw,
+        created_at: chrono::Utc::now().to_rfc3339(),
+        images: "[]".into(),
+        pdf_url: String::new(),
+    })
+}
+
+/// Generate a printable HTML page for PDF export (browser Print → Save as PDF)
+pub async fn api_patent_pdf(
+    Path(id): Path<String>,
+    State(s): State<AppState>,
+) -> impl IntoResponse {
+    let mut patent = match s.db.get_patent(&id) {
+        Ok(Some(p)) => p,
+        _ => {
+            return (
+                StatusCode::NOT_FOUND,
+                [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+                "<h1>Patent not found</h1>".to_string(),
+            );
+        }
+    };
+
+    // Auto-enrich if missing full text — try Google Patents free first, then SerpAPI
+    if patent.description.len() < 50 || patent.claims.len() < 50 {
+        println!(
+            "[PDF] Auto-enriching patent {} before PDF generation",
+            patent.patent_number
+        );
+
+        // MB2: 调用统一富化核心（合并第三份复制实现）
+        let _ = crate::search::enrichment::enrich_patent_free(&s.db, &id).await;
+        // 重新读取富化后的专利
+        if let Ok(Some(p)) = s.db.get_patent(&id) {
+            patent = p;
+        }
+
+        // Try SerpAPI for richer data if free scrape didn't get enough
+        let api_key = s
+            .config
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .next_serpapi_key();
+        if let Some(ref api_key) = api_key {
+            let lang = if patent.country == "CN" || patent.patent_number.starts_with("CN") {
+                "zh"
+            } else {
+                "en"
+            };
+            let patent_id_param = format!("patent/{}/{}", patent.patent_number, lang);
+            let url = format!(
+                "https://serpapi.com/search.json?engine=google_patents_details&patent_id={}&api_key={}",
+                urlencoding::encode(&patent_id_param), api_key
+            );
+            let client = reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(20))
+                .build()
+                .unwrap_or_default();
+            if let Ok(resp) = client.get(&url).send().await {
+                if let Ok(body) = resp.text().await {
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) {
+                        if json.get("error").is_none() {
+                            let desc = json["description"].as_str().unwrap_or("");
+                            if !desc.is_empty() {
+                                patent.description = desc.to_string();
+                            }
+                            let abs = json["abstract"].as_str().unwrap_or("");
+                            if !abs.is_empty() && patent.abstract_text.is_empty() {
+                                patent.abstract_text = abs.to_string();
+                            }
+                            if let Some(claims_arr) = json["claims"].as_array() {
+                                let claims = claims_arr
+                                    .iter()
+                                    .filter_map(|v| v.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join("\n\n");
+                                if !claims.is_empty() {
+                                    patent.claims = claims;
+                                }
+                            }
+                            if let Some(images) = json["images"].as_array() {
+                                let img_urls: Vec<&str> =
+                                    images.iter().filter_map(|v| v.as_str()).collect();
+                                if !img_urls.is_empty() {
+                                    patent.images =
+                                        serde_json::to_string(&img_urls).unwrap_or_default();
+                                }
+                            }
+                            if let Some(pdf) = json["pdf"].as_str() {
+                                patent.pdf_url = pdf.to_string();
+                            }
+                            // Save enriched data
+                            if let Ok(id) = s.db.insert_patent(&patent) {
+                                crate::db::vector::try_compute_and_save_embedding(
+                                    &s.db,
+                                    &id,
+                                    &format!("{} {}", patent.title, patent.abstract_text),
+                                );
+                            }
+                            println!(
+                                "[PDF] Enriched: desc={} claims={}",
+                                patent.description.len(),
+                                patent.claims.len()
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let esc = |s: &str| -> String {
+        s.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;")
+    };
+
+    let desc_html = if patent.description.is_empty() {
+        "<p style='color:#999;'>说明书内容未加载。请先在详情页点击「加载全文」后再导出。</p>"
+            .to_string()
+    } else {
+        format!(
+            "<pre style='white-space:pre-wrap;font-family:SimSun,serif;line-height:1.8;'>{}</pre>",
+            esc(&patent.description)
+        )
+    };
+
+    // Build images HTML
+    let images_html = {
+        let imgs: Vec<String> = serde_json::from_str(&patent.images).unwrap_or_default();
+        if imgs.is_empty() {
+            // No image URLs available — embed PDF directly via iframe (browser renders first page)
+            if !patent.pdf_url.is_empty() {
+                format!(
+                    "<h2>附图</h2>\n\
+                     <div style='text-align:center;margin:20px 0;'>\
+                     <embed src='{pdf}' type='application/pdf' width='100%' height='700px'>\
+                     <p style='color:#666;font-size:12px;margin-top:8px;'>\
+                     <a href='{pdf}' target='_blank'>📥 下载完整 PDF 文件</a></p>\
+                     </div>",
+                    pdf = patent.pdf_url
+                )
+            } else {
+                String::new()
+            }
+        } else {
+            let mut html = String::from("<h2>附图</h2>\n");
+            for (i, url) in imgs.iter().enumerate() {
+                let proxy_url = format!("/api/patent/image-proxy?url={}", urlencoding::encode(url));
+                html.push_str(&format!(
+                    "<div style='text-align:center;margin:20px 0;page-break-inside:avoid;'>\
+                     <img src='{}' alt='图 {}' style='max-width:100%;max-height:700px;'>\
+                     <p style='color:#666;font-size:12px;'>图 {}</p></div>\n",
+                    proxy_url,
+                    i + 1,
+                    i + 1
+                ));
+            }
+            // Also add PDF download link if available
+            if !patent.pdf_url.is_empty() {
+                html.push_str(&format!(
+                    "<div style='text-align:center;margin:20px 0;'>\
+                     <p style='color:#666;font-size:12px;'>\
+                     <a href='{pdf}' target='_blank'>📥 下载完整 PDF 文件</a></p>\
+                     </div>",
+                    pdf = patent.pdf_url
+                ));
+            }
+            html
+        }
+    };
+
+    let claims_html = if patent.claims.is_empty() {
+        "<p style='color:#999;'>权利要求内容未加载。</p>".to_string()
+    } else {
+        format!(
+            "<pre style='white-space:pre-wrap;font-family:SimSun,serif;line-height:1.8;'>{}</pre>",
+            esc(&patent.claims)
+        )
+    };
+
+    let html = format!(
+        r#"<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>{number} - {title}</title>
+<style>
+@media print {{
+    body {{ margin: 15mm; }}
+    .no-print {{ display: none !important; }}
+    h1 {{ font-size: 18pt; }}
+    h2 {{ font-size: 14pt; page-break-before: always; }}
+    h2:first-of-type {{ page-break-before: avoid; }}
+}}
+body {{ font-family: SimSun, 'Times New Roman', serif; max-width: 800px; margin: 0 auto; padding: 20px; color: #222; line-height: 1.6; }}
+h1 {{ text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; }}
+.meta-table {{ width: 100%; border-collapse: collapse; margin: 20px 0; }}
+.meta-table td {{ border: 1px solid #ccc; padding: 6px 12px; }}
+.meta-table td:first-child {{ background: #f5f5f5; font-weight: bold; width: 120px; }}
+h2 {{ color: #1a5276; border-bottom: 1px solid #ccc; padding-bottom: 5px; margin-top: 30px; }}
+.btn-print {{ display: inline-block; padding: 10px 30px; background: #238636; color: white; border: none; border-radius: 6px; font-size: 16px; cursor: pointer; margin: 20px auto; }}
+.btn-print:hover {{ background: #2ea043; }}
+.top-actions {{ text-align: center; margin-bottom: 20px; }}
+</style>
+</head>
+<body>
+<div class="no-print top-actions">
+    <button class="btn-print" onclick="window.print()">🖨️ 打印 / 保存为 PDF</button>
+    <button class="btn-print" style="background:#555;" onclick="window.close()">关闭</button>
+</div>
+<h1>{title}</h1>
+<p style="text-align:center;color:#666;font-size:14px;">专利号: {number}</p>
+<table class="meta-table">
+<tr><td>申请人</td><td>{applicant}</td></tr>
+<tr><td>发明人</td><td>{inventor}</td></tr>
+<tr><td>申请日</td><td>{filing_date}</td></tr>
+<tr><td>公开日</td><td>{pub_date}</td></tr>
+<tr><td>国家/地区</td><td>{country}</td></tr>
+<tr><td>IPC 分类</td><td>{ipc}</td></tr>
+<tr><td>法律状态</td><td>{legal}</td></tr>
+</table>
+
+<h2>摘要</h2>
+<p>{abstract_text}</p>
+
+<h2>权利要求书</h2>
+{claims_html}
+
+<h2>说明书</h2>
+{desc_html}
+
+{images_html}
+
+<div class="no-print top-actions" style="margin-top:40px;">
+    <button class="btn-print" onclick="window.print()">🖨️ 打印 / 保存为 PDF</button>
+</div>
+</body>
+</html>"#,
+        title = esc(&patent.title),
+        number = esc(&patent.patent_number),
+        applicant = esc(&patent.applicant),
+        inventor = esc(&patent.inventor),
+        filing_date = esc(&patent.filing_date),
+        pub_date = esc(&patent.publication_date),
+        country = esc(&patent.country),
+        ipc = esc(&patent.ipc_codes),
+        legal = esc(&patent.legal_status),
+        abstract_text = esc(&patent.abstract_text),
+        claims_html = claims_html,
+        desc_html = desc_html,
+        images_html = images_html,
+    );
+
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        html,
+    )
+}
+
+const ALLOWED_PATENT_IMAGE_HOSTS: &[&str] = &[
+    "patentimages.storage.googleapis.com",
+    "worldwide.espacenet.com",
+    "image.patent.k.sogou.com",
+];
+const MAX_PATENT_IMAGE_BYTES: usize = 20 * 1024 * 1024;
+
+fn allowed_patent_image_mime(content_type: Option<&str>) -> Option<&'static str> {
+    let mime = content_type?.split(';').next()?.trim();
+
+    if mime.eq_ignore_ascii_case("image/png") {
+        Some("image/png")
+    } else if mime.eq_ignore_ascii_case("image/jpeg") {
+        Some("image/jpeg")
+    } else if mime.eq_ignore_ascii_case("image/gif") {
+        Some("image/gif")
+    } else if mime.eq_ignore_ascii_case("image/webp") {
+        Some("image/webp")
+    } else if mime.eq_ignore_ascii_case("image/bmp") {
+        Some("image/bmp")
+    } else if mime.eq_ignore_ascii_case("image/avif") {
+        Some("image/avif")
+    } else {
+        None
+    }
+}
+
+fn image_content_length_is_within_limit(content_length: Option<u64>) -> bool {
+    content_length
+        .map(|length| length <= MAX_PATENT_IMAGE_BYTES as u64)
+        .unwrap_or(true)
+}
+
+fn image_body_can_accept_chunk(current_len: usize, chunk_len: usize) -> bool {
+    match current_len.checked_add(chunk_len) {
+        Some(total_len) => total_len <= MAX_PATENT_IMAGE_BYTES,
+        None => false,
+    }
+}
+
+/// Validate an upstream patent-image URL before proxying it.
+///
+/// The parsed URL is returned so callers preserve its path and query while avoiding
+/// string-prefix parsing mistakes such as user-info or subdomain host spoofing.
+fn validate_patent_image_url(raw_url: &str) -> Result<reqwest::Url, &'static str> {
+    let url = reqwest::Url::parse(raw_url).map_err(|_| "Invalid image URL")?;
+
+    if url.scheme() != "https" {
+        return Err("Only HTTPS patent image URLs are allowed");
+    }
+
+    let Some(host) = url.host_str() else {
+        return Err("Only patent image URLs from allowed domains are allowed");
+    };
+    if !ALLOWED_PATENT_IMAGE_HOSTS.contains(&host) {
+        return Err("Only patent image URLs from allowed domains are allowed");
+    }
+
+    if url.port_or_known_default() != Some(443) {
+        return Err("Only default HTTPS ports are allowed");
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err("Image URLs must not include user credentials");
+    }
+
+    Ok(url)
+}
+
+/// Proxy for patent images (bypass GFW blocking of patentimages.storage.googleapis.com)
+pub async fn api_patent_image_proxy(
+    Query(params): Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+    let url = match params.get("url") {
+        Some(raw_url) => match validate_patent_image_url(raw_url) {
+            Ok(url) => url,
+            Err(message) => {
+                return (
+                    StatusCode::FORBIDDEN,
+                    [(header::CONTENT_TYPE, "text/plain")],
+                    message.as_bytes().to_vec(),
+                );
+            }
+        },
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                [(header::CONTENT_TYPE, "text/plain")],
+                vec![],
+            );
+        }
+    };
+
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+    {
+        Ok(client) => client,
+        Err(_) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                [(header::CONTENT_TYPE, "text/plain")],
+                b"Image proxy is temporarily unavailable".to_vec(),
+            );
+        }
+    };
+
+    match client
+        .get(url)
+        .header("User-Agent", "Mozilla/5.0")
+        .send()
+        .await
+    {
+        Ok(mut resp) => {
+            if !resp.status().is_success() {
+                return (
+                    StatusCode::BAD_GATEWAY,
+                    [(header::CONTENT_TYPE, "text/plain")],
+                    format!("Upstream: {}", resp.status()).into_bytes(),
+                );
+            }
+            let content_type = match allowed_patent_image_mime(
+                resp.headers()
+                    .get(header::CONTENT_TYPE)
+                    .and_then(|value| value.to_str().ok()),
+            ) {
+                Some(content_type) => content_type,
+                None => {
+                    return (
+                        StatusCode::BAD_GATEWAY,
+                        [(header::CONTENT_TYPE, "text/plain")],
+                        b"Upstream returned an unsupported image type".to_vec(),
+                    );
+                }
+            };
+            if !image_content_length_is_within_limit(resp.content_length()) {
+                return (
+                    StatusCode::BAD_GATEWAY,
+                    [(header::CONTENT_TYPE, "text/plain")],
+                    b"Image exceeds the 20 MiB limit".to_vec(),
+                );
+            }
+
+            let mut image = Vec::with_capacity(
+                resp.content_length()
+                    .unwrap_or_default()
+                    .min(MAX_PATENT_IMAGE_BYTES as u64) as usize,
+            );
+            loop {
+                match resp.chunk().await {
+                    Ok(Some(chunk)) => {
+                        if !image_body_can_accept_chunk(image.len(), chunk.len()) {
+                            return (
+                                StatusCode::BAD_GATEWAY,
+                                [(header::CONTENT_TYPE, "text/plain")],
+                                b"Image exceeds the 20 MiB limit".to_vec(),
+                            );
+                        }
+                        image.extend_from_slice(&chunk);
+                    }
+                    Ok(None) => break,
+                    Err(_) => {
+                        return (
+                            StatusCode::BAD_GATEWAY,
+                            [(header::CONTENT_TYPE, "text/plain")],
+                            b"Failed to read image".to_vec(),
+                        );
+                    }
+                }
+            }
+
+            (
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, content_type)],
+                image,
+            )
+        }
+        Err(_) => (
+            StatusCode::BAD_GATEWAY,
+            [(header::CONTENT_TYPE, "text/plain")],
+            b"Failed to fetch image".to_vec(),
+        ),
+    }
+}
+
+// ── 法律状态查询（三级降级链）/ Legal Status Query (3-level degradation chain) ──
+
+/// GET /api/patent/:id/legal-status — 查询专利法律状态
+pub async fn api_patent_legal_status(
+    State(s): State<AppState>,
+    Path(patent_number): Path<String>,
+) -> Json<serde_json::Value> {
+    let config = s.config.clone();
+    match fetch_legal_status(&patent_number, &config).await {
+        Ok(result) => {
+            // 更新本地 Patent 记录的 legal_status 字段
+            if !result.current_status.is_empty() {
+                let status_text = result
+                    .events
+                    .iter()
+                    .take(5)
+                    .map(|e| format!("{} ({})", e.title, e.date))
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                let _ =
+                    s.db.update_patent_legal_status(&patent_number, &status_text);
+            }
+            Json(json!({"status": "ok", "result": result}))
+        }
+        Err(e) => Json(json!({"status": "error", "message": e.to_string()})),
+    }
+}
+
+/// 三级法律状态查询链 / 3-level legal status query chain
+async fn fetch_legal_status(
+    patent_number: &str,
+    config: &Arc<RwLock<super::AppConfig>>,
+) -> anyhow::Result<LegalStatusResult> {
+    let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+
+    // 第 1 级：Google Patents（已有 SerpAPI）
+    if let Ok(result) = fetch_legal_from_google_patents(patent_number, config).await {
+        if !result.events.is_empty() {
+            return Ok(result);
+        }
+    }
+
+    // 第 2 级：搜狗搜索国知局公告（Lens.org 已屏蔽）
+    if let Ok(result) = fetch_legal_from_sogou(patent_number).await {
+        if !result.events.is_empty() {
+            return Ok(result);
+        }
+    }
+
+    // 全部失败，返回未知状态
+    Ok(LegalStatusResult {
+        patent_number: patent_number.to_string(),
+        current_status: "未知".to_string(),
+        events: vec![],
+        source: "none".to_string(),
+        updated_at: now,
+    })
+}
+
+/// 第 1 级：Google Patents Details（通过 SerpAPI）
+async fn fetch_legal_from_google_patents(
+    patent_number: &str,
+    config: &Arc<RwLock<super::AppConfig>>,
+) -> anyhow::Result<LegalStatusResult> {
+    let serpapi_key = config
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .next_serpapi_key();
+    let Some(ref serpapi_key) = serpapi_key else {
+        return Err(anyhow::anyhow!("SerpAPI key not configured"));
+    };
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()?;
+
+    let url = format!(
+        "https://serpapi.com/search.json?engine=google_patents_details&patent_id={}&api_key={}",
+        urlencoding::encode(patent_number),
+        serpapi_key
+    );
+
+    let resp = client.get(&url).send().await?;
+    if !resp.status().is_success() {
+        return Err(anyhow::anyhow!("SerpAPI returned {}", resp.status()));
+    }
+
+    let json: serde_json::Value = resp.json().await?;
+    let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+    let mut events = Vec::new();
+
+    if let Some(legal_events) = json["legal_events"].as_array() {
+        for e in legal_events {
+            let title = e["title"].as_str().unwrap_or("").to_string();
+            let date = e["date"].as_str().unwrap_or("").to_string();
+            let desc = e["description"].as_str().unwrap_or("").to_string();
+            if !title.is_empty() {
+                events.push(LegalEvent {
+                    date,
+                    title,
+                    description: desc,
+                });
+            }
+        }
+    }
+
+    let current_status = infer_current_status(&events);
+
+    Ok(LegalStatusResult {
+        patent_number: patent_number.to_string(),
+        current_status,
+        events,
+        source: "google_patents".to_string(),
+        updated_at: now,
+    })
+}
+
+/// 第 2 级：搜狗搜索国知局公告页面（Lens.org 已屏蔽）
+async fn fetch_legal_from_sogou(patent_number: &str) -> anyhow::Result<LegalStatusResult> {
+    // 搜狗必须直连（不走代理），否则触发反爬虫
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .no_proxy()
+        .build()?;
+
+    let query = format!("{} 法律状态 专利", patent_number);
+    let url = format!(
+        "https://www.sogou.com/web?query={}&num=10",
+        urlencoding::encode(&query)
+    );
+
+    let resp = client
+        .get(&url)
+        .header(
+            "User-Agent",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        )
+        .header("Accept-Language", "zh-CN,zh;q=0.9")
+        .header("Accept", "text/html,application/xhtml+xml")
+        .send()
+        .await?;
+
+    let html = resp.text().await?;
+    let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+    let mut events = Vec::new();
+
+    // 从搜索结果摘要中提取法律状态关键词
+    let status_keywords = [
+        "授权",
+        "有效",
+        "无效",
+        "驳回",
+        "撤回",
+        "实审",
+        "公开",
+        "审查中",
+        "失效",
+        "届满",
+        "缴费",
+        "转让",
+        "许可",
+        "Grant",
+        "Active",
+        "Expired",
+        "Rejected",
+        "Withdrawn",
+    ];
+
+    // 从整个页面中提取法律状态关键词（搜索词已限定专利号，结果都是相关的）
+    // 先移除 script/style 标签及其内容，避免 JS/CSS 噪声（预编译 regex 避免重复开销）
+    use std::sync::OnceLock;
+    static RE_SCRIPT: OnceLock<Result<regex::Regex, regex::Error>> = OnceLock::new();
+    static RE_STYLE: OnceLock<Result<regex::Regex, regex::Error>> = OnceLock::new();
+    static RE_TAG: OnceLock<Result<regex::Regex, regex::Error>> = OnceLock::new();
+    let re_script = match RE_SCRIPT
+        .get_or_init(|| regex::Regex::new(r"(?is)<script[^>]*>.*?</script>"))
+        .as_ref()
+    {
+        Ok(regex) => regex,
+        Err(error) => {
+            tracing::error!(error = %error, "Failed to initialize Sogou script regex");
+            return Err(anyhow::anyhow!("无法初始化法律状态页面解析器"));
+        }
+    };
+    let re_style = match RE_STYLE
+        .get_or_init(|| regex::Regex::new(r"(?is)<style[^>]*>.*?</style>"))
+        .as_ref()
+    {
+        Ok(regex) => regex,
+        Err(error) => {
+            tracing::error!(error = %error, "Failed to initialize Sogou style regex");
+            return Err(anyhow::anyhow!("无法初始化法律状态页面解析器"));
+        }
+    };
+    let re_tag = match RE_TAG
+        .get_or_init(|| regex::Regex::new(r"<[^>]*>"))
+        .as_ref()
+    {
+        Ok(regex) => regex,
+        Err(error) => {
+            tracing::error!(error = %error, "Failed to initialize Sogou HTML tag regex");
+            return Err(anyhow::anyhow!("无法初始化法律状态页面解析器"));
+        }
+    };
+    let no_script = re_script.replace_all(&html, " ");
+    let no_style = re_style.replace_all(&no_script, " ");
+    // Strip HTML tags for clean text matching
+    let clean_html = re_tag.replace_all(&no_style, " ").to_string();
+
+    for kw in &status_keywords {
+        if clean_html.contains(kw) {
+            if let Some(pos) = clean_html.find(kw) {
+                // 用 char_indices 安全提取上下文，避免 UTF-8 边界 panic
+                let chars: Vec<(usize, char)> = clean_html.char_indices().collect();
+                let char_pos = chars.iter().position(|(i, _)| *i == pos).unwrap_or(0);
+                let ctx_start_idx = char_pos.saturating_sub(30);
+                let ctx_end_idx = (char_pos + 30).min(chars.len() - 1);
+                let byte_start = chars[ctx_start_idx].0;
+                let byte_end = if ctx_end_idx + 1 < chars.len() {
+                    chars[ctx_end_idx + 1].0
+                } else {
+                    clean_html.len()
+                };
+                let context = clean_html[byte_start..byte_end].trim().to_string();
+
+                // 过滤非有效中文描述：非中文字符占比 > 70% 则跳过
+                let chinese_count = context
+                    .chars()
+                    .filter(|c| *c >= '\u{4e00}' && *c <= '\u{9fff}')
+                    .count();
+                let total_non_space = context.chars().filter(|c| !c.is_whitespace()).count();
+                if total_non_space > 0 && (chinese_count as f64 / total_non_space as f64) < 0.3 {
+                    continue;
+                }
+
+                events.push(LegalEvent {
+                    date: now.clone(),
+                    title: kw.to_string(),
+                    description: context,
+                });
+            }
+        }
+    }
+
+    // 去重
+    let mut seen = std::collections::HashSet::new();
+    events.retain(|e| seen.insert(e.title.clone()));
+
+    let current_status = infer_current_status(&events);
+
+    Ok(LegalStatusResult {
+        patent_number: patent_number.to_string(),
+        current_status,
+        events,
+        source: "sogou".to_string(),
+        updated_at: now,
+    })
+}
+
+/// 从法律事件推断当前状态 / Infer current status from legal events
+fn infer_current_status(events: &[LegalEvent]) -> String {
+    for e in events {
+        let t = e.title.as_str();
+        if t.contains("无效") || t.contains("Expired") || t.contains("失效") {
+            return "无效".to_string();
+        }
+        if t.contains("驳回") || t.contains("Rejected") {
+            return "驳回".to_string();
+        }
+        if t.contains("撤回") || t.contains("Withdrawn") {
+            return "撤回".to_string();
+        }
+        if t.contains("授权") || t.contains("Grant") || t.contains("Active") {
+            return "有效".to_string();
+        }
+        if t.contains("实审") || t.contains("审查") {
+            return "审查中".to_string();
+        }
+        if t.contains("公开") {
+            return "公开".to_string();
+        }
+    }
+    "未知".to_string()
+}
+
+#[cfg(test)]
+mod patent_image_proxy_tests {
+    use super::{
+        allowed_patent_image_mime, image_body_can_accept_chunk,
+        image_content_length_is_within_limit, validate_patent_image_url, MAX_PATENT_IMAGE_BYTES,
+    };
+
+    #[test]
+    fn accepts_allowlisted_https_url_and_preserves_path_and_query() {
+        let url = validate_patent_image_url(
+            "https://patentimages.storage.googleapis.com/path/image.png?download=1",
+        )
+        .expect("allowlisted HTTPS URL should be valid");
+
+        assert_eq!(
+            url.as_str(),
+            "https://patentimages.storage.googleapis.com/path/image.png?download=1"
+        );
+    }
+
+    #[test]
+    fn accepts_case_insensitive_allowlisted_host() {
+        assert!(
+            validate_patent_image_url("https://PATENTIMAGES.STORAGE.GOOGLEAPIS.COM/image.png")
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn rejects_host_spoofing_variants() {
+        for url in [
+            "https://patentimages.storage.googleapis.com.evil.example/image.png",
+            "https://attacker@patentimages.storage.googleapis.com/image.png",
+            "https://patentimages.storage.googleapis.com@attacker.example/image.png",
+        ] {
+            assert!(
+                validate_patent_image_url(url).is_err(),
+                "should reject {url}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_non_https_non_default_port_and_invalid_urls() {
+        for url in [
+            "http://patentimages.storage.googleapis.com/image.png",
+            "https://patentimages.storage.googleapis.com:8443/image.png",
+            "not a URL",
+        ] {
+            assert!(
+                validate_patent_image_url(url).is_err(),
+                "should reject {url}"
+            );
+        }
+    }
+
+    #[test]
+    fn accepts_allowed_image_mime_types_case_insensitively_with_parameters() {
+        assert_eq!(
+            allowed_patent_image_mime(Some("IMAGE/JPEG; charset=binary")),
+            Some("image/jpeg")
+        );
+        assert_eq!(
+            allowed_patent_image_mime(Some(" image/WEBP ; q=1 ")),
+            Some("image/webp")
+        );
+    }
+
+    #[test]
+    fn rejects_missing_and_unsafe_image_mime_types() {
+        for content_type in [None, Some("image/svg+xml"), Some("text/html")] {
+            assert_eq!(
+                allowed_patent_image_mime(content_type),
+                None,
+                "should reject {content_type:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_content_length_larger_than_image_limit() {
+        assert!(image_content_length_is_within_limit(Some(
+            MAX_PATENT_IMAGE_BYTES as u64
+        )));
+        assert!(!image_content_length_is_within_limit(Some(
+            MAX_PATENT_IMAGE_BYTES as u64 + 1
+        )));
+        assert!(image_content_length_is_within_limit(None));
+    }
+
+    #[test]
+    fn rejects_streams_that_exceed_image_limit() {
+        assert!(image_body_can_accept_chunk(MAX_PATENT_IMAGE_BYTES - 1, 1));
+        assert!(!image_body_can_accept_chunk(MAX_PATENT_IMAGE_BYTES, 1));
+    }
+}

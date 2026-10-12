@@ -1,0 +1,109 @@
+# M-A 施工规格书：多源检索框架（MA1/MA2/MA3/MA5 实现依据）
+
+> 2026-08-15 规划会话编制。外部源事实经联网核实（来源见文末），标注 ⚠️ 的条目要求执行 agent 用冒烟用例实证后再依赖。
+> 配套：prd-v1.md N1-N4 需求；types-migration-map.md 类型落位。
+
+---
+
+## 1. 统一契约（crates 内新模块，先于任何源实现）
+
+```rust
+// crates/search/src/model.rs（或 src/search/model.rs，随 T1.1 缩水版落位）
+pub struct SearchQuery {
+    pub keyword: String,          // 用户输入，原样保留
+    pub country: Option<String>,  // "CN"/"US"/… 默认 Some("CN")
+    pub language: Option<Lang>,   // Chinese/English/All，默认 Chinese
+    pub assignee: Option<String>, // 申请人
+    pub exact_assignee: bool,     // MA4：精确匹配开关
+    pub date_from/date_to: Option<String>,
+    pub limit: usize,
+}
+
+pub enum SourceKind { SerpApi, GooglePatentsXhr, EpoOps, LocalFts }
+
+pub struct AttemptReport {          // MA5 诊断面板数据源
+    pub source: SourceKind,
+    pub status: AttemptStatus,      // Success | Failed(FailKind) | Skipped
+    pub latency_ms: u64,
+    pub hits: usize,
+    pub error: Option<String>,      // 用户可读，禁止裸 err.to_string()
+}
+
+pub struct SearchOutcome {
+    pub results: Vec<MergedPatent>, // 多源合并去重后（publication_number 为键）—— ❌ MA6c 裁决不做跨源拼接，`MergedPatent.key` 已删除，理由见 §6
+    pub attempts: Vec<AttemptReport>,
+}
+```
+
+**FailKind 分类（决定是否切下一源）**：Network(超时/DNS) → 切换；Quota(402/429/配额文案) → 标记冷却并切换；Auth(key 无效) → 冷却该源并切换；Parse(结构变化) → 记 bug 不切换直接报错。所有源调用必须带独立超时（建议 15s）+ 单次重试（指数退避，429 尊重 Retry-After）。**✅ MA6a 已落地**：三源超时统一 15s（SerpAPI 由旧 30s 收紧，`providers/serpapi.rs::UPSTREAM_TIMEOUT_SECS` 常量锁用例防回退；XHR/EPO 自 MA2 起即 15s）；Retry-After 在 XHR/EPO 源内单次重试中优先采用；Quota/Auth 的源级冷却消费点见 `src/search/breaker.rs`（`FailKind::cools_down()` 自 MA1 写定后首个生产消费点，接入 `routes/search.rs::api_search_online` 链前过滤 + 链后回写）。
+
+## 2. 源一：Google Patents 直抓（免费，无 Key）——推荐作为第一备用
+
+- **XHR 端点**：`GET https://patents.google.com/xhr/query?url={urlencoded}`
+  - `url=` 解码后即搜索框语法，如 `q=(固态电池)+(assignee=张三)&country=CN&language=CHINESE&sort=new`
+  - 高级过滤作为 url 串的独立参数：`country=CN`、`language=CHINESE`、`assignee=`、`inventor=`、`before=/after=priority|publication:YYYYMMDD`
+- **能力**：全球覆盖含 CN ✅、中文界面语言 ✅、无需 Key ✅
+- **已知坑（⚠️实证项）**：
+  1. 数据中心 IP 高频请求会吃 503——必须限速（建议 ≥2s 间隔+抖动）与退避；
+  2. `after=` 服务端日期过滤在 XHR 路径上行为可能与网页不一致——日期过滤改为客户端二次过滤兜底；
+  3. 返回 JSON 结构（cluster/results 字段）与网页 DOM 不同，需按实际响应建模。
+- **合规边界**：仅个人本地工具自用频率；禁止包装成对外服务。
+
+## 3. 源二：SerpAPI google_patents 引擎（付费主源，现役）
+
+- 端点 `https://serpapi.com/search.json?engine=google_patents&q=...`；高级语法同样内嵌在 q 中（`(关键词)+(country=CN)` 等）
+- 响应 `organic_results[]` 含 publication_number/title/snippet/assignee/inventor/pdf/country_status；详情走 `engine=google_patents_details`
+- **改造点**：
+  1. 迁入 trait 实现（从 routes/search.rs 抽出，逻辑保持）；
+  2. q 构造统一由 SearchQuery 渲染（含 CN/language 注入——**修复"要中文给英文"的直接动作**）；
+  3. 配额耗尽预警（余额接口已有 api_serpapi_balance，接入诊断面板）。 ✅ MA5b（search.html 诊断面板 SerpAPI 行复用该端点，失败静默降级）
+
+## 4. 源三：EPO OPS（免费注册，英文域权威）
+
+- OAuth2 client_credentials：`POST https://ops.epo.org/3.2/auth/accesstoken`（Basic key:secret），token ≈20 分钟过期需缓存刷新
+- 检索：`GET /3.2/rest-services/published-data/search?q=...&Range=1-25`，CQL 语法 `ti= ab= pa= ps= cn=CN`
+- **定位**：英文/EU 域补充源；对中文检索贡献有限，排在链路第三位。仓内 routes/patent.rs 已有 fetch_epo 雏形可复用其鉴权代码
+- 注册 Key 放设置页（新增两个配置位：EPO_KEY/EPO_SECRET，走 app_settings）
+
+## 5. 源四（可选）：PatentsView（美国专利，免费注册）
+
+- 新平台 `https://search.patentsview.org/api/v1/patent/` POST JSON 查询，需免费 API key
+- 仅美国域；作为 US 深度查询备选，M-A 可只留接口位不实现（标 Skipped 即可）
+
+## 6. 执行链策略（MA2 核心）
+
+```
+用户检索 → 并行发起 [SerpApi, GooglePatentsXhr]（各自 15s 超时）
+         → 任一成功即开始返回；全部失败 → EPO OPS → 仍无 → 本地 FTS 兜底并明示"仅本地库"
+合并去重键：publication_number 规范化（去空格/统一大小写）   ← ❌ MA6c 裁决不做，见本节末条
+```
+
+- 不做严格串行瀑布（太慢）；并行+先到先得，AttemptReport 全量记录进诊断面板 ✅ MA5b（`/api/search/online` 出参 `attempts` 键 + search 页诊断折叠面板；下方「每源独立熔断」✅ MA6a）
+- ~~合并去重键：publication_number 规范化（去空格/统一大小写），跨源结果按该键合并~~ ❌ **MA6c 裁决：不做跨源拼接，`MergedPatent.key` 字段已删除（2026-09-28，分支 `exec/ma6-dedup-ruling`）**。**裁决依据**：① 现行执行链是「并行发起 + 按登记顺序择单一胜者」（`src/search/chain.rs::resolve_by_precedence`），胜出源整份返回，架构上不存在「第二个源的结果」可供拼接（链级用例 `primary_wins_when_both_produce_hits` 断言的就是这件事）；② 该字段自 MA1 写定起只有 provider 侧断言在读、**零生产消费点**（`/api/search/online` 只发 `outcome.summaries()`，`MergedPatent`/`SearchOutcome` 从不上 wire、从不入库），属为规格书一句话保留的装饰性字段；③ 规范化去重能力已在真正需要它的路径落地并有生产消费点——`src/search/merge.rs::dedup_patent_summaries`（键 = `canonical_patent_key`，空号退化 `TITLE::<大写标题>`）服务本地 `/api/search`。**保留的真实锁**：EPO 著录公开号规范化后等于 `EP3445287`（原断言读 `key`，改为对 `summary.patent_number` 就地求值，语义一字未减）。**未来若要真做多源合并**：需先给链加「多源结果保留」的出参语义，届时按本节重建键，而不是复活一个没人读的字段。
+- 每源独立熔断 ~~：连续 3 次 FailKind∈{Quota,Auth} 后冷却 10 分钟不再尝试~~ ✅ **MA6a 已落地，实现口径修正**：单次 `cools_down()`（Quota/Auth）失败即冷却该源，时长按 `SourceKind × FailKind` 常量表（SerpAPI/EPO Quota 300s、Auth 900s；XHR Quota 120s，见 `src/search/breaker.rs`）。**放弃「连续 3 次」阈值的实证理由**：本仓实测同 IP 连打 3 发（<8s 间隔）即触发 Google 503 封禁——第 2、3 次「确认性」计数恰好落在恶性循环最疼的位置，且上游已返回 Quota/Auth 时限流即成立，多打两发省不下任何封禁时长。冷却为进程内状态（重启清零）、键为源级（换查询词不解锁），设计依据见 `breaker.rs` 模块头。
+
+## 7. 本地库兜底与索引同步（MA4）
+
+- 现状缺陷：FTS5 同步只在 save_patent 内手动 DELETE+重灌，绕过即失联
+- 修法：所有检索结果入库统一走单一入口方法（内部同步 FTS）；新增回归测试"插入→立即可搜"；触发器方案列为评估项不强制
+- **验收锚点（PRD）**：本人姓名精确搜索命中名下专利；已检索结果断网可复检
+
+## 8. 冒烟清单（执行 agent 在合入前必须逐条实证并附证据到任务 Notes）
+
+1. ✅ **2026-09-27 MA3 补半程实测通过（免费 XHR，真实出网）**：`{"query":"固态电池"}` 默认配置 → XHR 胜出，实际出网 URL `https://patents.google.com/xhr/query?url=q%3D%E5%9B%BA…%E6%B1%A0%26language%3DCHINESE`，首页 5/5 CN 号 + 中文标题；显式 `language:"english"` 同词 → URL 变 `…%26language%3DENGLISH`、`"all"` → 省略 language 参数。⚠️ 形态修正：URL 实际只带 `language=`，**`country=` 仅当请求显式传 country 时出现**（默认配置 country=None 不下发；CN 语义由 language=CHINESE 闸门承担）。证据见分支 `exec/ma3-lang-filter` PR 描述
+2. ✅ **MA4b（收尾棒 2026-09-27，实现 `07b3b3f`，经 **PR #23 合并 main，merge `2679c36`**）+ **MA6d 补形态 (c) 取证（2026-09-28，PR #27 merge `a6130bb`）→ 本项四形态已收口三类**（全程免费 XHR、真实出网）：assignee 精确性验证已确证三类形态——
+   - 形态 (a) `q=assignee:"西南交通大学"`（q 内嵌引号）：出网 URL 逐字符 `https://patents.google.com/xhr/query?url=q%3Dassignee%3A%22%E8%A5%BF%E5%8D%97%E4%BA%A4%E9%80%9A%E5%A4%A7%E5%AD%A6%22` → 真 JSON，`total_num_results=542`，首页 10/10 行 `patent.assignee` **全等**「西南交通大学」。**确证：q 内嵌引号形态真过滤**。
+   - 形态 (b) `q=固态电池&assignee=西南交通大学`（裸值独立参数）：出网 URL 逐字符 `https://patents.google.com/xhr/query?url=q%3D%E5%9B%BA%E6%80%81%E7%94%B5%E6%B1%A0%26assignee%3D%E8%A5%BF%E5%8D%97%E4%BA%A4%E9%80%9A%E5%A4%A7%E5%AD%A6` → 真 JSON，`total_num_results=58`（远小于「固态电池」全量的十万级），10/10 行 assignee 为 `<b>西南交通大学</b>`（上游把命中字段包 `<b>` 高亮），标题全部固态电池相关。**确证：独立裸值参数同样真过滤**——即本仓 `inner_url` 在 `exact_assignee=false`（缺省）时下发的形态。
+   - **已取证（MA6d 入档，2026-09-28 规划会话于反爬窗口外单次实测出网；原始件存仓库外 `D:\Temp\ma6d-probe\`：`form_c.json` 24429 字节真 JSON / `probe_url.txt` / `form_c_summary.txt`）**：形态 (c) 引号独立参数 `assignee="…"`（即 `exact_assignee=true` 下发形状）——出网 URL 逐字符 `https://patents.google.com/xhr/query?url=q%3D%E5%9B%BA%E6%80%81%E7%94%B5%E6%B1%A0%26assignee%3D%22%E8%A5%BF%E5%8D%97%E4%BA%A4%E9%80%9A%E5%A4%A7%E5%AD%A6%22` → HTTP 200、真 JSON（非 1103 字节 `Sorry...` 反爬页），`total_num_results=58`，首页 10/10 行 `patent.assignee` **严格全等**「西南交通大学」（公开号样本 CN110991049B / CN100582266C / CN120275837B / CN110968968A / CN113224379A）。**确证：引号独立参数形态上游真过滤**。⚠️ **caveat（如实标注）**：`total=58` 与形态 (b) 裸值参数 total **同值** ⇒ 至少对本例，引号相对裸值**只改语法形态、不改命中集**——`exact_assignee=true` 的上游语义是「下发精确匹配语法」，不是「在 (b) 之外进一步收窄」。**仍未取证（禁止过度结论）**：英文机构名形态（引号与裸值独立参数）仍只拿到 1103 字节 Google `Sorry...` 反爬 HTML（含多次 `*.retry.json` 重试），须在限频窗口外或换 IP 后重测，**不得据此对英文形态下任何生效性结论**。
+   - 已核查 `<b>` 高亮标签**不构成入库脏数据隐患**：main 的 `xhr_to_patent` 已对 title/snippet/assignee 统一走 `strip_highlight_tags`（`providers/google_patents_xhr.rs:463/473/474/477`，用例 :1034-1037），无需改代码。原始响应 JSON 与 URL 存 `D:\Temp\ma4b-probe\`（仓库外，不提交）。
+   - **等值通道真实实例取证（替代路径，验收锚点「本人姓名精确搜索」本地半边已实证）**：临时全新空库实例（`D:\Temp\ma4b-hit-probe`，未触碰用户 `innoforge.db`）把形态 (b) 真实抓回的 10 行 + 1 行构造对照「西南交通大学宜宾研究院」经 `/api/patents/import` 入库后打 `/api/search/online`：`{"query":"西南交通大学","search_type":"applicant","exact_assignee":true}` → attempts 末条 `{"source":"local_fts","status":"Success","hits":10}` 且 10/10 申请人全等（等值通道排除了变体）；同请求不带开关 → hits=11 含变体（旧 `LIKE %词%` 逐字不变）。**限制（MA4b 收尾时点）**：入库动作发生在「本实例在线命中」一档当时仍受上游反爬阻断未取证，故「在线命中→断网复检」全链路当时未闭合。**MA6d 已闭合（2026-09-28，在线命中档真闭合，非注入替代路径）**：临时全新空库实例（`D:\Temp\ma6d-hit-probe`，用户 `innoforge.db` mtime 未变、全程未触碰）真实出网打 `/api/search/online` `{"query":"固态电池","assignee":"西南交通大学"}` → `google_patents_xhr Success`（hits=1 为相关性闸门显示档，total=58，1.8s 真延），同页真实 10 行整页落入本实例 `patents` 表（`source='google_patents_xhr'`，申请人/发明人/日期/国别齐全，`abstract_text` 205–307 字符全文无截断，`patents_fts` 同步即时命中 10 行）；随后仅走本地端点 `/api/search`（`search_smart_exact` → SQLite，结构上零出网，且临时实例无 `.env` 无任何在线源凭据）复检：applicant 检索 total=10 与在线入库条数一致、`exact_assignee=true` 10/10 全等、专利号 `CN113224379A` 直查命中且标题逐字一致。请求/响应原始 JSON 与逐条读数存仓库外 `D:\Temp\ma6d-hit-probe\`（`PROBE_SUMMARY.txt`）。**诚实边界**：本包「断网」为通道级证据（复检全程未依赖出网调用），未注入 OS 级网络故障；验收锚点「本人姓名可搜到自己名下专利」的端到端取证至此闭合。
+3. ⚠️ SerpAPI q 内嵌 `(country=CN)` 后中文命中率对比——**2026-09-27 MA3 冒烟如实记录环境阻塞：本机未配置 SERPAPI_KEY，免费降级链下 SerpAPI 恒为 Skipped，无法做命中率对比**（配置 Key 后由凭证侧执行）
+4. ✅ **2026-09-27 MA4a 实测（断网兜底形态 + attempts 记账取证）**：临时全新空库实例（`D:\Temp\innoforge-e2e-run`，不触碰用户 `innoforge.db`）起服后打 `/api/search/online`，生僻词 `zzyyxx_offline_probe_qwertyuiop9x` 在线零命中自然回退，attempts 末条如实记 `{"source":"local_fts","status":"Success","hits":0,"latency_ms":0}`（前置 `serpapi Skipped`→`google_patents_xhr Success hits=0`），出参 `source:"local"`/hint/`patents[]/total/google_url/message` 与 MA4a 前逐字一致。完整 JSON 见分支 `exec/ma4a-localfts` PR body。注：本机未注入网络故障，取证形态为「在线零命中→本地兜底」，与「禁用两在线源」等价落在同一兜底分支；本地命中档（hits>0）由 `68ff948` 内存库单测锁形状。
+5. 503 场景退避生效（连续请求间隔 <1s 应触发限速保护而非打满错误）
+
+## 参考来源
+
+- [SerpAPI Google Patents Organic Results 文档](https://serpapi.com/google-patents-organic-results)（已抓取存 .firecrawl/）
+- [Google Patents 隐藏 XHR 端点分析](https://dev.to/jdpg23/tracking-new-patent-filings-without-an-api-key-google-patents-has-a-hidden-xhr-endpoint-4ec7)（已抓取存 .firecrawl/）
+- [PatentsView Search API](http://search.patentsview.org/docs/docs/Search%20API/SearchAPIReference/)
+- [EPO OPS v3.2 官方文档 PDF](https://link.epo.org/web/ops_v3.2_documentation_-_version_1.3.18_en.pdf)

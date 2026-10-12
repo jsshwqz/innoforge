@@ -1,0 +1,4 @@
+#!/bin/sh
+# InnoForge 硬防线：提交前自动扫描 HTML 模板函数完整性
+echo '🔍 扫描 HTML 模板函数完整性...'
+node check_html_functions.mjs
