@@ -1,0 +1,91 @@
+target/
+*.db
+*.db-shm
+*.db-wal
+.env
+.claude/
+.skill-router/
+mcp_stderr.txt
+# docs/plans/ — 版本规划文档需要入库，不再忽略
+*.zip
+node_modules
+# package-lock.json 必须入库：CI 的 `npm ci` 依赖它才能在干净 runner 上复现依赖（见 AGENTS.md §4.3）
+server.log
+
+# 根目录不放置源代码文件（所有源码在 src/ 下）
+/main.rs
+# 工具脚本不提交到仓库
+/write_start.py
+/mineru.bat
+memory_store.json
+
+# 构建产物和临时文件
+*.zip
+server.log
+*.db-journal
+
+# 临时工具脚本 / Temp utility scripts
+/fix_template.js
+/2
+
+# .reasonix / .codex 配置目录（AI Agent 工作文件）
+.reasonix/
+.codex/
+
+# 调试产物 / Debug artifacts（排障时落到根目录的请求体、日志、抓取结果）
+# 2026-09-20 核实：239 个已跟踪文件中无任何路径命中下列模式，故不会屏蔽真实源码
+_*.txt
+_*.json
+_*.py
+.firecrawl/
+
+# 测试适配器 / Test adapters
+testaionui-adapters/
+testpatent-hub-backup.skill-routermanifest.json
+
+# 备份文件 / Backup files
+*.bak
+test-*.js
+test-screenshots/
+test-screenshots-e2e/
+image_*.png
+.mcp.json
+
+# 运行时产物 / Runtime artifacts
+*.log
+docs/self-review/
+logs/
+uploads/
+docs/visible-e2e-runs/
+docs/depth-gate-runs/
+tools/__pycache__/
+tmp_real_regression_test.py
+hotfix_v053.patch
+
+# AI 生成的报告和临时产物 / AI-generated reports and temp artifacts
+辩论报告*.md
+辩论报告*.txt
+ocr_result.json
+test_*.png
+test_*.pdf
+
+# 已拆出的独立项目 / Separated into standalone repos
+skills/
+innoforge-skill/
+mobile/
+harmonyos/
+scripts/
+self-review.bat
+
+# 用户数据与导出（禁止入库，防止公网泄露）
+data/oa-exports/
+data/uploads/
+
+# 测试 fixtures 含案件数据，禁止入库
+# oa_real_case/ 保留忽略；oa_sample/ 放行（合成 fixture，T3 提交）
+tests/fixtures/*
+!tests/fixtures/oa_sample/
+
+# 根目录 PDF 与复审草稿禁止入库（T2.1 脱管）
+/*.pdf
+/reexam_letter_*
