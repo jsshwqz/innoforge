@@ -1,0 +1,197 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Git tag to build (e.g. v0.6.0)'
+        required: true
+        type: string
+  push:
+    tags:
+      - 'v*'
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate release metadata
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.extract-tag.outputs.tag }}
+      should_run: ${{ steps.extract-tag.outputs.should_run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Extract tag name
+        id: extract-tag
+        run: |
+          if [ -n "${{ inputs.tag }}" ]; then
+            TAG="${{ inputs.tag }}"
+            SHOULD_RUN=true
+          elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF_NAME}"
+            SHOULD_RUN=true
+          else
+            # Branch push: derive tag from Cargo.toml version
+            VERSION=$(grep -m1 '^version = ' Cargo.toml | sed 's/version = "//;s/"//')
+            TAG="v${VERSION}"
+            if git rev-parse --verify "${TAG}^{commit}" >/dev/null 2>&1; then
+              SHOULD_RUN=true
+              echo "Found tag ${TAG} in repo"
+            else
+              SHOULD_RUN=false
+              echo "Tag ${TAG} not found, skipping release"
+            fi
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "should_run=${SHOULD_RUN}" >> "$GITHUB_OUTPUT"
+          echo "Release tag: ${TAG}, should_run: ${SHOULD_RUN}"
+      - name: Validate tag, Cargo version, and changelog
+        if: steps.extract-tag.outputs.should_run == 'true'
+        shell: bash
+        env:
+          TAG: ${{ steps.extract-tag.outputs.tag }}
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          version="${TAG#v}"
+          grep -Fqx "version = \"${version}\"" Cargo.toml
+          grep -Fq "## [${TAG}]" CHANGELOG.md
+          git rev-parse --verify "${TAG}^{commit}"
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: validate
+    if: needs.validate.outputs.should_run == 'true'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            asset: innoforge-linux-x86_64.tar.gz
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            asset: innoforge-linux-aarch64.tar.gz
+            cross: true
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            asset: innoforge-windows-x86_64.zip
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            asset: innoforge-macos-aarch64.tar.gz
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cross
+        if: matrix.cross == true
+        run: cargo install cross --version 0.2.5 --locked
+
+      - name: Build release (native)
+        if: matrix.cross != true
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Build release (cross)
+        if: matrix.cross == true
+        run: cross build --release --target ${{ matrix.target }}
+
+      - name: Package Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p pkg
+          cp "target/${{ matrix.target }}/release/innoforge-server" pkg/
+          cp README.md LICENSE pkg/ 2>/dev/null || true
+          tar czf "${{ matrix.asset }}" -C pkg .
+
+      - name: Package Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path pkg -Force | Out-Null
+          Copy-Item "target\${{ matrix.target }}\release\innoforge-server.exe" pkg\
+          if (Test-Path README.md) { Copy-Item README.md pkg\ }
+          if (Test-Path LICENSE) { Copy-Item LICENSE pkg\ }
+          Compress-Archive -Path pkg\* -DestinationPath "${{ matrix.asset }}" -Force
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub Release
+    needs: [validate, build]
+    if: needs.validate.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Debug artifacts
+        run: find artifacts -type f | head -20
+
+      - name: Generate release notes
+        env:
+          TAG: ${{ needs.validate.outputs.tag }}
+        run: |
+          awk -v tag="$TAG" '
+            index($0, "## [" tag "]") == 1 { found=1; print; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > release_notes.md
+          test -s release_notes.md
+
+      - name: Create Release
+        env:
+          TAG: ${{ needs.validate.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --verify-tag \
+              --draft \
+              --notes-file release_notes.md \
+              --title "$TAG"
+          fi
+
+          find artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' \) | while read f; do
+            echo "Uploading $(basename "$f")..."
+            gh release upload "$TAG" "$f" --clobber
+          done
+
+          expected='innoforge-linux-aarch64.tar.gz innoforge-linux-x86_64.tar.gz innoforge-macos-aarch64.tar.gz innoforge-windows-x86_64.zip'
+          actual=$(gh release view "$TAG" --json assets --jq '.assets[].name' | sort | xargs)
+          test "$actual" = "$expected"
+          gh release edit "$TAG" --draft=false --latest
