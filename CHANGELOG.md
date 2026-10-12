@@ -4,6 +4,11 @@
 All notable changes are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
+## [Unreleased]
+
+_暂无条目。_
+
+---
 ## [v0.9.11] - 2026-10-04
 
 ### 新增 / Added
@@ -104,7 +109,7 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 
-## [Unreleased]
+## [v0.9.12] - 2026-10-12
 
 ### 新增 / Added
 - §6.3 真实 AI 冒烟测试（DeepSeek 主路径，7 个端到端场景）
