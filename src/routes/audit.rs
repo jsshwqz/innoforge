@@ -240,16 +240,16 @@ mod tests {
 
     fn sample_oa() -> &'static str {
         "审查意见通知书\n\
-         对比文件1公开了\u{201c}火焰喷嘴的圆周壁上固定连接有对角安装的电极\u{201d}。\n\
+         对比文件1公开了\u{201c}反应腔侧壁设有对称分布的传感元件\u{201d}。\n\
          对比文件2记载了交错排列的电极组件以实现均匀放电。\n\
-         区别在于：本申请还包括下网状电极发生器。\n\
+         区别在于：本申请还包括辅助信号发生器。\n\
          实际解决的技术问题是如何提高放电均匀性。\n\
          权利要求1-10不具备创造性。\n\
          综上所述，本申请不具备创造性，予以驳回。"
     }
 
     fn sample_d1() -> &'static str {
-        "一种燃烧器，火焰喷嘴的圆周壁上固定连接有对角安装的电极和下网状电极发生器。"
+        "一种反应器，反应腔侧壁设有对称分布的传感元件和辅助信号发生器。"
     }
 
     #[test]
@@ -280,8 +280,8 @@ mod tests {
     fn audit_feature_coverage_produces_results() {
         let report = claim_coverage::check_feature_coverage(
             sample_oa(),
-            "火焰喷嘴的圆周壁上固定连接有对角安装的电极和下网状电极发生器",
-            &["火焰喷嘴", "电极", "下网状电极发生器"],
+            "反应腔侧壁设有对称分布的传感元件和辅助信号发生器",
+            &["反应腔", "传感元件", "辅助信号发生器"],
         );
         assert!(!report.summary.is_empty(), "应产出非空摘要");
     }
@@ -290,7 +290,7 @@ mod tests {
     fn audit_feature_attribution_produces_results() {
         let report = feature_attribution::check_feature_attribution(
             sample_oa(),
-            &["电极"],
+            &["传感元件"],
             &[("对比文件1", sample_d1())],
         );
         assert!(!report.summary.is_empty(), "应产出非空摘要");

@@ -158,18 +158,18 @@ mod tests {
 
     #[test]
     fn count_term_basic() {
-        let text = "对角安装的电极和下网状电极发生器，对角布置";
+        let text = "对称分布的传感元件和辅助信号传感元件，对称布置";
         let stripped = strip_whitespace(text);
-        assert_eq!(count_term(&stripped, "对角"), 2);
-        assert_eq!(count_term(&stripped, "电极"), 2);
+        assert_eq!(count_term(&stripped, "对称"), 2);
+        assert_eq!(count_term(&stripped, "传感"), 2);
         assert_eq!(count_term(&stripped, "交错"), 0);
     }
 
     #[test]
     fn count_term_handles_whitespace_in_term() {
-        let text = strip_whitespace("火焰喷嘴的圆周壁上固定连接有对角安装");
+        let text = strip_whitespace("反应腔侧壁设有对称分布的传感元件");
         // term 内含空格也应去空格后匹配
-        assert_eq!(count_term(&text, "对 角"), 1);
+        assert_eq!(count_term(&text, "对 称"), 1);
     }
 
     #[test]
@@ -229,8 +229,8 @@ mod tests {
     fn sample_case_oa_rejection_duojiao_count() {
         let oa = include_str!("../../tests/fixtures/oa_sample/oa_rejection.txt");
         let stripped = strip_whitespace(oa);
-        // 驳回决定中 "对角" 出现 1 次
-        assert_eq!(count_term(&stripped, "对角"), 1);
+        // 驳回决定中 "对称" 出现 1 次
+        assert_eq!(count_term(&stripped, "对称"), 1);
         // 驳回决定中 "交错" 出现 0 次
         assert_eq!(count_term(&stripped, "交错"), 0);
         // 驳回决定中 "内侧面" 出现 0 次
@@ -241,10 +241,10 @@ mod tests {
 
     #[test]
     fn sample_case_submitted_claims_has_duojiao() {
-        // 关键发现：递交权项1自身就写了"对角安装"——发明自己的用语
+        // 关键发现：递交权项1自身就写了"对称分布"——发明自己的用语
         let claims = include_str!("../../tests/fixtures/oa_sample/submitted_claims.txt");
         let stripped = strip_whitespace(claims);
-        assert!(count_term(&stripped, "对角") >= 1, "递交权项应含'对角'");
+        assert!(count_term(&stripped, "对称") >= 1, "递交权项应含'对称'");
         // 确认递交权项无机理句
         assert_eq!(count_term(&stripped, "电场"), 0, "递交权项不应含'电场'");
         assert_eq!(count_term(&stripped, "交流"), 0, "递交权项不应含'交流'");
@@ -270,11 +270,11 @@ mod tests {
         );
         // 确认结构特征存在
         assert!(count_term(&stripped, "网状") >= 4, "递交权项应含'网状'>=4");
-        assert_eq!(count_term(&stripped, "把手"), 1);
-        assert_eq!(count_term(&stripped, "控制阀"), 1);
-        assert_eq!(count_term(&stripped, "陶瓷"), 1);
-        assert_eq!(count_term(&stripped, "弹簧"), 1);
-        assert_eq!(count_term(&stripped, "定位杆"), 2);
-        assert_eq!(count_term(&stripped, "滑块"), 3);
+        assert_eq!(count_term(&stripped, "提手"), 1);
+        assert_eq!(count_term(&stripped, "调节阀"), 1);
+        assert_eq!(count_term(&stripped, "氧化铝"), 1);
+        assert_eq!(count_term(&stripped, "弹性件"), 1);
+        assert_eq!(count_term(&stripped, "固定销"), 2);
+        assert_eq!(count_term(&stripped, "滑动件"), 3);
     }
 }

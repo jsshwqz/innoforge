@@ -1210,7 +1210,7 @@ mod tests {
                 },
             ],
             claims_under_review: "1. 一种合成技术装置的装置".into(),
-            spec_effect_statements: vec!["利用电场引导燃烧的火焰发生形变".into()],
+            spec_effect_statements: vec!["通过电磁场调控使反应气体流向发生偏转".into()],
             spec_full_text: None,
             legacy_analysis: None,
             legacy_discussion: None,

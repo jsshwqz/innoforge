@@ -43,7 +43,7 @@
   ],
   "claims_under_review": "1. 一种合成技术装置的装置，其特征在于：包括燃气管...",
   "spec_effect_statements": [
-    "利用电场引导燃烧的火焰发生形变，提高火焰燃烧速度",
+    "通过电磁场调控使反应气体流向发生偏转，提升反应效率",
     "通过通风管和过滤机构合成技术装置并提高燃烧效率"
   ]
 }
@@ -60,7 +60,7 @@
 | oa_full_text | 当前 office_action 参数 |
 | reference_documents[] | const 中 D1/D2/D3 公开号和原文 |
 | claims_under_review | const 中"权利要求第1项"引用 |
-| spec_effect_statements[] | const 中"利用电场引导燃烧的火焰发生形变..."等硬编码效果句 |
+| spec_effect_statements[] | const 中"通过电磁场调控使反应气体流向发生偏转..."等硬编码效果句 |
 
 **删除**：`REEXAM_LETTER_SAMPLE` 整个 const。
 **保留**：`REEXAM_PRE_SUBMIT_CHECKLIST`（程序性固定件，与案无关）、`FACT_DISCIPLINE`、`MECHANISM_ANALYSIS`（通用AI指令）。
@@ -123,10 +123,10 @@ CaseInput
 ```json
 {
   "ordinal": 3,
-  "feature_name": "上下网状电极发生器+外壁",
+  "feature_name": "辅助信号发生器+外壁",
   "oa_tag": "容易想到",
   "attributed_ref": "D2",
-  "oa_excerpt": "上下网状电极发生器设置于通风管外壁，容易想到（引D2）"
+  "oa_excerpt": "辅助信号发生器设于反应管道外侧，属常规设置（参D2）"
 }
 ```
 
@@ -193,7 +193,7 @@ CaseInput
 输出示例：
 ```
 驳回决定引用"作用相同，均为了提高稳焰效果"。
-然而，本申请实际效果为"利用电场引导燃烧的火焰发生形变，提高火焰燃烧速度"。
+然而，本申请实际效果为"通过电磁场调控使反应气体流向发生偏转，提升反应效率"。
 机理与效果均不同于D2，本领域技术人员无结合动机。
 ```
 

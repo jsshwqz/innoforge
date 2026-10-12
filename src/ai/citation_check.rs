@@ -174,8 +174,8 @@ mod tests {
     #[test]
     fn citation_matches_original() {
         // 中文引号“”是 CNIPA 正文的标准引号，正则必须匹配。
-        let oa = "对比文件1公开了\u{201c}火焰喷嘴的圆周壁上固定连接有对角安装的电极\u{201d}。";
-        let d1 = "一种燃烧器，火焰喷嘴的圆周壁上固定连接有对角安装的电极和下网状电极发生器。";
+        let oa = "对比文件1公开了\u{201c}反应腔侧壁设有对称分布的传感元件\u{201d}。";
+        let d1 = "一种反应器，反应腔侧壁设有对称分布的传感元件和辅助信号发生器。";
         let report = check_citations(oa, &[("对比文件1", d1)]);
         // 正向断言：引号内容被提取且在原文中找到
         assert_eq!(
@@ -206,8 +206,8 @@ mod tests {
     #[test]
     fn citation_ascii_quote_still_works() {
         // 回归：ASCII 引号仍应匹配。
-        let oa = "对比文件1公开了\"火焰喷嘴的圆周壁上固定连接有对角安装的电极\"。";
-        let d1 = "一种燃烧器，火焰喷嘴的圆周壁上固定连接有对角安装的电极和下网状电极发生器。";
+        let oa = "对比文件1公开了\"反应腔侧壁设有对称分布的传感元件\"。";
+        let d1 = "一种反应器，反应腔侧壁设有对称分布的传感元件和辅助信号发生器。";
         let report = check_citations(oa, &[("对比文件1", d1)]);
         assert_eq!(report.citations.len(), 1);
         assert!(report.citations[0].found_in_original);
@@ -216,7 +216,7 @@ mod tests {
     #[test]
     fn citation_mismatch_detected() {
         let oa = "对比文件1记载了交错安装的电极发生器。";
-        let d1 = "对角安装的电极和下网状电极发生器";
+        let d1 = "对称分布的传感元件和辅助信号发生器";
         let report = check_citations(oa, &[("对比文件1", d1)]);
         assert_eq!(report.mismatch_count, 1);
         assert!(report.summary.contains("不符"));
@@ -224,8 +224,8 @@ mod tests {
 
     #[test]
     fn citation_with_whitespace_match() {
-        let oa = "对比文件1记载了火焰喷嘴的圆周壁上固定连接有对角安装的电极。";
-        let d1 = "火焰喷嘴 的圆周壁 上固定连接 有对角 安装的电极。";
+        let oa = "对比文件1记载了反应腔侧壁设有对称分布的传感元件。";
+        let d1 = "反应腔 侧壁 设有 对称 分布 的传感元件。";
         let report = check_citations(oa, &[("对比文件1", d1)]);
         // 去空格后应匹配
         assert_eq!(report.mismatch_count, 0);

@@ -214,14 +214,14 @@ mod tests {
             oa,
             claims,
             &[
-                "对角",
+                "对称",
                 "网状",
-                "把手",
-                "控制阀",
-                "陶瓷",
-                "弹簧",
-                "定位杆",
-                "滑块",
+                "提手",
+                "调节阀",
+                "氧化铝",
+                "弹性件",
+                "固定销",
+                "滑动件",
             ],
         );
 
@@ -230,10 +230,10 @@ mod tests {
             report.covered_features, report.uncovered_features
         );
 
-        // "对角" 应在 OA 和递交权项中都存在
+        // "对称" 应在 OA 和递交权项中都存在
         assert!(
-            report.covered_features.contains(&"对角".to_string()),
-            "'对角'应被覆盖"
+            report.covered_features.contains(&"对称".to_string()),
+            "'对称'应被覆盖"
         );
     }
 }
