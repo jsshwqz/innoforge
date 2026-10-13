@@ -9,6 +9,25 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 _暂无条目。_
 
 ---
+## [v0.9.14] - 2026-10-13
+
+### 新增 / Added
+- **POST /api/ai/prohibition-check**：禁令自检端点，并接入 audit-checks
+- **Chart.js v4.5.1 本地化**：`static/vendor/chart.umd.min.js`（208,522 B）与 MIT 许可证文件入树，`templates/search.html` 改本地引用，去掉 jsDelivr 外链
+- **no_cdn_scripts 守卫**：`templates/**` 与 `static/**` 的 HTML 中出现任何 http(s) 外链 `<script src>` 即 fail，白名单为空
+
+### 修复 / Fixed
+- **换案数据隔离**：新增「清空本案输入」，新一轮不再继承上一案数据；同步重置答复期限（此前会残留上一案的届满日）
+- **`{n}` 占位符插值**：初始对比文献行 placeholder、`oa.workflow.round`、`oa.diff.from/to` 全部改为带变量渲染，页面上不再出现字面量 `{n}`
+- **`cargo fmt --check` 转绿**：`tests/no_cdn_scripts.rs:77` 的多行链折为单行
+
+### 验证 / Verification
+- CI 六项全绿：`test` / `lint` / `compare` / `compute (ubuntu)` / `compute (windows)` / `e2e`。此前 `e88fc23` 因格式步先失败，同一 job 的隐私守卫与整段 e2e 被连坐跳过，这次是它们第一次真正跑过
+- **no_cdn_scripts 负向验证成立**：临时分支 + PR #10 注入一行 jsDelivr 外链 ⇒ 守卫 FAIL 并点名文件与 URL（exit 101），同 job 内两条隐私守卫仍 ok；PR 已关闭未合并、分支已删
+- **Chart.js 运行时实测**：本地构建起服务后 `typeof window.Chart === "function"`、版本 4.5.1、页面全部 `script[src]` 均为本地路径、加载过程零外部域名请求
+- 隐私内容级复扫：整树 339 文件 / 494 条 12 字摘要，长句与案件号命中均为 0
+
+---
 ## [v0.9.13] - 2026-10-13
 
 ### 修复 / Fixed
