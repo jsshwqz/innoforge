@@ -2,7 +2,10 @@ import puppeteer from 'puppeteer';
 import { existsSync } from 'node:fs';
 
 const baseUrl = (process.env.INNOFORGE_E2E_BASE_URL || 'http://127.0.0.1:3000').replace(/\/$/, '');
-const expectedPasses = 60;
+// 本地部署身份：只有与 baseUrl 同一 authority 的 http(s) 请求才算自家资源，
+// 其余（jsDelivr/unpkg/fonts.googleapis/…）一律视为第三方外链。data:/blob:/about: 不发网络请求，不计入。
+const localAuthority = new URL(`${baseUrl}/`).host;
+const expectedPasses = 71;
 const failures = [];
 let passed = 0;
 
@@ -132,12 +135,27 @@ const pageMatrix = [
 async function openPage(browser, specification, pageErrors, requestFailures) {
     const page = await browser.newPage();
     const targetUrl = `${baseUrl}${specification.path}`;
+    const externalRequests = [];
     page.on('pageerror', error => {
         pageErrors.push(`page=${page.url() || targetUrl} error=${error.message}`);
     });
     page.on('console', message => {
         if (message.type() === 'error') {
             pageErrors.push(`page=${page.url() || targetUrl} console_error=${message.text()}`);
+        }
+    });
+    page.on('request', request => {
+        let parsed;
+        try {
+            parsed = new URL(request.url());
+        } catch {
+            return;
+        }
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+            return; // data:/blob:/about: 等内联资源，不产生对外请求
+        }
+        if (parsed.host !== localAuthority) {
+            externalRequests.push(`${request.resourceType()}|${parsed.host}|${request.url().slice(0, 120)}`);
         }
     });
     page.on('requestfailed', request => {
@@ -157,7 +175,7 @@ async function openPage(browser, specification, pageErrors, requestFailures) {
     } catch (error) {
         navigationError = error.message;
     }
-    return { page, response, targetUrl, navigationError };
+    return { page, response, targetUrl, navigationError, externalRequests };
 }
 
 async function runPageMatrix(browser, pageErrors, requestFailures) {
@@ -213,6 +231,72 @@ async function runPageMatrix(browser, pageErrors, requestFailures) {
             `${specification.name} has no failed requests`,
             requestFailures.slice(requestFailureStart).join('\n') || `page=${opened.page.url()} failed_request=unknown`,
         );
+        requireCondition(
+            opened.externalRequests.length === 0,
+            `${specification.name} loads no third-party origins`,
+            `page=${opened.page.url()} local=${localAuthority} external=${opened.externalRequests.join(' , ') || 'none'}`,
+        );
+
+        if (specification.path === '/search') {
+            const chartState = await opened.page.evaluate(() => ({
+                chartType: typeof window.Chart,
+                chartVersion: (window.Chart && window.Chart.version) || null,
+                scriptSrcs: Array.from(document.querySelectorAll('script[src]')).map(s => s.getAttribute('src')),
+            }));
+            requireCondition(
+                chartState.chartType === 'function',
+                'Search page exposes a local Chart constructor',
+                `page=${opened.page.url()} chart_type=${chartState.chartType} srcs=${chartState.scriptSrcs.join(',')}`,
+            );
+            requireCondition(
+                typeof chartState.chartVersion === 'string' && chartState.chartVersion.length > 0,
+                'Search page reports a Chart.js version',
+                `page=${opened.page.url()} chart_version=${String(chartState.chartVersion)} srcs=${chartState.scriptSrcs.join(',')}`,
+            );
+            let render = null;
+            try {
+                render = await opened.page.evaluate(async () => {
+                    if (typeof window.Chart !== 'function') {
+                        return { painted: false, reason: 'Chart 未定义' };
+                    }
+                    const canvas = document.createElement('canvas');
+                    canvas.width = 240;
+                    canvas.height = 140;
+                    canvas.style.position = 'fixed';
+                    canvas.style.left = '-9999px';
+                    document.body.appendChild(canvas);
+                    try {
+                        const instance = new window.Chart(canvas, {
+                            type: 'bar',
+                            data: { labels: ['甲', '乙'], datasets: [{ label: '自检', data: [3, 7] }] },
+                            options: { animation: false, responsive: false },
+                        });
+                        instance.update();
+                        await new Promise(resolve => requestAnimationFrame(() => resolve()));
+                        const ctx = canvas.getContext('2d');
+                        const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+                        let painted = false;
+                        for (let i = 3; i < pixels.length; i += 4) {
+                            if (pixels[i] !== 0) {
+                                painted = true;
+                                break;
+                            }
+                        }
+                        instance.destroy();
+                        return { painted, version: window.Chart.version };
+                    } finally {
+                        canvas.remove();
+                    }
+                });
+            } catch (error) {
+                render = { painted: false, reason: error.message };
+            }
+            requireCondition(
+                render !== null && render.painted === true,
+                'Search page renders a chart with a non-blank canvas',
+                `page=${opened.page.url()} render=${JSON.stringify(render)}`,
+            );
+        }
 
         if (patentDetailIsNotFound) {
             requireCondition(
