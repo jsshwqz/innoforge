@@ -4302,6 +4302,7 @@
     renderNavbar('oar');
     renderSidebar();
     applyI18nCommon();
+    reindexPlaceholders();  // fix: initial ref row placeholder {n} must be replaced with 1
     loadOaState();
     loadOaHistory();
     initDiscQuoteEvents();
