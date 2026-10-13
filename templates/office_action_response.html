@@ -26,7 +26,10 @@
                     <option value="">--</option>
                 </select>
             </div>
-            <button class="btn-primary" onclick="createOaRoundFromPage()" data-i18n="oa.workflow.newRound" style="padding: 4px 12px; font-size: 13px;"></button>
+            <div style="display: flex; gap: 8px;">
+                <button class="btn-primary" onclick="createOaRoundFromPage()" data-i18n="oa.workflow.newRound" style="padding: 4px 12px; font-size: 13px;"></button>
+                <button class="btn-secondary" onclick="clearCurrentCaseInputs()" style="padding: 4px 12px; font-size: 13px; color: #d73a49;">🗑️ 清空本案输入</button>
+            </div>
         </div>
 
         <!-- OA Type Selector -->
@@ -373,6 +376,43 @@
 
     function clearOaState() {
         try { localStorage.removeItem(OA_STORAGE_KEY); } catch (e) { /* ignore */ }
+    }
+
+    // 清空本案输入：只清前端状态（uploadedData + UI），不删磁盘文件
+    function clearCurrentCaseInputs() {
+        if (!confirm('确认清空本案所有输入（专利文本、OA通知书、对比文献）？\n\n这不会删除已保存的磁盘文件，只清除当前页面的输入状态。')) return;
+        // 清除 uploadedData 中的案件相关键
+        var keysToRemove = [];
+        for (var key in _uploadedData) {
+            if (key === 'my' || key === 'oa' || key.startsWith('ref_') || key === 'patent_number') {
+                keysToRemove.push(key);
+            }
+        }
+        keysToRemove.forEach(function(k) { delete uploadedData[k]; });
+        // 重置 UI：专利号输入
+        var myPatentInput = document.getElementById('my-patent');
+        if (myPatentInput) { myPatentInput.disabled = false; myPatentInput.value = ''; }
+        var myFileTag = document.getElementById('my-file-tag');
+        if (myFileTag) myFileTag.innerHTML = '';
+        // 重置 UI：OA 输入
+        var oaInput = document.getElementById('oa-input');
+        if (oaInput) { oaInput.disabled = false; oaInput.value = ''; }
+        var oaFileTag = document.getElementById('oa-file-tag');
+        if (oaFileTag) oaFileTag.innerHTML = '';
+        // 重置 UI：对比文献 — 只保留第一行，清空内容
+        var refRows = document.querySelectorAll('.ref-row');
+        for (var i = refRows.length - 1; i >= 1; i--) { refRows[i].remove(); }
+        var firstRefInput = document.querySelector('.ref-input');
+        if (firstRefInput) { firstRefInput.disabled = false; firstRefInput.value = ''; }
+        var firstRefTag = document.querySelector('.ref-row .file-tag-container');
+        if (firstRefTag) firstRefTag.remove();
+        reindexPlaceholders();
+        // 清除截止日期
+        var deadlineSection = document.getElementById('deadline-section');
+        if (deadlineSection) deadlineSection.style.display = 'none';
+        // 清除结果区
+        var result = document.getElementById('result');
+        if (result) result.innerHTML = '';
     }
 
     function restoreOaUi() {
@@ -4379,9 +4419,8 @@
         const roundType = selectedType ? (oaTypeMap[selectedType.value] || 'office_action') : 'office_action';
         const oaDate = prompt('发文日期 (YYYY-MM-DD):', new Date().toISOString().slice(0, 10));
         try {
-            // P0-2: 改用 getOA() 访问器
-            var oaData = getOA();
-            const oaText = oaData ? (oaData.content || oaData) : '';
+            // 新建轮次不自动继承上一案的通知书与对比文献
+            // 只传 patent_id / round_type / oa_date，不传 oa_text
             await fetch('/api/oa/rounds', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -4389,9 +4428,33 @@
                     patent_id: patentNum,
                     round_type: roundType,
                     oa_date: oaDate || null,
-                    oa_text: oaText || null
+                    oa_text: null
                 })
             });
+            // 清空本案输入：不继承上一案的 OA 通知书与对比文献
+            var keysToRemove = [];
+            for (var key in _uploadedData) {
+                if (key === 'oa' || key.startsWith('ref_')) {
+                    keysToRemove.push(key);
+                }
+            }
+            keysToRemove.forEach(function(k) { delete uploadedData[k]; });
+            // 重置 OA 输入 UI
+            var oaInput = document.getElementById('oa-input');
+            if (oaInput) { oaInput.disabled = false; oaInput.value = ''; }
+            var oaFileTag = document.getElementById('oa-file-tag');
+            if (oaFileTag) oaFileTag.innerHTML = '';
+            // 重置对比文献 UI — 只保留第一行空输入
+            var refRows = document.querySelectorAll('.ref-row');
+            for (var i = refRows.length - 1; i >= 1; i--) { refRows[i].remove(); }
+            var firstRefInput = document.querySelector('.ref-input');
+            if (firstRefInput) { firstRefInput.disabled = false; firstRefInput.value = ''; }
+            var firstRefTag = document.querySelector('.ref-row .file-tag-container');
+            if (firstRefTag) firstRefTag.remove();
+            reindexPlaceholders();
+            // 清除结果区
+            var result = document.getElementById('result');
+            if (result) result.innerHTML = '';
             loadOaRoundSelector();
         } catch (e) {
             console.error('Failed to create OA round:', e);
