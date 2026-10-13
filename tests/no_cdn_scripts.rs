@@ -77,10 +77,7 @@ fn no_cdn_script_tags_in_templates_or_static() {
         }
         for file_path in collect_files(dir) {
             // 只扫 HTML 文件
-            let ext = file_path
-                .extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("");
+            let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
             if ext != "html" && ext != "htm" {
                 continue;
             }
