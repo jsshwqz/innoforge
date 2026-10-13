@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 
 use crate::ai::{
     citation_check, claim_coverage, feature_attribution, golden_regression, paraphrase_check,
-    search_report, targeted_claims, tech_problem_check,
+    prohibition_check, search_report, targeted_claims, tech_problem_check,
 };
 
 /// POST /api/ai/audit-checks — 运行全部 12 个审计模块
@@ -209,6 +209,22 @@ pub async fn api_ai_audit_checks(
         json!({ "skipped": "未提供 pdf_text" })
     };
 
+    // ── 13. prohibition_check (C12) ──
+    let prohibition_report = prohibition_check::check_prohibitions(oa_text);
+    let prohibition_json = json!({
+        "violations": prohibition_report.violations.iter().map(|v| json!({
+            "rule_id": v.rule_id,
+            "rule_description": v.rule_description,
+            "violating_text": v.violating_text,
+            "severity": match v.severity {
+                prohibition_check::ProhibitionSeverity::Fatal => "fatal",
+                prohibition_check::ProhibitionSeverity::Warning => "warning",
+            },
+        })).collect::<Vec<_>>(),
+        "count": prohibition_report.count,
+        "summary": prohibition_report.summary,
+    });
+
     Json(json!({
         "status": "ok",
         "results": {
@@ -219,6 +235,7 @@ pub async fn api_ai_audit_checks(
             "golden_regression": golden_report,
             "paraphrase_check": paraphrase_json,
             "pre_submission_check": precheck_json,
+            "prohibition_check": prohibition_json,
             "search_report": search_json,
             "strategy_arbitration": strategy_json,
             "targeted_claims": targeted_json,
@@ -226,6 +243,42 @@ pub async fn api_ai_audit_checks(
             "whitespace_search": ws_json,
             "extraction_quality": eq_json,
         }
+    }))
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
+//  POST /api/ai/prohibition-check — 纯函数禁令自查（不调 LLM）
+// ═══════════════════════════════════════════════════════════════════════
+
+/// POST /api/ai/prohibition-check
+///
+/// 接收 `response_text`，调用 `prohibition_check::check_prohibitions` 纯函数，
+/// 返回 `violations` / `count` / `summary`。不依赖 LLM 服务商出网。
+pub async fn api_ai_prohibition_check(
+    State(_s): State<crate::routes::AppState>,
+    Json(req): Json<Value>,
+) -> Json<Value> {
+    let response_text = req["response_text"].as_str().unwrap_or("");
+    if response_text.is_empty() {
+        return Json(json!({ "error": "缺少 response_text / Missing response_text" }));
+    }
+
+    let report = prohibition_check::check_prohibitions(response_text);
+
+    Json(json!({
+        "status": "ok",
+        "violations": report.violations.iter().map(|v| json!({
+            "rule_id": v.rule_id,
+            "rule_description": v.rule_description,
+            "violating_text": v.violating_text,
+            "severity": match v.severity {
+                prohibition_check::ProhibitionSeverity::Fatal => "fatal",
+                prohibition_check::ProhibitionSeverity::Warning => "warning",
+            },
+        })).collect::<Vec<_>>(),
+        "count": report.count,
+        "summary": report.summary,
     }))
 }
 

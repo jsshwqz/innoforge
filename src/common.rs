@@ -353,6 +353,7 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
             post(routes::api_ai_oa_quality_score),
         )
         .route("/api/ai/audit-checks", post(routes::api_ai_audit_checks))
+        .route("/api/ai/prohibition-check", post(routes::api_ai_prohibition_check))
         .route(
             "/api/ai/oa-claim-simulate",
             post(routes::api_ai_oa_claim_simulate),
