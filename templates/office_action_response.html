@@ -21,7 +21,7 @@
         <!-- OA 历史轮次选择器 -->
         <div id="oa-round-selector" class="cmp-section" style="display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; margin-bottom: 8px; background: #f0f4ff; border-radius: 6px;">
             <div style="display: flex; align-items: center; gap: 12px;">
-                <label data-i18n="oa.workflow.round" style="font-weight: 500;"></label>
+                <label id="oa-round-label" data-i18n="oa.workflow.round" style="font-weight: 500;"></label>
                 <select id="oa-round-select" onchange="loadSelectedRound()" style="padding: 4px 8px; border-radius: 4px; border: 1px solid #ccc;">
                     <option value="">--</option>
                 </select>
@@ -3868,8 +3868,8 @@
             var d = diffs[i];
             diffHtml += '<div style="margin-bottom:10px;padding:8px;border:1px solid #30363d;border-radius:6px;">';
             diffHtml += '<div style="color:#8b949e;font-size:11px;margin-bottom:6px;">'
-                + t('oa.diff.from').replace('{n}', d.from_version || (i+1)) + ' → '
-                + t('oa.diff.to').replace('{n}', d.to_version || (i+2)) + '</div>';
+                + t('oa.diff.from', {n: d.from_version || (i+1)}) + ' → '
+                + t('oa.diff.to', {n: d.to_version || (i+2)}) + '</div>';
             // Type change
             if (d.oa_type_changed) {
                 diffHtml += '<div style="color:#d29922;font-size:12px;margin-bottom:4px;">'
@@ -4357,9 +4357,29 @@
     renderSidebar();
     applyI18nCommon();
     reindexPlaceholders();  // fix: initial ref row placeholder {n} must be replaced with 1
+    // updateRoundLabel: interpolate {n} in oa.workflow.round label with selected round number
+    function updateRoundLabel() {
+        var label = document.getElementById('oa-round-label');
+        if (!label) return;
+        var select = document.getElementById('oa-round-select');
+        var roundNum = 0;
+        if (select && select.value) {
+            var opt = select.options[select.selectedIndex];
+            if (opt) {
+                var m = opt.text.match(/第(\d+)轮/);
+                if (m) roundNum = parseInt(m[1], 10);
+            }
+        }
+        if (roundNum > 0) {
+            label.textContent = i18nLang === 'en' ? 'Round ' + roundNum : '第' + roundNum + '轮';
+        } else {
+            label.textContent = t('oa.workflow.round');
+        }
+    }
+    updateRoundLabel();
     // Register hook so language switch (which re-runs applyI18nCommon) also re-fixes placeholders
     if (!window._onI18nLangChange) window._onI18nLangChange = [];
-    window._onI18nLangChange.push(function() { reindexPlaceholders(); });
+    window._onI18nLangChange.push(function() { reindexPlaceholders(); updateRoundLabel(); });
     loadOaState();
     loadOaHistory();
     initDiscQuoteEvents();
@@ -4389,6 +4409,7 @@
                 options += '<option value="' + round.id + '">第' + round.round_number + '轮 · ' + typeLabel + '</option>';
             });
             select.innerHTML = options;
+            updateRoundLabel();
         } catch (e) {
             console.error('Failed to load OA rounds:', e);
         }
@@ -4396,7 +4417,8 @@
 
     async function loadSelectedRound() {
         const select = document.getElementById('oa-round-select');
-        if (!select || !select.value) return;
+        if (!select || !select.value) { updateRoundLabel(); return; }
+        updateRoundLabel();
         try {
             const resp = await fetch('/api/oa/rounds/' + encodeURIComponent(select.value));
             const data = await resp.json();
