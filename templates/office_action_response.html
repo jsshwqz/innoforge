@@ -407,9 +407,23 @@
         var firstRefTag = document.querySelector('.ref-row .file-tag-container');
         if (firstRefTag) firstRefTag.remove();
         reindexPlaceholders();
-        // 清除截止日期
+        // 清除截止日期：重置日期输入、倒计时显示、localStorage 键
+        localStorage.removeItem('innoforge_oa_date');
+        var oaDateInput = document.getElementById('oa-date');
+        if (oaDateInput) oaDateInput.value = '';
+        var deadlineInfo = document.getElementById('deadline-info');
+        if (deadlineInfo) deadlineInfo.innerHTML = '';
+        var deadlineBar = document.getElementById('deadline-bar');
+        if (deadlineBar) deadlineBar.remove();
         var deadlineSection = document.getElementById('deadline-section');
         if (deadlineSection) deadlineSection.style.display = 'none';
+        // 清除所有 innoforge_oa_deadline_* 键（多案跟踪）
+        for (var i = localStorage.length - 1; i >= 0; i--) {
+            var lk = localStorage.key(i);
+            if (lk && lk.startsWith('innoforge_oa_deadline_')) localStorage.removeItem(lk);
+        }
+        // 清除 oa_data 整键（避免刷新后恢复上一案数据）
+        clearOaState();
         // 清除结果区
         var result = document.getElementById('result');
         if (result) result.innerHTML = '';
