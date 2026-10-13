@@ -105,7 +105,7 @@
             <label class="cmp-label blue" data-i18n="oar.refLabel"></label>
             <div id="ref-list">
                 <div class="ref-row" data-idx="0">
-                    <input type="text" class="cmp-input ref-input" data-i18n-placeholder="oar.refPlaceholder">
+                    <input type="text" class="cmp-input ref-input">
                     <button class="btn-upload" onclick="uploadRef(this)">📎 <span data-i18n="common.upload"></span></button>
                     <button class="btn-paste" onclick="pasteRef(this)">📋 <span data-i18n="common.paste"></span></button>
                     <button class="btn-add" onclick="lookupRef(this)">🔍 <span data-i18n="oar.lookup"></span></button>
@@ -4343,6 +4343,9 @@
     renderSidebar();
     applyI18nCommon();
     reindexPlaceholders();  // fix: initial ref row placeholder {n} must be replaced with 1
+    // Register hook so language switch (which re-runs applyI18nCommon) also re-fixes placeholders
+    if (!window._onI18nLangChange) window._onI18nLangChange = [];
+    window._onI18nLangChange.push(function() { reindexPlaceholders(); });
     loadOaState();
     loadOaHistory();
     initDiscQuoteEvents();
