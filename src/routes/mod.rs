@@ -410,6 +410,8 @@ pub struct AppState {
     pub config: Arc<RwLock<AppConfig>>,
     /// 管道进度通道（SSE 推送），附带超时清理 / Pipeline progress channels with stale cleanup
     pub pipeline_channels: Arc<Mutex<HashMap<String, PipelineChannelEntry>>>,
+    /// Database file absolute path (for diagnostics / issue #14)
+    pub db_path: String,
 }
 
 impl AppState {

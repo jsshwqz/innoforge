@@ -34,7 +34,7 @@ fn provider_db_key(base_url: &str) -> &'static str {
 }
 
 /// 返回当前版本号与构建元信息 / Return version + build metadata
-pub async fn api_get_version() -> Json<serde_json::Value> {
+pub async fn api_get_version(State(s): State<AppState>) -> Json<serde_json::Value> {
     let templates = json!({
         "office_action_response.html": {
             "sha256": env!("TEMPLATE_SHA256_OFFICE_ACTION_RESPONSE_HTML"),
@@ -50,6 +50,7 @@ pub async fn api_get_version() -> Json<serde_json::Value> {
         "git_commit": env!("GIT_COMMIT"),
         "git_branch": env!("GIT_BRANCH"),
         "build_time": env!("BUILD_TIME"),
+        "db_path": s.db_path,
         "templates": templates
     }))
 }
@@ -914,6 +915,7 @@ mod epo_credential_settings_tests {
             cad: Arc::new(CadService::new(cad_root, None).expect("cad service")),
             config: Arc::new(RwLock::new(config)),
             pipeline_channels: Arc::new(Mutex::new(HashMap::new())),
+            db_path: ":memory:".to_string(),
         }
     }
 
