@@ -5,7 +5,7 @@ const baseUrl = (process.env.INNOFORGE_E2E_BASE_URL || 'http://127.0.0.1:3000').
 // 本地部署身份：只有与 baseUrl 同一 authority 的 http(s) 请求才算自家资源，
 // 其余（jsDelivr/unpkg/fonts.googleapis/…）一律视为第三方外链。data:/blob:/about: 不发网络请求，不计入。
 const localAuthority = new URL(`${baseUrl}/`).host;
-const expectedPasses = 71;
+const expectedPasses = 87;
 const failures = [];
 let passed = 0;
 
@@ -318,6 +318,177 @@ async function runPageMatrix(browser, pageErrors, requestFailures) {
     }
 
     return openedPages;
+}
+
+// ── issue #7：按钮级回归 ───────────────────────────────────────────────────────
+// 逐个点击每个页面渲染出来的 <button>，断言三件事：
+//   ① 点完不抛未捕获 JS 错误（pageerror / console error）
+//   ② 点完不向第三方域名发请求（隐私 + 离线纪律，与本文件开头的 authority 断言同口径）
+//   ③ 点完不出现同源 5xx（按钮背后的端点真的能被调用到，不是只在前端 bail 掉）
+// 导航安全：每个按钮都用一次全新页面加载，因此「点了就跳转/重载」的按钮不会打断整个循环
+// （这正是手工在已打开的页面里连点会崩的原因）。
+// 原生 confirm/prompt/alert 一律自动 dismiss —— #44 已证明原生对话框会卡死 CDP，
+// 绝不让 sweep 挂在一个二次确认上。
+const buttonSweepFloors = {
+    '/': 6,
+    '/search': 4,
+    '/patent/1': 12,
+    '/idea': 20,
+    '/ai': 3,
+    '/compare': 11,
+    '/settings': 10,
+    '/oa-response': 26,
+};
+const sweepSettleMs = 250;
+const sweepWaitMs = 900;
+
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+async function openSweepPage(browser, path) {
+    const page = await browser.newPage();
+    const bucket = { errors: [], external: [], server5xx: [], dialogs: [], failed: [], navigations: 0 };
+    let phase = 'load';
+    const startUrl = `${baseUrl}${path}`;
+    page.on('pageerror', error => {
+        if (phase === 'click') bucket.errors.push(String(error.message).slice(0, 160));
+    });
+    page.on('console', message => {
+        if (phase === 'click' && message.type() === 'error') {
+            bucket.errors.push(`console: ${message.text().slice(0, 160)}`);
+        }
+    });
+    page.on('dialog', dialog => {
+        bucket.dialogs.push(`${dialog.type()}: ${(dialog.message() || '').slice(0, 60)}`);
+        dialog.dismiss().catch(() => {});
+    });
+    page.on('request', request => {
+        if (phase !== 'click') return;
+        let parsed;
+        try {
+            parsed = new URL(request.url());
+        } catch {
+            return;
+        }
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return;
+        if (parsed.host !== localAuthority) bucket.external.push(parsed.host);
+    });
+    page.on('response', response => {
+        if (phase !== 'click') return;
+        let parsed;
+        try {
+            parsed = new URL(response.url());
+        } catch {
+            return;
+        }
+        if (parsed.host === localAuthority && response.status() >= 500) {
+            bucket.server5xx.push(`${response.status()} ${parsed.pathname}`);
+        }
+    });
+    page.on('requestfailed', request => {
+        if (phase !== 'click') return;
+        let parsed;
+        try {
+            parsed = new URL(request.url());
+        } catch {
+            return;
+        }
+        if (parsed.host === localAuthority) bucket.failed.push(parsed.pathname);
+    });
+    page.on('framenavigated', frame => {
+        if (phase === 'click' && frame === page.mainFrame()) bucket.navigations += 1;
+    });
+    let response = null;
+    try {
+        response = await page.goto(startUrl, { waitUntil: 'domcontentloaded', timeout: 20_000 });
+        await sleep(sweepSettleMs);
+    } catch {
+        // 导航失败由调用方按 bucket 判定，这里不重复计入加载期噪声
+    }
+    return { page, bucket, response, startUrl, setPhase: value => { phase = value; } };
+}
+
+async function countButtons(browser, path) {
+    const { page, response } = await openSweepPage(browser, path);
+    const buttons = await page.$$eval('button', els => els.map((el, index) => ({
+        index,
+        label: (el.innerText || el.value || el.getAttribute('aria-label') || el.getAttribute('onclick') || '')
+            .trim().replace(/\s+/g, ' ').slice(0, 40),
+    }))).catch(() => []);
+    await page.close().catch(() => {});
+    return { buttons, notFound: !!response && response.status() === 404 };
+}
+
+async function runButtonSweep(browser) {
+    for (const specification of pageMatrix) {
+        const name = specification.name;
+        const floor = buttonSweepFloors[specification.path];
+        if (typeof floor !== 'number') {
+            fail(`${name} button sweep is configured`, 'reason=no_floor_configured');
+            requireCondition(true, `${name} button sweep result`, 'reason=no_floor_configured_placeholder');
+            continue;
+        }
+
+        const { buttons, notFound } = await countButtons(browser, specification.path);
+
+        if (notFound) {
+            // 空库时详情页本来就不渲染任何控件：跳过点击，但把「跳过」显式记成断言，
+            // 免得覆盖面积被静默削掉（skipped ≠ passed）。
+            requireCondition(
+                buttons.length === 0,
+                `${name} button sweep is skipped for an empty local library`,
+                `page=${specification.path} rendered_buttons=${buttons.length} expected=0`,
+            );
+            requireCondition(
+                true,
+                `${name} button sweep result skipped with the empty library`,
+                `page=${specification.path} status=404`,
+            );
+            continue;
+        }
+
+        requireCondition(
+            buttons.length >= floor,
+            `${name} button sweep enumerates at least ${floor} controls`,
+            `page=${specification.path} rendered_buttons=${buttons.length} floor=${floor}`,
+        );
+
+        const errors = [];
+        const external = [];
+        const server5xx = [];
+        const failed = [];
+        const dialogs = [];
+        let clicked = 0;
+        for (const button of buttons) {
+            const opened = await openSweepPage(browser, specification.path);
+            opened.setPhase('click');
+            const didClick = await opened.page.evaluate(index => {
+                const elements = [...document.querySelectorAll('button')];
+                if (!elements[index]) return false;
+                elements[index].click();
+                return true;
+            }, button.index).catch(() => false);
+            if (didClick) clicked += 1;
+            await sleep(sweepWaitMs);
+            opened.setPhase('after');
+            for (const list of [['errors', errors], ['external', external], ['server5xx', server5xx], ['failed', failed], ['dialogs', dialogs]]) {
+                for (const item of opened.bucket[list[0]]) list[1].push(`${button.index}|${button.label}|${item}`);
+            }
+            await opened.page.close().catch(() => {});
+        }
+
+        const detail = [
+            errors.length ? `errors=${errors.slice(0, 3).join(' / ')}` : '',
+            external.length ? `external=${[...new Set(external)].slice(0, 3).join(' / ')}` : '',
+            server5xx.length ? `5xx=${[...new Set(server5xx)].slice(0, 3).join(' / ')}` : '',
+            failed.length ? `failed=${[...new Set(failed)].slice(0, 3).join(' / ')}` : '',
+        ].filter(Boolean).join(' ') || `page=${specification.path} clicked=${clicked}/${buttons.length} dialogs=${dialogs.length}`;
+
+        requireCondition(
+            errors.length === 0 && external.length === 0 && server5xx.length === 0 && failed.length === 0,
+            `${name} every button click stays local, error-free and server-healthy`,
+            detail,
+        );
+    }
 }
 
 async function checkAmendmentEndpoint(oaPage) {
@@ -874,6 +1045,9 @@ async function main() {
         } else {
             fail('OA regression page is available', `page=${baseUrl}/oa-response missing_page_instance=true`);
         }
+        // issue #7 按钮级回归放在最后：它会点击页面上每一个按钮，可能改写本地状态，
+        // 绝不能污染上面的功能性断言。
+        await runButtonSweep(browser);
     } catch (error) {
         fail('E2E test run', error.stack || error.message);
     } finally {
