@@ -9,6 +9,14 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 _暂无条目。_
 
 ---
+## [v0.9.15] - 2026-10-14
+
+### 验证 / Verification
+- **E2E 补 11 条运行时断言（`expectedPasses` 60 → 71）**：8 个页面各自断言所有 http(s) 请求与本服务同一 authority（对外域名零请求），`/search` 另断言 `window.Chart` 是 function、有版本号，并就地构造实例、确认画布出现非透明像素
+- 本版不含产品代码改动，仅把 #6 的 Chart.js 本地化从"静态证据"升级为"运行时回归"，防止 CDN 外链回归时 CI 仍然全绿
+- `cargo fmt --check` ✅ / 隐私长句守卫（494 条摘要）离线复扫 ✅ / CI 六项 ✅
+
+---
 ## [v0.9.14] - 2026-10-13
 
 ### 新增 / Added
