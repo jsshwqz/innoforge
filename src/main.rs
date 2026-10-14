@@ -285,7 +285,11 @@ mod tests {
         let dir = platform_data_dir();
         // On Linux with HOME set, should be under ~/.local/share/innoforge
         if cfg!(target_os = "linux") && std::env::var("HOME").is_ok() {
-            assert!(dir.is_absolute(), "platform_data_dir should be absolute, got {}", dir.display());
+            assert!(
+                dir.is_absolute(),
+                "platform_data_dir should be absolute, got {}",
+                dir.display()
+            );
             assert!(
                 dir.to_string_lossy().contains("innoforge"),
                 "should contain 'innoforge' in path"
