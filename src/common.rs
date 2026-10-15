@@ -324,7 +324,7 @@ pub fn init_app_state(db_path: &str) -> anyhow::Result<crate::routes::AppState> 
         cad: Arc::new(cad),
         config: Arc::new(RwLock::new(config)),
         pipeline_channels: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        db_path: strip_verbatim_prefix(&db_path_abs.to_string_lossy().to_string()),
+        db_path: strip_verbatim_prefix(db_path_abs.to_string_lossy().as_ref()),
     };
 
     // 启动日志：打印当前 AI 服务商和超时配置
