@@ -11,6 +11,23 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
     <script src="/static/purify.min.js"></script>
+
+    <style>
+    .confirm-modal-overlay {
+        display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background: rgba(0,0,0,0.4); z-index: 2000;
+    }
+    .confirm-modal-overlay.show { display: flex; align-items: center; justify-content: center; }
+    .confirm-modal {
+        background: #fff; border-radius: 8px; padding: 24px; min-width: 320px; max-width: 480px;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+    }
+    .confirm-modal h3 { margin: 0 0 16px 0; }
+    .confirm-modal p { margin: 0 0 16px 0; line-height: 1.6; }
+    .date-modal-input {
+        width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; margin-bottom: 12px;
+    }
+    </style>
 </head>
 <body>
     <div class="page-with-sidebar">
@@ -380,7 +397,7 @@
 
     // 清空本案输入：只清前端状态（uploadedData + UI），不删磁盘文件
     function clearCurrentCaseInputs() {
-        if (!confirm('确认清空本案所有输入（专利文本、OA通知书、对比文献）？\n\n这不会删除已保存的磁盘文件，只清除当前页面的输入状态。')) return;
+        if (!(await showConfirmDialog('确认清空本案所有输入（专利文本、OA通知书、对比文献）？\n\n这不会删除已保存的磁盘文件，只清除当前页面的输入状态。'))) return;
         // 清除 uploadedData 中的案件相关键
         var keysToRemove = [];
         for (var key in _uploadedData) {
@@ -621,7 +638,7 @@
             if (data.status === 'ok' && data.patent) { onSuccess(data.patent); return; }
         } catch (e) {}
         // 本地没有 → 让用户选择是否在线抓取（消耗 API 额度）
-        if (!confirm('本地库中未找到该专利。\n是否从在线数据库抓取？（将消耗 API 查询额度）\n\n点「取消」可改为上传 PDF 文件。')) return;
+        if (!(await showConfirmDialog('本地库中未找到该专利。\n是否从在线数据库抓取？（将消耗 API 查询额度）\n\n点「取消」可改为上传 PDF 文件。'))) return;
         try {
             var resp = await fetch('/api/patent/lookup-or-fetch', {
                 method: 'POST',
@@ -4456,7 +4473,8 @@
         };
         const selectedType = document.querySelector('input[name="oa_type"]:checked');
         const roundType = selectedType ? (oaTypeMap[selectedType.value] || 'office_action') : 'office_action';
-        const oaDate = prompt('发文日期 (YYYY-MM-DD):', new Date().toISOString().slice(0, 10));
+        const oaDate = await showDateModal('发文日期', new Date().toISOString().slice(0, 10));
+        if (oaDate === null) return;
         try {
             // 新建轮次不自动继承上一案的通知书与对比文献
             // 只传 patent_id / round_type / oa_date，不传 oa_text
@@ -4817,6 +4835,60 @@
         }
     }
 
+
+
+    // ── Page-in modal helpers (issue #15, replaces native prompt/confirm) ──
+    function showConfirmDialog(message) {
+        return new Promise((resolve) => {
+            const overlay = document.createElement('div');
+            overlay.className = 'confirm-modal-overlay';
+            overlay.innerHTML = '<div class="confirm-modal">' +
+                '<p>' + message.replace(/\n/g, '<br>') + '</p>' +
+                '<div class="modal-btns">' +
+                '<button class="btn-modal-cancel">取消</button>' +
+                '<button class="btn-modal-ok">确认</button>' +
+                '</div></div>';
+            document.body.appendChild(overlay);
+            overlay.classList.add('show');
+            const cancelBtn = overlay.querySelector('.btn-modal-cancel');
+            const okBtn = overlay.querySelector('.btn-modal-ok');
+            function cleanup(val) {
+                overlay.classList.remove('show');
+                document.body.removeChild(overlay);
+                resolve(val);
+            }
+            okBtn.addEventListener('click', () => cleanup(true));
+            cancelBtn.addEventListener('click', () => cleanup(false));
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) cleanup(false); });
+        });
+    }
+
+    function showDateModal(title, defaultDate) {
+        return new Promise((resolve) => {
+            const overlay = document.createElement('div');
+            overlay.className = 'confirm-modal-overlay';
+            overlay.innerHTML = '<div class="confirm-modal">' +
+                '<h3>' + title + '</h3>' +
+                '<input type="date" class="date-modal-input" value="' + defaultDate + '">' +
+                '<div class="modal-btns">' +
+                '<button class="btn-modal-cancel">取消</button>' +
+                '<button class="btn-modal-ok">确认</button>' +
+                '</div></div>';
+            document.body.appendChild(overlay);
+            overlay.classList.add('show');
+            const dateInput = overlay.querySelector('.date-modal-input');
+            const cancelBtn = overlay.querySelector('.btn-modal-cancel');
+            const okBtn = overlay.querySelector('.btn-modal-ok');
+            function cleanup(val) {
+                overlay.classList.remove('show');
+                document.body.removeChild(overlay);
+                resolve(val);
+            }
+            okBtn.addEventListener('click', () => cleanup(dateInput.value));
+            cancelBtn.addEventListener('click', () => cleanup(null));
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) cleanup(null); });
+        });
+    }
     </script>
 </body>
 </html>

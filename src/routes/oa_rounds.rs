@@ -62,6 +62,27 @@ pub async fn api_oa_rounds_create(
         }
     };
 
+    // Validate round_type against allowed enum values (issue #15)
+    const ALLOWED_ROUND_TYPES: &[&str] = &[
+        "first_rejection",
+        "second_rejection",
+        "reexamination",
+        "office_action",
+        "first_exam",
+        "abnormal",
+        "reject_review",
+    ];
+    if !ALLOWED_ROUND_TYPES.contains(&round_type.as_str()) {
+        return Json(json!({
+            "status": "error",
+            "message": format!(
+                "Invalid round_type: '{}'. Allowed values: {}",
+                round_type,
+                ALLOWED_ROUND_TYPES.join(", ")
+            )
+        }));
+    }
+
     // 自动计算轮次号
     let round_number = match s.db.next_round_number(&patent_id) {
         Ok(n) => n,
@@ -248,4 +269,59 @@ pub async fn api_oa_timeline(
             "pending": pending,
         }
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::common::init_app_state;
+    use axum::extract::State;
+    use serde_json::json;
+
+    /// #15: 提交非法 round_type 必须被拒绝，返回可读错误信息
+    #[tokio::test]
+    async fn reject_invalid_round_type() {
+        let state = init_app_state(":memory:").unwrap();
+        let req = json!({
+            "patent_id": "test_patent_1",
+            "round_type": "INVALID_TYPE",
+            "oa_date": "2026-01-01"
+        });
+        let resp = api_oa_rounds_create(State(state), Json(req)).await;
+        let resp_obj = resp.as_object().unwrap();
+        assert_eq!(resp_obj["status"], "error");
+        let msg = resp_obj["message"].as_str().unwrap();
+        assert!(
+            msg.contains("Invalid round_type"),
+            "message should mention invalid type: {}",
+            msg
+        );
+        assert!(
+            msg.contains("first_rejection"),
+            "message should list allowed values: {}",
+            msg
+        );
+    }
+
+    /// #15: 合法 round_type 应被接受（不会因验证失败返回 error）
+    #[tokio::test]
+    async fn accept_valid_round_type() {
+        let state = init_app_state(":memory:").unwrap();
+        let req = json!({
+            "patent_id": "test_patent_2",
+            "round_type": "first_rejection",
+            "oa_date": "2026-01-01"
+        });
+        let resp = api_oa_rounds_create(State(state), Json(req)).await;
+        let resp_obj = resp.as_object().unwrap();
+        // Should not be a validation error (might be ok or a db error, but not "Invalid round_type")
+        if resp_obj["status"] == "error" {
+            let msg = resp_obj["message"].as_str().unwrap_or("");
+            assert!(
+                !msg.contains("Invalid round_type"),
+                "valid type should not be rejected: {}",
+                msg
+            );
+        }
+    }
 }

@@ -1045,23 +1045,65 @@
     }
 
     async function createNewOaRound() {
-        const roundType = prompt('OA 类型 (first_rejection/second_rejection/reexamination):', 'first_rejection');
-        if (!roundType) return;
-        const oaDate = prompt('发文日期 (YYYY-MM-DD):', new Date().toISOString().slice(0, 10));
+        const result = await showOaRoundModal();
+        if (!result) return;
         try {
-            await fetch('/api/oa/rounds', {
+            const resp = await fetch('/api/oa/rounds', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
                     patent_id: patentId,
-                    round_type: roundType,
-                    oa_date: oaDate || null
+                    round_type: result.roundType,
+                    oa_date: result.oaDate || null
                 })
             });
+            const data = await resp.json();
+            if (data.status === 'error') {
+                alert(data.message || 'Failed to create OA round');
+                return;
+            }
             loadOaTimeline();
         } catch (e) {
             console.error('Failed to create OA round:', e);
         }
+    }
+
+    // ── OA Round creation modal (replaces native prompt, issue #15) ──
+    function showOaRoundModal() {
+        return new Promise((resolve) => {
+            const modal = document.getElementById('oa-round-modal');
+            const select = document.getElementById('oa-round-type-select');
+            const dateInput = document.getElementById('oa-round-date-input');
+            const okBtn = document.getElementById('oa-round-modal-ok');
+            const cancelBtn = document.getElementById('oa-round-modal-cancel');
+
+            // Set default date to today
+            dateInput.value = new Date().toISOString().slice(0, 10);
+            select.value = 'first_rejection';
+
+            modal.classList.add('show');
+
+            function cleanup() {
+                modal.classList.remove('show');
+                okBtn.removeEventListener('click', onOk);
+                cancelBtn.removeEventListener('click', onCancel);
+                modal.removeEventListener('click', onOverlay);
+            }
+            function onOk() {
+                cleanup();
+                resolve({ roundType: select.value, oaDate: dateInput.value });
+            }
+            function onCancel() {
+                cleanup();
+                resolve(null);
+            }
+            function onOverlay(e) {
+                if (e.target === modal) onCancel();
+            }
+            okBtn.addEventListener('click', onOk);
+            cancelBtn.addEventListener('click', onCancel);
+            modal.addEventListener('click', onOverlay);
+        });
     }
 
     function escapeHtml(text) {
@@ -1081,5 +1123,48 @@
     loadCollectState();
     loadTags();
     </script>
+
+    <!-- OA Round creation modal (issue #15, replaces native prompt) -->
+    <div class="oa-round-modal-overlay" id="oa-round-modal">
+        <div class="oa-round-modal">
+            <h3>新建 OA 轮次</h3>
+            <div class="oa-round-modal-field">
+                <label for="oa-round-type-select">OA 类型</label>
+                <select id="oa-round-type-select">
+                    <option value="first_rejection">一审驳回</option>
+                    <option value="second_rejection">二审驳回</option>
+                    <option value="reexamination">复审</option>
+                </select>
+            </div>
+            <div class="oa-round-modal-field">
+                <label for="oa-round-date-input">发文日期</label>
+                <input type="date" id="oa-round-date-input">
+            </div>
+            <div class="modal-btns">
+                <button class="btn-modal-cancel" id="oa-round-modal-cancel">取消</button>
+                <button class="btn-modal-ok" id="oa-round-modal-ok">确认</button>
+            </div>
+        </div>
+    </div>
+    <style>
+    .oa-round-modal-overlay {
+        display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background: rgba(0,0,0,0.4); z-index: 1000;
+    }
+    .oa-round-modal-overlay.show { display: flex; align-items: center; justify-content: center; }
+    .oa-round-modal {
+        background: #fff; border-radius: 8px; padding: 24px; min-width: 320px;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+    }
+    .oa-round-modal h3 { margin: 0 0 16px 0; }
+    .oa-round-modal-field { margin-bottom: 12px; }
+    .oa-round-modal-field label { display: block; margin-bottom: 4px; font-weight: 600; }
+    .oa-round-modal-field select, .oa-round-modal-field input {
+        width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;
+    }
+    .modal-btns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+    .btn-modal-cancel { padding: 8px 16px; border: 1px solid #ccc; border-radius: 4px; background: #f5f5f5; cursor: pointer; }
+    .btn-modal-ok { padding: 8px 16px; border: none; border-radius: 4px; background: #1976d2; color: #fff; cursor: pointer; }
+    </style>
 </body>
 </html>
