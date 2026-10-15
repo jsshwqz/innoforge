@@ -55,7 +55,7 @@ fn fixture_json() -> String {
 }
 
 fn start_server(ai_port: u16) -> std::process::Child {
-    Command::new("./target/release/innoforge-server")
+    Command::new(env!("CARGO_BIN_EXE_innoforge-server"))
         .env("INNOFORGE_PORT", SERVER_PORT.to_string())
         .env("AI_BASE_URL", format!("http://127.0.0.1:{}", ai_port))
         .env("AI_API_KEY", "test-key-not-real")
