@@ -394,3 +394,147 @@ fn exact_flag_does_not_leak_to_other_search_types() {
     assert_eq!(total, 2, "发明人域不消费精确开关，仍是 LIKE 模糊");
     assert_eq!(2, rows.len());
 }
+
+// ── Issue #13: Migration atomicity and self-healing tests ──────────────────────
+//
+// Pattern: run full migration → reset version to simulate interrupted migration
+// → re-run from old version → verify self-heal (skip ALTER, update version).
+//
+// The run() function executes ALL migrations from current_version to SCHEMA_VERSION
+// regardless of target_version (which is only for logging). So we run the full
+// migration first, then reset the recorded version to simulate "DDL applied but
+// version not recorded", then re-run to verify the column_exists() guards work.
+
+/// Helper: create a fresh in-memory db with schema_version table.
+fn fresh_migration_db() -> rusqlite::Connection {
+    let conn = rusqlite::Connection::open(":memory:").unwrap();
+    conn.execute_batch("PRAGMA journal_mode=WAL;").unwrap();
+    conn.execute_batch("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);")
+        .unwrap();
+    conn
+}
+
+/// Helper: read current schema version.
+fn current_schema_version(conn: &rusqlite::Connection) -> i32 {
+    conn.query_row(
+        "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+        [],
+        |r| r.get(0),
+    )
+    .unwrap_or(0)
+}
+
+/// Helper: check if a column exists.
+fn has_column(conn: &rusqlite::Connection, table: &str, column: &str) -> bool {
+    let mut stmt = conn
+        .prepare(&format!("PRAGMA table_info({})", table))
+        .unwrap();
+    let mut rows = stmt.query([]).unwrap();
+    while let Some(row) = rows.next().unwrap() {
+        let name: String = row.get(1).unwrap();
+        if name == column {
+            return true;
+        }
+    }
+    false
+}
+
+/// Helper: reset the recorded schema version to simulate an interrupted migration.
+fn reset_schema_version(conn: &rusqlite::Connection, version: i32) {
+    conn.execute_batch(&format!(
+        "DELETE FROM schema_version; INSERT INTO schema_version (version) VALUES({});",
+        version
+    ))
+    .unwrap();
+}
+
+#[test]
+fn migration_self_heal_v9_interrupted() {
+    // Scenario: migration 8→9 was interrupted after ALTER TABLE but before
+    // recording the version. The columns exist but version is still 8.
+    let conn = fresh_migration_db();
+    super::migrations::run(&conn, 0, Database::SCHEMA_VERSION).unwrap();
+    assert_eq!(current_schema_version(&conn), Database::SCHEMA_VERSION);
+    assert!(has_column(&conn, "feature_cards", "technical_problem"));
+
+    // Simulate interrupted migration: reset version to 8
+    reset_schema_version(&conn, 8);
+    assert_eq!(current_schema_version(&conn), 8);
+
+    // Run from v8 — must self-heal (skip ALTER since columns exist, just update version)
+    super::migrations::run(&conn, 8, Database::SCHEMA_VERSION).unwrap();
+    assert_eq!(current_schema_version(&conn), Database::SCHEMA_VERSION);
+}
+
+#[test]
+fn migration_self_heal_v3_interrupted() {
+    let conn = fresh_migration_db();
+    super::migrations::run(&conn, 0, Database::SCHEMA_VERSION).unwrap();
+    assert!(has_column(&conn, "ideas", "discussion_summary"));
+
+    // Simulate interrupted migration: reset version to 2
+    reset_schema_version(&conn, 2);
+    assert_eq!(current_schema_version(&conn), 2);
+
+    // Must self-heal: column already exists, skip ALTER, update version
+    super::migrations::run(&conn, 2, Database::SCHEMA_VERSION).unwrap();
+    assert_eq!(current_schema_version(&conn), Database::SCHEMA_VERSION);
+}
+
+#[test]
+fn migration_self_heal_v4_interrupted() {
+    let conn = fresh_migration_db();
+    super::migrations::run(&conn, 0, Database::SCHEMA_VERSION).unwrap();
+    assert!(has_column(&conn, "patents", "images"));
+
+    // Simulate interrupted migration: reset version to 3
+    reset_schema_version(&conn, 3);
+    assert_eq!(current_schema_version(&conn), 3);
+
+    super::migrations::run(&conn, 3, Database::SCHEMA_VERSION).unwrap();
+    assert_eq!(current_schema_version(&conn), Database::SCHEMA_VERSION);
+}
+
+#[test]
+fn migration_self_heal_v15_interrupted() {
+    let conn = fresh_migration_db();
+    super::migrations::run(&conn, 0, Database::SCHEMA_VERSION).unwrap();
+    assert!(has_column(&conn, "oa_analyses", "version"));
+
+    // Simulate interrupted migration: reset version to 14
+    reset_schema_version(&conn, 14);
+    assert_eq!(current_schema_version(&conn), 14);
+
+    super::migrations::run(&conn, 14, Database::SCHEMA_VERSION).unwrap();
+    assert_eq!(current_schema_version(&conn), Database::SCHEMA_VERSION);
+}
+
+#[test]
+fn migration_self_heal_v23_partial_interrupt() {
+    // v23 adds two columns: idea_id and session_id.
+    // Simulate: both columns exist (full migration ran), but version reset to 22.
+    // The migration must detect both exist and just update the version.
+    let conn = fresh_migration_db();
+    super::migrations::run(&conn, 0, Database::SCHEMA_VERSION).unwrap();
+    assert!(has_column(&conn, "ai_cost_ledger", "idea_id"));
+    assert!(has_column(&conn, "ai_cost_ledger", "session_id"));
+
+    // Simulate interrupted migration: reset version to 22
+    reset_schema_version(&conn, 22);
+    assert_eq!(current_schema_version(&conn), 22);
+
+    // Must self-heal: both columns exist, skip ALTERs, update version
+    super::migrations::run(&conn, 22, Database::SCHEMA_VERSION).unwrap();
+    assert_eq!(current_schema_version(&conn), Database::SCHEMA_VERSION);
+    assert!(has_column(&conn, "ai_cost_ledger", "session_id"));
+}
+
+#[test]
+fn migration_idempotent_rerun_at_full_version() {
+    let conn = fresh_migration_db();
+    super::migrations::run(&conn, 0, Database::SCHEMA_VERSION).unwrap();
+    let v = current_schema_version(&conn);
+    // Re-run from current version — must not error
+    super::migrations::run(&conn, v, Database::SCHEMA_VERSION).unwrap();
+    assert_eq!(current_schema_version(&conn), v);
+}

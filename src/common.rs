@@ -96,6 +96,186 @@ pub async fn serve_static_embedded(
     }
 }
 
+/// Resolve the database file path following a strict priority order (issue #14):
+///
+/// 1. `INNOFORGE_DB` env var (full file path)
+/// 2. `INNOFORGE_HOME` env var (directory; db at `<dir>/innoforge.db`)
+/// 3. Platform data directory:
+///    - Linux:   `~/.local/share/innoforge/innoforge.db`
+///    - Windows: `%APPDATA%\\innoforge\\innoforge.db`
+///    - macOS:   `~/Library/Application Support/innoforge/innoforge.db`
+/// 4. Directory of the running executable
+///
+/// If the old location (`./innoforge.db` or `./patent_hub.db` in cwd) exists
+/// but the new location does not, auto-migrate (copy then verify).  If the
+/// copy fails, returns an error — does NOT silently start with an empty db.
+pub fn resolve_db_path() -> anyhow::Result<std::path::PathBuf> {
+    // 1. INNOFORGE_DB — explicit full file path
+    if let Ok(p) = std::env::var("INNOFORGE_DB") {
+        let path = std::path::PathBuf::from(&p);
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        return Ok(path);
+    }
+
+    // 2. INNOFORGE_HOME — directory, db file inside
+    if let Ok(dir) = std::env::var("INNOFORGE_HOME") {
+        let dir_path = std::path::PathBuf::from(&dir);
+        let _ = std::fs::create_dir_all(&dir_path);
+        return Ok(dir_path.join("innoforge.db"));
+    }
+
+    // 3. Platform data directory
+    let platform_dir = platform_data_dir();
+    let _ = std::fs::create_dir_all(&platform_dir);
+    let new_path = platform_dir.join("innoforge.db");
+
+    // 4. Auto-migrate from old location if new doesn't exist
+    auto_migrate_db(&new_path)?;
+
+    Ok(new_path)
+}
+
+/// Return the platform-specific data directory for InnoForge.
+pub fn platform_data_dir() -> std::path::PathBuf {
+    if cfg!(target_os = "android") {
+        let base = std::env::var("HOME")
+            .or_else(|_| std::env::var("TMPDIR"))
+            .unwrap_or_else(|_| "/data/local/tmp".to_string());
+        return std::path::PathBuf::from(base);
+    }
+
+    if cfg!(target_os = "windows") {
+        if let Ok(appdata) = std::env::var("APPDATA") {
+            return std::path::PathBuf::from(appdata).join("innoforge");
+        }
+        return exe_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+    }
+
+    if cfg!(target_os = "macos") {
+        if let Ok(home) = std::env::var("HOME") {
+            return std::path::PathBuf::from(home)
+                .join("Library")
+                .join("Application Support")
+                .join("innoforge");
+        }
+    }
+
+    // Linux & other Unix: ~/.local/share/innoforge
+    if let Ok(home) = std::env::var("HOME") {
+        return std::path::PathBuf::from(home)
+            .join(".local")
+            .join("share")
+            .join("innoforge");
+    }
+
+    exe_dir().unwrap_or_else(|| std::path::PathBuf::from("."))
+}
+
+/// Directory of the currently running executable.
+pub fn exe_dir() -> Option<std::path::PathBuf> {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(std::path::Path::to_path_buf))
+}
+
+/// SQLite magic header: first 16 bytes of any valid SQLite 3 database file.
+const SQLITE_MAGIC: &[u8] = b"SQLite format 3\x00";
+
+/// Check whether a file starts with the SQLite 3 magic header (16 bytes).
+/// Returns false for missing files, directories, or files too small to read.
+pub fn is_sqlite_file(path: &std::path::Path) -> bool {
+    use std::io::Read;
+    let mut file = match std::fs::File::open(path) {
+        Ok(f) => f,
+        Err(_) => return false,
+    };
+    let mut header = [0u8; 16];
+    match file.read_exact(&mut header) {
+        Ok(()) => header == SQLITE_MAGIC,
+        Err(_) => false,
+    }
+}
+
+/// If old db file exists in cwd but new path doesn't, copy it over.
+/// Keeps the original file in place (non-destructive).
+///
+/// **Validation (issue #19):** Before copying, the source file's first 16
+/// bytes are checked against the SQLite magic header.  If the file is not a
+/// valid SQLite database, migration is **skipped** (no copy), a warning is
+/// logged with both paths, and `Ok(())` is returned so the caller creates a
+/// fresh database at the new location.  The user is never locked out.
+pub fn auto_migrate_db(new_path: &std::path::Path) -> anyhow::Result<()> {
+    if new_path.exists() {
+        return Ok(()); // new location already has a db
+    }
+
+    let candidates = ["innoforge.db", "patent_hub.db"];
+    for old_name in &candidates {
+        let old_path = std::path::Path::new(old_name);
+        if old_path.exists() && old_path.is_file() {
+            // Validate SQLite magic header before copying (issue #19).
+            if !is_sqlite_file(old_path) {
+                tracing::warn!(
+                    "Skipping migration: {} is not a valid SQLite database \
+                     (missing magic header). A fresh database will be created at {}.",
+                    old_path.display(),
+                    new_path.display()
+                );
+                println!(
+                    "Skipping migration: {} is not a valid SQLite database.                      A fresh database will be created at {}.",
+                    old_path.display(),
+                    new_path.display()
+                );
+                return Ok(()); // Don't copy garbage; let fresh db be created
+            }
+
+            let bytes = std::fs::copy(old_path, new_path).map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to migrate database from {}: {}",
+                    old_path.display(),
+                    e
+                )
+            })?;
+
+            let old_size = std::fs::metadata(old_path).map(|m| m.len()).unwrap_or(0);
+            if bytes != old_size {
+                let _ = std::fs::remove_file(new_path);
+                return Err(anyhow::anyhow!(
+                    "Database migration size mismatch: old={} copied={}",
+                    old_size,
+                    bytes
+                ));
+            }
+
+            tracing::info!(
+                "Auto-migrated database from {} to {} ({} bytes)",
+                old_path.display(),
+                new_path.display(),
+                bytes
+            );
+            return Ok(());
+        }
+    }
+    Ok(())
+}
+
+/// Strip the Windows verbatim (long-path) prefix `\?\` from a path string.
+///
+/// On Windows, `std::fs::canonicalize` returns paths with the `\?\` prefix
+/// (e.g. `\?\D:\TEMP\innoforge.db`).  This prefix breaks downstream string
+/// comparisons and changes directory names to uppercase.  We strip it so
+/// `/api/version` returns a clean path on all platforms (issue #19).
+pub fn strip_verbatim_prefix(path: &str) -> String {
+    // Strip \?\ prefix (Windows long path)
+    if let Some(stripped) = path.strip_prefix("\\\\?\\") {
+        stripped.to_string()
+    } else {
+        path.to_string()
+    }
+}
+
 /// 初始化应用数据库和状态（桌面端与移动端共用）。
 ///
 /// - 解析/创建数据库路径
@@ -144,7 +324,7 @@ pub fn init_app_state(db_path: &str) -> anyhow::Result<crate::routes::AppState> 
         cad: Arc::new(cad),
         config: Arc::new(RwLock::new(config)),
         pipeline_channels: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        db_path: db_path_abs.to_string_lossy().to_string(),
+        db_path: strip_verbatim_prefix(&db_path_abs.to_string_lossy().to_string()),
     };
 
     // 启动日志：打印当前 AI 服务商和超时配置

@@ -1,11 +1,39 @@
 use anyhow::Result;
 use rusqlite::Connection;
 
+/// Check if a column exists in a table (idempotency guard for ALTER TABLE).
+fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({})", table))?;
+    let mut rows = stmt.query([])?;
+    while let Some(row) = rows.next()? {
+        let name: String = row.get(1)?;
+        if name == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Run a migration in a transaction: DDL + version update commit atomically.
+/// If the process is killed mid-migration, the entire transaction rolls back.
+fn run_migration_tx(conn: &Connection, version: i32, sql: &str) -> Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    tx.execute_batch(sql)?;
+    tx.execute_batch(&format!(
+        "DELETE FROM schema_version; INSERT INTO schema_version (version) VALUES({});",
+        version
+    ))?;
+    tx.commit()?;
+    Ok(())
+}
+
 /// Run all pending database migrations.
 pub(crate) fn run(conn: &Connection, current_version: i32, target_version: i32) -> Result<()> {
     // Migration 0 → 1: Initial schema
     if current_version < 1 {
-        conn.execute_batch(
+        run_migration_tx(
+            conn,
+            1,
             "
             CREATE TABLE IF NOT EXISTS patents (
                 id TEXT PRIMARY KEY, patent_number TEXT NOT NULL, title TEXT NOT NULL,
@@ -25,604 +53,399 @@ pub(crate) fn run(conn: &Connection, current_version: i32, target_version: i32) 
                 patent_number, title, abstract_text, claims, applicant, inventor, ipc_codes,
                 content='patents', content_rowid='rowid'
             );
-
             CREATE TABLE IF NOT EXISTS ideas (
-                id TEXT PRIMARY KEY,
-                title TEXT NOT NULL,
-                description TEXT NOT NULL,
-                input_type TEXT DEFAULT 'text',
-                status TEXT DEFAULT 'pending',
-                analysis TEXT DEFAULT '',
-                web_results TEXT DEFAULT '[]',
-                patent_results TEXT DEFAULT '[]',
-                novelty_score REAL,
-                created_at TEXT DEFAULT (datetime('now')),
-                updated_at TEXT DEFAULT (datetime('now'))
+                id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL,
+                input_type TEXT DEFAULT 'text', status TEXT DEFAULT 'pending',
+                analysis TEXT DEFAULT '', web_results TEXT DEFAULT '[]',
+                patent_results TEXT DEFAULT '[]', novelty_score REAL,
+                created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
             );
-
-            DELETE FROM schema_version;
-            INSERT INTO schema_version (version) VALUES (1);
         ",
         )?;
         tracing::info!("Database migrated to version 1");
     }
 
-    // Migration 1 → 2: Collections and tags
     if current_version < 2 {
-        conn.execute_batch(
+        run_migration_tx(
+            conn,
+            2,
             "
             CREATE TABLE IF NOT EXISTS collections (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                description TEXT DEFAULT '',
+                id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT DEFAULT '',
                 created_at TEXT DEFAULT (datetime('now'))
             );
-
             CREATE TABLE IF NOT EXISTS patent_collections (
-                patent_id TEXT NOT NULL,
-                collection_id TEXT NOT NULL,
-                added_at TEXT DEFAULT (datetime('now')),
-                PRIMARY KEY (patent_id, collection_id)
+                patent_id TEXT NOT NULL, collection_id TEXT NOT NULL,
+                added_at TEXT DEFAULT (datetime('now')), PRIMARY KEY (patent_id, collection_id)
             );
-
             CREATE TABLE IF NOT EXISTS patent_tags (
-                patent_id TEXT NOT NULL,
-                tag TEXT NOT NULL,
-                PRIMARY KEY (patent_id, tag)
+                patent_id TEXT NOT NULL, tag TEXT NOT NULL, PRIMARY KEY (patent_id, tag)
             );
-
             CREATE INDEX IF NOT EXISTS idx_pc_collection ON patent_collections(collection_id);
             CREATE INDEX IF NOT EXISTS idx_pt_tag ON patent_tags(tag);
-
-            DELETE FROM schema_version;
-            INSERT INTO schema_version (version) VALUES (2);
         ",
         )?;
         tracing::info!("Database migrated to version 2");
     }
 
-    // Migration 2 → 3: Idea multi-round chat messages
     if current_version < 3 {
-        conn.execute_batch(
-            "
-            CREATE TABLE IF NOT EXISTS idea_messages (
-                id TEXT PRIMARY KEY,
-                idea_id TEXT NOT NULL,
-                role TEXT NOT NULL,
-                content TEXT NOT NULL,
-                created_at TEXT DEFAULT (datetime('now')),
+        let mut sql = String::from(
+            "CREATE TABLE IF NOT EXISTS idea_messages (
+                id TEXT PRIMARY KEY, idea_id TEXT NOT NULL, role TEXT NOT NULL,
+                content TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now')),
                 FOREIGN KEY (idea_id) REFERENCES ideas(id)
             );
-
-            CREATE INDEX IF NOT EXISTS idx_im_idea ON idea_messages(idea_id);
-
-            -- Add summary field to ideas table
-            ALTER TABLE ideas ADD COLUMN discussion_summary TEXT DEFAULT '';
-
-            DELETE FROM schema_version;
-            INSERT INTO schema_version (version) VALUES (3);
-        ",
-        )?;
+            CREATE INDEX IF NOT EXISTS idx_im_idea ON idea_messages(idea_id);",
+        );
+        if !column_exists(conn, "ideas", "discussion_summary")? {
+            sql.push_str("ALTER TABLE ideas ADD COLUMN discussion_summary TEXT DEFAULT '';");
+        }
+        run_migration_tx(conn, 3, &sql)?;
         tracing::info!("Database migrated to version 3");
     }
 
     if current_version < 4 {
-        conn.execute_batch(
-            "
-            ALTER TABLE patents ADD COLUMN images TEXT DEFAULT '[]';
-            ALTER TABLE patents ADD COLUMN pdf_url TEXT DEFAULT '';
-
-            DELETE FROM schema_version;
-            INSERT INTO schema_version (version) VALUES (4);
-        ",
-        )?;
+        let mut sql = String::new();
+        if !column_exists(conn, "patents", "images")? {
+            sql.push_str("ALTER TABLE patents ADD COLUMN images TEXT DEFAULT '[]';");
+        }
+        if !column_exists(conn, "patents", "pdf_url")? {
+            sql.push_str("ALTER TABLE patents ADD COLUMN pdf_url TEXT DEFAULT '';");
+        }
+        run_migration_tx(conn, 4, &sql)?;
         tracing::info!("Database migrated to version 4 (patent images)");
     }
 
-    // Migration 4 → 5: App settings table (for Android persistence)
     if current_version < 5 {
-        conn.execute_batch(
-            "
-            CREATE TABLE IF NOT EXISTS app_settings (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL,
+        run_migration_tx(
+            conn,
+            5,
+            "CREATE TABLE IF NOT EXISTS app_settings (
+                key TEXT PRIMARY KEY, value TEXT NOT NULL,
                 updated_at TEXT DEFAULT (datetime('now'))
-            );
-
-            DELETE FROM schema_version;
-            INSERT INTO schema_version (version) VALUES (5);
-        ",
+            );",
         )?;
-        tracing::info!("Database migrated to version 5 (app_settings 表)");
+        tracing::info!("Database migrated to version 5 (app_settings)");
     }
 
-    // Migration 5 → 6: Feature cards
     if current_version < 6 {
-        conn.execute_batch(
-            "
-            CREATE TABLE IF NOT EXISTS feature_cards (
-                id TEXT PRIMARY KEY,
-                idea_id TEXT NOT NULL,
-                title TEXT NOT NULL,
-                description TEXT DEFAULT '',
-                novelty_score REAL,
-                created_at TEXT DEFAULT (datetime('now')),
-                FOREIGN KEY (idea_id) REFERENCES ideas(id)
+        run_migration_tx(conn, 6,
+            "CREATE TABLE IF NOT EXISTS feature_cards (
+                id TEXT PRIMARY KEY, idea_id TEXT NOT NULL, title TEXT NOT NULL,
+                description TEXT DEFAULT '', novelty_score REAL,
+                created_at TEXT DEFAULT (datetime('now')), FOREIGN KEY (idea_id) REFERENCES ideas(id)
             );
             CREATE INDEX IF NOT EXISTS idx_fc_idea ON feature_cards(idea_id);
-            CREATE INDEX IF NOT EXISTS idx_fc_score ON feature_cards(novelty_score);
-
-            DELETE FROM schema_version;
-            INSERT INTO schema_version (version) VALUES (6);
-        ",
-        )?;
+            CREATE INDEX IF NOT EXISTS idx_fc_score ON feature_cards(novelty_score);")?;
         tracing::info!("Database migrated to version 6 (feature_cards)");
     }
 
-    // Migration 6 → 7: 管道快照 + 搜索缓存 / Pipeline snapshots + search cache
     if current_version < 7 {
-        conn.execute_batch(
-            "
-            CREATE TABLE IF NOT EXISTS pipeline_snapshots (
-                idea_id TEXT PRIMARY KEY,
-                context_json TEXT NOT NULL,
-                current_step TEXT NOT NULL,
-                updated_at TEXT DEFAULT (datetime('now'))
+        run_migration_tx(
+            conn,
+            7,
+            "CREATE TABLE IF NOT EXISTS pipeline_snapshots (
+                idea_id TEXT PRIMARY KEY, context_json TEXT NOT NULL,
+                current_step TEXT NOT NULL, updated_at TEXT DEFAULT (datetime('now'))
             );
-
             CREATE TABLE IF NOT EXISTS search_cache (
-                query_hash TEXT PRIMARY KEY,
-                query_text TEXT NOT NULL,
-                results_json TEXT NOT NULL,
-                source TEXT NOT NULL,
-                created_at TEXT DEFAULT (datetime('now')),
-                expires_at TEXT NOT NULL
+                query_hash TEXT PRIMARY KEY, query_text TEXT NOT NULL,
+                results_json TEXT NOT NULL, source TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime('now')), expires_at TEXT NOT NULL
             );
-            CREATE INDEX IF NOT EXISTS idx_cache_expires ON search_cache(expires_at);
-
-            DELETE FROM schema_version;
-            INSERT INTO schema_version (version) VALUES (7);
-        ",
+            CREATE INDEX IF NOT EXISTS idx_cache_expires ON search_cache(expires_at);",
         )?;
-        tracing::info!("Database migrated to version 7 (pipeline_snapshots + search_cache)");
+        tracing::info!("Database migrated to version 7");
     }
 
-    // Migration 7 → 8: 证据链 / Evidence chain
     if current_version < 8 {
-        conn.execute_batch(
-            "
-            CREATE TABLE IF NOT EXISTS evidence_chain (
-                id TEXT PRIMARY KEY,
-                idea_id TEXT NOT NULL,
-                claim TEXT NOT NULL,
-                source_type TEXT NOT NULL,
-                source_id TEXT NOT NULL,
-                source_title TEXT NOT NULL,
-                source_url TEXT DEFAULT '',
-                claim_number TEXT,
-                excerpt TEXT NOT NULL,
+        run_migration_tx(
+            conn,
+            8,
+            "CREATE TABLE IF NOT EXISTS evidence_chain (
+                id TEXT PRIMARY KEY, idea_id TEXT NOT NULL, claim TEXT NOT NULL,
+                source_type TEXT NOT NULL, source_id TEXT NOT NULL,
+                source_title TEXT NOT NULL, source_url TEXT DEFAULT '',
+                claim_number TEXT, excerpt TEXT NOT NULL,
                 relation TEXT NOT NULL DEFAULT 'supports',
-                confidence REAL NOT NULL DEFAULT 0.0,
-                produced_by TEXT NOT NULL,
+                confidence REAL NOT NULL DEFAULT 0.0, produced_by TEXT NOT NULL,
                 created_at TEXT DEFAULT (datetime('now')),
                 FOREIGN KEY (idea_id) REFERENCES ideas(id)
             );
             CREATE INDEX IF NOT EXISTS idx_ev_idea ON evidence_chain(idea_id);
-            CREATE INDEX IF NOT EXISTS idx_ev_confidence ON evidence_chain(confidence);
-
-            DELETE FROM schema_version;
-            INSERT INTO schema_version (version) VALUES (8);
-        ",
+            CREATE INDEX IF NOT EXISTS idx_ev_confidence ON evidence_chain(confidence);",
         )?;
         tracing::info!("Database migrated to version 8 (evidence_chain)");
     }
 
-    // Migration 8 → 9: Feature Card 5 维结构化字段
     if current_version < 9 {
-        conn.execute_batch(
-            "
-            ALTER TABLE feature_cards ADD COLUMN technical_problem TEXT DEFAULT '';
-            ALTER TABLE feature_cards ADD COLUMN core_structure TEXT DEFAULT '';
-            ALTER TABLE feature_cards ADD COLUMN key_relations TEXT DEFAULT '';
-            ALTER TABLE feature_cards ADD COLUMN process_steps TEXT DEFAULT '';
-            ALTER TABLE feature_cards ADD COLUMN application_scenarios TEXT DEFAULT '';
-
-            DELETE FROM schema_version;
-            INSERT INTO schema_version (version) VALUES (9);
-        ",
-        )?;
-        tracing::info!("Database migrated to version 9 (feature_card 5-dimension fields)");
+        let mut sql = String::new();
+        for (col, def) in [
+            ("technical_problem", "TEXT DEFAULT ''"),
+            ("core_structure", "TEXT DEFAULT ''"),
+            ("key_relations", "TEXT DEFAULT ''"),
+            ("process_steps", "TEXT DEFAULT ''"),
+            ("application_scenarios", "TEXT DEFAULT ''"),
+        ] {
+            if !column_exists(conn, "feature_cards", col)? {
+                sql.push_str(&format!(
+                    "ALTER TABLE feature_cards ADD COLUMN {} {};",
+                    col, def
+                ));
+            }
+        }
+        run_migration_tx(conn, 9, &sql)?;
+        tracing::info!("Database migrated to version 9 (feature_card 5-dim fields)");
     }
 
-    // Migration 9 → 10: 版本管理 + 发现记忆 / Version management + Findings memory
     if current_version < 10 {
-        conn.execute_batch(
-            "
-            CREATE TABLE IF NOT EXISTS idea_versions (
-                id TEXT PRIMARY KEY,
-                idea_id TEXT NOT NULL,
-                version_number INTEGER NOT NULL,
-                context_json TEXT NOT NULL,
-                current_step TEXT NOT NULL,
-                branch_id TEXT DEFAULT 'main',
-                created_at TEXT DEFAULT (datetime('now')),
+        run_migration_tx(
+            conn,
+            10,
+            "CREATE TABLE IF NOT EXISTS idea_versions (
+                id TEXT PRIMARY KEY, idea_id TEXT NOT NULL, version_number INTEGER NOT NULL,
+                context_json TEXT NOT NULL, current_step TEXT NOT NULL,
+                branch_id TEXT DEFAULT 'main', created_at TEXT DEFAULT (datetime('now')),
                 FOREIGN KEY (idea_id) REFERENCES ideas(id)
             );
             CREATE INDEX IF NOT EXISTS idx_iv_idea ON idea_versions(idea_id);
             CREATE INDEX IF NOT EXISTS idx_iv_branch ON idea_versions(branch_id);
-
             CREATE TABLE IF NOT EXISTS idea_branches (
-                id TEXT PRIMARY KEY,
-                idea_id TEXT NOT NULL,
-                name TEXT NOT NULL,
-                parent_branch_id TEXT DEFAULT 'main',
-                parent_version_id TEXT,
-                status TEXT DEFAULT 'active',
-                created_at TEXT DEFAULT (datetime('now')),
+                id TEXT PRIMARY KEY, idea_id TEXT NOT NULL, name TEXT NOT NULL,
+                parent_branch_id TEXT DEFAULT 'main', parent_version_id TEXT,
+                status TEXT DEFAULT 'active', created_at TEXT DEFAULT (datetime('now')),
                 FOREIGN KEY (idea_id) REFERENCES ideas(id)
             );
             CREATE INDEX IF NOT EXISTS idx_ib_idea ON idea_branches(idea_id);
-
             CREATE TABLE IF NOT EXISTS findings (
-                id TEXT PRIMARY KEY,
-                idea_id TEXT NOT NULL,
-                finding_type TEXT NOT NULL,
-                title TEXT NOT NULL,
-                content TEXT NOT NULL,
-                source_step TEXT DEFAULT '',
-                branch_id TEXT DEFAULT 'main',
-                created_at TEXT DEFAULT (datetime('now')),
+                id TEXT PRIMARY KEY, idea_id TEXT NOT NULL, finding_type TEXT NOT NULL,
+                title TEXT NOT NULL, content TEXT NOT NULL, source_step TEXT DEFAULT '',
+                branch_id TEXT DEFAULT 'main', created_at TEXT DEFAULT (datetime('now')),
                 FOREIGN KEY (idea_id) REFERENCES ideas(id)
             );
             CREATE INDEX IF NOT EXISTS idx_f_idea ON findings(idea_id);
-            CREATE INDEX IF NOT EXISTS idx_f_type ON findings(finding_type);
-
-            DELETE FROM schema_version;
-            INSERT INTO schema_version (version) VALUES (10);
-        ",
+            CREATE INDEX IF NOT EXISTS idx_f_type ON findings(finding_type);",
         )?;
-        tracing::info!(
-            "Database migrated to version 10 (idea_versions + idea_branches + findings)"
-        );
+        tracing::info!("Database migrated to version 10");
     }
 
-    // Migration 10 → 11: 权利要求树 / Claim tree
     if current_version < 11 {
-        conn.execute_batch(
-            "
-            CREATE TABLE IF NOT EXISTS claim_nodes (
-                id TEXT PRIMARY KEY,
-                idea_id TEXT NOT NULL,
-                claim_number INTEGER NOT NULL,
-                claim_type TEXT NOT NULL DEFAULT 'independent',
-                parent_claim_id TEXT,
-                content TEXT NOT NULL,
-                created_at TEXT DEFAULT (datetime('now')),
+        run_migration_tx(
+            conn,
+            11,
+            "CREATE TABLE IF NOT EXISTS claim_nodes (
+                id TEXT PRIMARY KEY, idea_id TEXT NOT NULL, claim_number INTEGER NOT NULL,
+                claim_type TEXT NOT NULL DEFAULT 'independent', parent_claim_id TEXT,
+                content TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now')),
                 FOREIGN KEY (idea_id) REFERENCES ideas(id)
             );
             CREATE INDEX IF NOT EXISTS idx_cn_idea ON claim_nodes(idea_id);
-
             CREATE TABLE IF NOT EXISTS technical_features (
-                id TEXT PRIMARY KEY,
-                claim_id TEXT NOT NULL,
-                description TEXT NOT NULL,
-                novelty_flag INTEGER NOT NULL DEFAULT 0,
-                evidence_ids TEXT DEFAULT '[]',
+                id TEXT PRIMARY KEY, claim_id TEXT NOT NULL, description TEXT NOT NULL,
+                novelty_flag INTEGER NOT NULL DEFAULT 0, evidence_ids TEXT DEFAULT '[]',
                 created_at TEXT DEFAULT (datetime('now')),
                 FOREIGN KEY (claim_id) REFERENCES claim_nodes(id)
             );
-            CREATE INDEX IF NOT EXISTS idx_tf_claim ON technical_features(claim_id);
-
-            DELETE FROM schema_version;
-            INSERT INTO schema_version (version) VALUES (11);
-        ",
+            CREATE INDEX IF NOT EXISTS idx_tf_claim ON technical_features(claim_id);",
         )?;
-        tracing::info!("Database migrated to version 11 (claim_nodes + technical_features)");
+        tracing::info!("Database migrated to version 11");
     }
 
-    // Migration 11 → 12: 研发状态机持久化 / Persistent research state
     if current_version < 12 {
-        conn.execute_batch(
-            "
-            CREATE TABLE IF NOT EXISTS idea_research_state (
-                idea_id TEXT PRIMARY KEY,
-                current_hypothesis TEXT DEFAULT '',
-                excluded_paths TEXT DEFAULT '[]',
-                open_questions TEXT DEFAULT '[]',
-                verified_claims TEXT DEFAULT '[]',
-                updated_at TEXT DEFAULT (datetime('now')),
+        run_migration_tx(
+            conn,
+            12,
+            "CREATE TABLE IF NOT EXISTS idea_research_state (
+                idea_id TEXT PRIMARY KEY, current_hypothesis TEXT DEFAULT '',
+                excluded_paths TEXT DEFAULT '[]', open_questions TEXT DEFAULT '[]',
+                verified_claims TEXT DEFAULT '[]', updated_at TEXT DEFAULT (datetime('now')),
                 FOREIGN KEY (idea_id) REFERENCES ideas(id)
             );
-            CREATE INDEX IF NOT EXISTS idx_rs_updated_at ON idea_research_state(updated_at);
-
-            DELETE FROM schema_version;
-            INSERT INTO schema_version (version) VALUES (12);
-        ",
+            CREATE INDEX IF NOT EXISTS idx_rs_updated_at ON idea_research_state(updated_at);",
         )?;
         tracing::info!("Database migrated to version 12 (idea_research_state)");
     }
 
-    // Migration 12 → 13: 聊天记录跨设备同步 / Chat records for cross-device sync
     if current_version < 13 {
-        conn.execute_batch(
-            "
-            CREATE TABLE IF NOT EXISTS chat_records (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_key TEXT NOT NULL,
+        run_migration_tx(
+            conn,
+            13,
+            "CREATE TABLE IF NOT EXISTS chat_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, session_key TEXT NOT NULL,
                 role TEXT NOT NULL CHECK(role IN ('user','assistant','system')),
-                content TEXT NOT NULL,
-                created_at TEXT DEFAULT (datetime('now'))
+                content TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now'))
             );
             CREATE INDEX IF NOT EXISTS idx_chat_session ON chat_records(session_key);
-            CREATE INDEX IF NOT EXISTS idx_chat_created ON chat_records(created_at);
-
-            DELETE FROM schema_version;
-            INSERT INTO schema_version (version) VALUES (13);
-        ",
+            CREATE INDEX IF NOT EXISTS idx_chat_created ON chat_records(created_at);",
         )?;
         tracing::info!("Database migrated to version 13 (chat_records)");
     }
 
     if current_version < 14 {
-        conn.execute_batch(
-            "
-            CREATE TABLE IF NOT EXISTS oa_analyses (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                patent_number TEXT NOT NULL,
-                patent_title TEXT DEFAULT '',
-                oa_type TEXT NOT NULL,
-                depth TEXT NOT NULL,
-                analysis_text TEXT NOT NULL,
-                created_at TEXT DEFAULT (datetime('now','localtime'))
+        run_migration_tx(
+            conn,
+            14,
+            "CREATE TABLE IF NOT EXISTS oa_analyses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, patent_number TEXT NOT NULL,
+                patent_title TEXT DEFAULT '', oa_type TEXT NOT NULL, depth TEXT NOT NULL,
+                analysis_text TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now','localtime'))
             );
             CREATE INDEX IF NOT EXISTS idx_oa_patent ON oa_analyses(patent_number);
-            CREATE INDEX IF NOT EXISTS idx_oa_created ON oa_analyses(created_at);
-
-            DELETE FROM schema_version;
-            INSERT INTO schema_version (version) VALUES (14);
-        ",
+            CREATE INDEX IF NOT EXISTS idx_oa_created ON oa_analyses(created_at);",
         )?;
         tracing::info!("Database migrated to version 14 (oa_analyses)");
     }
 
     if current_version < 15 {
-        conn.execute_batch(
-            "
-            ALTER TABLE oa_analyses ADD COLUMN version INTEGER DEFAULT 1;
-
-            DELETE FROM schema_version;
-            INSERT INTO schema_version (version) VALUES (15);
-        ",
-        )?;
+        let mut sql = String::new();
+        if !column_exists(conn, "oa_analyses", "version")? {
+            sql.push_str("ALTER TABLE oa_analyses ADD COLUMN version INTEGER DEFAULT 1;");
+        }
+        run_migration_tx(conn, 15, &sql)?;
         tracing::info!("Database migrated to version 15 (oa_analyses version)");
     }
 
     if current_version < 16 {
-        conn.execute_batch(
-            "
-            CREATE TABLE IF NOT EXISTS oa_discussions (
-                id TEXT PRIMARY KEY,
-                patent_number TEXT NOT NULL,
-                applicant_name TEXT,
-                oa_type TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                analysis_snapshot TEXT,
-                discussion_history TEXT,
-                oa_snippet TEXT,
+        run_migration_tx(conn, 16,
+            "CREATE TABLE IF NOT EXISTS oa_discussions (
+                id TEXT PRIMARY KEY, patent_number TEXT NOT NULL, applicant_name TEXT,
+                oa_type TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                analysis_snapshot TEXT, discussion_history TEXT, oa_snippet TEXT,
                 oa_text TEXT NOT NULL DEFAULT ''
             );
             CREATE INDEX IF NOT EXISTS idx_oa_discussions_patent ON oa_discussions(patent_number);
-            CREATE INDEX IF NOT EXISTS idx_oa_discussions_created ON oa_discussions(created_at DESC);
-
-            DELETE FROM schema_version;
-            INSERT INTO schema_version (version) VALUES (16);
-        ",
-        )?;
+            CREATE INDEX IF NOT EXISTS idx_oa_discussions_created ON oa_discussions(created_at DESC);")?;
         tracing::info!("Database migrated to version 16 (oa_discussions)");
     }
 
-    // v17: 为 oa_discussions 表增加 oa_text 字段（用于导入讨论后直接生成答复书）
     if current_version < 17 {
-        let mut columns = conn.prepare("PRAGMA table_info(oa_discussions)")?;
-        let mut rows = columns.query([])?;
-        let mut has_oa_text = false;
-        while let Some(row) = rows.next()? {
-            let name: String = row.get(1)?;
-            if name == "oa_text" {
-                has_oa_text = true;
-                break;
-            }
+        let mut sql = String::new();
+        if !column_exists(conn, "oa_discussions", "oa_text")? {
+            sql.push_str("ALTER TABLE oa_discussions ADD COLUMN oa_text TEXT NOT NULL DEFAULT '';");
         }
-        if !has_oa_text {
-            conn.execute_batch(
-                "ALTER TABLE oa_discussions ADD COLUMN oa_text TEXT NOT NULL DEFAULT '';",
-            )?;
-        }
-        conn.execute_batch(
-            "
-            DELETE FROM schema_version;
-            INSERT INTO schema_version (version) VALUES (17);
-            ",
-        )?;
+        run_migration_tx(conn, 17, &sql)?;
         tracing::info!("Database migrated to version 17 (oa_text column)");
     }
 
-    // v18: persistent FreeCAD artifact revision history.
     if current_version < 18 {
-        let tx = conn.unchecked_transaction()?;
-        tx.execute_batch(
-            "
-            CREATE TABLE IF NOT EXISTS cad_artifacts (
+        run_migration_tx(
+            conn,
+            18,
+            "CREATE TABLE IF NOT EXISTS cad_artifacts (
                 id TEXT PRIMARY KEY,
                 context_kind TEXT NOT NULL CHECK(context_kind IN ('idea','patent','oa')),
-                context_id TEXT NOT NULL,
-                parent_artifact_id TEXT,
-                revision INTEGER NOT NULL,
-                prompt TEXT NOT NULL,
-                assumptions_json TEXT NOT NULL DEFAULT '[]',
-                preview_rel_path TEXT NOT NULL,
-                fcstd_rel_path TEXT NOT NULL,
-                step_rel_path TEXT,
-                validation_json TEXT NOT NULL,
+                context_id TEXT NOT NULL, parent_artifact_id TEXT, revision INTEGER NOT NULL,
+                prompt TEXT NOT NULL, assumptions_json TEXT NOT NULL DEFAULT '[]',
+                preview_rel_path TEXT NOT NULL, fcstd_rel_path TEXT NOT NULL,
+                step_rel_path TEXT, validation_json TEXT NOT NULL,
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 FOREIGN KEY(parent_artifact_id) REFERENCES cad_artifacts(id),
                 UNIQUE(context_kind, context_id, revision)
             );
             CREATE INDEX IF NOT EXISTS idx_cad_artifacts_context_created
-            ON cad_artifacts(context_kind, context_id, created_at DESC);
-            DELETE FROM schema_version;
-            INSERT INTO schema_version (version) VALUES (18);
-            ",
+            ON cad_artifacts(context_kind, context_id, created_at DESC);",
         )?;
-        tx.commit()?;
         tracing::info!("Database migrated to version 18 (cad_artifacts)");
     }
 
-    // v19: AI 调用成本账本 — 追踪每次 AI 调用的 token 消耗和估算成本
     if current_version < 19 {
-        conn.execute_batch(
-            "
-            CREATE TABLE IF NOT EXISTS ai_cost_ledger (
-                id TEXT PRIMARY KEY,
-                pipeline_run_id TEXT NOT NULL,
-                step TEXT NOT NULL,
-                model TEXT NOT NULL,
-                provider TEXT NOT NULL,
-                timestamp TEXT NOT NULL,
-                input_tokens INTEGER NOT NULL DEFAULT 0,
-                output_tokens INTEGER NOT NULL DEFAULT 0,
-                estimated_cost_cents REAL NOT NULL DEFAULT 0.0,
-                duration_ms INTEGER NOT NULL DEFAULT 0
+        run_migration_tx(conn, 19,
+            "CREATE TABLE IF NOT EXISTS ai_cost_ledger (
+                id TEXT PRIMARY KEY, pipeline_run_id TEXT NOT NULL, step TEXT NOT NULL,
+                model TEXT NOT NULL, provider TEXT NOT NULL, timestamp TEXT NOT NULL,
+                input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0,
+                estimated_cost_cents REAL NOT NULL DEFAULT 0.0, duration_ms INTEGER NOT NULL DEFAULT 0
             );
             CREATE INDEX IF NOT EXISTS idx_ai_cost_pipeline ON ai_cost_ledger(pipeline_run_id);
-            CREATE INDEX IF NOT EXISTS idx_ai_cost_timestamp ON ai_cost_ledger(timestamp);
-            DELETE FROM schema_version;
-            INSERT INTO schema_version (version) VALUES (19);
-            ",
-        )?;
+            CREATE INDEX IF NOT EXISTS idx_ai_cost_timestamp ON ai_cost_ledger(timestamp);")?;
         tracing::info!("Database migrated to version 19 (ai_cost_ledger)");
     }
 
-    // v20: 向量嵌入表 — 存储专利文本的嵌入向量用于混合语义搜索
     if current_version < 20 {
-        conn.execute_batch(
-            "
-            CREATE TABLE IF NOT EXISTS patents_embedding (
-                patent_id TEXT NOT NULL UNIQUE,
-                embedding BLOB NOT NULL,
-                model_name TEXT NOT NULL DEFAULT 'doc2vec-patent',
-                text_hash TEXT,
+        run_migration_tx(
+            conn,
+            20,
+            "CREATE TABLE IF NOT EXISTS patents_embedding (
+                patent_id TEXT NOT NULL UNIQUE, embedding BLOB NOT NULL,
+                model_name TEXT NOT NULL DEFAULT 'doc2vec-patent', text_hash TEXT,
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now')),
                 FOREIGN KEY(patent_id) REFERENCES patents(id) ON DELETE CASCADE
             );
             CREATE INDEX IF NOT EXISTS idx_embedding_model ON patents_embedding(model_name);
-            CREATE INDEX IF NOT EXISTS idx_embedding_hash ON patents_embedding(text_hash);
-            DELETE FROM schema_version;
-            INSERT INTO schema_version (version) VALUES (20);
-            ",
+            CREATE INDEX IF NOT EXISTS idx_embedding_hash ON patents_embedding(text_hash);",
         )?;
         tracing::info!("Database migrated to version 20 (patents_embedding)");
     }
 
-    // v21: RAG 管道 — 专利全文切片存储
     if current_version < 21 {
-        conn.execute_batch(
-            "
-            CREATE TABLE IF NOT EXISTS patent_chunks (
-                id TEXT PRIMARY KEY,
-                patent_id TEXT NOT NULL,
-                chunk_index INTEGER NOT NULL,
-                source_type TEXT NOT NULL DEFAULT 'description' CHECK(source_type IN ('abstract', 'claim', 'description')),
-                content TEXT NOT NULL,
-                embedding BLOB NOT NULL,
+        run_migration_tx(
+            conn,
+            21,
+            "CREATE TABLE IF NOT EXISTS patent_chunks (
+                id TEXT PRIMARY KEY, patent_id TEXT NOT NULL, chunk_index INTEGER NOT NULL,
+                source_type TEXT NOT NULL DEFAULT 'description'
+                    CHECK(source_type IN ('abstract', 'claim', 'description')),
+                content TEXT NOT NULL, embedding BLOB NOT NULL,
                 model_name TEXT NOT NULL DEFAULT 'char-tfidf-v1',
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 FOREIGN KEY(patent_id) REFERENCES patents(id) ON DELETE CASCADE
             );
             CREATE INDEX IF NOT EXISTS idx_chunk_patent ON patent_chunks(patent_id);
-            CREATE INDEX IF NOT EXISTS idx_chunk_source ON patent_chunks(source_type);
-            DELETE FROM schema_version;
-            INSERT INTO schema_version (version) VALUES (21);
-            ",
+            CREATE INDEX IF NOT EXISTS idx_chunk_source ON patent_chunks(source_type);",
         )?;
         tracing::info!("Database migrated to version 21 (patent_chunks)");
     }
 
-    // Migration 21 -> 22: Idea memory table for persistent RAG-style recall.
-    // Stores domain concepts, decisions, patterns, and open questions extracted
-    // from completed pipeline runs, so future runs can inject prior context.
     if current_version < 22 {
-        conn.execute_batch(
-            "
-            CREATE TABLE IF NOT EXISTS idea_memory (
-                id TEXT PRIMARY KEY,
-                idea_id TEXT NOT NULL,
-                concept_name TEXT NOT NULL,
+        run_migration_tx(
+            conn,
+            22,
+            "CREATE TABLE IF NOT EXISTS idea_memory (
+                id TEXT PRIMARY KEY, idea_id TEXT NOT NULL, concept_name TEXT NOT NULL,
                 concept_type TEXT NOT NULL DEFAULT 'domain_concept'
                     CHECK(concept_type IN ('domain_concept', 'decision', 'pattern', 'question')),
-                content TEXT NOT NULL,
-                confidence REAL DEFAULT 0.5,
-                source_step TEXT,
+                content TEXT NOT NULL, confidence REAL DEFAULT 0.5, source_step TEXT,
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now')),
                 FOREIGN KEY(idea_id) REFERENCES ideas(id) ON DELETE CASCADE
             );
             CREATE INDEX IF NOT EXISTS idx_idea_memory_idea ON idea_memory(idea_id);
-            CREATE INDEX IF NOT EXISTS idx_idea_memory_type ON idea_memory(concept_type);
-            DELETE FROM schema_version;
-            INSERT INTO schema_version (version) VALUES (22);
-            ",
+            CREATE INDEX IF NOT EXISTS idx_idea_memory_type ON idea_memory(concept_type);",
         )?;
         tracing::info!("Database migrated to version 22 (idea_memory)");
     }
 
-    // v23: 扩展 ai_cost_ledger — 添加 idea_id / session_id 列，覆盖聊天与创意场景的 AI 成本
-    // Extend ai_cost_ledger with idea_id / session_id to cover chat & idea AI calls.
     if current_version < 23 {
-        conn.execute_batch(
-            "
-            ALTER TABLE ai_cost_ledger ADD COLUMN idea_id TEXT NULL;
-            ALTER TABLE ai_cost_ledger ADD COLUMN session_id TEXT NULL;
-            CREATE INDEX IF NOT EXISTS idx_ai_cost_idea ON ai_cost_ledger(idea_id);
-            DELETE FROM schema_version;
-            INSERT INTO schema_version (version) VALUES (23);
-            ",
-        )?;
+        let mut sql = String::new();
+        if !column_exists(conn, "ai_cost_ledger", "idea_id")? {
+            sql.push_str("ALTER TABLE ai_cost_ledger ADD COLUMN idea_id TEXT NULL;");
+        }
+        if !column_exists(conn, "ai_cost_ledger", "session_id")? {
+            sql.push_str("ALTER TABLE ai_cost_ledger ADD COLUMN session_id TEXT NULL;");
+        }
+        sql.push_str("CREATE INDEX IF NOT EXISTS idx_ai_cost_idea ON ai_cost_ledger(idea_id);");
+        run_migration_tx(conn, 23, &sql)?;
         tracing::info!("Database migrated to version 23 (ai_cost_idea_session)");
     }
 
-    // v24: OA 轮次追踪表 — 记录每件专利从一审→二审→复审→授权/驳回的完整流程
-    // OA rounds tracking table — records the full lifecycle of each patent OA process.
     if current_version < 24 {
-        conn.execute_batch(
-            "
-            CREATE TABLE IF NOT EXISTS oa_rounds (
-                id TEXT PRIMARY KEY,
-                patent_id TEXT NOT NULL,
-                round_number INTEGER NOT NULL,
-                round_type TEXT NOT NULL,
-                oa_date TEXT,
-                oa_text TEXT,
-                response_date TEXT,
-                response_text TEXT,
-                result TEXT,
-                result_date TEXT,
-                strategy_used TEXT,
-                quality_score REAL,
-                notes TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+        run_migration_tx(
+            conn,
+            24,
+            "CREATE TABLE IF NOT EXISTS oa_rounds (
+                id TEXT PRIMARY KEY, patent_id TEXT NOT NULL, round_number INTEGER NOT NULL,
+                round_type TEXT NOT NULL, oa_date TEXT, oa_text TEXT,
+                response_date TEXT, response_text TEXT, result TEXT, result_date TEXT,
+                strategy_used TEXT, quality_score REAL, notes TEXT,
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_oa_rounds_patent ON oa_rounds(patent_id);
-            CREATE INDEX IF NOT EXISTS idx_oa_rounds_number ON oa_rounds(patent_id, round_number);
-            DELETE FROM schema_version;
-            INSERT INTO schema_version (version) VALUES (24);
-            ",
+            CREATE INDEX IF NOT EXISTS idx_oa_rounds_number ON oa_rounds(patent_id, round_number);",
         )?;
         tracing::info!("Database migrated to version 24 (oa_rounds)");
     }
+
     if current_version > 0 && current_version < target_version {
         tracing::info!(
             "Database migrated from version {} to {}",
