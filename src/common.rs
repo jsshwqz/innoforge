@@ -324,7 +324,7 @@ pub fn init_app_state(db_path: &str) -> anyhow::Result<crate::routes::AppState> 
         cad: Arc::new(cad),
         config: Arc::new(RwLock::new(config)),
         pipeline_channels: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        db_path: strip_verbatim_prefix(&db_path_abs.to_string_lossy().to_string()),
+        db_path: strip_verbatim_prefix(db_path_abs.to_string_lossy().as_ref()),
     };
 
     // 启动日志：打印当前 AI 服务商和超时配置
@@ -353,6 +353,9 @@ pub fn init_app_state(db_path: &str) -> anyhow::Result<crate::routes::AppState> 
             cfg.ai_model,
         );
     }
+
+    // 启动日志：打印数据库路径（与 /api/version 回显的 db_path 同源，issue #14/#16 统一口径）
+    tracing::info!("[CONFIG] db_path={}", state.db_path);
 
     // 创建上传目录 / Create uploads directory
     let _ = std::fs::create_dir_all("data/uploads");
@@ -843,6 +846,52 @@ mod cors_tests {
                 "http://localhost:3000",
                 "https://safe.example",
             ]
+        );
+    }
+}
+
+#[cfg(test)]
+mod db_path_consistency_tests {
+    use super::*;
+
+    /// ③ 启动日志的 db_path 与 /api/version 回显的 db_path 必须是同一个字符串。
+    /// 这里直接验证 AppState.db_path 等于 strip_verbatim_prefix(canonicalize(path))。
+    #[tokio::test]
+    async fn db_path_log_equals_api_echo() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let db_path = tmp.path().to_str().unwrap();
+        let state = init_app_state(db_path).unwrap();
+
+        // Compute expected: canonicalize then strip verbatim prefix
+        let canonical = std::path::Path::new(db_path)
+            .canonicalize()
+            .unwrap_or_else(|_| std::path::PathBuf::from(db_path));
+        let expected = strip_verbatim_prefix(canonical.to_string_lossy().as_ref());
+
+        assert_eq!(
+            state.db_path, expected,
+            "state.db_path must equal strip_verbatim_prefix(canonicalize(db_path)) — \
+             this is the same value printed in startup log and returned by /api/version"
+        );
+    }
+
+    /// ③ strip_verbatim_prefix preserves original case (no lowercasing)
+    #[test]
+    fn strip_verbatim_prefix_preserves_case() {
+        // On Linux paths are case-sensitive; the function must not alter case
+        let input = "/tmp/InnoForge/Data/MyDB.sqlite";
+        let result = strip_verbatim_prefix(input);
+        assert_eq!(result, input, "strip_verbatim_prefix must preserve case");
+    }
+
+    /// ③ strip_verbatim_prefix removes \\?\ prefix on Windows-style paths
+    #[test]
+    fn strip_verbatim_prefix_removes_windows_prefix() {
+        let input = r"\\?\C:\Users\test\data\db.sqlite";
+        let result = strip_verbatim_prefix(input);
+        assert_eq!(
+            result, r"C:\Users\test\data\db.sqlite",
+            "strip_verbatim_prefix must remove \\\\?\\ prefix"
         );
     }
 }

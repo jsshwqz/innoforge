@@ -26,7 +26,7 @@ mod tests {
 
     // Check if a string contains Chinese characters
     fn has_chinese(s: &str) -> bool {
-        s.chars().any(|c| c >= '\u{4e00}' && c <= '\u{9fff}')
+        s.chars().any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c))
     }
 
     /// Find all alert('...') and confirm('...') calls with literal string
@@ -75,7 +75,7 @@ mod tests {
     fn no_english_only_alert_confirm_literals() {
         let violations = count_english_literals();
         assert!(
-            violations.len() <= BASELINE_ENGLISH_LITERALS,
+            violations.len() == BASELINE_ENGLISH_LITERALS,
             "Found {} hardcoded English alert/confirm literals (baseline {}):\n{}",
             violations.len(),
             BASELINE_ENGLISH_LITERALS,
