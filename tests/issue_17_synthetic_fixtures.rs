@@ -5,14 +5,27 @@
 //! Negative A: broken AI stub → server still renders, AI endpoint
 //!             returns controlled error (not crash/hang).
 //! Negative B: fixture has no real patent numbers or applicant names.
+//!
+//! Each test that starts a server uses its own dynamically allocated
+//! port (via TcpListener::bind("127.0.0.1:0")) to avoid collisions
+//! when tests run concurrently.
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::process::Command;
 
-const SERVER_PORT: u16 = 3137;
-const AI_STUB_PORT: u16 = 3138;
 const FIXTURE_ID: &str = "synthetic_fixture_001";
+
+// ── Port allocation ──
+
+/// Bind a temporary listener to 127.0.0.1:0, extract the assigned port,
+/// then drop the listener to free it. There is a small TOCTOU window
+/// where another process could grab the port, but in practice this is
+/// fine for test-level allocation.
+fn free_port() -> u16 {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind 127.0.0.1:0");
+    listener.local_addr().unwrap().port()
+}
 
 // ── Fake AI provider stub ──
 
@@ -54,21 +67,19 @@ fn fixture_json() -> String {
         .expect("fixture file must exist")
 }
 
-fn start_server(ai_port: u16) -> std::process::Child {
+fn start_server(server_port: u16, ai_port: u16) -> std::process::Child {
     Command::new(env!("CARGO_BIN_EXE_innoforge-server"))
-        .env("INNOFORGE_PORT", SERVER_PORT.to_string())
+        .env("INNOFORGE_PORT", server_port.to_string())
         .env("AI_BASE_URL", format!("http://127.0.0.1:{}", ai_port))
         .env("AI_API_KEY", "test-key-not-real")
         .spawn()
-        .expect("run cargo build --release first")
+        .expect("failed to spawn server binary")
 }
 
-fn wait_for_server(timeout_secs: u64) -> bool {
+fn wait_for_server(port: u16, timeout_secs: u64) -> bool {
     let start = std::time::Instant::now();
     while start.elapsed().as_secs() < timeout_secs {
-        if let Ok(resp) =
-            reqwest::blocking::get(format!("http://127.0.0.1:{}/api/version", SERVER_PORT))
-        {
+        if let Ok(resp) = reqwest::blocking::get(format!("http://127.0.0.1:{}/api/version", port)) {
             if resp.status().is_success() {
                 return true;
             }
@@ -78,13 +89,10 @@ fn wait_for_server(timeout_secs: u64) -> bool {
     false
 }
 
-fn inject_fixture() -> bool {
+fn inject_fixture(port: u16) -> bool {
     let client = reqwest::blocking::Client::new();
     let resp = client
-        .post(format!(
-            "http://127.0.0.1:{}/api/patents/import",
-            SERVER_PORT
-        ))
+        .post(format!("http://127.0.0.1:{}/api/patents/import", port))
         .header("Content-Type", "application/json")
         .body(fixture_json())
         .send();
@@ -94,8 +102,8 @@ fn inject_fixture() -> bool {
     }
 }
 
-fn count_buttons(path: &str) -> Option<usize> {
-    let url = format!("http://127.0.0.1:{}{}", SERVER_PORT, path);
+fn count_buttons(port: u16, path: &str) -> Option<usize> {
+    let url = format!("http://127.0.0.1:{}{}", port, path);
     let resp = reqwest::blocking::get(&url).ok()?;
     if !resp.status().is_success() {
         return None;
@@ -104,8 +112,8 @@ fn count_buttons(path: &str) -> Option<usize> {
     Some(html.matches("<button").count() + html.matches("role=\"button\"").count())
 }
 
-fn check_http_200(path: &str) -> bool {
-    let url = format!("http://127.0.0.1:{}{}", SERVER_PORT, path);
+fn check_http_200(port: u16, path: &str) -> bool {
+    let url = format!("http://127.0.0.1:{}{}", port, path);
     reqwest::blocking::get(&url)
         .map(|r| r.status().is_success())
         .unwrap_or(false)
@@ -136,7 +144,7 @@ fn fixture_has_no_real_patent_numbers() {
 #[test]
 fn fixture_has_no_real_applicant_names() {
     let fixture = fixture_json();
-    let forbidden: String = ['\u{738b}', '\u{9754}', '\u{829d}'].iter().collect();
+    let forbidden: String = ['\u{738b}', '\u{9759}', '\u{829d}'].iter().collect();
     assert!(
         !fixture.contains(&forbidden),
         "Fixture contains a forbidden applicant name"
@@ -156,14 +164,24 @@ fn fixture_is_marked_synthetic() {
 
 #[test]
 fn patent_detail_page_has_22_plus_buttons() {
-    let _stub = start_fake_ai_stub(AI_STUB_PORT);
+    let server_port = free_port();
+    let ai_port = free_port();
+
+    let _stub = start_fake_ai_stub(ai_port);
     std::thread::sleep(std::time::Duration::from_millis(500));
 
-    let server = start_server(AI_STUB_PORT);
-    assert!(wait_for_server(15), "Server must start within 15s");
-    assert!(inject_fixture(), "Fixture injection must succeed");
+    let server = start_server(server_port, ai_port);
+    assert!(
+        wait_for_server(server_port, 15),
+        "Server must start on port {} within 15s",
+        server_port
+    );
+    assert!(
+        inject_fixture(server_port),
+        "Fixture injection must succeed"
+    );
 
-    let button_count = count_buttons(&format!("/patent/{}", FIXTURE_ID))
+    let button_count = count_buttons(server_port, &format!("/patent/{}", FIXTURE_ID))
         .expect("Patent detail page must be reachable");
     assert!(
         button_count >= 22,
@@ -172,15 +190,21 @@ fn patent_detail_page_has_22_plus_buttons() {
     );
 
     assert!(
-        check_http_200("/oa-response"),
+        check_http_200(server_port, "/oa-response"),
         "OA response page must return 200"
     );
-    assert!(check_http_200("/"), "Home page must return 200");
-    assert!(check_http_200("/idea"), "Idea page must return 200");
+    assert!(
+        check_http_200(server_port, "/"),
+        "Home page must return 200"
+    );
+    assert!(
+        check_http_200(server_port, "/idea"),
+        "Idea page must return 200"
+    );
 
     // Verify git_commit matches HEAD
     let version_json =
-        reqwest::blocking::get(format!("http://127.0.0.1:{}/api/version", SERVER_PORT))
+        reqwest::blocking::get(format!("http://127.0.0.1:{}/api/version", server_port))
             .unwrap()
             .text()
             .unwrap();
@@ -200,17 +224,23 @@ fn patent_detail_page_has_22_plus_buttons() {
 
 #[test]
 fn broken_ai_stub_does_not_crash_server() {
+    let server_port = free_port();
     let dead_port: u16 = 59999;
-    let server = start_server(dead_port);
-    assert!(wait_for_server(15), "Server must start within 15s");
+
+    let server = start_server(server_port, dead_port);
     assert!(
-        inject_fixture(),
+        wait_for_server(server_port, 15),
+        "Server must start on port {} within 15s",
+        server_port
+    );
+    assert!(
+        inject_fixture(server_port),
         "Fixture injection must succeed without AI"
     );
 
     // Patent detail page must still render
     assert!(
-        check_http_200(&format!("/patent/{}", FIXTURE_ID)),
+        check_http_200(server_port, &format!("/patent/{}", FIXTURE_ID)),
         "Patent detail page must render even when AI stub is unreachable"
     );
 
@@ -219,7 +249,7 @@ fn broken_ai_stub_does_not_crash_server() {
     let ai_resp = client
         .post(format!(
             "http://127.0.0.1:{}/api/ai/office-action-response",
-            SERVER_PORT
+            server_port
         ))
         .header("Content-Type", "application/json")
         .body(r#"{"patent_id":"synthetic_fixture_001","oa_text":"虚构审查意见文本"}"#)
