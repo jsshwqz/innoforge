@@ -22,10 +22,8 @@ fn start_fake_ai_stub(port: u16) -> std::thread::JoinHandle<()> {
             Ok(l) => l,
             Err(_) => return,
         };
-        for stream in listener.incoming() {
-            if let Ok(mut stream) = stream {
-                handle_ai_request(&mut stream);
-            }
+        for mut stream in listener.incoming().flatten() {
+            handle_ai_request(&mut stream);
         }
     })
 }
@@ -68,7 +66,9 @@ fn start_server(ai_port: u16) -> std::process::Child {
 fn wait_for_server(timeout_secs: u64) -> bool {
     let start = std::time::Instant::now();
     while start.elapsed().as_secs() < timeout_secs {
-        if let Ok(resp) = reqwest::blocking::get(format!("http://127.0.0.1:{}/api/version", SERVER_PORT)) {
+        if let Ok(resp) =
+            reqwest::blocking::get(format!("http://127.0.0.1:{}/api/version", SERVER_PORT))
+        {
             if resp.status().is_success() {
                 return true;
             }
@@ -81,7 +81,10 @@ fn wait_for_server(timeout_secs: u64) -> bool {
 fn inject_fixture() -> bool {
     let client = reqwest::blocking::Client::new();
     let resp = client
-        .post(format!("http://127.0.0.1:{}/api/patents/import", SERVER_PORT))
+        .post(format!(
+            "http://127.0.0.1:{}/api/patents/import",
+            SERVER_PORT
+        ))
         .header("Content-Type", "application/json")
         .body(fixture_json())
         .send();
@@ -168,18 +171,25 @@ fn patent_detail_page_has_22_plus_buttons() {
         button_count
     );
 
-    assert!(check_http_200("/oa-response"), "OA response page must return 200");
+    assert!(
+        check_http_200("/oa-response"),
+        "OA response page must return 200"
+    );
     assert!(check_http_200("/"), "Home page must return 200");
     assert!(check_http_200("/idea"), "Idea page must return 200");
 
     // Verify git_commit matches HEAD
-    let version_json = reqwest::blocking::get(format!("http://127.0.0.1:{}/api/version", SERVER_PORT))
-        .unwrap()
-        .text()
-        .unwrap();
+    let version_json =
+        reqwest::blocking::get(format!("http://127.0.0.1:{}/api/version", SERVER_PORT))
+            .unwrap()
+            .text()
+            .unwrap();
     let v: serde_json::Value = serde_json::from_str(&version_json).unwrap();
     let api_commit = v["git_commit"].as_str().unwrap();
-    let head = Command::new("git").args(["rev-parse", "HEAD"]).output().unwrap();
+    let head = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .unwrap();
     let head_str = String::from_utf8(head.stdout).unwrap().trim().to_string();
     assert_eq!(api_commit, head_str, "git_commit must match HEAD");
 
@@ -193,7 +203,10 @@ fn broken_ai_stub_does_not_crash_server() {
     let dead_port: u16 = 59999;
     let server = start_server(dead_port);
     assert!(wait_for_server(15), "Server must start within 15s");
-    assert!(inject_fixture(), "Fixture injection must succeed without AI");
+    assert!(
+        inject_fixture(),
+        "Fixture injection must succeed without AI"
+    );
 
     // Patent detail page must still render
     assert!(
@@ -204,7 +217,10 @@ fn broken_ai_stub_does_not_crash_server() {
     // AI endpoint must return a controlled error, not crash
     let client = reqwest::blocking::Client::new();
     let ai_resp = client
-        .post(format!("http://127.0.0.1:{}/api/ai/office-action-response", SERVER_PORT))
+        .post(format!(
+            "http://127.0.0.1:{}/api/ai/office-action-response",
+            SERVER_PORT
+        ))
         .header("Content-Type", "application/json")
         .body(r#"{"patent_id":"synthetic_fixture_001","oa_text":"虚构审查意见文本"}"#)
         .timeout(std::time::Duration::from_secs(30))

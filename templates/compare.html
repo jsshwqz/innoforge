@@ -171,7 +171,7 @@
     }
 
     // ── My Patent upload ──
-    function uploadMyPatent() {
+    async function uploadMyPatent() {
         triggerFileSelect(async function(file) {
             var tagEl = document.getElementById('my-file-tag');
             tagEl.innerHTML = DOMPurify.sanitize('<span style="color:#8b949e; font-size:12px;">正在提取文本...</span>');
@@ -201,7 +201,7 @@
     }
 
     // ── Reference upload ──
-    function uploadRef(btn) {
+    async function uploadRef(btn) {
         var row = btn.closest('.ref-row');
         var idx = row.getAttribute('data-idx');
         triggerFileSelect(async function(file) {
@@ -371,7 +371,7 @@
     });
 
     // ── Office Action (审查意见) upload/paste ──
-    function uploadOA() {
+    async function uploadOA() {
         triggerFileSelect(async function(file) {
             var tagEl = document.getElementById('oa-file-tag');
             tagEl.innerHTML = DOMPurify.sanitize('<span style="color:#8b949e; font-size:12px;">正在提取文本...</span>');

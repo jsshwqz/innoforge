@@ -396,7 +396,7 @@
     }
 
     // 清空本案输入：只清前端状态（uploadedData + UI），不删磁盘文件
-    function clearCurrentCaseInputs() {
+    async function clearCurrentCaseInputs() {
         if (!(await showConfirmDialog('确认清空本案所有输入（专利文本、OA通知书、对比文献）？\n\n这不会删除已保存的磁盘文件，只清除当前页面的输入状态。'))) return;
         // 清除 uploadedData 中的案件相关键
         var keysToRemove = [];
@@ -551,7 +551,7 @@
     })();
 
     // ── My Patent helpers ──
-    function uploadMyPatent() {
+    async function uploadMyPatent() {
         triggerFileSelect(async function(file) {
             var tagEl = document.getElementById('my-file-tag');
             tagEl.innerHTML = DOMPurify.sanitize('<span style="color:#8b949e;font-size:12px;">' + t('common.extracting') + '</span>');
@@ -714,7 +714,7 @@
     }
 
     // ── OA text helpers ──
-    function uploadOA() {
+    async function uploadOA() {
         triggerFileSelect(async function(file) {
             var tagEl = document.getElementById('oa-file-tag');
             tagEl.innerHTML = DOMPurify.sanitize('<span style="color:#8b949e;font-size:12px;">' + t('common.extracting') + '</span>');
@@ -822,7 +822,7 @@
         }
     }
 
-    function uploadRef(btn) {
+    async function uploadRef(btn) {
         var row = btn.closest('.ref-row');
         var idx = row.getAttribute('data-idx');
         triggerFileSelect(async function(file) {
