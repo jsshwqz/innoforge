@@ -330,7 +330,7 @@
                 alert(data.message || 'PDF store failed');
             }
         } catch (e) {
-            alert('PDF preview failed: ' + e.message);
+            alert(t('oar.pdfPreviewFailed') + ': ' + e.message);
         }
     }
 

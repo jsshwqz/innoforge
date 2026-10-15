@@ -695,7 +695,7 @@
 
         if (!currentIdeaId) { alert(i18nLang === 'en' ? 'No idea selected' : '请先选择一个创意'); ideaSendBusy = false; return; }
         var chatEl = document.getElementById('chat-messages');
-        if (!chatEl) { alert('chat area not found'); ideaSendBusy = false; return; }
+        if (!chatEl) { alert(t('idea.chatNotFound')); ideaSendBusy = false; return; }
 
         // Append user bubble
         var row = document.createElement('div');
@@ -800,10 +800,10 @@
                         ideaAttachedText.push({ name: f.name, content: data.text });
                         renderChatAttachments();
                     } else {
-                        alert('PDF extract failed: ' + (data.error || 'unknown'));
+                        alert(t('idea.pdfExtractFailed') + ': ' + (data.error || 'unknown'));
                     }
                 } catch(e) {
-                    alert('PDF upload failed: ' + e.message);
+                    alert(t('idea.pdfUploadFailed') + ': ' + e.message);
                 }
             } else {
                 var reader = new FileReader();
@@ -1598,7 +1598,7 @@
         var type = document.getElementById('mem-concept-type').value;
         var confidence = parseFloat(document.getElementById('mem-confidence').value) || 0.5;
         var content = document.getElementById('mem-content').value.trim();
-        if (!name || !content) { alert('concept name and description required'); return; }
+        if (!name || !content) { alert(t('idea.conceptNameDescRequired')); return; }
         if (!currentIdeaId) return;
 
         var resp = await fetch('/api/idea/' + encodeURIComponent(currentIdeaId) + '/memory', {
@@ -1608,7 +1608,7 @@
         });
         var data = await resp.json();
         if (data.status === 'ok') { hideMemoryForm(); loadMemory(); }
-        else { alert('Failed: ' + data.message); }
+        else { alert(t('common.failed') + ': ' + data.message); }
     }
 
     async function loadMemory() {
@@ -1662,9 +1662,9 @@
     }
 
     async function deleteMemory(ideaId, entryId) {
-        if (!(await showConfirmDialog('Delete this memory?'))) return;
+        if (!(await showConfirmDialog(t('idea.deleteMemoryConfirm')))) return;
         var resp = await fetch('/api/idea/' + encodeURIComponent(ideaId) + '/memory/' + encodeURIComponent(entryId), { method: 'DELETE' });
-        if (resp.ok) { loadMemory(); } else { alert('Delete failed'); }
+        if (resp.ok) { loadMemory(); } else { alert(t('idea.deleteFailed')); }
     }
 
     // ── 通用工具函数（恢复自历史版本 3a50c49，被 9f1a14b 误删）──

@@ -497,7 +497,16 @@ const I18N_COMMON = {
     'common.info.country': '国家/地区',
     'common.info.legalStatus': '法律状态',
     'common.info.basicInfo': '基本信息',
-    'common.info.classification': '分类号'
+    'common.info.classification': '分类号',
+    // issue #16: previously hardcoded English
+    'idea.chatNotFound': '聊天区域未找到',
+    'idea.pdfExtractFailed': 'PDF 提取失败',
+    'idea.pdfUploadFailed': 'PDF 上传失败',
+    'idea.conceptNameDescRequired': '概念名称和描述不能为空',
+    'idea.deleteMemoryConfirm': '确定删除这条记忆？',
+    'idea.deleteFailed': '删除失败',
+    'common.failed': '失败',
+    'oar.pdfPreviewFailed': 'PDF 预览失败'
   },
   en: {
     'cad.draw': 'FreeCAD Drawing',
@@ -1029,7 +1038,16 @@ const I18N_COMMON = {
     'common.info.country': 'Country/Region',
     'common.info.legalStatus': 'Legal Status',
     'common.info.basicInfo': 'Basic Information',
-    'common.info.classification': 'Classification'
+    'common.info.classification': 'Classification',
+    // issue #16: previously hardcoded English
+    'idea.chatNotFound': 'chat area not found',
+    'idea.pdfExtractFailed': 'PDF extract failed',
+    'idea.pdfUploadFailed': 'PDF upload failed',
+    'idea.conceptNameDescRequired': 'concept name and description required',
+    'idea.deleteMemoryConfirm': 'Delete this memory?',
+    'idea.deleteFailed': 'Delete failed',
+    'common.failed': 'Failed',
+    'oar.pdfPreviewFailed': 'PDF preview failed'
   }
 };
 
