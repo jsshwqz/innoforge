@@ -17,10 +17,10 @@ _暂无条目。_
 - **#16: 8 处硬编码英文提示进 i18n**（`e9ec0ad`）：将 8 处直接写在 HTML 中的英文提示文本改为 `t()` 国际化调用，由 `static/i18n.js` 统一管理。新增 `tests/no_english_dialog_literals.rs` 守卫扫描模板中的硬编码英文对话框文本
 - **#14: 数据库路径改为平台数据目录**（`9bc0afc`）：数据库路径改为 `~/.local/share/innoforge/` 而非当前工作目录。新增 `tests/db_path_resolution.rs` 验证路径解析逻辑
 - **#19: 启动时校验 SQLite 文件头**（`533dec4`）：损坏的数据库文件被隔离重命名而非毒化平台目录
-- **#13: 迁移进事务并可自愈**（`c9268e6`）：每条迁移在 `run_migration_tx` 中以 `unchecked_transaction` 包裹，DDL 与版本号更新原子提交；进程被杀中途迁移会整体回滚，下次启动从上一完整版本继续
+- **#13: 迁移进事务并可自愈**（`533dec4`）：每条迁移在 `run_migration_tx` 中以 `unchecked_transaction` 包裹，DDL 与版本号更新原子提交；进程被杀中途迁移会整体回滚，下次启动从上一完整版本继续
 
 ### 新增 / Added
-- **#7: 逐按钮回归进入 CI**（`40fb98d`）：E2E 测试新增逐按钮 sweep，对每个页面的每个 `<button>` 执行点击并捕获 console error / dialog / 出网请求 / 5xx 响应，断言数 71 → 87
+- **#7: 逐按钮回归进入 CI**（`40fb98d`）：E2E 测试新增逐按钮 sweep，对每个页面的每个 `<button>` 执行点击并捕获 console error / dialog / 出网请求 / 5xx 响应，断言数由 e2e_test.mjs 的 expectedPasses 统一定义（当前 89）
 - **#17: 合成 fixture 与假 AI provider 桩**（`0312d24` `c246f6d`）：`tests/fixtures/synthetic_patent.json` 提供不含任何真实案件标识的合成数据；`tests/helpers/fake_ai_stub.rs` 在 `TcpListener::bind("127.0.0.1:0")` 上为每个测试独立占端口，返回受控固定响应
 - **#22: CI 拆分为七个独立 job 零 needs**（`d055f4f`）：原 `test` job 拆为 `fmt` / `clippy` / `test` / `privacy-guards` / `template-guards`，`e2e` 不再 `needs: [test, lint]`，任一 job 失败不连坐其他。分支保护必需检查同步更新
 
