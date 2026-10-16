@@ -887,7 +887,6 @@ fn no_case_long_sentence_in_repo() {
     }
 }
 
-
 // ── Negative controls: prove check_text actually fires on violations ──
 // These tests construct synthetic violations at runtime (same concatenation
 // technique as the forbidden_* functions) to avoid tripping the guard on
