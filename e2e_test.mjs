@@ -7,7 +7,7 @@ const baseUrl = (process.env.INNOFORGE_E2E_BASE_URL || 'http://127.0.0.1:3000').
 const localAuthority = new URL(`${baseUrl}/`).host;
 // Single source of truth for expected pass count.
 // Do NOT duplicate this number elsewhere — parse the JSON output to verify.
-const expectedPasses = 87;
+const expectedPasses = 88;
 const failures = [];
 const assertions = [];   // every assertion recorded as {kind, name, ...}
 let passed = 0;
