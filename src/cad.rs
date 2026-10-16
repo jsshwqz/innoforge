@@ -431,3 +431,5 @@ mod tests {
         )));
     }
 }
+
+// negctl(doc-staleness): 本行只为验证门禁能否变红，PR 关闭后删除
