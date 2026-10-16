@@ -673,3 +673,8 @@
 
 **main**: `a1b4a0d`（已合 PR #24 CI 拆分、#26 守卫负控）
 **分支保护**: strict, 7 required checks: Format / Clippy / Tests / Privacy Guards / Template Guards / Lint / E2E
+
+### 2026-10-16 — **PR#36 Doc Staleness 修复**
+
+- **状态 / Status**: 🔄 PR#36 分支已补 docs/errors.md 条目 ⑩（ERR_EMPTY_RESPONSE 被当成环境问题而误判为无缺陷）
+- **Doc Staleness**: PR#36 改了 tests/stub_hanging_backend.rs，补 docs/errors.md 条目 ⑩ 满足门禁
