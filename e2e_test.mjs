@@ -5,17 +5,36 @@ const baseUrl = (process.env.INNOFORGE_E2E_BASE_URL || 'http://127.0.0.1:3000').
 // 本地部署身份：只有与 baseUrl 同一 authority 的 http(s) 请求才算自家资源，
 // 其余（jsDelivr/unpkg/fonts.googleapis/…）一律视为第三方外链。data:/blob:/about: 不发网络请求，不计入。
 const localAuthority = new URL(`${baseUrl}/`).host;
-const expectedPasses = 89;
+// Single source of truth for expected pass count.
+// Do NOT duplicate this number elsewhere — parse the JSON output to verify.
+const expectedPasses = 87;
 const failures = [];
+const assertions = [];   // every assertion recorded as {kind, name, ...}
 let passed = 0;
+let skipped = 0;
 
+/// Atomically write a single-line JSON assertion record to stdout.
+/// Each line is one assertion — no multi-line, no concatenation ambiguity.
 function pass(name) {
     passed += 1;
-    console.log(`PASS ${passed}: ${name}`);
+    const entry = { kind: 'pass', seq: passed, name };
+    assertions.push(entry);
+    console.log(JSON.stringify(entry));
+}
+
+/// Skipped assertions use a different kind so they are never counted as pass.
+function skip(name) {
+    skipped += 1;
+    const entry = { kind: 'skip', seq: skipped, name };
+    assertions.push(entry);
+    console.log(JSON.stringify(entry));
 }
 
 function fail(name, detail) {
+    const entry = { kind: 'fail', name, detail };
+    assertions.push(entry);
     failures.push(`${name}: ${detail}`);
+    console.log(JSON.stringify(entry));
 }
 
 function requireCondition(condition, name, detail) {
@@ -299,11 +318,7 @@ async function runPageMatrix(browser, pageErrors, requestFailures) {
         }
 
         if (patentDetailIsNotFound) {
-            requireCondition(
-                true,
-                'Patent detail interaction is skipped when no local patent exists',
-                `page=${opened.page.url()} status=404`,
-            );
+            skip('Patent detail interaction is skipped when no local patent exists');
         } else {
             try {
                 requireCondition(
@@ -424,7 +439,7 @@ async function runButtonSweep(browser) {
         const floor = buttonSweepFloors[specification.path];
         if (typeof floor !== 'number') {
             fail(`${name} button sweep is configured`, 'reason=no_floor_configured');
-            requireCondition(true, `${name} button sweep result`, 'reason=no_floor_configured_placeholder');
+            skip(`${name} button sweep result — no floor configured`);
             continue;
         }
 
@@ -438,11 +453,7 @@ async function runButtonSweep(browser) {
                 `${name} button sweep is skipped for an empty local library`,
                 `page=${specification.path} rendered_buttons=${buttons.length} expected=0`,
             );
-            requireCondition(
-                true,
-                `${name} button sweep result skipped with the empty library`,
-                `page=${specification.path} status=404`,
-            );
+            skip(`${name} button sweep result skipped with the empty library`);
             continue;
         }
 
@@ -1172,17 +1183,37 @@ async function main() {
         }
     }
 
-    if (passed !== expectedPasses && failures.length === 0) {
-        fail('Stable browser regression count', `expected=${expectedPasses} actual=${passed}`);
+    // ── Assertion count verification (issue #32) ──
+    // Count from the in-memory assertions array, NOT from stdout text parsing.
+    // This eliminates the PASS 83PASS 84 concatenation bug.
+    const passCount = assertions.filter(a => a.kind === 'pass').length;
+    const skipCount = assertions.filter(a => a.kind === 'skip').length;
+    const failCount = assertions.filter(a => a.kind === 'fail').length;
+
+    if (passCount !== expectedPasses && failures.length === 0) {
+        // Print which expected assertion is missing
+        const passNames = new Set(assertions.filter(a => a.kind === 'pass').map(a => a.name));
+        console.error(JSON.stringify({
+            kind: 'count_mismatch',
+            expected: expectedPasses,
+            actual: passCount,
+            skipped: skipCount,
+            msg: `Expected ${expectedPasses} passes but got ${passCount}`
+        }));
+        process.exitCode = 1;
+        return;
     }
+
     if (failures.length > 0) {
-        console.error(`E2E FAILED (${passed}/${expectedPasses} passed) against ${baseUrl}`);
+        // Summary line is plain text (not JSON) so it won't be parsed as an assertion
+        console.error(`E2E FAILED (${passCount}/${expectedPasses} passed, ${skipCount} skipped, ${failCount} failed) against ${baseUrl}`);
         for (const failure of failures) console.error(`- ${failure}`);
         process.exitCode = 1;
         return;
     }
 
-    console.log(`E2E PASSED (${passed}/${expectedPasses}) against ${baseUrl}`);
+    // Summary line is plain text — NOT JSON, NOT a counting source
+    console.log(`E2E PASSED (${passCount}/${expectedPasses} passed, ${skipCount} skipped) against ${baseUrl}`);
 }
 
 main();
