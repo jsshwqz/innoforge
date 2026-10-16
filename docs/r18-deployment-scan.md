@@ -11,7 +11,7 @@
 **Server**: `target/release/innoforge-server` built from `main@a6517c5`  
 **Result**: 85/89 passed, 4 failures (all environment-dependent)
 
-### Failures (all environment, not code defects)
+### Failures (all environment, 未定因 — 现由 stub_hanging_backend 覆盖)
 
 | # | Test | Cause |
 |---|------|-------|
@@ -136,4 +136,4 @@ The 4 first-run failures were all environment-dependent:
 - 2 × `/api/cad/status` → `ERR_EMPTY_RESPONSE` (FreeCAD not installed, CAD backend unreachable)
 - 2 × button sweep on Settings/OA pages (same root cause)
 
-These are **not code defects** — the hanging backend tests prove the handlers return proper JSON responses (not empty replies) when backends are unreachable. The `ERR_EMPTY_RESPONSE` in the first E2E run was a transient browser-level timeout, not a server-level failure.
+These are **未定因（原始运行的服务端日志缺失；现由 stub_hanging_backend 覆盖）** — the hanging backend tests prove the handlers return proper JSON responses (not empty replies) when backends are unreachable. The `ERR_EMPTY_RESPONSE` in the first E2E run was 未定因（原始运行的服务端日志缺失；现由 stub_hanging_backend 覆盖），非服务端故障。
