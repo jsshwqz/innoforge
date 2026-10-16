@@ -100,7 +100,10 @@ fn stub_chat_completions_returns_valid_json() {
 
     assert!(resp.status().is_success(), "stub must return 200");
     let json: serde_json::Value = resp.json().expect("stub must return valid JSON");
-    assert!(json["choices"].is_array(), "response must have choices array");
+    assert!(
+        json["choices"].is_array(),
+        "response must have choices array"
+    );
     assert!(
         json["choices"][0]["message"]["content"].is_string(),
         "response must have message content"
@@ -124,7 +127,10 @@ fn stub_embeddings_returns_valid_json() {
 
     assert!(resp.status().is_success());
     let json: serde_json::Value = resp.json().expect("valid JSON");
-    assert!(json["data"].is_array(), "embeddings response must have data array");
+    assert!(
+        json["data"].is_array(),
+        "embeddings response must have data array"
+    );
     assert!(
         json["data"][0]["embedding"].is_array(),
         "embedding must be an array"
@@ -140,7 +146,10 @@ fn stub_unknown_endpoint_returns_ok() {
 
     let resp = reqwest::blocking::get(format!("http://127.0.0.1:{}/unknown", port))
         .expect("stub must respond");
-    assert!(resp.status().is_success(), "unknown endpoint should still return 200");
+    assert!(
+        resp.status().is_success(),
+        "unknown endpoint should still return 200"
+    );
 }
 
 // ── Server + stub integration ──
@@ -301,7 +310,10 @@ fn stub_handles_concurrent_requests() {
         let url = format!("http://127.0.0.1:{}/chat/completions", port);
         handles.push(std::thread::spawn(move || {
             let client = reqwest::blocking::Client::new();
-            let body = format!(r#"{{"model":"test","messages":[{{"role":"user","content":"msg{}"}}]}}"#, i);
+            let body = format!(
+                r#"{{"model":"test","messages":[{{"role":"user","content":"msg{}"}}]}}"#,
+                i
+            );
             let resp = client
                 .post(&url)
                 .header("Content-Type", "application/json")
@@ -357,16 +369,25 @@ fn server_serves_pages_without_ai() {
     let dead_ai_port = free_port(); // nothing listening here
 
     let server = start_server(server_port, dead_ai_port);
-    assert!(wait_for_server(server_port, 15), "server must start without AI");
+    assert!(
+        wait_for_server(server_port, 15),
+        "server must start without AI"
+    );
 
     // Pages must still render
     let resp = reqwest::blocking::get(format!("http://127.0.0.1:{}/", server_port))
         .expect("home page must respond");
-    assert!(resp.status().is_success(), "home page must return 200 without AI");
+    assert!(
+        resp.status().is_success(),
+        "home page must return 200 without AI"
+    );
 
     let resp = reqwest::blocking::get(format!("http://127.0.0.1:{}/idea", server_port))
         .expect("idea page must respond");
-    assert!(resp.status().is_success(), "idea page must return 200 without AI");
+    assert!(
+        resp.status().is_success(),
+        "idea page must return 200 without AI"
+    );
 
     kill_server(server);
 }
