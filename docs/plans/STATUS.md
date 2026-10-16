@@ -637,3 +637,39 @@
 
 ### 交接文档
 - `docs/plans/2026-10-03-T4-handoff.md` 已创建，含完整验证记录
+
+
+---
+
+## 2026-10-16 — **Issue #31 复盘规则空转修复 + CI 拆分 + 负控守卫**
+
+- **状态 / Status**: ✅ 已完成
+- **驱动**: issue #31——自开源首发 ae09bd4 后 55 条提交中 docs/errors.md / docs/feedback.md / docs/plans/STATUS.md 内容更新次数为 0，同期 cargo fmt 同类红复发 5 次。复盘规则形同虚设。
+- **完成项**:
+  1. **八类踩坑写回 docs/errors.md**: fmt 虚报 / clippy 红 / CI needs 连坐 / 恒不触发假通过（四种变体）/ 桩端口共享与 set_var 污染 / include_str! 烘模板 / amend 顶掉已推送 commit / CHANGELOG 错引 commit。同类复发的在原条目标注"复发于…"并升严重度。
+  2. **docs/feedback.md 三条用户边界**: 不写代码只做发现验收 / 不需确认的动作自己做完 / 验收必含负向验证。
+  3. **docs/plans/STATUS.md 更新到当前实况**（本条目）。
+  4. **新增 CI job `doc-staleness`**: PR 改了 src/templates/tests/.github 而未动 docs/errors.md 与 STATUS.md 则报红；PR 描述写"本轮无新增踩坑"可豁免。
+- **同期已完成的相关变更**:
+  - PR #24: CI 拆分为七个独立 job 零 needs（`d055f4f`）——解决 ③ CI needs 连坐
+  - PR #26: 四个守卫加负控（`63ac7d5`）——解决 ④ 恒不触发假通过
+  - T2: CHANGELOG 错引 commit 修复（`145ab43`）——解决 ⑧
+- **分支**: `r18/issue31-retrospective`
+- **后续 / Follow-up**: T5（issue #32 e2e 断言计数）、T6（issue #33 回调地址可配置）、T3（PR#29 Clippy 修 + 红绿取证）
+
+---
+
+## 当前分支与 PR 状态 (2026-10-16)
+
+| 分支 | PR | 状态 | 说明 |
+|------|-----|------|------|
+| `r18/release-0.9.16` | #23 | ✅ rebased + CHANGELOG 修 | T1+T2 完成 |
+| `r18/stub-tests` | #27 | ✅ rebased | T1 完成 |
+| `r18/deployment-scan` | #28 | ✅ rebased | T1 完成 |
+| `tmp/negative-control-malformed-responses` | #29 | ✅ rebased, 待修 Clippy | T1 完成, T3 待做 |
+| `r18/issue31-retrospective` | (新) | 🔄 本轮 | T4 复盘规则空转 |
+| `r18/issue32-assertion-count` | (待建) | 📋 | T5 e2e 断言计数 |
+| `r18/issue33-callback-config` | (待建) | 📋 | T6 回调地址可配置 |
+
+**main**: `a1b4a0d`（已合 PR #24 CI 拆分、#26 守卫负控）
+**分支保护**: strict, 7 required checks: Format / Clippy / Tests / Privacy Guards / Template Guards / Lint / E2E
