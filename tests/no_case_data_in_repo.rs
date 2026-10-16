@@ -886,3 +886,60 @@ fn no_case_long_sentence_in_repo() {
         );
     }
 }
+
+// ── Negative controls: prove check_text actually fires on violations ──
+// These tests construct synthetic violations at runtime (same concatenation
+// technique as the forbidden_* functions) to avoid tripping the guard on
+// this test file itself.
+
+#[test]
+fn negative_control_app_number_shape_detected() {
+    // Construct a 13-digit application number at runtime
+    let parts: [&str; 4] = ["2024", "0101", "2345", "6"];
+    let synthetic: String = parts.iter().copied().collect();
+    let hits = check_text(&synthetic, true);
+    assert!(
+        hits.iter().any(|h| h.contains("申请号形状")),
+        "negative control: 13-digit app number must be detected in src prod area, got {:?}",
+        hits
+    );
+}
+
+#[test]
+fn negative_control_pub_number_shape_detected() {
+    // Construct a CN+digits+letter publication number at runtime
+    let synthetic = format!("{}{}{}", "CN", "12345678", "B");
+    let hits = check_text(&synthetic, true);
+    assert!(
+        hits.iter().any(|h| h.contains("公开号形状")),
+        "negative control: CN+8digits+letter must be detected in src prod area, got {:?}",
+        hits
+    );
+}
+
+#[test]
+fn negative_control_clean_text_passes() {
+    // A string with no case data must produce no violations
+    let clean = "This is a normal comment with no sensitive data.";
+    let hits = check_text(clean, true);
+    assert!(
+        hits.is_empty(),
+        "negative control: clean text must not trigger any violation, got {:?}",
+        hits
+    );
+}
+
+#[test]
+fn negative_control_shape_check_only_in_src_prod() {
+    // The same 13-digit number in a non-src context (is_src_rust_prod=false)
+    // should NOT trigger the shape checks (only literal forbidden values are
+    // checked everywhere; shape regexes are src-only).
+    let parts: [&str; 4] = ["2024", "0101", "2345", "6"];
+    let synthetic: String = parts.iter().copied().collect();
+    let hits = check_text(&synthetic, false);
+    assert!(
+        !hits.iter().any(|h| h.contains("形状")),
+        "negative control: shape checks must not fire outside src prod area, got {:?}",
+        hits
+    );
+}
