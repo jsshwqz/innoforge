@@ -116,7 +116,7 @@ fn tolerates_empty_body_stub_response() {
             server_port
         ))
         .header("Content-Type", "application/json")
-        .body(r#"{"patent_id":"test","oa_text":"测试文本"}"#)
+        .body(r#"{"my_patent":{"title":"测试专利","content":"这是一段测试专利的详细内容描述，用于测试AI分析功能"},"office_action":"这是一段测试审查意见通知书内容，长度超过十个字符"}"#)
         .timeout(std::time::Duration::from_secs(30))
         .send();
 
@@ -163,7 +163,7 @@ fn accepts_valid_body_stub_response() {
             server_port
         ))
         .header("Content-Type", "application/json")
-        .body(r#"{"patent_id":"test","oa_text":"测试文本"}"#)
+        .body(r#"{"my_patent":{"title":"测试专利","content":"这是一段测试专利的详细内容描述，用于测试AI分析功能"},"office_action":"这是一段测试审查意见通知书内容，长度超过十个字符"}"#)
         .timeout(std::time::Duration::from_secs(30))
         .send();
 
@@ -208,7 +208,7 @@ fn tolerates_html_error_page_stub_response() {
             server_port
         ))
         .header("Content-Type", "application/json")
-        .body(r#"{"patent_id":"test","oa_text":"测试文本"}"#)
+        .body(r#"{"my_patent":{"title":"测试专利","content":"这是一段测试专利的详细内容描述，用于测试AI分析功能"},"office_action":"这是一段测试审查意见通知书内容，长度超过十个字符"}"#)
         .timeout(std::time::Duration::from_secs(30))
         .send();
 
@@ -256,7 +256,7 @@ fn accepts_json_content_type_stub_response() {
             server_port
         ))
         .header("Content-Type", "application/json")
-        .body(r#"{"patent_id":"test","oa_text":"测试文本"}"#)
+        .body(r#"{"my_patent":{"title":"测试专利","content":"这是一段测试专利的详细内容描述，用于测试AI分析功能"},"office_action":"这是一段测试审查意见通知书内容，长度超过十个字符"}"#)
         .timeout(std::time::Duration::from_secs(30))
         .send();
 
@@ -300,7 +300,7 @@ fn tolerates_truncated_json_stub_response() {
             server_port
         ))
         .header("Content-Type", "application/json")
-        .body(r#"{"patent_id":"test","oa_text":"测试文本"}"#)
+        .body(r#"{"my_patent":{"title":"测试专利","content":"这是一段测试专利的详细内容描述，用于测试AI分析功能"},"office_action":"这是一段测试审查意见通知书内容，长度超过十个字符"}"#)
         .timeout(std::time::Duration::from_secs(30))
         .send();
 
@@ -352,7 +352,7 @@ fn tolerates_overlong_json_stub_response() {
             server_port
         ))
         .header("Content-Type", "application/json")
-        .body(r#"{"patent_id":"test","oa_text":"测试文本"}"#)
+        .body(r#"{"my_patent":{"title":"测试专利","content":"这是一段测试专利的详细内容描述，用于测试AI分析功能"},"office_action":"这是一段测试审查意见通知书内容，长度超过十个字符"}"#)
         .timeout(std::time::Duration::from_secs(30))
         .send();
 
@@ -399,7 +399,7 @@ fn accepts_complete_json_stub_response() {
             server_port
         ))
         .header("Content-Type", "application/json")
-        .body(r#"{"patent_id":"test","oa_text":"测试文本"}"#)
+        .body(r#"{"my_patent":{"title":"测试专利","content":"这是一段测试专利的详细内容描述，用于测试AI分析功能"},"office_action":"这是一段测试审查意见通知书内容，长度超过十个字符"}"#)
         .timeout(std::time::Duration::from_secs(30))
         .send();
 
