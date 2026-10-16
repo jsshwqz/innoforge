@@ -1,17 +1,17 @@
 //! Negative control: three types of malformed AI stub responses.
 //!
 //! For each type (empty body, HTML error page, truncated/overlong JSON),
-//! we provide a red-green pair:
-//! - Red: a stub that returns the malformed response, and a test that
+//! we provide a tolerates-accepts pair:
+//! - tolerates: a stub that returns the malformed response, and a test that
 //!   verifies the server does NOT crash (if it crashes, test fails = red).
-//! - Green: a stub that returns a valid response, and the same test
-//!   passes = green.
+//! - accepts: a stub that returns a valid response, and the same test
+//!   passes = green evidence.
 //!
 //! All ports use 127.0.0.1:0 (OS-assigned) per test. No std::env::set_var
 //! — env vars are passed via Command::env() to the child process only.
 
 use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::TcpListener;
 use std::process::Command;
 
 fn free_port() -> u16 {
@@ -96,10 +96,10 @@ fn start_raw_stub_ct(port: u16, content_type: &str, body: &str) -> std::thread::
 // Type 1: Empty body
 // ═══════════════════════════════════════════════════════════════════
 
-/// Red: stub returns empty body. Server must not crash; AI endpoint
+/// tolerates: stub returns empty body. Server must not crash; AI endpoint
 /// should return a controlled error (4xx/5xx), not hang.
 #[test]
-fn red_empty_body_stub_response() {
+fn tolerates_empty_body_stub_response() {
     let server_port = free_port();
     let ai_port = free_port();
 
@@ -143,9 +143,9 @@ fn red_empty_body_stub_response() {
     kill_server(server);
 }
 
-/// Green: stub returns valid JSON. Server processes normally.
+/// accepts: stub returns valid JSON. Server processes normally.
 #[test]
-fn green_valid_body_stub_response() {
+fn accepts_valid_body_stub_response() {
     let server_port = free_port();
     let ai_port = free_port();
 
@@ -188,9 +188,9 @@ fn green_valid_body_stub_response() {
 // Type 2: HTML error page (wrong content-type)
 // ═══════════════════════════════════════════════════════════════════
 
-/// Red: stub returns HTML error page instead of JSON. Server must not crash.
+/// tolerates: stub returns HTML error page instead of JSON. Server must not crash.
 #[test]
-fn red_html_error_page_stub_response() {
+fn tolerates_html_error_page_stub_response() {
     let server_port = free_port();
     let ai_port = free_port();
 
@@ -235,9 +235,9 @@ fn red_html_error_page_stub_response() {
     kill_server(server);
 }
 
-/// Green: stub returns valid JSON with correct content-type.
+/// accepts: stub returns valid JSON with correct content-type.
 #[test]
-fn green_json_content_type_stub_response() {
+fn accepts_json_content_type_stub_response() {
     let server_port = free_port();
     let ai_port = free_port();
 
@@ -279,9 +279,9 @@ fn green_json_content_type_stub_response() {
 // Type 3: Truncated / overlong JSON
 // ═══════════════════════════════════════════════════════════════════
 
-/// Red: stub returns truncated JSON (cut mid-string). Server must not crash.
+/// tolerates: stub returns truncated JSON (cut mid-string). Server must not crash.
 #[test]
-fn red_truncated_json_stub_response() {
+fn tolerates_truncated_json_stub_response() {
     let server_port = free_port();
     let ai_port = free_port();
 
@@ -327,9 +327,9 @@ fn red_truncated_json_stub_response() {
     kill_server(server);
 }
 
-/// Red: stub returns overlong JSON (10KB of padding). Server must not crash.
+/// tolerates: stub returns overlong JSON (10KB of padding). Server must not crash.
 #[test]
-fn red_overlong_json_stub_response() {
+fn tolerates_overlong_json_stub_response() {
     let server_port = free_port();
     let ai_port = free_port();
 
@@ -379,9 +379,9 @@ fn red_overlong_json_stub_response() {
     kill_server(server);
 }
 
-/// Green: stub returns well-formed complete JSON. Server processes normally.
+/// accepts: stub returns well-formed complete JSON. Server processes normally.
 #[test]
-fn green_complete_json_stub_response() {
+fn accepts_complete_json_stub_response() {
     let server_port = free_port();
     let ai_port = free_port();
 
