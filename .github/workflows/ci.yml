@@ -10,24 +10,76 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  test:
+  # ── Format (independent: fmt failure must not skip any other job) ──
+  fmt:
+    name: Format
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy, rustfmt
-      - name: Cache cargo dependencies
-        uses: Swatinem/rust-cache@v2
+          components: rustfmt
       - name: Check formatting
         run: cargo fmt --check
+
+  # ── Clippy (independent) ──
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
       - name: Run clippy
         run: cargo clippy --all-targets -- -D warnings
+
+  # ── Tests (independent: includes all cargo tests) ──
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - name: Run tests
         run: cargo test
 
+  # ── Privacy guards (independent: must run even if fmt/clippy fail) ──
+  privacy-guards:
+    name: Privacy Guards
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run no_case_data_in_repo guard
+        run: cargo test --test no_case_data_in_repo
+
+  # ── Template guards (independent: must run even if fmt/clippy fail) ──
+  template-guards:
+    name: Template Guards
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Inline script parse guard
+        run: cargo test --test inline_scripts_parse
+      - name: No native dialog guard
+        run: cargo test --test no_native_dialog
+      - name: No English dialog literals guard
+        run: cargo test --test no_english_dialog_literals
+      - name: No CDN scripts guard
+        run: cargo test --test no_cdn_scripts
+
+  # ── Lint (independent) ──
   lint:
+    name: Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -41,13 +93,14 @@ jobs:
       - name: ESLint JS
         run: npx eslint static/i18n.js
 
+  # ── E2E (independent: must run even if fmt/clippy/test fail) ──
   e2e:
+    name: E2E
     runs-on: ubuntu-latest
-    needs: [test, lint]
     steps:
       - uses: actions/checkout@v4
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
           node-version: 20
