@@ -994,3 +994,11 @@
 - **修复 / Fix**: ① `c9268e6` → `533dec4`（已修，commit `145ab43`）；② "断言数 71 → 87"改为引用 `e2e_test.mjs` 的 `expectedPasses` 单一来源（当前 89）。
 - **预防 / Prevention**: ① CHANGELOG 每条 commit 引用必须用 `git log -S "<key_function>" --oneline` 验证；② 不写死会变的数字（如断言数），改引单一来源变量名；③ CHANGELOG review 时抽查 commit hash 与描述是否匹配。
 - **提交 / Commit**: `145ab43`（fix CHANGELOG commit ref and assertion count）。
+
+### [2026-10-16] ⑨ 请求字段名错导致 handler 提前返回、测试空跑
+- **严重程度 / Severity**: HIGH（测试全绿但被测路径从未执行，等于没测）
+- **现象 / Symptom**: 负控测试 `tolerates_empty_body_stub_response` 全绿，但实际从未触达 AI 调用路径——测试请求里用的字段名（如 `patent` / `oa`）与 handler 实际期望的字段名（`my_patent` / `office_action`）不匹配，handler 在参数校验阶段就提前返回 400/422，根本没走到 `extract_chat_content`，所以无论 stub 返回什么（空 body / HTML / 截断 JSON），测试都"通过"——因为被测的错误处理代码从未被触发。
+- **根因 / Root cause**: 写测试时凭记忆猜字段名，没有对照 handler 的实际请求 schema（`src/routes/ai.rs` 的 `OfficeActionRequest` struct）。测试只断言"server 不 crash"（否定断言），没断言"AI 路径被触发"（肯定断言），所以 handler 提前返回也被当作"通过"。
+- **修复 / Fix**: ① 对照 handler struct 修正字段名为 `my_patent`（object with `content`）和 `office_action`（string ≥10 chars）；② 在 stub 日志中确认 `[OA-ANALYZE] 开始调用AI` 出现，证明 AI 路径被触发；③ 红→绿取证：先 `std::process::exit(1)` 破坏 `extract_chat_content`，确认测试变红，再修回确认变绿（见 `docs/red-evidence-pr29.md`）。
+- **预防 / Prevention**: ① 测试请求字段名必须对照 handler 的实际 struct 定义，不凭记忆猜；② 否定断言（"不 crash"）必须配肯定断言（"期望路径被触发"），如检查日志输出或响应体内容；③ 负控测试必须附红→绿取证记录，证明被测路径确实被执行。
+- **提交 / Commit**: `b3d6f71`（correct test request fields + red-green evidence）。
