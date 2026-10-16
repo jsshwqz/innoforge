@@ -1,0 +1,379 @@
+{
+  "metadata": {
+    "timestamp": "2026-10-16T01:55:36.603201+00:00",
+    "tool": "e2e_test.mjs",
+    "base_url": "http://127.0.0.1:3000",
+    "git_branch": "main",
+    "git_commit": "a6517c5e212bcf62ddeefc0f65ed13bd1e2eb9c2",
+    "server_version": "0.9.15",
+    "build_time": "2026-10-16T01:30:12Z"
+  },
+  "summary": {
+    "total_passed": 84,
+    "expected_passes": 89,
+    "total_failures": 4,
+    "result": "FAILED"
+  },
+  "passes": [
+    {
+      "num": 1,
+      "name": "Home HTTP is reachable"
+    },
+    {
+      "num": 2,
+      "name": "Home critical root exists"
+    },
+    {
+      "num": 3,
+      "name": "Home has no browser errors"
+    },
+    {
+      "num": 4,
+      "name": "Home has no failed requests"
+    },
+    {
+      "num": 5,
+      "name": "Home loads no third-party origins"
+    },
+    {
+      "num": 6,
+      "name": "Home mode switch renders locally"
+    },
+    {
+      "num": 7,
+      "name": "Search HTTP is reachable"
+    },
+    {
+      "num": 8,
+      "name": "Search critical root exists"
+    },
+    {
+      "num": 9,
+      "name": "Search has no browser errors"
+    },
+    {
+      "num": 10,
+      "name": "Search has no failed requests"
+    },
+    {
+      "num": 11,
+      "name": "Search loads no third-party origins"
+    },
+    {
+      "num": 12,
+      "name": "Search page exposes a local Chart constructor"
+    },
+    {
+      "num": 13,
+      "name": "Search page reports a Chart.js version"
+    },
+    {
+      "num": 14,
+      "name": "Search page renders a chart with a non-blank canvas"
+    },
+    {
+      "num": 15,
+      "name": "Search query accepts local input"
+    },
+    {
+      "num": 16,
+      "name": "Patent detail reports an empty local library with HTTP 404"
+    },
+    {
+      "num": 17,
+      "name": "Patent detail shows the not-found prompt for an empty local library"
+    },
+    {
+      "num": 18,
+      "name": "Patent detail has no browser errors"
+    },
+    {
+      "num": 19,
+      "name": "Patent detail has no failed requests"
+    },
+    {
+      "num": 20,
+      "name": "Patent detail loads no third-party origins"
+    },
+    {
+      "num": 21,
+      "name": "Patent detail interaction is skipped when no local patent exists"
+    },
+    {
+      "num": 22,
+      "name": "Idea HTTP is reachable"
+    },
+    {
+      "num": 23,
+      "name": "Idea critical root exists"
+    },
+    {
+      "num": 24,
+      "name": "Idea has no browser errors"
+    },
+    {
+      "num": 25,
+      "name": "Idea has no failed requests"
+    },
+    {
+      "num": 26,
+      "name": "Idea loads no third-party origins"
+    },
+    {
+      "num": 27,
+      "name": "Idea evidence tab switches locally"
+    },
+    {
+      "num": 28,
+      "name": "AI chat HTTP is reachable"
+    },
+    {
+      "num": 29,
+      "name": "AI chat critical root exists"
+    },
+    {
+      "num": 30,
+      "name": "AI chat has no browser errors"
+    },
+    {
+      "num": 31,
+      "name": "AI chat has no failed requests"
+    },
+    {
+      "num": 32,
+      "name": "AI chat loads no third-party origins"
+    },
+    {
+      "num": 33,
+      "name": "AI chat input accepts local draft without sending"
+    },
+    {
+      "num": 34,
+      "name": "Compare HTTP is reachable"
+    },
+    {
+      "num": 35,
+      "name": "Compare critical root exists"
+    },
+    {
+      "num": 36,
+      "name": "Compare has no browser errors"
+    },
+    {
+      "num": 37,
+      "name": "Compare has no failed requests"
+    },
+    {
+      "num": 38,
+      "name": "Compare loads no third-party origins"
+    },
+    {
+      "num": 39,
+      "name": "Compare adds a local reference row"
+    },
+    {
+      "num": 40,
+      "name": "Settings HTTP is reachable"
+    },
+    {
+      "num": 41,
+      "name": "Settings critical root exists"
+    },
+    {
+      "num": 42,
+      "name": "Settings loads no third-party origins"
+    },
+    {
+      "num": 43,
+      "name": "Settings accepts an unsaved local key draft"
+    },
+    {
+      "num": 44,
+      "name": "OA response HTTP is reachable"
+    },
+    {
+      "num": 45,
+      "name": "OA response critical root exists"
+    },
+    {
+      "num": 46,
+      "name": "OA response has no browser errors"
+    },
+    {
+      "num": 47,
+      "name": "OA response has no failed requests"
+    },
+    {
+      "num": 48,
+      "name": "OA response loads no third-party origins"
+    },
+    {
+      "num": 49,
+      "name": "OA depth control accepts a local selection"
+    },
+    {
+      "num": 50,
+      "name": "Search language filter defaults to auto and omits language key"
+    },
+    {
+      "num": 51,
+      "name": "Search language filter sends explicit chinese selection"
+    },
+    {
+      "num": 52,
+      "name": "Search diagnostics renders cooldown badge with remaining seconds from structured cooldowns key"
+    },
+    {
+      "num": 53,
+      "name": "Search diagnostics stays hidden and throws nothing without attempts (local mode)"
+    },
+    {
+      "num": 54,
+      "name": "Search diagnostics ignores error-text wording for cooldown badges (structured key only)"
+    },
+    {
+      "num": 55,
+      "name": "Search diagnostics truncates long errors for display but keeps full text in title"
+    },
+    {
+      "num": 56,
+      "name": "CAD retry preserves the failed request prompt, context, history, and parent"
+    },
+    {
+      "num": 57,
+      "name": "CAD history can be rendered again after chat rebuilds its message container"
+    },
+    {
+      "num": 58,
+      "name": "Idea page keeps all critical functions defined"
+    },
+    {
+      "num": 59,
+      "name": "Idea page keeps the scroll-to-bottom button in the chat panel"
+    },
+    {
+      "num": 60,
+      "name": "Idea history entries keep a delete button"
+    },
+    {
+      "num": 61,
+      "name": "Settings page checks FreeCAD status without starting it automatically"
+    },
+    {
+      "num": 62,
+      "name": "Amendment check validates a malformed request without AI"
+    },
+    {
+      "num": 63,
+      "name": "Full discussion export becomes visible after a discussion exchange"
+    },
+    {
+      "num": 64,
+      "name": "Full discussion export uses a Markdown filename"
+    },
+    {
+      "num": 65,
+      "name": "Full discussion export preserves context and every message tail marker"
+    },
+    {
+      "num": 66,
+      "name": "Full discussion export preserves original Markdown backticks"
+    },
+    {
+      "num": 67,
+      "name": "Full discussion export includes roles, timestamps, and original-record notice"
+    },
+    {
+      "num": 68,
+      "name": "Full discussion export makes no AI request"
+    },
+    {
+      "num": 69,
+      "name": "Long OA payload preserves all tail markers without AI"
+    },
+    {
+      "num": 70,
+      "name": "Home button sweep enumerates at least 6 controls"
+    },
+    {
+      "num": 71,
+      "name": "Home every button click stays local, error-free and server-healthy"
+    },
+    {
+      "num": 72,
+      "name": "Search button sweep enumerates at least 4 controls"
+    },
+    {
+      "num": 73,
+      "name": "Search every button click stays local, error-free and server-healthy"
+    },
+    {
+      "num": 74,
+      "name": "Patent detail button sweep is skipped for an empty local library"
+    },
+    {
+      "num": 75,
+      "name": "Patent detail button sweep result skipped with the empty library"
+    },
+    {
+      "num": 76,
+      "name": "Idea button sweep enumerates at least 20 controls"
+    },
+    {
+      "num": 77,
+      "name": "Idea every button click stays local, error-free and server-healthy"
+    },
+    {
+      "num": 78,
+      "name": "AI chat button sweep enumerates at least 3 controls"
+    },
+    {
+      "num": 79,
+      "name": "AI chat every button click stays local, error-free and server-healthy"
+    },
+    {
+      "num": 80,
+      "name": "Compare button sweep enumerates at least 11 controls"
+    },
+    {
+      "num": 81,
+      "name": "Compare every button click stays local, error-free and server-healthy"
+    },
+    {
+      "num": 82,
+      "name": "Settings button sweep enumerates at least 10 controls"
+    },
+    {
+      "num": 83,
+      "name": "OA response button sweep enumerates at least 26 conPASS 8PASS 84: Same-origin API: at least 9 buttons trigger /api/ requests"
+    },
+    {
+      "num": 85,
+      "name": "AI button identification: at least 1 button triggers /api/ai/ request"
+    }
+  ],
+  "failures": [
+    "Settings has no browser errors: page=http://127.0.0.1:3000/settings console_error=Failed to load resource: net::ERR_EMPTY_RESPONSE",
+    "Settings has no failed requests: page=http://127.0.0.1:3000/settings request=http://127.0.0.1:3000/api/cad/status error=net::ERR_EMPTY_RESPONSE",
+    "Settings every button click stays local, error-free and server-healthy: errors=0|删除|console: Failed to load resource: net::ERR_EMPTY_RESPONSE / 2|保存|console: Failed to load resource: net::ERR_EMPTY_RESPONSE / 4|保存 EPO OPS 凭证|console: Failed to load resource: net::ERR_EMPTY_RESPONSE failed=0|删除|/api/cad/status / 2|保存|/api/cad/status / 4|保存 EPO OPS 凭证|/api/cad/status",
+    "OA response every button click stays local, error-free and server-healthy: errors=13|开始分析|console: Failed to load resource: net::ERR_EMPTY_RESPONSE / 13|开始分析|console: Failed to load resource: net::ERR_EMPTY_RESPONSE / 13|开始分析|console: Failed to load resource: net::ERR_EMPTY_RESPONSE failed=13|开始分析|/api/ai/office-action-response / 13|开始分析|/api/ai/office-action-response/stream"
+  ],
+  "server_info": {
+    "build_time": "2026-10-16T01:30:12Z",
+    "db_path": "/root/.local/share/innoforge/innoforge.db",
+    "git_branch": "main",
+    "git_commit": "a6517c5e212bcf62ddeefc0f65ed13bd1e2eb9c2",
+    "templates": {
+      "compare.html": {
+        "bytes": 43762,
+        "sha256": "01a70bb966c4ba4c634da1b98ccc9cb3d6fb56f5cf067aa9ec3248ab5fcb1073"
+      },
+      "office_action_response.html": {
+        "bytes": 260881,
+        "sha256": "1a8eb189aeacb7a9170f788b4a9efeaaf786072344bedd5c0de754d34f68f86b"
+      }
+    },
+    "version": "0.9.15"
+  },
+  "raw_output": "PASS 1: Home HTTP is reachable\nPASS 2: Home critical root exists\nPASS 3: Home has no browser errors\nPASS 4: Home has no failed requests\nPASS 5: Home loads no third-party origins\nPASS 6: Home mode switch renders locally\nPASS 7: Search HTTP is reachable\nPASS 8: Search critical root exists\nPASS 9: Search has no browser errors\nPASS 10: Search has no failed requests\nPASS 11: Search loads no third-party origins\nPASS 12: Search page exposes a local Chart constructor\nPASS 13: Search page reports a Chart.js version\nPASS 14: Search page renders a chart with a non-blank canvas\nPASS 15: Search query accepts local input\nPASS 16: Patent detail reports an empty local library with HTTP 404\nPASS 17: Patent detail shows the not-found prompt for an empty local library\nPASS 18: Patent detail has no browser errors\nPASS 19: Patent detail has no failed requests\nPASS 20: Patent detail loads no third-party origins\nPASS 21: Patent detail interaction is skipped when no local patent exists\nPASS 22: Idea HTTP is reachable\nPASS 23: Idea critical root exists\nPASS 24: Idea has no browser errors\nPASS 25: Idea has no failed requests\nPASS 26: Idea loads no third-party origins\nPASS 27: Idea evidence tab switches locally\nPASS 28: AI chat HTTP is reachable\nPASS 29: AI chat critical root exists\nPASS 30: AI chat has no browser errors\nPASS 31: AI chat has no failed requests\nPASS 32: AI chat loads no third-party origins\nPASS 33: AI chat input accepts local draft without sending\nPASS 34: Compare HTTP is reachable\nPASS 35: Compare critical root exists\nPASS 36: Compare has no browser errors\nPASS 37: Compare has no failed requests\nPASS 38: Compare loads no third-party origins\nPASS 39: Compare adds a local reference row\nPASS 40: Settings HTTP is reachable\nPASS 41: Settings critical root exists\nPASS 42: Settings loads no third-party origins\nPASS 43: Settings accepts an unsaved local key draft\nPASS 44: OA response HTTP is reachable\nPASS 45: OA response critical root exists\nPASS 46: OA response has no browser errors\nPASS 47: OA response has no failed requests\nPASS 48: OA response loads no third-party origins\nPASS 49: OA depth control accepts a local selection\nPASS 50: Search language filter defaults to auto and omits language key\nPASS 51: Search language filter sends explicit chinese selection\nPASS 52: Search diagnostics renders cooldown badge with remaining seconds from structured cooldowns key\nPASS 53: Search diagnostics stays hidden and throws nothing without attempts (local mode)\nPASS 54: Search diagnostics ignores error-text wording for cooldown badges (structured key only)\nPASS 55: Search diagnostics truncates long errors for display but keeps full text in title\nPASS 56: CAD retry preserves the failed request prompt, context, history, and parent\nPASS 57: CAD history can be rendered again after chat rebuilds its message container\nPASS 58: Idea page keeps all critical functions defined\nPASS 59: Idea page keeps the scroll-to-bottom button in the chat panel\nPASS 60: Idea history entries keep a delete button\nPASS 61: Settings page checks FreeCAD status without starting it automatically\nPASS 62: Amendment check validates a malformed request without AI\nPASS 63: Full discussion export becomes visible after a discussion exchange\nPASS 64: Full discussion export uses a Markdown filename\nPASS 65: Full discussion export preserves context and every message tail marker\nPASS 66: Full discussion export preserves original Markdown backticks\nPASS 67: Full discussion export includes roles, timestamps, and original-record notice\nPASS 68: Full discussion export makes no AI request\nPASS 69: Long OA payload preserves all tail markers without AI\nPASS 70: Home button sweep enumerates at least 6 controls\nPASS 71: Home every button click stays local, error-free and server-healthy\nPASS 72: Search button sweep enumerates at least 4 controls\nPASS 73: Search every button click stays local, error-free and server-healthy\nPASS 74: Patent detail button sweep is skipped for an empty local library\nPASS 75: Patent detail button sweep result skipped with the empty library\nPASS 76: Idea button sweep enumerates at least 20 controls\nPASS 77: Idea every button click stays local, error-free and server-healthy\nPASS 78: AI chat button sweep enumerates at least 3 controls\nPASS 79: AI chat every button click stays local, error-free and server-healthy\nPASS 80: Compare button sweep enumerates at least 11 controls\nPASS 81: Compare every button click stays local, error-free and server-healthy\nPASS 82: Settings button sweep enumerates at least 10 controls\nPASS 83: OA response button sweep enumerates at least 26 conPASS 8PASS 84: Same-origin API: at least 9 buttons trigger /api/ requests\nPASS 85: AI button identification: at least 1 button triggers /api/ai/ request\nE2E FAILED (85/89 passed) against http://127.0.0.1:3000\n- Settings has no browser errors: page=http://127.0.0.1:3000/settings console_error=Failed to load resource: net::ERR_EMPTY_RESPONSE\n- Settings has no failed requests: page=http://127.0.0.1:3000/settings request=http://127.0.0.1:3000/api/cad/status error=net::ERR_EMPTY_RESPONSE\n- Settings every button click stays local, error-free and server-healthy: errors=0|删除|console: Failed to load resource: net::ERR_EMPTY_RESPONSE / 2|保存|console: Failed to load resource: net::ERR_EMPTY_RESPONSE / 4|保存 EPO OPS 凭证|console: Failed to load resource: net::ERR_EMPTY_RESPONSE failed=0|删除|/api/cad/status / 2|保存|/api/cad/status / 4|保存 EPO OPS 凭证|/api/cad/status\n- OA response every button click stays local, error-free and server-healthy: errors=13|开始分析|console: Failed to load resource: net::ERR_EMPTY_RESPONSE / 13|开始分析|console: Failed to load resource: net::ERR_EMPTY_RESPONSE / 13|开始分析|console: Failed to load resource: net::ERR_EMPTY_RESPONSE failed=13|开始分析|/api/ai/office-action-response / 13|开始分析|/api/ai/office-action-response/stream\n/ai/office-action-response/stream\n"
+}
