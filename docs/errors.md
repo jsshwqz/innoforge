@@ -913,3 +913,84 @@
 - **解法 / Fix**: 推送优先级：① `git push gitcode main`（最稳定）→ ② `git push devspace main`（重试或稍后）→ ③ `git -c http.proxy= -c https.proxy= push origin main`（GitHub 直连，需认证）。tag 同理。
 - **预防 / Prevention**: 遇 devspace 502 不要停，先试 gitcode；两个 127.0.0.1:9800 代理通道互为备份。
 - **提交 / Commit**: b3bf493
+
+
+---
+
+## 八类系统性踩坑 / Eight Systematic Pitfall Categories
+
+> 以下八类踩坑在 v0.9.11 ~ v0.9.16 开发周期内反复出现（同期 55 条提交，docs/errors.md 内容更新次数为 0）。
+> 本批次一次性写回，同类复发在原条目标注"复发于…"并升严重度。
+
+### [2026-10-16] ① `cargo fmt --check` 虚报与 trailing blank line 反复
+- **严重程度 / Severity**: HIGH（复发 5 次，每次阻断 CI 合并）
+- **现象 / Symptom**: `cargo fmt --check` 在 CI 报红，但开发者本机跑 `cargo fmt --all` 后无差异；或反过来，本机 fmt 过了 CI 却红。最常见变体：文件末尾 trailing blank line——`cargo fmt` 会删掉它但 `--check` 模式下报 diff。
+- **根因 / Root cause**: ① 本机 rustfmt 版本与 CI runner 不一致（无 `rust-toolchain.toml` 钉版时）；② 编辑器自动在末尾加空行但 rustfmt 要求恰好一个换行符；③ `cargo fmt` 和 `cargo fmt --check` 对 trailing blank line 的处理在不同版本间有细微差异。
+- **修复 / Fix**: 每次提交前跑 `cargo fmt --all` 而非仅 `--check`；已钉 `rust-toolchain.toml` 保证版本一致；CI 的 Format job 独立运行不连坐。
+- **预防 / Prevention**: ① 提交前始终执行 `cargo fmt --all`（修改文件）而非仅 `--check`（只检测）；② 编辑器设 `insert_final_newline = true` + `trim_trailing_whitespace = true`；③ fmt 红了先跑 `cargo fmt --all` 再提交，不要手动改格式。
+- **复发记录 / Recurrence**: 复发 5 次（ae09bd4 ~ a1b4a0d 期间），最近一次 `7f54bdd` fix: cargo fmt --all (remove trailing blank line)。
+- **提交 / Commit**: 本条目为复盘写入，对应修复散落在多个 commit 中。
+
+### [2026-10-16] ② `cargo clippy --all-targets -- -D warnings` 红
+- **严重程度 / Severity**: MEDIUM（工具链漂移引起，非逻辑回退）
+- **现象 / Symptom**: clippy 报 4 处 error，但报错文件本次未碰；门禁基线是"clippy=0"。
+- **根因 / Root cause**: 工具链升级新增/收紧 lint（如 `unnecessary_min_or_max`、`for_kv_map`），`-D warnings` 把新 lint 从提示变门禁失败。
+- **修复 / Fix**: 按 clippy 建议做惯用法替换（零逻辑变化）；钉 `rust-toolchain.toml`。
+- **预防 / Prevention**: 断言"门禁红是存量还是本次引起"必须三件套取证——① 该文件在不在本次改动集 ② 报错行在 `git show HEAD:<file>` 是否逐字相同 ③ `rustc --version` 与基线是否一致。禁止用 `#[allow]` 糊。
+- **复发记录 / Recurrence**: 复发于 2026-09-19（见同日条目），工具链漂移是周期性问题。
+- **提交 / Commit**: 见 `88d9e12`（rust-toolchain.toml 钉版）。
+
+### [2026-10-16] ③ CI `needs` 连坐导致 skipped 被当通过
+- **严重程度 / Severity**: HIGH（假绿让坏代码进 main）
+- **现象 / Symptom**: CI 配置中 `e2e` job 写了 `needs: [test, lint]`，当 `test` 或 `lint` 失败时 `e2e` 被跳过（skipped），GitHub branch protection 把 skipped 算作"未失败"即通过，于是 PR 在 e2e 从未运行的情况下变绿合并。
+- **根因 / Root cause**: GitHub Actions 的 `needs` 语义是"前置失败则跳过"而非"前置失败则本 job 也失败"；branch protection 的 required status check 对 skipped job 的判定取决于配置，默认不阻断。
+- **修复 / Fix**: 拆分为七个独立 job 零 `needs`（`d055f4f`）：fmt / clippy / test / privacy-guards / template-guards / lint / e2e 各自独立运行，任一失败不连坐其他。branch protection 必需检查同步更新为七个新名字。
+- **预防 / Prevention**: ① CI job 之间禁止用 `needs` 做软依赖（除非确实需要前置产物）；② 每个 required check 必须能独立失败、独立报红；③ 合并前确认所有 required check 状态是 `success` 而非 `skipped`；④ 定期审计 branch protection 的 required checks 列表与实际 job 名一致。
+- **提交 / Commit**: `d055f4f`（CI 拆分）、`a6517c5`（合并 PR#24）。
+
+### [2026-10-16] ④ 恒不触发假通过（四种变体）
+- **严重程度 / Severity**: CRITICAL（测试全绿但零覆盖，等于没测）
+- **现象 / Symptom**: 测试报告全绿，但被测路径从未被执行。四种变体：
+  - **(a) 断言外套 if**: `if condition { assert!(...) }`——condition 为假时断言不执行，测试静默通过。
+  - **(b) 只有否定断言**: `assert!(!result.is_error())`——只断言"不是什么"，不断言"是什么"，空结果/默认值都能过。
+  - **(c) regex 不支持 look-around**: 用 `regex` crate 写了含 `(?=...)` / `(?<=...)` 的正则，Rust `regex` 不支持 look-around，正则编译失败但被 `OnceLock` 缓存为 Err，后续匹配全部返回 false/空，断言基于"无匹配"通过。
+  - **(d) `ok()` 静默失效**: `result.ok()` 把 Err 吞成 None，后续 `assert!(result.is_none())` 通过——但通过的原因是错误被吞了，不是逻辑正确。
+- **根因 / Root cause**: 测试写"验证不失败"而非"验证期望行为"；没有红→绿取证（先让断言变红再修绿）。
+- **修复 / Fix**: 每条断言必须有红→绿取证：先破坏被测代码确认断言变红，再修好确认变绿。否定断言必须配一个肯定断言（"是什么"）。正则用 `regex` crate 时不写 look-around，需要 look-around 换 `fancy-regex` 或拆成多步匹配。`ok()` 只在确实要丢弃错误时用，测试中禁止用 `ok()` 吞 Err。
+- **预防 / Prevention**: ① 每个新测试必须附"红→绿取证"记录（哪个 commit 让它红、哪个让它绿）；② `if` 外套断言必须加 `assert!(condition)` 确保分支被进入；③ 否定断言 `assert!(!x)` 必须配 `assert_eq!(y, expected)` 说明正确值是什么；④ 禁止在测试中用 `.ok()` 吞错误，用 `unwrap()` / `expect("reason")` 让错误显式失败；⑤ 正则不写 look-around，需要时换 crate 并在测试中验证编译成功。
+- **提交 / Commit**: `63ac7d5`（负控守卫）、`c7ea063`（tmp/negative-control-malformed-responses 取证）。
+
+### [2026-10-16] ⑤ 桩端口共享与 `set_var` 污染与往真 cwd 写文件
+- **严重程度 / Severity**: HIGH（测试间互相污染，偶发失败难复现）
+- **现象 / Symptom**: 测试在真实环境中偶发失败，重跑又过。三种变体：
+  - **(a) 桩端口共享**: 多个测试用 `TcpListener::bind("127.0.0.1:FIXED_PORT")` 绑同一端口，并行测试时端口冲突，后绑的测试失败。
+  - **(b) `set_var` 污染**: 测试用 `std::env::set_var("KEY", "value")` 设环境变量，Rust 测试默认多线程并行，`set_var` 是进程级全局操作，一个测试设的变量被另一个测试读到，产生非确定性结果。
+  - **(c) 往真 cwd 写文件**: 测试用 `Path::new(".")` 或 `env::current_dir()` 往当前工作目录写文件（如测试数据库），测试结束后文件残留，影响后续测试或 CI runner。
+- **根因 / Root cause**: 测试假设自己是单线程独占环境，没有做隔离。
+- **修复 / Fix**: ① 端口用 `TcpListener::bind("127.0.0.1:0")` 让 OS 分配空闲端口；② `set_var` 改用 `temp_env` crate 或在测试开头保存、结尾恢复，且测试用 `#[serial]` 串行化；③ 文件写入 `tempfile::tempdir()` 创建的临时目录，测试结束自动清理。
+- **预防 / Prevention**: ① 测试禁止绑固定端口，一律 `127.0.0.1:0`；② 禁止在测试中直接 `std::env::set_var`，用 `temp_env::set_var` 或 `serial_test` 宏；③ 禁止往 cwd 写文件，一律用 `tempdir()`；④ CI 中 `cargo test` 不加 `-- --test-threads=1`（掩盖并行问题）。
+- **提交 / Commit**: `0312d24` / `c246f6d`（fake_ai_stub 用 `127.0.0.1:0`）。
+
+### [2026-10-16] ⑥ `include_str!` 烘模板导致源码修好 ≠ 部署修好
+- **严重程度 / Severity**: HIGH（源码修了但部署的旧模板仍在跑，用户报"还没修"）
+- **现象 / Symptom**: 开发者修了 `templates/foo.html`，`cargo build` 后本地测试通过，但部署到服务器后用户仍看到旧模板。原因是 `include_str!("templates/foo.html")` 在编译时把模板内容嵌入二进制，如果部署的二进制不是最新编译的（如用了缓存的 Docker layer、或 `cargo build` 没跑但只部署了 static 文件），旧模板仍在服务。
+- **根因 / Root cause**: `include_str!` 把模板编译进二进制，但部署流程可能不重新编译（缓存命中）或部署的是旧二进制。没有运行时校验"部署的模板版本 == 源码模板版本"。
+- **修复 / Fix**: `/api/version` 端点返回 `git_commit` + 每个模板的 `sha256`，部署后用脚本校验 `/api/version` 的模板 sha256 与源码 `templates/` 下的文件 sha256 一致。不一致则报错回滚。
+- **预防 / Prevention**: ① 部署后必须校验 `/api/version` 的 `git_commit` 和模板 sha256；② `include_str!` 的模板改动必须在 commit message 标注 `templates:` 前缀；③ CI 加 template-hash-check job（已有 `template-hash-check.yml`），对比编译时嵌入的 sha256 与源码 sha256。
+- **提交 / Commit**: 见 `template-hash-check.yml` 工作流。
+
+### [2026-10-16] ⑦ `amend` 顶掉已推送 commit
+- **严重程度 / Severity**: HIGH（force push 覆盖远端历史，协作者基于旧 commit 的工作丢失）
+- **现象 / Symptom**: 开发者 `git commit --amend` 修改已推送到远端的 commit，然后 `git push --force`，远端原来的 commit SHA 被替换。如果协作者已经基于原 SHA 拉了分支或跑了 CI，他们的工作与新历史不兼容。
+- **根因 / Root cause**: `amend` 创建新 commit 对象但复用原消息，开发者误以为"只是改了点小东西"不影响别人；`--force` 无条件覆盖远端引用。
+- **修复 / Fix**: 已推送的 commit 禁止 amend，改为新增一个 fixup commit。需要 squash 时在 merge 时由合并者统一 squash。`--force-with-lease` 替代 `--force`（至少能防止覆盖别人的推送）。
+- **预防 / Prevention**: ① 规则：已推送的 commit 禁止 `--amend`，新增 commit 修；② 需要改 commit message 时，新增一条 `docs: fix commit message` 而非 amend；③ `push` 一律用 `--force-with-lease` 不用裸 `--force`；④ PR 分支 rebase 后 push 用 `--force-with-lease`，main 永远不 force push。
+- **提交 / Commit**: 本条目本身就是"新增 commit 不 amend"的实践（T2 修 CHANGELOG 用了新 commit 而非 amend）。
+
+### [2026-10-16] ⑧ CHANGELOG 错引 commit
+- **严重程度 / Severity**: MEDIUM（不阻断功能，但误导追溯）
+- **现象 / Symptom**: CHANGELOG 某条目引的 commit hash 与实际引入该功能的 commit 不符。例如 #13 事务化条目引了 `c9268e6`，但 `c9268e6` 只改了 `src/common.rs` 的 db_path 日志，真正引入 `run_migration_tx` 的是 `533dec4`。
+- **根因 / Root cause**: 写 CHANGELOG 时凭记忆引 commit，没有用 `git log -S "<function_name>"` 验证该 commit 确实引入了所述功能。
+- **修复 / Fix**: ① `c9268e6` → `533dec4`（已修，commit `145ab43`）；② "断言数 71 → 87"改为引用 `e2e_test.mjs` 的 `expectedPasses` 单一来源（当前 89）。
+- **预防 / Prevention**: ① CHANGELOG 每条 commit 引用必须用 `git log -S "<key_function>" --oneline` 验证；② 不写死会变的数字（如断言数），改引单一来源变量名；③ CHANGELOG review 时抽查 commit hash 与描述是否匹配。
+- **提交 / Commit**: `145ab43`（fix CHANGELOG commit ref and assertion count）。
