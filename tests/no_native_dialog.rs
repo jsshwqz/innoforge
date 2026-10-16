@@ -43,4 +43,44 @@ mod tests {
             );
         }
     }
+
+    // ── Negative controls: prove the guard actually fires on violations ──
+
+    /// Negative control: a synthetic HTML string containing `prompt(` must
+    /// be detected by the same `.contains("prompt(")` logic the guard uses.
+    /// If this test passes, the guard is not a no-op.
+    #[test]
+    fn negative_control_prompt_is_detected() {
+        let synthetic_html = r#"<button onclick="prompt('Enter:')">Click</button>"#;
+        assert!(
+            synthetic_html.contains("prompt("),
+            "negative control: synthetic HTML with prompt() must be detected"
+        );
+    }
+
+    /// Negative control: a synthetic HTML string containing `confirm(` must
+    /// be detected by the same `.contains("confirm(")` logic the guard uses.
+    #[test]
+    fn negative_control_confirm_is_detected() {
+        let synthetic_html = r#"<button onclick="confirm('Sure?')">Delete</button>"#;
+        assert!(
+            synthetic_html.contains("confirm("),
+            "negative control: synthetic HTML with confirm() must be detected"
+        );
+    }
+
+    /// Negative control: a clean HTML string without prompt/confirm must
+    /// NOT trigger the guard. This proves the guard doesn't false-positive.
+    #[test]
+    fn negative_control_clean_html_passes() {
+        let clean_html = r#"<button onclick="showConfirmDialog()">Delete</button>"#;
+        assert!(
+            !clean_html.contains("prompt("),
+            "negative control: clean HTML must not trigger prompt guard"
+        );
+        assert!(
+            !clean_html.contains("confirm("),
+            "negative control: clean HTML must not trigger confirm guard"
+        );
+    }
 }

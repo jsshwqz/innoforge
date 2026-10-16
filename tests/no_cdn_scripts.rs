@@ -104,3 +104,63 @@ fn no_cdn_script_tags_in_templates_or_static() {
             .join("\n")
     );
 }
+
+// ── Negative controls: prove the guard actually fires on violations ──
+
+/// Negative control: synthetic HTML with a CDN `<script src="https://...">`
+/// must be detected by `extract_cdn_script_srcs`.
+#[test]
+fn negative_control_cdn_https_is_detected() {
+    let synthetic = r#"<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>"#;
+    let hits = extract_cdn_script_srcs(synthetic);
+    assert_eq!(
+        hits.len(),
+        1,
+        "negative control: CDN https script must be detected, got {:?}",
+        hits
+    );
+    assert!(
+        hits[0].starts_with("https://"),
+        "negative control: detected URL should be https://, got {}",
+        hits[0]
+    );
+}
+
+/// Negative control: synthetic HTML with a CDN `<script src="http://...">`
+/// must also be detected.
+#[test]
+fn negative_control_cdn_http_is_detected() {
+    let synthetic = r#"<script src="http://unpkg.com/vue@3"></script>"#;
+    let hits = extract_cdn_script_srcs(synthetic);
+    assert_eq!(
+        hits.len(),
+        1,
+        "negative control: CDN http script must be detected, got {:?}",
+        hits
+    );
+}
+
+/// Negative control: local script tags (`/static/...`) must NOT be flagged.
+#[test]
+fn negative_control_local_script_passes() {
+    let synthetic = r#"<script src="/static/vendor/chart.umd.min.js"></script>"#;
+    let hits = extract_cdn_script_srcs(synthetic);
+    assert!(
+        hits.is_empty(),
+        "negative control: local script must not be flagged, got {:?}",
+        hits
+    );
+}
+
+/// Negative control: HTML comments containing CDN URLs must NOT be flagged
+/// (the guard skips comment lines).
+#[test]
+fn negative_control_commented_cdn_passes() {
+    let synthetic = r#"<!-- <script src="https://cdn.example.com/lib.js"></script> -->"#;
+    let hits = extract_cdn_script_srcs(synthetic);
+    assert!(
+        hits.is_empty(),
+        "negative control: commented-out CDN script must not be flagged, got {:?}",
+        hits
+    );
+}

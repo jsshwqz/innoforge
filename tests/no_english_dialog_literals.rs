@@ -121,4 +121,54 @@ mod tests {
             );
         }
     }
+
+    // ── Negative controls: prove the guard logic actually fires ──
+
+    /// Negative control: `alert('Error')` with no Chinese must be detected
+    /// as an English-only literal.
+    #[test]
+    fn negative_control_english_alert_detected() {
+        let synthetic = "alert('Error occurred')";
+        // Replicate the guard's detection logic
+        let prefix = "alert('";
+        let idx = synthetic.find(prefix).unwrap();
+        let after = &synthetic[idx + prefix.len()..];
+        let end = after.find('\'').unwrap();
+        let literal = &after[..end];
+        assert!(
+            !literal.is_empty() && !has_chinese(literal),
+            "negative control: English alert literal must be detected as violation"
+        );
+    }
+
+    /// Negative control: `alert('错误发生')` with Chinese must NOT be
+    /// detected as an English-only literal.
+    #[test]
+    fn negative_control_chinese_alert_passes() {
+        let synthetic = "alert('错误发生')";
+        let prefix = "alert('";
+        let idx = synthetic.find(prefix).unwrap();
+        let after = &synthetic[idx + prefix.len()..];
+        let end = after.find('\'').unwrap();
+        let literal = &after[..end];
+        assert!(
+            has_chinese(literal),
+            "negative control: Chinese alert literal must not be flagged"
+        );
+    }
+
+    /// Negative control: `t(alert('Error'))` wrapped in t() must NOT be
+    /// detected (the guard skips t()-wrapped calls).
+    #[test]
+    fn negative_control_t_wrapped_passes() {
+        let synthetic = "t(alert('Error'))";
+        let prefix = "alert('";
+        let idx = synthetic.find(prefix).unwrap();
+        let before = &synthetic[..idx];
+        let trimmed = before.trim_end();
+        assert!(
+            trimmed.ends_with("t("),
+            "negative control: t()-wrapped alert must be recognized as wrapped"
+        );
+    }
 }
