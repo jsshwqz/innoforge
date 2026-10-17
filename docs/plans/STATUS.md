@@ -680,3 +680,18 @@
 - **Doc Staleness**: PR#38 改了 tests/stub_malformed_responses.rs，补 docs/errors.md 条目 ⑨ 满足门禁
 - **PR#36**: 改了 tests/stub_hanging_backend.rs，补 docs/errors.md 条目 ⑩（ERR_EMPTY_RESPONSE 被当成环境问题而误判为无缺陷）
 - **G4 清理**: docs/pr34-description.md / docs/pr35-description.md 从 g4 分支移除，内容搬到 PR 描述
+
+### 2026-10-17 — **G5: i18n 验证 — 8 处硬编码英文字符串**
+
+- **状态 / Status**: ✅ 完成（验证+文档化，未修复字符串本身）
+- **分支 / Branch**: `r19/g5-i18n-verification`
+- **发现 / Findings**: 8 处硬编码英文字符串绕过 i18n：
+  1. `Loading...` (idea.html ×5) — innerHTML 直接设置，无 i18nLang 判断
+  2. `Patent not found` (ai.rs, patent.rs ×4) — API 错误消息
+  3. `Use millimetres` (cad.rs) — CAD 指令
+  4. `PDF store failed` (OAR.html) — alert 回退
+  5-7. `Missing required field: *` (oa_rounds.rs) — API 校验错误
+  8. `No rows updated` (oa_rounds.rs) — API 错误
+- **对比**: 已正确 i18n 的字符串：`No ideas yet`/`暂无创意记录`、search.html 的 `t()` 调用等
+- **测试**: 3 个测试（字符串存在性、i18n 字符串有中文、Loading 绕过 i18n 负控）
+- **验证**: fmt clean, clippy clean, 708 tests pass

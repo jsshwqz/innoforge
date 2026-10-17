@@ -1002,3 +1002,19 @@
 - **修复 / Fix**: ① 对照 handler struct 修正字段名为 `my_patent`（object with `content`）和 `office_action`（string ≥10 chars）；② 在 stub 日志中确认 `[OA-ANALYZE] 开始调用AI` 出现，证明 AI 路径被触发；③ 红→绿取证：先 `std::process::exit(1)` 破坏 `extract_chat_content`，确认测试变红，再修回确认变绿（见 `docs/red-evidence-pr29.md`）。
 - **预防 / Prevention**: ① 测试请求字段名必须对照 handler 的实际 struct 定义，不凭记忆猜；② 否定断言（"不 crash"）必须配肯定断言（"期望路径被触发"），如检查日志输出或响应体内容；③ 负控测试必须附红→绿取证记录，证明被测路径确实被执行。
 - **提交 / Commit**: `b3d6f71`（correct test request fields + red-green evidence）。
+
+### [2026-10-17] ⑭ 8 处硬编码英文字符串绕过 i18n
+- **严重程度 / Severity**: MEDIUM（中文界面出现英文文字）
+- **现象 / Symptom**: 8 处英文字符串未经过 i18n 系统，在中文界面（lang="zh-CN"）下仍显示英文：
+  1. `Loading...` — templates/idea.html（5 处，innerHTML 直接设置）
+  2. `Patent not found` — src/routes/ai.rs:634（AI 聊天内容）
+  3. `Patent not found` — src/routes/patent.rs:40,263,335,576（API 错误消息）
+  4. `Use millimetres` — src/routes/cad.rs:353（CAD 指令）
+  5. `PDF store failed` — templates/office_action_response.html:330（alert 回退）
+  6. `Missing required field: patent_id` — src/routes/oa_rounds.rs:50（API 错误）
+  7. `Missing required field: round_type` — src/routes/oa_rounds.rs:60（API 错误）
+  8. `No rows updated` — src/routes/oa_rounds.rs:204（API 错误）
+- **根因 / Root cause**: 前端 `Loading...` 直接写入 innerHTML，未用 `i18nLang === 'en' ? ... : ...` 包裹；后端 API 错误消息硬编码英文，未根据 Accept-Language 返回本地化消息。
+- **对比 / Contrast**: 以下字符串已正确通过 i18n：`No ideas yet`/`暂无创意记录`、`No discussion yet`/`暂无讨论记录`、`No idea selected`/`请先选择一个创意`、`Failed to load history`/`加载历史失败`、search.html 的 `t('alert.emptyQuery')` 等。
+- **修复建议 / Fix**: 前端用 `i18nLang === 'en' ? 'Loading...' : '加载中...'`；后端根据 Accept-Language header 返回本地化消息。
+- **验证 / Verification**: 3 个测试验证 8 个硬编码字符串存在、i18n 处理的字符串有中文翻译、`Loading...` 确实绕过 i18n。
