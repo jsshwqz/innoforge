@@ -882,3 +882,13 @@ Response:
 | 400 | 请求参数错误 / Bad Request |
 | 404 | 资源不存在 / Not Found |
 | 500 | 服务器内部错误 / Internal Server Error |
+
+---
+
+## 环境变量 / Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `INNOFORGE_PORT` | `3000` | HTTP 监听端口。更改后 OAuth 回调地址自动跟随。/ HTTP listen port. OAuth callback URL follows automatically. |
+| `INNOFORGE_OAUTH_CALLBACK_URL` | *(由 `INNOFORGE_PORT` 推导)* | Google OAuth 重定向 URI。设置后覆盖 `INNOFORGE_PORT` 推导的地址。必须与 Google Cloud Console 中登记的授权重定向 URI 逐字匹配。/ Google OAuth redirect URI. Overrides `INNOFORGE_PORT`-derived URL. Must match the authorized redirect URI in Google Cloud Console. |
+| `INNOFORGE_UPSTREAM_TIMEOUT_SECS` | `30` | 上游 HTTP 调用超时秒数（专利 API、Google OAuth、AI 模型探测）。/ Timeout in seconds for upstream HTTP calls. |

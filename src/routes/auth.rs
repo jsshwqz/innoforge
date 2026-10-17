@@ -19,8 +19,6 @@ use serde_json::json;
 const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const GOOGLE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_SCOPE: &str = "openid email https://www.googleapis.com/auth/generative-language";
-const REDIRECT_URI: &str = "http://localhost:3000/api/auth/google/callback";
-
 /// Atomically persist Google token state before it becomes active in memory.
 ///
 /// Token values are deliberately never included in caller logs; callers log only the
@@ -397,11 +395,11 @@ pub async fn api_google_auth_url(State(s): State<AppState>) -> Json<serde_json::
         "{}?client_id={}&redirect_uri={}&response_type=code&scope={}&access_type=offline&prompt=consent",
         GOOGLE_AUTH_URL,
         urlencoding::encode(client_id),
-        urlencoding::encode(REDIRECT_URI),
+        urlencoding::encode(&crate::common::oauth_callback_url()),
         urlencoding::encode(GOOGLE_SCOPE),
     );
 
-    Json(json!({"url": auth_url, "redirect_uri": REDIRECT_URI}))
+    Json(json!({"url": auth_url, "redirect_uri": crate::common::oauth_callback_url()}))
 }
 
 /// Google OAuth 回调页面：HTML 页面，JS 读取 URL query 中的 code 并 POST 到 exchange 端点
@@ -478,7 +476,7 @@ pub async fn api_google_exchange_handler(
     form.insert("client_id", client_id);
     form.insert("client_secret", client_secret);
     form.insert("grant_type", "authorization_code".to_string());
-    form.insert("redirect_uri", REDIRECT_URI.to_string());
+    form.insert("redirect_uri", crate::common::oauth_callback_url());
 
     let token_resp = http_client.post(GOOGLE_TOKEN_URL).form(&form).send().await;
 

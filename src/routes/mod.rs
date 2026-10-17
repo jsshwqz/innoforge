@@ -16,7 +16,7 @@
 mod ai;
 mod audit;
 pub use audit::*;
-mod auth;
+pub(crate) mod auth;
 mod cad;
 mod chat;
 mod collections;
