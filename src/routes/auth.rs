@@ -286,7 +286,7 @@ async fn refresh_token_from_adc(adc_path: &std::path::Path) -> Option<String> {
             let client_secret = v["client_secret"].as_str()?.to_string();
             let refresh_token = v["refresh_token"].as_str()?.to_string();
 
-            let http_client = reqwest::Client::new();
+            let http_client = crate::common::build_upstream_client();
             let mut params = std::collections::HashMap::new();
             params.insert("client_id", client_id);
             params.insert("client_secret", client_secret);
@@ -472,7 +472,7 @@ pub async fn api_google_exchange_handler(
     }
 
     // 交换 code → tokens
-    let http_client = reqwest::Client::new();
+    let http_client = crate::common::build_upstream_client();
     let mut form = std::collections::HashMap::new();
     form.insert("code", code);
     form.insert("client_id", client_id);
@@ -644,7 +644,7 @@ pub(crate) async fn refresh_google_token_background(
                 )
             };
             if !refresh_token.is_empty() && !client_id.is_empty() && !client_secret.is_empty() {
-                let http_client = reqwest::Client::new();
+                let http_client = crate::common::build_upstream_client();
                 let mut params = std::collections::HashMap::new();
                 params.insert("client_id", client_id);
                 params.insert("client_secret", client_secret);

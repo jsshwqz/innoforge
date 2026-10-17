@@ -2323,7 +2323,7 @@ pub async fn list_ai_models(
         let url = format!("{}/models", base_url.trim_end_matches('/'));
         let key = api_key.to_string();
         tokio::spawn(async move {
-            let resp = match reqwest::Client::new()
+            let resp = match crate::common::build_upstream_client()
                 .get(&url)
                 .header("Authorization", format!("Bearer {}", key))
                 .header("Content-Type", "application/json")

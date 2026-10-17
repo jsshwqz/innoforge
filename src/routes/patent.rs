@@ -74,7 +74,7 @@ pub async fn api_enrich_patent(
         api_key
     );
     println!("[ENRICH] Fetching details for {}", patent.patent_number);
-    let client = reqwest::Client::new();
+    let client = crate::common::build_upstream_client();
     match client.get(&url).send().await {
         Ok(resp) => {
             if let Ok(body) = resp.text().await {
@@ -467,7 +467,7 @@ pub async fn api_recommend_similar(
 }
 
 async fn fetch_patent(num: &str, source: &str) -> anyhow::Result<Patent> {
-    let client = reqwest::Client::new();
+    let client = crate::common::build_upstream_client();
     match source {
         "uspto" => fetch_uspto(&client, num).await,
         _ => fetch_epo(&client, num).await,
