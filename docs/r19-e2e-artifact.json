@@ -1,0 +1,59 @@
+{
+  "scan_date": "2026-10-17T07:50:00Z",
+  "deployment": {
+    "url": "http://127.0.0.1:3000",
+    "pid": 10620,
+    "build_type": "release",
+    "git_commit": "a6517c5e212bcf62ddeefc0f65ed13bd1e2eb9c2",
+    "git_branch": "main",
+    "build_time": "2026-10-16T01:30:12Z",
+    "version": "0.9.15"
+  },
+  "templates": {
+    "compare.html": {
+      "bytes": 43762,
+      "sha256": "01a70bb966c4ba4c634da1b98ccc9cb3d6fb56f5cf067aa9ec3248ab5fcb1073"
+    },
+    "office_action_response.html": {
+      "bytes": 260881,
+      "sha256": "1a8eb189aeacb7a9170f788b4a9efeaaf786072344bedd5c0de754d34f68f86b"
+    }
+  },
+  "e2e_result": {
+    "total": 87,
+    "passed": 84,
+    "skipped": 2,
+    "failed": 3,
+    "expected_passes": 87
+  },
+  "skips": [
+    {
+      "seq": 2,
+      "name": "Patent detail button sweep result skipped with the empty library",
+      "reason": "No patents in local library — expected skip, not a failure"
+    }
+  ],
+  "failures": [
+    {
+      "name": "Settings every button click stays local, error-free and server-healthy",
+      "detail": "errors=5 from /api/cad/status returning ERR_EMPTY_RESPONSE for buttons: 查询可用模型, 通过 gcloud CLI 登录, 检测并启动",
+      "root_cause": "CAD/FreeCAD endpoint /api/cad/status not available or times out on deployment instance (FreeCAD not installed)"
+    },
+    {
+      "name": "OA response every button click stays local, error-free and server-healthy",
+      "detail": "errors=13 from /api/ai/office-action-response and /api/ai/office-action-response/stream returning ERR_EMPTY_RESPONSE for button: 开始分析",
+      "root_cause": "AI endpoints not configured (no API key set) — expected on deployment without AI provider credentials"
+    },
+    {
+      "name": "Same-origin API: at least 9 buttons trigger /api/ requests",
+      "detail": "actual=8 floor=9, buttons found: AI 智能分析, 加载全文, 导出 PDF, 收藏, AI 智能分析, 加载全文, 导出 PDF, 对比分析",
+      "root_cause": "One button that should trigger /api/ request may be missing or not wired up in this version (0.9.15 vs main 0.9.16)"
+    }
+  ],
+  "chrome_dependencies_installed": [
+    "nspr", "nss", "atk", "at-spi2-atk", "cups-libs", "libdrm",
+    "libxkbcommon", "libXcomposite", "libXdamage", "libXfixes",
+    "libXrandr", "mesa-libgbm", "alsa-lib", "cairo", "pango",
+    "gdk-pixbuf2", "gtk3"
+  ]
+}
