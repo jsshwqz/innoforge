@@ -1017,3 +1017,11 @@
 - **修复 / Fix**: ① 新增 CI job `autoclose-hygiene`（`.github/workflows/ci.yml`），对 PR 的 CHANGELOG.md diff 新增行做硬校验：出现裸 `#\d+` 即失败，报出行号和内容；② 失败信息说明改法：把 `#13` 写成 `[issue 13](../issues/13)` 或直接写 issue 标题；③ 需将 `Autoclose Hygiene` 加入分支保护 required contexts。
 - **预防 / Prevention**: ① CHANGELOG 中禁止裸 `#NN`，统一用 `[issue NN](../issues/NN)` 或 issue 标题；② CI 门禁 `autoclose-hygiene` 作为 required context，阻止违规 PR 合并；③ commit message 中避免 `fix/close/resolve #NN` 除非确实要关闭 issue。
 - **提交 / Commit**: 见本 PR。
+
+### [2026-10-17] ⑫ 上游 HTTP 客户端默认没有超时，而「兜底」会把它静默放回来
+- **严重程度 / Severity**: HIGH（上游黑洞时请求永久 pending，占住 worker，外部表现是 HTTP 连接无响应）
+- **现象 / Symptom**: 六处上游调用（专利详情抓取、Google OAuth 换 token / 刷新 token、模型列表探测）都用 `reqwest::Client::new()`，它**不带任何超时**。对端接受 TCP 但不回字节时，请求会一直挂在 pending 上，浏览器侧只看到连接被关掉且没有响应体。
+- **根因 / Root cause**: ① `reqwest::Client::new()` 的默认行为就是无超时，必须显式 `.timeout(...)`；② 这类缺陷是"沉默的"——没有超时**不会**让任何断言失败，单测、clippy、fmt 全都能绿；③ 修的时候如果图省事写成 `.build().unwrap_or_else(|_| reqwest::Client::new())`，builder 一旦失败就把无超时客户端原样放回来，等于修复被静默撤销。
+- **修复 / Fix**: 新增 `src/common.rs` 的 `upstream_timeout_secs()`（读 `INNOFORGE_UPSTREAM_TIMEOUT_SECS`，默认 30，非法值与 0 回落默认）与 `build_upstream_client()`；六处调用全部改走它；`tests/upstream_timeout_test.rs` 加 6 个用例，其中黑洞后端用例断言 `result.is_err()`、`elapsed < 10s`、**`elapsed >= 1.5s`** —— 最后这条是关键，它证明连接真的被 accept 了，不是拿 ConnectionRefused 蒙过去。
+- **预防 / Prevention**: ① 新增上游调用一律走 `build_upstream_client()`，不直接 `Client::new()`；② **兜底不许静默退回无超时客户端**（`unwrap_or_else(|_| Client::new())` 要改成明确失败，存量四处在 issue 55 跟踪）；③ 验证"没有超时"这类缺陷时，红侧要能用外层超时把 hang 量出来，不能指望测试自己变红。
+- **提交 / Commit**: `def13ac`（R20 W1：给六处上游调用加超时）。
