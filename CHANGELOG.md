@@ -1037,3 +1037,5 @@ _暂无条目。_
 - Excel 数据导出 / Excel data export
 - 跨平台支持（Windows/Linux/macOS）/ Cross-platform support
 - 设置页面（网页配置 API Key）/ Settings page (web-based API key configuration)
+
+- **#424242: 这是一次一次性负向验证用的裸 issue 引用，只用于证明门禁能变红**
