@@ -1002,3 +1002,13 @@
 - **修复 / Fix**: ① 对照 handler struct 修正字段名为 `my_patent`（object with `content`）和 `office_action`（string ≥10 chars）；② 在 stub 日志中确认 `[OA-ANALYZE] 开始调用AI` 出现，证明 AI 路径被触发；③ 红→绿取证：先 `std::process::exit(1)` 破坏 `extract_chat_content`，确认测试变红，再修回确认变绿（见 `docs/red-evidence-pr29.md`）。
 - **预防 / Prevention**: ① 测试请求字段名必须对照 handler 的实际 struct 定义，不凭记忆猜；② 否定断言（"不 crash"）必须配肯定断言（"期望路径被触发"），如检查日志输出或响应体内容；③ 负控测试必须附红→绿取证记录，证明被测路径确实被执行。
 - **提交 / Commit**: `b3d6f71`（correct test request fields + red-green evidence）。
+
+### ⑭ G8: Doc Staleness CI 空转（仅修改现有文本通过检查）
+
+**问题**: 原 doc-staleness CI job 只检查 `docs/errors.md` 或 `docs/plans/STATUS.md` 是否有任何变更，不区分"新增条目"和"仅修改现有文本"。导致 PR 可以通过仅修改一个字来满足文档更新要求，绕过复盘规则。
+
+**修复**: 强化检查逻辑 — 现在 CI 统计 diff 中以 `+## ` 或 `+### ` 开头的新行数 (`NEW_ENTRIES`)，只有 `NEW_ENTRIES > 0` 才通过。失败消息区分"文档已改但无新条目"和"文档未改"两种情况。
+
+**负验证**: 模拟仅修改现有文本 → `check_new_entries()` 返回 false (red)；添加新 `###` 条目 → 返回 true (green)。
+
+**关联**: PR #52, 分支 `r19/g8-doc-staleness-strict`
