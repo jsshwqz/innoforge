@@ -157,7 +157,7 @@ impl AiClient {
 
         tokio::spawn(async move {
             let _ = tokio::time::timeout(
-                Duration::from_secs(AiClient::GLOBAL_TIMEOUT_SECS),
+                Duration::from_secs(AiClient::global_timeout_secs()),
                 async {
                     if is_anthropic {
                         // ── Anthropic Messages API streaming ──

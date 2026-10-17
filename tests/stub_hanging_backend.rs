@@ -8,6 +8,11 @@
 //! indefinitely and never returns an empty reply.
 //!
 //! Also verifies the server stays alive after the request completes.
+//!
+//! R19 fix: The original test body used wrong field names (`patent_id`/`oa_text`)
+//! that caused the handler to return early without ever calling the AI — a
+//! false pass. Fixed to use `my_patent`/`office_action` which triggers the
+//! actual AI call path, so the timeout+degradation is genuinely exercised.
 
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -24,6 +29,8 @@ fn start_server(server_port: u16, ai_port: u16) -> std::process::Child {
         .env("INNOFORGE_NO_OPEN", "1")
         .env("AI_BASE_URL", format!("http://127.0.0.1:{}", ai_port))
         .env("AI_API_KEY", "test-key-not-real")
+        .env("INNOFORGE_AI_GLOBAL_TIMEOUT_SECS", "5")
+        .env("INNOFORGE_AI_HTTP_TIMEOUT_SECS", "5")
         .spawn()
         .expect("failed to spawn server")
 }
@@ -45,6 +52,11 @@ fn kill_server(mut child: std::process::Child) {
     let _ = child.kill();
     let _ = child.wait();
 }
+
+/// Request body that genuinely triggers the AI call path in the
+/// office-action-response handler. Uses correct field names:
+/// `my_patent` (object with content/title) and `office_action` (string).
+const OA_REQUEST_BODY: &str = r#"{"my_patent":{"title":"测试专利","content":"这是一段测试用的专利内容描述用于验证黑洞后端场景下的超时降级机制是否正常工作"},"office_action":"这是一段测试用的审查意见通知书内容用于验证后端在外部AI超时时是否能正确返回HTTP响应而不是空连接"}"#;
 
 /// Start a "black hole" stub: accepts TCP connections but never sends
 /// any HTTP response. The connection stays open until the client times out.
@@ -116,6 +128,53 @@ fn assert_proper_http_response(resp: reqwest::blocking::Response, label: &str) {
     );
 }
 
+/// Like assert_proper_http_response but also verifies the response body
+/// contains evidence that the AI call path was actually exercised —
+/// not just an early-return validation error. This prevents false passes
+/// where the handler returns before ever calling the external backend.
+fn assert_ai_path_exercised(resp: reqwest::blocking::Response, label: &str) {
+    let status = resp.status().as_u16();
+    assert!(
+        (200..600).contains(&status),
+        "{}: expected HTTP status 200-599, got {}",
+        label,
+        status
+    );
+    let ct = resp
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert!(
+        ct.contains("json"),
+        "{}: expected JSON content-type, got '{}'",
+        label,
+        ct
+    );
+    let body = resp.text().unwrap_or_default();
+    assert!(
+        !body.is_empty(),
+        "{}: response body must not be empty (no ERR_EMPTY_RESPONSE)",
+        label
+    );
+    // Positive assertion: the body must contain evidence that the AI was
+    // actually called. When the AI backend is a black hole, the handler
+    // should return an error message mentioning the AI failure/timeout.
+    // If the body only contains a validation error (e.g. "请输入审查意见
+    // 通知书内容"), the AI path was never reached — a false pass.
+    let ai_exercised = body.contains("AI")
+        || body.contains("调用")
+        || body.contains("超时")
+        || body.contains("timeout")
+        || body.contains("失败");
+    assert!(
+        ai_exercised,
+        "{}: response body does not indicate AI path was exercised (body: {})",
+        label,
+        &body[..body.len().min(200)]
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // Test 1: AI backend accepts but never responds → server must return
 // a proper HTTP response with JSON body, not empty reply.
@@ -139,7 +198,7 @@ fn tolerates_blackhole_ai_backend_no_empty_reply() {
     assert!(wait_for_server(server_port, 15), "server must start");
 
     let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(120))
+        .timeout(std::time::Duration::from_secs(30))
         .build()
         .expect("client");
 
@@ -149,11 +208,11 @@ fn tolerates_blackhole_ai_backend_no_empty_reply() {
             server_port
         ))
         .header("Content-Type", "application/json")
-        .body(r#"{"patent_id":"test","oa_text":"测试文本"}"#)
+        .body(OA_REQUEST_BODY)
         .send();
 
     match resp {
-        Ok(r) => assert_proper_http_response(r, "blackhole AI backend"),
+        Ok(r) => assert_ai_path_exercised(r, "blackhole AI backend"),
         Err(e) => panic!(
             "server must not return connection-level failure on blackhole AI: {}",
             e
@@ -186,7 +245,7 @@ fn tolerates_slow_drip_ai_backend_no_empty_reply() {
     assert!(wait_for_server(server_port, 15), "server must start");
 
     let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(120))
+        .timeout(std::time::Duration::from_secs(30))
         .build()
         .expect("client");
 
@@ -196,11 +255,11 @@ fn tolerates_slow_drip_ai_backend_no_empty_reply() {
             server_port
         ))
         .header("Content-Type", "application/json")
-        .body(r#"{"patent_id":"test","oa_text":"测试文本"}"#)
+        .body(OA_REQUEST_BODY)
         .send();
 
     match resp {
-        Ok(r) => assert_proper_http_response(r, "slow drip AI backend"),
+        Ok(r) => assert_ai_path_exercised(r, "slow drip AI backend"),
         Err(e) => panic!(
             "server must not return connection-level failure on slow drip AI: {}",
             e
@@ -275,7 +334,7 @@ fn survives_repeated_blackhole_ai_requests() {
     assert!(wait_for_server(server_port, 15), "server must start");
 
     let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(120))
+        .timeout(std::time::Duration::from_secs(30))
         .build()
         .expect("client");
 
@@ -287,11 +346,11 @@ fn survives_repeated_blackhole_ai_requests() {
                 server_port
             ))
             .header("Content-Type", "application/json")
-            .body(r#"{"patent_id":"test","oa_text":"测试文本"}"#)
+            .body(OA_REQUEST_BODY)
             .send();
 
         match resp {
-            Ok(r) => assert_proper_http_response(r, &format!("blackhole AI request #{}", i)),
+            Ok(r) => assert_ai_path_exercised(r, &format!("blackhole AI request #{}", i)),
             Err(e) => panic!("request #{} connection-level failure: {}", i, e),
         }
     }
