@@ -1002,3 +1002,12 @@
 - **修复 / Fix**: ① 对照 handler struct 修正字段名为 `my_patent`（object with `content`）和 `office_action`（string ≥10 chars）；② 在 stub 日志中确认 `[OA-ANALYZE] 开始调用AI` 出现，证明 AI 路径被触发；③ 红→绿取证：先 `std::process::exit(1)` 破坏 `extract_chat_content`，确认测试变红，再修回确认变绿（见 `docs/red-evidence-pr29.md`）。
 - **预防 / Prevention**: ① 测试请求字段名必须对照 handler 的实际 struct 定义，不凭记忆猜；② 否定断言（"不 crash"）必须配肯定断言（"期望路径被触发"），如检查日志输出或响应体内容；③ 负控测试必须附红→绿取证记录，证明被测路径确实被执行。
 - **提交 / Commit**: `b3d6f71`（correct test request fields + red-green evidence）。
+
+### [2026-10-17] ⑫ 迁移原子性负验证（#13）与迁移文件校验负验证（#19）
+- **严重程度 / Severity**: HIGH（验证已有修复的负向测试，确保回退时变红）
+- **现象 / Symptom**: issue #13（迁移未在事务内）和 #19（自动迁移不校验源文件）的修复已在 main 上，但缺少负向测试证明"如果修复被回退，测试会变红"。
+- **负验证 / Negative verification**:
+  - **#13 红→绿**: 移除 `run_migration_tx` 中 v9 迁移的 `column_exists` 幂等守卫 → `migration_atomicity_interrupted_migration_self_heals` 和 `migration_atomicity_multiple_stale_versions_all_self_heal` 变红（`duplicate column name: technical_problem`）→ 恢复守卫 → 变绿。
+  - **#19 红→绿**: 将 `auto_migrate_db` 中 `is_sqlite_file` 检查改为 `if false && !is_sqlite_file(...)` 绕过校验 → `migration_validation_non_sqlite_file_not_copied` 和 `migration_validation_empty_file_rejected` 变红（垃圾文件被复制到新位置）→ 恢复校验 → 变绿。
+- **测试文件 / Test file**: `tests/migration_negative_tests.rs`（10 个测试，覆盖 #13 事务回滚+幂等自愈、#19 文件校验+损坏隔离）
+- **提交 / Commit**: 见本 PR commit。
