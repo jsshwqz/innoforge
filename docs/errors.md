@@ -1017,3 +1017,11 @@
 - **修复 / Fix**: ① 新增 CI job `autoclose-hygiene`（`.github/workflows/ci.yml`），对 PR 的 CHANGELOG.md diff 新增行做硬校验：出现裸 `#\d+` 即失败，报出行号和内容；② 失败信息说明改法：把 `#13` 写成 `[issue 13](../issues/13)` 或直接写 issue 标题；③ 需将 `Autoclose Hygiene` 加入分支保护 required contexts。
 - **预防 / Prevention**: ① CHANGELOG 中禁止裸 `#NN`，统一用 `[issue NN](../issues/NN)` 或 issue 标题；② CI 门禁 `autoclose-hygiene` 作为 required context，阻止违规 PR 合并；③ commit message 中避免 `fix/close/resolve #NN` 除非确实要关闭 issue。
 - **提交 / Commit**: 见本 PR。
+
+### [2026-10-17] ⑬ 集成测试自己起服务却用 sleep 等就绪 ⇒ 本地绿、CI 红
+- **严重程度 / Severity**: HIGH（CI 红得莫名其妙，且第一反应容易误判成"环境问题"）
+- **现象 / Symptom**: `version_endpoint_includes_configurable_fields` 在 CI 里 `ConnectionRefused (os 111)` 失败，本地却通过；同一 PR 的正文还写着「705 passed, 0 failed」。
+- **根因 / Root cause**: 用例自己 `spawn` 服务进程后固定 `sleep` 一小段时间就去连端口。CI 的 runner 负载与本地不同，服务还没开始 listen 就发起请求；而"本地能过"给了错误的安全感。另一层根因是交付时没有对照 CI 日志，把本地结果当成了 CI 结果（自报数字与日志不符，另行跟踪）。
+- **修复 / Fix**: 起服务后**轮询**探测就绪（反复请求 `/api/version` 直到成功或超时），去掉固定 `sleep`；就绪判据用真实 endpoint 而不是"进程已 spawn"。
+- **预防 / Prevention**: ① 任何起服务的测试都不许用固定 sleep 当同步原语；② 端口冲突/未就绪要显式报错并带上最后一次探测的响应；③ PR 正文里的测试数字必须附 CI run 链接（不得转述本地结果）。
+- **提交 / Commit**: 见本 PR。

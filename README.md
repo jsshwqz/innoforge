@@ -297,6 +297,14 @@ cargo run --release --bin innoforge-server
 
 All settings configurable via **Settings page** (http://localhost:3000/settings) or `.env` file.
 
+#### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `INNOFORGE_PORT` | `3000` | HTTP listen port. When changed, OAuth callback URL follows automatically. |
+| `INNOFORGE_OAUTH_CALLBACK_URL` | *(derived from `INNOFORGE_PORT`)* | Google OAuth redirect URI. Overrides `INNOFORGE_PORT`-derived URL when set. Must match the authorized redirect URI in Google Cloud Console. |
+| `INNOFORGE_UPSTREAM_TIMEOUT_SECS` | `30` | Timeout in seconds for upstream HTTP calls (patent APIs, Google OAuth, AI model probes). |
+
 **No API keys?** App still works -- search uses local database, AI features show setup guide.
 
 The Settings page ships with 9 provider presets (Base URLs taken from `templates/settings.html`) plus a custom OpenAI-compatible entry:
