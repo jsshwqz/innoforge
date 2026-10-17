@@ -348,7 +348,7 @@ pub fn init_app_state(db_path: &str) -> anyhow::Result<crate::routes::AppState> 
             "[CONFIG] AI provider={}, mode={}, timeout={}s, base_url={}, model={}",
             provider_label,
             mode,
-            crate::ai::AiClient::GLOBAL_TIMEOUT_SECS,
+            crate::ai::AiClient::global_timeout_secs(),
             cfg.ai_base_url,
             cfg.ai_model,
         );

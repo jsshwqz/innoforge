@@ -678,7 +678,7 @@ mod tests {
     #[test]
     fn global_timeout_is_300_seconds() {
         assert_eq!(
-            crate::ai::AiClient::GLOBAL_TIMEOUT_SECS,
+            crate::ai::AiClient::global_timeout_secs(),
             300,
             "Global timeout must be 300 seconds to allow OA analysis with full context"
         );

@@ -1003,6 +1003,13 @@
 - **预防 / Prevention**: ① 测试请求字段名必须对照 handler 的实际 struct 定义，不凭记忆猜；② 否定断言（"不 crash"）必须配肯定断言（"期望路径被触发"），如检查日志输出或响应体内容；③ 负控测试必须附红→绿取证记录，证明被测路径确实被执行。
 - **提交 / Commit**: `b3d6f71`（correct test request fields + red-green evidence）。
 
+### [2026-10-16] ⑩ ERR_EMPTY_RESPONSE 被当成环境问题而误判为无缺陷
+- **严重程度 / Severity**: HIGH（真实缺陷被误判为网络噪声，漏修）
+- **现象 / Symptom**: E2E 测试偶发 `ERR_EMPTY_RESPONSE`（浏览器层面"服务器连接成功但未返回任何数据"），开发者将其归类为"transient browser-level timeout"（瞬时浏览器超时）而非代码缺陷，在部署扫描报告中标注"not code defects"，导致真实问题——后端 handler 在外部 AI 超时后未正确返回 HTTP 响应体（连接保持打开但无数据写回）——被漏修。
+- **根因 / Root cause**: ① `ERR_EMPTY_RESPONSE` 是浏览器层面的错误，不区分"服务器主动关闭连接"和"服务器超时后未写 response body 就返回"；② 开发者凭经验将其归入"网络瞬时问题"类别，没有在后端代码中验证 handler 是否对所有外部调用路径都有超时+降级响应；③ 部署扫描报告将此类错误统一标为"not code defects"，缺少"需在后端验证"的跟进动作。
+- **修复 / Fix**: ① 新增 `tests/stub_hanging_backend.rs`（4 个测试）：启动"黑洞 stub"（接受 TCP 连接但不发任何响应）与"慢速滴流 stub"，验证 server 不挂死、正确返回 HTTP 响应、且 server 存活可继续服务；② 部署扫描报告中将 `ERR_EMPTY_RESPONSE` 从"not code defects"改为"未定因"，必须在后端验证 handler 超时降级后才能关闭；③ **R19 审计核对**：`src/routes/ai.rs`（L107 `quick_web_search` 有 `QUICK_WEB_UPSTREAM_TIMEOUT_SECS` 超时；L428 AI handler 由 `AiClient` 的 `PROVIDER_HTTP_TIMEOUT_SECS=300s` 分级超时兜底，超时后 L521 返回 `200 + {"content":"AI 调用失败: {e}"}`）、`src/routes/cad.rs`（L291 `clone_with_timeout(60s)`，L296 超时后降级为 `None` → fallback）、`src/ai/client.rs`（L390 `timeout(PROVIDER_HTTP_TIMEOUT_SECS)`，L21 分级超时 `ENRICHMENT=300s/ANALYSIS=120s/CHAT=45s`）——**三文件已核对，AI/CAD 路径无缺口**。但 `src/routes/patent.rs:77/470`、`src/routes/auth.rs:289/475/647`、`src/routes/idea.rs:2326` 使用 `reqwest::Client::new()` 无超时，跟踪在 #30。
+- **预防 / Prevention**: ① `ERR_EMPTY_RESPONSE` 默认视为代码缺陷，必须在后端验证 handler 对所有外部调用路径都有超时+降级响应后才能降级为"环境问题"；② 部署扫描报告中禁止将任何浏览器层错误统一标为"not code defects"——必须逐类在后端验证；③ 后端所有外部调用必须有超时+降级，禁止"连接成功但无响应"的路径存在。
+- **提交 / Commit**: `d30b5aa`（hanging backend resilience tests）、`ba49186`（replace 'not code defects' with '未定因'）。
 ### [2026-10-17] ⑪ CHANGELOG 裸 `#NN` 被复制进 commit message 触发 GitHub 自动关闭 issue
 - **严重程度 / Severity**: HIGH（未通过验收的 issue 被意外关闭，验收流程被绕过）
 - **现象 / Symptom**: commit `8437c42` 的 message 为 `docs(changelog): fix #13 commit ref …`，GitHub 在合并该 commit 时自动关闭了 issue #13，而 #13 的验收尚未通过。CHANGELOG 正文里的裸 `#NN` 虽然本身不会触发自动关闭，但它会被复制进 commit message，是复发源。
