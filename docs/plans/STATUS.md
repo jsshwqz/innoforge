@@ -674,7 +674,9 @@
 **main**: `a1b4a0d`（已合 PR #24 CI 拆分、#26 守卫负控）
 **分支保护**: strict, 7 required checks: Format / Clippy / Tests / Privacy Guards / Template Guards / Lint / E2E
 
-### 2026-10-16 — **PR#36 Doc Staleness 修复**
+### 2026-10-16 — **PR#38 踩坑条目 ⑨ + PR#36 踩坑条目 ⑩**
 
-- **状态 / Status**: 🔄 PR#36 分支已补 docs/errors.md 条目 ⑩（ERR_EMPTY_RESPONSE 被当成环境问题而误判为无缺陷）
-- **Doc Staleness**: PR#36 改了 tests/stub_hanging_backend.rs，补 docs/errors.md 条目 ⑩ 满足门禁
+- **状态 / Status**: 🔄 PR#38 分支已补 docs/errors.md 条目 ⑨（请求字段名错导致 handler 提前返回、测试空跑）
+- **Doc Staleness**: PR#38 改了 tests/stub_malformed_responses.rs，补 docs/errors.md 条目 ⑨ 满足门禁
+- **PR#36**: 改了 tests/stub_hanging_backend.rs，补 docs/errors.md 条目 ⑩（ERR_EMPTY_RESPONSE 被当成环境问题而误判为无缺陷）
+- **G4 清理**: docs/pr34-description.md / docs/pr35-description.md 从 g4 分支移除，内容搬到 PR 描述
