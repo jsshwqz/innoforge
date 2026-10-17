@@ -412,9 +412,9 @@ src/ai/
 
 ```
 GET  /                          → 主页
-GET  /api/patents               → 专利列表
-GET  /api/patents/:id           → 专利详情
-POST /api/patents               → 创建/更新专利
+POST /api/patents/import        → 批量导入专利
+GET  /api/patents/:id/tags      → 专利标签
+GET  /api/patents/:id/collections → 专利收藏
 GET  /api/search                → 全文搜索
 GET  /api/search/suggest        → 搜索建议
 POST /api/ai/analyze            → AI 分析专利

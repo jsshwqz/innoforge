@@ -33,7 +33,12 @@ pub mod timeouts {
 }
 
 // 向后兼容别名 / Backward-compatible alias for existing callers
-const PROVIDER_HTTP_TIMEOUT_SECS: u64 = 300; // = timeouts::ENRICHMENT (300s)
+fn provider_http_timeout_secs() -> u64 {
+    std::env::var("INNOFORGE_AI_HTTP_TIMEOUT_SECS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(300) // = timeouts::ENRICHMENT (300s)
+}
 const PROVIDER_MAX_RETRIES: usize = 3;
 
 /// AI 提供者模式 / AI provider operation mode.
@@ -387,7 +392,7 @@ impl AiClient {
     pub fn with_config(base_url: &str, api_key: &str, model: &str) -> Self {
         Self {
             client: Client::builder()
-                .timeout(Duration::from_secs(PROVIDER_HTTP_TIMEOUT_SECS))
+                .timeout(Duration::from_secs(provider_http_timeout_secs()))
                 .no_proxy()
                 .build()
                 .unwrap_or_else(|_| {
@@ -405,7 +410,7 @@ impl AiClient {
             fallbacks: Vec::new(),
             provider_mode: AiProviderMode::Http,
             gemini_cli_path: None,
-            timeout: Duration::from_secs(PROVIDER_HTTP_TIMEOUT_SECS),
+            timeout: Duration::from_secs(provider_http_timeout_secs()),
             last_usage: Arc::new(RwLock::new(None)),
         }
     }
@@ -768,7 +773,13 @@ impl AiClient {
     }
 
     /// 单次 AI 调用的全局超时上限。
-    pub(crate) const GLOBAL_TIMEOUT_SECS: u64 = 300;
+    /// 单次 AI 调用的全局超时上限。可通过环境变量 INNOFORGE_AI_GLOBAL_TIMEOUT_SECS 覆盖。
+    pub(crate) fn global_timeout_secs() -> u64 {
+        std::env::var("INNOFORGE_AI_GLOBAL_TIMEOUT_SECS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(300)
+    }
 
     /// Get the current model name.
     pub fn model_name(&self) -> &str {
@@ -787,7 +798,7 @@ impl AiClient {
     /// Send a raw JSON body to the AI provider.
     pub async fn send_json_body(&self, body: serde_json::Value) -> Result<String> {
         match tokio::time::timeout(
-            Duration::from_secs(Self::GLOBAL_TIMEOUT_SECS),
+            Duration::from_secs(Self::global_timeout_secs()),
             self.send_json_body_inner(body),
         )
         .await
@@ -795,7 +806,7 @@ impl AiClient {
             Ok(result) => result,
             Err(_) => Err(anyhow::anyhow!(
                 "AI 调用超时（全局上限 {}s）。请检查网络或更换 AI 服务商。",
-                Self::GLOBAL_TIMEOUT_SECS
+                Self::global_timeout_secs()
             )),
         }
     }
@@ -950,7 +961,7 @@ impl AiClient {
         temperature: f32,
     ) -> Result<String> {
         match tokio::time::timeout(
-            Duration::from_secs(Self::GLOBAL_TIMEOUT_SECS),
+            Duration::from_secs(Self::global_timeout_secs()),
             self.send_chat_inner(messages, temperature),
         )
         .await
@@ -958,7 +969,7 @@ impl AiClient {
             Ok(result) => result,
             Err(_) => Err(anyhow::anyhow!(
                 "AI 调用超时（全局上限 {}s）。请检查网络或更换 AI 服务商。",
-                Self::GLOBAL_TIMEOUT_SECS
+                Self::global_timeout_secs()
             )),
         }
     }
@@ -1174,7 +1185,7 @@ impl AiClient {
         // 使用 AiClient 已配置的模型（由 ai_client_expert 或 ai_client 决定），
         // 不再通过 env var 覆盖，确保设置页的模型选择生效。
         match tokio::time::timeout(
-            Duration::from_secs(Self::GLOBAL_TIMEOUT_SECS),
+            Duration::from_secs(Self::global_timeout_secs()),
             self.send_chat_inner_with_model(messages, temperature, None),
         )
         .await
@@ -1182,7 +1193,7 @@ impl AiClient {
             Ok(result) => result,
             Err(_) => Err(anyhow::anyhow!(
                 "AI 调用超时（全局上限 {}s）。请检查网络或更换 AI 服务商。",
-                Self::GLOBAL_TIMEOUT_SECS
+                Self::global_timeout_secs()
             )),
         }
     }
@@ -1196,7 +1207,7 @@ impl AiClient {
         model_override: Option<&str>,
     ) -> Result<String> {
         match tokio::time::timeout(
-            Duration::from_secs(Self::GLOBAL_TIMEOUT_SECS),
+            Duration::from_secs(Self::global_timeout_secs()),
             self.send_chat_inner_with_model(messages, temperature, model_override),
         )
         .await
@@ -1204,7 +1215,7 @@ impl AiClient {
             Ok(result) => result,
             Err(_) => Err(anyhow::anyhow!(
                 "AI 调用超时（全局上限 {}s）。请检查网络或更换 AI 服务商。",
-                Self::GLOBAL_TIMEOUT_SECS
+                Self::global_timeout_secs()
             )),
         }
     }
@@ -1212,7 +1223,7 @@ impl AiClient {
 
 #[cfg(test)]
 mod tests {
-    use super::{timeouts, AiClient, PROVIDER_HTTP_TIMEOUT_SECS};
+    use super::{provider_http_timeout_secs, timeouts, AiClient};
     use std::time::Duration;
 
     #[test]
@@ -1280,11 +1291,12 @@ mod tests {
         );
 
         assert_eq!(
-            PROVIDER_HTTP_TIMEOUT_SECS, 300,
+            provider_http_timeout_secs(),
+            300,
             "default provider HTTP timeout must be 300 seconds"
         );
         assert_eq!(
-            AiClient::GLOBAL_TIMEOUT_SECS,
+            AiClient::global_timeout_secs(),
             300,
             "global AI timeout must be 300 seconds"
         );
