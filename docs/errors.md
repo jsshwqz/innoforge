@@ -1010,3 +1010,10 @@
 - **修复 / Fix**: ① 新增 `tests/stub_hanging_backend.rs`（4 个测试）：启动"黑洞 stub"（接受 TCP 连接但不发任何响应）与"慢速滴流 stub"，验证 server 不挂死、正确返回 HTTP 响应、且 server 存活可继续服务；② 部署扫描报告中将 `ERR_EMPTY_RESPONSE` 从"not code defects"改为"未定因"，必须在后端验证 handler 超时降级后才能关闭；③ **R19 审计核对**：`src/routes/ai.rs`（L107 `quick_web_search` 有 `QUICK_WEB_UPSTREAM_TIMEOUT_SECS` 超时；L428 AI handler 由 `AiClient` 的 `PROVIDER_HTTP_TIMEOUT_SECS=300s` 分级超时兜底，超时后 L521 返回 `200 + {"content":"AI 调用失败: {e}"}`）、`src/routes/cad.rs`（L291 `clone_with_timeout(60s)`，L296 超时后降级为 `None` → fallback）、`src/ai/client.rs`（L390 `timeout(PROVIDER_HTTP_TIMEOUT_SECS)`，L21 分级超时 `ENRICHMENT=300s/ANALYSIS=120s/CHAT=45s`）——**三文件已核对，AI/CAD 路径无缺口**。但 `src/routes/patent.rs:77/470`、`src/routes/auth.rs:289/475/647`、`src/routes/idea.rs:2326` 使用 `reqwest::Client::new()` 无超时，跟踪在 #30。
 - **预防 / Prevention**: ① `ERR_EMPTY_RESPONSE` 默认视为代码缺陷，必须在后端验证 handler 对所有外部调用路径都有超时+降级响应后才能降级为"环境问题"；② 部署扫描报告中禁止将任何浏览器层错误统一标为"not code defects"——必须逐类在后端验证；③ 后端所有外部调用必须有超时+降级，禁止"连接成功但无响应"的路径存在。
 - **提交 / Commit**: `d30b5aa`（hanging backend resilience tests）、`ba49186`（replace 'not code defects' with '未定因'）。
+### [2026-10-17] ⑪ CHANGELOG 裸 `#NN` 被复制进 commit message 触发 GitHub 自动关闭 issue
+- **严重程度 / Severity**: HIGH（未通过验收的 issue 被意外关闭，验收流程被绕过）
+- **现象 / Symptom**: commit `8437c42` 的 message 为 `docs(changelog): fix #13 commit ref …`，GitHub 在合并该 commit 时自动关闭了 issue #13，而 #13 的验收尚未通过。CHANGELOG 正文里的裸 `#NN` 虽然本身不会触发自动关闭，但它会被复制进 commit message，是复发源。
+- **根因 / Root cause**: ① CHANGELOG 写法规范未禁止裸 `#NN`，开发者习惯用 `**#13: 描述**` 格式；② GitHub 的自动关闭语义对 commit message 中的 `fix #NN` / `close #NN` / `resolve #NN` 模式生效，CHANGELOG 内容被复制进 commit message 后即触发；③ 无 CI 门禁检测 CHANGELOG 新增行中的裸 `#NN`。
+- **修复 / Fix**: ① 新增 CI job `autoclose-hygiene`（`.github/workflows/ci.yml`），对 PR 的 CHANGELOG.md diff 新增行做硬校验：出现裸 `#\d+` 即失败，报出行号和内容；② 失败信息说明改法：把 `#13` 写成 `[issue 13](../issues/13)` 或直接写 issue 标题；③ 需将 `Autoclose Hygiene` 加入分支保护 required contexts。
+- **预防 / Prevention**: ① CHANGELOG 中禁止裸 `#NN`，统一用 `[issue NN](../issues/NN)` 或 issue 标题；② CI 门禁 `autoclose-hygiene` 作为 required context，阻止违规 PR 合并；③ commit message 中避免 `fix/close/resolve #NN` 除非确实要关闭 issue。
+- **提交 / Commit**: 见本 PR。

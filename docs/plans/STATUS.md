@@ -680,3 +680,9 @@
 - **Doc Staleness**: PR#38 改了 tests/stub_malformed_responses.rs，补 docs/errors.md 条目 ⑨ 满足门禁
 - **PR#36**: 改了 tests/stub_hanging_backend.rs，补 docs/errors.md 条目 ⑩（ERR_EMPTY_RESPONSE 被当成环境问题而误判为无缺陷）
 - **G4 清理**: docs/pr34-description.md / docs/pr35-description.md 从 g4 分支移除，内容搬到 PR 描述
+
+### 2026-10-17 — **G2: autoclose-hygiene CI 门禁（issue #43）**
+
+- **状态 / Status**: ✅ 新增 `autoclose-hygiene` CI job，检测 CHANGELOG.md 新增行中的裸 `#NN`
+- **踩坑**: ⑪ CHANGELOG 裸 `#NN` 被复制进 commit message 触发 GitHub 自动关闭 issue
+- **分支保护**: 需添加 `Autoclose Hygiene` 为第 8 条 required context（当前 7 条）
