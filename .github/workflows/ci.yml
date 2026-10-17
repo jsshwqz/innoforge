@@ -159,7 +159,7 @@ jobs:
             esac
           done
 
-          # Check if retrospective docs changed
+          # Check if retrospective docs changed (any change)
           DOCS_CHANGED=0
           for f in $CHANGED; do
             case "$f" in
@@ -167,8 +167,25 @@ jobs:
             esac
           done
 
+          # Check if retrospective docs have NEW entry lines (### or ##)
+          # Strengthened: require new heading entries, not just any text edit
+          NEW_ENTRIES=0
+          for f in $CHANGED; do
+            case "$f" in
+              docs/errors.md|docs/plans/STATUS.md)
+                # Count added lines that start with ## or ### (new entries)
+                COUNT=$(git diff "$BASE" "$HEAD" -- "$f" | grep -cE '^\+(##|###) ' || true)
+                if [ "$COUNT" -gt 0 ]; then
+                  echo "  $f: $COUNT new entry line(s)"
+                  NEW_ENTRIES=$((NEW_ENTRIES + COUNT))
+                fi
+                ;;
+            esac
+          done
+
           echo "Code/config changed: $CODE_CHANGED"
           echo "Retrospective docs changed: $DOCS_CHANGED"
+          echo "New entry lines: $NEW_ENTRIES"
 
           # If no code changed, nothing to check
           if [ "$CODE_CHANGED" -eq 0 ]; then
@@ -176,9 +193,9 @@ jobs:
             exit 0
           fi
 
-          # If docs changed, check passes
-          if [ "$DOCS_CHANGED" -eq 1 ]; then
-            echo "✅ Retrospective docs updated — check passes"
+          # If docs have new entry lines, check passes
+          if [ "$NEW_ENTRIES" -gt 0 ]; then
+            echo "✅ Retrospective docs have new entry lines — check passes"
             exit 0
           fi
 
@@ -191,7 +208,13 @@ jobs:
           fi
 
           # Fail
-          echo "❌ Code/config changed but docs/errors.md and docs/plans/STATUS.md not updated"
+          if [ "$DOCS_CHANGED" -eq 1 ]; then
+            echo "❌ Code/config changed and docs were edited, but no new entry lines (## or ###) found"
+            echo "   Strengthened check: docs/errors.md or docs/plans/STATUS.md must have NEW heading entries,"
+            echo "   not just modifications to existing text."
+          else
+            echo "❌ Code/config changed but docs/errors.md and docs/plans/STATUS.md not updated"
+          fi
           echo "   If this PR genuinely introduces no new pitfalls, add '本轮无新增踩坑' to the PR description."
           echo "   Changed files:"
           echo "$CHANGED" | sed 's/^/     /'

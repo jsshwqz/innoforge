@@ -680,3 +680,12 @@
 - **Doc Staleness**: PR#38 改了 tests/stub_malformed_responses.rs，补 docs/errors.md 条目 ⑨ 满足门禁
 - **PR#36**: 改了 tests/stub_hanging_backend.rs，补 docs/errors.md 条目 ⑩（ERR_EMPTY_RESPONSE 被当成环境问题而误判为无缺陷）
 - **G4 清理**: docs/pr34-description.md / docs/pr35-description.md 从 g4 分支移除，内容搬到 PR 描述
+
+### 2026-10-17 — **G8: 强化 Doc Staleness CI — 要求新条目行**
+
+- **状态 / Status**: ✅ 完成
+- **分支 / Branch**: `r19/g8-doc-staleness-strict`
+- **变更**: doc-staleness CI job 从"任意文档变更即通过"改为"必须有新 `##` 或 `###` 条目行才通过"
+- **负验证**: 模拟仅修改现有文本（无新条目行）→ 检查失败 (red)；添加新 `###` 条目 → 检查通过 (green)
+- **测试**: 6 个测试（green: 新条目通过, red: 仅修改现有文本失败, CI YAML 结构验证）
+- **失败消息**: 区分"文档已改但无新条目"和"文档未改"两种情况
