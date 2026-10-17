@@ -895,3 +895,26 @@ mod db_path_consistency_tests {
         );
     }
 }
+
+// ============================================================================
+// 上游 HTTP 调用超时 / Upstream HTTP call timeout (issue #30)
+// ============================================================================
+
+/// 上游 HTTP 调用的超时秒数，可通过环境变量 `INNOFORGE_UPSTREAM_TIMEOUT_SECS` 配置。
+/// 默认 30 秒。用于 patent.rs / auth.rs / idea.rs 中对外部 API 的 reqwest 调用。
+pub fn upstream_timeout_secs() -> u64 {
+    std::env::var("INNOFORGE_UPSTREAM_TIMEOUT_SECS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .filter(|&secs: &u64| secs > 0)
+        .unwrap_or(30)
+}
+
+/// 构建带超时的 reqwest::Client，替代裸 `reqwest::Client::new()`。
+/// 超时值由 `upstream_timeout_secs()` 决定（环境变量 `INNOFORGE_UPSTREAM_TIMEOUT_SECS`，默认 30s）。
+pub fn build_upstream_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(upstream_timeout_secs()))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
+}
