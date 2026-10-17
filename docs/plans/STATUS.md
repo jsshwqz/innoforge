@@ -680,3 +680,15 @@
 - **Doc Staleness**: PR#38 改了 tests/stub_malformed_responses.rs，补 docs/errors.md 条目 ⑨ 满足门禁
 - **PR#36**: 改了 tests/stub_hanging_backend.rs，补 docs/errors.md 条目 ⑩（ERR_EMPTY_RESPONSE 被当成环境问题而误判为无缺陷）
 - **G4 清理**: docs/pr34-description.md / docs/pr35-description.md 从 g4 分支移除，内容搬到 PR 描述
+
+### 2026-10-17 — **G6: 部署取证 — Issue #30 E2E 失败复现**
+
+- **状态 / Status**: ✅ 完成
+- **分支 / Branch**: `r19/g6-deploy-forensics`
+- **部署实例**: `http://127.0.0.1:3000`, PID 10620, release build, commit `a6517c5`
+- **端点取证**: 核心 API (version/settings/chat/cad) 全 200；部分端点 404（需路径参数）
+- **日志**: 无法取得 — `/tmp/innoforge.log` 不存在，`nohup.out` 为 0 字节
+- **E2E 失败根因**: Puppeteer Chrome 缺少 `libnspr4.so` 系统依赖（非应用 bug）
+- **修复建议**: `apt-get install -y libnspr4 libnss3 ...` 安装 Chrome 依赖
+- **测试**: 4 个测试（核心端点响应、404 端点、日志不可用、E2E 失败是系统依赖非应用 bug）
+- **文档**: `docs/r19-deployment-forensics.md`
