@@ -196,3 +196,65 @@ jobs:
           echo "   Changed files:"
           echo "$CHANGED" | sed 's/^/     /'
           exit 1
+
+
+  # ── Autoclose hygiene (issue #43 — 防止 CHANGELOG 裸 #NN 被复制进 commit 触发自动关闭) ──
+  # CHANGELOG.md 新增行里出现裸 #NN 会导致 GitHub 在合并时自动关闭该 issue。
+  # 事故：8437c42 的 message 含 "fix #13" 把未通过验收的 #13 关掉了。
+  autoclose-hygiene:
+    name: Autoclose Hygiene
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check CHANGELOG for bare issue references
+        run: |
+          set -euo pipefail
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+
+          # Check CHANGELOG.md diff for new lines containing bare #NN
+          VIOLATIONS=""
+          VIOLATION_COUNT=0
+
+          while IFS= read -r line; do
+            # Only process added lines (starting with +, not +++ which is the file header)
+            case "$line" in
+              +++*) continue ;;
+              +*) ;;
+              *) continue ;;
+            esac
+
+            # Extract the content after the +
+            content="${line#+}"
+
+            # Skip empty lines
+            [ -z "$content" ] && continue
+
+            # Check for bare #NN (but not markdown links like [text](...#NN) or [issue NN](...))
+            # We flag any line containing #\d+ that isn't inside a markdown link
+            if echo "$content" | grep -qP '#\d+'; then
+              # Check if it's inside a markdown link — if the # is preceded by ]( or is part of a URL, skip
+              if echo "$content" | grep -qP '\]\([^)]*#\d+\)' || echo "$content" | grep -qP 'https?://[^ ]*#\d+'; then
+                # It's inside a markdown link or URL — allowed
+                continue
+              fi
+              VIOLATION_COUNT=$((VIOLATION_COUNT + 1))
+              VIOLATIONS="${VIOLATIONS}\n  CHANGELOG.md: bare #NN found: ${content}"
+            fi
+          done < <(git diff "$BASE" "$HEAD" -- CHANGELOG.md)
+
+          if [ "$VIOLATION_COUNT" -gt 0 ]; then
+            echo "❌ CHANGELOG.md contains bare #NN references on new lines."
+            echo "   These can be copied into commit messages and trigger GitHub auto-close."
+            echo ""
+            echo "   Violations:"
+            echo -e "$VIOLATIONS"
+            echo ""
+            echo "   Fix: replace #NN with [issue NN](../issues/NN) or write the issue title instead."
+            exit 1
+          fi
+
+          echo "✅ No bare #NN references in CHANGELOG.md new lines."

@@ -1002,3 +1002,11 @@
 - **修复 / Fix**: ① 对照 handler struct 修正字段名为 `my_patent`（object with `content`）和 `office_action`（string ≥10 chars）；② 在 stub 日志中确认 `[OA-ANALYZE] 开始调用AI` 出现，证明 AI 路径被触发；③ 红→绿取证：先 `std::process::exit(1)` 破坏 `extract_chat_content`，确认测试变红，再修回确认变绿（见 `docs/red-evidence-pr29.md`）。
 - **预防 / Prevention**: ① 测试请求字段名必须对照 handler 的实际 struct 定义，不凭记忆猜；② 否定断言（"不 crash"）必须配肯定断言（"期望路径被触发"），如检查日志输出或响应体内容；③ 负控测试必须附红→绿取证记录，证明被测路径确实被执行。
 - **提交 / Commit**: `b3d6f71`（correct test request fields + red-green evidence）。
+
+### [2026-10-17] ⑪ CHANGELOG 裸 `#NN` 被复制进 commit message 触发 GitHub 自动关闭 issue
+- **严重程度 / Severity**: HIGH（未通过验收的 issue 被意外关闭，验收流程被绕过）
+- **现象 / Symptom**: commit `8437c42` 的 message 为 `docs(changelog): fix #13 commit ref …`，GitHub 在合并该 commit 时自动关闭了 issue #13，而 #13 的验收尚未通过。CHANGELOG 正文里的裸 `#NN` 虽然本身不会触发自动关闭，但它会被复制进 commit message，是复发源。
+- **根因 / Root cause**: ① CHANGELOG 写法规范未禁止裸 `#NN`，开发者习惯用 `**#13: 描述**` 格式；② GitHub 的自动关闭语义对 commit message 中的 `fix #NN` / `close #NN` / `resolve #NN` 模式生效，CHANGELOG 内容被复制进 commit message 后即触发；③ 无 CI 门禁检测 CHANGELOG 新增行中的裸 `#NN`。
+- **修复 / Fix**: ① 新增 CI job `autoclose-hygiene`（`.github/workflows/ci.yml`），对 PR 的 CHANGELOG.md diff 新增行做硬校验：出现裸 `#\d+` 即失败，报出行号和内容；② 失败信息说明改法：把 `#13` 写成 `[issue 13](../issues/13)` 或直接写 issue 标题；③ 需将 `Autoclose Hygiene` 加入分支保护 required contexts。
+- **预防 / Prevention**: ① CHANGELOG 中禁止裸 `#NN`，统一用 `[issue NN](../issues/NN)` 或 issue 标题；② CI 门禁 `autoclose-hygiene` 作为 required context，阻止违规 PR 合并；③ commit message 中避免 `fix/close/resolve #NN` 除非确实要关闭 issue。
+- **提交 / Commit**: 见本 PR。
