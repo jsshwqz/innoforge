@@ -680,3 +680,16 @@
 - **Doc Staleness**: PR#38 改了 tests/stub_malformed_responses.rs，补 docs/errors.md 条目 ⑨ 满足门禁
 - **PR#36**: 改了 tests/stub_hanging_backend.rs，补 docs/errors.md 条目 ⑩（ERR_EMPTY_RESPONSE 被当成环境问题而误判为无缺陷）
 - **G4 清理**: docs/pr34-description.md / docs/pr35-description.md 从 g4 分支移除，内容搬到 PR 描述
+
+### 2026-10-17 — **G7: 部署 E2E 扫描 — e2e_test.mjs 重跑**
+
+- **状态 / Status**: ✅ 完成
+- **分支 / Branch**: `r19/g7-deployment-scan`
+- **部署实例**: `http://127.0.0.1:3000`, PID 10620, release build, commit `a6517c5`, version `0.9.15`
+- **E2E 结果**: 84/87 passed, 2 skipped, 3 failed
+- **跳过 (2)**: 专利详情按钮扫描 — 本地库为空，预期跳过
+- **失败 (3)**: CAD 状态端点无响应 (FreeCAD 未安装), AI 端点未配置 (无 API key), 按钮计数版本不匹配 (0.9.15 vs 0.9.16)
+- **应用 bug**: 0 (所有失败均为部署环境问题)
+- **Chrome 依赖**: 安装了 nspr/nss/cairo/pango/gtk3 等 17 个包使 Puppeteer 可运行
+- **制品**: `docs/r19-e2e-artifact.json` (git_commit + template sha256), `docs/r19-deployment-scan.md`
+- **测试**: 5 个测试验证制品完整性和一致性
