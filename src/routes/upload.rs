@@ -14,7 +14,10 @@ const MAX_FILE_SIZE: usize = 10 * 1024 * 1024; // 10 MB
 const MAX_PDF_STORE_SIZE: usize = 20 * 1024 * 1024; // 20 MB
 
 /// Umi-OCR 默认 HTTP 地址（端口可在 Umi-OCR 全局设置中修改）
-const UMI_OCR_BASE_URL: &str = "http://127.0.0.1:1224";
+/// UMI-OCR base URL — configurable via INNOFORGE_UMI_OCR_URL (issue #33).
+fn umi_ocr_base_url() -> String {
+    crate::common::umi_ocr_base_url()
+}
 
 /// Files created for external PDF tools. They stay under the application
 /// working directory so the Windows launcher keeps them on the project drive.
@@ -894,7 +897,7 @@ async fn extract_pdf_text_umi_ocr(data: Vec<u8>) -> Result<String, String> {
         .map_err(|e| format!("Umi-OCR 客户端创建失败: {}", e))?;
 
     // Upload via multipart; the request body already owns the PDF bytes.
-    let upload_url = format!("{}/api/doc/upload", UMI_OCR_BASE_URL);
+    let upload_url = format!("{}/api/doc/upload", umi_ocr_base_url());
     let file_part = reqwest::multipart::Part::bytes(data)
         .file_name("document.pdf")
         .mime_str("application/pdf")
@@ -936,7 +939,7 @@ async fn extract_pdf_text_umi_ocr(data: Vec<u8>) -> Result<String, String> {
     };
 
     // Step 3: Poll for result (wait up to ~90s)
-    let result_url = format!("{}/api/doc/result", UMI_OCR_BASE_URL);
+    let result_url = format!("{}/api/doc/result", umi_ocr_base_url());
     let mut all_text = String::new();
     let max_polls = 90; // 90 * 1s = 90s max wait
     for _poll in 0..max_polls {
@@ -987,7 +990,7 @@ async fn extract_pdf_text_umi_ocr(data: Vec<u8>) -> Result<String, String> {
     }
 
     // Step 4: Cleanup — clear task on Umi-OCR
-    let clear_url = format!("{}/api/doc/clear/{}", UMI_OCR_BASE_URL, task_id);
+    let clear_url = format!("{}/api/doc/clear/{}", umi_ocr_base_url(), task_id);
     let _ = client.get(&clear_url).send().await;
 
     if all_text.trim().is_empty() {
@@ -1011,7 +1014,7 @@ async fn extract_image_text_umi_ocr(image_bytes: &[u8], _ext: &str) -> Result<St
         .map_err(|e| format!("Umi-OCR 客户端创建失败: {}", e))?;
 
     let resp = client
-        .post(format!("{}/api/ocr", UMI_OCR_BASE_URL))
+        .post(format!("{}/api/ocr", umi_ocr_base_url()))
         .json(&serde_json::json!({
             "base64": b64,
             "options": {

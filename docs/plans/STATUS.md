@@ -680,3 +680,18 @@
 - **Doc Staleness**: PR#38 改了 tests/stub_malformed_responses.rs，补 docs/errors.md 条目 ⑨ 满足门禁
 - **PR#36**: 改了 tests/stub_hanging_backend.rs，补 docs/errors.md 条目 ⑩（ERR_EMPTY_RESPONSE 被当成环境问题而误判为无缺陷）
 - **G4 清理**: docs/pr34-description.md / docs/pr35-description.md 从 g4 分支移除，内容搬到 PR 描述
+
+### 2026-10-17 — **G4: OAuth callback URL / UMI-OCR 地址可配置化**
+
+- **状态 / Status**: ✅ 完成
+- **分支 / Branch**: `r19/g4-configurable-endpoints`
+- **变更 / Changes**:
+  - `src/common.rs`: 新增 `oauth_callback_url()` 和 `umi_ocr_base_url()` 函数
+  - `src/routes/auth.rs`: `REDIRECT_URI` const → `redirect_uri()` 函数调用
+  - `src/routes/upload.rs`: `UMI_OCR_BASE_URL` const → `umi_ocr_base_url()` 函数调用
+  - `src/routes/settings.rs`: `/api/version` 新增 `oauth_callback_url` 和 `umi_ocr_url` 字段
+  - `src/main.rs`: 启动自检打印两个值，listen port ≠ callback port 时告警
+  - `tests/configurable_endpoints_test.rs`: 7 个测试（默认值、env 覆盖、port 跟随、优先级、/api/version 回显）
+  - `docs/errors.md`: 条目 ⑬
+- **验证 / Verification**: fmt clean, clippy clean, 705 tests pass (7 new)
+- **负控 / Negative**: G4 前两个值是 `const`，env var 无效，`/api/version` 无对应字段 → 断言变红

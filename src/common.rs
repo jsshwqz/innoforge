@@ -261,6 +261,28 @@ pub fn auto_migrate_db(new_path: &std::path::Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// OAuth callback URL (configurable via `INNOFORGE_OAUTH_CALLBACK_URL`).
+///
+/// Priority: env var → default (`http://localhost:{port}/api/auth/google/callback`).
+/// The port in the default comes from `INNOFORGE_PORT` (or 3000 if unset).
+pub fn oauth_callback_url() -> String {
+    if let Ok(url) = std::env::var("INNOFORGE_OAUTH_CALLBACK_URL") {
+        return url;
+    }
+    let port = std::env::var("INNOFORGE_PORT")
+        .ok()
+        .and_then(|v| v.parse::<u16>().ok())
+        .unwrap_or(3000);
+    format!("http://localhost:{port}/api/auth/google/callback")
+}
+
+/// UMI-OCR base URL (configurable via `INNOFORGE_UMI_OCR_URL`).
+///
+/// Priority: env var → default (`http://127.0.0.1:1224`).
+pub fn umi_ocr_base_url() -> String {
+    std::env::var("INNOFORGE_UMI_OCR_URL").unwrap_or_else(|_| "http://127.0.0.1:1224".to_string())
+}
+
 /// Strip the Windows verbatim (long-path) prefix `\?\` from a path string.
 ///
 /// On Windows, `std::fs::canonicalize` returns paths with the `\?\` prefix

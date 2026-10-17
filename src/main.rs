@@ -88,6 +88,35 @@ async fn main() -> anyhow::Result<()> {
     );
     println!("Local access: http://127.0.0.1:{port}");
 
+    // Startup self-check: print effective configurable endpoint values (issue #33).
+    let oauth_url = innoforge::common::oauth_callback_url();
+    let umi_url = innoforge::common::umi_ocr_base_url();
+    println!("OAuth callback URL: {oauth_url}");
+    println!("UMI-OCR URL: {umi_url}");
+    tracing::info!("OAuth callback URL: {}", oauth_url);
+    tracing::info!("UMI-OCR URL: {}", umi_url);
+
+    // Warn if listen port differs from the port in the OAuth callback URL.
+    if let Some(cb_port) = oauth_url
+        .split(':')
+        .nth(2)
+        .and_then(|s| s.split('/').next())
+        .and_then(|s| s.parse::<u16>().ok())
+    {
+        if cb_port != port {
+            println!(
+                "WARNING: listen port ({}) differs from OAuth callback port ({}). \\
+                 If OAuth fails, set INNOFORGE_OAUTH_CALLBACK_URL to match the listen port.",
+                port, cb_port
+            );
+            tracing::warn!(
+                "Listen port {} differs from OAuth callback port {}",
+                port,
+                cb_port
+            );
+        }
+    }
+
     // 自动打开浏览器（设置 INNOFORGE_NO_OPEN 可禁用）
     if std::env::var("INNOFORGE_NO_OPEN").is_err() {
         let url = format!("http://127.0.0.1:{port}/");

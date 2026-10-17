@@ -1002,3 +1002,11 @@
 - **修复 / Fix**: ① 对照 handler struct 修正字段名为 `my_patent`（object with `content`）和 `office_action`（string ≥10 chars）；② 在 stub 日志中确认 `[OA-ANALYZE] 开始调用AI` 出现，证明 AI 路径被触发；③ 红→绿取证：先 `std::process::exit(1)` 破坏 `extract_chat_content`，确认测试变红，再修回确认变绿（见 `docs/red-evidence-pr29.md`）。
 - **预防 / Prevention**: ① 测试请求字段名必须对照 handler 的实际 struct 定义，不凭记忆猜；② 否定断言（"不 crash"）必须配肯定断言（"期望路径被触发"），如检查日志输出或响应体内容；③ 负控测试必须附红→绿取证记录，证明被测路径确实被执行。
 - **提交 / Commit**: `b3d6f71`（correct test request fields + red-green evidence）。
+
+### [2026-10-17] ⑬ OAuth callback URL 与 UMI-OCR 地址硬编码
+- **严重程度 / Severity**: MEDIUM（部署到非默认端口/地址时 OAuth 回调失败、OCR 不可用）
+- **现象 / Symptom**: `REDIRECT_URI` 硬编码为 `http://localhost:3000/api/auth/google/callback`，`UMI_OCR_BASE_URL` 硬编码为 `http://127.0.0.1:1224`。当服务器通过 `INNOFORGE_PORT` 监听非 3000 端口时，OAuth 回调 URL 仍指向 3000，导致 Google OAuth 重定向到错误地址。UMI-OCR 部署在其他机器/端口时同理。
+- **根因 / Root cause**: 初始实现用 `const` 而非函数，未预留环境变量覆盖入口。`/api/version` 也不回显这两个值，运维无法从外部确认实际生效的配置。
+- **修复 / Fix**: ① `oauth_callback_url()` 函数：优先读 `INNOFORGE_OAUTH_CALLBACK_URL`，否则用 `INNOFORGE_PORT` 拼默认值，最后回退 `localhost:3000`；② `umi_ocr_base_url()` 函数：优先读 `INNOFORGE_UMI_OCR_URL`，默认 `http://127.0.0.1:1224`；③ `/api/version` 新增 `oauth_callback_url` 和 `umi_ocr_url` 字段；④ 启动时打印两个值，listen port ≠ callback port 时告警。
+- **预防 / Prevention**: ① 任何涉及外部地址/端口的值必须可通过环境变量覆盖，不用 `const`；② `/api/version` 回显所有可配置项的实际生效值，便于运维验证；③ 启动自检打印关键配置，端口不一致时主动告警。
+- **验证 / Verification**: 7 个测试覆盖默认值、env 覆盖、port 跟随、优先级、`/api/version` 回显。负控：G4 前这两个值是 `const`，env var 无效，`/api/version` 无对应字段 → 任何 env 覆盖断言变红。

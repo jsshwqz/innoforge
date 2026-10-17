@@ -51,6 +51,8 @@ pub async fn api_get_version(State(s): State<AppState>) -> Json<serde_json::Valu
         "git_branch": env!("GIT_BRANCH"),
         "build_time": env!("BUILD_TIME"),
         "db_path": s.db_path,
+        "oauth_callback_url": crate::common::oauth_callback_url(),
+        "umi_ocr_url": crate::common::umi_ocr_base_url(),
         "templates": templates
     }))
 }
