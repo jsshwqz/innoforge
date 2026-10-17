@@ -681,8 +681,15 @@
 - **PR#36**: 改了 tests/stub_hanging_backend.rs，补 docs/errors.md 条目 ⑩（ERR_EMPTY_RESPONSE 被当成环境问题而误判为无缺陷）
 - **G4 清理**: docs/pr34-description.md / docs/pr35-description.md 从 g4 分支移除，内容搬到 PR 描述
 
-### 2026-10-17 — **G2: autoclose-hygiene CI 门禁（issue #43）**
+### 2026-10-17 — **R19 G3: 迁移负验证（#13 + #19）**
 
-- **状态 / Status**: ✅ 新增 `autoclose-hygiene` CI job，检测 CHANGELOG.md 新增行中的裸 `#NN`
-- **踩坑**: ⑪ CHANGELOG 裸 `#NN` 被复制进 commit message 触发 GitHub 自动关闭 issue
-- **分支保护**: 需添加 `Autoclose Hygiene` 为第 8 条 required context（当前 7 条）
+- **状态 / Status**: ✅ 完成
+- **分支 / Branch**: `r19/g3-migration-negative-tests`
+- **内容**: `tests/migration_negative_tests.rs`（10 个测试）
+  - #13: 事务回滚验证、幂等自愈验证（多版本）、全量迁移到达目标版本
+  - #19: 非 SQLite 文件不复制、空文件不复制、有效 SQLite 文件复制、损坏 db 隔离
+- **负验证 / Negative verification**:
+  - #13 红→绿: 移除 `column_exists` 守卫 → 2 测试红（`duplicate column name`）→ 恢复 → 绿
+  - #19 红→绿: 绕过 `is_sqlite_file` → 2 测试红（垃圾被复制）→ 恢复 → 绿
+- **全量测试**: 126 passed, 0 failed
+- **docs/errors.md**: 条目 ⑫
