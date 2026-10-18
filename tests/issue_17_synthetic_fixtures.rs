@@ -172,11 +172,7 @@ fn patent_detail_page_has_22_plus_buttons() {
     let _stub = start_fake_ai_stub(ai_port);
     std::thread::sleep(std::time::Duration::from_millis(500));
 
-    let server = start_server(
-        server_port,
-        ai_port,
-        home_dir.path().to_str().unwrap(),
-    );
+    let server = start_server(server_port, ai_port, home_dir.path().to_str().unwrap());
     assert!(
         wait_for_server(server_port, 15),
         "Server must start on port {} within 15s",
@@ -234,11 +230,7 @@ fn broken_ai_stub_does_not_crash_server() {
     let dead_port: u16 = 59999;
     let home_dir = tempfile::TempDir::new().expect("temp dir for INNOFORGE_HOME");
 
-    let server = start_server(
-        server_port,
-        dead_port,
-        home_dir.path().to_str().unwrap(),
-    );
+    let server = start_server(server_port, dead_port, home_dir.path().to_str().unwrap());
     assert!(
         wait_for_server(server_port, 15),
         "Server must start on port {} within 15s",
@@ -283,7 +275,6 @@ fn broken_ai_stub_does_not_crash_server() {
     kill_server(server);
 }
 
-
 // ── Issue #60: test isolation ──
 
 #[test]
@@ -307,7 +298,8 @@ fn two_test_cases_resolve_different_db_path() {
 
     // Verify the directories are actually different (not just the filenames).
     assert_ne!(
-        dir_a.path(), dir_b.path(),
+        dir_a.path(),
+        dir_b.path(),
         "temp dirs must be different directories"
     );
 

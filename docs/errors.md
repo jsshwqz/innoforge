@@ -1025,3 +1025,11 @@
 - **修复 / Fix**: 新增 `src/common.rs` 的 `upstream_timeout_secs()`（读 `INNOFORGE_UPSTREAM_TIMEOUT_SECS`，默认 30，非法值与 0 回落默认）与 `build_upstream_client()`；六处调用全部改走它；`tests/upstream_timeout_test.rs` 加 6 个用例，其中黑洞后端用例断言 `result.is_err()`、`elapsed < 10s`、**`elapsed >= 1.5s`** —— 最后这条是关键，它证明连接真的被 accept 了，不是拿 ConnectionRefused 蒙过去。
 - **预防 / Prevention**: ① 新增上游调用一律走 `build_upstream_client()`，不直接 `Client::new()`；② **兜底不许静默退回无超时客户端**（`unwrap_or_else(|_| Client::new())` 要改成明确失败，存量四处在 issue 55 跟踪）；③ 验证"没有超时"这类缺陷时，红侧要能用外层超时把 hang 量出来，不能指望测试自己变红。
 - **提交 / Commit**: `def13ac`（R20 W1：给六处上游调用加超时）。
+
+### [2026-10-18] ⑭ cargo fmt：多行函数调用被拆开但 rustfmt 要求单行
+- **严重程度 / Severity**: LOW（功能正确，但 `cargo fmt --check` 红，CI fmt job 红）
+- **现象 / Symptom**: `tests/issue_17_synthetic_fixtures.rs` 中 `start_server(port, ai_port, home_dir.path().to_str().unwrap())` 被手动拆成多行，rustfmt 要求合并为单行（未超 100 列），`cargo fmt --check` 报 4 处 diff，CI 红。
+- **根因 / Root cause**: 手动编辑时习惯性折行，未跑 `cargo fmt` 验证。
+- **修复 / Fix**: `cargo fmt -- tests/issue_17_synthetic_fixtures.rs`，4 处多行调用合并为单行。
+- **预防 / Prevention**: 提交前必跑 `cargo fmt -- --check`；手动折行后必须 fmt 验证。
+- **提交 / Commit**: 见本 PR。
