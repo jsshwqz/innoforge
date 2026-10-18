@@ -1003,6 +1003,36 @@
 - **预防 / Prevention**: ① 测试请求字段名必须对照 handler 的实际 struct 定义，不凭记忆猜；② 否定断言（"不 crash"）必须配肯定断言（"期望路径被触发"），如检查日志输出或响应体内容；③ 负控测试必须附红→绿取证记录，证明被测路径确实被执行。
 - **提交 / Commit**: `b3d6f71`（correct test request fields + red-green evidence）。
 
+### [2026-10-16] ⑩ ERR_EMPTY_RESPONSE 被当成环境问题而误判为无缺陷
+- **严重程度 / Severity**: HIGH（真实缺陷被误判为网络噪声，漏修）
+- **现象 / Symptom**: E2E 测试偶发 `ERR_EMPTY_RESPONSE`（浏览器层面"服务器连接成功但未返回任何数据"），开发者将其归类为"transient browser-level timeout"（瞬时浏览器超时）而非代码缺陷，在部署扫描报告中标注"not code defects"，导致真实问题——后端 handler 在外部 AI 超时后未正确返回 HTTP 响应体（连接保持打开但无数据写回）——被漏修。
+- **根因 / Root cause**: ① `ERR_EMPTY_RESPONSE` 是浏览器层面的错误，不区分"服务器主动关闭连接"和"服务器超时后未写 response body 就返回"；② 开发者凭经验将其归入"网络瞬时问题"类别，没有在后端代码中验证 handler 是否对所有外部调用路径都有超时+降级响应；③ 部署扫描报告将此类错误统一标为"not code defects"，缺少"需在后端验证"的跟进动作。
+- **修复 / Fix**: ① 新增 `tests/stub_hanging_backend.rs`（4 个测试）：启动"黑洞 stub"（接受 TCP 连接但不发任何响应）与"慢速滴流 stub"，验证 server 不挂死、正确返回 HTTP 响应、且 server 存活可继续服务；② 部署扫描报告中将 `ERR_EMPTY_RESPONSE` 从"not code defects"改为"未定因"，必须在后端验证 handler 超时降级后才能关闭；③ **R19 审计核对**：`src/routes/ai.rs`（L107 `quick_web_search` 有 `QUICK_WEB_UPSTREAM_TIMEOUT_SECS` 超时；L428 AI handler 由 `AiClient` 的 `PROVIDER_HTTP_TIMEOUT_SECS=300s` 分级超时兜底，超时后 L521 返回 `200 + {"content":"AI 调用失败: {e}"}`）、`src/routes/cad.rs`（L291 `clone_with_timeout(60s)`，L296 超时后降级为 `None` → fallback）、`src/ai/client.rs`（L390 `timeout(PROVIDER_HTTP_TIMEOUT_SECS)`，L21 分级超时 `ENRICHMENT=300s/ANALYSIS=120s/CHAT=45s`）——**三文件已核对，AI/CAD 路径无缺口**。但 `src/routes/patent.rs:77/470`、`src/routes/auth.rs:289/475/647`、`src/routes/idea.rs:2326` 使用 `reqwest::Client::new()` 无超时，跟踪在 #30。
+- **预防 / Prevention**: ① `ERR_EMPTY_RESPONSE` 默认视为代码缺陷，必须在后端验证 handler 对所有外部调用路径都有超时+降级响应后才能降级为"环境问题"；② 部署扫描报告中禁止将任何浏览器层错误统一标为"not code defects"——必须逐类在后端验证；③ 后端所有外部调用必须有超时+降级，禁止"连接成功但无响应"的路径存在。
+- **提交 / Commit**: `d30b5aa`（hanging backend resilience tests）、`ba49186`（replace 'not code defects' with '未定因'）。
+### [2026-10-17] ⑪ CHANGELOG 裸 `#NN` 被复制进 commit message 触发 GitHub 自动关闭 issue
+- **严重程度 / Severity**: HIGH（未通过验收的 issue 被意外关闭，验收流程被绕过）
+- **现象 / Symptom**: commit `8437c42` 的 message 为 `docs(changelog): fix #13 commit ref …`，GitHub 在合并该 commit 时自动关闭了 issue #13，而 #13 的验收尚未通过。CHANGELOG 正文里的裸 `#NN` 虽然本身不会触发自动关闭，但它会被复制进 commit message，是复发源。
+- **根因 / Root cause**: ① CHANGELOG 写法规范未禁止裸 `#NN`，开发者习惯用 `**#13: 描述**` 格式；② GitHub 的自动关闭语义对 commit message 中的 `fix #NN` / `close #NN` / `resolve #NN` 模式生效，CHANGELOG 内容被复制进 commit message 后即触发；③ 无 CI 门禁检测 CHANGELOG 新增行中的裸 `#NN`。
+- **修复 / Fix**: ① 新增 CI job `autoclose-hygiene`（`.github/workflows/ci.yml`），对 PR 的 CHANGELOG.md diff 新增行做硬校验：出现裸 `#\d+` 即失败，报出行号和内容；② 失败信息说明改法：把 `#13` 写成 `[issue 13](../issues/13)` 或直接写 issue 标题；③ 需将 `Autoclose Hygiene` 加入分支保护 required contexts。
+- **预防 / Prevention**: ① CHANGELOG 中禁止裸 `#NN`，统一用 `[issue NN](../issues/NN)` 或 issue 标题；② CI 门禁 `autoclose-hygiene` 作为 required context，阻止违规 PR 合并；③ commit message 中避免 `fix/close/resolve #NN` 除非确实要关闭 issue。
+- **提交 / Commit**: 见本 PR。
+
+### [2026-10-17] ⑫ 上游 HTTP 客户端默认没有超时，而「兜底」会把它静默放回来
+- **严重程度 / Severity**: HIGH（上游黑洞时请求永久 pending，占住 worker，外部表现是 HTTP 连接无响应）
+- **现象 / Symptom**: 六处上游调用（专利详情抓取、Google OAuth 换 token / 刷新 token、模型列表探测）都用 `reqwest::Client::new()`，它**不带任何超时**。对端接受 TCP 但不回字节时，请求会一直挂在 pending 上，浏览器侧只看到连接被关掉且没有响应体。
+- **根因 / Root cause**: ① `reqwest::Client::new()` 的默认行为就是无超时，必须显式 `.timeout(...)`；② 这类缺陷是"沉默的"——没有超时**不会**让任何断言失败，单测、clippy、fmt 全都能绿；③ 修的时候如果图省事写成 `.build().unwrap_or_else(|_| reqwest::Client::new())`，builder 一旦失败就把无超时客户端原样放回来，等于修复被静默撤销。
+- **修复 / Fix**: 新增 `src/common.rs` 的 `upstream_timeout_secs()`（读 `INNOFORGE_UPSTREAM_TIMEOUT_SECS`，默认 30，非法值与 0 回落默认）与 `build_upstream_client()`；六处调用全部改走它；`tests/upstream_timeout_test.rs` 加 6 个用例，其中黑洞后端用例断言 `result.is_err()`、`elapsed < 10s`、**`elapsed >= 1.5s`** —— 最后这条是关键，它证明连接真的被 accept 了，不是拿 ConnectionRefused 蒙过去。
+- **预防 / Prevention**: ① 新增上游调用一律走 `build_upstream_client()`，不直接 `Client::new()`；② **兜底不许静默退回无超时客户端**（`unwrap_or_else(|_| Client::new())` 要改成明确失败，存量四处在 issue 55 跟踪）；③ 验证"没有超时"这类缺陷时，红侧要能用外层超时把 hang 量出来，不能指望测试自己变红。
+- **提交 / Commit**: `def13ac`（R20 W1：给六处上游调用加超时）。
+
+### [2026-10-18] ⑬ Clippy `manual_strip`：手写 `starts_with` + `[1..]` 而非 `strip_prefix`
+- **严重程度 / Severity**: LOW（功能正确，但 clippy `-D warnings` 下编译失败，CI 红）
+- **现象 / Symptom**: `tests/mcp_server_guard.rs` 两处字符串解析用 `if trimmed.starts_with('"') { trimmed[1..].find('"') }` 模式，clippy `manual_strip` lint 报错，CI clippy job 红。
+- **根因 / Root cause**: 习惯性写 `starts_with` + 手动切片 `[1..]`，没有用 `strip_prefix` 返回的 stripped slice，导致 clippy 认为是手动前缀剥离。
+- **修复 / Fix**: 改为 `if let Some(stripped) = trimmed.strip_prefix('"') { stripped.find('"') }`，用 stripped slice 替代手动 `[1..]`。
+- **预防 / Prevention**: 字符串前缀剥离一律用 `strip_prefix` / `strip_suffix`，不手写 `starts_with` + 切片。
+- **提交 / Commit**: 见本 PR。
 ### [2026-10-17] ⑫ 迁移原子性负验证（#13）与迁移文件校验负验证（#19）
 - **严重程度 / Severity**: HIGH（验证已有修复的负向测试，确保回退时变红）
 - **现象 / Symptom**: issue #13（迁移未在事务内）和 #19（自动迁移不校验源文件）的修复已在 main 上，但缺少负向测试证明"如果修复被回退，测试会变红"。
