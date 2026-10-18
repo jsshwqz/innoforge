@@ -1033,3 +1033,11 @@
 - **修复 / Fix**: `cargo fmt -- tests/issue_17_synthetic_fixtures.rs`，4 处多行调用合并为单行。
 - **预防 / Prevention**: 提交前必跑 `cargo fmt -- --check`；手动折行后必须 fmt 验证。
 - **提交 / Commit**: 见本 PR。
+
+### [2026-10-18] ⑯ 测试隔离后冷启动超时：15s 不够全新库迁移
+- **严重程度 / Severity**: MEDIUM（CI Tests job 红，测试 flaky）
+- **现象 / Symptom**: `tests/issue_17_synthetic_fixtures.rs` 每个用例用独立 `INNOFORGE_HOME` 后，每个 server 进程都要冷启动全新 SQLite 库跑全部 24 个 migration，实测 ~11 秒。`wait_for_server` 超时设为 15 秒，余量仅 4 秒，CI 环境下偶发超时。`tests/stub_hanging_backend.rs` 的 `tolerates_blackhole_cad_backend_no_empty_reply` 也因同样原因红在 "server must start"。
+- **根因 / Root cause**: ① 原来所有测试共享默认数据库位置，第一个测试冷启动后后续测试复用已迁移的库，所以 15 秒够用；② 隔离后每个测试独立库，每个都要冷启动；③ 15 秒超时是按"共享库热启动"设的，没考虑隔离后的冷启动开销。
+- **修复 / Fix**: `wait_for_server` 超时从 15 秒改为 60 秒，覆盖冷启动 + 迁移 + 就绪检查。`tests/issue_17_synthetic_fixtures.rs` 和 `tests/stub_hanging_backend.rs` 所有调用点统一改为 60 秒。
+- **预防 / Prevention**: ① 测试隔离后必须重新评估超时——冷启动开销是每个测试都要付的；② `wait_for_server` 的超时应留足余量（实际开销 × 2 或 + 30s）；③ CI 环境比本地慢，超时按 CI 开销设。
+- **提交 / Commit**: 见本 PR。

@@ -195,7 +195,7 @@ fn tolerates_blackhole_ai_backend_no_empty_reply() {
     std::thread::sleep(std::time::Duration::from_millis(200));
 
     let server = start_server(server_port, ai_port);
-    assert!(wait_for_server(server_port, 15), "server must start");
+    assert!(wait_for_server(server_port, 60), "server must start");
 
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
@@ -242,7 +242,7 @@ fn tolerates_slow_drip_ai_backend_no_empty_reply() {
     std::thread::sleep(std::time::Duration::from_millis(200));
 
     let server = start_server(server_port, ai_port);
-    assert!(wait_for_server(server_port, 15), "server must start");
+    assert!(wait_for_server(server_port, 60), "server must start");
 
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
@@ -295,7 +295,7 @@ fn tolerates_blackhole_cad_backend_no_empty_reply() {
         .spawn()
         .expect("failed to spawn server");
 
-    assert!(wait_for_server(server_port, 15), "server must start");
+    assert!(wait_for_server(server_port, 60), "server must start");
 
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(180))
@@ -331,7 +331,7 @@ fn survives_repeated_blackhole_ai_requests() {
     std::thread::sleep(std::time::Duration::from_millis(200));
 
     let server = start_server(server_port, ai_port);
-    assert!(wait_for_server(server_port, 15), "server must start");
+    assert!(wait_for_server(server_port, 60), "server must start");
 
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(30))

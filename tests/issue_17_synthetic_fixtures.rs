@@ -174,8 +174,8 @@ fn patent_detail_page_has_22_plus_buttons() {
 
     let server = start_server(server_port, ai_port, home_dir.path().to_str().unwrap());
     assert!(
-        wait_for_server(server_port, 15),
-        "Server must start on port {} within 15s",
+        wait_for_server(server_port, 60),
+        "Server must start on port {} within 60s",
         server_port
     );
     assert!(
@@ -232,8 +232,8 @@ fn broken_ai_stub_does_not_crash_server() {
 
     let server = start_server(server_port, dead_port, home_dir.path().to_str().unwrap());
     assert!(
-        wait_for_server(server_port, 15),
-        "Server must start on port {} within 15s",
+        wait_for_server(server_port, 60),
+        "Server must start on port {} within 60s",
         server_port
     );
     assert!(
@@ -316,12 +316,12 @@ fn two_test_cases_resolve_different_db_path() {
     let server_b = start_server(port_b, ai_port, dir_b.path().to_str().unwrap());
 
     assert!(
-        wait_for_server(port_a, 15),
+        wait_for_server(port_a, 60),
         "Server A must start on port {}",
         port_a
     );
     assert!(
-        wait_for_server(port_b, 15),
+        wait_for_server(port_b, 60),
         "Server B must start on port {}",
         port_b
     );
