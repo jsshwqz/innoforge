@@ -1026,6 +1026,12 @@
 - **预防 / Prevention**: ① 新增上游调用一律走 `build_upstream_client()`，不直接 `Client::new()`；② **兜底不许静默退回无超时客户端**（`unwrap_or_else(|_| Client::new())` 要改成明确失败，存量四处在 issue 55 跟踪）；③ 验证"没有超时"这类缺陷时，红侧要能用外层超时把 hang 量出来，不能指望测试自己变红。
 - **提交 / Commit**: `def13ac`（R20 W1：给六处上游调用加超时）。
 
+### [2026-10-18] ⑬ Clippy `manual_strip`：手写 `starts_with` + `[1..]` 而非 `strip_prefix`
+- **严重程度 / Severity**: LOW（功能正确，但 clippy `-D warnings` 下编译失败，CI 红）
+- **现象 / Symptom**: `tests/mcp_server_guard.rs` 两处字符串解析用 `if trimmed.starts_with('"') { trimmed[1..].find('"') }` 模式，clippy `manual_strip` lint 报错，CI clippy job 红。
+- **根因 / Root cause**: 习惯性写 `starts_with` + 手动切片 `[1..]`，没有用 `strip_prefix` 返回的 stripped slice，导致 clippy 认为是手动前缀剥离。
+- **修复 / Fix**: 改为 `if let Some(stripped) = trimmed.strip_prefix('"') { stripped.find('"') }`，用 stripped slice 替代手动 `[1..]`。
+- **预防 / Prevention**: 字符串前缀剥离一律用 `strip_prefix` / `strip_suffix`，不手写 `starts_with` + 切片。
 ### [2026-10-18] ⑰ Autoclose Hygiene 门禁误报：`[#NN](...)` markdown 链接被当成裸引用
 - **严重程度 / Severity**: LOW（门禁误报阻断合法 PR，但不会漏过真裸引用）
 - **现象 / Symptom**: CHANGELOG 中写 `[#61](../issues/61)` 这种 markdown 链接，autoclose-hygiene CI job 的正则 `#\d+` 匹配到方括号内的 `#61`，但放行规则只检查 URL 部分中的 `#NN`（`]\([^)]*#\d+\)`）和完整 URL（`https?://[^ ]*#\d+`），不覆盖方括号内的 `#NN`，导致误报。
