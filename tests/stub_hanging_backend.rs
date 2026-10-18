@@ -16,17 +16,62 @@
 
 use std::io::{Read, Write};
 use std::net::TcpListener;
+use std::path::PathBuf;
 use std::process::Command;
+use std::sync::OnceLock;
+
+/// Pre-migrated database template — created once, copied per test.
+/// This avoids each test paying ~11s cold-start migration cost.
+static DB_TEMPLATE: OnceLock<PathBuf> = OnceLock::new();
+
+/// Ensure a pre-migrated database template exists. On first call, starts a
+/// server with a fresh INNOFORGE_HOME, waits for /api/version (which triggers
+/// all migrations), kills the server, and stores the DB path. Subsequent
+/// calls return the cached path instantly.
+fn ensure_db_template() -> PathBuf {
+    DB_TEMPLATE
+        .get_or_init(|| {
+            let template_dir = tempfile::tempdir().expect("create template dir");
+            let template_port = free_port();
+            let child = Command::new(env!("CARGO_BIN_EXE_innoforge-server"))
+                .env("INNOFORGE_PORT", template_port.to_string())
+                .env("INNOFORGE_NO_OPEN", "1")
+                .env("INNOFORGE_HOME", template_dir.path().to_str().unwrap())
+                .spawn()
+                .expect("spawn server for template");
+            assert!(
+                wait_for_server(template_port, 60),
+                "template server must start within 60s"
+            );
+            kill_server(child);
+            let db_path = template_dir.path().join("innoforge.db");
+            assert!(db_path.exists(), "template db must exist after migration");
+            // Leak the tempdir so the DB file survives — template lives for process lifetime
+            std::mem::forget(template_dir);
+            db_path
+        })
+        .clone()
+}
+
+/// Copy the pre-migrated template DB to a fresh temp dir. Returns the temp
+/// dir (must be kept alive for the test's duration).
+fn fresh_db_dir() -> tempfile::TempDir {
+    let template = ensure_db_template();
+    let dir = tempfile::tempdir().expect("create fresh db dir");
+    std::fs::copy(&template, dir.path().join("innoforge.db")).expect("copy template db");
+    dir
+}
 
 fn free_port() -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind 127.0.0.1:0");
     listener.local_addr().unwrap().port()
 }
 
-fn start_server(server_port: u16, ai_port: u16) -> std::process::Child {
+fn start_server(server_port: u16, ai_port: u16, home: &tempfile::TempDir) -> std::process::Child {
     Command::new(env!("CARGO_BIN_EXE_innoforge-server"))
         .env("INNOFORGE_PORT", server_port.to_string())
         .env("INNOFORGE_NO_OPEN", "1")
+        .env("INNOFORGE_HOME", home.path().to_str().unwrap())
         .env("AI_BASE_URL", format!("http://127.0.0.1:{}", ai_port))
         .env("AI_API_KEY", "test-key-not-real")
         .env("INNOFORGE_AI_GLOBAL_TIMEOUT_SECS", "5")
@@ -194,7 +239,8 @@ fn tolerates_blackhole_ai_backend_no_empty_reply() {
     let _stub = start_blackhole_stub(ai_port);
     std::thread::sleep(std::time::Duration::from_millis(200));
 
-    let server = start_server(server_port, ai_port);
+    let _home = fresh_db_dir();
+    let server = start_server(server_port, ai_port, &_home);
     assert!(wait_for_server(server_port, 60), "server must start");
 
     let client = reqwest::blocking::Client::builder()
@@ -241,7 +287,8 @@ fn tolerates_slow_drip_ai_backend_no_empty_reply() {
     let _stub = start_slow_drip_stub(ai_port);
     std::thread::sleep(std::time::Duration::from_millis(200));
 
-    let server = start_server(server_port, ai_port);
+    let _home = fresh_db_dir();
+    let server = start_server(server_port, ai_port, &_home);
     assert!(wait_for_server(server_port, 60), "server must start");
 
     let client = reqwest::blocking::Client::builder()
@@ -285,9 +332,11 @@ fn tolerates_blackhole_cad_backend_no_empty_reply() {
     let _stub = start_blackhole_stub(cad_port);
     std::thread::sleep(std::time::Duration::from_millis(200));
 
+    let _home = fresh_db_dir();
     let server = Command::new(env!("CARGO_BIN_EXE_innoforge-server"))
         .env("INNOFORGE_PORT", server_port.to_string())
         .env("INNOFORGE_NO_OPEN", "1")
+        .env("INNOFORGE_HOME", _home.path().to_str().unwrap())
         .env(
             "INNOFORGE_AIONCAD_URL",
             format!("http://127.0.0.1:{}", cad_port),
@@ -330,7 +379,8 @@ fn survives_repeated_blackhole_ai_requests() {
     let _stub = start_blackhole_stub(ai_port);
     std::thread::sleep(std::time::Duration::from_millis(200));
 
-    let server = start_server(server_port, ai_port);
+    let _home = fresh_db_dir();
+    let server = start_server(server_port, ai_port, &_home);
     assert!(wait_for_server(server_port, 60), "server must start");
 
     let client = reqwest::blocking::Client::builder()
