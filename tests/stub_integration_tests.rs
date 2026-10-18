@@ -8,56 +8,14 @@
 //! - Malformed input graceful handling
 //! - Stub lifecycle (start, serve, drop)
 //!
-//! R21: Pre-migrated DB template + readiness polling (every 200ms, 60s cap).
-//! No fixed sleep for server startup.
+//! R21: Uses shared `tests/common/mod.rs` — pre-migrated DB template +
+//! readiness polling (every 200ms, 60s cap). No fixed sleep for server startup.
 
+mod common;
+
+use common::{free_port, spawn_test_server};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::path::PathBuf;
-use std::process::Command;
-use std::sync::OnceLock;
-
-// ── Port allocation ──
-
-fn free_port() -> u16 {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind 127.0.0.1:0");
-    listener.local_addr().unwrap().port()
-}
-
-// ── Pre-migrated DB template (avoids ~11s cold-start per test) ──
-
-static DB_TEMPLATE: OnceLock<PathBuf> = OnceLock::new();
-
-fn ensure_db_template() -> PathBuf {
-    DB_TEMPLATE
-        .get_or_init(|| {
-            let template_dir = tempfile::tempdir().expect("create template dir");
-            let template_port = free_port();
-            let child = Command::new(env!("CARGO_BIN_EXE_innoforge-server"))
-                .env("INNOFORGE_PORT", template_port.to_string())
-                .env("INNOFORGE_NO_OPEN", "1")
-                .env("INNOFORGE_HOME", template_dir.path().to_str().unwrap())
-                .spawn()
-                .expect("spawn server for template");
-            assert!(
-                wait_for_server(template_port, 60),
-                "template server must start within 60s"
-            );
-            kill_server(child);
-            let db_path = template_dir.path().join("innoforge.db");
-            assert!(db_path.exists(), "template db must exist after migration");
-            std::mem::forget(template_dir);
-            db_path
-        })
-        .clone()
-}
-
-fn fresh_db_dir() -> tempfile::TempDir {
-    let template = ensure_db_template();
-    let dir = tempfile::tempdir().expect("create fresh db dir");
-    std::fs::copy(&template, dir.path().join("innoforge.db")).expect("copy template db");
-    dir
-}
 
 // ── Fake AI stub (self-contained for this test file) ──
 
@@ -92,35 +50,16 @@ fn handle_stub(stream: &mut TcpStream) {
     let _ = stream.write_all(resp.as_bytes());
 }
 
-// ── Server helpers ──
-
-fn start_server(server_port: u16, ai_port: u16, home: &tempfile::TempDir) -> std::process::Child {
-    Command::new(env!("CARGO_BIN_EXE_innoforge-server"))
-        .env("INNOFORGE_PORT", server_port.to_string())
-        .env("INNOFORGE_NO_OPEN", "1")
-        .env("INNOFORGE_HOME", home.path().to_str().unwrap())
-        .env("AI_BASE_URL", format!("http://127.0.0.1:{}", ai_port))
-        .env("AI_API_KEY", "test-key-not-real")
-        .spawn()
-        .expect("failed to spawn server")
-}
-
-fn wait_for_server(port: u16, timeout_secs: u64) -> bool {
-    let start = std::time::Instant::now();
-    while start.elapsed().as_secs() < timeout_secs {
-        if let Ok(resp) = reqwest::blocking::get(format!("http://127.0.0.1:{}/api/version", port)) {
-            if resp.status().is_success() {
-                return true;
-            }
-        }
-        std::thread::sleep(std::time::Duration::from_millis(200));
-    }
-    false
-}
-
-fn kill_server(mut child: std::process::Child) {
-    let _ = child.kill();
-    let _ = child.wait();
+/// Helper: spawn a test server with AI pointing at `ai_port`.
+fn start_server(server_port: u16, ai_port: u16) -> common::TestServer {
+    let ai_url = format!("http://127.0.0.1:{}", ai_port);
+    spawn_test_server(
+        server_port,
+        &[
+            ("AI_BASE_URL", &ai_url),
+            ("AI_API_KEY", "test-key-not-real"),
+        ],
+    )
 }
 
 // ── Stub response correctness ──
@@ -205,9 +144,7 @@ fn server_serves_pages_with_stub_ai() {
     let _stub = start_stub(ai_port);
     std::thread::sleep(std::time::Duration::from_millis(200));
 
-    let home = fresh_db_dir();
-    let server = start_server(server_port, ai_port, &home);
-    assert!(wait_for_server(server_port, 60), "server must start");
+    let server = start_server(server_port, ai_port);
 
     // Key pages must be reachable
     for path in &["/", "/idea", "/search", "/compare"] {
@@ -221,7 +158,7 @@ fn server_serves_pages_with_stub_ai() {
         );
     }
 
-    kill_server(server);
+    drop(server);
 }
 
 /// Verify the /api/version endpoint returns correct version info.
@@ -233,9 +170,7 @@ fn version_endpoint_with_stub_ai() {
     let _stub = start_stub(ai_port);
     std::thread::sleep(std::time::Duration::from_millis(200));
 
-    let home = fresh_db_dir();
-    let server = start_server(server_port, ai_port, &home);
-    assert!(wait_for_server(server_port, 60));
+    let server = start_server(server_port, ai_port);
 
     let resp = reqwest::blocking::get(format!("http://127.0.0.1:{}/api/version", server_port))
         .expect("version endpoint must respond");
@@ -246,7 +181,7 @@ fn version_endpoint_with_stub_ai() {
         "version endpoint must return version string"
     );
 
-    kill_server(server);
+    drop(server);
 }
 
 // ── Malformed input handling ──
@@ -260,9 +195,7 @@ fn malformed_ai_request_does_not_crash() {
     let _stub = start_stub(ai_port);
     std::thread::sleep(std::time::Duration::from_millis(200));
 
-    let home = fresh_db_dir();
-    let server = start_server(server_port, ai_port, &home);
-    assert!(wait_for_server(server_port, 60));
+    let server = start_server(server_port, ai_port);
 
     let client = reqwest::blocking::Client::new();
 
@@ -298,7 +231,7 @@ fn malformed_ai_request_does_not_crash() {
         .unwrap_or(false);
     assert!(alive, "server must still respond after malformed request");
 
-    kill_server(server);
+    drop(server);
 }
 
 /// Verify the server handles empty request body gracefully.
@@ -310,9 +243,7 @@ fn empty_ai_request_does_not_crash() {
     let _stub = start_stub(ai_port);
     std::thread::sleep(std::time::Duration::from_millis(200));
 
-    let home = fresh_db_dir();
-    let server = start_server(server_port, ai_port, &home);
-    assert!(wait_for_server(server_port, 60));
+    let server = start_server(server_port, ai_port);
 
     let client = reqwest::blocking::Client::new();
     let resp = client
@@ -339,7 +270,7 @@ fn empty_ai_request_does_not_crash() {
         }
     }
 
-    kill_server(server);
+    drop(server);
 }
 
 // ── Concurrent request handling ──
@@ -385,18 +316,15 @@ fn server_handles_concurrent_page_requests() {
     let _stub = start_stub(ai_port);
     std::thread::sleep(std::time::Duration::from_millis(200));
 
-    let home = fresh_db_dir();
-    let server = start_server(server_port, ai_port, &home);
-    assert!(wait_for_server(server_port, 60));
+    let server = start_server(server_port, ai_port);
 
     let mut handles = Vec::new();
-    for i in 0..4 {
+    for _ in 0..4 {
         let url = format!("http://127.0.0.1:{}/", server_port);
         handles.push(std::thread::spawn(move || {
             let resp = reqwest::blocking::get(&url).expect("concurrent page request must succeed");
             resp.status().is_success()
         }));
-        let _ = i; // suppress unused warning
     }
 
     for handle in handles {
@@ -404,7 +332,7 @@ fn server_handles_concurrent_page_requests() {
         assert!(ok, "concurrent page request must return 200");
     }
 
-    kill_server(server);
+    drop(server);
 }
 
 // ── Server resilience without AI ──
@@ -415,12 +343,7 @@ fn server_serves_pages_without_ai() {
     let server_port = free_port();
     let dead_ai_port = free_port(); // nothing listening here
 
-    let home = fresh_db_dir();
-    let server = start_server(server_port, dead_ai_port, &home);
-    assert!(
-        wait_for_server(server_port, 60),
-        "server must start without AI"
-    );
+    let server = start_server(server_port, dead_ai_port);
 
     // Pages must still render
     let resp = reqwest::blocking::get(format!("http://127.0.0.1:{}/", server_port))
@@ -437,5 +360,5 @@ fn server_serves_pages_without_ai() {
         "idea page must return 200 without AI"
     );
 
-    kill_server(server);
+    drop(server);
 }

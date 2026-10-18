@@ -9,23 +9,18 @@
 //! Each test that starts a server uses its own dynamically allocated
 //! port (via TcpListener::bind("127.0.0.1:0")) to avoid collisions
 //! when tests run concurrently.
+//!
+//! R21: Uses shared `tests/common/mod.rs` — pre-migrated DB template +
+//! readiness polling (every 200ms, 60s cap). No fixed sleep for server startup.
 
+mod common;
+
+use common::{free_port, spawn_test_server};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::process::Command;
 
 const FIXTURE_ID: &str = "synthetic_fixture_001";
-
-// ── Port allocation ──
-
-/// Bind a temporary listener to 127.0.0.1:0, extract the assigned port,
-/// then drop the listener to free it. There is a small TOCTOU window
-/// where another process could grab the port, but in practice this is
-/// fine for test-level allocation.
-fn free_port() -> u16 {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind 127.0.0.1:0");
-    listener.local_addr().unwrap().port()
-}
 
 // ── Fake AI provider stub ──
 
@@ -67,27 +62,16 @@ fn fixture_json() -> String {
         .expect("fixture file must exist")
 }
 
-fn start_server(server_port: u16, ai_port: u16, home_dir: &str) -> std::process::Child {
-    Command::new(env!("CARGO_BIN_EXE_innoforge-server"))
-        .env("INNOFORGE_PORT", server_port.to_string())
-        .env("INNOFORGE_HOME", home_dir)
-        .env("AI_BASE_URL", format!("http://127.0.0.1:{}", ai_port))
-        .env("AI_API_KEY", "test-key-not-real")
-        .spawn()
-        .expect("failed to spawn server binary")
-}
-
-fn wait_for_server(port: u16, timeout_secs: u64) -> bool {
-    let start = std::time::Instant::now();
-    while start.elapsed().as_secs() < timeout_secs {
-        if let Ok(resp) = reqwest::blocking::get(format!("http://127.0.0.1:{}/api/version", port)) {
-            if resp.status().is_success() {
-                return true;
-            }
-        }
-        std::thread::sleep(std::time::Duration::from_millis(500));
-    }
-    false
+/// Helper: spawn a test server with AI pointing at `ai_port`.
+fn start_server(server_port: u16, ai_port: u16) -> common::TestServer {
+    let ai_url = format!("http://127.0.0.1:{}", ai_port);
+    spawn_test_server(
+        server_port,
+        &[
+            ("AI_BASE_URL", &ai_url),
+            ("AI_API_KEY", "test-key-not-real"),
+        ],
+    )
 }
 
 fn inject_fixture(port: u16) -> bool {
@@ -118,11 +102,6 @@ fn check_http_200(port: u16, path: &str) -> bool {
     reqwest::blocking::get(&url)
         .map(|r| r.status().is_success())
         .unwrap_or(false)
-}
-
-fn kill_server(mut child: std::process::Child) {
-    let _ = child.kill();
-    let _ = child.wait();
 }
 
 // ── Negative B: fixture privacy guard ──
@@ -167,17 +146,11 @@ fn fixture_is_marked_synthetic() {
 fn patent_detail_page_has_22_plus_buttons() {
     let server_port = free_port();
     let ai_port = free_port();
-    let home_dir = tempfile::TempDir::new().expect("temp dir for INNOFORGE_HOME");
 
     let _stub = start_fake_ai_stub(ai_port);
-    std::thread::sleep(std::time::Duration::from_millis(500));
+    std::thread::sleep(std::time::Duration::from_millis(200));
 
-    let server = start_server(server_port, ai_port, home_dir.path().to_str().unwrap());
-    assert!(
-        wait_for_server(server_port, 60),
-        "Server must start on port {} within 60s",
-        server_port
-    );
+    let server = start_server(server_port, ai_port);
     assert!(
         inject_fixture(server_port),
         "Fixture injection must succeed"
@@ -219,7 +192,7 @@ fn patent_detail_page_has_22_plus_buttons() {
     let head_str = String::from_utf8(head.stdout).unwrap().trim().to_string();
     assert_eq!(api_commit, head_str, "git_commit must match HEAD");
 
-    kill_server(server);
+    drop(server);
 }
 
 // ── Negative A: broken AI stub ──
@@ -228,14 +201,8 @@ fn patent_detail_page_has_22_plus_buttons() {
 fn broken_ai_stub_does_not_crash_server() {
     let server_port = free_port();
     let dead_port: u16 = 59999;
-    let home_dir = tempfile::TempDir::new().expect("temp dir for INNOFORGE_HOME");
 
-    let server = start_server(server_port, dead_port, home_dir.path().to_str().unwrap());
-    assert!(
-        wait_for_server(server_port, 60),
-        "Server must start on port {} within 60s",
-        server_port
-    );
+    let server = start_server(server_port, dead_port);
     assert!(
         inject_fixture(server_port),
         "Fixture injection must succeed without AI"
@@ -272,7 +239,7 @@ fn broken_ai_stub_does_not_crash_server() {
         }
     }
 
-    kill_server(server);
+    drop(server);
 }
 
 // ── Issue #60: test isolation ──
@@ -310,20 +277,22 @@ fn two_test_cases_resolve_different_db_path() {
     let ai_port = free_port();
 
     let _stub = start_fake_ai_stub(ai_port);
-    std::thread::sleep(std::time::Duration::from_millis(500));
+    std::thread::sleep(std::time::Duration::from_millis(200));
 
-    let server_a = start_server(port_a, ai_port, dir_a.path().to_str().unwrap());
-    let server_b = start_server(port_b, ai_port, dir_b.path().to_str().unwrap());
-
-    assert!(
-        wait_for_server(port_a, 60),
-        "Server A must start on port {}",
-        port_a
+    let ai_url = format!("http://127.0.0.1:{}", ai_port);
+    let server_a = spawn_test_server(
+        port_a,
+        &[
+            ("AI_BASE_URL", &ai_url),
+            ("AI_API_KEY", "test-key-not-real"),
+        ],
     );
-    assert!(
-        wait_for_server(port_b, 60),
-        "Server B must start on port {}",
-        port_b
+    let server_b = spawn_test_server(
+        port_b,
+        &[
+            ("AI_BASE_URL", &ai_url),
+            ("AI_API_KEY", "test-key-not-real"),
+        ],
     );
 
     // Both servers should be serving independently.
@@ -338,14 +307,14 @@ fn two_test_cases_resolve_different_db_path() {
 
     // Verify each server created its own db file in its own INNOFORGE_HOME.
     assert!(
-        db_path_a.exists(),
-        "Server A should have created a db file in its INNOFORGE_HOME"
+        server_a.home.path().join("innoforge.db").exists(),
+        "Server A should have a db file in its INNOFORGE_HOME"
     );
     assert!(
-        db_path_b.exists(),
-        "Server B should have created a db file in its INNOFORGE_HOME"
+        server_b.home.path().join("innoforge.db").exists(),
+        "Server B should have a db file in its INNOFORGE_HOME"
     );
 
-    kill_server(server_a);
-    kill_server(server_b);
+    drop(server_a);
+    drop(server_b);
 }
