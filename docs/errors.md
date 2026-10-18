@@ -1039,3 +1039,11 @@
 - **修复 / Fix**: ① `oauth_callback_url()` 改为接受 `listen_port: u16` 参数，回调地址跟随实际端口；② `AppState` 新增 `listen_port: u16` 字段，`init_app_state` 从 `INNOFORGE_PORT` 读取并传入；③ `main.rs` 启动后设置 `state.listen_port = port`，并打印实际回调地址做自检；④ `auth.rs` 三处调用 `oauth_callback_url` 改为传 `s.listen_port`；⑤ 新增 `tests/oauth_callback_integration_test.rs`：spawn 真实 server 到非默认端口，轮询 `/api/version` 等就绪后 GET `/api/auth/google/url`，断言 `redirect_uri` 包含实际端口。
 - **预防 / Prevention**: ① 端口只有一个真值——实际绑定的端口，所有派生用途（回调、日志、健康检查）都从它取；② `AppState` 应携带所有运行时配置，路由层不读环境变量；③ OAuth 回调地址变更后必须有集成测试验证 redirect_uri 与监听端口一致。
 - **提交 / Commit**: 见本 PR。
+### [2026-10-17] ⑫ 迁移原子性负验证（#13）与迁移文件校验负验证（#19）
+- **严重程度 / Severity**: HIGH（验证已有修复的负向测试，确保回退时变红）
+- **现象 / Symptom**: issue #13（迁移未在事务内）和 #19（自动迁移不校验源文件）的修复已在 main 上，但缺少负向测试证明"如果修复被回退，测试会变红"。
+- **负验证 / Negative verification**:
+  - **#13 红→绿**: 移除 `run_migration_tx` 中 v9 迁移的 `column_exists` 幂等守卫 → `migration_atomicity_interrupted_migration_self_heals` 和 `migration_atomicity_multiple_stale_versions_all_self_heal` 变红（`duplicate column name: technical_problem`）→ 恢复守卫 → 变绿。
+  - **#19 红→绿**: 将 `auto_migrate_db` 中 `is_sqlite_file` 检查改为 `if false && !is_sqlite_file(...)` 绕过校验 → `migration_validation_non_sqlite_file_not_copied` 和 `migration_validation_empty_file_rejected` 变红（垃圾文件被复制到新位置）→ 恢复校验 → 变绿。
+- **测试文件 / Test file**: `tests/migration_negative_tests.rs`（10 个测试，覆盖 #13 事务回滚+幂等自愈、#19 文件校验+损坏隔离）
+- **提交 / Commit**: 见本 PR commit。
