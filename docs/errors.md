@@ -1032,4 +1032,4 @@
 - **根因 / Root cause**: 习惯性写 `starts_with` + 手动切片 `[1..]`，没有用 `strip_prefix` 返回的 stripped slice，导致 clippy 认为是手动前缀剥离。
 - **修复 / Fix**: 改为 `if let Some(stripped) = trimmed.strip_prefix('"') { stripped.find('"') }`，用 stripped slice 替代手动 `[1..]`。
 - **预防 / Prevention**: 字符串前缀剥离一律用 `strip_prefix` / `strip_suffix`，不手写 `starts_with` + 切片。
-
+- **提交 / Commit**: 见本 PR。
