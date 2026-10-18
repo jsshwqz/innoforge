@@ -233,14 +233,10 @@ jobs:
             # Skip empty lines
             [ -z "$content" ] && continue
 
-            # Check for bare #NN (but not markdown links like [text](...#NN) or [issue NN](...))
-            # We flag any line containing #\d+ that isn't inside a markdown link
-            if echo "$content" | grep -qP '#\d+'; then
-              # Check if it's inside a markdown link — if the # is preceded by ]( or is part of a URL, skip
-              if echo "$content" | grep -qP '\]\([^)]*#\d+\)' || echo "$content" | grep -qP 'https?://[^ ]*#\d+'; then
-                # It's inside a markdown link or URL — allowed
-                continue
-              fi
+            # Strip markdown links [text](url) and bare URLs first, then look for bare #NN
+            stripped=$(echo "$content" | sed 's/\[[^]]*\]([^)]*)//g' | sed 's|https\{0,1\}://[^ ]*||g')
+
+            if echo "$stripped" | grep -qE '#[0-9]+'; then
               VIOLATION_COUNT=$((VIOLATION_COUNT + 1))
               VIOLATIONS="${VIOLATIONS}\n  CHANGELOG.md: bare #NN found: ${content}"
             fi

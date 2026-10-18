@@ -1038,6 +1038,20 @@
 - **根因 / Root cause**: ① 端口来源未统一——监听端口走 `INNOFORGE_PORT` 环境变量 + 候选列表回退，回调端口走独立硬编码；② `oauth_callback_url()` 不接受参数，无法感知实际绑定端口；③ `AppState` 缺少 `listen_port` 字段，路由层无法获取实际端口。
 - **修复 / Fix**: ① `oauth_callback_url()` 改为接受 `listen_port: u16` 参数，回调地址跟随实际端口；② `AppState` 新增 `listen_port: u16` 字段，`init_app_state` 从 `INNOFORGE_PORT` 读取并传入；③ `main.rs` 启动后设置 `state.listen_port = port`，并打印实际回调地址做自检；④ `auth.rs` 三处调用 `oauth_callback_url` 改为传 `s.listen_port`；⑤ 新增 `tests/oauth_callback_integration_test.rs`：spawn 真实 server 到非默认端口，轮询 `/api/version` 等就绪后 GET `/api/auth/google/url`，断言 `redirect_uri` 包含实际端口。
 - **预防 / Prevention**: ① 端口只有一个真值——实际绑定的端口，所有派生用途（回调、日志、健康检查）都从它取；② `AppState` 应携带所有运行时配置，路由层不读环境变量；③ OAuth 回调地址变更后必须有集成测试验证 redirect_uri 与监听端口一致。
+### [2026-10-18] ⑭ cargo fmt：多行函数调用被拆开但 rustfmt 要求单行
+- **严重程度 / Severity**: LOW（功能正确，但 `cargo fmt --check` 红，CI fmt job 红）
+- **现象 / Symptom**: `tests/issue_17_synthetic_fixtures.rs` 中 `start_server(port, ai_port, home_dir.path().to_str().unwrap())` 被手动拆成多行，rustfmt 要求合并为单行（未超 100 列），`cargo fmt --check` 报 4 处 diff，CI 红。
+- **根因 / Root cause**: 手动编辑时习惯性折行，未跑 `cargo fmt` 验证。
+- **修复 / Fix**: `cargo fmt -- tests/issue_17_synthetic_fixtures.rs`，4 处多行调用合并为单行。
+- **预防 / Prevention**: 提交前必跑 `cargo fmt -- --check`；手动折行后必须 fmt 验证。
+- **提交 / Commit**: 见本 PR。
+
+### [2026-10-18] ⑯ 测试隔离后冷启动超时：15s 不够全新库迁移
+- **严重程度 / Severity**: MEDIUM（CI Tests job 红，测试 flaky）
+- **现象 / Symptom**: `tests/issue_17_synthetic_fixtures.rs` 每个用例用独立 `INNOFORGE_HOME` 后，每个 server 进程都要冷启动全新 SQLite 库跑全部 24 个 migration，实测 ~11 秒。`wait_for_server` 超时设为 15 秒，余量仅 4 秒，CI 环境下偶发超时。`tests/stub_hanging_backend.rs` 的 `tolerates_blackhole_cad_backend_no_empty_reply` 也因同样原因红在 "server must start"。
+- **根因 / Root cause**: ① 原来所有测试共享默认数据库位置，第一个测试冷启动后后续测试复用已迁移的库，所以 15 秒够用；② 隔离后每个测试独立库，每个都要冷启动；③ 15 秒超时是按"共享库热启动"设的，没考虑隔离后的冷启动开销。
+- **修复 / Fix**: `wait_for_server` 超时从 15 秒改为 60 秒，覆盖冷启动 + 迁移 + 就绪检查。`tests/issue_17_synthetic_fixtures.rs` 和 `tests/stub_hanging_backend.rs` 所有调用点统一改为 60 秒。
+- **预防 / Prevention**: ① 测试隔离后必须重新评估超时——冷启动开销是每个测试都要付的；② `wait_for_server` 的超时应留足余量（实际开销 × 2 或 + 30s）；③ CI 环境比本地慢，超时按 CI 开销设。
 - **提交 / Commit**: 见本 PR。
 ### [2026-10-17] ⑫ 迁移原子性负验证（#13）与迁移文件校验负验证（#19）
 - **严重程度 / Severity**: HIGH（验证已有修复的负向测试，确保回退时变红）

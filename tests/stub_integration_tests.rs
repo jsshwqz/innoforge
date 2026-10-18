@@ -7,17 +7,15 @@
 //! - Concurrent request handling
 //! - Malformed input graceful handling
 //! - Stub lifecycle (start, serve, drop)
+//!
+//! R21: Uses shared `tests/common/mod.rs` — pre-migrated DB template +
+//! readiness polling (every 200ms, 60s cap). No fixed sleep for server startup.
 
+mod common;
+
+use common::{free_port, spawn_test_server};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::process::Command;
-
-// ── Port allocation ──
-
-fn free_port() -> u16 {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind 127.0.0.1:0");
-    listener.local_addr().unwrap().port()
-}
 
 // ── Fake AI stub (self-contained for this test file) ──
 
@@ -52,33 +50,16 @@ fn handle_stub(stream: &mut TcpStream) {
     let _ = stream.write_all(resp.as_bytes());
 }
 
-// ── Server helpers ──
-
-fn start_server(server_port: u16, ai_port: u16) -> std::process::Child {
-    Command::new(env!("CARGO_BIN_EXE_innoforge-server"))
-        .env("INNOFORGE_PORT", server_port.to_string())
-        .env("AI_BASE_URL", format!("http://127.0.0.1:{}", ai_port))
-        .env("AI_API_KEY", "test-key-not-real")
-        .spawn()
-        .expect("failed to spawn server")
-}
-
-fn wait_for_server(port: u16, timeout_secs: u64) -> bool {
-    let start = std::time::Instant::now();
-    while start.elapsed().as_secs() < timeout_secs {
-        if let Ok(resp) = reqwest::blocking::get(format!("http://127.0.0.1:{}/api/version", port)) {
-            if resp.status().is_success() {
-                return true;
-            }
-        }
-        std::thread::sleep(std::time::Duration::from_millis(500));
-    }
-    false
-}
-
-fn kill_server(mut child: std::process::Child) {
-    let _ = child.kill();
-    let _ = child.wait();
+/// Helper: spawn a test server with AI pointing at `ai_port`.
+fn start_server(server_port: u16, ai_port: u16) -> common::TestServer {
+    let ai_url = format!("http://127.0.0.1:{}", ai_port);
+    spawn_test_server(
+        server_port,
+        &[
+            ("AI_BASE_URL", &ai_url),
+            ("AI_API_KEY", "test-key-not-real"),
+        ],
+    )
 }
 
 // ── Stub response correctness ──
@@ -164,7 +145,6 @@ fn server_serves_pages_with_stub_ai() {
     std::thread::sleep(std::time::Duration::from_millis(200));
 
     let server = start_server(server_port, ai_port);
-    assert!(wait_for_server(server_port, 15), "server must start");
 
     // Key pages must be reachable
     for path in &["/", "/idea", "/search", "/compare"] {
@@ -178,7 +158,7 @@ fn server_serves_pages_with_stub_ai() {
         );
     }
 
-    kill_server(server);
+    drop(server);
 }
 
 /// Verify the /api/version endpoint returns correct version info.
@@ -191,7 +171,6 @@ fn version_endpoint_with_stub_ai() {
     std::thread::sleep(std::time::Duration::from_millis(200));
 
     let server = start_server(server_port, ai_port);
-    assert!(wait_for_server(server_port, 15));
 
     let resp = reqwest::blocking::get(format!("http://127.0.0.1:{}/api/version", server_port))
         .expect("version endpoint must respond");
@@ -202,7 +181,7 @@ fn version_endpoint_with_stub_ai() {
         "version endpoint must return version string"
     );
 
-    kill_server(server);
+    drop(server);
 }
 
 // ── Malformed input handling ──
@@ -217,7 +196,6 @@ fn malformed_ai_request_does_not_crash() {
     std::thread::sleep(std::time::Duration::from_millis(200));
 
     let server = start_server(server_port, ai_port);
-    assert!(wait_for_server(server_port, 15));
 
     let client = reqwest::blocking::Client::new();
 
@@ -253,7 +231,7 @@ fn malformed_ai_request_does_not_crash() {
         .unwrap_or(false);
     assert!(alive, "server must still respond after malformed request");
 
-    kill_server(server);
+    drop(server);
 }
 
 /// Verify the server handles empty request body gracefully.
@@ -266,7 +244,6 @@ fn empty_ai_request_does_not_crash() {
     std::thread::sleep(std::time::Duration::from_millis(200));
 
     let server = start_server(server_port, ai_port);
-    assert!(wait_for_server(server_port, 15));
 
     let client = reqwest::blocking::Client::new();
     let resp = client
@@ -293,7 +270,7 @@ fn empty_ai_request_does_not_crash() {
         }
     }
 
-    kill_server(server);
+    drop(server);
 }
 
 // ── Concurrent request handling ──
@@ -340,16 +317,14 @@ fn server_handles_concurrent_page_requests() {
     std::thread::sleep(std::time::Duration::from_millis(200));
 
     let server = start_server(server_port, ai_port);
-    assert!(wait_for_server(server_port, 15));
 
     let mut handles = Vec::new();
-    for i in 0..4 {
+    for _ in 0..4 {
         let url = format!("http://127.0.0.1:{}/", server_port);
         handles.push(std::thread::spawn(move || {
             let resp = reqwest::blocking::get(&url).expect("concurrent page request must succeed");
             resp.status().is_success()
         }));
-        let _ = i; // suppress unused warning
     }
 
     for handle in handles {
@@ -357,7 +332,7 @@ fn server_handles_concurrent_page_requests() {
         assert!(ok, "concurrent page request must return 200");
     }
 
-    kill_server(server);
+    drop(server);
 }
 
 // ── Server resilience without AI ──
@@ -369,10 +344,6 @@ fn server_serves_pages_without_ai() {
     let dead_ai_port = free_port(); // nothing listening here
 
     let server = start_server(server_port, dead_ai_port);
-    assert!(
-        wait_for_server(server_port, 15),
-        "server must start without AI"
-    );
 
     // Pages must still render
     let resp = reqwest::blocking::get(format!("http://127.0.0.1:{}/", server_port))
@@ -389,5 +360,5 @@ fn server_serves_pages_without_ai() {
         "idea page must return 200 without AI"
     );
 
-    kill_server(server);
+    drop(server);
 }
