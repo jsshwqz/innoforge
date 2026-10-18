@@ -1032,10 +1032,4 @@
 - **根因 / Root cause**: 习惯性写 `starts_with` + 手动切片 `[1..]`，没有用 `strip_prefix` 返回的 stripped slice，导致 clippy 认为是手动前缀剥离。
 - **修复 / Fix**: 改为 `if let Some(stripped) = trimmed.strip_prefix('"') { stripped.find('"') }`，用 stripped slice 替代手动 `[1..]`。
 - **预防 / Prevention**: 字符串前缀剥离一律用 `strip_prefix` / `strip_suffix`，不手写 `starts_with` + 切片。
-### [2026-10-18] ⑰ Autoclose Hygiene 门禁误报：`[#NN](...)` markdown 链接被当成裸引用
-- **严重程度 / Severity**: LOW（门禁误报阻断合法 PR，但不会漏过真裸引用）
-- **现象 / Symptom**: CHANGELOG 中写 `[#61](../issues/61)` 这种 markdown 链接，autoclose-hygiene CI job 的正则 `#\d+` 匹配到方括号内的 `#61`，但放行规则只检查 URL 部分中的 `#NN`（`]\([^)]*#\d+\)`）和完整 URL（`https?://[^ ]*#\d+`），不覆盖方括号内的 `#NN`，导致误报。
-- **根因 / Root cause**: ① 放行规则设计时只考虑了 `#NN` 出现在 URL 中的情况（如 `](../issues/61#section)`），没考虑 `#NN` 出现在链接文本中的情况（如 `[#61](../issues/61)`）；② `[#NN](...)` 是合法的 markdown 链接，GitHub 不会因链接文本中的 `#NN` 触发自动关闭，但门禁的正则不区分位置。
-- **修复 / Fix**: ① CHANGELOG 中 `[#NN](...)` 改为 `[issue NN](...)`，避免 `#` 出现在链接文本中；② ci.yml 的放行规则新增 `\[#\d+\]\(` 模式，放行 `[#NN](...)` 形式的 markdown 链接。
-- **预防 / Prevention**: ① 门禁正则应覆盖所有合法 markdown 链接形式，包括 `[#NN](...)`；② CHANGELOG 统一用 `[issue NN](../issues/NN)` 格式，不在链接文本中放 `#`。
-- **提交 / Commit**: 见本 PR。
+

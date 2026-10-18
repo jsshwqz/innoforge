@@ -236,11 +236,8 @@ jobs:
             # Check for bare #NN (but not markdown links like [text](...#NN) or [issue NN](...))
             # We flag any line containing #\d+ that isn't inside a markdown link
             if echo "$content" | grep -qP '#\d+'; then
-              # Check if it's inside a markdown link — skip if #NN is:
-              # 1) inside URL part of link: ](...#NN)
-              # 2) inside a full URL: https://...#NN
-              # 3) inside link text as [#NN](...) — markdown link with # in the label
-              if echo "$content" | grep -qP '\]\([^)]*#\d+\)' || echo "$content" | grep -qP 'https?://[^ ]*#\d+' || echo "$content" | grep -qP '\[#\d+\]\(''; then
+              # Check if it's inside a markdown link — if the # is preceded by ]( or is part of a URL, skip
+              if echo "$content" | grep -qP '\]\([^)]*#\d+\)' || echo "$content" | grep -qP 'https?://[^ ]*#\d+'; then
                 # It's inside a markdown link or URL — allowed
                 continue
               fi
