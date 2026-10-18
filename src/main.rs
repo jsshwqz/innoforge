@@ -46,8 +46,7 @@ async fn main() -> anyhow::Result<()> {
     println!("Database path: {}", db_abs.display());
     tracing::info!("Database path: {}", db_abs.display());
 
-    let state = innoforge::common::init_app_state(&db_path)?;
-    let app = build_router(state);
+    let mut state = innoforge::common::init_app_state(&db_path)?;
 
     let configured_port = std::env::var("INNOFORGE_PORT")
         .ok()
@@ -82,6 +81,32 @@ async fn main() -> anyhow::Result<()> {
             return Err(anyhow::anyhow!("no bind candidate ports configured"));
         }
     };
+
+    // Unify port source: callback follows actual bound port (issue #33)
+    state.listen_port = port;
+
+    // Startup self-check: print effective callback address (issue #33)
+    let callback_url = innoforge::common::oauth_callback_url(port);
+    let has_oauth = {
+        let cfg = state.config.read().unwrap_or_else(|e| e.into_inner());
+        !cfg.google_client_id.is_empty()
+    };
+    if has_oauth {
+        println!("OAuth callback URL: {}", callback_url);
+        // Warn if explicit callback URL port differs from listen port
+        if let Ok(explicit) = std::env::var("INNOFORGE_OAUTH_CALLBACK_URL") {
+            if !explicit.is_empty() && !explicit.contains(&format!(":{port}")) {
+                eprintln!(
+                    "⚠️  INNOFORGE_OAUTH_CALLBACK_URL='{}' does not contain listen port {} — \
+                     OAuth redirect may fail",
+                    explicit, port
+                );
+            }
+        }
+    }
+
+    let app = build_router(state);
+
     println!(
         "创研台 InnoForge v{} running at http://{addr}",
         env!("CARGO_PKG_VERSION")

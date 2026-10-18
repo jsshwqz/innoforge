@@ -325,6 +325,10 @@ pub fn init_app_state(db_path: &str) -> anyhow::Result<crate::routes::AppState> 
         config: Arc::new(RwLock::new(config)),
         pipeline_channels: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         db_path: strip_verbatim_prefix(db_path_abs.to_string_lossy().as_ref()),
+        listen_port: std::env::var("INNOFORGE_PORT")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(3000),
     };
 
     // 启动日志：打印当前 AI 服务商和超时配置
@@ -929,17 +933,11 @@ pub fn build_upstream_client() -> reqwest::Client {
 /// 1. `INNOFORGE_OAUTH_CALLBACK_URL` 环境变量（非空时直接使用）
 /// 2. `INNOFORGE_PORT` 环境变量 → `http://localhost:{port}/api/auth/google/callback`
 /// 3. 默认 `http://localhost:3000/api/auth/google/callback`
-pub fn oauth_callback_url() -> String {
+pub fn oauth_callback_url(listen_port: u16) -> String {
     if let Ok(url) = std::env::var("INNOFORGE_OAUTH_CALLBACK_URL") {
         if !url.is_empty() {
             return url;
         }
     }
-    if let Ok(port) = std::env::var("INNOFORGE_PORT") {
-        if let Ok(p) = port.parse::<u16>() {
-            return format!("http://localhost:{p}/api/auth/google/callback");
-        }
-    }
-    "http://localhost:3000/api/auth/google/callback".to_string()
-}
+    format!("http://localhost:{listen_port}/api/auth/google/callback")
 }
