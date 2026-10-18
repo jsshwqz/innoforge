@@ -888,6 +888,21 @@ async fn describe_image_with_ai(
 /// 使用 Umi-OCR 的文档识别接口：
 ///   上传 → 轮询 → 获取结果
 async fn extract_pdf_text_umi_ocr(data: Vec<u8>) -> Result<String, String> {
+    // Probe Umi-OCR reachability before attempting the full 120s workflow.
+    // If the service is not running, return immediately with a helpful message
+    // instead of waiting for the HTTP timeout.
+    let probe_addr = "127.0.0.1:1224";
+    let probe = tokio::time::timeout(
+        Duration::from_secs(2),
+        tokio::net::TcpStream::connect(probe_addr),
+    )
+    .await;
+    if probe.is_err() || probe.unwrap().is_err() {
+        return Err("Umi-OCR 未运行（127.0.0.1:1224 不可达）。\
+             需要 Umi-OCR 或改用可复制文本的 PDF"
+            .into());
+    }
+
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(UMI_OCR_TIMEOUT_SECS))
         .build()
