@@ -16,7 +16,7 @@ fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool> {
 
 /// Run a migration in a transaction: DDL + version update commit atomically.
 /// If the process is killed mid-migration, the entire transaction rolls back.
-fn run_migration_tx(conn: &Connection, version: i32, sql: &str) -> Result<()> {
+pub fn run_migration_tx(conn: &Connection, version: i32, sql: &str) -> Result<()> {
     let tx = conn.unchecked_transaction()?;
     tx.execute_batch(sql)?;
     tx.execute_batch(&format!(

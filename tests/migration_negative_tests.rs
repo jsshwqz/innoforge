@@ -103,47 +103,44 @@ fn migration_atomicity_interrupted_migration_self_heals() {
 #[test]
 fn migration_atomicity_rolled_back_migration_leaves_no_partial_state() {
     // Verify that a failed migration (invalid SQL) does not leave partial
-    // state. We test this at the rusqlite level: a transaction with bad SQL
-    // in the middle should roll back entirely.
+    // state. This test calls the PRODUCTION run_migration_tx() directly —
+    // if that function is non-atomic (e.g. plain conn.execute_batch without
+    // a transaction), the CREATE TABLE succeeds and is left behind even
+    // though the overall migration fails, causing this test to FAIL.
     //
-    // This directly tests the transaction wrapping in run_migration_tx().
+    // With proper transaction wrapping (unchecked_transaction + commit),
+    // the entire migration rolls back on error: no partial table, no
+    // version update.
 
     let dir = TempDir::new().expect("temp dir");
     let db_path = dir.path().join("test_tx.db");
     let conn = Connection::open(&db_path).expect("open db");
 
-    // Set up schema_version table.
+    // Set up schema_version table (required by run_migration_tx).
     conn.execute_batch("CREATE TABLE schema_version (version INTEGER NOT NULL);")
         .expect("create schema_version");
     conn.execute_batch("INSERT INTO schema_version (version) VALUES (0);")
         .expect("insert version 0");
 
-    // Simulate a migration with a deliberate error in the middle.
-    // The transaction should roll back: neither the table nor the version
-    // update should be visible.
-    let result = conn.unchecked_transaction();
-    let tx = result.expect("begin tx");
-
-    // First statement: create a table (would succeed on its own).
-    tx.execute_batch("CREATE TABLE test_partial (id INTEGER PRIMARY KEY);")
-        .expect("create table");
-
-    // Second statement: invalid SQL — this should fail.
-    let bad_result = tx.execute_batch("THIS IS NOT VALID SQL;");
-
-    // The bad SQL must produce an error.
-    assert!(
-        bad_result.is_err(),
-        "invalid SQL must return an error, got: {:?}",
-        bad_result
+    // Call the production function with SQL that has a deliberate error.
+    // The CREATE TABLE would succeed on its own, but the invalid SQL after
+    // it should cause the entire migration to fail and roll back.
+    let result = innoforge::db::migrations::run_migration_tx(
+        &conn,
+        1,
+        "CREATE TABLE test_partial (id INTEGER PRIMARY KEY); THIS IS NOT VALID SQL;",
     );
 
-    // The transaction is implicitly rolled back when dropped (not committed).
-    // Note: we don't call commit() — the error path in run_migration_tx
-    // would return Err before commit, dropping the tx and rolling back.
-    drop(tx);
+    // The migration must fail.
+    assert!(
+        result.is_err(),
+        "run_migration_tx with invalid SQL must return Err, got: {:?}",
+        result
+    );
 
     // Verify: the table should NOT exist (transaction rolled back).
+    // If run_migration_tx is non-atomic, the CREATE TABLE will have been
+    // committed and this assertion will FAIL — that's the detection.
     let table_exists: bool = conn
         .query_row(
             "SELECT count(*) > 0 FROM sqlite_master WHERE type='table' AND name='test_partial'",
@@ -153,7 +150,8 @@ fn migration_atomicity_rolled_back_migration_leaves_no_partial_state() {
         .expect("query table existence");
     assert!(
         !table_exists,
-        "partial table should not exist after rolled-back migration"
+        "partial table should not exist after rolled-back migration — \
+         if this fails, run_migration_tx is not using a transaction"
     );
 
     // Verify: schema_version should still be 0 (not updated).
@@ -212,6 +210,50 @@ fn migration_atomicity_multiple_stale_versions_all_self_heal() {
             stale_version
         );
     }
+}
+
+#[test]
+fn migration_atomicity_idempotent_when_columns_exist_but_version_unrecorded() {
+    // Issue #13 idempotency: all columns exist (fully migrated) but
+    // schema_version has no record (e.g. the DELETE succeeded but the
+    // INSERT was lost due to a crash). Re-running migrations must succeed
+    // without "duplicate column name" errors, thanks to column_exists guards.
+
+    let dir = TempDir::new().expect("temp dir");
+    let db_path = dir.path().join("test_idem.db");
+
+    // Step 1: Fully migrate the database.
+    {
+        let db = innoforge::db::Database::init(db_path.to_str().unwrap())
+            .expect("init should succeed on fresh db");
+        assert_eq!(
+            db.query_schema_version().unwrap(),
+            innoforge::db::Database::SCHEMA_VERSION,
+            "db should be fully migrated"
+        );
+    }
+
+    // Step 2: Delete ALL schema_version records — simulate the case where
+    // columns exist but the version was never recorded.
+    {
+        let conn = Connection::open(&db_path).expect("open db");
+        conn.execute_batch("DELETE FROM schema_version;")
+            .expect("delete all version records");
+    }
+
+    // Step 3: Re-init must succeed (idempotent), not fail with "duplicate column".
+    let db = innoforge::db::Database::init(db_path.to_str().unwrap()).unwrap_or_else(|e| {
+        panic!(
+            "re-init with unrecorded version should succeed idempotently, but failed: {}",
+            e
+        )
+    });
+    let version = db.query_schema_version().expect("query version");
+    assert_eq!(
+        version,
+        innoforge::db::Database::SCHEMA_VERSION,
+        "idempotent re-init should reach target schema version"
+    );
 }
 
 // =========================================================================
