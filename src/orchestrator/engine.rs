@@ -229,19 +229,19 @@ impl Orchestrator {
         if should_fallback_diversity(
             self.quick_mode,
             current,
-            ctx.diversity_score,
+            ctx.diversity_score.unwrap_or(0.0),
             ctx.retry_count,
             diversity_gate_runs,
         ) {
             // 正常最多回退 2 轮；若历史快照/状态异常导致 retry_count 未增长，也用 step 历史做硬上限兜底。
             tracing::info!(
                 "多样性不足 ({:.0}%)，回退到 SearchWeb（第 {} 轮）",
-                ctx.diversity_score * 100.0,
+                ctx.diversity_score.unwrap_or(0.0) * 100.0,
                 diversity_gate_runs
             );
             return Some(PipelineStep::SearchWeb);
         }
-        if !self.quick_mode && current == PipelineStep::DiversityGate && ctx.diversity_score < 0.3 {
+        if !self.quick_mode && current == PipelineStep::DiversityGate && ctx.diversity_score.unwrap_or(0.0) < 0.3 {
             tracing::warn!(
                 "多样性回退已达上限（retry_count={}, diversity_gate_runs={}），继续后续步骤",
                 ctx.retry_count,
@@ -268,6 +268,7 @@ impl Orchestrator {
         }
         if target_idx <= PipelineStep::ScoreNovelty.index() {
             ctx.novelty_score = 0.0;
+            ctx.novelty_status = Default::default();
             ctx.score_breakdown = Default::default();
         }
         if target_idx <= PipelineStep::AiDeepAnalysis.index() {
@@ -297,7 +298,7 @@ impl Orchestrator {
             }
             PipelineStep::DiversityGate => {
                 let r = steps::diversity::execute(ctx).await;
-                if r.is_ok() && ctx.diversity_score < 0.3 && ctx.retry_count < 2 {
+                if r.is_ok() && ctx.diversity_score.unwrap_or(0.0) < 0.3 && ctx.retry_count < 2 {
                     ctx.retry_count += 1;
                 }
                 r

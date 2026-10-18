@@ -113,7 +113,7 @@ pub async fn deep_analysis_simple(ctx: &mut PipelineContext, ai: &AiClient) -> R
         avg_sim = ctx.score_breakdown.avg_top5_similarity * 100.0,
         contra_bonus = ctx.score_breakdown.contradiction_bonus,
         gap_bonus = ctx.score_breakdown.coverage_gap_bonus,
-        diversity = ctx.diversity_score * 100.0,
+        diversity = ctx.diversity_score.unwrap_or(0.0) * 100.0,
         matches = top_matches_summary,
         contradictions = contradictions_summary,
     );
