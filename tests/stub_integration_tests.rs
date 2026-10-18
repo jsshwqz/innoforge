@@ -7,16 +7,56 @@
 //! - Concurrent request handling
 //! - Malformed input graceful handling
 //! - Stub lifecycle (start, serve, drop)
+//!
+//! R21: Pre-migrated DB template + readiness polling (every 200ms, 60s cap).
+//! No fixed sleep for server startup.
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::path::PathBuf;
 use std::process::Command;
+use std::sync::OnceLock;
 
 // ── Port allocation ──
 
 fn free_port() -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind 127.0.0.1:0");
     listener.local_addr().unwrap().port()
+}
+
+// ── Pre-migrated DB template (avoids ~11s cold-start per test) ──
+
+static DB_TEMPLATE: OnceLock<PathBuf> = OnceLock::new();
+
+fn ensure_db_template() -> PathBuf {
+    DB_TEMPLATE
+        .get_or_init(|| {
+            let template_dir = tempfile::tempdir().expect("create template dir");
+            let template_port = free_port();
+            let child = Command::new(env!("CARGO_BIN_EXE_innoforge-server"))
+                .env("INNOFORGE_PORT", template_port.to_string())
+                .env("INNOFORGE_NO_OPEN", "1")
+                .env("INNOFORGE_HOME", template_dir.path().to_str().unwrap())
+                .spawn()
+                .expect("spawn server for template");
+            assert!(
+                wait_for_server(template_port, 60),
+                "template server must start within 60s"
+            );
+            kill_server(child);
+            let db_path = template_dir.path().join("innoforge.db");
+            assert!(db_path.exists(), "template db must exist after migration");
+            std::mem::forget(template_dir);
+            db_path
+        })
+        .clone()
+}
+
+fn fresh_db_dir() -> tempfile::TempDir {
+    let template = ensure_db_template();
+    let dir = tempfile::tempdir().expect("create fresh db dir");
+    std::fs::copy(&template, dir.path().join("innoforge.db")).expect("copy template db");
+    dir
 }
 
 // ── Fake AI stub (self-contained for this test file) ──
@@ -54,9 +94,11 @@ fn handle_stub(stream: &mut TcpStream) {
 
 // ── Server helpers ──
 
-fn start_server(server_port: u16, ai_port: u16) -> std::process::Child {
+fn start_server(server_port: u16, ai_port: u16, home: &tempfile::TempDir) -> std::process::Child {
     Command::new(env!("CARGO_BIN_EXE_innoforge-server"))
         .env("INNOFORGE_PORT", server_port.to_string())
+        .env("INNOFORGE_NO_OPEN", "1")
+        .env("INNOFORGE_HOME", home.path().to_str().unwrap())
         .env("AI_BASE_URL", format!("http://127.0.0.1:{}", ai_port))
         .env("AI_API_KEY", "test-key-not-real")
         .spawn()
@@ -71,7 +113,7 @@ fn wait_for_server(port: u16, timeout_secs: u64) -> bool {
                 return true;
             }
         }
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        std::thread::sleep(std::time::Duration::from_millis(200));
     }
     false
 }
@@ -163,8 +205,9 @@ fn server_serves_pages_with_stub_ai() {
     let _stub = start_stub(ai_port);
     std::thread::sleep(std::time::Duration::from_millis(200));
 
-    let server = start_server(server_port, ai_port);
-    assert!(wait_for_server(server_port, 15), "server must start");
+    let home = fresh_db_dir();
+    let server = start_server(server_port, ai_port, &home);
+    assert!(wait_for_server(server_port, 60), "server must start");
 
     // Key pages must be reachable
     for path in &["/", "/idea", "/search", "/compare"] {
@@ -190,8 +233,9 @@ fn version_endpoint_with_stub_ai() {
     let _stub = start_stub(ai_port);
     std::thread::sleep(std::time::Duration::from_millis(200));
 
-    let server = start_server(server_port, ai_port);
-    assert!(wait_for_server(server_port, 15));
+    let home = fresh_db_dir();
+    let server = start_server(server_port, ai_port, &home);
+    assert!(wait_for_server(server_port, 60));
 
     let resp = reqwest::blocking::get(format!("http://127.0.0.1:{}/api/version", server_port))
         .expect("version endpoint must respond");
@@ -216,8 +260,9 @@ fn malformed_ai_request_does_not_crash() {
     let _stub = start_stub(ai_port);
     std::thread::sleep(std::time::Duration::from_millis(200));
 
-    let server = start_server(server_port, ai_port);
-    assert!(wait_for_server(server_port, 15));
+    let home = fresh_db_dir();
+    let server = start_server(server_port, ai_port, &home);
+    assert!(wait_for_server(server_port, 60));
 
     let client = reqwest::blocking::Client::new();
 
@@ -265,8 +310,9 @@ fn empty_ai_request_does_not_crash() {
     let _stub = start_stub(ai_port);
     std::thread::sleep(std::time::Duration::from_millis(200));
 
-    let server = start_server(server_port, ai_port);
-    assert!(wait_for_server(server_port, 15));
+    let home = fresh_db_dir();
+    let server = start_server(server_port, ai_port, &home);
+    assert!(wait_for_server(server_port, 60));
 
     let client = reqwest::blocking::Client::new();
     let resp = client
@@ -339,8 +385,9 @@ fn server_handles_concurrent_page_requests() {
     let _stub = start_stub(ai_port);
     std::thread::sleep(std::time::Duration::from_millis(200));
 
-    let server = start_server(server_port, ai_port);
-    assert!(wait_for_server(server_port, 15));
+    let home = fresh_db_dir();
+    let server = start_server(server_port, ai_port, &home);
+    assert!(wait_for_server(server_port, 60));
 
     let mut handles = Vec::new();
     for i in 0..4 {
@@ -368,9 +415,10 @@ fn server_serves_pages_without_ai() {
     let server_port = free_port();
     let dead_ai_port = free_port(); // nothing listening here
 
-    let server = start_server(server_port, dead_ai_port);
+    let home = fresh_db_dir();
+    let server = start_server(server_port, dead_ai_port, &home);
     assert!(
-        wait_for_server(server_port, 15),
+        wait_for_server(server_port, 60),
         "server must start without AI"
     );
 
