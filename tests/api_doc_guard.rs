@@ -16,8 +16,7 @@ use regex::Regex;
 fn parse_routes_from_src() -> HashSet<(String, String)> {
     let src = include_str!("../src/common.rs");
     let path_re = Regex::new(r#"\.route\(\s*"([^"]+)""#).unwrap();
-    let method_re =
-        Regex::new(r"\b(get|post|put|delete|patch)\b").unwrap();
+    let method_re = Regex::new(r"\b(get|post|put|delete|patch)\b").unwrap();
     let mut out = HashSet::new();
     for chunk in src.split(".route(").skip(1) {
         let path = match path_re.captures(&format!(".route({chunk}")) {
@@ -40,8 +39,7 @@ fn parse_routes_from_src() -> HashSet<(String, String)> {
 /// 从 `docs/API.md` 覆盖索引表行 `| METHOD | `path` | ... |` 解析声明端点。
 fn parse_doc_endpoints() -> Vec<(String, String)> {
     let doc = include_str!("../docs/API.md");
-    let row_re =
-        Regex::new(r"^\|\s*(GET|POST|PUT|DELETE|PATCH)\s*\|\s*`([^`]+)`").unwrap();
+    let row_re = Regex::new(r"^\|\s*(GET|POST|PUT|DELETE|PATCH)\s*\|\s*`([^`]+)`").unwrap();
     let mut out = Vec::new();
     for line in doc.lines() {
         if let Some(c) = row_re.captures(line) {
