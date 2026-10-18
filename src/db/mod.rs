@@ -10,7 +10,7 @@ mod cost;
 mod evidence;
 mod idea;
 pub mod memory;
-pub(crate) mod migrations;
+pub mod migrations;
 pub mod oa;
 mod patent;
 pub mod rag;

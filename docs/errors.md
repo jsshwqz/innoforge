@@ -1032,6 +1032,12 @@
 - **根因 / Root cause**: 习惯性写 `starts_with` + 手动切片 `[1..]`，没有用 `strip_prefix` 返回的 stripped slice，导致 clippy 认为是手动前缀剥离。
 - **修复 / Fix**: 改为 `if let Some(stripped) = trimmed.strip_prefix('"') { stripped.find('"') }`，用 stripped slice 替代手动 `[1..]`。
 - **预防 / Prevention**: 字符串前缀剥离一律用 `strip_prefix` / `strip_suffix`，不手写 `starts_with` + 切片。
+### [2026-10-18] ⑮ OAuth 回调端口有两套来源导致错配
+- **严重程度 / Severity**: MEDIUM（回调地址与实际监听端口不一致时 OAuth 换 token 失败）
+- **现象 / Symptom**: `main.rs` 中监听端口从 `INNOFORGE_PORT` 环境变量读取，候选值为 `[3000, 3921, 3100]`（依次尝试绑定），而 `oauth_callback_url()` 硬编码 `3000` 作为回调端口。当实际监听在 `3921` 或 `3100` 时，Google OAuth redirect_uri 仍写 `localhost:3000/api/auth/google/callback`，与 Google Console 注册的回调地址不匹配，换 token 阶段返回 `redirect_uri_mismatch`。
+- **根因 / Root cause**: ① 端口来源未统一——监听端口走 `INNOFORGE_PORT` 环境变量 + 候选列表回退，回调端口走独立硬编码；② `oauth_callback_url()` 不接受参数，无法感知实际绑定端口；③ `AppState` 缺少 `listen_port` 字段，路由层无法获取实际端口。
+- **修复 / Fix**: ① `oauth_callback_url()` 改为接受 `listen_port: u16` 参数，回调地址跟随实际端口；② `AppState` 新增 `listen_port: u16` 字段，`init_app_state` 从 `INNOFORGE_PORT` 读取并传入；③ `main.rs` 启动后设置 `state.listen_port = port`，并打印实际回调地址做自检；④ `auth.rs` 三处调用 `oauth_callback_url` 改为传 `s.listen_port`；⑤ 新增 `tests/oauth_callback_integration_test.rs`：spawn 真实 server 到非默认端口，轮询 `/api/version` 等就绪后 GET `/api/auth/google/url`，断言 `redirect_uri` 包含实际端口。
+- **预防 / Prevention**: ① 端口只有一个真值——实际绑定的端口，所有派生用途（回调、日志、健康检查）都从它取；② `AppState` 应携带所有运行时配置，路由层不读环境变量；③ OAuth 回调地址变更后必须有集成测试验证 redirect_uri 与监听端口一致。
 ### [2026-10-18] ⑭ cargo fmt：多行函数调用被拆开但 rustfmt 要求单行
 - **严重程度 / Severity**: LOW（功能正确，但 `cargo fmt --check` 红，CI fmt job 红）
 - **现象 / Symptom**: `tests/issue_17_synthetic_fixtures.rs` 中 `start_server(port, ai_port, home_dir.path().to_str().unwrap())` 被手动拆成多行，rustfmt 要求合并为单行（未超 100 列），`cargo fmt --check` 报 4 处 diff，CI 红。
@@ -1047,3 +1053,11 @@
 - **修复 / Fix**: `wait_for_server` 超时从 15 秒改为 60 秒，覆盖冷启动 + 迁移 + 就绪检查。`tests/issue_17_synthetic_fixtures.rs` 和 `tests/stub_hanging_backend.rs` 所有调用点统一改为 60 秒。
 - **预防 / Prevention**: ① 测试隔离后必须重新评估超时——冷启动开销是每个测试都要付的；② `wait_for_server` 的超时应留足余量（实际开销 × 2 或 + 30s）；③ CI 环境比本地慢，超时按 CI 开销设。
 - **提交 / Commit**: 见本 PR。
+### [2026-10-17] ⑫ 迁移原子性负验证（#13）与迁移文件校验负验证（#19）
+- **严重程度 / Severity**: HIGH（验证已有修复的负向测试，确保回退时变红）
+- **现象 / Symptom**: issue #13（迁移未在事务内）和 #19（自动迁移不校验源文件）的修复已在 main 上，但缺少负向测试证明"如果修复被回退，测试会变红"。
+- **负验证 / Negative verification**:
+  - **#13 红→绿**: 移除 `run_migration_tx` 中 v9 迁移的 `column_exists` 幂等守卫 → `migration_atomicity_interrupted_migration_self_heals` 和 `migration_atomicity_multiple_stale_versions_all_self_heal` 变红（`duplicate column name: technical_problem`）→ 恢复守卫 → 变绿。
+  - **#19 红→绿**: 将 `auto_migrate_db` 中 `is_sqlite_file` 检查改为 `if false && !is_sqlite_file(...)` 绕过校验 → `migration_validation_non_sqlite_file_not_copied` 和 `migration_validation_empty_file_rejected` 变红（垃圾文件被复制到新位置）→ 恢复校验 → 变绿。
+- **测试文件 / Test file**: `tests/migration_negative_tests.rs`（10 个测试，覆盖 #13 事务回滚+幂等自愈、#19 文件校验+损坏隔离）
+- **提交 / Commit**: 见本 PR commit。

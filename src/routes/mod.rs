@@ -16,7 +16,7 @@
 mod ai;
 mod audit;
 pub use audit::*;
-mod auth;
+pub(crate) mod auth;
 mod cad;
 mod chat;
 mod collections;
@@ -412,6 +412,8 @@ pub struct AppState {
     pub pipeline_channels: Arc<Mutex<HashMap<String, PipelineChannelEntry>>>,
     /// Database file absolute path (for diagnostics / issue #14)
     pub db_path: String,
+    /// Actual TCP port the server is listening on (issue #33)
+    pub listen_port: u16,
 }
 
 impl AppState {

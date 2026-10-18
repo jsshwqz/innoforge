@@ -916,6 +916,7 @@ mod epo_credential_settings_tests {
             config: Arc::new(RwLock::new(config)),
             pipeline_channels: Arc::new(Mutex::new(HashMap::new())),
             db_path: ":memory:".to_string(),
+            listen_port: 3000,
         }
     }
 
