@@ -284,6 +284,7 @@ mod tests {
             config: Arc::new(RwLock::new(config)),
             pipeline_channels: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             db_path: ":memory:".to_string(),
+            listen_port: 3000,
         }
     }
 
