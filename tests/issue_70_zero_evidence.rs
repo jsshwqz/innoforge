@@ -92,10 +92,10 @@ fn empty_evidence_must_not_claim_novelty_score() {
     let submit_resp = client
         .post(format!("http://127.0.0.1:{}/api/idea/submit", port))
         .header("Content-Type", "application/json")
-        .body(r#"{"title":"相变储热散热底座","input_type":"text"}"#)
+        .body(r#"{"title":"相变储热散热底座","input_type":"text","description":"相变储热材料贴合发热面，利用固液相变吸热为散热底座提供峰值热缓冲"}"#)
         .send()
         .expect("submit must respond");
-    assert!(submit_resp.status().is_success(), "submit status");
+    assert!(submit_resp.status().is_success(), "submit {} {}", submit_resp.status(), submit_resp.text().unwrap_or_default());
     let submit_json: serde_json::Value = submit_resp.json().expect("submit json");
     let id = submit_json["id"]
         .as_str()
