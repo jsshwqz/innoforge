@@ -686,3 +686,10 @@
 - **状态 / Status**: ✅ 新增 `autoclose-hygiene` CI job，检测 CHANGELOG.md 新增行中的裸 `#NN`
 - **踩坑**: ⑪ CHANGELOG 裸 `#NN` 被复制进 commit message 触发 GitHub 自动关闭 issue
 - **分支保护**: 需添加 `Autoclose Hygiene` 为第 8 条 required context（当前 7 条）
+
+### 2026-10-18 — **R21: v0.9.17 release prep + autoclose-hygiene 门禁修复**
+
+- **状态 / Status**: ✅ v0.9.17 版本号更新（Cargo.toml/Cargo.lock/CHANGELOG.md），CHANGELOG `[Unreleased]` → `[v0.9.17]`
+- **踩坑**: ⑰ Autoclose Hygiene 门禁误报 `[#NN](...)` markdown 链接为裸引用
+- **修复**: CHANGELOG 改用 `[issue NN](../issues/NN)` 格式；ci.yml 放行规则新增 `\[#\d+\]\(` 模式
+- **CHANGELOG 格式**: 新增行禁止裸 `#NN`，统一用 `[issue NN](../issues/NN)` 或 issue 标题

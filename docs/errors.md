@@ -1025,3 +1025,11 @@
 - **修复 / Fix**: 新增 `src/common.rs` 的 `upstream_timeout_secs()`（读 `INNOFORGE_UPSTREAM_TIMEOUT_SECS`，默认 30，非法值与 0 回落默认）与 `build_upstream_client()`；六处调用全部改走它；`tests/upstream_timeout_test.rs` 加 6 个用例，其中黑洞后端用例断言 `result.is_err()`、`elapsed < 10s`、**`elapsed >= 1.5s`** —— 最后这条是关键，它证明连接真的被 accept 了，不是拿 ConnectionRefused 蒙过去。
 - **预防 / Prevention**: ① 新增上游调用一律走 `build_upstream_client()`，不直接 `Client::new()`；② **兜底不许静默退回无超时客户端**（`unwrap_or_else(|_| Client::new())` 要改成明确失败，存量四处在 issue 55 跟踪）；③ 验证"没有超时"这类缺陷时，红侧要能用外层超时把 hang 量出来，不能指望测试自己变红。
 - **提交 / Commit**: `def13ac`（R20 W1：给六处上游调用加超时）。
+
+### [2026-10-18] ⑰ Autoclose Hygiene 门禁误报：`[#NN](...)` markdown 链接被当成裸引用
+- **严重程度 / Severity**: LOW（门禁误报阻断合法 PR，但不会漏过真裸引用）
+- **现象 / Symptom**: CHANGELOG 中写 `[#61](../issues/61)` 这种 markdown 链接，autoclose-hygiene CI job 的正则 `#\d+` 匹配到方括号内的 `#61`，但放行规则只检查 URL 部分中的 `#NN`（`]\([^)]*#\d+\)`）和完整 URL（`https?://[^ ]*#\d+`），不覆盖方括号内的 `#NN`，导致误报。
+- **根因 / Root cause**: ① 放行规则设计时只考虑了 `#NN` 出现在 URL 中的情况（如 `](../issues/61#section)`），没考虑 `#NN` 出现在链接文本中的情况（如 `[#61](../issues/61)`）；② `[#NN](...)` 是合法的 markdown 链接，GitHub 不会因链接文本中的 `#NN` 触发自动关闭，但门禁的正则不区分位置。
+- **修复 / Fix**: ① CHANGELOG 中 `[#NN](...)` 改为 `[issue NN](...)`，避免 `#` 出现在链接文本中；② ci.yml 的放行规则新增 `\[#\d+\]\(` 模式，放行 `[#NN](...)` 形式的 markdown 链接。
+- **预防 / Prevention**: ① 门禁正则应覆盖所有合法 markdown 链接形式，包括 `[#NN](...)`；② CHANGELOG 统一用 `[issue NN](../issues/NN)` 格式，不在链接文本中放 `#`。
+- **提交 / Commit**: 见本 PR。
