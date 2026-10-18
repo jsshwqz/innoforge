@@ -9,6 +9,21 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 _暂无条目。_
 
 ---
+## [v0.9.17] - 2026-10-17
+
+### 修复 / Fixed
+- **innoforge-mcp 四处缺陷修复**（[issue 61](../issues/61)）：`patent_compare` 端点路径修正、`BASE_URL` 改为环境变量级联、启动信息输出、所有声明工具的 dispatch 接线。新增 `tests/mcp_server_guard.rs` 守卫测试
+- **OAuth callback URL 端口统一**（[issue 33](../issues/33)）：`oauth_callback_url()` 接受 `listen_port` 参数，`AppState` 新增 `listen_port` 字段，启动自检打印实际回调地址
+- **迁移原子性测试调用生产路径**（[issue 13](../issues/13)）：`run_migration_tx` 提为 `pub fn`，测试直接调用生产函数而非手动创建事务，具备真正的检测能力。新增幂等验收用例
+
+### 新增 / Added
+- **测试隔离**（[issue 60](../issues/60)）：`tests/issue_17_synthetic_fixtures.rs` 中每个测试使用独立 `INNOFORGE_HOME` 临时目录，新增 `two_test_cases_resolve_different_db_path` 验证两个测试实例解析不同数据库路径
+
+### 验证 / Verification
+- `cargo fmt --check` ✅ / `cargo test` ✅
+- 迁移原子性自检：非原子 `run_migration_tx` → 1 test FAILED；恢复原子 → 11 tests pass
+
+---
 ## [v0.9.16] - 2026-10-16
 
 ### 修复 / Fixed
