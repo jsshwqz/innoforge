@@ -1,11 +1,12 @@
 //! InnoForge MCP Server
 //!
 //! Exposes InnoForge capabilities as MCP tools via stdio JSON-RPC.
-//! Requires InnoForge web server running on localhost:3000.
+//! Requires InnoForge web server running (default localhost:3000).
 //!
-// TODO(refactor T6.4): tools/list 声明了 6 个工具但分发目前仅接线 patent_search，
-// 未接线的 call_* 函数暂以 allow(dead_code) 保留；T6.4 决断补全或裁剪后移除本允许。
-#![allow(dead_code)]
+//! Base URL resolution order:
+//!   1. `INNOFORGE_MCP_BASE_URL` env var (full URL, e.g. `http://192.168.1.10:3921`)
+//!   2. `INNOFORGE_PORT` env var → `http://127.0.0.1:$INNOFORGE_PORT`
+//!   3. Default → `http://127.0.0.1:3000`
 //!
 //! Usage in MCP config:
 //! ```json
@@ -24,9 +25,28 @@ use std::io::{self, BufRead, Write};
 
 const SERVER_NAME: &str = "innoforge-mcp";
 const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
-const BASE_URL: &str = "http://127.0.0.1:3000";
+
+/// Resolve the InnoForge base URL from environment, falling back to default.
+///
+/// Priority: `INNOFORGE_MCP_BASE_URL` → `INNOFORGE_PORT` → default 3000.
+fn resolve_base_url() -> String {
+    if let Ok(url) = std::env::var("INNOFORGE_MCP_BASE_URL") {
+        let trimmed = url.trim_end_matches('/').to_string();
+        if !trimmed.is_empty() {
+            return trimmed;
+        }
+    }
+    let port = std::env::var("INNOFORGE_PORT")
+        .ok()
+        .and_then(|v| v.parse::<u16>().ok())
+        .unwrap_or(3000);
+    format!("http://127.0.0.1:{}", port)
+}
 
 fn main() {
+    let base_url = resolve_base_url();
+    eprintln!("[innoforge-mcp] Using base URL: {}", base_url);
+
     let stdin = io::stdin();
     let stdout = io::stdout();
     let mut stdout = stdout.lock();
@@ -111,6 +131,11 @@ fn handle_tools_call(req: &Value) -> Value {
 
     let result = match tool_name {
         "patent_search" => call_patent_search(&args),
+        "patent_detail" => call_patent_detail(&args),
+        "patent_analyze" => call_patent_analyze(&args),
+        "patent_compare" => call_patent_compare(&args),
+        "idea_validate" => call_idea_validate(&args),
+        "patent_chat" => call_patent_chat(&args),
         _ => Err(format!("Unknown tool: {}", tool_name)),
     };
 
@@ -126,29 +151,53 @@ fn handle_tools_call(req: &Value) -> Value {
 }
 
 fn http_get(path: &str) -> Result<Value, String> {
+    let base_url = resolve_base_url();
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(60))
         .build()
         .map_err(|e| e.to_string())?;
-    let url = format!("{}{}", BASE_URL, path);
+    let url = format!("{}{}", base_url, path);
     let resp = client
         .get(&url)
         .send()
-        .map_err(|e| format!("HTTP error (is innoforge running on port 3000?): {}", e))?;
+        .map_err(|e| format!("HTTP error (is innoforge running?): {}", e))?;
+    let status = resp.status();
+    if !status.is_success() {
+        let body_text = resp.text().unwrap_or_default();
+        let preview = truncate(&body_text, 200);
+        return Err(format!(
+            "HTTP {} {}: {}",
+            status.as_u16(),
+            status.canonical_reason().unwrap_or(""),
+            preview
+        ));
+    }
     resp.json::<Value>().map_err(|e| e.to_string())
 }
 
 fn http_post(path: &str, body: &Value) -> Result<Value, String> {
+    let base_url = resolve_base_url();
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(60))
         .build()
         .map_err(|e| e.to_string())?;
-    let url = format!("{}{}", BASE_URL, path);
+    let url = format!("{}{}", base_url, path);
     let resp = client
         .post(&url)
         .json(body)
         .send()
-        .map_err(|e| format!("HTTP error (is innoforge running on port 3000?): {}", e))?;
+        .map_err(|e| format!("HTTP error (is innoforge running?): {}", e))?;
+    let status = resp.status();
+    if !status.is_success() {
+        let body_text = resp.text().unwrap_or_default();
+        let preview = truncate(&body_text, 200);
+        return Err(format!(
+            "HTTP {} {}: {}",
+            status.as_u16(),
+            status.canonical_reason().unwrap_or(""),
+            preview
+        ));
+    }
     resp.json::<Value>().map_err(|e| e.to_string())
 }
 
@@ -167,23 +216,13 @@ fn call_patent_search(args: &Value) -> Result<String, String> {
     let data = http_post("/api/search", &body)?;
     let total = data["total"].as_u64().unwrap_or(0);
     let patents = data["patents"].as_array();
-
-    let mut output = format!(
-        "Found {} patents (page {})
-
-",
-        total, page
-    );
+    let mut output = format!("Found {} patents (page {})\n\n", total, page);
 
     if let Some(patents) = patents {
         for (i, p) in patents.iter().enumerate() {
             let score = p["relevance_score"].as_f64().unwrap_or(0.0);
             output.push_str(&format!(
-                "{}. [{}] {} (Score: {:.0}%)
-   Applicant: {} | Inventor: {}
-   ID: {}
-
-",
+                "{}. [{}] {} (Score: {:.0}%)\n   Applicant: {} | Inventor: {}\n   ID: {}\n\n",
                 i + 1,
                 p["patent_number"].as_str().unwrap_or("N/A"),
                 p["title"].as_str().unwrap_or("Untitled"),
@@ -209,10 +248,7 @@ fn call_patent_detail(args: &Value) -> Result<String, String> {
     let p = &empty;
 
     let output = format!(
-        "Patent: {} - Not found
-
-Try searching for a different patent number or ID.
-",
+        "Patent: {} - Not found\n\nTry searching for a different patent number or ID.\n",
         p["patent_number"].as_str().unwrap_or(id)
     );
 
@@ -240,7 +276,7 @@ fn call_patent_compare(args: &Value) -> Result<String, String> {
         args["patent_id_1"].as_str().unwrap_or(""),
         args["patent_id_2"].as_str().unwrap_or(""),
     ]});
-    let data = http_post("/api/ai/analyze-results", &body)?;
+    let data = http_post("/api/ai/compare", &body)?;
     Ok(data["content"]
         .as_str()
         .unwrap_or("Comparison failed")
