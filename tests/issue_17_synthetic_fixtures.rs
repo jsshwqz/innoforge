@@ -67,9 +67,10 @@ fn fixture_json() -> String {
         .expect("fixture file must exist")
 }
 
-fn start_server(server_port: u16, ai_port: u16) -> std::process::Child {
+fn start_server(server_port: u16, ai_port: u16, home_dir: &str) -> std::process::Child {
     Command::new(env!("CARGO_BIN_EXE_innoforge-server"))
         .env("INNOFORGE_PORT", server_port.to_string())
+        .env("INNOFORGE_HOME", home_dir)
         .env("AI_BASE_URL", format!("http://127.0.0.1:{}", ai_port))
         .env("AI_API_KEY", "test-key-not-real")
         .spawn()
@@ -166,11 +167,16 @@ fn fixture_is_marked_synthetic() {
 fn patent_detail_page_has_22_plus_buttons() {
     let server_port = free_port();
     let ai_port = free_port();
+    let home_dir = tempfile::TempDir::new().expect("temp dir for INNOFORGE_HOME");
 
     let _stub = start_fake_ai_stub(ai_port);
     std::thread::sleep(std::time::Duration::from_millis(500));
 
-    let server = start_server(server_port, ai_port);
+    let server = start_server(
+        server_port,
+        ai_port,
+        home_dir.path().to_str().unwrap(),
+    );
     assert!(
         wait_for_server(server_port, 15),
         "Server must start on port {} within 15s",
@@ -226,8 +232,13 @@ fn patent_detail_page_has_22_plus_buttons() {
 fn broken_ai_stub_does_not_crash_server() {
     let server_port = free_port();
     let dead_port: u16 = 59999;
+    let home_dir = tempfile::TempDir::new().expect("temp dir for INNOFORGE_HOME");
 
-    let server = start_server(server_port, dead_port);
+    let server = start_server(
+        server_port,
+        dead_port,
+        home_dir.path().to_str().unwrap(),
+    );
     assert!(
         wait_for_server(server_port, 15),
         "Server must start on port {} within 15s",
@@ -270,4 +281,79 @@ fn broken_ai_stub_does_not_crash_server() {
     }
 
     kill_server(server);
+}
+
+
+// ── Issue #60: test isolation ──
+
+#[test]
+fn two_test_cases_resolve_different_db_path() {
+    // Each test case gets its own INNOFORGE_HOME (temp dir), so the
+    // database files must be in different directories. This verifies
+    // test isolation: no shared database state between concurrent tests.
+    let dir_a = tempfile::TempDir::new().expect("temp dir A");
+    let dir_b = tempfile::TempDir::new().expect("temp dir B");
+
+    // Simulate what the server does: resolve_db_path with INNOFORGE_HOME set.
+    // We can't call resolve_db_path directly (it reads env vars globally),
+    // but we can verify the paths are different by construction.
+    let db_path_a = dir_a.path().join("innoforge.db");
+    let db_path_b = dir_b.path().join("innoforge.db");
+
+    assert_ne!(
+        db_path_a, db_path_b,
+        "two test cases with different INNOFORGE_HOME must resolve different db_path"
+    );
+
+    // Verify the directories are actually different (not just the filenames).
+    assert_ne!(
+        dir_a.path(), dir_b.path(),
+        "temp dirs must be different directories"
+    );
+
+    // Spin up two servers with different INNOFORGE_HOME and verify they
+    // don't interfere. Each should start independently and serve its own db.
+    let port_a = free_port();
+    let port_b = free_port();
+    let ai_port = free_port();
+
+    let _stub = start_fake_ai_stub(ai_port);
+    std::thread::sleep(std::time::Duration::from_millis(500));
+
+    let server_a = start_server(port_a, ai_port, dir_a.path().to_str().unwrap());
+    let server_b = start_server(port_b, ai_port, dir_b.path().to_str().unwrap());
+
+    assert!(
+        wait_for_server(port_a, 15),
+        "Server A must start on port {}",
+        port_a
+    );
+    assert!(
+        wait_for_server(port_b, 15),
+        "Server B must start on port {}",
+        port_b
+    );
+
+    // Both servers should be serving independently.
+    assert!(
+        check_http_200(port_a, "/api/version"),
+        "Server A must respond"
+    );
+    assert!(
+        check_http_200(port_b, "/api/version"),
+        "Server B must respond"
+    );
+
+    // Verify each server created its own db file in its own INNOFORGE_HOME.
+    assert!(
+        db_path_a.exists(),
+        "Server A should have created a db file in its INNOFORGE_HOME"
+    );
+    assert!(
+        db_path_b.exists(),
+        "Server B should have created a db file in its INNOFORGE_HOME"
+    );
+
+    kill_server(server_a);
+    kill_server(server_b);
 }
