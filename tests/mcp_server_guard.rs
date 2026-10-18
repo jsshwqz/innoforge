@@ -56,10 +56,10 @@ fn extract_dispatched_tools(src: &str) -> Vec<String> {
     for line in body.lines() {
         let trimmed = line.trim();
         // Match lines like `"patent_search" => call_patent_search(&args),`
-        if trimmed.starts_with('"') {
-            if let Some(end_quote) = trimmed[1..].find('"') {
-                let name = &trimmed[1..1 + end_quote];
-                if trimmed[1 + end_quote..].contains("=> call_") {
+        if let Some(stripped) = trimmed.strip_prefix('"') {
+            if let Some(end_quote) = stripped.find('"') {
+                let name = &stripped[..end_quote];
+                if stripped[end_quote..].contains("=> call_") {
                     tools.push(name.to_string());
                 }
             }
@@ -137,9 +137,9 @@ fn extract_route_paths(src: &str) -> Vec<String> {
         if trimmed.ends_with(".route(") || trimmed.ends_with(".route(") {
             if let Some(next) = lines.peek() {
                 let next_trimmed = next.trim();
-                if next_trimmed.starts_with('"') {
-                    if let Some(end_quote) = next_trimmed[1..].find('"') {
-                        let path = &next_trimmed[1..1 + end_quote];
+                if let Some(stripped) = next_trimmed.strip_prefix('"') {
+                    if let Some(end_quote) = stripped.find('"') {
+                        let path = &stripped[..end_quote];
                         if path.starts_with('/') {
                             routes.push(path.to_string());
                         }
