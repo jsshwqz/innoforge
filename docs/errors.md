@@ -1026,6 +1026,12 @@
 - **预防 / Prevention**: ① 新增上游调用一律走 `build_upstream_client()`，不直接 `Client::new()`；② **兜底不许静默退回无超时客户端**（`unwrap_or_else(|_| Client::new())` 要改成明确失败，存量四处在 issue 55 跟踪）；③ 验证"没有超时"这类缺陷时，红侧要能用外层超时把 hang 量出来，不能指望测试自己变红。
 - **提交 / Commit**: `def13ac`（R20 W1：给六处上游调用加超时）。
 
+### [2026-10-18] ⑬ Clippy `manual_strip`：手写 `starts_with` + `[1..]` 而非 `strip_prefix`
+- **严重程度 / Severity**: LOW（功能正确，但 clippy `-D warnings` 下编译失败，CI 红）
+- **现象 / Symptom**: `tests/mcp_server_guard.rs` 两处字符串解析用 `if trimmed.starts_with('"') { trimmed[1..].find('"') }` 模式，clippy `manual_strip` lint 报错，CI clippy job 红。
+- **根因 / Root cause**: 习惯性写 `starts_with` + 手动切片 `[1..]`，没有用 `strip_prefix` 返回的 stripped slice，导致 clippy 认为是手动前缀剥离。
+- **修复 / Fix**: 改为 `if let Some(stripped) = trimmed.strip_prefix('"') { stripped.find('"') }`，用 stripped slice 替代手动 `[1..]`。
+- **预防 / Prevention**: 字符串前缀剥离一律用 `strip_prefix` / `strip_suffix`，不手写 `starts_with` + 切片。
 ### [2026-10-18] ⑮ OAuth 回调端口有两套来源导致错配
 - **严重程度 / Severity**: MEDIUM（回调地址与实际监听端口不一致时 OAuth 换 token 失败）
 - **现象 / Symptom**: `main.rs` 中监听端口从 `INNOFORGE_PORT` 环境变量读取，候选值为 `[3000, 3921, 3100]`（依次尝试绑定），而 `oauth_callback_url()` 硬编码 `3000` 作为回调端口。当实际监听在 `3921` 或 `3100` 时，Google OAuth redirect_uri 仍写 `localhost:3000/api/auth/google/callback`，与 Google Console 注册的回调地址不匹配，换 token 阶段返回 `redirect_uri_mismatch`。
