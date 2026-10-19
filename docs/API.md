@@ -1227,12 +1227,106 @@ Response:
 
 ---
 
+---
+
+## 4. OA 期限 / 轮次 / 历史 / 讨论 / 导出
+
+> 这一组是审查意见（OA）工作流的数据面。期限计算以 `src/oa_deadline.rs` 为唯一数据源；轮次记录以 `oa_rounds` 表为准。
+
+### GET `/api/oa/deadline-table`
+
+返回各类 OA 的法定答复期限（唯一数据源，前端不应自行硬编码）。
+
+```json
+{
+  "deadline_table": {
+    "first_exam":             { "kind": "Months",  "value": 4 },
+    "second_rejection":       { "kind": "Months",  "value": 2 },
+    "reject_review":          { "kind": "Months",  "value": 3 },
+    "reexamination_request":  { "kind": "Months",  "value": 3 },
+    "reexamination_decision": { "kind": "Months",  "value": 3 },
+    "admin_lawsuit":          { "kind": "Months",  "value": 3 },
+    "abnormal":               { "kind": "WorkDays", "value": 15 }
+  }
+}
+```
+
+### GET `/api/oa/compute-deadline?oa_type=<type>&date=YYYY-MM-DD`
+
+按“发文日”推算届满日。`date` 不合法时返回 `{ "error": "Invalid date format, expected YYYY-MM-DD" }`。
+
+响应字段（`DeadlineResult`）：
+
+| 字段 | 含义 |
+|---|---|
+| `dispatch_date` | 发文日（原样返回） |
+| `service_date` | 送达日（电子送达＝发文日，不加邮路推定） |
+| `deadline` | 届满日 |
+| `days_left` | 剩余天数，负数表示已逾期 |
+| `total_days` | 发文日到届满日的总天数 |
+| `is_urgent` | 是否临近期限（≤7 天） |
+| `spec` | 期限规格（`Months(n)` / `WorkDays(n)`） |
+
+### GET `/api/oa/rounds/:patent_id`
+
+返回某专利的全部 OA 轮次：`{ "status": "ok", "patent_id": "...", "rounds": [...], "count": N }`。
+
+### POST `/api/oa/rounds`
+
+登记一轮 OA。必填：`patent_id`、`round_type`；`round_number` 由服务端自动计算。
+
+- `round_type` 仅允许：`first_rejection`、`second_rejection`、`reexamination`、`office_action`、`first_exam`、`abnormal`、`reject_review`；非法值返回 `{ "status": "error", "message": "Invalid round_type: '…'. Allowed values: …" }`。
+- 可选：`oa_date`、`oa_text`、`response_date`、`response_text`、`result`、`result_date`、`strategy_used`、`quality_score`（数值）、`notes`。
+- 成功：`{ "status": "ok", "round": {…}, "message": "OA round created" }`。
+
+### PUT `/api/oa/rounds/update/:id`
+
+按 id 局部更新一轮 OA，只更新请求里出现的字段；记录不存在返回 `{ "status": "error", "message": "OA round not found" }`。
+
+### GET `/api/oa/history/all` 与 GET `/api/oa/history/:patent_number`
+
+均返回 `{ "status": "ok", "analyses": [...] }`。`/history/all` 最多返回 100 条（按时间倒序）；`/history/:patent_number` 按专利号过滤。
+
+> ⚠️ `GET /api/oa/history/detail/:id` 目前被错误绑定到“列出全部”的 handler，`:id` 会被忽略（见 issue #88）。排查时不要依赖它。
+
+### POST `/api/oa/export-docx`
+
+把答复正文导出为 DOCX（服务端生成，返回 base64）。
+
+- 请求：`{ "response_text": "…", "patent_number": "…", "applicant": "…", "oa_type": "…" }`；`response_text` 必填且不超过 50,000 字符。
+- 成功：`{ "status": "ok", "docx": "<base64>" }`；失败：`{ "error": "…" }`。
+- 注意：响应是 JSON 里的 base64，不是二进制流。
+
+## 覆盖索引（R23 续：OA 17 条） / Coverage Index
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/oa/deadline-table` | 法定答复期限表（唯一数据源） |
+| GET | `/api/oa/compute-deadline` | 按发文日推算届满日 |
+| GET | `/api/oa/history/all` | 全部 OA 分析历史（≤100 条） |
+| GET | `/api/oa/history/:patent_number` | 某专利的 OA 分析历史 |
+| GET | `/api/oa/history/detail/:id` | 单条详情（当前实现有缺陷，见 #88） |
+| POST | `/api/oa/history/:id/delete` | 删除一条 OA 分析记录 |
+| GET | `/api/oa/history/:patent_number/diff` | 一审/二审差异对比 |
+| GET | `/api/oa/discussions/:patent_number` | 某专利的 OA 讨论会话列表 |
+| GET | `/api/oa/discussions/:patent_number/:discussion_id` | 单个讨论会话详情 |
+| POST | `/api/oa/discussions/import` | 导入讨论会话 |
+| POST | `/api/oa/export-docx` | 答复正文导出 DOCX（base64） |
+| POST | `/api/oa/export` | 分析结果服务端导出 |
+| GET | `/api/oa/export/:filename` | 下载已导出的文件 |
+| GET | `/api/oa/rounds/:patent_id` | 某专利的 OA 轮次列表 |
+| POST | `/api/oa/rounds` | 登记一轮 OA |
+| PUT | `/api/oa/rounds/update/:id` | 局部更新一轮 OA |
+| GET | `/api/oa/timeline/:patent_id` | 某专利的 OA 时间线 |
+
+
 ## 覆盖说明 / Coverage
 
 - 既有章节（搜索 / 专利 / 创意验证 / 特征卡片 / 收藏夹 / 标签 / 聊天 / IPC / 配置 / 错误 / 环境变量）：59 条 API 端点说明；
 - 页面路由表：6 条（`/test`、`/import` 已从代码移除，见上表下方注记）；
-- 本轮 R23 新增（CAD / 认证 / 审查意见 AI）：24 条。
-- 合计 **89 条**（按 method+path 去重），约覆盖 140 条路由的 65%。剩余条目由 issue #62 跟踪。
+- 本轮 R23 新增（CAD / 认证 / 审查意见 AI）：24 条；
+- 本轮续补（OA 期限 / 轮次 / 历史 / 讨论 / 导出）：17 条。
+- 合计 **111 条**（按 method+path 去重），覆盖 145 个 method+path 路由组合中的 111 条（约 77%）。剩余 39 条由 issue #62 跟踪。
 
 ## 待覆盖 / Not Yet Covered
 
