@@ -1090,3 +1090,20 @@
   - 负控2：把 `chars().count()` 改回 `q.len()` ⇒ `issue72_byte_vs_char_count_guard` 变红（2 字姓名「张三」= 6 字节 ∉ `2..=4`，字节判据拒绝）。已改回，`git diff` 为空。
 - **预防 / Prevention**: ① 任何涉及多字节字符（中文/emoji）的长度判据，一律用 `chars().count()` 而非 `len()`；② **姓名判据不得用作检索路由的排除门**——技术词首字与常见姓结构性重合，姓氏表是按测试词拟合、违反通用性；姓名召回应靠 Mixed 内含的 inventor 字段搜索，而非预先独占 inventor 通道；③ 多词查询不许隐式整串 LIKE，必须显式切 token 并声明 AND/OR 语义。
 - **提交 / Commit**: 见 PR（分支 `r24/relevance-charset`，`Closes #72`）。
+
+## [2026-10-19] 按字节切片多字节文本：中文 API Key 打挂 `/api/settings`、沙箱 truncate 必 panic
+- **严重程度**: HIGH（接口直接断连，且用户从界面上几乎无法自救）
+- **涉及文件**: `src/routes/settings.rs`（`mask_api_key`、`api_save_ai`）、`src/experiment/sandbox.rs`（本地 `truncate`）、`tests/no_unsafe_byte_slice.rs`（新增静态防线）
+- **现象**: 粘贴三个汉字当 API Key（`"测试密钥"`，9 字节）⇒ `POST /api/settings/ai` 返回 200 落库，随后 `GET /api/settings` **HTTP 000**（连接被断开），而 `GET /api/version` 仍 200 —— 说明是 handler panic 后连接被丢弃，不是进程崩溃。首页状态条与设置页都依赖该请求，其 `catch(e){}` 静默失败，用户看到的是"空白"，恢复只能靠设置页重新存一个 ASCII Key，而设置页恰恰打不开。
+- **根因**: ① `mask_api_key` 用 `&key[..4]` / `&key[key.len()-4..]` 按**字节**切片，4 不保证落在字符边界 ⇒ `byte index 4 is not a char boundary` panic；② `api_save_ai` 只校验 `api_key.len()`（字节）不校验字符集，非 ASCII Key 得以入库；③ `sandbox.rs` 另写了一个不检查边界的 `truncate`（阈值 5000/2000，`% 3 == 2`，中文输出几乎必切在字中间），而仓库里 `ai/client.rs` 早有 `safe_truncate` 做了 `is_char_boundary` 回退——不是不知道，是没统一。
+- **修复 / Fix**:
+  1. `mask_api_key` 改按**字符**取前/后各 4（`chars().take(4)` / `chars().skip(count-4)`），并提到模块级供 SerpAPI/EPO 复用；ASCII 形态 `sk-a****5678`、短 Key `****`、占位符空串全部保持。
+  2. `api_save_ai` 入口增加字符集校验：只允许可见 ASCII（`is_ascii_graphic`），与 EPO 通道 `parse_epo_credential` 同一把尺子；非法 Key 返回 **400 + 明确原因**，**绝不落库**。handler 返回类型改为 `Result<Json<Value>, (StatusCode, Json<Value>)>`，错误分支统一走真实状态码。
+  3. `sandbox.rs` 删除本地 `truncate`，统一改用 `crate::ai::client::safe_truncate`（超长才追加 `...(truncated)`）。
+  4. 新增 `tests/no_unsafe_byte_slice.rs` 基线快照守卫：`src/` 下裸 `[..` 切片按文件计数冻结基线，新增文件或已知文件计数上升即红；审查指南写入 `AGENTS.md`。
+- **负控 / Negative controls**:
+  - 负控1（功能没修死）：ASCII `sk-abcdefgh12345678` ⇒ `sk-a****5678`；≤8 字符 ⇒ `****`；占位符 ⇒ 空串。
+  - 负控2（断言不恒真）：把 `mask_api_key` 改回 `&key[..4]` ⇒ 中文 Key 两条测试 panic 变红；改回后 `git diff` 为空。
+  - 恢复性：坏 Key 被 400 拒 → 再存合法 ASCII Key → `GET /api/settings` 200。
+- **预防 / Prevention**: ① 任何多字节文本的切片索引必须先 `is_char_boundary` 回退，或改用 `chars()`；② 用户可粘贴的凭据类字段在**入口**校验字符集并返回 4xx，不允许"先落库后崩溃"；③ 已有正确工具函数（`safe_truncate`）必须复用，禁止在模块内另写一份——分叉的局部实现是这类 bug 的温床；④ 前端 `catch(e){}` 的静默失败会把后端 panic 伪装成"页面空白"，接口错误必须可见（与 #68 关联）。
+- **提交 / Commit**: 见 PR #87（分支 `r24/bytes-vs-chars`，`Closes #73`）。
