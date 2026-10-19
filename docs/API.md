@@ -84,9 +84,21 @@ Response:
   "total": 123,
   "page": 1,
   "page_size": 20,
-  "search_type": "inventor"
+  "search_type": "inventor",
+  "matched_fields": ["inventor"],
+  "applied_filter": "inventor_only",
+  "dedup_removed": 0
 }
 ```
+
+**多词语义（issue #72）**: 当 `query` 含空格分出多个 token 时，本地搜索走 **OR 语义**——
+每个 token 命中 `title / abstract_text / applicant / inventor / patent_number` 任一字段即返回该行，
+按相关性评分排序。单 token 时行为与旧整串 `%query%` LIKE 一致。
+
+**自证字段（issue #72）**:
+- `matched_fields`: 本次实际查询的数据库字段列表（如 `["inventor"]` 或 `["title","abstract_text","applicant","inventor","patent_number"]`）。
+- `applied_filter`: 检索策略标识：`inventor_only` / `applicant_only` / `patent_number` / `single_token_like` / `multi_token_or`。
+- `reason`（仅 0 命中出现）: 解释为何无结果，如 `"查询被判定为发明人检索，但发明人列无匹配"` / `"多词 OR 检索：库中无任一 token 命中"` / `"库中无匹配该词的专利"`。
 
 ### 2) 在线搜索 / Online Search
 

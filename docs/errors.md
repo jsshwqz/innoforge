@@ -1071,3 +1071,22 @@
 - **负控 / Negative controls**: 把 `None` 分支改回 `8.0` ⇒ 3 个测试红（含正向B 从 92 被顶到 100）；删掉空检索早退 ⇒ `test_no_results_must_not_claim_novelty` 红（`Sufficient` ≠ `InsufficientEvidence`）。均已改回。
 - **预防 / Prevention**: ① 任何「度量值」不得用零值同时表达「实测为零」与「未测」——必须 `Option`；② 加分项之和不得让分数可能越过满分上限，越界要用 `debug_assert` 暴露而非 `clamp` 掩盖；③ 修 bug 前先查有没有测试把 bug 锁成绿灯，有则连同断言语义一起改并在 PR 正文说明为何旧断言错。
 - **提交 / Commit**: 见 PR #81（分支 `r24/zero-evidence-novelty`）。
+
+---
+
+## [2026-10-19] 两字中文技术词被误判为发明人姓名 / 多词整句 LIKE 零命中
+- **严重程度**: HIGH
+- **涉及文件**: `src/db/relevance.rs`（`is_chinese_name` / `is_likely_name`）、`src/db/patent.rs`（`search_like`）
+- **现象**: 搜索「相变」「石蜡」「齿轮」等两字中文技术词返回 0 条且 `search_type:"inventor"`；搜索「散热底座 均热板」等多词查询也返回 0 条。
+- **根因**: ① `is_chinese_name` 用 `q.len()`（UTF-8 字节数）做姓名边界 `2..=6`，2 个汉字 = 6 字节恰好落进区间，且仅凭「短且纯中文」即判姓名；② `detect_search_type` 把 `is_likely_name` 当**排除门**——判姓名 ⇒ 只查 inventor ⇒ 技术词零命中；③ `search_like` 把整串 query（含空格）塞进一个 `%…%` LIKE，多词查询中两个词分别命中但合起来 0。
+- **修复 / Fix**:
+  1. `is_chinese_name` / `is_likely_name` 边界一律改用 `chars().count()`（字符数）。
+  2. **v2（通用性修正）**：删除姓氏表路由门。初版曾加常见姓氏表（首字须为前 ~85 大姓、刻意排除 `相`/`石`/`齿`）来挡技术词，但技术词首字与常见姓高度重合（`高温`/`金属`/`白色`/`向心` 的 `高`/`金`/`白`/`向` 均在表内）→ 仍被判姓名 → 只查 inventor → 0 命中；且「刻意排除 相/石/齿」是按测试词拟合，违反引擎通用性红线。现 `detect_search_type` 对中文短串**一律返回 Mixed**，姓名召回由 Mixed 内含的 inventor 字段搜索保证；`is_likely_name` 降为**形状 hint**，仅在 0 命中时于 `reason` 标注「查询形似人名，可显式指定 search_type=inventor 重试」。只有调用方显式传 `search_type=inventor` 才走 inventor-only。
+  3. `search_like` 按空白切 token，走 **OR 语义**——每个 token 命中任一字段即返回该行，单 token 时行为与旧整串 LIKE 逐字一致。语义写入 `docs/API.md`。
+  4. `SearchResult` 新增 `matched_fields` / `applied_filter` / `reason` 三个 `Option` 字段（`skip_serializing_if = "Option::is_none"`），让调用方看出「这次查了哪些列」「0 命中是因为库中无该词」。
+- **所选多词语义**: **OR**——每个 token 命中任一字段即返回，按相关性评分排序。选 OR 而非 AND 的理由：两词分别在库中命中但分布在不同专利时，AND 会返回 0（过严），OR 保证「两 token 单独都命中」时合起来必命中（满足正向B 红线）。
+- **负控 / Negative controls**:
+  - 负控1：合成中文姓名（张三/李四）走 Mixed 通道，仍命中且命中落在 inventor 字段——`issue72_real_names_hit_via_mixed_including_inventor`（断言 `detected_type==Mixed` 且返回行 `inventor` 含该姓名，对应路由层 `matched_fields` 含 `inventor`）。
+  - 负控2：把 `chars().count()` 改回 `q.len()` ⇒ `issue72_byte_vs_char_count_guard` 变红（2 字姓名「张三」= 6 字节 ∉ `2..=4`，字节判据拒绝）。已改回，`git diff` 为空。
+- **预防 / Prevention**: ① 任何涉及多字节字符（中文/emoji）的长度判据，一律用 `chars().count()` 而非 `len()`；② **姓名判据不得用作检索路由的排除门**——技术词首字与常见姓结构性重合，姓氏表是按测试词拟合、违反通用性；姓名召回应靠 Mixed 内含的 inventor 字段搜索，而非预先独占 inventor 通道；③ 多词查询不许隐式整串 LIKE，必须显式切 token 并声明 AND/OR 语义。
+- **提交 / Commit**: 见 PR（分支 `r24/relevance-charset`，`Closes #72`）。

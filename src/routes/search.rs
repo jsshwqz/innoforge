@@ -1,4 +1,5 @@
 use super::{escape_csv, parse_search_type, AppState};
+use crate::db::relevance::is_likely_name;
 use crate::db::Database;
 use crate::patent::*;
 // MA1：q 串渲染 / 相关性判定 / 排序去重 / 上游调用链均已抽到 `crate::search`，
@@ -383,6 +384,9 @@ pub async fn api_search(
             page: req.page,
             page_size: req.page_size,
             search_type: Some("mixed".into()),
+            matched_fields: None,
+            applied_filter: None,
+            reason: Some("查询为空".to_string()),
             dedup_removed: 0,
             categories: None,
         });
@@ -529,12 +533,76 @@ pub async fn api_search(
         total
     };
 
+    // # issue #72 — 响应可自证：标注本次实际查询的字段与策略
+    let matched_fields: Vec<String> = match detected_type {
+        SearchType::Inventor => vec!["inventor".to_string()],
+        SearchType::Applicant => vec!["applicant".to_string()],
+        SearchType::PatentNumber => vec!["patent_number".to_string()],
+        SearchType::Keyword | SearchType::Mixed => vec![
+            "title".to_string(),
+            "abstract_text".to_string(),
+            "applicant".to_string(),
+            "inventor".to_string(),
+            "patent_number".to_string(),
+        ],
+    };
+
+    let token_count = req
+        .query
+        .split_whitespace()
+        .filter(|s| !s.is_empty())
+        .count();
+    let applied_filter = match detected_type {
+        SearchType::Inventor => "inventor_only".to_string(),
+        SearchType::Applicant => "applicant_only".to_string(),
+        SearchType::PatentNumber => "patent_number".to_string(),
+        SearchType::Keyword | SearchType::Mixed => {
+            if token_count > 1 {
+                "multi_token_or".to_string()
+            } else {
+                "single_token_like".to_string()
+            }
+        }
+    };
+
+    // # issue #72 — 0 命中有原因
+    let reason = if final_total == 0 {
+        match detected_type {
+            SearchType::Inventor => Some("查询被判定为发明人检索，但发明人列无匹配".to_string()),
+            SearchType::Applicant => Some("查询被判定为申请人检索，但申请人列无匹配".to_string()),
+            SearchType::PatentNumber => {
+                Some("查询被判定为专利号检索，但库中无该专利号".to_string())
+            }
+            SearchType::Keyword | SearchType::Mixed => {
+                if token_count > 1 {
+                    Some("多词 OR 检索：库中无任一 token 命中".to_string())
+                } else {
+                    // # issue #72 v2 — name_like 标注：is_likely_name 仅作 hint，
+                    // 不路由。0 命中且形状像人名时，提示用户可显式走 inventor。
+                    if is_likely_name(&req.query) {
+                        Some(
+                            "库中无匹配该词的专利；查询形似人名，可显式指定 search_type=inventor 重试"
+                                .to_string(),
+                        )
+                    } else {
+                        Some("库中无匹配该词的专利".to_string())
+                    }
+                }
+            }
+        }
+    } else {
+        None
+    };
+
     Json(SearchResult {
         patents,
         total: final_total,
         page: req.page,
         page_size: req.page_size,
         search_type: Some(search_type_str.to_string()),
+        matched_fields: Some(matched_fields),
+        applied_filter: Some(applied_filter),
+        reason,
         categories,
         dedup_removed,
     })
