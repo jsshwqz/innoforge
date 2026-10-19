@@ -587,6 +587,20 @@ fn issue72_two_char_technical_terms_hit_as_mixed_not_inventor() {
     }
 }
 
+/// 通用性：v2 删除姓氏路由门后，首字与常见姓重合的技术词也走 Mixed，
+/// 不得因「形似人名」被收窄到 inventor-only（否则高温/金属/白色/向心 会 0 命中）。
+#[test]
+fn issue72_surname_leading_technical_terms_route_to_mixed() {
+    let db = Database::init(":memory:").expect("init db");
+    for term in &["高温", "金属", "白色", "向心"] {
+        assert_eq!(
+            db.detect_search_type(term),
+            SearchType::Mixed,
+            "term `{term}` must route to Mixed (not inventor-only)"
+        );
+    }
+}
+
 /// 正向B：两个 token 单独都命中的多词查询必须命中（OR 语义）。
 #[test]
 fn issue72_multi_token_or_query_hits() {

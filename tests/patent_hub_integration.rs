@@ -112,20 +112,24 @@ fn detect_company_as_applicant() {
 }
 
 #[test]
-fn detect_chinese_name_as_inventor() {
+fn detect_chinese_name_routes_to_mixed() {
     let db = Database::init(":memory:").unwrap();
+    // #72 v2：姓名不再走 inventor-only 路由门——中文短串一律 Mixed，
+    // 姓名召回由 Mixed 内含的 inventor 字段搜索保证（见 routes/search 的 matched_fields）。
+    // 旧断言 `SearchType::Inventor` 是字节长度误判的根源，故随之更新。
     assert!(matches!(
         db.detect_search_type("张三"),
-        SearchType::Inventor
+        SearchType::Mixed
     ));
 }
 
 #[test]
-fn detect_english_name_as_inventor() {
+fn detect_english_name_routes_to_mixed() {
     let db = Database::init(":memory:").unwrap();
+    // #72 v2：同上，英文姓名也走 Mixed（inventor 字段仍在检索范围内）。
     assert!(matches!(
         db.detect_search_type("John Smith"),
-        SearchType::Inventor
+        SearchType::Mixed
     ));
 }
 
