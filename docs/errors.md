@@ -1104,3 +1104,15 @@
 - **负控**: 在索引表注入 `POST /api/acc-union-ghost` ⇒ `api_doc_guard` 变红并精确列出该端点；撤销后复绿（2 passed）。
 - **预防**: ① 文档 PR 的评审指标要看**净删除量**，`−` 不是零就不许说“只是补充”；② 覆盖率必须按 method+path 去重后的**并集**计算；③ 文档里的每个端点都要能被路由表核对，守卫要能抓幽灵端点；④ “重写”不是文档工作的默认动作，除非能证明旧内容全部被新内容覆盖。
 - **提交**: 见 PR #86。
+
+---
+
+## [2026-10-19] 文档守卫把“路径里的动词”当成 HTTP 方法；多方法路由只记第一个
+- **严重程度**: MEDIUM（守卫误报会让正确的文档变红；漏记会让守卫少覆盖一半路由）
+- **现象**: 在索引表写入 `POST /api/oa/history/:id/delete`（代码里确实注册为 POST），`api_doc_guard` 报“文档声明了代码路由表中不存在的端点”，列出 `DELETE /api/oa/history/:id/delete`——方法被解析错了。
+- **根因**: ① 方法正则用的是裸词 `\b(get|post|put|delete|patch)\b`，路径字符串里的 `delete` 比后面的 `post(` 更早出现，被当成方法；② 每个 `.route(` 块只取**第一个**方法，`.get(a).post(b)` 这类多方法路由只记了 GET，导致守卫对同一路径的其它方法视而不见。
+- **修复**: 方法改为按**函数调用形态**匹配 `\b(get|post|put|delete|patch)\(`，并遍历 chunk 内所有方法；把解析逻辑抽成 `parse_routes_from(src: &str)` 以便单测。
+- **回归**: 新增 `parser_handles_method_word_inside_path_and_multi_method_routes`——路径含 `delete` 必须解析出 POST 且不产生 DELETE；`.get(...).post(...)` 两个方法都要在集合里。
+- **负控**: 索引表注入 `POST /api/acc-oa-ghost` ⇒ 守卫变红并精确列出该端点；撤销后 3 passed。
+- **预防**: 解析器匹配的是**语法形态**，不是自然语言词；正则修完后必须补一条“触发该误判的最小样例”的回归用例，否则下次改解析还会踩。
+- **提交**: 见 PR（分支 `r23/docs-idea-oa`）。
