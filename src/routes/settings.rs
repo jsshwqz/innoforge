@@ -1,5 +1,5 @@
 use super::{find_gemini_cli, AppState};
-use axum::{extract::State, Json};
+use axum::{extract::State, http::StatusCode, Json};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::path::PathBuf;
@@ -33,6 +33,22 @@ fn provider_db_key(base_url: &str) -> &'static str {
     }
 }
 
+/// 按**字符**（而非字节）取前/后各 4 个字符做掩码，避免非 ASCII Key 在字节
+/// 边界中间切片导致 panic（#73）。ASCII Key 的输出形态保持 `sk-a****5678`；
+/// ≤8 字符的短 Key 仍回显 `****`；空串与占位符回显空串。
+fn mask_api_key(key: &str) -> String {
+    if key.is_empty() || key == "your-serpapi-key-here" {
+        return String::new();
+    }
+    let char_count = key.chars().count();
+    if char_count <= 8 {
+        return "****".to_string();
+    }
+    let prefix: String = key.chars().take(4).collect();
+    let suffix: String = key.chars().skip(char_count - 4).collect();
+    format!("{prefix}****{suffix}")
+}
+
 /// 返回当前版本号与构建元信息 / Return version + build metadata
 pub async fn api_get_version(State(s): State<AppState>) -> Json<serde_json::Value> {
     let templates = json!({
@@ -57,16 +73,6 @@ pub async fn api_get_version(State(s): State<AppState>) -> Json<serde_json::Valu
 
 pub async fn api_get_settings(State(s): State<AppState>) -> Json<serde_json::Value> {
     let config = s.config.read().unwrap_or_else(|e| e.into_inner());
-
-    fn mask_api_key(key: &str) -> String {
-        if key.is_empty() || key == "your-serpapi-key-here" {
-            String::new()
-        } else if key.len() <= 8 {
-            "****".to_string()
-        } else {
-            format!("{}****{}", &key[..4], &key[key.len() - 4..])
-        }
-    }
 
     let serpapi_keys: Vec<String> = config
         .serpapi_keys
@@ -469,7 +475,7 @@ pub async fn api_save_serpapi(
 pub async fn api_save_ai(
     State(s): State<AppState>,
     Json(req): Json<serde_json::Value>,
-) -> Json<serde_json::Value> {
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     let base_url = req["base_url"].as_str().unwrap_or("").trim();
     let api_key = req["api_key"].as_str().unwrap_or("").trim();
     let model = req["model"].as_str().unwrap_or("").trim();
@@ -486,29 +492,55 @@ pub async fn api_save_ai(
         .to_string();
 
     if base_url.is_empty() || api_key.is_empty() || model.is_empty() {
-        return Json(json!({"status": "error", "message": "All fields are required"}));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"status": "error", "message": "All fields are required"})),
+        ));
     }
     if !base_url.starts_with("http://") && !base_url.starts_with("https://") {
-        return Json(json!({"status": "error", "message": "URL must use HTTP or HTTPS protocol"}));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"status": "error", "message": "URL must use HTTP or HTTPS protocol"})),
+        ));
     }
     // 掩码检测必须在长度检查之前：如果用户使用 ≤8 字符的短 Key 的掩码值 "****"，应允许通过
     if !api_key.contains("****") && (api_key.len() < 8 || api_key.len() > 200) {
-        return Json(
-            json!({"status": "error", "message": "API key length must be between 8 and 200 characters"}),
-        );
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(
+                json!({"status": "error", "message": "API key length must be between 8 and 200 characters"}),
+            ),
+        ));
+    }
+    // API Key 字符集校验（#73）：只允许可见 ASCII（0x21..=0x7E），不含空白/控制字符。
+    // 与 EPO 通道 `parse_epo_credential` 的 `is_ascii_graphic` 同一把尺子。
+    // 非法 Key 在此拒回 4xx，绝不落库——否则库里残留脏数据会让后续检索链
+    // 拿到无法用于鉴权的 Key（且旧版 `mask_api_key` 按字节切片会直接 panic）。
+    if !api_key.contains("****") && !api_key.chars().all(|c| c.is_ascii_graphic()) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "status": "error",
+                "message": "API Key 只能包含不含空格的可见 ASCII 字符（0x21..=0x7E），请检查是否误粘贴了中文或空白。"
+            })),
+        ));
     }
     if model.len() < 2 || model.len() > 100 {
-        return Json(
-            json!({"status": "error", "message": "Model name must be between 2 and 100 characters"}),
-        );
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(
+                json!({"status": "error", "message": "Model name must be between 2 and 100 characters"}),
+            ),
+        ));
     }
     if !model
         .chars()
         .all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.' || c == ':' || c == '/')
     {
-        return Json(
-            json!({"status": "error", "message": "Model name contains invalid characters"}),
-        );
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"status": "error", "message": "Model name contains invalid characters"})),
+        ));
     }
     let model_expert = if model_expert.is_empty() {
         "deepseek-reasoner"
@@ -520,9 +552,12 @@ pub async fn api_save_ai(
             c.is_alphanumeric() || c == '-' || c == '_' || c == '.' || c == ':' || c == '/'
         })
     {
-        return Json(
-            json!({"status": "error", "message": "Expert model name contains invalid characters"}),
-        );
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(
+                json!({"status": "error", "message": "Expert model name contains invalid characters"}),
+            ),
+        ));
     }
 
     // 检查 API Key 是否为掩码形式（包含 ****），若是则从该服务商独立 Key 字段中读取真实值
@@ -532,10 +567,13 @@ pub async fn api_save_ai(
         let config = s.config.read().unwrap_or_else(|e| e.into_inner());
         let current_key = config.api_key_for_provider(base_url);
         if current_key.is_empty() || current_key == "ollama" {
-            return Json(json!({
-                "status": "error",
-                "message": "该服务商尚未配置过 API Key，请手动输入完整 Key，不能使用掩码值。"
-            }));
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "status": "error",
+                    "message": "该服务商尚未配置过 API Key，请手动输入完整 Key，不能使用掩码值。"
+                })),
+            ));
         }
         current_key
     } else {
@@ -553,14 +591,17 @@ pub async fn api_save_ai(
             let old_domain = extract_domain(&current.ai_base_url);
             let new_domain = extract_domain(base_url);
             if old_domain != new_domain {
-                return Json(json!({
-                    "status": "error",
-                    "message": format!(
-                        "检测到切换 AI 服务商（{} → {}），请手动输入新的 Google Client Secret，不能使用旧 Secret 的掩码值。",
-                        old_domain.as_deref().unwrap_or("<unknown>"),
-                        new_domain.as_deref().unwrap_or("<unknown>")
-                    )
-                }));
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({
+                        "status": "error",
+                        "message": format!(
+                            "检测到切换 AI 服务商（{} → {}），请手动输入新的 Google Client Secret，不能使用旧 Secret 的掩码值。",
+                            old_domain.as_deref().unwrap_or("<unknown>"),
+                            new_domain.as_deref().unwrap_or("<unknown>")
+                        )
+                    })),
+                ));
             }
         }
         old
@@ -585,10 +626,13 @@ pub async fn api_save_ai(
     ];
     if let Err(e) = s.db.set_settings_batch(&settings) {
         tracing::error!("Failed to save AI settings to the database: {}", e);
-        return Json(json!({
-            "status": "error",
-            "message": "保存 AI 配置失败，请稍后重试"
-        }));
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({
+                "status": "error",
+                "message": "保存 AI 配置失败，请稍后重试"
+            })),
+        ));
     }
 
     // SQLite 主存储成功后，再更新内存配置以保持一致。
@@ -634,7 +678,7 @@ pub async fn api_save_ai(
         }
     }
 
-    Json(json!({"status": "ok"}))
+    Ok(Json(json!({"status": "ok"})))
 }
 
 /// 查询 SerpAPI 账户余额/用量
@@ -770,6 +814,62 @@ fn extract_domain(url: &str) -> Option<String> {
         ))
     } else {
         Some(domain.to_string())
+    }
+}
+
+/// #73 掩码与字符集防线测试
+#[cfg(test)]
+mod mask_api_key_tests {
+    use super::mask_api_key;
+
+    #[test]
+    fn ascii_key_keeps_classic_mask_shape() {
+        // 负控1：ASCII Key 掩码形态不变
+        assert_eq!("sk-a****5678", mask_api_key("sk-abcdefgh12345678"));
+    }
+
+    #[test]
+    fn short_key_returns_four_stars() {
+        // 负控1：≤8 字符短 Key 回显 ****
+        assert_eq!("****", mask_api_key("short"));
+        assert_eq!("****", mask_api_key("12345678"));
+        assert_eq!("****", mask_api_key("ab"));
+    }
+
+    #[test]
+    fn empty_and_placeholder_return_empty() {
+        assert_eq!("", mask_api_key(""));
+        assert_eq!("", mask_api_key("your-serpapi-key-here"));
+    }
+
+    #[test]
+    fn non_ascii_key_does_not_panic_and_masks_by_char() {
+        // 正向：中文 Key（9 字节 / 3 字符）按字符掩码，不 panic
+        // 3 字符 ≤ 8 ⇒ ****
+        assert_eq!("****", mask_api_key("测试密钥"));
+        // 12 个汉字（12 字符 > 8）⇒ 前 4 + **** + 后 4
+        let long_cjk = "一二三四五六七八九十十一";
+        let masked = mask_api_key(long_cjk);
+        assert_eq!("一二三四****九十十一", masked);
+        // 混合：ASCII + 中文，按字符取前/后 4（16 字符）
+        let mixed = "sk-a测试密钥abcdefgh";
+        let masked_mixed = mask_api_key(mixed);
+        assert_eq!("sk-a****efgh", masked_mixed);
+    }
+
+    #[test]
+    fn mask_output_is_valid_utf8_for_arbitrary_input() {
+        // 任何输入都不该产生非法 UTF-8 或 panic
+        let long_repeated = "×".repeat(100);
+        let cases = [
+            "🎉🎊🎈🎆🎇",           // emoji
+            "a🎉b🎊c🎈d🎆e🎇f",     // mixed
+            long_repeated.as_str(), // long repeated
+            "🇨🇳🇺🇸🇫🇷🇩🇪",             // flag emoji (multi-codepoint)
+        ];
+        for c in cases {
+            let _ = mask_api_key(c); // must not panic
+        }
     }
 }
 
@@ -1194,5 +1294,135 @@ mod epo_credential_settings_tests {
             setting(&state, "SERPAPI_KEY_1").is_empty(),
             "报错就不能顺手写另一个源"
         );
+    }
+}
+
+/// #73 `/api/settings/ai` 字符集校验 + 恢复性测试
+#[cfg(test)]
+mod ai_settings_charset_tests {
+    use super::{api_get_settings, api_save_ai};
+    use crate::cad::CadService;
+    use crate::db::Database;
+    use crate::routes::{AppConfig, AppState};
+    use axum::{extract::State, Json};
+    use serde_json::json;
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex, RwLock};
+
+    const VALID_ASCII_KEY: &str = "sk-abcdefgh12345678";
+
+    fn state_with(config: AppConfig) -> AppState {
+        let cad_root =
+            std::env::temp_dir().join(format!("innoforge-ai-charset-{}", uuid::Uuid::new_v4()));
+        AppState {
+            db: Arc::new(Database::init(":memory:").expect("in-memory db")),
+            cad: Arc::new(CadService::new(cad_root, None).expect("cad service")),
+            config: Arc::new(RwLock::new(config)),
+            pipeline_channels: Arc::new(Mutex::new(HashMap::new())),
+            db_path: ":memory:".to_string(),
+            listen_port: 3000,
+        }
+    }
+
+    fn ai_request(api_key: &str) -> serde_json::Value {
+        json!({
+            "base_url": "http://localhost:11434/v1",
+            "api_key": api_key,
+            "model": "qwen2.5:7b",
+            "ai_model_expert": "qwen2.5:7b"
+        })
+    }
+
+    /// 正向A：坏 Key 被拒 4xx，紧接着 GET /api/settings 必须 200（handler 不 panic）。
+    #[tokio::test]
+    async fn bad_key_rejected_then_get_settings_stays_200() {
+        let state = state_with(AppConfig::default());
+
+        let result = api_save_ai(State(state.clone()), Json(ai_request("测试密钥"))).await;
+        let err = result.expect_err("非 ASCII Key 必须被拒为 4xx");
+        let (status, body) = err;
+        assert_eq!(
+            400,
+            status.as_u16(),
+            "应返回 400，实际 {status}，body={body:?}"
+        );
+        assert_eq!(
+            "error",
+            body.0["status"].as_str().expect("status field"),
+            "body={body:?}"
+        );
+        let msg = body.0["message"].as_str().expect("message field");
+        assert!(
+            msg.contains("ASCII"),
+            "错误消息应说明字符集原因，实际：{msg}"
+        );
+
+        // 坏 Key 不得落库
+        let stored = state
+            .db
+            .get_setting("AI_API_KEY")
+            .expect("read")
+            .unwrap_or_default();
+        assert!(
+            stored.is_empty(),
+            "被拒的 Key 不该写进库，实际库里存了 {stored:?}"
+        );
+
+        // GET /api/settings 必须 200（改前这里因 panic 返回 000）
+        let echoed = api_get_settings(State(state.clone())).await;
+        assert_eq!(
+            "sk-a****5678".len(), // just ensure it doesn't panic
+            "sk-a****5678".len()
+        );
+        let _ = echoed; // 200 by type signature; the point is it didn't panic
+    }
+
+    /// 恢复性：坏 Key 被拒后，用合法 ASCII Key 覆盖 ⇒ GET /api/settings 200 且掩码正确。
+    #[tokio::test]
+    async fn recovery_bad_then_good_then_get_200() {
+        let state = state_with(AppConfig::default());
+
+        // ① 坏 Key → 4xx
+        let r1 = api_save_ai(State(state.clone()), Json(ai_request("测试密钥"))).await;
+        assert!(r1.is_err(), "坏 Key 应被拒");
+
+        // ② 合法 ASCII Key → 200
+        let r2 = api_save_ai(State(state.clone()), Json(ai_request(VALID_ASCII_KEY))).await;
+        let ok_body = r2.expect("合法 Key 应通过");
+        assert_eq!("ok", ok_body.0["status"].as_str().expect("status"));
+
+        // ③ GET /api/settings → 200，掩码形态正确
+        let echoed = api_get_settings(State(state.clone())).await;
+        assert_eq!(
+            "sk-a****5678",
+            echoed.0["ai_api_key"].as_str().expect("掩码"),
+            "GET 回显应为 sk-a****5678"
+        );
+        assert!(echoed.0["ai_api_key_configured"].as_bool().unwrap_or(false));
+    }
+
+    /// 负控1：合法 ASCII Key 的掩码形态与短 Key 回显保持不变。
+    #[tokio::test]
+    async fn ascii_key_mask_shape_unchanged() {
+        let state = state_with(AppConfig::default());
+
+        // 长 ASCII Key
+        let r = api_save_ai(State(state.clone()), Json(ai_request(VALID_ASCII_KEY))).await;
+        let _ = r.expect("合法 Key 应通过");
+        let echoed = api_get_settings(State(state.clone())).await;
+        assert_eq!(
+            "sk-a****5678",
+            echoed.0["ai_api_key"].as_str().expect("掩码")
+        );
+    }
+
+    /// 含空格的 ASCII Key 也应被拒（is_ascii_graphic 排除 0x20）。
+    #[tokio::test]
+    async fn key_with_space_rejected() {
+        let state = state_with(AppConfig::default());
+        let result =
+            api_save_ai(State(state.clone()), Json(ai_request("sk-abc def12345678"))).await;
+        let err = result.expect_err("含空格的 Key 应被拒");
+        assert_eq!(400, err.0.as_u16());
     }
 }

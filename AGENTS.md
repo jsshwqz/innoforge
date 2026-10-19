@@ -61,6 +61,13 @@
 - 生产路径（非测试代码）**禁止** `unwrap()` / `expect()`，统一用 `Result` + `?` 传播错误
 - API 层错误必须转换为用户友好的 JSON 响应，禁止将 Rust panic 信息暴露给前端
 - 禁止在循环中逐条查询数据库，优先使用批量操作（`WHERE id IN (...)` 等）
+- **禁止裸字节切片 `&s[..n]` / `&s[n..]`**（#73 防线）：对 `&str` 按字节索引切片时，
+  若 `n` 未经过 `is_char_boundary(n)` 回退或未由 `chars()` 间接保证落在字符边界，
+  非_ascii 输入会在多字节字符中间切断，触发 `panic`。正确做法：
+  - 截断文本 → 用 `crate::ai::client::safe_truncate`（字节）或 `safe_truncate_chars`（字符）；
+  - 取前/后 N 个字符 → `s.chars().take(N).collect()` / `s.chars().skip(count-N).collect()`；
+  - 确需按字节切 → 先 `while !s.is_char_boundary(end) && end > 0 { end -= 1; }` 回退到边界。
+  - CI 侧有 `tests/no_unsafe_byte_slice.rs` 静态扫描守这条线，新增违例会红。
 
 ---
 
