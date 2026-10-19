@@ -117,10 +117,7 @@ fn detect_chinese_name_routes_to_mixed() {
     // #72 v2：姓名不再走 inventor-only 路由门——中文短串一律 Mixed，
     // 姓名召回由 Mixed 内含的 inventor 字段搜索保证（见 routes/search 的 matched_fields）。
     // 旧断言 `SearchType::Inventor` 是字节长度误判的根源，故随之更新。
-    assert!(matches!(
-        db.detect_search_type("张三"),
-        SearchType::Mixed
-    ));
+    assert!(matches!(db.detect_search_type("张三"), SearchType::Mixed));
 }
 
 #[test]
