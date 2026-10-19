@@ -141,7 +141,7 @@ fn score_evidence(ctx: &PipelineContext) -> f64 {
     }
     total += 0.5;
 
-    score += ctx.diversity_score.min(1.0) * 0.5;
+    score += ctx.diversity_score.unwrap_or(0.0).min(1.0) * 0.5;
     total += 0.5;
 
     if total == 0.0 {
@@ -257,7 +257,7 @@ mod tests {
             "This is a comprehensive analysis covering all aspects of the technology".to_string();
         ctx.action_plan = "Implement in phases".to_string();
         ctx.novelty_score = 75.0;
-        ctx.diversity_score = 0.8;
+        ctx.diversity_score = Some(0.8);
         assert!((evaluate(&ctx).quality_score) > 0.5);
     }
 

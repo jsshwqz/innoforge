@@ -2,6 +2,19 @@ use super::state::PipelineStep;
 use crate::search::enrichment::EnrichmentStatus;
 use serde::{Deserialize, Serialize};
 
+/// 新颖性评估的证据状态
+///
+/// 区分「查了且证据充分」与「没查到任何对比文献」。
+/// 后者必须不给数值分，避免把"没查"当成"查了且完全不相似"。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum NoveltyStatus {
+    /// 证据充分，已给出数值新颖性分
+    Sufficient,
+    /// 证据不足：本地库 0 条且在线搜索未配置/未返回结果，无法评估新颖性
+    #[default]
+    InsufficientEvidence,
+}
+
 fn default_branch() -> String {
     "main".to_string()
 }
@@ -246,7 +259,7 @@ pub struct PipelineContext {
     pub patent_results: Vec<PipelinePatentHit>,
 
     // Step 5: DiversityGate
-    pub diversity_score: f64,
+    pub diversity_score: Option<f64>,
     pub coverage_dimensions: Vec<String>,
     pub retry_count: u32,
 
@@ -264,6 +277,7 @@ pub struct PipelineContext {
 
     // Step 10: ScoreNovelty
     pub novelty_score: f64,
+    pub novelty_status: NoveltyStatus,
     pub score_breakdown: ScoreBreakdown,
 
     // Step 11-12: AI Analysis
@@ -354,7 +368,7 @@ impl PipelineContext {
             expanded_queries: Vec::new(),
             web_results: Vec::new(),
             patent_results: Vec::new(),
-            diversity_score: 0.0,
+            diversity_score: None,
             coverage_dimensions: Vec::new(),
             retry_count: 0,
             similarity_scores: Vec::new(),
@@ -362,6 +376,7 @@ impl PipelineContext {
             prior_art_clusters: Vec::new(),
             contradictions: Vec::new(),
             novelty_score: 0.0,
+            novelty_status: NoveltyStatus::default(),
             score_breakdown: ScoreBreakdown::default(),
             ai_analysis: String::new(),
             action_plan: String::new(),

@@ -1061,3 +1061,13 @@
   - **#19 红→绿**: 将 `auto_migrate_db` 中 `is_sqlite_file` 检查改为 `if false && !is_sqlite_file(...)` 绕过校验 → `migration_validation_non_sqlite_file_not_copied` 和 `migration_validation_empty_file_rejected` 变红（垃圾文件被复制到新位置）→ 恢复校验 → 变绿。
 - **测试文件 / Test file**: `tests/migration_negative_tests.rs`（10 个测试，覆盖 #13 事务回滚+幂等自愈、#19 文件校验+损坏隔离）
 - **提交 / Commit**: 见本 PR commit。
+
+### [2026-10-19] ⑰ #70 零证据被算成满分新颖性：`0.0` 哨兵值 + 加分口径 + clamp 掩盖
+- **严重程度 / Severity**: CRITICAL（P0：产品对全新用户输出假结论，且该错误语义被单元测试锁绿，CI 会抵抗修复）
+- **现象 / Symptom**: 全新空库、未配置任何在线搜索时点「⚡快速推演」，`POST /api/idea/analyze` 约 3 秒返回 `新颖性评分: 100/100`，而同一响应自证「网络结果 0 条 / 专利结果 0 条」。
+- **根因 / Root cause**: ① `scoring.rs` 用 `scores.first().map(...).unwrap_or(0.0)`，把「没查到任何对比文献」当成「查了且完全不相似」；② 覆盖缺口加分 `if diversity_score < 0.5 { (1.0 - diversity_score) * 8.0 }`——`diversity_score` 是 `f64`，quick 模式跳过 `DiversityGate` 后保持默认 `0.0`，于是「没测多样性」与「实测多样性 0」共用同一哨兵值，无条件 +8；③ `raw_score = 100 + 8 = 108` 被 `clamp(0.0, 100.0)` 静默压回 100，抹掉「分数可超界＝靠加分凑」这一构造错误信号。三处叠加：没查 → 满分。
+- **锁绿的测试 / Locked-wrong test**: `test_no_results_means_high_novelty` 断言 `novelty_score > 90.0`，把缺陷行为固化成不变量——谁修好缺陷谁被它打红。这是 #36「永远不触发也能过」的升级版：触发了、还断言了错误不变量。
+- **修复 / Fix**: ① 空检索走显式分支 ⇒ `NoveltyStatus::InsufficientEvidence`，写证据链后直接 return，不进加减公式；② `diversity_score: Option<f64>`，`None ⇒ coverage_gap_bonus = 0.0`；③ 加 `debug_assert!(raw_score <= 100.0)`，越界在开发期炸出；④ `routes/idea.rs` 证据不足时 `idea.novelty_score` 落 `None`，报告文案改为「无法评估（证据不足）」并给可操作出路；⑤ 旧测试改名并反转为 `test_no_results_must_not_claim_novelty`。
+- **负控 / Negative controls**: 把 `None` 分支改回 `8.0` ⇒ 3 个测试红（含正向B 从 92 被顶到 100）；删掉空检索早退 ⇒ `test_no_results_must_not_claim_novelty` 红（`Sufficient` ≠ `InsufficientEvidence`）。均已改回。
+- **预防 / Prevention**: ① 任何「度量值」不得用零值同时表达「实测为零」与「未测」——必须 `Option`；② 加分项之和不得让分数可能越过满分上限，越界要用 `debug_assert` 暴露而非 `clamp` 掩盖；③ 修 bug 前先查有没有测试把 bug 锁成绿灯，有则连同断言语义一起改并在 PR 正文说明为何旧断言错。
+- **提交 / Commit**: 见 PR #81（分支 `r24/zero-evidence-novelty`）。
