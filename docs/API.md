@@ -27,9 +27,9 @@ http://127.0.0.1:3000
 | GET | `/compare` | 专利对比页 / Patent comparison page |
 | GET | `/ai` | AI 助手页 / AI assistant page |
 | GET | `/settings` | 设置页 / Settings page |
+
+> 注：`/test`（调试页）与 `/import`（样例导入页）两条页面路由已在代码中移除，故不再列出（issue #62）。
 | GET | `/patent/:id` | 专利详情页 / Patent detail page |
-| GET | `/test` | 调试测试页 / Debug test page |
-| GET | `/import` | 样例数据导入页 / Sample data import page |
 
 ---
 
