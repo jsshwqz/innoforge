@@ -8,7 +8,9 @@ use anyhow::Result;
 use std::sync::Arc;
 
 pub async fn execute(ctx: &mut PipelineContext, db: &Arc<Database>) -> Result<()> {
-    ctx.novelty_score = ctx.novelty_score.clamp(0.0, 100.0);
+    if ctx.novelty_status == crate::pipeline::context::NoveltyStatus::Sufficient {
+        ctx.novelty_score = ctx.novelty_score.clamp(0.0, 100.0);
+    }
 
     if ctx.ai_analysis.is_empty() {
         ctx.ai_analysis = generate_code_only_report(ctx);
@@ -168,6 +170,22 @@ fn extract_memory_entries(ctx: &PipelineContext) -> Vec<IdeaMemory> {
 }
 
 fn generate_code_only_report(ctx: &PipelineContext) -> String {
+    // #70：证据不足时不给数值分
+    if ctx.novelty_status != crate::pipeline::context::NoveltyStatus::Sufficient {
+        return format!(
+            "## 创新验证报告（数据驱动）\n\n\
+             **新颖性评分：无法评估（证据不足）**\n\n\
+             未获得任何对比文献：本地库 0 条 / 在线搜索未配置，无法评估新颖性。\n\n\
+             ### 可操作出路\n\
+             - 导入文献到本地库后再推演；\n\
+             - 配置 SerpAPI/EPO 在线搜索后重新推演。\n\n\
+             ### 搜索结果\n\
+             - 网络结果：{} 条\n\
+             - 专利结果：{} 条\n",
+            ctx.web_results.len(),
+            ctx.patent_results.len(),
+        );
+    }
     let mut report = String::new();
     report.push_str(
         "## 创新验证报告（数据驱动）
@@ -212,7 +230,7 @@ fn generate_code_only_report(ctx: &PipelineContext) -> String {
         ctx.score_breakdown.contradiction_bonus,
         ctx.contradictions.len(),
         ctx.score_breakdown.coverage_gap_bonus,
-        ctx.diversity_score * 100.0,
+        ctx.diversity_score.unwrap_or(0.0) * 100.0,
     ));
     if !ctx.top_matches.is_empty() {
         report.push_str(

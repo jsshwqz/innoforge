@@ -243,6 +243,9 @@ fn search_result_field_snapshot_is_unchanged_with_and_without_categories() {
         page: 1,
         page_size: 20,
         search_type: Some("keyword".into()),
+        matched_fields: None,
+        applied_filter: None,
+        reason: None,
         categories: Some(vec![CategoryGroup {
             label: "申请人: 某科技有限公司".into(),
             count: 4,
@@ -267,6 +270,9 @@ fn search_result_field_snapshot_is_unchanged_with_and_without_categories() {
         page: 1,
         page_size: 20,
         search_type: Some("mixed".into()),
+        matched_fields: None,
+        applied_filter: None,
+        reason: None,
         categories: None,
         dedup_removed: 0,
     };

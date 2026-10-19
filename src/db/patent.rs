@@ -1,4 +1,4 @@
-use super::relevance::{calculate_field_relevance, calculate_mixed_relevance, is_likely_name};
+use super::relevance::{calculate_field_relevance, calculate_mixed_relevance};
 use crate::patent::{Patent, PatentSummary, SearchType};
 use anyhow::Result;
 use rusqlite::{params, OptionalExtension};
@@ -181,10 +181,10 @@ impl super::Database {
             return SearchType::Applicant;
         }
 
-        if is_likely_name(q) {
-            return SearchType::Inventor;
-        }
-
+        // # issue #72 v2 — 不再用 is_likely_name 作路由门。
+        // 技术词首字与常见姓重合（高温/金属/白色/向心），姓氏门是按测试词拟合，
+        // 违反通用性。姓名召回改由 Mixed 内含的 inventor 字段搜索保证；
+        // 仅显式 search_type=inventor 才走 inventor-only（见 search_smart_exact）。
         SearchType::Mixed
     }
 
@@ -571,6 +571,13 @@ impl super::Database {
         Ok((rows, total))
     }
 
+    /// Multi-token LIKE search across title/abstract/applicant/inventor/patent_number.
+    ///
+    /// # issue #72 — 多词语义显式化
+    /// 旧实现把整串 `query` 塞进一个 `%…%` LIKE（含空格），导致「散热底座 均热板」
+    /// 这类两词查询——两个词单独都命中——合起来 0 命中。现按空白切 token，走 **OR 语义**：
+    /// 每个 token 命中任一字段即返回该行，按命中数（`relevance_score`）排序。
+    /// 单 token 时行为与旧 `%query%` 整串 LIKE 逐字一致。
     pub fn search_like(
         &self,
         query: &str,
@@ -582,101 +589,155 @@ impl super::Database {
     ) -> Result<(Vec<PatentSummary>, usize)> {
         let c = self.conn();
         let offset = page.saturating_sub(1) * page_size;
-        let q = format!("%{}%", query);
+
+        // 按空白切 token；单 token 时退化为旧整串 LIKE（issue #72）。
+        let tokens: Vec<&str> = query.split_whitespace().filter(|s| !s.is_empty()).collect();
+        if tokens.is_empty() {
+            return Ok((vec![], 0));
+        }
+        let like_patterns: Vec<String> = tokens.iter().map(|t| format!("%{}%", t)).collect();
+
+        // 构建 OR 子句：(title LIKE ?1 OR abstract_text LIKE ?1 OR … OR title LIKE ?2 OR …)
+        // 同一 token 的所有字段共享一个参数 ?N，减少绑定数。
+        const FIELDS: &[&str] = &[
+            "title",
+            "abstract_text",
+            "applicant",
+            "inventor",
+            "patent_number",
+        ];
+        let mut or_parts: Vec<String> = Vec::new();
+        for (i, _token) in tokens.iter().enumerate() {
+            let param = i + 1;
+            for field in FIELDS {
+                or_parts.push(format!("{field} LIKE ?{param}"));
+            }
+        }
+        let match_clause = or_parts.join(" OR ");
+
         let date_from = date_from.unwrap_or("");
         let date_to = date_to.unwrap_or("");
         let country = country.filter(|s| !s.is_empty());
-        let has_country = country.is_some();
-        let country_val = country.unwrap_or("");
+        let n_like = like_patterns.len();
 
-        let where_clause = if has_country {
-            "WHERE (title LIKE ?1 OR abstract_text LIKE ?1 OR applicant LIKE ?1 OR inventor LIKE ?1 OR patent_number LIKE ?1)
-             AND country=?2
-             AND (?3 = '' OR filing_date >= ?3)
-             AND (?4 = '' OR filing_date <= ?4)"
-        } else {
-            "WHERE (title LIKE ?1 OR abstract_text LIKE ?1 OR applicant LIKE ?1 OR inventor LIKE ?1 OR patent_number LIKE ?1)
-             AND (?2 = '' OR filing_date >= ?2)
-             AND (?3 = '' OR filing_date <= ?3)"
-        };
+        // 收集参数值（LIKE patterns 在前，后续 country/date/limit/offset）
+        let mut param_values: Vec<String> = like_patterns.clone();
 
-        let total: usize = if has_country {
-            c.prepare(&format!("SELECT COUNT(*) FROM patents {where_clause}"))?
-                .query_row(params![q, country_val, date_from, date_to], |r| r.get(0))?
-        } else {
-            c.prepare(&format!("SELECT COUNT(*) FROM patents {where_clause}"))?
-                .query_row(params![q, date_from, date_to], |r| r.get(0))?
-        };
+        let (where_clause, total, rows) = if let Some(country_val) = country {
+            let country_idx = n_like + 1;
+            let df_idx = n_like + 2;
+            let dt_idx = n_like + 3;
+            let where_clause = format!(
+                "WHERE ({match_clause}) AND country=?{country_idx}
+                 AND (?{df_idx} = '' OR filing_date >= ?{df_idx})
+                 AND (?{dt_idx} = '' OR filing_date <= ?{dt_idx})"
+            );
+            let count_sql = format!("SELECT COUNT(*) FROM patents {where_clause}");
+            let total: usize = c.prepare(&count_sql)?.query_row(
+                rusqlite::params_from_iter(
+                    param_values.iter().chain(
+                        [
+                            country_val.to_string(),
+                            date_from.to_string(),
+                            date_to.to_string(),
+                        ]
+                        .iter(),
+                    ),
+                ),
+                |r| r.get(0),
+            )?;
 
-        let select = format!("SELECT id,patent_number,title,abstract_text,applicant,inventor,filing_date,country FROM patents {where_clause} ORDER BY filing_date DESC");
+            let data_sql = format!(
+                "SELECT id,patent_number,title,abstract_text,applicant,inventor,filing_date,country
+                 FROM patents {where_clause} ORDER BY filing_date DESC LIMIT ?{} OFFSET ?{}",
+                n_like + 4,
+                n_like + 5
+            );
+            param_values.push(country_val.to_string());
+            param_values.push(date_from.to_string());
+            param_values.push(date_to.to_string());
+            param_values.push(page_size.to_string());
+            param_values.push(offset.to_string());
 
-        let rows: Vec<PatentSummary> = if has_country {
-            let sql = format!("{select} LIMIT ?5 OFFSET ?6");
-            let mut stmt = c.prepare(&sql)?;
-            let r = stmt
-                .query_map(
-                    params![
-                        q,
-                        country_val,
-                        date_from,
-                        date_to,
-                        page_size as i64,
-                        offset as i64
-                    ],
-                    |row| {
-                        let applicant = row.get::<_, String>(4).unwrap_or_default();
-                        let inventor = row.get::<_, String>(5).unwrap_or_default();
-                        let title = row.get::<_, String>(2).unwrap_or_default();
-                        let score = calculate_mixed_relevance(query, &applicant, &inventor, &title);
-                        Ok(PatentSummary {
-                            id: row.get(0)?,
-                            patent_number: row.get(1)?,
-                            title,
-                            abstract_text: row.get::<_, String>(3).unwrap_or_default(),
-                            applicant,
-                            inventor,
-                            filing_date: row.get::<_, String>(6).unwrap_or_default(),
-                            country: row.get::<_, String>(7).unwrap_or_default(),
-                            relevance_score: Some(score),
-                            score_source: Some("mixed search match".to_string()),
-                        })
-                    },
-                )?
+            let mut stmt = c.prepare(&data_sql)?;
+            let rows: Vec<PatentSummary> = stmt
+                .query_map(rusqlite::params_from_iter(param_values.iter()), |row| {
+                    let applicant = row.get::<_, String>(4).unwrap_or_default();
+                    let inventor = row.get::<_, String>(5).unwrap_or_default();
+                    let title = row.get::<_, String>(2).unwrap_or_default();
+                    let score = calculate_mixed_relevance(query, &applicant, &inventor, &title);
+                    Ok(PatentSummary {
+                        id: row.get(0)?,
+                        patent_number: row.get(1)?,
+                        title,
+                        abstract_text: row.get::<_, String>(3).unwrap_or_default(),
+                        applicant,
+                        inventor,
+                        filing_date: row.get::<_, String>(6).unwrap_or_default(),
+                        country: row.get::<_, String>(7).unwrap_or_default(),
+                        relevance_score: Some(score),
+                        score_source: Some("mixed search match".to_string()),
+                    })
+                })?
                 .filter_map(|r| r.ok())
                 .collect();
-            r
+            (where_clause, total, rows)
         } else {
-            let sql = format!("{select} LIMIT ?4 OFFSET ?5");
-            let mut stmt = c.prepare(&sql)?;
-            let r = stmt
-                .query_map(
-                    params![q, date_from, date_to, page_size as i64, offset as i64],
-                    |row| {
-                        let applicant = row.get::<_, String>(4).unwrap_or_default();
-                        let inventor = row.get::<_, String>(5).unwrap_or_default();
-                        let title = row.get::<_, String>(2).unwrap_or_default();
-                        let score = calculate_mixed_relevance(query, &applicant, &inventor, &title);
-                        Ok(PatentSummary {
-                            id: row.get(0)?,
-                            patent_number: row.get(1)?,
-                            title,
-                            abstract_text: row.get::<_, String>(3).unwrap_or_default(),
-                            applicant,
-                            inventor,
-                            filing_date: row.get::<_, String>(6).unwrap_or_default(),
-                            country: row.get::<_, String>(7).unwrap_or_default(),
-                            relevance_score: Some(score),
-                            score_source: Some("mixed search match".to_string()),
-                        })
-                    },
-                )?
+            let df_idx = n_like + 1;
+            let dt_idx = n_like + 2;
+            let where_clause = format!(
+                "WHERE ({match_clause})
+                 AND (?{df_idx} = '' OR filing_date >= ?{df_idx})
+                 AND (?{dt_idx} = '' OR filing_date <= ?{dt_idx})"
+            );
+            let count_sql = format!("SELECT COUNT(*) FROM patents {where_clause}");
+            let total: usize = c.prepare(&count_sql)?.query_row(
+                rusqlite::params_from_iter(
+                    param_values
+                        .iter()
+                        .chain([date_from.to_string(), date_to.to_string()].iter()),
+                ),
+                |r| r.get(0),
+            )?;
+
+            let data_sql = format!(
+                "SELECT id,patent_number,title,abstract_text,applicant,inventor,filing_date,country
+                 FROM patents {where_clause} ORDER BY filing_date DESC LIMIT ?{} OFFSET ?{}",
+                n_like + 3,
+                n_like + 4
+            );
+            param_values.push(date_from.to_string());
+            param_values.push(date_to.to_string());
+            param_values.push(page_size.to_string());
+            param_values.push(offset.to_string());
+
+            let mut stmt = c.prepare(&data_sql)?;
+            let rows: Vec<PatentSummary> = stmt
+                .query_map(rusqlite::params_from_iter(param_values.iter()), |row| {
+                    let applicant = row.get::<_, String>(4).unwrap_or_default();
+                    let inventor = row.get::<_, String>(5).unwrap_or_default();
+                    let title = row.get::<_, String>(2).unwrap_or_default();
+                    let score = calculate_mixed_relevance(query, &applicant, &inventor, &title);
+                    Ok(PatentSummary {
+                        id: row.get(0)?,
+                        patent_number: row.get(1)?,
+                        title,
+                        abstract_text: row.get::<_, String>(3).unwrap_or_default(),
+                        applicant,
+                        inventor,
+                        filing_date: row.get::<_, String>(6).unwrap_or_default(),
+                        country: row.get::<_, String>(7).unwrap_or_default(),
+                        relevance_score: Some(score),
+                        score_source: Some("mixed search match".to_string()),
+                    })
+                })?
                 .filter_map(|r| r.ok())
                 .collect();
-            r
+            (where_clause, total, rows)
         };
+        let _ = where_clause;
         Ok((rows, total))
     }
-
     // ── IPC Classification ────────────────────────────────────────────────────
 
     pub fn get_all_ipc_codes(&self) -> Result<Vec<String>> {

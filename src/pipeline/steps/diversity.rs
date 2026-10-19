@@ -68,7 +68,7 @@ pub async fn execute(ctx: &mut PipelineContext) -> Result<()> {
     }
 
     let score = dimensions.len() as f64 / 5.0;
-    ctx.diversity_score = score;
+    ctx.diversity_score = Some(score);
     ctx.coverage_dimensions = dimensions.iter().map(|s| s.to_string()).collect();
 
     Ok(())

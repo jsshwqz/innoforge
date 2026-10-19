@@ -71,6 +71,18 @@ pub struct SearchResult {
     pub page: usize,
     pub page_size: usize,
     pub search_type: Option<String>,
+    /// # issue #72 — 响应可自证：本次实际查询了哪些字段。
+    /// 例：inventor 通道仅查 inventor 列 ⇒ ["inventor"]；mixed 通道 ⇒ ["title","abstract_text","applicant","inventor","patent_number"]。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub matched_fields: Option<Vec<String>>,
+    /// # issue #72 — 响应可自证：本次应用的检索策略。
+    /// 例："inventor_only" / "applicant_only" / "multi_token_or" / "single_token_like" / "patent_number"。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applied_filter: Option<String>,
+    /// # issue #72 — 0 命中有原因：解释为何无结果，可合并 #67 的 hint。
+    /// 例："查询被判定为发明人检索，但发明人列无匹配" / "多词 OR 检索：库中无任一 token 命中" / "库中无匹配该词的专利"。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub categories: Option<Vec<CategoryGroup>>,
     #[serde(default)]

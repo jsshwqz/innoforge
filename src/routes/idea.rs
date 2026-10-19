@@ -246,7 +246,12 @@ pub async fn api_idea_analyze(
     match result {
         Ok(ctx) => {
             if let Ok(Some(mut idea)) = db.get_idea(id) {
-                idea.novelty_score = Some(ctx.novelty_score);
+                idea.novelty_score =
+                    if ctx.novelty_status == crate::pipeline::context::NoveltyStatus::Sufficient {
+                        Some(ctx.novelty_score)
+                    } else {
+                        None
+                    };
                 idea.web_results = serde_json::to_string(
                     &ctx.web_results
                         .iter()
@@ -275,24 +280,48 @@ pub async fn api_idea_analyze(
                         .collect::<Vec<_>>(),
                 )
                 .unwrap_or_else(|_| "[]".into());
-                idea.analysis = format!(
-                    "## 快速验证报告\n\n\
-                     **新颖性评分：{:.0}/100**\n\n\
-                     ### 评分细项\n\
-                     - 最高相似度：{:.1}%\n\
-                     - Top5 平均相似度：{:.1}%\n\n\
-                     ### 搜索结果\n\
-                     - 网络结果：{} 条\n\
-                     - 专利结果：{} 条\n",
-                    ctx.novelty_score,
-                    ctx.score_breakdown.max_similarity * 100.0,
-                    ctx.score_breakdown.avg_top5_similarity * 100.0,
-                    ctx.web_results.len(),
-                    ctx.patent_results.len(),
-                );
+                idea.analysis =
+                    if ctx.novelty_status == crate::pipeline::context::NoveltyStatus::Sufficient {
+                        format!(
+                            "## 快速验证报告\n\n\
+                         **新颖性评分：{:.0}/100**\n\n\
+                         ### 评分细项\n\
+                         - 最高相似度：{:.1}%\n\
+                         - Top5 平均相似度：{:.1}%\n\n\
+                         ### 搜索结果\n\
+                         - 网络结果：{} 条\n\
+                         - 专利结果：{} 条\n",
+                            ctx.novelty_score,
+                            ctx.score_breakdown.max_similarity * 100.0,
+                            ctx.score_breakdown.avg_top5_similarity * 100.0,
+                            ctx.web_results.len(),
+                            ctx.patent_results.len(),
+                        )
+                    } else {
+                        // #70：证据不足时不给数值分，给出可操作出路
+                        format!(
+                            "## 快速验证报告\n\n\
+                         **新颖性评分：无法评估（证据不足）**\n\n\
+                         未获得任何对比文献：本地库 0 条 / 在线搜索未配置，无法评估新颖性。\n\n\
+                         ### 可操作出路\n\
+                         - 导入文献到本地库后再推演；\n\
+                         - 配置 SerpAPI/EPO 在线搜索后重新推演。\n\n\
+                         ### 搜索结果\n\
+                         - 网络结果：{} 条\n\
+                         - 专利结果：{} 条\n",
+                            ctx.web_results.len(),
+                            ctx.patent_results.len(),
+                        )
+                    };
                 idea.status = "done".into();
                 let _ = db.update_idea(&idea);
 
+                let novelty_status_str =
+                    if ctx.novelty_status == crate::pipeline::context::NoveltyStatus::Sufficient {
+                        "sufficient"
+                    } else {
+                        "insufficient_evidence"
+                    };
                 Json(json!({
                     "status": "ok",
                     "idea": {
@@ -301,6 +330,7 @@ pub async fn api_idea_analyze(
                         "status": idea.status,
                         "analysis": idea.analysis,
                         "novelty_score": idea.novelty_score,
+                        "novelty_status": novelty_status_str,
                         "web_results": serde_json::from_str::<serde_json::Value>(&idea.web_results).unwrap_or_default(),
                         "patent_results": serde_json::from_str::<serde_json::Value>(&idea.patent_results).unwrap_or_default(),
                         // MB2: 富化状态结构化字段（哪些有全文/哪些没有/为什么没有）
@@ -950,9 +980,30 @@ pub async fn api_idea_pipeline(
         match &result {
             Ok(ctx) => {
                 if let Ok(Some(mut idea)) = db.get_idea(&idea_id) {
-                    idea.novelty_score = Some(ctx.novelty_score);
+                    let sufficient =
+                        ctx.novelty_status == crate::pipeline::context::NoveltyStatus::Sufficient;
+                    idea.novelty_score = if sufficient {
+                        Some(ctx.novelty_score)
+                    } else {
+                        None
+                    };
                     idea.analysis = if !ctx.ai_analysis.is_empty() {
                         ctx.ai_analysis.clone()
+                    } else if !sufficient {
+                        // #70：证据不足时不给数值分
+                        format!(
+                            "## 创新验证报告\n\n\
+                             **新颖性评分：无法评估（证据不足）**\n\n\
+                             未获得任何对比文献：本地库 0 条 / 在线搜索未配置，无法评估新颖性。\n\n\
+                             ### 可操作出路\n\
+                             - 导入文献到本地库后再推演；\n\
+                             - 配置 SerpAPI/EPO 在线搜索后重新推演。\n\n\
+                             ### 搜索结果\n\
+                             - 网络结果：{} 条\n\
+                             - 专利结果：{} 条\n",
+                            ctx.web_results.len(),
+                            ctx.patent_results.len(),
+                        )
                     } else {
                         // Use code-generated report from finalize step
                         format!(
@@ -976,7 +1027,7 @@ pub async fn api_idea_pipeline(
                             ctx.score_breakdown.coverage_gap_bonus,
                             ctx.web_results.len(),
                             ctx.patent_results.len(),
-                            ctx.diversity_score * 100.0,
+                            ctx.diversity_score.unwrap_or(0.0) * 100.0,
                             ctx.top_matches
                                 .iter()
                                 .take(5)
@@ -1062,7 +1113,13 @@ pub async fn api_idea_resume(
         match runner.resume(&idea_id, None).await {
             Ok(Some(ctx)) => {
                 if let Ok(Some(mut idea)) = db.get_idea(&idea_id) {
-                    idea.novelty_score = Some(ctx.novelty_score);
+                    idea.novelty_score = if ctx.novelty_status
+                        == crate::pipeline::context::NoveltyStatus::Sufficient
+                    {
+                        Some(ctx.novelty_score)
+                    } else {
+                        None
+                    };
                     if !ctx.ai_analysis.is_empty() {
                         idea.analysis = ctx.ai_analysis;
                     }
@@ -1883,7 +1940,13 @@ pub async fn api_idea_iterate(
                     iteration
                 );
                 if let Ok(Some(mut idea)) = db.get_idea(&idea_id_clone) {
-                    idea.novelty_score = Some(result_ctx.novelty_score);
+                    idea.novelty_score = if result_ctx.novelty_status
+                        == crate::pipeline::context::NoveltyStatus::Sufficient
+                    {
+                        Some(result_ctx.novelty_score)
+                    } else {
+                        None
+                    };
                     idea.analysis = result_ctx.ai_analysis;
                     idea.status = "done".into();
                     let _ = db.update_idea(&idea);
@@ -2028,7 +2091,13 @@ pub async fn api_idea_redirect(
                     restart_key_for_task
                 );
                 if let Ok(Some(mut idea)) = db.get_idea(&idea_id_clone) {
-                    idea.novelty_score = Some(result_ctx.novelty_score);
+                    idea.novelty_score = if result_ctx.novelty_status
+                        == crate::pipeline::context::NoveltyStatus::Sufficient
+                    {
+                        Some(result_ctx.novelty_score)
+                    } else {
+                        None
+                    };
                     idea.analysis = result_ctx.ai_analysis;
                     idea.status = "done".into();
                     let _ = db.update_idea(&idea);
