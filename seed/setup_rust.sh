@@ -46,7 +46,7 @@ CFG
   # 4) 依赖拉取 + cargo check 计时（这才是每次重置的真实代价）
   echo "[4/4] cargo fetch + check (timed) ..."
   cd /root/innoforge
-  /usr/bin/time -v cargo fetch 2>&1 | grep -E "time|Elapsed|error" | tail -3 || cargo fetch 2>&1 | tail -3
+  cargo fetch 2>&1 | tail -3
   start=$(date +%s)
   cargo check --all-targets 2>&1 | tail -8
   end=$(date +%s)
