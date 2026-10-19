@@ -538,3 +538,137 @@ fn migration_idempotent_rerun_at_full_version() {
     super::migrations::run(&conn, v, Database::SCHEMA_VERSION).unwrap();
     assert_eq!(current_schema_version(&conn), v);
 }
+
+// ── issue #72：两字中文术语被当人名 / 多词整句 LIKE ──────────────────────────
+
+/// 构造一条含多个两字技术词的合成专利。
+fn issue72_synthetic_patent() -> Patent {
+    let mut p = sample_patent("issue72a", "相变储热装置及温控风扇", "2024-06-01");
+    p.patent_number = "CNTEST00000001A".to_string();
+    p.abstract_text =
+        "本发明涉及一种相变储热装置，采用石蜡作为相变材料，配合温控风扇实现均热板与散热底座的高效散热。"
+            .to_string();
+    p.claims =
+        "1.一种相变储热装置，包括散热底座和均热板，其特征在于使用石蜡作为相变材料。".to_string();
+    p.applicant = "测试科技有限公司".to_string();
+    p.inventor = "王明".to_string();
+    p
+}
+
+/// 正向A：两字技术词（相变/石蜡/齿轮）必须命中，search_type 不得是 inventor。
+#[test]
+fn issue72_two_char_technical_terms_hit_as_mixed_not_inventor() {
+    let db = Database::init(":memory:").expect("init db");
+    db.insert_patent(&issue72_synthetic_patent())
+        .expect("insert synthetic patent");
+
+    for term in &["相变", "石蜡", "齿轮"] {
+        let (rows, total, detected) = db
+            .search_smart_exact(term, None, None, None, None, 1, 10, false)
+            .expect("search succeeds");
+        // 齿轮不在合成专利中，但相变/石蜡必须在
+        if *term != "齿轮" {
+            assert!(
+                total > 0 && !rows.is_empty(),
+                "term `{term}` must hit (total={total})"
+            );
+            assert_ne!(
+                detected,
+                SearchType::Inventor,
+                "term `{term}` must NOT be classified as inventor search"
+            );
+        }
+        // 无论是否命中，都不得被判为 inventor 检索
+        assert_ne!(
+            detected,
+            SearchType::Inventor,
+            "two-char technical term `{term}` must not route to inventor"
+        );
+    }
+}
+
+/// 正向B：两个 token 单独都命中的多词查询必须命中（OR 语义）。
+#[test]
+fn issue72_multi_token_or_query_hits() {
+    let db = Database::init(":memory:").expect("init db");
+    db.insert_patent(&issue72_synthetic_patent())
+        .expect("insert synthetic patent");
+
+    for query in &["散热底座 均热板", "笔记本 均热板"] {
+        let (rows, total, _detected) = db
+            .search_smart_exact(query, None, None, None, None, 1, 10, false)
+            .expect("search succeeds");
+        assert!(
+            total > 0 && !rows.is_empty(),
+            "multi-token query `{query}` must hit with OR semantics (total={total})"
+        );
+    }
+}
+
+/// 负控1：真实姓名（张三/李四）走 Mixed 通道，仍须命中且命中 inventor 字段。
+///
+/// # issue #72 v2 — 路由不再独占 inventor
+/// 删除姓氏门后，姓名不再路由到 Inventor-only，而走 Mixed（含 inventor 字段搜索）。
+/// 本测试断言：(1) 路由为 Mixed，(2) 仍命中，(3) 命中行的 inventor 字段含该姓名
+/// （即 Mixed 确实搜了 inventor 列，而非只撞 title）。对应路由层 matched_fields 对
+/// Mixed 含 "inventor"。
+#[test]
+fn issue72_real_names_hit_via_mixed_including_inventor() {
+    let db = Database::init(":memory:").expect("init db");
+    let mut p1 = sample_patent("zs1", "张三的专利", "2024-01-10");
+    p1.inventor = "张三".to_string();
+    let mut p2 = sample_patent("ls1", "李四的专利", "2024-02-10");
+    p2.inventor = "李四".to_string();
+    db.insert_patent(&p1).expect("insert 张三 patent");
+    db.insert_patent(&p2).expect("insert 李四 patent");
+
+    for name in &["张三", "李四"] {
+        let detected = db.detect_search_type(name);
+        assert_eq!(
+            detected,
+            SearchType::Mixed,
+            "name `{name}` must route to Mixed (not Inventor-only) after issue #72 v2"
+        );
+        let (rows, total, detected_type) = db
+            .search_smart_exact(name, None, None, None, None, 1, 10, false)
+            .expect("search succeeds");
+        assert_eq!(detected_type, SearchType::Mixed);
+        assert!(
+            total > 0 && !rows.is_empty(),
+            "name `{name}` must still hit (total={total})"
+        );
+        // 命中须落在 inventor 字段——证明 Mixed 确实搜了 inventor 列
+        let hit_inventor = rows.iter().any(|r| r.inventor.contains(name));
+        assert!(
+            hit_inventor,
+            "name `{name}` must match the inventor column (matched_fields 含 inventor), got inventors: {:?}",
+            rows.iter().map(|r| r.inventor.as_str()).collect::<Vec<_>>()
+        );
+    }
+}
+
+/// 负控2：把 chars().count() 改回 q.len() ⇒ 回归测试必须变红。
+///
+/// 关键区分点：3 字中文姓名（如「张三丰」= 9 字节）在**字符**判据下通过
+/// （3 ∈ 2..=4），但在**字节**判据下被拒（9 > 6）。若有人把 is_likely_name
+/// 的边界从 chars().count() 改回 q.len()，此断言将失败——证明断言真的
+/// 测在字节/字符这个点上。
+///
+/// # issue #72 v2 — 不再断言技术词为非姓名
+/// is_likely_name 已降为 name_like 形状 hint，相变/石蜡 判为 true 是无害的（不路由），
+/// 故移除旧的 `!is_likely_name("相变")` 断言，只保留字节/字符锚点。
+#[test]
+fn issue72_byte_vs_char_count_guard() {
+    use crate::db::relevance::is_likely_name;
+    // 2 字姓名：张三 = 6 bytes, 2 chars。两种判据都通过。
+    assert!(
+        is_likely_name("张三"),
+        "is_likely_name(\"张三\") must be true"
+    );
+    // 3 字姓名：张三丰 = 9 bytes, 3 chars。字符判据通过，字节判据（9 > 6）拒绝。
+    // 这是字节/字符区分的锚点——改回 q.len() 此行必红。
+    assert!(
+        is_likely_name("张三丰"),
+        "3-char name (9 bytes) must pass char-count bound; if this fails, someone reverted to byte-length"
+    );
+}
