@@ -8,6 +8,15 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-10-19 — **#70 零证据不再冒充满分新颖性**（R24）
+
+- **状态 / Status**: 🚧 PR #81 draft（分支 `r24/zero-evidence-novelty`，head `f2206c1`），等 CI 与独立验收
+- **驱动**: 全新空库 + 未配在线搜索时点「⚡快速推演」返回 `新颖性评分: 100/100`，且响应自证"网络结果 0 条 / 专利结果 0 条"——引擎把「没查」当成「查了且完全不相似」。
+- **三处根因**: ① `scoring.rs` 空检索无显式分支；② `diversity_score` 用 `0.0` 同时表达"实测多样性 0"与"没测"，quick 模式跳过 DiversityGate ⇒ 覆盖缺口加分恒 +8；③ `clamp` 把 raw=108 静默压回 100，掩盖"分数靠加分凑"的信号。
+- **修复**: 空检索 ⇒ `NoveltyStatus::InsufficientEvidence` 且不进加减公式；`diversity_score: Option<f64>`，`None ⇒ bonus 0`；加 `debug_assert!(raw_score <= 100.0)`；`routes/idea.rs` 证据不足时 `novelty_score` 落 `None`、报告改文案并给导入文献/配 SerpAPI·EPO 两条出路。
+- **反转锁绿断言**: `test_no_results_means_high_novelty`（断言 `>90.0`，把缺陷固化为不变量）改名并反转为 `test_no_results_must_not_claim_novelty`。
+- **验收**: 正向A e2e 绿；正向B 非空低相似仍给 92 分；负控1（`None ⇒ 8.0`）红、负控2（删空检索早退）红，均已改回。
+
 ### 2026-10-04 — **多轮对抗推演规划下发**（v0.10.0 目标）
 
 - **状态 / Status**: ✅ 已完成并验证（commit 6d3ddeb）
