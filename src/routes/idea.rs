@@ -246,13 +246,12 @@ pub async fn api_idea_analyze(
     match result {
         Ok(ctx) => {
             if let Ok(Some(mut idea)) = db.get_idea(id) {
-                idea.novelty_score = if ctx.novelty_status
-                    == crate::pipeline::context::NoveltyStatus::Sufficient
-                {
-                    Some(ctx.novelty_score)
-                } else {
-                    None
-                };
+                idea.novelty_score =
+                    if ctx.novelty_status == crate::pipeline::context::NoveltyStatus::Sufficient {
+                        Some(ctx.novelty_score)
+                    } else {
+                        None
+                    };
                 idea.web_results = serde_json::to_string(
                     &ctx.web_results
                         .iter()
@@ -281,11 +280,10 @@ pub async fn api_idea_analyze(
                         .collect::<Vec<_>>(),
                 )
                 .unwrap_or_else(|_| "[]".into());
-                idea.analysis = if ctx.novelty_status
-                    == crate::pipeline::context::NoveltyStatus::Sufficient
-                {
-                    format!(
-                        "## 快速验证报告\n\n\
+                idea.analysis =
+                    if ctx.novelty_status == crate::pipeline::context::NoveltyStatus::Sufficient {
+                        format!(
+                            "## 快速验证报告\n\n\
                          **新颖性评分：{:.0}/100**\n\n\
                          ### 评分细项\n\
                          - 最高相似度：{:.1}%\n\
@@ -293,16 +291,16 @@ pub async fn api_idea_analyze(
                          ### 搜索结果\n\
                          - 网络结果：{} 条\n\
                          - 专利结果：{} 条\n",
-                        ctx.novelty_score,
-                        ctx.score_breakdown.max_similarity * 100.0,
-                        ctx.score_breakdown.avg_top5_similarity * 100.0,
-                        ctx.web_results.len(),
-                        ctx.patent_results.len(),
-                    )
-                } else {
-                    // #70：证据不足时不给数值分，给出可操作出路
-                    format!(
-                        "## 快速验证报告\n\n\
+                            ctx.novelty_score,
+                            ctx.score_breakdown.max_similarity * 100.0,
+                            ctx.score_breakdown.avg_top5_similarity * 100.0,
+                            ctx.web_results.len(),
+                            ctx.patent_results.len(),
+                        )
+                    } else {
+                        // #70：证据不足时不给数值分，给出可操作出路
+                        format!(
+                            "## 快速验证报告\n\n\
                          **新颖性评分：无法评估（证据不足）**\n\n\
                          未获得任何对比文献：本地库 0 条 / 在线搜索未配置，无法评估新颖性。\n\n\
                          ### 可操作出路\n\
@@ -311,20 +309,19 @@ pub async fn api_idea_analyze(
                          ### 搜索结果\n\
                          - 网络结果：{} 条\n\
                          - 专利结果：{} 条\n",
-                        ctx.web_results.len(),
-                        ctx.patent_results.len(),
-                    )
-                };
+                            ctx.web_results.len(),
+                            ctx.patent_results.len(),
+                        )
+                    };
                 idea.status = "done".into();
                 let _ = db.update_idea(&idea);
 
-                let novelty_status_str = if ctx.novelty_status
-                    == crate::pipeline::context::NoveltyStatus::Sufficient
-                {
-                    "sufficient"
-                } else {
-                    "insufficient_evidence"
-                };
+                let novelty_status_str =
+                    if ctx.novelty_status == crate::pipeline::context::NoveltyStatus::Sufficient {
+                        "sufficient"
+                    } else {
+                        "insufficient_evidence"
+                    };
                 Json(json!({
                     "status": "ok",
                     "idea": {
@@ -983,9 +980,13 @@ pub async fn api_idea_pipeline(
         match &result {
             Ok(ctx) => {
                 if let Ok(Some(mut idea)) = db.get_idea(&idea_id) {
-                    let sufficient = ctx.novelty_status
-                        == crate::pipeline::context::NoveltyStatus::Sufficient;
-                    idea.novelty_score = if sufficient { Some(ctx.novelty_score) } else { None };
+                    let sufficient =
+                        ctx.novelty_status == crate::pipeline::context::NoveltyStatus::Sufficient;
+                    idea.novelty_score = if sufficient {
+                        Some(ctx.novelty_score)
+                    } else {
+                        None
+                    };
                     idea.analysis = if !ctx.ai_analysis.is_empty() {
                         ctx.ai_analysis.clone()
                     } else if !sufficient {

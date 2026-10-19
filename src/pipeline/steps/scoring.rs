@@ -25,9 +25,9 @@ pub async fn execute(ctx: &mut PipelineContext) -> Result<()> {
         ctx.novelty_status = NoveltyStatus::InsufficientEvidence;
         ctx.novelty_score = 0.0;
         ctx.score_breakdown = ScoreBreakdown::default();
-        ctx.research_state.verified_claims.push(
-            "新颖性无法评估：未获得任何对比文献（证据不足）".to_string(),
-        );
+        ctx.research_state
+            .verified_claims
+            .push("新颖性无法评估：未获得任何对比文献（证据不足）".to_string());
         ctx.evidence_chain.push(Evidence {
             id: uuid::Uuid::new_v4().to_string(),
             idea_id: ctx.idea_id.clone(),
@@ -169,7 +169,7 @@ mod tests {
         );
         // 双重保险：即便有人误读 novelty_score，也不应是接近满分的高分
         assert!(
-            !(ctx.novelty_score > 90.0),
+            ctx.novelty_score <= 90.0,
             "空证据下 novelty_score 不应是高分，当前={}",
             ctx.novelty_score
         );
@@ -195,6 +195,35 @@ mod tests {
         assert!(ctx.novelty_score > 0.0, "got {}", ctx.novelty_score);
     }
 
+    /// 正向 B（#70 验收·3 条非空低相似度）：喂 3 条 combined_score=0.1 的结果，
+    /// 断言 novelty_status=Sufficient 且 0<novelty_score<100。
+    /// 期望 raw=100-6-2+0+0=92.0（max_sim=0.1→penalty6, avg_top5=0.1→penalty2, 无矛盾, None 多样性→bonus0）。
+    #[tokio::test]
+    async fn test_positive_b_three_low_similarity_entries_sufficient() {
+        let mut ctx = PipelineContext::new("test", "t", "d");
+        ctx.similarity_scores = (0..3)
+            .map(|i| SimilarityEntry {
+                source_id: format!("s{i}"),
+                source_title: format!("s{i}"),
+                source_type: "web".into(),
+                tfidf_score: 0.1,
+                jaccard_score: 0.1,
+                combined_score: 0.1,
+            })
+            .collect();
+        execute(&mut ctx).await.unwrap();
+        assert_eq!(
+            ctx.novelty_status,
+            NoveltyStatus::Sufficient,
+            "3 条非空低相似度结果必须标 Sufficient"
+        );
+        assert!(
+            ctx.novelty_score > 0.0 && ctx.novelty_score < 100.0,
+            "3 条非空结果应给 0<score<100，实际={}",
+            ctx.novelty_score
+        );
+    }
+
     /// 负控 1（#70 验收）：若把 None 时 coverage_gap_bonus 重新赋 8，
     /// 本测试构造的低相似度+None 多样性场景会因 +8 越界而被 debug_assert 捕获或分数偏高。
     /// 这里断言 None 时 bonus 真为 0：raw = 100 - 6 - 2 + 0 + 0 = 92。
@@ -214,6 +243,10 @@ mod tests {
         execute(&mut ctx).await.unwrap();
         // max_sim=0.1 ⇒ penalty=6; avg_top5=0.1 ⇒ penalty=2; bonus=0 ⇒ raw=92
         assert_eq!(ctx.score_breakdown.coverage_gap_bonus, 0.0);
-        assert!((ctx.novelty_score - 92.0).abs() < 1e-6, "got {}", ctx.novelty_score);
+        assert!(
+            (ctx.novelty_score - 92.0).abs() < 1e-6,
+            "got {}",
+            ctx.novelty_score
+        );
     }
 }

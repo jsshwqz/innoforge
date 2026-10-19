@@ -241,7 +241,10 @@ impl Orchestrator {
             );
             return Some(PipelineStep::SearchWeb);
         }
-        if !self.quick_mode && current == PipelineStep::DiversityGate && ctx.diversity_score.unwrap_or(0.0) < 0.3 {
+        if !self.quick_mode
+            && current == PipelineStep::DiversityGate
+            && ctx.diversity_score.unwrap_or(0.0) < 0.3
+        {
             tracing::warn!(
                 "多样性回退已达上限（retry_count={}, diversity_gate_runs={}），继续后续步骤",
                 ctx.retry_count,

@@ -2,23 +2,17 @@ use super::state::PipelineStep;
 use crate::search::enrichment::EnrichmentStatus;
 use serde::{Deserialize, Serialize};
 
-
 /// 新颖性评估的证据状态
 ///
 /// 区分「查了且证据充分」与「没查到任何对比文献」。
 /// 后者必须不给数值分，避免把"没查"当成"查了且完全不相似"。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum NoveltyStatus {
     /// 证据充分，已给出数值新颖性分
     Sufficient,
     /// 证据不足：本地库 0 条且在线搜索未配置/未返回结果，无法评估新颖性
+    #[default]
     InsufficientEvidence,
-}
-
-impl Default for NoveltyStatus {
-    fn default() -> Self {
-        Self::InsufficientEvidence
-    }
 }
 
 fn default_branch() -> String {
