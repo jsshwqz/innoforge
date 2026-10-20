@@ -59,7 +59,7 @@ pub async fn api_get_settings(State(s): State<AppState>) -> Json<serde_json::Val
     let config = s.config.read().unwrap_or_else(|e| e.into_inner());
 
     fn mask_api_key(key: &str) -> String {
-        if key.is_empty() || key == "your-serpapi-key-here" {
+        if super::is_placeholder_api_key(key) {
             String::new()
         } else if key.len() <= 8 {
             "****".to_string()
@@ -87,6 +87,16 @@ pub async fn api_get_settings(State(s): State<AppState>) -> Json<serde_json::Val
     let aioncad_workspace = raw_key("aioncad_workspace");
     let freecad_auto_start = raw_key("freecad_auto_start") != "false";
 
+    // issue #68: ai_api_key_configured only true when the provider needs a key
+    // AND the key is not a placeholder. Ollama is local (no key needed) → always
+    // false here; the homepage uses /api/ai/models probe status for Ollama instead.
+    let is_ollama = super::is_ollama_url(&config.ai_base_url);
+    let ai_configured = if is_ollama {
+        false
+    } else {
+        !super::is_placeholder_api_key(&current_key)
+    };
+
     // 仅保留 SerpAPI + AI 配置，其他搜索源（Firecrawl/Bing/Lens/CNIPR）和备用 AI 已屏蔽
 
     Json(json!({
@@ -103,7 +113,8 @@ pub async fn api_get_settings(State(s): State<AppState>) -> Json<serde_json::Val
         "epo_configured": config.epo_credentials().is_some(),
         "ai_base_url": config.ai_base_url,
         "ai_api_key": mask_api_key(&current_key),
-        "ai_api_key_configured": !current_key.is_empty(),
+        "ai_api_key_configured": ai_configured,
+        "is_ollama": is_ollama,
         // 各服务商独立 Key（从 DB 读取原始值，不含回退逻辑）
         "ai_api_key_deepseek": mask(&raw_key("AI_API_KEY_DEEPSEEK")),
         "ai_api_key_anthropic": mask(&raw_key("AI_API_KEY_ANTHROPIC")),
@@ -531,7 +542,7 @@ pub async fn api_save_ai(
         // 从当前内存配置中反查该服务商的真实 Key
         let config = s.config.read().unwrap_or_else(|e| e.into_inner());
         let current_key = config.api_key_for_provider(base_url);
-        if current_key.is_empty() || current_key == "ollama" {
+        if super::is_placeholder_api_key(&current_key) {
             return Json(json!({
                 "status": "error",
                 "message": "该服务商尚未配置过 API Key，请手动输入完整 Key，不能使用掩码值。"
