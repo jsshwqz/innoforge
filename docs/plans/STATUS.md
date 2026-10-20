@@ -8,6 +8,16 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-10-20 — **#68 首启假绿灯**（R24）
+
+- **状态 / Status**: 🚧 PR draft（分支 `r24/first-run-fake-green`，head `ff6a7a5`），等 CI 与独立验收
+- **驱动**: 全新安装什么都没配置，首页却显示「✅ AI 服务已配置」；同一实例 `/api/ai/models` 明确 `status:"error"`，两处判据互相矛盾，把新用户排查方向直接带偏。
+- **根因**: 默认 `ai_api_key="ollama"` 是占位符，而 `ai_api_key_configured` 用 `!current_key.is_empty()` 判定；`mask_api_key` 又把短 key 一律显示成 `****`，接口层看不出是占位符；首页 `checkStatus()` 另算一套，不复用探测结果。
+- **修复**: 集中定义 `is_placeholder_api_key` / `is_ollama_url` 单一判据；`ai_api_key_configured` 仅在"需要 key 且非占位符"时为真（纯 Ollama 恒 false）；首页 AI 状态改从 `/api/ai/models` 的 provider status 取；未配置时横幅可点击直达设置页并给中性引导。
+- **回归**: `tests/issue_68_fake_green.rs`；负控为把判据改回 `!is_empty()` 必红，真实 key 仍必须 true（不一刀切）。
+
+---
+
 ### 2026-10-19 — **#73 多字节按字节切片：接口断连与沙箱 panic**（R24）
 
 - **状态 / Status**: 🚧 PR #87 draft（分支 `r24/bytes-vs-chars`），CI 复核中

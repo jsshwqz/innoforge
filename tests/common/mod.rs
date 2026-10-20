@@ -131,6 +131,26 @@ impl Drop for TestServer {
 pub fn spawn_test_server(port: u16, extra_env: &[(&str, &str)]) -> TestServer {
     let home = fresh_db_dir();
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_innoforge-server"));
+    // 隔离 1（#68 验收时发现）：cwd 指到临时 home，避免 dotenvy 从仓库根读到
+    // 开发者本地的 .env（`dotenvy::dotenv_override()` 会覆盖进程环境）。
+    cmd.current_dir(home.path());
+    // 隔离 2：清空继承环境，避免开发机上的 AI_* / SERPAPI_* / EPO_* 泄漏进被测进程，
+    // 造成“CI 绿、本机红”的不可复现结果。
+    cmd.env_clear();
+    for key in [
+        "PATH",
+        "SystemRoot",
+        "TEMP",
+        "TMP",
+        "HOME",
+        "USERPROFILE",
+        "APPDATA",
+        "LOCALAPPDATA",
+    ] {
+        if let Ok(v) = std::env::var(key) {
+            cmd.env(key, v);
+        }
+    }
     cmd.env("INNOFORGE_PORT", port.to_string())
         .env("INNOFORGE_NO_OPEN", "1")
         .env("INNOFORGE_HOME", home.path().to_str().unwrap());

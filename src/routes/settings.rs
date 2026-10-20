@@ -93,6 +93,16 @@ pub async fn api_get_settings(State(s): State<AppState>) -> Json<serde_json::Val
     let aioncad_workspace = raw_key("aioncad_workspace");
     let freecad_auto_start = raw_key("freecad_auto_start") != "false";
 
+    // issue #68: ai_api_key_configured only true when the provider needs a key
+    // AND the key is not a placeholder. Ollama is local (no key needed) → always
+    // false here; the homepage uses /api/ai/models probe status for Ollama instead.
+    let is_ollama = super::is_ollama_url(&config.ai_base_url);
+    let ai_configured = if is_ollama {
+        false
+    } else {
+        !super::is_placeholder_api_key(&current_key)
+    };
+
     // 仅保留 SerpAPI + AI 配置，其他搜索源（Firecrawl/Bing/Lens/CNIPR）和备用 AI 已屏蔽
 
     Json(json!({
@@ -109,7 +119,8 @@ pub async fn api_get_settings(State(s): State<AppState>) -> Json<serde_json::Val
         "epo_configured": config.epo_credentials().is_some(),
         "ai_base_url": config.ai_base_url,
         "ai_api_key": mask_api_key(&current_key),
-        "ai_api_key_configured": !current_key.is_empty(),
+        "ai_api_key_configured": ai_configured,
+        "is_ollama": is_ollama,
         // 各服务商独立 Key（从 DB 读取原始值，不含回退逻辑）
         "ai_api_key_deepseek": mask(&raw_key("AI_API_KEY_DEEPSEEK")),
         "ai_api_key_anthropic": mask(&raw_key("AI_API_KEY_ANTHROPIC")),
@@ -566,7 +577,7 @@ pub async fn api_save_ai(
         // 从当前内存配置中反查该服务商的真实 Key
         let config = s.config.read().unwrap_or_else(|e| e.into_inner());
         let current_key = config.api_key_for_provider(base_url);
-        if current_key.is_empty() || current_key == "ollama" {
+        if super::is_placeholder_api_key(&current_key) {
             return Err((
                 StatusCode::BAD_REQUEST,
                 Json(json!({
@@ -1325,8 +1336,12 @@ mod ai_settings_charset_tests {
     }
 
     fn ai_request(api_key: &str) -> serde_json::Value {
+        ai_request_at(api_key, "http://localhost:11434/v1")
+    }
+
+    fn ai_request_at(api_key: &str, base_url: &str) -> serde_json::Value {
         json!({
-            "base_url": "http://localhost:11434/v1",
+            "base_url": base_url,
             "api_key": api_key,
             "model": "qwen2.5:7b",
             "ai_model_expert": "qwen2.5:7b"
@@ -1387,7 +1402,14 @@ mod ai_settings_charset_tests {
         assert!(r1.is_err(), "坏 Key 应被拒");
 
         // ② 合法 ASCII Key → 200
-        let r2 = api_save_ai(State(state.clone()), Json(ai_request(VALID_ASCII_KEY))).await;
+        let r2 = api_save_ai(
+            State(state.clone()),
+            Json(ai_request_at(
+                VALID_ASCII_KEY,
+                "https://api.deepseek.com/v1",
+            )),
+        )
+        .await;
         let ok_body = r2.expect("合法 Key 应通过");
         assert_eq!("ok", ok_body.0["status"].as_str().expect("status"));
 

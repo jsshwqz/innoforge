@@ -361,6 +361,19 @@ impl AppConfig {
     }
 }
 
+/// Check if an API key is a placeholder/default value that should not count as "configured".
+/// Single source of truth shared by the settings endpoint and the homepage status bar
+/// (issue #68). Add new placeholders here only — never inline the check at call sites.
+pub fn is_placeholder_api_key(key: &str) -> bool {
+    let k = key.trim();
+    k.is_empty() || k == "ollama" || k == "your-serpapi-key-here" || k == "sk-xxx"
+}
+
+/// Check if the base URL points to a local Ollama instance (no API key needed).
+pub fn is_ollama_url(base_url: &str) -> bool {
+    base_url.contains("localhost:11434") || base_url.contains("127.0.0.1:11434")
+}
+
 /// 检测 Gemini CLI 是否可用 / Detect Gemini CLI installation.
 /// 返回可执行文件的完整路径，如果未安装则返回 None。
 pub(crate) fn find_gemini_cli() -> Option<String> {

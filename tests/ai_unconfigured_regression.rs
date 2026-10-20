@@ -21,6 +21,7 @@ fn ensure_db_template() -> PathBuf {
             let template_dir = tempfile::tempdir().expect("create template dir");
             let template_port = free_port();
             let child = Command::new(env!("CARGO_BIN_EXE_innoforge-server"))
+                .current_dir(template_dir.path())
                 .env("INNOFORGE_PORT", template_port.to_string())
                 .env("INNOFORGE_NO_OPEN", "1")
                 .env("INNOFORGE_HOME", template_dir.path().to_str().unwrap())
@@ -98,6 +99,7 @@ fn settings_returns_false_when_no_ai_key() {
     let home = fresh_db_dir();
     // Start server WITHOUT AI_API_KEY — the env var is deliberately absent.
     let server = Command::new(env!("CARGO_BIN_EXE_innoforge-server"))
+        .current_dir(home.path())
         .env("INNOFORGE_PORT", server_port.to_string())
         .env("INNOFORGE_NO_OPEN", "1")
         .env("INNOFORGE_HOME", home.path().to_str().unwrap())
