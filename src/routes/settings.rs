@@ -1404,7 +1404,10 @@ mod ai_settings_charset_tests {
         // ② 合法 ASCII Key → 200
         let r2 = api_save_ai(
             State(state.clone()),
-            Json(ai_request_at(VALID_ASCII_KEY, "https://api.deepseek.com/v1")),
+            Json(ai_request_at(
+                VALID_ASCII_KEY,
+                "https://api.deepseek.com/v1",
+            )),
         )
         .await;
         let ok_body = r2.expect("合法 Key 应通过");
