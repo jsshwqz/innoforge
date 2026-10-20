@@ -1104,3 +1104,12 @@
 - **负控**: 在索引表注入 `POST /api/acc-union-ghost` ⇒ `api_doc_guard` 变红并精确列出该端点；撤销后复绿（2 passed）。
 - **预防**: ① 文档 PR 的评审指标要看**净删除量**，`−` 不是零就不许说“只是补充”；② 覆盖率必须按 method+path 去重后的**并集**计算；③ 文档里的每个端点都要能被路由表核对，守卫要能抓幽灵端点；④ “重写”不是文档工作的默认动作，除非能证明旧内容全部被新内容覆盖。
 - **提交**: 见 PR #86。
+
+## [2026-10-19] ⑲ 首启假绿灯：默认占位 key `"ollama"` 被当成"已配置"
+- **严重程度 / Severity**: HIGH（新用户第一印象即被误导，且排查方向被带偏）
+- **现象 / Symptom**: 全新 `INNOFORGE_HOME`、清空 `AI_API_KEY*` 环境变量启动后，首页横幅显示「✅ AI 服务已配置」；而同一实例 `GET /api/ai/models` 返回 `status:"error"`、`total_count:0`。两处判据互相矛盾。
+- **根因 / Root cause**: ① `src/routes/mod.rs` 的默认值就是本地 Ollama——`ai_api_key = get("AI_API_KEY", "ollama")`；② `src/routes/settings.rs` 用 `!current_key.is_empty()` 判 `ai_api_key_configured`，占位符 `"ollama"` 非空 ⇒ true；③ `mask_api_key` 对 ≤8 字符一律回显 `****`，接口层看不出这是占位符；④ 首页 `templates/index.html` 的 `checkStatus()` 自己拿 `/api/settings` 另算一套，不复用已有的探测结果。
+- **修复 / Fix**: ① 新增单一判据函数 `routes::is_placeholder_api_key`（`""` / `"ollama"` / `"your-serpapi-key-here"` / `"sk-xxx"`）与 `is_ollama_url`，settings 端点与掩码回显共用，禁止在调用点内联判断；② `ai_api_key_configured` 仅在「该服务商确实需要 key 且 key 非占位符」时为真，纯 Ollama 恒为 false；③ 首页 AI 状态条改从 `/api/ai/models` 的 provider `status` 取，与模型列表页同源；④ 未配置时横幅可点击直达设置页并给出中性引导文案。
+- **回归 / Regression**: `tests/issue_68_fake_green.rs`——全新库 + 清空环境变量 ⇒ `ai_api_key_configured == false` 且首页含「未配置」；负控：把判据改回 `!current_key.is_empty()` ⇒ 2 个测试变红，改回后 `git diff` 为空。真实 key 仍必须为 true（防止一刀切成永远 false）。
+- **预防 / Prevention**: ① 默认值/占位符不得参与"已配置"判定，占位符集合必须是唯一集中定义；② 同一事实只允许一个判据来源，UI 不得自行另算（本次即"设置接口"与"模型探测"各算一套）；③ 前端 `catch(e){}` 静默失败会把后端错误伪装成空白，状态类接口失败要可见（与 #73 同源问题）。
+- **提交 / Commit**: 见 PR（分支 `r24/first-run-fake-green`，`Closes #68`）。
