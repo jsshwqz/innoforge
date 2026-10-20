@@ -10,6 +10,7 @@ use std::process::Command;
 
 fn start_server(port: u16, home_dir: &str) -> std::process::Child {
     Command::new(env!("CARGO_BIN_EXE_innoforge-server"))
+        .current_dir(home_dir)
         .env("INNOFORGE_PORT", port.to_string())
         .env("INNOFORGE_HOME", home_dir)
         .env("GOOGLE_CLIENT_ID", "test-client-id-for-port-assertion")

@@ -72,6 +72,7 @@ fn empty_evidence_must_not_claim_novelty_score() {
 
     // 不设 AI_API_KEY / AI_BASE_URL / AI_MODEL / SerpAPI —— 全新空库、未配搜索
     let server = Command::new(env!("CARGO_BIN_EXE_innoforge-server"))
+        .current_dir(home.path())
         .env("INNOFORGE_PORT", port.to_string())
         .env("INNOFORGE_NO_OPEN", "1")
         .env("INNOFORGE_HOME", home.path().to_str().unwrap())
