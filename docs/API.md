@@ -27,9 +27,9 @@ http://127.0.0.1:3000
 | GET | `/compare` | 专利对比页 / Patent comparison page |
 | GET | `/ai` | AI 助手页 / AI assistant page |
 | GET | `/settings` | 设置页 / Settings page |
+
+> 注：`/test`（调试页）与 `/import`（样例导入页）两条页面路由已在代码中移除，故不再列出（issue #62）。
 | GET | `/patent/:id` | 专利详情页 / Patent detail page |
-| GET | `/test` | 调试测试页 / Debug test page |
-| GET | `/import` | 样例数据导入页 / Sample data import page |
 
 ---
 
@@ -684,6 +684,8 @@ Response:
 
 **GET** `/api/patents/:patent_id/collections`
 
+> ⚠️ 该端点在当前代码路由表中不存在（历史条目，issue #62）。以实际路由为准，勿据此调用。
+
 ---
 
 ## 标签接口 / Tag APIs
@@ -691,6 +693,8 @@ Response:
 ### 1) 添加标签 / Add Tag
 
 **POST** `/api/patents/:patent_id/tags`
+
+> ⚠️ 该端点在当前代码路由表中不存在（历史条目，issue #62）。以实际路由为准，勿据此调用。
 
 ```json
 {
@@ -705,9 +709,13 @@ Response:
 
 **DELETE** `/api/patents/:patent_id/tags/:tag`
 
+> ⚠️ 该端点在当前代码路由表中不存在（历史条目，issue #62）。以实际路由为准，勿据此调用。
+
 ### 3) 获取专利标签 / Get Patent Tags
 
 **GET** `/api/patents/:patent_id/tags`
+
+> ⚠️ 该端点在当前代码路由表中不存在（历史条目，issue #62）。以实际路由为准，勿据此调用。
 
 Response:
 
@@ -800,6 +808,8 @@ Response:
 ### 1) IPC 建议 / Suggest
 
 **GET** `/api/ipc/suggest`
+
+> ⚠️ 该端点在当前代码路由表中不存在（历史条目，issue #62）。以实际路由为准，勿据此调用。
 
 ### 2) IPC 树 / Tree
 
@@ -904,3 +914,422 @@ Response:
 | `INNOFORGE_PORT` | `3000` | HTTP 监听端口。更改后 OAuth 回调地址自动跟随。/ HTTP listen port. OAuth callback URL follows automatically. |
 | `INNOFORGE_OAUTH_CALLBACK_URL` | *(由 `INNOFORGE_PORT` 推导)* | Google OAuth 重定向 URI。设置后覆盖 `INNOFORGE_PORT` 推导的地址。必须与 Google Cloud Console 中登记的授权重定向 URI 逐字匹配。/ Google OAuth redirect URI. Overrides `INNOFORGE_PORT`-derived URL. Must match the authorized redirect URI in Google Cloud Console. |
 | `INNOFORGE_UPSTREAM_TIMEOUT_SECS` | `30` | 上游 HTTP 调用超时秒数（专利 API、Google OAuth、AI 模型探测）。/ Timeout in seconds for upstream HTTP calls. |
+
+---
+
+## 覆盖索引（R23 新增 24 条） / Coverage Index
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/cad/status` | 查询 FreeCAD 引擎就绪状态 |
+| POST | `/api/cad/start` | 启动/预热 FreeCAD 引擎 |
+| POST | `/api/cad/draw` | 提交绘图指令，生成 CAD 产物 |
+| GET | `/api/cad/artifacts` | 列出某上下文的 CAD 产物历史 |
+| GET | `/api/cad/artifacts/:id/preview` | 取产物预览 PNG |
+| GET | `/api/cad/artifacts/:id/download/:format` | 下载产物（fcstd/step） |
+| GET | `/api/auth/google/url` | 生成 Google OAuth 授权跳转 URL |
+| GET | `/api/auth/google/callback` | OAuth 回调 HTML（前端中转） |
+| POST | `/api/auth/google/exchange` | 用授权码交换 access/refresh token |
+| GET | `/api/auth/google/status` | 查询 Google OAuth 凭据/令牌状态 |
+| GET | `/api/auth/gcloud/status` | 查询 gcloud CLI / ADC 状态 |
+| POST | `/api/auth/gcloud/login` | 通过 gcloud CLI 或 ADC 登录获取令牌 |
+| POST | `/api/ai/oa-discuss` | 审查意见多轮讨论 |
+| POST | `/api/ai/oa-fetch-refs` | 从审查意见抽取对比文献标识 |
+| POST | `/api/ai/oa-panel` | OA 分析面板聚合数据 |
+| POST | `/api/ai/oa-generate-response-letter` | 生成正式答复函草稿 |
+| POST | `/api/ai/oa-history-compare` | 对比当前与历史 OA 轮次 |
+| POST | `/api/ai/oa-examiner-preview` | 预览审查员视角下的答复 |
+| POST | `/api/ai/oa-defense-analysis` | 针对权项的抗辩分析 |
+| POST | `/api/ai/oa-strategy-recommend` | 答复策略推荐 |
+| POST | `/api/ai/oa-quality-score` | 答复质量评分 |
+| POST | `/api/ai/oa-claim-simulate` | 修改权项的侵权模拟 |
+| POST | `/api/ai/oa-collect-evidence` | 收集支持答复的证据 |
+| POST | `/api/ai/oa-adversarial` | 对抗性反驳压力测试 |
+
+
+## 1. CAD 接口 / `/api/cad/*`
+
+> handler：`src/routes/cad.rs`；域类型：`src/patent.rs`（`CadDrawRequest`/`CadDrawResponse`/`CadArtifact`/`CadContextKind`/`CadAvailability`/`CadStatus`）。
+> 所需配置：FreeCAD/AionCAD 引擎（`freecad_auto_start` 设置项控制是否自动启动）。
+
+### GET `/api/cad/status`
+
+- 请求：无 body。
+- 成功响应（`200`）：
+
+```json
+{ "availability": "ready", "message": "..." }
+```
+
+`availability` ∈ `ready` | `starting` | `unavailable` | `unsupported`。
+
+- 失败：本端点不返回错误体（始终 200）。
+
+### POST `/api/cad/start`
+
+- 请求：无 body。
+- 成功响应（`200`）：同 `/api/cad/status` 的 `CadStatus` 对象。
+
+### POST `/api/cad/draw`
+
+- 请求（`CadDrawRequest`）：
+
+```json
+{
+  "context_kind": "idea",
+  "context_id": "CN990001001A",
+  "prompt": "画一个 40x30x10 的长方体",
+  "conversation_context": "可选上下文文本",
+  "parent_artifact_id": null
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `context_kind` | enum `idea`/`patent`/`oa` | 是 | 上下文类型 |
+| `context_id` | string | 是 | 上下文 ID（非空） |
+| `prompt` | string | 是 | 绘图指令（非空） |
+| `conversation_context` | string | 否 | 上下文文本，默认空 |
+| `parent_artifact_id` | string\|null | 否 | 父版本 ID，用于派生新版本 |
+
+- 成功响应（`200`，`CadDrawResponse`）：
+
+```json
+{
+  "artifact": {
+    "id": "<uuid>",
+    "context_kind": "idea",
+    "context_id": "CN990001001A",
+    "parent_artifact_id": null,
+    "revision": 0,
+    "prompt": "画一个 40x30x10 的长方体",
+    "assumptions": ["单位毫米"],
+    "preview_rel_path": "...",
+    "fcstd_rel_path": "...",
+    "step_rel_path": null,
+    "validation": { "valid": true, "fixed": false, "issues": [] },
+    "created_at": ""
+  },
+  "warnings": []
+}
+```
+
+- 失败响应（`CadApiError` → `{ "code": "...", "error": "..." }`）：
+
+| HTTP | code | 触发条件 |
+|---|---|---|
+| 400 | `invalid_request` | prompt 或 context_id 为空 |
+| 400 | `parent_not_found` | parent_artifact_id 不存在 |
+| 400 | `parent_context_mismatch` | 父版本不属于当前上下文 |
+| 503 | `freecad_unavailable` | 引擎无法就绪 |
+| 503 | `draw_failed` | 绘图调用失败 |
+| 500 | `save_failed` / `parent_read_failed` | DB 读写失败 |
+
+### GET `/api/cad/artifacts`
+
+- 请求（query，`CadHistoryQuery`）：`context_kind`（enum）、`context_id`（string，非空）。
+- 成功响应（`200`）：`{ "artifacts": [CadArtifact, ...] }`。
+- 失败：`400 invalid_request`（context_id 空）/ `500 history_failed`。
+
+### GET `/api/cad/artifacts/:id/preview`
+
+- 路径参数：`id`（产物 ID）。
+- 成功响应（`200`）：`image/png` 二进制。
+- 失败：`404 artifact_not_found` / `404 file_not_found` / `400 invalid_path` / `500 root_unavailable`。
+
+### GET `/api/cad/artifacts/:id/download/:format`
+
+- 路径参数：`id`、`format` ∈ `fcstd` | `step`。
+- 成功响应（`200`）：对应 MIME 的二进制，带 `Content-Disposition: attachment`。
+- 失败：`404 step_unavailable`（无 STEP 文件）/ `400 invalid_format` / `404 artifact_not_found` / `404 file_not_found`。
+
+
+---
+
+## 2. 认证接口 / `/api/auth/*`
+
+> handler：`src/routes/auth.rs`。所需配置：Google OAuth Client ID/Secret（设置页或 `/api/settings`），或本机 gcloud CLI / ADC 文件。
+
+### GET `/api/auth/google/url`
+
+- 请求：无 body。
+- 成功响应（`200`）：
+
+```json
+{ "url": "https://accounts.google.com/o/oauth2/v2/auth?...", "redirect_uri": "http://127.0.0.1:3000/api/auth/google/callback" }
+```
+
+- 失败响应（`200`，业务错误内联）：`{ "error": "请先在设置页填写 Google OAuth Client ID" }`（未配置 client_id 时）。
+
+### GET `/api/auth/google/callback`
+
+- 请求：URL query `code`（由 Google 回跳带入）。
+- 响应（`200`）：`text/html` 页面，内嵌 JS 将 `code` POST 到 `/api/auth/google/exchange` 并展示结果。无 JSON body。
+
+### POST `/api/auth/google/exchange`
+
+- 请求：
+
+```json
+{ "code": "<授权码>" }
+```
+
+- 成功响应（`200`）：
+
+```json
+{ "status": "ok", "message": "Google 账号认证成功！", "expires_in": 3600, "has_refresh_token": true }
+```
+
+- 失败响应（`200`，业务错误内联）：
+
+| error 文案 | 触发条件 |
+|---|---|
+| `无效的 JSON 请求体` | body 非合法 JSON |
+| `缺少授权码` | 无 `code` 字段 |
+| `未配置 Google OAuth 凭据，请先在设置页填写` | client_id/secret 为空 |
+| `令牌交换失败: <详情>` | Google token 端点返回非 2xx |
+| `网络请求失败: <详情>` | 上游请求异常 |
+
+### GET `/api/auth/google/status`
+
+- 请求：无 body。
+- 成功响应（`200`）：
+
+```json
+{
+  "has_credentials": true,
+  "has_token": true,
+  "token_expired": false,
+  "token_expiry": 1730000000,
+  "client_id_set": true,
+  "client_secret_set": true,
+  "refresh_token_set": true,
+  "auth_mode": "oauth"
+}
+```
+
+- 无独立失败响应（始终 200，字段反映当前状态）。
+
+### GET `/api/auth/gcloud/status`
+
+- 请求：无 body。
+- 成功响应（`200`）：
+
+```json
+{
+  "gcloud_available": true,
+  "adc_file_exists": true,
+  "adc_file_path": "/root/.config/gcloud/application_default_credentials.json",
+  "adc_type": "authorized_user",
+  "adc_email": "robot@example.com",
+  "is_gcloud_mode": false,
+  "has_token": true,
+  "token_expired": false
+}
+```
+
+- 无独立失败响应（始终 200）。
+
+### POST `/api/auth/gcloud/login`
+
+- 请求：无 body。
+- 成功响应（`200`）：
+
+```json
+{ "status": "ok", "message": "✅ gcloud CLI 认证成功！", "method": "gcloud_cli", "expires_in": 3600 }
+```
+
+- 失败响应（`200`，业务错误内联）：`{ "status": "error", "message": "无法保存 Google 认证状态，请稍后重试。" }`（DB 持久化失败时）；gcloud CLI 不可用且 ADC 不可用时返回对应错误文案。
+
+
+---
+
+## 3. 审查意见 AI 接口 / `/api/ai/oa-*`
+
+> handler：`src/routes/ai.rs`。请求体均为 `application/json`（`Json<serde_json::Value>`，字段名取自代码中 `req["..."]` / `req.get("...")` 访问）。
+> 所需配置：OpenAI 兼容下游（`api_key`/`base_url`/`model`）；部分端点额外读取 DB 中的专利/历史记录。
+> 通用失败：缺关键字段时返回 `200` + `{ "error": "<message>" }`（业务级，非 HTTP 错误码）。
+
+### POST `/api/ai/oa-discuss`
+
+- 请求字段（从代码读取）：`message`、`patent_number`、`oa_text`、`oa_type`、`office_action`、`analysis`、`discussion`、`discussion_id`、`applicant_name`、`file_name`、`file_type`、`content`。
+- 成功响应（`200`）：`{ "reply": "...", "discussion_id": "...", ... }`（AI 回复与讨论状态）。
+- 失败：缺 `message` 或上下文时返回 `{ "error": "..." }`。
+
+### POST `/api/ai/oa-fetch-refs`
+
+- 请求字段：`oa_text`（审查意见全文）。
+- 成功响应（`200`）：`{ "references": [ { "number": "...", "title": "..." }, ... ] }`。
+- 失败：`oa_text` 为空时返回 `{ "error": "..." }`。
+
+### POST `/api/ai/oa-panel`
+
+- 请求字段：`my_patent`、`oa_text`、`refs`。
+- 成功响应（`200`）：面板聚合对象（含分析摘要、轮次、建议等）。
+- 失败：缺关键字段时返回 `{ "error": "..." }`。
+
+### POST `/api/ai/oa-generate-response-letter`
+
+- 请求字段：`analysis`、`discussion`、`discussion_id`、`oa_date`、`oa_full_text`、`oa_type`、`office_action`、`case_meta`。
+- 成功响应（`200`）：`{ "letter": "...", ... }`（正式答复函草稿）。
+- 失败：缺关键字段时返回 `{ "error": "..." }`。
+
+### POST `/api/ai/oa-history-compare`
+
+- 请求字段：`patent_id`、`current_oa_text`、`current_oa_type`。
+- 成功响应（`200`）：`{ "diff": "...", "rounds": [...], ... }`。
+- 失败：缺 `patent_id` 时返回 `{ "error": "..." }`。
+
+### POST `/api/ai/oa-examiner-preview`
+
+- 请求字段：`my_patent`、`oa_text`、`response_text`。
+- 成功响应（`200`）：`{ "preview": "...", ... }`（审查员视角预览）。
+- 失败：缺关键字段时返回 `{ "error": "..." }`。
+
+### POST `/api/ai/oa-defense-analysis`
+
+- 请求字段：`my_patent`、`claims`。
+- 成功响应（`200`）：`{ "defense": [...], ... }`。
+- 失败：缺关键字段时返回 `{ "error": "..." }`。
+
+### POST `/api/ai/oa-strategy-recommend`
+
+- 请求字段：`my_patent`、`oa_text`、`oa_type`、`refs`。
+- 成功响应（`200`）：`{ "strategies": [...], ... }`。
+- 失败：缺关键字段时返回 `{ "error": "..." }`。
+
+### POST `/api/ai/oa-quality-score`
+
+- 请求字段：`my_patent`、`oa_text`、`response_text`。
+- 成功响应（`200`）：`{ "score": <number>, "dimensions": {...}, ... }`。
+- 失败：缺关键字段时返回 `{ "error": "..." }`。
+
+### POST `/api/ai/oa-claim-simulate`
+
+- 请求字段：`original_claims`、`modified_claims`、`oa_text`、`refs`。
+- 成功响应（`200`）：`{ "simulation": [...], ... }`。
+- 失败：缺关键字段时返回 `{ "error": "..." }`。
+
+### POST `/api/ai/oa-collect-evidence`
+
+- 请求字段：`my_patent`、`oa_text`、`refs`。
+- 成功响应（`200`）：`{ "evidence": [...], ... }`。
+- 失败：缺关键字段时返回 `{ "error": "..." }`。
+
+### POST `/api/ai/oa-adversarial`
+
+- 请求字段：`my_patent`、`oa_text`、`claims`、`refs`、`rounds`、`focus`、`goal_threshold`。
+- 成功响应（`200`）：`{ "rounds": [...], "survived": <bool>, ... }`。
+- 失败：缺关键字段时返回 `{ "error": "..." }`。
+
+---
+
+
+---
+
+---
+
+## 4. OA 期限 / 轮次 / 历史 / 讨论 / 导出
+
+> 这一组是审查意见（OA）工作流的数据面。期限计算以 `src/oa_deadline.rs` 为唯一数据源；轮次记录以 `oa_rounds` 表为准。
+
+### GET `/api/oa/deadline-table`
+
+返回各类 OA 的法定答复期限（唯一数据源，前端不应自行硬编码）。
+
+```json
+{
+  "deadline_table": {
+    "first_exam":             { "kind": "Months",  "value": 4 },
+    "second_rejection":       { "kind": "Months",  "value": 2 },
+    "reject_review":          { "kind": "Months",  "value": 3 },
+    "reexamination_request":  { "kind": "Months",  "value": 3 },
+    "reexamination_decision": { "kind": "Months",  "value": 3 },
+    "admin_lawsuit":          { "kind": "Months",  "value": 3 },
+    "abnormal":               { "kind": "WorkDays", "value": 15 }
+  }
+}
+```
+
+### GET `/api/oa/compute-deadline?oa_type=<type>&date=YYYY-MM-DD`
+
+按“发文日”推算届满日。`date` 不合法时返回 `{ "error": "Invalid date format, expected YYYY-MM-DD" }`。
+
+响应字段（`DeadlineResult`）：
+
+| 字段 | 含义 |
+|---|---|
+| `dispatch_date` | 发文日（原样返回） |
+| `service_date` | 送达日（电子送达＝发文日，不加邮路推定） |
+| `deadline` | 届满日 |
+| `days_left` | 剩余天数，负数表示已逾期 |
+| `total_days` | 发文日到届满日的总天数 |
+| `is_urgent` | 是否临近期限（≤7 天） |
+| `spec` | 期限规格（`Months(n)` / `WorkDays(n)`） |
+
+### GET `/api/oa/rounds/:patent_id`
+
+返回某专利的全部 OA 轮次：`{ "status": "ok", "patent_id": "...", "rounds": [...], "count": N }`。
+
+### POST `/api/oa/rounds`
+
+登记一轮 OA。必填：`patent_id`、`round_type`；`round_number` 由服务端自动计算。
+
+- `round_type` 仅允许：`first_rejection`、`second_rejection`、`reexamination`、`office_action`、`first_exam`、`abnormal`、`reject_review`；非法值返回 `{ "status": "error", "message": "Invalid round_type: '…'. Allowed values: …" }`。
+- 可选：`oa_date`、`oa_text`、`response_date`、`response_text`、`result`、`result_date`、`strategy_used`、`quality_score`（数值）、`notes`。
+- 成功：`{ "status": "ok", "round": {…}, "message": "OA round created" }`。
+
+### PUT `/api/oa/rounds/update/:id`
+
+按 id 局部更新一轮 OA，只更新请求里出现的字段；记录不存在返回 `{ "status": "error", "message": "OA round not found" }`。
+
+### GET `/api/oa/history/all` 与 GET `/api/oa/history/:patent_number`
+
+均返回 `{ "status": "ok", "analyses": [...] }`。`/history/all` 最多返回 100 条（按时间倒序）；`/history/:patent_number` 按专利号过滤。
+
+> ⚠️ `GET /api/oa/history/detail/:id` 目前被错误绑定到“列出全部”的 handler，`:id` 会被忽略（见 issue #88）。排查时不要依赖它。
+
+### POST `/api/oa/export-docx`
+
+把答复正文导出为 DOCX（服务端生成，返回 base64）。
+
+- 请求：`{ "response_text": "…", "patent_number": "…", "applicant": "…", "oa_type": "…" }`；`response_text` 必填且不超过 50,000 字符。
+- 成功：`{ "status": "ok", "docx": "<base64>" }`；失败：`{ "error": "…" }`。
+- 注意：响应是 JSON 里的 base64，不是二进制流。
+
+## 覆盖索引（R23 续：OA 17 条） / Coverage Index
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/oa/deadline-table` | 法定答复期限表（唯一数据源） |
+| GET | `/api/oa/compute-deadline` | 按发文日推算届满日 |
+| GET | `/api/oa/history/all` | 全部 OA 分析历史（≤100 条） |
+| GET | `/api/oa/history/:patent_number` | 某专利的 OA 分析历史 |
+| GET | `/api/oa/history/detail/:id` | 单条详情（当前实现有缺陷，见 #88） |
+| POST | `/api/oa/history/:id/delete` | 删除一条 OA 分析记录 |
+| GET | `/api/oa/history/:patent_number/diff` | 一审/二审差异对比 |
+| GET | `/api/oa/discussions/:patent_number` | 某专利的 OA 讨论会话列表 |
+| GET | `/api/oa/discussions/:patent_number/:discussion_id` | 单个讨论会话详情 |
+| POST | `/api/oa/discussions/import` | 导入讨论会话 |
+| POST | `/api/oa/export-docx` | 答复正文导出 DOCX（base64） |
+| POST | `/api/oa/export` | 分析结果服务端导出 |
+| GET | `/api/oa/export/:filename` | 下载已导出的文件 |
+| GET | `/api/oa/rounds/:patent_id` | 某专利的 OA 轮次列表 |
+| POST | `/api/oa/rounds` | 登记一轮 OA |
+| PUT | `/api/oa/rounds/update/:id` | 局部更新一轮 OA |
+| GET | `/api/oa/timeline/:patent_id` | 某专利的 OA 时间线 |
+
+
+## 覆盖说明 / Coverage
+
+- 既有章节（搜索 / 专利 / 创意验证 / 特征卡片 / 收藏夹 / 标签 / 聊天 / IPC / 配置 / 错误 / 环境变量）：59 条 API 端点说明；
+- 页面路由表：6 条（`/test`、`/import` 已从代码移除，见上表下方注记）；
+- 本轮 R23 新增（CAD / 认证 / 审查意见 AI）：24 条；
+- 本轮续补（OA 期限 / 轮次 / 历史 / 讨论 / 导出）：17 条。
+- 合计 **111 条**（按 method+path 去重），覆盖 145 个 method+path 路由组合中的 111 条（约 77%）。剩余 39 条由 issue #62 跟踪。
+
+## 待覆盖 / Not Yet Covered
+
+以下范围尚未逐条展开：页面级交互细节、`/api/search/*` 中尚未给出字段级示例的部分、`/api/chat/*`、`/api/settings/*` 其余项、`/api/idea/*`、`/api/ideas/*`、`/api/oa/*`（非 `ai` 前缀）、`/api/ai/*`（非 `oa` 前缀）、`/api/ipc/*`、`/api/collections/*`、`/api/tags`、`/api/upload/*`、`/api/version`、`/static/*path`。
+
+> 注：`/api/search/*`、`/api/patent/*`、`/api/upload/compare` 的说明已在上文既有章节中，不属于“待覆盖”。
