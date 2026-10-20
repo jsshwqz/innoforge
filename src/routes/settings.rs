@@ -1336,8 +1336,12 @@ mod ai_settings_charset_tests {
     }
 
     fn ai_request(api_key: &str) -> serde_json::Value {
+        ai_request_at(api_key, "http://localhost:11434/v1")
+    }
+
+    fn ai_request_at(api_key: &str, base_url: &str) -> serde_json::Value {
         json!({
-            "base_url": "http://localhost:11434/v1",
+            "base_url": base_url,
             "api_key": api_key,
             "model": "qwen2.5:7b",
             "ai_model_expert": "qwen2.5:7b"
@@ -1398,7 +1402,11 @@ mod ai_settings_charset_tests {
         assert!(r1.is_err(), "坏 Key 应被拒");
 
         // ② 合法 ASCII Key → 200
-        let r2 = api_save_ai(State(state.clone()), Json(ai_request(VALID_ASCII_KEY))).await;
+        let r2 = api_save_ai(
+            State(state.clone()),
+            Json(ai_request_at(VALID_ASCII_KEY, "https://api.deepseek.com/v1")),
+        )
+        .await;
         let ok_body = r2.expect("合法 Key 应通过");
         assert_eq!("ok", ok_body.0["status"].as_str().expect("status"));
 
