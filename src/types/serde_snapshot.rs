@@ -54,7 +54,7 @@ fn assert_exact_json<T: Serialize>(value: &T, expected: &str) {
 fn sample_summary() -> PatentSummary {
     PatentSummary {
         id: "pid-1".into(),
-        patent_number: "CN116401354A".into(),
+        patent_number: "CN990001012A".into(),
         title: "一种固态电池".into(),
         abstract_text: "摘要正文".into(),
         applicant: "某科技有限公司".into(),
@@ -69,7 +69,7 @@ fn sample_summary() -> PatentSummary {
 fn sample_patent() -> Patent {
     Patent {
         id: "pt-1".into(),
-        patent_number: "CN116401354A".into(),
+        patent_number: "CN990001012A".into(),
         title: "一种固态电池".into(),
         abstract_text: "摘要".into(),
         description: "说明书".into(),
@@ -119,7 +119,7 @@ fn patent_summary_field_snapshot_is_unchanged() {
     // 前端逐字段读取这条记录：顺序与取值一并钉住
     assert_exact_json(
         &s,
-        r#"{"id":"pid-1","patent_number":"CN116401354A","title":"一种固态电池","abstract_text":"摘要正文","applicant":"某科技有限公司","inventor":"张三","filing_date":"2023-01-02","country":"CN","relevance_score":88.5,"score_source":"hybrid(pos:95+content:84)"}"#,
+        r#"{"id":"pid-1","patent_number":"CN990001012A","title":"一种固态电池","abstract_text":"摘要正文","applicant":"某科技有限公司","inventor":"张三","filing_date":"2023-01-02","country":"CN","relevance_score":88.5,"score_source":"hybrid(pos:95+content:84)"}"#,
     );
     assert_roundtrip_stable(&s);
 }
@@ -132,7 +132,7 @@ fn patent_summary_optional_scores_stay_serialized_as_null() {
     // `#[serde(default)]` 而非 `skip_serializing_if`：None 仍出现在 JSON 中（值为 null）
     assert_exact_json(
         &s,
-        r#"{"id":"pid-1","patent_number":"CN116401354A","title":"一种固态电池","abstract_text":"摘要正文","applicant":"某科技有限公司","inventor":"张三","filing_date":"2023-01-02","country":"CN","relevance_score":null,"score_source":null}"#,
+        r#"{"id":"pid-1","patent_number":"CN990001012A","title":"一种固态电池","abstract_text":"摘要正文","applicant":"某科技有限公司","inventor":"张三","filing_date":"2023-01-02","country":"CN","relevance_score":null,"score_source":null}"#,
     );
     assert_roundtrip_stable(&s);
 }
@@ -201,9 +201,9 @@ fn search_request_keeps_page_defaults_when_fields_absent() {
 #[test]
 fn search_request_accepts_assignee_keys_with_snake_case_defaults() {
     let req: SearchRequest =
-        serde_json::from_str(r#"{"query":"x","assignee":"西南交通大学","exact_assignee":true}"#)
+        serde_json::from_str(r#"{"query":"x","assignee":"示例交通大学","exact_assignee":true}"#)
             .expect("assignee keys request json");
-    assert_eq!(Some("西南交通大学".to_string()), req.assignee);
+    assert_eq!(Some("示例交通大学".to_string()), req.assignee);
     assert!(req.exact_assignee);
 
     // 只发 assignee 不发开关：exact 缺省 false（裸值形态，非精确）
@@ -383,7 +383,7 @@ fn patent_optional_and_defaulted_fields_survive_minimal_json() {
 #[test]
 fn legal_status_and_fetch_import_request_snapshots_are_unchanged() {
     let legal = LegalStatusResult {
-        patent_number: "CN116401354A".into(),
+        patent_number: "CN990001012A".into(),
         current_status: "有效".into(),
         events: vec![LegalEvent {
             date: "2024-02-01".into(),

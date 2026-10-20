@@ -12,7 +12,7 @@
 //! ```text
 //! { "results": {
 //!     "total_num_results": 14627, "total_num_pages": 77, "num_page": 0,
-//!     "cluster": [ { "result": [ { "id": "patent/CN120275837B/zh", "rank": 0,
+//!     "cluster": [ { "result": [ { "id": "patent/CN990001013B/zh", "rank": 0,
 //!                                  "patent": { title, snippet, publication_number,
 //!                                              assignee, inventor, priority_date,
 //!                                              filing_date, publication_date, grant_date,
@@ -36,15 +36,15 @@
 //!
 //! `inner_url` 按 `exact_assignee` 渲染独立参数 `assignee=` 两种形态（false ⇒ 裸值、
 //! true ⇒ 引号）。真实过滤性结论**严格限定为已实测到的三类形态**：
-//! - **q 内嵌引号形态**（`q=assignee:"西南交通大学"`）与**独立裸值参数形态**
-//!   （`q=固态电池&assignee=西南交通大学`，即 `exact_assignee=false` 缺省下发形状）
+//! - **q 内嵌引号形态**（`q=assignee:"示例交通大学"`）与**独立裸值参数形态**
+//!   （`q=固态电池&assignee=示例交通大学`，即 `exact_assignee=false` 缺省下发形状）
 //!   均拿到真 JSON 且确证**上游真过滤**：前者 `total_num_results=542`、首页 10/10 行
-//!   `patent.assignee` 全等「西南交通大学」；后者 `total=58`（远小于该词全量的十万级）、
-//!   10/10 行 assignee 为 `<b>西南交通大学</b>`（上游给命中字段包 `<b>` 高亮），
+//!   `patent.assignee` 全等「示例交通大学」；后者 `total=58`（远小于该词全量的十万级）、
+//!   10/10 行 assignee 为 `<b>示例交通大学</b>`（上游给命中字段包 `<b>` 高亮），
 //!   标题全部固态电池相关。
 //! - **引号独立参数形态**（`assignee="…"`，即 `exact_assignee=true` 下发形状）——
 //!   **MA6d 已取证（2026-09-28，反爬窗口外单次实测）**：HTTP 200、24429 字节真 JSON、
-//!   `total_num_results=58`、首页 10/10 行 assignee 严格全等「西南交通大学」，
+//!   `total_num_results=58`、首页 10/10 行 assignee 严格全等「示例交通大学」，
 //!   **确证上游真过滤**。⚠️ 如实标注 caveat：total 与裸值形态 (b) **同值** ⇒ 至少对
 //!   本例，引号相对裸值只改语法形态、不改命中集。
 //! - **未取证（如实保留，禁止过度结论）**：英文机构名形态（引号与裸值独立参数）仍
@@ -690,7 +690,7 @@ pub(crate) mod tests {
    {
     "result": [
      {
-      "id": "patent/CN120275837B/zh",
+      "id": "patent/CN990001013B/zh",
       "rank": 0,
       "patent": {
        "title": " 一种动车组电池健康状态评估与寿命预测方法及系统",
@@ -699,9 +699,9 @@ pub(crate) mod tests {
        "filing_date": "2025-06-11",
        "grant_date": "2025-09-05",
        "publication_date": "2025-09-05",
-       "inventor": "陈奎",
-       "assignee": "西南交通大学",
-       "publication_number": "CN120275837B",
+       "inventor": "张三",
+       "assignee": "示例交通大学",
+       "publication_number": "CN990001013B",
        "language": "zh",
        "thumbnail": "",
        "pdf": "",
@@ -709,7 +709,7 @@ pub(crate) mod tests {
       }
      },
      {
-      "id": "patent/CN120598460A/zh",
+      "id": "patent/CN990001014A/zh",
       "rank": 1,
       "patent": {
        "title": " 一种多模态融合的agv动态路径规划与集群调度系统",
@@ -717,9 +717,9 @@ pub(crate) mod tests {
        "priority_date": "2025-05-23",
        "filing_date": "2025-05-23",
        "publication_date": "2025-09-05",
-       "inventor": "刘徐丞",
-       "assignee": "华东交通大学",
-       "publication_number": "CN120598460A",
+       "inventor": "李四",
+       "assignee": "示例理工大学",
+       "publication_number": "CN990001014A",
        "language": "zh",
        "thumbnail": "",
        "pdf": "",
@@ -871,10 +871,10 @@ pub(crate) mod tests {
     #[test]
     fn inner_url_exact_assignee_quotes_the_independent_param() {
         let mut q = query("固态电池");
-        q.assignee = Some(" 西南交通大学 ".to_string());
+        q.assignee = Some(" 示例交通大学 ".to_string());
         q.exact_assignee = true;
         assert_eq!(
-            "q=固态电池&country=CN&language=CHINESE&assignee=\"西南交通大学\"&sort=new",
+            "q=固态电池&country=CN&language=CHINESE&assignee=\"示例交通大学\"&sort=new",
             GooglePatentsXhrProvider::inner_url(&q)
         );
     }
@@ -897,7 +897,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn exact_assignee_request_url_encodes_quotes_exactly_once() {
         let mut q = query("固态电池");
-        q.assignee = Some("西南交通大学".to_string());
+        q.assignee = Some("示例交通大学".to_string());
         q.exact_assignee = true;
         let (p, transport, _clock) = provider(vec![reply(200, REAL_EMPTY_REPLY)]);
         p.search(q).await;
@@ -906,7 +906,7 @@ pub(crate) mod tests {
             .into_iter()
             .next()
             .expect("one request issued");
-        let school_pct = urlencoding::encode("西南交通大学");
+        let school_pct = urlencoding::encode("示例交通大学");
         let expect_tail = format!("assignee%3D%22{}%22%26sort%3Dnew", school_pct);
         assert!(url.ends_with(&expect_tail), "出网 URL 尾部不符: {url}");
         assert!(!url.contains("%2522"), "引号被双重编码: {url}");
@@ -1003,7 +1003,7 @@ pub(crate) mod tests {
         let rows = flatten_rows(&json);
         assert_eq!(2, rows.len());
         assert_eq!(
-            "CN120275837B",
+            "CN990001013B",
             rows[0]["patent"]["publication_number"]
                 .as_str()
                 .expect("pub")
@@ -1022,19 +1022,19 @@ pub(crate) mod tests {
         let json: serde_json::Value = serde_json::from_str(REAL_CN_REPLY).expect("real reply");
         let row = json["results"]["cluster"][0]["result"][0].clone();
         let p = xhr_to_patent(&row);
-        assert_eq!("CN120275837B", p.patent_number);
+        assert_eq!("CN990001013B", p.patent_number);
         assert_eq!("CN", p.country, "国家码取公开号前缀字母");
         assert_eq!(
             "一种动车组电池健康状态评估与寿命预测方法及系统", p.title,
             "首尾空格应清掉"
         );
-        assert_eq!("西南交通大学", p.applicant);
-        assert_eq!("陈奎", p.inventor);
+        assert_eq!("示例交通大学", p.applicant);
+        assert_eq!("张三", p.inventor);
         assert_eq!("2025-06-11", p.filing_date);
         assert_eq!("2025-09-05", p.publication_date);
         assert_eq!(Some("2025-09-05".to_string()), p.grant_date);
         assert_eq!(SOURCE_LABEL, p.source);
-        assert!(p.raw_json.contains("CN120275837B"), "原文完整入库");
+        assert!(p.raw_json.contains("CN990001013B"), "原文完整入库");
 
         // 第 2 条上游就没有 grant_date → 必须是 None，不能是 Some("")
         let row2 = json["results"]["cluster"][0]["result"][1].clone();

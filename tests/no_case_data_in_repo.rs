@@ -4,8 +4,10 @@
 //! 1. 申请人姓名——汉字与拼音两种形态（拼音用字符数组逐字符拼装）
 //! 2. 对比文件公开号类目——本轮替掉的四个真实 D 号（每段 ≤4 字符拼接）
 //! 3. 发文序号类目——16 位数字（每段 ≤4 字符拼接）
-//! 4. 申请号形状 `\d{13}(\.\d)?`、公开号形状 `CN\d{8}[A-Z]` / `CN\d{9}U`
-//!    ——仅在 src/ 生代码区域（#[cfg(test)] 之前）检查
+//! 4. 申请号形状 `(?:\d{12}\.\d|\d{13})`、公开号形状 `CN\d{9}[A-Z]{1,2}`
+//!    / `CN\d{8}[A-Z]` / `US\d{7,9}[A-Z]?` / `WO\d{4}/\d{6}`
+//!    ——覆盖 src/ 生代码（#[cfg(test)] 之前）+ docs/ + tests/ + templates/；
+//!    合成夹具 allowlist 放行（99/90 段等），哈希片段跳过
 //!
 //! tests/fixtures/ 下的文件内容也执行四类检查（fixture 按定义是合成内容，更应被扫描）。
 //! 白名单常量必须保持为空。
@@ -88,6 +90,101 @@ fn production_part(content: &str, is_rust: bool) -> &str {
     }
 }
 
+// ── 合成段 allowlist：形状网命中这些号时放行，不报红 ──
+// 99/90 段 + 测试模式段：仓库既有合成夹具，必须在新正则下不误红。
+// allowlist 本身在此可见、可审计。每条都是合成号，非真实第三方号。
+const SYNTHETIC_PUB_NUM_ALLOWLIST: &[&str] = &[
+    // 99段（含本次替换真实号后新生的 99 段合成号）
+    "CN990001001A",
+    "CN990001002A",
+    "CN990001003U",
+    "CN990001004U",
+    "CN990001011A",
+    "CN990001012A",
+    "CN990001013B",
+    "CN990001014A",
+    "CN990001015B",
+    "CN990001016C",
+    "CN990001017A",
+    "CN999999999A",
+    // 90段
+    "CN900000000A",
+    "CN900000001A",
+    // 测试模式段（9 位 + 字母）
+    "CN123456789A",
+    "CN111000000A",
+    "CN110123456A",
+    "CN111122233A",
+    "CN222233344U",
+    "CN221464040U",
+    "CN109876543A",
+    "CN987654321A",
+    "CN990001020A",
+    // 重复数字段（8 位历史形态 + 字母）
+    "CN11111111A",
+    "CN22222222A",
+    "CN22222222B",
+    "CN33333333A",
+    "CN44444444A",
+    "CN55555555A",
+    "CN66666666A",
+    "CN77777777A",
+    "CN88888888A",
+    "CN12345678A",
+    "CN99999999A",
+    // 全零段
+    "CN000000003A",
+    "CN000000004A",
+];
+
+// 合成申请号 allowlist：仓库既有合成申请号，形状网命中时放行。
+const SYNTHETIC_APP_NUM_ALLOWLIST: &[&str] = &[
+    "202420009882.7",
+    "2024200098827",
+    "202410001234.5",
+    "1990999999999",
+];
+
+// 合成 US/WO 公开号 allowlist（历史形态）
+const SYNTHETIC_US_WO_ALLOWLIST: &[&str] = &[
+    "US10000000",
+    "US10000000B",
+    "US1000000B",
+    "US1234567",
+    "US1234567B",
+    "US12345678B",
+    "US202103456",
+    "US9000000B",
+    "US9000001B",
+    "WO2019/023456",
+    "WO2021/123456",
+];
+
+/// 判断公开号是否在合成 allowlist 内（大小写不敏感）。
+fn is_synthetic_pub_num(num: &str) -> bool {
+    let upper = num.to_uppercase();
+    SYNTHETIC_PUB_NUM_ALLOWLIST.iter().any(|&a| a == upper)
+        || SYNTHETIC_US_WO_ALLOWLIST.iter().any(|&a| a == upper)
+}
+
+/// 判断申请号是否在合成 allowlist 内。
+fn is_synthetic_app_num(num: &str) -> bool {
+    SYNTHETIC_APP_NUM_ALLOWLIST.contains(&num)
+}
+
+/// 判断一段数字匹配是否嵌在更长的十六进制串里（如 SHA-256 哈希片段）。
+/// 若匹配前后紧邻十六进制字符（0-9, a-f, A-F），则视为哈希片段而非独立号码。
+fn is_hex_fragment(text: &str, start: usize, end: usize) -> bool {
+    let is_hex = |c: char| c.is_ascii_hexdigit();
+    let before = if start > 0 {
+        text[..start].chars().next_back()
+    } else {
+        None
+    };
+    let after = text[end..].chars().next();
+    matches!(before, Some(c) if is_hex(c)) || matches!(after, Some(c) if is_hex(c))
+}
+
 /// 对单个文本（内容或路径）执行全部四类检查，返回违规类别列表。
 /// 违规消息不回显命中串本身。
 ///
@@ -95,7 +192,7 @@ fn production_part(content: &str, is_rust: bool) -> &str {
 /// - 申请人姓名汉字：中文无大小写概念，直接匹配。
 /// - 拼音／公开号／序号／申请号：大小写不敏感（每个文件只 to_lowercase 一次）。
 ///   防止小写公开号 / 混合大小写拼音等形态漏网。
-fn check_text(text: &str, is_src_rust_prod: bool) -> Vec<&'static str> {
+fn check_text(text: &str, shape_eligible: bool) -> Vec<&'static str> {
     let mut hits: Vec<&'static str> = Vec::new();
 
     // 类目 1：申请人姓名（汉字 — 中文无大小写，直接匹配）
@@ -135,20 +232,54 @@ fn check_text(text: &str, is_src_rust_prod: bool) -> Vec<&'static str> {
         }
     }
 
-    // 类目 4 续：形状检查（仅 src/ 生代码区域，大小写不敏感）
-    if is_src_rust_prod {
-        let re_app_num = Regex::new(r"\d{13}(\.\d)?").expect("invalid app num regex");
+    // 类目 4 续：形状检查（src/ 生代码 + docs/ + tests/ + templates/，大小写不敏感）
+    // 正则修正：申请号 12 位 + . + 1 位校验（现行标准形态）或 13 连号（历史）；
+    //           公开号 CN + 9 位 + 文献种类码（现行）或 CN + 8 位 + 字母（历史）；
+    //           并保留 US/WO 历史形态。
+    // allowlist：合成夹具（99/90 段等）命中时放行，不误红。
+    // 哈希片段：13 位数字若嵌在更长十六进制串里则跳过（非独立号码）。
+    if shape_eligible {
+        let re_app_num = Regex::new(r"(?:\d{12}\.\d|\d{13})").expect("invalid app num regex");
+        let re_pub_num_9 = Regex::new(r"(?i)CN\d{9}[A-Z]{1,2}").expect("invalid pub num 9 regex");
         let re_pub_num_8 = Regex::new(r"(?i)CN\d{8}[A-Z]").expect("invalid pub num 8 regex");
-        let re_pub_num_9u = Regex::new(r"(?i)CN\d{9}U").expect("invalid pub num 9u regex");
+        let re_pub_num_us = Regex::new(r"(?i)US\d{7,9}[A-Z]?").expect("invalid pub num US regex");
+        let re_pub_num_wo = Regex::new(r"(?i)WO\d{4}/\d{6}").expect("invalid pub num WO regex");
 
-        if re_app_num.is_match(text) {
-            hits.push("生代码申请号形状");
+        // 申请号形状：跳过 allowlist 内的合成号与哈希片段
+        for m in re_app_num.find_iter(text) {
+            let num = m.as_str();
+            if !is_synthetic_app_num(num) && !is_hex_fragment(text, m.start(), m.end()) {
+                hits.push("形状网申请号形状");
+                break;
+            }
         }
-        if re_pub_num_8.is_match(text) {
-            hits.push("生代码公开号形状(CN8+letter)");
+        // 公开号形状 CN 9 位：跳过 allowlist 内的合成号
+        for m in re_pub_num_9.find_iter(text) {
+            if !is_synthetic_pub_num(m.as_str()) {
+                hits.push("形状网公开号形状(CN9)");
+                break;
+            }
         }
-        if re_pub_num_9u.is_match(text) {
-            hits.push("生代码公开号形状(CN9+U)");
+        // 公开号形状 CN 8 位（历史形态）：跳过 allowlist
+        for m in re_pub_num_8.find_iter(text) {
+            if !is_synthetic_pub_num(m.as_str()) {
+                hits.push("形状网公开号形状(CN8)");
+                break;
+            }
+        }
+        // 公开号形状 US（历史形态）：跳过 allowlist
+        for m in re_pub_num_us.find_iter(text) {
+            if !is_synthetic_pub_num(m.as_str()) {
+                hits.push("形状网公开号形状(US)");
+                break;
+            }
+        }
+        // 公开号形状 WO（历史形态）：跳过 allowlist
+        for m in re_pub_num_wo.find_iter(text) {
+            if !is_synthetic_pub_num(m.as_str()) {
+                hits.push("形状网公开号形状(WO)");
+                break;
+            }
         }
     }
 
@@ -234,9 +365,14 @@ fn no_case_data_in_git_tracked_files() {
 
         scanned += 1;
 
-        let is_src_rust = file.starts_with("src/") && file.ends_with(".rs");
-        let prod = production_part(&content, is_src_rust);
-        let content_hits = check_text(prod, is_src_rust);
+        let is_rust = file.starts_with("src/") && file.ends_with(".rs");
+        // 形状网覆盖域：src/ 生代码 + docs/ + tests/ + templates/
+        let shape_eligible = is_rust
+            || file.starts_with("docs/")
+            || file.starts_with("tests/")
+            || file.starts_with("templates/");
+        let prod = production_part(&content, is_rust);
+        let content_hits = check_text(prod, shape_eligible);
         for h in content_hits {
             violations.push(format!("{}: 内容命中 [{}]", file, h));
         }
@@ -930,16 +1066,114 @@ fn negative_control_clean_text_passes() {
 }
 
 #[test]
-fn negative_control_shape_check_only_in_src_prod() {
-    // The same 13-digit number in a non-src context (is_src_rust_prod=false)
-    // should NOT trigger the shape checks (only literal forbidden values are
-    // checked everywhere; shape regexes are src-only).
+fn negative_control_shape_check_fires_outside_src_prod() {
+    // 旧断言 `negative_control_shape_check_only_in_src_prod` 曾要求
+    // is_src_rust_prod=false 时形状检查不许触发——它把"覆盖域缺失"当规则守着。
+    // 现形状网已扩到 docs/tests/templates，非 src 区域也必须触发。
+    // 反转断言：合成同形号在 shape_eligible=true 时必须被检出。
     let parts: [&str; 4] = ["2024", "0101", "2345", "6"];
     let synthetic: String = parts.iter().copied().collect();
-    let hits = check_text(&synthetic, false);
+    let hits = check_text(&synthetic, true);
     assert!(
-        !hits.iter().any(|h| h.contains("形状")),
-        "negative control: shape checks must not fire outside src prod area, got {:?}",
+        hits.iter().any(|h| h.contains("形状")),
+        "negative control: shape checks must fire for 13-digit app number, got {:?}",
         hits
     );
+    // 合成公开号同理
+    let pub_num = format!("{}{}{}", "CN", "991112233", "A");
+    let hits2 = check_text(&pub_num, true);
+    assert!(
+        hits2.iter().any(|h| h.contains("形状")),
+        "negative control: shape checks must fire for CN9+letter pub number, got {:?}",
+        hits2
+    );
+}
+
+// ── 常驻阳性对照：合成但同形的样本必须被守卫检出（证明形状网真能抓） ──
+
+#[test]
+fn positive_control_app_number_standard_shape() {
+    // 现行标准形态：12 位 + . + 1 位校验码。旧正则 \d{13}(\.\d)? 漏过此形态。
+    // 合成样本（12 位 + . + 1 位校验码，见下方 parts 拼装）不属于任何真实案号，也不在 allowlist 内。
+    let parts: [&str; 3] = ["199910000000", ".", "9"];
+    let synthetic: String = parts.iter().copied().collect();
+    let hits = check_text(&synthetic, true);
+    assert!(
+        hits.iter().any(|h| h.contains("申请号形状")),
+        "positive control: 12+1 app number must be detected, got {:?}",
+        hits
+    );
+}
+
+#[test]
+fn positive_control_pub_number_cn9_shape() {
+    // 现行公开号形态：CN + 9 位 + 字母。旧正则 CN\d{8}[A-Z] 漏过 9 位。
+    // 合成样本（CN + 9 位 + A，见下方 format 拼装）不在 allowlist 内。
+    let synthetic = format!("{}{}{}", "CN", "991112233", "A");
+    let hits = check_text(&synthetic, true);
+    assert!(
+        hits.iter().any(|h| h.contains("公开号")),
+        "positive control: CN9+letter pub number must be detected, got {:?}",
+        hits
+    );
+}
+
+#[test]
+fn positive_control_synthetic_fixtures_not_flagged() {
+    // 合法合成夹具（99/90 段）在扩覆盖 + 新正则下不得误红。
+    // 这些号在 allowlist 内，check_text 必须放行。
+    let fixtures = [
+        "CN990001001A",
+        "CN990001002A",
+        "CN990001003U",
+        "CN990001004U",
+        "CN900000000A",
+        "CN900000001A",
+        "CN999999999A",
+        "CN990001011A",
+        "CN990001012A",
+        "CN990001013B",
+    ];
+    for fx in &fixtures {
+        let hits = check_text(fx, true);
+        assert!(
+            !hits.iter().any(|h| h.contains("形状")),
+            "synthetic fixture {} must NOT be flagged by shape net, got {:?}",
+            fx,
+            hits
+        );
+    }
+    // 合成申请号同理
+    let app_fixtures = ["202420009882.7", "1990999999999"];
+    for fx in &app_fixtures {
+        let hits = check_text(fx, true);
+        assert!(
+            !hits.iter().any(|h| h.contains("形状")),
+            "synthetic app fixture {} must NOT be flagged, got {:?}",
+            fx,
+            hits
+        );
+    }
+}
+
+#[test]
+fn positive_control_docs_coverage() {
+    // 证明 docs/ 路径在 shape_eligible 判定内——形状网真扫 docs/。
+    // 此测试验证 shape_eligible 逻辑，不依赖文件系统。
+    let docs_file = "docs/example.md";
+    let is_rust = docs_file.starts_with("src/") && docs_file.ends_with(".rs");
+    let shape_eligible = is_rust
+        || docs_file.starts_with("docs/")
+        || docs_file.starts_with("tests/")
+        || docs_file.starts_with("templates/");
+    assert!(shape_eligible, "docs/ files must be shape-eligible");
+    // 同理验证 tests/ 和 templates/
+    for f in &["tests/x.rs", "templates/t.html"] {
+        let is_r = f.starts_with("src/") && f.ends_with(".rs");
+        let se = is_r
+            || f.starts_with("docs/")
+            || f.starts_with("tests/")
+            || f.starts_with("templates/");
+        assert!(se, "{} must be shape-eligible", f);
+    }
 }

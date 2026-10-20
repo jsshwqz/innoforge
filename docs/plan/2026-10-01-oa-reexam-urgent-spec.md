@@ -39,7 +39,7 @@
 
 | 前缀 | 正则 | 示例 | 说明 |
 |------|------|------|------|
-| CN | `CN\d{8,12}[A-Z]\d?` | CN113224379A, CN2010100012345B1 | 中国专利公开/公告号，末尾字母为种类码（A=公开, B=公告, U=实用新型, C=PCT），可选数字为修订序号 |
+| CN | `CN\d{8,12}[A-Z]\d?` | CN990001011A, CN2010100012345B1 | 中国专利公开/公告号，末尾字母为种类码（A=公开, B=公告, U=实用新型, C=PCT），可选数字为修订序号 |
 | US | `US\d{6,12}[A-Z]\d?` | US20210345678A1, US1234567B2 | 美国专利，含申请公开（A1/A2）与授权（B1/B2） |
 | EP | `EP\d{6,8}[A-Z]\d?` | EP3445287B1, EP1234567A2 | 欧洲专利 |
 | JP | `JP\d{4,8}[A-Z]` | JP2020123456A, JP5678900B | 日本专利（特开/特许/特表） |
@@ -218,7 +218,7 @@ D[1-9][:：]\s*<公开号>
 
 | # | 条件 | 验法 |
 |---|------|------|
-| V1 | OA 文本含「对比文件1：CN113224379A」时，分析请求 `references[]` 自动含该公开号全文（或 `reason_code` 标注失败原因） | 构造含公开号的 OA 文本 fixture，跑 `office_action_response_stream`，断言 `references` 含对应条目 |
+| V1 | OA 文本含「对比文件1：CN990001011A」时，分析请求 `references[]` 自动含该公开号全文（或 `reason_code` 标注失败原因） | 构造含公开号的 OA 文本 fixture，跑 `office_action_response_stream`，断言 `references` 含对应条目 |
 | V2 | `oa_type=reject_review` 时，生成答复书含四部分结构标题 + 提交前清单 8 项 | 跑 `generate_response_letter_stream`，正则匹配标题与清单项 |
 | V3 | 修改后权项引入原说明书未出现术语时，出参 `a33_check.status` 为 `risk` 且 `items[].risk_level` 含 `high` | 构造 fixture：原说明书无「区块链」，修改后权项含「区块链」，断言 `a33_check` |
 | V4 | `references_info` 超 5000 字符时，AI 输入含数据完整性尾注（选 A）或出参含容量警告（选 B） | 构造 6000 字符 refs fixture，断言截断行为 |

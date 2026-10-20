@@ -58,7 +58,7 @@
           "url": "/api/search",
           "status": 200,
           "ok": true,
-          "body_excerpt": "{\"patents\":[{\"id\":\"f5927339-2f09-47a0-b3b6-36b2bbc9bb8f\",\"patent_number\":\"CN121540857A\",\"title\":\"面向燃氢航空发动机燃烧室的尾气分析测试系统、运行方法及分析测试方法\",\"abstract_text\":\"The invention provides a tail gas analysis test system, an operation me"
+          "body_excerpt": "{\"patents\":[{\"id\":\"f5927339-2f09-47a0-b3b6-36b2bbc9bb8f\",\"patent_number\":\"CN990001020A\",\"title\":\"一种用于测试的燃烧室尾气分析系统、运行方法及分析测试方法\",\"abstract_text\":\"The invention provides a tail gas analysis test system, an operation me"
         },
         {
           "name": "POST ai chat",
@@ -855,7 +855,7 @@
           "url": "/api/search",
           "status": 200,
           "ok": true,
-          "body_excerpt": "{\"patents\":[{\"id\":\"f5927339-2f09-47a0-b3b6-36b2bbc9bb8f\",\"patent_number\":\"CN121540857A\",\"title\":\"面向燃氢航空发动机燃烧室的尾气分析测试系统、运行方法及分析测试方法\",\"abstract_text\":\"The invention provides a tail gas analysis test system, an operation me"
+          "body_excerpt": "{\"patents\":[{\"id\":\"f5927339-2f09-47a0-b3b6-36b2bbc9bb8f\",\"patent_number\":\"CN990001020A\",\"title\":\"一种用于测试的燃烧室尾气分析系统、运行方法及分析测试方法\",\"abstract_text\":\"The invention provides a tail gas analysis test system, an operation me"
         },
         {
           "name": "POST ai chat",

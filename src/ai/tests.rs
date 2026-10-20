@@ -117,7 +117,7 @@ mod ua4_refs_truncation_tests {
     /// V4 验收：references_info 超 5000 字符时，AI 输入含数据完整性尾注（选 A）
     #[test]
     fn ua4_refs_over_5000_gets_integrity_tail() {
-        let refs = "对比文件1：CN113224379A ".repeat(300); // ~6000 chars
+        let refs = "对比文件1：CN990001011A ".repeat(300); // ~6000 chars
         assert!(refs.chars().count() > 5000);
         let out = truncate_for_ai(&refs, 5000);
         assert!(out.chars().count() > 5000);
@@ -141,10 +141,10 @@ mod ua1_publication_number_tests {
 
     #[test]
     fn ua1_extracts_cn_publication_number() {
-        let oa = "对比文件1：CN113224379A\n本申请涉及一种存储装置。";
+        let oa = "对比文件1：CN990001011A\n本申请涉及一种存储装置。";
         let result = extract_publication_numbers(oa);
         assert!(!result.is_empty());
-        assert_eq!(result[0].0, "CN113224379A");
+        assert_eq!(result[0].0, "CN990001011A");
     }
 
     #[test]
@@ -204,7 +204,7 @@ mod ua1_publication_number_tests {
 
     #[test]
     fn ua1_deduplication_keeps_first_occurrence() {
-        let oa = "对比文件1：CN113224379A\n对比文件2：CN113224379A";
+        let oa = "对比文件1：CN990001011A\n对比文件2：CN990001011A";
         let result = extract_publication_numbers(oa);
         assert_eq!(
             result.len(),
@@ -216,10 +216,10 @@ mod ua1_publication_number_tests {
     #[test]
     fn ua1_extracts_all_country_formats() {
         let oa = "\
-对比文件1：CN113224379A\n对比文件2：US20210345678A1\n对比文件3：EP3445287B1\n对比文件4：JP20051234A\n对比文件5：KR102021012345A\n对比文件6：WO2021/123456A1\n";
+对比文件1：CN990001011A\n对比文件2：US20210345678A1\n对比文件3：EP3445287B1\n对比文件4：JP20051234A\n对比文件5：KR102021012345A\n对比文件6：WO2021/123456A1\n";
         let result = extract_publication_numbers(oa);
         assert_eq!(result.len(), 6, "should extract all 6 country formats");
-        assert_eq!(result[0].0, "CN113224379A");
+        assert_eq!(result[0].0, "CN990001011A");
         assert_eq!(result[1].0, "US20210345678A1");
         assert_eq!(result[2].0, "EP3445287B1");
         assert_eq!(result[3].0, "JP20051234A");
@@ -229,7 +229,7 @@ mod ua1_publication_number_tests {
 
     #[test]
     fn ua1_context_label_captured() {
-        let oa = "对比文件1：CN113224379A";
+        let oa = "对比文件1：CN990001011A";
         let result = extract_publication_numbers(oa);
         assert!(!result.is_empty());
         assert!(!result[0].1.is_empty(), "context label should be captured");
