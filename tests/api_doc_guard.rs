@@ -14,26 +14,53 @@ use regex::Regex;
 
 /// 从 `src/common.rs` 解析全部 `.route("path", method(...))` 路由。
 fn parse_routes_from_src() -> HashSet<(String, String)> {
-    let src = include_str!("../src/common.rs");
+    let routes = parse_routes_from(include_str!("../src/common.rs"));
+    assert!(
+        !routes.is_empty(),
+        "路由表解析结果为空，说明 src/common.rs 结构已变，需更新本测试的解析逻辑"
+    );
+    routes
+}
+
+/// 解析给定源码文本里的路由（抽出来便于单测解析器本身）。
+///
+/// 方法必须按**函数调用形态** `get(` / `post(` … 匹配，不能用裸词：
+/// 路径里可能出现 `…/delete`、`…/search` 这类词，裸词匹配会把路径词当成 HTTP 方法
+/// （实测把 `POST /api/oa/history/:id/delete` 误读成 `DELETE`）。
+/// 同时收集 chunk 内**所有**方法，`.get(a).post(b)` 这种多方法路由不能被漏掉。
+fn parse_routes_from(src: &str) -> HashSet<(String, String)> {
     let path_re = Regex::new(r#"\.route\(\s*"([^"]+)""#).unwrap();
-    let method_re = Regex::new(r"\b(get|post|put|delete|patch)\b").unwrap();
+    let method_re = Regex::new(r"\b(get|post|put|delete|patch)\(").unwrap();
     let mut out = HashSet::new();
     for chunk in src.split(".route(").skip(1) {
         let path = match path_re.captures(&format!(".route({chunk}")) {
             Some(c) => c.get(1).unwrap().as_str().to_string(),
             None => continue,
         };
-        let method = match method_re.captures(chunk) {
-            Some(c) => c.get(1).unwrap().as_str().to_ascii_uppercase(),
-            None => continue,
-        };
-        out.insert((method, path));
+        for m in method_re.captures_iter(chunk) {
+            out.insert((m[1].to_ascii_uppercase(), path.clone()));
+        }
     }
-    assert!(
-        !out.is_empty(),
-        "路由表解析结果为空，说明 src/common.rs 结构已变，需更新本测试的解析逻辑"
-    );
     out
+}
+
+#[test]
+fn parser_handles_method_word_inside_path_and_multi_method_routes() {
+    let src = r#"
+        .route("/api/x/:id/delete", post(h1))
+        .route("/api/collections", get(h2).post(h3))
+    "#;
+    let routes = parse_routes_from(src);
+    assert!(
+        routes.contains(&("POST".to_string(), "/api/x/:id/delete".to_string())),
+        "路径中的 delete 不能被当成方法：{routes:?}"
+    );
+    assert!(
+        !routes.contains(&("DELETE".to_string(), "/api/x/:id/delete".to_string())),
+        "不应凭空产生 DELETE 方法：{routes:?}"
+    );
+    assert!(routes.contains(&("GET".to_string(), "/api/collections".to_string())));
+    assert!(routes.contains(&("POST".to_string(), "/api/collections".to_string())));
 }
 
 /// 从 `docs/API.md` 覆盖索引表行 `| METHOD | `path` | ... |` 解析声明端点。
