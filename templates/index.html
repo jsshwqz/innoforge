@@ -417,21 +417,16 @@
     loadUploadedMeta();
     renderFileList();
 
-    // 服务状态检测
+    // 服务状态检测 — issue #68: AI 状态条与 /api/ai/models 探测同源，
+    // 不再自己用 /api/settings 的 ai_api_key_configured 另算一套。
     (async function checkStatus() {
+        var aiEl = document.getElementById('status-ai');
+        var searchEl = document.getElementById('status-search');
+
+        // 搜索状态仍从 /api/settings 读取
         try {
             var resp = await fetch('/api/settings');
             var data = await resp.json();
-            var aiEl = document.getElementById('status-ai');
-            var searchEl = document.getElementById('status-search');
-            if (data.ai_api_key_configured) {
-                aiEl.textContent = '✅ AI 服务已配置';
-                aiEl.style.color = '#3fb950';
-            } else {
-                aiEl.textContent = '⚠️ AI 未配置 — 点击设置';
-                aiEl.style.color = '#d29922';
-                aiEl.style.borderColor = '#d29922';
-            }
             if (data.serpapi_key_configured || data.bing_api_key_configured || data.lens_api_key_configured) {
                 searchEl.textContent = '✅ 在线搜索已配置';
                 searchEl.style.color = '#3fb950';
@@ -440,6 +435,36 @@
                 searchEl.style.color = '#8b949e';
             }
         } catch(e) {}
+
+        // AI 状态从 /api/ai/models 探测结果取 — 与模型列表页同一判据
+        try {
+            var modelsResp = await fetch('/api/ai/models');
+            var modelsData = await modelsResp.json();
+            var providers = modelsData.providers || [];
+            var anyOk = providers.some(function(p) {
+                return p.status === 'ok' && (p.count || 0) > 0;
+            });
+            var onlyOllamaError = providers.length > 0 && providers.every(function(p) {
+                return p.name === 'Ollama' && p.status === 'error';
+            });
+            if (anyOk) {
+                aiEl.textContent = '✅ AI 服务已配置';
+                aiEl.style.color = '#3fb950';
+            } else if (onlyOllamaError) {
+                aiEl.textContent = '⚠️ 本地 Ollama（未检测到服务）— 点击设置';
+                aiEl.style.color = '#d29922';
+                aiEl.style.borderColor = '#d29922';
+            } else {
+                aiEl.textContent = '⚠️ AI 未配置 — 点击设置';
+                aiEl.style.color = '#d29922';
+                aiEl.style.borderColor = '#d29922';
+            }
+        } catch(e) {
+            // 探测失败时回退到保守的"未配置"提示，不给假绿灯
+            aiEl.textContent = '⚠️ AI 未配置 — 点击设置';
+            aiEl.style.color = '#d29922';
+            aiEl.style.borderColor = '#d29922';
+        }
     })();
 
     // 加载最近项目

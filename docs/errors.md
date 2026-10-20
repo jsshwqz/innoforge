@@ -1091,6 +1091,23 @@
 - **预防 / Prevention**: ① 任何涉及多字节字符（中文/emoji）的长度判据，一律用 `chars().count()` 而非 `len()`；② **姓名判据不得用作检索路由的排除门**——技术词首字与常见姓结构性重合，姓氏表是按测试词拟合、违反通用性；姓名召回应靠 Mixed 内含的 inventor 字段搜索，而非预先独占 inventor 通道；③ 多词查询不许隐式整串 LIKE，必须显式切 token 并声明 AND/OR 语义。
 - **提交 / Commit**: 见 PR（分支 `r24/relevance-charset`，`Closes #72`）。
 
+## [2026-10-19] 按字节切片多字节文本：中文 API Key 打挂 `/api/settings`、沙箱 truncate 必 panic
+- **严重程度**: HIGH（接口直接断连，且用户从界面上几乎无法自救）
+- **涉及文件**: `src/routes/settings.rs`（`mask_api_key`、`api_save_ai`）、`src/experiment/sandbox.rs`（本地 `truncate`）、`tests/no_unsafe_byte_slice.rs`（新增静态防线）
+- **现象**: 粘贴三个汉字当 API Key（`"测试密钥"`，9 字节）⇒ `POST /api/settings/ai` 返回 200 落库，随后 `GET /api/settings` **HTTP 000**（连接被断开），而 `GET /api/version` 仍 200 —— 说明是 handler panic 后连接被丢弃，不是进程崩溃。首页状态条与设置页都依赖该请求，其 `catch(e){}` 静默失败，用户看到的是"空白"，恢复只能靠设置页重新存一个 ASCII Key，而设置页恰恰打不开。
+- **根因**: ① `mask_api_key` 用 `&key[..4]` / `&key[key.len()-4..]` 按**字节**切片，4 不保证落在字符边界 ⇒ `byte index 4 is not a char boundary` panic；② `api_save_ai` 只校验 `api_key.len()`（字节）不校验字符集，非 ASCII Key 得以入库；③ `sandbox.rs` 另写了一个不检查边界的 `truncate`（阈值 5000/2000，`% 3 == 2`，中文输出几乎必切在字中间），而仓库里 `ai/client.rs` 早有 `safe_truncate` 做了 `is_char_boundary` 回退——不是不知道，是没统一。
+- **修复 / Fix**:
+  1. `mask_api_key` 改按**字符**取前/后各 4（`chars().take(4)` / `chars().skip(count-4)`），并提到模块级供 SerpAPI/EPO 复用；ASCII 形态 `sk-a****5678`、短 Key `****`、占位符空串全部保持。
+  2. `api_save_ai` 入口增加字符集校验：只允许可见 ASCII（`is_ascii_graphic`），与 EPO 通道 `parse_epo_credential` 同一把尺子；非法 Key 返回 **400 + 明确原因**，**绝不落库**。handler 返回类型改为 `Result<Json<Value>, (StatusCode, Json<Value>)>`，错误分支统一走真实状态码。
+  3. `sandbox.rs` 删除本地 `truncate`，统一改用 `crate::ai::client::safe_truncate`（超长才追加 `...(truncated)`）。
+  4. 新增 `tests/no_unsafe_byte_slice.rs` 基线快照守卫：`src/` 下裸 `[..` 切片按文件计数冻结基线，新增文件或已知文件计数上升即红；审查指南写入 `AGENTS.md`。
+- **负控 / Negative controls**:
+  - 负控1（功能没修死）：ASCII `sk-abcdefgh12345678` ⇒ `sk-a****5678`；≤8 字符 ⇒ `****`；占位符 ⇒ 空串。
+  - 负控2（断言不恒真）：把 `mask_api_key` 改回 `&key[..4]` ⇒ 中文 Key 两条测试 panic 变红；改回后 `git diff` 为空。
+  - 恢复性：坏 Key 被 400 拒 → 再存合法 ASCII Key → `GET /api/settings` 200。
+- **预防 / Prevention**: ① 任何多字节文本的切片索引必须先 `is_char_boundary` 回退，或改用 `chars()`；② 用户可粘贴的凭据类字段在**入口**校验字符集并返回 4xx，不允许"先落库后崩溃"；③ 已有正确工具函数（`safe_truncate`）必须复用，禁止在模块内另写一份——分叉的局部实现是这类 bug 的温床；④ 前端 `catch(e){}` 的静默失败会把后端 panic 伪装成"页面空白"，接口错误必须可见（与 #68 关联）。
+- **提交 / Commit**: 见 PR #87（分支 `r24/bytes-vs-chars`，`Closes #73`）。
+
 ---
 
 ## [2026-10-19] 文档「重写式扩覆盖」会吞掉既有内容；幽灵端点必须用路由表核对
@@ -1113,3 +1130,26 @@
 - **修复**: (1) 申请号正则改为 `(?:\d{12}\.\d|\d{13})`，公开号改为 `CN\d{9}[A-Z]{1,2}` 并保留 `CN\d{8}[A-Z]`、`US\d{7,9}[A-Z]?`、`WO\d{4}/\d{6}` 历史形态；(2) 形状网覆盖域扩到 `docs/` + `tests/` + `templates/`；(3) 反转锁缺陷的测试断言；(4) 加合成段 allowlist（99/90 段等）防误红 + 哈希片段跳过；(5) 同 PR 清掉烤进源码的 7 个第三方真实公开号与真实发明人姓名/机构名，替换为合成号与占位名；(6) 常驻阳性对照测试（双向：植入必红、合法必绿）。
 - **预防**: 形状网正则必须与现行标准形态对齐，且有常驻阳性对照证明能抓；覆盖域变更时同步改锁定的测试；合成夹具用 allowlist 显式管理，不靠正则放行。
 - **提交**: R24#71 `r24/privacy-shape-guard`
+
+---
+
+## [2026-10-19] ⑲ 首启假绿灯：默认占位 key `"ollama"` 被当成"已配置"
+- **严重程度 / Severity**: HIGH（新用户第一印象即被误导，且排查方向被带偏）
+- **现象 / Symptom**: 全新 `INNOFORGE_HOME`、清空 `AI_API_KEY*` 环境变量启动后，首页横幅显示「✅ AI 服务已配置」；而同一实例 `GET /api/ai/models` 返回 `status:"error"`、`total_count:0`。两处判据互相矛盾。
+- **根因 / Root cause**: ① `src/routes/mod.rs` 的默认值就是本地 Ollama——`ai_api_key = get("AI_API_KEY", "ollama")`；② `src/routes/settings.rs` 用 `!current_key.is_empty()` 判 `ai_api_key_configured`，占位符 `"ollama"` 非空 ⇒ true；③ `mask_api_key` 对 ≤8 字符一律回显 `****`，接口层看不出这是占位符；④ 首页 `templates/index.html` 的 `checkStatus()` 自己拿 `/api/settings` 另算一套，不复用已有的探测结果。
+- **修复 / Fix**: ① 新增单一判据函数 `routes::is_placeholder_api_key`（`""` / `"ollama"` / `"your-serpapi-key-here"` / `"sk-xxx"`）与 `is_ollama_url`，settings 端点与掩码回显共用，禁止在调用点内联判断；② `ai_api_key_configured` 仅在「该服务商确实需要 key 且 key 非占位符」时为真，纯 Ollama 恒为 false；③ 首页 AI 状态条改从 `/api/ai/models` 的 provider `status` 取，与模型列表页同源；④ 未配置时横幅可点击直达设置页并给出中性引导文案。
+- **回归 / Regression**: `tests/issue_68_fake_green.rs`——全新库 + 清空环境变量 ⇒ `ai_api_key_configured == false` 且首页含「未配置」；负控：把判据改回 `!current_key.is_empty()` ⇒ 2 个测试变红，改回后 `git diff` 为空。真实 key 仍必须为 true（防止一刀切成永远 false）。
+- **预防 / Prevention**: ① 默认值/占位符不得参与"已配置"判定，占位符集合必须是唯一集中定义；② 同一事实只允许一个判据来源，UI 不得自行另算（本次即"设置接口"与"模型探测"各算一套）；③ 前端 `catch(e){}` 静默失败会把后端错误伪装成空白，状态类接口失败要可见（与 #73 同源问题）。
+- **提交 / Commit**: 见 PR（分支 `r24/first-run-fake-green`，`Closes #68`）。
+
+---
+
+## [2026-10-19] 文档守卫把“路径里的动词”当成 HTTP 方法；多方法路由只记第一个
+- **严重程度**: MEDIUM（守卫误报会让正确的文档变红；漏记会让守卫少覆盖一半路由）
+- **现象**: 在索引表写入 `POST /api/oa/history/:id/delete`（代码里确实注册为 POST），`api_doc_guard` 报“文档声明了代码路由表中不存在的端点”，列出 `DELETE /api/oa/history/:id/delete`——方法被解析错了。
+- **根因**: ① 方法正则用的是裸词 `\b(get|post|put|delete|patch)\b`，路径字符串里的 `delete` 比后面的 `post(` 更早出现，被当成方法；② 每个 `.route(` 块只取**第一个**方法，`.get(a).post(b)` 这类多方法路由只记了 GET，导致守卫对同一路径的其它方法视而不见。
+- **修复**: 方法改为按**函数调用形态**匹配 `\b(get|post|put|delete|patch)\(`，并遍历 chunk 内所有方法；把解析逻辑抽成 `parse_routes_from(src: &str)` 以便单测。
+- **回归**: 新增 `parser_handles_method_word_inside_path_and_multi_method_routes`——路径含 `delete` 必须解析出 POST 且不产生 DELETE；`.get(...).post(...)` 两个方法都要在集合里。
+- **负控**: 索引表注入 `POST /api/acc-oa-ghost` ⇒ 守卫变红并精确列出该端点；撤销后 3 passed。
+- **预防**: 解析器匹配的是**语法形态**，不是自然语言词；正则修完后必须补一条“触发该误判的最小样例”的回归用例，否则下次改解析还会踩。
+- **提交**: 见 PR（分支 `r23/docs-idea-oa`）。
