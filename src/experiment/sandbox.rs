@@ -4,6 +4,7 @@
 //! 临时文件统一放在 data/runtime-temp 下（不污染系统临时目录）。
 //! 超时通过 tokio::time::timeout 实现，超时后子进程自动终止。
 
+use crate::ai::client::safe_truncate;
 use crate::common::new_temp_file;
 use crate::experiment::types::ExperimentSpec;
 use crate::pipeline::context::ExperimentResult;
@@ -112,8 +113,22 @@ pub async fn run_experiment(spec: &ExperimentSpec) -> Result<ExperimentResult> {
                 script_path: format!("exp_{}.{}", script_id, ext),
                 language: spec.language.clone(),
                 exit_code,
-                stdout: truncate(&stdout, 5000),
-                stderr: truncate(&stderr, 2000),
+                stdout: {
+                    let t = safe_truncate(&stdout, 5000);
+                    if t.len() < stdout.len() {
+                        format!("{t}...(truncated)")
+                    } else {
+                        t.to_string()
+                    }
+                },
+                stderr: {
+                    let t = safe_truncate(&stderr, 2000);
+                    if t.len() < stderr.len() {
+                        format!("{t}...(truncated)")
+                    } else {
+                        t.to_string()
+                    }
+                },
                 metrics,
                 duration_ms,
                 success,
@@ -167,14 +182,6 @@ fn python_available() -> bool {
         }
     }
     false
-}
-
-fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        s.to_string()
-    } else {
-        format!("{}...(truncated)", &s[..max])
-    }
 }
 
 #[cfg(test)]
@@ -247,5 +254,55 @@ No JSON here
 "#;
         let metrics = extract_json_metrics(stdout);
         assert!(metrics.is_null());
+    }
+
+    /// #73 正向B：safe_truncate 对中文超长输入不 panic，结果前缀是合法 UTF-8。
+    #[test]
+    fn safe_truncate_chinese_no_panic() {
+        let chinese: String = "汉".repeat(40); // 40 个汉字 = 120 字节
+                                               // max=10：远小于 120 字节，截断点落在多字节字符中间
+        let truncated = crate::ai::client::safe_truncate(&chinese, 10);
+        // 不 panic 即通过；再验证结果是合法 UTF-8（&str 保证，但显式断言更清晰）
+        assert!(truncated.len() <= 10, "截断后字节数应 ≤ max");
+        assert!(truncated.chars().all(|c| c == '汉'), "截断后应只含完整汉字");
+
+        // max=5000：大于输入，应原样返回
+        let full = crate::ai::client::safe_truncate(&chinese, 5000);
+        assert_eq!(chinese, full, "max 大于输入时应原样返回");
+    }
+
+    /// #73 正向B：sandbox 截断逻辑（safe_truncate + 后缀）对中文不 panic。
+    #[test]
+    fn sandbox_truncation_with_suffix_chinese_no_panic() {
+        let chinese: String = "字".repeat(40); // 40 × 3 = 120 字节
+
+        // 模拟 sandbox.rs 中 stdout 的截断逻辑
+        let max = 10;
+        let t = crate::ai::client::safe_truncate(&chinese, max);
+        let result = if t.len() < chinese.len() {
+            format!("{t}...(truncated)")
+        } else {
+            t.to_string()
+        };
+        // 不 panic + 结果是合法 String（&str → String 保证 UTF-8 合法）
+        assert!(result.contains("...(truncated)"), "超长时应追加后缀");
+        assert!(result.starts_with('字'), "前缀应保留完整字符");
+
+        // max=5000：不截断，无后缀
+        let t2 = crate::ai::client::safe_truncate(&chinese, 5000);
+        let result2 = if t2.len() < chinese.len() {
+            format!("{t2}...(truncated)")
+        } else {
+            t2.to_string()
+        };
+        assert_eq!(chinese, result2, "max 大于输入时应原样返回，无后缀");
+    }
+
+    /// #73 正向B：空串与短串不 panic。
+    #[test]
+    fn safe_truncate_empty_and_short() {
+        assert_eq!("", crate::ai::client::safe_truncate("", 10));
+        assert_eq!("abc", crate::ai::client::safe_truncate("abc", 10));
+        assert_eq!("ab", crate::ai::client::safe_truncate("abc", 2));
     }
 }

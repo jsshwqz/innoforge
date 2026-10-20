@@ -5,6 +5,7 @@
 //! 整合前面步骤的产出（权利要求树、现有技术聚类、AI 深度分析、新颖性评分等），
 //! 调用 AI 生成 OA 答复辅助分析，包括：权利要求逐项审查、特征对比、三步法分析、答复策略建议。
 
+use crate::ai::client::safe_truncate;
 use crate::ai::AiClient;
 use crate::pipeline::context::PipelineContext;
 use anyhow::Result;
@@ -23,7 +24,7 @@ pub async fn execute(ctx: &mut PipelineContext, ai_client: &AiClient) -> Result<
     let claims_info = if ai_analysis.len() > 200 {
         format!(
             "（基于 AI 分析中的权利要求信息）\n{}",
-            truncate(ai_analysis, 2000)
+            safe_truncate(ai_analysis, 2000)
         )
     } else {
         "（流水线未生成权利要求分析数据）".to_string()
@@ -88,9 +89,9 @@ pub async fn execute(ctx: &mut PipelineContext, ai_client: &AiClient) -> Result<
         claims = claims_info,
         prior_art = prior_art_summary,
         score = novelty_score,
-        analysis = truncate(ai_analysis, 2000),
-        action_plan = truncate(action_plan, 1000),
-        reasoning = truncate(&reasoning_info, 1000),
+        analysis = safe_truncate(ai_analysis, 2000),
+        action_plan = safe_truncate(action_plan, 1000),
+        reasoning = safe_truncate(&reasoning_info, 1000),
     );
 
     let result = ai_client.chat(&prompt, None).await?;
@@ -152,16 +153,4 @@ fn build_prior_art_summary(ctx: &PipelineContext) -> String {
     }
 
     summary
-}
-
-fn truncate(s: &str, max: usize) -> &str {
-    if s.len() <= max {
-        s
-    } else {
-        let mut end = max;
-        while end > 0 && !s.is_char_boundary(end) {
-            end -= 1;
-        }
-        &s[..end]
-    }
 }
