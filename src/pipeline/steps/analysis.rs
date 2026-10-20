@@ -443,8 +443,8 @@ mod tests {
     fn test_extract_patent_number_from_ranked_match() {
         use crate::search::enrichment::extract_patent_number;
         // Local patent
-        let pn = extract_patent_number("patent_local_CN116401354A", "");
-        assert_eq!(pn, Some("CN116401354A".to_string()));
+        let pn = extract_patent_number("patent_local_CN990001012A", "");
+        assert_eq!(pn, Some("CN990001012A".to_string()));
         // From URL
         let pn = extract_patent_number(
             "patent_online_0",

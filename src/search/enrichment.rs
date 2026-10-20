@@ -638,15 +638,15 @@ mod tests {
     fn extract_patent_number_from_url() {
         let pn = extract_patent_number(
             "patent_online_0",
-            "https://patents.google.com/patent/CN116401354A/en",
+            "https://patents.google.com/patent/CN990001012A/en",
         );
-        assert_eq!(pn, Some("CN116401354A".to_string()));
+        assert_eq!(pn, Some("CN990001012A".to_string()));
     }
 
     #[test]
     fn extract_patent_number_from_local_id() {
-        let pn = extract_patent_number("patent_local_CN116401354A", "");
-        assert_eq!(pn, Some("CN116401354A".to_string()));
+        let pn = extract_patent_number("patent_local_CN990001012A", "");
+        assert_eq!(pn, Some("CN990001012A".to_string()));
     }
 
     #[test]
