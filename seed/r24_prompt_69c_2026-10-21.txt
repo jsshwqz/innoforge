@@ -1,0 +1,23 @@
+你在 /root/innoforge 仓库里工作。该仓库的根提交就是 main 基线（sha 见 /root/sync/BASELINE），所以 `git diff $(git rev-list --max-parents=0 HEAD)..HEAD` 得到的就是纯增量。
+
+第一步（必做，不许凭记忆）：执行
+  curl -4 -sL https://raw.githubusercontent.com/jsshwqz/innoforge/seed/tools/seed/r24_task_brief_69b_2026-10-21.md -o /root/brief69b.md
+然后完整阅读 /root/brief69b.md，严格按其中【本轮四件事】补完 GitHub issue #69 的差集。上一轮你已经落了 p69b.patch（①去服务商字面量 ②custom 下拉终态 ③掩码复用 #68 判据），本轮**只补差集，不要重做已对的部分，也不要回退它**。
+
+分支：如果当前不在 r24/settings-terminal-states 上，先 `git checkout -b r24/settings-terminal-states`。
+
+落盘纪律（最重要，违反等于白做）：每完成一件事，立刻
+  git add <具体文件>   # 禁 git add -A
+  git -c user.name=jsshwqz -c user.email=jsshwqz@users.noreply.github.com commit -m "fix(#69): <一句>"
+  git diff $(git rev-list --max-parents=0 HEAD)..HEAD > /root/sync/p69c.patch
+  base64 -w0 /root/sync/p69c.patch > /root/sync/p69c.b64
+不要攒到最后一次写。容器会在约 13:48 回收，任何时刻被截断都必须已有可用的部分成果。
+
+硬性禁令：
+- 禁止 git push、git fetch、git clone（容器网络与凭据不可靠）。
+- 禁止修改 docs/errors.md 与 docs/plans/STATUS.md（指挥方在同一 PR 里补，避免追加冲突）。
+- 禁止把任何真实案件信息（案号、申请号、公开号、人名、机构名、案件措辞）写进文件、测试、日志或输出；测试夹具一律用 99/90 段合成号。
+- 隐私/形状类违规消息只报「文件 + 类别」，绝不回显命中串原文。
+- 不许为了让测试变绿而改断言、skip、放宽阈值；不许新增厂商字面量或领域词表（引擎必须通用）。
+
+每条负控都要留下原始输出与退出码，写进 /root/sync/pr69c_body.md（再 base64 -w0 成 /root/sync/pr69c_body.b64）。最后跑一遍并如实报告原始结果：cargo fmt --check、cargo clippy --all-targets -- -D warnings、cargo test --lib、cargo test --test issue_69_settings_terminal_states。跑不过就说跑不过并贴原始报错，不许粉饰。
