@@ -748,6 +748,24 @@
   - 负控验证：旧正则 `\d{13}(\.\d)?` 漏过标准 12+1 形态（12 位加点加 1 位校验码），新正则命中 ✅
 - **docs/errors.md**: 条目已追加
 
+## 2026-10-21 · R24 #69 设置页四处终态（分支 `r24/settings-terminal-states`，基线 `41bb5fb`）
+- **范围**: issue #69 四条界面缺陷——①服务商标签硬编码 ②custom 模型下拉永驻「加载中」 ③占位 Key 被掩码回显成 `****` ④FreeCAD 探测永驻「正在检查」
+- **内容**:
+  - ① `templates/settings.html` 状态文案改取 provider 显示名（`AI_PROVIDERS[detectProvider(...)].title`），模板内不留厂商字面量
+  - ② `fetchAiModels` 的 `custom` 分支在 `return` 前把 `ai-model` / `ai-model-expert` 都置为明确终态，且两处都过 `DOMPurify.sanitize`；统一 `:451/:452` 口径
+  - ③ `mask_api_key` 复用 #68 的 `routes::is_placeholder_api_key`（单一事实源），占位符回显空串
+  - ④ 探测 10s / 启动 30s `AbortController` 上限，超时→`cad.checkTimeout`、失败→`cad.notDetected`（中英 i18n 各一键），「检测并启动」作重试入口，WARN `{e:?}`→`{e}` 压一行
+  - 新增 `tests/issue_69_settings_terminal_states.rs`（12 用例，含静态守卫与控制流可证伪断言）
+- **验收 / Acceptance**（指挥方本机 `D:\huawei-devspace\work\innoforge72` @ `41bb5fb` 实测）:
+  - `cargo fmt --check` rc=0 ✅
+  - `cargo test --test issue_69_settings_terminal_states` **12 passed / 0 failed** ✅
+  - 负控：删除 custom 分支两行清理 ⇒ `issue_69_custom_branch_sets_dropdowns_before_return` FAILED（11 passed / 1 failed，`missing-terminal-state`）⇒ 恢复后全绿 ✅
+  - 隐私：`cargo test --test no_case_data_in_repo` 云端 13 passed，测试夹具仅用合成串 ✅
+- **docs/errors.md**: 条目 ⑳ 已追加
+- **过程留痕**: 首轮 `p69c` 的 ② 是"改 placeholder 文字 + 字符串计数断言"的假修（11 条测试全绿而 bug 仍在），由指挥方本机复验识破后按缺口补派 69d 才真正修好；教训已并入 ⑳ 的「预防」第 ④ 条。
+
+---
+
 ## 2026-10-21 · R24 #85 多词 OR 检索按命中 token 数排序（分支 `r24/multi-token-ordering`，基线 `41bb5fb`）
 - **范围**: issue #85（#72 的直接后果）——文档称"按相关性排序"，SQL 实为 `filing_date DESC`，`relevance_score` 算了不参与排序
 - **裁定**: 走 issue 的 **plan A（实现相关性排序）**，不把文档降级为"按申请日倒序"

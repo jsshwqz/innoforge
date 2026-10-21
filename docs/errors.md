@@ -1156,6 +1156,18 @@
 
 ---
 
+## [2026-10-21] ⑳ 设置页四处「永不终结 / 张冠李戴」的界面状态（全新安装首启即可见）
+- **严重程度 / Severity**: HIGH（四条全部在零外部依赖的新用户第一屏重现，直接误导首启判断）
+- **现象 / Symptom**: ①AI 服务商下拉选「自定义」，底部状态栏仍写「✅ AI 服务已配置（DeepSeek）」；②`AI 模型（默认）`与`专家模型`两个下拉永驻「加载中...」，等 5 分钟不变；③未配置 Key 时输入框预填 `****`，且 Base URL/默认模型指向 Ollama 而专家模型指向另一后端；④FreeCAD 区块永驻「正在检查 FreeCAD…」，服务端每约 60 秒重复一条四层嵌套的 WARN。
+- **根因 / Root cause**: ①状态串是早期只支持单一后端时硬编码的字面量，与 `#ai-provider` 当前值无关；②`fetchAiModels(providerKey, silent)` 在 `selectedProvider === 'custom'` 时**直接 return**，silent 路径下 `isManual===false` 连提示都不给，占位符无人清除；③`mask_api_key` 自己内联判断占位符，只认 SerpAPI 那一个串，漏掉 AI 侧的 `"ollama"` 等，于是占位符被掩成 `****` 回显；④探测无超时上限，失败分支只调 `renderFreeCadStatus({availability:'unavailable'})` 而不落终态文案，错误链按 `{e:?}` 整棵打印。
+- **修复 / Fix**: ①状态文案改取 `AI_PROVIDERS[detectProvider(config.ai_base_url)].title`，模板内不再出现厂商字面量；②`custom` 分支在 `return` **之前**把 `ai-model` 与 `ai-model-expert` 都置为明确终态文案，并顺带统一 `:451/:452` 两行的 `DOMPurify.sanitize` 口径（此前一行过、一行没过）；③`mask_api_key` 复用 #68 的 `routes::is_placeholder_api_key` 作为单一事实源，占位符一律回显空串，前端拿到空值即空框；④探测加 10s / 启动加 30s 的 `AbortController` 上限，超时→`cad.checkTimeout`、失败→`cad.notDetected`（中英文 i18n 各补一键），「检测并启动」保留为重试入口，WARN 由 `{e:?}` 改 `{e}` 压成一行。
+- **回归 / Regression**: `tests/issue_69_settings_terminal_states.rs` 12 个用例。关键一条 `issue_69_custom_branch_sets_dropdowns_before_return` 按花括号深度解析 `custom` 分支、只取 `return` 之前的行，要求两个下拉都有 `.innerHTML` 赋值且都过 `DOMPurify.sanitize`、且不得含「加载中」——是控制流判据，不是"文件里含某字符串"的自证断言。另有 `issue_69_no_hardcoded_provider_in_status_push` 静态守卫扫 `status.push` 字面量里的厂商名。
+- **负控 / Negative control**: 指挥方本机实测——删除 `custom` 分支的两行下拉清理（恢复裸 `return`）⇒ `issue_69_custom_branch_sets_dropdowns_before_return` **FAILED**（`11 passed; 1 failed`，报 `missing-terminal-state`）；恢复后 12 passed。`cargo fmt --check` rc=0。
+- **预防 / Prevention**: ①异步探测必须带超时上限并落到终态，"永驻进行中"视为缺陷；②同一事实只允许一个判据来源（占位符集合归 `mod.rs`）；③守卫测试的判据要能被"退回旧行为"证伪，禁止用字符串存在性断言代替控制流断言；④相邻同逻辑代码的 sanitize 口径必须一致（同类不一致已由 #56 记录）。
+- **提交 / Commit**: 见 PR（分支 `r24/settings-terminal-states`，`refs #69`）。
+
+---
+
 ## [2026-10-21] ㉑ 多词 OR 检索：文档承诺按相关性排序，SQL 实为 `filing_date DESC`
 - **严重程度 / Severity**: MEDIUM（结果顺序与文档承诺不一致，直接影响"按相关度找现有技术"的用户）
 - **现象 / Symptom**: 多 token 查询时，命中 2 个 token 的旧专利会排在只命中 1 个 token 的新专利后面；`data_sql` 末尾是 `ORDER BY filing_date DESC`，而同一分支已为每行算出 `relevance_score`（`calculate_mixed_relevance`，`score_source="mixed search match"`）却完全不参与排序。`docs/API.md` 与 PR #84 正文都写着"按相关性评分排序"。
