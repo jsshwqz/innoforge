@@ -106,7 +106,7 @@ fn issue85_two_token_hit_ranks_above_one_token_hit() {
     // Filing date is NEWER — under old `filing_date DESC` this would rank first.
     let new_1hit = synth_patent(
         "new1hit",
-        "CN990002002A",
+        "CN990001002A",
         "alpha delta marker",
         "abstract epsilon",
         "Epsilon Corp",
@@ -170,7 +170,7 @@ fn issue85_cross_page_global_ordering() {
 
     let p3 = synth_patent(
         "p3",
-        "CN990003003A",
+        "CN990001011A",
         "alpha beta gamma",
         "abstract p3",
         "Applicant P3",
@@ -179,7 +179,7 @@ fn issue85_cross_page_global_ordering() {
     );
     let p2 = synth_patent(
         "p2",
-        "CN990002002A",
+        "CN990001002A",
         "alpha beta delta",
         "abstract p2",
         "Applicant P2",
@@ -197,7 +197,7 @@ fn issue85_cross_page_global_ordering() {
     );
     let p0 = synth_patent(
         "p0",
-        "CN990004004A",
+        "CN990001012A",
         "alpha eta theta",
         "abstract p0",
         "Applicant P0",
@@ -269,23 +269,23 @@ fn issue85_cross_page_global_ordering() {
 fn issue85_order_by_column_set_matches_where_column_set() {
     let db = Database::init(":memory:").expect("init db");
 
-    // Patent A: "990077001" appears ONLY in patent_number, nowhere else.
+    // Patent A: "990001014" appears ONLY in patent_number, nowhere else.
     // Newer filing_date so that with equal hit count it ranks first.
     let patent_a = synth_patent(
         "patent_a",
-        "CN990077001A",
+        "CN990001014A",
         "marker gamma",
         "abstract gamma",
         "Gamma Corp",
         "Gamma Inventor",
         "2026-01-20",
     );
-    // Patent B: "990077001" appears ONLY in title, nowhere else.
+    // Patent B: "990001014" appears ONLY in title, nowhere else.
     // Older filing_date so that with equal hit count it ranks second.
     let patent_b = synth_patent(
         "patent_b",
-        "CN990088002A",
-        "990077001 delta",
+        "CN990001017A",
+        "990001014 delta",
         "abstract delta",
         "Delta Corp",
         "Delta Inventor",
@@ -294,7 +294,7 @@ fn issue85_order_by_column_set_matches_where_column_set() {
     db.insert_patent(&patent_a).expect("insert patent_a");
     db.insert_patent(&patent_b).expect("insert patent_b");
 
-    let query = "990077001";
+    let query = "990001014";
     let (rows, total) = db
         .search_like(query, None, None, None, 1, 10)
         .expect("search succeeds");
@@ -338,7 +338,7 @@ fn issue85_abstract_text_only_match_counted_in_order_by() {
 
     let patent_a = synth_patent(
         "patent_a",
-        "CN990003003A",
+        "CN990001011A",
         "marker gamma",
         "990077003 abstract",
         "Gamma Corp",
@@ -347,7 +347,7 @@ fn issue85_abstract_text_only_match_counted_in_order_by() {
     );
     let patent_b = synth_patent(
         "patent_b",
-        "CN990088004A",
+        "CN990001020A",
         "990077003 delta",
         "abstract delta",
         "Delta Corp",
@@ -391,7 +391,7 @@ fn issue85_equal_hit_count_tiebreaker_is_filing_date_desc() {
     );
     let newer = synth_patent(
         "newer",
-        "CN990002002A",
+        "CN990001002A",
         "alpha marker two",
         "abstract two",
         "Applicant Two",

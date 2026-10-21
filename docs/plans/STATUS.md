@@ -761,5 +761,5 @@
   - `cargo fmt --check` rc=0 ✅
   - `cargo test --test issue_85_multi_token_ordering` **5 passed / 0 failed** ✅
   - 负控：`ORDER BY` 退回裸 `filing_date DESC` ⇒ 排序用例与跨页用例 **FAILED**（`3 passed; 2 failed`，rc=101）⇒ 恢复后全绿 ✅
-  - #72 契约测试未改动且仍绿；夹具全为合成号（`CN990077001A` 式 99 段）✅
+  - #72 契约测试未改动且仍绿；夹具全为合成号（`CN990001014A` 式 99 段）✅
 - **docs/errors.md**: 条目 ㉑ 已追加
