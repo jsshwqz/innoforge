@@ -1373,7 +1373,7 @@ Response:
 
 ### GET `/api/settings/serpapi/balance`
 
-用已配置的**第一个** SerpAPI key 查询 `https://serpapi.com/account.json`（30 秒超时；同步线程实现，不阻塞其它请求之外的 async worker）。
+用已配置的**第一个** SerpAPI key 查询 `https://serpapi.com/account.json`（30 秒超时；网络查询在独立线程执行）。
 
 成功：
 
@@ -1491,13 +1491,14 @@ Response:
 ## 覆盖说明 / Coverage
 
 - 既有章节（搜索 / 专利 / 创意验证 / 特征卡片 / 收藏夹 / 标签 / 聊天 / IPC / 配置 / 错误 / 环境变量）：59 条 API 端点说明；
-- 页面路由表：6 条（`/test`、`/import` 已从代码移除，见上表下方注记）；
+- 页面路由表：9 条（`/test`、`/import` 已从代码移除，见上表下方注记）；
 - 本轮 R23 新增（CAD / 认证 / 审查意见 AI）：24 条；
-- 本轮续补（OA 期限 / 轮次 / 历史 / 讨论 / 导出）：17 条。
-- 合计 **111 条**（按 method+path 去重），覆盖 145 个 method+path 路由组合中的 111 条（约 77%）。剩余 39 条由 issue #62 跟踪。
+- 本轮续补（OA 期限 / 轮次 / 历史 / 讨论 / 导出）：17 条；
+- 本轮 R24 续补（配置 / 聊天记录 / 收藏夹 / 标签 / IPC）：19 条。
+- 合计 **115 条**（按 method+path 去重；含页面路由 9 条），覆盖 145 个 method+path 路由组合中的 115 条（约 79%）。剩余 30 条由 issue #62 跟踪（`/api/ai/*` 分析类、`/api/patent/*`、`/api/idea/*` 等）。
 
 ## 待覆盖 / Not Yet Covered
 
-以下范围尚未逐条展开：页面级交互细节、`/api/search/*` 中尚未给出字段级示例的部分、`/api/chat/*`、`/api/settings/*` 其余项、`/api/idea/*`、`/api/ideas/*`、`/api/oa/*`（非 `ai` 前缀）、`/api/ai/*`（非 `oa` 前缀）、`/api/ipc/*`、`/api/collections/*`、`/api/tags`、`/api/upload/*`、`/api/version`、`/static/*path`。
+剩余端点集中在 `/api/ai/*` 分析类、`/api/patent/*` 外部抓取/富化、`/api/idea/*` 的记忆与报告子集，以及 `/api/upload/*`、`/api/search/export/xlsx`、`/api/search/vector`、`/api/feature-cards/diff`。
 
 > 注：`/api/search/*`、`/api/patent/*`、`/api/upload/compare` 的说明已在上文既有章节中，不属于“待覆盖”。
