@@ -37,7 +37,11 @@ fn provider_db_key(base_url: &str) -> &'static str {
 /// 边界中间切片导致 panic（#73）。ASCII Key 的输出形态保持 `sk-a****5678`；
 /// ≤8 字符的短 Key 仍回显 `****`；空串与占位符回显空串。
 fn mask_api_key(key: &str) -> String {
-    if key.is_empty() || key == "your-serpapi-key-here" {
+    // issue #69: reuse the single source of truth from mod.rs so that ALL
+    // placeholder shapes ("ollama", "sk-xxx", "your-serpapi-key-here", empty)
+    // consistently yield an empty echo — the frontend then shows an empty
+    // input box instead of a misleading **** mask.
+    if super::is_placeholder_api_key(key) {
         return String::new();
     }
     let char_count = key.chars().count();

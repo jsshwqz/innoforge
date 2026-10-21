@@ -116,7 +116,7 @@ impl CadService {
                 message: "FreeCAD ready".to_string(),
             },
             Err(e) => {
-                tracing::warn!("CAD check_ready failed: {e:?}");
+                tracing::warn!("CAD check_ready failed: {e}");
                 CadStatus {
                     availability: CadAvailability::Unavailable,
                     message: "FreeCAD is not ready".to_string(),
