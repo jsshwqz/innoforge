@@ -791,3 +791,20 @@
   - 负控：`ORDER BY` 退回裸 `filing_date DESC` ⇒ 排序用例与跨页用例 **FAILED**（`3 passed; 2 failed`，rc=101）⇒ 恢复后全绿 ✅
   - #72 契约测试未改动且仍绿；夹具全为合成号（`CN990001014A` 式 99 段）✅
 - **docs/errors.md**: 条目 ㉑ 已追加
+
+## 2026-10-21 · 版本发布 **v0.9.18**（R24 收口批次）
+- **决定 / Decision**: DS 裁定、用户确认——本轮已合入 main 的修复一次性打包发布，不再碎片化等待；P2（#83/#82/#88）与 R25（#76/#77/#78/#79）归 v0.9.19
+- **版本 / Version**: `Cargo.toml` 0.9.17 → **0.9.18**；`CHANGELOG.md` 新增 `## [v0.9.18] - 2026-10-21`（中文在前、英文在后）
+- **收录 / Included**（10 个 PR，按 main 上的合入顺序）:
+  - #70 零证据不再宣称高新颖性（PR #81）
+  - #72 中文短串误判人名 / 多词整句零命中（PR #84）
+  - R23 API 文档并集（PR #86）、#62 OA 组文档 + 守卫解析修正（PR #89）
+  - #73 多字节截断导致断连与 panic（PR #87）
+  - #68 首启假绿灯（PR #91）
+  - #71 隐私守卫形状网位数 + 覆盖域扩面 + 清掉烤进源码的第三方真实号（PR #92）
+  - #69 设置页四处永不终结状态（PR #94）
+  - #62 R24 文档续补 19 条 + 3 页面路由（PR #93）
+  - #85 多词 OR 按命中 token 数排序（PR #95）
+- **发版方式 / Release mechanics**: tag push 触发 `.github/workflows/release.yml`——validate 校验 tag/Cargo 版本/CHANGELOG 三者一致并跑隐私守卫，build 出四平台包，release 用 CHANGELOG 该段做正文、断言资产名逐字齐全后发布
+- **文档覆盖 / Doc coverage**: 115/145（约 79%），剩余 30 条仍由 issue #62 跟踪
+- **门禁说明 / Gate note**: 本 PR 未改 `src/*`、`templates/*`、`tests/*`、`.github/*`，按 Doc Staleness 规则属"无代码变更"跳过，故不新增 `docs/errors.md` 条目（不硬造复盘）
