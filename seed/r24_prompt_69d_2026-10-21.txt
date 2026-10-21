@@ -1,0 +1,29 @@
+指挥方复核结论：你这一轮 ①③④ 三条已核可，**但 ② 没有真正修复**，且新增的那条测试是自证式弱断言。本轮只做下面这一件事，不要动 ①③④ 的任何已对内容。
+
+【问题定位（指挥方已在 main 41bb5fb 上复现）】
+- `templates/settings.html` 的 `fetchAiModels(providerKey, silent)` 里，`if (selectedProvider === 'custom') { ... return; }` 这一支**仍然直接 return**，没有清掉两个下拉的占位符。全新安装默认 provider 就是 custom，silent 调用时 `isManual===false`，于是 `ai-model` 与 `ai-model-expert` 永驻 `<option value="">加载中...</option>` —— 这正是 issue #69 第 2 条报的症状，一点没变。
+- 你改的是另一处：把自定义输入框 `ai-model-custom` / `ai-model-expert-custom` 的 `placeholder` 换成"自定义模式请手动输入模型名"。那是手动输入框的提示文字，不是下拉的终态。
+- `templates/settings.html:451` 与 `:452` 的 DOMPurify 口径不一致（451 过了 sanitize，452 没过），issue 明确要求顺带统一，这条也没做。
+
+【本轮要求】
+1) 在 `custom` 分支 return **之前**，把 `ai-model` 和 `ai-model-expert` 两个元素的 innerHTML 都置为明确终态文案（例如 `<option value="">自定义模式请手动输入模型名</option>`），并且两处都过 `DOMPurify.sanitize`。
+2) 统一 `:451` / `:452` 的 sanitize 口径（两行同样处理）。
+3) 把 `issue_69_custom_dropdown_has_terminal_state_placeholder` 换成**能证伪**的断言，判据必须是控制流而不是字符串存在性：
+   - 断言 `fetchAiModels` 的 `selectedProvider === 'custom'` 分支内，在 `return` 之前对 `getElementById('ai-model')` 与 `getElementById('ai-model-expert')` **都有赋值**，且赋值内容不含"加载中"；
+   - 断言 `:451` 与 `:452` 两行的 sanitize 处理方式一致（同为 `DOMPurify.sanitize(...)` 包裹）。
+   - **禁止**再用"整个 HTML 文件里包含某个字符串 N 次"这类断言——它证明不了 bug 被修。
+
+【负控（双向，必须贴原始输出与退出码）】
+- 负控 A：把你在 custom 分支里新加的那段清理代码删掉（恢复成裸 return）⇒ 新测试必须红。贴原始报错。
+- 负控 B：把 `:452` 改回不过 sanitize ⇒ 口径一致性断言必须红。贴原始报错。
+- 两条跑完全部改回，`git diff` 必须为空，并贴 `git status --short` 证明。
+
+【落盘纪律】
+完成后立刻：
+  git add <具体文件>   # 禁 git add -A
+  git -c user.name=jsshwqz -c user.email=jsshwqz@users.noreply.github.com commit -m "fix(#69): custom provider 下拉真正落到终态 + 统一 sanitize 口径"
+  git diff $(git rev-list --max-parents=0 HEAD)..HEAD > /root/sync/p69d.patch
+  base64 -w0 /root/sync/p69d.patch > /root/sync/p69d.b64
+把两条负控的原始输出追加进 /root/sync/pr69d_body.md 并 base64 -w0 成 /root/sync/pr69d_body.b64。
+
+【禁令】不 git push/fetch/clone；不改 docs/errors.md 与 docs/plans/STATUS.md；不新增厂商字面量或领域词表；不许为了让测试变绿而改断言、skip 或放宽判据；任何输出不得含真实案件信息。最后跑 `cargo fmt --check`、`cargo clippy --all-targets -- -D warnings`、`cargo test --test issue_69_settings_terminal_states` 并如实贴原始结果，跑不过就说跑不过。
