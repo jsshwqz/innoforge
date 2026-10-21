@@ -1,0 +1,31 @@
+你在 /root/innoforge 仓库工作，根提交就是 main 基线（sha 见 /root/sync/BASELINE），所以 `git diff $(git rev-list --max-parents=0 HEAD)..HEAD` 就是纯增量。
+
+第一步（必做，不许凭记忆）：执行
+  curl -4 -sL https://raw.githubusercontent.com/jsshwqz/innoforge/seed/tools/seed/r24_task_brief_85_2026-10-21.md -o /root/brief85.md
+然后完整阅读 /root/brief85.md，严格按它实现 GitHub issue #85（指挥方已定 **plan A：多词 OR 检索按命中 token 数排序**，不要再在 A/B 之间摇摆）。分支：`git checkout -b r24/multi-token-ordering`。
+
+两条来自上一单（#69）的硬教训，本单直接作为验收要求，违反即视为未完成：
+
+1) **提交前必须真跑 `cargo fmt`（不是 --check）并把格式化结果一并提交**。上一单首轮测试文件有 3 处排版不合 rustfmt，直接把 CI 的 Format 门禁打红。
+2) **禁止自证式断言**。上一单有一条测试用"整个文件里含某字符串 N 次"当判据，结果 11 条全绿而缺陷原封不动。本单的断言必须能被"退回旧行为"证伪：
+   - 排序断言要作用在**返回结果的顺序**上（第 1 条 vs 第 2 条），不是"响应里出现了 relevance_score"这种存在性检查；
+   - 跨页断言要真取两页数据比较（第 2 页首条命中数 不得高于 第 1 页末条），证明是全局序而不是页内重排；
+   - 排序列集与 WHERE 列集一致性，要有"故意少算一列 ⇒ 测试红"的负控支撑。
+
+核心不变量（指挥方最看重的一条，务必落到实现与测试两侧）：`ORDER BY` 里数命中用的列集合，必须与 `WHERE` 里那串 OR LIKE 用的列集合**逐字相同**。建议把列清单提成单一常量/局部变量供两处共用，并在注释里写明这是本单不变量——否则会出现"结果集里有它、排序数不到它"的新缺陷。
+
+负控（双向，原始输出与退出码都要留）：
+- 负控 1：把 `ORDER BY` 改回裸 `filing_date DESC` ⇒ 排序测试必须红；
+- 负控 2：让 ORDER BY 少算一列（与 WHERE 列集不一致）⇒ 必须有测试红；若你认为不值得建常驻测试，在 PR 正文说明理由，不许静默跳过。
+- 两条跑完全部改回，`git diff` 必须为空，并贴 `git status --short` 证明。
+
+落盘纪律：每完成一项立刻
+  git add <具体文件>   # 禁 git add -A
+  git -c user.name=jsshwqz -c user.email=jsshwqz@users.noreply.github.com commit -m "fix(#85): <一句>"
+  git diff $(git rev-list --max-parents=0 HEAD)..HEAD > /root/sync/p85.patch
+  base64 -w0 /root/sync/p85.patch > /root/sync/p85.b64
+不要攒到最后一次写。PR 正文写 /root/sync/pr85_body.md 并 base64 -w0 成 /root/sync/pr85_body.b64。
+
+禁令：不 git push / git fetch / git clone（容器网络与凭据不可靠，push 由指挥方代做）；不改 docs/errors.md 与 docs/plans/STATUS.md（指挥方补）；不新增厂商字面量、领域词表或任何为让夹具通过而特化的判据（引擎必须通用）；任何文件/日志/输出不得出现真实案件信息（案号、申请号、公开号、人名、机构名、案件措辞），夹具一律 99/90 段合成号；违规消息只报「文件 + 类别」，绝不回显命中串。
+
+最后如实贴原始结果：`cargo fmt --check`、`cargo clippy --all-targets -- -D warnings`、`cargo test --lib`、`cargo test --test issue_85_multi_token_ordering`，并确认 #72 的两条契约测试（`detect_chinese_name_routes_to_mixed`、`issue72_surname_leading_technical_terms_route_to_mixed`）仍然绿——不许改它们迁就排序。跑不过就说跑不过并贴报错，不许粉饰。
