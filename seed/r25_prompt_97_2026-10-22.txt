@@ -1,0 +1,33 @@
+你在 /root/innoforge 仓库工作，根提交就是 main 基线（sha 见 /root/sync/BASELINE，应为 42027cc50f53516d8282931c19e968aaf900ee10），所以 `git diff $(git rev-list --max-parents=0 HEAD)..HEAD` 就是纯增量。
+
+第一步（必做，不许凭记忆）：执行
+  curl -4 -sL https://raw.githubusercontent.com/jsshwqz/innoforge/seed/tools/seed/r25_task_brief_97-100_2026-10-21.md -o /root/brief97.md
+然后完整阅读 /root/brief97.md，并按其中顺序实现四条 issue。**#97 是 P0，必须最先做完并先落盘**，再做 #98、#99、#100。分支：`git checkout -b r25/backend-truthfulness`。
+
+四条 issue 的正文也要各自完整读过（不要只看任务书摘要）：
+  curl -4 -sL https://api.github.com/repos/jsshwqz/innoforge/issues/97 -o /root/i97.json
+  curl -4 -sL https://api.github.com/repos/jsshwqz/innoforge/issues/98 -o /root/i98.json
+  curl -4 -sL https://api.github.com/repos/jsshwqz/innoforge/issues/99 -o /root/i99.json
+  curl -4 -sL https://api.github.com/repos/jsshwqz/innoforge/issues/100 -o /root/i100.json
+
+**重要：本轮容器窗口很短（约 09:26 北京时间回收）。所以按这个策略执行：**
+- 先做 #97（P0），做完立刻落盘一次；然后 #98、#99、#100 各做完立刻各落盘一次。**绝不攒到最后一次性写。**
+- 如果时间不够，**优先保证 #97 完整可交付**（实现 + 测试 + 负控 + fmt），其余没做完的在 PR 正文里如实写明做到哪一步、什么没做，不要用"应该已完成"这种说法。
+
+复现优先：动手前先按 issue 里的复现步骤确认现象真实存在（#97 用中文文件名 vs ASCII 文件名对比；#98 看 providers 数组里是否只有 Ollama；#99 传一个不存在的 oa_type；#100 看 score 字段形状）。**复现不出来的，立刻停下来在输出里说明，不要自行改判定、不要跳过、不要为了让测试过而改断言。**
+
+三条来自前几轮教训的硬纪律：
+1) **提交前必须真跑 `cargo fmt`（不是 --check）并把格式化结果一并提交** —— #69 和 #96 两次都栽在 Format 门禁上。
+2) **禁止自证式断言** —— 不许用"响应/文件里含某个字符串 N 次"当判据；每条断言必须能被"退回旧行为"证伪，并按任务书要求留下负控的原始输出与退出码。
+3) **禁止放宽守卫** —— 不得修改 `tests/no_case_data_in_repo.rs`、不得缩小覆盖域、不得往 allowlist 塞新合成号来让测试变绿；确实必须新增，先在输出里报出来等指挥方裁定。
+
+落盘纪律（每完成一件立刻执行）：
+  git add <具体文件>   # 禁 git add -A
+  git -c user.name=jsshwqz -c user.email=jsshwqz@users.noreply.github.com commit -m "fix(#NN): <一句>"
+  git diff $(git rev-list --max-parents=0 HEAD)..HEAD > /root/sync/p97.patch
+  base64 -w0 /root/sync/p97.patch > /root/sync/p97.b64
+PR 正文写 /root/sync/pr97_body.md 并 base64 -w0 成 /root/sync/pr97_body.b64（含每条负控的原始输出与退出码）。
+
+禁令：不 git push / git fetch / git clone（容器凭据与网络不可靠，push 由指挥方代做）；不改 `docs/errors.md` 与 `docs/plans/STATUS.md`（指挥方补）；`docs/API.md` 若因契约变化要改可以改，但要在 PR 正文说明；不新增厂商字面量、领域词表或任何为让夹具通过而特化的判据（引擎必须通用）；任何文件、测试、日志、输出**不得出现真实案件信息**（案号、申请号、公开号、人名、机构名、案件措辞），夹具一律 99/90 段合成号，测试用的中文文件名只许用"测试文档.pdf"这类通用词；违规消息只报「文件 + 类别」，绝不回显命中串。
+
+最后如实贴原始结果：`cargo fmt --check`、`cargo clippy --all-targets -- -D warnings`、`cargo test --lib`、以及新增的四个测试文件各自 `cargo test --test <名>` 的输出。跑不过就说跑不过并贴原始报错，不许粉饰。
