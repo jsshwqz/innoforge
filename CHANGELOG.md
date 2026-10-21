@@ -13,24 +13,24 @@ _暂无条目。_
 
 ### 修复 / Fixed
 
-- **零证据不再宣称高新颖性**（[issue 70](../issues/70)，PR #81）：检索无结果时 `novelty_score` 不再顶格 100，改判 `InsufficientEvidence` 并在报告里给出可执行的下一步。`diversity_score` 无数据时不再伪造 8.0。
+- **零证据不再宣称高新颖性**（[issue 70](../issues/70)，PR [#81](../pull/81)）：检索无结果时 `novelty_score` 不再顶格 100，改判 `InsufficientEvidence` 并在报告里给出可执行的下一步。`diversity_score` 无数据时不再伪造 8.0。
   *No-results searches no longer report novelty 100; the pipeline now yields `InsufficientEvidence` with actionable next steps, and `diversity_score` is no longer fabricated from empty data.*
-- **中文短串被误判为人名 / 多词整句 LIKE 零命中**（[issue 72](../issues/72)，PR #84）：按字符数（非字节）判定查询形态，取消"姓氏表"路由门——姓名识别降级为提示而非过滤器；多词查询改为分词 OR LIKE，响应新增 `matched_fields` / `applied_filter` / `reason`。
+- **中文短串被误判为人名 / 多词整句 LIKE 零命中**（[issue 72](../issues/72)，PR [#84](../pull/84)）：按字符数（非字节）判定查询形态，取消"姓氏表"路由门——姓名识别降级为提示而非过滤器；多词查询改为分词 OR LIKE，响应新增 `matched_fields` / `applied_filter` / `reason`。
   *Two-character Chinese technical terms are no longer routed as personal names (the surname gate was removed in favour of a hint), and multi-word queries are tokenised into OR LIKE clauses instead of matching literally as one phrase.*
-- **多词 OR 检索按命中 token 数排序**（[issue 85](../issues/85)，PR #95）：`ORDER BY (Σ CASE WHEN 命中 THEN 1 ELSE 0 END) DESC, filing_date DESC`，命中计数与 `WHERE` 的 OR LIKE 共用同一 `const FIELDS`（单一事实源），排序发生在 `LIMIT/OFFSET` 之前 ⇒ 全局序。文档此前承诺"按相关性排序"而 SQL 实为按申请日倒序，现已一致。
+- **多词 OR 检索按命中 token 数排序**（[issue 85](../issues/85)，PR [#95](../pull/95)）：`ORDER BY (Σ CASE WHEN 命中 THEN 1 ELSE 0 END) DESC, filing_date DESC`，命中计数与 `WHERE` 的 OR LIKE 共用同一 `const FIELDS`（单一事实源），排序发生在 `LIMIT/OFFSET` 之前 ⇒ 全局序。文档此前承诺"按相关性排序"而 SQL 实为按申请日倒序，现已一致。
   *Multi-token results are now ordered by hit count (with `filing_date DESC` only as a tie-breaker); the sort expression and the WHERE clause share one column set, and ordering happens before pagination. `relevance_score` is documented as a display score distinct from the sort key.*
-- **多字节 Key 导致接口断连与沙箱 panic**（[issue 73](../issues/73)，PR #87）：`mask_api_key` 改按字符切片；非 ASCII Key 在入口即 400 拒绝且不落库；沙箱统一使用 `safe_truncate`；新增 `tests/no_unsafe_byte_slice.rs` 基线守卫。
+- **多字节 Key 导致接口断连与沙箱 panic**（[issue 73](../issues/73)，PR [#87](../pull/87)）：`mask_api_key` 改按字符切片；非 ASCII Key 在入口即 400 拒绝且不落库；沙箱统一使用 `safe_truncate`；新增 `tests/no_unsafe_byte_slice.rs` 基线守卫。
   *API-key masking now slices by character rather than byte; non-ASCII keys are rejected with 400 before storage; the sandbox uses a single safe truncation helper, backed by a new byte-slice baseline guard.*
-- **首启假绿灯：占位 key 被当成"已配置"**（[issue 68](../issues/68)，PR #91）：新增单一判据 `routes::is_placeholder_api_key` / `is_ollama_url`，`ai_api_key_configured` 仅在真正配置时为真；首页状态与 `/api/ai/models` 探测同源，不再各算一套。
+- **首启假绿灯：占位 key 被当成"已配置"**（[issue 68](../issues/68)，PR [#91](../pull/91)）：新增单一判据 `routes::is_placeholder_api_key` / `is_ollama_url`，`ai_api_key_configured` 仅在真正配置时为真；首页状态与 `/api/ai/models` 探测同源，不再各算一套。
   *Placeholder keys (including the default `"ollama"`) no longer count as configured; the dashboard derives AI status from the same provider probe as the models page.*
-- **设置页四处"永不终结 / 张冠李戴"的界面状态**（[issue 69](../issues/69)，PR #94）：① 状态栏不再硬编码服务商名，改取当前 provider 显示名；② `custom` provider 的两个模型下拉在 `return` 前落到明确终态，并统一 `DOMPurify.sanitize` 口径；③ 占位 Key 回显空串而非 `****`；④ FreeCAD 探测加 10s / 启动 30s 超时上限，超时与失败各有终态文案与重试入口，四层嵌套 WARN 压成一行。
+- **设置页四处"永不终结 / 张冠李戴"的界面状态**（[issue 69](../issues/69)，PR [#94](../pull/94)）：① 状态栏不再硬编码服务商名，改取当前 provider 显示名；② `custom` provider 的两个模型下拉在 `return` 前落到明确终态，并统一 `DOMPurify.sanitize` 口径；③ 占位 Key 回显空串而非 `****`；④ FreeCAD 探测加 10s / 启动 30s 超时上限，超时与失败各有终态文案与重试入口，四层嵌套 WARN 压成一行。
   *The settings page no longer shows four misleading states: provider label is derived from the selected provider, custom-provider dropdowns reach a terminal state, placeholder keys render as an empty box, and the FreeCAD probe has bounded timeouts with explicit failure/timeout text plus a retry entry.*
-- **隐私守卫形状网位数与覆盖域**（[issue 71](../issues/71)，PR #92）：申请号正则改为 `(?:\d{12}\.\d|\d{13})`、公开号改为 `CN\d{9}[A-Z]{1,2}`（保留历史形态），扫描域从 `src/` 扩到 `docs/` + `tests/` + `templates/`；新增合成段 allowlist 与常驻双向阳性对照；同 PR 清掉此前烤进源码的第三方真实公开号、发明人姓名与机构名。
+- **隐私守卫形状网位数与覆盖域**（[issue 71](../issues/71)，PR [#92](../pull/92)）：申请号正则改为 `(?:\d{12}\.\d|\d{13})`、公开号改为 `CN\d{9}[A-Z]{1,2}`（保留历史形态），扫描域从 `src/` 扩到 `docs/` + `tests/` + `templates/`；新增合成段 allowlist 与常驻双向阳性对照；同 PR 清掉此前烤进源码的第三方真实公开号、发明人姓名与机构名。
   *The case-data shape net now matches current CNIPA formats and covers docs/tests/templates as well as source, with an explicit synthetic allowlist, permanent two-way positive controls, and third-party real identifiers removed from the repository.*
 
 ### 文档 / Documentation
 
-- **API 覆盖推进到 115/145**（[issue 62](../issues/62)，PR #86 / #89 / #93）：R23/R24 累计补齐创意、OA、配置、聊天记录、收藏夹、标签、IPC 等端点说明与 3 条页面路由，覆盖统计口径统一为 method+path 并集去重；`api_doc_guard` 修正"路径里的动词被当成 HTTP 方法"与"多方法路由只记第一个"两处解析缺陷。
+- **API 覆盖推进到 115/145**（[issue 62](../issues/62)，PR [#86](../pull/86) / [#89](../pull/89) / [#93](../pull/93)）：R23/R24 累计补齐创意、OA、配置、聊天记录、收藏夹、标签、IPC 等端点说明与 3 条页面路由，覆盖统计口径统一为 method+path 并集去重；`api_doc_guard` 修正"路径里的动词被当成 HTTP 方法"与"多方法路由只记第一个"两处解析缺陷。
   *Documented endpoint coverage advanced to 115/145 (~79%) with a normalised method+path counting rule, and the doc guard's route parser fixed for method-words inside paths and multi-method routes.*
 
 ### 验证 / Verification
