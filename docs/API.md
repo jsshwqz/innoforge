@@ -92,8 +92,16 @@ Response:
 ```
 
 **多词语义（issue #72）**: 当 `query` 含空格分出多个 token 时，本地搜索走 **OR 语义**——
-每个 token 命中 `title / abstract_text / applicant / inventor / patent_number` 任一字段即返回该行，
-按相关性评分排序。单 token 时行为与旧整串 `%query%` LIKE 一致。
+每个 token 命中 `title / abstract_text / applicant / inventor / patent_number` 任一字段即返回该行。
+单 token 时行为与旧整串 `%query%` LIKE 一致。
+
+**排序规则（issue #85）**: 多词检索按**命中 token 数**降序排列——每 token 命中上述 5 个字段
+中任一个即计 1 分，总命中数高者排前。同分时按 `filing_date DESC` 兜底。排序在 SQL 内完成
+（`ORDER BY ... LIMIT/OFFSET`），保证跨页全局有序，非页内重排。
+**核心不变量**：`ORDER BY` 计数用的列集合与 `WHERE` 的 OR LIKE 列集合**逐字相同**
+（共用同一 `FIELDS` 常量），杜绝「结果集里有它、排序数不到它」的口径分裂。
+`relevance_score` 字段由 `calculate_mixed_relevance` 独立计算（含姓名/标题/bigram 等加权），
+与排序用的命中计数同向但不完全等价——命中数决定粗序，`relevance_score` 供展示参考。
 
 **自证字段（issue #72）**:
 - `matched_fields`: 本次实际查询的数据库字段列表（如 `["inventor"]` 或 `["title","abstract_text","applicant","inventor","patent_number"]`）。
