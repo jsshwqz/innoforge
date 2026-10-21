@@ -27,9 +27,12 @@ http://127.0.0.1:3000
 | GET | `/compare` | 专利对比页 / Patent comparison page |
 | GET | `/ai` | AI 助手页 / AI assistant page |
 | GET | `/settings` | 设置页 / Settings page |
+| GET | `/patent/:id` | 专利详情页 / Patent detail page |
+| GET | `/idea` | 创意验证页 / Idea validation page |
+| GET | `/oa-response` | 审查意见答复页 / Office action response page |
+| GET | `/static/*path` | 内嵌静态资源 / Embedded static assets |
 
 > 注：`/test`（调试页）与 `/import`（样例导入页）两条页面路由已在代码中移除，故不再列出（issue #62）。
-| GET | `/patent/:id` | 专利详情页 / Patent detail page |
 
 ---
 
@@ -1320,16 +1323,182 @@ Response:
 | GET | `/api/oa/timeline/:patent_id` | 某专利的 OA 时间线 |
 
 
+## R24 续补：配置 / 聊天记录 / 收藏夹 / 标签 / IPC（19 条）
+
+> 本节的字段与错误码直接从 handler 读出（不是按命名臆测）。失败的响应形状有两套：本节的配置/聊天类返回 `{"status":"error","message":"…"}`，收藏夹/标签类返回 `{"error":"…"}`（历史遗留），接入方两种都要处理。
+
+### GET `/api/version`
+
+返回当前运行的版本与构建元信息，适合做部署核对（“跑的是不是新提交/新模板”）。
+
+```json
+{
+  "version": "0.9.17",
+  "git_commit": "41bb5fb…",
+  "git_branch": "main",
+  "build_time": "2026-10-20T12:00:00Z",
+  "db_path": "D:\\TEMP\\innoforge\\innoforge.db",
+  "templates": {
+    "office_action_response.html": { "sha256": "…", "bytes": 123456 },
+    "compare.html": { "sha256": "…", "bytes": 23456 }
+  }
+}
+```
+
+- `git_commit` / `git_branch` / `build_time` 由构建脚本注入；未注入时可能是 `unknown`。
+- 模板的 `sha256` 是编译期算的，用来确认二进制里烤进去的是哪版模板。
+- 无参数、无鉴权。
+
+### POST `/api/settings/cad`
+
+保存 FreeCAD 桥接工作区与自动启动开关。
+
+请求：
+
+```json
+{ "workspace": "D:\\cad\\workspace", "auto_start": false }
+```
+
+- `workspace` 为空串表示清除；非空必须是**绝对路径**、路径存在，且目录内含 `bootstrap_bridge.ps1`。
+- `workspace` 上限 1024 字符（按字符数）。
+- 成功：`{"status":"ok"}`；失败：`{"status":"error","code":"…"}`，`code` 取值：
+
+| code | 含义 |
+|---|---|
+| `workspace_too_long` | 超过 1024 字符 |
+| `workspace_not_absolute` | 不是绝对路径 |
+| `workspace_not_found` | 路径无法 canonicalize（不存在/无权限） |
+| `workspace_invalid` | 目录里没有 `bootstrap_bridge.ps1` |
+| `save_failed` | SQLite 写入失败（服务端日志有详情） |
+
+### GET `/api/settings/serpapi/balance`
+
+用已配置的**第一个** SerpAPI key 查询 `https://serpapi.com/account.json`（30 秒超时；网络查询在独立线程执行）。
+
+成功：
+
+```json
+{
+  "status": "ok",
+  "plan_name": "Free",
+  "searches_per_month": 250,
+  "this_month_usage": 12,
+  "remaining": 238,
+  "total_usage": 12,
+  "key_count": 1
+}
+```
+
+`remaining = max(searches_per_month - this_month_usage, 0)`。未配置 key、连接失败或超时返回 `{"status":"error","message":"…"}`（超时文案含“>30s”）。
+
+### 聊天记录 / Chat Records
+
+**GET** `/api/chat/:session_key`
+
+分页读取某会话的消息（按时间正序）。查询参数 `limit`（默认 50，钳制到 1–200）、`offset`（默认 0）。`session_key` 必须非空且 ≤255 字节。
+
+```json
+{ "status": "ok", "messages": [ … ], "total": 123, "limit": 50, "offset": 0 }
+```
+
+**POST** `/api/chat/:session_key/save`
+
+保存一条消息。请求 `{ "role": "user|assistant|system", "content": "…" }`；`role` 只接受这三个值，`content` 上限 50000（按 UTF-8 字节校验）。成功返回 `{"status":"ok","message_id":123}`。
+
+**POST** `/api/chat/:session_key/delete`
+
+删除该会话的全部消息，成功返回 `{"status":"ok","deleted":N}`。
+
+### 收藏夹 / Collections
+
+| 端点 | 请求 | 成功响应 |
+|---|---|---|
+| **GET** `/api/collections` | — | `{"collections":[{"id","name","description","patent_count","created_at"}]}` |
+| **POST** `/api/collections` | `{"name":"…","description":"…"}` | `{"status":"ok","id":"…","name":"…"}` |
+| **DELETE** `/api/collections/:id` | — | `{"status":"ok"}` |
+| **GET** `/api/collections/:id/patents` | — | `{"patents":[…]}` |
+| **POST** `/api/collections/:id/add` | `{"patent_id":"…"}` | `{"status":"ok"}` |
+| **DELETE** `/api/collections/:id/remove/:patent_id` | — | `{"status":"ok"}` |
+
+- 收藏夹 `name` 必填，上限 100 字节（按 UTF-8 字节校验，不是字符数）。
+- `add` 会先校验专利存在，不存在返回 `{"error":"专利不存在"}`。
+- 本组失败统一为 `{"error":"…"}`，**没有** `status` 字段。
+
+### 标签 / Tags
+
+| 端点 | 请求 | 成功响应 |
+|---|---|---|
+| **GET** `/api/patents/:id/tags` | — | `{"tags":["tag1","tag2"]}` |
+| **POST** `/api/patents/:id/tags` | `{"tag":"…"}` | `{"status":"ok"}` |
+| **DELETE** `/api/patents/:id/tags/:tag` | — | `{"status":"ok"}` |
+| **GET** `/api/patents/:id/collections` | — | `{"collection_ids":["…"]}` |
+| **GET** `/api/tags` | — | `{"tags":[{"tag":"…","count":3}]}` |
+
+标签名必填、上限 50 字节。路径里的 `:tag` 需要做 URL 编码（含空格/中文的标签）。
+
+### IPC 分类 / IPC Classification
+
+**GET** `/api/ipc/tree`
+
+从库内专利的 IPC 代码聚合出三级树（部 / 大类 / 小类），计数按出现次数累加：
+
+```json
+{
+  "status": "ok",
+  "total_codes": 42,
+  "sections": [
+    {
+      "code": "G",
+      "name": "Physics / 物理",
+      "count": 20,
+      "classes": [
+        { "code": "G06", "count": 15,
+          "subclasses": [ { "code": "G06N", "count": 9 } ] }
+      ]
+    }
+  ]
+}
+```
+
+**GET** `/api/ipc/:code/patents`
+
+按 IPC 代码**前缀**查专利；代码会 `trim` 并转大写。返回 `{"status":"ok","code":"G06N","count":N,"patents":[…]}`。
+
+### 覆盖索引（R24 续：19 条）
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/version` | 版本 / commit / 模板 sha256 |
+| POST | `/api/settings/cad` | 保存 FreeCAD 工作区与自动启动 |
+| GET | `/api/settings/serpapi/balance` | SerpAPI 余额（30s 超时） |
+| GET | `/api/chat/:session_key` | 会话消息分页读取 |
+| POST | `/api/chat/:session_key/save` | 保存一条消息 |
+| POST | `/api/chat/:session_key/delete` | 清空会话消息 |
+| GET | `/api/collections` | 收藏夹列表（含 patent_count） |
+| POST | `/api/collections` | 新建收藏夹 |
+| DELETE | `/api/collections/:id` | 删除收藏夹 |
+| GET | `/api/collections/:id/patents` | 收藏夹内专利 |
+| POST | `/api/collections/:id/add` | 加入专利（先校验存在） |
+| DELETE | `/api/collections/:id/remove/:patent_id` | 移出专利 |
+| GET | `/api/patents/:id/tags` | 某专利的标签 |
+| POST | `/api/patents/:id/tags` | 添加标签（≤50 字节） |
+| DELETE | `/api/patents/:id/tags/:tag` | 删除标签 |
+| GET | `/api/patents/:id/collections` | 某专利所属收藏夹 id |
+| GET | `/api/tags` | 全部标签及计数 |
+| GET | `/api/ipc/tree` | 库内专利的 IPC 三级树 |
+| GET | `/api/ipc/:code/patents` | 按 IPC 前缀查专利 |
+
 ## 覆盖说明 / Coverage
 
 - 既有章节（搜索 / 专利 / 创意验证 / 特征卡片 / 收藏夹 / 标签 / 聊天 / IPC / 配置 / 错误 / 环境变量）：59 条 API 端点说明；
-- 页面路由表：6 条（`/test`、`/import` 已从代码移除，见上表下方注记）；
+- 页面路由表：9 条（`/test`、`/import` 已从代码移除，见上表下方注记）；
 - 本轮 R23 新增（CAD / 认证 / 审查意见 AI）：24 条；
-- 本轮续补（OA 期限 / 轮次 / 历史 / 讨论 / 导出）：17 条。
-- 合计 **111 条**（按 method+path 去重），覆盖 145 个 method+path 路由组合中的 111 条（约 77%）。剩余 39 条由 issue #62 跟踪。
+- 本轮续补（OA 期限 / 轮次 / 历史 / 讨论 / 导出）：17 条；
+- 本轮 R24 续补（配置 / 聊天记录 / 收藏夹 / 标签 / IPC）：19 条。
+- 合计 **115 条**（按 method+path 去重；含页面路由 9 条），覆盖 145 个 method+path 路由组合中的 115 条（约 79%）。剩余 30 条由 issue #62 跟踪（`/api/ai/*` 分析类、`/api/patent/*`、`/api/idea/*` 等）。
 
 ## 待覆盖 / Not Yet Covered
 
-以下范围尚未逐条展开：页面级交互细节、`/api/search/*` 中尚未给出字段级示例的部分、`/api/chat/*`、`/api/settings/*` 其余项、`/api/idea/*`、`/api/ideas/*`、`/api/oa/*`（非 `ai` 前缀）、`/api/ai/*`（非 `oa` 前缀）、`/api/ipc/*`、`/api/collections/*`、`/api/tags`、`/api/upload/*`、`/api/version`、`/static/*path`。
+剩余端点集中在 `/api/ai/*` 分析类、`/api/patent/*` 外部抓取/富化、`/api/idea/*` 的记忆与报告子集，以及 `/api/upload/*`、`/api/search/export/xlsx`、`/api/search/vector`、`/api/feature-cards/diff`。
 
 > 注：`/api/search/*`、`/api/patent/*`、`/api/upload/compare` 的说明已在上文既有章节中，不属于“待覆盖”。
