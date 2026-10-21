@@ -106,7 +106,7 @@
                 <button class="btn-gray btn-save" id="ai-models-btn" style="margin-top:8px;padding:6px 16px;font-size:13px;" onclick="fetchAiModels(null, false)">🔍 查询可用模型</button>
                 <div id="custom-model-group" class="form-group" style="display:none;margin-top:8px;">
                     <label>自定义模型名称</label>
-                    <input type="text" id="ai-model-custom" placeholder="输入模型名称">
+                    <input type="text" id="ai-model-custom" placeholder="自定义模式请手动输入模型名">
                 </div>
                 <span class="form-hint" id="ai-model-hint">选择模型或切换至自定义输入</span>
             </div>
@@ -117,7 +117,7 @@
                 </select>
                 <div id="custom-expert-model-group" class="form-group" style="display:none;margin-top:8px;">
                     <label>自定义专家模型名称</label>
-                    <input type="text" id="ai-model-expert-custom" placeholder="输入模型名称">
+                    <input type="text" id="ai-model-expert-custom" placeholder="自定义模式请手动输入模型名">
                 </div>
                 <span class="form-hint">用于创新推演、创造性分析、侵权评估等高推理任务</span>
             </div>
@@ -449,7 +449,7 @@
             // 清空模型下拉，等待自动查询填充
             var modelSel = document.getElementById('ai-model');
             modelSel.innerHTML = DOMPurify.sanitize('<option value="">加载中...</option>');
-            document.getElementById('ai-model-expert').innerHTML = '<option value="">加载中...</option>';
+            document.getElementById('ai-model-expert').innerHTML = DOMPurify.sanitize('<option value="">加载中...</option>');
 
             // 自动从 API 查询真实模型列表
             fetchAiModels(providerKey, true);
@@ -633,7 +633,9 @@
             }
 
             if (config.ai_api_key_configured) {
-                status.push('✅ AI 服务已配置（DeepSeek）');
+                var _pKey = detectProvider(config.ai_base_url);
+                var _pTitle = (AI_PROVIDERS[_pKey] && AI_PROVIDERS[_pKey].title) ? AI_PROVIDERS[_pKey].title : 'AI';
+                status.push('✅ AI 服务已配置（' + _pTitle + '）');
             } else {
                 status.push('❌ AI 服务未配置（无法使用智能分析）');
             }
@@ -1183,14 +1185,28 @@
             status.className = 'status-pill ' + (availability === 'ready' ? 'success' : (availability === 'unsupported' ? 'warning' : 'error'));
         }
 
+        // issue #69: FreeCAD probe must have an upper-bound timeout (10 s).
+        // On timeout or failure the UI enters a clear terminal state
+        // (cad.notDetected / cad.checkTimeout) instead of staying in
+        // "checking" forever.  The "检测并启动" button remains visible as
+        // a retry entry point.
         async function refreshFreeCadStatus() {
             var status = document.getElementById('freecad-status');
             status.textContent = t('cad.checking');
+            var controller = new AbortController();
+            var timer = setTimeout(function() { controller.abort(); }, 10000);
             try {
-                var response = await fetch('/api/cad/status');
+                var response = await fetch('/api/cad/status', { signal: controller.signal });
+                clearTimeout(timer);
                 renderFreeCadStatus(await response.json());
             } catch (error) {
-                renderFreeCadStatus({ availability: 'unavailable' });
+                clearTimeout(timer);
+                if (error.name === 'AbortError') {
+                    status.textContent = t('cad.checkTimeout');
+                } else {
+                    status.textContent = t('cad.notDetected');
+                }
+                status.className = 'status-pill error';
             }
         }
 
@@ -1223,12 +1239,21 @@
         async function checkAndStartFreeCad() {
             var status = document.getElementById('freecad-status');
             status.textContent = t('cad.starting');
+            var controller = new AbortController();
+            var timer = setTimeout(function() { controller.abort(); }, 30000);
             try {
-                var response = await fetch('/api/cad/start', { method: 'POST' });
+                var response = await fetch('/api/cad/start', { method: 'POST', signal: controller.signal });
+                clearTimeout(timer);
                 var data = await response.json();
                 renderFreeCadStatus(data);
             } catch (error) {
-                renderFreeCadStatus({ availability: 'unavailable' });
+                clearTimeout(timer);
+                if (error.name === 'AbortError') {
+                    status.textContent = t('cad.checkTimeout');
+                } else {
+                    renderFreeCadStatus({ availability: 'unavailable' });
+                }
+                status.className = 'status-pill error';
             }
         }
 
@@ -1243,6 +1268,8 @@
             }
             var selectedProvider = providerKey || document.getElementById('ai-provider').value;
             if (selectedProvider === 'custom') {
+                document.getElementById('ai-model').innerHTML = DOMPurify.sanitize('<option value="">自定义模式请手动输入模型名</option>');
+                document.getElementById('ai-model-expert').innerHTML = DOMPurify.sanitize('<option value="">自定义模式请手动输入模型名</option>');
                 if (isManual) {
                     btn.textContent = '\u274c 自定义模式不支持自动查询';
                     btn.style.color = '#f85149';
