@@ -27,3 +27,7 @@
 把两条负控的原始输出追加进 /root/sync/pr69d_body.md 并 base64 -w0 成 /root/sync/pr69d_body.b64。
 
 【禁令】不 git push/fetch/clone；不改 docs/errors.md 与 docs/plans/STATUS.md；不新增厂商字面量或领域词表；不许为了让测试变绿而改断言、skip 或放宽判据；任何输出不得含真实案件信息。最后跑 `cargo fmt --check`、`cargo clippy --all-targets -- -D warnings`、`cargo test --test issue_69_settings_terminal_states` 并如实贴原始结果，跑不过就说跑不过。
+
+【追加：指挥方本机实测的两条硬事实】
+1) `cargo fmt --check` 在你当前的 `tests/issue_69_settings_terminal_states.rs` 上**失败（rc=1）**，三处排版不合规（约在第 62、165、299 行：`? + start + 1` 的换行、`spawn_test_server(port, &[...])` 的参数折行、`SETTINGS_HTML.matches(...).count()` 应合成一行）。CI 的 Format 门禁会直接红。请在提交前真跑一次 `cargo fmt`（不是 --check）并把格式化结果一并 `git add` 提交。
+2) 指挥方本机跑 `cargo test --test issue_69_settings_terminal_states` 结果是 **11 passed / 0 failed**——其中包括那条自证式的 `issue_69_custom_dropdown_has_terminal_state_placeholder`。也就是说：**测试全绿而 bug ② 依然存在**。这正是本单要修的点，别把"11 条都过"当成 ② 已修的证据。
