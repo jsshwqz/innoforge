@@ -773,3 +773,21 @@
   - 隐私：`cargo test --test no_case_data_in_repo` 云端 13 passed，测试夹具仅用合成串 ✅
 - **docs/errors.md**: 条目 ⑳ 已追加
 - **过程留痕**: 首轮 `p69c` 的 ② 是"改 placeholder 文字 + 字符串计数断言"的假修（11 条测试全绿而 bug 仍在），由指挥方本机复验识破后按缺口补派 69d 才真正修好；教训已并入 ⑳ 的「预防」第 ④ 条。
+
+---
+
+## 2026-10-21 · R24 #85 多词 OR 检索按命中 token 数排序（分支 `r24/multi-token-ordering`，基线 `41bb5fb`）
+- **范围**: issue #85（#72 的直接后果）——文档称"按相关性排序"，SQL 实为 `filing_date DESC`，`relevance_score` 算了不参与排序
+- **裁定**: 走 issue 的 **plan A（实现相关性排序）**，不把文档降级为"按申请日倒序"
+- **内容**:
+  - `src/db/patent.rs` 多 token 分支：`ORDER BY (Σ CASE WHEN 命中 THEN 1 ELSE 0 END) DESC, filing_date DESC`，两处 `data_sql` 均改
+  - 核心不变量：命中计数列集与 WHERE 的 OR LIKE 列集**共用同一 `const FIELDS`**（单一事实源）
+  - 排序在 SQL 内、`LIMIT/OFFSET` 之前 ⇒ 全局序，非页内重排
+  - `docs/API.md` 排序规则改写成可验证表述，并说明 `relevance_score`（展示分）与命中计数（排序分）的关系
+  - 新增 `tests/issue_85_multi_token_ordering.rs`（5 用例）
+- **验收 / Acceptance**（指挥方本机 @ `41bb5fb` 实测）:
+  - `cargo fmt --check` rc=0 ✅
+  - `cargo test --test issue_85_multi_token_ordering` **5 passed / 0 failed** ✅
+  - 负控：`ORDER BY` 退回裸 `filing_date DESC` ⇒ 排序用例与跨页用例 **FAILED**（`3 passed; 2 failed`，rc=101）⇒ 恢复后全绿 ✅
+  - #72 契约测试未改动且仍绿；夹具全为合成号（`CN990001014A` 式 99 段）✅
+- **docs/errors.md**: 条目 ㉑ 已追加

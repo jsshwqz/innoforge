@@ -615,6 +615,27 @@ impl super::Database {
         }
         let match_clause = or_parts.join(" OR ");
 
+        // ── issue #85: ORDER BY 命中 token 数 DESC, filing_date DESC ──
+        // 核心不变量：ORDER BY 里数命中用的列集合必须与 WHERE 里那串 OR LIKE
+        // 用的列集合逐字相同。两处共用上面的 FIELDS 常量，杜绝「WHERE 查 5 列、
+        // ORDER BY 只数 4 列」的口径分裂——否则会出现「结果集里有它、排序数不到
+        // 它」的新缺陷。
+        let mut hit_terms: Vec<String> = Vec::with_capacity(tokens.len());
+        for (i, _token) in tokens.iter().enumerate() {
+            let param = i + 1;
+            let field_checks: Vec<String> = FIELDS
+                .iter()
+                .map(|f| format!("{f} LIKE ?{param}"))
+                .collect();
+            hit_terms.push(format!(
+                "CASE WHEN ({}) THEN 1 ELSE 0 END",
+                field_checks.join(" OR ")
+            ));
+        }
+        let hit_count_expr = hit_terms.join(" + ");
+        // filing_date DESC 作为同分兜底，保证确定性
+        let order_clause = format!("ORDER BY ({hit_count_expr}) DESC, filing_date DESC");
+
         let date_from = date_from.unwrap_or("");
         let date_to = date_to.unwrap_or("");
         let country = country.filter(|s| !s.is_empty());
@@ -649,7 +670,7 @@ impl super::Database {
 
             let data_sql = format!(
                 "SELECT id,patent_number,title,abstract_text,applicant,inventor,filing_date,country
-                 FROM patents {where_clause} ORDER BY filing_date DESC LIMIT ?{} OFFSET ?{}",
+                 FROM patents {where_clause} {order_clause} LIMIT ?{} OFFSET ?{}",
                 n_like + 4,
                 n_like + 5
             );
@@ -702,7 +723,7 @@ impl super::Database {
 
             let data_sql = format!(
                 "SELECT id,patent_number,title,abstract_text,applicant,inventor,filing_date,country
-                 FROM patents {where_clause} ORDER BY filing_date DESC LIMIT ?{} OFFSET ?{}",
+                 FROM patents {where_clause} {order_clause} LIMIT ?{} OFFSET ?{}",
                 n_like + 3,
                 n_like + 4
             );

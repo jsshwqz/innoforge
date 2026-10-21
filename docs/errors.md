@@ -1165,3 +1165,15 @@
 - **负控 / Negative control**: 指挥方本机实测——删除 `custom` 分支的两行下拉清理（恢复裸 `return`）⇒ `issue_69_custom_branch_sets_dropdowns_before_return` **FAILED**（`11 passed; 1 failed`，报 `missing-terminal-state`）；恢复后 12 passed。`cargo fmt --check` rc=0。
 - **预防 / Prevention**: ①异步探测必须带超时上限并落到终态，"永驻进行中"视为缺陷；②同一事实只允许一个判据来源（占位符集合归 `mod.rs`）；③守卫测试的判据要能被"退回旧行为"证伪，禁止用字符串存在性断言代替控制流断言；④相邻同逻辑代码的 sanitize 口径必须一致（同类不一致已由 #56 记录）。
 - **提交 / Commit**: 见 PR（分支 `r24/settings-terminal-states`，`refs #69`）。
+
+---
+
+## [2026-10-21] ㉑ 多词 OR 检索：文档承诺按相关性排序，SQL 实为 `filing_date DESC`
+- **严重程度 / Severity**: MEDIUM（结果顺序与文档承诺不一致，直接影响"按相关度找现有技术"的用户）
+- **现象 / Symptom**: 多 token 查询时，命中 2 个 token 的旧专利会排在只命中 1 个 token 的新专利后面；`data_sql` 末尾是 `ORDER BY filing_date DESC`，而同一分支已为每行算出 `relevance_score`（`calculate_mixed_relevance`，`score_source="mixed search match"`）却完全不参与排序。`docs/API.md` 与 PR #84 正文都写着"按相关性评分排序"。
+- **根因 / Root cause**: #72 给 `search_like` 加了分词 OR LIKE 与 `matched_fields`/`relevance_score`，但排序子句是更早实现的、当时只有单 token 语义，扩到多 token 后没人回头改排序——**算了分不排序，文档却按"排序"承诺**。
+- **修复 / Fix**: 多 token 分支改为 `ORDER BY (Σ CASE WHEN <该 token 在 FIELDS 上命中> THEN 1 ELSE 0 END) DESC, filing_date DESC`。关键不变量：命中计数用的列集合与 `WHERE` 那串 OR LIKE **共用同一个 `const FIELDS`**（单一事实源），杜绝"WHERE 查 5 列、ORDER BY 只数 4 列"的口径分裂；`filing_date DESC` 仅作同分兜底以保证确定性。排序发生在 SQL 内、`LIMIT/OFFSET` 之前，因此是全局序而非页内序。`docs/API.md` 同步写成可验证表述并说明展示分 `relevance_score` 与排序用命中计数的关系。
+- **回归 / Regression**: `tests/issue_85_multi_token_ordering.rs` 5 个用例——两 token 命中必须排在一 token 命中之前；跨页断言（第 2 页首条命中数不得高于第 1 页末条）；`ORDER BY` 漏数某列（只在 `patent_number` 命中、或只在 `abstract_text` 命中）必须红；同分时按申请日倒序。#72 的两条契约测试（`detect_chinese_name_routes_to_mixed`、`issue72_surname_leading_technical_terms_route_to_mixed`）未改动且仍绿。
+- **负控 / Negative control**: 指挥方本机实测——把 `ORDER BY` 退回裸 `filing_date DESC` ⇒ `issue85_two_token_hit_ranks_above_one_token_hit` 与 `issue85_cross_page_global_ordering` 双双 **FAILED**（`3 passed; 2 failed`，rc=101）；恢复后 5 passed、`cargo fmt --check` rc=0。
+- **预防 / Prevention**: ①新增"算了但没用"的派生字段（分数、计数）时，必须同时回答"它是否参与排序/分页"，否则文档不许按它承诺；②排序与过滤涉及同一列集合时必须共用常量定义，禁止两处各写一份字面量；③排序类改动的测试必须断言**返回顺序**与**跨页一致性**，不能只断言结果集成员。
+- **提交 / Commit**: 见 PR（分支 `r24/multi-token-ordering`，`refs #85`）。
