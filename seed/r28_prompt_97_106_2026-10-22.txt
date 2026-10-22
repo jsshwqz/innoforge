@@ -1,0 +1,52 @@
+你在华为云临时容器里，是 InnoForge（Rust）的实现方。本轮 R28 只做两件事，**都是补测试、不改产品代码**。做完一件立刻 commit，再落盘 patch，再报进度 —— 顺序不许颠倒（R26/R27 两次都是跳这一步丢的工作）。
+
+【第 0 步：先把跑题的那个 commit 从分支上摘掉】
+DS 判定：`43b4e38`（rd_mode 研发模式）与本批次无关，**不认、不借 #97 标签合入**。它没有被指挥方合进远端分支，你在容器里直接丢弃它：
+```
+cd /root/innoforge
+git log --oneline -5
+git reset --hard 1f85fc7
+git log --oneline -3
+```
+之后 `src/routes/ai.rs` 里不得再出现 `rd_mode`，也不得新增 `tests/issue_97_rd_mode_toggle.rs`。**不要再实现那个功能**。遇到需求不清楚就停下来写进 `/root/sync/r28_state.txt` 报指挥方，不要自己选功能做。
+
+【第 1 步：取任务书（唯一事实源）】
+```
+curl -4 -sS --max-time 60 -SL -o /root/sync/r28_brief.md https://raw.githubusercontent.com/jsshwqz/innoforge/seed/tools/seed/r26_task_brief_v2_2026-10-22.md
+md5sum /root/sync/r28_brief.md
+cat /root/sync/r28_brief.md
+```
+任务书里第 2 件（#106 B 方案）与第 4 件（#97 两条真实形态）就是本轮范围；末尾 R27 增量小节仍然有效。若 curl 挂住/超时：任务书已在 `/root/sync/r27_brief.md`（同一份内容，md5 应为 6a79c0b3649a25e3749b6110d41bdaa7），直接 cat 它，不要死等网络。
+
+【A 件 · #97 两条真实故障形态用例】
+指挥方实测：裸 UTF-8 中文名在修复前**就是通的**；真正触发「文件编码不支持」的是这两种写法 ——
+(a) 只发 `filename*=UTF-8''<百分号编码>`、**不发** `filename=`；
+(b) 完全不带 `filename`。
+要求：新增两条集成用例（可放 `tests/issue_97_nonascii_filename.rs` 或新建 `tests/issue_97_filename_forms.rs`），**手工拼 multipart 请求体**（自己写 `Content-Disposition: form-data; name="file"; ...` 字节），不要依赖 HTTP 客户端库的文件名编码行为；上传一个自造的 `%%PDF-` 魔数文件，断言 `file_type=="pdf"` 且进入 PDF 分支（不再出现「文件编码不支持」/「无法识别文件类型」）。
+可证伪检查（必须真做并写进 commit）：把 `src/routes/upload.rs` 退回 `42027cc` 基线，这两条**必须红**；恢复后全绿。
+
+【B 件 · #106 真实 DOM 文本断言】
+现状：`tests/issue_106_score_contract.rs` 里那两条"e2e"断言的是**接口 JSON**，不是渲染后的 DOM 文本 —— DS 判为验收未满。
+要求：补真正作用在渲染结果上的断言，覆盖两条路径：
+- `parsed=true`：渲染出的 HTML/文本里必须出现总分数值与 `/10`、六个维度名、等级；**不得**出现 `undefined` / `NaN`。
+- `parsed=false`：必须出现中英双语失败文案（走 `static/i18n.js` 的 `oa.quality.parseFailed`），且**不得**出现 `undefined`、也不得出现 `0/10` 这种冒充分数。
+实现方式不限，但必须是"执行模板里的渲染逻辑并检查输出字符串"，例如：用 node 复用仓库已有的 `check_html_functions.mjs` / `e2e_test.mjs` 通道，或在 Rust 测试里把 `templates/office_action_response.html` 中相关函数体抽出来以给定响应驱动并把产出的 HTML 字符串做断言。**禁止**再用"直接断言 API 响应字段"充当 DOM 测试。
+可证伪检查：把模板退回 `5b3bead` 的旧读法（`var score = data.score || data;`）时，DOM 断言必须红（它现在会被 `issue_106_template_keys_discovered_from_source` 拦住，但 DOM 层也要能独立拦住）。
+
+【每件收尾顺序】
+1. 实现 + 自测；
+2. `git add <该件文件>` 逐文件、**禁止 `git add -A`**，然后 commit（正文写清该件红→绿证据与命令退出码）；
+3. 落盘（件号用 97dom 之外的真实号：A 件写 `p97`，B 件写 `p106b`）：
+   `git diff origin/main...HEAD > /root/sync/p<件号>.patch && base64 -w0 /root/sync/p<件号>.patch > /root/sync/p<件号>.b64`
+4. 往 `/root/sync/r28_progress.txt` **追加**一行：`<件号> done commit=<sha> patch=<字节数>B`。
+
+【收尾三条命令，命令原文+退出码+`N passed; M failed` 写进最后一笔 commit 并落盘 `/root/sync/r28_final.txt`】
+```
+cargo fmt --all --check
+cargo clippy --all-targets -- -D warnings
+cargo test
+```
+
+【硬红线（不变）】不得含案件数据（案号/申请号/公开号/人名/机构名/案件原文措辞）；测试夹具用合成串且必须复用 `SYNTHETIC_PUB_NUM_ALLOWLIST` 已有号、不得新增、不得改那个守卫；不许放宽任何守卫；禁止 `git push`、开 PR、rebase、动 main；不碰 `docs/errors.md` 与 `docs/plans/STATUS.md`；桩一律进程内 `bind(0)` 独占 + ready 判定，禁止 `python3` 与 `free_port()` 交给外部进程。遇 429：先 commit + 落盘 + 写 `/root/sync/r28_state.txt` 再停手，不连续硬打。
+
+现在容器剩约 40 分钟。先做 A 件（它小），立刻 commit+落盘，再做 B 件。
