@@ -191,7 +191,18 @@ pub async fn api_upload_compare(
         return Json(json!({"error": "缺少文件或专利 ID"}));
     }
 
-    let ext = file_name.rsplit('.').next().unwrap_or("").to_lowercase();
+    let ext_from_name = file_name.rsplit('.').next().unwrap_or("").to_lowercase();
+    // #97: filename may be missing or mangled for non-ASCII names.
+    // Use content magic bytes to detect type when the extension is unreliable.
+    let ext = match detect_type_by_magic(&file_bytes) {
+        Some(magic_type) => {
+            // Magic bytes override the filename extension — the content is
+            // authoritative.  This fixes non-ASCII filenames where the
+            // multipart parser may return None or a mangled file_name.
+            magic_type.to_string()
+        }
+        None => ext_from_name,
+    };
     if ext == "pdf" && !has_pdf_header(&file_bytes) {
         return Json(json!({
             "error": "文件不是有效 PDF，未检测到 %PDF- 文件签名"
@@ -269,7 +280,7 @@ pub async fn api_upload_compare(
                 let (text, _encoding, had_errors) = encoding_rs::GBK.decode(&file_bytes);
                 if had_errors {
                     return Json(
-                        json!({"error": "文件编码不支持，请上传 UTF-8 或 GBK 编码的文本文件、.docx、PDF 或图片"}),
+                        json!({"error": "无法识别文件类型，请上传 PDF、DOCX、TXT 或图片文件"}),
                     );
                 }
                 text.into_owned()
@@ -363,7 +374,13 @@ pub async fn api_upload_extract(
         }
     );
 
-    let ext = file_name.rsplit('.').next().unwrap_or("").to_lowercase();
+    let ext_from_name = file_name.rsplit('.').next().unwrap_or("").to_lowercase();
+    // #97: filename may be missing or mangled for non-ASCII names.
+    // Use content magic bytes to detect type when the extension is unreliable.
+    let ext = match detect_type_by_magic(&file_bytes) {
+        Some(magic_type) => magic_type.to_string(),
+        None => ext_from_name,
+    };
     if ext == "pdf" && !has_pdf_header(&file_bytes) {
         return Json(json!({
             "error": "文件不是有效 PDF，未检测到 %PDF- 文件签名"
@@ -427,7 +444,13 @@ pub async fn api_upload_extract(
             Err(_) => {
                 let (t, _, had_errors) = encoding_rs::GBK.decode(&file_bytes);
                 if had_errors {
-                    return Json(json!({"error": "文件编码不支持"}));
+                    // #97: The content is neither valid UTF-8 nor valid GBK,
+                    // and magic bytes did not identify it as PDF/DOCX.
+                    // The real problem is "unrecognised file type", not
+                    // "encoding unsupported".
+                    return Json(json!({
+                        "error": "无法识别文件类型，请上传 PDF、DOCX、TXT 或图片文件"
+                    }));
                 }
                 t.into_owned()
             }
@@ -1328,6 +1351,27 @@ fn has_pdf_header(data: &[u8]) -> bool {
     data[..data.len().min(1024)]
         .windows(b"%PDF-".len())
         .any(|window| window == b"%PDF-")
+}
+
+/// Check if data starts with the ZIP magic bytes (PK\x03\x04), which is the
+/// signature for .docx (and other Office Open XML formats).
+fn has_docx_header(data: &[u8]) -> bool {
+    data.len() >= 4 && data[0..4] == [0x50, 0x4B, 0x03, 0x04]
+}
+
+/// Detect file type by content magic bytes when the filename extension is
+/// missing or unreliable (e.g. non-ASCII filenames mangled by multipart parsers).
+///
+/// Returns `Some("pdf")` / `Some("docx")` when magic bytes match, `None` when
+/// no known magic is recognised.
+fn detect_type_by_magic(data: &[u8]) -> Option<&'static str> {
+    if has_pdf_header(data) {
+        return Some("pdf");
+    }
+    if has_docx_header(data) {
+        return Some("docx");
+    }
+    None
 }
 
 /// Download a PDF from a URL (for patent PDFs from enrichment).
