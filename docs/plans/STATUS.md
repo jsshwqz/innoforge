@@ -857,3 +857,11 @@
 - **A 件 · #97 两条真实故障形态（已落地）**：新增 `tests/issue_97_filename_forms.rs`（手工按字节拼 multipart，精确控制"哪些文件名参数存在"，刻意不用 HTTP 客户端库的 builder 以免掩盖故障形态）。指挥方本机独立复跑：修复态 **2 passed**；把 `src/routes/upload.rs` 退回 `42027cc` ⇒ **0 passed; 2 failed**（两条都报 `file_type must be 'pdf', got: txt`）。云端件号 commit `02700e3`，`p97.patch` 153326B 与 `.b64` 逐字节 IDENTICAL，且与本机差异仅此一文件（**rd_mode 未夹带**，已逐文件核验）。
 - **B 件 · #106 真实 DOM 断言（未落地，如实报）**：容器日志显示 GLM 已写完并以 commit `74bdb90` 提交，自报 13 个 DOM 断言全过、旧模板下 6/13 变红；但指挥方的回收前抢救只取到**截断且字符错乱**的 1377B（仅 `tests/dom_render_106.mjs` 开头，且 8000 通道随后返回 `session expired`/401）⇒ **内容不可用，本件按未完成处理**，下一窗口重做。绝不用残缺副本冒充验证。
 - **新发现 #111（指挥方独立核出，P1）**：#106 的 `parsed===false` 双语失败文案是**死代码** —— `templates/office_action_response.html:1348` 与 `:1586` 的前置 guard `if (data.error && data.parsed !== true) { alert(data.error); return; }` 在后端"解析失败必然同时给 `parsed:false` 与非空 `error`"的契约下恒真，先 alert+return，导致 `:1592`/`:1355` 的渲染分支不可达；用户实际看到英文 alert 直出而非双语 UI 文案。B 件编写过程中 GLM 亦注意到该问题（并记录"不改产品代码"的约束），它用 `error:""` 绕过 guard 测渲染 —— 那是掩盖而非修好。修法与三条负控见 issue #111。
+
+## 2026-10-23 · R29 收口：#106 的 DOM 断言与 #111 的 guard 死代码一并修掉，#104 代码面齐活
+- **容器**：`9aac8308`（22:54 北京登录恢复后新开体验容器，剩余 02:43）。装配 `setup_rust v2` **rc=0 / 105 秒**，`BASELINE=42027cc`；三件种子 PUT 入仓后 md5 全对（`b271019e` / `204c2dc5` / `16a55794`），派单提示词推 `seed/tools` commit `ae33341`。全程 `setsid nohup`（R26 的 pty 教训），零案件数据。
+- **本轮只派两件**（#97 已完成，明令勿重做；GLM 也自行核到 `tests/issue_97_filename_forms.rs` 存在）：#106 真实 DOM 文本断言 + #111 guard 最小修正。收尾顺序按硬纪律走完：commit → 落 `p106c.patch/.b64` → 追加 progress 带 sha → `r29_final.txt` 记三条命令退出码。
+- **产物一致性**：容器先落 `p106c.patch` 169494B（sha `3d65023`），我拉回后它又 fmt 微调重落 169529B（sha `d79ff5f`）；我按块提取比对，差异仅在 `tests/dom_render_106.rs` 的 87→92 行，而我本地已 `cargo fmt --all` 同步 ⇒ 两版内容一致，无遗漏。
+- **本机验证**：`dom_render_106` 1 passed、`issue_106_score_contract` 8 passed；负控两组（退模板 ⇒ 指名双语文案缺失 + alert 被调用；改 i18n 键 ⇒ 红）；`fmt --all` 与 `clippy --all-targets` rc=0。容器内全量 **926 passed / 0 failed / 32 ignored**。
+- **推送与 CI**：合入 commit `eecfa09`（head），**CI 12/12 success、0 fail（含 E2E）**。
+- **可交复核状态**：#97/#98/#99/#100/#105/#106/#107/#111 代码与测试全部落在 `r25/backend-truthfulness`；关闭各 issue 时逐条写"已修/未修"（#106 的"可见浏览器实测"仍未做，只做了 headless DOM；B 组可见 UI 实测另列）。#104 仍 draft，等 DS 复核裁定合并。
