@@ -1,0 +1,47 @@
+你在华为云临时容器里，是 InnoForge（Rust，github.com/jsshwqz/innoforge）的实现方。本地仓库在 /root/innoforge（setup 已 clone main）。现在是 R26 轮次。
+
+【第一步：取任务书（必须先做，逐字读完再动手）】
+curl -4 -sSL --retry 3 -o /root/sync/r26_brief.md https://raw.githubusercontent.com/jsshwqz/innoforge/seed/tools/seed/r26_task_brief_v2_2026-10-22.md
+md5sum /root/sync/r26_brief.md
+wc -c /root/sync/r26_brief.md
+然后完整 cat 读它。顺序、红线、验收全在里面，别凭记忆。
+
+【第二步：切到正确分支（不是新建分支）】
+本轮四件全部并入已有分支 r25/backend-truthfulness（它就是 GitHub 上的 draft PR #104），**不要另开分支**：
+cd /root/innoforge
+git fetch --depth 20 origin r25/backend-truthfulness
+git checkout -B r25/backend-truthfulness FETCH_HEAD
+git log --oneline -3        # 最新一笔应是 docs(STATUS) 开头，作者 行天/jsshwqz
+git status --short          # 必须干净
+
+【第三步：读 issue 原文（公开仓库，免认证即可）】
+GET https://api.github.com/repos/jsshwqz/innoforge/issues/107
+GET https://api.github.com/repos/jsshwqz/innoforge/issues/106
+GET https://api.github.com/repos/jsshwqz/innoforge/issues/105
+GET https://api.github.com/repos/jsshwqz/innoforge/issues/97
+issue #107 与 #106 正文里有指挥方实测的对照表和根因行号，按它做，别自己重猜。#106 已裁定走 **B 方案**（保持数值契约 + 模板两处同步改），任务书里写清了六条验收。
+
+【做单顺序】#107 → #106 → #105 → #97。一件一 commit。
+
+【落盘纪律（最重要，容器 push 不可靠，产物靠文件交接）】
+每完成一件，立刻把**该件至今的完整分支 diff**写两份到同步目录：
+  cd /root/innoforge && git diff origin/main...HEAD > /root/sync/p<件号>.patch
+  base64 -w0 /root/sync/p<件号>.patch > /root/sync/p<件号>.b64
+件号用 107/106/105/97。两份都要写，指挥方靠双通道互证流是否完整。**不要 git push**，也不要在容器里开 PR。
+
+【硬红线】
+1. 任何进仓库的内容不得含案件数据（案号/申请号/公开号/人名/机构名/案件原文措辞）；测试夹具用合成串，且必须复用 tests/no_case_data_in_repo.rs 里 SYNTHETIC_PUB_NUM_ALLOWLIST 已有的号，**不许新增 allowlist 项、不许改那个守卫文件、不许放宽任何门禁**。
+2. 断言必须可证伪，禁止"文件里含有某字符串"式自证；每条回归做完要自己跑"退回基线是否变红"，把哪条红了写进该件 commit 正文。
+3. 提交前必须真跑这三条，命令原文 + 退出码逐字写进最后一笔 commit 正文：
+   cargo fmt --all --check
+   cargo clippy --all-targets -- -D warnings
+   cargo test
+   **--all-targets 不许省**（不带它根本不检查 tests/，上一轮就是因此 CI Clippy 红）。不许用单文件绿灯代替全量绿灯。
+4. 不要碰 docs/errors.md 与 docs/plans/STATUS.md（指挥方负责）。docs/API.md 若要改可以改，但改字段名必须同时告诉模板侧怎么读。
+5. 只读 main 与 r25/backend-truthfulness，不 rebase、不 force、不动 main。
+
+【桩必须进程内】#105/#106 的测试不许再 Command::new("python3") 起外部进程；用 tests/helpers/fake_ai_stub.rs 或 TcpListener 手写响应 + 线程 + Drop 收尾，并要有 ready 判定（超时即报 stub did not start），别让桩自身崩溃伪装成产品断言失败。
+
+【E2E 不许谎报】headless 跑的就写"只做了 headless，未做可见实测"，禁止写"可见实测通过"。
+
+时间窗只剩不到 3 小时，容器会被回收。请**按里程碑增量落盘**（每完成一件就写 p<件号>.patch/.b64 + 追加一行进度到 /root/sync/r26_progress.txt），别攒到最后一次性写。开始吧。
