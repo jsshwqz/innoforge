@@ -3056,13 +3056,133 @@ pub async fn api_ai_oa_quality_score(
     let result = ai
         .chat_with_system(sys, &user_msg, 0.3)
         .await
-        .unwrap_or_else(|e| format!("{{\"error\": \"评分失败: {e}\"}}"));
+        .unwrap_or_else(|e| format!("AI call failed: {e}"));
 
-    // 尝试解析 JSON，如果失败则返回原始文本
-    let parsed: serde_json::Value =
-        serde_json::from_str(&result).unwrap_or_else(|_| json!({ "raw": result }));
+    // #100: parse the model output into a structured result.
+    // Previously, the raw text was wrapped in {"raw": ...} and returned as
+    // {"status":"ok","score":{"raw":"..."}} — making it impossible for the UI
+    // to extract a numeric score.
+    let score_result = parse_quality_score(&result);
+    Json(score_result)
+}
 
-    Json(json!({ "status": "ok", "score": parsed }))
+/// #100: Parse the model's quality-score output into a structured result.
+///
+/// Expected model output (JSON):
+/// ```json
+/// { "scores": {"logic": 8.5, ...}, "total": 8.0, "grade": "B", ... }
+/// ```
+///
+/// Returns a JSON object with:
+/// - `status`: "ok" or "error"
+/// - `parsed`: true if the model output was successfully parsed
+/// - `score`: numeric score (f64) — only present if parsed
+/// - `max`: maximum possible score (10.0)
+/// - `dimensions`: array of {name, score, comment} — only present if parsed
+/// - `raw`: the original model output (always present)
+/// - `error`: error message if parsing failed or score out of bounds
+fn parse_quality_score(raw: &str) -> serde_json::Value {
+    // Strip markdown code fences if present (```json ... ```)
+    let trimmed = raw.trim();
+    let json_str = if trimmed.starts_with("```") {
+        let inner = trimmed
+            .strip_prefix("```json")
+            .or_else(|| trimmed.strip_prefix("```"))
+            .unwrap_or(trimmed);
+        inner
+            .rsplit_once("```")
+            .map(|(s, _)| s)
+            .unwrap_or(inner)
+            .trim()
+    } else {
+        trimmed
+    };
+
+    let parsed_json: serde_json::Value = match serde_json::from_str(json_str) {
+        Ok(v) => v,
+        Err(e) => {
+            // #100: parsing failed — must NOT wrap raw text as if it were a
+            // successful score.  Return parsed:false with the reason.
+            return json!({
+                "status": "ok",
+                "parsed": false,
+                "error": format!("Failed to parse model output as JSON: {e}"),
+                "raw": raw
+            });
+        }
+    };
+
+    // Check for error in model output
+    if let Some(err) = parsed_json["error"].as_str() {
+        return json!({
+            "status": "error",
+            "parsed": false,
+            "error": err,
+            "raw": raw
+        });
+    }
+
+    // Extract the total score as a number
+    let score = parsed_json["total"].as_f64();
+    let score = match score {
+        Some(s) => s,
+        None => {
+            // Try "score" field as fallback
+            match parsed_json["score"].as_f64() {
+                Some(s) => s,
+                None => {
+                    return json!({
+                        "status": "ok",
+                        "parsed": false,
+                        "error": "Model output does not contain a numeric 'total' or 'score' field",
+                        "raw": raw
+                    });
+                }
+            }
+        }
+    };
+
+    // #100: check for out-of-bounds score (expected range: 0-10)
+    const SCORE_MIN: f64 = 0.0;
+    const SCORE_MAX: f64 = 10.0;
+    let out_of_bounds = score < SCORE_MIN || score > SCORE_MAX;
+
+    // Build dimensions array from the scores object
+    let dimensions: Vec<serde_json::Value> =
+        if let Some(scores_obj) = parsed_json["scores"].as_object() {
+            scores_obj
+                .iter()
+                .map(|(name, val)| {
+                    let dim_score = val.as_f64().unwrap_or(0.0);
+                    json!({
+                        "name": name,
+                        "score": dim_score,
+                        "comment": ""
+                    })
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+    let mut result = json!({
+        "status": "ok",
+        "parsed": true,
+        "score": score,
+        "max": SCORE_MAX,
+        "dimensions": dimensions,
+        "raw": raw,
+        "grade": parsed_json["grade"].clone(),
+        "weaknesses": parsed_json["weaknesses"].clone(),
+        "suggestions": parsed_json["suggestions"].clone(),
+    });
+
+    if out_of_bounds {
+        result["out_of_bounds"] = json!(true);
+        result["warning"] = json!(format!("Score {} is outside expected range [0, 10]", score));
+    }
+
+    result
 }
 
 /// POST /api/ai/oa-claim-simulate — P3-T2: 权利要求修改模拟器

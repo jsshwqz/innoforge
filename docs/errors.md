@@ -1177,3 +1177,101 @@
 - **负控 / Negative control**: 指挥方本机实测——把 `ORDER BY` 退回裸 `filing_date DESC` ⇒ `issue85_two_token_hit_ranks_above_one_token_hit` 与 `issue85_cross_page_global_ordering` 双双 **FAILED**（`3 passed; 2 failed`，rc=101）；恢复后 5 passed、`cargo fmt --check` rc=0。
 - **预防 / Prevention**: ①新增"算了但没用"的派生字段（分数、计数）时，必须同时回答"它是否参与排序/分页"，否则文档不许按它承诺；②排序与过滤涉及同一列集合时必须共用常量定义，禁止两处各写一份字面量；③排序类改动的测试必须断言**返回顺序**与**跨页一致性**，不能只断言结果集成员。
 - **提交 / Commit**: 见 PR（分支 `r24/multi-token-ordering`，`refs #85`）。
+
+---
+
+## [2026-10-22] ㉒ 上传判型只信文件名：拿不到文件名时把 PDF 当文本，报"文件编码不支持"
+- **严重程度 / Severity**: HIGH（国知局导出件普遍是中文名，主路径直接失效；且报错文案把用户引向"改编码"这条死路）
+- **现象 / Symptom**: 同一份真实 PDF，用命令行手工构造的 multipart 以 `filename="…pdf"` 上传一直成功，但**只发 `filename*=UTF-8''<百分号编码>`（不带 `filename=`）**或**完全不带文件名**时，`/api/upload/extract` 在 70ms 左右直接返回 `{"error":"文件编码不支持"}`，根本没进 PDF 解析。改名成 ASCII 就正常，因此最初被误记为"中文文件名导致失败"。
+- **根因 / Root cause**: 判型链路是 `field.file_name()` → 取不到时回落 `"unknown.txt"` → 取最后一个 `.` 后的扩展名决定分支。扩展名一旦不可信（文件名为空、只有 RFC 5987 的 `filename*`、或名字被截断），二进制内容就被送进文本分支，UTF-8 与 GBK 双败后抛出"编码不支持"——**报错说的是编码，真正坏的是判型**。部分客户端对非 ASCII 文件名只发 `filename*` 不发 `filename`，于是中文名成为高频诱因，但不是根因。
+- **修复 / Fix**: 新增 `has_docx_header` / `detect_type_by_magic`，`/api/upload/compare` 与 `/api/upload/extract` **两个**入口都先按内容魔数判型（`%PDF-` → pdf、`PK\x03\x04` → docx），魔数命中即覆盖扩展名，未命中才回退扩展名；文本分支的失败文案改为与真实原因一致的「无法识别文件类型，请上传 PDF、DOCX、TXT 或图片文件」。
+- **回归 / Regression**: `tests/issue_97_nonascii_filename.rs` 3 用例——随机二进制伪装 `.txt` 必须报"无法识别文件类型"、PDF 魔数伪装 `.txt` 不得报编码错、中文名/含空格/ASCII 三种文件名结果必须一致。
+- **负控 / Negative control**: 指挥方本机实测两组。①门禁可证伪：`git checkout` 退回 `src/routes/upload.rs` ⇒ 2 条 **FAILED**（`#97 neg-B: file_type must be 'pdf' (magic byte detection), got: txt`），恢复后 3 passed。②修复真作用于故障形态：同一份 PDF 打五种 `Content-Disposition` 写法，修复前「仅 filename\*」与「无 filename」两种返回 `文件编码不支持`（72ms / 78ms），修复后五种全部 `file_type=pdf`、解出同一字符数。**注意**：`issue_97_nonascii_filename_pdf_not_rejected_as_encoding` 这条以 issue 命名的用例在退回基线后**仍然通过**（它发的是带 `.pdf` 的裸 UTF-8 名，本就不会失败），故它只是"三形态一致性"守卫，不是故障复现——故障复现由指挥方的五种写法矩阵承担。
+- **预防 / Prevention**: ①凡以文件名为输入的分支，都要问"文件名取不到时怎么办"，内容魔数优先于扩展名；②报错文案必须指向**实际失败的那一步**，否则用户会按文案去做无效操作；③以 issue 命名的回归用例必须做"退回基线是否变红"的可证伪检查，红了才算复现了故障；④浏览器路径的 multipart 形态（`filename*` 与 `filename` 的有无组合）要有覆盖，不能只用一个顺手命名的测试文件复现。
+- **提交 / Commit**: 见 PR（分支 `r25/backend-truthfulness`，`refs #97`）。
+
+---
+
+## [2026-10-22] ㉓ `/api/ai/models` 探测失败仍报 `status:"ok"`，且从不探用户真正配置的 provider
+- **严重程度 / Severity**: HIGH（设置页据此判断"AI 是否可用"，假绿灯直接吞掉配置错误）
+- **现象 / Symptom**: 后端连不上或返回 401 时，接口返回 `{"status":"ok", …, "count":0}`；不带 `provider` 的多服务商模式只探硬编码的内置服务商列表，`AI_BASE_URL` 配的是另一个地址也完全不探。用户看到"ok + 0 个模型"，无法区分"这个服务商没有模型"和"根本没连上"。
+- **根因 / Root cause**: `make_task` 在三处失败点（连接错误、非 2xx、读 body 失败）统一 `return None`，原因串就地丢弃；调用侧把 `Ok(Ok(None))` 和超时都写成顶层 `"status": "ok"`，只把 provider 内层标成 error。多服务商模式的 provider 集合来自常量列表，从未与运行时配置求并。
+- **修复 / Fix**: `make_task` 失败时返回结构化对象（`status:"error"` + `error` 原因），连接失败给 `Connection failed: …`，401/403 归一为 `Authentication failed (invalid API key)`，其它给 `HTTP <code>`；顶层 `status` 改为**必须真拿到至少一个模型**才是 `ok`，否则 `error`，并把内层 `error` 提升到条目上；多服务商模式先探配置的 `AI_BASE_URL`/对应 key，再探内置列表。`docs/API.md` 新增该端点响应约定。
+- **回归 / Regression**: `tests/issue_98_models_probe.rs` 3 用例——配置态 provider 被探到且顶层 `ok`、后端不可达时顶层不得为 `ok`、401 必须报鉴权错误。
+- **负控 / Negative control**: 指挥方本机实测——退回 `src/routes/idea.rs` 基线 ⇒ 3 条**全部 FAILED**（`0 passed; 3 failed`）；恢复后 3 passed。桩服务用本机 Python 起，需临时提供 `python3` 可执行名（见「预防」③）。
+- **预防 / Prevention**: ①"计数为 0"永远不能同时是"成功"——聚合接口的顶层状态必须由**证据量**推导，不能由"流程跑完了"推导；②任何 `return None` 的错误分支都在丢诊断信息，探测类接口要把原因带到响应里；③测试桩依赖外部解释器时要显式声明依赖并保证跨平台（写死 `python3` 在 Windows 上直接 `program not found`，仓库已有 `tests/helpers/fake_ai_stub.rs` 的进程内桩可复用），且读 UTF-8 文本必须 `open(..., encoding='utf-8')`，否则在非 UTF-8 默认编码的机器上 `open()` 抛错、连接被掐断；④配置态与内置态要各自有断言，不能只测其一。
+- **提交 / Commit**: 见 PR（分支 `r25/backend-truthfulness`，`refs #98`）。
+
+---
+
+## [2026-10-22] ㉔ 未知 `oa_type` 静默按 4 个月兜底：期限算晚、且期限表与推算各写一份字面量
+- **严重程度 / Severity**: HIGH（期限类产品的最坏失败方向是"把届满日算晚"，用户会据此错过法定期限）
+- **现象 / Symptom**: `compute-deadline?oa_type=<拼写错误>` 返回 `status:"ok"`、按 4 个月给出一个看似合法的届满日，响应里没有任何"该类型不被识别"的痕迹；`/api/oa/deadline-table` 的表是手写的第二份字面量，与 `deadline_spec()` 无绑定，改一处不会同步另一处。
+- **根因 / Root cause**: `deadline_spec` 的 `_ =>` 分支取的是**所有合法值里最长**的 4 个月，理由是"保守"——但对期限而言保守应当是取短；兜底与合法值在响应结构上完全同形，调用方无从分辨；表与算法分写两份，缺单一事实源。
+- **修复 / Fix**: 引入 `VALID_OA_TYPES` 常量作为唯一判据，`deadline_spec` 的兜底改为**最短合法期限 2 个月**；`DeadlineResult` 增加 `recognized: bool` 与 `warning: Option<String>`，未知类型必须带告警；`deadline_table()` 改为遍历 `VALID_OA_TYPES` 逐条调用 `deadline_spec()` 生成，并额外返回 `valid_types`，表与算法不可能再分叉。`docs/API.md` 明确"未知类型不得当合法期限用"。
+- **回归 / Regression**: `tests/issue_99_deadline_unknown_type.rs` 4 用例——七个已知类型的期限逐一正确、未知类型必须 `recognized:false` 且带 warning、兜底必须是 2 个月、期限表必须与 `valid_types` 同步。
+- **负控 / Negative control**: 指挥方本机实测——退回 `src/oa_deadline.rs` 基线 ⇒ 4 条**全部 FAILED**（`0 passed; 4 failed`）；恢复后 4 passed。
+- **预防 / Prevention**: ①任何"未知输入兜底一个默认值"都必须同时返回**兜底标记**，兜底值与合法值不得同形；②保守方向的定义要跟着业务语义走：期限/预算类取短、可用性判断类取悲观，不能一律"取最大"；③同一份事实（枚举 + 其数值）只允许一个来源，展示用的表必须由算法生成，禁止手写第二份；④错误串里插值用 `{e}` 而不是 `{e:?}`，日志不得把用户可控输入按 Debug 形态展开（同 #69）。
+- **提交 / Commit**: 见 PR（分支 `r25/backend-truthfulness`，`refs #99`）。
+
+---
+
+## [2026-10-22] ㉕ `/api/ai/oa-quality-score` 把未解析的模型原文塞进 `score.raw` 冒充评分成功
+- **严重程度 / Severity**: MEDIUM-HIGH（评分是答复策略的输入，假成功会让前端显示一个不存在的分数）
+- **现象 / Symptom**: 模型输出散文（不是 JSON）时，接口返回 `{"status":"ok","score":{"raw":"<整段原文>"}}`；输出 87 这种越界总分时照单全收；前端拿不到数值分数，也看不到失败信号。
+- **根因 / Root cause**: 处理链只有一句 `serde_json::from_str(&result).unwrap_or_else(|_| json!({"raw": result}))`——解析失败被当作"另一种成功"包装，`score` 字段类型从数值退化成对象也没人管；模型调用失败时 `unwrap_or_else` 造的是 `{"error": "…"}` 字符串文本，反而更容易落进上面那个假成功分支。
+- **修复 / Fix**: 新增 `parse_quality_score`：剥 markdown 代码围栏后严格解析；失败返回 `parsed:false` + `error` + 保留 `raw`，且**不产出 `score` 数值**；成功返回 `score`(f64)/`max=10`/`dimensions:[{name,score,comment}]`/`grade`/`weaknesses`/`suggestions`/`raw`；分数落出 `[0,10]` 时保留数值但标记 `out_of_bounds:true` 并给 `warning`；`status` 在模型自身报错时为 `error`。`docs/API.md` 逐字段成表并写明旧形态已废除。
+- **回归 / Regression**: `tests/issue_100_quality_score_parsing.rs` 3 用例——合法输出解析成数值与六个维度、纯散文必须 `parsed:false` 且不得伪造数值/不得再用 `score.raw`、87 分必须标记越界。
+- **负控 / Negative control**: 指挥方本机实测两组。①独立复验不依赖 GLM 的桩：自写 node 桩（UTF-8 正确）打真实端点，退回 `src/routes/ai.rs` 基线 ⇒ 三模式**全部 FAIL**，实际响应 `score=[object Object]`（正是旧假成功形态）；恢复后三模式 PASS（`parsed=true score=8 max=10 dims=6` / `parsed=false + error + raw` / `score=87 out_of_bounds=true`）。②GLM 自带用例在本机 `2 passed; 1 failed`，失败原因在**测试件本身**：桩脚本 `open(content_path, 'r')` 未指定编码，在 Windows 默认 cp936 下读含中文的期望输出抛 `UnicodeDecodeError`、连接被掐断，产品逻辑无关（同条用例在 Linux 与指挥方 node 桩下均通过）。
+- **预防 / Prevention**: ①解析外部模型输出的接口，失败路径必须产出**结构可辨**的失败（独立布尔位 + 原因），不得复用成功字段承载原文；②响应字段要有类型契约，同一字段不得在数值/对象间漂移；③数值要带量程与越界标记，越界不等于失败但要可见；④测试桩读写文本一律显式 `encoding='utf-8'`；⑤指挥方的复验桩要用不同实现（node vs python），避免与产物共享同一缺陷假设。
+- **提交 / Commit**: 见 PR（分支 `r25/backend-truthfulness`，`refs #100`）。
+
+---
+
+## [2026-10-22] ㉖ 改响应契约的两类次生伤害：去重判断互相甩锅、后端变诚实前端退化
+- **严重程度 / Severity**: HIGH（两条都是"修复正确方向、代价是主路径退化"，且都不是新功能的 bug，而是改契约时的连带破坏）
+- **现象 / Symptom**: ①#98 把 `/api/ai/models` 的顶层假绿改掉后，**首启默认形态**（`AI_BASE_URL` 就是 `http://localhost:11434/v1`）返回 `{"status":"error","providers":[],"count":0}`——Ollama 条目整个消失；CI 的 `tests/issue_68_fake_green.rs` 在 `:70` 变红。本机对照：基线是 `status:"ok"` + `providers:[Ollama]`（假绿，本就该修），修复后假绿没了、条目也没了。②#100 把 `oa-quality-score` 的 `score` 从对象改成数值 `8.0`，而 `templates/office_action_response.html` 两处仍按 `var score = data.score || data;` 读 `score.total / scores / grade / weaknesses / suggestions / not_applicable / raw` ⇒ 总分格显示 `undefined`、六维雷达图与薄弱点/建议整块不渲染。
+- **根因 / Root cause**: ①多服务商分支里两个去重判断各自以为对方会补上：Custom 条目被 `if !cfg_base_url.is_empty() && !cfg_is_ollama` 挡掉（配置的就是 Ollama），内置 Ollama 行又被 `if base_url.to_lowercase() == cfg_lower { continue; }`（理由写在注释里："already added above as Custom"）挡掉——**两个条件的成立集合在"配置==Ollama"这一点上重叠，于是谁都不加**。②改后端形状时只验证了"响应更诚实"，没有验证"消费方还能读到"；且**仓库里没有任何测试覆盖这个前后端契约**，所以 CI 全绿也照不出。同一条链上还有测试件问题：`//!` 文档注释列表续行缩进 6 空格触发 `doc_overindented_list_items`，而 GLM 自称"clippy 零警告"是因为命令没带 `--all-targets`——不带它根本不检查测试文件。
+- **修复 / Fix**: 本条**不在本 PR 修**（跟踪 #107 / #106）。要求的方向：①去重落到单一判据——先按归一化 URL 构造待探集合，配置 provider 与内置 provider 命中同一 URL 时合并成一条、`name` 取内置名并加 `configured: true`，且任何情况下 `providers` 不得为空；②后端要么恢复 `score` 为对象、把新增信息以并列新字段暴露（`parsed/max/dimensions/out_of_bounds/warning/raw`），要么同步改模板两处消费点，并在 `parsed=false` 时显示明确失败文案而非 `undefined`。
+- **回归 / Regression**: 要求的**契约测试**不是"响应里有某键"，而是从模板源码静态抽出 `score.<key>` 的键集合，逐个断言响应对象上存在（键清单由代码产生，不由人写死）；`providers` 侧要求 #68 与 #98 两条断言在**同一个响应**上同时成立才算修好。
+- **负控 / Negative control**: 指挥方本机实测——①`AI_BASE_URL=http://localhost:11434/v1` 打真实端点：基线 1 条 `Ollama`、修复后 **0 条**（`providers: []`）；换非 Ollama 地址则两条都在，证明只在首启默认这一支必现。②`issue_68_fake_green` 在本机同代码 `2 passed; 1 failed`，与 CI 同一失败点，非环境问题。③clippy：本机复现 `error: doc list item overindented --> tests\issue_98_models_probe.rs:12:5`，改缩进后待复跑确认。
+- **预防 / Prevention**: ①**改任何对外响应形状，必须同时给出消费方仍成立的证据**——模板/前端在读哪些键要有可执行的契约测试，不能靠人工比对；②两个以上"去重/跳过"条件叠加时，必须写出它们的不相交论证，否则默认会漏在交集点上；③"某列表为空"本身就是需要断言的状态，探测类接口的验收不能只看顶层标志位；④报"lint 干净"必须附**完整命令**与退出码，`cargo clippy` 不带 `--all-targets` 等于没测测试件；⑤修复"假绿灯"时，新状态要保证**信息量不减**：状态更严格不等于条目更少。
+- **提交 / Commit**: 指挥方记录（本 PR 仅含 clippy 缩进的纯空白修正）；产品侧修复见 `refs #107`、`refs #106`。
+
+---
+
+## [2026-10-22] ㉗ 假绿拦截实录两则：随机字节能被 GBK 解成"合法文本"、桩进程崩溃会伪装成产品断言失败
+- **严重程度 / Severity**: HIGH（两条都不是产品缺陷，而是**测试与验收手段自身会产出假结论**；不写下来，下一轮还会用它当证据）
+- **出处 / Attribution**: 第一则是**云端 GLM 自查自纠**（记录在 `glm97.log`），第二则是**指挥方本机复验时拦下**。两则都发生在 R25（#97/#98/#100）这一批，逐条如实记名，不合并成"我们发现"。
+- **现象 / Symptom**:
+  - ①`issue_97` 的负控用例原本用"随机字节写成 `.txt`"来断言必须报「无法识别文件类型」。GLM 实跑发现**随机二进制经常能被 GBK 成功解码**（`had_errors=false`），于是内容被当作合法文本抽出——断言在**修复前后都可能通过或随机失败**，是一条会产假结论的门禁。GLM 自行改成"必须是 GBK 也解不出的非法字节序列"后才得到稳定红→绿。
+  - ②同一批里 `issue_98` / `issue_100` 的桩用 `Command::new("python3")` 起外部进程：Windows 上直接 `program not found`；即使补上解释器，桩脚本 `open(content_path, 'r')` 未指定编码，在默认 **cp936** 的机器上读含非 ASCII 的期望输出抛 `UnicodeDecodeError`、连接被掐断，被测程序收到的是 `AI call failed: … connection closed before message completed`——**看起来像 #100 没修好，实际是测试件自己死了**。而 CI 全在 `ubuntu-latest`（有 `python3`、默认 UTF-8），这两条在 CI 恒绿，把缺陷完全掩盖。
+- **根因 / Root cause**: ①"非法文本"的判据不能靠随机性——GBK 是**极宽松**的编码，任意字节序列大概率是合法 GBK；判据必须是"该编码明确解不出的字节组合"。②测试把**被测系统的失败**和**测试基础设施的失败**混在同一断言通道里，且桩是外部进程、没有 ready 判定：桩死掉时没有任何一条断言专门说"桩没起来"，于是它的死以产品失败的形式出现；再叠加"门禁只在 Linux 跑"这一环境不对称，缺陷只在非 CI 平台暴露。
+- **修复 / Fix**: ①夹具层面：GBK 用例改用确定性的非法字节序列，并由指挥方复核该序列在 UTF-8/GBK 下**都**解不出。②已开 **#105** 要求桩改**进程内**（复用 `tests/helpers/fake_ai_stub.rs`），且必须有 ready 判定（超时 ⇒ `stub did not start`）、所有文本 IO 显式 `encoding='utf-8'`；#106 的新契约测试也强制走进程内桩。指挥方本轮为复验临时造了 `python3.exe` 垫片，**未进仓库**。
+- **负控 / Negative control**: ①把 #97 那条 GBK 用例的夹具退回"随机字节"⇒ 结论不稳定（同一命令两次跑出不同结果），据此可证该判据无效；换成固定非法序列后红→绿可复现。②把 `src/routes/ai.rs` 退回基线 ⇒ 指挥方**自写的 node 桩**（显式 UTF-8）三模式全 FAIL 且响应是旧形态 `score=[object Object]`；同一时刻 GLM 的 python 桩用例仍报"连接被关闭"——两者结论不同，正说明**必须由不复用同一实现的第二根桩交叉验证**。
+- **预防 / Prevention**: ①"非法编码/非法输入"类夹具必须是**确定性**构造，禁止用随机字节充当反例；②测试基础设施的失败要与产品失败分通道：起外部进程就要有 ready 判定与"桩侧原因"专属断言，否则它的死会冒充产品 bug；③**门禁只跑在一个平台上，等于该平台的假设被写进了产品**——涉及编码、路径、解释器名的测试必须在 Windows 与 Linux 双跑，或改为不依赖这些差异的进程内实现；④验收者要用**不同实现**的桩/夹具交叉复验，不能拿产物自己的桩自证；⑤汇报归属要如实区分"GLM 自查"与"指挥方拦截"，混成一队会掩盖真实缺口。
+- **提交 / Commit**: 指挥方记录（本条仅文档，无代码改动）。关联 `refs #97`、`refs #105`、`refs #106`、`refs #107`。
+
+---
+
+## [2026-10-22] ㉘ 修假绿灯时把列表判空当"无内容"：两条互不相让的去重条件留出真空区间
+- **严重程度 / Severity**: HIGH（首启默认形态是**每个新用户必经**的路径；列表判空后前端与设置页再也看不到"本地 Ollama 通不通"）
+- **现象 / Symptom**: #98 把顶层假绿改掉之后，`AI_BASE_URL=http://localhost:11434/v1`（首启默认）下 `GET /api/ai/models` 返回 `{"status":"error","providers":[],"count":0}`；基线 `42027cc` 同一输入是 `status:"ok"` + `providers:[Ollama]`。CI 与本机同代码复现同一失败点：`tests/issue_68_fake_green.rs::first_run_must_not_show_fake_green` 在 `:70` 断言"providers 里必须有 Ollama"变红。
+- **根因 / Root cause**: 待探集合由**两条各自成立、合起来互相甩锅**的跳过条件决定——Custom 条目被 `if !cfg_base_url.is_empty() && !cfg_is_ollama` 挡掉（配置的就是 Ollama），内置 Ollama 行又被 `if base_url.to_lowercase() == cfg_lower { continue; }`（注释理由是"上面已作为 Custom 加过"）挡掉。两个条件的**不成立集合没有并集覆盖"配置即内置"这一点**，于是该点成为谁都不加的真空区间。测试集当时恰好绕开这个输入（#98 的三条用例用的是桩地址与"不可达"地址），所以自家测试全绿而真实主路径坏。
+- **修复 / Fix**: 去重改为**单一判据**：URL 归一化（小写 + 去尾部 `/`）后比较，配置 provider 与内置 provider 命中同一 URL 时**合并成一条**，`name` 取内置名、并带 `"configured": true`；只有配置地址不匹配任何内置项时才加 `Custom`。硬约束：`providers` 在任何输入下不得为空数组。实现由云端 GLM 完成（commit `91e0f55`，容器回收后 sha 不可取回，**内容经 `p107.patch` 快照在本机重放**），指挥方逐行核对并本机复验。
+- **回归 / Regression**: 新增 `tests/issue_107_models_first_run.rs` 3 用例——`first_run_ollama_not_empty`（默认形态：providers 非空、含 Ollama 且 `status!="ok"`、`configured==true`、顶层 `error`）、`configured_stub_provider_ok`（配置 provider 探到 1 个模型 ⇒ 顶层 `ok`、`count>=1`）、`issue_68_and_98_assertions_hold_simultaneously`（**#68 与 #98 的断言必须同一响应同时成立**，这正是原测试集缺的交叉点）。桩是**进程内 `TcpListener` + 线程 + ready 判定**（`stub did not start`），不再依赖外部解释器。
+- **负控 / Negative control**: 指挥方本机实测三组。①可证伪：退回 `src/routes/idea.rs` 基线 ⇒ `first_run_ollama_not_empty` 与 `issue_68_and_98_assertions_hold_simultaneously` **FAILED**（`1 passed; 2 failed`，报 `providers must not be empty on first run`），`configured_stub_provider_ok` 仍过（该路径本来就没坏）——红得具体、不牵连。②修复态：`issue_107` 3 passed、`issue_68` 3 passed、`issue_98` 3 passed，`cargo fmt --check` rc=0，`cargo clippy --all-targets -- -D warnings` rc=0。③**顺带抓到一次与产品无关的假红**：三个测试 binary 合跑时 `issue_98` 有 2 条 FAILED，单独跑与复跑合跑均 3/3 绿；指挥方用自写 node 桩独立打真实端点，结果为 `Custom:ok / total=1`、401 时 `Custom=>Authentication failed (invalid API key)` ⇒ 判定是 `free_port()` 与外部 Python 桩的**端口竞态**，即 #105 那一类"基础设施失败冒充产品失败"，且**不只在 Windows 出现**。
+- **预防 / Prevention**: ①多条"跳过/去重"条件叠加时必须论证它们的不成立集合**覆盖全部输入**，否则默认在交集处漏；把"列表不得为空"写成显式断言而不是靠逻辑显然。②改判据（假绿→真红）时，验收要包含**与原判据保护对象的交叉用例**——本例即 #68 与 #98 同响应同时成立；只测自家新语义、不测被保护的老语义，就会把 A 修好 B 弄坏。③测试桩要么进程内、要么带 ready 与归属校验；`free_port()` 分到的端口在并发线程间可能被重复使用，桩侧失败必须显式报 `stub did not start` 而不是让产品断言背锅（#105 范围据此扩大到 Linux）。④容器回收会带走 commit sha：**每完成一件就落 `.patch`+`.b64` 双通道**，指挥方从 patch 重放即可恢复内容，本轮 #107 就是这样从唯一副本救回的。
+- **提交 / Commit**: 见 PR（分支 `r25/backend-truthfulness`，`refs #107`）。
+
+---
+
+## [2026-10-22] ㉙ "失败要可见"的 guard 写成了"有 error 就弹走"，把新加的失败 UI 变成死代码
+- **严重程度 / Severity**: HIGH（不是崩，而是**用户永远看不到为失败准备的界面**，且看到的是后端诊断串直出——比原来更难看）
+- **现象 / Symptom**: #106 把后端改成返回 `{parsed:false, error:"…", raw}`，并在模板里加了接 i18n 键 `oa.quality.parseFailed` 的双语失败渲染块。但真实失败响应进来时，用户看到的是 `alert("Failed to parse model output as JSON: expected value at line 1 column 1")` 加空白正文，那段双语文案一次都没执行。
+- **根因 / Root cause**: 同一函数里两条规则顺序倒了 —— 前置 guard `if (data.error && data.parsed !== true) { alert(data.error); return; }` 写在失败渲染块之前，而**新契约下"解析失败"必然同时带 `parsed:false` 和非空 `error`**，于是 guard 恒真、先 return。guard 的语义还停留在旧世界（"有 error = 传输层失败"），没跟着契约一起更新；同一个函数有两处，改的时候只保证"能读到新字段"，没验证"失败路径可达"。
+- **修复 / Fix**: 两处（`:1348`、`:1586`）同改——先判 `parsed===false` 渲染失败 UI 并 return，其后再 `else if (data.error)` 处理真正的传输/后端层失败；顺带修掉同函数里一处遗漏的 `div.innerHTML = html;`（第一个渲染块算好了 html 却没写进 DOM，成功路径同样显示不出来）。响应契约零改动。代码由云端 GLM 完成（commit `3d65023`→`d79ff5f`，产物 `p106c.patch` 169529B 与 `.b64` 逐字节 IDENTICAL）。
+- **回归 / Regression**: `tests/dom_render_106.mjs`（node 抽取模板渲染逻辑 + 浏览器全局 mock，喂**真实失败响应**，断言 HTML 里出现中英双语 `parseFailed` 文案、无 `undefined`/`NaN`/`0/10`、且 `alert` 未被调用；成功路径断言总分数值、`/10`、六维名、等级）+ `tests/dom_render_106.rs`（Rust 壳调用它并把非零退出转成测试失败）。云端专项 38 passed；HTML 函数完整性扫描 8 模板通过；容器内全量 `cargo test` **926 passed / 0 failed / 32 ignored**，fmt 与 `clippy --all-targets` rc=0。
+- **负控 / Negative control**: 指挥方本机独立跑两组，不是引用自报。①模板退回修复前 ⇒ **FAILED**，逐条指名：`missing zh/en parseFailed "评分解析失败，无法提取数值评分"`、`alert called 1x: Failed to parse model output as JSON: expected value at line 1 column 1`、`regression: alert called on parsed=false path`（两个渲染块 B1/B2 同时红）。②把 i18n 键改成 `oa.quality.parseFaild` ⇒ **FAILED**（证明断言锚在文案上而非恒真）。恢复后 1 passed。本机 `fmt --all` / `clippy --all-targets -- -D warnings` rc=0。
+- **预防 / Prevention**: ①**新增失败分支时必须同时证明它可达**——可达性要有断言，光"代码写在文件里"不算实现；②改动返回契约时，所有以 `error` 为信号的旧 guard 都要重新审一遍语义（"有 error"≠"传输失败"），一处改一处留是同类缺陷；③测渲染就测渲染，**禁止喂 `error:""` 之类特例绕开 guard 让分支变可达**（上一轮就是这么"通过"的，属掩盖）；④断言文案而不是断言"有内容"：把 i18n 键改错必须让测试红，否则这条测试是恒真的；⑤同一函数里"计算 html"与"写入 DOM"成对出现，改一处要检查另一处。
+- **提交 / Commit**: 见 PR（分支 `r25/backend-truthfulness`，`refs #106`、`refs #111`）。

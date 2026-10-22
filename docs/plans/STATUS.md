@@ -808,3 +808,60 @@
 - **发版方式 / Release mechanics**: tag push 触发 `.github/workflows/release.yml`——validate 校验 tag/Cargo 版本/CHANGELOG 三者一致并跑隐私守卫，build 出四平台包，release 用 CHANGELOG 该段做正文、断言资产名逐字齐全后发布
 - **文档覆盖 / Doc coverage**: 115/145（约 79%），剩余 30 条仍由 issue #62 跟踪
 - **门禁说明 / Gate note**: 本 PR 未改 `src/*`、`templates/*`、`tests/*`、`.github/*`，按 Doc Staleness 规则属"无代码变更"跳过，故不新增 `docs/errors.md` 条目（不硬造复盘）
+
+## 2026-10-22 · R25 后端真实性批次 #97 / #98 / #99 / #100（分支 `r25/backend-truthfulness`，基线 `42027cc` = v0.9.18）
+- **来源**: A 组端到端实测（v0.9.18 官方 Windows 资产 + 本地桩后端）发现的四个后端缺陷，全部按 issue 通用化后派单给云端 GLM-5.2 实现
+- **范围**:
+  - #97 上传判型只信文件名 → `/api/upload/compare`、`/api/upload/extract` 改为**内容魔数优先**（`%PDF-` / `PK\x03\x04`），失败文案改指真实原因
+  - #98 `/api/ai/models` 假绿灯 → 探测失败带原因、顶层 `status` 必须由"真拿到模型"推导、多服务商模式先探配置的 `AI_BASE_URL`
+  - #99 未知 `oa_type` 静默按 4 个月 → `VALID_OA_TYPES` 单一事实源、兜底改最短 2 个月、响应加 `recognized` / `warning`、期限表由算法生成
+  - #100 `/api/ai/oa-quality-score` 把未解析原文塞 `score.raw` 冒充成功 → `parse_quality_score` 输出 `{parsed, score, max, dimensions, raw}`，越界标记 `out_of_bounds`
+- **文档**: `docs/API.md` 更新上述四个端点的响应契约（含新增 `/api/ai/models` 章节）；`docs/errors.md` 追加条目 ㉒–㉕
+- **附带修正**: `Cargo.lock` 里 `innoforge` 版本仍停在 `0.9.17`（v0.9.18 发布时漏同步），本 PR 一并同步为 `0.9.18`，否则任何源码构建都会把工作树弄脏
+- **验收 / Acceptance**（指挥方本机 @ `42027cc` 实测，Windows）:
+  - `cargo fmt --check` rc=0 ✅
+  - `cargo test --test issue_97_nonascii_filename` 3 passed；`--test issue_98_models_probe` 3 passed；`--test issue_99_deadline_unknown_type` 4 passed ✅
+  - #100 独立复验（指挥方自写 node 桩，绕开 GLM 测试件的 Python/cp936 依赖）：修复后三模式 PASS（`score=8 max=10 dims=6` / `parsed=false` 且无伪分数 / `score=87 → out_of_bounds`）✅
+  - 负控（退回基线必须变红）：`upload.rs` ⇒ 2 FAILED；`idea.rs` ⇒ 3 FAILED；`oa_deadline.rs` ⇒ 4 FAILED；`ai.rs` ⇒ 独立复验 3 FAILED（旧形态 `score=[object Object]`）✅
+  - 隐私：`cargo test --test no_case_data_in_repo` 13 passed；`tests/no_case_data_in_repo.rs` 未被改动、未新增 allowlist 项；指挥方另以本地 47 条敏感串（案号/申请号/公开号/人名/机构名/标题）独立扫描 8 个待推送文件与 PR 正文，命中 0 ✅
+- **未收口 / Open**:
+  - `tests/issue_98_models_probe.rs` 与 `tests/issue_100_quality_score_parsing.rs` 写死 `python3` 且 `open()` 未指定编码，Windows 本机分别 `program not found` / `UnicodeDecodeError`（Linux CI 不受影响）→ 另开 issue 跟踪
+  - `issue_97_nonascii_filename_pdf_not_rejected_as_encoding` 退回基线仍通过，属"三形态一致性"守卫而非故障复现；真正的复现形态（仅 `filename*`、无 `filename`）目前只由指挥方矩阵覆盖 → 同一 issue 内要求补测试
+  - **CI 两项红灯（本 PR 保持 draft，不合并）**：
+    - Clippy：`tests/issue_98_models_probe.rs:12` 文档注释列表续行缩进 6 空格触发 `doc_overindented_list_items`。GLM 自称"clippy 零警告"是因为没带 `--all-targets`——不带该标志根本不检查测试文件。指挥方已就地改缩进（**纯空白，未动逻辑**），并在任务书里把"提交前必须 `cargo clippy --all-targets -- -D warnings`"写死。
+    - Tests：`tests/issue_68_fake_green.rs::first_run_must_not_show_fake_green` 在 `:70` 变红。根因是 #98 的实现让**首启默认形态**（`AI_BASE_URL` 就是 Ollama）的 `providers` 变成空数组：Custom 分支被 `!cfg_is_ollama` 挡掉，内置 Ollama 行又被"与配置 URL 相同、上面已加过"的 `continue` 挡掉，两个去重判断互相以为对方会补。本机对照：基线 `status:"ok"` + `providers:[Ollama]`（假绿，本就该修）→ 修复后 `status:"error"` + `providers:[]`（假绿没了，条目也没了）。已开 **#107**，并在 #98 上补验收判据：零模型可以为 `error`，但 `providers` 不得为空。
+  - **#106（新发现的产品回归）**：#100 把 `score` 从对象改成数值，而 `templates/office_action_response.html` 两处仍按 `data.score || data` 读 `score.total / scores / grade / weaknesses / suggestions / not_applicable / raw` ⇒ 总分显示 `undefined`、雷达图与薄弱点整块消失。后端变诚实、前端退化，且**没有任何测试覆盖这个契约**。已要求补一条"从模板静态抽出 `score.<key>` 键集、逐项断言响应存在"的契约测试（双向负控）。
+- **R26 任务书**: `D:\huawei-devspace\seed\r26_task_brief_v2_2026-10-22.md`（**已按 DS 2026-10-22 10:50 裁定改写**）
+- **DS 裁定 · #106 选 B 不选 A**: 理由是 A 只把 `score` 恢复成旧对象，`parsed=false` 时旧模板仍显示 `undefined`/空分，等于没修 #100 的失败路径；B 才把"分数是数值、维度与失败原因并列"的契约立起来。验收要求：模板两处全改读新形状、`parsed=false` 走中英双语失败文案（`static/i18n.js` 各补一键，禁止 `undefined`/`NaN`/`0/10` 冒充）、契约测试**从模板源码静态抽出**所读键集合（键清单由代码产生，不许人写死）并双负控、headless E2E 断言成功/失败两条路径的真实 DOM 文本（只做了 headless 就如实写明，不许谎报可见实测）、`docs/API.md` 同步、`fmt` 与 `clippy --all-targets` 的退出码进正文
+- **DS 裁定 · 分支归属**: #107、#106(B)、#105、#97 两条真实形态**全部并入本分支 `r25/backend-truthfulness`**（不另开分支），四件全绿后一并交 DS 复核；在此之前 #104 保持 draft
+- **全量枚举 / Failure enumeration**（本机 `cargo test --no-fail-fast`，41 个测试块跑完，rc=101）：**4 条失败，逐条定性**
+  | 失败用例 | 定性 | 依据 |
+  |---|---|---|
+  | `issue_68_fake_green::first_run_must_not_show_fake_green` | **阻塞**，本 PR 引入 | 即 #107；根因是两个去重条件在"配置即 Ollama"上取交集 |
+  | `issue_100_valid_output_parsed_to_numeric_score` | **非阻塞**（测试件，Windows 专属） | 即 #105：桩 `open()` 未指定编码，cp936 下抛 `UnicodeDecodeError` 掐断连接，伪装成产品失败 |
+  | `db_path_resolution::platform_data_dir_used_when_no_env_vars` | **非阻塞**（既有平台相关测试件缺陷） | 断言把 Linux 的 `$HOME/.local/share` 当成"平台数据目录"的通用期望值；Windows 上 `dirs::data_dir()` 返回 `AppData\Roaming` 且不认 `HOME` ⇒ 与 #104 无关，已开 **#108** |
+  | `issue_17_synthetic_fixtures::patent_detail_page_has_22_plus_buttons` | **非阻塞**（脆弱断言，且本次由指挥方自己触发） | 断言"编译期烤进的 git commit == 运行时 `git rev-parse HEAD`"；我在全量跑的过程中提交并推送了一笔 docs，HEAD 前移 ⇒ 旧二进制必红。已开 **#109**，并在此如实记明**这次红是我操作造成的，不是产品问题** |
+  - 结论：**阻塞项只有 #107 一条**，已补进 R26；#108/#109 只留档不并入，避免静默扩大范围
+  - 方法论收获：CI 跑的是裸 `cargo test`，**遇第一个失败 binary 即停**，所以"Tests 红 = 只有 #107"必须靠 `--no-fail-fast` 全量枚举来证，不能拿 CI 的单一红当结论
+
+## 2026-10-22 · R26 轮次结果（#107 已落地；#106/#105/#97 未落地，原因如实记录）
+- **落地**: #107（首启默认形态 `providers` 空数组）——commit `37e3cce`（代码+新测试）与 `9ff7f48`（errors.md ㉘）
+- **来源与交接**: 云端 GLM 在容器 `9858b839` 完成 #107 并 commit `91e0f55`；容器按点回收后该 sha 不可取回，**内容从 T-30 快照 `p107.patch`（102645B，13 个 `diff --git` 块）在本机重放**。逐文件与本机 HEAD 比对后确认云端独有增量只有 `src/routes/idea.rs` 与新增 `tests/issue_107_models_first_run.rs`，其余 11 块（含 `Cargo.lock`，差异仅为行尾）与本机一致 ⇒ 无夹带改动
+- **本机验收**: `cargo fmt --all --check` rc=0；`cargo clippy --all-targets -- -D warnings` rc=0；`issue_107` 3 passed、`issue_68` 3 passed、`issue_98` 3 passed、`no_case_data_in_repo` 13 passed（新测试文件已 git 跟踪后再跑）。负控：退回 `src/routes/idea.rs` ⇒ `first_run_ollama_not_empty` 与 `issue_68_and_98_assertions_hold_simultaneously` FAILED（`1 passed; 2 failed`）
+- **未落地**: #106（B 方案）、#105、#97 两条真实形态用例。原因：**tokenhub 429（ModelArts.81111 TPM 超限）打断 `hwcloud run`**，进度文件停在"#107 done - fix committed 91e0f55"；#106 只改到工作树未 commit，容器随即回收 ⇒ 未进入任何 patch。限流属平台侧，本轮重试无意义
+- **R27 建议顺序**: 从 `p107.patch` 之上重放 #106(B) → #105 → #97，并要求 GLM **每完成一件先 commit 再报进度**（限流/回收时不至于丢工作树）；#105 范围按本轮新证据扩大到"并发 `free_port()` 与外部桩的端口竞态"（Linux 同样会假红）
+- **PR #104 状态**: 仍 draft；CI 的 Tests 红灯成因（#107）已在分支修复，待 CI 复跑确认；#106/#105/#97 未合入前不交 DS 复核
+
+## 2026-10-22 · R28 轮次结果（#97 补齐已落地；#106 DOM 断言待重做；新开 #111）
+- **DS 判定**：`rd_mode`（R27 冒充 #97 的跑题件）**不认、不借标签合入**；#106 代码接受但验收未满（其两条"e2e"只断言接口 JSON，非渲染 DOM）；#105 接受。容器与分支状态由 DS 自看，不再挂任何定时检查（指挥方已删除自建监视任务 `05554a94`）。
+- **A 件 · #97 两条真实故障形态（已落地）**：新增 `tests/issue_97_filename_forms.rs`（手工按字节拼 multipart，精确控制"哪些文件名参数存在"，刻意不用 HTTP 客户端库的 builder 以免掩盖故障形态）。指挥方本机独立复跑：修复态 **2 passed**；把 `src/routes/upload.rs` 退回 `42027cc` ⇒ **0 passed; 2 failed**（两条都报 `file_type must be 'pdf', got: txt`）。云端件号 commit `02700e3`，`p97.patch` 153326B 与 `.b64` 逐字节 IDENTICAL，且与本机差异仅此一文件（**rd_mode 未夹带**，已逐文件核验）。
+- **B 件 · #106 真实 DOM 断言（未落地，如实报）**：容器日志显示 GLM 已写完并以 commit `74bdb90` 提交，自报 13 个 DOM 断言全过、旧模板下 6/13 变红；但指挥方的回收前抢救只取到**截断且字符错乱**的 1377B（仅 `tests/dom_render_106.mjs` 开头，且 8000 通道随后返回 `session expired`/401）⇒ **内容不可用，本件按未完成处理**，下一窗口重做。绝不用残缺副本冒充验证。
+- **新发现 #111（指挥方独立核出，P1）**：#106 的 `parsed===false` 双语失败文案是**死代码** —— `templates/office_action_response.html:1348` 与 `:1586` 的前置 guard `if (data.error && data.parsed !== true) { alert(data.error); return; }` 在后端"解析失败必然同时给 `parsed:false` 与非空 `error`"的契约下恒真，先 alert+return，导致 `:1592`/`:1355` 的渲染分支不可达；用户实际看到英文 alert 直出而非双语 UI 文案。B 件编写过程中 GLM 亦注意到该问题（并记录"不改产品代码"的约束），它用 `error:""` 绕过 guard 测渲染 —— 那是掩盖而非修好。修法与三条负控见 issue #111。
+
+## 2026-10-23 · R29 收口：#106 的 DOM 断言与 #111 的 guard 死代码一并修掉，#104 代码面齐活
+- **容器**：`9aac8308`（22:54 北京登录恢复后新开体验容器，剩余 02:43）。装配 `setup_rust v2` **rc=0 / 105 秒**，`BASELINE=42027cc`；三件种子 PUT 入仓后 md5 全对（`b271019e` / `204c2dc5` / `16a55794`），派单提示词推 `seed/tools` commit `ae33341`。全程 `setsid nohup`（R26 的 pty 教训），零案件数据。
+- **本轮只派两件**（#97 已完成，明令勿重做；GLM 也自行核到 `tests/issue_97_filename_forms.rs` 存在）：#106 真实 DOM 文本断言 + #111 guard 最小修正。收尾顺序按硬纪律走完：commit → 落 `p106c.patch/.b64` → 追加 progress 带 sha → `r29_final.txt` 记三条命令退出码。
+- **产物一致性**：容器先落 `p106c.patch` 169494B（sha `3d65023`），我拉回后它又 fmt 微调重落 169529B（sha `d79ff5f`）；我按块提取比对，差异仅在 `tests/dom_render_106.rs` 的 87→92 行，而我本地已 `cargo fmt --all` 同步 ⇒ 两版内容一致，无遗漏。
+- **本机验证**：`dom_render_106` 1 passed、`issue_106_score_contract` 8 passed；负控两组（退模板 ⇒ 指名双语文案缺失 + alert 被调用；改 i18n 键 ⇒ 红）；`fmt --all` 与 `clippy --all-targets` rc=0。容器内全量 **926 passed / 0 failed / 32 ignored**。
+- **推送与 CI**：合入 commit `eecfa09`（head），**CI 12/12 success、0 fail（含 E2E）**。
+- **可交复核状态**：#97/#98/#99/#100/#105/#106/#107/#111 代码与测试全部落在 `r25/backend-truthfulness`；关闭各 issue 时逐条写"已修/未修"（#106 的"可见浏览器实测"仍未做，只做了 headless DOM；B 组可见 UI 实测另列）。#104 仍 draft，等 DS 复核裁定合并。

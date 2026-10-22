@@ -2383,7 +2383,10 @@ pub async fn list_ai_models(
     let db_settings = s.db.get_all_settings().ok().unwrap_or_default();
     let requested_provider: &str = query.get("provider").map(|s| s.as_str()).unwrap_or("");
 
-    // Helper: create a model-query task for one provider
+    // Helper: create a model-query task for one provider.
+    // Returns a JSON object with either {"status":"ok","models":[...],"count":N}
+    // or {"status":"error","error":"...","models":[],"count":0}.
+    // #98: previously returned None on failure, hiding the error reason.
     fn make_task(
         _name: &str,
         base_url: &str,
@@ -2400,14 +2403,39 @@ pub async fn list_ai_models(
                 .await
             {
                 Ok(r) => r,
-                Err(_) => return None,
+                Err(e) => {
+                    return Some(json!({
+                        "status": "error",
+                        "error": format!("Connection failed: {e}"),
+                        "models": Vec::<serde_json::Value>::new(),
+                        "count": 0
+                    }));
+                }
             };
             if !resp.status().is_success() {
-                return None;
+                let code = resp.status().as_u16();
+                let reason = if code == 401 || code == 403 {
+                    "Authentication failed (invalid API key)".to_string()
+                } else {
+                    format!("HTTP {code}")
+                };
+                return Some(json!({
+                    "status": "error",
+                    "error": reason,
+                    "models": Vec::<serde_json::Value>::new(),
+                    "count": 0
+                }));
             }
             let bytes_data = match resp.bytes().await {
                 Ok(b) => b,
-                Err(_) => return None,
+                Err(e) => {
+                    return Some(json!({
+                        "status": "error",
+                        "error": format!("Failed to read response: {e}"),
+                        "models": Vec::<serde_json::Value>::new(),
+                        "count": 0
+                    }));
+                }
             };
             let data: serde_json::Value = match serde_json::from_slice(&bytes_data) {
                 Ok(d) => d,
@@ -2451,21 +2479,31 @@ pub async fn list_ai_models(
             match tokio::time::timeout(std::time::Duration::from_secs(12), handle).await {
                 Ok(Ok(Some(result))) => {
                     let models = result["models"].as_array().cloned().unwrap_or_default();
-                    Json(json!({
-                        "status": "ok",
-                        "provider": {"name": name, "status": "ok", "count": models.len()},
+                    let result_status = result["status"].as_str().unwrap_or("ok");
+                    let top = if result_status == "ok" && !models.is_empty() {
+                        "ok"
+                    } else {
+                        "error"
+                    };
+                    let mut entry = json!({
+                        "status": top,
+                        "provider": {"name": name, "status": result_status, "count": models.len()},
                         "models": models,
                         "count": models.len()
-                    }))
+                    });
+                    if let Some(e) = result["error"].as_str() {
+                        entry["error"] = json!(e);
+                    }
+                    Json(entry)
                 }
                 Ok(Ok(None)) | Ok(Err(_)) => Json(json!({
-                    "status": "ok",
+                    "status": "error",
                     "provider": {"name": name, "status": "error", "count": 0},
                     "models": Vec::<serde_json::Value>::new(),
                     "count": 0
                 })),
                 Err(_) => Json(json!({
-                    "status": "ok",
+                    "status": "error",
                     "provider": {"name": name, "status": "timeout", "count": 0},
                     "models": Vec::<serde_json::Value>::new(),
                     "count": 0
@@ -2481,16 +2519,64 @@ pub async fn list_ai_models(
             }))
         }
     } else {
-        // Multi-provider mode: query all configured providers
+        // Multi-provider mode: query the configured provider + known providers.
+        // #98: previously only probed KNOWN_AI_PROVIDERS (hardcoded list),
+        // ignoring the user's configured AI_BASE_URL.  Top-level status was
+        // always "ok" even when all providers failed.
         let mut provider_results: Vec<serde_json::Value> = Vec::new();
         let mut tasks: Vec<(
             String,
             String,
+            bool, // configured flag (#107)
             tokio::task::JoinHandle<Option<serde_json::Value>>,
         )> = Vec::new();
 
+        // #98: Probe the configured provider first.
+        let (cfg_base_url, cfg_api_key) = {
+            let cfg = s.config.read().unwrap_or_else(|e| e.into_inner());
+            let base_url = cfg.ai_base_url.clone();
+            let api_key = cfg.api_key_for_provider(&base_url);
+            (base_url, api_key)
+        };
+
+        // #107: Build the list of providers to probe using a single dedup
+        // pass.  Normalize URLs (lowercase, strip trailing slash) so that
+        // the configured provider and a known provider hitting the same URL
+        // merge into one entry — the known provider's name wins, and the
+        // entry gets a "configured": true flag.  Previously two separate
+        // skip conditions (cfg_is_ollama + URL equality) created a gap where
+        // neither added the Ollama entry when the configured URL WAS Ollama,
+        // producing an empty providers array on first run.
+        let cfg_norm = cfg_base_url.to_lowercase();
+        let cfg_norm = cfg_norm.trim_end_matches('/');
+
+        // Does the configured URL match any known provider?
+        let cfg_matches_known = KNOWN_AI_PROVIDERS
+            .iter()
+            .any(|(_, url, _)| url.to_lowercase().trim_end_matches('/') == cfg_norm);
+
+        // Add configured provider as "Custom" only when it does NOT match
+        // any known provider (otherwise it will be probed under the known
+        // name below, with the configured API key).
+        if !cfg_base_url.is_empty() && !cfg_matches_known {
+            let name = "Custom".to_string();
+            let base_url_resp = cfg_base_url.clone();
+            let handle = make_task(&name, &cfg_base_url, &cfg_api_key);
+            tasks.push((name, base_url_resp, false, handle));
+        }
+
         for (name, base_url, db_key) in KNOWN_AI_PROVIDERS {
-            let api_key = db_settings.get(*db_key).cloned().unwrap_or_default();
+            let provider_norm = base_url.to_lowercase();
+            let provider_norm = provider_norm.trim_end_matches('/');
+            let is_configured = provider_norm == cfg_norm;
+
+            // Use the configured API key when this known provider IS the
+            // configured one; otherwise use the DB-stored key.
+            let api_key = if is_configured {
+                cfg_api_key.clone()
+            } else {
+                db_settings.get(*db_key).cloned().unwrap_or_default()
+            };
             let is_ollama = *base_url == "http://localhost:11434/v1";
             if !is_ollama && (api_key.is_empty() || api_key == "your-serpapi-key-here") {
                 continue;
@@ -2504,20 +2590,27 @@ pub async fn list_ai_models(
             let name_clone = name.to_string();
             let base_url_resp = base_url.to_string();
             let handle = make_task(name, base_url, &key);
-            tasks.push((name_clone, base_url_resp, handle));
+            tasks.push((name_clone, base_url_resp, is_configured, handle));
         }
 
-        for (name, base_url, handle) in tasks {
+        for (name, base_url, configured, handle) in tasks {
             match tokio::time::timeout(std::time::Duration::from_secs(12), handle).await {
                 Ok(Ok(Some(result))) => {
                     let models = result["models"].as_array().cloned().unwrap_or_default();
-                    provider_results.push(json!({
+                    let status = result["status"].as_str().unwrap_or("ok");
+                    let error = result["error"].as_str().map(|s| s.to_string());
+                    let mut entry = json!({
                         "name": name,
                         "base_url": base_url,
-                        "status": "ok",
+                        "status": status,
                         "models": models,
-                        "count": models.len()
-                    }));
+                        "count": models.len(),
+                        "configured": configured
+                    });
+                    if let Some(e) = error {
+                        entry["error"] = json!(e);
+                    }
+                    provider_results.push(entry);
                 }
                 Ok(Ok(None)) | Ok(Err(_)) => {
                     provider_results.push(json!({
@@ -2526,7 +2619,8 @@ pub async fn list_ai_models(
                         "status": "error",
                         "error": "Query failed",
                         "models": Vec::<serde_json::Value>::new(),
-                        "count": 0
+                        "count": 0,
+                        "configured": configured
                     }));
                 }
                 Err(_) => {
@@ -2536,7 +2630,8 @@ pub async fn list_ai_models(
                         "status": "timeout",
                         "error": "Query timed out",
                         "models": Vec::<serde_json::Value>::new(),
-                        "count": 0
+                        "count": 0,
+                        "configured": configured
                     }));
                 }
             }
@@ -2547,8 +2642,15 @@ pub async fn list_ai_models(
             .map(|p| p["count"].as_u64().unwrap_or(0) as usize)
             .sum();
 
+        // #98: top-level status must reflect actual provider states.
+        // "ok" only if at least one provider has status "ok" with count > 0.
+        let any_ok = provider_results
+            .iter()
+            .any(|p| p["status"].as_str() == Some("ok") && p["count"].as_u64().unwrap_or(0) > 0);
+        let top_status = if any_ok { "ok" } else { "error" };
+
         Json(json!({
-            "status": "ok",
+            "status": top_status,
             "providers": provider_results,
             "total_count": total_count
         }))

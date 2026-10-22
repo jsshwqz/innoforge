@@ -37,6 +37,10 @@ pub struct DeadlineResult {
     pub is_urgent: bool,
     /// 期限类型描述
     pub spec: DeadlineSpec,
+    /// #99: oa_type 是否被识别为合法值
+    pub recognized: bool,
+    /// #99: 未识别时的告警信息
+    pub warning: Option<String>,
 }
 
 /// 期限表 —— 唯一数据源 / single source of truth
@@ -50,6 +54,23 @@ pub struct DeadlineResult {
 /// | reexamination_decision | 3 个月 | 对复审决定不服 |
 /// | admin_lawsuit | 3 个月 | 收到通知日起3个月内起诉 |
 /// | abnormal | 15 工作日 | 非正常申请通知书 |
+/// 合法 oa_type 列表 —— 单一事实源 / single source of truth.
+/// `deadline_table` 和 `deadline_spec` 共用此常量，禁止在别处再写一份字面量。
+pub const VALID_OA_TYPES: &[&str] = &[
+    "first_exam",
+    "second_rejection",
+    "reject_review",
+    "reexamination_request",
+    "reexamination_decision",
+    "admin_lawsuit",
+    "abnormal",
+];
+
+/// 判断 oa_type 是否为合法值
+pub fn is_valid_oa_type(oa_type: &str) -> bool {
+    VALID_OA_TYPES.contains(&oa_type)
+}
+
 pub fn deadline_spec(oa_type: &str) -> DeadlineSpec {
     match oa_type {
         "first_exam" => DeadlineSpec::Months(4),
@@ -59,7 +80,10 @@ pub fn deadline_spec(oa_type: &str) -> DeadlineSpec {
         "reexamination_decision" => DeadlineSpec::Months(3),
         "admin_lawsuit" => DeadlineSpec::Months(3),
         "abnormal" => DeadlineSpec::WorkDays(15),
-        _ => DeadlineSpec::Months(4), // 未知类型保守取 4 个月
+        // #99: unknown type — use the SHORTEST valid period (2 months) as
+        // conservative fallback, not the longest (4 months).  A deadline that
+        // is too late is more dangerous than one that is too early.
+        _ => DeadlineSpec::Months(2),
     }
 }
 
@@ -83,6 +107,15 @@ fn add_work_days(start: NaiveDate, days: u32) -> NaiveDate {
 /// 送达日 = 发文日（电子送达，细则第四条第三款）
 pub fn compute_deadline(oa_type: &str, dispatch_date: NaiveDate) -> DeadlineResult {
     let spec = deadline_spec(oa_type);
+    let recognized = is_valid_oa_type(oa_type);
+    let warning = if recognized {
+        None
+    } else {
+        Some(format!(
+            "unknown oa_type '{}', using conservative default (shortest period)",
+            oa_type
+        ))
+    };
 
     let deadline = match spec {
         DeadlineSpec::Months(m) => {
@@ -116,21 +149,27 @@ pub fn compute_deadline(oa_type: &str, dispatch_date: NaiveDate) -> DeadlineResu
         total_days,
         is_urgent,
         spec,
+        recognized,
+        warning,
     }
 }
 
 /// API: `GET /api/oa/deadline-table` —— 返回期限表 JSON
 pub async fn deadline_table() -> Json<serde_json::Value> {
-    let table = serde_json::json!({
-        "first_exam":              {"kind": "Months", "value": 4},
-        "second_rejection":        {"kind": "Months", "value": 2},
-        "reject_review":           {"kind": "Months", "value": 3},
-        "reexamination_request":   {"kind": "Months", "value": 3},
-        "reexamination_decision":  {"kind": "Months", "value": 3},
-        "admin_lawsuit":           {"kind": "Months", "value": 3},
-        "abnormal":                {"kind": "WorkDays", "value": 15},
-    });
-    Json(serde_json::json!({ "deadline_table": table }))
+    // #99: build from the same single source of truth as deadline_spec.
+    let mut table = serde_json::Map::new();
+    for &oa_type in VALID_OA_TYPES {
+        let spec = deadline_spec(oa_type);
+        let entry = match spec {
+            DeadlineSpec::Months(m) => serde_json::json!({"kind": "Months", "value": m}),
+            DeadlineSpec::WorkDays(d) => serde_json::json!({"kind": "WorkDays", "value": d}),
+        };
+        table.insert(oa_type.to_string(), entry);
+    }
+    Json(serde_json::json!({
+        "deadline_table": serde_json::Value::Object(table),
+        "valid_types": VALID_OA_TYPES,
+    }))
 }
 
 /// API: `GET /api/oa/compute-deadline?oa_type=...&date=YYYY-MM-DD`
@@ -293,13 +332,18 @@ mod tests {
     }
 
     #[test]
-    fn test_unknown_type_defaults_4_months() {
+    fn test_unknown_type_marked_unrecognized() {
+        // #99: unknown type must be marked as unrecognized with a warning.
+        // The fallback period is the SHORTEST valid period (2 months), not 4.
         let r = compute_deadline(
             "unknown_type",
             NaiveDate::from_ymd_opt(2026, 1, 15).unwrap(),
         );
-        assert_eq!(r.deadline, "2026-05-15");
-        assert_eq!(r.spec, DeadlineSpec::Months(4));
+        assert!(!r.recognized, "unknown type must have recognized=false");
+        assert!(r.warning.is_some(), "unknown type must have a warning");
+        // Fallback is 2 months (shortest), not 4 months (longest)
+        assert_eq!(r.spec, DeadlineSpec::Months(2));
+        assert_eq!(r.deadline, "2026-03-15");
     }
 
     #[test]
@@ -317,5 +361,26 @@ mod tests {
         );
         assert_eq!(deadline_spec("admin_lawsuit"), DeadlineSpec::Months(3));
         assert_eq!(deadline_spec("abnormal"), DeadlineSpec::WorkDays(15));
+    }
+
+    #[test]
+    fn test_known_types_are_recognized() {
+        // #99: all valid types must have recognized=true and no warning
+        for &oa_type in VALID_OA_TYPES {
+            let r = compute_deadline(oa_type, NaiveDate::from_ymd_opt(2026, 1, 15).unwrap());
+            assert!(r.recognized, "type '{}' must be recognized", oa_type);
+            assert!(
+                r.warning.is_none(),
+                "type '{}' must have no warning",
+                oa_type
+            );
+        }
+    }
+
+    #[test]
+    fn test_valid_oa_types_matches_spec_count() {
+        // #99: single source of truth — VALID_OA_TYPES must cover exactly
+        // the 7 types that deadline_spec handles.
+        assert_eq!(VALID_OA_TYPES.len(), 7);
     }
 }
