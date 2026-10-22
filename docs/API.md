@@ -238,6 +238,10 @@ Fields:
 - `file` (`.txt` 等文本文件)
 - `patent_id`
 
+> 文件类型以**内容魔数**为准，不以文件名为准（issue #97）：命中 `%PDF-` 判 PDF、命中 `PK\x03\x04` 判 DOCX，二者都覆盖文件名给出的扩展名；魔数不命中才回退扩展名。`/api/upload/extract` 同规则。
+> 文件名取不到时（部分客户端对非 ASCII 名只发 `filename*=UTF-8''…` 而不发 `filename=`）会回落到 `unknown.txt`，此时扩展名不可信——正因如此判型必须靠魔数。
+> 报错文案对应真实原因：内容既非 PDF/DOCX、又不能按 UTF-8/GBK 解出文本时，返回 `无法识别文件类型，请上传 PDF、DOCX、TXT 或图片文件`，不再误报"文件编码不支持"。
+
 ---
 
 ## AI 接口 / AI APIs
@@ -1209,10 +1213,32 @@ Response:
 - 成功响应（`200`）：`{ "strategies": [...], ... }`。
 - 失败：缺关键字段时返回 `{ "error": "..." }`。
 
+### GET `/api/ai/models?provider=<key>`
+
+设置页「查询可用模型」用。不带 `provider` 时并发探测**已配置的 `AI_BASE_URL`** 与内置已知服务商；带 `provider` 时只探该服务商（issue #98）。
+
+- 顶层 `status` 只在该次探测**真的拿到至少一个模型**时才为 `ok`；全部失败/超时为 `error`，不再出现"零模型也报 ok"的假绿灯。
+- 每个 provider 条目带 `status`（`ok` / `error` / `timeout`）与 `error` 原因串：连不上给 `Connection failed: …`，`401/403` 归一为 `Authentication failed (invalid API key)`，其它状态码给 `HTTP <code>`。
+- 失败条目仍然返回 `models: []`、`count: 0`，前端可据此区分"确实没有模型"与"探测失败"。
+
 ### POST `/api/ai/oa-quality-score`
 
 - 请求字段：`my_patent`、`oa_text`、`response_text`。
-- 成功响应（`200`）：`{ "score": <number>, "dimensions": {...}, ... }`。
+- 成功响应（`200`）：模型输出被解析为结构化数值（issue #100）。字段：
+
+| 字段 | 出现条件 | 含义 |
+|---|---|---|
+| `status` | 总是 | `ok`（调用完成）或 `error`（模型自身报错） |
+| `parsed` | 总是 | 模型输出是否成功解析为结构化评分；**解析失败为 `false`，不再伪造成功** |
+| `score` | `parsed=true` | 总分（数值，`f64`） |
+| `max` | `parsed=true` | 满分，固定 `10.0` |
+| `dimensions` | `parsed=true` | 各维度数组 `[{name, score, comment}]` |
+| `grade` / `weaknesses` / `suggestions` | `parsed=true` | 透传模型给出的等级、薄弱点与建议 |
+| `out_of_bounds` / `warning` | 分数越出 `[0, 10]` | 标记越界并给出原因，不静默接受 |
+| `raw` | 总是 | 模型原始输出文本（供人工核对） |
+| `error` | `parsed=false` 或 `status=error` | 未能解析/后端报错的原因 |
+
+- 旧形态 `{ "score": { "raw": "<文本>" } }`（把未解析原文塞进 `score.raw` 冒充成功）已废除。
 - 失败：缺关键字段时返回 `{ "error": "..." }`。
 
 ### POST `/api/ai/oa-claim-simulate`
@@ -1246,7 +1272,7 @@ Response:
 
 ### GET `/api/oa/deadline-table`
 
-返回各类 OA 的法定答复期限（唯一数据源，前端不应自行硬编码）。
+返回各类 OA 的法定答复期限（唯一数据源，前端不应自行硬编码）。表体由 `VALID_OA_TYPES` 逐项链 `deadline_spec()` 生成，与推算端点共用同一判据，**不会再出现"表里一套、算的是另一套"**（issue #99）。顶层同时返回 `valid_types`，供调用方先校验 `oa_type` 再取期限。
 
 ```json
 {
@@ -1258,13 +1284,16 @@ Response:
     "reexamination_decision": { "kind": "Months",  "value": 3 },
     "admin_lawsuit":          { "kind": "Months",  "value": 3 },
     "abnormal":               { "kind": "WorkDays", "value": 15 }
-  }
+  },
+  "valid_types": ["first_exam", "second_rejection", "reject_review", "reexamination_request", "reexamination_decision", "admin_lawsuit", "abnormal"]
 }
 ```
 
 ### GET `/api/oa/compute-deadline?oa_type=<type>&date=YYYY-MM-DD`
 
-按“发文日”推算届满日。`date` 不合法时返回 `{ "error": "Invalid date format, expected YYYY-MM-DD" }`。
+按"发文日"推算届满日。`date` 不合法时返回 `{ "error": "Invalid date format, expected YYYY-MM-DD" }`。
+
+`oa_type` **必须是上表 `valid_types` 之一**。未知类型不再静默按 4 个月推算（那会把期限算晚，是最危险的方向）：现在标记为未识别，并按**最短合法期限 2 个月**兜底，同时返回告警文本，调用方必须把它当作"参数错误"处理而不是当成合法期限使用（issue #99）。
 
 响应字段（`DeadlineResult`）：
 
@@ -1277,6 +1306,8 @@ Response:
 | `total_days` | 发文日到届满日的总天数 |
 | `is_urgent` | 是否临近期限（≤7 天） |
 | `spec` | 期限规格（`Months(n)` / `WorkDays(n)`） |
+| `recognized` | `oa_type` 是否为合法值；`false` 表示本次结果是兜底值 |
+| `warning` | 未识别时给出 `unknown oa_type '<值>', using conservative default (shortest period)`；识别时为 `null` |
 
 ### GET `/api/oa/rounds/:patent_id`
 

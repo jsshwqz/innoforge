@@ -1177,3 +1177,51 @@
 - **负控 / Negative control**: 指挥方本机实测——把 `ORDER BY` 退回裸 `filing_date DESC` ⇒ `issue85_two_token_hit_ranks_above_one_token_hit` 与 `issue85_cross_page_global_ordering` 双双 **FAILED**（`3 passed; 2 failed`，rc=101）；恢复后 5 passed、`cargo fmt --check` rc=0。
 - **预防 / Prevention**: ①新增"算了但没用"的派生字段（分数、计数）时，必须同时回答"它是否参与排序/分页"，否则文档不许按它承诺；②排序与过滤涉及同一列集合时必须共用常量定义，禁止两处各写一份字面量；③排序类改动的测试必须断言**返回顺序**与**跨页一致性**，不能只断言结果集成员。
 - **提交 / Commit**: 见 PR（分支 `r24/multi-token-ordering`，`refs #85`）。
+
+---
+
+## [2026-10-22] ㉒ 上传判型只信文件名：拿不到文件名时把 PDF 当文本，报"文件编码不支持"
+- **严重程度 / Severity**: HIGH（国知局导出件普遍是中文名，主路径直接失效；且报错文案把用户引向"改编码"这条死路）
+- **现象 / Symptom**: 同一份真实 PDF，用命令行手工构造的 multipart 以 `filename="…pdf"` 上传一直成功，但**只发 `filename*=UTF-8''<百分号编码>`（不带 `filename=`）**或**完全不带文件名**时，`/api/upload/extract` 在 70ms 左右直接返回 `{"error":"文件编码不支持"}`，根本没进 PDF 解析。改名成 ASCII 就正常，因此最初被误记为"中文文件名导致失败"。
+- **根因 / Root cause**: 判型链路是 `field.file_name()` → 取不到时回落 `"unknown.txt"` → 取最后一个 `.` 后的扩展名决定分支。扩展名一旦不可信（文件名为空、只有 RFC 5987 的 `filename*`、或名字被截断），二进制内容就被送进文本分支，UTF-8 与 GBK 双败后抛出"编码不支持"——**报错说的是编码，真正坏的是判型**。部分客户端对非 ASCII 文件名只发 `filename*` 不发 `filename`，于是中文名成为高频诱因，但不是根因。
+- **修复 / Fix**: 新增 `has_docx_header` / `detect_type_by_magic`，`/api/upload/compare` 与 `/api/upload/extract` **两个**入口都先按内容魔数判型（`%PDF-` → pdf、`PK\x03\x04` → docx），魔数命中即覆盖扩展名，未命中才回退扩展名；文本分支的失败文案改为与真实原因一致的「无法识别文件类型，请上传 PDF、DOCX、TXT 或图片文件」。
+- **回归 / Regression**: `tests/issue_97_nonascii_filename.rs` 3 用例——随机二进制伪装 `.txt` 必须报"无法识别文件类型"、PDF 魔数伪装 `.txt` 不得报编码错、中文名/含空格/ASCII 三种文件名结果必须一致。
+- **负控 / Negative control**: 指挥方本机实测两组。①门禁可证伪：`git checkout` 退回 `src/routes/upload.rs` ⇒ 2 条 **FAILED**（`#97 neg-B: file_type must be 'pdf' (magic byte detection), got: txt`），恢复后 3 passed。②修复真作用于故障形态：同一份 PDF 打五种 `Content-Disposition` 写法，修复前「仅 filename\*」与「无 filename」两种返回 `文件编码不支持`（72ms / 78ms），修复后五种全部 `file_type=pdf`、解出同一字符数。**注意**：`issue_97_nonascii_filename_pdf_not_rejected_as_encoding` 这条以 issue 命名的用例在退回基线后**仍然通过**（它发的是带 `.pdf` 的裸 UTF-8 名，本就不会失败），故它只是"三形态一致性"守卫，不是故障复现——故障复现由指挥方的五种写法矩阵承担。
+- **预防 / Prevention**: ①凡以文件名为输入的分支，都要问"文件名取不到时怎么办"，内容魔数优先于扩展名；②报错文案必须指向**实际失败的那一步**，否则用户会按文案去做无效操作；③以 issue 命名的回归用例必须做"退回基线是否变红"的可证伪检查，红了才算复现了故障；④浏览器路径的 multipart 形态（`filename*` 与 `filename` 的有无组合）要有覆盖，不能只用一个顺手命名的测试文件复现。
+- **提交 / Commit**: 见 PR（分支 `r25/backend-truthfulness`，`refs #97`）。
+
+---
+
+## [2026-10-22] ㉓ `/api/ai/models` 探测失败仍报 `status:"ok"`，且从不探用户真正配置的 provider
+- **严重程度 / Severity**: HIGH（设置页据此判断"AI 是否可用"，假绿灯直接吞掉配置错误）
+- **现象 / Symptom**: 后端连不上或返回 401 时，接口返回 `{"status":"ok", …, "count":0}`；不带 `provider` 的多服务商模式只探硬编码的内置服务商列表，`AI_BASE_URL` 配的是另一个地址也完全不探。用户看到"ok + 0 个模型"，无法区分"这个服务商没有模型"和"根本没连上"。
+- **根因 / Root cause**: `make_task` 在三处失败点（连接错误、非 2xx、读 body 失败）统一 `return None`，原因串就地丢弃；调用侧把 `Ok(Ok(None))` 和超时都写成顶层 `"status": "ok"`，只把 provider 内层标成 error。多服务商模式的 provider 集合来自常量列表，从未与运行时配置求并。
+- **修复 / Fix**: `make_task` 失败时返回结构化对象（`status:"error"` + `error` 原因），连接失败给 `Connection failed: …`，401/403 归一为 `Authentication failed (invalid API key)`，其它给 `HTTP <code>`；顶层 `status` 改为**必须真拿到至少一个模型**才是 `ok`，否则 `error`，并把内层 `error` 提升到条目上；多服务商模式先探配置的 `AI_BASE_URL`/对应 key，再探内置列表。`docs/API.md` 新增该端点响应约定。
+- **回归 / Regression**: `tests/issue_98_models_probe.rs` 3 用例——配置态 provider 被探到且顶层 `ok`、后端不可达时顶层不得为 `ok`、401 必须报鉴权错误。
+- **负控 / Negative control**: 指挥方本机实测——退回 `src/routes/idea.rs` 基线 ⇒ 3 条**全部 FAILED**（`0 passed; 3 failed`）；恢复后 3 passed。桩服务用本机 Python 起，需临时提供 `python3` 可执行名（见「预防」③）。
+- **预防 / Prevention**: ①"计数为 0"永远不能同时是"成功"——聚合接口的顶层状态必须由**证据量**推导，不能由"流程跑完了"推导；②任何 `return None` 的错误分支都在丢诊断信息，探测类接口要把原因带到响应里；③测试桩依赖外部解释器时要显式声明依赖并保证跨平台（写死 `python3` 在 Windows 上直接 `program not found`，仓库已有 `tests/helpers/fake_ai_stub.rs` 的进程内桩可复用），且读 UTF-8 文本必须 `open(..., encoding='utf-8')`，否则在非 UTF-8 默认编码的机器上 `open()` 抛错、连接被掐断；④配置态与内置态要各自有断言，不能只测其一。
+- **提交 / Commit**: 见 PR（分支 `r25/backend-truthfulness`，`refs #98`）。
+
+---
+
+## [2026-10-22] ㉔ 未知 `oa_type` 静默按 4 个月兜底：期限算晚、且期限表与推算各写一份字面量
+- **严重程度 / Severity**: HIGH（期限类产品的最坏失败方向是"把届满日算晚"，用户会据此错过法定期限）
+- **现象 / Symptom**: `compute-deadline?oa_type=<拼写错误>` 返回 `status:"ok"`、按 4 个月给出一个看似合法的届满日，响应里没有任何"该类型不被识别"的痕迹；`/api/oa/deadline-table` 的表是手写的第二份字面量，与 `deadline_spec()` 无绑定，改一处不会同步另一处。
+- **根因 / Root cause**: `deadline_spec` 的 `_ =>` 分支取的是**所有合法值里最长**的 4 个月，理由是"保守"——但对期限而言保守应当是取短；兜底与合法值在响应结构上完全同形，调用方无从分辨；表与算法分写两份，缺单一事实源。
+- **修复 / Fix**: 引入 `VALID_OA_TYPES` 常量作为唯一判据，`deadline_spec` 的兜底改为**最短合法期限 2 个月**；`DeadlineResult` 增加 `recognized: bool` 与 `warning: Option<String>`，未知类型必须带告警；`deadline_table()` 改为遍历 `VALID_OA_TYPES` 逐条调用 `deadline_spec()` 生成，并额外返回 `valid_types`，表与算法不可能再分叉。`docs/API.md` 明确"未知类型不得当合法期限用"。
+- **回归 / Regression**: `tests/issue_99_deadline_unknown_type.rs` 4 用例——七个已知类型的期限逐一正确、未知类型必须 `recognized:false` 且带 warning、兜底必须是 2 个月、期限表必须与 `valid_types` 同步。
+- **负控 / Negative control**: 指挥方本机实测——退回 `src/oa_deadline.rs` 基线 ⇒ 4 条**全部 FAILED**（`0 passed; 4 failed`）；恢复后 4 passed。
+- **预防 / Prevention**: ①任何"未知输入兜底一个默认值"都必须同时返回**兜底标记**，兜底值与合法值不得同形；②保守方向的定义要跟着业务语义走：期限/预算类取短、可用性判断类取悲观，不能一律"取最大"；③同一份事实（枚举 + 其数值）只允许一个来源，展示用的表必须由算法生成，禁止手写第二份；④错误串里插值用 `{e}` 而不是 `{e:?}`，日志不得把用户可控输入按 Debug 形态展开（同 #69）。
+- **提交 / Commit**: 见 PR（分支 `r25/backend-truthfulness`，`refs #99`）。
+
+---
+
+## [2026-10-22] ㉕ `/api/ai/oa-quality-score` 把未解析的模型原文塞进 `score.raw` 冒充评分成功
+- **严重程度 / Severity**: MEDIUM-HIGH（评分是答复策略的输入，假成功会让前端显示一个不存在的分数）
+- **现象 / Symptom**: 模型输出散文（不是 JSON）时，接口返回 `{"status":"ok","score":{"raw":"<整段原文>"}}`；输出 87 这种越界总分时照单全收；前端拿不到数值分数，也看不到失败信号。
+- **根因 / Root cause**: 处理链只有一句 `serde_json::from_str(&result).unwrap_or_else(|_| json!({"raw": result}))`——解析失败被当作"另一种成功"包装，`score` 字段类型从数值退化成对象也没人管；模型调用失败时 `unwrap_or_else` 造的是 `{"error": "…"}` 字符串文本，反而更容易落进上面那个假成功分支。
+- **修复 / Fix**: 新增 `parse_quality_score`：剥 markdown 代码围栏后严格解析；失败返回 `parsed:false` + `error` + 保留 `raw`，且**不产出 `score` 数值**；成功返回 `score`(f64)/`max=10`/`dimensions:[{name,score,comment}]`/`grade`/`weaknesses`/`suggestions`/`raw`；分数落出 `[0,10]` 时保留数值但标记 `out_of_bounds:true` 并给 `warning`；`status` 在模型自身报错时为 `error`。`docs/API.md` 逐字段成表并写明旧形态已废除。
+- **回归 / Regression**: `tests/issue_100_quality_score_parsing.rs` 3 用例——合法输出解析成数值与六个维度、纯散文必须 `parsed:false` 且不得伪造数值/不得再用 `score.raw`、87 分必须标记越界。
+- **负控 / Negative control**: 指挥方本机实测两组。①独立复验不依赖 GLM 的桩：自写 node 桩（UTF-8 正确）打真实端点，退回 `src/routes/ai.rs` 基线 ⇒ 三模式**全部 FAIL**，实际响应 `score=[object Object]`（正是旧假成功形态）；恢复后三模式 PASS（`parsed=true score=8 max=10 dims=6` / `parsed=false + error + raw` / `score=87 out_of_bounds=true`）。②GLM 自带用例在本机 `2 passed; 1 failed`，失败原因在**测试件本身**：桩脚本 `open(content_path, 'r')` 未指定编码，在 Windows 默认 cp936 下读含中文的期望输出抛 `UnicodeDecodeError`、连接被掐断，产品逻辑无关（同条用例在 Linux 与指挥方 node 桩下均通过）。
+- **预防 / Prevention**: ①解析外部模型输出的接口，失败路径必须产出**结构可辨**的失败（独立布尔位 + 原因），不得复用成功字段承载原文；②响应字段要有类型契约，同一字段不得在数值/对象间漂移；③数值要带量程与越界标记，越界不等于失败但要可见；④测试桩读写文本一律显式 `encoding='utf-8'`；⑤指挥方的复验桩要用不同实现（node vs python），避免与产物共享同一缺陷假设。
+- **提交 / Commit**: 见 PR（分支 `r25/backend-truthfulness`，`refs #100`）。

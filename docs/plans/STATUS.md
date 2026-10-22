@@ -808,3 +808,22 @@
 - **发版方式 / Release mechanics**: tag push 触发 `.github/workflows/release.yml`——validate 校验 tag/Cargo 版本/CHANGELOG 三者一致并跑隐私守卫，build 出四平台包，release 用 CHANGELOG 该段做正文、断言资产名逐字齐全后发布
 - **文档覆盖 / Doc coverage**: 115/145（约 79%），剩余 30 条仍由 issue #62 跟踪
 - **门禁说明 / Gate note**: 本 PR 未改 `src/*`、`templates/*`、`tests/*`、`.github/*`，按 Doc Staleness 规则属"无代码变更"跳过，故不新增 `docs/errors.md` 条目（不硬造复盘）
+
+## 2026-10-22 · R25 后端真实性批次 #97 / #98 / #99 / #100（分支 `r25/backend-truthfulness`，基线 `42027cc` = v0.9.18）
+- **来源**: A 组端到端实测（v0.9.18 官方 Windows 资产 + 本地桩后端）发现的四个后端缺陷，全部按 issue 通用化后派单给云端 GLM-5.2 实现
+- **范围**:
+  - #97 上传判型只信文件名 → `/api/upload/compare`、`/api/upload/extract` 改为**内容魔数优先**（`%PDF-` / `PK\x03\x04`），失败文案改指真实原因
+  - #98 `/api/ai/models` 假绿灯 → 探测失败带原因、顶层 `status` 必须由"真拿到模型"推导、多服务商模式先探配置的 `AI_BASE_URL`
+  - #99 未知 `oa_type` 静默按 4 个月 → `VALID_OA_TYPES` 单一事实源、兜底改最短 2 个月、响应加 `recognized` / `warning`、期限表由算法生成
+  - #100 `/api/ai/oa-quality-score` 把未解析原文塞 `score.raw` 冒充成功 → `parse_quality_score` 输出 `{parsed, score, max, dimensions, raw}`，越界标记 `out_of_bounds`
+- **文档**: `docs/API.md` 更新上述四个端点的响应契约（含新增 `/api/ai/models` 章节）；`docs/errors.md` 追加条目 ㉒–㉕
+- **附带修正**: `Cargo.lock` 里 `innoforge` 版本仍停在 `0.9.17`（v0.9.18 发布时漏同步），本 PR 一并同步为 `0.9.18`，否则任何源码构建都会把工作树弄脏
+- **验收 / Acceptance**（指挥方本机 @ `42027cc` 实测，Windows）:
+  - `cargo fmt --check` rc=0 ✅
+  - `cargo test --test issue_97_nonascii_filename` 3 passed；`--test issue_98_models_probe` 3 passed；`--test issue_99_deadline_unknown_type` 4 passed ✅
+  - #100 独立复验（指挥方自写 node 桩，绕开 GLM 测试件的 Python/cp936 依赖）：修复后三模式 PASS（`score=8 max=10 dims=6` / `parsed=false` 且无伪分数 / `score=87 → out_of_bounds`）✅
+  - 负控（退回基线必须变红）：`upload.rs` ⇒ 2 FAILED；`idea.rs` ⇒ 3 FAILED；`oa_deadline.rs` ⇒ 4 FAILED；`ai.rs` ⇒ 独立复验 3 FAILED（旧形态 `score=[object Object]`）✅
+  - 隐私：`cargo test --test no_case_data_in_repo` 13 passed；`tests/no_case_data_in_repo.rs` 未被改动、未新增 allowlist 项；指挥方另以本地 47 条敏感串（案号/申请号/公开号/人名/机构名/标题）独立扫描 8 个待推送文件与 PR 正文，命中 0 ✅
+- **未收口 / Open**:
+  - `tests/issue_98_models_probe.rs` 与 `tests/issue_100_quality_score_parsing.rs` 写死 `python3` 且 `open()` 未指定编码，Windows 本机分别 `program not found` / `UnicodeDecodeError`（Linux CI 不受影响）→ 另开 issue 跟踪
+  - `issue_97_nonascii_filename_pdf_not_rejected_as_encoding` 退回基线仍通过，属"三形态一致性"守卫而非故障复现；真正的复现形态（仅 `filename*`、无 `filename`）目前只由指挥方矩阵覆盖 → 同一 issue 内要求补测试
