@@ -865,3 +865,11 @@
 - **本机验证**：`dom_render_106` 1 passed、`issue_106_score_contract` 8 passed；负控两组（退模板 ⇒ 指名双语文案缺失 + alert 被调用；改 i18n 键 ⇒ 红）；`fmt --all` 与 `clippy --all-targets` rc=0。容器内全量 **926 passed / 0 failed / 32 ignored**。
 - **推送与 CI**：合入 commit `eecfa09`（head），**CI 12/12 success、0 fail（含 E2E）**。
 - **可交复核状态**：#97/#98/#99/#100/#105/#106/#107/#111 代码与测试全部落在 `r25/backend-truthfulness`；关闭各 issue 时逐条写"已修/未修"（#106 的"可见浏览器实测"仍未做，只做了 headless DOM；B 组可见 UI 实测另列）。#104 仍 draft，等 DS 复核裁定合并。
+
+## 2026-10-23 · v0.9.19 发布：#104 合并 + 关闭八件 + 版本/tag
+- **授权来源**：夜间计划第 2–3 条由复核方预先授权（用户已睡）——R29 全绿后预授权合并 #104（ready + squash）并发 v0.9.19。此前"保持 draft"的裁定被本条明示覆盖。
+- **R29 四项复测（本机 Windows，harness 未入库）**：①旧模板(b6bd0df)真实失败响应 `dom_render_106` 17 红/exit1；②修复态 38 绿/exit0；③#111 三条负控红集互不相同（guard 前置 8 红 / 分支不可达 8 红 / 不写 innerHTML 4 红且 noAlert 仍绿）；④`fmt --all --check` 与 `clippy --all-targets -- -D warnings` 均 rc=0。全量 `cargo test --no-fail-fast` 仅 2 红，经证 `42027cc..5aa121a` 区间未碰 `db_path_resolution.rs`/`upstream_timeout_test.rs`/`src/db.rs`/`src/common.rs` ⇒ 非本批引入、main 上同样表现；且分别是 #108 的 Linux-XDG-写死 与 并行环境变量竞态（`--test-threads=1` 复跑 6 pass），Linux CI 真实门禁 12/12 绿。
+- **合并**：#104 标 ready（GraphQL）后 squash 合入，main `42027cc` → `1adf33f`；分支保留未删（复核方自看）。合并触发 main CI 复跑，确认 12/12 后方发布。
+- **关闭**：#97/#98/#99/#100/#105/#106/#107/#111 八件逐条写"已修+证据+负控"后关闭。**保持 OPEN**：#108/#109/#110（测试可移植/竞态类，本批未修）。
+- **发布**：`Cargo.toml`/`Cargo.lock` 0.9.18→0.9.19；CHANGELOG 新增 `## [v0.9.19] - 2026-10-23`（全部 `[issue NN](../issues/NN)` / `PR [#104](../pull/104)` 链接形态，过 Autoclose Hygiene）；tag `v0.9.19` → `.github/workflows/release.yml` 构建四资产（linux-x86_64 / linux-aarch64 / macos-aarch64 / windows-x86_64）并发布。
+- **仍未做（如实）**：#106 的"可见（非 headless）浏览器 UI 实测"（B 组，task #13）；#110 应用侧 `free_port()` TOCTOU。

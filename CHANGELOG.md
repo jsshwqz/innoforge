@@ -9,6 +9,34 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 _暂无条目。_
 
 ---
+## [v0.9.19] - 2026-10-23
+
+### 修复 / Fixed
+
+- **上传判型以内容魔数为准**（[issue 97](../issues/97)，PR [#104](../pull/104)）：`/api/upload/compare` 与 `/api/upload/extract` 两个入口新增 `detect_type_by_magic`（`%PDF-` / `PK\x03\x04`），文件名不可信时内容魔数优先、扩展名兜底；失败文案改指真实原因，不再把 PDF 当文本解后误报"文件编码不支持"。经五种 `Content-Disposition` 写法（裸 UTF-8 名 / 仅 `filename*=` / 不解码的百分号串 / 名+`filename*` / 完全无 `filename`）逐一坐实。
+  *Upload type detection is now driven by content magic bytes rather than the file name, covering all five `Content-Disposition` forms; a PDF is no longer parsed as text when the name is untrusted, and the error points at the real cause instead of a spurious "encoding not supported".*
+- **模型探测不再假绿 / 首启 providers 不再为空**（[issue 98](../issues/98) 与 [issue 107](../issues/107)，PR [#104](../pull/104)）：`/api/ai/models` 先探用户配置的 `AI_BASE_URL` provider，探测失败返回结构化原因（401/403→认证失败，其它→`HTTP <code>`），顶层 `status` 必须由真拿到 ≥1 模型推导；并把该修复遗留的两条互相甩锅的去重条件合并为单一归一化判据，配置 URL 命中已知 provider 时合并为一条 `configured:true`，`providers` 永不为空。
+  *The models endpoint probes the configured provider first, returns a structured reason on failure, and derives the top-level status only from a real model; the two dedup conditions that jointly dropped the Ollama entry into an empty array are replaced by one normalised rule so `providers` is never empty.*
+- **未知 `oa_type` 显式兜底**（[issue 99](../issues/99)，PR [#104](../pull/104)）：`VALID_OA_TYPES` 成为单一事实源，期限表遍历该常量生成并返回 `valid_types`；未知类型不再静默按最长的 4 个月兜底，改取最保守的最短合法期限 2 个月，并在 `DeadlineResult` 增加 `recognized` / `warning`。
+  *Unknown OA types no longer fall back to the longest window; a single source of truth generates the deadline table and returns `valid_types`, the unknown case takes the most conservative shortest window and is flagged via `recognized` / `warning`.*
+- **质量分结构化解析**（[issue 100](../issues/100) 与 [issue 106](../issues/106)，PR [#104](../pull/104)）：`/api/ai/oa-quality-score` 经 `parse_quality_score` 输出 `{parsed, score, max, dimensions[], grade, weaknesses, suggestions, raw, out_of_bounds, warning, error}`，解析失败 `parsed:false` 且不产出任何伪数值、越界标记 `out_of_bounds`；前端两处消费块同步改读该结构化契约，`parsed:false` 走 `oa.quality.parseFailed` 双语失败文案并展示 `error`/`raw`，成功态渲染总分/max/六维/等级，不再有 `undefined`/`NaN`/`0/10`。
+  *Quality scores are parsed into a structured contract with no fabricated number on failure and out-of-range marking; both front-end consumers were migrated to the new shape, the parse-failure path renders bilingual failure text, and the success path no longer shows undefined/NaN/0-of-10.*
+- **失败文案不再是死代码**（[issue 111](../issues/111)，PR [#104](../pull/104)）：`parsed:false` 渲染块前的 `if (data.error && data.parsed !== true){alert;return}` 把任何失败响应都截走，使双语失败文案永不可达；现将该 guard 移到渲染块之后（改为 `else if (data.error)`），并补上块 1 缺失的 `div.innerHTML = html;`，失败 UI 可达。
+  *A guard placed ahead of the `parsed:false` render block swallowed every failure response and made the bilingual failure text dead code; it is relocated after the block (as `else if (data.error)`) and the missing `innerHTML` assignment is restored, so the failure UI actually renders.*
+
+### 测试基建 / Test infrastructure
+
+- **测试桩进程内独占端口，去 python3 依赖**（[issue 105](../issues/105)，PR [#104](../pull/104)）：集成测试桩改为进程内 `TcpListener::bind("127.0.0.1:0")` 独占端口 + 就绪探测，去掉 `Command::new("python3")` 与 `open(...,'r')` 不指定编码的假设，Windows 本机不再因缺 `python3`/cp936 必红，Linux CI 同样成立。被测 app 侧 `free_port()` 的 TOCTOU 残留另记 [issue 110](../issues/110)（仍 OPEN）。
+  *Integration stubs now bind an exclusive in-process port with a readiness probe, removing the `python3` dependency and encoding assumptions; a residual app-side `free_port()` TOCTOU is tracked separately and remains open.*
+- **评分契约双向负控 + 真实 DOM 断言**（PR [#104](../pull/104)）：`issue_106_score_contract` 从模板源码反推消费键并要求后端齐备（后端改名必被 neg-A 抓、模板多读必被 neg-B 抓）；`dom_render_106.mjs`/`.rs` 用真实 `parsed:false`+非空 `error` 响应断言渲染 HTML 含双语失败文案且 `alert` 不触发（同时承重 [issue 111](../issues/111)），三条独立负控红集互不相同。
+
+### 验证 / Verification
+
+- 每个修复均含**双向负控**（植入必红、合法写法不误红），原始输出与退出码记录在 PR [#104](../pull/104) 正文与各 issue 关闭评论；复盘条目见 `docs/errors.md` ㉒–㉙。
+- 合并前由指挥方本机（Windows）独立复现：`cargo fmt --all --check` rc=0、`cargo clippy --all-targets -- -D warnings` rc=0；真实 Linux CI 12 项检查全绿。
+- `Cargo.lock` 中 `innoforge` 版本与 `Cargo.toml` 同步至 `0.9.19`（发版顺带，避免任何源码构建脏工作树）。
+
+---
 ## [v0.9.18] - 2026-10-21
 
 ### 修复 / Fixed
