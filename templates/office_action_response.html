@@ -1345,7 +1345,6 @@
                 })
             });
             var data = await resp.json();
-            if (data.error && data.parsed !== true) { alert(data.error); return; }
             var result = document.getElementById('result');
             var div = document.createElement('div');
             div.style.marginTop = '20px';
@@ -1362,6 +1361,7 @@
                 result.appendChild(div);
                 return;
             }
+            else if (data.error) { alert(data.error); return; }
             var scoreNum = data.score;
             var maxScore = data.max || 10;
             var dimensions = data.dimensions || [];
@@ -1408,6 +1408,7 @@
             if (data.raw) {
                 html += '<div style="color:#c9d1d9;font-size:13px;line-height:1.8;padding:12px;border:1px solid #30363d;border-radius:8px;">' + DOMPurify.sanitize(renderMarkdown(data.raw)) + '</div>';
             }
+            div.innerHTML = html;
             result.appendChild(div);
         } catch(e) {
             alert((t('oa.quality.scoreError') || '评分失败') + ': ' + e.message);
@@ -1583,7 +1584,6 @@
                 })
             });
             var data = await resp.json();
-            if (data.error && data.parsed !== true) { alert(data.error); return; }
             var result = document.getElementById('result');
             var div = document.createElement('div');
             div.style.marginTop = '20px';
@@ -1599,6 +1599,7 @@
                 result.appendChild(div);
                 return;
             }
+            else if (data.error) { alert(data.error); return; }
             var scoreNum = data.score;
             var maxScore = data.max || 10;
             var dimensions = data.dimensions || [];
