@@ -2527,6 +2527,7 @@ pub async fn list_ai_models(
         let mut tasks: Vec<(
             String,
             String,
+            bool, // configured flag (#107)
             tokio::task::JoinHandle<Option<serde_json::Value>>,
         )> = Vec::new();
 
@@ -2538,27 +2539,44 @@ pub async fn list_ai_models(
             (base_url, api_key)
         };
 
-        // Build the list of providers to probe.  Start with the configured
-        // provider, then add known providers that are not already covered.
-        let cfg_lower = cfg_base_url.to_lowercase();
-        let cfg_is_ollama = super::is_ollama_url(&cfg_base_url);
+        // #107: Build the list of providers to probe using a single dedup
+        // pass.  Normalize URLs (lowercase, strip trailing slash) so that
+        // the configured provider and a known provider hitting the same URL
+        // merge into one entry — the known provider's name wins, and the
+        // entry gets a "configured": true flag.  Previously two separate
+        // skip conditions (cfg_is_ollama + URL equality) created a gap where
+        // neither added the Ollama entry when the configured URL WAS Ollama,
+        // producing an empty providers array on first run.
+        let cfg_norm = cfg_base_url.to_lowercase();
+        let cfg_norm = cfg_norm.trim_end_matches('/');
 
-        // Add configured provider (skip if it's just the default Ollama URL,
-        // which is already in KNOWN_AI_PROVIDERS).
-        if !cfg_base_url.is_empty() && !cfg_is_ollama {
+        // Does the configured URL match any known provider?
+        let cfg_matches_known = KNOWN_AI_PROVIDERS
+            .iter()
+            .any(|(_, url, _)| url.to_lowercase().trim_end_matches('/') == cfg_norm);
+
+        // Add configured provider as "Custom" only when it does NOT match
+        // any known provider (otherwise it will be probed under the known
+        // name below, with the configured API key).
+        if !cfg_base_url.is_empty() && !cfg_matches_known {
             let name = "Custom".to_string();
             let base_url_resp = cfg_base_url.clone();
             let handle = make_task(&name, &cfg_base_url, &cfg_api_key);
-            tasks.push((name, base_url_resp, handle));
+            tasks.push((name, base_url_resp, false, handle));
         }
 
         for (name, base_url, db_key) in KNOWN_AI_PROVIDERS {
-            // Skip if this provider's URL is the same as the configured one
-            // (already added above as "Custom").
-            if base_url.to_lowercase() == cfg_lower {
-                continue;
-            }
-            let api_key = db_settings.get(*db_key).cloned().unwrap_or_default();
+            let provider_norm = base_url.to_lowercase();
+            let provider_norm = provider_norm.trim_end_matches('/');
+            let is_configured = provider_norm == cfg_norm;
+
+            // Use the configured API key when this known provider IS the
+            // configured one; otherwise use the DB-stored key.
+            let api_key = if is_configured {
+                cfg_api_key.clone()
+            } else {
+                db_settings.get(*db_key).cloned().unwrap_or_default()
+            };
             let is_ollama = *base_url == "http://localhost:11434/v1";
             if !is_ollama && (api_key.is_empty() || api_key == "your-serpapi-key-here") {
                 continue;
@@ -2572,10 +2590,10 @@ pub async fn list_ai_models(
             let name_clone = name.to_string();
             let base_url_resp = base_url.to_string();
             let handle = make_task(name, base_url, &key);
-            tasks.push((name_clone, base_url_resp, handle));
+            tasks.push((name_clone, base_url_resp, is_configured, handle));
         }
 
-        for (name, base_url, handle) in tasks {
+        for (name, base_url, configured, handle) in tasks {
             match tokio::time::timeout(std::time::Duration::from_secs(12), handle).await {
                 Ok(Ok(Some(result))) => {
                     let models = result["models"].as_array().cloned().unwrap_or_default();
@@ -2586,7 +2604,8 @@ pub async fn list_ai_models(
                         "base_url": base_url,
                         "status": status,
                         "models": models,
-                        "count": models.len()
+                        "count": models.len(),
+                        "configured": configured
                     });
                     if let Some(e) = error {
                         entry["error"] = json!(e);
@@ -2600,7 +2619,8 @@ pub async fn list_ai_models(
                         "status": "error",
                         "error": "Query failed",
                         "models": Vec::<serde_json::Value>::new(),
-                        "count": 0
+                        "count": 0,
+                        "configured": configured
                     }));
                 }
                 Err(_) => {
@@ -2610,7 +2630,8 @@ pub async fn list_ai_models(
                         "status": "timeout",
                         "error": "Query timed out",
                         "models": Vec::<serde_json::Value>::new(),
-                        "count": 0
+                        "count": 0,
+                        "configured": configured
                     }));
                 }
             }
