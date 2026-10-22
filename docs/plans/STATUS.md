@@ -843,3 +843,11 @@
   | `issue_17_synthetic_fixtures::patent_detail_page_has_22_plus_buttons` | **非阻塞**（脆弱断言，且本次由指挥方自己触发） | 断言"编译期烤进的 git commit == 运行时 `git rev-parse HEAD`"；我在全量跑的过程中提交并推送了一笔 docs，HEAD 前移 ⇒ 旧二进制必红。已开 **#109**，并在此如实记明**这次红是我操作造成的，不是产品问题** |
   - 结论：**阻塞项只有 #107 一条**，已补进 R26；#108/#109 只留档不并入，避免静默扩大范围
   - 方法论收获：CI 跑的是裸 `cargo test`，**遇第一个失败 binary 即停**，所以"Tests 红 = 只有 #107"必须靠 `--no-fail-fast` 全量枚举来证，不能拿 CI 的单一红当结论
+
+## 2026-10-22 · R26 轮次结果（#107 已落地；#106/#105/#97 未落地，原因如实记录）
+- **落地**: #107（首启默认形态 `providers` 空数组）——commit `37e3cce`（代码+新测试）与 `9ff7f48`（errors.md ㉘）
+- **来源与交接**: 云端 GLM 在容器 `9858b839` 完成 #107 并 commit `91e0f55`；容器按点回收后该 sha 不可取回，**内容从 T-30 快照 `p107.patch`（102645B，13 个 `diff --git` 块）在本机重放**。逐文件与本机 HEAD 比对后确认云端独有增量只有 `src/routes/idea.rs` 与新增 `tests/issue_107_models_first_run.rs`，其余 11 块（含 `Cargo.lock`，差异仅为行尾）与本机一致 ⇒ 无夹带改动
+- **本机验收**: `cargo fmt --all --check` rc=0；`cargo clippy --all-targets -- -D warnings` rc=0；`issue_107` 3 passed、`issue_68` 3 passed、`issue_98` 3 passed、`no_case_data_in_repo` 13 passed（新测试文件已 git 跟踪后再跑）。负控：退回 `src/routes/idea.rs` ⇒ `first_run_ollama_not_empty` 与 `issue_68_and_98_assertions_hold_simultaneously` FAILED（`1 passed; 2 failed`）
+- **未落地**: #106（B 方案）、#105、#97 两条真实形态用例。原因：**tokenhub 429（ModelArts.81111 TPM 超限）打断 `hwcloud run`**，进度文件停在"#107 done - fix committed 91e0f55"；#106 只改到工作树未 commit，容器随即回收 ⇒ 未进入任何 patch。限流属平台侧，本轮重试无意义
+- **R27 建议顺序**: 从 `p107.patch` 之上重放 #106(B) → #105 → #97，并要求 GLM **每完成一件先 commit 再报进度**（限流/回收时不至于丢工作树）；#105 范围按本轮新证据扩大到"并发 `free_port()` 与外部桩的端口竞态"（Linux 同样会假红）
+- **PR #104 状态**: 仍 draft；CI 的 Tests 红灯成因（#107）已在分支修复，待 CI 复跑确认；#106/#105/#97 未合入前不交 DS 复核
