@@ -1,0 +1,52 @@
+你在华为云临时容器里，是 InnoForge（Rust，github.com/jsshwqz/innoforge）的实现方。本轮是 R27。上一轮 R26 你已完成 #107（commit 内容已由指挥方合入分支），但在做 #106 时被 tokenhub 429（ModelArts.81111 TPM 超限）打断，**当时 #106 只改到工作树、没有 commit，容器回收后全部丢失**。本轮的核心纪律就是防止这种损失重演。
+
+【第一步：取任务书（必读，逐字读完再动手）】
+curl -4 -sS --max-time 60 -SL -o /root/sync/r27_brief.md https://raw.githubusercontent.com/jsshwqz/innoforge/seed/tools/seed/r26_task_brief_v2_2026-10-22.md
+md5sum /root/sync/r27_brief.md
+wc -c /root/sync/r27_brief.md
+cat /root/sync/r27_brief.md
+任务书末尾有「R27 增量」小节，**它的优先级高于上文旧表述**：先 commit 再报进度、基线从分支 head 起、#105 范围扩到端口竞态、429 处置规程。
+若 curl 挂住或超时：不要死等，用 `git ls-remote` 之类最小请求先探连通性；仍不通就直说"取不到任务书"，**不要凭想象开工**。
+
+【第二步：切到分支 head（不要新建分支）】
+cd /root/innoforge
+git remote add origin https://github.com/jsshwqz/innoforge.git 2>/dev/null
+git fetch --depth 30 origin r25/backend-truthfulness
+git checkout -B r25/backend-truthfulness FETCH_HEAD
+git log --oneline -4
+git status --short
+最新一笔应是 `docs(STATUS): R26 轮次结果…`（本地 sha 5b3bead），其上有 #107 的 `fix(ai-models)…`。**分支里已含 R25 四件 + #107 + 指挥方的 docs 提交，不要回退、不要 rebase、不要动 main。**
+
+【本轮要做三件，顺序固定】
+1. **#106（P1）质量评分契约** —— DS 已裁定 **B 方案**（不许改成 A）。六条验收在任务书第 2 件里，逐条做齐：模板 `templates/office_action_response.html` 两处（约 :1349 与 :1577）全改读新形状；`parsed===false` 走 `static/i18n.js` **中英各补一键**的明确失败文案，禁止 undefined/NaN/0过10 冒充分数；契约测试的键集合必须**由解析模板源码产生**（禁止手写键名清单），对 parsed=true/false 两种真实响应逐项断言；双负控——后端改任一键名要红并**指名是哪个键**，模板多读一个后端没有的键也要红；headless E2E 断言成功/失败两条路径的真实 DOM 文本；`docs/API.md` 同步。只做 headless 就如实写"未做可见实测"。
+2. **#105（P2）测试桩可移植** —— `tests/issue_98_models_probe.rs`、`tests/issue_100_quality_score_parsing.rs` 去掉 `Command::new("python3")`，改**进程内桩**（复用 `tests/helpers/fake_ai_stub.rs` 或 TcpListener+线程+Drop），带 ready 判定（超时即 `stub did not start`）。**新增一条本轮实测依据**：三个测试 binary 合跑时 issue_98 有 2 条 FAILED，单跑/复跑合跑都 3/3 绿；指挥方用 node 桩独立打真实端点证明产品无错 ⇒ 这是 `free_port()` 与外部桩的**端口竞态**，Linux 也会假红。所以桩端口必须**由该测试自己 bind(0) 独占**，禁止"先探空闲端口再交给外部进程"这种 TOCTOU 写法。
+3. **#97 补两条真实故障形态** —— 指挥方实测：裸 UTF-8 中文名在修复前**就是通的**；真正触发「文件编码不支持」的是（a）只发 `filename*=UTF-8''<百分号编码>` 不发 `filename=`，（b）完全不带 `filename`。补这两条集成用例（**手工拼 multipart 头**，不要依赖 HTTP 客户端库的文件名编码行为），断言 `file_type=="pdf"` 且能抽出正文；并做可证伪检查：把 `src/routes/upload.rs` 退回基线，这两条必须红。
+
+【每件都必须按这个顺序收尾，不许颠倒】
+1. 在该件内实现 + 测试；
+2. **`git add <该件的文件>` 并 commit**（逐文件 add，禁止 `git add -A`；commit 正文写清该件的红→绿证据）；
+3. 立刻落盘两份（件号用 106 / 105 / 97）：
+   cd /root/innoforge && git diff origin/main...HEAD > /root/sync/p<件号>.patch
+   base64 -w0 /root/sync/p<件号>.patch > /root/sync/p<件号>.b64
+4. 往 `/root/sync/r27_progress.txt` **追加一行**：`<件号> done commit=<sha> patch=<字节数>B`。
+⇒ 这样即使 429 或容器回收，已完成的工作也不会丢。上一轮就是因为跳过第 2 步直接报进度而丢了 #106。
+
+【429 / 限流处置（上一轮的死因）】
+- 遇到 `429 Too Many Requests / ModelArts.81111 TPM 超限`：**不要连续硬打**。先完成"已改内容的 commit + 落盘 + 进度行"，再把当前状态写 `/root/sync/r27_state.txt`（已完成件、各件 sha、未完成件的进度百分比、最后一次报错原文）。
+- 提示词与任务书要**分片消化**：一次只推进一件，不要并行铺开三件后再统一提交。
+- 若同一件重试两次仍 429，就停手并落盘，明确写"因平台限流中断"，不要假装完成。
+
+【硬红线（沿用 R26，不得违反）】
+1. 任何进仓库/GitHub 的内容**不得含案件数据**：案号、申请号、公开号、人名、机构名、案件原文措辞。测试夹具一律合成串，且必须复用 `tests/no_case_data_in_repo.rs` 里 `SYNTHETIC_PUB_NUM_ALLOWLIST` 已有的号（精确匹配，**不许新增 allowlist 项**）。
+2. **不许修改** `tests/no_case_data_in_repo.rs`，不许放宽任何守卫。
+3. 断言必须是可证伪的控制流断言，禁止"文件里含有某字符串"式自证；每条回归要自己做"退回基线是否变红"的检查并把结果写进 commit 正文。
+4. 三件全部做完后统一跑并把**命令原文 + 退出码 + `N passed; M failed` 原样**写进最后一笔 commit 正文，同时落盘 `/root/sync/r27_final.txt`：
+   cargo fmt --all --check
+   cargo clippy --all-targets -- -D warnings
+   cargo test
+   `--all-targets` 不许省（不带它不检查 tests/，上一轮 CI Clippy 就是这么红的）；不许用单文件绿灯代替全量绿灯。
+5. 不要碰 `docs/errors.md` 与 `docs/plans/STATUS.md`（指挥方负责）。`docs/API.md` 可以改，但改了字段名必须同步说明模板怎么读。
+6. **不要 git push、不要开 PR**：容器 push 不可靠，产物走 `.patch` + `.b64` 双通道由指挥方落地。
+7. 只读 main 与 r25/backend-truthfulness，不 rebase、不 force、不动 main。
+
+时间窗约 3 小时（从 18:15 左右起算）。开始吧，第一件事是取任务书并 cat 出来。
