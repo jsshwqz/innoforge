@@ -9,7 +9,7 @@
 //! Negative controls:
 //! - A: stop the provider endpoint → top-level status must NOT be "ok".
 //! - B: provider returns 401 → must report auth error, not "ok", not
-//!      fall back to Ollama.
+//!   fall back to Ollama.
 
 mod common;
 use common::{free_port, spawn_test_server};
