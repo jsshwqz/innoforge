@@ -1345,28 +1345,51 @@
                 })
             });
             var data = await resp.json();
-            if (data.error) { alert(data.error); return; }
-            var score = data.score || data;
+            if (data.error && data.parsed !== true) { alert(data.error); return; }
             var result = document.getElementById('result');
             var div = document.createElement('div');
             div.style.marginTop = '20px';
             div.id = 'quality-score-result';
             var html = '<h3 style="color:#58a6ff;">📊 ' + (t('oa.quality.title') || '答复质量评估') + '</h3>';
-            if (score.scores) {
-                var scores = score.scores;
-                var dims = [
-                    {key:'logic', label: t('oa.quality.logic') || '逻辑严密性'},
-                    {key:'evidence', label: t('oa.quality.evidence') || '证据引用'},
-                    {key:'distinction', label: t('oa.quality.distinction') || '区别特征论证'},
-                    {key:'modification', label: t('oa.quality.modification') || '修改合理性'},
-                    {key:'tone', label: t('oa.quality.tone') || '措辞专业度'},
-                    {key:'completeness', label: t('oa.quality.completeness') || '回复完整性'}
-                ];
+            // #106: Read new contract shape (B approach)
+            if (data.parsed === false) {
+                html += '<div style="margin:16px 0;padding:12px;border:1px solid #f85149;border-radius:8px;background:#1c0d0d;color:#c9d1d9;">';
+                html += '<p style="color:#f85149;font-weight:600;">' + (t('oa.quality.parseFailed') || '评分解析失败，无法提取数值评分') + '</p>';
+                if (data.error) { html += '<p style="font-size:13px;margin-top:8px;">' + escapeHtml(data.error) + '</p>'; }
+                if (data.raw) { html += '<details style="margin-top:8px;"><summary style="cursor:pointer;color:#8b949e;">raw</summary><pre style="font-size:12px;white-space:pre-wrap;word-break:break-all;">' + escapeHtml(data.raw) + '</pre></details>'; }
+                html += '</div>';
+                div.innerHTML = html;
+                result.appendChild(div);
+                return;
+            }
+            var scoreNum = data.score;
+            var maxScore = data.max || 10;
+            var dimensions = data.dimensions || [];
+            var grade = data.grade || '';
+            var gradeColor = grade === 'A' ? '#3fb950' : (grade === 'B' ? '#58a6ff' : (grade === 'C' ? '#d29922' : '#f85149'));
+            if (data.out_of_bounds === true && data.warning) {
+                html += '<div style="margin:8px 0;padding:8px 12px;border:1px solid #d29922;border-radius:6px;background:#1c1a0d;color:#d29922;font-size:13px;">⚠️ ' + escapeHtml(data.warning) + '</div>';
+            }
+            if (scoreNum !== undefined && scoreNum !== null) {
+                html += '<div style="display:flex;gap:24px;align-items:center;margin:16px 0;padding:12px;border:1px solid #30363d;border-radius:8px;">';
+                html += '<div><span style="color:#8b949e;">' + (t('oa.quality.total') || '总分') + ': </span><span style="font-size:28px;font-weight:700;color:#58a6ff;">' + scoreNum + '</span><span style="color:#8b949e;">/' + maxScore + '</span></div>';
+                if (grade) {
+                    html += '<div><span style="color:#8b949e;">' + (t('oa.quality.grade') || '等级') + ': </span><span style="font-size:28px;font-weight:700;color:' + gradeColor + ';">' + escapeHtml(grade) + '</span></div>';
+                }
+                html += '</div>';
+            }
+            if (dimensions.length > 0) {
+                var dims = [];
+                var scoresMap = {};
+                for (var i = 0; i < dimensions.length; i++) {
+                    dims.push({key: dimensions[i].name, label: dimensions[i].name});
+                    scoresMap[dimensions[i].name] = dimensions[i].score;
+                }
                 html += '<div style="display:flex;gap:24px;flex-wrap:wrap;margin:16px 0;">';
-                html += '<div style="flex-shrink:0;">' + renderRadarChart(dims, scores) + '</div>';
+                html += '<div style="flex-shrink:0;">' + renderRadarChart(dims, scoresMap) + '</div>';
                 html += '<div style="flex:1;min-width:300px;">';
                 for (var i = 0; i < dims.length; i++) {
-                    var val = scores[dims[i].key];
+                    var val = scoresMap[dims[i].key];
                     if (val === undefined || val === null) continue;
                     var color = val >= 7 ? '#3fb950' : (val >= 5 ? '#d29922' : '#f85149');
                     html += '<div style="margin-bottom:8px;"><span style="display:inline-block;width:140px;color:#8b949e;">' + escapeHtml(dims[i].label) + '</span>';
@@ -1375,29 +1398,16 @@
                     html += '<div style="width:' + (val * 10) + '%;height:100%;background:' + color + ';border-radius:4px;"></div></div></div>';
                 }
                 html += '</div></div>';
-                if (score.total !== undefined) {
-                    var gradeColor = score.grade === 'A' ? '#3fb950' : (score.grade === 'B' ? '#58a6ff' : (score.grade === 'C' ? '#d29922' : '#f85149'));
-                    html += '<div style="display:flex;gap:24px;align-items:center;margin:16px 0;padding:12px;border:1px solid #30363d;border-radius:8px;">';
-                    html += '<div><span style="color:#8b949e;">' + (t('oa.quality.total') || '总分') + ': </span><span style="font-size:28px;font-weight:700;color:#58a6ff;">' + score.total + '</span><span style="color:#8b949e;">/10</span></div>';
-                    if (score.grade) {
-                        html += '<div><span style="color:#8b949e;">' + (t('oa.quality.grade') || '等级') + ': </span><span style="font-size:28px;font-weight:700;color:' + gradeColor + ';">' + escapeHtml(score.grade) + '</span></div>';
-                    }
-                    html += '</div>';
-                }
-                if (score.not_applicable && score.not_applicable.length > 0) {
-                    html += '<div style="color:#8b949e;margin:8px 0;">' + (t('oa.quality.notApplicable') || '不适用') + ': ' + escapeHtml(score.not_applicable.join(', ')) + '</div>';
-                }
             }
-            if (score.weaknesses) {
-                html += '<div style="margin:12px 0;"><h4 style="color:#d29922;">' + (t('oa.quality.weaknesses') || '薄弱点') + '</h4><div style="color:#c9d1d9;font-size:13px;line-height:1.8;">' + DOMPurify.sanitize(renderMarkdown(score.weaknesses)) + '</div></div>';
+            if (data.weaknesses) {
+                html += '<div style="margin:12px 0;"><h4 style="color:#d29922;">' + (t('oa.quality.weaknesses') || '薄弱点') + '</h4><div style="color:#c9d1d9;font-size:13px;line-height:1.8;">' + DOMPurify.sanitize(renderMarkdown(data.weaknesses)) + '</div></div>';
             }
-            if (score.suggestions) {
-                html += '<div style="margin:12px 0;"><h4 style="color:#3fb950;">' + (t('oa.quality.suggestions') || '改进建议') + '</h4><div style="color:#c9d1d9;font-size:13px;line-height:1.8;">' + DOMPurify.sanitize(renderMarkdown(score.suggestions)) + '</div></div>';
+            if (data.suggestions) {
+                html += '<div style="margin:12px 0;"><h4 style="color:#3fb950;">' + (t('oa.quality.suggestions') || '改进建议') + '</h4><div style="color:#c9d1d9;font-size:13px;line-height:1.8;">' + DOMPurify.sanitize(renderMarkdown(data.suggestions)) + '</div></div>';
             }
-            if (score.raw) {
-                html += '<div style="color:#c9d1d9;font-size:13px;line-height:1.8;padding:12px;border:1px solid #30363d;border-radius:8px;">' + DOMPurify.sanitize(renderMarkdown(score.raw)) + '</div>';
+            if (data.raw) {
+                html += '<div style="color:#c9d1d9;font-size:13px;line-height:1.8;padding:12px;border:1px solid #30363d;border-radius:8px;">' + DOMPurify.sanitize(renderMarkdown(data.raw)) + '</div>';
             }
-            div.innerHTML = html;
             result.appendChild(div);
         } catch(e) {
             alert((t('oa.quality.scoreError') || '评分失败') + ': ' + e.message);
@@ -1573,63 +1583,57 @@
                 })
             });
             var data = await resp.json();
-            if (data.error) { alert(data.error); return; }
-            var score = data.score || data;
+            if (data.error && data.parsed !== true) { alert(data.error); return; }
             var result = document.getElementById('result');
             var div = document.createElement('div');
             div.style.marginTop = '20px';
-
-            // 构建评分卡片 HTML
-            var scores = score.scores || {};
-            var scoreItems = [
-                { key: 'logic', label: t('oa.quality.logic') || '逻辑严密性', weight: '20%' },
-                { key: 'evidence', label: t('oa.quality.evidence') || '证据引用', weight: '15%' },
-                { key: 'distinction', label: t('oa.quality.distinction') || '区别特征论证', weight: '25%' },
-                { key: 'modification', label: t('oa.quality.modification') || '修改合理性', weight: '15%' },
-                { key: 'tone', label: t('oa.quality.tone') || '措辞专业度', weight: '10%' },
-                { key: 'completeness', label: t('oa.quality.completeness') || '回复完整性', weight: '15%' }
-            ];
-
+            var html = '<h3 style="color:#58a6ff;">📊 ' + (t('oa.quality.title') || '答复质量评估') + '</h3>';
+            // #106: Read new contract shape (B approach)
+            if (data.parsed === false) {
+                html += '<div style="margin:16px 0;padding:12px;border:1px solid #f85149;border-radius:8px;background:#1c0d0d;color:#c9d1d9;">';
+                html += '<p style="color:#f85149;font-weight:600;">' + (t('oa.quality.parseFailed') || '评分解析失败，无法提取数值评分') + '</p>';
+                if (data.error) { html += '<p style="font-size:13px;margin-top:8px;">' + escapeHtml(data.error) + '</p>'; }
+                if (data.raw) { html += '<details style="margin-top:8px;"><summary style="cursor:pointer;color:#8b949e;">raw</summary><pre style="font-size:12px;white-space:pre-wrap;word-break:break-all;">' + escapeHtml(data.raw) + '</pre></details>'; }
+                html += '</div>';
+                div.innerHTML = html;
+                result.appendChild(div);
+                return;
+            }
+            var scoreNum = data.score;
+            var maxScore = data.max || 10;
+            var dimensions = data.dimensions || [];
+            var grade = data.grade || 'N/A';
             var gradeColor = '#3fb950';
-            var grade = score.grade || 'N/A';
             if (grade === 'C') gradeColor = '#d29922';
             if (grade === 'D') gradeColor = '#f85149';
-
-            var html = '<h3 style="color:#58a6ff;">📊 ' + (t('oa.quality.title') || '答复质量评估') + '</h3>';
-
-            // 总分 + 等级
+            if (data.out_of_bounds === true && data.warning) {
+                html += '<div style="margin:8px 0;padding:8px 12px;border:1px solid #d29922;border-radius:6px;background:#1c1a0d;color:#d29922;font-size:13px;">⚠️ ' + escapeHtml(data.warning) + '</div>';
+            }
             html += '<div style="display:flex;gap:24px;align-items:center;margin-bottom:16px;padding:12px;border:1px solid #30363d;border-radius:8px;background:#0d1117;">';
-            html += '<div style="text-align:center;"><div style="font-size:32px;font-weight:bold;color:#58a6ff;">' + escapeHtml(String(score.total || 'N/A')) + '</div><div style="font-size:12px;color:#8b949e;">' + (t('oa.quality.total') || '总分') + '</div></div>';
+            html += '<div style="text-align:center;"><div style="font-size:32px;font-weight:bold;color:#58a6ff;">' + escapeHtml(String(scoreNum !== undefined && scoreNum !== null ? scoreNum : 'N/A')) + '</div><div style="font-size:12px;color:#8b949e;">' + (t('oa.quality.total') || '总分') + '</div></div>';
             html += '<div style="text-align:center;"><div style="font-size:32px;font-weight:bold;color:' + gradeColor + ';">' + escapeHtml(grade) + '</div><div style="font-size:12px;color:#8b949e;">' + (t('oa.quality.grade') || '等级') + '</div></div>';
             html += '</div>';
-
-            // 雷达图 (SVG)
-            var radarLabels = scoreItems.map(function(s) { return s.label; });
-            var radarValues = scoreItems.map(function(s) { return parseFloat(scores[s.key] || 0); });
-            html += '<div style="margin-bottom:16px;">' + renderRadarChart(radarLabels, radarValues) + '</div>';
-
-            // 评分明细
-            html += '<div style="margin-bottom:16px;">';
-            for (var i = 0; i < scoreItems.length; i++) {
-                var s = scoreItems[i];
-                var val = parseFloat(scores[s.key] || 0);
-                var barColor = val >= 7 ? '#3fb950' : (val >= 5 ? '#d29922' : '#f85149');
-                html += '<div style="margin-bottom:8px;">';
-                html += '<div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;"><span>' + escapeHtml(s.label) + ' <span style="color:#8b949e;font-size:11px;">(' + s.weight + ')</span></span><span style="font-weight:bold;color:' + barColor + ';">' + escapeHtml(String(scores[s.key] || '-')) + '</span></div>';
-                html += '<div style="height:6px;background:#21262d;border-radius:3px;overflow:hidden;"><div style="height:100%;width:' + (val * 10) + '%;background:' + barColor + ';border-radius:3px;"></div></div>';
+            if (dimensions.length > 0) {
+                var radarLabels = dimensions.map(function(d) { return d.name; });
+                var radarValues = dimensions.map(function(d) { return parseFloat(d.score || 0); });
+                html += '<div style="margin-bottom:16px;">' + renderRadarChart(radarLabels, radarValues) + '</div>';
+                html += '<div style="margin-bottom:16px;">';
+                for (var i = 0; i < dimensions.length; i++) {
+                    var val = parseFloat(dimensions[i].score || 0);
+                    var barColor = val >= 7 ? '#3fb950' : (val >= 5 ? '#d29922' : '#f85149');
+                    html += '<div style="margin-bottom:8px;">';
+                    html += '<div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;"><span>' + escapeHtml(dimensions[i].name) + '</span><span style="font-weight:bold;color:' + barColor + ';">' + escapeHtml(String(dimensions[i].score !== undefined ? dimensions[i].score : '-')) + '</span></div>';
+                    html += '<div style="height:6px;background:#21262d;border-radius:3px;overflow:hidden;"><div style="height:100%;width:' + (val * 10) + '%;background:' + barColor + ';border-radius:3px;"></div></div>';
+                    html += '</div>';
+                }
                 html += '</div>';
             }
-            html += '</div>';
-
-            // 薄弱点
-            if (score.weaknesses) {
-                html += '<div style="margin-bottom:12px;padding:10px 14px;border:1px solid #f85149;border-radius:6px;background:#1c0d0d;"><strong style="color:#f85149;">⚠️ ' + (t('oa.quality.weaknesses') || '薄弱点') + '</strong><div style="font-size:13px;line-height:1.6;color:#c9d1d9;margin-top:6px;">' + DOMPurify.sanitize(renderMarkdown(score.weaknesses)) + '</div></div>';
+            if (data.weaknesses) {
+                html += '<div style="margin-bottom:12px;padding:10px 14px;border:1px solid #f85149;border-radius:6px;background:#1c0d0d;"><strong style="color:#f85149;">⚠️ ' + (t('oa.quality.weaknesses') || '薄弱点') + '</strong><div style="font-size:13px;line-height:1.6;color:#c9d1d9;margin-top:6px;">' + DOMPurify.sanitize(renderMarkdown(data.weaknesses)) + '</div></div>';
             }
-            // 改进建议
-            if (score.suggestions) {
-                html += '<div style="margin-bottom:12px;padding:10px 14px;border:1px solid #3fb950;border-radius:6px;background:#0d1c0d;"><strong style="color:#3fb950;">💡 ' + (t('oa.quality.suggestions') || '改进建议') + '</strong><div style="font-size:13px;line-height:1.6;color:#c9d1d9;margin-top:6px;">' + DOMPurify.sanitize(renderMarkdown(score.suggestions)) + '</div></div>';
+            if (data.suggestions) {
+                html += '<div style="margin-bottom:12px;padding:10px 14px;border:1px solid #3fb950;border-radius:6px;background:#0d1c0d;"><strong style="color:#3fb950;">💡 ' + (t('oa.quality.suggestions') || '改进建议') + '</strong><div style="font-size:13px;line-height:1.6;color:#c9d1d9;margin-top:6px;">' + DOMPurify.sanitize(renderMarkdown(data.suggestions)) + '</div></div>';
             }
-
             div.innerHTML = html;
             result.appendChild(div);
         } catch(e) {

@@ -1239,6 +1239,7 @@ Response:
 | `error` | `parsed=false` 或 `status=error` | 未能解析/后端报错的原因 |
 
 - 旧形态 `{ "score": { "raw": "<文本>" } }`（把未解析原文塞进 `score.raw` 冒充成功）已废除。
+- **模板契约（#106 B 方案）**：`templates/office_action_response.html` 两处 `qualityScore()` 均读上述新字段。`parsed===false` 时显示 `oa.quality.parseFailed`（中英双语，`static/i18n.js`），禁止 `undefined`/`NaN`/`0/10` 冒充分数。越界分数保留原值并显示 `out_of_bounds`/`warning` 告警。
 - 失败：缺关键字段时返回 `{ "error": "..." }`。
 
 ### POST `/api/ai/oa-claim-simulate`
