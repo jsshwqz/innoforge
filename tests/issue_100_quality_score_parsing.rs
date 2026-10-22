@@ -14,98 +14,66 @@
 
 mod common;
 use common::{free_port, spawn_test_server};
-use std::io::Write;
 use std::net::TcpListener;
 
-/// Stub server that responds to POST /v1/chat/completions with a given
-/// content string in the OpenAI chat completion format.
+/// In-process stub server that responds to POST /v1/chat/completions with a
+/// given content string in the OpenAI chat completion format.
+/// Also responds to GET /v1/models for provider probe.
+///
+/// #105: In-process (no python3), port exclusively owned via bind(0).
 struct StubAiServer {
-    child: std::process::Child,
     port: u16,
+    _thread: std::thread::JoinHandle<()>,
 }
 
 impl Drop for StubAiServer {
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        // Thread exits when listener is dropped.
     }
 }
 
 fn spawn_ai_stub(content: &str) -> StubAiServer {
-    let port = free_port();
-    // Write content to a temp file so the Python script can read it
-    let mut content_file = tempfile::NamedTempFile::new().expect("create content file");
-    content_file
-        .write_all(content.as_bytes())
-        .expect("write content");
-    content_file.flush().expect("flush");
-    let content_path = content_file.into_temp_path();
-    let content_path_str = content_path.to_str().unwrap().to_string();
-    std::mem::forget(content_path);
-
-    let script = format!(
-        r#"
-import http.server, json, sys
-
-content_path = sys.argv[1]
-
-class H(http.server.BaseHTTPRequestHandler):
-    def do_POST(self):
-        if "/chat/completions" in self.path:
-            with open(content_path, 'r') as f:
-                content = f.read()
-            body = json.dumps({{
-                "choices": [{{"message": {{"content": content}}, "finish_reason": "stop"}}],
-                "usage": {{"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30}}
-            }}).encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-        else:
-            self.send_response(404)
-            self.end_headers()
-    def do_GET(self):
-        if "/models" in self.path:
-            body = json.dumps({{"data": [{{"id": "stub-model"}}]}}).encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-        else:
-            self.send_response(404)
-            self.end_headers()
-    def log_message(self, *a):
-        pass
-
-http.server.HTTPServer(("127.0.0.1", {port}), H).serve_forever()
-"#,
-        port = port
-    );
-
-    let mut tmp = tempfile::NamedTempFile::new().expect("create temp script");
-    tmp.write_all(script.as_bytes()).expect("write script");
-    tmp.flush().expect("flush");
-    let script_path = tmp.into_temp_path();
-    let script_path_str = script_path.to_str().unwrap().to_string();
-    std::mem::forget(script_path);
-
-    let child = std::process::Command::new("python3")
-        .arg(&script_path_str)
-        .arg(&content_path_str)
-        .spawn()
-        .expect("spawn stub server");
-
-    for _ in 0..50 {
-        if TcpListener::bind(("127.0.0.1", port)).is_err() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind stub");
+    let port = listener.local_addr().unwrap().port();
+    let content = content.to_string();
+    let thread = std::thread::spawn(move || {
+        for mut stream in listener.incoming().flatten() {
+            let mut buf = [0u8; 4096];
+            let _ = std::io::Read::read(&mut stream, &mut buf);
+            let request = String::from_utf8_lossy(&buf);
+            let response = if request.contains("/chat/completions") {
+                format!(
+                    r#"{{"choices":[{{"message":{{"content":{}}},"finish_reason":"stop"}}],"usage":{{"prompt_tokens":10,"completion_tokens":20,"total_tokens":30}}}}"#,
+                    serde_json::Value::String(content.clone())
+                )
+            } else if request.contains("/models") {
+                r#"{"data":[{"id":"stub-model"}]}"#.to_string()
+            } else {
+                r#"{"status":"ok"}"#.to_string()
+            };
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                response.len(),
+                response
+            );
+            let _ = std::io::Write::write_all(&mut stream, response.as_bytes());
+        }
+    });
+    // Ready check: poll until stub accepts connections
+    let start = std::time::Instant::now();
+    while start.elapsed().as_secs() < 5 {
+        if std::net::TcpStream::connect(format!("127.0.0.1:{}", port)).is_ok() {
             break;
         }
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        std::thread::sleep(std::time::Duration::from_millis(50));
     }
-
-    StubAiServer { child, port }
+    if start.elapsed().as_secs() >= 5 {
+        panic!("stub did not start within 5s");
+    }
+    StubAiServer {
+        port,
+        _thread: thread,
+    }
 }
 
 fn call_quality_score(client: &reqwest::blocking::Client, port: u16) -> serde_json::Value {

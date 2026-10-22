@@ -13,94 +13,81 @@
 
 mod common;
 use common::{free_port, spawn_test_server};
-use std::io::Write;
 use std::net::TcpListener;
 
-/// A minimal OpenAI-compatible stub server that responds to GET /v1/models.
+/// A minimal in-process stub server that responds to GET /v1/models.
 /// `response_type` controls what it returns:
 /// - "ok" → 200 with one model
 /// - "401" → 401 Unauthorized
 /// - "empty" → 200 with empty model list
+///
+/// #105: In-process (no python3), port exclusively owned via bind(0).
 struct StubServer {
-    child: std::process::Child,
     port: u16,
+    _thread: std::thread::JoinHandle<()>,
 }
 
 impl Drop for StubServer {
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        // Thread exits when listener is dropped (on thread exit).
+        // Process cleanup handles the rest.
     }
 }
 
-/// Spawn a stub HTTP server on a free port.
-/// Returns the server handle and the port it's listening on.
+/// Spawn an in-process stub HTTP server.
+/// The port is OS-assigned via bind(0) and exclusively owned by the listener
+/// (no TOCTOU free_port race).
 fn spawn_stub(response_type: &str) -> StubServer {
-    let port = free_port();
-    let script = format!(
-        r#"
-import http.server, json, sys
-
-rt = sys.argv[1]
-
-class H(http.server.BaseHTTPRequestHandler):
-    def do_GET(self):
-        if "/models" in self.path:
-            if rt == "ok":
-                body = json.dumps({{"data": [{{"id": "stub-model"}}]}}).encode()
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-            elif rt == "401":
-                self.send_response(401)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(b'{{"error": "invalid api key"}}')
-            elif rt == "empty":
-                body = json.dumps({{"data": []}}).encode()
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-            else:
-                self.send_response(500)
-                self.end_headers()
-        else:
-            self.send_response(404)
-            self.end_headers()
-    def log_message(self, *a):
-        pass
-
-http.server.HTTPServer(("127.0.0.1", {port}), H).serve_forever()
-"#,
-        port = port
-    );
-
-    let mut tmp = tempfile::NamedTempFile::new().expect("create temp script");
-    tmp.write_all(script.as_bytes()).expect("write script");
-    tmp.flush().expect("flush");
-    let script_path = tmp.into_temp_path();
-    let script_path_str = script_path.to_str().unwrap().to_string();
-    std::mem::forget(script_path); // keep alive for child duration
-
-    let child = std::process::Command::new("python3")
-        .arg(&script_path_str)
-        .arg(response_type)
-        .spawn()
-        .expect("spawn stub server");
-
-    // Wait for stub to be ready
-    for _ in 0..50 {
-        if TcpListener::bind(("127.0.0.1", port)).is_err() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind stub");
+    let port = listener.local_addr().unwrap().port();
+    let rt = response_type.to_string();
+    let thread = std::thread::spawn(move || {
+        for mut stream in listener.incoming().flatten() {
+            let mut buf = [0u8; 4096];
+            let _ = std::io::Read::read(&mut stream, &mut buf);
+            let request = String::from_utf8_lossy(&buf);
+            let response = if request.contains("/models") {
+                match rt.as_str() {
+                    "ok" => {
+                        let body = r#"{"data":[{"id":"stub-model"}]}"#;
+                        format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                            body.len(), body
+                        )
+                    }
+                    "401" => {
+                        "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\n\r\n{\"error\":\"invalid api key\"}".to_string()
+                    }
+                    "empty" => {
+                        let body = r#"{"data":[]}"#;
+                        format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                            body.len(), body
+                        )
+                    }
+                    _ => "HTTP/1.1 500 Internal Server Error\r\n\r\n".to_string(),
+                }
+            } else {
+                "HTTP/1.1 404 Not Found\r\n\r\n".to_string()
+            };
+            let _ = std::io::Write::write_all(&mut stream, response.as_bytes());
+        }
+    });
+    // Ready check: poll until stub accepts connections
+    let start = std::time::Instant::now();
+    while start.elapsed().as_secs() < 5 {
+        if std::net::TcpStream::connect(format!("127.0.0.1:{}", port)).is_ok() {
             break;
         }
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        std::thread::sleep(std::time::Duration::from_millis(50));
     }
-
-    StubServer { child, port }
+    if start.elapsed().as_secs() >= 5 {
+        panic!("stub did not start within 5s");
+    }
+    StubServer {
+        port,
+        _thread: thread,
+    }
 }
 
 /// #98 positive: configured provider is reachable → providers list includes
