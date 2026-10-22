@@ -1,0 +1,69 @@
+你在华为云临时容器里，是 InnoForge（Rust）的实现方。本轮 R29 **只做两件**，它们其实同一处代码，做完就收工。分工：你写代码/测试；派单、拉回、复验、推送都由指挥方做。**不要自己 `git push`、不开 PR、不动 main。**
+
+【第 0 步：读增量任务书（先做这个）】
+```
+curl -4 -sS --max-time 60 -SL -o /root/sync/r29_delta.md https://raw.githubusercontent.com/jsshwqz/innoforge/seed/tools/seed/r28_delta_2026-10-22.md
+md5sum /root/sync/r29_delta.md      # 期望 16a5579421784c53904cfb9a3040d274
+cat /root/sync/r29_delta.md
+```
+若 curl 挂住/超时：不要死等，直接用下面两件的描述开工（内容与此一致）。GitHub raw 不通时可用 `git ls-remote` / 最小请求先探连通性。
+
+【第 0.5 步：取分支（R28 已合入的东西必须在）】
+```
+cd /root/innoforge
+git remote add origin https://github.com/jsshwqz/innoforge.git 2>/dev/null
+git fetch --depth 30 origin r25/backend-truthfulness
+git checkout -B r25/backend-truthfulness FETCH_HEAD
+git log --oneline -4
+grep -c "filename\*" tests/issue_97_filename_forms.rs
+```
+`tests/issue_97_filename_forms.rs` 必须存在（#97 已完成，**不要重做、不要再提交它**）。若不存在说明分支取错，停下写 `/root/sync/r29_state.txt` 报指挥方。
+
+═══════════════════════════════════════════
+【唯一任务：#106 的真实 DOM 断言 + 顺带修掉 #111 的死代码 guard】
+═══════════════════════════════════════════
+
+**背景（已核实的产品缺陷 #111）**：`templates/office_action_response.html` 两处（约 `:1348` 与 `:1586`）都有前置 guard：
+
+```js
+if (data.error && data.parsed !== true) { alert(data.error); return; }
+```
+
+而后端 `parse_quality_score` 在模型输出解析失败时**必然同时**给出 `parsed:false` **和**非空 `error`（例如 `Failed to parse model output as JSON: …`）。于是这个 guard 恒真，先 `alert(后端英文串)` 后 `return`，导致后面的
+`if (data.parsed === false) { … t('oa.quality.parseFailed') … }`
+双语失败文案分支**一次都执行不到**。用户看到的是英文后端串直出的 alert + 空白正文，这既违反 #106 的验收（要中英双语文案、不许后端串当 UI），也是 DS 已裁定的 **B 方案里"parsed=false 要显示明确失败文案"** 未真正实现。
+
+**做法（严格按这个顺序，这就是正向与负向证据）**：
+
+1. **先写"红"的测试**：用**真实失败响应**驱动渲染 —— 即 `parsed:false` 且 `error` 非空（就是后端实际返回的样子），断言渲染产物里出现 `oa.quality.parseFailed` 对应的中英双语文案、且**没有** `undefined`/`NaN`/`0/10`、并且**没有**走 `alert`。此时测试必须**红**。**明确禁止**再用 `error:""` 或任何绕过 guard 的输入去"测渲染分支"——那是掩盖，上一轮就是这么做的，本轮视为不合格。
+2. **再做最小修正**：把 `parsed` 的判定放到 `error` guard **之前**，**两处同改**，例如先 `if (data.parsed === false) { …渲染失败UI并 return; }`，再 `else if (data.error) { alert(data.error); return; }` 处理传输/后端层失败。不许改响应契约（字段名、类型、`parsed`/`score`/`max`/`dimensions` 的语义都不动），不许顺手做别的功能。
+3. **变绿**，并且补一条 `parsed=true` 的 DOM 断言：渲染产物必须出现总分数值与 `/10`、六个维度名、等级；不得出现 `undefined`/`NaN`。
+4. 再补一条 guard 顺序的**回归护栏**：把 `parsed:false` + 非空 `error` 喂进去，断言不触发 `alert`（可在测试里桩掉 `window.alert`/或统计调用），证明失败路径不再被 alert 吞掉。
+
+**DOM 断言的实现方式**：优先复用仓库已有的 headless 设施（`e2e_test.mjs`、`check_html_functions.mjs` 这类，或 node 直接抽取模板里的渲染函数执行并检查输出字符串）。要求是**对渲染产出的 HTML/文本做断言**，不是对接口 JSON 做断言；上一条 #106 契约测试已经存在且保留，两者互补，不许把"接口字段断言"再冒充 DOM。若新增辅助脚本，放在 `tests/`（如 `tests/dom_render_106.mjs`）并让它被 Rust 测试调用。
+
+**可证伪要求（写进 commit 正文）**：
+- 第 1 步的"红"要在修正前真实复现一次（记录输出）。
+- 另外再做一次：把模板 guard 改回旧顺序（或 `git show` 旧版模板），DOM 断言必须**红**；恢复后**绿**。
+- 若顺手改了模板里 i18n 键名（例如把 `oa.quality.parseFailed` 改错），也必须能让测试红 —— 用来证明断言真的锚在文案上而不是恒真。
+
+═══════════════════════════════════════════
+【收尾硬顺序：一件一次，不许攒】
+═══════════════════════════════════════════
+1. `git add <本件文件>` 逐文件（**禁 `git add -A`**）→ commit（正文含：命令原文、退出码、`N passed; M failed`、上面三条可证伪的实测输出摘要）。
+2. **立刻落盘**（两件同名一件，用 `p106c`）：
+   ```
+   cd /root/innoforge && git diff origin/main...HEAD > /root/sync/p106c.patch
+   base64 -w0 /root/sync/p106c.patch > /root/sync/p106c.b64
+   wc -c /root/sync/p106c.patch
+   ```
+3. **立刻追加**一行到 `/root/sync/r28_progress.txt`：`106c done commit=<sha> patch=<字节数>B`
+4. 最后再跑并落盘全量：`cargo fmt --all --check`、`cargo clippy --all-targets -- -D warnings`、`cargo test` 三条命令原文+退出码+通过数写入 `/root/sync/r29_final.txt`。
+
+**先落盘再回报**。容器随时可能被回收，上一轮就是"做完了没落盘"导致整件重做。
+
+【429 处置】遇 `429 Too Many Requests` / `ModelArts.81111`：先 commit + 落 `p106c.patch/.b64` + 写 `/root/sync/r29_state.txt`（已完成到哪一步、sha、剩余待办），再停手。不连续硬打，不假装完成。
+
+【硬红线】不得含案件数据（案号/申请号/公开号/人名/机构名/案件措辞）；测试夹具只用合成串且必须复用 `SYNTHETIC_PUB_NUM_ALLOWLIST` 已有号、**不得新增**；不得改 `tests/no_case_data_in_repo.rs` 或放宽任何守卫；断言必须可证伪，禁止字符串存在性自证；不碰 `docs/errors.md` 与 `docs/plans/STATUS.md`（指挥方负责），`docs/API.md` 若因契约说明需要小改可以改但要说明；桩一律进程内 `bind(0)` 独占 + ready 判定（超时即 `stub did not start`），禁止 `python3` 与把 `free_port()` 结果交给外部进程；`rd_mode` 或任何额外功能一律不做；需求不清就写 `/root/sync/r29_state.txt` 报指挥方，不要自己选功能做。
+
+开工吧：第 0 步先 cat 增量任务书，然后取分支，然后按 1→2→3→4 走。
