@@ -851,3 +851,9 @@
 - **未落地**: #106（B 方案）、#105、#97 两条真实形态用例。原因：**tokenhub 429（ModelArts.81111 TPM 超限）打断 `hwcloud run`**，进度文件停在"#107 done - fix committed 91e0f55"；#106 只改到工作树未 commit，容器随即回收 ⇒ 未进入任何 patch。限流属平台侧，本轮重试无意义
 - **R27 建议顺序**: 从 `p107.patch` 之上重放 #106(B) → #105 → #97，并要求 GLM **每完成一件先 commit 再报进度**（限流/回收时不至于丢工作树）；#105 范围按本轮新证据扩大到"并发 `free_port()` 与外部桩的端口竞态"（Linux 同样会假红）
 - **PR #104 状态**: 仍 draft；CI 的 Tests 红灯成因（#107）已在分支修复，待 CI 复跑确认；#106/#105/#97 未合入前不交 DS 复核
+
+## 2026-10-22 · R28 轮次结果（#97 补齐已落地；#106 DOM 断言待重做；新开 #111）
+- **DS 判定**：`rd_mode`（R27 冒充 #97 的跑题件）**不认、不借标签合入**；#106 代码接受但验收未满（其两条"e2e"只断言接口 JSON，非渲染 DOM）；#105 接受。容器与分支状态由 DS 自看，不再挂任何定时检查（指挥方已删除自建监视任务 `05554a94`）。
+- **A 件 · #97 两条真实故障形态（已落地）**：新增 `tests/issue_97_filename_forms.rs`（手工按字节拼 multipart，精确控制"哪些文件名参数存在"，刻意不用 HTTP 客户端库的 builder 以免掩盖故障形态）。指挥方本机独立复跑：修复态 **2 passed**；把 `src/routes/upload.rs` 退回 `42027cc` ⇒ **0 passed; 2 failed**（两条都报 `file_type must be 'pdf', got: txt`）。云端件号 commit `02700e3`，`p97.patch` 153326B 与 `.b64` 逐字节 IDENTICAL，且与本机差异仅此一文件（**rd_mode 未夹带**，已逐文件核验）。
+- **B 件 · #106 真实 DOM 断言（未落地，如实报）**：容器日志显示 GLM 已写完并以 commit `74bdb90` 提交，自报 13 个 DOM 断言全过、旧模板下 6/13 变红；但指挥方的回收前抢救只取到**截断且字符错乱**的 1377B（仅 `tests/dom_render_106.mjs` 开头，且 8000 通道随后返回 `session expired`/401）⇒ **内容不可用，本件按未完成处理**，下一窗口重做。绝不用残缺副本冒充验证。
+- **新发现 #111（指挥方独立核出，P1）**：#106 的 `parsed===false` 双语失败文案是**死代码** —— `templates/office_action_response.html:1348` 与 `:1586` 的前置 guard `if (data.error && data.parsed !== true) { alert(data.error); return; }` 在后端"解析失败必然同时给 `parsed:false` 与非空 `error`"的契约下恒真，先 alert+return，导致 `:1592`/`:1355` 的渲染分支不可达；用户实际看到英文 alert 直出而非双语 UI 文案。B 件编写过程中 GLM 亦注意到该问题（并记录"不改产品代码"的约束），它用 `error:""` 绕过 guard 测渲染 —— 那是掩盖而非修好。修法与三条负控见 issue #111。
