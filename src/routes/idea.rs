@@ -2383,7 +2383,10 @@ pub async fn list_ai_models(
     let db_settings = s.db.get_all_settings().ok().unwrap_or_default();
     let requested_provider: &str = query.get("provider").map(|s| s.as_str()).unwrap_or("");
 
-    // Helper: create a model-query task for one provider
+    // Helper: create a model-query task for one provider.
+    // Returns a JSON object with either {"status":"ok","models":[...],"count":N}
+    // or {"status":"error","error":"...","models":[],"count":0}.
+    // #98: previously returned None on failure, hiding the error reason.
     fn make_task(
         _name: &str,
         base_url: &str,
@@ -2400,14 +2403,39 @@ pub async fn list_ai_models(
                 .await
             {
                 Ok(r) => r,
-                Err(_) => return None,
+                Err(e) => {
+                    return Some(json!({
+                        "status": "error",
+                        "error": format!("Connection failed: {e}"),
+                        "models": Vec::<serde_json::Value>::new(),
+                        "count": 0
+                    }));
+                }
             };
             if !resp.status().is_success() {
-                return None;
+                let code = resp.status().as_u16();
+                let reason = if code == 401 || code == 403 {
+                    "Authentication failed (invalid API key)".to_string()
+                } else {
+                    format!("HTTP {code}")
+                };
+                return Some(json!({
+                    "status": "error",
+                    "error": reason,
+                    "models": Vec::<serde_json::Value>::new(),
+                    "count": 0
+                }));
             }
             let bytes_data = match resp.bytes().await {
                 Ok(b) => b,
-                Err(_) => return None,
+                Err(e) => {
+                    return Some(json!({
+                        "status": "error",
+                        "error": format!("Failed to read response: {e}"),
+                        "models": Vec::<serde_json::Value>::new(),
+                        "count": 0
+                    }));
+                }
             };
             let data: serde_json::Value = match serde_json::from_slice(&bytes_data) {
                 Ok(d) => d,
@@ -2451,21 +2479,31 @@ pub async fn list_ai_models(
             match tokio::time::timeout(std::time::Duration::from_secs(12), handle).await {
                 Ok(Ok(Some(result))) => {
                     let models = result["models"].as_array().cloned().unwrap_or_default();
-                    Json(json!({
-                        "status": "ok",
-                        "provider": {"name": name, "status": "ok", "count": models.len()},
+                    let result_status = result["status"].as_str().unwrap_or("ok");
+                    let top = if result_status == "ok" && !models.is_empty() {
+                        "ok"
+                    } else {
+                        "error"
+                    };
+                    let mut entry = json!({
+                        "status": top,
+                        "provider": {"name": name, "status": result_status, "count": models.len()},
                         "models": models,
                         "count": models.len()
-                    }))
+                    });
+                    if let Some(e) = result["error"].as_str() {
+                        entry["error"] = json!(e);
+                    }
+                    Json(entry)
                 }
                 Ok(Ok(None)) | Ok(Err(_)) => Json(json!({
-                    "status": "ok",
+                    "status": "error",
                     "provider": {"name": name, "status": "error", "count": 0},
                     "models": Vec::<serde_json::Value>::new(),
                     "count": 0
                 })),
                 Err(_) => Json(json!({
-                    "status": "ok",
+                    "status": "error",
                     "provider": {"name": name, "status": "timeout", "count": 0},
                     "models": Vec::<serde_json::Value>::new(),
                     "count": 0
@@ -2481,7 +2519,10 @@ pub async fn list_ai_models(
             }))
         }
     } else {
-        // Multi-provider mode: query all configured providers
+        // Multi-provider mode: query the configured provider + known providers.
+        // #98: previously only probed KNOWN_AI_PROVIDERS (hardcoded list),
+        // ignoring the user's configured AI_BASE_URL.  Top-level status was
+        // always "ok" even when all providers failed.
         let mut provider_results: Vec<serde_json::Value> = Vec::new();
         let mut tasks: Vec<(
             String,
@@ -2489,7 +2530,34 @@ pub async fn list_ai_models(
             tokio::task::JoinHandle<Option<serde_json::Value>>,
         )> = Vec::new();
 
+        // #98: Probe the configured provider first.
+        let (cfg_base_url, cfg_api_key) = {
+            let cfg = s.config.read().unwrap_or_else(|e| e.into_inner());
+            let base_url = cfg.ai_base_url.clone();
+            let api_key = cfg.api_key_for_provider(&base_url);
+            (base_url, api_key)
+        };
+
+        // Build the list of providers to probe.  Start with the configured
+        // provider, then add known providers that are not already covered.
+        let cfg_lower = cfg_base_url.to_lowercase();
+        let cfg_is_ollama = super::is_ollama_url(&cfg_base_url);
+
+        // Add configured provider (skip if it's just the default Ollama URL,
+        // which is already in KNOWN_AI_PROVIDERS).
+        if !cfg_base_url.is_empty() && !cfg_is_ollama {
+            let name = "Custom".to_string();
+            let base_url_resp = cfg_base_url.clone();
+            let handle = make_task(&name, &cfg_base_url, &cfg_api_key);
+            tasks.push((name, base_url_resp, handle));
+        }
+
         for (name, base_url, db_key) in KNOWN_AI_PROVIDERS {
+            // Skip if this provider's URL is the same as the configured one
+            // (already added above as "Custom").
+            if base_url.to_lowercase() == cfg_lower {
+                continue;
+            }
             let api_key = db_settings.get(*db_key).cloned().unwrap_or_default();
             let is_ollama = *base_url == "http://localhost:11434/v1";
             if !is_ollama && (api_key.is_empty() || api_key == "your-serpapi-key-here") {
@@ -2511,13 +2579,19 @@ pub async fn list_ai_models(
             match tokio::time::timeout(std::time::Duration::from_secs(12), handle).await {
                 Ok(Ok(Some(result))) => {
                     let models = result["models"].as_array().cloned().unwrap_or_default();
-                    provider_results.push(json!({
+                    let status = result["status"].as_str().unwrap_or("ok");
+                    let error = result["error"].as_str().map(|s| s.to_string());
+                    let mut entry = json!({
                         "name": name,
                         "base_url": base_url,
-                        "status": "ok",
+                        "status": status,
                         "models": models,
                         "count": models.len()
-                    }));
+                    });
+                    if let Some(e) = error {
+                        entry["error"] = json!(e);
+                    }
+                    provider_results.push(entry);
                 }
                 Ok(Ok(None)) | Ok(Err(_)) => {
                     provider_results.push(json!({
@@ -2547,8 +2621,15 @@ pub async fn list_ai_models(
             .map(|p| p["count"].as_u64().unwrap_or(0) as usize)
             .sum();
 
+        // #98: top-level status must reflect actual provider states.
+        // "ok" only if at least one provider has status "ok" with count > 0.
+        let any_ok = provider_results
+            .iter()
+            .any(|p| p["status"].as_str() == Some("ok") && p["count"].as_u64().unwrap_or(0) > 0);
+        let top_status = if any_ok { "ok" } else { "error" };
+
         Json(json!({
-            "status": "ok",
+            "status": top_status,
             "providers": provider_results,
             "total_count": total_count
         }))
