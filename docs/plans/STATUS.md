@@ -831,4 +831,15 @@
     - Clippy：`tests/issue_98_models_probe.rs:12` 文档注释列表续行缩进 6 空格触发 `doc_overindented_list_items`。GLM 自称"clippy 零警告"是因为没带 `--all-targets`——不带该标志根本不检查测试文件。指挥方已就地改缩进（**纯空白，未动逻辑**），并在任务书里把"提交前必须 `cargo clippy --all-targets -- -D warnings`"写死。
     - Tests：`tests/issue_68_fake_green.rs::first_run_must_not_show_fake_green` 在 `:70` 变红。根因是 #98 的实现让**首启默认形态**（`AI_BASE_URL` 就是 Ollama）的 `providers` 变成空数组：Custom 分支被 `!cfg_is_ollama` 挡掉，内置 Ollama 行又被"与配置 URL 相同、上面已加过"的 `continue` 挡掉，两个去重判断互相以为对方会补。本机对照：基线 `status:"ok"` + `providers:[Ollama]`（假绿，本就该修）→ 修复后 `status:"error"` + `providers:[]`（假绿没了，条目也没了）。已开 **#107**，并在 #98 上补验收判据：零模型可以为 `error`，但 `providers` 不得为空。
   - **#106（新发现的产品回归）**：#100 把 `score` 从对象改成数值，而 `templates/office_action_response.html` 两处仍按 `data.score || data` 读 `score.total / scores / grade / weaknesses / suggestions / not_applicable / raw` ⇒ 总分显示 `undefined`、雷达图与薄弱点整块消失。后端变诚实、前端退化，且**没有任何测试覆盖这个契约**。已要求补一条"从模板静态抽出 `score.<key>` 键集、逐项断言响应存在"的契约测试（双向负控）。
-- **R26 任务书**: `D:\huawei-devspace\seed\r26_task_brief_2026-10-22.md`（#106 契约修复 + #107 首启去重缝隙 + #105 桩可移植 + #97 两条真实形态 + clippy 必须 `--all-targets`），等下一个容器窗口派发
+- **R26 任务书**: `D:\huawei-devspace\seed\r26_task_brief_v2_2026-10-22.md`（**已按 DS 2026-10-22 10:50 裁定改写**）
+- **DS 裁定 · #106 选 B 不选 A**: 理由是 A 只把 `score` 恢复成旧对象，`parsed=false` 时旧模板仍显示 `undefined`/空分，等于没修 #100 的失败路径；B 才把"分数是数值、维度与失败原因并列"的契约立起来。验收要求：模板两处全改读新形状、`parsed=false` 走中英双语失败文案（`static/i18n.js` 各补一键，禁止 `undefined`/`NaN`/`0/10` 冒充）、契约测试**从模板源码静态抽出**所读键集合（键清单由代码产生，不许人写死）并双负控、headless E2E 断言成功/失败两条路径的真实 DOM 文本（只做了 headless 就如实写明，不许谎报可见实测）、`docs/API.md` 同步、`fmt` 与 `clippy --all-targets` 的退出码进正文
+- **DS 裁定 · 分支归属**: #107、#106(B)、#105、#97 两条真实形态**全部并入本分支 `r25/backend-truthfulness`**（不另开分支），四件全绿后一并交 DS 复核；在此之前 #104 保持 draft
+- **全量枚举 / Failure enumeration**（本机 `cargo test --no-fail-fast`，41 个测试块跑完，rc=101）：**4 条失败，逐条定性**
+  | 失败用例 | 定性 | 依据 |
+  |---|---|---|
+  | `issue_68_fake_green::first_run_must_not_show_fake_green` | **阻塞**，本 PR 引入 | 即 #107；根因是两个去重条件在"配置即 Ollama"上取交集 |
+  | `issue_100_valid_output_parsed_to_numeric_score` | **非阻塞**（测试件，Windows 专属） | 即 #105：桩 `open()` 未指定编码，cp936 下抛 `UnicodeDecodeError` 掐断连接，伪装成产品失败 |
+  | `db_path_resolution::platform_data_dir_used_when_no_env_vars` | **非阻塞**（既有平台相关测试件缺陷） | 断言把 Linux 的 `$HOME/.local/share` 当成"平台数据目录"的通用期望值；Windows 上 `dirs::data_dir()` 返回 `AppData\Roaming` 且不认 `HOME` ⇒ 与 #104 无关，已开 **#108** |
+  | `issue_17_synthetic_fixtures::patent_detail_page_has_22_plus_buttons` | **非阻塞**（脆弱断言，且本次由指挥方自己触发） | 断言"编译期烤进的 git commit == 运行时 `git rev-parse HEAD`"；我在全量跑的过程中提交并推送了一笔 docs，HEAD 前移 ⇒ 旧二进制必红。已开 **#109**，并在此如实记明**这次红是我操作造成的，不是产品问题** |
+  - 结论：**阻塞项只有 #107 一条**，已补进 R26；#108/#109 只留档不并入，避免静默扩大范围
+  - 方法论收获：CI 跑的是裸 `cargo test`，**遇第一个失败 binary 即停**，所以"Tests 红 = 只有 #107"必须靠 `--no-fail-fast` 全量枚举来证，不能拿 CI 的单一红当结论
