@@ -1225,3 +1225,15 @@
 - **负控 / Negative control**: 指挥方本机实测两组。①独立复验不依赖 GLM 的桩：自写 node 桩（UTF-8 正确）打真实端点，退回 `src/routes/ai.rs` 基线 ⇒ 三模式**全部 FAIL**，实际响应 `score=[object Object]`（正是旧假成功形态）；恢复后三模式 PASS（`parsed=true score=8 max=10 dims=6` / `parsed=false + error + raw` / `score=87 out_of_bounds=true`）。②GLM 自带用例在本机 `2 passed; 1 failed`，失败原因在**测试件本身**：桩脚本 `open(content_path, 'r')` 未指定编码，在 Windows 默认 cp936 下读含中文的期望输出抛 `UnicodeDecodeError`、连接被掐断，产品逻辑无关（同条用例在 Linux 与指挥方 node 桩下均通过）。
 - **预防 / Prevention**: ①解析外部模型输出的接口，失败路径必须产出**结构可辨**的失败（独立布尔位 + 原因），不得复用成功字段承载原文；②响应字段要有类型契约，同一字段不得在数值/对象间漂移；③数值要带量程与越界标记，越界不等于失败但要可见；④测试桩读写文本一律显式 `encoding='utf-8'`；⑤指挥方的复验桩要用不同实现（node vs python），避免与产物共享同一缺陷假设。
 - **提交 / Commit**: 见 PR（分支 `r25/backend-truthfulness`，`refs #100`）。
+
+---
+
+## [2026-10-22] ㉖ 改响应契约的两类次生伤害：去重判断互相甩锅、后端变诚实前端退化
+- **严重程度 / Severity**: HIGH（两条都是"修复正确方向、代价是主路径退化"，且都不是新功能的 bug，而是改契约时的连带破坏）
+- **现象 / Symptom**: ①#98 把 `/api/ai/models` 的顶层假绿改掉后，**首启默认形态**（`AI_BASE_URL` 就是 `http://localhost:11434/v1`）返回 `{"status":"error","providers":[],"count":0}`——Ollama 条目整个消失；CI 的 `tests/issue_68_fake_green.rs` 在 `:70` 变红。本机对照：基线是 `status:"ok"` + `providers:[Ollama]`（假绿，本就该修），修复后假绿没了、条目也没了。②#100 把 `oa-quality-score` 的 `score` 从对象改成数值 `8.0`，而 `templates/office_action_response.html` 两处仍按 `var score = data.score || data;` 读 `score.total / scores / grade / weaknesses / suggestions / not_applicable / raw` ⇒ 总分格显示 `undefined`、六维雷达图与薄弱点/建议整块不渲染。
+- **根因 / Root cause**: ①多服务商分支里两个去重判断各自以为对方会补上：Custom 条目被 `if !cfg_base_url.is_empty() && !cfg_is_ollama` 挡掉（配置的就是 Ollama），内置 Ollama 行又被 `if base_url.to_lowercase() == cfg_lower { continue; }`（理由写在注释里："already added above as Custom"）挡掉——**两个条件的成立集合在"配置==Ollama"这一点上重叠，于是谁都不加**。②改后端形状时只验证了"响应更诚实"，没有验证"消费方还能读到"；且**仓库里没有任何测试覆盖这个前后端契约**，所以 CI 全绿也照不出。同一条链上还有测试件问题：`//!` 文档注释列表续行缩进 6 空格触发 `doc_overindented_list_items`，而 GLM 自称"clippy 零警告"是因为命令没带 `--all-targets`——不带它根本不检查测试文件。
+- **修复 / Fix**: 本条**不在本 PR 修**（跟踪 #107 / #106）。要求的方向：①去重落到单一判据——先按归一化 URL 构造待探集合，配置 provider 与内置 provider 命中同一 URL 时合并成一条、`name` 取内置名并加 `configured: true`，且任何情况下 `providers` 不得为空；②后端要么恢复 `score` 为对象、把新增信息以并列新字段暴露（`parsed/max/dimensions/out_of_bounds/warning/raw`），要么同步改模板两处消费点，并在 `parsed=false` 时显示明确失败文案而非 `undefined`。
+- **回归 / Regression**: 要求的**契约测试**不是"响应里有某键"，而是从模板源码静态抽出 `score.<key>` 的键集合，逐个断言响应对象上存在（键清单由代码产生，不由人写死）；`providers` 侧要求 #68 与 #98 两条断言在**同一个响应**上同时成立才算修好。
+- **负控 / Negative control**: 指挥方本机实测——①`AI_BASE_URL=http://localhost:11434/v1` 打真实端点：基线 1 条 `Ollama`、修复后 **0 条**（`providers: []`）；换非 Ollama 地址则两条都在，证明只在首启默认这一支必现。②`issue_68_fake_green` 在本机同代码 `2 passed; 1 failed`，与 CI 同一失败点，非环境问题。③clippy：本机复现 `error: doc list item overindented --> tests\issue_98_models_probe.rs:12:5`，改缩进后待复跑确认。
+- **预防 / Prevention**: ①**改任何对外响应形状，必须同时给出消费方仍成立的证据**——模板/前端在读哪些键要有可执行的契约测试，不能靠人工比对；②两个以上"去重/跳过"条件叠加时，必须写出它们的不相交论证，否则默认会漏在交集点上；③"某列表为空"本身就是需要断言的状态，探测类接口的验收不能只看顶层标志位；④报"lint 干净"必须附**完整命令**与退出码，`cargo clippy` 不带 `--all-targets` 等于没测测试件；⑤修复"假绿灯"时，新状态要保证**信息量不减**：状态更严格不等于条目更少。
+- **提交 / Commit**: 指挥方记录（本 PR 仅含 clippy 缩进的纯空白修正）；产品侧修复见 `refs #107`、`refs #106`。

@@ -827,3 +827,8 @@
 - **未收口 / Open**:
   - `tests/issue_98_models_probe.rs` 与 `tests/issue_100_quality_score_parsing.rs` 写死 `python3` 且 `open()` 未指定编码，Windows 本机分别 `program not found` / `UnicodeDecodeError`（Linux CI 不受影响）→ 另开 issue 跟踪
   - `issue_97_nonascii_filename_pdf_not_rejected_as_encoding` 退回基线仍通过，属"三形态一致性"守卫而非故障复现；真正的复现形态（仅 `filename*`、无 `filename`）目前只由指挥方矩阵覆盖 → 同一 issue 内要求补测试
+  - **CI 两项红灯（本 PR 保持 draft，不合并）**：
+    - Clippy：`tests/issue_98_models_probe.rs:12` 文档注释列表续行缩进 6 空格触发 `doc_overindented_list_items`。GLM 自称"clippy 零警告"是因为没带 `--all-targets`——不带该标志根本不检查测试文件。指挥方已就地改缩进（**纯空白，未动逻辑**），并在任务书里把"提交前必须 `cargo clippy --all-targets -- -D warnings`"写死。
+    - Tests：`tests/issue_68_fake_green.rs::first_run_must_not_show_fake_green` 在 `:70` 变红。根因是 #98 的实现让**首启默认形态**（`AI_BASE_URL` 就是 Ollama）的 `providers` 变成空数组：Custom 分支被 `!cfg_is_ollama` 挡掉，内置 Ollama 行又被"与配置 URL 相同、上面已加过"的 `continue` 挡掉，两个去重判断互相以为对方会补。本机对照：基线 `status:"ok"` + `providers:[Ollama]`（假绿，本就该修）→ 修复后 `status:"error"` + `providers:[]`（假绿没了，条目也没了）。已开 **#107**，并在 #98 上补验收判据：零模型可以为 `error`，但 `providers` 不得为空。
+  - **#106（新发现的产品回归）**：#100 把 `score` 从对象改成数值，而 `templates/office_action_response.html` 两处仍按 `data.score || data` 读 `score.total / scores / grade / weaknesses / suggestions / not_applicable / raw` ⇒ 总分显示 `undefined`、雷达图与薄弱点整块消失。后端变诚实、前端退化，且**没有任何测试覆盖这个契约**。已要求补一条"从模板静态抽出 `score.<key>` 键集、逐项断言响应存在"的契约测试（双向负控）。
+- **R26 任务书**: `D:\huawei-devspace\seed\r26_task_brief_2026-10-22.md`（#106 契约修复 + #107 首启去重缝隙 + #105 桩可移植 + #97 两条真实形态 + clippy 必须 `--all-targets`），等下一个容器窗口派发
