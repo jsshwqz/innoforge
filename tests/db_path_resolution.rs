@@ -102,20 +102,66 @@ fn platform_data_dir_used_when_no_env_vars() {
     let _lock = lock();
 
     let tmp_home = tempfile::tempdir().unwrap();
+    // On Windows, platform_data_dir uses %APPDATA%, not HOME.
+    // Set both so the test is deterministic on every platform.
+    let tmp_appdata = tempfile::tempdir().unwrap();
 
     with_env_var("INNOFORGE_DB", None, || {
         with_env_var("INNOFORGE_HOME", None, || {
             with_env_var("HOME", Some(tmp_home.path().to_str().unwrap()), || {
-                let resolved = resolve_db_path().unwrap();
-                let expected = tmp_home
-                    .path()
-                    .join(".local")
-                    .join("share")
-                    .join("innoforge")
-                    .join("innoforge.db");
-                assert_eq!(
-                    resolved, expected,
-                    "without env vars, db should be in platform data dir under HOME"
+                with_env_var(
+                    "APPDATA",
+                    Some(tmp_appdata.path().to_str().unwrap()),
+                    || {
+                        let resolved = resolve_db_path().unwrap();
+
+                        // Primary assertion: resolve_db_path falls back to
+                        // platform_data_dir + innoforge.db (same-source comparison,
+                        // not a hardcoded Linux XDG path).
+                        let expected = platform_data_dir().join("innoforge.db");
+                        assert_eq!(
+                            resolved, expected,
+                            "without env vars, db should be in platform data dir"
+                        );
+
+                        // General properties that hold on all platforms.
+                        assert!(
+                            resolved.is_absolute(),
+                            "resolved path must be absolute: {}",
+                            resolved.display()
+                        );
+                        assert!(
+                            resolved.to_string_lossy().contains("innoforge"),
+                            "resolved path must contain 'innoforge': {}",
+                            resolved.display()
+                        );
+
+                        // Platform-specific shape verification -- real assertions,
+                        // not #[cfg(windows)] return; skips.
+                        #[cfg(target_os = "linux")]
+                        {
+                            let xdg_expected = tmp_home
+                                .path()
+                                .join(".local")
+                                .join("share")
+                                .join("innoforge")
+                                .join("innoforge.db");
+                            assert_eq!(
+                                resolved, xdg_expected,
+                                "on Linux, db should be in XDG data dir under HOME"
+                            );
+                        }
+
+                        #[cfg(target_os = "windows")]
+                        {
+                            let win_expected =
+                                tmp_appdata.path().join("innoforge").join("innoforge.db");
+                            assert_eq!(
+                                resolved, win_expected,
+                                "on Windows, db should be in %APPDATA%\\innoforge"
+                            );
+                        }
+                    },
                 );
             });
         });
