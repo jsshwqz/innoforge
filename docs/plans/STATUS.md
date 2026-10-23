@@ -883,3 +883,6 @@
 - #82 首版测试恒真（home panic 被删掩盖孤儿），改 `mem::forget(home)`+先 kill 后真负控生效（删 kill ⇒ orphan 可观测 ⇒ 红）。复盘 errors.md ㉛。draft PR #114，本机 fmt/clippy --all-targets/no_case(13) 全绿、#82 测试 2 passed。
 - #83：GLM 已产 commit `1965c81`，3 passed 但强制门 false 仍不红 ⇒ 断言不敏感，**暂缓不 ship**，patch 留本机，下窗口先修负控。#110 未做。
 
+
+## 2026-10-23 · R32：#83 三态文案（可证伪负控坐实）draft PR #121
+- `search.rs` 加 `serpapi_configured` 门（只有真未配置才前置「未配置」Skipped），`serpapi.rs` 加 `SERPAPI_BASE_URL` 打桩；测试锁门极性。本机正确门 2 passed，反转门 2 failed（植入必红达成）。复盘 errors ㉜。
