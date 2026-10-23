@@ -1299,3 +1299,14 @@
 - **预防 / Prevention**: ①测"回收/清理副作用"时，必须确认被清理对象的**消失是且仅是要验的那行代码造成的**——若还有别的机制（如 temp 目录 drop）会掩盖，就得先把掩盖机制去掉（`mem::forget`/持久目录）再断言。②每条回归测试合入前先做一次"删修复行必红"的负控，绿了就说明它没在测东西。
 - **提交 / Commit**: 见 PR #114（分支 `r31/oa-reason-and-orphan`，`refs #82`）。
 
+
+---
+
+## [2026-10-23] ㉜ 文案三态修复两轮做不出"可证伪"测试：第一版断言根本没命中被判分支；正确做法是把"门"的极性本身钉成断言
+- **严重程度 / Severity**: MEDIUM（产品改动方向一直对，但**两轮回归测试都恒真**，若放行等于没有回归防护；上一轮因此拒绝 ship）
+- **现象 / Symptom**: #83（配了 Key 但 0 结果时误报"未配置"）两轮都写了测试且"通过"，但指挥方把 `serpapi_configured` 门反转/关闭后测试**仍绿**（第一版强制 `if false` 仍 3 passed；根因是断言查的整个 body `contains` 且 stub 未真正命中"已配+0 结果"路径）。
+- **根因 / Root cause**: 断言锚在"宽泛现象"（body 不含某词）而非"被判分支的极性"；stub 构造没把请求真实送进 `serpapi_configured==true` 且结果为空的那条路径，于是门怎么改都碰不到断言观察点。
+- **修复 / Fix**: 拆两步（先源 `search.rs`/`serpapi.rs` 提交，再单写测试），并把测试改成**直接锁门极性**：未配 Key ⇒ attempts 必含 serpapi `Skipped「未配置」` 行；已配 Key（`SERPAPI_BASE_URL` 指向本机桩）⇒ 必不含。断言锚在这条 attempts 行的存在性上，正好由 `if !serpapi_configured` 的门决定。
+- **回归 / 负控 / Regression & Negative control**: 正确门 2 passed；把 `if !serpapi_configured` 反转成 `if serpapi_configured` ⇒ **2 failed**（`configured_key_does_not_prepend…` 见错误前置该行、`unconfigured_key_prepends…` 见该行缺失）。植入必红达成（前两轮没有）。
+- **预防 / Prevention**: ①"让它红"的负控必须直接跑一遍（反转被锁分支/门），绿了就是没测到；②断言要锚在**被判代码分支的产物**（某条 attempt 行的有无/某字段值），不要用整串 body 的宽 contains；③stub 必须能构造出"触发该分支"的输入，否则测试与实现各说各话。
+- **提交 / Commit**: 见 PR #121（分支 `r32/issue-83-three-state`，`refs #83`）。

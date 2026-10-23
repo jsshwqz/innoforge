@@ -36,6 +36,14 @@ use std::time::{Duration, Instant};
 /// 常量值由单测 `upstream_timeout_is_tightened_to_spec_1` 锁死，防止无声回退成 30s。
 const UPSTREAM_TIMEOUT_SECS: u64 = 15;
 
+/// SerpAPI 上游端点基址。生产恒为 `https://serpapi.com/search.json`；
+/// 测试可通过环境变量 `SERPAPI_BASE_URL` 覆盖为本地桩地址，
+/// 使「已配 Key + 上游返回 0 结果」的代码路径可被端到端走到（issue 83 三态文案）。
+fn serpapi_base_url() -> String {
+    std::env::var("SERPAPI_BASE_URL")
+        .unwrap_or_else(|_| "https://serpapi.com/search.json".to_string())
+}
+
 /// SerpAPI `google_patents` 引擎封装（付费主源，spec §3）。
 pub struct SerpApiProvider {
     /// 本次请求选用的 Key —— 由调用方从 `AppConfig::next_serpapi_key()` 轮转取得后注入，
@@ -104,7 +112,8 @@ impl SerpApiProvider {
     /// SerpAPI 对参数顺序不敏感，但**锁死顺序**才能让「改造前后请求一致」可被 diff 审查。
     pub(crate) fn search_url(query: &SearchQuery, api_key: &str) -> String {
         format!(
-            "https://serpapi.com/search.json?engine=google_patents&q={}&page={}{}{}{}&api_key={}",
+            "{}?engine=google_patents&q={}&page={}{}{}{}&api_key={}",
+            serpapi_base_url(),
             urlencoding::encode(&render_q(query)),
             page_param(query),
             country_param(query),
@@ -117,7 +126,8 @@ impl SerpApiProvider {
     /// 详情直查（`google_patents_details`）的请求 URL。
     fn details_url(patent_id: &str, api_key: &str) -> String {
         format!(
-            "https://serpapi.com/search.json?engine=google_patents_details&patent_id={}&api_key={}",
+            "{}?engine=google_patents_details&patent_id={}&api_key={}",
+            serpapi_base_url(),
             urlencoding::encode(patent_id),
             api_key
         )
@@ -135,7 +145,8 @@ impl SerpApiProvider {
                 continue;
             }
             let search_url = format!(
-                "https://serpapi.com/search.json?engine=google_patents&q={}&page=1&api_key={}",
+                "{}?engine=google_patents&q={}&page=1&api_key={}",
+                serpapi_base_url(),
                 urlencoding::encode(c),
                 api_key
             );
