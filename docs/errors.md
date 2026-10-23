@@ -1278,6 +1278,18 @@
 
 ---
 
+## [2026-10-23] ㉚ 路由把"按 id 查单条"接到了"列全部"的 handler 上；同类还有两条把某平台/某时刻当普适的测试
+- **严重程度 / Severity**: MEDIUM（#88：接口永远返回全量列表，前端详情页拿不到"这一条"，且泄露无关记录；#108/#109：只在 Linux 绿的测试是假绿，改平台/改时序即假红）
+- **现象 / Symptom**: `/api/oa/history/detail/:id` 无论传什么 id（含不存在的）都返回**全部** OA 记录——`src/common.rs:566-569` 的 `.route("/api/oa/history/detail/:id", get(routes::api_oa_history_all))` 用了列表 handler，`:id` 被丢。另有两条：`db_path_resolution::platform_data_dir_used_when_no_env_vars` 把 Linux XDG `~/.local/share` 写死成"平台数据目录"普适期望，Windows（`%APPDATA%\innoforge`）必红；`issue_17` 把构建期烤进二进制的 `git_commit` 与运行时 `git rev-parse HEAD` 比对，构建与跑测之间只要落一个 commit 就假红。
+- **根因 / Root cause**: ①新增"按 id 查单条"需求时，库里已有 `src/db/oa.rs:134 get_oa_analysis(id)->Result<Option<OaAnalysis>>` 却**无人调用**，接线时图省事复用了列表 handler，路径参数被静默忽略——路由表与 handler 语义没有一致性校验。②测试把"我这台机器/这个时刻的观察"当成不变量：Linux CI 掩盖了平台差异，`env!` 构建期值被拿去比运行时 HEAD。
+- **修复 / Fix**: #88 路由改指新 handler `api_oa_history_detail`（`src/routes/ai.rs`），调 `get_oa_analysis(id)`：`Some`→单条、`None`→`{"status":"error","message":"记录不存在"}`（**绝不回落全量**）、`Err`→查询错误。#108 测试改为"主断言比对 `platform_data_dir()` 同源 + 通用性质（绝对、含 innoforge）+ 真实 `#[cfg(linux)]`/`#[cfg(windows)]` 形状断言"（不是 skip Windows）。#109 改为"非空 + 合法形状（40-hex/unknown）+ 与 `env!("GIT_COMMIT")` 构建期同源比对"，去掉对运行时 HEAD 的耦合。代码/测试均由云端 GLM 在容器 `7b80b6f4`（基线 `aeaf663`=v0.9.19）完成，逐件 commit+落 `pNN.patch`，指挥方拉回本机 Windows 复验。
+- **回归 / Regression**: 新增 `tests/issue_88_oa_history_detail.rs`（2 用例，进程内 server + bind(0)）。本机：修复态 #88 2 passed、db 12 passed、issue_17 6 passed、`no_case_data_in_repo` 13 passed；`fmt --all` 与 `clippy --all-targets -- -D warnings` rc=0。
+- **负控 / Negative control**: 三组各自独立、红得具体。①#88 把路由退回 `api_oa_history_all` ⇒ 两用例 **FAILED**（`non-existent id must return status error, not ok`）。②#108 把同源期望改成 bogus 路径 ⇒ `platform_data_dir_used_when_no_env_vars` **FAILED**（证明它真在校验解析结果，不是恒真）。③#109 把构建期常量换成 dummy sha ⇒ `git_commit ... must match the build-time GIT_COMMIT constant` **FAILED**。恢复后全绿。
+- **预防 / Prevention**: ①接线路由要做"路径参数是否真被消费"的校验——存在 `:id` 却调用无参 handler 是静态可查的反模式；库里已有的按 id 取数函数应当被优先接线。②测试禁止把"当前平台/当前 HEAD 的观察"当不变量：平台相关用 `#[cfg]` 分别真验、构建期信息只与构建期常量同源比对，绝不与运行时工作树状态耦合。③`Doc Staleness` 门禁的"本轮无新增踩坑"豁免只在**确实没有**新认知时使用；有就写。
+- **提交 / Commit**: 见 PR #113（分支 `r30/oa-detail-and-portable-tests`，`refs #88`、`refs #108`、`refs #109`）。
+
+---
+
 ## [2026-10-23] ㉛ "回收子进程防孤儿"的回归测试第一版是恒真的：home 被 panic 顺带删掉，孤儿自崩，杀不杀都绿
 - **严重程度 / Severity**: MEDIUM（不影响产品，但**一条测不到东西的测试会让人误以为 #82 已修**，下一轮就会拿它当证据放行真泄漏）
 - **现象 / Symptom**: #82 第一版修复给 `spawn_test_server` 加了"ready 失败先 `child.kill()` 再 panic"，并配回归测试用 0s 超时触发失败路径、断言端口无人 bind。修复态 2 passed。**但指挥方把 `kill` 删掉重新制造泄漏后，测试仍 2 passed**——植入不红，断言无效。
@@ -1286,3 +1298,4 @@
 - **回归 / 负控 / Regression & Negative control**: `tests/issue_82_no_orphan_on_failure.rs` 现含真负控——本机 Windows 删除 `child.kill()` 后 `no_orphan_when_server_fails_to_start` **FAILED**：`orphan server detected on port 32366 — spawn_test_server_with_timeout failed to kill the child process`。修复态 2 passed。**植入必红达成**（第一版做不到的那一点）。另：清理 Windows 上因测试泄漏的 `innoforge-server.exe` 孤儿（它们锁住 `target/debug/innoforge-server.exe` 导致后续 `cargo` 报 os error 5，是本地复验环境陷阱，非产品问题）。
 - **预防 / Prevention**: ①测"回收/清理副作用"时，必须确认被清理对象的**消失是且仅是要验的那行代码造成的**——若还有别的机制（如 temp 目录 drop）会掩盖，就得先把掩盖机制去掉（`mem::forget`/持久目录）再断言。②每条回归测试合入前先做一次"删修复行必红"的负控，绿了就说明它没在测东西。
 - **提交 / Commit**: 见 PR #114（分支 `r31/oa-reason-and-orphan`，`refs #82`）。
+

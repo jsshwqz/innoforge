@@ -18,7 +18,6 @@ mod common;
 use common::{free_port, spawn_test_server};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::process::Command;
 
 const FIXTURE_ID: &str = "synthetic_fixture_001";
 
@@ -177,7 +176,11 @@ fn patent_detail_page_has_22_plus_buttons() {
         "Idea page must return 200"
     );
 
-    // Verify git_commit matches HEAD
+    // Verify build info injection is working: git_commit must be non-empty,
+    // have valid commit shape (40-char hex or "unknown"), and match the
+    // build-time constant env!("GIT_COMMIT") — NOT the runtime HEAD.
+    // Coupling to runtime HEAD causes false reds when a commit lands between
+    // build and test run (issue 109).
     let version_json =
         reqwest::blocking::get(format!("http://127.0.0.1:{}/api/version", server_port))
             .unwrap()
@@ -185,12 +188,34 @@ fn patent_detail_page_has_22_plus_buttons() {
             .unwrap();
     let v: serde_json::Value = serde_json::from_str(&version_json).unwrap();
     let api_commit = v["git_commit"].as_str().unwrap();
-    let head = Command::new("git")
-        .args(["rev-parse", "HEAD"])
-        .output()
-        .unwrap();
-    let head_str = String::from_utf8(head.stdout).unwrap().trim().to_string();
-    assert_eq!(api_commit, head_str, "git_commit must match HEAD");
+
+    // 1. Non-empty
+    assert!(
+        !api_commit.is_empty(),
+        "git_commit must be non-empty (build info injection must work)"
+    );
+
+    // 2. Valid shape: either "unknown" (no git) or a 40-char lowercase hex sha
+    let is_unknown = api_commit == "unknown";
+    let is_full_sha = api_commit.len() == 40
+        && api_commit
+            .chars()
+            .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c));
+    assert!(
+        is_unknown || is_full_sha,
+        "git_commit must be 'unknown' or a 40-char hex sha, got: {}",
+        api_commit
+    );
+
+    // 3. Same-source comparison: the API value must match the build-time
+    //    constant baked into this test binary by the same build.rs.
+    //    This proves the injection flows correctly from build.rs -> env! -> API
+    //    without depending on the runtime working-tree HEAD.
+    let build_time_commit = env!("GIT_COMMIT");
+    assert_eq!(
+        api_commit, build_time_commit,
+        "git_commit from API must match the build-time GIT_COMMIT constant"
+    );
 
     drop(server);
 }
