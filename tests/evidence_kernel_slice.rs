@@ -3,14 +3,20 @@
 //! 设计与验收标准：`docs/design/evidence-kernel-v2.md` §7。
 //!
 //! ## 负控验证纪律（红 → 绿，PR 正文记录真实执行输出）
-//! - NC1（伪造引文）：把 `verifier.rs` 的核验临时替换为 #79 否决的"数字/子串包含"实现 →
-//!   `nc1_fabricated_citation_must_fail` 必须翻红。
-//! - NC2（删证据）：把 `critic::collect_findings` 临时改为跳过无证据 claim →
-//!   `nc2_deleting_evidence_must_downgrade` 必须翻红。
-//! - NC3（空检索）：把 `rubric::score` 的 grounding 硬门临时移除 →
-//!   `nc3_empty_corpus_must_not_score_high` 必须翻红。
+//! - NC1（伪造引文）：把 `verifier.rs` 的 `CorpusIndex::resolve` 临时替换为 #79 否决的
+//!   "数字包含式检查器"（section_id.contains(number)）→ `nc1_fabricated_citation_must_fail` 必须翻红
+//!   （实测：`[D1:第3段]` 因 "D1:para:35" 含 "3" 被假命中 → 断言"必须 AnchorNotFound"失败）。
+//! - NC2（删证据）：把 `critic::collect_findings` 临时改为静默返回空 →
+//!   `nc2_deleting_evidence_must_downgrade` 必须翻红（实测："删证据后必须降级"失败）。
+//! - NC3（空检索）——不变量 I3 有**两个执行点**，红通道分两半，均已实测翻红：
+//!   - NC3-i：`rubric::score` 的 `InsufficientEvidence => 0.0` 硬门临时改为不归零 →
+//!     单测 `evidence_kernel::rubric::tests::grounding_zero_when_insufficient` 翻红；
+//!   - NC3-ii：`mod.rs` 空语料提前返回的 `rubric: RubricScore::default()` 临时改为满分 →
+//!     `nc3_empty_corpus_must_not_score_high` 翻红。
+//!     教训：只变异 score() 时 nc3 不红——空语料路径提前返回、不经过 score()；
+//!     这正是"负控证伪不了就停下来查"抓出来的盲区。
 //!
-//! 红通道执行方式：临时 patch 对应函数 → `cargo test --test evidence_kernel_slice` → 记录 FAIL → 还原。
+//! 红通道执行方式：临时 patch 对应函数 → `cargo test ...` → 记录 FAIL → `git checkout --` 还原 → 复绿。
 
 use innoforge::evidence_kernel as ek;
 use innoforge::evidence_kernel::model::*;
