@@ -53,6 +53,8 @@ fn detail_returns_single_record_for_existing_id() {
     // Insert a record directly into the server's DB
     let db_path = server
         .home
+        .as_ref()
+        .unwrap()
         .path()
         .join("innoforge.db")
         .to_str()
@@ -120,6 +122,8 @@ fn detail_returns_not_found_for_nonexistent_id() {
     // NOT return this record (or any list) for a non-existent id.
     let db_path = server
         .home
+        .as_ref()
+        .unwrap()
         .path()
         .join("innoforge.db")
         .to_str()
