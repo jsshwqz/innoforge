@@ -12,7 +12,7 @@ pub mod common;
 pub(crate) mod context;
 pub mod db;
 mod docx_export;
-mod error;
+pub mod error;
 mod experiment;
 mod oa_deadline;
 mod orchestrator;
