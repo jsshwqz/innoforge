@@ -83,8 +83,10 @@ data/uploads/
 
 # 测试 fixtures 含案件数据，禁止入库
 # oa_real_case/ 保留忽略；oa_sample/ 放行（合成 fixture，T3 提交）
+# evidence_kernel/ 放行（纯合成 golden 示例报告，EK-v2 提交；内容不含任何案件数据）
 tests/fixtures/*
 !tests/fixtures/oa_sample/
+!tests/fixtures/evidence_kernel/
 
 # 根目录 PDF 与复审草稿禁止入库（T2.1 脱管）
 /*.pdf

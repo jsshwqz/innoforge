@@ -6,7 +6,10 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 ---
 ## [Unreleased]
 
-_暂无条目。_
+### 新增 / Added
+
+- **证据可核验分析内核 v2（垂直切片）**（设计文档 `docs/design/evidence-kernel-v2.md`）：新增 `src/evidence_kernel/` 模块——claim/evidence 数据模型（claim、source_id、locator、quote、support/contradict/insufficient）、锚点解析器（四套遗留引用格式统一为 (doc_id, kind, number) 三元组）、确定性引用核验器（零 AI：三元组精确匹配 + 引文归一化逐字/滑窗近似匹配，失败即 FAIL，全链禁止数字子串包含判据，落实 issue #79）、五维评分（grounding/coverage/legal_reasoning/clarity/consistency，grounding 为乘法门）与自我批判降级循环（未支撑事实句标注【未证实】保留原文）。接入 idea pipeline Finalize 步：核验报告逐句带 E# 证据号追加到分析尾部、`kernel_report` 随快照持久化（不加表）、grounding < 0.5 或证据不足时抑制申请/放弃/转向决策。空检索硬门（InsufficientEvidence）落地：executive 报告不再把无评分折算成 0 分输出"低新颖性"，改为如实输出"证据不足"。
+  *Evidence-verifiable analysis kernel v2 (vertical slice): new `src/evidence_kernel/` module with a claim/evidence data model, an anchor parser unifying four legacy citation formats into (doc_id, kind, number) triples, a deterministic citation verifier (zero AI; exact triple match plus normalised verbatim / sliding-window approximate quote matching, no digit-substring passes — issue #79), a five-dimension rubric where grounding multiplicatively gates the overall score, and a self-critique downgrade loop marking unsupported factual sentences as 【未证实】 in place. Wired into the idea pipeline Finalize step: per-claim E# verification report appended to the analysis, kernel report persisted in the snapshot (no schema change), and decision recommendations suppressed when grounding < 0.5 or evidence is insufficient. The empty-search hard gate lands end to end: executive reports no longer fold a missing score into 0 with a "low novelty" verdict but state insufficient evidence.*
 
 ---
 ## [v0.9.19] - 2026-10-23

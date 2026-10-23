@@ -352,6 +352,10 @@ pub struct PipelineContext {
     #[serde(default)]
     pub fact_check_rejected: bool,
 
+    // EK-v2: 证据核验内核报告（JSON，随快照持久化，不加表——ADR-8）
+    #[serde(default)]
+    pub kernel_report: Option<String>,
+
     // 元数据
     pub current_step: PipelineStep,
     pub step_results: Vec<StepResult>,
@@ -398,6 +402,7 @@ impl PipelineContext {
             decision: None,
             fact_check_report: None,
             fact_check_rejected: false,
+            kernel_report: None,
             current_step: PipelineStep::ParseInput,
             step_results: Vec::new(),
         }
