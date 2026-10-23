@@ -66,7 +66,7 @@ impl Database {
                 Connection::open(path)?
             }
         };
-        conn.execute_batch("PRAGMA journal_mode=WAL;")?;
+        conn.execute_batch("PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL;")?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);",
         )?;
@@ -108,6 +108,14 @@ impl Database {
             [],
             |r| r.get(0),
         )?;
+        Ok(v)
+    }
+
+    /// Read current busy_timeout in milliseconds (for testing/diagnostics).
+    #[allow(dead_code)]
+    pub fn query_busy_timeout(&self) -> Result<i64> {
+        let c = self.conn();
+        let v: i64 = c.query_row("PRAGMA busy_timeout", [], |r| r.get(0))?;
         Ok(v)
     }
 }

@@ -15,7 +15,7 @@ mod docx_export;
 mod error;
 mod experiment;
 mod oa_deadline;
-mod orchestrator;
+pub mod orchestrator;
 pub mod patent;
 pub mod pipeline;
 pub mod rag;

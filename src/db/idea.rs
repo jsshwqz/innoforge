@@ -82,7 +82,6 @@ impl super::Database {
     /// 使用单事务保证要么全部删除成功，要么全部回滚。
     pub fn purge_idea(&self, idea_id: &str) -> Result<()> {
         let mut c = self.conn();
-        let _ = c.busy_timeout(std::time::Duration::from_secs(3));
         let tx = c.transaction()?;
 
         // claim_nodes -> technical_features 为反向依赖，先删子表
