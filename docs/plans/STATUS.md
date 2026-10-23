@@ -4,6 +4,10 @@
 > 本文档追踪项目的所有重大功能开发进度、状态变更和技术债务处理。
 > This document tracks all major feature development progress, status changes, and technical debt handling.
 
+> **当前版本 / Current version**: v0.9.19（main `e1e6bf0`）
+> **单一优先级权威 / Single priority authority**: GitHub issue **#90**（本文件是历史事实与变更记录；**排队与优先级只以 #90 为准**，勿据此文件自行认领顺序）
+> **归档 / Archive**: R24（2026-10-20）以前的轮次计划、任务板、指挥官日志等已移至 `docs/plans/archive/`（44 份，**仅归档、不删除**）；本文件保留现状与近期轮次记录。
+
 ---
 
 ## 状态变更日志 (Status Change Log)
