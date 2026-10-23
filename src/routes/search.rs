@@ -684,6 +684,13 @@ pub async fn api_search_online(
         .unwrap_or_else(|e| e.into_inner())
         .next_serpapi_key();
 
+    // issue 83 三态文案：serpapi_configured 门区分「未配置」与「已配但 0 结果」两条路径，
+    // 使各自的 attempt 文案可被独立断言（而非整 body 宽松 contains）。
+    // 三态：① 未配置 → Skipped + 「未配置 SERPAPI_KEY…」
+    //       ② 已配 + 0 结果 → Success + 「SerpAPI 返回 0 条可用结果…」（不含「未配置」）
+    //       ③ 已配 + 有命中 → Success + hits > 0
+    let serpapi_configured = api_key_opt.is_some();
+
     // ── 精确专利号查询：SerpAPI Details 是本源独占能力，命中即按旧形状直接返回 ──
     // 保持「在降级链之前」的位置：MA2a 没有给 XHR 源做 details 端点（spec §2 只有 query 一个端点）。
     // MA6c：出网前先问一次熔断冷却表（判据与取舍见 [`exact_lookup_allowed`]）——SerpAPI 在
@@ -742,7 +749,7 @@ pub async fn api_search_online(
     breaker::note_attempts(&outcome.attempts);
     outcome.attempts = weave_cooled_attempts(&chain_kinds, &cooled, outcome.attempts);
 
-    if api_key_opt.is_none() {
+    if !serpapi_configured {
         let skipped = serpapi_skipped_outcome("未配置有效 SerpAPI Key，已自动尝试下游回退。");
         let mut attempts = skipped.attempts;
         attempts.append(&mut outcome.attempts);
