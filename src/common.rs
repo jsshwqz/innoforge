@@ -565,7 +565,7 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
         )
         .route(
             "/api/oa/history/detail/:id",
-            get(routes::api_oa_history_all),
+            get(routes::api_oa_history_detail),
         )
         .route(
             "/api/oa/history/:id/delete",

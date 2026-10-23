@@ -1275,3 +1275,15 @@
 - **负控 / Negative control**: 指挥方本机独立跑两组，不是引用自报。①模板退回修复前 ⇒ **FAILED**，逐条指名：`missing zh/en parseFailed "评分解析失败，无法提取数值评分"`、`alert called 1x: Failed to parse model output as JSON: expected value at line 1 column 1`、`regression: alert called on parsed=false path`（两个渲染块 B1/B2 同时红）。②把 i18n 键改成 `oa.quality.parseFaild` ⇒ **FAILED**（证明断言锚在文案上而非恒真）。恢复后 1 passed。本机 `fmt --all` / `clippy --all-targets -- -D warnings` rc=0。
 - **预防 / Prevention**: ①**新增失败分支时必须同时证明它可达**——可达性要有断言，光"代码写在文件里"不算实现；②改动返回契约时，所有以 `error` 为信号的旧 guard 都要重新审一遍语义（"有 error"≠"传输失败"），一处改一处留是同类缺陷；③测渲染就测渲染，**禁止喂 `error:""` 之类特例绕开 guard 让分支变可达**（上一轮就是这么"通过"的，属掩盖）；④断言文案而不是断言"有内容"：把 i18n 键改错必须让测试红，否则这条测试是恒真的；⑤同一函数里"计算 html"与"写入 DOM"成对出现，改一处要检查另一处。
 - **提交 / Commit**: 见 PR（分支 `r25/backend-truthfulness`，`refs #106`、`refs #111`）。
+
+---
+
+## [2026-10-23] ㉚ 路由把"按 id 查单条"接到了"列全部"的 handler 上；同类还有两条把某平台/某时刻当普适的测试
+- **严重程度 / Severity**: MEDIUM（#88：接口永远返回全量列表，前端详情页拿不到"这一条"，且泄露无关记录；#108/#109：只在 Linux 绿的测试是假绿，改平台/改时序即假红）
+- **现象 / Symptom**: `/api/oa/history/detail/:id` 无论传什么 id（含不存在的）都返回**全部** OA 记录——`src/common.rs:566-569` 的 `.route("/api/oa/history/detail/:id", get(routes::api_oa_history_all))` 用了列表 handler，`:id` 被丢。另有两条：`db_path_resolution::platform_data_dir_used_when_no_env_vars` 把 Linux XDG `~/.local/share` 写死成"平台数据目录"普适期望，Windows（`%APPDATA%\innoforge`）必红；`issue_17` 把构建期烤进二进制的 `git_commit` 与运行时 `git rev-parse HEAD` 比对，构建与跑测之间只要落一个 commit 就假红。
+- **根因 / Root cause**: ①新增"按 id 查单条"需求时，库里已有 `src/db/oa.rs:134 get_oa_analysis(id)->Result<Option<OaAnalysis>>` 却**无人调用**，接线时图省事复用了列表 handler，路径参数被静默忽略——路由表与 handler 语义没有一致性校验。②测试把"我这台机器/这个时刻的观察"当成不变量：Linux CI 掩盖了平台差异，`env!` 构建期值被拿去比运行时 HEAD。
+- **修复 / Fix**: #88 路由改指新 handler `api_oa_history_detail`（`src/routes/ai.rs`），调 `get_oa_analysis(id)`：`Some`→单条、`None`→`{"status":"error","message":"记录不存在"}`（**绝不回落全量**）、`Err`→查询错误。#108 测试改为"主断言比对 `platform_data_dir()` 同源 + 通用性质（绝对、含 innoforge）+ 真实 `#[cfg(linux)]`/`#[cfg(windows)]` 形状断言"（不是 skip Windows）。#109 改为"非空 + 合法形状（40-hex/unknown）+ 与 `env!("GIT_COMMIT")` 构建期同源比对"，去掉对运行时 HEAD 的耦合。代码/测试均由云端 GLM 在容器 `7b80b6f4`（基线 `aeaf663`=v0.9.19）完成，逐件 commit+落 `pNN.patch`，指挥方拉回本机 Windows 复验。
+- **回归 / Regression**: 新增 `tests/issue_88_oa_history_detail.rs`（2 用例，进程内 server + bind(0)）。本机：修复态 #88 2 passed、db 12 passed、issue_17 6 passed、`no_case_data_in_repo` 13 passed；`fmt --all` 与 `clippy --all-targets -- -D warnings` rc=0。
+- **负控 / Negative control**: 三组各自独立、红得具体。①#88 把路由退回 `api_oa_history_all` ⇒ 两用例 **FAILED**（`non-existent id must return status error, not ok`）。②#108 把同源期望改成 bogus 路径 ⇒ `platform_data_dir_used_when_no_env_vars` **FAILED**（证明它真在校验解析结果，不是恒真）。③#109 把构建期常量换成 dummy sha ⇒ `git_commit ... must match the build-time GIT_COMMIT constant` **FAILED**。恢复后全绿。
+- **预防 / Prevention**: ①接线路由要做"路径参数是否真被消费"的校验——存在 `:id` 却调用无参 handler 是静态可查的反模式；库里已有的按 id 取数函数应当被优先接线。②测试禁止把"当前平台/当前 HEAD 的观察"当不变量：平台相关用 `#[cfg]` 分别真验、构建期信息只与构建期常量同源比对，绝不与运行时工作树状态耦合。③`Doc Staleness` 门禁的"本轮无新增踩坑"豁免只在**确实没有**新认知时使用；有就写。
+- **提交 / Commit**: 见 PR #113（分支 `r30/oa-detail-and-portable-tests`，`refs #88`、`refs #108`、`refs #109`）。

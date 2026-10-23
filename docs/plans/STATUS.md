@@ -873,3 +873,8 @@
 - **关闭**：#97/#98/#99/#100/#105/#106/#107/#111 八件逐条写"已修+证据+负控"后关闭。**保持 OPEN**：#108/#109/#110（测试可移植/竞态类，本批未修）。
 - **发布**：`Cargo.toml`/`Cargo.lock` 0.9.18→0.9.19；CHANGELOG 新增 `## [v0.9.19] - 2026-10-23`（全部 `[issue NN](../issues/NN)` / `PR [#104](../pull/104)` 链接形态，过 Autoclose Hygiene）；tag `v0.9.19` → `.github/workflows/release.yml` 构建四资产（linux-x86_64 / linux-aarch64 / macos-aarch64 / windows-x86_64）并发布。
 - **仍未做（如实）**：#106 的"可见（非 headless）浏览器 UI 实测"（B 组，task #13）；#110 应用侧 `free_port()` TOCTOU。
+
+## 2026-10-23 · R30：#88 详情路由接错 handler + #108/#109 测试可移植/去脆弱断言（draft PR #113）
+- 容器 `7b80b6f4`（v2 装配 rc=0/99s，`cargo check` 31s），BASELINE=`aeaf663`(v0.9.19)。`hwcloud` openagent 逐件产出 commit+`pNN.patch`（88 `bd4879b`/108 `729339e`/109 `86177d2`），指挥方 `filePath`+base64 拉回，字节精确 7006/10736/13390。
+- 本机 Windows 复验：#88 2 passed（退路由→2 红）、#108 db 12 passed（bogus 期望→1 红；本件此前 Windows 必红）、#109 issue_17 6 passed（dummy sha→1 红）、隐私 13 passed；fmt/clippy `--all-targets` rc=0。最终态 `git apply -R --check p109` 通过。
+- 三件逐件 commit（`ac557f3`/`8f5b1ec`/`f0449c6`）+ docs ㉚，push 开 **draft PR #113**，不合，等复核。**#110 本轮不做**（40+ 文件 free_port 统一，另起）。
