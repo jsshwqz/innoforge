@@ -332,11 +332,23 @@ fn two_test_cases_resolve_different_db_path() {
 
     // Verify each server created its own db file in its own INNOFORGE_HOME.
     assert!(
-        server_a.home.path().join("innoforge.db").exists(),
+        server_a
+            .home
+            .as_ref()
+            .unwrap()
+            .path()
+            .join("innoforge.db")
+            .exists(),
         "Server A should have a db file in its INNOFORGE_HOME"
     );
     assert!(
-        server_b.home.path().join("innoforge.db").exists(),
+        server_b
+            .home
+            .as_ref()
+            .unwrap()
+            .path()
+            .join("innoforge.db")
+            .exists(),
         "Server B should have a db file in its INNOFORGE_HOME"
     );
 

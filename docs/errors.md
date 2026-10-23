@@ -1287,3 +1287,15 @@
 - **负控 / Negative control**: 三组各自独立、红得具体。①#88 把路由退回 `api_oa_history_all` ⇒ 两用例 **FAILED**（`non-existent id must return status error, not ok`）。②#108 把同源期望改成 bogus 路径 ⇒ `platform_data_dir_used_when_no_env_vars` **FAILED**（证明它真在校验解析结果，不是恒真）。③#109 把构建期常量换成 dummy sha ⇒ `git_commit ... must match the build-time GIT_COMMIT constant` **FAILED**。恢复后全绿。
 - **预防 / Prevention**: ①接线路由要做"路径参数是否真被消费"的校验——存在 `:id` 却调用无参 handler 是静态可查的反模式；库里已有的按 id 取数函数应当被优先接线。②测试禁止把"当前平台/当前 HEAD 的观察"当不变量：平台相关用 `#[cfg]` 分别真验、构建期信息只与构建期常量同源比对，绝不与运行时工作树状态耦合。③`Doc Staleness` 门禁的"本轮无新增踩坑"豁免只在**确实没有**新认知时使用；有就写。
 - **提交 / Commit**: 见 PR #113（分支 `r30/oa-detail-and-portable-tests`，`refs #88`、`refs #108`、`refs #109`）。
+
+---
+
+## [2026-10-23] ㉛ "回收子进程防孤儿"的回归测试第一版是恒真的：home 被 panic 顺带删掉，孤儿自崩，杀不杀都绿
+- **严重程度 / Severity**: MEDIUM（不影响产品，但**一条测不到东西的测试会让人误以为 #82 已修**，下一轮就会拿它当证据放行真泄漏）
+- **现象 / Symptom**: #82 第一版修复给 `spawn_test_server` 加了"ready 失败先 `child.kill()` 再 panic"，并配回归测试用 0s 超时触发失败路径、断言端口无人 bind。修复态 2 passed。**但指挥方把 `kill` 删掉重新制造泄漏后，测试仍 2 passed**——植入不红，断言无效。
+- **根因 / Root cause**: `spawn_test_server` 里 `home = fresh_db_dir()` 是个 `TempDir`；ready 失败走 panic 时，函数局部 `home` 随展开被 drop，**临时目录连同服务的 `INNOFORGE_HOME` 一起被删**，被 spawn 的 server 进程因找不到 home 自行崩溃退出。于是"杀没杀子进程"在端口层面**不可观测**——孤儿本来就活不长，测试永远绿。这正是"为过样本挑断言"的同类陷阱：断言锚在了一个被另一条机制（home 删除）掩盖的现象上。
+- **修复 / Fix**: 失败分支改成**先 `child.kill()+wait()` 再 `std::mem::forget(home)`** 后 panic——`mem::forget` 让 home 在展开中**不被删**，从而"未 kill"的孤儿子进程能够继续启动并真正 bind 目标端口，可被端口探测观测。配套 `TestServer.home` 改为 `Option<TempDir>`，`issue_17` 机械适配新字段。
+- **回归 / 负控 / Regression & Negative control**: `tests/issue_82_no_orphan_on_failure.rs` 现含真负控——本机 Windows 删除 `child.kill()` 后 `no_orphan_when_server_fails_to_start` **FAILED**：`orphan server detected on port 32366 — spawn_test_server_with_timeout failed to kill the child process`。修复态 2 passed。**植入必红达成**（第一版做不到的那一点）。另：清理 Windows 上因测试泄漏的 `innoforge-server.exe` 孤儿（它们锁住 `target/debug/innoforge-server.exe` 导致后续 `cargo` 报 os error 5，是本地复验环境陷阱，非产品问题）。
+- **预防 / Prevention**: ①测"回收/清理副作用"时，必须确认被清理对象的**消失是且仅是要验的那行代码造成的**——若还有别的机制（如 temp 目录 drop）会掩盖，就得先把掩盖机制去掉（`mem::forget`/持久目录）再断言。②每条回归测试合入前先做一次"删修复行必红"的负控，绿了就说明它没在测东西。
+- **提交 / Commit**: 见 PR #114（分支 `r31/oa-reason-and-orphan`，`refs #82`）。
+
