@@ -8,12 +8,15 @@
 //!
 //! 垂直切片接缝：`pipeline/steps/finalize.rs`（详见设计文档 §3）。
 
+pub mod ai_repair;
 pub mod anchor;
 pub mod classifier;
 pub mod critic;
 pub mod model;
 pub mod report;
 pub mod rubric;
+#[cfg(test)]
+mod tests_support;
 pub mod verifier;
 
 use crate::pipeline::context::ReferenceChunk;
@@ -59,35 +62,9 @@ pub fn run_kernel_with_repair(
     repair: critic::RepairFn<'_>,
     max_repair_rounds: u32,
 ) -> (KernelReport, String) {
-    if corpus.is_empty() {
-        return (
-            KernelReport {
-                status: KernelStatus::InsufficientEvidence,
-                claims: Vec::new(),
-                metrics: rubric::compute_metrics(&[]),
-                rubric: model::RubricScore::default(),
-                critique: Vec::new(),
-                repair_rounds: 0,
-                insufficient_reason: "证据语料为空（检索结果为空或未取得全文切片）".to_string(),
-            },
-            text.to_string(),
-        );
+    if let Some(out) = insufficient_early_return(text, corpus) {
+        return out;
     }
-    if text.trim().is_empty() {
-        return (
-            KernelReport {
-                status: KernelStatus::InsufficientEvidence,
-                claims: Vec::new(),
-                metrics: rubric::compute_metrics(&[]),
-                rubric: model::RubricScore::default(),
-                critique: Vec::new(),
-                repair_rounds: 0,
-                insufficient_reason: "分析文本为空".to_string(),
-            },
-            text.to_string(),
-        );
-    }
-
     let index = verifier::CorpusIndex::build(corpus);
     let mut current_text = text.to_string();
     let mut rounds = 0u32;
@@ -100,15 +77,98 @@ pub fn run_kernel_with_repair(
         current_text = repair(&current_text, &findings);
         rounds += 1;
         records = verify_text(&current_text, &index);
-        // 降级标注以【未证实】前缀落在句首；标记后 collect_findings 不再重复报告
-        for r in records.iter_mut() {
-            if r.text.starts_with("【未证实】") {
-                r.downgraded = true;
-            }
-        }
+        mark_downgrades(&mut records);
+        findings = critic::collect_findings(&records);
+    }
+    // 终局兜底：修复轮耗尽仍有未支撑句 → 强制降级标注（「修复或降级」，不许悬空）
+    if !findings.is_empty() {
+        current_text = critic::apply_downgrades(&current_text, &findings);
+        records = verify_text(&current_text, &index);
+        mark_downgrades(&mut records);
         findings = critic::collect_findings(&records);
     }
 
+    finalize_report(records, findings, rounds, &index, current_text)
+}
+
+/// 运行内核（AI 修复轮版本，见 `ai_repair` 模块）。
+/// 修复是异步的（一次 AI chat）；产物仍须过同一核验器，修不好照样降级（ADR-1/ADR-6）。
+/// 空语料硬门与降级语义与同步版完全一致。
+pub async fn run_kernel_with_repair_async(
+    text: &str,
+    corpus: &SourceCorpus,
+    repair: ai_repair::AsyncRepairFn<'_>,
+    max_repair_rounds: u32,
+) -> (KernelReport, String) {
+    if let Some(out) = insufficient_early_return(text, corpus) {
+        return out;
+    }
+    let index = verifier::CorpusIndex::build(corpus);
+    let mut current_text = text.to_string();
+    let mut rounds = 0u32;
+
+    let mut records = verify_text(&current_text, &index);
+    let mut findings = critic::collect_findings(&records);
+
+    while !findings.is_empty() && rounds <= max_repair_rounds {
+        current_text = repair(&current_text, &findings, corpus).await;
+        rounds += 1;
+        records = verify_text(&current_text, &index);
+        mark_downgrades(&mut records);
+        findings = critic::collect_findings(&records);
+    }
+    // 终局兜底：与同步版一致——修复无效的句子绝不悬空，一律降级标注
+    if !findings.is_empty() {
+        current_text = critic::apply_downgrades(&current_text, &findings);
+        records = verify_text(&current_text, &index);
+        mark_downgrades(&mut records);
+        findings = critic::collect_findings(&records);
+    }
+
+    finalize_report(records, findings, rounds, &index, current_text)
+}
+
+/// 空语料/空文本硬门（I3）：返回 Some(报告, 原文) 表示提前退出。
+fn insufficient_early_return(text: &str, corpus: &SourceCorpus) -> Option<(KernelReport, String)> {
+    if !corpus.is_empty() && !text.trim().is_empty() {
+        return None;
+    }
+    let reason = if corpus.is_empty() {
+        "证据语料为空（检索结果为空或未取得全文切片）"
+    } else {
+        "分析文本为空"
+    };
+    Some((
+        KernelReport {
+            status: KernelStatus::InsufficientEvidence,
+            claims: Vec::new(),
+            metrics: rubric::compute_metrics(&[]),
+            rubric: model::RubricScore::default(),
+            critique: Vec::new(),
+            repair_rounds: 0,
+            insufficient_reason: reason.to_string(),
+        },
+        text.to_string(),
+    ))
+}
+
+/// 降级标注以【未证实】前缀落在句首；标记后 collect_findings 不再重复报告。
+fn mark_downgrades(records: &mut [ClaimRecord]) {
+    for r in records.iter_mut() {
+        if r.text.starts_with("【未证实】") {
+            r.downgraded = true;
+        }
+    }
+}
+
+/// 收尾：计量、状态（降级史不洗白）、批判清单、评分。
+fn finalize_report(
+    records: Vec<ClaimRecord>,
+    findings: Vec<Finding>,
+    rounds: u32,
+    index: &verifier::CorpusIndex,
+    current_text: String,
+) -> (KernelReport, String) {
     let metrics = rubric::compute_metrics(&records);
     // 降级过的句（即使修复轮后 findings 已空）也必须保持 Degraded——
     // 「修复完就当 Ok」会把降级史洗白（golden 测试曾抓到这个错）
