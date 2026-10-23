@@ -618,7 +618,9 @@ impl AiClient {
                         });
                     }
 
-                    if status.is_server_error() && attempt < max_retries - 1 {
+                    if crate::error::error_kind(status.as_u16()).should_retry()
+                        && attempt < max_retries - 1
+                    {
                         last_err = Some(anyhow::anyhow!("Server error {}", status));
                         continue;
                     }
@@ -727,6 +729,22 @@ impl AiClient {
                     }
                     if !status.is_success() {
                         let raw = resp.text().await.unwrap_or_default();
+                        if crate::error::error_kind(status.as_u16()).should_retry()
+                            && attempt < max_retries - 1
+                        {
+                            tracing::warn!(
+                                "[{}] Anthropic retryable error ({}): {}",
+                                provider.name,
+                                status.as_u16(),
+                                safe_truncate(&raw, 200)
+                            );
+                            last_err = Some(anyhow::anyhow!(
+                                "Anthropic HTTP {}: {}",
+                                status.as_u16(),
+                                safe_truncate(&raw, 200)
+                            ));
+                            continue;
+                        }
                         return Err(anyhow::anyhow!(
                             "Anthropic HTTP {}: {}",
                             status.as_u16(),
@@ -926,7 +944,9 @@ impl AiClient {
                             *w = Some(usage);
                         });
                     }
-                    if status.is_server_error() && attempt < max_retries - 1 {
+                    if crate::error::error_kind(status.as_u16()).should_retry()
+                        && attempt < max_retries - 1
+                    {
                         last_err = Some(anyhow::anyhow!("Server error {}", status));
                         continue;
                     }
