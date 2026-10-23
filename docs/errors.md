@@ -1275,3 +1275,14 @@
 - **负控 / Negative control**: 指挥方本机独立跑两组，不是引用自报。①模板退回修复前 ⇒ **FAILED**，逐条指名：`missing zh/en parseFailed "评分解析失败，无法提取数值评分"`、`alert called 1x: Failed to parse model output as JSON: expected value at line 1 column 1`、`regression: alert called on parsed=false path`（两个渲染块 B1/B2 同时红）。②把 i18n 键改成 `oa.quality.parseFaild` ⇒ **FAILED**（证明断言锚在文案上而非恒真）。恢复后 1 passed。本机 `fmt --all` / `clippy --all-targets -- -D warnings` rc=0。
 - **预防 / Prevention**: ①**新增失败分支时必须同时证明它可达**——可达性要有断言，光"代码写在文件里"不算实现；②改动返回契约时，所有以 `error` 为信号的旧 guard 都要重新审一遍语义（"有 error"≠"传输失败"），一处改一处留是同类缺陷；③测渲染就测渲染，**禁止喂 `error:""` 之类特例绕开 guard 让分支变可达**（上一轮就是这么"通过"的，属掩盖）；④断言文案而不是断言"有内容"：把 i18n 键改错必须让测试红，否则这条测试是恒真的；⑤同一函数里"计算 html"与"写入 DOM"成对出现，改一处要检查另一处。
 - **提交 / Commit**: 见 PR（分支 `r25/backend-truthfulness`，`refs #106`、`refs #111`）。
+
+---
+
+## [2026-10-23] ㉛ "回收子进程防孤儿"的回归测试第一版是恒真的：home 被 panic 顺带删掉，孤儿自崩，杀不杀都绿
+- **严重程度 / Severity**: MEDIUM（不影响产品，但**一条测不到东西的测试会让人误以为 #82 已修**，下一轮就会拿它当证据放行真泄漏）
+- **现象 / Symptom**: #82 第一版修复给 `spawn_test_server` 加了"ready 失败先 `child.kill()` 再 panic"，并配回归测试用 0s 超时触发失败路径、断言端口无人 bind。修复态 2 passed。**但指挥方把 `kill` 删掉重新制造泄漏后，测试仍 2 passed**——植入不红，断言无效。
+- **根因 / Root cause**: `spawn_test_server` 里 `home = fresh_db_dir()` 是个 `TempDir`；ready 失败走 panic 时，函数局部 `home` 随展开被 drop，**临时目录连同服务的 `INNOFORGE_HOME` 一起被删**，被 spawn 的 server 进程因找不到 home 自行崩溃退出。于是"杀没杀子进程"在端口层面**不可观测**——孤儿本来就活不长，测试永远绿。这正是"为过样本挑断言"的同类陷阱：断言锚在了一个被另一条机制（home 删除）掩盖的现象上。
+- **修复 / Fix**: 失败分支改成**先 `child.kill()+wait()` 再 `std::mem::forget(home)`** 后 panic——`mem::forget` 让 home 在展开中**不被删**，从而"未 kill"的孤儿子进程能够继续启动并真正 bind 目标端口，可被端口探测观测。配套 `TestServer.home` 改为 `Option<TempDir>`，`issue_17` 机械适配新字段。
+- **回归 / 负控 / Regression & Negative control**: `tests/issue_82_no_orphan_on_failure.rs` 现含真负控——本机 Windows 删除 `child.kill()` 后 `no_orphan_when_server_fails_to_start` **FAILED**：`orphan server detected on port 32366 — spawn_test_server_with_timeout failed to kill the child process`。修复态 2 passed。**植入必红达成**（第一版做不到的那一点）。另：清理 Windows 上因测试泄漏的 `innoforge-server.exe` 孤儿（它们锁住 `target/debug/innoforge-server.exe` 导致后续 `cargo` 报 os error 5，是本地复验环境陷阱，非产品问题）。
+- **预防 / Prevention**: ①测"回收/清理副作用"时，必须确认被清理对象的**消失是且仅是要验的那行代码造成的**——若还有别的机制（如 temp 目录 drop）会掩盖，就得先把掩盖机制去掉（`mem::forget`/持久目录）再断言。②每条回归测试合入前先做一次"删修复行必红"的负控，绿了就说明它没在测东西。
+- **提交 / Commit**: 见 PR #114（分支 `r31/oa-reason-and-orphan`，`refs #82`）。
