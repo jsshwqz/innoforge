@@ -2275,6 +2275,21 @@ pub async fn api_oa_history_all(State(s): State<AppState>) -> Json<serde_json::V
     }
 }
 
+/// 按 ID 获取单条 OA 分析记录 / Get a single OA analysis record by ID
+///
+/// 与 api_oa_history_all 不同，本 handler 只返回指定 id 的单条记录。
+/// 未命中时返回 {"status":"error","message":"..."}，绝不回落为全量列表。
+pub async fn api_oa_history_detail(
+    Path(id): Path<i64>,
+    State(s): State<AppState>,
+) -> Json<serde_json::Value> {
+    match s.db.get_oa_analysis(id) {
+        Ok(Some(rec)) => Json(json!({"status": "ok", "analysis": rec})),
+        Ok(None) => Json(json!({"status": "error", "message": "记录不存在 / Record not found."})),
+        Err(e) => Json(json!({"status": "error", "message": format!("查询失败: {}", e)})),
+    }
+}
+
 /// 列出某专利的所有 OA 讨论会话
 pub async fn api_oa_discussion_list(
     Path(patent_number): Path<String>,
