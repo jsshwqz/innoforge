@@ -71,14 +71,15 @@ pub fn split_sentences(text: &str) -> Vec<(String, usize)> {
     for (idx, ch) in text.char_indices() {
         let is_terminator = matches!(ch, '。' | '！' | '？' | '!' | '?' | '；' | ';' | '\n');
         if is_terminator {
-            let seg = &text[start..idx + ch.len_utf8()];
+            // char_indices 的 idx 与 start 均在字符边界；get() 形态杜绝裸字节切片（#73）
+            let seg = text.get(start..idx + ch.len_utf8()).unwrap_or_default();
             if seg.trim().chars().any(|c| !c.is_whitespace()) {
                 out.push((seg.trim().to_string(), start));
             }
             start = idx + ch.len_utf8();
         }
     }
-    let tail = &text[start..];
+    let tail = text.get(start..).unwrap_or("");
     if tail.trim().chars().any(|c| !c.is_whitespace()) {
         out.push((tail.trim().to_string(), start));
     }

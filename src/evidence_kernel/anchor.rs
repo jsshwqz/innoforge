@@ -92,12 +92,14 @@ pub fn extract_evidence_refs(text: &str) -> Vec<EvidenceRef> {
         let whole = m.as_str().to_string();
         let anchor = parse_anchor(&whole);
         let quote = if anchor.is_some() {
-            let before = &text[..m.start()];
+            // 索引均来自 regex/find（天然落在字符边界），get() 形态从语法上根除
+            // 非 ASCII panic 可能（#73 防线：禁裸字节切片）
+            let before = text.get(..m.start()).unwrap_or_default();
             let adjacent_close = before.trim_end().ends_with(['”', '」', '』', '’']);
             if adjacent_close {
                 quote_before(before)
             } else {
-                quote_after(&text[m.end()..])
+                quote_after(text.get(m.end()..).unwrap_or_default())
             }
             .unwrap_or_default()
         } else {
@@ -118,9 +120,9 @@ fn quote_after(rest: &str) -> Option<String> {
     for (open, close) in [('“', '”'), ('「', '」'), ('《', '》')] {
         if let Some(start) = rest.find(open) {
             if start <= 12 {
-                let after = &rest[start + open.len_utf8()..];
+                let after = rest.get(start + open.len_utf8()..).unwrap_or_default();
                 if let Some(end) = after.find(close) {
-                    let q = &after[..end];
+                    let q = after.get(..end).unwrap_or_default();
                     if !q.is_empty() && q.chars().count() <= 120 {
                         return Some(q.to_string());
                     }
@@ -134,9 +136,9 @@ fn quote_after(rest: &str) -> Option<String> {
 /// 锚点串之前最近的引文。窗口 = 本句内（先截断到最后一个句读符）再取末尾 120 字，
 /// 防止抓到上一句的引文。
 fn quote_before(before: &str) -> Option<String> {
-    // 截断到本句：最后一个句读符之后的内容
+    // 截断到本句：最后一个句读符之后的内容（find 返回字节索引必在字符边界）
     let this_sentence = match before.rfind(['。', '！', '？', '；', ';', '!', '?', '\n']) {
-        Some(pos) => &before[pos + 1..],
+        Some(pos) => before.get(pos + 1..).unwrap_or_default(),
         None => before,
     };
     let chars: Vec<char> = this_sentence.chars().collect();
@@ -147,9 +149,9 @@ fn quote_before(before: &str) -> Option<String> {
     let window: String = chars[window_start..].iter().collect();
     for (open, close) in [('“', '”'), ('「', '」'), ('《', '》')] {
         if let Some(open_pos) = window.rfind(open) {
-            let inner = &window[open_pos + open.len_utf8()..];
+            let inner = window.get(open_pos + open.len_utf8()..).unwrap_or_default();
             if let Some(end) = inner.find(close) {
-                let q = &inner[..end];
+                let q = inner.get(..end).unwrap_or_default();
                 if !q.is_empty() && q.chars().count() <= 120 {
                     return Some(q.to_string());
                 }
