@@ -9,18 +9,20 @@
 # 合成（SIMULATED_FAIL）输入生成，不含任何案件数据；缺失时本脚本先跑该测试生成，
 # 绝不硬编码案件号/姓名。
 #
-# 幂等性：每次运行清空 /tmp/m2-regression/run-*；启动前清理本脚本上次留下的
-# server（pidfile）；端口被外部进程占用时明确报错退出。
+# 幂等性：启动前清理本脚本上次留下的 server（pidfile）；run-* 按<b>时间戳归档</b>不清空
+# （保留历史供复核），输出文件均写到当次 run 目录，重跑互不覆盖。
+# 端口被外部进程占用时明确报错退出。
 #
 # AI 通道：优先 env（AI_BASE_URL/AI_API_KEY），否则读本机 8080 网关配置的 key
 # （只读取，不打印、不写入仓库/日志）。AI 不可用时脚本照常产出报告（分数为 0
 # 并标注 AI_UNAVAILABLE），不伪装成功。
 #
 # 产出（/tmp/m2-regression/）：
-#   report.md          — 汇总：响应时间 / fact_check 分 / anchor_rate / quote_count
-#   run-<ts>/sse_analysis.txt   — 原始 SSE 流
+#   output.txt         — SSE 原始响应完整落盘（任务书指定路径）
+#   report.md          — 汇总：wall_time / fact_check_score / anchor_rate / quote_count / error_events
+#   run-<ts>/sse_analysis.txt   — 原始 SSE 流（同 output.txt，按次归档）
 #   run-<ts>/analysis_decoded.md— 解码后分析文本
-#   run-<ts>/metrics.json       — 机器可读指标
+#   run-<ts>/metrics.json       — 机器可读指标（含 wall_time_s、error_events）
 #   server.log         — 服务日志
 
 set -u
@@ -102,10 +104,10 @@ rm -rf "$HOME_DIR"; mkdir -p "$HOME_DIR"
     INNOFORGE_AI_GLOBAL_TIMEOUT_SECS=300 \
     AI_BASE_URL="$AI_BASE_URL" \
     AI_MODEL="$AI_MODEL" \
+    AI_MODEL_EXPERT="${AI_MODEL_EXPERT:-$AI_MODEL}" \
     AI_API_KEY="$AI_API_KEY" \
     "$BIN" >> "$LOG" 2>&1
 ) &
-SERVER_PID=$!
 SERVER_PID=$!
 echo "$SERVER_PID" > "$PIDFILE"
 trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
@@ -167,15 +169,17 @@ STREAM_METRICS="$(curl -sN -o "$SSE_OUT" -w "%{http_code} %{time_total}" --max-t
   -d @"$RUN/analysis_body.json" \
   "http://127.0.0.1:$PORT/api/ai/office-action-response/stream")"
 echo "[stream] http/time: $STREAM_METRICS"
+# 任务书指定路径：完整 SSE 响应落盘 /tmp/m2-regression/output.txt
+cp "$SSE_OUT" "$OUT_BASE/output.txt"
 
 # ── 7. 解码 + fact_check 分 + anchor_rate + quote_count ───────────────
-node - "$SSE_OUT" "$RUN" "$AI_MODE" <<'NODE' | tee "$RUN/metrics_stdout.txt"
+node - "$SSE_OUT" "$RUN" "$AI_MODE" "$STREAM_METRICS" <<'NODE' | tee "$RUN/metrics_stdout.txt"
 const fs = require('fs');
-const [ssePath, run, aiMode] = process.argv.slice(2);
+const [ssePath, run, aiMode, streamMetrics] = process.argv.slice(2);
 const raw = fs.readFileSync(ssePath, 'utf8');
-let text = '', hasError = false, errorMsg = '';
+let text = '', hasError = false, errorMsg = '', errorEvents = 0;
 for (const line of raw.split('\n')) {
-  if (line.startsWith('event:')) { if (line.slice(6).trim() === 'error') hasError = true; continue; }
+  if (line.startsWith('event:')) { if (line.slice(6).trim() === 'error') { hasError = true; errorEvents++; } continue; }
   if (!line.startsWith('data:')) continue;
   const d = line.slice(5).replace(/^ /, '');
   if (d === '[DONE]') continue;
@@ -196,9 +200,12 @@ const factSents = sents.filter(s => factPat.test(s));
 const anchored = factSents.filter(s => anchorPat.test(s)).length;
 const quoteCount = (text.match(/“[^”]{1,120}”/g) || []).length;
 
+const wt = Number((streamMetrics || '').trim().split(/\s+/)[1]);
 const metrics = {
   ai_mode: aiMode,
+  wall_time_s: Number.isFinite(wt) && wt > 0 ? +wt.toFixed(2) : null,
   stream_error: hasError ? errorMsg || true : false,
+  error_events: errorEvents,
   decoded_chars: text.length,
   newlines: (text.match(/\n/g) || []).length,
   fact_check_score: factScore,
@@ -215,7 +222,6 @@ NODE
 SUBMIT_HTTP="${SUBMIT_METRICS%% *}"
 SUBMIT_TIME="${SUBMIT_METRICS#* }"
 STREAM_HTTP="${STREAM_METRICS%% *}"
-STREAM_TIME="${STREAM_METRICS#* }"
 cat > "$OUT_BASE/report.md" <<EOF
 # M2-E 回归报告（$TS）
 
@@ -223,9 +229,14 @@ cat > "$OUT_BASE/report.md" <<EOF
 - 端口：$PORT（隔离 home：$HOME_DIR）
 - AI 通道：$AI_BASE_URL / $AI_MODEL — $AI_MODE
 - 提交 /api/idea/submit：HTTP $SUBMIT_HTTP，${SUBMIT_TIME}s（idea_id=${IDEA_ID:-无}）
-- 分析流 /api/ai/office-action-response/stream：HTTP $STREAM_HTTP，${STREAM_TIME}s
-- 指标：见 $RUN/metrics.json（fact_check 分 / anchor_rate / quote_count / 流错误标记）
-- 产物：$RUN/sse_analysis.txt、$RUN/analysis_decoded.md、$RUN/server 侧日志 $LOG
+- 分析流 /api/ai/office-action-response/stream：HTTP $STREAM_HTTP
+- 五项指标（详见 $RUN/metrics.json）：
+  - wall_time（分析流墙钟）：$(echo "$STREAM_METRICS" | awk '{print $2}')s
+  - fact_check_score：$(node -e "try{const j=require(process.argv[1]);console.log(j.fact_check_score)}catch(e){console.log('N/A')}" "$RUN/metrics.json")
+  - anchor_rate：$(node -e "try{const j=require(process.argv[1]);console.log(j.anchor_rate)}catch(e){console.log('N/A')}" "$RUN/metrics.json")
+  - quote_count：$(node -e "try{const j=require(process.argv[1]);console.log(j.quote_count)}catch(e){console.log('N/A')}" "$RUN/metrics.json")
+  - error_events：$(node -e "try{const j=require(process.argv[1]);console.log(j.error_events)}catch(e){console.log('N/A')}" "$RUN/metrics.json")
+- 产物：$OUT_BASE/output.txt（完整 SSE 响应）、$RUN/analysis_decoded.md、服务日志 $LOG
 EOF
 echo "[done] 报告：$OUT_BASE/report.md"
 tail -40 "$RUN/metrics_stdout.txt" 2>/dev/null || true
