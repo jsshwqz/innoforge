@@ -42,6 +42,40 @@ pub(crate) fn escape_prompt_material(value: &str) -> String {
         .replace('>', "&gt;")
 }
 
+/// SSE 单行载荷编码：JSON 字符串转义（换行/引号/控制字符全部安全），
+/// 前端 `sseDecode()`（`JSON.parse` + 失败回退原样）还原。
+///
+/// 解决 EK-P6：逐 chunk 换行曾被替换成空格，破坏句边界（句子黏连、
+/// 锚点与句对不齐、落库文本无法做逐句证据核验）。累积侧永远用原文，
+/// 仅传输层编码。与 chat 流的 `\\n` 字面量半编码（前端不解码、显示残留反斜杠）
+/// 不兼容——OA 链路三个流统一走本函数。
+fn sse_encode(text: &str) -> String {
+    serde_json::to_string(text).unwrap_or_else(|_| "\"\"".to_string())
+}
+
+#[cfg(test)]
+mod sse_tests {
+    use super::sse_encode;
+
+    #[test]
+    fn sse_payload_is_single_line_and_roundtrips() {
+        for sample in [
+            "第一行\n第二行\r\n第三行",
+            "含\"引号\"与\\反斜杠",
+            "中文锚点 [D1:第0035段]。\n\n下一句",
+            "",
+        ] {
+            let encoded = sse_encode(sample);
+            assert!(
+                !encoded.contains('\n') && !encoded.contains('\r'),
+                "SSE 载荷必须单行: {encoded:?}"
+            );
+            let decoded: String = serde_json::from_str(&encoded).expect("JSON 往返");
+            assert_eq!(decoded, sample);
+        }
+    }
+}
+
 /// Keep externally supplied material distinct from the server's fixed instructions.
 /// `label` must always be a server-owned, fixed description rather than request data.
 fn bounded_reference_material(label: &str, content: &str) -> String {
@@ -1718,9 +1752,10 @@ pub async fn api_ai_office_action_response_stream(
                                 yield Ok(Event::default().event("error").data(chunk));
                                 return;
                             }
-                            let sanitized = chunk.replace(['\n', '\r'], " ");
-                            full_text.push_str(&sanitized);
-                            yield Ok(Event::default().data(sanitized));
+                            // EK-P6 修复：累积原文（核验/落库需要句边界），
+                            // SSE 载荷用 JSON 编码保单行（前端 sseDecode 还原）
+                            full_text.push_str(&chunk);
+                            yield Ok(Event::default().data(sse_encode(&chunk)));
                         }
                         None => break,
                     }
@@ -1732,9 +1767,8 @@ pub async fn api_ai_office_action_response_stream(
         }
         let fact_report = check_oa_analysis(&full_text, &fact_references, &fact_my_patent);
         let fact_text = format!("\n\n## AI 事实核查（请人工复核）\n{}", format_report(&fact_report));
-        let fact_sse = fact_text.replace(['\n', '\r'], " ");
         full_text.push_str(&fact_text);
-        yield Ok(Event::default().data(fact_sse));
+        yield Ok(Event::default().data(sse_encode(&fact_text)));
 
         // P0-3c: 转述冲突检测 — refs 有全文(>500字)时自动触发
         if conflict_refs_info.len() > 500 {
@@ -1742,9 +1776,8 @@ pub async fn api_ai_office_action_response_stream(
             match conflict_ai.detect_paraphrase_conflicts(&conflict_oa_text, &conflict_refs_info).await {
                 Ok(conflict_report) if conflict_report.trim().len() > 20 => {
                     let conflict_text = format!("\n\n---\n\n## 转述冲突检测（可主张审查员认定错误）\n\n{}", conflict_report);
-                    let conflict_sse = conflict_text.replace(['\n', '\r'], " ");
                     full_text.push_str(&conflict_text);
-                    yield Ok(Event::default().data(conflict_sse));
+                    yield Ok(Event::default().data(sse_encode(&conflict_text)));
                     tracing::info!("[OA-CONFLICT-STREAM] 检测完成, report_len={}", conflict_report.len());
                 }
                 Ok(_) => {
@@ -1912,10 +1945,9 @@ pub async fn api_ai_oa_generate_response_letter(
                 yield Ok(Event::default().event("error").data(chunk));
                 return;
             }
-            // Keep paragraph boundaries while preserving a single SSE data line.
-            let escaped = chunk.replace('\r', "").replace('\n', "\\n");
-            full_text.push_str(&escaped);
-            yield Ok(Event::default().data(escaped));
+            // EK-P6：累积原文（句边界完整），SSE 载荷 JSON 编码
+            full_text.push_str(&chunk);
+            yield Ok(Event::default().data(sse_encode(&chunk)));
         }
         // R6c: 事实核查已由 pipeline 内嵌，SSE 层不再重复追加
         yield Ok(Event::default().event("done").data("[DONE]"));
@@ -2214,18 +2246,16 @@ pub async fn api_ai_oa_discuss(
                 yield Ok(Event::default().event("error").data(chunk));
                 return;
             }
-            // SSE safety: sanitize \n/\r to prevent protocol breakage
-            let sanitized = chunk.replace(['\n', '\r'], " ");
-            accumulated_response.push_str(&sanitized);
-            yield Ok(Event::default().data(sanitized));
+            // EK-P6 修复：累积原文，SSE 载荷 JSON 编码（前端 sseDecode 还原）
+            accumulated_response.push_str(&chunk);
+            yield Ok(Event::default().data(sse_encode(&chunk)));
         }
 
         // MC2: 讨论回复事实核查——附到讨论消息后
         let disc_fact_report = check_oa_analysis(&accumulated_response, &analysis_text, &accumulated_response);
         if !disc_fact_report.warnings.is_empty() {
             let fact_text = format!("\n\n## AI 事实核查（请人工复核）\n{}", format_report(&disc_fact_report));
-            let fact_sse = fact_text.replace(['\n', '\r'], " ");
-            yield Ok(Event::default().data(fact_sse));
+            yield Ok(Event::default().data(sse_encode(&fact_text)));
         }
 
         // P0: done 事件携带 discussion_id，确保前端可捕获

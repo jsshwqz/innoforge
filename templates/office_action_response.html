@@ -482,6 +482,14 @@
 
     // ── Helpers ──
     function escapeHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+    // SSE 载荷解码：后端 OA 链路三个流统一 JSON 编码（保单行、留换行）。
+    // 兼容旧载荷（不以引号开头）与历史 \n 字面量（答复书流旧编码），失败回退原文。
+    function sseDecode(d) {
+        if (d && d.charAt(0) === '"') {
+            try { return JSON.parse(d); } catch (e) { return d; }
+        }
+        return typeof d === 'string' ? d.replace(/\\n/g, '\n') : d;
+    }
 
     function getPatentNumberFromUrl() {
         // 优先从 URL 参数读取
@@ -2277,7 +2285,7 @@
                             break;
                         }
                         // Regular text chunk
-                        fullText += data;
+                        fullText += sseDecode(data);
                         if (streamDiv) {
                             streamDiv.textContent = fullText;
                             streamDiv.scrollTop = streamDiv.scrollHeight;
@@ -2679,7 +2687,7 @@
                             done = true;
                             break;
                         }
-                        aiText += data;
+                        aiText += sseDecode(data);
                         if (aiDiv) aiDiv.innerHTML = renderMarkdown(aiText) + '<span style="color:#f0883e;">▌</span>';
                     } else if (line === '' && currentEvent) {
                         currentEvent = '';
@@ -2862,7 +2870,7 @@
                             return;
                         }
                         if (data === '[DONE]') { done = true; break; }
-                        fullText += data.replace(/\\n/g, '\n');
+                        fullText += sseDecode(data);
                         if (streamDiv) {
                             streamDiv.textContent = fullText;
                             if (overlayDiv) { overlayDiv.scrollTop = overlayDiv.scrollHeight; }
