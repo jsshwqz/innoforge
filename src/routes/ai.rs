@@ -1757,7 +1757,16 @@ pub async fn api_ai_office_action_response_stream(
                             full_text.push_str(&chunk);
                             yield Ok(Event::default().data(sse_encode(&chunk)));
                         }
-                        None => break,
+                        None => {
+                            // M2-A：通道关闭而全文为空 = 静默失败，必须以 error 事件可见
+                            if full_text.trim().is_empty() {
+                                yield Ok(Event::default().event("error").data(
+                                    "[ERROR] 主分析流结束但无任何内容——请检查模型通道或超时配置",
+                                ));
+                                return;
+                            }
+                            break;
+                        }
                     }
                 }
                 _ = heartbeat.tick() => {

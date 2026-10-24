@@ -1,6 +1,6 @@
 //! 聊天接口 / Chat interface methods
 
-use super::client::{safe_truncate, timeouts, AiClient, AiProviderMode, Message};
+use super::client::{safe_truncate, AiClient, AiProviderMode, Message};
 use anyhow::Result;
 use std::time::Duration;
 
@@ -147,9 +147,13 @@ impl AiClient {
         }
 
         let provider = self.primary.clone();
-        // OA 讨论和分析使用 ANALYSIS HTTP 超时（180s）；异步任务由全局 300 秒守卫包裹。
+        // M2-A（基线失败 #1）：不再给流式请求挂 180s 总超时——thinking 模型首 token
+        // 可能 >180s，总超时会把"慢思考"当"挂了"掐死且静默无错。改为：
+        //   - 传输层总兜底 = 全局超时（global_timeout_secs，env 可覆盖）；
+        //   - 首 token 用 stream_first_token_timeout_secs（默认 300s，env 可覆盖）；
+        //   - 任何异常终止（首 token 超时/中段错误/零内容结束）必须发 [ERROR]。
         let client = reqwest::Client::builder()
-            .timeout(timeouts::ANALYSIS)
+            .timeout(Duration::from_secs(AiClient::global_timeout_secs()))
             .no_proxy()
             .build()
             .unwrap_or_else(|_| self.client.clone());
@@ -215,8 +219,31 @@ impl AiClient {
                         }
 
                         let mut buf = String::new();
+                        // M2-A：首 token 超时 + 异常终止可见 + 零内容显式报错
+                        let ft = Duration::from_secs(
+                            crate::ai::client::stream_first_token_timeout_secs(),
+                        );
+                        let mut sent_any = false;
+                        let mut first_chunk = true;
                         loop {
-                            match resp.chunk().await {
+                            let next = if first_chunk {
+                                first_chunk = false;
+                                match tokio::time::timeout(ft, resp.chunk()).await {
+                                    Ok(c) => c,
+                                    Err(_) => {
+                                        let _ = tx
+                                            .send(format!(
+                                                "[ERROR] 首个响应片段超时（{}s）——模型长时间无输出；可调 INNOFORGE_AI_FIRST_TOKEN_TIMEOUT_SECS",
+                                                crate::ai::client::stream_first_token_timeout_secs()
+                                            ))
+                                            .await;
+                                        return;
+                                    }
+                                }
+                            } else {
+                                resp.chunk().await
+                            };
+                            match next {
                                 Ok(Some(chunk)) => {
                                     buf.push_str(&String::from_utf8_lossy(&chunk));
                                     while let Some(pos) = buf.find('\n') {
@@ -234,13 +261,21 @@ impl AiClient {
                                                             if !text.is_empty() {
                                                                 // SSE safety: sanitize \n/\r to prevent protocol breakage
                                                                 let sanitized = text.replace(['\r', '\n'], " ");
+                                                                sent_any = true;
                                                                 if tx.send(sanitized).await.is_err() {
                                                                     return;
                                                                 }
                                                             }
                                                         }
                                                     }
-                                                    Some("message_stop") => return,
+                                                    Some("message_stop") => {
+                                                        if !sent_any {
+                                                            let _ = tx
+                                                                .send("[ERROR] 流结束但未输出任何内容（message_stop 前零内容）".to_string())
+                                                                .await;
+                                                        }
+                                                        return;
+                                                    }
                                                     Some("error") => {
                                                         let msg = val["error"]["message"]
                                                             .as_str()
@@ -260,8 +295,16 @@ impl AiClient {
                                     }
                                 }
                                 Ok(None) => break,
-                                Err(_) => break,
+                                Err(e) => {
+                                    let _ = tx.send(format!("[ERROR] 流中断: {}", e)).await;
+                                    return;
+                                }
                             }
+                        }
+                        if !sent_any {
+                            let _ = tx
+                                .send("[ERROR] 流结束但未输出任何内容".to_string())
+                                .await;
                         }
                     } else {
                         // ── OpenAI-compatible streaming (DeepSeek, OpenAI, etc.) ──
@@ -312,9 +355,32 @@ impl AiClient {
 
                         let mut buf = String::new();
                         let mut total_chars: usize = 0;
+                        // M2-A：首 token 超时 + 异常终止可见 + 零内容显式报错
+                        let ft = Duration::from_secs(
+                            crate::ai::client::stream_first_token_timeout_secs(),
+                        );
+                        let mut sent_any = false;
+                        let mut first_chunk = true;
 
                         loop {
-                            match resp.chunk().await {
+                            let next = if first_chunk {
+                                first_chunk = false;
+                                match tokio::time::timeout(ft, resp.chunk()).await {
+                                    Ok(c) => c,
+                                    Err(_) => {
+                                        let _ = tx
+                                            .send(format!(
+                                                "[ERROR] 首个响应片段超时（{}s）——模型长时间无输出；可调 INNOFORGE_AI_FIRST_TOKEN_TIMEOUT_SECS",
+                                                crate::ai::client::stream_first_token_timeout_secs()
+                                            ))
+                                            .await;
+                                        return;
+                                    }
+                                }
+                            } else {
+                                resp.chunk().await
+                            };
+                            match next {
                                 Ok(Some(chunk)) => {
                                     let chunk_str = String::from_utf8_lossy(&chunk);
                                     if total_chars == 0 && chunk_str.trim().len() > 10 {
@@ -339,6 +405,11 @@ impl AiClient {
                                         buf = buf[pos + 1..].to_string();
 
                                         if line == "data: [DONE]" {
+                                            if !sent_any {
+                                                let _ = tx
+                                                    .send("[ERROR] 流结束但未输出任何内容（[DONE] 前零内容）".to_string())
+                                                    .await;
+                                            }
                                             return;
                                         }
                                         if let Some(json_str) = line.strip_prefix("data: ") {
@@ -357,6 +428,7 @@ impl AiClient {
                                                     if !content.is_empty() {
                                                         // SSE safety: sanitize \n/\r to prevent protocol breakage
                                                         let sanitized = content.replace(['\r', '\n'], " ");
+                                                        sent_any = true;
                                                         if tx.send(sanitized).await.is_err() {
                                                             return;
                                                         }
@@ -387,6 +459,7 @@ impl AiClient {
                                                         );
                                                         // SSE safety: sanitize \n/\r to prevent protocol breakage
                                                         let sanitized = text.replace(['\n', '\r'], " ");
+                                                        sent_any = true;
                                                         if tx.send(sanitized).await.is_err() {
                                                             return;
                                                         }
@@ -403,8 +476,16 @@ impl AiClient {
                                     );
                                     break;
                                 }
-                                Err(_) => break,
+                                Err(e) => {
+                                    let _ = tx.send(format!("[ERROR] 流中断: {}", e)).await;
+                                    return;
+                                }
                             }
+                        }
+                        if !sent_any {
+                            let _ = tx
+                                .send("[ERROR] 流结束但未输出任何内容".to_string())
+                                .await;
                         }
                     } // end OpenAI-compatible branch
                 },

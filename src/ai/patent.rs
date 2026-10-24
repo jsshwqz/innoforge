@@ -1131,6 +1131,18 @@ impl AiClient {
                 }
             }
 
+            // M2-A：任何路径下主分析为空都必须可见地失败——
+            // "0 chunk 0 error" 静默结束是 M1 基线失败 #1
+            if full_text.trim().is_empty() {
+                let _ = tx
+                    .send(
+                        "[ERROR] 主分析无输出（流在产出任何内容前结束）——请检查模型通道/超时配置"
+                            .to_string(),
+                    )
+                    .await;
+                return;
+            }
+
             if !is_deep {
                 return;
             }
