@@ -103,7 +103,8 @@ pub fn check_oa_analysis(ai_output: &str, references: &str, my_patent: &str) -> 
     // M2-B（基线失败 #2）：空/纯空白输入必须显式失败。旧行为是走完全部检测器、
     // warnings 为空 → compute_score([])=100（"未检测到明显事实性问题"）——空输入默认
     // 通过，与 #79 否决的假绿同族。M1 实测：主分析静默失败后空文本拿了 100/100。
-    if ai_output.trim().is_empty() {
+    // M2 审查 P1-7：is_blank 覆盖 Unicode 空白与零宽字符（trim 不算零宽）。
+    if is_blank_incl_zero_width(ai_output) {
         report.warnings.push(FactWarning {
             category: "无内容可核查".to_string(),
             description: "分析文本为空（或仅空白）：事实核查无对象，评分 0——请先确认主分析已产出。"
@@ -267,6 +268,13 @@ fn run_c_module_checks(ai_output: &str) -> Vec<FactWarning> {
 }
 
 /// 根据警告列表计算可信度评分
+/// M2 审查 P1-7：空白判定覆盖零宽字符（U+200B/200C/200D/FEFF）与 Unicode 空白。
+fn is_blank_incl_zero_width(s: &str) -> bool {
+    s.chars().all(|c| {
+        c.is_whitespace() || matches!(c, '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{FEFF}')
+    })
+}
+
 fn compute_score(warnings: &[FactWarning]) -> f64 {
     let mut penalty = 0.0;
     for w in warnings {

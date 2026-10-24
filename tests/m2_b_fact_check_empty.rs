@@ -33,6 +33,18 @@ fn empty_input_must_not_pass() {
 }
 
 #[test]
+fn zero_width_only_input_must_not_pass() {
+    // M2 审查 P1-7：零宽字符（trim 不视为空白）不得绕过空输入检查
+    for zw in ["\u{200B}", "\u{200B}\u{200C}\u{200D}", "\u{FEFF} \u{200B}"] {
+        let r = check_oa_analysis(zw, "对比文件原文", "本申请原文");
+        assert_eq!(r.score, 0.0, "零宽输入评分必须为 0，got {}", r.score);
+        assert!(!r.warnings.is_empty(), "零宽输入必须显式警告");
+        let text = format_report(&r);
+        assert!(!text.contains("未检测到"), "零宽输入不得假绿: {text}");
+    }
+}
+
+#[test]
 fn clean_nonempty_text_keeps_full_score() {
     // 非空且无风险模式的文本仍应 100 分并显示"未检测到"（正常路径不误伤）
     let r = check_oa_analysis(

@@ -27,8 +27,10 @@ enum StubMode {
     SlowFirstToken(u64),
     /// 发一个空 role 帧后静默 seconds 秒再关闭（无内容帧不得骗过首内容截止期）
     RoleThenSilence(u64),
-    /// 一个内容 chunk 后**不发 [DONE]** 直接关闭（截断形态）
+    /// 一个内容 chunk 后**不发 [DONE]** 直接关闭（网关省略 [DONE] 形态）
     PartialCloseNoDone,
+    /// 一个内容 chunk 后挂起不关连接（总超时形态）
+    PartialThenHang,
     /// 立即 [DONE]，零内容
     EmptyDone,
     /// 两个内容 chunk 后 [DONE]
@@ -96,6 +98,14 @@ fn start_stub(mode: StubMode) -> u16 {
                     let _ = stream.write_all(body.as_bytes());
                     let _ = stream.flush();
                     // 不发 [DONE]，直接关闭
+                }
+                StubMode::PartialThenHang => {
+                    let body =
+                        "data: {\"choices\":[{\"delta\":{\"content\":\"M2A 挂起前内容。\"}}]}\n\n";
+                    let _ = stream.write_all(body.as_bytes());
+                    let _ = stream.flush();
+                    // 挂起 60s（> 测试设的 2s 全局超时），让 client 总超时先触发
+                    std::thread::sleep(std::time::Duration::from_secs(60));
                 }
                 StubMode::EmptyDone => {
                     let _ = stream.write_all(b"data: [DONE]\n\n");
@@ -192,7 +202,8 @@ fn m2a_four_terminations() {
         &resp[..resp.len().min(300)]
     );
 
-    // ── ③ 部分内容后无 [DONE] 关闭：截断必须可见，且已收内容保留 ──
+    // ── ③ 部分内容后无 [DONE] 关闭（M2 审查 P0-3 修订）：已有内容视为完成——
+    // 不报 error（网关可不发 [DONE]），已收内容保留 ──
     let partial_port = start_stub(StubMode::PartialCloseNoDone);
     let app_port_partial = common::free_port();
     let _s3 = common::spawn_test_server_with_timeout(
@@ -210,14 +221,14 @@ fn m2a_four_terminations() {
     );
     let resp = post_stream(app_port_partial, &minimal_body());
     assert!(
-        resp.contains("event:error") && resp.contains("完成标记"),
-        "③无 [DONE] 中断必须以 error 事件可见，实际响应片段：{}",
+        !resp.contains("event:error"),
+        "③有内容无 [DONE] 不得报错（P0-3），实际响应片段：{}",
         &resp[..resp.len().min(300)]
     );
     let decoded_partial = decode_sse(&resp);
     assert!(
         decoded_partial.contains("M2A 截断前内容"),
-        "③截断前已收内容必须保留，decoded={decoded_partial}"
+        "③已收内容必须保留，decoded={decoded_partial}"
     );
 
     // ── ④ 正常完成：内容照发、无 error ──
@@ -263,6 +274,36 @@ fn m2a_empty_done_stream() {
         resp.contains("event:error") && resp.contains("未输出任何内容"),
         "空流必须以 error 事件可见，实际响应片段：{}",
         &resp[..resp.len().min(300)]
+    );
+}
+
+/// M2 审查 P0-2：部分内容后总超时（单一 deadline = reqwest client 全局超时）
+/// 必须以 [ERROR] 可见，不得静默结束。
+#[test]
+fn m2a_global_timeout_with_partial_content_visible() {
+    let port = start_stub(StubMode::PartialThenHang);
+    let app_port = common::free_port();
+    let _s = common::spawn_test_server_with_timeout(
+        app_port,
+        60,
+        tempfile::tempdir().expect("dir"),
+        &[
+            ("AI_BASE_URL", &format!("http://127.0.0.1:{port}/v1")),
+            ("AI_API_KEY", "stub-key"),
+            ("INNOFORGE_AI_FIRST_TOKEN_TIMEOUT_SECS", "10"),
+            ("INNOFORGE_AI_GLOBAL_TIMEOUT_SECS", "2"),
+        ],
+    );
+    let resp = post_stream(app_port, &minimal_body());
+    eprintln!(
+        "GT_DBG full_resp_len={} resp={:?}",
+        resp.len(),
+        &resp[..resp.len().min(1200)]
+    );
+    assert!(
+        resp.contains("event:error") && resp.contains("[ERROR]"),
+        "全局超时（有部分内容）必须以 error 事件可见，实际响应片段：{}",
+        &resp[..resp.len().min(400)]
     );
 }
 

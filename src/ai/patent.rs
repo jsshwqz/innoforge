@@ -1192,7 +1192,12 @@ impl AiClient {
             let mut stream2 = self_clone.send_chat_stream(critique_messages, 0.3);
             while let Some(chunk) = stream2.recv().await {
                 if chunk.starts_with("[ERROR]") {
-                    let _ = tx.send(chunk).await;
+                    // M2 审查 P0-3：自检（第二轮）失败不得丢弃已完成的主分析——
+                    // 主分析 chunk 已发出，转发 [ERROR] 会让路由层整段丢弃。
+                    // 降级为可见提示后正常收尾。
+                    tracing::warn!("OA deep 自检失败（主分析已完整产出）: {}", chunk);
+                    let note = "\n\n---\n\n> ⚠️ 审查员视角自检未完成（模型调用失败），以上主分析不受影响。".to_string();
+                    let _ = tx.send(note).await;
                     return;
                 }
                 if tx.send(chunk).await.is_err() {

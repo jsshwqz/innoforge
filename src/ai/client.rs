@@ -442,9 +442,10 @@ impl AiClient {
     }
 
     /// Create a new AiClient with analysis timeout (for patent/idea analysis).
-    /// Shorthand for `clone_with_timeout(timeouts::ANALYSIS)`.
+    /// M2 审查 P1-4：接 `INNOFORGE_AI_ANALYSIS_TIMEOUT_SECS`（默认仍 180，
+    /// `timeouts::ANALYSIS` 常量不动）——让"180s 可覆盖"名副其实。
     pub fn with_analysis_timeout(&self) -> Self {
-        self.clone_with_timeout(timeouts::ANALYSIS)
+        self.clone_with_timeout(Duration::from_secs(analysis_http_timeout_secs()))
     }
 
     /// 创建新的 AiClient 实例并指定超时 / Clone with a different timeout.
