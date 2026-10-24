@@ -100,6 +100,20 @@ const STOP_WORDS: &[&str] = &[
 pub fn check_oa_analysis(ai_output: &str, references: &str, my_patent: &str) -> FactCheckReport {
     let mut report = FactCheckReport::default();
 
+    // M2-B（基线失败 #2）：空/纯空白输入必须显式失败。旧行为是走完全部检测器、
+    // warnings 为空 → compute_score([])=100（"未检测到明显事实性问题"）——空输入默认
+    // 通过，与 #79 否决的假绿同族。M1 实测：主分析静默失败后空文本拿了 100/100。
+    if ai_output.trim().is_empty() {
+        report.warnings.push(FactWarning {
+            category: "无内容可核查".to_string(),
+            description: "分析文本为空（或仅空白）：事实核查无对象，评分 0——请先确认主分析已产出。"
+                .to_string(),
+            severity: "致命".to_string(),
+        });
+        report.score = 0.0;
+        return report;
+    }
+
     // ① 技术领域一致性校验
     let domain_report = check_tech_domain(ai_output, references);
     report.warnings.extend(domain_report.warnings);
@@ -268,7 +282,11 @@ fn compute_score(warnings: &[FactWarning]) -> f64 {
 
 /// 将校验报告格式化为人类可读的 Markdown 文本（追加到分析结果末尾）
 pub fn format_report(report: &FactCheckReport) -> String {
+    // M2-B 双保险：零警告但零分 = 无内容场景，绝不能写成"未检测到问题"
     if report.warnings.is_empty() {
+        if report.score <= 0.0 {
+            return "无内容可核查（分析文本为空），评分 0。".to_string();
+        }
         return format!(
             "可信度评分：{:.0}/100。未检测到明显事实性问题。",
             report.score
