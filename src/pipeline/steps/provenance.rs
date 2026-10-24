@@ -250,13 +250,22 @@ pub fn append_decision_section(ctx: &mut PipelineContext) {
     ctx.ai_analysis.push_str(&section);
 }
 
-/// 完整执行三阶段 / Run all three phases
-pub fn run_provenance_pipeline(ctx: &mut PipelineContext) {
+/// 完整执行三阶段 / Run all three phases。
+///
+/// `allow_decision=false`（EK-v2 决策门触发：证据不足或实证度过低）时跳过决策生成，
+/// 追加抑制说明——没有证据地基就不给「申请/放弃/转向」建议（设计文档 §3-4）。
+pub fn run_provenance_pipeline(ctx: &mut PipelineContext, allow_decision: bool) {
     annotate_provenance(ctx);
-    if let Some(decision) = generate_decision(ctx) {
-        ctx.decision = Some(decision);
+    if allow_decision {
+        if let Some(decision) = generate_decision(ctx) {
+            ctx.decision = Some(decision);
+        }
+        append_decision_section(ctx);
+    } else {
+        ctx.ai_analysis.push_str(
+            "\n\n---\n\n## 决策建议\n\n（证据核验未达门槛：实证度过低或证据不足，本次不输出申请/放弃/转向建议。详见上方证据核验报告。）\n",
+        );
     }
-    append_decision_section(ctx);
 }
 
 #[cfg(test)]
@@ -464,7 +473,7 @@ mod tests {
         ctx.evidence_chain
             .push(make_test_evidence("ev-3", "CN003", "专利C", 0.5));
 
-        run_provenance_pipeline(&mut ctx);
+        run_provenance_pipeline(&mut ctx, true);
 
         // Provenance annotations should be created
         assert!(!ctx.provenance_annotations.is_empty());
