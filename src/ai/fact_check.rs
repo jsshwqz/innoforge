@@ -232,6 +232,49 @@ pub fn check_oa_analysis_from_pdfs(
     report
 }
 
+/// C2/C12 检测前剥离"非作者主张"文本，消除两类结构性误伤（M3-20261025 实测发现）：
+///
+/// 1. **尾部自报告段**：`check_oa_analysis` 的报告会追加到分析文本末尾，答复书门禁
+///    （MC2）对同一文本复检时，报告内的违规示例文本（如「属于常规设置」）会再次
+///    触发 C12——检查器被自己的报告自触发。
+/// 2. **引号段**：驳斥式分析的正当结构是"先复述审查员/对比文件原文再驳斥"，引述
+///    使用 「…」/“…”/"…"（ASCII）。审查员的核心主张往往正是"公知常识/常规选择"，
+///    不剥离引号则任何认真复述审查观点的分析都无法通过答复书门禁（阈值 65）。
+///
+/// 只影响 C2（零举证计数）与 C12（答复禁令）两个 needle 型检查；C1 引用真实性等
+/// 需要原文对照的检查不受影响。
+fn strip_non_authorial_for_c_checks(text: &str) -> String {
+    // 1) 删除尾部自报告段（从首个 "AI 事实核查" 标题起截断）
+    let body = match text.find("AI 事实核查") {
+        Some(idx) => &text[..idx],
+        None => text,
+    };
+
+    // 2) 删除引号段：成对 「…」、“…”、"…"；上限 300 字防未闭合引号吞掉全文
+    let mut out = String::with_capacity(body.len());
+    let chars: Vec<char> = body.chars().collect();
+    let openers = ['「', '“', '"'];
+    let closers = ['」', '”', '"'];
+    let mut i = 0;
+    while i < chars.len() {
+        if openers.contains(&chars[i]) {
+            let close = closers[openers.iter().position(|&o| o == chars[i]).unwrap()];
+            let mut j = i + 1;
+            while j < chars.len() && chars[j] != close && j - i <= 300 {
+                j += 1;
+            }
+            if j < chars.len() && chars[j] == close {
+                // 成对引号段整体剥离
+                i = j + 1;
+                continue;
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
+}
+
 /// C1-C13 纯函数检测层：调用各检测模块，将结果转为 FactWarning 列表
 ///
 /// 此函数是 fact_check 与 C1-C13 纯函数模块之间的适配层。
@@ -239,8 +282,11 @@ pub fn check_oa_analysis_from_pdfs(
 fn run_c_module_checks(ai_output: &str) -> Vec<FactWarning> {
     let mut warnings = Vec::new();
 
+    // 引述/自报告剥离后再做 needle 型检查（见函数文档）
+    let authorial = strip_non_authorial_for_c_checks(ai_output);
+
     // C2: 零举证检测
-    let zero_ev = crate::ai::zero_evidence::check_zero_evidence(ai_output);
+    let zero_ev = crate::ai::zero_evidence::check_zero_evidence(&authorial);
     if zero_ev.count > 0 {
         warnings.push(FactWarning {
             category: "C2零举证".to_string(),
@@ -250,7 +296,7 @@ fn run_c_module_checks(ai_output: &str) -> Vec<FactWarning> {
     }
 
     // C12: 答复禁令自查
-    let prohibitions = crate::ai::prohibition_check::check_prohibitions(ai_output);
+    let prohibitions = crate::ai::prohibition_check::check_prohibitions(&authorial);
     for v in &prohibitions.violations {
         let severity = if v.severity == crate::ai::prohibition_check::ProhibitionSeverity::Fatal {
             "致命"
@@ -931,8 +977,58 @@ mod tests {
 
     // ── 综合校验测试 ──
 
+    // M3-20261025：C2/C12 对引述与自报告的剥离行为（strip_non_authorial_for_c_checks）
     #[test]
-    fn test_full_check_combines_all() {
+    fn c12_quoted_examiner_assertion_does_not_fire() {
+        // 复述审查员观点（引号内含禁令短语）不应触发 C12
+        let text = "审查员引用的关键原文：「区别仅在于……属于常规设置」。申请人不同意该认定：对比文件1未公开电缸直行程驱动，参见说明书第[0002]段。";
+        let warnings = run_c_module_checks(text);
+        assert!(
+            !warnings.iter().any(|w| w.category.contains("C12禁令-P1")),
+            "引号内的审查员断言不应触发 P1，实际：{:?}",
+            warnings
+        );
+    }
+
+    #[test]
+    fn c12_own_voice_assertion_still_fires() {
+        // 己方口吻（无引号）的常规性让步必须继续触发 P1
+        let text = "该区别特征属于常规设置，无需创造性劳动。";
+        let warnings = run_c_module_checks(text);
+        assert!(
+            warnings.iter().any(|w| w.category.contains("C12禁令-P1")),
+            "己方让步表述应触发 P1，实际：{:?}",
+            warnings
+        );
+    }
+
+    #[test]
+    fn trailing_self_report_section_ignored() {
+        // 尾部自报告段内的违规示例文本不应再次触发（门禁复检自触发回归）
+        let body = "权利要求1与对比文件1相比，区别特征在于电缸直行程调节，参见说明书第[0002]段。";
+        let self_report = "\n\n## AI 事实核查（请人工复核）\n可信度评分：40/100。\n检测到违规文本「属于常规设置」、公知常识。";
+        let warnings = run_c_module_checks(&(body.to_string() + self_report));
+        assert!(
+            warnings.is_empty(),
+            "自报告段不应触发 C2/C12，实际：{:?}",
+            warnings
+        );
+    }
+
+    #[test]
+    fn unclosed_quote_does_not_swallow_body() {
+        // 未闭合引号不得吞掉后续正文（防剥离过宽导致漏检）
+        let text = "审查员称「如下：区别特征属于常规设置，且公知常识结合显而易见。后续正文本领域技术人员容易想到。";
+        let warnings = run_c_module_checks(text);
+        assert!(
+            warnings.iter().any(|w| w.category.contains("C2零举证")),
+            "未闭合引号后的正文仍应被检查，实际：{:?}",
+            warnings
+        );
+    }
+
+    #[test]
+    fn full_check_combines_all() {
         let ai_output = "D1涉及消防车领域。对比文件第[0099]段公开了电缸。流量变化1%导致温度波动50度。建议修改为：通过以太网总线连接。";
         let references = "背景技术：城市集中供热管网。说明书第[0001]段。";
         let patent = "说明书：电性连接，闭环控制。";
