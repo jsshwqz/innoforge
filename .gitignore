@@ -74,7 +74,9 @@ skills/
 innoforge-skill/
 mobile/
 harmonyos/
-scripts/
+scripts/*
+# M2-E 回归脚本（合成夹具驱动，无案件数据）例外入库
+!scripts/m2_regression.sh
 self-review.bat
 
 # 用户数据与导出（禁止入库，防止公网泄露）
