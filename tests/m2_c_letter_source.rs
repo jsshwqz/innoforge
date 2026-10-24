@@ -7,6 +7,7 @@
 //!   正文首部可见横幅"主分析缺失"；
 //! - `oa_text_fallback`：分析 <50 字、OA 兜底 → meta + 横幅；
 //! - 双空 → error。
+//!
 //! meta 事件走 SSE `event:meta`（前端解析器只认 error/done/data，未知事件安全跳过）。
 //!
 //! 负控（红通道）：stash `src/routes/ai.rs`（回到无来源标记版本）→
