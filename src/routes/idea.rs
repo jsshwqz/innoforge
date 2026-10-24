@@ -435,6 +435,60 @@ pub async fn api_idea_evidence(
     }
 }
 
+/// GET /api/idea/:id/kernel-report — 证据内核 v2 的结构化核验报告（EK-v2）。
+///
+/// 数据源是 pipeline 快照里的 `ctx.kernel_report`（Finalize 步写入；ADR-8 不加表）。
+/// 三种明确状态：ok（带报告）/ no_snapshot / no_kernel_report（旧快照或 quick 模式），
+/// 不把"没有"伪装成"通过"。
+pub async fn api_idea_kernel_report(
+    State(s): State<AppState>,
+    Path(idea_id): Path<String>,
+) -> Json<serde_json::Value> {
+    // idea 存在性先行（与 evidence 路由一致的错误语义）
+    match s.db.get_idea(&idea_id) {
+        Ok(Some(_)) => {}
+        _ => return Json(json!({"status": "error", "message": "创意不存在"})),
+    }
+    let (context_json, current_step) = match s.db.load_pipeline_snapshot(&idea_id) {
+        Ok(Some(snapshot)) => snapshot,
+        Ok(None) => {
+            return Json(json!({
+                "status": "no_snapshot",
+                "message": "该创意尚无流水线快照（未跑过分析）"
+            }))
+        }
+        Err(e) => return Json(json!({"status": "error", "message": e.to_string()})),
+    };
+    let ctx = match serde_json::from_str::<crate::pipeline::context::PipelineContext>(&context_json)
+    {
+        Ok(ctx) => ctx,
+        Err(e) => {
+            return Json(json!({
+                "status": "error",
+                "message": format!("快照解析失败: {e}")
+            }))
+        }
+    };
+    match ctx.kernel_report {
+        Some(kr) => match serde_json::from_str::<serde_json::Value>(&kr) {
+            Ok(report) => Json(json!({
+                "status": "ok",
+                "current_step": current_step,
+                "kernel_report": report
+            })),
+            Err(e) => Json(json!({
+                "status": "error",
+                "message": format!("内核报告反序列化失败: {e}")
+            })),
+        },
+        None => Json(json!({
+            "status": "no_kernel_report",
+            "message": "快照无内核报告（旧版本快照或分析未到达 Finalize）",
+            "current_step": current_step
+        })),
+    }
+}
+
 // ── Idea multi-round chat ────────────────────────────────────────────
 
 /// 将创意记忆条目渲染为注入 system context 的文本块。
