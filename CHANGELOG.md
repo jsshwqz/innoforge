@@ -4,6 +4,25 @@
 All notable changes are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
+## [v0.9.20] - 2026-10-25
+
+### 修复 / Fixed
+
+- **流式终止语义修正（M2-A）**：答复书 SSE 流不再以固定 180s 总超时截断，改为首内容截止期（防空 role 帧欺骗）；无 `[DONE]` 截断必发 `[ERROR]` 事件，四种终止路径全覆盖。
+- **空文本事实核查显式失败（M2-B）**：`check_oa_analysis` 空输入不再默认 100 分（假绿），改判 0 分 + 无内容警告。
+- **答复书来源标记三态可见（M2-C）**：meta 事件走 SSE `event:meta`（前端安全跳过未知事件），正文不再泄漏来源元数据到导出/DOCX；deep 自检失败不丢主分析、分析超时 env 接线、零宽空白清理。
+- **事实核查门禁误伤修复（C2/C12）**：检测前剥离引述段与自报告段，避免对复述审查员观点的结构性误判。
+- **后端真相性三件（R30）**：详情路由兜底、平台路径测试可移植、构建期 commit 解耦。
+
+### 新增 / Added
+
+- **M2-E 回归脚本**（`scripts/m2_regression.sh`）：release 构建 + 3000 端口隔离启动 + SSE 分析捕获 + fact_check/anchor_rate/quote_count 指标 + 幂等可重跑，合成夹具零案件数据。
+
+### 文档 / Docs
+
+- 方向冻结令写入 AGENTS.md（§〇）；旧计划归档至 `docs/plans/archive/`；再对齐复核稿合并。
+
+---
 ## [Unreleased]
 
 ### 新增 / Added
