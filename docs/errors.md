@@ -1299,3 +1299,14 @@
 - **预防 / Prevention**: ①测"回收/清理副作用"时，必须确认被清理对象的**消失是且仅是要验的那行代码造成的**——若还有别的机制（如 temp 目录 drop）会掩盖，就得先把掩盖机制去掉（`mem::forget`/持久目录）再断言。②每条回归测试合入前先做一次"删修复行必红"的负控，绿了就说明它没在测东西。
 - **提交 / Commit**: 见 PR #114（分支 `r31/oa-reason-and-orphan`，`refs #82`）。
 
+
+---
+
+## [2026-10-24] ㉜ 负控变异必须打在"不变量的实际执行点"上；blocking reqwest 绝不能进 tokio 异步上下文
+- **严重程度 / Severity**: MEDIUM（前者让负控恒绿、给出虚假的测试有效性证明；后者让集成测试以 runtime panic 收场，并连带孤儿进程锁死二进制）
+- **现象 / Symptom**: ①EK-v2 的 NC3（空检索不得高分）第一轮红通道：把 `rubric::score` 的 `InsufficientEvidence => 0.0` 硬门改为不归零后，目标测试**依然绿**——负控证伪失败。②集成测试 `#[tokio::test]` 里调用含 `reqwest::blocking` 的测试 harness（就绪探测），直接 panic：`Cannot drop a runtime in a context where blocking is not allowed`；panic 路径泄漏的 `innoforge-server.exe` 孤儿锁住 `target/debug/innoforge-server.exe`，后续 cargo 报 os error 5。
+- **根因 / Root cause**: ①空语料路径在 `run_kernel_with_repair` 里**提前返回**（rubric 直接给全零 default），根本不经过 `score()`——变异打在一个该路径不会执行的函数上，等于没变异。不变量 I3 有两个执行点（提前返回 + score 硬门），负控只打了其中一个。②`reqwest::blocking` 内部自建当前线程 runtime 并在 drop 时要求可阻塞上下文；在 `#[tokio::test]` 的 worker 上下文里 drop 它必然 panic。这是"同步工具混进异步世界"的组合陷阱。
+- **修复 / Fix**: ①NC3 红通道改为双执行点：变异 `score()` 硬门 → 单测 `grounding_zero_when_insufficient` 红；变异提前返回的 rubric 为满分 → 集成 `nc3_empty_corpus_must_not_score_high` 红。两者都实测翻红后才算证伪闭环（写入 `tests/evidence_kernel_slice.rs` 文件头）。②集成测试改全同步（`#[test]` + `reqwest::blocking`），不再嵌 tokio；测试前 `taskkill /IM innoforge-server.exe` 清孤儿。
+- **负控 / Negative control**: NC3 两半的红通道均为真实执行输出（见 PR #125 正文）；blocking-reqwest 问题的复现即那次 panic 本身（backtrace 定位到 `reqwest::blocking::client::ClientHandle::new`）。
+- **预防 / Prevention**: ①写负控前先回答"这个不变量由哪几行代码强制执行"，变异必须覆盖**每一个**执行点；只绿一半的红通道不算证伪。②测试里 harness 含 blocking HTTP 客户端时，测试本体禁止 `#[tokio::test]`；反之需要异步断言时，把 spawn/就绪（同步）与断言（`Runtime::new().block_on`）分开在同步测试里两段调用。
+- **提交 / Commit**: 见 PR #125（分支 `r33/evidence-kernel`）。

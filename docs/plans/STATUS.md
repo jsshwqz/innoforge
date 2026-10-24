@@ -883,3 +883,10 @@
 - #82 首版测试恒真（home panic 被删掩盖孤儿），改 `mem::forget(home)`+先 kill 后真负控生效（删 kill ⇒ orphan 可观测 ⇒ 红）。复盘 errors.md ㉛。draft PR #114，本机 fmt/clippy --all-targets/no_case(13) 全绿、#82 测试 2 passed。
 - #83：GLM 已产 commit `1965c81`，3 passed 但强制门 false 仍不红 ⇒ 断言不敏感，**暂缓不 ship**，patch 留本机，下窗口先修负控。#110 未做。
 
+
+## 2026-10-24 · R33：证据可核验分析内核 v2 垂直切片（draft PR #125，分支 `r33/evidence-kernel`，基线 `e1e6bf0` = v0.9.19）
+- **交付**：设计文档 `docs/design/evidence-kernel-v2.md`（问题清单 EK-P1..P8 / 数据契约 / ADR×8 / FMEA×8）→ `src/evidence_kernel/` 八模块（锚点三元组解析 / 确定性核验器：精确匹配+归一化逐字+滑窗近似，禁子串包含 / 句级分类 / 五维评分 grounding 乘法门 / 降级循环）→ 接入 idea pipeline Finalize（决策门 grounding<0.5 抑制；executive 报告不再折零）→ AI 修复轮（锚点白名单 prompt + 终局降级兜底）→ `GET /api/idea/:id/kernel-report` 四态端点。
+- **负控**：NC1/NC2/NC3 全部真实翻红后复绿（NC3 双执行点教训见 errors.md ㉜）；合成案件 golden `tests/fixtures/evidence_kernel/example_report.md`。
+- **决策**：grounding<0.5 决策门与 v1 零 AI 降级经用户确认维持；AI 修复轮 opt-in 接线待拍板（需把 AppConfig 传入 finalize）。
+- **CI 门禁新增认知**：Autoclose Hygiene 禁 CHANGELOG 裸 `#NN`；Doc Staleness 要求改代码必须同 PR 更新 errors.md/STATUS.md（本条即履约）。
+- **后续**：R33-OA 把内核接进 OA 答复链路（SSE 换行破坏句对齐先修，落库前跑同一核验器），分支 `r33/evidence-oa`。
