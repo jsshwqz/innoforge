@@ -1,15 +1,18 @@
 //! M2-A（基线失败 #1）回归：流式主分析的终止必须可见。
 //!
-//! 三态：
-//! 1. 慢首 token（thinking 形态）→ 首 token 超时必须以 [ERROR] 事件可见，不许静默；
-//! 2. 空流（[DONE] 前零内容）→ 必须以 [ERROR] 事件可见；
-//! 3. 正常流 → 内容 chunk 正常到达，无 error 事件。
+//! 四种终止（M2 独立审计要求的覆盖面）：
+//! ① 首内容超时（thinking 卡死/纯静默）→ `[ERROR] 首个内容超时`；
+//! ② 空 role 帧后静默（无内容帧不能骗过首内容截止期）→ 同①；
+//! ③ 部分内容后连接关闭而无 [DONE] → `[ERROR] 流在完成标记前中断`，且已收内容保留；
+//! ④ 正常完成（内容 + [DONE]）→ 无 error 事件。
+//! 另：空流（[DONE] 前零内容）→ `[ERROR] 未输出任何内容`。
+//! 错误事件格式：SSE `event:error`，data 以 `[ERROR]` 开头（前端既有 error 分支可消费）。
 //!
-//! 负控（红通道，PR 记录）：把 `routes/ai.rs` 流循环 `None` 分支的空文兜底
-//! 与 `patent.rs` spawn_oa_stream_worker 的空文守卫临时移除 → 本文件
-//! `empty_stream_must_emit_error` / `slow_first_token_must_timeout_visibly` 必须翻红。
-//! （首 token 超时红通道：把 `chat.rs` 首块 `tokio::time::timeout` 临时改为直接
-//! `resp.chunk().await` → slow 用例翻红。）
+//! 负控（红通道，PR 记录，全部真实执行）：
+//! - R1 `git stash push src/ai/chat.rs src/ai/client.rs src/ai/patent.rs src/routes/ai.rs`
+//!   （整体回到修复前）→ ①/②/③ 用例全部翻红；
+//! - R2 只把 `chat.rs` 的 `timeout_at(ft_deadline, resp.chunk())` 临时改为
+//!   `resp.chunk().await`（模拟"首块计时被任意字节满足"的旧语义）→ ② 翻红。
 //!
 //! 桩：进程内 std TcpListener 手写 SSE（可控时延），不走外网。
 
@@ -22,6 +25,10 @@ use std::net::TcpListener;
 enum StubMode {
     /// 先发响应头，然后静默 seconds 秒再关闭（thinking 卡首 token 形态）
     SlowFirstToken(u64),
+    /// 发一个空 role 帧后静默 seconds 秒再关闭（无内容帧不得骗过首内容截止期）
+    RoleThenSilence(u64),
+    /// 一个内容 chunk 后**不发 [DONE]** 直接关闭（截断形态）
+    PartialCloseNoDone,
     /// 立即 [DONE]，零内容
     EmptyDone,
     /// 两个内容 chunk 后 [DONE]
@@ -74,6 +81,21 @@ fn start_stub(mode: StubMode) -> u16 {
                 StubMode::SlowFirstToken(secs) => {
                     std::thread::sleep(std::time::Duration::from_secs(secs));
                     // 静默关闭（不发任何 data）
+                }
+                StubMode::RoleThenSilence(secs) => {
+                    // OpenAI 兼容流的典型首帧：role 声明，无 content（thinking 前奏）
+                    let _ = stream.write_all(
+                        b"data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n",
+                    );
+                    let _ = stream.flush();
+                    std::thread::sleep(std::time::Duration::from_secs(secs));
+                }
+                StubMode::PartialCloseNoDone => {
+                    let body =
+                        "data: {\"choices\":[{\"delta\":{\"content\":\"M2A 截断前内容。\"}}]}\n\n";
+                    let _ = stream.write_all(body.as_bytes());
+                    let _ = stream.flush();
+                    // 不发 [DONE]，直接关闭
                 }
                 StubMode::EmptyDone => {
                     let _ = stream.write_all(b"data: [DONE]\n\n");
@@ -129,8 +151,8 @@ fn minimal_body() -> String {
 }
 
 #[test]
-fn m2a_slow_first_token_and_empty_stream_and_normal() {
-    // ── 桩 1：慢首 token（>服务端 1s 首 token 预算）──
+fn m2a_four_terminations() {
+    // ── ① 纯静默（thinking 卡死）：首内容超时必须以 error 可见 ──
     let slow_port = start_stub(StubMode::SlowFirstToken(30));
     let app_port_slow = common::free_port();
     let _s1 = common::spawn_test_server_with_timeout(
@@ -145,15 +167,88 @@ fn m2a_slow_first_token_and_empty_stream_and_normal() {
     );
     let resp = post_stream(app_port_slow, &minimal_body());
     assert!(
-        resp.contains("event:error") && resp.contains("首个响应片段超时"),
-        "慢首 token 必须以 error 事件可见，实际响应片段：{}",
+        resp.contains("event:error") && resp.contains("[ERROR]") && resp.contains("首个内容超时"),
+        "①纯静默必须以 error 事件可见，实际响应片段：{}",
         &resp[..resp.len().min(300)]
     );
 
-    // ── 桩 2：空流（[DONE] 前零内容）──
+    // ── ② 空 role 帧后静默：无内容帧不能骗过首内容截止期 ──
+    let role_port = start_stub(StubMode::RoleThenSilence(15));
+    let app_port_role = common::free_port();
+    let _s2 = common::spawn_test_server_with_timeout(
+        app_port_role,
+        60,
+        tempfile::tempdir().expect("dir"),
+        &[
+            ("AI_BASE_URL", &format!("http://127.0.0.1:{role_port}/v1")),
+            ("AI_API_KEY", "stub-key"),
+            ("INNOFORGE_AI_FIRST_TOKEN_TIMEOUT_SECS", "1"),
+        ],
+    );
+    let resp = post_stream(app_port_role, &minimal_body());
+    assert!(
+        resp.contains("event:error") && resp.contains("首个内容超时"),
+        "②空 role 帧后静默必须按首内容超时报错，实际响应片段：{}",
+        &resp[..resp.len().min(300)]
+    );
+
+    // ── ③ 部分内容后无 [DONE] 关闭：截断必须可见，且已收内容保留 ──
+    let partial_port = start_stub(StubMode::PartialCloseNoDone);
+    let app_port_partial = common::free_port();
+    let _s3 = common::spawn_test_server_with_timeout(
+        app_port_partial,
+        60,
+        tempfile::tempdir().expect("dir"),
+        &[
+            (
+                "AI_BASE_URL",
+                &format!("http://127.0.0.1:{partial_port}/v1"),
+            ),
+            ("AI_API_KEY", "stub-key"),
+            ("INNOFORGE_AI_FIRST_TOKEN_TIMEOUT_SECS", "10"),
+        ],
+    );
+    let resp = post_stream(app_port_partial, &minimal_body());
+    assert!(
+        resp.contains("event:error") && resp.contains("完成标记"),
+        "③无 [DONE] 中断必须以 error 事件可见，实际响应片段：{}",
+        &resp[..resp.len().min(300)]
+    );
+    let decoded_partial = decode_sse(&resp);
+    assert!(
+        decoded_partial.contains("M2A 截断前内容"),
+        "③截断前已收内容必须保留，decoded={decoded_partial}"
+    );
+
+    // ── ④ 正常完成：内容照发、无 error ──
+    let normal_port = start_stub(StubMode::Normal);
+    let app_port_normal = common::free_port();
+    let _s4 = common::spawn_test_server_with_timeout(
+        app_port_normal,
+        60,
+        tempfile::tempdir().expect("dir"),
+        &[
+            ("AI_BASE_URL", &format!("http://127.0.0.1:{normal_port}/v1")),
+            ("AI_API_KEY", "stub-key"),
+            ("INNOFORGE_AI_FIRST_TOKEN_TIMEOUT_SECS", "10"),
+        ],
+    );
+    let resp = post_stream(app_port_normal, &minimal_body());
+    assert!(
+        !resp.contains("event:error"),
+        "④正常流不得出现 error 事件，响应片段：{}",
+        &resp[..resp.len().min(300)]
+    );
+    let decoded = decode_sse(&resp);
+    assert!(decoded.contains("M2A 正常内容第一句"), "decoded={decoded}");
+}
+
+#[test]
+fn m2a_empty_done_stream() {
+    // 空流（[DONE] 前零内容）→ 显式"未输出任何内容"
     let empty_port = start_stub(StubMode::EmptyDone);
     let app_port_empty = common::free_port();
-    let _s2 = common::spawn_test_server_with_timeout(
+    let _s = common::spawn_test_server_with_timeout(
         app_port_empty,
         60,
         tempfile::tempdir().expect("dir"),
@@ -169,29 +264,6 @@ fn m2a_slow_first_token_and_empty_stream_and_normal() {
         "空流必须以 error 事件可见，实际响应片段：{}",
         &resp[..resp.len().min(300)]
     );
-
-    // ── 桩 3：正常流（内容照发、无 error）──
-    let normal_port = start_stub(StubMode::Normal);
-    let app_port_normal = common::free_port();
-    let _s3 = common::spawn_test_server_with_timeout(
-        app_port_normal,
-        60,
-        tempfile::tempdir().expect("dir"),
-        &[
-            ("AI_BASE_URL", &format!("http://127.0.0.1:{normal_port}/v1")),
-            ("AI_API_KEY", "stub-key"),
-            ("INNOFORGE_AI_FIRST_TOKEN_TIMEOUT_SECS", "10"),
-        ],
-    );
-    let resp = post_stream(app_port_normal, &minimal_body());
-    assert!(
-        !resp.contains("event:error"),
-        "正常流不得出现 error 事件，响应片段：{}",
-        &resp[..resp.len().min(300)]
-    );
-    // 内容经 JSON 编码传输，解码后应含桩文案
-    let decoded = decode_sse(&resp);
-    assert!(decoded.contains("M2A 正常内容第一句"), "decoded={decoded}");
 }
 
 fn decode_sse(raw: &str) -> String {

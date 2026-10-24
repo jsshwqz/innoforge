@@ -219,29 +219,29 @@ impl AiClient {
                         }
 
                         let mut buf = String::new();
-                        // M2-A：首 token 超时 + 异常终止可见 + 零内容显式报错
-                        let ft = Duration::from_secs(
-                            crate::ai::client::stream_first_token_timeout_secs(),
-                        );
+                        // M2-A：首内容截止期 + 异常终止可见 + 零内容显式报错。
+                        // 截止期从流开始计时到「首个可见 content」——空 role 帧等无内容
+                        // 帧不能重置/满足它（M2 独立审计：不能被空帧骗过）。
+                        let ft_secs = crate::ai::client::stream_first_token_timeout_secs();
+                        let ft_deadline =
+                            tokio::time::Instant::now() + Duration::from_secs(ft_secs);
                         let mut sent_any = false;
-                        let mut first_chunk = true;
                         loop {
-                            let next = if first_chunk {
-                                first_chunk = false;
-                                match tokio::time::timeout(ft, resp.chunk()).await {
+                            let next = if sent_any {
+                                resp.chunk().await
+                            } else {
+                                match tokio::time::timeout_at(ft_deadline, resp.chunk()).await {
                                     Ok(c) => c,
                                     Err(_) => {
                                         let _ = tx
                                             .send(format!(
-                                                "[ERROR] 首个响应片段超时（{}s）——模型长时间无输出；可调 INNOFORGE_AI_FIRST_TOKEN_TIMEOUT_SECS",
-                                                crate::ai::client::stream_first_token_timeout_secs()
+                                                "[ERROR] 首个内容超时（{}s）——模型长时间无可见输出；可调 INNOFORGE_AI_FIRST_TOKEN_TIMEOUT_SECS",
+                                                ft_secs
                                             ))
                                             .await;
                                         return;
                                     }
                                 }
-                            } else {
-                                resp.chunk().await
                             };
                             match next {
                                 Ok(Some(chunk)) => {
@@ -294,18 +294,21 @@ impl AiClient {
                                         }
                                     }
                                 }
-                                Ok(None) => break,
+                                Ok(None) => {
+                                    // M2-A 边界③：连接关闭而无 message_stop = 可能截断，必须可见
+                                    let _ = tx
+                                        .send("[ERROR] 流在完成标记（message_stop）前中断——内容可能被截断".to_string())
+                                        .await;
+                                    return;
+                                }
                                 Err(e) => {
                                     let _ = tx.send(format!("[ERROR] 流中断: {}", e)).await;
                                     return;
                                 }
                             }
                         }
-                        if !sent_any {
-                            let _ = tx
-                                .send("[ERROR] 流结束但未输出任何内容".to_string())
-                                .await;
-                        }
+                        // 注：本分支所有出口均 return——message_stop（零内容时已报错）、
+                        // Ok(None)（无 message_stop=截断，已报错）、Err（已报错）、首内容超时。
                     } else {
                         // ── OpenAI-compatible streaming (DeepSeek, OpenAI, etc.) ──
                         let request_body = serde_json::json!({
@@ -355,30 +358,29 @@ impl AiClient {
 
                         let mut buf = String::new();
                         let mut total_chars: usize = 0;
-                        // M2-A：首 token 超时 + 异常终止可见 + 零内容显式报错
-                        let ft = Duration::from_secs(
-                            crate::ai::client::stream_first_token_timeout_secs(),
-                        );
+                        // M2-A：首内容截止期（空 role 帧不能骗过）+ 异常终止可见 + 零内容显式报错
+                        let ft_secs = crate::ai::client::stream_first_token_timeout_secs();
+                        let ft_deadline =
+                            tokio::time::Instant::now() + Duration::from_secs(ft_secs);
                         let mut sent_any = false;
-                        let mut first_chunk = true;
+                        // （[DONE] 命中即 return；Ok(None) 必然无 [DONE] = 截断）
 
                         loop {
-                            let next = if first_chunk {
-                                first_chunk = false;
-                                match tokio::time::timeout(ft, resp.chunk()).await {
+                            let next = if sent_any {
+                                resp.chunk().await
+                            } else {
+                                match tokio::time::timeout_at(ft_deadline, resp.chunk()).await {
                                     Ok(c) => c,
                                     Err(_) => {
                                         let _ = tx
                                             .send(format!(
-                                                "[ERROR] 首个响应片段超时（{}s）——模型长时间无输出；可调 INNOFORGE_AI_FIRST_TOKEN_TIMEOUT_SECS",
-                                                crate::ai::client::stream_first_token_timeout_secs()
+                                                "[ERROR] 首个内容超时（{}s）——模型长时间无可见输出；可调 INNOFORGE_AI_FIRST_TOKEN_TIMEOUT_SECS",
+                                                ft_secs
                                             ))
                                             .await;
                                         return;
                                     }
                                 }
-                            } else {
-                                resp.chunk().await
                             };
                             match next {
                                 Ok(Some(chunk)) => {
@@ -470,11 +472,12 @@ impl AiClient {
                                     }
                                 }
                                 Ok(None) => {
-                                    tracing::info!(
-                                        "[AI STREAM] stream complete, total chars: {}",
-                                        total_chars
-                                    );
-                                    break;
+                                    // M2-A 边界③：连接关闭而无 [DONE] = 可能截断，必须可见。
+                                    // （[DONE] 命中即 return，走到这里必然无完成标记。）
+                                    let _ = tx
+                                        .send("[ERROR] 流在完成标记（[DONE]）前中断——内容可能被截断".to_string())
+                                        .await;
+                                    return;
                                 }
                                 Err(e) => {
                                     let _ = tx.send(format!("[ERROR] 流中断: {}", e)).await;
@@ -482,11 +485,8 @@ impl AiClient {
                                 }
                             }
                         }
-                        if !sent_any {
-                            let _ = tx
-                                .send("[ERROR] 流结束但未输出任何内容".to_string())
-                                .await;
-                        }
+                        // 注：本分支所有出口均 return——[DONE]（零内容时已报错）、
+                        // Ok(None)（截断，已报错）、Err（已报错）、首内容超时。
                     } // end OpenAI-compatible branch
                 },
             )
