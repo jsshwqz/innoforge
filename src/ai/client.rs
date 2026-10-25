@@ -39,6 +39,26 @@ fn provider_http_timeout_secs() -> u64 {
         .and_then(|s| s.parse().ok())
         .unwrap_or(300) // = timeouts::ENRICHMENT (300s)
 }
+
+/// M2-A（基线失败 #1）：OA 分析/流式路径的 HTTP 超时，可经
+/// `INNOFORGE_AI_ANALYSIS_TIMEOUT_SECS` 覆盖（默认 180s = `timeouts::ANALYSIS`，
+/// 常量本身不动——`with_analysis_timeout` 的既有语义保持）。
+pub fn analysis_http_timeout_secs() -> u64 {
+    std::env::var("INNOFORGE_AI_ANALYSIS_TIMEOUT_SECS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(180) // = timeouts::ANALYSIS
+}
+
+/// M2-A：流式「首 token 超时」——thinking 模型首个可见片段可能远超 180s，
+/// 不能把慢思考当总超时掐死。默认 300s，`INNOFORGE_AI_FIRST_TOKEN_TIMEOUT_SECS` 覆盖。
+/// 超时必须以 `[ERROR]` 事件可见，不许静默结束（M1 基线：0 chunk + 0 error）。
+pub fn stream_first_token_timeout_secs() -> u64 {
+    std::env::var("INNOFORGE_AI_FIRST_TOKEN_TIMEOUT_SECS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(300)
+}
 const PROVIDER_MAX_RETRIES: usize = 3;
 
 /// AI 提供者模式 / AI provider operation mode.
@@ -422,9 +442,10 @@ impl AiClient {
     }
 
     /// Create a new AiClient with analysis timeout (for patent/idea analysis).
-    /// Shorthand for `clone_with_timeout(timeouts::ANALYSIS)`.
+    /// M2 审查 P1-4：接 `INNOFORGE_AI_ANALYSIS_TIMEOUT_SECS`（默认仍 180，
+    /// `timeouts::ANALYSIS` 常量不动）——让"180s 可覆盖"名副其实。
     pub fn with_analysis_timeout(&self) -> Self {
-        self.clone_with_timeout(timeouts::ANALYSIS)
+        self.clone_with_timeout(Duration::from_secs(analysis_http_timeout_secs()))
     }
 
     /// 创建新的 AiClient 实例并指定超时 / Clone with a different timeout.
@@ -1225,6 +1246,23 @@ impl AiClient {
 mod tests {
     use super::{provider_http_timeout_secs, timeouts, AiClient};
     use std::time::Duration;
+
+    #[test]
+    fn m2a_timeout_defaults_and_env_override() {
+        // M2-A.1：ANALYSIS 常量默认保持 180（命令书要求默认不变）
+        assert_eq!(timeouts::ANALYSIS, Duration::from_secs(180));
+        assert_eq!(super::analysis_http_timeout_secs(), 180);
+        assert_eq!(super::stream_first_token_timeout_secs(), 300);
+        // env 覆盖（本测试独占这两个变量名，无并行竞争）
+        std::env::set_var("INNOFORGE_AI_ANALYSIS_TIMEOUT_SECS", "777");
+        std::env::set_var("INNOFORGE_AI_FIRST_TOKEN_TIMEOUT_SECS", "888");
+        assert_eq!(super::analysis_http_timeout_secs(), 777);
+        assert_eq!(super::stream_first_token_timeout_secs(), 888);
+        std::env::remove_var("INNOFORGE_AI_ANALYSIS_TIMEOUT_SECS");
+        std::env::remove_var("INNOFORGE_AI_FIRST_TOKEN_TIMEOUT_SECS");
+        assert_eq!(super::analysis_http_timeout_secs(), 180);
+        assert_eq!(super::stream_first_token_timeout_secs(), 300);
+    }
 
     #[test]
     fn truncate_for_ai_strict_contains_integrity_warning() {

@@ -482,6 +482,14 @@
 
     // ── Helpers ──
     function escapeHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+    // SSE 载荷解码：后端 OA 链路三个流统一 JSON 编码（保单行、留换行）。
+    // 兼容旧载荷（不以引号开头）与历史 \n 字面量（答复书流旧编码），失败回退原文。
+    function sseDecode(d) {
+        if (d && d.charAt(0) === '"') {
+            try { return JSON.parse(d); } catch (e) { return d; }
+        }
+        return typeof d === 'string' ? d.replace(/\\n/g, '\n') : d;
+    }
 
     function getPatentNumberFromUrl() {
         // 优先从 URL 参数读取
@@ -2262,10 +2270,15 @@
 
                 for (let i = 0; i < lines.length; i++) {
                     var line = lines[i];
-                    if (line.startsWith('event: ')) {
-                        currentEvent = line.slice(7).trim();
+                    if (line.startsWith('event:')) {
+                        // 兼容 'event: x' 与 'event:x'（axum 无空格格式）
+                        currentEvent = line.slice(6).replace(/^ /, '').trim();
                     } else if (line.startsWith('data:')) {
                         var data = line.slice(5).replace(/^ /, '');
+                        if (currentEvent === 'meta') {
+                            // P0-1：结构化来源事件，不进正文/导出
+                            continue;
+                        }
                         if (currentEvent === 'error' || data.startsWith('[ERROR]')) {
                             showError(data.replace('[ERROR] ', ''));
                             errored = true;
@@ -2277,7 +2290,7 @@
                             break;
                         }
                         // Regular text chunk
-                        fullText += data;
+                        fullText += sseDecode(data);
                         if (streamDiv) {
                             streamDiv.textContent = fullText;
                             streamDiv.scrollTop = streamDiv.scrollHeight;
@@ -2658,10 +2671,14 @@
                 buffer = lines.pop();
                 for (let i = 0; i < lines.length; i++) {
                     var line = lines[i];
-                    if (line.startsWith('event: ')) {
-                        currentEvent = line.slice(7).trim();
+                    if (line.startsWith('event:')) {
+                        currentEvent = line.slice(6).replace(/^ /, '').trim();
                     } else if (line.startsWith('data:')) {
                         var data = line.slice(5).replace(/^ /, '');
+                        if (currentEvent === 'meta') {
+                            // P0-1：结构化来源事件，不进正文
+                            continue;
+                        }
                         if (currentEvent === 'error' || data.startsWith('[ERROR]')) {
                             aiText = '⚠️ ' + data.replace('[ERROR] ', '');
                             done = true;
@@ -2679,7 +2696,7 @@
                             done = true;
                             break;
                         }
-                        aiText += data;
+                        aiText += sseDecode(data);
                         if (aiDiv) aiDiv.innerHTML = renderMarkdown(aiText) + '<span style="color:#f0883e;">▌</span>';
                     } else if (line === '' && currentEvent) {
                         currentEvent = '';
@@ -2851,10 +2868,20 @@
                 buffer += decoder.decode(value, { stream: true });
                 var lines = buffer.split('\n');
                 buffer = lines.pop();
+                var currentEvent = '';
                 for (let i = 0; i < lines.length; i++) {
                     var line = lines[i];
+                    if (line.startsWith('event:')) {
+                        currentEvent = line.slice(6).replace(/^ /, '').trim();
+                        continue;
+                    }
+                    if (line === '') { currentEvent = ''; continue; }
                     if (line.startsWith('data:')) {
                         var data = line.slice(5).replace(/^ /, '');
+                        if (currentEvent === 'meta') {
+                            // P0-1：结构化来源事件，不进正文/DOCX 导出
+                            continue;
+                        }
                         if (data.startsWith('[ERROR]')) {
                             if (section5Area) section5Area.innerHTML = '<div style="color:#f85149;padding:16px;">' + escapeHtml(data) + '</div>';
                             if (overlayDiv) { overlayDiv.querySelector('h3').textContent = '❌ 生成失败'; overlayDiv.querySelector('#overlay-stream').textContent = data; }
@@ -2862,7 +2889,7 @@
                             return;
                         }
                         if (data === '[DONE]') { done = true; break; }
-                        fullText += data.replace(/\\n/g, '\n');
+                        fullText += sseDecode(data);
                         if (streamDiv) {
                             streamDiv.textContent = fullText;
                             if (overlayDiv) { overlayDiv.scrollTop = overlayDiv.scrollHeight; }

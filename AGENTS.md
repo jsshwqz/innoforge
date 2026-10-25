@@ -1,17 +1,20 @@
 # InnoForge 项目规约
 
 > 本文件是所有 AI Agent 和人类贡献者的强制规范。修改代码前必须阅读并遵守。
+> **优先级唯一权威 = GitHub issue #90**：排队与优先级以 #90 为准；本文件只讲规矩，不承载进度。现状见 `docs/plans/STATUS.md`。
+
+## 〇、方向冻结令（2026-10-24 起，优先于其他计划）
+
+1. 验收以 `docs/plan/product-vision.md` §3 三条为准：**报告敢用 / 决策敢做 / 答复敢交**。
+2. 唯一主线：**一宗真实在办 OA/复审案 → 答复书 + 证据表 → 人工判可提交**。细则见 `docs/plans/2026-10-24-direction-realignment.md`。
+3. M1 达标前：不加检索/向量/成本基建，不加 prompt/报告类型/前端功能，不扩证据内核；#78 暂停；只修 M1 top-3。
+4. 不再单开"守卫/计数/文档时效"类 issue；负控只服务产品项；纯测试/守卫变更不单独发版。
+5. **commit-first**：先提交再验收，禁止只靠 patch / `.b64` 回传；无 commit 不开长任务。
+6. 任务权威 = #90；`product-vision` 只答"为什么"；MASTER / STATUS 为历史。
+7. 案件材料只在本地；禁止进入 git / PR / issue / CI 日志。
 
 ## 记忆
-本项目的协作记忆按以下位置维护。进入任务前按 Step 0b 的检索规则读取相关记忆；命中 Step 0c 的存储触发器后，须在最终回复前静默更新对应记忆：
-- 用户反馈（纠正 / 认可 / 边界澄清）→ `docs/feedback.md`
-- 工具 / 依赖 / CI / 构建踩坑复盘 → `docs/errors.md`（错误复盘数据库）
-- 项目阶段事实与共识 → `docs/plans/STATUS.md`
-- 用户长期偏好与决策习惯 → 本文件各条款（如温度策略、事实纪律、目标用户定位）
-
-> 记忆与最新代码、文档或运行结果冲突时，以最新可验证来源为准，并在必要时更新记忆。
->
-> 后端 `src/context.rs` 会在每次 AI 对话时自动读取本目录的记忆文件，汇编成有字符预算（≤6000 字符）的「项目记忆上下文」注入系统提示词，让 agent 无需自行猜测读什么即可拿到近期反馈/复盘/状态；文件缺失时静默降级，不影响主流程。
+Step 0b/0c：反馈→`docs/feedback.md`；踩坑→`docs/errors.md`；阶段事实→`docs/plans/STATUS.md`；长期偏好→本文件。冲突以代码/运行结果为准。`src/context.rs` 自动汇编（≤6000 字符）注入提示词，缺失静默降级。
 
 ---
 
@@ -143,21 +146,9 @@ docs/          # 文档和规划
   钩子用 `core.hooksPath` 指向 `.githooks/`，随仓库提交、跨机器共享；每次 `git commit` 自动跑 `check_html_functions.mjs`。
 - **硬关卡（强制）**：本地钩子可被 `git commit --no-verify` 跳过，它只是方便层；真正的强制关卡是远端 **CI**（`.github/workflows/ci.yml`），push/PR 后自动跑 fmt/clippy/test + HTML 函数完整性扫描 + e2e，不过关无法合并——任何 AI 或开发者想绕过本地检查都拦不住远端。
 
-#### Step 0b: 记忆检索规则（每次任务执行）
-- 固定先读 `AGENTS.md`，再读 `docs/plans/STATUS.md`（**每次必读**）。
-- **只读与本任务直接相关的记忆全文**；无关的长文档（`docs/errors.md`、`CHANGELOG.md`、计划文档）只看最近若干条或标题，避免把整份历史塞进上下文。
-- `docs/errors.md`（工具/构建/CI 复盘）只在当前任务会用到对应工具，或该工具刚刚失败时才展开。
-- `docs/feedback.md` 只展开与当前任务最相关的几条；宁缺毋滥，不为凑「全面」继续读。
-- 检索到**足够支撑当前判断的证据即停**，不要为措辞或「全面感」继续铺开记忆。
-- **记忆与最新代码、文档或运行结果冲突时，以最新可验证来源为准**，并在必要时更新对应记忆。
-- 不要为了「看起来读过所有东西」而重复读同一份记忆；同一轮内读过即记。
-
-#### Step 0c: 记忆存储规则（最终回复前静默执行）
-- 每轮最终回复前必须静默判断是否需要维护记忆。命中以下任一条件则先写入、再回复，命中后无需向用户解释。
-- **用户反馈**：当用户用「你这里不应该 / 这样不对 / 不是 X 而是 Y / 以后遇到这种情况 / 以后都 / 我更喜欢 / 默认按」等话术给出纠正、认可或边界澄清时，写入 `docs/feedback.md`（含：规则 / 原因 / 适用场景 / 时间）；**既记纠正也记肯定**，避免 agent 越来越保守。
-- **工具踩坑**：新增的构建/CI/依赖/工具失败解法，写入 `docs/errors.md`（沿用其条目格式）。
-- **不应沉淀**：一次性流水账、可从代码直接读取的信息、临时任务摘要。
-- 已有同主题记忆可承载时**优先更新旧条目**，不重复新建。
+#### Step 0b/0c: 记忆检索与回写
+- 只展开与本任务直接相关的记忆（反馈 / 踩坑 / 计划），证据足够即停；冲突以代码 / 运行结果为准。
+- 最终回复前静默判断：用户纠正或认可→`docs/feedback.md`；工具踩坑→`docs/errors.md`；一次性流水账不沉淀。
 
 ### Step 1: 理解任务
 - 明确用户要做什么（新功能 / bug 修复 / 重构 / 分析调研）
@@ -261,16 +252,7 @@ docs/          # 文档和规划
 
 ## 六、当前状态速查
 
-- **版本**：见 `Cargo.toml` 的 `version` 字段（以此为准）
-- **DB Schema**：见 `src/db/migrations.rs` 中最新迁移版本号
-- **Pipeline 步骤**：16 步（见 `src/pipeline/state.rs` 的 `PipelineStep` 枚举）
-- **AI 服务商**：内置 10 家主流服务商（DeepSeek 为主，可在设置页切换，模型列表按服务商 API 实时查询）
-- **搜索源**：在线 3 源降级链（SerpAPI → EPO OPS → Google Patents XHR，见 `src/search/chain.rs`）+ 本地 SQLite FTS5 + 向量语义搜索（`/api/search/vector`）
-- **前端页面**：8 个（index/search/patent_detail/idea/ai/compare/settings/oa-response）
-
-> 注意：版本号、Schema 版本等数字会随开发变化，请以源码文件为准，不要依赖本节的静态数字。
-
-本仓禁止 git add -A / git add .，只允许显式列文件路径。
+> 版本/Schema/Pipeline/前端页面等**会变的数字不在此硬编码**。唯一权威：优先级=GitHub issue **#90**；版本=`Cargo.toml`；Schema=`src/db/migrations.rs`；现状=`docs/plans/STATUS.md`。本仓禁止 `git add -A` / `git add .`。
 
 ## 部署铁律 / Deployment Rules
 

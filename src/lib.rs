@@ -13,6 +13,8 @@ pub(crate) mod context;
 pub mod db;
 mod docx_export;
 mod error;
+/// 证据可核验分析内核 v2（设计文档 docs/design/evidence-kernel-v2.md）
+pub mod evidence_kernel;
 mod experiment;
 mod oa_deadline;
 pub mod orchestrator;
