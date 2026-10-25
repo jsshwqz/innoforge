@@ -435,6 +435,60 @@ pub async fn api_idea_evidence(
     }
 }
 
+/// GET /api/idea/:id/kernel-report — 证据内核 v2 的结构化核验报告（EK-v2）。
+///
+/// 数据源是 pipeline 快照里的 `ctx.kernel_report`（Finalize 步写入；ADR-8 不加表）。
+/// 三种明确状态：ok（带报告）/ no_snapshot / no_kernel_report（旧快照或 quick 模式），
+/// 不把"没有"伪装成"通过"。
+pub async fn api_idea_kernel_report(
+    State(s): State<AppState>,
+    Path(idea_id): Path<String>,
+) -> Json<serde_json::Value> {
+    // idea 存在性先行（与 evidence 路由一致的错误语义）
+    match s.db.get_idea(&idea_id) {
+        Ok(Some(_)) => {}
+        _ => return Json(json!({"status": "error", "message": "创意不存在"})),
+    }
+    let (context_json, current_step) = match s.db.load_pipeline_snapshot(&idea_id) {
+        Ok(Some(snapshot)) => snapshot,
+        Ok(None) => {
+            return Json(json!({
+                "status": "no_snapshot",
+                "message": "该创意尚无流水线快照（未跑过分析）"
+            }))
+        }
+        Err(e) => return Json(json!({"status": "error", "message": e.to_string()})),
+    };
+    let ctx = match serde_json::from_str::<crate::pipeline::context::PipelineContext>(&context_json)
+    {
+        Ok(ctx) => ctx,
+        Err(e) => {
+            return Json(json!({
+                "status": "error",
+                "message": format!("快照解析失败: {e}")
+            }))
+        }
+    };
+    match ctx.kernel_report {
+        Some(kr) => match serde_json::from_str::<serde_json::Value>(&kr) {
+            Ok(report) => Json(json!({
+                "status": "ok",
+                "current_step": current_step,
+                "kernel_report": report
+            })),
+            Err(e) => Json(json!({
+                "status": "error",
+                "message": format!("内核报告反序列化失败: {e}")
+            })),
+        },
+        None => Json(json!({
+            "status": "no_kernel_report",
+            "message": "快照无内核报告（旧版本快照或分析未到达 Finalize）",
+            "current_step": current_step
+        })),
+    }
+}
+
 // ── Idea multi-round chat ────────────────────────────────────────────
 
 /// 将创意记忆条目渲染为注入 system context 的文本块。
@@ -1207,8 +1261,11 @@ pub async fn api_idea_report(
 
     let report_type = params.get("type").map(|s| s.as_str()).unwrap_or("full");
 
-    // T21: 支持 ?version_id= 从历史版本快照生成报告
-    let (score, analysis_text) = if let Some(vid) = params.get("version_id") {
+    // T21: 支持 ?version_id= 从历史版本快照生成报告。
+    // EK-P2 修复：novelty_score 为 None（证据不足/未评估）时不再折算 0 分输出"低新颖性"结论，
+    // 而是如实输出"证据不足"（设计文档 evidence-kernel-v2.md §3-5）。
+    let (score, analysis_text): (Option<f64>, String) = if let Some(vid) = params.get("version_id")
+    {
         // 从 idea_versions 读取快照
         match s.db.get_idea_versions(&idea_id) {
             Ok(versions) => {
@@ -1216,56 +1273,75 @@ pub async fn api_idea_report(
                     if let Ok(ctx) = serde_json::from_str::<crate::pipeline::context::PipelineContext>(
                         &ver.context_json,
                     ) {
-                        (ctx.novelty_score, ctx.ai_analysis)
+                        let s = if ctx.novelty_status
+                            == crate::pipeline::context::NoveltyStatus::InsufficientEvidence
+                        {
+                            None
+                        } else {
+                            Some(ctx.novelty_score)
+                        };
+                        (s, ctx.ai_analysis)
                     } else {
-                        (idea.novelty_score.unwrap_or(0.0), idea.analysis.clone())
+                        (idea.novelty_score, idea.analysis.clone())
                     }
                 } else {
                     return Json(json!({"status": "error", "message": "版本不存在"}));
                 }
             }
-            Err(_) => (idea.novelty_score.unwrap_or(0.0), idea.analysis.clone()),
+            Err(_) => (idea.novelty_score, idea.analysis.clone()),
         }
     } else {
-        (idea.novelty_score.unwrap_or(0.0), idea.analysis.clone())
+        (idea.novelty_score, idea.analysis.clone())
     };
 
-    let level = if score >= 70.0 {
-        "高新颖性"
-    } else if score >= 40.0 {
-        "中等新颖性"
-    } else {
-        "低新颖性"
+    // 证据不足与数值分档互斥：None 只能出"证据不足"，绝不折算 0 分
+    let (level, risk, conclusion, score_line) = match score {
+        None => (
+            "证据不足（未评估）",
+            "—",
+            "检索证据不足，无法给出新颖性结论；请补充检索或对比文件后重新分析",
+            "—/100".to_string(),
+        ),
+        Some(s) => (
+            if s >= 70.0 {
+                "高新颖性"
+            } else if s >= 40.0 {
+                "中等新颖性"
+            } else {
+                "低新颖性"
+            },
+            if s >= 70.0 {
+                "低"
+            } else if s >= 40.0 {
+                "中"
+            } else {
+                "高"
+            },
+            if s >= 70.0 {
+                "该创意具有较高新颖性，建议推进专利申请"
+            } else if s >= 40.0 {
+                "该创意有一定新颖性，建议进一步差异化后申请"
+            } else {
+                "该创意与现有技术重叠较多，建议调整技术路线"
+            },
+            format!("{:.1}/100", s),
+        ),
     };
 
     match report_type {
         "executive" => {
             // 领导版：1 页精简报告
-            let risk = if score >= 70.0 {
-                "低"
-            } else if score >= 40.0 {
-                "中"
-            } else {
-                "高"
-            };
-            let conclusion = if score >= 70.0 {
-                "该创意具有较高新颖性，建议推进专利申请"
-            } else if score >= 40.0 {
-                "该创意有一定新颖性，建议进一步差异化后申请"
-            } else {
-                "该创意与现有技术重叠较多，建议调整技术路线"
-            };
             let report_md = format!(
                 "# 创新验证结论\n\
                  **项目**：{}\n\
-                 **新颖性评分**：{:.1}/100（{}）\n\
+                 **新颖性评分**：{}（{}）\n\
                  **核心结论**：{}\n\
                  **建议**：\n\
                  - 1. 对核心技术差异点进行深度论证\n\
                  - 2. 补充实验数据支撑新颖性主张\n\
                  - 3. 关注竞品动态，及时更新技术方案\n\
                  **风险等级**：{}",
-                idea.title, score, level, conclusion, risk
+                idea.title, score_line, level, conclusion, risk
             );
             Json(json!({
                 "status": "ok",
@@ -1285,14 +1361,14 @@ pub async fn api_idea_report(
                  **标题**：{}\n\
                  **描述**：{}\n\n\
                  ## 新颖性评分\n\
-                 **总分**：{:.1}/100（{}）\n\n\
+                 **总分**：{}（{}）\n\n\
                  ## 现有技术对比\n\
                  详见 web_results 和 patent_results 字段。\n\n\
                  ## 技术差异分析\n\
                  {}\n\n\
                  ## 行动方案\n\
                  基于以上分析，建议执行差异化策略。",
-                idea.title, idea.description, score, level, analysis_text
+                idea.title, idea.description, score_line, level, analysis_text
             );
             Json(json!({
                 "status": "ok",

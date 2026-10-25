@@ -4,9 +4,33 @@
 All notable changes are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
+## [v0.9.20] - 2026-10-25
+
+### 修复 / Fixed
+
+- **流式终止语义修正（M2-A）**：答复书 SSE 流不再以固定 180s 总超时截断，改为首内容截止期（防空 role 帧欺骗）；无 `[DONE]` 截断必发 `[ERROR]` 事件，四种终止路径全覆盖。
+- **空文本事实核查显式失败（M2-B）**：`check_oa_analysis` 空输入不再默认 100 分（假绿），改判 0 分 + 无内容警告。
+- **答复书来源标记三态可见（M2-C）**：meta 事件走 SSE `event:meta`（前端安全跳过未知事件），正文不再泄漏来源元数据到导出/DOCX；deep 自检失败不丢主分析、分析超时 env 接线、零宽空白清理。
+- **事实核查门禁误伤修复（C2/C12）**：检测前剥离引述段与自报告段，避免对复述审查员观点的结构性误判。
+- **后端真相性三件（R30）**：详情路由兜底、平台路径测试可移植、构建期 commit 解耦。
+
+### 新增 / Added
+
+- **M2-E 回归脚本**（`scripts/m2_regression.sh`）：release 构建 + 3000 端口隔离启动 + SSE 分析捕获 + fact_check/anchor_rate/quote_count 指标 + 幂等可重跑，合成夹具零案件数据。
+
+### 文档 / Docs
+
+- 方向冻结令写入 AGENTS.md（§〇）；旧计划归档至 `docs/plans/archive/`；再对齐复核稿合并。
+
+---
 ## [Unreleased]
 
-_暂无条目。_
+### 新增 / Added
+
+- **证据可核验分析内核 v2（垂直切片）**（设计文档 `docs/design/evidence-kernel-v2.md`）：新增 `src/evidence_kernel/` 模块——claim/evidence 数据模型（claim、source_id、locator、quote、support/contradict/insufficient）、锚点解析器（四套遗留引用格式统一为 (doc_id, kind, number) 三元组）、确定性引用核验器（零 AI：三元组精确匹配 + 引文归一化逐字/滑窗近似匹配，失败即 FAIL，全链禁止数字子串包含判据，落实 [issue 79](../issues/79)）、五维评分（grounding/coverage/legal_reasoning/clarity/consistency，grounding 为乘法门）与自我批判降级循环（未支撑事实句标注【未证实】保留原文）。接入 idea pipeline Finalize 步：核验报告逐句带 E# 证据号追加到分析尾部、`kernel_report` 随快照持久化（不加表）、grounding < 0.5 或证据不足时抑制申请/放弃/转向决策。空检索硬门（InsufficientEvidence）落地：executive 报告不再把无评分折算成 0 分输出"低新颖性"，改为如实输出"证据不足"。
+  *Evidence-verifiable analysis kernel v2 (vertical slice): new `src/evidence_kernel/` module with a claim/evidence data model, an anchor parser unifying four legacy citation formats into (doc_id, kind, number) triples, a deterministic citation verifier (zero AI; exact triple match plus normalised verbatim / sliding-window approximate quote matching, no digit-substring passes — [issue 79](../issues/79)), a five-dimension rubric where grounding multiplicatively gates the overall score, and a self-critique downgrade loop marking unsupported factual sentences as 【未证实】 in place. Wired into the idea pipeline Finalize step: per-claim E# verification report appended to the analysis, kernel report persisted in the snapshot (no schema change), and decision recommendations suppressed when grounding < 0.5 or evidence is insufficient. The empty-search hard gate lands end to end: executive reports no longer fold a missing score into 0 with a "low novelty" verdict but state insufficient evidence.*
+- **内核扩展：AI 修复轮与结构化报告 API**：`evidence_kernel::ai_repair` 补全 critique-repair 的修复半环——异步修复入口 `run_kernel_with_repair_async`（修复 prompt 只给语料锚点白名单、禁编造编号；修复失败/返回过短自动回退原文），修复轮耗尽后**终局降级兜底**（未支撑句绝不悬空，一律标注【未证实】）；新增 `GET /api/idea/:id/kernel-report` 四态端点（ok / no_snapshot / no_kernel_report / error），结构化返回逐句核验明细、计量与五维评分。
+  *Kernel extensions: the AI repair round completes the critique-repair loop — an async entry `run_kernel_with_repair_async` whose repair prompt only offers corpus-derived anchors (fabricated ids impossible), with automatic fallback to the original text on failure, and a mandatory terminal downgrade pass so unsupported sentences never dangle; plus `GET /api/idea/:id/kernel-report`, a four-state endpoint returning the structured per-claim verification detail, metrics and rubric.*
 
 ---
 ## [v0.9.19] - 2026-10-23

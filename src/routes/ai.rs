@@ -42,6 +42,40 @@ pub(crate) fn escape_prompt_material(value: &str) -> String {
         .replace('>', "&gt;")
 }
 
+/// SSE 单行载荷编码：JSON 字符串转义（换行/引号/控制字符全部安全），
+/// 前端 `sseDecode()`（`JSON.parse` + 失败回退原样）还原。
+///
+/// 解决 EK-P6：逐 chunk 换行曾被替换成空格，破坏句边界（句子黏连、
+/// 锚点与句对不齐、落库文本无法做逐句证据核验）。累积侧永远用原文，
+/// 仅传输层编码。与 chat 流的 `\\n` 字面量半编码（前端不解码、显示残留反斜杠）
+/// 不兼容——OA 链路三个流统一走本函数。
+fn sse_encode(text: &str) -> String {
+    serde_json::to_string(text).unwrap_or_else(|_| "\"\"".to_string())
+}
+
+#[cfg(test)]
+mod sse_tests {
+    use super::sse_encode;
+
+    #[test]
+    fn sse_payload_is_single_line_and_roundtrips() {
+        for sample in [
+            "第一行\n第二行\r\n第三行",
+            "含\"引号\"与\\反斜杠",
+            "中文锚点 [D1:第0035段]。\n\n下一句",
+            "",
+        ] {
+            let encoded = sse_encode(sample);
+            assert!(
+                !encoded.contains('\n') && !encoded.contains('\r'),
+                "SSE 载荷必须单行: {encoded:?}"
+            );
+            let decoded: String = serde_json::from_str(&encoded).expect("JSON 往返");
+            assert_eq!(decoded, sample);
+        }
+    }
+}
+
 /// Keep externally supplied material distinct from the server's fixed instructions.
 /// `label` must always be a server-owned, fixed description rather than request data.
 fn bounded_reference_material(label: &str, content: &str) -> String {
@@ -1718,11 +1752,21 @@ pub async fn api_ai_office_action_response_stream(
                                 yield Ok(Event::default().event("error").data(chunk));
                                 return;
                             }
-                            let sanitized = chunk.replace(['\n', '\r'], " ");
-                            full_text.push_str(&sanitized);
-                            yield Ok(Event::default().data(sanitized));
+                            // EK-P6 修复：累积原文（核验/落库需要句边界），
+                            // SSE 载荷用 JSON 编码保单行（前端 sseDecode 还原）
+                            full_text.push_str(&chunk);
+                            yield Ok(Event::default().data(sse_encode(&chunk)));
                         }
-                        None => break,
+                        None => {
+                            // M2-A：通道关闭而全文为空 = 静默失败，必须以 error 事件可见
+                            if full_text.trim().is_empty() {
+                                yield Ok(Event::default().event("error").data(
+                                    "[ERROR] 主分析流结束但无任何内容——请检查模型通道或超时配置",
+                                ));
+                                return;
+                            }
+                            break;
+                        }
                     }
                 }
                 _ = heartbeat.tick() => {
@@ -1730,11 +1774,13 @@ pub async fn api_ai_office_action_response_stream(
                 }
             }
         }
+        // M2-C（审查 P1-9）：M2-A 保证空主分析在 worker 层已发 [ERROR]（路由层
+        // None 分支同样兜底），走到这里 full_text 必有主内容——来源恒为
+        // main_analysis，conflict_report_only 死分支删除。
         let fact_report = check_oa_analysis(&full_text, &fact_references, &fact_my_patent);
         let fact_text = format!("\n\n## AI 事实核查（请人工复核）\n{}", format_report(&fact_report));
-        let fact_sse = fact_text.replace(['\n', '\r'], " ");
         full_text.push_str(&fact_text);
-        yield Ok(Event::default().data(fact_sse));
+        yield Ok(Event::default().data(sse_encode(&fact_text)));
 
         // P0-3c: 转述冲突检测 — refs 有全文(>500字)时自动触发
         if conflict_refs_info.len() > 500 {
@@ -1742,9 +1788,8 @@ pub async fn api_ai_office_action_response_stream(
             match conflict_ai.detect_paraphrase_conflicts(&conflict_oa_text, &conflict_refs_info).await {
                 Ok(conflict_report) if conflict_report.trim().len() > 20 => {
                     let conflict_text = format!("\n\n---\n\n## 转述冲突检测（可主张审查员认定错误）\n\n{}", conflict_report);
-                    let conflict_sse = conflict_text.replace(['\n', '\r'], " ");
                     full_text.push_str(&conflict_text);
-                    yield Ok(Event::default().data(conflict_sse));
+                    yield Ok(Event::default().data(sse_encode(&conflict_text)));
                     tracing::info!("[OA-CONFLICT-STREAM] 检测完成, report_len={}", conflict_report.len());
                 }
                 Ok(_) => {
@@ -1756,6 +1801,10 @@ pub async fn api_ai_office_action_response_stream(
             }
         }
 
+        // M2-C：结构化来源事件（前端按 event 分派，不进正文/导出——P0-1）
+        yield Ok(Event::default()
+            .event("meta")
+            .data("{\"source\":\"main_analysis\"}"));
         yield Ok(Event::default().event("done").data("[DONE]"));
 
         if !patent_number.is_empty() && !full_text.is_empty() {
@@ -1867,6 +1916,31 @@ pub async fn api_ai_oa_generate_response_letter(
 
     // 无分析结果时，用 OA 文本 + 讨论历史作为上下文（支持导入后直接生成）
     let is_import_flow = analysis_text.trim().is_empty();
+    // M2-C（审查 P1-8）：来源三态标记。优先采用调用方显式声明的 `analysis_source`
+    // （前端/驱动在拿到分析流 meta 后回传，杜绝启发式误判）；未提供时才回退到
+    // 启发式——且"仅事实核查段"（含 AI 事实核查/可信度评分而无主分析结构）必须
+    // 判为非主分析（M1 实况：主分析静默失败后核查段/冲突报告顶位）。
+    const VALID_SOURCES: [&str; 3] = ["main_analysis", "conflict_report_only", "oa_text_fallback"];
+    let explicit: Option<String> = req
+        .get("analysis_source")
+        .and_then(|v| v.as_str())
+        .filter(|s| VALID_SOURCES.contains(s))
+        .map(|s| s.to_string());
+    let analysis_source: String = explicit.unwrap_or_else(|| {
+        if analysis_text.trim().len() >= 50 {
+            let main_markers = ["第一部分", "审查意见概述", "答复思路", "策略分析", "对比表"];
+            let non_main_markers = ["转述冲突检测", "AI 事实核查", "可信度评分"];
+            let has_main = main_markers.iter().any(|m| analysis_text.contains(m));
+            let has_non_main = non_main_markers.iter().any(|m| analysis_text.contains(m));
+            if !has_main && has_non_main {
+                "conflict_report_only".to_string()
+            } else {
+                "main_analysis".to_string()
+            }
+        } else {
+            "oa_text_fallback".to_string()
+        }
+    });
     let final_analysis = if analysis_text.trim().len() >= 50 {
         analysis_text
     } else if !office_action.is_empty() {
@@ -1876,6 +1950,20 @@ pub async fn api_ai_oa_generate_response_letter(
         return Sse::new(error_sse(
             "[ERROR] 缺少分析结果和 OA 文本，请先上传 OA 或完成分析后再生成答复书".into(),
         ));
+    };
+    // M2-C：非主分析来源 → 答复书正文首部必须有可见提示（随首个 data 帧下发，确定性前置）
+    let source_banner = if analysis_source == "main_analysis" {
+        String::new()
+    } else {
+        let basis = if analysis_source == "conflict_report_only" {
+            "主分析缺失，本稿基于转述冲突检测报告生成"
+        } else {
+            "主分析缺失，本稿基于审查意见通知书原文生成"
+        };
+        format!(
+            "> ⚠️ 来源提示（{}）：{}，请人工核验后再使用。\n\n",
+            analysis_source, basis
+        )
     };
 
     let config_guard = s.config.read().unwrap_or_else(|e| e.into_inner());
@@ -1907,15 +1995,22 @@ pub async fn api_ai_oa_generate_response_letter(
 
     let stream = async_stream::stream! {
         let mut full_text = String::new();
+        // M2-C：结构化来源字段走 meta 事件（前端解析器只认 error/done/data，未知事件安全跳过）
+        yield Ok(Event::default()
+            .event("meta")
+            .data(format!("{{\"source\":\"{analysis_source}\"}}")));
+        if !source_banner.is_empty() {
+            full_text.push_str(&source_banner);
+            yield Ok(Event::default().data(sse_encode(&source_banner)));
+        }
         while let Some(chunk) = rx.recv().await {
             if chunk.starts_with("[ERROR]") {
                 yield Ok(Event::default().event("error").data(chunk));
                 return;
             }
-            // Keep paragraph boundaries while preserving a single SSE data line.
-            let escaped = chunk.replace('\r', "").replace('\n', "\\n");
-            full_text.push_str(&escaped);
-            yield Ok(Event::default().data(escaped));
+            // EK-P6：累积原文（句边界完整），SSE 载荷 JSON 编码
+            full_text.push_str(&chunk);
+            yield Ok(Event::default().data(sse_encode(&chunk)));
         }
         // R6c: 事实核查已由 pipeline 内嵌，SSE 层不再重复追加
         yield Ok(Event::default().event("done").data("[DONE]"));
@@ -2214,18 +2309,16 @@ pub async fn api_ai_oa_discuss(
                 yield Ok(Event::default().event("error").data(chunk));
                 return;
             }
-            // SSE safety: sanitize \n/\r to prevent protocol breakage
-            let sanitized = chunk.replace(['\n', '\r'], " ");
-            accumulated_response.push_str(&sanitized);
-            yield Ok(Event::default().data(sanitized));
+            // EK-P6 修复：累积原文，SSE 载荷 JSON 编码（前端 sseDecode 还原）
+            accumulated_response.push_str(&chunk);
+            yield Ok(Event::default().data(sse_encode(&chunk)));
         }
 
         // MC2: 讨论回复事实核查——附到讨论消息后
         let disc_fact_report = check_oa_analysis(&accumulated_response, &analysis_text, &accumulated_response);
         if !disc_fact_report.warnings.is_empty() {
             let fact_text = format!("\n\n## AI 事实核查（请人工复核）\n{}", format_report(&disc_fact_report));
-            let fact_sse = fact_text.replace(['\n', '\r'], " ");
-            yield Ok(Event::default().data(fact_sse));
+            yield Ok(Event::default().data(sse_encode(&fact_text)));
         }
 
         // P0: done 事件携带 discussion_id，确保前端可捕获

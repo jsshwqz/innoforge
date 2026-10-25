@@ -1310,3 +1310,11 @@
 - **回归 / 负控 / Regression & Negative control**: 正确门 2 passed；把 `if !serpapi_configured` 反转成 `if serpapi_configured` ⇒ **2 failed**（`configured_key_does_not_prepend…` 见错误前置该行、`unconfigured_key_prepends…` 见该行缺失）。植入必红达成（前两轮没有）。
 - **预防 / Prevention**: ①"让它红"的负控必须直接跑一遍（反转被锁分支/门），绿了就是没测到；②断言要锚在**被判代码分支的产物**（某条 attempt 行的有无/某字段值），不要用整串 body 的宽 contains；③stub 必须能构造出"触发该分支"的输入，否则测试与实现各说各话。
 - **提交 / Commit**: 见 PR #121（分支 `r32/issue-83-three-state`，`refs #83`）。
+## [2026-10-24] ㉝ 负控变异必须打在"不变量的实际执行点"上；blocking reqwest 绝不能进 tokio 异步上下文
+- **严重程度 / Severity**: MEDIUM（前者让负控恒绿、给出虚假的测试有效性证明；后者让集成测试以 runtime panic 收场，并连带孤儿进程锁死二进制）
+- **现象 / Symptom**: ①EK-v2 的 NC3（空检索不得高分）第一轮红通道：把 `rubric::score` 的 `InsufficientEvidence => 0.0` 硬门改为不归零后，目标测试**依然绿**——负控证伪失败。②集成测试 `#[tokio::test]` 里调用含 `reqwest::blocking` 的测试 harness（就绪探测），直接 panic：`Cannot drop a runtime in a context where blocking is not allowed`；panic 路径泄漏的 `innoforge-server.exe` 孤儿锁住 `target/debug/innoforge-server.exe`，后续 cargo 报 os error 5。
+- **根因 / Root cause**: ①空语料路径在 `run_kernel_with_repair` 里**提前返回**（rubric 直接给全零 default），根本不经过 `score()`——变异打在一个该路径不会执行的函数上，等于没变异。不变量 I3 有两个执行点（提前返回 + score 硬门），负控只打了其中一个。②`reqwest::blocking` 内部自建当前线程 runtime 并在 drop 时要求可阻塞上下文；在 `#[tokio::test]` 的 worker 上下文里 drop 它必然 panic。这是"同步工具混进异步世界"的组合陷阱。
+- **修复 / Fix**: ①NC3 红通道改为双执行点：变异 `score()` 硬门 → 单测 `grounding_zero_when_insufficient` 红；变异提前返回的 rubric 为满分 → 集成 `nc3_empty_corpus_must_not_score_high` 红。两者都实测翻红后才算证伪闭环（写入 `tests/evidence_kernel_slice.rs` 文件头）。②集成测试改全同步（`#[test]` + `reqwest::blocking`），不再嵌 tokio；测试前 `taskkill /IM innoforge-server.exe` 清孤儿。
+- **负控 / Negative control**: NC3 两半的红通道均为真实执行输出（见 PR #125 正文）；blocking-reqwest 问题的复现即那次 panic 本身（backtrace 定位到 `reqwest::blocking::client::ClientHandle::new`）。
+- **预防 / Prevention**: ①写负控前先回答"这个不变量由哪几行代码强制执行"，变异必须覆盖**每一个**执行点；只绿一半的红通道不算证伪。②测试里 harness 含 blocking HTTP 客户端时，测试本体禁止 `#[tokio::test]`；反之需要异步断言时，把 spawn/就绪（同步）与断言（`Runtime::new().block_on`）分开在同步测试里两段调用。
+- **提交 / Commit**: 见 PR #125（分支 `r33/evidence-kernel`）。
