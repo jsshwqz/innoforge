@@ -31,8 +31,31 @@ pub async fn execute(ctx: &mut PipelineContext, db: &Arc<Database>) -> Result<()
         tracing::warn!("Fact check rejected: score below threshold");
     }
 
+    // EK-v2: 证据核验内核（docs/design/evidence-kernel-v2.md）。
+    // 逐句绑定证据：未支撑断言降级标注【未证实】；报告追加到 ai_analysis 尾部；
+    // 决策门（grounding < 0.5 或证据不足）抑制申请/放弃/转向建议。
+    let corpus = crate::evidence_kernel::corpus_from_chunks(&ctx.rag_chunks);
+    let (kernel_report, kernel_text) =
+        crate::evidence_kernel::run_kernel(&ctx.ai_analysis, &corpus);
+    if kernel_text != ctx.ai_analysis {
+        ctx.ai_analysis = kernel_text;
+    }
+    ctx.kernel_report = serde_json::to_string(&kernel_report).ok();
+    let allow_decision = !crate::evidence_kernel::should_suppress_decision(&kernel_report);
+    if !allow_decision {
+        tracing::warn!(
+            "EK-v2 decision gate: status={:?} grounding={:.2} — 决策建议被抑制",
+            kernel_report.status,
+            kernel_report.rubric.grounding
+        );
+    }
+    ctx.ai_analysis
+        .push_str(&crate::evidence_kernel::report::render_markdown(
+            &kernel_report,
+        ));
+
     // MB4: 出处标注 + 决策建议段（在事实校验之后、记忆提取之前执行）
-    super::provenance::run_provenance_pipeline(ctx);
+    super::provenance::run_provenance_pipeline(ctx, allow_decision);
     if !ctx.provenance_annotations.is_empty() {
         let speculation_count = ctx
             .provenance_annotations
