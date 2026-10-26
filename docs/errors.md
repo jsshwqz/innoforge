@@ -1318,3 +1318,12 @@
 - **负控 / Negative control**: NC3 两半的红通道均为真实执行输出（见 PR #125 正文）；blocking-reqwest 问题的复现即那次 panic 本身（backtrace 定位到 `reqwest::blocking::client::ClientHandle::new`）。
 - **预防 / Prevention**: ①写负控前先回答"这个不变量由哪几行代码强制执行"，变异必须覆盖**每一个**执行点；只绿一半的红通道不算证伪。②测试里 harness 含 blocking HTTP 客户端时，测试本体禁止 `#[tokio::test]`；反之需要异步断言时，把 spawn/就绪（同步）与断言（`Runtime::new().block_on`）分开在同步测试里两段调用。
 - **提交 / Commit**: 见 PR #125（分支 `r33/evidence-kernel`）。
+
+## [2026-10-26] ㉞ "existence ≠ support" 不是加权重系数，是计分门与清单门的语义一致性
+- **严重程度 / Severity**: HIGH（0.7 权重让 grounding 分子、`relation()`、critic 清单三处消费点同时假绿；零逐字支撑的报告可越过决策门）
+- **涉及文件**: `src/evidence_kernel/model.rs`（`verified_weight`）、`src/evidence_kernel/rubric.rs`（`compute_metrics` / `anchored_docs`）、`src/evidence_kernel/critic.rs`（`collect_findings`）
+- **现象 / Symptom**: 一份"事实句只写 `[引用N]`、不写引文"的报告 grounding 可达 0.7，越过 0.5 决策门放行决策建议；golden 示例报告里三条裸引用句全部显示"✅ 支撑"。PR #125 复核意见（head `11d4c25`）以 Blocking 抓出。
+- **根因 / Root cause**: `verified_weight()` 给 AnchorOnly 记 0.7 本意是"部分可信"，但所有消费点把 `is_some()` 当"已核验"——权重一非零，`relation()` 判 Support、grounding 分子计入 0.7、critic 不挑清单。"existence ≠ support"的设计主张只写在了文档里，没有贯穿到每个消费点的语义。
+- **修复 / Fix**: `verified_weight()` 收紧为逐字核验（Exact/Approx ⇒ `Some(1.0)`，AnchorOnly ⇒ `None`）；矛盾检测的 `anchored_docs` 显式按"锚点命中"匹配（不随权重收窄）；critic reason 点名"仅有锚点命中、无逐字引文支撑（existence ≠ support）"；NC4 负控先红后绿（修复前 relation=Support、grounding=0.7、门不抑制，实测 FAILED 后复绿）。
+- **预防 / Prevention**: ①给枚举状态记"部分分"时，必须枚举它的**每一个消费点**并回答"非零值在这里的语义是什么"——任何一个消费点只认布尔 `is_some()`，部分分就是假绿。②golden 夹具记录的是**语义快照**：语义变更必须重生成（`EK_WRITE_GOLDEN=1`）并逐行核读 diff，不能只改断言数字——本次 golden diff 恰好暴露了第三处假绿句（C8）和降级回路的重分类行为。
+- **提交 / Commit**: 见 PR #125（分支 `r33/evidence-kernel`）。

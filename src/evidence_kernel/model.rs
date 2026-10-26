@@ -114,11 +114,13 @@ pub enum VerifyStatus {
 }
 
 impl VerifyStatus {
-    /// 是否算「已核验」及其 grounding 权重（ADR：Exact/Approx=1.0，AnchorOnly=0.7）。
+    /// 是否算「逐字核验」及其 grounding 权重（ADR 修订，PR #125 复核 Blocking / 负控 NC4）：
+    /// Exact/Approx=1.0；AnchorOnly（仅锚点、无引文）⇒ `None`——锚点存在（existence）
+    /// 不等于有支撑（support），它单独走 `anchor_only` 计量与 critic 清单，
+    /// 不得冒充核验抬分或越过决策门。
     pub fn verified_weight(&self) -> Option<f64> {
         match self {
             VerifyStatus::VerifiedExact { .. } | VerifyStatus::VerifiedApprox { .. } => Some(1.0),
-            VerifyStatus::AnchorOnly { .. } => Some(0.7),
             _ => None,
         }
     }
@@ -146,6 +148,8 @@ pub struct ClaimRecord {
 }
 
 impl ClaimRecord {
+    /// Support 要求至少一条**逐字核验**（Exact/Approx）；仅锚点命中（AnchorOnly）
+    /// 不算支撑（existence ≠ support，NC4），降级句恒 Insufficient。
     pub fn relation(&self) -> Relation {
         let has_verified = self
             .verifications
