@@ -1757,7 +1757,16 @@ pub async fn api_ai_office_action_response_stream(
                             full_text.push_str(&chunk);
                             yield Ok(Event::default().data(sse_encode(&chunk)));
                         }
-                        None => break,
+                        None => {
+                            // M2-A：通道关闭而全文为空 = 静默失败，必须以 error 事件可见
+                            if full_text.trim().is_empty() {
+                                yield Ok(Event::default().event("error").data(
+                                    "[ERROR] 主分析流结束但无任何内容——请检查模型通道或超时配置",
+                                ));
+                                return;
+                            }
+                            break;
+                        }
                     }
                 }
                 _ = heartbeat.tick() => {
@@ -1765,6 +1774,9 @@ pub async fn api_ai_office_action_response_stream(
                 }
             }
         }
+        // M2-C（审查 P1-9）：M2-A 保证空主分析在 worker 层已发 [ERROR]（路由层
+        // None 分支同样兜底），走到这里 full_text 必有主内容——来源恒为
+        // main_analysis，conflict_report_only 死分支删除。
         let fact_report = check_oa_analysis(&full_text, &fact_references, &fact_my_patent);
         let fact_text = format!("\n\n## AI 事实核查（请人工复核）\n{}", format_report(&fact_report));
         full_text.push_str(&fact_text);
@@ -1789,6 +1801,10 @@ pub async fn api_ai_office_action_response_stream(
             }
         }
 
+        // M2-C：结构化来源事件（前端按 event 分派，不进正文/导出——P0-1）
+        yield Ok(Event::default()
+            .event("meta")
+            .data("{\"source\":\"main_analysis\"}"));
         yield Ok(Event::default().event("done").data("[DONE]"));
 
         if !patent_number.is_empty() && !full_text.is_empty() {
@@ -1900,6 +1916,31 @@ pub async fn api_ai_oa_generate_response_letter(
 
     // 无分析结果时，用 OA 文本 + 讨论历史作为上下文（支持导入后直接生成）
     let is_import_flow = analysis_text.trim().is_empty();
+    // M2-C（审查 P1-8）：来源三态标记。优先采用调用方显式声明的 `analysis_source`
+    // （前端/驱动在拿到分析流 meta 后回传，杜绝启发式误判）；未提供时才回退到
+    // 启发式——且"仅事实核查段"（含 AI 事实核查/可信度评分而无主分析结构）必须
+    // 判为非主分析（M1 实况：主分析静默失败后核查段/冲突报告顶位）。
+    const VALID_SOURCES: [&str; 3] = ["main_analysis", "conflict_report_only", "oa_text_fallback"];
+    let explicit: Option<String> = req
+        .get("analysis_source")
+        .and_then(|v| v.as_str())
+        .filter(|s| VALID_SOURCES.contains(s))
+        .map(|s| s.to_string());
+    let analysis_source: String = explicit.unwrap_or_else(|| {
+        if analysis_text.trim().len() >= 50 {
+            let main_markers = ["第一部分", "审查意见概述", "答复思路", "策略分析", "对比表"];
+            let non_main_markers = ["转述冲突检测", "AI 事实核查", "可信度评分"];
+            let has_main = main_markers.iter().any(|m| analysis_text.contains(m));
+            let has_non_main = non_main_markers.iter().any(|m| analysis_text.contains(m));
+            if !has_main && has_non_main {
+                "conflict_report_only".to_string()
+            } else {
+                "main_analysis".to_string()
+            }
+        } else {
+            "oa_text_fallback".to_string()
+        }
+    });
     let final_analysis = if analysis_text.trim().len() >= 50 {
         analysis_text
     } else if !office_action.is_empty() {
@@ -1909,6 +1950,20 @@ pub async fn api_ai_oa_generate_response_letter(
         return Sse::new(error_sse(
             "[ERROR] 缺少分析结果和 OA 文本，请先上传 OA 或完成分析后再生成答复书".into(),
         ));
+    };
+    // M2-C：非主分析来源 → 答复书正文首部必须有可见提示（随首个 data 帧下发，确定性前置）
+    let source_banner = if analysis_source == "main_analysis" {
+        String::new()
+    } else {
+        let basis = if analysis_source == "conflict_report_only" {
+            "主分析缺失，本稿基于转述冲突检测报告生成"
+        } else {
+            "主分析缺失，本稿基于审查意见通知书原文生成"
+        };
+        format!(
+            "> ⚠️ 来源提示（{}）：{}，请人工核验后再使用。\n\n",
+            analysis_source, basis
+        )
     };
 
     let config_guard = s.config.read().unwrap_or_else(|e| e.into_inner());
@@ -1940,6 +1995,14 @@ pub async fn api_ai_oa_generate_response_letter(
 
     let stream = async_stream::stream! {
         let mut full_text = String::new();
+        // M2-C：结构化来源字段走 meta 事件（前端解析器只认 error/done/data，未知事件安全跳过）
+        yield Ok(Event::default()
+            .event("meta")
+            .data(format!("{{\"source\":\"{analysis_source}\"}}")));
+        if !source_banner.is_empty() {
+            full_text.push_str(&source_banner);
+            yield Ok(Event::default().data(sse_encode(&source_banner)));
+        }
         while let Some(chunk) = rx.recv().await {
             if chunk.starts_with("[ERROR]") {
                 yield Ok(Event::default().event("error").data(chunk));

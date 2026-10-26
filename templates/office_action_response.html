@@ -2270,10 +2270,15 @@
 
                 for (let i = 0; i < lines.length; i++) {
                     var line = lines[i];
-                    if (line.startsWith('event: ')) {
-                        currentEvent = line.slice(7).trim();
+                    if (line.startsWith('event:')) {
+                        // 兼容 'event: x' 与 'event:x'（axum 无空格格式）
+                        currentEvent = line.slice(6).replace(/^ /, '').trim();
                     } else if (line.startsWith('data:')) {
                         var data = line.slice(5).replace(/^ /, '');
+                        if (currentEvent === 'meta') {
+                            // P0-1：结构化来源事件，不进正文/导出
+                            continue;
+                        }
                         if (currentEvent === 'error' || data.startsWith('[ERROR]')) {
                             showError(data.replace('[ERROR] ', ''));
                             errored = true;
@@ -2666,10 +2671,14 @@
                 buffer = lines.pop();
                 for (let i = 0; i < lines.length; i++) {
                     var line = lines[i];
-                    if (line.startsWith('event: ')) {
-                        currentEvent = line.slice(7).trim();
+                    if (line.startsWith('event:')) {
+                        currentEvent = line.slice(6).replace(/^ /, '').trim();
                     } else if (line.startsWith('data:')) {
                         var data = line.slice(5).replace(/^ /, '');
+                        if (currentEvent === 'meta') {
+                            // P0-1：结构化来源事件，不进正文
+                            continue;
+                        }
                         if (currentEvent === 'error' || data.startsWith('[ERROR]')) {
                             aiText = '⚠️ ' + data.replace('[ERROR] ', '');
                             done = true;
@@ -2859,10 +2868,20 @@
                 buffer += decoder.decode(value, { stream: true });
                 var lines = buffer.split('\n');
                 buffer = lines.pop();
+                var currentEvent = '';
                 for (let i = 0; i < lines.length; i++) {
                     var line = lines[i];
+                    if (line.startsWith('event:')) {
+                        currentEvent = line.slice(6).replace(/^ /, '').trim();
+                        continue;
+                    }
+                    if (line === '') { currentEvent = ''; continue; }
                     if (line.startsWith('data:')) {
                         var data = line.slice(5).replace(/^ /, '');
+                        if (currentEvent === 'meta') {
+                            // P0-1：结构化来源事件，不进正文/DOCX 导出
+                            continue;
+                        }
                         if (data.startsWith('[ERROR]')) {
                             if (section5Area) section5Area.innerHTML = '<div style="color:#f85149;padding:16px;">' + escapeHtml(data) + '</div>';
                             if (overlayDiv) { overlayDiv.querySelector('h3').textContent = '❌ 生成失败'; overlayDiv.querySelector('#overlay-stream').textContent = data; }

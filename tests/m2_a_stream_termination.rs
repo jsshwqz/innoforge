@@ -1,0 +1,330 @@
+//! M2-A（基线失败 #1）回归：流式主分析的终止必须可见。
+//!
+//! 四种终止（M2 独立审计要求的覆盖面）：
+//! ① 首内容超时（thinking 卡死/纯静默）→ `[ERROR] 首个内容超时`；
+//! ② 空 role 帧后静默（无内容帧不能骗过首内容截止期）→ 同①；
+//! ③ 部分内容后连接关闭而无 [DONE] → `[ERROR] 流在完成标记前中断`，且已收内容保留；
+//! ④ 正常完成（内容 + [DONE]）→ 无 error 事件。
+//! 另：空流（[DONE] 前零内容）→ `[ERROR] 未输出任何内容`。
+//! 错误事件格式：SSE `event:error`，data 以 `[ERROR]` 开头（前端既有 error 分支可消费）。
+//!
+//! 负控（红通道，PR 记录，全部真实执行）：
+//! - R1 `git stash push src/ai/chat.rs src/ai/client.rs src/ai/patent.rs src/routes/ai.rs`
+//!   （整体回到修复前）→ ①/②/③ 用例全部翻红；
+//! - R2 只把 `chat.rs` 的 `timeout_at(ft_deadline, resp.chunk())` 临时改为
+//!   `resp.chunk().await`（模拟"首块计时被任意字节满足"的旧语义）→ ② 翻红。
+//!
+//! 桩：进程内 std TcpListener 手写 SSE（可控时延），不走外网。
+
+mod common;
+
+use std::io::{Read, Write};
+use std::net::TcpListener;
+
+/// 可控 SSE 桩模式
+enum StubMode {
+    /// 先发响应头，然后静默 seconds 秒再关闭（thinking 卡首 token 形态）
+    SlowFirstToken(u64),
+    /// 发一个空 role 帧后静默 seconds 秒再关闭（无内容帧不得骗过首内容截止期）
+    RoleThenSilence(u64),
+    /// 一个内容 chunk 后**不发 [DONE]** 直接关闭（网关省略 [DONE] 形态）
+    PartialCloseNoDone,
+    /// 一个内容 chunk 后挂起不关连接（总超时形态）
+    PartialThenHang,
+    /// 立即 [DONE]，零内容
+    EmptyDone,
+    /// 两个内容 chunk 后 [DONE]
+    Normal,
+}
+
+fn start_stub(mode: StubMode) -> u16 {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind stub");
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let mut stream = match stream {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+            // 读完请求头+体（Content-Length 内）
+            let mut buf = Vec::new();
+            let mut tmp = [0u8; 8192];
+            let mut header_end = None;
+            loop {
+                match stream.read(&mut tmp) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        buf.extend_from_slice(&tmp[..n]);
+                        if header_end.is_none() {
+                            if let Some(pos) = find_subsequence(&buf, b"\r\n\r\n") {
+                                header_end = Some(pos);
+                            }
+                        }
+                        if let Some(he) = header_end {
+                            let head = String::from_utf8_lossy(&buf[..he]).to_string();
+                            let cl = head
+                                .lines()
+                                .find(|l| l.to_ascii_lowercase().starts_with("content-length:"))
+                                .and_then(|l| l.split(':').nth(1))
+                                .and_then(|v| v.trim().parse::<usize>().ok())
+                                .unwrap_or(0);
+                            if buf.len() >= he + 4 + cl {
+                                break;
+                            }
+                        }
+                    }
+                    Err(_) => return,
+                }
+            }
+            let sse_headers = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n";
+            let _ = stream.write_all(sse_headers.as_bytes());
+            let _ = stream.flush();
+            match mode {
+                StubMode::SlowFirstToken(secs) => {
+                    std::thread::sleep(std::time::Duration::from_secs(secs));
+                    // 静默关闭（不发任何 data）
+                }
+                StubMode::RoleThenSilence(secs) => {
+                    // OpenAI 兼容流的典型首帧：role 声明，无 content（thinking 前奏）
+                    let _ = stream.write_all(
+                        b"data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n",
+                    );
+                    let _ = stream.flush();
+                    std::thread::sleep(std::time::Duration::from_secs(secs));
+                }
+                StubMode::PartialCloseNoDone => {
+                    let body =
+                        "data: {\"choices\":[{\"delta\":{\"content\":\"M2A 截断前内容。\"}}]}\n\n";
+                    let _ = stream.write_all(body.as_bytes());
+                    let _ = stream.flush();
+                    // 不发 [DONE]，直接关闭
+                }
+                StubMode::PartialThenHang => {
+                    let body =
+                        "data: {\"choices\":[{\"delta\":{\"content\":\"M2A 挂起前内容。\"}}]}\n\n";
+                    let _ = stream.write_all(body.as_bytes());
+                    let _ = stream.flush();
+                    // 挂起 60s（> 测试设的 2s 全局超时），让 client 总超时先触发
+                    std::thread::sleep(std::time::Duration::from_secs(60));
+                }
+                StubMode::EmptyDone => {
+                    let _ = stream.write_all(b"data: [DONE]\n\n");
+                    let _ = stream.flush();
+                }
+                StubMode::Normal => {
+                    let body = concat!(
+                        "data: {\"choices\":[{\"delta\":{\"content\":\"M2A 正常内容第一句。\"}}]}\n\n",
+                        "data: {\"choices\":[{\"delta\":{\"content\":\"M2A 正常内容第二句。\"}}]}\n\n",
+                        "data: [DONE]\n\n",
+                    );
+                    let _ = stream.write_all(body.as_bytes());
+                    let _ = stream.flush();
+                }
+            }
+            let _ = stream.shutdown(std::net::Shutdown::Both);
+            // 单请求即止：listener 循环继续服务后续连接（spawn_test_server 可能发探测）
+        }
+    });
+    port
+}
+
+fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack.windows(needle.len()).position(|w| w == needle)
+}
+
+fn post_stream(port: u16, body: &str) -> String {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(90))
+        .build()
+        .expect("client");
+    client
+        .post(format!(
+            "http://127.0.0.1:{port}/api/ai/office-action-response/stream"
+        ))
+        .header("Content-Type", "application/json")
+        .body(body.to_string())
+        .send()
+        .expect("post")
+        .text()
+        .expect("body")
+}
+
+fn minimal_body() -> String {
+    serde_json::json!({
+        "my_patent": {"title": "M2A 测试", "content": "权利要求1：一种测试装置。"},
+        "office_action": {"content": "审查意见通知书：权利要求1相对于对比文件1不具备创造性。"},
+        "references": [],
+        "oa_type": "first_exam",
+        "depth": "standard"
+    })
+    .to_string()
+}
+
+#[test]
+fn m2a_four_terminations() {
+    // ── ① 纯静默（thinking 卡死）：首内容超时必须以 error 可见 ──
+    let slow_port = start_stub(StubMode::SlowFirstToken(30));
+    let app_port_slow = common::free_port();
+    let _s1 = common::spawn_test_server_with_timeout(
+        app_port_slow,
+        60,
+        tempfile::tempdir().expect("dir"),
+        &[
+            ("AI_BASE_URL", &format!("http://127.0.0.1:{slow_port}/v1")),
+            ("AI_API_KEY", "stub-key"),
+            ("INNOFORGE_AI_FIRST_TOKEN_TIMEOUT_SECS", "1"),
+        ],
+    );
+    let resp = post_stream(app_port_slow, &minimal_body());
+    assert!(
+        resp.contains("event:error") && resp.contains("[ERROR]") && resp.contains("首个内容超时"),
+        "①纯静默必须以 error 事件可见，实际响应片段：{}",
+        &resp[..resp.len().min(300)]
+    );
+
+    // ── ② 空 role 帧后静默：无内容帧不能骗过首内容截止期 ──
+    let role_port = start_stub(StubMode::RoleThenSilence(15));
+    let app_port_role = common::free_port();
+    let _s2 = common::spawn_test_server_with_timeout(
+        app_port_role,
+        60,
+        tempfile::tempdir().expect("dir"),
+        &[
+            ("AI_BASE_URL", &format!("http://127.0.0.1:{role_port}/v1")),
+            ("AI_API_KEY", "stub-key"),
+            ("INNOFORGE_AI_FIRST_TOKEN_TIMEOUT_SECS", "1"),
+        ],
+    );
+    let resp = post_stream(app_port_role, &minimal_body());
+    assert!(
+        resp.contains("event:error") && resp.contains("首个内容超时"),
+        "②空 role 帧后静默必须按首内容超时报错，实际响应片段：{}",
+        &resp[..resp.len().min(300)]
+    );
+
+    // ── ③ 部分内容后无 [DONE] 关闭（M2 审查 P0-3 修订）：已有内容视为完成——
+    // 不报 error（网关可不发 [DONE]），已收内容保留 ──
+    let partial_port = start_stub(StubMode::PartialCloseNoDone);
+    let app_port_partial = common::free_port();
+    let _s3 = common::spawn_test_server_with_timeout(
+        app_port_partial,
+        60,
+        tempfile::tempdir().expect("dir"),
+        &[
+            (
+                "AI_BASE_URL",
+                &format!("http://127.0.0.1:{partial_port}/v1"),
+            ),
+            ("AI_API_KEY", "stub-key"),
+            ("INNOFORGE_AI_FIRST_TOKEN_TIMEOUT_SECS", "10"),
+        ],
+    );
+    let resp = post_stream(app_port_partial, &minimal_body());
+    assert!(
+        !resp.contains("event:error"),
+        "③有内容无 [DONE] 不得报错（P0-3），实际响应片段：{}",
+        &resp[..resp.len().min(300)]
+    );
+    let decoded_partial = decode_sse(&resp);
+    assert!(
+        decoded_partial.contains("M2A 截断前内容"),
+        "③已收内容必须保留，decoded={decoded_partial}"
+    );
+
+    // ── ④ 正常完成：内容照发、无 error ──
+    let normal_port = start_stub(StubMode::Normal);
+    let app_port_normal = common::free_port();
+    let _s4 = common::spawn_test_server_with_timeout(
+        app_port_normal,
+        60,
+        tempfile::tempdir().expect("dir"),
+        &[
+            ("AI_BASE_URL", &format!("http://127.0.0.1:{normal_port}/v1")),
+            ("AI_API_KEY", "stub-key"),
+            ("INNOFORGE_AI_FIRST_TOKEN_TIMEOUT_SECS", "10"),
+        ],
+    );
+    let resp = post_stream(app_port_normal, &minimal_body());
+    assert!(
+        !resp.contains("event:error"),
+        "④正常流不得出现 error 事件，响应片段：{}",
+        &resp[..resp.len().min(300)]
+    );
+    let decoded = decode_sse(&resp);
+    assert!(decoded.contains("M2A 正常内容第一句"), "decoded={decoded}");
+}
+
+#[test]
+fn m2a_empty_done_stream() {
+    // 空流（[DONE] 前零内容）→ 显式"未输出任何内容"
+    let empty_port = start_stub(StubMode::EmptyDone);
+    let app_port_empty = common::free_port();
+    let _s = common::spawn_test_server_with_timeout(
+        app_port_empty,
+        60,
+        tempfile::tempdir().expect("dir"),
+        &[
+            ("AI_BASE_URL", &format!("http://127.0.0.1:{empty_port}/v1")),
+            ("AI_API_KEY", "stub-key"),
+            ("INNOFORGE_AI_FIRST_TOKEN_TIMEOUT_SECS", "10"),
+        ],
+    );
+    let resp = post_stream(app_port_empty, &minimal_body());
+    assert!(
+        resp.contains("event:error") && resp.contains("未输出任何内容"),
+        "空流必须以 error 事件可见，实际响应片段：{}",
+        &resp[..resp.len().min(300)]
+    );
+}
+
+/// M2 审查 P0-2：部分内容后总超时（单一 deadline = reqwest client 全局超时）
+/// 必须以 [ERROR] 可见，不得静默结束。
+#[test]
+fn m2a_global_timeout_with_partial_content_visible() {
+    let port = start_stub(StubMode::PartialThenHang);
+    let app_port = common::free_port();
+    let _s = common::spawn_test_server_with_timeout(
+        app_port,
+        60,
+        tempfile::tempdir().expect("dir"),
+        &[
+            ("AI_BASE_URL", &format!("http://127.0.0.1:{port}/v1")),
+            ("AI_API_KEY", "stub-key"),
+            ("INNOFORGE_AI_FIRST_TOKEN_TIMEOUT_SECS", "10"),
+            ("INNOFORGE_AI_GLOBAL_TIMEOUT_SECS", "2"),
+        ],
+    );
+    let resp = post_stream(app_port, &minimal_body());
+    eprintln!(
+        "GT_DBG full_resp_len={} resp={:?}",
+        resp.len(),
+        &resp[..resp.len().min(1200)]
+    );
+    assert!(
+        resp.contains("event:error") && resp.contains("[ERROR]"),
+        "全局超时（有部分内容）必须以 error 事件可见，实际响应片段：{}",
+        &resp[..resp.len().min(400)]
+    );
+}
+
+fn decode_sse(raw: &str) -> String {
+    let mut out = String::new();
+    for line in raw.split('\n') {
+        if let Some(d) = line
+            .strip_prefix("data:")
+            .map(|d| d.strip_prefix(' ').unwrap_or(d))
+        {
+            if d.starts_with('"') {
+                if let Ok(s) = serde_json::from_str::<String>(d) {
+                    out.push_str(&s);
+                }
+            } else {
+                out.push_str(d);
+            }
+        }
+    }
+    out
+}
+
+// 默认值与 env 覆盖的断言在 `src/ai/client.rs` 单测（m2a_timeout_defaults_and_env_override）——
+// 与实现同文件，负控 stash 时随实现一起回退，保证本文件对旧代码可独立编译。
