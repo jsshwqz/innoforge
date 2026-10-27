@@ -1983,6 +1983,18 @@ pub async fn api_ai_oa_generate_response_letter(
         }
     }
 
+    // 主 UI 只传 analysis/discussion/office_action；答复管线的 Stage A 需要本专利原文
+    // 做 verbatim 校验，否则所有特征被丢弃、产出空答复。
+    let my_patent_text = match req.get("my_patent") {
+        Some(serde_json::Value::String(s)) => s.clone(),
+        Some(serde_json::Value::Object(o)) => o
+            .get("content")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        _ => String::new(),
+    };
+
     let mut rx = ai.generate_response_letter_stream(
         &final_analysis,
         &discussion,
@@ -1990,6 +2002,7 @@ pub async fn api_ai_oa_generate_response_letter(
         &oa_type,
         is_import_flow,
         Some(&req),
+        &my_patent_text,
         Some(&ai_fast),
     );
 

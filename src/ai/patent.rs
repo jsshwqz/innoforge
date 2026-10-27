@@ -987,9 +987,15 @@ impl AiClient {
                 return full_output[pos..].to_string();
             }
         }
-        // Fallback: return the last half of the output (heuristic for response part)
-        let mid = full_output.len() / 2;
-        full_output[mid..].to_string()
+        // Fallback: return the last half of the output (heuristic for response part).
+        // 按字符边界切：字节 len/2 可能落在多字节汉字内部（#73 同类 panic）。
+        let mid_char = full_output.chars().count() / 2;
+        let start = full_output
+            .char_indices()
+            .nth(mid_char)
+            .map(|(i, _)| i)
+            .unwrap_or(full_output.len());
+        full_output[start..].to_string()
     }
 
     /// Batch summarize multiple patents concurrently.
@@ -1223,6 +1229,7 @@ impl AiClient {
         oa_type: &str,
         is_import_flow: bool,
         request_json: Option<&serde_json::Value>,
+        my_patent_text: &str,
         ai_client_fast: Option<&AiClient>,
     ) -> tokio::sync::mpsc::Receiver<String> {
         let (tx, rx) = tokio::sync::mpsc::channel::<String>(64);
@@ -1385,6 +1392,13 @@ impl AiClient {
                     custom_stopwords: vec![],
                 }
             };
+            let mut case_input = case_input;
+            // 主 UI 的答复书请求不带 CaseInput；没有权利要求时 Stage A 的 verbatim 校验
+            // 会把所有特征丢弃，产出空答复。用用户上传的本专利文本补位。
+            if case_input.claims_under_review.trim().is_empty() && !my_patent_text.trim().is_empty()
+            {
+                case_input.claims_under_review = my_patent_text.to_string();
+            }
             let self_clone = self.clone();
             let ai_client_fast_cloned = ai_client_fast.cloned();
             tokio::spawn(async move {
@@ -1933,5 +1947,17 @@ fn strategy_recommend_prompt_handles_empty_inputs() {
     assert!(
         user.contains("## OA 类型\n\n"),
         "user should handle empty oa_type"
+    );
+}
+
+#[test]
+fn extract_oa_response_section_fallback_is_char_safe() {
+    // 3 字节汉字 + 2 个 ASCII：字节 len/2 落在汉字内部，旧实现 `full_output[mid..]` 必 panic。
+    let full = format!("{}ab", "控".repeat(1000));
+    let tail = AiClient::extract_oa_response_section(&full);
+    assert!(!tail.is_empty(), "fallback must return a non-empty tail");
+    assert!(
+        tail.chars().all(|c| c == '控' || c == 'a' || c == 'b'),
+        "fallback must start on a char boundary"
     );
 }

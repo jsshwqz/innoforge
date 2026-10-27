@@ -26,13 +26,13 @@ ACK 2026-10-27 整顿令：本任务 = M1/M2/M3 第X步，服务于 <哪个质�
 
 ## 3. 第 0 步｜立账、停扩（1 天）
 
-- [ ] 单一账本 = #90；MASTER 标历史；STATUS 只留最近两轮。
-- [ ] 对账 MASTER 自相矛盾（§3 的 M-A 3/6、M-B 0/6 与 §6 的"M-A 已收口"），以 PR / merge commit 为准，只改一次。
-- [ ] 冻结：#78 暂停；#125 收口 `common.rs` + `idea.rs` 未提交接线后冻结；#121–#124 合并清零。
-- [ ] 不可达能力标 experimental：`/api/search/vector` 前端零调用，从汇报口径移除。
-- [ ] 更正两处事实（防重复误诊）：5000 字截断在 `src/ai/patent.rs:307-308`，且 `src/ai/client.rs` 的 `truncate_for_ai`（尾注在 :304） 会追加"材料不完整"尾注，不是静默截断；`fact_check_rejected` 在 `src/pipeline/steps/finalize.rs:30-32` 只 warn，不阻断。
+- [x] 单一账本 = #90；MASTER 标历史；STATUS 只留最近两轮。
+- [x] 对账 MASTER 自相矛盾（§3 的 M-A 3/6、M-B 0/6 与 §6 的"M-A 已收口"），以 PR / merge commit 为准，只改一次。
+- [x] 冻结：#78 暂停；#125 已合并（`d048ed9`）后冻结；#121/#122/#124 已合并清零，#123 保持 open。
+- [x] 不可达能力标 experimental：`/api/search/vector` 前端零调用，从汇报口径移除。
+- [x] 更正两处事实（防重复误诊）：5000 字截断在 `src/ai/patent.rs:307-308`；`truncate_for_ai`（`src/ai/client.rs:297-308`）会在 :304 追加"材料不完整"尾注，不是静默截断；`fact_check_rejected` 在 `src/pipeline/steps/finalize.rs:30-32` 只 warn，不阻断。
 
-验收：一本账、一张冻结清单、一份更正记录。
+验收：一本账、一张冻结清单、一份更正记录 —— 见 `docs/plans/2026-10-27-step0-ledger.md`。
 
 ## 4. 第 1 步｜立尺（M1，至 10/31）
 
@@ -41,6 +41,7 @@ ACK 2026-10-27 整顿令：本任务 = M1/M2/M3 第X步，服务于 <哪个质�
 - **尺子**：五维 1–5 分锚点文件（事实准确 / 法条与逻辑 / 覆盖 / 可追溯 / 可直接提交度），每档写行为描述；同一评分者跨轮。
 - **产出**：基线分 + top-10 失败清单（每条带 `file:line` 或输出片段）+ 调用成本。
 - **门**：≥3 维达 4/5 才进 M2；否则只修 top-3。
+- **2026-10-27 实况**：M1 已跑（`docs/plans/2026-10-27-m1-baseline.md`），五维 2/2/2/1/1，门未过 → M2 只修 top-3：证据化+法条化 / CaseMeta 回填 / OA 输入完整性。
 
 ## 5. 第 2 步｜只修三（M2，11/01–11/07）
 
