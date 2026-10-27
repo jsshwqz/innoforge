@@ -15,6 +15,11 @@
 //!     `nc3_empty_corpus_must_not_score_high` 翻红。
 //!     教训：只变异 score() 时 nc3 不红——空语料路径提前返回、不经过 score()；
 //!     这正是"负控证伪不了就停下来查"抓出来的盲区。
+//! - NC4（existence ≠ support，PR #125 复核 Blocking）：`verified_weight()` 修复前
+//!   （AnchorOnly ⇒ Some(0.7)）`nc4_anchor_only_must_not_support_nor_raise_grounding`
+//!   实测翻红——裸 `[引用N]` 句被 relation() 判 Support、grounding=0.7 越过 0.5 决策门；
+//!   修复（AnchorOnly ⇒ None，grounding 分子只计 Exact/Approx）后复绿。
+//!   前置形态断言（该句必须纯 AnchorOnly）保证变异可见，不测空气。
 //!
 //! 红通道执行方式：临时 patch 对应函数 → `cargo test ...` → 记录 FAIL → `git checkout --` 还原 → 复绿。
 
@@ -252,10 +257,22 @@ fn nc1_fabricated_citation_must_fail() {
         .any(|f| f.text.contains("机器学习预测热失效")));
 }
 
+/// NC2 专用夹具：全部句子逐字核验（Exact）——「证据齐全」在 existence ≠ support
+/// 语义下必须真的齐全（混合质量的 fixture_analysis 含裸引用句，grounding 只有
+/// 2/6≈0.33，不适合再当「齐全」基线；那是 NC4 的管辖面）。
+fn nc2_full_evidence_analysis() -> String {
+    [
+        "D1 公开了“当温度超过阈值时，控制器自动启动风扇”[D1:第0035段]。",
+        "D1 记载了“根据温差调节转速”[D1:第0035段]。",
+        "D2 公开了“相变储热模块在温度上升时吸收热量”[D2:第0012段]。",
+    ]
+    .join("\n\n")
+}
+
 /// NC2：删除证据后，原已核验的结论必须降级且决策门关闭。
 #[test]
 fn nc2_deleting_evidence_must_downgrade() {
-    let full = ek::run_kernel(&fixture_analysis(), &fixture_corpus());
+    let full = ek::run_kernel(&nc2_full_evidence_analysis(), &fixture_corpus());
     assert!(
         !ek::should_suppress_decision(&full.0),
         "证据齐全时（grounding={:.2}）不应抑制决策",
@@ -265,14 +282,14 @@ fn nc2_deleting_evidence_must_downgrade() {
     // 删掉 D1 全部证据（模拟上游检索丢结果/竞态）
     let mut shrunk = fixture_corpus();
     shrunk.docs.retain(|d| d.doc_id != "D1");
-    let (report, text) = ek::run_kernel(&fixture_analysis(), &shrunk);
+    let (report, text) = ek::run_kernel(&nc2_full_evidence_analysis(), &shrunk);
 
     // 原 Verified 的 D1 句子现在必须 Unsupported → 降级
     assert!(
-        text.contains("【未证实】D1 公开了温差驱动"),
+        text.contains("【未证实】D1 公开了") && text.contains("【未证实】D1 记载了"),
         "删证据后必须降级: {text}"
     );
-    // grounding 显著下降且决策门关闭
+    // grounding 显著下降且决策门关闭（3/3 → 1/3）
     assert!(
         report.rubric.grounding < full.0.rubric.grounding,
         "grounding 应下降: {:.2} -> {:.2}",
@@ -305,6 +322,69 @@ fn nc3_empty_corpus_must_not_score_high() {
     assert!(md.contains("不构成新颖性"), "{md}");
     // 决策门必须关
     assert!(ek::should_suppress_decision(&report));
+}
+
+/// NC4（existence ≠ support，PR #125 复核 Blocking）：只含裸 `[引用N]`（锚点命中、
+/// 无引文）的事实句，不得被判为 Support，也不得抬高 grounding——否则一份
+/// "事实句只写 [引用N]、不写引文"的报告 grounding 可达 0.7，越过 0.5 决策门，
+/// 即"零逐字支撑仍放行决策"。修复前此断言红（relation=Support、grounding=0.7、
+/// 决策门不抑制）；修复 = `verified_weight()` 收紧为逐字核验（AnchorOnly ⇒ None），
+/// grounding 分子只计 Exact/Approx，AnchorOnly 保留为独立诊断计量（m.anchor_only）。
+#[test]
+fn nc4_anchor_only_must_not_support_nor_raise_grounding() {
+    // 生产形态语料：corpus_from_chunks（引用N:chunk:0，number 恒 0）——
+    // 复核意见指出的放大路径，不用手摆 fixture。
+    let corpus = ek::corpus_from_chunks(&fixture_chunks());
+    // 单条事实句、只带裸引用号、无引文——锚点真实存在（existence 成立）
+    let text = "本申请说明书还记载了导热界面材料降低接触热阻的方案[引用1]。".to_string();
+    let (report, text) = ek::run_kernel(&text, &corpus);
+
+    let fact = report
+        .claims
+        .iter()
+        .find(|c| c.kind == ClaimKind::FactFromSource)
+        .expect("含锚点句应被识别为 FactFromSource");
+    // 该句的证据必须是 AnchorOnly（锚点命中、无引文）——确认测的是目标形态
+    assert!(
+        !fact.verifications.is_empty()
+            && fact
+                .verifications
+                .iter()
+                .all(|(_, s)| matches!(s, VerifyStatus::AnchorOnly { .. })),
+        "前置：该句应为纯 AnchorOnly，实际 {:?}",
+        fact.verifications
+    );
+    // ① relation 不得是 Support（仅锚点 = existence，不是 support）
+    assert_eq!(
+        fact.relation(),
+        Relation::Insufficient,
+        "裸 [引用N]（无引文）不得单独支撑事实断言: verifications={:?}",
+        fact.verifications
+    );
+    // ② 不得抬高 grounding（分子只计 Exact/Approx）
+    assert_eq!(
+        report.metrics.grounding,
+        Some(0.0),
+        "仅 AnchorOnly 的报告 grounding 分子必须为 0: metrics={:?}",
+        report.metrics
+    );
+    // ③ 放大效应兜底：零逐字支撑必须关闭决策门（0.0 < 0.5）
+    assert!(
+        ek::should_suppress_decision(&report),
+        "grounding={:?} 必须抑制决策建议",
+        report.rubric.grounding
+    );
+    // ④ AnchorOnly 仍是可见诊断（不消失，只是不再冒充支撑）
+    assert!(
+        report.metrics.anchor_only >= 1,
+        "AnchorOnly 计量保留: metrics={:?}",
+        report.metrics
+    );
+    // ⑤ 修复或降级：v1 生产路径（no_repair）下该句必须带【未证实】标注
+    assert!(
+        text.contains("【未证实】"),
+        "零逐字支撑的事实句必须降级标注，不得悬空: {text}"
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════

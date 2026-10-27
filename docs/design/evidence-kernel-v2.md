@@ -178,6 +178,7 @@ pub struct KernelReport {
 | F6 | corpus 构造错（把摘要标成原文段） | SectionKind 与来源强绑定（abstract 伪段单独 kind），报告中明示证据类型；绝不把摘要冒充 claim/para |
 | F7 | 超大 corpus 性能（万级 section） | 索引 = HashMap<(doc_id, kind), BTreeMap<number, section_idx>>，锚点 O(1)；引文匹配只在命中 section 内做，天然受限 |
 | F8 | 锚点+引文都真但断言语义不成立（引非所证） | v1 不能解（ADR-1 边界）；报告 limitation 明示"核验=存在性，非支持性"；v3 方向 NLI/对照表 |
+| F9 | 仅锚点引用被当支撑计分（AnchorOnly 冒充核验；PR #125 复核 Blocking 抓出） | `verified_weight()` 只认逐字核验（Exact/Approx ⇒ 1.0，AnchorOnly ⇒ None）；grounding 分子只计 Exact/Approx；critic 清单点名"仅有锚点、无逐字引文"；`anchor_only` 计量保留为诊断。**负控 NC4 直接盯这条** |
 
 ---
 
@@ -207,6 +208,7 @@ pub struct KernelReport {
 - NC1 伪造引文必须红：`[D1:第9999段]` + 编造引文 → AnchorNotFound/QuoteMismatch、hallucination_rate 上升、claim 降级。**红通道**：临时把 verifier 换成 contains 版（模拟 #79 被否决的检查器）重跑 → 测试必须 FAIL（真实执行并记录输出）。
 - NC2 删证据必须降级：从 corpus 移除被引用的 doc → 原 Verified claim 变 Unsupported → grounding 跌破决策门 → decision=None + 报告出现降级标注。红通道：把降级逻辑改成"跳过无证据 claim"重跑 → FAIL。
 - NC3 检索为空不得高分：空 corpus → status=InsufficientEvidence、grounding=0、五维总分被封顶（数值断言 < 阈值）、无事实 claim。红通道：去掉封顶规则重跑 → FAIL。
+- NC4 仅锚点不得冒充支撑（existence ≠ support；PR #125 复核 Blocking）：只含裸 `[引用N]`（锚点命中、无引文）的事实句 → relation 必须非 Support、grounding 分子必须为 0、决策门必须关闭、句子必须降级标注；`anchor_only` 计量保留为诊断。**红通道**：`verified_weight()` 把 AnchorOnly 记 0.7 分（修复前实现）重跑 → 测试必须 FAIL（真实执行：relation=Support、grounding=0.7 越过 0.5 决策门）。
 
 **命令**（PR 正文照抄）：
 ```bash
