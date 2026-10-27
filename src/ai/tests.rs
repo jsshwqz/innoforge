@@ -102,6 +102,7 @@ mod oa_capacity_tests {
             "first_exam",
             false,
             None,
+            "",
             None,
         );
         let error = stream.recv().await.expect("overflow should emit an error");

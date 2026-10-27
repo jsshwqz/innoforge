@@ -2848,7 +2848,8 @@
                     discussion: JSON.stringify(oaDiscussMessages),
                     office_action: oaDiscussOAText,
                     oa_type: oaDiscussOAType,
-                    discussion_id: localStorage.getItem('oa-discuss-id') || ''
+                    discussion_id: localStorage.getItem('oa-discuss-id') || '',
+                    my_patent: (uploadedData && uploadedData['my']) || { content: (document.getElementById('my-patent') || {}).value || '' }
                 })
             });
 
