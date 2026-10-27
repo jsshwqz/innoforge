@@ -1,3 +1,5 @@
+> **⚠️ 2026-10-27 整顿令生效后，本文件只作历史事实记录。** 当前主线、门禁与禁止项以 `AGENTS.md` §〇 与 `docs/plans/2026-10-27-rectification.md` 为准；不得据本文件认领顺序。
+
 # Patent-Hub 开发进度状态追踪
 # Patent-Hub Development Progress Tracker
 
