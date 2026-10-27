@@ -36,7 +36,7 @@
 
 ## 5. 更正记录
 
-- 5000 字截断：`src/ai/patent.rs:307-308`；`src/ai/client.rs:283-286` 会追加「材料不完整」尾注，**不是静默截断**。
+- 5000 字截断：`src/ai/patent.rs:307-308`；`truncate_for_ai`（`src/ai/client.rs:297-308`，尾注 :304）会追加「材料不完整」尾注，**不是静默截断**。
 - `fact_check_rejected`：`src/pipeline/steps/finalize.rs:30-32` 只 warn，不阻断；OA 生成前门在 `src/routes/ai.rs:1889`。
 - #125 当前边界：OA 路由 grep `evidence_kernel` 零命中，仍只覆盖 idea。
 
