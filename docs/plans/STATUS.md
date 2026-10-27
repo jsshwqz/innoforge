@@ -895,6 +895,7 @@
 ## 2026-10-24 · R33：证据可核验分析内核 v2 垂直切片（draft PR #125，分支 `r33/evidence-kernel`，基线 `e1e6bf0` = v0.9.19）
 - **交付**：设计文档 `docs/design/evidence-kernel-v2.md`（问题清单 EK-P1..P8 / 数据契约 / ADR×8 / FMEA×8）→ `src/evidence_kernel/` 八模块（锚点三元组解析 / 确定性核验器：精确匹配+归一化逐字+滑窗近似，禁子串包含 / 句级分类 / 五维评分 grounding 乘法门 / 降级循环）→ 接入 idea pipeline Finalize（决策门 grounding<0.5 抑制；executive 报告不再折零）→ AI 修复轮（锚点白名单 prompt + 终局降级兜底）→ `GET /api/idea/:id/kernel-report` 四态端点。
 - **负控**：NC1/NC2/NC3 全部真实翻红后复绿（NC3 双执行点教训见 errors.md ㉝）；合成案件 golden `tests/fixtures/evidence_kernel/example_report.md`。
+- **NC4（复核 Blocking 已修，2026-10-26）**：`AnchorOnly` 曾记 0.7 权重，"只写 `[引用N]` 不写引文"的报告 grounding 可达 0.7 越过 0.5 决策门（existence ≠ support 未成立，复核 head `11d4c25` 抓出）。修复：`verified_weight()` 收紧为逐字核验、grounding 分子只计 Exact/Approx、critic reason 点名"仅有锚点、无逐字引文支撑"；NC4 负控先红后绿；golden/NC2 夹具按新语义更新（golden 中 3 条裸引用句由"✅ 支撑"如实改判【未证实】，grounding 0.59→0.33，教训见 errors.md ㉞）。同批收口 wip `11d4c25` 的 58 行（OA 链路 SSE 换行保留 + 前端 sseDecode，EK-P6）。
 - **决策**：grounding<0.5 决策门与 v1 零 AI 降级经用户确认维持；AI 修复轮 opt-in 接线待拍板（需把 AppConfig 传入 finalize）。
 - **CI 门禁新增认知**：Autoclose Hygiene 禁 CHANGELOG 裸 `#NN`；Doc Staleness 要求改代码必须同 PR 更新 errors.md/STATUS.md（本条即履约）。
 - **后续**：R33-OA 把内核接进 OA 答复链路（SSE 换行破坏句对齐先修，落库前跑同一核验器），分支 `r33/evidence-oa`。

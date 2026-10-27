@@ -157,9 +157,19 @@ fn detect_negation_conflicts(records: &[ClaimRecord]) -> f64 {
             || s.contains("未记载")
     }
     fn anchored_docs(r: &ClaimRecord) -> HashSet<String> {
+        // 矛盾检测只问「锚点是否真实命中该 doc」（existence 语义）——含仅锚点引用；
+        // 引文对不上、伪造锚点、无法解析不算（与判定原文「各有 ≥1 个已核验锚点」的
+        // 命中面一致，verified_weight() 已收紧为逐字核验，这里不随之收窄）。
         r.verifications
             .iter()
-            .filter(|(_, s)| s.verified_weight().is_some())
+            .filter(|(_, s)| {
+                matches!(
+                    s,
+                    VerifyStatus::VerifiedExact { .. }
+                        | VerifyStatus::VerifiedApprox { .. }
+                        | VerifyStatus::AnchorOnly { .. }
+                )
+            })
             .filter_map(|(e, _)| e.anchor.as_ref().map(|a| a.doc_id.clone()))
             .collect()
     }

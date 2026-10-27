@@ -46,10 +46,16 @@ pub fn collect_findings(records: &[ClaimRecord]) -> Vec<Finding> {
                 .verifications
                 .iter()
                 .any(|(_, s)| matches!(s, VerifyStatus::UnparsedAnchor));
+            let anchor_only_only = !r.verifications.is_empty()
+                && r.verifications
+                    .iter()
+                    .all(|(_, s)| matches!(s, VerifyStatus::AnchorOnly { .. }));
             let reason = if r.verifications.is_empty() {
                 "事实断言无任何引用".to_string()
             } else if has_unparsed {
                 "引用格式无法解析为锚点".to_string()
+            } else if anchor_only_only {
+                "仅有锚点命中、无逐字引文支撑（existence ≠ support）".to_string()
             } else {
                 "引用未通过核验（锚点或引文不成立）".to_string()
             };
@@ -95,12 +101,14 @@ mod tests {
         }
     }
 
+    /// NC4 修复后的语义：仅锚点命中（AnchorOnly）不算有支撑——它与锚点未命中
+    /// 一样必须进批判清单，且 reason 各自点名（existence ≠ support）。
     #[test]
     fn unsupported_fact_claims_become_findings() {
         let records = vec![
             record(
                 "C1",
-                "有证据句。",
+                "仅锚点句。",
                 ClaimKind::FactFromSource,
                 vec![VerifyStatus::AnchorOnly {
                     section_id: "D1:para:1".into(),
@@ -115,9 +123,20 @@ mod tests {
             record("C3", "推论句。", ClaimKind::AnalysisInference, vec![]),
         ];
         let findings = collect_findings(&records);
-        assert_eq!(findings.len(), 1);
-        assert_eq!(findings[0].claim_id, "C2");
-        assert!(findings[0].reason.contains("未通过核验"));
+        assert_eq!(
+            findings.len(),
+            2,
+            "仅锚点与未命中都不算支撑: {:?}",
+            findings
+        );
+        let c1 = findings.iter().find(|f| f.claim_id == "C1").expect("C1");
+        assert!(
+            c1.reason.contains("仅有锚点"),
+            "C1 应点名仅锚点形态: {}",
+            c1.reason
+        );
+        let c2 = findings.iter().find(|f| f.claim_id == "C2").expect("C2");
+        assert!(c2.reason.contains("未通过核验"), "C2 reason: {}", c2.reason);
     }
 
     #[test]
