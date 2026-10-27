@@ -1,17 +1,21 @@
 # InnoForge 项目规约
 
 > 本文件是所有 AI Agent 和人类贡献者的强制规范。修改代码前必须阅读并遵守。
-> **优先级唯一权威 = GitHub issue #90**：排队与优先级以 #90 为准；本文件只讲规矩，不承载进度。现状见 `docs/plans/STATUS.md`。
+> **开工第一入口 = 下方 §〇「2026-10-27 整顿令」**；任务排队在整顿令范围内以 GitHub issue #90 为准。本文件只讲规矩，不承载进度；现状见 `docs/plans/STATUS.md`（历史）。
 
-## 〇、方向冻结令（2026-10-24 起，优先于其他计划）
+## 〇、最高效力令：2026-10-27 整顿令（不可跳过）
 
-1. 验收以 `docs/plan/product-vision.md` §3 三条为准：**报告敢用 / 决策敢做 / 答复敢交**。
-2. 唯一主线：**一宗真实在办 OA/复审案 → 答复书 + 证据表 → 人工判可提交**。细则见 `docs/plans/2026-10-24-direction-realignment.md`。
-3. M1 达标前：不加检索/向量/成本基建，不加 prompt/报告类型/前端功能，不扩证据内核；#78 暂停；只修 M1 top-3。
-4. 不再单开"守卫/计数/文档时效"类 issue；负控只服务产品项；纯测试/守卫变更不单独发版。
-5. **commit-first**：先提交再验收，禁止只靠 patch / `.b64` 回传；无 commit 不开长任务。
-6. 任务权威 = #90；`product-vision` 只答"为什么"；MASTER / STATUS 为历史。
-7. 案件材料只在本地；禁止进入 git / PR / issue / CI 日志。
+> 全文与里程碑：`docs/plans/2026-10-27-rectification.md`。本节的目的是让任何 agent 在第一步就撞上它。
+> 机器守卫：`tests/rectification_order_present.rs` —— 删除/改名本令或入口标记，`cargo test` 与 CI 直接红。
+
+1. **效力链**：本令 > 本文件其余条款（安全/隐私红线除外）> issue #90 > `docs/plan/product-vision.md` > MASTER / STATUS / 2026-03-30 规划（均为历史，不得据其认领任务或判断进度）。
+2. **唯一主线**：**一宗真实在办 OA/复审案 → 答复书 + 证据表 → 人工判"可提交"**。三周内只此一件；验收口径见 `docs/plan/product-vision.md` §3（报告敢用 / 决策敢做 / 答复敢交）。
+3. **开工声明（不可跳过）**：任务记录或首条回复必须写 `ACK 2026-10-27 整顿令：本任务 = M1/M2/M3 第X步，服务于 <质量项>`；归不进任一步 = 不做。
+4. **三周禁止**：新检索/向量/成本基建；新 prompt/报告类型/前端；#78 暂停；#125 收口 `common.rs`+`idea.rs` 未提交接线后冻结、不扩；云端开机/DevSpace；以测试数/PR 数/文档数当进度；单开守卫/计数/文档时效类 issue。
+5. **门禁**：M1（至 10/31）先出五维基线分与 top-10 失败清单，≥3 维达 4/5 才进 M2；M2 只修 top-3；M3 出终稿并做交/不交决定。M1 未过不得以"顺手修"为名提前改代码。
+6. **commit-first**：先提交再验收，禁止只靠 patch / `.b64` 回传；无 commit 不开长任务。
+7. **事实更正（防重复误诊）**：5000 字截断在 `src/ai/patent.rs:307-308`，且 `src/ai/client.rs` 的 `truncate_for_ai`（尾注在 :304） 会追加"材料不完整"尾注，不是静默截断；`fact_check_rejected` 在 `src/pipeline/steps/finalize.rs:30-32` 只 warn，不阻断。
+8. **案件材料只在本地**；禁止进入 git / PR / issue / CI 日志。
 
 ## 记忆
 Step 0b/0c：反馈→`docs/feedback.md`；踩坑→`docs/errors.md`；阶段事实→`docs/plans/STATUS.md`；长期偏好→本文件。冲突以代码/运行结果为准。`src/context.rs` 自动汇编（≤6000 字符）注入提示词，缺失静默降级。
