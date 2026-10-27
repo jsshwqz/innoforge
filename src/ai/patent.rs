@@ -1393,6 +1393,13 @@ impl AiClient {
                 }
             };
             let mut case_input = case_input;
+            crate::ai::case_input::fill_case_meta(
+                &mut case_input.case_meta,
+                request_json,
+                analysis_text,
+                oa,
+                my_patent_text,
+            );
             // 主 UI 的答复书请求不带 CaseInput；没有权利要求时 Stage A 的 verbatim 校验
             // 会把所有特征丢弃，产出空答复。用用户上传的本专利文本补位。
             if case_input.claims_under_review.trim().is_empty() && !my_patent_text.trim().is_empty()
