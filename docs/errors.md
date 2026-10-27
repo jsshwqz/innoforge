@@ -1327,3 +1327,12 @@
 - **修复 / Fix**: `verified_weight()` 收紧为逐字核验（Exact/Approx ⇒ `Some(1.0)`，AnchorOnly ⇒ `None`）；矛盾检测的 `anchored_docs` 显式按"锚点命中"匹配（不随权重收窄）；critic reason 点名"仅有锚点命中、无逐字引文支撑（existence ≠ support）"；NC4 负控先红后绿（修复前 relation=Support、grounding=0.7、门不抑制，实测 FAILED 后复绿）。
 - **预防 / Prevention**: ①给枚举状态记"部分分"时，必须枚举它的**每一个消费点**并回答"非零值在这里的语义是什么"——任何一个消费点只认布尔 `is_some()`，部分分就是假绿。②golden 夹具记录的是**语义快照**：语义变更必须重生成（`EK_WRITE_GOLDEN=1`）并逐行核读 diff，不能只改断言数字——本次 golden diff 恰好暴露了第三处假绿句（C8）和降级回路的重分类行为。
 - **提交 / Commit**: 见 PR #125（分支 `r33/evidence-kernel`）。
+
+## [2026-10-27] ㉟ 正式答复书空输出：reject_review 缺 my_patent + 字节切片 panic
+- **严重程度 / Severity**: CRITICAL（主 UI 正式答复书返回空文本却报成功）
+- **涉及文件**: `src/ai/patent.rs`（`extract_oa_response_section` 兜底切片）、`src/routes/ai.rs`（`api_ai_oa_generate_response_letter`）、`templates/office_action_response.html`（`generateResponseLetter` 请求体）、`src/routes/mod.rs`（`AI_MODEL_FAST` 默认值）
+- **现象 / Symptom**: M1 真实 OA 答复跑 `reject_review`，`/api/ai/oa-generate-response-letter` 返回 846B，正文只有 `[DONE]`；服务日志先报 `patent.rs start byte index ... not a char boundary`（'控' 字节 21498..21501），随后 Stage A 把所有特征当"非 verbatim"丢弃；把 `AI_MODEL_FAST` 指到网关可用模型后，Stage A 才正常抽特征。
+- **根因 / Root cause**: ①兜底 `full_output[full_output.len()/2..]` 按字节切多字节中文；②主 UI 答复书请求只传 analysis/discussion/office_action，后端 fallback `CaseInput.claims_under_review` 为空，Stage A 的 verbatim 校验没有可比对的原文；③`AI_MODEL_FAST` 默认 `deepseek-v4-flash` 不在 8080 网关，Stage A 返回 `Requested entity was not found.`，接口仍以 `[DONE]` 收尾。
+- **修复 / Fix**: 兜底切片改 `char_indices` 取字符边界（补中文回归测试）；前端 body 带 `my_patent`，后端在 `claims_under_review` 为空时用本专利原文补位；运行时显式设置可用的 fast 模型。同一案件从 846B `[DONE]` 变为 6,746B / 2,260 字。
+- **预防 / Prevention**: ①契约测试必须覆盖**主 UI 实际 payload**，不能只测后端自造 JSON；②任何"模型不可用"必须是可见错误，禁止以 `[DONE]` 收尾；③`tests/no_unsafe_byte_slice.rs` 的启发式只匹配 `[..`，漏掉 `[expr..]`，后续修守卫时要覆盖变量起点。
+- **提交 / Commit**: `2e682f4` / PR #133。

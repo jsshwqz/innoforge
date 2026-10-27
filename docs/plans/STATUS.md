@@ -14,6 +14,14 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-10-27 — **M1 真实案件基线 + 答复书两处 P0**（PR #133）
+
+- **状态 / Status**: 🚧 PR open（分支 `fix/oa-letter-empty-output`，PR #133），等 CI
+- **驱动**: M1 用副本库唯一 `reject_review` 跑真实 OA 答复；正式答复书只回 846B `[DONE]`，正文为空。
+- **根因**: ① `src/ai/patent.rs` 兜底 `full_output[mid..]` 按字节切中文，panic；② 主 UI 答复书请求不带 `my_patent`，`CaseInput.claims_under_review` 空，Stage A verbatim 全丢；③ `AI_MODEL_FAST` 默认 `deepseek-v4-flash` 不在网关，Stage A 返回 `Requested entity was not found.` 仍回 `[DONE]`。
+- **修复**: 字符边界取后半段 + 中文回归；前端 body 带 `my_patent`、后端缺权利要求时补位；M1 记录五维 2/2/2/1/1（门未过），M2 只修 top-3。
+- **验证**: `cargo test --lib` 764 passed；4 个 OA 集成测试；fmt/clippy/HTML 扫描。
+
 ### 2026-10-20 — **#68 首启假绿灯**（R24）
 
 - **状态 / Status**: 🚧 PR draft（分支 `r24/first-run-fake-green`，head `ff6a7a5`），等 CI 与独立验收
