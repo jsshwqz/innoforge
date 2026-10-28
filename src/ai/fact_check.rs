@@ -232,6 +232,118 @@ pub fn check_oa_analysis_from_pdfs(
     report
 }
 
+/// C2/C12 检测前剥离"非作者主张"文本，消除两类结构性误伤（M3-20261025 实测发现）：
+///
+/// 1. **尾部自报告段**：`check_oa_analysis` 的报告会追加到分析文本末尾，答复书门禁
+///    （MC2）对同一文本复检时，报告内的违规示例文本（如「属于常规设置」）会再次
+///    触发 C12——检查器被自己的报告自触发。
+/// 2. **引号段**：驳斥式分析的正当结构是"先复述审查员/对比文件原文再驳斥"，引述
+///    使用 「…」/“…”/"…"（ASCII）。审查员的核心主张往往正是"公知常识/常规选择"，
+///    不剥离引号则任何认真复述审查观点的分析都无法通过答复书门禁（阈值 65）。
+///    M3-20261028 复核加固：只剥离**明确属于引述**的引号段（前文 30 字内出现引述
+///    标记，或引号段自身以引述主语开头）；无引述判据的引号段（我方强调/自认）保留
+///    参与检查，杜绝借引号绕过 C2/C12。
+///
+/// 只影响 C2（零举证计数）与 C12（答复禁令）两个 needle 型检查；C1 引用真实性等
+/// 需要原文对照的检查不受影响。
+fn strip_non_authorial_for_c_checks(text: &str) -> String {
+    // 1) 删除尾部自报告段：锚点多种写法取最后一个命中，且仅当命中位于文档末尾
+    //    20% 区域才截断——生成器把核查报告拼在文末，中部出现同词属正文引用，
+    //    截断会腰斩其后正常答复正文（漏检），故明确放弃。
+    const SELF_REPORT_ANCHORS: [&str; 4] =
+        ["AI 事实核查", "事实核查报告", "一致性核查", "AI核查报告"];
+    let total_chars = text.chars().count();
+    let mut last_hit: Option<usize> = None; // 字节偏移
+    for anchor in SELF_REPORT_ANCHORS {
+        let mut from = 0;
+        while let Some(pos) = text.get(from..).and_then(|s| s.find(anchor)) {
+            let abs = from + pos;
+            last_hit = Some(match last_hit {
+                Some(p) if p > abs => p,
+                _ => abs,
+            });
+            from = abs + anchor.len();
+        }
+    }
+    let body: &str = match last_hit {
+        Some(idx) => {
+            // idx 来自 find()，必落字符边界；get() 形态兜底：万一非边界返回 None 走不截断分支
+            let chars_before = text
+                .get(..idx)
+                .map(|s| s.chars().count())
+                .unwrap_or(total_chars);
+            if total_chars > 0 && chars_before * 5 >= total_chars * 4 {
+                tracing::debug!(
+                    hit_chars = chars_before,
+                    total_chars,
+                    "自报告锚点命中于文档末尾 20% 区域，截断其后全文"
+                );
+                text.get(..idx).unwrap_or(text)
+            } else {
+                tracing::debug!(
+                    hit_chars = chars_before,
+                    total_chars,
+                    "自报告锚点命中于文档中部，不截断（防腰斩正常正文）"
+                );
+                text
+            }
+        }
+        None => {
+            tracing::debug!("未命中自报告锚点，全文参与 C2/C12 检查");
+            text
+        }
+    };
+
+    // 2) 删除引号段：仅剥离「明确属于引述」的段——引号前文 30 字内出现引述标记
+    //    （审查员/审查意见/通知书/对比文件/申请人主张），或引号段自身以引述主语
+    //    （审查员/对比文件）开头；无引述判据的引号段（如我方用引号强调或自认）
+    //    原样保留，继续参与 C2/C12。成对上限 300 字防远距/未闭合引号吞正文。
+    const QUOTE_CONTEXT_MARKERS: [&str; 5] =
+        ["审查员", "审查意见", "通知书", "对比文件", "申请人主张"];
+    const QUOTE_SUBJECT_PREFIXES: [&str; 2] = ["审查员", "对比文件"];
+    let mut out = String::with_capacity(body.len());
+    let chars: Vec<char> = body.chars().collect();
+    let openers = ['「', '“', '"'];
+    let closers = ['」', '”', '"'];
+    let mut i = 0;
+    while i < chars.len() {
+        if openers.contains(&chars[i]) {
+            let close = closers[openers.iter().position(|&o| o == chars[i]).unwrap()];
+            let mut j = i + 1;
+            while j < chars.len() && chars[j] != close && j - i <= 300 {
+                j += 1;
+            }
+            if j < chars.len() && chars[j] == close {
+                let quoted: String = chars[i + 1..j].iter().collect();
+                // ctx_start 来自 char_indices()，必落字符边界；get() 形态兜底防 panic
+                let context = out
+                    .char_indices()
+                    .rev()
+                    .nth(29)
+                    .map(|(b, _)| b)
+                    .and_then(|b| out.get(b..))
+                    .unwrap_or(out.as_str());
+                let context_marked = QUOTE_CONTEXT_MARKERS.iter().any(|m| context.contains(m));
+                let subject_prefixed = QUOTE_SUBJECT_PREFIXES
+                    .iter()
+                    .any(|p| quoted.trim_start().starts_with(p));
+                if context_marked || subject_prefixed {
+                    // 明确引述 → 成对引号段整体剥离
+                    i = j + 1;
+                    continue;
+                }
+                // 无引述判据：引号与其内容保留，参与 C2/C12
+                out.push(chars[i]);
+                i += 1;
+                continue;
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
+}
+
 /// C1-C13 纯函数检测层：调用各检测模块，将结果转为 FactWarning 列表
 ///
 /// 此函数是 fact_check 与 C1-C13 纯函数模块之间的适配层。
@@ -239,8 +351,11 @@ pub fn check_oa_analysis_from_pdfs(
 fn run_c_module_checks(ai_output: &str) -> Vec<FactWarning> {
     let mut warnings = Vec::new();
 
+    // 引述/自报告剥离后再做 needle 型检查（见函数文档）
+    let authorial = strip_non_authorial_for_c_checks(ai_output);
+
     // C2: 零举证检测
-    let zero_ev = crate::ai::zero_evidence::check_zero_evidence(ai_output);
+    let zero_ev = crate::ai::zero_evidence::check_zero_evidence(&authorial);
     if zero_ev.count > 0 {
         warnings.push(FactWarning {
             category: "C2零举证".to_string(),
@@ -250,7 +365,7 @@ fn run_c_module_checks(ai_output: &str) -> Vec<FactWarning> {
     }
 
     // C12: 答复禁令自查
-    let prohibitions = crate::ai::prohibition_check::check_prohibitions(ai_output);
+    let prohibitions = crate::ai::prohibition_check::check_prohibitions(&authorial);
     for v in &prohibitions.violations {
         let severity = if v.severity == crate::ai::prohibition_check::ProhibitionSeverity::Fatal {
             "致命"
@@ -931,8 +1046,150 @@ mod tests {
 
     // ── 综合校验测试 ──
 
+    // M3-20261025：C2/C12 对引述与自报告的剥离行为（strip_non_authorial_for_c_checks）
+    // M3-20261028 复核加固：引号段剥离加语境判据（只剥「明确属于引述」）、自报告锚点
+    // 多写法 + 末尾 20% 区域限定；各用例注释标明所锁语义。
+
+    /// 构造长正文：使后续追加的自报告锚点落在文档末尾 20% 区域（trailing 前提）。
+    fn long_clean_body() -> String {
+        "权利要求1与对比文件1相比，区别特征在于采用电缸直行程驱动调节阀芯行程，".repeat(12)
+    }
+
     #[test]
-    fn test_full_check_combines_all() {
+    fn c12_quoted_examiner_assertion_does_not_fire() {
+        // 锁的语义（负向+正向）：①引号段前文 30 字内有引述标记（「审查员引用」）→
+        // 该引号段按引述剥离，引号内的禁令短语不触发 P1；②剥离只作用于该引号段——
+        // 同文本中剥离后仍存在的己方口吻让步必须触发 P1（防剥离逻辑错吞全文的假绿）。
+        let quoted_only = "审查员引用的关键原文：「区别仅在于……属于常规设置」。申请人不同意该认定：对比文件1未公开电缸直行程驱动，参见说明书第[0002]段。";
+        let with_own_voice = quoted_only.to_string() + "且该区别特征属于常规设置，无需创造性劳动。";
+        assert!(
+            !run_c_module_checks(quoted_only)
+                .iter()
+                .any(|w| w.category.contains("C12禁令-P1")),
+            "引号内的审查员断言不应触发 P1"
+        );
+        assert!(
+            run_c_module_checks(&with_own_voice)
+                .iter()
+                .any(|w| w.category.contains("C12禁令-P1")),
+            "剥离后仍存在的己方口吻段必须触发 P1"
+        );
+    }
+
+    #[test]
+    fn c12_own_voice_assertion_still_fires() {
+        // 锁的语义：己方口吻（无引号）的常规性让步必须继续触发 P1。
+        let text = "该区别特征属于常规设置，无需创造性劳动。";
+        let warnings = run_c_module_checks(text);
+        assert!(
+            warnings.iter().any(|w| w.category.contains("C12禁令-P1")),
+            "己方让步表述应触发 P1，实际：{:?}",
+            warnings
+        );
+    }
+
+    #[test]
+    fn c12_own_voice_in_quotes_without_marker_still_fires() {
+        // 锁的语义（复核问题 1 核心，先红后绿）：我方用引号强调/自认（前文 30 字内
+        // 无引述标记、引号段不以引述主语开头）不得被剥离——「该特征属于常规选择」
+        // 必须继续触发 C12-P1（修复前成对引号一律无条件剥离 = 假绿）。
+        let text = "综上所述，申请人认为「该特征属于常规选择」的认定有误，本申请不应被据此驳回。参见说明书第[0002]段。";
+        let warnings = run_c_module_checks(text);
+        assert!(
+            warnings.iter().any(|w| w.category.contains("C12禁令-P1")),
+            "无引述标记的己方引号自认必须触发 P1，实际：{:?}",
+            warnings
+        );
+    }
+
+    #[test]
+    fn c12_quoted_examiner_subject_prefix_still_stripped() {
+        // 锁的语义（防过修，修复前后均绿）：引号段自身以引述主语「审查员」开头 →
+        // 即使前文无引述标记也按引述剥离，「审查员认为该特征属于常规选择」不触发 P1。
+        let text = "对于创造性的认定「审查员认为该特征属于常规选择」的主张，本申请不予认同，理由如下。参见说明书第[0002]段。";
+        let warnings = run_c_module_checks(text);
+        assert!(
+            !warnings.iter().any(|w| w.category.contains("C12禁令-P1")),
+            "引号段以引述主语开头应剥离，不应触发 P1，实际：{:?}",
+            warnings
+        );
+    }
+
+    #[test]
+    fn trailing_self_report_section_ignored() {
+        // 锁的语义：文档末尾 20% 区域的自报告段（锚点写法一「AI 事实核查」）被截断，
+        // 段内违规示例文本不再触发 C2/C12（门禁复检自触发回归）。
+        let body = long_clean_body();
+        let self_report = "\n\n## AI 事实核查（请人工复核）\n可信度评分：40/100。\n检测到违规文本「属于常规设置」、公知常识。";
+        let warnings = run_c_module_checks(&(body + self_report));
+        assert!(
+            warnings.is_empty(),
+            "自报告段不应触发 C2/C12，实际：{:?}",
+            warnings
+        );
+    }
+
+    #[test]
+    fn trailing_self_report_marker_variant_still_ignored() {
+        // 锁的语义（先红后绿）：自报告段换措辞（锚点写法二「事实核查报告」）也须识别——
+        // 末尾 20% 区域内命中第二写法 → 截断尾部（修复前只认「AI 事实核查」= 漏截自触发）。
+        let body = long_clean_body();
+        let self_report =
+            "\n\n## 事实核查报告\n可信度评分：40/100。\n检测到违规文本「属于常规设置」、公知常识。";
+        let warnings = run_c_module_checks(&(body + self_report));
+        assert!(
+            warnings.is_empty(),
+            "换措辞的自报告段仍应被截断，实际：{:?}",
+            warnings
+        );
+    }
+
+    #[test]
+    fn mid_text_self_report_marker_does_not_truncate() {
+        // 锁的语义（先红后绿）：自报告锚点出现在文档中部（非末尾 20% 区域）→ 不截断，
+        // 其后的正常答复正文仍参与 C2/C12（修复前 find 首个命中腰斩其后全文 = 漏检）。
+        let text = "答复正文不应出现「AI 事实核查」字样。该区别特征属于常规设置，无需创造性劳动。参见说明书第[0002]段。";
+        let warnings = run_c_module_checks(text);
+        assert!(
+            warnings.iter().any(|w| w.category.contains("C12禁令-P1")),
+            "中部锚点不得腰斩其后正文，其后违规必须触发 P1，实际：{:?}",
+            warnings
+        );
+    }
+
+    #[test]
+    fn long_distance_quote_pair_not_stripped() {
+        // 锁的语义（复核问题 3①）：opener 与 close 相距超过 300 字的成对引号与未闭合
+        // 引号一样**整体不剥离**（0 吞噬，比"最多吞 300 字"更保守）——引号内与引号外
+        // 的正文全部参与 C2/C12，远距引号不得吞掉其后正文（正向断言：保留段仍参与检查）。
+        let mut text = String::from("审查员提出如下认定「");
+        text.push_str(&"此处为审查意见的展开论述内容。".repeat(30));
+        text.push_str(
+            "属于常规设置」该区别特征属于常规设置，无需创造性劳动。参见说明书第[0002]段。",
+        );
+        let warnings = run_c_module_checks(&text);
+        assert!(
+            warnings.iter().any(|w| w.category.contains("C12禁令-P1")),
+            "跨距>300 的成对引号不得吞掉其后正文，实际：{:?}",
+            warnings
+        );
+    }
+
+    #[test]
+    fn unclosed_quote_does_not_swallow_body() {
+        // 锁的语义：未闭合引号不得吞掉后续正文（防剥离过宽导致漏检）——
+        // 扫描在 300 字上限内找不到 close 时 opener 按普通字符保留，正文全量参与检查。
+        let text = "审查员称「如下：区别特征属于常规设置，且公知常识结合显而易见。后续正文本领域技术人员容易想到。";
+        let warnings = run_c_module_checks(text);
+        assert!(
+            warnings.iter().any(|w| w.category.contains("C2零举证")),
+            "未闭合引号后的正文仍应被检查，实际：{:?}",
+            warnings
+        );
+    }
+
+    #[test]
+    fn full_check_combines_all() {
         let ai_output = "D1涉及消防车领域。对比文件第[0099]段公开了电缸。流量变化1%导致温度波动50度。建议修改为：通过以太网总线连接。";
         let references = "背景技术：城市集中供热管网。说明书第[0001]段。";
         let patent = "说明书：电性连接，闭环控制。";
