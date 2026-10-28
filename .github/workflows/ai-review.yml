@@ -35,16 +35,16 @@ jobs:
       - env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          AI_REVIEW_MODEL: "gemini-2.5-flash"
+          AI_REVIEW_MODEL: "gemini-flash-latest"
           AI_REVIEW_DIFF_LIMIT: "30000"
           AI_REVIEW_HTTP_TIMEOUT: "30"
         run: |
           python3 - << 'EOF'
-          import os, re, json, requests
+          import os, re, json, time, requests
 
           github_token = os.environ.get("GITHUB_TOKEN")
           gemini_key = os.environ.get("GEMINI_API_KEY")
-          model = os.environ.get("AI_REVIEW_MODEL", "gemini-2.5-flash")
+          model = os.environ.get("AI_REVIEW_MODEL", "gemini-flash-latest")
           diff_limit = int(os.environ.get("AI_REVIEW_DIFF_LIMIT", "30000"))
           http_timeout = int(os.environ.get("AI_REVIEW_HTTP_TIMEOUT", "30"))
           headers = {"Authorization": f"Bearer {github_token}", "Accept": "application/vnd.github.v3+json"}
@@ -72,10 +72,16 @@ jobs:
               markers = [(m.start(), m.group(1)) for m in
                          re.finditer(r"^diff --git a/(.+?) b/", full_diff, re.M)]
               uncovered = [path for pos, path in markers if pos >= diff_limit]
-              uncovered_lines = "\n".join(f"- `{p}`" for p in uncovered) or "- （无法解析出文件清单）"
+              uncovered_lines = "\n".join(f"- `{p}`" for p in uncovered) if markers else ""
+              if not markers:
+                  covered = "无法解析出文件清单（按截断处理：后方部分未审）"
+              elif uncovered:
+                  covered = f"以下 {len(uncovered)} 个文件未被本次审查覆盖：\n{uncovered_lines}"
+              else:
+                  covered = "所有文件的起点均在审查范围内（0 个文件被整段跳过）"
               truncation_note = (
                   f"> ⚠️ **截断声明**：diff 共 {total_len} 字符，仅审查前 {diff_limit} 字符。"
-                  f"以下 {len(uncovered)} 个文件未被本次审查覆盖：\n{uncovered_lines}\n\n"
+                  f"{covered}\n\n"
               )
 
           checklist = (
@@ -92,21 +98,110 @@ jobs:
               f"代码变动:\n```diff\n{diff_text}\n```"
           )
 
-          res = requests.post(
-              f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={gemini_key}",
-              json={"contents": [{"parts": [{"text": prompt}]}]},
-              timeout=http_timeout,
-          )
+          # 重试与降级：上游 503/429 与读超时都属临时波动，重试一轮并降级到备用模型；
+          # 无论最终成败都只发评论、不抛异常——避免上游波动把 CI 染红。
+          def endpoint(m):
+              return (
+                  "https://generativelanguage.googleapis.com/v1beta/models/"
+                  f"{m}:generateContent?key={gemini_key}"
+              )
 
-          if res.status_code == 200:
+          candidates = [model] + (["gemini-2.5-flash"] if model != "gemini-2.5-flash" else [])
+          attempts = [(m, wait) for m in candidates for wait in (0, 4)]
+          # 总预算：整个审查步骤硬上限 80s，超时即熔断，避免重试级联把 CI 时长撑大。
+          deadline = time.monotonic() + 80
+          res = None
+          last_note = ""
+          used_model = model
+          for cand, wait in attempts:
+              if time.monotonic() + wait > deadline:
+                  last_note = last_note or "总预算 80s 用尽，熔断跳过"
+                  break
+              if wait:
+                  time.sleep(wait)
+              try:
+                  # 单次请求超时与剩余预算取 min：避免第 78s 发起的请求阻塞到 108s 打破 90s 承诺。
+                  req_timeout = max(1.0, min(http_timeout, deadline - time.monotonic()))
+                  r = requests.post(
+                      endpoint(cand),
+                      json={"contents": [{"parts": [{"text": prompt}]}]},
+                      timeout=req_timeout,
+                  )
+              except Exception as e:  # noqa: BLE001 — 网络波动不抛，记录后重试
+                  last_note = f"{type(e).__name__}: {e}"
+                  continue
+              res = r
+              if r.status_code == 200:
+                  used_model = cand
+                  break
+              last_note = f"HTTP {r.status_code}"
+              if r.status_code not in (429, 503):
+                  break
+
+          if res is not None and res.status_code == 200:
               ai_reply = res.json()["candidates"][0]["content"]["parts"][0]["text"]
           else:
-              ai_reply = f"审查调用失败：HTTP {res.status_code}，本次未审查。"
+              # 失败自诊断：把该 key 实际可用的模型名列出来，便于下一轮直接改 AI_REVIEW_MODEL。
+              diag = ""
+              try:
+                  mres = requests.get(
+                      f"https://generativelanguage.googleapis.com/v1beta/models?key={gemini_key}",
+                      timeout=http_timeout,
+                  )
+                  if mres.status_code == 200:
+                      names = [
+                          m.get("name", "").replace("models/", "")
+                          for m in mres.json().get("models", [])
+                          if "generateContent" in (m.get("supportedGenerationMethods") or [])
+                      ]
+                      diag = "可用模型（前 8）：" + (", ".join(names[:8]) if names else "（空）")
+                  else:
+                      diag = f"模型列表请求同样失败：HTTP {mres.status_code}"
+              except Exception as e:  # noqa: BLE001 — 诊断信息优先，不因诊断失败再抛
+                  diag = f"模型列表请求异常：{e}"
+              snippet = res.text[:300] if res is not None else ""
+              ai_reply = (
+                  f"审查调用失败：{last_note or '未知原因'}（model={model}，已重试并尝试降级），"
+                  f"本次未审查。\n\n{diag}\n\n上游响应片段：{snippet}"
+              )
 
-          requests.post(
-              f"https://api.github.com/repos/{os.environ.get('GITHUB_REPOSITORY')}/issues/{pr_number}/comments",
-              headers=headers,
-              json={"body": f"### 🤖 自动审查反馈\n\n{truncation_note}{ai_reply}"},
-              timeout=http_timeout,
+          marker = "<!-- ai-review -->"
+          degrade = "，降级" if used_model != model else ""
+          body_text = (
+              f"### 🤖 自动审查反馈（生效模型：{used_model}{degrade}）\n\n"
+              f"{truncation_note}{ai_reply}\n\n{marker}"
           )
+          repo_url = f"https://api.github.com/repos/{os.environ.get('GITHUB_REPOSITORY')}"
+          try:
+              # 唯一锚点 upsert：同一 PR 只保留一条自动审查评论，连续 push 不刷屏。
+              mine = None
+              listed = requests.get(
+                  f"{repo_url}/issues/{pr_number}/comments?per_page=100&sort=updated&direction=desc",
+                  headers=headers,
+                  timeout=http_timeout,
+              ).json()
+              if isinstance(listed, list):
+                  for c in listed:
+                      if marker in (c.get("body") or ""):
+                          mine = c
+                          break
+              if mine:
+                  requests.patch(
+                      f"{repo_url}/issues/comments/{mine['id']}",
+                      headers=headers,
+                      json={"body": body_text},
+                      timeout=http_timeout,
+                  )
+              else:
+                  requests.post(
+                      f"{repo_url}/issues/{pr_number}/comments",
+                      headers=headers,
+                      json={"body": body_text},
+                      timeout=http_timeout,
+                  )
+          except Exception as e:  # noqa: BLE001 — 评论失败也不让 job 变红，日志留痕
+              print(f"评论发布失败：{e}")
+          print("AI_REVIEW_DONE")
+          # 上游波动与评论失败都不应把 CI 染红；本工作流只负责产出评论。
+          raise SystemExit(0)
           EOF
