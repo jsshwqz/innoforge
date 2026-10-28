@@ -471,7 +471,7 @@ mod tests {
         fill_case_meta(
             &mut meta,
             Some(&req),
-            "**申请号**:2022999999999\n**发明名称**:一种示例装置\n**申请人**:示例申请人",
+            "**申请号**:9999999999999\n**发明名称**:一种示例装置\n**申请人**:示例申请人",
             "",
             "",
         );
@@ -520,11 +520,11 @@ mod tests {
         fill_case_meta(
             &mut meta,
             None,
-            "| **申请号** | 2022999999999 |\n| **发明名称** | 一种示例装置 |",
+            "| **申请号** | 9999999999999 |\n| **发明名称** | 一种示例装置 |",
             "",
             "",
         );
-        assert_eq!(meta.application_number, "2022999999999");
+        assert_eq!(meta.application_number, "9999999999999");
         assert_eq!(meta.invention_title, "一种示例装置");
     }
 
@@ -534,11 +534,11 @@ mod tests {
         fill_case_meta(
             &mut meta,
             None,
-            "**申请号**:202299999999.9\n**发明名称**:一种示例装置\n**申请人**:核对原文",
+            "**申请号**:999999999999.9\n**发明名称**:一种示例装置\n**申请人**:核对原文",
             "",
             "",
         );
-        assert_eq!(meta.application_number, "202299999999.9");
+        assert_eq!(meta.application_number, "999999999999.9");
         assert_eq!(meta.invention_title, "一种示例装置");
         assert!(
             meta.applicant.is_empty(),
