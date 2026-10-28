@@ -120,10 +120,12 @@ jobs:
               if wait:
                   time.sleep(wait)
               try:
+                  # 单次请求超时与剩余预算取 min：避免第 78s 发起的请求阻塞到 108s 打破 90s 承诺。
+                  req_timeout = max(1.0, min(http_timeout, deadline - time.monotonic()))
                   r = requests.post(
                       endpoint(cand),
                       json={"contents": [{"parts": [{"text": prompt}]}]},
-                      timeout=http_timeout,
+                      timeout=req_timeout,
                   )
               except Exception as e:  # noqa: BLE001 — 网络波动不抛，记录后重试
                   last_note = f"{type(e).__name__}: {e}"
@@ -174,7 +176,7 @@ jobs:
               # 唯一锚点 upsert：同一 PR 只保留一条自动审查评论，连续 push 不刷屏。
               mine = None
               listed = requests.get(
-                  f"{repo_url}/issues/{pr_number}/comments?per_page=100",
+                  f"{repo_url}/issues/{pr_number}/comments?per_page=100&sort=updated&direction=desc",
                   headers=headers,
                   timeout=http_timeout,
               ).json()
