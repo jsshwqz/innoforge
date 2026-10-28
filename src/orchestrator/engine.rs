@@ -71,7 +71,13 @@ impl Orchestrator {
                     }
                     OrchestratorCommand::Abort { reason } => {
                         tracing::info!("Orchestrator: Abort — {}", reason);
-                        super::record_failure(&self.db, &ctx, ctx.current_step, &reason);
+                        super::record_failure_blocking(
+                            self.db.clone(),
+                            ctx.clone(),
+                            ctx.current_step,
+                            reason.clone(),
+                        )
+                        .await;
                         return Err(anyhow::anyhow!("Pipeline aborted: {}", reason));
                     }
                     OrchestratorCommand::Retry { max_attempts } => {
@@ -129,15 +135,22 @@ impl Orchestrator {
             match &result {
                 Ok(()) => {
                     self.send_progress(&progress_tx, &step, StepStatus::Done);
-                    let _ = self.db.save_pipeline_snapshot(
-                        &ctx.idea_id,
-                        &serde_json::to_string(&ctx).unwrap_or_default(),
-                        &format!("{:?}", step),
-                    );
-                    let _ = self
-                        .db
-                        .upsert_research_state(&ctx.idea_id, &ctx.research_state);
-                    super::save_version_snapshot(&self.db, &ctx, step);
+                    let context_json = serde_json::to_string(&ctx).unwrap_or_default();
+                    let step_str = format!("{:?}", step);
+                    super::save_pipeline_snapshot_blocking(
+                        self.db.clone(),
+                        ctx.idea_id.clone(),
+                        context_json,
+                        step_str,
+                    )
+                    .await;
+                    super::upsert_research_state_blocking(
+                        self.db.clone(),
+                        ctx.idea_id.clone(),
+                        ctx.research_state.clone(),
+                    )
+                    .await;
+                    super::save_version_snapshot_blocking(self.db.clone(), ctx.clone(), step).await;
 
                     // Run reflection + debate for LLM steps (multi-agent pipeline)
                     let step_clone = step;
@@ -185,14 +198,23 @@ impl Orchestrator {
 
                     if step.is_critical() {
                         self.send_progress(&progress_tx, &step, StepStatus::Error);
-                        super::record_failure(&self.db, &ctx, step, &e.to_string());
+                        let error_str = e.to_string();
+                        super::record_failure_blocking(
+                            self.db.clone(),
+                            ctx.clone(),
+                            step,
+                            error_str,
+                        )
+                        .await;
                         // 关键步骤失败后保存回滚快照，供 resume 续跑起点
                         if let Ok(json) = serde_json::to_string(&ctx) {
-                            let _ = self.db.save_pipeline_snapshot(
-                                &ctx.idea_id,
-                                &json,
-                                &format!("{:?}_rollback", step),
-                            );
+                            super::save_pipeline_snapshot_blocking(
+                                self.db.clone(),
+                                ctx.idea_id.clone(),
+                                json,
+                                format!("{:?}_rollback", step),
+                            )
+                            .await;
                         }
                         return Err(anyhow::anyhow!(
                             "关键步骤「{}」失败: {}（已回滚到执行前状态，可续跑）",
@@ -201,7 +223,9 @@ impl Orchestrator {
                         ));
                     }
                     tracing::warn!("非关键步骤 {:?} 失败: {}，跳过继续", step, e);
-                    super::record_failure(&self.db, &ctx, step, &e.to_string());
+                    let error_str = e.to_string();
+                    super::record_failure_blocking(self.db.clone(), ctx.clone(), step, error_str)
+                        .await;
                     self.send_progress(&progress_tx, &step, StepStatus::Skipped);
                 }
             }
@@ -213,7 +237,7 @@ impl Orchestrator {
             }
         }
 
-        let _ = self.db.delete_pipeline_snapshot(&ctx.idea_id);
+        super::delete_pipeline_snapshot_blocking(self.db.clone(), ctx.idea_id.clone()).await;
         Ok(ctx)
     }
 

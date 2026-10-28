@@ -17,7 +17,7 @@ pub mod error;
 pub mod evidence_kernel;
 mod experiment;
 mod oa_deadline;
-mod orchestrator;
+pub mod orchestrator;
 pub mod patent;
 pub mod pipeline;
 pub mod rag;
