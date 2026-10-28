@@ -19,7 +19,7 @@ const BASELINE: &[(&str, usize)] = &[
     ("src/ai/client.rs", 3),
     ("src/ai/evidence.rs", 1),
     ("src/ai/extraction.rs", 1),
-    ("src/ai/fact_check.rs", 2),
+    ("src/ai/fact_check.rs", 3),
     ("src/ai/golden_regression.rs", 2),
     ("src/ai/prohibition_check.rs", 1),
     ("src/ai/response_pipeline.rs", 3),

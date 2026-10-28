@@ -57,7 +57,7 @@ jobs:
 
           if not gemini_key:
               # fork PR 不携带 secret：明确跳过并留日志，不静默失败。
-              print(f"PR #{pr_number}: GEMINI_API_KEY 未注入（fork PR 不携带 secret），本次跳过 AI 审查。")
+              print(f"PR #{pr_number}: GEMINI_API_KEY 未配置或未注入（fork PR 不携带 secret），本次跳过 AI 审查。")
               raise SystemExit(0)
 
           resp = requests.get(diff_url, headers=headers, timeout=http_timeout)
