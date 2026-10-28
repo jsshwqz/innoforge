@@ -143,6 +143,9 @@ const SYNTHETIC_APP_NUM_ALLOWLIST: &[&str] = &[
     "2024200098827",
     "202410001234.5",
     "1990999999999",
+    // 2026-10-28：替换真实申请号后新生的 99 段合成号
+    "202299999999.9",
+    "2022999999999",
 ];
 
 // 合成 US/WO 公开号 allowlist（历史形态）
@@ -372,7 +375,18 @@ fn no_case_data_in_git_tracked_files() {
             || file.starts_with("tests/")
             || file.starts_with("templates/");
         let prod = production_part(&content, is_rust);
-        let content_hits = check_text(prod, shape_eligible);
+        let mut content_hits = check_text(prod, shape_eligible);
+        // 盲区修复（2026-10-28）：Rust 文件的 #[cfg(test)] 区域此前完全不参与内容扫描，
+        // 导致真实申请号写进 src 的单测夹具仍能全绿。此处对**精确禁忌字面量**
+        // （姓名 / 对比文件公开号 / 发文序号 / 被禁申请号）在全文件范围补扫一遍；
+        // 形状正则仍只跑生代码区（shape_eligible），避免合成夹具被形状网误判。
+        if is_rust && prod.len() != content.len() {
+            for h in check_text(&content, false) {
+                if !content_hits.contains(&h) {
+                    content_hits.push(h);
+                }
+            }
+        }
         for h in content_hits {
             violations.push(format!("{}: 内容命中 [{}]", file, h));
         }

@@ -916,3 +916,6 @@
 - **决策**：grounding<0.5 决策门与 v1 零 AI 降级经用户确认维持；AI 修复轮 opt-in 接线待拍板（需把 AppConfig 传入 finalize）。
 - **CI 门禁新增认知**：Autoclose Hygiene 禁 CHANGELOG 裸 `#NN`；Doc Staleness 要求改代码必须同 PR 更新 errors.md/STATUS.md（本条即履约）。
 - **后续**：R33-OA 把内核接进 OA 答复链路（SSE 换行破坏句对齐先修，落库前跑同一核验器），分支 `r33/evidence-oa`。
+
+## 2026-10-28 · M2 第一轮补记：隐私守卫双层扫描（PR #134）
+- **修复**：`tests/no_case_data_in_repo.rs` 对 Rust 文件改为双层扫描——精确禁忌字面量（姓名/公开号/发文序号/被禁申请号）覆盖全文含 `#[cfg(test)]` 区，形状正则仍限生代码区；`src/ai/case_input.rs` 单测夹具的真实申请号换成 99 段合成号。复盘 errors ㊲。

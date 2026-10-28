@@ -534,11 +534,11 @@ mod tests {
         fill_case_meta(
             &mut meta,
             None,
-            "**申请号**:202210477324.9\n**发明名称**:一种示例装置\n**申请人**:核对原文",
+            "**申请号**:202299999999.9\n**发明名称**:一种示例装置\n**申请人**:核对原文",
             "",
             "",
         );
-        assert_eq!(meta.application_number, "202210477324.9");
+        assert_eq!(meta.application_number, "202299999999.9");
         assert_eq!(meta.invention_title, "一种示例装置");
         assert!(
             meta.applicant.is_empty(),
