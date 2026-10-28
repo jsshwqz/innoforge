@@ -11,7 +11,7 @@ pub use command::OrchestratorCommand;
 
 use crate::db::version::{Finding, IdeaBranch, IdeaVersion};
 use crate::db::Database;
-use crate::pipeline::context::PipelineContext;
+use crate::pipeline::context::{PipelineContext, ResearchState};
 use crate::pipeline::state::PipelineStep;
 use anyhow::Result;
 use std::sync::Arc;
@@ -72,4 +72,72 @@ pub fn create_branch(
     db.insert_idea_branch(&branch)?;
     tracing::info!("创建分支 '{}' (id: {})", branch_name, branch_id);
     Ok(branch_id)
+}
+
+// ── spawn_blocking 异步包装 / Async wrappers for blocking DB writes ──────────
+//
+// Issue #77: Orchestrator 的 run() 是 async fn，但 SQLite 写入是同步阻塞操作。
+// 直接在 async worker 线程上调用会卡住整个 runtime。这些包装函数把同步 DB
+// 调用移到 tokio 的 blocking thread pool，避免阻塞 async executor。
+//
+// Issue #77: The orchestrator's run() is async, but SQLite writes are synchronous.
+// Calling them directly on the async worker stalls the runtime. These wrappers
+// move the blocking DB calls onto tokio's blocking thread pool.
+
+/// 异步保存管道快照（offload to spawn_blocking）
+pub async fn save_pipeline_snapshot_blocking(
+    db: Arc<Database>,
+    idea_id: String,
+    context_json: String,
+    current_step: String,
+) {
+    let _ = tokio::task::spawn_blocking(move || {
+        let _ = db.save_pipeline_snapshot(&idea_id, &context_json, &current_step);
+    })
+    .await;
+}
+
+/// 异步保存研发状态（offload to spawn_blocking）
+pub async fn upsert_research_state_blocking(
+    db: Arc<Database>,
+    idea_id: String,
+    state: ResearchState,
+) {
+    let _ = tokio::task::spawn_blocking(move || {
+        let _ = db.upsert_research_state(&idea_id, &state);
+    })
+    .await;
+}
+
+/// 异步保存版本快照（offload to spawn_blocking）
+pub async fn save_version_snapshot_blocking(
+    db: Arc<Database>,
+    ctx: PipelineContext,
+    step: PipelineStep,
+) {
+    let _ = tokio::task::spawn_blocking(move || {
+        save_version_snapshot(&db, &ctx, step);
+    })
+    .await;
+}
+
+/// 异步记录失败路径（offload to spawn_blocking）
+pub async fn record_failure_blocking(
+    db: Arc<Database>,
+    ctx: PipelineContext,
+    step: PipelineStep,
+    error: String,
+) {
+    let _ = tokio::task::spawn_blocking(move || {
+        record_failure(&db, &ctx, step, &error);
+    })
+    .await;
+}
+
+/// 异步删除管道快照（offload to spawn_blocking）
+pub async fn delete_pipeline_snapshot_blocking(db: Arc<Database>, idea_id: String) {
+    let _ = tokio::task::spawn_blocking(move || {
+        let _ = db.delete_pipeline_snapshot(&idea_id);
+    })
+    .await;
 }

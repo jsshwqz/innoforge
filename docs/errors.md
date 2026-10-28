@@ -1328,6 +1328,8 @@
 - **预防 / Prevention**: ①给枚举状态记"部分分"时，必须枚举它的**每一个消费点**并回答"非零值在这里的语义是什么"——任何一个消费点只认布尔 `is_some()`，部分分就是假绿。②golden 夹具记录的是**语义快照**：语义变更必须重生成（`EK_WRITE_GOLDEN=1`）并逐行核读 diff，不能只改断言数字——本次 golden diff 恰好暴露了第三处假绿句（C8）和降级回路的重分类行为。
 - **提交 / Commit**: 见 PR #125（分支 `r33/evidence-kernel`）。
 
+---
+
 ## [2026-10-27] ㉟ 正式答复书空输出：reject_review 缺 my_patent + 字节切片 panic
 - **严重程度 / Severity**: CRITICAL（主 UI 正式答复书返回空文本却报成功）
 - **涉及文件**: `src/ai/patent.rs`（`extract_oa_response_section` 兜底切片）、`src/routes/ai.rs`（`api_ai_oa_generate_response_letter`）、`templates/office_action_response.html`（`generateResponseLetter` 请求体）、`src/routes/mod.rs`（`AI_MODEL_FAST` 默认值）
@@ -1351,6 +1353,15 @@
 - **涉及文件**: `src/ai/case_input.rs`（`fill_case_meta` 单测夹具）、`tests/no_case_data_in_repo.rs`（`production_part` / `check_text` 调用点）
 - **现象 / Symptom**: M2 第一轮给 `fill_case_meta` 补单测时，夹具字符串直接用了真实申请号做「Markdown 字段行」样例；分支已推送（公有仓），CI 的 Privacy Guards 仍然 pass。
 - **根因 / Root cause**: 守卫对 Rust 文件只截取 `#[cfg(test)]` 之前的「生代码区」再扫全部类目，测试区完全不在扫描范围内。设计初衷是「测试区多是合成夹具」，但合成夹具本来就不会命中**精确禁忌字面量**（真实姓名/公开号/发文序号/被禁申请号），真正需要拦的恰恰是这类硬编码；用"区域"一刀切，等于给测试区开了后门。
-- **修复 / Fix**: ①夹具换成 99 段合成申请号（并登记进合成 allowlist，可审计）；②守卫改为**双层扫描**：精确禁忌字面量在全文件范围检查（含 `#[cfg(test)]` 区），形状正则仍只跑生代码区，既堵洞又不误伤合成夹具。
-- **预防 / Prevention**: ①任何"按区域跳过"的扫描规则，先问"被跳过的区域里最该拦的是什么"——合成数据不会命中精确字面量，精确字面量检查就不该受区域限制；②新增单测夹具时，凡形似编号的串一律用 99/90 段合成值，不复制粘贴真实材料。
+- **修复 / Fix**: ①夹具换成 99 段合成号（并登记进合成 allowlist，可审计）；②守卫改为**字面量全文化**：精确禁忌字面量（姓名/对比文件公开号/发文序号/被禁申请号）扫全文含 `#[cfg(test)]` 区，形状正则仍只跑生代码区；③把遗漏的第三个变体（同一案件被写成 13 连号形态）补进被禁申请号黑名单。
+- **预防 / Prevention**: ①漏的不是"形状网没覆盖测试区"，而是**黑名单没列全真实号的变体**——复核一个真实值是否清干净时，要按"同一号码可能的书写形态"（12+校验位 / 13 连号 / 错位变体）逐一列全，不能只查一种；②试过把形状网放开到测试区，会撞出十几处合成/EPO 文档号误报，判据宽窄要按"误报成本 vs 漏报成本"选，精确字面量才是测试区的正确判据。
 - **提交 / Commit**: 见 PR #134（分支 `m2/letter-evidence`）。
+---
+
+## [2026-10-28] ㊳ AI 审查工作流两坑：静默截断产生假安全感；公开仓 issue_comment 触发携带 secret 构成滥用向量
+- **严重程度 / Severity**: MEDIUM-HIGH（前者让审查结论以偏概全却无人知晓；后者是公开仓上的真实安全洞——任何路人评论都能消耗/探测我们的模型 Key）
+- **现象 / Symptom**: ①`.github/workflows/ai-review.yml` 里 `diff_text = requests.get(...).text[:10000]`：diff 超 1 万字符时静默砍掉后半，审查评论照常给出"看起来完整"的结论，被砍文件里的问题永远不会被报出，读者却以为整个 PR 都审过了。②工作流同时挂了 `issue_comment: [created]` 触发且带 `GEMINI_API_KEY`：公开仓上任何外部用户在任何 PR 下发一条评论，就能让 Actions 携带 secret 跑一次模型调用——刷评论即可消耗配额、做Key滥用，属典型 pwn-request 形态的滥用向量。
+- **根因 / Root cause**: ①截断是"为了省 token"的实现细节，却没有上升为对读者的显式契约——被截断这一事实既不进评论也不进日志，假安全感来自"输出形态与完整审查不可区分"。②触发器选型只想了"评论也能触发审查"的便利，没想"公开仓 + 评论触发 + 携带 secret"三者叠加的信任模型：issue_comment 的输入完全由外部人控制。
+- **修复 / Fix**: ①截断上限提到 30000（env `AI_REVIEW_DIFF_LIMIT` 集中定义），超限时在评论开头显式声明"diff 共 N 字符，仅审查前 M 字符"，并解析 `diff --git` 标记列出完全落在截断点之后的未覆盖文件路径清单。②删掉 issue_comment 触发与对应分支代码，仅保留 `pull_request: [opened, synchronize]`；fork PR 不携带 secret，脚本检测 `GEMINI_API_KEY` 为空即跳过并在日志写明原因；yml 顶部注释警告不要加回 issue_comment。另加 concurrency 取消闸与 paths 过滤控成本，模型调用失败评论带 HTTP 状态码与"本次未审查"，所有 requests 调用加 30s 超时。
+- **预防 / Prevention**: ①任何"截断/采样后仍产出完整口吻结论"的流水线，必须把截断事实与被截掉的范围写进产物本身（评论/报告开头），否则就是假绿灯的变体。②公开仓工作流凡携带 secret，触发面必须逐个审"输入由谁控制"；由外部人可控的触发器（issue_comment / PR 评论 / discussion）一律不配 secret 作业。
+- **提交 / Commit**: 见 PR #132（分支 `jsshwqz-patch-2`）。

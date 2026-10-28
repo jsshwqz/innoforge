@@ -6,8 +6,12 @@
 //! 3. 发文序号类目——16 位数字（每段 ≤4 字符拼接）
 //! 4. 申请号形状 `(?:\d{12}\.\d|\d{13})`、公开号形状 `CN\d{9}[A-Z]{1,2}`
 //!    / `CN\d{8}[A-Z]` / `US\d{7,9}[A-Z]?` / `WO\d{4}/\d{6}`
-//!    ——覆盖 src/ 生代码（#[cfg(test)] 之前）+ docs/ + tests/ + templates/；
+//!    ——形状网覆盖 src/ 生代码区（#[cfg(test)] 之前）+ docs/ + tests/ + templates/；
 //!    合成夹具 allowlist 放行（99/90 段等），哈希片段跳过
+//!
+//! 2026-10-28：**精确禁忌字面量（类目 1-3 与类目 4 的黑名单号）改为扫全文**，
+//! 含 Rust 的 #[cfg(test)] 区——真实案号两次都是写进单测夹具后漏过去的；
+//! 形状正则仍限生代码区，避免合成夹具与 EPO 文档号被误判。
 //!
 //! tests/fixtures/ 下的文件内容也执行四类检查（fixture 按定义是合成内容，更应被扫描）。
 //! 白名单常量必须保持为空。
@@ -71,14 +75,21 @@ fn forbidden_app_numbers() -> Vec<String> {
     // 案号B → ["2022","1047","7324","9"] 四段拼接
     let a2 = format!("{}{}{}{}", "2022", "1047", "7324", "9");
     let a2d = format!("{}{}.{}", "2022", "1047", "7324.9");
-    vec![a1, a1d, a2, a2d]
+    // 案号B 的数字错位变体（同一案件曾被误写成 13 连号形态）→ ["2022","1047","7732","4"]
+    let a3 = format!("{}{}{}{}", "2022", "1047", "7732", "4");
+    let a3d = format!("{}{}.{}", "2022", "1047", "7732.4");
+    vec![a1, a1d, a2, a2d, a3, a3d]
 }
 
 /// 白名单：必须保持为空。不许为了让测试通过而往白名单加条目。
 const WHITELIST: &[&str] = &[];
 
-/// 对于 Rust 文件，截取 #[cfg(test)] 之前的部分作为生代码区域。
+/// 对于 Rust 文件，截取 #[cfg(test)] 之前的部分作为「生代码区」。
 /// 如果文件没有 #[cfg(test)]，返回全文。
+///
+/// 2026-10-28：形状正则只用它；**精确禁忌字面量改扫全文**（见调用点），
+/// 因为两轮真实案号都是写进单测夹具后漏过去的，而形状网若放开到测试区
+/// 会把大量合成/无关数字（如 2025 1000 0000 0 段夹具、EPO 文档号）误判。
 fn production_part(content: &str, is_rust: bool) -> &str {
     if !is_rust {
         return content;
@@ -369,17 +380,17 @@ fn no_case_data_in_git_tracked_files() {
         scanned += 1;
 
         let is_rust = file.starts_with("src/") && file.ends_with(".rs");
-        // 形状网覆盖域：src/ 生代码 + docs/ + tests/ + templates/
+        // 形状网覆盖域：src/ 生代码区 + docs/ + tests/ + templates/
         let shape_eligible = is_rust
             || file.starts_with("docs/")
             || file.starts_with("tests/")
             || file.starts_with("templates/");
         let prod = production_part(&content, is_rust);
         let mut content_hits = check_text(prod, shape_eligible);
-        // 盲区修复（2026-10-28）：Rust 文件的 #[cfg(test)] 区域此前完全不参与内容扫描，
-        // 导致真实申请号写进 src 的单测夹具仍能全绿。此处对**精确禁忌字面量**
-        // （姓名 / 对比文件公开号 / 发文序号 / 被禁申请号）在全文件范围补扫一遍；
-        // 形状正则仍只跑生代码区（shape_eligible），避免合成夹具被形状网误判。
+        // 2026-10-28 盲区修复：Rust 文件的 #[cfg(test)] 区域此前完全不参与内容扫描，
+        // 真实案号写进单测夹具仍能全绿（已发生两次）。此处对**精确禁忌字面量**
+        // （姓名/对比文件公开号/发文序号/被禁申请号）在全文件范围补扫；
+        // 形状正则仍只跑生代码区——放开到测试区会把合成夹具与 EPO 文档号误判。
         if is_rust && prod.len() != content.len() {
             for h in check_text(&content, false) {
                 if !content_hits.contains(&h) {

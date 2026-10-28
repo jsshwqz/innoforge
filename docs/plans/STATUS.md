@@ -919,3 +919,4 @@
 
 ## 2026-10-28 · M2 第一轮补记：隐私守卫双层扫描（PR #134）
 - **修复**：`tests/no_case_data_in_repo.rs` 对 Rust 文件改为双层扫描——精确禁忌字面量（姓名/公开号/发文序号/被禁申请号）覆盖全文含 `#[cfg(test)]` 区，形状正则仍限生代码区；`src/ai/case_input.rs` 单测夹具的真实申请号换成 99 段合成号。复盘 errors ㊲。
+- **工作流改造（2026-10-28，PR #132，分支 `jsshwqz-patch-2`）**：`.github/workflows/ai-review.yml` 修四硬伤——①diff 静默截断改为显式声明"共 N 字符仅审前 M 字符"+未覆盖文件清单（上限 30000，env 集中）；②删 issue_comment 触发（公开仓滥用向量），仅留 pull_request opened/synchronize，fork 无 secret 即跳过并记日志；③prompt 内联固定审查清单（实质风险/隐私红线/文档履约/最多 8 条 file:line）；④加 concurrency 取消闸与 paths 过滤（src/tests/templates/.github）；另：失败评论带 HTTP 状态码与「本次未审查」、requests 全部加 30s 超时。复盘 errors.md ㊳（本条即 Doc Staleness 履约）。
