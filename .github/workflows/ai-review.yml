@@ -35,7 +35,7 @@ jobs:
       - env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          AI_REVIEW_MODEL: "gemini-2.0-flash"
+          AI_REVIEW_MODEL: "gemini-flash-latest"
           AI_REVIEW_DIFF_LIMIT: "30000"
           AI_REVIEW_HTTP_TIMEOUT: "30"
         run: |
@@ -44,7 +44,7 @@ jobs:
 
           github_token = os.environ.get("GITHUB_TOKEN")
           gemini_key = os.environ.get("GEMINI_API_KEY")
-          model = os.environ.get("AI_REVIEW_MODEL", "gemini-2.0-flash")
+          model = os.environ.get("AI_REVIEW_MODEL", "gemini-flash-latest")
           diff_limit = int(os.environ.get("AI_REVIEW_DIFF_LIMIT", "30000"))
           http_timeout = int(os.environ.get("AI_REVIEW_HTTP_TIMEOUT", "30"))
           headers = {"Authorization": f"Bearer {github_token}", "Accept": "application/vnd.github.v3+json"}
@@ -127,6 +127,7 @@ jobs:
                   diag = f"模型列表请求异常：{e}"
               ai_reply = (
                   f"审查调用失败：HTTP {res.status_code}（model={model}），本次未审查。\n\n{diag}"
+                  f"\n\n上游响应片段：{res.text[:300]}"
               )
 
           requests.post(
