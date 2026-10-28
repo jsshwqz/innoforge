@@ -40,7 +40,7 @@ jobs:
           AI_REVIEW_HTTP_TIMEOUT: "30"
         run: |
           python3 - << 'EOF'
-          import os, re, json, requests
+          import os, re, json, time, requests
 
           github_token = os.environ.get("GITHUB_TOKEN")
           gemini_key = os.environ.get("GEMINI_API_KEY")
@@ -98,13 +98,38 @@ jobs:
               f"代码变动:\n```diff\n{diff_text}\n```"
           )
 
-          res = requests.post(
-              f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={gemini_key}",
-              json={"contents": [{"parts": [{"text": prompt}]}]},
-              timeout=http_timeout,
-          )
+          # 重试与降级：上游 503/429 与读超时都属临时波动，重试一轮并降级到备用模型；
+          # 无论最终成败都只发评论、不抛异常——避免上游波动把 CI 染红。
+          def endpoint(m):
+              return (
+                  "https://generativelanguage.googleapis.com/v1beta/models/"
+                  f"{m}:generateContent?key={gemini_key}"
+              )
 
-          if res.status_code == 200:
+          candidates = [model] + (["gemini-2.5-flash"] if model != "gemini-2.5-flash" else [])
+          attempts = [(m, wait) for m in candidates for wait in (0, 4)]
+          res = None
+          last_note = ""
+          for cand, wait in attempts:
+              if wait:
+                  time.sleep(wait)
+              try:
+                  r = requests.post(
+                      endpoint(cand),
+                      json={"contents": [{"parts": [{"text": prompt}]}]},
+                      timeout=http_timeout,
+                  )
+              except Exception as e:  # noqa: BLE001 — 网络波动不抛，记录后重试
+                  last_note = f"{type(e).__name__}: {e}"
+                  continue
+              res = r
+              if r.status_code == 200:
+                  break
+              last_note = f"HTTP {r.status_code}"
+              if r.status_code not in (429, 503):
+                  break
+
+          if res is not None and res.status_code == 200:
               ai_reply = res.json()["candidates"][0]["content"]["parts"][0]["text"]
           else:
               # 失败自诊断：把该 key 实际可用的模型名列出来，便于下一轮直接改 AI_REVIEW_MODEL。
@@ -125,15 +150,22 @@ jobs:
                       diag = f"模型列表请求同样失败：HTTP {mres.status_code}"
               except Exception as e:  # noqa: BLE001 — 诊断信息优先，不因诊断失败再抛
                   diag = f"模型列表请求异常：{e}"
+              snippet = res.text[:300] if res is not None else ""
               ai_reply = (
-                  f"审查调用失败：HTTP {res.status_code}（model={model}），本次未审查。\n\n{diag}"
-                  f"\n\n上游响应片段：{res.text[:300]}"
+                  f"审查调用失败：{last_note or '未知原因'}（model={model}，已重试并尝试降级），"
+                  f"本次未审查。\n\n{diag}\n\n上游响应片段：{snippet}"
               )
 
-          requests.post(
-              f"https://api.github.com/repos/{os.environ.get('GITHUB_REPOSITORY')}/issues/{pr_number}/comments",
-              headers=headers,
-              json={"body": f"### 🤖 自动审查反馈\n\n{truncation_note}{ai_reply}"},
-              timeout=http_timeout,
-          )
+          try:
+              requests.post(
+                  f"https://api.github.com/repos/{os.environ.get('GITHUB_REPOSITORY')}/issues/{pr_number}/comments",
+                  headers=headers,
+                  json={"body": f"### 🤖 自动审查反馈\n\n{truncation_note}{ai_reply}"},
+                  timeout=http_timeout,
+              )
+          except Exception as e:  # noqa: BLE001 — 评论失败也不让 job 变红，日志留痕
+              print(f"评论发布失败：{e}")
+          print("AI_REVIEW_DONE")
+          # 上游波动与评论失败都不应把 CI 染红；本工作流只负责产出评论。
+          raise SystemExit(0)
           EOF
