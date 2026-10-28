@@ -1328,6 +1328,8 @@
 - **预防 / Prevention**: ①给枚举状态记"部分分"时，必须枚举它的**每一个消费点**并回答"非零值在这里的语义是什么"——任何一个消费点只认布尔 `is_some()`，部分分就是假绿。②golden 夹具记录的是**语义快照**：语义变更必须重生成（`EK_WRITE_GOLDEN=1`）并逐行核读 diff，不能只改断言数字——本次 golden diff 恰好暴露了第三处假绿句（C8）和降级回路的重分类行为。
 - **提交 / Commit**: 见 PR #125（分支 `r33/evidence-kernel`）。
 
+---
+
 ## [2026-10-27] ㉟ 正式答复书空输出：reject_review 缺 my_patent + 字节切片 panic
 - **严重程度 / Severity**: CRITICAL（主 UI 正式答复书返回空文本却报成功）
 - **涉及文件**: `src/ai/patent.rs`（`extract_oa_response_section` 兜底切片）、`src/routes/ai.rs`（`api_ai_oa_generate_response_letter`）、`templates/office_action_response.html`（`generateResponseLetter` 请求体）、`src/routes/mod.rs`（`AI_MODEL_FAST` 默认值）
@@ -1337,12 +1339,49 @@
 - **预防 / Prevention**: ①契约测试必须覆盖**主 UI 实际 payload**，不能只测后端自造 JSON；②任何"模型不可用"必须是可见错误，禁止以 `[DONE]` 收尾；③`tests/no_unsafe_byte_slice.rs` 的启发式只匹配 `[..`，漏掉 `[expr..]`，后续修守卫时要覆盖变量起点。
 - **提交 / Commit**: `2e682f4` / PR #133。
 
-## [2026-10-28] ㊴ 修改稿「原文零命中的措辞」被写成"来源于原说明书的明确记载"：词表判据＋未接线＋含糊句式三重漏放
+## [2026-10-27] ㊱ 从 AI 分析稿回填案件信息：标签匹配过宽会把小节标题当申请人
+- **严重程度 / Severity**: HIGH（正式答复书头部可能写入“意见陈述的回应要点”等非申请人文本）
+- **涉及文件**: `src/ai/case_input.rs`（`fill_case_meta` / `label_value`）
+- **现象 / Symptom**: 回填后请求书申请人变为“意见陈述的回应要点”；申请号 / 发明名称正确。
+- **根因 / Root cause**: `line.find(label)` 在任意位置匹配，分析稿正文里的小节标题与“申请人认为…”句子都被当成字段；只做了空值过滤，没有行首位置与语义过滤。
+- **修复 / Fix**: 标签必须出现在行首（允许 `|` / `*` / `#` 表格与 Markdown 前缀）且后接分隔符；申请人值过滤占位词与小节型词（要点 / 陈述 / 论证 / …）；加 4 条单测，回填只填空、不猜造。
+- **预防 / Prevention**: 从 AI 文本回填结构化字段时，先定义“字段行”的行首约束，再做值域过滤；占位词必须显式拒绝。
+- **提交 / Commit**: 见 PR（分支 `m2/letter-evidence`）。
+
+## [2026-10-28] ㊲ 隐私守卫的盲区：Rust 文件的 #[cfg(test)] 区域不参与内容扫描，真实申请号写进单测夹具仍全绿
+- **严重程度 / Severity**: CRITICAL（公开仓上把真实申请号写进 `src/` 单测夹具，Privacy Guards 绿）
+- **涉及文件**: `src/ai/case_input.rs`（`fill_case_meta` 单测夹具）、`tests/no_case_data_in_repo.rs`（`production_part` / `check_text` 调用点）
+- **现象 / Symptom**: M2 第一轮给 `fill_case_meta` 补单测时，夹具字符串直接用了真实申请号做「Markdown 字段行」样例；分支已推送（公有仓），CI 的 Privacy Guards 仍然 pass。
+- **根因 / Root cause**: 守卫对 Rust 文件只截取 `#[cfg(test)]` 之前的「生代码区」再扫全部类目，测试区完全不在扫描范围内。设计初衷是「测试区多是合成夹具」，但合成夹具本来就不会命中**精确禁忌字面量**（真实姓名/公开号/发文序号/被禁申请号），真正需要拦的恰恰是这类硬编码；用"区域"一刀切，等于给测试区开了后门。
+- **修复 / Fix**: ①夹具换成 99 段合成号（并登记进合成 allowlist，可审计）；②守卫改为**字面量全文化**：精确禁忌字面量（姓名/对比文件公开号/发文序号/被禁申请号）扫全文含 `#[cfg(test)]` 区，形状正则仍只跑生代码区；③把遗漏的第三个变体（同一案件被写成 13 连号形态）补进被禁申请号黑名单。
+- **预防 / Prevention**: ①漏的不是"形状网没覆盖测试区"，而是**黑名单没列全真实号的变体**——复核一个真实值是否清干净时，要按"同一号码可能的书写形态"（12+校验位 / 13 连号 / 错位变体）逐一列全，不能只查一种；②试过把形状网放开到测试区，会撞出十几处合成/EPO 文档号误报，判据宽窄要按"误报成本 vs 漏报成本"选，精确字面量才是测试区的正确判据。
+- **已知遗留（Gemini 第八轮判定，2026-10-28）**：字面量黑名单只能覆盖「已知涉案号」，若后续单测再引入未登记的真实号，形状网不扫测试区仍会漏（打地鼠风险）。根治方案＝形状网全文件覆盖 + 把测试区现有约 40 个合成号/EPO 文档号/哈希片段一次性登记 allowlist，属「扩守卫」范畴，按整顿令 §7 本轮不做。**触发条件**：再发生一次真实号漏放，即实施全量覆盖。
+- **提交 / Commit**: 见 PR #134（分支 `m2/letter-evidence`）。
+---
+
+## [2026-10-28] ㊳ AI 审查工作流两坑：静默截断产生假安全感；公开仓 issue_comment 触发携带 secret 构成滥用向量
+- **严重程度 / Severity**: MEDIUM-HIGH（前者让审查结论以偏概全却无人知晓；后者是公开仓上的真实安全洞——任何路人评论都能消耗/探测我们的模型 Key）
+- **现象 / Symptom**: ①`.github/workflows/ai-review.yml` 里 `diff_text = requests.get(...).text[:10000]`：diff 超 1 万字符时静默砍掉后半，审查评论照常给出"看起来完整"的结论，被砍文件里的问题永远不会被报出，读者却以为整个 PR 都审过了。②工作流同时挂了 `issue_comment: [created]` 触发且带 `GEMINI_API_KEY`：公开仓上任何外部用户在任何 PR 下发一条评论，就能让 Actions 携带 secret 跑一次模型调用——刷评论即可消耗配额、做Key滥用，属典型 pwn-request 形态的滥用向量。
+- **根因 / Root cause**: ①截断是"为了省 token"的实现细节，却没有上升为对读者的显式契约——被截断这一事实既不进评论也不进日志，假安全感来自"输出形态与完整审查不可区分"。②触发器选型只想了"评论也能触发审查"的便利，没想"公开仓 + 评论触发 + 携带 secret"三者叠加的信任模型：issue_comment 的输入完全由外部人控制。
+- **修复 / Fix**: ①截断上限提到 30000（env `AI_REVIEW_DIFF_LIMIT` 集中定义），超限时在评论开头显式声明"diff 共 N 字符，仅审查前 M 字符"，并解析 `diff --git` 标记列出完全落在截断点之后的未覆盖文件路径清单。②删掉 issue_comment 触发与对应分支代码，仅保留 `pull_request: [opened, synchronize]`；fork PR 不携带 secret，脚本检测 `GEMINI_API_KEY` 为空即跳过并在日志写明原因；yml 顶部注释警告不要加回 issue_comment。另加 concurrency 取消闸与 paths 过滤控成本，模型调用失败评论带 HTTP 状态码与"本次未审查"，所有 requests 调用加 30s 超时。
+- **预防 / Prevention**: ①任何"截断/采样后仍产出完整口吻结论"的流水线，必须把截断事实与被截掉的范围写进产物本身（评论/报告开头），否则就是假绿灯的变体。②公开仓工作流凡携带 secret，触发面必须逐个审"输入由谁控制"；由外部人可控的触发器（issue_comment / PR 评论 / discussion）一律不配 secret 作业。
+- **提交 / Commit**: 见 PR #132（分支 `jsshwqz-patch-2`）。
+
+## [2026-10-28] ㊴ AI 审查工作流首次实跑 404：模型名与环境可用性脱节；失败无自诊断等于每次 PR 挂废评论
+- **严重程度 / Severity**: MEDIUM（每次 PR 触发一条无用评论，且掩盖真实原因；不阻断合并但污染审查信号）
+- **涉及文件**: `.github/workflows/ai-review.yml`
+- **现象 / Symptom**: #132 合并后首次实跑（PR #134），评论正文只有"审查调用失败：HTTP 404，本次未审查"；截断声明在文件清单解析失败时仍写"以下 0 个文件未被审查覆盖"，与事实相反。
+- **根因 / Root cause**: ①默认模型 `gemini-2.5-flash` 是对着文档猜的，没有先确认该 key 实际可用模型；②失败分支只回状态码、不回上游响应体，也不查可用模型列表，等于放弃自诊断；③截断声明的"未覆盖清单"把"解析失败"与"零文件"混为一谈。
+- **修复 / Fix**: 默认模型改 `gemini-flash-latest`（由失败时的 `/v1beta/models` 自诊断列出）；失败评论附上游 `res.text` 前 300 字符；截断声明区分「无文件被整段跳过 / N 个文件未覆盖 / 清单解析失败」三态。
+- **预防 / Prevention**: ①任何"按文档猜的名字"都要先用最小请求实测，不能等它在生产 PR 上失败；②失败路径必须自带诊断信息（状态码 + 响应体片段 + 候选清单），否则下一轮仍然靠猜。
+- **提交 / Commit**: PR #135（分支 `fix/ai-review-model`）。编号 ㊴：㊲/㊳ 已被同日在途的 PR #134 占用，避让。
+
+## [2026-10-28] ㊵ 修改稿「原文零命中的措辞」被写成"来源于原说明书的明确记载"：词表判据＋未接线＋含糊句式三重漏放
 - **严重程度 / Severity**: HIGH（答复书把生造措辞写进修改后权利要求，还断言有明确记载——提交即构成专利法第33条修改超范围风险，且当事人看不出来）
 - **涉及文件**: `src/evidence_kernel/amendment_gate.rs`（新增门：特征句抽取/归一化豁免/原文本语料）、`src/evidence_kernel/verifier.rs`（`verify_quote_in_doc` 受控范围检索，复用同一匹配内核）、`src/ai/fact_check.rs`（槽位④改接 `check_a33_verbatim`，UA3 升级为 `check_a33_structured` 适配层）、`src/routes/ai.rs`（答复书网关流结束处挂门 + 首部横幅 + meta 计数）
 - **现象 / Symptom**: 回公开原始申请文本逐字核对发现，答复书「修改后的权利要求」里出现原始文本**零记载**的措辞（通用技术词复现为"隔离罩/差值/伸缩轴行程"），同段还写"上述修改均来源于原说明书具体实施方式的明确记载"。旧链路三条路径全部漏放：①这些词不在 `check_a33_risk` 的 17 个硬编码高风险术语里；②修改稿不是「修改为：「…」」句式，正则不匹配；③答复书网关只跑 C2/C12 needle 检查，**根本不调用任何 A33 校验**。
 - **根因 / Root cause**: 判据方向对的那道实现（UA3 `check_a33_structured`）被 `#[allow(dead_code)]` 封存、生产零调用，只有三条单测在跑——"判据正确但没接线"被当成了能力储备而不是缺陷；而真正接线的是词表+正则的弱判据，两道检查各自以为"另一道在管"。叠加一个机理问题：旧判据按 3–8 字中文块回原文，词边界是猜的，合法撰写变换（所述/其特征在于/附图标记/标点/数值范围）会被误判、真实生造短语又可能被切碎后逐块命中而漏放。
 - **修复 / Fix**: ①判据换成**特征句级**逐字核验：把修改后权利要求拆成特征句，归一化后对「原始申请文本（说明书 + 权利要求书）」做逐字/滑窗匹配；②归一化豁免五类**合法撰写变换**（指代词/权项连接语与语序/附图标记与括号/标点/数值范围与单位全半角），逐类一条正控；③复用内核语义而不另造：`evidence_kernel::model` 数据契约、`verifier::verify_quote_in_doc`（检索范围限定本申请权利要求 + 具体实施方式段落三元组）、`critic` 消费的严格 `Relation::Support`（AnchorOnly 仅锚点不算支撑）；④阻断形态=**降级标注**不是硬阻断：零命中特征句保留原文、就地标【未证实：该措辞在原始文本零命中】；"明确记载/来源于原说明书"类断言整句替换为降级块；meta 事件带 `amendment_unsupported=N`，N>0 时正文首部加阻断横幅（复用 M2-C 横幅形态）并把提交度维度压死（④的警告为致命档，评分 65，答复书网关阈值不放行）；⑤与 C2/C12 范畴正交，同时触发各记各的，不去重不互相抑制。
-- **负控 / Negative control**: 先红后绿（真实执行输出见 PR 正文红→绿表）。接线前：`tests/amendment_verbatim_gate.rs::zero_hit_amendment_must_be_caught_by_analysis_gate` **FAILED**（`check_oa_analysis` 的 warnings 里没有任何 `A33逐字核验`），`tests/m2_amendment_verbatim_letter.rs::letter_gate_blocks_zero_hit_amendment` **FAILED**（答复书正文只有模型原文，无就地标注/无首部横幅/meta 无 `amendment_unsupported`）；接线后两条复绿。正控六条（五类豁免 + 从属权项并入独立权项）在 `amendment_gate` 单测中修复前后均绿，证明不误伤。
+- **负控 / Negative control**: 先红后绿（真实执行输出见 PR 正文红→绿表）。接线前（`src/ai/fact_check.rs` 槽位④ 与 `src/routes/ai.rs` 退回基线）：`tests/amendment_verbatim_gate.rs::zero_hit_amendment_must_be_caught_by_analysis_gate` **FAILED**（`check_oa_analysis` 的 warnings 里没有任何 `A33逐字核验`），`tests/m2_amendment_verbatim_letter.rs` 两条 **FAILED**（答复书正文只有模型原文、无就地标注；meta 无 `amendment_unsupported`）；接线后全绿。正控六条（五类豁免 + 从属权项并入独立权项）在 `amendment_gate` 单测中修复前后均绿，证明不误伤；另有一条正交性用例锁"A33 与 C12 同时触发各记各的并罚"。
 - **预防 / Prevention**: ①"判据正确但未接线"必须作为缺陷登记——`#[allow(dead_code)]` 是漏放许可证，不是能力储备；任何检查器合入前要能指出它的**生产调用点**（file:line）。②零命中必须落到**用户可见文本**（就地标注 + 首部横幅），只进日志/只进计数等于没拦。③词表型检查不能充当 A33 的唯一防线：判据必须是"回原文可证伪"的匹配，而不是"像不像专业术语"的启发式。④收尾时旧实现（`check_a33_risk` 的 17 词表、`HIGH_RISK_AMENDMENT_TERMS`、`extract_amendment_section`）**整体删除**而不是加 `#[allow(dead_code)]` 留档：留着就还有被重新接线的可能，`clippy -D warnings` 的 `dead_code` 红正是该删的信号。
-- **提交 / Commit**: 见 PR（分支 `feat/amendment-verbatim-gate`）。编号说明：本分支基线 `8f89f4f` 的文件最大号为 ㉟，但合入目标 `origin/main` 已用到 ㊳（㊱㊲㊳ 均为 main 上条目），故本条取 ㊴。
+- **提交 / Commit**: 见 PR（分支 `feat/amendment-verbatim-gate`）。编号说明：本分支基线 `8f89f4f` 的文件最大号为 ㉟，合入目标 `origin/main` 已用到 ㊴，故本条取 ㊵。

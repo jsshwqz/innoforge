@@ -14,6 +14,15 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-10-27 — **M2 第一轮：答复书证据化 / 法条化 + CaseMeta 回填**（分支 `m2/letter-evidence`）
+
+- **状态 / Status**: 🚧 PR 待开，等 CI
+- **驱动**: M1 基线 2/2/2/1/1；答复书头部空、0 法条、0 证据表、15 处零举证。
+- **实现**: CaseMeta 从 request / 分析稿行首标签回填（占位词与小节标题过滤）；Stage E 增法律依据段（程序性第 41 条 + 实体缺口提示）、区别特征出处对照表、每条反驳绑定证据表行号；材料完整性提示；零举证顶部阻断横幅。
+- **回归**: 同一案件正式答复书 2,260 → 3,125 字；五维 2/3/2/2/2；仍不可直接提交（15 处零举证 + 缺实体法条 / 对比文件原文）。
+- **验证**: `cargo test --lib` 775 passed；4 个 OA 集成测试；fmt/clippy/HTML 扫描。
+- **未做**: 证据内核接 OA（锚点级核验）、实体法条（缺驳回决定全文）、零举证消除。
+
 ### 2026-10-27 — **M1 真实案件基线 + 答复书两处 P0**（PR #133）
 
 - **状态 / Status**: 🚧 PR open（分支 `fix/oa-letter-empty-output`，PR #133），等 CI
@@ -907,6 +916,13 @@
 - **决策**：grounding<0.5 决策门与 v1 零 AI 降级经用户确认维持；AI 修复轮 opt-in 接线待拍板（需把 AppConfig 传入 finalize）。
 - **CI 门禁新增认知**：Autoclose Hygiene 禁 CHANGELOG 裸 `#NN`；Doc Staleness 要求改代码必须同 PR 更新 errors.md/STATUS.md（本条即履约）。
 - **后续**：R33-OA 把内核接进 OA 答复链路（SSE 换行破坏句对齐先修，落库前跑同一核验器），分支 `r33/evidence-oa`。
+- **工作流改造（2026-10-28，PR #132，分支 `jsshwqz-patch-2`）**：`.github/workflows/ai-review.yml` 修四硬伤——①diff 静默截断改为显式声明"共 N 字符仅审前 M 字符"+未覆盖文件清单（上限 30000，env 集中）；②删 issue_comment 触发（公开仓滥用向量），仅留 pull_request opened/synchronize，fork 无 secret 即跳过并记日志；③prompt 内联固定审查清单（实质风险/隐私红线/文档履约/最多 8 条 file:line）；④加 concurrency 取消闸与 paths 过滤（src/tests/templates/.github）；另：失败评论带 HTTP 状态码与「本次未审查」、requests 全部加 30s 超时。复盘 errors.md ㊳（本条即 Doc Staleness 履约）。
+
+## 2026-10-28 · M2 第一轮补记：隐私守卫字面量全文化（PR #134）
+- **修复**：`tests/no_case_data_in_repo.rs` 对 Rust 文件的精确禁忌字面量（姓名/公开号/发文序号/被禁申请号）覆盖全文含 `#[cfg(test)]` 区，形状正则仍限生代码区；补登 13 连号变体；`src/ai/case_input.rs` 单测夹具真实案号换为非法年份 9999 段合成号。复盘 errors ㊲。
+
+## 2026-10-28 · AI 审查工作流首跑修复（PR #135）
+- **修复**：`.github/workflows/ai-review.yml` 默认模型改 `gemini-flash-latest`；失败评论附上游响应片段与 `/v1beta/models` 可用模型列表（自诊断）；截断声明区分零文件/未覆盖/解析失败三态；每个候选模型两次尝试（仅对 429/503/异常）并降级到 `gemini-2.5-flash`；审查步骤 80s 总预算熔断；评论按 `<!-- ai-review -->` 唯一锚点 upsert；首行标注生效模型与是否降级。复盘 errors ㊴。
 
 ## 2026-10-28 · M2 第 2 步：修改稿特征逐字核验门（UA3 v2，分支 `feat/amendment-verbatim-gate`，基线 `8f89f4f`）
 - **交付**：新增 `src/evidence_kernel/amendment_gate.rs`（特征句抽取 / 五类合法撰写变换归一化豁免 / 本申请语料 = 权利要求 + 具体实施方式段落三元组 / 就地降级标注 / 断言降级 / 阻断横幅）；`verifier.rs` 增 `CorpusIndex::verify_quote_in_doc`（受控范围检索，复用同一匹配内核与 `critic` 严格 `Support` 判定，未另造包含匹配）；`fact_check.rs` 槽位④ 由 `check_a33_risk`（17 词表）换为 `check_a33_verbatim`（UA3 `check_a33_structured` 升级为适配层，去掉 dead_code）；`routes/ai.rs` 答复书网关流结束处挂门：整篇产出后门检 → 正文首部横幅 + 就地标注 + `meta.amendment_unsupported=N` + `submission_ready=false` 下发。
@@ -914,4 +930,4 @@
 - **负控（先红后绿）**：接线前 `tests/amendment_verbatim_gate.rs`（分析流槽位④）与 `tests/m2_amendment_verbatim_letter.rs`（答复书 SSE）三条断言 FAILED（分析流无 `A33逐字核验`、正文无就地标注、meta 无 `amendment_unsupported`），接线后全绿；正控六条（指代词/连接语与语序/附图标记与括号/标点/数值范围与单位全半角/从属权项并入独立权项）修复前后均绿。
 - **门禁**：`cargo fmt --check`、`cargo clippy --all-targets -- -D warnings`、全量 `cargo test -j 2`、`no_unsafe_byte_slice` 四项 rc 见 PR 正文表。
 - **如实声明**：同义替换 / 上位概括 / 跨实施例拼凑这道门拦不住，两层防线各拦什么、各漏什么登记在 `docs/design/evidence-kernel-v2.md` §5.1（FMEA 负控区）。与 C2/C12 范畴正交，同时触发并罚不去重（`tests/amendment_verbatim_gate.rs::a33_gate_and_c2_c12_are_orthogonal_both_penalized`）。
-- **编号**：本分支基线 `8f89f4f` 的 `docs/errors.md` 最大号为 ㉟，但 `origin/main` 已用到 ㊳（㊱㊲㊳ 均为 main 条目），合入后取 ㊴，避免重号。
+- **编号**：本分支基线 `8f89f4f` 的 `docs/errors.md` 最大号为 ㉟，但 `origin/main` 已用到 ㊴（㊱–㊴ 均为 main 条目），合入后取 ㊵，避免重号。

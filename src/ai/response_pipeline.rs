@@ -16,7 +16,7 @@
 use super::case_input::*;
 use super::client::AiClient;
 use super::extraction::{count_term_in_text, normalize_text};
-use super::fact_check::{check_oa_analysis, format_report};
+use super::fact_check::{check_oa_analysis, format_report, FactCheckReport};
 use super::output_guard::run_guard;
 
 // ── 管线入口 ───────────────────────────────────────────────────────────
@@ -58,13 +58,110 @@ pub async fn generate_response_letter_pipeline(
         "\n\n## AI事实核查（请人工复核）\n\n{}",
         format_report(&fact_report)
     );
-    let full_text = format!("{}{}", raw_text, fact_section);
+    let banner = fact_check_banner(&fact_report);
+    let full_text = format!("{}{}{}", banner, raw_text, fact_section);
 
     let guard_result = run_guard(&full_text, input);
     ResponseLetter {
         full_text,
         guard_result,
     }
+}
+
+/// 事实核查顶部横幅：零举证不再是文末一条警告，必须在正文最前面可见。
+fn fact_check_banner(report: &FactCheckReport) -> String {
+    if report.warnings.is_empty() {
+        return String::new();
+    }
+    let zero_evidence = report
+        .warnings
+        .iter()
+        .any(|w| w.category.contains("零举证") || w.description.contains("零举证"));
+    if zero_evidence {
+        format!(
+            "【不可直接提交：存在零举证断言（{} 条警告），见文末事实核查】\n\n",
+            report.warnings.len()
+        )
+    } else {
+        format!(
+            "【需人工复核：事实核查有 {} 条警告，见文末】\n\n",
+            report.warnings.len()
+        )
+    }
+}
+
+/// 材料完整性提示：输入缺口必须显式可见，不能默认自己拿到了全文。
+fn material_warnings(input: &CaseInput) -> Vec<String> {
+    let mut out = Vec::new();
+    let oa_len = input.oa_full_text.chars().count();
+    if oa_len < 1000 {
+        out.push(format!("驳回决定文本仅 {oa_len} 字，可能为残片或 OCR 片段"));
+    }
+    if !input.oa_full_text.contains("对比文件") {
+        out.push("驳回决定中未出现「对比文件」；特征级比对只能依据审查员转述".into());
+    }
+    if input.reference_documents.is_empty() {
+        out.push("未提供对比文件全文；本稿不能声称已核对对比文件原文".into());
+    }
+    if input.claims_under_review.trim().is_empty() {
+        out.push("未提供待审权利要求原文".into());
+    }
+    out
+}
+
+/// 从驳回决定原文提取法条引用（确定性，不猜造）。
+fn extract_legal_basis(oa_text: &str) -> Vec<String> {
+    let Ok(re) = regex::Regex::new(
+        r"专利法(?:实施条例|实施细则)?第[一二三四五六七八九十百千零〇0-9]+条(?:第[一二三四五六七八九十0-9]+款)?",
+    ) else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = Vec::new();
+    for m in re.find_iter(oa_text) {
+        let s = m.as_str().to_string();
+        if !out.contains(&s) {
+            out.push(s);
+        }
+    }
+    out
+}
+
+/// 区别特征 → 驳回决定原文出处对照表（确定性；缺摘录必须显式标出）。
+fn evidence_table(features: &[DistinguishingFeature]) -> String {
+    let mut text = String::new();
+    text.push_str("| 序号 | 区别特征 | 驳回标签 | 审查员归因 | 驳回决定原文摘录 |\n");
+    text.push_str("|------|---------|---------|-----------|------------------|\n");
+    for f in features {
+        let excerpt = if f.oa_excerpt.trim().is_empty() {
+            "【缺原文摘录】".to_string()
+        } else {
+            truncate_chars(&sanitize_cell(&f.oa_excerpt), 120)
+        };
+        text.push_str(&format!(
+            "| {} | {} | {} | {} | {} |\n",
+            f.ordinal,
+            truncate_chars(&sanitize_cell(&f.feature_name), 80),
+            f.oa_tag.as_chinese(),
+            f.attributed_ref.as_deref().unwrap_or("未归因"),
+            excerpt
+        ));
+    }
+    text
+}
+
+fn sanitize_cell(s: &str) -> String {
+    s.replace(['\n', '\r', '|', '｜'], " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn truncate_chars(s: &str, max: usize) -> String {
+    let mut out: String = s.chars().take(max).collect();
+    if s.chars().count() > max {
+        out.push('…');
+    }
+    out
 }
 
 // ── Stage A：OA区别特征抽取 ─────────────────────────────────────────────
@@ -1018,6 +1115,38 @@ fn stage_e_assemble(
     }
     text.push_str("\n请求撤销驳回决定，并发回原审查部门继续审查。\n\n");
 
+    let warnings = material_warnings(input);
+    if !warnings.is_empty() {
+        text.push_str("【材料完整性提示：以下缺口会影响结论可靠性，补齐前不可直接提交】\n");
+        for w in &warnings {
+            text.push_str(&format!("- {w}\n"));
+        }
+        text.push('\n');
+    }
+
+    let mut legal_bases = extract_legal_basis(&input.oa_full_text);
+    if input.case_meta.oa_type == "reject_review"
+        && !legal_bases.iter().any(|b| b.contains("第41条"))
+    {
+        legal_bases.push("专利法第41条（复审请求的程序依据）".into());
+    }
+    section += 1;
+    text.push_str(&format!("{}、法律依据\n\n", cn_nums[section - 1]));
+    if legal_bases.is_empty() {
+        text.push_str("【系统警告：未从驳回决定中识别到法条依据，请人工核对】\n\n");
+    } else {
+        for b in &legal_bases {
+            text.push_str(&format!("- {b}\n"));
+        }
+        if !legal_bases.iter().any(|b| !b.contains("第41条")) {
+            text.push_str(
+                "\n【提示：驳回决定的实体条款未在现有文本中识别，需人工核对驳回决定原文】\n\n",
+            );
+        } else {
+            text.push_str("\n以上为驳回决定引用的法律依据，下文逐项回应。\n\n");
+        }
+    }
+
     section += 1;
     text.push_str(&format!(
         "{}、针对驳回决定各项理由的逐项消除缺陷论证\n\n",
@@ -1058,11 +1187,29 @@ fn stage_e_assemble(
             text.push('\n');
             text.push_str(&r.insufficient);
         }
+        if let Some(f) = features.iter().find(|f| f.ordinal == r.ordinal) {
+            if !f.oa_excerpt.trim().is_empty() {
+                text.push_str(&format!(
+                    "\n根据驳回决定原文摘录（见证据表第{}行）。",
+                    r.ordinal
+                ));
+            }
+        }
         text.push_str("\n\n");
     }
     for em in effect_mismatches {
         text.push_str(&em.rebuttal_text);
         text.push_str("\n\n");
+    }
+
+    if !features.is_empty() {
+        section += 1;
+        text.push_str(&format!(
+            "{}、区别特征与驳回决定出处对照表\n\n",
+            cn_nums[section - 1]
+        ));
+        text.push_str(&evidence_table(features));
+        text.push_str("\n本表为驳回决定转述的出处对照，不替代对比文件原文核验。\n\n");
     }
 
     section += 1;
@@ -1152,8 +1299,84 @@ mod tests {
         );
     }
 
-    use super::super::case_input::{CaseMeta, ReferenceDocument};
+    use super::super::case_input::{
+        CaseMeta, DistinguishingFeature, FeatureRebuttal, OaTag, ReferenceDocument,
+    };
+    use super::super::fact_check::FactWarning;
     use super::*;
+
+    #[test]
+    fn fact_check_banner_marks_zero_evidence_as_blocking() {
+        let report = FactCheckReport {
+            warnings: vec![FactWarning {
+                category: "C2零举证".into(),
+                description: "检测到15处零举证断言".into(),
+                severity: "高".into(),
+            }],
+            score: 85.0,
+            c0_extractions: vec![],
+        };
+        let banner = fact_check_banner(&report);
+        assert!(banner.contains("不可直接提交"));
+        assert!(banner.contains("零举证"));
+    }
+
+    #[test]
+    fn material_warnings_flag_missing_refs_and_short_oa() {
+        let input = make_sample_case_input();
+        let warnings = material_warnings(&input);
+        assert!(warnings.iter().any(|w| w.contains("字")));
+        assert!(warnings.iter().any(|w| w.contains("对比文件")));
+    }
+
+    #[test]
+    fn stage_e_includes_legal_basis_and_evidence_table() {
+        let mut input = make_sample_case_input();
+        input.oa_full_text = "根据专利法第22条第3款，权利要求1不具备创造性。".into();
+        let features = vec![DistinguishingFeature {
+            ordinal: 1,
+            feature_name: "特征A".into(),
+            oa_tag: OaTag::RoutineChoice,
+            attributed_ref: Some("D1".into()),
+            oa_excerpt: String::new(),
+        }];
+        let output = stage_e_assemble(&input, &features, &[], &[], &[], &[]);
+        assert!(output.contains("法律依据"));
+        assert!(output.contains("专利法第22条第3款"));
+        assert!(output.contains("区别特征与驳回决定出处对照表"));
+        assert!(output.contains("【缺原文摘录】"));
+    }
+
+    #[test]
+    fn stage_e_reject_review_without_substantive_law_marks_gap() {
+        let mut input = make_sample_case_input();
+        input.oa_full_text = "驳回决定正文，未引用具体条款。".into();
+        let output = stage_e_assemble(&input, &[], &[], &[], &[], &[]);
+        assert!(output.contains("专利法第41条"));
+        assert!(output.contains("实体条款未在现有文本中识别"));
+    }
+
+    #[test]
+    fn stage_e_ties_rebuttal_to_evidence_row() {
+        let input = make_sample_case_input();
+        let features = vec![DistinguishingFeature {
+            ordinal: 1,
+            feature_name: "特征A".into(),
+            oa_tag: OaTag::RoutineChoice,
+            attributed_ref: Some("D1".into()),
+            oa_excerpt: "审查员转述".into(),
+        }];
+        let rebuttals = vec![FeatureRebuttal {
+            ordinal: 1,
+            feature_name: "特征A".into(),
+            oa_tag: OaTag::RoutineChoice,
+            severance: "割裂".into(),
+            synergy: "协同".into(),
+            insufficient: "不足".into(),
+        }];
+        let output = stage_e_assemble(&input, &features, &[], &[], &rebuttals, &[]);
+        assert!(output.contains("根据驳回决定原文摘录（见证据表第1行）"));
+    }
 
     #[test]
     fn r6c_pipeline_output_contains_fact_check_section() {
