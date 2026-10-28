@@ -892,7 +892,6 @@ mod tests {
     // 旧 17 词表判据的用例随实现一并删除；五类豁免与负控的逐条用例在
     // `src/evidence_kernel/amendment_gate.rs` 单测与 `tests/amendment_verbatim_gate.rs`。
 
-
     // ── 综合校验测试 ──
 
     // M3-20261025：C2/C12 对引述与自报告的剥离行为（strip_non_authorial_for_c_checks）
