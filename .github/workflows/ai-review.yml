@@ -35,7 +35,7 @@ jobs:
       - env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          AI_REVIEW_MODEL: "gemini-2.5-flash"
+          AI_REVIEW_MODEL: "gemini-2.0-flash"
           AI_REVIEW_DIFF_LIMIT: "30000"
           AI_REVIEW_HTTP_TIMEOUT: "30"
         run: |
@@ -44,7 +44,7 @@ jobs:
 
           github_token = os.environ.get("GITHUB_TOKEN")
           gemini_key = os.environ.get("GEMINI_API_KEY")
-          model = os.environ.get("AI_REVIEW_MODEL", "gemini-2.5-flash")
+          model = os.environ.get("AI_REVIEW_MODEL", "gemini-2.0-flash")
           diff_limit = int(os.environ.get("AI_REVIEW_DIFF_LIMIT", "30000"))
           http_timeout = int(os.environ.get("AI_REVIEW_HTTP_TIMEOUT", "30"))
           headers = {"Authorization": f"Bearer {github_token}", "Accept": "application/vnd.github.v3+json"}
@@ -72,10 +72,16 @@ jobs:
               markers = [(m.start(), m.group(1)) for m in
                          re.finditer(r"^diff --git a/(.+?) b/", full_diff, re.M)]
               uncovered = [path for pos, path in markers if pos >= diff_limit]
-              uncovered_lines = "\n".join(f"- `{p}`" for p in uncovered) or "- （无法解析出文件清单）"
+              uncovered_lines = "\n".join(f"- `{p}`" for p in uncovered) if markers else ""
+              if not markers:
+                  covered = "无法解析出文件清单（按截断处理：后方部分未审）"
+              elif uncovered:
+                  covered = f"以下 {len(uncovered)} 个文件未被本次审查覆盖：\n{uncovered_lines}"
+              else:
+                  covered = "所有文件的起点均在审查范围内（0 个文件被整段跳过）"
               truncation_note = (
                   f"> ⚠️ **截断声明**：diff 共 {total_len} 字符，仅审查前 {diff_limit} 字符。"
-                  f"以下 {len(uncovered)} 个文件未被本次审查覆盖：\n{uncovered_lines}\n\n"
+                  f"{covered}\n\n"
               )
 
           checklist = (
@@ -101,7 +107,27 @@ jobs:
           if res.status_code == 200:
               ai_reply = res.json()["candidates"][0]["content"]["parts"][0]["text"]
           else:
-              ai_reply = f"审查调用失败：HTTP {res.status_code}，本次未审查。"
+              # 失败自诊断：把该 key 实际可用的模型名列出来，便于下一轮直接改 AI_REVIEW_MODEL。
+              diag = ""
+              try:
+                  mres = requests.get(
+                      f"https://generativelanguage.googleapis.com/v1beta/models?key={gemini_key}",
+                      timeout=http_timeout,
+                  )
+                  if mres.status_code == 200:
+                      names = [
+                          m.get("name", "").replace("models/", "")
+                          for m in mres.json().get("models", [])
+                          if "generateContent" in (m.get("supportedGenerationMethods") or [])
+                      ]
+                      diag = "可用模型（前 8）：" + (", ".join(names[:8]) if names else "（空）")
+                  else:
+                      diag = f"模型列表请求同样失败：HTTP {mres.status_code}"
+              except Exception as e:  # noqa: BLE001 — 诊断信息优先，不因诊断失败再抛
+                  diag = f"模型列表请求异常：{e}"
+              ai_reply = (
+                  f"审查调用失败：HTTP {res.status_code}（model={model}），本次未审查。\n\n{diag}"
+              )
 
           requests.post(
               f"https://api.github.com/repos/{os.environ.get('GITHUB_REPOSITORY')}/issues/{pr_number}/comments",
