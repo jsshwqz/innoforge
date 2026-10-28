@@ -1327,3 +1327,13 @@
 - **修复 / Fix**: `verified_weight()` 收紧为逐字核验（Exact/Approx ⇒ `Some(1.0)`，AnchorOnly ⇒ `None`）；矛盾检测的 `anchored_docs` 显式按"锚点命中"匹配（不随权重收窄）；critic reason 点名"仅有锚点命中、无逐字引文支撑（existence ≠ support）"；NC4 负控先红后绿（修复前 relation=Support、grounding=0.7、门不抑制，实测 FAILED 后复绿）。
 - **预防 / Prevention**: ①给枚举状态记"部分分"时，必须枚举它的**每一个消费点**并回答"非零值在这里的语义是什么"——任何一个消费点只认布尔 `is_some()`，部分分就是假绿。②golden 夹具记录的是**语义快照**：语义变更必须重生成（`EK_WRITE_GOLDEN=1`）并逐行核读 diff，不能只改断言数字——本次 golden diff 恰好暴露了第三处假绿句（C8）和降级回路的重分类行为。
 - **提交 / Commit**: 见 PR #125（分支 `r33/evidence-kernel`）。
+
+---
+
+## [2026-10-28] ㉟ AI 审查工作流两坑：静默截断产生假安全感；公开仓 issue_comment 触发携带 secret 构成滥用向量
+- **严重程度 / Severity**: MEDIUM-HIGH（前者让审查结论以偏概全却无人知晓；后者是公开仓上的真实安全洞——任何路人评论都能消耗/探测我们的模型 Key）
+- **现象 / Symptom**: ①`.github/workflows/ai-review.yml` 里 `diff_text = requests.get(...).text[:10000]`：diff 超 1 万字符时静默砍掉后半，审查评论照常给出"看起来完整"的结论，被砍文件里的问题永远不会被报出，读者却以为整个 PR 都审过了。②工作流同时挂了 `issue_comment: [created]` 触发且带 `GEMINI_API_KEY`：公开仓上任何外部用户在任何 PR 下发一条评论，就能让 Actions 携带 secret 跑一次模型调用——刷评论即可消耗配额、做Key滥用，属典型 pwn-request 形态的滥用向量。
+- **根因 / Root cause**: ①截断是"为了省 token"的实现细节，却没有上升为对读者的显式契约——被截断这一事实既不进评论也不进日志，假安全感来自"输出形态与完整审查不可区分"。②触发器选型只想了"评论也能触发审查"的便利，没想"公开仓 + 评论触发 + 携带 secret"三者叠加的信任模型：issue_comment 的输入完全由外部人控制。
+- **修复 / Fix**: ①截断上限提到 30000（env `AI_REVIEW_DIFF_LIMIT` 集中定义），超限时在评论开头显式声明"diff 共 N 字符，仅审查前 M 字符"，并解析 `diff --git` 标记列出完全落在截断点之后的未覆盖文件路径清单。②删掉 issue_comment 触发与对应分支代码，仅保留 `pull_request: [opened, synchronize]`；fork PR 不携带 secret，脚本检测 `GEMINI_API_KEY` 为空即跳过并在日志写明原因；yml 顶部注释警告不要加回 issue_comment。另加 concurrency 取消闸与 paths 过滤控成本，模型调用失败评论带 HTTP 状态码与"本次未审查"，所有 requests 调用加 30s 超时。
+- **预防 / Prevention**: ①任何"截断/采样后仍产出完整口吻结论"的流水线，必须把截断事实与被截掉的范围写进产物本身（评论/报告开头），否则就是假绿灯的变体。②公开仓工作流凡携带 secret，触发面必须逐个审"输入由谁控制"；由外部人可控的触发器（issue_comment / PR 评论 / discussion）一律不配 secret 作业。
+- **提交 / Commit**: 见 PR #132（分支 `jsshwqz-patch-2`）。

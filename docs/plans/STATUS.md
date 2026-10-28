@@ -897,3 +897,4 @@
 - **决策**：grounding<0.5 决策门与 v1 零 AI 降级经用户确认维持；AI 修复轮 opt-in 接线待拍板（需把 AppConfig 传入 finalize）。
 - **CI 门禁新增认知**：Autoclose Hygiene 禁 CHANGELOG 裸 `#NN`；Doc Staleness 要求改代码必须同 PR 更新 errors.md/STATUS.md（本条即履约）。
 - **后续**：R33-OA 把内核接进 OA 答复链路（SSE 换行破坏句对齐先修，落库前跑同一核验器），分支 `r33/evidence-oa`。
+- **工作流改造（2026-10-28，PR #132，分支 `jsshwqz-patch-2`）**：`.github/workflows/ai-review.yml` 修四硬伤——①diff 静默截断改为显式声明"共 N 字符仅审前 M 字符"+未覆盖文件清单（上限 30000，env 集中）；②删 issue_comment 触发（公开仓滥用向量），仅留 pull_request opened/synchronize，fork 无 secret 即跳过并记日志；③prompt 内联固定审查清单（实质风险/隐私红线/文档履约/最多 8 条 file:line）；④加 concurrency 取消闸与 paths 过滤（src/tests/templates/.github）；另：失败评论带 HTTP 状态码与「本次未审查」、requests 全部加 30s 超时。复盘 errors.md ㉟（本条即 Doc Staleness 履约）。

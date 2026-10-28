@@ -1,21 +1,31 @@
 name: "AI Code Review"
 
+# 安全说明：
+# - 仅由 pull_request (opened/synchronize) 触发。来自 fork 的 PR 不携带 secret
+#   （GEMINI_API_KEY 为空），脚本检测到后跳过审查并在日志中说明原因。
+# - 不要加回"PR 评论"类触发器（issue-comment 事件）：公开仓上任何外部用户的
+#   评论都会带着 GEMINI_API_KEY 跑一次模型调用，构成滥用/泄露向量。
+
 on:
   pull_request:
     types: [opened, synchronize]
-  issue_comment:
-    types: [created]
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "templates/**"
+      - ".github/**"
 
 permissions:
   contents: read
   pull-requests: write
   issues: write
 
+concurrency:
+  group: ai-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   review:
-    if: >
-      github.event_name == 'pull_request' || 
-      (github.event.issue.pull_request != null && github.event.comment.user.type != 'Bot')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,39 +35,78 @@ jobs:
       - env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          AI_REVIEW_MODEL: "gemini-2.5-flash"
+          AI_REVIEW_DIFF_LIMIT: "30000"
+          AI_REVIEW_HTTP_TIMEOUT: "30"
         run: |
           python3 - << 'EOF'
-          import os, json, requests
-          
+          import os, re, json, requests
+
           github_token = os.environ.get("GITHUB_TOKEN")
           gemini_key = os.environ.get("GEMINI_API_KEY")
+          model = os.environ.get("AI_REVIEW_MODEL", "gemini-2.5-flash")
+          diff_limit = int(os.environ.get("AI_REVIEW_DIFF_LIMIT", "30000"))
+          http_timeout = int(os.environ.get("AI_REVIEW_HTTP_TIMEOUT", "30"))
           headers = {"Authorization": f"Bearer {github_token}", "Accept": "application/vnd.github.v3+json"}
-          
+
           with open(os.environ.get("GITHUB_EVENT_PATH"), "r", encoding="utf-8") as f:
               event_data = json.load(f)
-          
-          event_name = os.environ.get("GITHUB_EVENT_NAME")
-          if event_name == "pull_request":
-              pr_number = event_data["pull_request"]["number"]
-              diff_url = event_data["pull_request"]["diff_url"]
-          else:
-              pr_number = event_data["issue"]["number"]
-              diff_url = requests.get(event_data["issue"]["pull_request"]["url"], headers=headers).json().get("diff_url")
-              
-          diff_text = requests.get(diff_url, headers=headers).text[:10000]
-          
-          prompt = f"你是一位务实的代码审查专家。请指出以下代码变动中的实质性风险和缺陷，使用简体中文回复。\n\n代码变动:\n```diff\n{diff_text}\n```"
-          
-          res = requests.post(
-              f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}",
-              json={"contents": [{"parts": [{"text": prompt}]}]}
+
+          pr_number = event_data["pull_request"]["number"]
+          diff_url = event_data["pull_request"]["diff_url"]
+
+          if not gemini_key:
+              # fork PR 不携带 secret：明确跳过并留日志，不静默失败。
+              print(f"PR #{pr_number}: GEMINI_API_KEY 未注入（fork PR 不携带 secret），本次跳过 AI 审查。")
+              raise SystemExit(0)
+
+          resp = requests.get(diff_url, headers=headers, timeout=http_timeout)
+          resp.raise_for_status()
+          full_diff = resp.text
+          total_len = len(full_diff)
+          diff_text = full_diff[:diff_limit]
+
+          truncation_note = ""
+          if total_len > diff_limit:
+              # 显式声明截断，并列出完全落在截断点之后、未被审查的文件路径。
+              markers = [(m.start(), m.group(1)) for m in
+                         re.finditer(r"^diff --git a/(.+?) b/", full_diff, re.M)]
+              uncovered = [path for pos, path in markers if pos >= diff_limit]
+              uncovered_lines = "\n".join(f"- `{p}`" for p in uncovered) or "- （无法解析出文件清单）"
+              truncation_note = (
+                  f"> ⚠️ **截断声明**：diff 共 {total_len} 字符，仅审查前 {diff_limit} 字符。"
+                  f"以下 {len(uncovered)} 个文件未被本次审查覆盖：\n{uncovered_lines}\n\n"
+              )
+
+          checklist = (
+              "固定审查清单：\n"
+              "1. 实质性风险：正确性、边界条件、并发问题、索引安全（SQLite 索引与写路径）。\n"
+              "2. 隐私红线：diff 或评论中不得出现专利申请号、人名、公开号、案件专有长句；发现即指出。\n"
+              "3. 文档履约：改代码必须同步更新 docs/errors.md 与 docs/plans/STATUS.md。\n"
+              "4. 只报实质问题，不报风格碎念；最多 8 条，每条给出 file:line。"
           )
-          
-          ai_reply = res.json()["candidates"][0]["content"]["parts"][0]["text"] if res.status_code == 200 else "审查调用失败。"
-          
+
+          prompt = (
+              f"你是一位务实的代码审查专家（本仓库为 InnoForge：Rust + Axum + SQLite）。"
+              f"请按下列清单审查代码变动，使用简体中文回复。\n\n{checklist}\n\n"
+              f"代码变动:\n```diff\n{diff_text}\n```"
+          )
+
+          res = requests.post(
+              f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={gemini_key}",
+              json={"contents": [{"parts": [{"text": prompt}]}]},
+              timeout=http_timeout,
+          )
+
+          if res.status_code == 200:
+              ai_reply = res.json()["candidates"][0]["content"]["parts"][0]["text"]
+          else:
+              ai_reply = f"审查调用失败：HTTP {res.status_code}，本次未审查。"
+
           requests.post(
               f"https://api.github.com/repos/{os.environ.get('GITHUB_REPOSITORY')}/issues/{pr_number}/comments",
               headers=headers,
-              json={"body": f"### 🤖 自动审查反馈\n\n{ai_reply}"}
+              json={"body": f"### 🤖 自动审查反馈\n\n{truncation_note}{ai_reply}"},
+              timeout=http_timeout,
           )
           EOF
