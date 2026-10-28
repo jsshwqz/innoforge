@@ -108,9 +108,15 @@ jobs:
 
           candidates = [model] + (["gemini-2.5-flash"] if model != "gemini-2.5-flash" else [])
           attempts = [(m, wait) for m in candidates for wait in (0, 4)]
+          # 总预算：整个审查步骤硬上限 80s，超时即熔断，避免重试级联把 CI 时长撑大。
+          deadline = time.monotonic() + 80
           res = None
           last_note = ""
+          used_model = model
           for cand, wait in attempts:
+              if time.monotonic() + wait > deadline:
+                  last_note = last_note or "总预算 80s 用尽，熔断跳过"
+                  break
               if wait:
                   time.sleep(wait)
               try:
@@ -124,6 +130,7 @@ jobs:
                   continue
               res = r
               if r.status_code == 200:
+                  used_model = cand
                   break
               last_note = f"HTTP {r.status_code}"
               if r.status_code not in (429, 503):
@@ -156,13 +163,40 @@ jobs:
                   f"本次未审查。\n\n{diag}\n\n上游响应片段：{snippet}"
               )
 
+          marker = "<!-- ai-review -->"
+          degrade = "，降级" if used_model != model else ""
+          body_text = (
+              f"### 🤖 自动审查反馈（生效模型：{used_model}{degrade}）\n\n"
+              f"{truncation_note}{ai_reply}\n\n{marker}"
+          )
+          repo_url = f"https://api.github.com/repos/{os.environ.get('GITHUB_REPOSITORY')}"
           try:
-              requests.post(
-                  f"https://api.github.com/repos/{os.environ.get('GITHUB_REPOSITORY')}/issues/{pr_number}/comments",
+              # 唯一锚点 upsert：同一 PR 只保留一条自动审查评论，连续 push 不刷屏。
+              mine = None
+              listed = requests.get(
+                  f"{repo_url}/issues/{pr_number}/comments?per_page=100",
                   headers=headers,
-                  json={"body": f"### 🤖 自动审查反馈\n\n{truncation_note}{ai_reply}"},
                   timeout=http_timeout,
-              )
+              ).json()
+              if isinstance(listed, list):
+                  for c in listed:
+                      if marker in (c.get("body") or ""):
+                          mine = c
+                          break
+              if mine:
+                  requests.patch(
+                      f"{repo_url}/issues/comments/{mine['id']}",
+                      headers=headers,
+                      json={"body": body_text},
+                      timeout=http_timeout,
+                  )
+              else:
+                  requests.post(
+                      f"{repo_url}/issues/{pr_number}/comments",
+                      headers=headers,
+                      json={"body": body_text},
+                      timeout=http_timeout,
+                  )
           except Exception as e:  # noqa: BLE001 — 评论失败也不让 job 变红，日志留痕
               print(f"评论发布失败：{e}")
           print("AI_REVIEW_DONE")
