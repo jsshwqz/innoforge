@@ -53,9 +53,30 @@ fn sse_encode(text: &str) -> String {
     serde_json::to_string(text).unwrap_or_else(|_| "\"\"".to_string())
 }
 
+/// 把整篇文本切成不超过 `max_chars` 个字符的 SSE 帧（按 `chars()` 切，天然字符边界安全）。
+/// 答复书门把"先发后检"改成"检完再发"后，仍按句长分帧下发，避免单帧过大。
+fn split_sse_frames(text: &str, max_chars: usize) -> Vec<String> {
+    let max_chars = max_chars.max(1);
+    let mut frames: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut n = 0usize;
+    for ch in text.chars() {
+        cur.push(ch);
+        n += 1;
+        if n >= max_chars {
+            frames.push(std::mem::take(&mut cur));
+            n = 0;
+        }
+    }
+    if !cur.is_empty() {
+        frames.push(cur);
+    }
+    frames
+}
+
 #[cfg(test)]
 mod sse_tests {
-    use super::sse_encode;
+    use super::{split_sse_frames, sse_encode};
 
     #[test]
     fn sse_payload_is_single_line_and_roundtrips() {
@@ -73,6 +94,15 @@ mod sse_tests {
             let decoded: String = serde_json::from_str(&encoded).expect("JSON 往返");
             assert_eq!(decoded, sample);
         }
+    }
+
+    #[test]
+    fn frames_reassemble_exactly_and_respect_char_boundaries() {
+        let text = "中文帧切分【未证实：该措辞在原始文本零命中】。第二句含 emoji free 文本。";
+        let frames = split_sse_frames(text, 7);
+        assert!(frames.iter().all(|f| f.chars().count() <= 7));
+        assert_eq!(frames.concat(), text, "分帧不得丢字/换字");
+        assert!(split_sse_frames("", 7).is_empty());
     }
 }
 
@@ -2007,24 +2037,49 @@ pub async fn api_ai_oa_generate_response_letter(
     );
 
     let stream = async_stream::stream! {
-        let mut full_text = String::new();
+        let mut raw_text = String::new();
         // M2-C：结构化来源字段走 meta 事件（前端解析器只认 error/done/data，未知事件安全跳过）
         yield Ok(Event::default()
             .event("meta")
             .data(format!("{{\"source\":\"{analysis_source}\"}}")));
-        if !source_banner.is_empty() {
-            full_text.push_str(&source_banner);
-            yield Ok(Event::default().data(sse_encode(&source_banner)));
-        }
         while let Some(chunk) = rx.recv().await {
             if chunk.starts_with("[ERROR]") {
                 yield Ok(Event::default().event("error").data(chunk));
                 return;
             }
             // EK-P6：累积原文（句边界完整），SSE 载荷 JSON 编码
-            full_text.push_str(&chunk);
-            yield Ok(Event::default().data(sse_encode(&chunk)));
+            raw_text.push_str(&chunk);
         }
+        // ── UA3 v2 修改稿特征逐字核验门（M2 第 2 步）──
+        // 必须在整篇产出后跑：①阻断横幅要落在正文首部；②零命中特征句要**就地**标注，
+        // 流式转发无法回填已下发的字符。两条生成链路本就整篇单帧返回（非逐 token），
+        // 因此缓冲不改变可见时延，只把"先发后检"换成"检完再发"。
+        let gate = crate::evidence_kernel::amendment_gate::gate_amendment_text(
+            &raw_text,
+            &my_patent_text,
+        );
+        let mut body = String::new();
+        if !source_banner.is_empty() {
+            body.push_str(&source_banner);
+        }
+        if gate.unsupported_count > 0 {
+            let banner = gate.banner();
+            body.push_str(&banner);
+        }
+        body.push_str(&gate.gated_text);
+        for frame in split_sse_frames(&body, 240) {
+            yield Ok(Event::default().data(sse_encode(&frame)));
+        }
+        // 结构化维度：amendment_unsupported=N 与提交度维度（N>0 即 False）
+        yield Ok(Event::default().event("meta").data(format!(
+            "{{\"source\":\"{analysis_source}\",\"amendment_unsupported\":{},\"amendment_assertions_downgraded\":{},\"amendment_claims\":{},\"amendment_features\":{},\"amendment_gate\":\"{}\",\"submission_ready\":{}}}",
+            gate.unsupported_count,
+            gate.assertions_downgraded,
+            gate.amended_claim_count,
+            gate.checked_feature_count,
+            gate.status.as_str(),
+            gate.submission_ready
+        )));
         // R6c: 事实核查已由 pipeline 内嵌，SSE 层不再重复追加
         yield Ok(Event::default().event("done").data("[DONE]"));
     };

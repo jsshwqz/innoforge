@@ -9,6 +9,7 @@
 //! 垂直切片接缝：`pipeline/steps/finalize.rs`（详见设计文档 §3）。
 
 pub mod ai_repair;
+pub mod amendment_gate;
 pub mod anchor;
 pub mod classifier;
 pub mod critic;

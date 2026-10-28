@@ -179,6 +179,18 @@ pub struct KernelReport {
 | F7 | 超大 corpus 性能（万级 section） | 索引 = HashMap<(doc_id, kind), BTreeMap<number, section_idx>>，锚点 O(1)；引文匹配只在命中 section 内做，天然受限 |
 | F8 | 锚点+引文都真但断言语义不成立（引非所证） | v1 不能解（ADR-1 边界）；报告 limitation 明示"核验=存在性，非支持性"；v3 方向 NLI/对照表 |
 | F9 | 仅锚点引用被当支撑计分（AnchorOnly 冒充核验；PR #125 复核 Blocking 抓出） | `verified_weight()` 只认逐字核验（Exact/Approx ⇒ 1.0，AnchorOnly ⇒ None）；grounding 分子只计 Exact/Approx；critic 清单点名"仅有锚点、无逐字引文"；`anchor_only` 计量保留为诊断。**负控 NC4 直接盯这条** |
+| F10 | 修改稿写入原始文本零记载的措辞，并断言"来源于原说明书的明确记载"（A33 超范围；M3 实测） | `amendment_gate` 特征句逐字门挂到 `check_oa_analysis` 槽位④ + 答复书生成流结束处：零命中特征句就地标【未证实】（保留原文）、"明确记载"类断言整句降级、正文首部阻断横幅 + `meta.amendment_unsupported=N`、提交度维度压死。**负控 NC5 直接盯这条**（先红后绿） |
+
+### 5.1 修改稿逐字门（UA3 v2，`src/evidence_kernel/amendment_gate.rs`）的两层防线：各拦什么、各漏什么
+
+评审裁定：这道门**只做可确定性证伪的那部分**，漏放面必须如实登记，不许用"已接入内核"搪塞。两层防线与残余风险如下。
+
+| 层 | 机制（file:line） | 拦得住 | 拦不住（如实声明） | 补位 |
+|---|---|---|---|---|
+| 第一层：受控检索 + 归一化逐字/滑窗 | `amendment_gate::gate_amendment_text`（`amendment_gate.rs`）+ `verifier::CorpusIndex::verify_quote_in_doc`（`verifier.rs`）；检索范围＝本申请 `Claim` 三元组 + `具体实施方式` `Paragraph` 三元组 | ①原始文本里**零记载**的新措辞（生造术语/未记载的结构或参数）；②把对比文件或 OA 结论冒充本申请记载（对比文件不在检索范围内，必零命中）；③跨文档借用；④附图标记/标点/单位全半角/数值范围/指代词/连接语造成的**表述差异**（五类豁免，逐类正控） | ①**同义替换**（"隔离罩"写成"隔绝罩"、"间隙"写成"缝隙"）：只要与原文逐字/近似（3-gram ≥0.85）都不沾，就会被判零命中——方向是偏保守（宁可误标也不放行），但真正等义的改写会被打上待核标记；②**上位概括**（"弹簧"→"弹性件"）：上位词若从未在原文出现即零命中，会被拦；若原文别处出现过同词则放行（语义是否仍被支持，见第二层）；③**跨实施例拼凑**：特征 A 在段 1、B 在段 2，组合本身无记载，但逐句都能各自命中 ⇒ **这道门拦不住** | 第二层（critic 严格 Support）只能拦住"无逐字支撑"，拦不住拼凑；拼凑的最终防线是人工复核 + 正文首部的待核提示（`amendment_unsupported` 为 0 时也可能存在） |
+| 第二层：critic 严格 `Relation::Support` | `model::ClaimRecord::relation` + `critic::collect_findings`（`critic.rs`），门内对每条特征句构造 `FactFromSource` 记录并按严格 Support 判定 | ①**只有锚点、没有引文**的假支撑（AnchorOnly ⇒ `verified_weight() = None` ⇒ Insufficient，NC4 语义）；②近似分低于 0.85 的**改写**被判零命中，而不是被"看起来像"放行；③降级过的句子不会在下一轮被"修好"洗白（`downgraded` 位保留） | ①**语义层"引非所证"**：句子逐字命中，但被用来支撑它并不支持的结论（v1 边界，NLI 属 v3，对应 F8）；②**断言的时态/范围修饰**（"约""通常""优选"）不参与判定，原文有该措辞即视为命中 | v3 语义支持性判定（NLI/对照表）；本轮不做，PR 与 errors.md ㊴ 已登记 |
+
+负控登记：**NC5**（零命中却声称"明确记载"）先红后绿——接线前（`src/ai/fact_check.rs` 槽位④ 与 `src/routes/ai.rs` 退回基线）三条断言 FAILED：①分析流 warnings 无 `A33逐字核验`；②答复书正文无就地标注、无首部横幅；③meta 无 `amendment_unsupported`。接线后全绿（`tests/amendment_verbatim_gate.rs`、`tests/m2_amendment_verbatim_letter.rs`）。正控六条（五类豁免 + 从属权项并入独立权项）修复前后均绿，证明不误伤合法撰写；正交性另有一条用例（A33 与 C12 同时触发各记各的并罚）。
 
 ---
 
@@ -193,7 +205,7 @@ pub struct KernelReport {
 | evidence_chain 表 | `db/evidence.rs` | 不动；内核报告独立（ADR-8） |
 | FACT_DISCIPLINE 锚点语法 | `patent.rs:12-22` | `[Dx:权利要求Y]/[Dx:第Z段]` 即规范语法的事实来源 |
 
-**后续收编清单**（本切片不动）：output_guard 拦截语义、UA3/UA6 接线、rag_search 死码删除、provenance 弱匹配替换、claim_tree evidence_ids 填充。
+**后续收编清单**（本切片不动）：output_guard 拦截语义、UA6 接线、rag_search 死码删除、provenance 弱匹配替换、claim_tree evidence_ids 填充。（UA3 已在 M2 第 2 步接线，见 §5.1。）
 
 ---
 

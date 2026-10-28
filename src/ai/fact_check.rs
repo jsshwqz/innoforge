@@ -4,7 +4,7 @@
 //! 1. 对比文件技术领域识别错误（幻觉）
 //! 2. 段落引用不存在（编造出处）
 //! 3. 无来源的定量数据（编造数据）
-//! 4. 修改建议违反 A33（引入说明书未记载的术语）
+//! 4. 修改建议违反 A33（修改稿特征句回原始申请文本逐字/滑窗零命中）
 //!
 //! 设计原则：
 //! - 纯函数，不依赖网络/大模型，可独立单元测试
@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 /// 单条校验警告
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FactWarning {
-    /// 警告类别："技术领域错误" | "段落引用不存在" | "无来源数据" | "A33风险"
+    /// 警告类别："技术领域错误" | "段落引用不存在" | "无来源数据" | "A33逐字核验" | "A33断言降级"
     pub category: String,
     /// 人类可读的警告描述
     pub description: String,
@@ -127,8 +127,9 @@ pub fn check_oa_analysis(ai_output: &str, references: &str, my_patent: &str) -> 
     let data_report = check_fabricated_data(ai_output);
     report.warnings.extend(data_report.warnings);
 
-    // ④ A33 合规性风险检测
-    let a33_report = check_a33_risk(ai_output, my_patent);
+    // ④ A33 合规性核验（UA3 v2：修改稿特征句逐字回原文，判据见
+    //    evidence_kernel::amendment_gate；旧 17 词表判据 check_a33_risk 已删除）
+    let a33_report = check_a33_verbatim(ai_output, my_patent);
     report.warnings.extend(a33_report.warnings);
 
     // ⑤ C1-C13 纯函数检测层
@@ -773,139 +774,13 @@ pub fn check_fabricated_data(ai_output: &str) -> FactCheckReport {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-//  校验④：A33 合规性风险
+//  校验④：A33 合规性核验（UA3 v2，判据在 `evidence_kernel::amendment_gate`）
 // ═══════════════════════════════════════════════════════════════════════
-
-/// 一组高风险术语——这些通常是 AI 编造的、在说明书中不太可能出现的专业术语
-///
-/// 当这些术语出现在"修改建议"中但不在说明书原文中时，强烈提示 A33 风险
-const HIGH_RISK_AMENDMENT_TERMS: &[&str] = &[
-    "以太网",
-    "Profinet",
-    "EtherCAT",
-    "Modbus",
-    "总线",
-    "确定性",
-    "实时以太网",
-    "工业总线",
-    "毫秒级",
-    "亚毫秒",
-    "微秒",
-    "OTA升级",
-    "云端协同",
-    "预测性维护",
-    "边缘计算",
-    "数字孪生",
-    "区块链",
-];
-
-/// 从 AI 输出中提取权利要求修改建议段落
-fn extract_amendment_section(ai_output: &str) -> String {
-    let mut result = String::new();
-
-    // 定位"修改方案""修改后的权利要求""建议修改"等段落
-    let markers = [
-        "修改后的权利要求",
-        "建议修改",
-        "修改方案",
-        "层级C",
-        "权利要求修改",
-        "修改为",
-    ];
-
-    for marker in &markers {
-        if let Some(pos) = ai_output.find(marker) {
-            // 截取标志词后 800 字符
-            let start = pos;
-            let remaining = &ai_output[start..];
-            let end = remaining
-                .char_indices()
-                .take(800)
-                .last()
-                .map(|(i, c)| i + c.len_utf8())
-                .unwrap_or(remaining.len());
-            result.push_str(&remaining[..end]);
-            result.push('\n');
-        }
-    }
-
-    result
-}
-
-/// A33 合规性风险检测
-///
-/// 检查 AI 建议的权利要求修改是否引入了说明书中不存在的术语
-pub fn check_a33_risk(ai_output: &str, my_patent: &str) -> FactCheckReport {
-    let mut report = FactCheckReport::default();
-
-    if my_patent.trim().is_empty() {
-        return report;
-    }
-
-    let amendment_text = extract_amendment_section(ai_output);
-    if amendment_text.is_empty() {
-        return report;
-    }
-
-    let mut risky_terms: Vec<String> = Vec::new();
-
-    for term in HIGH_RISK_AMENDMENT_TERMS {
-        // 术语出现在修改建议中
-        if amendment_text.contains(term) {
-            // 但不在说明书原文中
-            if !my_patent.contains(term) {
-                risky_terms.push(term.to_string());
-            }
-        }
-    }
-
-    // 额外检测：提取"修改为："后的引号内容，检查是否在原文中
-    if let Ok(re) = regex::Regex::new(r#"修改为[：:]\s*[「"]([^」"]+)[」"]"#) {
-        for cap in re.captures_iter(&amendment_text) {
-            if let Some(amended) = cap.get(1) {
-                let text = amended.as_str();
-                // 检查这段修改内容中的关键术语是否在原文中
-                // 提取 3 字以上的中文术语
-                for chunk in text.split(|c: char| !('\u{4e00}'..='\u{9fff}').contains(&c)) {
-                    let chars: Vec<char> = chunk.chars().collect();
-                    if chars.len() >= 3 && chars.len() <= 8 {
-                        let word: String = chars.iter().collect();
-                        if !my_patent.contains(&word)
-                            && !STOP_WORDS.contains(&word.as_str())
-                            && !risky_terms.contains(&word)
-                        {
-                            // 只报告看起来像专业术语的词（避免过多误报）
-                            let likely_term = HIGH_RISK_AMENDMENT_TERMS
-                                .iter()
-                                .any(|t| word.contains(t))
-                            // 包含高风险关键词的变体
-                            || word.contains("协议")
-                            || word.contains("算法")
-                            || word.contains("架构");
-                            if likely_term {
-                                risky_terms.push(word);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    if !risky_terms.is_empty() {
-        report.warnings.push(FactWarning {
-            category: "A33风险".to_string(),
-            description: format!(
-                "AI 修改建议中使用了术语「{}」，但本专利说明书原文中未出现。写入权利要求可能违反专利法第33条（修改超范围）。必须人工核实或删除。",
-                risky_terms.join("」「")
-            ),
-            severity: "高".to_string(),
-        });
-    }
-
-    report.score = compute_score(&report.warnings);
-    report
-}
+//
+// 旧实现 `check_a33_risk`（17 个硬编码高风险术语 + 「修改为：「…」」正则 + 3–8 字
+// 中文块包含匹配）已整体删除，不留 `#[allow(dead_code)]` 封存：它的判据不可证伪
+// （措辞不在词表里就放过），且唯一调用点是它自己的单测——保留即给弱判据留一条
+// 重新接线的路。生产入口只有 `check_a33_verbatim`（槽位④）。
 
 // ═══════════════════════════════════════════════════════════════════════
 //  测试
@@ -1013,36 +888,10 @@ mod tests {
         assert!(report.warnings.is_empty(), "有来源标注的数据不应触发警告");
     }
 
-    // ── A33 风险检测测试 ──
+    // ── UA3 v2: A33 特征句逐字核验（判据在 evidence_kernel::amendment_gate）──
+    // 旧 17 词表判据的用例随实现一并删除；五类豁免与负控的逐条用例在
+    // `src/evidence_kernel/amendment_gate.rs` 单测与 `tests/amendment_verbatim_gate.rs`。
 
-    #[test]
-    fn test_a33_catches_unsupported_terms() {
-        let ai_output = "层级C—权利要求修改方案：建议将权利要求1修改为：所述计算机控制器为工业PLC，通过工业实时以太网总线电性连接，以进行确定性闭环控制。";
-
-        let patent_text = "说明书：计算机控制器内设有PLC程序。电性连接。闭环控制。";
-
-        let report = check_a33_risk(ai_output, patent_text);
-        assert!(
-            report.warnings.iter().any(|w| w.category == "A33风险"),
-            "应检测到 A33 风险术语（以太网总线/确定性），实际：{:?}",
-            report.warnings
-        );
-    }
-
-    #[test]
-    fn test_a33_passes_supported_terms() {
-        let ai_output = "建议修改为：所述电动执行器为电缸，电缸的伸缩轴与阀芯连接。";
-        let patent_text = "说明书：电动执行器优选为电缸，电缸的伸缩轴与阀芯连接。";
-
-        let report = check_a33_risk(ai_output, patent_text);
-        assert!(report.warnings.is_empty(), "说明书已支持的术语不应触发警告");
-    }
-
-    #[test]
-    fn test_a33_empty_amendment_skipped() {
-        let report = check_a33_risk("这是一段普通分析，没有修改建议。", "说明书内容");
-        assert!(report.warnings.is_empty());
-    }
 
     // ── 综合校验测试 ──
 
@@ -1445,22 +1294,35 @@ mod tests {
 
 /// A33 单项检查结果
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)]
 pub struct A33CheckItem {
     pub claim_num: String,
     pub modified_text: String,
+    /// 零命中特征句原文（字段名沿用旧 UA3 便于快照/前端兼容，语义＝回原文零命中的措辞）
     pub introduced_terms: Vec<String>,
+    /// 命中出处（`本申请:para:N` / `本申请:claim:N`）或「零命中」
     pub original_spec_coverage: String,
-    pub risk_level: String, // "high" | "medium" | "none"
+    pub risk_level: String, // "high"（零命中）| "none"
     pub detail: String,
 }
 
-/// A33 结构化检查结果
+/// A33 结构化检查结果（UA3 v2：修改稿特征句逐字核验门）
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)]
 pub struct A33CheckResult {
-    pub status: String, // "pass" | "warning" | "risk"
+    /// "pass" | "risk"（warning 档在新判据下不存在：要么逐字命中，要么零命中）
+    pub status: String,
     pub items: Vec<A33CheckItem>,
+    /// 零命中特征句（含权项号与 critic 判据理由）
+    pub unsupported: Vec<crate::evidence_kernel::amendment_gate::UnsupportedFeature>,
+    /// 零命中特征句数＝ meta 事件的 amendment_unsupported
+    pub unsupported_count: usize,
+    /// 被替换为降级标注的「明确记载 / 来源于原说明书」断言条数
+    pub assertions_downgraded: usize,
+    /// 就地标注后的文本（答复书网关据此下发；分析流仅消费计数）
+    pub gated_text: String,
+    /// 提交度维度：零命中为 0（压死规则）
+    pub submission_ready: bool,
+    /// 门状态：no_amendment / skipped_no_original / verified / degraded
+    pub gate_status: String,
 }
 
 impl Default for A33CheckResult {
@@ -1468,128 +1330,108 @@ impl Default for A33CheckResult {
         Self {
             status: "pass".to_string(),
             items: Vec::new(),
+            unsupported: Vec::new(),
+            unsupported_count: 0,
+            assertions_downgraded: 0,
+            gated_text: String::new(),
+            submission_ready: true,
+            gate_status: "no_amendment".to_string(),
         }
     }
 }
 
-/// UA3: 对修改后权项 vs 原权利要求书 + 说明书做显式对照检查。
+/// UA3 v2: 修改后权利要求 vs 原始申请文本（说明书 + 权利要求书）特征句逐字核验。
 ///
-/// 从 AI 输出中提取修改后权利要求，逐项检查引入的术语是否在原说明书/权利要求书中出现。
-/// 返回结构化 `a33_check` 标记键（沿 §2.3 格式）。
-#[allow(dead_code)]
+/// 判据、归一化豁免（五类合法撰写变换）、检索范围（本申请权利要求 + 具体实施方式
+/// 段落三元组）与支撑判定（严格 `Relation::Support`，AnchorOnly 不算支撑）全部在
+/// `evidence_kernel::amendment_gate` 内，本函数只做适配——**不在这里另写包含匹配**。
 pub fn check_a33_structured(ai_output: &str, my_patent: &str) -> A33CheckResult {
-    let mut result = A33CheckResult::default();
+    use crate::evidence_kernel::amendment_gate;
 
-    if my_patent.trim().is_empty() {
-        return result;
-    }
+    let gate = amendment_gate::gate_amendment_text(ai_output, my_patent);
 
-    let amendment_text = extract_amendment_section(ai_output);
-    if amendment_text.is_empty() {
-        return result;
-    }
-
-    // 提取修改后权项：匹配 "权项X" 或 "权利要求X" 后的修改内容
-    let claim_re = regex::Regex::new(
-        r#"(?:权项|权利要求)\s*(\d+)[^。]*?(?:修改为|改为|修改后)[：:]\s*[「"]([^」"]+)[」"]"#,
-    )
-    .ok();
-
-    if let Some(re) = claim_re {
-        for cap in re.captures_iter(&amendment_text) {
-            let claim_num = cap
-                .get(1)
-                .map(|m| m.as_str().to_string())
-                .unwrap_or_default();
-            let modified_text = cap
-                .get(2)
-                .map(|m| m.as_str().to_string())
-                .unwrap_or_default();
-
-            // 提取修改文本中的中文术语（3-8字）
-            let mut introduced: Vec<String> = Vec::new();
-            for chunk in modified_text.split(|c: char| !('\u{4e00}'..='\u{9fff}').contains(&c)) {
-                let chars: Vec<char> = chunk.chars().collect();
-                if chars.len() >= 3 && chars.len() <= 8 {
-                    let word: String = chars.iter().collect();
-                    if !STOP_WORDS.contains(&word.as_str()) && !my_patent.contains(&word) {
-                        introduced.push(word);
-                    }
-                }
-            }
-
-            if introduced.is_empty() {
-                continue;
-            }
-
-            // 逐术语检查覆盖情况
-            let mut coverage_parts: Vec<String> = Vec::new();
-            let mut has_high = false;
-            let mut has_medium = false;
-
-            for term in &introduced {
-                if my_patent.contains(term) {
-                    coverage_parts.push(format!("{term}：说明书中有记载"));
-                } else {
-                    // 检查是否有近似表述（术语的部分在原文中出现）
-                    let partial = term
-                        .chars()
-                        .take(term.chars().count() - 1)
-                        .collect::<String>();
-                    if my_patent.contains(&partial) {
-                        coverage_parts.push(format!(
-                            "{term}：原文有近似表述「{partial}」，但表述形式有实质差异"
-                        ));
-                        has_medium = true;
-                    } else {
-                        coverage_parts.push(format!("{term}：未在原说明书与权利要求书中发现"));
-                        has_high = true;
-                    }
-                }
-            }
-
-            let risk_level = if has_high {
-                "high"
-            } else if has_medium {
-                "medium"
-            } else {
-                "none"
-            };
-
-            let detail = if has_high {
-                format!(
-                    "权项{claim_num}引入「{}」未见于原说明书及原权利要求书，可能违反专利法第33条",
-                    introduced.join("」「")
-                )
-            } else if has_medium {
-                format!("权项{claim_num}引入的术语表述形式与原文有实质差异，需人工核实是否超范围")
-            } else {
-                format!("权项{claim_num}修改未引入超范围术语")
-            };
-
-            result.items.push(A33CheckItem {
-                claim_num,
-                modified_text,
-                introduced_terms: introduced,
-                original_spec_coverage: coverage_parts.join(" / "),
-                risk_level: risk_level.to_string(),
-                detail,
-            });
+    // 按权项聚合零命中特征句（一个权项一条 item）
+    let mut by_claim: Vec<(String, Vec<String>)> = Vec::new();
+    for u in &gate.unsupported {
+        if let Some(slot) = by_claim.iter_mut().find(|(c, _)| *c == u.claim_no) {
+            slot.1.push(u.text.clone());
+        } else {
+            by_claim.push((u.claim_no.clone(), vec![u.text.clone()]));
         }
     }
 
-    // 计算 status
-    let has_high = result.items.iter().any(|i| i.risk_level == "high");
-    let has_medium = result.items.iter().any(|i| i.risk_level == "medium");
-    result.status = if has_high {
-        "risk".to_string()
-    } else if has_medium {
-        "warning".to_string()
-    } else {
-        "pass".to_string()
-    };
+    let items: Vec<A33CheckItem> = by_claim
+        .into_iter()
+        .map(|(claim_no, terms)| A33CheckItem {
+            detail: format!(
+                "修改后权利要求{} 有 {} 处特征句在原始申请文本（说明书 + 权利要求书）零命中，已就地降级标注【未证实】，违反专利法第33条风险",
+                claim_no,
+                terms.len()
+            ),
+            original_spec_coverage: "零命中（本申请权利要求 + 具体实施方式段落均无逐字/滑窗命中）"
+                .to_string(),
+            modified_text: terms.join("，"),
+            introduced_terms: terms,
+            claim_num: claim_no,
+            risk_level: "high".to_string(),
+        })
+        .collect();
 
-    result
+    let status = if gate.unsupported_count > 0 {
+        "risk"
+    } else {
+        "pass"
+    };
+    A33CheckResult {
+        status: status.to_string(),
+        items,
+        unsupported: gate.unsupported,
+        unsupported_count: gate.unsupported_count,
+        assertions_downgraded: gate.assertions_downgraded,
+        gated_text: gate.gated_text,
+        submission_ready: gate.submission_ready,
+        gate_status: gate.status.as_str().to_string(),
+    }
+}
+
+/// ④ A33 合规性核验的生产入口：把 UA3 v2 的门结果转成事实核查警告。
+///
+/// 零命中＝致命档（100 - 35 = 65，答复书网关阈值 65 因此拒绝放行未经核验的修改稿）；
+/// 断言降级单独记中档，保留可见性但不重复计分。
+pub fn check_a33_verbatim(ai_output: &str, my_patent: &str) -> FactCheckReport {
+    let mut report = FactCheckReport::default();
+    let result = check_a33_structured(ai_output, my_patent);
+
+    if result.unsupported_count > 0 {
+        let terms: Vec<String> = result
+            .unsupported
+            .iter()
+            .map(|u| format!("「{}」（权项{}）", u.text, u.claim_no))
+            .collect();
+        report.warnings.push(FactWarning {
+            category: "A33逐字核验".to_string(),
+            severity: "致命".to_string(),
+            description: format!(
+                "修改后权利要求有 {} 处特征句在原始申请文本（说明书 + 权利要求书）零命中：{}。已就地标注【未证实：该措辞在原始文本零命中】，提交度维度置零——提交前必须逐处核对专利法第33条。",
+                result.unsupported_count,
+                terms.join("；")
+            ),
+        });
+    }
+
+    if result.assertions_downgraded > 0 {
+        report.warnings.push(FactWarning {
+            category: "A33断言降级".to_string(),
+            severity: "中".to_string(),
+            description: format!(
+                "有 {} 处「明确记载 / 来源于原说明书」类断言在零命中情况下被替换为降级标注。",
+                result.assertions_downgraded
+            ),
+        });
+    }
+
+    report.score = compute_score(&report.warnings);
+    report
 }
 
 // ═══════════════════════════════════════════════════════════════════════
