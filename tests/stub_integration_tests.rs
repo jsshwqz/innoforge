@@ -19,16 +19,17 @@ use std::net::{TcpListener, TcpStream};
 
 // ── Fake AI stub (self-contained for this test file) ──
 
-fn start_stub(port: u16) -> std::thread::JoinHandle<()> {
-    std::thread::spawn(move || {
-        let listener = match TcpListener::bind(format!("127.0.0.1:{}", port)) {
-            Ok(l) => l,
-            Err(_) => return,
-        };
+fn start_stub() -> (u16, std::thread::JoinHandle<()>) {
+    // 先 bind（端口 0 由内核分配）再起线程：避免 free_port() 探测到 bind 之间被并行用例
+    // 抢走端口，导致 stub 线程 bind 失败静默退出、客户端 Connection refused（CI 实际发生过）。
+    let listener = TcpListener::bind("127.0.0.1:0").expect("stub must bind an ephemeral port");
+    let port = listener.local_addr().expect("stub local_addr").port();
+    let handle = std::thread::spawn(move || {
         for mut stream in listener.incoming().flatten() {
             handle_stub(&mut stream);
         }
-    })
+    });
+    (port, handle)
 }
 
 fn handle_stub(stream: &mut TcpStream) {
@@ -67,9 +68,7 @@ fn start_server(server_port: u16, ai_port: u16) -> common::TestServer {
 /// Verify the stub returns a valid chat completion response.
 #[test]
 fn stub_chat_completions_returns_valid_json() {
-    let port = free_port();
-    let _handle = start_stub(port);
-    std::thread::sleep(std::time::Duration::from_millis(200));
+    let (port, _handle) = start_stub();
 
     let client = reqwest::blocking::Client::new();
     let resp = client
@@ -94,9 +93,7 @@ fn stub_chat_completions_returns_valid_json() {
 /// Verify the stub returns a valid embeddings response.
 #[test]
 fn stub_embeddings_returns_valid_json() {
-    let port = free_port();
-    let _handle = start_stub(port);
-    std::thread::sleep(std::time::Duration::from_millis(200));
+    let (port, _handle) = start_stub();
 
     let client = reqwest::blocking::Client::new();
     let resp = client
@@ -121,9 +118,7 @@ fn stub_embeddings_returns_valid_json() {
 /// Verify the stub handles unknown endpoints gracefully.
 #[test]
 fn stub_unknown_endpoint_returns_ok() {
-    let port = free_port();
-    let _handle = start_stub(port);
-    std::thread::sleep(std::time::Duration::from_millis(200));
+    let (port, _handle) = start_stub();
 
     let resp = reqwest::blocking::get(format!("http://127.0.0.1:{}/unknown", port))
         .expect("stub must respond");
@@ -139,10 +134,7 @@ fn stub_unknown_endpoint_returns_ok() {
 #[test]
 fn server_serves_pages_with_stub_ai() {
     let server_port = free_port();
-    let ai_port = free_port();
-
-    let _stub = start_stub(ai_port);
-    std::thread::sleep(std::time::Duration::from_millis(200));
+    let (ai_port, _stub) = start_stub();
 
     let server = start_server(server_port, ai_port);
 
@@ -165,10 +157,7 @@ fn server_serves_pages_with_stub_ai() {
 #[test]
 fn version_endpoint_with_stub_ai() {
     let server_port = free_port();
-    let ai_port = free_port();
-
-    let _stub = start_stub(ai_port);
-    std::thread::sleep(std::time::Duration::from_millis(200));
+    let (ai_port, _stub) = start_stub();
 
     let server = start_server(server_port, ai_port);
 
@@ -190,10 +179,7 @@ fn version_endpoint_with_stub_ai() {
 #[test]
 fn malformed_ai_request_does_not_crash() {
     let server_port = free_port();
-    let ai_port = free_port();
-
-    let _stub = start_stub(ai_port);
-    std::thread::sleep(std::time::Duration::from_millis(200));
+    let (ai_port, _stub) = start_stub();
 
     let server = start_server(server_port, ai_port);
 
@@ -238,10 +224,7 @@ fn malformed_ai_request_does_not_crash() {
 #[test]
 fn empty_ai_request_does_not_crash() {
     let server_port = free_port();
-    let ai_port = free_port();
-
-    let _stub = start_stub(ai_port);
-    std::thread::sleep(std::time::Duration::from_millis(200));
+    let (ai_port, _stub) = start_stub();
 
     let server = start_server(server_port, ai_port);
 
@@ -278,9 +261,7 @@ fn empty_ai_request_does_not_crash() {
 /// Verify the stub handles multiple concurrent requests without panicking.
 #[test]
 fn stub_handles_concurrent_requests() {
-    let port = free_port();
-    let _handle = start_stub(port);
-    std::thread::sleep(std::time::Duration::from_millis(200));
+    let (port, _handle) = start_stub();
 
     let mut handles = Vec::new();
     for i in 0..5 {
@@ -311,10 +292,7 @@ fn stub_handles_concurrent_requests() {
 #[test]
 fn server_handles_concurrent_page_requests() {
     let server_port = free_port();
-    let ai_port = free_port();
-
-    let _stub = start_stub(ai_port);
-    std::thread::sleep(std::time::Duration::from_millis(200));
+    let (ai_port, _stub) = start_stub();
 
     let server = start_server(server_port, ai_port);
 
