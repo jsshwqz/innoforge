@@ -1375,3 +1375,13 @@
 - **修复 / Fix**: 默认模型改 `gemini-flash-latest`（由失败时的 `/v1beta/models` 自诊断列出）；失败评论附上游 `res.text` 前 300 字符；截断声明区分「无文件被整段跳过 / N 个文件未覆盖 / 清单解析失败」三态。
 - **预防 / Prevention**: ①任何"按文档猜的名字"都要先用最小请求实测，不能等它在生产 PR 上失败；②失败路径必须自带诊断信息（状态码 + 响应体片段 + 候选清单），否则下一轮仍然靠猜。
 - **提交 / Commit**: PR #135（分支 `fix/ai-review-model`）。编号 ㊴：㊲/㊳ 已被同日在途的 PR #134 占用，避让。
+
+## [2026-10-28] ㊵ 修改稿「原文零命中的措辞」被写成"来源于原说明书的明确记载"：词表判据＋未接线＋含糊句式三重漏放
+- **严重程度 / Severity**: HIGH（答复书把生造措辞写进修改后权利要求，还断言有明确记载——提交即构成专利法第33条修改超范围风险，且当事人看不出来）
+- **涉及文件**: `src/evidence_kernel/amendment_gate.rs`（新增门：特征句抽取/归一化豁免/原文本语料）、`src/evidence_kernel/verifier.rs`（`verify_quote_in_doc` 受控范围检索，复用同一匹配内核）、`src/ai/fact_check.rs`（槽位④改接 `check_a33_verbatim`，UA3 升级为 `check_a33_structured` 适配层）、`src/routes/ai.rs`（答复书网关流结束处挂门 + 首部横幅 + meta 计数）
+- **现象 / Symptom**: 回公开原始申请文本逐字核对发现，答复书「修改后的权利要求」里出现原始文本**零记载**的措辞（通用技术词复现为"隔离罩/差值/伸缩轴行程"），同段还写"上述修改均来源于原说明书具体实施方式的明确记载"。旧链路三条路径全部漏放：①这些词不在 `check_a33_risk` 的 17 个硬编码高风险术语里；②修改稿不是「修改为：「…」」句式，正则不匹配；③答复书网关只跑 C2/C12 needle 检查，**根本不调用任何 A33 校验**。
+- **根因 / Root cause**: 判据方向对的那道实现（UA3 `check_a33_structured`）被 `#[allow(dead_code)]` 封存、生产零调用，只有三条单测在跑——"判据正确但没接线"被当成了能力储备而不是缺陷；而真正接线的是词表+正则的弱判据，两道检查各自以为"另一道在管"。叠加一个机理问题：旧判据按 3–8 字中文块回原文，词边界是猜的，合法撰写变换（所述/其特征在于/附图标记/标点/数值范围）会被误判、真实生造短语又可能被切碎后逐块命中而漏放。
+- **修复 / Fix**: ①判据换成**特征句级**逐字核验：把修改后权利要求拆成特征句，归一化后对「原始申请文本（说明书 + 权利要求书）」做逐字/滑窗匹配；②归一化豁免五类**合法撰写变换**（指代词/权项连接语与语序/附图标记与括号/标点/数值范围与单位全半角），逐类一条正控；③复用内核语义而不另造：`evidence_kernel::model` 数据契约、`verifier::verify_quote_in_doc`（检索范围限定本申请权利要求 + 具体实施方式段落三元组）、`critic` 消费的严格 `Relation::Support`（AnchorOnly 仅锚点不算支撑）；④阻断形态=**降级标注**不是硬阻断：零命中特征句保留原文、就地标【未证实：该措辞在原始文本零命中】；"明确记载/来源于原说明书"类断言整句替换为降级块；meta 事件带 `amendment_unsupported=N`，N>0 时正文首部加阻断横幅（复用 M2-C 横幅形态）并把提交度维度压死（④的警告为致命档，评分 65，答复书网关阈值不放行）；⑤与 C2/C12 范畴正交，同时触发各记各的，不去重不互相抑制。
+- **负控 / Negative control**: 先红后绿（真实执行输出见 PR 正文红→绿表）。接线前（`src/ai/fact_check.rs` 槽位④ 与 `src/routes/ai.rs` 退回基线）：`tests/amendment_verbatim_gate.rs::zero_hit_amendment_must_be_caught_by_analysis_gate` **FAILED**（`check_oa_analysis` 的 warnings 里没有任何 `A33逐字核验`），`tests/m2_amendment_verbatim_letter.rs` 两条 **FAILED**（答复书正文只有模型原文、无就地标注；meta 无 `amendment_unsupported`）；接线后全绿。正控六条（五类豁免 + 从属权项并入独立权项）在 `amendment_gate` 单测中修复前后均绿，证明不误伤；另有一条正交性用例锁"A33 与 C12 同时触发各记各的并罚"。
+- **预防 / Prevention**: ①"判据正确但未接线"必须作为缺陷登记——`#[allow(dead_code)]` 是漏放许可证，不是能力储备；任何检查器合入前要能指出它的**生产调用点**（file:line）。②零命中必须落到**用户可见文本**（就地标注 + 首部横幅），只进日志/只进计数等于没拦。③词表型检查不能充当 A33 的唯一防线：判据必须是"回原文可证伪"的匹配，而不是"像不像专业术语"的启发式。④收尾时旧实现（`check_a33_risk` 的 17 词表、`HIGH_RISK_AMENDMENT_TERMS`、`extract_amendment_section`）**整体删除**而不是加 `#[allow(dead_code)]` 留档：留着就还有被重新接线的可能，`clippy -D warnings` 的 `dead_code` 红正是该删的信号。
+- **提交 / Commit**: 见 PR（分支 `feat/amendment-verbatim-gate`）。编号说明：本分支基线 `8f89f4f` 的文件最大号为 ㉟，合入目标 `origin/main` 已用到 ㊴，故本条取 ㊵。

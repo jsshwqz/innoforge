@@ -923,3 +923,11 @@
 
 ## 2026-10-28 · AI 审查工作流首跑修复（PR #135）
 - **修复**：`.github/workflows/ai-review.yml` 默认模型改 `gemini-flash-latest`；失败评论附上游响应片段与 `/v1beta/models` 可用模型列表（自诊断）；截断声明区分零文件/未覆盖/解析失败三态；每个候选模型两次尝试（仅对 429/503/异常）并降级到 `gemini-2.5-flash`；审查步骤 80s 总预算熔断；评论按 `<!-- ai-review -->` 唯一锚点 upsert；首行标注生效模型与是否降级。复盘 errors ㊴。
+
+## 2026-10-28 · M2 第 2 步：修改稿特征逐字核验门（UA3 v2，分支 `feat/amendment-verbatim-gate`，基线 `8f89f4f`）
+- **交付**：新增 `src/evidence_kernel/amendment_gate.rs`（特征句抽取 / 五类合法撰写变换归一化豁免 / 本申请语料 = 权利要求 + 具体实施方式段落三元组 / 就地降级标注 / 断言降级 / 阻断横幅）；`verifier.rs` 增 `CorpusIndex::verify_quote_in_doc`（受控范围检索，复用同一匹配内核与 `critic` 严格 `Support` 判定，未另造包含匹配）；`fact_check.rs` 槽位④ 由 `check_a33_risk`（17 词表）换为 `check_a33_verbatim`（UA3 `check_a33_structured` 升级为适配层，去掉 dead_code）；`routes/ai.rs` 答复书网关流结束处挂门：整篇产出后门检 → 正文首部横幅 + 就地标注 + `meta.amendment_unsupported=N` + `submission_ready=false` 下发。
+- **删旧**：旧弱判据 `check_a33_risk` + `HIGH_RISK_AMENDMENT_TERMS` + `extract_amendment_section` 及其三条单测整体删除（不留 `#[allow(dead_code)]`），`clippy -D warnings` 的 `dead_code` 三项红即其唯一调用点只在自测的证据。
+- **负控（先红后绿）**：接线前 `tests/amendment_verbatim_gate.rs`（分析流槽位④）与 `tests/m2_amendment_verbatim_letter.rs`（答复书 SSE）三条断言 FAILED（分析流无 `A33逐字核验`、正文无就地标注、meta 无 `amendment_unsupported`），接线后全绿；正控六条（指代词/连接语与语序/附图标记与括号/标点/数值范围与单位全半角/从属权项并入独立权项）修复前后均绿。
+- **门禁**：`cargo fmt --check`、`cargo clippy --all-targets -- -D warnings`、全量 `cargo test -j 2`、`no_unsafe_byte_slice` 四项 rc 见 PR 正文表。
+- **如实声明**：同义替换 / 上位概括 / 跨实施例拼凑这道门拦不住，两层防线各拦什么、各漏什么登记在 `docs/design/evidence-kernel-v2.md` §5.1（FMEA 负控区）。与 C2/C12 范畴正交，同时触发并罚不去重（`tests/amendment_verbatim_gate.rs::a33_gate_and_c2_c12_are_orthogonal_both_penalized`）。
+- **编号**：本分支基线 `8f89f4f` 的 `docs/errors.md` 最大号为 ㉟，但 `origin/main` 已用到 ㊴（㊱–㊴ 均为 main 条目），合入后取 ㊵，避免重号。

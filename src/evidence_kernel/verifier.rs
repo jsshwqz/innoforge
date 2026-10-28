@@ -55,6 +55,91 @@ impl CorpusIndex {
             .flat_map(|m| m.values().map(|s| s.section_id.clone()))
             .collect()
     }
+
+    /// 在 `doc_id` 的指定 section 种类内检索引文，返回最佳命中（判定内核与
+    /// [`verify_ref`] 完全一致：归一化逐字优先 → 滑窗近似兜底）。
+    ///
+    /// 用途：调用方手里没有 AI 写出的锚点，只有一段待核验文本（如修改稿特征句），
+    /// 需要由代码遍历受控范围内的真实段落来「找原文」，而不是编造锚点或另写包含匹配。
+    /// 两阶段：① 全部候选中找归一化逐字命中（O(段数)）；② 未命中时只对整段 3-gram
+    /// 相似度最高的候选做滑窗近似——滑窗是 O(段长²) 量级，不能对每个候选都跑。
+    pub fn verify_quote_in_doc(
+        &self,
+        quote: &str,
+        doc_id: &str,
+        kinds: &[LocatorKind],
+    ) -> Option<ScopedHit> {
+        let mut kinds_sorted: Vec<LocatorKind> = kinds.to_vec();
+        kinds_sorted.sort();
+        kinds_sorted.dedup();
+
+        let mut candidates: Vec<(Anchor, &SourceSection)> = Vec::new();
+        for kind in &kinds_sorted {
+            let Some(by_number) = self.map.get(&(doc_id.to_string(), *kind)) else {
+                continue;
+            };
+            let mut numbers: Vec<u32> = by_number.keys().copied().collect();
+            numbers.sort_unstable();
+            for n in numbers {
+                if let Some(sec) = by_number.get(&n) {
+                    candidates.push((
+                        Anchor {
+                            doc_id: doc_id.to_string(),
+                            kind: *kind,
+                            number: n,
+                        },
+                        sec,
+                    ));
+                }
+            }
+        }
+        if candidates.is_empty() {
+            return None;
+        }
+
+        // ① 逐字层：第一个命中即返回（编号升序，结果确定）
+        for (anchor, section) in &candidates {
+            if let VerifyStatus::VerifiedExact { .. } = match_quote_in_section(quote, section) {
+                return Some(ScopedHit {
+                    anchor: anchor.clone(),
+                    status: VerifyStatus::VerifiedExact {
+                        section_id: section.section_id.clone(),
+                    },
+                });
+            }
+        }
+
+        // ② 近似层：整段 3-gram Jaccard 先排序，只对最像的一段跑滑窗
+        let loose_quote = normalize_loose(&normalize(quote));
+        if loose_quote.is_empty() {
+            return None;
+        }
+        let mut best_idx: Option<(usize, f64)> = None;
+        for (i, (_, section)) in candidates.iter().enumerate() {
+            let loose_text = normalize_loose(&normalize(&section.text));
+            let whole = trigram_jaccard(&loose_quote, &loose_text);
+            if best_idx.map(|(_, s)| whole > s).unwrap_or(true) {
+                best_idx = Some((i, whole));
+            }
+        }
+        let (i, _) = best_idx?;
+        let (anchor, section) = &candidates[i];
+        match match_quote_in_section(quote, section) {
+            VerifyStatus::VerifiedApprox { score, .. } => Some(ScopedHit {
+                anchor: anchor.clone(),
+                status: VerifyStatus::VerifiedApprox {
+                    section_id: section.section_id.clone(),
+                    score,
+                },
+            }),
+            VerifyStatus::QuoteMismatch { best_score } => Some(ScopedHit {
+                anchor: anchor.clone(),
+                status: VerifyStatus::QuoteMismatch { best_score },
+            }),
+            // 逐字层已扫过全部候选，这里不会出现 Exact/AnchorOnly
+            _ => None,
+        }
+    }
 }
 
 /// 核验单条证据引用。
@@ -65,12 +150,20 @@ pub fn verify_ref(ev: &EvidenceRef, index: &CorpusIndex) -> VerifyStatus {
     let Some(section) = index.resolve(anchor) else {
         return VerifyStatus::AnchorNotFound;
     };
-    if ev.quote.trim().is_empty() {
+    match_quote_in_section(&ev.quote, section)
+}
+
+/// 引文 × 单段的核验内核（逐字归一化 → 去标点宽松逐字 → 滑窗近似）。
+///
+/// `verify_ref`（AI 写锚点）与 [`CorpusIndex::verify_quote_in_doc`]（代码遍历语料）
+/// 共用本函数——判据只有一份，不存在"第二套包含匹配"。
+fn match_quote_in_section(quote: &str, section: &SourceSection) -> VerifyStatus {
+    if quote.trim().is_empty() {
         return VerifyStatus::AnchorOnly {
             section_id: section.section_id.clone(),
         };
     }
-    let norm_quote = normalize(&ev.quote);
+    let norm_quote = normalize(quote);
     let norm_text = normalize(&section.text);
     if norm_text.contains(&norm_quote) {
         return VerifyStatus::VerifiedExact {
@@ -95,6 +188,13 @@ pub fn verify_ref(ev: &EvidenceRef, index: &CorpusIndex) -> VerifyStatus {
         };
     }
     VerifyStatus::QuoteMismatch { best_score: score }
+}
+
+/// 代码遍历语料得到的一处命中（锚点由索引构造，不来自 AI 文本）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScopedHit {
+    pub anchor: Anchor,
+    pub status: VerifyStatus,
 }
 
 /// 宽松归一化：在 normalize 基础上去掉全部标点（只留字母/数字/CJK）。
