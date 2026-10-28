@@ -7,11 +7,28 @@
 //!    within the timeout — not hanging indefinitely. This is the positive assertion: the
 //!    degraded path is exercised and completes in bounded time.
 
+use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
+
+/// Every test below mutates the process-global `INNOFORGE_UPSTREAM_TIMEOUT_SECS`
+/// env var, and cargo runs tests in parallel threads within this binary. Without
+/// serialization, a sibling test's `remove_var`/`set_var` can land between
+/// `set_var("2")` and `build_upstream_client()` in
+/// `upstream_client_times_out_on_hanging_server`, so the client is built with
+/// the default 30s timeout and the bounded-time assertion fails with
+/// `elapsed = 30.00xs` (observed on CI). All env-touching tests must hold this
+/// lock while reading/mutating the env var.
+static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+fn lock_env() -> MutexGuard<'static, ()> {
+    // Recover from poisoning: a panicked sibling must not cascade failures.
+    ENV_LOCK.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 /// Verify the default timeout is 30s when env var is unset.
 #[test]
 fn upstream_timeout_default_is_30s() {
+    let _guard = lock_env();
     // Save and restore env var
     let saved = std::env::var("INNOFORGE_UPSTREAM_TIMEOUT_SECS").ok();
     std::env::remove_var("INNOFORGE_UPSTREAM_TIMEOUT_SECS");
@@ -30,6 +47,7 @@ fn upstream_timeout_default_is_30s() {
 /// Verify the timeout is configurable via environment variable.
 #[test]
 fn upstream_timeout_configurable_via_env() {
+    let _guard = lock_env();
     let saved = std::env::var("INNOFORGE_UPSTREAM_TIMEOUT_SECS").ok();
     std::env::set_var("INNOFORGE_UPSTREAM_TIMEOUT_SECS", "5");
 
@@ -49,6 +67,7 @@ fn upstream_timeout_configurable_via_env() {
 /// Verify that invalid env var values fall back to default.
 #[test]
 fn upstream_timeout_invalid_env_falls_back_to_default() {
+    let _guard = lock_env();
     let saved = std::env::var("INNOFORGE_UPSTREAM_TIMEOUT_SECS").ok();
     std::env::set_var("INNOFORGE_UPSTREAM_TIMEOUT_SECS", "not-a-number");
 
@@ -65,6 +84,7 @@ fn upstream_timeout_invalid_env_falls_back_to_default() {
 /// Verify that zero env var value falls back to default.
 #[test]
 fn upstream_timeout_zero_falls_back_to_default() {
+    let _guard = lock_env();
     let saved = std::env::var("INNOFORGE_UPSTREAM_TIMEOUT_SECS").ok();
     std::env::set_var("INNOFORGE_UPSTREAM_TIMEOUT_SECS", "0");
 
@@ -108,11 +128,16 @@ async fn upstream_client_times_out_on_hanging_server() {
         }
     });
 
-    // Set a short timeout for the test (2 seconds).
-    let saved = std::env::var("INNOFORGE_UPSTREAM_TIMEOUT_SECS").ok();
-    std::env::set_var("INNOFORGE_UPSTREAM_TIMEOUT_SECS", "2");
-
-    let client = innoforge::common::build_upstream_client();
+    // Set a short timeout for the test (2 seconds). Hold ENV_LOCK across
+    // save/set/build so no sibling test can mutate the env var in between
+    // (see ENV_LOCK docs — that race made the client use the 30s default).
+    let saved;
+    let client = {
+        let _guard = lock_env();
+        saved = std::env::var("INNOFORGE_UPSTREAM_TIMEOUT_SECS").ok();
+        std::env::set_var("INNOFORGE_UPSTREAM_TIMEOUT_SECS", "2");
+        innoforge::common::build_upstream_client()
+    };
     let start = Instant::now();
 
     let result = client.get(&server_url).send().await;
@@ -120,10 +145,13 @@ async fn upstream_client_times_out_on_hanging_server() {
     let elapsed = start.elapsed();
 
     // Restore env var
-    if let Some(v) = saved {
-        std::env::set_var("INNOFORGE_UPSTREAM_TIMEOUT_SECS", v);
-    } else {
-        std::env::remove_var("INNOFORGE_UPSTREAM_TIMEOUT_SECS");
+    {
+        let _guard = lock_env();
+        if let Some(v) = saved {
+            std::env::set_var("INNOFORGE_UPSTREAM_TIMEOUT_SECS", v);
+        } else {
+            std::env::remove_var("INNOFORGE_UPSTREAM_TIMEOUT_SECS");
+        }
     }
 
     // Positive assertion: the request must fail (timeout error), not hang forever.

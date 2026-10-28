@@ -212,6 +212,182 @@ pub struct DependencyGraph {
     pub edges: Vec<(String, Vec<String>)>,
 }
 
+/// 用请求 / 分析 / 材料中的显式字段补齐空白 CaseMeta。
+/// 只填空，不覆盖已有值；识别不到就保持为空，不猜造。
+pub fn fill_case_meta(
+    meta: &mut CaseMeta,
+    request_json: Option<&serde_json::Value>,
+    analysis_text: &str,
+    oa_text: &str,
+    my_patent_text: &str,
+) {
+    if let Some(rj) = request_json {
+        if let Some(cm) = rj.get("case_meta").and_then(|v| v.as_object()) {
+            fill_meta_from_object(meta, cm);
+        }
+        if let Some(mp) = rj.get("my_patent") {
+            if let Some(obj) = mp.as_object() {
+                fill_meta_from_object(meta, obj);
+            } else if let Some(s) = mp.as_str() {
+                fill_meta_from_labels(meta, s);
+            }
+        }
+        if meta.application_number.is_empty() {
+            if let Some(id) = rj.get("my_patent_id").and_then(|v| v.as_str()) {
+                if !id.trim().is_empty() {
+                    meta.application_number = id.trim().to_string();
+                }
+            }
+        }
+    }
+    fill_meta_from_labels(meta, analysis_text);
+    fill_meta_from_labels(meta, oa_text);
+    fill_meta_from_labels(meta, my_patent_text);
+    if meta.application_number.is_empty() {
+        if let Some(n) = extract_patent_number(my_patent_text) {
+            meta.application_number = n;
+        }
+    }
+}
+
+fn fill_meta_from_object(meta: &mut CaseMeta, o: &serde_json::Map<String, serde_json::Value>) {
+    let get = |k: &str| o.get(k).and_then(|v| v.as_str()).unwrap_or("").trim();
+    if meta.application_number.is_empty() {
+        for k in ["application_number", "patent_number", "app_no"] {
+            let v = get(k);
+            if !v.is_empty() {
+                meta.application_number = v.to_string();
+                break;
+            }
+        }
+    }
+    if meta.invention_title.is_empty() {
+        for k in ["invention_title", "title"] {
+            let v = get(k);
+            if !v.is_empty() && !is_generic_title(v) && !is_placeholder_value(v) {
+                meta.invention_title = v.to_string();
+                break;
+            }
+        }
+    }
+    if meta.applicant.is_empty() {
+        let v = get("applicant");
+        if !v.is_empty() && !is_placeholder_value(v) && !is_section_like(v) {
+            meta.applicant = v.to_string();
+        }
+    }
+}
+
+fn fill_meta_from_labels(meta: &mut CaseMeta, text: &str) {
+    if text.trim().is_empty() {
+        return;
+    }
+    let head: String = text.chars().take(6000).collect();
+    if meta.application_number.is_empty() {
+        if let Some(v) = label_value(&head, &["申请号", "申请案号"]) {
+            meta.application_number = v;
+        }
+    }
+    if meta.invention_title.is_empty() {
+        if let Some(v) = label_value(&head, &["发明名称", "发明创造名称"]) {
+            meta.invention_title = v;
+        }
+    }
+    if meta.applicant.is_empty() {
+        if let Some(v) = label_value(&head, &["申请人", "专利权人"]) {
+            if !is_section_like(&v) {
+                meta.applicant = v;
+            }
+        }
+    }
+}
+
+fn label_value(text: &str, labels: &[&str]) -> Option<String> {
+    for line in text.lines().take(120) {
+        let head = line.trim_start_matches(|c: char| {
+            c == '|' || c == '*' || c == '#' || c == '-' || c.is_whitespace()
+        });
+        for label in labels {
+            if !head.starts_with(label) {
+                continue;
+            }
+            let rest = &head[label.len()..];
+            let first = rest.chars().next();
+            if !matches!(
+                first,
+                Some(':') | Some('：') | Some('*') | Some('|') | Some(' ') | Some('\t')
+            ) {
+                continue;
+            }
+            let rest = rest.trim_start_matches(|c: char| {
+                c == ':' || c == '：' || c == '*' || c == '|' || c == '｜' || c.is_whitespace()
+            });
+            let value = rest
+                .split(['|', '｜', '\n'])
+                .next()
+                .unwrap_or("")
+                .trim()
+                .trim_matches(|c: char| c == '*' || c == ' ');
+            if !value.is_empty() && !is_placeholder_value(value) && value.chars().count() <= 80 {
+                return Some(value.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn is_generic_title(title: &str) -> bool {
+    matches!(
+        title.trim(),
+        "本案" | "本专利" | "我的专利" | "专利" | "未命名"
+    )
+}
+
+fn is_section_like(value: &str) -> bool {
+    [
+        "要点",
+        "概述",
+        "分析",
+        "论证",
+        "策略",
+        "意见陈述",
+        "结论",
+        "请求",
+        "目录",
+        "摘要",
+        "正文",
+        "说明",
+        "核对",
+        "回应",
+    ]
+    .iter()
+    .any(|k| value.contains(k))
+}
+
+fn is_placeholder_value(value: &str) -> bool {
+    let v = value.trim();
+    matches!(
+        v,
+        "核对原文"
+            | "待核对"
+            | "待补充"
+            | "未提供"
+            | "不详"
+            | "未知"
+            | "无"
+            | "-"
+            | "—"
+            | "N/A"
+            | "n/a"
+    ) || v.starts_with("待")
+        || v.starts_with("核对")
+}
+
+fn extract_patent_number(text: &str) -> Option<String> {
+    let re = regex::Regex::new(r"(?:CN|US|EP|JP|KR|WO)\s*\d{7,12}(?:\.\d)?[A-Z]?").ok()?;
+    re.find(text).map(|m| m.as_str().replace(' ', ""))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -271,5 +447,118 @@ mod tests {
         let input: CaseInput = serde_json::from_str(json).unwrap();
         assert_eq!(input.legacy_analysis.as_deref(), Some("旧分析结果"));
         assert!(input.spec_effect_statements.is_empty());
+    }
+
+    fn empty_meta() -> CaseMeta {
+        CaseMeta {
+            application_number: String::new(),
+            applicant: String::new(),
+            invention_title: String::new(),
+            oa_date: None,
+            oa_type: "reject_review".into(),
+            claim_basis_date: None,
+            claim_basis_text: None,
+        }
+    }
+
+    #[test]
+    fn fill_case_meta_uses_request_then_labels_without_fabricating() {
+        let mut meta = empty_meta();
+        let req = serde_json::json!({
+            "my_patent": {"title": "本案", "content": ""},
+            "my_patent_id": "CN990001001A"
+        });
+        fill_case_meta(
+            &mut meta,
+            Some(&req),
+            "**申请号**:9999999999999\n**发明名称**:一种示例装置\n**申请人**:示例申请人",
+            "",
+            "",
+        );
+        assert_eq!(meta.application_number, "CN990001001A");
+        assert_eq!(meta.invention_title, "一种示例装置");
+        assert_eq!(meta.applicant, "示例申请人");
+    }
+
+    #[test]
+    fn fill_case_meta_leaves_unknown_fields_empty() {
+        let mut meta = empty_meta();
+        fill_case_meta(&mut meta, None, "没有案号字段", "", "");
+        assert!(meta.application_number.is_empty());
+        assert!(meta.invention_title.is_empty());
+        assert!(meta.applicant.is_empty());
+    }
+
+    #[test]
+    fn fill_case_meta_does_not_override_existing_values() {
+        let mut meta = empty_meta();
+        meta.application_number = "EXISTING".into();
+        meta.applicant = "原申请人".into();
+        meta.invention_title = "原名称".into();
+        let req = serde_json::json!({
+            "case_meta": {
+                "application_number": "NEW",
+                "invention_title": "新名称",
+                "applicant": "新申请人"
+            }
+        });
+        fill_case_meta(
+            &mut meta,
+            Some(&req),
+            "申请号：X\n发明名称：Y\n申请人：Z",
+            "",
+            "",
+        );
+        assert_eq!(meta.application_number, "EXISTING");
+        assert_eq!(meta.invention_title, "原名称");
+        assert_eq!(meta.applicant, "原申请人");
+    }
+
+    #[test]
+    fn fill_case_meta_reads_markdown_table_row() {
+        let mut meta = empty_meta();
+        fill_case_meta(
+            &mut meta,
+            None,
+            "| **申请号** | 9999999999999 |\n| **发明名称** | 一种示例装置 |",
+            "",
+            "",
+        );
+        assert_eq!(meta.application_number, "9999999999999");
+        assert_eq!(meta.invention_title, "一种示例装置");
+    }
+
+    #[test]
+    fn fill_case_meta_skips_placeholder_values() {
+        let mut meta = empty_meta();
+        fill_case_meta(
+            &mut meta,
+            None,
+            "**申请号**:999999999999.9\n**发明名称**:一种示例装置\n**申请人**:核对原文",
+            "",
+            "",
+        );
+        assert_eq!(meta.application_number, "999999999999.9");
+        assert_eq!(meta.invention_title, "一种示例装置");
+        assert!(
+            meta.applicant.is_empty(),
+            "placeholder applicant must be skipped"
+        );
+    }
+
+    #[test]
+    fn fill_case_meta_rejects_section_like_applicant() {
+        let mut meta = empty_meta();
+        fill_case_meta(
+            &mut meta,
+            None,
+            "**申请人**:意见陈述的回应要点\n申请人认为该特征应当整体考虑。",
+            "",
+            "",
+        );
+        assert!(
+            meta.applicant.is_empty(),
+            "section-like applicant must be skipped"
+        );
     }
 }
