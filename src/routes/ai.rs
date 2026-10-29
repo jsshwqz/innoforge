@@ -2065,13 +2065,12 @@ pub async fn api_ai_oa_generate_response_letter(
         if gate.unsupported_count > 0 {
             let banner = gate.banner();
             body.push_str(&banner);
-        } else {
-            // 门没做逐字核验（未定位到修改稿段落 / 缺原始申请文本）时必须显式说明，
-            // 否则"没有横幅"会被读成"已核验通过"——假绿。
-            let note = gate.skip_note();
-            if !note.is_empty() {
-                body.push_str(&note);
-            }
+        }
+        // 门未核验（未定位到修改稿 / 缺原文）或**语料缺权项**时都要挂说明——
+        // 后者即使有零命中也必须挂，否则读者会把"只比对了说明书"当成"已核验修改稿"（#140）。
+        let note = gate.skip_note();
+        if !note.is_empty() {
+            body.push_str(&note);
         }
         body.push_str(&gate.gated_text);
         for frame in split_sse_frames(&body, 240) {
@@ -2079,11 +2078,12 @@ pub async fn api_ai_oa_generate_response_letter(
         }
         // 结构化维度：amendment_unsupported=N 与提交度维度（N>0 即 False）
         yield Ok(Event::default().event("meta").data(format!(
-            "{{\"source\":\"{analysis_source}\",\"amendment_unsupported\":{},\"amendment_assertions_downgraded\":{},\"amendment_claims\":{},\"amendment_features\":{},\"amendment_gate\":\"{}\",\"submission_ready\":{}}}",
+            "{{\"source\":\"{analysis_source}\",\"amendment_unsupported\":{},\"amendment_assertions_downgraded\":{},\"amendment_claims\":{},\"amendment_features\":{},\"corpus_claims\":{},\"amendment_gate\":\"{}\",\"submission_ready\":{}}}",
             gate.unsupported_count,
             gate.assertions_downgraded,
             gate.amended_claim_count,
             gate.checked_feature_count,
+            gate.corpus_claims,
             gate.status.as_str(),
             gate.submission_ready
         )));
