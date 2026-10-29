@@ -1487,3 +1487,11 @@
 - **修复 / Fix**: `is_heading_fragment` 除原有判据外，按**固定结构词**再排除两类：模板小节名（`关于权利要求的修改` / `关于权利要求的修改（如有）` / `权利要求的修改`）；`修改后的权利要求` + 至多 4 位数字且总长 ≤ 12 字的引出标签。判据从严——真实特征句后面一定还有技术内容，不会长成这个样子。
 - **不变量 / Negative control**: 修误报不能把门关掉。新单测同时断言"标题不标"与"真零命中的特征句仍被标注"，后者用 `机架侧面还固定有气动夹爪组件与压力传感器`（原文没有、无标点、长度过阈）。`amendment_gate` 全组 30 例通过。
 - **预防 / Prevention**: ①"标题/标签"与"内容"是两类文本，判据要按**模板里实际存在的形态**枚举（含不带冒号的那种），不能只认最规整的一种；②任何"就地标注"的产物，都要有人在真实产物上看一眼——这条缺陷在单测里看不出来，是在 v8 的成品里肉眼发现的；③统计口径里的"处数"一旦混入结构性噪声，读者对整张表的信任会打折，宁可把判据写细。
+## [2026-10-29] ㊿ 跨进程迁移竞态：幂等检查在事务外等于没有幂等（#60）
+- **严重程度 / Severity**: HIGH（并发启动同一库 ⇒ 后到进程 `duplicate column` 崩溃退出；也是 #30「部分端点无响应」的首要候选解释）
+- **涉及文件**: `src/db/migrations.rs`（`run_migration_tx` / 各迁移分支的 `column_exists`）
+- **现象 / Symptom**: PR #53 纯文档提交 CI `Tests` 假红（`duplicate column name: technical_problem` → server 15s 不 listen → 超时）；生产双开实例同理。
+- **根因 / Root cause**: 幂等保护「先查后改」——`column_exists`（PRAGMA table_info）在迁移事务**外**执行，检查与 ALTER 之间没有跨进程原子性：两个进程同时看到「列缺失」，各自把 ALTER 排进批次，先到成功、后到 duplicate。单进程事务原子性（#13）解决不了跨进程窗口。
+- **修复 / Fix**: `run_migration_tx` 改 `BEGIN IMMEDIATE`（先取库写锁）+ 逐语句执行 + `duplicate column name` 幂等容忍（败者重放锁外陈旧语句时逐条跳过）+ 版本不回退（目标版本高于库内才覆写）。确定性负控：以「胜者先完成同一 ALTER、败者重放同批语句」建模竞态败者，修复前 `duplicate column name: technical_problem` FAILED（与 issue 现象逐字一致），修复后 ok；真并发冒烟两线程同库完整迁移双 Ok 收敛。
+- **预防 / Prevention**: ①「先查后改」型幂等保护跨进程一律不算数——检查必须与变更同锁（BEGIN IMMEDIATE）或把变更写成可容忍重复的形态；②测试里确定性建模竞态败者（另一连接先完成同一变更）比真并发压测更可证伪且不 flaky；③rusqlite `Connection::open` 默认 busy_timeout=0，涉及锁竞争的路径必须显式设等待（生产已由 `Database::init` 的 `PRAGMA busy_timeout=5000` 覆盖）。
+- **提交 / Commit**: 见 #60 修复 PR（分支 fix/migration-race-guard）。
