@@ -7,9 +7,11 @@
 //! "这份能不能直接交"，只能靠人逐行看。
 //!
 //! # 本层的分工
-//! 1. [`LetterHeader::extract`]：**只用通用标签与形状**（`发文序号`、`发文日`、
-//!    `申请号`/`专利号`、`发明名称`、`申请人`，以及 CN/US/EP 号形状与 `YYYY年M月D日`）
-//!    从输入文本里取值。绝不认具体案件、绝不内置任何案号/人名/特征词。
+//! 1. [`LetterHeader::extract`]：**只用通用标签与形状**——标签组
+//!    `专利申请号/申请案号/专利号/申请号`、`发明创造名称/实用新型名称/发明名称`、
+//!    `专利权人/申请人`、`发文序号`、`发文日期/发文日`；形状只用于
+//!    「发文序号 = 标记后 ≥8 位连续数字」与「发文日 = 标记后 40 字内的 `YYYY年M月D日`」。
+//!    绝不认具体案件、绝不内置任何案号/人名/特征词，也不用"正文里第一个日期"顶替发文日。
 //! 2. [`LetterHeader::backfill`]：对**已成文**的答复书做确定性替换。两条纪律：
 //!    - 抽不到就**不编造**，统一写成 [`UNRESOLVED`]（`【未提取｜需人工补录】`），
 //!      并把字段名计数返回；
@@ -84,7 +86,53 @@ impl LetterHeader {
         for text in [office_action, my_patent_text] {
             fill_from_labels(&mut header, text);
         }
+        header.apply_shape_cuts();
         header
+    }
+
+    /// 表头常常是**连排的一行**（`申请号：X 发文序号：{Y}`、`申请人：Z 地址：…`），
+    /// `label_value` 取到行尾，会把隔壁字段连同它的标签一起吞进来（真实通知书实测：
+    /// 抽到的"申请号"长 37 字符，尾部是下一个字段的标签与值）。
+    ///
+    /// 这里按形状收口，切不出干净值就整条置 `None`——**宁可报"抽不到"，
+    /// 也不把脏值写进信头或提示词**：脏值会让读者以为系统已经核对过。
+    fn apply_shape_cuts(&mut self) {
+        for value in [
+            &mut self.invention_title,
+            &mut self.applicant,
+            &mut self.dispatch_date,
+        ] {
+            *value = value
+                .as_deref()
+                .map(cut_at_inner_label)
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string());
+        }
+        // 申请号/发文序号有明确形状，优先取形状内的第一段
+        if let Some(raw) = self.application_number.as_deref() {
+            let cut = cut_at_inner_label(raw);
+            self.application_number = first_app_shape(cut)
+                .or_else(|| {
+                    if cut.is_empty() {
+                        None
+                    } else {
+                        Some(cut.to_string())
+                    }
+                })
+                .filter(|s| !s.is_empty());
+        }
+        if let Some(raw) = self.dispatch_serial.as_deref() {
+            let cut = cut_at_inner_label(raw);
+            self.dispatch_serial = first_digit_run(cut, 8)
+                .or_else(|| {
+                    if cut.is_empty() {
+                        None
+                    } else {
+                        Some(cut.to_string())
+                    }
+                })
+                .filter(|s| !s.is_empty());
+        }
     }
 
     /// 已抽到的字段数（0..=5），写进 meta 让复核人一眼看到信头完成度。
@@ -327,6 +375,60 @@ fn is_line_decor(ch: char) -> bool {
 /// 标签与分隔符之间、以及分隔符之后允许跳过的装饰（不含 `|`，它是分隔符本身）。
 fn is_value_decor(ch: char) -> bool {
     matches!(ch, ' ' | '\t' | '*' | '\u{feff}' | '\u{3000}')
+}
+
+/// 值里再出现"标签：值"形态时，截到该标签之前。
+///
+/// 规则：找到第一个 `：`/`:`，若它**前面还有空白**，就截到那段空白之前——
+/// 说明冒号属于下一个字段而不是本字段的分隔符（本字段的冒号已在 `label_value` 里剥掉）。
+/// 冒号紧贴值开头或值里没有空白时不动，避免把 `2026年07月10日` 这类正常值切坏。
+fn cut_at_inner_label(value: &str) -> &str {
+    let value = value.trim();
+    let chars: Vec<char> = value.chars().collect();
+    for (i, c) in chars.iter().enumerate() {
+        if !matches!(c, '：' | ':') {
+            continue;
+        }
+        let Some(sp) = chars[..i].iter().rposition(|c| c.is_whitespace()) else {
+            break;
+        };
+        let byte = value
+            .char_indices()
+            .nth(sp)
+            .map(|(b, _)| b)
+            .unwrap_or(value.len());
+        return value[..byte].trim_end();
+    }
+    value
+}
+
+/// 申请号形状：8~13 位数字，可选 `.校验位`，可选一位字母后缀。
+fn first_app_shape(value: &str) -> Option<String> {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| {
+        regex::Regex::new(r"\d{8,13}(?:\.\d)?[A-Z]?").expect("letter_header: 申请号形状正则")
+    });
+    re.find(value).map(|m| m.as_str().to_string())
+}
+
+/// 连续数字串（发文序号用，至少 `min` 位）。
+fn first_digit_run(value: &str, min: usize) -> Option<String> {
+    let mut run = String::new();
+    let mut best = String::new();
+    for c in value.chars() {
+        if c.is_ascii_digit() {
+            run.push(c);
+        } else {
+            if run.len() >= min && run.len() > best.len() {
+                best = run.clone();
+            }
+            run.clear();
+        }
+    }
+    if run.len() >= min && run.len() > best.len() {
+        best = run;
+    }
+    (!best.is_empty()).then_some(best)
 }
 
 /// 半截日期（`2026年【待填写】月【待填写】日`）在无法回填时收敛成可追形态，
@@ -673,5 +775,40 @@ mod tests {
         assert!(block.contains("发文日：2026年07月10日"));
         assert!(block.contains(UNRESOLVED), "抽不到的字段要给出可追形态");
         assert!(block.contains("禁止输出【待填写】"));
+    }
+
+    #[test]
+    fn run_on_header_line_does_not_swallow_the_next_field() {
+        // 真实形态（掩码探针实测）：表头是连排的一行，`label_value` 取到行尾，
+        // 于是"申请号"的抽到的值里拖着下一个字段的标签与值。
+        let notice = "\
+发文日：2026年07月10日 发文序号：{9999010100000001}
+申请号：999999999999.9 复审请求号：{9999010100000002}
+申请人：示例申请人 地址：示例地址
+";
+        let h = LetterHeader::extract(notice, "", None);
+        assert_eq!(
+            h.application_number.as_deref(),
+            Some("999999999999.9"),
+            "实际：{:?}",
+            h.application_number
+        );
+        assert_eq!(h.applicant.as_deref(), Some("示例申请人"));
+        assert_eq!(h.dispatch_serial.as_deref(), Some("9999010100000001"));
+        assert_eq!(h.dispatch_date.as_deref(), Some("2026年07月10日"));
+    }
+
+    #[test]
+    fn shape_cut_keeps_plain_values_whole() {
+        assert_eq!(cut_at_inner_label("一种示例装置"), "一种示例装置");
+        assert_eq!(cut_at_inner_label("2026年07月10日"), "2026年07月10日");
+        assert_eq!(
+            cut_at_inner_label("999999999999.9 代理机构：示例专利代理事务所"),
+            "999999999999.9"
+        );
+        assert_eq!(
+            first_digit_run("编号 {9999010100000003} 收悉", 8).as_deref(),
+            Some("9999010100000003")
+        );
     }
 }
