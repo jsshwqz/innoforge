@@ -17,13 +17,16 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 
 /// Start a stub that returns a fixed raw response for all requests.
-fn start_raw_stub(port: u16, status: u16, body: &str) -> std::thread::JoinHandle<()> {
+///
+/// 先 `bind("127.0.0.1:0")` 由内核分配端口并立即进入 listen，再把 listener 移入子线程，
+/// 返回 `(port, handle)`。不要退回"先 free_port() 探端口、再在子线程里 bind"：两步之间
+/// 端口会被同二进制并行用例抢走，桩线程 bind 失败后静默 return，客户端直接
+/// Connection refused（CI run 40630679117 实测）。
+fn start_raw_stub(status: u16, body: &str) -> (u16, std::thread::JoinHandle<()>) {
     let body = body.to_string();
-    std::thread::spawn(move || {
-        let listener = match TcpListener::bind(format!("127.0.0.1:{}", port)) {
-            Ok(l) => l,
-            Err(_) => return,
-        };
+    let listener = TcpListener::bind("127.0.0.1:0").expect("stub must bind an ephemeral port");
+    let port = listener.local_addr().expect("stub local_addr").port();
+    let handle = std::thread::spawn(move || {
         for mut stream in listener.incoming().flatten() {
             let mut buf = [0u8; 4096];
             let _ = stream.read(&mut buf);
@@ -35,18 +38,20 @@ fn start_raw_stub(port: u16, status: u16, body: &str) -> std::thread::JoinHandle
             );
             let _ = stream.write_all(resp.as_bytes());
         }
-    })
+    });
+    (port, handle)
 }
 
 /// Start a stub that returns a fixed raw response with custom content-type.
-fn start_raw_stub_ct(port: u16, content_type: &str, body: &str) -> std::thread::JoinHandle<()> {
+///
+/// 端口分配同上：bind(0) 成功后端口已在监听，`local_addr()` 拿到的是**已经绑定**的端口，
+/// 调用方拿到 port 即可连接，无需 sleep 等待。
+fn start_raw_stub_ct(content_type: &str, body: &str) -> (u16, std::thread::JoinHandle<()>) {
     let body = body.to_string();
     let ct = content_type.to_string();
-    std::thread::spawn(move || {
-        let listener = match TcpListener::bind(format!("127.0.0.1:{}", port)) {
-            Ok(l) => l,
-            Err(_) => return,
-        };
+    let listener = TcpListener::bind("127.0.0.1:0").expect("stub must bind an ephemeral port");
+    let port = listener.local_addr().expect("stub local_addr").port();
+    let handle = std::thread::spawn(move || {
         for mut stream in listener.incoming().flatten() {
             let mut buf = [0u8; 4096];
             let _ = stream.read(&mut buf);
@@ -58,7 +63,8 @@ fn start_raw_stub_ct(port: u16, content_type: &str, body: &str) -> std::thread::
             );
             let _ = stream.write_all(resp.as_bytes());
         }
-    })
+    });
+    (port, handle)
 }
 
 /// Helper: spawn a test server with AI pointing at `ai_port`.
@@ -82,10 +88,8 @@ fn start_server(server_port: u16, ai_port: u16) -> common::TestServer {
 #[test]
 fn tolerates_empty_body_stub_response() {
     let server_port = free_port();
-    let ai_port = free_port();
 
-    let _stub = start_raw_stub(ai_port, 200, "");
-    std::thread::sleep(std::time::Duration::from_millis(200));
+    let (ai_port, _stub) = start_raw_stub(200, "");
 
     let server = start_server(server_port, ai_port);
 
@@ -127,11 +131,9 @@ fn tolerates_empty_body_stub_response() {
 #[test]
 fn accepts_valid_body_stub_response() {
     let server_port = free_port();
-    let ai_port = free_port();
 
     let valid_json = r#"{"choices":[{"message":{"role":"assistant","content":"OK"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}"#;
-    let _stub = start_raw_stub(ai_port, 200, valid_json);
-    std::thread::sleep(std::time::Duration::from_millis(200));
+    let (ai_port, _stub) = start_raw_stub(200, valid_json);
 
     let server = start_server(server_port, ai_port);
 
@@ -171,11 +173,9 @@ fn accepts_valid_body_stub_response() {
 #[test]
 fn tolerates_html_error_page_stub_response() {
     let server_port = free_port();
-    let ai_port = free_port();
 
     let html = "<html><body><h1>503 Service Unavailable</h1></body></html>";
-    let _stub = start_raw_stub_ct(ai_port, "text/html", html);
-    std::thread::sleep(std::time::Duration::from_millis(200));
+    let (ai_port, _stub) = start_raw_stub_ct("text/html", html);
 
     let server = start_server(server_port, ai_port);
 
@@ -217,12 +217,10 @@ fn tolerates_html_error_page_stub_response() {
 #[test]
 fn accepts_json_content_type_stub_response() {
     let server_port = free_port();
-    let ai_port = free_port();
 
     let valid_json =
         r#"{"choices":[{"message":{"role":"assistant","content":"OK"},"finish_reason":"stop"}]}"#;
-    let _stub = start_raw_stub_ct(ai_port, "application/json", valid_json);
-    std::thread::sleep(std::time::Duration::from_millis(200));
+    let (ai_port, _stub) = start_raw_stub_ct("application/json", valid_json);
 
     let server = start_server(server_port, ai_port);
 
@@ -260,12 +258,10 @@ fn accepts_json_content_type_stub_response() {
 #[test]
 fn tolerates_truncated_json_stub_response() {
     let server_port = free_port();
-    let ai_port = free_port();
 
     // Truncated: missing closing braces and quote
     let truncated = r#"{"choices":[{"message":{"role":"assistant","content":"OK"#;
-    let _stub = start_raw_stub(ai_port, 200, truncated);
-    std::thread::sleep(std::time::Duration::from_millis(200));
+    let (ai_port, _stub) = start_raw_stub(200, truncated);
 
     let server = start_server(server_port, ai_port);
 
@@ -307,7 +303,6 @@ fn tolerates_truncated_json_stub_response() {
 #[test]
 fn tolerates_overlong_json_stub_response() {
     let server_port = free_port();
-    let ai_port = free_port();
 
     // Overlong: valid JSON but with 10KB of padding in content
     let padding = "x".repeat(10240);
@@ -315,8 +310,7 @@ fn tolerates_overlong_json_stub_response() {
         r#"{{"choices":[{{"message":{{"role":"assistant","content":"{}"}},"finish_reason":"stop"}}]}}"#,
         padding
     );
-    let _stub = start_raw_stub(ai_port, 200, &overlong);
-    std::thread::sleep(std::time::Duration::from_millis(200));
+    let (ai_port, _stub) = start_raw_stub(200, &overlong);
 
     let server = start_server(server_port, ai_port);
 
@@ -358,11 +352,9 @@ fn tolerates_overlong_json_stub_response() {
 #[test]
 fn accepts_complete_json_stub_response() {
     let server_port = free_port();
-    let ai_port = free_port();
 
     let valid = r#"{"choices":[{"message":{"role":"assistant","content":"完整的AI回复"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":10,"total_tokens":15}}"#;
-    let _stub = start_raw_stub(ai_port, 200, valid);
-    std::thread::sleep(std::time::Duration::from_millis(200));
+    let (ai_port, _stub) = start_raw_stub(200, valid);
 
     let server = start_server(server_port, ai_port);
 
@@ -390,4 +382,41 @@ fn accepts_complete_json_stub_response() {
     }
 
     drop(server);
+}
+
+// ── 端口分配机制的负控：证明旧形态的 TOCTOU 窗口真实存在，新形态没有 ──
+
+/// 负控（先红）：`free_port()` 探到端口后 listener 立即 drop，**这个端口在真正 bind
+/// 之前是可被抢占的**——旧写法（探端口 → 传进子线程 → 子线程 bind）的失败窗口就在这里：
+/// 子线程 bind 失败后 `Err(_) => return` 静默退出，客户端拿到的是一个没人监听的端口。
+#[test]
+fn free_port_probe_leaves_a_stealable_window() {
+    let probed = free_port();
+    // 抢占者：在探针释放后立刻把同一端口 bind 走（模拟并行用例/同机其它进程）
+    let thief = TcpListener::bind(("127.0.0.1", probed))
+        .expect("抢占者应能拿到 free_port 刚释放的端口（否则本负控失去意义）");
+    // 旧写法的桩线程此刻 bind ⇒ 必然失败 ⇒ 静默 return ⇒ 端口无人监听
+    let stub_bind = TcpListener::bind(("127.0.0.1", probed));
+    assert!(
+        stub_bind.is_err(),
+        "端口 {probed} 未被抢占，负控失效：free_port → 线程内 bind 的窗口必须可复现"
+    );
+    if let Ok(l) = stub_bind {
+        drop(l);
+    }
+    drop(thief);
+}
+
+/// 正控（后绿）：`bind("127.0.0.1:0")` 在**起线程之前**完成，helper 返回端口时该端口
+/// 已进入 listen，客户端立刻可连——不需要 sleep，也不存在被抢占的窗口。
+#[test]
+fn ephemeral_bind_is_listening_before_helper_returns() {
+    let (port, _handle) = start_raw_stub(200, r#"{"ok":true}"#);
+    assert_ne!(port, 0, "内核应已分配端口");
+    let connected = std::net::TcpStream::connect(("127.0.0.1", port));
+    assert!(
+        connected.is_ok(),
+        "bind(0) 返回后端口必须已在监听: {:?}",
+        connected.err()
+    );
 }

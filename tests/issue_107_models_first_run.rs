@@ -26,12 +26,16 @@ struct ModelsStub {
 
 impl ModelsStub {
     fn start() -> Self {
-        let port = free_port();
+        // 先 bind(0) 让内核分配端口并立即进入 listen，再把 listener 移入线程。
+        // 不要先 free_port() 再在线程里 bind：空窗期端口会被并行用例抢走，线程
+        // bind 失败静默 return，探测/请求端直接 Connection refused（CI 实测形态）。
+        let listener =
+            TcpListener::bind("127.0.0.1:0").expect("models stub must bind an ephemeral port");
+        let port = listener
+            .local_addr()
+            .expect("models stub local_addr")
+            .port();
         let handle = std::thread::spawn(move || {
-            let listener = match TcpListener::bind(("127.0.0.1", port)) {
-                Ok(l) => l,
-                Err(_) => return,
-            };
             for mut stream in listener.incoming().flatten() {
                 let mut buf = [0u8; 4096];
                 let _ = stream.read(&mut buf);
@@ -49,25 +53,7 @@ impl ModelsStub {
                 }
             }
         });
-        // Ready check: poll until the port accepts connections
-        for _ in 0..50 {
-            std::thread::sleep(std::time::Duration::from_millis(50));
-            if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
-                break;
-            }
-        }
-        // Verify stub is actually up
-        if std::net::TcpStream::connect_timeout(
-            &std::net::SocketAddr::from((std::net::Ipv4Addr::new(127, 0, 0, 1), port)),
-            std::time::Duration::from_secs(2),
-        )
-        .is_err()
-        {
-            panic!(
-                "stub did not start: could not connect to 127.0.0.1:{}",
-                port
-            );
-        }
+        // listener 在起线程前就已监听，端口此时可连接，无需轮询/sleep 等待就绪。
         ModelsStub {
             _handle: handle,
             port,

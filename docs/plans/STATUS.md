@@ -942,3 +942,8 @@
 
 ## 2026-10-29 · 修改稿正文抽取接住真实版式（分支 `fix/amendment-claim-body`，base `fix/corpus-json-inputs`）
 - issue #142：#137+#141 修完仍报 26 处，逐条回核发现被标的是**关于修改的叙述句**，而引号里的权项全文没被单独核验。两处根因：`extract_claims` 权项标题正则要求行首（真实稿写 `1. 权利要求1的修改说明：` 不匹配 ⇒ 整块当假权项）；引号支路只认同行形态且上限 300 字（真实权项全文普遍更长且冒号后换行）。修法：引号抽取收进单一出处 `quoted_amendment_ranges()` 并放宽为**允许换行 + 上限 1200**；`hits` 为空且有引号段时**只送检引号段**。**刻意不采纳** issue 原文"无正文就返回 unsupported=0"的要求——那会造出同型假绿，改为保留整块回退并用 `block_without_header_or_quote_still_falls_back` 钉住，理由与取舍写进 errors.md ㊸。真实复跑：`unsupported` 26→9、`checked_features` 39→22、9 处全部归属"引号内"、叙述句归零、三类真零命中措辞仍全部抓到、`submission_ready=false` 保持。测试：3 条新单测 + 门内 26 条 + scope 6 条 + verbatim + m2 端到端全绿；fmt/clippy/全量 test rc=0。复盘 errors.md ㊸。
+## 2026-10-28 · 测试桩端口竞态（分支 `fix/test-stub-port-race`，base `origin/main` e130d06）
+- 四个测试文件（`stub_malformed_responses` / `stub_hanging_backend` / `issue_17_synthetic_fixtures` / `issue_107_models_first_run`）的桩统一改为"先 `TcpListener::bind("127.0.0.1:0")` 取 `local_addr().port()`、再把 listener 移入子线程、helper 返回 `(port, handle)`"，删掉 `free_port()` 预探与固定 sleep/轮询；CI run 40630679117 的 `ConnectionRefused` 根因即 free_port→线程内 bind 的 TOCTOU。四轮验证：4 binary × 3 轮 `--test-threads=8` 全绿（每轮 20 项），另加两条**确定性**机制测试（旧形态窗口可复现／新形态返回即监听）。`tests/helpers/fake_ai_stub.rs` 经查是**未被任何 target 编译的死文件**，本轮只同步签名 + 单独 `rustc --crate-type lib` 类型检查，接线或删除并入 #110。复盘 errors.md ㊹。
+
+## 2026-10-29 · 模板库就绪判据（同分支 `fix/test-stub-port-race`）
+- 第 4 轮合跑红出第二类基础设施缺陷：`ensure_db_template` 用 `/api/version` 应答当就绪，应答后立刻 kill ⇒ `template db must exist after migration` 断言炸（随机 1/5 轮，且红在与它无关的用例上）。改为就绪后轮询 db 文件「存在且大小连续两次采样不变」再 kill，超时 panic 带路径/大小/目录清单自诊断。负控（把等待目标改成不存在的文件名）确认该分支是活代码而非装饰；绿控 4 binary × 5 轮 `--test-threads=8` + 全量 `cargo test` rc=0。复盘 errors.md ㊺。

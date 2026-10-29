@@ -7,20 +7,28 @@
 use std::io::{Read, Write};
 use std::net::TcpListener;
 
-/// Start the fake AI stub on the given port. Returns immediately;
-/// the listener runs in a background thread.
-pub fn start_fake_ai_stub(port: u16) -> std::thread::JoinHandle<()> {
-    std::thread::spawn(move || {
-        let listener = match TcpListener::bind(format!("127.0.0.1:{}", port)) {
-            Ok(l) => l,
-            Err(_) => return,
-        };
+/// Start the fake AI stub on an OS-assigned ephemeral port. Returns
+/// `(port, handle)` immediately; the listener runs in a background thread.
+///
+/// 端口由 `bind("127.0.0.1:0")` 在**起线程之前**分配并已进入 listen，所以调用方拿到
+/// port 就能连——不要退回"先 free_port() 探端口、再在线程内 bind"：空窗期端口会被
+/// 同二进制并行用例抢走，桩线程 bind 失败静默 return，客户端 Connection refused
+/// （CI run 40630679117 实测）。
+pub fn start_fake_ai_stub() -> (u16, std::thread::JoinHandle<()>) {
+    let listener =
+        TcpListener::bind("127.0.0.1:0").expect("fake AI stub must bind an ephemeral port");
+    let port = listener
+        .local_addr()
+        .expect("fake AI stub local_addr")
+        .port();
+    let handle = std::thread::spawn(move || {
         for stream in listener.incoming() {
             if let Ok(mut stream) = stream {
                 handle_request(&mut stream);
             }
         }
-    })
+    });
+    (port, handle)
 }
 
 fn handle_request(stream: &mut std::net::TcpStream) {
