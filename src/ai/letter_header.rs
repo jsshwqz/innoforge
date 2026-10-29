@@ -105,32 +105,19 @@ impl LetterHeader {
             *value = value
                 .as_deref()
                 .map(cut_at_inner_label)
-                .filter(|s| !s.is_empty())
-                .map(|s| s.to_string());
+                .filter(|s| !s.is_empty());
         }
         // 申请号/发文序号有明确形状，优先取形状内的第一段
         if let Some(raw) = self.application_number.as_deref() {
             let cut = cut_at_inner_label(raw);
-            self.application_number = first_app_shape(cut)
-                .or_else(|| {
-                    if cut.is_empty() {
-                        None
-                    } else {
-                        Some(cut.to_string())
-                    }
-                })
+            self.application_number = first_app_shape(&cut)
+                .or_else(|| (!cut.is_empty()).then_some(cut))
                 .filter(|s| !s.is_empty());
         }
         if let Some(raw) = self.dispatch_serial.as_deref() {
             let cut = cut_at_inner_label(raw);
-            self.dispatch_serial = first_digit_run(cut, 8)
-                .or_else(|| {
-                    if cut.is_empty() {
-                        None
-                    } else {
-                        Some(cut.to_string())
-                    }
-                })
+            self.dispatch_serial = first_digit_run(&cut, 8)
+                .or_else(|| (!cut.is_empty()).then_some(cut))
                 .filter(|s| !s.is_empty());
         }
     }
@@ -382,24 +369,23 @@ fn is_value_decor(ch: char) -> bool {
 /// 规则：找到第一个 `：`/`:`，若它**前面还有空白**，就截到那段空白之前——
 /// 说明冒号属于下一个字段而不是本字段的分隔符（本字段的冒号已在 `label_value` 里剥掉）。
 /// 冒号紧贴值开头或值里没有空白时不动，避免把 `2026年07月10日` 这类正常值切坏。
-fn cut_at_inner_label(value: &str) -> &str {
-    let value = value.trim();
-    let chars: Vec<char> = value.chars().collect();
-    for (i, c) in chars.iter().enumerate() {
-        if !matches!(c, '：' | ':') {
-            continue;
-        }
-        let Some(sp) = chars[..i].iter().rposition(|c| c.is_whitespace()) else {
-            break;
-        };
-        let byte = value
-            .char_indices()
-            .nth(sp)
-            .map(|(b, _)| b)
-            .unwrap_or(value.len());
-        return value[..byte].trim_end();
+///
+/// 用 `chars()` 而不是字节下标：通知书文本含全角标点，按字节切会在多字节字符中间断开
+/// （#73 防线 `tests/no_unsafe_byte_slice.rs` 专门守这个）。
+fn cut_at_inner_label(value: &str) -> String {
+    let trimmed = value.trim();
+    let chars: Vec<char> = trimmed.chars().collect();
+    let colon = chars.iter().position(|c| matches!(c, '：' | ':'));
+    let cut = colon.and_then(|i| chars.iter().take(i).rposition(|c| c.is_whitespace()));
+    match cut {
+        Some(sp) => chars
+            .iter()
+            .take(sp)
+            .collect::<String>()
+            .trim_end()
+            .to_string(),
+        None => trimmed.to_string(),
     }
-    value
 }
 
 /// 申请号形状：8~13 位数字，可选 `.校验位`，可选一位字母后缀。
