@@ -378,14 +378,8 @@ pub fn amendment_blocks(text: &str) -> Vec<(usize, usize)> {
         }
     }
     // 「修改为：「…」」句式：模型常把修改文本直接放在引号里
-    if let Ok(re) = regex::Regex::new(
-        r#"(?:修改为|改为|修改文本为|修改后内容为)\s*[：:]?\s*[「“"]([^」”"]{2,300})[」”"]"#,
-    ) {
-        for cap in re.captures_iter(text) {
-            if let Some(q) = cap.get(1) {
-                raw.push((q.start(), q.end()));
-            }
-        }
+    for (s, e) in quoted_amendment_ranges(text) {
+        raw.push((s, e));
     }
     raw.sort_unstable();
     // 合并重叠区间
@@ -400,6 +394,29 @@ pub fn amendment_blocks(text: &str) -> Vec<(usize, usize)> {
         merged.push((s, e));
     }
     merged
+}
+
+/// 引号内权项全文的正则（单一出处，`amendment_blocks` 与 `extract_claims` 共用）。
+///
+/// 两条放宽都是真实答复书逼出来的（issue #142）：
+/// ①**允许冒号后换行**——模型常写 `具体修改为：` 换行再给 `“一种……”`；
+/// ②**长度上限 300 → 1200**——独立权项正文普遍超过 300 字，旧上限会把权项全文截没。
+fn regex_quoted_amendment() -> &'static regex::Regex {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    RE.get_or_init(|| {
+        regex::Regex::new(
+            r#"(?:修改为|改为|修改文本为|修改后内容为|修改如下)\s*[：:]?\s*(?:[\r\n]+\s*)?[「“"]([^」”"]{2,1200})[」”"]"#,
+        )
+        .unwrap_or_else(|e| panic!("引号权项正则常量失败即 bug: {e}"))
+    })
+}
+
+/// 文本中所有「引号内的修改稿正文」区间。
+fn quoted_amendment_ranges(text: &str) -> Vec<(usize, usize)> {
+    regex_quoted_amendment()
+        .captures_iter(text)
+        .filter_map(|c| c.get(1).map(|m| (m.start(), m.end())))
+        .collect()
 }
 
 /// 段落终点：遇到下一节标题（`#`/`一、`/`**三`/`修改要点说明`）或超长上限即止。
@@ -546,6 +563,23 @@ fn extract_claims(block: &str) -> Vec<AmendedClaim> {
         })
         .collect();
     if hits.is_empty() {
+        // 没有行首「权利要求N」标题 ⇒ 先看块内有没有**引号内的权项全文**：
+        // 有 ⇒ 只扫引号段。修改稿节里的叙述句（"为进一步突出本发明的实质性技术贡献"
+        // "缩短审查周期"）不是权项正文，逐句核验只会产出误报（issue #142 实测 26 处）。
+        // 无 ⇒ 保留旧回退（整块当一个权项），宁可粗筛也不静默放过。
+        let quotes: Vec<String> = quoted_amendment_ranges(block)
+            .into_iter()
+            .filter_map(|(s, e)| block.get(s..e).map(|t| t.to_string()))
+            .collect();
+        if !quotes.is_empty() {
+            return quotes
+                .into_iter()
+                .map(|text| AmendedClaim {
+                    claim_no: "引号内".to_string(),
+                    text,
+                })
+                .collect();
+        }
         return vec![AmendedClaim {
             claim_no: "0".to_string(),
             text: block.to_string(),
@@ -1232,6 +1266,96 @@ mod tests {
             delivered.matches(UNVERIFIED_MARK).count(),
             r.unsupported_count,
             "横幅计数与正文标记数必须一致: {delivered}"
+        );
+    }
+
+    // ── issue #142：真实版式的修改稿（带前导序号小标题 + 跨行引号全文）──
+
+    /// 跨行引号必须被接住：`具体修改为：` 换行后给 `“一种……”`。
+    /// 节内叙述句（"为进一步突出…""缩短审查周期"）**不得**被当特征句打标；
+    /// 引号内权项全文才是核验对象，其中真正无原文依据的措辞必须被抓到。
+    #[test]
+    fn multiline_quoted_claim_is_scanned_and_narrative_is_not() {
+        let letter = "\
+=== 意见陈述书 ===
+
+二、关于权利要求的修改
+1. 权利要求1的修改说明：
+为进一步突出本发明的实质性技术贡献，缩短审查周期，申请人对权利要求书进行了限定性修改，具体修改为：
+“一种物料输送装置，其特征在于，包括机架，机架上设有输送带，机架侧面固定有驱动电机，且设有隔离罩。”
+
+三、关于创造性的论述
+本申请具备创造性。
+";
+        let r = gate_amendment_text(letter, SPEC);
+        // 叙述句零标记：整封信里只允许出现引号段内部的标记
+        let narrative_zone = r
+            .gated_text
+            .split_once('“')
+            .map(|(head, _)| head)
+            .unwrap_or("");
+        assert_eq!(
+            narrative_zone.matches(UNVERIFIED_MARK).count(),
+            0,
+            "引号之前的叙述句不得被标注:\n{}",
+            r.gated_text
+        );
+        assert!(
+            r.unsupported.iter().any(|u| u.text.contains("隔离罩")),
+            "引号内权项全文的零命中措辞必须被抓到: {:?}",
+            r.unsupported
+        );
+        assert!(
+            r.unsupported.iter().all(|u| u.claim_no == "引号内"),
+            "本例核验对象应全部来自引号段: {:?}",
+            r.unsupported
+                .iter()
+                .map(|u| u.claim_no.clone())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// 既无行首权项标题、也无引号段 ⇒ **保留**旧回退（整块当一个权项继续粗筛）。
+    /// 这是刻意选择：宁可多标也不静默放过——修改稿哪怕写得不成样子，33 条核验也不能
+    /// 变成"没找到正文所以通过"。与 issue #142 原文里"返回 skipped"的设想相反，
+    /// 已在 issue 下注明取舍理由。
+    #[test]
+    fn block_without_header_or_quote_still_falls_back() {
+        let letter = "## 二、关于权利要求的修改\n\n在保留原权利要求1全部特征的基础上，增加设置于机架上的隔离罩。\n";
+        let r = gate_amendment_text(letter, SPEC);
+        assert!(
+            !r.unsupported.is_empty(),
+            "无标题无引号时仍须回退整块核验，不得静默放过"
+        );
+        assert!(
+            r.unsupported.iter().any(|u| u.text.contains("隔离罩")),
+            "回退路径必须仍能抓到零命中措辞: {:?}",
+            r.unsupported
+        );
+    }
+
+    /// 引号段长度上限从 300 提到 1200：真实独立权项普遍超过 300 字，
+    /// 旧上限会把权项全文截断成半句，导致核验对象错位。
+    #[test]
+    fn long_quoted_claim_is_not_truncated() {
+        let long_claim = format!(
+            "一种物料输送装置，其特征在于，包括机架，机架上设有输送带，机架侧面固定有驱动电机，{}，并设有隔离罩。",
+            "导料板与输送带之间的间距为20至30厘米，".repeat(12)
+        );
+        assert!(
+            long_claim.chars().count() > 300,
+            "夹具须超过旧上限 300 字才有意义"
+        );
+        let letter = format!(
+            "## 二、关于权利要求的修改\n\n修改后的权利要求书如下：\n具体修改为：\n“{long_claim}”\n"
+        );
+        let ranges = quoted_amendment_ranges(&letter);
+        assert_eq!(ranges.len(), 1, "长引号段应被完整捕获为一处");
+        let captured = letter.get(ranges[0].0..ranges[0].1).unwrap_or("");
+        assert!(
+            captured.ends_with("并设有隔离罩。"),
+            "捕获内容必须到引号结尾，实际尾部: …{}",
+            captured.chars().rev().take(12).collect::<String>()
         );
     }
 
