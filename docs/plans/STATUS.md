@@ -931,3 +931,8 @@
 - **门禁**：`cargo fmt --check`、`cargo clippy --all-targets -- -D warnings`、全量 `cargo test -j 2`、`no_unsafe_byte_slice` 四项 rc 见 PR 正文表。
 - **如实声明**：同义替换 / 上位概括 / 跨实施例拼凑这道门拦不住，两层防线各拦什么、各漏什么登记在 `docs/design/evidence-kernel-v2.md` §5.1（FMEA 负控区）。与 C2/C12 范畴正交，同时触发并罚不去重（`tests/amendment_verbatim_gate.rs::a33_gate_and_c2_c12_are_orthogonal_both_penalized`）。
 - **编号**：本分支基线 `8f89f4f` 的 `docs/errors.md` 最大号为 ㉟，但 `origin/main` 已用到 ㊴（㊱–㊴ 均为 main 条目），合入后取 ㊵，避免重号。
+
+## 2026-10-28 · 修改稿核验门作用域收敛（分支 `fix/amendment-gate-scope`，base `origin/main` e130d06）
+- v4 实测 `amendment_unsupported=136`/正文 137 标记的过火缺陷已修，两处根因一起补：①`amendment_blocks` 只认**修改稿标签位**的 marker（剥装饰与节序号后以 marker 起始、行内残留 ≤12 字且无句子标点、且该行是纯标题或以冒号结尾），于是叙述句与创造性论述小标题 `（一）修改后的权利要求1` 不再开块；②`extract_claims` 原先把块内第一个「权利要求N」标题**之前**的正文整段丢弃，而真实答复书恰恰写成 `1. 权利要求1的修改：` + 换行 + `在保留原权利要求1全部特征（含……）的基础上……`（带前导序号不匹配权项标题正则）——只修①会让 136 收敛成 2 且那 2 处都不是真缺陷＝把过火换成假绿；现前缀段以 `claim_no="未编号"` 一并送检，`split_features` 加 `is_heading_fragment` 不把标题行当特征句。另：横幅不再内嵌 `UNVERIFIED_MARK` 字面量（136 vs 137 的差 1 即横幅自带）；新增 `skip_note()` 与 `skipped_no_amendment_section` 状态串，把"门没跑"从"没有警告"里分离出来。
+- **真实材料复跑**（本地一次性探针，只打印计数与字节偏移、跑完即删）：块数 多块→1，`amendment_unsupported` 136→18，正文标记 137→18（与横幅一致），`checked_features=19`、`submission_ready=false` 保持；原始文本零记载的三类措辞全部被抓到。剩余 18 处多为"关于修改的叙述"而非权项文本，根子在 v4 没给出修改后的权利要求全文——属生成侧内容缺陷，已记为已知边界。
+- 测试：`tests/amendment_gate_scope.rs` 六例（负控／正控／计数一致／抽取失败 skipped／真实形态／**前缀段仍送检**）+ 门内单测 19 条全绿；`amendment_verbatim_gate`、`m2_amendment_verbatim_letter`（SSE 网关端到端）不回归。复盘 errors.md ㊶。

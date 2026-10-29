@@ -2065,6 +2065,13 @@ pub async fn api_ai_oa_generate_response_letter(
         if gate.unsupported_count > 0 {
             let banner = gate.banner();
             body.push_str(&banner);
+        } else {
+            // 门没做逐字核验（未定位到修改稿段落 / 缺原始申请文本）时必须显式说明，
+            // 否则"没有横幅"会被读成"已核验通过"——假绿。
+            let note = gate.skip_note();
+            if !note.is_empty() {
+                body.push_str(&note);
+            }
         }
         body.push_str(&gate.gated_text);
         for frame in split_sse_frames(&body, 240) {

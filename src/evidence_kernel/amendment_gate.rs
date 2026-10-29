@@ -70,7 +70,7 @@ pub enum GateStatus {
 impl GateStatus {
     pub fn as_str(&self) -> &'static str {
         match self {
-            GateStatus::NoAmendment => "no_amendment",
+            GateStatus::NoAmendment => "skipped_no_amendment_section",
             GateStatus::NoOriginal => "skipped_no_original",
             GateStatus::Verified => "verified",
             GateStatus::Degraded => "degraded",
@@ -121,14 +121,33 @@ impl AmendmentGateResult {
     }
 
     /// 阻断横幅（复用 M2-C 横幅形态：`> ⚠️` blockquote，随正文首部一并下发）。
+    ///
+    /// 横幅里**不得出现** [`UNVERIFIED_MARK`] 的字面量（含 `【】`）：交付文本的标记数是
+    /// `横幅 + 正文`，横幅自带一次字面量就会让读者数出 N+1 个标记、与
+    /// `amendment_unsupported=N` 对不上（真实案件实测 136 vs 137）。这里改用「」描述。
     pub fn banner(&self) -> String {
         if self.unsupported_count == 0 {
             return String::new();
         }
         format!(
-            "> ⚠️ 修改稿核验阻断（amendment_unsupported={}）：本稿修改后的权利要求中有 {} 处特征句在原始申请文本（说明书 + 权利要求书）零命中，已就地标注{}；相关「明确记载 / 来源于原说明书」类断言已降级。提交前必须逐处核对专利法第33条（修改超范围）。\n\n",
-            self.unsupported_count, self.unsupported_count, UNVERIFIED_MARK
+            "> ⚠️ 修改稿核验阻断（amendment_unsupported={}）：本稿修改后的权利要求中有 {} 处特征句在原始申请文本（说明书 + 权利要求书）零命中，已就地逐处标注「未证实：该措辞在原始文本零命中」；相关「明确记载 / 来源于原说明书」类断言已降级。提交前必须逐处核对专利法第33条（修改超范围）。\n\n",
+            self.unsupported_count, self.unsupported_count
         )
+    }
+
+    /// 门未做逐字核验时的可见说明（贴在正文首部，避免"没有横幅＝已核验"的假绿）。
+    ///
+    /// - [`GateStatus::NoAmendment`]：答复书里没定位到修改稿段落——可能本答复确实不含权项修改，
+    ///   也可能是模型没按标签格式写；两种情况都必须让读者知道"本次未核验"。
+    /// - [`GateStatus::NoOriginal`]：缺原始申请文本，无比对基准。
+    ///
+    /// 其余状态（verified / degraded）返回空串。
+    pub fn skip_note(&self) -> String {
+        match self.status {
+            GateStatus::NoAmendment => "> ℹ️ 修改稿逐字核验：未定位到「修改后的权利要求」段落，本次未做第33条逐字核验；若本答复含权利要求修改，请人工核对。\n\n".to_string(),
+            GateStatus::NoOriginal => "> ℹ️ 修改稿逐字核验：缺少原始申请文本（说明书 + 权利要求书），本次未做第33条逐字核验。\n\n".to_string(),
+            GateStatus::Verified | GateStatus::Degraded => String::new(),
+        }
     }
 }
 
@@ -323,13 +342,20 @@ fn judge(needle: &str, hit: &Option<ScopedHit>) -> (bool, String, f64) {
 // ═══════════════════════════════════════════════════════════════════════
 
 /// 从文本中定位全部「修改后权利要求」段落，返回 (start, end) 字节区间（已排序合并且均落字符边界）。
+///
+/// **只有行首标签位的 marker 才算段落起点**（见 [`is_amendment_label`]）。答复书正文里的
+/// 叙述句——"申请人认为修改后的权利要求1-3已克服全部缺陷"——不是起点：一旦把它当起点，
+/// 块会一路延伸到下一节标题，块内所有非权项句子被当成特征句逐句核验、全部零命中、
+/// 整封打满标记（真实案件实测 `amendment_unsupported=136`）。
 pub fn amendment_blocks(text: &str) -> Vec<(usize, usize)> {
     let mut raw: Vec<(usize, usize)> = Vec::new();
     for marker in AMENDMENT_MARKERS {
         let mut from = 0usize;
         while let Some(pos) = text.get(from..).and_then(|s| s.find(marker)) {
             let abs = from + pos;
-            raw.push((abs, block_end(text, abs)));
+            if is_amendment_label(text, abs, marker) {
+                raw.push((abs, block_end(text, abs)));
+            }
             from = abs + marker.len().max(1);
             if raw.len() >= 8 {
                 break;
@@ -390,6 +416,88 @@ fn is_section_boundary(line: &str) -> bool {
     t.starts_with('#') || t.starts_with("修改要点说明") || regex_section_heading().is_match(t)
 }
 
+/// marker 之后的行内残留若短于此且不含句读，视为标签（`修改后的权利要求1：`）；
+/// 超过此长度或带句读，说明这句话在**叙述**而不是在给修改稿（`……1-3已克服缺陷，理由如下：`）。
+const LABEL_REST_MAX_CHARS: usize = 12;
+
+/// 判定 `marker` 在 `abs` 处的出现是否处于「修改稿段落标签位」。
+///
+/// 三条同时成立才算：
+/// ① 该行去掉行首装饰（`#`/`*`/`>`/列表符/空白）与节序号（`二、`/`(二)`/`3.`）后**以 marker 起始**；
+/// ② marker 之后的行内残留 ≤ [`LABEL_REST_MAX_CHARS`] 字符，且不含 `，。；,;！？` 任一句子标点
+///    （放行 `修改后的权利要求1-3：`，拦住 `……1-3已克服缺陷，理由如下。`）；
+/// ③ 该行**要么是纯标题（残留为空），要么以冒号结尾**——即它在"引出修改稿正文"，
+///    而不是在"给一段论述起小标题"。
+///
+/// ③ 是关键：真实答复书里 `（一）修改后的权利要求1` 是**创造性论述**的小标题，下面跟的是
+/// 区别特征比对与论证，不是权项文本；把它当修改稿起点会让整节论述被逐句核验、全部零命中、
+/// 被打满标记。只有 `二、关于权利要求的修改`（纯标题）与 `修改后的权利要求1：`（冒号引出）
+/// 才算修改稿起点。
+fn is_amendment_label(text: &str, abs: usize, marker: &str) -> bool {
+    let line_start = text
+        .get(..abs)
+        .and_then(|head| head.rfind('\n'))
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    let line_end = text
+        .get(abs..)
+        .and_then(|tail| tail.find('\n'))
+        .map(|i| abs + i)
+        .unwrap_or(text.len());
+    let line = match text.get(line_start..line_end) {
+        Some(l) => l,
+        None => return false,
+    };
+    let content = strip_label_decor(line);
+    let after_marker = match content.strip_prefix(marker) {
+        Some(rest) => rest,
+        None => return false,
+    };
+    let residue = after_marker.trim_end_matches(['：', ':', '*', ' ', '\t', '、']);
+    if residue.chars().count() > LABEL_REST_MAX_CHARS {
+        return false;
+    }
+    if residue
+        .chars()
+        .any(|c| matches!(c, '，' | '。' | '；' | ',' | ';' | '！' | '？'))
+    {
+        return false;
+    }
+    // ③ 纯标题（`二、关于权利要求的修改`）或冒号引出（`修改后的权利要求1：`）才算起点
+    let bare_heading = residue.is_empty();
+    let introduces_text = content
+        .trim_end_matches(['*', ' ', '\t'])
+        .ends_with(['：', ':']);
+    bare_heading || introduces_text
+}
+
+/// 剥掉行首装饰与节序号，返回真正的内容起点。
+fn strip_label_decor(line: &str) -> &str {
+    let mut t = line.trim_start_matches(['#', '*', '>', '-', '•', ' ', '\t', ':', '：']);
+    // 中文序号：`二、` / `（二）` / `(二)`
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| {
+        regex::Regex::new(
+            r"^(?:[一二三四五六七八九十百]{1,3}[、.．]|[（(][一二三四五六七八九十百]{1,3}[）)])",
+        )
+        .unwrap_or_else(|e| panic!("节序号正则常量失败即 bug: {e}"))
+    });
+    if let Some(m) = re.find(t) {
+        t = t.get(m.end()..).unwrap_or("");
+    } else {
+        // 阿拉伯序号：`3.` / `3、` / `(3)`
+        static RE_NUM: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+        let ren = RE_NUM.get_or_init(|| {
+            regex::Regex::new(r"^(?:\d{1,2}[、.．]|[（(]\d{1,2}[）)])")
+                .unwrap_or_else(|e| panic!("数字节序号正则常量失败即 bug: {e}"))
+        });
+        if let Some(m) = ren.find(t) {
+            t = t.get(m.end()..).unwrap_or("");
+        }
+    }
+    t.trim_start_matches(['#', '*', '>', ' ', '\t'])
+}
+
 fn regex_section_heading() -> &'static regex::Regex {
     static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     RE.get_or_init(|| {
@@ -429,6 +537,19 @@ fn extract_claims(block: &str) -> Vec<AmendedClaim> {
         }];
     }
     let mut out = Vec::new();
+    // 第一个「权利要求N」标题**之前**的内容也必须扫：真实答复书常写成
+    // `1. 权利要求1的修改：\n在保留原权利要求1全部特征（含……）的基础上，从原说明书……`
+    // ——这种带前导序号的写法不匹配权项标题正则，若只从第一个命中标题开始扫，
+    // 33 条真正要抓的那一段反而被跳过（v4 复跑实测：136 收敛到 2，但那 2 处都不是真缺陷，
+    // 真缺陷段落被静默略过＝把过火换成了假绿）。块自身的小标题行不是权项文本，剥掉。
+    let prefix = block.get(..hits[0].0).unwrap_or("");
+    let prefix_body = prefix.split_once('\n').map(|(_, rest)| rest).unwrap_or("");
+    if prefix_body.trim().chars().count() >= MIN_FEATURE_CHARS {
+        out.push(AmendedClaim {
+            claim_no: "未编号".to_string(),
+            text: prefix_body.to_string(),
+        });
+    }
     for (i, (_, body_start, num)) in hits.iter().enumerate() {
         let body_end = hits.get(i + 1).map(|h| h.0).unwrap_or(block.len());
         let body = block.get(*body_start..body_end).unwrap_or("");
@@ -453,8 +574,16 @@ fn split_features(claim_text: &str) -> Vec<String> {
                 .trim_start_matches(['*', '-', '•', ' '])
                 .to_string()
         })
-        .filter(|s| !s.is_empty() && !is_declarative_meta(s))
+        .filter(|s| !s.is_empty() && !is_declarative_meta(s) && !is_heading_fragment(s))
         .collect()
+}
+
+/// 形如 `1. 权利要求1的修改：` 的行是**小标题**而不是技术特征句：短且以冒号结尾。
+/// 与块起点判据（[`is_amendment_label`]：纯标题或冒号引出）同源，不另造第二套概念——
+/// 区别只在于：块起点看"这行是否引出修改稿"，这里看"这句是不是修改稿里的一句标题"。
+fn is_heading_fragment(fragment: &str) -> bool {
+    let t = fragment.trim_end_matches(['*', ' ', '\t']);
+    t.ends_with(['：', ':']) && t.chars().count() <= 20
 }
 
 fn is_declarative_meta(fragment: &str) -> bool {
@@ -950,5 +1079,93 @@ mod tests {
         assert_eq!(c, d);
         // "至少"不得被当成范围号
         assert!(strip_legal_variation("至少一个").contains("至少"));
+    }
+
+    // ── 作用域：marker 只在行首标签位才开块（过火回归守卫）──
+
+    #[test]
+    fn prose_mention_of_marker_does_not_open_block() {
+        // 真实过火形态①：正文叙述句里提到"修改后的权利要求1-3"，句中含逗号句号
+        let text = "申请人认为修改后的权利要求1-3已克服审查意见指出的全部缺陷，具体理由如下。\n";
+        assert!(
+            amendment_blocks(text).is_empty(),
+            "叙述句里的 marker 不得开块: {:?}",
+            amendment_blocks(text)
+        );
+    }
+
+    #[test]
+    fn argumentation_subheading_does_not_open_block() {
+        // 真实过火形态②（v4 实测的主因）：`（一）修改后的权利要求1` 是**创造性论述**的小标题，
+        // 下面跟的是区别特征比对与论证，不是权项文本；当起点会把整节论述打满标记。
+        let text = "\
+三、关于创造性的论述
+
+（一）修改后的权利要求1
+
+1. 区别特征确认
+将修改后的权利要求1与D1对比，D1公开了管道与电动执行器。
+区别特征A：计算机控制器内设有PLC程序，D1未公开。
+";
+        assert!(
+            amendment_blocks(text).is_empty(),
+            "论述小标题不得开块: {:?}",
+            amendment_blocks(text)
+        );
+    }
+
+    #[test]
+    fn label_forms_still_open_block() {
+        // 四种真标签写法都必须继续开块（否则就是将过火修成漏检）
+        let cases = [
+            "修改后的权利要求1：\n一种物料输送装置，包括机架。\n",
+            "**修改后的权利要求 1**：\n一种物料输送装置，包括机架。\n",
+            "（二）关于权利要求的修改\n修改后的权利要求书：\n1. 一种物料输送装置，包括机架。\n",
+            "## 修改后的权利要求1-3：\n一种物料输送装置，包括机架。\n",
+        ];
+        for c in cases {
+            assert!(!amendment_blocks(c).is_empty(), "标签写法未被识别: {c:?}");
+        }
+    }
+
+    #[test]
+    fn banner_and_body_marker_counts_agree() {
+        // 交付文本 = 横幅 + gated；整段里 UNVERIFIED_MARK 的字面量数必须等于 unsupported_count。
+        // （修复前横幅自带一次字面量，读者数出 N+1——真实案件实测 136 vs 137）
+        let letter = "\
+## 二、关于权利要求的修改\n\n\
+修改后的权利要求1：\n\
+一种物料输送装置，包括机架（1），其特征在于，还包括设置在机架上的隔离罩。\n";
+        let r = gate(letter);
+        assert_eq!(r.unsupported_count, 1, "{:?}", r.unsupported);
+        let delivered = format!("{}{}", r.banner(), r.gated_text);
+        assert_eq!(
+            delivered.matches(UNVERIFIED_MARK).count(),
+            r.unsupported_count,
+            "横幅计数与正文标记数必须一致: {delivered}"
+        );
+    }
+
+    #[test]
+    fn skip_note_only_for_unverified_statuses() {
+        let no_section = gate("## 一、关于审查意见的答复\n\n申请人认为对比文件未公开该特征。\n");
+        assert_eq!(no_section.status, GateStatus::NoAmendment);
+        assert!(no_section.skip_note().contains("未定位到"));
+        assert_eq!(no_section.status.as_str(), "skipped_no_amendment_section");
+
+        let no_original = gate_amendment_text(
+            "## 二、关于权利要求的修改\n\n修改后的权利要求1：\n一种物料输送装置，包括机架。\n",
+            "",
+        );
+        assert!(!no_original.skip_note().is_empty());
+
+        let verified = gate(
+            "## 二、关于权利要求的修改\n\n修改后的权利要求1：\n一种物料输送装置，包括机架。\n",
+        );
+        assert_eq!(verified.status, GateStatus::Verified);
+        assert!(
+            verified.skip_note().is_empty(),
+            "已核验时不得再挂 skipped 说明"
+        );
     }
 }
