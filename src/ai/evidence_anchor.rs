@@ -142,6 +142,7 @@ impl ParagraphIndex {
 /// 2. 正文含省略号（`…` / `...` / `——`）时，切出的**每个 ≥8 字片段**都落在该段 ⇒ 命中
 ///    （模型爱把两处原文用省略号连成一条"引文"，这仍然是可翻回原文的）；
 /// 3. 正文不足 8 字 ⇒ 不判命中（两三个字的短语全文到处都在，那种命中是噪声）。
+///
 /// **不做前缀匹配、不做相似度匹配**——锚点的意义就是能翻回原文。
 fn content_matches(normalized_entry: &str, content: &str) -> bool {
     let Some(needle) = normalize(content) else {
@@ -395,7 +396,7 @@ pub fn anchor_items(items: &mut [Evidence], index: &ParagraphIndex) -> AnchorRep
                 report.unlocated += 1;
                 let kept = claimed
                     .as_ref()
-                    .map(|c| format_anchor(c))
+                    .map(format_anchor)
                     .unwrap_or_else(|| item.source.clone());
                 item.source = format!("{UNLOCATED}{kept}");
             }
