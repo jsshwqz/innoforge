@@ -23,16 +23,18 @@ const FIXTURE_ID: &str = "synthetic_fixture_001";
 
 // ── Fake AI provider stub ──
 
-fn start_fake_ai_stub(port: u16) -> std::thread::JoinHandle<()> {
-    std::thread::spawn(move || {
-        let listener = match TcpListener::bind(format!("127.0.0.1:{}", port)) {
-            Ok(l) => l,
-            Err(_) => return,
-        };
+/// 先 bind(0) 拿到已监听的端口再起线程，返回 `(port, handle)`。
+/// 不要退回"先 free_port() 再在线程内 bind"：两步之间的空窗会被并行用例抢走端口，
+/// 桩线程 bind 失败静默退出，客户端 Connection refused（CI run 40630679117 实测）。
+fn start_fake_ai_stub() -> (u16, std::thread::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("stub must bind an ephemeral port");
+    let port = listener.local_addr().expect("stub local_addr").port();
+    let handle = std::thread::spawn(move || {
         for mut stream in listener.incoming().flatten() {
             handle_ai_request(&mut stream);
         }
-    })
+    });
+    (port, handle)
 }
 
 fn handle_ai_request(stream: &mut TcpStream) {
@@ -144,10 +146,8 @@ fn fixture_is_marked_synthetic() {
 #[test]
 fn patent_detail_page_has_22_plus_buttons() {
     let server_port = free_port();
-    let ai_port = free_port();
 
-    let _stub = start_fake_ai_stub(ai_port);
-    std::thread::sleep(std::time::Duration::from_millis(200));
+    let (ai_port, _stub) = start_fake_ai_stub();
 
     let server = start_server(server_port, ai_port);
     assert!(
@@ -299,10 +299,8 @@ fn two_test_cases_resolve_different_db_path() {
     // don't interfere. Each should start independently and serve its own db.
     let port_a = free_port();
     let port_b = free_port();
-    let ai_port = free_port();
 
-    let _stub = start_fake_ai_stub(ai_port);
-    std::thread::sleep(std::time::Duration::from_millis(200));
+    let (ai_port, _stub) = start_fake_ai_stub();
 
     let ai_url = format!("http://127.0.0.1:{}", ai_port);
     let server_a = spawn_test_server(

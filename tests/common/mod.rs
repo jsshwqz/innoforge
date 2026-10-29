@@ -63,9 +63,49 @@ fn ensure_db_template() -> PathBuf {
                 let _ = child.wait();
                 panic!("template server must start within 60s");
             }
-            kill_server(child);
+            // 就绪判据必须落在**我们要复用的那个产物**上：`/api/version` 应答只说明进程活着
+            // 并触发了迁移，不等于迁移已经落盘。实测（分支 fix/test-stub-port-race 第 4 轮）
+            // 端口应答后立刻 kill ⇒ `template db must exist after migration` 断言炸：
+            // 5 个 binary 合跑时红一次、单独跑全绿，与端口无关，属同一类"用错的信号当就绪"。
+            // 这里等 db 文件出现且大小稳定（连续两次采样相同）再 kill；超时则带诊断信息 panic，
+            // 让下一次红能自己说明原因，而不是把"基础设施没就绪"伪装成产品断言失败。
             let db_path = template_dir.path().join("innoforge.db");
-            assert!(db_path.exists(), "template db must exist after migration");
+            let mut last_size = u64::MAX;
+            let mut stable = false;
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+            while std::time::Instant::now() < deadline {
+                let size = std::fs::metadata(&db_path).map(|m| m.len()).unwrap_or(0);
+                if size > 0 && size == last_size {
+                    stable = true;
+                    break;
+                }
+                last_size = size;
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+            if !stable {
+                let dir_listing: Vec<String> = std::fs::read_dir(template_dir.path())
+                    .map(|rd| {
+                        rd.filter_map(|e| e.ok())
+                            .map(|e| e.file_name().to_string_lossy().into_owned())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!(
+                    "template db never became stable: path={} exists={} last_size={} dir={:?}",
+                    db_path.display(),
+                    db_path.exists(),
+                    last_size,
+                    dir_listing
+                );
+            }
+            kill_server(child);
+            assert!(
+                db_path.exists(),
+                "template db must exist after migration: {}",
+                db_path.display()
+            );
             // Leak the tempdir so the DB file survives — template lives for process lifetime.
             std::mem::forget(template_dir);
             db_path

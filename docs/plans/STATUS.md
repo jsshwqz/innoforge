@@ -931,3 +931,9 @@
 - **门禁**：`cargo fmt --check`、`cargo clippy --all-targets -- -D warnings`、全量 `cargo test -j 2`、`no_unsafe_byte_slice` 四项 rc 见 PR 正文表。
 - **如实声明**：同义替换 / 上位概括 / 跨实施例拼凑这道门拦不住，两层防线各拦什么、各漏什么登记在 `docs/design/evidence-kernel-v2.md` §5.1（FMEA 负控区）。与 C2/C12 范畴正交，同时触发并罚不去重（`tests/amendment_verbatim_gate.rs::a33_gate_and_c2_c12_are_orthogonal_both_penalized`）。
 - **编号**：本分支基线 `8f89f4f` 的 `docs/errors.md` 最大号为 ㉟，但 `origin/main` 已用到 ㊴（㊱–㊴ 均为 main 条目），合入后取 ㊵，避免重号。
+
+## 2026-10-28 · 测试桩端口竞态（分支 `fix/test-stub-port-race`，base `origin/main` e130d06）
+- 四个测试文件（`stub_malformed_responses` / `stub_hanging_backend` / `issue_17_synthetic_fixtures` / `issue_107_models_first_run`）的桩统一改为"先 `TcpListener::bind("127.0.0.1:0")` 取 `local_addr().port()`、再把 listener 移入子线程、helper 返回 `(port, handle)`"，删掉 `free_port()` 预探与固定 sleep/轮询；CI run 40630679117 的 `ConnectionRefused` 根因即 free_port→线程内 bind 的 TOCTOU。四轮验证：4 binary × 3 轮 `--test-threads=8` 全绿（每轮 20 项），另加两条**确定性**机制测试（旧形态窗口可复现／新形态返回即监听）。`tests/helpers/fake_ai_stub.rs` 经查是**未被任何 target 编译的死文件**，本轮只同步签名 + 单独 `rustc --crate-type lib` 类型检查，接线或删除并入 #110。复盘 errors.md ㊶。
+
+## 2026-10-29 · 模板库就绪判据（同分支 `fix/test-stub-port-race`）
+- 第 4 轮合跑红出第二类基础设施缺陷：`ensure_db_template` 用 `/api/version` 应答当就绪，应答后立刻 kill ⇒ `template db must exist after migration` 断言炸（随机 1/5 轮，且红在与它无关的用例上）。改为就绪后轮询 db 文件「存在且大小连续两次采样不变」再 kill，超时 panic 带路径/大小/目录清单自诊断。负控（把等待目标改成不存在的文件名）确认该分支是活代码而非装饰；绿控 4 binary × 5 轮 `--test-threads=8` + 全量 `cargo test` rc=0。复盘 errors.md ㊷。

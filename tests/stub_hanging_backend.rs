@@ -45,12 +45,14 @@ const OA_REQUEST_BODY: &str = r#"{"my_patent":{"title":"测试专利","content":
 
 /// Start a "black hole" stub: accepts TCP connections but never sends
 /// any HTTP response. The connection stays open until the client times out.
-fn start_blackhole_stub(port: u16) -> std::thread::JoinHandle<()> {
-    std::thread::spawn(move || {
-        let listener = match TcpListener::bind(format!("127.0.0.1:{}", port)) {
-            Ok(l) => l,
-            Err(_) => return,
-        };
+///
+/// 端口在**起线程之前**由 `bind("127.0.0.1:0")` 分配并已进入 listen，返回
+/// `(port, handle)`；不用 free_port() 预探端口（预探与线程内 bind 之间的空窗会被
+/// 并行用例抢走，桩线程静默退出 ⇒ 客户端 Connection refused）。
+fn start_blackhole_stub() -> (u16, std::thread::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("stub must bind an ephemeral port");
+    let port = listener.local_addr().expect("stub local_addr").port();
+    let handle = std::thread::spawn(move || {
         for mut stream in listener.incoming().flatten() {
             // Read the request but never respond
             let mut buf = [0u8; 4096];
@@ -59,17 +61,18 @@ fn start_blackhole_stub(port: u16) -> std::thread::JoinHandle<()> {
             // Keep the connection open — the client must time out
             std::thread::sleep(std::time::Duration::from_secs(300));
         }
-    })
+    });
+    (port, handle)
 }
 
 /// Start a "slow drip" stub: accepts connections, sends a partial HTTP
 /// response header, then hangs indefinitely.
-fn start_slow_drip_stub(port: u16) -> std::thread::JoinHandle<()> {
-    std::thread::spawn(move || {
-        let listener = match TcpListener::bind(format!("127.0.0.1:{}", port)) {
-            Ok(l) => l,
-            Err(_) => return,
-        };
+///
+/// 端口分配同上：bind(0) 成功即已监听，调用方无需 sleep 等待桩就绪。
+fn start_slow_drip_stub() -> (u16, std::thread::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("stub must bind an ephemeral port");
+    let port = listener.local_addr().expect("stub local_addr").port();
+    let handle = std::thread::spawn(move || {
         for mut stream in listener.incoming().flatten() {
             let mut buf = [0u8; 4096];
             let _ = stream.read(&mut buf);
@@ -78,7 +81,8 @@ fn start_slow_drip_stub(port: u16) -> std::thread::JoinHandle<()> {
             // Do NOT send Content-Length or body — hang instead
             std::thread::sleep(std::time::Duration::from_secs(300));
         }
-    })
+    });
+    (port, handle)
 }
 
 /// Assert that a response is a proper HTTP response (not empty reply):
@@ -174,10 +178,8 @@ fn assert_ai_path_exercised(resp: reqwest::blocking::Response, label: &str) {
 #[test]
 fn tolerates_blackhole_ai_backend_no_empty_reply() {
     let server_port = free_port();
-    let ai_port = free_port();
 
-    let _stub = start_blackhole_stub(ai_port);
-    std::thread::sleep(std::time::Duration::from_millis(200));
+    let (ai_port, _stub) = start_blackhole_stub();
 
     let server = start_server(server_port, ai_port);
 
@@ -220,10 +222,8 @@ fn tolerates_blackhole_ai_backend_no_empty_reply() {
 #[test]
 fn tolerates_slow_drip_ai_backend_no_empty_reply() {
     let server_port = free_port();
-    let ai_port = free_port();
 
-    let _stub = start_slow_drip_stub(ai_port);
-    std::thread::sleep(std::time::Duration::from_millis(200));
+    let (ai_port, _stub) = start_slow_drip_stub();
 
     let server = start_server(server_port, ai_port);
 
@@ -263,10 +263,8 @@ fn tolerates_slow_drip_ai_backend_no_empty_reply() {
 #[test]
 fn tolerates_blackhole_cad_backend_no_empty_reply() {
     let server_port = free_port();
-    let cad_port = free_port();
 
-    let _stub = start_blackhole_stub(cad_port);
-    std::thread::sleep(std::time::Duration::from_millis(200));
+    let (cad_port, _stub) = start_blackhole_stub();
 
     let cad_url = format!("http://127.0.0.1:{}", cad_port);
     let server = spawn_test_server(server_port, &[("INNOFORGE_AIONCAD_URL", &cad_url)]);
@@ -299,10 +297,8 @@ fn tolerates_blackhole_cad_backend_no_empty_reply() {
 #[test]
 fn survives_repeated_blackhole_ai_requests() {
     let server_port = free_port();
-    let ai_port = free_port();
 
-    let _stub = start_blackhole_stub(ai_port);
-    std::thread::sleep(std::time::Duration::from_millis(200));
+    let (ai_port, _stub) = start_blackhole_stub();
 
     let server = start_server(server_port, ai_port);
 
