@@ -70,7 +70,7 @@ pub enum GateStatus {
 impl GateStatus {
     pub fn as_str(&self) -> &'static str {
         match self {
-            GateStatus::NoAmendment => "no_amendment",
+            GateStatus::NoAmendment => "skipped_no_amendment_section",
             GateStatus::NoOriginal => "skipped_no_original",
             GateStatus::Verified => "verified",
             GateStatus::Degraded => "degraded",
@@ -102,6 +102,10 @@ pub struct AmendmentGateResult {
     pub assertions_downgraded: usize,
     pub amended_claim_count: usize,
     pub checked_feature_count: usize,
+    /// 语料里 `Claim` 三元组条数。为 0 说明**原始权利要求书没进语料**——此时"逐字核验"
+    /// 实际只比对了说明书，任何"未命中"都可能是权项正文未被索引造成的误报，
+    /// 不得以"已核验"口吻交付（issue #140 的可见性要求）。
+    pub corpus_claims: usize,
     /// 提交度维度：`unsupported_count == 0` 才可能为真（压死规则见调用方）
     pub submission_ready: bool,
 }
@@ -116,19 +120,47 @@ impl AmendmentGateResult {
             assertions_downgraded: 0,
             amended_claim_count: 0,
             checked_feature_count: 0,
+            corpus_claims: 0,
             submission_ready: status != GateStatus::Degraded,
         }
     }
 
     /// 阻断横幅（复用 M2-C 横幅形态：`> ⚠️` blockquote，随正文首部一并下发）。
+    ///
+    /// 横幅里**不得出现** [`UNVERIFIED_MARK`] 的字面量（含 `【】`）：交付文本的标记数是
+    /// `横幅 + 正文`，横幅自带一次字面量就会让读者数出 N+1 个标记、与
+    /// `amendment_unsupported=N` 对不上（真实案件实测 136 vs 137）。这里改用「」描述。
     pub fn banner(&self) -> String {
         if self.unsupported_count == 0 {
             return String::new();
         }
         format!(
-            "> ⚠️ 修改稿核验阻断（amendment_unsupported={}）：本稿修改后的权利要求中有 {} 处特征句在原始申请文本（说明书 + 权利要求书）零命中，已就地标注{}；相关「明确记载 / 来源于原说明书」类断言已降级。提交前必须逐处核对专利法第33条（修改超范围）。\n\n",
-            self.unsupported_count, self.unsupported_count, UNVERIFIED_MARK
+            "> ⚠️ 修改稿核验阻断（amendment_unsupported={}）：本稿修改后的权利要求中有 {} 处特征句在原始申请文本（说明书 + 权利要求书）零命中，已就地逐处标注「未证实：该措辞在原始文本零命中」；相关「明确记载 / 来源于原说明书」类断言已降级。提交前必须逐处核对专利法第33条（修改超范围）。\n\n",
+            self.unsupported_count, self.unsupported_count
         )
+    }
+
+    /// 门未做逐字核验时的可见说明（贴在正文首部，避免"没有横幅＝已核验"的假绿）。
+    ///
+    /// - [`GateStatus::NoAmendment`]：答复书里没定位到修改稿段落——可能本答复确实不含权项修改，
+    ///   也可能是模型没按标签格式写；两种情况都必须让读者知道"本次未核验"。
+    /// - [`GateStatus::NoOriginal`]：缺原始申请文本，无比对基准。
+    ///
+    /// 其余状态（verified / degraded）返回空串。
+    pub fn skip_note(&self) -> String {
+        match self.status {
+            GateStatus::NoAmendment => "> ℹ️ 修改稿逐字核验：未定位到「修改后的权利要求」段落，本次未做第33条逐字核验；若本答复含权利要求修改，请人工核对。\n\n".to_string(),
+            GateStatus::NoOriginal => "> ℹ️ 修改稿逐字核验：缺少原始申请文本（说明书 + 权利要求书），本次未做第33条逐字核验。\n\n".to_string(),
+            GateStatus::Verified | GateStatus::Degraded => {
+                // 语料里一条权项都没有 ⇒ "逐字核验"实际只比对了说明书。此时任何零命中都可能
+                // 是「权项正文未被索引」造成的误报，必须显式否认"已核验"（issue #140）。
+                if self.corpus_claims == 0 {
+                    "> ⚠️ 修改稿逐字核验：语料中未索引到任何权利要求条目，本次比对只覆盖说明书，权项正文可能被误判为零命中——不得据此认定已通过第33条核验。\n\n".to_string()
+                } else {
+                    String::new()
+                }
+            }
+        }
     }
 }
 
@@ -188,6 +220,7 @@ pub fn gate_amendment_text(letter: &str, original_application: &str) -> Amendmen
             assertions_downgraded: 0,
             amended_claim_count: claim_count,
             checked_feature_count: 0,
+            corpus_claims: claim_section_count(&corpus),
             submission_ready: true,
         };
     }
@@ -256,6 +289,7 @@ pub fn gate_amendment_text(letter: &str, original_application: &str) -> Amendmen
         assertions_downgraded,
         amended_claim_count: claim_count,
         checked_feature_count: evals.len(),
+        corpus_claims: claim_section_count(&corpus),
         submission_ready: gate_submission_ready(status),
     }
 }
@@ -323,13 +357,20 @@ fn judge(needle: &str, hit: &Option<ScopedHit>) -> (bool, String, f64) {
 // ═══════════════════════════════════════════════════════════════════════
 
 /// 从文本中定位全部「修改后权利要求」段落，返回 (start, end) 字节区间（已排序合并且均落字符边界）。
+///
+/// **只有行首标签位的 marker 才算段落起点**（见 [`is_amendment_label`]）。答复书正文里的
+/// 叙述句——"申请人认为修改后的权利要求1-3已克服全部缺陷"——不是起点：一旦把它当起点，
+/// 块会一路延伸到下一节标题，块内所有非权项句子被当成特征句逐句核验、全部零命中、
+/// 整封打满标记（真实案件实测 `amendment_unsupported=136`）。
 pub fn amendment_blocks(text: &str) -> Vec<(usize, usize)> {
     let mut raw: Vec<(usize, usize)> = Vec::new();
     for marker in AMENDMENT_MARKERS {
         let mut from = 0usize;
         while let Some(pos) = text.get(from..).and_then(|s| s.find(marker)) {
             let abs = from + pos;
-            raw.push((abs, block_end(text, abs)));
+            if is_amendment_label(text, abs, marker) {
+                raw.push((abs, block_end(text, abs)));
+            }
             from = abs + marker.len().max(1);
             if raw.len() >= 8 {
                 break;
@@ -337,14 +378,8 @@ pub fn amendment_blocks(text: &str) -> Vec<(usize, usize)> {
         }
     }
     // 「修改为：「…」」句式：模型常把修改文本直接放在引号里
-    if let Ok(re) = regex::Regex::new(
-        r#"(?:修改为|改为|修改文本为|修改后内容为)\s*[：:]?\s*[「“"]([^」”"]{2,300})[」”"]"#,
-    ) {
-        for cap in re.captures_iter(text) {
-            if let Some(q) = cap.get(1) {
-                raw.push((q.start(), q.end()));
-            }
-        }
+    for (s, e) in quoted_amendment_ranges(text) {
+        raw.push((s, e));
     }
     raw.sort_unstable();
     // 合并重叠区间
@@ -359,6 +394,29 @@ pub fn amendment_blocks(text: &str) -> Vec<(usize, usize)> {
         merged.push((s, e));
     }
     merged
+}
+
+/// 引号内权项全文的正则（单一出处，`amendment_blocks` 与 `extract_claims` 共用）。
+///
+/// 两条放宽都是真实答复书逼出来的（issue #142）：
+/// ①**允许冒号后换行**——模型常写 `具体修改为：` 换行再给 `“一种……”`；
+/// ②**长度上限 300 → 1200**——独立权项正文普遍超过 300 字，旧上限会把权项全文截没。
+fn regex_quoted_amendment() -> &'static regex::Regex {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    RE.get_or_init(|| {
+        regex::Regex::new(
+            r#"(?:修改为|改为|修改文本为|修改后内容为|修改如下)\s*[：:]?\s*(?:[\r\n]+\s*)?[「“"]([^」”"]{2,1200})[」”"]"#,
+        )
+        .unwrap_or_else(|e| panic!("引号权项正则常量失败即 bug: {e}"))
+    })
+}
+
+/// 文本中所有「引号内的修改稿正文」区间。
+fn quoted_amendment_ranges(text: &str) -> Vec<(usize, usize)> {
+    regex_quoted_amendment()
+        .captures_iter(text)
+        .filter_map(|c| c.get(1).map(|m| (m.start(), m.end())))
+        .collect()
 }
 
 /// 段落终点：遇到下一节标题（`#`/`一、`/`**三`/`修改要点说明`）或超长上限即止。
@@ -388,6 +446,88 @@ fn is_section_boundary(line: &str) -> bool {
         return false;
     }
     t.starts_with('#') || t.starts_with("修改要点说明") || regex_section_heading().is_match(t)
+}
+
+/// marker 之后的行内残留若短于此且不含句读，视为标签（`修改后的权利要求1：`）；
+/// 超过此长度或带句读，说明这句话在**叙述**而不是在给修改稿（`……1-3已克服缺陷，理由如下：`）。
+const LABEL_REST_MAX_CHARS: usize = 12;
+
+/// 判定 `marker` 在 `abs` 处的出现是否处于「修改稿段落标签位」。
+///
+/// 三条同时成立才算：
+/// ① 该行去掉行首装饰（`#`/`*`/`>`/列表符/空白）与节序号（`二、`/`(二)`/`3.`）后**以 marker 起始**；
+/// ② marker 之后的行内残留 ≤ [`LABEL_REST_MAX_CHARS`] 字符，且不含 `，。；,;！？` 任一句子标点
+///    （放行 `修改后的权利要求1-3：`，拦住 `……1-3已克服缺陷，理由如下。`）；
+/// ③ 该行**要么是纯标题（残留为空），要么以冒号结尾**——即它在"引出修改稿正文"，
+///    而不是在"给一段论述起小标题"。
+///
+/// ③ 是关键：真实答复书里 `（一）修改后的权利要求1` 是**创造性论述**的小标题，下面跟的是
+/// 区别特征比对与论证，不是权项文本；把它当修改稿起点会让整节论述被逐句核验、全部零命中、
+/// 被打满标记。只有 `二、关于权利要求的修改`（纯标题）与 `修改后的权利要求1：`（冒号引出）
+/// 才算修改稿起点。
+fn is_amendment_label(text: &str, abs: usize, marker: &str) -> bool {
+    let line_start = text
+        .get(..abs)
+        .and_then(|head| head.rfind('\n'))
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    let line_end = text
+        .get(abs..)
+        .and_then(|tail| tail.find('\n'))
+        .map(|i| abs + i)
+        .unwrap_or(text.len());
+    let line = match text.get(line_start..line_end) {
+        Some(l) => l,
+        None => return false,
+    };
+    let content = strip_label_decor(line);
+    let after_marker = match content.strip_prefix(marker) {
+        Some(rest) => rest,
+        None => return false,
+    };
+    let residue = after_marker.trim_end_matches(['：', ':', '*', ' ', '\t', '、']);
+    if residue.chars().count() > LABEL_REST_MAX_CHARS {
+        return false;
+    }
+    if residue
+        .chars()
+        .any(|c| matches!(c, '，' | '。' | '；' | ',' | ';' | '！' | '？'))
+    {
+        return false;
+    }
+    // ③ 纯标题（`二、关于权利要求的修改`）或冒号引出（`修改后的权利要求1：`）才算起点
+    let bare_heading = residue.is_empty();
+    let introduces_text = content
+        .trim_end_matches(['*', ' ', '\t'])
+        .ends_with(['：', ':']);
+    bare_heading || introduces_text
+}
+
+/// 剥掉行首装饰与节序号，返回真正的内容起点。
+fn strip_label_decor(line: &str) -> &str {
+    let mut t = line.trim_start_matches(['#', '*', '>', '-', '•', ' ', '\t', ':', '：']);
+    // 中文序号：`二、` / `（二）` / `(二)`
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| {
+        regex::Regex::new(
+            r"^(?:[一二三四五六七八九十百]{1,3}[、.．]|[（(][一二三四五六七八九十百]{1,3}[）)])",
+        )
+        .unwrap_or_else(|e| panic!("节序号正则常量失败即 bug: {e}"))
+    });
+    if let Some(m) = re.find(t) {
+        t = t.get(m.end()..).unwrap_or("");
+    } else {
+        // 阿拉伯序号：`3.` / `3、` / `(3)`
+        static RE_NUM: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+        let ren = RE_NUM.get_or_init(|| {
+            regex::Regex::new(r"^(?:\d{1,2}[、.．]|[（(]\d{1,2}[）)])")
+                .unwrap_or_else(|e| panic!("数字节序号正则常量失败即 bug: {e}"))
+        });
+        if let Some(m) = ren.find(t) {
+            t = t.get(m.end()..).unwrap_or("");
+        }
+    }
+    t.trim_start_matches(['#', '*', '>', ' ', '\t'])
 }
 
 fn regex_section_heading() -> &'static regex::Regex {
@@ -423,12 +563,42 @@ fn extract_claims(block: &str) -> Vec<AmendedClaim> {
         })
         .collect();
     if hits.is_empty() {
+        // 没有行首「权利要求N」标题 ⇒ 先看块内有没有**引号内的权项全文**：
+        // 有 ⇒ 只扫引号段。修改稿节里的叙述句（"为进一步突出本发明的实质性技术贡献"
+        // "缩短审查周期"）不是权项正文，逐句核验只会产出误报（issue #142 实测 26 处）。
+        // 无 ⇒ 保留旧回退（整块当一个权项），宁可粗筛也不静默放过。
+        let quotes: Vec<String> = quoted_amendment_ranges(block)
+            .into_iter()
+            .filter_map(|(s, e)| block.get(s..e).map(|t| t.to_string()))
+            .collect();
+        if !quotes.is_empty() {
+            return quotes
+                .into_iter()
+                .map(|text| AmendedClaim {
+                    claim_no: "引号内".to_string(),
+                    text,
+                })
+                .collect();
+        }
         return vec![AmendedClaim {
             claim_no: "0".to_string(),
             text: block.to_string(),
         }];
     }
     let mut out = Vec::new();
+    // 第一个「权利要求N」标题**之前**的内容也必须扫：真实答复书常写成
+    // `1. 权利要求1的修改：\n在保留原权利要求1全部特征（含……）的基础上，从原说明书……`
+    // ——这种带前导序号的写法不匹配权项标题正则，若只从第一个命中标题开始扫，
+    // 33 条真正要抓的那一段反而被跳过（v4 复跑实测：136 收敛到 2，但那 2 处都不是真缺陷，
+    // 真缺陷段落被静默略过＝把过火换成了假绿）。块自身的小标题行不是权项文本，剥掉。
+    let prefix = block.get(..hits[0].0).unwrap_or("");
+    let prefix_body = prefix.split_once('\n').map(|(_, rest)| rest).unwrap_or("");
+    if prefix_body.trim().chars().count() >= MIN_FEATURE_CHARS {
+        out.push(AmendedClaim {
+            claim_no: "未编号".to_string(),
+            text: prefix_body.to_string(),
+        });
+    }
     for (i, (_, body_start, num)) in hits.iter().enumerate() {
         let body_end = hits.get(i + 1).map(|h| h.0).unwrap_or(block.len());
         let body = block.get(*body_start..body_end).unwrap_or("");
@@ -453,8 +623,16 @@ fn split_features(claim_text: &str) -> Vec<String> {
                 .trim_start_matches(['*', '-', '•', ' '])
                 .to_string()
         })
-        .filter(|s| !s.is_empty() && !is_declarative_meta(s))
+        .filter(|s| !s.is_empty() && !is_declarative_meta(s) && !is_heading_fragment(s))
         .collect()
+}
+
+/// 形如 `1. 权利要求1的修改：` 的行是**小标题**而不是技术特征句：短且以冒号结尾。
+/// 与块起点判据（[`is_amendment_label`]：纯标题或冒号引出）同源，不另造第二套概念——
+/// 区别只在于：块起点看"这行是否引出修改稿"，这里看"这句是不是修改稿里的一句标题"。
+fn is_heading_fragment(fragment: &str) -> bool {
+    let t = fragment.trim_end_matches(['*', ' ', '\t']);
+    t.ends_with(['：', ':']) && t.chars().count() <= 20
 }
 
 fn is_declarative_meta(fragment: &str) -> bool {
@@ -558,8 +736,20 @@ fn to_halfwidth(c: char) -> char {
 
 /// 构造「本申请」语料：权利要求书各权项（`Claim` 三元组）+ 说明书具体实施方式各段
 /// （`Paragraph` 三元组）。检索范围因此被限制在本申请内部，对比文件不参与。
+///
+/// 输入形态有两种，都必须认得（issue #140）：
+/// ①**标题式纯文本**——含「权利要求书 / 说明书 / 具体实施方式」这类小节名；
+/// ②**本应用自己的规范形态**——`my_patent` 是一段 JSON 字符串
+/// （`title / abstract_text / claims / description`）。主 UI 与答复书网关传的就是这种。
+/// 形态②先经 [`flatten_json_application`] 摊平成形态①再走同一套分节逻辑，
+/// **不另造第二套抽取**；摊平失败（不是 JSON、或没有权项字段）时按原文继续，
+/// 由 `corpus_claims==0` 这条可见性把"语料里没有权项"暴露出来。
 pub fn build_own_application_corpus(original: &str) -> SourceCorpus {
-    let text = original.trim();
+    let flattened = flatten_json_application(original);
+    let text = match flattened.as_deref() {
+        Some(f) => f.trim(),
+        None => original.trim(),
+    };
     if text.is_empty() {
         return SourceCorpus::default();
     }
@@ -602,6 +792,68 @@ pub fn build_own_application_corpus(original: &str) -> SourceCorpus {
             sections,
         }],
     }
+}
+
+/// 把本应用的规范 JSON 形态摊平成「权利要求书 / 说明书」标题式文本。
+///
+/// 认得 `claims`（或 `claims_under_review`）与 `description`（或 `specification`）四类键；
+/// 只要有一个可用字段就返回摊平结果。返回 `None` 表示"这不是 JSON 或没有可用字段"，
+/// 调用方按原文继续——**不在此处猜测、也不静默造内容**。
+///
+/// 摊平顺序刻意与人工撰写的原始申请文本一致（权项在前、说明书在后），
+/// 使 `claims_region` / `spec_region` 的既有语义原样复用。
+fn flatten_json_application(text: &str) -> Option<String> {
+    let trimmed = text.trim_start();
+    if !trimmed.starts_with('{') {
+        return None;
+    }
+    let v: serde_json::Value = serde_json::from_str(text).ok()?;
+    let field = |keys: &[&str]| -> Option<String> {
+        keys.iter().find_map(|k| {
+            v.get(*k)
+                .and_then(|x| x.as_str())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        })
+    };
+    let claims = field(&["claims", "claims_under_review"]);
+    let spec = field(&["description", "specification", "description_text"]);
+    let abstract_text = field(&["abstract_text", "abstract"]);
+    if claims.is_none() && spec.is_none() {
+        return None;
+    }
+    let mut out = String::new();
+    if let Some(c) = &claims {
+        out.push_str("权利要求书\n");
+        out.push_str(c);
+        out.push('\n');
+    }
+    out.push_str("说明书\n");
+    if let Some(a) = &abstract_text {
+        out.push_str("技术领域\n");
+        out.push_str(a);
+        out.push('\n');
+    }
+    if let Some(s) = &spec {
+        out.push_str("具体实施方式\n");
+        out.push_str(s);
+        out.push('\n');
+    }
+    Some(out)
+}
+
+/// 语料里的权项三元组条数（可见性用：0 表示原始权利要求书没进语料）。
+fn claim_section_count(corpus: &SourceCorpus) -> usize {
+    corpus
+        .docs
+        .first()
+        .map(|d| {
+            d.sections
+                .iter()
+                .filter(|s| s.kind == LocatorKind::Claim)
+                .count()
+        })
+        .unwrap_or(0)
 }
 
 fn claims_region(text: &str) -> Option<(usize, usize)> {
@@ -950,5 +1202,270 @@ mod tests {
         assert_eq!(c, d);
         // "至少"不得被当成范围号
         assert!(strip_legal_variation("至少一个").contains("至少"));
+    }
+
+    // ── 作用域：marker 只在行首标签位才开块（过火回归守卫）──
+
+    #[test]
+    fn prose_mention_of_marker_does_not_open_block() {
+        // 真实过火形态①：正文叙述句里提到"修改后的权利要求1-3"，句中含逗号句号
+        let text = "申请人认为修改后的权利要求1-3已克服审查意见指出的全部缺陷，具体理由如下。\n";
+        assert!(
+            amendment_blocks(text).is_empty(),
+            "叙述句里的 marker 不得开块: {:?}",
+            amendment_blocks(text)
+        );
+    }
+
+    #[test]
+    fn argumentation_subheading_does_not_open_block() {
+        // 真实过火形态②（v4 实测的主因）：`（一）修改后的权利要求1` 是**创造性论述**的小标题，
+        // 下面跟的是区别特征比对与论证，不是权项文本；当起点会把整节论述打满标记。
+        let text = "\
+三、关于创造性的论述
+
+（一）修改后的权利要求1
+
+1. 区别特征确认
+将修改后的权利要求1与D1对比，D1公开了管道与电动执行器。
+区别特征A：计算机控制器内设有PLC程序，D1未公开。
+";
+        assert!(
+            amendment_blocks(text).is_empty(),
+            "论述小标题不得开块: {:?}",
+            amendment_blocks(text)
+        );
+    }
+
+    #[test]
+    fn label_forms_still_open_block() {
+        // 四种真标签写法都必须继续开块（否则就是将过火修成漏检）
+        let cases = [
+            "修改后的权利要求1：\n一种物料输送装置，包括机架。\n",
+            "**修改后的权利要求 1**：\n一种物料输送装置，包括机架。\n",
+            "（二）关于权利要求的修改\n修改后的权利要求书：\n1. 一种物料输送装置，包括机架。\n",
+            "## 修改后的权利要求1-3：\n一种物料输送装置，包括机架。\n",
+        ];
+        for c in cases {
+            assert!(!amendment_blocks(c).is_empty(), "标签写法未被识别: {c:?}");
+        }
+    }
+
+    #[test]
+    fn banner_and_body_marker_counts_agree() {
+        // 交付文本 = 横幅 + gated；整段里 UNVERIFIED_MARK 的字面量数必须等于 unsupported_count。
+        // （修复前横幅自带一次字面量，读者数出 N+1——真实案件实测 136 vs 137）
+        let letter = "\
+## 二、关于权利要求的修改\n\n\
+修改后的权利要求1：\n\
+一种物料输送装置，包括机架（1），其特征在于，还包括设置在机架上的隔离罩。\n";
+        let r = gate(letter);
+        assert_eq!(r.unsupported_count, 1, "{:?}", r.unsupported);
+        let delivered = format!("{}{}", r.banner(), r.gated_text);
+        assert_eq!(
+            delivered.matches(UNVERIFIED_MARK).count(),
+            r.unsupported_count,
+            "横幅计数与正文标记数必须一致: {delivered}"
+        );
+    }
+
+    // ── issue #142：真实版式的修改稿（带前导序号小标题 + 跨行引号全文）──
+
+    /// 跨行引号必须被接住：`具体修改为：` 换行后给 `“一种……”`。
+    /// 节内叙述句（"为进一步突出…""缩短审查周期"）**不得**被当特征句打标；
+    /// 引号内权项全文才是核验对象，其中真正无原文依据的措辞必须被抓到。
+    #[test]
+    fn multiline_quoted_claim_is_scanned_and_narrative_is_not() {
+        let letter = "\
+=== 意见陈述书 ===
+
+二、关于权利要求的修改
+1. 权利要求1的修改说明：
+为进一步突出本发明的实质性技术贡献，缩短审查周期，申请人对权利要求书进行了限定性修改，具体修改为：
+“一种物料输送装置，其特征在于，包括机架，机架上设有输送带，机架侧面固定有驱动电机，且设有隔离罩。”
+
+三、关于创造性的论述
+本申请具备创造性。
+";
+        let r = gate_amendment_text(letter, SPEC);
+        // 叙述句零标记：整封信里只允许出现引号段内部的标记
+        let narrative_zone = r
+            .gated_text
+            .split_once('“')
+            .map(|(head, _)| head)
+            .unwrap_or("");
+        assert_eq!(
+            narrative_zone.matches(UNVERIFIED_MARK).count(),
+            0,
+            "引号之前的叙述句不得被标注:\n{}",
+            r.gated_text
+        );
+        assert!(
+            r.unsupported.iter().any(|u| u.text.contains("隔离罩")),
+            "引号内权项全文的零命中措辞必须被抓到: {:?}",
+            r.unsupported
+        );
+        assert!(
+            r.unsupported.iter().all(|u| u.claim_no == "引号内"),
+            "本例核验对象应全部来自引号段: {:?}",
+            r.unsupported
+                .iter()
+                .map(|u| u.claim_no.clone())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// 既无行首权项标题、也无引号段 ⇒ **保留**旧回退（整块当一个权项继续粗筛）。
+    /// 这是刻意选择：宁可多标也不静默放过——修改稿哪怕写得不成样子，33 条核验也不能
+    /// 变成"没找到正文所以通过"。与 issue #142 原文里"返回 skipped"的设想相反，
+    /// 已在 issue 下注明取舍理由。
+    #[test]
+    fn block_without_header_or_quote_still_falls_back() {
+        let letter = "## 二、关于权利要求的修改\n\n在保留原权利要求1全部特征的基础上，增加设置于机架上的隔离罩。\n";
+        let r = gate_amendment_text(letter, SPEC);
+        assert!(
+            !r.unsupported.is_empty(),
+            "无标题无引号时仍须回退整块核验，不得静默放过"
+        );
+        assert!(
+            r.unsupported.iter().any(|u| u.text.contains("隔离罩")),
+            "回退路径必须仍能抓到零命中措辞: {:?}",
+            r.unsupported
+        );
+    }
+
+    /// 引号段长度上限从 300 提到 1200：真实独立权项普遍超过 300 字，
+    /// 旧上限会把权项全文截断成半句，导致核验对象错位。
+    #[test]
+    fn long_quoted_claim_is_not_truncated() {
+        let long_claim = format!(
+            "一种物料输送装置，其特征在于，包括机架，机架上设有输送带，机架侧面固定有驱动电机，{}，并设有隔离罩。",
+            "导料板与输送带之间的间距为20至30厘米，".repeat(12)
+        );
+        assert!(
+            long_claim.chars().count() > 300,
+            "夹具须超过旧上限 300 字才有意义"
+        );
+        let letter = format!(
+            "## 二、关于权利要求的修改\n\n修改后的权利要求书如下：\n具体修改为：\n“{long_claim}”\n"
+        );
+        let ranges = quoted_amendment_ranges(&letter);
+        assert_eq!(ranges.len(), 1, "长引号段应被完整捕获为一处");
+        let captured = letter.get(ranges[0].0..ranges[0].1).unwrap_or("");
+        assert!(
+            captured.ends_with("并设有隔离罩。"),
+            "捕获内容必须到引号结尾，实际尾部: …{}",
+            captured.chars().rev().take(12).collect::<String>()
+        );
+    }
+
+    // ── issue #140：语料必须认得本应用自己的 JSON 形态 my_patent ──
+
+    /// JSON 形态（主 UI 与答复书网关实际传的就是这种）：权项正文必须进语料。
+    #[test]
+    fn json_shaped_input_indexes_claims() {
+        let json = concat!(
+            r#"{"title":"一种物料输送装置","abstract_text":"本发明涉及输送设备。","#,
+            r#""claims":"1.一种物料输送装置，其特征在于，包括机架，机架上设有输送带，机架侧面固定有驱动电机。\n"#,
+            r#"2.根据权利要求1所述的装置，其特征在于，输送带上方设有导料板。","#,
+            r#""description":"具体实施方式\n[0001] 机架上设有导料板，导料板与输送带之间的间距为20～30厘米。"}"#
+        );
+        let corpus = build_own_application_corpus(json);
+        let claims = claim_section_count(&corpus);
+        assert!(
+            claims >= 2,
+            "JSON 的 claims 应拆出 ≥2 条权项三元组，实际 {claims}"
+        );
+        // 逐字取自 claims 的修改稿不得被判零命中（v5 实测误报 30 处的根因）
+        let letter = "## 二、关于权利要求的修改\n\n修改后的权利要求1：\n一种物料输送装置，其特征在于，包括机架，机架上设有输送带，机架侧面固定有驱动电机。\n";
+        let r = gate_amendment_text(letter, json);
+        assert_eq!(r.corpus_claims, claims, "corpus_claims 必须与语料一致");
+        assert_eq!(
+            r.unsupported_count,
+            0,
+            "逐字来自原权利要求书的修改稿不得被误判: {:?} / 标记 {}",
+            r.unsupported,
+            r.gated_text.matches(UNVERIFIED_MARK).count()
+        );
+        assert!(
+            r.skip_note().is_empty(),
+            "有权项语料时不得再挂缺基准说明: {}",
+            r.skip_note()
+        );
+    }
+
+    /// 只有说明书、没有权项 ⇒ 必须显式否认"已核验"，不得让读者以为比过了原文。
+    #[test]
+    fn corpus_without_claims_is_visible_not_silent() {
+        let spec_only =
+            "说明书\n技术领域\n本发明涉及输送设备。\n具体实施方式\n[0001] 机架上设有输送带。\n";
+        let letter = "## 二、关于权利要求的修改\n\n修改后的权利要求1：\n一种物料输送装置，其特征在于，机架上设有输送带，且设有隔离罩。\n";
+        let r = gate_amendment_text(letter, spec_only);
+        assert_eq!(r.corpus_claims, 0, "纯说明书输入不应有权项三元组");
+        assert!(
+            r.skip_note().contains("未索引到任何权利要求"),
+            "语料缺权项时必须显式说明，实际: {:?}",
+            r.skip_note()
+        );
+    }
+
+    /// `claims_under_review` 是别名键，也必须认得。
+    #[test]
+    fn json_alias_claims_under_review_is_recognised() {
+        let json = r#"{"claims_under_review":"1.一种物料输送装置，包括机架。","description":"具体实施方式\n[0001] 机架上设有输送带。"}"#;
+        let corpus = build_own_application_corpus(json);
+        assert!(
+            claim_section_count(&corpus) >= 1,
+            "别名键 claims_under_review 必须被认得"
+        );
+    }
+
+    /// 不是 JSON（或 JSON 里没有可用字段）时不得瞎猜，按原文继续。
+    #[test]
+    fn non_json_input_falls_back_unchanged() {
+        assert!(
+            flatten_json_application(SPEC).is_none(),
+            "标题式纯文本不该被当 JSON"
+        );
+        assert!(
+            flatten_json_application(r#"{"title":"只有标题"}"#).is_none(),
+            "没有 claims/description 的 JSON 不得凭空造语料"
+        );
+    }
+
+    #[test]
+    fn skip_note_only_for_unverified_statuses() {
+        let no_section = gate("## 一、关于审查意见的答复\n\n申请人认为对比文件未公开该特征。\n");
+        assert_eq!(no_section.status, GateStatus::NoAmendment);
+        assert!(no_section.skip_note().contains("未定位到"));
+        assert_eq!(no_section.status.as_str(), "skipped_no_amendment_section");
+
+        let no_original = gate_amendment_text(
+            "## 二、关于权利要求的修改\n\n修改后的权利要求1：\n一种物料输送装置，包括机架。\n",
+            "",
+        );
+        assert!(!no_original.skip_note().is_empty());
+
+        let verified = gate(
+            "## 二、关于权利要求的修改\n\n修改后的权利要求1：\n一种物料输送装置，包括机架。\n",
+        );
+        assert_eq!(verified.status, GateStatus::Verified);
+        // SPEC 夹具只有说明书、没有「权利要求书」分节 ⇒ 语料无权项，
+        // 新行为要求此时挂"语料缺权项"说明（#140），但**不得**挂"未定位到修改稿"那种
+        // 与事实相反的说明——两者是不同的可见性通道，这里分别钉住。
+        assert!(
+            !verified.skip_note().contains("未定位到"),
+            "已找到修改稿时不得声称未定位到: {}",
+            verified.skip_note()
+        );
+        assert_eq!(
+            verified.corpus_claims, 0,
+            "SPEC 夹具无权利要求书分节，corpus_claims 应为 0"
+        );
+        assert!(
+            verified.skip_note().contains("未索引到任何权利要求"),
+            "语料缺权项时即使判 verified 也必须挂缺基准说明: {:?}",
+            verified.skip_note()
+        );
     }
 }

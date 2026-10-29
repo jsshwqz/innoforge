@@ -1320,7 +1320,7 @@ pub struct A33CheckResult {
     pub gated_text: String,
     /// 提交度维度：零命中为 0（压死规则）
     pub submission_ready: bool,
-    /// 门状态：no_amendment / skipped_no_original / verified / degraded
+    /// 门状态：skipped_no_amendment_section / skipped_no_original / verified / degraded
     pub gate_status: String,
 }
 
@@ -1334,7 +1334,7 @@ impl Default for A33CheckResult {
             assertions_downgraded: 0,
             gated_text: String::new(),
             submission_ready: true,
-            gate_status: "no_amendment".to_string(),
+            gate_status: "skipped_no_amendment_section".to_string(),
         }
     }
 }
