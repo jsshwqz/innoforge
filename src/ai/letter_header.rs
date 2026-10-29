@@ -444,7 +444,7 @@ mod tests {
 国家知识产权局
 发文日：2026年07月10日
 发文序号：9999010100000001
-申请号：9999001234567.8
+申请号：999999999999.9
 发明名称：一种示例装置
 申请人：示例申请人
 正文其余内容。";
@@ -456,7 +456,7 @@ mod tests {
     #[test]
     fn extract_reads_all_five_header_fields() {
         let h = synthetic_header();
-        assert_eq!(h.application_number.as_deref(), Some("9999001234567.8"));
+        assert_eq!(h.application_number.as_deref(), Some("999999999999.9"));
         assert_eq!(h.invention_title.as_deref(), Some("一种示例装置"));
         assert_eq!(h.applicant.as_deref(), Some("示例申请人"));
         assert_eq!(h.dispatch_serial.as_deref(), Some("9999010100000001"));
@@ -467,11 +467,11 @@ mod tests {
     #[test]
     fn extract_does_not_grab_the_first_date_it_sees() {
         // 负控：正文里出现的第一个日期不是发文日 ⇒ 发文日必须抽不到，而不是被当成发文日
-        let text = "公开号 CN990000001A 公开日：2026年01月01日\n申请号：9999001234567.8\n";
+        let text = "公开号 CN990000001A 公开日：2026年01月01日\n申请号：999999999999.9\n";
         let h = LetterHeader::extract(text, "", None);
         assert_eq!(h.dispatch_date, None, "无发文日标记时不得用任意日期顶替");
         assert_eq!(h.dispatch_serial, None);
-        assert_eq!(h.application_number.as_deref(), Some("9999001234567.8"));
+        assert_eq!(h.application_number.as_deref(), Some("999999999999.9"));
     }
 
     #[test]
@@ -505,7 +505,7 @@ mod tests {
 日期：【待填写】";
         let out = h.backfill(letter);
         assert!(
-            out.letter.contains("**专利号**：9999001234567.8"),
+            out.letter.contains("**专利号**：999999999999.9"),
             "{}",
             out.letter
         );
@@ -550,7 +550,7 @@ mod tests {
     #[test]
     fn backfill_collapses_half_filled_date_instead_of_leaving_three_holes() {
         // 真实形态：模型自己写了年份，月日是占位（v6 实测）
-        let h = LetterHeader::extract("申请号：9999001234567.8", "", None);
+        let h = LetterHeader::extract("申请号：999999999999.9", "", None);
         let letter = "日期：2026年【待填写】月【待填写】日\n";
         let out = h.backfill(letter);
         assert!(!out.letter.contains("待填写"));
@@ -586,7 +586,7 @@ mod tests {
         // 值区间取到下一个竖线为止，因此竖线前的那个空格被一起替换掉了；
         // markdown 仍能渲染，形态在这里是确定的，所以把它钉死而不是写成"包含即可"。
         assert!(
-            out.letter.contains("| **专利号** | 9999001234567.8|"),
+            out.letter.contains("| **专利号** | 999999999999.9|"),
             "{}",
             out.letter
         );
@@ -621,7 +621,7 @@ mod tests {
         assert_eq!(out.filled, 5, "五项都补进去了");
         assert!(
             out.letter.starts_with(
-                "复审请求书\n专利号：9999001234567.8\n发明名称：一种示例装置\n\
+                "复审请求书\n专利号：999999999999.9\n发明名称：一种示例装置\n\
                  申请人：示例申请人\n发文序号：9999010100000001\n发文日：2026年07月10日\n"
             ),
             "{}",
@@ -667,13 +667,9 @@ mod tests {
 
     #[test]
     fn prompt_block_states_known_values_and_forbids_bare_placeholder() {
-        let h = LetterHeader::extract(
-            "申请号：9999001234567.8\n发文日：2026年07月10日\n",
-            "",
-            None,
-        );
+        let h = LetterHeader::extract("申请号：999999999999.9\n发文日：2026年07月10日\n", "", None);
         let block = h.prompt_block();
-        assert!(block.contains("专利号：9999001234567.8"));
+        assert!(block.contains("专利号：999999999999.9"));
         assert!(block.contains("发文日：2026年07月10日"));
         assert!(block.contains(UNRESOLVED), "抽不到的字段要给出可追形态");
         assert!(block.contains("禁止输出【待填写】"));

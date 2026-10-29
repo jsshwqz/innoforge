@@ -61,7 +61,7 @@ const NOTICE_WITH_HEADER: &str = "\
 国家知识产权局
 发文日：2026年07月10日
 发文序号：9999010100000001
-申请号：9999001234567.8
+申请号：999999999999.9
 发明名称：一种示例物料输送装置
 申请人：示例申请人
 正文：权利要求 1 不具备专利法第22条第3款规定的创造性。
@@ -227,7 +227,7 @@ fn header_is_backfilled_and_no_template_placeholder_reaches_the_reader() {
     );
     // 负控点 2：五项写的是从通知书表头抽到的真实值
     assert!(
-        decoded.contains("**专利号**：9999001234567.8"),
+        decoded.contains("**专利号**：999999999999.9"),
         "专利号未回填: {decoded}"
     );
     assert!(
@@ -239,14 +239,12 @@ fn header_is_backfilled_and_no_template_placeholder_reaches_the_reader() {
         "申请人未回填: {decoded}"
     );
     assert!(
-        decoded.contains("发文序号：9999010100000001") && decoded.contains("发文日：2026年07月10日"),
+        decoded.contains("发文序号：9999010100000001")
+            && decoded.contains("发文日：2026年07月10日"),
         "发文序号/发文日该被补插进信头块: {decoded}"
     );
     // 负控点 3：半截日期整体收敛，不许留下会被当成系统确认过的"2026年"
-    assert!(
-        !decoded.contains("2026年【"),
-        "半截日期必须收敛: {decoded}"
-    );
+    assert!(!decoded.contains("2026年【"), "半截日期必须收敛: {decoded}");
     assert!(
         decoded.contains(&format!("日期：{UNRESOLVED}")),
         "签署日由申请人决定 ⇒ 必须是可追形态: {decoded}"
