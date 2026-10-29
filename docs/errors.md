@@ -1386,7 +1386,7 @@
 - **预防 / Prevention**: ①"判据正确但未接线"必须作为缺陷登记——`#[allow(dead_code)]` 是漏放许可证，不是能力储备；任何检查器合入前要能指出它的**生产调用点**（file:line）。②零命中必须落到**用户可见文本**（就地标注 + 首部横幅），只进日志/只进计数等于没拦。③词表型检查不能充当 A33 的唯一防线：判据必须是"回原文可证伪"的匹配，而不是"像不像专业术语"的启发式。④收尾时旧实现（`check_a33_risk` 的 17 词表、`HIGH_RISK_AMENDMENT_TERMS`、`extract_amendment_section`）**整体删除**而不是加 `#[allow(dead_code)]` 留档：留着就还有被重新接线的可能，`clippy -D warnings` 的 `dead_code` 红正是该删的信号。
 - **提交 / Commit**: 见 PR（分支 `feat/amendment-verbatim-gate`）。编号说明：本分支基线 `8f89f4f` 的文件最大号为 ㉟，合入目标 `origin/main` 已用到 ㊴，故本条取 ㊵。
 
-## [2026-10-28] ㊶ 四个测试桩仍用 "free_port() 预探 + 线程内 bind"：CI 实测 Connection refused，桩 bind 失败静默退出
+## [2026-10-28] ㊹ 四个测试桩仍用 "free_port() 预探 + 线程内 bind"：CI 实测 Connection refused，桩 bind 失败静默退出
 - **严重程度 / Severity**: HIGH（CI Tests 作业间歇性红；测试基础设施不可靠会直接污染"可直接提交度"的判定——这是"基础设施失败冒充产品失败"的又一形态）
 - **涉及文件**: `tests/stub_malformed_responses.rs`、`tests/stub_hanging_backend.rs`、`tests/issue_17_synthetic_fixtures.rs`、`tests/issue_107_models_first_run.rs`、`tests/helpers/fake_ai_stub.rs`（后者见"如实说明"）
 - **现象 / Symptom**: CI run 40630679117 的 Tests 作业里，桩类集成测试偶发红：客户端拿到 `127.0.0.1:<port>` 直接 `ConnectError("tcp connect error", ConnectionRefused)`（典型失败点 `stub_chat_completions_returns_valid_json`），同一提交重跑又能全绿；本地串行跑几乎不复现，`--test-threads=8` 才偶发。
@@ -1395,14 +1395,14 @@
 - **回归 / 负控 / Regression & Negative control**: ①四个测试 binary 合跑 `cargo test --test <名>… -- --test-threads=8` 共 **8 轮**（端口修复后 3 轮 + 就绪判据修复后 5 轮）全部 rc=0，每轮 3+6+4+7=20 项全绿，无一次 ConnectionRefused。②机制层负控（新增两条确定性测试，不靠概率）：`free_port_probe_leaves_a_stealable_window` 先 `free_port()` 再让抢占者 bind 同一端口 ⇒ 成功，随后模拟桩线程的 bind ⇒ **必须 `is_err()`**，把"旧形态有窗口"钉成可复现事实；`ephemeral_bind_is_listening_before_helper_returns` 证明新形态 helper 返回端口时 `TcpStream::connect` 立刻成功 ⇒ 无需 sleep。③`fmt --check` / `clippy --all-targets -D warnings` / 全量 `cargo test` / `no_unsafe_byte_slice` 见 PR 的门禁表。
 - **如实说明（未修部分）**: `tests/helpers/fake_ai_stub.rs` **当前不被任何 cargo test target 编译**——`tests/` 子目录里的文件不会自动成为测试目标，而全仓没有任何 `mod helpers;` 引用它（`grep -rn 'fake_ai_stub' tests/` 只有它自己与 `issue_17` 里的**同名内联副本**）。也就是说 `docs/errors.md` 里"仓库已有 `tests/helpers/fake_ai_stub.rs` 的进程内桩可复用"（#105/#106 的预防条目）目前是一句**无法兑现的推荐**：改这个文件不会让任何测试变红或变绿。本轮只把它改成与四个已接线文件一致的签名，并用 `rustc --edition 2021 --crate-type lib tests/helpers/fake_ai_stub.rs` 单独类型检查（rc=0，零告警）证明它没有语法/类型腐烂；**接线或删除留给 #110**（与"应用侧 40+ 处 `free_port()` 统一"同批处理），不在本轮夹带。
 - **预防 / Prevention**: ①测试里"分配端口"必须与"监听端口"是**同一个动作**：拿到 `local_addr()` 的 listener 不许 drop 后再复用端口号——端口号只有在 listener 已 listen 时才有意义。②桩线程的 `bind` 失败不允许静默 `return`，至少 `expect`/`panic!`，否则故障会伪装成"客户端连不上"的另一层现象。③凡是用 `sleep`/轮询掩盖启动时序的测试，都要问一句"这段时间里端口是否真的在监听"；如果不是，sleep 只是把概率降低而不是消除。④**放在 `tests/` 子目录里的共享 helper 必须被显式 `mod` 引用，否则它是死文件**：仓库文档推荐复用它之前，先确认它真的被编译。
-- **提交 / Commit**: 见 PR（分支 `fix/test-stub-port-race`）。编号说明：`origin/main` 已用到 ㊵，本条取 ㊶。
+- **提交 / Commit**: 见 PR（分支 `fix/test-stub-port-race`）。编号说明：合入时 `origin/main` 已用到 ㊸（#137/#145 各占 ㊶/㊷/㊸），故本条取 ㊹、下一条取 ㊺。
 
-## [2026-10-29] ㊷ 模板库就绪判据用错信号：`/api/version` 应答 ≠ 迁移落盘，kill 后 db 文件不存在
-- **严重程度 / Severity**: HIGH（与 ㊶ 同一类"基础设施失败冒充产品失败"，但机制不同：㊶ 是端口 TOCTOU，本条是**就绪信号与依赖产物脱钩**；红起来是随机 1/5 轮，且红的是不相干用例，极易被误判成产品缺陷）
+## [2026-10-29] ㊺ 模板库就绪判据用错信号：`/api/version` 应答 ≠ 迁移落盘，kill 后 db 文件不存在
+- **严重程度 / Severity**: HIGH（与 ㊹ 同一类"基础设施失败冒充产品失败"，但机制不同：㊹ 是端口 TOCTOU，本条是**就绪信号与依赖产物脱钩**；红起来是随机 1/5 轮，且红的是不相干用例，极易被误判成产品缺陷）
 - **涉及文件**: `tests/common/mod.rs`（`ensure_db_template`）
 - **现象 / Symptom**: 分支 `fix/test-stub-port-race` 本机第 4 轮 `--test-threads=8` 合跑时，`issue_17_synthetic_fixtures::broken_ai_stub_does_not_crash_server` 红一条：`panicked at tests\common\mod.rs:68: template db must exist after migration`；同一提交第 5 轮与全量 `cargo test` 均绿，单独跑该 binary 也绿。
 - **根因 / Root cause**: `ensure_db_template()` 的手法是"起一个临时 HOME 的服务器 → `wait_for_server(port)` 轮询 `/api/version` 拿到 2xx → **立刻 kill** → 断言 `INNOFORGE_HOME/innoforge.db` 存在"。但 `/api/version` 应答只证明**进程活着并接受了请求**，不证明**迁移已经写完并落盘**——应答与文件落盘之间没有因果关系，机器负载高（并行 4 个 binary + 其它测试进程）时窗口被放大，kill 抢在落盘前就把进程干掉了，留下一个不存在的（或半写的）模板库。下游每个用例都从这个模板复制 db，所以一旦踩中，红的是"恰好第一个调用 `ensure_db_template` 的那个用例"，与它自己的断言毫无关系。
 - **修复 / Fix**: 就绪判据改落在**真正要复用的产物**上：`wait_for_server` 通过后不直接 kill，而是轮询 `innoforge.db` 直到"存在且大小 >0 且连续两次采样大小不变"（200ms 一档，20s 上限），稳定后才 `kill_server`；超时则 panic 并带**自诊断信息**（路径 / 是否存在 / 最后一次大小 / 目录条目列表），让下一次红自己说明原因。`/api/version` 仍保留——它是"进程活着"的必要条件，只是不再是"可以安全 kill"的充分条件。
-- **回归 / 负控 / Regression & Negative control**: ①红控：把等待目标临时改成不存在的文件名（`innoforge.nope`）⇒ 新分支必然触发 `template db never became stable: path=… exists=false last_size=0 dir=[…]` 并带目录清单，证明这段等待是**活代码**而不是永远不会走到的装饰；还原后 `cmp` 校验字节一致。②绿控：修复态 4 个 stub binary × 5 轮 `--test-threads=8` 全绿（含 ㊶ 的两条机制测试），全量 `cargo test --no-fail-fast -j 2` rc=0。
-- **预防 / Prevention**: ①**"服务应答了"和"产物就绪了"是两件事**：凡"起进程 → 等就绪 → 杀掉 → 复用它的落盘产物"这种形态，就绪判据必须直接检查那个产物（文件存在且稳定 / 目标记录可读），不能拿健康检查代替。②随机红在**别的用例**上时，先查共享前置（模板、夹具、临时目录、端口），别急着怀疑被测功能——本例红的是 `broken_ai_stub_does_not_crash_server`，缺陷却在 `ensure_db_template`。③不可复现的基础设施失败要**把它变成可诊断的失败**（panic 带路径/大小/目录清单），否则下一轮还是只能靠"重跑变绿"猜。④与 ㊶ 合并看：一个测试桩的可靠性由「端口分配」「就绪信号」「进程回收」三处独立决定，任何一处用错信号都会伪装成产品缺陷。
+- **回归 / 负控 / Regression & Negative control**: ①红控：把等待目标临时改成不存在的文件名（`innoforge.nope`）⇒ 新分支必然触发 `template db never became stable: path=… exists=false last_size=0 dir=[…]` 并带目录清单，证明这段等待是**活代码**而不是永远不会走到的装饰；还原后 `cmp` 校验字节一致。②绿控：修复态 4 个 stub binary × 5 轮 `--test-threads=8` 全绿（含 ㊹ 的两条机制测试），全量 `cargo test --no-fail-fast -j 2` rc=0。
+- **预防 / Prevention**: ①**"服务应答了"和"产物就绪了"是两件事**：凡"起进程 → 等就绪 → 杀掉 → 复用它的落盘产物"这种形态，就绪判据必须直接检查那个产物（文件存在且稳定 / 目标记录可读），不能拿健康检查代替。②随机红在**别的用例**上时，先查共享前置（模板、夹具、临时目录、端口），别急着怀疑被测功能——本例红的是 `broken_ai_stub_does_not_crash_server`，缺陷却在 `ensure_db_template`。③不可复现的基础设施失败要**把它变成可诊断的失败**（panic 带路径/大小/目录清单），否则下一轮还是只能靠"重跑变绿"猜。④与 ㊹ 合并看：一个测试桩的可靠性由「端口分配」「就绪信号」「进程回收」三处独立决定，任何一处用错信号都会伪装成产品缺陷。
 - **提交 / Commit**: 见 PR（分支 `fix/test-stub-port-race`）。
