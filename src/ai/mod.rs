@@ -29,6 +29,7 @@ pub mod citation_check;
 pub mod claim_coverage;
 pub mod client;
 mod evidence;
+pub mod evidence_anchor;
 pub mod extraction;
 pub mod extraction_quality;
 mod fact_check;

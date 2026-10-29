@@ -802,7 +802,7 @@ pub fn build_own_application_corpus(original: &str) -> SourceCorpus {
 ///
 /// 摊平顺序刻意与人工撰写的原始申请文本一致（权项在前、说明书在后），
 /// 使 `claims_region` / `spec_region` 的既有语义原样复用。
-fn flatten_json_application(text: &str) -> Option<String> {
+pub(crate) fn flatten_json_application(text: &str) -> Option<String> {
     let trimmed = text.trim_start();
     if !trimmed.starts_with('{') {
         return None;

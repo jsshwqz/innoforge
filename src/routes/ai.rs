@@ -3537,7 +3537,7 @@ pub async fn api_ai_oa_collect_evidence(
         .ai_client_expert();
 
     match crate::ai::collect_evidence(&ai, my_patent, refs, oa_text).await {
-        Ok((evidence, summary)) => {
+        Ok((evidence, summary, anchor_report)) => {
             // 统计各类型数量
             let mut stats = serde_json::Map::new();
             let mut total_relevance = 0.0f32;
@@ -3560,7 +3560,10 @@ pub async fn api_ai_oa_collect_evidence(
                 "stats": {
                     "type_counts": stats,
                     "total": evidence.len(),
-                    "avg_relevance": avg_relevance
+                    "avg_relevance": avg_relevance,
+                    // 锚点核对结果：total = located + unlocated，模型自报的 source 一律不采信
+                    "anchor": serde_json::to_value(&anchor_report)
+                        .expect("AnchorReport 是自身序列化的结构")
                 }
             }))
         }
