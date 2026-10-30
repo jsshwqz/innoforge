@@ -2025,6 +2025,15 @@ pub async fn api_ai_oa_generate_response_letter(
         _ => String::new(),
     };
 
+    // 信头五项（专利号/发明名称/申请人/发文序号/发文日）按通用标签抽取一次，
+    // 既供提示词注入，也供成文后的确定性回填——两条生成链路都从这里出去，
+    // 所以回填放在路由层能同时覆盖模板路径与通用管线路径。
+    let oa_header = crate::ai::letter_header::LetterHeader::extract(
+        &office_action,
+        &my_patent_text,
+        Some(&req),
+    );
+
     let mut rx = ai.generate_response_letter_stream(
         &final_analysis,
         &discussion,
@@ -2050,12 +2059,17 @@ pub async fn api_ai_oa_generate_response_letter(
             // EK-P6：累积原文（句边界完整），SSE 载荷 JSON 编码
             raw_text.push_str(&chunk);
         }
+        // ── 信头回填（先于逐字核验门）──
+        // 顺序理由：门是"就地标注 + 计数"，它看到什么就该被读者看到什么；
+        // 若先跑门再改信头，标注的字节偏移与新文本不再对应。信头行也不在修改稿段内，
+        // 反过来先回填不会给门引入新的命中。产物里不允许残留裸【待填写】。
+        let header_fill = oa_header.backfill(&raw_text);
         // ── UA3 v2 修改稿特征逐字核验门（M2 第 2 步）──
         // 必须在整篇产出后跑：①阻断横幅要落在正文首部；②零命中特征句要**就地**标注，
         // 流式转发无法回填已下发的字符。两条生成链路本就整篇单帧返回（非逐 token），
         // 因此缓冲不改变可见时延，只把"先发后检"换成"检完再发"。
         let gate = crate::evidence_kernel::amendment_gate::gate_amendment_text(
-            &raw_text,
+            &header_fill.letter,
             &my_patent_text,
         );
         let mut body = String::new();
@@ -2078,14 +2092,19 @@ pub async fn api_ai_oa_generate_response_letter(
         }
         // 结构化维度：amendment_unsupported=N 与提交度维度（N>0 即 False）
         yield Ok(Event::default().event("meta").data(format!(
-            "{{\"source\":\"{analysis_source}\",\"amendment_unsupported\":{},\"amendment_assertions_downgraded\":{},\"amendment_claims\":{},\"amendment_features\":{},\"corpus_claims\":{},\"amendment_gate\":\"{}\",\"submission_ready\":{}}}",
+            "{{\"source\":\"{analysis_source}\",\"amendment_unsupported\":{},\"amendment_assertions_downgraded\":{},\"amendment_claims\":{},\"amendment_features\":{},\"corpus_claims\":{},\"amendment_gate\":\"{}\",\"submission_ready\":{},\"header_known\":{},\"header_filled\":{},\"header_unresolved_count\":{},\"header_unresolved\":\"{}\",\"header_unresolved_marks\":{}}}",
             gate.unsupported_count,
             gate.assertions_downgraded,
             gate.amended_claim_count,
             gate.checked_feature_count,
             gate.corpus_claims,
             gate.status.as_str(),
-            gate.submission_ready
+            gate.submission_ready,
+            oa_header.known_count(),
+            header_fill.filled,
+            header_fill.unresolved_fields.len(),
+            header_fill.unresolved_fields.join("|"),
+            header_fill.unresolved_marks
         )));
         // R6c: 事实核查已由 pipeline 内嵌，SSE 层不再重复追加
         yield Ok(Event::default().event("done").data("[DONE]"));

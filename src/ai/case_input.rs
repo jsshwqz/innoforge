@@ -302,7 +302,7 @@ fn fill_meta_from_labels(meta: &mut CaseMeta, text: &str) {
     }
 }
 
-fn label_value(text: &str, labels: &[&str]) -> Option<String> {
+pub(crate) fn label_value(text: &str, labels: &[&str]) -> Option<String> {
     for line in text.lines().take(120) {
         let head = line.trim_start_matches(|c: char| {
             c == '|' || c == '*' || c == '#' || c == '-' || c.is_whitespace()
@@ -364,7 +364,7 @@ fn is_section_like(value: &str) -> bool {
     .any(|k| value.contains(k))
 }
 
-fn is_placeholder_value(value: &str) -> bool {
+pub(crate) fn is_placeholder_value(value: &str) -> bool {
     let v = value.trim();
     matches!(
         v,

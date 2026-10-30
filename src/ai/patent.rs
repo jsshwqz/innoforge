@@ -1257,6 +1257,22 @@ impl AiClient {
         let oa = office_action;
         let discussion = discussion_json;
 
+        // 信头五项：先按通用标签从通知书表头/上传文本抽出来，再进模板与提示词。
+        // 模板里不再出现【待填写】——留空位模型就照抄空位，产物形态每次都不一样。
+        let header = crate::ai::letter_header::LetterHeader::extract(
+            office_action,
+            my_patent_text,
+            request_json,
+        );
+        let hdr_app_no =
+            crate::ai::letter_header::resolved_value(header.application_number.as_ref());
+        let hdr_title = crate::ai::letter_header::resolved_value(header.invention_title.as_ref());
+        let hdr_applicant = crate::ai::letter_header::resolved_value(header.applicant.as_ref());
+        let hdr_serial = crate::ai::letter_header::resolved_value(header.dispatch_serial.as_ref());
+        let hdr_date = crate::ai::letter_header::resolved_value(header.dispatch_date.as_ref());
+        let hdr_unresolved = crate::ai::letter_header::UNRESOLVED;
+        let header_block = header.prompt_block();
+
         let doc_type = match oa_type {
             "abnormal" => "意见陈述书（非正常申请答辩）",
             "reject_review" => "复审请求书",
@@ -1436,9 +1452,15 @@ impl AiClient {
             "针对贵局发出的审查意见通知书，申请人根据专利法及其实施细则的规定，特此陈述意见如下："
         };
         let opening_statement_with_date = if is_reexam {
-            "针对贵局于【日期】发出的关于本申请的驳回决定，\n                     申请人根据专利法及其实施细则的规定，特此陈述意见如下："
+            format!(
+                "针对贵局于{hdr_date}发出的关于本申请的驳回决定，\n                     申请人根据专利法及其实施细则的规定，特此陈述意见如下："
+            )
         } else {
-            "针对贵局于【日期】发出的第【通知书编号】号审查意见通知书，\n                     申请人根据专利法及其实施细则的规定，特此陈述意见如下："
+            // 不再写"第【通知书编号】号"：通知书编号与发文序号不是同一件事，
+            // 没有可靠抽取来源时宁可只按发文日指称，也不留一个模型填不出的空位。
+            format!(
+                "针对贵局于{hdr_date}发出的审查意见通知书，\n                     申请人根据专利法及其实施细则的规定，特此陈述意见如下："
+            )
         };
         let conclusion_statement = if is_reexam {
             "请求复审和无效审理部在考虑上述意见陈述的基础上，撤销驳回决定。"
@@ -1465,6 +1487,7 @@ impl AiClient {
                 ),
                 format!(
                     "## 原始审查意见通知书\n{oa}\n\n\
+                     {header_block}\
                      ## 讨论记录（含已确认的修改意见）\n{discussion}\n\n\
                      请基于上述材料，独立完成分析并生成完整的{doc_type}。注意：\n\
                      1. 讨论中达成一致的修改意见必须体现在答复书中\n\
@@ -1473,8 +1496,10 @@ impl AiClient {
                      4. 如果 OCR 文本中有无法识别的部分，请根据上下文合理推断并标注【待核实】\n\n\
                      输出格式：\n\n\
                      === 意见陈述书 ===\n\n\
-                     **专利号**：【从 OA 中提取或标注待填写】\n\
-                     **发明名称**：【从 OA 中提取或标注待填写】\n\n\
+                     **专利号**：{hdr_app_no}\n\
+                     **发明名称**：{hdr_title}\n\
+                     **发文序号**：{hdr_serial}\n\
+                     **发文日**：{hdr_date}\n\n\
                      {salutation}\n\n\
                      {opening_statement}\n\n\
                      一、关于审查意见的答复\n\
@@ -1489,8 +1514,8 @@ impl AiClient {
                      ## 修改要点说明\n\
                      （列出本次答复中的关键修改点，2-3条即可）\n\n\
                      此致\n\n\
-                     申请人：【待填写】\n\
-                     日期：【待填写】"
+                     申请人：{hdr_applicant}\n\
+                     日期：{hdr_unresolved}"
                 ),
             )
         } else {
@@ -1510,6 +1535,7 @@ impl AiClient {
                 ),
                 format!(
                     "## 原始审查意见通知书\n{oa}\n\n\
+                     {header_block}\
                      ## 已确认的分析结果（1-4部分）\n{analysis}\n\n\
                      ## 讨论记录（含已确认的修改意见）\n{discussion}\n\n\
                      请基于上述材料，生成完整的{doc_type}。注意：\n\
@@ -1518,8 +1544,10 @@ impl AiClient {
                      3. 答复书末尾附「修改要点说明」摘要\n\n\
                      输出格式：\n\n\
                      === 意见陈述书 ===\n\n\
-                     **专利号**：【从分析中提取】\n\
-                     **发明名称**：【从分析中提取】\n\n\
+                     **专利号**：{hdr_app_no}\n\
+                     **发明名称**：{hdr_title}\n\
+                     **发文序号**：{hdr_serial}\n\
+                     **发文日**：{hdr_date}\n\n\
                      {salutation}\n\n\
                      {opening_statement_with_date}\
                      申请人根据专利法及其实施细则的规定，特此陈述意见如下：\n\n\
@@ -1535,8 +1563,8 @@ impl AiClient {
                      ## 修改要点说明\n\
                      （列出本次答复中根据讨论结果做出的关键修改，2-3条即可）\n\n\
                      此致\n\n\
-                     申请人：【待填写】\n\
-                     日期：【待填写】"
+                     申请人：{hdr_applicant}\n\
+                     日期：{hdr_unresolved}"
                 ),
             )
         };

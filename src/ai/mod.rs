@@ -36,6 +36,7 @@ mod fact_check;
 pub mod feature_attribution;
 pub mod golden_regression;
 mod idea;
+pub mod letter_header;
 pub mod output_guard;
 pub mod paraphrase_check;
 pub mod patent;
