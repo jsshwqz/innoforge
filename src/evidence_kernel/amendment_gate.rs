@@ -630,9 +630,31 @@ fn split_features(claim_text: &str) -> Vec<String> {
 /// 形如 `1. 权利要求1的修改：` 的行是**小标题**而不是技术特征句：短且以冒号结尾。
 /// 与块起点判据（[`is_amendment_label`]：纯标题或冒号引出）同源，不另造第二套概念——
 /// 区别只在于：块起点看"这行是否引出修改稿"，这里看"这句是不是修改稿里的一句标题"。
+///
+/// 2026-10-30 补：小节标题本身**没有冒号**（`二、关于权利要求的修改`），却会被当成特征句
+/// 核验并就地标注，产物里出现 `二、【未证实…】关于权利要求的修改`——标题被破坏，且计入
+/// 零命中数。模板小节名是固定措辞，按结构词直接排除。
 fn is_heading_fragment(fragment: &str) -> bool {
     let t = fragment.trim_end_matches(['*', ' ', '\t']);
-    t.ends_with(['：', ':']) && t.chars().count() <= 20
+    if t.ends_with(['：', ':']) && t.chars().count() <= 20 {
+        return true;
+    }
+    let bare = t.trim_start_matches(|c: char| c.is_ascii_digit() || matches!(c, '、' | '．' | '.'));
+    matches!(
+        bare.trim(),
+        "关于权利要求的修改" | "关于权利要求的修改（如有）" | "权利要求的修改"
+    ) || is_claim_label_line(bare.trim())
+}
+
+/// `修改后的权利要求1` / `修改后的权利要求` 这种**不带冒号的引出标签**也不是特征句。
+/// 判据从严：必须以"修改后的权利要求"开头、只允许跟随数字，且总长 ≤ 12 字——
+/// 真实特征句后面一定还有技术内容，不会长成这个样子。
+fn is_claim_label_line(line: &str) -> bool {
+    let Some(rest) = line.strip_prefix("修改后的权利要求") else {
+        return false;
+    };
+    let rest = rest.trim_matches(['*', ' ', '\t']);
+    rest.chars().count() <= 4 && rest.chars().all(|c| c.is_ascii_digit())
 }
 
 fn is_declarative_meta(fragment: &str) -> bool {
