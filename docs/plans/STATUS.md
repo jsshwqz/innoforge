@@ -947,3 +947,8 @@
 
 ## 2026-10-29 · 模板库就绪判据（同分支 `fix/test-stub-port-race`）
 - 第 4 轮合跑红出第二类基础设施缺陷：`ensure_db_template` 用 `/api/version` 应答当就绪，应答后立刻 kill ⇒ `template db must exist after migration` 断言炸（随机 1/5 轮，且红在与它无关的用例上）。改为就绪后轮询 db 文件「存在且大小连续两次采样不变」再 kill，超时 panic 带路径/大小/目录清单自诊断。负控（把等待目标改成不存在的文件名）确认该分支是活代码而非装饰；绿控 4 binary × 5 轮 `--test-threads=8` + 全量 `cargo test` rc=0。复盘 errors.md ㊺。
+
+## 2026-10-30 · #101 逐项 matched_fields（分支 `fix/search-per-item-matched-fields`，基线 main@3c45cc3）
+- **issue 现状核对**：reason 与顶层 matched_fields/applied_filter 已由 #72 v2 落地（issue 实测是 v0.9.18 时代）；剩余半边 = 逐项命中字段（issue 推荐方案 A）。
+- **交付**：`PatentSummary.matched_fields: Option<Vec<String>>`（skip 序列化不破既有形状锁）+ 路由层 `item_matched_fields()` 逐条计算——Keyword/Mixed 按小写包含逐列真算（只命中 patent_number 的条只返回该列，负控语义）；定向通道（inventor/applicant/patent_number）恒为通道列。命中场景 reason 已在（0 命中），不冗余补。
+- **测试**：3 条单测（只含实命中列 / 多 token 跨列并集 / 定向通道钉列）全绿；#72/#85 既有契约测试零改动。

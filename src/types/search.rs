@@ -114,6 +114,12 @@ pub struct PatentSummary {
     pub relevance_score: Option<f64>,
     #[serde(default)]
     pub score_source: Option<String>, // 评分来源说明
+    /// # issue #101 — 逐项命中字段：本条实际在哪些列上命中了查询词
+    /// （title / abstract_text / applicant / inventor / patent_number 的子集，
+    /// 由路由层逐条计算；定向通道（inventor/applicant/patent_number）恒为该列）。
+    /// None = 不适用（空查询响应、或定向通道之外的哑值）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub matched_fields: Option<Vec<String>>,
 }
 
 /// 流水线单条检索命中 / A single hit produced by the idea-validation pipeline.

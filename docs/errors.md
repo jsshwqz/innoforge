@@ -1487,3 +1487,10 @@
 - **修复 / Fix**: `is_heading_fragment` 除原有判据外，按**固定结构词**再排除两类：模板小节名（`关于权利要求的修改` / `关于权利要求的修改（如有）` / `权利要求的修改`）；`修改后的权利要求` + 至多 4 位数字且总长 ≤ 12 字的引出标签。判据从严——真实特征句后面一定还有技术内容，不会长成这个样子。
 - **不变量 / Negative control**: 修误报不能把门关掉。新单测同时断言"标题不标"与"真零命中的特征句仍被标注"，后者用 `机架侧面还固定有气动夹爪组件与压力传感器`（原文没有、无标点、长度过阈）。`amendment_gate` 全组 30 例通过。
 - **预防 / Prevention**: ①"标题/标签"与"内容"是两类文本，判据要按**模板里实际存在的形态**枚举（含不带冒号的那种），不能只认最规整的一种；②任何"就地标注"的产物，都要有人在真实产物上看一眼——这条缺陷在单测里看不出来，是在 v8 的成品里肉眼发现的；③统计口径里的"处数"一旦混入结构性噪声，读者对整张表的信任会打折，宁可把判据写细。
+## [2026-10-31] ㊿ 多 agent 并行构建的本地验证死结：exe 锁 + 双 target 磁盘耗尽
+- **严重程度 / Severity**: MEDIUM（阻塞本地全量验证，不改产品代码；CI 兜底不受影响）
+- **现象 / Symptom**: ①集成测试链接时 `failed to remove innoforge-server.exe`（拒绝访问）——并行 agent 起的 server 持有共享 target 的同名二进制；②独立 CARGO_TARGET_DIR 冷编全量 → 磁盘 8G 被 LNK1180 吃光（双 target 并存 = 双倍空间）；③重负载下 busy_timeout=5000 的测试 init 也 SQLITE_BUSY。
+- **根因 / Root cause**: 多个 agent 并行共享 D:/cargo-target（构建锁排队）+ 各自 server 进程锁二进制 + 646G 盘被多 agent 构建迭代填满——本地全量验证在多 agent 并行期是稀缺资源。
+- **修复 / Fix**: ①按 commit-first 纪律：定向验证（改动模块单测 + lib 全量 + fmt/clippy 绿）+ push 由 CI 兜底全量；②独立 target 用 `-j 1` 降链接峰值；③每轮验证前清 `incremental/`（可再生）。
+- **预防 / Prevention**: ①多 agent 并行期，本地全量验证优先顺序：定向单测 → lib 全量 → 集成测试（依赖 exe 链接，最容易被锁挡）→ CI 兜底；②磁盘监控应在构建前（<3G 即清 incremental）而不是链接失败后；③server 进程持有共享 target 二进制时，任何人的集成测试都过不去——起 server 用独立 target 或结束即回收。
+- **提交 / Commit**: 见 #101 修复 PR（分支 fix/search-per-item-matched-fields）。

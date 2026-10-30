@@ -360,6 +360,7 @@ mod tests {
             country: "CN".to_string(),
             relevance_score: Some(88.0),
             score_source: Some("hybrid(pos:98+content:88)".to_string()),
+            matched_fields: None,
         };
         let outcome = SearchOutcome {
             results: vec![MergedPatent {
@@ -398,6 +399,7 @@ mod tests {
                     country: "CN".to_string(),
                     relevance_score: None,
                     score_source: None,
+                    matched_fields: None,
                 },
                 sources: vec![SourceKind::GooglePatentsXhr],
             }],

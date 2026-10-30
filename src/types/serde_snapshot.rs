@@ -63,6 +63,7 @@ fn sample_summary() -> PatentSummary {
         country: "CN".into(),
         relevance_score: Some(88.5),
         score_source: Some("hybrid(pos:95+content:84)".into()),
+        matched_fields: None,
     }
 }
 
