@@ -79,7 +79,7 @@ fn build_evidence_collect_prompt(patent: &str, refs: &str, oa: &str) -> (String,
           \"evidence\": [\n\
             {\n\
               \"evidenceType\": \"specSupport\",\n\
-              \"source\": \"说明书第3段\",\n\
+              \"source\": \"[说明书:第0027段]\",\n\
               \"content\": \"...\",\n\
               \"relevance\": 0.85\n\
             },\n\
@@ -88,7 +88,8 @@ fn build_evidence_collect_prompt(patent: &str, refs: &str, oa: &str) -> (String,
           \"summary\": \"共收集到 N 条证据，其中说明书支持 X 条、区别点 Y 条...\"\n\
         }\n\n\
         ## 要求\n\
-        - 每条证据必须标注来源（说明书第X段 / D1第Y页 / OA第Z段）\n\
+        - 每条证据的 source 必须给**段落级锚点**：原文里有 [00xx] 段号就写 `[说明书:第0027段]` / `[D1:第0012段]`，权利要求写 `[本申请:权利要求3]`；只写「说明书」「权利要求书」这种文档级措辞视为不合格。\n\
+        - 锚点由系统逐条回原文核对，核对不到的会被标为【未定位】；因此**不得**填写你不确定段号的锚点\n\
         - relevance 取值 0-1，表示该证据对答复的相关性程度\n\
         - 证据内容必须来自材料原文，不得编造\n\
         - 如果某类型无证据，该类型不出现即可\n\
@@ -180,19 +181,30 @@ fn extract_json_from_markdown(raw: &str) -> Option<String> {
 /// 收集证据 / Collect evidence
 ///
 /// 从专利全文、对比文献、OA 文本中自动提取证据段落。
+///
+/// 返回的第三个值是**锚点核对报告**：模型自报的 `source` 一律不采信，
+/// 由 `evidence_anchor` 拿证据正文回原文定位后再回写，定位不到的条目会带上
+/// `【未定位】`（见 docs/errors.md 的计数口径纪律）。
 pub async fn collect_evidence(
     ai: &AiClient,
     patent: &str,
     refs: &str,
     oa: &str,
-) -> Result<(Vec<Evidence>, String)> {
+) -> Result<(
+    Vec<Evidence>,
+    String,
+    crate::ai::evidence_anchor::AnchorReport,
+)> {
     let (system, user) = build_evidence_collect_prompt(patent, refs, oa);
 
     let raw = ai.chat_with_system(&system, &user, 0.3).await?;
 
-    let (evidence, summary) = parse_evidence_response(&raw);
+    let (mut evidence, summary) = parse_evidence_response(&raw);
+    let index = crate::ai::evidence_anchor::build_index(patent, refs, oa);
+    let report = crate::ai::evidence_anchor::anchor_items(&mut evidence, &index);
+    let summary = format!("{summary}\n{}", report.as_line());
 
-    Ok((evidence, summary))
+    Ok((evidence, summary, report))
 }
 
 #[cfg(test)]
