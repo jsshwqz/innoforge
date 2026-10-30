@@ -1257,6 +1257,23 @@ impl AiClient {
         let oa = office_action;
         let discussion = discussion_json;
 
+        // 原始申请文本：修改稿只能由它逐字组成。此前提示词**从未**包含它——模型被要求写
+        // "修改后的权利要求"，却看不到原始申请文本，只能凭分析/讨论猜（v7 实测 22 处特征句
+        // 原文零命中）。这里注入的是与核验门**同一份**归一化（flatten_json_application），
+        // 否则模型"逐字引用"的排版与门看到的排版不同，会被判零命中。
+        let original_block =
+            crate::evidence_kernel::amendment_gate::original_application_block(my_patent_text);
+        if let Some(error) = oa_capacity_error(
+            "original_application",
+            &original_block,
+            OA_RESPONSE_OA_MAX_CHARS,
+        ) {
+            tokio::spawn(async move {
+                let _ = tx.send(error).await;
+            });
+            return rx;
+        }
+
         // 信头五项：先按通用标签从通知书表头/上传文本抽出来，再进模板与提示词。
         // 模板里不再出现【待填写】——留空位模型就照抄空位，产物形态每次都不一样。
         let header = crate::ai::letter_header::LetterHeader::extract(
@@ -1488,6 +1505,7 @@ impl AiClient {
                 format!(
                     "## 原始审查意见通知书\n{oa}\n\n\
                      {header_block}\
+                     ## 原始申请文本（修改稿的唯一依据：此块以外的技术措辞一律不得写入修改稿）\n{original_block}\n\n\
                      ## 讨论记录（含已确认的修改意见）\n{discussion}\n\n\
                      请基于上述材料，独立完成分析并生成完整的{doc_type}。注意：\n\
                      1. 讨论中达成一致的修改意见必须体现在答复书中\n\
@@ -1536,6 +1554,7 @@ impl AiClient {
                 format!(
                     "## 原始审查意见通知书\n{oa}\n\n\
                      {header_block}\
+                     ## 原始申请文本（修改稿的唯一依据：此块以外的技术措辞一律不得写入修改稿）\n{original_block}\n\n\
                      ## 已确认的分析结果（1-4部分）\n{analysis}\n\n\
                      ## 讨论记录（含已确认的修改意见）\n{discussion}\n\n\
                      请基于上述材料，生成完整的{doc_type}。注意：\n\
@@ -1576,7 +1595,8 @@ impl AiClient {
              3. 创造性答复必须针对对应权利要求，明确区别特征、该特征产生的技术效果、实际解决的技术问题，以及技术人员为何没有结合动机；对已被对比文件公开的特征必须如实承认。\n\
              4. 权利要求修改只能从已提供的说明书、权利要求或经确认的技术材料中提取。材料不足时只给出“建议核对的修改方向”，并标注【需申请人确认】；绝不编写新的技术方案。\n\
              5. 不得使用空泛套话替代论证，不得写“符合相关规定”等没有具体理由的结论。法律依据仅在材料已明确或能够准确确认时引用；不确定时说明需要专业代理人核对。\n\
-             6. 输出是供申请人和专利代理人复核的草案，不是法律意见；结尾必须列出“待申请人/代理人确认事项”。",
+             6. 输出是供申请人和专利代理人复核的草案，不是法律意见；结尾必须列出“待申请人/代理人确认事项”。\n\
+             7. 「修改后的权利要求」必须由「原始申请文本」中的字句**逐字组成**：不得改写、概括、增补、替换术语；需要增补的技术内容一律不写，改为写明“建议核对方向”并标注【需申请人确认】。系统会逐句核验，原文零命中的措辞会被就地标出；宁可只对现有权项做删除或合并，也不要编出原文没有的技术特征。",
         );
 
         let user_prompt = format!(
