@@ -269,7 +269,7 @@ pub fn extract_filing_info(oa_text: &str) -> Option<OaFilingInfo> {
     })
 }
 
-fn extract_serial(stripped: &str) -> Option<String> {
+pub(crate) fn extract_serial(stripped: &str) -> Option<String> {
     // 匹配 "发文序号" 后的连续数字
     let marker = "发文序号";
     let pos = stripped.find(marker)?;
@@ -287,7 +287,7 @@ fn extract_serial(stripped: &str) -> Option<String> {
     }
 }
 
-fn extract_date(stripped: &str) -> Option<String> {
+pub(crate) fn extract_date(stripped: &str) -> Option<String> {
     // 匹配 "YYYY年M月D日" 格式
     let re =
         regex::Regex::new(r"(\d{4}年\d{1,2}月\d{1,2}日)").expect("search_report: 日期提取正则");
