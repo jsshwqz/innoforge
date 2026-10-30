@@ -630,9 +630,31 @@ fn split_features(claim_text: &str) -> Vec<String> {
 /// 形如 `1. 权利要求1的修改：` 的行是**小标题**而不是技术特征句：短且以冒号结尾。
 /// 与块起点判据（[`is_amendment_label`]：纯标题或冒号引出）同源，不另造第二套概念——
 /// 区别只在于：块起点看"这行是否引出修改稿"，这里看"这句是不是修改稿里的一句标题"。
+///
+/// 2026-10-30 补：小节标题本身**没有冒号**（`二、关于权利要求的修改`），却会被当成特征句
+/// 核验并就地标注，产物里出现 `二、【未证实…】关于权利要求的修改`——标题被破坏，且计入
+/// 零命中数。模板小节名是固定措辞，按结构词直接排除。
 fn is_heading_fragment(fragment: &str) -> bool {
     let t = fragment.trim_end_matches(['*', ' ', '\t']);
-    t.ends_with(['：', ':']) && t.chars().count() <= 20
+    if t.ends_with(['：', ':']) && t.chars().count() <= 20 {
+        return true;
+    }
+    let bare = t.trim_start_matches(|c: char| c.is_ascii_digit() || matches!(c, '、' | '．' | '.'));
+    matches!(
+        bare.trim(),
+        "关于权利要求的修改" | "关于权利要求的修改（如有）" | "权利要求的修改"
+    ) || is_claim_label_line(bare.trim())
+}
+
+/// `修改后的权利要求1` / `修改后的权利要求` 这种**不带冒号的引出标签**也不是特征句。
+/// 判据从严：必须以"修改后的权利要求"开头、只允许跟随数字，且总长 ≤ 12 字——
+/// 真实特征句后面一定还有技术内容，不会长成这个样子。
+fn is_claim_label_line(line: &str) -> bool {
+    let Some(rest) = line.strip_prefix("修改后的权利要求") else {
+        return false;
+    };
+    let rest = rest.trim_matches(['*', ' ', '\t']);
+    rest.chars().count() <= 4 && rest.chars().all(|c| c.is_ascii_digit())
 }
 
 fn is_declarative_meta(fragment: &str) -> bool {
@@ -1013,6 +1035,36 @@ mod tests {
 
     fn gate(letter: &str) -> AmendmentGateResult {
         gate_amendment_text(letter, SPEC)
+    }
+
+    #[test]
+    fn section_heading_and_label_without_colon_are_not_marked() {
+        // v8 实测形态：小节标题与引出标签都**没有冒号**，会被当成特征句核验并就地标注，
+        // 产物里变成 `二、【未证实…】关于权利要求的修改`——标题被破坏，还计入零命中数。
+        let letter = "\
+## 二、关于权利要求的修改\n\n\
+修改后的权利要求1\n\
+一种物料输送装置，包括机架（1），机架（1）上设有输送带（2）。\n\
+机架侧面还固定有气动夹爪组件与压力传感器\n";
+        let r = gate(letter);
+        let mark = "【未证实：该措辞在原始文本零命中】";
+        assert!(
+            !r.gated_text.contains(&format!("{mark}关于权利要求的修改")),
+            "小节标题不得被标注：{}",
+            r.gated_text
+        );
+        assert!(
+            !r.gated_text.contains(&format!("{mark}修改后的权利要求1")),
+            "无冒号的引出标签不得被标注：{}",
+            r.gated_text
+        );
+        // 修误报不能把门关掉：真零命中的特征句必须仍被标注
+        assert!(
+            r.gated_text
+                .contains(&format!("{mark}机架侧面还固定有气动夹爪组件与压力传感器")),
+            "真零命中的特征句必须仍被标注：{}",
+            r.gated_text
+        );
     }
 
     // ── 正控：五类合法撰写变换各一条（修复前后均必须 ok，证明不误伤）──
