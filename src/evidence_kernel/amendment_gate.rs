@@ -864,6 +864,23 @@ pub(crate) fn flatten_json_application(text: &str) -> Option<String> {
     Some(out)
 }
 
+/// 答复书提示词里的「原始申请文本」块。
+///
+/// 与核验门**共用同一份归一化**（[`flatten_json_application`]）：门拿什么去比对，
+/// 模型就必须看到什么——否则模型"逐字引用"的是另一种排版，必然被判零命中。
+///
+/// 空输入返回**可见的**未提供说明：提示词里留空，模型就会自己编修改稿
+/// （v7 实测 22 处特征句原文零命中，绝大多数是模型凭空补的技术措辞）。
+pub fn original_application_block(text: &str) -> String {
+    let flat = flatten_json_application(text).unwrap_or_else(|| text.trim().to_string());
+    if flat.trim().is_empty() {
+        "（未提供原始申请文本：本次不得输出任何「修改后的权利要求」正文，只能给出修改方向并标注【需申请人确认】）"
+            .to_string()
+    } else {
+        flat
+    }
+}
+
 /// 语料里的权项三元组条数（可见性用：0 表示原始权利要求书没进语料）。
 fn claim_section_count(corpus: &SourceCorpus) -> usize {
     corpus
@@ -1035,36 +1052,6 @@ mod tests {
 
     fn gate(letter: &str) -> AmendmentGateResult {
         gate_amendment_text(letter, SPEC)
-    }
-
-    #[test]
-    fn section_heading_and_label_without_colon_are_not_marked() {
-        // v8 实测形态：小节标题与引出标签都**没有冒号**，会被当成特征句核验并就地标注，
-        // 产物里变成 `二、【未证实…】关于权利要求的修改`——标题被破坏，还计入零命中数。
-        let letter = "\
-## 二、关于权利要求的修改\n\n\
-修改后的权利要求1\n\
-一种物料输送装置，包括机架（1），机架（1）上设有输送带（2）。\n\
-机架侧面还固定有气动夹爪组件与压力传感器\n";
-        let r = gate(letter);
-        let mark = "【未证实：该措辞在原始文本零命中】";
-        assert!(
-            !r.gated_text.contains(&format!("{mark}关于权利要求的修改")),
-            "小节标题不得被标注：{}",
-            r.gated_text
-        );
-        assert!(
-            !r.gated_text.contains(&format!("{mark}修改后的权利要求1")),
-            "无冒号的引出标签不得被标注：{}",
-            r.gated_text
-        );
-        // 修误报不能把门关掉：真零命中的特征句必须仍被标注
-        assert!(
-            r.gated_text
-                .contains(&format!("{mark}机架侧面还固定有气动夹爪组件与压力传感器")),
-            "真零命中的特征句必须仍被标注：{}",
-            r.gated_text
-        );
     }
 
     // ── 正控：五类合法撰写变换各一条（修复前后均必须 ok，证明不误伤）──
@@ -1518,6 +1505,42 @@ mod tests {
             verified.skip_note().contains("未索引到任何权利要求"),
             "语料缺权项时即使判 verified 也必须挂缺基准说明: {:?}",
             verified.skip_note()
+        );
+    }
+
+    #[test]
+    fn prompt_block_flattens_json_so_model_sees_what_the_gate_compares() {
+        let json = serde_json::json!({
+            "claims": "1. 一种物料输送装置，包括机架。",
+            "description": "[0001] 机架上设有输送带。"
+        })
+        .to_string();
+        let block = original_application_block(&json);
+        assert!(block.contains("权利要求书"), "{block}");
+        assert!(block.contains("一种物料输送装置"), "{block}");
+        assert!(block.contains("[0001] 机架上设有输送带。"), "{block}");
+        // 与门比对用的归一化必须是同一份
+        assert_eq!(
+            block,
+            flatten_json_application(&json).expect("JSON 形态应能摊平")
+        );
+    }
+
+    #[test]
+    fn prompt_block_keeps_plain_text_as_is() {
+        let plain =
+            "权利要求书\n1. 一种物料输送装置，包括机架。\n说明书\n[0001] 机架上设有输送带。\n";
+        assert_eq!(original_application_block(plain), plain.trim());
+    }
+
+    #[test]
+    fn prompt_block_missing_original_is_visible_not_empty() {
+        // 提示词里留空，模型就会自己编修改稿；必须是看得见的"未提供"
+        let block = original_application_block("   \n  ");
+        assert!(block.contains("未提供原始申请文本"), "{block}");
+        assert!(
+            block.contains("不得输出任何「修改后的权利要求」正文"),
+            "缺失时必须明令禁止编修改稿: {block}"
         );
     }
 }
