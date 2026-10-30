@@ -947,3 +947,8 @@
 
 ## 2026-10-29 · 模板库就绪判据（同分支 `fix/test-stub-port-race`）
 - 第 4 轮合跑红出第二类基础设施缺陷：`ensure_db_template` 用 `/api/version` 应答当就绪，应答后立刻 kill ⇒ `template db must exist after migration` 断言炸（随机 1/5 轮，且红在与它无关的用例上）。改为就绪后轮询 db 文件「存在且大小连续两次采样不变」再 kill，超时 panic 带路径/大小/目录清单自诊断。负控（把等待目标改成不存在的文件名）确认该分支是活代码而非装饰；绿控 4 binary × 5 轮 `--test-threads=8` + 全量 `cargo test` rc=0。复盘 errors.md ㊺。
+
+## 2026-10-30 · #102 AI 端点入参校验状态码（分支 `fix/ai-endpoint-validation-status`，基线 main@3c45cc3）
+- **缺陷**：12 个 AI 端点（claim-chart / compare-matrix / oa-quality-score / oa-panel / oa-strategy-recommend / oa-examiner-preview / oa-defense-analysis / oa-collect-evidence / oa-adversarial / oa-claim-simulate / check-amendments / inventiveness-analysis）在必填字段缺失时返回 HTTP 200 + body error——只看状态码的监控/重试/告警全绿。
+- **修复**：12 个 handler 签名 `Json<Value>` → `impl IntoResponse`，入参校验失败改 `(StatusCode::BAD_REQUEST, Json(...))`（错误文案保留），成功路径同步包 `(StatusCode::OK, ...)`。
+- **守卫测试（先红后绿，真实执行）**：`tests/ai_endpoint_status_guard.rs` 对 12 端点发空请求断言 400——修复前 **12×HTTP 200 FAILED**（与 issue 实测一致）→ 修复后全绿。负控回归：任何端点回退 200+error 即红。

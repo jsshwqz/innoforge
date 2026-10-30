@@ -6,6 +6,8 @@ use crate::ai::{
     OA_RESPONSE_DISCUSSION_MAX_CHARS, OA_RESPONSE_OA_MAX_CHARS,
 };
 use crate::patent::*;
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use axum::{
     extract::Path,
     extract::State,
@@ -977,7 +979,7 @@ pub async fn api_ai_risk_assessment(
 pub async fn api_ai_compare_matrix(
     State(s): State<AppState>,
     Json(req): Json<serde_json::Value>,
-) -> Json<serde_json::Value> {
+) -> impl IntoResponse {
     // Support new format: items array with mixed types (text objects + patent IDs)
     let items = req["items"]
         .as_array()
@@ -985,9 +987,24 @@ pub async fn api_ai_compare_matrix(
 
     let items = match items {
         Some(arr) if arr.len() >= 2 && arr.len() <= 5 => arr.clone(),
-        Some(arr) if arr.len() < 2 => return Json(json!({"error": "请选择至少2个专利/文件"})),
-        Some(_) => return Json(json!({"error": "请选择 2-5 个专利/文件进行对比"})),
-        None => return Json(json!({"error": "请选择至少2个专利"})),
+        Some(arr) if arr.len() < 2 => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "请选择至少2个专利/文件"})),
+            )
+        }
+        Some(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "请选择 2-5 个专利/文件进行对比"})),
+            )
+        }
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "请选择至少2个专利"})),
+            )
+        }
     };
 
     let mut patents_info = String::new();
@@ -1032,9 +1049,15 @@ pub async fn api_ai_compare_matrix(
     match ai.compare_multiple(&patents_info).await {
         Ok(content) => {
             let _ = s.db.log_ai_call(&ai, "ai-compare-matrix", None, None);
-            Json(json!({"status": "ok", "analysis": content}))
+            (
+                StatusCode::OK,
+                Json(json!({"status": "ok", "analysis": content})),
+            )
         }
-        Err(e) => Json(json!({ "error": format!("对比失败: {}", e) })),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": format!("对比失败: {}", e) })),
+        ),
     }
 }
 
@@ -1196,10 +1219,10 @@ fn resolve_references(
 pub async fn api_ai_inventiveness_analysis(
     State(s): State<AppState>,
     Json(req): Json<serde_json::Value>,
-) -> Json<serde_json::Value> {
+) -> impl IntoResponse {
     let my_info = match resolve_my_patent(&s.db, &req) {
         Ok(info) => info,
-        Err(e) => return Json(json!({ "error": e })),
+        Err(e) => return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))),
     };
 
     let refs = req["references"]
@@ -1207,14 +1230,29 @@ pub async fn api_ai_inventiveness_analysis(
         .or_else(|| req["reference_ids"].as_array()); // backward compat
     let refs = match refs {
         Some(arr) if !arr.is_empty() && arr.len() <= 4 => arr.clone(),
-        Some(arr) if arr.is_empty() => return Json(json!({"error": "请选择至少一个对比文件"})),
-        Some(_) => return Json(json!({"error": "请选择 1-4 个对比文件"})),
-        None => return Json(json!({"error": "请选择至少一个对比文件"})),
+        Some(arr) if arr.is_empty() => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "请选择至少一个对比文件"})),
+            )
+        }
+        Some(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "请选择 1-4 个对比文件"})),
+            )
+        }
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "请选择至少一个对比文件"})),
+            )
+        }
     };
 
     let refs_info = match resolve_references(&s.db, &refs) {
         Ok(info) => info,
-        Err(e) => return Json(json!({ "error": e })),
+        Err(e) => return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))),
     };
 
     let ai = s
@@ -1225,9 +1263,15 @@ pub async fn api_ai_inventiveness_analysis(
     match ai.inventiveness_analysis(&my_info, &refs_info).await {
         Ok(content) => {
             let _ = s.db.log_ai_call(&ai, "ai-inventiveness", None, None);
-            Json(json!({"status": "ok", "analysis": content}))
+            (
+                StatusCode::OK,
+                Json(json!({"status": "ok", "analysis": content})),
+            )
         }
-        Err(e) => Json(json!({ "error": format!("创造性分析失败: {}", e) })),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": format!("创造性分析失败: {}", e) })),
+        ),
     }
 }
 
@@ -2588,13 +2632,16 @@ pub async fn api_oa_history_delete(
 pub async fn api_ai_check_amendments(
     State(s): State<AppState>,
     Json(req): Json<serde_json::Value>,
-) -> Json<serde_json::Value> {
+) -> impl IntoResponse {
     let original = req["original_claims"].as_str().unwrap_or("");
     let amended = req["amended_claims"].as_str().unwrap_or("");
     let oa = req["office_action"].as_str().unwrap_or("");
 
     if original.is_empty() || amended.is_empty() {
-        return Json(json!({"error": "原始权利要求和修改后权利要求不能为空"}));
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "原始权利要求和修改后权利要求不能为空"})),
+        );
     }
 
     let ai = s
@@ -2606,9 +2653,15 @@ pub async fn api_ai_check_amendments(
     match ai.check_claim_amendments(original, amended, oa).await {
         Ok(content) => {
             let _ = s.db.log_ai_call(&ai, "ai-claim-amendments", None, None);
-            Json(json!({"status": "ok", "analysis": content}))
+            (
+                StatusCode::OK,
+                Json(json!({"status": "ok", "analysis": content})),
+            )
         }
-        Err(e) => Json(json!({ "error": format!("审查失败: {}", e) })),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": format!("审查失败: {}", e) })),
+        ),
     }
 }
 
@@ -2647,12 +2700,15 @@ pub async fn api_ai_threat_assessment(
 pub async fn api_ai_claim_chart(
     State(s): State<AppState>,
     Json(req): Json<serde_json::Value>,
-) -> Json<serde_json::Value> {
+) -> impl IntoResponse {
     let my_claims = req["my_claims"].as_str().unwrap_or("");
     let prior_art = req["prior_art"].as_str().unwrap_or("");
 
     if my_claims.is_empty() || prior_art.is_empty() {
-        return Json(json!({"error": "权利要求和对比文件内容不能为空"}));
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "权利要求和对比文件内容不能为空"})),
+        );
     }
 
     let ai = s
@@ -2664,11 +2720,17 @@ pub async fn api_ai_claim_chart(
     match ai.claim_chart(my_claims, prior_art).await {
         Ok(content) => {
             let _ = s.db.log_ai_call(&ai, "ai-claim-chart", None, None);
-            Json(json!({"status": "ok", "analysis": content}))
+            (
+                StatusCode::OK,
+                Json(json!({"status": "ok", "analysis": content})),
+            )
         }
-        Err(e) => Json(json!({
-            "error": format!("权利要求对照表生成失败: {}", e)
-        })),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": format!("权利要求对照表生成失败: {}", e)
+            })),
+        ),
     }
 }
 
@@ -2869,13 +2931,16 @@ pub async fn api_ai_oa_fetch_refs(
 pub async fn api_ai_oa_panel(
     State(s): State<AppState>,
     Json(req): Json<serde_json::Value>,
-) -> Json<serde_json::Value> {
+) -> impl IntoResponse {
     let my_patent = req["my_patent"].as_str().unwrap_or("");
     let oa_text = req["oa_text"].as_str().unwrap_or("");
     let refs = req["refs"].as_str().unwrap_or("");
 
     if my_patent.is_empty() || oa_text.is_empty() {
-        return Json(json!({ "error": "缺少专利文本或 OA 文本 / Missing patent or OA text" }));
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "缺少专利文本或 OA 文本 / Missing patent or OA text" })),
+        );
     }
 
     let ai = s
@@ -3019,23 +3084,26 @@ pub async fn api_ai_oa_panel(
     // synthesis = chair for backward compatibility
     let synthesis = chair.clone();
 
-    Json(json!({
-        "status": "ok",
-        "roles": {
-            "examiner": examiner,
-            "agent": agent,
-            "expert": expert,
-            "opponent": opponent
-        },
-        "rebuttals": {
-            "examiner": examiner_rebuttal,
-            "agent": agent_rebuttal,
-            "expert": expert_rebuttal,
-            "opponent": opponent_rebuttal
-        },
-        "chair": chair,
-        "synthesis": synthesis
-    }))
+    (
+        StatusCode::OK,
+        Json(json!({
+            "status": "ok",
+            "roles": {
+                "examiner": examiner,
+                "agent": agent,
+                "expert": expert,
+                "opponent": opponent
+            },
+            "rebuttals": {
+                "examiner": examiner_rebuttal,
+                "agent": agent_rebuttal,
+                "expert": expert_rebuttal,
+                "opponent": opponent_rebuttal
+            },
+            "chair": chair,
+            "synthesis": synthesis
+        })),
+    )
 }
 
 /// P1-T3: 一审-二审对比分析
@@ -3112,13 +3180,16 @@ pub async fn api_ai_oa_history_compare(
 pub async fn api_ai_oa_examiner_preview(
     State(s): State<AppState>,
     Json(req): Json<serde_json::Value>,
-) -> Json<serde_json::Value> {
+) -> impl IntoResponse {
     let my_patent = req["my_patent"].as_str().unwrap_or("");
     let oa_text = req["oa_text"].as_str().unwrap_or("");
     let response_text = req["response_text"].as_str().unwrap_or("");
 
     if response_text.is_empty() {
-        return Json(json!({ "error": "缺少答复文本 / Missing response text" }));
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "缺少答复文本 / Missing response text" })),
+        );
     }
 
     let ai = s
@@ -3145,7 +3216,10 @@ pub async fn api_ai_oa_examiner_preview(
         .await
         .unwrap_or_else(|e| format!("预判失败: {}", e));
 
-    Json(json!({ "status": "ok", "preview": result }))
+    (
+        StatusCode::OK,
+        Json(json!({ "status": "ok", "preview": result })),
+    )
 }
 
 /// P2-T3: 对方视角防御分析
@@ -3153,12 +3227,15 @@ pub async fn api_ai_oa_examiner_preview(
 pub async fn api_ai_oa_defense_analysis(
     State(s): State<AppState>,
     Json(req): Json<serde_json::Value>,
-) -> Json<serde_json::Value> {
+) -> impl IntoResponse {
     let my_patent = req["my_patent"].as_str().unwrap_or("");
     let claims = req["claims"].as_str().unwrap_or("");
 
     if my_patent.is_empty() {
-        return Json(json!({ "error": "缺少专利文本 / Missing patent text" }));
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "缺少专利文本 / Missing patent text" })),
+        );
     }
 
     let ai = s
@@ -3194,7 +3271,10 @@ pub async fn api_ai_oa_defense_analysis(
         .await
         .unwrap_or_else(|e| format!("分析失败: {}", e));
 
-    Json(json!({ "status": "ok", "analysis": result }))
+    (
+        StatusCode::OK,
+        Json(json!({ "status": "ok", "analysis": result })),
+    )
 }
 
 /// P3-T1: 答复策略智能推荐
@@ -3202,14 +3282,17 @@ pub async fn api_ai_oa_defense_analysis(
 pub async fn api_ai_oa_strategy_recommend(
     State(s): State<AppState>,
     Json(req): Json<serde_json::Value>,
-) -> Json<serde_json::Value> {
+) -> impl IntoResponse {
     let oa_type = req["oa_type"].as_str().unwrap_or("second_rejection");
     let my_patent = req["my_patent"].as_str().unwrap_or("");
     let refs = req["refs"].as_str().unwrap_or("");
     let oa_text = req["oa_text"].as_str().unwrap_or("");
 
     if my_patent.is_empty() || oa_text.is_empty() {
-        return Json(json!({ "error": "缺少专利文本或OA文本 / Missing patent or OA text" }));
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "缺少专利文本或OA文本 / Missing patent or OA text" })),
+        );
     }
 
     let ai = s
@@ -3226,7 +3309,10 @@ pub async fn api_ai_oa_strategy_recommend(
         .await
         .unwrap_or_else(|e| format!("策略推荐失败: {}", e));
 
-    Json(json!({ "status": "ok", "strategies": result }))
+    (
+        StatusCode::OK,
+        Json(json!({ "status": "ok", "strategies": result })),
+    )
 }
 
 /// POST /api/ai/oa-quality-score — P3-T3: 答复质量量化评估
@@ -3234,13 +3320,16 @@ pub async fn api_ai_oa_strategy_recommend(
 pub async fn api_ai_oa_quality_score(
     State(s): State<AppState>,
     Json(req): Json<serde_json::Value>,
-) -> Json<serde_json::Value> {
+) -> impl IntoResponse {
     let response_text = req["response_text"].as_str().unwrap_or("");
     let oa_text = req["oa_text"].as_str().unwrap_or("");
     let my_patent = req["my_patent"].as_str().unwrap_or("");
 
     if response_text.is_empty() || oa_text.is_empty() {
-        return Json(json!({ "error": "缺少答复文本或OA文本 / Missing response or OA text" }));
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "缺少答复文本或OA文本 / Missing response or OA text" })),
+        );
     }
 
     let ai = s
@@ -3265,7 +3354,7 @@ pub async fn api_ai_oa_quality_score(
     // {"status":"ok","score":{"raw":"..."}} — making it impossible for the UI
     // to extract a numeric score.
     let score_result = parse_quality_score(&result);
-    Json(score_result)
+    (StatusCode::OK, Json(score_result))
 }
 
 /// #100: Parse the model's quality-score output into a structured result.
@@ -3392,14 +3481,17 @@ fn parse_quality_score(raw: &str) -> serde_json::Value {
 pub async fn api_ai_oa_claim_simulate(
     State(s): State<AppState>,
     Json(req): Json<serde_json::Value>,
-) -> Json<serde_json::Value> {
+) -> impl IntoResponse {
     let original_claims = req["original_claims"].as_str().unwrap_or("");
     let modified_claims = req["modified_claims"].as_str().unwrap_or("");
     let refs = req["refs"].as_str().unwrap_or("");
     let oa_text = req["oa_text"].as_str().unwrap_or("");
 
     if modified_claims.is_empty() {
-        return Json(json!({ "error": "缺少修改后权利要求 / Missing modified claims" }));
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "缺少修改后权利要求 / Missing modified claims" })),
+        );
     }
 
     let ai = s
@@ -3422,7 +3514,10 @@ pub async fn api_ai_oa_claim_simulate(
     let parsed: serde_json::Value =
         serde_json::from_str(&result).unwrap_or_else(|_| json!({ "raw": result }));
 
-    Json(json!({ "status": "ok", "simulation": parsed }))
+    (
+        StatusCode::OK,
+        Json(json!({ "status": "ok", "simulation": parsed })),
+    )
 }
 
 /// T1: 在线搜索链 fallback — 当本地库未找到对比文献时，尝试在线搜索
@@ -3537,16 +3632,19 @@ async fn try_online_search(
 pub async fn api_ai_oa_collect_evidence(
     State(s): State<AppState>,
     Json(req): Json<serde_json::Value>,
-) -> Json<serde_json::Value> {
+) -> impl IntoResponse {
     let my_patent = req["my_patent"].as_str().unwrap_or("");
     let refs = req["refs"].as_str().unwrap_or("");
     let oa_text = req["oa_text"].as_str().unwrap_or("");
 
     if my_patent.is_empty() || oa_text.is_empty() {
-        return Json(json!({
-            "status": "error",
-            "message": "缺少专利文本或OA文本 / Missing patent or OA text"
-        }));
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "status": "error",
+                "message": "缺少专利文本或OA文本 / Missing patent or OA text"
+            })),
+        );
     }
 
     let ai = s
@@ -3572,24 +3670,30 @@ pub async fn api_ai_oa_collect_evidence(
                 total_relevance / evidence.len() as f32
             };
 
-            Json(json!({
-                "status": "ok",
-                "evidence": evidence,
-                "summary": summary,
-                "stats": {
-                    "type_counts": stats,
-                    "total": evidence.len(),
-                    "avg_relevance": avg_relevance,
-                    // 锚点核对结果：total = located + unlocated，模型自报的 source 一律不采信
-                    "anchor": serde_json::to_value(&anchor_report)
-                        .expect("AnchorReport 是自身序列化的结构")
-                }
-            }))
+            (
+                StatusCode::OK,
+                Json(json!({
+                    "status": "ok",
+                    "evidence": evidence,
+                    "summary": summary,
+                    "stats": {
+                        "type_counts": stats,
+                        "total": evidence.len(),
+                        "avg_relevance": avg_relevance,
+                        // 锚点核对结果：total = located + unlocated，模型自报的 source 一律不采信
+                        "anchor": serde_json::to_value(&anchor_report)
+                            .expect("AnchorReport 是自身序列化的结构")
+                    }
+                })),
+            )
         }
-        Err(e) => Json(json!({
-            "status": "error",
-            "message": format!("证据收集失败: {e}")
-        })),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "status": "error",
+                "message": format!("证据收集失败: {e}")
+            })),
+        ),
     }
 }
 
@@ -3600,7 +3704,7 @@ pub async fn api_ai_oa_collect_evidence(
 pub async fn api_ai_oa_adversarial(
     State(s): State<AppState>,
     Json(req): Json<serde_json::Value>,
-) -> Json<serde_json::Value> {
+) -> impl IntoResponse {
     let my_patent = req["my_patent"].as_str().unwrap_or("");
     let claims = req["claims"].as_str().unwrap_or("");
     let oa_text = req["oa_text"].as_str().unwrap_or("");
@@ -3610,7 +3714,10 @@ pub async fn api_ai_oa_adversarial(
     let goal_threshold = req["goal_threshold"].as_f64().unwrap_or(0.85) as f32;
 
     if my_patent.is_empty() || oa_text.is_empty() {
-        return Json(json!({ "error": "缺少专利文本或OA文本 / Missing patent or OA text" }));
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "缺少专利文本或OA文本 / Missing patent or OA text" })),
+        );
     }
 
     let params = crate::ai::AdversarialParams {
@@ -3631,17 +3738,20 @@ pub async fn api_ai_oa_adversarial(
 
     let result = crate::ai::run_adversarial_deliberation(&ai, &params).await;
 
-    Json(json!({
-        "status": "ok",
-        "transcript": result.transcript,
-        "final_response": result.final_response,
-        "confidence_score": result.confidence_score,
-        "weak_points": result.weak_points,
-        "rounds_completed": result.rounds_completed,
-        "converged": result.converged,
-        "goal_achieved": result.goal_achieved,
-        "goal_threshold": result.goal_threshold
-    }))
+    (
+        StatusCode::OK,
+        Json(json!({
+            "status": "ok",
+            "transcript": result.transcript,
+            "final_response": result.final_response,
+            "confidence_score": result.confidence_score,
+            "weak_points": result.weak_points,
+            "rounds_completed": result.rounds_completed,
+            "converged": result.converged,
+            "goal_achieved": result.goal_achieved,
+            "goal_threshold": result.goal_threshold
+        })),
+    )
 }
 
 #[cfg(test)]
