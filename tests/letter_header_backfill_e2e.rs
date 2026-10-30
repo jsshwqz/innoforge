@@ -73,7 +73,7 @@ const NOTICE_WITHOUT_HEADER: &str = "\
 正文：权利要求 1 不具备专利法第22条第3款规定的创造性，理由见下。
 ";
 
-fn start_stub() -> u16 {
+fn start_stub(capture: std::sync::Arc<std::sync::Mutex<Vec<String>>>) -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
     let port = listener.local_addr().unwrap().port();
     std::thread::spawn(move || {
@@ -111,6 +111,11 @@ fn start_stub() -> u16 {
                     Err(_) => return,
                 }
             }
+            // 记下发给模型的完整请求体：用来断言"提示词里到底有没有原始申请文本"
+            capture
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(String::from_utf8_lossy(&buf).to_string());
             let payload = serde_json::json!({
                 "choices": [{
                     "message": {"role": "assistant", "content": STUB_LETTER},
@@ -184,8 +189,13 @@ fn meta_of(raw: &str, key: &str) -> Option<serde_json::Value> {
     None
 }
 
-fn spawn_with_stub() -> (u16, common::TestServer) {
-    let stub_port = start_stub();
+fn spawn_with_stub() -> (
+    u16,
+    common::TestServer,
+    std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+) {
+    let capture = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let stub_port = start_stub(capture.clone());
     let app_port = common::free_port();
     let s = common::spawn_test_server_with_timeout(
         app_port,
@@ -196,7 +206,7 @@ fn spawn_with_stub() -> (u16, common::TestServer) {
             ("AI_API_KEY", "stub-key"),
         ],
     );
-    (app_port, s)
+    (app_port, s, capture)
 }
 
 fn letter_request(notice: &str) -> serde_json::Value {
@@ -211,7 +221,7 @@ fn letter_request(notice: &str) -> serde_json::Value {
 
 #[test]
 fn header_is_backfilled_and_no_template_placeholder_reaches_the_reader() {
-    let (port, _s) = spawn_with_stub();
+    let (port, _s, capture) = spawn_with_stub();
     let resp = post_letter(port, &letter_request(NOTICE_WITH_HEADER));
     assert!(
         !resp.contains("event:error"),
@@ -219,6 +229,27 @@ fn header_is_backfilled_and_no_template_placeholder_reaches_the_reader() {
         &resp[..resp.len().min(400)]
     );
     let decoded = decode_data(&resp);
+
+    // 提示词必须把「原始申请文本」给到模型：v7 的 22 处零命中，根因就是提示词里
+    // 根本没有原文——模型被要求写"修改后的权利要求"，却看不到它应当逐字引用的东西。
+    let sent = capture
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .first()
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        sent.contains("输送带上方设有导料板，导料板与输送带之间的间距为20～30厘米"),
+        "发给模型的提示词里必须含原始申请文本原文（否则模型只能编修改稿）"
+    );
+    assert!(
+        sent.contains("原始申请文本（修改稿的唯一依据"),
+        "缺少『原始申请文本』一节的标题与用途说明"
+    );
+    assert!(
+        sent.contains("逐字组成"),
+        "缺少『修改稿必须由原文逐字组成』这条硬规则"
+    );
 
     // 负控点 1：产物里零个"待填写"（修复前桩原文会原样穿过）
     assert!(
@@ -269,7 +300,7 @@ fn header_is_backfilled_and_no_template_placeholder_reaches_the_reader() {
 fn extraction_failure_is_shown_as_visible_holes_not_a_clean_letter() {
     // 负控另一侧：通知书里没有表头标签 ⇒ 一个真实值都不许编出来，
     // 但每处空位都要变成可追形态并如实报数（不能报成"信头已完成"）。
-    let (port, _s) = spawn_with_stub();
+    let (port, _s, _capture) = spawn_with_stub();
     let resp = post_letter(port, &letter_request(NOTICE_WITHOUT_HEADER));
     let decoded = decode_data(&resp);
     let meta = meta_of(&resp, "header_unresolved_marks")
