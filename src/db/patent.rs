@@ -351,6 +351,7 @@ impl super::Database {
                         country: r.get::<_, String>(7).unwrap_or_default(),
                         relevance_score: Some(100.0),
                         score_source: Some("patent number exact match".to_string()),
+                        matched_fields: None,
                     })
                 },
             )?
@@ -498,6 +499,7 @@ impl super::Database {
             country: row.get::<_, String>(7).unwrap_or_default(),
             relevance_score: Some(score),
             score_source: Some(source),
+            matched_fields: None,
         })
     }
 
@@ -564,6 +566,7 @@ impl super::Database {
                     country: r.get::<_, String>(7).unwrap_or_default(),
                     relevance_score: Some(score),
                     score_source: Some("FTS5-BM25".to_string()),
+                    matched_fields: None,
                 })
             })?
             .filter_map(|r| r.ok())
@@ -698,6 +701,7 @@ impl super::Database {
                         country: row.get::<_, String>(7).unwrap_or_default(),
                         relevance_score: Some(score),
                         score_source: Some("mixed search match".to_string()),
+                        matched_fields: None,
                     })
                 })?
                 .filter_map(|r| r.ok())
@@ -750,6 +754,7 @@ impl super::Database {
                         country: row.get::<_, String>(7).unwrap_or_default(),
                         relevance_score: Some(score),
                         score_source: Some("mixed search match".to_string()),
+                        matched_fields: None,
                     })
                 })?
                 .filter_map(|r| r.ok())

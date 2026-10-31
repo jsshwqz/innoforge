@@ -156,6 +156,7 @@ mod tests {
             country: "CN".to_string(),
             relevance_score: Some(90.0),
             score_source: None,
+            matched_fields: None,
         }
     }
 

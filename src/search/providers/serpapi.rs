@@ -578,6 +578,7 @@ impl SearchProvider for SerpApiProvider {
                 country,
                 relevance_score: Some(100.0),
                 score_source: Some("exact_lookup".to_string()),
+                matched_fields: None,
             };
 
             println!(
@@ -916,6 +917,7 @@ mod tests {
                     country: p.country.clone(),
                     relevance_score: Some(score),
                     score_source: Some(source),
+                    matched_fields: None,
                 });
             }
         }
@@ -1046,6 +1048,7 @@ mod tests {
             country: "CN".to_string(),
             relevance_score: Some(100.0),
             score_source: Some("exact_lookup".to_string()),
+            matched_fields: None,
         };
         let value = exact_lookup_response(summary.clone());
         assert_eq!(
