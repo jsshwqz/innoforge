@@ -1514,3 +1514,13 @@
 - **回归 / 负控 / Regression & Negative control**: `no_amendment_declaration_is_not_treated_as_amendment_draft` 钉真实形态（`NoAmendment`、`unsupported=0`、正文零标注、`submission_ready=false`）；`declaration_of_no_amendment_does_not_hide_an_actual_claim_draft` 是负控（同一节里既说"不修改权利要求2"又贴了修改后的权利要求1 ⇒ **不得**跳过，`checked_feature_count>0`）；`unverified_statuses_are_never_submission_ready` 钉三种状态（`NoAmendment`/`NoOriginal` ⇒ false，`Verified` ⇒ true）。
 - **真实产物 / Real artifact**: 同一封不修改答复书，修复前 `degraded/unsupported=7/ready=false`，修复后 `skipped_no_amendment_section/0/ready=false`，正文无标注。修复前"读数不可交、产物却在正文里标了 7 处未证实"，两样都在误导读者。
 - **预防 / Prevention**: ①**"查过且通过"与"没查"必须是两个状态**，状态机里任何"未执行"分支的默认值都不能是绿色；布尔字段要由"是否真的执行过"推导，而不是由"有没有报错"推导。②定位类判据要回答"**对象存在吗**"，不能只回答"起点在哪"——后者会把"标题"当成"内容"。③放宽一个判据时必须同时写负控（本例：声明不修改 + 真有修改稿），否则"跳过"会变成新的漏检通道。
+
+## [2026-10-31] 53 门不幂等（重跑把标注算成新零命中）＋ 横幅报"特征句条数"而正文只有"标注处数"
+- **严重程度 / Severity**: HIGH
+- **涉及文件 / Files**: `src/evidence_kernel/amendment_gate.rs`（`gate_amendment_text`、`banner`、`AmendmentGateResult`）
+- **现象 / Symptom**: ①把**已经过门的产物**再喂一次，`UNVERIFIED_MARK` 从 28 处变 56 处（真实案件实测）：标注是在特征句**之前**插入的，重跑时标注连同被标注的句子一起被切成新特征句，而原文里当然没有这句，于是一处变两处。②同一次真实运行里，`amendment_unsupported=24` 而正文只有 **17** 处标注：两条特征句从同一位置开始（或一条是另一条的前缀）时插入位置被 `dedup` 合并，横幅却仍按"条数"报 24。读者数一遍得到 17，会以为计数坏了——而"数不出来"的表等于没有表。
+- **根因 / Root cause**: ①门的入口把"用户文本"和"本函数上一轮的产物"当同一类输入；本函数写进正文的东西没有在入口被剥离，于是自己吃自己。②计数取自**中间量**（`unsupported.len()`）而不是**成品**（`gated.matches(MARK).count()`）；插入次数、命中条数、正文处数三者本就不相等，报错哪个都会让读者对不上。这正是 errors.md ㊶④（展示数与产物数用同一次统计口径）在门内部的复发。
+- **修复 / Fix**: ①新增 `strip_prior_gate_artifacts`，入口先剥掉本门自己产出的工件（`UNVERIFIED_MARK`、`> ⚠️ 修改稿核验阻断` 横幅行、`> ℹ️/⚠️ 修改稿逐字核验` 说明行），再定位与核验；幂等由 `gate(gate(x).gated_text)` 与 `gate(x)` 读数相等来保证。②新增 `marked_count` 字段，值取**成品里数出来的**处数；横幅在两者不等时补一句「同一位置上重叠的命中合并为一处标注，正文实际标注 N 处」；meta 同步增加 `amendment_marked`。
+- **回归 / 负控 / Regression & Negative control**: `gate_is_idempotent_over_its_own_output`（重跑后 `unsupported_count` 与正文标注处数都必须与首跑相同，旧行为是 1 → 2）；`stale_banner_is_stripped_so_the_artifact_stops_contradicting_itself`（首行旧横幅必须被剥掉，否则产物与新结论互相矛盾）；`marked_count_is_the_number_a_reader_can_count` 与既有 `banner_and_body_marker_counts_agree` 都改为断言「横幅 + 正文的字面量数 == `marked_count` == 正文里数得出来的处数」。
+- **真实产物 / Real artifact**: v10 真跑（合并后的代码）同一封信：`amendment_unsupported=24`、正文 17 处标注、`待填写=0`、`未提取=1`（签署日）、`header_known=5 / header_filled=0`。修复后横幅报「24 处特征句……正文实际标注 17 处」，读者能数得出来。
+- **预防 / Prevention**: ①**门要对"自己的输出"负责**：任何会在正文里写下标记/横幅的环节，其入口都必须能把这些标记剥回去，否则"重跑一次"就是一条改变结论的路径。②凡是"报给读者看的数字"，取数点必须在**成品**上，不能在中间集合上；中间量与成品量不相等是常态，不是异常。③两个数不相等时**两个都报出来并且说明为什么**，不要挑一个看起来整齐的。
