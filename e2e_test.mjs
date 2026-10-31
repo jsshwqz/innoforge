@@ -475,6 +475,7 @@ async function runButtonSweep(browser) {
         const server5xx = [];
         const failed = [];
         const dialogs = [];
+        const validation400 = [];
         let clicked = 0;
         for (const button of buttons) {
             const opened = await openSweepPage(browser, specification.path);
