@@ -98,6 +98,13 @@ pub struct AmendmentGateResult {
     pub gated_text: String,
     pub unsupported: Vec<UnsupportedFeature>,
     pub unsupported_count: usize,
+    /// 成品文本里 [`UNVERIFIED_MARK`] 的**实际处数**。
+    ///
+    /// 与 `unsupported_count` 平行而非相等：两条特征句若从同一位置开始（或一条是另一条的前缀），
+    /// 标注会合并成一个位置，`unsupported_count` 仍逐条计数。真实案件实测 24 条特征句 →
+    /// 正文 17 处标注。横幅与 meta 必须报"能数出来"的那个数，否则读者数一遍就对不上
+    /// （errors.md ㊶④：展示数与产物数用同一次统计口径）。
+    pub marked_count: usize,
     /// 被替换为降级标注的"明确记载"类断言条数
     pub assertions_downgraded: usize,
     pub amended_claim_count: usize,
@@ -117,6 +124,7 @@ impl AmendmentGateResult {
             gated_text: text.to_string(),
             unsupported: Vec::new(),
             unsupported_count: 0,
+            marked_count: 0,
             assertions_downgraded: 0,
             amended_claim_count: 0,
             checked_feature_count: 0,
@@ -130,13 +138,24 @@ impl AmendmentGateResult {
     /// 横幅里**不得出现** [`UNVERIFIED_MARK`] 的字面量（含 `【】`）：交付文本的标记数是
     /// `横幅 + 正文`，横幅自带一次字面量就会让读者数出 N+1 个标记、与
     /// `amendment_unsupported=N` 对不上（真实案件实测 136 vs 137）。这里改用「」描述。
+    ///
+    /// 同时把「特征句条数」与「正文标注处数」分开报：两条特征句从同一位置开始时标注会合并，
+    /// 真实案件实测 24 条 → 17 处。只报 24 会让读者数出 17，以为计数坏了。
     pub fn banner(&self) -> String {
         if self.unsupported_count == 0 {
             return String::new();
         }
+        let merge_note = if self.marked_count == self.unsupported_count {
+            String::new()
+        } else {
+            format!(
+                "（同一位置上重叠的命中合并为一处标注，正文实际标注 {} 处）",
+                self.marked_count
+            )
+        };
         format!(
-            "> ⚠️ 修改稿核验阻断（amendment_unsupported={}）：本稿修改后的权利要求中有 {} 处特征句在原始申请文本（说明书 + 权利要求书）零命中，已就地逐处标注「未证实：该措辞在原始文本零命中」；相关「明确记载 / 来源于原说明书」类断言已降级。提交前必须逐处核对专利法第33条（修改超范围）。\n\n",
-            self.unsupported_count, self.unsupported_count
+            "> ⚠️ 修改稿核验阻断（amendment_unsupported={}）：本稿修改后的权利要求中有 {} 处特征句在原始申请文本（说明书 + 权利要求书）零命中，已就地逐处标注「未证实：该措辞在原始文本零命中」{}；相关「明确记载 / 来源于原说明书」类断言已降级。提交前必须逐处核对专利法第33条（修改超范围）。\n\n",
+            self.unsupported_count, self.unsupported_count, merge_note
         )
     }
 
@@ -164,10 +183,40 @@ impl AmendmentGateResult {
     }
 }
 
+/// 剥掉本门自己产出的工件：就地标注、阻断横幅、未核验说明横幅。
+///
+/// 为什么必须在入口做：这些工件是**本函数写进正文**的东西。把它们当成用户文本再核验一次，
+/// 就会出现两种畸形——①标注被切成特征句，一处零命中变两处（28 → 56）；②旧横幅留在产物里，
+/// 与新一次核验的结论互相矛盾（门说 verified，首行还写着"核验阻断"）。issue #158。
+fn strip_prior_gate_artifacts(text: &str) -> String {
+    let without_marks = text.replace(UNVERIFIED_MARK, "");
+    let mut out = String::with_capacity(without_marks.len() + 1);
+    for line in without_marks.split('\n') {
+        let t = line.trim_start();
+        if t.starts_with("> ⚠️ 修改稿核验阻断")
+            || t.starts_with("> ℹ️ 修改稿逐字核验")
+            || t.starts_with("> ⚠️ 修改稿逐字核验")
+        {
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    if out.ends_with('\n') {
+        out.pop();
+    }
+    out
+}
+
 /// 门主入口：核验并返回就地标注后的文本。
 ///
 /// 纯函数、零 AI、零网络（与内核 ADR-1 一致）。
 pub fn gate_amendment_text(letter: &str, original_application: &str) -> AmendmentGateResult {
+    // 幂等入口：先剥掉本函数自己上一轮的产出（就地标注 + 阻断/说明横幅），再核验。
+    // 不剥的话，重跑时标注本身会被切成新的特征句再拿去比对，一处变两处（真实案件实测
+    // 28 → 56）；旧横幅还会留在产物里跟新结论打架（issue #158）。
+    let cleaned = strip_prior_gate_artifacts(letter);
+    let letter = cleaned.as_str();
     if letter.trim().is_empty() {
         return AmendmentGateResult::empty(GateStatus::NoAmendment, letter);
     }
@@ -274,10 +323,15 @@ pub fn gate_amendment_text(letter: &str, original_application: &str) -> Amendmen
     } else {
         GateStatus::Degraded
     };
+    // 计数口径：标注处数**从成品里数**，不是把插入次数累加。降级替换可能吞掉一处标注，
+    // 同一位置的重复命中会被合并——这两种情况下"插入了几次"与"正文里有几处"不相等，
+    // 读者只会数正文。
+    let marked_count = gated.matches(UNVERIFIED_MARK).count();
     AmendmentGateResult {
         status,
         gated_text: gated,
         unsupported_count: unsupported.len(),
+        marked_count,
         unsupported,
         assertions_downgraded,
         amended_claim_count: claim_count,
@@ -1397,9 +1451,44 @@ mod tests {
         let delivered = format!("{}{}", r.banner(), r.gated_text);
         assert_eq!(
             delivered.matches(UNVERIFIED_MARK).count(),
-            r.unsupported_count,
+            r.marked_count,
             "横幅计数与正文标记数必须一致: {delivered}"
         );
+        assert_eq!(
+            r.marked_count,
+            r.gated_text.matches(UNVERIFIED_MARK).count(),
+            "marked_count 必须是从成品里数出来的"
+        );
+    }
+
+    #[test]
+    fn marked_count_is_the_number_a_reader_can_count() {
+        // 真实案件实测：24 条零命中特征句，正文只有 17 处标注（同位置重叠合并）。
+        // 只报条数时读者数一遍就对不上，会直接不信整张表。
+        let letter = "\
+## 二、关于权利要求的修改\n\n\
+修改后的权利要求1：\n\
+一种物料输送装置，包括机架（1），还包括虚构的磁悬浮导轨与虚构的量子阀。\n";
+        let r = gate(letter);
+        assert!(r.unsupported_count > 0);
+        assert_eq!(
+            r.marked_count,
+            r.gated_text.matches(UNVERIFIED_MARK).count(),
+            "marked_count 必须等于正文里能数出来的处数"
+        );
+        let delivered = format!("{}{}", r.banner(), r.gated_text);
+        assert_eq!(
+            delivered.matches(UNVERIFIED_MARK).count(),
+            r.marked_count,
+            "横幅里不得再带一次字面量"
+        );
+        if r.unsupported_count != r.marked_count {
+            assert!(
+                r.banner().contains("正文实际标注"),
+                "条数与处数不等时横幅必须说明: {}",
+                r.banner()
+            );
+        }
     }
 
     // ── issue #142：真实版式的修改稿（带前导序号小标题 + 跨行引号全文）──
@@ -1704,5 +1793,40 @@ mod tests {
         );
         assert_eq!(verified.status, GateStatus::Verified);
         assert!(verified.submission_ready, "核验通过才可交");
+    }
+
+    // ── issue #158：门不幂等（重跑把标注本身算成新零命中；旧横幅留在产物里）──
+
+    #[test]
+    fn gate_is_idempotent_over_its_own_output() {
+        let letter = "## 二、关于权利要求的修改\n\n修改后的权利要求1：\n一种物料输送装置，机架上设有虚构的磁悬浮导轨。\n";
+        let once = gate(letter);
+        assert!(once.unsupported_count > 0, "这个夹具本来就该零命中");
+        let twice = gate(&once.gated_text);
+        assert_eq!(
+            twice.unsupported_count, once.unsupported_count,
+            "重跑不得把上一轮的标注算成新的零命中特征"
+        );
+        assert_eq!(
+            twice.gated_text.matches(UNVERIFIED_MARK).count(),
+            once.gated_text.matches(UNVERIFIED_MARK).count(),
+            "标注处数必须一致（旧行为是 1 → 2）"
+        );
+    }
+
+    #[test]
+    fn stale_banner_is_stripped_so_the_artifact_stops_contradicting_itself() {
+        // 真实形态：手改过的稿子正文已干净，首行旧横幅还在，写着"核验阻断 28 处"。
+        let clean = "## 二、关于权利要求的修改\n\n修改后的权利要求1：\n一种物料输送装置，机架（1）上设有输送带（2）。\n";
+        let stale =
+            format!("> ⚠️ 修改稿核验阻断（amendment_unsupported=28）：旧的一次。\n\n{clean}");
+        let r = gate(&stale);
+        assert_eq!(r.status, GateStatus::Verified);
+        assert_eq!(r.unsupported_count, 0);
+        assert!(
+            !r.gated_text.contains("修改稿核验阻断"),
+            "旧横幅必须剥掉，否则产物与新结论自相矛盾：{}",
+            r.gated_text
+        );
     }
 }
