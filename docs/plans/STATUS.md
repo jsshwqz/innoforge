@@ -947,3 +947,8 @@
 
 ## 2026-10-29 · 模板库就绪判据（同分支 `fix/test-stub-port-race`）
 - 第 4 轮合跑红出第二类基础设施缺陷：`ensure_db_template` 用 `/api/version` 应答当就绪，应答后立刻 kill ⇒ `template db must exist after migration` 断言炸（随机 1/5 轮，且红在与它无关的用例上）。改为就绪后轮询 db 文件「存在且大小连续两次采样不变」再 kill，超时 panic 带路径/大小/目录清单自诊断。负控（把等待目标改成不存在的文件名）确认该分支是活代码而非装饰；绿控 4 binary × 5 轮 `--test-threads=8` + 全量 `cargo test` rc=0。复盘 errors.md ㊺。
+
+## 2026-10-30 · #103 首页横幅 provider 派生 + OA 答复入口（分支 `fix/homepage-provider-banner-and-oa-entry`，基线 main@428fbdc）
+- **修复 1**：index.html 横幅 provider 显示名从 `/api/ai/models` 探测结果**派生**（`okName`/`errNames` 拼接），写死文案「本地 Ollama（未检测到服务）」删除——换 provider 横幅跟着变（负控 A 的静态守卫：`homepage_banner_has_no_hardcoded_vendor_names`，厂商字面量即红）。
+- **修复 2**：features 区新增「📝 OA 答复与复审」卡（href=/oa-response，与既有三张卡同级）——主功能可发现。负控 B：`homepage_has_oa_response_entry`（删入口即红）。两条守卫扩展进 `tests/ai_unconfigured_regression.rs`（#68 同主题文件）4/4 绿。
+- **HTML 扫描**：check_html_functions.mjs 通过（无 on* 断链、基线零漂移）。
