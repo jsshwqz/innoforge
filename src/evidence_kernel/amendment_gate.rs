@@ -479,9 +479,10 @@ fn is_no_amendment_section(text: &str, start: usize, end: usize) -> bool {
 fn has_claim_draft_text(body: &str) -> bool {
     static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     let re = RE.get_or_init(|| {
-        // ① `修改后的权利要求1：` 引出标签；② `1.一种…` / `2.根据…` 编号权项行
+        // ① `修改后的权利要求1：` 引出标签；② `1.一种…` / `2.根据…` 编号权项行；
+        // ③ `（3）一种…` 括号编号（复核发现：漏这条会把真修改稿整节跳过——宁可误红）
         regex::Regex::new(
-            r"(?m)^[\s#>*\-•]*(?:修改后的?权利要求\s*[0-9一二三四五六七八九十]{0,4}\s*[：:]|[0-9]{1,2}\s*[.．、]\s*(?:一种|根据))",
+            r"(?m)^[\s#>*\-•]*(?:修改后的?权利要求\s*[0-9一二三四五六七八九十]{0,4}\s*[：:]|[0-9]{1,2}\s*[.．、]\s*(?:一种|根据)|[（(][0-9一二三四五六七八九十]{1,3}[）)]\s*(?:一种|根据))",
         )
         .unwrap_or_else(|e| panic!("修改稿形态正则常量失败即 bug: {e}"))
     });
@@ -1827,6 +1828,45 @@ mod tests {
             !r.gated_text.contains("修改稿核验阻断"),
             "旧横幅必须剥掉，否则产物与新结论自相矛盾：{}",
             r.gated_text
+        );
+    }
+
+    // ── 复核补漏（第三方复核命中）：括号编号的权项行也必须算"有修改稿"──
+
+    #[test]
+    fn no_amendment_declaration_with_parenthesised_claim_draft_still_verified() {
+        // 声明"不作修改"，但正文确实贴了（3）一种… 的修改稿。
+        // 修复前：编号只认 `3.一种`，括号编号不命中 ⇒ 整节被当"无修改稿"跳过（静默漏检）。
+        let letter = "## 二、关于权利要求的修改
+
+本次对独立权利要求1不作修改。
+
+（3）一种物料输送装置，机架（1）上设有输送带（2），机架（1）侧面固定有驱动电机（3）。
+";
+        let r = gate(letter);
+        assert_ne!(
+            r.status,
+            GateStatus::NoAmendment,
+            "括号编号的修改稿不得被当成\"无修改稿\"跳过：{}",
+            r.gated_text
+        );
+        assert!(r.checked_feature_count > 0, "必须真的核验了特征句");
+    }
+
+    #[test]
+    fn plain_numbered_claim_draft_is_still_recognised() {
+        // 负控的另一半：阿拉伯点号编号仍要认（改动不能把常见形态弄坏）。
+        let letter = "## 二、关于权利要求的修改
+
+本次对独立权利要求1不作修改。
+
+3.一种物料输送装置，机架（1）上设有输送带（2）。
+";
+        let r = gate(letter);
+        assert_ne!(
+            r.status,
+            GateStatus::NoAmendment,
+            "3.一种… 必须仍被识别为修改稿"
         );
     }
 }

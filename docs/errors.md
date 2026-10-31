@@ -1524,3 +1524,12 @@
 - **回归 / 负控 / Regression & Negative control**: `gate_is_idempotent_over_its_own_output`（重跑后 `unsupported_count` 与正文标注处数都必须与首跑相同，旧行为是 1 → 2）；`stale_banner_is_stripped_so_the_artifact_stops_contradicting_itself`（首行旧横幅必须被剥掉，否则产物与新结论互相矛盾）；`marked_count_is_the_number_a_reader_can_count` 与既有 `banner_and_body_marker_counts_agree` 都改为断言「横幅 + 正文的字面量数 == `marked_count` == 正文里数得出来的处数」。
 - **真实产物 / Real artifact**: v10 真跑（合并后的代码）同一封信：`amendment_unsupported=24`、正文 17 处标注、`待填写=0`、`未提取=1`（签署日）、`header_known=5 / header_filled=0`。修复后横幅报「24 处特征句……正文实际标注 17 处」，读者能数得出来。
 - **预防 / Prevention**: ①**门要对"自己的输出"负责**：任何会在正文里写下标记/横幅的环节，其入口都必须能把这些标记剥回去，否则"重跑一次"就是一条改变结论的路径。②凡是"报给读者看的数字"，取数点必须在**成品**上，不能在中间集合上；中间量与成品量不相等是常态，不是异常。③两个数不相等时**两个都报出来并且说明为什么**，不要挑一个看起来整齐的。
+
+## [2026-10-31] 56 括号编号的修改稿被整节跳过核验：`（3）一种…` 不算"有修改稿"
+- **严重程度 / Severity**: HIGH
+- **涉及文件**: `src/evidence_kernel/amendment_gate.rs`（`has_claim_draft_text`）
+- **现象**: 一封声明"本次对独立权利要求1不作修改"、但正文确实贴了 `（3）一种…` 修改稿的答复书，被判为"本节没有修改稿"（`skipped_no_amendment_section`），整节**静默跳过**核验。旧码实测：`features=0 unsupported=0 ready=false`；修复后同一文本 `features=4 unsupported=1`。
+- **根因**: `has_claim_draft_text` 只认两种编号形态——`1.一种…` / `2.根据…`（阿拉伯数字 + 点/顿号）与 `修改后的权利要求N：` 引出标签。括号编号 `（3）一种…` / `(3)一种…` 不在判据里，于是"声明不修改 + 括号编号"同时出现时被判无修改稿。这是 #160 那句"宁可误红不要漏检"的反例：判据收窄时把一种真实编号写法漏在了外面。
+- **修复**: 正则增加第三条分支 `[（(][0-9一二三四五六七八九十]{1,3}[）)]\s*(?:一种|根据)`；新增两条单测（括号编号必须被识别；`3.一种…` 仍要识别，防止改动弄坏常见形态）。
+- **回归 / 负控**: `no_amendment_declaration_with_parenthesised_claim_draft_still_verified`（正控：必须进核验且 `checked_feature_count>0`）、`plain_numbered_claim_draft_is_still_recognised`（负控：常规点号编号不受影响）。红通道用**修复前的二进制**跑同一段文本：`skipped_no_amendment_section`；修复后 `degraded/features=4`。
+- **预防**: ①"章节存在性"判据要把**同一种东西的所有常见写法**枚举齐（点号/顿号/括号/中文数字），只举一种就会在另一种上静默漏检；②这类判据的失败方向必须是**误红**（多核验一段散文）而不是**漏检**（整节不查）——本条的修复方向即如此；③第三方复核提出的反例要逐条回代码验：本次三条里一条成立（本条）、一条是本 PR 已写明的已知边界、一条不成立（标记计数那条按实现不会出现 2）。
