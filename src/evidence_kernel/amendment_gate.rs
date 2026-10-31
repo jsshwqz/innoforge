@@ -663,6 +663,25 @@ fn is_declarative_meta(fragment: &str) -> bool {
         || fragment.contains("修改依据")
         || fragment.contains("修改理由")
         || fragment.contains("修改要点")
+        || is_amendment_act(fragment)
+}
+
+/// 叙述"本次做了哪种修改"的句子不是技术特征句。
+///
+/// 真实产物形态：`本次修改系将原权利要求2的附加技术特征并入权利要求1` —— 它描述的是
+/// **修改动作本身**（把哪一权项并进来），不是并入后权利要求里的技术内容；拿去和原始
+/// 申请文本做逐字比对必然零命中，于是把一份本来达标的稿子压成 `submission_ready=false`。
+///
+/// 判据要求三件事同时出现，避免误放行真特征句：
+/// ①修改叙述主语（本次/上述/如下修改）；②合并类动词（并入/合并）；③权项指代（权利要求）。
+/// 纯技术特征句不会自带"本次修改系将…"这种主语。
+fn is_amendment_act(fragment: &str) -> bool {
+    let says_amend = fragment.contains("本次修改")
+        || fragment.contains("上述修改")
+        || fragment.contains("如下修改");
+    let says_merge = fragment.contains("并入") || fragment.contains("合并");
+    let refers_claim = fragment.contains("权利要求");
+    says_amend && says_merge && refers_claim
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1153,6 +1172,33 @@ mod tests {
             r.unsupported
         );
         assert!(!r.submission_ready, "有零命中时提交度维度必须压死");
+    }
+
+    #[test]
+    fn amendment_act_narration_is_meta_but_real_feature_still_checked() {
+        // 真实形态（B-1 整封复跑时抓到）：说明"本次把权2并入权1"的句子描述的是修改动作，
+        // 不是修改后权利要求里的技术特征；它进了逐字核验就会把达标的稿子压成不可交。
+        let letter = "\
+## 二、关于权利要求的修改\n\n\
+修改后的权利要求1：\n\
+一种物料输送装置，包括机架（1），机架（1）上设有输送带（2）。\n\
+本次修改系将原权利要求2的附加技术特征并入权利要求1\n\
+机架侧面还固定有气动夹爪组件与压力传感器\n";
+        let r = gate(letter);
+        assert_eq!(
+            r.unsupported_count,
+            1,
+            "叙述句不该计数、真编造特征句必须仍被抓到： {:?}",
+            r.unsupported
+                .iter()
+                .map(|u| u.text.chars().count())
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            !r.gated_text.contains("】本次修改系将"),
+            "修改动作叙述句不得被就地标注: {}",
+            r.gated_text
+        );
     }
 
     #[test]
