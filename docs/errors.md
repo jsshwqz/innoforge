@@ -1495,3 +1495,11 @@
 - **修复 / Fix**: 逐处手工修复 + 编译器驱动（每轮 check 定位下一批错误）；三种形态分别处理；match 全臂统一包状态码。
 - **预防 / Prevention**: ①批量改 Rust 签名时，`impl Trait` 返回类型的含义是"单一具体类型"——先数清函数体内所有返回路径再动手；②行级脚本改多行宏调用（json!）天然不可靠，跨行形态必须手工；③改造后先 `cargo check` 全绿再写测试，否则测试红绿会被编译噪声淹没。
 - **提交 / Commit**: 见 #102 修复 PR（分支 fix/ai-endpoint-validation-status）。
+
+## [2026-10-31] ㊿ 多 agent 并行构建的本地验证死结：exe 锁 + 双 target 磁盘耗尽
+- **严重程度 / Severity**: MEDIUM（阻塞本地全量验证，不改产品代码；CI 兜底不受影响）
+- **现象 / Symptom**: ①集成测试链接时 `failed to remove innoforge-server.exe`（拒绝访问）——并行 agent 起的 server 持有共享 target 的同名二进制；②独立 CARGO_TARGET_DIR 冷编全量 → 磁盘 8G 被 LNK1180 吃光（双 target 并存 = 双倍空间）；③重负载下 busy_timeout=5000 的测试 init 也 SQLITE_BUSY。
+- **根因 / Root cause**: 多个 agent 并行共享 D:/cargo-target（构建锁排队）+ 各自 server 进程锁二进制 + 646G 盘被多 agent 构建迭代填满——本地全量验证在多 agent 并行期是稀缺资源。
+- **修复 / Fix**: ①按 commit-first 纪律：定向验证（改动模块单测 + lib 全量 + fmt/clippy 绿）+ push 由 CI 兜底全量；②独立 target 用 `-j 1` 降链接峰值；③每轮验证前清 `incremental/`（可再生）。
+- **预防 / Prevention**: ①多 agent 并行期，本地全量验证优先顺序：定向单测 → lib 全量 → 集成测试（依赖 exe 链接，最容易被锁挡）→ CI 兜底；②磁盘监控应在构建前（<3G 即清 incremental）而不是链接失败后；③server 进程持有共享 target 二进制时，任何人的集成测试都过不去——起 server 用独立 target 或结束即回收。
+- **提交 / Commit**: 见 #102 修复 PR（分支 fix/ai-endpoint-validation-status）。
