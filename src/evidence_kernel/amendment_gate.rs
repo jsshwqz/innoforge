@@ -121,7 +121,7 @@ impl AmendmentGateResult {
             amended_claim_count: 0,
             checked_feature_count: 0,
             corpus_claims: 0,
-            submission_ready: status != GateStatus::Degraded,
+            submission_ready: gate_submission_ready(status),
         }
     }
 
@@ -212,17 +212,10 @@ pub fn gate_amendment_text(letter: &str, original_application: &str) -> Amendmen
     }
 
     if evals.is_empty() {
-        return AmendmentGateResult {
-            status: GateStatus::Verified,
-            gated_text: letter.to_string(),
-            unsupported: Vec::new(),
-            unsupported_count: 0,
-            assertions_downgraded: 0,
-            amended_claim_count: claim_count,
-            checked_feature_count: 0,
-            corpus_claims: claim_section_count(&corpus),
-            submission_ready: true,
-        };
+        // 定位到了块，却一句可核验的特征都没抽出来 ⇒ 一句也没核验。
+        // 这不叫 verified（"核验通过"至少意味着核验过一句），按未核验处理：
+        // 读者会从 skip note 读到"本次未做第33条逐字核验"，而不是从一个布尔值读出结论。
+        return AmendmentGateResult::empty(GateStatus::NoAmendment, letter);
     }
 
     // 零命中 → 就地插入降级标注（保留原句；按块内顺序定位，重复句逐处标注）
@@ -294,8 +287,14 @@ pub fn gate_amendment_text(letter: &str, original_application: &str) -> Amendmen
     }
 }
 
+/// 提交度维度只看"核验过且全部通过"。
+///
+/// 曾经写成 `status != Degraded`，于是**没核验**（未定位到修改稿 / 缺原始文本）也会
+/// 返回 `submission_ready=true`——"未发现违规"被当成了"核验通过"，是假绿灯里最难察觉
+/// 的一种（调用方只看布尔值，不会去看 status）。三种未核验状态一律 `false`，
+/// 让读者从 skip note 里读到"为什么没核验"，而不是从 `true` 里读到一个不存在的结论。
 fn gate_submission_ready(status: GateStatus) -> bool {
-    !matches!(status, GateStatus::Degraded)
+    matches!(status, GateStatus::Verified)
 }
 
 struct FeatureEval {
@@ -393,8 +392,57 @@ pub fn amendment_blocks(text: &str) -> Vec<(usize, usize)> {
         }
         merged.push((s, e));
     }
+    // 「本节只是在说明为什么不修改」：定位到标题不等于有修改稿（issue #160）。
+    // 只做"起点定位"会把整个论述小节当修改稿，整段论述被切句去和原文逐字比对，
+    // 全部零命中，一封合法的"不修改"答复书因此被压成不可交。
+    merged.retain(|(s, e)| !is_no_amendment_section(text, *s, *e));
     merged
 }
+
+/// 本节是否"声明不修改、且确实没有贴修改稿"。
+///
+/// 判据必须双向，缺一不可：
+/// ① 节内有明确的不修改声明（`不修改权利要求` / `不作修改` / `不进行修改` …）；
+/// ② 节内**既没有** `修改后的权利要求N：` 这类引出标签，**也没有** `1.一种…` /
+///     `2.根据…` 式的编号权项行。
+///
+/// 只满足①不满足②的文本（声明不修改却又贴了权项正文）必须继续走核验——
+/// 那是"改了一部分"，不是"没改"。
+fn is_no_amendment_section(text: &str, start: usize, end: usize) -> bool {
+    let Some(body) = text.get(start..end) else {
+        return false;
+    };
+    if !NO_AMENDMENT_DECLARATIONS
+        .iter()
+        .any(|marker| body.contains(marker))
+    {
+        return false;
+    }
+    !has_claim_draft_text(body)
+}
+
+/// 节内是否出现"修改稿正文"的形态。命中任一条即认为本节带修改稿。
+fn has_claim_draft_text(body: &str) -> bool {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| {
+        // ① `修改后的权利要求1：` 引出标签；② `1.一种…` / `2.根据…` 编号权项行
+        regex::Regex::new(
+            r"(?m)^[\s#>*\-•]*(?:修改后的?权利要求\s*[0-9一二三四五六七八九十]{0,4}\s*[：:]|[0-9]{1,2}\s*[.．、]\s*(?:一种|根据))",
+        )
+        .unwrap_or_else(|e| panic!("修改稿形态正则常量失败即 bug: {e}"))
+    });
+    re.is_match(body)
+}
+
+/// "本次不修改权利要求"类声明的词面。只用于①，必须与 [`has_claim_draft_text`] 一起判。
+const NO_AMENDMENT_DECLARATIONS: &[&str] = &[
+    "不修改权利要求",
+    "未修改权利要求",
+    "不作修改",
+    "不进行修改",
+    "不对权利要求进行修改",
+    "不涉及权利要求修改",
+];
 
 /// 引号内权项全文的正则（单一出处，`amendment_blocks` 与 `extract_claims` 共用）。
 ///
@@ -663,6 +711,25 @@ fn is_declarative_meta(fragment: &str) -> bool {
         || fragment.contains("修改依据")
         || fragment.contains("修改理由")
         || fragment.contains("修改要点")
+        || is_amendment_act(fragment)
+}
+
+/// 叙述"本次做了哪种修改"的句子不是技术特征句。
+///
+/// 真实产物形态：`本次修改系将原权利要求2的附加技术特征并入权利要求1` —— 它描述的是
+/// **修改动作本身**（把哪一权项并进来），不是并入后权利要求里的技术内容；拿去和原始
+/// 申请文本做逐字比对必然零命中，于是把一份本来达标的稿子压成 `submission_ready=false`。
+///
+/// 判据要求三件事同时出现，避免误放行真特征句：
+/// ①修改叙述主语（本次/上述/如下修改）；②合并类动词（并入/合并）；③权项指代（权利要求）。
+/// 纯技术特征句不会自带"本次修改系将…"这种主语。
+fn is_amendment_act(fragment: &str) -> bool {
+    let says_amend = fragment.contains("本次修改")
+        || fragment.contains("上述修改")
+        || fragment.contains("如下修改");
+    let says_merge = fragment.contains("并入") || fragment.contains("合并");
+    let refers_claim = fragment.contains("权利要求");
+    says_amend && says_merge && refers_claim
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1156,6 +1223,33 @@ mod tests {
     }
 
     #[test]
+    fn amendment_act_narration_is_meta_but_real_feature_still_checked() {
+        // 真实形态（B-1 整封复跑时抓到）：说明"本次把权2并入权1"的句子描述的是修改动作，
+        // 不是修改后权利要求里的技术特征；它进了逐字核验就会把达标的稿子压成不可交。
+        let letter = "\
+## 二、关于权利要求的修改\n\n\
+修改后的权利要求1：\n\
+一种物料输送装置，包括机架（1），机架（1）上设有输送带（2）。\n\
+本次修改系将原权利要求2的附加技术特征并入权利要求1\n\
+机架侧面还固定有气动夹爪组件与压力传感器\n";
+        let r = gate(letter);
+        assert_eq!(
+            r.unsupported_count,
+            1,
+            "叙述句不该计数、真编造特征句必须仍被抓到： {:?}",
+            r.unsupported
+                .iter()
+                .map(|u| u.text.chars().count())
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            !r.gated_text.contains("】本次修改系将"),
+            "修改动作叙述句不得被就地标注: {}",
+            r.gated_text
+        );
+    }
+
+    #[test]
     fn supported_features_are_not_marked() {
         let letter = "## 二、关于权利要求的修改\n\n修改后的权利要求1：\n一种物料输送装置，包括机架（1），机架上设有输送带（2）。\n";
         let r = gate(letter);
@@ -1542,5 +1636,73 @@ mod tests {
             block.contains("不得输出任何「修改后的权利要求」正文"),
             "缺失时必须明令禁止编修改稿: {block}"
         );
+    }
+
+    // ── issue #160：不修改答复书被整节当修改稿核验（真实案件撞出）──
+
+    #[test]
+    fn no_amendment_declaration_is_not_treated_as_amendment_draft() {
+        // 真实形态：标题按模板写「二、关于权利要求的修改」，本节讲的是"为什么不改"。
+        // 修复前：本节整段被当修改稿切句，论述句逐句零命中，合法稿被压成 graded/degraded。
+        let letter = "\
+## 二、关于权利要求的修改
+
+本次答复不修改权利要求。
+
+申请人认为，现行权利要求1已以电缸直行程限定与D1的区别。
+通知书认定的三项区别特征并非彼此独立的单项替换。
+";
+        let r = gate(letter);
+        assert_eq!(r.status, GateStatus::NoAmendment);
+        assert_eq!(r.unsupported_count, 0, "论述句不该被计成零命中特征");
+        assert_eq!(
+            r.gated_text.matches(UNVERIFIED_MARK).count(),
+            0,
+            "正文不得出现标注：{}",
+            r.gated_text
+        );
+        assert!(!r.submission_ready, "没核验就不能说可交");
+    }
+
+    #[test]
+    fn declaration_of_no_amendment_does_not_hide_an_actual_claim_draft() {
+        // 负控：声明"不修改权利要求2"但确实贴了修改后的权利要求1 ⇒ 必须继续核验，
+        // 不能因为句子里有"不修改"就整节跳过。
+        let letter = "\
+## 二、关于权利要求的修改
+
+本次不修改权利要求2，修改后的权利要求1：
+
+1.一种物料输送装置，机架（1）上设有输送带（2），机架（1）侧面固定有驱动电机（3）。
+";
+        let r = gate(letter);
+        assert_ne!(
+            r.status,
+            GateStatus::NoAmendment,
+            "带修改稿的节不得被判为无修改稿"
+        );
+        assert!(r.checked_feature_count > 0, "必须真的核验了特征句");
+    }
+
+    #[test]
+    fn unverified_statuses_are_never_submission_ready() {
+        // 假绿灯：`submission_ready` 曾经写成 `status != Degraded`，
+        // 于是"未定位到修改稿""缺原始文本"这两种**没核验**的状态都返回 true。
+        let no_section = gate("## 一、关于审查意见的答复\n\n申请人认为对比文件未公开该特征。\n");
+        assert_eq!(no_section.status, GateStatus::NoAmendment);
+        assert!(!no_section.submission_ready, "未定位到修改稿 ≠ 可交");
+
+        let no_original = gate_amendment_text(
+            "## 二、关于权利要求的修改\n\n修改后的权利要求1：\n一种物料输送装置，包括机架（1）。\n",
+            "",
+        );
+        assert_eq!(no_original.status, GateStatus::NoOriginal);
+        assert!(!no_original.submission_ready, "缺原始文本 ≠ 可交");
+
+        let verified = gate(
+            "## 二、关于权利要求的修改\n\n修改后的权利要求1：\n一种物料输送装置，机架（1）上设有输送带（2）。\n",
+        );
+        assert_eq!(verified.status, GateStatus::Verified);
+        assert!(verified.submission_ready, "核验通过才可交");
     }
 }
