@@ -98,6 +98,10 @@ pub struct AmendmentGateResult {
     pub gated_text: String,
     pub unsupported: Vec<UnsupportedFeature>,
     pub unsupported_count: usize,
+    /// #139 — 判为零命中、但就地定位失败（游标已越过其块内位置，或文本形态
+    /// 与块内不一致）的条数。不变式：正文标记数 + unlocated_count ==
+    /// unsupported_count——计数对不上是"读者按横幅找标记找不到"的假绿家族。
+    pub unlocated_count: usize,
     /// 被替换为降级标注的"明确记载"类断言条数
     pub assertions_downgraded: usize,
     pub amended_claim_count: usize,
@@ -117,6 +121,7 @@ impl AmendmentGateResult {
             gated_text: text.to_string(),
             unsupported: Vec::new(),
             unsupported_count: 0,
+            unlocated_count: 0,
             assertions_downgraded: 0,
             amended_claim_count: 0,
             checked_feature_count: 0,
@@ -134,9 +139,19 @@ impl AmendmentGateResult {
         if self.unsupported_count == 0 {
             return String::new();
         }
+        // #139：定位失败的条目进不了正文的「未证实」标记，必须在此明说——
+        // 否则读者按横幅数字去正文找标记、找不到就以为门禁误报（计数分叉假绿）。
+        let unlocated_note = if self.unlocated_count > 0 {
+            format!(
+                "另有 {} 处零命中未能在正文就地定位（游标越过或形态不一致），请对照下方清单逐条核对；",
+                self.unlocated_count
+            )
+        } else {
+            String::new()
+        };
         format!(
-            "> ⚠️ 修改稿核验阻断（amendment_unsupported={}）：本稿修改后的权利要求中有 {} 处特征句在原始申请文本（说明书 + 权利要求书）零命中，已就地逐处标注「未证实：该措辞在原始文本零命中」；相关「明确记载 / 来源于原说明书」类断言已降级。提交前必须逐处核对专利法第33条（修改超范围）。\n\n",
-            self.unsupported_count, self.unsupported_count
+            "> ⚠️ 修改稿核验阻断（amendment_unsupported={}）：本稿修改后的权利要求中有 {} 处特征句在原始申请文本（说明书 + 权利要求书）零命中，已就地逐处标注「未证实：该措辞在原始文本零命中」；{}相关「明确记载 / 来源于原说明书」类断言已降级。提交前必须逐处核对专利法第33条（修改超范围）。\n\n",
+            self.unsupported_count, self.unsupported_count, unlocated_note
         )
     }
 
@@ -217,6 +232,7 @@ pub fn gate_amendment_text(letter: &str, original_application: &str) -> Amendmen
             gated_text: letter.to_string(),
             unsupported: Vec::new(),
             unsupported_count: 0,
+            unlocated_count: 0,
             assertions_downgraded: 0,
             amended_claim_count: claim_count,
             checked_feature_count: 0,
@@ -225,27 +241,11 @@ pub fn gate_amendment_text(letter: &str, original_application: &str) -> Amendmen
         };
     }
 
-    // 零命中 → 就地插入降级标注（保留原句；按块内顺序定位，重复句逐处标注）
-    let mut insertions: Vec<usize> = Vec::new();
-    for (bi, (start, end)) in blocks.iter().enumerate() {
-        let block_len = end - start;
-        let block_text = letter.get(*start..).unwrap_or("");
-        let mut cursor = 0usize;
-        for ev in evals.iter().filter(|e| e.block == bi && !e.supported) {
-            let Some(rel) = block_text
-                .get(cursor..)
-                .and_then(|rest| rest.find(ev.raw.as_str()))
-            else {
-                continue;
-            };
-            let abs = cursor + rel;
-            if abs >= block_len {
-                break;
-            }
-            insertions.push(start + abs);
-            cursor = abs + ev.raw.len();
-        }
-    }
+    // 零命中 → 就地插入降级标注（保留原句；按块内顺序定位，重复句逐处标注）。
+    // #139：定位失败**显式计数**（unlocated），绝不静默跳过——unsupported 已计入，
+    // 正文标记缺位会让"横幅数字"与"读者能数到的标记"分叉。
+    let unsupported_refs: Vec<&FeatureEval> = evals.iter().filter(|e| !e.supported).collect();
+    let (mut insertions, unlocated) = locate_insertions(letter, &blocks, &unsupported_refs);
     insertions.sort_unstable();
     insertions.dedup();
 
@@ -285,6 +285,7 @@ pub fn gate_amendment_text(letter: &str, original_application: &str) -> Amendmen
         status,
         gated_text: gated,
         unsupported_count: unsupported.len(),
+        unlocated_count: unlocated,
         unsupported,
         assertions_downgraded,
         amended_claim_count: claim_count,
@@ -292,6 +293,49 @@ pub fn gate_amendment_text(letter: &str, original_application: &str) -> Amendmen
         corpus_claims: claim_section_count(&corpus),
         submission_ready: gate_submission_ready(status),
     }
+}
+
+/// 就地定位：把零命中特征句按块内顺序 find 出插入点。
+/// 返回 (插入点列表, 定位失败条数)。失败**显式计数**，绝不静默跳过（#139）。
+fn locate_insertions(
+    letter: &str,
+    blocks: &[(usize, usize)],
+    unsupported: &[&FeatureEval],
+) -> (Vec<usize>, usize) {
+    let mut insertions: Vec<usize> = Vec::new();
+    let mut unlocated = 0usize;
+    for (bi, (start, end)) in blocks.iter().enumerate() {
+        let block_len = *end - *start;
+        let block_text = letter.get(*start..).unwrap_or("");
+        let mut cursor = 0usize;
+        for ev in unsupported.iter().filter(|e| e.block == bi) {
+            let Some(rel) = block_text
+                .get(cursor..)
+                .and_then(|rest| rest.find(ev.raw.as_str()))
+            else {
+                unlocated += 1;
+                continue;
+            };
+            let abs = cursor + rel;
+            if abs >= block_len {
+                break;
+            }
+            insertions.push(start + abs);
+            cursor = abs + ev.raw.len();
+        }
+    }
+    (insertions, unlocated)
+}
+
+/// 就地定位的单元测试辅助（#139 确定性触发器：不经全流程直接喂 evals）。
+#[cfg(test)]
+fn locate_insertions_test(
+    letter: &str,
+    blocks: &[(usize, usize)],
+    evals: &[FeatureEval],
+) -> (Vec<usize>, usize) {
+    let refs: Vec<&FeatureEval> = evals.iter().collect();
+    locate_insertions(letter, blocks, &refs)
 }
 
 fn gate_submission_ready(status: GateStatus) -> bool {
@@ -1542,5 +1586,74 @@ mod tests {
             block.contains("不得输出任何「修改后的权利要求」正文"),
             "缺失时必须明令禁止编修改稿: {block}"
         );
+    }
+
+    /// #139 回归（确定性触发器）：不经全流程，直接喂"游标交叉"的 evals——
+    /// ev1 的块内区间覆盖 ev2 的起点（ev1 消费后游标越过 ev2），ev2 整体 find
+    /// 必然失败。修复前：unsupported=2 而正文标记只有 1（静默 continue）——
+    /// 横幅数字与读者能数到的标记分叉。
+    /// 不变式：正文标记数 + unlocated_count == unsupported_count。
+    #[test]
+    fn unlocated_features_are_counted_and_invariant_holds() {
+        let letter = "修改后的权利要求1：
+舱体结构密封圈支撑件。";
+        let blocks = amendment_blocks(letter);
+        assert!(!blocks.is_empty(), "夹具必须能定位修改稿块");
+        let evals = vec![
+            FeatureEval {
+                block: 0,
+                claim_no: "1".into(),
+                raw: "舱体结构密封圈".into(),
+                supported: false,
+                reason: "零命中".into(),
+                best_score: 0.0,
+            },
+            FeatureEval {
+                block: 0,
+                claim_no: "1".into(),
+                // 起点（"结构"）落在 ev1 的区间内——游标越过，整体 find 失败
+                raw: "结构密封圈支撑件".into(),
+                supported: false,
+                reason: "零命中".into(),
+                best_score: 0.0,
+            },
+        ];
+        let (insertions, unlocated) = locate_insertions_test(letter, &blocks, &evals);
+        assert_eq!(insertions.len(), 1, "只有 ev1 能就地定位");
+        assert_eq!(unlocated, 1, "ev2 必须显式计数为定位失败");
+        assert_eq!(
+            insertions.len() + unlocated,
+            evals.len(),
+            "不变式：正文标记数 + unlocated == unsupported_count"
+        );
+        let gate = AmendmentGateResult {
+            status: GateStatus::Degraded,
+            gated_text: letter.to_string(),
+            unsupported_count: evals.len(),
+            unlocated_count: unlocated,
+            unsupported: evals
+                .iter()
+                .map(|e| UnsupportedFeature {
+                    claim_no: e.claim_no.clone(),
+                    text: e.raw.clone(),
+                    reason: e.reason.clone(),
+                    best_score: e.best_score,
+                })
+                .collect(),
+            assertions_downgraded: 0,
+            amended_claim_count: 1,
+            checked_feature_count: 2,
+            corpus_claims: 1,
+            submission_ready: false,
+        };
+        let banner = gate.banner();
+        assert!(
+            banner.contains("未能在正文就地定位"),
+            "unlocated>0 时横幅必须明说，实际：{banner}"
+        );
+        assert!(gate
+            .unsupported
+            .iter()
+            .any(|f| f.text.contains("结构密封圈支撑件")));
     }
 }
