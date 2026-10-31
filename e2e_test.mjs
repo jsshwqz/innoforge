@@ -361,7 +361,7 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 async function openSweepPage(browser, path) {
     const page = await browser.newPage();
-    const bucket = { errors: [], external: [], server5xx: [], dialogs: [], failed: [], navigations: 0 };
+    const bucket = { errors: [], external: [], server5xx: [], dialogs: [], failed: [], navigations: 0, validation400: [] };
     let phase = 'load';
     const startUrl = `${baseUrl}${path}`;
     page.on('pageerror', error => {
@@ -369,7 +369,14 @@ async function openSweepPage(browser, path) {
     });
     page.on('console', message => {
         if (phase === 'click' && message.type() === 'error') {
-            bucket.errors.push(`console: ${message.text().slice(0, 160)}`);
+            const text = message.text().slice(0, 160);
+            // #102：入参校验失败返回 400 是服务的正确拒绝（非缺陷）——
+            // 分离为独立展示桶；5xx 与其它 console 错误仍判失败。
+            if (/Failed to load resource: the server responded with a status of 400 \(/.test(text)) {
+                bucket.validation400.push(text);
+                return;
+            }
+            bucket.errors.push(`console: ${text}`);
         }
     });
     page.on('dialog', dialog => {
@@ -468,6 +475,7 @@ async function runButtonSweep(browser) {
         const server5xx = [];
         const failed = [];
         const dialogs = [];
+        const validation400 = [];
         let clicked = 0;
         for (const button of buttons) {
             const opened = await openSweepPage(browser, specification.path);
@@ -481,7 +489,7 @@ async function runButtonSweep(browser) {
             if (didClick) clicked += 1;
             await sleep(sweepWaitMs);
             opened.setPhase('after');
-            for (const list of [['errors', errors], ['external', external], ['server5xx', server5xx], ['failed', failed], ['dialogs', dialogs]]) {
+            for (const list of [['errors', errors], ['external', external], ['server5xx', server5xx], ['failed', failed], ['dialogs', dialogs], ['validation400', validation400]]) {
                 for (const item of opened.bucket[list[0]]) list[1].push(`${button.index}|${button.label}|${item}`);
             }
             await opened.page.close().catch(() => {});
@@ -492,6 +500,7 @@ async function runButtonSweep(browser) {
             external.length ? `external=${[...new Set(external)].slice(0, 3).join(' / ')}` : '',
             server5xx.length ? `5xx=${[...new Set(server5xx)].slice(0, 3).join(' / ')}` : '',
             failed.length ? `failed=${[...new Set(failed)].slice(0, 3).join(' / ')}` : '',
+            validation400.length ? `validation400=${validation400.length}（#102 入参校验 400，预期拒绝）` : '',
         ].filter(Boolean).join(' ') || `page=${specification.path} clicked=${clicked}/${buttons.length} dialogs=${dialogs.length}`;
 
         requireCondition(
