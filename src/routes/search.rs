@@ -547,11 +547,13 @@ pub async fn api_search(
         ],
     };
 
-    let token_count = req
+    let tokens: Vec<String> = req
         .query
         .split_whitespace()
         .filter(|s| !s.is_empty())
-        .count();
+        .map(|s| s.to_lowercase())
+        .collect();
+    let token_count = tokens.len();
     let applied_filter = match detected_type {
         SearchType::Inventor => "inventor_only".to_string(),
         SearchType::Applicant => "applicant_only".to_string(),
@@ -593,6 +595,11 @@ pub async fn api_search(
     } else {
         None
     };
+
+    // # issue #101 — 逐项命中字段：每条结果给出实际命中了哪些列（不是全局列集合）
+    for p in &mut patents {
+        p.matched_fields = item_matched_fields(p, &tokens, &detected_type);
+    }
 
     Json(SearchResult {
         patents,
@@ -1541,6 +1548,7 @@ mod tests {
             country: "CN".to_string(),
             relevance_score: Some(87.2),
             score_source: Some("hybrid(pos:98+content:80)".to_string()),
+            matched_fields: None,
         };
         let outcome = SearchOutcome {
             results: crate::search::merge::merged_from(SourceKind::SerpApi, vec![summary.clone()]),
@@ -2089,5 +2097,93 @@ mod tests {
             &[],
         );
         assert_eq!(2, out2["patents"].as_array().expect("patents").len());
+    }
+}
+/// # issue #101 — 逐项命中判定：该条在哪些列上含任一查询 token。
+/// 定向通道（inventor/applicant/patent_number）恒返回该列（通道语义即命中面）；
+/// Keyword/Mixed 按小写包含逐列真算——只命中 patent_number 的条只返回
+/// ["patent_number"]，证明它不是把列清单原样贴上去（负控语义）。
+fn item_matched_fields(
+    p: &crate::types::search::PatentSummary,
+    tokens: &[String],
+    detected: &SearchType,
+) -> Option<Vec<String>> {
+    let fields: [(&str, &String); 5] = [
+        ("title", &p.title),
+        ("abstract_text", &p.abstract_text),
+        ("applicant", &p.applicant),
+        ("inventor", &p.inventor),
+        ("patent_number", &p.patent_number),
+    ];
+    match detected {
+        SearchType::Inventor => Some(vec!["inventor".to_string()]),
+        SearchType::Applicant => Some(vec!["applicant".to_string()]),
+        SearchType::PatentNumber => Some(vec!["patent_number".to_string()]),
+        SearchType::Keyword | SearchType::Mixed => {
+            let hit: Vec<String> = fields
+                .iter()
+                .filter(|(_, v)| tokens.iter().any(|t| v.to_lowercase().contains(t)))
+                .map(|(n, _)| (*n).to_string())
+                .collect();
+            if hit.is_empty() {
+                None
+            } else {
+                Some(hit)
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod item_matched_fields_tests {
+    use super::*;
+    use crate::types::search::PatentSummary;
+
+    fn summary(title: &str, applicant: &str, inventor: &str, pn: &str) -> PatentSummary {
+        PatentSummary {
+            id: "t1".into(),
+            patent_number: pn.into(),
+            title: title.into(),
+            abstract_text: String::new(),
+            applicant: applicant.into(),
+            inventor: inventor.into(),
+            filing_date: String::new(),
+            country: "CN".into(),
+            relevance_score: None,
+            score_source: None,
+            matched_fields: None,
+        }
+    }
+
+    #[test]
+    fn per_item_fields_only_include_actually_hit_columns() {
+        // 锁的语义（#101 负控核心）：只在 title 命中的条，逐项 matched_fields
+        // 只含 title——证明它是逐条真算的，不是把全局列清单贴上去。
+        let p = summary("固态电池电解质改进", "某新能源公司", "李四", "CN100000001A");
+        let got = item_matched_fields(&p, &["固态电池".to_string()], &SearchType::Mixed).unwrap();
+        assert_eq!(got, vec!["title".to_string()], "其余列不含该词，不得出现");
+    }
+
+    #[test]
+    fn per_item_fields_multi_token_cross_column_union() {
+        // 多 token 跨列命中：任一列含任一 token 即计入该列（OR 语义与 #85 排序一致）。
+        let p = summary("隔热罩", "某电池公司", "李四", "CN100000001A");
+        let got = item_matched_fields(
+            &p,
+            &["隔热罩".to_string(), "电池".to_string()],
+            &SearchType::Mixed,
+        )
+        .unwrap();
+        assert!(got.contains(&"title".to_string()));
+        assert!(got.contains(&"applicant".to_string()));
+        assert!(!got.contains(&"inventor".to_string()), "李四不含任一 token");
+    }
+
+    #[test]
+    fn per_item_fields_inventor_channel_is_pinned() {
+        // 定向通道：命中面即通道列（即使 title 恰好也含词）。
+        let p = summary("李四的电池研究", "某公司", "李四", "CN100000001A");
+        let got = item_matched_fields(&p, &["李四".to_string()], &SearchType::Inventor).unwrap();
+        assert_eq!(got, vec!["inventor".to_string()]);
     }
 }

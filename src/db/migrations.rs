@@ -14,16 +14,69 @@ fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool> {
     Ok(false)
 }
 
-/// Run a migration in a transaction: DDL + version update commit atomically.
-/// If the process is killed mid-migration, the entire transaction rolls back.
+/// Run a migration in an IMMEDIATE transaction: DDL + version update commit atomically
+/// (#13), and serialized across processes (#60) — `BEGIN IMMEDIATE` takes the database
+/// write lock up front, so two processes starting against the same database file cannot
+/// both run their "column missing" branches and race to ALTER.
+///
+/// The loser of the race replays statements built from its stale out-of-lock checks
+/// under the lock; any `duplicate column name` error therefore means "the other
+/// process already did it" and is skipped statement-by-statement (statements are split
+/// on `;` — every migration in this file is plain DDL with no semicolons inside string
+/// literals). The recorded version is never lowered: replaying an old migration keeps
+/// whichever higher version the winner already wrote, so concurrent starters converge
+/// on the latest schema without crashing.
 pub fn run_migration_tx(conn: &Connection, version: i32, sql: &str) -> Result<()> {
-    let tx = conn.unchecked_transaction()?;
-    tx.execute_batch(sql)?;
-    tx.execute_batch(&format!(
-        "DELETE FROM schema_version; INSERT INTO schema_version (version) VALUES({});",
-        version
-    ))?;
-    tx.commit()?;
+    // BEGIN IMMEDIATE with backoff retry: under full-migration load (24 version
+    // steps) the other starter can hold the write lock longer than the connection's
+    // busy_timeout — SQLITE_BUSY on a concurrent start is exactly the crash class
+    // this function exists to prevent (#60), so wait and retry instead of failing.
+    let begin = (|| -> Result<()> {
+        for attempt in 1..=12u32 {
+            match conn.execute_batch("BEGIN IMMEDIATE") {
+                Ok(()) => return Ok(()),
+                Err(e) if format!("{e}").contains("database is locked") && attempt < 12 => {
+                    std::thread::sleep(std::time::Duration::from_millis(150 * u64::from(attempt)));
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+        unreachable!("retry loop always returns")
+    })();
+    begin?;
+    let result = (|| -> Result<()> {
+        for stmt in sql.split(';') {
+            let stmt = stmt.trim();
+            if stmt.is_empty() {
+                continue;
+            }
+            if let Err(e) = conn.execute_batch(stmt) {
+                if format!("{e}").contains("duplicate column name") {
+                    continue;
+                }
+                return Err(e.into());
+            }
+        }
+        let current_db: i32 = conn.query_row(
+            "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+            [],
+            |r| r.get(0),
+        )?;
+        if version > current_db {
+            conn.execute_batch(&format!(
+                "DELETE FROM schema_version; INSERT INTO schema_version (version) VALUES({});",
+                version
+            ))?;
+        }
+        Ok(())
+    })();
+    match result {
+        Ok(()) => conn.execute_batch("COMMIT")?,
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            return Err(e);
+        }
+    }
     Ok(())
 }
 
@@ -455,4 +508,92 @@ pub(crate) fn run(conn: &Connection, current_version: i32, target_version: i32) 
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #60 核心负控（确定性建模竞态败者）：胜者连接已完成 ALTER，败者拿锁后
+    /// 重放由锁外陈旧判据拼出的同批语句——必须幂等跳过 duplicate column，
+    /// 不得以  崩溃退出（修复前形态）。
+    #[test]
+    fn concurrent_migration_loser_replays_stale_sql_without_crash() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let db_path = dir.path().join("race.db");
+        let conn_a = Connection::open(&db_path).unwrap();
+        let conn_b = Connection::open(&db_path).unwrap();
+        conn_a
+            .execute_batch(
+                "CREATE TABLE schema_version (version INTEGER NOT NULL);
+                 INSERT INTO schema_version VALUES(4);
+                 CREATE TABLE IF NOT EXISTS patents (id TEXT PRIMARY KEY);",
+            )
+            .unwrap();
+        let sql = "ALTER TABLE patents ADD COLUMN technical_problem TEXT DEFAULT '';";
+
+        // 胜者先完成同一 ALTER（跨进程竞态的胜者侧）
+        conn_a.execute_batch(sql).unwrap();
+        // 败者此刻才拿锁重放同批语句（其 sql 由锁外的 column_exists=false 拼出）
+        run_migration_tx(&conn_b, 5, sql).unwrap();
+
+        let v: i32 = conn_b
+            .query_row(
+                "SELECT COALESCE(MAX(version),0) FROM schema_version",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(v >= 5, "版本不得低于本次迁移目标，实际 {v}");
+        let cnt: i32 = conn_b
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('patents') WHERE name='technical_problem'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(cnt, 1, "列必须恰好一份");
+    }
+
+    /// 竞态冒烟：两连接对同一文件库各自完整跑 0 到全部迁移，无 duplicate 崩溃、终态一致。
+    #[test]
+    fn concurrent_full_migration_smoke_two_connections() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let db_path = dir
+            .path()
+            .join("smoke.db")
+            .into_os_string()
+            .into_string()
+            .unwrap();
+        let db_path2 = db_path.clone();
+        let db_path3 = db_path2.clone();
+        // 贴近生产调用链：Database::init 先设 busy_timeout 并建 schema_version，再跑迁移。
+        // busy_timeout 先行单独执行且给足等待（全量并行测试下 24 版本迁移序列可远超 5s，
+        // 重负载 CI 中 5s 耗尽即 SQLITE_BUSY——这正是 #60 要消灭的崩溃形态之一）。
+        let set_wait = "PRAGMA busy_timeout=30000;";
+        let init = "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);";
+        let h1 = std::thread::spawn(move || {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.execute_batch(set_wait).unwrap();
+            conn.execute_batch(init).unwrap();
+            run(&conn, 0, 999)
+        });
+        let h2 = std::thread::spawn(move || {
+            let conn = Connection::open(&db_path2).unwrap();
+            conn.execute_batch(set_wait).unwrap();
+            conn.execute_batch(init).unwrap();
+            run(&conn, 0, 999)
+        });
+        h1.join().unwrap().unwrap();
+        h2.join().unwrap().unwrap();
+        let conn = Connection::open(&db_path3).unwrap();
+        let v: i32 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(version),0) FROM schema_version",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(v >= 24, "两连接并发迁移后版本应到最新，实际 {v}");
+    }
 }

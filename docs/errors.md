@@ -1525,6 +1525,21 @@
 - **真实产物 / Real artifact**: v10 真跑（合并后的代码）同一封信：`amendment_unsupported=24`、正文 17 处标注、`待填写=0`、`未提取=1`（签署日）、`header_known=5 / header_filled=0`。修复后横幅报「24 处特征句……正文实际标注 17 处」，读者能数得出来。
 - **预防 / Prevention**: ①**门要对"自己的输出"负责**：任何会在正文里写下标记/横幅的环节，其入口都必须能把这些标记剥回去，否则"重跑一次"就是一条改变结论的路径。②凡是"报给读者看的数字"，取数点必须在**成品**上，不能在中间集合上；中间量与成品量不相等是常态，不是异常。③两个数不相等时**两个都报出来并且说明为什么**，不要挑一个看起来整齐的。
 
+## [2026-10-29] 57 跨进程迁移竞态：幂等检查在事务外等于没有幂等（#60）
+- **严重程度 / Severity**: HIGH（并发启动同一库 ⇒ 后到进程 `duplicate column` 崩溃退出；也是 #30「部分端点无响应」的首要候选解释）
+- **涉及文件**: `src/db/migrations.rs`（`run_migration_tx` / 各迁移分支的 `column_exists`）
+- **现象 / Symptom**: PR #53 纯文档提交 CI `Tests` 假红（`duplicate column name: technical_problem` → server 15s 不 listen → 超时）；生产双开实例同理。
+- **根因 / Root cause**: 幂等保护「先查后改」——`column_exists`（PRAGMA table_info）在迁移事务**外**执行，检查与 ALTER 之间没有跨进程原子性：两个进程同时看到「列缺失」，各自把 ALTER 排进批次，先到成功、后到 duplicate。单进程事务原子性（#13）解决不了跨进程窗口。
+- **修复 / Fix**: `run_migration_tx` 改 `BEGIN IMMEDIATE`（先取库写锁）+ 逐语句执行 + `duplicate column name` 幂等容忍（败者重放锁外陈旧语句时逐条跳过）+ 版本不回退（目标版本高于库内才覆写）。确定性负控：以「胜者先完成同一 ALTER、败者重放同批语句」建模竞态败者，修复前 `duplicate column name: technical_problem` FAILED（与 issue 现象逐字一致），修复后 ok；真并发冒烟两线程同库完整迁移双 Ok 收敛。
+- **预防 / Prevention**: ①「先查后改」型幂等保护跨进程一律不算数——检查必须与变更同锁（BEGIN IMMEDIATE）或把变更写成可容忍重复的形态；②测试里确定性建模竞态败者（另一连接先完成同一变更）比真并发压测更可证伪且不 flaky；③rusqlite `Connection::open` 默认 busy_timeout=0，涉及锁竞争的路径必须显式设等待（生产已由 `Database::init` 的 `PRAGMA busy_timeout=5000` 覆盖）。
+- **提交 / Commit**: 见 #60 修复 PR（分支 fix/migration-race-guard）。
+## [2026-10-31] 58 多 agent 并行构建的本地验证死结：exe 锁 + 双 target 磁盘耗尽
+- **严重程度 / Severity**: MEDIUM（阻塞本地全量验证，不改产品代码；CI 兜底不受影响）
+- **现象 / Symptom**: ①集成测试链接时 `failed to remove innoforge-server.exe`（拒绝访问）——并行 agent 起的 server 持有共享 target 的同名二进制；②独立 CARGO_TARGET_DIR 冷编全量 → 磁盘 8G 被 LNK1180 吃光（双 target 并存 = 双倍空间）；③重负载下 busy_timeout=5000 的测试 init 也 SQLITE_BUSY。
+- **根因 / Root cause**: 多个 agent 并行共享 D:/cargo-target（构建锁排队）+ 各自 server 进程锁二进制 + 646G 盘被多 agent 构建迭代填满——本地全量验证在多 agent 并行期是稀缺资源。
+- **修复 / Fix**: ①按 commit-first 纪律：定向验证（改动模块单测 + lib 全量 + fmt/clippy 绿）+ push 由 CI 兜底全量；②独立 target 用 `-j 1` 降链接峰值；③每轮验证前清 `incremental/`（可再生）。
+- **预防 / Prevention**: ①多 agent 并行期，本地全量验证优先顺序：定向单测 → lib 全量 → 集成测试（依赖 exe 链接，最容易被锁挡）→ CI 兜底；②磁盘监控应在构建前（<3G 即清 incremental）而不是链接失败后；③server 进程持有共享 target 二进制时，任何人的集成测试都过不去——起 server 用独立 target 或结束即回收。
+- **提交 / Commit**: 见 #101 修复 PR（分支 fix/search-per-item-matched-fields）。
 ## [2026-10-31] 56 括号编号的修改稿被整节跳过核验：`（3）一种…` 不算"有修改稿"
 - **严重程度 / Severity**: HIGH
 - **涉及文件**: `src/evidence_kernel/amendment_gate.rs`（`has_claim_draft_text`）

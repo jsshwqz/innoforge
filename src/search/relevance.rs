@@ -297,6 +297,7 @@ where
             abstract_text: p.abstract_text.clone(),
             applicant: p.applicant.clone(),
             inventor: p.inventor.clone(),
+            matched_fields: None,
             filing_date: p.filing_date.clone(),
             country: p.country.clone(),
             relevance_score: Some(score),

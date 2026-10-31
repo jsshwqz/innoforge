@@ -89,6 +89,7 @@ impl super::Database {
                     country: r.get(7)?,
                     relevance_score: None,
                     score_source: None,
+                    matched_fields: None,
                 })
             })?
             .filter_map(|r| r.ok())

@@ -90,6 +90,30 @@ fn template_contains_ai_unconfigured_message() {
     );
 }
 
+/// #103 负控 A：首页横幅不得写死任何厂商显示名——provider 名必须从
+/// /api/ai/models 探测结果派生（换 provider 横幅跟着变）。写死即红。
+#[test]
+fn homepage_banner_has_no_hardcoded_vendor_names() {
+    // 旧缺陷形态：「⚠️ 本地 Ollama（未检测到服务）」——配置为 DeepSeek 等其它
+    // provider 时文案与真实状态不符（issue #103）。
+    for literal in ["本地 Ollama", "本地 Ollama（未检测到服务）"] {
+        assert!(
+            !INDEX_HTML.contains(literal),
+            "index.html 不得写死厂商文案：{literal:?}（provider 名必须从探测结果派生）"
+        );
+    }
+}
+
+/// #103 负控 B：首页必须有指向 /oa-response 的入口（OA 答复是主功能，
+/// 不可发现 = 主功能不可用）。删掉入口即红。
+#[test]
+fn homepage_has_oa_response_entry() {
+    assert!(
+        INDEX_HTML.contains("href=\"/oa-response\""),
+        "index.html must contain an entry (feature card or link) to /oa-response"
+    );
+}
+
 /// When no AI_API_KEY is set, /api/settings must return
 /// ai_api_key_configured=false so the frontend shows the warning.
 #[test]

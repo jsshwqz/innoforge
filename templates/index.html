@@ -118,6 +118,10 @@
                 <h3>⚖️ 对比与侵权评估</h3>
                 <p>本申请与对比文件逐项比对，三步法创造性分析，一键生成一审答复。</p>
             </a>
+            <a href="/oa-response" class="feature-card" style="text-decoration:none;">
+                <h3>📝 OA 答复与复审</h3>
+                <p>粘贴审查意见通知书，AI 全链路分析、多轮讨论推演，生成意见陈述书与证据表。</p>
+            </a>
         </div>
 
         <footer class="page-footer">
@@ -444,14 +448,19 @@
             var anyOk = providers.some(function(p) {
                 return p.status === 'ok' && (p.count || 0) > 0;
             });
-            var onlyOllamaError = providers.length > 0 && providers.every(function(p) {
-                return p.name === 'Ollama' && p.status === 'error';
+            // #103：provider 显示名一律从探测结果派生，禁止写死厂商字面量
+            var errNames = providers
+                .filter(function(p) { return p.status === 'error'; })
+                .map(function(p) { return p.name || '未知服务'; });
+            var okName = '';
+            providers.forEach(function(p) {
+                if (!okName && p.status === 'ok' && (p.count || 0) > 0) okName = p.name || '';
             });
             if (anyOk) {
-                aiEl.textContent = '✅ AI 服务已配置';
+                aiEl.textContent = okName ? ('✅ AI 已配置（' + okName + '）') : '✅ AI 服务已配置';
                 aiEl.style.color = '#3fb950';
-            } else if (onlyOllamaError) {
-                aiEl.textContent = '⚠️ 本地 Ollama（未检测到服务）— 点击设置';
+            } else if (errNames.length > 0) {
+                aiEl.textContent = '⚠️ ' + errNames.join('、') + '（未检测到服务）— 点击设置';
                 aiEl.style.color = '#d29922';
                 aiEl.style.borderColor = '#d29922';
             } else {

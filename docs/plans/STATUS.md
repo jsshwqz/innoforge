@@ -947,3 +947,16 @@
 
 ## 2026-10-29 · 模板库就绪判据（同分支 `fix/test-stub-port-race`）
 - 第 4 轮合跑红出第二类基础设施缺陷：`ensure_db_template` 用 `/api/version` 应答当就绪，应答后立刻 kill ⇒ `template db must exist after migration` 断言炸（随机 1/5 轮，且红在与它无关的用例上）。改为就绪后轮询 db 文件「存在且大小连续两次采样不变」再 kill，超时 panic 带路径/大小/目录清单自诊断。负控（把等待目标改成不存在的文件名）确认该分支是活代码而非装饰；绿控 4 binary × 5 轮 `--test-threads=8` + 全量 `cargo test` rc=0。复盘 errors.md ㊺。
+
+## 2026-10-29 · #60 迁移跨进程竞态护栏（分支 `fix/migration-race-guard`，基线 main@e07ee80）
+- **缺陷**：`run_migration_tx` 的幂等保护（`column_exists`）发生在事务**外**，两个进程同时启动指向同一库时都看到「列缺失」→ 后到者 `duplicate column name` 崩溃退出（PR #53 的 Tests 假红、#30 部分端点无响应的首要候选解释；测试隔离半边已由 PR #64 修复，生产半边遗留）。
+- **修复**：`run_migration_tx` 改 `BEGIN IMMEDIATE`（先取库写锁再执行，并发启动串行化）+ **逐语句执行**（`;` 切分——本文件迁移全部为纯 DDL 无字面量内分号）+ `duplicate column name` 幂等容忍（竞态败者重放锁外陈旧判据拼出的语句时逐条跳过，崩溃降级为幂等跳过）+ **版本不回退**（仅当目标版本高于库内版本才覆写，并发收敛于最新 schema）。
+- **负控（先红后绿，真实执行）**：①确定性竞态败者用例（胜者连接先完成同一 ALTER，败者重放同批语句）`concurrent_migration_loser_replays_stale_sql_without_crash` FAILED（`duplicate column name: technical_problem`，与 issue 现象逐字一致）→ ok；②真并发冒烟 `concurrent_full_migration_smoke_two_connections`（两线程同库完整跑 0→全部迁移）FAILED → 双 Ok 且版本收敛最新（4.93s，锁等待真实发生）。
+## 2026-10-30 · #101 逐项 matched_fields（分支 `fix/search-per-item-matched-fields`，基线 main@3c45cc3）
+- **issue 现状核对**：reason 与顶层 matched_fields/applied_filter 已由 #72 v2 落地（issue 实测是 v0.9.18 时代）；剩余半边 = 逐项命中字段（issue 推荐方案 A）。
+- **交付**：`PatentSummary.matched_fields: Option<Vec<String>>`（skip 序列化不破既有形状锁）+ 路由层 `item_matched_fields()` 逐条计算——Keyword/Mixed 按小写包含逐列真算（只命中 patent_number 的条只返回该列，负控语义）；定向通道（inventor/applicant/patent_number）恒为通道列。命中场景 reason 已在（0 命中），不冗余补。
+- **测试**：3 条单测（只含实命中列 / 多 token 跨列并集 / 定向通道钉列）全绿；#72/#85 既有契约测试零改动。
+## 2026-10-30 · #103 首页横幅 provider 派生 + OA 答复入口（分支 `fix/homepage-provider-banner-and-oa-entry`，基线 main@428fbdc）
+- **修复 1**：index.html 横幅 provider 显示名从 `/api/ai/models` 探测结果**派生**（`okName`/`errNames` 拼接），写死文案「本地 Ollama（未检测到服务）」删除——换 provider 横幅跟着变（负控 A 的静态守卫：`homepage_banner_has_no_hardcoded_vendor_names`，厂商字面量即红）。
+- **修复 2**：features 区新增「📝 OA 答复与复审」卡（href=/oa-response，与既有三张卡同级）——主功能可发现。负控 B：`homepage_has_oa_response_entry`（删入口即红）。两条守卫扩展进 `tests/ai_unconfigured_regression.rs`（#68 同主题文件）4/4 绿。
+- **HTML 扫描**：check_html_functions.mjs 通过（无 on* 断链、基线零漂移）。
