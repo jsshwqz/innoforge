@@ -947,3 +947,9 @@
 
 ## 2026-10-29 · 模板库就绪判据（同分支 `fix/test-stub-port-race`）
 - 第 4 轮合跑红出第二类基础设施缺陷：`ensure_db_template` 用 `/api/version` 应答当就绪，应答后立刻 kill ⇒ `template db must exist after migration` 断言炸（随机 1/5 轮，且红在与它无关的用例上）。改为就绪后轮询 db 文件「存在且大小连续两次采样不变」再 kill，超时 panic 带路径/大小/目录清单自诊断。负控（把等待目标改成不存在的文件名）确认该分支是活代码而非装饰；绿控 4 binary × 5 轮 `--test-threads=8` + 全量 `cargo test` rc=0。复盘 errors.md ㊺。
+
+## 2026-10-31 · #139 修改稿核验门 unlocated 显式计数（分支 `fix/amendment-gate-unlocated`，基线 main@428fbdc）
+- **缺陷**：`gate_amendment_text` 的"判零命中"与"就地插入标记"两步分离，插入环节 `find` 定位失败时静默 `continue`——`unsupported` 计了数、正文标记缺位，横幅数字与读者能数到的标记分叉（实测 31 vs 30）。
+- **修复**：`AmendmentGateResult.unlocated_count` + meta `amendment_unlocated=N`；横幅 `unlocated>0` 时明写"另有 N 处零命中未能在正文就地定位，请对照下方清单"；清单（`unsupported` 列表）逐条给出原文 ✓ 已满足。**不变式：正文标记数 + unlocated_count == unsupported_count**。
+- **定位逻辑抽函数**：`locate_insertions()`（支持单元测试直接喂 evals——全流程构造确定性触发器失败，交叉游标需人工 evals）。
+- **负控（变异取证，真实执行）**：移除 `unlocated += 1` → 测试 FAILED（不变式 1+0≠2）→ 恢复绿。回归测试 `unlocated_features_are_counted_and_invariant_holds` 用确定性交叉 evals（ev2 起点落在 ev1 区间内）钉住不变式与横幅断言。
