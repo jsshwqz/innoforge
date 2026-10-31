@@ -105,6 +105,14 @@ pub struct AmendmentGateResult {
     /// 正文 17 处标注。横幅与 meta 必须报"能数出来"的那个数，否则读者数一遍就对不上
     /// （errors.md ㊶④：展示数与产物数用同一次统计口径）。
     pub marked_count: usize,
+    /// 扩范围方向（删限定 / 改限定）的检查结果：`text` 是被删掉的现权项限定句。
+    ///
+    /// 逐字核验只回答「新增内容是否超范围」（专利法第33条的上界）；**删掉一个限定
+    /// ＝扩大保护范围**是另一头，必须拿"审查所针对的那版权项"当基准（issue #159）。
+    pub broadened: Vec<UnsupportedFeature>,
+    /// 是否真的做了扩范围方向检查。缺现权项文本时为 `false`——此时**必须在产物里可见**
+    /// （[`AmendmentGateResult::direction_note`]），不能静默退化成只查单向。
+    pub current_claims_checked: bool,
     /// 被替换为降级标注的"明确记载"类断言条数
     pub assertions_downgraded: usize,
     pub amended_claim_count: usize,
@@ -125,12 +133,37 @@ impl AmendmentGateResult {
             unsupported: Vec::new(),
             unsupported_count: 0,
             marked_count: 0,
+            broadened: Vec::new(),
+            current_claims_checked: false,
             assertions_downgraded: 0,
             amended_claim_count: 0,
             checked_feature_count: 0,
             corpus_claims: 0,
             submission_ready: gate_submission_ready(status),
         }
+    }
+
+    /// 扩范围方向的可见说明：**不通过**与**没核验**两种情况都要写出来。
+    ///
+    /// 逐字核验通过并不等于"可以交"：如果修改把现权项的某个限定删掉了，保护范围反而变宽，
+    /// 而逐字核验对此完全无感（删掉的内容当然不在原文里"新增"）。
+    pub fn direction_note(&self) -> String {
+        if !self.broadened.is_empty() {
+            return format!(
+                "> ⚠️ 修改稿扩范围校验未通过（broadening_findings={}）：修改后的独立权项缺少现权项的部分限定；删除或改写限定等于扩大保护范围，不可直接递交。
+
+",
+                self.broadened.len()
+            );
+        }
+        if !self.current_claims_checked
+            && matches!(self.status, GateStatus::Verified | GateStatus::Degraded)
+        {
+            return "> ℹ️ 修改稿扩范围方向未核验：未提供「审查所针对的那版权项」文本，本次只做了「新增内容是否超范围」（专利法第33条）的单向核验。
+
+".to_string();
+        }
+        String::new()
     }
 
     /// 阻断横幅（复用 M2-C 横幅形态：`> ⚠️` blockquote，随正文首部一并下发）。
@@ -212,6 +245,18 @@ fn strip_prior_gate_artifacts(text: &str) -> String {
 ///
 /// 纯函数、零 AI、零网络（与内核 ADR-1 一致）。
 pub fn gate_amendment_text(letter: &str, original_application: &str) -> AmendmentGateResult {
+    gate_amendment_text_with_current_claims(letter, original_application, "")
+}
+
+/// 带「审查所针对的那版权项」的入口：除了查新增超范围，还查**删限定/改限定**（扩范围）。
+///
+/// `current_claims` 为空 ⇒ 只做单向核验，但 `current_claims_checked=false` 会把这件事
+/// 写进产物（[`AmendmentGateResult::direction_note`]）——不静默。
+pub fn gate_amendment_text_with_current_claims(
+    letter: &str,
+    original_application: &str,
+    current_claims: &str,
+) -> AmendmentGateResult {
     // 幂等入口：先剥掉本函数自己上一轮的产出（就地标注 + 阻断/说明横幅），再核验。
     // 不剥的话，重跑时标注本身会被切成新的特征句再拿去比对，一处变两处（真实案件实测
     // 28 → 56）；旧横幅还会留在产物里跟新结论打架（issue #158）。
@@ -233,10 +278,12 @@ pub fn gate_amendment_text(letter: &str, original_application: &str) -> Amendmen
 
     let mut evals: Vec<FeatureEval> = Vec::new();
     let mut claim_count = 0usize;
+    let mut amended_claims: Vec<AmendedClaim> = Vec::new();
     for (bi, (start, end)) in blocks.iter().enumerate() {
         let block_text = letter.get(*start..*end).unwrap_or("");
         for claim in extract_claims(block_text) {
             claim_count += 1;
+            amended_claims.push(claim.clone());
             for raw in split_features(&claim.text) {
                 let needle = strip_legal_variation(&raw);
                 if needle.chars().count() < MIN_FEATURE_CHARS {
@@ -327,11 +374,25 @@ pub fn gate_amendment_text(letter: &str, original_application: &str) -> Amendmen
     // 同一位置的重复命中会被合并——这两种情况下"插入了几次"与"正文里有几处"不相等，
     // 读者只会数正文。
     let marked_count = gated.matches(UNVERIFIED_MARK).count();
+    // 扩范围方向：拿"审查所针对的那版权项"当基准，逐条确认现权项的限定还在（issue #159）。
+    // 缺现权项文本 ⇒ 不做，但把"没做"这件事标出来（current_claims_checked=false）。
+    let (broadened, current_claims_checked) = if current_claims.trim().is_empty() {
+        (Vec::new(), false)
+    } else {
+        (check_broadening(current_claims, &amended_claims), true)
+    };
+    let status = if !broadened.is_empty() {
+        GateStatus::Degraded
+    } else {
+        status
+    };
     AmendmentGateResult {
         status,
         gated_text: gated,
         unsupported_count: unsupported.len(),
         marked_count,
+        broadened,
+        current_claims_checked,
         unsupported,
         assertions_downgraded,
         amended_claim_count: claim_count,
@@ -349,6 +410,110 @@ pub fn gate_amendment_text(letter: &str, original_application: &str) -> Amendmen
 /// 让读者从 skip note 里读到"为什么没核验"，而不是从 `true` 里读到一个不存在的结论。
 fn gate_submission_ready(status: GateStatus) -> bool {
     matches!(status, GateStatus::Verified)
+}
+
+/// 扩范围方向检查：现权项（审查所针对的那版）的每条限定，必须仍出现在修改后的独立权项里。
+///
+/// 逐字核验只回答「新增内容是否超范围」；`删掉一个限定＝扩大保护范围` 是另一头，
+/// 必须拿现权项当基准（issue #159）。判定按"独立权项按出现顺序一一对应"，
+/// 这是答复书的常规形态（改动集中在独立权项）；对应不上的，宁可报出来让人看。
+fn check_broadening(current_claims: &str, amended: &[AmendedClaim]) -> Vec<UnsupportedFeature> {
+    // 现权项通常写成「1. 一种…」，而 extract_claims 只认「权利要求N」，所以这里用宽松解析。
+    let current = parse_claims_loose(current_claims);
+    let cur_indep: Vec<&AmendedClaim> = current
+        .iter()
+        .filter(|c| !is_dependent_claim(&c.text))
+        .collect();
+    let new_indep: Vec<&AmendedClaim> = amended
+        .iter()
+        .filter(|c| !is_dependent_claim(&c.text))
+        .collect();
+    let mut out = Vec::new();
+    if new_indep.len() > cur_indep.len() {
+        out.push(UnsupportedFeature {
+            claim_no: "-".to_string(),
+            text: format!("独立权项数量 {} → {}", cur_indep.len(), new_indep.len()),
+            reason: "独立权项数量增加＝保护范围扩大".to_string(),
+            best_score: 0.0,
+        });
+    }
+    for (i, c) in cur_indep.iter().enumerate() {
+        let Some(new) = new_indep.get(i) else {
+            out.push(UnsupportedFeature {
+                claim_no: c.claim_no.clone(),
+                text: "修改后找不到对应的独立权项".to_string(),
+                reason: "现权项的独立权项在修改稿里缺失".to_string(),
+                best_score: 0.0,
+            });
+            continue;
+        };
+        let hay = strip_legal_variation(&new.text);
+        for raw in split_features(&c.text) {
+            let needle = strip_legal_variation(&raw);
+            if needle.chars().count() < MIN_FEATURE_CHARS {
+                continue;
+            }
+            if !hay.contains(&needle) {
+                out.push(UnsupportedFeature {
+                    claim_no: c.claim_no.clone(),
+                    text: raw,
+                    reason:
+                        "现权项的这个限定在修改后的独立权项里找不到（删除或改写＝可能扩大保护范围）"
+                            .to_string(),
+                    best_score: 0.0,
+                });
+            }
+        }
+    }
+    out
+}
+
+/// 宽松权项解析：同时接受「权利要求1：…」与「1. 一种…」两种行首形态（现权项用后者）。
+fn parse_claims_loose(text: &str) -> Vec<AmendedClaim> {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| {
+        regex::Regex::new(
+            r"(?m)^[ \t*#\-]*(?:修改后的)?(?:权利要求\s*([0-9]{1,3})|([0-9]{1,3})\s*[.．、])\s*",
+        )
+        .unwrap_or_else(|e| panic!("宽松权项正则常量失败即 bug: {e}"))
+    });
+    // 存 match 的**结束**位置：编号本身不进正文，否则「1.一种…」里的「1.」会被当成限定去比对。
+    let heads: Vec<(usize, String)> = re
+        .captures_iter(text)
+        .map(|c| {
+            let num = c
+                .get(1)
+                .or_else(|| c.get(2))
+                .map(|m| m.as_str().to_string());
+            (
+                c.get(0).map(|m| m.end()).unwrap_or(0),
+                num.unwrap_or_default(),
+            )
+        })
+        .collect();
+    let mut out = Vec::new();
+    for i in 0..heads.len() {
+        let end = if i + 1 < heads.len() {
+            heads[i].0
+        } else {
+            text.len()
+        };
+        let start = heads[i].0;
+        // 下一段的起点是"下一行的行首"，本段到此为止；两端都必须是字符边界。
+        if let Some(body) = text.get(start..end.max(start)) {
+            out.push(AmendedClaim {
+                claim_no: heads[i].1.clone(),
+                text: body.to_string(),
+            });
+        }
+    }
+    out
+}
+
+/// 从属权项的判据：正文开头出现引用型引导语。只看前 40 字，避免被权项里的长描述干扰。
+fn is_dependent_claim(text: &str) -> bool {
+    let head: String = text.chars().take(40).collect();
+    head.contains("根据权利要求") || head.contains("如权利要求") || head.contains("按照权利要求")
 }
 
 struct FeatureEval {
@@ -641,6 +806,7 @@ fn regex_section_heading() -> &'static regex::Regex {
     })
 }
 
+#[derive(Clone)]
 struct AmendedClaim {
     claim_no: String,
     text: String,
@@ -1867,6 +2033,74 @@ mod tests {
             r.status,
             GateStatus::NoAmendment,
             "3.一种… 必须仍被识别为修改稿"
+        );
+    }
+
+    // ── issue #159：删限定＝扩大保护范围（现权项当基准）──
+
+    #[test]
+    fn deleting_a_limitation_is_flagged_as_broadening() {
+        let current = "1.一种物料输送装置，其特征在于，包括机架（1），机架（1）上设有输送带（2），机架（1）侧面固定有防护罩（3）。
+";
+        let letter = "## 二、关于权利要求的修改
+
+修改后的权利要求1：
+一种物料输送装置，包括机架（1），机架（1）上设有输送带（2）。
+";
+        let r = gate_amendment_text_with_current_claims(letter, SPEC, current);
+        assert!(
+            !r.broadened.is_empty(),
+            "删掉「防护罩」必须被报成扩范围，实际 broadened={:?}",
+            r.broadened
+        );
+        assert_eq!(r.status, GateStatus::Degraded);
+        assert!(!r.submission_ready, "扩范围不得判可交");
+        assert!(
+            r.direction_note().contains("扩范围"),
+            "{}",
+            r.direction_note()
+        );
+    }
+
+    #[test]
+    fn adding_a_limitation_alone_is_not_broadening() {
+        let current = "1.一种物料输送装置，其特征在于，包括机架（1），机架（1）上设有输送带（2）。
+";
+        let letter = "## 二、关于权利要求的修改
+
+修改后的权利要求1：
+一种物料输送装置，包括机架（1），机架（1）上设有输送带（2），机架（1）侧面固定有驱动电机（3）。
+";
+        let r = gate_amendment_text_with_current_claims(letter, SPEC, current);
+        assert!(
+            r.broadened.is_empty(),
+            "只增加限定不算扩范围：{:?}",
+            r.broadened
+        );
+        assert!(r.current_claims_checked);
+        assert!(
+            !r.direction_note().contains("扩范围"),
+            "只加不减不该报扩范围"
+        );
+    }
+
+    #[test]
+    fn missing_current_claims_is_visible_not_silent() {
+        let letter = "## 二、关于权利要求的修改
+
+修改后的权利要求1：
+一种物料输送装置，机架（1）上设有输送带（2）。
+";
+        let r = gate(letter);
+        assert!(r.broadened.is_empty());
+        assert!(
+            !r.current_claims_checked,
+            "没给现权项时必须是未核验，而不是悄悄当通过"
+        );
+        assert!(
+            r.direction_note().contains("未核验"),
+            "缺输入的可见性说明缺失: {}",
+            r.direction_note()
         );
     }
 }

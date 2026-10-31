@@ -12,6 +12,7 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
   - 「本次修改系将权2并入权1」这类**修改动作叙述句**不再被当技术特征逐字核验（[#155](https://github.com/jsshwqz/innoforge/pull/155)）。
   - **没核验不再报"可交"**：「未定位到修改稿 / 缺原始文本 / 抽出 0 个特征」三种状态一律 `submission_ready=false`；声明"不修改"的整节不再被当修改稿核验（[#161](https://github.com/jsshwqz/innoforge/pull/161)）。
   - **门对自己的产出负责**：重跑前先剥掉自身插入的标注与阻断/说明横幅——真实产物实测"一处零命中变两处（28→56）"消失；横幅把「特征句条数」与「正文标注处数」分开报，读者能数得出来（[#162](https://github.com/jsshwqz/innoforge/pull/162)）。
+  - **扩范围方向也查**：新增 `current_claims` 入参，拿「审查所针对的那版权项」当基准，删掉/改写现权项的限定＝扩大保护范围，直接判 `degraded`；缺该输入时把「未核验」写进产物（`broadening_checked=false` + 可见说明），不再静默只查单向（[#159](https://github.com/jsshwqz/innoforge/issues/159)）。
   - **括号编号** `（3）一种…` 的修改稿不再被误判为"无修改稿"而整节跳过（[#163](https://github.com/jsshwqz/innoforge/pull/163)）。
 - **信头五项回填**：认得「驳回决定发文日」这类带文档限定语的字段标签，同一字段不再被补插成两行、两种日期形态（[#157](https://github.com/jsshwqz/innoforge/pull/157)）。
 - **数据库迁移**：跨进程竞态护栏——`BEGIN IMMEDIATE` + 逐语句幂等容忍 + 版本不回退（[#147](https://github.com/jsshwqz/innoforge/pull/147)）。

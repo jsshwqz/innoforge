@@ -1548,3 +1548,13 @@
 - **修复**: 正则增加第三条分支 `[（(][0-9一二三四五六七八九十]{1,3}[）)]\s*(?:一种|根据)`；新增两条单测（括号编号必须被识别；`3.一种…` 仍要识别，防止改动弄坏常见形态）。
 - **回归 / 负控**: `no_amendment_declaration_with_parenthesised_claim_draft_still_verified`（正控：必须进核验且 `checked_feature_count>0`）、`plain_numbered_claim_draft_is_still_recognised`（负控：常规点号编号不受影响）。红通道用**修复前的二进制**跑同一段文本：`skipped_no_amendment_section`；修复后 `degraded/features=4`。
 - **预防**: ①"章节存在性"判据要把**同一种东西的所有常见写法**枚举齐（点号/顿号/括号/中文数字），只举一种就会在另一种上静默漏检；②这类判据的失败方向必须是**误红**（多核验一段散文）而不是**漏检**（整节不查）——本条的修复方向即如此；③第三方复核提出的反例要逐条回代码验：本次三条里一条成立（本条）、一条是本 PR 已写明的已知边界、一条不成立（标记计数那条按实现不会出现 2）。
+
+## [2026-11-01] 59 核验门只查"新增超范围"，不查"删限定＝扩大保护范围"：真稿被删掉一个限定仍报 verified
+- **严重程度 / Severity**: CRITICAL
+- **涉及文件**: `src/evidence_kernel/amendment_gate.rs`（新增 `gate_amendment_text_with_current_claims` / `check_broadening` / `direction_note`）、`src/routes/ai.rs`（读取 `current_claims`，meta 增 `broadening_count`/`broadening_checked`）
+- **现象**: 一份"最小缩限"修改稿把现权1 里的「隔离结构」整句删掉了，门报 `verified / unsupported=0 / submission_ready=true`。逐字核验对此完全无感——它只问"新增的句子在不在原文里"，而删掉的内容当然不在原文里"新增"。删掉一个限定特征＝保护范围扩大（细则第57条第3款/第33条意义上不可接受）。
+- **根因**: 门只有两份输入（`letter` 与 `original_application`），缺第三份「审查所针对的那版权项」。前者是上界（新增不得超范围），后者是下界（修改不得放宽），而 `current_claims` 从来没进过判据。产品手上其实有这条链路的另一半信息（答复是针对哪版权项作的），只是没接。
+- **修复**: ①新入口 `gate_amendment_text_with_current_claims(letter, original, current_claims)`：按"独立权项出现顺序一一对应"，拿现权项每条限定去修改后的独立权项里找；找不到即记 `broadened`（删除或改写）；独立权项数量增加也记为扩范围。②`status` 在 `broadened` 非空时强制 `Degraded`，`submission_ready=false`。③缺现权项文本时不静默：`current_claims_checked=false` 且 `direction_note()` 输出可见的「扩范围方向未核验」。④路由从请求读可选字段 `current_claims`，meta 增 `broadening_count` / `broadening_checked`。
+- **回归 / 负控 / Regression & Negative control**: 三条单测：`deleting_a_limitation_is_flagged_as_broadening`（删限定 ⇒ `broadened` 非空、`Degraded`、`ready=false`）、`adding_a_limitation_alone_is_not_broadening`（只加不减 ⇒ 不报、`checked=true`）、`missing_current_claims_is_visible_not_silent`（缺输入 ⇒ `checked=false` 且说明可见）。**真实产物验收**：把 B-1 稿与合成的"含隔离结构的现权项"一起喂进去，读数由 `verified/0/ready=true` 变为 `degraded/0/ready=false/broadened=1/checked=true`；不给现权项时 `checked=false`。
+- **已知边界（如实）**: ①**现权项文本的产品侧来源还没有**：前端/导入流程目前不产出这个字段，所以线上实际仍是 `checked=false`（可见但未核验）。要真正生效，导入流程必须把"已备案的权利要求书"落库。②判定是"独立权项按顺序一一对应 + 限定的归一化子串包含"，改写型修改会被报成"删除或改写"（属安全侧误红，交人判）。③`submission_ready` 仍只表示"逐字核验通过"；扩范围是否核验看 `broadening_checked`，两者不合并成单一布尔。
+- **预防**: ①**范围校验有上下界**：只查"新增超范围"必然漏掉"删限定放宽"，两头都要有输入、都要有判据；②判据缺输入时，正确做法是**把"没查"写进产物**（本条 `direction_note`），而不是静默退化成单向；③凡是"要不要交"的结论，都必须能指出它由哪几项检查合成——本条的 `ready × checked` 就是为此保留两个维度。

@@ -2034,6 +2034,13 @@ pub async fn api_ai_oa_generate_response_letter(
         Some(&req),
     );
 
+    // 审查所针对的那版权项（可选）：有它才能查"删限定＝扩大保护范围"（issue #159）。
+    let current_claims = req
+        .get("current_claims")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
     let mut rx = ai.generate_response_letter_stream(
         &final_analysis,
         &discussion,
@@ -2068,9 +2075,10 @@ pub async fn api_ai_oa_generate_response_letter(
         // 必须在整篇产出后跑：①阻断横幅要落在正文首部；②零命中特征句要**就地**标注，
         // 流式转发无法回填已下发的字符。两条生成链路本就整篇单帧返回（非逐 token），
         // 因此缓冲不改变可见时延，只把"先发后检"换成"检完再发"。
-        let gate = crate::evidence_kernel::amendment_gate::gate_amendment_text(
+        let gate = crate::evidence_kernel::amendment_gate::gate_amendment_text_with_current_claims(
             &header_fill.letter,
             &my_patent_text,
+            &current_claims,
         );
         let mut body = String::new();
         if !source_banner.is_empty() {
@@ -2086,15 +2094,22 @@ pub async fn api_ai_oa_generate_response_letter(
         if !note.is_empty() {
             body.push_str(&note);
         }
+        // 扩范围方向：不通过 / 未核验都要可见（#159）
+        let direction = gate.direction_note();
+        if !direction.is_empty() {
+            body.push_str(&direction);
+        }
         body.push_str(&gate.gated_text);
         for frame in split_sse_frames(&body, 240) {
             yield Ok(Event::default().data(sse_encode(&frame)));
         }
         // 结构化维度：amendment_unsupported=N 与提交度维度（N>0 即 False）
         yield Ok(Event::default().event("meta").data(format!(
-            "{{\"source\":\"{analysis_source}\",\"amendment_unsupported\":{},\"amendment_marked\":{},\"amendment_assertions_downgraded\":{},\"amendment_claims\":{},\"amendment_features\":{},\"corpus_claims\":{},\"amendment_gate\":\"{}\",\"submission_ready\":{},\"header_known\":{},\"header_filled\":{},\"header_unresolved_count\":{},\"header_unresolved\":\"{}\",\"header_unresolved_marks\":{}}}",
+            "{{\"source\":\"{analysis_source}\",\"amendment_unsupported\":{},\"amendment_marked\":{},\"broadening_count\":{},\"broadening_checked\":{},\"amendment_assertions_downgraded\":{},\"amendment_claims\":{},\"amendment_features\":{},\"corpus_claims\":{},\"amendment_gate\":\"{}\",\"submission_ready\":{},\"header_known\":{},\"header_filled\":{},\"header_unresolved_count\":{},\"header_unresolved\":\"{}\",\"header_unresolved_marks\":{}}}",
             gate.unsupported_count,
             gate.marked_count,
+            gate.broadened.len(),
+            gate.current_claims_checked,
             gate.assertions_downgraded,
             gate.amended_claim_count,
             gate.checked_feature_count,
