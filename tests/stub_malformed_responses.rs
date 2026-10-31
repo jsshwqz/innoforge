@@ -391,20 +391,29 @@ fn accepts_complete_json_stub_response() {
 /// 子线程 bind 失败后 `Err(_) => return` 静默退出，客户端拿到的是一个没人监听的端口。
 #[test]
 fn free_port_probe_leaves_a_stealable_window() {
-    let probed = free_port();
-    // 抢占者：在探针释放后立刻把同一端口 bind 走（模拟并行用例/同机其它进程）
-    let thief = TcpListener::bind(("127.0.0.1", probed))
-        .expect("抢占者应能拿到 free_port 刚释放的端口（否则本负控失去意义）");
-    // 旧写法的桩线程此刻 bind ⇒ 必然失败 ⇒ 静默 return ⇒ 端口无人监听
-    let stub_bind = TcpListener::bind(("127.0.0.1", probed));
-    assert!(
-        stub_bind.is_err(),
-        "端口 {probed} 未被抢占，负控失效：free_port → 线程内 bind 的窗口必须可复现"
-    );
-    if let Ok(l) = stub_bind {
-        drop(l);
+    // 取样要重试：`free_port()` 探到并释放后，本进程里**并行跑的其他用例**可能抢先绑走这个端口，
+    // 此时"抢占者"bind 失败会让本负控假红（CI 实测一次，见 issue #110 的同族）。
+    // 本负控要证明的是"这个窗口存在"，不是"某个特定端口一定能被抢到"——所以取样到抢中为止。
+    let mut proven: Option<u16> = None;
+    for _ in 0..16 {
+        let probed = free_port();
+        let Ok(thief) = TcpListener::bind(("127.0.0.1", probed)) else {
+            continue; // 这个端口已被并行用例拿走，换一个再取样
+        };
+        // 旧写法的桩线程此刻 bind ⇒ 必然失败 ⇒ 静默 return ⇒ 端口无人监听
+        let stub_bind = TcpListener::bind(("127.0.0.1", probed));
+        assert!(
+            stub_bind.is_err(),
+            "端口 {probed} 已被抢占者绑住，冒充桩线程的 bind 仍成功——负控不成立"
+        );
+        drop(thief);
+        proven = Some(probed);
+        break;
     }
-    drop(thief);
+    assert!(
+        proven.is_some(),
+        "16 次取样都没能复现可抢占窗口：负控失效（若 free_port 已改成先 bind 再返回，本用例应随之改写）"
+    );
 }
 
 /// 正控（后绿）：`bind("127.0.0.1:0")` 在**起线程之前**完成，helper 返回端口时该端口
