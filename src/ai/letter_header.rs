@@ -298,57 +298,120 @@ const HEADER_LABELS: &[(&str, &[&str])] = &[
 
 /// 判断一行是否为信头标签行，返回 `(字段, 值的字节区间)`。
 ///
-/// 只认"行首装饰符 + 标签 + （可选装饰符）+ 分隔符 `：`/`:`/`|`"的形态，因此正文里
-/// "申请人认为…"这类句子不会被当成信头行——标签后必须紧跟分隔符。
+/// 只认"行首装饰符 + 标签（可带文档限定语）+ 分隔符 `：`/`:`/`|`"的形态，因此正文里
+/// "申请人认为…"这类句子不会被当成信头行——标签后必须紧跟分隔符，且标签原文里
+/// 不能出现句读（"综上，申请号：以通知书记载为准"整行是句子，冒号不属于字段）。
 /// 已知边界：若两个字段写在同一行（`申请号：X 发明名称：Y`），只认第一个标签；
 /// 但第二个字段的值不含占位符，回填层的"值非空即不动"纪律保证它不会被覆盖。
 fn header_line_value_range(line: &str) -> Option<(&'static str, usize, usize)> {
     let line = line.trim_end_matches(['\r']);
     let rest = line.trim_start_matches(is_line_decor);
     let base = line.len() - rest.len();
+    let (raw_label, separator, value_offset) = split_label_separator_value(rest)?;
+    let label = raw_label.trim_end_matches(is_value_decor);
+    if label.is_empty() || label.contains(is_label_break) {
+        return None;
+    }
+    let key = match_header_label(label)?;
+
+    let value_start = base + value_offset;
+    let tail = &line[value_start..];
+    // 表格形态（`| 专利号 | CN… |`）值止于下一个竖线；普通行取到行尾
+    let value_end = match separator {
+        '|' => match tail.find('|') {
+            Some(p) => value_start + p,
+            None => line.len(),
+        },
+        _ => line.len(),
+    };
+    debug_assert!(value_start <= value_end && value_end <= line.len());
+    Some((key, value_start, value_end))
+}
+
+/// 标签前允许的最长文档限定语（按字符数）。
+///
+/// 存在的理由：管线路径（`response_pipeline::stage_e_assemble`）把发文日写成
+/// `驳回决定发文日：…`，而通知书表头写 `发文日：…`——限定语不同、字段相同。
+/// 只认行首精确标签的回填层会把这行当成"正文里没有该标签行"，于是再补插一行
+/// `发文日：…`，同一封信里同一字段出现两行两种日期形态。
+/// 之所以要有长度上限：限定语越长越可能是句子，冒号也越可能是句中的冒号。
+const MAX_QUALIFIER_CHARS: usize = 8;
+
+/// 标签原文里出现这些字符 ⇒ 这一行是正文句子，不是字段行。
+fn is_label_break(ch: char) -> bool {
+    ch.is_whitespace()
+        || matches!(
+            ch,
+            '。' | '，'
+                | '、'
+                | '；'
+                | ';'
+                | ','
+                | '（'
+                | '）'
+                | '('
+                | ')'
+                | '【'
+                | '】'
+                | '['
+                | ']'
+                | '！'
+                | '!'
+                | '？'
+                | '?'
+                | '—'
+                | '…'
+        )
+}
+
+/// 按 HEADER_LABELS 顺序（同组内长标签在前）找这一行对应的字段。
+fn match_header_label(label: &str) -> Option<&'static str> {
     for &(key, labels) in HEADER_LABELS {
-        for &label in labels {
-            let Some(after) = rest.strip_prefix(label) else {
+        for &cand in labels {
+            let Some(qualifier) = label.strip_suffix(cand) else {
                 continue;
             };
-            // 跳过标签与分隔符之间的装饰符；遇到的第一个非装饰字符必须是分隔符
-            let mut idx = 0usize;
-            let mut separator = None;
-            while let Some(ch) = after[idx..].chars().next() {
-                match ch {
-                    c if is_value_decor(c) => idx += c.len_utf8(),
-                    '：' | ':' | '|' => {
-                        separator = Some(ch);
-                        idx += ch.len_utf8();
-                        break;
-                    }
-                    _ => break,
-                }
-            }
-            if separator.is_none() {
-                // 该标签后面不是分隔符 ⇒ 这一行不是这个字段的标签行，
-                // 换下一个标签继续试（"发文日期"要先于"发文日"命中，否则会被短标签吃掉）
+            if qualifier.chars().count() > MAX_QUALIFIER_CHARS {
                 continue;
-            };
-            while let Some(ch) = after[idx..].chars().next() {
-                if is_value_decor(ch) {
-                    idx += ch.len_utf8();
-                } else {
-                    break;
-                }
             }
-            let value_start = base + label.len() + idx;
-            let tail = &line[value_start..];
-            // 表格形态（`| 专利号 | CN… |`）值止于下一个竖线；普通行取到行尾
-            let value_end = match tail.find('|') {
-                Some(p) => value_start + p,
-                None => line.len(),
-            };
-            debug_assert!(value_start <= value_end && value_end <= line.len());
-            return Some((key, value_start, value_end));
+            return Some(key);
         }
     }
     None
+}
+
+/// 把"行首装饰符之后"的内容拆成 `(标签原文, 分隔符, 值起始相对偏移)`。
+///
+/// 按字符走一遍并用累加得出偏移，而不是 `&rest[..pos]` 切片——字节切片处数受
+/// `tests/no_unsafe_byte_slice.rs` 基线约束，多一处就得放宽基线；宁可多写十行。
+fn split_label_separator_value(rest: &str) -> Option<(String, char, usize)> {
+    let mut label = String::new();
+    let mut separator: Option<char> = None;
+    let mut offset = 0usize;
+    let mut skipping_decor = false;
+    for ch in rest.chars() {
+        match separator {
+            None => {
+                if matches!(ch, '：' | ':' | '|') {
+                    separator = Some(ch);
+                    skipping_decor = true;
+                    offset += ch.len_utf8();
+                } else {
+                    label.push(ch);
+                    offset += ch.len_utf8();
+                }
+            }
+            Some(_) if skipping_decor => {
+                if !is_value_decor(ch) {
+                    break;
+                }
+                offset += ch.len_utf8();
+            }
+            Some(_) => break,
+        }
+    }
+    let separator = separator?;
+    Some((label, separator, offset))
 }
 
 /// 行首允许剥掉的版式装饰（markdown 强调、标题、列表、表格分隔、BOM、全角空格）。
@@ -796,5 +859,64 @@ mod tests {
             first_digit_run("编号 {9999010100000003} 收悉", 8).as_deref(),
             Some("9999010100000003")
         );
+    }
+
+    #[test]
+    fn sentence_with_a_colon_is_still_not_a_header_line() {
+        // 把识别从"行首精确标签"放宽到"标签可带文档限定语"之后，仍然要有门：
+        // 整行是句子时那个冒号属于句子，不属于字段。若把它当信头行，
+        // "抽取失败 + 值非占位"这一支会把正文里的真实词句换成 `【未提取｜需人工补录】`。
+        for line in [
+            "综上，申请号：以通知书记载为准。",
+            "针对本次修改，发明名称：保持不变",
+            "根据通知书首页表头所载发文日：2026年07月10日",
+            // 已知边界：条目序号与标签之间的顿号不是字段的一部分，因此这一行**不认**，
+            // 后果只是"该字段可能被补插一行"，而不是改坏正文。
+            "一、发文日：2026年07月10日",
+        ] {
+            assert!(
+                header_line_value_range(line).is_none(),
+                "句读或超长限定语 ⇒ {line} 不是信头行"
+            );
+        }
+        // 正控：同一字段换成无限定语的表头写法就必须认，否则上面的"不认"变成"全都认不出"。
+        assert!(header_line_value_range("发文日：2026年07月10日").is_some());
+        assert!(header_line_value_range("驳回决定发文日：2026-07-10").is_some());
+    }
+
+    #[test]
+    fn rejection_review_date_line_is_the_same_field_and_gets_no_duplicate() {
+        // 管线路径（`response_pipeline::stage_e_assemble`）自己写的是
+        // 「驳回决定发文日：2026-07-10」；回填层只认行首 `发文日`，于是把这个已写实的
+        // 字段当成"正文里没有该标签行"，再补插一行「发文日：2026年07月10日」——
+        // 同一封信、同一字段出现两行两种日期形态，读者会当成系统自己没对齐。
+        let notice = "\
+发文日：2026年07月10日
+申请号：999999999999.9
+发明名称：一种示例装置
+申请人：示例申请人
+";
+        let letter = "\
+复审请求书
+
+一、复审请求范围
+
+申请号：999999999999.9
+发明名称：一种示例装置
+申请人：示例申请人
+驳回决定发文日：2026-07-10
+
+请求撤销驳回决定，并发回原审查部门继续审查。
+";
+        let h = LetterHeader::extract(notice, "", None);
+        let out = h.backfill(letter);
+        assert_eq!(
+            out.letter.matches("发文日：").count(),
+            1,
+            "同一字段只留一行，实际产物：\n{}",
+            out.letter
+        );
+        assert_eq!(out.filled, 0, "五项都已写实，不该有任何补插");
+        assert_eq!(out.letter, letter, "已有真实值的信头一字不动");
     }
 }
