@@ -4,6 +4,18 @@
 All notable changes are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
+## [v0.9.22] - 2026-11-01
+
+### 修复 / Fixed
+
+- **AI 端点入参校验失败返回 400**：12 个端点不再以 200 + error 载荷返回，状态码可用于监控（[#149](https://github.com/jsshwqz/innoforge/pull/149)）。
+- **测试端口分配**：三处 `free_port()` 收敛成一份进程级分配器（发出的端口记账、撞号再取），消掉"并行用例互相抢端口"这一类假红；外部进程抢占仍需调用方兜底（[#168](https://github.com/jsshwqz/innoforge/pull/168)）。
+
+### 新增 / Added
+
+- **OA 页可粘贴「现行权利要求书」**：随答复书请求带上 `current_claims`，让 v0.9.21 落地的"删限定＝扩大保护范围"校验真正有输入；不填时产物里仍标注"扩范围方向未核验"（[#167](https://github.com/jsshwqz/innoforge/pull/167)）。
+
+---
 ## [v0.9.21] - 2026-10-31
 
 ### 修复 / Fixed
