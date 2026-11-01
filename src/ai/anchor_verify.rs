@@ -167,13 +167,17 @@ fn anchor_bodies(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut rest = text;
     while let Some(start) = rest.find('[') {
-        let Some(after) = rest.get(start + 1..) else { break };
+        let Some(after) = rest.get(start + 1..) else {
+            break;
+        };
         let Some(end) = after.find(']') else { break };
         if let Some(body) = after.get(..end) {
             out.push(body.to_string());
         }
         // end 是 ']' 的字节位置（必为字符边界），这里用 get 而不是裸切片。
-        let Some(next) = after.get(end + 1..) else { break };
+        let Some(next) = after.get(end + 1..) else {
+            break;
+        };
         rest = next;
     }
     out
