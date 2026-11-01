@@ -2,9 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**仓库地址：** [GitHub](https://github.com/jsshwqz/innoforge)
-
-> **⚠️ 维护中：2026-10-27 整顿令（不可跳过）**——当前唯一主线是「一宗真实在办 OA/复审案 → 答复书 + 证据表 → 人工判可提交」。任何 AI / agent 开工前必须读 `AGENTS.md` §〇 与 `docs/plans/2026-10-27-rectification.md`，并声明 `ACK 2026-10-27 整顿令`。三周内不加检索 / 向量 / 成本基建，不新增报告类型。
+**仓库地址：** [GitHub](https://github.com/jsshwqz/innoforge
 
 很多产品不是死在实现阶段，而是死在更早之前：想法看起来不错，却缺少判断依据；方向似乎可行，却没有清晰方案；产品刚开始推进，才发现已有技术、专利壁垒或知识产权保护缺口。
 
