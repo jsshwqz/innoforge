@@ -4,6 +4,14 @@
 All notable changes are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
+## [v0.9.24] - 2026-11-02
+
+### 新增 / Added
+
+- **逐端点的字段级契约自动生成**：`scripts/gen_api_contracts.js` 从路由声明与处理函数源码生成 `docs/API-CONTRACTS.md`——132 条 `/api` 路由逐条给出路径参数、请求体/查询类型（能解析到 `struct` 时列出字段、serde 重命名与是否可省略）、响应类型；对 `Json<serde_json::Value>` 端点静态抽取函数体实际读取的键与 `json!` 返回的顶层键。抽不到的一律写明「未抽取到」，不拿空白冒充「没有」。新增 `tests/api_contracts_up_to_date.rs` 用同一脚本的 `--check` 模式比对，代码改了没重跑生成器就红（本 PR）。
+- `docs/API-ROUTES.md`、`docs/API-CONTRACTS.md`、`docs/API.md` 三份文件在顶部互相写明分工：清单回答「有哪些端点」，契约回答「收什么、回什么」，`API.md` 写语义与示例。
+
+---
 ## [v0.9.23] - 2026-11-02
 
 ### 修复 / Fixed
