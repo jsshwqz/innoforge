@@ -2149,9 +2149,11 @@ pub async fn api_ai_oa_generate_response_letter(
         }
         // 结构化维度：amendment_unsupported=N 与提交度维度（N>0 即 False）
         yield Ok(Event::default().event("meta").data(format!(
-            "{{\"source\":\"{analysis_source}\",\"amendment_unsupported\":{},\"amendment_marked\":{},\"broadening_count\":{},\"broadening_checked\":{},\"amendment_assertions_downgraded\":{},\"amendment_claims\":{},\"amendment_features\":{},\"corpus_claims\":{},\"amendment_gate\":\"{}\",\"submission_ready\":{},\"header_known\":{},\"header_filled\":{},\"header_unresolved_count\":{},\"header_unresolved\":\"{}\",\"header_unresolved_marks\":{}}}",
+            "{{\"source\":\"{analysis_source}\",\"amendment_unsupported\":{},\"amendment_marked\":{},\"amendment_merged\":{},\"amendment_unlocated\":{},\"broadening_count\":{},\"broadening_checked\":{},\"amendment_assertions_downgraded\":{},\"amendment_claims\":{},\"amendment_features\":{},\"corpus_claims\":{},\"amendment_gate\":\"{}\",\"submission_ready\":{},\"header_known\":{},\"header_filled\":{},\"header_unresolved_count\":{},\"header_unresolved\":\"{}\",\"header_unresolved_marks\":{}}}",
             gate.unsupported_count,
             gate.marked_count,
+            gate.merged_count,
+            gate.unlocated_count,
             gate.broadened.len(),
             gate.current_claims_checked,
             gate.assertions_downgraded,
