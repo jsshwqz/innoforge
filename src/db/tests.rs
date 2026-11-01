@@ -686,3 +686,64 @@ fn issue72_byte_vs_char_count_guard() {
         "3-char name (9 bytes) must pass char-count bound; if this fails, someone reverted to byte-length"
     );
 }
+
+/// #77：单 worker 的 runtime 上，**直接同步写**会卡住定时器；`spawn_blocking` 包裹不会。
+///
+/// 这条用例把"旧形态会饿死 runtime"与"新形态不会"放在同一个测试里对照——
+/// 两段都是实测：第一段断言的正是修复前的形态（它必须慢），第二段断言修复后的形态（必须快）。
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn snapshot_write_offload_does_not_starve_the_runtime() {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    let file = tempfile::NamedTempFile::new().expect("temp database");
+    let path = file.path().to_string_lossy().to_string();
+    let db = Arc::new(Database::init(&path).expect("init"));
+
+    // ① 旧形态：同步 DB 调用直接写在 async 任务里 ⇒ 占住唯一的 worker。
+    let timer_delay_direct = {
+        let db = db.clone();
+        let worker_blocked = tokio::spawn(async move {
+            let guard = db.conn();
+            std::thread::sleep(Duration::from_millis(300));
+            drop(guard);
+        });
+        let started = std::time::Instant::now();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let delay = started.elapsed();
+        worker_blocked.await.expect("join direct writer");
+        delay
+    };
+    assert!(
+        timer_delay_direct >= Duration::from_millis(200),
+        "复现失败：直接同步调用本应卡住 runtime，实际定时器只晚了 {timer_delay_direct:?}"
+    );
+
+    // ② 新形态：同样持锁 300ms，但放到 blocking 池 ⇒ 定时器按时触发。
+    let timer_delay_offloaded = {
+        let db = db.clone();
+        let worker_blocked = tokio::task::spawn_blocking(move || {
+            let guard = db.conn();
+            std::thread::sleep(Duration::from_millis(300));
+            drop(guard);
+        });
+        let started = std::time::Instant::now();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let delay = started.elapsed();
+        worker_blocked.await.expect("join blocking writer");
+        delay
+    };
+    assert!(
+        timer_delay_offloaded < Duration::from_millis(200),
+        "spawn_blocking 仍卡住 runtime：定时器晚了 {timer_delay_offloaded:?}"
+    );
+
+    // ③ 真包装函数冒烟：写快照必须能返回（不 panic、不永久阻塞）。
+    crate::orchestrator::save_pipeline_snapshot_blocking(
+        db.clone(),
+        "synthetic-idea".to_string(),
+        "{}".to_string(),
+        "step".to_string(),
+    )
+    .await;
+}
