@@ -79,6 +79,8 @@ scripts/*
 !scripts/m2_regression.sh
 # 路由清单生成器（纯解析，无案件数据）例外入库
 !scripts/gen_route_inventory.js
+# API 契约生成器（纯解析，无案件数据）例外入库
+!scripts/gen_api_contracts.js
 self-review.bat
 
 # 用户数据与导出（禁止入库，防止公网泄露）

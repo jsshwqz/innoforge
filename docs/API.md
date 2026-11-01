@@ -10,6 +10,7 @@ http://127.0.0.1:3000
 
 ## 说明 / Notes
 
+- **完整端点清单**见 [`API-ROUTES.md`](API-ROUTES.md)（自动生成，含方法 / 路径 / 处理函数 / 源码行）；**逐端点的字段级契约**（路径参数、请求体字段、响应顶层键）见 [`API-CONTRACTS.md`](API-CONTRACTS.md)。本文只写语义、示例与使用注意事项。
 - 搜索历史为前端 `localStorage`，没有 `/api/search/history` 接口。
 - 详情页是页面路由 `GET /patent/:id`，不是 JSON API。
 - AI 分析相关接口均为 OpenAI 兼容下游能力封装。
