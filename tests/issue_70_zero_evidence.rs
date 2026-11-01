@@ -6,7 +6,6 @@
 //! 回归入口：端到端 submit → analyze，不只测 execute(&mut ctx) 内部函数。
 //! 判据通用：输入是公开通用技术描述，无案件信息。
 
-use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::OnceLock;
@@ -42,9 +41,11 @@ fn fresh_db_dir() -> tempfile::TempDir {
 }
 
 fn free_port() -> u16 {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
-    listener.local_addr().unwrap().port()
+    port_alloc::free_port()
 }
+
+#[path = "port_alloc.rs"]
+mod port_alloc;
 
 fn wait_for_server(port: u16, timeout_secs: u64) -> bool {
     let start = std::time::Instant::now();

@@ -23,18 +23,19 @@
 //! }
 //! ```
 
-use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::OnceLock;
 
 // ── Port allocation ──
 
-/// Bind to 127.0.0.1:0, extract the OS-assigned port, then drop the listener.
+/// 取一个本进程没发出去过的端口（实现见 `tests/port_alloc.rs`，issue #110）。
 pub fn free_port() -> u16 {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind 127.0.0.1:0");
-    listener.local_addr().unwrap().port()
+    port_alloc::free_port()
 }
+
+#[path = "../port_alloc.rs"]
+mod port_alloc;
 
 // ── Pre-migrated DB template ──
 
