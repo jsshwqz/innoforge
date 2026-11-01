@@ -2124,6 +2124,10 @@ pub async fn api_ai_oa_generate_response_letter(
             &my_patent_text,
             &current_claims,
         );
+        // 锚点核验（#79）：本路由拿不到检索分块元数据（依赖 #78 的 section_tag），
+        // 因此只做"引用了哪些锚点、能不能精确对上"，对不上就如实报，不假装核验过。
+        let anchor_report =
+            crate::ai::anchor_verify::verify_anchors(&header_fill.letter, &crate::ai::anchor_verify::ChunkIndex::new());
         let mut body = String::new();
         if !source_banner.is_empty() {
             body.push_str(&source_banner);
@@ -2143,13 +2147,21 @@ pub async fn api_ai_oa_generate_response_letter(
         if !direction.is_empty() {
             body.push_str(&direction);
         }
+        if anchor_report.has_unverified() {
+            body.push_str(&format!(
+                "> ℹ️ 锚点核验：本稿引用了 {} 处形如 [D1:第N段] / [D1:权利要求N] 的锚点，本次未提供对应文档的分块元数据，无法逐条核对；请人工确认这些段落号/权项号确实存在于被引文件。
+
+",
+                anchor_report.unverified.len()
+            ));
+        }
         body.push_str(&gate.gated_text);
         for frame in split_sse_frames(&body, 240) {
             yield Ok(Event::default().data(sse_encode(&frame)));
         }
         // 结构化维度：amendment_unsupported=N 与提交度维度（N>0 即 False）
         yield Ok(Event::default().event("meta").data(format!(
-            "{{\"source\":\"{analysis_source}\",\"amendment_unsupported\":{},\"amendment_marked\":{},\"amendment_merged\":{},\"amendment_unlocated\":{},\"broadening_count\":{},\"broadening_checked\":{},\"amendment_assertions_downgraded\":{},\"amendment_claims\":{},\"amendment_features\":{},\"corpus_claims\":{},\"amendment_gate\":\"{}\",\"submission_ready\":{},\"header_known\":{},\"header_filled\":{},\"header_unresolved_count\":{},\"header_unresolved\":\"{}\",\"header_unresolved_marks\":{}}}",
+            "{{\"source\":\"{analysis_source}\",\"amendment_unsupported\":{},\"amendment_marked\":{},\"amendment_merged\":{},\"amendment_unlocated\":{},\"broadening_count\":{},\"broadening_checked\":{},\"amendment_assertions_downgraded\":{},\"amendment_claims\":{},\"amendment_features\":{},\"corpus_claims\":{},\"amendment_gate\":\"{}\",\"anchor_verified\":{},\"anchor_unverified\":{},\"anchor_unparsed\":{},\"anchor_hallucination_rate\":{:.3},\"submission_ready\":{},\"header_known\":{},\"header_filled\":{},\"header_unresolved_count\":{},\"header_unresolved\":\"{}\",\"header_unresolved_marks\":{}}}",
             gate.unsupported_count,
             gate.marked_count,
             gate.merged_count,
@@ -2161,6 +2173,10 @@ pub async fn api_ai_oa_generate_response_letter(
             gate.checked_feature_count,
             gate.corpus_claims,
             gate.status.as_str(),
+            anchor_report.verified.len(),
+            anchor_report.unverified.len(),
+            anchor_report.unparsed.len(),
+            anchor_report.hallucination_rate(),
             gate.submission_ready,
             oa_header.known_count(),
             header_fill.filled,
