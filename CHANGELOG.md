@@ -4,6 +4,24 @@
 All notable changes are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
+## [v0.9.23] - 2026-11-02
+
+### 修复 / Fixed
+
+- **核验门差额拆成两个数**：`unsupported - marked` 不再一律解释成「同位置重叠合并」；新增 `merged_count` / `unlocated_count`，横幅分开说，不变量 `marked + merged + unlocated == unsupported`（[#170](https://github.com/jsshwqz/innoforge/pull/170)）。
+- **两条守卫自身不再假绿**：缺 node 时 `inline_scripts_parse` 从「跳过后 ok」改为 fail closed，失败消息给模板内行号 + node 的 SyntaxError 原文；隐私长句守卫补上可自证的阳性对照（植入自造摘要必须被抓到、空集合必须 0），并断言摘要条数与常量数组一致（[#171](https://github.com/jsshwqz/innoforge/pull/171)）。
+- **WAL 下补 `synchronous=NORMAL`**；新增「单 worker 上直接同步写会卡住 runtime、`spawn_blocking` 不会」的对照测试（[#173](https://github.com/jsshwqz/innoforge/pull/173)）。
+
+### 新增 / Added
+
+- **引文锚点三元组核验**：`[D1:权利要求2]` / `[D1:第0035段]` 按 `(doc, kind, number)` 精确匹配，数字按数值比较，`unparsed` 与 `unverified` 分开统计；把「数字包含」那套假绿设计钉成回归用例。答复书里检出锚点时挂可见说明，meta 增四项（[#172](https://github.com/jsshwqz/innoforge/pull/172)）。
+- **路由清单自动生成 + 漂移守卫**：141 条路由（132 API + 9 页面）由 `scripts/gen_route_inventory.js` 生成到 `docs/API-ROUTES.md`，`tests/route_inventory_up_to_date.rs` 逐条比对（[#174](https://github.com/jsshwqz/innoforge/pull/174)）。
+
+### 说明
+
+锚点的生产接线（逐条核对）依赖检索分块的 `section_tag`（[#78](https://github.com/jsshwqz/innoforge/issues/78) 冻结中）；当前只报「引用了 N 处锚点、无法核对」。
+
+---
 ## [v0.9.22] - 2026-11-01
 
 ### 修复 / Fixed
