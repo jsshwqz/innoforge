@@ -109,6 +109,10 @@ pub struct AmendmentGateResult {
     ///
     /// 逐字核验只回答「新增内容是否超范围」（专利法第33条的上界）；**删掉一个限定
     /// ＝扩大保护范围**是另一头，必须拿"审查所针对的那版权项"当基准（issue #159）。
+    /// 不同命中落在同一位置、合并成一处标注的条数（差额的一半）
+    pub merged_count: usize,
+    /// 零命中但**没能**在正文里定位的条数（差额的另一半；>0 时正文标注会少于条数）
+    pub unlocated_count: usize,
     pub broadened: Vec<UnsupportedFeature>,
     /// 是否真的做了扩范围方向检查。缺现权项文本时为 `false`——此时**必须在产物里可见**
     /// （[`AmendmentGateResult::direction_note`]），不能静默退化成只查单向。
@@ -133,6 +137,8 @@ impl AmendmentGateResult {
             unsupported: Vec::new(),
             unsupported_count: 0,
             marked_count: 0,
+            merged_count: 0,
+            unlocated_count: 0,
             broadened: Vec::new(),
             current_claims_checked: false,
             assertions_downgraded: 0,
@@ -178,13 +184,24 @@ impl AmendmentGateResult {
         if self.unsupported_count == 0 {
             return String::new();
         }
-        let merge_note = if self.marked_count == self.unsupported_count {
+        // 差额分开报：只写"重叠合并"会把"根本没定位到"这种情况掩盖掉。
+        let mut notes: Vec<String> = Vec::new();
+        if self.merged_count > 0 {
+            notes.push(format!(
+                "其中 {} 处是不同命中落在同一位置、合并为一处标注，正文实际标注 {} 处",
+                self.merged_count, self.marked_count
+            ));
+        }
+        if self.unlocated_count > 0 {
+            notes.push(format!(
+                "另有 {} 处零命中特征在正文里没能定位（游标越过或形态不一致），请对照下方清单逐条人工核对",
+                self.unlocated_count
+            ));
+        }
+        let merge_note = if notes.is_empty() {
             String::new()
         } else {
-            format!(
-                "（同一位置上重叠的命中合并为一处标注，正文实际标注 {} 处）",
-                self.marked_count
-            )
+            format!("（{}）", notes.join("；"))
         };
         format!(
             "> ⚠️ 修改稿核验阻断（amendment_unsupported={}）：本稿修改后的权利要求中有 {} 处特征句在原始申请文本（说明书 + 权利要求书）零命中，已就地逐处标注「未证实：该措辞在原始文本零命中」{}；相关「明确记载 / 来源于原说明书」类断言已降级。提交前必须逐处核对专利法第33条（修改超范围）。\n\n",
@@ -335,8 +352,16 @@ pub fn gate_amendment_text_with_current_claims(
             cursor = abs + ev.raw.len();
         }
     }
+    // 差额要分开报：
+    //   located_raw - distinct = 同一位置重叠（两处命中落在一个起点，合并成一处标注）
+    //   unsupported - located_raw = 根本没能在正文里定位（find 失败）
+    // 只把差额一律解释成"重叠合并"，会把后者掩盖掉（#156）。
+    let located_raw = insertions.len();
     insertions.sort_unstable();
     insertions.dedup();
+    let merged_count = located_raw - insertions.len();
+    let unsupported_total = evals.iter().filter(|e| !e.supported).count();
+    let unlocated_count = unsupported_total.saturating_sub(located_raw);
 
     let mut gated = String::with_capacity(letter.len() + insertions.len() * UNVERIFIED_MARK.len());
     let mut prev = 0usize;
@@ -391,6 +416,8 @@ pub fn gate_amendment_text_with_current_claims(
         gated_text: gated,
         unsupported_count: unsupported.len(),
         marked_count,
+        merged_count,
+        unlocated_count,
         broadened,
         current_claims_checked,
         unsupported,
@@ -2102,5 +2129,40 @@ mod tests {
             "缺输入的可见性说明缺失: {}",
             r.direction_note()
         );
+    }
+
+    // ── 差额拆两块：#156 提的 unlocated，与"重叠合并"分开报 ──
+
+    #[test]
+    fn shortfall_is_split_into_merged_and_unlocated() {
+        let letter = "## 二、关于权利要求的修改
+
+修改后的权利要求1：
+一种物料输送装置，包括机架（1），还包括虚构的量子阀。
+";
+        let r = gate(letter);
+        assert_eq!(
+            r.marked_count + r.merged_count + r.unlocated_count,
+            r.unsupported_count,
+            "标注 + 合并 + 未定位 必须等于零命中条数：{:?}",
+            r
+        );
+    }
+
+    #[test]
+    fn banner_names_unlocated_separately_from_merged() {
+        // 只钉文案：把两个计数分别置位，确认横幅不会把"没定位到"说成"重叠合并"。
+        let letter = "## 二、关于权利要求的修改
+
+修改后的权利要求1：
+一种物料输送装置，包括虚构部件。
+";
+        let mut r = gate(letter);
+        assert!(r.unsupported_count > 0);
+        r.merged_count = 1;
+        r.unlocated_count = 2;
+        let b = r.banner();
+        assert!(b.contains("合并为一处标注"), "合并要有自己的说法: {b}");
+        assert!(b.contains("没能定位"), "未定位必须单独说: {b}");
     }
 }
