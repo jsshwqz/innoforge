@@ -66,7 +66,11 @@ impl Database {
                 Connection::open(path)?
             }
         };
-        conn.execute_batch("PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL;")?;
+        // busy_timeout：并发启动/并行读写时不要立刻 SQLITE_BUSY（#77）；
+        // synchronous=NORMAL：WAL 下足以保证崩溃一致性，同时少一次 fsync。
+        conn.execute_batch(
+            "PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;",
+        )?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);",
         )?;
