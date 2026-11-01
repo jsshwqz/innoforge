@@ -960,3 +960,7 @@
 - **修复 1**：index.html 横幅 provider 显示名从 `/api/ai/models` 探测结果**派生**（`okName`/`errNames` 拼接），写死文案「本地 Ollama（未检测到服务）」删除——换 provider 横幅跟着变（负控 A 的静态守卫：`homepage_banner_has_no_hardcoded_vendor_names`，厂商字面量即红）。
 - **修复 2**：features 区新增「📝 OA 答复与复审」卡（href=/oa-response，与既有三张卡同级）——主功能可发现。负控 B：`homepage_has_oa_response_entry`（删入口即红）。两条守卫扩展进 `tests/ai_unconfigured_regression.rs`（#68 同主题文件）4/4 绿。
 - **HTML 扫描**：check_html_functions.mjs 通过（无 on* 断链、基线零漂移）。
+## 2026-10-30 · #102 AI 端点入参校验状态码（分支 `fix/ai-endpoint-validation-status`，基线 main@3c45cc3）
+- **缺陷**：12 个 AI 端点（claim-chart / compare-matrix / oa-quality-score / oa-panel / oa-strategy-recommend / oa-examiner-preview / oa-defense-analysis / oa-collect-evidence / oa-adversarial / oa-claim-simulate / check-amendments / inventiveness-analysis）在必填字段缺失时返回 HTTP 200 + body error——只看状态码的监控/重试/告警全绿。
+- **修复**：12 个 handler 签名 `Json<Value>` → `impl IntoResponse`，入参校验失败改 `(StatusCode::BAD_REQUEST, Json(...))`（错误文案保留），成功路径同步包 `(StatusCode::OK, ...)`。
+- **守卫测试（先红后绿，真实执行）**：`tests/ai_endpoint_status_guard.rs` 对 12 端点发空请求断言 400——修复前 **12×HTTP 200 FAILED**（与 issue 实测一致）→ 修复后全绿。负控回归：任何端点回退 200+error 即红。

@@ -1534,6 +1534,16 @@
 - **预防 / Prevention**: ①「先查后改」型幂等保护跨进程一律不算数——检查必须与变更同锁（BEGIN IMMEDIATE）或把变更写成可容忍重复的形态；②测试里确定性建模竞态败者（另一连接先完成同一变更）比真并发压测更可证伪且不 flaky；③rusqlite `Connection::open` 默认 busy_timeout=0，涉及锁竞争的路径必须显式设等待（生产已由 `Database::init` 的 `PRAGMA busy_timeout=5000` 覆盖）。
 - **提交 / Commit**: 见 #60 修复 PR（分支 fix/migration-race-guard）。
 ## [2026-10-31] 58 多 agent 并行构建的本地验证死结：exe 锁 + 双 target 磁盘耗尽
+## [2026-10-30] 60 批量转换 Rust handler 签名：正则替换会吃掉 match 臂与跨行 json!
+- **严重程度 / Severity**: MEDIUM（3 处 mismatched delimiter + 8 处类型不匹配，靠编译器逐个兜出来）
+- **涉及文件**: `src/routes/ai.rs`（12 个 handler 的 200+error → 400 改造，#102）
+- **现象 / Symptom**: ①`Err(e) => Json(json!(...))` 的 match 臂值形态被括号配平脚本切坏（"son(json!" 少壳）；②adversarial 的跨行 `Json(json!({...}))` 尾表达式被包后函数闭括号 `}` 被吞（unclosed delimiter）；③`impl IntoResponse` 签名下 Ok/Err 臂类型必须一致——Ok 臂漏包导致 8 处 E0308。
+- **根因 / Root cause**: `return Json(...)` / `=> return Json(...)` / `=> Json(...)` 三种语法形态的转换规则不同；`json!({...})` 跨行时行级脚本无法配平；`impl IntoResponse` 是不透明类型——函数体所有返回路径必须同一具体类型。
+- **修复 / Fix**: 逐处手工修复 + 编译器驱动（每轮 check 定位下一批错误）；三种形态分别处理；match 全臂统一包状态码。
+- **预防 / Prevention**: ①批量改 Rust 签名时，`impl Trait` 返回类型的含义是"单一具体类型"——先数清函数体内所有返回路径再动手；②行级脚本改多行宏调用（json!）天然不可靠，跨行形态必须手工；③改造后先 `cargo check` 全绿再写测试，否则测试红绿会被编译噪声淹没。
+- **提交 / Commit**: 见 #102 修复 PR（分支 fix/ai-endpoint-validation-status）。
+
+## [2026-10-31] ㊿ 多 agent 并行构建的本地验证死结：exe 锁 + 双 target 磁盘耗尽
 - **严重程度 / Severity**: MEDIUM（阻塞本地全量验证，不改产品代码；CI 兜底不受影响）
 - **现象 / Symptom**: ①集成测试链接时 `failed to remove innoforge-server.exe`（拒绝访问）——并行 agent 起的 server 持有共享 target 的同名二进制；②独立 CARGO_TARGET_DIR 冷编全量 → 磁盘 8G 被 LNK1180 吃光（双 target 并存 = 双倍空间）；③重负载下 busy_timeout=5000 的测试 init 也 SQLITE_BUSY。
 - **根因 / Root cause**: 多个 agent 并行共享 D:/cargo-target（构建锁排队）+ 各自 server 进程锁二进制 + 646G 盘被多 agent 构建迭代填满——本地全量验证在多 agent 并行期是稀缺资源。
@@ -1558,3 +1568,4 @@
 - **回归 / 负控 / Regression & Negative control**: 三条单测：`deleting_a_limitation_is_flagged_as_broadening`（删限定 ⇒ `broadened` 非空、`Degraded`、`ready=false`）、`adding_a_limitation_alone_is_not_broadening`（只加不减 ⇒ 不报、`checked=true`）、`missing_current_claims_is_visible_not_silent`（缺输入 ⇒ `checked=false` 且说明可见）。**真实产物验收**：把 B-1 稿与合成的"含隔离结构的现权项"一起喂进去，读数由 `verified/0/ready=true` 变为 `degraded/0/ready=false/broadened=1/checked=true`；不给现权项时 `checked=false`。
 - **已知边界（如实）**: ①**现权项文本的产品侧来源还没有**：前端/导入流程目前不产出这个字段，所以线上实际仍是 `checked=false`（可见但未核验）。要真正生效，导入流程必须把"已备案的权利要求书"落库。②判定是"独立权项按顺序一一对应 + 限定的归一化子串包含"，改写型修改会被报成"删除或改写"（属安全侧误红，交人判）。③`submission_ready` 仍只表示"逐字核验通过"；扩范围是否核验看 `broadening_checked`，两者不合并成单一布尔。
 - **预防**: ①**范围校验有上下界**：只查"新增超范围"必然漏掉"删限定放宽"，两头都要有输入、都要有判据；②判据缺输入时，正确做法是**把"没查"写进产物**（本条 `direction_note`），而不是静默退化成单向；③凡是"要不要交"的结论，都必须能指出它由哪几项检查合成——本条的 `ready × checked` 就是为此保留两个维度。
+- **提交 / Commit**: 见 #102 修复 PR（分支 fix/ai-endpoint-validation-status）。
