@@ -19,7 +19,7 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ### 说明
 
-锚点的生产接线（逐条核对）依赖检索分块的 `section_tag`（#78 冻结中）；当前只报「引用了 N 处锚点、无法核对」。
+锚点的生产接线（逐条核对）依赖检索分块的 `section_tag`（[#78](https://github.com/jsshwqz/innoforge/issues/78) 冻结中）；当前只报「引用了 N 处锚点、无法核对」。
 
 ---
 ## [v0.9.22] - 2026-11-01
