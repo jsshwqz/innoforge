@@ -1578,3 +1578,12 @@
 - **修复**: 拆成两个数——`merged_count = located_raw - distinct`（同位置合并）、`unlocated_count = 零命中条数 - located_raw`（没定位）；横幅按需分别说，meta 增 `amendment_merged` / `amendment_unlocated`。不变量：`marked_count + merged_count + unlocated_count == unsupported_count`。
 - **回归 / 负控**: `shortfall_is_split_into_merged_and_unlocated`（真实路径上断言不变量）；`banner_names_unlocated_separately_from_merged`（只钉文案：两数分别置位后，横幅必须同时出现"合并为一处标注"与"没能定位"两种说法，防止又把后者说成前者）。
 - **预防**: ①**一个差额两种来源时，两个都要有名字**；只有能唯一归因时才用一句话解释。②凡是要读者"自己去找"的状态，措辞必须把它与"已经标过"区分开——否则读者按标注数找齐了，仍漏掉没标的那些。③这条是 #162（条数与处数分开报）的下半截：#162 让差额可见，本条让差额**可解释**。
+
+## [2026-11-01] 62 两条守卫自己是假的：缺依赖时打印 ok；"0 命中"从未被证明能抓到东西
+- **严重程度 / Severity**: CRITICAL
+- **涉及文件**: `tests/inline_scripts_parse.rs`、`tests/no_case_data_in_repo.rs`（长句守卫）、`.github/workflows/ci.yml`（Tests job）
+- **现象**: ①`inline_scripts_parse` 在没有 node 时打印 "node not found — skipping" 然后 `ok`——两条守卫（模板内联 JS 语法、非 async 函数用 await）同时失效，报告上一切正常；失败时给的诊断是"临时文件路径 + 临时文件内行号"，临时文件测完即删，既不能定位也不能复现，node 的原话（`SyntaxError: …`）一个字都没出现。②隐私长句守卫每次都报 0 命中，但**仓库内没有任何东西能证明它抓得到**：目录与摘要数组都写死在常量里，"能否抓到"只能靠手工改源码做一次临时对照。
+- **根因**: ①把"依赖缺失"当成了"无需检查"——依赖缺失是**守卫无法工作**，不是"没有违规"；②诊断信息取自中间产物（临时文件）而不是源文件位置；③判据不可注入参数 ⇒ 阳性对照无法固化，等于把一条 CRITICAL 守卫的可信度建立在"上次有人手工验过"上。
+- **修复**: ①`require_node()` 改为 fail closed（找不到 node 直接 panic，文案给出"装 node 或在该 job setup-node"的可执行路径），并在 Tests job 里显式 `actions/setup-node@v4`；②`describe_node_error()` 把 node stderr 的 `SyntaxError:` 原文带上，并用 `line_offset + node 行号` 换算回**模板内行号**，不再输出临时路径；③长句守卫抽出 `scan_long_sentences(files, digests)`，原测试变薄封装；新增 `positive_control_planted_digest_is_caught`（临时目录 + 自创文本 + 注入摘要 ⇒ 必须 1 条命中、位置正确、**描述不回显原文**）与 `positive_control_empty_digest_set_reports_zero`（空集合必须 0 命中）；并断言摘要集合长度 == 常量数组长度（防数组被清空后静默失去意义）。
+- **回归 / 负控（真实执行）**: ①把 node 从 PATH 去掉直接跑测试 exe ⇒ `FAILED`（原先是 2 passed）；②往 `templates/search.html` 末尾植入 `function zzqPlantedBroken( {` ⇒ 报 `templates\search.html: templates 内第 1113 行附近：SyntaxError: Unexpected number`（无临时路径），还原后回到 2 passed；③阳性对照里把写入文本改一个字而摘要仍按原文算 ⇒ `植入的摘要必须被抓到：[]` 变红，还原后绿；④`cargo test --test no_case_data_in_repo` 15 passed（含原长句扫描 114s）。
+- **预防**: ①**"依赖缺失"一律 fail closed**：能跑=通过/失败二选一，跑不了必须是失败并可执行地告诉人怎么修——`skipped` 乃至 `ok` 都会被当成"查过了"；②诊断信息只能来自**源文件位置**（模板行号、原文件偏移），不许来自临时文件；③凡是"守卫每次报 0"的东西，都要有一条**在仓库内能自证的阳性对照**（注入一条自造样本必须被抓到），并与"空输入必须 0"配对，同时断言判据规模（摘要条数）——否则"永远返回 0"和"永远返回全部"两种退化都不会被发现。

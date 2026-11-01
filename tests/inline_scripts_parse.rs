@@ -95,18 +95,61 @@ fn preprocess_template_vars(script: &str) -> String {
     result
 }
 
-fn has_node() -> bool {
-    Command::new("node")
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+/// 拿 node 的版本；拿不到就 **fail closed**（#59：依赖缺失不许报 ok）。
+fn require_node() -> String {
+    match Command::new("node").arg("--version").output() {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
+        Ok(o) => {
+            let err = String::from_utf8_lossy(&o.stderr);
+            panic!(
+                "node 存在但 `node --version` 失败（stderr 首行：{}）。                 这条守卫无法工作，请安装可用的 node，或在跑它的 CI job 里 setup-node。",
+                err.lines().next().unwrap_or("<empty>")
+            );
+        }
+        Err(e) => panic!(
+            "找不到 node（{e}）。模板内联 JS 语法守卫 **无法工作**，不能算通过。             请安装 node，或在跑这条测试的 CI job 里加 actions/setup-node@v4。"
+        ),
+    }
 }
 
-fn check_script_with_node(script: &str) -> Result<(), String> {
+/// 把 node 的 stderr 变成可定位的消息：**模板内行号 + SyntaxError 原文**，
+/// 绝不把临时文件路径/临时行号当诊断（临时文件测完就删，那串信息无法复现，见 #59）。
+fn describe_node_error(stderr: &str, line_offset: usize) -> String {
+    let mut temp_line: Option<usize> = None;
+    let mut syntax: Option<String> = None;
+    for line in stderr.lines() {
+        let t = line.trim();
+        if syntax.is_none() && (t.starts_with("SyntaxError") || t.starts_with("Error")) {
+            syntax = Some(t.to_string());
+            continue;
+        }
+        // node 的定位行形如 "/tmp/xxx.js:6" 或 "D:\Temp\abc.js:6"
+        if temp_line.is_none() {
+            if let Some((_, n)) = t.rsplit_once(':') {
+                if let Ok(v) = n.trim().parse::<usize>() {
+                    if t.contains(".js:") || t.contains(".mjs:") {
+                        temp_line = Some(v);
+                    }
+                }
+            }
+        }
+    }
+    let at = temp_line
+        .map(|n| format!("templates 内第 {} 行附近", line_offset + n))
+        .unwrap_or_else(|| format!("inline script（起始于第 {} 行）", line_offset));
+    format!(
+        "{at}：{}",
+        syntax.unwrap_or_else(|| "<node 未给出错误行>".to_string())
+    )
+}
+
+fn check_script_with_node(script: &str, line_offset: usize) -> Result<(), String> {
     let preprocessed = preprocess_template_vars(script);
 
-    let temp = tempfile::NamedTempFile::new().map_err(|e| format!("tempfile error: {e}"))?;
+    let temp = tempfile::Builder::new()
+        .suffix(".js")
+        .tempfile()
+        .map_err(|e| format!("tempfile error: {e}"))?;
     fs::write(temp.path(), &preprocessed).map_err(|e| format!("write error: {e}"))?;
 
     let output = Command::new("node")
@@ -119,7 +162,7 @@ fn check_script_with_node(script: &str) -> Result<(), String> {
         Ok(())
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        Err(stderr.to_string())
+        Err(describe_node_error(&stderr, line_offset))
     }
 }
 
@@ -139,10 +182,9 @@ fn collect_templates() -> Vec<PathBuf> {
 
 #[test]
 fn all_inline_scripts_parse_as_valid_js() {
-    if !has_node() {
-        eprintln!("node not found — skipping inline script parse check");
-        return;
-    }
+    // 依赖缺失 = 守卫无法工作 = 失败（#59）。这里打印版本，便于在 CI 日志里确认真的跑了。
+    let node_version = require_node();
+    eprintln!("inline_scripts_parse: node {node_version}");
 
     let templates = collect_templates();
     assert!(!templates.is_empty(), "no templates found");
@@ -154,13 +196,8 @@ fn all_inline_scripts_parse_as_valid_js() {
         let scripts = extract_inline_scripts(&html);
 
         for (script, line_offset) in scripts {
-            if let Err(err) = check_script_with_node(&script) {
-                failures.push(format!(
-                    "{} (inline script at ~line {}): {}",
-                    path.display(),
-                    line_offset,
-                    err.lines().next().unwrap_or("unknown error")
-                ));
+            if let Err(err) = check_script_with_node(&script, line_offset) {
+                failures.push(format!("{}: {}", path.display(), err));
             }
         }
     }

@@ -973,6 +973,72 @@ const CASE_TEXT_12CHAR_SHA256_DIGESTS: &[&str] = &[
 /// 滑窗大小：12 个 Unicode 字符（码点）。
 const CASE_TEXT_WINDOW: usize = 12;
 
+/// 一条长句命中。**只记位置和摘要前缀，不记原文**——报错本身不能变成泄露面。
+#[derive(Debug, Clone, PartialEq)]
+struct LongSentenceViolation {
+    file: String,
+    /// 命中的起始**字符**（码点）偏移
+    offset: usize,
+    /// 摘要前 16 位
+    digest_prefix: String,
+}
+
+impl LongSentenceViolation {
+    fn describe(&self) -> String {
+        format!(
+            "{}: 第{}字符位置命中 12 字长句守卫（SHA256={}）",
+            self.file, self.offset, self.digest_prefix
+        )
+    }
+}
+
+/// 长句扫描本体：输入"待扫文件列表 + 摘要集合"，输出"实扫文件数 + 违规列表"。
+///
+/// 抽成可注入参数的形态，是为了让"它到底能不能抓到东西"能在仓库内自证（#58）——
+/// 原先目录和摘要都写死在常量里，只能手工改源码做阳性对照。
+fn scan_long_sentences(
+    files: &[String],
+    digests: &HashSet<String>,
+) -> (usize, Vec<LongSentenceViolation>) {
+    let mut scanned: usize = 0;
+    let mut violations: Vec<LongSentenceViolation> = Vec::new();
+
+    for file in files {
+        let file = file.as_str();
+        if WHITELIST.contains(&file) {
+            continue;
+        }
+        let Ok(content) = std::fs::read_to_string(file) else {
+            continue; // 跳过二进制文件
+        };
+        scanned += 1;
+
+        let chars: Vec<char> = content.chars().collect();
+        if chars.len() < CASE_TEXT_WINDOW {
+            continue;
+        }
+        let mut hits_in_file = 0usize;
+        for i in 0..=chars.len() - CASE_TEXT_WINDOW {
+            let window: String = chars[i..i + CASE_TEXT_WINDOW].iter().collect();
+            let mut hasher = Sha256::new();
+            hasher.update(window.as_bytes());
+            let hex = format!("{:x}", hasher.finalize());
+            if digests.contains(hex.as_str()) {
+                violations.push(LongSentenceViolation {
+                    file: file.to_string(),
+                    offset: i,
+                    digest_prefix: hex.chars().take(16).collect(),
+                });
+                hits_in_file += 1;
+                if hits_in_file >= 3 {
+                    break; // 每个文件最多报 3 条，避免日志爆炸
+                }
+            }
+        }
+    }
+    (scanned, violations)
+}
+
 #[test]
 fn no_case_long_sentence_in_repo() {
     let (files, mode) = collect_files();
@@ -982,70 +1048,102 @@ fn no_case_long_sentence_in_repo() {
         mode
     );
 
-    // 构建摘要集合用于 O(1) 查找
-    let digest_set: HashSet<&str> = CASE_TEXT_12CHAR_SHA256_DIGESTS.iter().copied().collect();
+    let digest_set: HashSet<String> = CASE_TEXT_12CHAR_SHA256_DIGESTS
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    // 摘要集合必须是常量数组的忠实映像：数组被清空/写重，测试不能静默失去意义。
+    assert!(
+        !CASE_TEXT_12CHAR_SHA256_DIGESTS.is_empty(),
+        "12 字长句摘要数组为空——守卫等于没开"
+    );
+    assert_eq!(
+        digest_set.len(),
+        CASE_TEXT_12CHAR_SHA256_DIGESTS.len(),
+        "摘要集合与常量数组长度不一致（有重复摘要？）"
+    );
 
-    let mut scanned: usize = 0;
-    let mut violations: Vec<String> = Vec::new();
-
-    for file in &files {
-        let file = file.as_str();
-        if WHITELIST.contains(&file) {
-            continue;
-        }
-
-        let content = match std::fs::read_to_string(file) {
-            Ok(c) => c,
-            Err(_) => continue, // 跳过二进制文件
-        };
-
-        scanned += 1;
-
-        let chars: Vec<char> = content.chars().collect();
-        if chars.len() < CASE_TEXT_WINDOW {
-            continue;
-        }
-
-        for i in 0..=chars.len() - CASE_TEXT_WINDOW {
-            let window: String = chars[i..i + CASE_TEXT_WINDOW].iter().collect();
-            let mut hasher = Sha256::new();
-            hasher.update(window.as_bytes());
-            let digest = hasher.finalize();
-            let hex = format!("{:x}", digest);
-
-            if digest_set.contains(hex.as_str()) {
-                violations.push(format!(
-                    "{}: 第{}字符位置命中 12 字长句守卫（SHA256={}）",
-                    file,
-                    i,
-                    &hex[..16]
-                ));
-                // 每个文件最多报 3 条，避免日志爆炸
-                let count_for_file = violations
-                    .iter()
-                    .filter(|v| v.starts_with(&format!("{}:", file)))
-                    .count();
-                if count_for_file >= 3 {
-                    break;
-                }
-            }
-        }
-    }
+    let (scanned, violations) = scan_long_sentences(&files, &digest_set);
 
     eprintln!(
-        "长句守卫：扫描方式={}，{} 个文件，{} 条摘要",
+        "长句守卫：扫描方式={}，{} 个文件，{} 条摘要（数组 {} 条）",
         mode,
         scanned,
-        digest_set.len()
+        digest_set.len(),
+        CASE_TEXT_12CHAR_SHA256_DIGESTS.len()
     );
 
     if !violations.is_empty() {
+        let lines: Vec<String> = violations.iter().map(|v| v.describe()).collect();
         panic!(
-            "长句守卫发现 {} 处违规：\n{}",
+            "长句守卫发现 {} 处违规：
+{}",
             violations.len(),
-            violations.join("\n")
+            lines.join(
+                "
+"
+            )
         );
     }
+}
+
+/// 阳性对照（#58）：**植入一条自创摘要，必须被抓到**。
+///
+/// 这证明"0 命中"是能力而不是巧合。植入文本是自创的，且断言违规描述里**不含原文**。
+#[test]
+fn positive_control_planted_digest_is_caught() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    // 自创文本（13 个字符），不得包含任何真实案件内容
+    let planted = "这是一次阳性对照植入的文句";
+    let path = dir.path().join("planted.txt");
+    std::fs::write(&path, planted).expect("write planted file");
+
+    let window: String = planted.chars().take(CASE_TEXT_WINDOW).collect();
+    let mut hasher = Sha256::new();
+    hasher.update(window.as_bytes());
+    let hex = format!("{:x}", hasher.finalize());
+    let digests: HashSet<String> = std::iter::once(hex.clone()).collect();
+
+    let files = vec![path.to_string_lossy().to_string()];
+    let (scanned, violations) = scan_long_sentences(&files, &digests);
+
+    assert_eq!(scanned, 1, "必须真的扫到了那个文件");
+    assert_eq!(
+        violations.len(),
+        1,
+        "植入的摘要必须被抓到：{:?}",
+        violations
+    );
+    assert_eq!(violations[0].offset, 0, "命中位置应是第 0 个字符");
+    let text = violations[0].describe();
+    assert!(
+        !text.contains(&window),
+        "违规描述不得回显被植入的原文：{text}"
+    );
+    assert!(
+        text.contains(&hex[..16]),
+        "违规描述应带摘要前缀便于归因：{text}"
+    );
+}
+
+/// 配对的负向下界（#58）：空摘要集合必须 0 命中——排除"永远返回全部"。
+#[test]
+fn positive_control_empty_digest_set_reports_zero() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("anything.txt");
+    std::fs::write(
+        &path,
+        "一段与任何摘要都无关的自创文本，用来验证空集合不会乱报",
+    )
+    .expect("write");
+    let files = vec![path.to_string_lossy().to_string()];
+    let (scanned, violations) = scan_long_sentences(&files, &HashSet::new());
+    assert_eq!(scanned, 1);
+    assert!(
+        violations.is_empty(),
+        "空摘要集合不得报违规：{:?}",
+        violations
+    );
 }
 
 // ── Negative controls: prove check_text actually fires on violations ──
