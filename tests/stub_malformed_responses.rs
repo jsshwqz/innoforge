@@ -386,6 +386,14 @@ fn accepts_complete_json_stub_response() {
 
 // ── 端口分配机制的负控：证明旧形态的 TOCTOU 窗口真实存在，新形态没有 ──
 
+/// 正控（#110）：同一进程里连续取 64 个端口必须互不重复——并行用例不会再拿到同一个号。
+#[test]
+fn free_port_hands_out_distinct_ports() {
+    let ports: Vec<u16> = (0..64).map(|_| free_port()).collect();
+    let uniq: std::collections::HashSet<u16> = ports.iter().copied().collect();
+    assert_eq!(uniq.len(), ports.len(), "取到重复端口：{:?}", ports);
+}
+
 /// 负控（先红）：`free_port()` 探到端口后 listener 立即 drop，**这个端口在真正 bind
 /// 之前是可被抢占的**——旧写法（探端口 → 传进子线程 → 子线程 bind）的失败窗口就在这里：
 /// 子线程 bind 失败后 `Err(_) => return` 静默退出，客户端拿到的是一个没人监听的端口。

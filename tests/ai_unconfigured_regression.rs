@@ -8,7 +8,6 @@
 //!   2. The /api/settings endpoint returns ai_api_key_configured=false when no
 //!      AI_API_KEY is set, so the frontend can actually trigger the message.
 
-use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::OnceLock;
@@ -48,9 +47,11 @@ fn fresh_db_dir() -> tempfile::TempDir {
 }
 
 fn free_port() -> u16 {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind 127.0.0.1:0");
-    listener.local_addr().unwrap().port()
+    port_alloc::free_port()
 }
+
+#[path = "port_alloc.rs"]
+mod port_alloc;
 
 fn wait_for_server(port: u16, timeout_secs: u64) -> bool {
     let start = std::time::Instant::now();
