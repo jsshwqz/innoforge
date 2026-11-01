@@ -1487,7 +1487,54 @@
 - **修复 / Fix**: `is_heading_fragment` 除原有判据外，按**固定结构词**再排除两类：模板小节名（`关于权利要求的修改` / `关于权利要求的修改（如有）` / `权利要求的修改`）；`修改后的权利要求` + 至多 4 位数字且总长 ≤ 12 字的引出标签。判据从严——真实特征句后面一定还有技术内容，不会长成这个样子。
 - **不变量 / Negative control**: 修误报不能把门关掉。新单测同时断言"标题不标"与"真零命中的特征句仍被标注"，后者用 `机架侧面还固定有气动夹爪组件与压力传感器`（原文没有、无标点、长度过阈）。`amendment_gate` 全组 30 例通过。
 - **预防 / Prevention**: ①"标题/标签"与"内容"是两类文本，判据要按**模板里实际存在的形态**枚举（含不带冒号的那种），不能只认最规整的一种；②任何"就地标注"的产物，都要有人在真实产物上看一眼——这条缺陷在单测里看不出来，是在 v8 的成品里肉眼发现的；③统计口径里的"处数"一旦混入结构性噪声，读者对整张表的信任会打折，宁可把判据写细。
-## [2026-10-30] ㊼ 批量转换 Rust handler 签名：正则替换会吃掉 match 臂与跨行 json!
+
+## [2026-10-30] ㊿ 门把"本次把权2并入权1"这类修改动作叙述句当技术特征核验：达标的稿子被压成不可交
+
+- **现象 / Symptom**: B-1 修改稿（原权1 + 原权2的附加特征）单独跑门是 `unsupported=0`；嵌进整封答复书后变 `unsupported=1 / submission_ready=false`。多出来的那 1 处不是权项内容，是我写的过渡说明句 `本次修改系将原权利要求2的附加技术特征并入权利要求1`。
+- **根因 / Root cause**: 该句落在"二、关于权利要求的修改"节内，`split_features` 按标点把它切成子句后，每一个存活子句都被当成"修改后权利要求的技术特征句"送去逐字比对——可它描述的是**修改动作**（哪一权项被并进来），本来就不该在原文里逐字存在。㊻/㊾ 修的是标题与引出标签，这一类"动作叙述句"是第三种非特征文本，仍然漏在核验范围内。
+- **修复 / Fix**: `is_declarative_meta` 增一条 `is_amendment_act`：同时出现【修改叙述主语】(本次修改/上述修改/如下修改) + 【合并动词】(并入/合并) + 【权项指代】(权利要求) 才判为元语句。三个条件缺一不可，避免把真含"并入"的技术特征句误放行。
+- **回归 / 负控**: `amendment_act_narration_is_meta_but_real_feature_still_checked` 一条同时钉两侧——叙述句不计数且不被标注，**同一段里真编造的特征句必须仍被抓到**（`unsupported_count==1` 且指向那句编造内容）；只放行不抓真问题的修法会在这里翻红。
+
+## [2026-10-31] 51 回填把已写实的「驳回决定发文日」当成缺失字段：同一字段补插成两行、两种日期形态
+- **严重程度 / Severity**: HIGH
+- **涉及文件 / Files**: `src/ai/letter_header.rs`（`header_line_value_range`）、`src/ai/response_pipeline.rs:1114`（`stage_e_assemble` 写标签的那一行）
+- **现象 / Symptom**: 复审请求书管线路径的产物信头里同时出现两行指同一字段的日期——`发文日：2026年07月10日`（回填补插的，通知书表头形态）与 `驳回决定发文日：2026-07-10`（管线自己写的，ISO 形态）。`meta.header_filled` 还把这次多余的补插计成"填了 1 处"，读者看到的是"系统补齐了一个缺失字段"，实际是系统自己造了个重复字段。
+- **根因 / Root cause**: 回填层的信头行识别只认**行首精确标签**（`发文日`/`发文日期`），而字段在成品里允许带文档限定语（`驳回决定发文日`、`通知书发文日`）。抽取层不受影响——它按"标记之后 40 字内找日期"走，`驳回决定发文日` 里含 `发文日` 因此早就抽得到；于是**同一个字段：抽取认得、回填认不得**，第②步"抽到但正文没有该标签行⇒补插"就被误触发。这类不对称（两层用不同的识别口径）是 ㊻ 的同族：㊻ 修的是"交给模型填"，这一条修的是"系统自己填重了"。
+- **修复 / Fix**: 把识别从"行首精确标签"改成"标签 + 至多 8 字的文档限定语"，并给限定语加两道硬门以免放宽变成滥认：①限定语里不得出现句读（`。，、；,;()（）【】[]！？…`）与空白——整行是句子时那个冒号属于句子，不属于字段；②限定语长度上限 8 字（`驳回决定`=4 通过，`根据通知书首页表头所载`=11 拒绝）。偏移量改按字符累加得出（`split_label_separator_value`），不新增 `&str[..]` 字节切片，避免为过守卫放宽基线。识别到之后，"值非空且不含 `【` 就绝不动"的既有纪律保证这行的真实值不被覆盖，`seen_keys` 保证不再补插。
+- **回归 / 负控 / Regression & Negative control**: 新单测两条。`rejection_review_date_line_is_the_same_field_and_gets_no_duplicate` 用管线实际版式（`申请号/发明名称/申请人/驳回决定发文日` 四行写实）断言 `matches("发文日：").count()==1`、`filled==0`、**整封信逐字等于输入**——修复前这三条同时翻红（实测 `left: 2`，产物里就摆着两行）。`sentence_with_a_colon_is_still_not_a_header_line` 钉住放宽的边界：四种带冒号的句子/超长限定语形态仍判不是信头行，同时正控断言 `发文日：…` 与 `驳回决定发文日：…` 两种表头写法都必须认。`cargo test --lib` 842 passed / 0 failed；`no_unsafe_byte_slice`、`no_case_data_in_repo`、`clippy --all-targets -D warnings` 全绿。
+- **已知边界（如实）**: ①条目序号与标签之间的顿号不是字段的一部分，所以 `一、发文日：…` **不认**——后果只是该字段可能被补插一行，不会改坏正文（写成断言钉住，不假装它被解决了）；②两行日期形态不同（`YYYY-MM-DD` 与 `YYYY年M月D日`）这件事本身没在本条修：回填层的纪律是"真实值一律不动"，统一格式需要决定以谁为准，属于另一个口径问题；③只放宽到 8 字限定语，更长的复合限定语（如带书名号的 `《驳回决定》发文日`，含书名号会被句读门拒掉）不认。
+- **预防 / Prevention**: ①**同一字段的识别口径必须只有一份**：抽取层与回填层若各写一套"这是什么字段"的判断，两层不一致时会表现成"数据明明有，却给成品加了重复行"这种比缺失更难发现的缺陷；②放宽匹配时同步写一条"仍然不认"的负控，并把边界形态用断言钉住而不是写在注释里；③补插类动作的前置条件是"该字段在正文里**不存在**"，而"不存在"必须由与识别相同的口径得出——否则计数与产物会一起说谎；④自家模板（`stage_e_assemble`）与识别层（`HEADER_LABELS`）是同一产品的两端，改一端要 grep 另一端。
+
+## [2026-10-31] 52 没核验也报"可交"：不修改答复书被整节当修改稿核验（7 处论述句零命中），以及 `skipped` 状态下 `submission_ready=true`
+- **严重程度 / Severity**: CRITICAL
+- **涉及文件 / Files**: `src/evidence_kernel/amendment_gate.rs`（`amendment_blocks`、`gate_submission_ready`、`gate_amendment_text`）
+- **现象 / Symptom**: 一封**明确声明不修改权利要求**的答复书，节标题按模板写「二、关于权利要求的修改」，门把本节之后到信末的整段当修改稿切句核验：`features=7 unsupported=7 degraded marks=7`，7 处全部是论述句（长度 11 / 5 / 42 字等），全信没有任何 `1.一种…` 权项正文、也没有 `修改后的权利要求N：` 引出标签。同一现象的另一半是反向的假绿灯：`status=skipped_no_amendment_section` 或 `skipped_no_original` 时 `submission_ready` 仍为 `true`——**没核验**被读成**核验通过**。
+- **根因 / Root cause**: 两处各自成立。①`amendment_blocks()` 只做**起点定位**：找到 `关于权利要求的修改` 这个标题行就把整块当修改稿交给特征切分，从不回答"这一节里到底有没有修改稿"。而该标题同时用于"我改了什么"和"我为什么不改"，后者在审查意见答复里是常见形态。②`gate_submission_ready(status)` 写成 `status != Degraded`，于是三种**未执行**状态（未定位到修改稿 / 缺原始文本 / 定位到但抽不出特征）都被算成"可交"。调用方只看布尔值，不会回头去看 status，假绿灯就这样一路走到产物。
+- **修复 / Fix**: ①新增 `is_no_amendment_section`，双条件判"本节无修改稿"：节内有明确的不修改声明（`不修改权利要求` / `不作修改` / `不进行修改` …）**且** 节内既无 `修改后的权利要求N：` 引出标签、也无 `1.一种…` / `2.根据…` 式编号权项行；命中则从块集合里剔除（剔空 ⇒ `NoAmendment`）。只满足声明、却贴了权项正文的节**必须继续核验**。②`gate_submission_ready` 改为 `matches!(status, Verified)`。③定位到块但 `evals` 为空（抽出 0 个特征）也按 `NoAmendment` 处理，不再报 `Verified`。
+- **回归 / 负控 / Regression & Negative control**: `no_amendment_declaration_is_not_treated_as_amendment_draft` 钉真实形态（`NoAmendment`、`unsupported=0`、正文零标注、`submission_ready=false`）；`declaration_of_no_amendment_does_not_hide_an_actual_claim_draft` 是负控（同一节里既说"不修改权利要求2"又贴了修改后的权利要求1 ⇒ **不得**跳过，`checked_feature_count>0`）；`unverified_statuses_are_never_submission_ready` 钉三种状态（`NoAmendment`/`NoOriginal` ⇒ false，`Verified` ⇒ true）。
+- **真实产物 / Real artifact**: 同一封不修改答复书，修复前 `degraded/unsupported=7/ready=false`，修复后 `skipped_no_amendment_section/0/ready=false`，正文无标注。修复前"读数不可交、产物却在正文里标了 7 处未证实"，两样都在误导读者。
+- **预防 / Prevention**: ①**"查过且通过"与"没查"必须是两个状态**，状态机里任何"未执行"分支的默认值都不能是绿色；布尔字段要由"是否真的执行过"推导，而不是由"有没有报错"推导。②定位类判据要回答"**对象存在吗**"，不能只回答"起点在哪"——后者会把"标题"当成"内容"。③放宽一个判据时必须同时写负控（本例：声明不修改 + 真有修改稿），否则"跳过"会变成新的漏检通道。
+
+## [2026-10-31] 53 门不幂等（重跑把标注算成新零命中）＋ 横幅报"特征句条数"而正文只有"标注处数"
+- **严重程度 / Severity**: HIGH
+- **涉及文件 / Files**: `src/evidence_kernel/amendment_gate.rs`（`gate_amendment_text`、`banner`、`AmendmentGateResult`）
+- **现象 / Symptom**: ①把**已经过门的产物**再喂一次，`UNVERIFIED_MARK` 从 28 处变 56 处（真实案件实测）：标注是在特征句**之前**插入的，重跑时标注连同被标注的句子一起被切成新特征句，而原文里当然没有这句，于是一处变两处。②同一次真实运行里，`amendment_unsupported=24` 而正文只有 **17** 处标注：两条特征句从同一位置开始（或一条是另一条的前缀）时插入位置被 `dedup` 合并，横幅却仍按"条数"报 24。读者数一遍得到 17，会以为计数坏了——而"数不出来"的表等于没有表。
+- **根因 / Root cause**: ①门的入口把"用户文本"和"本函数上一轮的产物"当同一类输入；本函数写进正文的东西没有在入口被剥离，于是自己吃自己。②计数取自**中间量**（`unsupported.len()`）而不是**成品**（`gated.matches(MARK).count()`）；插入次数、命中条数、正文处数三者本就不相等，报错哪个都会让读者对不上。这正是 errors.md ㊶④（展示数与产物数用同一次统计口径）在门内部的复发。
+- **修复 / Fix**: ①新增 `strip_prior_gate_artifacts`，入口先剥掉本门自己产出的工件（`UNVERIFIED_MARK`、`> ⚠️ 修改稿核验阻断` 横幅行、`> ℹ️/⚠️ 修改稿逐字核验` 说明行），再定位与核验；幂等由 `gate(gate(x).gated_text)` 与 `gate(x)` 读数相等来保证。②新增 `marked_count` 字段，值取**成品里数出来的**处数；横幅在两者不等时补一句「同一位置上重叠的命中合并为一处标注，正文实际标注 N 处」；meta 同步增加 `amendment_marked`。
+- **回归 / 负控 / Regression & Negative control**: `gate_is_idempotent_over_its_own_output`（重跑后 `unsupported_count` 与正文标注处数都必须与首跑相同，旧行为是 1 → 2）；`stale_banner_is_stripped_so_the_artifact_stops_contradicting_itself`（首行旧横幅必须被剥掉，否则产物与新结论互相矛盾）；`marked_count_is_the_number_a_reader_can_count` 与既有 `banner_and_body_marker_counts_agree` 都改为断言「横幅 + 正文的字面量数 == `marked_count` == 正文里数得出来的处数」。
+- **真实产物 / Real artifact**: v10 真跑（合并后的代码）同一封信：`amendment_unsupported=24`、正文 17 处标注、`待填写=0`、`未提取=1`（签署日）、`header_known=5 / header_filled=0`。修复后横幅报「24 处特征句……正文实际标注 17 处」，读者能数得出来。
+- **预防 / Prevention**: ①**门要对"自己的输出"负责**：任何会在正文里写下标记/横幅的环节，其入口都必须能把这些标记剥回去，否则"重跑一次"就是一条改变结论的路径。②凡是"报给读者看的数字"，取数点必须在**成品**上，不能在中间集合上；中间量与成品量不相等是常态，不是异常。③两个数不相等时**两个都报出来并且说明为什么**，不要挑一个看起来整齐的。
+
+## [2026-10-29] 57 跨进程迁移竞态：幂等检查在事务外等于没有幂等（#60）
+- **严重程度 / Severity**: HIGH（并发启动同一库 ⇒ 后到进程 `duplicate column` 崩溃退出；也是 #30「部分端点无响应」的首要候选解释）
+- **涉及文件**: `src/db/migrations.rs`（`run_migration_tx` / 各迁移分支的 `column_exists`）
+- **现象 / Symptom**: PR #53 纯文档提交 CI `Tests` 假红（`duplicate column name: technical_problem` → server 15s 不 listen → 超时）；生产双开实例同理。
+- **根因 / Root cause**: 幂等保护「先查后改」——`column_exists`（PRAGMA table_info）在迁移事务**外**执行，检查与 ALTER 之间没有跨进程原子性：两个进程同时看到「列缺失」，各自把 ALTER 排进批次，先到成功、后到 duplicate。单进程事务原子性（#13）解决不了跨进程窗口。
+- **修复 / Fix**: `run_migration_tx` 改 `BEGIN IMMEDIATE`（先取库写锁）+ 逐语句执行 + `duplicate column name` 幂等容忍（败者重放锁外陈旧语句时逐条跳过）+ 版本不回退（目标版本高于库内才覆写）。确定性负控：以「胜者先完成同一 ALTER、败者重放同批语句」建模竞态败者，修复前 `duplicate column name: technical_problem` FAILED（与 issue 现象逐字一致），修复后 ok；真并发冒烟两线程同库完整迁移双 Ok 收敛。
+- **预防 / Prevention**: ①「先查后改」型幂等保护跨进程一律不算数——检查必须与变更同锁（BEGIN IMMEDIATE）或把变更写成可容忍重复的形态；②测试里确定性建模竞态败者（另一连接先完成同一变更）比真并发压测更可证伪且不 flaky；③rusqlite `Connection::open` 默认 busy_timeout=0，涉及锁竞争的路径必须显式设等待（生产已由 `Database::init` 的 `PRAGMA busy_timeout=5000` 覆盖）。
+- **提交 / Commit**: 见 #60 修复 PR（分支 fix/migration-race-guard）。
+## [2026-10-31] 58 多 agent 并行构建的本地验证死结：exe 锁 + 双 target 磁盘耗尽
+## [2026-10-30] 60 批量转换 Rust handler 签名：正则替换会吃掉 match 臂与跨行 json!
 - **严重程度 / Severity**: MEDIUM（3 处 mismatched delimiter + 8 处类型不匹配，靠编译器逐个兜出来）
 - **涉及文件**: `src/routes/ai.rs`（12 个 handler 的 200+error → 400 改造，#102）
 - **现象 / Symptom**: ①`Err(e) => Json(json!(...))` 的 match 臂值形态被括号配平脚本切坏（"son(json!" 少壳）；②adversarial 的跨行 `Json(json!({...}))` 尾表达式被包后函数闭括号 `}` 被吞（unclosed delimiter）；③`impl IntoResponse` 签名下 Ok/Err 臂类型必须一致——Ok 臂漏包导致 8 处 E0308。
@@ -1502,4 +1549,23 @@
 - **根因 / Root cause**: 多个 agent 并行共享 D:/cargo-target（构建锁排队）+ 各自 server 进程锁二进制 + 646G 盘被多 agent 构建迭代填满——本地全量验证在多 agent 并行期是稀缺资源。
 - **修复 / Fix**: ①按 commit-first 纪律：定向验证（改动模块单测 + lib 全量 + fmt/clippy 绿）+ push 由 CI 兜底全量；②独立 target 用 `-j 1` 降链接峰值；③每轮验证前清 `incremental/`（可再生）。
 - **预防 / Prevention**: ①多 agent 并行期，本地全量验证优先顺序：定向单测 → lib 全量 → 集成测试（依赖 exe 链接，最容易被锁挡）→ CI 兜底；②磁盘监控应在构建前（<3G 即清 incremental）而不是链接失败后；③server 进程持有共享 target 二进制时，任何人的集成测试都过不去——起 server 用独立 target 或结束即回收。
+- **提交 / Commit**: 见 #101 修复 PR（分支 fix/search-per-item-matched-fields）。
+## [2026-10-31] 56 括号编号的修改稿被整节跳过核验：`（3）一种…` 不算"有修改稿"
+- **严重程度 / Severity**: HIGH
+- **涉及文件**: `src/evidence_kernel/amendment_gate.rs`（`has_claim_draft_text`）
+- **现象**: 一封声明"本次对独立权利要求1不作修改"、但正文确实贴了 `（3）一种…` 修改稿的答复书，被判为"本节没有修改稿"（`skipped_no_amendment_section`），整节**静默跳过**核验。旧码实测：`features=0 unsupported=0 ready=false`；修复后同一文本 `features=4 unsupported=1`。
+- **根因**: `has_claim_draft_text` 只认两种编号形态——`1.一种…` / `2.根据…`（阿拉伯数字 + 点/顿号）与 `修改后的权利要求N：` 引出标签。括号编号 `（3）一种…` / `(3)一种…` 不在判据里，于是"声明不修改 + 括号编号"同时出现时被判无修改稿。这是 #160 那句"宁可误红不要漏检"的反例：判据收窄时把一种真实编号写法漏在了外面。
+- **修复**: 正则增加第三条分支 `[（(][0-9一二三四五六七八九十]{1,3}[）)]\s*(?:一种|根据)`；新增两条单测（括号编号必须被识别；`3.一种…` 仍要识别，防止改动弄坏常见形态）。
+- **回归 / 负控**: `no_amendment_declaration_with_parenthesised_claim_draft_still_verified`（正控：必须进核验且 `checked_feature_count>0`）、`plain_numbered_claim_draft_is_still_recognised`（负控：常规点号编号不受影响）。红通道用**修复前的二进制**跑同一段文本：`skipped_no_amendment_section`；修复后 `degraded/features=4`。
+- **预防**: ①"章节存在性"判据要把**同一种东西的所有常见写法**枚举齐（点号/顿号/括号/中文数字），只举一种就会在另一种上静默漏检；②这类判据的失败方向必须是**误红**（多核验一段散文）而不是**漏检**（整节不查）——本条的修复方向即如此；③第三方复核提出的反例要逐条回代码验：本次三条里一条成立（本条）、一条是本 PR 已写明的已知边界、一条不成立（标记计数那条按实现不会出现 2）。
+
+## [2026-11-01] 59 核验门只查"新增超范围"，不查"删限定＝扩大保护范围"：真稿被删掉一个限定仍报 verified
+- **严重程度 / Severity**: CRITICAL
+- **涉及文件**: `src/evidence_kernel/amendment_gate.rs`（新增 `gate_amendment_text_with_current_claims` / `check_broadening` / `direction_note`）、`src/routes/ai.rs`（读取 `current_claims`，meta 增 `broadening_count`/`broadening_checked`）
+- **现象**: 一份"最小缩限"修改稿把现权1 里的「隔离结构」整句删掉了，门报 `verified / unsupported=0 / submission_ready=true`。逐字核验对此完全无感——它只问"新增的句子在不在原文里"，而删掉的内容当然不在原文里"新增"。删掉一个限定特征＝保护范围扩大（细则第57条第3款/第33条意义上不可接受）。
+- **根因**: 门只有两份输入（`letter` 与 `original_application`），缺第三份「审查所针对的那版权项」。前者是上界（新增不得超范围），后者是下界（修改不得放宽），而 `current_claims` 从来没进过判据。产品手上其实有这条链路的另一半信息（答复是针对哪版权项作的），只是没接。
+- **修复**: ①新入口 `gate_amendment_text_with_current_claims(letter, original, current_claims)`：按"独立权项出现顺序一一对应"，拿现权项每条限定去修改后的独立权项里找；找不到即记 `broadened`（删除或改写）；独立权项数量增加也记为扩范围。②`status` 在 `broadened` 非空时强制 `Degraded`，`submission_ready=false`。③缺现权项文本时不静默：`current_claims_checked=false` 且 `direction_note()` 输出可见的「扩范围方向未核验」。④路由从请求读可选字段 `current_claims`，meta 增 `broadening_count` / `broadening_checked`。
+- **回归 / 负控 / Regression & Negative control**: 三条单测：`deleting_a_limitation_is_flagged_as_broadening`（删限定 ⇒ `broadened` 非空、`Degraded`、`ready=false`）、`adding_a_limitation_alone_is_not_broadening`（只加不减 ⇒ 不报、`checked=true`）、`missing_current_claims_is_visible_not_silent`（缺输入 ⇒ `checked=false` 且说明可见）。**真实产物验收**：把 B-1 稿与合成的"含隔离结构的现权项"一起喂进去，读数由 `verified/0/ready=true` 变为 `degraded/0/ready=false/broadened=1/checked=true`；不给现权项时 `checked=false`。
+- **已知边界（如实）**: ①**现权项文本的产品侧来源还没有**：前端/导入流程目前不产出这个字段，所以线上实际仍是 `checked=false`（可见但未核验）。要真正生效，导入流程必须把"已备案的权利要求书"落库。②判定是"独立权项按顺序一一对应 + 限定的归一化子串包含"，改写型修改会被报成"删除或改写"（属安全侧误红，交人判）。③`submission_ready` 仍只表示"逐字核验通过"；扩范围是否核验看 `broadening_checked`，两者不合并成单一布尔。
+- **预防**: ①**范围校验有上下界**：只查"新增超范围"必然漏掉"删限定放宽"，两头都要有输入、都要有判据；②判据缺输入时，正确做法是**把"没查"写进产物**（本条 `direction_note`），而不是静默退化成单向；③凡是"要不要交"的结论，都必须能指出它由哪几项检查合成——本条的 `ready × checked` 就是为此保留两个维度。
 - **提交 / Commit**: 见 #102 修复 PR（分支 fix/ai-endpoint-validation-status）。

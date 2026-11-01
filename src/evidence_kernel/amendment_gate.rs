@@ -98,6 +98,21 @@ pub struct AmendmentGateResult {
     pub gated_text: String,
     pub unsupported: Vec<UnsupportedFeature>,
     pub unsupported_count: usize,
+    /// 成品文本里 [`UNVERIFIED_MARK`] 的**实际处数**。
+    ///
+    /// 与 `unsupported_count` 平行而非相等：两条特征句若从同一位置开始（或一条是另一条的前缀），
+    /// 标注会合并成一个位置，`unsupported_count` 仍逐条计数。真实案件实测 24 条特征句 →
+    /// 正文 17 处标注。横幅与 meta 必须报"能数出来"的那个数，否则读者数一遍就对不上
+    /// （errors.md ㊶④：展示数与产物数用同一次统计口径）。
+    pub marked_count: usize,
+    /// 扩范围方向（删限定 / 改限定）的检查结果：`text` 是被删掉的现权项限定句。
+    ///
+    /// 逐字核验只回答「新增内容是否超范围」（专利法第33条的上界）；**删掉一个限定
+    /// ＝扩大保护范围**是另一头，必须拿"审查所针对的那版权项"当基准（issue #159）。
+    pub broadened: Vec<UnsupportedFeature>,
+    /// 是否真的做了扩范围方向检查。缺现权项文本时为 `false`——此时**必须在产物里可见**
+    /// （[`AmendmentGateResult::direction_note`]），不能静默退化成只查单向。
+    pub current_claims_checked: bool,
     /// 被替换为降级标注的"明确记载"类断言条数
     pub assertions_downgraded: usize,
     pub amended_claim_count: usize,
@@ -117,12 +132,38 @@ impl AmendmentGateResult {
             gated_text: text.to_string(),
             unsupported: Vec::new(),
             unsupported_count: 0,
+            marked_count: 0,
+            broadened: Vec::new(),
+            current_claims_checked: false,
             assertions_downgraded: 0,
             amended_claim_count: 0,
             checked_feature_count: 0,
             corpus_claims: 0,
-            submission_ready: status != GateStatus::Degraded,
+            submission_ready: gate_submission_ready(status),
         }
+    }
+
+    /// 扩范围方向的可见说明：**不通过**与**没核验**两种情况都要写出来。
+    ///
+    /// 逐字核验通过并不等于"可以交"：如果修改把现权项的某个限定删掉了，保护范围反而变宽，
+    /// 而逐字核验对此完全无感（删掉的内容当然不在原文里"新增"）。
+    pub fn direction_note(&self) -> String {
+        if !self.broadened.is_empty() {
+            return format!(
+                "> ⚠️ 修改稿扩范围校验未通过（broadening_findings={}）：修改后的独立权项缺少现权项的部分限定；删除或改写限定等于扩大保护范围，不可直接递交。
+
+",
+                self.broadened.len()
+            );
+        }
+        if !self.current_claims_checked
+            && matches!(self.status, GateStatus::Verified | GateStatus::Degraded)
+        {
+            return "> ℹ️ 修改稿扩范围方向未核验：未提供「审查所针对的那版权项」文本，本次只做了「新增内容是否超范围」（专利法第33条）的单向核验。
+
+".to_string();
+        }
+        String::new()
     }
 
     /// 阻断横幅（复用 M2-C 横幅形态：`> ⚠️` blockquote，随正文首部一并下发）。
@@ -130,13 +171,24 @@ impl AmendmentGateResult {
     /// 横幅里**不得出现** [`UNVERIFIED_MARK`] 的字面量（含 `【】`）：交付文本的标记数是
     /// `横幅 + 正文`，横幅自带一次字面量就会让读者数出 N+1 个标记、与
     /// `amendment_unsupported=N` 对不上（真实案件实测 136 vs 137）。这里改用「」描述。
+    ///
+    /// 同时把「特征句条数」与「正文标注处数」分开报：两条特征句从同一位置开始时标注会合并，
+    /// 真实案件实测 24 条 → 17 处。只报 24 会让读者数出 17，以为计数坏了。
     pub fn banner(&self) -> String {
         if self.unsupported_count == 0 {
             return String::new();
         }
+        let merge_note = if self.marked_count == self.unsupported_count {
+            String::new()
+        } else {
+            format!(
+                "（同一位置上重叠的命中合并为一处标注，正文实际标注 {} 处）",
+                self.marked_count
+            )
+        };
         format!(
-            "> ⚠️ 修改稿核验阻断（amendment_unsupported={}）：本稿修改后的权利要求中有 {} 处特征句在原始申请文本（说明书 + 权利要求书）零命中，已就地逐处标注「未证实：该措辞在原始文本零命中」；相关「明确记载 / 来源于原说明书」类断言已降级。提交前必须逐处核对专利法第33条（修改超范围）。\n\n",
-            self.unsupported_count, self.unsupported_count
+            "> ⚠️ 修改稿核验阻断（amendment_unsupported={}）：本稿修改后的权利要求中有 {} 处特征句在原始申请文本（说明书 + 权利要求书）零命中，已就地逐处标注「未证实：该措辞在原始文本零命中」{}；相关「明确记载 / 来源于原说明书」类断言已降级。提交前必须逐处核对专利法第33条（修改超范围）。\n\n",
+            self.unsupported_count, self.unsupported_count, merge_note
         )
     }
 
@@ -164,10 +216,52 @@ impl AmendmentGateResult {
     }
 }
 
+/// 剥掉本门自己产出的工件：就地标注、阻断横幅、未核验说明横幅。
+///
+/// 为什么必须在入口做：这些工件是**本函数写进正文**的东西。把它们当成用户文本再核验一次，
+/// 就会出现两种畸形——①标注被切成特征句，一处零命中变两处（28 → 56）；②旧横幅留在产物里，
+/// 与新一次核验的结论互相矛盾（门说 verified，首行还写着"核验阻断"）。issue #158。
+fn strip_prior_gate_artifacts(text: &str) -> String {
+    let without_marks = text.replace(UNVERIFIED_MARK, "");
+    let mut out = String::with_capacity(without_marks.len() + 1);
+    for line in without_marks.split('\n') {
+        let t = line.trim_start();
+        if t.starts_with("> ⚠️ 修改稿核验阻断")
+            || t.starts_with("> ℹ️ 修改稿逐字核验")
+            || t.starts_with("> ⚠️ 修改稿逐字核验")
+        {
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    if out.ends_with('\n') {
+        out.pop();
+    }
+    out
+}
+
 /// 门主入口：核验并返回就地标注后的文本。
 ///
 /// 纯函数、零 AI、零网络（与内核 ADR-1 一致）。
 pub fn gate_amendment_text(letter: &str, original_application: &str) -> AmendmentGateResult {
+    gate_amendment_text_with_current_claims(letter, original_application, "")
+}
+
+/// 带「审查所针对的那版权项」的入口：除了查新增超范围，还查**删限定/改限定**（扩范围）。
+///
+/// `current_claims` 为空 ⇒ 只做单向核验，但 `current_claims_checked=false` 会把这件事
+/// 写进产物（[`AmendmentGateResult::direction_note`]）——不静默。
+pub fn gate_amendment_text_with_current_claims(
+    letter: &str,
+    original_application: &str,
+    current_claims: &str,
+) -> AmendmentGateResult {
+    // 幂等入口：先剥掉本函数自己上一轮的产出（就地标注 + 阻断/说明横幅），再核验。
+    // 不剥的话，重跑时标注本身会被切成新的特征句再拿去比对，一处变两处（真实案件实测
+    // 28 → 56）；旧横幅还会留在产物里跟新结论打架（issue #158）。
+    let cleaned = strip_prior_gate_artifacts(letter);
+    let letter = cleaned.as_str();
     if letter.trim().is_empty() {
         return AmendmentGateResult::empty(GateStatus::NoAmendment, letter);
     }
@@ -184,10 +278,12 @@ pub fn gate_amendment_text(letter: &str, original_application: &str) -> Amendmen
 
     let mut evals: Vec<FeatureEval> = Vec::new();
     let mut claim_count = 0usize;
+    let mut amended_claims: Vec<AmendedClaim> = Vec::new();
     for (bi, (start, end)) in blocks.iter().enumerate() {
         let block_text = letter.get(*start..*end).unwrap_or("");
         for claim in extract_claims(block_text) {
             claim_count += 1;
+            amended_claims.push(claim.clone());
             for raw in split_features(&claim.text) {
                 let needle = strip_legal_variation(&raw);
                 if needle.chars().count() < MIN_FEATURE_CHARS {
@@ -212,17 +308,10 @@ pub fn gate_amendment_text(letter: &str, original_application: &str) -> Amendmen
     }
 
     if evals.is_empty() {
-        return AmendmentGateResult {
-            status: GateStatus::Verified,
-            gated_text: letter.to_string(),
-            unsupported: Vec::new(),
-            unsupported_count: 0,
-            assertions_downgraded: 0,
-            amended_claim_count: claim_count,
-            checked_feature_count: 0,
-            corpus_claims: claim_section_count(&corpus),
-            submission_ready: true,
-        };
+        // 定位到了块，却一句可核验的特征都没抽出来 ⇒ 一句也没核验。
+        // 这不叫 verified（"核验通过"至少意味着核验过一句），按未核验处理：
+        // 读者会从 skip note 读到"本次未做第33条逐字核验"，而不是从一个布尔值读出结论。
+        return AmendmentGateResult::empty(GateStatus::NoAmendment, letter);
     }
 
     // 零命中 → 就地插入降级标注（保留原句；按块内顺序定位，重复句逐处标注）
@@ -281,10 +370,29 @@ pub fn gate_amendment_text(letter: &str, original_application: &str) -> Amendmen
     } else {
         GateStatus::Degraded
     };
+    // 计数口径：标注处数**从成品里数**，不是把插入次数累加。降级替换可能吞掉一处标注，
+    // 同一位置的重复命中会被合并——这两种情况下"插入了几次"与"正文里有几处"不相等，
+    // 读者只会数正文。
+    let marked_count = gated.matches(UNVERIFIED_MARK).count();
+    // 扩范围方向：拿"审查所针对的那版权项"当基准，逐条确认现权项的限定还在（issue #159）。
+    // 缺现权项文本 ⇒ 不做，但把"没做"这件事标出来（current_claims_checked=false）。
+    let (broadened, current_claims_checked) = if current_claims.trim().is_empty() {
+        (Vec::new(), false)
+    } else {
+        (check_broadening(current_claims, &amended_claims), true)
+    };
+    let status = if !broadened.is_empty() {
+        GateStatus::Degraded
+    } else {
+        status
+    };
     AmendmentGateResult {
         status,
         gated_text: gated,
         unsupported_count: unsupported.len(),
+        marked_count,
+        broadened,
+        current_claims_checked,
         unsupported,
         assertions_downgraded,
         amended_claim_count: claim_count,
@@ -294,8 +402,118 @@ pub fn gate_amendment_text(letter: &str, original_application: &str) -> Amendmen
     }
 }
 
+/// 提交度维度只看"核验过且全部通过"。
+///
+/// 曾经写成 `status != Degraded`，于是**没核验**（未定位到修改稿 / 缺原始文本）也会
+/// 返回 `submission_ready=true`——"未发现违规"被当成了"核验通过"，是假绿灯里最难察觉
+/// 的一种（调用方只看布尔值，不会去看 status）。三种未核验状态一律 `false`，
+/// 让读者从 skip note 里读到"为什么没核验"，而不是从 `true` 里读到一个不存在的结论。
 fn gate_submission_ready(status: GateStatus) -> bool {
-    !matches!(status, GateStatus::Degraded)
+    matches!(status, GateStatus::Verified)
+}
+
+/// 扩范围方向检查：现权项（审查所针对的那版）的每条限定，必须仍出现在修改后的独立权项里。
+///
+/// 逐字核验只回答「新增内容是否超范围」；`删掉一个限定＝扩大保护范围` 是另一头，
+/// 必须拿现权项当基准（issue #159）。判定按"独立权项按出现顺序一一对应"，
+/// 这是答复书的常规形态（改动集中在独立权项）；对应不上的，宁可报出来让人看。
+fn check_broadening(current_claims: &str, amended: &[AmendedClaim]) -> Vec<UnsupportedFeature> {
+    // 现权项通常写成「1. 一种…」，而 extract_claims 只认「权利要求N」，所以这里用宽松解析。
+    let current = parse_claims_loose(current_claims);
+    let cur_indep: Vec<&AmendedClaim> = current
+        .iter()
+        .filter(|c| !is_dependent_claim(&c.text))
+        .collect();
+    let new_indep: Vec<&AmendedClaim> = amended
+        .iter()
+        .filter(|c| !is_dependent_claim(&c.text))
+        .collect();
+    let mut out = Vec::new();
+    if new_indep.len() > cur_indep.len() {
+        out.push(UnsupportedFeature {
+            claim_no: "-".to_string(),
+            text: format!("独立权项数量 {} → {}", cur_indep.len(), new_indep.len()),
+            reason: "独立权项数量增加＝保护范围扩大".to_string(),
+            best_score: 0.0,
+        });
+    }
+    for (i, c) in cur_indep.iter().enumerate() {
+        let Some(new) = new_indep.get(i) else {
+            out.push(UnsupportedFeature {
+                claim_no: c.claim_no.clone(),
+                text: "修改后找不到对应的独立权项".to_string(),
+                reason: "现权项的独立权项在修改稿里缺失".to_string(),
+                best_score: 0.0,
+            });
+            continue;
+        };
+        let hay = strip_legal_variation(&new.text);
+        for raw in split_features(&c.text) {
+            let needle = strip_legal_variation(&raw);
+            if needle.chars().count() < MIN_FEATURE_CHARS {
+                continue;
+            }
+            if !hay.contains(&needle) {
+                out.push(UnsupportedFeature {
+                    claim_no: c.claim_no.clone(),
+                    text: raw,
+                    reason:
+                        "现权项的这个限定在修改后的独立权项里找不到（删除或改写＝可能扩大保护范围）"
+                            .to_string(),
+                    best_score: 0.0,
+                });
+            }
+        }
+    }
+    out
+}
+
+/// 宽松权项解析：同时接受「权利要求1：…」与「1. 一种…」两种行首形态（现权项用后者）。
+fn parse_claims_loose(text: &str) -> Vec<AmendedClaim> {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| {
+        regex::Regex::new(
+            r"(?m)^[ \t*#\-]*(?:修改后的)?(?:权利要求\s*([0-9]{1,3})|([0-9]{1,3})\s*[.．、])\s*",
+        )
+        .unwrap_or_else(|e| panic!("宽松权项正则常量失败即 bug: {e}"))
+    });
+    // 存 match 的**结束**位置：编号本身不进正文，否则「1.一种…」里的「1.」会被当成限定去比对。
+    let heads: Vec<(usize, String)> = re
+        .captures_iter(text)
+        .map(|c| {
+            let num = c
+                .get(1)
+                .or_else(|| c.get(2))
+                .map(|m| m.as_str().to_string());
+            (
+                c.get(0).map(|m| m.end()).unwrap_or(0),
+                num.unwrap_or_default(),
+            )
+        })
+        .collect();
+    let mut out = Vec::new();
+    for i in 0..heads.len() {
+        let end = if i + 1 < heads.len() {
+            heads[i].0
+        } else {
+            text.len()
+        };
+        let start = heads[i].0;
+        // 下一段的起点是"下一行的行首"，本段到此为止；两端都必须是字符边界。
+        if let Some(body) = text.get(start..end.max(start)) {
+            out.push(AmendedClaim {
+                claim_no: heads[i].1.clone(),
+                text: body.to_string(),
+            });
+        }
+    }
+    out
+}
+
+/// 从属权项的判据：正文开头出现引用型引导语。只看前 40 字，避免被权项里的长描述干扰。
+fn is_dependent_claim(text: &str) -> bool {
+    let head: String = text.chars().take(40).collect();
+    head.contains("根据权利要求") || head.contains("如权利要求") || head.contains("按照权利要求")
 }
 
 struct FeatureEval {
@@ -393,8 +611,58 @@ pub fn amendment_blocks(text: &str) -> Vec<(usize, usize)> {
         }
         merged.push((s, e));
     }
+    // 「本节只是在说明为什么不修改」：定位到标题不等于有修改稿（issue #160）。
+    // 只做"起点定位"会把整个论述小节当修改稿，整段论述被切句去和原文逐字比对，
+    // 全部零命中，一封合法的"不修改"答复书因此被压成不可交。
+    merged.retain(|(s, e)| !is_no_amendment_section(text, *s, *e));
     merged
 }
+
+/// 本节是否"声明不修改、且确实没有贴修改稿"。
+///
+/// 判据必须双向，缺一不可：
+/// ① 节内有明确的不修改声明（`不修改权利要求` / `不作修改` / `不进行修改` …）；
+/// ② 节内**既没有** `修改后的权利要求N：` 这类引出标签，**也没有** `1.一种…` /
+///     `2.根据…` 式的编号权项行。
+///
+/// 只满足①不满足②的文本（声明不修改却又贴了权项正文）必须继续走核验——
+/// 那是"改了一部分"，不是"没改"。
+fn is_no_amendment_section(text: &str, start: usize, end: usize) -> bool {
+    let Some(body) = text.get(start..end) else {
+        return false;
+    };
+    if !NO_AMENDMENT_DECLARATIONS
+        .iter()
+        .any(|marker| body.contains(marker))
+    {
+        return false;
+    }
+    !has_claim_draft_text(body)
+}
+
+/// 节内是否出现"修改稿正文"的形态。命中任一条即认为本节带修改稿。
+fn has_claim_draft_text(body: &str) -> bool {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| {
+        // ① `修改后的权利要求1：` 引出标签；② `1.一种…` / `2.根据…` 编号权项行；
+        // ③ `（3）一种…` 括号编号（复核发现：漏这条会把真修改稿整节跳过——宁可误红）
+        regex::Regex::new(
+            r"(?m)^[\s#>*\-•]*(?:修改后的?权利要求\s*[0-9一二三四五六七八九十]{0,4}\s*[：:]|[0-9]{1,2}\s*[.．、]\s*(?:一种|根据)|[（(][0-9一二三四五六七八九十]{1,3}[）)]\s*(?:一种|根据))",
+        )
+        .unwrap_or_else(|e| panic!("修改稿形态正则常量失败即 bug: {e}"))
+    });
+    re.is_match(body)
+}
+
+/// "本次不修改权利要求"类声明的词面。只用于①，必须与 [`has_claim_draft_text`] 一起判。
+const NO_AMENDMENT_DECLARATIONS: &[&str] = &[
+    "不修改权利要求",
+    "未修改权利要求",
+    "不作修改",
+    "不进行修改",
+    "不对权利要求进行修改",
+    "不涉及权利要求修改",
+];
 
 /// 引号内权项全文的正则（单一出处，`amendment_blocks` 与 `extract_claims` 共用）。
 ///
@@ -538,6 +806,7 @@ fn regex_section_heading() -> &'static regex::Regex {
     })
 }
 
+#[derive(Clone)]
 struct AmendedClaim {
     claim_no: String,
     text: String,
@@ -663,6 +932,25 @@ fn is_declarative_meta(fragment: &str) -> bool {
         || fragment.contains("修改依据")
         || fragment.contains("修改理由")
         || fragment.contains("修改要点")
+        || is_amendment_act(fragment)
+}
+
+/// 叙述"本次做了哪种修改"的句子不是技术特征句。
+///
+/// 真实产物形态：`本次修改系将原权利要求2的附加技术特征并入权利要求1` —— 它描述的是
+/// **修改动作本身**（把哪一权项并进来），不是并入后权利要求里的技术内容；拿去和原始
+/// 申请文本做逐字比对必然零命中，于是把一份本来达标的稿子压成 `submission_ready=false`。
+///
+/// 判据要求三件事同时出现，避免误放行真特征句：
+/// ①修改叙述主语（本次/上述/如下修改）；②合并类动词（并入/合并）；③权项指代（权利要求）。
+/// 纯技术特征句不会自带"本次修改系将…"这种主语。
+fn is_amendment_act(fragment: &str) -> bool {
+    let says_amend = fragment.contains("本次修改")
+        || fragment.contains("上述修改")
+        || fragment.contains("如下修改");
+    let says_merge = fragment.contains("并入") || fragment.contains("合并");
+    let refers_claim = fragment.contains("权利要求");
+    says_amend && says_merge && refers_claim
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1156,6 +1444,33 @@ mod tests {
     }
 
     #[test]
+    fn amendment_act_narration_is_meta_but_real_feature_still_checked() {
+        // 真实形态（B-1 整封复跑时抓到）：说明"本次把权2并入权1"的句子描述的是修改动作，
+        // 不是修改后权利要求里的技术特征；它进了逐字核验就会把达标的稿子压成不可交。
+        let letter = "\
+## 二、关于权利要求的修改\n\n\
+修改后的权利要求1：\n\
+一种物料输送装置，包括机架（1），机架（1）上设有输送带（2）。\n\
+本次修改系将原权利要求2的附加技术特征并入权利要求1\n\
+机架侧面还固定有气动夹爪组件与压力传感器\n";
+        let r = gate(letter);
+        assert_eq!(
+            r.unsupported_count,
+            1,
+            "叙述句不该计数、真编造特征句必须仍被抓到： {:?}",
+            r.unsupported
+                .iter()
+                .map(|u| u.text.chars().count())
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            !r.gated_text.contains("】本次修改系将"),
+            "修改动作叙述句不得被就地标注: {}",
+            r.gated_text
+        );
+    }
+
+    #[test]
     fn supported_features_are_not_marked() {
         let letter = "## 二、关于权利要求的修改\n\n修改后的权利要求1：\n一种物料输送装置，包括机架（1），机架上设有输送带（2）。\n";
         let r = gate(letter);
@@ -1303,9 +1618,44 @@ mod tests {
         let delivered = format!("{}{}", r.banner(), r.gated_text);
         assert_eq!(
             delivered.matches(UNVERIFIED_MARK).count(),
-            r.unsupported_count,
+            r.marked_count,
             "横幅计数与正文标记数必须一致: {delivered}"
         );
+        assert_eq!(
+            r.marked_count,
+            r.gated_text.matches(UNVERIFIED_MARK).count(),
+            "marked_count 必须是从成品里数出来的"
+        );
+    }
+
+    #[test]
+    fn marked_count_is_the_number_a_reader_can_count() {
+        // 真实案件实测：24 条零命中特征句，正文只有 17 处标注（同位置重叠合并）。
+        // 只报条数时读者数一遍就对不上，会直接不信整张表。
+        let letter = "\
+## 二、关于权利要求的修改\n\n\
+修改后的权利要求1：\n\
+一种物料输送装置，包括机架（1），还包括虚构的磁悬浮导轨与虚构的量子阀。\n";
+        let r = gate(letter);
+        assert!(r.unsupported_count > 0);
+        assert_eq!(
+            r.marked_count,
+            r.gated_text.matches(UNVERIFIED_MARK).count(),
+            "marked_count 必须等于正文里能数出来的处数"
+        );
+        let delivered = format!("{}{}", r.banner(), r.gated_text);
+        assert_eq!(
+            delivered.matches(UNVERIFIED_MARK).count(),
+            r.marked_count,
+            "横幅里不得再带一次字面量"
+        );
+        if r.unsupported_count != r.marked_count {
+            assert!(
+                r.banner().contains("正文实际标注"),
+                "条数与处数不等时横幅必须说明: {}",
+                r.banner()
+            );
+        }
     }
 
     // ── issue #142：真实版式的修改稿（带前导序号小标题 + 跨行引号全文）──
@@ -1541,6 +1891,216 @@ mod tests {
         assert!(
             block.contains("不得输出任何「修改后的权利要求」正文"),
             "缺失时必须明令禁止编修改稿: {block}"
+        );
+    }
+
+    // ── issue #160：不修改答复书被整节当修改稿核验（真实案件撞出）──
+
+    #[test]
+    fn no_amendment_declaration_is_not_treated_as_amendment_draft() {
+        // 真实形态：标题按模板写「二、关于权利要求的修改」，本节讲的是"为什么不改"。
+        // 修复前：本节整段被当修改稿切句，论述句逐句零命中，合法稿被压成 graded/degraded。
+        let letter = "\
+## 二、关于权利要求的修改
+
+本次答复不修改权利要求。
+
+申请人认为，现行权利要求1已以电缸直行程限定与D1的区别。
+通知书认定的三项区别特征并非彼此独立的单项替换。
+";
+        let r = gate(letter);
+        assert_eq!(r.status, GateStatus::NoAmendment);
+        assert_eq!(r.unsupported_count, 0, "论述句不该被计成零命中特征");
+        assert_eq!(
+            r.gated_text.matches(UNVERIFIED_MARK).count(),
+            0,
+            "正文不得出现标注：{}",
+            r.gated_text
+        );
+        assert!(!r.submission_ready, "没核验就不能说可交");
+    }
+
+    #[test]
+    fn declaration_of_no_amendment_does_not_hide_an_actual_claim_draft() {
+        // 负控：声明"不修改权利要求2"但确实贴了修改后的权利要求1 ⇒ 必须继续核验，
+        // 不能因为句子里有"不修改"就整节跳过。
+        let letter = "\
+## 二、关于权利要求的修改
+
+本次不修改权利要求2，修改后的权利要求1：
+
+1.一种物料输送装置，机架（1）上设有输送带（2），机架（1）侧面固定有驱动电机（3）。
+";
+        let r = gate(letter);
+        assert_ne!(
+            r.status,
+            GateStatus::NoAmendment,
+            "带修改稿的节不得被判为无修改稿"
+        );
+        assert!(r.checked_feature_count > 0, "必须真的核验了特征句");
+    }
+
+    #[test]
+    fn unverified_statuses_are_never_submission_ready() {
+        // 假绿灯：`submission_ready` 曾经写成 `status != Degraded`，
+        // 于是"未定位到修改稿""缺原始文本"这两种**没核验**的状态都返回 true。
+        let no_section = gate("## 一、关于审查意见的答复\n\n申请人认为对比文件未公开该特征。\n");
+        assert_eq!(no_section.status, GateStatus::NoAmendment);
+        assert!(!no_section.submission_ready, "未定位到修改稿 ≠ 可交");
+
+        let no_original = gate_amendment_text(
+            "## 二、关于权利要求的修改\n\n修改后的权利要求1：\n一种物料输送装置，包括机架（1）。\n",
+            "",
+        );
+        assert_eq!(no_original.status, GateStatus::NoOriginal);
+        assert!(!no_original.submission_ready, "缺原始文本 ≠ 可交");
+
+        let verified = gate(
+            "## 二、关于权利要求的修改\n\n修改后的权利要求1：\n一种物料输送装置，机架（1）上设有输送带（2）。\n",
+        );
+        assert_eq!(verified.status, GateStatus::Verified);
+        assert!(verified.submission_ready, "核验通过才可交");
+    }
+
+    // ── issue #158：门不幂等（重跑把标注本身算成新零命中；旧横幅留在产物里）──
+
+    #[test]
+    fn gate_is_idempotent_over_its_own_output() {
+        let letter = "## 二、关于权利要求的修改\n\n修改后的权利要求1：\n一种物料输送装置，机架上设有虚构的磁悬浮导轨。\n";
+        let once = gate(letter);
+        assert!(once.unsupported_count > 0, "这个夹具本来就该零命中");
+        let twice = gate(&once.gated_text);
+        assert_eq!(
+            twice.unsupported_count, once.unsupported_count,
+            "重跑不得把上一轮的标注算成新的零命中特征"
+        );
+        assert_eq!(
+            twice.gated_text.matches(UNVERIFIED_MARK).count(),
+            once.gated_text.matches(UNVERIFIED_MARK).count(),
+            "标注处数必须一致（旧行为是 1 → 2）"
+        );
+    }
+
+    #[test]
+    fn stale_banner_is_stripped_so_the_artifact_stops_contradicting_itself() {
+        // 真实形态：手改过的稿子正文已干净，首行旧横幅还在，写着"核验阻断 28 处"。
+        let clean = "## 二、关于权利要求的修改\n\n修改后的权利要求1：\n一种物料输送装置，机架（1）上设有输送带（2）。\n";
+        let stale =
+            format!("> ⚠️ 修改稿核验阻断（amendment_unsupported=28）：旧的一次。\n\n{clean}");
+        let r = gate(&stale);
+        assert_eq!(r.status, GateStatus::Verified);
+        assert_eq!(r.unsupported_count, 0);
+        assert!(
+            !r.gated_text.contains("修改稿核验阻断"),
+            "旧横幅必须剥掉，否则产物与新结论自相矛盾：{}",
+            r.gated_text
+        );
+    }
+
+    // ── 复核补漏（第三方复核命中）：括号编号的权项行也必须算"有修改稿"──
+
+    #[test]
+    fn no_amendment_declaration_with_parenthesised_claim_draft_still_verified() {
+        // 声明"不作修改"，但正文确实贴了（3）一种… 的修改稿。
+        // 修复前：编号只认 `3.一种`，括号编号不命中 ⇒ 整节被当"无修改稿"跳过（静默漏检）。
+        let letter = "## 二、关于权利要求的修改
+
+本次对独立权利要求1不作修改。
+
+（3）一种物料输送装置，机架（1）上设有输送带（2），机架（1）侧面固定有驱动电机（3）。
+";
+        let r = gate(letter);
+        assert_ne!(
+            r.status,
+            GateStatus::NoAmendment,
+            "括号编号的修改稿不得被当成\"无修改稿\"跳过：{}",
+            r.gated_text
+        );
+        assert!(r.checked_feature_count > 0, "必须真的核验了特征句");
+    }
+
+    #[test]
+    fn plain_numbered_claim_draft_is_still_recognised() {
+        // 负控的另一半：阿拉伯点号编号仍要认（改动不能把常见形态弄坏）。
+        let letter = "## 二、关于权利要求的修改
+
+本次对独立权利要求1不作修改。
+
+3.一种物料输送装置，机架（1）上设有输送带（2）。
+";
+        let r = gate(letter);
+        assert_ne!(
+            r.status,
+            GateStatus::NoAmendment,
+            "3.一种… 必须仍被识别为修改稿"
+        );
+    }
+
+    // ── issue #159：删限定＝扩大保护范围（现权项当基准）──
+
+    #[test]
+    fn deleting_a_limitation_is_flagged_as_broadening() {
+        let current = "1.一种物料输送装置，其特征在于，包括机架（1），机架（1）上设有输送带（2），机架（1）侧面固定有防护罩（3）。
+";
+        let letter = "## 二、关于权利要求的修改
+
+修改后的权利要求1：
+一种物料输送装置，包括机架（1），机架（1）上设有输送带（2）。
+";
+        let r = gate_amendment_text_with_current_claims(letter, SPEC, current);
+        assert!(
+            !r.broadened.is_empty(),
+            "删掉「防护罩」必须被报成扩范围，实际 broadened={:?}",
+            r.broadened
+        );
+        assert_eq!(r.status, GateStatus::Degraded);
+        assert!(!r.submission_ready, "扩范围不得判可交");
+        assert!(
+            r.direction_note().contains("扩范围"),
+            "{}",
+            r.direction_note()
+        );
+    }
+
+    #[test]
+    fn adding_a_limitation_alone_is_not_broadening() {
+        let current = "1.一种物料输送装置，其特征在于，包括机架（1），机架（1）上设有输送带（2）。
+";
+        let letter = "## 二、关于权利要求的修改
+
+修改后的权利要求1：
+一种物料输送装置，包括机架（1），机架（1）上设有输送带（2），机架（1）侧面固定有驱动电机（3）。
+";
+        let r = gate_amendment_text_with_current_claims(letter, SPEC, current);
+        assert!(
+            r.broadened.is_empty(),
+            "只增加限定不算扩范围：{:?}",
+            r.broadened
+        );
+        assert!(r.current_claims_checked);
+        assert!(
+            !r.direction_note().contains("扩范围"),
+            "只加不减不该报扩范围"
+        );
+    }
+
+    #[test]
+    fn missing_current_claims_is_visible_not_silent() {
+        let letter = "## 二、关于权利要求的修改
+
+修改后的权利要求1：
+一种物料输送装置，机架（1）上设有输送带（2）。
+";
+        let r = gate(letter);
+        assert!(r.broadened.is_empty());
+        assert!(
+            !r.current_claims_checked,
+            "没给现权项时必须是未核验，而不是悄悄当通过"
+        );
+        assert!(
+            r.direction_note().contains("未核验"),
+            "缺输入的可见性说明缺失: {}",
+            r.direction_note()
         );
     }
 }
