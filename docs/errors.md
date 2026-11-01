@@ -1587,3 +1587,13 @@
 - **修复**: ①`require_node()` 改为 fail closed（找不到 node 直接 panic，文案给出"装 node 或在该 job setup-node"的可执行路径），并在 Tests job 里显式 `actions/setup-node@v4`；②`describe_node_error()` 把 node stderr 的 `SyntaxError:` 原文带上，并用 `line_offset + node 行号` 换算回**模板内行号**，不再输出临时路径；③长句守卫抽出 `scan_long_sentences(files, digests)`，原测试变薄封装；新增 `positive_control_planted_digest_is_caught`（临时目录 + 自创文本 + 注入摘要 ⇒ 必须 1 条命中、位置正确、**描述不回显原文**）与 `positive_control_empty_digest_set_reports_zero`（空集合必须 0 命中）；并断言摘要集合长度 == 常量数组长度（防数组被清空后静默失去意义）。
 - **回归 / 负控（真实执行）**: ①把 node 从 PATH 去掉直接跑测试 exe ⇒ `FAILED`（原先是 2 passed）；②往 `templates/search.html` 末尾植入 `function zzqPlantedBroken( {` ⇒ 报 `templates\search.html: templates 内第 1113 行附近：SyntaxError: Unexpected number`（无临时路径），还原后回到 2 passed；③阳性对照里把写入文本改一个字而摘要仍按原文算 ⇒ `植入的摘要必须被抓到：[]` 变红，还原后绿；④`cargo test --test no_case_data_in_repo` 15 passed（含原长句扫描 114s）。
 - **预防**: ①**"依赖缺失"一律 fail closed**：能跑=通过/失败二选一，跑不了必须是失败并可执行地告诉人怎么修——`skipped` 乃至 `ok` 都会被当成"查过了"；②诊断信息只能来自**源文件位置**（模板行号、原文件偏移），不许来自临时文件；③凡是"守卫每次报 0"的东西，都要有一条**在仓库内能自证的阳性对照**（注入一条自造样本必须被抓到），并与"空输入必须 0"配对，同时断言判据规模（摘要条数）——否则"永远返回 0"和"永远返回全部"两种退化都不会被发现。
+
+## [2026-11-01] 63 引文锚点核验用"数字包含"＝假绿机器：`[D1:第2段]` 会被语料里的任意 `2` 放行
+- **严重程度 / Severity**: HIGH
+- **涉及文件**: `src/ai/anchor_verify.rs`（新增）、`src/routes/ai.rs`（meta + 可见说明）
+- **现象**: 提示词要求模型用 `[D1:权利要求2]` / `[D1:第0035段]` 指称来源，但代码层不校验。外部复核提过一个检查器，做法是"把锚点里的数字拼出来，看语料里有没有这个数字"——`[D1:第2段]` 会命中语料里任意一个 `2`（哪怕那是"权利要求2"或文档号里的 2），编造的锚点照样过。
+- **根因**: 把"指称"降维成了"包含"：`(doc_id, 层级, 编号)` 是三元组，只用"编号出现在某处"去判，等于把三件事压成一件事；且未区分"解析不出来"与"解析出来但匹配不上"。
+- **修复**: 新增 `anchor_verify` 模块：①解析只认 `doc:权利要求N` / `doc:第N段` 两种形态，其它落 `unparsed`；②匹配是**三元组精确相等**（doc_id + kind + number），数字按数值比较（`0035` == `35`），任何一级都不用子串包含；③`hallucination_rate` 的分母只算可解析锚点，`unparsed` 单列；④索引为空时所有可解析锚点落 `unverified`——不许"没有可匹配对象"默认通过。路由层在答复书里检出锚点时挂可见说明（本次无分块元数据 ⇒ 无法逐条核对），meta 增 `anchor_verified/anchor_unverified/anchor_unparsed/anchor_hallucination_rate`。
+- **回归 / 负控**: `fabricated_paragraph_is_unverified`（编造 `第9999段` 必须 unverified）；`digit_inclusion_would_be_a_false_green` **把被拒的设计钉成用例**——同一段文本用"数字包含"判过、用三元组判不过；`kind_mismatch_is_unverified` / `doc_mismatch_is_unverified`（层级、文档号不许互相顶替）；`zero_padded_number_matches_by_value`；`empty_index_reports_unverified_not_pass`；`unparsable_anchor_is_counted_separately`（不进分母）。
+- **已知边界**: 生产接线要等检索分块的 `section_tag`（#78 冻结中）；当前路由拿不到分块元数据，所以只报"引用了 N 处锚点、无法核对"，不假装核验过。
+- **预防**: ①**"指称"类判据必须按它的元组逐项比**，把任何一维降级成"包含"都会退回假绿；②"解析不出来"≠"匹配不上"，两者分母不同，合并后得到的比例没有意义；③拒掉一个设计时，把它写成**能复现假绿的用例**，比在注释里写"不要这样做"有效。

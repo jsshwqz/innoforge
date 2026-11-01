@@ -23,6 +23,7 @@
 //! - golden_regression: C13 黄金回归测试
 
 mod adversarial;
+pub mod anchor_verify;
 pub mod case_input;
 mod chat;
 pub mod citation_check;
