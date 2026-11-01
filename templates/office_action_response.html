@@ -96,6 +96,12 @@
             <div id="my-file-tag"></div>
         </div>
 
+        <!-- 现行权利要求书（可选）：审查所针对的那版权项，用于「删限定＝扩大范围」校验 -->
+        <div class="cmp-section cmp-my">
+            <label class="cmp-label orange">现行权利要求书（可选）</label>
+            <textarea id="current-claims" rows="3" style="width:100%;resize:vertical;font-family:Consolas,monospace;font-size:13px;" placeholder="可选。粘贴审查意见所针对的那版权项全文（如「1.一种……；2.根据权利要求1……」）。填了才能校验修改有没有删掉限定特征；不填会在产物里标注「扩范围方向未核验」。"></textarea>
+        </div>
+
         <!-- P0a: Deadline Countdown -->
         <div class="cmp-section cmp-oa-orange" id="deadline-section" style="display:none;">
             <label class="cmp-label orange">⏰ <span data-i18n="oar.deadlineTitle"></span></label>
@@ -2849,7 +2855,9 @@
                     office_action: oaDiscussOAText,
                     oa_type: oaDiscussOAType,
                     discussion_id: localStorage.getItem('oa-discuss-id') || '',
-                    my_patent: (uploadedData && uploadedData['my']) || { content: (document.getElementById('my-patent') || {}).value || '' }
+                    my_patent: (uploadedData && uploadedData['my']) || { content: (document.getElementById('my-patent') || {}).value || '' },
+                    // 现权项（可选）：有它才能查「删限定＝扩大保护范围」（#159）
+                    current_claims: ((document.getElementById('current-claims') || {}).value || '').trim()
                 })
             });
 
@@ -4922,6 +4930,16 @@
             overlay.addEventListener('click', (e) => { if (e.target === overlay) cleanup(null); });
         });
     }
+        // 现行权利要求书：随草稿保存，刷新/换案后仍在（本地，不上传）
+    (function () {
+        var ta = document.getElementById('current-claims');
+        if (!ta) return;
+        var KEY = 'oa-current-claims';
+        try { ta.value = localStorage.getItem(KEY) || ''; } catch (e) {}
+        ta.addEventListener('input', function () {
+            try { localStorage.setItem(KEY, ta.value); } catch (e) {}
+        });
+    })();
     </script>
 </body>
 </html>
