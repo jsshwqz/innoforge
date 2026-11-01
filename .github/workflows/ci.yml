@@ -43,6 +43,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # inline_scripts_parse 需要 node；依赖 runner 镜像自带等于把守卫交给运气（#59）。
+      # 这条测试在 node 缺失时已经 fail closed，这里显式装一份。
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
       - name: Run tests
         run: cargo test
 
