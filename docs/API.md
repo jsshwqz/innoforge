@@ -1186,7 +1186,8 @@ Response:
 
 ### POST `/api/ai/oa-generate-response-letter`
 
-- 请求字段：`analysis`、`discussion`、`discussion_id`、`oa_date`、`oa_full_text`、`oa_type`、`office_action`、`case_meta`。
+- 请求字段：`analysis`、`discussion`、`discussion_id`、`oa_date`、`oa_full_text`、`oa_type`、`office_action`、`case_meta`、`current_claims`（可选）。
+- `current_claims` 是「审查所针对的那版权项」全文。填了，核验门才会做「删限定／改限定＝扩大保护范围」方向；不填时产物里会写「修改稿扩范围方向未核验」，只做专利法第33条的新增内容核验。答复页按专利号查到库内专利后，会把该记录的 `claims` 回填进这个输入框（已有手填内容时不覆盖）。
 - 成功响应（`200`）：`{ "letter": "...", ... }`（正式答复函草稿）。
 - 失败：缺关键字段时返回 `{ "error": "..." }`。
 

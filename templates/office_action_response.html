@@ -619,6 +619,14 @@
             tagEl.innerHTML = '<span class="file-tag">📦 ' + escapeHtml(p.patent_number) + ' — ' + escapeHtml(p.title)
                 + ' (' + content.length + t('common.chars') + ')'
                 + '<span class="tag-remove" onclick="clearMyPatent()">&times;</span></span>';
+            // #159：本地库/在线抓取到的专利记录里就带着「审查所针对的那版权项」。
+            // 只在用户还没填时回填（不覆盖手填或上次草稿），并触发 input 让草稿保存逻辑接住；
+            // 填了它，核验门才能跑「删限定＝扩大保护范围」那一半。
+            var claimsBox = document.getElementById('current-claims');
+            if (claimsBox && !claimsBox.value.trim() && p.claims && p.claims.trim()) {
+                claimsBox.value = p.claims.trim();
+                claimsBox.dispatchEvent(new Event('input'));
+            }
         });
     }
 
