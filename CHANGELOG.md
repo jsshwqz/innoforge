@@ -4,6 +4,22 @@
 All notable changes are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
+## [v0.9.25] - 2026-11-03
+
+### 修复 / Fixed
+
+- **契约生成器漏抓多方法路由的第二个处理函数**：同一 `.route(...)` 上挂 `GET+POST` 的 5 条路由（`research-state` / `feature-cards` / `memory` / `collections` / `patents/:id/tags`）之前只解析第一个 handler，第二个方法的请求体与字段被静默漏掉。现在按方法收集整条 handler 链、分别解析，总表列出全部处理函数与源码行；解析的 (method, handler) 组合 132→137（[#178](https://github.com/jsshwqz/innoforge/pull/178)）。
+
+### 新增 / Added
+
+- **答复页自动回填「现行权利要求书」**：按专利号查到库内专利后，若该输入框为空且专利记录带 `claims`，自动回填并触发现有草稿保存；已手填内容不覆盖。这样核验门的「删限定＝扩大保护范围」方向默认就能跑，而不是恒为 `broadening_checked=false`（[#179](https://github.com/jsshwqz/innoforge/pull/179)）。
+- **API 文档补齐 132/132 条 `/api` 路由**：新增 27 条端点说明（搜索导出/向量检索、专利外部抓取/法律状态/PDF/图片代理、上传、AI 分析与成本、创意内核报告/对话记忆），`docs/API.md` 的覆盖说明改为 132/132；字段级契约继续由 `docs/API-CONTRACTS.md` 生成并守卫（[#178](https://github.com/jsshwqz/innoforge/pull/178)）。
+
+### 说明
+
+[#159](https://github.com/jsshwqz/innoforge/issues/159) 的判据（v0.9.21 起在门里）与产品侧输入（本版回填）现已接上；当用户查不到专利、只能手贴时，仍可在同一输入框填写，不填则产物明确标注「修改稿扩范围方向未核验」。
+
+---
 ## [v0.9.24] - 2026-11-02
 
 ### 新增 / Added
