@@ -4,7 +4,7 @@
 All notable changes are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
-## [v0.9.25] - 2026-11-02
+## [v0.9.25] - 2026-11-03
 
 ### 修复 / Fixed
 
@@ -17,7 +17,7 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ### 说明
 
-`#159` 的判据（v0.9.21 起在门里）与产品侧输入（本版回填）现已接上；当用户查不到专利、只能手贴时，仍可在同一输入框填写，不填则产物明确标注「修改稿扩范围方向未核验」。
+[#159](https://github.com/jsshwqz/innoforge/issues/159) 的判据（v0.9.21 起在门里）与产品侧输入（本版回填）现已接上；当用户查不到专利、只能手贴时，仍可在同一输入框填写，不填则产物明确标注「修改稿扩范围方向未核验」。
 
 ---
 ## [v0.9.24] - 2026-11-02
