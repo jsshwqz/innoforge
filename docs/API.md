@@ -1529,17 +1529,252 @@ Response:
 | GET | `/api/ipc/tree` | 库内专利的 IPC 三级树 |
 | GET | `/api/ipc/:code/patents` | 按 IPC 前缀查专利 |
 
+## R27 续补：分析 / 外部抓取 / 上传 / 创意记忆（27 条）
+
+> 本节补齐前几轮「待覆盖」剩下的端点。字段与错误形状按 handler 实读；以 `Json<serde_json::Value>` 接收的端点，键名以 [`API-CONTRACTS.md`](API-CONTRACTS.md) 的抽取结果为准（那里逐条标了源码行）。
+
+### 搜索导出 / 混合检索
+
+**POST** `/api/search/export/xlsx`
+
+把本地库按 `SearchRequest` 检索（最多 **10 000** 条），生成 `.xlsx` 下载。
+
+- 请求体与 `POST /api/search` 相同（`SearchRequest`，字段见 `API-CONTRACTS.md`）。
+- 成功：`200` + `Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`，`Content-Disposition: attachment; filename="patents_YYYYmmdd_HHMMSS.xlsx"`。
+- 列：Patent No. / Title / Applicant / Inventor / Filing Date / Country / Abstract（摘要截前 200 字符）。
+- 生成失败：`500` + 纯文本 `Failed to generate Excel: …`。
+- 只查**本地库**，不出网；没有结果时返回只有表头的文件。
+
+**POST** `/api/search/vector`
+
+BM25 + 向量相似度的 RRF 融合检索。
+
+```json
+{ "query": "…", "limit": 20, "rrf_k": 60 }
+```
+
+- `query` 为空 → `{"error":"查询不能为空"}`（HTTP 200）。
+- 向量层用 TF-IDF 嵌入与 `patents_embedding` 里的缓存比对，余弦相似度 > 0.1 才计入；库内没有嵌入时只剩 BM25 一路。
+- 成功：`{"patents":[{"id","patent_number","title","applicant","inventor","relevance_score","fused_score"}],"total","source":"hybrid","method":"rrf","rrf_k","bm25_count","vector_count"}`。
+- `relevance_score` 是 `fused_score × 100` 的展示值，不是概率；排序以 `fused_score` 为准。
+
+### 专利：外部抓取 / 法律状态 / PDF / 图片
+
+**GET** `/api/patent/enrich-free/:id`
+
+对库里已有专利做一次免费全文富化（Google Patents 免费抓取，走 `search::enrichment` 统一核心）。
+
+- `id` 由富化核心解析，内部 ID 或专利号均可。
+- `status`：`ok`（含 `patent`）、`cooldown`（`message` + `remaining_secs`）、`error`（`message`：专利不存在或抓取失败）。
+- 处于冷却时**不重试、不等待**，直接返回剩余秒数。
+
+**GET** `/api/patent/lookup/:number?fetch=true`
+
+按专利号查本地库（先归一化号，再按原串兜底）。
+
+- `fetch=true` 且本地没有时，用 EPO 抓取，成功后入库并计算向量嵌入。
+- 成功：`{"status":"ok","patent":{"patent_number","title","abstract_text","description","claims","applicant","inventor"}}`。
+- 本地没有且未要求抓取：`{"status":"error","message":"Patent not found in local DB"}`（HTTP 200）。
+
+**POST** `/api/patent/lookup-or-fetch`
+
+同上，但**总是**先本地、再 EPO 抓取。
+
+```json
+{ "patent_number": "CN…" }
+```
+
+- 成功多一个 `source`：`"local"` 或 `"online"`；抓取失败 `{"status":"error","message":"在线抓取失败: …"}`；空号 `{"status":"error","message":"请输入专利号"}`。
+- 抓取成功但缓存失败时，仍返回 `source:"online"` 的上游原始数据。
+
+**GET** `/api/patent/:id/legal-status`
+
+三级降级查法律状态：Google Patents（SerpAPI）→ 搜狗国知局公告 → 未知。
+
+- `:id` 按**专利号**使用，不是内部 ID。
+- 成功：`{"status":"ok","result":{"patent_number","current_status","events":[{"title","date",…}],"source","updated_at"}}`。
+- 全部来源失败不报错：`current_status="未知"`、`source="none"`、`events=[]`——这是「没查到」，不是「无法律状态」。
+- 查到非空状态时，把前 5 条事件写回本地专利的 `legal_status` 字段。
+
+**GET** `/api/patent/pdf/:id`
+
+生成可打印的 HTML 页（浏览器「打印 → 另存为 PDF」），不是 PDF 二进制。
+
+- 专利不存在：`404` + `text/html` 的 `<h1>Patent not found</h1>`。
+- 说明书或权利要求不足 50 字符时，先尝试免费富化，再尝试 SerpAPI，然后渲染。
+- 成功：`200` + `text/html; charset=utf-8`。
+
+**POST** `/api/patent/pdf/extract-text`
+
+`multipart/form-data`：可传 `file`（PDF，≤20 MB），或用 `patent_id` 让服务端下载该专利的 `pdf_url`。
+
+- 逐页提取，无文字的页会被过滤；逐页提取失败时退化为整篇提取，并把 `method` 标为 `standard_fallback`。
+- 成功：`{"status":"ok","pages":[{"page","text","char_count"}],"page_count","total_chars","full_text"}`。
+- 缺 `%PDF-` 签名、找不到可下载 PDF、缺参数：`{"error":"…"}`（HTTP 200）。
+
+**GET** `/api/patent/image-proxy?url=…`
+
+绕开专利图片域名的网络限制，只代理**白名单域名**：`patentimages.storage.googleapis.com`、`worldwide.espacenet.com`、`image.patent.k.sogou.com`。
+
+- 只接受 HTTPS、默认 443 端口、URL 不能带账号密码；不跟随重定向。
+- 上游非 2xx、类型不在允许的图片 MIME、超过 20 MiB：`502` + 纯文本原因。
+- 域名或协议不合规：`403`；缺 `url`：`400`。
+- 成功：上游图片字节原样返回（保留上游图片 MIME）。
+
+### 上传
+
+**POST** `/api/upload/extract`
+
+`multipart/form-data` 的 `file` 字段（≤10 MB），把附件转成文本供后续 AI 分析。
+
+- 支持 PDF / DOCX / TXT / 图片（png/jpg/jpeg/gif/bmp/webp）。类型优先按**文件头魔数**判断，扩展名只在魔数不认识时兜底（中文文件名的历史问题见 #97）。
+- 图片走 AI 视觉描述；PDF 文本不足 100 字符时用 AI 视觉兜底；当前配置是 DeepSeek 时会明确提示切换模型，而不是硬失败。
+- 成功：`{"text","file_type","length","char_length","truncated"}`；超过 50 000 字符会截断并置 `truncated:true`（**不静默**，调用方据此提示）。
+- 失败：`{"error":"…"}`，不带 `status` 字段（历史形状）。
+
+**POST** `/api/upload/pdf-store`
+
+`multipart/form-data` 的 `file` 字段（≤20 MB）。只落盘，不解析。
+
+- 只收 `.pdf` 且必须带 `%PDF-` 签名；文件写入 `data/uploads/<uuid>.pdf`。
+- 成功：`{"status":"ok","url":"/uploads/<uuid>.pdf","filename","size"}`。
+- 失败：`{"status":"error","message":"…"}`。
+
+### AI 分析（非流式 / 流式 / 审计 / 成本）
+
+**POST** `/api/ai/claims`
+
+按本地专利分析权利要求：`{"patent_id":"…"}`。
+
+- 专利不存在或权利要求为空（<10 字符）→ `{"error":"…"}`（HTTP 200）。
+- 成功：`{"status":"ok","analysis":"…"}`（AI 原文，未解析成结构）。
+
+**POST** `/api/ai/risk`
+
+侵权风险评估：`{"product_description":"…","patent_ids":["…"]}`，专利 **1–10** 个。
+
+- 描述为空、`patent_ids` 缺失/为空/超过 10：`{"error":"…"}`。
+- 一个专利都查不到时，错误里会列出找不到的 ID。
+- 成功：`{"status":"ok","analysis":"…"}`。
+
+**POST** `/api/ai/batch-summarize`
+
+批量摘要：`{"patent_ids":["…"]}`，**1–20** 个。
+
+- 成功：`{"status":"ok","summaries":[{"id","patent_number","title","summary"}]}`；单条失败时该条用 `error` 代替 `summary`，不影响其他条。
+- 已知限制：批量内部逐条串行调用，成本账本只记最后一次调用的用量，批量总成本会被低估。
+
+**POST** `/api/ai/inventiveness-analysis`
+
+创造性（三步法）分析。`my_patent` 可以是专利 ID/号，也可以是 `{"title","content"}` 文本对象；对比文件放 `references`（旧字段 `reference_ids` 兼容），**1–4** 个。
+
+- 参数不合法：`400` + `{"error":"…"}`（这个端点校验失败走 HTTP 400）。
+- 成功：`200` + `{"status":"ok","analysis":"…"}`。
+
+**POST** `/api/ai/office-action-response`
+
+审查意见答复分析（非流式）。
+
+请求键：`my_patent`（文本对象或 ID）、`office_action`（字符串或 `{"content"}`）、`oa_date`（可选，结构化发文日）、`references`（ID 或 `{"type":"text","title","content"}`）、`my_patent_id`（可选，用于缓存）、`force`（可选，跳过缓存）。
+
+- `office_action` 少于 10 字符 → `{"error":"请输入审查意见通知书内容"}`。
+- 传入 `oa_date` 时，会把「以此为准」的发文日注入正文头部，避免模型从 OA 正文里抓错日期。
+- 三个大字段各有容量上限，**超限报错而不是截断**。
+- 缓存：同一 `my_patent_id` + OA 类型 + 深度且 `force != true` 时直接返回 `{"status":"ok","analysis","cached":true,"version":…,"patent_number","patent_title"}`；未命中则重新分析，成功后把非空结果写入历史。
+- 参考文献有全文（>500 字）时，自动追加「转述冲突检测」段落。
+- AI 返回空白或 <10 字符：`{"error":"AI 返回内容为空或过短…"}`，不会把空串当成功。
+
+**POST** `/api/ai/office-action-response/stream`
+
+同一套入参，返回 `text/event-stream`。
+
+- 事件：默认事件（无 `event:` 名）逐块推送 **JSON 编码**后的文本；`heartbeat` 保活；`meta` 固定为 `{"source":"main_analysis"}`（结构性元数据，不进正文/导出）；`done` 数据为 `[DONE]`；`error` 数据以 `[ERROR]` 开头。
+- 主分析流结束但全文为空 → 发 `error`，不静默结束。
+- 结束后依次追加「AI 事实核查」与（参考文献足够长时的）「转述冲突检测」，再发 `meta` / `done`；完整文本写入历史。
+
+**POST** `/api/ai/audit-checks`
+
+14 项答复质量审计（纯规则 + 检索匹配，**不调 LLM**）。
+
+请求：`oa_text`（必填）、`documents:[{"id","text"}]`、`known_features:[]`、`key_terms:[]`、`submitted_claims`、`submitted_claim_count`、`golden_output`、`ai_output`、`pdf_text`。
+
+- 缺 `oa_text` → `{"error":"缺少 oa_text / Missing oa_text"}`。
+- 成功：`{"status":"ok","results":{…14 项…}}`：`citation_check`、`claim_coverage`、`feature_coverage`、`feature_attribution`、`golden_regression`、`paraphrase_check`、`pre_submission_check`、`prohibition_check`、`search_report`、`strategy_arbitration`、`targeted_claims`、`tech_problem_check`、`whitespace_search`、`extraction_quality`。
+- 没给输入的子项返回 `{"skipped":"…"}` 或 `{"status":"available","note":"…"}`，不会假装通过。
+
+**POST** `/api/ai/prohibition-check`
+
+答复文本的禁令自查（纯函数，不出网）：`{"response_text":"…"}`。
+
+- 成功：`{"status":"ok","violations":[{"rule_id","rule_description","violating_text","severity":"fatal|warning"}],"count","summary"}`。
+- 缺 `response_text` → `{"error":"缺少 response_text / Missing response_text"}`。
+
+**POST** `/api/ai/check-amendments`
+
+按《专利审查指南》检查修改是否超范围：`original_claims`、`amended_claims`、`office_action`（均字符串）。
+
+- 原始或修改后权利要求为空 → `400` + `{"error":"原始权利要求和修改后权利要求不能为空"}`。
+- 成功：`200` + `{"status":"ok","analysis":"…"}`；AI 失败 → `400`。
+
+**GET** `/api/ai/cost`
+
+近 **30 天**成本汇总（固定 30 天，不接受参数）。
+
+```json
+{
+  "period_days": 30,
+  "total_calls": 12,
+  "total_input_tokens": 12345,
+  "total_output_tokens": 6789,
+  "total_cost_cents": 4.5,
+  "total_cost_dollars": 0.05,
+  "by_model": { "model-name": { "input_tokens": 1, "output_tokens": 2, "cost_cents": 3, "calls": 4 } }
+}
+```
+
+- 查询失败：`{"error":"Failed to get cost summary: …"}`。
+
+**GET** `/api/ai/cost/records`
+
+最近 **100** 条成本记录：`{"status":"ok","count","records":[{"id","pipeline_run_id","step","model","provider","timestamp","input_tokens","output_tokens","estimated_cost_cents","duration_ms"}]}`。
+
+**POST** `/api/ai/cost/record`
+
+手工写入一条成本记录。请求：`model`、`provider`、`pipeline_run_id`、`step`、`input_tokens`、`output_tokens`、`estimated_cost_cents`、`duration_ms`（缺省依次为 `unknown` / `unknown` / 空串 / `unknown` / 0）。
+
+- 成功：`{"status":"ok","id":…}`；失败：`{"error":"Failed to save cost record: …"}`。
+
+### 创意：内核报告 / 对话快照 / 记忆
+
+**GET** `/api/idea/:id/kernel-report`
+
+取该创意流水线快照里的证据内核报告。
+
+- `status`：`ok`（`kernel_report` + `current_step`）、`no_snapshot`（没跑过分析）、`no_kernel_report`（旧快照或未到 Finalize）、`error`（创意不存在 / 快照解析失败）。
+- 这是「报告是否真的产出过」的权威入口；`no_*` 不等于空报告。
+
+**GET** `/api/idea/:id/chat/conversation`
+
+一次取回讨论全量（不分页）：`{"status":"ok","idea":{"id","title","description"},"messages":[{"role","content","created_at"}]}`。创意不存在 → `{"error":"创意不存在"}`。
+
+**GET** `/api/idea/:id/memory`
+
+列出创意记忆：`{"status":"ok","entries":[…],"counts":{"total","by_type"}}`。
+
+**POST** `/api/idea/:id/memory`
+
+手工新增一条记忆。请求：`concept_name`、`content`（必填）、`concept_type`（`domain_concept` / `decision` / `pattern` / `question`，默认 `domain_concept`）、`confidence`（0–1，默认 0.5，越界会被钳制）。
+
+- 成功：`{"status":"ok","id":…}`；缺字段或类型非法：`{"status":"error","message":…}`。
+- 手工条目的 `source_step` 记为 `UserManual`，可与流水线自动沉淀的条目区分。
+
+**DELETE** `/api/idea/:id/memory/:entry_id`
+
+删除一条记忆：`{"status":"ok"}` 或 `{"status":"error","message":…}`。删除不存在的条目也返回 `ok`（SQL 影响 0 行不算错）。
+
 ## 覆盖说明 / Coverage
 
-- 既有章节（搜索 / 专利 / 创意验证 / 特征卡片 / 收藏夹 / 标签 / 聊天 / IPC / 配置 / 错误 / 环境变量）：59 条 API 端点说明；
-- 页面路由表：9 条（`/test`、`/import` 已从代码移除，见上表下方注记）；
-- 本轮 R23 新增（CAD / 认证 / 审查意见 AI）：24 条；
-- 本轮续补（OA 期限 / 轮次 / 历史 / 讨论 / 导出）：17 条；
-- 本轮 R24 续补（配置 / 聊天记录 / 收藏夹 / 标签 / IPC）：19 条。
-- 合计 **115 条**（按 method+path 去重；含页面路由 9 条），覆盖 145 个 method+path 路由组合中的 115 条（约 79%）。剩余 30 条由 issue #62 跟踪（`/api/ai/*` 分析类、`/api/patent/*`、`/api/idea/*` 等）。
-
-## 待覆盖 / Not Yet Covered
-
-剩余端点集中在 `/api/ai/*` 分析类、`/api/patent/*` 外部抓取/富化、`/api/idea/*` 的记忆与报告子集，以及 `/api/upload/*`、`/api/search/export/xlsx`、`/api/search/vector`、`/api/feature-cards/diff`。
-
-> 注：`/api/search/*`、`/api/patent/*`、`/api/upload/compare` 的说明已在上文既有章节中，不属于“待覆盖”。
+- `/api` 路由：**132 / 132 条都有说明**（按 path 计；5 条 GET+POST 合并声明的路由在同一节里按方法分别写）。
+- 页面/静态路由：**9 条**在[页面路由表](#页面路由--page-routes)中（表格形式，不计入上面的自动统计）。
+- 字段级契约（路径参数 / 请求体字段 / 查询参数 / 响应顶层键）由 [`API-CONTRACTS.md`](API-CONTRACTS.md) 自动生成并由 `tests/api_contracts_up_to_date.rs` 守卫；本文只写语义、示例与使用注意。
+- 历史分节保留原编号（R23 24 条、R24 19 条、R27 27 条等），方便按提交追溯。

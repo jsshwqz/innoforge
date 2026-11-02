@@ -266,14 +266,18 @@ function extractRoutes() {
     const pm = seg.match(/\.route\(\s*"([^"]+)"/);
     if (!pm) continue;
     const afterPath = seg.slice(pm.index + pm[0].length);
-    const methods = METHODS.filter((mm) => new RegExp(`\\b${mm}\\s*\\(`).test(afterPath)).map((mm) =>
-      mm.toUpperCase()
-    );
-    const hm = afterPath.match(/\b(?:get|post|put|delete|patch|head|options)\s*\(\s*([A-Za-z_][A-Za-z0-9_:]*)/);
+    // 同一路由可以挂多个方法（GET/POST 合并声明），每个方法有自己的处理函数；
+    // 只取第一个会把第二个方法的字段悄悄漏掉。
+    const handlerPairs = [];
+    for (const mm of METHODS) {
+      const hm = afterPath.match(new RegExp(`\\b${mm}\\s*\\(\\s*([A-Za-z_][A-Za-z0-9_:]*)`));
+      if (hm) handlerPairs.push({ method: mm.toUpperCase(), name: hm[1] });
+    }
     out.push({
       path: pm[1],
-      methods: methods.length ? methods : ["?"],
-      handler: hm ? hm[1] : "",
+      methods: handlerPairs.length ? handlerPairs.map((p) => p.method) : ["?"],
+      handler: handlerPairs.length ? handlerPairs[0].name : "",
+      handlerPairs,
       commonLine: lineOf(src, start),
     });
   }
@@ -442,7 +446,7 @@ function extractReqKeys(body, varName) {
   // req["x"] / req.get("x")
   for (const re of [
     new RegExp(`\\b${esc}\\s*\\[\\s*"([A-Za-z0-9_]+)"\\s*\\]`, "g"),
-    new RegExp(`\\b${esc}\\.get\\(\\s*"([A-Za-z0-9_]+)"\\s*\\)`, "g"),
+    new RegExp(`\\b${esc}\\s*\\.\\s*get\\(\\s*"([A-Za-z0-9_]+)"\\s*\\)`, "g"),
     new RegExp(`\\b[a-z_][a-z0-9_]*\\(\\s*&?${esc}\\s*,\\s*"([A-Za-z0-9_]+)"`, "g"),
   ]) {
     let m;
@@ -469,33 +473,58 @@ const routes = extractRoutes();
 const resolved = [];
 const unresolved = [];
 for (const r of routes) {
-  const site = handlerSite(r.handler);
-  if (!site) {
-    unresolved.push(r);
+  const handlers = [];
+  for (const pair of r.handlerPairs) {
+    const site = handlerSite(pair.name);
+    if (!site) {
+      unresolved.push({ route: r, pair });
+      continue;
+    }
+    const info = parseHandler(site);
+    const json = info.params.find((p) => p.kind === "json");
+    const query = info.params.find((p) => p.kind === "query");
+    const queryKeys = query && query.type && query.type.arbitrary ? extractReqKeys(info.body, query.varName) : new Set();
+    handlers.push({
+      pair,
+      site,
+      info,
+      json,
+      query,
+      queryKeys,
+      multipart: info.params.some((p) => p.kind === "multipart"),
+      resp: normalizeResponse(info.ret),
+      reqKeys: json && json.type.arbitrary ? extractReqKeys(info.body, json.varName) : new Set(),
+      respKeys: extractRespKeys(info.body),
+    });
+  }
+  if (!handlers.length) {
+    unresolved.push({ route: r, pair: r.handlerPairs[0] || { method: "?", name: r.handler } });
     continue;
   }
-  const info = parseHandler(site);
-  const json = info.params.find((p) => p.kind === "json");
-  const query = info.params.find((p) => p.kind === "query");
-  const pathP = info.params.find((p) => p.kind === "path");
-  const multipart = info.params.some((p) => p.kind === "multipart");
-  const resp = normalizeResponse(info.ret);
-  const reqKeys = json && json.type.arbitrary ? extractReqKeys(info.body, json.varName) : new Set();
-  const queryKeys = query && query.type && query.type.arbitrary ? extractReqKeys(info.body, query.varName) : new Set();
-  const respKeys = extractRespKeys(info.body);
+  // 表里每列取「最有用」的那个处理函数：有请求体的、有查询的、有响应类型的
+  const pick = (pred) => handlers.find(pred);
+  const withJson = pick((h) => h.json);
+  const withQuery = pick((h) => h.query);
+  const withResp = pick((h) => h.resp && h.resp.display && h.resp.display !== "未解析") || handlers[0];
   const pathParams = [...r.path.matchAll(/:([A-Za-z0-9_]+)/g)].map((x) => x[1]);
   resolved.push({
     ...r,
-    site,
-    info,
-    json,
-    query,
-    pathP,
-    multipart,
-    resp,
-    reqKeys,
-    queryKeys,
-    respKeys,
+    handlers,
+    site: handlers[0].site,
+    info: handlers[0].info,
+    json: withJson ? withJson.json : undefined,
+    jsonMethod: withJson ? withJson.pair.method : "",
+    query: withQuery ? withQuery.query : undefined,
+    queryMethod: withQuery ? withQuery.pair.method : "",
+    pathP: handlers.map((h) => h.info.params.find((p) => p.kind === "path")).find(Boolean),
+    multipart: handlers.some((h) => h.multipart),
+    resp: withResp.resp,
+    reqKeys: new Set(handlers.flatMap((h) => [...h.reqKeys])),
+    queryKeys: new Set(handlers.flatMap((h) => [...h.queryKeys])),
+    respKeys: {
+      keys: new Set(handlers.flatMap((h) => [...h.respKeys.keys])),
+      statuses: new Set(handlers.flatMap((h) => [...h.respKeys.statuses])),
+    },
     pathParams,
   });
 }
@@ -603,20 +632,19 @@ md.push("");
 md.push("| # | 方法 | 路径 | 路径参数 | 请求体 | 查询 | 响应 | 处理函数 | 源码 |");
 md.push("| --- | --- | --- | --- | --- | --- | --- | --- | --- |");
 api.forEach((r) => {
+  const multi = r.methods.length > 1;
   const body = r.multipart
     ? "`multipart/form-data`"
     : r.json
       ? r.json.type.arbitrary
-        ? r.reqKeys.size
-          ? `任意 JSON（§${r.no}）`
-          : "任意 JSON"
+        ? (multi ? r.jsonMethod + " " : "") +
+          (r.reqKeys.size ? `任意 JSON（§${r.no}）` : "任意 JSON")
         : "`" + r.json.type.display + "`"
       : "—";
   const query = r.query
     ? r.query.type && r.query.type.arbitrary
-      ? r.queryKeys.size
-        ? `任意键值对（§${r.no}）`
-        : "任意键值对"
+      ? (multi ? r.queryMethod + " " : "") +
+        (r.queryKeys.size ? `任意键值对（§${r.no}）` : "任意键值对")
       : "`" + r.query.type.display + "`"
     : "—";
   let resp = r.resp.display;
@@ -624,9 +652,12 @@ api.forEach((r) => {
     resp = r.respKeys.keys.size ? `JSON（§${r.no}）` : "JSON（未抽到顶层键）";
   }
   const pp = r.pathParams.length ? r.pathParams.map((x) => "`" + x + "`").join(", ") : "—";
-  const where = "`" + rel(r.site.file) + ":" + r.info.sigLine + "`";
+  const handlerCell = r.handlers.map((h) => "`" + h.pair.name + "`").join("<br>");
+  const whereCell = r.handlers
+    .map((h) => "`" + rel(h.site.file) + ":" + h.info.sigLine + "`")
+    .join("<br>");
   md.push(
-    `| ${r.no} | ${r.methods.join(" / ")} | \`${r.path}\` | ${pp} | ${body} | ${query} | ${resp} | \`${r.handler}\` | ${where} |`
+    `| ${r.no} | ${r.methods.join(" / ")} | \`${r.path}\` | ${pp} | ${body} | ${query} | ${resp} | ${handlerCell} | ${whereCell} |`
   );
 });
 md.push("");
@@ -716,26 +747,39 @@ for (const r of api) {
   if (!hasKeys) continue;
   md.push(`### §${r.no} ${r.methods.join(" / ")} \`${r.path}\``);
   md.push("");
-  const where = `\`${rel(r.site.file)}:${r.info.sigLine}\``;
-  const req = r.reqKeys.size
-    ? [...r.reqKeys].sort().map((k) => "`" + k + "`").join("、")
-    : r.json
-      ? "未抽取到（可能经共享 helper 读取）"
-      : "（无请求体）";
-  const q = r.queryKeys.size ? [...r.queryKeys].sort().map((k) => "`" + k + "`").join("、") : "";
-  const resp = r.respKeys.keys.size
-    ? [...r.respKeys.keys].sort().map((k) => "`" + k + "`").join("、")
-    : "未抽取到（动态构造或非 JSON 响应）";
-  const st = r.respKeys.statuses.size ? [...r.respKeys.statuses].sort().join(" / ") : "";
-  md.push(`- 源码：${where}`);
-  if (r.json && !r.json.type.arbitrary) {
-    md.push(`- 请求体：\`${r.json.type.display}\`（字段见上文类型表）`);
-  } else if (r.json) {
-    md.push(`- 读取的请求键：${req}`);
+  const multi = r.handlers.length > 1;
+  for (const h of r.handlers) {
+    const where = `\`${rel(h.site.file)}:${h.info.sigLine}\``;
+    const req = h.reqKeys.size
+      ? [...h.reqKeys].sort().map((k) => "`" + k + "`").join("、")
+      : h.json
+        ? "未抽取到（可能经共享 helper 读取）"
+        : "（无请求体）";
+    const q = h.queryKeys.size ? [...h.queryKeys].sort().map((k) => "`" + k + "`").join("、") : "";
+    const resp = h.respKeys.keys.size
+      ? [...h.respKeys.keys].sort().map((k) => "`" + k + "`").join("、")
+      : "未抽取到（动态构造或非 JSON 响应）";
+    const st = h.respKeys.statuses.size ? [...h.respKeys.statuses].sort().join(" / ") : "";
+    if (multi) {
+      md.push(`- **${h.pair.method}** \`${h.pair.name}\`（${where}）`);
+      const indent = "  ";
+      if (h.json && !h.json.type.arbitrary) md.push(`${indent}- 请求体：\`${h.json.type.display}\`（字段见上文类型表）`);
+      else if (h.json) md.push(`${indent}- 读取的请求键：${req}`);
+      if (q) md.push(`${indent}- 读取的查询键：${q}`);
+      md.push(`${indent}- 响应顶层键：${resp}`);
+      if (st) md.push(`${indent}- \`status\` 取值：${st}`);
+      continue;
+    }
+    md.push(`- 源码：${where}`);
+    if (h.json && !h.json.type.arbitrary) {
+      md.push(`- 请求体：\`${h.json.type.display}\`（字段见上文类型表）`);
+    } else if (h.json) {
+      md.push(`- 读取的请求键：${req}`);
+    }
+    if (q) md.push(`- 读取的查询键：${q}`);
+    md.push(`- 响应顶层键：${resp}`);
+    if (st) md.push(`- \`status\` 取值：${st}`);
   }
-  if (q) md.push(`- 读取的查询键：${q}`);
-  md.push(`- 响应顶层键：${resp}`);
-  if (st) md.push(`- \`status\` 取值：${st}`);
   md.push("");
 }
 
@@ -744,7 +788,8 @@ if (unresolved.length) {
   md.push("");
   md.push("| 方法 | 路径 | 处理函数 |");
   md.push("| --- | --- | --- |");
-  for (const r of unresolved) md.push(`| ${r.methods.join(" / ")} | \`${r.path}\` | \`${r.handler}\` |`);
+  for (const u of unresolved)
+    md.push(`| ${u.pair.method} | \`${u.route.path}\` | \`${u.pair.name}\` |`);
   md.push("");
 }
 
