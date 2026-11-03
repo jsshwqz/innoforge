@@ -149,7 +149,7 @@ docs/          # 文档和规划
   git config core.hooksPath .githooks      # 或运行 sh .githooks/setup-githooks.sh
   ```
 
-  钩子用 `core.hooksPath` 指向 `.githooks/`，随仓库提交、跨机器共享；每次 `git commit` 自动跑 `check_html_functions.mjs`。
+  钩子用 `core.hooksPath` 指向 `.githooks/`，随仓库提交、跨机器共享；每次 `git commit` 自动跑 `scripts/check_html_functions.mjs`。
 - **硬关卡（强制）**：本地钩子可被 `git commit --no-verify` 跳过，它只是方便层；真正的强制关卡是远端 **CI**（`.github/workflows/ci.yml`），push/PR 后自动跑 fmt/clippy/test + HTML 函数完整性扫描 + e2e，不过关无法合并——任何 AI 或开发者想绕过本地检查都拦不住远端。
 
 #### Step 0b: 记忆检索规则（每次任务执行）
@@ -202,34 +202,33 @@ docs/          # 文档和规划
 - 运行 `cargo test`（测试通过）
 - 如果修改了模板（`templates/`）或 JS 文件（`static/`），运行 ESLint 检查 JS 语法：
   ```bash
-  export PATH="/c/Users/Administrator/AppData/Local/ms-playwright-go/1.57.0:/c/Users/Administrator/AppData/Roaming/npm:$PATH"
-  node node_modules/.bin/eslint templates/static/i18n.js 2>&1 | grep -v "node_modules"
+  npx eslint static/i18n.js
   ```
   无 `error` 级别报错
 - 三项全过才算完成，任一失败必须修复后重跑
 - 优化：fmt 失败先修格式再跑后续；clippy 失败不必跑 test，先修警告
-- **端到端回退检测**：如果修改了模板文件（`templates/`）或静态资源（`static/`），特别是涉及截断、数据流、DOM 操作的改动，完成编译后必须手动跑一遍核心流程确认正常：
+- **端到端回退检测**：如果修改了模板文件（`templates/`），特别是在涉及截断、数据流、DOM 操作的改动，完成编译后必须手动跑一遍核心流程确认正常：
   1. 首页 → 上传 PDF → 检查文件内容完整（未被截断）
   2. 专利详情页 → 点「加载全文」→ 检查 5 个标签页内容均显示正常
   3. OA 答复页 → 粘贴 OA → 专利号/日期自动填入 → 点分析 → 讨论 → 生成答复书
   4. 技术调研 → 上传 PDF → 点开始 → 导出报告 → 检查 PDF 全文完整
   **关键原则**：改了什么，就要测什么。改了 PDF 提取就测 PDF 上传，改了截断就测数据完整性，改了 i18n 就测标签页文本。
-- **Puppeteer 自动化测试**：如果修改了模板文件（`templates/`），且 Puppeteer 已安装（`node_modules/puppeteer` 存在），必须运行：
+- **Puppeteer 自动化测试**：如果修改了模板文件（`templates/`），且 Puppeteer 已安装（`node_modules/puppeteer` 存在），必须在仓库根目录运行：
   ```bash
-  export PATH="/c/Users/Administrator/AppData/Local/ms-playwright-go/1.57.0:/c/Users/Administrator/AppData/Roaming/npm:$PATH"
-  cd D:\\test\\patent-hub-backup && node e2e_test.mjs
+  node scripts/e2e_test.mjs
   ```
   确保全部测试通过（54/54 PASSED）。如果有失败项必须修复后才能提交。
+  若你的环境需要给 Playwright/Puppeteer 指定浏览器路径，请自行设置 `PATH`，不要把本机绝对路径写进仓库。
 
 - **HTML 模板函数完整性扫描（强制）**：每次修改 `templates/` 下任何 HTML 文件，编译前必须运行：
   ```bash
-  node check_html_functions.mjs
+  node scripts/check_html_functions.mjs
   ```
   该扫描**自动发现 `templates/` 下所有 `*.html`（包括未来新增页面）**，不靠硬编码页面清单。它执行两条规则：
   1. 任何 `on*` 引用的函数未定义（按钮在、函数没了）→ 拦截
   2. 基线中存在的引用/定义在当前被移除（整块功能消失）→ 拦截（补齐静态扫描的原理盲区）
   **任何"按钮在、函数没了"或"整块功能消失"的情况（如历史事故 42c726e / 9f1a14b 两次重构误删函数）都会被拦截在编译前。**
-  基线文件为 `docs/functions-manifest.json`（随代码提交）；新增页面/新增函数后，跑一次 `node check_html_functions.mjs --refresh` 更新基线，并把基线变更与模板变更一起提交（基线变更在 code review 中可审计）。
+  基线文件为 `docs/functions-manifest.json`（随代码提交）；新增页面/新增函数后，跑一次 `node scripts/check_html_functions.mjs --refresh` 更新基线，并把基线变更与模板变更一起提交（基线变更在 code review 中可审计）。
   退出码非 0 时必须先补齐函数定义再继续。
 
 - **重构模板时的功能清单核对**：重写/重构任何页面模板前，先列出该页所有功能点（按钮 → 对应函数 → 对应 API），重构后逐项核对，禁止"删了再说"式重构。函数级删除必须先确认无引用。
@@ -263,7 +262,7 @@ docs/          # 文档和规划
 - 禁止在仓库根目录创建临时文件
 - 禁止删除或覆盖用户未提交的工作
 - 禁止跳过 Step 5 验证直接提交
-- 禁止删除或篡改 `check_html_functions.mjs` 的扫描规则、或静默删除 `docs/functions-manifest.json` 基线。如需更改扫描规则或基线，必须在同一提交中说明原因并提交完整的 `--refresh` 更新结果，以便 code review 审查。
+- 禁止删除或篡改 `scripts/check_html_functions.mjs` 的扫描规则、或静默删除 `docs/functions-manifest.json` 基线。如需更改扫描规则或基线，必须在同一提交中说明原因并提交完整的 `--refresh` 更新结果，以便 code review 审查。
 - 禁止在生产路径使用 `unwrap()` / `expect()`（见 2.7）
 
 ---

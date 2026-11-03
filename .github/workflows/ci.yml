@@ -94,7 +94,7 @@ jobs:
       - name: Install deps
         run: npm ci
       - name: HTML 模板函数完整性（含基线回归）
-        run: node check_html_functions.mjs
+        run: node scripts/check_html_functions.mjs
       - name: ESLint JS
         run: npx eslint static/i18n.js
 
@@ -125,7 +125,7 @@ jobs:
           done
           curl -sI http://127.0.0.1:3000/
       - name: Run E2E
-        run: node e2e_test.mjs
+        run: node scripts/e2e_test.mjs
       - name: Stop server
         if: always()
         run: kill $(cat /tmp/server.pid 2>/dev/null) 2>/dev/null || true

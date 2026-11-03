@@ -24,4 +24,4 @@ sh .githooks/setup-githooks.sh
 
 - 钩子可被 `git commit --no-verify` 跳过——它是方便层。
 - 真正的强制关卡是远端 **CI**（.github/workflows/ci.yml），任何本地跳过都拦不住远端合并。
-- 钩子只是入口；核心防线是 check_html_functions.mjs 本身（静态扫描 + 基线回归）。
+- 钩子只是入口；核心防线是 scripts/check_html_functions.mjs 本身（静态扫描 + 基线回归）。
