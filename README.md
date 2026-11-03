@@ -1,16 +1,17 @@
 # 创研台 InnoForge
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Latest release](https://img.shields.io/github/v/release/jsshwqz/innoforge)](https://github.com/jsshwqz/innoforge/releases/latest)
 
-**仓库地址：** [GitHub](https://github.com/jsshwqz/innoforge)
+**把技术想法推进成可核验的决策依据、行动方案与专利 / OA 材料。** 面向开发者与研发人员：数据库与导出文件都在本机；AI 分析与在线检索会把相应内容发送给你配置的服务商或数据源。
 
-> **⚠️ 维护中：2026-10-27 整顿令（不可跳过）**——当前唯一主线是「一宗真实在办 OA/复审案 → 答复书 + 证据表 → 人工判可提交」。任何 AI / agent 开工前必须读 `AGENTS.md` §〇 与 `docs/plans/2026-10-27-rectification.md`，并声明 `ACK 2026-10-27 整顿令`。三周内不加检索 / 向量 / 成本基建，不新增报告类型。
+> **三步开始**：下载解压 → 运行 `innoforge-server`（Windows 双击 exe）→ 在设置里填一个 OpenAI 兼容 Key。不配 Key 也能用本地检索、收藏与导入。
+
+[📥 下载](#-下载) · [快速开始](#快速开始) · [API 文档](docs/API.md) · [English](#english)
 
 很多产品不是死在实现阶段，而是死在更早之前：想法看起来不错，却缺少判断依据；方向似乎可行，却没有清晰方案；产品刚开始推进，才发现已有技术、专利壁垒或知识产权保护缺口。
 
-**创研台 InnoForge** 面向开发者和研发人员，帮助你把最初的想法逐步推进为决策依据、执行方案、产品落地和知识产权保护，减少盲目投入，提高从创意到成果的转化效率。
-
-[English](#english)
+**创研台 InnoForge** 帮助你把最初的想法逐步推进为决策依据、执行方案、产品落地和知识产权保护，减少盲目投入，提高从创意到成果的转化效率。
 
 ---
 
@@ -211,15 +212,17 @@ innoforge/
 - **后端**：Rust + Axum + SQLite（内嵌，零配置）
 - **前端**：原生 HTML/CSS/JS（无需构建工具）
 - **AI**：兼容任意 OpenAI API + 9 个内置预设自动容灾
-- **搜索**：CNIPR + SerpAPI + Google Patents + 本地库（级联回退）
+- **搜索**：SerpAPI + Google Patents + 本地库（级联回退；EPO OPS 需凭据才启用）
 - **移动端**：Rust cdylib / staticlib 导出 C ABI，供任意 WebView 壳内嵌（壳工程不在本仓库）
 - **国际化**：中英双语
 
 ### 已知限制
 
-- 页面图表通过 jsDelivr CDN 加载 `chart.js@4`，**完全离线环境下图表不渲染**（其余功能不受影响）。
+- **扫描版 PDF（无可复制文字）需要本机运行 [Umi-OCR](https://github.com/hiroi-sora/Umi-OCR)**（默认 `127.0.0.1:1224`）。未运行时会直接返回「Umi-OCR 未运行」的明确错误（约 2 秒，不会等超时）；可改用文字版 PDF，或先 OCR 得到文本再上传。
 - 服务绑定 `0.0.0.0` 且无访问鉴权，请勿直接暴露公网。
 - 在线专利检索依赖 SerpAPI / Google Patents 可达性；不可用时自动回退本地库，结果为空说明本地库尚未导入数据。
+- AI 功能需要自备一个 OpenAI 兼容的 API Key；不配置时检索、收藏、导入与管理仍可用。
+- 页面图表使用随包携带的本地 Chart.js（`/static/vendor/chart.umd.min.js`），**离线可用**。
 
 ---
 
@@ -254,6 +257,8 @@ innoforge/
 2. 创建功能分支 (`git checkout -b feature/amazing`)
 3. 提交更改
 4. 发起 Pull Request
+
+> 维护者与 AI agent 的开工程序见 [AGENTS.md](AGENTS.md) §〇 与 [2026-10-27 整顿令](docs/plans/2026-10-27-rectification.md)；开工前请声明 `ACK 2026-10-27 整顿令`。这条是给贡献者的，不影响普通用户使用。
 
 ---
 
