@@ -4,6 +4,19 @@
 All notable changes are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
+## [v0.9.26] - 2026-11-03
+
+### 修复 / Fixed
+
+- **报告/分析强制中文输出**：AI 生成的报告与分析 prompt 未约束语言，输入英文材料时跟着漂英文；现三处结构化结论报告/讨论总结 prompt 要求全文中文撰写（专利号、专业术语、化学式可保留原文）（[#182](https://github.com/jsshwqz/innoforge/pull/182)）。
+- **CN 专利 enrich 补更新中文标题**：enrich 路径更新了摘要/权利要求/说明书却漏了标题；现以 `lang=zh` 抓取详情，标题含 CJK 时覆盖（[#182](https://github.com/jsshwqz/innoforge/pull/182)）。
+- **搜索结果列表中文标题优先命中与异步自愈**：本地库已有 CJK 标题时不再被在线英文标题冲刷覆盖；新增 `POST /api/patent/resolve-chinese-titles` 批量拉取官方中文标题并回写，前端渲染后静默替换（[#183](https://github.com/jsshwqz/innoforge/pull/183)）。
+
+### 文档 / Docs
+
+- **README 首屏还给用户**：一句话定位 + 版本徽章 + 三步开始 + 文档入口；整顿令入口移到「贡献」节，机器守卫不削弱（[#181](https://github.com/jsshwqz/innoforge/pull/181)）。
+
+---
 ## [v0.9.25] - 2026-11-03
 
 ### 修复 / Fixed
