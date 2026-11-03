@@ -23,62 +23,84 @@ use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::process::Command;
 
-// ── 类目 1：申请人姓名（汉字 + 拼音）──
+// ── 外置隐私禁词表加载机制（绝不将真实案件字面量硬编码入库）──
 
-/// 申请人姓名汉字形态：用字符数组逐字符拼接构造。
-fn forbidden_name_cn() -> String {
-    let chars: [char; 3] = ['\u{738b}', '\u{9752}', '\u{829d}'];
-    chars.iter().collect()
+fn dirs_home_dir() -> Option<std::path::PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(std::path::PathBuf::from)
 }
 
-/// 申请人姓名拼音形态：用字符数组逐字符拼接构造。
-/// 守卫文件自身不含此拼音字面量。
-fn forbidden_name_pinyin() -> String {
-    let chars: [char; 11] = ['w', 'a', 'n', 'g', 'q', 'i', 'n', 'g', 'z', 'h', 'i'];
-    chars.iter().collect()
-}
+/// 从环境变量或外置配置文件加载动态禁词列表（绝不入库）。
+/// 优先级：
+/// 1. 环境变量 INNOFORGE_PRIVACY_TERMS（分号分隔或指向文件）
+/// 2. ~/.config/innoforge/privacy-terms.txt
+/// 3. 本地工程目录下 privacy-terms.txt（已加入 .gitignore）
+fn load_external_privacy_terms() -> Vec<String> {
+    let mut terms = Vec::new();
 
-// ── 类目 2：对比文件公开号（每段 ≤4 字符，运行时拼接）──
+    // 1. 检查环境变量
+    if let Ok(val) = std::env::var("INNOFORGE_PRIVACY_TERMS") {
+        let val_trim = val.trim();
+        if !val_trim.is_empty() {
+            let path = std::path::Path::new(val_trim);
+            if path.exists() && path.is_file() {
+                if let Ok(content) = std::fs::read_to_string(path) {
+                    for line in content.lines() {
+                        let l = line.trim();
+                        if !l.is_empty() && !l.starts_with('#') {
+                            terms.push(l.to_string());
+                        }
+                    }
+                }
+            } else {
+                for part in val_trim.split([';', '\n']) {
+                    let p = part.trim();
+                    if !p.is_empty() && !p.starts_with('#') {
+                        terms.push(p.to_string());
+                    }
+                }
+            }
+        }
+    }
 
-fn forbidden_pub_numbers() -> Vec<String> {
-    // D1 → ["CN","1031","3314","4A"]
-    let d1 = format!("{}{}{}{}", "CN", "1031", "3314", "4A");
-    // D2 → ["CN","1131","0768","4A"]
-    let d2 = format!("{}{}{}{}", "CN", "1131", "0768", "4A");
-    // D3 → ["CN","2109","5132","0U"]
-    let d3 = format!("{}{}{}{}", "CN", "2109", "5132", "0U");
-    // D4 → ["CN","2183","2814","1U"]
-    let d4 = format!("{}{}{}{}", "CN", "2183", "2814", "1U");
-    // 旧案公开号A → ["CN","1150","7668","8A"]
-    let p1 = format!("{}{}{}{}", "CN", "1150", "7668", "8A");
-    // 旧案公开号B → ["CN","1149","6275","7U"]
-    let p2 = format!("{}{}{}{}", "CN", "1149", "6275", "7U");
-    vec![d1, d2, d3, d4, p1, p2]
-}
+    // 2. 检查 ~/.config/innoforge/privacy-terms.txt
+    if terms.is_empty() {
+        if let Some(home) = dirs_home_dir() {
+            let p = home
+                .join(".config")
+                .join("innoforge")
+                .join("privacy-terms.txt");
+            if p.exists() {
+                if let Ok(content) = std::fs::read_to_string(&p) {
+                    for line in content.lines() {
+                        let l = line.trim();
+                        if !l.is_empty() && !l.starts_with('#') {
+                            terms.push(l.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
 
-// ── 类目 3：发文序号（16 位，每段 ≤4 字符拼接）──
+    // 3. 检查仓库本地根目录下的 privacy-terms.txt（已被 .gitignore 忽略）
+    if terms.is_empty() {
+        let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let local_p = manifest_dir.join("privacy-terms.txt");
+        if local_p.exists() {
+            if let Ok(content) = std::fs::read_to_string(&local_p) {
+                for line in content.lines() {
+                    let l = line.trim();
+                    if !l.is_empty() && !l.starts_with('#') {
+                        terms.push(l.to_string());
+                    }
+                }
+            }
+        }
+    }
 
-fn forbidden_filing_serials() -> Vec<String> {
-    // 驳回决定发文序号 → ["2026","0710","0014","1920"]
-    let s1 = format!("{}{}{}{}", "2026", "0710", "0014", "1920");
-    // 一通发文序号 → ["2026","0301","0002","8380"]
-    let s2 = format!("{}{}{}{}", "2026", "0301", "0002", "8380");
-    vec![s1, s2]
-}
-
-// ── 类目 4：被禁申请号（每段 ≤4 字符拼接）──
-
-fn forbidden_app_numbers() -> Vec<String> {
-    // 案号A → ["2022","1083","5143","9"] 四段拼接
-    let a1 = format!("{}{}{}{}", "2022", "1083", "5143", "9");
-    let a1d = format!("{}{}.{}", "2022", "1083", "5143.9");
-    // 案号B → ["2022","1047","7324","9"] 四段拼接
-    let a2 = format!("{}{}{}{}", "2022", "1047", "7324", "9");
-    let a2d = format!("{}{}.{}", "2022", "1047", "7324.9");
-    // 案号B 的数字错位变体（同一案件曾被误写成 13 连号形态）→ ["2022","1047","7732","4"]
-    let a3 = format!("{}{}{}{}", "2022", "1047", "7732", "4");
-    let a3d = format!("{}{}.{}", "2022", "1047", "7732.4");
-    vec![a1, a1d, a2, a2d, a3, a3d]
+    terms
 }
 
 /// 白名单：必须保持为空。不许为了让测试通过而往白名单加条目。
@@ -199,59 +221,27 @@ fn is_hex_fragment(text: &str, start: usize, end: usize) -> bool {
     matches!(before, Some(c) if is_hex(c)) || matches!(after, Some(c) if is_hex(c))
 }
 
-/// 对单个文本（内容或路径）执行全部四类检查，返回违规类别列表。
+/// 对单个文本（内容或路径）执行全部检查，返回违规类别列表。
 /// 违规消息不回显命中串本身。
-///
-/// 大小写敏感性：
-/// - 申请人姓名汉字：中文无大小写概念，直接匹配。
-/// - 拼音／公开号／序号／申请号：大小写不敏感（每个文件只 to_lowercase 一次）。
-///   防止小写公开号 / 混合大小写拼音等形态漏网。
-fn check_text(text: &str, shape_eligible: bool) -> Vec<&'static str> {
+fn check_text_with_terms(text: &str, shape_eligible: bool, terms: &[String]) -> Vec<&'static str> {
     let mut hits: Vec<&'static str> = Vec::new();
 
-    // 类目 1：申请人姓名（汉字 — 中文无大小写，直接匹配）
-    if text.contains(&forbidden_name_cn()) {
-        hits.push("申请人姓名(汉字)");
-    }
-
-    // 大小写不敏感类目：对 text 做一次 to_lowercase，needle 也 lowercase
-    let text_lower = text.to_lowercase();
-
-    // 类目 1 续：申请人姓名拼音（大小写不敏感，防混合大小写拼音漏网）
-    if text_lower.contains(&forbidden_name_pinyin().to_lowercase()) {
-        hits.push("申请人姓名(拼音)");
-    }
-
-    // 类目 2：对比文件公开号（大小写不敏感，防小写公开号漏网）
-    for n in forbidden_pub_numbers() {
-        if text_lower.contains(&n.to_lowercase()) {
-            hits.push("对比文件公开号");
-            break;
+    // 1. 本地动态外置禁词表匹配（大小写不敏感 + 汉字包含）
+    if !terms.is_empty() {
+        let text_lower = text.to_lowercase();
+        for t in terms {
+            let t_trimmed = t.trim();
+            if t_trimmed.is_empty() {
+                continue;
+            }
+            if text.contains(t_trimmed) || text_lower.contains(&t_trimmed.to_lowercase()) {
+                hits.push("外置隐私禁词命中");
+                break;
+            }
         }
     }
 
-    // 类目 3：发文序号（纯数字，大小写不敏感无影响，走同一路径保持一致）
-    for n in forbidden_filing_serials() {
-        if text_lower.contains(&n) {
-            hits.push("发文序号");
-            break;
-        }
-    }
-
-    // 类目 4：被禁申请号（纯数字，同上）
-    for n in forbidden_app_numbers() {
-        if text_lower.contains(&n) {
-            hits.push("被禁申请号");
-            break;
-        }
-    }
-
-    // 类目 4 续：形状检查（src/ 生代码 + docs/ + tests/ + templates/，大小写不敏感）
-    // 正则修正：申请号 12 位 + . + 1 位校验（现行标准形态）或 13 连号（历史）；
-    //           公开号 CN + 9 位 + 文献种类码（现行）或 CN + 8 位 + 字母（历史）；
-    //           并保留 US/WO 历史形态。
-    // allowlist：合成夹具（99/90 段等）命中时放行，不误红。
-    // 哈希片段：13 位数字若嵌在更长十六进制串里则跳过（非独立号码）。
+    // 2. 形状检查（src/ 生代码 + docs/ + tests/ + templates/，大小写不敏感）
     if shape_eligible {
         let re_app_num = Regex::new(r"(?:\d{12}\.\d|\d{13})").expect("invalid app num regex");
         let re_pub_num_9 = Regex::new(r"(?i)CN\d{9}[A-Z]{1,2}").expect("invalid pub num 9 regex");
@@ -298,6 +288,10 @@ fn check_text(text: &str, shape_eligible: bool) -> Vec<&'static str> {
     }
 
     hits
+}
+
+fn check_text(text: &str, shape_eligible: bool) -> Vec<&'static str> {
+    check_text_with_terms(text, shape_eligible, &[])
 }
 
 /// 收集待扫文件：优先 `git ls-files`（跟踪树权威清单）。
@@ -351,6 +345,18 @@ fn no_case_data_in_git_tracked_files() {
         mode
     );
 
+    let terms = load_external_privacy_terms();
+    if terms.is_empty() {
+        eprintln!(
+            "[NOTICE] 未检测到本地外置隐私禁词（可通过 ~/.config/innoforge/privacy-terms.txt 或 INNOFORGE_PRIVACY_TERMS 注入）；守卫将执行形状网正则与不可逆 SHA-256 长句摘要扫描。"
+        );
+    } else {
+        eprintln!(
+            "案件数据守卫：已加载 {} 条外置本地禁词执行严格子串与精确匹配",
+            terms.len()
+        );
+    }
+
     let mut scanned: usize = 0;
     let mut violations: Vec<String> = Vec::new();
 
@@ -361,17 +367,13 @@ fn no_case_data_in_git_tracked_files() {
             continue;
         }
 
-        // ── 路径扫描：对所有文件路径执行四类检查 ──
-        // （tests/fixtures/ 路径也扫，因为泄露可能藏在路径里的姓名/案号）
-        let path_hits = check_text(file, false);
+        // ── 路径扫描：对所有文件路径执行检查 ──
+        let path_hits = check_text_with_terms(file, false, &terms);
         for h in path_hits {
             violations.push(format!("{}: 路径命中 [{}]", file, h));
         }
 
         // ── 内容扫描 ──
-        // tests/fixtures/ 内容也扫描：fixture 按定义是合成内容，
-        // 若往 fixture 里塞真实案卷，守卫必须报警。不留静默口子。
-
         let content = match std::fs::read_to_string(file) {
             Ok(c) => c,
             Err(_) => continue,
@@ -380,19 +382,14 @@ fn no_case_data_in_git_tracked_files() {
         scanned += 1;
 
         let is_rust = file.starts_with("src/") && file.ends_with(".rs");
-        // 形状网覆盖域：src/ 生代码区 + docs/ + tests/ + templates/
         let shape_eligible = is_rust
             || file.starts_with("docs/")
             || file.starts_with("tests/")
             || file.starts_with("templates/");
         let prod = production_part(&content, is_rust);
-        let mut content_hits = check_text(prod, shape_eligible);
-        // 2026-10-28 盲区修复：Rust 文件的 #[cfg(test)] 区域此前完全不参与内容扫描，
-        // 真实案号写进单测夹具仍能全绿（已发生两次）。此处对**精确禁忌字面量**
-        // （姓名/对比文件公开号/发文序号/被禁申请号）在全文件范围补扫；
-        // 形状正则仍只跑生代码区——放开到测试区会把合成夹具与 EPO 文档号误判。
+        let mut content_hits = check_text_with_terms(prod, shape_eligible, &terms);
         if is_rust && prod.len() != content.len() {
-            for h in check_text(&content, false) {
+            for h in check_text_with_terms(&content, false, &terms) {
                 if !content_hits.contains(&h) {
                     content_hits.push(h);
                 }
@@ -419,16 +416,15 @@ fn no_case_data_in_git_tracked_files() {
     }
 }
 
-// ── 回归测试：大小写不敏感匹配 ──
+// ── 回归测试：大小写不敏感匹配（使用合成词测试逻辑，不硬编码真实案卷） ──
 
 #[test]
 fn case_insensitive_pub_number_lowercase_is_caught() {
-    // 合成字符串：小写 cn + D1 号码形态（不使用真实 D1 号码字面量）
-    let d1_lower = format!("{}{}{}{}", "cn", "1031", "3314", "4a");
-    let sample = format!("文件名 d1_{}.pdf", d1_lower);
-    let hits = check_text(&sample, false);
+    let sample = "文件名 d1_cn990001001a.pdf";
+    let terms = vec!["CN990001001A".to_string()];
+    let hits = check_text_with_terms(sample, false, &terms);
     assert!(
-        hits.contains(&"对比文件公开号"),
+        hits.contains(&"外置隐私禁词命中"),
         "lowercase pub number must be caught, got hits: {:?}",
         hits
     );
@@ -436,15 +432,12 @@ fn case_insensitive_pub_number_lowercase_is_caught() {
 
 #[test]
 fn case_insensitive_pinyin_mixed_case_is_caught() {
-    // 混合大小写拼音（首字母大写形态）
-    let pinyin_mixed: String = {
-        let chars: [char; 11] = ['W', 'a', 'n', 'g', 'Q', 'i', 'n', 'g', 'Z', 'h', 'i'];
-        chars.iter().collect()
-    };
+    let pinyin_mixed = "SyntheticPersonName";
     let sample = format!("作者：{}", pinyin_mixed);
-    let hits = check_text(&sample, false);
+    let terms = vec!["syntheticpersonname".to_string()];
+    let hits = check_text_with_terms(&sample, false, &terms);
     assert!(
-        hits.contains(&"申请人姓名(拼音)"),
+        hits.contains(&"外置隐私禁词命中"),
         "mixed-case pinyin must be caught, got hits: {:?}",
         hits
     );
@@ -452,12 +445,11 @@ fn case_insensitive_pinyin_mixed_case_is_caught() {
 
 #[test]
 fn case_insensitive_pub_number_uppercase_still_caught() {
-    // 大写形态仍应被命中（回归：不能因为加了不敏感而漏掉原来的大写）
-    let d1_upper = format!("{}{}{}{}", "CN", "1031", "3314", "4A");
-    let sample = format!("对比文件 {}", d1_upper);
-    let hits = check_text(&sample, false);
+    let sample = "对比文件 CN990001001A";
+    let terms = vec!["cn990001001a".to_string()];
+    let hits = check_text_with_terms(sample, false, &terms);
     assert!(
-        hits.contains(&"对比文件公开号"),
+        hits.contains(&"外置隐私禁词命中"),
         "uppercase pub number must still be caught, got hits: {:?}",
         hits
     );
