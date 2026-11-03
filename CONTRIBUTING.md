@@ -24,7 +24,7 @@
 ### 发布门禁（强制）
 
 - 发布前必须执行人工实测清单：`docs/release-gate-manual-e2e.md`
-- 发布前可执行自动核验脚本：`docs/release_verify.ps1`
+- 发布前可执行自动核验脚本：`scripts/release_verify.ps1`
 - 若任一功能项或资产核验失败，不得宣布“发布成功”
 - 发布后必须补复盘文档（问题、修复、复验结论）
 
@@ -35,14 +35,21 @@
 - 所有面向用户的文本：中文在前，英文在后
 - 提交信息使用中文，格式：`feat/fix/refactor: 简要描述`
 
+### 开发者与 AI 协作规范
+
+* **人类贡献者指南**：遵循本文件（`CONTRIBUTING.md`）的标准 GitHub 流程。
+* **AI 代理开发规约**：本项目采用多 Agent / AI 协同工程化流程。所有参与编码的 AI Agent 必须在开工前读取并严格遵守 [`AGENTS.md`](AGENTS.md) 中的工程纪律、边界守卫与质量门禁。
+* **文档中心**：完整架构与 API 契约文档参见 [`docs/README.md`](docs/README.md)。
+
 ### 项目结构
 
 ```
-src/           # Rust 核心代码（后端 + API）
-templates/     # HTML 页面模板
-static/        # 静态资源（CSS、JS）
-tests/         # 集成测试
-docs/          # 文档
+src/           # Rust 核心代码（后端 + API + 状态机流水线）
+templates/     # 服务端渲染 HTML 页面模板
+static/        # 前端静态资源（CSS、JS、双语翻译）
+tests/         # 集成测试与守卫测试
+scripts/       # 构建、代码生成与契约验证工具脚本
+docs/          # 项目文档中心（详见 docs/README.md）
 ```
 
 ### 关联仓库

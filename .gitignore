@@ -31,6 +31,8 @@ server.log
 # .reasonix / .codex 配置目录（AI Agent 工作文件）
 .reasonix/
 .codex/
+.zcode/
+_skeleton_backup/
 
 # 调试产物 / Debug artifacts（排障时落到根目录的请求体、日志、抓取结果）
 # 2026-09-20 核实：239 个已跟踪文件中无任何路径命中下列模式，故不会屏蔽真实源码
@@ -65,9 +67,20 @@ hotfix_v053.patch
 # AI 生成的报告和临时产物 / AI-generated reports and temp artifacts
 辩论报告*.md
 辩论报告*.txt
+*质量分析报告*.md
 ocr_result.json
 test_*.png
 test_*.pdf
+*.patch
+
+# 内部交接与单次测试证据（禁止入库，防止公网泄露）
+docs/local-context/
+handover-*.md
+red-evidence-*.md
+*e2e-artifact*.json
+*real-test*.json
+release-postmortem-*.md
+release-incident-*.md
 
 # 已拆出的独立项目 / Separated into standalone repos
 skills/

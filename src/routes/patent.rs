@@ -85,6 +85,7 @@ pub async fn api_enrich_patent(
                             json!({"status":"error","message":format!("SerpAPI: {}", err)}),
                         );
                     }
+                    let fetched_title = json["title"].as_str().unwrap_or("").to_string();
                     let abstract_text = json["abstract"].as_str().unwrap_or("").to_string();
                     let claims_arr = json["claims"].as_array();
                     let claims = claims_arr
@@ -155,6 +156,16 @@ pub async fn api_enrich_patent(
                         .unwrap_or_default();
                     let family_id = json["family_id"].as_str().map(|s| s.to_string());
                     let mut updated = patent.clone();
+                    // CN 专利：详情端点以 lang=zh 抓取，返回的 title 才是中文原文。
+                    // 搜索阶段落库的 title 常是 Google 英文翻译版，此处若详情返回的 title
+                    // 含 CJK 则用它覆盖（含 CJK 才覆盖，避免英文 title 反向顶掉中文）。
+                    if !fetched_title.is_empty()
+                        && fetched_title
+                            .chars()
+                            .any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c))
+                    {
+                        updated.title = fetched_title;
+                    }
                     if !abstract_text.is_empty() {
                         updated.abstract_text = abstract_text;
                     }
