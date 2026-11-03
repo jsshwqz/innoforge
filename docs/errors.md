@@ -1606,3 +1606,11 @@
 - **修复 / Fix**: ①修复 `tests/no_case_data_in_repo.rs` 中的字符匹配数组（`[';', '\n']`）与无意义借用；②在 `docs/errors.md` 沉淀本条复盘记录；③更新 PR 正文。
 - **预防 / Prevention**: ①本地 Rust 静态检查必须统一使用 `cargo clippy --all-targets -- -D warnings`，与 CI 命令严格保持一致；②提交前检查改动范围，若触碰 `src/templates/tests` 必须同步复盘或做显式豁免声明。
 
+
+## [2026-11-04] 65 `Cargo.lock` 无 eol 规则以 CRLF 入库：本机 cargo 重新生成即 5000+ 行噪音 diff
+- **严重程度 / Severity**: LOW
+- **涉及文件**: `.gitattributes`, `Cargo.lock`
+- **现象 / Symptom**: v0.9.27 发版分支上跑 `cargo metadata`（同步 innoforge 包版本号），`Cargo.lock` 的 diff 变成全文件 5294 行（2647 行全删全加），而实际内容只变了 1 行版本号。
+- **根因 / Root cause**: `.gitattributes` 的换行规则按扩展名声明，`*.toml` 匹配不到 `Cargo.lock`（扩展名是 `.lock`），于是它没有任何 eol 规则、以 CRLF 入库（`git ls-files --eol` 可复现 `attr/` 为空）；本机 `core.autocrlf=true`，cargo 重写 lock 时输出 LF，clean filter 再把 CRLF 工作副本归一成 LF 入暂存区，与旧 CRLF blob 逐行不等 ⇒ 全文件 diff。#90 勘误（2026-11-03）已指出该缺口。
+- **修复 / Fix**: v0.9.27 发版 PR 一次性归一化 lock 为 LF，并在 `.gitattributes` 补 `Cargo.lock text eol=lf` 钉住规则；此后 cargo 再怎么重写都不再翻转。
+- **预防 / Prevention**: ①新入库的生成物文件先查 `git ls-files --eol`，`attr/` 为空的文本文件迟早踩换行翻转；②给 lock 类文件做内容级 diff 时先 `git diff --stat` 看行数量级，数量级与预期不符先怀疑换行符而非内容。

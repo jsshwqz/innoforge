@@ -65,3 +65,7 @@ Dockerfile text eol=lf
 .env.example text eol=lf
 .gitattributes text eol=lf
 LICENSE text eol=lf
+# Cargo.lock 不匹配 *.toml（扩展名是 .lock），此前无任何 eol 规则，以 CRLF 入库；
+# 本机 cargo 重新生成会整文件翻成 LF，产生 5000+ 行噪音 diff（#90 勘误 2026-11-03）。
+# v0.9.27 发版时一次性归一化为 LF 并钉住规则，此后不再翻转。
+Cargo.lock text eol=lf

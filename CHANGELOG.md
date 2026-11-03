@@ -4,6 +4,17 @@
 All notable changes are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
+## [v0.9.27] - 2026-11-04
+
+### 安全修复 / Security
+
+- **案件数据一票否决禁词表外置化彻底脱敏**：守卫源码与规约中不再存放任何真实姓名/拼音/公开号/发文序号字面量（含字符数组、分段拼接等可还原形式）；禁词表改从本地外置文件 `~/.config/innoforge/privacy-terms.txt` 或环境变量 `INNOFORGE_PRIVACY_TERMS` 动态加载，绝不入库；未配置本地表时只打印提示、保留长句摘要（SHA-256 digest）守卫、申请号/公开号形状正则与路径级扫描，不静默跳过（[#185](https://github.com/jsshwqz/innoforge/pull/185)）。
+
+### 工程整理 / Maintenance
+
+- **根目录只留用户与构建入口**：开发脚本收敛进 `scripts/`（模板校验、E2E、dev.bat），手工排查脚本进 `scripts/manual/`，`tools/` 只留被文档引用的用户工具；同步 CI、pre-commit、PR 模板与 AGENTS/CLAUDE/README 路径引用；新增 `tests/repo_root_layout.rs` 根目录白名单守卫（含负控）——根目录出现未登记条目 CI 直接红（[#186](https://github.com/jsshwqz/innoforge/pull/186)）。
+
+---
 ## [v0.9.26] - 2026-11-03
 
 ### 修复 / Fixed
