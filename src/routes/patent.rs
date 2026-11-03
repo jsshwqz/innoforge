@@ -1541,7 +1541,8 @@ mod patent_image_proxy_tests {
         assert_eq!(loaded.title, "一种合成测试装置");
 
         // 验证 update_patent_title 正常更新
-        db.update_patent_title(&id1, "更新后的中文标题").expect("update");
+        db.update_patent_title(&id1, "更新后的中文标题")
+            .expect("update");
         let loaded2 = db.get_patent(&id1).expect("get").expect("found");
         assert_eq!(loaded2.title, "更新后的中文标题");
     }
