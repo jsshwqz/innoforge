@@ -101,7 +101,7 @@ Invoke-Case -Rows $rows -CaseName "ai_chat_web" -Uri "$BaseUrl/api/ai/chat" -Bod
     history    = @()
 } -Count $NAiWeb -TimeoutSec $TimeoutSec
 Invoke-Case -Rows $rows -CaseName "search_online" -Uri "$BaseUrl/api/search/online" -Body @{
-    query       = "wang qing zhi"
+    query       = "damper control device"
     page        = 1
     page_size   = 5
     search_type = "keyword"

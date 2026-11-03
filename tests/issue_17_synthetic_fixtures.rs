@@ -125,11 +125,15 @@ fn fixture_has_no_real_patent_numbers() {
 #[test]
 fn fixture_has_no_real_applicant_names() {
     let fixture = fixture_json();
-    let forbidden: String = ['\u{738b}', '\u{9759}', '\u{829d}'].iter().collect();
-    assert!(
-        !fixture.contains(&forbidden),
-        "Fixture contains a forbidden applicant name"
-    );
+    // 夹具必须为虚构合成数据，若配置了外部隐私禁词则额外校验
+    if let Ok(terms) = std::env::var("INNOFORGE_PRIVACY_TERMS") {
+        for term in terms.split(';').map(str::trim).filter(|s| !s.is_empty()) {
+            assert!(
+                !fixture.contains(term),
+                "Fixture must not contain configured privacy term"
+            );
+        }
+    }
 }
 
 #[test]

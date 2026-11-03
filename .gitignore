@@ -114,3 +114,8 @@ tests/fixtures/*
 # 本地一次性探针（读私有案件文本，永不入库）；曾因 git add -A 误入 #149
 /examples/gate_*.rs
 /examples/header_probe.rs
+
+# 本地外置隐私禁词表（禁止入库）
+privacy-terms.txt
+.privacy-terms*
+
