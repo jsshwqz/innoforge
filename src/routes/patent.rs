@@ -6,7 +6,9 @@ use axum::{
     response::IntoResponse,
     Json,
 };
+use serde::Deserialize;
 use serde_json::json;
+use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 pub async fn api_fetch_patent(
@@ -344,6 +346,106 @@ pub async fn api_patent_lookup(
     }
 
     Json(json!({"status": "error", "message": "Patent not found in local DB"}))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ResolveTitlesRequest {
+    pub patents: Vec<ResolveTitleItem>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ResolveTitleItem {
+    pub id: String,
+    pub patent_number: Option<String>,
+}
+
+/// 批量为 CN 专利补齐中文标题（优先查本地库，库中无则异步拉取详情并回写库）
+pub async fn api_resolve_chinese_titles(
+    State(s): State<AppState>,
+    Json(req): Json<ResolveTitlesRequest>,
+) -> Json<serde_json::Value> {
+    let mut resolved_titles: HashMap<String, String> = HashMap::new();
+    let api_key_opt = s
+        .config
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .next_serpapi_key();
+
+    // 限制单批最多 15 个，防止突发流量
+    let items: Vec<ResolveTitleItem> = req.patents.into_iter().take(15).collect();
+    let mut need_fetch: Vec<(String, String)> = Vec::new(); // (id, patent_number)
+
+    for item in items {
+        // 1. 先查本地数据库：如果已经存在中文标题，直接复用
+        if let Ok(Some(p)) = s.db.get_patent(&item.id) {
+            if p.title
+                .chars()
+                .any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c))
+            {
+                resolved_titles.insert(item.id.clone(), p.title);
+                continue;
+            }
+        }
+        let pn = item.patent_number.or_else(|| {
+            s.db.get_patent(&item.id)
+                .ok()
+                .flatten()
+                .map(|p| p.patent_number)
+        });
+        if let Some(pn) = pn {
+            let is_cn = pn.to_uppercase().starts_with("CN");
+            if is_cn {
+                need_fetch.push((item.id, pn));
+            }
+        }
+    }
+
+    // 2. 针对库中缺失中文标题的项，若配置了 SerpAPI Key 则并发拉取详情中的中文标题
+    if let Some(ref api_key) = api_key_opt {
+        if !need_fetch.is_empty() {
+            let client = crate::common::build_upstream_client();
+            let mut tasks = Vec::new();
+            for (id, pn) in need_fetch {
+                let client = client.clone();
+                let api_key = api_key.clone();
+                tasks.push(tokio::spawn(async move {
+                    let patent_id_param = format!("patent/{}/zh", pn);
+                    let url = format!(
+                        "https://serpapi.com/search.json?engine=google_patents_details&patent_id={}&api_key={}",
+                        urlencoding::encode(&patent_id_param),
+                        api_key
+                    );
+                    if let Ok(resp) = client.get(&url).send().await {
+                        if let Ok(body) = resp.text().await {
+                            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) {
+                                if let Some(title) = json["title"].as_str() {
+                                    if title
+                                        .chars()
+                                        .any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c))
+                                    {
+                                        return Some((id, title.to_string()));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    None
+                }));
+            }
+
+            for task in tasks {
+                if let Ok(Some((id, chinese_title))) = task.await {
+                    let _ = s.db.update_patent_title(&id, &chinese_title);
+                    resolved_titles.insert(id, chinese_title);
+                }
+            }
+        }
+    }
+
+    Json(json!({
+        "status": "ok",
+        "titles": resolved_titles
+    }))
 }
 
 /// POST /api/patent/lookup-or-fetch — 先查本地库，找不到则在线抓取并缓存
@@ -1393,5 +1495,55 @@ mod patent_image_proxy_tests {
     fn rejects_streams_that_exceed_image_limit() {
         assert!(image_body_can_accept_chunk(MAX_PATENT_IMAGE_BYTES - 1, 1));
         assert!(!image_body_can_accept_chunk(MAX_PATENT_IMAGE_BYTES, 1));
+    }
+
+    #[test]
+    fn test_chinese_title_preserved_against_english_overwrite() {
+        let db = crate::db::Database::init(":memory:").expect("in-memory db");
+        let p_zh = crate::patent::Patent {
+            id: "test-id-1".to_string(),
+            patent_number: "CN119999999A".to_string(),
+            title: "一种合成测试装置".to_string(),
+            abstract_text: "测试摘要".to_string(),
+            description: String::new(),
+            claims: String::new(),
+            applicant: "测试申请人".to_string(),
+            inventor: "测试发明人".to_string(),
+            filing_date: "2024-01-01".to_string(),
+            publication_date: "2024-06-01".to_string(),
+            grant_date: None,
+            ipc_codes: String::new(),
+            cpc_codes: String::new(),
+            priority_date: String::new(),
+            country: "CN".to_string(),
+            kind_code: "A".to_string(),
+            family_id: None,
+            legal_status: String::new(),
+            citations: "[]".to_string(),
+            cited_by: "[]".to_string(),
+            source: "test".to_string(),
+            raw_json: "{}".to_string(),
+            created_at: String::new(),
+            images: "[]".to_string(),
+            pdf_url: String::new(),
+        };
+        let id1 = db.insert_patent(&p_zh).expect("insert zh");
+
+        // 尝试用同号英文标题覆盖
+        let mut p_en = p_zh.clone();
+        p_en.id = "new-temp-id".to_string();
+        p_en.title = "A synthetic test device".to_string();
+        let id2 = db.insert_patent(&p_en).expect("insert en");
+        assert_eq!(id1, id2);
+
+        // 验证已有中文标题未被英文冲掉
+        let loaded = db.get_patent(&id1).expect("get").expect("found");
+        assert_eq!(loaded.title, "一种合成测试装置");
+
+        // 验证 update_patent_title 正常更新
+        db.update_patent_title(&id1, "更新后的中文标题")
+            .expect("update");
+        let loaded2 = db.get_patent(&id1).expect("get").expect("found");
+        assert_eq!(loaded2.title, "更新后的中文标题");
     }
 }

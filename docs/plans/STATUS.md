@@ -14,6 +14,15 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-11-03 — **搜索结果列表中文标题优先命中与异步自愈补齐**（PR #183）
+
+- **状态 / Status**: 🚧 PR open（分支 `fix/search-list-chinese-title`，PR #183），等 CI
+- **驱动**: Google Patents 检索列表默认只返回英文机翻标题、且在线重查会冲刷本地已有中文标题；研发人员体验受损。
+- **根因**: ① Google Patents 检索 API（`engine=google_patents`）未返回中文标题；② `insert_patent` 使用无条件覆盖，在线重新搜索时会将库中已富化出的中文标题冲成英文。
+- **修复**: ① 数据库 `insert_patent` 增加防冲刷保护，含 CJK 标题时阻止英文覆盖，并提供 `update_patent_title`；② `rank_and_gate_hits` 组装 `PatentSummary` 优先回填本地库中文标题；③ 新增端点 `POST /api/patent/resolve-chinese-titles` 批量拉取中文原文；④ 前端 `templates/search.html` 渲染后异步静默请求并无感自愈替换。
+- **验证**: `cargo test --lib test_chinese_title_preserved_against_english_overwrite`；15 项隐私守卫测试全绿；HTML 模板函数完整性扫描全绿；Release 构建与进程热替换完成。
+
+
 ### 2026-10-27 — **M2 第一轮：答复书证据化 / 法条化 + CaseMeta 回填**（分支 `m2/letter-evidence`）
 
 - **状态 / Status**: 🚧 PR 待开，等 CI

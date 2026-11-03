@@ -290,10 +290,21 @@ where
             "hybrid(pos:{:.0}+content:{:.0})",
             position_score, content_score
         );
+        let title_to_use = match db.get_patent(&saved_id) {
+            Ok(Some(existing))
+                if existing
+                    .title
+                    .chars()
+                    .any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c)) =>
+            {
+                existing.title
+            }
+            _ => p.title.clone(),
+        };
         patents.push(PatentSummary {
             id: saved_id,
             patent_number: p.patent_number.clone(),
-            title: p.title.clone(),
+            title: title_to_use,
             abstract_text: p.abstract_text.clone(),
             applicant: p.applicant.clone(),
             inventor: p.inventor.clone(),

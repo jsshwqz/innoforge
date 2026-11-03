@@ -8,11 +8,15 @@ impl super::Database {
         let c = self.conn();
         let canonical = crate::patent::canonical_patent_key(&p.patent_number);
         let mut final_id = p.id.clone();
+        let mut final_title = p.title.clone();
+        let mut final_abstract = p.abstract_text.clone();
+        let mut final_description = p.description.clone();
+        let mut final_claims = p.claims.clone();
 
         // Reuse existing row id for same canonical publication key to avoid duplicate rows.
         if !canonical.is_empty() {
             let mut stmt = c.prepare(
-                "SELECT id, patent_number FROM patents
+                "SELECT id, patent_number, title, abstract_text, description, claims FROM patents
                  WHERE patent_number LIKE ?1
                     OR REPLACE(REPLACE(UPPER(patent_number), ' ', ''), '.', '') LIKE ?2
                  LIMIT 200",
@@ -25,6 +29,38 @@ impl super::Database {
                 let existing_number: String = row.get(1)?;
                 if crate::patent::canonical_patent_key(&existing_number) == canonical {
                     final_id = existing_id;
+                    let existing_title: String = row.get(2).unwrap_or_default();
+                    let existing_abstract: String = row.get(3).unwrap_or_default();
+                    let existing_desc: String = row.get(4).unwrap_or_default();
+                    let existing_claims_text: String = row.get(5).unwrap_or_default();
+
+                    // 若已有中文标题，严禁被新抓到的纯英文标题冲刷覆盖（保持中文原文）
+                    let existing_has_cjk = existing_title
+                        .chars()
+                        .any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c));
+                    let new_has_cjk = p
+                        .title
+                        .chars()
+                        .any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c));
+                    if existing_has_cjk && !new_has_cjk {
+                        final_title = existing_title;
+                    }
+                    if existing_claims_text.len() > p.claims.len() {
+                        final_claims = existing_claims_text;
+                    }
+                    if existing_desc.len() > p.description.len() {
+                        final_description = existing_desc;
+                    }
+                    let existing_abs_has_cjk = existing_abstract
+                        .chars()
+                        .any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c));
+                    let new_abs_has_cjk = p
+                        .abstract_text
+                        .chars()
+                        .any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c));
+                    if existing_abs_has_cjk && !new_abs_has_cjk && !existing_abstract.is_empty() {
+                        final_abstract = existing_abstract;
+                    }
                     break;
                 }
             }
@@ -38,7 +74,7 @@ impl super::Database {
             tracing::warn!("FTS delete for patent {} failed: {}", final_id, e);
         }
         c.execute("INSERT OR REPLACE INTO patents (id,patent_number,title,abstract_text,description,claims,applicant,inventor,filing_date,publication_date,grant_date,ipc_codes,cpc_codes,priority_date,country,kind_code,family_id,legal_status,citations,cited_by,source,raw_json,images,pdf_url) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24)",
-            params![final_id,p.patent_number,p.title,p.abstract_text,p.description,p.claims,p.applicant,p.inventor,p.filing_date,p.publication_date,p.grant_date,p.ipc_codes,p.cpc_codes,p.priority_date,p.country,p.kind_code,p.family_id,p.legal_status,p.citations,p.cited_by,p.source,p.raw_json,p.images,p.pdf_url])?;
+            params![final_id,p.patent_number,final_title,final_abstract,final_description,final_claims,p.applicant,p.inventor,p.filing_date,p.publication_date,p.grant_date,p.ipc_codes,p.cpc_codes,p.priority_date,p.country,p.kind_code,p.family_id,p.legal_status,p.citations,p.cited_by,p.source,p.raw_json,p.images,p.pdf_url])?;
         // Insert single row into FTS index (incremental, not full rebuild)
         if let Err(e) = c.execute(
             "INSERT INTO patents_fts(rowid, patent_number, title, abstract_text, claims, applicant, inventor, ipc_codes) SELECT rowid, patent_number, title, abstract_text, claims, applicant, inventor, ipc_codes FROM patents WHERE id = ?1",
@@ -47,6 +83,22 @@ impl super::Database {
             tracing::warn!("FTS insert for patent {} failed: {}", final_id, e);
         }
         Ok(final_id)
+    }
+
+    /// 局部更新单篇专利标题并同步更新 FTS 索引
+    pub fn update_patent_title(&self, id: &str, title: &str) -> Result<bool> {
+        let c = self.conn();
+        let rows_affected = c.execute(
+            "UPDATE patents SET title = ?1 WHERE id = ?2",
+            params![title, id],
+        )?;
+        if rows_affected > 0 {
+            let _ = c.execute(
+                "UPDATE patents_fts SET title = ?1 WHERE rowid = (SELECT rowid FROM patents WHERE id = ?2)",
+                params![title, id],
+            );
+        }
+        Ok(rows_affected > 0)
     }
 
     pub fn get_patent(&self, id: &str) -> Result<Option<Patent>> {
