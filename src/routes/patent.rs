@@ -1496,4 +1496,53 @@ mod patent_image_proxy_tests {
         assert!(image_body_can_accept_chunk(MAX_PATENT_IMAGE_BYTES - 1, 1));
         assert!(!image_body_can_accept_chunk(MAX_PATENT_IMAGE_BYTES, 1));
     }
+
+    #[test]
+    fn test_chinese_title_preserved_against_english_overwrite() {
+        let db = crate::db::Database::init(":memory:").expect("in-memory db");
+        let p_zh = crate::patent::Patent {
+            id: "test-id-1".to_string(),
+            patent_number: "CN119999999A".to_string(),
+            title: "一种合成测试装置".to_string(),
+            abstract_text: "测试摘要".to_string(),
+            description: String::new(),
+            claims: String::new(),
+            applicant: "测试申请人".to_string(),
+            inventor: "测试发明人".to_string(),
+            filing_date: "2024-01-01".to_string(),
+            publication_date: "2024-06-01".to_string(),
+            grant_date: None,
+            ipc_codes: String::new(),
+            cpc_codes: String::new(),
+            priority_date: String::new(),
+            country: "CN".to_string(),
+            kind_code: "A".to_string(),
+            family_id: None,
+            legal_status: String::new(),
+            citations: "[]".to_string(),
+            cited_by: "[]".to_string(),
+            source: "test".to_string(),
+            raw_json: "{}".to_string(),
+            created_at: String::new(),
+            images: "[]".to_string(),
+            pdf_url: String::new(),
+        };
+        let id1 = db.insert_patent(&p_zh).expect("insert zh");
+
+        // 尝试用同号英文标题覆盖
+        let mut p_en = p_zh.clone();
+        p_en.id = "new-temp-id".to_string();
+        p_en.title = "A synthetic test device".to_string();
+        let id2 = db.insert_patent(&p_en).expect("insert en");
+        assert_eq!(id1, id2);
+
+        // 验证已有中文标题未被英文冲掉
+        let loaded = db.get_patent(&id1).expect("get").expect("found");
+        assert_eq!(loaded.title, "一种合成测试装置");
+
+        // 验证 update_patent_title 正常更新
+        db.update_patent_title(&id1, "更新后的中文标题").expect("update");
+        let loaded2 = db.get_patent(&id1).expect("get").expect("found");
+        assert_eq!(loaded2.title, "更新后的中文标题");
+    }
 }
