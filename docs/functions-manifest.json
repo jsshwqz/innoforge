@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-10-26T17:09:05.548Z",
+  "generatedAt": "2026-11-03T10:28:47.228Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -581,6 +581,7 @@
         "renderPagination",
         "renderResults",
         "renderSearchDiagnostics",
+        "resolveChineseTitles",
         "runRiskAssessment",
         "saveHistory",
         "saveSearchPdfMeta",

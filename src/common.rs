@@ -458,6 +458,10 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
             post(routes::api_patent_lookup_and_fetch),
         )
         .route(
+            "/api/patent/resolve-chinese-titles",
+            post(routes::api_resolve_chinese_titles),
+        )
+        .route(
             "/api/patent/similar/:id",
             get(routes::api_recommend_similar),
         )

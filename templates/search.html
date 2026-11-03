@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -478,7 +478,7 @@ function renderResults(data, page, pageSize) {
                     <input type="checkbox" class="batch-check" data-id="${escapeHtml(p.id)}" style="width:16px;height:16px;cursor:pointer;">
                 </label>
                 <div style="flex:1;">
-                    <h3><a href="/patent/${escapeHtml(p.id)}">${escapeHtml(p.title || '无标题')}</a></h3>
+                    <h3><a id="patent-title-link-${escapeHtml(p.id)}" href="/patent/${escapeHtml(p.id)}">${escapeHtml(p.title || '无标题')}</a></h3>
                     <div class="meta-row">
                         <span>${t('meta.patent')}: ${escapeHtml(p.patent_number || '暂无')}</span>
                         <span>${t('meta.applicant')}: ${escapeHtml(p.applicant || '暂无')}</span>
@@ -526,6 +526,45 @@ function renderResults(data, page, pageSize) {
 
     document.getElementById('results').innerHTML = html + '<div id="batch-result" style="margin-top:16px;"></div>';
     renderPagination(total, page, pageSize);
+    resolveChineseTitles(patents);
+}
+
+function resolveChineseTitles(patents) {
+    if (!Array.isArray(patents) || patents.length === 0) return;
+    const cjkRegex = /[\u4e00-\u9fa5]/;
+    const candidates = [];
+    patents.forEach(function(p) {
+        if (!p || !p.id) return;
+        const isCn = (p.country === 'CN') || (p.patent_number && p.patent_number.toUpperCase().startsWith('CN'));
+        if (isCn && p.title && !cjkRegex.test(p.title)) {
+            candidates.push({ id: p.id, patent_number: p.patent_number });
+        }
+    });
+
+    if (candidates.length === 0) return;
+
+    fetch('/api/patent/resolve-chinese-titles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ patents: candidates })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data && data.status === 'ok' && data.titles) {
+            Object.keys(data.titles).forEach(function(id) {
+                const newTitle = data.titles[id];
+                if (newTitle && cjkRegex.test(newTitle)) {
+                    const el = document.getElementById('patent-title-link-' + id);
+                    if (el) {
+                        el.textContent = newTitle;
+                    }
+                }
+            });
+        }
+    })
+    .catch(function(err) {
+        console.debug('resolveChineseTitles fallback:', err);
+    });
 }
 
 // ── MA5b 检索诊断面板 ─────────────────────────────────────────────────────────
