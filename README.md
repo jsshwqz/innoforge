@@ -180,28 +180,25 @@ docker run -p 3000:3000 -v innoforge-data:/data innoforge
 
 ```
 innoforge/
-  src/
+  src/                    # Rust 源码
     main.rs               # Web 服务器入口
     lib.rs                # 库导出 + Android JNI / iOS FFI
-    patent.rs             # 数据模型
     ai/                   # AI 客户端（多服务商容灾）
-      client.rs           # HTTP 客户端 + 故障转移
-      chat.rs             # 对话接口
-      patent.rs           # 专利分析（摘要/对比/风险）
-      idea.rs             # 创意验证
-    db/                   # SQLite 数据库
-      patent.rs           # 专利 CRUD + FTS5 全文搜索
-      settings.rs         # 配置持久化
-      migrations.rs       # 数据库迁移
-    routes/               # API 路由处理器
+    db/                   # SQLite 数据库 + 迁移
+    routes/               # HTTP 路由处理器
     pipeline/             # 16 步创新验证流水线
-      steps/
-        deep_reasoning.rs # AI 深度推演
-    bin/
-      mcp-server.rs       # MCP 协议服务器
+    bin/mcp-server.rs     # MCP 协议服务器
   templates/              # HTML 页面模板
-  static/                 # 静态资源（CSS/JS）
+  static/                 # 静态资源（CSS/JS/本地 Chart.js）
+  tests/                  # 集成测试与守卫
+  scripts/                # 开发脚本（模板校验 / E2E / 发布辅助）
+    manual/               # 手工排查脚本（不参与 CI）
+  tools/                  # 独立小工具（公开数据导入、深度门测试）
+  docs/                   # 文档，入口见 docs/README.md
+  start.bat               # Windows 一键启动（用户入口）
 ```
+
+文档分三类，请不要混用：`docs/README.md` 是索引；`docs/API*.md` 是给使用者的接口说明；`docs/plans/` 与 `docs/plan/`、`docs/progress/`、`docs/records/` 是维护过程记录（会过期，按日期读）。
 
 **关联仓库：** 桌面端（Tauri）、iOS 原生壳、鸿蒙原生壳均为**规划中的独立仓库，目前尚未创建**。本仓库的 `src/lib.rs` 已导出 C ABI（`innoforge_start_server` / `innoforge_shutdown_server`）以供这些壳工程内嵌，欢迎按需自行封装。
 

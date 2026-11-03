@@ -87,7 +87,7 @@ routes/* (13 子模块, handler 层——但普遍混入业务逻辑)
 
 | 出口 | 产物 | 说明 |
 |------|------|------|
-| 桌面/Docker | innoforge-server 二进制 | start.bat / dev.bat / Dockerfile |
+| 桌面/Docker | innoforge-server 二进制 | start.bat / scripts/dev.bat / Dockerfile |
 | 移动端 | cdylib/staticlib | 由独立仓库消费（innoforge-desktop/-ios/-harmony，不在本仓库） |
 | MCP | innoforge-mcp 二进制 | `bin/mcp-server.rs` |
 | 静态资源 | rust-embed 编译嵌入 | 改前端需重编译 |
