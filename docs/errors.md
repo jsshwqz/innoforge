@@ -1597,3 +1597,12 @@
 - **回归 / 负控**: `fabricated_paragraph_is_unverified`（编造 `第9999段` 必须 unverified）；`digit_inclusion_would_be_a_false_green` **把被拒的设计钉成用例**——同一段文本用"数字包含"判过、用三元组判不过；`kind_mismatch_is_unverified` / `doc_mismatch_is_unverified`（层级、文档号不许互相顶替）；`zero_padded_number_matches_by_value`；`empty_index_reports_unverified_not_pass`；`unparsable_anchor_is_counted_separately`（不进分母）。
 - **已知边界**: 生产接线要等检索分块的 `section_tag`（#78 冻结中）；当前路由拿不到分块元数据，所以只报"引用了 N 处锚点、无法核对"，不假装核验过。
 - **预防**: ①**"指称"类判据必须按它的元组逐项比**，把任何一维降级成"包含"都会退回假绿；②"解析不出来"≠"匹配不上"，两者分母不同，合并后得到的比例没有意义；③拒掉一个设计时，把它写成**能复现假绿的用例**，比在注释里写"不要这样做"有效。
+
+## [2026-11-03] 64 本地 clippy 漏测 targets 导致 CI 假绿 + 守卫修改触发 Doc Staleness
+- **严重程度 / Severity**: MEDIUM
+- **涉及文件**: `tests/no_case_data_in_repo.rs`, `.github/workflows/ci.yml`
+- **现象 / Symptom**: 本地执行 `cargo clippy -- -D warnings` 零警告，但提交 PR #185 后 CI 在 `Clippy` 与 `Doc Staleness` 两个 job 报红。
+- **根因 / Root cause**: ①本地未带 `--all-targets` 参数，clippy 默认仅检查 lib/bin 目标，遗漏了集成测试目标（tests/）中的 `clippy::manual_pattern_char_comparison` 与 `clippy::needless_borrow`；②CI 的 `Doc Staleness`（#31 规约空转防护）检测到 PR 修改了 `tests/*` 但未同步更新复盘文档（`docs/errors.md`），且 PR 描述中缺少豁免声明。
+- **修复 / Fix**: ①修复 `tests/no_case_data_in_repo.rs` 中的字符匹配数组（`[';', '\n']`）与无意义借用；②在 `docs/errors.md` 沉淀本条复盘记录；③更新 PR 正文。
+- **预防 / Prevention**: ①本地 Rust 静态检查必须统一使用 `cargo clippy --all-targets -- -D warnings`，与 CI 命令严格保持一致；②提交前检查改动范围，若触碰 `src/templates/tests` 必须同步复盘或做显式豁免声明。
+

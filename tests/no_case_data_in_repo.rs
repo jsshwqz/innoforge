@@ -54,7 +54,7 @@ fn load_external_privacy_terms() -> Vec<String> {
                     }
                 }
             } else {
-                for part in val_trim.split(|c| c == ';' || c == '\n') {
+                for part in val_trim.split([';', '\n']) {
                     let p = part.trim();
                     if !p.is_empty() && !p.starts_with('#') {
                         terms.push(p.to_string());
@@ -422,7 +422,7 @@ fn no_case_data_in_git_tracked_files() {
 fn case_insensitive_pub_number_lowercase_is_caught() {
     let sample = "文件名 d1_cn990001001a.pdf";
     let terms = vec!["CN990001001A".to_string()];
-    let hits = check_text_with_terms(&sample, false, &terms);
+    let hits = check_text_with_terms(sample, false, &terms);
     assert!(
         hits.contains(&"外置隐私禁词命中"),
         "lowercase pub number must be caught, got hits: {:?}",
@@ -447,7 +447,7 @@ fn case_insensitive_pinyin_mixed_case_is_caught() {
 fn case_insensitive_pub_number_uppercase_still_caught() {
     let sample = "对比文件 CN990001001A";
     let terms = vec!["cn990001001a".to_string()];
-    let hits = check_text_with_terms(&sample, false, &terms);
+    let hits = check_text_with_terms(sample, false, &terms);
     assert!(
         hits.contains(&"外置隐私禁词命中"),
         "uppercase pub number must still be caught, got hits: {:?}",
