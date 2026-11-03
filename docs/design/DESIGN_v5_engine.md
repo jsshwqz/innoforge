@@ -251,7 +251,7 @@ CaseInput
 ```json
 {
   "case_meta": {
-    "application_number": "2025108888888",
+    "application_number": "1990999999999",
     "applicant": "张三",
     "invention_title": "一种散热装置",
     "oa_type": "reject_review"
