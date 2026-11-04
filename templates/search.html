@@ -193,6 +193,7 @@ function clearSearchPdfMeta() {
     'results.searching': '搜索中...',
     'results.noData': '未找到结果',
     'results.info': '找到 {total} 条 | 第 {page} 页 | 每页 {size} 条{source}',
+    'results.upstream_filtered': '上游共命中 {upstream} 条，低相关结果已按相关性过滤',
     'results.source': '来源',
     'results.google': 'Google Patents',
     'results.score': '相关性评分',
@@ -276,6 +277,7 @@ function clearSearchPdfMeta() {
     'results.searching': 'Searching...',
     'results.noData': 'No results',
     'results.info': 'Found {total} | page {page} | {size}/page{source}',
+    'results.upstream_filtered': 'upstream matched {upstream}, low-relevance results filtered',
     'results.source': 'source',
     'results.google': 'Google Patents',
     'results.score': 'Relevance',
@@ -439,11 +441,19 @@ async function doSearch(page) {
 function renderResults(data, page, pageSize) {
     renderSearchDiagnostics(data);
     const total = Number(data.total || 0);
-    const source = data.source ? ` | ${t('results.source')}: ${escapeHtml(data.source)}` : '';
+    // 后端如实返回的每页条数优先（在线源上游每页 10 条，与请求的 page_size 可能不同；
+    // 本地兜底回显请求值）。翻页数学必须用真实交付口径，否则会算出不存在的页。
+    const effectiveSize = Number(data.page_size) || pageSize;
+    let source = data.source ? ` | ${t('results.source')}: ${escapeHtml(data.source)}` : '';
+    // 上游总数 > 本页可展示数时（免费直抓源不支持翻页 + 相关性过滤折损），如实展示两个口径
+    const upstream = Number(data.upstream_total || 0);
+    if (upstream > total) {
+        source += `<span class="muted"> | ${escapeHtml(t('results.upstream_filtered', { upstream }))}</span>`;
+    }
     document.getElementById('results-info').innerHTML = t('results.info', {
         total,
         page,
-        size: pageSize,
+        size: effectiveSize,
         source
     });
 
@@ -525,7 +535,7 @@ function renderResults(data, page, pageSize) {
     </div>` + html;
 
     document.getElementById('results').innerHTML = html + '<div id="batch-result" style="margin-top:16px;"></div>';
-    renderPagination(total, page, pageSize);
+    renderPagination(total, page, effectiveSize);
     resolveChineseTitles(patents);
 }
 

@@ -240,7 +240,7 @@ impl GooglePatentsXhrProvider {
     ///
     /// 参数顺序固定 `q → country → language → assignee → inventor → sort`，
     /// 便于逐字符断言。**日期参数刻意缺席**（已知坑 2），`page`/`num` 亦不下发
-    /// （见 [`Self::pagination_note`]）。
+    /// （该源不支持翻页，`page > 1` 的请求在 [`Self::search`] 入口直接 Skipped）。
     pub(crate) fn inner_url(query: &SearchQuery) -> String {
         // 摘掉日期后交给共用的 render_q，保证 q 串渲染全仓只有一份出处（AGENTS.md 2.2）；
         // 日期改由客户端过滤，见 filter_by_publication_window。
@@ -290,21 +290,20 @@ impl GooglePatentsXhrProvider {
         )
     }
 
-    /// 翻页能力说明（MA2a 的如实边界，不是 TODO 暗坑）。
+    /// 免费直抓源**不支持翻页**（MA2a 如实边界，2026-11-04 收紧为「跳过」而非「伪装」）。
     ///
     /// 响应里的 `num_page` / `total_num_pages` 表明上游按页返回，但**页参数名未能在本次
     /// 实证中确认**（探测期间本机 IP 被 503 挡住，见 EVIDENCE 第 5 条），spec §2 的参数清单
-    /// 里也没有它。宁可不翻页，也不伪造一个未验证的参数：`page > 1` 时本源返回第 1 页内容
-    /// 并在 `AttemptReport::hint` 明示，交由 MA2b/MA3 补齐。
-    fn pagination_note(query: &SearchQuery) -> Option<String> {
-        if query.page > 1 {
-            Some(
-                "Google Patents 直抓源暂不支持翻页（页参数未实证），本次返回第 1 页内容。"
-                    .to_string(),
-            )
-        } else {
-            None
-        }
+    /// 里也没有它。宁可不翻页，也不伪造一个未验证的参数。
+    ///
+    /// **2026-11-04 缺陷修复**：旧行为是 `page > 1` 时仍发请求并把第 1 页内容**伪装成
+    /// 第 N 页**返回（仅挂一条 hint）——用户翻页时看到与第 1 页完全相同的结果，感知为
+    /// 「翻页一直重复」。现改为 `page > 1` 直接 **Skipped**（一发请求都不发），如实告诉
+    /// 用户该源翻不了页；链路自然落到下一个源或本地兜底，绝不再伪造分页内容。
+    fn pagination_skipped_hint(page: usize) -> String {
+        format!(
+            "Google Patents 免费直抓源不支持翻页（页参数未实证），第 {page} 页请求已跳过，避免返回与第 1 页重复的内容。"
+        )
     }
 
     /// 等待到允许发起下一次请求（spec §2 已知坑 1 的限速落点）。
@@ -605,8 +604,29 @@ impl SearchProvider for GooglePatentsXhrProvider {
     ) -> Pin<Box<dyn Future<Output = SearchOutcome> + Send + 'a>> {
         Box::pin(async move {
             let started = self.clock.now_ms();
+
+            // 免费直抓源不支持翻页：page > 1 直接 Skipped（一发请求都不发），
+            // 绝不把第 1 页内容伪装成第 N 页返回（旧行为会让用户「翻页一直重复」）。
+            if query.page > 1 {
+                println!(
+                    "[ONLINE] {SOURCE_LABEL} page={} skipped (pagination not supported)",
+                    query.page
+                );
+                return SearchOutcome {
+                    results: Vec::new(),
+                    attempts: vec![AttemptReport {
+                        source: SourceKind::GooglePatentsXhr,
+                        status: AttemptStatus::Skipped,
+                        latency_ms: self.clock.now_ms().saturating_sub(started),
+                        hits: 0,
+                        error: None,
+                        hint: Some(Self::pagination_skipped_hint(query.page)),
+                    }],
+                    upstream_total: None,
+                };
+            }
+
             let url = Self::request_url(&query);
-            let hint = Self::pagination_note(&query);
             println!(
                 "[ONLINE] {SOURCE_LABEL} url={} page={}",
                 report_excerpt(&url),
@@ -633,7 +653,7 @@ impl SearchProvider for GooglePatentsXhrProvider {
                     latency_ms: self.clock.now_ms().saturating_sub(started),
                     hits,
                     error: error_note,
-                    hint,
+                    hint: None,
                 }],
                 upstream_total,
             }
@@ -992,6 +1012,50 @@ pub(crate) mod tests {
         assert!(
             inner.starts_with("q=\"CN202420009882.7\" OR \"202420009882\""),
             "{inner}"
+        );
+    }
+
+    /// **2026-11-04 缺陷修复锁**：`page > 1` 必须 Skipped（零出网），
+    /// 绝不把第 1 页内容伪装成第 N 页返回（旧行为 = 用户「翻页一直重复」）。
+    #[tokio::test]
+    async fn page_beyond_first_is_skipped_without_any_upstream_request() {
+        let (p, transport, _clock) = provider(vec![reply(200, REAL_CN_REPLY)]);
+        let mut q = query("固态电池");
+        q.page = 2;
+
+        let outcome = p.search(q).await;
+
+        // 一发上游请求都没有
+        assert_eq!(
+            0,
+            transport.fetch_count(),
+            "不支持翻页的源在 page>1 时不得发起任何上游请求"
+        );
+        // 记账为 Skipped + 明确 hint，结果为空（链路落到下一个源/本地兜底）
+        assert_eq!(0, outcome.results.len(), "不得携带任何伪造的分页结果");
+        assert_eq!(
+            None, outcome.upstream_total,
+            "不得携带上游总数（根本没问过上游）"
+        );
+        let report = &outcome.attempts[0];
+        assert!(
+            matches!(report.status, AttemptStatus::Skipped),
+            "{:?}",
+            report.status
+        );
+        let hint = report.hint.as_deref().unwrap_or_default();
+        assert!(
+            hint.contains("不支持翻页"),
+            "hint 应如实说明翻页能力: {hint}"
+        );
+        assert!(hint.contains("已跳过"), "hint 应说明本次已跳过: {hint}");
+        // page=1 的正常路径不受影响（对照：同传输下 page=1 正常出网）
+        let (p1, transport1, _c1) = provider(vec![reply(200, REAL_CN_REPLY)]);
+        let outcome1 = p1.search(query("固态电池")).await;
+        assert_eq!(1, transport1.fetch_count(), "page=1 应正常发起请求");
+        assert!(
+            matches!(outcome1.attempts[0].status, AttemptStatus::Success),
+            "page=1 照常成功"
         );
     }
 
