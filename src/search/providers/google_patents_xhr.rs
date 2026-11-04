@@ -1356,19 +1356,14 @@ pub(crate) mod tests {
         assert!(!decoded.contains("num="), "不得凭空发明条数参数: {decoded}");
     }
 
-    #[tokio::test]
-    async fn page_gt_one_returns_first_page_with_honest_hint() {
-        let mut q = query("动车组电池健康状态");
-        q.page = 3;
-        let (p, _transport, _clock) = provider(vec![reply(200, REAL_CN_REPLY)]);
-        let outcome = p.search(q).await;
-        let hint = outcome.attempts[0].hint.clone().expect("pagination hint");
-        assert!(hint.contains("翻页"), "{hint}");
-        assert!(
-            !outcome.results.is_empty(),
-            "提示不等于把结果清空——数据完整性优先（AGENTS.md 2.5）"
-        );
-    }
+    /// （2026-11-04 已删除 `page_gt_one_returns_first_page_with_honest_hint`。）
+    /// 旧测试锁的是「page>1 仍返回第 1 页内容 + 挂 hint」——那条锁的本意是"提示不等于
+    /// 清空结果（AGENTS.md 2.5 数据完整性）"，但它锁住的正是本次用户实测报告的缺陷：
+    /// 把第 1 页数据**伪装成第 N 页**返回 = 伪造分页，用户翻页永远看到同样几条
+    /// （"一直重复"）。伪造分页内容不属于 2.5 要保护的数据完整性——2.5 禁的是把
+    /// 送往 AI/递交用途的数据截断，而不是把"拿不到的第 2 页"用第 1 页冒充。
+    /// 新语义（Skipped 零出网 + 如实 hint）由
+    /// [`page_beyond_first_is_skipped_without_any_upstream_request`] 锁死。
 
     #[tokio::test]
     async fn kind_and_lookup_exact_defaults() {
