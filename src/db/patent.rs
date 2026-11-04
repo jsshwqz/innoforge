@@ -645,8 +645,13 @@ impl super::Database {
         let c = self.conn();
         let offset = page.saturating_sub(1) * page_size;
 
-        // 按空白切 token；单 token 时退化为旧整串 LIKE（issue #72）。
-        let tokens: Vec<&str> = query.split_whitespace().filter(|s| !s.is_empty()).collect();
+        // 多词查询切 token：优先尊重用户空格，无空格中文长句自动提取核心技术词，均走 OR 语义。
+        let extracted_words = crate::search::relevance::extract_query_words(query);
+        let tokens: Vec<&str> = if !extracted_words.is_empty() {
+            extracted_words.iter().map(|s| s.as_str()).collect()
+        } else {
+            query.split_whitespace().filter(|s| !s.is_empty()).collect()
+        };
         if tokens.is_empty() {
             return Ok((vec![], 0));
         }

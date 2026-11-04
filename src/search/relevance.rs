@@ -24,6 +24,68 @@ pub fn contains_cjk(s: &str) -> bool {
     s.chars().any(|c| ('\u{4E00}'..='\u{9FFF}').contains(&c))
 }
 
+/// 从查询词中提取检索关键词单元。
+///
+/// 1. 若查询词包含空格（如英文多词或用户显式输入了空格），按空格切分，保留既有行为；
+/// 2. 若查询词为连续无空格的中文长句（字数 > 4）：
+///    - 剥离专利模板停用词与虚词（如「一种」、「基于」、「用于」、「关于」、「具有」、「带有」、
+///      「及其」、「以及」、「通过」、「包括」、「之中」、「之」、「的」、「装置」、「系统」、
+///      「方法」、「设备」、「结构」、「部件」、「组件」、「机构」、「功能」、「技术」、「带」、
+///      「有」等）；
+///    - 提取有意义的技术关键词单元（长度 >= 2）；
+///    - 长度 >= 4 的复合词进一步拆解出 2 字符核心子词（例如「润滑油嘴」拆解出「润滑」、「油嘴」）；
+///    - 始终将原始 query 保留在首位，确保完全匹配该长句的结果具有最高排序权重。
+pub fn extract_query_words(q: &str) -> Vec<String> {
+    let whitespace_tokens: Vec<String> = q
+        .split_whitespace()
+        .filter(|w| !w.is_empty())
+        .map(|w| w.to_string())
+        .collect();
+
+    if whitespace_tokens.len() > 1 || !contains_cjk(q) || q.chars().count() <= 4 {
+        return whitespace_tokens;
+    }
+
+    const NOISE_WORDS: &[&str] = &[
+        "一种", "基于", "用于", "关于", "具有", "带有", "及其", "以及", "通过", "包括", "之中",
+        "之", "的", "装置", "系统", "方法", "设备", "结构", "部件", "组件", "机构", "功能", "技术",
+        "带", "有",
+    ];
+
+    let mut cleaned = q.to_string();
+    for nw in NOISE_WORDS {
+        cleaned = cleaned.replace(nw, " ");
+    }
+
+    let chunks: Vec<&str> = cleaned
+        .split_whitespace()
+        .filter(|w| w.chars().count() >= 2)
+        .collect();
+
+    let mut terms: Vec<String> = Vec::new();
+    terms.push(q.trim().to_string());
+
+    for chunk in chunks {
+        if !terms.contains(&chunk.to_string()) {
+            terms.push(chunk.to_string());
+        }
+        let char_count = chunk.chars().count();
+        if char_count >= 4 {
+            let chars: Vec<char> = chunk.chars().collect();
+            let sub1: String = chars[..2].iter().collect();
+            let sub2: String = chars[char_count - 2..].iter().collect();
+            if !terms.contains(&sub1) {
+                terms.push(sub1);
+            }
+            if !terms.contains(&sub2) {
+                terms.push(sub2);
+            }
+        }
+    }
+
+    terms
+}
+
 /// 计算文本相似度分数（用于在线搜索排序和过滤）
 pub fn calculate_online_relevance(
     query: &str,
@@ -47,9 +109,9 @@ pub fn calculate_online_relevance(
         score += 35.0;
     } else {
         // Word-level matching in title
-        let q_words: Vec<&str> = q.split_whitespace().filter(|w| w.len() > 1).collect();
+        let q_words = extract_query_words(&q);
         if !q_words.is_empty() {
-            let matches = q_words.iter().filter(|w| t.contains(*w)).count();
+            let matches = q_words.iter().filter(|w| t.contains(w.as_str())).count();
             score += (matches as f64 / q_words.len() as f64) * 30.0;
         }
         // Chinese bigram matching
@@ -82,9 +144,9 @@ pub fn calculate_online_relevance(
     if a.contains(&q) {
         score += 15.0;
     } else {
-        let q_words: Vec<&str> = q.split_whitespace().filter(|w| w.len() > 1).collect();
+        let q_words = extract_query_words(&q);
         if !q_words.is_empty() {
-            let matches = q_words.iter().filter(|w| a.contains(*w)).count();
+            let matches = q_words.iter().filter(|w| a.contains(w.as_str())).count();
             score += (matches as f64 / q_words.len() as f64) * 10.0;
         }
         let q_chars: Vec<char> = q
@@ -169,8 +231,23 @@ pub fn is_online_result_relevant(
         return true;
     }
 
-    // 中文查询：门槛更高，避免无关英文噪声
+    // 中文查询：门槛与核心词放行（避免无关英文噪声，同时支持中文长句检索）
     if is_cn_query {
+        let q_words = extract_query_words(&ql);
+        // 若从长查询中抽取出了多个核心技术单元（如「测温」、「润滑油嘴」等）
+        if q_words.len() >= 3 {
+            let haystack = format!("{t} {a}");
+            let core_words = &q_words[1..];
+            let matched = core_words
+                .iter()
+                .filter(|term| haystack.contains(term.as_str()))
+                .count();
+            // 命中 2 个或以上核心词，或核心词覆盖率过半，直接判定为相关
+            if matched >= 2 || (matched >= 1 && matched * 2 >= core_words.len()) {
+                return true;
+            }
+        }
+
         if contains_cjk(title) || contains_cjk(abstract_text) {
             return content_score >= 45.0;
         }
@@ -447,5 +524,62 @@ mod tests {
         );
         // 空 inventor 的既有行为：`q.contains(&inv)` 对空串恒真 → +15
         assert_eq!(45.0, calculate_online_relevance("abc", "xyz", "", "", ""));
+    }
+
+    #[test]
+    fn extract_query_words_handles_chinese_long_queries_and_preserves_short() {
+        // 短词保持原样
+        assert_eq!(vec!["固态电池"], extract_query_words("固态电池"));
+        // 带空格保持原样
+        assert_eq!(
+            vec!["润滑油嘴", "测温"],
+            extract_query_words("润滑油嘴 测温")
+        );
+        // 英文保持原样
+        assert_eq!(
+            vec!["lithium", "battery"],
+            extract_query_words("lithium battery")
+        );
+
+        // 中文无空格长句：自动剔除模板停用词并提取核心单元
+        let words = extract_query_words("一种带测温功能的润滑油嘴");
+        assert!(words.contains(&"一种带测温功能的润滑油嘴".to_string()));
+        assert!(words.contains(&"测温".to_string()));
+        assert!(words.contains(&"润滑油嘴".to_string()));
+        assert!(words.contains(&"润滑".to_string()));
+        assert!(words.contains(&"油嘴".to_string()));
+    }
+
+    #[test]
+    fn long_chinese_query_relevant_results_pass_and_noise_rejected() {
+        let q = "一种带测温功能的润滑油嘴";
+
+        // 相关结果必须放行
+        let relevant_title = "智能测温润滑油嘴";
+        let relevant_abs = "本实用新型公开了一种智能测温润滑油嘴，包括油嘴本体和温度传感器。";
+        let score = calculate_online_relevance(q, relevant_title, relevant_abs, "", "zzz");
+        assert!(
+            is_online_result_relevant(q, relevant_title, relevant_abs, score, true, "zzz"),
+            "相关专利不应被门禁误杀：score={score}"
+        );
+
+        // 部分命中结果通过核心词放行
+        let partial_title = "一种风电变速器的润滑油在线监测方法";
+        let partial_abs = "基于磨损、润滑油理化性能进行监测。";
+        let score2 = calculate_online_relevance(q, partial_title, partial_abs, "", "zzz");
+        assert!(
+            score2 >= 45.0
+                || is_online_result_relevant(q, partial_title, partial_abs, score2, true, "zzz"),
+            "部分技术相关专利应被合理放行：score={score2}"
+        );
+
+        // 无关噪声仍然被严格拒绝
+        let noise_title = "一种折叠屏手机转轴结构";
+        let noise_abs = "本发明涉及移动终端技术领域，公开了一种折叠转轴组件。";
+        let score_noise = calculate_online_relevance(q, noise_title, noise_abs, "", "zzz");
+        assert!(
+            !is_online_result_relevant(q, noise_title, noise_abs, score_noise, true, "zzz"),
+            "无关噪声专利必须被拦截：score={score_noise}"
+        );
     }
 }

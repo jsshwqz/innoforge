@@ -547,12 +547,18 @@ pub async fn api_search(
         ],
     };
 
-    let tokens: Vec<String> = req
-        .query
-        .split_whitespace()
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_lowercase())
-        .collect();
+    let tokens: Vec<String> = {
+        let extracted = crate::search::relevance::extract_query_words(&req.query);
+        if !extracted.is_empty() {
+            extracted.into_iter().map(|s| s.to_lowercase()).collect()
+        } else {
+            req.query
+                .split_whitespace()
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_lowercase())
+                .collect()
+        }
+    };
     let token_count = tokens.len();
     let applied_filter = match detected_type {
         SearchType::Inventor => "inventor_only".to_string(),
