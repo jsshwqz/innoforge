@@ -1614,3 +1614,18 @@
 - **根因 / Root cause**: `.gitattributes` 的换行规则按扩展名声明，`*.toml` 匹配不到 `Cargo.lock`（扩展名是 `.lock`），于是它没有任何 eol 规则、以 CRLF 入库（`git ls-files --eol` 可复现 `attr/` 为空）；本机 `core.autocrlf=true`，cargo 重写 lock 时输出 LF，clean filter 再把 CRLF 工作副本归一成 LF 入暂存区，与旧 CRLF blob 逐行不等 ⇒ 全文件 diff。#90 勘误（2026-11-03）已指出该缺口。
 - **修复 / Fix**: v0.9.27 发版 PR 一次性归一化 lock 为 LF，并在 `.gitattributes` 补 `Cargo.lock text eol=lf` 钉住规则；此后 cargo 再怎么重写都不再翻转。
 - **预防 / Prevention**: ①新入库的生成物文件先查 `git ls-files --eol`，`attr/` 为空的文本文件迟早踩换行翻转；②给 lock 类文件做内容级 diff 时先 `git diff --stat` 看行数量级，数量级与预期不符先怀疑换行符而非内容。
+
+## [2026-11-04] 66 中文长查询因分母稀释与空白分词失效导致相关性门禁误杀清零（搜长句必 0 命中）
+- **严重程度 / Severity**: HIGH（用户输入稍长自然语言或带「一种...的」查询词即搜不到任何结果）
+- **涉及文件**: `src/search/relevance.rs`（`calculate_online_relevance`、`is_online_result_relevant`、新增 `extract_query_words`）、`src/db/patent.rs`（`search_like`）、`src/routes/search.rs`
+- **现象 / Symptom**: 用户搜索连续中文长短语（如「一种带测温功能的润滑油嘴」）时，上游 Google Patents 实际返回了数十篇相关专利，但界面显示「找到 0 条」；只有改为 2~4 字符短词（如「润滑油嘴」）才能搜出结果。用户感知为“必须精确输入关键词才能搜”。
+- **根因 / Root cause**:
+  1. `calculate_online_relevance` 原词级匹配使用 `q.split_whitespace()`：中文长句通常无空格，词级匹配 0 分（损失多达 40 分）；纯靠 bigram 统计，分母为全句字对数（11 个）。由于包含「一种」、「带」、「功能的」等模板词，除非标题几乎一字不差复现整句，否则字对覆盖率不足 60%，得分恒低于 45.0；
+  2. `is_online_result_relevant` 门禁对中文死卡 `content_score >= 45.0`，导致上游返回的数十篇高度相关专利全部被当成噪声抛弃；
+  3. 本地数据库检索 `search_like` 亦只依赖 `split_whitespace()`，无空格时退化为单串 `LIKE '%长句%'` 导致本地 0 命中。
+- **修复 / Fix**:
+  1. 新增 `extract_query_words`：对字数 > 4 且无空格的中文长句，自动剥离专利模板停用词（一种/基于/用于/具有/带有/功能/装置/方法等）并抽取 2~4 字符的核心技术单元；
+  2. `calculate_online_relevance` 与 `search_like` 接入提取关键词，使中文长句同样享受词级匹配与多 token OR 检索；
+  3. `is_online_result_relevant` 增加中文多核心词放行机制（与英文 query_terms 机制对齐，命中 2 个或以上核心词直接视为相关放行）。
+- **回归 / 负控**: `extract_query_words_handles_chinese_long_queries_and_preserves_short`（短词与空格分词保持原样，长句正确抽取关键词）；`long_chinese_query_relevant_results_pass_and_noise_rejected`（长句下相关专利得分从 42.0 提升至 52.0~82.7 并稳稳放行，无关噪声如折叠屏仍被严格拦截在 33.0 拒绝门外）。
+- **预防**: 多语言搜索算法必须针对该语言的书写习惯做特征提取（如中文无空格分词与专利套话前缀），不能直接套用英文基于 whitespace 的分词假设；算相似度比例时需警惕分母被停用词稀释导致长查询惩罚。
