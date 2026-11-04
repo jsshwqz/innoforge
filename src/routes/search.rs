@@ -773,15 +773,36 @@ pub async fn api_search_online(
 
     // 在线源成功且有命中 → 按旧形状直接返回；`source` 自 MA2a 起如实反映胜出源
     // （旧代码恒为 "serpapi"，因为那时只有一个在线源）。
+    //
+    // 2026-11-04 缺陷修复（「67 条却只显示 2 条」的错位观感）：`total` 的语义按胜出源的
+    // 真实翻页能力分档——
+    // - SerpAPI / EPO OPS 支持**真实上游翻页**（页参数已实证）：`total` = 上游总数，页码可信；
+    // - Google Patents 免费直抓源**不支持翻页**：它只回第 1 页且不可再取，若仍报上游总数
+    //   （如 67），前端会按它算出 7 页、每页还有过滤折损，用户翻页只会撞上本地兜底或空页。
+    //   故 `total` 如实改报**本页通过相关性过滤的真实条数**，另以纯新增键 `upstream_total`
+    //   保留「上游共命中 N 条」供前端展示，两端数字不再互相冒充。
     if let Some(winner) = outcome.winning_source() {
+        let gated_count = outcome.summaries().len();
+        let paginated = matches!(winner, SourceKind::SerpApi | SourceKind::EpoOps);
+        let (total, upstream_total) = if paginated {
+            (outcome.upstream_total.unwrap_or(0), outcome.upstream_total)
+        } else {
+            (gated_count, outcome.upstream_total)
+        };
         let mut out = json!({
             "patents": outcome.summaries(),
-            "total": outcome.upstream_total.unwrap_or(0),
+            "total": total,
             "page": req.page,
             "page_size": 10,
             "source": winner.as_str(),
             "attempts": attempts_json(&outcome)
         });
+        if let Some(up) = upstream_total {
+            if up > total {
+                // 纯新增键：仅当上游总数确实大于本页可展示数时才出现（不伪造、不误导）
+                out["upstream_total"] = json!(up);
+            }
+        }
         if let Some(h) = upstream_hint.take() {
             out["hint"] = json!(h);
         }
