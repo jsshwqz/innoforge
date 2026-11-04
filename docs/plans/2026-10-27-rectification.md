@@ -12,7 +12,7 @@
 
 ## 1. 效力链
 
-本令 > `AGENTS.md` 其余条款（安全/隐私红线除外）> issue #90 > `docs/plan/product-vision.md` > MASTER / STATUS / 2026-03-30 规划（均为历史，不得据其认领任务或判断进度）。
+本令 > `AGENTS.md` 其余条款（安全/隐私红线除外）> issue #90 > `docs/plans/product-vision.md` > MASTER / STATUS / 2026-03-30 规划（均为历史，不得据其认领任务或判断进度）。
 
 ## 2. 开工声明（不可跳过）
 
