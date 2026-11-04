@@ -4,6 +4,18 @@
 All notable changes are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
+## [v0.9.28] - 2026-11-05
+
+### 修复 / Fixed
+
+- **中文长句搜索恒空命中**：自然语言长短语（如「一种带测温功能的润滑油嘴」）在上游实际命中数十篇专利的情况下显示 0 条。根因是相关性打分的词级匹配依赖空格分词，中文长句恒为 0 分，字对统计的分母又被「一种 / 带 / 功能的」等专利模板词稀释，得分恒低于放行门槛被整页过滤。现自动剥离专利模板停用词并提取核心技术单元（如「测温」「润滑油嘴」）参与词级匹配与门禁放行；本地检索同步支持按核心词多词 OR（[#191](https://github.com/jsshwqz/innoforge/pull/191)）。
+- **在线搜索翻页一直重复**：免费直抓源（Google Patents XHR）不支持翻页，旧行为在第 2 页起把第 1 页内容伪装成当前页返回（仅挂提示），翻页永远看到同样几条；且 total 恒报上游总数（如 67），与每页实际可展示数错位（「67 条却只有 2 条」）。现该源在第 2 页起直接跳过并如实提示（零出网、绝不伪造分页内容）；响应按胜出源的翻页能力分档报告 total，另附 `upstream_total` 供前端展示「上游共命中 N 条，本页 M 条通过相关性过滤」；前端翻页改用后端如实返回的每页条数（[#192](https://github.com/jsshwqz/innoforge/pull/192)、[#193](https://github.com/jsshwqz/innoforge/pull/193)）。
+
+### 说明
+
+- 配置运维提示：配置了多个 SerpAPI Key 时，其中一个失效会导致轮询撞上即整源熔断 15 分钟（表现为在线搜索只剩不能翻页的免费直抓源）。可在设置页移除失效 Key，或到 [serpapi.com/manage-api-key](https://serpapi.com/manage-api-key) 换新。
+
+---
 ## [v0.9.27] - 2026-11-04
 
 ### 安全修复 / Security
