@@ -72,8 +72,12 @@ pub fn extract_query_words(q: &str) -> Vec<String> {
         let char_count = chunk.chars().count();
         if char_count >= 4 {
             let chars: Vec<char> = chunk.chars().collect();
-            let sub1: String = chars[..2].iter().collect();
-            let sub2: String = chars[char_count - 2..].iter().collect();
+            let sub1: String = chars.iter().take(2).collect();
+            let sub2: String = chars
+                .iter()
+                .skip(char_count.saturating_sub(2))
+                .take(2)
+                .collect();
             if !terms.contains(&sub1) {
                 terms.push(sub1);
             }
