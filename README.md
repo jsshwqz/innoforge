@@ -198,7 +198,7 @@ innoforge/
   start.bat               # Windows 一键启动（用户入口）
 ```
 
-文档分三类，请不要混用：`docs/README.md` 是索引；`docs/API*.md` 是给使用者的接口说明；`docs/plans/` 与 `docs/plan/`、`docs/progress/`、`docs/records/` 是维护过程记录（会过期，按日期读）。
+文档分三类，请不要混用：`docs/README.md` 是索引；`docs/API*.md` 是给使用者的接口说明；`docs/plans/`（历史规划在 `docs/plans/archive/`）、`docs/archive/`、`docs/progress/`、`docs/records/` 是维护过程记录（会过期，按日期读）。
 
 **关联仓库：** 桌面端（Tauri）、iOS 原生壳、鸿蒙原生壳均为**规划中的独立仓库，目前尚未创建**。本仓库的 `src/lib.rs` 已导出 C ABI（`innoforge_start_server` / `innoforge_shutdown_server`）以供这些壳工程内嵌，欢迎按需自行封装。
 

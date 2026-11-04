@@ -14,6 +14,14 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-11-04 — **仓库可读性整理：阶段A 根目录收敛 + 阶段B docs 瘦身**（PR #186 已合并 / 阶段B 本 PR）
+
+- **状态 / Status**: ✅ 阶段A 已合并（PR #186，squash → `7969fad`，含 v0.9.27 发版 PR #187 → `cc4c90b`）；🚧 阶段B PR 等 CI
+- **驱动**: #90 看板《仓库可读性整理》勘误版（2026-11-03）——外部读者反馈「像本地开发机，不像一个产品」。
+- **阶段A（#186）**: 根目录开发脚本收敛进 `scripts/`（含 `scripts/manual/`），`tools/` 只留被文档引用的用户工具；CI/pre-commit/PR 模板/AGENTS/CLAUDE/README 引用同步，AGENTS/CLAUDE 删除本机绝对路径；新增 `tests/repo_root_layout.rs` 根目录白名单守卫（28 项，含负控）。
+- **阶段B（本 PR）**: `docs/plan/`（单数，12 件）消失——11 件历史规划书并入 `docs/plans/archive/`（无重名冲突），`product-vision.md` 因仍是整顿令效力链的活文件改入 `docs/plans/` 根（AGENTS.md ×2、CLAUDE.md ×1、整顿令 ×1 引用同步）；`docs/audit/`（1 件一次性审计）与散件 `deepscientist-insights.md`、`oa-import-flow-status.md` 归档进 `docs/archive/`（新目录，原文件名与内容不动）；`depth-quality-gate.md`（活工具文档）、`feedback.md`（AGENTS.md Step 0c 强制的记忆文件）、`国内用户指南.md`（用户入口）经判断保留在 docs 根；`docs/README.md` 索引与 README 三分类措辞同步。**`docs/local-context/` 全目录为 gitignore 的本地未跟踪文件，不入库不移动。**
+- **验证**: `node scripts/check_html_functions.mjs` 8 模板基线一致；`tests/repo_root_layout` / `readme_front_page_scope` / `rectification_order_present` 全绿；活动层 `docs/plan/` 引用清零（STATUS 历史条目按规约不重写）。
+
 ### 2026-11-03 — **搜索结果列表中文标题优先命中与异步自愈补齐**（PR #183）
 
 - **状态 / Status**: 🚧 PR open（分支 `fix/search-list-chinese-title`，PR #183），等 CI

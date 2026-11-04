@@ -78,6 +78,7 @@
 
 ## 5. 历史归档与审计 (Archives)
 
-* **[版本与里程碑规划 (`docs/plans/`)](plans/)**：历史版本规划、整顿基线与阶段性验收备忘录。
+* **[版本与里程碑规划 (`docs/plans/`)](plans/)**：当前计划与整顿基线在 `plans/` 根，已结束的轮次与历史规划书在 `plans/archive/`（含原 `docs/plan/` 单数目录的全部历史文件）。
 * **[深度质量分析 (`docs/analysis/`)](analysis/)**：系统质量体检报告、模块体量清单与风险评估。
 * **[流程与发版复盘 (`docs/records/` & `docs/process/`)](records/)**：发版验证记录、E2E 测试证据。
+* **[一次性审计与散件归档 (`docs/archive/`)](archive/)**：一次性审计结论（如 vacuous-checks）、历史洞见与状态快照，按原文件名归档、内容不重写。
