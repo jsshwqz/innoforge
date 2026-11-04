@@ -319,7 +319,7 @@ mod tests {
     #[test]
     fn generated_docx_converts_markdown_table_to_native_word_table() {
         let params = ExportParams {
-            response_text: "| 特征 | 原始申请文件依据 | 合规性 |\n| :--- | :--- | :--- |\n| 电动执行器为电缸 | 说明书第[0025]段：所述电缸的伸缩轴与阀芯连接。 | ✅ |\n| 智能模块控制电缸行程 | 说明书第[0028]段：使用智能算法控制电动执行器行程。 | ✅ |".to_string(),
+            response_text: "| 特征 | 原始申请文件依据 | 合规性 |\n| :--- | :--- | :--- |\n| 电动执行器为伺服电机 | 说明书第[0025]段：所述驱动电机的伸缩轴与执行构件连接。 | ✅ |\n| 智能模块控制电缸行程 | 说明书第[0028]段：使用智能算法控制电动执行器行程。 | ✅ |".to_string(),
             patent_number: "202610000001.0".to_string(),
             applicant: "测试申请人".to_string(),
             oa_type: "第一次审查意见通知书".to_string(),

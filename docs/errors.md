@@ -1333,9 +1333,9 @@
 ## [2026-10-27] ㉟ 正式答复书空输出：reject_review 缺 my_patent + 字节切片 panic
 - **严重程度 / Severity**: CRITICAL（主 UI 正式答复书返回空文本却报成功）
 - **涉及文件**: `src/ai/patent.rs`（`extract_oa_response_section` 兜底切片）、`src/routes/ai.rs`（`api_ai_oa_generate_response_letter`）、`templates/office_action_response.html`（`generateResponseLetter` 请求体）、`src/routes/mod.rs`（`AI_MODEL_FAST` 默认值）
-- **现象 / Symptom**: M1 真实 OA 答复跑 `reject_review`，`/api/ai/oa-generate-response-letter` 返回 846B，正文只有 `[DONE]`；服务日志先报 `patent.rs start byte index ... not a char boundary`（'控' 字节 21498..21501），随后 Stage A 把所有特征当"非 verbatim"丢弃；把 `AI_MODEL_FAST` 指到网关可用模型后，Stage A 才正常抽特征。
+- **现象 / Symptom**: OA 答复跑 `reject_review` 时，`/api/ai/oa-generate-response-letter` 返回截断短输出，正文只有 `[DONE]`；服务日志先报 `patent.rs start byte index ... not a char boundary`（'控' 字节 21498..21501），随后 Stage A 把所有特征当"非 verbatim"丢弃；把 `AI_MODEL_FAST` 指到网关可用模型后，Stage A 才正常抽特征。
 - **根因 / Root cause**: ①兜底 `full_output[full_output.len()/2..]` 按字节切多字节中文；②主 UI 答复书请求只传 analysis/discussion/office_action，后端 fallback `CaseInput.claims_under_review` 为空，Stage A 的 verbatim 校验没有可比对的原文；③`AI_MODEL_FAST` 默认 `deepseek-v4-flash` 不在 8080 网关，Stage A 返回 `Requested entity was not found.`，接口仍以 `[DONE]` 收尾。
-- **修复 / Fix**: 兜底切片改 `char_indices` 取字符边界（补中文回归测试）；前端 body 带 `my_patent`，后端在 `claims_under_review` 为空时用本专利原文补位；运行时显式设置可用的 fast 模型。同一案件从 846B `[DONE]` 变为 6,746B / 2,260 字。
+- **修复 / Fix**: 兜底切片改 `char_indices` 取字符边界（补中文回归测试）；前端 body 带 `my_patent`，后端在 `claims_under_review` 为空时用本专利原文补位；运行时显式设置可用的 fast 模型。修复后从截断输出恢复为完整输出。
 - **预防 / Prevention**: ①契约测试必须覆盖**主 UI 实际 payload**，不能只测后端自造 JSON；②任何"模型不可用"必须是可见错误，禁止以 `[DONE]` 收尾；③`tests/no_unsafe_byte_slice.rs` 的启发式只匹配 `[..`，漏掉 `[expr..]`，后续修守卫时要覆盖变量起点。
 - **提交 / Commit**: `2e682f4` / PR #133。
 
@@ -1562,10 +1562,10 @@
 ## [2026-11-01] 59 核验门只查"新增超范围"，不查"删限定＝扩大保护范围"：真稿被删掉一个限定仍报 verified
 - **严重程度 / Severity**: CRITICAL
 - **涉及文件**: `src/evidence_kernel/amendment_gate.rs`（新增 `gate_amendment_text_with_current_claims` / `check_broadening` / `direction_note`）、`src/routes/ai.rs`（读取 `current_claims`，meta 增 `broadening_count`/`broadening_checked`）
-- **现象**: 一份"最小缩限"修改稿把现权1 里的「隔离结构」整句删掉了，门报 `verified / unsupported=0 / submission_ready=true`。逐字核验对此完全无感——它只问"新增的句子在不在原文里"，而删掉的内容当然不在原文里"新增"。删掉一个限定特征＝保护范围扩大（细则第57条第3款/第33条意义上不可接受）。
+- **现象**: 一份缩限修改稿把独立权项里的限定特征整句删掉了，门报 `verified / unsupported=0 / submission_ready=true`。逐字核验对此完全无感——它只问"新增的句子在不在原文里"，而删掉的内容当然不在原文里"新增"。删掉一个限定特征＝保护范围扩大（细则第57条第3款/第33条意义上不可接受）。
 - **根因**: 门只有两份输入（`letter` 与 `original_application`），缺第三份「审查所针对的那版权项」。前者是上界（新增不得超范围），后者是下界（修改不得放宽），而 `current_claims` 从来没进过判据。产品手上其实有这条链路的另一半信息（答复是针对哪版权项作的），只是没接。
 - **修复**: ①新入口 `gate_amendment_text_with_current_claims(letter, original, current_claims)`：按"独立权项出现顺序一一对应"，拿现权项每条限定去修改后的独立权项里找；找不到即记 `broadened`（删除或改写）；独立权项数量增加也记为扩范围。②`status` 在 `broadened` 非空时强制 `Degraded`，`submission_ready=false`。③缺现权项文本时不静默：`current_claims_checked=false` 且 `direction_note()` 输出可见的「扩范围方向未核验」。④路由从请求读可选字段 `current_claims`，meta 增 `broadening_count` / `broadening_checked`。
-- **回归 / 负控 / Regression & Negative control**: 三条单测：`deleting_a_limitation_is_flagged_as_broadening`（删限定 ⇒ `broadened` 非空、`Degraded`、`ready=false`）、`adding_a_limitation_alone_is_not_broadening`（只加不减 ⇒ 不报、`checked=true`）、`missing_current_claims_is_visible_not_silent`（缺输入 ⇒ `checked=false` 且说明可见）。**真实产物验收**：把 B-1 稿与合成的"含隔离结构的现权项"一起喂进去，读数由 `verified/0/ready=true` 变为 `degraded/0/ready=false/broadened=1/checked=true`；不给现权项时 `checked=false`。
+- **回归 / 负控 / Regression & Negative control**: 三条单测：`deleting_a_limitation_is_flagged_as_broadening`（删限定 ⇒ `broadened` 非空、`Degraded`、`ready=false`）、`adding_a_limitation_alone_is_not_broadening`（只加不减 ⇒ 不报、`checked=true`）、`missing_current_claims_is_visible_not_silent`（缺输入 ⇒ `checked=false` 且说明可见）。**产物验收**：把删限定修改稿与包含该限定特征的现权项一起喂进去，读数由 `verified/0/ready=true` 变为 `degraded/0/ready=false/broadened=1/checked=true`；不给现权项时 `checked=false`。
 - **已知边界（如实）**: ①**现权项文本的产品侧来源还没有**：前端/导入流程目前不产出这个字段，所以线上实际仍是 `checked=false`（可见但未核验）。要真正生效，导入流程必须把"已备案的权利要求书"落库。②判定是"独立权项按顺序一一对应 + 限定的归一化子串包含"，改写型修改会被报成"删除或改写"（属安全侧误红，交人判）。③`submission_ready` 仍只表示"逐字核验通过"；扩范围是否核验看 `broadening_checked`，两者不合并成单一布尔。
 - **预防**: ①**范围校验有上下界**：只查"新增超范围"必然漏掉"删限定放宽"，两头都要有输入、都要有判据；②判据缺输入时，正确做法是**把"没查"写进产物**（本条 `direction_note`），而不是静默退化成单向；③凡是"要不要交"的结论，都必须能指出它由哪几项检查合成——本条的 `ready × checked` 就是为此保留两个维度。
 - **提交 / Commit**: 见 #102 修复 PR（分支 fix/ai-endpoint-validation-status）。

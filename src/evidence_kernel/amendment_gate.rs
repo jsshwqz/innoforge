@@ -101,7 +101,7 @@ pub struct AmendmentGateResult {
     /// 成品文本里 [`UNVERIFIED_MARK`] 的**实际处数**。
     ///
     /// 与 `unsupported_count` 平行而非相等：两条特征句若从同一位置开始（或一条是另一条的前缀），
-    /// 标注会合并成一个位置，`unsupported_count` 仍逐条计数。真实案件实测 24 条特征句 →
+    /// 标注会合并成一个位置，`unsupported_count` 仍逐条计数。实测长文本 24 条特征句 →
     /// 正文 17 处标注。横幅与 meta 必须报"能数出来"的那个数，否则读者数一遍就对不上
     /// （errors.md ㊶④：展示数与产物数用同一次统计口径）。
     pub marked_count: usize,
@@ -176,10 +176,10 @@ impl AmendmentGateResult {
     ///
     /// 横幅里**不得出现** [`UNVERIFIED_MARK`] 的字面量（含 `【】`）：交付文本的标记数是
     /// `横幅 + 正文`，横幅自带一次字面量就会让读者数出 N+1 个标记、与
-    /// `amendment_unsupported=N` 对不上（真实案件实测 136 vs 137）。这里改用「」描述。
+    /// `amendment_unsupported=N` 对不上（实测长文本 136 vs 137）。这里改用「」描述。
     ///
     /// 同时把「特征句条数」与「正文标注处数」分开报：两条特征句从同一位置开始时标注会合并，
-    /// 真实案件实测 24 条 → 17 处。只报 24 会让读者数出 17，以为计数坏了。
+    /// 实测长文本 24 条 → 17 处。只报 24 会让读者数出 17，以为计数坏了。
     pub fn banner(&self) -> String {
         if self.unsupported_count == 0 {
             return String::new();
@@ -275,7 +275,7 @@ pub fn gate_amendment_text_with_current_claims(
     current_claims: &str,
 ) -> AmendmentGateResult {
     // 幂等入口：先剥掉本函数自己上一轮的产出（就地标注 + 阻断/说明横幅），再核验。
-    // 不剥的话，重跑时标注本身会被切成新的特征句再拿去比对，一处变两处（真实案件实测
+    // 不剥的话，重跑时标注本身会被切成新的特征句再拿去比对，一处变两处（实测用例
     // 28 → 56）；旧横幅还会留在产物里跟新结论打架（issue #158）。
     let cleaned = strip_prior_gate_artifacts(letter);
     let letter = cleaned.as_str();
@@ -606,7 +606,7 @@ fn judge(needle: &str, hit: &Option<ScopedHit>) -> (bool, String, f64) {
 /// **只有行首标签位的 marker 才算段落起点**（见 [`is_amendment_label`]）。答复书正文里的
 /// 叙述句——"申请人认为修改后的权利要求1-3已克服全部缺陷"——不是起点：一旦把它当起点，
 /// 块会一路延伸到下一节标题，块内所有非权项句子被当成特征句逐句核验、全部零命中、
-/// 整封打满标记（真实案件实测 `amendment_unsupported=136`）。
+/// 整封打满标记（实测用例 `amendment_unsupported=136`）。
 pub fn amendment_blocks(text: &str) -> Vec<(usize, usize)> {
     let mut raw: Vec<(usize, usize)> = Vec::new();
     for marker in AMENDMENT_MARKERS {
@@ -1472,7 +1472,7 @@ mod tests {
 
     #[test]
     fn amendment_act_narration_is_meta_but_real_feature_still_checked() {
-        // 真实形态（B-1 整封复跑时抓到）：说明"本次把权2并入权1"的句子描述的是修改动作，
+        // 实际场景（复杂修改稿复跑时抓到）：说明"本次把权2并入权1"的句子描述的是修改动作，
         // 不是修改后权利要求里的技术特征；它进了逐字核验就会把达标的稿子压成不可交。
         let letter = "\
 ## 二、关于权利要求的修改\n\n\
@@ -1635,7 +1635,7 @@ mod tests {
     #[test]
     fn banner_and_body_marker_counts_agree() {
         // 交付文本 = 横幅 + gated；整段里 UNVERIFIED_MARK 的字面量数必须等于 unsupported_count。
-        // （修复前横幅自带一次字面量，读者数出 N+1——真实案件实测 136 vs 137）
+        // （修复前横幅自带一次字面量，读者数出 N+1——实测长文本 136 vs 137）
         let letter = "\
 ## 二、关于权利要求的修改\n\n\
 修改后的权利要求1：\n\
@@ -1657,7 +1657,7 @@ mod tests {
 
     #[test]
     fn marked_count_is_the_number_a_reader_can_count() {
-        // 真实案件实测：24 条零命中特征句，正文只有 17 处标注（同位置重叠合并）。
+        // 实测用例：24 条零命中特征句，正文只有 17 处标注（同位置重叠合并）。
         // 只报条数时读者数一遍就对不上，会直接不信整张表。
         let letter = "\
 ## 二、关于权利要求的修改\n\n\
@@ -1921,7 +1921,7 @@ mod tests {
         );
     }
 
-    // ── issue #160：不修改答复书被整节当修改稿核验（真实案件撞出）──
+    // ── issue #160：不修改答复书被整节当修改稿核验（边界场景）──
 
     #[test]
     fn no_amendment_declaration_is_not_treated_as_amendment_draft() {
