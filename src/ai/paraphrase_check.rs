@@ -208,7 +208,7 @@ mod tests {
         let terms: &[&'static str] = &["对角", "交错", "内侧面", "长方形", "稳燃锥罩"];
         let report = check_paraphrase_distortion("D1", d1_paraphrase, d1, terms);
 
-        // 本案关键发现：审查员转述用了"对角"，D1 原文也是"对角"——一致
+        // 示例比对：审查员转述用了"对角"，D1 原文也是"对角"——一致
         // 如果审查员转述用了"交错"而 D1 原文用"对角"，则应检测到失真
         eprintln!("D1 转述检测：{} 失真项", report.distortion_count);
     }

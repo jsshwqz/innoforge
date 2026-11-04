@@ -149,7 +149,7 @@ def make_cases() -> list[DepthCase]:
                     {
                         "type": "text",
                         "title": "D2",
-                        "content": "公开热失控隔离结构。",
+                        "content": "公开阻隔散热结构。",
                     },
                 ],
             },
