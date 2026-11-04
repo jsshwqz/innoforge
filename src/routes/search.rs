@@ -798,8 +798,10 @@ pub async fn api_search_online(
             "attempts": attempts_json(&outcome)
         });
         if let Some(up) = upstream_total {
-            if up > total {
-                // 纯新增键：仅当上游总数确实大于本页可展示数时才出现（不伪造、不误导）
+            if up > gated_count {
+                // 纯新增键：上游总数 > 本页通过过滤的真实条数时才出现（不伪造、不误导）。
+                // 对可翻页源（total=上游总数）与不可翻页源（total=本页条数）统一生效，
+                // 前端据此展示「上游共命中 N 条，本页 M 条通过相关性过滤」。
                 out["upstream_total"] = json!(up);
             }
         }

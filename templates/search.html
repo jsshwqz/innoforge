@@ -193,7 +193,7 @@ function clearSearchPdfMeta() {
     'results.searching': '搜索中...',
     'results.noData': '未找到结果',
     'results.info': '找到 {total} 条 | 第 {page} 页 | 每页 {size} 条{source}',
-    'results.upstream_filtered': '上游共命中 {upstream} 条，低相关结果已按相关性过滤',
+    'results.upstream_filtered': '上游共命中 {upstream} 条，本页 {shown} 条通过相关性过滤',
     'results.source': '来源',
     'results.google': 'Google Patents',
     'results.score': '相关性评分',
@@ -277,7 +277,7 @@ function clearSearchPdfMeta() {
     'results.searching': 'Searching...',
     'results.noData': 'No results',
     'results.info': 'Found {total} | page {page} | {size}/page{source}',
-    'results.upstream_filtered': 'upstream matched {upstream}, low-relevance results filtered',
+    'results.upstream_filtered': 'upstream matched {upstream}, {shown} passed relevance filter on this page',
     'results.source': 'source',
     'results.google': 'Google Patents',
     'results.score': 'Relevance',
@@ -445,10 +445,11 @@ function renderResults(data, page, pageSize) {
     // 本地兜底回显请求值）。翻页数学必须用真实交付口径，否则会算出不存在的页。
     const effectiveSize = Number(data.page_size) || pageSize;
     let source = data.source ? ` | ${t('results.source')}: ${escapeHtml(data.source)}` : '';
-    // 上游总数 > 本页可展示数时（免费直抓源不支持翻页 + 相关性过滤折损），如实展示两个口径
+    // 上游总数 > 本页实际渲染条数时（免费直抓源不支持翻页 + 相关性过滤折损），如实展示两个口径
     const upstream = Number(data.upstream_total || 0);
-    if (upstream > total) {
-        source += `<span class="muted"> | ${escapeHtml(t('results.upstream_filtered', { upstream }))}</span>`;
+    const shown = patents.length; // 本页实际通过过滤并渲染的条数
+    if (upstream > shown) {
+        source += `<span class="muted"> | ${escapeHtml(t('results.upstream_filtered', { upstream, shown }))}</span>`;
     }
     document.getElementById('results-info').innerHTML = t('results.info', {
         total,
