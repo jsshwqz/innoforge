@@ -1268,7 +1268,7 @@
             }
             var selectedProvider = providerKey || document.getElementById('ai-provider').value;
             // 2026-11-05 修复：自定义网关同样支持自动探测（后端 provider=custom 分支
-            // 会探测已配置的 base_url）。旧实现前端硬拦截「自定义模式不支持自动查询」，
+            // 会探测已配置的 base_url）。旧实现前端对 custom 硬拦截并直接要求手输，
             // 用户只能手输模型名、网关更新模型也无法感知。探测失败时才退回手动输入。
             var url = '/api/ai/models?provider=' + encodeURIComponent(selectedProvider);
             try {

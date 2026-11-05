@@ -295,111 +295,40 @@ fn issue_69_cad_warn_is_single_line() {
 
 // ── ② Custom dropdown terminal state (control-flow guard) ──
 
-/// Extract the lines of the `if (selectedProvider === 'custom')` block
-/// that appear **before** the top-level `return;`, i.e. the code that
-/// runs unconditionally when the provider is `custom` (regardless of
-/// `isManual`).  Brace-depth tracking ensures we only stop at a `return`
-/// that sits at depth 1 — the top level of the if block — not one nested
-/// inside `if (isManual) { … }`.
-fn custom_branch_lines_before_return(html: &str) -> Vec<String> {
-    let lines: Vec<&str> = html.lines().collect();
-
-    let custom_idx = lines
-        .iter()
-        .position(|l| {
-            let t = l.trim();
-            t.starts_with("if") && l.contains("selectedProvider === 'custom'")
-        })
-        .expect("custom branch if-statement must exist in settings.html");
-
-    let mut depth: i32 = 0;
-    let mut collected: Vec<String> = Vec::new();
-
-    for (i, line) in lines.iter().enumerate().skip(custom_idx) {
-        let depth_before = depth;
-        for ch in line.chars() {
-            if ch == '{' {
-                depth += 1;
-            } else if ch == '}' {
-                depth -= 1;
-            }
-        }
-        // Block closed — stop without collecting the closing brace line.
-        if depth == 0 && i > custom_idx {
-            break;
-        }
-        // Top-level return inside the if block — stop, don't collect it.
-        if depth_before == 1 && line.trim().starts_with("return") {
-            break;
-        }
-        // Collect every line inside the block (skip the if-line itself).
-        if i > custom_idx && depth > 0 {
-            collected.push(line.to_string());
-        }
-    }
-    collected
-}
-
-/// Control-flow assertion: the `selectedProvider === 'custom'` branch
-/// must assign a terminal state to **both** `ai-model` and
-/// `ai-model-expert` via `innerHTML` **before** its `return`, the
-/// assigned text must not contain "加载中", and both assignments must
-/// go through `DOMPurify.sanitize`.
-///
-/// This is falsifiable: if the assignments are removed (bare `return`),
-/// or if only one dropdown is set, or if the text still says "加载中",
-/// the test goes red.
+/// 2026-11-05 语义更新（errors.md #70）：旧实现把 custom 硬拦截
+/// （「自定义模式不支持自动查询」+ 提前 return），本测试当时锁的是该拦截的终态。
+/// 修复后 custom 走正常探测，终态由探测结果分支给出——#69 的原意图不变：
+/// custom 不得把下拉卡在「加载中」，任何失败路径都必须落到明确终态 + 手输兜底。
+/// 可证伪：恢复硬拦截文案 ⇒ 红；删任一失败分支的 populateSelect 终态 ⇒ 红；
+/// 删手输兜底函数或其任一调用 ⇒ 红。
 #[test]
-fn issue_69_custom_branch_sets_dropdowns_before_return() {
-    let lines = custom_branch_lines_before_return(SETTINGS_HTML);
+fn issue_69_custom_provider_reaches_terminal_state_without_hard_block() {
     assert!(
-        !lines.is_empty(),
-        "issue #69: custom branch must contain code before return, not a bare return"
+        !SETTINGS_HTML.contains("自定义模式不支持自动查询"),
+        "custom 不得再被硬拦截自动查模型（#70 修复；恢复旧文案即红）"
     );
 
-    let ai_model_set = lines
-        .iter()
-        .any(|l| l.contains("getElementById('ai-model')") && l.contains(".innerHTML"));
     assert!(
-        ai_model_set,
-        "issue #69: custom branch must assign ai-model innerHTML before return          (category: missing-terminal-state)"
+        SETTINGS_HTML.contains("function showCustomManualFallback"),
+        "探测失败必须保留手输兜底函数（#69 终态意图的现代表达）"
+    );
+    let fallback_uses = SETTINGS_HTML.matches("showCustomManualFallback(").count();
+    assert!(
+        fallback_uses >= 4,
+        "手输兜底须覆盖 空结果/查询失败/网络错误 三条路径（定义+3 调用=4），实际 {fallback_uses}"
     );
 
-    let ai_model_expert_set = lines
-        .iter()
-        .any(|l| l.contains("getElementById('ai-model-expert')") && l.contains(".innerHTML"));
-    assert!(
-        ai_model_expert_set,
-        "issue #69: custom branch must assign ai-model-expert innerHTML before return          (category: missing-terminal-state)"
-    );
-
-    let still_loading = lines
-        .iter()
-        .any(|l| l.contains(".innerHTML") && l.contains("加载中"));
-    assert!(
-        !still_loading,
-        "issue #69: custom branch must not leave dropdowns in '加载中' state          (category: stuck-loading)"
-    );
-
-    let ai_model_sanitized = lines.iter().any(|l| {
-        l.contains("getElementById('ai-model')")
-            && l.contains(".innerHTML")
-            && l.contains("DOMPurify.sanitize")
-    });
-    assert!(
-        ai_model_sanitized,
-        "issue #69: custom branch ai-model assignment must use DOMPurify.sanitize"
-    );
-
-    let ai_model_expert_sanitized = lines.iter().any(|l| {
-        l.contains("getElementById('ai-model-expert')")
-            && l.contains(".innerHTML")
-            && l.contains("DOMPurify.sanitize")
-    });
-    assert!(
-        ai_model_expert_sanitized,
-        "issue #69: custom branch ai-model-expert assignment must use DOMPurify.sanitize"
-    );
+    for (label, branch) in [
+        ("无可用模型", "空结果分支"),
+        ("查询失败", "status!=ok 分支"),
+        ("网络错误", "catch 分支"),
+    ] {
+        let needle = format!("label: '{}'", label);
+        assert!(
+            SETTINGS_HTML.contains(&needle),
+            "#69: fetchAiModels 的{branch}必须给下拉赋终态文案 '{label}'，不得停在加载中"
+        );
+    }
 }
 
 /// Sanitize consistency: every line that sets `innerHTML` to a value
