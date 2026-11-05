@@ -246,8 +246,12 @@ pub fn is_online_result_relevant(
                 .iter()
                 .filter(|term| haystack.contains(term.as_str()))
                 .count();
-            // 命中 2 个或以上核心词，或核心词覆盖率过半，直接判定为相关
-            if matched >= 2 || (matched >= 1 && matched * 2 >= core_words.len()) {
+            // 命中至少 1 个核心词即放行（2026-11-05 从「≥2 或过半」放宽）：
+            // 上游 Google Patents 已按整句检索排序，本页 10 条本就是候选相关结果；
+            // 旧判据把「润滑」「测温」只中其一的专利（如风电变速器润滑油监测、
+            // 排油烟风机自动加油）整页杀掉，用户观感「67 条却每页只有 2 条」。
+            // 0 命中（如折叠屏转轴专利不含任何核心词）仍由下方分数门槛拦截。
+            if matched >= 1 {
                 return true;
             }
         }
@@ -567,14 +571,15 @@ mod tests {
             "相关专利不应被门禁误杀：score={score}"
         );
 
-        // 部分命中结果通过核心词放行
+        // 部分命中结果（只中「润滑」一个核心词）也必须放行——
+        // 2026-11-05 放宽：旧判据「≥2 或过半」把这类上游已排序的域内相关专利整页杀掉，
+        // 用户观感「67 条却每页只有 2 条」。这里用刻意低于门槛的 score 证明放行
+        // 走的是核心词规则而非分数规则。
         let partial_title = "一种风电变速器的润滑油在线监测方法";
         let partial_abs = "基于磨损、润滑油理化性能进行监测。";
-        let score2 = calculate_online_relevance(q, partial_title, partial_abs, "", "zzz");
         assert!(
-            score2 >= 45.0
-                || is_online_result_relevant(q, partial_title, partial_abs, score2, true, "zzz"),
-            "部分技术相关专利应被合理放行：score={score2}"
+            is_online_result_relevant(q, partial_title, partial_abs, 30.0, true, "zzz"),
+            "命中 1 个核心词即应放行（不依赖分数）"
         );
 
         // 无关噪声仍然被严格拒绝

@@ -299,8 +299,9 @@ impl GooglePatentsXhrProvider {
     /// **2026-11-04 缺陷修复**：旧行为是 `page > 1` 时仍发请求并把第 1 页内容**伪装成
     /// 第 N 页**返回（仅挂一条 hint）——用户翻页时看到与第 1 页完全相同的结果，感知为
     /// 「翻页一直重复」。现改为 `page > 1` 直接 **Skipped**（一发请求都不发），如实告诉
-    /// 用户该源翻不了页；链路自然落到下一个源或本地兜底，绝不再伪造分页内容。
-    fn pagination_skipped_hint(page: usize) -> String {
+    /// 用户该源翻不了页（文案进 `error` 不进 `hint`，沿 MA6a 冷却跳过纪律，防泄漏成顶层横幅）；
+    /// 链路自然落到下一个源或本地兜底，绝不再伪造分页内容。
+    fn pagination_skipped_reason(page: usize) -> String {
         format!(
             "Google Patents 免费直抓源不支持翻页（页参数未实证），第 {page} 页请求已跳过，避免返回与第 1 页重复的内容。"
         )
@@ -607,6 +608,10 @@ impl SearchProvider for GooglePatentsXhrProvider {
 
             // 免费直抓源不支持翻页：page > 1 直接 Skipped（一发请求都不发），
             // 绝不把第 1 页内容伪装成第 N 页返回（旧行为会让用户「翻页一直重复」）。
+            // 跳过原因进 `error` 不进 `hint`（沿 MA6a 冷却跳过同一纪律：Skipped 的
+            // hint 恒 None，否则会经 `SearchOutcome::hint()` 泄漏成顶层横幅——
+            // 2026-11-05 用户实测：serpapi 正常供第 2 页，横幅却显示本源「翻页已跳过」
+            // +「去设置」，把成功渲染伪装成故障告警）。
             if query.page > 1 {
                 println!(
                     "[ONLINE] {SOURCE_LABEL} page={} skipped (pagination not supported)",
@@ -619,8 +624,8 @@ impl SearchProvider for GooglePatentsXhrProvider {
                         status: AttemptStatus::Skipped,
                         latency_ms: self.clock.now_ms().saturating_sub(started),
                         hits: 0,
-                        error: None,
-                        hint: Some(Self::pagination_skipped_hint(query.page)),
+                        error: Some(Self::pagination_skipped_reason(query.page)),
+                        hint: None,
                     }],
                     upstream_total: None,
                 };
@@ -1017,6 +1022,8 @@ pub(crate) mod tests {
 
     /// **2026-11-04 缺陷修复锁**：`page > 1` 必须 Skipped（零出网），
     /// 绝不把第 1 页内容伪装成第 N 页返回（旧行为 = 用户「翻页一直重复」）。
+    /// **2026-11-05 补**：跳过原因进 `error`、`hint` 恒 None（MA6a 同一纪律），
+    /// 否则经 `SearchOutcome::hint()` 泄漏成顶层横幅，把「serpapi 正常供页」伪装成故障。
     #[tokio::test]
     async fn page_beyond_first_is_skipped_without_any_upstream_request() {
         let (p, transport, _clock) = provider(vec![reply(200, REAL_CN_REPLY)]);
@@ -1031,7 +1038,7 @@ pub(crate) mod tests {
             transport.fetch_count(),
             "不支持翻页的源在 page>1 时不得发起任何上游请求"
         );
-        // 记账为 Skipped + 明确 hint，结果为空（链路落到下一个源/本地兜底）
+        // 记账为 Skipped + error 说明原因，结果为空（链路落到下一个源/本地兜底）
         assert_eq!(0, outcome.results.len(), "不得携带任何伪造的分页结果");
         assert_eq!(
             None, outcome.upstream_total,
@@ -1043,12 +1050,21 @@ pub(crate) mod tests {
             "{:?}",
             report.status
         );
-        let hint = report.hint.as_deref().unwrap_or_default();
         assert!(
-            hint.contains("不支持翻页"),
-            "hint 应如实说明翻页能力: {hint}"
+            report.hint.is_none(),
+            "Skipped 的 hint 必须恒 None（防泄漏成顶层横幅）"
         );
-        assert!(hint.contains("已跳过"), "hint 应说明本次已跳过: {hint}");
+        let reason = report.error.as_deref().unwrap_or_default();
+        assert!(
+            reason.contains("不支持翻页"),
+            "error 应如实说明翻页能力: {reason}"
+        );
+        assert!(
+            reason.contains("已跳过"),
+            "error 应说明本次已跳过: {reason}"
+        );
+        // 整链视角：该 Skipped 不得经 outcome.hint() 变成顶层提示
+        assert_eq!(None, outcome.hint(), "跳过记账不得提升为顶层 hint");
         // page=1 的正常路径不受影响（对照：同传输下 page=1 正常出网）
         let (p1, transport1, _c1) = provider(vec![reply(200, REAL_CN_REPLY)]);
         let outcome1 = p1.search(query("固态电池")).await;
