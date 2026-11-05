@@ -4,6 +4,18 @@
 All notable changes are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
+## [v0.9.32] - 2026-11-06
+
+### 修复 / Fixed
+
+- **自定义网关无法「查询可用模型」（假接线第二例）**：设置页选「自定义」后点「查询可用模型」必失败，只能手输模型名，网关上新增/更新的模型永远感知不到——而网关 `/v1/models` 实测可回数十个模型。两层各堵一处：前端对 custom 硬拦截「不支持自动查询」直接拒绝；后端单源模式只认 `KNOWN_AI_PROVIDERS` 硬编码表，`provider=custom` 恒返回 `not_found`（讽刺的是多源模式早已支持 Custom 探测——同一能力两处实现只修了一处）。现 `provider=custom` 探测配置的 base_url + Key 并返回实时列表；前端仅在探测失败/空时退回手输框，手输名已在列表中则自动选中（[#201](https://github.com/jsshwqz/innoforge/pull/201)）。
+
+### 说明
+
+- 复盘入 `docs/errors.md` #70：同一能力有多个调用路径时修复必须枚举所有路径；前端「不支持 X」硬拦截要定期对照后端真实能力复查。
+- 本机实测：`provider=custom` 返回 63 个实时模型（随网关动态变化）；设置页探测失败时自动落回手动输入。
+
+---
 ## [v0.9.31] - 2026-11-05
 
 ### 修复 / Fixed
