@@ -4,6 +4,17 @@
 All notable changes are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
+## [v0.9.29] - 2026-11-05
+
+### 修复 / Fixed
+
+- **搜索结果渲染必失败（v0.9.28 回归）**：任何搜索都显示「搜索失败: Cannot access 'patents' before initialization」。[PR #193](https://github.com/jsshwqz/innoforge/pull/193) 引入的上游命中注记在 `patents` 变量声明之前引用了它（TDZ 暂时性死区），`renderResults` 每次执行必抛错。改从 `data.patents` 直接取本页条数（[#195](https://github.com/jsshwqz/innoforge/pull/195)）。
+
+### 说明
+
+- 复盘已入 `docs/errors.md`（第 67 条）：模板内联 JS 的 TDZ 属运行时错误，语法扫描/静态守卫/既有 e2e 均覆盖不到渲染路径——**凡改渲染/数据流逻辑，验收必须在真实浏览器点到底**。本条即因此发布补丁版。
+
+---
 ## [v0.9.28] - 2026-11-05
 
 ### 修复 / Fixed
