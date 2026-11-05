@@ -67,6 +67,34 @@ fn page_param(query: &SearchQuery) -> usize {
     }
 }
 
+/// google_patents 引擎每页固定交付的上游条数（`num` 参数未实证，不臆造）。
+pub(crate) const UPSTREAM_PAGE_SIZE: usize = 10;
+
+/// 单次检索聚合的上游页数上限（= 每页最多 50 条）：page_size=100 时不得一次烧 10 发配额，
+/// 超出部分如实少给（响应 page_size 报有效值，前端翻页数学随之对齐）。
+pub(crate) const MAX_UPSTREAM_PAGES: usize = 5;
+
+/// 用户请求的 `page_size` 换算成需要聚合的上游页数（2026-11-05 缺陷修复：
+/// 旧实现完全不消费 `limit`，用户设「每页 20/50」实际永远只回 10 条）。
+/// `limit ≤ 10` 时恒为 1——与旧单页行为逐字一致（含 0/空值）。
+pub(crate) fn upstream_pages_for(limit: usize) -> usize {
+    if limit <= UPSTREAM_PAGE_SIZE {
+        return 1;
+    }
+    limit.div_ceil(UPSTREAM_PAGE_SIZE).min(MAX_UPSTREAM_PAGES)
+}
+
+/// 聚合后的有效每页条数（响应 `page_size` 用它，前端翻页数学与「用户页 ↔ 上游页」映射对齐）。
+pub(crate) fn effective_page_size(limit: usize) -> usize {
+    upstream_pages_for(limit) * UPSTREAM_PAGE_SIZE
+}
+
+/// 「用户页 N（每页 k 个上游页）→ 起始上游页」映射：`(N-1)*k+1`，页间不重叠。
+/// `k==1` 时恒等（`N`）——旧单页行为逐字不变。`N<1` 钳到 1（同 `page_param`）。
+pub(crate) fn upstream_first_page(user_page: usize, pages_needed: usize) -> usize {
+    user_page.max(1).saturating_sub(1) * pages_needed + 1
+}
+
 /// `&country=XX`：旧代码对空串刻意不下发该参数，且**未** 做 URL 编码 —— 原样保留。
 fn country_param(query: &SearchQuery) -> String {
     match query.country.as_deref() {
@@ -204,6 +232,19 @@ impl SearchProvider for SerpApiProvider {
             let mut status = AttemptStatus::Success;
             let mut upstream_total: Option<usize> = None;
             let mut patents: Vec<PatentSummary> = Vec::new();
+            // 聚合用原始行与「解析成功」标志（见下方 2026-11-05 分页聚合修复）
+            let mut raw_rows: Vec<serde_json::Value> = Vec::new();
+            let mut parsed_ok = false;
+
+            // ── 2026-11-05 缺陷修复：page_size 此前完全不被消费（用户设「每页 20/50」永远只回 10）──
+            // 聚合时把「用户页」重映射为不重叠的「上游页」区间起点：
+            // 用户页 N（每页 k 个上游页）→ 上游 (N-1)*k+1 .. N*k。
+            // pages_needed==1 时映射恒等（(N-1)*1+1=N），与旧单页行为逐字一致。
+            let mut query = query;
+            let pages_needed = upstream_pages_for(query.limit);
+            if pages_needed > 1 {
+                query.page = upstream_first_page(query.page, pages_needed);
+            }
 
             let client = Self::client();
             let search_query = render_q(&query);
@@ -281,33 +322,14 @@ impl SearchProvider for SerpApiProvider {
                                         .unwrap_or(0)
                                         as usize;
                                     upstream_total = Some(total);
+                                    parsed_ok = true;
                                     if let Some(results) = json["organic_results"].as_array() {
                                         println!(
                                             "[ONLINE] SerpAPI results: {}, total: {}",
                                             results.len(),
                                             total
                                         );
-                                        patents = self.outcome_patents(
-                                            &query.keyword,
-                                            is_cn_query(&query),
-                                            results,
-                                        );
-                                    }
-                                    // 旧代码只在这条「解析成功但零结果」的路径上补该文案；
-                                    // 网络/读体失败等路径不得顺手覆盖，否则用户可见提示会变。
-                                    if patents.is_empty() {
-                                        println!(
-                                            "[ONLINE] SerpAPI returned empty; fallback to local DB"
-                                        );
-                                        if hint.is_none() {
-                                            hint = Some(
-                                                "SerpAPI 无结果，已自动尝试下游回退。".to_string(),
-                                            );
-                                        }
-                                        error_note = Some(
-                                            "SerpAPI 返回 0 条可用结果（上游 organic_results 为空或全被过滤)"
-                                                .to_string(),
-                                        );
+                                        raw_rows.extend(results.iter().cloned());
                                     }
                                 }
                             } else if hint.is_none() {
@@ -334,6 +356,61 @@ impl SearchProvider for SerpApiProvider {
                     hint = Some(format!("SerpAPI 请求异常：{}，已自动尝试下游回退。", e));
                     error_note = Some(format!("请求 SerpAPI 上游失败（网络/超时）：{}", e));
                     status = AttemptStatus::Failed(FailKind::Network);
+                }
+            }
+
+            // ── 2026-11-05 缺陷修复（续）：第一页语义逐字保留在上方旧分支；这里只做纯增量聚合：
+            // 从映射后的起始页续取剩余上游页（封顶 5 页=50 条），
+            // 任何后续页失败/空页即停止、保留已取到的部分（如实少给，不伪造）。
+            if matches!(status, AttemptStatus::Success) && parsed_ok && !raw_rows.is_empty() {
+                let first_upstream = page_param(&query);
+                for offset in 1..pages_needed {
+                    let mut q2 = query.clone();
+                    q2.page = first_upstream + offset;
+                    let url2 = Self::search_url(&q2, &self.api_key);
+                    let body2 = match client.get(&url2).send().await {
+                        Ok(resp) if resp.status().is_success() => {
+                            resp.text().await.unwrap_or_default()
+                        }
+                        _ => break,
+                    };
+                    match serde_json::from_str::<serde_json::Value>(&body2) {
+                        Ok(j) => {
+                            let more = j["organic_results"]
+                                .as_array()
+                                .map(|a| a.len())
+                                .unwrap_or(0);
+                            if more == 0 {
+                                break;
+                            }
+                            if let Some(arr) = j["organic_results"].as_array() {
+                                raw_rows.extend(arr.iter().cloned());
+                            }
+                        }
+                        Err(_) => break,
+                    }
+                }
+                if raw_rows.len() > UPSTREAM_PAGE_SIZE {
+                    println!(
+                        "[ONLINE] SerpAPI aggregated rows={} (pages_needed={})",
+                        raw_rows.len(),
+                        upstream_pages_for(query.limit)
+                    );
+                }
+            }
+            if matches!(status, AttemptStatus::Success) && parsed_ok {
+                patents = self.outcome_patents(&query.keyword, is_cn_query(&query), &raw_rows);
+                // 旧代码只在这条「解析成功但零结果」的路径上补该文案；
+                // 网络/读体失败等路径不得顺手覆盖，否则用户可见提示会变。
+                if patents.is_empty() {
+                    println!("[ONLINE] SerpAPI returned empty; fallback to local DB");
+                    if hint.is_none() {
+                        hint = Some("SerpAPI 无结果，已自动尝试下游回退。".to_string());
+                    }
+                    error_note = Some(
+                        "SerpAPI 返回 0 条可用结果（上游 organic_results 为空或全被过滤)"
+                            .to_string(),
+                    );
                 }
             }
 
@@ -675,6 +752,30 @@ mod tests {
 
     fn db() -> Arc<Database> {
         Arc::new(Database::init(":memory:").expect("in-memory db"))
+    }
+
+    /// **2026-11-05 分页聚合换算锁**：page_size → 上游页数 / 有效每页条数。
+    /// `limit ≤ 10` 恒为 1 页（与旧单页行为逐字一致，含 0）；>10 按 10 条/页向上取整，
+    /// 封顶 5 页（=50 条）——page_size=100 也不得一次烧 10 发配额，超出如实少给。
+    #[test]
+    fn upstream_pages_and_effective_size() {
+        assert_eq!(1, upstream_pages_for(0));
+        assert_eq!(1, upstream_pages_for(10));
+        assert_eq!(2, upstream_pages_for(20));
+        assert_eq!(3, upstream_pages_for(25));
+        assert_eq!(5, upstream_pages_for(50));
+        assert_eq!(5, upstream_pages_for(100), "封顶 5 页，不烧 10 发配额");
+        assert_eq!(10, effective_page_size(10));
+        assert_eq!(20, effective_page_size(20));
+        assert_eq!(50, effective_page_size(100), "有效口径=实际消费口径");
+
+        // 页映射不重叠：用户页 2（k=2）→ 上游 3..4，不得与页 1 的上游 1..2 重叠
+        assert_eq!(1, upstream_first_page(1, 2));
+        assert_eq!(3, upstream_first_page(2, 2));
+        assert_eq!(5, upstream_first_page(3, 2));
+        // k==1 恒等（旧单页行为逐字不变）；page<1 钳到 1
+        assert_eq!(7, upstream_first_page(7, 1));
+        assert_eq!(1, upstream_first_page(0, 3));
     }
 
     fn q(keyword: &str) -> SearchQuery {

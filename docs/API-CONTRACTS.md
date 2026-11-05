@@ -47,12 +47,12 @@
 | 15 | GET | `/api/chat/:session_key` | `session_key` | — | `ChatPagination` | JSON（§15） | `routes::api_chat_get_messages` | `src/routes/chat.rs:21` |
 | 16 | POST | `/api/chat/:session_key/save` | `session_key` | 任意 JSON（§16） | — | JSON（§16） | `routes::api_chat_save_message` | `src/routes/chat.rs:53` |
 | 17 | POST | `/api/chat/:session_key/delete` | `session_key` | — | — | JSON（§17） | `routes::api_chat_delete_messages` | `src/routes/chat.rs:90` |
-| 18 | POST | `/api/search` | — | `SearchRequest` | — | JSON SearchResult | `routes::api_search` | `src/routes/search.rs:375` |
-| 19 | POST | `/api/search/stats` | — | `SearchRequest` | — | JSON（§19） | `routes::api_search_stats` | `src/routes/search.rs:962` |
-| 20 | POST | `/api/search/export` | — | `SearchRequest` | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_export_csv` | `src/routes/search.rs:1026` |
-| 21 | POST | `/api/search/export/xlsx` | — | `SearchRequest` | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_export_xlsx` | `src/routes/search.rs:1077` |
-| 22 | POST | `/api/search/online` | — | `SearchRequest` | — | JSON（§22） | `routes::api_search_online` | `src/routes/search.rs:634` |
-| 23 | POST | `/api/search/vector` | — | 任意 JSON（§23） | — | JSON（§23） | `routes::api_search_vector` | `src/routes/search.rs:844` |
+| 18 | POST | `/api/search` | — | `SearchRequest` | — | JSON SearchResult | `routes::api_search` | `src/routes/search.rs:390` |
+| 19 | POST | `/api/search/stats` | — | `SearchRequest` | — | JSON（§19） | `routes::api_search_stats` | `src/routes/search.rs:991` |
+| 20 | POST | `/api/search/export` | — | `SearchRequest` | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_export_csv` | `src/routes/search.rs:1055` |
+| 21 | POST | `/api/search/export/xlsx` | — | `SearchRequest` | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_export_xlsx` | `src/routes/search.rs:1106` |
+| 22 | POST | `/api/search/online` | — | `SearchRequest` | — | JSON（§22） | `routes::api_search_online` | `src/routes/search.rs:649` |
+| 23 | POST | `/api/search/vector` | — | 任意 JSON（§23） | — | JSON（§23） | `routes::api_search_vector` | `src/routes/search.rs:873` |
 | 24 | POST | `/api/search/analyze` | — | 任意 JSON（§24） | — | JSON（§24） | `routes::api_ai_analyze_results` | `src/routes/ai.rs:811` |
 | 25 | POST | `/api/patent/fetch` | — | `FetchPatentRequest` | — | JSON（§25） | `routes::api_fetch_patent` | `src/routes/patent.rs:14` |
 | 26 | GET | `/api/patent/enrich/:id` | `id` | — | — | JSON（§26） | `routes::api_enrich_patent` | `src/routes/patent.rs:35` |
@@ -532,19 +532,19 @@
 
 ### §19 POST `/api/search/stats`
 
-- 源码：`src/routes/search.rs:962`
+- 源码：`src/routes/search.rs:991`
 - 请求体：`SearchRequest`（字段见上文类型表）
 - 响应顶层键：`applicants`、`countries`、`total`、`years`
 
 ### §22 POST `/api/search/online`
 
-- 源码：`src/routes/search.rs:634`
+- 源码：`src/routes/search.rs:649`
 - 请求体：`SearchRequest`（字段见上文类型表）
 - 响应顶层键：`attempts`、`message`、`page`、`page_size`、`patents`、`source`、`total`
 
 ### §23 POST `/api/search/vector`
 
-- 源码：`src/routes/search.rs:844`
+- 源码：`src/routes/search.rs:873`
 - 读取的请求键：`limit`、`query`、`rrf_k`
 - 响应顶层键：`applicant`、`bm25_count`、`error`、`fused_score`、`id`、`inventor`、`method`、`patent_number`、`patents`、`relevance_score`、`rrf_k`、`source`、`title`、`total`、`vector_count`
 
