@@ -1267,17 +1267,9 @@
                 btn.textContent = '\u23f3\ufe0f 查询中...';
             }
             var selectedProvider = providerKey || document.getElementById('ai-provider').value;
-            if (selectedProvider === 'custom') {
-                document.getElementById('ai-model').innerHTML = DOMPurify.sanitize('<option value="">自定义模式请手动输入模型名</option>');
-                document.getElementById('ai-model-expert').innerHTML = DOMPurify.sanitize('<option value="">自定义模式请手动输入模型名</option>');
-                if (isManual) {
-                    btn.textContent = '\u274c 自定义模式不支持自动查询';
-                    btn.style.color = '#f85149';
-                    setTimeout(function() { btn.textContent = '\ud83d\udd0d 查询可用模型'; btn.style.color = ''; }, 3000);
-                    btn.disabled = false;
-                }
-                return;
-            }
+            // 2026-11-05 修复：自定义网关同样支持自动探测（后端 provider=custom 分支
+            // 会探测已配置的 base_url）。旧实现前端硬拦截「自定义模式不支持自动查询」，
+            // 用户只能手输模型名、网关更新模型也无法感知。探测失败时才退回手动输入。
             var url = '/api/ai/models?provider=' + encodeURIComponent(selectedProvider);
             try {
                 const res = await fetch(url);
@@ -1294,10 +1286,24 @@
                         });
                     }
                     if (models.length > 0) {
-                        var curModel = document.getElementById('ai-model').value;
+                        var modelEl = document.getElementById('ai-model');
+                        var customGroup = document.getElementById('custom-model-group');
+                        var curModel = modelEl.value;
+                        // 手输框可见时，真正保存的模型在它里面——用它作选中种子
+                        if (customGroup && customGroup.style.display !== 'none') {
+                            curModel = document.getElementById('ai-model-custom').value || curModel;
+                        }
                         var curExpert = document.getElementById('ai-model-expert').value;
                         populateSelect('ai-model', models, curModel);
                         populateSelect('ai-model-expert', models, curExpert);
+                        if (customGroup && curModel) {
+                            // 手输的模型名在探测列表里 → 直接选中并收起手输框；不在则保留手输框可用
+                            var inList = models.some(function(m) { return m.value === curModel; });
+                            if (inList) {
+                                modelEl.value = curModel;
+                                customGroup.style.display = 'none';
+                            }
+                        }
                         if (isManual) {
                             btn.textContent = '\u2705 ' + models.length + ' 个模型';
                             btn.style.color = '#4ade80';
@@ -1306,8 +1312,9 @@
                     } else {
                         populateSelect('ai-model', [{ value: '', label: '无可用模型' }], '');
                         populateSelect('ai-model-expert', [{ value: '', label: '无可用模型' }], '');
+                        showCustomManualFallback('探测无结果：可手动输入模型名（下拉选「自定义模型...」）');
                         if (isManual) {
-                            btn.textContent = '\u274c 无可用模型（请确认 API Key 已配置）';
+                            btn.textContent = '\u274c 无可用模型（自定义网关请确认 Base URL 可达）';
                             btn.style.color = '#f85149';
                             setTimeout(function() { btn.textContent = '\ud83d\udd0d 查询可用模型'; btn.style.color = ''; }, 3000);
                         }
@@ -1315,6 +1322,7 @@
                 } else {
                     populateSelect('ai-model', [{ value: '', label: '查询失败' }], '');
                     populateSelect('ai-model-expert', [{ value: '', label: '查询失败' }], '');
+                    showCustomManualFallback('探测失败：可手动输入模型名（下拉选「自定义模型...」）');
                     if (isManual) {
                         btn.textContent = '\u274c ' + (data.message || '查询失败');
                         btn.style.color = '#f85149';
@@ -1324,12 +1332,24 @@
             } catch(e) {
                 populateSelect('ai-model', [{ value: '', label: '网络错误' }], '');
                 populateSelect('ai-model-expert', [{ value: '', label: '网络错误' }], '');
+                showCustomManualFallback('网络错误：可手动输入模型名（下拉选「自定义模型...」）');
                 if (isManual) {
                     btn.textContent = '\u274c 网络错误';
                     setTimeout(function() { btn.textContent = '\ud83d\udd0d 查询可用模型'; }, 3000);
                 }
             } finally {
                 if (btn && isManual) btn.disabled = false;
+            }
+
+            // 自定义提供方探测不成时退回手输（保留旧行为，不再硬拦截探测本身）
+            function showCustomManualFallback(hintText) {
+                if (selectedProvider !== 'custom') return;
+                var g = document.getElementById('custom-model-group');
+                if (g) g.style.display = 'block';
+                var ge = document.getElementById('custom-expert-model-group');
+                if (ge) ge.style.display = 'block';
+                var h = document.getElementById('ai-model-hint');
+                if (h) h.textContent = hintText;
             }
         }
 </script>

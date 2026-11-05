@@ -1655,3 +1655,12 @@
 - **根因 / Root cause**: 请求体里 `sort_by`/`page_size` 一路传到 `SearchQuery`，但在线胜出分支直接 `outcome.summaries()` 返回、`page_size` 硬编码 10；SerpAPI provider 的 `search_url` 压根不读 `limit`（google_patents 引擎每页固定 10，`num` 参数未实证）。前端控件与后端消费之间**没有一条断言钉住「这个参数真的影响结果」**——MA1 的「改造前后逐字一致」锁只锁了 URL 形状与旧行为相同，旧行为本来就没消费它。
 - **修复 / Fix**: ①provider 按 `upstream_pages_for(limit)`（封顶 5 页=50 条）聚合上游页，`upstream_first_page` 做不重叠的「用户页↔上游页」映射（k==1 恒等，旧单页行为逐字不变）；响应 `page_size` 报有效口径；②路由胜出分支新增 `apply_online_sort`：new/old 本地按申请日重排，relevance/缺省不动；③纯函数各配锁（含「用户页 2 k=2 → 上游 3..4 不得与页 1 重叠」的负控——自查时抓出并修掉了我第一版写的重叠映射）。
 - **预防 / Prevention**: ①前端每接一个影响检索结果的控件，必须有一条「改这个值→出参/上游请求真的变」的断言，形状锁不等于语义锁；②聚合类改动先画「用户页 ↔ 上游页」映射表再写循环，边界页（末页超出上游页数）必须 break 而不是返回空数组冒充。
+
+## [2026-11-05] 70 自定义网关的模型探测被两层硬堵：前端直接拒绝 + 后端只认硬编码表
+- **严重程度 / Severity**: MEDIUM（用户实测：设置页选「自定义」后点「查询可用模型」必失败，只能手输模型名；网关上新增/更新的模型永远感知不到）
+- **涉及文件**: `templates/settings.html`（`fetchAiModels`）、`src/routes/idea.rs`（`list_ai_models` 单源分支）
+- **现象 / Symptom**: 配置 magpie 本地网关（OpenAI 兼容，`/v1/models` 实测可回 80 个模型）后，设置页点「查询可用模型」显示「❌ 自定义模式不支持自动查询」；即使绕过前端直接调 `/api/ai/models?provider=custom`，后端也返回 `not_found` + 空列表。
+- **根因 / Root cause**: 两层各堵一处——①前端 `fetchAiModels` 对 `selectedProvider==='custom'` 提前 return 并硬写「请手动输入模型名」；②后端单源模式只在 `KNOWN_AI_PROVIDERS` 硬编码表里查名字，查不到就 `not_found`，完全不看用户配置的 `ai_base_url`。讽刺的是**多源模式早在 #98 就支持探测 Custom**（首页状态用的就是它），设置页偏偏走单源分支——同一能力两处实现，只修了一处。
+- **修复 / Fix**: ①后端：单源分支 `provider=custom` 改为探测配置的 `ai_base_url` + Key（本地网关常无鉴权，不沿用已知源的「空 Key ⇒ not_configured」拦截）；探测收尾逻辑抽成 `finish_probe` 供两条路径共用，出参形状与原 known-provider 分支逐字一致；②前端：去掉硬拦截，custom 正常调探测；仅在探测失败/空时退回手输框（旧行为作为兜底保留）；手输模型名若已在探测列表中，自动选中并收起手输框。
+- **验证**: 本机实测 `/api/ai/models?provider=custom` 返回 80 个模型；浏览器设置页点「查询可用模型」列表填充成功。
+- **预防**: ①同一能力有多个调用路径（单源/多源、首页/设置页）时，修复必须枚举所有路径——「一处已修」不代表全局已修；②前端「不支持 X」的硬拦截要定期对照后端真实能力复查：这里后端网关早已支持 /models，拦截本身是过时认知的固化。

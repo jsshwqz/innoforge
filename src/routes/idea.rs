@@ -2535,6 +2535,47 @@ pub async fn list_ai_models(
         })
     }
 
+    // 单源探测的收尾：把 make_task 的结果组装成出参（形状与原 known-provider 分支逐字一致，
+    // 供已知源与 custom 两条路径共用）。
+    async fn finish_probe(
+        name: String,
+        handle: tokio::task::JoinHandle<Option<serde_json::Value>>,
+    ) -> Json<serde_json::Value> {
+        match tokio::time::timeout(std::time::Duration::from_secs(12), handle).await {
+            Ok(Ok(Some(result))) => {
+                let models = result["models"].as_array().cloned().unwrap_or_default();
+                let result_status = result["status"].as_str().unwrap_or("ok");
+                let top = if result_status == "ok" && !models.is_empty() {
+                    "ok"
+                } else {
+                    "error"
+                };
+                let mut entry = json!({
+                    "status": top,
+                    "provider": {"name": name, "status": result_status, "count": models.len()},
+                    "models": models,
+                    "count": models.len()
+                });
+                if let Some(e) = result["error"].as_str() {
+                    entry["error"] = json!(e);
+                }
+                Json(entry)
+            }
+            Ok(Ok(None)) | Ok(Err(_)) => Json(json!({
+                "status": "error",
+                "provider": {"name": name, "status": "error", "count": 0},
+                "models": Vec::<serde_json::Value>::new(),
+                "count": 0
+            })),
+            Err(_) => Json(json!({
+                "status": "error",
+                "provider": {"name": name, "status": "timeout", "count": 0},
+                "models": Vec::<serde_json::Value>::new(),
+                "count": 0
+            })),
+        }
+    }
+
     if !requested_provider.is_empty() {
         // Single-provider mode: query only the requested provider
         let provider_lower = requested_provider.to_lowercase();
@@ -2554,47 +2595,32 @@ pub async fn list_ai_models(
             }
 
             let handle = make_task(name, base_url, &api_key);
-            match tokio::time::timeout(std::time::Duration::from_secs(12), handle).await {
-                Ok(Ok(Some(result))) => {
-                    let models = result["models"].as_array().cloned().unwrap_or_default();
-                    let result_status = result["status"].as_str().unwrap_or("ok");
-                    let top = if result_status == "ok" && !models.is_empty() {
-                        "ok"
-                    } else {
-                        "error"
-                    };
-                    let mut entry = json!({
-                        "status": top,
-                        "provider": {"name": name, "status": result_status, "count": models.len()},
-                        "models": models,
-                        "count": models.len()
-                    });
-                    if let Some(e) = result["error"].as_str() {
-                        entry["error"] = json!(e);
-                    }
-                    Json(entry)
-                }
-                Ok(Ok(None)) | Ok(Err(_)) => Json(json!({
-                    "status": "error",
-                    "provider": {"name": name, "status": "error", "count": 0},
-                    "models": Vec::<serde_json::Value>::new(),
-                    "count": 0
-                })),
-                Err(_) => Json(json!({
-                    "status": "error",
-                    "provider": {"name": name, "status": "timeout", "count": 0},
-                    "models": Vec::<serde_json::Value>::new(),
-                    "count": 0
-                })),
-            }
+            finish_probe(name.to_string(), handle).await
         } else {
-            // Unknown provider — return empty
-            Json(json!({
-                "status": "ok",
-                "provider": {"name": requested_provider, "status": "not_found"},
-                "models": Vec::<serde_json::Value>::new(),
-                "count": 0
-            }))
+            // 2026-11-05 缺陷修复（用户实测：设置页选「自定义」点「查询可用模型」必失败，
+            // 只能手输模型名，网关更新模型也无法感知）：旧实现只认 KNOWN_AI_PROVIDERS
+            // 硬编码表，`provider=custom` 恒返回 not_found。请求指向用户配置的提供方
+            // （custom，或与 ai_provider 同名）时，改用配置的 base_url + Key 探测——
+            // 与多源模式（#98 已支持 Custom 探测）同一口径；本地网关常无鉴权，
+            // 故不沿用已知源的「空 Key ⇒ not_configured」拦截。
+            let (cfg_base_url, cfg_api_key) = {
+                let config = s.config.read().unwrap_or_else(|e| e.into_inner());
+                let base = config.ai_base_url.clone();
+                let key = config.api_key_for_provider(&base);
+                (base, key)
+            };
+            if provider_lower == "custom" && !cfg_base_url.is_empty() {
+                let handle = make_task("Custom", &cfg_base_url, &cfg_api_key);
+                finish_probe("Custom".to_string(), handle).await
+            } else {
+                // 其余未知提供方——维持旧空返回
+                Json(json!({
+                    "status": "ok",
+                    "provider": {"name": requested_provider, "status": "not_found"},
+                    "models": Vec::<serde_json::Value>::new(),
+                    "count": 0
+                }))
+            }
         }
     } else {
         // Multi-provider mode: query the configured provider + known providers.
