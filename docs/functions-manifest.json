@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-03T10:28:47.228Z",
+  "generatedAt": "2026-11-05T08:23:25.576Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -637,6 +637,7 @@
         "saveFreeCadSettings",
         "saveGoogleCredentials",
         "saveSerpApiKey",
+        "showCustomManualFallback",
         "showStatus",
         "toggleGeminiCliMode",
         "updateConfigStatus",
