@@ -14,7 +14,7 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 ### 说明
 
 - 配额提示：每页 20 = 每次检索 2 发上游请求；额度耗尽自动走既有 429→降级链，行为不变。
-- 复盘入 `docs/errors.md` #69：前端控件与后端消费之间必须有「改这个值→结果真的变」的断言，形状锁不等于语义锁。
+- 复盘入 `docs/errors.md`（第 69 条）：前端控件与后端消费之间必须有「改这个值→结果真的变」的断言，形状锁不等于语义锁。
 
 ---
 ## [v0.9.30] - 2026-11-05
