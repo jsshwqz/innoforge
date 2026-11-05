@@ -12,7 +12,7 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ### 说明
 
-- 复盘入 `docs/errors.md` #70：同一能力有多个调用路径时修复必须枚举所有路径；前端「不支持 X」硬拦截要定期对照后端真实能力复查。
+- 复盘入 `docs/errors.md`（第 70 条）：同一能力有多个调用路径时修复必须枚举所有路径；前端「不支持 X」硬拦截要定期对照后端真实能力复查。
 - 本机实测：`provider=custom` 返回 63 个实时模型（随网关动态变化）；设置页探测失败时自动落回手动输入。
 
 ---
