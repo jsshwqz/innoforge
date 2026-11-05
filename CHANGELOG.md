@@ -4,6 +4,13 @@
 All notable changes are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
+## [v0.9.30] - 2026-11-05
+
+### 修复 / Fixed
+
+- **在线搜索横幅误导**：SerpAPI 正常供页时，顶层却显示免费直抓源「不支持翻页已跳过…去设置」的黄色告警——跳过源的提示经 `SearchOutcome::hint()` 泄漏成横幅。现跳过原因只进诊断面板（`error`），`hint` 恒 None（沿用熔断冷却的既有纪律），横幅只在实际参与结果的路径出问题时出现（[#197](https://github.com/jsshwqz/innoforge/pull/197)）。
+- **长句搜索每页召回过狠**：中文长句核心词门禁要求命中 ≥2，把只中「润滑」或只中「测温」的域内相关专利整页杀掉（上游 10 条只放 2 条，观感「67 条却每页只有 2 条」）。放宽为命中 ≥1 即放行（上游已按整句排序）；0 命中噪声仍由分数门槛拦截（[#197](https://github.com/jsshwqz/innoforge/pull/197)）。
+---
 ## [v0.9.29] - 2026-11-05
 
 ### 修复 / Fixed
