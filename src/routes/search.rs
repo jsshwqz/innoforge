@@ -372,6 +372,21 @@ fn exact_lookup_allowed(
     table.remaining(SourceKind::SerpApi, now).is_none()
 }
 
+/// 在线胜出结果的本地排序（2026-11-05 缺陷修复：在线路径此前从不消费 `sort_by`，
+/// 下拉「最新/最早」毫无效果——上游即便按日期返回，也被 dedup 的混合分降序打回）。
+///
+/// - `"new"` / `"old"`：本地按 `filing_date` 降序 / 升序，排序控件真实生效；
+/// - `"relevance"` 及缺省：保持现状（上游已按相关性交付、dedup 按混合分降序），不重排。
+///
+/// 空值日期在 `new` 档沉底（`""` 最小），与本地路径 `api_search` 的既有口径一致。
+fn apply_online_sort(patents: &mut [PatentSummary], sort_by: Option<&str>) {
+    match sort_by {
+        Some("new") => patents.sort_by(|a, b| b.filing_date.cmp(&a.filing_date)),
+        Some("old") => patents.sort_by(|a, b| a.filing_date.cmp(&b.filing_date)),
+        _ => {}
+    }
+}
+
 pub async fn api_search(
     State(s): State<AppState>,
     Json(req): Json<SearchRequest>,
@@ -782,18 +797,32 @@ pub async fn api_search_online(
     //   故 `total` 如实改报**本页通过相关性过滤的真实条数**，另以纯新增键 `upstream_total`
     //   保留「上游共命中 N 条」供前端展示，两端数字不再互相冒充。
     if let Some(winner) = outcome.winning_source() {
-        let gated_count = outcome.summaries().len();
+        // 2026-11-05 缺陷修复：在线胜出路径此前从不消费 req.sort_by——下拉选「最新/最早」
+        // 毫无效果（上游即便按日期返回，也被 dedup 的混合分降序打回）。relevance 保持
+        // 现状（混合分降序）；new/old 本地按申请日重排，让排序控件真实生效。
+        let mut patents = outcome.summaries();
+        apply_online_sort(&mut patents, req.sort_by.as_deref());
+        let gated_count = patents.len();
         let paginated = matches!(winner, SourceKind::SerpApi | SourceKind::EpoOps);
         let (total, upstream_total) = if paginated {
             (outcome.upstream_total.unwrap_or(0), outcome.upstream_total)
         } else {
             (gated_count, outcome.upstream_total)
         };
+        // page_size 如实报「本次每页实际交付口径」：SerpAPI 聚合后为有效页大小（10/20/…/50），
+        // EPO 按 Range 跨度交付，免费直抓源固定 10（不可聚合）。前端翻页数学以此为准。
+        let effective_size = match winner {
+            SourceKind::SerpApi => {
+                crate::search::providers::serpapi::effective_page_size(req.page_size)
+            }
+            SourceKind::EpoOps => req.page_size.min(25),
+            _ => 10,
+        };
         let mut out = json!({
-            "patents": outcome.summaries(),
+            "patents": patents,
             "total": total,
             "page": req.page,
-            "page_size": 10,
+            "page_size": effective_size,
             "source": winner.as_str(),
             "attempts": attempts_json(&outcome)
         });
@@ -1166,6 +1195,58 @@ pub async fn api_export_xlsx(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **2026-11-05 在线排序锁**：`apply_online_sort` 让下拉「最新/最早」在在线路径
+    /// 真实生效（旧实现从不消费 `sort_by`，上游即便按日期返回也被混合分降序打回）；
+    /// `relevance`/缺省必须**不动**输入顺序（现状=混合分降序由 dedup 保证）。
+    #[test]
+    fn apply_online_sort_honors_new_old_and_leaves_relevance() {
+        let mk = |pn: &str, date: &str| PatentSummary {
+            id: pn.into(),
+            patent_number: pn.into(),
+            title: pn.into(),
+            abstract_text: String::new(),
+            applicant: String::new(),
+            inventor: String::new(),
+            filing_date: date.into(),
+            country: "CN".into(),
+            relevance_score: None,
+            score_source: None,
+            matched_fields: None,
+        };
+        let base = || vec![mk("A", "2015-01-30"), mk("B", "2023-07-12"), mk("C", "")];
+
+        let mut v = base();
+        apply_online_sort(&mut v, Some("new"));
+        assert_eq!(
+            vec!["B", "A", "C"],
+            v.iter()
+                .map(|p| p.patent_number.as_str())
+                .collect::<Vec<_>>(),
+            "最新：申请日降序，空日期沉底"
+        );
+
+        let mut v = base();
+        apply_online_sort(&mut v, Some("old"));
+        assert_eq!(
+            vec!["C", "A", "B"],
+            v.iter()
+                .map(|p| p.patent_number.as_str())
+                .collect::<Vec<_>>(),
+            "最早：申请日升序"
+        );
+
+        let mut v = base();
+        apply_online_sort(&mut v, Some("relevance"));
+        apply_online_sort(&mut v, None);
+        assert_eq!(
+            vec!["A", "B", "C"],
+            v.iter()
+                .map(|p| p.patent_number.as_str())
+                .collect::<Vec<_>>(),
+            "relevance/缺省不得重排（保持 dedup 的混合分降序）"
+        );
+    }
 
     // ── `/api/search/online` 的四条终态响应形状（MA1 抽出前后对照，逐字来自
     // `git show b08f1c5:src/routes/search.rs` 的 `api_search_online`）──
