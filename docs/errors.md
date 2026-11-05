@@ -1629,3 +1629,12 @@
   3. `is_online_result_relevant` 增加中文多核心词放行机制（与英文 query_terms 机制对齐，命中 2 个或以上核心词直接视为相关放行）。
 - **回归 / 负控**: `extract_query_words_handles_chinese_long_queries_and_preserves_short`（短词与空格分词保持原样，长句正确抽取关键词）；`long_chinese_query_relevant_results_pass_and_noise_rejected`（长句下相关专利得分从 42.0 提升至 52.0~82.7 并稳稳放行，无关噪声如折叠屏仍被严格拦截在 33.0 拒绝门外）。
 - **预防**: 多语言搜索算法必须针对该语言的书写习惯做特征提取（如中文无空格分词与专利套话前缀），不能直接套用英文基于 whitespace 的分词假设；算相似度比例时需警惕分母被停用词稀释导致长查询惩罚。
+
+## [2026-11-05] 67 模板内联 JS 的 TDZ 引用：语法扫描/e2e 全覆盖不到，改动渲染逻辑必须真实浏览器点一遍
+- **严重程度 / Severity**: HIGH（v0.9.28 发布版任何搜索都显示"搜索失败"，发布产物带病）
+- **涉及文件**: `templates/search.html`（`renderResults`）
+- **现象 / Symptom**: v0.9.28 起任何搜索（含 0 结果）都显示「搜索失败: Cannot access 'patents' before initialization」。CI 13 项全绿照常合并发版。
+- **根因 / Root cause**: #193 在 `renderResults` 里新增的 `upstream_total` 注记块引用了 `patents.length`，而 `const patents` 在函数下方才声明——TDZ（暂时性死区）运行时错误。该错误被 `doSearch` 的 try/catch 捕获转成失败文案，不产生未捕获异常。
+- **为什么四道防线全漏**: ①`node --check`/`new Function` 只查语法，TDZ 是运行时语义；②HTML 静态扫描只查 on* 函数完整性；③既有 e2e 搜索用例只断言输入可用、不断言结果渲染；④改动者的验收只做了 API 层真实调用，没在浏览器走渲染路径——违反「改了什么就要测什么」。
+- **修复 / Fix**: `shown` 改从 `data.patents` 直接取数（不引用下方声明）；引用处留注释。
+- **预防 / Prevention**: ①凡改模板内联 JS 的**渲染/数据流逻辑**，验收必须包含真实浏览器点到底（输入→搜索→卡片渲染→翻页），不能只测 API；②新增引用一个变量前先确认它的声明位置（const/let 的 TDZ 在 `node --check` 下完全隐形）；③e2e 增加一条「搜索后有结果卡片渲染」的正向断言属后续可选项（冻结期结束再议，本条只登记）。

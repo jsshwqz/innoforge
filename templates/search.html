@@ -445,9 +445,12 @@ function renderResults(data, page, pageSize) {
     // 本地兜底回显请求值）。翻页数学必须用真实交付口径，否则会算出不存在的页。
     const effectiveSize = Number(data.page_size) || pageSize;
     let source = data.source ? ` | ${t('results.source')}: ${escapeHtml(data.source)}` : '';
-    // 上游总数 > 本页实际渲染条数时（免费直抓源不支持翻页 + 相关性过滤折损），如实展示两个口径
+    // 上游总数 > 本页实际渲染条数时（免费直抓源不支持翻页 + 相关性过滤折损），如实展示两个口径。
+    // 注意：patents 变量在本函数下方才声明，这里只能从 data.patents 取数——
+    // 2026-11-05 教训：在此处引用下方 const 会触发 TDZ（"Cannot access 'patents'
+    // before initialization"），整个 renderResults 抛错、搜索结果永远显示失败。
     const upstream = Number(data.upstream_total || 0);
-    const shown = patents.length; // 本页实际通过过滤并渲染的条数
+    const shown = Array.isArray(data.patents) ? data.patents.length : 0;
     if (upstream > shown) {
         source += `<span class="muted"> | ${escapeHtml(t('results.upstream_filtered', { upstream, shown }))}</span>`;
     }
