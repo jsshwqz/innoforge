@@ -109,7 +109,126 @@ fn material_warnings(input: &CaseInput) -> Vec<String> {
     out
 }
 
-/// 从驳回决定原文提取法条引用（确定性，不猜造）。
+/// 中文数字（0–99）→ 阿拉伯数字；已是阿拉伯数字或识别不了则原样返回。
+fn cn_number_to_digits(s: &str) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    if chars.is_empty() || chars.iter().all(|c| c.is_ascii_digit()) {
+        return s.to_string();
+    }
+    let digit = |c: char| -> Option<u32> {
+        Some(match c {
+            '零' | '〇' => 0,
+            '一' => 1,
+            '二' | '两' => 2,
+            '三' => 3,
+            '四' => 4,
+            '五' => 5,
+            '六' => 6,
+            '七' => 7,
+            '八' => 8,
+            '九' => 9,
+            _ => return None,
+        })
+    };
+    if let Some(pos) = chars.iter().position(|c| *c == '十') {
+        let tens = if pos == 0 {
+            1
+        } else {
+            digit(chars[pos - 1]).unwrap_or(1)
+        };
+        let ones = if pos + 1 < chars.len() {
+            digit(chars[pos + 1]).unwrap_or(0)
+        } else {
+            0
+        };
+        return (tens * 10 + ones).to_string();
+    }
+    if chars.len() == 1 {
+        if let Some(d) = digit(chars[0]) {
+            return d.to_string();
+        }
+    }
+    s.to_string()
+}
+
+/// 法条引用的去重键：中文数字归一为阿拉伯数字，使「第二十二条第三款」与「第22条第3款」
+/// 视为同一条款（同一依据不得在答复书里列两遍）。「专利法」与「专利法实施细则」前缀不同，
+/// 不会被误并。
+fn law_citation_key(c: &str) -> String {
+    let Ok(re) = regex::Regex::new(r"第([一二三四五六七八九十百零〇0-9]+)(条|款)")
+    else {
+        return c.to_string();
+    };
+    let mut out = String::new();
+    let mut last = 0usize;
+    for cap in re.captures_iter(c) {
+        let m = match cap.get(0) {
+            Some(m) => m,
+            None => continue,
+        };
+        out.push_str(&c[last..m.start()]);
+        out.push('第');
+        out.push_str(&cn_number_to_digits(&cap[1]));
+        out.push_str(&cap[2]);
+        last = m.end();
+    }
+    out.push_str(&c[last..]);
+    out
+}
+
+/// 「本案适用」语句的判据标记：只收决定主文与复审救济告知（实体认定由 cites_specific_claim 判）。
+const APPLIED_GROUND_MARKERS: &[&str] = &[
+    "驳回上述专利申请",
+    "决定驳回",
+    "作出本驳回决定",
+    "请求复审",
+    "复审请求",
+];
+
+/// 同句是否引用了具体权利要求编号（「权利要求1-4」「权利要求1~3」「权利要求1」）。
+///
+/// 勾选表模板行有三种写法（2026-11-06 真实案件实测逐轮暴露）：
+/// 1. 「申请不符合专利法第X条的规定」——排除「申请不符合」即可；
+/// 2. 「权利要求不符合专利法第X条的规定」——按「权利要求」四字放行会把这条也收进来；
+/// 3. 「权利要求不具备专利法第22条第2款规定的新颖性」——按「不具备」放行又会收进来。
+///
+/// 三种模板行的共同点是**泛指、无具体编号**；真实认定必然点名具体权利要求
+/// （「指出权利要求1-4不具备专利法第22条第3款规定的创造性」）。故判据取「有编号」，
+/// 或「属决定主文/救济告知」（见 APPLIED_GROUND_MARKERS）。
+///
+/// 代价与兜底：若理由正文只用「该权利要求不具备……」而不带编号，该条会被漏收——
+/// 但漏收会触发答复书里的显式告警「实体条款未在现有文本中识别，需人工核对」，
+/// 属响亮失败；相比旧行为（把 15 条从未适用的依据当真依据列给用户），
+/// 漏收+显式告警是可接受的一侧。
+fn cites_specific_claim(sent: &str) -> bool {
+    let Ok(re) = regex::Regex::new(r"权利要求\s*[0-9一二三四五六七八九十]") else {
+        return false;
+    };
+    re.is_match(sent)
+}
+
+/// 按句切分（`。`/`；`/`;`/换行），供法条判据限定在**同句**作用域内——跨句牵连会把
+/// 表格空白项与正文认定混为一谈。
+fn split_law_sentences(text: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut start = 0usize;
+    for (idx, ch) in text.char_indices() {
+        if matches!(ch, '。' | '；' | ';' | '\n') {
+            out.push(&text[start..idx]);
+            start = idx + ch.len_utf8();
+        }
+    }
+    out.push(&text[start..]);
+    out
+}
+
+/// 从驳回决定原文提取**本案实际适用**的法条依据（确定性，不猜造）。
+///
+/// 2026-11-06 缺陷修复（真实案件实测）：驳回决定首页是一张候选法条勾选表，每一项都印着
+/// 「申请不符合专利法第X条的规定」，**未勾选的项同样留在 OCR 文本里**。旧实现对全文所有
+/// 法条样式一律收走，导致答复书把 15 条从未适用的依据一并列给用户（实际实体依据只有
+/// 第22条第3款一条）。现只认「本案适用」语句形态（见 [`APPLIED_GROUND_MARKERS`]），
+/// 表格式裸条目一律丢弃；同一法条的中文/阿拉伯数字写法归一后去重。
 fn extract_legal_basis(oa_text: &str) -> Vec<String> {
     let Ok(re) = regex::Regex::new(
         r"专利法(?:实施条例|实施细则)?第[一二三四五六七八九十百千零〇0-9]+条(?:第[一二三四五六七八九十0-9]+款)?",
@@ -117,10 +236,18 @@ fn extract_legal_basis(oa_text: &str) -> Vec<String> {
         return Vec::new();
     };
     let mut out: Vec<String> = Vec::new();
-    for m in re.find_iter(oa_text) {
-        let s = m.as_str().to_string();
-        if !out.contains(&s) {
-            out.push(s);
+    let mut seen_keys: Vec<String> = Vec::new();
+    for sent in split_law_sentences(oa_text) {
+        if !APPLIED_GROUND_MARKERS.iter().any(|m| sent.contains(m)) && !cites_specific_claim(sent) {
+            continue;
+        }
+        for m in re.find_iter(sent) {
+            let s = m.as_str().to_string();
+            let key = law_citation_key(&s);
+            if !seen_keys.contains(&key) {
+                seen_keys.push(key);
+                out.push(s);
+            }
         }
     }
     out
@@ -1236,6 +1363,13 @@ fn stage_e_assemble(
         }
     }
 
+    // UA2 接线（2026-11-06 缺陷修复）：复审请求书文末固定追加「提交前清单」——
+    // 该文案早已定稿并写了常量存在性测试，但从未拼进产物（`allow(dead_code)` 挂了很久），
+    // 属于「文案到位、动作缺位」的假交付。清单是静态确定性内容，不经 AI 生成。
+    if input.case_meta.oa_type == "reject_review" {
+        text.push_str(AiClient::REEXAM_PRE_SUBMIT_CHECKLIST);
+    }
+
     collapse_whitespace(&text)
 }
 
@@ -1354,6 +1488,91 @@ mod tests {
         let output = stage_e_assemble(&input, &[], &[], &[], &[], &[]);
         assert!(output.contains("专利法第41条"));
         assert!(output.contains("实体条款未在现有文本中识别"));
+    }
+
+    /// **2026-11-06 缺陷锁（真实案件形态）**：驳回决定首页的候选法条勾选表，未勾选项也留在
+    /// OCR 文本里。旧实现把它们全当真依据列给用户（实测 15 条 vs 实际 1 条实体依据）。
+    /// 现只认「本案适用」语句；表格裸条目必须被丢弃。
+    #[test]
+    fn legal_basis_ignores_rejection_form_checklist() {
+        let oa = "1. 根据专利法第38条及其实施细则第59条的规定，决定驳回上述专利申请。\n\
+                  申请不符合专利法第2条第2款的规定。\n\
+                  申请不符合专利法第5条或者第25条规定的不授予专利权的范围。\n\
+                  申请不符合专利法第9条第1款的规定。\n\
+                  申请不符合专利法第22条第2款的规定。\n\
+                  申请不符合专利法第26条第3款或者第4款的规定。\n\
+                  权利要求不符合专利法第2条第2款的规定。\n\
+                  权利要求不符合专利法第31条第1款的规定。\n\
+                  权利要求不具备专利法第22条第2款规定的新颖性。\n\
+                  权利要求不具备专利法第22条第4款规定的实用性。\n\
+                  详细的驳回理由见驳回决定正文部分（共3页）。\n\
+                  审查员于2026年01月19日发出第一次审查意见通知书，指出权利要求1-4不具备专利法第22条第3款规定的创造性。\n\
+                  该权利要求不具备专利法第二十二条第三款规定的创造性。\n\
+                  3. 根据专利法第41条及实施细则第65条的规定，申请人可以请求复审。";
+        let bases = extract_legal_basis(oa);
+        let joined = bases.join("|");
+        // 实际适用的实体依据保留
+        assert!(
+            joined.contains("第22条第3款"),
+            "本案实体依据必须保留: {joined}"
+        );
+        // 决定主文的程序依据保留
+        assert!(
+            joined.contains("第38条"),
+            "驳回主文程序依据必须保留: {joined}"
+        );
+        // 表格空白项一律不得出现（含「权利要求不符合…」「权利要求不具备…规定的新颖性」
+        // 这两种带「权利要求」/「不具备」字样的模板行）
+        for bogus in [
+            "第2条第2款",
+            "第9条第1款",
+            "第22条第2款",
+            "第22条第4款",
+            "第26条第3款",
+            "第31条第1款",
+        ] {
+            assert!(
+                !bases.iter().any(|b| b.contains(bogus)),
+                "勾选表未适用条目 {bogus} 不得列为法律依据: {joined}"
+            );
+        }
+        // 中文数字与阿拉伯数字同一条款只出现一次
+        assert_eq!(
+            bases
+                .iter()
+                .filter(|b| law_citation_key(b).contains("第22条第3款"))
+                .count(),
+            1,
+            "第二十二条第三款与第22条第3款必须归一去重: {joined}"
+        );
+    }
+
+    /// **UA2 接线锁（2026-11-06）**：复审请求书文末必须带「提交前清单」固定段。
+    /// 旧状态是文案常量早已定稿但从未拼进产物（`allow(dead_code)`），属假交付。
+    #[test]
+    fn stage_e_reject_review_appends_pre_submit_checklist() {
+        let mut input = make_sample_case_input();
+        input.case_meta.oa_type = "reject_review".into();
+        let output = stage_e_assemble(&input, &[], &[], &[], &[], &[]);
+        assert!(
+            output.contains("提交前清单"),
+            "复审请求书文末必须有提交前清单"
+        );
+        for i in 1..=8 {
+            assert!(
+                output.contains(&format!("□ {i}.")),
+                "清单第 {i} 项必须出现在产物里"
+            );
+        }
+
+        // 非复审类型（普通审查意见答复）不得追加复审专用清单
+        let mut oa_input = make_sample_case_input();
+        oa_input.case_meta.oa_type = "office_action".into();
+        let oa_output = stage_e_assemble(&oa_input, &[], &[], &[], &[], &[]);
+        assert!(
+            !oa_output.contains("提交前清单"),
+            "提交前清单是复审专用，不得混入其他答复类型"
+        );
     }
 
     #[test]
