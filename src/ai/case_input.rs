@@ -75,6 +75,37 @@ pub struct ReferenceDocument {
     pub technical_field: Option<String>,
 }
 
+/// 决定 Stage A verbatim 校验的基准权利要求文本。
+///
+/// 优先级：CaseInput 自带 `claims_under_review` > 请求 `current_claims`（审查基准文本）
+/// > `my_patent_text`（原始申请文本补位）。
+///
+/// 为什么 `current_claims` 必须优先于原始申请文本：审查员认定的区别特征以「审查所针对的
+/// 权利要求文本」（如驳回决定载明"针对 X年X月X日提交的权利要求第1-N项"）为基准；申请人
+/// 在复审前修改**新增**的特征在原始申请权利要求里不存在，若回退用原始申请补位，这些特征
+/// 会被 Stage A 的 verbatim 子串校验静默丢弃，答复书随即漏掉最核心的区别特征论证。
+pub fn resolve_claims_under_review(
+    existing: &str,
+    request_json: Option<&serde_json::Value>,
+    my_patent_text: &str,
+) -> String {
+    if !existing.trim().is_empty() {
+        return existing.to_string();
+    }
+    if let Some(basis) = request_json
+        .and_then(|rj| rj.get("current_claims"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        return basis.to_string();
+    }
+    if !my_patent_text.trim().is_empty() {
+        return my_patent_text.to_string();
+    }
+    String::new()
+}
+
 // ── Stage 输出类型 ─────────────────────────────────────────────────────
 
 /// Stage A 输出：区别特征。
@@ -447,6 +478,36 @@ mod tests {
         let input: CaseInput = serde_json::from_str(json).unwrap();
         assert_eq!(input.legacy_analysis.as_deref(), Some("旧分析结果"));
         assert!(input.spec_effect_statements.is_empty());
+    }
+
+    #[test]
+    fn resolve_claims_prefers_existing_then_current_claims_then_my_patent() {
+        let with_cc = serde_json::json!({
+            "current_claims": "1. 修改后权利要求（含新增特征甲）"
+        });
+        let without_cc = serde_json::json!({"analysis": "x"});
+
+        // 1. CaseInput 自带值优先：请求带 current_claims 也不覆盖
+        assert_eq!(
+            resolve_claims_under_review("1. 已有权项", Some(&with_cc), "1. 原始申请权项"),
+            "1. 已有权项"
+        );
+        // 2. 空白（含纯空白）视为缺失 → current_claims 胜出 my_patent
+        assert_eq!(
+            resolve_claims_under_review("  ", Some(&with_cc), "1. 原始申请权项"),
+            "1. 修改后权利要求（含新增特征甲）"
+        );
+        // 3. 无 current_claims / 空串 → 回退原始申请文本
+        assert_eq!(
+            resolve_claims_under_review("", Some(&without_cc), "1. 原始申请权项"),
+            "1. 原始申请权项"
+        );
+        assert_eq!(
+            resolve_claims_under_review("", Some(&with_cc), "  "),
+            "1. 修改后权利要求（含新增特征甲）"
+        );
+        // 4. 全空 → 空串（不猜造）
+        assert_eq!(resolve_claims_under_review("", None, ""), "");
     }
 
     fn empty_meta() -> CaseMeta {

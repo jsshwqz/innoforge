@@ -1435,11 +1435,14 @@ impl AiClient {
                 my_patent_text,
             );
             // 主 UI 的答复书请求不带 CaseInput；没有权利要求时 Stage A 的 verbatim 校验
-            // 会把所有特征丢弃，产出空答复。用用户上传的本专利文本补位。
-            if case_input.claims_under_review.trim().is_empty() && !my_patent_text.trim().is_empty()
-            {
-                case_input.claims_under_review = my_patent_text.to_string();
-            }
+            // 会把所有特征丢弃，产出空答复。基准文本按 resolve_claims_under_review 的
+            // 优先级解析：审查基准文本（current_claims）优先于原始申请文本补位——否则
+            // 复审前修改新增的特征会被 verbatim 校验静默丢弃（#159 字段接线补全）。
+            case_input.claims_under_review = crate::ai::case_input::resolve_claims_under_review(
+                &case_input.claims_under_review,
+                request_json,
+                my_patent_text,
+            );
             let self_clone = self.clone();
             let ai_client_fast_cloned = ai_client_fast.cloned();
             tokio::spawn(async move {
