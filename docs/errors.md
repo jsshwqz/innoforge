@@ -1678,3 +1678,12 @@
 - **另一处连带缺陷**: `REEXAM_PRE_SUBMIT_CHECKLIST`（UA2 要求的复审请求书文末固定清单）早已定稿并配了常量存在性测试，但从未拼进产物（`#[allow(dead_code)]` 注释自陈「接线到提交动作前暂未被引用」）——文案到位、动作缺位的假交付。现已接线，并加双向负控（复审必有 8 项 / 普通 OA 答复必无）。
 - **回归 / 负控**: `legal_basis_ignores_rejection_form_checklist`（三种模板变体全构造进样例，断言 6 个空白项一个都不出现，同时断言第22条第3款与第38条必须保留、中文数字与阿拉伯数字同一条款去重）；`stage_e_reject_review_appends_pre_submit_checklist`（双向）。
 - **预防**: ①区分「模板 boilerplate」与「实际认定」时，判据要抓**泛指 vs 特指**这个结构差异，不能逐个关键词加白名单——每加一个词都会被下一个模板变体绕过；②正则里的 `\s` 经脚本改写易被吞成字面 `s`（本次就踩了，函数恒返回 false 而测试仍「通过」——因为同一条目被别的判据收进），改完正则必须验证「不匹配的情形真的不匹配」；③定稿的文案常量要定期检查是否真被引用，`allow(dead_code)` + 存在性测试的组合是假交付的信号。
+
+## [2026-11-07] 72 current_claims（审查基准权利要求）未接入生成管线：Stage A verbatim 校验永远对原始申请文本，复审前修改新增的特征被静默丢弃
+- **严重程度 / Severity**: HIGH（复审在办案件实测：驳回决定针对提交基准日修改后的权利要求作认定，修改新增的最核心区别特征每次生成都被丢，答复书逐项论证缺主心骨，而产物零告警——静默缺失）
+- **涉及文件**: `src/ai/patent.rs`（generate_response_letter_stream 的 reject_review 分支）、`src/ai/case_input.rs`（新增 resolve_claims_under_review）
+- **现象 / Symptom**: 同一请求反复生成，特征清单稳定缺同一条——恰是申请人复审前修改时**新增**进权利要求的特征；原始申请里就有的特征全部在稿。
+- **根因 / Root cause**: 路由层为修改稿逐字核验门（#159）提取了 current_claims，但 reject_review 分支构建 CaseInput 时 claims_under_review 恒为空串，随后用 my_patent（原始申请文本）补位；Stage A 的「feature_name 必须是权利要求 verbatim 子串」校验于是对**原始申请**执行——复审前修改新增的特征不在其中，被当非 verbatim 丢弃（仅 tracing::warn，产物无任何提示）。同一字段只接了核验门、没接生成管线——「只接一半」接线缺陷第三例（#69 sort_by/page_size、#201 custom 探测同族）。
+- **修复 / Fix**: `resolve_claims_under_review`（优先级：CaseInput 自带 > 请求 current_claims > my_patent 补位），reject_review 分支改用它解析基准。
+- **回归 / 负控**: `resolve_claims_prefers_existing_then_current_claims_then_my_patent`（四象限：已有值优先 / current_claims 胜出 my_patent / 空白与空串回退 / 全空不猜造）。
+- **预防**: ①新字段接入时必须枚举其全部消费点，修一处不等于修完；②「静默丢弃」类校验只留日志不够——丢弃导致产物结构性缺失时必须在产物里挂显式提示（响亮失败优于静默缺失）；③verbatim 类校验的基准文本必须与「审查认定所针对的文本」一致，而不是与「手头最全的文本」一致。
