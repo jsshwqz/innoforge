@@ -1687,3 +1687,12 @@
 - **修复 / Fix**: `resolve_claims_under_review`（优先级：CaseInput 自带 > 请求 current_claims > my_patent 补位），reject_review 分支改用它解析基准。
 - **回归 / 负控**: `resolve_claims_prefers_existing_then_current_claims_then_my_patent`（四象限：已有值优先 / current_claims 胜出 my_patent / 空白与空串回退 / 全空不猜造）。
 - **预防**: ①新字段接入时必须枚举其全部消费点，修一处不等于修完；②「静默丢弃」类校验只留日志不够——丢弃导致产物结构性缺失时必须在产物里挂显式提示（响亮失败优于静默缺失）；③verbatim 类校验的基准文本必须与「审查认定所针对的文本」一致，而不是与「手头最全的文本」一致。
+
+## [2026-11-07] 73 效果对照引文半句截断：先切窗、后截断的顺序错误，下游兜底函数防御不了「短而残」
+- **严重程度 / Severity**: MEDIUM（正式文书里出现「公开了流量传」半句残词引文，用户可见、影响可用性；不影响结论正确性）
+- **涉及文件**: `src/ai/response_pipeline.rs`（scan_effect_claims 两条取窗路径 + 新增 extend_window_to_sentence_boundary）
+- **现象 / Symptom**: 效果对照段引用驳回决定原文，引文以半句残词结尾（如「……对比文件1公开了流量传」），无省略号、无任何异常标记。
+- **根因 / Root cause**: 引文窗口按「命中点后固定 +60 字」硬切，切点落在句中；随后调用的 truncate_at_sentence_boundary 只在文本**超过** max_chars 时找句边界收尾，对这种本身只有几十字的残窗直接原样放行。防御放在了错误的层——截断函数防超长，不防残缺。
+- **修复 / Fix**: 取窗时优先把窗口末尾延伸到句边界（120/150 字内找最近的 。／；），无边界才回退硬窗口；truncate_at_sentence_boundary 保留为超长兜底。通配模式与固定模式两条路径同修。
+- **回归 / 负控**: `scan_effect_claims_quotes_end_at_sentence_boundary`（命中后 >60 字才有句号的长句，断言引文以句号收尾、含完整从句、无省略号）；`extend_window_to_sentence_boundary_finds_or_defers`（有边界停在句号后 / 无边界返回原值）。
+- **预防**: ①文本窗口类处理，「切在哪」的决策必须与「切多长」的决策同层；②同一个提取函数被多条路径喂料时，每条路径的窗口构造都要核对——本例两条路径同病，只修一条会误以为已修复。

@@ -1054,6 +1054,21 @@ fn truncate_at_sentence_boundary(text: &str, max_chars: usize) -> String {
     }
 }
 
+/// 在 chars[from] 起向后（含 from）在 lookahead 字内找最近的句子边界（。；;），
+/// 返回边界后一位（含句号）。找不到边界则返回 from，调用方自行回退硬窗口——
+/// 硬窗口切在句中会产生「公开了流量传」这类半句引文，正式文书里不可读。
+fn extend_window_to_sentence_boundary(chars: &[char], from: usize, lookahead: usize) -> usize {
+    let limit = from.saturating_add(lookahead).min(chars.len());
+    let mut i = from;
+    while i < limit {
+        if matches!(chars[i], '。' | '；' | ';') {
+            return i + 1;
+        }
+        i += 1;
+    }
+    from
+}
+
 fn scan_effect_claims(oa_text: &str) -> Vec<EffectClaim> {
     let mut claims = Vec::new();
     let chars: Vec<char> = oa_text.chars().collect();
@@ -1082,7 +1097,17 @@ fn scan_effect_claims(oa_text: &str) -> Vec<EffectClaim> {
                             &suffix.chars().collect::<Vec<_>>(),
                         ) {
                             if suf_pos < search_end {
-                                let end = (suf_pos + suffix.chars().count() + 60).min(len);
+                                // 窗口末尾优先延伸到句尾（120 字内），无边界才退回硬窗口
+                                let win_from = (suf_pos + suffix.chars().count()).min(len);
+                                let end = {
+                                    let extended =
+                                        extend_window_to_sentence_boundary(&chars, win_from, 120);
+                                    if extended == win_from {
+                                        (win_from + 60).min(len)
+                                    } else {
+                                        extended
+                                    }
+                                };
                                 let raw: String = chars[pos..end].iter().collect();
                                 let context = truncate_at_sentence_boundary(&raw, 120);
                                 if !claims.iter().any(|c: &EffectClaim| c.text == context) {
@@ -1106,9 +1131,17 @@ fn scan_effect_claims(oa_text: &str) -> Vec<EffectClaim> {
         let mut start = 0;
         while start < len {
             if let Some(pos) = find_substring(&chars, start, &pattern_vec) {
-                // 取上下文：前30字 + 匹配 + 后30字
+                // 取上下文：前60字 + 匹配 + 句尾（150 字内无边界才退回硬窗口 +60）
                 let ctx_start = pos.saturating_sub(60);
-                let ctx_end = (pos + pattern_vec.len() + 60).min(len);
+                let win_from = (pos + pattern_vec.len()).min(len);
+                let ctx_end = {
+                    let extended = extend_window_to_sentence_boundary(&chars, win_from, 150);
+                    if extended == win_from {
+                        (win_from + 60).min(len)
+                    } else {
+                        extended
+                    }
+                };
                 let raw: String = chars[ctx_start..ctx_end].iter().collect();
                 let context = truncate_at_sentence_boundary(&raw, 150);
                 if !claims.iter().any(|c: &EffectClaim| c.text == context) {
@@ -2130,6 +2163,44 @@ mod tests {
             claims.iter().any(|c| c.text.contains("效果一致")),
             "应匹配'效果一致'"
         );
+    }
+
+    #[test]
+    fn scan_effect_claims_quotes_end_at_sentence_boundary() {
+        // 造一段：命中"效果相同"后跟 >60 字才到句号——旧硬窗口（+60 字）会把引文
+        // 切在句中（如「公开了流量传」半句），正式文书不可读。
+        let long_tail = "本领域技术人员在对比文件的基础上结合公知常识即可获得该技术方案，这对所属技术领域的技术人员来说是显而易见的，因此该权利要求不具备创造性";
+        let oa = format!(
+            "对比文件1的流量控制与本申请的效果相同，{}。第二句从句号后开始。",
+            long_tail
+        );
+        let claims = scan_effect_claims(&oa);
+        let hit = claims
+            .iter()
+            .find(|c| c.text.contains("效果相同"))
+            .expect("应命中'效果相同'");
+        assert!(
+            hit.text.ends_with('。'),
+            "引文应在句号收尾，实际结尾: {:?}",
+            hit.text.chars().last()
+        );
+        assert!(
+            hit.text.contains("不具备创造性"),
+            "引文应包含到句号为止的完整句子"
+        );
+        assert!(!hit.text.ends_with('…'), "未触发截断时不应带省略号");
+    }
+
+    #[test]
+    fn extend_window_to_sentence_boundary_finds_or_defers() {
+        let chars: Vec<char> = "第一句。第二句很长但还没有句号".chars().collect();
+        // from 指向第二句开头"第"，句号在 lookahead 内 → 返回句号后一位
+        let from = chars.iter().rposition(|&c| c == '第').unwrap();
+        let end = super::extend_window_to_sentence_boundary(&chars, from, 40);
+        assert_eq!(chars[end - 1], '。', "应停在句号后");
+        // lookahead 内无边界 → 返回原值（调用方回退硬窗口）
+        let end2 = super::extend_window_to_sentence_boundary(&chars, from, 3);
+        assert_eq!(end2, from, "无边界时应返回 from");
     }
 
     #[test]
