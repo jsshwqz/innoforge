@@ -30,7 +30,7 @@ pub async fn generate_response_letter_pipeline(
     ai_client: Option<&AiClient>,
     ai_client_fast: Option<&AiClient>,
 ) -> ResponseLetter {
-    let features = stage_a_extract_features(input, ai_client_fast).await;
+    let (features, dropped_features) = stage_a_extract_features(input, ai_client_fast).await;
     let (term_checks, unsupported_claims) = stage_b_count_terms(input, &features);
     let rebuttals = stage_c_rebut_features(input, &features).await;
     let effect_mismatches = stage_d_compare_effects(input, ai_client).await;
@@ -41,6 +41,7 @@ pub async fn generate_response_letter_pipeline(
         &unsupported_claims,
         &rebuttals,
         &effect_mismatches,
+        &dropped_features,
     );
 
     // R6c: 对生成文本运行事实校验，将报告附加为末尾固定段
@@ -107,6 +108,35 @@ fn material_warnings(input: &CaseInput) -> Vec<String> {
         out.push("未提供待审权利要求原文".into());
     }
     out
+}
+
+/// 被丢弃特征的产物内显式提示（errors.md #72 预防②：响亮失败优于静默缺失）。
+///
+/// Stage A 的 verbatim 校验丢弃一条特征，意味着答复书**缺少**对应论证段——
+/// 若被丢的恰是审查员实际认定的区别特征，产物就是结构性缺失。只留日志时
+/// 用户无从察觉（#205 缺陷曾因此潜伏）。无丢弃返回 None（不占产物版面）。
+pub(crate) fn format_dropped_features_note(dropped: &[String]) -> Option<String> {
+    if dropped.is_empty() {
+        return None;
+    }
+    let listed = dropped
+        .iter()
+        .map(|f| {
+            let preview: String = f.chars().take(60).collect();
+            if f.chars().count() > 60 {
+                format!("{preview}…")
+            } else {
+                preview
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("；");
+    Some(format!(
+        "【特征抽取丢弃提示：另有 {} 条被审查员提及但未能在权利要求/说明书中逐字定位的表述未进入逐项论证：{}。\
+         若其中含实际认定的区别特征，本稿缺少对应论证段，请人工核对并补写】",
+        dropped.len(),
+        listed
+    ))
 }
 
 /// 中文数字（0–99）→ 阿拉伯数字；已是阿拉伯数字或识别不了则原样返回。
@@ -298,13 +328,16 @@ fn truncate_chars(s: &str, max: usize) -> String {
 /// 方法：AI单次调用（structured output）。
 /// 硬约束（裁决①）：每个 feature_name 必须是 claims_under_review 或 spec_full_text
 /// 的 verbatim 子串，否则丢弃。
+/// 返回：(通过校验的特征, 被丢弃的特征名列表)。丢弃必须让调用方知情——
+/// 丢弃导致产物结构性缺失时只留日志是静默失败（errors.md #72 预防②），
+/// 由 stage_e 在产物内挂显式提示（响亮失败优于静默缺失）。
 async fn stage_a_extract_features(
     input: &CaseInput,
     ai_client: Option<&AiClient>,
-) -> Vec<DistinguishingFeature> {
+) -> (Vec<DistinguishingFeature>, Vec<String>) {
     let ai = match ai_client {
         Some(c) => c,
-        None => return Vec::new(),
+        None => return (Vec::new(), Vec::new()),
     };
 
     let system_prompt = "\
@@ -332,7 +365,7 @@ async fn stage_a_extract_features(
         Ok(text) => text,
         Err(e) => {
             tracing::warn!("Stage A AI调用失败: {}", e);
-            return Vec::new();
+            return (Vec::new(), Vec::new());
         }
     };
 
@@ -352,7 +385,7 @@ async fn stage_a_extract_features(
                     tracing::info!("Stage A 正则回退解析成功：提取{}个特征", v.len());
                     v
                 }
-                _ => return Vec::new(),
+                _ => return (Vec::new(), Vec::new()),
             }
         }
     };
@@ -360,6 +393,7 @@ async fn stage_a_extract_features(
     let claims = &input.claims_under_review;
     let spec = input.spec_full_text.as_deref().unwrap_or("");
     let mut features = Vec::new();
+    let mut dropped = Vec::new();
 
     for v in parsed {
         let feature_name = v
@@ -377,6 +411,7 @@ async fn stage_a_extract_features(
                 "Stage A 丢弃非verbatim特征: '{}' 不在权利要求或说明书中",
                 feature_name
             );
+            dropped.push(feature_name);
             continue;
         }
 
@@ -409,7 +444,7 @@ async fn stage_a_extract_features(
         });
     }
 
-    features
+    (features, dropped)
 }
 
 /// 从AI输出中提取JSON数组（去除markdown代码块标记）。
@@ -1257,6 +1292,7 @@ fn stage_e_assemble(
     unsupported_claims: &[UnsupportedClaim],
     rebuttals: &[FeatureRebuttal],
     effect_mismatches: &[EffectMismatch],
+    dropped_features: &[String],
 ) -> String {
     let meta = &input.case_meta;
     let mut text = String::new();
@@ -1282,6 +1318,10 @@ fn stage_e_assemble(
             text.push_str(&format!("- {w}\n"));
         }
         text.push('\n');
+    }
+    if let Some(note) = format_dropped_features_note(dropped_features) {
+        text.push_str(&note);
+        text.push_str("\n\n");
     }
 
     let mut legal_bases = extract_legal_basis(&input.oa_full_text);
@@ -1446,6 +1486,7 @@ mod tests {
             &unsupported,
             &rebuttals,
             &mismatches,
+            &[],
         );
         let mut max_consecutive = 0;
         let mut current = 0;
@@ -1507,7 +1548,7 @@ mod tests {
             attributed_ref: Some("D1".into()),
             oa_excerpt: String::new(),
         }];
-        let output = stage_e_assemble(&input, &features, &[], &[], &[], &[]);
+        let output = stage_e_assemble(&input, &features, &[], &[], &[], &[], &[]);
         assert!(output.contains("法律依据"));
         assert!(output.contains("专利法第22条第3款"));
         assert!(output.contains("区别特征与驳回决定出处对照表"));
@@ -1518,7 +1559,7 @@ mod tests {
     fn stage_e_reject_review_without_substantive_law_marks_gap() {
         let mut input = make_sample_case_input();
         input.oa_full_text = "驳回决定正文，未引用具体条款。".into();
-        let output = stage_e_assemble(&input, &[], &[], &[], &[], &[]);
+        let output = stage_e_assemble(&input, &[], &[], &[], &[], &[], &[]);
         assert!(output.contains("专利法第41条"));
         assert!(output.contains("实体条款未在现有文本中识别"));
     }
@@ -1586,7 +1627,7 @@ mod tests {
     fn stage_e_reject_review_appends_pre_submit_checklist() {
         let mut input = make_sample_case_input();
         input.case_meta.oa_type = "reject_review".into();
-        let output = stage_e_assemble(&input, &[], &[], &[], &[], &[]);
+        let output = stage_e_assemble(&input, &[], &[], &[], &[], &[], &[]);
         assert!(
             output.contains("提交前清单"),
             "复审请求书文末必须有提交前清单"
@@ -1601,7 +1642,7 @@ mod tests {
         // 非复审类型（普通审查意见答复）不得追加复审专用清单
         let mut oa_input = make_sample_case_input();
         oa_input.case_meta.oa_type = "office_action".into();
-        let oa_output = stage_e_assemble(&oa_input, &[], &[], &[], &[], &[]);
+        let oa_output = stage_e_assemble(&oa_input, &[], &[], &[], &[], &[], &[]);
         assert!(
             !oa_output.contains("提交前清单"),
             "提交前清单是复审专用，不得混入其他答复类型"
@@ -1626,7 +1667,7 @@ mod tests {
             synergy: "协同".into(),
             insufficient: "不足".into(),
         }];
-        let output = stage_e_assemble(&input, &features, &[], &[], &rebuttals, &[]);
+        let output = stage_e_assemble(&input, &features, &[], &[], &rebuttals, &[], &[]);
         assert!(output.contains("根据驳回决定原文摘录（见证据表第1行）"));
     }
 
@@ -2201,6 +2242,47 @@ mod tests {
         // lookahead 内无边界 → 返回原值（调用方回退硬窗口）
         let end2 = super::extend_window_to_sentence_boundary(&chars, from, 3);
         assert_eq!(end2, from, "无边界时应返回 from");
+    }
+
+    #[test]
+    fn dropped_features_note_emitted_and_lists_names() {
+        let dropped = vec![
+            "某条未逐字定位的特征表述甲".to_string(),
+            "另一条被审查员提及的表述乙，其中包含较长的描述内容用于测试截断行为是否正确处理——这一段是超过六十字的填充内容，用于验证预览截断省略号".to_string(),
+        ];
+        let note = format_dropped_features_note(&dropped).expect("有丢弃必须有提示");
+        assert!(note.contains("2 条"), "提示应含丢弃条数: {note}");
+        assert!(note.contains("未逐字定位的特征表述甲"), "应列出丢弃特征名");
+        assert!(note.contains('…'), "超 60 字的条目应截断加省略号");
+        assert!(
+            note.contains("请人工核对"),
+            "提示应要求人工核对（响亮失败）"
+        );
+    }
+
+    #[test]
+    fn dropped_features_note_none_when_empty() {
+        assert!(format_dropped_features_note(&[]).is_none());
+    }
+
+    #[test]
+    fn stage_e_emits_dropped_note_after_material_warnings() {
+        let input = make_sample_case_input();
+        let features: Vec<DistinguishingFeature> = vec![];
+        let dropped = vec!["被丢弃的特征丙（测试）".to_string()];
+        let output = stage_e_assemble(&input, &features, &[], &[], &[], &[], &dropped);
+        let warn_pos = output
+            .find("【材料完整性提示")
+            .or_else(|| output.find("复审请求范围"));
+        let note_pos = output.find("【特征抽取丢弃提示");
+        assert!(note_pos.is_some(), "有丢弃必须在产物内显式提示");
+        if let (Some(w), Some(n)) = (warn_pos, note_pos) {
+            assert!(w < n, "丢弃提示应在材料提示之后、正文论证之前");
+        }
+        assert!(output.contains("被丢弃的特征丙（测试）"));
+        // 无丢弃 → 不出现提示
+        let clean = stage_e_assemble(&input, &features, &[], &[], &[], &[], &[]);
+        assert!(!clean.contains("【特征抽取丢弃提示"), "无丢弃时不得占版面");
     }
 
     #[test]
