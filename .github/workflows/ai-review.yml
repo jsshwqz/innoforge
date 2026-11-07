@@ -35,7 +35,7 @@ jobs:
       - env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          AI_REVIEW_MODEL: "gemini-flash-latest"
+          AI_REVIEW_MODEL: "gemini-3.8-flash"
           AI_REVIEW_DIFF_LIMIT: "30000"
           AI_REVIEW_HTTP_TIMEOUT: "30"
         run: |
@@ -44,7 +44,7 @@ jobs:
 
           github_token = os.environ.get("GITHUB_TOKEN")
           gemini_key = os.environ.get("GEMINI_API_KEY")
-          model = os.environ.get("AI_REVIEW_MODEL", "gemini-flash-latest")
+          model = os.environ.get("AI_REVIEW_MODEL", "gemini-3.8-flash")
           diff_limit = int(os.environ.get("AI_REVIEW_DIFF_LIMIT", "30000"))
           http_timeout = int(os.environ.get("AI_REVIEW_HTTP_TIMEOUT", "30"))
           headers = {"Authorization": f"Bearer {github_token}", "Accept": "application/vnd.github.v3+json"}
@@ -106,7 +106,7 @@ jobs:
                   f"{m}:generateContent?key={gemini_key}"
               )
 
-          candidates = [model] + (["gemini-2.5-flash"] if model != "gemini-2.5-flash" else [])
+          candidates = [model] + (["gemini-flash-lite-latest"] if model != "gemini-flash-lite-latest" else [])
           attempts = [(m, wait) for m in candidates for wait in (0, 4)]
           # 总预算：整个审查步骤硬上限 80s，超时即熔断，避免重试级联把 CI 时长撑大。
           deadline = time.monotonic() + 80

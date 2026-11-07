@@ -14,6 +14,14 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-11-08 — **AI review 工作流换活模型：gemini-3.8-flash**（队列#3，CI 配置修复）
+
+- **状态 / Status**: 🚧 PR 等 CI＋真 key 端到端验证
+- **驱动**: 看板冻结期后队列 #3——自 #172 起主模型与降级候选双双 404，PR 自动审查全部空转（bot 评论只剩自诊断）。
+- **根因**: Google 对该 key 账户按「新用户」策略停供 gemini-2.5-flash 系列，主模型别名 gemini-flash-latest 同批退役；而模型列表端点仍列出已退役模型——列表可用≠调用可用，验证必须以真实 generateContent 为准。上游 404 信息点名替代模型 gemini-3.8-flash。
+- **修复**: AI_REVIEW_MODEL 与默认值改 gemini-3.8-flash；降级候选由已退役的 gemini-2.5-flash 换为列表中仍在线的 gemini-flash-lite-latest。纯 CI 配置，零产品代码。
+- **验证方式**: PR 触发 .github/** 路径即跑工作流，bot 评论（真 key 调用）即为端到端验证。
+
 ### 2026-11-07 — **特征静默丢弃升级为产物内显式提示**（PR #207，→ v0.9.36）
 
 - **状态 / Status**: 🚧 PR 等 CI
