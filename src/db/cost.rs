@@ -13,6 +13,19 @@ impl Database {
         Ok(())
     }
 
+    /// 统计今日某 step 的 AI 调用次数（队列 #2 P1 日预算判据）。
+    ///
+    /// 「今日」按本地日期（`date('now','localtime')`），与账本 timestamp 的写入时区一致。
+    /// 预算超限时路由层记 Skipped 并走原行为——响亮降级，不阻断检索。
+    pub fn count_ai_calls_today(&self, step: &str) -> Result<i64, rusqlite::Error> {
+        let c = self.conn();
+        let mut stmt = c.prepare(
+            "SELECT COUNT(*) FROM ai_cost_ledger WHERE step = ?1 AND date(timestamp) = date('now','localtime')",
+        )?;
+        let count: i64 = stmt.query_row(rusqlite::params![step], |row| row.get(0))?;
+        Ok(count)
+    }
+
     /// Get cost summary by time range.
     pub fn get_cost_summary(&self, days: i64) -> Result<serde_json::Value, rusqlite::Error> {
         let c = self.conn();
@@ -320,5 +333,38 @@ mod tests {
         assert_eq!(r.input_tokens, 1234);
         assert_eq!(r.output_tokens, 567);
         assert_eq!(r.idea_id.as_deref(), Some("idea-1"));
+    }
+
+    #[test]
+    fn count_ai_calls_today_counts_only_matching_step_and_resets_daily() {
+        let db = Database::init(":memory:").expect("in-memory db");
+        let mk = |step: &str| crate::pipeline::context::AiCostRecord {
+            id: uuid::Uuid::new_v4().to_string(),
+            pipeline_run_id: "run".into(),
+            step: step.to_string(),
+            model: "fast".into(),
+            provider: "configured_gateway".into(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            input_tokens: 0,
+            output_tokens: 0,
+            estimated_cost_cents: 0.0,
+            duration_ms: 1,
+            idea_id: None,
+            session_id: None,
+        };
+        db.save_cost_record(&mk("search_rewrite")).expect("save 1");
+        db.save_cost_record(&mk("search_rewrite")).expect("save 2");
+        db.save_cost_record(&mk("other_step")).expect("save 3");
+        assert_eq!(
+            db.count_ai_calls_today("search_rewrite").expect("count"),
+            2,
+            "只计同 step 的今日调用"
+        );
+        assert_eq!(db.count_ai_calls_today("other_step").expect("count"), 1);
+        assert_eq!(
+            db.count_ai_calls_today("nonexistent").expect("count"),
+            0,
+            "无记录时为 0（预算判据不炸）"
+        );
     }
 }

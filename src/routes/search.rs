@@ -30,6 +30,24 @@ use std::time::{Duration, Instant};
 
 const ONLINE_TOTAL_BUDGET_SECS: u64 = 60;
 
+/// ── 队列 #2 P1：查询改写（设计稿 [A] 段）──
+/// prompt 落点遵守 AGENTS.md 2.6（AI prompt 统一放 route handler，不单独建 prompt 文件）。
+/// 注意：示例 JSON 里的引号是**给 LLM 看的示例文本**，用中文书名号《》占位避免与
+/// Rust 字符串转义纠缠（LLM 对示例的理解不受引号风格影响）。
+const REWRITE_SYSTEM_PROMPT: &str = "你是一位专利检索query优化专家。用户给你的检索词在专利数据库中零命中。\n\
+请分析该检索词，输出 JSON（纯 JSON，不要 markdown 围栏），形如：\n\
+{ \"variants\": [《变体检索词1》, 《变体检索词2》], \"intent\": 《意图》 }\n\
+规则：\n\
+1. variants：给出最多 3 个更可能命中的检索变体——同义词替换、上下位概念、常见表述形式；不要重复原词；每个变体必须是独立可检索的完整词组。\n\
+2. intent：从「关键词 / 申请人 / 发明人 / 专利号」中选一个，表示你判断的用户检索意图；判断不了就写「关键词」。\n\
+3. 输出里的字符串一律用英文双引号包裹；禁止输出 JSON 以外的任何内容；禁止编造检索结果。";
+
+/// 改写调用的每日预算（用户拍板 2026-11-08）：超过后当日记 Skipped、走原降级行为。
+const REWRITE_DAILY_BUDGET: i64 = 200;
+
+/// 改写步骤的 attempts 记账行 step 名（ai_cost_ledger 复用）。
+pub(crate) const REWRITE_COST_STEP: &str = "search_rewrite";
+
 /// 没有可用 Key 时的「本源未参与」结果。
 ///
 /// 旧代码在 `api_key_opt` 为 `None` 时只设一句 `upstream_hint` 然后落到本地兜底；
@@ -773,9 +791,119 @@ pub async fn api_search_online(
         filter_cooled_providers(providers, &table, Instant::now())
     };
 
-    let mut outcome = SourceChain::new(providers).run(search_query.clone()).await;
+    let mut outcome = SourceChain::new(providers.clone())
+        .run(search_query.clone())
+        .await;
     breaker::note_attempts(&outcome.attempts);
     outcome.attempts = weave_cooled_attempts(&chain_kinds, &cooled, outcome.attempts);
+
+    // ── 队列 #2 P1：链 0 命中 → LLM 改写变体重试一次（设计稿 [A] 段）──
+    // 纪律：主查询恒为用户原词（LLM 只贡献变体）；解析失败/预算用尽/超时 → 记账后走
+    // 原降级链，行为与 v0.9.38 逐字一致（设计稿硬验收）。重试链只跑一次（成本上限 +1 轮）。
+    if outcome.winning_source().is_none() && online_start.elapsed().as_secs() < 30 {
+        let rewrite_start = Instant::now();
+        let budget_used =
+            s.db.count_ai_calls_today(REWRITE_COST_STEP)
+                .unwrap_or(REWRITE_DAILY_BUDGET);
+        let fast_model = {
+            let cfg = s.config.read().unwrap_or_else(|e| e.into_inner());
+            cfg.ai_client_fast()
+        };
+        if budget_used >= REWRITE_DAILY_BUDGET {
+            outcome.attempts.push(AttemptReport {
+                source: SourceKind::QueryRewrite,
+                status: AttemptStatus::Skipped,
+                latency_ms: 0,
+                hits: 0,
+                error: Some(format!(
+                    "今日改写预算已用尽（{}/{}），改写步骤未参与",
+                    budget_used, REWRITE_DAILY_BUDGET
+                )),
+                hint: None,
+            });
+        } else {
+            let user_msg = format!("检索词：{}", search_query.keyword.trim());
+            let rewrite_result = fast_model
+                .chat_with_system(REWRITE_SYSTEM_PROMPT, &user_msg, 0.3)
+                .await;
+            let _ =
+                s.db.save_cost_record(&crate::pipeline::context::AiCostRecord {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    pipeline_run_id: uuid::Uuid::new_v4().to_string(),
+                    step: REWRITE_COST_STEP.to_string(),
+                    model: "fast".to_string(),
+                    provider: "configured_gateway".to_string(),
+                    timestamp: chrono::Utc::now().to_rfc3339(),
+                    input_tokens: 0,
+                    output_tokens: 0,
+                    estimated_cost_cents: 0.0,
+                    duration_ms: rewrite_start.elapsed().as_millis() as i64,
+                    idea_id: None,
+                    session_id: None,
+                });
+            match rewrite_result {
+                Err(e) => {
+                    outcome.attempts.push(AttemptReport {
+                        source: SourceKind::QueryRewrite,
+                        status: AttemptStatus::Failed(FailKind::Network),
+                        latency_ms: rewrite_start.elapsed().as_millis() as u64,
+                        hits: 0,
+                        error: Some(format!(
+                            "改写 LLM 调用失败（Network）：{}",
+                            report_excerpt(&e.to_string())
+                        )),
+                        hint: None,
+                    });
+                }
+                Ok(raw) => {
+                    match crate::search::agent::parse_rewrite_response(&raw, &search_query.keyword)
+                    {
+                        None => {
+                            outcome.attempts.push(AttemptReport {
+                                source: SourceKind::QueryRewrite,
+                                status: AttemptStatus::Failed(FailKind::Parse),
+                                latency_ms: rewrite_start.elapsed().as_millis() as u64,
+                                hits: 0,
+                                error: Some(format!(
+                                    "改写输出无法解析为有效 JSON（Parse，上游改版/输出漂移）：{}",
+                                    report_excerpt(&raw)
+                                )),
+                                hint: None,
+                            });
+                            // 解析失败：不重试，顺序落空到下方回退链（Firecrawl → 本地兜底）
+                        }
+                        Some(rewrite) => {
+                            outcome.attempts.push(AttemptReport {
+                                source: SourceKind::QueryRewrite,
+                                status: AttemptStatus::Success,
+                                latency_ms: rewrite_start.elapsed().as_millis() as u64,
+                                hits: rewrite.variants.len(),
+                                error: None,
+                                hint: None,
+                            });
+                            if let Some(retry_query) =
+                                crate::search::agent::retry_query_for(&search_query, Some(&rewrite))
+                            {
+                                println!(
+                                    "[ONLINE] 零命中重试（改写变体）: '{}'",
+                                    retry_query.keyword
+                                );
+                                let retry_outcome =
+                                    SourceChain::new(providers.clone()).run(retry_query).await;
+                                breaker::note_attempts(&retry_outcome.attempts);
+                                let retry_won = retry_outcome.winning_source().is_some();
+                                if retry_won {
+                                    outcome.results = retry_outcome.results.clone();
+                                    outcome.upstream_total = retry_outcome.upstream_total;
+                                }
+                                outcome.attempts.extend(retry_outcome.attempts);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     if !serpapi_configured {
         let skipped = serpapi_skipped_outcome("未配置有效 SerpAPI Key，已自动尝试下游回退。");
