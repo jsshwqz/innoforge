@@ -8,7 +8,7 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ### 新增 / Added
 
-- **AI 搜索 P1：查询改写 + 意图路由（队列 #2，设计稿拍板后首期）**：在线专利链 0 命中时，fast 模型一次性改写出 ≤3 个检索变体（意图判定：关键词/申请人/发明人/专利号），用第一变体**重试一次**链路——改写偏离原意的风险用「主查询恒为用户原词、LLM 只贡献变体」锁死；解析失败/预算用尽/超时记 attempts 后走原降级链，**LLM 全挂时行为与 v0.9.38 逐字一致**（设计稿硬验收）。日预算 200 次/日（复用 ai_cost_ledger 记账，超限当日记 Skipped）；诊断面板新增 \`query_rewrite\` 行。（[#212](https://github.com/jsshwqz/innoforge/pull/212)）
+- **AI 搜索 P1：查询改写 + 意图路由（AI 搜索方向设计稿拍板后首期）**：在线专利链 0 命中时，fast 模型一次性改写出 ≤3 个检索变体（意图判定：关键词/申请人/发明人/专利号），用第一变体**重试一次**链路——改写偏离原意的风险用「主查询恒为用户原词、LLM 只贡献变体」锁死；解析失败/预算用尽/超时记 attempts 后走原降级链，**LLM 全挂时行为与 v0.9.38 逐字一致**（设计稿硬验收）。日预算 200 次/日（复用 ai_cost_ledger 记账，超限当日记 Skipped）；诊断面板新增 \`query_rewrite\` 行。（[#212](https://github.com/jsshwqz/innoforge/pull/212)）
 
 ### 修复 / Fixed
 
