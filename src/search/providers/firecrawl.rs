@@ -462,7 +462,7 @@ mod tests {
 
     #[test]
     fn parse_search_response_error_field_short_circuits() {
-        let (msg) = parse_search_response(r#"{"error":"credits exhausted"}"#).unwrap_err();
+        let msg = parse_search_response(r#"{"error":"credits exhausted"}"#).unwrap_err();
         assert!(msg.contains("credits exhausted"), "{msg}");
     }
 }
