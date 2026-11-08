@@ -37,6 +37,12 @@ pub enum SourceKind {
     /// 可撤（任务书预期与实际代码的差异，已在 PR 中如实对账）。
     #[serde(rename = "local_fts")]
     LocalFts,
+    /// Firecrawl 网页搜索回退（冻结期后队列 #1）。**不进并行链**——由
+    /// `routes/search.rs` 在「在线专利链 0 命中」时条件调用，attempts 里如实记一行
+    /// `firecrawl_web`；结果以纯新增键 `web_results` 交付（网页命中，非专利著录），
+    /// 不参与 `winning_source`（出参 `source` 直接报 `"firecrawl_web"`）。
+    #[serde(rename = "firecrawl_web")]
+    FirecrawlWeb,
 }
 
 impl SourceKind {
@@ -48,6 +54,7 @@ impl SourceKind {
             SourceKind::GooglePatentsXhr => "google_patents_xhr",
             SourceKind::EpoOps => "epo_ops",
             SourceKind::LocalFts => "local_fts",
+            SourceKind::FirecrawlWeb => "firecrawl_web",
         }
     }
 }
