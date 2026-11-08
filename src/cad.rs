@@ -81,6 +81,11 @@ impl CadService {
                 .unwrap_or_else(|_| "http://127.0.0.1:8080".to_string()),
         )?;
         let client = reqwest::Client::builder()
+            // 探活/绘图的桥在环回或局域网：连接建立应在数百毫秒内完成。
+            // 不设连接超时的话，死端口/代理路径上 connect 可挂秒级（Windows 实测 ~2s），
+            // 设置页每次加载的 /api/cad/status 就会以慢响应骚扰前端，E2E 按钮 sweep
+            // 的 900ms 关页窗口内必然掐断在途请求（net::ERR_ABORTED 假失败）。
+            .connect_timeout(Duration::from_millis(500))
             .timeout(Duration::from_secs(120))
             .build()?;
         std::fs::create_dir_all(&cad_root)?;
@@ -126,9 +131,12 @@ impl CadService {
     }
 
     async fn check_ready(&self) -> Result<()> {
+        // 探活是设置页每次加载都会发的高频请求：单请求 3s 上限（覆盖 .timeout(120s)），
+        // 与 500ms 连接超时叠加，保证最坏情况下 /api/cad/status 仍秒级返回。
         let health: Value = self
             .client
             .get(self.origin.endpoint("/health"))
+            .timeout(Duration::from_secs(3))
             .send()
             .await?
             .error_for_status()?

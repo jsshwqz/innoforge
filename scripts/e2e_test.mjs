@@ -414,7 +414,13 @@ async function openSweepPage(browser, path) {
         } catch {
             return;
         }
-        if (parsed.host === localAuthority) bucket.failed.push(parsed.pathname);
+        if (parsed.host !== localAuthority) return;
+        // net::ERR_ABORTED = 请求被客户端生命周期掐断（页面导航/关闭中断在途请求），
+        // 请求根本没到服务端，不携带任何服务端健康信号——计入会把 sweep 的
+        // 「服务端健康」断言污染成时序彩票（#192/#194 各撞一次，每次重跑 ~16 分钟）。
+        // 服务端真实故障（连接复用崩、响应中断）走 response 监听的 5xx 桶与 console 错误桶，不经过这里。
+        if (request.failure() && request.failure().errorText === 'net::ERR_ABORTED') return;
+        bucket.failed.push(parsed.pathname);
     });
     page.on('framenavigated', frame => {
         if (phase === 'click' && frame === page.mainFrame()) bucket.navigations += 1;
