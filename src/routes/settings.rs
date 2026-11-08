@@ -96,6 +96,12 @@ pub async fn api_get_settings(State(s): State<AppState>) -> Json<serde_json::Val
     let raw_key = |db_key: &str| -> String { db_settings.get(db_key).cloned().unwrap_or_default() };
     let aioncad_workspace = raw_key("aioncad_workspace");
     let freecad_auto_start = raw_key("freecad_auto_start") != "false";
+    // 队列 #2 P2：AI 搜索编排设置（重排开关默认开、日预算默认 200）
+    let search_rerank_enabled = raw_key("SEARCH_RERANK_ENABLED") != "false";
+    let search_llm_daily_budget = raw_key("SEARCH_LLM_DAILY_BUDGET")
+        .parse::<i64>()
+        .unwrap_or(200)
+        .clamp(1, 10000);
 
     // issue #68: ai_api_key_configured only true when the provider needs a key
     // AND the key is not a placeholder. Ollama is local (no key needed) → always
@@ -142,6 +148,8 @@ pub async fn api_get_settings(State(s): State<AppState>) -> Json<serde_json::Val
         "google_client_secret_set": !config.google_client_secret.is_empty(),
         "google_oauth_connected": !config.google_refresh_token.is_empty() || !config.google_access_token.is_empty(),
         "google_auth_mode": config.google_auth_mode,
+        "search_rerank_enabled": search_rerank_enabled,
+        "search_llm_daily_budget": search_llm_daily_budget,
         "gemini_cli_enabled": config.gemini_cli_enabled,
         "gemini_cli_available": !config.gemini_cli_path.is_empty(),
         "gemini_cli_path": config.gemini_cli_path,
@@ -149,6 +157,40 @@ pub async fn api_get_settings(State(s): State<AppState>) -> Json<serde_json::Val
         "freecad_auto_start": freecad_auto_start,
         "freecad_platform_supported": cfg!(target_os = "windows"),
     }))
+}
+
+/// 队列 #2 P2：AI 搜索编排设置（重排开关 + 编排 LLM 日预算）。
+///
+/// 形态镜像 [`api_save_cad_settings`]：先校验、后一次落库；两键存 \`app_settings\`
+/// （\`SEARCH_RERANK_ENABLED\` / \`SEARCH_LLM_DAILY_BUDGET\`），检索路由在
+/// \`api_search_online\` 内实时读取（不经 AppConfig 重载），改完即生效。
+pub async fn api_save_search_agent_settings(
+    State(s): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let rerank_enabled = match req.get("rerank_enabled").and_then(|v| v.as_bool()) {
+        Some(b) => b,
+        None => {
+            return Json(json!({ "status": "error", "code": "rerank_enabled_required" }));
+        }
+    };
+    let daily_budget = match req.get("daily_budget").and_then(|v| v.as_i64()) {
+        Some(n) if (1..=10000).contains(&n) => n,
+        _ => {
+            return Json(json!({ "status": "error", "code": "daily_budget_out_of_range" }));
+        }
+    };
+    if let Err(error) = s.db.set_settings_batch(&[
+        (
+            "SEARCH_RERANK_ENABLED",
+            if rerank_enabled { "true" } else { "false" },
+        ),
+        ("SEARCH_LLM_DAILY_BUDGET", daily_budget.to_string().as_str()),
+    ]) {
+        tracing::error!(error = %error, "Failed to save search agent settings");
+        return Json(json!({ "status": "error", "code": "save_failed" }));
+    }
+    Json(json!({ "status": "ok", "rerank_enabled": rerank_enabled, "daily_budget": daily_budget }))
 }
 
 pub async fn api_save_cad_settings(

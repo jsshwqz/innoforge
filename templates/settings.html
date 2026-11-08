@@ -40,6 +40,25 @@
         </div>
 
         <div class="setting-group">
+            <h3>🤖 AI 搜索编排（队列 #2）</h3>
+            <p data-i18n="agent.desc">检索结果 0 命中时由 AI 改写重试；有结果时由 AI 重排并给出推荐理由。关闭后检索行为与旧版完全一致。LLM 编排调用共享每日预算。</p>
+            <div style="margin:10px 0;">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                    <input type="checkbox" id="search-rerank-enabled" checked>
+                    <span data-i18n="agent.rerankLabel">启用 AI 重排（结果按 AI 相关性分排序，评分下方附推荐理由）</span>
+                </label>
+            </div>
+            <div style="margin:10px 0;">
+                <label for="search-llm-daily-budget" data-i18n="agent.budgetLabel">LLM 编排每日预算（改写+重排合计，1-10000）</label>
+                <input id="search-llm-daily-budget" type="number" min="1" max="10000" value="200" style="width:120px;margin-left:8px;">
+            </div>
+            <div class="btn-row" style="margin-top:8px;">
+                <button class="btn-save" onclick="saveSearchAgentSettings()" data-i18n="agent.save">保存</button>
+            </div>
+            <div id="search-agent-status" class="status-message"></div>
+        </div>
+
+        <div class="setting-group">
             <h3 data-i18n="settings.epoTitle"></h3>
             <p data-i18n="settings.epoHint"></p>
             <p class="warn-text"><span data-i18n="settings.epoRegister"></span>：<a href="https://developers.epo.org/" target="_blank" rel="noopener">https://developers.epo.org/</a></p>
@@ -593,6 +612,11 @@
                     detectGeminiCli();
                     document.getElementById('aioncad-workspace').value = config.aioncad_workspace || '';
                     document.getElementById('freecad-auto-start').checked = config.freecad_auto_start !== false;
+                    // 队列 #2 P2：AI 搜索编排设置回显（后端已 clamp 预算范围）
+                    var rerankToggle = document.getElementById('search-rerank-enabled');
+                    if (rerankToggle) rerankToggle.checked = config.search_rerank_enabled !== false;
+                    var budgetInput = document.getElementById('search-llm-daily-budget');
+                    if (budgetInput) budgetInput.value = config.search_llm_daily_budget || 200;
                     if (!config.freecad_platform_supported) {
                         document.getElementById('aioncad-workspace').disabled = true;
                         document.getElementById('freecad-auto-start').disabled = true;
@@ -741,6 +765,36 @@
         });
 
         // ── SerpAPI 余额查询 ──
+        // 队列 #2 P2：AI 搜索编排设置保存（/api/settings/search-agent）
+        async function saveSearchAgentSettings() {
+            var statusEl = document.getElementById('search-agent-status');
+            var rerank = document.getElementById('search-rerank-enabled').checked;
+            var budget = parseInt(document.getElementById('search-llm-daily-budget').value, 10);
+            if (!(budget >= 1 && budget <= 10000)) {
+                statusEl.textContent = t('agent.budgetInvalid');
+                statusEl.className = 'status-message error';
+                return;
+            }
+            try {
+                const res = await fetch('/api/settings/search-agent', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ rerank_enabled: rerank, daily_budget: budget })
+                });
+                const data = await res.json();
+                if (data.status === 'ok') {
+                    statusEl.textContent = t('agent.saved');
+                    statusEl.className = 'status-message ok';
+                } else {
+                    statusEl.textContent = t('agent.saveFailed') + ': ' + (data.code || '');
+                    statusEl.className = 'status-message error';
+                }
+            } catch (e) {
+                statusEl.textContent = t('agent.saveFailed');
+                statusEl.className = 'status-message error';
+            }
+        }
+
         async function fetchSerpapiBalance() {
             var contentEl = document.getElementById('serpapi-balance-content');
             contentEl.textContent = '查询中...';

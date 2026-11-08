@@ -48,6 +48,11 @@ pub enum SourceKind {
     /// 与耗时。不参与 `winning_source`，出参 `source` 不受影响。
     #[serde(rename = "query_rewrite")]
     QueryRewrite,
+    /// LLM 重排（队列 #2 P2）。同 QueryRewrite：编排步骤的记账行，不是检索源、
+    /// 不参与 \`winning_source\`。链有胜者且设置开启时，fast 模型对 ≤20 条候选做
+    /// 相关性判定，胜者路径按判定分重排并更新 relevance_score/score_source。
+    #[serde(rename = "llm_rerank")]
+    LlmRerank,
 }
 
 impl SourceKind {
@@ -61,6 +66,7 @@ impl SourceKind {
             SourceKind::LocalFts => "local_fts",
             SourceKind::FirecrawlWeb => "firecrawl_web",
             SourceKind::QueryRewrite => "query_rewrite",
+            SourceKind::LlmRerank => "llm_rerank",
         }
     }
 }

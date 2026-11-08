@@ -4,6 +4,24 @@
 All notable changes are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
+## [v0.9.41] - 2026-11-09
+
+### 新增 / Added
+
+- **AI 搜索 P2：LLM 重排 + 推荐理由 + 设置页开关（AI 搜索方向设计稿第二期）**：在线检索有结果且排序方式为相关性/默认时，fast 模型对 ≤20 条候选做相关性判定（0-100 分 + 一句话理由），结果按判定分重排——已判定项排前（同分稳定）、未判定项保持原相对序；每条分数更新并标注 `LLM重排｜{理由}`。**整段弃用纪律**：LLM 输出混入任何清单外的序号/非整数序号 → 整段弃用回退混合分（评分者数错行数 = 分数不可信）。网页回退命中的候选以「非专利著录」标注进入隔离区块，prompt 声明候选内容为不可信数据、内嵌指令一律无视。（[#214](https://github.com/jsshwqz/innoforge/pull/214)）
+- **设置页新增「AI 搜索编排」区块**：重排开关（默认开）+ LLM 编排日预算（默认 200，1-10000 可调），新端点 `POST /api/settings/search-agent`（先校验后落库），改完即生效。改写与重排**共享同一日预算**（多 step 合计计数）。（[#214](https://github.com/jsshwqz/innoforge/pull/214)）
+
+### 修复 / Fixed
+
+- **「今日」跨时区错位：日预算窗口偏移 8 小时**（复盘 errors.md 第 77 条）：ai_cost_ledger 的 timestamp 以 UTC 写入，预算比较却用本地日期——本地凌晨 0-8 点写入的记录 date 到昨天，永远不计入当日预算。现两侧统一本地时区（`date(timestamp, 'localtime') = date('now','localtime')`）。P1 深夜单测在跨午夜窗口内暴露（白天全绿的时区类缺陷的唯一暴露形态）。（[#214](https://github.com/jsshwqz/innoforge/pull/214)）
+
+### 说明
+
+- 复盘入 `docs/errors.md` 第 77 条：凡「今日/本月」统计，存储时区与比较时区必须显式一致；时区类缺陷只在日期跨界窗口暴露。
+- LLM 全挂/超时/输出破损时行为与 v0.9.40 逐字一致（设计稿硬验收延续）；重排与改写共享 20s 单调用超时与 35s 链路预算门。
+- 用户显式选「最新/最早」排序时跳过重排——显式排序优先于 AI。
+
+---
 ## [v0.9.40] - 2026-11-08
 
 ### 修复 / Fixed

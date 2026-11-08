@@ -14,6 +14,13 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-11-09 — **AI 搜索 P2：LLM 重排+理由+设置页开关；日预算跨时区错位修复**（队列#2 P2，PR #214，→ v0.9.41）
+
+- **状态 / Status**: 🚧 PR 等 CI
+- **实现**: agent.rs 重排解析（整段弃用纪律：任何越界/非整数序号 → None）+ 候选隔离构建（≤20 条、`<candidate N>` 标签、网页命中标注、字符级截断）；路由 winner 分支重排流（开关/显式排序/预算/耗时四重门，LLM 失败回退混合分）；`POST /api/settings/search-agent` + 设置页「AI 搜索编排」区块（开关默认开、日预算默认 200 可调）；改写+重排共享日预算（count_ai_calls_today_steps 多 step 合计）。
+- **附带修复**: errors.md #77——ai_cost_ledger UTC 存储 × 本地日期比较混用，预算窗口错位 8 小时（P1 深夜单测在跨午夜窗口内暴露）；两侧统一本地时区。
+- **验证**: 全量 1175 passed / 0 failed；E2E 87/87；fmt/clippy(--all-targets) 零告警；API-CONTRACTS/ROUTES 再生（134 条）。
+
 ### 2026-11-08 — **AI 搜索 P1：查询改写+意图路由；Windows 保留段测试假红修复**（队列#2 P1，PR #212，→ v0.9.39）
 
 - **状态 / Status**: 🚧 PR 等 CI
