@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-08T08:35:52.665Z",
+  "generatedAt": "2026-11-08T18:41:52.582Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -610,6 +610,7 @@
         "saveEpoCredentials",
         "saveFreeCadSettings",
         "saveGoogleCredentials",
+        "saveSearchAgentSettings",
         "saveSerpApiKey",
         "toggleGeminiCliMode",
         "updateEpoPairHint"
@@ -637,6 +638,7 @@
         "saveEpoCredentials",
         "saveFreeCadSettings",
         "saveGoogleCredentials",
+        "saveSearchAgentSettings",
         "saveSerpApiKey",
         "showCustomManualFallback",
         "showStatus",
