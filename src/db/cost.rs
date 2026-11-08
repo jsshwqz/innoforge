@@ -15,14 +15,33 @@ impl Database {
 
     /// 统计今日某 step 的 AI 调用次数（队列 #2 P1 日预算判据）。
     ///
-    /// 「今日」按本地日期（`date('now','localtime')`），与账本 timestamp 的写入时区一致。
+    /// 「今日」按本地日期：timestamp（UTC 存储）与 now 都经 `date(..., 'localtime')`
+    /// 转到本地时区再比较（errors.md #77——跨午夜后 UTC 日期 ≠ 本地日期，
+    /// 直接比较会让凌晨 0-8 点的调用错位到昨天的预算窗口）。
     /// 预算超限时路由层记 Skipped 并走原行为——响亮降级，不阻断检索。
     pub fn count_ai_calls_today(&self, step: &str) -> Result<i64, rusqlite::Error> {
         let c = self.conn();
         let mut stmt = c.prepare(
-            "SELECT COUNT(*) FROM ai_cost_ledger WHERE step = ?1 AND date(timestamp) = date('now','localtime')",
+            "SELECT COUNT(*) FROM ai_cost_ledger WHERE step = ?1 AND date(timestamp, 'localtime') = date('now','localtime')",
         )?;
         let count: i64 = stmt.query_row(rusqlite::params![step], |row| row.get(0))?;
+        Ok(count)
+    }
+
+    /// 统计今日多个 step 的 AI 调用次数之和（队列 #2 P2 日预算判据：
+    /// 改写与重排共享同一编排预算，超限当日两者都跳过）。
+    pub fn count_ai_calls_today_steps(&self, steps: &[&str]) -> Result<i64, rusqlite::Error> {
+        if steps.is_empty() {
+            return Ok(0);
+        }
+        let placeholders = vec!["?"; steps.len()].join(",");
+        let c = self.conn();
+        let mut stmt = c.prepare(&format!(
+            "SELECT COUNT(*) FROM ai_cost_ledger WHERE step IN ({placeholders}) AND date(timestamp, 'localtime') = date('now','localtime')"
+        ))?;
+        let params: Vec<&dyn rusqlite::ToSql> =
+            steps.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
+        let count: i64 = stmt.query_row(params.as_slice(), |row| row.get(0))?;
         Ok(count)
     }
 

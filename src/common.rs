@@ -412,6 +412,10 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
         )
         .route("/api/settings", get(routes::api_get_settings))
         .route("/api/settings/cad", post(routes::api_save_cad_settings))
+        .route(
+            "/api/settings/search-agent",
+            post(routes::api_save_search_agent_settings),
+        )
         .route("/api/settings/serpapi", post(routes::api_save_serpapi))
         .route("/api/settings/ai", post(routes::api_save_ai))
         .route(
