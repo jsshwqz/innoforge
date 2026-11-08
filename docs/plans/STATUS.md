@@ -14,6 +14,14 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-11-08 — **E2E 假失败根治：CAD 探活连接超时 + sweep 真值修复**（队列#4，PR #209，→ v0.9.37）
+
+- **状态 / Status**: 🚧 PR 等 CI
+- **驱动**: 看板冻结期后队列 #4——CI 三撞两次（#192/#194 各一次），每次重跑 ~16 分钟。
+- **根因两层**: ①探活 client 无连接超时，代理环境下对死端口连接悬挂 ~2s（本机实测，NO_PROXY 含 127.0.0.1 亦未幸免）；②sweep 的 requestfailed 收集器把 net::ERR_ABORTED（客户端生命周期中断，无服务端信号）计为服务端故障。复盘入 docs/errors.md #74。
+- **修复**: client connect_timeout(500ms) + 探活单请求 3s（实测 10 连测 ~2s→稳定 ~0.51s）；sweep 跳过 ERR_ABORTED（依据入注释），真实故障仍由 5xx/console 桶捕获。
+- **验证**: 病灶机器全量 E2E 连跑两遍 87/87 PASSED；1155 单测全过；fmt/clippy 零告警。
+
 ### 2026-11-08 — **AI review 工作流换活模型：gemini-3.8-flash**（队列#3，CI 配置修复）
 
 - **状态 / Status**: 🚧 PR 等 CI＋真 key 端到端验证

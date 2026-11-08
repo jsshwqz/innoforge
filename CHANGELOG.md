@@ -4,6 +4,18 @@
 All notable changes are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
+## [v0.9.37] - 2026-11-08
+
+### 修复 / Fixed
+
+- **CAD 探活无连接超时，设置页每次白等 2 秒**：探活 client 只设 120s 总超时——系统代理环境下对死端口的连接悬挂 ~2s（NO_PROXY 对 IP 字面量匹配不可信赖），设置页每次加载的 `/api/cad/status` 都以慢响应骚扰前端。现 client 设 500ms 连接超时（环回/局域网足够）+ 探活单请求 3s 上限，实测 10 连测稳定 ~0.5s。（[#209](https://github.com/jsshwqz/innoforge/pull/209)）
+- **E2E 按钮 sweep 把客户端中断当服务端故障（CI 假失败根治）**：`net::ERR_ABORTED` 是导航/关页掐断在途请求的客户端生命周期信号，根本没到服务端，不携带健康信号；sweep 收集器此前照单计红，CI 三撞两次、每次重跑 ~16 分钟。现跳过 ERR_ABORTED 条目（依据入注释），服务端真实故障仍由 5xx 桶与 console 错误桶捕获。病灶机器（探活 2s）上全量 E2E 连跑两遍 87/87 PASSED。（[#209](https://github.com/jsshwqz/innoforge/pull/209)）
+
+### 说明
+
+- 复盘入 `docs/errors.md` 第 74 条：探活端点必须显式设连接超时（总超时防「对端慢」，防不了「连不上时的悬挂」）；E2E 断言收集器要区分服务端信号与客户端生命周期信号，混计把测试变成时序彩票。
+
+---
 ## [v0.9.36] - 2026-11-07
 
 ### 修复 / Fixed
