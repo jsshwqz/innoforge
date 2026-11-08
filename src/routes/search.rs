@@ -1064,7 +1064,7 @@ pub async fn api_search_online(
                         // 未判定项保持原相对序排后；分数与来源标注就地更新。
                         let mut scored: Vec<(usize, u8)> =
                             verdicts.iter().map(|v| (v.index - 1, v.score)).collect();
-                        scored.sort_by(|a, b| b.1.cmp(&a.1));
+                        scored.sort_by_key(|&(_, score)| std::cmp::Reverse(score));
                         let scored_idx: Vec<usize> = scored.iter().map(|(i, _)| *i).collect();
                         let unscored: Vec<usize> = (0..patents.len())
                             .filter(|i| !scored_idx.contains(i))
