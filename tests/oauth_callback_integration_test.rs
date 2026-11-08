@@ -35,6 +35,25 @@ fn wait_for_server(port: u16, timeout_secs: u64) -> bool {
     false
 }
 
+/// 从 preferred 起向上探测第一个**当前可绑定**的端口。
+///
+/// 背景（2026-11-08 现场件）：Windows 的 TCP 保留端口段（Hyper-V/WSL 动态排除范围，
+/// `netsh interface ipv4 show excludedportrange`）会在重启后漂移——硬编码 3921 曾整段
+/// 落进 3911-4010 保留区，服务器 bind 报 os error 10013 直接退出，测试 30s 超时假红。
+/// bind 探测与真实监听之间仍有毫秒级 TOCTOU 窗口（#110 的已知形态），但保留段是
+/// **结构性不可绑定**，探测跳过它就是本修复的全部价值。
+fn find_bindable_port(preferred: u16) -> u16 {
+    // 扫描窗口必须足够宽：Windows 保留段是成块的 100 端口（实测 3911-4010 整段保留），
+    // 窄窗口会整段落空。bind 尝试本身就是排除段检测——保留段立即 EACCES（10013），
+    // 可绑定端口立即成功，全扫毫秒级。任何 bind 错误（占用/保留）都视为不可用。
+    for port in preferred..=preferred.saturating_add(2000) {
+        if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok() {
+            return port;
+        }
+    }
+    preferred
+}
+
 fn kill_server(mut child: std::process::Child) {
     let _ = child.kill();
     let _ = child.wait();
@@ -42,8 +61,9 @@ fn kill_server(mut child: std::process::Child) {
 
 #[test]
 fn redirect_uri_contains_actual_listen_port() {
-    // Use a non-default port to prove the callback URL is not hardcoded to 3000
-    let port = 3921;
+    // Use a non-default port to prove the callback URL is not hardcoded to 3000.
+    // 端口必须现场探测：Windows 保留段会漂移（见 find_bindable_port 文档）。
+    let port = find_bindable_port(3921);
 
     // Create a temp dir for the test database
     let temp_dir = std::env::temp_dir().join(format!(

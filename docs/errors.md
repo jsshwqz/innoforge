@@ -1705,3 +1705,12 @@
 - **修复 / Fix**: ①client 加 connect_timeout(500ms)（环回/局域网足够宽裕）+ 探活请求单请求 3s 超时——实测 10 连测从 ~2s 降到稳定 ~0.51s；②sweep 收集器跳过 errorText=net::ERR_ABORTED 的条目（注释写明依据），服务端真实故障仍由 5xx 桶与 console 错误桶捕获。
 - **回归 / 负控**: 本机（2s 病灶机器）全量 E2E 连跑两遍 87/87 PASSED；1155 单测全过。
 - **预防**: ①探活/健康检查类端点必须显式设连接超时，不能只靠总超时兜底——总超时防的是「对端慢」，防不了「连不上时的悬挂」；②E2E 断言收集器要区分「服务端信号」（状态码、console 错误）与「客户端生命周期信号」（aborted、关闭噪音），混计会把测试变成时序彩票；③reqwest 默认读代理环境变量，NO_PROXY 对 IP 字面量的匹配不可信赖——对内网/环回地址的出站请求要显式设短连接超时。
+
+## [2026-11-08] 75 Windows 保留端口段漂移：硬编码测试端口结构性假红，探测窗口必须宽于保留块
+- **严重程度 / Severity**: MEDIUM（集成测试 30s 超时假红；CI 上 ubuntu 无此机制故不炸，本机反复撞）
+- **涉及文件**: \`tests/oauth_callback_integration_test.rs\`（find_bindable_port）
+- **现象 / Symptom**: OAuth 回调集成测试恒红——子进程服务器 30s 内 never ready；手动复现抓到真因：bind 报 os error 10013（WSAEACCES），服务器直接退出。
+- **根因 / Root cause**: Windows 的 TCP 保留端口段（Hyper-V/WSL 动态排除，\`netsh interface ipv4 show excludedportrange protocol=tcp\`）**重启后漂移**——实测 3911-4010 整段被保留，测试硬编码的 3921 躺在段内，bind 结构性失败。保留段是块状（实测成段 100 端口），窄探测窗口（+50）会整段落空。
+- **修复 / Fix**: find_bindable_port 从 preferred 起扫 +2000 宽度，bind 尝试本身就是排除段检测（保留段立即 EACCES，可绑定立即成功，全扫毫秒级）；任何 bind 错误（占用/保留）都视为不可用。与 #110 的 TOCTOU 是不同机制：#110 是「探测后被抢」，本条是「端口结构性不可绑定」。
+- **回归 / 负控**: 本机（保留段正在漂移覆盖 3921 的真实病灶环境）测试 3.3s 通过（原 31s 假红）。
+- **预防**: ①测试/运维里凡指定本地端口，必须现场探测且扫描窗口 ≥2000；②Windows 保留段漂移是重启级事件，昨天能跑今天必重验；③bind 报 10013 不要去查防火墙——先查 \`netsh ... excludedportrange\`。

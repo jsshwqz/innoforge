@@ -4,6 +4,22 @@
 All notable changes are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
+## [v0.9.39] - 2026-11-08
+
+### 新增 / Added
+
+- **AI 搜索 P1：查询改写 + 意图路由（AI 搜索方向设计稿拍板后首期）**：在线专利链 0 命中时，fast 模型一次性改写出 ≤3 个检索变体（意图判定：关键词/申请人/发明人/专利号），用第一变体**重试一次**链路——改写偏离原意的风险用「主查询恒为用户原词、LLM 只贡献变体」锁死；解析失败/预算用尽/超时记 attempts 后走原降级链，**LLM 全挂时行为与 v0.9.38 逐字一致**（设计稿硬验收）。日预算 200 次/日（复用 ai_cost_ledger 记账，超限当日记 Skipped）；诊断面板新增 \`query_rewrite\` 行。（[#212](https://github.com/jsshwqz/innoforge/pull/212)）
+
+### 修复 / Fixed
+
+- **Windows 保留端口段漂移导致的集成测试结构性假红**：Hyper-V/WSL 动态排除范围重启后漂移，实测 3911-4010 整段保留，OAuth 集成测试硬编码的 3921 落入段内、bind 报 10013 服务器直接退出、30s 超时假红。现测试端口现场探测（扫宽 +2000，bind 即排除段检测）。本机病灶环境实测 31s 假红 → 3.3s 通过。（[#212](https://github.com/jsshwqz/innoforge/pull/212)）
+
+### 说明
+
+- 复盘入 \`docs/errors.md\` 第 75 条：①测试/运维里凡指定本地端口必须现场探测且窗口 ≥2000（保留段是成块 100 端口）；②Windows 保留段漂移是重启级事件；③bind 10013 先查 \`netsh ... excludedportrange\` 再查防火墙。
+- P1 范围与设计稿一致：[B]/[C]/[D] 段分别在 P2/P3 落地；本版 [A] 已含意图判定的记账（意图路由的源裁剪留 P2 与重排开关同批）。
+
+---
 ## [v0.9.38] - 2026-11-08
 
 ### 新增 / Added

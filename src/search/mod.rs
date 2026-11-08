@@ -10,6 +10,7 @@
 //!   MA2b 起追加 `epo_ops`；MA4 的本地 FTS 兜底源在此追加）
 //! - [`chain`]：[`SourceChain`](chain::SourceChain) 多源并行执行链与降级择胜规则（MA2a）
 //! - [`breaker`]：源级熔断冷却表 —— `FailKind::cools_down()` 的生产消费点（MA6a）
+//! - [`agent`]：查询改写与意图解析（队列 #2 P1）——LLM 只贡献变体与意图，主查询恒为用户原词；解析失败回退原行为
 //!
 //! ## MA1 边界（有意不做的事）
 //! - ~~不做新源接入（Google Patents XHR / EPO OPS 属 MA2）~~
@@ -34,6 +35,7 @@
 //! - 不改任何对外 API 形状：`/api/search/online` 的响应字段、上游请求参数、结果映射
 //!   与迁移前逐字一致，由 `providers::serpapi` 与 `query` 的参照实现单测锁死。
 
+pub mod agent;
 pub mod breaker;
 pub mod chain;
 pub mod enrichment;

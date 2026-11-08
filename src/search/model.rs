@@ -43,6 +43,11 @@ pub enum SourceKind {
     /// 不参与 `winning_source`（出参 `source` 直接报 `"firecrawl_web"`）。
     #[serde(rename = "firecrawl_web")]
     FirecrawlWeb,
+    /// 查询改写（队列 #2 P1）。**不是检索源**——LLM 编排步骤的 attempts 记账行：
+    /// 链 0 命中时路由层调 fast 模型改写出重试变体，本行记录该步的成功/失败/跳过
+    /// 与耗时。不参与 `winning_source`，出参 `source` 不受影响。
+    #[serde(rename = "query_rewrite")]
+    QueryRewrite,
 }
 
 impl SourceKind {
@@ -55,6 +60,7 @@ impl SourceKind {
             SourceKind::EpoOps => "epo_ops",
             SourceKind::LocalFts => "local_fts",
             SourceKind::FirecrawlWeb => "firecrawl_web",
+            SourceKind::QueryRewrite => "query_rewrite",
         }
     }
 }

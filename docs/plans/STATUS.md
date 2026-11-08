@@ -14,6 +14,13 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-11-08 — **AI 搜索 P1：查询改写+意图路由；Windows 保留段测试假红修复**（队列#2 P1，PR #212，→ v0.9.39）
+
+- **状态 / Status**: 🚧 PR 等 CI
+- **驱动**: 用户拍板设计稿三项建议（重排开关默认开、日预算 200/日、P1→P3 顺序）后开工。
+- **实现**: \`search/agent.rs\`（改写解析纯函数 6 件 + 重试决策矩阵；主查询恒为用户原词）；路由 0 命中时 fast 模型改写 → 第一变体重试一次；日预算 200（ai_cost_ledger 复用 + count_ai_calls_today）；SourceKind::QueryRewrite 记账 + 前端诊断标签；附带修复 OAuth 集成测试 Windows 保留段假红（errors.md #75，31s 假红 → 3.3s）。
+- **验证**: 全量 1169 passed / 0 failed；fmt/clippy(--all-targets) 零告警。
+
 ### 2026-11-08 — **Firecrawl 网页搜索回退接入**（队列#1 提前解冻，PR #210，→ v0.9.38）
 
 - **状态 / Status**: 🚧 PR 等 CI
