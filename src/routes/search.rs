@@ -823,9 +823,15 @@ pub async fn api_search_online(
             });
         } else {
             let user_msg = format!("检索词：{}", search_query.keyword.trim());
-            let rewrite_result = fast_model
-                .chat_with_system(REWRITE_SYSTEM_PROMPT, &user_msg, 0.3)
-                .await;
+            // 改写是检索链内的编排步骤，不是独立 AI 会话：20s 专属超时（设计稿 ≤25s 预算，
+            // AiClient 默认 300s 是给 OA 分析这类长任务的——不设的话 0 命中搜索会被改写
+            // 卡到 5 分钟，用户早走了）。超时 → Network 记账 → 原降级链。
+            let rewrite_result = tokio::time::timeout(
+                std::time::Duration::from_secs(20),
+                fast_model.chat_with_system(REWRITE_SYSTEM_PROMPT, &user_msg, 0.3),
+            )
+            .await
+            .unwrap_or_else(|_| Err(anyhow::anyhow!("改写调用超时（20s 预算用尽）")));
             let _ =
                 s.db.save_cost_record(&crate::pipeline::context::AiCostRecord {
                     id: uuid::Uuid::new_v4().to_string(),
