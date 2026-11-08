@@ -831,9 +831,7 @@ pub async fn api_search_online(
                 fast_model.chat_with_system(REWRITE_SYSTEM_PROMPT, &user_msg, 0.3),
             )
             .await
-            .unwrap_or_else(|_| {
-                Err(anyhow::anyhow!("改写调用超时（20s 预算用尽）"))
-            });
+            .unwrap_or_else(|_| Err(anyhow::anyhow!("改写调用超时（20s 预算用尽）")));
             let _ =
                 s.db.save_cost_record(&crate::pipeline::context::AiCostRecord {
                     id: uuid::Uuid::new_v4().to_string(),
