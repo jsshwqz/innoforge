@@ -4,6 +4,19 @@
 All notable changes are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
+## [v0.9.38] - 2026-11-08
+
+### 新增 / Added
+
+- **在线专利链 0 命中 → Firecrawl 网页搜索回退（带来源标注）**：SerpAPI / Google Patents XHR / EPO OPS 三源全空时，自动回退 Firecrawl 网页搜索（key 经 `FIRECRAWL_API_KEY` 环境变量配置，未配置则 attempts 记 Skipped、行为与旧版一致）。结果以**纯新增顶层键 `web_results`** 交付（title/snippet/url），`patents` 恒为空数组——网页命中**不伪装成专利著录**，前端渲染独立「网页搜索结果」区块（外链新窗口 + 每行域名与完整 URL 来源标注）。诊断面板新增 `firecrawl_web` 源行，attempts 三态如实记账。触发点刻意**不进并行链**（链上第四源=每次搜索都烧付费配额）；中文查询自动追加「专利」、英文追加 "patent"。（[#210](https://github.com/jsshwqz/innoforge/pull/210)）
+
+### 说明
+
+- 真实 key 端到端烟测：专利链全 0（serpapi 上游改版 + XHR 限流）→ 8 条高度相关网页命中，端到端 5.3s；离线单测 8 件（官方响应形状解析/缺 URL 行跳过/429→Quota、401→Auth/传输故障→Network/非 JSON→Parse/请求体转义）+ 路由出参形状锁（patents 恒空、hint/cooldowns 空则省略）。
+- 网页内容属外部不可信输入：当前回退路径不把网页正文喂给任何 AI prompt（仅搜索页展示摘要）；未来并入 AI 上下文前必须做边界隔离（provider 模块头已声明纪律）。
+- `docs/API-CONTRACTS.md` 随代码重新生成（行号漂移 + §22 说明）。
+
+---
 ## [v0.9.37] - 2026-11-08
 
 ### 修复 / Fixed

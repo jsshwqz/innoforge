@@ -192,6 +192,8 @@ function clearSearchPdfMeta() {
     'stats.year': '申请趋势（按年份）',
     'results.searching': '搜索中...',
     'results.noData': '未找到结果',
+    'results.webTitle': '网页搜索结果（在线专利源 0 命中，已回退网页搜索）',
+    'results.webOpen': '以上为相关网页（非专利著录），点按标题在新窗口打开原文。',
     'results.info': '找到 {total} 条 | 第 {page} 页 | 每页 {size} 条{source}',
     'results.upstream_filtered': '上游共命中 {upstream} 条，本页 {shown} 条通过相关性过滤',
     'results.source': '来源',
@@ -276,6 +278,8 @@ function clearSearchPdfMeta() {
     'stats.year': 'Year Trend',
     'results.searching': 'Searching...',
     'results.noData': 'No results',
+    'results.webTitle': 'Web results (patent sources found nothing, fell back to web search)',
+    'results.webOpen': 'The items above are related web pages (not patent records). Click a title to open the original page in a new window.',
     'results.info': 'Found {total} | page {page} | {size}/page{source}',
     'results.upstream_filtered': 'upstream matched {upstream}, {shown} passed relevance filter on this page',
     'results.source': 'source',
@@ -438,6 +442,67 @@ async function doSearch(page) {
     }
 }
 
+// 冻结期后队列 #1（2026-11-08）：Firecrawl 网页回退结果渲染。
+// web_results 是网页命中，**不进专利卡片**——没有著录字段可渲染，链接也不该指向
+// 本站 /patent/{id} 详情页（会 404）。独立区块 + 外链新窗口 + 每行来源标注（域名+完整 URL）。
+// 全程 createElement + textContent（AGENTS.md 2.5：动态文本禁止 innerHTML 直插）。
+// 无 web_results / 空数组时返回 false，调用方落回「未找到结果」原路径。
+function renderWebResults(data) {
+    const items = Array.isArray(data.web_results) ? data.web_results : [];
+    if (!items.length) return false;
+    const container = document.getElementById('results');
+    container.innerHTML = '';
+    const sec = document.createElement('div');
+    sec.className = 'patent-card';
+    sec.style.padding = '12px';
+    const h = document.createElement('h3');
+    h.textContent = t('results.webTitle') + '（' + items.length + '）';
+    h.style.marginTop = '0';
+    sec.appendChild(h);
+    const list = document.createElement('div');
+    items.forEach(function (item) {
+        const row = document.createElement('div');
+        row.style.cssText = 'padding:10px 0;border-bottom:1px solid #30363d;';
+        const link = document.createElement('a');
+        link.href = item.url || '#';
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = item.title || item.url || '(无标题)';
+        link.style.cssText = 'color:#58a6ff;font-weight:bold;';
+        row.appendChild(link);
+        if (item.snippet) {
+            const sn = document.createElement('p');
+            sn.className = 'patent-abstract';
+            const text = String(item.snippet);
+            sn.textContent = text.length > 200 ? text.slice(0, 200) + '...' : text;
+            sn.style.margin = '6px 0 2px';
+            row.appendChild(sn);
+        }
+        const meta = document.createElement('div');
+        meta.style.cssText = 'color:#8b949e;font-size:0.8em;word-break:break-all;';
+        let host = '';
+        try { host = new URL(item.url).host; } catch (e) { host = String(item.url || ''); }
+        meta.textContent = t('results.source') + ': ' + host + ' | ' + String(item.url || '');
+        row.appendChild(meta);
+        list.appendChild(row);
+    });
+    sec.appendChild(list);
+    const note = document.createElement('p');
+    note.className = 'muted';
+    note.textContent = t('results.webOpen');
+    sec.appendChild(note);
+    container.appendChild(sec);
+    // 后端回退说明（message）显示在搜索提示行，与 hint 同一挂点
+    if (data.message) {
+        const hintEl = document.getElementById('search-hint');
+        if (hintEl) {
+            hintEl.textContent = data.message;
+            hintEl.style.display = 'block';
+        }
+    }
+    return true;
+}
+
 function renderResults(data, page, pageSize) {
     renderSearchDiagnostics(data);
     const total = Number(data.total || 0);
@@ -475,6 +540,12 @@ function renderResults(data, page, pageSize) {
 
     const patents = Array.isArray(data.patents) ? data.patents : [];
     if (!patents.length) {
+        // 冻结期后队列 #1：在线专利链 0 命中时的 Firecrawl 网页回退结果。
+        // 有网页命中时渲染独立区块（外链新窗口 + 来源标注），不再走「未找到结果」。
+        if (renderWebResults(data)) {
+            document.getElementById('pagination').innerHTML = '';
+            return;
+        }
         const extra = data.google_url ? ` | <a href="${escapeHtml(data.google_url)}" target="_blank">${t('results.google')}</a>` : '';
         document.getElementById('results').innerHTML = `<p class="muted">${t('results.noData')}${extra}</p>`;
         document.getElementById('pagination').innerHTML = '';
@@ -596,7 +667,8 @@ const DIAG_SOURCE_LABELS = {
     serpapi: 'SerpAPI',
     google_patents_xhr: 'Google Patents XHR',
     epo_ops: 'EPO OPS',
-    local_fts: 'Local FTS'
+    local_fts: 'Local FTS',
+    firecrawl_web: 'Firecrawl Web'
 };
 const DIAG_FAIL_KEYS = ['network', 'quota', 'auth', 'parse'];
 

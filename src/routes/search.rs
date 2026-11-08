@@ -773,7 +773,7 @@ pub async fn api_search_online(
         filter_cooled_providers(providers, &table, Instant::now())
     };
 
-    let mut outcome = SourceChain::new(providers).run(search_query).await;
+    let mut outcome = SourceChain::new(providers).run(search_query.clone()).await;
     breaker::note_attempts(&outcome.attempts);
     outcome.attempts = weave_cooled_attempts(&chain_kinds, &cooled, outcome.attempts);
 
@@ -854,6 +854,70 @@ pub async fn api_search_online(
         }
     }
 
+    // ── 冻结期后队列 #1（2026-11-08 用户提前解冻）：在线专利链 0 命中 → Firecrawl 网页搜索回退 ──
+    // 触发点刻意放在「链无胜者」之后、本地兜底之前：用户预期（原话）是「Google 专利搜不到
+    // 就用网络搜索」，本地 FTS 仍保留为最后一档。Parse 失败**不拦截**本回退：链的 Parse
+    // 拦截防的是「拿同域低优先级专利源把上游改版洗成正常搜索」，而 web_results 是带来源
+    // 标注的异域结果、`patents` 恒空，不存在洗白面。Key 缺失 / 预算用尽均记 Skipped 账。
+    let firecrawl_key = std::env::var("FIRECRAWL_API_KEY")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
+    let mut web_fallback_json: Option<serde_json::Value> = None;
+    match firecrawl_key {
+        None => outcome.attempts.push(AttemptReport {
+            source: SourceKind::FirecrawlWeb,
+            status: AttemptStatus::Skipped,
+            latency_ms: 0,
+            hits: 0,
+            error: Some("未配置 FIRECRAWL_API_KEY，网页搜索回退未参与".to_string()),
+            hint: None,
+        }),
+        Some(key) => {
+            if online_start.elapsed().as_secs() >= ONLINE_TOTAL_BUDGET_SECS {
+                outcome.attempts.push(AttemptReport {
+                    source: SourceKind::FirecrawlWeb,
+                    status: AttemptStatus::Skipped,
+                    latency_ms: 0,
+                    hits: 0,
+                    error: Some(format!(
+                        "在线检索超时预算已用尽（{}s），网页搜索回退未参与",
+                        ONLINE_TOTAL_BUDGET_SECS
+                    )),
+                    hint: None,
+                });
+            } else {
+                let provider =
+                    crate::search::providers::firecrawl::FirecrawlSearchProvider::new(key);
+                let fc_start = Instant::now();
+                let (hits, status, error_note) = match provider.web_search(&search_query).await {
+                    Ok(hits) => (hits, AttemptStatus::Success, None),
+                    Err((kind, msg)) => (Vec::new(), AttemptStatus::Failed(kind), Some(msg)),
+                };
+                outcome.attempts.push(AttemptReport {
+                    source: SourceKind::FirecrawlWeb,
+                    status,
+                    latency_ms: fc_start.elapsed().as_millis() as u64,
+                    hits: hits.len(),
+                    error: error_note,
+                    hint: None,
+                });
+                if !hits.is_empty() {
+                    web_fallback_json = Some(firecrawl_web_results_json(
+                        &hits,
+                        &req,
+                        attempts_json(&outcome),
+                        upstream_hint.take(),
+                        &cooled,
+                    ));
+                }
+            }
+        }
+    }
+    if let Some(out) = web_fallback_json {
+        return Json(out);
+    }
+
     // MA2b 起在线链路为 [SerpAPI → Google Patents XHR 直抓 → EPO OPS]（见上方的 SourceChain），
     // 其余历史源（Firecrawl / Bing / CNIPR / 搜狗）仍处于屏蔽状态。
     // 三个在线源都没有可用结果时，回退本地数据库。
@@ -867,6 +931,50 @@ pub async fn api_search_online(
         &mut outcome,
         &cooled,
     ))
+}
+
+/// 队列 #1：Firecrawl 网页回退的出参组装（纯函数，离线可测）。
+///
+/// 形状承诺：
+/// - `patents` 恒为空数组——网页命中**不伪装成专利著录**（诚实优先，见 provider 模块头）；
+/// - `web_results` 为纯新增顶层键：`[{title, snippet, url}]`，url 供前端外链新窗口 + 来源标注；
+/// - `source` 报 `"firecrawl_web"`（[`SourceKind::FirecrawlWeb::as_str`]，前端
+///   `DIAG_SOURCE_LABELS` 同键表解析）；
+/// - `hint` / `cooldowns` 键与胜者路径同一口径：空则整键省略，出参其余键不因回退而变形。
+fn firecrawl_web_results_json(
+    hits: &[crate::search::providers::firecrawl::FirecrawlWebHit],
+    req: &SearchRequest,
+    attempts_value: serde_json::Value,
+    hint: Option<String>,
+    cooled: &[(SourceKind, Duration)],
+) -> serde_json::Value {
+    let web_results: Vec<serde_json::Value> = hits
+        .iter()
+        .map(|h| {
+            json!({
+                "title": h.title,
+                "snippet": h.snippet,
+                "url": h.url,
+            })
+        })
+        .collect();
+    let mut out = json!({
+        "patents": [],
+        "web_results": web_results,
+        "total": hits.len(),
+        "page": req.page,
+        "page_size": req.page_size,
+        "source": SourceKind::FirecrawlWeb.as_str(),
+        "message": "在线专利源 0 命中，已回退网页搜索——以下为相关网页（非专利著录），点按标题在新窗口打开原文。",
+        "attempts": attempts_value,
+    });
+    if let Some(h) = hint {
+        out["hint"] = json!(h);
+    }
+    if let Some(cd) = cooldowns_json(cooled) {
+        out["cooldowns"] = cd;
+    }
+    out
 }
 
 /// Vector hybrid search endpoint — RRF fuse BM25 + vector similarity.
@@ -1195,6 +1303,74 @@ pub async fn api_export_xlsx(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **队列 #1 出参形状锁（2026-11-08）**：网页回退的诚实承诺——`patents` 恒空、
+    /// `web_results` 携带 title/snippet/url、`source`=`firecrawl_web`、hint/cooldowns
+    /// 空则整键省略（与胜者路径同一口径）。
+    #[test]
+    fn firecrawl_web_results_json_locks_honest_shape() {
+        let req = SearchRequest {
+            query: "流量调节".into(),
+            page: 1,
+            page_size: 20,
+            country: None,
+            search_type: None,
+            language: None,
+            region: None,
+            assignee: None,
+            exact_assignee: false,
+            date_from: None,
+            date_to: None,
+            sort_by: None,
+            ipc: None,
+            cpc: None,
+        };
+        let hits = vec![
+            crate::search::providers::firecrawl::FirecrawlWebHit {
+                title: "一种数字式流量智能调节系统 - Google Patents".into(),
+                snippet: "本发明涉及流量调节领域。".into(),
+                url: "https://patents.google.com/patent/CN114962757A/zh".into(),
+            },
+            crate::search::providers::firecrawl::FirecrawlWebHit {
+                title: "论坛讨论帖".into(),
+                snippet: "".into(),
+                url: "https://example.com/thread/1".into(),
+            },
+        ];
+        let attempts = serde_json::json!([{"source": "firecrawl_web", "status": "success"}]);
+        let out = firecrawl_web_results_json(&hits, &req, attempts.clone(), None, &[]);
+        // 诚实承诺：patents 恒空、网页命中不进专利数组
+        assert_eq!(serde_json::json!([]), out["patents"]);
+        let web = out["web_results"]
+            .as_array()
+            .expect("web_results 必须为数组");
+        assert_eq!(2, web.len());
+        assert_eq!(
+            "https://patents.google.com/patent/CN114962757A/zh",
+            web[0]["url"].as_str().unwrap()
+        );
+        assert_eq!("论坛讨论帖", web[1]["title"].as_str().unwrap());
+        // source 与总数
+        assert_eq!("firecrawl_web", out["source"].as_str().unwrap());
+        assert_eq!(2, out["total"].as_u64().unwrap());
+        // 回退说明必须点明「非专利著录」（来源标注义务在文案层也要可见）
+        assert!(
+            out["message"].as_str().unwrap().contains("非专利著录"),
+            "{:?}",
+            out["message"]
+        );
+        // attempts 原样带出（诊断面板可见 firecrawl_web 行）
+        assert_eq!(attempts, out["attempts"]);
+        // 空则整键省略：hint / cooldowns 不得出现
+        assert!(out.get("hint").is_none(), "无 hint 时整键省略");
+        assert!(out.get("cooldowns").is_none(), "无冷却时整键省略");
+        // page / page_size 回显请求值（网页回退无真实翻页，不伪造口径）
+        assert_eq!(1, out["page"].as_u64().unwrap());
+        assert_eq!(20, out["page_size"].as_u64().unwrap());
+        // 有 hint 时必须带出
+        let out2 = firecrawl_web_results_json(&hits, &req, attempts, Some("H".into()), &[]);
+        assert_eq!("H", out2["hint"].as_str().unwrap());
+    }
 
     /// **2026-11-05 在线排序锁**：`apply_online_sort` 让下拉「最新/最早」在在线路径
     /// 真实生效（旧实现从不消费 `sort_by`，上游即便按日期返回也被混合分降序打回）；
