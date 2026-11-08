@@ -4,6 +4,18 @@
 All notable changes are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
+## [v0.9.40] - 2026-11-08
+
+### 修复 / Fixed
+
+- **查询改写调用补 20s 专属超时（v0.9.39 热修）**：改写是检索链内嵌的编排步骤，此前继承 AiClient 默认 300s 超时（OA 分析级预算）——网关慢时 0 命中搜索被改写步骤卡到 5 分钟（烟测实测 150s 无响应）。现 tokio::time::timeout(20s) 包裹（设计稿 ≤25s 预算），超时记 attempts 后走原降级链，全链 23.7s 收敛。（[#213](https://github.com/jsshwqz/innoforge/pull/213)）
+
+### 说明
+
+- 复盘入 \`docs/errors.md\` 第 76 条：检索链内嵌的每一步都要有自己的预算常量；「发版后真实环境烟测」再次在单测全绿的情况下抓到端到端缺陷。
+- 本版不含其他变更，仅热修上版编排超时。
+
+---
 ## [v0.9.39] - 2026-11-08
 
 ### 新增 / Added
