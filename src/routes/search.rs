@@ -900,13 +900,16 @@ pub async fn api_search_online(
                                     "[ONLINE] 零命中重试（改写变体）: '{}'",
                                     retry_query.keyword
                                 );
-                                let retry_outcome =
-                                    SourceChain::new(providers.clone()).run(retry_query).await;
+                                let retry_outcome = SourceChain::new(providers.clone())
+                                    .run(retry_query.clone())
+                                    .await;
                                 breaker::note_attempts(&retry_outcome.attempts);
                                 let retry_won = retry_outcome.winning_source().is_some();
                                 if retry_won {
                                     outcome.results = retry_outcome.results.clone();
                                     outcome.upstream_total = retry_outcome.upstream_total;
+                                    // P3 证据：胜出结果来自改写变体重试，如实记录用了哪个变体
+                                    winning_variant = Some(retry_query.keyword.clone());
                                 }
                                 outcome.attempts.extend(retry_outcome.attempts);
                             }
