@@ -801,6 +801,8 @@ pub async fn api_search_online(
     breaker::note_attempts(&outcome.attempts);
     outcome.attempts = weave_cooled_attempts(&chain_kinds, &cooled, outcome.attempts);
 
+    // P3 证据：改写重试的胜出变体（有结果来自重试时才非 None）
+    let mut winning_variant: Option<String> = None;
     // ── 队列 #2 P1：链 0 命中 → LLM 改写变体重试一次（设计稿 [A] 段）──
     // 纪律：主查询恒为用户原词（LLM 只贡献变体）；解析失败/预算用尽/超时 → 记账后走
     // 原降级链，行为与 v0.9.38 逐字一致（设计稿硬验收）。重试链只跑一次（成本上限 +1 轮）。
@@ -898,13 +900,16 @@ pub async fn api_search_online(
                                     "[ONLINE] 零命中重试（改写变体）: '{}'",
                                     retry_query.keyword
                                 );
-                                let retry_outcome =
-                                    SourceChain::new(providers.clone()).run(retry_query).await;
+                                let retry_outcome = SourceChain::new(providers.clone())
+                                    .run(retry_query.clone())
+                                    .await;
                                 breaker::note_attempts(&retry_outcome.attempts);
                                 let retry_won = retry_outcome.winning_source().is_some();
                                 if retry_won {
                                     outcome.results = retry_outcome.results.clone();
                                     outcome.upstream_total = retry_outcome.upstream_total;
+                                    // P3 证据：胜出结果来自改写变体重试，如实记录用了哪个变体
+                                    winning_variant = Some(retry_query.keyword.clone());
                                 }
                                 outcome.attempts.extend(retry_outcome.attempts);
                             }
@@ -939,6 +944,10 @@ pub async fn api_search_online(
         // 毫无效果（上游即便按日期返回，也被 dedup 的混合分降序打回）。relevance 保持
         // 现状（混合分降序）；new/old 本地按申请日重排，让排序控件真实生效。
         let mut patents = outcome.summaries();
+        // P3 证据：LLM 理由按重排后位置收集（无重排时全 None）
+        let mut rerank_reasons: Vec<Option<String>> = vec![None; patents.len()];
+        // P3 证据：每条结果在 outcome.results 里的来源位置（重排后跟随新序）
+        let mut patent_origin: Vec<usize> = (0..patents.len()).collect();
         // ── 队列 #2 P2：LLM 重排（设计稿 [C] 段，2026-11-09）──
         // 触发条件（全部满足才调）：设置开关开 + 用户未显式选 new/old（显式排序优先）
         // + 候选 ≥2 条 + 编排日预算未超 + 链路总耗时未超 35s。任一不满足 → 记 Skipped
@@ -1073,10 +1082,17 @@ pub async fn api_search_online(
                         for (new_pos, old_pos) in new_order.iter().enumerate() {
                             patents[new_pos] = old[*old_pos].clone();
                         }
+                        patent_origin = new_order.clone();
                         for v in &verdicts {
                             let p = &mut patents[v.index - 1];
                             p.relevance_score = Some(v.score as f64);
-                            p.score_source = Some(format!("LLM重排｜{}", v.reason));
+                            p.score_source = Some("LLM重排".to_string());
+                        }
+                        // P3 证据：LLM 理由按重排后位置收集（新序第 i 位 = 原序 new_order[i]）
+                        for (new_pos, old_pos) in new_order.iter().enumerate() {
+                            if let Some(v) = verdicts.iter().find(|v| v.index - 1 == *old_pos) {
+                                rerank_reasons[new_pos] = Some(v.reason.clone());
+                            }
                         }
                     }
                 }
@@ -1099,8 +1115,35 @@ pub async fn api_search_online(
             SourceKind::EpoOps => req.page_size.min(25),
             _ => 10,
         };
+        // P3 证据：每条结果附 evidence（命中源 / AI 理由 / 重试变体）——纯新增键，
+        // 无任何证据内容的条目不带该键；本地路径与网页回退路径不受影响。
+        let result_sources: Vec<Vec<String>> = outcome
+            .results
+            .iter()
+            .map(|m| m.sources.iter().map(|s| s.as_str().to_string()).collect())
+            .collect();
+        let mut patents_json = serde_json::to_value(&patents).unwrap_or_else(|_| json!([]));
+        if let Some(arr) = patents_json.as_array_mut() {
+            for (i, item) in arr.iter_mut().enumerate() {
+                let mut ev = serde_json::Map::new();
+                if let Some(srcs) = result_sources.get(patent_origin[i]) {
+                    if !srcs.is_empty() {
+                        ev.insert("sources".to_string(), json!(srcs));
+                    }
+                }
+                if let Some(Some(reason)) = rerank_reasons.get(i) {
+                    ev.insert("reason".to_string(), json!(reason));
+                }
+                if let Some(v) = &winning_variant {
+                    ev.insert("query_variant".to_string(), json!(v));
+                }
+                if !ev.is_empty() {
+                    item["evidence"] = serde_json::Value::Object(ev);
+                }
+            }
+        }
         let mut out = json!({
-            "patents": patents,
+            "patents": patents_json,
             "total": total,
             "page": req.page,
             "page_size": effective_size,

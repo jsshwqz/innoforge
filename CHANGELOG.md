@@ -4,6 +4,19 @@
 All notable changes are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
+## [v0.9.42] - 2026-11-12
+
+### 新增 / Added
+
+- **AI 搜索 P3：证据出参 + 结果卡「为什么推荐」折叠行（AI 搜索方向设计稿收官期）**：在线检索结果的每条可携带纯新增键 `evidence`——`sources`（该条命中的源标签，重排后按新序对齐 outcome.results）、`reason`（AI 重排理由，从 score_source 过渡形态独立成键）、`query_variant`（结果来自改写重试时标注所用变体词）。无证据内容的条目不带该键；本地路径与网页回退路径不受影响。前端结果卡新增「为什么推荐」`<details>` 折叠行（默认收起），逐项展示 AI 理由/重试变体/命中源（双语）。（[#215](https://github.com/jsshwqz/innoforge/pull/215)）
+- score_source 随之瘦身：重排后只标 `LLM重排`（理由移入 evidence，不再双写）。（[#215](https://github.com/jsshwqz/innoforge/pull/215)）
+
+### 说明
+
+- 设计稿三期的 [D] 段落地，AI 搜索方向设计稿三期软件侧收官；证据数据链：[A] 改写变体 → [B] 五源命中 → [C] 重排理由 → [D] 出参展示。
+- 既有出参键逐字不变（evidence 纯新增、空则省略）；本地检索与网页回退结果无此键。
+
+---
 ## [v0.9.41] - 2026-11-09
 
 ### 新增 / Added

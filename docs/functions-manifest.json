@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-08T18:41:52.582Z",
+  "generatedAt": "2026-11-12T15:31:23.814Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -567,6 +567,7 @@
         "diagParseStatus",
         "doSearch",
         "escapeHtml",
+        "evidenceHtml",
         "exportCsv",
         "extractPdfContent",
         "formatFileSize",

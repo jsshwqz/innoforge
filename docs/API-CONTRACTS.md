@@ -49,11 +49,11 @@
 | 17 | POST | `/api/chat/:session_key/save` | `session_key` | 任意 JSON（§17） | — | JSON（§17） | `routes::api_chat_save_message` | `src/routes/chat.rs:53` |
 | 18 | POST | `/api/chat/:session_key/delete` | `session_key` | — | — | JSON（§18） | `routes::api_chat_delete_messages` | `src/routes/chat.rs:90` |
 | 19 | POST | `/api/search` | — | `SearchRequest` | — | JSON SearchResult | `routes::api_search` | `src/routes/search.rs:412` |
-| 20 | POST | `/api/search/stats` | — | `SearchRequest` | — | JSON（§20） | `routes::api_search_stats` | `src/routes/search.rs:1380` |
-| 21 | POST | `/api/search/export` | — | `SearchRequest` | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_export_csv` | `src/routes/search.rs:1444` |
-| 22 | POST | `/api/search/export/xlsx` | — | `SearchRequest` | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_export_xlsx` | `src/routes/search.rs:1495` |
+| 20 | POST | `/api/search/stats` | — | `SearchRequest` | — | JSON（§20） | `routes::api_search_stats` | `src/routes/search.rs:1423` |
+| 21 | POST | `/api/search/export` | — | `SearchRequest` | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_export_csv` | `src/routes/search.rs:1487` |
+| 22 | POST | `/api/search/export/xlsx` | — | `SearchRequest` | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_export_xlsx` | `src/routes/search.rs:1538` |
 | 23 | POST | `/api/search/online` | — | `SearchRequest` | — | JSON（§23） | `routes::api_search_online` | `src/routes/search.rs:671` |
-| 24 | POST | `/api/search/vector` | — | 任意 JSON（§24） | — | JSON（§24） | `routes::api_search_vector` | `src/routes/search.rs:1262` |
+| 24 | POST | `/api/search/vector` | — | 任意 JSON（§24） | — | JSON（§24） | `routes::api_search_vector` | `src/routes/search.rs:1305` |
 | 25 | POST | `/api/search/analyze` | — | 任意 JSON（§25） | — | JSON（§25） | `routes::api_ai_analyze_results` | `src/routes/ai.rs:811` |
 | 26 | POST | `/api/patent/fetch` | — | `FetchPatentRequest` | — | JSON（§26） | `routes::api_fetch_patent` | `src/routes/patent.rs:14` |
 | 27 | GET | `/api/patent/enrich/:id` | `id` | — | — | JSON（§27） | `routes::api_enrich_patent` | `src/routes/patent.rs:35` |
@@ -540,7 +540,7 @@
 
 ### §20 POST `/api/search/stats`
 
-- 源码：`src/routes/search.rs:1380`
+- 源码：`src/routes/search.rs:1423`
 - 请求体：`SearchRequest`（字段见上文类型表）
 - 响应顶层键：`applicants`、`countries`、`total`、`years`
 
@@ -552,7 +552,7 @@
 
 ### §24 POST `/api/search/vector`
 
-- 源码：`src/routes/search.rs:1262`
+- 源码：`src/routes/search.rs:1305`
 - 读取的请求键：`limit`、`query`、`rrf_k`
 - 响应顶层键：`applicant`、`bm25_count`、`error`、`fused_score`、`id`、`inventor`、`method`、`patent_number`、`patents`、`relevance_score`、`rrf_k`、`source`、`title`、`total`、`vector_count`
 

@@ -192,6 +192,10 @@ function clearSearchPdfMeta() {
     'stats.year': '申请趋势（按年份）',
     'results.searching': '搜索中...',
     'results.noData': '未找到结果',
+    'results.whyTitle': '为什么推荐',
+    'results.evidenceReason': 'AI 理由',
+    'results.evidenceVariant': '重试变体',
+    'results.evidenceSources': '命中源',
     'results.webTitle': '网页搜索结果（在线专利源 0 命中，已回退网页搜索）',
     'results.webOpen': '以上为相关网页（非专利著录），点按标题在新窗口打开原文。',
     'results.info': '找到 {total} 条 | 第 {page} 页 | 每页 {size} 条{source}',
@@ -278,6 +282,10 @@ function clearSearchPdfMeta() {
     'stats.year': 'Year Trend',
     'results.searching': 'Searching...',
     'results.noData': 'No results',
+    'results.whyTitle': 'Why recommended',
+    'results.evidenceReason': 'AI reason',
+    'results.evidenceVariant': 'Retry variant',
+    'results.evidenceSources': 'Hit sources',
     'results.webTitle': 'Web results (patent sources found nothing, fell back to web search)',
     'results.webOpen': 'The items above are related web pages (not patent records). Click a title to open the original page in a new window.',
     'results.info': 'Found {total} | page {page} | {size}/page{source}',
@@ -442,6 +450,19 @@ async function doSearch(page) {
     }
 }
 
+// 队列 #2 P3（2026-11-09）：证据行 HTML（「为什么推荐」折叠体）。
+// reason = AI 重排理由；query_variant = 结果来自改写重试时的变体词；
+// sources = 命中源标签列表。全部经 escapeHtml 后拼接（本文件既有模式）。
+function evidenceHtml(ev) {
+    const lines = [];
+    if (ev.reason) lines.push(t('results.evidenceReason') + ': ' + ev.reason);
+    if (ev.query_variant) lines.push(t('results.evidenceVariant') + ': ' + ev.query_variant);
+    if (Array.isArray(ev.sources) && ev.sources.length) {
+        lines.push(t('results.evidenceSources') + ': ' + ev.sources.join(', '));
+    }
+    return lines.map(escapeHtml).join('<br>');
+}
+
 // 冻结期后队列 #1（2026-11-08）：Firecrawl 网页回退结果渲染。
 // web_results 是网页命中，**不进专利卡片**——没有著录字段可渲染，链接也不该指向
 // 本站 /patent/{id} 详情页（会 404）。独立区块 + 外链新窗口 + 每行来源标注（域名+完整 URL）。
@@ -572,6 +593,7 @@ function renderResults(data, page, pageSize) {
                         <span>${t('meta.country')}: ${escapeHtml(p.country || '暂无')}</span>
                     </div>
                     <p class="patent-abstract">${escapeHtml((p.abstract_text || '').slice(0, 260))}${(p.abstract_text || '').length > 260 ? '...' : ''}</p>
+                    ${p.evidence ? `<details class="evidence-row" style="margin-top:4px;"><summary style="cursor:pointer;color:#58a6ff;font-size:0.8em;">${t('results.whyTitle')}</summary><div style="color:#8b949e;font-size:0.8em;padding:4px 0;">${evidenceHtml(p.evidence)}</div></details>` : ''}
                 </div>
                 <div class="score-tag">
                     <div class="score-value" style="color:${scoreColor}">${score.toFixed(0)}%</div>
