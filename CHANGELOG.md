@@ -13,7 +13,7 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ### 说明
 
-- 设计稿三期的 [D] 段落地，队列 #2 软件侧收官；证据数据链：[A] 改写变体 → [B] 五源命中 → [C] 重排理由 → [D] 出参展示。
+- 设计稿三期的 [D] 段落地，AI 搜索方向设计稿三期软件侧收官；证据数据链：[A] 改写变体 → [B] 五源命中 → [C] 重排理由 → [D] 出参展示。
 - 既有出参键逐字不变（evidence 纯新增、空则省略）；本地检索与网页回退结果无此键。
 
 ---
