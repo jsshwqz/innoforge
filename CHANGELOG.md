@@ -8,7 +8,7 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ### 新增 / Added
 
-- **AI 搜索 P3：证据出参 + 结果卡「为什么推荐」折叠行（队列 #2 收官期）**：在线检索结果的每条可携带纯新增键 `evidence`——`sources`（该条命中的源标签，重排后按新序对齐 outcome.results）、`reason`（AI 重排理由，从 score_source 过渡形态独立成键）、`query_variant`（结果来自改写重试时标注所用变体词）。无证据内容的条目不带该键；本地路径与网页回退路径不受影响。前端结果卡新增「为什么推荐」`<details>` 折叠行（默认收起），逐项展示 AI 理由/重试变体/命中源（双语）。（[#215](https://github.com/jsshwqz/innoforge/pull/215)）
+- **AI 搜索 P3：证据出参 + 结果卡「为什么推荐」折叠行（AI 搜索方向设计稿收官期）**：在线检索结果的每条可携带纯新增键 `evidence`——`sources`（该条命中的源标签，重排后按新序对齐 outcome.results）、`reason`（AI 重排理由，从 score_source 过渡形态独立成键）、`query_variant`（结果来自改写重试时标注所用变体词）。无证据内容的条目不带该键；本地路径与网页回退路径不受影响。前端结果卡新增「为什么推荐」`<details>` 折叠行（默认收起），逐项展示 AI 理由/重试变体/命中源（双语）。（[#215](https://github.com/jsshwqz/innoforge/pull/215)）
 - score_source 随之瘦身：重排后只标 `LLM重排`（理由移入 evidence，不再双写）。（[#215](https://github.com/jsshwqz/innoforge/pull/215)）
 
 ### 说明
