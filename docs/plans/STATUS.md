@@ -14,6 +14,13 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-11-12 — **AI 搜索 P3：证据出参+「为什么推荐」折叠行（队列#2 收官）**（PR #215，→ v0.9.42）
+
+- **状态 / Status**: 🚧 PR 等 CI
+- **实现**: 路由 winner 分支组装 per-item evidence（`patent_origin` 跟随重排新序对齐 outcome.results 的命中源；rerank_reasons 按重排后位置收集；winning_variant 标注改写重试来源）；score_source 瘦身为 `LLM重排`；前端结果卡 `<details>` 折叠行（AI 理由/重试变体/命中源，双语）。
+- **验证**: 全量 1175 passed / 0 failed；E2E 87/87（首跑首页 0 按钮为启动竞态瞬态，复跑全绿）；fmt/clippy(--all-targets) 零告警；API-CONTRACTS/ROUTES 再生。
+- **队列#2 收官**: 设计稿三期（P1 改写/意图路由、P2 重排/开关、P3 证据出参）全部交付。
+
 ### 2026-11-09 — **AI 搜索 P2：LLM 重排+理由+设置页开关；日预算跨时区错位修复**（队列#2 P2，PR #214，→ v0.9.41）
 
 - **状态 / Status**: 🚧 PR 等 CI
