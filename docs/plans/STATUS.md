@@ -14,6 +14,13 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-11-14 — **issue #55 收口：上游客户端兜底 expect 化；issue #110 端口预留+归因诊断**
+
+- **状态 / Status**: 🚧 PR 等 CI（#216 / #217）
+- **issue #55（P2）**: 5 处 `.unwrap_or_else(|_| reqwest::Client::new())` 兜底 expect 化（点名 4 处 + firecrawl 同款第 5 处）——关键事实：旧兜底同场景一样 panic（`Client::new()` 内部即 `build().expect`），expect 化不新增崩溃面、只提升诚实度；三搜索源客户端补 `connect_timeout(500ms)`（errors.md #74 纪律）；静态守卫 `tests/no_silent_client_fallback.rs`（收口条件第二条）。
+- **issue #110（P3）**: `spawn_test_server_with_timeout` spawn 前预留端口 + 就绪失败归因诊断（端口被抢 vs 子进程自亡，分别报）；新入口 `spawn_test_server_on_free_port`（预留/重试/诊断收在一处）；负控 A 落 test（端口被占 → 立即 `port unavailable`）；OAuth 测试迁移到新入口（删 find_bindable_port 重复实现）。
+- **验证**: 全量 1178 passed / 0 failed（含 3 件新测试）；fmt/clippy(--all-targets) 零告警。
+
 ### 2026-11-12 — **AI 搜索 P3：证据出参+「为什么推荐」折叠行（队列#2 收官）**（PR #215，→ v0.9.42）
 
 - **状态 / Status**: 🚧 PR 等 CI

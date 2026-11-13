@@ -8,17 +8,18 @@
 //! Usage:
 //! ```ignore
 //! mod common;
-//! use common::spawn_test_server;
+//! use common::spawn_test_server_on_free_port;
 //!
 //! #[test]
 //! fn my_test() {
-//!     let port = common::free_port();
 //!     let ai_port = common::free_port();
 //!     // start stub on ai_port ...
-//!     let server = spawn_test_server(port, &[
+//!     // 推荐：端口分配/预留/失败诊断都收在这一个入口里（issue #110）
+//!     let server = spawn_test_server_on_free_port(&[
 //!         ("AI_BASE_URL", &format!("http://127.0.0.1:{}", ai_port)),
 //!         ("AI_API_KEY", "test-key-not-real"),
 //!     ]);
+//!     let port = server.port;
 //!     // server is killed automatically when `server` is dropped
 //! }
 //! ```
@@ -218,20 +219,43 @@ pub fn spawn_test_server_with_timeout(
     extra_env: &[(&str, &str)],
 ) -> TestServer {
     let home_path = home.path().to_path_buf();
+    // issue #110：spawn 前先**预留**端口（bind 后持有），把 free_port() 与子进程
+    // bind 之间的竞态窗口压缩到毫秒级；预留失败（端口被占/Windows 保留段）立即
+    // 报 `port unavailable`，绝不静默换成误导性断言（负控 A 的验收形态）。
+    let reservation = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap_or_else(|e| {
+        panic!(
+            "port unavailable: cannot reserve port {} before spawn ({}). \
+             端口被占用，或落在 Windows 保留段（见 errors.md #75）",
+            port, e
+        )
+    });
     let mut cmd = build_server_cmd(&home_path, port, extra_env);
     // #82: spawn() 成功后任何路径都必须回收子进程。
     // 若 wait_for_server 失败，先 kill+wait 再 panic，避免孤儿进程残留。
     // mem::forget(home) 确保临时目录在 panic unwind 中不被删除——
     // 孤儿进程检测测试需要 home 持续存在，否则未 kill 的孤儿也会因 home
     // 被删而自崩，导致测试恒真（上一轮踩坑）。
+    drop(reservation);
     let mut child = cmd.spawn().expect("failed to spawn server");
     if !wait_for_server(port, timeout_secs) {
         let _ = child.kill();
         let _ = child.wait();
         std::mem::forget(home);
+        // issue #110：失败必须可归因——端口被抢 vs 服务器自己死了，两种病两种话。
+        let port_state = match std::net::TcpListener::bind(("127.0.0.1", port)) {
+            Ok(probe) => {
+                drop(probe);
+                "端口在失败时是空闲的（子进程自己没起来/起来即崩）"
+            }
+            Err(_) => "端口在失败时仍被占用（被其他进程抢走）",
+        };
+        let exit_note = match child.try_wait() {
+            Ok(Some(status)) => format!("子进程已退出：{}", status),
+            _ => "子进程仍在运行（已强制终止）".to_string(),
+        };
         panic!(
-            "server must start on port {} within {}s",
-            port, timeout_secs
+            "port unavailable or server failed to start on port {} within {}s：{}；{}",
+            port, timeout_secs, port_state, exit_note
         );
     }
     TestServer {
@@ -239,6 +263,63 @@ pub fn spawn_test_server_with_timeout(
         port,
         home: Some(home),
     }
+}
+
+/// Spawn a test server on an OS-assigned free port（issue #110 的推荐入口）。
+/// 仅部分测试 binary 消费本入口——与 [`spawn_test_server`] 同款 `#[allow(dead_code)]`。
+#[allow(dead_code)]
+///
+/// 与「caller 先 free_port() 再传进来」相比，这里把预留-探测-重试收进同一处：
+/// 预留失败（端口被占/保留段）自动换下一个端口，最多 3 次；仍失败则带
+/// `port unavailable` 明确 panic。新测试一律用本入口，不要再手写 free_port()。
+pub fn spawn_test_server_on_free_port(extra_env: &[(&str, &str)]) -> TestServer {
+    let mut last_error = String::new();
+    for _ in 0..3 {
+        let port = free_port();
+        let home = fresh_db_dir();
+        let probe = std::net::TcpListener::bind(("127.0.0.1", port));
+        match probe {
+            Ok(reservation) => {
+                drop(reservation);
+                let home_path = home.path().to_path_buf();
+                let mut cmd = build_server_cmd(&home_path, port, extra_env);
+                let mut child = match cmd.spawn() {
+                    Ok(c) => c,
+                    Err(e) => {
+                        last_error = format!("port {}: spawn failed: {}", port, e);
+                        continue;
+                    }
+                };
+                if wait_for_server(port, 60) {
+                    return TestServer {
+                        child,
+                        port,
+                        home: Some(home),
+                    };
+                }
+                let _ = child.kill();
+                let _ = child.wait();
+                last_error = format!(
+                    "port {}: server did not become ready within 60s（{}）",
+                    port,
+                    match std::net::TcpListener::bind(("127.0.0.1", port)) {
+                        Ok(l) => {
+                            drop(l);
+                            "端口空闲——子进程自己没起来"
+                        }
+                        Err(_) => "端口仍被占用——被抢",
+                    }
+                );
+            }
+            Err(e) => {
+                last_error = format!("port {}: unavailable ({})", port, e);
+            }
+        }
+    }
+    panic!(
+        "port unavailable: 3 次预留/启动均失败；最后一次：{}",
+        last_error
+    )
 }
 
 /// Spawn a test server with a pre-migrated DB copy and wait for readiness.

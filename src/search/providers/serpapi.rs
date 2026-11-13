@@ -129,9 +129,11 @@ impl SerpApiProvider {
     /// 客户端构造：超时 15s（MA6a 收紧，见 `UPSTREAM_TIMEOUT_SECS` 注释），builder 失败时退回默认客户端。
     fn client() -> reqwest::Client {
         reqwest::Client::builder()
+            // errors.md #74 纪律：上游/外联类客户端显式设连接超时
+            .connect_timeout(Duration::from_millis(500))
             .timeout(Duration::from_secs(UPSTREAM_TIMEOUT_SECS))
             .build()
-            .unwrap_or_else(|_| reqwest::Client::new())
+            .expect("上游 HTTP 客户端构建失败（TLS 后端初始化）——禁止静默退回无超时客户端，见 issue #55")
     }
 
     /// 关键词检索的上游请求 URL。

@@ -930,9 +930,16 @@ pub fn upstream_timeout_secs() -> u64 {
 /// 超时值由 `upstream_timeout_secs()` 决定（环境变量 `INNOFORGE_UPSTREAM_TIMEOUT_SECS`，默认 30s）。
 pub fn build_upstream_client() -> reqwest::Client {
     reqwest::Client::builder()
+        // errors.md #74 纪律：上游/外联类客户端显式设连接超时，防代理/死端点悬挂
+        .connect_timeout(std::time::Duration::from_millis(500))
         .timeout(std::time::Duration::from_secs(upstream_timeout_secs()))
         .build()
-        .unwrap_or_else(|_| reqwest::Client::new())
+        // issue #55 收口：builder 失败（TLS 后端初始化）时 expect 明确失败——
+        // 旧写法 unwrap_or_else(|_| Client::new()) 在同场景下一样会 panic（Client::new
+        // 内部即 build().expect），但信息更差且看似存在「无超时兜底」的歧义。
+        .expect(
+            "上游 HTTP 客户端构建失败（TLS 后端初始化）——禁止静默退回无超时客户端，见 issue #55",
+        )
 }
 
 // ============================================================================
