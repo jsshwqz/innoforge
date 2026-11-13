@@ -4,6 +4,14 @@
 All notable changes are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
+## [v0.9.43] - 2026-11-14
+
+### 修复 / Fixed
+
+- **上游客户端兜底 expect 化（上游客户端兜底收口）**：5 处 `.unwrap_or_else(|_| reqwest::Client::new())` 全部 `.expect(明确失败)`——旧兜底在同场景下一样 panic（`Client::new()` 内部即 `build().expect`），expect 化不新增崩溃面、只提升诚实度；三搜索源客户端补 `connect_timeout(500ms)`（errors.md 第 74 条纪律）；新增静态守卫 `tests/no_silent_client_fallback.rs`（兜底形态必须为空）。（[#217](https://github.com/jsshwqz/innoforge/pull/217)）
+- **测试端口预留 + 失败归因诊断（测试端口预留收口）**：`spawn_test_server_with_timeout` spawn 前预留端口（竞态窗口压到毫秒级）、预留失败立即报 `port unavailable`、就绪失败后归因诊断（端口被抢 vs 子进程自亡分别报）；新入口 `spawn_test_server_on_free_port`（预留/重试/诊断收在一处）；负控 A 落 test；OAuth 测试迁移到新入口。（[#217](https://github.com/jsshwqz/innoforge/pull/217)）
+
+---
 ## [v0.9.42] - 2026-11-12
 
 ### 新增 / Added
