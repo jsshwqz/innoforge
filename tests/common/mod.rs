@@ -266,6 +266,8 @@ pub fn spawn_test_server_with_timeout(
 }
 
 /// Spawn a test server on an OS-assigned free port（issue #110 的推荐入口）。
+/// 仅部分测试 binary 消费本入口——与 [`spawn_test_server`] 同款 `#[allow(dead_code)]`。
+#[allow(dead_code)]
 ///
 /// 与「caller 先 free_port() 再传进来」相比，这里把预留-探测-重试收进同一处：
 /// 预留失败（端口被占/保留段）自动换下一个端口，最多 3 次；仍失败则带
