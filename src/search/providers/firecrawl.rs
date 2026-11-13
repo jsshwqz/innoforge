@@ -84,7 +84,7 @@ impl ReqwestFirecrawlTransport {
             .connect_timeout(Duration::from_millis(500))
             .timeout(Duration::from_secs(WEB_SEARCH_TIMEOUT_SECS))
             .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
+            .expect("上游 HTTP 客户端构建失败（TLS 后端初始化）——禁止静默退回无超时客户端，见 issue #55");
         Self { client }
     }
 }
