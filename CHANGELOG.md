@@ -4,6 +4,19 @@
 All notable changes are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
+## [v0.9.45] - 2026-11-14
+
+### 新增 / Added
+
+- **Umi-OCR 服务地址可配置（开源阻塞项收口）**：扫描版 PDF/图片 OCR 的 Umi-OCR 地址此前写死 `127.0.0.1:1224`——装在其它机器/端口的用户会以为功能坏了且无任何提示。现可用环境变量 `UMI_OCR_BASE_URL` 覆盖（默认保持出厂 1224 不变），TCP 探测地址从解析后的服务地址**同源推导**（旧写死会在自定义地址下探错对象），错误信息带上实际探测地址与配置指引；`GET /api/settings` 回显解析后的实际值。`docs/API.md` 环境变量表与 README 配置段/已知限制同步。
+- **OAuth 半边核对**：开源阻塞项第 1 条（回调地址硬编码）经核对**已在先前的修复中解决**——回调地址自实际监听端口推导、`INNOFORGE_OAUTH_CALLBACK_URL` 可覆盖、启动时自检日志、非默认端口回归测试（本 PR 迁移至 spawn_test_server_on_free_port 新入口）。（[#221](https://github.com/jsshwqz/innoforge/pull/221)）
+
+### 说明
+
+- 单测 2 件：地址解析优先级（env 覆盖/去尾斜杠/空串钳制）与探测地址同源推导（含带路径/无 scheme 形态）。
+- 环境变量属部署环境属性 → 选 env 注入点（issue「二选一」），docs/API.md 与 README 均已记录。
+
+---
 ## [v0.9.44] - 2026-11-14
 
 ### 修复 / Fixed

@@ -122,6 +122,7 @@ docker run -p 3000:3000 -v innoforge-data:/data innoforge
 |--------|--------|------|
 | 数据库 | `innoforge.db` | SQLite 数据库文件路径 |
 | 监听地址 | `0.0.0.0:3000` | 主程序绑定所有网卡（`src/main.rs`），本机访问用 http://127.0.0.1:3000；可用 `INNOFORGE_PORT` 改端口。**没有访问鉴权，请勿把该端口直接暴露到公网**，需要远程访问请套一层反向代理或 SSH 隧道 |
+| Umi-OCR 地址 | `http://127.0.0.1:1224` | 扫描版 PDF 的本地 OCR 服务（issue #33）。OCR 装在其它机器/端口时设置环境变量 `UMI_OCR_BASE_URL`（如 `http://192.168.1.8:1224`） |
 
 所有设置均可通过**设置页面**（http://localhost:3000/settings）在线配置，也可编辑 `.env` 文件。
 
@@ -215,7 +216,7 @@ innoforge/
 
 ### 已知限制
 
-- **扫描版 PDF（无可复制文字）需要本机运行 [Umi-OCR](https://github.com/hiroi-sora/Umi-OCR)**（默认 `127.0.0.1:1224`）。未运行时会直接返回「Umi-OCR 未运行」的明确错误（约 2 秒，不会等超时）；可改用文字版 PDF，或先 OCR 得到文本再上传。
+- **扫描版 PDF（无可复制文字）需要本机运行 [Umi-OCR](https://github.com/hiroi-sora/Umi-OCR)**（默认 `127.0.0.1:1224`，可用环境变量 `UMI_OCR_BASE_URL` 指向其它地址/端口，issue #33）。未运行时会直接返回「Umi-OCR 未运行」的明确错误（约 2 秒，不会等超时）；可改用文字版 PDF，或先 OCR 得到文本再上传。
 - 服务绑定 `0.0.0.0` 且无访问鉴权，请勿直接暴露公网。
 - 在线专利检索依赖 SerpAPI / Google Patents 可达性；不可用时自动回退本地库，结果为空说明本地库尚未导入数据。
 - AI 功能需要自备一个 OpenAI 兼容的 API Key；不配置时检索、收藏、导入与管理仍可用。

@@ -13,8 +13,39 @@ use std::{
 const MAX_FILE_SIZE: usize = 10 * 1024 * 1024; // 10 MB
 const MAX_PDF_STORE_SIZE: usize = 20 * 1024 * 1024; // 20 MB
 
-/// Umi-OCR 默认 HTTP 地址（端口可在 Umi-OCR 全局设置中修改）
-const UMI_OCR_BASE_URL: &str = "http://127.0.0.1:1224";
+/// Umi-OCR 出厂默认 HTTP 地址（端口可在 Umi-OCR 全局设置中修改）。
+/// issue #33：可用环境变量 `UMI_OCR_BASE_URL` 覆盖（部署环境属性 → env 注入点）。
+const UMI_OCR_BASE_URL_DEFAULT: &str = "http://127.0.0.1:1224";
+
+/// 解析 Umi-OCR 服务地址：环境变量 `UMI_OCR_BASE_URL` 非空时覆盖默认值。
+/// 纯函数（env 由调用方传入），由 `umi_ocr_base_url_resolution` 锁死优先级/去尾斜杠/空值钳制。
+fn resolve_umi_ocr_base_url(env_value: Option<&str>) -> String {
+    match env_value {
+        Some(v) => {
+            let v = v.trim().trim_end_matches('/').to_string();
+            if v.is_empty() {
+                UMI_OCR_BASE_URL_DEFAULT.to_string()
+            } else {
+                v
+            }
+        }
+        None => UMI_OCR_BASE_URL_DEFAULT.to_string(),
+    }
+}
+
+pub(crate) fn umi_ocr_base_url() -> String {
+    resolve_umi_ocr_base_url(std::env::var("UMI_OCR_BASE_URL").ok().as_deref())
+}
+
+/// 从服务地址推导探测地址（去 scheme、取 host:port）——TCP 探测目标必须与
+/// 实际 HTTP 目标同源，写死 1224 会在自定义地址下探错对象。
+fn probe_addr_for(base_url: &str) -> String {
+    let stripped = base_url
+        .strip_prefix("https://")
+        .or_else(|| base_url.strip_prefix("http://"))
+        .unwrap_or(base_url);
+    stripped.split('/').next().unwrap_or(stripped).to_string()
+}
 
 /// Files created for external PDF tools. They stay under the application
 /// working directory so the Windows launcher keeps them on the project drive.
@@ -914,7 +945,8 @@ async fn extract_pdf_text_umi_ocr(data: Vec<u8>) -> Result<String, String> {
     // Probe Umi-OCR reachability before attempting the full 120s workflow.
     // If the service is not running, return immediately with a helpful message
     // instead of waiting for the HTTP timeout.
-    let probe_addr = "127.0.0.1:1224";
+    let base_url = umi_ocr_base_url();
+    let probe_addr = probe_addr_for(&base_url);
     let probe = tokio::time::timeout(
         Duration::from_secs(2),
         tokio::net::TcpStream::connect(probe_addr),
@@ -932,7 +964,7 @@ async fn extract_pdf_text_umi_ocr(data: Vec<u8>) -> Result<String, String> {
         .map_err(|e| format!("Umi-OCR 客户端创建失败: {}", e))?;
 
     // Upload via multipart; the request body already owns the PDF bytes.
-    let upload_url = format!("{}/api/doc/upload", UMI_OCR_BASE_URL);
+    let upload_url = format!("{}/api/doc/upload", base_url);
     let file_part = reqwest::multipart::Part::bytes(data)
         .file_name("document.pdf")
         .mime_str("application/pdf")
@@ -974,7 +1006,7 @@ async fn extract_pdf_text_umi_ocr(data: Vec<u8>) -> Result<String, String> {
     };
 
     // Step 3: Poll for result (wait up to ~90s)
-    let result_url = format!("{}/api/doc/result", UMI_OCR_BASE_URL);
+    let result_url = format!("{}/api/doc/result", base_url);
     let mut all_text = String::new();
     let max_polls = 90; // 90 * 1s = 90s max wait
     for _poll in 0..max_polls {
@@ -1025,7 +1057,7 @@ async fn extract_pdf_text_umi_ocr(data: Vec<u8>) -> Result<String, String> {
     }
 
     // Step 4: Cleanup — clear task on Umi-OCR
-    let clear_url = format!("{}/api/doc/clear/{}", UMI_OCR_BASE_URL, task_id);
+    let clear_url = format!("{}/api/doc/clear/{}", base_url, task_id);
     let _ = client.get(&clear_url).send().await;
 
     if all_text.trim().is_empty() {
@@ -1049,7 +1081,7 @@ async fn extract_image_text_umi_ocr(image_bytes: &[u8], _ext: &str) -> Result<St
         .map_err(|e| format!("Umi-OCR 客户端创建失败: {}", e))?;
 
     let resp = client
-        .post(format!("{}/api/ocr", UMI_OCR_BASE_URL))
+        .post(format!("{}/api/ocr", umi_ocr_base_url()))
         .json(&serde_json::json!({
             "base64": b64,
             "options": {
@@ -1653,5 +1685,46 @@ mod file_parser_tests {
         assert!(append_pdf_chunk(&mut buf, &[1]).is_ok());
         // 超出
         assert!(append_pdf_chunk(&mut buf, &[2]).is_err());
+    }
+}
+
+#[cfg(test)]
+mod umi_ocr_config_tests {
+    use super::*;
+
+    #[test]
+    fn umi_ocr_base_url_resolution() {
+        // 环境变量未设置 → 出厂默认
+        assert_eq!(resolve_umi_ocr_base_url(None), "http://127.0.0.1:1224");
+        // 设置 → 覆盖（含去尾斜杠）
+        assert_eq!(
+            resolve_umi_ocr_base_url(Some("http://192.168.1.8:1224/")),
+            "http://192.168.1.8:1224"
+        );
+        // 空串/纯空白 → 视为未设置（不产生空 URL）
+        assert_eq!(resolve_umi_ocr_base_url(Some("")), "http://127.0.0.1:1224");
+        assert_eq!(
+            resolve_umi_ocr_base_url(Some("   ")),
+            "http://127.0.0.1:1224"
+        );
+    }
+
+    #[test]
+    fn probe_addr_follows_base_url() {
+        assert_eq!(probe_addr_for("http://127.0.0.1:1224"), "127.0.0.1:1224");
+        assert_eq!(
+            probe_addr_for("http://192.168.1.8:1224"),
+            "192.168.1.8:1224"
+        );
+        assert_eq!(
+            probe_addr_for("http://ocr.lan:9000/api"),
+            "ocr.lan:9000",
+            "带路径的地址取 host:port"
+        );
+        assert_eq!(
+            probe_addr_for("127.0.0.1:1224"),
+            "127.0.0.1:1224",
+            "无 scheme 也能取"
+        );
     }
 }
