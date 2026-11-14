@@ -4,6 +4,17 @@
 All notable changes are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
+## [v0.9.46] - 2026-11-14
+
+### 修复 / Fixed
+
+- **issue #56 收口：静态守卫遍历化 + 双引号拓宽 + i18n 运行时测试**（[#222](https://github.com/jsshwqz/innoforge/pull/222)）：
+  - no_english_dialog_literals.rs 的写死 include_str! 8 条清单 → **运行时遍历 templates/**（照 no_case_data_in_repo 范例）+ 交叉断言「发现数 == 实际 *.html 数」防遍历被写死
+  - **负向验证真跑还抓出守卫自身盲区**——双引号 `alert("...")` 形态首版不检测，已拓宽（单/双引号假模板均验证红→绿）
+  - i18n 运行时测试：加载真实 static/i18n.js（最小桩），缺失键回退 key 本身非 undefined（中英各一次）、真实键中英双语各自渲染、setI18nLang 持久化——6/6 checks
+- **issue #110 收尾：stub_integration_tests 7 用例迁移到 spawn_test_server_on_free_port**——version_endpoint_with_stub_ai 实测撞跨 binary 端口竞态（#217 的预留诊断按设计正确响亮失败），迁移消除竞态；dead AI 桩改持有 listener（never-responds 形态）。（[#222](https://github.com/jsshwqz/innoforge/pull/222)）
+
+---
 ## [v0.9.45] - 2026-11-14
 
 ### 新增 / Added
