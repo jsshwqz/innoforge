@@ -415,12 +415,10 @@ impl AiClient {
                 .timeout(Duration::from_secs(provider_http_timeout_secs()))
                 .no_proxy()
                 .build()
-                .unwrap_or_else(|_| {
-                    Client::builder()
-                        .no_proxy()
-                        .build()
-                        .unwrap_or_else(|_| Client::new())
-                }),
+                // issue #55 同族：兜底禁止静默退回无超时客户端。no_proxy 是刻意的
+                // （AI 网关常在本机，系统代理会劫持 localhost 路由），builder 失败
+                // 属进程级故障（TLS 后端初始化），expect 明确失败。
+                .expect("AI 上游客户端构建失败（TLS 后端初始化）——禁止静默退回无超时客户端，见 issue #55"),
             primary: AiProvider {
                 name: "primary".to_string(),
                 base_url: base_url.to_string(),
@@ -467,7 +465,9 @@ impl AiClient {
             .pool_idle_timeout(Duration::from_secs(90))
             .no_proxy()
             .build()
-            .unwrap_or_else(|_| Client::new());
+            .expect(
+                "AI 上游客户端构建失败（TLS 后端初始化）——禁止静默退回无超时客户端，见 issue #55",
+            );
         new
     }
 

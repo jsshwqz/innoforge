@@ -151,7 +151,7 @@
 | 119 | DELETE | `/api/idea/:id/memory/:entry_id` | `id`, `entry_id` | — | — | JSON（§119） | `routes::api_idea_memory_delete` | `src/routes/idea.rs:2399` |
 | 120 | GET | `/api/ipc/tree` | — | — | — | JSON（§120） | `routes::api_ipc_tree` | `src/routes/ipc.rs:22` |
 | 121 | GET | `/api/ipc/:code/patents` | `code` | — | — | JSON（§121） | `routes::api_ipc_patents` | `src/routes/ipc.rs:122` |
-| 122 | POST | `/api/patents/import` | — | `ImportRequest` | — | JSON（§122） | `routes::api_import_patents` | `src/routes/settings.rs:804` |
+| 122 | POST | `/api/patents/import` | — | `ImportRequest` | — | JSON（§122） | `routes::api_import_patents` | `src/routes/settings.rs:810` |
 | 123 | GET / POST | `/api/collections` | — | POST 任意 JSON（§123） | — | JSON（§123） | `routes::api_list_collections`<br>`routes::api_create_collection` | `src/routes/collections.rs:28`<br>`src/routes/collections.rs:8` |
 | 124 | DELETE | `/api/collections/:id` | `id` | — | — | JSON（§124） | `routes::api_delete_collection` | `src/routes/collections.rs:49` |
 | 125 | GET | `/api/collections/:id/patents` | `id` | — | — | JSON（§125） | `routes::api_get_collection_patents` | `src/routes/collections.rs:92` |
@@ -1139,7 +1139,7 @@
 
 ### §122 POST `/api/patents/import`
 
-- 源码：`src/routes/settings.rs:804`
+- 源码：`src/routes/settings.rs:810`
 - 请求体：`ImportRequest`（字段见上文类型表）
 - 响应顶层键：`imported`、`status`
 - `status` 取值：ok

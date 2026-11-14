@@ -752,7 +752,13 @@ pub async fn api_serpapi_balance(State(s): State<AppState>) -> Json<serde_json::
         let url = format!("https://serpapi.com/account.json?api_key={}", key);
         let (tx, rx) = std::sync::mpsc::channel::<Result<serde_json::Value, String>>();
         std::thread::spawn(move || {
-            let client = reqwest::blocking::Client::new();
+            // errors.md #74 纪律：blocking 客户端挂住会泄漏线程（通道等待方有
+            // recv_timeout 兜底，但线程本身会一直卡着），显式 15s 上限。
+            let client = reqwest::blocking::Client::builder()
+                .connect_timeout(std::time::Duration::from_millis(500))
+                .timeout(std::time::Duration::from_secs(15))
+                .build()
+                .expect("SerpAPI 余额检查客户端构建失败——见 issue #55");
             let result = client
                 .get(&url)
                 .send()
