@@ -52,15 +52,14 @@ fn handle_stub(stream: &mut TcpStream) {
 }
 
 /// Helper: spawn a test server with AI pointing at `ai_port`.
-fn start_server(server_port: u16, ai_port: u16) -> common::TestServer {
+// issue #110：端口分配/预留/重试收口到 spawn_test_server_on_free_port，
+// 调用方改用 server.port 取实际端口（free_port+drop 的跨 binary 竞态已实测假红）。
+fn start_server(ai_port: u16) -> common::TestServer {
     let ai_url = format!("http://127.0.0.1:{}", ai_port);
-    spawn_test_server(
-        server_port,
-        &[
-            ("AI_BASE_URL", &ai_url),
-            ("AI_API_KEY", "test-key-not-real"),
-        ],
-    )
+    common::spawn_test_server_on_free_port(&[
+        ("AI_BASE_URL", &ai_url),
+        ("AI_API_KEY", "test-key-not-real"),
+    ])
 }
 
 // ── Stub response correctness ──
@@ -133,14 +132,13 @@ fn stub_unknown_endpoint_returns_ok() {
 /// Verify the server starts and serves pages when using the stub as AI backend.
 #[test]
 fn server_serves_pages_with_stub_ai() {
-    let server_port = free_port();
     let (ai_port, _stub) = start_stub();
 
-    let server = start_server(server_port, ai_port);
+    let server = start_server(ai_port);
 
     // Key pages must be reachable
     for path in &["/", "/idea", "/search", "/compare"] {
-        let resp = reqwest::blocking::get(format!("http://127.0.0.1:{}{}", server_port, path))
+        let resp = reqwest::blocking::get(format!("http://127.0.0.1:{}{}", server.port, path))
             .expect("page must respond");
         assert!(
             resp.status().is_success(),
@@ -156,12 +154,11 @@ fn server_serves_pages_with_stub_ai() {
 /// Verify the /api/version endpoint returns correct version info.
 #[test]
 fn version_endpoint_with_stub_ai() {
-    let server_port = free_port();
     let (ai_port, _stub) = start_stub();
 
-    let server = start_server(server_port, ai_port);
+    let server = start_server(ai_port);
 
-    let resp = reqwest::blocking::get(format!("http://127.0.0.1:{}/api/version", server_port))
+    let resp = reqwest::blocking::get(format!("http://127.0.0.1:{}/api/version", server.port))
         .expect("version endpoint must respond");
     assert!(resp.status().is_success());
     let json: serde_json::Value = resp.json().expect("valid JSON");
@@ -178,10 +175,9 @@ fn version_endpoint_with_stub_ai() {
 /// Verify the server doesn't crash on malformed AI request body.
 #[test]
 fn malformed_ai_request_does_not_crash() {
-    let server_port = free_port();
     let (ai_port, _stub) = start_stub();
 
-    let server = start_server(server_port, ai_port);
+    let server = start_server(ai_port);
 
     let client = reqwest::blocking::Client::new();
 
@@ -189,7 +185,7 @@ fn malformed_ai_request_does_not_crash() {
     let resp = client
         .post(format!(
             "http://127.0.0.1:{}/api/ai/office-action-response",
-            server_port
+            server.port
         ))
         .header("Content-Type", "application/json")
         .body(r#"this is not valid json"#)
@@ -212,7 +208,7 @@ fn malformed_ai_request_does_not_crash() {
     }
 
     // Server must still be alive after the malformed request
-    let alive = reqwest::blocking::get(format!("http://127.0.0.1:{}/api/version", server_port))
+    let alive = reqwest::blocking::get(format!("http://127.0.0.1:{}/api/version", server.port))
         .map(|r| r.status().is_success())
         .unwrap_or(false);
     assert!(alive, "server must still respond after malformed request");
@@ -223,16 +219,15 @@ fn malformed_ai_request_does_not_crash() {
 /// Verify the server handles empty request body gracefully.
 #[test]
 fn empty_ai_request_does_not_crash() {
-    let server_port = free_port();
     let (ai_port, _stub) = start_stub();
 
-    let server = start_server(server_port, ai_port);
+    let server = start_server(ai_port);
 
     let client = reqwest::blocking::Client::new();
     let resp = client
         .post(format!(
             "http://127.0.0.1:{}/api/ai/office-action-response",
-            server_port
+            server.port
         ))
         .header("Content-Type", "application/json")
         .body("")
@@ -291,10 +286,10 @@ fn stub_handles_concurrent_requests() {
 /// Verify the server handles multiple concurrent page requests.
 #[test]
 fn server_handles_concurrent_page_requests() {
-    let server_port = free_port();
     let (ai_port, _stub) = start_stub();
 
-    let server = start_server(server_port, ai_port);
+    let server = start_server(ai_port);
+    let server_port = server.port;
 
     let mut handles = Vec::new();
     for _ in 0..4 {
@@ -318,10 +313,10 @@ fn server_handles_concurrent_page_requests() {
 /// Verify the server starts and serves pages even when AI is completely unreachable.
 #[test]
 fn server_serves_pages_without_ai() {
-    let server_port = free_port();
     let dead_ai_port = free_port(); // nothing listening here
 
-    let server = start_server(server_port, dead_ai_port);
+    let server = start_server(dead_ai_port);
+    let server_port = server.port;
 
     // Pages must still render
     let resp = reqwest::blocking::get(format!("http://127.0.0.1:{}/", server_port))
