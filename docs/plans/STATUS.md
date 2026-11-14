@@ -14,6 +14,12 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-11-14 — **AI 后端挂死降级应答回归测试 + 兜底/裸客户端清零**（issue #30 部分收口，PR #220）
+
+- **状态 / Status**: 🚧 PR 等 CI
+- **实现**: never-responds 回归测试（accept 后持有连接永不回复 → AI 指向死桩 INNOFORGE_AI_HTTP_TIMEOUT_SECS=5 → 断言 2xx+JSON+逐角色「立论失败」降级标记+60s 内完成）；client.rs 两处嵌套兜底链/search.rs 步骤客户端/settings.rs blocking 裸客户端 expect 化或补超时；守卫拓宽三种形态（短形态 unwrap_or_else/裸 Client::new/blocking 裸客户端）。
+- **验证**: 全量 1179 passed / 0 failed；never-responds 测试实测 68s 通过（3 轮 × 5s 超时 + 启动）。
+
 ### 2026-11-14 — **issue #55 收口：上游客户端兜底 expect 化；issue #110 端口预留+归因诊断**
 
 - **状态 / Status**: 🚧 PR 等 CI（#216 / #217）

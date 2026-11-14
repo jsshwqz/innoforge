@@ -132,7 +132,7 @@ pub async fn search_web(ctx: &mut PipelineContext, serpapi_key: &str, db: &Datab
     let client = Client::builder()
         .timeout(Duration::from_secs(SEARCH_UPSTREAM_TIMEOUT_SECS))
         .build()
-        .unwrap_or_else(|_| Client::new());
+        .expect("搜索步骤上游客户端构建失败——禁止静默退回无超时客户端，见 issue #55");
     let mut all_results = Vec::new();
     let mut seen_urls: HashSet<String> = HashSet::new();
 
