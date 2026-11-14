@@ -34,6 +34,13 @@
 - **issue #110（P3）**: `spawn_test_server_with_timeout` spawn 前预留端口 + 就绪失败归因诊断（端口被抢 vs 子进程自亡，分别报）；新入口 `spawn_test_server_on_free_port`（预留/重试/诊断收在一处）；负控 A 落 test（端口被占 → 立即 `port unavailable`）；OAuth 测试迁移到新入口（删 find_bindable_port 重复实现）。
 - **验证**: 全量 1178 passed / 0 failed（含 3 件新测试）；fmt/clippy(--all-targets) 零告警。
 
+### 2026-11-14 — **#56 守卫收口（遍历化+双引号拓宽+i18n 运行时）+ #110 stub 迁移**（PR #222）
+
+- **状态 / Status**: 🚧 PR 等 CI
+- **#56 三条全落地**: 守卫遍历化+数量交叉断言；负向验证真跑（单引号红/绿 ✓，**且抓出双引号形态盲区**——拓宽后双引号红/绿 ✓）；i18n 运行时测试（真实 i18n.js + 最小桩，6 checks：缺失键回退/双语渲染/持久化）。
+- **#110 收尾**: stub_integration_tests 7 用例迁移到 spawn_test_server_on_free_port（version_endpoint_with_stub_ai 实测撞跨 binary 端口竞态，#217 预留诊断正确响亮失败——迁移消除竞态）。
+- **验证**: 全量 1183 passed / 0 failed。
+
 ### 2026-11-12 — **AI 搜索 P3：证据出参+「为什么推荐」折叠行（队列#2 收官）**（PR #215，→ v0.9.42）
 
 - **状态 / Status**: 🚧 PR 等 CI
