@@ -40,11 +40,11 @@
 | 8 | GET | `/api/oa/deadline-table` | — | — | — | JSON（§8） | `crate::oa_deadline::deadline_table` | `src/oa_deadline.rs:158` |
 | 9 | GET | `/api/oa/compute-deadline` | — | — | — | JSON（§9） | `crate::oa_deadline::compute_deadline_api` | `src/oa_deadline.rs:176` |
 | 10 | GET | `/api/settings` | — | — | — | JSON（§10） | `routes::api_get_settings` | `src/routes/settings.rs:78` |
-| 11 | POST | `/api/settings/cad` | — | `CadSettingsRequest` | — | JSON（§11） | `routes::api_save_cad_settings` | `src/routes/settings.rs:196` |
-| 12 | POST | `/api/settings/search-agent` | — | 任意 JSON（§12） | — | JSON（§12） | `routes::api_save_search_agent_settings` | `src/routes/settings.rs:167` |
-| 13 | POST | `/api/settings/serpapi` | — | 任意 JSON（§13） | — | JSON（§13） | `routes::api_save_serpapi` | `src/routes/settings.rs:470` |
-| 14 | POST | `/api/settings/ai` | — | 任意 JSON（§14） | — | JSON（§14） | `routes::api_save_ai` | `src/routes/settings.rs:532` |
-| 15 | GET | `/api/settings/serpapi/balance` | — | — | — | JSON（§15） | `routes::api_serpapi_balance` | `src/routes/settings.rs:742` |
+| 11 | POST | `/api/settings/cad` | — | `CadSettingsRequest` | — | JSON（§11） | `routes::api_save_cad_settings` | `src/routes/settings.rs:198` |
+| 12 | POST | `/api/settings/search-agent` | — | 任意 JSON（§12） | — | JSON（§12） | `routes::api_save_search_agent_settings` | `src/routes/settings.rs:169` |
+| 13 | POST | `/api/settings/serpapi` | — | 任意 JSON（§13） | — | JSON（§13） | `routes::api_save_serpapi` | `src/routes/settings.rs:472` |
+| 14 | POST | `/api/settings/ai` | — | 任意 JSON（§14） | — | JSON（§14） | `routes::api_save_ai` | `src/routes/settings.rs:534` |
+| 15 | GET | `/api/settings/serpapi/balance` | — | — | — | JSON（§15） | `routes::api_serpapi_balance` | `src/routes/settings.rs:744` |
 | 16 | GET | `/api/chat/:session_key` | `session_key` | — | `ChatPagination` | JSON（§16） | `routes::api_chat_get_messages` | `src/routes/chat.rs:21` |
 | 17 | POST | `/api/chat/:session_key/save` | `session_key` | 任意 JSON（§17） | — | JSON（§17） | `routes::api_chat_save_message` | `src/routes/chat.rs:53` |
 | 18 | POST | `/api/chat/:session_key/delete` | `session_key` | — | — | JSON（§18） | `routes::api_chat_delete_messages` | `src/routes/chat.rs:90` |
@@ -59,7 +59,7 @@
 | 27 | GET | `/api/patent/enrich/:id` | `id` | — | — | JSON（§27） | `routes::api_enrich_patent` | `src/routes/patent.rs:35` |
 | 28 | GET | `/api/patent/enrich-free/:id` | `id` | — | — | JSON（§28） | `routes::api_enrich_patent_free` | `src/routes/patent.rs:247` |
 | 29 | GET | `/api/patent/pdf/:id` | `id` | — | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_patent_pdf` | `src/routes/patent.rs:679` |
-| 30 | POST | `/api/patent/pdf/extract-text` | — | — | — | JSON（§30） | `routes::api_patent_pdf_extract_text` | `src/routes/upload.rs:1107` |
+| 30 | POST | `/api/patent/pdf/extract-text` | — | — | — | JSON（§30） | `routes::api_patent_pdf_extract_text` | `src/routes/upload.rs:1139` |
 | 31 | GET | `/api/patent/image-proxy` | — | — | 任意键值对（§31） | HTTP 响应（动态，状态码/正文见源码） | `routes::api_patent_image_proxy` | `src/routes/patent.rs:1002` |
 | 32 | GET | `/api/patent/lookup/:number` | `number` | — | 任意键值对（§32） | JSON（§32） | `routes::api_patent_lookup` | `src/routes/patent.rs:282` |
 | 33 | POST | `/api/patent/lookup-or-fetch` | — | 任意 JSON（§33） | — | JSON（§33） | `routes::api_patent_lookup_and_fetch` | `src/routes/patent.rs:453` |
@@ -151,7 +151,7 @@
 | 119 | DELETE | `/api/idea/:id/memory/:entry_id` | `id`, `entry_id` | — | — | JSON（§119） | `routes::api_idea_memory_delete` | `src/routes/idea.rs:2399` |
 | 120 | GET | `/api/ipc/tree` | — | — | — | JSON（§120） | `routes::api_ipc_tree` | `src/routes/ipc.rs:22` |
 | 121 | GET | `/api/ipc/:code/patents` | `code` | — | — | JSON（§121） | `routes::api_ipc_patents` | `src/routes/ipc.rs:122` |
-| 122 | POST | `/api/patents/import` | — | `ImportRequest` | — | JSON（§122） | `routes::api_import_patents` | `src/routes/settings.rs:810` |
+| 122 | POST | `/api/patents/import` | — | `ImportRequest` | — | JSON（§122） | `routes::api_import_patents` | `src/routes/settings.rs:812` |
 | 123 | GET / POST | `/api/collections` | — | POST 任意 JSON（§123） | — | JSON（§123） | `routes::api_list_collections`<br>`routes::api_create_collection` | `src/routes/collections.rs:28`<br>`src/routes/collections.rs:8` |
 | 124 | DELETE | `/api/collections/:id` | `id` | — | — | JSON（§124） | `routes::api_delete_collection` | `src/routes/collections.rs:49` |
 | 125 | GET | `/api/collections/:id/patents` | `id` | — | — | JSON（§125） | `routes::api_get_collection_patents` | `src/routes/collections.rs:92` |
@@ -161,9 +161,9 @@
 | 129 | DELETE | `/api/patents/:id/tags/:tag` | `id`, `tag` | — | — | JSON（§129） | `routes::api_remove_tag` | `src/routes/collections.rs:118` |
 | 130 | GET | `/api/patents/:id/collections` | `id` | — | — | JSON（§130） | `routes::api_get_patent_collections` | `src/routes/collections.rs:151` |
 | 131 | GET | `/api/tags` | — | — | — | JSON（§131） | `routes::api_list_all_tags` | `src/routes/collections.rs:138` |
-| 132 | POST | `/api/upload/compare` | — | — | — | JSON（§132） | `routes::api_upload_compare` | `src/routes/upload.rs:161` |
-| 133 | POST | `/api/upload/extract` | — | — | — | JSON（§133） | `routes::api_upload_extract` | `src/routes/upload.rs:339` |
-| 134 | POST | `/api/upload/pdf-store` | — | — | — | JSON（§134） | `routes::api_upload_pdf_store` | `src/routes/upload.rs:96` |
+| 132 | POST | `/api/upload/compare` | — | — | — | JSON（§132） | `routes::api_upload_compare` | `src/routes/upload.rs:192` |
+| 133 | POST | `/api/upload/extract` | — | — | — | JSON（§133） | `routes::api_upload_extract` | `src/routes/upload.rs:370` |
+| 134 | POST | `/api/upload/pdf-store` | — | — | — | JSON（§134） | `routes::api_upload_pdf_store` | `src/routes/upload.rs:127` |
 
 ## 请求 / 查询类型字段
 
@@ -483,39 +483,39 @@
 ### §10 GET `/api/settings`
 
 - 源码：`src/routes/settings.rs:78`
-- 响应顶层键：`ai_api_key`、`ai_api_key_anthropic`、`ai_api_key_configured`、`ai_api_key_deepseek`、`ai_api_key_gemini`、`ai_api_key_openai`、`ai_api_key_openrouter`、`ai_api_key_qwen`、`ai_api_key_sensetime`、`ai_api_key_xiaomi`、`ai_api_key_zhipu`、`ai_base_url`、`ai_model`、`ai_model_expert`、`aioncad_workspace`、`epo_configured`、`epo_key`、`epo_key_configured`、`epo_secret`、`epo_secret_configured`、`freecad_auto_start`、`freecad_platform_supported`、`gemini_cli_available`、`gemini_cli_enabled`、`gemini_cli_path`、`google_auth_mode`、`google_client_id`、`google_client_id_set`、`google_client_secret_set`、`google_oauth_connected`、`is_ollama`、`search_llm_daily_budget`、`search_rerank_enabled`、`serpapi_key_configured`、`serpapi_keys`
+- 响应顶层键：`ai_api_key`、`ai_api_key_anthropic`、`ai_api_key_configured`、`ai_api_key_deepseek`、`ai_api_key_gemini`、`ai_api_key_openai`、`ai_api_key_openrouter`、`ai_api_key_qwen`、`ai_api_key_sensetime`、`ai_api_key_xiaomi`、`ai_api_key_zhipu`、`ai_base_url`、`ai_model`、`ai_model_expert`、`aioncad_workspace`、`epo_configured`、`epo_key`、`epo_key_configured`、`epo_secret`、`epo_secret_configured`、`freecad_auto_start`、`freecad_platform_supported`、`gemini_cli_available`、`gemini_cli_enabled`、`gemini_cli_path`、`google_auth_mode`、`google_client_id`、`google_client_id_set`、`google_client_secret_set`、`google_oauth_connected`、`is_ollama`、`search_llm_daily_budget`、`search_rerank_enabled`、`serpapi_key_configured`、`serpapi_keys`、`umi_ocr_base_url`
 
 ### §11 POST `/api/settings/cad`
 
-- 源码：`src/routes/settings.rs:196`
+- 源码：`src/routes/settings.rs:198`
 - 请求体：`CadSettingsRequest`（字段见上文类型表）
 - 响应顶层键：`code`、`status`
 - `status` 取值：error / ok
 
 ### §12 POST `/api/settings/search-agent`
 
-- 源码：`src/routes/settings.rs:167`
+- 源码：`src/routes/settings.rs:169`
 - 读取的请求键：`daily_budget`、`rerank_enabled`
 - 响应顶层键：`code`、`daily_budget`、`rerank_enabled`、`status`
 - `status` 取值：error / ok
 
 ### §13 POST `/api/settings/serpapi`
 
-- 源码：`src/routes/settings.rs:470`
+- 源码：`src/routes/settings.rs:472`
 - 读取的请求键：`api_keys`、`epo_key`、`epo_secret`
 - 响应顶层键：`message`、`status`
 - `status` 取值：error / ok
 
 ### §14 POST `/api/settings/ai`
 
-- 源码：`src/routes/settings.rs:532`
+- 源码：`src/routes/settings.rs:534`
 - 读取的请求键：`ai_model_expert`、`api_key`、`base_url`、`gemini_cli_enabled`、`google_client_id`、`google_client_secret`、`model`
 - 响应顶层键：`message`、`status`
 - `status` 取值：error / ok
 
 ### §15 GET `/api/settings/serpapi/balance`
 
-- 源码：`src/routes/settings.rs:742`
+- 源码：`src/routes/settings.rs:744`
 - 响应顶层键：`key_count`、`message`、`plan_name`、`remaining`、`searches_per_month`、`status`、`this_month_usage`、`total_usage`
 - `status` 取值：error / ok
 
@@ -584,7 +584,7 @@
 
 ### §30 POST `/api/patent/pdf/extract-text`
 
-- 源码：`src/routes/upload.rs:1107`
+- 源码：`src/routes/upload.rs:1139`
 - 响应顶层键：`char_count`、`error`、`full_text`、`method`、`page`、`page_count`、`pages`、`status`、`text`、`total_chars`
 - `status` 取值：ok
 
@@ -1139,7 +1139,7 @@
 
 ### §122 POST `/api/patents/import`
 
-- 源码：`src/routes/settings.rs:810`
+- 源码：`src/routes/settings.rs:812`
 - 请求体：`ImportRequest`（字段见上文类型表）
 - 响应顶层键：`imported`、`status`
 - `status` 取值：ok
@@ -1204,17 +1204,17 @@
 
 ### §132 POST `/api/upload/compare`
 
-- 源码：`src/routes/upload.rs:161`
+- 源码：`src/routes/upload.rs:192`
 - 响应顶层键：`analysis`、`content_length`、`error`、`file_type`、`success`
 
 ### §133 POST `/api/upload/extract`
 
-- 源码：`src/routes/upload.rs:339`
+- 源码：`src/routes/upload.rs:370`
 - 响应顶层键：`char_length`、`error`、`file_type`、`length`、`text`、`truncated`
 
 ### §134 POST `/api/upload/pdf-store`
 
-- 源码：`src/routes/upload.rs:96`
+- 源码：`src/routes/upload.rs:127`
 - 响应顶层键：`filename`、`message`、`size`、`status`、`url`
 - `status` 取值：error / ok
 
