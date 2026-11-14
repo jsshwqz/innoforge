@@ -13,7 +13,6 @@
 
 mod common;
 
-use common::spawn_test_server_on_free_port;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 
