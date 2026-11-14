@@ -313,7 +313,20 @@ fn server_handles_concurrent_page_requests() {
 /// Verify the server starts and serves pages even when AI is completely unreachable.
 #[test]
 fn server_serves_pages_without_ai() {
-    let dead_ai_port = free_port(); // nothing listening here
+    // dead AI：bind :0 拿端口后**持有** listener（issue #110 同法——不 drop，
+    // 保证它真的在监听，连接能建立但永远不会得到响应）
+    let dead_ai_listener =
+        std::net::TcpListener::bind("127.0.0.1:0").expect("dead ai listener must bind");
+    let dead_ai_port = dead_ai_listener.local_addr().expect("addr").port();
+    std::thread::spawn(move || {
+        for stream in dead_ai_listener.incoming().flatten() {
+            // 持有连接不回复——正是 #30 的 never-responds 形态
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(60));
+                drop(stream);
+            });
+        }
+    });
 
     let server = start_server(dead_ai_port);
     let server_port = server.port;
