@@ -8,13 +8,13 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ### 修复 / Fixed
 
-- **AI 后端挂死时降级应答回归测试落地（issue #30 部分收口）**：never-responds 桩（accept 后持有连接永不回复，比 RST 更阴险——只能靠客户端超时脱身）+ AI 指向死桩（`INNOFORGE_AI_HTTP_TIMEOUT_SECS=5` 压超时）→ 断言 2xx + 合法 JSON + 逐角色「立论失败」降级标记 + 60s 内完成，不连接级失败不无限挂起。实测 68s（3 轮 × 5s 超时 + 服务器启动）。（[#220](https://github.com/jsshwqz/innoforge/pull/220)）
-- **兜底/裸客户端清零（#55 守卫拓宽后审计出的 4 处）**：client.rs with_config/clone_with_timeout 两处嵌套兜底链 expect 化（no_proxy 刻意防网关被系统代理劫持；builder 失败属进程级故障）；pipeline/steps/search.rs 搜索步骤客户端 expect 化；settings.rs SerpAPI 余额检查 blocking 裸客户端补 500ms+15s（独立线程挂住会泄漏线程）。（[#220](https://github.com/jsshwqz/innoforge/pull/220)）
+- **AI 后端挂死时降级应答回归测试落地（可选后端断连专项部分收口）**：never-responds 桩（accept 后持有连接永不回复，比 RST 更阴险——只能靠客户端超时脱身）+ AI 指向死桩（`INNOFORGE_AI_HTTP_TIMEOUT_SECS=5` 压超时）→ 断言 2xx + 合法 JSON + 逐角色「立论失败」降级标记 + 60s 内完成，不连接级失败不无限挂起。实测 68s（3 轮 × 5s 超时 + 服务器启动）。（[#220](https://github.com/jsshwqz/innoforge/pull/220)）
+- **兜底/裸客户端清零（第 55 号工单守卫拓宽后审计出的 4 处）**：client.rs with_config/clone_with_timeout 两处嵌套兜底链 expect 化（no_proxy 刻意防网关被系统代理劫持；builder 失败属进程级故障）；pipeline/steps/search.rs 搜索步骤客户端 expect 化；settings.rs SerpAPI 余额检查 blocking 裸客户端补 500ms+15s（独立线程挂住会泄漏线程）。（[#220](https://github.com/jsshwqz/innoforge/pull/220)）
 - **守卫拓宽三种形态**：短形态 `unwrap_or_else(|_| Client::new())` / 裸 `Client::new()` / `reqwest::blocking::Client::new()` 全部禁（首版只抓 reqwest 全限定形态漏了三种——审计的价值正在于此）。（[#220](https://github.com/jsshwqz/innoforge/pull/220)）
 
 ### 说明
 
-- issue #30 四项要求对账见 PR 描述：①never-responds 测试在本地完整复现该条件（强于已灭失的部署日志）②回归测试 ✓ ③全出站探测超时审计 ✓（cad v0.9.37、firecrawl/搜索源 15s+500ms、AI 分级 60/180/300、OCR 15s、MCP 60s）④降级语义由 v0.9.37-#40 增量实现，本 PR 为守卫固化。
+- 可选后端断连专项的四项要求对账见 PR 描述：①never-responds 测试在本地完整复现该条件（强于已灭失的部署日志）②回归测试 ✓ ③全出站探测超时审计 ✓（cad v0.9.37、firecrawl/搜索源 15s+500ms、AI 分级 60/180/300、OCR 15s、MCP 60s）④降级语义由 v0.9.37-#40 增量实现，本 PR 为守卫固化。
 
 ---
 ## [v0.9.43] - 2026-11-14
