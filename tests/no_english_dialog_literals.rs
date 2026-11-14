@@ -4,25 +4,62 @@
 //! The guard counts `alert('…')` / `confirm('…')` calls where the argument
 //! is a string literal that contains NO Chinese characters and is NOT
 //! wrapped in t(). The baseline after #16 fix is 0.
+//!
+//! #56（2026-11-14）：文件集合从写死的 8 条 `include_str!` 改为**运行时遍历
+//! `templates/`**（照 no_case_data_in_repo 的范例），并交叉断言「发现的文件数
+//! == templates/ 下 *.html 的实际数」——防止遍历被写死或过滤条件放宽导致
+//! 新增页面静默漏检。
 
 #[cfg(test)]
 mod tests {
-    static TEMPLATES: &[(&str, &str)] = &[
-        ("ai.html", include_str!("../templates/ai.html")),
-        ("compare.html", include_str!("../templates/compare.html")),
-        ("idea.html", include_str!("../templates/idea.html")),
-        ("index.html", include_str!("../templates/index.html")),
-        (
-            "office_action_response.html",
-            include_str!("../templates/office_action_response.html"),
-        ),
-        (
-            "patent_detail.html",
-            include_str!("../templates/patent_detail.html"),
-        ),
-        ("search.html", include_str!("../templates/search.html")),
-        ("settings.html", include_str!("../templates/settings.html")),
-    ];
+    // #56：运行时遍历 templates/ 得到文件集合（不再写死 include_str! 清单）。
+    // 返回 (文件名, 内容)，按文件名排序保证确定性。
+    fn discover_templates() -> Vec<(String, String)> {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("templates");
+        let mut out = Vec::new();
+        let entries = std::fs::read_dir(&dir)
+            .unwrap_or_else(|e| panic!("templates/ 目录必须存在且可读: {} ({})", dir.display(), e));
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().map(|e| e == "html").unwrap_or(false) {
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let content = std::fs::read_to_string(&path).expect("templates/*.html 必须可读");
+                out.push((name, content));
+            }
+        }
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out
+    }
+
+    /// #56 交叉断言：遍历发现的文件数必须等于 templates/ 下 *.html 的实际数
+    /// （独立第二次统计），防止遍历被写死或过滤条件放宽导致静默漏检。
+    #[test]
+    fn discovered_template_count_matches_directory() {
+        let discovered = discover_templates();
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("templates");
+        let actual = std::fs::read_dir(&dir)
+            .expect("templates/ 目录必须存在")
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().map(|x| x == "html").unwrap_or(false))
+            .count();
+        assert_eq!(
+            discovered.len(),
+            actual,
+            "守卫发现的模板数（{}）必须等于 templates/ 下 *.html 实际数（{}）——             不一致说明遍历被写死或过滤条件被放宽（issue #56）",
+            discovered.len(),
+            actual
+        );
+        // 历史基线：2026-11-14 时点为 8 个页面；新增页面时本断言随 discover 自动覆盖，
+        // 无需改守卫（这正是 #56 要求的形态）。
+        assert!(
+            discovered.len() >= 8,
+            "页面数不应回退：{}",
+            discovered.len()
+        );
+    }
 
     // Check if a string contains Chinese characters
     fn has_chinese(s: &str) -> bool {
@@ -33,15 +70,21 @@ mod tests {
     /// arguments that contain no Chinese and are not wrapped in t().
     fn count_english_literals() -> Vec<String> {
         let mut violations = Vec::new();
-        for (name, content) in TEMPLATES {
+        for (name, content) in discover_templates() {
             // Search for alert(' and confirm(' patterns
-            for prefix in &["alert('", "confirm('"] {
+            // (prefix, closing quote) 双引号形态由 #56 负向验证暴露——首版只抓单引号
+            for (prefix, close) in &[
+                ("alert('", '\''),
+                ("confirm('", '\''),
+                ("alert(\"", '"'),
+                ("confirm(\"", '"'),
+            ] {
                 let mut search_start = 0;
                 while let Some(idx) = content[search_start..].find(prefix) {
                     let abs_idx = search_start + idx;
                     // Find the closing quote
                     let after_prefix = &content[abs_idx + prefix.len()..];
-                    if let Some(end) = after_prefix.find('\'') {
+                    if let Some(end) = after_prefix.find(*close) {
                         let literal = &after_prefix[..end];
                         // Check: no Chinese, not empty, not a t() call
                         if !literal.is_empty() && !has_chinese(literal) {
@@ -53,9 +96,10 @@ mod tests {
                             let trimmed = before.trim_end();
                             if !trimmed.ends_with("t(") {
                                 violations.push(format!(
-                                    "{}: {}('{}')",
+                                    "{}: {}({}{})",
                                     name,
                                     prefix.trim_end_matches('('),
+                                    close,
                                     literal
                                 ));
                             }
