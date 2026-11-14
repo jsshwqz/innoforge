@@ -14,7 +14,7 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ### 说明
 
-- 可选后端断连专项的四项要求对账见 PR 描述：①never-responds 测试在本地完整复现该条件（强于已灭失的部署日志）②回归测试 ✓ ③全出站探测超时审计 ✓（cad v0.9.37、firecrawl/搜索源 15s+500ms、AI 分级 60/180/300、OCR 15s、MCP 60s）④降级语义由 v0.9.37-#40 增量实现，本 PR 为守卫固化。
+- 可选后端断连专项的四项要求对账见 PR 描述：①never-responds 测试在本地完整复现该条件（强于已灭失的部署日志）②回归测试 ✓ ③全出站探测超时审计 ✓（cad v0.9.37、firecrawl/搜索源 15s+500ms、AI 分级 60/180/300、OCR 15s、MCP 60s）④降级语义由 v0.9.37 至 v0.9.40 增量实现，本 PR 为守卫固化。
 
 ---
 ## [v0.9.43] - 2026-11-14
