@@ -930,6 +930,7 @@ Response:
 | `INNOFORGE_PORT` | `3000` | HTTP 监听端口。更改后 OAuth 回调地址自动跟随。/ HTTP listen port. OAuth callback URL follows automatically. |
 | `INNOFORGE_OAUTH_CALLBACK_URL` | *(由 `INNOFORGE_PORT` 推导)* | Google OAuth 重定向 URI。设置后覆盖 `INNOFORGE_PORT` 推导的地址。必须与 Google Cloud Console 中登记的授权重定向 URI 逐字匹配。/ Google OAuth redirect URI. Overrides `INNOFORGE_PORT`-derived URL. Must match the authorized redirect URI in Google Cloud Console. |
 | `INNOFORGE_UPSTREAM_TIMEOUT_SECS` | `30` | 上游 HTTP 调用超时秒数（专利 API、Google OAuth、AI 模型探测）。/ Timeout in seconds for upstream HTTP calls. |
+| `UMI_OCR_BASE_URL` | `http://127.0.0.1:1224` | Umi-OCR 本地 OCR 服务地址（扫描版 PDF/图片 OCR）。装在其它机器或端口时覆盖（issue #33）。/ Umi-OCR local OCR service URL for scanned PDFs and image OCR. |
 
 ---
 

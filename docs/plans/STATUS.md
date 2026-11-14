@@ -14,6 +14,13 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-11-14 — **Umi-OCR 服务地址可配置（issue #33 收口）**（PR #221，→ v0.9.45）
+
+- **状态 / Status**: 🚧 PR 等 CI
+- **核对结论**: issue #33 第 1 条（OAuth 回调硬编码）已在先前修复中解决（oauth_callback_url 自实际端口推导 + INNOFORGE_OAUTH_CALLBACK_URL 覆盖 + main.rs 启动自检 + 非默认端口回归测试）；第 2 条（UMI-OCR 写死 1224）本次收口。
+- **实现**: resolve_umi_ocr_base_url（env UMI_OCR_BASE_URL 覆盖/去尾斜杠/空串钳制，纯函数 2 件测试）+ probe_addr_for 同源推导（TCP 探测不再探错对象）+ 错误信息带实际地址与配置指引 + GET /api/settings 回显；docs/API.md 环境变量表 + README 配置段/已知限制同步。
+- **验证**: 全量 1181 passed / 0 failed；fmt/clippy(--all-targets) 零告警。
+
 ### 2026-11-14 — **AI 后端挂死降级应答回归测试 + 兜底/裸客户端清零**（issue #30 部分收口，PR #220）
 
 - **状态 / Status**: 🚧 PR 等 CI

@@ -150,6 +150,8 @@ pub async fn api_get_settings(State(s): State<AppState>) -> Json<serde_json::Val
         "google_auth_mode": config.google_auth_mode,
         "search_rerank_enabled": search_rerank_enabled,
         "search_llm_daily_budget": search_llm_daily_budget,
+        // issue #33：Umi-OCR 地址可配置（env UMI_OCR_BASE_URL），回显解析后的实际值
+        "umi_ocr_base_url": crate::routes::upload::umi_ocr_base_url(),
         "gemini_cli_enabled": config.gemini_cli_enabled,
         "gemini_cli_available": !config.gemini_cli_path.is_empty(),
         "gemini_cli_path": config.gemini_cli_path,
