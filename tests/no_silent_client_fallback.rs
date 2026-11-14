@@ -19,6 +19,7 @@ use std::path::Path;
 ///    —— builder 失败后的静默兜底；
 /// 2. 裸 `Client::new()` / `reqwest::blocking::Client::new()`——无超时直连，
 ///    #30/#74 的失效形态。
+///
 /// 合法豁免：注释行（以 // 开头；文档与示例里的字面量不算）。
 const FORBIDDEN_PATTERNS: &[&str] = &[
     "unwrap_or_else(|_| Client::new())",
