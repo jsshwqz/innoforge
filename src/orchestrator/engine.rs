@@ -19,6 +19,8 @@ use std::time::Instant;
 
 pub struct Orchestrator {
     ai_client: AiClient,
+    /// 快模型通道（实验脚本自修复等结构化短任务）；None = 未配置/离线，跳过修复
+    ai_client_fast: Option<AiClient>,
     db: Arc<Database>,
     serpapi_key: String,
     quick_mode: bool,
@@ -29,12 +31,14 @@ pub struct Orchestrator {
 impl Orchestrator {
     pub fn new(
         ai_client: AiClient,
+        ai_client_fast: Option<AiClient>,
         db: Arc<Database>,
         serpapi_key: String,
         quick_mode: bool,
     ) -> Self {
         Self {
             ai_client,
+            ai_client_fast,
             db,
             serpapi_key,
             quick_mode,
@@ -349,7 +353,13 @@ impl Orchestrator {
                 result
             }
             PipelineStep::ExperimentValidation => {
-                steps::experiment::execute(ctx, &self.ai_client, &self.db).await
+                steps::experiment::execute(
+                    ctx,
+                    &self.ai_client,
+                    self.ai_client_fast.as_ref(),
+                    &self.db,
+                )
+                .await
             }
             PipelineStep::BuildClaimTree => {
                 steps::claim_tree::execute(ctx, &self.ai_client, &self.db).await
