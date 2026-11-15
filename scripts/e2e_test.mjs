@@ -7,7 +7,7 @@ const baseUrl = (process.env.INNOFORGE_E2E_BASE_URL || 'http://127.0.0.1:3000').
 const localAuthority = new URL(`${baseUrl}/`).host;
 // Single source of truth for expected pass count.
 // Do NOT duplicate this number elsewhere — parse the JSON output to verify.
-const expectedPasses = 87;
+const expectedPasses = 90;
 const failures = [];
 const assertions = [];   // every assertion recorded as {kind, name, ...}
 let passed = 0;
@@ -333,6 +333,73 @@ async function runPageMatrix(browser, pageErrors, requestFailures) {
     }
 
     return openedPages;
+}
+
+// ── issue #67 P1.1：首启引导回归 ──────────────────────────────────────────────
+// 合同（全新 INNOFORGE_HOME、未配置任何 provider 的服务端，即 CI 的启动形态）：
+//   ① AI 状态徽标 = ⚠️ 中性引导（「AI 未配置」或「未检测到服务」）且带「点击设置」
+//   ② 在线搜索徽标 = 「在线搜索未配置（可用本地库）」的如实提示
+//   ③ 两个徽标都是指向设置页的链接（可点击直达）
+// 若目标服务器已配置 AI/在线搜索（开发者本机常态），断言 ①② 转为 skip——
+// 合同只在未配置环境上强制，CI 的全新 checkout 恒满足该前提。
+async function checkFirstRunBanners(homePage) {
+    if (!homePage) {
+        fail('First-run guidance banners on home', `page=${baseUrl}/ missing_page_instance=true`);
+        return;
+    }
+    let configured = { ai: false, search: false };
+    try {
+        const settingsRes = await fetch(`${baseUrl}/api/settings`);
+        const settings = await settingsRes.json();
+        configured.search = Boolean(settings.serpapi_key_configured || settings.bing_api_key_configured || settings.lens_api_key_configured);
+        const modelsRes = await fetch(`${baseUrl}/api/ai/models`);
+        const models = await modelsRes.json();
+        configured.ai = (models.providers || []).some(p => p.status === 'ok' && (p.count || 0) > 0);
+    } catch (e) {
+        // 探测失败按未配置处理——下方断言会如实裁决
+    }
+    try {
+        await homePage.waitForFunction(() => {
+            const el = document.getElementById('status-ai');
+            return el && el.textContent.trim().length > 0;
+        }, { timeout: 15000 });
+    } catch (e) {
+        fail('First-run AI banner appears', `timeout waiting for #status-ai text: ${e.message}`);
+        return;
+    }
+    const banners = await homePage.evaluate(() => {
+        const ai = document.getElementById('status-ai');
+        const search = document.getElementById('status-search');
+        return {
+            aiText: ai ? ai.textContent.trim() : '',
+            aiHref: ai ? ai.getAttribute('href') : null,
+            searchText: search ? search.textContent.trim() : '',
+            searchHref: search ? search.getAttribute('href') : null,
+        };
+    });
+    requireCondition(
+        banners.aiHref === '/settings?from=/' && banners.searchHref === '/settings?from=/',
+        'First-run banners link to settings page',
+        `aiHref=${banners.aiHref} searchHref=${banners.searchHref}`
+    );
+    if (configured.ai) {
+        skip('First-run AI banner guides to settings', 'server has a working AI provider configured');
+    } else {
+        requireCondition(
+            /⚠️/.test(banners.aiText) && (banners.aiText.includes('AI 未配置') || banners.aiText.includes('未检测到服务')) && banners.aiText.includes('点击设置'),
+            'First-run AI banner guides to settings',
+            `aiText=${banners.aiText}`
+        );
+    }
+    if (configured.search) {
+        skip('First-run search banner states local fallback', 'server has online search configured');
+    } else {
+        requireCondition(
+            banners.searchText.includes('在线搜索未配置') && banners.searchText.includes('可用本地库'),
+            'First-run search banner states local fallback',
+            `searchText=${banners.searchText}`
+        );
+    }
 }
 
 // ── issue #7：按钮级回归 ───────────────────────────────────────────────────────
@@ -1157,6 +1224,8 @@ async function main() {
         });
 
         openedPages = await runPageMatrix(browser, pageErrors, requestFailures);
+        // issue #67 P1.1：首启引导横幅回归（CI 全新环境强制；已配置服务器自动降级为 skip）
+        await checkFirstRunBanners(openedPages.get('/'));
         const searchPage = openedPages.get('/search');
         if (searchPage) {
             await checkSearchLanguageFilter(searchPage);

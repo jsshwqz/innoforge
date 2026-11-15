@@ -28,6 +28,8 @@
 > 解压后直接运行主程序：Windows 双击 `innoforge-server.exe`，Linux / macOS 执行 `./innoforge-server`。程序会自动启动本地服务并打开浏览器 http://127.0.0.1:3000。无需安装数据库。
 > 若本机 `3000` 端口被系统占用/保留，可设置环境变量 `INNOFORGE_PORT`（如 `3900`）后启动。
 
+**首次使用三步**（issue #67）：① 运行 `innoforge-server` 打开首页 → ② 点首页顶部的「⚠️ AI 未配置 — 点击设置」横幅进设置页，填一个 OpenAI 兼容 Key（DeepSeek / 智谱 GLM / 通义 Qwen / Gemini / 商汤任选其一）并保存 → ③ 回到首页开始使用。未配置时首页会持续显示该提示横幅；不配 Key 也能用本地检索、收藏与导入。扫描版 PDF 需要 UMI-OCR（见「已知限制」）。
+
 ---
 
 ## 核心能力
