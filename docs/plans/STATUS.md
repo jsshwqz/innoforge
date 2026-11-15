@@ -16,7 +16,7 @@
 
 ### 2026-11-15 — **批次任务：CI 端口竞态修复 + AI 预设补齐 + LCS 滚动数组 + #67 首启引导与 99 组词条补全**
 
-- **状态 / Status**: 🚧 本地 6 commit，待推送等 CI
+- **状态 / Status**: 🚧 PR [#224](https://github.com/jsshwqz/innoforge/pull/224) 等 CI（main 分支保护 9 项必过检查拦截直推，改走 PR 原生合并保留 6 个 commit hash；外加 1 个 CHANGELOG 裸 #NN 改链接的 hygiene 修复 commit）
 - **开工声明**: ACK 2026-10-27 整顿令：整顿令窗口（至 11-14）已按其自身条款届满、主线闭环后按质量通道继续（见 2026-11-07 条）；本批为用户指定的批次任务（Batch 0 + Batch 3 局部），不属冻结类别。
 - **① CI Tests 假红修复（v0.9.46 main push run 43618022587）**: `tolerates_blackhole_ai_backend_no_empty_reply` 在 `tests/common/mod.rs` 预留 assert「port unavailable」假红（PR 重跑通过、main 复现的典型竞态）。**事实更正**：派单口径「环境变量测试加 Mutex」诊断有误——`port_alloc::free_port()` 内部本就有 Mutex 记账，真缺陷是黑洞/慢滴 stub 直接 `TcpListener::bind("127.0.0.1:0")` **绕过记账**，OS 把并行用例刚回收的端口号发给 stub，与另一用例 `free_port()` 拿到的服务器端口相撞。修复（`201b494`）：新增 `common::bind_stub_on_free_port()`（桩走记账分配器 + Windows 保留段 3 次重试），4 用例迁移到 `spawn_test_server_on_free_port`（#110 既定纪律）。本机 4/4 通过。
 - **② settings.html 模型预设补齐**（`4158e54`）: 智谱补 glm-5.3/glm-5.3-flash（官方现役，外部检索确认）；Gemini 摘除已停供的 2.5-flash/2.0 系列、换代 gemini-3.8-flash/gemini-flash-lite-latest（依据 STATUS 2026-11-08 CI 实况）；商汤补 glm-5.3-flash（商汤通道）；通义补 qwen4-max-preview/qwen3.7-plus（百炼官方文档确认）。模型下拉本就实时查 `/api/ai/models`，预设仅探测失败时回退，错项无实际风险。
