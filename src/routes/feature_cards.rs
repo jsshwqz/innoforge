@@ -258,9 +258,92 @@ fn classify_diff(a: &FeatureCard, b: &FeatureCard) -> (String, bool, String) {
     (diff_type.to_string(), novelty_significance, novelty_reason)
 }
 
+/// 滚动数组计算 LCS DP 的最后一行 / Final LCS DP row via a two-row rolling array
+///
+/// 只保留上一行与当前行两行（各 n+1 格），空间 O(n)。
+fn lcs_last_row(a: &[char], b: &[char]) -> Vec<u32> {
+    let n = b.len();
+    let mut prev = vec![0u32; n + 1];
+    let mut cur = vec![0u32; n + 1];
+    for &ca in a {
+        for j in 1..=n {
+            cur[j] = if ca == b[j - 1] {
+                prev[j - 1] + 1
+            } else {
+                prev[j].max(cur[j - 1])
+            };
+        }
+        std::mem::swap(&mut prev, &mut cur);
+        // 交换后 cur 持有旧行，下一轮每个格子都会被整行覆写（cur[0] 恒为 0），无需清零
+    }
+    prev
+}
+
+/// Hirschberg 分治：线性空间重建 LCS 编辑序列 / Linear-space LCS reconstruction
+///
+/// 输出顺序与旧全表回溯一致（从左到右）：'='（保留）/'-'（删除）/'+'（新增）。
+/// 平手时取最小分割点，保持稳定的输出取向。
+fn lcs_diff_ops(a: &[char], b: &[char], ops: &mut Vec<(char, char)>) {
+    if b.is_empty() {
+        for &ch in a {
+            ops.push(('-', ch));
+        }
+        return;
+    }
+    if a.is_empty() {
+        for &ch in b {
+            ops.push(('+', ch));
+        }
+        return;
+    }
+    if a.len() == 1 {
+        // 单字符基准：在 b 中找首个匹配，命中则 add+equal+add，否则全增再删
+        match b.iter().position(|&c| c == a[0]) {
+            Some(j) => {
+                for &c in &b[..j] {
+                    ops.push(('+', c));
+                }
+                ops.push(('=', a[0]));
+                for &c in &b[j + 1..] {
+                    ops.push(('+', c));
+                }
+            }
+            None => {
+                for &c in b {
+                    ops.push(('+', c));
+                }
+                ops.push(('-', a[0]));
+            }
+        }
+        return;
+    }
+    let mid = a.len() / 2;
+    let n = b.len();
+    let left = lcs_last_row(&a[..mid], b);
+    let a_tail_rev: Vec<char> = a[mid..].iter().rev().copied().collect();
+    let b_rev: Vec<char> = b.iter().rev().copied().collect();
+    let right = lcs_last_row(&a_tail_rev, &b_rev);
+    // 选分割点 k：最大化 left[k] + right[n-k]（LCS 分治的最优分割）
+    let mut best_k = 0usize;
+    let mut best_score = left[0] + right[n];
+    for k in 1..=n {
+        let s = left[k] + right[n - k];
+        if s > best_score {
+            best_score = s;
+            best_k = k;
+        }
+    }
+    lcs_diff_ops(&a[..mid], &b[..best_k], ops);
+    lcs_diff_ops(&a[mid..], &b[best_k..], ops);
+}
+
 /// 字符级差异提取 / Character-level diff extraction
 ///
-/// 基于最长公共子序列（LCS），输出增删操作列表
+/// 基于最长公共子序列（LCS），输出增删操作列表。
+///
+/// 空间优化（滚动数组）：DP 只保留两行，差异重建用 Hirschberg 分治线性空间完成，
+/// 整体空间 O(n)，不再分配完整 (m+1)×(n+1) 表——5000 字上限下旧实现约 100MB，
+/// 现在约 40KB。时间仍为 O(m·n)（分治带来约 2 倍常数）。
 fn diff_strings(a: &str, b: &str) -> Vec<serde_json::Value> {
     if a == b {
         return vec![json!({"type": "equal", "text": a})];
@@ -271,8 +354,7 @@ fn diff_strings(a: &str, b: &str) -> Vec<serde_json::Value> {
     let m = a_chars.len();
     let n = b_chars.len();
 
-    // LCS 表（空间优化：只保留两行）
-    // 对超长文本截断避免 O(m*n) 爆内存
+    // 对超长文本短路为整段替换，避免 O(m*n) 时间爆量（空间已是线性，仍按旧口径防御）
     if m > 5000 || n > 5000 {
         return vec![
             json!({"type": "remove", "text": a}),
@@ -280,44 +362,15 @@ fn diff_strings(a: &str, b: &str) -> Vec<serde_json::Value> {
         ];
     }
 
-    // 计算 LCS 表
-    let mut dp = vec![vec![0u32; n + 1]; m + 1];
-    for i in 1..=m {
-        for j in 1..=n {
-            dp[i][j] = if a_chars[i - 1] == b_chars[j - 1] {
-                dp[i - 1][j - 1] + 1
-            } else {
-                dp[i - 1][j].max(dp[i][j - 1])
-            };
-        }
-    }
+    // Hirschberg 分治重建差异：顺序产出 '='（保留）/'-'（删除）/'+'（新增）
+    let mut raw_ops: Vec<(char, char)> = Vec::new();
+    lcs_diff_ops(&a_chars, &b_chars, &mut raw_ops);
 
-    // 回溯生成差异
+    // 合并连续的同类操作
     let mut ops: Vec<serde_json::Value> = Vec::new();
-    let mut i = m;
-    let mut j = n;
     let mut buf_eq = String::new();
     let mut buf_rm = String::new();
     let mut buf_add = String::new();
-
-    // 先收集反向操作，最后翻转
-    let mut raw_ops: Vec<(char, char)> = Vec::new(); // ('=', ch), ('-', ch), ('+', ch)
-    while i > 0 || j > 0 {
-        if i > 0 && j > 0 && a_chars[i - 1] == b_chars[j - 1] {
-            raw_ops.push(('=', a_chars[i - 1]));
-            i -= 1;
-            j -= 1;
-        } else if j > 0 && (i == 0 || dp[i][j - 1] >= dp[i - 1][j]) {
-            raw_ops.push(('+', b_chars[j - 1]));
-            j -= 1;
-        } else {
-            raw_ops.push(('-', a_chars[i - 1]));
-            i -= 1;
-        }
-    }
-    raw_ops.reverse();
-
-    // 合并连续的同类操作
     let flush = |ops: &mut Vec<serde_json::Value>,
                  buf_eq: &mut String,
                  buf_rm: &mut String,
@@ -442,13 +495,51 @@ mod tests {
 
     #[test]
     fn test_diff_strings_long_text_truncation() {
-        // 超过 5000 字符时直接返回 remove + add（避免 O(m*n) 爆内存）
+        // 超过 5000 字符时直接返回 remove + add（避免 O(m*n) 爆时间）
         let long_a = "A".repeat(5001);
         let long_b = "B".repeat(5001);
         let ops = diff_strings(&long_a, &long_b);
         assert_eq!(ops.len(), 2);
         assert_eq!(ops[0]["type"], "remove");
         assert_eq!(ops[1]["type"], "add");
+    }
+
+    #[test]
+    fn test_diff_strings_lcs_length_classic() {
+        // 经典教材例：LCS("ABCBDAB", "BDCABA") = 4（如 BCBA / BDAB）。
+        // equal 段总字符数必须恰为 LCS 长度，锁定 Hirschberg 重建的最优性。
+        let ops = diff_strings("ABCBDAB", "BDCABA");
+        let equal_chars: usize = ops
+            .iter()
+            .filter(|o| o["type"] == "equal")
+            .map(|o| o["text"].as_str().unwrap().chars().count())
+            .sum();
+        assert_eq!(equal_chars, 4, "equal 段总字符数必须等于 LCS 长度");
+    }
+
+    #[test]
+    fn test_diff_strings_near_cap_no_shortcut() {
+        // 5000 字上限内不做整段替换捷径：微差长文本应产出 equal 主体 + 局部增删。
+        // 滚动数组后空间线性（旧全表实现此处约 100MB），长文本可安全计算。
+        let long_a = format!("X{}Y", "A".repeat(4998));
+        let long_b = format!("X{}Z", "A".repeat(4998));
+        assert_eq!(long_a.chars().count(), 5000);
+        let ops = diff_strings(&long_a, &long_b);
+        assert!(
+            ops.iter()
+                .any(|o| o["type"] == "remove" && o["text"] == "Y"),
+            "应包含 remove Y"
+        );
+        assert!(
+            ops.iter().any(|o| o["type"] == "add" && o["text"] == "Z"),
+            "应包含 add Z"
+        );
+        let equal_chars: usize = ops
+            .iter()
+            .filter(|o| o["type"] == "equal")
+            .map(|o| o["text"].as_str().unwrap().chars().count())
+            .sum();
+        assert_eq!(equal_chars, 4999, "X + 4998 个 A 应全部保留");
     }
 
     // ── classify_diff 测试 ──
