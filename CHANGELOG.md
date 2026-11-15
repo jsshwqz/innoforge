@@ -4,6 +4,23 @@
 All notable changes are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
+## [Unreleased]
+
+### 新增 / Added
+
+- **AI 服务商模型预设补齐（设置页）**：智谱补 GLM-5.3 / GLM-5.3-Flash（官方现役）；Gemini 换代为 gemini-3.8-flash / gemini-flash-lite-latest（gemini-2.5-flash 系列已停供新用户、gemini-flash-latest 别名退役，摘除失效项）；商汤通道补 GLM-5.3-Flash；通义千问补 Qwen4-Max-Preview / Qwen3.7-Plus。模型下拉本就自动实时查询 `/api/ai/models`，预设仅作探测失败时的回退。
+- **首启引导回归 + README「首次使用三步」**（issue [#67](https://github.com/jsshwqz/innoforge/issues/67) P1.1）：E2E 在未配置环境（CI 全新 checkout 形态）强制断言首页「⚠️ AI 未配置」「ℹ️ 在线搜索未配置（可用本地库）」两条横幅出现且可点击直达设置页；已配置的服务器自动降级为 skip，不产生本机假红。README 下载段补首次使用三步（运行 → 设置填 Key → 回首页）。
+
+### 修复 / Fixed
+
+- **CI Tests 假红（端口竞态，v0.9.46 main push 实测）**：黑洞/慢滴测试桩直接 `bind("127.0.0.1:0")` 绕过 `port_alloc` 已发出端口记账——OS 把并行用例刚回收的端口号发给桩，与另一用例的服务器端口相撞，`spawn_test_server_with_timeout` 的预留 assert 假红（PR 上重跑通过、main 上复现的典型竞态）。修复：新增 `tests/common::bind_stub_on_free_port()`（桩走记账分配器 + Windows 保留段自动重试），`stub_hanging_backend` 4 用例迁移到 `spawn_test_server_on_free_port` 预留重试入口（issue [#110](https://github.com/jsshwqz/innoforge/issues/110) 既定纪律：新测试一律用它）。
+
+### 改进 / Improved
+
+- **特征卡片差异比较内存优化（滚动数组）**：`routes/feature_cards.rs` 字符级 LCS 注释一直声称「只保留两行」但实际分配全量 (m+1)×(n+1) 表（5000 字上限下 ≈100MB）；改为真·两行滚动 DP + Hirschberg 分治线性空间重建（O(n) ≈40KB，时间仍 O(m·n)），输出操作序列与旧实现同序；新增 LCS 最优性锁测试与 5000 字近上限测试。
+- **i18n 词条补全 99 组**（issue [#67](https://github.com/jsshwqz/innoforge/issues/67)）：OA 多角色会诊 / 质量评估 / 权利要求模拟器 / 证据中心 / 策略推荐 / 一审-二审对比 / 对抗推演 / OA 答复时间线等模板已引用但中英均无定义的键全部补入 `static/i18n.js` 双语（含 {n}/{days}/{count} 插值词条）；复扫 0 缺失、zh/en 两侧 475=475 齐平，英文界面不再回退显示中文或裸键。
+
+---
 ## [v0.9.46] - 2026-11-14
 
 ### 修复 / Fixed

@@ -29,6 +29,10 @@ const BASELINE: &[(&str, usize)] = &[
     ("src/bin/mcp-server.rs", 1),
     ("src/context.rs", 1),
     ("src/routes/ai.rs", 2),
+    // 2026-11-15 审查登记：LCS Hirschberg 分治的 3 处 `[..` 全部是对 `&[char]`
+    // （Vec<char> collect 的字符数组）按**元素下标**切片（&a[..mid]/&b[..j]/&b[..best_k]），
+    // 元素即 char、无 UTF-8 字节边界语义，构造性安全（#73 防线只针对 &str 字节切片）。
+    ("src/routes/feature_cards.rs", 3),
     ("src/routes/idea.rs", 1),
     ("src/routes/ipc.rs", 2),
     ("src/routes/upload.rs", 3),

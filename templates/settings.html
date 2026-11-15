@@ -340,6 +340,7 @@
                 models: [
                     {value: 'sensenova-6.7-flash-lite', label: 'SenseNova 6.7 Flash Lite（最新，支持看图+推理）'},
                     {value: 'sensenova-6.8-flash-lite', label: 'SenseNova 6.8 Flash Lite（最新，支持看图）'},
+                    {value: 'glm-5.3-flash', label: 'GLM-5.3-Flash（商汤通道，快速）'},
                     {value: 'glm-5.2', label: 'GLM 5.2（商汤通道）'},
                     {value: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash（商汤通道，免费）'},
                     {value: 'sensenova-u1-fast', label: 'SenseNova U1 Fast（快速推理）'},
@@ -347,6 +348,7 @@
                 expert_models: [
                     {value: 'sensenova-6.7-flash-lite', label: 'SenseNova 6.7 Flash Lite（支持看图+推理）'},
                     {value: 'sensenova-6.8-flash-lite', label: 'SenseNova 6.8 Flash Lite（最新）'},
+                    {value: 'glm-5.3-flash', label: 'GLM-5.3-Flash（商汤通道，快速）'},
                     {value: 'glm-5.2', label: 'GLM 5.2（商汤通道）'},
                     {value: 'sensenova-u1-fast', label: 'SenseNova U1 Fast（推理）'},
                 ],
@@ -370,16 +372,17 @@
                 title: 'Google Gemini',
                 base_url: 'https://generativelanguage.googleapis.com/v1beta/openai',
                 key_link: 'https://aistudio.google.com/apikey',
+                // 2026-11-15 更新：gemini-2.5-flash 系列已停供新用户、gemini-flash-latest 别名
+                // 同批退役（见 docs/plans/STATUS.md 2026-11-08 条），现役以 CI 实测的
+                // gemini-3.8-flash / gemini-flash-lite-latest 为准
                 models: [
-                    {value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash（推荐，支持看图）'},
+                    {value: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash（推荐，支持看图）'},
+                    {value: 'gemini-flash-lite-latest', label: 'Gemini Flash Lite Latest（轻量备用）'},
                     {value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro（最强，需付费）'},
-                    {value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash'},
-                    {value: 'gemini-2.0-flash-lite', label: 'Gemini 2.0 Flash Lite'},
                 ],
                 expert_models: [
+                    {value: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash'},
                     {value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro（最强）'},
-                    {value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash'},
-                    {value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash'},
                 ],
                 hint: 'Google Gemini API（OpenAI 兼容接口）'
             },
@@ -388,14 +391,17 @@
                 base_url: 'https://open.bigmodel.cn/api/paas/v4',
                 key_link: 'https://open.bigmodel.cn/usercenter/apikeys',
                 models: [
-                    {value: 'glm-4-plus', label: 'GLM-4-Plus（最强）'},
-                    {value: 'glm-4-flash', label: 'GLM-4-Flash（免费，推荐）'},
+                    {value: 'glm-5.3-flash', label: 'GLM-5.3-Flash（快速超低价，推荐）'},
+                    {value: 'glm-5.3', label: 'GLM-5.3（旗舰，深度推理）'},
+                    {value: 'glm-4-plus', label: 'GLM-4-Plus（上一代旗舰）'},
+                    {value: 'glm-4-flash', label: 'GLM-4-Flash（免费）'},
                     {value: 'glm-4-air', label: 'GLM-4-Air（快速）'},
                     {value: 'glm-4-flashx', label: 'GLM-4-FlashX（快速免费）'},
                 ],
                 expert_models: [
-                    {value: 'glm-4-plus', label: 'GLM-4-Plus（最强）'},
-                    {value: 'glm-4-flash', label: 'GLM-4-Flash（免费）'},
+                    {value: 'glm-5.3', label: 'GLM-5.3（最强）'},
+                    {value: 'glm-5.3-flash', label: 'GLM-5.3-Flash（快速）'},
+                    {value: 'glm-4-plus', label: 'GLM-4-Plus（上一代旗舰）'},
                 ],
                 hint: '智谱 GLM OpenAI 兼容接口'
             },
@@ -420,15 +426,18 @@
                 base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
                 key_link: 'https://bailian.console.aliyun.com/',
                 models: [
-                    {value: 'qwen-max', label: 'Qwen-Max（最强）'},
-                    {value: 'qwen-plus', label: 'Qwen-Plus（均衡，推荐）'},
+                    {value: 'qwen4-max-preview', label: 'Qwen4-Max-Preview（新一代旗舰，多模态+深度思考）'},
+                    {value: 'qwen3.7-plus', label: 'Qwen3.7-Plus（均衡，推荐）'},
+                    {value: 'qwen-max', label: 'Qwen-Max（上一代旗舰）'},
+                    {value: 'qwen-plus', label: 'Qwen-Plus（均衡）'},
                     {value: 'qwen-turbo', label: 'Qwen-Turbo（快速，推荐）'},
                     {value: 'qwen-long', label: 'Qwen-Long（超长上下文）'},
                     {value: 'qwen-vl-max', label: 'Qwen-VL-Max（多模态）'},
                 ],
                 expert_models: [
-                    {value: 'qwen-max', label: 'Qwen-Max（最强）'},
-                    {value: 'qwen-plus', label: 'Qwen-Plus（均衡）'},
+                    {value: 'qwen4-max-preview', label: 'Qwen4-Max-Preview（旗舰）'},
+                    {value: 'qwen3.7-plus', label: 'Qwen3.7-Plus（均衡）'},
+                    {value: 'qwen-max', label: 'Qwen-Max（上一代旗舰）'},
                 ],
                 hint: '阿里通义千问，国内最强模型之一'
             }

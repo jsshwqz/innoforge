@@ -1733,3 +1733,25 @@
 - **修复 / Fix**: 两侧统一本地时区——`date(timestamp, 'localtime') = date('now','localtime')`（SQLite 对带时区的 ISO 串会先换算）。
 - **回归 / 负控**: 深夜（跨界窗口内）单测实测修复前 0≠2 红、修复后绿；测试本身保留为永久回归（它只在跨界窗口内才有判别力——这恰是它的价值）。
 - **预防**: ①凡「今日/本月」类统计，存储时区与比较时区必须显式一致，写 SQL 时先问「这个 date() 是哪个时区的今天」；②深夜/清晨是时区类缺陷唯一的暴露窗口，涉及日期边界的代码要在边界时段各跑一遍。
+
+
+## [2026-11-15] 78 CI Tests 假红真因：黑洞/慢滴 stub 绕过端口记账分配器，OS 复用刚回收的端口号（派单诊断「环境变量」有误）
+- **严重程度 / Severity**: MEDIUM（CI Tests job 假红阻塞 v0.9.46 main push；PR 重跑通过、main 复现的典型竞态，不修则 CI 持续偶发）
+- **涉及文件**: \`tests/stub_hanging_backend.rs\`、\`tests/common/mod.rs\`、\`tests/port_alloc.rs\`
+- **现象 / Symptom**: v0.9.46 CI run 43618022587 \`tolerates_blackhole_ai_backend_no_empty_reply\` panic 于 \`tests/common/mod.rs:226\` 预留 assert「port unavailable: cannot reserve port N before spawn」。
+- **根因 / Root cause**: **不是环境变量**（派单口径误诊）。\`port_alloc::free_port()\` 内部本就有 Mutex 记账（已发出端口集合），但 stub_hanging_backend 的黑洞/慢滴桩直接 \`TcpListener::bind("127.0.0.1:0")\` **绕过记账**——并行用例 A 刚通过 free_port() 拿到并释放探测端口号 P，内核立即把 P 重新发给并行用例 B 的裸 bind(":0") 桩；A 随后 spawn_test_server(P) 的预留 bind 即失败。port_alloc 模块头注释早已写明这类竞态形态。
+- **修复 / Fix**: 新增 \`tests/common::bind_stub_on_free_port()\`（桩走记账分配器 bind 具体端口号 + Windows 保留段 3 次重试）；该 binary 4 个用例全部迁移到 \`spawn_test_server_on_free_port\`（预留+重试入口，issue #110 既定纪律「新测试一律用它」）。
+- **回归 / 负控**: 本机全量 \`cargo test\` 1185 passed / 0 failed（含该 binary 4/4）；记账分配器使「桩拿到的号不会再发给同进程任何用例」成为构造性保证。
+- **预防**: ①测试内一切 TCP 监听（桩/探活/mock）一律走 \`bind_stub_on_free_port\` 或自 bind(":0") 后**只用返回的 listener**，绝不「先探一个数字再用」；②派单诊断要以日志 panic 点为锚（本次 panic 点在端口预留，不在任何 env 读取），防止下一轮照着错误诊断修出第二个 Mutex。
+- **提交**: \`201b494\`
+
+
+## [2026-11-15] 79 本机跑 E2E 的两个环境陷阱：C 盘满致 link.exe 间歇失败；全局 AI_* 环境变量把「全新环境」伪装成已配置
+- **严重程度 / Severity**: LOW-MEDIUM（均只影响本机开发/验收，不影响 CI；但两个都会把人引向错误结论）
+- **涉及文件**: 无产品代码——环境属性（C 盘容量、系统级 \`AI_API_KEY\`/\`AI_BASE_URL\`/\`AI_MODEL\` 全局变量）
+- **现象 / Symptom**: ①全量 \`cargo test\` 在编译期报 MSVC link.exe exit 1（同一批二进制重跑又自愈），C 盘仅余 880MB；②用全新 \`INNOFORGE_HOME\` 起服验证首启横幅，\`/api/ai/models\` 却显示 DeepSeek configured:true 且探测 ok——「全新环境」不是全新的。
+- **根因 / Root cause**: ①link.exe 的中间临时文件写 %TMP%（默认 C 盘），并发链接挤爆所剩无几的 C 盘（STATUS 2026-11-07 的「先查盘不查码」同族，这次是 C 盘+TMP）；②服务器继承系统级 \`AI_API_KEY\`/\`AI_BASE_URL\`/\`AI_MODEL\` 全局变量（tests/common/mod.rs build_server_cmd 的 env_clear 就是为防这个），不剔除则 dotenvy/继承环境污染全新实例。
+- **修复 / Fix**: ①\`export TMP='D:\\Temp' TEMP='D:\\Temp'\` 后重跑（并 \`-j 2\` 降并发链接压力）；②起服时 \`env -u AI_API_KEY -u AI_BASE_URL -u AI_MODEL -u AI_SECURITY_FAIL_POLICY -u INNOFORGE_AIONCAD_URL\` + **cwd 指向 fresh home**（防 dotenvy 读仓库根 .env）。
+- **回归 / 负控**: 剔除后 \`/api/settings\` 的 \`ai_api_key_configured:false\`、providers 仅 Ollama 探测失败——与 CI 全新 checkout 形态一致；E2E 90/90 PASSED（2 skipped）。
+- **预防**: ①本机验收「首启/未配置」类行为前，先 \`env | grep -E '^AI_|^INNOFORGE'\` 查泄漏，起服一律 cwd 隔离 + 显式剔除；②C 盘是系统盘且长期 >95%，构建类失败先查 \`df -h /c\` 再查码；给 cargo/link 大量临时写盘的机器，TMP 应常驻 D 盘。
+- **提交**: 无（环境操作，无代码变更；相关验收见 \`4532e02\`）
