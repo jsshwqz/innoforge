@@ -14,6 +14,19 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-11-15 — **批次任务：CI 端口竞态修复 + AI 预设补齐 + LCS 滚动数组 + #67 首启引导与 99 组词条补全**
+
+- **状态 / Status**: 🚧 本地 6 commit，待推送等 CI
+- **开工声明**: ACK 2026-10-27 整顿令：整顿令窗口（至 11-14）已按其自身条款届满、主线闭环后按质量通道继续（见 2026-11-07 条）；本批为用户指定的批次任务（Batch 0 + Batch 3 局部），不属冻结类别。
+- **① CI Tests 假红修复（v0.9.46 main push run 43618022587）**: `tolerates_blackhole_ai_backend_no_empty_reply` 在 `tests/common/mod.rs` 预留 assert「port unavailable」假红（PR 重跑通过、main 复现的典型竞态）。**事实更正**：派单口径「环境变量测试加 Mutex」诊断有误——`port_alloc::free_port()` 内部本就有 Mutex 记账，真缺陷是黑洞/慢滴 stub 直接 `TcpListener::bind("127.0.0.1:0")` **绕过记账**，OS 把并行用例刚回收的端口号发给 stub，与另一用例 `free_port()` 拿到的服务器端口相撞。修复（`201b494`）：新增 `common::bind_stub_on_free_port()`（桩走记账分配器 + Windows 保留段 3 次重试），4 用例迁移到 `spawn_test_server_on_free_port`（#110 既定纪律）。本机 4/4 通过。
+- **② settings.html 模型预设补齐**（`4158e54`）: 智谱补 glm-5.3/glm-5.3-flash（官方现役，外部检索确认）；Gemini 摘除已停供的 2.5-flash/2.0 系列、换代 gemini-3.8-flash/gemini-flash-lite-latest（依据 STATUS 2026-11-08 CI 实况）；商汤补 glm-5.3-flash（商汤通道）；通义补 qwen4-max-preview/qwen3.7-plus（百炼官方文档确认）。模型下拉本就实时查 `/api/ai/models`，预设仅探测失败时回退，错项无实际风险。
+- **③ feature_cards.rs LCS 滚动数组**（`ad3b8ef`）: 注释一直声称「只保留两行」但实际分配全量 (m+1)×(n+1) u32 表（5000 字上限 ≈100MB）；改两行滚动 DP + Hirschberg 分治线性空间重建（O(n) ≈40KB，时间仍 O(m·n)），输出与旧回溯同序；新增 LCS 最优性锁 + 5000 字近上限测试（lib 侧 feature_cards 17/17）。`tests/no_unsafe_byte_slice.rs` BASELINE 按守卫自身协议登记 3 处 `&[char]` 元素切片（构造性安全，非 str 字节切片）。
+- **④ i18n 99 组词条补全**（`bef8b36`）: 扫描脚本发现模板引用但 zh/en 均无定义的键 99 组（OA 会诊/质量评估/权利要求模拟器/证据中心/策略推荐/一审-二审对比/对抗推演/OA 时间线等，英文界面回退显示中文或裸键）；全部补入 static/i18n.js 双语（含 {n}/{days}/{count} 插值）。复扫 0 missing、parity 475=475。
+- **⑤ issue #67 P1.1 首启引导**（`4532e02`）: e2e 新增 checkFirstRunBanners——未配置环境（CI 全新 checkout 形态）强制断言两条状态横幅文案 + `/settings` 链接；目标服务器已配置则自动降级 skip（开发者本机不假红）。expectedPasses 87→90。README 下载段补「首次使用三步」。
+- **CHANGELOG**: `[Unreleased]` 段新增（新增 2 / 修复 1 / 改进 2）。
+- **验证**: `cargo test --no-fail-fast` **1185 passed / 0 failed（72 个二进制）**；fmt --check / clippy --all-targets -D warnings 零告警；HTML 函数扫描 8 模板基线一致；ESLint static/i18n.js 0 error（5 warning 存量）；**E2E 90/90 PASSED（2 skipped）**——全新 `INNOFORGE_HOME` 实例（`env -u AI_API_KEY/AI_BASE_URL/AI_MODEL + cwd 隔离`，与 CI 形态一致）实测。
+- **运维记**: ① 本机 C 盘满（880MB 剩余）致 MSVC link.exe 间歇性链接失败，`TMP/TEMP=D:\Temp` 重跑后复现两次又在余量回升后自愈——`构建失败先查盘不查码` 再添一例（C 盘：link.exe temp；D 盘：LLVM/增量缓存）；② 本机跑 e2e 必须剔除全局 `AI_*` 环境变量并隔离 cwd，否则 dotenvy/继承环境把开发机 Key 漏进「全新环境」，横幅断言会被 skip 掉失去意义。均入 docs/errors.md #78/#79。
+
 ### 2026-11-14 — **Umi-OCR 服务地址可配置（issue #33 收口）**（PR #221，→ v0.9.45）
 
 - **状态 / Status**: 🚧 PR 等 CI
