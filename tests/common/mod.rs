@@ -334,3 +334,29 @@ pub fn spawn_test_server(port: u16, extra_env: &[(&str, &str)]) -> TestServer {
     let home = fresh_db_dir();
     spawn_test_server_with_timeout(port, 60, home, extra_env)
 }
+
+/// 给"黑洞/慢滴"类 TCP 桩分配一个**走记账分配器**的监听端口（v0.9.46 CI 修复）。
+///
+/// 旧写法 `TcpListener::bind("127.0.0.1:0")` 绕过 `port_alloc` 的已发出端口记账：
+/// 并行用例 A 刚通过 `free_port()` 拿到并释放探测端口号 P，内核可能立刻把 P
+/// 重新发给并行用例 B 的裸 bind(":0") 桩；A 随后 `spawn_test_server(P)` 的预留
+/// bind 即失败 → `tests/common/mod.rs` 的 `port unavailable` panic（CI 实测假红）。
+/// 本入口让桩与服务器共用同一记账分配器：桩拿到的号不会再发给任何同进程用例。
+/// bind 落在 Windows 保留段（errors.md #75）时自动换下一个号，最多 3 次。
+///
+/// 返回 `(listener, port)`；listener 必须由调用方持有（drop 即释放端口）。
+#[allow(dead_code)]
+pub fn bind_stub_on_free_port() -> (std::net::TcpListener, u16) {
+    let mut last_error = String::new();
+    for _ in 0..3 {
+        let port = free_port();
+        match std::net::TcpListener::bind(("127.0.0.1", port)) {
+            Ok(listener) => return (listener, port),
+            Err(e) => last_error = format!("port {}: bind failed ({})", port, e),
+        }
+    }
+    panic!(
+        "stub bind failed 3 times in a row; last error: {}",
+        last_error
+    )
+}

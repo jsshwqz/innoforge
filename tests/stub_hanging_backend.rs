@@ -19,23 +19,25 @@
 
 mod common;
 
-use common::{free_port, spawn_test_server};
+use common::{bind_stub_on_free_port, spawn_test_server_on_free_port};
 use std::io::{Read, Write};
-use std::net::TcpListener;
 
-/// Helper: spawn a test server with AI pointing at `ai_port` and short
-/// AI timeouts (5s) so the blackhole/slow-drip tests don't take 60s+.
-fn start_server(server_port: u16, ai_port: u16) -> common::TestServer {
+/// Helper: spawn a test server on an OS-assigned port (预留+重试入口，
+/// issue #110) with AI pointing at `ai_port` and short AI timeouts (5s)
+/// so the blackhole/slow-drip tests don't take 60s+.
+///
+/// v0.9.46 CI 修复：旧写法 caller 先 `free_port()` 再传端口，探测-预留窗口
+/// 会被并行用例绕过记账的裸 bind(":0") 桩抢走端口号 → 预留 panic 假红。
+/// 统一改走 `spawn_test_server_on_free_port` + `bind_stub_on_free_port`，
+/// 让桩与服务器共用同一记账分配器。
+fn start_server(ai_port: u16) -> common::TestServer {
     let ai_url = format!("http://127.0.0.1:{}", ai_port);
-    spawn_test_server(
-        server_port,
-        &[
-            ("AI_BASE_URL", &ai_url),
-            ("AI_API_KEY", "test-key-not-real"),
-            ("INNOFORGE_AI_GLOBAL_TIMEOUT_SECS", "5"),
-            ("INNOFORGE_AI_HTTP_TIMEOUT_SECS", "5"),
-        ],
-    )
+    spawn_test_server_on_free_port(&[
+        ("AI_BASE_URL", &ai_url),
+        ("AI_API_KEY", "test-key-not-real"),
+        ("INNOFORGE_AI_GLOBAL_TIMEOUT_SECS", "5"),
+        ("INNOFORGE_AI_HTTP_TIMEOUT_SECS", "5"),
+    ])
 }
 
 /// Request body that genuinely triggers the AI call path in the
@@ -46,12 +48,11 @@ const OA_REQUEST_BODY: &str = r#"{"my_patent":{"title":"测试专利","content":
 /// Start a "black hole" stub: accepts TCP connections but never sends
 /// any HTTP response. The connection stays open until the client times out.
 ///
-/// 端口在**起线程之前**由 `bind("127.0.0.1:0")` 分配并已进入 listen，返回
-/// `(port, handle)`；不用 free_port() 预探端口（预探与线程内 bind 之间的空窗会被
-/// 并行用例抢走，桩线程静默退出 ⇒ 客户端 Connection refused）。
+/// 端口走记账分配器（`bind_stub_on_free_port`）：bind 在起线程之前完成并已进入
+/// listen，返回 `(port, handle)`；不用裸 `bind(":0")`——它绕过 port_alloc 记账，
+/// 会被内核把并行用例刚回收的端口号发给本桩（v0.9.46 CI 假红根因）。
 fn start_blackhole_stub() -> (u16, std::thread::JoinHandle<()>) {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("stub must bind an ephemeral port");
-    let port = listener.local_addr().expect("stub local_addr").port();
+    let (listener, port) = bind_stub_on_free_port();
     let handle = std::thread::spawn(move || {
         for mut stream in listener.incoming().flatten() {
             // Read the request but never respond
@@ -68,10 +69,9 @@ fn start_blackhole_stub() -> (u16, std::thread::JoinHandle<()>) {
 /// Start a "slow drip" stub: accepts connections, sends a partial HTTP
 /// response header, then hangs indefinitely.
 ///
-/// 端口分配同上：bind(0) 成功即已监听，调用方无需 sleep 等待桩就绪。
+/// 端口分配同上：走记账分配器，bind 成功即已监听，调用方无需 sleep 等待桩就绪。
 fn start_slow_drip_stub() -> (u16, std::thread::JoinHandle<()>) {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("stub must bind an ephemeral port");
-    let port = listener.local_addr().expect("stub local_addr").port();
+    let (listener, port) = bind_stub_on_free_port();
     let handle = std::thread::spawn(move || {
         for mut stream in listener.incoming().flatten() {
             let mut buf = [0u8; 4096];
@@ -177,11 +177,10 @@ fn assert_ai_path_exercised(resp: reqwest::blocking::Response, label: &str) {
 
 #[test]
 fn tolerates_blackhole_ai_backend_no_empty_reply() {
-    let server_port = free_port();
-
     let (ai_port, _stub) = start_blackhole_stub();
 
-    let server = start_server(server_port, ai_port);
+    let server = start_server(ai_port);
+    let server_port = server.port;
 
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
@@ -221,11 +220,10 @@ fn tolerates_blackhole_ai_backend_no_empty_reply() {
 
 #[test]
 fn tolerates_slow_drip_ai_backend_no_empty_reply() {
-    let server_port = free_port();
-
     let (ai_port, _stub) = start_slow_drip_stub();
 
-    let server = start_server(server_port, ai_port);
+    let server = start_server(ai_port);
+    let server_port = server.port;
 
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
@@ -262,12 +260,11 @@ fn tolerates_slow_drip_ai_backend_no_empty_reply() {
 
 #[test]
 fn tolerates_blackhole_cad_backend_no_empty_reply() {
-    let server_port = free_port();
-
     let (cad_port, _stub) = start_blackhole_stub();
 
     let cad_url = format!("http://127.0.0.1:{}", cad_port);
-    let server = spawn_test_server(server_port, &[("INNOFORGE_AIONCAD_URL", &cad_url)]);
+    let server = spawn_test_server_on_free_port(&[("INNOFORGE_AIONCAD_URL", &cad_url)]);
+    let server_port = server.port;
 
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(180))
@@ -296,11 +293,10 @@ fn tolerates_blackhole_cad_backend_no_empty_reply() {
 
 #[test]
 fn survives_repeated_blackhole_ai_requests() {
-    let server_port = free_port();
-
     let (ai_port, _stub) = start_blackhole_stub();
 
-    let server = start_server(server_port, ai_port);
+    let server = start_server(ai_port);
+    let server_port = server.port;
 
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
