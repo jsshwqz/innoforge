@@ -17,6 +17,16 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::convert::Infallible;
 
+/// 按配置决定是否提供快模型通道（未配置/占位 Key 时为 None，
+/// Pipeline 内跳过依赖快模型的增强，保持离线可用）
+fn fast_ai_channel(config: &super::AppConfig) -> Option<crate::ai::AiClient> {
+    if config.ai_fast_channel_ready() {
+        Some(config.ai_client_fast())
+    } else {
+        None
+    }
+}
+
 #[derive(Debug, Deserialize, Default, Clone)]
 pub struct ResearchStateUpdateRequest {
     pub current_hypothesis: Option<String>,
@@ -232,9 +242,11 @@ pub async fn api_idea_analyze(
     // Run pipeline in quick mode (synchronous await)
     let config = s.config.read().unwrap_or_else(|e| e.into_inner()).clone();
     let ai_client = config.ai_client();
+    let ai_fast = fast_ai_channel(&config);
     let db = s.db.clone();
     let runner = PipelineRunner::new(
         ai_client,
+        ai_fast,
         db.clone(),
         config.next_serpapi_key().unwrap_or_default(),
         true, // quick_mode
@@ -1015,9 +1027,10 @@ pub async fn api_idea_pipeline(
     // Build runner from config
     let config = s.config.read().unwrap_or_else(|e| e.into_inner()).clone();
     let ai_client = config.ai_client();
+    let ai_fast = fast_ai_channel(&config);
     let db = s.db.clone();
     let serpapi_key = config.next_serpapi_key().unwrap_or_default();
-    let runner = PipelineRunner::new(ai_client, db.clone(), serpapi_key, false);
+    let runner = PipelineRunner::new(ai_client, ai_fast, db.clone(), serpapi_key, false);
 
     let idea_id = id.to_string();
     let title = idea.title.clone();
@@ -1153,9 +1166,11 @@ pub async fn api_idea_resume(
 
     let config = s.config.read().unwrap_or_else(|e| e.into_inner()).clone();
     let ai_client = config.ai_client();
+    let ai_fast = fast_ai_channel(&config);
     let db = s.db.clone();
     let runner = PipelineRunner::new(
         ai_client,
+        ai_fast,
         db.clone(),
         config.next_serpapi_key().unwrap_or_default(),
         false,
@@ -1999,6 +2014,7 @@ pub async fn api_idea_iterate(
     let config = s.config.read().unwrap_or_else(|e| e.into_inner()).clone();
     let mut orch = crate::orchestrator::engine::Orchestrator::new(
         config.ai_client(),
+        fast_ai_channel(&config),
         s.db.clone(),
         config.next_serpapi_key().unwrap_or_default(),
         false,
@@ -2152,6 +2168,7 @@ pub async fn api_idea_redirect(
     let config = s.config.read().unwrap_or_else(|e| e.into_inner()).clone();
     let mut orch = crate::orchestrator::engine::Orchestrator::new(
         config.ai_client(),
+        fast_ai_channel(&config),
         s.db.clone(),
         config.next_serpapi_key().unwrap_or_default(),
         false,

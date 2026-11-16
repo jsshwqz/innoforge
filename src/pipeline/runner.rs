@@ -11,6 +11,8 @@ use std::sync::Arc;
 
 pub struct PipelineRunner {
     ai_client: AiClient,
+    /// 快模型通道（实验脚本自修复等结构化短任务）；None = 未配置/离线
+    ai_client_fast: Option<AiClient>,
     db: Arc<Database>,
     serpapi_key: String,
     quick_mode: bool,
@@ -19,12 +21,14 @@ pub struct PipelineRunner {
 impl PipelineRunner {
     pub fn new(
         ai_client: AiClient,
+        ai_client_fast: Option<AiClient>,
         db: Arc<Database>,
         serpapi_key: String,
         quick_mode: bool,
     ) -> Self {
         Self {
             ai_client,
+            ai_client_fast,
             db,
             serpapi_key,
             quick_mode,
@@ -34,6 +38,7 @@ impl PipelineRunner {
     fn make_orchestrator(&self) -> Orchestrator {
         Orchestrator::new(
             self.ai_client.clone(),
+            self.ai_client_fast.clone(),
             self.db.clone(),
             self.serpapi_key.clone(),
             self.quick_mode,

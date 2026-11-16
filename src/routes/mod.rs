@@ -254,6 +254,15 @@ impl AppConfig {
         client
     }
 
+    /// 快模型通道是否就绪：本地 Ollama 无需 Key 即可用；远端通道非占位 Key 才可用。
+    /// 用于决定是否向 Pipeline 提供实验自修复等快模型能力（离线保持 None）。
+    pub fn ai_fast_channel_ready(&self) -> bool {
+        if is_ollama_url(&self.ai_base_url) {
+            return true;
+        }
+        !is_placeholder_api_key(&self.effective_api_key())
+    }
+
     /// 为 Gemini 端点添加模型降级兜底：从高到低，主模型 quota 用完后尝试更便宜的模型。
     /// 非 Gemini 端点不添加降级。
     fn add_gemini_model_fallback(&self, client: &mut AiClient, primary_model: &str) {
