@@ -14,6 +14,15 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-11-16 — **Batch 3-A 收口：实验沙箱 3 轮自修复 + CAD 静默吞错/阻塞 IO 修复**（PR #225）
+
+- **状态 / Status**: ✅ 收口（12/13 检查绿后补本条过 Doc Staleness 门禁，随后原生合并 → main）
+- **开工声明**: ACK 2026-10-27 整顿令：整顿令窗口已按其自身条款届满（见 2026-11-15 条），本批为用户指定批次任务（Batch 3-A），不属冻结类别。
+- **① 实验沙箱 3 轮自修复**（`src/pipeline/steps/experiment.rs`）: 沙箱执行失败时由快模型按 stderr 摘要重写脚本并重跑，最多 `MAX_REPAIR_ROUNDS = 3` 轮；快模型返回空脚本或脚本与上一轮一致时提前放弃；`ai_fast = None` 时保持旧行为（单次执行不修复）；修复日志与发现输出按 `safe_truncate_chars` 截显示不破坏数据。
+- **② CAD 静默吞错修复**（`src/routes/cad.rs`）: 需求整理 AI 调用失败不再静默吞错——回退原始输入并在出参 warning 中注明回退原因；错误路径返回显式状态码，不向前端暴露内部细节。
+- **③ 阻塞 IO 修复**: CAD 路径 `std::fs::read` → `tokio::fs::read`，同步阻塞读文件移出 async 执行器关键路径（`src/orchestrator/engine.rs` / `src/pipeline/runner.rs` 配套接线，`docs/API-CONTRACTS.md` 同步）。
+- **验证**: PR CI 12/13 绿（Format/Clippy/Tests/Privacy Guards/Template Guards/Lint/E2E/Autoclose Hygiene 全过）；本轮无新增踩坑（阻塞 IO 与吞错均为修复项，无工具踩坑需沉淀）。
+
 ### 2026-11-15 — **批次任务：CI 端口竞态修复 + AI 预设补齐 + LCS 滚动数组 + #67 首启引导与 99 组词条补全**
 
 - **状态 / Status**: 🚧 PR [#224](https://github.com/jsshwqz/innoforge/pull/224) 等 CI（main 分支保护 9 项必过检查拦截直推，改走 PR 原生合并保留 6 个 commit hash；外加 1 个 CHANGELOG 裸 #NN 改链接的 hygiene 修复 commit）
