@@ -102,6 +102,7 @@ fn fixture_chunks() -> Vec<ReferenceChunk> {
         patent_id: "MY-APP".into(),
         chunk_index: 0,
         source_type: "description".into(),
+        section_tag: String::new(),
         content: "散热底座与均热板之间设置有导热界面材料，用于降低接触热阻。".into(),
         relevance_score: 0.9,
     }]
@@ -483,6 +484,7 @@ fn corpus_numbering_matches_deep_reasoning_prompt() {
             patent_id: format!("P{i}"),
             chunk_index: 0,
             source_type: "description".into(),
+            section_tag: String::new(),
             content: format!("切片内容 {i}：导热界面材料降低接触热阻。"),
             relevance_score: 0.5,
         })

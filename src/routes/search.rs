@@ -16,6 +16,7 @@ use crate::search::model::{
 use crate::search::provider::SearchProvider;
 use crate::search::providers::epo_ops::EpoOpsProvider;
 use crate::search::providers::google_patents_xhr::GooglePatentsXhrProvider;
+use crate::search::providers::openalex::OpenAlexProvider;
 use crate::search::providers::serpapi::{exact_lookup_response, SerpApiProvider};
 use crate::search::query::resolve_lang_with_explicit;
 use axum::{
@@ -205,8 +206,8 @@ fn local_fallback_json(
     out
 }
 
-/// 按 spec §6 的优先级装配在线执行链的源集合（MA2b 起三源）：
-/// `[SerpAPI(有 Key) → GooglePatentsXhr → EpoOps(有 Key)]`。
+/// 按 spec §6 的优先级装配在线执行链的源集合（MA2b 起三源 + Batch 1 学术补源）：
+/// `[SerpAPI(有 Key) → GooglePatentsXhr → EpoOps(有 Key) → OpenAlex(免费无 Key)]`。
 ///
 /// 抽成独立函数是因为**链的形状**本身就是需要被断言的语义：
 /// SerpAPI 与 EPO 都遵循「未配置 Key 即不登记」（该源压根不参与，`attempts` 里不会出现它，
@@ -215,6 +216,8 @@ fn local_fallback_json(
 /// SerpAPI 的 Key 由调用方传入 —— round-robin 选取属配置层既有职责（MA1 起即不上提到 provider）。
 /// EPO 排链尾的依据见 `docs/analysis/search-sources-spec.md` §4 与
 /// `providers/epo_ops.rs` 的 CQL 索引一节（`ti`/`ab` 只有英文著录数据）。
+/// OpenAlex 恒登记在链尾（Batch 1 任务 1.5，免费无 Key 学术文献源）——专利三源全空时
+/// 顶上提供期刊论文/预印本著录；attempt 恒出现在诊断面板（「跑了但零命中」可见）。
 fn online_chain_providers(
     db: &Arc<Database>,
     serpapi_key: Option<String>,
@@ -235,6 +238,8 @@ fn online_chain_providers(
         ))),
         None => println!("[ONLINE] No EPO_KEY/EPO_SECRET configured, skipping epo_ops"),
     }
+    // 免 Key 学术文献补充源，恒登记链尾（Batch 1 任务 1.5）。
+    providers.push(Arc::new(OpenAlexProvider::new(db.clone())));
     providers
 }
 
@@ -1764,10 +1769,12 @@ mod tests {
     // `providers::serpapi::search_url_matches_legacy_builder`、
     // `providers::serpapi::outcome_patents_match_legacy_mapping`。
 
-    /// **MA2b 链形状（任务清单 2-③）**：未配 `EPO_KEY/EPO_SECRET` 时链里**压根不登记** EpoOps，
-    /// 因此 `attempts` 里不会出现该源（与「登记了但 Skipped」是两种形状，后者见
+    /// **MA2b 链形状（任务清单 2-③）+ Batch 1 学术补源**：未配 `EPO_KEY/EPO_SECRET`
+    /// 时链里**压根不登记** EpoOps，因此 `attempts` 里不会出现该源（与「登记了但
+    /// Skipped」是两种形状，后者见
     /// `search::chain::case6_epo_without_credentials_skips_and_sends_nothing`）。
-    /// 配齐后才追加在链尾，顺序即降级优先级（spec §6）。
+    /// 配齐后追加在 OpenAlex 之前，顺序即降级优先级（spec §6）。
+    /// OpenAlex（Batch 1 任务 1.5）免费无 Key，**恒登记链尾**。
     #[test]
     fn online_chain_registers_epo_only_with_credentials() {
         let db = Arc::new(Database::init(":memory:").expect("in-memory db"));
@@ -1782,10 +1789,11 @@ mod tests {
             vec![
                 SourceKind::SerpApi,
                 SourceKind::GooglePatentsXhr,
-                SourceKind::EpoOps
+                SourceKind::EpoOps,
+                SourceKind::OpenAlex
             ],
             with_epo.kinds(),
-            "三源齐配时的链形状 = 优先级顺序"
+            "四源齐配时的链形状 = 优先级顺序（OpenAlex 恒登记链尾）"
         );
 
         let without_epo = SourceChain::new(online_chain_providers(
@@ -1794,21 +1802,33 @@ mod tests {
             None,
         ));
         assert_eq!(
-            vec![SourceKind::SerpApi, SourceKind::GooglePatentsXhr],
+            vec![
+                SourceKind::SerpApi,
+                SourceKind::GooglePatentsXhr,
+                SourceKind::OpenAlex
+            ],
             without_epo.kinds(),
-            "未配 EPO 凭证即不登记该源（与 SerpAPI 同语义），链保持 MA2a 形状"
+            "未配 EPO 凭证即不登记该源（与 SerpAPI 同语义）；OpenAlex 仍在"
         );
 
-        // SerpAPI 缺 Key 只摘掉它自己，不影响 EPO 的登记与相对顺序。
+        // SerpAPI 缺 Key 只摘掉它自己，不影响 EPO/OpenAlex 的登记与相对顺序。
         let without_serpapi = SourceChain::new(online_chain_providers(&db, None, creds()));
         assert_eq!(
-            vec![SourceKind::GooglePatentsXhr, SourceKind::EpoOps],
+            vec![
+                SourceKind::GooglePatentsXhr,
+                SourceKind::EpoOps,
+                SourceKind::OpenAlex
+            ],
             without_serpapi.kinds()
         );
 
-        // 三源全不可用（两 Key 皆无）时链仍非空：免费的 XHR 直抓恒登记，兜底才轮得到本地库。
+        // 专利源全不可用（两 Key 皆无）时链仍非空：免费的 XHR 直抓 + OpenAlex 恒登记，
+        // 学术文献兜底之后才轮到本地库。
         let bare = SourceChain::new(online_chain_providers(&db, None, None));
-        assert_eq!(vec![SourceKind::GooglePatentsXhr], bare.kinds());
+        assert_eq!(
+            vec![SourceKind::GooglePatentsXhr, SourceKind::OpenAlex],
+            bare.kinds()
+        );
         assert!(!bare.is_empty());
     }
 
@@ -1847,14 +1867,19 @@ mod tests {
             vec![
                 SourceKind::SerpApi,
                 SourceKind::GooglePatentsXhr,
-                SourceKind::EpoOps
+                SourceKind::EpoOps,
+                SourceKind::OpenAlex
             ],
             order
         );
 
         let (active, cooled) = filter_cooled_providers(providers, &table, now);
         assert_eq!(
-            vec![SourceKind::GooglePatentsXhr, SourceKind::EpoOps],
+            vec![
+                SourceKind::GooglePatentsXhr,
+                SourceKind::EpoOps,
+                SourceKind::OpenAlex
+            ],
             active.iter().map(|p| p.kind()).collect::<Vec<_>>(),
             "冷却源必须摘到链外——链只跑手里的 providers，摘掉即零请求"
         );
@@ -1863,15 +1888,17 @@ mod tests {
             cooled
         );
 
-        // 链只跑了 XHR（成功）与 EPO（网络失败），attempts 本里没有 SerpAPI 的位置
+        // 链只跑了 XHR（成功）、EPO（网络失败）与 OpenAlex（成功），
+        // attempts 本里没有 SerpAPI 的位置
         let chain_attempts = vec![
             brk_report(SourceKind::GooglePatentsXhr, AttemptStatus::Success),
             brk_report(SourceKind::EpoOps, AttemptStatus::Failed(FailKind::Network)),
+            brk_report(SourceKind::OpenAlex, AttemptStatus::Success),
         ];
         let merged = weave_cooled_attempts(&order, &cooled, chain_attempts);
 
         assert_eq!(
-            3,
+            4,
             merged.len(),
             "冷却源不能从面板消失（伪装成没配 Key 是误读）"
         );
@@ -1894,11 +1921,12 @@ mod tests {
             None, merged[0].hint,
             "hint 必须留空，否则会污染出参顶层 hint 键"
         );
-        // 真跑过的那两路原样保留、顺序不变
+        // 真跑过的那三路原样保留、顺序不变
         assert_eq!(
             vec![
                 (SourceKind::GooglePatentsXhr, AttemptStatus::Success),
                 (SourceKind::EpoOps, AttemptStatus::Failed(FailKind::Network)),
+                (SourceKind::OpenAlex, AttemptStatus::Success),
             ],
             merged[1..]
                 .iter()

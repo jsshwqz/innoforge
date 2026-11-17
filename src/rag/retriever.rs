@@ -5,6 +5,11 @@ use crate::db::Database;
 use crate::pipeline::context::ReferenceChunk;
 
 /// Retrieve relevant chunks from a patent for a given query.
+///
+/// Batch 1 任务 1.3：升级为 [`Database::search_chunks_hybrid_rrf`]（BM25 + 向量
+/// RRF 融合，k=60）。词汇通道失效时融合内部已按「无贡献」降级为纯向量，
+/// 与旧行为等价；融合分与旧向量分同为「越大越相关」语义，`relevance_score`
+/// 直接透传融合分。
 pub fn retrieve_chunks(
     db: &Database,
     patent_id: &str,
@@ -13,10 +18,10 @@ pub fn retrieve_chunks(
 ) -> Result<Vec<ReferenceChunk>, String> {
     let query_embedding = chunker::compute_chunk_embedding(query);
 
-    let scores = match db.search_chunks(patent_id, &query_embedding, top_k * 2) {
+    let scores = match db.search_chunks_hybrid_rrf(patent_id, query, &query_embedding, top_k * 2) {
         Ok(s) => s,
         Err(e) => {
-            tracing::warn!("Failed to search chunks: {}", e);
+            tracing::warn!("Failed to search chunks (hybrid RRF): {}", e);
             return Ok(vec![]);
         }
     };
@@ -37,6 +42,7 @@ pub fn retrieve_chunks(
             patent_id: chunk.patent_id,
             chunk_index: chunk.chunk_index,
             source_type: chunk.source_type,
+            section_tag: chunk.section_tag,
             content: chunk.content,
             relevance_score: score,
         });
@@ -62,7 +68,7 @@ pub fn retrieve_chunks_by_keyword(
     let conn = db.conn();
     let pattern = format!("%{}%", query.trim());
     let mut stmt = match conn.prepare(
-        "SELECT id, patent_id, chunk_index, source_type, content
+        "SELECT id, patent_id, chunk_index, source_type, section_tag, content
          FROM patent_chunks
          WHERE patent_id = ?1 AND content LIKE ?2
          ORDER BY chunk_index
@@ -83,7 +89,8 @@ pub fn retrieve_chunks_by_keyword(
                 patent_id: row.get(1)?,
                 chunk_index: row.get(2)?,
                 source_type: row.get(3)?,
-                content: row.get(4)?,
+                section_tag: row.get(4)?,
+                content: row.get(5)?,
                 relevance_score: 0.0, // keyword match, no vector score
             })
         },

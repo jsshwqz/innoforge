@@ -6,14 +6,30 @@ pub struct PatentChunk {
     pub patent_id: String,
     pub chunk_index: i32,
     pub source_type: String,
+    /// 结构化分块的段落标签（Batch 1 任务 1.2）：`Claim:N` / `Desc:[0001]` /
+    /// `Desc:具体实施方式` / `Desc:Window` / `Abstract`；存量数据为空串。
+    /// 旧 JSON 反序列化靠 `#[serde(default)]` 兼容（AGENTS.md 2.2 数据不破）。
+    #[serde(default)]
+    pub section_tag: String,
     pub content: String,
     pub embedding: Vec<f32>,
 }
 
 use super::Database;
 
+/// RRF（Reciprocal Rank Fusion）融合常数（Batch 1 任务 1.3 任务书口径 k=60）。
+/// 与 `/api/search/vector`（routes/search.rs，专利表级 RRF）同一公式 `1/(k+rank)`、
+/// 同一 rank 约定（1-based）；chunks 级融合以本模块 `rrf_fuse` 为单一出处。
+pub const RRF_K: f32 = 60.0;
+
+/// FTS5 查询 token 数上限（防御病态超长查询拖垮 MATCH）。
+const FTS_MAX_TOKENS: usize = 64;
+
 impl Database {
     /// Save all chunks for a patent.
+    ///
+    /// Batch 1 任务 1.3：同一事务内同步维护 `chunks_fts`（delete 旧 patent + 逐条
+    /// insert bigram 索引正文），保证词汇通道与向量通道看到同一份数据。
     pub fn save_patent_chunks(
         &self,
         patent_id: &str,
@@ -23,9 +39,13 @@ impl Database {
         let mut c = self.conn();
         let tx = c.transaction()?;
 
-        // Delete old chunks for this patent
+        // Delete old chunks for this patent (both authoritative rows and FTS mirror)
         tx.execute(
             "DELETE FROM patent_chunks WHERE patent_id = ?1",
+            rusqlite::params![patent_id],
+        )?;
+        tx.execute(
+            "DELETE FROM chunks_fts WHERE patent_id = ?1",
             rusqlite::params![patent_id],
         )?;
 
@@ -37,12 +57,16 @@ impl Database {
                 .flat_map(|f| f.to_le_bytes())
                 .collect();
             tx.execute(
-                "INSERT INTO patent_chunks (id, patent_id, chunk_index, source_type, content, embedding, model_name) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                "INSERT INTO patent_chunks (id, patent_id, chunk_index, source_type, section_tag, content, embedding, model_name) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                 rusqlite::params![
                     chunk.id, patent_id, chunk.chunk_index,
-                    chunk.source_type, chunk.content,
+                    chunk.source_type, chunk.section_tag, chunk.content,
                     rusqlite::types::Value::Blob(bytes), model_name
                 ],
+            )?;
+            tx.execute(
+                "INSERT INTO chunks_fts(content, chunk_id, patent_id) VALUES (?1, ?2, ?3)",
+                rusqlite::params![fts_bigram_text(&chunk.content), chunk.id, patent_id],
             )?;
             count += 1;
         }
@@ -97,14 +121,15 @@ impl Database {
     pub fn get_chunk(&self, chunk_id: &str) -> Result<Option<PatentChunk>, rusqlite::Error> {
         let c = self.conn();
         let mut stmt = c.prepare(
-            "SELECT patent_id, chunk_index, source_type, content, embedding FROM patent_chunks WHERE id = ?1"
+            "SELECT patent_id, chunk_index, source_type, section_tag, content, embedding FROM patent_chunks WHERE id = ?1"
         )?;
         let rows = stmt.query_map(rusqlite::params![chunk_id], |row: &rusqlite::Row| {
             let patent_id: String = row.get(0)?;
             let chunk_index: i32 = row.get(1)?;
             let source_type: String = row.get(2)?;
-            let content: String = row.get(3)?;
-            let blob_val: rusqlite::types::Value = row.get(4)?;
+            let section_tag: String = row.get(3)?;
+            let content: String = row.get(4)?;
+            let blob_val: rusqlite::types::Value = row.get(5)?;
             let embedding = match blob_val {
                 rusqlite::types::Value::Blob(bytes) => {
                     let mut emb = Vec::with_capacity(bytes.len() / 4);
@@ -123,6 +148,7 @@ impl Database {
                 patent_id,
                 chunk_index,
                 source_type,
+                section_tag,
                 content,
                 embedding,
             })
@@ -144,6 +170,240 @@ impl Database {
         )?;
         Ok(count)
     }
+
+    /// BM25 词汇通道检索（Batch 1 任务 1.3）。
+    ///
+    /// 走 `chunks_fts`（FTS5 unicode61 + CJK bigram 索引正文，见 [`fts_bigram_text`]），
+    /// `bm25(chunks_fts)` 取负值越小越好，这里翻转为正分（越大越好）以与
+    /// [`Database::search_chunks`] 的「score 越大越相关」同一语义。
+    /// 查询表达式由 [`fts_query_expr`] 生成；空查询/零命中返回空列表（不报错，
+    /// 上层 RRF 融合按「词汇通道无贡献」处理）。
+    pub fn search_chunks_lexical(
+        &self,
+        patent_id: &str,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<(String, f32)>, rusqlite::Error> {
+        let expr = fts_query_expr(query);
+        if expr.is_empty() || limit == 0 {
+            return Ok(vec![]);
+        }
+        let c = self.conn();
+        let mut stmt = c.prepare(
+            "SELECT chunk_id, bm25(chunks_fts) AS bm25_score
+             FROM chunks_fts
+             WHERE chunks_fts MATCH ?1 AND patent_id = ?2
+             ORDER BY bm25_score
+             LIMIT ?3",
+        )?;
+        let rows = stmt.query_map(
+            rusqlite::params![expr, patent_id, limit as i64],
+            |row: &rusqlite::Row| {
+                let chunk_id: String = row.get(0)?;
+                let score: f64 = row.get(1)?;
+                Ok((chunk_id, -(score as f32)))
+            },
+        )?;
+        Ok(rows.flatten().collect())
+    }
+
+    /// BM25 + 向量 RRF 融合检索（Batch 1 任务 1.3）。
+    ///
+    /// 两个通道各取 `limit * 2` 条候选，按 [`rrf_fuse`]（`1/(k+rank)`，k=[`RRF_K`]=60）
+    /// 融合后取前 `limit` 条。词汇通道失败（FTS 缺行/查询异常）按空列表降级——
+    /// 语义为「该通道本次无贡献」，向量通道仍独立可用；两通道都失败才返回空。
+    pub fn search_chunks_hybrid_rrf(
+        &self,
+        patent_id: &str,
+        query_text: &str,
+        query_embedding: &[f32],
+        limit: usize,
+    ) -> Result<Vec<(String, f32)>, rusqlite::Error> {
+        if limit == 0 {
+            return Ok(vec![]);
+        }
+        let deep = limit * 2;
+        let vec_rank = self.search_chunks(patent_id, query_embedding, deep)?;
+        let lex_rank = self
+            .search_chunks_lexical(patent_id, query_text, deep)
+            .unwrap_or_else(|e| {
+                tracing::warn!(
+                    "lexical chunk channel failed, degrading to vector-only: {}",
+                    e
+                );
+                vec![]
+            });
+        let vec_ids: Vec<String> = vec_rank.into_iter().map(|(id, _)| id).collect();
+        let lex_ids: Vec<String> = lex_rank.into_iter().map(|(id, _)| id).collect();
+        Ok(rrf_fuse(&vec_ids, &lex_ids, RRF_K, limit))
+    }
+}
+
+/// Reciprocal Rank Fusion 纯函数（Batch 1 任务 1.3 的融合单一出处）。
+///
+/// 输入两个通道各自的 id 排名列表（越靠前越相关），输出融合分排序的前 `limit` 条：
+/// `score(id) = Σ 1/(k + rank_i)`，rank 从 1 起（与 `/api/search/vector` 路由内联的
+/// 专利表级融合同一公式与约定；chunks 级以本函数为出处，不复制第二份公式）。
+/// 排序稳定：同分时保持向量通道优先（先到先得），保证测试确定性。
+pub(crate) fn rrf_fuse(
+    vec_rank: &[String],
+    lex_rank: &[String],
+    k: f32,
+    limit: usize,
+) -> Vec<(String, f32)> {
+    use std::collections::HashMap;
+    let mut order: Vec<String> = Vec::new();
+    let mut scores: HashMap<String, f32> = HashMap::new();
+    for (rank, id) in vec_rank.iter().enumerate() {
+        if !scores.contains_key(id) {
+            order.push(id.clone());
+        }
+        *scores.entry(id.clone()).or_insert(0.0) += 1.0 / (k + rank as f32 + 1.0);
+    }
+    for (rank, id) in lex_rank.iter().enumerate() {
+        if !scores.contains_key(id) {
+            order.push(id.clone());
+        }
+        *scores.entry(id.clone()).or_insert(0.0) += 1.0 / (k + rank as f32 + 1.0);
+    }
+    let mut fused: Vec<(String, f32)> = order
+        .into_iter()
+        .map(|id| {
+            let s = scores.get(&id).copied().unwrap_or(0.0);
+            (id, s)
+        })
+        .collect();
+    fused.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    fused.truncate(limit);
+    fused
+}
+
+/// FTS5 索引侧正文变换：CJK 连续段做 bigram 空格切分（Batch 1 任务 1.3）。
+///
+/// unicode61 不切 CJK——「固态电池与充电方法」会整句成单 token，查询单字/bigram
+/// 都匹配不上，BM25 通道对中文形同虚设。本变换把每个 CJK 连续段切成滑窗 bigram
+/// （「固态电池」→「固态 态电 电池」；单字独存），拉丁词原样保留，标点归空格。
+/// 仅用于 chunks_fts（派生索引）；权威正文 patent_chunks.content 不动
+/// （AGENTS.md 2.5 数据完整性）。
+pub(crate) fn fts_bigram_text(s: &str) -> String {
+    let mut out = String::new();
+    let mut latin = String::new();
+    let mut cjk_run: Vec<char> = Vec::new();
+    let mut have_token = false; // out 里是否已有 token（决定 token 之间是否补空格）
+                                // 把累积的 Latin 词整词冲进 out。查询侧 [`fts_query_expr`] 同样把连续拉丁字母
+                                // 累积成整词——两侧切分必须同源，逐字符拆会让英文被切成单字母 token（#78）。
+    let flush_latin = |out: &mut String, latin: &mut String, have_token: &mut bool| {
+        if latin.is_empty() {
+            return;
+        }
+        if *have_token {
+            out.push(' ');
+        }
+        out.push_str(latin);
+        *have_token = true;
+        latin.clear();
+    };
+    // 把累积的 CJK run 以滑窗 bigram 形式冲进 out（单字独存）。
+    let flush_cjk_run = |out: &mut String, run: &mut Vec<char>, have_token: &mut bool| {
+        if run.is_empty() {
+            return;
+        }
+        if *have_token {
+            out.push(' ');
+        }
+        if run.len() == 1 {
+            out.push(run[0]);
+        } else {
+            for i in 0..run.len() - 1 {
+                if i > 0 {
+                    out.push(' '); // 首个 bigram 前的空格已在上方补过
+                }
+                out.push(run[i]);
+                out.push(run[i + 1]);
+            }
+        }
+        *have_token = true;
+        run.clear();
+    };
+    for c in s.chars() {
+        if is_cjk_char(c) {
+            flush_latin(&mut out, &mut latin, &mut have_token);
+            cjk_run.push(c);
+        } else if c.is_alphanumeric() {
+            flush_cjk_run(&mut out, &mut cjk_run, &mut have_token);
+            latin.push(c);
+        } else {
+            // 标点/空白：切词边界，冲出累积但不产生 token
+            flush_latin(&mut out, &mut latin, &mut have_token);
+            flush_cjk_run(&mut out, &mut cjk_run, &mut have_token);
+        }
+    }
+    flush_latin(&mut out, &mut latin, &mut have_token);
+    flush_cjk_run(&mut out, &mut cjk_run, &mut have_token);
+    out
+}
+
+/// FTS5 查询侧表达式生成：与 [`fts_bigram_text`] 同一切分规则（AGENTS.md 2.2）。
+///
+/// CJK 段 → 滑窗 bigram（单字段 → 单字），拉丁词 → 原词（小写化）；每 token 加引号
+/// （防 FTS5 语法字符注入），`OR` 连接（召回优先，BM25 对多命中自然加权）。
+/// 超过 [`FTS_MAX_TOKENS`] 截断；无 token 返回空串（调用方跳过词汇通道）。
+pub(crate) fn fts_query_expr(q: &str) -> String {
+    let mut tokens: Vec<String> = Vec::new();
+    let mut latin: String = String::new();
+    let mut cjk_run: Vec<char> = Vec::new();
+    let flush_latin = |tokens: &mut Vec<String>, latin: &mut String| {
+        if !latin.is_empty() {
+            tokens.push(latin.to_lowercase());
+            latin.clear();
+        }
+    };
+    let flush_cjk = |tokens: &mut Vec<String>, run: &mut Vec<char>| {
+        if run.is_empty() {
+            return;
+        }
+        if run.len() == 1 {
+            tokens.push(run.iter().collect::<String>());
+        } else {
+            for i in 0..run.len() - 1 {
+                let bigram: String = run[i..i + 2].iter().collect();
+                tokens.push(bigram);
+            }
+        }
+        run.clear();
+    };
+    for c in q.chars() {
+        if is_cjk_char(c) {
+            flush_latin(&mut tokens, &mut latin);
+            cjk_run.push(c);
+        } else if c.is_ascii_alphanumeric() {
+            flush_cjk(&mut tokens, &mut cjk_run);
+            latin.push(c);
+        } else {
+            flush_latin(&mut tokens, &mut latin);
+            flush_cjk(&mut tokens, &mut cjk_run);
+        }
+    }
+    flush_latin(&mut tokens, &mut latin);
+    flush_cjk(&mut tokens, &mut cjk_run);
+
+    tokens.truncate(FTS_MAX_TOKENS);
+    tokens
+        .into_iter()
+        .map(|t| format!("\"{}\"", t.replace('"', "")))
+        .collect::<Vec<_>>()
+        .join(" OR ")
+}
+
+/// 是否为 CJK 表意/假名/谚文字符（索引与查询两侧切分的字符域判据，单一出处）。
+fn is_cjk_char(c: char) -> bool {
+    matches!(c,
+        '\u{3400}'..='\u{4DBF}'   // CJK 扩展 A
+        | '\u{4E00}'..='\u{9FFF}' // CJK 基本区
+        | '\u{F900}'..='\u{FAFF}' // CJK 兼容
+        | '\u{3040}'..='\u{30FF}' // 平假名/片假名
+        | '\u{AC00}'..='\u{D7AF}' // 谚文
+    )
 }
 
 /// Compute cosine similarity between two vectors.
@@ -159,4 +419,268 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
         return 0.0;
     }
     (dot / (na * nb)).clamp(0.0, 1.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::rag::chunker::compute_chunk_embedding;
+
+    // ── rrf_fuse 纯函数 ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn rrf_fuse_merges_and_ranks_both_channels() {
+        let v = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        let l = vec!["b".to_string(), "d".to_string()];
+        let fused = rrf_fuse(&v, &l, 60.0, 10);
+        let score_of = |id: &str| {
+            fused
+                .iter()
+                .find(|(i, _)| i == id)
+                .map(|(_, s)| *s)
+                .expect("id must survive fusion")
+        };
+        // b 双通道命中 → 最高
+        assert_eq!("b", fused[0].0, "双通道命中的应排第一: {fused:?}");
+        assert!((score_of("b") - (1.0 / 62.0 + 1.0 / 61.0)).abs() < 1e-6);
+        // a 只有向量 rank1
+        assert!((score_of("a") - 1.0 / 61.0).abs() < 1e-6);
+        // d 只有词汇 rank2
+        assert!((score_of("d") - 1.0 / 62.0).abs() < 1e-6);
+        // c 只有向量 rank3
+        assert!((score_of("c") - 1.0 / 63.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn rrf_fuse_respects_limit_and_stable_order() {
+        let v: Vec<String> = (0..6).map(|i| format!("v{i}")).collect();
+        let l: Vec<String> = (0..6).map(|i| format!("l{i}")).collect();
+        let fused = rrf_fuse(&v, &l, 60.0, 4);
+        assert_eq!(4, fused.len(), "limit 截断");
+        assert_eq!("v0", fused[0].0, "同分时向量通道先到先得（确定性）");
+        assert_eq!("l0", fused[1].0);
+        // 分数单调不增
+        for w in fused.windows(2) {
+            assert!(w[0].1 >= w[1].1, "{fused:?}");
+        }
+    }
+
+    // ── CJK bigram 切分（索引/查询两侧同一出处） ────────────────────────────────
+
+    #[test]
+    fn fts_bigram_text_splits_cjk_runs_and_keeps_latin() {
+        assert_eq!("固态 态电 电池", fts_bigram_text("固态电池"));
+        assert_eq!("电", fts_bigram_text("电"));
+        assert_eq!("lithium battery", fts_bigram_text("lithium battery"));
+        assert_eq!(
+            "solid 固态 态电 电池 池技 技术",
+            fts_bigram_text("solid固态电池技术")
+        );
+        assert_eq!("", fts_bigram_text("   "));
+        // 标点归空格，不产生噪声 token
+        assert_eq!("电池 充电", fts_bigram_text("电池、充电"));
+    }
+
+    #[test]
+    fn fts_query_expr_quotes_tokens_and_uses_or() {
+        let expr = fts_query_expr("固态电池");
+        assert_eq!("\"固态\" OR \"态电\" OR \"电池\"", expr);
+        // 空白/纯标点 → 空表达式（调用方跳过词汇通道）
+        assert_eq!("", fts_query_expr("   "));
+        assert_eq!("", fts_query_expr("。，！"));
+        // 拉丁词小写化
+        assert_eq!("\"battery\"", fts_query_expr("Battery"));
+        // FTS 语法字符被引号包裹：token 内的引号被剥离，且每个 token 完整加引号
+        let expr = fts_query_expr("a\"b");
+        assert_eq!(
+            "\"a\" OR \"b\"", expr,
+            "token 内引号应被剥离，拆成 a/b 两个 token: {expr}"
+        );
+        assert!(!expr.contains("\"\""), "不得出现空 token 的双引号: {expr}");
+    }
+
+    // ── 端到端（内存库）：save → lexical → hybrid，section_tag 透传 ─────────────
+
+    fn setup_db() -> (Database, String) {
+        let db = Database::init(":memory:").expect("in-memory db");
+        let patent = crate::types::patent::Patent {
+            id: String::new(),
+            patent_number: "CN000000099A".to_string(),
+            title: "一种快离子导体材料".to_string(),
+            abstract_text: "测试摘要".to_string(),
+            description: String::new(),
+            claims: String::new(),
+            applicant: String::new(),
+            inventor: String::new(),
+            filing_date: String::new(),
+            publication_date: String::new(),
+            grant_date: None,
+            ipc_codes: String::new(),
+            cpc_codes: String::new(),
+            priority_date: String::new(),
+            country: "CN".to_string(),
+            kind_code: "A".to_string(),
+            family_id: None,
+            legal_status: String::new(),
+            citations: "[]".to_string(),
+            cited_by: "[]".to_string(),
+            source: String::new(),
+            raw_json: String::new(),
+            created_at: String::new(),
+            images: "[]".to_string(),
+            pdf_url: String::new(),
+        };
+        let patent_id = db.insert_patent(&patent).expect("insert patent");
+        (db, patent_id)
+    }
+
+    fn make_chunk(patent_id: &str, idx: i32, section_tag: &str, content: &str) -> PatentChunk {
+        PatentChunk {
+            id: format!("{patent_id}-c{idx}"),
+            patent_id: patent_id.to_string(),
+            chunk_index: idx,
+            source_type: "description".to_string(),
+            section_tag: section_tag.to_string(),
+            content: content.to_string(),
+            embedding: compute_chunk_embedding(content),
+        }
+    }
+
+    #[test]
+    fn save_and_lexical_search_roundtrip_with_section_tag() {
+        let (db, patent_id) = setup_db();
+        let chunks = vec![
+            make_chunk(
+                &patent_id,
+                0,
+                "Desc:背景技术",
+                "背景技术常规介绍，现有方案存在效率不足的问题。",
+            ),
+            make_chunk(
+                &patent_id,
+                1,
+                "Claim:1",
+                "一种固态电池，其特征在于包括钪碲化合物快离子导体层。",
+            ),
+        ];
+        let n = db
+            .save_patent_chunks(&patent_id, &chunks, "char-tfidf-v1")
+            .expect("save");
+        assert_eq!(2, n);
+
+        // get_chunk 透传 section_tag
+        let got = db
+            .get_chunk(&format!("{patent_id}-c1"))
+            .expect("get")
+            .expect("exists");
+        assert_eq!("Claim:1", got.section_tag);
+
+        // 词汇通道：BM25 命中含「钪碲」的 chunk
+        let lex = db
+            .search_chunks_lexical(&patent_id, "钪碲化合物", 5)
+            .expect("lexical");
+        assert_eq!(1, lex.len(), "只有 c1 含查询 bigram: {lex:?}");
+        assert_eq!(format!("{patent_id}-c1"), lex[0].0);
+        assert!(lex[0].1 > 0.0, "翻转后的 BM25 分应为正: {:?}", lex[0].1);
+
+        // 重复保存替换 FTS 行（delete-first），不残留旧索引。
+        // 新内容刻意避开旧 bigram（原「不含钪碲」自身含该 bigram 会假红）。
+        let updated = vec![make_chunk(
+            &patent_id,
+            0,
+            "Desc:Window",
+            "全新的内容描述，不含任何旧关键词。",
+        )];
+        db.save_patent_chunks(&patent_id, &updated, "char-tfidf-v1")
+            .expect("resave");
+        let lex2 = db
+            .search_chunks_lexical(&patent_id, "钪碲", 5)
+            .expect("lexical after resave");
+        assert!(lex2.is_empty(), "旧索引必须随重存清空: {lex2:?}");
+    }
+
+    #[test]
+    fn lexical_channel_degrades_on_unmatched_query() {
+        let (db, patent_id) = setup_db();
+        let chunks = vec![make_chunk(&patent_id, 0, "Abstract", "普通文本内容")];
+        db.save_patent_chunks(&patent_id, &chunks, "char-tfidf-v1")
+            .expect("save");
+        let lex = db
+            .search_chunks_lexical(&patent_id, "量子纠缠", 5)
+            .expect("lexical");
+        assert!(lex.is_empty(), "零命中返回空列表而非报错");
+        let lex = db
+            .search_chunks_lexical(&patent_id, "   ", 5)
+            .expect("lexical");
+        assert!(lex.is_empty(), "空查询返回空列表");
+    }
+
+    /// **RRF 召回率 >= 纯向量检索**（虚拟合成专利夹具，Batch 1 任务 1.3 验收锚点）。
+    ///
+    /// 夹具利用现役 TF-IDF「排序权重伪嵌入」（向量只比权重分布、不认词元）的物理事实：
+    /// - `decoy`：全不重复短句 → 与查询的嵌入余弦 ≈ 1.0（均匀分布向量），纯向量 top-1；
+    /// - `target`：含查询的稀有 bigram（钪碲化合物）但被大量重复填充词稀释，
+    ///   嵌入分布与查询差异大，纯向量排位靠后；
+    /// - `f1`：另一块普通填充。
+    ///
+    /// 断言：① 纯向量 top-1 = decoy（向量通道抓不到目标）；② RRF 融合 top-1 = target
+    /// （BM25 词汇通道把目标捞回）；③ RRF top-k ⊇ 纯向量 top-k（本夹具上召回率
+    /// 严格优于纯向量）。
+    #[test]
+    fn hybrid_rrf_recall_beats_vector_only_on_synthetic_patent() {
+        let (db, patent_id) = setup_db();
+        let filler = "本实施例采用常规工艺进行制备，搅拌均匀后静置，随后进行干燥处理，\
+                      重复上述步骤若干次，直至得到均匀稳定的最终产物，产物的形貌与预期一致。";
+        let chunks = vec![
+            make_chunk(
+                &patent_id,
+                0,
+                "Desc:背景技术",
+                "锂枝晶抑制与界面阻抗调控研究进展综述。",
+            ),
+            make_chunk(
+                &patent_id,
+                1,
+                "Desc:[0042]",
+                &format!("钪碲化合物作为快离子导体的主相。{filler}"),
+            ),
+            make_chunk(&patent_id, 2, "Desc:Window", filler),
+        ];
+        db.save_patent_chunks(&patent_id, &chunks, "char-tfidf-v1")
+            .expect("save");
+
+        let query_text = "钪碲化合物快离子导体材料制备方法";
+        let query_emb = compute_chunk_embedding(query_text);
+
+        // ① 纯向量 top-1 = decoy（c0）：权重分布与查询几乎一致，而目标被稀释
+        let vec_only = db
+            .search_chunks(&patent_id, &query_emb, 3)
+            .expect("vector search");
+        assert!(!vec_only.is_empty(), "向量通道应有结果");
+        let decoy_id = format!("{patent_id}-c0");
+        assert_eq!(
+            decoy_id, vec_only[0].0,
+            "夹具前提：纯向量 top-1 应是权重分布撞车的 decoy: {vec_only:?}"
+        );
+        let vec_top: Vec<String> = vec_only.iter().map(|(id, _)| id.clone()).collect();
+
+        // ② RRF 融合 top-1 = target（c1）
+        let hybrid = db
+            .search_chunks_hybrid_rrf(&patent_id, query_text, &query_emb, 3)
+            .expect("hybrid search");
+        let target_id = format!("{patent_id}-c1");
+        assert_eq!(
+            target_id, hybrid[0].0,
+            "RRF 融合必须把词汇通道命中的目标捞回第一: {hybrid:?}"
+        );
+
+        // ③ RRF top-k ⊇ 纯向量 top-k（本夹具召回率 >= 纯向量）
+        let hybrid_top: Vec<String> = hybrid.iter().map(|(id, _)| id.clone()).collect();
+        for id in &vec_top {
+            assert!(
+                hybrid_top.contains(id),
+                "纯向量命中的 {id} 被 RRF 融合挤掉了，召回率回退: vec={vec_top:?} hybrid={hybrid_top:?}"
+            );
+        }
+    }
 }

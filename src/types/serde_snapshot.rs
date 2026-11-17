@@ -500,11 +500,15 @@ fn chat_message_field_snapshot_is_unchanged() {
 #[test]
 fn pipeline_owned_domain_types_field_snapshots_are_unchanged() {
     // 这三个类型原居 pipeline/context.rs，按 types-migration-map.md §2 归属检索/创意域
+    // （2026-11-17 Batch 1 快照更新：ReferenceChunk 尾部新增 `section_tag`，带
+    // serde default——新增键不破坏旧 JSON 反序列化；字段顺序锁同步追加，见同 PR 的
+    // STATUS.md 记录。）
     let chunk = ReferenceChunk {
         id: "rc-1".into(),
         patent_id: "pt-1".into(),
         chunk_index: 3,
         source_type: "description".into(),
+        section_tag: "Desc:[0042]".into(),
         content: "说明书片段".into(),
         relevance_score: 0.83_f32,
     };
@@ -514,6 +518,7 @@ fn pipeline_owned_domain_types_field_snapshots_are_unchanged() {
             "patent_id",
             "chunk_index",
             "source_type",
+            "section_tag",
             "content",
             "relevance_score",
         ]),

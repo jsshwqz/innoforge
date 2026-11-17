@@ -8,6 +8,15 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ### 新增 / Added
 
+- **RAG 结构化分块 + BM25/向量 RRF 混合检索（DB v25）**（issue [#78](https://github.com/jsshwqz/innoforge/issues/78)）：权利要求按序号（`Claim:N`）、说明书按段落号（`Desc:[0001]`）/章节标题切分打标，无标记回退窗口切分；新增 `chunks_fts` FTS5 词汇索引（CJK bigram 切分，存量数据自动回填）；检索升级为 BM25 + 向量 RRF 融合（k=60），合成夹具单测证明召回率 ≥ 纯向量检索；检索结果引用头透传展示段落标签（`来源: claim / Claim:3`）。
+- **OpenAlex 学术文献检索源（免费无 Key）**：在线检索链尾恒登记第四源（SerpAPI → Google Patents XHR → EPO OPS → OpenAlex），专利源全空时提供 2.5 亿+ 篇期刊论文/预印本著录检索——倒排索引还原摘要正文、提取真实 DOI/期刊名/年份/作者；诊断面板如实记账（`openalex` 行）。
+
+### 修复 / Fixed
+
+- **解除 5000 字硬截断（对比分析失真根因）**：`compare_multiple`（旧 6000 字）与 `inventiveness_analysis`（旧 5000 字）废除盲目字符截断，改为**权利要求书 100% 全文保留** + 说明书按相关性选段（实施例 > 技术效果 > 与权利要求特征重叠），超预算被丢弃的段落显式写入「数据完整性提示」——靠后权利要求（往往是保护范围递进的关键条项）不再被整条截掉。
+
+### 新增 / Added（先前批次）
+
 - **AI 服务商模型预设补齐（设置页）**：智谱补 GLM-5.3 / GLM-5.3-Flash（官方现役）；Gemini 换代为 gemini-3.8-flash / gemini-flash-lite-latest（gemini-2.5-flash 系列已停供新用户、gemini-flash-latest 别名退役，摘除失效项）；商汤通道补 GLM-5.3-Flash；通义千问补 Qwen4-Max-Preview / Qwen3.7-Plus。模型下拉本就自动实时查询 `/api/ai/models`，预设仅作探测失败时的回退。
 - **首启引导回归 + README「首次使用三步」**（issue [#67](https://github.com/jsshwqz/innoforge/issues/67) P1.1）：E2E 在未配置环境（CI 全新 checkout 形态）强制断言首页「⚠️ AI 未配置」「ℹ️ 在线搜索未配置（可用本地库）」两条横幅出现且可点击直达设置页；已配置的服务器自动降级为 skip，不产生本机假红。README 下载段补首次使用三步（运行 → 设置填 Key → 回首页）。
 

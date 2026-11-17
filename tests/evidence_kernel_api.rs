@@ -85,6 +85,7 @@ fn kernel_report_endpoint_states() {
                 patent_id: "P1".into(),
                 chunk_index: 0,
                 source_type: "description".into(),
+                section_tag: String::new(),
                 content: "当温度超过阈值时，控制器自动启动风扇并根据温差调节转速。".into(),
                 relevance_score: 0.9,
             },

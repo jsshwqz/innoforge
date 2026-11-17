@@ -8,7 +8,7 @@ pub mod assembler;
 pub mod chunker;
 pub mod retriever;
 
-use self::chunker::{chunk_summary, chunk_text, compute_chunk_embedding};
+use self::chunker::{chunk_structured_patent, chunk_summary, compute_chunk_embedding};
 use crate::ai::AiClient;
 use crate::db::Database;
 use crate::pipeline::context::ReferenceChunk;
@@ -18,6 +18,11 @@ const CHUNK_OVERLAP: usize = 100;
 const TOP_K: usize = 3;
 
 /// Build chunks from patent text fields.
+///
+/// Batch 1 任务 1.2：切片改走 [`chunker::chunk_structured_patent`] 结构化分块——
+/// 权利要求按序号、说明书按段落号/章节标题打 `section_tag`（检索结果可透传展示
+/// 「命中在哪一条权利要求/哪个段落」），无结构标记时回退窗口切分（`Desc:Window` /
+/// `Claim:Window`），语义与旧实现一致。
 pub fn build_chunks_from_patent(
     patent_id: &str,
     _title: &str,
@@ -28,15 +33,18 @@ pub fn build_chunks_from_patent(
     let mut chunks = Vec::new();
     let mut index = 0i32;
 
-    // Abstract chunk
+    // Abstract chunk（单段常规形态，统一标 Abstract）
     if !abstract_text.is_empty() {
-        for text in chunk_text(abstract_text, CHUNK_SIZE, CHUNK_OVERLAP) {
+        for (tag, text) in
+            chunk_structured_patent("abstract", abstract_text, CHUNK_SIZE, CHUNK_OVERLAP)
+        {
             let embedding = compute_chunk_embedding(&text);
             chunks.push(crate::db::rag::PatentChunk {
                 id: format!("{}-{}", patent_id, index),
                 patent_id: patent_id.to_string(),
                 chunk_index: index,
                 source_type: "abstract".to_string(),
+                section_tag: tag,
                 content: text,
                 embedding,
             });
@@ -44,15 +52,16 @@ pub fn build_chunks_from_patent(
         }
     }
 
-    // Claims chunk
+    // Claims chunks（按权利要求序号标 Claim:N）
     if !claims.is_empty() {
-        for text in chunk_text(claims, CHUNK_SIZE, CHUNK_OVERLAP) {
+        for (tag, text) in chunk_structured_patent("claim", claims, CHUNK_SIZE, CHUNK_OVERLAP) {
             let embedding = compute_chunk_embedding(&text);
             chunks.push(crate::db::rag::PatentChunk {
                 id: format!("{}-{}", patent_id, index),
                 patent_id: patent_id.to_string(),
                 chunk_index: index,
                 source_type: "claim".to_string(),
+                section_tag: tag,
                 content: text,
                 embedding,
             });
@@ -60,15 +69,18 @@ pub fn build_chunks_from_patent(
         }
     }
 
-    // Description chunks (chunk larger text)
+    // Description chunks（按 [NNNN] 段落号 / 章节标题打标签，无标记回退窗口）
     if !description.is_empty() {
-        for text in chunk_text(description, CHUNK_SIZE, CHUNK_OVERLAP) {
+        for (tag, text) in
+            chunk_structured_patent("description", description, CHUNK_SIZE, CHUNK_OVERLAP)
+        {
             let embedding = compute_chunk_embedding(&text);
             chunks.push(crate::db::rag::PatentChunk {
                 id: format!("{}-{}", patent_id, index),
                 patent_id: patent_id.to_string(),
                 chunk_index: index,
                 source_type: "description".to_string(),
+                section_tag: tag,
                 content: text,
                 embedding,
             });

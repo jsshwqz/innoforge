@@ -14,6 +14,18 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-11-17 — **Batch 1：DB v25 结构化分块 + BM25/向量 RRF 混合检索（#78）+ OpenAlex 学术源 + 解除 5000 字硬截断**（PR 待建）
+
+- **状态 / Status**: 🚧 PR 等 CI
+- **开工声明**: ACK 2026-10-27 整顿令：整顿令窗口已按其自身条款届满（见 2026-11-15 条），本批为用户指定的批次任务（Batch 1），不属冻结类别；issue [#78](https://github.com/jsshwqz/innoforge/issues/78) 收口。
+- **① DB v24 → v25**（`src/db/migrations.rs`）: `patent_chunks.section_tag TEXT NOT NULL DEFAULT ''` + 索引 `idx_chunk_section_tag`（`patent_id, section_tag` 复合）+ `chunks_fts`（FTS5 `unicode61`，列 `content/chunk_id/patent_id`）；存量回填独立事务 `backfill_chunks_fts`（delete-first 幂等，回填正文经 `db::rag::fts_bigram_text` CJK bigram 切分——unicode61 不切 CJK，不做变换则中文整句成单 token、BM25 通道形同虚设）；v24→v25 升级路径守卫测试（列存在 + 回填形态 + 幂等重放不重复）。
+- **② 结构化分块**（`src/rag/chunker.rs` + `src/rag/mod.rs`）: `pub fn chunk_structured_patent(source_type, text, chunk_size, overlap) -> Vec<(String, String)>`——权利要求按序号打 `Claim:N`（有状态扫描：期望序号严格递进，`1.5 mm`/`图1.`/「权利要求1所述」不误切），说明书优先按 `[0001]` 段落号打 `Desc:[0001]`、无段落号按章节标题（技术领域/背景技术/发明内容/附图说明/具体实施方式整行锚定）、都无则回退 `chunk_text` 窗口标 `Desc:Window`；超长片段细分保留同一标签；`build_chunks_from_patent` 三路（abstract/claim/description）全部接入。
+- **③ BM25 + 向量 RRF 混合检索**（`src/db/rag.rs` + `src/rag/retriever.rs` + `src/rag/assembler.rs`）: `PatentChunk` 增 `#[serde(default)] section_tag`（旧 JSON/旧库兼容）；`save_patent_chunks` 同事务维护 chunks_fts（delete-first + bigram insert）；`search_chunks_lexical`（FTS5 MATCH + bm25 负值翻转正分）与 `search_chunks_hybrid_rrf`（`rrf_fuse` 纯函数 `1/(k+rank)` k=60，与 `/api/search/vector` 专利表级 RRF 同公式同 1-based 约定）；retriever 升级 hybrid_rrf，`ReferenceChunk` 增 `section_tag`（types/search.rs + serde_snapshot 快照同步 + 3 处测试夹具补字段）；assembler 引用头透传展示（`来源: claim / Claim:3`，空标签回退纯 source_type）；**召回率单测**：合成夹具利用现役 TF-IDF「排序权重伪嵌入」物理事实（decoy 与查询权重分布撞车、目标被填充词稀释），断言纯向量 top-1=decoy 而 RRF top-1=target 且 RRF top-k ⊇ 纯向量 top-k。
+- **④ 解除 5000 字硬截断**（`src/ai/patent.rs`）: `compare_multiple`（旧 6000 字）/`inventiveness_analysis`（旧 5000 字）改走 `structured_patent_excerpt`——按路由层拼装格式（`### ` 小节 / `权利要求书全文：`/`权利要求（前部分）：` 标记 / 说明书区块）切分后**权利要求 100% 保留一字不丢**，说明书按相关性选段（实施例 > 有益效果/技术效果 > 权利要求 bigram 重叠，贪心装预算），超预算丢弃段落数/字符数显式写入「数据完整性提示」尾注（AGENTS.md 2.5）；无结构标记整节超预算退回 `truncate_for_ai` 显式截断；6 组单测（末条权利要求不丢/预算内零改写/变体标记/多节独立预算/无结构回退/空输入）。
+- **⑤ OpenAlex 学术期刊源**（`src/search/providers/openalex.rs`，免费无 Key）: 严格实现 `SearchProvider` trait，`GET api.openalex.org/works?search=...&per-page=10`（2026-11-16 实测样本存 `D:\Temp\openalex-sample.json`）；`abstract_inverted_index` 倒排按位还原摘要正文；提取真实 `doi`（剥 `https://doi.org/` 前缀进 `patent_number`）、期刊名（`primary_location.source.display_name` 进 applicant）、年份、前 5 位作者；`SourceKind::OpenAlex` + 链尾恒登记（`online_chain_providers` 四源：SerpAPI→XHR→EPO→OpenAlex，链形状测试更新）；page>1 零出网 Skipped（不伪造分页）；15s 超时 + 单次重试 + FailKind 记账；前端 `DIAG_SOURCE_LABELS` 补 `openalex: 'OpenAlex 学术'`。如实标注边界：中文查询命中弱（英文著录索引，与 EPO 同类数据现实）；无全文（只著录+摘要）。
+- **运维记**: 本机 cargo 走 ustc 镜像（`~/.cargo/config.toml` replace-with），而全局 `HTTP(S)_PROXY=172.19.176.1:10810` 已死——cargo 经死代理拉镜像索引必失败（`failed to download replaced source registry`）；**正确姿势：cargo 命令前 `env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY ...` 清代理直连**（ustc 直连 200）。另外 `cargo check | grep` 后接 `echo $?` 拿到的是管道末命令退出码，验证 cargo 退出码必须用 `${PIPESTATUS[0]}`。
+- **验证**: fmt --check / clippy --all-targets -D warnings 零告警；`cargo test --no-fail-fast` 结果见 PR 正文。
+
 ### 2026-11-16 — **Batch 3-A 收口：实验沙箱 3 轮自修复 + CAD 静默吞错/阻塞 IO 修复**（PR #225）
 
 - **状态 / Status**: ✅ 收口（12/13 检查绿后补本条过 Doc Staleness 门禁，随后原生合并 → main）

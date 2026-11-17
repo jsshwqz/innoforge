@@ -254,7 +254,9 @@ impl AiClient {
              - 技术演进趋势\n\
              - 最具创新性的方案\n\
              - 互补性分析",
-            patents = crate::ai::client::truncate_for_ai(patents_info, 6000),
+            // Batch 1 任务 1.4：废除 6000 字硬截断——权利要求 100% 保留，
+            // 说明书按相关性选段（每节预算 20k 字符，超限带显式完整性提示）
+            patents = structured_patent_excerpt(patents_info, 20_000),
         );
 
         let messages = vec![
@@ -304,8 +306,11 @@ impl AiClient {
              - **反论**: 可能存在的相反观点或证据\n\
              - **下一步**: 建议的应对策略\n\
              最后给出「综合答辩策略建议」，并单列至少3项“风险N：”及对应的缓解措施。",
-            my_patent = crate::ai::client::truncate_for_ai(my_patent_info, 5000),
-            references = crate::ai::client::truncate_for_ai(references_info, 5000),
+            // Batch 1 任务 1.4：废除 5000 字硬截断——三步法分析的关键事实在权利要求
+            // 全文与实施例段，改为 100% 权利要求 + 说明书相关性选段（每节 30k 字符
+            // 预算，超限带显式完整性提示），细节见 structured_patent_excerpt
+            my_patent = structured_patent_excerpt(my_patent_info, 30_000),
+            references = structured_patent_excerpt(references_info, 30_000),
         );
 
         let messages = vec![
@@ -1754,6 +1759,269 @@ impl AiClient {
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Batch 1 任务 1.4：结构化截取——100% 保留全部权利要求书 + 说明书按相关性选段
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// 与 `truncate_for_ai`（盲目取前 N 字符）的分工：创造性/对比分析的核心材料是
+// 权利要求书——按字符数盲目截断会把靠后的权利要求（往往是最关键的保护范围递进）
+// 整条丢掉，审查分析直接失真（5000 字硬截断的实测缺陷）。本组函数：
+// 1. 按 `### ` 小节切分（`compare_multiple` / `resolve_references` 路由层的多文档
+//    拼装格式），单文档无小节头则整体视作一节；
+// 2. 每节内定位权利要求区（路由层拼装标记行）100% 保留；
+// 3. 说明书段落按相关性选段（实施例 > 有益效果/技术效果 > 与权利要求 bigram 重叠），
+//    预算 `description_budget` 字符，预算充裕时全量保留；
+// 4. 被丢弃的段落数/字符数显式写入尾部提示（AGENTS.md 2.5：送 AI 的数据截断
+//    不得静默，必须让模型知道材料不完整）。
+
+/// 权利要求区标记行（路由层拼装变体 + 上传原文的裸标题行）。
+const CLAIMS_SECTION_MARKERS: [&str; 8] = [
+    "权利要求书全文：",
+    "权利要求书全文:",
+    "权利要求（前部分）：",
+    "权利要求（前部分):",
+    "权利要求书：",
+    "权利要求书:",
+    "权利要求：",
+    "权利要求:",
+];
+
+/// 判定一行是否权利要求区标记（裸标题行「权利要求书」也算）。
+fn is_claims_marker(trimmed: &str) -> bool {
+    CLAIMS_SECTION_MARKERS
+        .iter()
+        .any(|m| trimmed.starts_with(m))
+        || trimmed == "权利要求书"
+}
+
+/// 权利要求区之后的区块标记（命中即离开权利要求区，进入说明书选段池）。
+const AFTER_CLAIMS_MARKERS: [&str; 7] = [
+    "说明书",
+    "具体实施方式",
+    "技术领域",
+    "背景技术",
+    "发明内容",
+    "附图说明",
+    "摘要",
+];
+
+/// 是否 CJK 表意字符（权利要求 bigram 关键词提取用，局部判据）。
+fn is_cjk_ideograph(c: char) -> bool {
+    matches!(c, '\u{3400}'..='\u{4DBF}' | '\u{4E00}'..='\u{9FFF}' | '\u{F900}'..='\u{FAFF}')
+}
+
+/// 从权利要求书提取高频 CJK bigram 关键词（说明书选段的相关性判据）。
+/// 功能词停用表过滤；按频次降序、同频按字典序（确定性），截 `cap` 个。
+fn claim_keywords(claims: &str, cap: usize) -> Vec<String> {
+    const STOP: [&str; 9] = [
+        "所述", "一种", "在于", "以及", "或者", "其中", "之间", "权利", "要求",
+    ];
+    let chars: Vec<char> = claims.chars().collect();
+    let mut freq: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for w in chars.windows(2) {
+        if is_cjk_ideograph(w[0]) && is_cjk_ideograph(w[1]) {
+            let gram: String = w.iter().collect();
+            *freq.entry(gram).or_insert(0) += 1;
+        }
+    }
+    let mut pairs: Vec<(String, usize)> = freq
+        .into_iter()
+        .filter(|(g, _)| !STOP.contains(&g.as_str()))
+        .collect();
+    pairs.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    pairs.truncate(cap);
+    pairs.into_iter().map(|(g, _)| g).collect()
+}
+
+/// 一节文本 → (header, claims, description)。
+///
+/// header = 权利要求标记行之前的所有行（专利号/标题/申请人/摘要等）；claims =
+/// 标记行后直到说明书/摘要等区块标记的全文；description = 其后的全部文本。
+/// 无任何结构标记时 claims 与 description 均为空串（调用方原样保留整节）。
+fn split_claims_description(section: &str) -> (String, String, String) {
+    let mut header = String::new();
+    let mut claims = String::new();
+    let mut description = String::new();
+    // stage: 0=header 1=claims 2=description
+    let mut stage = 0u8;
+    for line in section.lines() {
+        let trimmed = line.trim();
+        match stage {
+            0 => {
+                if is_claims_marker(trimmed) {
+                    stage = 1;
+                } else {
+                    header.push_str(line);
+                    header.push('\n');
+                }
+            }
+            1 => {
+                if AFTER_CLAIMS_MARKERS.iter().any(|m| trimmed.starts_with(m)) {
+                    stage = 2;
+                    description.push_str(line);
+                    description.push('\n');
+                } else {
+                    claims.push_str(line);
+                    claims.push('\n');
+                }
+            }
+            _ => {
+                description.push_str(line);
+                description.push('\n');
+            }
+        }
+    }
+    (header, claims, description)
+}
+
+/// 说明书段落相关性选段。
+/// 返回 `(选中段落, 总段数, 总字符, 丢弃段数, 丢弃字符)`。
+/// 全文在预算内 → 全量保留零丢弃；超预算 → 按相关性贪心装预算（同分按原序），
+/// 相关性段落装完后剩余预算按原序补普通段落。
+fn select_description_paragraphs(
+    description: &str,
+    claims: &str,
+    budget: usize,
+) -> (Vec<String>, usize, usize, usize, usize) {
+    let paragraphs: Vec<&str> = description
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .collect();
+    let total_n = paragraphs.len();
+    let char_lens: Vec<usize> = paragraphs.iter().map(|p| p.chars().count()).collect();
+    let total_chars: usize = char_lens.iter().sum();
+    if total_n == 0 {
+        return (vec![], 0, 0, 0, 0);
+    }
+    if total_chars <= budget {
+        return (
+            paragraphs.iter().map(|p| (*p).to_string()).collect(),
+            total_n,
+            total_chars,
+            0,
+            0,
+        );
+    }
+    let keywords = claim_keywords(claims, 30);
+    let score = |p: &str| -> i32 {
+        let mut s = 0i32;
+        if p.contains("实施例") {
+            s += 4;
+        }
+        if p.contains("有益效果") || p.contains("技术效果") {
+            s += 2;
+        }
+        let mut hits = 0i32;
+        for kw in &keywords {
+            if p.contains(kw.as_str()) {
+                hits += 1;
+                if hits >= 3 {
+                    break;
+                }
+            }
+        }
+        s + hits
+    };
+    let scores: Vec<i32> = paragraphs.iter().map(|p| score(p)).collect();
+    let mut order: Vec<usize> = (0..total_n).collect();
+    order.sort_by(|&a, &b| scores[b].cmp(&scores[a]).then(a.cmp(&b)));
+    let mut chosen = vec![false; total_n];
+    let mut used = 0usize;
+    // pass 1：相关性段落（score > 0）按分装预算
+    for &i in &order {
+        if scores[i] == 0 {
+            continue;
+        }
+        if used + char_lens[i] <= budget {
+            chosen[i] = true;
+            used += char_lens[i];
+        }
+    }
+    // pass 2：剩余预算按原序补普通段落
+    for i in 0..total_n {
+        if !chosen[i] && scores[i] == 0 && used + char_lens[i] <= budget {
+            chosen[i] = true;
+            used += char_lens[i];
+        }
+    }
+    let mut picked = Vec::new();
+    let mut omitted_n = 0usize;
+    let mut omitted_chars = 0usize;
+    for i in 0..total_n {
+        if chosen[i] {
+            picked.push(paragraphs[i].to_string());
+        } else {
+            omitted_n += 1;
+            omitted_chars += char_lens[i];
+        }
+    }
+    (picked, total_n, total_chars, omitted_n, omitted_chars)
+}
+
+/// 单节结构化截取：预算内零丢弃原样返回；仅在丢弃段落时才重写 + 加显式提示。
+fn structured_section(section: &str, description_budget: usize) -> String {
+    let (header, claims, description) = split_claims_description(section);
+    let (picked, total_n, total_chars, omitted_n, omitted_chars) =
+        select_description_paragraphs(&description, &claims, description_budget);
+    // 预算内零丢弃（含「无结构标记整节」与「有结构但说明书全保留」两种形态）→ 原样返回：
+    // 不重排、不丢路由层「权利要求书全文：」等标记，让小输入端到端字节不变（零改写）。
+    // 只有真的丢弃了段落时才值得重写加提示（AGENTS.md 2.5：截断必须显式告知）。
+    if omitted_n == 0 {
+        return section.to_string();
+    }
+    let mut out = String::new();
+    out.push_str(header.trim_end());
+    if !claims.is_empty() {
+        out.push_str("\n\n权利要求书（100% 全文保留）：\n");
+        out.push_str(claims.trim_end());
+    }
+    if !picked.is_empty() {
+        out.push_str("\n\n说明书关键段落（按与权利要求的相关性提取）：\n");
+        out.push_str(&picked.join("\n"));
+    }
+    out.push_str(&format!(
+        "\n\n【数据完整性提示：本节说明书原文共 {total_n} 段 / {total_chars} 字符；\
+         权利要求书已 100% 保留，说明书按相关性送入 {} 段 / {} 字符，\
+         其余 {omitted_n} 段（{omitted_chars} 字符）未包含。\
+         凡涉及未包含段落内容的问题，请明确说明材料不完整，禁止推测或补全。】",
+        total_n - omitted_n,
+        total_chars - omitted_chars
+    ));
+    out
+}
+
+/// 结构化截取总入口（Batch 1 任务 1.4）。
+///
+/// 多文档拼装输入（`### 专利 N` / `### 对比文件 N` / `### 文件 N` 小节）逐节处理，
+/// 各节独立享受 `description_budget`；无小节头输入整体一节。权利要求书一律 100%
+/// 保留，不做任何字符截断；只有「无结构标记且超预算」的整节才退回
+/// `truncate_for_ai` 显式截断。
+pub(crate) fn structured_patent_excerpt(text: &str, description_budget: usize) -> String {
+    if text.trim().is_empty() {
+        return String::new();
+    }
+    let mut out = String::new();
+    let mut current = String::new();
+    let flush = |out: &mut String, current: &mut String| {
+        if !current.trim().is_empty() {
+            if !out.is_empty() {
+                out.push('\n');
+            }
+            out.push_str(&structured_section(current, description_budget));
+        }
+        current.clear();
+    };
+    for line in text.lines() {
+        if line.trim_start().starts_with("### ") {
+            flush(&mut out, &mut current);
+        }
+        current.push_str(line);
+        current.push('\n');
+    }
+    flush(&mut out, &mut current);
+    out
+}
+
 #[cfg(test)]
 mod ua_tests {
     use super::AiClient;
@@ -2019,4 +2287,95 @@ fn extract_oa_response_section_fallback_is_char_safe() {
         tail.chars().all(|c| c == '控' || c == 'a' || c == 'b'),
         "fallback must start on a char boundary"
     );
+}
+
+#[cfg(test)]
+mod structured_excerpt_tests {
+    use super::structured_patent_excerpt;
+
+    /// 权利要求 100% 保留：说明书超预算被选段时，权利要求全文一字不丢，且带显式提示。
+    #[test]
+    fn claims_fully_preserved_and_note_present() {
+        let claims = "1.一种固态电池，包括正极、负极与固态电解质层。2.根据权利要求1所述的固态电池，其特征在于所述固态电解质层为硫化物层。3.根据权利要求2所述的固态电池，还包括封装外壳。";
+        let filler = "常规工艺描述段落，与权利要求无重叠词汇。".repeat(40);
+        let desc = format!("说明书\n[0001]\n背景介绍。{filler}\n[0088]\n实施例1：采用钪碲化合物作为快离子导体，有益效果显著。");
+        let text = format!("专利号：CN000000001A\n标题：测试\n\n权利要求书全文：\n{claims}\n\n说明书（前部分）：\n{desc}");
+        let out = structured_patent_excerpt(&text, 500);
+        assert!(out.contains(claims), "权利要求全文必须 100% 保留");
+        assert!(out.contains("实施例1"), "实施例段必须入选（score 最高）");
+        assert!(
+            !out.contains("常规工艺描述段落，与权利要求无重叠词汇。常规工艺描述段落"),
+            "低相关填充段应被丢弃"
+        );
+        assert!(out.contains("数据完整性提示"), "丢弃必须显式声明");
+        assert!(out.contains("未包含"), "提示须说明哪些内容未包含");
+        // 末条权利要求（3.）必须在 —— 5000 字硬截断时代会被切掉的部分
+        assert!(out.contains("还包括封装外壳"));
+    }
+
+    /// 输入在预算内 → 原样保留、零丢弃、无提示（不惊扰模型）。
+    #[test]
+    fn small_input_untouched_without_note() {
+        let text = "专利号：CN000000002A\n\n权利要求书全文：\n1.一种装置。\n\n说明书（前部分）：\n[0001]\n简短说明书。";
+        let out = structured_patent_excerpt(text, 30_000);
+        assert_eq!(text, out, "预算内输入不得被改写");
+        assert!(!out.contains("数据完整性提示"));
+    }
+
+    /// resolve_references 拼装格式（「权利要求（前部分）：」变体）同样命中。
+    #[test]
+    fn route_variant_marker_recognized() {
+        let claims = "1.一种方法。2.根据权利要求1所述的方法。";
+        let text = format!(
+            "### 对比文件 1 — 标题\n专利号：CN000000003A\n标题：t\n申请人：a\n\n摘要：摘要。\n\n权利要求（前部分）：\n{claims}\n\n说明书（前部分）：\n[0001]\n实施例：具体步骤，所述方法应用于制备。"
+        );
+        let out = structured_patent_excerpt(&text, 30_000);
+        assert!(out.contains(claims), "变体标记行也要命中权利要求区");
+        assert!(out.contains("实施例：具体步骤"));
+        assert!(!out.contains("数据完整性提示"), "预算充足时零丢弃");
+    }
+
+    /// 多文档拼装（### 小节）逐节处理，各节独立预算。
+    #[test]
+    fn multi_section_processed_independently() {
+        let big = "无关填充句子。".repeat(200);
+        let text = format!(
+            "### 专利 1\n权利要求书全文：\n1.一种电池。\n\n说明书（前部分）：\n{big}\n### 专利 2\n权利要求书全文：\n1.一种装置。\n\n说明书（前部分）：\n[0001]\n实施例：装置的具体装配方式。"
+        );
+        let out = structured_patent_excerpt(&text, 300);
+        // 专利 1 超预算 → 有提示；专利 2 在预算内 → 无提示
+        let s1 = out.split("### 专利 2").next().expect("section 1");
+        let s2 = format!(
+            "### 专利 2{}",
+            out.split("### 专利 2").nth(1).expect("section 2")
+        );
+        assert!(s1.contains("数据完整性提示"), "超预算节须带提示");
+        assert!(s2.contains("实施例：装置的具体装配方式"));
+        assert!(!s2.contains("数据完整性提示"), "预算内节零丢弃: {s2}");
+        assert!(
+            s1.contains("1.一种电池。") && s2.contains("1.一种装置。"),
+            "两节权利要求都全保留"
+        );
+    }
+
+    /// 无结构标记的整节：预算内原样；超预算走 truncate_for_ai 显式截断。
+    #[test]
+    fn unstructured_section_falls_back_honestly() {
+        let small = "一段没有任何结构标记的普通文本。";
+        assert_eq!(small, structured_patent_excerpt(small, 30_000));
+        let big = "长文本无结构标记。".repeat(5000);
+        let out = structured_patent_excerpt(&big, 1_000);
+        assert!(
+            out.contains("数据完整性提示"),
+            "超预算无结构文本须显式截断提示: {}",
+            out.chars().skip(990).take(120).collect::<String>()
+        );
+    }
+
+    /// 空输入 → 空输出（不产生任何提示噪音）。
+    #[test]
+    fn empty_input_empty_output() {
+        assert_eq!("", structured_patent_excerpt("", 10_000));
+        assert_eq!("", structured_patent_excerpt("   ", 10_000));
+    }
 }

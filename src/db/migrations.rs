@@ -499,6 +499,34 @@ pub(crate) fn run(conn: &Connection, current_version: i32, target_version: i32) 
         tracing::info!("Database migrated to version 24 (oa_rounds)");
     }
 
+    if current_version < 25 {
+        // Batch 1 任务 1.1（issue #78 前置）：chunk 结构化分块 + BM25 词汇通道的 schema。
+        // - section_tag：结构化分块的段落标签（Claim:N / Desc:[0001] / Desc:具体实施方式 /
+        //   Desc:Window / Abstract），检索结果透传展示；存量数据空串。
+        // - chunks_fts：patent_chunks 的 FTS5 词汇索引（unicode61）。索引正文对 CJK 连续段
+        //   做 bigram 空格切分（`db::rag::fts_bigram_text`，与查询侧同一出处）——unicode61
+        //   不切 CJK，不做变换则整句成一个 token，BM25 通道对中文形同虚设。
+        //   chunks_fts 是派生索引（权威正文仍在 patent_chunks.content）。
+        let mut sql = String::new();
+        if !column_exists(conn, "patent_chunks", "section_tag")? {
+            sql.push_str(
+                "ALTER TABLE patent_chunks ADD COLUMN section_tag TEXT NOT NULL DEFAULT '';",
+            );
+        }
+        sql.push_str(
+            "CREATE INDEX IF NOT EXISTS idx_chunk_section_tag ON patent_chunks(patent_id, section_tag);
+             CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
+                content, chunk_id UNINDEXED, patent_id UNINDEXED, tokenize='unicode61'
+             );",
+        );
+        run_migration_tx(conn, 25, &sql)?;
+        // 存量回填：delete-first 幂等（竞态败者重放/手工重放都收敛到正确状态）。
+        // 独立事务且失败不回滚版本：chunks_fts 缺行只让词汇通道按空结果降级，
+        // 权威数据（patent_chunks）完好（#13 的原子性只要求 schema+版本一致）。
+        backfill_chunks_fts(conn)?;
+        tracing::info!("Database migrated to version 25 (chunk_section_tag_chunks_fts)");
+    }
+
     if current_version > 0 && current_version < target_version {
         tracing::info!(
             "Database migrated from version {} to {}",
@@ -507,6 +535,49 @@ pub(crate) fn run(conn: &Connection, current_version: i32, target_version: i32) 
         );
     }
 
+    Ok(())
+}
+
+/// 把 `patent_chunks` 存量数据回填进 `chunks_fts`（Batch 1 任务 1.1）。
+///
+/// 回填发生在 DDL+版本推进（[`run_migration_tx`]）之后、独立事务内：版本号已落盘，
+/// 进程在回填中途被杀时下次启动不会重跑 v25——delete-first 保证重放幂等（旧索引行
+/// 全清后按当前 patent_chunks 重建），词汇检索对「索引落后/缺行」在查询侧按空结果
+/// 静默降级。写入正文经 [`crate::db::rag::fts_bigram_text`] 做 CJK bigram 切分，
+/// 与查询侧 [`crate::db::rag::fts_query_expr`] 同一出处（AGENTS.md 2.2）。
+fn backfill_chunks_fts(conn: &Connection) -> Result<()> {
+    conn.execute_batch("BEGIN IMMEDIATE")?;
+    let result = (|| -> Result<()> {
+        conn.execute_batch("DELETE FROM chunks_fts;")?;
+        let mut stmt = conn.prepare("SELECT id, patent_id, content FROM patent_chunks")?;
+        let rows: Vec<(String, String, String)> = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        drop(stmt);
+        let mut insert = conn
+            .prepare("INSERT INTO chunks_fts(content, chunk_id, patent_id) VALUES (?1, ?2, ?3)")?;
+        for (chunk_id, patent_id, content) in rows {
+            insert.execute(rusqlite::params![
+                crate::db::rag::fts_bigram_text(&content),
+                chunk_id,
+                patent_id
+            ])?;
+        }
+        Ok(())
+    })();
+    match result {
+        Ok(()) => conn.execute_batch("COMMIT")?,
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            return Err(e);
+        }
+    }
     Ok(())
 }
 
@@ -595,5 +666,72 @@ mod tests {
             )
             .unwrap();
         assert!(v >= 24, "两连接并发迁移后版本应到最新，实际 {v}");
+    }
+
+    /// Batch 1 任务 1.1 守卫：v24 → v25 升级路径。
+    ///
+    /// ① 升级后 `patent_chunks` 有 `section_tag` 列、`chunks_fts` 存在；
+    /// ② 存量 chunk 被回填进 chunks_fts，索引正文经 bigram 变换（与查询侧同一出处）；
+    /// ③ 幂等重放（schema_version 回拨到 24 再跑一遍）不产生重复回填。
+    #[test]
+    fn migration_v25_adds_section_tag_and_backfills_chunks_fts() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let conn = Connection::open(dir.path().join("v25.db")).unwrap();
+        conn.execute_batch("CREATE TABLE schema_version (version INTEGER NOT NULL);")
+            .unwrap();
+
+        // 1) 迁到 v24 并塞一条存量 chunk（裸 SQL，绕过 save_patent_chunks 的 FTS 同步）
+        run(&conn, 0, 24).unwrap();
+        conn.execute_batch(
+            "INSERT INTO patents (id, patent_number, title) VALUES ('p1', 'CN000000001A', 't');
+             INSERT INTO patent_chunks (id, patent_id, chunk_index, source_type, content, embedding)
+             VALUES ('p1-c0', 'p1', 0, 'description', '固态电池快离子导体', x'00000000');",
+        )
+        .unwrap();
+
+        // 2) v24 → v25：DDL + 回填
+        run(&conn, 24, 25).unwrap();
+        let v: i32 = conn
+            .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(25, v);
+
+        let has_col: bool = column_exists(&conn, "patent_chunks", "section_tag").unwrap();
+        assert!(has_col, "section_tag 列必须存在");
+        let fts_tables: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='chunks_fts'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(1, fts_tables, "chunks_fts 必须存在");
+
+        // 3) 回填内容 = bigram 变换后的正文（与 crate::db::rag::fts_bigram_text 同出处）
+        let fts_content: String = conn
+            .query_row(
+                "SELECT content FROM chunks_fts WHERE chunk_id = 'p1-c0'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            crate::db::rag::fts_bigram_text("固态电池快离子导体"),
+            fts_content,
+            "回填正文必须是 bigram 切分形态"
+        );
+
+        // 4) 幂等重放：版本回拨 + 重跑，不重复回填（回填 delete-first 收敛）
+        conn.execute_batch("DELETE FROM schema_version; INSERT INTO schema_version VALUES (24);")
+            .unwrap();
+        run(&conn, 24, 25).unwrap();
+        let rows: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM chunks_fts WHERE chunk_id = 'p1-c0'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(1, rows, "重放后不得出现重复索引行");
     }
 }
