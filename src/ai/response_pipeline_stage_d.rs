@@ -1,6 +1,7 @@
 use crate::ai::case_input::{CaseInput, EffectMismatch};
-use crate::ai::client::AiClient;
+use crate::ai::client::{safe_truncate_chars, AiClient};
 use crate::ai::extraction::normalize_text;
+use serde::Deserialize;
 
 // ── Stage D：作用相同断言对比 ──────────────────────────────────────────
 
@@ -43,12 +44,9 @@ pub(super) async fn stage_d_compare_effects(
 
     // Step 1: 正则扫描"作用相同"类断言（在去空白文本上扫描，避免残词）
     let effect_claims = scan_effect_claims(&oa_normalized);
-    if effect_claims.is_empty() {
-        return Vec::new();
-    }
 
     // Step 2: 获取本申请效果句（去空白，与OA文本同规则）
-    let actual_effects = if !input.spec_effect_statements.is_empty() {
+    let actual_effects: Vec<String> = if !input.spec_effect_statements.is_empty() {
         input
             .spec_effect_statements
             .iter()
@@ -63,61 +61,182 @@ pub(super) async fn stage_d_compare_effects(
         Vec::new()
     };
 
-    if actual_effects.is_empty() {
-        return Vec::new();
-    }
+    // Step 3: 确定性扫描生成 base_mismatches
+    let mut base_mismatches = Vec::new();
+    if !effect_claims.is_empty() && !actual_effects.is_empty() {
+        for claim in &effect_claims {
+            let ref_label = find_ref_label_for_claim(&oa_normalized, &claim.text);
 
-    // Step 3: 对每个效果断言，对比本申请实际效果
-    let mut mismatches = Vec::new();
+            for actual_effect in &actual_effects {
+                let is_identical = normalize_text(&claim.text)
+                    .contains(&normalize_text(actual_effect))
+                    || normalize_text(actual_effect).contains(&normalize_text(&claim.text));
 
-    for claim in &effect_claims {
-        // 找到 claim 对应的对比文件标签
-        let ref_label = find_ref_label_for_claim(&oa_normalized, &claim.text);
+                if !is_identical {
+                    let rebuttal_text = format!(
+                        "驳回决定声称{}\"{}\"，然而本申请说明书记载的技术效果为\
+                         \"{}\"，两者在技术效果上存在实质差异。\n\n\
+                         - 驳回决定声称效果：{}\n\
+                         - 本申请说明书效果：{}\n\n\
+                         审查员将技术效果实质不同的方案认定为\"作用相同\"，\
+                         不符合创造性判断中关于\"技术效果\"的对比要求。\
+                         根据《专利审查指南》，创造性判断应当对比\
+                         要求保护的发明与现有技术所达到的技术效果是否\
+                         实质相同，而非仅以功能层面的笼统对应否定创造性。",
+                        ref_label
+                            .as_deref()
+                            .map(|l| format!("{}中", l))
+                            .unwrap_or_default(),
+                        claim.text,
+                        actual_effect,
+                        claim.text,
+                        actual_effect
+                    );
 
-        // 对每条本申请效果句，检查是否与OA声称的效果实质不同
-        for actual_effect in &actual_effects {
-            // 确定性检查：如果OA声称的效果文本与本申请效果文本不完全一致
-            // 则可能存在效果差异，生成反驳段
-            let is_identical = normalize_text(&claim.text).contains(&normalize_text(actual_effect))
-                || normalize_text(actual_effect).contains(&normalize_text(&claim.text));
-
-            if !is_identical {
-                let rebuttal_text = format!(
-                    "驳回决定声称{}\"{}\"，然而本申请说明书记载的技术效果为\
-                     \"{}\"，两者在技术效果上存在实质差异。\n\n\
-                     - 驳回决定声称效果：{}\n\
-                     - 本申请说明书效果：{}\n\n\
-                     审查员将技术效果实质不同的方案认定为\"作用相同\"，\
-                     不符合创造性判断中关于\"技术效果\"的对比要求。\
-                     根据《专利审查指南》，创造性判断应当对比\
-                     要求保护的发明与现有技术所达到的技术效果是否\
-                     实质相同，而非仅以功能层面的笼统对应否定创造性。",
-                    ref_label
-                        .as_deref()
-                        .map(|l| format!("{}中", l))
-                        .unwrap_or_default(),
-                    claim.text,
-                    actual_effect,
-                    claim.text,
-                    actual_effect
-                );
-
-                let ref_label_str = ref_label.clone().unwrap_or_else(|| "对比文件".to_string());
-                mismatches.push(EffectMismatch {
-                    oa_claim: claim.text.clone(),
-                    ref_label: ref_label_str,
-                    actual_effect: actual_effect.clone(),
-                    rebuttal_text,
-                });
+                    let ref_label_str = ref_label.clone().unwrap_or_else(|| "对比文件".to_string());
+                    base_mismatches.push(EffectMismatch {
+                        oa_claim: claim.text.clone(),
+                        ref_label: ref_label_str,
+                        actual_effect: actual_effect.clone(),
+                        rebuttal_text,
+                    });
+                }
             }
         }
     }
 
-    // Step 4: 如果有AI且存在mismatches，可选调用AI做语义精判
-    // 当前确定性实现已足够，AI精判留作Phase 4增强
-    let _ = ai_client;
+    // Step 4: AI 强模型机理—结构—效果深度对比（60s 超时 + output_guard 过滤，失败无损回退 base_mismatches）
+    if let Some(ai) = ai_client {
+        if !input.reference_documents.is_empty() {
+            if let Some(ai_mismatches) = run_ai_mechanism_comparison(ai, input).await {
+                for item in ai_mismatches {
+                    let dup = base_mismatches.iter().any(|existing| {
+                        existing.rebuttal_text == item.rebuttal_text
+                            || (existing.ref_label == item.ref_label
+                                && existing.oa_claim == item.oa_claim)
+                    });
+                    if !dup {
+                        base_mismatches.push(item);
+                    }
+                }
+            }
+        }
+    }
 
-    mismatches
+    base_mismatches
+}
+
+#[derive(Debug, Deserialize)]
+struct AiMismatchCandidate {
+    #[serde(default)]
+    oa_claim: String,
+    #[serde(default)]
+    ref_label: String,
+    #[serde(default)]
+    actual_effect: String,
+    #[serde(default)]
+    rebuttal_text: String,
+}
+
+/// 解析 AI 返回的机理—结构—效果对比 JSON，并逐条经 `output_guard` 校验过滤。
+pub(super) fn parse_and_guard_ai_mismatches(raw: &str, input: &CaseInput) -> Vec<EffectMismatch> {
+    let Some(start) = raw.find('[') else {
+        return Vec::new();
+    };
+    let Some(end) = raw.rfind(']') else {
+        return Vec::new();
+    };
+    if end < start {
+        return Vec::new();
+    }
+    let Some(json_slice) = raw.get(start..=end) else {
+        return Vec::new();
+    };
+    let Ok(candidates) = serde_json::from_str::<Vec<AiMismatchCandidate>>(json_slice) else {
+        return Vec::new();
+    };
+
+    let mut result = Vec::new();
+    for c in candidates {
+        let oa_claim = c.oa_claim.trim().to_string();
+        let ref_label = c.ref_label.trim().to_string();
+        let actual_effect = c.actual_effect.trim().to_string();
+        let rebuttal_text = c.rebuttal_text.trim().to_string();
+        if oa_claim.is_empty()
+            || ref_label.is_empty()
+            || actual_effect.is_empty()
+            || rebuttal_text.is_empty()
+        {
+            continue;
+        }
+        if !crate::ai::output_guard::run_guard(&rebuttal_text, input).passed {
+            continue;
+        }
+        let dup = result
+            .iter()
+            .any(|existing: &EffectMismatch| existing.rebuttal_text == rebuttal_text);
+        if !dup {
+            result.push(EffectMismatch {
+                oa_claim,
+                ref_label,
+                actual_effect,
+                rebuttal_text,
+            });
+        }
+    }
+    result
+}
+
+async fn run_ai_mechanism_comparison(
+    ai: &AiClient,
+    input: &CaseInput,
+) -> Option<Vec<EffectMismatch>> {
+    let system_prompt = "你是资深中国专利代理师。请严格对比本申请与对比文件的「工作原理—结构连接—实际效果」，\
+仅基于输入材料输出 JSON 数组，不要输出任何额外说明或 Markdown。\
+每个数组元素包含 4 个字符串字段：oa_claim、ref_label、actual_effect、rebuttal_text。\
+禁止编造未提供的公开号；禁止使用英文缩写 vs 或 VS；禁止使用“等”后接“可以/能够/应当/显然/必然/确定”。";
+
+    let mut refs_summary = String::new();
+    for doc in input.reference_documents.iter().take(4) {
+        refs_summary.push_str(&format!(
+            "[{} | {}]\n{}\n\n",
+            doc.label,
+            doc.publication_number,
+            safe_truncate_chars(&doc.full_text, 1500)
+        ));
+    }
+
+    let spec_excerpt = input
+        .spec_full_text
+        .as_deref()
+        .map(|s| safe_truncate_chars(s, 2000))
+        .unwrap_or_default();
+
+    let user_prompt = format!(
+        "请对比以下本申请与对比文件在「工作原理—结构连接—实际效果」上的实质差异，输出 JSON 数组：\n\
+<user_input>\n\
+【审查意见全文】\n{}\n\n\
+【待审权利要求】\n{}\n\n\
+【说明书摘要/正文】\n{}\n\n\
+【对比文件】\n{}\n\
+</user_input>",
+        safe_truncate_chars(&input.oa_full_text, 2000),
+        safe_truncate_chars(&input.claims_under_review, 1500),
+        spec_excerpt,
+        refs_summary
+    );
+
+    let timed_client = ai.clone_with_timeout(std::time::Duration::from_secs(60));
+    let raw = timed_client
+        .chat_with_system(system_prompt, &user_prompt, 0.2)
+        .await
+        .ok()?;
+    let parsed = parse_and_guard_ai_mismatches(&raw, input);
+    if parsed.is_empty() {
+        None
+    } else {
+        Some(parsed)
+    }
 }
 
 /// 正则扫描结果：OA中一个"作用相同"类断言。
@@ -327,4 +446,78 @@ pub(super) fn auto_extract_effect_statements(spec_full_text: &str) -> Vec<String
     }
 
     effects
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ai::case_input::{CaseMeta, ReferenceDocument};
+
+    fn make_stage_d_test_input() -> CaseInput {
+        CaseInput {
+            case_meta: CaseMeta {
+                application_number: "TEST001".to_string(),
+                invention_title: "液压控制阀".to_string(),
+                applicant: "测试单位".to_string(),
+                oa_date: Some("2026-01-01".to_string()),
+                claim_basis_text: None,
+                oa_type: "reject_review".to_string(),
+                claim_basis_date: None,
+            },
+            oa_full_text: "审查员认为D1公开了与本申请作用相同的阀芯结构。".to_string(),
+            reference_documents: vec![ReferenceDocument {
+                label: "D1".to_string(),
+                publication_number: "CN001".to_string(),
+                full_text: "D1公开了一种固定节流阀。".to_string(),
+                extraction_method: None,
+                page_count: None,
+                technical_field: Some("液压机械".to_string()),
+            }],
+            claims_under_review: "一种液压控制阀，包括滑动配合的阀芯与阀体。".to_string(),
+            spec_effect_statements: vec!["降低压力冲击并提高响应精度".to_string()],
+            spec_full_text: None,
+            legacy_analysis: None,
+            legacy_discussion: None,
+            custom_stopwords: vec![],
+        }
+    }
+
+    #[test]
+    fn parse_and_guard_filters_invalid_citations_and_keeps_valid_mechanism() {
+        let input = make_stage_d_test_input();
+        let raw = r#"```json
+[
+  {
+    "oa_claim": "D1与本申请作用相同",
+    "ref_label": "D1",
+    "actual_effect": "降低压力冲击",
+    "rebuttal_text": "D1采用固定节流，而本申请通过阀芯与阀体滑动配合实现压力缓冲，两者工作原理存在实质差异。"
+  },
+  {
+    "oa_claim": "引用未在案文献",
+    "ref_label": "D9",
+    "actual_effect": "提高精度",
+    "rebuttal_text": "参见未经提交的CN999999999A可知效果不同。"
+  },
+  {
+    "oa_claim": "含英文缩写",
+    "ref_label": "D1",
+    "actual_effect": "提高精度",
+    "rebuttal_text": "本申请 vs D1 在工作机理上完全不同。"
+  }
+]
+```"#;
+
+        let parsed = parse_and_guard_ai_mismatches(raw, &input);
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].ref_label, "D1");
+        assert!(parsed[0].rebuttal_text.contains("工作原理存在实质差异"));
+    }
+
+    #[test]
+    fn parse_and_guard_returns_empty_on_malformed_json() {
+        let input = make_stage_d_test_input();
+        assert!(parse_and_guard_ai_mismatches("not json at all", &input).is_empty());
+        assert!(parse_and_guard_ai_mismatches("[{broken}]", &input).is_empty());
+    }
 }

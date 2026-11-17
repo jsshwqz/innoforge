@@ -1088,6 +1088,23 @@ fn stage_e_assemble(
         text.push_str("\n\n");
     }
 
+    let arbitration =
+        crate::ai::strategy_arbitration::arbitrate(input, features, rebuttals, effect_mismatches);
+    for item in &arbitration.items {
+        let is_academic_doi = item.line
+            == crate::ai::strategy_arbitration::AttackLine::ZeroEvidence
+            && (item.text.contains("DOI") || item.text.contains("10."));
+        let is_topology_diff = item.line
+            == crate::ai::strategy_arbitration::AttackLine::MechanismEffectDiff
+            && !effect_mismatches
+                .iter()
+                .any(|em| em.rebuttal_text == item.text);
+        if is_academic_doi || is_topology_diff {
+            text.push_str(&item.text);
+            text.push_str("\n\n");
+        }
+    }
+
     if !features.is_empty() {
         section += 1;
         text.push_str(&format!(
@@ -2059,5 +2076,39 @@ mod tests {
             "Guard errors: {:?}",
             result.guard_result.errors
         );
+    }
+
+    #[test]
+    fn stage_e_includes_academic_doi_and_part_topology_rebuttals() {
+        let mut input = make_sample_case_input();
+        input.oa_full_text = "审查员认为上述特征属于本领域的公知常识。".to_string();
+        input.claims_under_review =
+            "一种控制阀，包括1-机架、2-阀体和3-阀芯，阀芯3与阀体2滑动配合。".to_string();
+        input.reference_documents = vec![
+            ReferenceDocument {
+                label: "D1".to_string(),
+                publication_number: "CN001".to_string(),
+                full_text: "对比文件1公开了一种机架和阀体，但未公开阀芯及其滑动配合结构。"
+                    .to_string(),
+                extraction_method: None,
+                page_count: None,
+                technical_field: None,
+            },
+            ReferenceDocument {
+                label: "NPL1".to_string(),
+                publication_number: "10.1016/j.test.2026.009".to_string(),
+                full_text: "Academic study.".to_string(),
+                extraction_method: Some("openalex".to_string()),
+                page_count: None,
+                technical_field: None,
+            },
+        ];
+
+        let output = stage_e_assemble(&input, &[], &[], &[], &[], &[], &[]);
+        assert!(output.contains("10.1016/j.test.2026.009"));
+        assert!(output.contains("阀芯") && output.contains("滑动配合"));
+
+        let guard = crate::ai::output_guard::run_guard(&output, &input);
+        assert!(guard.passed, "Guard errors: {:?}", guard.errors);
     }
 }

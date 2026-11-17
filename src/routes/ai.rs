@@ -2042,7 +2042,7 @@ pub async fn api_ai_oa_generate_response_letter(
     };
 
     let config_guard = s.config.read().unwrap_or_else(|e| e.into_inner());
-    let ai = config_guard.ai_client();
+    let ai = config_guard.ai_client_expert();
     let ai_fast = config_guard.ai_client_fast();
     drop(config_guard);
     // MC2: 生成答复书前做事实核查——致命档拒绝生成

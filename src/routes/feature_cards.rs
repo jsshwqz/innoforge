@@ -426,6 +426,329 @@ fn diff_strings(a: &str, b: &str) -> Vec<serde_json::Value> {
     ops
 }
 
+/// 语义级特征卡对比判定结果
+#[allow(dead_code)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SemanticDiffVerdict {
+    pub semantically_equivalent: bool,
+    pub diff_type: String,
+    pub novelty_significance: bool,
+    pub novelty_reason: String,
+    pub fallback_used: bool,
+}
+
+fn extract_context_hints(
+    db: &crate::db::Database,
+    idea_id: &str,
+    fallback_analysis: &str,
+) -> (String, Vec<String>) {
+    let ctx_json_opt = db
+        .load_pipeline_snapshot(idea_id)
+        .ok()
+        .flatten()
+        .map(|(ctx_json, _)| ctx_json)
+        .or_else(|| {
+            db.get_latest_version(idea_id, "main")
+                .ok()
+                .flatten()
+                .map(|v| v.context_json)
+        });
+
+    if let Some(ctx_json) = ctx_json_opt {
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&ctx_json) {
+            let analysis = val["ai_analysis"]
+                .as_str()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .unwrap_or(fallback_analysis)
+                .to_string();
+            let keywords = val["keywords"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(str::trim))
+                        .filter(|s| !s.is_empty())
+                        .map(String::from)
+                        .collect()
+                })
+                .unwrap_or_default();
+            return (analysis, keywords);
+        }
+    }
+
+    (fallback_analysis.to_string(), Vec::new())
+}
+
+fn build_deterministic_feature_cards(
+    idea_id: &str,
+    idea_title: &str,
+    idea_description: &str,
+    analysis_text: &str,
+    keywords: &[String],
+) -> Vec<FeatureCard> {
+    let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+    let segments: Vec<&str> = idea_description
+        .split(['。', '；', '\n', '.', ';'])
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .take(3)
+        .collect();
+
+    let key_rel = if keywords.is_empty() {
+        crate::ai::safe_truncate_chars(idea_description.trim(), 120).to_string()
+    } else {
+        keywords
+            .iter()
+            .take(5)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("、")
+    };
+    let steps = if analysis_text.trim().is_empty() {
+        "待补充实施步骤".to_string()
+    } else {
+        crate::ai::safe_truncate_chars(analysis_text.trim(), 160).to_string()
+    };
+    let problem = crate::ai::safe_truncate_chars(idea_title.trim(), 120).to_string();
+    let scenario = crate::ai::safe_truncate_chars(idea_title.trim(), 80).to_string();
+
+    if segments.is_empty() {
+        return vec![FeatureCard {
+            id: uuid::Uuid::new_v4().to_string(),
+            idea_id: idea_id.to_string(),
+            title: crate::ai::safe_truncate_chars(idea_title.trim(), 40).to_string(),
+            description: idea_description.trim().to_string(),
+            novelty_score: None,
+            created_at: now,
+            technical_problem: problem,
+            core_structure: crate::ai::safe_truncate_chars(idea_description.trim(), 200)
+                .to_string(),
+            key_relations: key_rel,
+            process_steps: steps,
+            application_scenarios: scenario,
+        }];
+    }
+
+    segments
+        .into_iter()
+        .map(|seg| FeatureCard {
+            id: uuid::Uuid::new_v4().to_string(),
+            idea_id: idea_id.to_string(),
+            title: crate::ai::safe_truncate_chars(seg, 40).to_string(),
+            description: seg.to_string(),
+            novelty_score: None,
+            created_at: now.clone(),
+            technical_problem: problem.clone(),
+            core_structure: crate::ai::safe_truncate_chars(seg, 200).to_string(),
+            key_relations: key_rel.clone(),
+            process_steps: steps.clone(),
+            application_scenarios: scenario.clone(),
+        })
+        .collect()
+}
+
+/// 为指定创意自动生成 5 维特征卡（优先调 ai_client_fast 60s 超时解析，无 Key/失败回退规则提取并入库）
+#[allow(dead_code)]
+pub async fn api_generate_feature_cards(
+    State(s): State<AppState>,
+    Path(idea_id): Path<String>,
+) -> impl IntoResponse {
+    let idea = match s.db.get_idea(&idea_id) {
+        Ok(Some(i)) => i,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({"status": "error", "message": "idea not found"})),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"status": "error", "message": e.to_string()})),
+            )
+                .into_response();
+        }
+    };
+
+    let (analysis_text, keywords) = extract_context_hints(&s.db, &idea_id, &idea.analysis);
+    let config = s.config.read().unwrap_or_else(|e| e.into_inner()).clone();
+
+    if config.ai_fast_channel_ready() {
+        const SYSTEM_PROMPT: &str =
+            "你是专利技术特征提取助手。请严格只输出合法的 JSON 数组，不要输出任何解释文字或 markdown 标记。";
+        let prompt = format!(
+            "从以下创意描述与分析上下文中提取 5 维技术特征卡片（最多 5 张）。\n\
+             输出 JSON 数组，每个元素包含字段：\n\
+             title, technical_problem, core_structure, key_relations, process_steps, application_scenarios。\n\n\
+             创意标题：\n<user_input>\n{}\n</user_input>\n\n\
+             创意描述：\n<user_input>\n{}\n</user_input>\n\n\
+             分析摘要：\n<user_input>\n{}\n</user_input>",
+            idea.title,
+            idea.description,
+            crate::ai::truncate_for_ai(&analysis_text, 2000)
+        );
+        let fast_ai = config
+            .ai_client_fast()
+            .clone_with_timeout(std::time::Duration::from_secs(60));
+        if let Ok(raw) = fast_ai.chat_with_system(SYSTEM_PROMPT, &prompt, 0.2).await {
+            let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+            let cards =
+                crate::pipeline::steps::analysis::parse_ai_feature_cards_json(&idea_id, &raw, &now);
+            if !cards.is_empty() {
+                for card in &cards {
+                    if let Err(e) = s.db.insert_feature_card(card) {
+                        tracing::warn!("自动生成特征卡入库失败: {}", e);
+                    }
+                }
+                return Json(json!({
+                    "status": "ok",
+                    "cards": cards,
+                    "source": "ai_fast"
+                }))
+                .into_response();
+            }
+        }
+    }
+
+    let cards = build_deterministic_feature_cards(
+        &idea_id,
+        &idea.title,
+        &idea.description,
+        &analysis_text,
+        &keywords,
+    );
+    for card in &cards {
+        if let Err(e) = s.db.insert_feature_card(card) {
+            tracing::warn!("保底特征卡入库失败: {}", e);
+        }
+    }
+    Json(json!({
+        "status": "ok",
+        "cards": cards,
+        "source": "deterministic_fallback"
+    }))
+    .into_response()
+}
+
+fn deterministic_semantic_verdict(a: &FeatureCard, b: &FeatureCard) -> SemanticDiffVerdict {
+    let (diff_type, novelty_significance, novelty_reason) = classify_diff(a, b);
+    SemanticDiffVerdict {
+        semantically_equivalent: diff_type == "none",
+        diff_type,
+        novelty_significance,
+        novelty_reason,
+        fallback_used: true,
+    }
+}
+
+fn parse_semantic_diff_json(
+    raw: &str,
+    fallback: &SemanticDiffVerdict,
+) -> Option<SemanticDiffVerdict> {
+    let start = raw.find('{')?;
+    let end = raw.rfind('}')?;
+    if start > end {
+        return None;
+    }
+    let slice = raw.get(start..=end)?;
+    let val = serde_json::from_str::<serde_json::Value>(slice).ok()?;
+    let semantically_equivalent = val["semantically_equivalent"].as_bool()?;
+    let diff_type = match val["diff_type"].as_str() {
+        Some(t @ ("none" | "structure" | "method" | "parameter")) => t.to_string(),
+        _ => fallback.diff_type.clone(),
+    };
+    let novelty_significance = val["novelty_significance"]
+        .as_bool()
+        .unwrap_or(!semantically_equivalent);
+    let novelty_reason = val["novelty_reason"]
+        .as_str()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+        .unwrap_or_else(|| fallback.novelty_reason.clone());
+
+    Some(SemanticDiffVerdict {
+        semantically_equivalent,
+        diff_type,
+        novelty_significance,
+        novelty_reason,
+        fallback_used: false,
+    })
+}
+
+/// 语义级特征卡对比（ai_fast 为 None 或调用/JSON 解析失败时，100% 回退确定性 classify_diff）
+#[allow(dead_code)]
+pub async fn classify_diff_semantic(
+    ai_fast: Option<&crate::ai::AiClient>,
+    a: &FeatureCard,
+    b: &FeatureCard,
+) -> SemanticDiffVerdict {
+    let fallback = deterministic_semantic_verdict(a, b);
+    let Some(ai) = ai_fast else {
+        return fallback;
+    };
+
+    const SYSTEM_PROMPT: &str =
+        "你是专利技术特征语义对比助手。请严格只输出一个合法的 JSON 对象，包含字段：semantically_equivalent (bool), diff_type (\"none\"|\"structure\"|\"method\"|\"parameter\"), novelty_significance (bool), novelty_reason (string)。";
+    let user_prompt = format!(
+        "请判断以下两张技术特征卡是否构成实质性语义等价。\n\n\
+         卡片 A：\n<user_input>\n标题：{}\n技术问题：{}\n核心结构：{}\n关键关系：{}\n工艺步骤：{}\n应用场景：{}\n</user_input>\n\n\
+         卡片 B：\n<user_input>\n标题：{}\n技术问题：{}\n核心结构：{}\n关键关系：{}\n工艺步骤：{}\n应用场景：{}\n</user_input>",
+        a.title,
+        a.technical_problem,
+        a.core_structure,
+        a.key_relations,
+        a.process_steps,
+        a.application_scenarios,
+        b.title,
+        b.technical_problem,
+        b.core_structure,
+        b.key_relations,
+        b.process_steps,
+        b.application_scenarios,
+    );
+
+    let fast_ai = ai.clone_with_timeout(std::time::Duration::from_secs(60));
+    match fast_ai
+        .chat_with_system(SYSTEM_PROMPT, &user_prompt, 0.1)
+        .await
+    {
+        Ok(raw) => parse_semantic_diff_json(&raw, &fallback).unwrap_or(fallback),
+        Err(_) => fallback,
+    }
+}
+
+/// 从单张 5 维特征卡组装结构化 FreeCAD 绘图指令（供一键转入 /api/cad/draw）
+#[allow(dead_code)]
+pub fn build_cad_prompt_from_card(card: &FeatureCard) -> String {
+    let structure = if card.core_structure.trim().is_empty() {
+        card.description.trim()
+    } else {
+        card.core_structure.trim()
+    };
+    let mut parts = vec![
+        format!("特征名称：{}", card.title.trim()),
+        format!("核心技术结构：{}", structure),
+    ];
+    if !card.technical_problem.trim().is_empty() {
+        parts.push(format!("解决的技术问题：{}", card.technical_problem.trim()));
+    }
+    if !card.key_relations.trim().is_empty() {
+        parts.push(format!("关键配合与连接关系：{}", card.key_relations.trim()));
+    }
+    if !card.process_steps.trim().is_empty() {
+        parts.push(format!("工艺/装配步骤：{}", card.process_steps.trim()));
+    }
+    if !card.application_scenarios.trim().is_empty() {
+        parts.push(format!("应用场景：{}", card.application_scenarios.trim()));
+    }
+    format!(
+        "请基于以下专利技术特征生成参数化 FreeCAD 3D 建模脚本与关键几何约束：\n{}",
+        parts.join("\n")
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -647,5 +970,88 @@ mod tests {
         b.novelty_score = None;
         let diff = compute_minimal_diff(&a, &b);
         assert!(diff["novelty_score"].is_null());
+    }
+
+    #[tokio::test]
+    async fn test_classify_diff_semantic_fallback_when_no_ai() {
+        let a = sample_card("c1", "Card A");
+        let mut b = sample_card("c2", "Card B");
+        b.core_structure = "行星齿轮减速机构".to_string();
+
+        let verdict = classify_diff_semantic(None, &a, &b).await;
+        assert!(verdict.fallback_used);
+        assert!(!verdict.semantically_equivalent);
+        assert_eq!(verdict.diff_type, "structure");
+        assert!(verdict.novelty_significance);
+
+        let same = classify_diff_semantic(None, &a, &a).await;
+        assert!(same.fallback_used);
+        assert!(same.semantically_equivalent);
+        assert_eq!(same.diff_type, "none");
+    }
+
+    #[test]
+    fn test_parse_semantic_diff_json_valid_and_invalid() {
+        let a = sample_card("c1", "Card A");
+        let fallback = deterministic_semantic_verdict(&a, &a);
+
+        let wrapped = "结果如下：\n```json\n{\"semantically_equivalent\":true,\"diff_type\":\"none\",\"novelty_significance\":false,\"novelty_reason\":\"同义表述\"}\n```";
+        let parsed = parse_semantic_diff_json(wrapped, &fallback).expect("valid json");
+        assert!(!parsed.fallback_used);
+        assert!(parsed.semantically_equivalent);
+        assert_eq!(parsed.diff_type, "none");
+        assert_eq!(parsed.novelty_reason, "同义表述");
+
+        assert!(parse_semantic_diff_json("not json", &fallback).is_none());
+        assert!(parse_semantic_diff_json("}{", &fallback).is_none());
+    }
+
+    #[test]
+    fn test_build_cad_prompt_from_card_contains_structured_fields() {
+        let card = sample_card("cad-1", "双联液压阀体");
+        let prompt = build_cad_prompt_from_card(&card);
+        assert!(prompt.contains("FreeCAD"));
+        assert!(prompt.contains("双联液压阀体"));
+        assert!(prompt.contains("core structure"));
+        assert!(prompt.contains("key relations"));
+        assert!(prompt.contains("technical problem"));
+    }
+
+    #[test]
+    fn test_build_deterministic_feature_cards_splits_and_persists() {
+        let db = crate::db::Database::init(":memory:").expect("in-memory db");
+        let idea_id = "idea-det-1";
+        let idea = crate::patent::Idea {
+            id: idea_id.to_string(),
+            title: "液压阀".to_string(),
+            description: "第一句：阀体带阶梯孔。第二句：阀芯轴向滑动。".to_string(),
+            input_type: "text".to_string(),
+            status: "draft".to_string(),
+            analysis: String::new(),
+            web_results: String::new(),
+            patent_results: String::new(),
+            novelty_score: None,
+            created_at: "2026-11-18T00:00:00Z".to_string(),
+            updated_at: "2026-11-18T00:00:00Z".to_string(),
+            discussion_summary: String::new(),
+        };
+        db.insert_idea(&idea).expect("insert idea");
+        let (analysis, keywords) = extract_context_hints(&db, idea_id, "初步分析");
+        assert_eq!(analysis, "初步分析");
+        assert!(keywords.is_empty());
+
+        let cards = build_deterministic_feature_cards(
+            idea_id,
+            &idea.title,
+            &idea.description,
+            &analysis,
+            &["液压阀".to_string(), "阶梯孔".to_string()],
+        );
+        assert_eq!(cards.len(), 2);
+        for card in &cards {
+            db.insert_feature_card(card).expect("insert card");
+        }
+        let stored = db.get_feature_cards_by_idea(idea_id).expect("query cards");
+        assert_eq!(stored.len(), 2);
     }
 }
