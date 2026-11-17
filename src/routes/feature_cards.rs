@@ -548,7 +548,6 @@ fn build_deterministic_feature_cards(
 }
 
 /// 为指定创意自动生成 5 维特征卡（优先调 ai_client_fast 60s 超时解析，无 Key/失败回退规则提取并入库）
-#[allow(dead_code)]
 pub async fn api_generate_feature_cards(
     State(s): State<AppState>,
     Path(idea_id): Path<String>,

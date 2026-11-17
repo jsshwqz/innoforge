@@ -634,6 +634,36 @@ Response:
 - `parameter` — 参数级差异（新颖性意义低）
 - `none` — 无显著差异
 
+### 4) 自动生成特征卡片 / Auto-Generate Feature Cards
+
+**POST** `/api/ideas/:id/feature-cards/generate`
+
+优先使用快模型通道（60 秒超时）从创意描述与分析上下文自动提取 5 维特征卡片并入库；未配置快模型 Key、超时或解析为空时自动降级为确定性切分提取并入库。
+
+Response:
+
+```json
+{
+  "status": "ok",
+  "source": "ai_fast",
+  "cards": [
+    {
+      "id": "uuid",
+      "idea_id": "uuid",
+      "title": "特征标题",
+      "description": "描述...",
+      "novelty_score": null,
+      "technical_problem": "解决的技术问题...",
+      "core_structure": "核心技术结构...",
+      "key_relations": "关键关系...",
+      "process_steps": "工艺步骤...",
+      "application_scenarios": "应用场景...",
+      "created_at": "2026-11-18T00:00:00Z"
+    }
+  ]
+}
+```
+
 ---
 
 ## 收藏夹接口 / Collections APIs

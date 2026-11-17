@@ -678,6 +678,10 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
             get(routes::api_get_feature_cards).post(routes::api_create_feature_card),
         )
         .route(
+            "/api/ideas/:id/feature-cards/generate",
+            post(routes::api_generate_feature_cards),
+        )
+        .route(
             "/api/feature-cards/diff",
             get(routes::api_feature_card_diff),
         )

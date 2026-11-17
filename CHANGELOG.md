@@ -8,6 +8,20 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ### 新增 / Added
 
+- **OA 答复 Stage D 强模型机理对比与部件拓扑/学术反驳**：新增 `part_topology` 模块提取附图标记与部件连接关系并生成机理差异反驳；识别 OpenAlex 真实 DOI 文献生成学术公知常识反驳；Stage D 接入 60 秒超时强模型对比并经 `output_guard` 逐条校验放行，无 Key 或超时时无损回退确定性扫描。 / Added `part_topology` extraction and academic DOI rebuttal in OA arbitration; wired 60s-timeout expert-model mechanism comparison in Stage D with `output_guard` verification and deterministic fallback.
+- **工程 BOM 与期刊草稿双交付包**：新增 `deliverables` 模块并在 `Finalize` 阶段自动落库（`deliverable_bom` / `deliverable_journal_draft`）；`GET /api/idea/:id/report` 新增 `bom_pack` 与 `journal_draft` 导出分支，置顶防破新颖性安全锁警告并绑定检索所得真实 DOI。 / Added engineering BOM pack and journal manuscript draft deliverables persisted in `Finalize` and exposed via `bom_pack` / `journal_draft` report types.
+- **特征卡自动生成端点与快慢模型路由闭环**：新增 `POST /api/ideas/:id/feature-cards/generate`（快模型 JSON 解析 + 确定性回退入库）、语义级差异对比与 FreeCAD 建模提示词组装；主管线与 OA 深度生成接入 `ai_client_expert()`，扩展查询与特征提取接入 `ai_client_fast()`。 / Added `POST /api/ideas/:id/feature-cards/generate` with deterministic fallback, CAD prompt builder, and expert/fast AI channel routing.
+
+### 修复 / Fixed
+
+- **OA 载体兼容检测、专利摘要换行与 OpenAlex 倒排索引越界**：`detect_carrier_incompatible` 改从说明书与发明名称提取技术领域而非误读申请人；修复 `structured_patent_excerpt` 预算内零丢弃时末尾多余换行；为 `abstract_from_inverted_index` 增设位置上限防异常大槽位引发 OOM。 / Fixed carrier incompatibility field extraction, trailing newline in `structured_patent_excerpt`, and sparse slot cap in OpenAlex inverted index decoding.
+
+### 重构 / Refactored
+
+- **四大巨石文件模块化拆分**：将 `response_pipeline.rs`、`routes/search.rs`、`routes/ai.rs`、`routes/idea.rs` 分别拆出 `response_pipeline_stage_d.rs`、`routes/search_tail.rs`、`routes/oa_assist.rs`、`routes/idea_ops.rs` 四个子模块，保持零新增不安全字节切片与零生产 `unwrap()/expect()`。 / Split four monolithic modules into focused submodules (`response_pipeline_stage_d.rs`, `search_tail.rs`, `oa_assist.rs`, `idea_ops.rs`) with zero new unsafe byte slicing.
+
+### 新增 / Added（先前批次）
+
 - **RAG 结构化分块 + BM25/向量 RRF 混合检索（DB v25）**（issue [#78](https://github.com/jsshwqz/innoforge/issues/78)）：权利要求按序号（`Claim:N`）、说明书按段落号（`Desc:[0001]`）/章节标题切分打标，无标记回退窗口切分；新增 `chunks_fts` FTS5 词汇索引（CJK bigram 切分，存量数据自动回填）；检索升级为 BM25 + 向量 RRF 融合（k=60），合成夹具单测证明召回率 ≥ 纯向量检索；检索结果引用头透传展示段落标签（`来源: claim / Claim:3`）。
 - **OpenAlex 学术文献检索源（免费无 Key）**：在线检索链尾恒登记第四源（SerpAPI → Google Patents XHR → EPO OPS → OpenAlex），专利源全空时提供 2.5 亿+ 篇期刊论文/预印本著录检索——倒排索引还原摘要正文、提取真实 DOI/期刊名/年份/作者；诊断面板如实记账（`openalex` 行）。
 

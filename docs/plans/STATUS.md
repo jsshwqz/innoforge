@@ -14,6 +14,26 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-11-18 — **功能优先重构与五阶工程闭环（巨石解耦 + OA Stage D 强模型/部件拓扑/学术反驳 + 特征卡自动生成 + 工程 BOM/期刊双交付包）**
+
+- **状态 / Status**: 🚧 Wave 1 (`b128e7d`) + Wave 2 (`745036d`) 已提交（`cargo test --lib` 981 passed / 0 failed），Wave 3 收官验证中
+- **开工声明**: ACK 2026-10-27 整顿令：整顿令窗口已按其自身条款届满（见 2026-11-15 条），本批为功能优先重构与工程闭环任务（`feat/1118-refactor-and-functional-closure`），不属冻结类别。
+- **① 4 大巨石文件拆分（零新 `[..` 切片，零生产 `unwrap()/expect()`）**:
+  - `src/ai/response_pipeline.rs`：2377 → 2063 行（Wave 2 接入后 2114 行），剥离出 `src/ai/response_pipeline_stage_d.rs`（330 行，Wave 2 接入后 523 行）
+  - `src/routes/search.rs`：2827 → 1634 行，剥离出 `src/routes/search_tail.rs`（1198 行）
+  - `src/routes/ai.rs`：4015 → 3102 行，剥离出 `src/routes/oa_assist.rs`（918 行）
+  - `src/routes/idea.rs`：2851 → 2074 行，剥离出 `src/routes/idea_ops.rs`（794 行）
+- **② 修复 3 处实锤 Bug**:
+  - `src/ai/strategy_arbitration.rs`（`detect_carrier_incompatible`）：不再误读 `applicant`，改为优先从 `spec_full_text` 提取「涉及/属于…领域」，缺失时回退 `invention_title`。
+  - `src/ai/patent.rs`（`structured_patent_excerpt`）：修复预算内零丢弃时末尾多出 `\n` 的边界缺陷。
+  - `src/search/providers/openalex.rs`（`abstract_from_inverted_index`）：增设 `(total_occ * 4).clamp(16, 4096)` 位置上限，安全丢弃越界槽位防 OOM。
+- **③ 新增模块、路由与功能闭环**:
+  - **部件拓扑与学术反驳**（`src/ai/part_topology.rs` + `src/ai/strategy_arbitration.rs`）：提取附图标记与部件拓扑连接关系并生成 `MechanismEffectDiff` 反驳；识别 OpenAlex 真实 DOI 文献生成 `AttackLine::ZeroEvidence` 反驳。
+  - **Stage D 强模型机理对比**（`src/ai/response_pipeline_stage_d.rs` + `src/ai/response_pipeline.rs`）：60s 超时强模型对比「工作原理—结构连接—实际效果」，经 `output_guard::run_guard` 逐条校验并在 `stage_e_assemble` 汇入仲裁结果。
+  - **快慢模型路由与特征卡生成**（`src/routes/mod.rs` + `src/orchestrator/engine.rs` + `src/pipeline/steps/analysis.rs` + `src/routes/feature_cards.rs` + `src/common.rs`）：Gemini 降级链更新为 `gemini-3.8-flash` / `gemini-flash-lite-latest`；新增 `ai_expert_channel_ready`；新增端点 `POST /api/ideas/:id/feature-cards/generate` 与 CAD 提示词组装 `build_cad_prompt_from_card`。
+  - **工程 BOM 与期刊草稿双交付包**（`src/pipeline/steps/deliverables.rs` + `src/pipeline/steps/finalize.rs` + `src/routes/idea.rs`）：`Finalize` 阶段在 EK-v2 / 溯源完成后自动落库 `deliverable_bom` 与 `deliverable_journal_draft`（`concept_type = "decision"`），`GET /api/idea/:id/report` 新增 `bom_pack` 与 `journal_draft` 分支（含防破新颖性锁警告与真实 DOI 引用）。
+  - **文档与契约同步**：`docs/API-CONTRACTS.md`、`docs/API-ROUTES.md`、`docs/API.md`、`CHANGELOG.md` 同步更新。
+
 ### 2026-11-17 — **Batch 1：DB v25 结构化分块 + BM25/向量 RRF 混合检索（#78）+ OpenAlex 学术源 + 解除 5000 字硬截断**（PR 待建）
 
 - **状态 / Status**: 🚧 PR 等 CI

@@ -1031,7 +1031,7 @@ pub async fn api_idea_pipeline(
 
     // Build runner from config
     let config = s.config.read().unwrap_or_else(|e| e.into_inner()).clone();
-    let ai_client = config.ai_client();
+    let ai_client = config.ai_client_expert();
     let ai_fast = fast_ai_channel(&config);
     let db = s.db.clone();
     let serpapi_key = config.next_serpapi_key().unwrap_or_default();
@@ -1170,7 +1170,7 @@ pub async fn api_idea_resume(
     }
 
     let config = s.config.read().unwrap_or_else(|e| e.into_inner()).clone();
-    let ai_client = config.ai_client();
+    let ai_client = config.ai_client_expert();
     let ai_fast = fast_ai_channel(&config);
     let db = s.db.clone();
     let runner = PipelineRunner::new(
@@ -1397,6 +1397,9 @@ pub async fn api_idea_report(
                 "web_results": web_results,
                 "patent_results": patent_results,
             }))
+        }
+        "bom_pack" | "journal_draft" => {
+            Json(build_deliverable_report_json(&s.db, &idea, report_type))
         }
         _ => {
             // 默认：完整原始数据（向后兼容）
@@ -2072,3 +2075,152 @@ pub async fn api_idea_iterate(
 #[path = "idea_ops.rs"]
 mod idea_ops;
 pub use idea_ops::*;
+
+fn resolve_pipeline_context_for_deliverables(
+    db: &crate::db::Database,
+    idea: &Idea,
+) -> crate::pipeline::context::PipelineContext {
+    if let Ok(Some((ctx_json, _))) = db.load_pipeline_snapshot(&idea.id) {
+        if let Ok(ctx) =
+            serde_json::from_str::<crate::pipeline::context::PipelineContext>(&ctx_json)
+        {
+            return ctx;
+        }
+    }
+    let mut ctx =
+        crate::pipeline::context::PipelineContext::new(&idea.id, &idea.title, &idea.description);
+    ctx.ai_analysis = idea.analysis.clone();
+    ctx.web_results = serde_json::from_str(&idea.web_results).unwrap_or_default();
+    ctx.patent_results = serde_json::from_str(&idea.patent_results).unwrap_or_default();
+    ctx
+}
+
+fn build_deliverable_report_json(
+    db: &crate::db::Database,
+    idea: &Idea,
+    report_type: &str,
+) -> serde_json::Value {
+    let concept_key = if report_type == "bom_pack" {
+        "deliverable_bom"
+    } else {
+        "deliverable_journal_draft"
+    };
+    let persisted = db
+        .get_memory_by_type(&idea.id, "decision")
+        .unwrap_or_default()
+        .into_iter()
+        .find(|m| m.concept_name == concept_key)
+        .map(|m| m.content);
+
+    let ctx = resolve_pipeline_context_for_deliverables(db, idea);
+    if report_type == "bom_pack" {
+        let (report_md, source) = match persisted {
+            Some(md) => (md, "persisted_memory"),
+            None => {
+                let cards = db.get_feature_cards_by_idea(&idea.id).unwrap_or_default();
+                let pack =
+                    crate::pipeline::steps::deliverables::build_engineering_bom_pack(&ctx, &cards);
+                (pack.full_markdown, "generated_on_demand")
+            }
+        };
+        return json!({
+            "status": "ok",
+            "idea_id": idea.id,
+            "title": idea.title,
+            "type": "bom_pack",
+            "report_type": "bom_pack",
+            "source": source,
+            "report": report_md,
+        });
+    }
+
+    let draft = crate::pipeline::steps::deliverables::build_journal_manuscript_draft(&ctx);
+    let (report_md, source) = match persisted {
+        Some(md) => (md, "persisted_memory"),
+        None => (draft.full_markdown, "generated_on_demand"),
+    };
+    json!({
+        "status": "ok",
+        "idea_id": idea.id,
+        "title": idea.title,
+        "type": "journal_draft",
+        "report_type": "journal_draft",
+        "source": source,
+        "novelty_lock_warning": draft.novelty_lock_warning,
+        "cited_dois": draft.cited_dois,
+        "report": report_md,
+    })
+}
+
+#[cfg(test)]
+mod deliverables_report_tests {
+    use super::{build_deliverable_report_json, Idea};
+    use crate::db::memory::IdeaMemory;
+    use crate::db::Database;
+
+    fn seed_idea(db: &Database, id: &str) -> Idea {
+        let now = "2026-11-18T00:00:00Z".to_string();
+        let idea = Idea {
+            id: id.to_string(),
+            title: "磁流变阻尼器".to_string(),
+            description: "面向精密隔振平台的磁流变阻尼控制装置".to_string(),
+            input_type: "text".to_string(),
+            status: "done".to_string(),
+            analysis: "采用多级励磁线圈结构降低响应延时。".to_string(),
+            web_results: r#"[{"id":"10.1016/j.ymssp.2024.111222","title":"MR damper","snippet":"OpenAlex","link":"https://doi.org/10.1016/j.ymssp.2024.111222","source":"openalex"}]"#.to_string(),
+            patent_results: "[]".to_string(),
+            novelty_score: Some(82.0),
+            created_at: now.clone(),
+            updated_at: now,
+            discussion_summary: String::new(),
+        };
+        db.insert_idea(&idea).expect("insert idea");
+        idea
+    }
+
+    #[test]
+    fn bom_pack_and_journal_draft_prefer_persisted_and_fallback_on_demand() {
+        let db = Database::init(":memory:").expect("in-memory db");
+        let idea = seed_idea(&db, "idea-w3-1");
+
+        let on_demand_bom = build_deliverable_report_json(&db, &idea, "bom_pack");
+        assert_eq!(on_demand_bom["status"], "ok");
+        assert_eq!(on_demand_bom["type"], "bom_pack");
+        assert_eq!(on_demand_bom["source"], "generated_on_demand");
+        assert!(on_demand_bom["report"]
+            .as_str()
+            .unwrap_or("")
+            .contains("机械与电控分类 BOM 清单"));
+
+        let on_demand_journal = build_deliverable_report_json(&db, &idea, "journal_draft");
+        assert_eq!(on_demand_journal["status"], "ok");
+        assert_eq!(on_demand_journal["type"], "journal_draft");
+        assert_eq!(on_demand_journal["source"], "generated_on_demand");
+        assert!(on_demand_journal["novelty_lock_warning"]
+            .as_str()
+            .unwrap_or("")
+            .contains("防破新颖性安全锁"));
+        assert_eq!(
+            on_demand_journal["cited_dois"],
+            serde_json::json!(["10.1016/j.ymssp.2024.111222"])
+        );
+
+        let now = "2026-11-18T00:00:00Z".to_string();
+        db.save_memory(&IdeaMemory {
+            id: "mem-bom-1".to_string(),
+            idea_id: "idea-w3-1".to_string(),
+            concept_name: "deliverable_bom".to_string(),
+            concept_type: "decision".to_string(),
+            content: "# 已落库 BOM".to_string(),
+            confidence: 0.9,
+            source_step: Some("FinalizeDeliverables".to_string()),
+            created_at: now.clone(),
+            updated_at: now,
+        })
+        .expect("save persisted bom");
+
+        let persisted_bom = build_deliverable_report_json(&db, &idea, "bom_pack");
+        assert_eq!(persisted_bom["source"], "persisted_memory");
+        assert_eq!(persisted_bom["report"], "# 已落库 BOM");
+    }
+}
