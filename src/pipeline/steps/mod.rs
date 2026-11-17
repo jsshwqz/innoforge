@@ -3,6 +3,7 @@ pub mod claim_tree;
 pub mod contradiction;
 pub mod debate;
 pub mod deep_reasoning;
+pub mod deliverables;
 pub mod diversity;
 pub mod expand;
 pub mod experiment;

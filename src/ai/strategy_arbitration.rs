@@ -13,8 +13,12 @@
 //! - 主攻段（attack）：无长度限制，充分展开
 //! - 纯防守段（defense）：≤3句，简洁回应
 
-use super::case_input::CaseInput;
-use super::case_input::{DistinguishingFeature, EffectMismatch, FeatureRebuttal};
+#[path = "part_topology.rs"]
+pub mod part_topology;
+
+use super::case_input::{
+    CaseInput, DistinguishingFeature, EffectMismatch, FeatureRebuttal, ReferenceDocument,
+};
 
 /// 攻击线类型，按优先级从高到低排列
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -150,16 +154,122 @@ fn detect_mechanism_effect_diff(effect_mismatches: &[EffectMismatch]) -> Vec<Str
         .collect()
 }
 
+/// 判断对比文件是否为学术 DOI 文献（如 OpenAlex 检索结果）
+pub fn is_academic_doi_doc(doc: &ReferenceDocument) -> bool {
+    doc.publication_number.trim().starts_with("10.")
+        || doc.extraction_method.as_deref() == Some("openalex")
+}
+
+/// 从本申请说明书（优先“涉及…技术领域 / 属于…领域”）或发明名称提取本案技术领域
+fn extract_app_technical_field(input: &CaseInput) -> String {
+    if let Some(spec) = &input.spec_full_text {
+        if let Ok(re) = regex::Regex::new(r"(?:涉及|属于)([^，。；\n]{2,30}?(?:技术领域|领域))")
+        {
+            if let Some(cap) = re.captures(spec) {
+                if let Some(m) = cap.get(1) {
+                    let extracted = m.as_str().trim();
+                    if !extracted.is_empty() {
+                        return extracted.to_string();
+                    }
+                }
+            }
+        }
+    }
+    input.case_meta.invention_title.trim().to_string()
+}
+
+/// 检测学术 DOI 文献反驳“公知常识”泛化认定
+///
+/// 当 `reference_documents` 含学术 DOI 文献，且 OA 含“公知常识”或存在泛化标签特征时，
+/// 生成引用该文献 `label`/`publication_number` 的 `AttackLine::ZeroEvidence` 攻击项。
+fn detect_academic_common_knowledge_rebuttal(
+    input: &CaseInput,
+    features: &[DistinguishingFeature],
+) -> Vec<StrategyItem> {
+    let has_trigger = input.oa_full_text.contains("公知常识") || !features.is_empty();
+    if !has_trigger {
+        return Vec::new();
+    }
+
+    let mut items = Vec::new();
+    for doc in &input.reference_documents {
+        if !is_academic_doi_doc(doc) {
+            continue;
+        }
+        let pub_num = doc.publication_number.trim();
+        let citation = if pub_num.is_empty() {
+            doc.label.clone()
+        } else {
+            format!("{}（DOI: {}）", doc.label, pub_num)
+        };
+        items.push(StrategyItem {
+            line: AttackLine::ZeroEvidence,
+            role: Role::Attack,
+            feature_ordinal: None,
+            text: format!(
+                "审查员将相关技术特征认定为公知常识，但并未提供公知常识性证据。\
+                 学术文献{}表明该领域存在特定的技术机理与工程约束，\
+                 不能仅以“公知常识”这一泛化定性替代具体的技术启示举证。",
+                citation
+            ),
+        });
+    }
+    items
+}
+
+/// 检测部件标号拓扑连接关系差异
+///
+/// 遍历非学术对比文件，若有正文则调 `part_topology::diff_topology_rebuttals`
+/// 生成 `AttackLine::MechanismEffectDiff` 攻击项。
+fn detect_part_topology_diff(input: &CaseInput) -> Vec<StrategyItem> {
+    let app_text = match &input.spec_full_text {
+        Some(spec) if !spec.trim().is_empty() => {
+            format!("{}\n{}", input.claims_under_review, spec)
+        }
+        _ => input.claims_under_review.clone(),
+    };
+    if app_text.trim().is_empty() {
+        return Vec::new();
+    }
+
+    let mut items = Vec::new();
+    for doc in &input.reference_documents {
+        if is_academic_doi_doc(doc) || doc.full_text.trim().is_empty() {
+            continue;
+        }
+        for rebuttal in
+            part_topology::diff_topology_rebuttals(&app_text, &doc.label, &doc.full_text)
+        {
+            items.push(StrategyItem {
+                line: AttackLine::MechanismEffectDiff,
+                role: Role::Attack,
+                feature_ordinal: None,
+                text: rebuttal,
+            });
+        }
+    }
+    items
+}
+
 /// 检测载体不兼容
 ///
-/// 判断依据：对比文件的 technical_field 与本申请不同（如有该元数据）。
-/// 当前为确定性检测：检查 reference_documents 中的 technical_field 字段。
+/// 判断依据：对比文件的 technical_field 与本申请不同（优先从说明书提取技术领域，
+/// 缺失时回退至发明名称）。
 fn detect_carrier_incompatible(input: &CaseInput) -> Vec<StrategyItem> {
     let mut items = Vec::new();
-    let app_field = input.case_meta.applicant.as_str();
+    let app_field = extract_app_technical_field(input);
     for doc in &input.reference_documents {
         if let Some(field) = &doc.technical_field {
-            if !field.is_empty() && field != app_field {
+            let field_trimmed = field.trim();
+            if field_trimmed.is_empty() {
+                continue;
+            }
+            let is_incompatible = if app_field.is_empty() {
+                true
+            } else {
+                !field_trimmed.contains(&app_field) && !app_field.contains(field_trimmed)
+            };
+            if is_incompatible {
                 items.push(StrategyItem {
                     line: AttackLine::CarrierIncompatible,
                     role: Role::Defense,
@@ -167,7 +277,7 @@ fn detect_carrier_incompatible(input: &CaseInput) -> Vec<StrategyItem> {
                     text: format!(
                         "对比文件{}的技术领域为“{}”，\
                          与本申请技术领域不同，本领域技术人员缺乏跨领域结合的动机。",
-                        doc.label, field
+                        doc.label, field_trimmed
                     ),
                 });
             }
@@ -205,10 +315,12 @@ pub fn arbitrate(
 
     // 1. 定性失真（最高优先级）
     items.extend(detect_qualitative_distortion(features));
-    // 2. 零举证标签
+    // 2. 零举证标签（含学术 DOI 反驳“公知常识”）
     items.extend(detect_zero_evidence(features, rebuttals));
-    // 3. 机理/效果差异
+    items.extend(detect_academic_common_knowledge_rebuttal(input, features));
+    // 3. 机理/效果差异（含部件标号拓扑连接关系差异）
     items.extend(detect_mechanism_effect_diff(effect_mismatches));
+    items.extend(detect_part_topology_diff(input));
     // 4. 载体不兼容
     items.extend(detect_carrier_incompatible(input));
     // 5. 割裂式判断（最低优先级）
@@ -548,5 +660,157 @@ mod tests {
             .unwrap_or("");
         let sentence_count = defense_section.chars().filter(|c| *c == '。').count();
         assert!(sentence_count <= 3);
+    }
+
+    #[test]
+    fn carrier_incompatible_uses_spec_field_not_applicant() {
+        let mut input = make_test_input();
+        // 即使申请人姓名恰好与对比文件领域相同，也不应误判为兼容
+        input.case_meta.applicant = "机械制造".to_string();
+        input.case_meta.invention_title = "生物医药制剂".to_string();
+        input.reference_documents = vec![ReferenceDocument {
+            label: "D1".to_string(),
+            publication_number: "CN001".to_string(),
+            full_text: "D1全文".to_string(),
+            extraction_method: None,
+            page_count: None,
+            technical_field: Some("机械制造".to_string()),
+        }];
+        let res1 = arbitrate(&input, &[], &[], &[]);
+        assert!(
+            res1.items
+                .iter()
+                .any(|item| item.line == AttackLine::CarrierIncompatible),
+            "applicant 相同但技术领域不同时应触发 CarrierIncompatible"
+        );
+
+        // 当说明书声明同一技术领域时，不应触发 CarrierIncompatible
+        input.spec_full_text =
+            Some("本发明涉及机械制造技术领域，具体公开了一种传动装置。".to_string());
+        let res2 = arbitrate(&input, &[], &[], &[]);
+        assert!(
+            !res2
+                .items
+                .iter()
+                .any(|item| item.line == AttackLine::CarrierIncompatible),
+            "说明书领域与对比文件一致时不应触发 CarrierIncompatible"
+        );
+    }
+
+    #[test]
+    fn academic_doi_doc_detection_and_common_knowledge_rebuttal() {
+        let doi_doc = ReferenceDocument {
+            label: "NPL1".to_string(),
+            publication_number: "10.1016/j.test.2026.001".to_string(),
+            full_text: "学术摘要".to_string(),
+            extraction_method: Some("openalex".to_string()),
+            page_count: None,
+            technical_field: None,
+        };
+        let patent_doc = ReferenceDocument {
+            label: "D1".to_string(),
+            publication_number: "CN001".to_string(),
+            full_text: "D1全文".to_string(),
+            extraction_method: None,
+            page_count: None,
+            technical_field: None,
+        };
+        assert!(is_academic_doi_doc(&doi_doc));
+        assert!(!is_academic_doi_doc(&patent_doc));
+
+        let mut input = make_test_input();
+        input.oa_full_text = "审查员认为上述特征属于本领域的公知常识。".to_string();
+        input.reference_documents = vec![doi_doc];
+
+        let result = arbitrate(&input, &[], &[], &[]);
+        assert!(result.items.iter().any(|item| {
+            item.line == AttackLine::ZeroEvidence
+                && item.text.contains("NPL1")
+                && item.text.contains("10.1016/j.test.2026.001")
+        }));
+    }
+
+    #[test]
+    fn part_topology_diff_generates_mechanism_effect_diff() {
+        let mut input = make_test_input();
+        input.claims_under_review =
+            "一种控制阀，包括1-机架、2-阀体和3-阀芯，阀芯3与阀体2滑动配合，阀体2固定连接在机架1上。"
+                .to_string();
+        input.reference_documents = vec![ReferenceDocument {
+            label: "D1".to_string(),
+            publication_number: "CN002".to_string(),
+            full_text: "对比文件1公开了一种机架和阀体，但未公开阀芯及其滑动配合结构。".to_string(),
+            extraction_method: None,
+            page_count: None,
+            technical_field: None,
+        }];
+
+        let result = arbitrate(&input, &[], &[], &[]);
+        assert!(result.items.iter().any(|item| {
+            item.line == AttackLine::MechanismEffectDiff
+                && item.text.contains("D1")
+                && item.text.contains("阀芯")
+        }));
+    }
+
+    #[test]
+    fn part_topology_extracts_legend_and_inline_filters_non_parts() {
+        let text = "如图1所示，实施例1及权利要求1记载：1-机架，2、电缸，10：阀体；\
+                    阀芯3与第一壳体12滑动配合，对比文件1和步骤1应被过滤。";
+        let parts = part_topology::extract_part_designators(text);
+        assert!(parts.iter().any(|p| p.number == "1" && p.name == "机架"));
+        assert!(parts.iter().any(|p| p.number == "2" && p.name == "电缸"));
+        assert!(parts.iter().any(|p| p.number == "10" && p.name == "阀体"));
+        assert!(parts.iter().any(|p| p.number == "3" && p.name == "阀芯"));
+        assert!(parts
+            .iter()
+            .any(|p| p.number == "12" && p.name == "第一壳体"));
+        assert!(!parts
+            .iter()
+            .any(|p| p.name.contains("图") || p.name.contains("步骤")));
+    }
+
+    #[test]
+    fn arbitration_output_passes_output_guard() {
+        let mut input = make_test_input();
+        input.oa_full_text = "审查员认为该结构属于公知常识。".to_string();
+        input.spec_full_text =
+            Some("本发明涉及流体控制技术领域。1-机架，2-阀体，3-阀芯。".to_string());
+        input.claims_under_review = "阀芯3与阀体2滑动配合。".to_string();
+        input.reference_documents = vec![
+            ReferenceDocument {
+                label: "D1".to_string(),
+                publication_number: "CN001".to_string(),
+                full_text: "对比文件1公开了一种机架与阀体。".to_string(),
+                extraction_method: None,
+                page_count: None,
+                technical_field: Some("电磁感应技术领域".to_string()),
+            },
+            ReferenceDocument {
+                label: "NPL1".to_string(),
+                publication_number: "10.1016/j.test.2026.002".to_string(),
+                full_text: "Academic abstract.".to_string(),
+                extraction_method: Some("openalex".to_string()),
+                page_count: None,
+                technical_field: None,
+            },
+        ];
+
+        let features = vec![make_test_feature(
+            1,
+            "滑动配合",
+            OaTag::RoutineDesign,
+            Some("D1"),
+        )];
+        let rebuttals = vec![make_test_rebuttal(1, "滑动配合")];
+        let result = arbitrate(&input, &features, &rebuttals, &[]);
+        let formatted = format_arbitration(&result);
+
+        let guard = crate::ai::output_guard::run_guard(&formatted, &input);
+        assert!(
+            guard.passed,
+            "output_guard 应放行仲裁输出，实际错误: {:?}",
+            guard.errors
+        );
     }
 }

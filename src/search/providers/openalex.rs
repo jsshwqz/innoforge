@@ -302,29 +302,50 @@ pub fn abstract_from_inverted_index(inv: &serde_json::Value) -> String {
     let Some(map) = inv.as_object() else {
         return String::new();
     };
-    let mut max_pos: i64 = -1;
+    let mut total_occ: usize = 0;
     for positions in map.values() {
         if let Some(list) = positions.as_array() {
             for p in list {
                 if let Some(idx) = p.as_i64() {
-                    max_pos = max_pos.max(idx);
+                    if idx >= 0 {
+                        total_occ += 1;
+                    }
                 }
             }
         }
     }
-    if max_pos < 0 {
+    if total_occ == 0 {
         return String::new();
     }
-    let mut slots: Vec<&str> = vec![""; (max_pos as usize) + 1];
+    let pos_cap = total_occ.saturating_mul(4).clamp(16, 4096);
+    let mut max_pos: Option<usize> = None;
+    for positions in map.values() {
+        if let Some(list) = positions.as_array() {
+            for p in list {
+                if let Some(idx) = p.as_i64() {
+                    if idx >= 0 && (idx as usize) < pos_cap {
+                        let u = idx as usize;
+                        max_pos = Some(max_pos.map_or(u, |m| m.max(u)));
+                    }
+                }
+            }
+        }
+    }
+    let Some(max_pos) = max_pos else {
+        return String::new();
+    };
+    let mut slots: Vec<&str> = vec![""; max_pos + 1];
     for (word, positions) in map {
         let Some(list) = positions.as_array() else {
             continue;
         };
         for p in list {
             if let Some(idx) = p.as_i64() {
-                let idx = idx as usize;
-                if idx < slots.len() && slots[idx].is_empty() {
-                    slots[idx] = word.as_str();
+                if idx >= 0 && (idx as usize) < pos_cap {
+                    let u = idx as usize;
+                    if u < slots.len() && slots[u].is_empty() {
+                        slots[u] = word.as_str();
+                    }
                 }
             }
         }

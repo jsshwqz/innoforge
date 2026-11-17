@@ -86,18 +86,18 @@
 | 54 | POST | `/api/ai/office-action-response/stream` | — | 任意 JSON（§54） | — | SSE 事件流（text/event-stream） | `routes::api_ai_office_action_response_stream` | `src/routes/ai.rs:1571` |
 | 55 | POST | `/api/ai/oa-generate-response-letter` | — | 任意 JSON（§55） | — | SSE 事件流（text/event-stream） | `routes::api_ai_oa_generate_response_letter` | `src/routes/ai.rs:1894` |
 | 56 | POST | `/api/ai/oa-discuss` | — | 任意 JSON（§56） | — | SSE 事件流（text/event-stream） | `routes::api_ai_oa_discuss` | `src/routes/ai.rs:2197` |
-| 57 | POST | `/api/ai/oa-fetch-refs` | — | 任意 JSON（§57） | — | JSON（§57） | `routes::api_ai_oa_fetch_refs` | `src/routes/ai.rs:2878` |
-| 58 | POST | `/api/ai/oa-panel` | — | 任意 JSON（§58） | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_ai_oa_panel` | `src/routes/ai.rs:2966` |
-| 59 | POST | `/api/ai/oa-history-compare` | — | 任意 JSON（§59） | — | JSON（§59） | `routes::api_ai_oa_history_compare` | `src/routes/ai.rs:3147` |
-| 60 | POST | `/api/ai/oa-examiner-preview` | — | 任意 JSON（§60） | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_ai_oa_examiner_preview` | `src/routes/ai.rs:3215` |
-| 61 | POST | `/api/ai/oa-defense-analysis` | — | 任意 JSON（§61） | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_ai_oa_defense_analysis` | `src/routes/ai.rs:3262` |
-| 62 | POST | `/api/ai/oa-strategy-recommend` | — | 任意 JSON（§62） | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_ai_oa_strategy_recommend` | `src/routes/ai.rs:3317` |
-| 63 | POST | `/api/ai/oa-quality-score` | — | 任意 JSON（§63） | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_ai_oa_quality_score` | `src/routes/ai.rs:3355` |
+| 57 | POST | `/api/ai/oa-fetch-refs` | — | 任意 JSON（§57） | — | JSON（§57） | `routes::api_ai_oa_fetch_refs` | `src/routes/oa_assist.rs:6` |
+| 58 | POST | `/api/ai/oa-panel` | — | 任意 JSON（§58） | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_ai_oa_panel` | `src/routes/oa_assist.rs:94` |
+| 59 | POST | `/api/ai/oa-history-compare` | — | 任意 JSON（§59） | — | JSON（§59） | `routes::api_ai_oa_history_compare` | `src/routes/oa_assist.rs:275` |
+| 60 | POST | `/api/ai/oa-examiner-preview` | — | 任意 JSON（§60） | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_ai_oa_examiner_preview` | `src/routes/oa_assist.rs:343` |
+| 61 | POST | `/api/ai/oa-defense-analysis` | — | 任意 JSON（§61） | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_ai_oa_defense_analysis` | `src/routes/oa_assist.rs:390` |
+| 62 | POST | `/api/ai/oa-strategy-recommend` | — | 任意 JSON（§62） | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_ai_oa_strategy_recommend` | `src/routes/oa_assist.rs:445` |
+| 63 | POST | `/api/ai/oa-quality-score` | — | 任意 JSON（§63） | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_ai_oa_quality_score` | `src/routes/oa_assist.rs:483` |
 | 64 | POST | `/api/ai/audit-checks` | — | 任意 JSON（§64） | — | JSON（§64） | `routes::api_ai_audit_checks` | `src/routes/audit.rs:16` |
 | 65 | POST | `/api/ai/prohibition-check` | — | 任意 JSON（§65） | — | JSON（§65） | `routes::api_ai_prohibition_check` | `src/routes/audit.rs:257` |
-| 66 | POST | `/api/ai/oa-claim-simulate` | — | 任意 JSON（§66） | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_ai_oa_claim_simulate` | `src/routes/ai.rs:3516` |
-| 67 | POST | `/api/ai/oa-collect-evidence` | — | 任意 JSON（§67） | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_ai_oa_collect_evidence` | `src/routes/ai.rs:3667` |
-| 68 | POST | `/api/ai/oa-adversarial` | — | 任意 JSON（§68） | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_ai_oa_adversarial` | `src/routes/ai.rs:3739` |
+| 66 | POST | `/api/ai/oa-claim-simulate` | — | 任意 JSON（§66） | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_ai_oa_claim_simulate` | `src/routes/oa_assist.rs:644` |
+| 67 | POST | `/api/ai/oa-collect-evidence` | — | 任意 JSON（§67） | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_ai_oa_collect_evidence` | `src/routes/oa_assist.rs:795` |
+| 68 | POST | `/api/ai/oa-adversarial` | — | 任意 JSON（§68） | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_ai_oa_adversarial` | `src/routes/oa_assist.rs:867` |
 | 69 | GET | `/api/oa/history/all` | — | — | — | JSON（§69） | `routes::api_oa_history_all` | `src/routes/ai.rs:2537` |
 | 70 | GET | `/api/oa/history/:patent_number` | `patent_number` | — | — | JSON（§70） | `routes::api_oa_history` | `src/routes/ai.rs:2526` |
 | 71 | GET | `/api/oa/history/detail/:id` | `id` | — | — | JSON（§71） | `routes::api_oa_history_detail` | `src/routes/ai.rs:2548` |
@@ -734,49 +734,49 @@
 
 ### §57 POST `/api/ai/oa-fetch-refs`
 
-- 源码：`src/routes/ai.rs:2878`
+- 源码：`src/routes/oa_assist.rs:6`
 - 读取的请求键：`oa_text`
 - 响应顶层键：`abstract`、`context`、`found`、`found_count`、`full_text`、`message`、`pub_number`、`refs`、`source`、`status`、`title`、`total`
 - `status` 取值：error / ok
 
 ### §58 POST `/api/ai/oa-panel`
 
-- 源码：`src/routes/ai.rs:2966`
+- 源码：`src/routes/oa_assist.rs:94`
 - 读取的请求键：`my_patent`、`oa_text`、`refs`
 - 响应顶层键：`chair`、`error`、`rebuttals`、`roles`、`status`、`synthesis`
 - `status` 取值：ok
 
 ### §59 POST `/api/ai/oa-history-compare`
 
-- 源码：`src/routes/ai.rs:3147`
+- 源码：`src/routes/oa_assist.rs:275`
 - 读取的请求键：`current_oa_text`、`current_oa_type`、`patent_id`
 - 响应顶层键：`analysis`、`error`、`history_count`、`message`、`status`
 - `status` 取值：no_history / ok
 
 ### §60 POST `/api/ai/oa-examiner-preview`
 
-- 源码：`src/routes/ai.rs:3215`
+- 源码：`src/routes/oa_assist.rs:343`
 - 读取的请求键：`my_patent`、`oa_text`、`response_text`
 - 响应顶层键：`error`、`preview`、`status`
 - `status` 取值：ok
 
 ### §61 POST `/api/ai/oa-defense-analysis`
 
-- 源码：`src/routes/ai.rs:3262`
+- 源码：`src/routes/oa_assist.rs:390`
 - 读取的请求键：`claims`、`my_patent`
 - 响应顶层键：`analysis`、`error`、`status`
 - `status` 取值：ok
 
 ### §62 POST `/api/ai/oa-strategy-recommend`
 
-- 源码：`src/routes/ai.rs:3317`
+- 源码：`src/routes/oa_assist.rs:445`
 - 读取的请求键：`my_patent`、`oa_text`、`oa_type`、`refs`
 - 响应顶层键：`error`、`status`、`strategies`
 - `status` 取值：ok
 
 ### §63 POST `/api/ai/oa-quality-score`
 
-- 源码：`src/routes/ai.rs:3355`
+- 源码：`src/routes/oa_assist.rs:483`
 - 读取的请求键：`my_patent`、`oa_text`、`response_text`
 - 响应顶层键：`error`
 - `status` 取值：ok
@@ -797,21 +797,21 @@
 
 ### §66 POST `/api/ai/oa-claim-simulate`
 
-- 源码：`src/routes/ai.rs:3516`
+- 源码：`src/routes/oa_assist.rs:644`
 - 读取的请求键：`modified_claims`、`oa_text`、`original_claims`、`refs`
 - 响应顶层键：`error`、`raw`、`simulation`、`status`
 - `status` 取值：ok
 
 ### §67 POST `/api/ai/oa-collect-evidence`
 
-- 源码：`src/routes/ai.rs:3667`
+- 源码：`src/routes/oa_assist.rs:795`
 - 读取的请求键：`my_patent`、`oa_text`、`refs`
 - 响应顶层键：`evidence`、`message`、`stats`、`status`、`summary`
 - `status` 取值：error / ok
 
 ### §68 POST `/api/ai/oa-adversarial`
 
-- 源码：`src/routes/ai.rs:3739`
+- 源码：`src/routes/oa_assist.rs:867`
 - 读取的请求键：`claims`、`focus`、`goal_threshold`、`my_patent`、`oa_text`、`refs`、`rounds`
 - 响应顶层键：`confidence_score`、`converged`、`error`、`final_response`、`goal_achieved`、`goal_threshold`、`rounds_completed`、`status`、`transcript`、`weak_points`
 - `status` 取值：ok

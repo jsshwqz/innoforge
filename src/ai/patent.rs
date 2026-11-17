@@ -1961,6 +1961,9 @@ fn select_description_paragraphs(
 /// 单节结构化截取：预算内零丢弃原样返回；仅在丢弃段落时才重写 + 加显式提示。
 fn structured_section(section: &str, description_budget: usize) -> String {
     let (header, claims, description) = split_claims_description(section);
+    if claims.is_empty() && description.is_empty() {
+        return crate::ai::client::truncate_for_ai(section, description_budget);
+    }
     let (picked, total_n, total_chars, omitted_n, omitted_chars) =
         select_description_paragraphs(&description, &claims, description_budget);
     // 预算内零丢弃（含「无结构标记整节」与「有结构但说明书全保留」两种形态）→ 原样返回：
@@ -2019,6 +2022,9 @@ pub(crate) fn structured_patent_excerpt(text: &str, description_budget: usize) -
         current.push('\n');
     }
     flush(&mut out, &mut current);
+    if !text.ends_with('\n') && out.ends_with('\n') {
+        out.pop();
+    }
     out
 }
 
