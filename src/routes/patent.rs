@@ -1124,17 +1124,65 @@ pub async fn api_patent_legal_status(
     Path(patent_number): Path<String>,
 ) -> Json<serde_json::Value> {
     let config = s.config.clone();
+    let epo_creds = config
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .epo_credentials();
+    let epo_info = if let Some((k, sec)) = epo_creds {
+        Some(
+            crate::search::providers::epo_ops::fetch_epo_legal_and_citations(
+                &patent_number,
+                &k,
+                &sec,
+            )
+            .await,
+        )
+    } else {
+        None
+    };
+
+    if let Some(ref info) = epo_info {
+        let citations_json = serde_json::to_string(&info.cited_patents).ok();
+        let cited_by_json = serde_json::to_string(&info.citing_patents).ok();
+        let status_to_save =
+            if info.legal_status != crate::search::providers::epo_ops::LegalStatus::Unknown {
+                info.legal_status_text.as_str()
+            } else {
+                ""
+            };
+        let _ = s.db.update_patent_legal_and_citations(
+            &patent_number,
+            status_to_save,
+            info.family_id.as_deref(),
+            citations_json.as_deref(),
+            cited_by_json.as_deref(),
+        );
+    }
+
     match fetch_legal_status(&patent_number, &config).await {
-        Ok(result) => {
+        Ok(mut result) => {
+            if result.events.is_empty() {
+                if let Some(info) = epo_info {
+                    if info.legal_status != crate::search::providers::epo_ops::LegalStatus::Unknown
+                    {
+                        result.current_status = info.legal_status_text;
+                        result.source = info.source;
+                    }
+                }
+            }
             // 更新本地 Patent 记录的 legal_status 字段
-            if !result.current_status.is_empty() {
-                let status_text = result
-                    .events
-                    .iter()
-                    .take(5)
-                    .map(|e| format!("{} ({})", e.title, e.date))
-                    .collect::<Vec<_>>()
-                    .join("; ");
+            if !result.current_status.is_empty() && result.current_status != "未知" {
+                let status_text = if result.events.is_empty() {
+                    result.current_status.clone()
+                } else {
+                    result
+                        .events
+                        .iter()
+                        .take(5)
+                        .map(|e| format!("{} ({})", e.title, e.date))
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                };
                 let _ =
                     s.db.update_patent_legal_status(&patent_number, &status_text);
             }
@@ -1142,6 +1190,156 @@ pub async fn api_patent_legal_status(
         }
         Err(e) => Json(json!({"status": "error", "message": e.to_string()})),
     }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateLegalStatusRequest {
+    pub legal_status: String,
+}
+
+/// POST /api/patent/:id/legal-status — 手动标注或更新专利法律状态（Batch 11 / v0.9.54）
+pub async fn api_update_patent_legal_status(
+    State(s): State<AppState>,
+    Path(patent_id): Path<String>,
+    Json(req): Json<UpdateLegalStatusRequest>,
+) -> Json<serde_json::Value> {
+    let status_trimmed = req.legal_status.trim();
+    if status_trimmed.is_empty() {
+        return Json(json!({"status": "error", "message": "legal_status is required"}));
+    }
+    let normalized = crate::search::providers::epo_ops::LegalStatus::from_str_lossy(status_trimmed);
+    if let Err(e) = s.db.update_patent_legal_status(&patent_id, status_trimmed) {
+        return Json(json!({"status": "error", "message": e.to_string()}));
+    }
+    Json(json!({
+        "status": "ok",
+        "patent_id": patent_id,
+        "legal_status": status_trimmed,
+        "normalized_status": normalized.as_str(),
+        "badge_color": normalized.badge_color(),
+    }))
+}
+
+fn parse_patent_number_list(raw: &str) -> Vec<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed == "[]" {
+        return Vec::new();
+    }
+    if let Ok(arr) = serde_json::from_str::<Vec<String>>(trimmed) {
+        return arr
+            .into_iter()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+    }
+    trimmed
+        .split([',', ';', '\n'])
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+/// GET /api/patent/:id/citation-graph — 返回专利前后向引文与同族节点/边 JSON（Batch 11 / v0.9.54）
+pub async fn api_patent_citation_graph(
+    State(s): State<AppState>,
+    Path(patent_id): Path<String>,
+) -> Json<serde_json::Value> {
+    let patent = match s.db.get_patent(&patent_id) {
+        Ok(Some(p)) => p,
+        Ok(None) => return Json(json!({"status": "error", "message": "Patent not found"})),
+        Err(e) => return Json(json!({"status": "error", "message": e.to_string()})),
+    };
+
+    let normalized =
+        crate::search::providers::epo_ops::LegalStatus::from_str_lossy(&patent.legal_status);
+    let cited_patents = parse_patent_number_list(&patent.citations);
+    let citing_patents = parse_patent_number_list(&patent.cited_by);
+    let family_patents: Vec<serde_json::Value> = patent
+        .family_id
+        .as_deref()
+        .and_then(|fid| s.db.list_family_patents(fid, &patent.patent_number).ok())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|fp| {
+            let fn_norm =
+                crate::search::providers::epo_ops::LegalStatus::from_str_lossy(&fp.legal_status);
+            json!({
+                "patent_number": fp.patent_number,
+                "title": fp.title,
+                "country": fp.country,
+                "legal_status": fp.legal_status,
+                "normalized_status": fn_norm.as_str(),
+                "badge_color": fn_norm.badge_color(),
+            })
+        })
+        .collect();
+
+    let mut nodes = vec![json!({
+        "id": patent.patent_number,
+        "label": patent.patent_number,
+        "title": patent.title,
+        "role": "center",
+        "legal_status": patent.legal_status,
+        "normalized_status": normalized.as_str(),
+        "badge_color": normalized.badge_color(),
+    })];
+    let mut edges = Vec::new();
+
+    for cited in &cited_patents {
+        nodes.push(json!({
+            "id": cited,
+            "label": cited,
+            "role": "cited",
+        }));
+        edges.push(json!({
+            "from": patent.patent_number,
+            "to": cited,
+            "relation": "cites",
+        }));
+    }
+    for citing in &citing_patents {
+        nodes.push(json!({
+            "id": citing,
+            "label": citing,
+            "role": "citing",
+        }));
+        edges.push(json!({
+            "from": citing,
+            "to": patent.patent_number,
+            "relation": "cited_by",
+        }));
+    }
+    for fp in &family_patents {
+        if let Some(pn) = fp.get("patent_number").and_then(|v| v.as_str()) {
+            nodes.push(json!({
+                "id": pn,
+                "label": pn,
+                "title": fp.get("title").and_then(|v| v.as_str()).unwrap_or(""),
+                "role": "family",
+                "badge_color": fp.get("badge_color").and_then(|v| v.as_str()).unwrap_or("gray"),
+            }));
+            edges.push(json!({
+                "from": patent.patent_number,
+                "to": pn,
+                "relation": "same_family",
+            }));
+        }
+    }
+
+    Json(json!({
+        "status": "ok",
+        "patent_number": patent.patent_number,
+        "title": patent.title,
+        "legal_status": patent.legal_status,
+        "normalized_status": normalized.as_str(),
+        "badge_color": normalized.badge_color(),
+        "family_id": patent.family_id,
+        "cited_patents": cited_patents,
+        "citing_patents": citing_patents,
+        "family_patents": family_patents,
+        "nodes": nodes,
+        "edges": edges,
+    }))
 }
 
 /// 三级法律状态查询链 / 3-level legal status query chain

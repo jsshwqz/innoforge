@@ -471,7 +471,11 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
         )
         .route(
             "/api/patent/:id/legal-status",
-            get(routes::api_patent_legal_status),
+            get(routes::api_patent_legal_status).post(routes::api_update_patent_legal_status),
+        )
+        .route(
+            "/api/patent/:id/citation-graph",
+            get(routes::api_patent_citation_graph),
         )
         // AI 接口 / AI API
         .route("/api/ai/chat", post(routes::api_ai_chat))

@@ -6,6 +6,13 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 ---
 ## [Unreleased]
 
+## [v0.9.54] - 2026-11-18
+
+### 新增 / Added
+- **Batch 11 专利法律状态核验与同族引文图谱联动**：
+  - 扩展 `src/search/providers/epo_ops.rs` 解析 `LegalStatus`（`Active`/`Pending`/`Expired`/`Rejected`/`Unknown`）、`family_id` 与前后向引文，支持无 EPO 凭据平稳降级为 `Unknown` 与手动标注；
+  - 新增 `GET /api/patent/:id/citation-graph` 与 `POST /api/patent/:id/legal-status`，在专利详情页展示引文与同族列表并在 FTO 看板展示有效/失效徽章。
+
 ## [v0.9.53] - 2026-11-18
 
 ### 新增 / Added
@@ -447,6 +454,13 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 ## [Unreleased]
+
+## [v0.9.54] - 2026-11-18
+
+### 新增 / Added
+- **Batch 11 专利法律状态核验与同族引文图谱联动**：
+  - 扩展 `src/search/providers/epo_ops.rs` 解析 `LegalStatus`（`Active`/`Pending`/`Expired`/`Rejected`/`Unknown`）、`family_id` 与前后向引文，支持无 EPO 凭据平稳降级为 `Unknown` 与手动标注；
+  - 新增 `GET /api/patent/:id/citation-graph` 与 `POST /api/patent/:id/legal-status`，在专利详情页展示引文与同族列表并在 FTO 看板展示有效/失效徽章。
 
 ## [v0.9.53] - 2026-11-18
 

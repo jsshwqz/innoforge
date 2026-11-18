@@ -49,7 +49,22 @@
                         <tr><td data-i18n="common.info.pubDate"></td><td>{{publication_date}}</td></tr>
                         <tr><td data-i18n="common.info.grantDate"></td><td>{{grant_date}}</td></tr>
                         <tr><td data-i18n="common.info.country"></td><td>{{country}}</td></tr>
-                        <tr><td data-i18n="common.info.legalStatus" id="legal-status-label"></td><td>{{legal_status}}</td></tr>
+                        <tr>
+                            <td data-i18n="common.info.legalStatus" id="legal-status-label"></td>
+                            <td>
+                                <span id="legal-status-badge">{{legal_status}}</span>
+                                <span style="margin-left:8px;">
+                                    <select id="manual-legal-status-select" style="padding:2px 6px;border-radius:4px;">
+                                        <option value="Active">有效授权 (Active)</option>
+                                        <option value="Pending">实审中 (Pending)</option>
+                                        <option value="Expired">期满失效 (Expired)</option>
+                                        <option value="Rejected">驳回/撤回 (Rejected)</option>
+                                        <option value="Unknown">未知 (Unknown)</option>
+                                    </select>
+                                    <button type="button" class="btn-secondary" style="padding:2px 8px;font-size:12px;" onclick="saveManualLegalStatus()" data-i18n="detail.legalStatusSave">保存</button>
+                                </span>
+                            </td>
+                        </tr>
                     </table>
                 </div>
                 <div class="detail-section">
@@ -65,6 +80,7 @@
                 <button class="tab" onclick="showTab('description', event)" data-i18n="detail.tabDesc"></button>
                 <button class="tab" onclick="showTab('drawings', event)" id="tab-drawings-btn">📐 图纸</button>
                 <button class="tab" onclick="showTab('ai-chat', event)" data-i18n="detail.tabAiChat"></button>
+                <button class="tab" onclick="showTab('citations', event)" data-i18n="detail.tabCitations">🔗 引文与同族</button>
                 <button class="tab" onclick="showTab('oa-timeline', event)" data-i18n="oa.workflow.timeline"></button>
             </div>
 
@@ -95,6 +111,17 @@
                     <button id="patent-stop-btn" class="btn-stop" style="display:none" onclick="stopPatentGeneration()" data-i18n="detail.stop"></button>
                     <button id="patent-export-btn" class="btn-export-ghost" style="display:none" onclick="exportPatentConclusions()" data-i18n="detail.exportConclusions"></button>
                 </div>
+            <div id="tab-citations" class="tab-content">
+                <div style="padding: 12px 0;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                        <h3 style="margin:0;" data-i18n="detail.tabCitations">引文与同族图谱</h3>
+                        <button type="button" class="btn-primary" onclick="loadCitationGraph()" data-i18n="detail.refreshCitations">刷新引文图谱</button>
+                    </div>
+                    <div id="citation-graph-container" class="content-box">
+                        <p class="muted">点击“刷新引文图谱”或切换到此标签以加载前后向引文与同族专利。</p>
+                    </div>
+                </div>
+            </div>
             <div id="tab-oa-timeline" class="tab-content">
                 <div id="oa-timeline-container" style="padding: 16px 0;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
@@ -1113,11 +1140,73 @@
         return div.innerHTML;
     }
 
-    // 当切换到 OA 时间线标签时加载数据
+    async function saveManualLegalStatus() {
+        const sel = document.getElementById('manual-legal-status-select');
+        if (!sel) return;
+        const val = sel.value;
+        try {
+            const resp = await fetch('/api/patent/' + encodeURIComponent(patentNumber || patentId) + '/legal-status', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ legal_status: val })
+            });
+            const data = await resp.json();
+            if (data.status === 'ok') {
+                const badge = document.getElementById('legal-status-badge');
+                if (badge) {
+                    const icon = data.badge_color === 'red' ? '🔴 ' : (data.badge_color === 'green' ? '🟢 ' : (data.badge_color === 'amber' ? '🟡 ' : '⚪ '));
+                    badge.textContent = icon + data.legal_status;
+                }
+            }
+        } catch (e) { console.error(e); }
+    }
+
+    async function loadCitationGraph() {
+        const container = document.getElementById('citation-graph-container');
+        if (!container) return;
+        container.textContent = '加载中...';
+        try {
+            const resp = await fetch('/api/patent/' + encodeURIComponent(patentId || patentNumber) + '/citation-graph');
+            const data = await resp.json();
+            container.textContent = '';
+            if (data.status !== 'ok') {
+                container.textContent = data.message || '加载失败';
+                return;
+            }
+            const addGroup = (title, items) => {
+                const h = document.createElement('h4');
+                h.style.margin = '10px 0 6px';
+                h.textContent = title + ' (' + items.length + ')';
+                container.appendChild(h);
+                if (!items.length) {
+                    const empty = document.createElement('p');
+                    empty.className = 'muted';
+                    empty.textContent = '暂无记录';
+                    container.appendChild(empty);
+                    return;
+                }
+                const ul = document.createElement('ul');
+                items.forEach(it => {
+                    const li = document.createElement('li');
+                    li.textContent = typeof it === 'string' ? it : ((it.patent_number || '') + (it.title ? ' — ' + it.title : '') + (it.legal_status ? ' [' + it.legal_status + ']' : ''));
+                    ul.appendChild(li);
+                });
+                container.appendChild(ul);
+            };
+            addGroup('引用对比文件 / Cited (Backward)', data.cited_patents || []);
+            addGroup('被引用 / Cited By (Forward)', data.citing_patents || []);
+            addGroup('同族专利 / Same Family', data.family_patents || []);
+        } catch (e) {
+            container.textContent = '加载失败: ' + e.message;
+        }
+    }
+
+    // 当切换到 OA 时间线或引文标签时加载数据
     const origShowTab = showTab;
     showTab = function(name, ev) {
         origShowTab(name, ev);
         if (name === 'oa-timeline') loadOaTimeline();
+        if (name === 'citations') loadCitationGraph();
     };
 
     loadCollectState();
