@@ -28,6 +28,7 @@ pub mod case_input;
 mod chat;
 pub mod citation_check;
 pub mod claim_coverage;
+pub mod claim_validator;
 pub mod client;
 mod evidence;
 pub mod evidence_anchor;

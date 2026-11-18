@@ -12,6 +12,19 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 - **多轮审查意见视图漂移检测与禁止反言一致性守卫（Batch 15）**：新增 `oa_drift` 引擎（`src/ai/oa_drift.rs`）读取全量 `oa_rounds` 并比对相邻轮次演化，自动高亮（1）审查员隐含/明确认可的特征与权项、（2）新增对比文件（D3/D4）与新增驳回理由、（3）禁止反言与历史口径一致性红线；新增 `GET /api/oa/:case_id/rounds/diff` 路由并在 OA 分析/答复书生成链路自动注入历史一致性约束；`office_action_response.html` 上线「第1轮 → 第2轮 → 驳回/复审」多轮演化时间线与三段式漂移面板及中英双语词条。 / Added `oa_drift` cross-round OA view drift & estoppel consistency guard (`GET /api/oa/:case_id/rounds/diff`), automatic historical constraint injection during response generation, and multi-round evolution timeline & diff panel in `office_action_response.html`.
 
+## [v0.9.55] - 2026-11-18
+
+### 新增 / Added
+
+- **权利要求树可视化编辑器与专利法第26条第4款自检工作台（Batch 12）**：新增 `claim_validator` 引擎，实现多项从属引用多项从属、前序/正文“所述XX”缺少引用基础、自引用/向后引用等确定性语法校验，并结合 `v25` `chunks_fts` 说明书实施例分块与可选 `ai_client_expert` 核对数值范围与功能限定支撑（第26条第4款）；新增 `POST /api/ideas/:id/claims/validate`、`POST /api/idea/:id/claim-tree` 与 `DELETE /api/idea/:id/claim-tree/:claim_id`，并在 `idea.html` 升级权利要求树为可增删改与一键体检的可视化工作台。 / Added `claim_validator` engine (syntax & antecedent basis checks + `chunks_fts` / optional `ai_client_expert` Art. 26.4 embodiment support validation), `POST /api/ideas/:id/claims/validate`, claim node add/edit/delete routes, and interactive claim tree editor UI in `idea.html`.
+
+## [v0.9.54] - 2026-11-18
+
+### 新增 / Added
+- **Batch 11 专利法律状态核验与同族引文图谱联动**：
+  - 扩展 `src/search/providers/epo_ops.rs` 解析 `LegalStatus`（`Active`/`Pending`/`Expired`/`Rejected`/`Unknown`）、`family_id` 与前后向引文，支持无 EPO 凭据平稳降级为 `Unknown` 与手动标注；
+  - 新增 `GET /api/patent/:id/citation-graph` 与 `POST /api/patent/:id/legal-status`，在专利详情页展示引文与同族列表并在 FTO 看板展示有效/失效徽章。
+
 ## [v0.9.53] - 2026-11-18
 
 ### 新增 / Added
@@ -459,6 +472,19 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 ### 新增 / Added
 
 - **多轮审查意见视图漂移检测与禁止反言一致性守卫（Batch 15）**：新增 `oa_drift` 引擎（`src/ai/oa_drift.rs`）读取全量 `oa_rounds` 并比对相邻轮次演化，自动高亮（1）审查员隐含/明确认可的特征与权项、（2）新增对比文件（D3/D4）与新增驳回理由、（3）禁止反言与历史口径一致性红线；新增 `GET /api/oa/:case_id/rounds/diff` 路由并在 OA 分析/答复书生成链路自动注入历史一致性约束；`office_action_response.html` 上线「第1轮 → 第2轮 → 驳回/复审」多轮演化时间线与三段式漂移面板及中英双语词条。 / Added `oa_drift` cross-round OA view drift & estoppel consistency guard (`GET /api/oa/:case_id/rounds/diff`), automatic historical constraint injection during response generation, and multi-round evolution timeline & diff panel in `office_action_response.html`.
+
+## [v0.9.55] - 2026-11-18
+
+### 新增 / Added
+
+- **权利要求树可视化编辑器与专利法第26条第4款自检工作台（Batch 12）**：新增 `claim_validator` 引擎，实现多项从属引用多项从属、前序/正文“所述XX”缺少引用基础、自引用/向后引用等确定性语法校验，并结合 `v25` `chunks_fts` 说明书实施例分块与可选 `ai_client_expert` 核对数值范围与功能限定支撑（第26条第4款）；新增 `POST /api/ideas/:id/claims/validate`、`POST /api/idea/:id/claim-tree` 与 `DELETE /api/idea/:id/claim-tree/:claim_id`，并在 `idea.html` 升级权利要求树为可增删改与一键体检的可视化工作台。 / Added `claim_validator` engine (syntax & antecedent basis checks + `chunks_fts` / optional `ai_client_expert` Art. 26.4 embodiment support validation), `POST /api/ideas/:id/claims/validate`, claim node add/edit/delete routes, and interactive claim tree editor UI in `idea.html`.
+
+## [v0.9.54] - 2026-11-18
+
+### 新增 / Added
+- **Batch 11 专利法律状态核验与同族引文图谱联动**：
+  - 扩展 `src/search/providers/epo_ops.rs` 解析 `LegalStatus`（`Active`/`Pending`/`Expired`/`Rejected`/`Unknown`）、`family_id` 与前后向引文，支持无 EPO 凭据平稳降级为 `Unknown` 与手动标注；
+  - 新增 `GET /api/patent/:id/citation-graph` 与 `POST /api/patent/:id/legal-status`，在专利详情页展示引文与同族列表并在 FTO 看板展示有效/失效徽章。
 
 ## [v0.9.53] - 2026-11-18
 

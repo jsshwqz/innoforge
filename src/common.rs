@@ -471,7 +471,11 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
         )
         .route(
             "/api/patent/:id/legal-status",
-            get(routes::api_patent_legal_status),
+            get(routes::api_patent_legal_status).post(routes::api_update_patent_legal_status),
+        )
+        .route(
+            "/api/patent/:id/citation-graph",
+            get(routes::api_patent_citation_graph),
         )
         // AI 接口 / AI API
         .route("/api/ai/chat", post(routes::api_ai_chat))
@@ -714,8 +718,19 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
             "/api/feature-cards/diff",
             get(routes::api_feature_card_diff),
         )
+        .route(
+            "/api/ideas/:id/claims/validate",
+            post(routes::api_idea_claims_validate),
+        )
         // 版本管理 + 迭代 API
-        .route("/api/idea/:id/claim-tree", get(routes::api_idea_claim_tree))
+        .route(
+            "/api/idea/:id/claim-tree",
+            get(routes::api_idea_claim_tree).post(routes::api_idea_claim_node_upsert),
+        )
+        .route(
+            "/api/idea/:id/claim-tree/:claim_id",
+            delete(routes::api_idea_claim_node_delete),
+        )
         .route("/api/idea/:id/iterate", post(routes::api_idea_iterate))
         .route("/api/idea/:id/versions", get(routes::api_idea_versions))
         .route("/api/idea/:id/branches", get(routes::api_idea_branches))

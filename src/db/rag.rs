@@ -15,6 +15,16 @@ pub struct PatentChunk {
     pub embedding: Vec<f32>,
 }
 
+/// 跨专利说明书实施例分块检索命中（用于专利法第26条第4款支撑核对）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmbodimentChunkHit {
+    pub chunk_id: String,
+    pub patent_id: String,
+    pub section_tag: String,
+    pub content: String,
+    pub score: f32,
+}
+
 use super::Database;
 
 /// RRF（Reciprocal Rank Fusion）融合常数（Batch 1 任务 1.3 任务书口径 k=60）。
@@ -296,6 +306,47 @@ impl Database {
                 let chunk_id: String = row.get(0)?;
                 let score: f64 = row.get(1)?;
                 Ok((chunk_id, -(score as f32)))
+            },
+        )?;
+        Ok(rows.flatten().collect())
+    }
+
+    /// 跨专利说明书实施例分块 BM25 检索（走 `chunks_fts` + 回查 `patent_chunks.content`）。
+    ///
+    /// 用于权利要求树第 26 条第 4 款核对：从说明书及实施例分块中检索与权利要求参数/功能特征匹配的原文。
+    pub fn search_embodiment_chunks_lexical(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<EmbodimentChunkHit>, rusqlite::Error> {
+        let expr = fts_query_expr(query);
+        if expr.is_empty() || limit == 0 {
+            return Ok(vec![]);
+        }
+        let c = self.conn();
+        let mut stmt = c.prepare(
+            "SELECT pc.id, pc.patent_id, COALESCE(pc.section_tag, ''), pc.content, bm25(chunks_fts) AS bm25_score
+             FROM chunks_fts
+             JOIN patent_chunks pc ON pc.id = chunks_fts.chunk_id
+             WHERE chunks_fts MATCH ?1
+             ORDER BY bm25_score
+             LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(
+            rusqlite::params![expr, limit as i64],
+            |row: &rusqlite::Row| {
+                let chunk_id: String = row.get(0)?;
+                let patent_id: String = row.get(1)?;
+                let section_tag: String = row.get(2)?;
+                let content: String = row.get(3)?;
+                let score: f64 = row.get(4)?;
+                Ok(EmbodimentChunkHit {
+                    chunk_id,
+                    patent_id,
+                    section_tag,
+                    content,
+                    score: -(score as f32),
+                })
             },
         )?;
         Ok(rows.flatten().collect())
