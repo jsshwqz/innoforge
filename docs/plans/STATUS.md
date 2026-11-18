@@ -16,7 +16,7 @@
 
 ### 2026-11-18 — **功能优先重构与五阶工程闭环（巨石解耦 + OA Stage D 强模型/部件拓扑/学术反驳 + 特征卡自动生成 + 工程 BOM/期刊双交付包）**
 
-- **状态 / Status**: 🚧 Wave 1 (`b128e7d`) + Wave 2 (`745036d`) 已提交（`cargo test --lib` 981 passed / 0 failed），Wave 3 收官验证中
+- **状态 / Status**: ✅ 本地全量验证通过（[PR #226](https://github.com/jsshwqz/innoforge/pull/226) 已含 Batch 1 + Wave 1~7 + clippy 修复 `182b24d`，因此前标记 `[HOLD - 让路 <1.0 团队]` 关闭，待 Reopen 跑远端 CI/E2E）
 - **开工声明**: ACK 2026-10-27 整顿令：整顿令窗口已按其自身条款届满（见 2026-11-15 条），本批为功能优先重构与工程闭环任务（`feat/1118-refactor-and-functional-closure`），不属冻结类别。
 - **① 4 大巨石文件拆分（零新 `[..` 切片，零生产 `unwrap()/expect()`）**:
   - `src/ai/response_pipeline.rs`：2377 → 2063 行（Wave 2 接入后 2114 行），剥离出 `src/ai/response_pipeline_stage_d.rs`（330 行，Wave 2 接入后 523 行）
@@ -44,6 +44,7 @@
 - **⑥ Wave 7 收口 issue [#67](https://github.com/jsshwqz/innoforge/issues/67) 剩余两项工程缺口（P2.4 + P2.6）**:
   - **P2.4 数据库冷启动迁移进度日志**（`src/db/migrations.rs`）：`migrations::run` 在 `current_version < target_version` 时输出中文起止进度提示（`"正在初始化数据库 Schema（当前版本 v{} -> 目标版本 v{}）..."` 与 `"数据库 Schema 就绪（v{}）"`），不改动 SQL 与版本号。
   - **P2.6 MCP 端到端真实闭环集成测试**（`tests/mcp_e2e_roundtrip.rs`）：通过 `common::spawn_test_server_on_free_port` 启动真实服务器与 `innoforge-mcp` 子进程（清代理），完成 `initialize` → `notifications/initialized` → `tools/list` → `tools/call`（`patent_search`）JSON-RPC 2.0 闭环并验证 EOF 正常退出。
+  - **收口修复与全量验证**：移除 `src/ai/response_pipeline_tests.rs` 冗余 `use super::*;`（`182b24d`）；`cargo fmt --check` 与 `cargo clippy --all-targets -- -D warnings` 零告警；`cargo test --no-fail-fast` **1261 passed / 0 failed / 34 ignored（73 个测试二进制）**；HTML 函数扫描 8 模板一致；ESLint `static/i18n.js` 0 error。
 
 ### 2026-11-17 — **Batch 1：DB v25 结构化分块 + BM25/向量 RRF 混合检索（#78）+ OpenAlex 学术源 + 解除 5000 字硬截断**（PR 待建）
 
