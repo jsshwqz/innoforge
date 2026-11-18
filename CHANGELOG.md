@@ -6,6 +6,12 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 ---
 ## [Unreleased]
 
+## [0.9.51] - 2026-11-18
+
+### 新增 / Added
+
+- **多对比文件三维特征矩阵与 OA 修改对照页 Word `.docx` 导出（Batch 8）**：新增 `oa_matrix` 引擎拆解原子特征并定位本案 A33 段落锚点与 D1/D2/D3 公开状态/结合障碍，接入 `POST /api/ai/oa-feature-matrix` 及 OA 页可折叠三维矩阵表；新增 `GET /api/oa/:case_id/export/docx` 生成带红色删除线（`<w:strike/>`）与蓝色下划线（`<w:u w:val="single"/>`）的《权利要求书修改对照页》与三段式《意见陈述书》`.docx`。 / Added `oa_matrix` multi-reference 3D feature comparison engine (`POST /api/ai/oa-feature-matrix`) and `.docx` export with strike/underline revision markup (`GET /api/oa/:case_id/export/docx`).
+
 ## [0.9.50] - 2026-11-18
 
 ### 新增 / Added
@@ -429,6 +435,12 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 ## [Unreleased]
+
+## [0.9.51] - 2026-11-18
+
+### 新增 / Added
+
+- **多对比文件三维特征矩阵与 OA 修改对照页 Word `.docx` 导出（Batch 8）**：新增 `oa_matrix` 引擎拆解原子特征并定位本案 A33 段落锚点与 D1/D2/D3 公开状态/结合障碍，接入 `POST /api/ai/oa-feature-matrix` 及 OA 页可折叠三维矩阵表；新增 `GET /api/oa/:case_id/export/docx` 生成带红色删除线（`<w:strike/>`）与蓝色下划线（`<w:u w:val="single"/>`）的《权利要求书修改对照页》与三段式《意见陈述书》`.docx`。 / Added `oa_matrix` multi-reference 3D feature comparison engine (`POST /api/ai/oa-feature-matrix`) and `.docx` export with strike/underline revision markup (`GET /api/oa/:case_id/export/docx`).
 
 ## [0.9.50] - 2026-11-18
 

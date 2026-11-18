@@ -495,4 +495,276 @@ mod tests {
             err
         );
     }
+
+    #[test]
+    fn oa_docx_export_contains_strike_and_underline_xml() {
+        let bytes = super::build_oa_docx_bytes(
+            "CN119900001A",
+            "1. 一种普通电磁阀，包括线圈。",
+            "1. 一种双波纹管隔离电磁阀，包括线圈。",
+            "[0024]",
+            "一、修改说明：依据说明书第[0024]段进行修改。\n二、创造性争辩：本申请具有显著进步。\n三、结论：请求授予专利权。",
+        )
+        .expect("build oa docx");
+        assert_eq!(&bytes[0..2], b"PK", "docx must be a valid ZIP archive");
+
+        let cursor = std::io::Cursor::new(bytes);
+        let mut archive = zip::ZipArchive::new(cursor).expect("open docx zip");
+        let mut doc_file = archive.by_name("word/document.xml").expect("document.xml");
+        let mut xml = String::new();
+        std::io::Read::read_to_string(&mut doc_file, &mut xml).expect("read document.xml");
+        assert!(xml.contains("<w:strike/>"), "must contain <w:strike/>");
+        assert!(xml.contains("<w:u "), "must contain <w:u underline tag");
+        assert!(xml.contains("[0024]"), "must preserve A33 anchor");
+    }
+}
+
+fn escape_xml(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
+/// 基于字符级 LCS 对比修改前后文本，生成带 OOXML 修订标记的 `<w:r>` 片段列表。
+/// 返回 `Vec<(is_del, is_add, segment_text)>`。
+fn diff_claim_segments(old_text: &str, new_text: &str) -> Vec<(bool, bool, String)> {
+    let a: Vec<char> = old_text.chars().collect();
+    let b: Vec<char> = new_text.chars().collect();
+    if a.len() * b.len() > 2_500_000 {
+        return vec![
+            (true, false, old_text.to_string()),
+            (false, true, new_text.to_string()),
+        ];
+    }
+    let m = a.len();
+    let n = b.len();
+    let mut dp = vec![vec![0u32; n + 1]; m + 1];
+    for i in (0..m).rev() {
+        for j in (0..n).rev() {
+            dp[i][j] = if a[i] == b[j] {
+                dp[i + 1][j + 1] + 1
+            } else {
+                dp[i + 1][j].max(dp[i][j + 1])
+            };
+        }
+    }
+
+    let mut ops: Vec<(bool, bool, char)> = Vec::new();
+    let (mut i, mut j) = (0, 0);
+    while i < m && j < n {
+        if a[i] == b[j] {
+            ops.push((false, false, a[i]));
+            i += 1;
+            j += 1;
+        } else if dp[i + 1][j] >= dp[i][j + 1] {
+            ops.push((true, false, a[i]));
+            i += 1;
+        } else {
+            ops.push((false, true, b[j]));
+            j += 1;
+        }
+    }
+    while i < m {
+        ops.push((true, false, a[i]));
+        i += 1;
+    }
+    while j < n {
+        ops.push((false, true, b[j]));
+        j += 1;
+    }
+
+    let mut merged: Vec<(bool, bool, String)> = Vec::new();
+    for (del, add, ch) in ops {
+        if let Some(last) = merged.last_mut() {
+            if last.0 == del && last.1 == add {
+                last.2.push(ch);
+                continue;
+            }
+        }
+        merged.push((del, add, ch.to_string()));
+    }
+    merged
+}
+
+/// 生成带《权利要求书修改对照页》（红删线+蓝下划线+A33锚点）与《意见陈述书》的标准 `.docx` 字节流。
+pub fn build_oa_docx_bytes(
+    case_label: &str,
+    old_claims: &str,
+    new_claims: &str,
+    anchor_note: &str,
+    statement_body: &str,
+) -> Result<Vec<u8>, String> {
+    use std::io::Write;
+    use zip::write::SimpleFileOptions;
+
+    let mut runs_xml = String::new();
+    if old_claims.trim() != new_claims.trim() && !old_claims.trim().is_empty() {
+        for (is_del, is_add, seg) in diff_claim_segments(old_claims, new_claims) {
+            let esc = escape_xml(&seg);
+            if is_del {
+                runs_xml.push_str(&format!(
+                    "<w:r><w:rPr><w:color w:val=\"C00000\"/><w:strike/></w:rPr><w:t xml:space=\"preserve\">{esc}</w:t></w:r>"
+                ));
+            } else if is_add {
+                runs_xml.push_str(&format!(
+                    "<w:r><w:rPr><w:color w:val=\"0052CC\"/><w:u w:val=\"single\"/></w:rPr><w:t xml:space=\"preserve\">{esc}</w:t></w:r>"
+                ));
+            } else {
+                runs_xml.push_str(&format!(
+                    "<w:r><w:t xml:space=\"preserve\">{esc}</w:t></w:r>"
+                ));
+            }
+        }
+    } else {
+        let esc = escape_xml(if new_claims.trim().is_empty() {
+            "（本次答复未修改权利要求书）"
+        } else {
+            new_claims
+        });
+        runs_xml.push_str(&format!(
+            "<w:r><w:t xml:space=\"preserve\">{esc}</w:t></w:r>"
+        ));
+    }
+
+    let safe_anchor = if anchor_note.trim().is_empty() {
+        "【A33提示：尚未绑定说明书段落锚点，提交前请核对依据】".to_string()
+    } else {
+        format!("修改依据（专利法第33条锚点）：{}", anchor_note.trim())
+    };
+
+    let mut body_paras = String::new();
+    body_paras.push_str(&format!(
+        "<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>一、权利要求书修改对照页（{}）</w:t></w:r></w:p>",
+        escape_xml(case_label)
+    ));
+    body_paras.push_str(&format!("<w:p>{runs_xml}</w:p>"));
+    body_paras.push_str(&format!(
+        "<w:p><w:r><w:rPr><w:i/></w:rPr><w:t>{}</w:t></w:r></w:p>",
+        escape_xml(&safe_anchor)
+    ));
+    body_paras.push_str("<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>二、意见陈述书</w:t></w:r></w:p>");
+    let stmt_text = if statement_body.trim().is_empty() {
+        "一、修改说明（专利法第33条）\n二、创造性/新颖性争辩（三步法+证据锚点）\n三、结论：恳请审查员继续审查并授予专利权。"
+    } else {
+        statement_body
+    };
+    for line in stmt_text.lines() {
+        body_paras.push_str(&format!(
+            "<w:p><w:r><w:t xml:space=\"preserve\">{}</w:t></w:r></w:p>",
+            escape_xml(line)
+        ));
+    }
+
+    let doc_xml = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
+         <w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">\
+         <w:body>{body_paras}<w:sectPr/></w:body></w:document>"
+    );
+
+    let content_types = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
+        <Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">\
+        <Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>\
+        <Default Extension=\"xml\" ContentType=\"application/xml\"/>\
+        <Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/>\
+        </Types>";
+    let rels = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
+        <Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">\
+        <Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"word/document.xml\"/>\
+        </Relationships>";
+    let doc_rels = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
+        <Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"/>";
+
+    let mut buf = std::io::Cursor::new(Vec::new());
+    {
+        let mut zip = zip::ZipWriter::new(&mut buf);
+        let opts = SimpleFileOptions::default();
+        zip.start_file("[Content_Types].xml", opts)
+            .map_err(|e| e.to_string())?;
+        zip.write_all(content_types.as_bytes())
+            .map_err(|e| e.to_string())?;
+        zip.start_file("_rels/.rels", opts)
+            .map_err(|e| e.to_string())?;
+        zip.write_all(rels.as_bytes()).map_err(|e| e.to_string())?;
+        zip.start_file("word/_rels/document.xml.rels", opts)
+            .map_err(|e| e.to_string())?;
+        zip.write_all(doc_rels.as_bytes())
+            .map_err(|e| e.to_string())?;
+        zip.start_file("word/document.xml", opts)
+            .map_err(|e| e.to_string())?;
+        zip.write_all(doc_xml.as_bytes())
+            .map_err(|e| e.to_string())?;
+        zip.finish().map_err(|e| e.to_string())?;
+    }
+    Ok(buf.into_inner())
+}
+
+#[derive(serde::Deserialize, Default)]
+pub struct OaDocxQuery {
+    #[serde(default)]
+    pub old_claims: String,
+    #[serde(default)]
+    pub new_claims: String,
+    #[serde(default)]
+    pub anchor_note: String,
+    #[serde(default)]
+    pub statement: String,
+}
+
+/// GET /api/oa/:case_id/export/docx — 导出带红删线/蓝下划线修改对照页与意见陈述书的标准 `.docx`
+pub async fn api_oa_case_export_docx(
+    State(s): State<AppState>,
+    Path(case_id): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<OaDocxQuery>,
+) -> Response {
+    let old_claims = q.old_claims;
+    let new_claims = q.new_claims;
+    let mut anchor_note = q.anchor_note;
+    let mut statement = q.statement;
+
+    if statement.trim().is_empty() {
+        if let Ok(numeric_id) = case_id.parse::<i64>() {
+            if let Ok(Some(record)) = s.db.get_oa_analysis(numeric_id) {
+                statement = record.analysis_text;
+            }
+        }
+    }
+    if anchor_note.trim().is_empty() && !case_id.trim().is_empty() {
+        anchor_note = format!("案件号: {}", case_id.trim());
+    }
+
+    match build_oa_docx_bytes(&case_id, &old_claims, &new_claims, &anchor_note, &statement) {
+        Ok(bytes) => {
+            let safe_id: String = case_id
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+                .collect();
+            let filename = format!(
+                "oa-response-{}.docx",
+                if safe_id.is_empty() { "case" } else { &safe_id }
+            );
+            (
+                StatusCode::OK,
+                [
+                    (
+                        header::CONTENT_TYPE,
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                            .to_string(),
+                    ),
+                    (
+                        header::CONTENT_DISPOSITION,
+                        format!("attachment; filename=\"{filename}\""),
+                    ),
+                ],
+                bytes,
+            )
+                .into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("DOCX build error: {e}"),
+        )
+            .into_response(),
+    }
 }

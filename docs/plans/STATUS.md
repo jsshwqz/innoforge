@@ -14,6 +14,12 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-11-18 — **Batch 8：多对比文件三维特征矩阵 + OA 修改对照页 Word `.docx` 导出（v0.9.51）**
+
+- **状态 / Status**: ✅ 本地全量验证通过（`cargo fmt` / `clippy --all-targets -D warnings` 零告警，`cargo test --no-fail-fast` 73 个测试二进制全过，含 lib 1002 passed），已提 PR 等 CI 合并进 `main` 并打 `v0.9.51` Tag
+- **① 三维特征比对矩阵引擎**（`src/ai/oa_matrix.rs`、`src/ai/mod.rs`、`src/routes/oa_assist.rs`）：拆解原子特征并匹配本案说明书 `[00xx]` A33 段落锚点及 D1/D2/D3 公开状态与结合障碍，接入 `POST /api/ai/oa-feature-matrix`。
+- **② Word `.docx` 修订对照页与意见陈述书导出**（`src/routes/oa_export.rs`、`src/common.rs`、`templates/office_action_response.html`、`static/i18n.js`、`docs/API.md`）：基于内置 `zip` 生成标准 OOXML `.docx`（红删线 `<w:strike/>` + 蓝下划线 `<w:u w:val="single"/>` + A33 锚点标注 + 三段式意见陈述书），暴露 `GET /api/oa/:case_id/export/docx` 及前端「三维特征比对矩阵」「导出 Word 答复套件 (.docx)」按钮。
+
 ### 2026-11-18 — **Batch 7：控制系统原型代码生成 + 闭环响应曲线可视化（v0.9.50）**
 
 - **状态 / Status**: ✅ 本地全量验证通过（`cargo fmt` / `clippy --all-targets -D warnings` 零告警，`cargo test --no-fail-fast` 73 个测试二进制全过，含 lib 1000 passed），已提 PR 等 CI 合并进 `main` 并打 `v0.9.50` Tag

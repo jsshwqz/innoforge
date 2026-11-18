@@ -154,6 +154,8 @@
             <button class="btn-secondary" onclick="collectEvidence()" id="btn-collect-evidence" style="margin-left:8px;">📁 <span data-i18n="oa.evidence.btn">自动收集证据</span></button>
             <button class="btn-secondary" onclick="startAdversarial()" id="btn-adversarial" style="margin-left:8px;">🔄 <span data-i18n="oa.adversarial.start">多轮对抗推演</span></button>
             <button class="btn-secondary" onclick="triggerVisionFigureCheck()" id="btn-vision-figure" style="margin-left:8px;">🖼️ <span data-i18n="oa.visionFigure.btn">附图标号与结构核对</span></button>
+            <button class="btn-secondary" onclick="buildOaFeatureMatrix()" id="btn-oa-matrix" style="margin-left:8px;">🧮 <span data-i18n="oa.matrix.btn">三维特征比对矩阵</span></button>
+            <button class="btn-secondary" onclick="exportOaWordKit()" id="btn-oa-word-kit" style="margin-left:8px;">📝 <span data-i18n="oa.exportWordKit.btn">导出 Word 答复套件 (.docx)</span></button>
             <input type="file" id="vision-figure-input" accept="image/*" multiple style="display:none;" onchange="handleVisionFigureFiles(this)">
             <div style="display:flex;align-items:center;gap:8px;margin-left:auto;">
                 <span class="muted" data-i18n="oar.depthLabel"></span>
@@ -4935,6 +4937,112 @@
         if (btnRow && btnRow.parentNode && btnRow.parentNode.parentNode) {
             btnRow.parentNode.parentNode.appendChild(panel);
         }
+    }
+
+    async function buildOaFeatureMatrix() {
+        var claimsData = getMyPatent();
+        var specText = claimsData ? (claimsData.content || claimsData) : '';
+        var claimsEl = document.getElementById('current-claims-input');
+        var claims = (claimsEl && claimsEl.value) ? claimsEl.value : (typeof specText === 'string' ? specText : '');
+        var refsArr = getRefs();
+        var refs = refsArr.map(function(r, idx) {
+            return {
+                label: 'D' + (idx + 1),
+                full_text: (r && r.content) ? r.content : String(r || '')
+            };
+        });
+        try {
+            var resp = await fetch('/api/ai/oa-feature-matrix', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    claims: claims,
+                    spec_text: typeof specText === 'string' ? specText : '',
+                    refs: refs
+                })
+            });
+            var data = await resp.json();
+            renderOaFeatureMatrix(data);
+        } catch (err) {
+            alert('生成三维特征矩阵失败: ' + err.message);
+        }
+    }
+
+    function renderOaFeatureMatrix(data) {
+        var existing = document.getElementById('oa-feature-matrix-panel');
+        if (existing) existing.remove();
+        var details = document.createElement('details');
+        details.id = 'oa-feature-matrix-panel';
+        details.className = 'cmp-section';
+        details.open = true;
+        details.style.marginTop = '12px';
+
+        var summary = document.createElement('summary');
+        summary.style.fontWeight = '600';
+        summary.style.cursor = 'pointer';
+        summary.textContent = '🧮 ' + (t('oa.matrix.title') || '多对比文件三维特征比对矩阵') + ' — ' + (data.summary || '');
+        details.appendChild(summary);
+
+        var table = document.createElement('table');
+        table.style.width = '100%';
+        table.style.borderCollapse = 'collapse';
+        table.style.marginTop = '8px';
+        table.style.fontSize = '0.85em';
+
+        var thead = document.createElement('thead');
+        var htr = document.createElement('tr');
+        ['区别', '特征', '本案锚点', 'D1', 'D2', 'D3', '结合障碍'].forEach(function(col) {
+            var th = document.createElement('th');
+            th.textContent = col;
+            th.style.textAlign = 'left';
+            th.style.padding = '6px';
+            th.style.borderBottom = '1px solid var(--border-color, #30363d)';
+            htr.appendChild(th);
+        });
+        thead.appendChild(htr);
+        table.appendChild(thead);
+
+        var tbody = document.createElement('tbody');
+        (data.rows || []).forEach(function(row) {
+            var tr = document.createElement('tr');
+            var tdChk = document.createElement('td');
+            var chk = document.createElement('input');
+            chk.type = 'checkbox';
+            chk.checked = !!row.is_distinguishing;
+            tdChk.appendChild(chk);
+            tr.appendChild(tdChk);
+
+            [
+                row.feature_text || '',
+                row.app_anchor || '—',
+                (row.d1 && row.d1.status ? row.d1.status : '') + (row.d1 && row.d1.anchor ? ' ' + row.d1.anchor : ''),
+                (row.d2 && row.d2.status ? row.d2.status : '') + (row.d2 && row.d2.anchor ? ' ' + row.d2.anchor : ''),
+                (row.d3 && row.d3.status ? row.d3.status : '') + (row.d3 && row.d3.anchor ? ' ' + row.d3.anchor : ''),
+                row.combination_barrier || ''
+            ].forEach(function(val) {
+                var td = document.createElement('td');
+                td.textContent = val;
+                td.style.padding = '6px';
+                td.style.borderBottom = '1px solid var(--border-color, #30363d)';
+                tr.appendChild(td);
+            });
+            tbody.appendChild(tr);
+        });
+        table.appendChild(tbody);
+        details.appendChild(table);
+
+        var btnRow = document.getElementById('btn-oa-matrix');
+        if (btnRow && btnRow.parentNode && btnRow.parentNode.parentNode) {
+            btnRow.parentNode.parentNode.appendChild(details);
+        }
+    }
+
+    function exportOaWordKit() {
+        var caseId = getCurrentPatentNumber() || 'draft';
+        var claimsEl = document.getElementById('current-claims-input');
+        var newClaims = claimsEl && claimsEl.value ? claimsEl.value : '';
+        var url = '/api/oa/' + encodeURIComponent(caseId) + '/export/docx?new_claims=' + encodeURIComponent(newClaims);
+        window.location.href = url;
     }
 
     function toggleEvidenceGroup(groupId) {
