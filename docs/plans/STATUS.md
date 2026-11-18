@@ -41,6 +41,9 @@
 - **⑤ Wave 6 全仓 >2000 行巨石 100% 清零与特征卡语义对比前端闭环**:
   - **全仓 7 个 >2,000 行巨石模块 100% 清零**：完成 `src/search/providers/epo_ops.rs`、`src/routes/idea.rs` 与 `src/ai/response_pipeline.rs`（2114 → 1164 行，拆分测试至 `src/ai/response_pipeline_tests.rs` 947 行）解耦。
   - **特征卡双卡语义等价对比前端上线**：`templates/idea.html` `#feature-cards-area` 补齐双卡选择与「语义差异比对」行内结果展示（`GET /api/feature-cards/diff?a=...&b=...&semantic=true`），`static/i18n.js` 同步双语词条。
+- **⑥ Wave 7 收口 issue [#67](https://github.com/jsshwqz/innoforge/issues/67) 剩余两项工程缺口（P2.4 + P2.6）**:
+  - **P2.4 数据库冷启动迁移进度日志**（`src/db/migrations.rs`）：`migrations::run` 在 `current_version < target_version` 时输出中文起止进度提示（`"正在初始化数据库 Schema（当前版本 v{} -> 目标版本 v{}）..."` 与 `"数据库 Schema 就绪（v{}）"`），不改动 SQL 与版本号。
+  - **P2.6 MCP 端到端真实闭环集成测试**（`tests/mcp_e2e_roundtrip.rs`）：通过 `common::spawn_test_server_on_free_port` 启动真实服务器与 `innoforge-mcp` 子进程（清代理），完成 `initialize` → `notifications/initialized` → `tools/list` → `tools/call`（`patent_search`）JSON-RPC 2.0 闭环并验证 EOF 正常退出。
 
 ### 2026-11-17 — **Batch 1：DB v25 结构化分块 + BM25/向量 RRF 混合检索（#78）+ OpenAlex 学术源 + 解除 5000 字硬截断**（PR 待建）
 

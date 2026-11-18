@@ -82,6 +82,14 @@ pub fn run_migration_tx(conn: &Connection, version: i32, sql: &str) -> Result<()
 
 /// Run all pending database migrations.
 pub(crate) fn run(conn: &Connection, current_version: i32, target_version: i32) -> Result<()> {
+    if current_version < target_version {
+        tracing::info!(
+            "正在初始化数据库 Schema（当前版本 v{} -> 目标版本 v{}）...",
+            current_version,
+            target_version
+        );
+    }
+
     // Migration 0 → 1: Initial schema
     if current_version < 1 {
         run_migration_tx(
@@ -533,6 +541,9 @@ pub(crate) fn run(conn: &Connection, current_version: i32, target_version: i32) 
             current_version,
             target_version
         );
+    }
+    if current_version < target_version {
+        tracing::info!("数据库 Schema 就绪（v{}）", target_version);
     }
 
     Ok(())

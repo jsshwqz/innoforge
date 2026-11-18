@@ -1,3 +1,4 @@
+#[cfg(test)]
 use super::*;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
