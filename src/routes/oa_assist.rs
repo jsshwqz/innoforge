@@ -968,3 +968,39 @@ pub async fn api_ai_vision_figure_check(
 
     (StatusCode::OK, Json(json!(result)))
 }
+
+/// Batch 8: 多对比文件（D1/D2/D3）三维特征对比矩阵
+/// POST /api/ai/oa-feature-matrix
+pub async fn api_ai_oa_feature_matrix(
+    Json(req): Json<serde_json::Value>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let claims = req["claims"].as_str().unwrap_or("");
+    let spec_text = req["spec_text"].as_str().unwrap_or("");
+    let refs: Vec<crate::ai::case_input::ReferenceDocument> = req["refs"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .enumerate()
+                .filter_map(|(idx, v)| {
+                    let text = v.as_str().or_else(|| v["full_text"].as_str())?;
+                    let label = v["label"]
+                        .as_str()
+                        .map(ToString::to_string)
+                        .unwrap_or_else(|| format!("D{}", idx + 1));
+                    let pub_num = v["publication_number"].as_str().unwrap_or("").to_string();
+                    Some(crate::ai::case_input::ReferenceDocument {
+                        label,
+                        publication_number: pub_num,
+                        full_text: text.to_string(),
+                        extraction_method: None,
+                        page_count: None,
+                        technical_field: None,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let matrix = crate::ai::oa_matrix::build_multi_doc_feature_matrix(claims, spec_text, &refs);
+    (StatusCode::OK, Json(json!(matrix)))
+}

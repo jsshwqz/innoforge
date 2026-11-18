@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-18T11:22:44.745Z",
+  "generatedAt": "2026-11-18T11:59:27.620Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -248,6 +248,7 @@
         "addRef",
         "attachDiscussFile",
         "autoFetchRefs",
+        "buildOaFeatureMatrix",
         "checkAmendments",
         "clearCurrentCaseInputs",
         "clearMyPatent",
@@ -269,6 +270,7 @@
         "exportDiscussionConclusions",
         "exportDiscussionTranscript",
         "exportGeneratedResponse",
+        "exportOaWordKit",
         "exportResponseDraft",
         "exportResultMarkdown",
         "extractArgConclusions",
@@ -326,6 +328,7 @@
         "buildArgLibrary",
         "buildDiscussionTranscript",
         "buildExportDocument",
+        "buildOaFeatureMatrix",
         "buildToolbar",
         "checkAmendments",
         "cleanup",
@@ -365,6 +368,7 @@
         "exportDiscussionConclusions",
         "exportDiscussionTranscript",
         "exportGeneratedResponse",
+        "exportOaWordKit",
         "exportResponseDraft",
         "exportResultMarkdown",
         "extractArgConclusions",
@@ -427,6 +431,7 @@
         "renderImportDiscussionPanel",
         "renderMarkdown",
         "renderOaDiff",
+        "renderOaFeatureMatrix",
         "renderOaHistory",
         "renderRadarChart",
         "renderStrategyCards",

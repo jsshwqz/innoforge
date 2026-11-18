@@ -1309,6 +1309,15 @@ Response:
 
 - 请求字段：`patent_id`（可选）、`spec_text`（可选）、`image_base64_urls`（可选，Base64 Data URL 数组）。
 - 成功响应（`200`）：`FigureAnalysisResult`（含 `status`、`vision_model_used`、`parts`、`relations`、`consistent_pairs`、`discrepancies`、`stage_d_rebuttal_context`；无可用视觉模型时优雅降级为 `"degraded"` 并返回确定性文本拓扑）。
+
+### POST `/api/ai/oa-feature-matrix`
+
+- 请求字段：`claims`、`spec_text`、`refs`（D1/D2/D3 数组）。
+- 成功响应（`200`）：`MultiDocFeatureMatrix`（原子特征列表、本案 A33 锚点、D1/D2/D3 公开状态与结合障碍）。
+
+### GET `/api/oa/:case_id/export/docx`
+
+- 导出带红色删除线（`<w:strike/>`）与蓝色下划线（`<w:u w:val="single"/>`）的《权利要求书修改对照页》与三段式《意见陈述书》`.docx`。
 - 失败：缺关键字段时返回 `{ "error": "..." }`。
 
 ---

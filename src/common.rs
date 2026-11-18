@@ -569,6 +569,10 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
             "/api/ai/vision-figure-check",
             post(routes::api_ai_vision_figure_check),
         )
+        .route(
+            "/api/ai/oa-feature-matrix",
+            post(routes::api_ai_oa_feature_matrix),
+        )
         // OA 分析历史 API / OA History API
         .route("/api/oa/history/all", get(routes::api_oa_history_all))
         .route(
@@ -603,6 +607,10 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
         )
         // OA 答复书 docx 导出
         .route("/api/oa/export-docx", post(routes::api_oa_export_docx))
+        .route(
+            "/api/oa/:case_id/export/docx",
+            get(routes::api_oa_case_export_docx),
+        )
         // OA 分析结果服务端导出 (R10-A1)
         .route(
             "/api/oa/export",
