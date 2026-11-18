@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-18T08:35:06.497Z",
+  "generatedAt": "2026-11-18T10:03:58.255Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -268,6 +268,7 @@
         "extractArgConclusions",
         "fillArgTemplate",
         "generateResponseLetter",
+        "handleVisionFigureFiles",
         "loadOaAnalysis",
         "loadSelectedRound",
         "lookupMyPatent",
@@ -301,6 +302,7 @@
         "toggleArgLib",
         "toggleEvidenceGroup",
         "toggleEvidenceUse",
+        "triggerVisionFigureCheck",
         "updateChecklistProgress",
         "uploadMyPatent",
         "uploadOA",
@@ -375,6 +377,7 @@
         "getRefs",
         "getResponseButtonText",
         "getSection5Title",
+        "handleVisionFigureFiles",
         "hideDiscQuoteBtn",
         "hideDiscussionExportButton",
         "hideDiscussionStopButton",
@@ -421,6 +424,7 @@
         "renderOaHistory",
         "renderRadarChart",
         "renderStrategyCards",
+        "renderVisionFigurePanel",
         "restoreOaUi",
         "runClaimSimulation",
         "sanitize",
@@ -462,6 +466,7 @@
         "toggleEvidenceGroup",
         "toggleEvidenceUse",
         "triggerFileSelect",
+        "triggerVisionFigureCheck",
         "updateChecklistProgress",
         "updateCurrentOADiscussionExportButton",
         "updateDeadline",

@@ -530,13 +530,101 @@ impl AiClient {
                 .await;
         }
 
-        let request_body = ChatRequest {
+        let request_body = serde_json::to_value(ChatRequest {
             max_tokens: Some(16384),
             model: provider.model.clone(),
             messages: messages.to_vec(),
             temperature,
-        };
+        })?;
 
+        self.send_openai_request(provider, &request_body, messages.len())
+            .await
+    }
+
+    /// 判断模型/端点是否支持多模态看图。
+    pub(super) fn supports_vision(provider: &AiProvider) -> bool {
+        let base = provider.base_url.to_ascii_lowercase();
+        let model = provider.model.to_ascii_lowercase();
+        if model.contains("deepseek") || model.contains("kimi") || model == "glm-5.3" {
+            return false;
+        }
+        base.contains("sensenova")
+            || base.contains("xiaomimimo")
+            || base.contains("googleapis")
+            || base.contains("openai.com")
+            || base.contains("openrouter")
+            || base.contains("dashscope")
+            || base.contains("anthropic")
+            || model.contains("vl")
+            || model.contains("vision")
+            || model.contains("omni")
+            || model.contains("gemini")
+            || model.contains("gpt-4o")
+            || model.contains("gpt-5")
+            || model.contains("sensenova")
+            || model.contains("mimo")
+    }
+
+    /// 使用 OpenAI Vision 兼容格式向单个服务商发送多模态图文请求。
+    pub(super) async fn try_provider_vision(
+        &self,
+        provider: &AiProvider,
+        system: &str,
+        prompt: &str,
+        image_base64_urls: &[String],
+        temperature: f32,
+    ) -> Result<String> {
+        if !Self::supports_vision(provider) {
+            return Err(anyhow::anyhow!(
+                "当前服务商/模型（{} / {}）不支持多模态看图，请在设置中配置商汤 SenseNova、小米 MiMo 或 Gemini 等视觉模型。",
+                provider.name,
+                provider.model
+            ));
+        }
+
+        let mut user_content: Vec<Value> = vec![serde_json::json!({
+            "type": "text",
+            "text": prompt,
+        })];
+        for url in image_base64_urls {
+            let trimmed = url.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let data_url = if trimmed.starts_with("data:image/") || trimmed.starts_with("http") {
+                trimmed.to_string()
+            } else {
+                format!("data:image/png;base64,{trimmed}")
+            };
+            user_content.push(serde_json::json!({
+                "type": "image_url",
+                "image_url": { "url": data_url }
+            }));
+        }
+
+        let mut msgs = Vec::new();
+        if !system.trim().is_empty() {
+            msgs.push(serde_json::json!({ "role": "system", "content": system }));
+        }
+        msgs.push(serde_json::json!({ "role": "user", "content": user_content }));
+
+        let request_body = serde_json::json!({
+            "max_tokens": 8192,
+            "model": provider.model,
+            "messages": msgs,
+            "temperature": temperature,
+        });
+
+        self.send_openai_request(provider, &request_body, 2).await
+    }
+
+    /// 共用的 OpenAI 兼容 JSON 请求发送、429 退避重试与用量记录逻辑。
+    async fn send_openai_request(
+        &self,
+        provider: &AiProvider,
+        request_body: &Value,
+        msg_count: usize,
+    ) -> Result<String> {
         let max_retries = PROVIDER_MAX_RETRIES;
         let mut last_err = None;
         for attempt in 0..max_retries {
@@ -554,13 +642,13 @@ impl AiClient {
                 provider.name,
                 req_url,
                 provider.model,
-                messages.len()
+                msg_count
             );
             match self
                 .client
                 .post(&req_url)
                 .header("Authorization", format!("Bearer {}", provider.api_key))
-                .json(&request_body)
+                .json(request_body)
                 .send()
                 .await
             {

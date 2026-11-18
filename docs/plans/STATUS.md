@@ -14,6 +14,13 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-11-18 — **Batch 5：专利附图多模态看图联动与标号视觉核对（v0.9.48）**
+
+- **状态 / Status**: ✅ 本地全量验证通过（`cargo fmt` / `clippy --all-targets -D warnings` 零告警，`cargo test --no-fail-fast` 73 个测试二进制全过，含 lib 995 passed），已提 PR 等 CI 合并进 `main` 并打 `v0.9.48` Tag
+- **① 多模态视觉通道**（`src/ai/client.rs`、`src/ai/chat.rs`、`src/routes/mod.rs`）：新增 `AiClient::chat_with_images` 与共享 `send_openai_request`；`AppConfig::ai_client_vision` 优先选择商汤 SenseNova / 小米 MiMo / Gemini / Qwen-VL 等看图模型，无可用视觉通道时返回 `None` 优雅降级。
+- **② 图文标号与拓扑交叉核对**（`src/ai/vision_topology.rs`、`src/ai/response_pipeline_stage_d.rs`）：解析附图 `parts` / `relations` / `interference_or_isolation_risks`，与 `part_topology` 文本拓扑交叉比对输出 `consistent_pairs` / `discrepancies` 及 `stage_d_rebuttal_context`，接入 Stage D 机理比对。
+- **③ API 与前端接线**（`src/routes/oa_assist.rs`、`src/common.rs`、`templates/office_action_response.html`、`static/i18n.js`、`docs/API.md`）：新增 `POST /api/ai/vision-figure-check` 及 OA 答复页「附图标号与结构核对」交互面板。
+
 ### 2026-11-18 — **v0.9.47 发版收口：--release 真机全站逐按钮实测 + /settings 模型预设回退 & /oa-response 轮次栏修复**
 
 - **状态 / Status**: 🚧 准备 PR 合入 `main` 并打 `v0.9.47` Tag

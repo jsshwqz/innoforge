@@ -38,6 +38,28 @@ pub(super) async fn stage_d_compare_effects(
     input: &CaseInput,
     ai_client: Option<&AiClient>,
 ) -> Vec<EffectMismatch> {
+    stage_d_compare_effects_with_vision(input, ai_client, None).await
+}
+
+/// 将多份专利附图视觉核对结果组装为 OA Stage D 机理比对上下文。
+#[allow(dead_code)]
+pub fn format_vision_stage_d_context(
+    figure_results: &[crate::ai::vision_topology::FigureAnalysisResult],
+) -> String {
+    let contexts: Vec<String> = figure_results
+        .iter()
+        .filter(|r| !r.stage_d_rebuttal_context.trim().is_empty())
+        .map(|r| r.stage_d_rebuttal_context.clone())
+        .collect();
+    contexts.join("\n\n")
+}
+
+/// 带附图视觉与图文核对上下文的 Stage D 对比入口。
+pub(super) async fn stage_d_compare_effects_with_vision(
+    input: &CaseInput,
+    ai_client: Option<&AiClient>,
+    vision_context: Option<&str>,
+) -> Vec<EffectMismatch> {
     // 缺陷4修复：去除换行与多余空白后再定位引文窗口，与CNIPA提取件去空格规则一致
     let oa_text = &input.oa_full_text;
     let oa_normalized = normalize_text(oa_text);
@@ -108,7 +130,9 @@ pub(super) async fn stage_d_compare_effects(
     // Step 4: AI 强模型机理—结构—效果深度对比（60s 超时 + output_guard 过滤，失败无损回退 base_mismatches）
     if let Some(ai) = ai_client {
         if !input.reference_documents.is_empty() {
-            if let Some(ai_mismatches) = run_ai_mechanism_comparison(ai, input).await {
+            if let Some(ai_mismatches) =
+                run_ai_mechanism_comparison(ai, input, vision_context).await
+            {
                 for item in ai_mismatches {
                     let dup = base_mismatches.iter().any(|existing| {
                         existing.rebuttal_text == item.rebuttal_text
@@ -190,6 +214,7 @@ pub(super) fn parse_and_guard_ai_mismatches(raw: &str, input: &CaseInput) -> Vec
 async fn run_ai_mechanism_comparison(
     ai: &AiClient,
     input: &CaseInput,
+    vision_context: Option<&str>,
 ) -> Option<Vec<EffectMismatch>> {
     let system_prompt = "你是资深中国专利代理师。请严格对比本申请与对比文件的「工作原理—结构连接—实际效果」，\
 仅基于输入材料输出 JSON 数组，不要输出任何额外说明或 Markdown。\
@@ -212,18 +237,30 @@ async fn run_ai_mechanism_comparison(
         .map(|s| safe_truncate_chars(s, 2000))
         .unwrap_or_default();
 
+    let vision_section = vision_context
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| {
+            format!(
+                "\n\n【附图视觉与图文核对结果】\n{}\n",
+                safe_truncate_chars(s, 1500)
+            )
+        })
+        .unwrap_or_default();
+
     let user_prompt = format!(
         "请对比以下本申请与对比文件在「工作原理—结构连接—实际效果」上的实质差异，输出 JSON 数组：\n\
 <user_input>\n\
 【审查意见全文】\n{}\n\n\
 【待审权利要求】\n{}\n\n\
 【说明书摘要/正文】\n{}\n\n\
-【对比文件】\n{}\n\
+【对比文件】\n{}{}\n\
 </user_input>",
         safe_truncate_chars(&input.oa_full_text, 2000),
         safe_truncate_chars(&input.claims_under_review, 1500),
         spec_excerpt,
-        refs_summary
+        refs_summary,
+        vision_section
     );
 
     let timed_client = ai.clone_with_timeout(std::time::Duration::from_secs(60));

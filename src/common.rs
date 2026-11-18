@@ -565,6 +565,10 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
             "/api/ai/oa-adversarial",
             post(routes::api_ai_oa_adversarial),
         )
+        .route(
+            "/api/ai/vision-figure-check",
+            post(routes::api_ai_vision_figure_check),
+        )
         // OA 分析历史 API / OA History API
         .route("/api/oa/history/all", get(routes::api_oa_history_all))
         .route(

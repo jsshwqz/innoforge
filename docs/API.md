@@ -992,6 +992,7 @@ Response:
 | POST | `/api/ai/oa-claim-simulate` | 修改权项的侵权模拟 |
 | POST | `/api/ai/oa-collect-evidence` | 收集支持答复的证据 |
 | POST | `/api/ai/oa-adversarial` | 对抗性反驳压力测试 |
+| POST | `/api/ai/vision-figure-check` | 专利附图多模态标号与图文拓扑核对 |
 
 
 ## 1. CAD 接口 / `/api/cad/*`
@@ -1291,6 +1292,11 @@ Response:
 
 - 请求字段：`my_patent`、`oa_text`、`claims`、`refs`、`rounds`、`focus`、`goal_threshold`。
 - 成功响应（`200`）：`{ "rounds": [...], "survived": <bool>, ... }`。
+
+### POST `/api/ai/vision-figure-check`
+
+- 请求字段：`patent_id`（可选）、`spec_text`（可选）、`image_base64_urls`（可选，Base64 Data URL 数组）。
+- 成功响应（`200`）：`FigureAnalysisResult`（含 `status`、`vision_model_used`、`parts`、`relations`、`consistent_pairs`、`discrepancies`、`stage_d_rebuttal_context`；无可用视觉模型时优雅降级为 `"degraded"` 并返回确定性文本拓扑）。
 - 失败：缺关键字段时返回 `{ "error": "..." }`。
 
 ---

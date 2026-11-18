@@ -50,6 +50,7 @@ pub mod strategy_arbitration;
 pub mod targeted_claims;
 pub mod tech_problem_check;
 mod tests;
+pub mod vision_topology;
 pub mod whitespace_search;
 pub mod zero_evidence;
 
