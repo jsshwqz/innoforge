@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-12T15:31:23.814Z",
+  "generatedAt": "2026-11-18T00:13:50.208Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -129,6 +129,7 @@
         "drawIdeaCad",
         "exportConclusions",
         "exportConversation",
+        "generateFeatureCards",
         "handleChatFileSelect",
         "hideMemoryForm",
         "loadMemory",
@@ -160,6 +161,7 @@
         "esc",
         "exportConclusions",
         "exportConversation",
+        "generateFeatureCards",
         "getTypeIcon",
         "getTypeLabel",
         "handleChatFileSelect",

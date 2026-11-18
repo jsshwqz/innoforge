@@ -32,6 +32,7 @@
   - **Stage D 强模型机理对比**（`src/ai/response_pipeline_stage_d.rs` + `src/ai/response_pipeline.rs`）：60s 超时强模型对比「工作原理—结构连接—实际效果」，经 `output_guard::run_guard` 逐条校验并在 `stage_e_assemble` 汇入仲裁结果。
   - **快慢模型路由与特征卡生成**（`src/routes/mod.rs` + `src/orchestrator/engine.rs` + `src/pipeline/steps/analysis.rs` + `src/routes/feature_cards.rs` + `src/common.rs`）：Gemini 降级链更新为 `gemini-3.8-flash` / `gemini-flash-lite-latest`；新增 `ai_expert_channel_ready`；新增端点 `POST /api/ideas/:id/feature-cards/generate` 与 CAD 提示词组装 `build_cad_prompt_from_card`。
   - **工程 BOM 与期刊草稿双交付包**（`src/pipeline/steps/deliverables.rs` + `src/pipeline/steps/finalize.rs` + `src/routes/idea.rs`）：`Finalize` 阶段在 EK-v2 / 溯源完成后自动落库 `deliverable_bom` 与 `deliverable_journal_draft`（`concept_type = "decision"`），`GET /api/idea/:id/report` 新增 `bom_pack` 与 `journal_draft` 分支（含防破新颖性锁警告与真实 DOI 引用）。
+  - **前端最小功能按钮接线**（`templates/idea.html` + `static/i18n.js` + `docs/functions-manifest.json`）：报告切换栏接入 `bom_pack` / `journal_draft` 按钮及 `openReport` 映射；特征卡片面板新增「AI 自动提取特征卡」按钮（调用 `POST /api/ideas/:id/feature-cards/generate` 并在行内展示状态）与卡片级「转 FreeCAD 建模」按钮（`createElement` + `addEventListener` 切换讨论页并调用 `ideaCadController.drawFromInput`）。
   - **文档与契约同步**：`docs/API-CONTRACTS.md`、`docs/API-ROUTES.md`、`docs/API.md`、`CHANGELOG.md` 同步更新。
 
 ### 2026-11-17 — **Batch 1：DB v25 结构化分块 + BM25/向量 RRF 混合检索（#78）+ OpenAlex 学术源 + 解除 5000 字硬截断**（PR 待建）

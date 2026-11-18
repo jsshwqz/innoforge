@@ -11,6 +11,7 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 - **OA 答复 Stage D 强模型机理对比与部件拓扑/学术反驳**：新增 `part_topology` 模块提取附图标记与部件连接关系并生成机理差异反驳；识别 OpenAlex 真实 DOI 文献生成学术公知常识反驳；Stage D 接入 60 秒超时强模型对比并经 `output_guard` 逐条校验放行，无 Key 或超时时无损回退确定性扫描。 / Added `part_topology` extraction and academic DOI rebuttal in OA arbitration; wired 60s-timeout expert-model mechanism comparison in Stage D with `output_guard` verification and deterministic fallback.
 - **工程 BOM 与期刊草稿双交付包**：新增 `deliverables` 模块并在 `Finalize` 阶段自动落库（`deliverable_bom` / `deliverable_journal_draft`）；`GET /api/idea/:id/report` 新增 `bom_pack` 与 `journal_draft` 导出分支，置顶防破新颖性安全锁警告并绑定检索所得真实 DOI。 / Added engineering BOM pack and journal manuscript draft deliverables persisted in `Finalize` and exposed via `bom_pack` / `journal_draft` report types.
 - **特征卡自动生成端点与快慢模型路由闭环**：新增 `POST /api/ideas/:id/feature-cards/generate`（快模型 JSON 解析 + 确定性回退入库）、语义级差异对比与 FreeCAD 建模提示词组装；主管线与 OA 深度生成接入 `ai_client_expert()`，扩展查询与特征提取接入 `ai_client_fast()`。 / Added `POST /api/ideas/:id/feature-cards/generate` with deterministic fallback, CAD prompt builder, and expert/fast AI channel routing.
+- **创研台前端最小功能按钮接线**：`idea.html` 报告切换栏新增工程 BOM 交付包与期刊论文草稿切换按钮，特征卡片面板新增「AI 自动提取特征卡」触发按钮及单卡「转 FreeCAD 建模」跳转按钮，并补全中英双语词条。 / Wired BOM pack & journal draft report switchers, auto-extract feature cards button, and per-card "Send to FreeCAD" action in `idea.html` with bilingual i18n keys.
 
 ### 修复 / Fixed
 
