@@ -646,6 +646,12 @@ Response:
 
 导出标准三 Sheet `.xlsx` 文件（Sheet 1：工程 BOM 清单；Sheet 2：电气控制 IO 表；Sheet 3：样机台架测试验收大纲），表头加粗底色并自动列宽、冻结首行。
 
+### 6) 生成控制原型与闭环响应仿真 / Generate Control Prototype & Simulation
+
+**POST** `/api/ideas/:id/control-prototype`
+
+生成 IEC 61131-3 结构化文本（ST）功能块、多段标定映射表与闭环阶跃响应时序数据（`time_ms`、`setpoint`、`actual_value`、`metrics`）。
+
 Response:
 
 ```json

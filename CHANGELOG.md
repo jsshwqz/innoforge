@@ -6,6 +6,12 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 ---
 ## [Unreleased]
 
+## [0.9.50] - 2026-11-18
+
+### 新增 / Added
+
+- **控制系统原型代码生成与闭环响应曲线可视化（Batch 7）**：新增 `control_proto` 模块生成 IEC 61131-3 结构化文本（ST）功能块（含防除零、超限联锁与手自动无扰切换）、多段线性插值标定表与闭环阶跃响应数值仿真（超调量/稳态误差/调节时间）；新增 `POST /api/ideas/:id/control-prototype` 接口及 `idea.html` 基于本地 `Chart.js` 的控制响应曲线可视化与 ST 代码复制面板。 / Added `control_proto` IEC 61131-3 ST generator, piecewise calibration interpolation, closed-loop step simulation, `POST /api/ideas/:id/control-prototype`, and local `Chart.js` curve panel in `idea.html`.
+
 ## [0.9.49] - 2026-11-18
 
 ### 新增 / Added
@@ -423,6 +429,12 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 ## [Unreleased]
+
+## [0.9.50] - 2026-11-18
+
+### 新增 / Added
+
+- **控制系统原型代码生成与闭环响应曲线可视化（Batch 7）**：新增 `control_proto` 模块生成 IEC 61131-3 结构化文本（ST）功能块（含防除零、超限联锁与手自动无扰切换）、多段线性插值标定表与闭环阶跃响应数值仿真（超调量/稳态误差/调节时间）；新增 `POST /api/ideas/:id/control-prototype` 接口及 `idea.html` 基于本地 `Chart.js` 的控制响应曲线可视化与 ST 代码复制面板。 / Added `control_proto` IEC 61131-3 ST generator, piecewise calibration interpolation, closed-loop step simulation, `POST /api/ideas/:id/control-prototype`, and local `Chart.js` curve panel in `idea.html`.
 
 ## [0.9.49] - 2026-11-18
 

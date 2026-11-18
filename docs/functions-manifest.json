@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-18T10:46:15.888Z",
+  "generatedAt": "2026-11-18T11:22:44.745Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -126,11 +126,13 @@
         "addMemoryEntry",
         "clearForm",
         "compareFeatureCards",
+        "copyControlStCode",
         "deleteMemory",
         "drawIdeaCad",
         "exportBomXlsx",
         "exportConclusions",
         "exportConversation",
+        "generateControlPrototype",
         "generateFeatureCards",
         "handleChatFileSelect",
         "hideMemoryForm",
@@ -157,6 +159,7 @@
         "closeActiveSSE",
         "compareFeatureCards",
         "context",
+        "copyControlStCode",
         "deleteIdea",
         "deleteMemory",
         "displayResults",
@@ -165,6 +168,7 @@
         "exportBomXlsx",
         "exportConclusions",
         "exportConversation",
+        "generateControlPrototype",
         "generateFeatureCards",
         "getTypeIcon",
         "getTypeLabel",

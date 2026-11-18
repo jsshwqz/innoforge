@@ -690,6 +690,10 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
             get(routes::api_idea_delivery_pack_xlsx),
         )
         .route(
+            "/api/ideas/:id/control-prototype",
+            post(routes::api_idea_control_prototype),
+        )
+        .route(
             "/api/feature-cards/diff",
             get(routes::api_feature_card_diff),
         )
