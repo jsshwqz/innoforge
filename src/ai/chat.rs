@@ -5,6 +5,63 @@ use anyhow::Result;
 use std::time::Duration;
 
 impl AiClient {
+    /// 多模态看图对话接口（OpenAI Vision 兼容格式，支持主备通道容灾）。
+    pub async fn chat_with_images(
+        &self,
+        system: &str,
+        prompt: &str,
+        image_base64_urls: &[String],
+        temperature: f32,
+    ) -> Result<String> {
+        if image_base64_urls.is_empty() {
+            return Err(anyhow::anyhow!(
+                "未提供有效附图（image_base64_urls 为空），无法执行视觉分析。"
+            ));
+        }
+
+        let mut failed_chain: Vec<String> = Vec::new();
+        match self
+            .try_provider_vision(
+                &self.primary,
+                system,
+                prompt,
+                image_base64_urls,
+                temperature,
+            )
+            .await
+        {
+            Ok(content) => return Ok(content),
+            Err(e) => {
+                failed_chain.push(format!("{}: {}", self.primary.name, e));
+                if self.fallbacks.is_empty() {
+                    return Err(e);
+                }
+                tracing::warn!(
+                    "[{}] vision failed: {}, trying fallbacks...",
+                    self.primary.name,
+                    e
+                );
+            }
+        }
+
+        for fallback in &self.fallbacks {
+            match self
+                .try_provider_vision(fallback, system, prompt, image_base64_urls, temperature)
+                .await
+            {
+                Ok(content) => return Ok(content),
+                Err(e) => {
+                    failed_chain.push(format!("{}: {}", fallback.name, e));
+                }
+            }
+        }
+
+        Err(anyhow::anyhow!(
+            "视觉模型通道均失败或不支持看图（{}）。",
+            failed_chain.join(" | ")
+        ))
+    }
+
     /// 专家模式：用于创新推演、专利深分析等高推理任务。
     /// 使用 AiClient 创建时配置的模型（ai_client_expert → ai_model_expert，ai_client → ai_model）。
     pub async fn chat_expert(&self, user_msg: &str, context: Option<&str>) -> Result<String> {

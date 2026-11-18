@@ -153,6 +153,8 @@
             <button class="btn-secondary" onclick="openClaimSimulator()" id="btn-claim-sim" style="margin-left:8px;">🔧 <span data-i18n="oa.claimSim.title">权利要求修改模拟器</span></button>
             <button class="btn-secondary" onclick="collectEvidence()" id="btn-collect-evidence" style="margin-left:8px;">📁 <span data-i18n="oa.evidence.btn">自动收集证据</span></button>
             <button class="btn-secondary" onclick="startAdversarial()" id="btn-adversarial" style="margin-left:8px;">🔄 <span data-i18n="oa.adversarial.start">多轮对抗推演</span></button>
+            <button class="btn-secondary" onclick="triggerVisionFigureCheck()" id="btn-vision-figure" style="margin-left:8px;">🖼️ <span data-i18n="oa.visionFigure.btn">附图标号与结构核对</span></button>
+            <input type="file" id="vision-figure-input" accept="image/*" multiple style="display:none;" onchange="handleVisionFigureFiles(this)">
             <div style="display:flex;align-items:center;gap:8px;margin-left:auto;">
                 <span class="muted" data-i18n="oar.depthLabel"></span>
                 <select id="depth-select" class="depth-select">
@@ -4849,6 +4851,89 @@
             btnRow.parentNode.parentNode.appendChild(div);
         } else {
             document.querySelector('.container').appendChild(div);
+        }
+    }
+
+    function triggerVisionFigureCheck() {
+        var inp = document.getElementById('vision-figure-input');
+        if (inp) inp.click();
+    }
+
+    async function handleVisionFigureFiles(inputEl) {
+        var files = inputEl && inputEl.files ? Array.from(inputEl.files) : [];
+        if (files.length === 0) return;
+        var btn = document.getElementById('btn-vision-figure');
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = '⏳ ' + (t('oa.visionFigure.loading') || '附图视觉核对中...');
+        }
+        try {
+            var urls = await Promise.all(files.slice(0, 4).map(function(f) {
+                return new Promise(function(resolve, reject) {
+                    var reader = new FileReader();
+                    reader.onload = function() { resolve(String(reader.result || '')); };
+                    reader.onerror = reject;
+                    reader.readAsDataURL(f);
+                });
+            }));
+            var patentData = getMyPatent();
+            var specText = patentData ? (patentData.content || patentData) : '';
+            var resp = await fetch('/api/ai/vision-figure-check', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    patent_id: getCurrentPatentNumber() || '',
+                    spec_text: typeof specText === 'string' ? specText : '',
+                    image_base64_urls: urls
+                })
+            });
+            var data = await resp.json();
+            renderVisionFigurePanel(data);
+        } catch (err) {
+            alert((t('oa.visionFigure.error') || '附图标号核对失败: ') + err.message);
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = '🖼️ ' + (t('oa.visionFigure.btn') || '附图标号与结构核对');
+            }
+            if (inputEl) inputEl.value = '';
+        }
+    }
+
+    function renderVisionFigurePanel(data) {
+        var existing = document.getElementById('vision-figure-panel');
+        if (existing) existing.remove();
+        var panel = document.createElement('div');
+        panel.id = 'vision-figure-panel';
+        panel.className = 'cmp-section';
+        panel.style.marginTop = '12px';
+
+        var title = document.createElement('h4');
+        title.textContent = '🖼️ ' + (t('oa.visionFigure.title') || '附图标号与图文拓扑核对结果') + ' (' + (data.vision_model_used || 'none') + ')';
+        panel.appendChild(title);
+
+        var summary = document.createElement('p');
+        summary.textContent = data.summary || '';
+        panel.appendChild(summary);
+
+        if (Array.isArray(data.consistent_pairs) && data.consistent_pairs.length > 0) {
+            var okP = document.createElement('p');
+            okP.textContent = '✅ ' + data.consistent_pairs.join('；');
+            panel.appendChild(okP);
+        }
+        if (Array.isArray(data.discrepancies) && data.discrepancies.length > 0) {
+            var ul = document.createElement('ul');
+            data.discrepancies.forEach(function(d) {
+                var li = document.createElement('li');
+                li.textContent = '[' + (d.kind || '') + '] ' + (d.detail || '');
+                ul.appendChild(li);
+            });
+            panel.appendChild(ul);
+        }
+
+        var btnRow = document.getElementById('btn-vision-figure');
+        if (btnRow && btnRow.parentNode && btnRow.parentNode.parentNode) {
+            btnRow.parentNode.parentNode.appendChild(panel);
         }
     }
 

@@ -6,6 +6,12 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 ---
 ## [Unreleased]
 
+## [0.9.48] - 2026-11-18
+
+### 新增 / Added
+
+- **专利附图多模态看图联动与部件标号视觉核对（Batch 5）**：`AiClient` 新增 `chat_with_images`（OpenAI Vision 兼容格式与容灾链），`AppConfig::ai_client_vision` 自动优选商汤 SenseNova / 小米 MiMo / Gemini / Qwen-VL 等视觉通道；新增 `vision_topology` 模块提取附图标号/连接关系/运动干涉与介质未隔离隐患，并与 `part_topology` 说明书文本拓扑交叉核对接入 OA Stage D；新增 `POST /api/ai/vision-figure-check` 接口与 OA 答复页「附图标号与结构核对」按钮（含无视觉模型时的确定性降级）。 / Added multimodal `AiClient::chat_with_images`, `vision_topology` figure-vs-spec designator cross-check wired into OA Stage D, `POST /api/ai/vision-figure-check`, and OA UI button with graceful degradation.
+
 ## [0.9.47] - 2026-11-18
 
 ### 修复 / Fixed
@@ -411,6 +417,12 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 ## [Unreleased]
+
+## [0.9.48] - 2026-11-18
+
+### 新增 / Added
+
+- **专利附图多模态看图联动与部件标号视觉核对（Batch 5）**：`AiClient` 新增 `chat_with_images`（OpenAI Vision 兼容格式与容灾链），`AppConfig::ai_client_vision` 自动优选商汤 SenseNova / 小米 MiMo / Gemini / Qwen-VL 等视觉通道；新增 `vision_topology` 模块提取附图标号/连接关系/运动干涉与介质未隔离隐患，并与 `part_topology` 说明书文本拓扑交叉核对接入 OA Stage D；新增 `POST /api/ai/vision-figure-check` 接口与 OA 答复页「附图标号与结构核对」按钮（含无视觉模型时的确定性降级）。 / Added multimodal `AiClient::chat_with_images`, `vision_topology` figure-vs-spec designator cross-check wired into OA Stage D, `POST /api/ai/vision-figure-check`, and OA UI button with graceful degradation.
 
 ## [0.9.47] - 2026-11-18
 

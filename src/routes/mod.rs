@@ -284,6 +284,103 @@ impl AppConfig {
         self.ai_channel_ready()
     }
 
+    /// 首选支持多模态看图的 AI 客户端，返回 `(AiClient, 选中的视觉模型名)`；
+    /// 若当前及已配置独立 Key 的服务商均不支持看图，返回 `None` 供调用方优雅降级。
+    pub fn ai_client_vision(&self) -> Option<(AiClient, String)> {
+        let base_lower = self.ai_base_url.to_ascii_lowercase();
+        let primary_key = self.effective_api_key();
+
+        // 1. 优先检查当前主配置（若是商汤通道但主模型是 DeepSeek/GLM 纯文本，自动切为商汤视觉模型）
+        if !is_placeholder_api_key(&primary_key) || is_ollama_url(&self.ai_base_url) {
+            if base_lower.contains("sensenova") {
+                let m = if self.ai_model.contains("sensenova-6.") {
+                    self.ai_model.clone()
+                } else {
+                    "sensenova-6.8-flash-lite".to_string()
+                };
+                return Some((
+                    AiClient::with_config(&self.ai_base_url, &primary_key, &m),
+                    m,
+                ));
+            }
+            if base_lower.contains("xiaomimimo") {
+                let m = if self.ai_model.contains("mimo") {
+                    self.ai_model.clone()
+                } else {
+                    "mimo-v2.5-pro".to_string()
+                };
+                return Some((
+                    AiClient::with_config(&self.ai_base_url, &primary_key, &m),
+                    m,
+                ));
+            }
+            if base_lower.contains("googleapis") {
+                let m = if self.ai_model.contains("gemini") {
+                    self.ai_model.clone()
+                } else {
+                    "gemini-3.8-flash".to_string()
+                };
+                let mut client = AiClient::with_config(&self.ai_base_url, &primary_key, &m);
+                self.add_gemini_model_fallback(&mut client, &m);
+                return Some((client, m));
+            }
+            if base_lower.contains("openai.com") || base_lower.contains("openrouter") {
+                let m = if self.ai_model.contains("gpt-4o") || self.ai_model.contains("gpt-5") {
+                    self.ai_model.clone()
+                } else {
+                    "gpt-4o".to_string()
+                };
+                return Some((
+                    AiClient::with_config(&self.ai_base_url, &primary_key, &m),
+                    m,
+                ));
+            }
+            if base_lower.contains("dashscope") {
+                let m = if self.ai_model.contains("vl") || self.ai_model.contains("qwen4-max") {
+                    self.ai_model.clone()
+                } else {
+                    "qwen-vl-max".to_string()
+                };
+                return Some((
+                    AiClient::with_config(&self.ai_base_url, &primary_key, &m),
+                    m,
+                ));
+            }
+        }
+
+        // 2. 若主配置为纯文本（如 DeepSeek）或未配置，尝试已独立配置 Key 的多模态服务商
+        let generic_key = self.ai_api_key.as_str();
+        let candidates: [(&str, &str, &str); 4] = [
+            (
+                &self.ai_api_key_sensetime,
+                "https://token.sensenova.cn/v1",
+                "sensenova-6.8-flash-lite",
+            ),
+            (
+                &self.ai_api_key_xiaomi,
+                "https://api.xiaomimimo.com/v1",
+                "mimo-v2.5-pro",
+            ),
+            (
+                &self.ai_api_key_gemini,
+                "https://generativelanguage.googleapis.com/v1beta/openai",
+                "gemini-3.8-flash",
+            ),
+            (
+                &self.ai_api_key_qwen,
+                "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "qwen-vl-max",
+            ),
+        ];
+        for (key, url, model) in candidates {
+            if !is_placeholder_api_key(key) && key != generic_key {
+                return Some((AiClient::with_config(url, key, model), model.to_string()));
+            }
+        }
+
+        None
+    }
+
     /// 为 Gemini 端点添加模型降级兜底：从高到低，主模型 quota 用完后尝试更便宜的模型。
     /// 非 Gemini 端点不添加降级。
     fn add_gemini_model_fallback(&self, client: &mut AiClient, primary_model: &str) {

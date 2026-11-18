@@ -916,3 +916,55 @@ pub async fn api_ai_oa_adversarial(
         })),
     )
 }
+
+/// Batch 5: 专利附图多模态看图联动与标号视觉核对
+/// POST /api/ai/vision-figure-check
+/// 接收 { patent_id?, image_base64_urls?, spec_text? } -> 返回 FigureAnalysisResult JSON
+pub async fn api_ai_vision_figure_check(
+    State(s): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let patent_id = req["patent_id"].as_str().unwrap_or("").trim();
+    let mut spec_text = req["spec_text"].as_str().unwrap_or("").trim().to_string();
+
+    if spec_text.is_empty() && !patent_id.is_empty() {
+        if let Ok(Some(p)) = s.db.get_patent(patent_id) {
+            spec_text = format!(
+                "{}\n\n{}\n\n{}\n\n{}",
+                p.title, p.abstract_text, p.claims, p.description
+            );
+        }
+    }
+
+    let images: Vec<String> = req["image_base64_urls"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(str::trim))
+                .filter(|s| !s.is_empty())
+                .map(ToString::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let vision_opt = s
+        .config
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .ai_client_vision();
+
+    let (client_ref, model_label) = match vision_opt.as_ref() {
+        Some((c, m)) => (Some(c), m.as_str()),
+        None => (None, "none"),
+    };
+
+    let result = crate::ai::vision_topology::analyze_figure_with_vision(
+        client_ref,
+        &images,
+        &spec_text,
+        model_label,
+    )
+    .await;
+
+    (StatusCode::OK, Json(json!(result)))
+}
