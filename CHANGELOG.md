@@ -6,6 +6,12 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 ---
 ## [Unreleased]
 
+## [0.9.49] - 2026-11-18
+
+### 新增 / Added
+
+- **离线专利库批量导入提速与工程 BOM Excel 专业导出（Batch 6）**：新增 `batch_import_patents_with_chunks`（单 `BEGIN IMMEDIATE` 事务包裹专利表 + `patents_fts` + 结构化分块 `patent_chunks` + `chunks_fts` 写入与末尾 `optimize` 优化钩子，并接入 `/api/import`）；新增 `GET /api/ideas/:id/delivery-pack/xlsx` 导出三 Sheet 标准 `.xlsx`（工程 BOM 清单 / 电气控制 IO 表 / 样机台架测试验收大纲，含加粗底色表头、冻结首行与自动列宽）及前端「导出 Excel BOM 包」按钮。 / Added transactional `batch_import_patents_with_chunks` with FTS optimize hook and 3-sheet formatted Excel BOM delivery pack export (`GET /api/ideas/:id/delivery-pack/xlsx`).
+
 ## [0.9.48] - 2026-11-18
 
 ### 新增 / Added
@@ -417,6 +423,12 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 ## [Unreleased]
+
+## [0.9.49] - 2026-11-18
+
+### 新增 / Added
+
+- **离线专利库批量导入提速与工程 BOM Excel 专业导出（Batch 6）**：新增 `batch_import_patents_with_chunks`（单 `BEGIN IMMEDIATE` 事务包裹专利表 + `patents_fts` + 结构化分块 `patent_chunks` + `chunks_fts` 写入与末尾 `optimize` 优化钩子，并接入 `/api/import`）；新增 `GET /api/ideas/:id/delivery-pack/xlsx` 导出三 Sheet 标准 `.xlsx`（工程 BOM 清单 / 电气控制 IO 表 / 样机台架测试验收大纲，含加粗底色表头、冻结首行与自动列宽）及前端「导出 Excel BOM 包」按钮。 / Added transactional `batch_import_patents_with_chunks` with FTS optimize hook and 3-sheet formatted Excel BOM delivery pack export (`GET /api/ideas/:id/delivery-pack/xlsx`).
 
 ## [0.9.48] - 2026-11-18
 

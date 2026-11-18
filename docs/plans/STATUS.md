@@ -14,6 +14,12 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-11-18 — **Batch 6：离线专利库批量导入提速 + 工程 BOM Excel 专业导出（v0.9.49）**
+
+- **状态 / Status**: ✅ 本地全量验证通过（`cargo fmt` / `clippy --all-targets -D warnings` 零告警，`cargo test --no-fail-fast` 73 个测试二进制全过，含 lib 997 passed），已提 PR 等 CI 合并进 `main` 并打 `v0.9.49` Tag
+- **① 离线专利批量导入与 `chunks_fts` 事务批处理**（`src/db/rag.rs`、`src/routes/settings.rs`）：新增 `batch_import_patents_with_chunks` 单 `BEGIN IMMEDIATE` 事务批量写入专利、`patents_fts`、`patent_chunks` 与 `chunks_fts`（按公开号幂等去重 + 末尾 `optimize`），并接入 `POST /api/import`。
+- **② 工程落地交付包三 Sheet `.xlsx` 导出**（`src/routes/idea_reports.rs`、`src/common.rs`、`templates/idea.html`、`static/i18n.js`、`docs/API.md`）：复用 `rust_xlsxwriter` 实现 `GET /api/ideas/:id/delivery-pack/xlsx`（Sheet 1 工程 BOM 清单 / Sheet 2 电气控制 IO 表 / Sheet 3 样机台架测试验收大纲，冻结首行+加粗表头+自动列宽）与前端导出按钮。
+
 ### 2026-11-18 — **Batch 5：专利附图多模态看图联动与标号视觉核对（v0.9.48）**
 
 - **状态 / Status**: ✅ 本地全量验证通过（`cargo fmt` / `clippy --all-targets -D warnings` 零告警，`cargo test --no-fail-fast` 73 个测试二进制全过，含 lib 995 passed），已提 PR 等 CI 合并进 `main` 并打 `v0.9.48` Tag

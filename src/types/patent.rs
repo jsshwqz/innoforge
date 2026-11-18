@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 
 /// 专利数据 / Patent data
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Patent {
     #[serde(default = "gen_id")]
     pub id: String,
