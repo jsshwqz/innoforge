@@ -6,6 +6,12 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 ---
 ## [Unreleased]
 
+## [0.9.52] - 2026-11-18
+
+### 新增 / Added
+
+- **批量 FTO 侵权风险主动扫描与规避设计工作台（Batch 9）**：新增 `fto_scanner` 引擎（`high_red` 全面覆盖 / `warn_yellow` 等同预警 / `safe_green` 缺特征或已失效专利自动标绿，碰撞专利自动生成 3 套含 BOM 成本与性能影响的规避方案）；新增 `POST /api/ideas/:id/fto-scan` 路由与 `idea.html` FTO 红绿灯碰撞看板及一键采纳按钮。 / Added `fto_scanner` batch FTO engine (all-elements & equivalents rules, inactive patent clearance, 3 design-around options), `POST /api/ideas/:id/fto-scan`, and FTO traffic-light dashboard in `idea.html`.
+
 ## [0.9.51] - 2026-11-18
 
 ### 新增 / Added
@@ -435,6 +441,12 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 ## [Unreleased]
+
+## [0.9.52] - 2026-11-18
+
+### 新增 / Added
+
+- **批量 FTO 侵权风险主动扫描与规避设计工作台（Batch 9）**：新增 `fto_scanner` 引擎（`high_red` 全面覆盖 / `warn_yellow` 等同预警 / `safe_green` 缺特征或已失效专利自动标绿，碰撞专利自动生成 3 套含 BOM 成本与性能影响的规避方案）；新增 `POST /api/ideas/:id/fto-scan` 路由与 `idea.html` FTO 红绿灯碰撞看板及一键采纳按钮。 / Added `fto_scanner` batch FTO engine (all-elements & equivalents rules, inactive patent clearance, 3 design-around options), `POST /api/ideas/:id/fto-scan`, and FTO traffic-light dashboard in `idea.html`.
 
 ## [0.9.51] - 2026-11-18
 

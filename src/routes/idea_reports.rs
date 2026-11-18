@@ -1120,6 +1120,63 @@ pub async fn api_idea_control_prototype(
     (StatusCode::OK, Json(json!(result))).into_response()
 }
 
+/// POST /api/ideas/:id/fto-scan — 批量 FTO 侵权风险主动扫描与规避设计生成
+pub async fn api_idea_fto_scan(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+) -> axum::response::Response {
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+
+    let idea = match s.db.get_idea(&id) {
+        Ok(Some(i)) => i,
+        _ => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "status": "error", "message": "Idea not found" })),
+            )
+                .into_response();
+        }
+    };
+
+    let cards = s.db.get_feature_cards_by_idea(&idea.id).unwrap_or_default();
+    let mut ids: Vec<String> =
+        s.db.search_smart(&idea.title, None, None, None, None, 1, 20)
+            .map(|(list, _, _)| list.into_iter().map(|p| p.id).collect())
+            .unwrap_or_default();
+    if ids.is_empty() {
+        ids =
+            s.db.search_like("", None, None, None, 1, 20)
+                .map(|(list, _)| list.into_iter().map(|p| p.id).collect())
+                .unwrap_or_default();
+    }
+    let patents = if ids.is_empty() {
+        Vec::new()
+    } else {
+        s.db.get_patents_by_ids(&ids).unwrap_or_default()
+    };
+
+    let solution_desc = format!("{}\n{}", idea.title, idea.description);
+    let report =
+        crate::ai::fto_scanner::run_batch_fto_scan(&idea.id, &solution_desc, &cards, &patents);
+
+    // 同步沉淀至 idea_memory 供 Batch 10 一键归档使用
+    let now = chrono::Utc::now().to_rfc3339();
+    let _ = s.db.save_memory(&crate::db::memory::IdeaMemory {
+        id: format!("fto-{}", idea.id),
+        idea_id: idea.id.clone(),
+        concept_name: "fto_report".to_string(),
+        concept_type: "decision".to_string(),
+        content: serde_json::to_string_pretty(&report).unwrap_or_default(),
+        confidence: 0.85,
+        source_step: Some("BatchFtoScan".to_string()),
+        created_at: now.clone(),
+        updated_at: now,
+    });
+
+    (StatusCode::OK, Json(json!(report))).into_response()
+}
+
 #[cfg(test)]
 mod deliverables_report_tests {
     use super::{build_deliverable_report_json, Idea};

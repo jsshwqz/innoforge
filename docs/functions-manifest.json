@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-18T11:59:27.620Z",
+  "generatedAt": "2026-11-18T12:54:57.984Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -138,6 +138,7 @@
         "hideMemoryForm",
         "loadMemory",
         "openReportInNewTab",
+        "runBatchFtoScan",
         "scrollIdeaChatToBottom",
         "sendChatMessage",
         "setAnalysisMode",
@@ -196,6 +197,7 @@
         "renderMarkdown",
         "renderOverview",
         "resumePipeline",
+        "runBatchFtoScan",
         "runExistingIdea",
         "scrollIdeaChatToBottom",
         "sendChatMessage",

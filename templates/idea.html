@@ -268,6 +268,14 @@
                     </div>
                     <pre id="control-st-code" style="display:none; background:var(--bg-elevated, #161b22); padding:12px; border-radius:6px; overflow:auto; max-height:260px; font-size:0.82em;"></pre>
                 </div>
+                <div id="fto-scan-panel" class="panel-box" style="margin-top:16px;">
+                    <div class="page-header-row">
+                        <h3 style="margin:0;" data-i18n="idea.ftoTitle">🛡️ 批量 FTO 侵权扫描与规避工作台</h3>
+                        <button class="ai-btn" style="width:auto; padding:6px 14px; font-size:0.85em;" onclick="runBatchFtoScan()" id="btn-run-fto-scan" data-i18n="idea.ftoRunBtn">执行批量 FTO 扫描</button>
+                    </div>
+                    <div id="fto-scan-summary" class="muted" style="margin:8px 0; font-size:0.9em;"></div>
+                    <div id="fto-scan-hits"></div>
+                </div>
             </div>
 
             <!-- Tab: 版本历史 -->
@@ -2062,6 +2070,79 @@
         if (!stEl || !stEl.textContent) return;
         if (navigator.clipboard) {
             navigator.clipboard.writeText(stEl.textContent).catch(function() {});
+        }
+    }
+
+    async function runBatchFtoScan() {
+        if (!currentIdeaId) {
+            alert('请先选择或创建项目');
+            return;
+        }
+        var btn = document.getElementById('btn-run-fto-scan');
+        if (btn) btn.disabled = true;
+        try {
+            var resp = await fetch('/api/ideas/' + encodeURIComponent(currentIdeaId) + '/fto-scan', {
+                method: 'POST'
+            });
+            var data = await resp.json();
+            var sumEl = document.getElementById('fto-scan-summary');
+            if (sumEl) sumEl.textContent = data.summary || '';
+            var hitsEl = document.getElementById('fto-scan-hits');
+            if (hitsEl) {
+                hitsEl.textContent = '';
+                (data.hits || []).forEach(function(hit) {
+                    var card = document.createElement('div');
+                    card.style.padding = '10px';
+                    card.style.marginBottom = '8px';
+                    card.style.borderRadius = '6px';
+                    card.style.border = '1px solid var(--border-color, #30363d)';
+
+                    var badge = hit.risk_level === 'high_red' ? '🔴 高危'
+                        : (hit.risk_level === 'warn_yellow' ? '🟡 等同预警' : '🟢 安全');
+                    var header = document.createElement('div');
+                    header.style.fontWeight = '600';
+                    header.textContent = badge + ' | ' + (hit.patent_number || '') + ' — ' + (hit.title || '') + ' [' + (hit.legal_status || '') + ']';
+                    card.appendChild(header);
+
+                    var reason = document.createElement('div');
+                    reason.style.fontSize = '0.88em';
+                    reason.style.marginTop = '4px';
+                    reason.textContent = hit.rationale || '';
+                    card.appendChild(reason);
+
+                    (hit.design_arounds || []).forEach(function(opt) {
+                        var optRow = document.createElement('div');
+                        optRow.style.marginTop = '6px';
+                        optRow.style.padding = '6px 8px';
+                        optRow.style.background = 'var(--bg-elevated, #161b22)';
+                        optRow.style.borderRadius = '4px';
+                        optRow.style.fontSize = '0.84em';
+
+                        var txt = document.createElement('span');
+                        txt.textContent = (opt.title || '') + ': ' + (opt.approach || '') + ' [' + (opt.bom_cost_impact || '') + '] ';
+                        optRow.appendChild(txt);
+
+                        var adoptBtn = document.createElement('button');
+                        adoptBtn.className = 'ai-btn';
+                        adoptBtn.style.width = 'auto';
+                        adoptBtn.style.padding = '2px 8px';
+                        adoptBtn.style.fontSize = '0.8em';
+                        adoptBtn.textContent = '采纳规避方案';
+                        adoptBtn.addEventListener('click', function() {
+                            adoptBtn.textContent = '✅ 已采纳';
+                            adoptBtn.disabled = true;
+                        });
+                        optRow.appendChild(adoptBtn);
+                        card.appendChild(optRow);
+                    });
+
+                    hitsEl.appendChild(card);
+                });
+            }
+        } catch (err) {
+            alert('FTO 扫描失败: ' + err.message);
+        } finally {
+            if (btn) btn.disabled = false;
         }
     }
 

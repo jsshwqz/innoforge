@@ -35,6 +35,7 @@ pub mod extraction;
 pub mod extraction_quality;
 mod fact_check;
 pub mod feature_attribution;
+pub mod fto_scanner;
 pub mod golden_regression;
 mod idea;
 pub mod letter_header;
