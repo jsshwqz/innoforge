@@ -1647,13 +1647,15 @@ mod tests {
             source: "web".to_string(),
         });
 
-        let mut db_patent = Patent::default();
-        db_patent.patent_number = "10.1016/j.ymssp.2024.111222".to_string();
-        db_patent.title = "Active magnetic vibration isolation".to_string();
-        db_patent.inventor = "Zhang Wei, Li Ming".to_string();
-        db_patent.applicant = "Mechanical Systems and Signal Processing".to_string();
-        db_patent.filing_date = "2024".to_string();
-        db_patent.source = "openalex".to_string();
+        let db_patent = Patent {
+            patent_number: "10.1016/j.ymssp.2024.111222".to_string(),
+            title: "Active magnetic vibration isolation".to_string(),
+            inventor: "Zhang Wei, Li Ming".to_string(),
+            applicant: "Mechanical Systems and Signal Processing".to_string(),
+            filing_date: "2024".to_string(),
+            source: "openalex".to_string(),
+            ..Default::default()
+        };
 
         let bundle = build_paper_latex_bundle(&ctx, &[sample_feature_card()], &[db_patent], None);
         assert_eq!(bundle.bib_entries.len(), 2);
