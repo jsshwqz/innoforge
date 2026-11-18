@@ -3,8 +3,8 @@
 //! Axum Web 服务器入口，注册所有路由并启动 HTTP 服务。
 //! Axum web server entry point, registers all routes and starts HTTP service.
 //!
-//! 默认监听 `0.0.0.0:3000`（可通过 `INNOFORGE_PORT` 覆盖），自动打开浏览器。
-//! Listens on `0.0.0.0:3000` by default (override via `INNOFORGE_PORT`), auto-opens browser.
+//! 默认监听 `127.0.0.1:3000`（可通过 `INNOFORGE_BIND_HOST` / `INNOFORGE_PORT` 覆盖），自动打开浏览器。
+//! Listens on `127.0.0.1:3000` by default (override via `INNOFORGE_BIND_HOST` / `INNOFORGE_PORT`), auto-opens browser.
 //!
 //! ## 双入口架构 / Dual-entry Architecture
 //!
@@ -21,7 +21,7 @@
 
 use std::net::SocketAddr;
 
-use innoforge::common::build_router;
+use innoforge::app::{build_app_router, resolve_bind_ip, AuthGuardConfig};
 
 fn bind_candidate_ports(configured_port: Option<u16>) -> Vec<u16> {
     match configured_port {
@@ -48,13 +48,14 @@ async fn main() -> anyhow::Result<()> {
 
     let mut state = innoforge::common::init_app_state(&db_path)?;
 
+    let bind_ip = resolve_bind_ip();
     let configured_port = std::env::var("INNOFORGE_PORT")
         .ok()
         .and_then(|v| v.parse::<u16>().ok());
     let mut bound = None;
     let mut last_bind_error = None;
     for candidate in bind_candidate_ports(configured_port) {
-        let candidate_addr = SocketAddr::from(([0, 0, 0, 0], candidate));
+        let candidate_addr = SocketAddr::new(bind_ip, candidate);
         match tokio::net::TcpListener::bind(candidate_addr).await {
             Ok(listener) => {
                 let local_addr = listener.local_addr()?;
@@ -107,7 +108,15 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    let app = build_router(state);
+    let auth = AuthGuardConfig::from_bind_and_env(bind_ip);
+    if auth.enforce_auth {
+        println!(
+            "🔒 Auth guard enabled (non-loopback bind or INNOFORGE_ACCESS_TOKEN set). \
+             Use Bearer token or POST /api/auth/unlock."
+        );
+    }
+
+    let app = build_app_router(state, auth);
 
     println!(
         "创研台 InnoForge v{} running at http://{addr}",

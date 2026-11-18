@@ -1512,6 +1512,8 @@ Response:
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/version` | 版本 / commit / 模板 sha256 |
+| GET | `/api/healthz` | 服务健康检查（免鉴权） |
+| POST | `/api/auth/unlock` | 非回环/令牌模式下校验 `access_code` 并下发 `HttpOnly; SameSite=Strict` 会话 Cookie |
 | POST | `/api/settings/cad` | 保存 FreeCAD 工作区与自动启动 |
 | GET | `/api/settings/serpapi/balance` | SerpAPI 余额（30s 超时） |
 | GET | `/api/chat/{session_key}` | 会话消息分页读取 |

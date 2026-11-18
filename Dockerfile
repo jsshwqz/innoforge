@@ -30,5 +30,8 @@ COPY .env.example /data/.env.example
 
 EXPOSE 3000
 ENV RUST_LOG=info
+# 容器对外监听 0.0.0.0 时会自动强制开启同源 Cookie / Bearer 鉴权；
+# 建议通过 `-e INNOFORGE_ACCESS_TOKEN=<your-token>` 指定固定访问令牌，否则启动时自动生成随机令牌。
+ENV INNOFORGE_BIND_HOST=0.0.0.0
 VOLUME ["/data"]
 CMD ["innoforge-server"]

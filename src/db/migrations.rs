@@ -45,16 +45,20 @@ pub fn run_migration_tx(conn: &Connection, version: i32, sql: &str) -> Result<()
     })();
     begin?;
     let result = (|| -> Result<()> {
-        for stmt in sql.split(';') {
-            let stmt = stmt.trim();
-            if stmt.is_empty() {
-                continue;
-            }
-            if let Err(e) = conn.execute_batch(stmt) {
-                if format!("{e}").contains("duplicate column name") {
+        if sql.contains("CREATE TRIGGER") {
+            conn.execute_batch(sql)?;
+        } else {
+            for stmt in sql.split(';') {
+                let stmt = stmt.trim();
+                if stmt.is_empty() {
                     continue;
                 }
-                return Err(e.into());
+                if let Err(e) = conn.execute_batch(stmt) {
+                    if format!("{e}").contains("duplicate column name") {
+                        continue;
+                    }
+                    return Err(e.into());
+                }
             }
         }
         let current_db: i32 = conn.query_row(
@@ -497,6 +501,16 @@ pub(crate) fn run(conn: &Connection, current_version: i32, target_version: i32) 
             CREATE INDEX IF NOT EXISTS idx_oa_rounds_number ON oa_rounds(patent_id, round_number);",
         )?;
         tracing::info!("Database migrated to version 24 (oa_rounds)");
+    }
+
+    if current_version < 25 {
+        run_migration_tx(conn, 25, crate::core::vault::schema_mig::MIGRATION_V25_SQL)?;
+        tracing::info!("Database migrated to version 25 (vault knowledge_docs & doc_chunks)");
+    }
+
+    if current_version < 26 {
+        run_migration_tx(conn, 26, crate::core::vault::schema_mig::MIGRATION_V26_SQL)?;
+        tracing::info!("Database migrated to version 26 (vault numerals/atoms/experiments/dag)");
     }
 
     if current_version > 0 && current_version < target_version {

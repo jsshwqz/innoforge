@@ -372,11 +372,27 @@ pub fn init_app_state(db_path: &str) -> anyhow::Result<crate::routes::AppState> 
 
 /// 构建统一的 axum Router（桌面端与移动端共用）。
 ///
-/// 所有路由入口集中在本函数，确保 `main.rs` 和 `lib.rs` 同步。
+/// 默认关闭强制鉴权（回环零打扰），通过 `crate::app::build_app_router` 统一装配。
 pub fn build_router(state: crate::routes::AppState) -> Router {
+    crate::app::build_app_router(
+        state,
+        crate::app::AuthGuardConfig {
+            enforce_auth: false,
+            access_token: String::new(),
+        },
+    )
+}
+
+/// 构建核心路由表（不含外层鉴权中间件），供 `crate::app::build_app_router` 挂载。
+///
+/// 所有路由入口集中在本函数，确保 `main.rs` 和 `lib.rs` 同步。
+pub fn build_router_inner(state: crate::routes::AppState) -> Router {
     use crate::routes;
 
     Router::new()
+        // 健康检查与同源鉴权 / Health check & auth unlock
+        .route("/api/healthz", get(crate::app::api_healthz))
+        .route("/api/auth/unlock", post(crate::app::api_auth_unlock))
         // 页面路由 / Page routes
         .route("/", get(routes::index_page))
         .route("/search", get(routes::search_page))

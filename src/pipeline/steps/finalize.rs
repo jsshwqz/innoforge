@@ -28,7 +28,9 @@ pub async fn execute(ctx: &mut PipelineContext, db: &Arc<Database>) -> Result<()
     // MB1: 幻觉防线——事实校验（在 ai_analysis 确定后、provenance 之前执行）
     super::fact_check::run_fact_check(ctx);
     if ctx.fact_check_rejected {
-        tracing::warn!("Fact check rejected: score below threshold");
+        tracing::warn!(
+            "Fact check rejected: score below threshold — quality gate downgrade enforced"
+        );
     }
 
     // EK-v2: 证据核验内核（docs/design/evidence-kernel-v2.md）。
@@ -40,8 +42,15 @@ pub async fn execute(ctx: &mut PipelineContext, db: &Arc<Database>) -> Result<()
     if kernel_text != ctx.ai_analysis {
         ctx.ai_analysis = kernel_text;
     }
+    if ctx.fact_check_rejected {
+        const DOWNGRADE_BANNER: &str = "⚠️ 【质量门禁强制降级 · 待人工补证】本报告部分断言未通过原文锚点确定性核验，禁止直接作为可提交定稿使用。\n\n";
+        if !ctx.ai_analysis.starts_with("⚠️ 【质量门禁强制降级") {
+            ctx.ai_analysis = format!("{}{}", DOWNGRADE_BANNER, ctx.ai_analysis);
+        }
+    }
     ctx.kernel_report = serde_json::to_string(&kernel_report).ok();
-    let allow_decision = !crate::evidence_kernel::should_suppress_decision(&kernel_report);
+    let allow_decision = !crate::evidence_kernel::should_suppress_decision(&kernel_report)
+        && !ctx.fact_check_rejected;
     if !allow_decision {
         tracing::warn!(
             "EK-v2 decision gate: status={:?} grounding={:.2} — 决策建议被抑制",
@@ -184,6 +193,20 @@ fn extract_memory_entries(ctx: &PipelineContext) -> Vec<IdeaMemory> {
             content: ctx.research_state.current_hypothesis.clone(),
             confidence: 0.5,
             source_step: Some("ResearchState".to_string()),
+            created_at: now.clone(),
+            updated_at: now.clone(),
+        });
+    }
+
+    if ctx.fact_check_rejected {
+        entries.push(IdeaMemory {
+            id: format!("{}-quality-gate-{}", idea_id, uuid::Uuid::new_v4()),
+            idea_id: idea_id.clone(),
+            concept_name: "quality_gate_verdict".to_string(),
+            concept_type: "decision".to_string(),
+            content: "downgrade_needs_evidence".to_string(),
+            confidence: 1.0,
+            source_step: Some("Finalize".to_string()),
             created_at: now.clone(),
             updated_at: now.clone(),
         });
