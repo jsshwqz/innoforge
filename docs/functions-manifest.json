@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-18T02:38:53.143Z",
+  "generatedAt": "2026-11-18T08:35:06.497Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -628,6 +628,7 @@
         "detectGcloud",
         "detectGeminiCli",
         "detectProvider",
+        "fallbackToProviderPresets",
         "fetchAiModels",
         "fetchSerpapiBalance",
         "fillEpoCredentials",

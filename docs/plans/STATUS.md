@@ -14,6 +14,13 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-11-18 — **v0.9.47 发版收口：--release 真机全站逐按钮实测 + /settings 模型预设回退 & /oa-response 轮次栏修复**
+
+- **状态 / Status**: 🚧 准备 PR 合入 `main` 并打 `v0.9.47` Tag
+- **真机实测结果**: 基于 `main`（`76eee2a`）编译 `--release` 并在隔离环境启动实测全站 7 个主页面（`/`、`/settings`、`/search`、`/patent/:id`、`/idea`、`/compare`、`/oa-response`、`/ai`），全程 0 5xx、0 Console 报错，并实测定位到两个 UI 缺陷后就地修复：
+  1. `templates/settings.html`：未填 Key（`not_configured`）或探测失败时回退展示 `AI_PROVIDERS` 预设模型列表（此前直接显示「无可用模型」导致选不到模型），切回 `custom` 时重置 Base URL/Key 链接；
+  2. `templates/office_action_response.html`：移除顶部轮次栏白底硬编码 `#f0f4ff` 以适配暗色主题，修复未选轮次时显示 `"第 {n} 轮"` 未插值字样。
+
 ### 2026-11-18 — **功能优先重构与五阶工程闭环（巨石解耦 + OA Stage D 强模型/部件拓扑/学术反驳 + 特征卡自动生成 + 工程 BOM/期刊双交付包）**
 
 - **状态 / Status**: ✅ 本地全量验证通过（[PR #226](https://github.com/jsshwqz/innoforge/pull/226) 已含 Batch 1 + Wave 1~7 + clippy 修复 `182b24d`，因此前标记 `[HOLD - 让路 <1.0 团队]` 关闭，待 Reopen 跑远端 CI/E2E）
