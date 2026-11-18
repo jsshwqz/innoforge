@@ -6,6 +6,12 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 ---
 ## [Unreleased]
 
+## [0.9.47] - 2026-11-18
+
+### 修复 / Fixed
+
+- **设置页未配置 Key 模型下拉回退预设与 OA 轮次栏修复**：修复 `settings.html` 在服务商未填 API Key（`status: "not_configured"`）或探测失败时下拉显示「无可用模型」而非回退展示 `AI_PROVIDERS` 预设推荐列表的问题，并修复切回 `custom` 时残留上一服务商 Base URL/Key 链接的问题；修复 `office_action_response.html` 顶部历史轮次栏白底浅字及未选轮次时显示 `"第 {n} 轮"` 占位符的问题。 / Fixed `settings.html` model dropdown falling back to `AI_PROVIDERS` presets when `not_configured`/probe fails and resetting URLs on `custom`; fixed `office_action_response.html` round selector bar dark-theme styling and uninterpolated `{n}` label.
+
 ### 新增 / Added
 
 - **OA 答复 Stage D 强模型机理对比与部件拓扑/学术反驳**：新增 `part_topology` 模块提取附图标记与部件连接关系并生成机理差异反驳；识别 OpenAlex 真实 DOI 文献生成学术公知常识反驳；Stage D 接入 60 秒超时强模型对比并经 `output_guard` 逐条校验放行，无 Key 或超时时无损回退确定性扫描。 / Added `part_topology` extraction and academic DOI rebuttal in OA arbitration; wired 60s-timeout expert-model mechanism comparison in Stage D with `output_guard` verification and deterministic fallback.
@@ -405,6 +411,12 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 ## [Unreleased]
+
+## [0.9.47] - 2026-11-18
+
+### 修复 / Fixed
+
+- **设置页未配置 Key 模型下拉回退预设与 OA 轮次栏修复**：修复 `settings.html` 在服务商未填 API Key（`status: "not_configured"`）或探测失败时下拉显示「无可用模型」而非回退展示 `AI_PROVIDERS` 预设推荐列表的问题，并修复切回 `custom` 时残留上一服务商 Base URL/Key 链接的问题；修复 `office_action_response.html` 顶部历史轮次栏白底浅字及未选轮次时显示 `"第 {n} 轮"` 占位符的问题。 / Fixed `settings.html` model dropdown falling back to `AI_PROVIDERS` presets when `not_configured`/probe fails and resetting URLs on `custom`; fixed `office_action_response.html` round selector bar dark-theme styling and uninterpolated `{n}` label.
 
 ### 新增 / Added
 

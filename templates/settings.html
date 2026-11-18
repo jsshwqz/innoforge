@@ -482,7 +482,10 @@
                 document.getElementById('ai-key-link').textContent = '\u2192 \u83b7\u53d6 ' + provider.title + ' Key';
                 document.getElementById('ai-base-hint').textContent = provider.hint;
             } else {
-                document.getElementById('ai-base-hint').textContent = '自定义 API 地址';
+                document.getElementById('ai-base-url').value = 'http://localhost:11434/v1';
+                document.getElementById('ai-key-link').removeAttribute('href');
+                document.getElementById('ai-key-link').textContent = '';
+                document.getElementById('ai-base-hint').textContent = '自定义 OpenAI 兼容 API 地址（默认本地 Ollama）';
             }
 
             // 清空模型下拉，等待自动查询填充
@@ -548,10 +551,6 @@
 
         function onProviderChange() {
             var val = document.getElementById('ai-provider').value;
-            if (val === 'custom') {
-                document.getElementById('ai-provider-title').textContent = '\u81ea\u5b9a\u4e49';
-                return;
-            }
             updateProviderUI(val);
         }
 
@@ -1384,8 +1383,7 @@
                             setTimeout(function() { btn.textContent = '\ud83d\udd0d 查询可用模型'; btn.style.color = ''; }, 3000);
                         }
                     } else {
-                        populateSelect('ai-model', [{ value: '', label: '无可用模型' }], '');
-                        populateSelect('ai-model-expert', [{ value: '', label: '无可用模型' }], '');
+                        fallbackToProviderPresets(selectedProvider, { value: '', label: '无可用模型' });
                         showCustomManualFallback('探测无结果：可手动输入模型名（下拉选「自定义模型...」）');
                         if (isManual) {
                             btn.textContent = '\u274c 无可用模型（自定义网关请确认 Base URL 可达）';
@@ -1394,8 +1392,7 @@
                         }
                     }
                 } else {
-                    populateSelect('ai-model', [{ value: '', label: '查询失败' }], '');
-                    populateSelect('ai-model-expert', [{ value: '', label: '查询失败' }], '');
+                    fallbackToProviderPresets(selectedProvider, { value: '', label: '查询失败' });
                     showCustomManualFallback('探测失败：可手动输入模型名（下拉选「自定义模型...」）');
                     if (isManual) {
                         btn.textContent = '\u274c ' + (data.message || '查询失败');
@@ -1404,8 +1401,7 @@
                     }
                 }
             } catch(e) {
-                populateSelect('ai-model', [{ value: '', label: '网络错误' }], '');
-                populateSelect('ai-model-expert', [{ value: '', label: '网络错误' }], '');
+                fallbackToProviderPresets(selectedProvider, { value: '', label: '网络错误' });
                 showCustomManualFallback('网络错误：可手动输入模型名（下拉选「自定义模型...」）');
                 if (isManual) {
                     btn.textContent = '\u274c 网络错误';
@@ -1413,6 +1409,22 @@
                 }
             } finally {
                 if (btn && isManual) btn.disabled = false;
+            }
+
+            function fallbackToProviderPresets(provKey, emptyOpt) {
+                var prov = AI_PROVIDERS[provKey];
+                if (prov && prov.models && prov.models.length > 0) {
+                    var curM = document.getElementById('ai-model').value;
+                    var curE = document.getElementById('ai-model-expert').value;
+                    populateSelect('ai-model', prov.models, curM || prov.models[0].value);
+                    var expList = (prov.expert_models && prov.expert_models.length > 0) ? prov.expert_models : prov.models;
+                    populateSelect('ai-model-expert', expList, curE || expList[0].value);
+                    var hintEl = document.getElementById('ai-model-hint');
+                    if (hintEl) hintEl.textContent = '当前展示预设推荐模型（填写 API Key 后可实时查询账户可用模型）';
+                } else {
+                    populateSelect('ai-model', [emptyOpt], '');
+                    populateSelect('ai-model-expert', [emptyOpt], '');
+                }
             }
 
             // 自定义提供方探测不成时退回手输（保留旧行为，不再硬拦截探测本身）
