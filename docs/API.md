@@ -1413,6 +1413,10 @@ Response:
 
 按 id 局部更新一轮 OA，只更新请求里出现的字段；记录不存在返回 `{ "status": "error", "message": "OA round not found" }`。
 
+### GET `/api/oa/:case_id/rounds/diff`
+
+跨轮次 OA 视图漂移与禁止反言一致性比对，返回时间线演化节点（`timeline`）、相邻轮次差异（`transitions`）、审查员隐含/明确认可特征（`accepted_features`）、新增对比文件 D3/D4（`newly_introduced_prior_art`）、驳回理由漂移（`new_rejection_grounds`）、禁止反言红线（`consistency_redlines`）及用于 AI 提示词注入的 `prompt_constraints_block`。
+
 ### GET `/api/oa/history/all` 与 GET `/api/oa/history/:patent_number`
 
 均返回 `{ "status": "ok", "analyses": [...] }`。`/history/all` 最多返回 100 条（按时间倒序）；`/history/:patent_number` 按专利号过滤。
@@ -1447,6 +1451,7 @@ Response:
 | GET | `/api/oa/rounds/:patent_id` | 某专利的 OA 轮次列表 |
 | POST | `/api/oa/rounds` | 登记一轮 OA |
 | PUT | `/api/oa/rounds/update/:id` | 局部更新一轮 OA |
+| GET | `/api/oa/:case_id/rounds/diff` | 多轮 OA 视图漂移与禁止反言一致性比对 |
 | GET | `/api/oa/timeline/:patent_id` | 某专利的 OA 时间线 |
 
 

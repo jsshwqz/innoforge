@@ -19,6 +19,11 @@
 - **状态 / Status**: ✅ 本地全量验证通过，已提 PR 等 CI 合并进 `main` 并打 `v0.9.59` Tag
 - **① 真实 DOI `.bib` 与本地 SVG 曲线渲染**（`src/pipeline/steps/finalize.rs`、`src/pipeline/steps/deliverables.rs`、`src/db/patent.rs`）：仅基于 OpenAlex/CrossRef 已核验真实 DOI 生成 `.bib`（零孤儿引用、零编造文献），并基于第 13 步数值仿真数据渲染纯本地 SVG 对比曲线图（含坐标轴与图例）。
 - **② 双模投稿导出接口与前端**（`src/routes/idea_reports.rs`、`src/common.rs`、`templates/idea.html`、`static/i18n.js`、`docs/API.md`）：新增 `GET /api/ideas/:id/paper/latex-bundle`（含 `main.tex`、`references.bib`、`figures/simulation_curve.svg`）与 `GET /api/ideas/:id/paper/docx`，保留「先申专利防破新颖性」硬提示锁。
+### 2026-11-18 — **Batch 15：多轮 OA 审查观点漂移追踪与递进答辩引擎（v0.9.58）**
+
+- **状态 / Status**: ✅ 本地全量验证通过，已提 PR 等 CI 合并进 `main` 并打 `v0.9.58` Tag
+- **① 跨轮次 OA 观点 Diff 与一致性守护**（`src/ai/oa_drift.rs`、`src/ai/mod.rs`、`src/ai/patent.rs`）：读取 `oa_rounds` 历史记录，自动标出审查员已认可特征、本轮新增对比文件（D3/D4）/新驳回理由及禁止反言红线，并在新一轮答复生成时自动注入历史一致约束。
+- **② 多轮时间轴看板与接口**（`src/routes/oa_rounds.rs`、`src/routes/oa_core.rs`、`src/common.rs`、`templates/office_action_response.html`、`static/i18n.js`、`docs/API.md`）：新增 `GET /api/oa/:case_id/rounds/diff`，并在 OA 界面展示「第1轮 → 第2轮 → 驳回/复审」演化时间轴与漂移面板。
 
 ### 2026-11-18 — **Batch 12：权利要求树可视化编辑器 + 专利法第26条第4款自检（v0.9.55）**
 

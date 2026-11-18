@@ -626,6 +626,10 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
         )
         // OA 轮次追踪 / OA Round Workflow Tracking
         .route("/api/oa/rounds/:patent_id", get(routes::api_oa_rounds_get))
+        .route(
+            "/api/oa/:case_id/rounds/diff",
+            get(routes::api_oa_rounds_diff),
+        )
         .route("/api/oa/rounds", post(routes::api_oa_rounds_create))
         .route(
             "/api/oa/rounds/update/:id",

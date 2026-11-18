@@ -680,7 +680,18 @@ const I18N_COMMON = {
     'oa.workflow.pending': '待处理',
     'oa.workflow.accepted': '已接受',
     'oa.workflow.rejected': '已驳回',
-    'oa.workflow.partial': '部分接受'
+    'oa.workflow.partial': '部分接受',
+    'oa.drift.btn': '多轮视图漂移',
+    'oa.drift.title': '多轮审查意见演化时间线与一致性红线',
+    'oa.drift.needCase': '请先输入或载入专利号/案件号',
+    'oa.drift.empty': '当前案件暂无多轮 OA 轮次记录，可先点击「新建答复轮次」记录一审/二审/复审节点',
+    'oa.drift.acceptedTitle': '审查员隐含/明确认可的特征（不得误改或削弱）',
+    'oa.drift.newPriorArtTitle': '新增对比文件（D3/D4）与新增驳回理由',
+    'oa.drift.redlinesTitle': '禁止反言与历史一致性红线（严禁与前轮矛盾）',
+    'oa.drift.transitionsTitle': '相邻轮次演化对比',
+    'oa.drift.noAccepted': '暂未检出明确或隐含认可的特征',
+    'oa.drift.noNewPriorArt': '暂未检出新增对比文件或新增驳回理由',
+    'oa.drift.noRedlines': '暂未检出前轮答复中的禁止反言约束'
   },
   en: {
     'cad.draw': 'FreeCAD Drawing',
@@ -1397,7 +1408,18 @@ const I18N_COMMON = {
     'oa.workflow.pending': 'Pending',
     'oa.workflow.accepted': 'Accepted',
     'oa.workflow.rejected': 'Rejected',
-    'oa.workflow.partial': 'Partially Accepted'
+    'oa.workflow.partial': 'Partially Accepted',
+    'oa.drift.btn': 'Multi-Round Drift',
+    'oa.drift.title': 'Multi-Round OA Evolution Timeline & Estoppel Guard',
+    'oa.drift.needCase': 'Please enter or load a patent / case ID first',
+    'oa.drift.empty': 'No multi-round OA workflow records for this case yet. Click "New Round" to record rounds.',
+    'oa.drift.acceptedTitle': 'Features Implicitly/Explicitly Accepted by Examiner (Do Not Alter/Weaken)',
+    'oa.drift.newPriorArtTitle': 'Newly Introduced Prior Art (D3/D4) & New Rejection Grounds',
+    'oa.drift.redlinesTitle': 'Estoppel & Historical Consistency Redlines (Must Not Contradict Prior Rounds)',
+    'oa.drift.transitionsTitle': 'Round-to-Round Transition Diff',
+    'oa.drift.noAccepted': 'No explicitly or implicitly accepted features detected yet',
+    'oa.drift.noNewPriorArt': 'No newly introduced prior art or rejection grounds detected',
+    'oa.drift.noRedlines': 'No prior-round estoppel constraints detected yet'
   }
 };
 

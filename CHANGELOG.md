@@ -11,6 +11,11 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 ### 新增 / Added
 
 - **期刊论文 LaTeX/Word 双模投稿导出与仿真曲线/BibTeX 自动嵌入（Batch 16）**：新增真实 DOI 学术参考文献 `.bib` 生成器（仅绑定 OpenAlex/CrossRef 已核验 DOI 记录，零编造引用）与基于第 13 步数值仿真序列的纯本地 SVG 曲线渲染器（含坐标轴标注与图例）；新增 `GET /api/ideas/:id/paper/latex-bundle`（打包 `main.tex`、`references.bib` 与 `figures/simulation_curve.svg`）及 `GET /api/ideas/:id/paper/docx`（学术排版 Word `.docx`，置顶防破新颖性安全锁），并在 `idea.html` 补齐双模导出按钮与中英双语词条。 / Added real-DOI `.bib` reference generator, local SVG simulation curve renderer (with axes & legend), `GET /api/ideas/:id/paper/latex-bundle` (`.zip` with `main.tex`, `references.bib`, and SVG figure), `GET /api/ideas/:id/paper/docx` (academic Word `.docx` with novelty lock warning), and export buttons in `idea.html`.
+## [v0.9.58] - 2026-11-18
+
+### 新增 / Added
+
+- **多轮审查意见视图漂移检测与禁止反言一致性守卫（Batch 15）**：新增 `oa_drift` 引擎（`src/ai/oa_drift.rs`）读取全量 `oa_rounds` 并比对相邻轮次演化，自动高亮（1）审查员隐含/明确认可的特征与权项、（2）新增对比文件（D3/D4）与新增驳回理由、（3）禁止反言与历史口径一致性红线；新增 `GET /api/oa/:case_id/rounds/diff` 路由并在 OA 分析/答复书生成链路自动注入历史一致性约束；`office_action_response.html` 上线「第1轮 → 第2轮 → 驳回/复审」多轮演化时间线与三段式漂移面板及中英双语词条。 / Added `oa_drift` cross-round OA view drift & estoppel consistency guard (`GET /api/oa/:case_id/rounds/diff`), automatic historical constraint injection during response generation, and multi-round evolution timeline & diff panel in `office_action_response.html`.
 
 ## [v0.9.55] - 2026-11-18
 
@@ -472,6 +477,11 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 ### 新增 / Added
 
 - **期刊论文 LaTeX/Word 双模投稿导出与仿真曲线/BibTeX 自动嵌入（Batch 16）**：新增真实 DOI 学术参考文献 `.bib` 生成器（仅绑定 OpenAlex/CrossRef 已核验 DOI 记录，零编造引用）与基于第 13 步数值仿真序列的纯本地 SVG 曲线渲染器（含坐标轴标注与图例）；新增 `GET /api/ideas/:id/paper/latex-bundle`（打包 `main.tex`、`references.bib` 与 `figures/simulation_curve.svg`）及 `GET /api/ideas/:id/paper/docx`（学术排版 Word `.docx`，置顶防破新颖性安全锁），并在 `idea.html` 补齐双模导出按钮与中英双语词条。 / Added real-DOI `.bib` reference generator, local SVG simulation curve renderer (with axes & legend), `GET /api/ideas/:id/paper/latex-bundle` (`.zip` with `main.tex`, `references.bib`, and SVG figure), `GET /api/ideas/:id/paper/docx` (academic Word `.docx` with novelty lock warning), and export buttons in `idea.html`.
+## [v0.9.58] - 2026-11-18
+
+### 新增 / Added
+
+- **多轮审查意见视图漂移检测与禁止反言一致性守卫（Batch 15）**：新增 `oa_drift` 引擎（`src/ai/oa_drift.rs`）读取全量 `oa_rounds` 并比对相邻轮次演化，自动高亮（1）审查员隐含/明确认可的特征与权项、（2）新增对比文件（D3/D4）与新增驳回理由、（3）禁止反言与历史口径一致性红线；新增 `GET /api/oa/:case_id/rounds/diff` 路由并在 OA 分析/答复书生成链路自动注入历史一致性约束；`office_action_response.html` 上线「第1轮 → 第2轮 → 驳回/复审」多轮演化时间线与三段式漂移面板及中英双语词条。 / Added `oa_drift` cross-round OA view drift & estoppel consistency guard (`GET /api/oa/:case_id/rounds/diff`), automatic historical constraint injection during response generation, and multi-round evolution timeline & diff panel in `office_action_response.html`.
 
 ## [v0.9.55] - 2026-11-18
 
