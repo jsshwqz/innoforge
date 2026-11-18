@@ -4,12 +4,15 @@
 //! `patent_results` / `web_results` 中的真实 DOI，零网络调用、零编造数据。
 
 use crate::ai::client::safe_truncate_chars;
-use crate::patent::FeatureCard;
+use crate::patent::{FeatureCard, Patent};
 use crate::pipeline::context::{ExperimentResult, PipelineContext};
+use crate::pipeline::steps::control_proto::StepSimulationData;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-const NOVELTY_LOCK_WARNING: &str = "> ⚠️ 【防破新颖性安全锁】：本手稿包含尚未公开的核心技术方案。在正式提交专利申请并取得申请号/申请日之前，严禁公开发表、上传预印本或外发审稿，否则将导致本申请丧失《专利法》第22条第2款新颖性！";
+pub const NOVELTY_LOCK_WARNING: &str = "> ⚠️ 【防破新颖性安全锁】：本手稿包含尚未公开的核心技术方案。在正式提交专利申请并取得申请号/申请日之前，严禁公开发表、上传预印本或外发审稿，否则将导致本申请丧失《专利法》第22条第2款新颖性！";
+
+pub const NOVELTY_LOCK_TEXT_PLAIN: &str = "【防破新颖性安全锁 / Patent-Before-Paper Novelty Lock】：本手稿包含尚未公开的核心技术方案。在正式提交专利申请并取得申请号/申请日之前，严禁公开发表、上传预印本或外发审稿，否则将导致本申请丧失《专利法》第22条第2款新颖性！";
 
 const MISSING_CALIBRATION_TAG: &str = "【待台架标定】";
 const MISSING_DOI_TAG: &str = "【当前检索结果无 DOI 文献，请补充 OpenAlex 检索后再绑定引用】";
@@ -45,6 +48,53 @@ pub struct JournalManuscriptDraft {
     pub novelty_lock_warning: String,
     pub cited_dois: Vec<String>,
     pub full_markdown: String,
+}
+
+/// 真实 DOI 学术文献 BibTeX 条目（仅来自 OpenAlex / CrossRef 等已核验检索结果，绝不编造）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BibEntry {
+    pub cite_key: String,
+    pub doi: String,
+    pub title: String,
+    pub author: String,
+    pub journal: String,
+    pub year: String,
+    pub url: String,
+    pub source: String,
+}
+
+/// 仿真曲线单条序列
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SimulationSeries {
+    pub label: String,
+    pub color: String,
+    pub dashed: bool,
+    pub values: Vec<f64>,
+}
+
+/// 第 13 步数值仿真 / 控制响应绘图数据
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SimulationPlotData {
+    pub title: String,
+    pub x_label: String,
+    pub y_label: String,
+    pub x_values: Vec<f64>,
+    pub series: Vec<SimulationSeries>,
+    pub summary_note: String,
+    pub from_step13: bool,
+}
+
+/// 期刊投稿 LaTeX + BibTeX + SVG 仿真图打包输出
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaperLatexBundle {
+    pub idea_id: String,
+    pub novelty_lock_warning: String,
+    pub bib_entries: Vec<BibEntry>,
+    pub bibtex_content: String,
+    pub main_tex: String,
+    pub simulation_svg: String,
+    pub has_step13_simulation: bool,
+    pub plot_data: Option<SimulationPlotData>,
 }
 
 /// 基于流水线上下文、特征卡与沙箱实验指标（`ctx.experiment_results`）生成《工程落地交付包》
@@ -516,6 +566,952 @@ fn escape_md_cell(s: &str) -> String {
     s.replace('|', "\\|").replace(['\r', '\n'], " ")
 }
 
+/// 从流水线上下文提取已去重的真实 DOI 列表
+pub fn extract_verified_dois(ctx: &PipelineContext) -> Vec<String> {
+    extract_cited_dois(ctx)
+}
+
+/// 从检索命中与可选数据库著录中提取带真实 DOI 的学术文献条目（绝不编造无 DOI 文献）
+pub fn extract_verified_bib_entries(ctx: &PipelineContext, db_patents: &[Patent]) -> Vec<BibEntry> {
+    let mut db_map: HashMap<String, &Patent> = HashMap::new();
+    for p in db_patents {
+        let key = p.patent_number.trim().to_lowercase();
+        if key.is_empty() {
+            continue;
+        }
+        let is_academic = matches!(
+            p.source.trim().to_lowercase().as_str(),
+            "openalex" | "crossref"
+        );
+        match db_map.get(&key) {
+            Some(existing) => {
+                let existing_academic = matches!(
+                    existing.source.trim().to_lowercase().as_str(),
+                    "openalex" | "crossref"
+                );
+                if is_academic && !existing_academic {
+                    db_map.insert(key, p);
+                }
+            }
+            None => {
+                db_map.insert(key, p);
+            }
+        }
+    }
+
+    let mut seen = HashSet::new();
+    let mut entries = Vec::new();
+
+    for hit in ctx.patent_results.iter().chain(ctx.web_results.iter()) {
+        let mut hit_dois = Vec::new();
+        let mut hit_seen = HashSet::new();
+        for field in [&hit.id, &hit.link, &hit.title, &hit.snippet] {
+            collect_dois_from_str(field, &mut hit_seen, &mut hit_dois);
+        }
+
+        for doi in hit_dois {
+            let doi_lower = doi.to_lowercase();
+            if !seen.insert(doi_lower.clone()) {
+                continue;
+            }
+            let db_rec = db_map.get(&doi_lower).copied();
+            let title = if !hit.title.trim().is_empty() {
+                hit.title.trim().to_string()
+            } else if let Some(p) = db_rec {
+                if !p.title.trim().is_empty() {
+                    p.title.trim().to_string()
+                } else {
+                    format!("DOI: {}", doi)
+                }
+            } else {
+                format!("DOI: {}", doi)
+            };
+
+            let author = db_rec
+                .map(|p| p.inventor.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_default();
+
+            let journal = db_rec
+                .map(|p| p.applicant.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_default();
+
+            let year = db_rec
+                .and_then(|p| {
+                    extract_four_digit_year(&p.filing_date)
+                        .or_else(|| extract_four_digit_year(&p.publication_date))
+                })
+                .or_else(|| extract_four_digit_year(&hit.snippet))
+                .unwrap_or_default();
+
+            let source = if !hit.source.trim().is_empty() {
+                hit.source.trim().to_string()
+            } else if let Some(p) = db_rec {
+                p.source.trim().to_string()
+            } else {
+                "doi".to_string()
+            };
+
+            let idx = entries.len() + 1;
+            let cite_key = format!("ref{}_{}", idx, sanitize_bib_key(&doi));
+            entries.push(BibEntry {
+                cite_key,
+                doi: doi.clone(),
+                title,
+                author,
+                journal,
+                year,
+                url: format!("https://doi.org/{}", doi),
+                source,
+            });
+        }
+    }
+
+    entries
+}
+
+fn sanitize_bib_key(doi: &str) -> String {
+    let raw: String = doi
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let mut collapsed = String::new();
+    let mut prev_underscore = false;
+    for ch in raw.chars() {
+        if ch == '_' {
+            if !prev_underscore && !collapsed.is_empty() {
+                collapsed.push('_');
+            }
+            prev_underscore = true;
+        } else {
+            collapsed.push(ch);
+            prev_underscore = false;
+        }
+    }
+    let trimmed = collapsed.trim_matches('_');
+    let truncated: String = trimmed.chars().take(36).collect();
+    if truncated.is_empty() {
+        "doi".to_string()
+    } else {
+        truncated.trim_end_matches('_').to_string()
+    }
+}
+
+fn extract_four_digit_year(input: &str) -> Option<String> {
+    let chars: Vec<char> = input.chars().collect();
+    for win in chars.windows(4) {
+        if win.iter().all(|c| c.is_ascii_digit()) {
+            let s: String = win.iter().collect();
+            if let Ok(y) = s.parse::<u32>() {
+                if (1950..=2099).contains(&y) {
+                    return Some(s);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn escape_bibtex_value(s: &str) -> String {
+    s.replace('\\', "\\textbackslash ")
+        .replace('{', "\\{")
+        .replace('}', "\\}")
+        .replace('&', "\\&")
+        .replace('%', "\\%")
+        .replace('#', "\\#")
+        .replace('_', "\\_")
+        .replace(['\r', '\n'], " ")
+}
+
+/// 将已核验真实 DOI 文献格式化为标准 `.bib` 内容（无真实 DOI 时不输出伪造条目）
+pub fn format_bibtex(entries: &[BibEntry]) -> String {
+    if entries.is_empty() {
+        return "% No verified DOI references found in retrieved OpenAlex/CrossRef records.\n"
+            .to_string();
+    }
+    let mut out = String::from("% Verified Academic References (OpenAlex / CrossRef DOI)\n\n");
+    for entry in entries {
+        out.push_str(&format!("@article{{{},\n", entry.cite_key));
+        out.push_str(&format!(
+            "  title = {{{{{}}}}},\n",
+            escape_bibtex_value(&entry.title)
+        ));
+        if !entry.author.trim().is_empty() {
+            out.push_str(&format!(
+                "  author = {{{}}},\n",
+                escape_bibtex_value(&entry.author)
+            ));
+        }
+        if !entry.journal.trim().is_empty() {
+            out.push_str(&format!(
+                "  journal = {{{}}},\n",
+                escape_bibtex_value(&entry.journal)
+            ));
+        }
+        if !entry.year.trim().is_empty() {
+            out.push_str(&format!("  year = {{{}}},\n", entry.year.trim()));
+        }
+        out.push_str(&format!("  doi = {{{}}},\n", entry.doi.trim()));
+        out.push_str(&format!("  url = {{{}}},\n", entry.url.trim()));
+        if !entry.source.trim().is_empty() {
+            out.push_str(&format!(
+                "  note = {{Indexed source: {}}}\n",
+                escape_bibtex_value(&entry.source)
+            ));
+        }
+        out.push_str("}\n\n");
+    }
+    out
+}
+
+fn parse_numeric_array(val: &serde_json::Value) -> Option<Vec<f64>> {
+    let arr = val.as_array()?;
+    let nums: Vec<f64> = arr
+        .iter()
+        .filter_map(|v| v.as_f64())
+        .filter(|n| n.is_finite())
+        .collect();
+    if nums.len() >= 2 && nums.len() == arr.len() {
+        Some(nums)
+    } else {
+        None
+    }
+}
+
+fn try_extract_series_from_json(
+    obj: &serde_json::Map<String, serde_json::Value>,
+) -> Option<SimulationPlotData> {
+    let x_candidates = [
+        "time_ms",
+        "t_ms",
+        "time",
+        "t",
+        "x",
+        "step",
+        "steps",
+        "freq_hz",
+        "frequency",
+    ];
+    let mut x_key_used: Option<String> = None;
+    let mut x_vals: Option<Vec<f64>> = None;
+    for key in x_candidates {
+        if let Some(arr) = obj.get(key).and_then(parse_numeric_array) {
+            x_key_used = Some(key.to_string());
+            x_vals = Some(arr);
+            break;
+        }
+    }
+
+    let palette = ["#2563eb", "#dc2626", "#059669", "#d97706"];
+    let mut series = Vec::new();
+    let mut color_idx = 0usize;
+
+    for (key, val) in obj {
+        if x_key_used.as_deref() == Some(key.as_str()) {
+            continue;
+        }
+        if let Some(vals) = parse_numeric_array(val) {
+            let lower = key.to_lowercase();
+            let is_ref = lower.contains("setpoint")
+                || lower.contains("target")
+                || lower.contains("baseline")
+                || lower.contains("ref");
+            let color = if is_ref {
+                "#64748b".to_string()
+            } else {
+                let c = palette[color_idx % palette.len()];
+                color_idx += 1;
+                c.to_string()
+            };
+            series.push(SimulationSeries {
+                label: key.clone(),
+                color,
+                dashed: is_ref,
+                values: vals,
+            });
+            if series.len() >= 4 {
+                break;
+            }
+        }
+    }
+
+    if series.is_empty() {
+        return None;
+    }
+
+    let min_len = series.iter().map(|s| s.values.len()).min().unwrap_or(0);
+    if min_len < 2 {
+        return None;
+    }
+
+    let x_values = match x_vals {
+        Some(mut xv) if xv.len() >= 2 => {
+            let len = xv.len().min(min_len);
+            xv.truncate(len);
+            for s in &mut series {
+                s.values.truncate(len);
+            }
+            xv
+        }
+        _ => {
+            for s in &mut series {
+                s.values.truncate(min_len);
+            }
+            (0..min_len).map(|i| i as f64).collect()
+        }
+    };
+
+    let x_label = match x_key_used.as_deref() {
+        Some("time_ms") | Some("t_ms") => "Time (ms)".to_string(),
+        Some("time") | Some("t") => "Time (s)".to_string(),
+        Some("freq_hz") | Some("frequency") => "Frequency (Hz)".to_string(),
+        Some(other) => other.to_string(),
+        None => "Sample Index".to_string(),
+    };
+
+    let scalar_notes: Vec<String> = obj
+        .iter()
+        .filter_map(|(k, v)| {
+            v.as_f64()
+                .filter(|n| n.is_finite())
+                .map(|n| format!("{k}={n:.3}"))
+        })
+        .take(5)
+        .collect();
+
+    Some(SimulationPlotData {
+        title: "Step 13 Numerical Simulation Curve".to_string(),
+        x_label,
+        y_label: "Simulated Response".to_string(),
+        x_values,
+        series,
+        summary_note: if scalar_notes.is_empty() {
+            "Source: Step 13 Experiment Validation".to_string()
+        } else {
+            format!("Step 13 Metrics: {}", scalar_notes.join(" | "))
+        },
+        from_step13: true,
+    })
+}
+
+/// 从第 13 步实验结果（优先）或控制原型闭环仿真数据提取数值仿真绘图序列
+pub fn extract_simulation_plot_data(
+    ctx: &PipelineContext,
+    fallback_sim: Option<&StepSimulationData>,
+) -> Option<SimulationPlotData> {
+    let mut ordered: Vec<&ExperimentResult> = ctx
+        .experiment_results
+        .iter()
+        .filter(|e| e.success)
+        .collect();
+    for exp in &ctx.experiment_results {
+        if !exp.success {
+            ordered.push(exp);
+        }
+    }
+
+    for exp in &ordered {
+        if let Some(obj) = exp.metrics.as_object() {
+            if let Some(plot) = try_extract_series_from_json(obj) {
+                return Some(plot);
+            }
+        }
+        for line in exp.stdout.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with('{') && trimmed.ends_with('}') {
+                if let Ok(serde_json::Value::Object(obj)) =
+                    serde_json::from_str::<serde_json::Value>(trimmed)
+                {
+                    if let Some(plot) = try_extract_series_from_json(&obj) {
+                        return Some(plot);
+                    }
+                }
+            }
+        }
+    }
+
+    // 若无数组序列但第 13 步存在标量数值指标，提取标量对比曲线
+    let mut metric_names = Vec::new();
+    let mut metric_vals = Vec::new();
+    for exp in &ordered {
+        if let Some(obj) = exp.metrics.as_object() {
+            for (k, v) in obj {
+                if let Some(n) = v.as_f64().filter(|x| x.is_finite()) {
+                    metric_names.push(format!("{k}={n:.2}"));
+                    metric_vals.push(n);
+                }
+            }
+        }
+    }
+    if metric_vals.len() >= 2 {
+        let x_values: Vec<f64> = (1..=metric_vals.len()).map(|i| i as f64).collect();
+        return Some(SimulationPlotData {
+            title: "Step 13 Experiment Metrics Profile".to_string(),
+            x_label: "Metric Index".to_string(),
+            y_label: "Measured Value".to_string(),
+            x_values,
+            series: vec![SimulationSeries {
+                label: "Measured Metrics".to_string(),
+                color: "#2563eb".to_string(),
+                dashed: false,
+                values: metric_vals,
+            }],
+            summary_note: metric_names
+                .into_iter()
+                .take(6)
+                .collect::<Vec<_>>()
+                .join(" | "),
+            from_step13: true,
+        });
+    }
+
+    if let Some(sim) = fallback_sim {
+        if sim.time_ms.len() >= 2 && sim.actual_value.len() >= 2 {
+            let len = sim.time_ms.len().min(sim.actual_value.len());
+            let mut series = Vec::new();
+            if sim.setpoint.len() >= len {
+                series.push(SimulationSeries {
+                    label: "Setpoint".to_string(),
+                    color: "#64748b".to_string(),
+                    dashed: true,
+                    values: sim.setpoint.iter().copied().take(len).collect(),
+                });
+            }
+            series.push(SimulationSeries {
+                label: "Actual Response".to_string(),
+                color: "#2563eb".to_string(),
+                dashed: false,
+                values: sim.actual_value.iter().copied().take(len).collect(),
+            });
+            return Some(SimulationPlotData {
+                title: "Closed-Loop Step Response Simulation".to_string(),
+                x_label: "Time (ms)".to_string(),
+                y_label: "Response Value (%)".to_string(),
+                x_values: sim.time_ms.iter().copied().take(len).collect(),
+                series,
+                summary_note: format!(
+                    "Overshoot: {:.2}% | Steady-State Error: {:.2} | Settling Time: {:.1} ms",
+                    sim.metrics.overshoot_pct,
+                    sim.metrics.steady_state_error,
+                    sim.metrics.settling_time_ms
+                ),
+                from_step13: false,
+            });
+        }
+    }
+
+    None
+}
+
+fn escape_svg_text(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
+/// 纯本地高分辨率 SVG 仿真曲线渲染器（含坐标轴标注、刻度网格、标题与图例）
+pub fn render_simulation_svg(plot: &SimulationPlotData) -> String {
+    let width = 900.0_f64;
+    let height = 520.0_f64;
+    let left = 90.0_f64;
+    let right = 860.0_f64;
+    let top = 72.0_f64;
+    let bottom = 430.0_f64;
+    let plot_w = right - left;
+    let plot_h = bottom - top;
+
+    let mut min_x = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    for &x in &plot.x_values {
+        if x.is_finite() {
+            min_x = min_x.min(x);
+            max_x = max_x.max(x);
+        }
+    }
+    if !min_x.is_finite() || !max_x.is_finite() {
+        min_x = 0.0;
+        max_x = 1.0;
+    }
+    if (max_x - min_x).abs() < 1e-9 {
+        max_x = min_x + 1.0;
+    }
+
+    let mut min_y = f64::INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    for s in &plot.series {
+        for &y in &s.values {
+            if y.is_finite() {
+                min_y = min_y.min(y);
+                max_y = max_y.max(y);
+            }
+        }
+    }
+    if !min_y.is_finite() || !max_y.is_finite() {
+        min_y = 0.0;
+        max_y = 100.0;
+    }
+    if (max_y - min_y).abs() < 1e-9 {
+        min_y -= 1.0;
+        max_y += 1.0;
+    } else {
+        let pad = (max_y - min_y) * 0.08;
+        min_y -= pad;
+        max_y += pad;
+    }
+
+    let map_x = |x: f64| -> f64 { left + ((x - min_x) / (max_x - min_x)) * plot_w };
+    let map_y = |y: f64| -> f64 { bottom - ((y - min_y) / (max_y - min_y)) * plot_h };
+
+    let mut svg = String::new();
+    svg.push_str(&format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {width:.0} {height:.0}\" width=\"{width:.0}\" height=\"{height:.0}\">\n"
+    ));
+    svg.push_str(&format!(
+        "  <rect width=\"{width:.0}\" height=\"{height:.0}\" fill=\"#ffffff\"/>\n"
+    ));
+    svg.push_str(&format!(
+        "  <text x=\"{:.1}\" y=\"32\" text-anchor=\"middle\" font-family=\"Arial, Helvetica, sans-serif\" font-size=\"18\" font-weight=\"bold\" fill=\"#111827\">{}</text>\n",
+        (left + right) / 2.0,
+        escape_svg_text(&plot.title)
+    ));
+    if !plot.summary_note.is_empty() {
+        svg.push_str(&format!(
+            "  <text x=\"{:.1}\" y=\"54\" text-anchor=\"middle\" font-family=\"Arial, Helvetica, sans-serif\" font-size=\"12\" fill=\"#4b5563\">{}</text>\n",
+            (left + right) / 2.0,
+            escape_svg_text(&plot.summary_note)
+        ));
+    }
+
+    // 网格与刻度
+    let ticks = 5usize;
+    for i in 0..=ticks {
+        let frac = (i as f64) / (ticks as f64);
+        let y_pos = bottom - frac * plot_h;
+        let y_val = min_y + frac * (max_y - min_y);
+        svg.push_str(&format!(
+            "  <line x1=\"{left:.1}\" y1=\"{y_pos:.1}\" x2=\"{right:.1}\" y2=\"{y_pos:.1}\" stroke=\"#e5e7eb\" stroke-width=\"1\"/>\n"
+        ));
+        svg.push_str(&format!(
+            "  <text x=\"{:.1}\" y=\"{:.1}\" text-anchor=\"end\" font-family=\"Arial, Helvetica, sans-serif\" font-size=\"11\" fill=\"#4b5563\">{y_val:.1}</text>\n",
+            left - 8.0,
+            y_pos + 4.0
+        ));
+
+        let x_pos = left + frac * plot_w;
+        let x_val = min_x + frac * (max_x - min_x);
+        svg.push_str(&format!(
+            "  <line x1=\"{x_pos:.1}\" y1=\"{top:.1}\" x2=\"{x_pos:.1}\" y2=\"{bottom:.1}\" stroke=\"#e5e7eb\" stroke-width=\"1\"/>\n"
+        ));
+        svg.push_str(&format!(
+            "  <text x=\"{x_pos:.1}\" y=\"{:.1}\" text-anchor=\"middle\" font-family=\"Arial, Helvetica, sans-serif\" font-size=\"11\" fill=\"#4b5563\">{x_val:.1}</text>\n",
+            bottom + 18.0
+        ));
+    }
+
+    // 坐标轴边框
+    svg.push_str(&format!(
+        "  <line x1=\"{left:.1}\" y1=\"{top:.1}\" x2=\"{left:.1}\" y2=\"{bottom:.1}\" stroke=\"#374151\" stroke-width=\"1.5\"/>\n"
+    ));
+    svg.push_str(&format!(
+        "  <line x1=\"{left:.1}\" y1=\"{bottom:.1}\" x2=\"{right:.1}\" y2=\"{bottom:.1}\" stroke=\"#374151\" stroke-width=\"1.5\"/>\n"
+    ));
+
+    // 坐标轴名称标注
+    svg.push_str(&format!(
+        "  <text x=\"{:.1}\" y=\"{:.1}\" text-anchor=\"middle\" font-family=\"Arial, Helvetica, sans-serif\" font-size=\"13\" font-weight=\"bold\" fill=\"#1f2937\">{}</text>\n",
+        (left + right) / 2.0,
+        bottom + 46.0,
+        escape_svg_text(&plot.x_label)
+    ));
+    let y_mid = (top + bottom) / 2.0;
+    svg.push_str(&format!(
+        "  <text x=\"24\" y=\"{y_mid:.1}\" text-anchor=\"middle\" transform=\"rotate(-90 24 {y_mid:.1})\" font-family=\"Arial, Helvetica, sans-serif\" font-size=\"13\" font-weight=\"bold\" fill=\"#1f2937\">{}</text>\n",
+        escape_svg_text(&plot.y_label)
+    ));
+
+    // 曲线绘制
+    for s in &plot.series {
+        let count = plot.x_values.len().min(s.values.len());
+        if count < 2 {
+            continue;
+        }
+        let mut pts = Vec::with_capacity(count);
+        for i in 0..count {
+            let xv = plot.x_values[i];
+            let yv = s.values[i];
+            if xv.is_finite() && yv.is_finite() {
+                pts.push((map_x(xv), map_y(yv)));
+            }
+        }
+        if pts.len() < 2 {
+            continue;
+        }
+        let points_attr: String = pts
+            .iter()
+            .map(|(px, py)| format!("{px:.2},{py:.2}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let dash = if s.dashed {
+            " stroke-dasharray=\"6,4\""
+        } else {
+            ""
+        };
+        svg.push_str(&format!(
+            "  <polyline fill=\"none\" stroke=\"{}\" stroke-width=\"2.4\"{dash} points=\"{points_attr}\"/>\n",
+            escape_svg_text(&s.color)
+        ));
+        if pts.len() <= 30 {
+            for (px, py) in &pts {
+                svg.push_str(&format!(
+                    "  <circle cx=\"{px:.2}\" cy=\"{py:.2}\" r=\"3\" fill=\"{}\"/>\n",
+                    escape_svg_text(&s.color)
+                ));
+            }
+        }
+    }
+
+    // 图例框
+    if !plot.series.is_empty() {
+        let legend_w = 195.0_f64;
+        let legend_h = 18.0 + (plot.series.len() as f64) * 22.0;
+        let legend_x = right - legend_w - 14.0;
+        let legend_y = top + 12.0;
+        svg.push_str(&format!(
+            "  <g class=\"legend\">\n    <rect x=\"{legend_x:.1}\" y=\"{legend_y:.1}\" width=\"{legend_w:.1}\" height=\"{legend_h:.1}\" rx=\"6\" fill=\"#ffffff\" fill-opacity=\"0.92\" stroke=\"#d1d5db\" stroke-width=\"1\"/>\n"
+        ));
+        for (idx, s) in plot.series.iter().enumerate() {
+            let row_y = legend_y + 20.0 + (idx as f64) * 22.0;
+            let dash = if s.dashed {
+                " stroke-dasharray=\"5,3\""
+            } else {
+                ""
+            };
+            svg.push_str(&format!(
+                "    <line x1=\"{:.1}\" y1=\"{:.1}\" x2=\"{:.1}\" y2=\"{:.1}\" stroke=\"{}\" stroke-width=\"2.5\"{dash}/>\n",
+                legend_x + 12.0,
+                row_y - 4.0,
+                legend_x + 36.0,
+                row_y - 4.0,
+                escape_svg_text(&s.color)
+            ));
+            svg.push_str(&format!(
+                "    <text x=\"{:.1}\" y=\"{row_y:.1}\" font-family=\"Arial, Helvetica, sans-serif\" font-size=\"12\" fill=\"#111827\">{}</text>\n",
+                legend_x + 44.0,
+                escape_svg_text(safe_truncate_chars(&s.label, 20))
+            ));
+        }
+        svg.push_str("  </g>\n");
+    }
+
+    svg.push_str("</svg>\n");
+    svg
+}
+
+fn escape_latex(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '\\' => out.push_str("\\textbackslash{}"),
+            '{' => out.push_str("\\{"),
+            '}' => out.push_str("\\}"),
+            '$' => out.push_str("\\$"),
+            '&' => out.push_str("\\&"),
+            '%' => out.push_str("\\%"),
+            '#' => out.push_str("\\#"),
+            '_' => out.push_str("\\_"),
+            '^' => out.push_str("\\textasciicircum{}"),
+            '~' => out.push_str("\\textasciitilde{}"),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+/// 构造可直接用于投稿的 LaTeX + BibTeX + SVG 仿真图打包输出
+pub fn build_paper_latex_bundle(
+    ctx: &PipelineContext,
+    feature_cards: &[FeatureCard],
+    db_patents: &[Patent],
+    fallback_sim: Option<&StepSimulationData>,
+) -> PaperLatexBundle {
+    let bib_entries = extract_verified_bib_entries(ctx, db_patents);
+    let bibtex_content = format_bibtex(&bib_entries);
+    let plot_data = extract_simulation_plot_data(ctx, fallback_sim);
+    let has_step13_simulation = plot_data.as_ref().is_some_and(|p| p.from_step13);
+    let simulation_svg = match &plot_data {
+        Some(plot) => render_simulation_svg(plot),
+        None => {
+            let default_sim =
+                crate::pipeline::steps::control_proto::run_closed_loop_step_simulation(
+                    &crate::pipeline::steps::control_proto::default_calibration_table(),
+                );
+            let default_plot = SimulationPlotData {
+                title: "Closed-Loop Step Response Simulation".to_string(),
+                x_label: "Time (ms)".to_string(),
+                y_label: "Response Value (%)".to_string(),
+                x_values: default_sim.time_ms,
+                series: vec![
+                    SimulationSeries {
+                        label: "Setpoint".to_string(),
+                        color: "#64748b".to_string(),
+                        dashed: true,
+                        values: default_sim.setpoint,
+                    },
+                    SimulationSeries {
+                        label: "Actual Response".to_string(),
+                        color: "#2563eb".to_string(),
+                        dashed: false,
+                        values: default_sim.actual_value,
+                    },
+                ],
+                summary_note: format!(
+                    "Overshoot: {:.2}% | Steady-State Error: {:.2} | Settling Time: {:.1} ms",
+                    default_sim.metrics.overshoot_pct,
+                    default_sim.metrics.steady_state_error,
+                    default_sim.metrics.settling_time_ms
+                ),
+                from_step13: false,
+            };
+            render_simulation_svg(&default_plot)
+        }
+    };
+
+    let title = if ctx.title.trim().is_empty() {
+        "Engineering System Design and Experimental Validation"
+    } else {
+        ctx.title.trim()
+    };
+    let domain = if ctx.technical_domain.trim().is_empty() {
+        "Engineering & Mechatronics"
+    } else {
+        ctx.technical_domain.trim()
+    };
+    let abstract_body = if ctx.description.trim().is_empty() {
+        "Technical abstract pending refinement."
+    } else {
+        safe_truncate_chars(ctx.description.trim(), 500)
+    };
+    let keywords_line = if ctx.keywords.is_empty() {
+        "Engineering Design; Closed-Loop Control; Experimental Validation".to_string()
+    } else {
+        ctx.keywords.join("; ")
+    };
+
+    let related_work_tex = if bib_entries.is_empty() {
+        escape_latex(MISSING_DOI_TAG)
+    } else {
+        let mut s = String::from(
+            "Prior academic studies retrieved via verified OpenAlex/CrossRef DOI indexing are summarized below:\\par\n\\begin{itemize}\n",
+        );
+        for entry in &bib_entries {
+            s.push_str(&format!(
+                "  \\item {} (DOI: \\texttt{{{}}})~\\cite{{{}}}.\n",
+                escape_latex(&entry.title),
+                escape_latex(&entry.doi),
+                entry.cite_key
+            ));
+        }
+        s.push_str("\\end{itemize}\n");
+        s
+    };
+
+    let mut mechanism_tex = if ctx.ai_analysis.trim().is_empty() {
+        escape_latex(abstract_body)
+    } else {
+        escape_latex(safe_truncate_chars(ctx.ai_analysis.trim(), 900))
+    };
+    if !feature_cards.is_empty() {
+        mechanism_tex.push_str("\n\n\\begin{itemize}\n");
+        for card in feature_cards.iter().take(6) {
+            mechanism_tex.push_str(&format!(
+                "  \\item \\textbf{{{}}}: {}\n",
+                escape_latex(card.title.trim()),
+                escape_latex(safe_truncate_chars(card.description.trim(), 200))
+            ));
+        }
+        mechanism_tex.push_str("\\end{itemize}\n");
+    }
+
+    let sim_caption = match &plot_data {
+        Some(p) if p.from_step13 => format!(
+            "{} ({})",
+            escape_latex(&p.title),
+            escape_latex(&p.summary_note)
+        ),
+        Some(p) => format!(
+            "{} ({})",
+            escape_latex(&p.title),
+            escape_latex(&p.summary_note)
+        ),
+        None => "Closed-loop step response simulation curve.".to_string(),
+    };
+
+    let exp_rows_tex = {
+        let successful: Vec<&ExperimentResult> = ctx
+            .experiment_results
+            .iter()
+            .filter(|e| e.success)
+            .collect();
+        if successful.is_empty() {
+            format!(
+                "\\noindent\\textit{{{}}}\n",
+                escape_latex(MISSING_CALIBRATION_TAG)
+            )
+        } else {
+            let mut tbl = String::from(
+                "\\begin{table}[htbp]\n\\centering\n\\caption{Step 13 Numerical Experiment Metrics}\n\\begin{tabular}{llp{7.5cm}}\n\\toprule\nRun & Duration (ms) & Verified Metrics \\\\\n\\midrule\n",
+            );
+            for (idx, exp) in successful.iter().enumerate() {
+                tbl.push_str(&format!(
+                    "{} & {} & \\texttt{{{}}} \\\\\n",
+                    idx + 1,
+                    exp.duration_ms,
+                    escape_latex(safe_truncate_chars(&exp.metrics.to_string(), 160))
+                ));
+            }
+            tbl.push_str("\\bottomrule\n\\end{tabular}\n\\end{table}\n");
+            tbl
+        }
+    };
+
+    let conclusion_body = if ctx.action_plan.trim().is_empty() {
+        format!(
+            "This study establishes the structural and closed-loop validation baseline for {}.",
+            title
+        )
+    } else {
+        safe_truncate_chars(ctx.action_plan.trim(), 400).to_string()
+    };
+
+    let bibliography_block = if bib_entries.is_empty() {
+        "% No \\cite{} keys emitted because zero verified DOI references are bound.\n".to_string()
+    } else {
+        "\\bibliographystyle{plain}\n\\bibliography{references}\n".to_string()
+    };
+
+    let main_tex = format!(
+        "% !TEX program = xelatex\n\
+         % !NOVELTY LOCK WARNING: {novelty_plain}\n\
+         \\documentclass[11pt,a4paper]{{article}}\n\
+         \\usepackage[utf8]{{inputenc}}\n\
+         \\usepackage{{graphicx}}\n\
+         \\usepackage{{amsmath}}\n\
+         \\usepackage{{booktabs}}\n\
+         \\usepackage{{hyperref}}\n\
+         \\title{{{tex_title}}}\n\
+         \\author{{InnoForge Engineering Research Workspace}}\n\
+         \\date{{\\today}}\n\n\
+         \\begin{{document}}\n\
+         \\maketitle\n\n\
+         \\begin{{center}}\n\
+         \\fbox{{\\parbox{{0.94\\linewidth}}{{\\textbf{{Novelty Lock Warning:}} {tex_warning}}}}}\n\
+         \\end{{center}}\n\n\
+         \\begin{{abstract}}\n\
+         {tex_abstract}\n\
+         \\end{{abstract}}\n\n\
+         \\noindent\\textbf{{Keywords:}} {tex_keywords}\n\n\
+         \\section{{Introduction and Related Work}}\n\
+         This work investigates technical challenges in \\textbf{{{tex_domain}}}.\n\
+         {related_work}\n\
+         \\section{{System Mechanism and Structural Modeling}}\n\
+         {mechanism}\n\n\
+         \\section{{Simulation and Experimental Validation}}\n\
+         {exp_rows}\n\
+         \\begin{{figure}}[htbp]\n\
+         \\centering\n\
+         % Note: For pdfLaTeX, convert figures/simulation_curve.svg to PDF/PNG or compile with svg package.\n\
+         \\includegraphics[width=0.92\\linewidth]{{figures/simulation_curve.svg}}\n\
+         \\caption{{{sim_caption}}}\n\
+         \\label{{fig:sim_curve}}\n\
+         \\end{{figure}}\n\n\
+         \\section{{Conclusion}}\n\
+         {tex_conclusion}\n\n\
+         {bibliography_block}\
+         \\end{{document}}\n",
+        novelty_plain = NOVELTY_LOCK_TEXT_PLAIN,
+        tex_title = escape_latex(title),
+        tex_warning = escape_latex(NOVELTY_LOCK_TEXT_PLAIN),
+        tex_abstract = escape_latex(abstract_body),
+        tex_keywords = escape_latex(&keywords_line),
+        tex_domain = escape_latex(domain),
+        related_work = related_work_tex,
+        mechanism = mechanism_tex,
+        exp_rows = exp_rows_tex,
+        sim_caption = sim_caption,
+        tex_conclusion = escape_latex(&conclusion_body),
+        bibliography_block = bibliography_block,
+    );
+
+    PaperLatexBundle {
+        idea_id: ctx.idea_id.clone(),
+        novelty_lock_warning: NOVELTY_LOCK_WARNING.to_string(),
+        bib_entries,
+        bibtex_content,
+        main_tex,
+        simulation_svg,
+        has_step13_simulation,
+        plot_data,
+    }
+}
+
+/// 从 LaTeX 源码提取全部 `\cite{...}` 引用键
+pub fn extract_tex_cite_keys(tex: &str) -> Vec<String> {
+    let mut keys = Vec::new();
+    let mut rest = tex;
+    while let Some(pos) = rest.find("\\cite{") {
+        let after_start = pos + "\\cite{".len();
+        let Some(tail) = rest.get(after_start..) else {
+            break;
+        };
+        let Some(end) = tail.find('}') else {
+            break;
+        };
+        if let Some(raw_keys) = tail.get(..end) {
+            for k in raw_keys.split(',') {
+                let trimmed = k.trim();
+                if !trimmed.is_empty() {
+                    keys.push(trimmed.to_string());
+                }
+            }
+        }
+        rest = tail.get(end + 1..).unwrap_or("");
+    }
+    keys
+}
+
+/// 从 `.bib` 内容提取全部 `@type{key,` 条目键
+pub fn extract_bib_keys(bib: &str) -> HashSet<String> {
+    let mut keys = HashSet::new();
+    for line in bib.lines() {
+        let trimmed = line.trim();
+        if !trimmed.starts_with('@') {
+            continue;
+        }
+        if let Some(open) = trimmed.find('{') {
+            if let Some(after_open) = trimmed.get(open + 1..) {
+                if let Some(comma) = after_open.find(',') {
+                    if let Some(key) = after_open.get(..comma) {
+                        let k = key.trim();
+                        if !k.is_empty() {
+                            keys.insert(k.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    keys
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -618,5 +1614,104 @@ mod tests {
             .starts_with(&draft_zero_doi.novelty_lock_warning));
         assert!(draft_zero_doi.cited_dois.is_empty());
         assert!(draft_zero_doi.full_markdown.contains(MISSING_DOI_TAG));
+    }
+
+    #[test]
+    fn latex_bundle_zero_orphan_citations_and_real_doi_only() {
+        let mut ctx = PipelineContext::new(
+            "idea-bib-1",
+            "主动磁悬浮隔振平台",
+            "结合前馈自适应补偿的六自由度磁悬浮隔振系统",
+        );
+        ctx.keywords = vec!["磁悬浮".to_string(), "自适应控制".to_string()];
+        ctx.patent_results.push(PipelinePatentHit {
+            id: "10.1016/j.ymssp.2024.111222".to_string(),
+            title: "Active magnetic vibration isolation".to_string(),
+            snippet: "OpenAlex indexed work (2024)".to_string(),
+            link: "https://doi.org/10.1016/j.ymssp.2024.111222".to_string(),
+            source: "openalex".to_string(),
+        });
+        ctx.web_results.push(PipelinePatentHit {
+            id: "crossref-1".to_string(),
+            title: "Feedforward damping control".to_string(),
+            snippet: "CrossRef DOI 10.1109/TIE.2023.3301234".to_string(),
+            link: "https://doi.org/10.1109/TIE.2023.3301234".to_string(),
+            source: "crossref".to_string(),
+        });
+        // 无 DOI 的网页条目，严禁被编造进参考文献
+        ctx.web_results.push(PipelinePatentHit {
+            id: "web-no-doi".to_string(),
+            title: "Blog post without DOI".to_string(),
+            snippet: "General engineering notes without identifier".to_string(),
+            link: "https://example.org/blog/1".to_string(),
+            source: "web".to_string(),
+        });
+
+        let mut db_patent = Patent::default();
+        db_patent.patent_number = "10.1016/j.ymssp.2024.111222".to_string();
+        db_patent.title = "Active magnetic vibration isolation".to_string();
+        db_patent.inventor = "Zhang Wei, Li Ming".to_string();
+        db_patent.applicant = "Mechanical Systems and Signal Processing".to_string();
+        db_patent.filing_date = "2024".to_string();
+        db_patent.source = "openalex".to_string();
+
+        let bundle = build_paper_latex_bundle(&ctx, &[sample_feature_card()], &[db_patent], None);
+        assert_eq!(bundle.bib_entries.len(), 2);
+        assert!(bundle.bibtex_content.contains("@article{"));
+        assert!(bundle.bibtex_content.contains("Zhang Wei, Li Ming"));
+        assert!(bundle
+            .bibtex_content
+            .contains("Mechanical Systems and Signal Processing"));
+        assert!(!bundle.bibtex_content.contains("Blog post without DOI"));
+        assert!(bundle.main_tex.contains("专利法》第22条第2款新颖性"));
+
+        let tex_cites = extract_tex_cite_keys(&bundle.main_tex);
+        let bib_keys = extract_bib_keys(&bundle.bibtex_content);
+        assert_eq!(tex_cites.len(), 2);
+        assert_eq!(bib_keys.len(), 2);
+        for cite_key in &tex_cites {
+            assert!(
+                bib_keys.contains(cite_key),
+                "orphan citation {cite_key} not found in references.bib keys: {bib_keys:?}"
+            );
+        }
+
+        // 零 DOI 时不应出现任何 \cite{...} 且不应编造 @article
+        let empty_ctx = PipelineContext::new("idea-empty-doi", "纯内部预研", "无外网文献");
+        let empty_bundle = build_paper_latex_bundle(&empty_ctx, &[], &[], None);
+        assert!(empty_bundle.bib_entries.is_empty());
+        assert!(extract_tex_cite_keys(&empty_bundle.main_tex).is_empty());
+        assert!(extract_bib_keys(&empty_bundle.bibtex_content).is_empty());
+    }
+
+    #[test]
+    fn svg_simulation_renderer_handles_step13_and_renders_axes_and_legend() {
+        let mut ctx = PipelineContext::new("idea-sim-1", "闭环阶跃仿真测试", "仿真验证");
+        ctx.experiment_results.push(ExperimentResult {
+            script_path: "step13_sim.py".to_string(),
+            language: "python".to_string(),
+            exit_code: 0,
+            stdout: "EXPERIMENT_DONE".to_string(),
+            stderr: String::new(),
+            metrics: serde_json::json!({
+                "time_ms": [0.0, 50.0, 100.0, 150.0, 200.0],
+                "setpoint": [80.0, 80.0, 80.0, 80.0, 80.0],
+                "actual_value": [0.0, 32.5, 68.4, 79.2, 80.1],
+                "overshoot_pct": 0.125
+            }),
+            duration_ms: 45,
+            success: true,
+        });
+
+        let bundle = build_paper_latex_bundle(&ctx, &[], &[], None);
+        assert!(bundle.has_step13_simulation);
+        assert!(bundle.simulation_svg.contains("<svg"));
+        assert!(bundle.simulation_svg.contains("Time (ms)"));
+        assert!(bundle.simulation_svg.contains("Simulated Response"));
+        assert!(bundle.simulation_svg.contains("class=\"legend\""));
+        assert!(bundle.simulation_svg.contains("setpoint"));
+        assert!(bundle.simulation_svg.contains("actual_value"));
+        assert!(bundle.simulation_svg.contains("<polyline"));
+        assert!(bundle.main_tex.contains("figures/simulation_curve.svg"));
     }
 }

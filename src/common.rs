@@ -707,6 +707,14 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
             get(routes::api_idea_archive_zip),
         )
         .route(
+            "/api/ideas/:id/paper/latex-bundle",
+            get(routes::api_idea_paper_latex_bundle),
+        )
+        .route(
+            "/api/ideas/:id/paper/docx",
+            get(routes::api_idea_paper_docx),
+        )
+        .route(
             "/api/feature-cards/diff",
             get(routes::api_feature_card_diff),
         )

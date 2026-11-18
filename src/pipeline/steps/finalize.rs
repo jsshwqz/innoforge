@@ -75,6 +75,14 @@ pub async fn execute(ctx: &mut PipelineContext, db: &Arc<Database>) -> Result<()
         .unwrap_or_default();
     let bom_pack = super::deliverables::build_engineering_bom_pack(ctx, &feature_cards);
     let journal_draft = super::deliverables::build_journal_manuscript_draft(ctx);
+    let verified_dois = super::deliverables::extract_verified_dois(ctx);
+    let db_patents = db
+        .get_patents_by_numbers(&verified_dois)
+        .unwrap_or_default();
+    let bib_entries = super::deliverables::extract_verified_bib_entries(ctx, &db_patents);
+    let bibtex_content = super::deliverables::format_bibtex(&bib_entries);
+    let step13_svg = super::deliverables::extract_simulation_plot_data(ctx, None)
+        .map(|plot| super::deliverables::render_simulation_svg(&plot));
     let now = chrono::Utc::now().to_rfc3339();
     memory.push(IdeaMemory {
         id: format!("{}-deliverable-bom-{}", ctx.idea_id, uuid::Uuid::new_v4()),
@@ -100,8 +108,34 @@ pub async fn execute(ctx: &mut PipelineContext, db: &Arc<Database>) -> Result<()
         confidence: 0.9,
         source_step: Some("FinalizeDeliverables".to_string()),
         created_at: now.clone(),
-        updated_at: now,
+        updated_at: now.clone(),
     });
+    if !bib_entries.is_empty() {
+        memory.push(IdeaMemory {
+            id: format!("{}-deliverable-bib-{}", ctx.idea_id, uuid::Uuid::new_v4()),
+            idea_id: ctx.idea_id.clone(),
+            concept_name: "deliverable_journal_bibtex".to_string(),
+            concept_type: "decision".to_string(),
+            content: bibtex_content,
+            confidence: 0.9,
+            source_step: Some("FinalizeDeliverables".to_string()),
+            created_at: now.clone(),
+            updated_at: now.clone(),
+        });
+    }
+    if let Some(svg) = step13_svg {
+        memory.push(IdeaMemory {
+            id: format!("{}-deliverable-svg-{}", ctx.idea_id, uuid::Uuid::new_v4()),
+            idea_id: ctx.idea_id.clone(),
+            concept_name: "deliverable_simulation_svg".to_string(),
+            concept_type: "decision".to_string(),
+            content: svg,
+            confidence: 0.9,
+            source_step: Some("FinalizeDeliverables".to_string()),
+            created_at: now.clone(),
+            updated_at: now,
+        });
+    }
     ctx.memory_entries = memory.clone();
     if !memory.is_empty() {
         if let Err(e) = db.save_memory_batch(&memory) {

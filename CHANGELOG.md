@@ -6,6 +6,12 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 ---
 ## [Unreleased]
 
+## [v0.9.59] - 2026-11-18
+
+### 新增 / Added
+
+- **期刊论文 LaTeX/Word 双模投稿导出与仿真曲线/BibTeX 自动嵌入（Batch 16）**：新增真实 DOI 学术参考文献 `.bib` 生成器（仅绑定 OpenAlex/CrossRef 已核验 DOI 记录，零编造引用）与基于第 13 步数值仿真序列的纯本地 SVG 曲线渲染器（含坐标轴标注与图例）；新增 `GET /api/ideas/:id/paper/latex-bundle`（打包 `main.tex`、`references.bib` 与 `figures/simulation_curve.svg`）及 `GET /api/ideas/:id/paper/docx`（学术排版 Word `.docx`，置顶防破新颖性安全锁），并在 `idea.html` 补齐双模导出按钮与中英双语词条。 / Added real-DOI `.bib` reference generator, local SVG simulation curve renderer (with axes & legend), `GET /api/ideas/:id/paper/latex-bundle` (`.zip` with `main.tex`, `references.bib`, and SVG figure), `GET /api/ideas/:id/paper/docx` (academic Word `.docx` with novelty lock warning), and export buttons in `idea.html`.
+
 ## [v0.9.53] - 2026-11-18
 
 ### 新增 / Added
@@ -447,6 +453,12 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 ## [Unreleased]
+
+## [v0.9.59] - 2026-11-18
+
+### 新增 / Added
+
+- **期刊论文 LaTeX/Word 双模投稿导出与仿真曲线/BibTeX 自动嵌入（Batch 16）**：新增真实 DOI 学术参考文献 `.bib` 生成器（仅绑定 OpenAlex/CrossRef 已核验 DOI 记录，零编造引用）与基于第 13 步数值仿真序列的纯本地 SVG 曲线渲染器（含坐标轴标注与图例）；新增 `GET /api/ideas/:id/paper/latex-bundle`（打包 `main.tex`、`references.bib` 与 `figures/simulation_curve.svg`）及 `GET /api/ideas/:id/paper/docx`（学术排版 Word `.docx`，置顶防破新颖性安全锁），并在 `idea.html` 补齐双模导出按钮与中英双语词条。 / Added real-DOI `.bib` reference generator, local SVG simulation curve renderer (with axes & legend), `GET /api/ideas/:id/paper/latex-bundle` (`.zip` with `main.tex`, `references.bib`, and SVG figure), `GET /api/ideas/:id/paper/docx` (academic Word `.docx` with novelty lock warning), and export buttons in `idea.html`.
 
 ## [v0.9.53] - 2026-11-18
 
