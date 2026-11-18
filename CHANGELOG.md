@@ -6,6 +6,12 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 ---
 ## [Unreleased]
 
+## [v0.9.55] - 2026-11-18
+
+### 新增 / Added
+
+- **权利要求树可视化编辑器与专利法第26条第4款自检工作台（Batch 12）**：新增 `claim_validator` 引擎，实现多项从属引用多项从属、前序/正文“所述XX”缺少引用基础、自引用/向后引用等确定性语法校验，并结合 `v25` `chunks_fts` 说明书实施例分块与可选 `ai_client_expert` 核对数值范围与功能限定支撑（第26条第4款）；新增 `POST /api/ideas/:id/claims/validate`、`POST /api/idea/:id/claim-tree` 与 `DELETE /api/idea/:id/claim-tree/:claim_id`，并在 `idea.html` 升级权利要求树为可增删改与一键体检的可视化工作台。 / Added `claim_validator` engine (syntax & antecedent basis checks + `chunks_fts` / optional `ai_client_expert` Art. 26.4 embodiment support validation), `POST /api/ideas/:id/claims/validate`, claim node add/edit/delete routes, and interactive claim tree editor UI in `idea.html`.
+
 ## [v0.9.54] - 2026-11-18
 
 ### 新增 / Added
@@ -454,6 +460,12 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 ## [Unreleased]
+
+## [v0.9.55] - 2026-11-18
+
+### 新增 / Added
+
+- **权利要求树可视化编辑器与专利法第26条第4款自检工作台（Batch 12）**：新增 `claim_validator` 引擎，实现多项从属引用多项从属、前序/正文“所述XX”缺少引用基础、自引用/向后引用等确定性语法校验，并结合 `v25` `chunks_fts` 说明书实施例分块与可选 `ai_client_expert` 核对数值范围与功能限定支撑（第26条第4款）；新增 `POST /api/ideas/:id/claims/validate`、`POST /api/idea/:id/claim-tree` 与 `DELETE /api/idea/:id/claim-tree/:claim_id`，并在 `idea.html` 升级权利要求树为可增删改与一键体检的可视化工作台。 / Added `claim_validator` engine (syntax & antecedent basis checks + `chunks_fts` / optional `ai_client_expert` Art. 26.4 embodiment support validation), `POST /api/ideas/:id/claims/validate`, claim node add/edit/delete routes, and interactive claim tree editor UI in `idea.html`.
 
 ## [v0.9.54] - 2026-11-18
 

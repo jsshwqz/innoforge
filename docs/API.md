@@ -669,6 +669,12 @@ Response:
 - **POST** `/api/backup/export`：基于 `VACUUM INTO` 生成一致 `.db` 热备份快照下载。
 - **POST** `/api/backup/check`：校验备份文件 SQLite 3 文件头与 `schema_version` 完整性。
 
+### 10) 权利要求树编辑与第26条第4款自检 / Claim Tree Editor & Art. 26.4 Validator
+
+- **POST** `/api/idea/:id/claim-tree`：新增或编辑单条权利要求节点（`claim_number`、`claim_type`、`parent_claim_id`、`content`）。
+- **DELETE** `/api/idea/:id/claim-tree/:claim_id`：删除指定权利要求节点及其关联特征。
+- **POST** `/api/ideas/:id/claims/validate`：执行形式语法（多项从属链、“所述XX”引用基础）与结合 `chunks_fts`/专家模型的专利法第26条第4款实施例支撑体检，返回逐条告警清单。
+
 Response:
 
 ```json

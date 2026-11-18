@@ -229,6 +229,284 @@ pub async fn api_idea_claim_tree(
     Json(json!({"status": "ok", "claims": result_claims}))
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct UpsertClaimNodeRequest {
+    #[serde(default)]
+    pub id: Option<String>,
+    pub claim_number: u32,
+    #[serde(default)]
+    pub claim_type: String,
+    #[serde(default)]
+    pub parent_claim_id: Option<String>,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+pub struct ValidateClaimsRequest {
+    #[serde(default)]
+    pub claims: Vec<crate::ai::claim_validator::ClaimInput>,
+    #[serde(default)]
+    pub specification: Option<String>,
+}
+
+/// POST /api/idea/:id/claim-tree — 新增或编辑单条权利要求节点
+pub async fn api_idea_claim_node_upsert(
+    State(s): State<AppState>,
+    Path(idea_id): Path<String>,
+    Json(req): Json<UpsertClaimNodeRequest>,
+) -> impl axum::response::IntoResponse {
+    use axum::http::StatusCode;
+
+    match s.db.get_idea(&idea_id) {
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({"status": "error", "message": "创意不存在"})),
+            );
+        }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"status": "error", "message": e.to_string()})),
+            );
+        }
+    }
+
+    let content = req.content.trim().to_string();
+    if req.claim_number == 0 || content.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(
+                json!({"status": "error", "message": "claim_number 必须 >= 1 且 content 不能为空"}),
+            ),
+        );
+    }
+
+    let claim_type = if req.claim_type.trim().eq_ignore_ascii_case("dependent") {
+        "dependent".to_string()
+    } else {
+        "independent".to_string()
+    };
+    let parent_claim_id = req
+        .parent_claim_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(ToString::to_string);
+    let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+
+    let conn = s.db.conn();
+    let existing_id = req
+        .id
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(ToString::to_string);
+
+    if let Some(cid) = existing_id {
+        match conn.execute(
+            "UPDATE claim_nodes SET claim_number = ?1, claim_type = ?2, parent_claim_id = ?3, content = ?4 \
+             WHERE id = ?5 AND idea_id = ?6",
+            rusqlite::params![req.claim_number, claim_type, parent_claim_id, content, cid, idea_id],
+        ) {
+            Ok(updated) if updated > 0 => {
+                return (
+                    StatusCode::OK,
+                    Json(json!({
+                        "status": "ok",
+                        "claim": {
+                            "id": cid,
+                            "claim_number": req.claim_number,
+                            "claim_type": claim_type,
+                            "parent_claim_id": parent_claim_id,
+                            "content": content,
+                            "created_at": now,
+                        }
+                    })),
+                );
+            }
+            Ok(_) => {}
+            Err(e) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"status": "error", "message": e.to_string()})),
+                );
+            }
+        }
+    }
+
+    let new_id = uuid::Uuid::new_v4().to_string();
+    if let Err(e) = conn.execute(
+        "INSERT INTO claim_nodes (id, idea_id, claim_number, claim_type, parent_claim_id, content, created_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        rusqlite::params![new_id, idea_id, req.claim_number, claim_type, parent_claim_id, content, now],
+    ) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"status": "error", "message": e.to_string()})),
+        );
+    }
+
+    (
+        StatusCode::OK,
+        Json(json!({
+            "status": "ok",
+            "claim": {
+                "id": new_id,
+                "claim_number": req.claim_number,
+                "claim_type": claim_type,
+                "parent_claim_id": parent_claim_id,
+                "content": content,
+                "created_at": now,
+            }
+        })),
+    )
+}
+
+/// DELETE /api/idea/:id/claim-tree/:claim_id — 删除单条权利要求节点
+pub async fn api_idea_claim_node_delete(
+    State(s): State<AppState>,
+    Path((idea_id, claim_id)): Path<(String, String)>,
+) -> impl axum::response::IntoResponse {
+    use axum::http::StatusCode;
+
+    match s.db.get_idea(&idea_id) {
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({"status": "error", "message": "创意不存在"})),
+            );
+        }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"status": "error", "message": e.to_string()})),
+            );
+        }
+    }
+
+    let conn = s.db.conn();
+    let _ = conn.execute(
+        "UPDATE claim_nodes SET parent_claim_id = NULL WHERE idea_id = ?1 AND parent_claim_id = ?2",
+        rusqlite::params![idea_id, claim_id],
+    );
+    let _ = conn.execute(
+        "DELETE FROM technical_features WHERE claim_id = ?1",
+        rusqlite::params![claim_id],
+    );
+    if let Err(e) = conn.execute(
+        "DELETE FROM claim_nodes WHERE id = ?1 AND idea_id = ?2",
+        rusqlite::params![claim_id, idea_id],
+    ) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"status": "error", "message": e.to_string()})),
+        );
+    }
+
+    (StatusCode::OK, Json(json!({"status": "ok"})))
+}
+
+/// POST /api/ideas/:id/claims/validate — 权利要求树形式语法与专利法第26条第4款自检
+pub async fn api_idea_claims_validate(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+
+    let req: ValidateClaimsRequest = if body.is_empty() {
+        ValidateClaimsRequest::default()
+    } else {
+        match serde_json::from_slice(&body) {
+            Ok(parsed) => parsed,
+            Err(e) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"status": "error", "message": format!("请求体 JSON 格式错误: {}", e)})),
+                )
+                    .into_response();
+            }
+        }
+    };
+
+    let idea = match s.db.get_idea(&id) {
+        Ok(Some(i)) => i,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({"status": "error", "message": "Idea not found"})),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"status": "error", "message": e.to_string()})),
+            )
+                .into_response();
+        }
+    };
+
+    let claims = if !req.claims.is_empty() {
+        req.claims
+    } else {
+        let conn = s.db.conn();
+        let mut loaded = Vec::new();
+        if let Ok(mut stmt) = conn.prepare(
+            "SELECT id, claim_number, claim_type, parent_claim_id, content \
+             FROM claim_nodes WHERE idea_id = ?1 ORDER BY claim_number ASC",
+        ) {
+            if let Ok(rows) = stmt.query_map(rusqlite::params![idea.id], |r| {
+                Ok(crate::ai::claim_validator::ClaimInput {
+                    id: Some(r.get::<_, String>(0)?),
+                    claim_number: r.get::<_, i64>(1).unwrap_or(0).max(0) as u32,
+                    claim_type: r.get::<_, String>(2)?,
+                    parent_claim_id: r.get::<_, Option<String>>(3)?,
+                    depends_on: Vec::new(),
+                    content: r.get::<_, String>(4)?,
+                })
+            }) {
+                loaded = rows.filter_map(|r| r.ok()).collect();
+            }
+        }
+        loaded
+    };
+
+    let mut extra_spec_chunks = Vec::new();
+    if let Some(spec) = req.specification.as_deref() {
+        let trimmed = spec.trim();
+        if !trimmed.is_empty() {
+            extra_spec_chunks.push(trimmed.to_string());
+        }
+    } else if !idea.analysis.trim().is_empty() {
+        extra_spec_chunks.push(idea.analysis.clone());
+    }
+
+    let ai_expert = {
+        let cfg = s.config.read().unwrap_or_else(|e| e.into_inner());
+        if cfg.ai_expert_channel_ready() {
+            Some(cfg.ai_client_expert())
+        } else {
+            None
+        }
+    };
+
+    let report = crate::ai::claim_validator::validate_claims(
+        &idea.id,
+        &claims,
+        &extra_spec_chunks,
+        Some(&s.db),
+        ai_expert.as_ref(),
+    )
+    .await;
+
+    (StatusCode::OK, Json(json!(report))).into_response()
+}
+
 /// GET /api/idea/:id/versions — 列出版本历史
 pub async fn api_idea_versions(
     State(s): State<AppState>,
