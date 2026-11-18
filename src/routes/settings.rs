@@ -1505,3 +1505,88 @@ mod ai_settings_charset_tests {
         assert_eq!(400, err.0.as_u16());
     }
 }
+
+/// POST /api/backup/export — 使用 SQLite `VACUUM INTO` 生成一致热备份并作为 `.db` 文件下载
+pub async fn api_backup_export(State(s): State<AppState>) -> axum::response::Response {
+    use axum::http::{header, StatusCode};
+    use axum::response::IntoResponse;
+
+    let ts = chrono::Local::now().format("%Y%m%d-%H%M%S");
+    let filename = format!("innoforge-backup-{ts}.db");
+    let snap_path =
+        std::env::temp_dir().join(format!("innoforge-snap-{}.db", uuid::Uuid::new_v4()));
+
+    if let Err(e) = s.db.vacuum_into_backup(&snap_path) {
+        let _ = tokio::fs::remove_file(&snap_path).await;
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("数据库热备份失败: {e}"),
+        )
+            .into_response();
+    }
+
+    let read_res = tokio::fs::read(&snap_path).await;
+    let _ = tokio::fs::remove_file(&snap_path).await;
+
+    match read_res {
+        Ok(bytes) => (
+            StatusCode::OK,
+            [
+                (header::CONTENT_TYPE, "application/octet-stream".to_string()),
+                (
+                    header::CONTENT_DISPOSITION,
+                    format!("attachment; filename=\"{filename}\""),
+                ),
+            ],
+            bytes,
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("读取备份快照失败: {e}"),
+        )
+            .into_response(),
+    }
+}
+
+/// POST /api/backup/check — 校验指定备份路径或当前实时快照的 SQLite 文件头与 `schema_version`
+pub async fn api_backup_check(
+    State(s): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let custom_path = req["path"].as_str().unwrap_or("").trim();
+    if !custom_path.is_empty() {
+        return match crate::db::Database::verify_sqlite_backup(std::path::Path::new(custom_path)) {
+            Ok((ver, size)) => Json(json!({
+                "status": "ok",
+                "valid_sqlite": true,
+                "schema_version": ver,
+                "size_bytes": size
+            })),
+            Err(e) => Json(json!({
+                "status": "error",
+                "valid_sqlite": false,
+                "message": format!("备份校验失败: {e}")
+            })),
+        };
+    }
+
+    let snap = std::env::temp_dir().join(format!("innoforge-verify-{}.db", uuid::Uuid::new_v4()));
+    let res =
+        s.db.vacuum_into_backup(&snap)
+            .and_then(|_| crate::db::Database::verify_sqlite_backup(&snap));
+    let _ = std::fs::remove_file(&snap);
+    match res {
+        Ok((ver, size)) => Json(json!({
+            "status": "ok",
+            "valid_sqlite": true,
+            "schema_version": ver,
+            "size_bytes": size
+        })),
+        Err(e) => Json(json!({
+            "status": "error",
+            "valid_sqlite": false,
+            "message": format!("热备份自检失败: {e}")
+        })),
+    }
+}

@@ -247,6 +247,7 @@
                             <button class="report-type-btn" data-rtype="bom_pack" onclick="switchReportType('bom_pack')" data-i18n="idea.reportBomPack">工程 BOM 交付包</button>
                             <button class="report-type-btn" data-rtype="journal_draft" onclick="switchReportType('journal_draft')" data-i18n="idea.reportJournalDraft">期刊论文草稿</button>
                             <button class="report-type-btn" type="button" onclick="exportBomXlsx()" data-i18n="idea.exportBomXlsx">导出 Excel BOM 包</button>
+                            <button class="report-type-btn" type="button" onclick="exportProjectZip()" data-i18n="idea.exportProjectZip">一键导出完整项目包 (.zip)</button>
                         </div>
                     </div>
                     <div id="report-content" style="line-height:1.7; color:var(--text-secondary);"><p class="muted">完成推演后可查看报告</p></div>
@@ -2016,6 +2017,11 @@
     function exportBomXlsx() {
         if (!currentIdeaId) return;
         window.location.href = '/api/ideas/' + encodeURIComponent(currentIdeaId) + '/delivery-pack/xlsx';
+    }
+
+    function exportProjectZip() {
+        if (!currentIdeaId) return;
+        window.location.href = '/api/ideas/' + encodeURIComponent(currentIdeaId) + '/archive/zip';
     }
 
     var controlResponseChartInstance = null;

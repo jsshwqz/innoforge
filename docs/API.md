@@ -658,6 +658,17 @@ Response:
 
 对项目与同领域专利库执行全面覆盖/等同原则批量 FTO 扫描，区分有效授权/已失效状态并返回红/黄/绿碰撞清单与 3 套规避设计方案。
 
+### 8) 一键导出全项目 5 目录归档包 / Export Full Project ZIP Archive
+
+**GET** `/api/ideas/:id/archive/zip`
+
+全内存流打包项目 5 个标准工程目录（调研与 FTO、CAD 与结构、控制与仿真、BOM 与交付、专利与论文草稿）。
+
+### 9) SQLite 热备份导出与完整性校验 / SQLite Hot Backup & Check
+
+- **POST** `/api/backup/export`：基于 `VACUUM INTO` 生成一致 `.db` 热备份快照下载。
+- **POST** `/api/backup/check`：校验备份文件 SQLite 3 文件头与 `schema_version` 完整性。
+
 Response:
 
 ```json
