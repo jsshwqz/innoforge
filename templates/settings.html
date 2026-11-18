@@ -1383,7 +1383,7 @@
                             setTimeout(function() { btn.textContent = '\ud83d\udd0d 查询可用模型'; btn.style.color = ''; }, 3000);
                         }
                     } else {
-                        fallbackToProviderPresets(selectedProvider, '无可用模型');
+                        fallbackToProviderPresets(selectedProvider, { value: '', label: '无可用模型' });
                         showCustomManualFallback('探测无结果：可手动输入模型名（下拉选「自定义模型...」）');
                         if (isManual) {
                             btn.textContent = '\u274c 无可用模型（自定义网关请确认 Base URL 可达）';
@@ -1392,7 +1392,7 @@
                         }
                     }
                 } else {
-                    fallbackToProviderPresets(selectedProvider, '查询失败');
+                    fallbackToProviderPresets(selectedProvider, { value: '', label: '查询失败' });
                     showCustomManualFallback('探测失败：可手动输入模型名（下拉选「自定义模型...」）');
                     if (isManual) {
                         btn.textContent = '\u274c ' + (data.message || '查询失败');
@@ -1401,7 +1401,7 @@
                     }
                 }
             } catch(e) {
-                fallbackToProviderPresets(selectedProvider, '网络错误');
+                fallbackToProviderPresets(selectedProvider, { value: '', label: '网络错误' });
                 showCustomManualFallback('网络错误：可手动输入模型名（下拉选「自定义模型...」）');
                 if (isManual) {
                     btn.textContent = '\u274c 网络错误';
@@ -1411,7 +1411,7 @@
                 if (btn && isManual) btn.disabled = false;
             }
 
-            function fallbackToProviderPresets(provKey, emptyLabel) {
+            function fallbackToProviderPresets(provKey, emptyOpt) {
                 var prov = AI_PROVIDERS[provKey];
                 if (prov && prov.models && prov.models.length > 0) {
                     var curM = document.getElementById('ai-model').value;
@@ -1422,8 +1422,8 @@
                     var hintEl = document.getElementById('ai-model-hint');
                     if (hintEl) hintEl.textContent = '当前展示预设推荐模型（填写 API Key 后可实时查询账户可用模型）';
                 } else {
-                    populateSelect('ai-model', [{ value: '', label: emptyLabel }], '');
-                    populateSelect('ai-model-expert', [{ value: '', label: emptyLabel }], '');
+                    populateSelect('ai-model', [emptyOpt], '');
+                    populateSelect('ai-model-expert', [emptyOpt], '');
                 }
             }
 
