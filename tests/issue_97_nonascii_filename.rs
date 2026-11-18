@@ -16,7 +16,8 @@
 //! "文件编码不支持" again, and these assertions will fail.
 
 mod common;
-use common::{free_port, spawn_test_server};
+use common::spawn_test_server_on_free_port;
+use common::sync_http;
 
 /// Minimal one-page PDF with extractable text.
 /// Built by hand — no external tools needed.
@@ -55,14 +56,14 @@ fn random_binary() -> Vec<u8> {
 
 /// Upload a file with a given filename to /api/upload/extract.
 fn upload_extract(
-    client: &reqwest::blocking::Client,
+    client: &sync_http::Client,
     port: u16,
     filename: &str,
     content: &[u8],
 ) -> serde_json::Value {
-    let form = reqwest::blocking::multipart::Form::new().part(
+    let form = sync_http::multipart::Form::new().part(
         "file",
-        reqwest::blocking::multipart::Part::bytes(content.to_vec()).file_name(filename.to_string()),
+        sync_http::multipart::Part::bytes(content.to_vec()).file_name(filename.to_string()),
     );
     let resp = client
         .post(format!("http://127.0.0.1:{}/api/upload/extract", port))
@@ -78,9 +79,9 @@ fn upload_extract(
 /// (either succeed or fail with a PDF-specific error).
 #[test]
 fn issue_97_nonascii_filename_pdf_not_rejected_as_encoding() {
-    let port = free_port();
-    let server = spawn_test_server(port, &[]);
-    let client = reqwest::blocking::Client::new();
+    let server = spawn_test_server_on_free_port(&[]);
+    let port = server.port;
+    let client = sync_http::Client::new();
     let pdf = minimal_pdf();
 
     // Non-ASCII (Chinese) filename
@@ -143,9 +144,9 @@ fn issue_97_nonascii_filename_pdf_not_rejected_as_encoding() {
 /// unsupported).  The error must match the real cause.
 #[test]
 fn issue_97_random_binary_as_txt_must_say_unrecognised_type() {
-    let port = free_port();
-    let server = spawn_test_server(port, &[]);
-    let client = reqwest::blocking::Client::new();
+    let server = spawn_test_server_on_free_port(&[]);
+    let port = server.port;
+    let client = sync_http::Client::new();
     let bin = random_binary();
 
     let resp = upload_extract(&client, port, "data.txt", &bin);
@@ -173,9 +174,9 @@ fn issue_97_random_binary_as_txt_must_say_unrecognised_type() {
 /// explicitly rejected — but not with an encoding error.
 #[test]
 fn issue_97_pdf_magic_renamed_txt_must_not_say_encoding_error() {
-    let port = free_port();
-    let server = spawn_test_server(port, &[]);
-    let client = reqwest::blocking::Client::new();
+    let server = spawn_test_server_on_free_port(&[]);
+    let port = server.port;
+    let client = sync_http::Client::new();
     let pdf = minimal_pdf();
 
     // Upload a PDF with .txt extension — magic bytes should detect it as PDF

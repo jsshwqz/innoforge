@@ -7,6 +7,8 @@
 
 mod common;
 
+use common::sync_http;
+
 #[test]
 fn redirect_uri_contains_actual_listen_port() {
     // GOOGLE_CLIENT_ID 走 extra_env；端口由 OS 分配并经预留保护（issue #110）
@@ -17,7 +19,7 @@ fn redirect_uri_contains_actual_listen_port() {
     let port = server.port;
 
     // GET /api/auth/google/url and check redirect_uri
-    let resp = reqwest::blocking::get(format!("http://127.0.0.1:{}/api/auth/google/url", port))
+    let resp = sync_http::get(format!("http://127.0.0.1:{}/api/auth/google/url", port))
         .expect("failed to GET /api/auth/google/url");
 
     assert!(

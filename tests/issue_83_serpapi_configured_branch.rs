@@ -12,7 +12,9 @@
 
 mod common;
 
-use common::spawn_test_server;
+use common::sync_http;
+
+use common::spawn_test_server_on_free_port;
 use serde_json::Value;
 
 /// 在 attempts 数组中查找 serpapi 源的 Skipped 行且 error 含「未配置」。
@@ -35,7 +37,7 @@ fn has_unconfigured_serpapi_skip(attempts: &Value) -> bool {
 
 /// 发起一次 /api/search/online 请求，返回响应 JSON。
 fn search_online(port: u16) -> Value {
-    let client = reqwest::blocking::Client::builder()
+    let client = sync_http::Client::builder()
         .timeout(std::time::Duration::from_secs(90))
         .build()
         .expect("build reqwest client");
@@ -67,8 +69,8 @@ fn search_online(port: u16) -> Value {
 /// has_unconfigured_serpapi_skip 返回 false → assert 失败 → 红。
 #[test]
 fn unconfigured_key_prepends_skipped_attempt() {
-    let port = common::free_port();
-    let server = spawn_test_server(port, &[]);
+    let server = spawn_test_server_on_free_port(&[]);
+    let port = server.port;
 
     let body = search_online(port);
     let attempts = &body["attempts"];
@@ -91,15 +93,12 @@ fn unconfigured_key_prepends_skipped_attempt() {
 /// has_unconfigured_serpapi_skip 返回 true → assert 失败 → 红。
 #[test]
 fn configured_key_does_not_prepend_skipped_attempt() {
-    let port = common::free_port();
-    let server = spawn_test_server(
-        port,
-        &[
-            ("SERPAPI_KEY", "test-key-not-real-0123456789abcdef"),
-            // 死端口：连接立即被拒，SerpAPI 记 Failed 而非 Skipped
-            ("SERPAPI_BASE_URL", "http://127.0.0.1:1/search.json"),
-        ],
-    );
+    let server = spawn_test_server_on_free_port(&[
+        ("SERPAPI_KEY", "test-key-not-real-0123456789abcdef"),
+        // 死端口：连接立即被拒，SerpAPI 记 Failed 而非 Skipped
+        ("SERPAPI_BASE_URL", "http://127.0.0.1:1/search.json"),
+    ]);
+    let port = server.port;
 
     let body = search_online(port);
     let attempts = &body["attempts"];

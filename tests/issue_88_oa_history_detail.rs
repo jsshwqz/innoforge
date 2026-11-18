@@ -11,7 +11,9 @@
 
 mod common;
 
-use common::{free_port, spawn_test_server};
+use common::sync_http;
+
+use common::{free_port, spawn_test_server_on_free_port};
 use rusqlite::params;
 
 /// Insert a test OA analysis record directly into the server's SQLite DB.
@@ -38,17 +40,14 @@ fn insert_test_oa_analysis(db_path: &str) -> i64 {
 
 #[test]
 fn detail_returns_single_record_for_existing_id() {
-    let server_port = free_port();
     let ai_port = free_port();
     let ai_url = format!("http://127.0.0.1:{}", ai_port);
 
-    let server = spawn_test_server(
-        server_port,
-        &[
-            ("AI_BASE_URL", &ai_url),
-            ("AI_API_KEY", "test-key-not-real"),
-        ],
-    );
+    let server = spawn_test_server_on_free_port(&[
+        ("AI_BASE_URL", &ai_url),
+        ("AI_API_KEY", "test-key-not-real"),
+    ]);
+    let server_port = server.port;
 
     // Insert a record directly into the server's DB
     let db_path = server
@@ -67,7 +66,7 @@ fn detail_returns_single_record_for_existing_id() {
         "http://127.0.0.1:{}/api/oa/history/detail/{}",
         server_port, record_id
     );
-    let resp = reqwest::blocking::get(&url).expect("GET detail");
+    let resp = sync_http::get(&url).expect("GET detail");
     assert!(
         resp.status().is_success(),
         "detail endpoint should return 2xx for existing id"
@@ -106,17 +105,14 @@ fn detail_returns_single_record_for_existing_id() {
 
 #[test]
 fn detail_returns_not_found_for_nonexistent_id() {
-    let server_port = free_port();
     let ai_port = free_port();
     let ai_url = format!("http://127.0.0.1:{}", ai_port);
 
-    let server = spawn_test_server(
-        server_port,
-        &[
-            ("AI_BASE_URL", &ai_url),
-            ("AI_API_KEY", "test-key-not-real"),
-        ],
-    );
+    let server = spawn_test_server_on_free_port(&[
+        ("AI_BASE_URL", &ai_url),
+        ("AI_API_KEY", "test-key-not-real"),
+    ]);
+    let server_port = server.port;
 
     // Insert one record so the DB is not empty — the negative test must still
     // NOT return this record (or any list) for a non-existent id.
@@ -137,7 +133,7 @@ fn detail_returns_not_found_for_nonexistent_id() {
         "http://127.0.0.1:{}/api/oa/history/detail/{}",
         server_port, nonexistent_id
     );
-    let resp = reqwest::blocking::get(&url).expect("GET detail nonexistent");
+    let resp = sync_http::get(&url).expect("GET detail nonexistent");
     let body_text = resp.text().unwrap();
     let body: serde_json::Value = serde_json::from_str(&body_text).unwrap();
 

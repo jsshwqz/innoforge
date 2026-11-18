@@ -13,7 +13,6 @@
 //! - Neg-B: stub returns out-of-bounds score (87) → flagged as out_of_bounds.
 
 mod common;
-use common::{free_port, spawn_test_server};
 use std::net::TcpListener;
 
 /// In-process stub server that responds to POST /v1/chat/completions with a
@@ -76,7 +75,7 @@ fn spawn_ai_stub(content: &str) -> StubAiServer {
     }
 }
 
-fn call_quality_score(client: &reqwest::blocking::Client, port: u16) -> serde_json::Value {
+fn call_quality_score(client: &common::sync_http::Client, port: u16) -> serde_json::Value {
     let body = serde_json::json!({
         "response_text": "本申请通过修改权利要求1，增加了特征限定...",
         "oa_text": "审查员指出权利要求1相对于D1不具备创造性...",
@@ -114,15 +113,12 @@ const VALID_OUTPUT: &str = r#"{
 #[test]
 fn issue_100_valid_output_parsed_to_numeric_score() {
     let stub = spawn_ai_stub(VALID_OUTPUT);
-    let port = free_port();
-    let server = spawn_test_server(
-        port,
-        &[
-            ("AI_BASE_URL", &format!("http://127.0.0.1:{}/v1", stub.port)),
-            ("AI_API_KEY", "test-key"),
-        ],
-    );
-    let client = reqwest::blocking::Client::new();
+    let server = common::spawn_test_server_on_free_port(&[
+        ("AI_BASE_URL", &format!("http://127.0.0.1:{}/v1", stub.port)),
+        ("AI_API_KEY", "test-key"),
+    ]);
+    let port = server.port;
+    let client = common::sync_http::Client::new();
 
     let resp = call_quality_score(&client, port);
 
@@ -168,15 +164,12 @@ fn issue_100_valid_output_parsed_to_numeric_score() {
 #[test]
 fn issue_100_free_text_must_return_parsed_false() {
     let stub = spawn_ai_stub("This is a qualitative assessment without any numeric scores. The response is generally good but could be improved in several areas.");
-    let port = free_port();
-    let server = spawn_test_server(
-        port,
-        &[
-            ("AI_BASE_URL", &format!("http://127.0.0.1:{}/v1", stub.port)),
-            ("AI_API_KEY", "test-key"),
-        ],
-    );
-    let client = reqwest::blocking::Client::new();
+    let server = common::spawn_test_server_on_free_port(&[
+        ("AI_BASE_URL", &format!("http://127.0.0.1:{}/v1", stub.port)),
+        ("AI_API_KEY", "test-key"),
+    ]);
+    let port = server.port;
+    let client = common::sync_http::Client::new();
 
     let resp = call_quality_score(&client, port);
 
@@ -232,15 +225,12 @@ fn issue_100_out_of_bounds_score_must_be_flagged() {
 }"#;
 
     let stub = spawn_ai_stub(out_of_bounds_output);
-    let port = free_port();
-    let server = spawn_test_server(
-        port,
-        &[
-            ("AI_BASE_URL", &format!("http://127.0.0.1:{}/v1", stub.port)),
-            ("AI_API_KEY", "test-key"),
-        ],
-    );
-    let client = reqwest::blocking::Client::new();
+    let server = common::spawn_test_server_on_free_port(&[
+        ("AI_BASE_URL", &format!("http://127.0.0.1:{}/v1", stub.port)),
+        ("AI_API_KEY", "test-key"),
+    ]);
+    let port = server.port;
+    let client = common::sync_http::Client::new();
 
     let resp = call_quality_score(&client, port);
 

@@ -47,16 +47,16 @@ fn parse_routes_from(src: &str) -> HashSet<(String, String)> {
 #[test]
 fn parser_handles_method_word_inside_path_and_multi_method_routes() {
     let src = r#"
-        .route("/api/x/:id/delete", post(h1))
+        .route("/api/x/{id}/delete", post(h1))
         .route("/api/collections", get(h2).post(h3))
     "#;
     let routes = parse_routes_from(src);
     assert!(
-        routes.contains(&("POST".to_string(), "/api/x/:id/delete".to_string())),
+        routes.contains(&("POST".to_string(), "/api/x/{id}/delete".to_string())),
         "路径中的 delete 不能被当成方法：{routes:?}"
     );
     assert!(
-        !routes.contains(&("DELETE".to_string(), "/api/x/:id/delete".to_string())),
+        !routes.contains(&("DELETE".to_string(), "/api/x/{id}/delete".to_string())),
         "不应凭空产生 DELETE 方法：{routes:?}"
     );
     assert!(routes.contains(&("GET".to_string(), "/api/collections".to_string())));

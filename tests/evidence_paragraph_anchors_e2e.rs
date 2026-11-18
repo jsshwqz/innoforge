@@ -100,17 +100,11 @@ fn start_stub() -> u16 {
 
 fn spawn_with_stub() -> (u16, common::TestServer) {
     let stub_port = start_stub();
-    let app_port = common::free_port();
-    let s = common::spawn_test_server_with_timeout(
-        app_port,
-        60,
-        tempfile::tempdir().expect("dir"),
-        &[
-            ("AI_BASE_URL", &format!("http://127.0.0.1:{stub_port}/v1")),
-            ("AI_API_KEY", "stub-key"),
-        ],
-    );
-    (app_port, s)
+    let s = common::spawn_test_server_on_free_port(&[
+        ("AI_BASE_URL", &format!("http://127.0.0.1:{stub_port}/v1")),
+        ("AI_API_KEY", "stub-key"),
+    ]);
+    (s.port, s)
 }
 
 fn request_body() -> serde_json::Value {
@@ -139,7 +133,7 @@ fn request_body() -> serde_json::Value {
 #[test]
 fn collected_evidence_carries_verified_paragraph_anchors() {
     let (port, _s) = spawn_with_stub();
-    let client = reqwest::blocking::Client::builder()
+    let client = common::sync_http::Client::builder()
         .timeout(std::time::Duration::from_secs(90))
         .build()
         .expect("client");

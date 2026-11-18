@@ -51,13 +51,15 @@ async fn main() -> anyhow::Result<()> {
     let configured_port = std::env::var("INNOFORGE_PORT")
         .ok()
         .and_then(|v| v.parse::<u16>().ok());
-    let mut server = None;
+    let mut bound = None;
     let mut last_bind_error = None;
     for candidate in bind_candidate_ports(configured_port) {
         let candidate_addr = SocketAddr::from(([0, 0, 0, 0], candidate));
-        match axum::Server::try_bind(&candidate_addr) {
-            Ok(bound_server) => {
-                server = Some((candidate, candidate_addr, bound_server));
+        match tokio::net::TcpListener::bind(candidate_addr).await {
+            Ok(listener) => {
+                let local_addr = listener.local_addr()?;
+                let port = local_addr.port();
+                bound = Some((port, local_addr, listener));
                 break;
             }
             Err(e) => {
@@ -72,8 +74,8 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     }
-    let (port, addr, server) = match server {
-        Some(server) => server,
+    let (port, addr, listener) = match bound {
+        Some(bound) => bound,
         None => {
             if let Some(e) = last_bind_error {
                 return Err(e.into());
@@ -112,6 +114,11 @@ async fn main() -> anyhow::Result<()> {
         env!("CARGO_PKG_VERSION")
     );
     println!("Local access: http://127.0.0.1:{port}");
+    println!("INNOFORGE_BOUND_PORT={port}");
+    {
+        use std::io::Write;
+        let _ = std::io::stdout().flush();
+    }
 
     // 自动打开浏览器（设置 INNOFORGE_NO_OPEN 可禁用）
     if std::env::var("INNOFORGE_NO_OPEN").is_err() {
@@ -127,7 +134,7 @@ async fn main() -> anyhow::Result<()> {
         println!("Mobile access: http://{}:{port}", local_ip);
     }
 
-    server.serve(app.into_make_service()).await?;
+    axum::serve(listener, app).await?;
     Ok(())
 }
 

@@ -27,7 +27,8 @@
 //! differently, which would mask the real failure mode.
 
 mod common;
-use common::{free_port, spawn_test_server};
+use common::spawn_test_server_on_free_port;
+use common::sync_http;
 
 /// Synthetic PDF with >100 chars of extractable text so the handler returns
 /// `file_type` in the response body (the PDF branch only emits `file_type`
@@ -65,7 +66,7 @@ trailer\n<< /Root 1 0 R /Size 6 >>\nstartxref\n0\n%%EOF\n",
 /// Content-Disposition header.  This gives us full control over which
 /// filename parameters are present (filename, filename*, or neither).
 fn raw_multipart_upload(
-    client: &reqwest::blocking::Client,
+    client: &sync_http::Client,
     port: u16,
     content_disposition: &str,
     file_bytes: &[u8],
@@ -107,9 +108,9 @@ fn raw_multipart_upload(
 /// content as PDF by magic bytes and enters the PDF branch.
 #[test]
 fn issue_97_filename_star_only_not_rejected_as_encoding() {
-    let port = free_port();
-    let server = spawn_test_server(port, &[]);
-    let client = reqwest::blocking::Client::new();
+    let server = spawn_test_server_on_free_port(&[]);
+    let port = server.port;
+    let client = sync_http::Client::new();
     let pdf = synthetic_pdf();
 
     // "测试文档.pdf" percent-encoded as UTF-8:
@@ -154,9 +155,9 @@ fn issue_97_filename_star_only_not_rejected_as_encoding() {
 /// With the fix, magic bytes detect the content as PDF.
 #[test]
 fn issue_97_no_filename_at_all_not_rejected_as_encoding() {
-    let port = free_port();
-    let server = spawn_test_server(port, &[]);
-    let client = reqwest::blocking::Client::new();
+    let server = spawn_test_server_on_free_port(&[]);
+    let port = server.port;
+    let client = sync_http::Client::new();
     let pdf = synthetic_pdf();
 
     // Content-Disposition with only name="file", no filename parameter.

@@ -20,7 +20,6 @@
 //!    success and failure paths.  Only headless; no visible browser test.
 
 mod common;
-use common::{free_port, spawn_test_server};
 use std::collections::HashSet;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -396,7 +395,7 @@ const VALID_OUTPUT: &str = r#"{
   "total": 8.0, "grade": "B", "weaknesses": "证据引用可更充分", "suggestions": "增加引用", "detail": "", "not_applicable": []
 }"#;
 
-fn call_quality_score(client: &reqwest::blocking::Client, port: u16) -> serde_json::Value {
+fn call_quality_score(client: &common::sync_http::Client, port: u16) -> serde_json::Value {
     let body = serde_json::json!({
         "response_text": "本申请通过修改权利要求1，增加了特征限定...",
         "oa_text": "审查员指出权利要求1相对于D1不具备创造性...",
@@ -416,15 +415,12 @@ fn call_quality_score(client: &reqwest::blocking::Client, port: u16) -> serde_js
 #[test]
 fn issue_106_e2e_success_path() {
     let stub = InProcessStub::new(VALID_OUTPUT);
-    let port = free_port();
-    let server = spawn_test_server(
-        port,
-        &[
-            ("AI_BASE_URL", &format!("http://127.0.0.1:{}/v1", stub.port)),
-            ("AI_API_KEY", "test-key"),
-        ],
-    );
-    let client = reqwest::blocking::Client::new();
+    let server = common::spawn_test_server_on_free_port(&[
+        ("AI_BASE_URL", &format!("http://127.0.0.1:{}/v1", stub.port)),
+        ("AI_API_KEY", "test-key"),
+    ]);
+    let port = server.port;
+    let client = common::sync_http::Client::new();
     let resp = call_quality_score(&client, port);
 
     assert_eq!(
@@ -458,15 +454,12 @@ fn issue_106_e2e_success_path() {
 #[test]
 fn issue_106_e2e_failure_path() {
     let stub = InProcessStub::new("This is free text without any JSON structure.");
-    let port = free_port();
-    let server = spawn_test_server(
-        port,
-        &[
-            ("AI_BASE_URL", &format!("http://127.0.0.1:{}/v1", stub.port)),
-            ("AI_API_KEY", "test-key"),
-        ],
-    );
-    let client = reqwest::blocking::Client::new();
+    let server = common::spawn_test_server_on_free_port(&[
+        ("AI_BASE_URL", &format!("http://127.0.0.1:{}/v1", stub.port)),
+        ("AI_API_KEY", "test-key"),
+    ]);
+    let port = server.port;
+    let client = common::sync_http::Client::new();
     let resp = call_quality_score(&client, port);
 
     assert_eq!(

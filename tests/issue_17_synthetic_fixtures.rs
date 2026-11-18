@@ -14,8 +14,6 @@
 //! readiness polling (every 200ms, 60s cap). No fixed sleep for server startup.
 
 mod common;
-
-use common::{free_port, spawn_test_server};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 
@@ -64,19 +62,16 @@ fn fixture_json() -> String {
 }
 
 /// Helper: spawn a test server with AI pointing at `ai_port`.
-fn start_server(server_port: u16, ai_port: u16) -> common::TestServer {
+fn start_server(ai_port: u16) -> common::TestServer {
     let ai_url = format!("http://127.0.0.1:{}", ai_port);
-    spawn_test_server(
-        server_port,
-        &[
-            ("AI_BASE_URL", &ai_url),
-            ("AI_API_KEY", "test-key-not-real"),
-        ],
-    )
+    common::spawn_test_server_on_free_port(&[
+        ("AI_BASE_URL", &ai_url),
+        ("AI_API_KEY", "test-key-not-real"),
+    ])
 }
 
 fn inject_fixture(port: u16) -> bool {
-    let client = reqwest::blocking::Client::new();
+    let client = common::sync_http::Client::new();
     let resp = client
         .post(format!("http://127.0.0.1:{}/api/patents/import", port))
         .header("Content-Type", "application/json")
@@ -90,7 +85,7 @@ fn inject_fixture(port: u16) -> bool {
 
 fn count_buttons(port: u16, path: &str) -> Option<usize> {
     let url = format!("http://127.0.0.1:{}{}", port, path);
-    let resp = reqwest::blocking::get(&url).ok()?;
+    let resp = common::sync_http::get(&url).ok()?;
     if !resp.status().is_success() {
         return None;
     }
@@ -100,7 +95,7 @@ fn count_buttons(port: u16, path: &str) -> Option<usize> {
 
 fn check_http_200(port: u16, path: &str) -> bool {
     let url = format!("http://127.0.0.1:{}{}", port, path);
-    reqwest::blocking::get(&url)
+    common::sync_http::get(&url)
         .map(|r| r.status().is_success())
         .unwrap_or(false)
 }
@@ -149,11 +144,10 @@ fn fixture_is_marked_synthetic() {
 
 #[test]
 fn patent_detail_page_has_22_plus_buttons() {
-    let server_port = free_port();
-
     let (ai_port, _stub) = start_fake_ai_stub();
 
-    let server = start_server(server_port, ai_port);
+    let server = start_server(ai_port);
+    let server_port = server.port;
     assert!(
         inject_fixture(server_port),
         "Fixture injection must succeed"
@@ -186,7 +180,7 @@ fn patent_detail_page_has_22_plus_buttons() {
     // Coupling to runtime HEAD causes false reds when a commit lands between
     // build and test run (issue 109).
     let version_json =
-        reqwest::blocking::get(format!("http://127.0.0.1:{}/api/version", server_port))
+        common::sync_http::get(format!("http://127.0.0.1:{}/api/version", server_port))
             .unwrap()
             .text()
             .unwrap();
@@ -228,10 +222,10 @@ fn patent_detail_page_has_22_plus_buttons() {
 
 #[test]
 fn broken_ai_stub_does_not_crash_server() {
-    let server_port = free_port();
     let dead_port: u16 = 59999;
 
-    let server = start_server(server_port, dead_port);
+    let server = start_server(dead_port);
+    let server_port = server.port;
     assert!(
         inject_fixture(server_port),
         "Fixture injection must succeed without AI"
@@ -244,7 +238,7 @@ fn broken_ai_stub_does_not_crash_server() {
     );
 
     // AI endpoint must return a controlled error, not crash
-    let client = reqwest::blocking::Client::new();
+    let client = common::sync_http::Client::new();
     let ai_resp = client
         .post(format!(
             "http://127.0.0.1:{}/api/ai/office-action-response",
@@ -301,26 +295,19 @@ fn two_test_cases_resolve_different_db_path() {
 
     // Spin up two servers with different INNOFORGE_HOME and verify they
     // don't interfere. Each should start independently and serve its own db.
-    let port_a = free_port();
-    let port_b = free_port();
-
     let (ai_port, _stub) = start_fake_ai_stub();
 
     let ai_url = format!("http://127.0.0.1:{}", ai_port);
-    let server_a = spawn_test_server(
-        port_a,
-        &[
-            ("AI_BASE_URL", &ai_url),
-            ("AI_API_KEY", "test-key-not-real"),
-        ],
-    );
-    let server_b = spawn_test_server(
-        port_b,
-        &[
-            ("AI_BASE_URL", &ai_url),
-            ("AI_API_KEY", "test-key-not-real"),
-        ],
-    );
+    let server_a = common::spawn_test_server_on_free_port(&[
+        ("AI_BASE_URL", &ai_url),
+        ("AI_API_KEY", "test-key-not-real"),
+    ]);
+    let port_a = server_a.port;
+    let server_b = common::spawn_test_server_on_free_port(&[
+        ("AI_BASE_URL", &ai_url),
+        ("AI_API_KEY", "test-key-not-real"),
+    ]);
+    let port_b = server_b.port;
 
     // Both servers should be serving independently.
     assert!(

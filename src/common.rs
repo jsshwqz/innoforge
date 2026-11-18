@@ -380,7 +380,7 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
         // 页面路由 / Page routes
         .route("/", get(routes::index_page))
         .route("/search", get(routes::search_page))
-        .route("/patent/:id", get(routes::patent_detail_page))
+        .route("/patent/{id}", get(routes::patent_detail_page))
         .route("/ai", get(routes::ai_page))
         .route("/compare", get(routes::compare_page))
         .route("/idea", get(routes::idea_page))
@@ -392,11 +392,11 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
         .route("/api/cad/draw", post(routes::api_cad_draw))
         .route("/api/cad/artifacts", get(routes::api_cad_artifacts))
         .route(
-            "/api/cad/artifacts/:id/preview",
+            "/api/cad/artifacts/{id}/preview",
             get(routes::api_cad_preview),
         )
         .route(
-            "/api/cad/artifacts/:id/download/:format",
+            "/api/cad/artifacts/{id}/download/{format}",
             get(routes::api_cad_download),
         )
         // 设置 API / Settings API
@@ -423,13 +423,16 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
             get(routes::api_serpapi_balance),
         )
         // 聊天记录 API / Chat Records API
-        .route("/api/chat/:session_key", get(routes::api_chat_get_messages))
         .route(
-            "/api/chat/:session_key/save",
+            "/api/chat/{session_key}",
+            get(routes::api_chat_get_messages),
+        )
+        .route(
+            "/api/chat/{session_key}/save",
             post(routes::api_chat_save_message),
         )
         .route(
-            "/api/chat/:session_key/delete",
+            "/api/chat/{session_key}/delete",
             post(routes::api_chat_delete_messages),
         )
         // 搜索 API / Search API
@@ -442,12 +445,12 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
         .route("/api/search/analyze", post(routes::api_ai_analyze_results))
         // 专利 API / Patent API
         .route("/api/patent/fetch", post(routes::api_fetch_patent))
-        .route("/api/patent/enrich/:id", get(routes::api_enrich_patent))
+        .route("/api/patent/enrich/{id}", get(routes::api_enrich_patent))
         .route(
-            "/api/patent/enrich-free/:id",
+            "/api/patent/enrich-free/{id}",
             get(routes::api_enrich_patent_free),
         )
-        .route("/api/patent/pdf/:id", get(routes::api_patent_pdf))
+        .route("/api/patent/pdf/{id}", get(routes::api_patent_pdf))
         .route(
             "/api/patent/pdf/extract-text",
             post(routes::api_patent_pdf_extract_text),
@@ -456,7 +459,10 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
             "/api/patent/image-proxy",
             get(routes::api_patent_image_proxy),
         )
-        .route("/api/patent/lookup/:number", get(routes::api_patent_lookup))
+        .route(
+            "/api/patent/lookup/{number}",
+            get(routes::api_patent_lookup),
+        )
         .route(
             "/api/patent/lookup-or-fetch",
             post(routes::api_patent_lookup_and_fetch),
@@ -466,11 +472,11 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
             post(routes::api_resolve_chinese_titles),
         )
         .route(
-            "/api/patent/similar/:id",
+            "/api/patent/similar/{id}",
             get(routes::api_recommend_similar),
         )
         .route(
-            "/api/patent/:id/legal-status",
+            "/api/patent/{id}/legal-status",
             get(routes::api_patent_legal_status),
         )
         // AI 接口 / AI API
@@ -568,29 +574,29 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
         // OA 分析历史 API / OA History API
         .route("/api/oa/history/all", get(routes::api_oa_history_all))
         .route(
-            "/api/oa/history/:patent_number",
+            "/api/oa/history/{patent_number}",
             get(routes::api_oa_history),
         )
         .route(
-            "/api/oa/history/detail/:id",
+            "/api/oa/history/detail/{id}",
             get(routes::api_oa_history_detail),
         )
         .route(
-            "/api/oa/history/:id/delete",
+            "/api/oa/history/{id}/delete",
             post(routes::api_oa_history_delete),
         )
         // OA 一审-二审对比分析 / OA First-Second Examination Diff
         .route(
-            "/api/oa/history/:patent_number/diff",
+            "/api/oa/history/{patent_number}/diff",
             get(routes::api_oa_history_diff),
         )
         // OA 讨论会话列表与详情 / OA Discussion Sessions API
         .route(
-            "/api/oa/discussions/:patent_number",
+            "/api/oa/discussions/{patent_number}",
             get(routes::api_oa_discussion_list),
         )
         .route(
-            "/api/oa/discussions/:patent_number/:discussion_id",
+            "/api/oa/discussions/{patent_number}/{discussion_id}",
             get(routes::api_oa_discussion_get),
         )
         .route(
@@ -605,17 +611,17 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
             post(routes::oa_export::api_oa_export_post),
         )
         .route(
-            "/api/oa/export/:filename",
+            "/api/oa/export/{filename}",
             get(routes::oa_export::api_oa_export_get),
         )
         // OA 轮次追踪 / OA Round Workflow Tracking
-        .route("/api/oa/rounds/:patent_id", get(routes::api_oa_rounds_get))
+        .route("/api/oa/rounds/{patent_id}", get(routes::api_oa_rounds_get))
         .route("/api/oa/rounds", post(routes::api_oa_rounds_create))
         .route(
-            "/api/oa/rounds/update/:id",
+            "/api/oa/rounds/update/{id}",
             put(routes::api_oa_rounds_update),
         )
-        .route("/api/oa/timeline/:patent_id", get(routes::api_oa_timeline))
+        .route("/api/oa/timeline/{patent_id}", get(routes::api_oa_timeline))
         .route(
             "/api/ai/check-amendments",
             post(routes::api_ai_check_amendments),
@@ -638,43 +644,43 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
             post(routes::api_ideas_batch_compare),
         )
         .route("/api/idea/list", get(routes::api_idea_list))
-        .route("/api/idea/:id", get(routes::api_idea_get))
-        .route("/api/idea/:id/delete", post(routes::api_idea_delete))
-        .route("/api/idea/:id/progress", get(routes::api_idea_progress))
-        .route("/api/idea/:id/resume", post(routes::api_idea_resume))
+        .route("/api/idea/{id}", get(routes::api_idea_get))
+        .route("/api/idea/{id}/delete", post(routes::api_idea_delete))
+        .route("/api/idea/{id}/progress", get(routes::api_idea_progress))
+        .route("/api/idea/{id}/resume", post(routes::api_idea_resume))
         .route(
-            "/api/idea/:id/research-state",
+            "/api/idea/{id}/research-state",
             get(routes::api_idea_research_state).post(routes::api_idea_research_state_update),
         )
-        .route("/api/idea/:id/redirect", post(routes::api_idea_redirect))
-        .route("/api/idea/:id/report", get(routes::api_idea_report))
+        .route("/api/idea/{id}/redirect", post(routes::api_idea_redirect))
+        .route("/api/idea/{id}/report", get(routes::api_idea_report))
         .route(
-            "/api/idea/:id/report.html",
+            "/api/idea/{id}/report.html",
             get(routes::api_idea_report_html),
         )
         .route("/api/ai/models", get(routes::list_ai_models))
-        .route("/api/idea/:id/chat", post(routes::api_idea_chat))
-        .route("/api/idea/:id/evidence", get(routes::api_idea_evidence))
+        .route("/api/idea/{id}/chat", post(routes::api_idea_chat))
+        .route("/api/idea/{id}/evidence", get(routes::api_idea_evidence))
         .route(
-            "/api/idea/:id/kernel-report",
+            "/api/idea/{id}/kernel-report",
             get(routes::api_idea_kernel_report),
         )
-        .route("/api/idea/:id/messages", get(routes::api_idea_messages))
+        .route("/api/idea/{id}/messages", get(routes::api_idea_messages))
         .route(
-            "/api/idea/:id/chat/conclusions",
+            "/api/idea/{id}/chat/conclusions",
             get(routes::api_idea_chat_conclusions),
         )
         .route(
-            "/api/idea/:id/chat/conversation",
+            "/api/idea/{id}/chat/conversation",
             get(routes::api_idea_chat_conversation),
         )
         .route(
-            "/api/idea/:id/summarize",
+            "/api/idea/{id}/summarize",
             post(routes::api_idea_summarize_discussion),
         )
         // 特征卡片 API / Feature cards API
         .route(
-            "/api/ideas/:id/feature-cards",
+            "/api/ideas/{id}/feature-cards",
             get(routes::api_get_feature_cards).post(routes::api_create_feature_card),
         )
         .route(
@@ -682,23 +688,26 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
             get(routes::api_feature_card_diff),
         )
         // 版本管理 + 迭代 API
-        .route("/api/idea/:id/claim-tree", get(routes::api_idea_claim_tree))
-        .route("/api/idea/:id/iterate", post(routes::api_idea_iterate))
-        .route("/api/idea/:id/versions", get(routes::api_idea_versions))
-        .route("/api/idea/:id/branches", get(routes::api_idea_branches))
-        .route("/api/idea/:id/findings", get(routes::api_idea_findings))
+        .route(
+            "/api/idea/{id}/claim-tree",
+            get(routes::api_idea_claim_tree),
+        )
+        .route("/api/idea/{id}/iterate", post(routes::api_idea_iterate))
+        .route("/api/idea/{id}/versions", get(routes::api_idea_versions))
+        .route("/api/idea/{id}/branches", get(routes::api_idea_branches))
+        .route("/api/idea/{id}/findings", get(routes::api_idea_findings))
         // 记忆 API / Memory API
         .route(
-            "/api/idea/:id/memory",
+            "/api/idea/{id}/memory",
             get(routes::api_idea_memory).post(routes::api_idea_memory_add),
         )
         .route(
-            "/api/idea/:id/memory/:entry_id",
+            "/api/idea/{id}/memory/{entry_id}",
             delete(routes::api_idea_memory_delete),
         )
         // IPC 分类 API
         .route("/api/ipc/tree", get(routes::api_ipc_tree))
-        .route("/api/ipc/:code/patents", get(routes::api_ipc_patents))
+        .route("/api/ipc/{code}/patents", get(routes::api_ipc_patents))
         // 导入 API
         .route("/api/patents/import", post(routes::api_import_patents))
         // 收藏夹 API
@@ -707,32 +716,32 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
             get(routes::api_list_collections).post(routes::api_create_collection),
         )
         .route(
-            "/api/collections/:id",
+            "/api/collections/{id}",
             axum::routing::delete(routes::api_delete_collection),
         )
         .route(
-            "/api/collections/:id/patents",
+            "/api/collections/{id}/patents",
             get(routes::api_get_collection_patents),
         )
         .route(
-            "/api/collections/:id/add",
+            "/api/collections/{id}/add",
             post(routes::api_add_to_collection),
         )
         .route(
-            "/api/collections/:id/remove/:patent_id",
+            "/api/collections/{id}/remove/{patent_id}",
             axum::routing::delete(routes::api_remove_from_collection),
         )
         // 标签 API
         .route(
-            "/api/patents/:id/tags",
+            "/api/patents/{id}/tags",
             get(routes::api_get_patent_tags).post(routes::api_add_tag),
         )
         .route(
-            "/api/patents/:id/tags/:tag",
+            "/api/patents/{id}/tags/{tag}",
             axum::routing::delete(routes::api_remove_tag),
         )
         .route(
-            "/api/patents/:id/collections",
+            "/api/patents/{id}/collections",
             get(routes::api_get_patent_collections),
         )
         .route("/api/tags", get(routes::api_list_all_tags))
@@ -743,7 +752,7 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
         // 上传文件静态服务
         .nest_service("/uploads", ServeDir::new("data/uploads"))
         // 静态资源
-        .route("/static/*path", get(serve_static_embedded))
+        .route("/static/{*path}", get(serve_static_embedded))
         // 中间件层
         .layer(DefaultBodyLimit::max(20 * 1024 * 1024))
         .layer(
@@ -767,6 +776,16 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
             HeaderValue::from_static("strict-origin-when-cross-origin"),
         ))
         .with_state(state)
+}
+
+/// 使用已绑定的 TcpListener 启动服务（供集成测试零竞态复用）
+pub async fn serve_with_listener(
+    listener: tokio::net::TcpListener,
+    state: crate::routes::AppState,
+) -> anyhow::Result<()> {
+    let app = build_router(state);
+    axum::serve(listener, app).await?;
+    Ok(())
 }
 
 // ============================================================================

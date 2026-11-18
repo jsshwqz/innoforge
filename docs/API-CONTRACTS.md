@@ -34,8 +34,8 @@
 | 2 | POST | `/api/cad/start` | — | — | — | JSON（未抽到顶层键） | `routes::api_cad_start` | `src/routes/cad.rs:45` |
 | 3 | POST | `/api/cad/draw` | — | `CadDrawRequest` | — | JSON CadDrawResponse | `routes::api_cad_draw` | `src/routes/cad.rs:49` |
 | 4 | GET | `/api/cad/artifacts` | — | — | `CadHistoryQuery` | JSON（§4） | `routes::api_cad_artifacts` | `src/routes/cad.rs:165` |
-| 5 | GET | `/api/cad/artifacts/:id/preview` | `id` | — | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_cad_preview` | `src/routes/cad.rs:189` |
-| 6 | GET | `/api/cad/artifacts/:id/download/:format` | `id`, `format` | — | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_cad_download` | `src/routes/cad.rs:197` |
+| 5 | GET | `/api/cad/artifacts/{id}/preview` | `id` | — | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_cad_preview` | `src/routes/cad.rs:189` |
+| 6 | GET | `/api/cad/artifacts/{id}/download/{format}` | `id`, `format` | — | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_cad_download` | `src/routes/cad.rs:197` |
 | 7 | GET | `/api/version` | — | — | — | JSON（§7） | `routes::api_get_version` | `src/routes/settings.rs:57` |
 | 8 | GET | `/api/oa/deadline-table` | — | — | — | JSON（§8） | `crate::oa_deadline::deadline_table` | `src/oa_deadline.rs:158` |
 | 9 | GET | `/api/oa/compute-deadline` | — | — | — | JSON（§9） | `crate::oa_deadline::compute_deadline_api` | `src/oa_deadline.rs:176` |
@@ -45,9 +45,9 @@
 | 13 | POST | `/api/settings/serpapi` | — | 任意 JSON（§13） | — | JSON（§13） | `routes::api_save_serpapi` | `src/routes/settings.rs:472` |
 | 14 | POST | `/api/settings/ai` | — | 任意 JSON（§14） | — | JSON（§14） | `routes::api_save_ai` | `src/routes/settings.rs:534` |
 | 15 | GET | `/api/settings/serpapi/balance` | — | — | — | JSON（§15） | `routes::api_serpapi_balance` | `src/routes/settings.rs:744` |
-| 16 | GET | `/api/chat/:session_key` | `session_key` | — | `ChatPagination` | JSON（§16） | `routes::api_chat_get_messages` | `src/routes/chat.rs:21` |
-| 17 | POST | `/api/chat/:session_key/save` | `session_key` | 任意 JSON（§17） | — | JSON（§17） | `routes::api_chat_save_message` | `src/routes/chat.rs:53` |
-| 18 | POST | `/api/chat/:session_key/delete` | `session_key` | — | — | JSON（§18） | `routes::api_chat_delete_messages` | `src/routes/chat.rs:90` |
+| 16 | GET | `/api/chat/{session_key}` | `session_key` | — | `ChatPagination` | JSON（§16） | `routes::api_chat_get_messages` | `src/routes/chat.rs:21` |
+| 17 | POST | `/api/chat/{session_key}/save` | `session_key` | 任意 JSON（§17） | — | JSON（§17） | `routes::api_chat_save_message` | `src/routes/chat.rs:53` |
+| 18 | POST | `/api/chat/{session_key}/delete` | `session_key` | — | — | JSON（§18） | `routes::api_chat_delete_messages` | `src/routes/chat.rs:90` |
 | 19 | POST | `/api/search` | — | `SearchRequest` | — | JSON SearchResult | `routes::api_search` | `src/routes/search.rs:412` |
 | 20 | POST | `/api/search/stats` | — | `SearchRequest` | — | JSON（§20） | `routes::api_search_stats` | `src/routes/search.rs:1423` |
 | 21 | POST | `/api/search/export` | — | `SearchRequest` | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_export_csv` | `src/routes/search.rs:1487` |
@@ -56,16 +56,16 @@
 | 24 | POST | `/api/search/vector` | — | 任意 JSON（§24） | — | JSON（§24） | `routes::api_search_vector` | `src/routes/search.rs:1305` |
 | 25 | POST | `/api/search/analyze` | — | 任意 JSON（§25） | — | JSON（§25） | `routes::api_ai_analyze_results` | `src/routes/ai.rs:811` |
 | 26 | POST | `/api/patent/fetch` | — | `FetchPatentRequest` | — | JSON（§26） | `routes::api_fetch_patent` | `src/routes/patent.rs:14` |
-| 27 | GET | `/api/patent/enrich/:id` | `id` | — | — | JSON（§27） | `routes::api_enrich_patent` | `src/routes/patent.rs:35` |
-| 28 | GET | `/api/patent/enrich-free/:id` | `id` | — | — | JSON（§28） | `routes::api_enrich_patent_free` | `src/routes/patent.rs:247` |
-| 29 | GET | `/api/patent/pdf/:id` | `id` | — | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_patent_pdf` | `src/routes/patent.rs:679` |
+| 27 | GET | `/api/patent/enrich/{id}` | `id` | — | — | JSON（§27） | `routes::api_enrich_patent` | `src/routes/patent.rs:35` |
+| 28 | GET | `/api/patent/enrich-free/{id}` | `id` | — | — | JSON（§28） | `routes::api_enrich_patent_free` | `src/routes/patent.rs:247` |
+| 29 | GET | `/api/patent/pdf/{id}` | `id` | — | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_patent_pdf` | `src/routes/patent.rs:679` |
 | 30 | POST | `/api/patent/pdf/extract-text` | — | — | — | JSON（§30） | `routes::api_patent_pdf_extract_text` | `src/routes/upload.rs:1139` |
 | 31 | GET | `/api/patent/image-proxy` | — | — | 任意键值对（§31） | HTTP 响应（动态，状态码/正文见源码） | `routes::api_patent_image_proxy` | `src/routes/patent.rs:1002` |
-| 32 | GET | `/api/patent/lookup/:number` | `number` | — | 任意键值对（§32） | JSON（§32） | `routes::api_patent_lookup` | `src/routes/patent.rs:282` |
+| 32 | GET | `/api/patent/lookup/{number}` | `number` | — | 任意键值对（§32） | JSON（§32） | `routes::api_patent_lookup` | `src/routes/patent.rs:282` |
 | 33 | POST | `/api/patent/lookup-or-fetch` | — | 任意 JSON（§33） | — | JSON（§33） | `routes::api_patent_lookup_and_fetch` | `src/routes/patent.rs:453` |
 | 34 | POST | `/api/patent/resolve-chinese-titles` | — | `ResolveTitlesRequest` | — | JSON（§34） | `routes::api_resolve_chinese_titles` | `src/routes/patent.rs:363` |
-| 35 | GET | `/api/patent/similar/:id` | `id` | — | — | JSON（§35） | `routes::api_recommend_similar` | `src/routes/patent.rs:535` |
-| 36 | GET | `/api/patent/:id/legal-status` | `id` | — | — | JSON（§36） | `routes::api_patent_legal_status` | `src/routes/patent.rs:1122` |
+| 35 | GET | `/api/patent/similar/{id}` | `id` | — | — | JSON（§35） | `routes::api_recommend_similar` | `src/routes/patent.rs:535` |
+| 36 | GET | `/api/patent/{id}/legal-status` | `id` | — | — | JSON（§36） | `routes::api_patent_legal_status` | `src/routes/patent.rs:1122` |
 | 37 | POST | `/api/ai/chat` | — | `AiChatRequest` | — | JSON AiResponse | `routes::api_ai_chat` | `src/routes/ai.rs:410` |
 | 38 | POST | `/api/ai/chat/stream` | — | `AiChatRequest` | — | SSE 事件流（text/event-stream） | `routes::api_ai_chat_stream` | `src/routes/ai.rs:357` |
 | 39 | POST | `/api/ai/chat/conclusions` | — | 任意 JSON（§39） | — | JSON（§39） | `routes::api_ai_chat_conclusions` | `src/routes/ai.rs:591` |
@@ -99,20 +99,20 @@
 | 67 | POST | `/api/ai/oa-collect-evidence` | — | 任意 JSON（§67） | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_ai_oa_collect_evidence` | `src/routes/ai.rs:3667` |
 | 68 | POST | `/api/ai/oa-adversarial` | — | 任意 JSON（§68） | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_ai_oa_adversarial` | `src/routes/ai.rs:3739` |
 | 69 | GET | `/api/oa/history/all` | — | — | — | JSON（§69） | `routes::api_oa_history_all` | `src/routes/ai.rs:2537` |
-| 70 | GET | `/api/oa/history/:patent_number` | `patent_number` | — | — | JSON（§70） | `routes::api_oa_history` | `src/routes/ai.rs:2526` |
-| 71 | GET | `/api/oa/history/detail/:id` | `id` | — | — | JSON（§71） | `routes::api_oa_history_detail` | `src/routes/ai.rs:2548` |
-| 72 | POST | `/api/oa/history/:id/delete` | `id` | — | — | JSON（§72） | `routes::api_oa_history_delete` | `src/routes/ai.rs:2656` |
-| 73 | GET | `/api/oa/history/:patent_number/diff` | `patent_number` | — | — | JSON（§73） | `routes::api_oa_history_diff` | `src/routes/oa_diff.rs:21` |
-| 74 | GET | `/api/oa/discussions/:patent_number` | `patent_number` | — | — | JSON（§74） | `routes::api_oa_discussion_list` | `src/routes/ai.rs:2560` |
-| 75 | GET | `/api/oa/discussions/:patent_number/:discussion_id` | `patent_number`, `discussion_id` | — | — | JSON（§75） | `routes::api_oa_discussion_get` | `src/routes/ai.rs:2571` |
+| 70 | GET | `/api/oa/history/{patent_number}` | `patent_number` | — | — | JSON（§70） | `routes::api_oa_history` | `src/routes/ai.rs:2526` |
+| 71 | GET | `/api/oa/history/detail/{id}` | `id` | — | — | JSON（§71） | `routes::api_oa_history_detail` | `src/routes/ai.rs:2548` |
+| 72 | POST | `/api/oa/history/{id}/delete` | `id` | — | — | JSON（§72） | `routes::api_oa_history_delete` | `src/routes/ai.rs:2656` |
+| 73 | GET | `/api/oa/history/{patent_number}/diff` | `patent_number` | — | — | JSON（§73） | `routes::api_oa_history_diff` | `src/routes/oa_diff.rs:21` |
+| 74 | GET | `/api/oa/discussions/{patent_number}` | `patent_number` | — | — | JSON（§74） | `routes::api_oa_discussion_list` | `src/routes/ai.rs:2560` |
+| 75 | GET | `/api/oa/discussions/{patent_number}/{discussion_id}` | `patent_number`, `discussion_id` | — | — | JSON（§75） | `routes::api_oa_discussion_get` | `src/routes/ai.rs:2571` |
 | 76 | POST | `/api/oa/discussions/import` | — | 任意 JSON（§76） | — | JSON（§76） | `routes::api_oa_discussion_import` | `src/routes/ai.rs:2593` |
 | 77 | POST | `/api/oa/export-docx` | — | 任意 JSON（§77） | — | JSON（§77） | `routes::api_oa_export_docx` | `src/routes/ai.rs:2773` |
 | 78 | POST | `/api/oa/export` | — | 任意 JSON | — | HTTP 响应（动态，状态码/正文见源码） | `routes::oa_export::api_oa_export_post` | `src/routes/oa_export.rs:313` |
-| 79 | GET | `/api/oa/export/:filename` | `filename` | — | — | HTTP 响应（动态，状态码/正文见源码） | `routes::oa_export::api_oa_export_get` | `src/routes/oa_export.rs:324` |
-| 80 | GET | `/api/oa/rounds/:patent_id` | `patent_id` | — | — | JSON（§80） | `routes::api_oa_rounds_get` | `src/routes/oa_rounds.rs:15` |
+| 79 | GET | `/api/oa/export/{filename}` | `filename` | — | — | HTTP 响应（动态，状态码/正文见源码） | `routes::oa_export::api_oa_export_get` | `src/routes/oa_export.rs:324` |
+| 80 | GET | `/api/oa/rounds/{patent_id}` | `patent_id` | — | — | JSON（§80） | `routes::api_oa_rounds_get` | `src/routes/oa_rounds.rs:15` |
 | 81 | POST | `/api/oa/rounds` | — | 任意 JSON（§81） | — | JSON（§81） | `routes::api_oa_rounds_create` | `src/routes/oa_rounds.rs:41` |
-| 82 | PUT | `/api/oa/rounds/update/:id` | `id` | 任意 JSON（§82） | — | JSON（§82） | `routes::api_oa_rounds_update` | `src/routes/oa_rounds.rs:156` |
-| 83 | GET | `/api/oa/timeline/:patent_id` | `patent_id` | — | — | JSON（§83） | `routes::api_oa_timeline` | `src/routes/oa_rounds.rs:231` |
+| 82 | PUT | `/api/oa/rounds/update/{id}` | `id` | 任意 JSON（§82） | — | JSON（§82） | `routes::api_oa_rounds_update` | `src/routes/oa_rounds.rs:156` |
+| 83 | GET | `/api/oa/timeline/{patent_id}` | `patent_id` | — | — | JSON（§83） | `routes::api_oa_timeline` | `src/routes/oa_rounds.rs:231` |
 | 84 | POST | `/api/ai/check-amendments` | — | 任意 JSON（§84） | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_ai_check_amendments` | `src/routes/ai.rs:2667` |
 | 85 | POST | `/api/ai/threat-assessment` | — | 任意 JSON（§85） | — | JSON（§85） | `routes::api_ai_threat_assessment` | `src/routes/ai.rs:2704` |
 | 86 | POST | `/api/ai/claim-chart` | — | 任意 JSON（§86） | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_ai_claim_chart` | `src/routes/ai.rs:2735` |
@@ -124,42 +124,42 @@
 | 92 | POST | `/api/idea/pipeline` | — | 任意 JSON（§92） | — | JSON（§92） | `routes::api_idea_pipeline` | `src/routes/idea.rs:997` |
 | 93 | POST | `/api/ideas/batch-compare` | — | 任意 JSON（§93） | — | JSON（§93） | `routes::api_ideas_batch_compare` | `src/routes/idea.rs:1855` |
 | 94 | GET | `/api/idea/list` | — | — | — | JSON（§94） | `routes::api_idea_list` | `src/routes/idea.rs:399` |
-| 95 | GET | `/api/idea/:id` | `id` | — | — | JSON（§95） | `routes::api_idea_get` | `src/routes/idea.rs:367` |
-| 96 | POST | `/api/idea/:id/delete` | `id` | — | — | JSON（§96） | `routes::api_idea_delete` | `src/routes/idea.rs:409` |
-| 97 | GET | `/api/idea/:id/progress` | `id` | — | — | SSE 事件流（text/event-stream） | `routes::api_idea_progress` | `src/routes/idea.rs:1216` |
-| 98 | POST | `/api/idea/:id/resume` | `id` | — | — | JSON（§98） | `routes::api_idea_resume` | `src/routes/idea.rs:1156` |
-| 99 | GET / POST | `/api/idea/:id/research-state` | `id` | `ResearchStateUpdateRequest` | — | JSON（§99） | `routes::api_idea_research_state`<br>`routes::api_idea_research_state_update` | `src/routes/idea.rs:2068`<br>`src/routes/idea.rs:2087` |
-| 100 | POST | `/api/idea/:id/redirect` | `id` | `RedirectRequest` | — | JSON（§100） | `routes::api_idea_redirect` | `src/routes/idea.rs:2108` |
-| 101 | GET | `/api/idea/:id/report` | `id` | — | 任意键值对（§101） | JSON（§101） | `routes::api_idea_report` | `src/routes/idea.rs:1267` |
-| 102 | GET | `/api/idea/:id/report.html` | `id` | — | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_idea_report_html` | `src/routes/idea.rs:1419` |
+| 95 | GET | `/api/idea/{id}` | `id` | — | — | JSON（§95） | `routes::api_idea_get` | `src/routes/idea.rs:367` |
+| 96 | POST | `/api/idea/{id}/delete` | `id` | — | — | JSON（§96） | `routes::api_idea_delete` | `src/routes/idea.rs:409` |
+| 97 | GET | `/api/idea/{id}/progress` | `id` | — | — | SSE 事件流（text/event-stream） | `routes::api_idea_progress` | `src/routes/idea.rs:1216` |
+| 98 | POST | `/api/idea/{id}/resume` | `id` | — | — | JSON（§98） | `routes::api_idea_resume` | `src/routes/idea.rs:1156` |
+| 99 | GET / POST | `/api/idea/{id}/research-state` | `id` | `ResearchStateUpdateRequest` | — | JSON（§99） | `routes::api_idea_research_state`<br>`routes::api_idea_research_state_update` | `src/routes/idea.rs:2068`<br>`src/routes/idea.rs:2087` |
+| 100 | POST | `/api/idea/{id}/redirect` | `id` | `RedirectRequest` | — | JSON（§100） | `routes::api_idea_redirect` | `src/routes/idea.rs:2108` |
+| 101 | GET | `/api/idea/{id}/report` | `id` | — | 任意键值对（§101） | JSON（§101） | `routes::api_idea_report` | `src/routes/idea.rs:1267` |
+| 102 | GET | `/api/idea/{id}/report.html` | `id` | — | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_idea_report_html` | `src/routes/idea.rs:1419` |
 | 103 | GET | `/api/ai/models` | — | — | 任意键值对（§103） | JSON（§103） | `routes::list_ai_models` | `src/routes/idea.rs:2474` |
-| 104 | POST | `/api/idea/:id/chat` | `id` | `IdeaChatRequest` | — | JSON（§104） | `routes::api_idea_chat` | `src/routes/idea.rs:546` |
-| 105 | GET | `/api/idea/:id/evidence` | `id` | — | — | JSON（§105） | `routes::api_idea_evidence` | `src/routes/idea.rs:438` |
-| 106 | GET | `/api/idea/:id/kernel-report` | `id` | — | — | JSON（§106） | `routes::api_idea_kernel_report` | `src/routes/idea.rs:455` |
-| 107 | GET | `/api/idea/:id/messages` | `id` | — | — | JSON（§107） | `routes::api_idea_messages` | `src/routes/idea.rs:971` |
-| 108 | GET | `/api/idea/:id/chat/conclusions` | `id` | — | — | JSON（§108） | `routes::api_idea_chat_conclusions` | `src/routes/idea.rs:1730` |
-| 109 | GET | `/api/idea/:id/chat/conversation` | `id` | — | — | JSON（§109） | `routes::api_idea_chat_conversation` | `src/routes/idea.rs:1709` |
-| 110 | POST | `/api/idea/:id/summarize` | `id` | — | — | JSON（§110） | `routes::api_idea_summarize_discussion` | `src/routes/idea.rs:1798` |
-| 111 | GET / POST | `/api/ideas/:id/feature-cards` | `id` | `CreateFeatureCardRequest` | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_get_feature_cards`<br>`routes::api_create_feature_card` | `src/routes/feature_cards.rs:16`<br>`src/routes/feature_cards.rs:50` |
+| 104 | POST | `/api/idea/{id}/chat` | `id` | `IdeaChatRequest` | — | JSON（§104） | `routes::api_idea_chat` | `src/routes/idea.rs:546` |
+| 105 | GET | `/api/idea/{id}/evidence` | `id` | — | — | JSON（§105） | `routes::api_idea_evidence` | `src/routes/idea.rs:438` |
+| 106 | GET | `/api/idea/{id}/kernel-report` | `id` | — | — | JSON（§106） | `routes::api_idea_kernel_report` | `src/routes/idea.rs:455` |
+| 107 | GET | `/api/idea/{id}/messages` | `id` | — | — | JSON（§107） | `routes::api_idea_messages` | `src/routes/idea.rs:971` |
+| 108 | GET | `/api/idea/{id}/chat/conclusions` | `id` | — | — | JSON（§108） | `routes::api_idea_chat_conclusions` | `src/routes/idea.rs:1730` |
+| 109 | GET | `/api/idea/{id}/chat/conversation` | `id` | — | — | JSON（§109） | `routes::api_idea_chat_conversation` | `src/routes/idea.rs:1709` |
+| 110 | POST | `/api/idea/{id}/summarize` | `id` | — | — | JSON（§110） | `routes::api_idea_summarize_discussion` | `src/routes/idea.rs:1798` |
+| 111 | GET / POST | `/api/ideas/{id}/feature-cards` | `id` | `CreateFeatureCardRequest` | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_get_feature_cards`<br>`routes::api_create_feature_card` | `src/routes/feature_cards.rs:16`<br>`src/routes/feature_cards.rs:50` |
 | 112 | GET | `/api/feature-cards/diff` | — | — | 任意键值对（§112） | HTTP 响应（动态，状态码/正文见源码） | `routes::api_feature_card_diff` | `src/routes/feature_cards.rs:121` |
-| 113 | GET | `/api/idea/:id/claim-tree` | `id` | — | — | JSON（§113） | `routes::api_idea_claim_tree` | `src/routes/idea.rs:2221` |
-| 114 | POST | `/api/idea/:id/iterate` | `id` | — | — | JSON（§114） | `routes::api_idea_iterate` | `src/routes/idea.rs:1955` |
-| 115 | GET | `/api/idea/:id/versions` | `id` | — | — | JSON（§115） | `routes::api_idea_versions` | `src/routes/idea.rs:2290` |
-| 116 | GET | `/api/idea/:id/branches` | `id` | — | — | JSON（§116） | `routes::api_idea_branches` | `src/routes/idea.rs:2315` |
-| 117 | GET | `/api/idea/:id/findings` | `id` | — | — | JSON（§117） | `routes::api_idea_findings` | `src/routes/idea.rs:2326` |
-| 118 | GET / POST | `/api/idea/:id/memory` | `id` | POST 任意 JSON（§118） | — | JSON（§118） | `routes::api_idea_memory`<br>`routes::api_idea_memory_add` | `src/routes/idea.rs:2337`<br>`src/routes/idea.rs:2358` |
-| 119 | DELETE | `/api/idea/:id/memory/:entry_id` | `id`, `entry_id` | — | — | JSON（§119） | `routes::api_idea_memory_delete` | `src/routes/idea.rs:2416` |
+| 113 | GET | `/api/idea/{id}/claim-tree` | `id` | — | — | JSON（§113） | `routes::api_idea_claim_tree` | `src/routes/idea.rs:2221` |
+| 114 | POST | `/api/idea/{id}/iterate` | `id` | — | — | JSON（§114） | `routes::api_idea_iterate` | `src/routes/idea.rs:1955` |
+| 115 | GET | `/api/idea/{id}/versions` | `id` | — | — | JSON（§115） | `routes::api_idea_versions` | `src/routes/idea.rs:2290` |
+| 116 | GET | `/api/idea/{id}/branches` | `id` | — | — | JSON（§116） | `routes::api_idea_branches` | `src/routes/idea.rs:2315` |
+| 117 | GET | `/api/idea/{id}/findings` | `id` | — | — | JSON（§117） | `routes::api_idea_findings` | `src/routes/idea.rs:2326` |
+| 118 | GET / POST | `/api/idea/{id}/memory` | `id` | POST 任意 JSON（§118） | — | JSON（§118） | `routes::api_idea_memory`<br>`routes::api_idea_memory_add` | `src/routes/idea.rs:2337`<br>`src/routes/idea.rs:2358` |
+| 119 | DELETE | `/api/idea/{id}/memory/{entry_id}` | `id`, `entry_id` | — | — | JSON（§119） | `routes::api_idea_memory_delete` | `src/routes/idea.rs:2416` |
 | 120 | GET | `/api/ipc/tree` | — | — | — | JSON（§120） | `routes::api_ipc_tree` | `src/routes/ipc.rs:22` |
-| 121 | GET | `/api/ipc/:code/patents` | `code` | — | — | JSON（§121） | `routes::api_ipc_patents` | `src/routes/ipc.rs:122` |
-| 122 | POST | `/api/patents/import` | — | `ImportRequest` | — | JSON（§122） | `routes::api_import_patents` | `src/routes/settings.rs:812` |
+| 121 | GET | `/api/ipc/{code}/patents` | `code` | — | — | JSON（§121） | `routes::api_ipc_patents` | `src/routes/ipc.rs:122` |
+| 122 | POST | `/api/patents/import` | — | `ImportRequest` | — | JSON（§122） | `routes::api_import_patents` | `src/routes/settings.rs:802` |
 | 123 | GET / POST | `/api/collections` | — | POST 任意 JSON（§123） | — | JSON（§123） | `routes::api_list_collections`<br>`routes::api_create_collection` | `src/routes/collections.rs:28`<br>`src/routes/collections.rs:8` |
-| 124 | DELETE | `/api/collections/:id` | `id` | — | — | JSON（§124） | `routes::api_delete_collection` | `src/routes/collections.rs:49` |
-| 125 | GET | `/api/collections/:id/patents` | `id` | — | — | JSON（§125） | `routes::api_get_collection_patents` | `src/routes/collections.rs:92` |
-| 126 | POST | `/api/collections/:id/add` | `id` | 任意 JSON（§126） | — | JSON（§126） | `routes::api_add_to_collection` | `src/routes/collections.rs:59` |
-| 127 | DELETE | `/api/collections/:id/remove/:patent_id` | `id`, `patent_id` | — | — | JSON（§127） | `routes::api_remove_from_collection` | `src/routes/collections.rs:82` |
-| 128 | GET / POST | `/api/patents/:id/tags` | `id` | POST 任意 JSON（§128） | — | JSON（§128） | `routes::api_get_patent_tags`<br>`routes::api_add_tag` | `src/routes/collections.rs:128`<br>`src/routes/collections.rs:102` |
-| 129 | DELETE | `/api/patents/:id/tags/:tag` | `id`, `tag` | — | — | JSON（§129） | `routes::api_remove_tag` | `src/routes/collections.rs:118` |
-| 130 | GET | `/api/patents/:id/collections` | `id` | — | — | JSON（§130） | `routes::api_get_patent_collections` | `src/routes/collections.rs:151` |
+| 124 | DELETE | `/api/collections/{id}` | `id` | — | — | JSON（§124） | `routes::api_delete_collection` | `src/routes/collections.rs:49` |
+| 125 | GET | `/api/collections/{id}/patents` | `id` | — | — | JSON（§125） | `routes::api_get_collection_patents` | `src/routes/collections.rs:92` |
+| 126 | POST | `/api/collections/{id}/add` | `id` | 任意 JSON（§126） | — | JSON（§126） | `routes::api_add_to_collection` | `src/routes/collections.rs:59` |
+| 127 | DELETE | `/api/collections/{id}/remove/{patent_id}` | `id`, `patent_id` | — | — | JSON（§127） | `routes::api_remove_from_collection` | `src/routes/collections.rs:82` |
+| 128 | GET / POST | `/api/patents/{id}/tags` | `id` | POST 任意 JSON（§128） | — | JSON（§128） | `routes::api_get_patent_tags`<br>`routes::api_add_tag` | `src/routes/collections.rs:128`<br>`src/routes/collections.rs:102` |
+| 129 | DELETE | `/api/patents/{id}/tags/{tag}` | `id`, `tag` | — | — | JSON（§129） | `routes::api_remove_tag` | `src/routes/collections.rs:118` |
+| 130 | GET | `/api/patents/{id}/collections` | `id` | — | — | JSON（§130） | `routes::api_get_patent_collections` | `src/routes/collections.rs:151` |
 | 131 | GET | `/api/tags` | — | — | — | JSON（§131） | `routes::api_list_all_tags` | `src/routes/collections.rs:138` |
 | 132 | POST | `/api/upload/compare` | — | — | — | JSON（§132） | `routes::api_upload_compare` | `src/routes/upload.rs:192` |
 | 133 | POST | `/api/upload/extract` | — | — | — | JSON（§133） | `routes::api_upload_extract` | `src/routes/upload.rs:370` |
@@ -235,7 +235,7 @@
 | `limit` | `Option<usize>` | 是 |
 | `offset` | `Option<usize>` | 是 |
 
-使用该类型的端点：`/api/chat/:session_key`
+使用该类型的端点：`/api/chat/{session_key}`
 
 ### `CreateFeatureCardRequest`（请求体；定义于 `src/types/idea.rs:135`）
 
@@ -250,7 +250,7 @@
 | `process_steps` | `String` | 是 |
 | `application_scenarios` | `String` | 是 |
 
-使用该类型的端点：`/api/ideas/:id/feature-cards`
+使用该类型的端点：`/api/ideas/{id}/feature-cards`
 
 ### `FetchPatentRequest`（请求体；定义于 `src/types/patent.rs:107`）
 
@@ -270,7 +270,7 @@
 | `images` | `Vec<String>` | 是 |
 | `attachments` | `Vec<TextAttachment>` | 是 |
 
-使用该类型的端点：`/api/idea/:id/chat`
+使用该类型的端点：`/api/idea/{id}/chat`
 
 ### `IdeaSubmitRequest`（请求体；定义于 `src/types/idea.rs:26`）
 
@@ -300,7 +300,7 @@
 | `reason` | `Option<String>` | 是 |
 | `research_state` | `Option<ResearchStateUpdateRequest>` | 是 |
 
-使用该类型的端点：`/api/idea/:id/redirect`
+使用该类型的端点：`/api/idea/{id}/redirect`
 
 ### `ResearchStateUpdateRequest`（请求体；定义于 `src/routes/idea.rs:31`）
 
@@ -311,7 +311,7 @@
 | `open_questions` | `Option<Vec<String>>` | 是 |
 | `verified_claims` | `Option<Vec<String>>` | 是 |
 
-使用该类型的端点：`/api/idea/:id/research-state`
+使用该类型的端点：`/api/idea/{id}/research-state`
 
 ### `ResolveTitlesRequest`（请求体；定义于 `src/routes/patent.rs:352`）
 
@@ -519,20 +519,20 @@
 - 响应顶层键：`key_count`、`message`、`plan_name`、`remaining`、`searches_per_month`、`status`、`this_month_usage`、`total_usage`
 - `status` 取值：error / ok
 
-### §16 GET `/api/chat/:session_key`
+### §16 GET `/api/chat/{session_key}`
 
 - 源码：`src/routes/chat.rs:21`
 - 响应顶层键：`limit`、`message`、`messages`、`offset`、`status`、`total`
 - `status` 取值：error / ok
 
-### §17 POST `/api/chat/:session_key/save`
+### §17 POST `/api/chat/{session_key}/save`
 
 - 源码：`src/routes/chat.rs:53`
 - 读取的请求键：`content`、`role`
 - 响应顶层键：`message`、`message_id`、`status`
 - `status` 取值：error / ok
 
-### §18 POST `/api/chat/:session_key/delete`
+### §18 POST `/api/chat/{session_key}/delete`
 
 - 源码：`src/routes/chat.rs:90`
 - 响应顶层键：`deleted`、`message`、`status`
@@ -570,13 +570,13 @@
 - 响应顶层键：`message`、`patent`、`status`
 - `status` 取值：error / ok
 
-### §27 GET `/api/patent/enrich/:id`
+### §27 GET `/api/patent/enrich/{id}`
 
 - 源码：`src/routes/patent.rs:35`
 - 响应顶层键：`message`、`patent`、`status`
 - `status` 取值：error / ok
 
-### §28 GET `/api/patent/enrich-free/:id`
+### §28 GET `/api/patent/enrich-free/{id}`
 
 - 源码：`src/routes/patent.rs:247`
 - 响应顶层键：`message`、`patent`、`remaining_secs`、`status`
@@ -594,7 +594,7 @@
 - 读取的查询键：`url`
 - 响应顶层键：未抽取到（动态构造或非 JSON 响应）
 
-### §32 GET `/api/patent/lookup/:number`
+### §32 GET `/api/patent/lookup/{number}`
 
 - 源码：`src/routes/patent.rs:282`
 - 读取的查询键：`fetch`
@@ -615,12 +615,12 @@
 - 响应顶层键：`status`、`titles`
 - `status` 取值：ok
 
-### §35 GET `/api/patent/similar/:id`
+### §35 GET `/api/patent/similar/{id}`
 
 - 源码：`src/routes/patent.rs:535`
 - 响应顶层键：`error`、`similar`
 
-### §36 GET `/api/patent/:id/legal-status`
+### §36 GET `/api/patent/{id}/legal-status`
 
 - 源码：`src/routes/patent.rs:1122`
 - 响应顶层键：`message`、`result`、`status`
@@ -822,37 +822,37 @@
 - 响应顶层键：`analyses`、`message`、`status`
 - `status` 取值：error / ok
 
-### §70 GET `/api/oa/history/:patent_number`
+### §70 GET `/api/oa/history/{patent_number}`
 
 - 源码：`src/routes/ai.rs:2526`
 - 响应顶层键：`analyses`、`message`、`status`
 - `status` 取值：error / ok
 
-### §71 GET `/api/oa/history/detail/:id`
+### §71 GET `/api/oa/history/detail/{id}`
 
 - 源码：`src/routes/ai.rs:2548`
 - 响应顶层键：`analysis`、`message`、`status`
 - `status` 取值：error / ok
 
-### §72 POST `/api/oa/history/:id/delete`
+### §72 POST `/api/oa/history/{id}/delete`
 
 - 源码：`src/routes/ai.rs:2656`
 - 响应顶层键：`message`、`status`
 - `status` 取值：error / ok
 
-### §73 GET `/api/oa/history/:patent_number/diff`
+### §73 GET `/api/oa/history/{patent_number}/diff`
 
 - 源码：`src/routes/oa_diff.rs:21`
 - 响应顶层键：`added_refs`、`analyses`、`analysis_diff`、`analysis_full`、`analysis_preview`、`created_at`、`depth`、`depth_changed`、`diffs`、`first_exam_context`、`from_analysis_preview`、`from_claim_changes`、`from_date`、`from_depth`、`from_oa_type`、`from_version`、`history`、`message`、`new_reasons`、`oa_type`、`oa_type_changed`、`overcome_reasons`、`patent_number`、`patent_title`、`ref_diff`、`removed_refs`、`status`、`to_analysis_preview`、`to_claim_changes`、`to_date`、`to_depth`、`to_oa_type`、`to_version`、`total_rounds`、`version`
 - `status` 取值：error / ok
 
-### §74 GET `/api/oa/discussions/:patent_number`
+### §74 GET `/api/oa/discussions/{patent_number}`
 
 - 源码：`src/routes/ai.rs:2560`
 - 响应顶层键：`discussions`、`message`、`status`
 - `status` 取值：error / ok
 
-### §75 GET `/api/oa/discussions/:patent_number/:discussion_id`
+### §75 GET `/api/oa/discussions/{patent_number}/{discussion_id}`
 
 - 源码：`src/routes/ai.rs:2571`
 - 响应顶层键：`discussion`、`message`、`status`
@@ -872,7 +872,7 @@
 - 响应顶层键：`docx`、`error`、`status`
 - `status` 取值：ok
 
-### §80 GET `/api/oa/rounds/:patent_id`
+### §80 GET `/api/oa/rounds/{patent_id}`
 
 - 源码：`src/routes/oa_rounds.rs:15`
 - 响应顶层键：`count`、`message`、`patent_id`、`rounds`、`status`
@@ -885,14 +885,14 @@
 - 响应顶层键：`message`、`round`、`status`
 - `status` 取值：error / ok
 
-### §82 PUT `/api/oa/rounds/update/:id`
+### §82 PUT `/api/oa/rounds/update/{id}`
 
 - 源码：`src/routes/oa_rounds.rs:156`
 - 读取的请求键：`notes`、`oa_date`、`oa_text`、`quality_score`、`response_date`、`response_text`、`result`、`result_date`、`strategy_used`
 - 响应顶层键：`message`、`round`、`status`
 - `status` 取值：error / ok
 
-### §83 GET `/api/oa/timeline/:patent_id`
+### §83 GET `/api/oa/timeline/{patent_id}`
 
 - 源码：`src/routes/oa_rounds.rs:231`
 - 响应顶层键：`analyses`、`has_response`、`has_result`、`patent_id`、`round`、`status`、`summary`、`timeline`
@@ -971,25 +971,25 @@
 - 响应顶层键：`ideas`、`message`、`status`
 - `status` 取值：error / ok
 
-### §95 GET `/api/idea/:id`
+### §95 GET `/api/idea/{id}`
 
 - 源码：`src/routes/idea.rs:367`
 - 响应顶层键：`idea`、`message`、`status`
 - `status` 取值：error / ok
 
-### §96 POST `/api/idea/:id/delete`
+### §96 POST `/api/idea/{id}/delete`
 
 - 源码：`src/routes/idea.rs:409`
 - 响应顶层键：`message`、`status`
 - `status` 取值：error / ok
 
-### §98 POST `/api/idea/:id/resume`
+### §98 POST `/api/idea/{id}/resume`
 
 - 源码：`src/routes/idea.rs:1156`
 - 响应顶层键：`message`、`status`
 - `status` 取值：error / ok
 
-### §99 GET / POST `/api/idea/:id/research-state`
+### §99 GET / POST `/api/idea/{id}/research-state`
 
 - **GET** `routes::api_idea_research_state`（`src/routes/idea.rs:2068`）
   - 响应顶层键：`message`、`research_state`、`source`、`status`
@@ -999,14 +999,14 @@
   - 响应顶层键：`message`、`research_state`、`status`
   - `status` 取值：error / ok
 
-### §100 POST `/api/idea/:id/redirect`
+### §100 POST `/api/idea/{id}/redirect`
 
 - 源码：`src/routes/idea.rs:2108`
 - 请求体：`RedirectRequest`（字段见上文类型表）
 - 响应顶层键：`message`、`reason`、`restart_from`、`status`
 - `status` 取值：error / ok
 
-### §101 GET `/api/idea/:id/report`
+### §101 GET `/api/idea/{id}/report`
 
 - 源码：`src/routes/idea.rs:1267`
 - 读取的查询键：`type`、`version_id`
@@ -1020,49 +1020,49 @@
 - 响应顶层键：`base_url`、`configured`、`count`、`error`、`id`、`models`、`name`、`provider`、`providers`、`status`、`total_count`
 - `status` 取值：error / not_configured / not_found / ok / timeout
 
-### §104 POST `/api/idea/:id/chat`
+### §104 POST `/api/idea/{id}/chat`
 
 - 源码：`src/routes/idea.rs:546`
 - 请求体：`IdeaChatRequest`（字段见上文类型表）
 - 响应顶层键：`content`、`error`、`image_url`、`message`、`messages`、`model`、`role`、`status`、`temperature`、`text`、`type`
 - `status` 取值：ok
 
-### §105 GET `/api/idea/:id/evidence`
+### §105 GET `/api/idea/{id}/evidence`
 
 - 源码：`src/routes/idea.rs:438`
 - 响应顶层键：`count`、`evidence`、`message`、`status`
 - `status` 取值：error / ok
 
-### §106 GET `/api/idea/:id/kernel-report`
+### §106 GET `/api/idea/{id}/kernel-report`
 
 - 源码：`src/routes/idea.rs:455`
 - 响应顶层键：`current_step`、`kernel_report`、`message`、`status`
 - `status` 取值：error / no_kernel_report / no_snapshot / ok
 
-### §107 GET `/api/idea/:id/messages`
+### §107 GET `/api/idea/{id}/messages`
 
 - 源码：`src/routes/idea.rs:971`
 - 响应顶层键：`content`、`created_at`、`error`、`id`、`messages`、`role`
 
-### §108 GET `/api/idea/:id/chat/conclusions`
+### §108 GET `/api/idea/{id}/chat/conclusions`
 
 - 源码：`src/routes/idea.rs:1730`
 - 响应顶层键：`conclusions`、`error`、`status`
 - `status` 取值：ok
 
-### §109 GET `/api/idea/:id/chat/conversation`
+### §109 GET `/api/idea/{id}/chat/conversation`
 
 - 源码：`src/routes/idea.rs:1709`
 - 响应顶层键：`content`、`created_at`、`error`、`idea`、`messages`、`role`、`status`
 - `status` 取值：ok
 
-### §110 POST `/api/idea/:id/summarize`
+### §110 POST `/api/idea/{id}/summarize`
 
 - 源码：`src/routes/idea.rs:1798`
 - 响应顶层键：`error`、`status`、`summary`
 - `status` 取值：ok
 
-### §111 GET / POST `/api/ideas/:id/feature-cards`
+### §111 GET / POST `/api/ideas/{id}/feature-cards`
 
 - **GET** `routes::api_get_feature_cards`（`src/routes/feature_cards.rs:16`）
   - 响应顶层键：`cards`、`message`、`status`
@@ -1079,37 +1079,37 @@
 - 响应顶层键：`card_a`、`card_b`、`diff`、`diff_type`、`message`、`novelty_reason`、`novelty_significance`、`status`
 - `status` 取值：error / ok
 
-### §113 GET `/api/idea/:id/claim-tree`
+### §113 GET `/api/idea/{id}/claim-tree`
 
 - 源码：`src/routes/idea.rs:2221`
 - 响应顶层键：`claim_number`、`claim_type`、`claims`、`content`、`created_at`、`description`、`id`、`message`、`novelty_flag`、`parent_claim_id`、`status`
 - `status` 取值：error / ok
 
-### §114 POST `/api/idea/:id/iterate`
+### §114 POST `/api/idea/{id}/iterate`
 
 - 源码：`src/routes/idea.rs:1955`
 - 响应顶层键：`iteration`、`message`、`status`
 - `status` 取值：error / ok
 
-### §115 GET `/api/idea/:id/versions`
+### §115 GET `/api/idea/{id}/versions`
 
 - 源码：`src/routes/idea.rs:2290`
 - 响应顶层键：`branch_id`、`created_at`、`current_step`、`id`、`message`、`status`、`version_number`、`versions`
 - `status` 取值：error / ok
 
-### §116 GET `/api/idea/:id/branches`
+### §116 GET `/api/idea/{id}/branches`
 
 - 源码：`src/routes/idea.rs:2315`
 - 响应顶层键：`branches`、`message`、`status`
 - `status` 取值：error / ok
 
-### §117 GET `/api/idea/:id/findings`
+### §117 GET `/api/idea/{id}/findings`
 
 - 源码：`src/routes/idea.rs:2326`
 - 响应顶层键：`findings`、`message`、`status`
 - `status` 取值：error / ok
 
-### §118 GET / POST `/api/idea/:id/memory`
+### §118 GET / POST `/api/idea/{id}/memory`
 
 - **GET** `routes::api_idea_memory`（`src/routes/idea.rs:2337`）
   - 响应顶层键：`by_type`、`counts`、`entries`、`message`、`status`、`total`
@@ -1119,7 +1119,7 @@
   - 响应顶层键：`id`、`message`、`status`
   - `status` 取值：error / ok
 
-### §119 DELETE `/api/idea/:id/memory/:entry_id`
+### §119 DELETE `/api/idea/{id}/memory/{entry_id}`
 
 - 源码：`src/routes/idea.rs:2416`
 - 响应顶层键：`message`、`status`
@@ -1131,7 +1131,7 @@
 - 响应顶层键：`classes`、`code`、`count`、`message`、`name`、`sections`、`status`、`subclasses`、`total_codes`
 - `status` 取值：error / ok
 
-### §121 GET `/api/ipc/:code/patents`
+### §121 GET `/api/ipc/{code}/patents`
 
 - 源码：`src/routes/ipc.rs:122`
 - 响应顶层键：`code`、`count`、`message`、`patents`、`status`
@@ -1139,7 +1139,7 @@
 
 ### §122 POST `/api/patents/import`
 
-- 源码：`src/routes/settings.rs:812`
+- 源码：`src/routes/settings.rs:802`
 - 请求体：`ImportRequest`（字段见上文类型表）
 - 响应顶层键：`imported`、`status`
 - `status` 取值：ok
@@ -1153,31 +1153,31 @@
   - 响应顶层键：`error`、`id`、`name`、`status`
   - `status` 取值：ok
 
-### §124 DELETE `/api/collections/:id`
+### §124 DELETE `/api/collections/{id}`
 
 - 源码：`src/routes/collections.rs:49`
 - 响应顶层键：`error`、`status`
 - `status` 取值：ok
 
-### §125 GET `/api/collections/:id/patents`
+### §125 GET `/api/collections/{id}/patents`
 
 - 源码：`src/routes/collections.rs:92`
 - 响应顶层键：`error`、`patents`
 
-### §126 POST `/api/collections/:id/add`
+### §126 POST `/api/collections/{id}/add`
 
 - 源码：`src/routes/collections.rs:59`
 - 读取的请求键：`patent_id`
 - 响应顶层键：`error`、`status`
 - `status` 取值：ok
 
-### §127 DELETE `/api/collections/:id/remove/:patent_id`
+### §127 DELETE `/api/collections/{id}/remove/{patent_id}`
 
 - 源码：`src/routes/collections.rs:82`
 - 响应顶层键：`error`、`status`
 - `status` 取值：ok
 
-### §128 GET / POST `/api/patents/:id/tags`
+### §128 GET / POST `/api/patents/{id}/tags`
 
 - **GET** `routes::api_get_patent_tags`（`src/routes/collections.rs:128`）
   - 响应顶层键：`error`、`tags`
@@ -1186,13 +1186,13 @@
   - 响应顶层键：`error`、`status`
   - `status` 取值：ok
 
-### §129 DELETE `/api/patents/:id/tags/:tag`
+### §129 DELETE `/api/patents/{id}/tags/{tag}`
 
 - 源码：`src/routes/collections.rs:118`
 - 响应顶层键：`error`、`status`
 - `status` 取值：ok
 
-### §130 GET `/api/patents/:id/collections`
+### §130 GET `/api/patents/{id}/collections`
 
 - 源码：`src/routes/collections.rs:151`
 - 响应顶层键：`collection_ids`、`error`

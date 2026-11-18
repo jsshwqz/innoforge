@@ -150,55 +150,52 @@ fn handle_tools_call(req: &Value) -> Value {
     }
 }
 
-fn http_get(path: &str) -> Result<Value, String> {
+fn http_request(
+    method: reqwest::Method,
+    path: &str,
+    body: Option<&Value>,
+) -> Result<Value, String> {
     let base_url = resolve_base_url();
-    let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(60))
+    let url = format!("{}{}", base_url, path);
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
         .build()
         .map_err(|e| e.to_string())?;
-    let url = format!("{}{}", base_url, path);
-    let resp = client
-        .get(&url)
-        .send()
-        .map_err(|e| format!("HTTP error (is innoforge running?): {}", e))?;
-    let status = resp.status();
-    if !status.is_success() {
-        let body_text = resp.text().unwrap_or_default();
-        let preview = truncate(&body_text, 200);
-        return Err(format!(
-            "HTTP {} {}: {}",
-            status.as_u16(),
-            status.canonical_reason().unwrap_or(""),
-            preview
-        ));
-    }
-    resp.json::<Value>().map_err(|e| e.to_string())
+    rt.block_on(async {
+        let client = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_millis(500))
+            .timeout(std::time::Duration::from_secs(60))
+            .build()
+            .map_err(|e| e.to_string())?;
+        let mut req = client.request(method, &url);
+        if let Some(json_body) = body {
+            req = req.json(json_body);
+        }
+        let resp = req
+            .send()
+            .await
+            .map_err(|e| format!("HTTP error (is innoforge running?): {}", e))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body_text = resp.text().await.unwrap_or_default();
+            let preview = truncate(&body_text, 200);
+            return Err(format!(
+                "HTTP {} {}: {}",
+                status.as_u16(),
+                status.canonical_reason().unwrap_or(""),
+                preview
+            ));
+        }
+        resp.json::<Value>().await.map_err(|e| e.to_string())
+    })
+}
+
+fn http_get(path: &str) -> Result<Value, String> {
+    http_request(reqwest::Method::GET, path, None)
 }
 
 fn http_post(path: &str, body: &Value) -> Result<Value, String> {
-    let base_url = resolve_base_url();
-    let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(60))
-        .build()
-        .map_err(|e| e.to_string())?;
-    let url = format!("{}{}", base_url, path);
-    let resp = client
-        .post(&url)
-        .json(body)
-        .send()
-        .map_err(|e| format!("HTTP error (is innoforge running?): {}", e))?;
-    let status = resp.status();
-    if !status.is_success() {
-        let body_text = resp.text().unwrap_or_default();
-        let preview = truncate(&body_text, 200);
-        return Err(format!(
-            "HTTP {} {}: {}",
-            status.as_u16(),
-            status.canonical_reason().unwrap_or(""),
-            preview
-        ));
-    }
-    resp.json::<Value>().map_err(|e| e.to_string())
+    http_request(reqwest::Method::POST, path, Some(body))
 }
 
 fn call_patent_search(args: &Value) -> Result<String, String> {

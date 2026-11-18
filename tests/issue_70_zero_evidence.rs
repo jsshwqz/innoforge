@@ -44,13 +44,16 @@ fn free_port() -> u16 {
     port_alloc::free_port()
 }
 
+#[path = "helpers/sync_http.rs"]
+mod sync_http;
+
 #[path = "port_alloc.rs"]
 mod port_alloc;
 
 fn wait_for_server(port: u16, timeout_secs: u64) -> bool {
     let start = std::time::Instant::now();
     while start.elapsed().as_secs() < timeout_secs {
-        if let Ok(resp) = reqwest::blocking::get(format!("http://127.0.0.1:{}/api/version", port)) {
+        if let Ok(resp) = sync_http::get(format!("http://127.0.0.1:{}/api/version", port)) {
             if resp.status().is_success() {
                 return true;
             }
@@ -86,7 +89,7 @@ fn empty_evidence_must_not_claim_novelty_score() {
         .expect("spawn server");
     assert!(wait_for_server(port, 60), "server must start");
 
-    let client = reqwest::blocking::Client::new();
+    let client = sync_http::Client::new();
 
     // 1) submit
     let submit_resp = client

@@ -7,8 +7,6 @@
 
 mod common;
 
-use common::{free_port, spawn_test_server};
-
 /// 12 个端点（issue #102 清单），请求体为空对象——必填字段全部缺失。
 const ENDPOINTS: [&str; 12] = [
     "/api/ai/claim-chart",
@@ -27,9 +25,9 @@ const ENDPOINTS: [&str; 12] = [
 
 #[test]
 fn missing_field_requests_return_4xx_not_200() {
-    let port = free_port();
-    let mut server = spawn_test_server(port, &[]);
-    let client = reqwest::blocking::Client::builder()
+    let mut server = common::spawn_test_server_on_free_port(&[]);
+    let port = server.port;
+    let client = common::sync_http::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()
         .unwrap();

@@ -12,7 +12,9 @@
 
 mod common;
 
-use common::{free_port, spawn_test_server};
+use common::sync_http;
+
+use common::{free_port, spawn_test_server_on_free_port};
 use std::io::{Read, Write};
 use std::net::TcpListener;
 
@@ -68,15 +70,12 @@ fn start_raw_stub_ct(content_type: &str, body: &str) -> (u16, std::thread::JoinH
 }
 
 /// Helper: spawn a test server with AI pointing at `ai_port`.
-fn start_server(server_port: u16, ai_port: u16) -> common::TestServer {
+fn start_server(ai_port: u16) -> common::TestServer {
     let ai_url = format!("http://127.0.0.1:{}", ai_port);
-    spawn_test_server(
-        server_port,
-        &[
-            ("AI_BASE_URL", &ai_url),
-            ("AI_API_KEY", "test-key-not-real"),
-        ],
-    )
+    spawn_test_server_on_free_port(&[
+        ("AI_BASE_URL", &ai_url),
+        ("AI_API_KEY", "test-key-not-real"),
+    ])
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -87,13 +86,12 @@ fn start_server(server_port: u16, ai_port: u16) -> common::TestServer {
 /// should return a controlled error (4xx/5xx), not hang.
 #[test]
 fn tolerates_empty_body_stub_response() {
-    let server_port = free_port();
-
     let (ai_port, _stub) = start_raw_stub(200, "");
 
-    let server = start_server(server_port, ai_port);
+    let server = start_server(ai_port);
+    let server_port = server.port;
 
-    let client = reqwest::blocking::Client::new();
+    let client = sync_http::Client::new();
     let resp = client
         .post(format!(
             "http://127.0.0.1:{}/api/ai/office-action-response",
@@ -119,7 +117,7 @@ fn tolerates_empty_body_stub_response() {
     }
 
     // Server must still be alive
-    let alive = reqwest::blocking::get(format!("http://127.0.0.1:{}/api/version", server_port))
+    let alive = sync_http::get(format!("http://127.0.0.1:{}/api/version", server_port))
         .map(|r| r.status().is_success())
         .unwrap_or(false);
     assert!(alive, "server must survive empty AI response");
@@ -130,14 +128,13 @@ fn tolerates_empty_body_stub_response() {
 /// accepts: stub returns valid JSON. Server processes normally.
 #[test]
 fn accepts_valid_body_stub_response() {
-    let server_port = free_port();
-
     let valid_json = r#"{"choices":[{"message":{"role":"assistant","content":"OK"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}"#;
     let (ai_port, _stub) = start_raw_stub(200, valid_json);
 
-    let server = start_server(server_port, ai_port);
+    let server = start_server(ai_port);
+    let server_port = server.port;
 
-    let client = reqwest::blocking::Client::new();
+    let client = sync_http::Client::new();
     let resp = client
         .post(format!(
             "http://127.0.0.1:{}/api/ai/office-action-response",
@@ -172,14 +169,13 @@ fn accepts_valid_body_stub_response() {
 /// tolerates: stub returns HTML error page instead of JSON. Server must not crash.
 #[test]
 fn tolerates_html_error_page_stub_response() {
-    let server_port = free_port();
-
     let html = "<html><body><h1>503 Service Unavailable</h1></body></html>";
     let (ai_port, _stub) = start_raw_stub_ct("text/html", html);
 
-    let server = start_server(server_port, ai_port);
+    let server = start_server(ai_port);
+    let server_port = server.port;
 
-    let client = reqwest::blocking::Client::new();
+    let client = sync_http::Client::new();
     let resp = client
         .post(format!(
             "http://127.0.0.1:{}/api/ai/office-action-response",
@@ -205,7 +201,7 @@ fn tolerates_html_error_page_stub_response() {
     }
 
     // Server must still be alive
-    let alive = reqwest::blocking::get(format!("http://127.0.0.1:{}/api/version", server_port))
+    let alive = sync_http::get(format!("http://127.0.0.1:{}/api/version", server_port))
         .map(|r| r.status().is_success())
         .unwrap_or(false);
     assert!(alive, "server must survive HTML AI response");
@@ -216,15 +212,14 @@ fn tolerates_html_error_page_stub_response() {
 /// accepts: stub returns valid JSON with correct content-type.
 #[test]
 fn accepts_json_content_type_stub_response() {
-    let server_port = free_port();
-
     let valid_json =
         r#"{"choices":[{"message":{"role":"assistant","content":"OK"},"finish_reason":"stop"}]}"#;
     let (ai_port, _stub) = start_raw_stub_ct("application/json", valid_json);
 
-    let server = start_server(server_port, ai_port);
+    let server = start_server(ai_port);
+    let server_port = server.port;
 
-    let client = reqwest::blocking::Client::new();
+    let client = sync_http::Client::new();
     let resp = client
         .post(format!(
             "http://127.0.0.1:{}/api/ai/office-action-response",
@@ -257,15 +252,14 @@ fn accepts_json_content_type_stub_response() {
 /// tolerates: stub returns truncated JSON (cut mid-string). Server must not crash.
 #[test]
 fn tolerates_truncated_json_stub_response() {
-    let server_port = free_port();
-
     // Truncated: missing closing braces and quote
     let truncated = r#"{"choices":[{"message":{"role":"assistant","content":"OK"#;
     let (ai_port, _stub) = start_raw_stub(200, truncated);
 
-    let server = start_server(server_port, ai_port);
+    let server = start_server(ai_port);
+    let server_port = server.port;
 
-    let client = reqwest::blocking::Client::new();
+    let client = sync_http::Client::new();
     let resp = client
         .post(format!(
             "http://127.0.0.1:{}/api/ai/office-action-response",
@@ -291,7 +285,7 @@ fn tolerates_truncated_json_stub_response() {
     }
 
     // Server must still be alive
-    let alive = reqwest::blocking::get(format!("http://127.0.0.1:{}/api/version", server_port))
+    let alive = sync_http::get(format!("http://127.0.0.1:{}/api/version", server_port))
         .map(|r| r.status().is_success())
         .unwrap_or(false);
     assert!(alive, "server must survive truncated JSON");
@@ -302,8 +296,6 @@ fn tolerates_truncated_json_stub_response() {
 /// tolerates: stub returns overlong JSON (10KB of padding). Server must not crash.
 #[test]
 fn tolerates_overlong_json_stub_response() {
-    let server_port = free_port();
-
     // Overlong: valid JSON but with 10KB of padding in content
     let padding = "x".repeat(10240);
     let overlong = format!(
@@ -312,9 +304,10 @@ fn tolerates_overlong_json_stub_response() {
     );
     let (ai_port, _stub) = start_raw_stub(200, &overlong);
 
-    let server = start_server(server_port, ai_port);
+    let server = start_server(ai_port);
+    let server_port = server.port;
 
-    let client = reqwest::blocking::Client::new();
+    let client = sync_http::Client::new();
     let resp = client
         .post(format!(
             "http://127.0.0.1:{}/api/ai/office-action-response",
@@ -340,7 +333,7 @@ fn tolerates_overlong_json_stub_response() {
     }
 
     // Server must still be alive
-    let alive = reqwest::blocking::get(format!("http://127.0.0.1:{}/api/version", server_port))
+    let alive = sync_http::get(format!("http://127.0.0.1:{}/api/version", server_port))
         .map(|r| r.status().is_success())
         .unwrap_or(false);
     assert!(alive, "server must survive overlong JSON");
@@ -351,14 +344,13 @@ fn tolerates_overlong_json_stub_response() {
 /// accepts: stub returns well-formed complete JSON. Server processes normally.
 #[test]
 fn accepts_complete_json_stub_response() {
-    let server_port = free_port();
-
     let valid = r#"{"choices":[{"message":{"role":"assistant","content":"完整的AI回复"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":10,"total_tokens":15}}"#;
     let (ai_port, _stub) = start_raw_stub(200, valid);
 
-    let server = start_server(server_port, ai_port);
+    let server = start_server(ai_port);
+    let server_port = server.port;
 
-    let client = reqwest::blocking::Client::new();
+    let client = sync_http::Client::new();
     let resp = client
         .post(format!(
             "http://127.0.0.1:{}/api/ai/office-action-response",

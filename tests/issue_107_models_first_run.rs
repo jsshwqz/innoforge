@@ -13,7 +13,6 @@
 //! `first_run_ollama_not_empty` fail (providers is empty, Ollama not found).
 
 mod common;
-use common::{free_port, spawn_test_server};
 use std::io::{Read, Write};
 use std::net::TcpListener;
 
@@ -66,12 +65,12 @@ impl ModelsStub {
 /// This is the case that was broken: providers was [] after PR #104.
 #[test]
 fn first_run_ollama_not_empty() {
-    let port = free_port();
     // No AI_BASE_URL set → server defaults to http://localhost:11434/v1 (Ollama)
     // No Ollama is running in the test environment
-    let server = spawn_test_server(port, &[]);
+    let server = common::spawn_test_server_on_free_port(&[]);
+    let port = server.port;
 
-    let client = reqwest::blocking::Client::new();
+    let client = common::sync_http::Client::new();
     let resp = client
         .get(format!("http://127.0.0.1:{}/api/ai/models", port))
         .send()
@@ -129,16 +128,13 @@ fn first_run_ollama_not_empty() {
 #[test]
 fn configured_stub_provider_ok() {
     let stub = ModelsStub::start();
-    let port = free_port();
-    let server = spawn_test_server(
-        port,
-        &[
-            ("AI_BASE_URL", &format!("http://127.0.0.1:{}/v1", stub.port)),
-            ("AI_API_KEY", "test-key-107"),
-        ],
-    );
+    let server = common::spawn_test_server_on_free_port(&[
+        ("AI_BASE_URL", &format!("http://127.0.0.1:{}/v1", stub.port)),
+        ("AI_API_KEY", "test-key-107"),
+    ]);
+    let port = server.port;
 
-    let client = reqwest::blocking::Client::new();
+    let client = common::sync_http::Client::new();
     let resp = client
         .get(format!("http://127.0.0.1:{}/api/ai/models", port))
         .send()
@@ -175,11 +171,11 @@ fn configured_stub_provider_ok() {
 /// must hold on the SAME response simultaneously.
 #[test]
 fn issue_68_and_98_assertions_hold_simultaneously() {
-    let port = free_port();
     // Default config → Ollama, no Ollama running
-    let server = spawn_test_server(port, &[]);
+    let server = common::spawn_test_server_on_free_port(&[]);
+    let port = server.port;
 
-    let client = reqwest::blocking::Client::new();
+    let client = common::sync_http::Client::new();
     let resp = client
         .get(format!("http://127.0.0.1:{}/api/ai/models", port))
         .send()

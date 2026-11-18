@@ -3,8 +3,8 @@
 //! 四种明确状态逐一验证：error（创意不存在）/ no_snapshot / no_kernel_report（旧快照）/
 //! ok（带完整内核报告）。快照通过直插 DB 构造（WAL 并发安全），不走重型 pipeline。
 //!
-//! 全程同步（harness 就绪探测与断言请求均用 reqwest::blocking）——
-//! blocking reqwest 内部自建 runtime，放进异步上下文会 panic，故不用 #[tokio::test]。
+//! 全程同步（harness 就绪探测与断言请求均用 common::sync_http）——
+//! sync_http 内部自建 runtime，放进异步上下文会 panic，故不用 #[tokio::test]。
 
 mod common;
 
@@ -38,7 +38,7 @@ fn insert_snapshot(home: &std::path::Path, idea_id: &str, kernel_report: Option<
 
 fn get_report(port: u16, idea_id: &str) -> Value {
     let url = format!("http://127.0.0.1:{port}/api/idea/{idea_id}/kernel-report");
-    reqwest::blocking::get(&url)
+    common::sync_http::get(&url)
         .expect("http get")
         .json::<Value>()
         .expect("json body")

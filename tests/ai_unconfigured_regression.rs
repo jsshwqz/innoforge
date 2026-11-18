@@ -12,6 +12,9 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::OnceLock;
 
+#[path = "helpers/sync_http.rs"]
+mod sync_http;
+
 static DB_TEMPLATE: OnceLock<PathBuf> = OnceLock::new();
 
 fn ensure_db_template() -> PathBuf {
@@ -56,7 +59,7 @@ mod port_alloc;
 fn wait_for_server(port: u16, timeout_secs: u64) -> bool {
     let start = std::time::Instant::now();
     while start.elapsed().as_secs() < timeout_secs {
-        if let Ok(resp) = reqwest::blocking::get(format!("http://127.0.0.1:{}/api/version", port)) {
+        if let Ok(resp) = sync_http::get(format!("http://127.0.0.1:{}/api/version", port)) {
             if resp.status().is_success() {
                 return true;
             }
@@ -134,7 +137,7 @@ fn settings_returns_false_when_no_ai_key() {
 
     assert!(wait_for_server(server_port, 60), "server must start");
 
-    let resp = reqwest::blocking::get(format!("http://127.0.0.1:{}/api/settings", server_port))
+    let resp = sync_http::get(format!("http://127.0.0.1:{}/api/settings", server_port))
         .expect("/api/settings must respond");
     assert!(resp.status().is_success(), "/api/settings must return 200");
 

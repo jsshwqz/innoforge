@@ -12,7 +12,8 @@
 //!   fall back to Ollama.
 
 mod common;
-use common::{free_port, spawn_test_server};
+use common::sync_http;
+use common::{free_port, spawn_test_server_on_free_port};
 use std::net::TcpListener;
 
 /// A minimal in-process stub server that responds to GET /v1/models.
@@ -95,15 +96,12 @@ fn spawn_stub(response_type: &str) -> StubServer {
 #[test]
 fn issue_98_configured_provider_probed_and_ok() {
     let stub = spawn_stub("ok");
-    let port = free_port();
-    let server = spawn_test_server(
-        port,
-        &[
-            ("AI_BASE_URL", &format!("http://127.0.0.1:{}/v1", stub.port)),
-            ("AI_API_KEY", "test-key"),
-        ],
-    );
-    let client = reqwest::blocking::Client::new();
+    let server = spawn_test_server_on_free_port(&[
+        ("AI_BASE_URL", &format!("http://127.0.0.1:{}/v1", stub.port)),
+        ("AI_API_KEY", "test-key"),
+    ]);
+    let port = server.port;
+    let client = sync_http::Client::new();
 
     let resp = client
         .get(format!("http://127.0.0.1:{}/api/ai/models", port))
@@ -148,15 +146,12 @@ fn issue_98_configured_provider_probed_and_ok() {
 #[test]
 fn issue_98_provider_unreachable_top_status_not_ok() {
     let dead_port = free_port(); // nothing listening here
-    let port = free_port();
-    let server = spawn_test_server(
-        port,
-        &[
-            ("AI_BASE_URL", &format!("http://127.0.0.1:{}/v1", dead_port)),
-            ("AI_API_KEY", "test-key"),
-        ],
-    );
-    let client = reqwest::blocking::Client::new();
+    let server = spawn_test_server_on_free_port(&[
+        ("AI_BASE_URL", &format!("http://127.0.0.1:{}/v1", dead_port)),
+        ("AI_API_KEY", "test-key"),
+    ]);
+    let port = server.port;
+    let client = sync_http::Client::new();
 
     let resp = client
         .get(format!("http://127.0.0.1:{}/api/ai/models", port))
@@ -189,15 +184,12 @@ fn issue_98_provider_unreachable_top_status_not_ok() {
 #[test]
 fn issue_98_provider_401_must_report_auth_error() {
     let stub = spawn_stub("401");
-    let port = free_port();
-    let server = spawn_test_server(
-        port,
-        &[
-            ("AI_BASE_URL", &format!("http://127.0.0.1:{}/v1", stub.port)),
-            ("AI_API_KEY", "invalid-key"),
-        ],
-    );
-    let client = reqwest::blocking::Client::new();
+    let server = spawn_test_server_on_free_port(&[
+        ("AI_BASE_URL", &format!("http://127.0.0.1:{}/v1", stub.port)),
+        ("AI_API_KEY", "invalid-key"),
+    ]);
+    let port = server.port;
+    let client = sync_http::Client::new();
 
     let resp = client
         .get(format!("http://127.0.0.1:{}/api/ai/models", port))

@@ -42,7 +42,7 @@ fn dead_ai_backend_degrades_to_structured_response() {
     let port = server.port;
 
     // 3) 触发会真实发起 AI 调用的端点（oa-panel 四角色立论，最小输入即可）
-    let client = reqwest::blocking::Client::builder()
+    let client = common::sync_http::Client::builder()
         .timeout(std::time::Duration::from_secs(90))
         .build()
         .expect("test client");

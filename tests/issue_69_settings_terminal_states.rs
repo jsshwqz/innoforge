@@ -7,7 +7,6 @@
 //! All test names carry `issue_69` for discoverability.
 
 mod common;
-use common::{free_port, spawn_test_server};
 
 const SETTINGS_HTML: &str = include_str!("../templates/settings.html");
 const I18N_JS: &str = include_str!("../static/i18n.js");
@@ -113,7 +112,6 @@ fn issue_69_placeholder_keys_echo_empty_and_unconfigured() {
     let placeholders: &[&str] = &["", "ollama", "sk-xxx", "your-serpapi-key-here"];
 
     for &placeholder in placeholders {
-        let port = free_port();
         let env_key = if placeholder.is_empty() {
             vec![("AI_BASE_URL", "https://api.deepseek.com/v1")]
         } else {
@@ -123,8 +121,9 @@ fn issue_69_placeholder_keys_echo_empty_and_unconfigured() {
             ]
         };
 
-        let server = spawn_test_server(port, &env_key);
-        let client = reqwest::blocking::Client::new();
+        let server = common::spawn_test_server_on_free_port(&env_key);
+        let port = server.port;
+        let client = common::sync_http::Client::new();
 
         let resp = client
             .get(format!("http://127.0.0.1:{}/api/settings", port))
@@ -165,16 +164,13 @@ fn issue_69_placeholder_keys_echo_empty_and_unconfigured() {
 /// would fail.
 #[test]
 fn issue_69_real_key_shows_configured_and_masked() {
-    let port = free_port();
-    let server = spawn_test_server(
-        port,
-        &[
-            ("AI_BASE_URL", "https://api.deepseek.com/v1"),
-            ("AI_API_KEY", "sk-real-key-for-negative-control-69"),
-        ],
-    );
+    let server = common::spawn_test_server_on_free_port(&[
+        ("AI_BASE_URL", "https://api.deepseek.com/v1"),
+        ("AI_API_KEY", "sk-real-key-for-negative-control-69"),
+    ]);
+    let port = server.port;
 
-    let client = reqwest::blocking::Client::new();
+    let client = common::sync_http::Client::new();
     let resp = client
         .get(format!("http://127.0.0.1:{}/api/settings", port))
         .send()

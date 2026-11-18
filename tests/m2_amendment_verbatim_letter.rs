@@ -13,6 +13,8 @@
 
 mod common;
 
+use common::sync_http;
+
 use std::io::{Read, Write};
 use std::net::TcpListener;
 
@@ -103,7 +105,7 @@ fn start_stub() -> u16 {
 }
 
 fn post_letter(port: u16, body: &serde_json::Value) -> String {
-    let client = reqwest::blocking::Client::builder()
+    let client = sync_http::Client::builder()
         .timeout(std::time::Duration::from_secs(90))
         .build()
         .expect("client");

@@ -12,7 +12,7 @@ http://127.0.0.1:3000
 
 - **完整端点清单**见 [`API-ROUTES.md`](API-ROUTES.md)（自动生成，含方法 / 路径 / 处理函数 / 源码行）；**逐端点的字段级契约**（路径参数、请求体字段、响应顶层键）见 [`API-CONTRACTS.md`](API-CONTRACTS.md)。本文只写语义、示例与使用注意事项。
 - 搜索历史为前端 `localStorage`，没有 `/api/search/history` 接口。
-- 详情页是页面路由 `GET /patent/:id`，不是 JSON API。
+- 详情页是页面路由 `GET /patent/{id}`，不是 JSON API。
 - AI 分析相关接口均为 OpenAI 兼容下游能力封装。
 - 全局请求超时：300 秒（防止大上下文提前超时）。
 - SSE（Server-Sent Events）端点使用标准 `text/event-stream` 格式。
@@ -28,10 +28,10 @@ http://127.0.0.1:3000
 | GET | `/compare` | 专利对比页 / Patent comparison page |
 | GET | `/ai` | AI 助手页 / AI assistant page |
 | GET | `/settings` | 设置页 / Settings page |
-| GET | `/patent/:id` | 专利详情页 / Patent detail page |
+| GET | `/patent/{id}` | 专利详情页 / Patent detail page |
 | GET | `/idea` | 创意验证页 / Idea validation page |
 | GET | `/oa-response` | 审查意见答复页 / Office action response page |
-| GET | `/static/*path` | 内嵌静态资源 / Embedded static assets |
+| GET | `/static/{*path}` | 内嵌静态资源 / Embedded static assets |
 
 > 注：`/test`（调试页）与 `/import`（样例导入页）两条页面路由已在代码中移除，故不再列出（issue #62）。
 
@@ -225,11 +225,11 @@ Request:
 
 ### 3) 丰富专利信息 / Enrich Patent
 
-**GET** `/api/patent/enrich/:id`
+**GET** `/api/patent/enrich/{id}`
 
 ### 4) 相似专利推荐 / Similar Patents
 
-**GET** `/api/patent/similar/:id`
+**GET** `/api/patent/similar/{id}`
 
 ### 5) 上传文档对比 / Upload Compare
 
@@ -394,7 +394,7 @@ Response:
 
 ### 4) 断点续跑 / Resume Pipeline
 
-**POST** `/api/idea/:id/resume`
+**POST** `/api/idea/{id}/resume`
 
 从上一次失败或中断的步骤继续执行管道。
 
@@ -410,13 +410,13 @@ Response:
 
 ### 5) SSE 进度流 / Pipeline Progress (SSE)
 
-**GET** `/api/idea/:id/progress`
+**GET** `/api/idea/{id}/progress`
 
 返回 `text/event-stream`，推送管道执行进度。每条事件包含当前步骤名称、完成百分比、中间结果。
 
 ### 6) 获取创意详情 / Get Idea
 
-**GET** `/api/idea/:id`
+**GET** `/api/idea/{id}`
 
 ### 7) 列出所有创意 / List Ideas
 
@@ -424,19 +424,19 @@ Response:
 
 ### 8) 删除创意 / Delete Idea
 
-**POST** `/api/idea/:id/delete`
+**POST** `/api/idea/{id}/delete`
 
 级联删除：创意 + 消息 + 特征卡片 + 管道快照 + 证据链。
 
 ### 9) 证据链 / Evidence Chain
 
-**GET** `/api/idea/:id/evidence`
+**GET** `/api/idea/{id}/evidence`
 
 返回管道执行过程中积累的全部证据条目。
 
 ### 10) 创意对话 / Idea Multi-Round Chat
 
-**POST** `/api/idea/:id/chat`
+**POST** `/api/idea/{id}/chat`
 
 ```json
 {
@@ -446,19 +446,19 @@ Response:
 
 ### 11) 获取对话消息 / Get Idea Messages
 
-**GET** `/api/idea/:id/messages`
+**GET** `/api/idea/{id}/messages`
 
 ### 12) 对话结论 / Chat Conclusions
 
-**GET** `/api/idea/:id/chat/conclusions`
+**GET** `/api/idea/{id}/chat/conclusions`
 
 ### 13) 总结讨论 / Summarize Discussion
 
-**POST** `/api/idea/:id/summarize`
+**POST** `/api/idea/{id}/summarize`
 
 ### 14) 验证报告 / Report
 
-**GET** `/api/idea/:id/report?type=executive`
+**GET** `/api/idea/{id}/report?type=executive`
 
 Query 参数 `type`: `executive | technical`
 
@@ -466,15 +466,15 @@ Query 参数 `type`: `executive | technical`
 
 ### 15) HTML 报告 / Report HTML
 
-**GET** `/api/idea/:id/report.html`
+**GET** `/api/idea/{id}/report.html`
 
 返回可直接渲染的 HTML 报告。
 
 ### 16) 研发状态 / Research State
 
-**GET** `/api/idea/:id/research-state`
+**GET** `/api/idea/{id}/research-state`
 
-**POST** `/api/idea/:id/research-state`
+**POST** `/api/idea/{id}/research-state`
 
 获取或更新研发状态机的当前状态。
 
@@ -491,7 +491,7 @@ Request:
 
 ### 17) 管道重定向 / Redirect Pipeline
 
-**POST** `/api/idea/:id/redirect`
+**POST** `/api/idea/{id}/redirect`
 
 从指定步骤重新启动管道，可切换技术领域或追加查询词。
 
@@ -518,27 +518,27 @@ Request:
 
 ### 19) 权利要求树 / Claim Tree
 
-**GET** `/api/idea/:id/claim-tree`
+**GET** `/api/idea/{id}/claim-tree`
 
 返回可视化权利要求层级结构。
 
 ### 20) 迭代优化 / Iterate
 
-**POST** `/api/idea/:id/iterate`
+**POST** `/api/idea/{id}/iterate`
 
 基于当前验证结果，自动迭代优化创意。
 
 ### 21) 版本历史 / Versions
 
-**GET** `/api/idea/:id/versions`
+**GET** `/api/idea/{id}/versions`
 
 ### 22) 分支列表 / Branches
 
-**GET** `/api/idea/:id/branches`
+**GET** `/api/idea/{id}/branches`
 
 ### 23) 关键发现 / Findings
 
-**GET** `/api/idea/:id/findings`
+**GET** `/api/idea/{id}/findings`
 
 ---
 
@@ -548,7 +548,7 @@ Request:
 
 ### 1) 获取特征卡片列表 / Get Feature Cards
 
-**GET** `/api/ideas/:id/feature-cards`
+**GET** `/api/ideas/{id}/feature-cards`
 
 Response:
 
@@ -575,7 +575,7 @@ Response:
 
 ### 2) 创建特征卡片 / Create Feature Card
 
-**POST** `/api/ideas/:id/feature-cards`
+**POST** `/api/ideas/{id}/feature-cards`
 
 Request (`CreateFeatureCardRequest`):
 
@@ -674,15 +674,15 @@ Response:
 
 ### 3) 删除收藏夹 / Delete Collection
 
-**DELETE** `/api/collections/:id`
+**DELETE** `/api/collections/{id}`
 
 ### 4) 获取收藏夹内专利 / Get Collection Patents
 
-**GET** `/api/collections/:id/patents`
+**GET** `/api/collections/{id}/patents`
 
 ### 5) 添加专利到收藏夹 / Add Patent to Collection
 
-**POST** `/api/collections/:id/add`
+**POST** `/api/collections/{id}/add`
 
 ```json
 {
@@ -694,11 +694,11 @@ Response:
 
 ### 6) 从收藏夹移除专利 / Remove Patent from Collection
 
-**DELETE** `/api/collections/:id/remove/:patent_id`
+**DELETE** `/api/collections/{id}/remove/{patent_id}`
 
 ### 7) 获取专利所属收藏夹 / Get Patent's Collections
 
-**GET** `/api/patents/:patent_id/collections`
+**GET** `/api/patents/{patent_id}/collections`
 
 > ⚠️ 该端点在当前代码路由表中不存在（历史条目，issue #62）。以实际路由为准，勿据此调用。
 
@@ -708,7 +708,7 @@ Response:
 
 ### 1) 添加标签 / Add Tag
 
-**POST** `/api/patents/:patent_id/tags`
+**POST** `/api/patents/{patent_id}/tags`
 
 > ⚠️ 该端点在当前代码路由表中不存在（历史条目，issue #62）。以实际路由为准，勿据此调用。
 
@@ -723,13 +723,13 @@ Response:
 
 ### 2) 删除标签 / Remove Tag
 
-**DELETE** `/api/patents/:patent_id/tags/:tag`
+**DELETE** `/api/patents/{patent_id}/tags/{tag}`
 
 > ⚠️ 该端点在当前代码路由表中不存在（历史条目，issue #62）。以实际路由为准，勿据此调用。
 
 ### 3) 获取专利标签 / Get Patent Tags
 
-**GET** `/api/patents/:patent_id/tags`
+**GET** `/api/patents/{patent_id}/tags`
 
 > ⚠️ 该端点在当前代码路由表中不存在（历史条目，issue #62）。以实际路由为准，勿据此调用。
 
@@ -764,7 +764,7 @@ Response:
 
 ### 1) 获取消息（分页）/ Get Messages
 
-**GET** `/api/chat/:session_key?limit=50&offset=0`
+**GET** `/api/chat/{session_key}?limit=50&offset=0`
 
 Query 参数：
 - `limit`（可选，默认 50，范围 1-200）
@@ -789,7 +789,7 @@ Response:
 
 ### 2) 保存消息 / Save Message
 
-**POST** `/api/chat/:session_key/save`
+**POST** `/api/chat/{session_key}/save`
 
 ```json
 {
@@ -804,7 +804,7 @@ Response:
 
 ### 3) 删除消息 / Delete Messages
 
-**POST** `/api/chat/:session_key/delete`
+**POST** `/api/chat/{session_key}/delete`
 
 删除指定会话的全部消息。
 
@@ -942,8 +942,8 @@ Response:
 | POST | `/api/cad/start` | 启动/预热 FreeCAD 引擎 |
 | POST | `/api/cad/draw` | 提交绘图指令，生成 CAD 产物 |
 | GET | `/api/cad/artifacts` | 列出某上下文的 CAD 产物历史 |
-| GET | `/api/cad/artifacts/:id/preview` | 取产物预览 PNG |
-| GET | `/api/cad/artifacts/:id/download/:format` | 下载产物（fcstd/step） |
+| GET | `/api/cad/artifacts/{id}/preview` | 取产物预览 PNG |
+| GET | `/api/cad/artifacts/{id}/download/{format}` | 下载产物（fcstd/step） |
 | GET | `/api/auth/google/url` | 生成 Google OAuth 授权跳转 URL |
 | GET | `/api/auth/google/callback` | OAuth 回调 HTML（前端中转） |
 | POST | `/api/auth/google/exchange` | 用授权码交换 access/refresh token |
@@ -1048,13 +1048,13 @@ Response:
 - 成功响应（`200`）：`{ "artifacts": [CadArtifact, ...] }`。
 - 失败：`400 invalid_request`（context_id 空）/ `500 history_failed`。
 
-### GET `/api/cad/artifacts/:id/preview`
+### GET `/api/cad/artifacts/{id}/preview`
 
 - 路径参数：`id`（产物 ID）。
 - 成功响应（`200`）：`image/png` 二进制。
 - 失败：`404 artifact_not_found` / `404 file_not_found` / `400 invalid_path` / `500 root_unavailable`。
 
-### GET `/api/cad/artifacts/:id/download/:format`
+### GET `/api/cad/artifacts/{id}/download/{format}`
 
 - 路径参数：`id`、`format` ∈ `fcstd` | `step`。
 - 成功响应（`200`）：对应 MIME 的二进制，带 `Content-Disposition: attachment`。
@@ -1313,7 +1313,7 @@ Response:
 | `recognized` | `oa_type` 是否为合法值；`false` 表示本次结果是兜底值 |
 | `warning` | 未识别时给出 `unknown oa_type '<值>', using conservative default (shortest period)`；识别时为 `null` |
 
-### GET `/api/oa/rounds/:patent_id`
+### GET `/api/oa/rounds/{patent_id}`
 
 返回某专利的全部 OA 轮次：`{ "status": "ok", "patent_id": "...", "rounds": [...], "count": N }`。
 
@@ -1325,15 +1325,15 @@ Response:
 - 可选：`oa_date`、`oa_text`、`response_date`、`response_text`、`result`、`result_date`、`strategy_used`、`quality_score`（数值）、`notes`。
 - 成功：`{ "status": "ok", "round": {…}, "message": "OA round created" }`。
 
-### PUT `/api/oa/rounds/update/:id`
+### PUT `/api/oa/rounds/update/{id}`
 
 按 id 局部更新一轮 OA，只更新请求里出现的字段；记录不存在返回 `{ "status": "error", "message": "OA round not found" }`。
 
-### GET `/api/oa/history/all` 与 GET `/api/oa/history/:patent_number`
+### GET `/api/oa/history/all` 与 GET `/api/oa/history/{patent_number}`
 
-均返回 `{ "status": "ok", "analyses": [...] }`。`/history/all` 最多返回 100 条（按时间倒序）；`/history/:patent_number` 按专利号过滤。
+均返回 `{ "status": "ok", "analyses": [...] }`。`/history/all` 最多返回 100 条（按时间倒序）；`/history/{patent_number}` 按专利号过滤。
 
-> ⚠️ `GET /api/oa/history/detail/:id` 目前被错误绑定到“列出全部”的 handler，`:id` 会被忽略（见 issue #88）。排查时不要依赖它。
+> ⚠️ `GET /api/oa/history/detail/{id}` 目前被错误绑定到“列出全部”的 handler，`:id` 会被忽略（见 issue #88）。排查时不要依赖它。
 
 ### POST `/api/oa/export-docx`
 
@@ -1350,20 +1350,20 @@ Response:
 | GET | `/api/oa/deadline-table` | 法定答复期限表（唯一数据源） |
 | GET | `/api/oa/compute-deadline` | 按发文日推算届满日 |
 | GET | `/api/oa/history/all` | 全部 OA 分析历史（≤100 条） |
-| GET | `/api/oa/history/:patent_number` | 某专利的 OA 分析历史 |
-| GET | `/api/oa/history/detail/:id` | 单条详情（当前实现有缺陷，见 #88） |
-| POST | `/api/oa/history/:id/delete` | 删除一条 OA 分析记录 |
-| GET | `/api/oa/history/:patent_number/diff` | 一审/二审差异对比 |
-| GET | `/api/oa/discussions/:patent_number` | 某专利的 OA 讨论会话列表 |
-| GET | `/api/oa/discussions/:patent_number/:discussion_id` | 单个讨论会话详情 |
+| GET | `/api/oa/history/{patent_number}` | 某专利的 OA 分析历史 |
+| GET | `/api/oa/history/detail/{id}` | 单条详情（当前实现有缺陷，见 #88） |
+| POST | `/api/oa/history/{id}/delete` | 删除一条 OA 分析记录 |
+| GET | `/api/oa/history/{patent_number}/diff` | 一审/二审差异对比 |
+| GET | `/api/oa/discussions/{patent_number}` | 某专利的 OA 讨论会话列表 |
+| GET | `/api/oa/discussions/{patent_number}/{discussion_id}` | 单个讨论会话详情 |
 | POST | `/api/oa/discussions/import` | 导入讨论会话 |
 | POST | `/api/oa/export-docx` | 答复正文导出 DOCX（base64） |
 | POST | `/api/oa/export` | 分析结果服务端导出 |
-| GET | `/api/oa/export/:filename` | 下载已导出的文件 |
-| GET | `/api/oa/rounds/:patent_id` | 某专利的 OA 轮次列表 |
+| GET | `/api/oa/export/{filename}` | 下载已导出的文件 |
+| GET | `/api/oa/rounds/{patent_id}` | 某专利的 OA 轮次列表 |
 | POST | `/api/oa/rounds` | 登记一轮 OA |
-| PUT | `/api/oa/rounds/update/:id` | 局部更新一轮 OA |
-| GET | `/api/oa/timeline/:patent_id` | 某专利的 OA 时间线 |
+| PUT | `/api/oa/rounds/update/{id}` | 局部更新一轮 OA |
+| GET | `/api/oa/timeline/{patent_id}` | 某专利的 OA 时间线 |
 
 
 ## R24 续补：配置 / 聊天记录 / 收藏夹 / 标签 / IPC（19 条）
@@ -1436,7 +1436,7 @@ Response:
 
 ### 聊天记录 / Chat Records
 
-**GET** `/api/chat/:session_key`
+**GET** `/api/chat/{session_key}`
 
 分页读取某会话的消息（按时间正序）。查询参数 `limit`（默认 50，钳制到 1–200）、`offset`（默认 0）。`session_key` 必须非空且 ≤255 字节。
 
@@ -1444,11 +1444,11 @@ Response:
 { "status": "ok", "messages": [ … ], "total": 123, "limit": 50, "offset": 0 }
 ```
 
-**POST** `/api/chat/:session_key/save`
+**POST** `/api/chat/{session_key}/save`
 
 保存一条消息。请求 `{ "role": "user|assistant|system", "content": "…" }`；`role` 只接受这三个值，`content` 上限 50000（按 UTF-8 字节校验）。成功返回 `{"status":"ok","message_id":123}`。
 
-**POST** `/api/chat/:session_key/delete`
+**POST** `/api/chat/{session_key}/delete`
 
 删除该会话的全部消息，成功返回 `{"status":"ok","deleted":N}`。
 
@@ -1458,10 +1458,10 @@ Response:
 |---|---|---|
 | **GET** `/api/collections` | — | `{"collections":[{"id","name","description","patent_count","created_at"}]}` |
 | **POST** `/api/collections` | `{"name":"…","description":"…"}` | `{"status":"ok","id":"…","name":"…"}` |
-| **DELETE** `/api/collections/:id` | — | `{"status":"ok"}` |
-| **GET** `/api/collections/:id/patents` | — | `{"patents":[…]}` |
-| **POST** `/api/collections/:id/add` | `{"patent_id":"…"}` | `{"status":"ok"}` |
-| **DELETE** `/api/collections/:id/remove/:patent_id` | — | `{"status":"ok"}` |
+| **DELETE** `/api/collections/{id}` | — | `{"status":"ok"}` |
+| **GET** `/api/collections/{id}/patents` | — | `{"patents":[…]}` |
+| **POST** `/api/collections/{id}/add` | `{"patent_id":"…"}` | `{"status":"ok"}` |
+| **DELETE** `/api/collections/{id}/remove/{patent_id}` | — | `{"status":"ok"}` |
 
 - 收藏夹 `name` 必填，上限 100 字节（按 UTF-8 字节校验，不是字符数）。
 - `add` 会先校验专利存在，不存在返回 `{"error":"专利不存在"}`。
@@ -1471,10 +1471,10 @@ Response:
 
 | 端点 | 请求 | 成功响应 |
 |---|---|---|
-| **GET** `/api/patents/:id/tags` | — | `{"tags":["tag1","tag2"]}` |
-| **POST** `/api/patents/:id/tags` | `{"tag":"…"}` | `{"status":"ok"}` |
-| **DELETE** `/api/patents/:id/tags/:tag` | — | `{"status":"ok"}` |
-| **GET** `/api/patents/:id/collections` | — | `{"collection_ids":["…"]}` |
+| **GET** `/api/patents/{id}/tags` | — | `{"tags":["tag1","tag2"]}` |
+| **POST** `/api/patents/{id}/tags` | `{"tag":"…"}` | `{"status":"ok"}` |
+| **DELETE** `/api/patents/{id}/tags/{tag}` | — | `{"status":"ok"}` |
+| **GET** `/api/patents/{id}/collections` | — | `{"collection_ids":["…"]}` |
 | **GET** `/api/tags` | — | `{"tags":[{"tag":"…","count":3}]}` |
 
 标签名必填、上限 50 字节。路径里的 `:tag` 需要做 URL 编码（含空格/中文的标签）。
@@ -1503,7 +1503,7 @@ Response:
 }
 ```
 
-**GET** `/api/ipc/:code/patents`
+**GET** `/api/ipc/{code}/patents`
 
 按 IPC 代码**前缀**查专利；代码会 `trim` 并转大写。返回 `{"status":"ok","code":"G06N","count":N,"patents":[…]}`。
 
@@ -1514,22 +1514,22 @@ Response:
 | GET | `/api/version` | 版本 / commit / 模板 sha256 |
 | POST | `/api/settings/cad` | 保存 FreeCAD 工作区与自动启动 |
 | GET | `/api/settings/serpapi/balance` | SerpAPI 余额（30s 超时） |
-| GET | `/api/chat/:session_key` | 会话消息分页读取 |
-| POST | `/api/chat/:session_key/save` | 保存一条消息 |
-| POST | `/api/chat/:session_key/delete` | 清空会话消息 |
+| GET | `/api/chat/{session_key}` | 会话消息分页读取 |
+| POST | `/api/chat/{session_key}/save` | 保存一条消息 |
+| POST | `/api/chat/{session_key}/delete` | 清空会话消息 |
 | GET | `/api/collections` | 收藏夹列表（含 patent_count） |
 | POST | `/api/collections` | 新建收藏夹 |
-| DELETE | `/api/collections/:id` | 删除收藏夹 |
-| GET | `/api/collections/:id/patents` | 收藏夹内专利 |
-| POST | `/api/collections/:id/add` | 加入专利（先校验存在） |
-| DELETE | `/api/collections/:id/remove/:patent_id` | 移出专利 |
-| GET | `/api/patents/:id/tags` | 某专利的标签 |
-| POST | `/api/patents/:id/tags` | 添加标签（≤50 字节） |
-| DELETE | `/api/patents/:id/tags/:tag` | 删除标签 |
-| GET | `/api/patents/:id/collections` | 某专利所属收藏夹 id |
+| DELETE | `/api/collections/{id}` | 删除收藏夹 |
+| GET | `/api/collections/{id}/patents` | 收藏夹内专利 |
+| POST | `/api/collections/{id}/add` | 加入专利（先校验存在） |
+| DELETE | `/api/collections/{id}/remove/{patent_id}` | 移出专利 |
+| GET | `/api/patents/{id}/tags` | 某专利的标签 |
+| POST | `/api/patents/{id}/tags` | 添加标签（≤50 字节） |
+| DELETE | `/api/patents/{id}/tags/{tag}` | 删除标签 |
+| GET | `/api/patents/{id}/collections` | 某专利所属收藏夹 id |
 | GET | `/api/tags` | 全部标签及计数 |
 | GET | `/api/ipc/tree` | 库内专利的 IPC 三级树 |
-| GET | `/api/ipc/:code/patents` | 按 IPC 前缀查专利 |
+| GET | `/api/ipc/{code}/patents` | 按 IPC 前缀查专利 |
 
 ## R27 续补：分析 / 外部抓取 / 上传 / 创意记忆（27 条）
 
@@ -1562,7 +1562,7 @@ BM25 + 向量相似度的 RRF 融合检索。
 
 ### 专利：外部抓取 / 法律状态 / PDF / 图片
 
-**GET** `/api/patent/enrich-free/:id`
+**GET** `/api/patent/enrich-free/{id}`
 
 对库里已有专利做一次免费全文富化（Google Patents 免费抓取，走 `search::enrichment` 统一核心）。
 
@@ -1570,7 +1570,7 @@ BM25 + 向量相似度的 RRF 融合检索。
 - `status`：`ok`（含 `patent`）、`cooldown`（`message` + `remaining_secs`）、`error`（`message`：专利不存在或抓取失败）。
 - 处于冷却时**不重试、不等待**，直接返回剩余秒数。
 
-**GET** `/api/patent/lookup/:number?fetch=true`
+**GET** `/api/patent/lookup/{number}?fetch=true`
 
 按专利号查本地库（先归一化号，再按原串兜底）。
 
@@ -1589,7 +1589,7 @@ BM25 + 向量相似度的 RRF 融合检索。
 - 成功多一个 `source`：`"local"` 或 `"online"`；抓取失败 `{"status":"error","message":"在线抓取失败: …"}`；空号 `{"status":"error","message":"请输入专利号"}`。
 - 抓取成功但缓存失败时，仍返回 `source:"online"` 的上游原始数据。
 
-**GET** `/api/patent/:id/legal-status`
+**GET** `/api/patent/{id}/legal-status`
 
 三级降级查法律状态：Google Patents（SerpAPI）→ 搜狗国知局公告 → 未知。
 
@@ -1598,7 +1598,7 @@ BM25 + 向量相似度的 RRF 融合检索。
 - 全部来源失败不报错：`current_status="未知"`、`source="none"`、`events=[]`——这是「没查到」，不是「无法律状态」。
 - 查到非空状态时，把前 5 条事件写回本地专利的 `legal_status` 字段。
 
-**GET** `/api/patent/pdf/:id`
+**GET** `/api/patent/pdf/{id}`
 
 生成可打印的 HTML 页（浏览器「打印 → 另存为 PDF」），不是 PDF 二进制。
 
@@ -1748,29 +1748,29 @@ BM25 + 向量相似度的 RRF 融合检索。
 
 ### 创意：内核报告 / 对话快照 / 记忆
 
-**GET** `/api/idea/:id/kernel-report`
+**GET** `/api/idea/{id}/kernel-report`
 
 取该创意流水线快照里的证据内核报告。
 
 - `status`：`ok`（`kernel_report` + `current_step`）、`no_snapshot`（没跑过分析）、`no_kernel_report`（旧快照或未到 Finalize）、`error`（创意不存在 / 快照解析失败）。
 - 这是「报告是否真的产出过」的权威入口；`no_*` 不等于空报告。
 
-**GET** `/api/idea/:id/chat/conversation`
+**GET** `/api/idea/{id}/chat/conversation`
 
 一次取回讨论全量（不分页）：`{"status":"ok","idea":{"id","title","description"},"messages":[{"role","content","created_at"}]}`。创意不存在 → `{"error":"创意不存在"}`。
 
-**GET** `/api/idea/:id/memory`
+**GET** `/api/idea/{id}/memory`
 
 列出创意记忆：`{"status":"ok","entries":[…],"counts":{"total","by_type"}}`。
 
-**POST** `/api/idea/:id/memory`
+**POST** `/api/idea/{id}/memory`
 
 手工新增一条记忆。请求：`concept_name`、`content`（必填）、`concept_type`（`domain_concept` / `decision` / `pattern` / `question`，默认 `domain_concept`）、`confidence`（0–1，默认 0.5，越界会被钳制）。
 
 - 成功：`{"status":"ok","id":…}`；缺字段或类型非法：`{"status":"error","message":…}`。
 - 手工条目的 `source_step` 记为 `UserManual`，可与流水线自动沉淀的条目区分。
 
-**DELETE** `/api/idea/:id/memory/:entry_id`
+**DELETE** `/api/idea/{id}/memory/{entry_id}`
 
 删除一条记忆：`{"status":"ok"}` 或 `{"status":"error","message":…}`。删除不存在的条目也返回 `ok`（SQL 影响 0 行不算错）。
 

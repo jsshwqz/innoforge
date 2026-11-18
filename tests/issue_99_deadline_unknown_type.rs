@@ -14,14 +14,15 @@
 //! silently changed.
 
 mod common;
-use common::{free_port, spawn_test_server};
+use common::spawn_test_server_on_free_port;
+use common::sync_http;
 
 /// #99 positive: known oa_types produce correct deadlines.
 #[test]
 fn issue_99_known_types_correct_deadlines() {
-    let port = free_port();
-    let server = spawn_test_server(port, &[]);
-    let client = reqwest::blocking::Client::new();
+    let server = spawn_test_server_on_free_port(&[]);
+    let port = server.port;
+    let client = sync_http::Client::new();
 
     // reject_review → +3 months
     let resp: serde_json::Value = client
@@ -73,9 +74,9 @@ fn issue_99_known_types_correct_deadlines() {
 /// with a warning.  The response must contain `recognized: false`.
 #[test]
 fn issue_99_unknown_type_marked_unrecognized() {
-    let port = free_port();
-    let server = spawn_test_server(port, &[]);
-    let client = reqwest::blocking::Client::new();
+    let server = spawn_test_server_on_free_port(&[]);
+    let port = server.port;
+    let client = sync_http::Client::new();
 
     let resp: serde_json::Value = client
         .get(format!(
@@ -117,9 +118,9 @@ fn issue_99_unknown_type_marked_unrecognized() {
 /// this test will fail.
 #[test]
 fn issue_99_unknown_type_uses_shortest_period() {
-    let port = free_port();
-    let server = spawn_test_server(port, &[]);
-    let client = reqwest::blocking::Client::new();
+    let server = spawn_test_server_on_free_port(&[]);
+    let port = server.port;
+    let client = sync_http::Client::new();
 
     let resp: serde_json::Value = client
         .get(format!(
@@ -156,9 +157,9 @@ fn issue_99_unknown_type_uses_shortest_period() {
 /// used by deadline_spec (single source of truth).
 #[test]
 fn issue_99_deadline_table_lists_valid_types() {
-    let port = free_port();
-    let server = spawn_test_server(port, &[]);
-    let client = reqwest::blocking::Client::new();
+    let server = spawn_test_server_on_free_port(&[]);
+    let port = server.port;
+    let client = sync_http::Client::new();
 
     let resp: serde_json::Value = client
         .get(format!("http://127.0.0.1:{}/api/oa/deadline-table", port))

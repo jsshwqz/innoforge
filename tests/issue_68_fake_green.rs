@@ -10,18 +10,16 @@
 //! 跑完负控后改回，git diff 应为空。
 
 mod common;
-use common::{free_port, spawn_test_server};
 
 /// 正向：全新目录 + 清空环境变量 ⇒ ai_api_key_configured == false + 首页含「未配置」
 #[test]
 fn first_run_must_not_show_fake_green() {
-    let port = free_port();
-
     // 不传任何 AI_API_KEY* 环境变量 —— 全新空库、未配置
-    // spawn_test_server already sets INNOFORGE_PORT / INNOFORGE_NO_OPEN / INNOFORGE_HOME
-    let server = spawn_test_server(port, &[]);
+    // spawn_test_server_on_free_port already sets INNOFORGE_PORT / INNOFORGE_NO_OPEN / INNOFORGE_HOME
+    let server = common::spawn_test_server_on_free_port(&[]);
+    let port = server.port;
 
-    let client = reqwest::blocking::Client::new();
+    let client = common::sync_http::Client::new();
 
     // 1) /api/settings — ai_api_key_configured must be false
     let settings_resp = client
@@ -88,18 +86,14 @@ fn first_run_must_not_show_fake_green() {
 /// 正向测试的 assert_eq!(configured, false) 就会红（因为 "ollama" 不再被排除）。
 #[test]
 fn real_key_must_show_configured() {
-    let port = free_port();
-
     // 设一个真实的非占位符 key + 非 Ollama base_url
-    let server = spawn_test_server(
-        port,
-        &[
-            ("AI_API_KEY", "sk-real-key-for-negative-control-test-only"),
-            ("AI_BASE_URL", "https://api.deepseek.com/v1"),
-        ],
-    );
+    let server = common::spawn_test_server_on_free_port(&[
+        ("AI_API_KEY", "sk-real-key-for-negative-control-test-only"),
+        ("AI_BASE_URL", "https://api.deepseek.com/v1"),
+    ]);
+    let port = server.port;
 
-    let client = reqwest::blocking::Client::new();
+    let client = common::sync_http::Client::new();
     let settings_resp = client
         .get(format!("http://127.0.0.1:{}/api/settings", port))
         .send()
@@ -119,12 +113,11 @@ fn real_key_must_show_configured() {
 /// Ollama URL + 默认 key "ollama" ⇒ ai_api_key_configured == false（本地服务不算"已配置"）
 #[test]
 fn ollama_default_must_not_show_configured() {
-    let port = free_port();
-
     // 默认 base_url 就是 Ollama，默认 key 就是 "ollama" —— 不传任何 env
-    let server = spawn_test_server(port, &[]);
+    let server = common::spawn_test_server_on_free_port(&[]);
+    let port = server.port;
 
-    let client = reqwest::blocking::Client::new();
+    let client = common::sync_http::Client::new();
     let settings_resp = client
         .get(format!("http://127.0.0.1:{}/api/settings", port))
         .send()

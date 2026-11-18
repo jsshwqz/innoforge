@@ -19,6 +19,8 @@
 
 mod common;
 
+use common::sync_http;
+
 use common::{bind_stub_on_free_port, spawn_test_server_on_free_port};
 use std::io::{Read, Write};
 
@@ -90,7 +92,7 @@ fn start_slow_drip_stub() -> (u16, std::thread::JoinHandle<()>) {
 /// - Status code is in normal HTTP range (200-599)
 /// - Content-Type contains "json"
 /// - Body is non-empty
-fn assert_proper_http_response(resp: reqwest::blocking::Response, label: &str) {
+fn assert_proper_http_response(resp: sync_http::Response, label: &str) {
     let status = resp.status().as_u16();
     assert!(
         (200..600).contains(&status),
@@ -121,7 +123,7 @@ fn assert_proper_http_response(resp: reqwest::blocking::Response, label: &str) {
 /// contains evidence that the AI call path was actually exercised —
 /// not just an early-return validation error. This prevents false passes
 /// where the handler returns before ever calling the external backend.
-fn assert_ai_path_exercised(resp: reqwest::blocking::Response, label: &str) {
+fn assert_ai_path_exercised(resp: sync_http::Response, label: &str) {
     let status = resp.status().as_u16();
     assert!(
         (200..600).contains(&status),
@@ -182,7 +184,7 @@ fn tolerates_blackhole_ai_backend_no_empty_reply() {
     let server = start_server(ai_port);
     let server_port = server.port;
 
-    let client = reqwest::blocking::Client::builder()
+    let client = sync_http::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()
         .expect("client");
@@ -205,7 +207,7 @@ fn tolerates_blackhole_ai_backend_no_empty_reply() {
     }
 
     // Server must still be alive
-    let alive = reqwest::blocking::get(format!("http://127.0.0.1:{}/api/version", server_port))
+    let alive = sync_http::get(format!("http://127.0.0.1:{}/api/version", server_port))
         .map(|r| r.status().is_success())
         .unwrap_or(false);
     assert!(alive, "server must survive blackhole AI backend");
@@ -225,7 +227,7 @@ fn tolerates_slow_drip_ai_backend_no_empty_reply() {
     let server = start_server(ai_port);
     let server_port = server.port;
 
-    let client = reqwest::blocking::Client::builder()
+    let client = sync_http::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()
         .expect("client");
@@ -266,7 +268,7 @@ fn tolerates_blackhole_cad_backend_no_empty_reply() {
     let server = spawn_test_server_on_free_port(&[("INNOFORGE_AIONCAD_URL", &cad_url)]);
     let server_port = server.port;
 
-    let client = reqwest::blocking::Client::builder()
+    let client = sync_http::Client::builder()
         .timeout(std::time::Duration::from_secs(180))
         .build()
         .expect("client");
@@ -298,7 +300,7 @@ fn survives_repeated_blackhole_ai_requests() {
     let server = start_server(ai_port);
     let server_port = server.port;
 
-    let client = reqwest::blocking::Client::builder()
+    let client = sync_http::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()
         .expect("client");
@@ -321,7 +323,7 @@ fn survives_repeated_blackhole_ai_requests() {
     }
 
     // Server must still be alive after all requests
-    let alive = reqwest::blocking::get(format!("http://127.0.0.1:{}/api/version", server_port))
+    let alive = sync_http::get(format!("http://127.0.0.1:{}/api/version", server_port))
         .map(|r| r.status().is_success())
         .unwrap_or(false);
     assert!(alive, "server must survive repeated blackhole AI requests");

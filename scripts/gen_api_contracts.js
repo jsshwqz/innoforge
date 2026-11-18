@@ -506,7 +506,7 @@ for (const r of routes) {
   const withJson = pick((h) => h.json);
   const withQuery = pick((h) => h.query);
   const withResp = pick((h) => h.resp && h.resp.display && h.resp.display !== "未解析") || handlers[0];
-  const pathParams = [...r.path.matchAll(/:([A-Za-z0-9_]+)/g)].map((x) => x[1]);
+  const pathParams = [...r.path.matchAll(/(?::([A-Za-z0-9_]+)|\{\*?([A-Za-z0-9_]+)\})/g)].map((x) => x[1] || x[2]);
   resolved.push({
     ...r,
     handlers,

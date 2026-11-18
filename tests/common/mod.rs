@@ -28,6 +28,9 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::OnceLock;
 
+#[path = "../helpers/sync_http.rs"]
+pub mod sync_http;
+
 // ── Port allocation ──
 
 /// 取一个本进程没发出去过的端口（实现见 `tests/port_alloc.rs`，issue #110）。
@@ -42,6 +45,65 @@ mod port_alloc;
 
 static DB_TEMPLATE: OnceLock<PathBuf> = OnceLock::new();
 
+/// 从子进程 stdout 读取 `INNOFORGE_BOUND_PORT=<port>`，并在后台线程持续消费剩余输出，
+/// 防止 stdout 管道写满导致子进程阻塞。
+fn read_bound_port_and_drain(
+    stdout: std::process::ChildStdout,
+    timeout: std::time::Duration,
+) -> Result<u16, String> {
+    use std::io::BufRead;
+    let (tx, rx) = std::sync::mpsc::channel::<Result<u16, String>>();
+    std::thread::spawn(move || {
+        let reader = std::io::BufReader::new(stdout);
+        let mut sent = false;
+        for line in reader.lines() {
+            match line {
+                Ok(l) => {
+                    if !sent {
+                        if let Some(rest) = l.trim().strip_prefix("INNOFORGE_BOUND_PORT=") {
+                            match rest.trim().parse::<u16>() {
+                                Ok(port) if port > 0 => {
+                                    let _ = tx.send(Ok(port));
+                                    sent = true;
+                                }
+                                other => {
+                                    let _ = tx.send(Err(format!(
+                                        "invalid INNOFORGE_BOUND_PORT value {:?}: {:?}",
+                                        rest, other
+                                    )));
+                                    sent = true;
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    if !sent {
+                        let _ = tx.send(Err(format!("stdout read error before bound port: {}", e)));
+                        sent = true;
+                    }
+                    break;
+                }
+            }
+        }
+        if !sent {
+            let _ = tx.send(Err(
+                "stdout closed before INNOFORGE_BOUND_PORT was emitted".to_string()
+            ));
+        }
+    });
+    match rx.recv_timeout(timeout) {
+        Ok(res) => res,
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(format!(
+            "timed out after {:?} waiting for INNOFORGE_BOUND_PORT",
+            timeout
+        )),
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            Err("stdout reader thread disconnected unexpectedly".to_string())
+        }
+    }
+}
+
 /// Ensure a pre-migrated database template exists. On first call, starts a
 /// server with a fresh INNOFORGE_HOME, waits for /api/version (which triggers
 /// all migrations), kills the server, and caches the DB path. Subsequent
@@ -50,16 +112,26 @@ fn ensure_db_template() -> PathBuf {
     DB_TEMPLATE
         .get_or_init(|| {
             let template_dir = tempfile::tempdir().expect("create template dir");
-            let template_port = free_port();
             // #82: spawn() 成功后任何路径都必须回收子进程。
             // 若 wait_for_server 失败（模板服务器未能在 60s 内就绪），
             // 先 kill+wait 再 panic，避免孤儿进程残留。
             let mut child = Command::new(env!("CARGO_BIN_EXE_innoforge-server"))
-                .env("INNOFORGE_PORT", template_port.to_string())
+                .env("INNOFORGE_PORT", "0")
                 .env("INNOFORGE_NO_OPEN", "1")
                 .env("INNOFORGE_HOME", template_dir.path().to_str().unwrap())
+                .stdout(std::process::Stdio::piped())
                 .spawn()
                 .expect("spawn server for template");
+            let stdout = child.stdout.take().expect("template server piped stdout");
+            let template_port =
+                match read_bound_port_and_drain(stdout, std::time::Duration::from_secs(30)) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        panic!("template server failed to report bound port: {}", e);
+                    }
+                };
             if !wait_for_server(template_port, 60) {
                 let _ = child.kill();
                 let _ = child.wait();
@@ -129,9 +201,17 @@ pub fn fresh_db_dir() -> tempfile::TempDir {
 /// Poll /api/version every 200ms until it returns 200, or timeout.
 /// No fixed sleep — the 200ms sleep is the poll interval, not a startup guess.
 pub fn wait_for_server(port: u16, timeout_secs: u64) -> bool {
+    let client = sync_http::Client::builder()
+        .connect_timeout(std::time::Duration::from_millis(300))
+        .timeout(std::time::Duration::from_secs(2))
+        .build()
+        .expect("probe");
     let start = std::time::Instant::now();
     while start.elapsed().as_secs() < timeout_secs {
-        if let Ok(resp) = reqwest::blocking::get(format!("http://127.0.0.1:{}/api/version", port)) {
+        if let Ok(resp) = client
+            .get(format!("http://127.0.0.1:{}/api/version", port))
+            .send()
+        {
             if resp.status().is_success() {
                 return true;
             }
@@ -265,61 +345,71 @@ pub fn spawn_test_server_with_timeout(
     }
 }
 
-/// Spawn a test server on an OS-assigned free port（issue #110 的推荐入口）。
+/// Spawn a test server on an OS-assigned free port（`INNOFORGE_PORT=0` 零 TOCTOU 绑定）。
 /// 仅部分测试 binary 消费本入口——与 [`spawn_test_server`] 同款 `#[allow(dead_code)]`。
 #[allow(dead_code)]
-///
-/// 与「caller 先 free_port() 再传进来」相比，这里把预留-探测-重试收进同一处：
-/// 预留失败（端口被占/保留段）自动换下一个端口，最多 3 次；仍失败则带
-/// `port unavailable` 明确 panic。新测试一律用本入口，不要再手写 free_port()。
 pub fn spawn_test_server_on_free_port(extra_env: &[(&str, &str)]) -> TestServer {
-    let mut last_error = String::new();
-    for _ in 0..3 {
-        let port = free_port();
-        let home = fresh_db_dir();
-        let probe = std::net::TcpListener::bind(("127.0.0.1", port));
-        match probe {
-            Ok(reservation) => {
-                drop(reservation);
-                let home_path = home.path().to_path_buf();
-                let mut cmd = build_server_cmd(&home_path, port, extra_env);
-                let mut child = match cmd.spawn() {
-                    Ok(c) => c,
-                    Err(e) => {
-                        last_error = format!("port {}: spawn failed: {}", port, e);
-                        continue;
-                    }
-                };
-                if wait_for_server(port, 60) {
-                    return TestServer {
-                        child,
-                        port,
-                        home: Some(home),
-                    };
-                }
-                let _ = child.kill();
-                let _ = child.wait();
-                last_error = format!(
-                    "port {}: server did not become ready within 60s（{}）",
-                    port,
-                    match std::net::TcpListener::bind(("127.0.0.1", port)) {
-                        Ok(l) => {
-                            drop(l);
-                            "端口空闲——子进程自己没起来"
-                        }
-                        Err(_) => "端口仍被占用——被抢",
-                    }
-                );
-            }
-            Err(e) => {
-                last_error = format!("port {}: unavailable ({})", port, e);
-            }
+    let home = fresh_db_dir();
+    let home_path = home.path().to_path_buf();
+    let mut cmd = build_server_cmd(&home_path, 0, extra_env);
+    cmd.stdout(std::process::Stdio::piped());
+    let mut child = cmd.spawn().expect("failed to spawn server on port 0");
+    let stdout = child.stdout.take().expect("server piped stdout");
+    let port = match read_bound_port_and_drain(stdout, std::time::Duration::from_secs(30)) {
+        Ok(p) => p,
+        Err(e) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("server failed to report INNOFORGE_BOUND_PORT: {}", e);
         }
+    };
+    if !wait_for_server(port, 60) {
+        let _ = child.kill();
+        let _ = child.wait();
+        panic!("server bound port {} did not become ready within 60s", port);
     }
-    panic!(
-        "port unavailable: 3 次预留/启动均失败；最后一次：{}",
-        last_error
-    )
+    TestServer {
+        child,
+        port,
+        home: Some(home),
+    }
+}
+
+/// 进程内直传已绑定 `TcpListener` 启动测试路由，消除跨进程启动与端口竞态。
+#[allow(dead_code)]
+pub fn spawn_inprocess_with_listener(
+    listener: std::net::TcpListener,
+    db_path: &str,
+) -> (
+    u16,
+    tokio::sync::oneshot::Sender<()>,
+    std::thread::JoinHandle<()>,
+) {
+    let port = listener.local_addr().expect("listener local_addr").port();
+    listener
+        .set_nonblocking(true)
+        .expect("listener set_nonblocking");
+    let db_path = db_path.to_string();
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+    let handle = std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("build tokio runtime for in-process server");
+        rt.block_on(async move {
+            let tokio_listener = tokio::net::TcpListener::from_std(listener)
+                .expect("convert std TcpListener to tokio");
+            let state = innoforge::common::init_app_state(&db_path).expect("state");
+            let app = innoforge::common::build_router(state);
+            axum::serve(tokio_listener, app)
+                .with_graceful_shutdown(async {
+                    let _ = shutdown_rx.await;
+                })
+                .await
+                .expect("in-process axum::serve");
+        });
+    });
+    (port, shutdown_tx, handle)
 }
 
 /// Spawn a test server with a pre-migrated DB copy and wait for readiness.

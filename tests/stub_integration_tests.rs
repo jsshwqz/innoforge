@@ -13,6 +13,8 @@
 
 mod common;
 
+use common::sync_http;
+
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 
@@ -68,7 +70,7 @@ fn start_server(ai_port: u16) -> common::TestServer {
 fn stub_chat_completions_returns_valid_json() {
     let (port, _handle) = start_stub();
 
-    let client = reqwest::blocking::Client::new();
+    let client = sync_http::Client::new();
     let resp = client
         .post(format!("http://127.0.0.1:{}/chat/completions", port))
         .header("Content-Type", "application/json")
@@ -93,7 +95,7 @@ fn stub_chat_completions_returns_valid_json() {
 fn stub_embeddings_returns_valid_json() {
     let (port, _handle) = start_stub();
 
-    let client = reqwest::blocking::Client::new();
+    let client = sync_http::Client::new();
     let resp = client
         .post(format!("http://127.0.0.1:{}/embeddings", port))
         .header("Content-Type", "application/json")
@@ -118,8 +120,8 @@ fn stub_embeddings_returns_valid_json() {
 fn stub_unknown_endpoint_returns_ok() {
     let (port, _handle) = start_stub();
 
-    let resp = reqwest::blocking::get(format!("http://127.0.0.1:{}/unknown", port))
-        .expect("stub must respond");
+    let resp =
+        sync_http::get(format!("http://127.0.0.1:{}/unknown", port)).expect("stub must respond");
     assert!(
         resp.status().is_success(),
         "unknown endpoint should still return 200"
@@ -137,7 +139,7 @@ fn server_serves_pages_with_stub_ai() {
 
     // Key pages must be reachable
     for path in &["/", "/idea", "/search", "/compare"] {
-        let resp = reqwest::blocking::get(format!("http://127.0.0.1:{}{}", server.port, path))
+        let resp = sync_http::get(format!("http://127.0.0.1:{}{}", server.port, path))
             .expect("page must respond");
         assert!(
             resp.status().is_success(),
@@ -157,7 +159,7 @@ fn version_endpoint_with_stub_ai() {
 
     let server = start_server(ai_port);
 
-    let resp = reqwest::blocking::get(format!("http://127.0.0.1:{}/api/version", server.port))
+    let resp = sync_http::get(format!("http://127.0.0.1:{}/api/version", server.port))
         .expect("version endpoint must respond");
     assert!(resp.status().is_success());
     let json: serde_json::Value = resp.json().expect("valid JSON");
@@ -178,7 +180,7 @@ fn malformed_ai_request_does_not_crash() {
 
     let server = start_server(ai_port);
 
-    let client = reqwest::blocking::Client::new();
+    let client = sync_http::Client::new();
 
     // Send malformed JSON to AI endpoint
     let resp = client
@@ -207,7 +209,7 @@ fn malformed_ai_request_does_not_crash() {
     }
 
     // Server must still be alive after the malformed request
-    let alive = reqwest::blocking::get(format!("http://127.0.0.1:{}/api/version", server.port))
+    let alive = sync_http::get(format!("http://127.0.0.1:{}/api/version", server.port))
         .map(|r| r.status().is_success())
         .unwrap_or(false);
     assert!(alive, "server must still respond after malformed request");
@@ -222,7 +224,7 @@ fn empty_ai_request_does_not_crash() {
 
     let server = start_server(ai_port);
 
-    let client = reqwest::blocking::Client::new();
+    let client = sync_http::Client::new();
     let resp = client
         .post(format!(
             "http://127.0.0.1:{}/api/ai/office-action-response",
@@ -261,7 +263,7 @@ fn stub_handles_concurrent_requests() {
     for i in 0..5 {
         let url = format!("http://127.0.0.1:{}/chat/completions", port);
         handles.push(std::thread::spawn(move || {
-            let client = reqwest::blocking::Client::new();
+            let client = sync_http::Client::new();
             let body = format!(
                 r#"{{"model":"test","messages":[{{"role":"user","content":"msg{}"}}]}}"#,
                 i
@@ -294,7 +296,7 @@ fn server_handles_concurrent_page_requests() {
     for _ in 0..4 {
         let url = format!("http://127.0.0.1:{}/", server_port);
         handles.push(std::thread::spawn(move || {
-            let resp = reqwest::blocking::get(&url).expect("concurrent page request must succeed");
+            let resp = sync_http::get(&url).expect("concurrent page request must succeed");
             resp.status().is_success()
         }));
     }
@@ -331,14 +333,14 @@ fn server_serves_pages_without_ai() {
     let server_port = server.port;
 
     // Pages must still render
-    let resp = reqwest::blocking::get(format!("http://127.0.0.1:{}/", server_port))
+    let resp = sync_http::get(format!("http://127.0.0.1:{}/", server_port))
         .expect("home page must respond");
     assert!(
         resp.status().is_success(),
         "home page must return 200 without AI"
     );
 
-    let resp = reqwest::blocking::get(format!("http://127.0.0.1:{}/idea", server_port))
+    let resp = sync_http::get(format!("http://127.0.0.1:{}/idea", server_port))
         .expect("idea page must respond");
     assert!(
         resp.status().is_success(),

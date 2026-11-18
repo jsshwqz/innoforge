@@ -18,6 +18,8 @@
 
 mod common;
 
+use common::sync_http;
+
 use std::io::{Read, Write};
 use std::net::TcpListener;
 
@@ -133,7 +135,7 @@ fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 }
 
 fn post_stream(port: u16, body: &str) -> String {
-    let client = reqwest::blocking::Client::builder()
+    let client = sync_http::Client::builder()
         .timeout(std::time::Duration::from_secs(90))
         .build()
         .expect("client");

@@ -62,17 +62,22 @@ fn start_server(
                 let addr: std::net::SocketAddr = ([127, 0, 0, 1], 3000).into();
                 tracing::info!("InnoForge mobile server starting on http://{}", addr);
 
-                let server = axum::Server::bind(&addr).serve(app.into_make_service());
+                let listener = match tokio::net::TcpListener::bind(addr).await {
+                    Ok(l) => l,
+                    Err(e) => {
+                        tracing::error!("InnoForge mobile server bind error: {}", e);
+                        return;
+                    }
+                };
 
-                tokio::select! {
-                    _ = shutdown_rx => {
+                if let Err(e) = axum::serve(listener, app)
+                    .with_graceful_shutdown(async move {
+                        let _ = shutdown_rx.await;
                         tracing::info!("InnoForge mobile server shutting down gracefully");
-                    }
-                    result = server => {
-                        if let Err(e) = result {
-                            tracing::error!("InnoForge mobile server error: {}", e);
-                        }
-                    }
+                    })
+                    .await
+                {
+                    tracing::error!("InnoForge mobile server error: {}", e);
                 }
             });
         })?;
