@@ -116,6 +116,16 @@
                             <button id="btn-generate-feature-cards" class="btn-success-sm" onclick="generateFeatureCards()" data-i18n="idea.generateFeatureCards">AI 自动提取特征卡</button>
                         </div>
                     </div>
+                    <div id="feature-cards-diff-bar" style="display:none;margin-bottom:12px;padding:10px 12px;background:#161b22;border:1px solid #30363d;border-radius:6px;">
+                        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+                            <label for="feature-diff-select-a" style="font-size:12px;color:#8b949e;" data-i18n="idea.featureDiffCardA">卡片 A</label>
+                            <select id="feature-diff-select-a" style="padding:4px 8px;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;font-size:13px;max-width:220px;"></select>
+                            <label for="feature-diff-select-b" style="font-size:12px;color:#8b949e;" data-i18n="idea.featureDiffCardB">卡片 B</label>
+                            <select id="feature-diff-select-b" style="padding:4px 8px;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;font-size:13px;max-width:220px;"></select>
+                            <button id="btn-compare-feature-cards" type="button" class="btn-success-sm" onclick="compareFeatureCards()" data-i18n="idea.compareFeatureCards">语义差异比对</button>
+                        </div>
+                        <div id="feature-cards-diff-result" style="margin-top:8px;font-size:13px;"></div>
+                    </div>
                     <div id="feature-cards-list"><p class="muted">暂无特征卡片</p></div>
                 </div>
             </div>
@@ -573,16 +583,96 @@
         }
     }
 
+    // 更新特征卡语义比对下拉框 / Update feature card semantic diff selectors
+    function updateFeatureDiffControls(cards) {
+        var diffBar = document.getElementById('feature-cards-diff-bar');
+        var selA = document.getElementById('feature-diff-select-a');
+        var selB = document.getElementById('feature-diff-select-b');
+        var resEl = document.getElementById('feature-cards-diff-result');
+        if (!diffBar || !selA || !selB) return;
+        selA.textContent = '';
+        selB.textContent = '';
+        if (resEl) resEl.textContent = '';
+        if (!cards || cards.length < 2) {
+            diffBar.style.display = 'none';
+            return;
+        }
+        cards.forEach(function(card, idx) {
+            var label = (idx + 1) + '. ' + (card.title || card.description || card.id);
+            var optA = document.createElement('option');
+            optA.value = card.id;
+            optA.textContent = label;
+            selA.appendChild(optA);
+            var optB = document.createElement('option');
+            optB.value = card.id;
+            optB.textContent = label;
+            selB.appendChild(optB);
+        });
+        selA.selectedIndex = 0;
+        selB.selectedIndex = 1;
+        diffBar.style.display = 'block';
+    }
+
+    // 特征卡语义差异比对 / Compare two feature cards semantically
+    async function compareFeatureCards() {
+        var selA = document.getElementById('feature-diff-select-a');
+        var selB = document.getElementById('feature-diff-select-b');
+        var resEl = document.getElementById('feature-cards-diff-result');
+        var btn = document.getElementById('btn-compare-feature-cards');
+        if (!selA || !selB || !resEl) return;
+        var idA = selA.value;
+        var idB = selB.value;
+        if (!idA || !idB || idA === idB) {
+            resEl.textContent = t('idea.featureDiffSelectTwo');
+            return;
+        }
+        if (btn) btn.disabled = true;
+        resEl.textContent = t('idea.comparingFeatureCards');
+        try {
+            var url = '/api/feature-cards/diff?a=' + encodeURIComponent(idA) + '&b=' + encodeURIComponent(idB) + '&semantic=true';
+            var resp = await fetch(url);
+            var data = await resp.json().catch(function() { return {}; });
+            if (!resp.ok || data.status === 'error') {
+                throw new Error(data.message || data.error || ('HTTP ' + resp.status));
+            }
+            resEl.textContent = '';
+            var box = document.createElement('div');
+            box.style.cssText = 'padding:8px 10px;background:#0d1117;border:1px solid #30363d;border-radius:4px;line-height:1.6;';
+            var summary = document.createElement('div');
+            var equivText = data.semantically_equivalent ? t('idea.featureDiffEquivalent') : t('idea.featureDiffNotEquivalent');
+            var novText = data.novelty_significance ? t('idea.featureDiffSignificant') : t('idea.featureDiffNotSignificant');
+            summary.textContent =
+                t('idea.featureDiffEquivalence') + ': ' + equivText +
+                ' | ' + t('idea.featureDiffType') + ': ' + (data.diff_type || '-') +
+                ' | ' + t('idea.featureDiffNovelty') + ': ' + novText +
+                (data.fallback_used ? ' ' + t('idea.featureDiffFallbackUsed') : '');
+            box.appendChild(summary);
+            if (data.novelty_reason) {
+                var reasonEl = document.createElement('div');
+                reasonEl.style.cssText = 'color:#8b949e;font-size:12px;margin-top:4px;';
+                reasonEl.textContent = data.novelty_reason;
+                box.appendChild(reasonEl);
+            }
+            resEl.appendChild(box);
+        } catch(e) {
+            resEl.textContent = t('idea.featureDiffFailed') + (e && e.message ? ': ' + e.message : '');
+        } finally {
+            if (btn) btn.disabled = false;
+        }
+    }
+
     // 加载特征卡片 / Load feature cards
     async function loadFeatureCards(ideaId) {
         var listEl = document.getElementById('feature-cards-list');
         if (!listEl) return;
         listEl.innerHTML = DOMPurify.sanitize('<p class="muted">Loading...</p>');
+        updateFeatureDiffControls([]);
         try {
             var resp = await fetch('/api/ideas/' + encodeURIComponent(ideaId) + '/feature-cards');
             if (!resp.ok) { listEl.innerHTML = '<p class="muted">Load failed</p>'; return; }
             var data = await resp.json();
             var cards = data.cards || [];
+            updateFeatureDiffControls(cards);
             if (cards.length === 0) { listEl.innerHTML = '<p class="muted">暂无特征卡片</p>'; return; }
             listEl.innerHTML = '';
             cards.forEach(function(card) {

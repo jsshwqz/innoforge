@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-18T00:13:50.208Z",
+  "generatedAt": "2026-11-18T02:38:53.143Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -125,6 +125,7 @@
       "references": [
         "addMemoryEntry",
         "clearForm",
+        "compareFeatureCards",
         "deleteMemory",
         "drawIdeaCad",
         "exportConclusions",
@@ -153,6 +154,7 @@
         "clearForm",
         "clearResults",
         "closeActiveSSE",
+        "compareFeatureCards",
         "context",
         "deleteIdea",
         "deleteMemory",
@@ -205,6 +207,7 @@
         "switchTab",
         "toCST",
         "toggleDimension",
+        "updateFeatureDiffControls",
         "updatePipelineStep"
       ]
     },

@@ -38,6 +38,9 @@
   - **特征卡 `dead_code` 彻底清零**：`src/routes/feature_cards.rs` 消灭全部 `dead_code`，接入 `?semantic=true` 语义级差异对比端点与 `cad_prompts` FreeCAD 提示词组装链路。
   - **商汤模型池同步**：`templates/settings.html` 同步商汤 1.0M 免费模型池预设。
   - **第二批三块 >2100 行巨石解耦**：完成 `src/routes/ai.rs`、`src/ai/patent.rs` 与 `src/evidence_kernel/amendment_gate.rs`（2168 → 1355 行，拆分测试至 `src/evidence_kernel/amendment_gate_tests.rs` 809 行）解耦。
+- **⑤ Wave 6 全仓 >2000 行巨石 100% 清零与特征卡语义对比前端闭环**:
+  - **全仓 7 个 >2,000 行巨石模块 100% 清零**：完成 `src/search/providers/epo_ops.rs`、`src/routes/idea.rs` 与 `src/ai/response_pipeline.rs`（2114 → 1164 行，拆分测试至 `src/ai/response_pipeline_tests.rs` 947 行）解耦。
+  - **特征卡双卡语义等价对比前端上线**：`templates/idea.html` `#feature-cards-area` 补齐双卡选择与「语义差异比对」行内结果展示（`GET /api/feature-cards/diff?a=...&b=...&semantic=true`），`static/i18n.js` 同步双语词条。
 
 ### 2026-11-17 — **Batch 1：DB v25 结构化分块 + BM25/向量 RRF 混合检索（#78）+ OpenAlex 学术源 + 解除 5000 字硬截断**（PR 待建）
 

@@ -122,7 +122,7 @@
 | 90 | POST | `/api/idea/submit` | — | `IdeaSubmitRequest` | — | JSON（§90） | `routes::api_idea_submit` | `src/routes/idea.rs:176` |
 | 91 | POST | `/api/idea/analyze` | — | 任意 JSON（§91） | — | JSON（§91） | `routes::api_idea_analyze` | `src/routes/idea.rs:224` |
 | 92 | POST | `/api/idea/pipeline` | — | 任意 JSON（§92） | — | JSON（§92） | `routes::api_idea_pipeline` | `src/routes/idea.rs:1002` |
-| 93 | POST | `/api/ideas/batch-compare` | — | 任意 JSON（§93） | — | JSON（§93） | `routes::api_ideas_batch_compare` | `src/routes/idea.rs:1863` |
+| 93 | POST | `/api/ideas/batch-compare` | — | 任意 JSON（§93） | — | JSON（§93） | `routes::api_ideas_batch_compare` | `src/routes/idea_reports.rs:599` |
 | 94 | GET | `/api/idea/list` | — | — | — | JSON（§94） | `routes::api_idea_list` | `src/routes/idea.rs:404` |
 | 95 | GET | `/api/idea/:id` | `id` | — | — | JSON（§95） | `routes::api_idea_get` | `src/routes/idea.rs:372` |
 | 96 | POST | `/api/idea/:id/delete` | `id` | — | — | JSON（§96） | `routes::api_idea_delete` | `src/routes/idea.rs:414` |
@@ -130,21 +130,21 @@
 | 98 | POST | `/api/idea/:id/resume` | `id` | — | — | JSON（§98） | `routes::api_idea_resume` | `src/routes/idea.rs:1161` |
 | 99 | GET / POST | `/api/idea/:id/research-state` | `id` | `ResearchStateUpdateRequest` | — | JSON（§99） | `routes::api_idea_research_state`<br>`routes::api_idea_research_state_update` | `src/routes/idea_ops.rs:11`<br>`src/routes/idea_ops.rs:30` |
 | 100 | POST | `/api/idea/:id/redirect` | `id` | `RedirectRequest` | — | JSON（§100） | `routes::api_idea_redirect` | `src/routes/idea_ops.rs:51` |
-| 101 | GET | `/api/idea/:id/report` | `id` | — | 任意键值对（§101） | JSON（§101） | `routes::api_idea_report` | `src/routes/idea.rs:1272` |
-| 102 | GET | `/api/idea/:id/report.html` | `id` | — | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_idea_report_html` | `src/routes/idea.rs:1427` |
+| 101 | GET | `/api/idea/:id/report` | `id` | — | 任意键值对（§101） | JSON（§101） | `routes::api_idea_report` | `src/routes/idea_reports.rs:8` |
+| 102 | GET | `/api/idea/:id/report.html` | `id` | — | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_idea_report_html` | `src/routes/idea_reports.rs:163` |
 | 103 | GET | `/api/ai/models` | — | — | 任意键值对（§103） | JSON（§103） | `routes::list_ai_models` | `src/routes/idea_ops.rs:417` |
 | 104 | POST | `/api/idea/:id/chat` | `id` | `IdeaChatRequest` | — | JSON（§104） | `routes::api_idea_chat` | `src/routes/idea.rs:551` |
 | 105 | GET | `/api/idea/:id/evidence` | `id` | — | — | JSON（§105） | `routes::api_idea_evidence` | `src/routes/idea.rs:443` |
 | 106 | GET | `/api/idea/:id/kernel-report` | `id` | — | — | JSON（§106） | `routes::api_idea_kernel_report` | `src/routes/idea.rs:460` |
 | 107 | GET | `/api/idea/:id/messages` | `id` | — | — | JSON（§107） | `routes::api_idea_messages` | `src/routes/idea.rs:976` |
-| 108 | GET | `/api/idea/:id/chat/conclusions` | `id` | — | — | JSON（§108） | `routes::api_idea_chat_conclusions` | `src/routes/idea.rs:1738` |
-| 109 | GET | `/api/idea/:id/chat/conversation` | `id` | — | — | JSON（§109） | `routes::api_idea_chat_conversation` | `src/routes/idea.rs:1717` |
-| 110 | POST | `/api/idea/:id/summarize` | `id` | — | — | JSON（§110） | `routes::api_idea_summarize_discussion` | `src/routes/idea.rs:1806` |
+| 108 | GET | `/api/idea/:id/chat/conclusions` | `id` | — | — | JSON（§108） | `routes::api_idea_chat_conclusions` | `src/routes/idea_reports.rs:474` |
+| 109 | GET | `/api/idea/:id/chat/conversation` | `id` | — | — | JSON（§109） | `routes::api_idea_chat_conversation` | `src/routes/idea_reports.rs:453` |
+| 110 | POST | `/api/idea/:id/summarize` | `id` | — | — | JSON（§110） | `routes::api_idea_summarize_discussion` | `src/routes/idea_reports.rs:542` |
 | 111 | GET / POST | `/api/ideas/:id/feature-cards` | `id` | `CreateFeatureCardRequest` | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_get_feature_cards`<br>`routes::api_create_feature_card` | `src/routes/feature_cards.rs:16`<br>`src/routes/feature_cards.rs:50` |
 | 112 | POST | `/api/ideas/:id/feature-cards/generate` | `id` | — | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_generate_feature_cards` | `src/routes/feature_cards.rs:585` |
 | 113 | GET | `/api/feature-cards/diff` | — | — | `FeatureCardDiffQuery` | HTTP 响应（动态，状态码/正文见源码） | `routes::api_feature_card_diff` | `src/routes/feature_cards.rs:132` |
 | 114 | GET | `/api/idea/:id/claim-tree` | `id` | — | — | JSON（§114） | `routes::api_idea_claim_tree` | `src/routes/idea_ops.rs:164` |
-| 115 | POST | `/api/idea/:id/iterate` | `id` | — | — | JSON（§115） | `routes::api_idea_iterate` | `src/routes/idea.rs:1963` |
+| 115 | POST | `/api/idea/:id/iterate` | `id` | — | — | JSON（§115） | `routes::api_idea_iterate` | `src/routes/idea_reports.rs:699` |
 | 116 | GET | `/api/idea/:id/versions` | `id` | — | — | JSON（§116） | `routes::api_idea_versions` | `src/routes/idea_ops.rs:233` |
 | 117 | GET | `/api/idea/:id/branches` | `id` | — | — | JSON（§117） | `routes::api_idea_branches` | `src/routes/idea_ops.rs:258` |
 | 118 | GET | `/api/idea/:id/findings` | `id` | — | — | JSON（§118） | `routes::api_idea_findings` | `src/routes/idea_ops.rs:269` |
@@ -971,7 +971,7 @@
 
 ### §93 POST `/api/ideas/batch-compare`
 
-- 源码：`src/routes/idea.rs:1863`
+- 源码：`src/routes/idea_reports.rs:599`
 - 读取的请求键：`idea_ids`
 - 响应顶层键：`description`、`id`、`ideas`、`message`、`novelty_score`、`similarity_matrix`、`status`、`title`
 - `status` 取值：error / ok
@@ -1019,7 +1019,7 @@
 
 ### §101 GET `/api/idea/:id/report`
 
-- 源码：`src/routes/idea.rs:1272`
+- 源码：`src/routes/idea_reports.rs:8`
 - 读取的查询键：`type`、`version_id`
 - 响应顶层键：`message`、`patent_results`、`report`、`report_type`、`status`、`web_results`
 - `status` 取值：error / ok
@@ -1057,19 +1057,19 @@
 
 ### §108 GET `/api/idea/:id/chat/conclusions`
 
-- 源码：`src/routes/idea.rs:1738`
+- 源码：`src/routes/idea_reports.rs:474`
 - 响应顶层键：`conclusions`、`error`、`status`
 - `status` 取值：ok
 
 ### §109 GET `/api/idea/:id/chat/conversation`
 
-- 源码：`src/routes/idea.rs:1717`
+- 源码：`src/routes/idea_reports.rs:453`
 - 响应顶层键：`content`、`created_at`、`error`、`idea`、`messages`、`role`、`status`
 - `status` 取值：ok
 
 ### §110 POST `/api/idea/:id/summarize`
 
-- 源码：`src/routes/idea.rs:1806`
+- 源码：`src/routes/idea_reports.rs:542`
 - 响应顶层键：`error`、`status`、`summary`
 - `status` 取值：ok
 
@@ -1103,7 +1103,7 @@
 
 ### §115 POST `/api/idea/:id/iterate`
 
-- 源码：`src/routes/idea.rs:1963`
+- 源码：`src/routes/idea_reports.rs:699`
 - 响应顶层键：`iteration`、`message`、`status`
 - `status` 取值：error / ok
 
