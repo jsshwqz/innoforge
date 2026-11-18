@@ -6,43 +6,43 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 ---
 ## [Unreleased]
 
-## [0.9.53] - 2026-11-18
+## [v0.9.53] - 2026-11-18
 
 ### 新增 / Added
 
 - **全项目工程包一键 `.zip` 归档与 SQLite `VACUUM INTO` 热备份（Batch 10）**：新增 `GET /api/ideas/:id/archive/zip` 按 5 大标准工程目录（`01_Research_and_FTO` / `02_CAD_and_Mechanics` / `03_Control_and_Simulation` / `04_BOM_and_Delivery` / `05_IP_and_Paper`）全内存流打包项目全套成果；新增 `Database::vacuum_into_backup` / `verify_sqlite_backup` 及 `POST /api/backup/export`、`POST /api/backup/check` 实现零阻塞热备份与完整性校验，前端同步一键导出与一键备份按钮。 / Added 5-folder full project `.zip` archive (`GET /api/ideas/:id/archive/zip`) and SQLite `VACUUM INTO` hot backup & integrity verification (`POST /api/backup/export`, `POST /api/backup/check`).
 
-## [0.9.52] - 2026-11-18
+## [v0.9.52] - 2026-11-18
 
 ### 新增 / Added
 
 - **批量 FTO 侵权风险主动扫描与规避设计工作台（Batch 9）**：新增 `fto_scanner` 引擎（`high_red` 全面覆盖 / `warn_yellow` 等同预警 / `safe_green` 缺特征或已失效专利自动标绿，碰撞专利自动生成 3 套含 BOM 成本与性能影响的规避方案）；新增 `POST /api/ideas/:id/fto-scan` 路由与 `idea.html` FTO 红绿灯碰撞看板及一键采纳按钮。 / Added `fto_scanner` batch FTO engine (all-elements & equivalents rules, inactive patent clearance, 3 design-around options), `POST /api/ideas/:id/fto-scan`, and FTO traffic-light dashboard in `idea.html`.
 
-## [0.9.51] - 2026-11-18
+## [v0.9.51] - 2026-11-18
 
 ### 新增 / Added
 
 - **多对比文件三维特征矩阵与 OA 修改对照页 Word `.docx` 导出（Batch 8）**：新增 `oa_matrix` 引擎拆解原子特征并定位本案 A33 段落锚点与 D1/D2/D3 公开状态/结合障碍，接入 `POST /api/ai/oa-feature-matrix` 及 OA 页可折叠三维矩阵表；新增 `GET /api/oa/:case_id/export/docx` 生成带红色删除线（`<w:strike/>`）与蓝色下划线（`<w:u w:val="single"/>`）的《权利要求书修改对照页》与三段式《意见陈述书》`.docx`。 / Added `oa_matrix` multi-reference 3D feature comparison engine (`POST /api/ai/oa-feature-matrix`) and `.docx` export with strike/underline revision markup (`GET /api/oa/:case_id/export/docx`).
 
-## [0.9.50] - 2026-11-18
+## [v0.9.50] - 2026-11-18
 
 ### 新增 / Added
 
 - **控制系统原型代码生成与闭环响应曲线可视化（Batch 7）**：新增 `control_proto` 模块生成 IEC 61131-3 结构化文本（ST）功能块（含防除零、超限联锁与手自动无扰切换）、多段线性插值标定表与闭环阶跃响应数值仿真（超调量/稳态误差/调节时间）；新增 `POST /api/ideas/:id/control-prototype` 接口及 `idea.html` 基于本地 `Chart.js` 的控制响应曲线可视化与 ST 代码复制面板。 / Added `control_proto` IEC 61131-3 ST generator, piecewise calibration interpolation, closed-loop step simulation, `POST /api/ideas/:id/control-prototype`, and local `Chart.js` curve panel in `idea.html`.
 
-## [0.9.49] - 2026-11-18
+## [v0.9.49] - 2026-11-18
 
 ### 新增 / Added
 
 - **离线专利库批量导入提速与工程 BOM Excel 专业导出（Batch 6）**：新增 `batch_import_patents_with_chunks`（单 `BEGIN IMMEDIATE` 事务包裹专利表 + `patents_fts` + 结构化分块 `patent_chunks` + `chunks_fts` 写入与末尾 `optimize` 优化钩子，并接入 `/api/import`）；新增 `GET /api/ideas/:id/delivery-pack/xlsx` 导出三 Sheet 标准 `.xlsx`（工程 BOM 清单 / 电气控制 IO 表 / 样机台架测试验收大纲，含加粗底色表头、冻结首行与自动列宽）及前端「导出 Excel BOM 包」按钮。 / Added transactional `batch_import_patents_with_chunks` with FTS optimize hook and 3-sheet formatted Excel BOM delivery pack export (`GET /api/ideas/:id/delivery-pack/xlsx`).
 
-## [0.9.48] - 2026-11-18
+## [v0.9.48] - 2026-11-18
 
 ### 新增 / Added
 
 - **专利附图多模态看图联动与部件标号视觉核对（Batch 5）**：`AiClient` 新增 `chat_with_images`（OpenAI Vision 兼容格式与容灾链），`AppConfig::ai_client_vision` 自动优选商汤 SenseNova / 小米 MiMo / Gemini / Qwen-VL 等视觉通道；新增 `vision_topology` 模块提取附图标号/连接关系/运动干涉与介质未隔离隐患，并与 `part_topology` 说明书文本拓扑交叉核对接入 OA Stage D；新增 `POST /api/ai/vision-figure-check` 接口与 OA 答复页「附图标号与结构核对」按钮（含无视觉模型时的确定性降级）。 / Added multimodal `AiClient::chat_with_images`, `vision_topology` figure-vs-spec designator cross-check wired into OA Stage D, `POST /api/ai/vision-figure-check`, and OA UI button with graceful degradation.
 
-## [0.9.47] - 2026-11-18
+## [v0.9.47] - 2026-11-18
 
 ### 修复 / Fixed
 
@@ -448,43 +448,43 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 ---
 ## [Unreleased]
 
-## [0.9.53] - 2026-11-18
+## [v0.9.53] - 2026-11-18
 
 ### 新增 / Added
 
 - **全项目工程包一键 `.zip` 归档与 SQLite `VACUUM INTO` 热备份（Batch 10）**：新增 `GET /api/ideas/:id/archive/zip` 按 5 大标准工程目录（`01_Research_and_FTO` / `02_CAD_and_Mechanics` / `03_Control_and_Simulation` / `04_BOM_and_Delivery` / `05_IP_and_Paper`）全内存流打包项目全套成果；新增 `Database::vacuum_into_backup` / `verify_sqlite_backup` 及 `POST /api/backup/export`、`POST /api/backup/check` 实现零阻塞热备份与完整性校验，前端同步一键导出与一键备份按钮。 / Added 5-folder full project `.zip` archive (`GET /api/ideas/:id/archive/zip`) and SQLite `VACUUM INTO` hot backup & integrity verification (`POST /api/backup/export`, `POST /api/backup/check`).
 
-## [0.9.52] - 2026-11-18
+## [v0.9.52] - 2026-11-18
 
 ### 新增 / Added
 
 - **批量 FTO 侵权风险主动扫描与规避设计工作台（Batch 9）**：新增 `fto_scanner` 引擎（`high_red` 全面覆盖 / `warn_yellow` 等同预警 / `safe_green` 缺特征或已失效专利自动标绿，碰撞专利自动生成 3 套含 BOM 成本与性能影响的规避方案）；新增 `POST /api/ideas/:id/fto-scan` 路由与 `idea.html` FTO 红绿灯碰撞看板及一键采纳按钮。 / Added `fto_scanner` batch FTO engine (all-elements & equivalents rules, inactive patent clearance, 3 design-around options), `POST /api/ideas/:id/fto-scan`, and FTO traffic-light dashboard in `idea.html`.
 
-## [0.9.51] - 2026-11-18
+## [v0.9.51] - 2026-11-18
 
 ### 新增 / Added
 
 - **多对比文件三维特征矩阵与 OA 修改对照页 Word `.docx` 导出（Batch 8）**：新增 `oa_matrix` 引擎拆解原子特征并定位本案 A33 段落锚点与 D1/D2/D3 公开状态/结合障碍，接入 `POST /api/ai/oa-feature-matrix` 及 OA 页可折叠三维矩阵表；新增 `GET /api/oa/:case_id/export/docx` 生成带红色删除线（`<w:strike/>`）与蓝色下划线（`<w:u w:val="single"/>`）的《权利要求书修改对照页》与三段式《意见陈述书》`.docx`。 / Added `oa_matrix` multi-reference 3D feature comparison engine (`POST /api/ai/oa-feature-matrix`) and `.docx` export with strike/underline revision markup (`GET /api/oa/:case_id/export/docx`).
 
-## [0.9.50] - 2026-11-18
+## [v0.9.50] - 2026-11-18
 
 ### 新增 / Added
 
 - **控制系统原型代码生成与闭环响应曲线可视化（Batch 7）**：新增 `control_proto` 模块生成 IEC 61131-3 结构化文本（ST）功能块（含防除零、超限联锁与手自动无扰切换）、多段线性插值标定表与闭环阶跃响应数值仿真（超调量/稳态误差/调节时间）；新增 `POST /api/ideas/:id/control-prototype` 接口及 `idea.html` 基于本地 `Chart.js` 的控制响应曲线可视化与 ST 代码复制面板。 / Added `control_proto` IEC 61131-3 ST generator, piecewise calibration interpolation, closed-loop step simulation, `POST /api/ideas/:id/control-prototype`, and local `Chart.js` curve panel in `idea.html`.
 
-## [0.9.49] - 2026-11-18
+## [v0.9.49] - 2026-11-18
 
 ### 新增 / Added
 
 - **离线专利库批量导入提速与工程 BOM Excel 专业导出（Batch 6）**：新增 `batch_import_patents_with_chunks`（单 `BEGIN IMMEDIATE` 事务包裹专利表 + `patents_fts` + 结构化分块 `patent_chunks` + `chunks_fts` 写入与末尾 `optimize` 优化钩子，并接入 `/api/import`）；新增 `GET /api/ideas/:id/delivery-pack/xlsx` 导出三 Sheet 标准 `.xlsx`（工程 BOM 清单 / 电气控制 IO 表 / 样机台架测试验收大纲，含加粗底色表头、冻结首行与自动列宽）及前端「导出 Excel BOM 包」按钮。 / Added transactional `batch_import_patents_with_chunks` with FTS optimize hook and 3-sheet formatted Excel BOM delivery pack export (`GET /api/ideas/:id/delivery-pack/xlsx`).
 
-## [0.9.48] - 2026-11-18
+## [v0.9.48] - 2026-11-18
 
 ### 新增 / Added
 
 - **专利附图多模态看图联动与部件标号视觉核对（Batch 5）**：`AiClient` 新增 `chat_with_images`（OpenAI Vision 兼容格式与容灾链），`AppConfig::ai_client_vision` 自动优选商汤 SenseNova / 小米 MiMo / Gemini / Qwen-VL 等视觉通道；新增 `vision_topology` 模块提取附图标号/连接关系/运动干涉与介质未隔离隐患，并与 `part_topology` 说明书文本拓扑交叉核对接入 OA Stage D；新增 `POST /api/ai/vision-figure-check` 接口与 OA 答复页「附图标号与结构核对」按钮（含无视觉模型时的确定性降级）。 / Added multimodal `AiClient::chat_with_images`, `vision_topology` figure-vs-spec designator cross-check wired into OA Stage D, `POST /api/ai/vision-figure-check`, and OA UI button with graceful degradation.
 
-## [0.9.47] - 2026-11-18
+## [v0.9.47] - 2026-11-18
 
 ### 修复 / Fixed
 
