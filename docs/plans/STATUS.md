@@ -14,6 +14,12 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-11-18 — **Batch 11：专利法律状态核验与同族引文图谱联动（v0.9.54）**
+
+- **状态 / Status**: ✅ 本地全量验证通过，已提 PR 等 CI 合并进 `main` 并打 `v0.9.54` Tag
+- **① 法律状态与同族引文抓取**（`src/search/providers/epo_ops.rs`、`src/db/patent.rs`）：新增 `LegalStatus`（`Active`/`Pending`/`Expired`/`Rejected`/`Unknown`）、`PatentLegalAndCitations` 解析器与无 EPO 凭据平稳降级逻辑，支持同族查询与本地持久化。
+- **② 引文图谱与手动标注**（`src/routes/patent.rs`、`src/common.rs`、`templates/patent_detail.html`、`templates/idea.html`、`static/i18n.js`、`docs/API.md`）：新增 `GET /api/patent/:id/citation-graph` 与 `POST /api/patent/:id/legal-status`，在专利详情页与 FTO 看板展示有效/失效徽章与前后向引文列表。
+
 ### 2026-11-18 — **Batch 10：全项目工程包一键 `.zip` 归档 + 本地数据库 `VACUUM INTO` 热备份（v0.9.53）**
 
 - **状态 / Status**: ✅ 本地全量验证通过（`cargo fmt` / `clippy --all-targets -D warnings` 零告警，`cargo test --no-fail-fast` 73 个测试二进制全过，含 lib 1005 passed），已提 PR 等 CI 合并进 `main` 并打 `v0.9.53` Tag
