@@ -38,7 +38,17 @@ impl Database {
     ) -> Result<usize, rusqlite::Error> {
         let mut c = self.conn();
         let tx = c.transaction()?;
+        let count = Self::write_chunks_in_tx(&tx, patent_id, chunks, model_name)?;
+        tx.commit()?;
+        Ok(count)
+    }
 
+    fn write_chunks_in_tx(
+        tx: &rusqlite::Transaction<'_>,
+        patent_id: &str,
+        chunks: &[PatentChunk],
+        model_name: &str,
+    ) -> Result<usize, rusqlite::Error> {
         // Delete old chunks for this patent (both authoritative rows and FTS mirror)
         tx.execute(
             "DELETE FROM patent_chunks WHERE patent_id = ?1",
@@ -70,9 +80,93 @@ impl Database {
             )?;
             count += 1;
         }
-
-        tx.commit()?;
         Ok(count)
+    }
+
+    /// 批量导入公开专利并同步写入结构化分块与 `chunks_fts`（单 `BEGIN IMMEDIATE` 事务 + 末尾 FTS optimize）。
+    pub fn batch_import_patents_with_chunks(
+        &self,
+        patents: &[crate::patent::Patent],
+        model_name: &str,
+    ) -> Result<(usize, usize), rusqlite::Error> {
+        let mut c = self.conn();
+        let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let mut imported = 0usize;
+        let mut chunks_written = 0usize;
+
+        for p in patents {
+            let existing_id: Option<String> = if p.patent_number.trim().is_empty() {
+                None
+            } else {
+                tx.query_row(
+                    "SELECT id FROM patents WHERE patent_number = ?1 LIMIT 1",
+                    rusqlite::params![p.patent_number],
+                    |r| r.get(0),
+                )
+                .ok()
+            };
+            let final_id = existing_id.unwrap_or_else(|| {
+                if p.id.trim().is_empty() {
+                    uuid::Uuid::new_v4().to_string()
+                } else {
+                    p.id.clone()
+                }
+            });
+
+            tx.execute(
+                "DELETE FROM patents_fts WHERE rowid = (SELECT rowid FROM patents WHERE id = ?1)",
+                rusqlite::params![final_id],
+            )?;
+            tx.execute(
+                "INSERT OR REPLACE INTO patents (id,patent_number,title,abstract_text,description,claims,applicant,inventor,filing_date,publication_date,grant_date,ipc_codes,cpc_codes,priority_date,country,kind_code,family_id,legal_status,citations,cited_by,source,raw_json,images,pdf_url) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24)",
+                rusqlite::params![
+                    final_id,
+                    p.patent_number,
+                    p.title,
+                    p.abstract_text,
+                    p.description,
+                    p.claims,
+                    p.applicant,
+                    p.inventor,
+                    p.filing_date,
+                    p.publication_date,
+                    p.grant_date,
+                    p.ipc_codes,
+                    p.cpc_codes,
+                    p.priority_date,
+                    p.country,
+                    p.kind_code,
+                    p.family_id,
+                    p.legal_status,
+                    p.citations,
+                    p.cited_by,
+                    p.source,
+                    p.raw_json,
+                    p.images,
+                    p.pdf_url
+                ],
+            )?;
+            tx.execute(
+                "INSERT INTO patents_fts(rowid, patent_number, title, abstract_text, claims, applicant, inventor, ipc_codes) SELECT rowid, patent_number, title, abstract_text, claims, applicant, inventor, ipc_codes FROM patents WHERE id = ?1",
+                rusqlite::params![final_id],
+            )?;
+
+            let chunks = crate::rag::build_chunks_from_patent(
+                &final_id,
+                &p.title,
+                &p.abstract_text,
+                &p.claims,
+                &p.description,
+            );
+            chunks_written += Self::write_chunks_in_tx(&tx, &final_id, &chunks, model_name)?;
+            imported += 1;
+        }
+
+        if imported > 0 {
+            tx.execute("INSERT INTO chunks_fts(chunks_fts) VALUES('optimize')", [])?;
+        }
+        tx.commit()?;
+        Ok((imported, chunks_written))
     }
 
     /// Search chunks for a patent by query text with cosine similarity.
@@ -682,5 +776,55 @@ mod tests {
                 "纯向量命中的 {id} 被 RRF 融合挤掉了，召回率回退: vec={vec_top:?} hybrid={hybrid_top:?}"
             );
         }
+    }
+
+    #[test]
+    fn batch_import_patents_with_chunks_is_idempotent_and_fts_searchable() {
+        let db = Database::init(":memory:").expect("open in-memory db");
+        let p1 = crate::patent::Patent {
+            id: "".into(),
+            patent_number: "CN119900001A".into(),
+            title: "固态电解质陶瓷隔膜制备方法".into(),
+            abstract_text: "本发明公开一种石榴石型固态电解质隔膜烧结工艺。".into(),
+            claims: "1. 一种固态电解质隔膜，其特征在于采用等离子烧结。".into(),
+            description: "[0001] 本发明属于固态电池技术领域。".into(),
+            ..Default::default()
+        };
+        let p2 = crate::patent::Patent {
+            id: "".into(),
+            patent_number: "CN119900002A".into(),
+            title: "微型隔离电磁阀".into(),
+            abstract_text: "一种带有双层波纹管隔离的微型电磁阀。".into(),
+            claims: "1. 一种电磁阀，包括阀芯与波纹管隔离件。".into(),
+            description: "[0001] 防止介质污染线圈。".into(),
+            ..Default::default()
+        };
+
+        let (imp1, chk1) = db
+            .batch_import_patents_with_chunks(&[p1.clone(), p2.clone()], "tfidf-local")
+            .expect("first batch import");
+        assert_eq!(imp1, 2);
+        assert!(chk1 >= 4);
+
+        // 重复导入同一公开号必须幂等，不产生重复 chunk
+        let (imp2, chk2) = db
+            .batch_import_patents_with_chunks(&[p1, p2], "tfidf-local")
+            .expect("second batch import");
+        assert_eq!(imp2, 2);
+        assert_eq!(chk1, chk2);
+
+        let stored = db
+            .get_patent("CN119900001A")
+            .expect("get_patent")
+            .expect("exists");
+        assert_eq!(db.count_chunks(&stored.id).expect("count") as usize, 3);
+
+        let hits = db
+            .search_chunks_lexical(&stored.id, "等离子烧结", 5)
+            .expect("lexical search");
+        assert!(
+            !hits.is_empty(),
+            "批量导入后 chunks_fts 应立即支持 BM25 检索"
+        );
     }
 }

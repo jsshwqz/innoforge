@@ -640,6 +640,12 @@ Response:
 
 优先使用快模型通道（60 秒超时）从创意描述与分析上下文自动提取 5 维特征卡片并入库；未配置快模型 Key、超时或解析为空时自动降级为确定性切分提取并入库。
 
+### 5) 导出工程 BOM 交付包 (.xlsx) / Export Engineering BOM Delivery Pack
+
+**GET** `/api/ideas/:id/delivery-pack/xlsx`
+
+导出标准三 Sheet `.xlsx` 文件（Sheet 1：工程 BOM 清单；Sheet 2：电气控制 IO 表；Sheet 3：样机台架测试验收大纲），表头加粗底色并自动列宽、冻结首行。
+
 Response:
 
 ```json

@@ -884,6 +884,202 @@ fn build_deliverable_report_json(
     })
 }
 
+/// 生成三 Sheet 标准化《工程落地交付包》`.xlsx` 字节流（BOM 清单 + 电气控制 IO 表 + 台架验收大纲）。
+pub fn build_delivery_pack_xlsx(db: &crate::db::Database, idea: &Idea) -> Result<Vec<u8>, String> {
+    use rust_xlsxwriter::{Color, Format, Workbook};
+
+    let ctx = resolve_pipeline_context_for_deliverables(db, idea);
+    let cards = db.get_feature_cards_by_idea(&idea.id).unwrap_or_default();
+    let pack = crate::pipeline::steps::deliverables::build_engineering_bom_pack(&ctx, &cards);
+
+    let mut workbook = Workbook::new();
+    let header_fmt = Format::new()
+        .set_bold()
+        .set_background_color(Color::RGB(0xE8EEF5));
+
+    // Sheet 1: 工程 BOM 清单
+    let ws1 = workbook.add_worksheet();
+    ws1.set_name("工程BOM清单").map_err(|e| e.to_string())?;
+    ws1.set_freeze_panes(1, 0).map_err(|e| e.to_string())?;
+    let s1_headers = [
+        "序号",
+        "部件标号",
+        "名称",
+        "类别",
+        "关键规格参数",
+        "材质/耐温耐压要求",
+        "参考数量",
+        "备注",
+    ];
+    for (col, h) in s1_headers.iter().enumerate() {
+        ws1.write_string_with_format(0, col as u16, *h, &header_fmt)
+            .map_err(|e| e.to_string())?;
+    }
+    for (idx, item) in pack.bom_items.iter().enumerate() {
+        let row = (idx + 1) as u32;
+        ws1.write_number(row, 0, item.item_no as f64)
+            .map_err(|e| e.to_string())?;
+        ws1.write_string(row, 1, format!("P{:02}", item.item_no))
+            .map_err(|e| e.to_string())?;
+        ws1.write_string(row, 2, &item.part_name)
+            .map_err(|e| e.to_string())?;
+        ws1.write_string(row, 3, &item.category)
+            .map_err(|e| e.to_string())?;
+        ws1.write_string(row, 4, &item.spec_summary)
+            .map_err(|e| e.to_string())?;
+        let env_req = if item.category.contains("自制") {
+            "工业级金属/工程塑料（耐压耐温按工况标定）"
+        } else {
+            "原厂标准工业级规格"
+        };
+        ws1.write_string(row, 5, env_req)
+            .map_err(|e| e.to_string())?;
+        ws1.write_number(row, 6, 1.0).map_err(|e| e.to_string())?;
+        ws1.write_string(row, 7, &item.source_feature)
+            .map_err(|e| e.to_string())?;
+    }
+    ws1.autofit();
+
+    // Sheet 2: 电气控制 IO 与参数表
+    let ws2 = workbook.add_worksheet();
+    ws2.set_name("电气控制IO表").map_err(|e| e.to_string())?;
+    ws2.set_freeze_panes(1, 0).map_err(|e| e.to_string())?;
+    let s2_headers = [
+        "通道/点位",
+        "信号类型",
+        "关联执行器/传感器",
+        "量程与控制逻辑说明",
+    ];
+    for (col, h) in s2_headers.iter().enumerate() {
+        ws2.write_string_with_format(0, col as u16, *h, &header_fmt)
+            .map_err(|e| e.to_string())?;
+    }
+    let io_rows = parse_markdown_table_rows(&pack.control_io_spec_md, 4);
+    for (idx, cols) in io_rows.iter().enumerate() {
+        let row = (idx + 1) as u32;
+        for (c_idx, val) in cols.iter().enumerate() {
+            ws2.write_string(row, c_idx as u16, val)
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    ws2.autofit();
+
+    // Sheet 3: 样机台架测试验收大纲
+    let ws3 = workbook.add_worksheet();
+    ws3.set_name("样机台架测试验收大纲")
+        .map_err(|e| e.to_string())?;
+    ws3.set_freeze_panes(1, 0).map_err(|e| e.to_string())?;
+    let s3_headers = ["测试项", "输入工况", "目标指标", "判定标准"];
+    for (col, h) in s3_headers.iter().enumerate() {
+        ws3.write_string_with_format(0, col as u16, *h, &header_fmt)
+            .map_err(|e| e.to_string())?;
+    }
+    let test_rows = parse_markdown_table_rows(&pack.bench_test_outline_md, 4);
+    if test_rows.is_empty() {
+        ws3.write_string(1, 0, "功能与指标验证")
+            .map_err(|e| e.to_string())?;
+        ws3.write_string(1, 1, "额定工况")
+            .map_err(|e| e.to_string())?;
+        let metric = ctx
+            .experiment_results
+            .first()
+            .map(|e| format!("exit_code={}（实测指标见第13步）", e.exit_code))
+            .unwrap_or_else(|| "【待台架标定】".to_string());
+        ws3.write_string(1, 2, &metric).map_err(|e| e.to_string())?;
+        ws3.write_string(1, 3, "满足设计指标且无异常告警")
+            .map_err(|e| e.to_string())?;
+    } else {
+        for (idx, cols) in test_rows.iter().enumerate() {
+            let row = (idx + 1) as u32;
+            for (c_idx, val) in cols.iter().enumerate() {
+                ws3.write_string(row, c_idx as u16, val)
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+    }
+    ws3.autofit();
+
+    workbook.save_to_buffer().map_err(|e| e.to_string())
+}
+
+fn parse_markdown_table_rows(md: &str, expected_cols: usize) -> Vec<Vec<String>> {
+    let mut rows = Vec::new();
+    let mut skipped_header = false;
+    for line in md.lines() {
+        let trimmed = line.trim();
+        if !trimmed.starts_with('|') || !trimmed.ends_with('|') {
+            continue;
+        }
+        let inner = trimmed.trim_matches('|');
+        let cells: Vec<String> = inner.split('|').map(|s| s.trim().to_string()).collect();
+        if cells
+            .iter()
+            .all(|c| c.chars().all(|ch| ch == '-' || ch == ':' || ch == ' '))
+        {
+            skipped_header = true;
+            continue;
+        }
+        if !skipped_header {
+            continue;
+        }
+        let mut padded = cells;
+        padded.resize(expected_cols, String::new());
+        rows.push(padded);
+    }
+    rows
+}
+
+/// GET /api/ideas/:id/delivery-pack/xlsx — 一键导出三 Sheet 工程 BOM 交付包 (.xlsx)
+pub async fn api_idea_delivery_pack_xlsx(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+) -> axum::response::Response {
+    use axum::http::{header, StatusCode};
+    use axum::response::IntoResponse;
+
+    let idea = match s.db.get_idea(&id) {
+        Ok(Some(i)) => i,
+        _ => {
+            return (StatusCode::NOT_FOUND, "Idea not found").into_response();
+        }
+    };
+
+    match build_delivery_pack_xlsx(&s.db, &idea) {
+        Ok(bytes) => {
+            let safe_id: String = idea
+                .id
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+                .collect();
+            let filename = format!(
+                "delivery-pack-{}.xlsx",
+                if safe_id.is_empty() { "bom" } else { &safe_id }
+            );
+            (
+                StatusCode::OK,
+                [
+                    (
+                        header::CONTENT_TYPE,
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                            .to_string(),
+                    ),
+                    (
+                        header::CONTENT_DISPOSITION,
+                        format!("attachment; filename=\"{filename}\""),
+                    ),
+                ],
+                bytes,
+            )
+                .into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("XLSX build error: {e}"),
+        )
+            .into_response(),
+    }
+}
+
 #[cfg(test)]
 mod deliverables_report_tests {
     use super::{build_deliverable_report_json, Idea};
@@ -954,5 +1150,27 @@ mod deliverables_report_tests {
         let persisted_bom = build_deliverable_report_json(&db, &idea, "bom_pack");
         assert_eq!(persisted_bom["source"], "persisted_memory");
         assert_eq!(persisted_bom["report"], "# 已落库 BOM");
+    }
+
+    #[test]
+    fn delivery_pack_xlsx_has_valid_zip_and_three_sheets() {
+        let db = Database::init(":memory:").expect("open db");
+        let idea = seed_idea(&db, "idea-xlsx-1");
+        let bytes = super::build_delivery_pack_xlsx(&db, &idea).expect("build xlsx");
+        assert!(bytes.len() > 500, "xlsx bytes should be non-empty");
+        assert_eq!(&bytes[0..2], b"PK", "xlsx must be a valid ZIP archive");
+
+        let cursor = std::io::Cursor::new(bytes);
+        let mut archive = zip::ZipArchive::new(cursor).expect("open zip");
+        for sheet in [
+            "xl/worksheets/sheet1.xml",
+            "xl/worksheets/sheet2.xml",
+            "xl/worksheets/sheet3.xml",
+        ] {
+            let mut f = archive.by_name(sheet).expect("sheet must exist");
+            let mut xml = String::new();
+            std::io::Read::read_to_string(&mut f, &mut xml).expect("read sheet xml");
+            assert!(!xml.is_empty(), "{sheet} should not be empty");
+        }
     }
 }

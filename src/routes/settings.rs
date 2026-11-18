@@ -813,18 +813,21 @@ pub async fn api_import_patents(
     State(s): State<AppState>,
     Json(req): Json<crate::patent::ImportRequest>,
 ) -> Json<serde_json::Value> {
-    let mut n = 0;
-    for p in &req.patents {
-        if let Ok(id) = s.db.insert_patent(p) {
-            crate::db::vector::try_compute_and_save_embedding(
-                &s.db,
-                &id,
-                &format!("{} {}", p.title, p.abstract_text),
-            );
-            n += 1;
-        }
+    match s
+        .db
+        .batch_import_patents_with_chunks(&req.patents, "tfidf-local")
+    {
+        Ok((imported, chunks)) => Json(json!({
+            "status": "ok",
+            "imported": imported,
+            "chunks": chunks
+        })),
+        Err(e) => Json(json!({
+            "status": "error",
+            "imported": 0,
+            "message": format!("批量导入失败: {e}")
+        })),
     }
-    Json(json!({"status":"ok","imported":n}))
 }
 
 // api_save_fallbacks 已屏蔽（仅保留 DeepSeek AI，无需备用 AI）

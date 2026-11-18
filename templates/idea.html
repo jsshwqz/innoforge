@@ -245,6 +245,7 @@
                             <button class="report-type-btn" data-rtype="executive" onclick="switchReportType('executive')">精简版</button>
                             <button class="report-type-btn" data-rtype="bom_pack" onclick="switchReportType('bom_pack')" data-i18n="idea.reportBomPack">工程 BOM 交付包</button>
                             <button class="report-type-btn" data-rtype="journal_draft" onclick="switchReportType('journal_draft')" data-i18n="idea.reportJournalDraft">期刊论文草稿</button>
+                            <button class="report-type-btn" type="button" onclick="exportBomXlsx()" data-i18n="idea.exportBomXlsx">导出 Excel BOM 包</button>
                         </div>
                     </div>
                     <div id="report-content" style="line-height:1.7; color:var(--text-secondary);"><p class="muted">完成推演后可查看报告</p></div>
@@ -1987,6 +1988,11 @@
         } catch(e) {
             content.innerHTML = DOMPurify.sanitize('<p style="color:#f85149;">加载失败: ' + esc(e.message) + '</p>');
         }
+    }
+
+    function exportBomXlsx() {
+        if (!currentIdeaId) return;
+        window.location.href = '/api/ideas/' + encodeURIComponent(currentIdeaId) + '/delivery-pack/xlsx';
     }
 
     function openReportInNewTab() {
