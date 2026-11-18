@@ -840,6 +840,13 @@ impl AiClient {
             ""
         };
 
+        let historical_constraints = request_json
+            .and_then(|rj| rj.get("historical_constraints"))
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(String::from);
+
         // UA2: reject_review 走复审请求书专用模板
         // Phase 4: reject_review 走通用管线 generate_response_letter_pipeline
         if oa_type == "reject_review" {
@@ -953,6 +960,13 @@ impl AiClient {
                 request_json,
                 my_patent_text,
             );
+            if let Some(ref hc) = historical_constraints {
+                let merged = match case_input.legacy_discussion.take() {
+                    Some(prev) if !prev.trim().is_empty() => format!("{prev}\n\n{hc}"),
+                    _ => hc.clone(),
+                };
+                case_input.legacy_discussion = Some(merged);
+            }
             let self_clone = self.clone();
             let ai_client_fast_cloned = ai_client_fast.cloned();
             tokio::spawn(async move {
@@ -1113,8 +1127,19 @@ impl AiClient {
              7. 「修改后的权利要求」必须由「原始申请文本」中的字句**逐字组成**：不得改写、概括、增补、替换术语；需要增补的技术内容一律不写，改为写明“建议核对方向”并标注【需申请人确认】。系统会逐句核验，原文零命中的措辞会被就地标出；宁可只对现有权项做删除或合并，也不要编出原文没有的技术特征。",
         );
 
+        if historical_constraints.is_some() {
+            system_prompt.push_str(
+                "\n8. 若输入中包含 <historical_consistency_constraints>，必须严格遵守其中的前轮禁止反言红线、审查员已认可特征及新增对比文件拆解要求，严禁推翻前轮已作出的限定或自认。",
+            );
+        }
+
+        let constraints_block = historical_constraints
+            .as_deref()
+            .map(|hc| format!("\n\n<historical_consistency_constraints>\n{hc}\n</historical_consistency_constraints>"))
+            .unwrap_or_default();
+
         let user_prompt = format!(
-            "{base_user_prompt}\n\n补充输出要求：第五部分“权利要求修改建议”必须按权利要求逐项给出“修改前要点、建议修改文本或修改方向、修改理由及证据依据”。每一部分均应为完整中文段落，禁止只输出标题、符号或占位符。\n\n<office_action>\n{oa}\n</office_action>\n\n<confirmed_analysis>\n{analysis}\n</confirmed_analysis>\n\n<discussion>\n{discussion}\n</discussion>"
+            "{base_user_prompt}\n\n补充输出要求：第五部分“权利要求修改建议”必须按权利要求逐项给出“修改前要点、建议修改文本或修改方向、修改理由及证据依据”。每一部分均应为完整中文段落，禁止只输出标题、符号或占位符。\n\n<office_action>\n{oa}\n</office_action>\n\n<confirmed_analysis>\n{analysis}\n</confirmed_analysis>\n\n<discussion>\n{discussion}\n</discussion>{constraints_block}"
         );
 
         let self_clone = self.clone();

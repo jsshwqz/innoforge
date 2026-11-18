@@ -39,6 +39,7 @@ pub mod fto_scanner;
 pub mod golden_regression;
 mod idea;
 pub mod letter_header;
+pub mod oa_drift;
 pub mod oa_matrix;
 pub mod output_guard;
 pub mod paraphrase_check;

@@ -43,11 +43,21 @@
                     <option value="">--</option>
                 </select>
             </div>
-            <div style="display: flex; gap: 8px;">
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                <button class="btn-secondary" id="btn-oa-round-drift" onclick="loadOaRoundDrift(true)" style="padding: 4px 12px; font-size: 13px;">🧭 <span data-i18n="oa.drift.btn">多轮视图漂移</span></button>
                 <button class="btn-primary" onclick="createOaRoundFromPage()" data-i18n="oa.workflow.newRound" style="padding: 4px 12px; font-size: 13px;"></button>
                 <button class="btn-secondary" onclick="clearCurrentCaseInputs()" style="padding: 4px 12px; font-size: 13px; color: #d73a49;">🗑️ 清空本案输入</button>
             </div>
         </div>
+
+        <!-- 多轮 OA 演化时间线与视图漂移面板 (Batch 15) -->
+        <details id="oa-round-drift-panel" class="cmp-section" style="display:none; margin-bottom:10px; padding:12px 16px;">
+            <summary id="oa-round-drift-summary" style="font-weight:600; cursor:pointer; color:#58a6ff;">
+                🧭 <span data-i18n="oa.drift.title">多轮审查意见演化时间线与一致性红线</span>
+            </summary>
+            <div id="oa-round-timeline-bar" style="display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:12px;"></div>
+            <div id="oa-round-drift-body" style="margin-top:12px;"></div>
+        </details>
 
         <!-- OA Type Selector -->
         <div class="cmp-section cmp-oa-violet">
@@ -2187,18 +2197,33 @@
             body.strategy_hint = selectedStrategy;
         }
 
-        // T3: 二审驳回时自动获取一审历史上下文
-        if (oaType === 'second_rejection') {
-            var pnForDiff = null;
-            if (typeof my === 'object' && my.patent_number) {
-                pnForDiff = my.patent_number;
-            } else if (typeof my === 'string') {
-                pnForDiff = my;
-            } else if (my && my.content) {
-                var m = my.content.match(/\b((?:CN|US|EP|JP|KR|WO)\d{7,12}(?:[.]?\d)?)\b/i);
-                if (m) pnForDiff = m[1];
+        // T3: 二审驳回时自动获取一审历史上下文，同时全类型注入多轮 oa_rounds 一致性约束
+        var pnForDiff = null;
+        if (typeof my === 'object' && my.patent_number) {
+            pnForDiff = my.patent_number;
+        } else if (typeof my === 'string') {
+            pnForDiff = my;
+        } else if (my && my.content) {
+            var m = my.content.match(/\b((?:CN|US|EP|JP|WO|KR)\d{7,12}(?:[.]?\d)?)\b/i);
+            if (m) pnForDiff = m[1];
+        }
+        if (pnForDiff) {
+            body.case_id = pnForDiff;
+            if (window._oaDriftConstraints) {
+                body.historical_constraints = window._oaDriftConstraints;
             }
-            if (pnForDiff) {
+            try {
+                var roundsDiffResp = await fetch('/api/oa/' + encodeURIComponent(pnForDiff) + '/rounds/diff');
+                var roundsDiffData = await roundsDiffResp.json();
+                if (roundsDiffData.status === 'ok' && roundsDiffData.total_rounds > 0) {
+                    if (roundsDiffData.prompt_constraints_block) {
+                        window._oaDriftConstraints = roundsDiffData.prompt_constraints_block;
+                        body.historical_constraints = roundsDiffData.prompt_constraints_block;
+                    }
+                    renderOaRoundDrift(roundsDiffData, false);
+                }
+            } catch (e) { /* rounds diff fetch failed, continue without */ }
+            if (oaType === 'second_rejection') {
                 try {
                     var diffResp = await fetch('/api/oa/history/' + encodeURIComponent(pnForDiff) + '/diff');
                     var diffData = await diffResp.json();
@@ -2869,7 +2894,9 @@
                     discussion_id: localStorage.getItem('oa-discuss-id') || '',
                     my_patent: (uploadedData && uploadedData['my']) || { content: (document.getElementById('my-patent') || {}).value || '' },
                     // 现权项（可选）：有它才能查「删限定＝扩大保护范围」（#159）
-                    current_claims: ((document.getElementById('current-claims') || {}).value || '').trim()
+                    current_claims: ((document.getElementById('current-claims') || {}).value || '').trim(),
+                    case_id: getCurrentPatentNumber() || '',
+                    historical_constraints: window._oaDriftConstraints || ''
                 })
             });
 
@@ -4480,8 +4507,199 @@
             });
             select.innerHTML = options;
             updateRoundLabel();
+            loadOaRoundDrift(false);
         } catch (e) {
             console.error('Failed to load OA rounds:', e);
+        }
+    }
+
+    async function loadOaRoundDrift(explicitOpen) {
+        const patentNum = getCurrentPatentNumber();
+        if (!patentNum) {
+            if (explicitOpen) {
+                alert(t('oa.drift.needCase') || '请先输入或载入专利号/案件号');
+            }
+            return;
+        }
+        try {
+            const resp = await fetch('/api/oa/' + encodeURIComponent(patentNum) + '/rounds/diff');
+            const data = await resp.json();
+            if (data.status !== 'ok') {
+                if (explicitOpen) alert(data.message || '加载多轮漂移分析失败');
+                return;
+            }
+            window._oaDriftConstraints = data.prompt_constraints_block || '';
+            renderOaRoundDrift(data, explicitOpen);
+        } catch (e) {
+            console.error('Failed to load OA round drift:', e);
+            if (explicitOpen) alert('加载多轮漂移分析失败: ' + e.message);
+        }
+    }
+
+    function renderOaRoundDrift(data, explicitOpen) {
+        var panel = document.getElementById('oa-round-drift-panel');
+        var timelineBar = document.getElementById('oa-round-timeline-bar');
+        var bodyEl = document.getElementById('oa-round-drift-body');
+        if (!panel || !timelineBar || !bodyEl) return;
+
+        panel.style.display = 'block';
+        if (explicitOpen || (data.total_rounds || 0) >= 2) {
+            panel.open = true;
+        }
+
+        var summarySpan = document.getElementById('oa-round-drift-summary');
+        if (summarySpan) {
+            summarySpan.textContent = '🧭 ' + (t('oa.drift.title') || '多轮审查意见演化时间线与一致性红线')
+                + (data.summary ? ' — ' + data.summary : '');
+        }
+
+        timelineBar.textContent = '';
+        bodyEl.textContent = '';
+
+        var timeline = data.timeline || [];
+        if (timeline.length === 0) {
+            var emptyMsg = document.createElement('div');
+            emptyMsg.style.color = '#8b949e';
+            emptyMsg.style.fontSize = '13px';
+            emptyMsg.textContent = t('oa.drift.empty') || '当前案件暂无多轮 OA 轮次记录';
+            timelineBar.appendChild(emptyMsg);
+            return;
+        }
+
+        timeline.forEach(function(stage, idx) {
+            if (idx > 0) {
+                var arrow = document.createElement('span');
+                arrow.textContent = '→';
+                arrow.style.color = '#8b949e';
+                arrow.style.fontWeight = '700';
+                arrow.style.fontSize = '16px';
+                timelineBar.appendChild(arrow);
+            }
+            var node = document.createElement('div');
+            var borderCol = stage.result === 'accepted' ? '#3fb950'
+                : (stage.result === 'rejected' ? '#da3633'
+                : (stage.result === 'partially_accepted' ? '#d29922' : '#58a6ff'));
+            node.style.cssText = 'border:1px solid ' + borderCol + ';background:#161b22;border-radius:8px;padding:8px 12px;min-width:170px;';
+
+            var title = document.createElement('div');
+            title.style.cssText = 'font-weight:600;font-size:13px;color:' + borderCol + ';';
+            title.textContent = stage.stage_label || ('第' + stage.round_number + '轮');
+            node.appendChild(title);
+
+            if (stage.oa_date) {
+                var dateEl = document.createElement('div');
+                dateEl.style.cssText = 'font-size:11px;color:#8b949e;margin-top:2px;';
+                dateEl.textContent = stage.oa_date;
+                node.appendChild(dateEl);
+            }
+            if (stage.prior_art_refs && stage.prior_art_refs.length > 0) {
+                var refsEl = document.createElement('div');
+                refsEl.style.cssText = 'font-size:11px;color:#c9d1d9;margin-top:4px;';
+                refsEl.textContent = '对比: ' + stage.prior_art_refs.join(', ');
+                node.appendChild(refsEl);
+            }
+            if (stage.rejection_grounds && stage.rejection_grounds.length > 0) {
+                var grEl = document.createElement('div');
+                grEl.style.cssText = 'font-size:11px;color:#f0883e;margin-top:2px;';
+                grEl.textContent = stage.rejection_grounds.join(' / ');
+                node.appendChild(grEl);
+            }
+            timelineBar.appendChild(node);
+        });
+
+        function buildDriftSection(icon, titleText, borderColor, items, emptyText, renderItem) {
+            var box = document.createElement('div');
+            box.style.cssText = 'margin-bottom:10px;padding:10px 12px;border:1px solid ' + borderColor + '55;border-left:4px solid ' + borderColor + ';border-radius:6px;background:#0d1117;';
+            var h = document.createElement('div');
+            h.style.cssText = 'font-weight:600;font-size:13px;color:' + borderColor + ';margin-bottom:6px;';
+            h.textContent = icon + ' ' + titleText;
+            box.appendChild(h);
+
+            if (!items || items.length === 0) {
+                var emp = document.createElement('div');
+                emp.style.cssText = 'font-size:12px;color:#8b949e;';
+                emp.textContent = emptyText;
+                box.appendChild(emp);
+            } else {
+                var ul = document.createElement('ul');
+                ul.style.cssText = 'margin:0;padding-left:18px;font-size:12px;color:#c9d1d9;line-height:1.6;';
+                items.forEach(function(item) {
+                    var li = document.createElement('li');
+                    li.textContent = renderItem(item);
+                    ul.appendChild(li);
+                });
+                box.appendChild(ul);
+            }
+            return box;
+        }
+
+        var acceptedBox = buildDriftSection(
+            '🟢',
+            t('oa.drift.acceptedTitle') || '审查员隐含/明确认可的特征（不得误改或削弱）',
+            '#3fb950',
+            data.accepted_features || [],
+            t('oa.drift.noAccepted') || '暂未检出明确或隐含认可的特征',
+            function(f) {
+                var basis = f.basis === 'explicit' ? '明确认可' : '隐含认可';
+                return '[第' + f.round_number + '轮·' + basis + '] ' + (f.claim_ref || '') + ' — ' + (f.feature || '');
+            }
+        );
+        bodyEl.appendChild(acceptedBox);
+
+        var newPriorItems = [];
+        (data.newly_introduced_prior_art || []).forEach(function(pa) {
+            newPriorItems.push('[第' + pa.introduced_in_round + '轮新增对比文件] ' + pa.label + ' (' + pa.doc_ref + ') — ' + (pa.evidence_snippet || ''));
+        });
+        (data.new_rejection_grounds || []).forEach(function(gd) {
+            if (gd.status === 'new') {
+                newPriorItems.push('[第' + gd.to_round + '轮新增驳回理由] ' + gd.ground);
+            }
+        });
+        var newPriorBox = buildDriftSection(
+            '🔴',
+            t('oa.drift.newPriorArtTitle') || '新增对比文件（D3/D4）与新增驳回理由',
+            '#da3633',
+            newPriorItems,
+            t('oa.drift.noNewPriorArt') || '暂未检出新增对比文件或新增驳回理由',
+            function(s) { return s; }
+        );
+        bodyEl.appendChild(newPriorBox);
+
+        var redlinesBox = buildDriftSection(
+            '⚠️',
+            t('oa.drift.redlinesTitle') || '禁止反言与历史一致性红线（严禁与前轮矛盾）',
+            '#d29922',
+            data.consistency_redlines || [],
+            t('oa.drift.noRedlines') || '暂未检出前轮答复中的禁止反言约束',
+            function(rl) {
+                return '[' + rl.redline_id + ' · 第' + rl.source_round + '轮] ' + rl.constraint_rule;
+            }
+        );
+        bodyEl.appendChild(redlinesBox);
+
+        var transitions = data.transitions || [];
+        if (transitions.length > 0) {
+            var transBox = buildDriftSection(
+                '🔀',
+                t('oa.drift.transitionsTitle') || '相邻轮次演化对比',
+                '#58a6ff',
+                transitions,
+                '',
+                function(tr) {
+                    var parts = ['第' + tr.from_round + '轮 → 第' + tr.to_round + '轮'];
+                    if (tr.newly_introduced_prior_art && tr.newly_introduced_prior_art.length > 0) {
+                        parts.push('新增文献: ' + tr.newly_introduced_prior_art.map(function(p) { return p.label; }).join(', '));
+                    }
+                    if (tr.new_rejection_grounds && tr.new_rejection_grounds.length > 0) {
+                        parts.push('新增理由: ' + tr.new_rejection_grounds.join(', '));
+                    }
+                    if (tr.overcome_rejection_grounds && tr.overcome_rejection_grounds.length > 0) {
+                        parts.push('已克服: ' + tr.overcome_rejection_grounds.join(', '));
+                    }
+                    return parts.join(' ｜ ');
+                }
+            );
+            bodyEl.appendChild(transBox);
         }
     }
 
