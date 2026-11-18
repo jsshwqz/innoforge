@@ -34,6 +34,10 @@
   - **工程 BOM 与期刊草稿双交付包**（`src/pipeline/steps/deliverables.rs` + `src/pipeline/steps/finalize.rs` + `src/routes/idea.rs`）：`Finalize` 阶段在 EK-v2 / 溯源完成后自动落库 `deliverable_bom` 与 `deliverable_journal_draft`（`concept_type = "decision"`），`GET /api/idea/:id/report` 新增 `bom_pack` 与 `journal_draft` 分支（含防破新颖性锁警告与真实 DOI 引用）。
   - **前端最小功能按钮接线**（`templates/idea.html` + `static/i18n.js` + `docs/functions-manifest.json`）：报告切换栏接入 `bom_pack` / `journal_draft` 按钮及 `openReport` 映射；特征卡片面板新增「AI 自动提取特征卡」按钮（调用 `POST /api/ideas/:id/feature-cards/generate` 并在行内展示状态）与卡片级「转 FreeCAD 建模」按钮（`createElement` + `addEventListener` 切换讨论页并调用 `ideaCadController.drawFromInput`）。
   - **文档与契约同步**：`docs/API-CONTRACTS.md`、`docs/API-ROUTES.md`、`docs/API.md`、`CHANGELOG.md` 同步更新。
+- **④ Wave 5 死代码清零、模型池同步与第二批巨石解耦**:
+  - **特征卡 `dead_code` 彻底清零**：`src/routes/feature_cards.rs` 消灭全部 `dead_code`，接入 `?semantic=true` 语义级差异对比端点与 `cad_prompts` FreeCAD 提示词组装链路。
+  - **商汤模型池同步**：`templates/settings.html` 同步商汤 1.0M 免费模型池预设。
+  - **第二批三块 >2100 行巨石解耦**：完成 `src/routes/ai.rs`、`src/ai/patent.rs` 与 `src/evidence_kernel/amendment_gate.rs`（2168 → 1355 行，拆分测试至 `src/evidence_kernel/amendment_gate_tests.rs` 809 行）解耦。
 
 ### 2026-11-17 — **Batch 1：DB v25 结构化分块 + BM25/向量 RRF 混合检索（#78）+ OpenAlex 学术源 + 解除 5000 字硬截断**（PR 待建）
 

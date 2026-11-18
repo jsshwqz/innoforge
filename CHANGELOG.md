@@ -12,6 +12,7 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 - **工程 BOM 与期刊草稿双交付包**：新增 `deliverables` 模块并在 `Finalize` 阶段自动落库（`deliverable_bom` / `deliverable_journal_draft`）；`GET /api/idea/:id/report` 新增 `bom_pack` 与 `journal_draft` 导出分支，置顶防破新颖性安全锁警告并绑定检索所得真实 DOI。 / Added engineering BOM pack and journal manuscript draft deliverables persisted in `Finalize` and exposed via `bom_pack` / `journal_draft` report types.
 - **特征卡自动生成端点与快慢模型路由闭环**：新增 `POST /api/ideas/:id/feature-cards/generate`（快模型 JSON 解析 + 确定性回退入库）、语义级差异对比与 FreeCAD 建模提示词组装；主管线与 OA 深度生成接入 `ai_client_expert()`，扩展查询与特征提取接入 `ai_client_fast()`。 / Added `POST /api/ideas/:id/feature-cards/generate` with deterministic fallback, CAD prompt builder, and expert/fast AI channel routing.
 - **创研台前端最小功能按钮接线**：`idea.html` 报告切换栏新增工程 BOM 交付包与期刊论文草稿切换按钮，特征卡片面板新增「AI 自动提取特征卡」触发按钮及单卡「转 FreeCAD 建模」跳转按钮，并补全中英双语词条。 / Wired BOM pack & journal draft report switchers, auto-extract feature cards button, and per-card "Send to FreeCAD" action in `idea.html` with bilingual i18n keys.
+- **特征卡语义对比/CAD 提示词接线与商汤模型池同步**：`feature_cards.rs` 消灭全部 `dead_code`，接入 `?semantic=true` 语义差异对比与 `cad_prompts` 提示词组装；`settings.html` 同步商汤 1.0M 免费模型池。 / Eliminated all `dead_code` in `feature_cards.rs` by wiring `?semantic=true` semantic diff and `cad_prompts` builder; synced SenseTime 1.0M free model pool in `settings.html`.
 
 ### 修复 / Fixed
 
@@ -20,6 +21,7 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 ### 重构 / Refactored
 
 - **四大巨石文件模块化拆分**：将 `response_pipeline.rs`、`routes/search.rs`、`routes/ai.rs`、`routes/idea.rs` 分别拆出 `response_pipeline_stage_d.rs`、`routes/search_tail.rs`、`routes/oa_assist.rs`、`routes/idea_ops.rs` 四个子模块，保持零新增不安全字节切片与零生产 `unwrap()/expect()`。 / Split four monolithic modules into focused submodules (`response_pipeline_stage_d.rs`, `search_tail.rs`, `oa_assist.rs`, `idea_ops.rs`) with zero new unsafe byte slicing.
+- **第二批三大巨石文件解耦**：完成 `routes/ai.rs`、`ai/patent.rs` 与 `evidence_kernel/amendment_gate.rs` 三块 >2100 行巨石模块拆分，保持零新增不安全字节切片。 / Decoupled the second batch of >2100-line monoliths (`routes/ai.rs`, `ai/patent.rs`, `evidence_kernel/amendment_gate.rs`) with zero new unsafe byte slicing.
 
 ### 新增 / Added（先前批次）
 

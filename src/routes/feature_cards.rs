@@ -115,14 +115,25 @@ pub async fn api_create_feature_card(
     }
 }
 
+/// 特征卡差异对比查询参数 / Query parameters for feature card diff
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct FeatureCardDiffQuery {
+    #[serde(default)]
+    pub a: Option<String>,
+    #[serde(default)]
+    pub b: Option<String>,
+    #[serde(default)]
+    pub semantic: Option<bool>,
+}
+
 /// GET /api/feature-cards/diff?a=ID_A&b=ID_B
 /// 最小差异定位：对比两张特征卡片的标题和描述
 /// Minimal diff: compare two feature cards' title and description
 pub async fn api_feature_card_diff(
     State(s): State<AppState>,
-    Query(params): Query<std::collections::HashMap<String, String>>,
+    Query(params): Query<FeatureCardDiffQuery>,
 ) -> impl IntoResponse {
-    let id_a = match params.get("a") {
+    let id_a = match params.a.as_deref() {
         Some(id) => id,
         None => {
             return (
@@ -132,7 +143,7 @@ pub async fn api_feature_card_diff(
                 .into_response();
         }
     };
-    let id_b = match params.get("b") {
+    let id_b = match params.b.as_deref() {
         Some(id) => id,
         None => {
             return (
@@ -180,6 +191,30 @@ pub async fn api_feature_card_diff(
     };
 
     let diff = compute_minimal_diff(&card_a, &card_b);
+    if params.semantic == Some(true) {
+        let fast_client = {
+            let cfg = s.config.read().unwrap_or_else(|e| e.into_inner());
+            if cfg.ai_fast_channel_ready() {
+                Some(cfg.ai_client_fast())
+            } else {
+                None
+            }
+        };
+        let verdict = classify_diff_semantic(fast_client.as_ref(), &card_a, &card_b).await;
+        return Json(json!({
+            "status": "ok",
+            "card_a": { "id": card_a.id, "title": card_a.title },
+            "card_b": { "id": card_b.id, "title": card_b.title },
+            "diff": diff,
+            "diff_type": verdict.diff_type,
+            "novelty_significance": verdict.novelty_significance,
+            "novelty_reason": verdict.novelty_reason,
+            "semantically_equivalent": verdict.semantically_equivalent,
+            "fallback_used": verdict.fallback_used,
+        }))
+        .into_response();
+    }
+
     let (diff_type, novelty_significance, novelty_reason) = classify_diff(&card_a, &card_b);
     Json(json!({
         "status": "ok",
@@ -427,7 +462,6 @@ fn diff_strings(a: &str, b: &str) -> Vec<serde_json::Value> {
 }
 
 /// 语义级特征卡对比判定结果
-#[allow(dead_code)]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SemanticDiffVerdict {
     pub semantically_equivalent: bool,
@@ -600,9 +634,12 @@ pub async fn api_generate_feature_cards(
                         tracing::warn!("自动生成特征卡入库失败: {}", e);
                     }
                 }
+                let cad_prompts: Vec<String> =
+                    cards.iter().map(build_cad_prompt_from_card).collect();
                 return Json(json!({
                     "status": "ok",
                     "cards": cards,
+                    "cad_prompts": cad_prompts,
                     "source": "ai_fast"
                 }))
                 .into_response();
@@ -622,9 +659,11 @@ pub async fn api_generate_feature_cards(
             tracing::warn!("保底特征卡入库失败: {}", e);
         }
     }
+    let cad_prompts: Vec<String> = cards.iter().map(build_cad_prompt_from_card).collect();
     Json(json!({
         "status": "ok",
         "cards": cards,
+        "cad_prompts": cad_prompts,
         "source": "deterministic_fallback"
     }))
     .into_response()
@@ -677,7 +716,6 @@ fn parse_semantic_diff_json(
 }
 
 /// 语义级特征卡对比（ai_fast 为 None 或调用/JSON 解析失败时，100% 回退确定性 classify_diff）
-#[allow(dead_code)]
 pub async fn classify_diff_semantic(
     ai_fast: Option<&crate::ai::AiClient>,
     a: &FeatureCard,
@@ -719,7 +757,6 @@ pub async fn classify_diff_semantic(
 }
 
 /// 从单张 5 维特征卡组装结构化 FreeCAD 绘图指令（供一键转入 /api/cad/draw）
-#[allow(dead_code)]
 pub fn build_cad_prompt_from_card(card: &FeatureCard) -> String {
     let structure = if card.core_structure.trim().is_empty() {
         card.description.trim()
@@ -1052,5 +1089,109 @@ mod tests {
         }
         let stored = db.get_feature_cards_by_idea(idea_id).expect("query cards");
         assert_eq!(stored.len(), 2);
+    }
+
+    fn make_test_state() -> AppState {
+        let db = crate::db::Database::init(":memory:").expect("in-memory db");
+        let cad_root = std::env::temp_dir().join(format!(
+            "innoforge-feature-cards-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let cad = crate::cad::CadService::new(cad_root, None).expect("cad service");
+        AppState {
+            db: std::sync::Arc::new(db),
+            cad: std::sync::Arc::new(cad),
+            config: std::sync::Arc::new(
+                std::sync::RwLock::new(crate::routes::AppConfig::default()),
+            ),
+            pipeline_channels: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
+            db_path: ":memory:".to_string(),
+            listen_port: 3000,
+        }
+    }
+
+    async fn response_json(resp: axum::response::Response) -> serde_json::Value {
+        use axum::body::HttpBody as _;
+        let mut body = resp.into_body();
+        let mut bytes = Vec::new();
+        while let Some(chunk) = body.data().await {
+            bytes.extend_from_slice(&chunk.expect("read body chunk"));
+        }
+        serde_json::from_slice(&bytes).expect("valid json response")
+    }
+
+    #[tokio::test]
+    async fn test_api_feature_card_diff_semantic_and_generate_cad_prompts() {
+        let state = make_test_state();
+        let idea_id = "idea-route-1";
+        let idea = crate::patent::Idea {
+            id: idea_id.to_string(),
+            title: "双联液压阀".to_string(),
+            description: "阀体设置阶梯内孔。阀芯采用双密封环结构。".to_string(),
+            input_type: "text".to_string(),
+            status: "draft".to_string(),
+            analysis: String::new(),
+            web_results: String::new(),
+            patent_results: String::new(),
+            novelty_score: None,
+            created_at: "2026-11-18T00:00:00Z".to_string(),
+            updated_at: "2026-11-18T00:00:00Z".to_string(),
+            discussion_summary: String::new(),
+        };
+        state.db.insert_idea(&idea).expect("insert idea");
+
+        let gen_resp = api_generate_feature_cards(State(state.clone()), Path(idea_id.to_string()))
+            .await
+            .into_response();
+        let gen_json = response_json(gen_resp).await;
+        assert_eq!(gen_json["status"], "ok");
+        let cards = gen_json["cards"].as_array().expect("cards array");
+        let cad_prompts = gen_json["cad_prompts"]
+            .as_array()
+            .expect("cad_prompts array");
+        assert_eq!(cards.len(), 2);
+        assert_eq!(cad_prompts.len(), cards.len());
+        assert!(cad_prompts[0]
+            .as_str()
+            .expect("prompt string")
+            .contains("FreeCAD"));
+
+        let id_a = cards[0]["id"].as_str().expect("card a id").to_string();
+        let id_b = cards[1]["id"].as_str().expect("card b id").to_string();
+
+        // 默认分支（semantic=None）保持向后兼容，不返回 semantic 扩展字段
+        let det_resp = api_feature_card_diff(
+            State(state.clone()),
+            Query(FeatureCardDiffQuery {
+                a: Some(id_a.clone()),
+                b: Some(id_b.clone()),
+                semantic: None,
+            }),
+        )
+        .await
+        .into_response();
+        let det_json = response_json(det_resp).await;
+        assert_eq!(det_json["status"], "ok");
+        assert!(det_json.get("semantically_equivalent").is_none());
+        assert!(det_json.get("fallback_used").is_none());
+
+        // semantic=true 分支（无 fast key 时回退确定性语义判定并返回扩展字段）
+        let sem_resp = api_feature_card_diff(
+            State(state),
+            Query(FeatureCardDiffQuery {
+                a: Some(id_a),
+                b: Some(id_b),
+                semantic: Some(true),
+            }),
+        )
+        .await
+        .into_response();
+        let sem_json = response_json(sem_resp).await;
+        assert_eq!(sem_json["status"], "ok");
+        assert_eq!(sem_json["fallback_used"], true);
+        assert!(sem_json["semantically_equivalent"].is_boolean());
+        assert!(sem_json["diff_type"].is_string());
     }
 }
