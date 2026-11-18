@@ -14,6 +14,12 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-11-18 — **Batch 12：权利要求树可视化编辑器 + 专利法第26条第4款自检（v0.9.55）**
+
+- **状态 / Status**: 🚧 实施完成，待合并后统一跑全量编译门禁
+- **① 结构化权利要求校验引擎**（`src/ai/claim_validator.rs`、`src/ai/mod.rs`、`src/db/rag.rs`）：实现多项从属引用多项从属（`SYNTAX_MULTI_DEP_CHAIN`）、“所述XX”缺少引用基础（`SYNTAX_ANTECEDENT_BASIS`）、自引用/后向引用与独立权项必要特征初筛，并结合 `chunks_fts`（`search_embodiment_chunks_lexical`）与可选 `ai_client_expert` 核对数值范围/功能限定第26条第4款支撑。
+- **② 交互式编辑与实时体检 API/UI**（`src/routes/idea_ops.rs`、`src/common.rs`、`templates/idea.html`、`static/i18n.js`、`docs/API.md`）：新增 `POST /api/ideas/:id/claims/validate`、`POST /api/idea/:id/claim-tree`、`DELETE /api/idea/:id/claim-tree/:claim_id`，并在 `idea.html` 落地节点增删改、一键合规体检按钮与逐条定位告警面板。
+
 ### 2026-11-18 — **Batch 10：全项目工程包一键 `.zip` 归档 + 本地数据库 `VACUUM INTO` 热备份（v0.9.53）**
 
 - **状态 / Status**: ✅ 本地全量验证通过（`cargo fmt` / `clippy --all-targets -D warnings` 零告警，`cargo test --no-fail-fast` 73 个测试二进制全过，含 lib 1005 passed），已提 PR 等 CI 合并进 `main` 并打 `v0.9.53` Tag

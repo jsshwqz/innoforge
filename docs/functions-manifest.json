@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-18T13:32:27.614Z",
+  "generatedAt": "2026-11-18T14:51:51.211Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -136,13 +136,16 @@
         "generateControlPrototype",
         "generateFeatureCards",
         "handleChatFileSelect",
+        "hideClaimNodeForm",
         "hideMemoryForm",
         "loadMemory",
         "openReportInNewTab",
         "runBatchFtoScan",
+        "saveClaimNode",
         "scrollIdeaChatToBottom",
         "sendChatMessage",
         "setAnalysisMode",
+        "showClaimNodeForm",
         "showMemoryForm",
         "showNewIdeaForm",
         "startIterate",
@@ -150,7 +153,8 @@
         "submitIdea",
         "summarizeDiscussion",
         "switchReportType",
-        "switchTab"
+        "switchTab",
+        "validateClaimTree"
       ],
       "definitions": [
         "addMemoryEntry",
@@ -162,6 +166,7 @@
         "compareFeatureCards",
         "context",
         "copyControlStCode",
+        "deleteClaimNode",
         "deleteIdea",
         "deleteMemory",
         "displayResults",
@@ -176,6 +181,7 @@
         "getTypeIcon",
         "getTypeLabel",
         "handleChatFileSelect",
+        "hideClaimNodeForm",
         "hideMemoryForm",
         "history",
         "input",
@@ -193,17 +199,22 @@
         "onContinue",
         "openReport",
         "openReportInNewTab",
+        "populateClaimParentSelect",
         "reapplyPage",
         "renderChatAttachments",
+        "renderClaimTreeNodes",
+        "renderClaimValidationReport",
         "renderDeepReasoningUI",
         "renderMarkdown",
         "renderOverview",
         "resumePipeline",
         "runBatchFtoScan",
         "runExistingIdea",
+        "saveClaimNode",
         "scrollIdeaChatToBottom",
         "sendChatMessage",
         "setAnalysisMode",
+        "showClaimNodeForm",
         "showConfirmDialog",
         "showDiscussionPanel",
         "showMemoryForm",
@@ -218,7 +229,8 @@
         "toCST",
         "toggleDimension",
         "updateFeatureDiffControls",
-        "updatePipelineStep"
+        "updatePipelineStep",
+        "validateClaimTree"
       ]
     },
     "index.html": {
