@@ -81,6 +81,49 @@ module.exports = [
     ignores: ["node_modules/", "target/", "*.min.js"],
   },
   {
+    files: ["static/js/**/*.js"],
+    languageOptions: {
+      ecmaVersion: "latest",
+      sourceType: "module",
+      globals: {
+        ...browserGlobals,
+        customElements: "readonly",
+      },
+    },
+    rules: {
+      "no-redeclare": ["error", { builtinGlobals: true }],
+      "no-var": "error",
+      "no-const-assign": "error",
+      "no-undef": "error",
+      "no-unused-vars": "warn",
+      "no-unexpected-multiline": "error",
+      "no-extra-semi": "error",
+      "no-useless-escape": "warn",
+    },
+  },
+  {
+    files: ["scripts/**/*.mjs"],
+    languageOptions: {
+      ecmaVersion: "latest",
+      sourceType: "module",
+      globals: {
+        ...browserGlobals,
+        process: "readonly",
+      },
+    },
+    rules: {
+      "no-redeclare": ["error", { builtinGlobals: true }],
+      "no-var": "error",
+      "no-const-assign": "error",
+      "no-undef": "error",
+      "no-unused-vars": "warn",
+      "no-unexpected-multiline": "error",
+      "no-extra-semi": "error",
+      "no-useless-escape": "warn",
+    },
+  },
+  {
+    files: ["static/i18n.js"],
     languageOptions: {
       ecmaVersion: "latest",
       sourceType: "script",

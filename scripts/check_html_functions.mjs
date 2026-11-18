@@ -7,7 +7,7 @@
 // 用法：node check_html_functions.mjs   /   node check_html_functions.mjs --refresh
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 
 const templatesDir = join(process.cwd(), 'templates');
 const manifestPath = join(process.cwd(), 'docs', 'functions-manifest.json');
@@ -46,13 +46,38 @@ function extractRefs(html, invoked) {
 function extractDefs(html, defined) {
     const scriptRe = /<script>([\s\S]*?)<\/script>/g;
     let sm; while ((sm = scriptRe.exec(html)) !== null) collectDefined(sm[1], defined);
+
+    const visited = new Set();
+    const modReA = /<script[^>]*type=["']module["'][^>]*src=["']\/static\/(js\/[^"']+)["'][^>]*>/gi;
+    const modReB = /<script[^>]*src=["']\/static\/(js\/[^"']+)["'][^>]*type=["']module["'][^>]*>/gi;
+    for (const modRe of [modReA, modReB]) {
+        let mm;
+        while ((mm = modRe.exec(html)) !== null) {
+            const entryPath = resolve(process.cwd(), 'static', mm[1]);
+            collectModuleTree(entryPath, defined, visited);
+        }
+    }
+}
+function collectModuleTree(filePath, defined, visited) {
+    if (visited.has(filePath) || !existsSync(filePath)) return;
+    visited.add(filePath);
+    const body = readFileSync(filePath, 'utf8');
+    collectDefined(body, defined);
+
+    const importRe = /import\s+(?:[^'"]+from\s+)?["'](\.[^"']+)["']/g;
+    let im;
+    while ((im = importRe.exec(body)) !== null) {
+        let target = resolve(dirname(filePath), im[1]);
+        if (!existsSync(target) && existsSync(target + '.js')) target += '.js';
+        collectModuleTree(target, defined, visited);
+    }
 }
 function collectDefined(body, defined) {
     for (const re of [
-        /function\s+([A-Za-z_$][\w$]*)\s*\(/g,
+        /(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/g,
         /(?:var|let|const)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?function/g,
         /([A-Za-z_$][\w$]*)\s*:\s*(?:async\s*)?function/g,
-        /async\s+function\s+([A-Za-z_$][\w$]*)\s*\(/g,
+        /window\.([A-Za-z_$][\w$]*)\s*=/g,
     ]) { let m; while ((m = re.exec(body)) !== null) defined.add(m[1]); }
 }
 function shouldSkip(name) {

@@ -1,7 +1,11 @@
 {
+  "scripts": {
+    "lint": "eslint static/i18n.js static/js/core/*.js static/js/widgets/*.js",
+    "check:html": "node scripts/check_html_functions.mjs",
+    "test:widgets": "node scripts/test_widgets_xss.mjs"
+  },
   "dependencies": {
     "playwright": "^1.62.1",
-    "puppeteer": "^25.2.1",
     "ws": "^8.21.3"
   },
   "devDependencies": {
