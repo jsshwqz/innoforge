@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-18T12:54:57.984Z",
+  "generatedAt": "2026-11-18T13:32:27.614Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -132,6 +132,7 @@
         "exportBomXlsx",
         "exportConclusions",
         "exportConversation",
+        "exportProjectZip",
         "generateControlPrototype",
         "generateFeatureCards",
         "handleChatFileSelect",
@@ -169,6 +170,7 @@
         "exportBomXlsx",
         "exportConclusions",
         "exportConversation",
+        "exportProjectZip",
         "generateControlPrototype",
         "generateFeatureCards",
         "getTypeIcon",
@@ -624,9 +626,11 @@
       "references": [
         "addSerpapiKeyRow",
         "checkAndStartFreeCad",
+        "checkDbBackupHealth",
         "connectGoogle",
         "detectGcloud",
         "detectGeminiCli",
+        "exportDbBackup",
         "fetchAiModels",
         "fetchSerpapiBalance",
         "loginWithGcloud",
@@ -642,10 +646,12 @@
       "definitions": [
         "addSerpapiKeyRow",
         "checkAndStartFreeCad",
+        "checkDbBackupHealth",
         "connectGoogle",
         "detectGcloud",
         "detectGeminiCli",
         "detectProvider",
+        "exportDbBackup",
         "fallbackToProviderPresets",
         "fetchAiModels",
         "fetchSerpapiBalance",

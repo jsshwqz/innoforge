@@ -6,6 +6,12 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 ---
 ## [Unreleased]
 
+## [0.9.53] - 2026-11-18
+
+### 新增 / Added
+
+- **全项目工程包一键 `.zip` 归档与 SQLite `VACUUM INTO` 热备份（Batch 10）**：新增 `GET /api/ideas/:id/archive/zip` 按 5 大标准工程目录（`01_Research_and_FTO` / `02_CAD_and_Mechanics` / `03_Control_and_Simulation` / `04_BOM_and_Delivery` / `05_IP_and_Paper`）全内存流打包项目全套成果；新增 `Database::vacuum_into_backup` / `verify_sqlite_backup` 及 `POST /api/backup/export`、`POST /api/backup/check` 实现零阻塞热备份与完整性校验，前端同步一键导出与一键备份按钮。 / Added 5-folder full project `.zip` archive (`GET /api/ideas/:id/archive/zip`) and SQLite `VACUUM INTO` hot backup & integrity verification (`POST /api/backup/export`, `POST /api/backup/check`).
+
 ## [0.9.52] - 2026-11-18
 
 ### 新增 / Added
@@ -441,6 +447,12 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 ## [Unreleased]
+
+## [0.9.53] - 2026-11-18
+
+### 新增 / Added
+
+- **全项目工程包一键 `.zip` 归档与 SQLite `VACUUM INTO` 热备份（Batch 10）**：新增 `GET /api/ideas/:id/archive/zip` 按 5 大标准工程目录（`01_Research_and_FTO` / `02_CAD_and_Mechanics` / `03_Control_and_Simulation` / `04_BOM_and_Delivery` / `05_IP_and_Paper`）全内存流打包项目全套成果；新增 `Database::vacuum_into_backup` / `verify_sqlite_backup` 及 `POST /api/backup/export`、`POST /api/backup/check` 实现零阻塞热备份与完整性校验，前端同步一键导出与一键备份按钮。 / Added 5-folder full project `.zip` archive (`GET /api/ideas/:id/archive/zip`) and SQLite `VACUUM INTO` hot backup & integrity verification (`POST /api/backup/export`, `POST /api/backup/check`).
 
 ## [0.9.52] - 2026-11-18
 

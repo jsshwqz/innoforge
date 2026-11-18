@@ -14,6 +14,12 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-11-18 — **Batch 10：全项目工程包一键 `.zip` 归档 + 本地数据库 `VACUUM INTO` 热备份（v0.9.53）**
+
+- **状态 / Status**: ✅ 本地全量验证通过（`cargo fmt` / `clippy --all-targets -D warnings` 零告警，`cargo test --no-fail-fast` 73 个测试二进制全过，含 lib 1005 passed），已提 PR 等 CI 合并进 `main` 并打 `v0.9.53` Tag
+- **① 全链路 5 目录 `.zip` 归档包**（`src/routes/idea_reports.rs`、`src/common.rs`、`templates/idea.html`、`static/i18n.js`）：新增 `GET /api/ideas/:id/archive/zip`，内存流打包 `01_Research_and_FTO/`、`02_CAD_and_Mechanics/`、`03_Control_and_Simulation/`、`04_BOM_and_Delivery/`、`05_IP_and_Paper/`（严防路径穿越）及项目页「一键导出完整项目包 (.zip)」按钮。
+- **② SQLite `VACUUM INTO` 热备份与完整性校验**（`src/db/mod.rs`、`src/routes/settings.rs`、`templates/settings.html`、`docs/API.md`）：实现 `vacuum_into_backup` 与 `verify_sqlite_backup`（校验 `"SQLite format 3\0"` 文件头与 `schema_version`），接入 `POST /api/backup/export`、`POST /api/backup/check` 及设置页一键备份/校验按钮。
+
 ### 2026-11-18 — **Batch 9：批量 FTO 侵权风险主动扫描 + 规避设计工作台（v0.9.52）**
 
 - **状态 / Status**: ✅ 本地全量验证通过（`cargo fmt` / `clippy --all-targets -D warnings` 零告警，`cargo test --no-fail-fast` 73 个测试二进制全过，含 lib 1003 passed），已提 PR 等 CI 合并进 `main` 并打 `v0.9.52` Tag

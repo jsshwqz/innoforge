@@ -703,6 +703,10 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
         )
         .route("/api/ideas/:id/fto-scan", post(routes::api_idea_fto_scan))
         .route(
+            "/api/ideas/:id/archive/zip",
+            get(routes::api_idea_archive_zip),
+        )
+        .route(
             "/api/feature-cards/diff",
             get(routes::api_feature_card_diff),
         )
@@ -726,6 +730,8 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
         .route("/api/ipc/:code/patents", get(routes::api_ipc_patents))
         // 导入 API
         .route("/api/patents/import", post(routes::api_import_patents))
+        .route("/api/backup/export", post(routes::api_backup_export))
+        .route("/api/backup/check", post(routes::api_backup_check))
         // 收藏夹 API
         .route(
             "/api/collections",

@@ -1177,6 +1177,165 @@ pub async fn api_idea_fto_scan(
     (StatusCode::OK, Json(json!(report))).into_response()
 }
 
+/// 生成全链路 5 目录标准化项目归档 `.zip` 内存字节流。
+pub async fn build_project_archive_zip(
+    db: &crate::db::Database,
+    idea: &Idea,
+) -> Result<Vec<u8>, String> {
+    use std::io::Write;
+    use zip::write::SimpleFileOptions;
+
+    let ctx = resolve_pipeline_context_for_deliverables(db, idea);
+    let cards = db.get_feature_cards_by_idea(&idea.id).unwrap_or_default();
+    let pack = crate::pipeline::steps::deliverables::build_engineering_bom_pack(&ctx, &cards);
+    let journal = crate::pipeline::steps::deliverables::build_journal_manuscript_draft(&ctx);
+    let xlsx_bytes = build_delivery_pack_xlsx(db, idea)?;
+    let ctrl_proto = crate::pipeline::steps::control_proto::generate_control_prototype(
+        &idea.id,
+        &idea.title,
+        &cards,
+        None,
+    )
+    .await;
+    let docx_bytes = crate::routes::oa_export::build_oa_docx_bytes(
+        &idea.title,
+        "",
+        &idea.description,
+        &idea.id,
+        "",
+    )?;
+
+    let fto_md = db
+        .get_memory_by_type(&idea.id, "decision")
+        .unwrap_or_default()
+        .into_iter()
+        .find(|m| m.concept_name == "fto_report")
+        .map(|m| m.content)
+        .unwrap_or_else(|| "（尚未执行批量 FTO 扫描，可在项目页点击执行）".to_string());
+
+    let research_md = format!(
+        "# 查新调研与 FTO 风险档案\n\n项目：{}\n\n## 绑定真实 DOI 文献\n{}\n\n## FTO 扫描记录\n{}\n",
+        idea.title,
+        if journal.cited_dois.is_empty() {
+            "无".to_string()
+        } else {
+            journal.cited_dois.join("\n")
+        },
+        fto_md
+    );
+
+    let cad_md = format!(
+        "# CAD 与机械结构拓扑说明\n\n项目：{}\n\n## 特征卡片摘要\n{}\n",
+        idea.title,
+        cards
+            .iter()
+            .map(|c| format!("- {}: {}", c.title, c.description))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+
+    let sim_json = serde_json::to_string_pretty(&ctrl_proto.simulation).unwrap_or_default();
+
+    let mut buf = std::io::Cursor::new(Vec::new());
+    {
+        let mut zip = zip::ZipWriter::new(&mut buf);
+        let opts = SimpleFileOptions::default();
+
+        let entries: Vec<(&str, Vec<u8>)> = vec![
+            (
+                "01_Research_and_FTO/research_and_fto.md",
+                research_md.into_bytes(),
+            ),
+            (
+                "02_CAD_and_Mechanics/part_topology_and_cad.md",
+                cad_md.into_bytes(),
+            ),
+            (
+                "03_Control_and_Simulation/FB_ClosedLoopControl.st",
+                ctrl_proto.st_code.into_bytes(),
+            ),
+            (
+                "03_Control_and_Simulation/simulation_metrics.json",
+                sim_json.into_bytes(),
+            ),
+            (
+                "04_BOM_and_Delivery/engineering_delivery_pack.xlsx",
+                xlsx_bytes,
+            ),
+            (
+                "04_BOM_and_Delivery/bom_and_bench_outline.md",
+                pack.full_markdown.into_bytes(),
+            ),
+            (
+                "05_IP_and_Paper/journal_manuscript_draft.md",
+                journal.full_markdown.into_bytes(),
+            ),
+            ("05_IP_and_Paper/oa_response_kit.docx", docx_bytes),
+        ];
+
+        for (entry_path, data) in entries {
+            if entry_path.contains("..") || entry_path.starts_with('/') {
+                return Err(format!("非法归档路径: {entry_path}"));
+            }
+            zip.start_file(entry_path, opts)
+                .map_err(|e| e.to_string())?;
+            zip.write_all(&data).map_err(|e| e.to_string())?;
+        }
+        zip.finish().map_err(|e| e.to_string())?;
+    }
+
+    Ok(buf.into_inner())
+}
+
+/// GET /api/ideas/:id/archive/zip — 一键导出全项目 5 目录工程归档包 (.zip)
+pub async fn api_idea_archive_zip(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+) -> axum::response::Response {
+    use axum::http::{header, StatusCode};
+    use axum::response::IntoResponse;
+
+    let idea = match s.db.get_idea(&id) {
+        Ok(Some(i)) => i,
+        _ => return (StatusCode::NOT_FOUND, "Idea not found").into_response(),
+    };
+
+    match build_project_archive_zip(&s.db, &idea).await {
+        Ok(bytes) => {
+            let safe_id: String = idea
+                .id
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+                .collect();
+            let filename = format!(
+                "innoforge-project-{}.zip",
+                if safe_id.is_empty() {
+                    "archive"
+                } else {
+                    &safe_id
+                }
+            );
+            (
+                StatusCode::OK,
+                [
+                    (header::CONTENT_TYPE, "application/zip".to_string()),
+                    (
+                        header::CONTENT_DISPOSITION,
+                        format!("attachment; filename=\"{filename}\""),
+                    ),
+                ],
+                bytes,
+            )
+                .into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("ZIP archive error: {e}"),
+        )
+            .into_response(),
+    }
+}
+
 #[cfg(test)]
 mod deliverables_report_tests {
     use super::{build_deliverable_report_json, Idea};
@@ -1268,6 +1427,38 @@ mod deliverables_report_tests {
             let mut xml = String::new();
             std::io::Read::read_to_string(&mut f, &mut xml).expect("read sheet xml");
             assert!(!xml.is_empty(), "{sheet} should not be empty");
+        }
+    }
+
+    #[tokio::test]
+    async fn project_archive_zip_contains_five_standard_directories() {
+        let db = Database::init(":memory:").expect("open db");
+        let idea = seed_idea(&db, "idea-zip-1");
+        let bytes = super::build_project_archive_zip(&db, &idea)
+            .await
+            .expect("build zip");
+        assert_eq!(&bytes[0..2], b"PK", "archive must be a valid ZIP");
+
+        let cursor = std::io::Cursor::new(bytes);
+        let mut archive = zip::ZipArchive::new(cursor).expect("open zip");
+        let mut names = Vec::new();
+        for i in 0..archive.len() {
+            let f = archive.by_index(i).expect("entry");
+            let n = f.name().to_string();
+            assert!(!n.contains(".."), "no path traversal allowed: {n}");
+            names.push(n);
+        }
+        for prefix in [
+            "01_Research_and_FTO/",
+            "02_CAD_and_Mechanics/",
+            "03_Control_and_Simulation/",
+            "04_BOM_and_Delivery/",
+            "05_IP_and_Paper/",
+        ] {
+            assert!(
+                names.iter().any(|n| n.starts_with(prefix)),
+                "missing directory {prefix} in {names:?}"
+            );
         }
     }
 }

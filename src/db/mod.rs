@@ -122,4 +122,76 @@ impl Database {
         let v: i64 = c.query_row("PRAGMA busy_timeout", [], |r| r.get(0))?;
         Ok(v)
     }
+
+    /// 使用 SQLite 原生 `VACUUM INTO` 生成一致热备份快照文件，返回文件大小（字节）。
+    pub fn vacuum_into_backup(&self, dest_path: &std::path::Path) -> Result<u64> {
+        for comp in dest_path.components() {
+            if matches!(comp, std::path::Component::ParentDir) {
+                anyhow::bail!("备份路径禁止包含 '..'");
+            }
+        }
+        if let Some(parent) = dest_path.parent() {
+            if !parent.as_os_str().is_empty() {
+                std::fs::create_dir_all(parent)?;
+            }
+        }
+        if dest_path.exists() {
+            std::fs::remove_file(dest_path)?;
+        }
+        let path_str = dest_path
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("备份路径包含非 UTF-8 字符"))?;
+        {
+            let c = self.conn();
+            c.execute("VACUUM INTO ?1", rusqlite::params![path_str])?;
+        }
+        let meta = std::fs::metadata(dest_path)?;
+        Ok(meta.len())
+    }
+
+    /// 校验备份文件头（SQLite format 3）及 `schema_version` 完整性，返回 `(schema_version, file_size)`。
+    pub fn verify_sqlite_backup(backup_path: &std::path::Path) -> Result<(i32, u64)> {
+        use std::io::Read;
+        for comp in backup_path.components() {
+            if matches!(comp, std::path::Component::ParentDir) {
+                anyhow::bail!("校验路径禁止包含 '..'");
+            }
+        }
+        let mut file = std::fs::File::open(backup_path)?;
+        let size = file.metadata()?.len();
+        let mut header = [0u8; 16];
+        file.read_exact(&mut header)?;
+        if &header != b"SQLite format 3\0" {
+            anyhow::bail!("非有效 SQLite 3 数据库文件头");
+        }
+        let conn =
+            Connection::open_with_flags(backup_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        let ver: i32 = conn.query_row(
+            "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+            [],
+            |r| r.get(0),
+        )?;
+        Ok((ver, size))
+    }
+}
+
+#[cfg(test)]
+mod backup_tests {
+    use super::Database;
+
+    #[test]
+    fn vacuum_into_backup_produces_valid_reopenable_sqlite() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let main_path = dir.path().join("main.db");
+        let backup_path = dir.path().join("snap.db");
+        let db = Database::init(main_path.to_str().expect("utf8")).expect("init db");
+
+        let size = db.vacuum_into_backup(&backup_path).expect("vacuum into");
+        assert!(size > 4096, "backup db should be non-empty");
+
+        let (ver, verified_size) =
+            Database::verify_sqlite_backup(&backup_path).expect("verify backup");
+        assert_eq!(size, verified_size);
+        assert!(ver >= 25, "expected schema_version >= 25, got {ver}");
+    }
 }
