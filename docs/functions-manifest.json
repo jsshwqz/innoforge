@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-18T16:58:25.103Z",
+  "generatedAt": "2026-11-18T17:37:24.700Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -132,6 +132,8 @@
         "exportBomXlsx",
         "exportConclusions",
         "exportConversation",
+        "exportPaperDocx",
+        "exportPaperLatexBundle",
         "exportProjectZip",
         "generateControlPrototype",
         "generateFeatureCards",
@@ -175,6 +177,8 @@
         "exportBomXlsx",
         "exportConclusions",
         "exportConversation",
+        "exportPaperDocx",
+        "exportPaperLatexBundle",
         "exportProjectZip",
         "generateControlPrototype",
         "generateFeatureCards",

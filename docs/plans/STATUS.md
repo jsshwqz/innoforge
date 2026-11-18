@@ -14,6 +14,11 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-11-18 — **Batch 16：期刊论文 LaTeX/Word 双模排版 + 仿真图/BibTeX 自动嵌入（v0.9.59）**
+
+- **状态 / Status**: ✅ 本地全量验证通过，已提 PR 等 CI 合并进 `main` 并打 `v0.9.59` Tag
+- **① 真实 DOI `.bib` 与本地 SVG 曲线渲染**（`src/pipeline/steps/finalize.rs`、`src/pipeline/steps/deliverables.rs`、`src/db/patent.rs`）：仅基于 OpenAlex/CrossRef 已核验真实 DOI 生成 `.bib`（零孤儿引用、零编造文献），并基于第 13 步数值仿真数据渲染纯本地 SVG 对比曲线图（含坐标轴与图例）。
+- **② 双模投稿导出接口与前端**（`src/routes/idea_reports.rs`、`src/common.rs`、`templates/idea.html`、`static/i18n.js`、`docs/API.md`）：新增 `GET /api/ideas/:id/paper/latex-bundle`（含 `main.tex`、`references.bib`、`figures/simulation_curve.svg`）与 `GET /api/ideas/:id/paper/docx`，保留「先申专利防破新颖性」硬提示锁。
 ### 2026-11-18 — **Batch 15：多轮 OA 审查观点漂移追踪与递进答辩引擎（v0.9.58）**
 
 - **状态 / Status**: ✅ 本地全量验证通过，已提 PR 等 CI 合并进 `main` 并打 `v0.9.58` Tag

@@ -285,6 +285,8 @@
                             <button class="report-type-btn" data-rtype="journal_draft" onclick="switchReportType('journal_draft')" data-i18n="idea.reportJournalDraft">期刊论文草稿</button>
                             <button class="report-type-btn" type="button" onclick="exportBomXlsx()" data-i18n="idea.exportBomXlsx">导出 Excel BOM 包</button>
                             <button class="report-type-btn" type="button" onclick="exportProjectZip()" data-i18n="idea.exportProjectZip">一键导出完整项目包 (.zip)</button>
+                            <button class="report-type-btn" type="button" onclick="exportPaperLatexBundle()" data-i18n="idea.exportPaperLatex">导出论文 LaTeX 包 (.zip)</button>
+                            <button class="report-type-btn" type="button" onclick="exportPaperDocx()" data-i18n="idea.exportPaperDocx">导出论文 Word (.docx)</button>
                         </div>
                     </div>
                     <div id="report-content" style="line-height:1.7; color:var(--text-secondary);"><p class="muted">完成推演后可查看报告</p></div>
@@ -2382,6 +2384,16 @@
     function exportProjectZip() {
         if (!currentIdeaId) return;
         window.location.href = '/api/ideas/' + encodeURIComponent(currentIdeaId) + '/archive/zip';
+    }
+
+    function exportPaperLatexBundle() {
+        if (!currentIdeaId) return;
+        window.location.href = '/api/ideas/' + encodeURIComponent(currentIdeaId) + '/paper/latex-bundle';
+    }
+
+    function exportPaperDocx() {
+        if (!currentIdeaId) return;
+        window.location.href = '/api/ideas/' + encodeURIComponent(currentIdeaId) + '/paper/docx';
     }
 
     var controlResponseChartInstance = null;

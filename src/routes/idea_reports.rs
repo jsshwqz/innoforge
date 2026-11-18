@@ -1336,6 +1336,502 @@ pub async fn api_idea_archive_zip(
     }
 }
 
+fn sanitize_ascii_id(raw: &str, fallback: &str) -> String {
+    let cleaned: String = raw
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .collect();
+    if cleaned.is_empty() {
+        fallback.to_string()
+    } else {
+        cleaned
+    }
+}
+
+fn escape_paper_xml(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
+fn docx_heading_p(style: &str, text: &str) -> String {
+    format!(
+        "<w:p><w:pPr><w:pStyle w:val=\"{}\"/></w:pPr><w:r><w:t xml:space=\"preserve\">{}</w:t></w:r></w:p>",
+        escape_paper_xml(style),
+        escape_paper_xml(text)
+    )
+}
+
+fn docx_text_p(text: &str) -> String {
+    format!(
+        "<w:p><w:r><w:t xml:space=\"preserve\">{}</w:t></w:r></w:p>",
+        escape_paper_xml(text)
+    )
+}
+
+fn docx_table_xml(headers: &[&str], rows: &[Vec<String>]) -> String {
+    let mut xml = String::from(
+        "<w:tbl><w:tblPr><w:tblBorders>\
+         <w:top w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"CBD5E1\"/>\
+         <w:left w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"CBD5E1\"/>\
+         <w:bottom w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"CBD5E1\"/>\
+         <w:right w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"CBD5E1\"/>\
+         <w:insideH w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"E2E8F0\"/>\
+         <w:insideV w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"E2E8F0\"/>\
+         </w:tblBorders></w:tblPr>",
+    );
+    xml.push_str("<w:tr>");
+    for h in headers {
+        xml.push_str(&format!(
+            "<w:tc><w:tcPr><w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"E8EEF5\"/></w:tcPr>\
+             <w:p><w:r><w:rPr><w:b/></w:rPr><w:t xml:space=\"preserve\">{}</w:t></w:r></w:p></w:tc>",
+            escape_paper_xml(h)
+        ));
+    }
+    xml.push_str("</w:tr>");
+    for row in rows {
+        xml.push_str("<w:tr>");
+        for cell in row {
+            xml.push_str(&format!(
+                "<w:tc><w:p><w:r><w:t xml:space=\"preserve\">{}</w:t></w:r></w:p></w:tc>",
+                escape_paper_xml(cell)
+            ));
+        }
+        xml.push_str("</w:tr>");
+    }
+    xml.push_str("</w:tbl>");
+    xml
+}
+
+/// 生成期刊投稿 LaTeX 打包 ZIP（`main.tex`、`references.bib`、`figures/simulation_curve.svg`）
+pub fn build_paper_latex_bundle_zip(
+    db: &crate::db::Database,
+    idea: &Idea,
+) -> Result<Vec<u8>, String> {
+    use std::io::Write;
+    use zip::write::SimpleFileOptions;
+
+    let ctx = resolve_pipeline_context_for_deliverables(db, idea);
+    let cards = db.get_feature_cards_by_idea(&idea.id).unwrap_or_default();
+    let dois = crate::pipeline::steps::deliverables::extract_verified_dois(&ctx);
+    let db_patents = db.get_patents_by_numbers(&dois).unwrap_or_default();
+    let fallback_sim = crate::pipeline::steps::control_proto::run_closed_loop_step_simulation(
+        &crate::pipeline::steps::control_proto::default_calibration_table(),
+    );
+
+    let bundle = crate::pipeline::steps::deliverables::build_paper_latex_bundle(
+        &ctx,
+        &cards,
+        &db_patents,
+        Some(&fallback_sim),
+    );
+
+    let readme = format!(
+        "InnoForge Journal Submission LaTeX Bundle\n\
+         ========================================\n\
+         Project: {}\n\
+         Verified DOI Citations: {}\n\
+         Step 13 Numerical Simulation Figure: {}\n\n\
+         Files:\n\
+         - main.tex\n\
+         - references.bib\n\
+         - figures/simulation_curve.svg\n\n\
+         {}\n",
+        idea.title,
+        bundle.bib_entries.len(),
+        if bundle.has_step13_simulation {
+            "figures/simulation_curve.svg (Step 13 Experiment Validation)"
+        } else {
+            "figures/simulation_curve.svg (Closed-Loop Control Step Simulation)"
+        },
+        crate::pipeline::steps::deliverables::NOVELTY_LOCK_TEXT_PLAIN,
+    );
+
+    let mut buf = std::io::Cursor::new(Vec::new());
+    {
+        let mut zip = zip::ZipWriter::new(&mut buf);
+        let opts = SimpleFileOptions::default();
+
+        let entries: [(&str, &[u8]); 4] = [
+            ("main.tex", bundle.main_tex.as_bytes()),
+            ("references.bib", bundle.bibtex_content.as_bytes()),
+            (
+                "figures/simulation_curve.svg",
+                bundle.simulation_svg.as_bytes(),
+            ),
+            ("README.txt", readme.as_bytes()),
+        ];
+
+        for (entry_path, data) in entries {
+            if entry_path.contains("..") || entry_path.starts_with('/') {
+                return Err(format!("非法归档路径: {entry_path}"));
+            }
+            zip.start_file(entry_path, opts)
+                .map_err(|e| e.to_string())?;
+            zip.write_all(data).map_err(|e| e.to_string())?;
+        }
+        zip.finish().map_err(|e| e.to_string())?;
+    }
+
+    Ok(buf.into_inner())
+}
+
+/// 生成学术期刊投稿 Word `.docx` 字节流（置顶防破新颖性安全锁、真实 DOI 文献与仿真数据表）
+pub fn build_paper_docx_bytes(db: &crate::db::Database, idea: &Idea) -> Result<Vec<u8>, String> {
+    use std::io::Write;
+    use zip::write::SimpleFileOptions;
+
+    let ctx = resolve_pipeline_context_for_deliverables(db, idea);
+    let cards = db.get_feature_cards_by_idea(&idea.id).unwrap_or_default();
+    let dois = crate::pipeline::steps::deliverables::extract_verified_dois(&ctx);
+    let db_patents = db.get_patents_by_numbers(&dois).unwrap_or_default();
+    let bib_entries =
+        crate::pipeline::steps::deliverables::extract_verified_bib_entries(&ctx, &db_patents);
+    let fallback_sim = crate::pipeline::steps::control_proto::run_closed_loop_step_simulation(
+        &crate::pipeline::steps::control_proto::default_calibration_table(),
+    );
+    let plot_data = crate::pipeline::steps::deliverables::extract_simulation_plot_data(
+        &ctx,
+        Some(&fallback_sim),
+    );
+
+    let title = if ctx.title.trim().is_empty() {
+        "工程系统设计与实验验证手稿"
+    } else {
+        ctx.title.trim()
+    };
+    let domain = if ctx.technical_domain.trim().is_empty() {
+        "通用工程与机电控制"
+    } else {
+        ctx.technical_domain.trim()
+    };
+    let abstract_body = if ctx.description.trim().is_empty() {
+        "【待补充方案技术摘要】"
+    } else {
+        crate::ai::client::safe_truncate_chars(ctx.description.trim(), 500)
+    };
+    let keywords_line = if ctx.keywords.is_empty() {
+        "工程设计；闭环控制；实验验证".to_string()
+    } else {
+        ctx.keywords.join("；")
+    };
+
+    let mut body = String::new();
+    // 置顶「防破新颖性安全锁」醒目提示框
+    body.push_str(&format!(
+        "<w:p><w:pPr><w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"FEF3C7\"/>\
+         <w:spacing w:before=\"120\" w:after=\"180\"/></w:pPr>\
+         <w:r><w:rPr><w:b/><w:color w:val=\"B45309\"/></w:rPr>\
+         <w:t xml:space=\"preserve\">{}</w:t></w:r></w:p>",
+        escape_paper_xml(crate::pipeline::steps::deliverables::NOVELTY_LOCK_TEXT_PLAIN)
+    ));
+
+    body.push_str(&docx_heading_p("Title", title));
+    body.push_str(&docx_text_p(&format!(
+        "项目 ID：{} | 技术领域：{}",
+        ctx.idea_id, domain
+    )));
+    body.push_str(&docx_heading_p("Heading1", "摘要 / Abstract"));
+    body.push_str(&docx_text_p(abstract_body));
+    body.push_str(&docx_text_p(&format!(
+        "关键词 / Keywords：{}",
+        keywords_line
+    )));
+
+    // 1. 引言与文献评述
+    body.push_str(&docx_heading_p("Heading1", "1. 引言与文献评述"));
+    body.push_str(&docx_text_p(&format!(
+        "本研究针对「{}」领域的关键工程瓶颈开展系统建模与验证，共检索核验可追溯 DOI 学术文献 {} 篇。",
+        domain,
+        bib_entries.len()
+    )));
+    if bib_entries.is_empty() {
+        body.push_str(&docx_text_p(
+            "【当前检索结果无 DOI 文献，请补充 OpenAlex / CrossRef 检索后再绑定引用】",
+        ));
+    } else {
+        for (idx, entry) in bib_entries.iter().enumerate() {
+            body.push_str(&docx_text_p(&format!(
+                "文献 [{}] {}（DOI: {}）对相关方法提供了基础支撑。",
+                idx + 1,
+                entry.title,
+                entry.doi
+            )));
+        }
+    }
+
+    // 2. 系统机理与结构建模
+    body.push_str(&docx_heading_p("Heading1", "2. 系统机理与结构建模"));
+    if ctx.ai_analysis.trim().is_empty() {
+        body.push_str(&docx_text_p(abstract_body));
+    } else {
+        for para in crate::ai::client::safe_truncate_chars(ctx.ai_analysis.trim(), 1200).lines() {
+            let trimmed = para.trim();
+            if !trimmed.is_empty() {
+                body.push_str(&docx_text_p(trimmed));
+            }
+        }
+    }
+    if !cards.is_empty() {
+        let rows: Vec<Vec<String>> = cards
+            .iter()
+            .take(8)
+            .map(|c| {
+                vec![
+                    c.title.clone(),
+                    crate::ai::client::safe_truncate_chars(c.core_structure.trim(), 100)
+                        .to_string(),
+                    crate::ai::client::safe_truncate_chars(c.key_relations.trim(), 100).to_string(),
+                ]
+            })
+            .collect();
+        body.push_str(&docx_table_xml(
+            &["特征名称", "核心结构", "关键关系"],
+            &rows,
+        ));
+    }
+
+    // 3. 仿真与实验结果分析
+    body.push_str(&docx_heading_p("Heading1", "3. 仿真与实验结果分析"));
+    let successful_exp: Vec<&crate::pipeline::context::ExperimentResult> = ctx
+        .experiment_results
+        .iter()
+        .filter(|e| e.success)
+        .collect();
+    if successful_exp.is_empty() {
+        body.push_str(&docx_text_p(
+            "【待台架标定】第 13 步尚未记录通过的沙箱实验，以下附带确定性闭环阶跃响应仿真参考数据。",
+        ));
+    } else {
+        let exp_rows: Vec<Vec<String>> = successful_exp
+            .iter()
+            .enumerate()
+            .map(|(idx, exp)| {
+                vec![
+                    format!("实验组 {}", idx + 1),
+                    exp.language.clone(),
+                    format!("{} ms", exp.duration_ms),
+                    crate::ai::client::safe_truncate_chars(&exp.metrics.to_string(), 140)
+                        .to_string(),
+                ]
+            })
+            .collect();
+        body.push_str(&docx_table_xml(
+            &["实验组", "语言", "耗时", "真实指标"],
+            &exp_rows,
+        ));
+    }
+
+    if let Some(plot) = plot_data {
+        body.push_str(&docx_text_p(&format!(
+            "仿真曲线摘要（{}）：{}",
+            plot.title, plot.summary_note
+        )));
+        let headers_vec: Vec<String> = std::iter::once(plot.x_label.clone())
+            .chain(plot.series.iter().map(|s| s.label.clone()))
+            .collect();
+        let header_refs: Vec<&str> = headers_vec.iter().map(String::as_str).collect();
+        let point_count = plot.x_values.len();
+        let stride = (point_count / 10).max(1);
+        let mut sample_rows = Vec::new();
+        for idx in (0..point_count).step_by(stride).take(12) {
+            let mut row = vec![format!("{:.2}", plot.x_values[idx])];
+            for s in &plot.series {
+                let val_str = s
+                    .values
+                    .get(idx)
+                    .map(|v| format!("{:.2}", v))
+                    .unwrap_or_else(|| "-".to_string());
+                row.push(val_str);
+            }
+            sample_rows.push(row);
+        }
+        if !sample_rows.is_empty() {
+            body.push_str(&docx_table_xml(&header_refs, &sample_rows));
+        }
+    }
+
+    // 4. 结论
+    body.push_str(&docx_heading_p("Heading1", "4. 结论"));
+    let conclusion_body = if ctx.action_plan.trim().is_empty() {
+        format!(
+            "围绕「{}」完成了技术方案机理梳理与仿真验证，待专利申请受理后可推进样机测试与论文投稿。",
+            title
+        )
+    } else {
+        crate::ai::client::safe_truncate_chars(ctx.action_plan.trim(), 500).to_string()
+    };
+    body.push_str(&docx_text_p(&conclusion_body));
+
+    // 5. 参考文献（仅绑定真实 DOI）
+    body.push_str(&docx_heading_p("Heading1", "5. 参考文献"));
+    if bib_entries.is_empty() {
+        body.push_str(&docx_text_p(
+            "【无已核验 DOI 文献条目；系统严禁编造参考文献】",
+        ));
+    } else {
+        for (idx, entry) in bib_entries.iter().enumerate() {
+            let mut citation = format!("[{}] ", idx + 1);
+            if !entry.author.is_empty() {
+                citation.push_str(&format!("{}. ", entry.author));
+            }
+            citation.push_str(&entry.title);
+            if !entry.journal.is_empty() {
+                citation.push_str(&format!(". {}", entry.journal));
+            }
+            if !entry.year.is_empty() {
+                citation.push_str(&format!(" ({})", entry.year));
+            }
+            citation.push_str(&format!(". DOI: {}", entry.url));
+            body.push_str(&docx_text_p(&citation));
+        }
+    }
+
+    let document_xml = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
+         <w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">\
+         <w:body>{body}<w:sectPr>\
+         <w:pgSz w:w=\"11906\" w:h=\"16838\"/>\
+         <w:pgMar w:top=\"1440\" w:right=\"1440\" w:bottom=\"1440\" w:left=\"1440\"/>\
+         </w:sectPr></w:body></w:document>"
+    );
+
+    let content_types = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
+        <Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">\
+        <Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-officedocument.relationships+xml\"/>\
+        <Default Extension=\"xml\" ContentType=\"application/xml\"/>\
+        <Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/>\
+        <Override PartName=\"/word/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml\"/>\
+        </Types>";
+    let rels = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
+        <Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">\
+        <Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"word/document.xml\"/>\
+        </Relationships>";
+    let doc_rels = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
+        <Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">\
+        <Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>\
+        </Relationships>";
+    let styles_xml = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
+        <w:styles xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">\
+        <w:style w:type=\"paragraph\" w:styleId=\"Title\">\
+          <w:name w:val=\"Title\"/><w:basedOn w:val=\"Normal\"/><w:next w:val=\"Normal\"/>\
+          <w:pPr><w:spacing w:before=\"120\" w:after=\"160\"/><w:jc w:val=\"center\"/></w:pPr>\
+          <w:rPr><w:rFonts w:ascii=\"Times New Roman\" w:hAnsi=\"Times New Roman\" w:eastAsia=\"SimSun\"/><w:b/><w:sz w:val=\"32\"/></w:rPr>\
+        </w:style>\
+        <w:style w:type=\"paragraph\" w:styleId=\"Heading1\">\
+          <w:name w:val=\"Heading 1\"/><w:basedOn w:val=\"Normal\"/><w:next w:val=\"Normal\"/>\
+          <w:pPr><w:spacing w:before=\"200\" w:after=\"80\"/></w:pPr>\
+          <w:rPr><w:rFonts w:ascii=\"Times New Roman\" w:hAnsi=\"Times New Roman\" w:eastAsia=\"SimHei\"/><w:b/><w:sz w:val=\"26\"/><w:color w:val=\"1E3A8A\"/></w:rPr>\
+        </w:style>\
+        <w:style w:type=\"paragraph\" w:styleId=\"Normal\">\
+          <w:name w:val=\"Normal\"/>\
+          <w:pPr><w:spacing w:before=\"0\" w:after=\"100\" w:line=\"320\" w:lineRule=\"auto\"/></w:pPr>\
+          <w:rPr><w:rFonts w:ascii=\"Times New Roman\" w:hAnsi=\"Times New Roman\" w:eastAsia=\"SimSun\"/><w:sz w:val=\"22\"/></w:rPr>\
+        </w:style>\
+        </w:styles>";
+
+    let mut buf = std::io::Cursor::new(Vec::new());
+    {
+        let mut zip = zip::ZipWriter::new(&mut buf);
+        let opts = SimpleFileOptions::default();
+        for (path, content) in [
+            ("[Content_Types].xml", content_types.as_bytes()),
+            ("_rels/.rels", rels.as_bytes()),
+            ("word/_rels/document.xml.rels", doc_rels.as_bytes()),
+            ("word/styles.xml", styles_xml.as_bytes()),
+            ("word/document.xml", document_xml.as_bytes()),
+        ] {
+            zip.start_file(path, opts).map_err(|e| e.to_string())?;
+            zip.write_all(content).map_err(|e| e.to_string())?;
+        }
+        zip.finish().map_err(|e| e.to_string())?;
+    }
+
+    Ok(buf.into_inner())
+}
+
+/// GET /api/ideas/:id/paper/latex-bundle — 导出期刊投稿 LaTeX 打包文件 (.zip: main.tex + references.bib + SVG 仿真图)
+pub async fn api_idea_paper_latex_bundle(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+) -> axum::response::Response {
+    use axum::http::{header, StatusCode};
+    use axum::response::IntoResponse;
+
+    let idea = match s.db.get_idea(&id) {
+        Ok(Some(i)) => i,
+        _ => return (StatusCode::NOT_FOUND, "Idea not found").into_response(),
+    };
+
+    match build_paper_latex_bundle_zip(&s.db, &idea) {
+        Ok(bytes) => {
+            let safe_id = sanitize_ascii_id(&idea.id, "paper");
+            let filename = format!("paper-latex-{safe_id}.zip");
+            (
+                StatusCode::OK,
+                [
+                    (header::CONTENT_TYPE, "application/zip".to_string()),
+                    (
+                        header::CONTENT_DISPOSITION,
+                        format!("attachment; filename=\"{filename}\""),
+                    ),
+                ],
+                bytes,
+            )
+                .into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("LaTeX bundle build error: {e}"),
+        )
+            .into_response(),
+    }
+}
+
+/// GET /api/ideas/:id/paper/docx — 导出学术期刊论文 Word 排版件 (.docx)
+pub async fn api_idea_paper_docx(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+) -> axum::response::Response {
+    use axum::http::{header, StatusCode};
+    use axum::response::IntoResponse;
+
+    let idea = match s.db.get_idea(&id) {
+        Ok(Some(i)) => i,
+        _ => return (StatusCode::NOT_FOUND, "Idea not found").into_response(),
+    };
+
+    match build_paper_docx_bytes(&s.db, &idea) {
+        Ok(bytes) => {
+            let safe_id = sanitize_ascii_id(&idea.id, "paper");
+            let filename = format!("paper-manuscript-{safe_id}.docx");
+            (
+                StatusCode::OK,
+                [
+                    (
+                        header::CONTENT_TYPE,
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                            .to_string(),
+                    ),
+                    (
+                        header::CONTENT_DISPOSITION,
+                        format!("attachment; filename=\"{filename}\""),
+                    ),
+                ],
+                bytes,
+            )
+                .into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Paper DOCX build error: {e}"),
+        )
+            .into_response(),
+    }
+}
+
 #[cfg(test)]
 mod deliverables_report_tests {
     use super::{build_deliverable_report_json, Idea};
@@ -1460,5 +1956,118 @@ mod deliverables_report_tests {
                 "missing directory {prefix} in {names:?}"
             );
         }
+    }
+
+    #[test]
+    fn paper_latex_bundle_zip_contains_valid_tex_bib_svg_and_zero_orphan_cites() {
+        let db = Database::init(":memory:").expect("open db");
+        let idea = seed_idea(&db, "idea-latex-1");
+
+        let mut ctx = crate::pipeline::context::PipelineContext::new(
+            &idea.id,
+            &idea.title,
+            &idea.description,
+        );
+        ctx.web_results = serde_json::from_str(&idea.web_results).expect("parse web_results");
+        ctx.experiment_results
+            .push(crate::pipeline::context::ExperimentResult {
+                script_path: "sim_step13.py".to_string(),
+                language: "python".to_string(),
+                exit_code: 0,
+                stdout: "EXPERIMENT_DONE".to_string(),
+                stderr: String::new(),
+                metrics: serde_json::json!({
+                    "time_ms": [0.0, 25.0, 50.0, 75.0, 100.0],
+                    "setpoint": [50.0, 50.0, 50.0, 50.0, 50.0],
+                    "actual_value": [0.0, 21.0, 42.5, 49.0, 50.1]
+                }),
+                duration_ms: 35,
+                success: true,
+            });
+        let ctx_json = serde_json::to_string(&ctx).expect("serialize ctx");
+        db.save_pipeline_snapshot(&idea.id, "Finalize", &ctx_json)
+            .expect("save snapshot");
+
+        let bytes = super::build_paper_latex_bundle_zip(&db, &idea).expect("build latex zip");
+        assert!(bytes.starts_with(b"PK"), "latex bundle must be a valid ZIP");
+
+        let cursor = std::io::Cursor::new(bytes);
+        let mut archive = zip::ZipArchive::new(cursor).expect("open latex zip");
+
+        let mut tex = String::new();
+        std::io::Read::read_to_string(
+            &mut archive.by_name("main.tex").expect("main.tex must exist"),
+            &mut tex,
+        )
+        .expect("read main.tex");
+
+        let mut bib = String::new();
+        std::io::Read::read_to_string(
+            &mut archive
+                .by_name("references.bib")
+                .expect("references.bib must exist"),
+            &mut bib,
+        )
+        .expect("read references.bib");
+
+        let mut svg = String::new();
+        std::io::Read::read_to_string(
+            &mut archive
+                .by_name("figures/simulation_curve.svg")
+                .expect("figures/simulation_curve.svg must exist"),
+            &mut svg,
+        )
+        .expect("read svg");
+
+        assert!(tex.contains("专利法》第22条第2款新颖性"));
+        assert!(tex.contains("figures/simulation_curve.svg"));
+        assert!(bib.contains("10.1016/j.ymssp.2024.111222"));
+
+        let tex_cites = crate::pipeline::steps::deliverables::extract_tex_cite_keys(&tex);
+        let bib_keys = crate::pipeline::steps::deliverables::extract_bib_keys(&bib);
+        assert!(!tex_cites.is_empty(), "must cite verified DOI entry");
+        for key in &tex_cites {
+            assert!(
+                bib_keys.contains(key),
+                "orphan citation {key} not found in references.bib ({bib_keys:?})"
+            );
+        }
+
+        assert!(svg.contains("<svg"));
+        assert!(svg.contains("Time (ms)"));
+        assert!(svg.contains("class=\"legend\""));
+        assert!(svg.contains("<polyline"));
+    }
+
+    #[test]
+    fn paper_docx_zip_structure_is_valid_and_preserves_novelty_lock() {
+        let db = Database::init(":memory:").expect("open db");
+        let idea = seed_idea(&db, "idea-paper-docx-1");
+        let bytes = super::build_paper_docx_bytes(&db, &idea).expect("build paper docx");
+        assert!(bytes.starts_with(b"PK"), "docx must be a valid ZIP archive");
+
+        let cursor = std::io::Cursor::new(bytes);
+        let mut archive = zip::ZipArchive::new(cursor).expect("open docx zip");
+        for required in [
+            "[Content_Types].xml",
+            "_rels/.rels",
+            "word/_rels/document.xml.rels",
+            "word/styles.xml",
+            "word/document.xml",
+        ] {
+            let mut f = archive.by_name(required).expect("required OOXML part");
+            let mut xml = String::new();
+            std::io::Read::read_to_string(&mut f, &mut xml).expect("read OOXML part");
+            assert!(!xml.is_empty(), "{required} should not be empty");
+        }
+
+        let mut doc_xml = String::new();
+        std::io::Read::read_to_string(
+            &mut archive.by_name("word/document.xml").expect("document.xml"),
+            &mut doc_xml,
+        )
+        .expect("read document.xml");
+        assert!(doc_xml.contains("专利法》第22条第2款新颖性"));
+        assert!(doc_xml.contains("10.1016/j.ymssp.2024.111222"));
     }
 }

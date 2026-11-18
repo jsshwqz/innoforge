@@ -5,7 +5,7 @@
 > `node scripts/gen_route_inventory.js`
 > 逐条「收什么、回什么」的契约（路径参数 / 请求体字段 / 响应键）见 `docs/API-CONTRACTS.md`，同样自动生成。
 
-共 **157** 条路由：页面/静态 9 条，`/api` 接口 148 条。
+共 **159** 条路由：页面/静态 9 条，`/api` 接口 150 条。
 
 ## 说明：清单只回答「有哪些端点」
 
@@ -143,31 +143,33 @@
 | 127 | POST | `/api/ideas/:id/control-prototype` | `routes::api_idea_control_prototype` | src/common.rs:708 |
 | 128 | POST | `/api/ideas/:id/fto-scan` | `routes::api_idea_fto_scan` | src/common.rs:712 |
 | 129 | GET | `/api/ideas/:id/archive/zip` | `routes::api_idea_archive_zip` | src/common.rs:713 |
-| 130 | GET | `/api/feature-cards/diff` | `routes::api_feature_card_diff` | src/common.rs:717 |
-| 131 | POST | `/api/ideas/:id/claims/validate` | `routes::api_idea_claims_validate` | src/common.rs:721 |
-| 132 | GET / POST | `/api/idea/:id/claim-tree` | `routes::api_idea_claim_tree` | src/common.rs:726 |
-| 133 | DELETE | `/api/idea/:id/claim-tree/:claim_id` | `routes::api_idea_claim_node_delete` | src/common.rs:730 |
-| 134 | POST | `/api/idea/:id/iterate` | `routes::api_idea_iterate` | src/common.rs:734 |
-| 135 | GET | `/api/idea/:id/versions` | `routes::api_idea_versions` | src/common.rs:735 |
-| 136 | GET | `/api/idea/:id/branches` | `routes::api_idea_branches` | src/common.rs:736 |
-| 137 | GET | `/api/idea/:id/findings` | `routes::api_idea_findings` | src/common.rs:737 |
-| 138 | GET / POST | `/api/idea/:id/memory` | `routes::api_idea_memory` | src/common.rs:739 |
-| 139 | DELETE | `/api/idea/:id/memory/:entry_id` | `routes::api_idea_memory_delete` | src/common.rs:743 |
-| 140 | GET | `/api/ipc/tree` | `routes::api_ipc_tree` | src/common.rs:748 |
-| 141 | GET | `/api/ipc/:code/patents` | `routes::api_ipc_patents` | src/common.rs:749 |
-| 142 | POST | `/api/patents/import` | `routes::api_import_patents` | src/common.rs:751 |
-| 143 | POST | `/api/backup/export` | `routes::api_backup_export` | src/common.rs:752 |
-| 144 | POST | `/api/backup/check` | `routes::api_backup_check` | src/common.rs:753 |
-| 145 | GET / POST | `/api/collections` | `routes::api_list_collections` | src/common.rs:755 |
-| 146 | DELETE | `/api/collections/:id` | `routes::api_delete_collection` | src/common.rs:759 |
-| 147 | GET | `/api/collections/:id/patents` | `routes::api_get_collection_patents` | src/common.rs:763 |
-| 148 | POST | `/api/collections/:id/add` | `routes::api_add_to_collection` | src/common.rs:767 |
-| 149 | DELETE | `/api/collections/:id/remove/:patent_id` | `routes::api_remove_from_collection` | src/common.rs:771 |
-| 150 | GET / POST | `/api/patents/:id/tags` | `routes::api_get_patent_tags` | src/common.rs:776 |
-| 151 | DELETE | `/api/patents/:id/tags/:tag` | `routes::api_remove_tag` | src/common.rs:780 |
-| 152 | GET | `/api/patents/:id/collections` | `routes::api_get_patent_collections` | src/common.rs:784 |
-| 153 | GET | `/api/tags` | `routes::api_list_all_tags` | src/common.rs:788 |
-| 154 | POST | `/api/upload/compare` | `routes::api_upload_compare` | src/common.rs:790 |
-| 155 | POST | `/api/upload/extract` | `routes::api_upload_extract` | src/common.rs:791 |
-| 156 | POST | `/api/upload/pdf-store` | `routes::api_upload_pdf_store` | src/common.rs:792 |
-| 157 | GET | `/static/*path` | `serve_static_embedded` | src/common.rs:796 |
+| 130 | GET | `/api/ideas/:id/paper/latex-bundle` | `routes::api_idea_paper_latex_bundle` | src/common.rs:717 |
+| 131 | GET | `/api/ideas/:id/paper/docx` | `routes::api_idea_paper_docx` | src/common.rs:721 |
+| 132 | GET | `/api/feature-cards/diff` | `routes::api_feature_card_diff` | src/common.rs:725 |
+| 133 | POST | `/api/ideas/:id/claims/validate` | `routes::api_idea_claims_validate` | src/common.rs:729 |
+| 134 | GET / POST | `/api/idea/:id/claim-tree` | `routes::api_idea_claim_tree` | src/common.rs:734 |
+| 135 | DELETE | `/api/idea/:id/claim-tree/:claim_id` | `routes::api_idea_claim_node_delete` | src/common.rs:738 |
+| 136 | POST | `/api/idea/:id/iterate` | `routes::api_idea_iterate` | src/common.rs:742 |
+| 137 | GET | `/api/idea/:id/versions` | `routes::api_idea_versions` | src/common.rs:743 |
+| 138 | GET | `/api/idea/:id/branches` | `routes::api_idea_branches` | src/common.rs:744 |
+| 139 | GET | `/api/idea/:id/findings` | `routes::api_idea_findings` | src/common.rs:745 |
+| 140 | GET / POST | `/api/idea/:id/memory` | `routes::api_idea_memory` | src/common.rs:747 |
+| 141 | DELETE | `/api/idea/:id/memory/:entry_id` | `routes::api_idea_memory_delete` | src/common.rs:751 |
+| 142 | GET | `/api/ipc/tree` | `routes::api_ipc_tree` | src/common.rs:756 |
+| 143 | GET | `/api/ipc/:code/patents` | `routes::api_ipc_patents` | src/common.rs:757 |
+| 144 | POST | `/api/patents/import` | `routes::api_import_patents` | src/common.rs:759 |
+| 145 | POST | `/api/backup/export` | `routes::api_backup_export` | src/common.rs:760 |
+| 146 | POST | `/api/backup/check` | `routes::api_backup_check` | src/common.rs:761 |
+| 147 | GET / POST | `/api/collections` | `routes::api_list_collections` | src/common.rs:763 |
+| 148 | DELETE | `/api/collections/:id` | `routes::api_delete_collection` | src/common.rs:767 |
+| 149 | GET | `/api/collections/:id/patents` | `routes::api_get_collection_patents` | src/common.rs:771 |
+| 150 | POST | `/api/collections/:id/add` | `routes::api_add_to_collection` | src/common.rs:775 |
+| 151 | DELETE | `/api/collections/:id/remove/:patent_id` | `routes::api_remove_from_collection` | src/common.rs:779 |
+| 152 | GET / POST | `/api/patents/:id/tags` | `routes::api_get_patent_tags` | src/common.rs:784 |
+| 153 | DELETE | `/api/patents/:id/tags/:tag` | `routes::api_remove_tag` | src/common.rs:788 |
+| 154 | GET | `/api/patents/:id/collections` | `routes::api_get_patent_collections` | src/common.rs:792 |
+| 155 | GET | `/api/tags` | `routes::api_list_all_tags` | src/common.rs:796 |
+| 156 | POST | `/api/upload/compare` | `routes::api_upload_compare` | src/common.rs:798 |
+| 157 | POST | `/api/upload/extract` | `routes::api_upload_extract` | src/common.rs:799 |
+| 158 | POST | `/api/upload/pdf-store` | `routes::api_upload_pdf_store` | src/common.rs:800 |
+| 159 | GET | `/static/*path` | `serve_static_embedded` | src/common.rs:804 |
