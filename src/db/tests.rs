@@ -3,11 +3,11 @@ use crate::patent::{CadArtifact, CadContextKind, CadValidation, Patent, SearchTy
 
 #[test]
 fn schema_v23_is_created_and_idempotent() {
-    // v24: OA 轮次追踪表 idea_id/session_id 列（见 migrations.rs）
+    // v25: chunk 结构化分块 section_tag 列 + chunks_fts（Batch 1 任务 1.1，见 migrations.rs）
     let file = tempfile::NamedTempFile::new().expect("temp database");
     let path = file.path().to_string_lossy().to_string();
     let db = Database::init(&path).expect("initialize database to latest schema");
-    assert_eq!(db.query_schema_version().expect("schema version"), 24);
+    assert_eq!(db.query_schema_version().expect("schema version"), 25);
 
     // Verify all new tables exist: cad_artifacts, ai_cost_ledger, patents_embedding, patent_chunks, idea_memory
     let cad_count: i64 = db
@@ -52,7 +52,18 @@ fn schema_v23_is_created_and_idempotent() {
 
     drop(db);
     let reopened = Database::init(&path).expect("reopen migrated database");
-    assert_eq!(reopened.query_schema_version().expect("schema version"), 24);
+    assert_eq!(reopened.query_schema_version().expect("schema version"), 25);
+
+    // Verify chunks_fts (v25, Batch 1) exists alongside the v21-v24 tables
+    let fts_count: i64 = reopened
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='chunks_fts'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("query chunks_fts table");
+    assert_eq!(fts_count, 1);
 
     // Verify idea_memory table exists
     let mem_count: i64 = reopened

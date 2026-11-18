@@ -5,7 +5,7 @@
 > `node scripts/gen_route_inventory.js`
 > 逐条「收什么、回什么」的契约（路径参数 / 请求体字段 / 响应键）见 `docs/API-CONTRACTS.md`，同样自动生成。
 
-共 **143** 条路由：页面/静态 9 条，`/api` 接口 134 条。
+共 **144** 条路由：页面/静态 9 条，`/api` 接口 135 条。
 
 ## 说明：清单只回答「有哪些端点」
 
@@ -133,27 +133,28 @@
 | 117 | GET | `/api/idea/:id/chat/conversation` | `routes::api_idea_chat_conversation` | src/common.rs:667 |
 | 118 | POST | `/api/idea/:id/summarize` | `routes::api_idea_summarize_discussion` | src/common.rs:671 |
 | 119 | GET / POST | `/api/ideas/:id/feature-cards` | `routes::api_get_feature_cards` | src/common.rs:676 |
-| 120 | GET | `/api/feature-cards/diff` | `routes::api_feature_card_diff` | src/common.rs:680 |
-| 121 | GET | `/api/idea/:id/claim-tree` | `routes::api_idea_claim_tree` | src/common.rs:685 |
-| 122 | POST | `/api/idea/:id/iterate` | `routes::api_idea_iterate` | src/common.rs:686 |
-| 123 | GET | `/api/idea/:id/versions` | `routes::api_idea_versions` | src/common.rs:687 |
-| 124 | GET | `/api/idea/:id/branches` | `routes::api_idea_branches` | src/common.rs:688 |
-| 125 | GET | `/api/idea/:id/findings` | `routes::api_idea_findings` | src/common.rs:689 |
-| 126 | GET / POST | `/api/idea/:id/memory` | `routes::api_idea_memory` | src/common.rs:691 |
-| 127 | DELETE | `/api/idea/:id/memory/:entry_id` | `routes::api_idea_memory_delete` | src/common.rs:695 |
-| 128 | GET | `/api/ipc/tree` | `routes::api_ipc_tree` | src/common.rs:700 |
-| 129 | GET | `/api/ipc/:code/patents` | `routes::api_ipc_patents` | src/common.rs:701 |
-| 130 | POST | `/api/patents/import` | `routes::api_import_patents` | src/common.rs:703 |
-| 131 | GET / POST | `/api/collections` | `routes::api_list_collections` | src/common.rs:705 |
-| 132 | DELETE | `/api/collections/:id` | `routes::api_delete_collection` | src/common.rs:709 |
-| 133 | GET | `/api/collections/:id/patents` | `routes::api_get_collection_patents` | src/common.rs:713 |
-| 134 | POST | `/api/collections/:id/add` | `routes::api_add_to_collection` | src/common.rs:717 |
-| 135 | DELETE | `/api/collections/:id/remove/:patent_id` | `routes::api_remove_from_collection` | src/common.rs:721 |
-| 136 | GET / POST | `/api/patents/:id/tags` | `routes::api_get_patent_tags` | src/common.rs:726 |
-| 137 | DELETE | `/api/patents/:id/tags/:tag` | `routes::api_remove_tag` | src/common.rs:730 |
-| 138 | GET | `/api/patents/:id/collections` | `routes::api_get_patent_collections` | src/common.rs:734 |
-| 139 | GET | `/api/tags` | `routes::api_list_all_tags` | src/common.rs:738 |
-| 140 | POST | `/api/upload/compare` | `routes::api_upload_compare` | src/common.rs:740 |
-| 141 | POST | `/api/upload/extract` | `routes::api_upload_extract` | src/common.rs:741 |
-| 142 | POST | `/api/upload/pdf-store` | `routes::api_upload_pdf_store` | src/common.rs:742 |
-| 143 | GET | `/static/*path` | `serve_static_embedded` | src/common.rs:746 |
+| 120 | POST | `/api/ideas/:id/feature-cards/generate` | `routes::api_generate_feature_cards` | src/common.rs:680 |
+| 121 | GET | `/api/feature-cards/diff` | `routes::api_feature_card_diff` | src/common.rs:684 |
+| 122 | GET | `/api/idea/:id/claim-tree` | `routes::api_idea_claim_tree` | src/common.rs:689 |
+| 123 | POST | `/api/idea/:id/iterate` | `routes::api_idea_iterate` | src/common.rs:690 |
+| 124 | GET | `/api/idea/:id/versions` | `routes::api_idea_versions` | src/common.rs:691 |
+| 125 | GET | `/api/idea/:id/branches` | `routes::api_idea_branches` | src/common.rs:692 |
+| 126 | GET | `/api/idea/:id/findings` | `routes::api_idea_findings` | src/common.rs:693 |
+| 127 | GET / POST | `/api/idea/:id/memory` | `routes::api_idea_memory` | src/common.rs:695 |
+| 128 | DELETE | `/api/idea/:id/memory/:entry_id` | `routes::api_idea_memory_delete` | src/common.rs:699 |
+| 129 | GET | `/api/ipc/tree` | `routes::api_ipc_tree` | src/common.rs:704 |
+| 130 | GET | `/api/ipc/:code/patents` | `routes::api_ipc_patents` | src/common.rs:705 |
+| 131 | POST | `/api/patents/import` | `routes::api_import_patents` | src/common.rs:707 |
+| 132 | GET / POST | `/api/collections` | `routes::api_list_collections` | src/common.rs:709 |
+| 133 | DELETE | `/api/collections/:id` | `routes::api_delete_collection` | src/common.rs:713 |
+| 134 | GET | `/api/collections/:id/patents` | `routes::api_get_collection_patents` | src/common.rs:717 |
+| 135 | POST | `/api/collections/:id/add` | `routes::api_add_to_collection` | src/common.rs:721 |
+| 136 | DELETE | `/api/collections/:id/remove/:patent_id` | `routes::api_remove_from_collection` | src/common.rs:725 |
+| 137 | GET / POST | `/api/patents/:id/tags` | `routes::api_get_patent_tags` | src/common.rs:730 |
+| 138 | DELETE | `/api/patents/:id/tags/:tag` | `routes::api_remove_tag` | src/common.rs:734 |
+| 139 | GET | `/api/patents/:id/collections` | `routes::api_get_patent_collections` | src/common.rs:738 |
+| 140 | GET | `/api/tags` | `routes::api_list_all_tags` | src/common.rs:742 |
+| 141 | POST | `/api/upload/compare` | `routes::api_upload_compare` | src/common.rs:744 |
+| 142 | POST | `/api/upload/extract` | `routes::api_upload_extract` | src/common.rs:745 |
+| 143 | POST | `/api/upload/pdf-store` | `routes::api_upload_pdf_store` | src/common.rs:746 |
+| 144 | GET | `/static/*path` | `serve_static_embedded` | src/common.rs:750 |

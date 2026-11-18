@@ -40,7 +40,7 @@ const SQLITE_MAGIC: [u8; 16] = *b"SQLite format 3\0";
 
 #[test]
 fn migration_atomicity_full_migration_reaches_target_version() {
-    // Positive assertion: a fresh db initializes to SCHEMA_VERSION (24).
+    // Positive assertion: a fresh db initializes to SCHEMA_VERSION (25).
     let dir = TempDir::new().expect("temp dir");
     let db_path = dir.path().join("test.db");
     let db = innoforge::db::Database::init(db_path.to_str().unwrap())

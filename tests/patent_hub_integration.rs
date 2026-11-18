@@ -393,7 +393,7 @@ fn schema_version_is_set_on_fresh_db() {
     let version: i32 = db
         .query_schema_version()
         .expect("should be able to read schema version");
-    assert_eq!(version, 24);
+    assert_eq!(version, 25);
 }
 
 #[test]
@@ -415,7 +415,7 @@ fn reinit_same_db_is_idempotent() {
     assert_eq!(p.unwrap().title, "Migration test");
 
     let version = db2.query_schema_version().unwrap();
-    assert_eq!(version, 24);
+    assert_eq!(version, 25);
 }
 
 // ── Chat records CRUD ────────────────────────────────────────────────────────

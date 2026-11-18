@@ -30,6 +30,11 @@ pub enum SourceKind {
     GooglePatentsXhr,
     #[serde(rename = "epo_ops")]
     EpoOps,
+    /// OpenAlex 学术文献补充源（Batch 1 任务 1.5，免费无 Key）。**链尾恒登记**——
+    /// 专利三源全空时顶上提供期刊论文/预印本著录（DOI 进 patent_number，
+    /// 期刊名进 applicant，见 `providers/openalex.rs` 模块头字段映射）。
+    #[serde(rename = "openalex")]
+    OpenAlex,
     /// 本地 FTS 兜底。**MA4a 起有真实生产消费点**：`routes/search.rs::local_fallback_json`
     /// 把每次本地兜底补记为 attempts 末条的 `local_fts` 行（仅记账，不进在线链、
     /// 不参与 `winning_source`，出参 `source` 仍为 `"local"`）。
@@ -63,6 +68,7 @@ impl SourceKind {
             SourceKind::SerpApi => "serpapi",
             SourceKind::GooglePatentsXhr => "google_patents_xhr",
             SourceKind::EpoOps => "epo_ops",
+            SourceKind::OpenAlex => "openalex",
             SourceKind::LocalFts => "local_fts",
             SourceKind::FirecrawlWeb => "firecrawl_web",
             SourceKind::QueryRewrite => "query_rewrite",

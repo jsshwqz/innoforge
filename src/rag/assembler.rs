@@ -2,6 +2,17 @@
 
 use crate::pipeline::context::ReferenceChunk;
 
+/// 引用头的来源描述（Batch 1 任务 1.3）：`section_tag` 非空时透传展示
+/// 「来源: claim / Claim:3」——结构化分块标签让模型与用户都能看到命中位置；
+/// 旧数据（空串）退回纯 source_type，展示形态与旧版一致。
+fn source_label(chunk: &ReferenceChunk) -> String {
+    if chunk.section_tag.is_empty() {
+        chunk.source_type.clone()
+    } else {
+        format!("{} / {}", chunk.source_type, chunk.section_tag)
+    }
+}
+
 /// Assemble RAG context into a formatted prompt string.
 pub fn assemble_rag_prompt(
     query: &str,
@@ -42,7 +53,7 @@ pub fn assemble_rag_prompt(
 
 ",
                 i + 1,
-                chunk.source_type,
+                source_label(chunk),
                 chunk.relevance_score,
                 truncated
             ));
@@ -54,7 +65,7 @@ pub fn assemble_rag_prompt(
 
 ",
             i + 1,
-            chunk.source_type,
+            source_label(chunk),
             chunk.relevance_score,
             chunk.content
         ));
@@ -113,9 +124,27 @@ mod tests {
             patent_id: "test-patent".to_string(),
             chunk_index: 0,
             source_type: "abstract".to_string(),
+            section_tag: String::new(),
             content: content.to_string(),
             relevance_score: score,
         }
+    }
+
+    #[test]
+    fn test_assemble_shows_section_tag_when_present() {
+        let mut chunk = make_chunk("c1", "Content one", 0.9);
+        chunk.source_type = "claim".to_string();
+        chunk.section_tag = "Claim:3".to_string();
+        let result = assemble_rag_prompt("query", std::slice::from_ref(&chunk), "system", 1000);
+        assert!(
+            result.contains("来源: claim / Claim:3"),
+            "section_tag 必须透传展示: {result}"
+        );
+        // 旧数据（空 tag）不出现「/」形态
+        let plain = make_chunk("c2", "Content two", 0.8);
+        let result2 = assemble_rag_prompt("query", std::slice::from_ref(&plain), "system", 1000);
+        assert!(result2.contains("来源: abstract"), "{result2}");
+        assert!(!result2.contains("来源: abstract /"), "{result2}");
     }
 
     #[test]

@@ -320,7 +320,10 @@ impl Orchestrator {
     ) -> Result<()> {
         match ctx.current_step {
             PipelineStep::ParseInput => steps::parse::execute(ctx, &self.db).await,
-            PipelineStep::ExpandQuery => steps::expand::execute(ctx, &self.ai_client).await,
+            PipelineStep::ExpandQuery => {
+                let expand_ai = self.ai_client_fast.as_ref().unwrap_or(&self.ai_client);
+                steps::expand::execute(ctx, expand_ai).await
+            }
             PipelineStep::SearchWeb => {
                 steps::search::search_web(ctx, &self.serpapi_key, &self.db).await
             }
@@ -346,9 +349,10 @@ impl Orchestrator {
                 let result = steps::analysis::action_plan(ctx, &self.ai_client).await;
                 if result.is_ok() {
                     let _ = steps::analysis::extract_feature_cards(ctx, &self.db).await;
-                    let _ =
-                        steps::analysis::extract_feature_cards_ai(ctx, &self.ai_client, &self.db)
-                            .await;
+                    if let Some(fast_ai) = self.ai_client_fast.as_ref() {
+                        let _ =
+                            steps::analysis::extract_feature_cards_ai(ctx, fast_ai, &self.db).await;
+                    }
                 }
                 result
             }

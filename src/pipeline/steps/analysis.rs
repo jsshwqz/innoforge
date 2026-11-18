@@ -229,6 +229,62 @@ pub async fn extract_feature_cards(ctx: &PipelineContext, db: &Database) -> Resu
     Ok(())
 }
 
+/// 从 AI 返回文本中安全解析 5 维特征卡片 JSON 数组（最多 5 张）。
+/// 兼容裸 JSON 数组、markdown 代码块包裹及前后夹杂解释文字；非法 JSON 降级返回空列表。
+pub fn parse_ai_feature_cards_json(idea_id: &str, raw: &str, created_at: &str) -> Vec<FeatureCard> {
+    let Some(start) = raw.find('[') else {
+        return Vec::new();
+    };
+    let Some(end) = raw.rfind(']') else {
+        return Vec::new();
+    };
+    if start > end {
+        return Vec::new();
+    }
+    let Some(json_slice) = raw.get(start..=end) else {
+        return Vec::new();
+    };
+    let Ok(cards) = serde_json::from_str::<Vec<serde_json::Value>>(json_slice) else {
+        return Vec::new();
+    };
+
+    cards
+        .iter()
+        .take(5)
+        .map(|card_json| FeatureCard {
+            id: uuid::Uuid::new_v4().to_string(),
+            idea_id: idea_id.to_string(),
+            title: card_json["title"]
+                .as_str()
+                .unwrap_or("AI提取特征")
+                .to_string(),
+            description: String::new(),
+            novelty_score: None,
+            created_at: created_at.to_string(),
+            technical_problem: card_json["technical_problem"]
+                .as_str()
+                .unwrap_or("")
+                .to_string(),
+            core_structure: card_json["core_structure"]
+                .as_str()
+                .unwrap_or("")
+                .to_string(),
+            key_relations: card_json["key_relations"]
+                .as_str()
+                .unwrap_or("")
+                .to_string(),
+            process_steps: card_json["process_steps"]
+                .as_str()
+                .unwrap_or("")
+                .to_string(),
+            application_scenarios: card_json["application_scenarios"]
+                .as_str()
+                .unwrap_or("")
+                .to_string(),
+        })
+        .collect()
+}
+
 /// AI 驱动的 5 维特征提取 — 在 deep_analysis 完成后调用
 /// 向 AI 发送结构化 prompt，解析返回的 JSON 数组，创建带 5 维字段的 FeatureCard
 pub async fn extract_feature_cards_ai(
@@ -236,6 +292,8 @@ pub async fn extract_feature_cards_ai(
     ai: &AiClient,
     db: &Database,
 ) -> Result<()> {
+    const SYSTEM_PROMPT: &str =
+        "你是专利技术特征提取助手。请严格只输出合法的 JSON 数组，不要输出任何解释文字、散文结构或 markdown 标记。";
     let prompt = format!(
         "从以下创意描述和分析结果中提取技术特征卡片。\n\
          请输出 JSON 数组，每个元素包含以下字段：\n\
@@ -245,66 +303,34 @@ pub async fn extract_feature_cards_ai(
          - key_relations: 关键技术关系/连接\n\
          - process_steps: 工艺/实施步骤\n\
          - application_scenarios: 应用场景/领域\n\n\
-         创意标题：{}\n创意描述：{}\n\n分析结果：{}\n\n\
+         创意标题：\n<user_input>\n{}\n</user_input>\n\n\
+         创意描述：\n<user_input>\n{}\n</user_input>\n\n\
+         分析结果：\n<user_input>\n{}\n</user_input>\n\n\
          请直接输出 JSON 数组，不要包含 markdown 标记。",
         ctx.title,
         ctx.description,
         crate::ai::truncate_for_ai(&ctx.ai_analysis, 2000)
     );
 
-    match ai.chat_expert(&prompt, None).await {
+    let fast_ai = ai.clone_with_timeout(std::time::Duration::from_secs(60));
+    match fast_ai.chat_with_system(SYSTEM_PROMPT, &prompt, 0.2).await {
         Ok(response) => {
-            let cleaned = response
-                .trim()
-                .trim_start_matches("```json")
-                .trim_start_matches("```")
-                .trim_end_matches("```")
-                .trim();
-            if let Ok(cards) = serde_json::from_str::<Vec<serde_json::Value>>(cleaned) {
-                let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
-                for card_json in cards.iter().take(5) {
-                    let card = FeatureCard {
-                        id: uuid::Uuid::new_v4().to_string(),
-                        idea_id: ctx.idea_id.clone(),
-                        title: card_json["title"]
-                            .as_str()
-                            .unwrap_or("AI提取特征")
-                            .to_string(),
-                        description: String::new(),
-                        novelty_score: None,
-                        created_at: now.clone(),
-                        technical_problem: card_json["technical_problem"]
-                            .as_str()
-                            .unwrap_or("")
-                            .to_string(),
-                        core_structure: card_json["core_structure"]
-                            .as_str()
-                            .unwrap_or("")
-                            .to_string(),
-                        key_relations: card_json["key_relations"]
-                            .as_str()
-                            .unwrap_or("")
-                            .to_string(),
-                        process_steps: card_json["process_steps"]
-                            .as_str()
-                            .unwrap_or("")
-                            .to_string(),
-                        application_scenarios: card_json["application_scenarios"]
-                            .as_str()
-                            .unwrap_or("")
-                            .to_string(),
-                    };
-                    if let Err(e) = db.insert_feature_card(&card) {
+            let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+            let parsed_cards = parse_ai_feature_cards_json(&ctx.idea_id, &response, &now);
+            if parsed_cards.is_empty() {
+                tracing::warn!("AI 特征提取返回非法或空 JSON，跳过");
+            } else {
+                let count = parsed_cards.len();
+                for card in &parsed_cards {
+                    if let Err(e) = db.insert_feature_card(card) {
                         tracing::warn!("AI 特征卡片存储失败: {}", e);
                     }
                 }
                 tracing::info!(
                     "AI 自动提取 {} 张 5 维特征卡片 (idea: {})",
-                    cards.len().min(5),
+                    count,
                     ctx.idea_id
                 );
-            } else {
-                tracing::warn!("AI 特征提取返回非法 JSON，跳过");
             }
         }
         Err(e) => {
@@ -694,5 +720,39 @@ mod tests {
                 file
             );
         }
+    }
+
+    #[test]
+    fn parse_ai_feature_cards_json_handles_raw_markdown_prose_and_cap() {
+        let raw = r#"[{"title":"特征A","technical_problem":"问题A","core_structure":"结构A","key_relations":"关系A","process_steps":"步骤A","application_scenarios":"场景A"}]"#;
+        let cards = super::parse_ai_feature_cards_json("idea-1", raw, "2026-11-18 00:00:00");
+        assert_eq!(cards.len(), 1);
+        assert_eq!(cards[0].idea_id, "idea-1");
+        assert_eq!(cards[0].title, "特征A");
+        assert_eq!(cards[0].technical_problem, "问题A");
+        assert_eq!(cards[0].core_structure, "结构A");
+
+        let wrapped = "以下是提取结果：\n```json\n[{\"title\":\"特征B\",\"core_structure\":\"结构B\"}]\n```\n请查收。";
+        let cards = super::parse_ai_feature_cards_json("idea-2", wrapped, "2026-11-18 00:00:00");
+        assert_eq!(cards.len(), 1);
+        assert_eq!(cards[0].title, "特征B");
+        assert_eq!(cards[0].core_structure, "结构B");
+
+        let six_items = r#"[
+            {"title":"1"},{"title":"2"},{"title":"3"},{"title":"4"},{"title":"5"},{"title":"6"}
+        ]"#;
+        let cards = super::parse_ai_feature_cards_json("idea-3", six_items, "2026-11-18 00:00:00");
+        assert_eq!(cards.len(), 5);
+    }
+
+    #[test]
+    fn parse_ai_feature_cards_json_returns_empty_on_invalid_json() {
+        assert!(super::parse_ai_feature_cards_json("idea-1", "无 JSON 内容", "t").is_empty());
+        assert!(super::parse_ai_feature_cards_json("idea-1", "][", "t").is_empty());
+        assert!(super::parse_ai_feature_cards_json("idea-1", "[{bad json}]", "t").is_empty());
+        assert!(
+            super::parse_ai_feature_cards_json("idea-1", "{\"title\":\"not array\"}", "t")
+                .is_empty()
+        );
     }
 }

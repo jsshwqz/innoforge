@@ -39,6 +39,11 @@ const BASELINE: &[(&str, usize)] = &[
     ("src/search/enrichment.rs", 1),
     ("src/search/providers/serpapi.rs", 4),
     ("src/search/query.rs", 5),
+    // 2026-11-17 审查登记（Batch 1）：chunk_structured_patent 的 2 处 `[..` 是对
+    // `Vec<char>`（专利文本 chars().collect()）按**元素下标**取前缀段
+    // （&chars[..starts[0].1] / &chars[..marks[0]]），元素即 char、无字节边界语义，
+    // 构造性安全（#73 防线只针对 &str 字节切片；同 feature_cards.rs 先例）。
+    ("src/rag/chunker.rs", 2),
 ];
 
 /// 统计一个文件中「疑似裸字节切片」的行数。

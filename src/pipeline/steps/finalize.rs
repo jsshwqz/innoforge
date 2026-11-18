@@ -69,7 +69,39 @@ pub async fn execute(ctx: &mut PipelineContext, db: &Arc<Database>) -> Result<()
         );
     }
 
-    let memory = extract_memory_entries(ctx);
+    let mut memory = extract_memory_entries(ctx);
+    let feature_cards = db
+        .get_feature_cards_by_idea(&ctx.idea_id)
+        .unwrap_or_default();
+    let bom_pack = super::deliverables::build_engineering_bom_pack(ctx, &feature_cards);
+    let journal_draft = super::deliverables::build_journal_manuscript_draft(ctx);
+    let now = chrono::Utc::now().to_rfc3339();
+    memory.push(IdeaMemory {
+        id: format!("{}-deliverable-bom-{}", ctx.idea_id, uuid::Uuid::new_v4()),
+        idea_id: ctx.idea_id.clone(),
+        concept_name: "deliverable_bom".to_string(),
+        concept_type: "decision".to_string(),
+        content: bom_pack.full_markdown,
+        confidence: 0.9,
+        source_step: Some("FinalizeDeliverables".to_string()),
+        created_at: now.clone(),
+        updated_at: now.clone(),
+    });
+    memory.push(IdeaMemory {
+        id: format!(
+            "{}-deliverable-journal-{}",
+            ctx.idea_id,
+            uuid::Uuid::new_v4()
+        ),
+        idea_id: ctx.idea_id.clone(),
+        concept_name: "deliverable_journal_draft".to_string(),
+        concept_type: "decision".to_string(),
+        content: journal_draft.full_markdown,
+        confidence: 0.9,
+        source_step: Some("FinalizeDeliverables".to_string()),
+        created_at: now.clone(),
+        updated_at: now,
+    });
     ctx.memory_entries = memory.clone();
     if !memory.is_empty() {
         if let Err(e) = db.save_memory_batch(&memory) {
@@ -304,4 +336,94 @@ fn generate_code_only_report(ctx: &PipelineContext) -> String {
         }
     }
     report
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::patent::{FeatureCard, Idea};
+
+    #[tokio::test]
+    async fn finalize_persists_deliverables_without_altering_ek_grounding() {
+        let db = Arc::new(Database::init(":memory:").expect("in-memory db"));
+        let now = "2026-11-18T00:00:00Z".to_string();
+        db.insert_idea(&Idea {
+            id: "idea-fin-1".to_string(),
+            title: "微流控比例阀".to_string(),
+            description: "采用压电叠堆驱动的微流控比例调节阀".to_string(),
+            input_type: "text".to_string(),
+            status: "analyzing".to_string(),
+            analysis: String::new(),
+            web_results: String::new(),
+            patent_results: String::new(),
+            novelty_score: None,
+            created_at: now.clone(),
+            updated_at: now.clone(),
+            discussion_summary: String::new(),
+        })
+        .expect("insert idea");
+        db.insert_feature_card(&FeatureCard {
+            id: "fc-fin-1".to_string(),
+            idea_id: "idea-fin-1".to_string(),
+            title: "压电驱动微阀芯".to_string(),
+            description: "高频响微流量控制".to_string(),
+            novelty_score: Some(0.8),
+            created_at: now,
+            technical_problem: "传统电磁阀响应慢".to_string(),
+            core_structure: "压电叠堆致动器与弹性膜片阀座".to_string(),
+            key_relations: "位移放大机构连接阀针".to_string(),
+            process_steps: "流量传感器闭环调节驱动电压".to_string(),
+            application_scenarios: "生物芯片进样".to_string(),
+        })
+        .expect("insert feature card");
+
+        let mut ctx = PipelineContext::new(
+            "idea-fin-1",
+            "微流控比例阀",
+            "采用压电叠堆驱动的微流控比例调节阀",
+        );
+        let initial_analysis = "本方案通过压电叠堆致动器实现微流量调节。".to_string();
+        ctx.ai_analysis = initial_analysis.clone();
+
+        let corpus = crate::evidence_kernel::corpus_from_chunks(&ctx.rag_chunks);
+        let (expected_kernel, _) = crate::evidence_kernel::run_kernel(&initial_analysis, &corpus);
+
+        execute(&mut ctx, &db).await.expect("finalize execute");
+
+        let kernel_json = ctx.kernel_report.as_deref().expect("kernel report present");
+        let parsed: serde_json::Value =
+            serde_json::from_str(kernel_json).expect("valid kernel json");
+        let actual_grounding = parsed
+            .get("rubric")
+            .and_then(|r| r.get("grounding"))
+            .and_then(|g| g.as_f64())
+            .expect("grounding score");
+        assert!((actual_grounding - expected_kernel.rubric.grounding).abs() < 1e-9);
+
+        let saved = db
+            .get_memory_entries("idea-fin-1")
+            .expect("query memory entries");
+        let bom_entry = saved
+            .iter()
+            .find(|m| m.concept_name == "deliverable_bom")
+            .expect("deliverable_bom persisted");
+        assert_eq!(bom_entry.concept_type, "decision");
+        assert_eq!(
+            bom_entry.source_step.as_deref(),
+            Some("FinalizeDeliverables")
+        );
+        assert!(bom_entry.content.contains("机械与电控分类 BOM 清单"));
+        assert!(bom_entry.content.contains("压电叠堆致动器与弹性膜片阀座"));
+
+        let journal_entry = saved
+            .iter()
+            .find(|m| m.concept_name == "deliverable_journal_draft")
+            .expect("deliverable_journal_draft persisted");
+        assert_eq!(journal_entry.concept_type, "decision");
+        assert_eq!(
+            journal_entry.source_step.as_deref(),
+            Some("FinalizeDeliverables")
+        );
+        assert!(journal_entry.content.contains("防破新颖性安全锁"));
+    }
 }

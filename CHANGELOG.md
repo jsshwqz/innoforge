@@ -8,6 +8,35 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ### 新增 / Added
 
+- **OA 答复 Stage D 强模型机理对比与部件拓扑/学术反驳**：新增 `part_topology` 模块提取附图标记与部件连接关系并生成机理差异反驳；识别 OpenAlex 真实 DOI 文献生成学术公知常识反驳；Stage D 接入 60 秒超时强模型对比并经 `output_guard` 逐条校验放行，无 Key 或超时时无损回退确定性扫描。 / Added `part_topology` extraction and academic DOI rebuttal in OA arbitration; wired 60s-timeout expert-model mechanism comparison in Stage D with `output_guard` verification and deterministic fallback.
+- **工程 BOM 与期刊草稿双交付包**：新增 `deliverables` 模块并在 `Finalize` 阶段自动落库（`deliverable_bom` / `deliverable_journal_draft`）；`GET /api/idea/:id/report` 新增 `bom_pack` 与 `journal_draft` 导出分支，置顶防破新颖性安全锁警告并绑定检索所得真实 DOI。 / Added engineering BOM pack and journal manuscript draft deliverables persisted in `Finalize` and exposed via `bom_pack` / `journal_draft` report types.
+- **特征卡自动生成端点与快慢模型路由闭环**：新增 `POST /api/ideas/:id/feature-cards/generate`（快模型 JSON 解析 + 确定性回退入库）、语义级差异对比与 FreeCAD 建模提示词组装；主管线与 OA 深度生成接入 `ai_client_expert()`，扩展查询与特征提取接入 `ai_client_fast()`。 / Added `POST /api/ideas/:id/feature-cards/generate` with deterministic fallback, CAD prompt builder, and expert/fast AI channel routing.
+- **创研台前端最小功能按钮接线**：`idea.html` 报告切换栏新增工程 BOM 交付包与期刊论文草稿切换按钮，特征卡片面板新增「AI 自动提取特征卡」触发按钮及单卡「转 FreeCAD 建模」跳转按钮，并补全中英双语词条。 / Wired BOM pack & journal draft report switchers, auto-extract feature cards button, and per-card "Send to FreeCAD" action in `idea.html` with bilingual i18n keys.
+- **特征卡语义对比/CAD 提示词接线与商汤模型池同步**：`feature_cards.rs` 消灭全部 `dead_code`，接入 `?semantic=true` 语义差异对比与 `cad_prompts` 提示词组装；`settings.html` 同步商汤 1.0M 免费模型池。 / Eliminated all `dead_code` in `feature_cards.rs` by wiring `?semantic=true` semantic diff and `cad_prompts` builder; synced SenseTime 1.0M free model pool in `settings.html`.
+- **特征卡双卡语义等价对比前端上线**：`idea.html` 特征卡片区新增双卡选择与「语义差异比对」行内展示闭环（接入 `GET /api/feature-cards/diff?a=...&b=...&semantic=true`），同步补全中英双语词条。 / Shipped dual-card semantic equivalence comparison UI in `idea.html` wired to `GET /api/feature-cards/diff?a=...&b=...&semantic=true` with bilingual i18n keys.
+- **数据库冷启动迁移进度日志与 MCP 端到端闭环测试**（issue [#67](https://github.com/jsshwqz/innoforge/issues/67) P2.4 & P2.6）：`migrations::run` 在冷启动或升级迁移前后输出中文 Schema 初始化进度与就绪日志；新增 `tests/mcp_e2e_roundtrip.rs` 启动真实 `innoforge-server` 与 `innoforge-mcp` 子进程完成 `initialize` / `notifications/initialized` / `tools/list` / `tools/call`（`patent_search`）stdio JSON-RPC 2.0 端到端闭环验证。 / Added Chinese schema initialization progress/ready logs in `migrations::run` and `tests/mcp_e2e_roundtrip.rs` exercising real `innoforge-mcp` stdio JSON-RPC 2.0 roundtrip against a live `innoforge-server` (issue [#67](https://github.com/jsshwqz/innoforge/issues/67) P2.4 & P2.6).
+
+### 修复 / Fixed
+
+- **OA 载体兼容检测、专利摘要换行与 OpenAlex 倒排索引越界**：`detect_carrier_incompatible` 改从说明书与发明名称提取技术领域而非误读申请人；修复 `structured_patent_excerpt` 预算内零丢弃时末尾多余换行；为 `abstract_from_inverted_index` 增设位置上限防异常大槽位引发 OOM。 / Fixed carrier incompatibility field extraction, trailing newline in `structured_patent_excerpt`, and sparse slot cap in OpenAlex inverted index decoding.
+
+### 重构 / Refactored
+
+- **四大巨石文件模块化拆分**：将 `response_pipeline.rs`、`routes/search.rs`、`routes/ai.rs`、`routes/idea.rs` 分别拆出 `response_pipeline_stage_d.rs`、`routes/search_tail.rs`、`routes/oa_assist.rs`、`routes/idea_ops.rs` 四个子模块，保持零新增不安全字节切片与零生产 `unwrap()/expect()`。 / Split four monolithic modules into focused submodules (`response_pipeline_stage_d.rs`, `search_tail.rs`, `oa_assist.rs`, `idea_ops.rs`) with zero new unsafe byte slicing.
+- **第二批三大巨石文件解耦**：完成 `routes/ai.rs`、`ai/patent.rs` 与 `evidence_kernel/amendment_gate.rs` 三块 >2100 行巨石模块拆分，保持零新增不安全字节切片。 / Decoupled the second batch of >2100-line monoliths (`routes/ai.rs`, `ai/patent.rs`, `evidence_kernel/amendment_gate.rs`) with zero new unsafe byte slicing.
+- **全仓 >2,000 行巨石模块 100% 清零**：完成 `search/providers/epo_ops.rs`、`routes/idea.rs` 与 `ai/response_pipeline.rs` 拆分，全仓 7 个 >2,000 行巨石文件全部降至 2,000 行以下。 / Eliminated 100% of >2,000-line monoliths across the repository by splitting `search/providers/epo_ops.rs`, `routes/idea.rs`, and `ai/response_pipeline.rs`.
+
+### 新增 / Added（先前批次）
+
+- **RAG 结构化分块 + BM25/向量 RRF 混合检索（DB v25）**（issue [#78](https://github.com/jsshwqz/innoforge/issues/78)）：权利要求按序号（`Claim:N`）、说明书按段落号（`Desc:[0001]`）/章节标题切分打标，无标记回退窗口切分；新增 `chunks_fts` FTS5 词汇索引（CJK bigram 切分，存量数据自动回填）；检索升级为 BM25 + 向量 RRF 融合（k=60），合成夹具单测证明召回率 ≥ 纯向量检索；检索结果引用头透传展示段落标签（`来源: claim / Claim:3`）。
+- **OpenAlex 学术文献检索源（免费无 Key）**：在线检索链尾恒登记第四源（SerpAPI → Google Patents XHR → EPO OPS → OpenAlex），专利源全空时提供 2.5 亿+ 篇期刊论文/预印本著录检索——倒排索引还原摘要正文、提取真实 DOI/期刊名/年份/作者；诊断面板如实记账（`openalex` 行）。
+
+### 修复 / Fixed
+
+- **解除 5000 字硬截断（对比分析失真根因）**：`compare_multiple`（旧 6000 字）与 `inventiveness_analysis`（旧 5000 字）废除盲目字符截断，改为**权利要求书 100% 全文保留** + 说明书按相关性选段（实施例 > 技术效果 > 与权利要求特征重叠），超预算被丢弃的段落显式写入「数据完整性提示」——靠后权利要求（往往是保护范围递进的关键条项）不再被整条截掉。
+
+### 新增 / Added（先前批次）
+
 - **AI 服务商模型预设补齐（设置页）**：智谱补 GLM-5.3 / GLM-5.3-Flash（官方现役）；Gemini 换代为 gemini-3.8-flash / gemini-flash-lite-latest（gemini-2.5-flash 系列已停供新用户、gemini-flash-latest 别名退役，摘除失效项）；商汤通道补 GLM-5.3-Flash；通义千问补 Qwen4-Max-Preview / Qwen3.7-Plus。模型下拉本就自动实时查询 `/api/ai/models`，预设仅作探测失败时的回退。
 - **首启引导回归 + README「首次使用三步」**（issue [#67](https://github.com/jsshwqz/innoforge/issues/67) P1.1）：E2E 在未配置环境（CI 全新 checkout 形态）强制断言首页「⚠️ AI 未配置」「ℹ️ 在线搜索未配置（可用本地库）」两条横幅出现且可点击直达设置页；已配置的服务器自动降级为 skip，不产生本机假红。README 下载段补首次使用三步（运行 → 设置填 Key → 回首页）。
 

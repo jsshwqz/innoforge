@@ -147,6 +147,11 @@ pub struct ReferenceChunk {
     pub patent_id: String,
     pub chunk_index: i32,
     pub source_type: String,
+    /// 结构化分块的段落标签（Batch 1 任务 1.3 透传）：`Claim:N` / `Desc:[0001]` /
+    /// `Desc:具体实施方式` / `Desc:Window` / `Abstract`；旧数据/旧 JSON 空串
+    /// （`#[serde(default)]` 兼容历史缓存，AGENTS.md 2.5 数据不破）。
+    #[serde(default)]
+    pub section_tag: String,
     pub content: String,
     pub relevance_score: f32,
 }

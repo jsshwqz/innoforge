@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-12T15:31:23.814Z",
+  "generatedAt": "2026-11-18T02:38:53.143Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -125,10 +125,12 @@
       "references": [
         "addMemoryEntry",
         "clearForm",
+        "compareFeatureCards",
         "deleteMemory",
         "drawIdeaCad",
         "exportConclusions",
         "exportConversation",
+        "generateFeatureCards",
         "handleChatFileSelect",
         "hideMemoryForm",
         "loadMemory",
@@ -152,6 +154,7 @@
         "clearForm",
         "clearResults",
         "closeActiveSSE",
+        "compareFeatureCards",
         "context",
         "deleteIdea",
         "deleteMemory",
@@ -160,6 +163,7 @@
         "esc",
         "exportConclusions",
         "exportConversation",
+        "generateFeatureCards",
         "getTypeIcon",
         "getTypeLabel",
         "handleChatFileSelect",
@@ -203,6 +207,7 @@
         "switchTab",
         "toCST",
         "toggleDimension",
+        "updateFeatureDiffControls",
         "updatePipelineStep"
       ]
     },

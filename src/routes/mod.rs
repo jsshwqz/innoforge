@@ -254,13 +254,34 @@ impl AppConfig {
         client
     }
 
-    /// 快模型通道是否就绪：本地 Ollama 无需 Key 即可用；远端通道非占位 Key 才可用。
-    /// 用于决定是否向 Pipeline 提供实验自修复等快模型能力（离线保持 None）。
-    pub fn ai_fast_channel_ready(&self) -> bool {
+    const GEMINI_FALLBACK_CHAIN: [&'static str; 2] =
+        ["gemini-3.8-flash", "gemini-flash-lite-latest"];
+
+    fn gemini_fallback_models(primary_model: &str) -> Vec<&'static str> {
+        Self::GEMINI_FALLBACK_CHAIN
+            .iter()
+            .copied()
+            .filter(|fb| *fb != primary_model)
+            .collect()
+    }
+
+    fn ai_channel_ready(&self) -> bool {
         if is_ollama_url(&self.ai_base_url) {
             return true;
         }
         !is_placeholder_api_key(&self.effective_api_key())
+    }
+
+    /// 快模型通道是否就绪：本地 Ollama 无需 Key 即可用；远端通道非占位 Key 才可用。
+    /// 用于决定是否向 Pipeline 提供实验自修复等快模型能力（离线保持 None）。
+    pub fn ai_fast_channel_ready(&self) -> bool {
+        self.ai_channel_ready()
+    }
+
+    /// 专家模型通道是否就绪：本地 Ollama 无需 Key 即可用；远端通道非占位 Key 才可用。
+    /// 用于决定是否向 Pipeline / OA 阶段提供专家模型能力（离线保持 None）。
+    pub fn ai_expert_channel_ready(&self) -> bool {
+        self.ai_channel_ready()
     }
 
     /// 为 Gemini 端点添加模型降级兜底：从高到低，主模型 quota 用完后尝试更便宜的模型。
@@ -272,11 +293,7 @@ impl AppConfig {
         }
         let api_key = self.effective_api_key();
         // 降级优先级：从最新到最稳定（越靠前越新、quota 可能越紧）
-        let fallback_chain = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
-        for fb_model in &fallback_chain {
-            if fb_model == &primary_model {
-                continue;
-            }
+        for fb_model in Self::gemini_fallback_models(primary_model) {
             client.add_fallback(&self.ai_base_url, &api_key, fb_model, fb_model);
         }
     }
@@ -684,7 +701,7 @@ mod tests {
     fn gemini_provider_with_cli_enables_gemini_cli() {
         let config = AppConfig {
             ai_base_url: "https://generativelanguage.googleapis.com/v1beta/openai/".into(),
-            ai_model: "gemini-2.0-flash".into(),
+            ai_model: "gemini-3.8-flash".into(),
             ai_api_key_gemini: "test-key".into(),
             gemini_cli_enabled: true,
             gemini_cli_path: "gemini.cmd".into(),
@@ -696,6 +713,43 @@ mod tests {
             client.is_gemini_cli_mode(),
             "Gemini provider with gemini_cli_enabled=true SHOULD enable CLI mode"
         );
+    }
+
+    #[test]
+    fn gemini_fallback_chain_uses_active_models_and_skips_primary() {
+        assert_eq!(
+            AppConfig::gemini_fallback_models("gemini-2.5-pro"),
+            vec!["gemini-3.8-flash", "gemini-flash-lite-latest"]
+        );
+        assert_eq!(
+            AppConfig::gemini_fallback_models("gemini-3.8-flash"),
+            vec!["gemini-flash-lite-latest"]
+        );
+    }
+
+    #[test]
+    fn ai_expert_channel_ready_matches_provider_and_key_rules() {
+        let ollama = AppConfig {
+            ai_base_url: "http://localhost:11434/v1".into(),
+            ai_api_key: String::new(),
+            ..AppConfig::default()
+        };
+        assert!(ollama.ai_expert_channel_ready());
+
+        let placeholder = AppConfig {
+            ai_base_url: "https://api.deepseek.com/v1".into(),
+            ai_api_key: "sk-xxx".into(),
+            ai_api_key_deepseek: String::new(),
+            ..AppConfig::default()
+        };
+        assert!(!placeholder.ai_expert_channel_ready());
+
+        let configured = AppConfig {
+            ai_base_url: "https://api.deepseek.com/v1".into(),
+            ai_api_key_deepseek: "sk-real-key".into(),
+            ..AppConfig::default()
+        };
+        assert!(configured.ai_expert_channel_ready());
     }
 
     /// 验证单次 AI 调用的全局超时上限为 300 秒。
