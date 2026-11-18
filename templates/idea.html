@@ -2465,9 +2465,13 @@
 
                     var badge = hit.risk_level === 'high_red' ? '🔴 高危'
                         : (hit.risk_level === 'warn_yellow' ? '🟡 等同预警' : '🟢 安全');
+                    var lsLower = (hit.legal_status || '').toLowerCase();
+                    var lsBadge = (lsLower.indexOf('失效') >= 0 || lsLower.indexOf('expired') >= 0 || lsLower.indexOf('撤回') >= 0 || lsLower.indexOf('rejected') >= 0 || lsLower.indexOf('终止') >= 0)
+                        ? '🟢 失效/可实施'
+                        : ((lsLower.indexOf('有效') >= 0 || lsLower.indexOf('active') >= 0 || lsLower.indexOf('授权') >= 0) ? '🔴 有效授权' : '⚪ ' + (hit.legal_status || 'Unknown'));
                     var header = document.createElement('div');
                     header.style.fontWeight = '600';
-                    header.textContent = badge + ' | ' + (hit.patent_number || '') + ' — ' + (hit.title || '') + ' [' + (hit.legal_status || '') + ']';
+                    header.textContent = badge + ' | ' + (hit.patent_number || '') + ' — ' + (hit.title || '') + ' [' + lsBadge + ']';
                     card.appendChild(header);
 
                     var reason = document.createElement('div');

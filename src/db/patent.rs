@@ -898,9 +898,65 @@ impl super::Database {
     ) -> Result<()> {
         let c = self.conn();
         c.execute(
-            "UPDATE patents SET legal_status = ?1 WHERE patent_number = ?2",
+            "UPDATE patents SET legal_status = ?1 WHERE patent_number = ?2 OR id = ?2",
             params![legal_status, patent_number],
         )?;
         Ok(())
+    }
+
+    /// 同步更新专利法律状态、同族 ID 与前后向引文 JSON（Batch 11 / v0.9.54）。
+    pub fn update_patent_legal_and_citations(
+        &self,
+        patent_number: &str,
+        legal_status: &str,
+        family_id: Option<&str>,
+        citations_json: Option<&str>,
+        cited_by_json: Option<&str>,
+    ) -> Result<()> {
+        let c = self.conn();
+        c.execute(
+            "UPDATE patents
+             SET legal_status = CASE WHEN ?1 <> '' THEN ?1 ELSE legal_status END,
+                 family_id = COALESCE(?2, family_id),
+                 citations = CASE WHEN ?3 IS NOT NULL AND ?3 <> '' THEN ?3 ELSE citations END,
+                 cited_by = CASE WHEN ?4 IS NOT NULL AND ?4 <> '' THEN ?4 ELSE cited_by END
+             WHERE patent_number = ?5 OR id = ?5",
+            params![
+                legal_status,
+                family_id,
+                citations_json,
+                cited_by_json,
+                patent_number
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// 查询同族专利列表（按 family_id 匹配并排除自身）。
+    pub fn list_family_patents(
+        &self,
+        family_id: &str,
+        exclude_patent_number: &str,
+    ) -> Result<Vec<Patent>> {
+        if family_id.trim().is_empty() {
+            return Ok(Vec::new());
+        }
+        let c = self.conn();
+        let mut stmt = c.prepare(
+            "SELECT id,patent_number,title,abstract_text,description,claims,applicant,inventor,
+                    filing_date,publication_date,grant_date,ipc_codes,cpc_codes,priority_date,
+                    country,kind_code,family_id,legal_status,citations,cited_by,source,raw_json,
+                    created_at,images,pdf_url
+             FROM patents
+             WHERE family_id = ?1 AND patent_number <> ?2
+             LIMIT 30",
+        )?;
+        let rows = stmt
+            .query_map(params![family_id.trim(), exclude_patent_number], |r| {
+                Ok(Self::row_to_patent(r))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
     }
 }

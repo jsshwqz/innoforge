@@ -1136,6 +1136,435 @@ fn skipped_outcome(reason: &str) -> SearchOutcome {
     }
 }
 
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+/// 标准化专利法律状态（Batch 11 / v0.9.54）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum LegalStatus {
+    Active,
+    Pending,
+    Expired,
+    Rejected,
+    #[default]
+    Unknown,
+}
+
+impl LegalStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Active => "Active",
+            Self::Pending => "Pending",
+            Self::Expired => "Expired",
+            Self::Rejected => "Rejected",
+            Self::Unknown => "Unknown",
+        }
+    }
+
+    pub fn from_str_lossy(raw: &str) -> Self {
+        let lower = raw.trim().to_ascii_lowercase();
+        if lower.is_empty() || lower == "unknown" || lower.contains("未知") {
+            return Self::Unknown;
+        }
+        if lower.contains("rejected")
+            || lower.contains("withdrawn")
+            || lower.contains("驳回")
+            || lower.contains("撤回")
+            || lower.contains("视撤")
+            || lower.contains("无效")
+            || lower.contains("revoked")
+            || lower.contains("invalid")
+        {
+            return Self::Rejected;
+        }
+        if lower.contains("expired")
+            || lower.contains("lapsed")
+            || lower.contains("cease")
+            || lower.contains("失效")
+            || lower.contains("终止")
+            || lower.contains("期满")
+            || lower.contains("过期")
+        {
+            return Self::Expired;
+        }
+        if lower.contains("active")
+            || lower.contains("granted")
+            || lower.contains("valid")
+            || lower.contains("有效")
+            || lower.contains("授权")
+        {
+            return Self::Active;
+        }
+        if lower.contains("pending")
+            || lower.contains("exam")
+            || lower.contains("审")
+            || lower.contains("公开")
+        {
+            return Self::Pending;
+        }
+        Self::Unknown
+    }
+
+    pub fn badge_color(&self) -> &'static str {
+        match self {
+            Self::Active => "red",
+            Self::Expired | Self::Rejected => "green",
+            Self::Pending => "amber",
+            Self::Unknown => "gray",
+        }
+    }
+}
+
+/// EPO OPS 法律状态与同族引文解析结果。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PatentLegalAndCitations {
+    pub patent_number: String,
+    pub legal_status: LegalStatus,
+    pub legal_status_text: String,
+    pub family_id: Option<String>,
+    pub cited_patents: Vec<String>,
+    pub citing_patents: Vec<String>,
+    pub source: String,
+}
+
+fn extract_epo_doc_number(doc_id: &Value) -> Option<String> {
+    let country = doc_id
+        .get("country")
+        .and_then(|v| v.get("$"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+    let num = doc_id
+        .get("doc-number")
+        .and_then(|v| v.get("$"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+    if num.is_empty() {
+        return None;
+    }
+    let kind = doc_id
+        .get("kind")
+        .and_then(|v| v.get("$"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+    Some(format!("{country}{num}{kind}"))
+}
+
+fn push_unique_citation(out: &mut Vec<String>, candidate: String) {
+    let trimmed = candidate.trim().to_string();
+    if !trimmed.is_empty() && !out.iter().any(|x| x.eq_ignore_ascii_case(&trimmed)) {
+        out.push(trimmed);
+    }
+}
+
+fn collect_citations_from_node(node: &Value, out: &mut Vec<String>) {
+    match node {
+        Value::Array(items) => {
+            for item in items {
+                collect_citations_from_node(item, out);
+            }
+        }
+        Value::Object(map) => {
+            if let Some(patcit) = map.get("patcit") {
+                collect_citations_from_node(patcit, out);
+            }
+            if let Some(doc_id) = map.get("document-id") {
+                for item in as_array(doc_id) {
+                    if let Some(pn) = extract_epo_doc_number(item) {
+                        push_unique_citation(out, pn);
+                    }
+                }
+            }
+            if let Some(pn_str) = map.get("patent_number").and_then(|v| v.as_str()) {
+                push_unique_citation(out, pn_str.to_string());
+            }
+            if let Some(pn_str) = map.get("$").and_then(|v| v.as_str()) {
+                push_unique_citation(out, pn_str.to_string());
+            }
+        }
+        Value::String(s) => push_unique_citation(out, s.clone()),
+        _ => {}
+    }
+}
+
+fn classify_epo_legal_code(code: &str, desc: &str) -> LegalStatus {
+    let combined = format!("{code} {desc}").to_ascii_uppercase();
+    if combined.contains("LAPSE")
+        || combined.contains("EXPIRED")
+        || combined.contains("EXPIR")
+        || combined.contains("CEASE")
+        || combined.contains("TERM")
+    {
+        return LegalStatus::Expired;
+    }
+    if combined.contains("REVOK")
+        || combined.contains("WITHD")
+        || combined.contains("REFUS")
+        || combined.contains("REJECT")
+        || combined.contains("INVALID")
+    {
+        return LegalStatus::Rejected;
+    }
+    if combined.contains("GRANT")
+        || combined.contains("PGFP")
+        || combined.contains("ACTIVE")
+        || code.trim().eq_ignore_ascii_case("L")
+        || code.trim().eq_ignore_ascii_case("R")
+    {
+        return LegalStatus::Active;
+    }
+    if combined.contains("EXAM") || combined.contains("REQ") || combined.contains("PUB") {
+        return LegalStatus::Pending;
+    }
+    LegalStatus::from_str_lossy(&format!("{code} {desc}"))
+}
+
+/// 从 EPO OPS biblio/legal JSON 提取标准化法律状态、同族 ID 与前后向引文。
+pub fn parse_epo_ops_legal_and_citations(
+    patent_number: &str,
+    json: &Value,
+) -> PatentLegalAndCitations {
+    let mut out = PatentLegalAndCitations {
+        patent_number: patent_number.trim().to_string(),
+        source: "epo_ops".to_string(),
+        ..Default::default()
+    };
+
+    let world = json.get("ops:world-patent-data").unwrap_or(json);
+
+    // 1) 提取 family-id 与引文（references-cited / cited-by）
+    if let Some(docs) = world
+        .get("exchange-documents")
+        .and_then(|v| v.get("exchange-document"))
+    {
+        for doc in as_array(docs) {
+            if out.family_id.is_none() {
+                out.family_id = doc
+                    .get("@family-id")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty());
+            }
+            if let Some(bib) = doc.get("bibliographic-data") {
+                if let Some(refs) = bib.get("references-cited").and_then(|v| v.get("citation")) {
+                    collect_citations_from_node(refs, &mut out.cited_patents);
+                }
+                if let Some(cited_by) = bib.get("cited-by").or_else(|| bib.get("citing-patents")) {
+                    collect_citations_from_node(cited_by, &mut out.citing_patents);
+                }
+            }
+        }
+    }
+
+    // 2) 提取 ops:legal 法律状态事件（取最后一条有效事件）
+    if let Some(legal_arr) = world
+        .get("ops:patent-family")
+        .and_then(|v| v.get("ops:family-member"))
+        .or_else(|| world.get("ops:legal"))
+    {
+        for member in as_array(legal_arr) {
+            let events = member.get("ops:legal").unwrap_or(member);
+            for ev in as_array(events) {
+                let code = ev
+                    .get("@code")
+                    .and_then(|v| v.as_str())
+                    .or_else(|| ev.get("code").and_then(|v| v.as_str()))
+                    .unwrap_or("");
+                let desc = ev
+                    .get("ops:L500EP")
+                    .and_then(|v| v.get("$"))
+                    .and_then(|v| v.as_str())
+                    .or_else(|| ev.get("desc").and_then(|v| v.as_str()))
+                    .unwrap_or("");
+                let parsed = classify_epo_legal_code(code, desc);
+                if parsed != LegalStatus::Unknown {
+                    out.legal_status = parsed;
+                    out.legal_status_text = if desc.is_empty() {
+                        parsed.as_str().to_string()
+                    } else {
+                        desc.trim().to_string()
+                    };
+                }
+            }
+        }
+    }
+
+    if out.legal_status_text.is_empty() {
+        out.legal_status_text = out.legal_status.as_str().to_string();
+    }
+    out
+}
+
+/// 在线拉取 EPO OPS 法律状态与同族引文；无 EPO 凭据或网络失败时平稳回退为 `Unknown`。
+pub async fn fetch_epo_legal_and_citations(
+    patent_number: &str,
+    consumer_key: &str,
+    consumer_secret: &str,
+) -> PatentLegalAndCitations {
+    if consumer_key.trim().is_empty() || consumer_secret.trim().is_empty() {
+        return PatentLegalAndCitations {
+            patent_number: patent_number.trim().to_string(),
+            legal_status: LegalStatus::Unknown,
+            legal_status_text: "Unknown".to_string(),
+            source: "none (missing_epo_credentials)".to_string(),
+            ..Default::default()
+        };
+    }
+
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(12))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => {
+            return PatentLegalAndCitations {
+                patent_number: patent_number.trim().to_string(),
+                legal_status: LegalStatus::Unknown,
+                legal_status_text: "Unknown".to_string(),
+                source: "epo_ops_error".to_string(),
+                ..Default::default()
+            };
+        }
+    };
+
+    use base64::Engine;
+    let basic = base64::engine::general_purpose::STANDARD.encode(format!(
+        "{}:{}",
+        consumer_key.trim(),
+        consumer_secret.trim()
+    ));
+    let token_resp = client
+        .post("https://ops.epo.org/3.2/auth/accesstoken")
+        .header("Authorization", format!("Basic {basic}"))
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .body("grant_type=client_credentials")
+        .send()
+        .await;
+
+    let access_token = match token_resp {
+        Ok(r) if r.status().is_success() => r.json::<Value>().await.ok().and_then(|v| {
+            v.get("access_token")
+                .and_then(|t| t.as_str())
+                .map(|s| s.to_string())
+        }),
+        _ => None,
+    };
+
+    let Some(token) = access_token else {
+        return PatentLegalAndCitations {
+            patent_number: patent_number.trim().to_string(),
+            legal_status: LegalStatus::Unknown,
+            legal_status_text: "Unknown".to_string(),
+            source: "epo_ops_auth_failed".to_string(),
+            ..Default::default()
+        };
+    };
+
+    let pn_clean: String = patent_number
+        .trim()
+        .to_uppercase()
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect();
+    let biblio_url = format!(
+        "https://ops.epo.org/3.2/rest-services/published-data/publication/epodoc/{}/biblio",
+        urlencoding::encode(&pn_clean)
+    );
+    let mut merged = PatentLegalAndCitations {
+        patent_number: patent_number.trim().to_string(),
+        legal_status: LegalStatus::Unknown,
+        legal_status_text: "Unknown".to_string(),
+        source: "epo_ops".to_string(),
+        ..Default::default()
+    };
+
+    if let Ok(resp) = client
+        .get(&biblio_url)
+        .header("Authorization", format!("Bearer {token}"))
+        .header("Accept", "application/json")
+        .send()
+        .await
+    {
+        if resp.status().is_success() {
+            if let Ok(json) = resp.json::<Value>().await {
+                merged = parse_epo_ops_legal_and_citations(patent_number, &json);
+            }
+        }
+    }
+
+    let legal_url = format!(
+        "https://ops.epo.org/3.2/rest-services/legal/publication/epodoc/{}",
+        urlencoding::encode(&pn_clean)
+    );
+    if let Ok(resp) = client
+        .get(&legal_url)
+        .header("Authorization", format!("Bearer {token}"))
+        .header("Accept", "application/json")
+        .send()
+        .await
+    {
+        if resp.status().is_success() {
+            if let Ok(json) = resp.json::<Value>().await {
+                let legal_parsed = parse_epo_ops_legal_and_citations(patent_number, &json);
+                if legal_parsed.legal_status != LegalStatus::Unknown {
+                    merged.legal_status = legal_parsed.legal_status;
+                    merged.legal_status_text = legal_parsed.legal_status_text;
+                }
+            }
+        }
+    }
+
+    merged
+}
+
+#[cfg(test)]
+mod legal_citation_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn parses_epo_biblio_and_legal_status_correctly() {
+        let mock = json!({
+            "ops:world-patent-data": {
+                "exchange-documents": {
+                    "exchange-document": {
+                        "@family-id": "44556677",
+                        "bibliographic-data": {
+                            "references-cited": {
+                                "citation": [
+                                    { "patcit": { "document-id": { "country": {"$":"US"}, "doc-number": {"$":"9000001"}, "kind": {"$":"B2"} } } },
+                                    { "patcit": { "document-id": { "country": {"$":"EP"}, "doc-number": {"$":"1234567"}, "kind": {"$":"A1"} } } }
+                                ]
+                            },
+                            "cited-by": ["CN110000001A"]
+                        }
+                    }
+                },
+                "ops:legal": [
+                    { "@code": "PGFP", "ops:L500EP": { "$": "FEE PAYMENT YEAR 05" } },
+                    { "@code": "LAPSE", "ops:L500EP": { "$": "LAPSE FOR NON-PAYMENT" } }
+                ]
+            }
+        });
+        let res = parse_epo_ops_legal_and_citations("EP3445287A1", &mock);
+        assert_eq!(res.family_id.as_deref(), Some("44556677"));
+        assert_eq!(res.legal_status, LegalStatus::Expired);
+        assert_eq!(res.legal_status.badge_color(), "green");
+        assert_eq!(res.cited_patents, vec!["US9000001B2", "EP1234567A1"]);
+        assert_eq!(res.citing_patents, vec!["CN110000001A"]);
+    }
+
+    #[tokio::test]
+    async fn fetch_epo_legal_gracefully_falls_back_without_credentials() {
+        let res = fetch_epo_legal_and_citations("CN111111111A", "", "").await;
+        assert_eq!(res.legal_status, LegalStatus::Unknown);
+        assert_eq!(res.legal_status.as_str(), "Unknown");
+        assert!(res.source.contains("missing_epo_credentials"));
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 测试（全部离线：假传输 + 假时钟，零网络。`pub(crate)` 是为了让 `chain.rs` 的
 // 降级链用例复用同一套假件 —— 与 `providers/google_patents_xhr.rs::tests` 同构。）
