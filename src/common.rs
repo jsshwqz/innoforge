@@ -701,6 +701,7 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
             "/api/ideas/:id/control-prototype",
             post(routes::api_idea_control_prototype),
         )
+        .route("/api/ideas/:id/fto-scan", post(routes::api_idea_fto_scan))
         .route(
             "/api/feature-cards/diff",
             get(routes::api_feature_card_diff),

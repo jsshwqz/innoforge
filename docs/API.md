@@ -652,6 +652,12 @@ Response:
 
 生成 IEC 61131-3 结构化文本（ST）功能块、多段标定映射表与闭环阶跃响应时序数据（`time_ms`、`setpoint`、`actual_value`、`metrics`）。
 
+### 7) 批量 FTO 侵权风险扫描 / Batch FTO Scan
+
+**POST** `/api/ideas/:id/fto-scan`
+
+对项目与同领域专利库执行全面覆盖/等同原则批量 FTO 扫描，区分有效授权/已失效状态并返回红/黄/绿碰撞清单与 3 套规避设计方案。
+
 Response:
 
 ```json

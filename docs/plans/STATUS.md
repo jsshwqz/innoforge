@@ -14,6 +14,12 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-11-18 — **Batch 9：批量 FTO 侵权风险主动扫描 + 规避设计工作台（v0.9.52）**
+
+- **状态 / Status**: ✅ 本地全量验证通过（`cargo fmt` / `clippy --all-targets -D warnings` 零告警，`cargo test --no-fail-fast` 73 个测试二进制全过，含 lib 1003 passed），已提 PR 等 CI 合并进 `main` 并打 `v0.9.52` Tag
+- **① 批量 FTO 扫描引擎**（`src/ai/fto_scanner.rs`、`src/ai/mod.rs`）：区分有效授权/实审中与已失效专利（失效自动标绿），按全面覆盖与等同原则判定红/黄/绿风险，碰撞专利自动生成 3 套规避替代方案（含 BOM 成本与性能影响）。
+- **② API 与红绿灯碰撞看板**（`src/routes/idea_reports.rs`、`src/common.rs`、`templates/idea.html`、`static/i18n.js`、`docs/API.md`）：新增 `POST /api/ideas/:id/fto-scan` 并将报告落库 `idea_memory`；前端提供碰撞清单展示与一键采纳规避方案按钮。
+
 ### 2026-11-18 — **Batch 8：多对比文件三维特征矩阵 + OA 修改对照页 Word `.docx` 导出（v0.9.51）**
 
 - **状态 / Status**: ✅ 本地全量验证通过（`cargo fmt` / `clippy --all-targets -D warnings` 零告警，`cargo test --no-fail-fast` 73 个测试二进制全过，含 lib 1002 passed），已提 PR 等 CI 合并进 `main` 并打 `v0.9.51` Tag
