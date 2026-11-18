@@ -271,6 +271,36 @@ pub async fn api_oa_timeline(
     }))
 }
 
+/// GET /api/oa/:case_id/rounds/diff
+///
+/// 跨轮次 OA 视图漂移与禁止反言一致性比对：
+/// 读取同一案件的所有 `oa_rounds`，对比前后轮次的对比文件（如新增 D3/D4）、
+/// 驳回理由演化、审查员已认可特征，以及不可推翻的禁止反言红线。
+pub async fn api_oa_rounds_diff(
+    Path(case_id): Path<String>,
+    State(s): State<AppState>,
+) -> Json<Value> {
+    match crate::ai::oa_drift::analyze_case_drift(&s.db, &case_id) {
+        Ok(report) => Json(json!({
+            "status": "ok",
+            "case_id": report.case_id,
+            "total_rounds": report.total_rounds,
+            "timeline": report.timeline,
+            "transitions": report.transitions,
+            "accepted_features": report.accepted_features,
+            "newly_introduced_prior_art": report.newly_introduced_prior_art,
+            "new_rejection_grounds": report.new_rejection_grounds,
+            "consistency_redlines": report.consistency_redlines,
+            "prompt_constraints_block": report.prompt_constraints_block,
+            "summary": report.summary,
+        })),
+        Err(e) => Json(json!({
+            "status": "error",
+            "message": format!("Failed to compute OA rounds diff: {e}")
+        })),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -323,5 +353,99 @@ mod tests {
                 msg
             );
         }
+    }
+
+    #[tokio::test]
+    async fn rounds_diff_detects_new_prior_art_and_consistency_redlines() {
+        let state = init_app_state(":memory:").unwrap();
+        let case_id = "MOCK-CASE-DRIFT-001";
+
+        let r1 = json!({
+            "patent_id": case_id,
+            "round_type": "first_rejection",
+            "oa_date": "2026-01-10",
+            "oa_text": "一通：权利要求1和权利要求2相对于对比文件1（CN101010101A）和D2（CN102020202A）不具备创造性，且权利要求1不具备新颖性。",
+            "response_text": "第1轮答复：承认D1公开了主轴外壳。我们将权利要求1修改为增加双级磁流体密封环限定。技术效果在于消除高速泄漏。"
+        });
+        let resp1 = api_oa_rounds_create(State(state.clone()), Json(r1)).await;
+        assert_eq!(resp1.0["status"], "ok");
+
+        let r2 = json!({
+            "patent_id": case_id,
+            "round_type": "second_rejection",
+            "oa_date": "2026-04-20",
+            "oa_text": "二通：权利要求2具备新颖性。补充对比文件3（CN103030303A）和D4（US8877665B2），认为权利要求1相对于D1、D3和D4不具备创造性，并指出修改超范围（专利法第33条）。",
+            "response_text": "第2轮答复：核心区别特征在于双级磁流体密封环与螺旋导流槽的协同效应。"
+        });
+        let resp2 = api_oa_rounds_create(State(state.clone()), Json(r2)).await;
+        assert_eq!(resp2.0["status"], "ok");
+
+        let r3 = json!({
+            "patent_id": case_id,
+            "round_type": "reexamination",
+            "oa_date": "2026-08-12",
+            "oa_text": "驳回决定：维持驳回权利要求1相对于D1+D3+D4不具备创造性。"
+        });
+        let resp3 = api_oa_rounds_create(State(state.clone()), Json(r3)).await;
+        assert_eq!(resp3.0["status"], "ok");
+
+        let diff_resp = api_oa_rounds_diff(Path(case_id.to_string()), State(state)).await;
+        let obj = diff_resp.0.as_object().unwrap();
+        assert_eq!(obj["status"], "ok");
+        assert_eq!(obj["total_rounds"], 3);
+
+        let timeline = obj["timeline"].as_array().unwrap();
+        assert_eq!(timeline.len(), 3);
+        assert!(timeline[0]["stage_label"]
+            .as_str()
+            .unwrap()
+            .contains("第1轮"));
+        assert!(timeline[2]["stage_label"]
+            .as_str()
+            .unwrap()
+            .contains("驳回/复审"));
+
+        let new_pa = obj["newly_introduced_prior_art"].as_array().unwrap();
+        assert!(
+            new_pa.iter().any(|p| p["label"] == "D3"),
+            "should detect newly introduced D3: {new_pa:?}"
+        );
+        assert!(
+            new_pa.iter().any(|p| p["label"] == "D4"),
+            "should detect newly introduced D4: {new_pa:?}"
+        );
+
+        let accepted = obj["accepted_features"].as_array().unwrap();
+        assert!(
+            !accepted.is_empty(),
+            "should detect explicit or implicit accepted features"
+        );
+
+        let redlines = obj["consistency_redlines"].as_array().unwrap();
+        assert!(
+            redlines
+                .iter()
+                .any(|r| r["category"] == "estoppel_amendment"),
+            "should capture prior round amendment estoppel redline: {redlines:?}"
+        );
+        assert!(
+            redlines
+                .iter()
+                .any(|r| r["category"] == "estoppel_admission"),
+            "should capture prior round admission estoppel redline: {redlines:?}"
+        );
+
+        let block = obj["prompt_constraints_block"].as_str().unwrap();
+        assert!(block.contains("禁止反言"));
+        assert!(block.contains("D3"));
+    }
+
+    #[tokio::test]
+    async fn rounds_diff_empty_case_returns_zero_rounds() {
+        let state = init_app_state(":memory:").unwrap();
+        let diff_resp = api_oa_rounds_diff(Path("MOCK-EMPTY-CASE".to_string()), State(state)).await;
+        assert_eq!(diff_resp.0["status"], "ok");
+        assert_eq!(diff_resp.0["total_rounds"], 0);
+        assert_eq!(diff_resp.0["transitions"].as_array().unwrap().len(), 0);
     }
 }

@@ -14,6 +14,12 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-11-18 — **Batch 15：多轮 OA 审查观点漂移追踪与递进答辩引擎（v0.9.58）**
+
+- **状态 / Status**: ✅ 本地全量验证通过，已提 PR 等 CI 合并进 `main` 并打 `v0.9.58` Tag
+- **① 跨轮次 OA 观点 Diff 与一致性守护**（`src/ai/oa_drift.rs`、`src/ai/mod.rs`、`src/ai/patent.rs`）：读取 `oa_rounds` 历史记录，自动标出审查员已认可特征、本轮新增对比文件（D3/D4）/新驳回理由及禁止反言红线，并在新一轮答复生成时自动注入历史一致约束。
+- **② 多轮时间轴看板与接口**（`src/routes/oa_rounds.rs`、`src/routes/oa_core.rs`、`src/common.rs`、`templates/office_action_response.html`、`static/i18n.js`、`docs/API.md`）：新增 `GET /api/oa/:case_id/rounds/diff`，并在 OA 界面展示「第1轮 → 第2轮 → 驳回/复审」演化时间轴与漂移面板。
+
 ### 2026-11-18 — **Batch 12：权利要求树可视化编辑器 + 专利法第26条第4款自检（v0.9.55）**
 
 - **状态 / Status**: ✅ 本地全量验证通过，已提 PR 等 CI 合并进 `main` 并打 `v0.9.55` Tag

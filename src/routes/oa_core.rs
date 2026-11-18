@@ -1,5 +1,58 @@
 use super::*;
 
+/// 从请求体或备选案号中解析 `case_id` 并提取多轮 OA 视图漂移与禁止反言约束。
+fn resolve_oa_drift_report(
+    db: &crate::db::Database,
+    req: &serde_json::Value,
+    fallback_case_id: Option<&str>,
+) -> Option<crate::ai::oa_drift::OaDriftReport> {
+    let candidates = [
+        req.get("case_id").and_then(|v| v.as_str()),
+        req.get("patent_id").and_then(|v| v.as_str()),
+        req.get("my_patent_id").and_then(|v| v.as_str()),
+        fallback_case_id,
+    ];
+    for cid in candidates.into_iter().flatten() {
+        let trimmed = cid.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Ok(report) = crate::ai::oa_drift::analyze_case_drift(db, trimmed) {
+            if !report.prompt_constraints_block.is_empty() {
+                return Some(report);
+            }
+        }
+    }
+    None
+}
+
+/// 将策略提示与多轮 OA 一致性红线注入专利背景上下文，供各类型 OA 分析复用。
+fn prepend_strategy_and_drift_constraints(
+    my_info: &str,
+    strategy_hint: Option<&str>,
+    drift_report: Option<&crate::ai::oa_drift::OaDriftReport>,
+    client_constraints: Option<&str>,
+) -> String {
+    let mut prefix = String::new();
+    if let Some(hint) = strategy_hint.map(str::trim).filter(|s| !s.is_empty()) {
+        prefix.push_str(&format!("【用户选择的答复策略：{hint}】\n\n"));
+    }
+    if let Some(report) = drift_report {
+        if !report.prompt_constraints_block.is_empty() {
+            prefix.push_str(&report.prompt_constraints_block);
+            prefix.push_str("\n\n");
+        }
+    } else if let Some(hc) = client_constraints.map(str::trim).filter(|s| !s.is_empty()) {
+        prefix.push_str(hc);
+        prefix.push_str("\n\n");
+    }
+    if prefix.is_empty() {
+        my_info.to_string()
+    } else {
+        format!("{prefix}{my_info}")
+    }
+}
+
 /// Office action response analysis: deep analysis for responding to examination opinions
 pub async fn api_ai_office_action_response(
     State(s): State<AppState>,
@@ -208,15 +261,22 @@ pub async fn api_ai_office_action_response(
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string());
-    let my_info_with_strategy = if let Some(ref hint) = strategy_hint {
-        format!(
-            "【用户选择的答复策略：{hint}】
-
-{my_info}"
-        )
-    } else {
-        my_info.clone()
-    };
+    let drift_report = resolve_oa_drift_report(
+        &s.db,
+        &req,
+        if patent_number.is_empty() {
+            None
+        } else {
+            Some(patent_number)
+        },
+    );
+    let client_constraints = req.get("historical_constraints").and_then(|v| v.as_str());
+    let my_info_with_strategy = prepend_strategy_and_drift_constraints(
+        &my_info,
+        strategy_hint.as_deref(),
+        drift_report.as_ref(),
+        client_constraints,
+    );
     tracing::info!(
         "[OA-ANALYZE] 开始调用AI, my_info_len={}, oa_text_len={}, refs_len={}, oa_type={}",
         my_info_with_strategy.len(),
@@ -497,15 +557,14 @@ pub async fn api_ai_office_action_response_stream(
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string());
-    let my_info_with_strategy = if let Some(ref hint) = strategy_hint {
-        format!(
-            "【用户选择的答复策略：{hint}】
-
-{my_info}"
-        )
-    } else {
-        my_info.clone()
-    };
+    let drift_report = resolve_oa_drift_report(&s.db, &req, None);
+    let client_constraints = req.get("historical_constraints").and_then(|v| v.as_str());
+    let my_info_with_strategy = prepend_strategy_and_drift_constraints(
+        &my_info,
+        strategy_hint.as_deref(),
+        drift_report.as_ref(),
+        client_constraints,
+    );
 
     let mut rx = ai.office_action_response_stream(
         &my_info_with_strategy,
@@ -810,13 +869,39 @@ pub async fn api_ai_oa_generate_response_letter(
         .unwrap_or("")
         .to_string();
 
+    // 注入多轮 OA 视图漂移与禁止反言历史约束（如 DB 中存在 oa_rounds 记录或前端透传）
+    let drift_report =
+        resolve_oa_drift_report(&s.db, &req, oa_header.application_number.as_deref());
+    let drift_redlines_count = drift_report
+        .as_ref()
+        .map(|r| r.consistency_redlines.len())
+        .unwrap_or(0);
+    let mut enriched_req = req.clone();
+    let merged_constraints = drift_report
+        .as_ref()
+        .map(|r| r.prompt_constraints_block.clone())
+        .or_else(|| {
+            req.get("historical_constraints")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+        });
+    let drift_constraints_applied = merged_constraints.is_some();
+    if let (Some(constraints), Some(obj)) = (merged_constraints, enriched_req.as_object_mut()) {
+        obj.insert(
+            "historical_constraints".to_string(),
+            serde_json::Value::String(constraints),
+        );
+    }
+
     let mut rx = ai.generate_response_letter_stream(
         &final_analysis,
         &discussion,
         &office_action,
         &oa_type,
         is_import_flow,
-        Some(&req),
+        Some(&enriched_req),
         &my_patent_text,
         Some(&ai_fast),
     );
@@ -886,7 +971,7 @@ pub async fn api_ai_oa_generate_response_letter(
         }
         // 结构化维度：amendment_unsupported=N 与提交度维度（N>0 即 False）
         yield Ok(Event::default().event("meta").data(format!(
-            "{{\"source\":\"{analysis_source}\",\"amendment_unsupported\":{},\"amendment_marked\":{},\"amendment_merged\":{},\"amendment_unlocated\":{},\"broadening_count\":{},\"broadening_checked\":{},\"amendment_assertions_downgraded\":{},\"amendment_claims\":{},\"amendment_features\":{},\"corpus_claims\":{},\"amendment_gate\":\"{}\",\"anchor_verified\":{},\"anchor_unverified\":{},\"anchor_unparsed\":{},\"anchor_hallucination_rate\":{:.3},\"submission_ready\":{},\"header_known\":{},\"header_filled\":{},\"header_unresolved_count\":{},\"header_unresolved\":\"{}\",\"header_unresolved_marks\":{}}}",
+            "{{\"source\":\"{analysis_source}\",\"amendment_unsupported\":{},\"amendment_marked\":{},\"amendment_merged\":{},\"amendment_unlocated\":{},\"broadening_count\":{},\"broadening_checked\":{},\"amendment_assertions_downgraded\":{},\"amendment_claims\":{},\"amendment_features\":{},\"corpus_claims\":{},\"amendment_gate\":\"{}\",\"anchor_verified\":{},\"anchor_unverified\":{},\"anchor_unparsed\":{},\"anchor_hallucination_rate\":{:.3},\"submission_ready\":{},\"header_known\":{},\"header_filled\":{},\"header_unresolved_count\":{},\"header_unresolved\":\"{}\",\"header_unresolved_marks\":{},\"drift_constraints_applied\":{},\"drift_redlines_count\":{}}}",
             gate.unsupported_count,
             gate.marked_count,
             gate.merged_count,
@@ -907,7 +992,9 @@ pub async fn api_ai_oa_generate_response_letter(
             header_fill.filled,
             header_fill.unresolved_fields.len(),
             header_fill.unresolved_fields.join("|"),
-            header_fill.unresolved_marks
+            header_fill.unresolved_marks,
+            drift_constraints_applied,
+            drift_redlines_count
         )));
         // R6c: 事实核查已由 pipeline 内嵌，SSE 层不再重复追加
         yield Ok(Event::default().event("done").data("[DONE]"));

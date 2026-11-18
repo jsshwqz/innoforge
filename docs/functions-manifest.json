@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-18T15:35:56.298Z",
+  "generatedAt": "2026-11-18T16:58:25.103Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -294,6 +294,7 @@
         "generateResponseLetter",
         "handleVisionFigureFiles",
         "loadOaAnalysis",
+        "loadOaRoundDrift",
         "loadSelectedRound",
         "lookupMyPatent",
         "lookupRef",
@@ -343,6 +344,7 @@
         "autoFetchRefs",
         "buildArgLibrary",
         "buildDiscussionTranscript",
+        "buildDriftSection",
         "buildExportDocument",
         "buildOaFeatureMatrix",
         "buildToolbar",
@@ -414,6 +416,7 @@
         "loadOADiscussionHistory",
         "loadOaAnalysis",
         "loadOaHistory",
+        "loadOaRoundDrift",
         "loadOaRoundSelector",
         "loadOaState",
         "loadSelectedRound",
@@ -449,6 +452,7 @@
         "renderOaDiff",
         "renderOaFeatureMatrix",
         "renderOaHistory",
+        "renderOaRoundDrift",
         "renderRadarChart",
         "renderStrategyCards",
         "renderVisionFigurePanel",
