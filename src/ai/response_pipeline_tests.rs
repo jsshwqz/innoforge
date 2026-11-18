@@ -53,7 +53,6 @@ use super::super::case_input::{
     CaseMeta, DistinguishingFeature, FeatureRebuttal, OaTag, ReferenceDocument,
 };
 use super::super::fact_check::FactWarning;
-use super::*;
 
 #[test]
 fn fact_check_banner_marks_zero_evidence_as_blocking() {
