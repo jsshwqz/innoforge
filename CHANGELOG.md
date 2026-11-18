@@ -12,6 +12,19 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 - **期刊论文 LaTeX/Word 双模投稿导出与仿真曲线/BibTeX 自动嵌入（Batch 16）**：新增真实 DOI 学术参考文献 `.bib` 生成器（仅绑定 OpenAlex/CrossRef 已核验 DOI 记录，零编造引用）与基于第 13 步数值仿真序列的纯本地 SVG 曲线渲染器（含坐标轴标注与图例）；新增 `GET /api/ideas/:id/paper/latex-bundle`（打包 `main.tex`、`references.bib` 与 `figures/simulation_curve.svg`）及 `GET /api/ideas/:id/paper/docx`（学术排版 Word `.docx`，置顶防破新颖性安全锁），并在 `idea.html` 补齐双模导出按钮与中英双语词条。 / Added real-DOI `.bib` reference generator, local SVG simulation curve renderer (with axes & legend), `GET /api/ideas/:id/paper/latex-bundle` (`.zip` with `main.tex`, `references.bib`, and SVG figure), `GET /api/ideas/:id/paper/docx` (academic Word `.docx` with novelty lock warning), and export buttons in `idea.html`.
 
+## [v0.9.55] - 2026-11-18
+
+### 新增 / Added
+
+- **权利要求树可视化编辑器与专利法第26条第4款自检工作台（Batch 12）**：新增 `claim_validator` 引擎，实现多项从属引用多项从属、前序/正文“所述XX”缺少引用基础、自引用/向后引用等确定性语法校验，并结合 `v25` `chunks_fts` 说明书实施例分块与可选 `ai_client_expert` 核对数值范围与功能限定支撑（第26条第4款）；新增 `POST /api/ideas/:id/claims/validate`、`POST /api/idea/:id/claim-tree` 与 `DELETE /api/idea/:id/claim-tree/:claim_id`，并在 `idea.html` 升级权利要求树为可增删改与一键体检的可视化工作台。 / Added `claim_validator` engine (syntax & antecedent basis checks + `chunks_fts` / optional `ai_client_expert` Art. 26.4 embodiment support validation), `POST /api/ideas/:id/claims/validate`, claim node add/edit/delete routes, and interactive claim tree editor UI in `idea.html`.
+
+## [v0.9.54] - 2026-11-18
+
+### 新增 / Added
+- **Batch 11 专利法律状态核验与同族引文图谱联动**：
+  - 扩展 `src/search/providers/epo_ops.rs` 解析 `LegalStatus`（`Active`/`Pending`/`Expired`/`Rejected`/`Unknown`）、`family_id` 与前后向引文，支持无 EPO 凭据平稳降级为 `Unknown` 与手动标注；
+  - 新增 `GET /api/patent/:id/citation-graph` 与 `POST /api/patent/:id/legal-status`，在专利详情页展示引文与同族列表并在 FTO 看板展示有效/失效徽章。
+
 ## [v0.9.53] - 2026-11-18
 
 ### 新增 / Added
@@ -459,6 +472,19 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 ### 新增 / Added
 
 - **期刊论文 LaTeX/Word 双模投稿导出与仿真曲线/BibTeX 自动嵌入（Batch 16）**：新增真实 DOI 学术参考文献 `.bib` 生成器（仅绑定 OpenAlex/CrossRef 已核验 DOI 记录，零编造引用）与基于第 13 步数值仿真序列的纯本地 SVG 曲线渲染器（含坐标轴标注与图例）；新增 `GET /api/ideas/:id/paper/latex-bundle`（打包 `main.tex`、`references.bib` 与 `figures/simulation_curve.svg`）及 `GET /api/ideas/:id/paper/docx`（学术排版 Word `.docx`，置顶防破新颖性安全锁），并在 `idea.html` 补齐双模导出按钮与中英双语词条。 / Added real-DOI `.bib` reference generator, local SVG simulation curve renderer (with axes & legend), `GET /api/ideas/:id/paper/latex-bundle` (`.zip` with `main.tex`, `references.bib`, and SVG figure), `GET /api/ideas/:id/paper/docx` (academic Word `.docx` with novelty lock warning), and export buttons in `idea.html`.
+
+## [v0.9.55] - 2026-11-18
+
+### 新增 / Added
+
+- **权利要求树可视化编辑器与专利法第26条第4款自检工作台（Batch 12）**：新增 `claim_validator` 引擎，实现多项从属引用多项从属、前序/正文“所述XX”缺少引用基础、自引用/向后引用等确定性语法校验，并结合 `v25` `chunks_fts` 说明书实施例分块与可选 `ai_client_expert` 核对数值范围与功能限定支撑（第26条第4款）；新增 `POST /api/ideas/:id/claims/validate`、`POST /api/idea/:id/claim-tree` 与 `DELETE /api/idea/:id/claim-tree/:claim_id`，并在 `idea.html` 升级权利要求树为可增删改与一键体检的可视化工作台。 / Added `claim_validator` engine (syntax & antecedent basis checks + `chunks_fts` / optional `ai_client_expert` Art. 26.4 embodiment support validation), `POST /api/ideas/:id/claims/validate`, claim node add/edit/delete routes, and interactive claim tree editor UI in `idea.html`.
+
+## [v0.9.54] - 2026-11-18
+
+### 新增 / Added
+- **Batch 11 专利法律状态核验与同族引文图谱联动**：
+  - 扩展 `src/search/providers/epo_ops.rs` 解析 `LegalStatus`（`Active`/`Pending`/`Expired`/`Rejected`/`Unknown`）、`family_id` 与前后向引文，支持无 EPO 凭据平稳降级为 `Unknown` 与手动标注；
+  - 新增 `GET /api/patent/:id/citation-graph` 与 `POST /api/patent/:id/legal-status`，在专利详情页展示引文与同族列表并在 FTO 看板展示有效/失效徽章。
 
 ## [v0.9.53] - 2026-11-18
 
