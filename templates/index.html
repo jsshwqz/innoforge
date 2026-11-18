@@ -16,10 +16,62 @@
     <div class="page-with-sidebar">
     <aside id="page-sidebar" class="page-sidebar"></aside>
     <main class="page-main">
-        <div class="hero">
-            <h1>创研台</h1>
-            <p class="subtitle">从想法到落地 · 决策依据 · 执行方案 · 知识产权保护</p>
+        <div class="hero" style="position:relative;">
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+                <div>
+                    <h1>创研台 InnoForge</h1>
+                    <p class="subtitle">全谱系创研工作台 · 7 张独立自治卡片 · 从想法共创、四维检索、三栖抗辩到一源四出</p>
+                </div>
+                <div style="position:relative;">
+                    <button type="button" id="health-capsule-btn" onclick="toggleHealthCapsule()"
+                        style="display:inline-flex;align-items:center;gap:8px;padding:6px 14px;border-radius:999px;border:1px solid var(--border);background:var(--bg-card);color:var(--text-primary);cursor:pointer;font-size:13px;">
+                        <span id="health-capsule-dot" style="width:9px;height:9px;border-radius:50%;background:#8b949e;display:inline-block;"></span>
+                        <span id="health-capsule-label">系统健康自检中…</span>
+                    </button>
+                    <div id="health-capsule-panel" style="display:none;position:absolute;right:0;top:42px;width:360px;max-width:90vw;z-index:50;background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:14px;box-shadow:0 8px 24px rgba(0,0,0,0.45);text-align:left;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                            <strong style="font-size:14px;">四维环境健康自检</strong>
+                            <a href="/settings" style="font-size:12px;color:var(--accent-hover);">前往配置 &rarr;</a>
+                        </div>
+                        <div id="health-capsule-details" style="font-size:12px;line-height:1.6;color:var(--text-secondary);"></div>
+                    </div>
+                </div>
+            </div>
         </div>
+
+        <!-- v1.0 七张独立自治功能卡片网格导航台 -->
+        <section aria-label="七大独立自治功能卡片" style="margin-bottom:24px;">
+            <div class="features" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;">
+                <a href="/search" class="feature-card" style="text-decoration:none;">
+                    <h3>① 全域情报检索卡</h3>
+                    <p>全球专利 + 四大免 Key 学术源 + 开源工程 + 行业标准四维检索，左搜右读同屏精读与一键打标入库。</p>
+                </a>
+                <a href="/studio" class="feature-card" style="text-decoration:none;">
+                    <h3>② 多模态想法共创与推演卡</h3>
+                    <p>图文附件多轮共创收敛基线卡，支持挂载自有前序成果、三档速选、路线分叉与实测数据回填。</p>
+                </a>
+                <a href="/dissect" class="feature-card" style="text-decoration:none;">
+                    <h3>③ 单篇文献扒皮与深析卡</h3>
+                    <p>专利附图部件词典与 FTO 逐权项排雷，学术论文机理公式拆解、复现超参数表与局限性挖掘。</p>
+                </a>
+                <a href="/matrix" class="feature-card" style="text-decoration:none;">
+                    <h3>④ 多方案对决与矩阵卡</h3>
+                    <p>2～6 方案三维视角对决（工程性能 / 学术 Baseline / Claim Chart），自动预警跨实施例强行拼凑。</p>
+                </a>
+                <a href="/rebuttal" class="feature-card" style="text-decoration:none;">
+                    <h3>⑤ 审查与审稿三栖抗辩卡</h3>
+                    <p>已有专利官方 OA/复审、新专利魔鬼预审、期刊论文 Rebuttal 三模式，五维硬门禁核验与留痕导出。</p>
+                </a>
+                <a href="/forge" class="feature-card" style="text-decoration:none;">
+                    <h3>⑥ 全谱系成果锻造工坊卡</h3>
+                    <p>一源四出（PRD/TRD、调研 FTO 报告、真实 BibTeX 论文、专利交底书），内置先专利后论文时序守卫。</p>
+                </a>
+                <a href="/settings" class="feature-card" style="text-decoration:none;">
+                    <h3>⑦ 系统配置与知识金库卡</h3>
+                    <p>四维健康自检、9 服务商容灾与看图路由、免 Python 原生数据包流式灌库与自有成果资产管理。</p>
+                </a>
+            </div>
+        </section>
 
         <!-- 研发流程指引 -->
         <div class="workflow-hint">
@@ -104,24 +156,11 @@
             </details>
         </div>
 
-        <!-- 功能入口 -->
-        <div class="features">
-            <a href="/idea" class="feature-card" style="text-decoration:none;">
-                <h3>🧠 AI 推演验证</h3>
-                <p>描述技术想法，AI 全链路分析：新颖性评分、证据链、特征卡片与可行性报告。</p>
-            </a>
-            <a href="/search" class="feature-card" style="text-decoration:none;">
-                <h3>🔍 专利检索调研</h3>
-                <p>在线搜索或本地库检索现有技术，按相关度排序，附统计分析与批量导出。</p>
-            </a>
-            <a href="/compare" class="feature-card" style="text-decoration:none;">
-                <h3>⚖️ 对比与侵权评估</h3>
-                <p>本申请与对比文件逐项比对，三步法创造性分析，一键生成一审答复。</p>
-            </a>
-            <a href="/oa-response" class="feature-card" style="text-decoration:none;">
-                <h3>📝 OA 答复与复审</h3>
-                <p>粘贴审查意见通知书，AI 全链路分析、多轮讨论推演，生成意见陈述书与证据表。</p>
-            </a>
+        <!-- 兼容快捷入口 -->
+        <div style="margin-top:12px;font-size:12px;color:var(--text-muted);display:flex;gap:14px;flex-wrap:wrap;justify-content:center;">
+            <a href="/idea" style="color:var(--text-secondary);">旧版推演工作区 (/idea)</a>
+            <a href="/compare" style="color:var(--text-secondary);">旧版对比 (/compare)</a>
+            <a href="/oa-response" style="color:var(--text-secondary);">旧版 OA 答复 (/oa-response)</a>
         </div>
 
         <footer class="page-footer">
@@ -631,6 +670,75 @@
 
     // 页面加载时渲染提醒
     renderOaDeadlineReminders();
+
+    // 顶栏系统健康状态胶囊灯
+    async function loadHealthCapsule() {
+        var dot = document.getElementById('health-capsule-dot');
+        var label = document.getElementById('health-capsule-label');
+        var details = document.getElementById('health-capsule-details');
+        if (!dot || !label || !details) return;
+        try {
+            var resp = await fetch('/api/settings/health');
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            var data = await resp.json();
+            var level = data.overall_level || 'yellow';
+            dot.style.background = level === 'green' ? '#3fb950' : level === 'red' ? '#f85149' : '#d29922';
+            label.textContent = level === 'green'
+                ? '四维健康正常 (' + (data.elapsed_ms || 0) + 'ms)'
+                : level === 'red' ? '环境存在异常' : '部分能力待配置';
+
+            while (details.firstChild) details.removeChild(details.firstChild);
+            var dims = data.dimensions || {};
+            var rows = [
+                {
+                    name: '① SQLite 存储',
+                    ok: !!(dims.sqlite && dims.sqlite.healthy),
+                    text: dims.sqlite ? ('WAL=' + dims.sqlite.journal_mode + ' · Schema v' + dims.sqlite.schema_version + ' · 文献 ' + dims.sqlite.knowledge_docs_count + ' 篇') : '未知'
+                },
+                {
+                    name: '② 网络安全监听',
+                    ok: !!(dims.network_security && dims.network_security.healthy),
+                    text: dims.network_security ? dims.network_security.label : '未知'
+                },
+                {
+                    name: '③ AI 容灾与看图',
+                    ok: !!(dims.ai_failover_vision && dims.ai_failover_vision.healthy),
+                    text: dims.ai_failover_vision ? ('可用服务商 ' + dims.ai_failover_vision.remote_usable_count + '/9 · 看图就绪 ' + dims.ai_failover_vision.vision_ready_count) : '未知'
+                },
+                {
+                    name: '④ 四维检索与 OCR',
+                    ok: !!(dims.omni_search_and_ocr && dims.omni_search_and_ocr.healthy),
+                    text: dims.omni_search_and_ocr ? ('免 Key 学术源 4 家就绪 · SerpAPI ' + dims.omni_search_and_ocr.serpapi_key_count + ' 个 · 三级 OCR 就绪') : '未知'
+                }
+            ];
+            rows.forEach(function(r) {
+                var rowEl = document.createElement('div');
+                rowEl.style.marginBottom = '6px';
+                var badge = document.createElement('span');
+                badge.style.color = r.ok ? '#3fb950' : '#d29922';
+                badge.style.fontWeight = '600';
+                badge.textContent = (r.ok ? '● ' : '▲ ') + r.name + '：';
+                var desc = document.createElement('span');
+                desc.textContent = r.text;
+                rowEl.appendChild(badge);
+                rowEl.appendChild(desc);
+                details.appendChild(rowEl);
+            });
+        } catch (err) {
+            dot.style.background = '#d29922';
+            label.textContent = '健康检查暂不可用';
+        }
+    }
+
+    function toggleHealthCapsule() {
+        var panel = document.getElementById('health-capsule-panel');
+        if (!panel) return;
+        var opening = panel.style.display === 'none' || panel.style.display === '';
+        panel.style.display = opening ? 'block' : 'none';
+        if (opening) loadHealthCapsule();
+    }
+
+    loadHealthCapsule();
     </script>
 </body>
 </html>

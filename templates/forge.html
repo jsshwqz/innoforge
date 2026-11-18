@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>全谱系成果锻造工坊 - 创研台 InnoForge</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#0d1117">
+    <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+    <script src="/static/purify.min.js"></script>
+    <style>
+        .forge-shell { display: flex; flex-direction: column; gap: 16px; }
+        .forge-header h1 { margin: 0 0 4px; font-size: 1.5rem; }
+        .forge-header p { margin: 0; color: var(--text-secondary, #8b949e); font-size: 0.92rem; }
+
+        /* 顶部醒目公开时序冲突守卫灯横幅 */
+        .priority-banner {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 14px;
+            padding: 12px 16px;
+            border-radius: 10px;
+            border: 1px solid var(--border-muted, #30363d);
+            background: var(--bg-elevated, #161b22);
+            transition: border-color 0.2s, background 0.2s;
+        }
+        .priority-banner--green { border-color: var(--green-border, #238636); background: rgba(35, 134, 54, 0.12); }
+        .priority-banner--yellow { border-color: var(--orange-border, #d29922); background: rgba(210, 153, 34, 0.12); }
+        .priority-banner--red { border-color: var(--red-border, #f85149); background: rgba(248, 81, 73, 0.14); }
+
+        .priority-lamp-wrap { display: flex; align-items: center; gap: 12px; }
+        .priority-lamp {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            flex-shrink: 0;
+            background: #8b949e;
+            box-shadow: 0 0 0 3px rgba(139, 148, 158, 0.2);
+        }
+        .priority-banner--green .priority-lamp { background: #3fb950; box-shadow: 0 0 10px rgba(63, 185, 80, 0.65); }
+        .priority-banner--yellow .priority-lamp { background: #d29922; box-shadow: 0 0 10px rgba(210, 153, 34, 0.65); }
+        .priority-banner--red .priority-lamp { background: #f85149; box-shadow: 0 0 12px rgba(248, 81, 73, 0.8); }
+
+        .priority-title { font-weight: 600; font-size: 0.95rem; margin-bottom: 2px; }
+        .priority-desc { font-size: 0.86rem; color: var(--text-secondary, #8b949e); }
+        .priority-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .priority-ack-label { display: inline-flex; align-items: center; gap: 6px; font-size: 0.84rem; cursor: pointer; }
+
+        /* 左右双栏工坊布局 */
+        .forge-grid {
+            display: grid;
+            grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
+            gap: 16px;
+            align-items: start;
+        }
+        @media (max-width: 960px) {
+            .forge-grid { grid-template-columns: 1fr; }
+        }
+
+        .forge-panel {
+            background: var(--bg-elevated, #161b22);
+            border: 1px solid var(--border-muted, #30363d);
+            border-radius: 10px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+        .forge-field { display: flex; flex-direction: column; gap: 6px; }
+        .forge-field label { font-size: 0.86rem; font-weight: 600; color: var(--text-primary, #e6edf3); }
+        .forge-input, .forge-textarea, .forge-select {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 8px 10px;
+            border-radius: 6px;
+            border: 1px solid var(--border-muted, #30363d);
+            background: var(--bg-canvas, #0d1117);
+            color: var(--text-primary, #e6edf3);
+            font-size: 0.9rem;
+        }
+        .forge-textarea { min-height: 82px; resize: vertical; }
+
+        .genre-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .genre-btn {
+            text-align: left;
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid var(--border-muted, #30363d);
+            background: var(--bg-canvas, #0d1117);
+            color: var(--text-primary, #e6edf3);
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+        .genre-btn.is-active {
+            border-color: var(--accent, #58a6ff);
+            background: rgba(88, 166, 255, 0.12);
+        }
+        .genre-btn-title { font-weight: 600; font-size: 0.88rem; }
+        .genre-btn-sub { font-size: 0.76rem; color: var(--text-secondary, #8b949e); }
+
+        .vault-picker-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+        .selected-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+        .selected-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 3px 8px;
+            border-radius: 999px;
+            font-size: 0.78rem;
+            border: 1px solid var(--border-muted, #30363d);
+            background: var(--bg-canvas, #0d1117);
+        }
+
+        .forge-btn-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .forge-btn {
+            padding: 8px 14px;
+            border-radius: 6px;
+            border: 1px solid var(--border-muted, #30363d);
+            background: var(--bg-canvas, #0d1117);
+            color: var(--text-primary, #e6edf3);
+            cursor: pointer;
+            font-size: 0.88rem;
+            font-weight: 500;
+        }
+        .forge-btn:hover { border-color: var(--accent, #58a6ff); }
+        .forge-btn--primary { background: var(--accent, #2f81f7); border-color: var(--accent, #2f81f7); color: #fff; }
+        .forge-btn--primary:disabled { opacity: 0.55; cursor: not-allowed; }
+
+        /* 右栏预览与门禁 */
+        .gate-strip {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            flex-wrap: wrap;
+            padding: 10px 12px;
+            border-radius: 8px;
+            border: 1px solid var(--border-muted, #30363d);
+            background: var(--bg-canvas, #0d1117);
+        }
+        .gate-scores { display: flex; gap: 10px; flex-wrap: wrap; font-size: 0.8rem; color: var(--text-secondary, #8b949e); }
+        .gate-badge { font-weight: 600; font-size: 0.84rem; padding: 2px 8px; border-radius: 999px; }
+        .gate-badge--pass { background: rgba(63, 185, 80, 0.16); color: #3fb950; }
+        .gate-badge--warn { background: rgba(210, 153, 34, 0.16); color: #d29922; }
+        .gate-badge--block { background: rgba(248, 81, 73, 0.16); color: #f85149; }
+
+        .section-list { display: flex; flex-direction: column; gap: 12px; }
+        .preview-section {
+            border: 1px solid var(--border-muted, #30363d);
+            border-radius: 8px;
+            padding: 12px;
+            background: var(--bg-canvas, #0d1117);
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .preview-section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+        .preview-section-title { margin: 0; font-size: 0.98rem; }
+        .preview-section-body { white-space: pre-wrap; font-size: 0.88rem; line-height: 1.55; color: var(--text-secondary, #c9d1d9); }
+        .preview-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+
+        .export-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            flex-wrap: wrap;
+            padding-top: 8px;
+            border-top: 1px solid var(--border-muted, #30363d);
+        }
+        .citation-detail-box {
+            padding: 10px 12px;
+            border-radius: 8px;
+            border: 1px solid var(--border-muted, #30363d);
+            background: var(--bg-canvas, #0d1117);
+            font-size: 0.84rem;
+        }
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+<div class="page-with-sidebar">
+    <aside id="page-sidebar" class="page-sidebar"></aside>
+    <main class="container page-main forge-shell">
+        <header class="forge-header">
+            <h1 data-i18n="forge.title">全谱系成果锻造工坊</h1>
+            <p data-i18n="forge.subtitle">一源四出（PRD/TRD · 调研/FTO 报告 · 真实 BibTeX 期刊论文 · 专利交底书）× 先锁专利申请日公开时序守卫</p>
+        </header>
+
+        <!-- 顶部醒目：公开时序冲突守卫灯横幅 -->
+        <section id="priority-guard-banner" class="priority-banner priority-banner--green" role="status" aria-live="polite">
+            <div class="priority-lamp-wrap">
+                <span id="priority-lamp" class="priority-lamp" aria-hidden="true"></span>
+                <div>
+                    <div id="priority-title" class="priority-title">公开时序冲突守卫：待检测</div>
+                    <div id="priority-desc" class="priority-desc">选择关联自有技术方案与目标体裁后，系统将自动核验是否违反「先专利申请日、后公开论文/开源」原则。</div>
+                </div>
+            </div>
+            <div class="priority-actions">
+                <label id="priority-ack-wrap" class="priority-ack-label hidden">
+                    <input type="checkbox" id="priority-ack-checkbox">
+                    <span>我已知晓泄露风险，仅导出内部审阅草稿</span>
+                </label>
+                <button type="button" id="btn-priority-check" class="forge-btn">立即复检时序</button>
+            </div>
+        </section>
+
+        <div class="forge-grid">
+            <!-- 左栏：素材勾选 + 体裁选择 + 商业秘密保留项 -->
+            <section class="forge-panel" aria-label="成果编译配置">
+                <div class="forge-field">
+                    <label for="forge-title-input">成果标题</label>
+                    <input id="forge-title-input" class="forge-input" type="text" placeholder="例如：高导热液态金属微通道散热系统技术报告">
+                </div>
+
+                <div class="forge-field">
+                    <label>目标成果体裁（一源四出）</label>
+                    <div class="genre-cards" id="genre-selector">
+                        <button type="button" class="genre-btn is-active" data-genre="product_prd_trd">
+                            <span class="genre-btn-title">产品 PRD / TRD</span>
+                            <span class="genre-btn-sub">架构契约与验收指标</span>
+                        </button>
+                        <button type="button" class="genre-btn" data-genre="survey_fto_report">
+                            <span class="genre-btn-title">调研 / FTO 报告</span>
+                            <span class="genre-btn-sub">四维情报与规避建议</span>
+                        </button>
+                        <button type="button" class="genre-btn" data-genre="academic_paper">
+                            <span class="genre-btn-title">学术期刊论文</span>
+                            <span class="genre-btn-sub">仅绑定真 DOI / BibTeX</span>
+                        </button>
+                        <button type="button" class="genre-btn" data-genre="patent_disclosure">
+                            <span class="genre-btn-title">专利技术交底书</span>
+                            <span class="genre-btn-sub">独权构思与多实施例</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="forge-field">
+                    <label>知识金库素材勾选（方案基线 / 参考文献 / 对照实验）</label>
+                    <div class="vault-picker-bar">
+                        <button type="button" id="btn-open-vault-picker" class="forge-btn">从知识金库勾选素材</button>
+                        <span id="vault-selection-summary" class="priority-desc">已选 0 篇文档 · 0 项实验</span>
+                    </div>
+                    <div id="vault-selected-pills" class="selected-pills"></div>
+                </div>
+
+                <div class="forge-field">
+                    <label for="knowhow-markers-input">商业秘密保留项（逗号分隔，导出时自动脱敏裁剪）</label>
+                    <input id="knowhow-markers-input" class="forge-input" type="text" placeholder="例如：配方比例 68.5:21.5:10, 退火温度 420°C">
+                </div>
+
+                <div class="forge-field">
+                    <label for="custom-notes-input">补充构想 / 编译指示</label>
+                    <textarea id="custom-notes-input" class="forge-textarea" placeholder="输入额外需要融入本成果的关键技术点、实验背景或篇幅侧重..."></textarea>
+                </div>
+
+                <div class="forge-btn-row">
+                    <label class="priority-ack-label">
+                        <input type="checkbox" id="use-ai-checkbox">
+                        <span>启用 AI 润色编排（未配置密钥时自动降级为确定性结构汇编）</span>
+                    </label>
+                </div>
+
+                <div class="forge-btn-row">
+                    <button type="button" id="btn-compile-preview" class="forge-btn forge-btn--primary">编译分节可核验预览</button>
+                </div>
+            </section>
+
+            <!-- 右栏：分节可核验预览器 + 五维门禁 + 多格式导出 -->
+            <section class="forge-panel" aria-label="分节预览与导出">
+                <div class="gate-strip" id="gate-strip">
+                    <div>
+                        <span id="gate-badge" class="gate-badge gate-badge--warn">待编译</span>
+                        <span id="gate-overall-score" class="priority-desc" style="margin-left:8px;">五维门禁总分：--</span>
+                    </div>
+                    <div id="gate-scores" class="gate-scores">
+                        <span>锚点: --</span>
+                        <span>合规: --</span>
+                        <span>逻辑: --</span>
+                        <span>实施例: --</span>
+                        <span>时序保密: --</span>
+                    </div>
+                </div>
+
+                <div id="gate-warnings-box" class="citation-detail-box hidden"></div>
+
+                <div id="preview-sections" class="section-list">
+                    <div class="preview-section">
+                        <h3 class="preview-section-title">尚未编译预览</h3>
+                        <div class="preview-section-body">请在左侧填写标题、选择目标体裁与金库素材，点击「编译分节可核验预览」生成带核验芯片的分节草稿。</div>
+                    </div>
+                </div>
+
+                <div id="citation-detail-box" class="citation-detail-box hidden"></div>
+
+                <div class="export-bar">
+                    <span class="priority-desc">确认过门禁后一键导出：</span>
+                    <div class="forge-btn-row">
+                        <button type="button" class="forge-btn" data-export-format="docx">导出 .docx</button>
+                        <button type="button" class="forge-btn" data-export-format="md">导出 .md</button>
+                        <button type="button" class="forge-btn" data-export-format="tex">导出 .tex</button>
+                        <button type="button" class="forge-btn" data-export-format="tex" data-bundle-zip="true">导出 .tex + .bib (.zip)</button>
+                        <button type="button" class="forge-btn" data-export-format="pdf">导出 .pdf</button>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>
+</div>
+
+<!-- 复用统一多选知识金库选择器 -->
+<if-vault-picker id="forge-vault-picker" multi-select="true"></if-vault-picker>
+
+<script src="/static/i18n.js"></script>
+<script type="module" src="/static/js/widgets/if-vault-picker.js"></script>
+<script type="module" src="/static/js/widgets/if-citation-chip.js"></script>
+<script type="module" src="/static/js/cards/forge.js"></script>
+</body>
+</html>

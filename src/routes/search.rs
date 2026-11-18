@@ -1393,21 +1393,64 @@ pub async fn api_search_vector(
         sorted
     };
 
-    let mut top_patents: Vec<serde_json::Value> = Vec::new();
-    for (id, fused_score) in fused.into_iter().take(limit) {
-        if let Ok(Some(patent)) = s.db.get_patent(&id) {
-            let score_percent = (fused_score * 100.0).round() * 100.0 / 100.0;
-            top_patents.push(json!({
-                "id": patent.id,
-                "patent_number": patent.patent_number,
-                "title": patent.title,
-                "applicant": patent.applicant,
-                "inventor": patent.inventor,
-                "relevance_score": score_percent,
-                "fused_score": fused_score,
-            }));
+    let top_patents: Vec<serde_json::Value> = {
+        let conn = s.db.conn();
+        let _ = crate::core::vault::VaultService::ensure_tables(&conn);
+        let bundle = crate::core::vault::VaultService::hybrid_search_chunks(
+            &conn,
+            query,
+            crate::core::vault::models::SearchSceneMode::PatentCompare,
+            None,
+            None,
+            None,
+            limit,
+            limit.saturating_mul(600).max(4000),
+        )
+        .ok();
+        let mut vault_docs: Vec<serde_json::Value> = Vec::new();
+        let mut seen_doc_ids = std::collections::HashSet::new();
+        if let Some(ref b) = bundle {
+            for hit in &b.hits {
+                if seen_doc_ids.insert(hit.chunk.doc_id.clone()) {
+                    if let Ok(Some(doc)) =
+                        crate::core::vault::VaultService::get_document(&conn, &hit.chunk.doc_id)
+                    {
+                        vault_docs.push(json!({
+                            "id": doc.doc_id,
+                            "patent_number": doc.external_id,
+                            "title": if doc.title_zh.is_empty() { doc.title_en } else { doc.title_zh },
+                            "applicant": doc.authors_or_assignees,
+                            "inventor": "",
+                            "relevance_score": (hit.rrf_score * 1000.0).min(100.0),
+                            "fused_score": hit.rrf_score,
+                            "section_tag": hit.chunk.section_tag,
+                        }));
+                    }
+                }
+            }
         }
-    }
+        drop(conn);
+
+        for (id, fused_score) in fused.into_iter().take(limit) {
+            if !seen_doc_ids.insert(id.clone()) {
+                continue;
+            }
+            if let Ok(Some(patent)) = s.db.get_patent(&id) {
+                let score_percent = (fused_score * 100.0).round() * 100.0 / 100.0;
+                vault_docs.push(json!({
+                    "id": patent.id,
+                    "patent_number": patent.patent_number,
+                    "title": patent.title,
+                    "applicant": patent.applicant,
+                    "inventor": patent.inventor,
+                    "relevance_score": score_percent,
+                    "fused_score": fused_score,
+                }));
+            }
+        }
+        vault_docs.truncate(limit);
+        vault_docs
+    };
 
     Json(json!({
         "patents": top_patents,

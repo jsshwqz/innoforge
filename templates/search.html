@@ -12,11 +12,80 @@
 <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
 <!-- Chart.js v4.5.1 (MIT License) - vendored from https://www.chartjs.org/ — see static/vendor/LICENSE.chart.md -->
 <script src="/static/vendor/chart.umd.min.js"></script>
+<style>
+.omni-search-panel { border: 1px solid var(--accent-border, rgba(88,166,255,0.35)); }
+.omni-realm-bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 10px; }
+.omni-realm-check { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border-muted, #30363d); background: var(--bg-elevated, #161b22); cursor: pointer; font-size: 13px; }
+.omni-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+.omni-toolbar input[type="text"] { flex: 1; min-width: 240px; }
+.omni-split-workspace { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 12px; align-items: start; }
+@media (max-width: 1024px) { .omni-split-workspace { grid-template-columns: 1fr; } }
+.omni-results-col, .omni-reader-col { min-height: 220px; max-height: 720px; overflow-y: auto; border: 1px solid var(--border-muted, #30363d); border-radius: 8px; padding: 12px; background: var(--bg-elevated, #161b22); }
+.omni-hit-card { border: 1px solid var(--border-muted, #30363d); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; background: var(--bg-primary, #0d1117); }
+.omni-hit-top, .omni-hit-actions, .omni-reader-meta, .omni-reader-actions, .omni-chunk-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.omni-hit-title { margin: 6px 0 4px; font-size: 15px; }
+.omni-title-link { background: transparent; border: 0; padding: 0; color: var(--accent, #58a6ff); font-weight: 600; text-align: left; cursor: pointer; font-size: inherit; }
+.omni-title-link:hover { text-decoration: underline; }
+.omni-hit-abs { margin: 6px 0; font-size: 13px; line-height: 1.5; }
+.omni-hit-reason { margin: 6px 0; font-size: 12px; }
+.omni-badge, .omni-badge-subtle, .omni-provider-tag, .omni-own-tag { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border-muted, #30363d); }
+.omni-own-tag { border-color: var(--green-border, #2ea043); color: #86efac; }
+.omni-diag-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.omni-diag-pill { font-size: 11px; padding: 2px 7px; border-radius: 6px; border: 1px solid var(--border-muted, #30363d); }
+.omni-viewer-split { display: grid; grid-template-columns: 2fr 1fr; gap: 10px; margin-top: 10px; }
+.omni-chunk-item { border: 1px solid var(--border-muted, #30363d); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; }
+.omni-chunk-child { margin-left: 14px; border-left: 3px solid var(--accent, #58a6ff); }
+.omni-chunk-item.is-highlighted { border-color: var(--accent, #58a6ff); }
+.omni-numeral-list { display: flex; flex-direction: column; gap: 6px; }
+.omni-numeral-pill { text-align: left; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--border-muted, #30363d); background: transparent; color: inherit; cursor: pointer; font-size: 12px; }
+.omni-numeral-pill.is-active, .omni-numeral-pill:hover { border-color: var(--accent, #58a6ff); background: rgba(88,166,255,0.14); }
+.omni-numeral-mark { background: rgba(245,158,11,0.35); color: inherit; padding: 0 2px; border-radius: 3px; }
+.omni-chunk-pre { white-space: pre-wrap; font-size: 12px; margin: 6px 0; }
+</style>
 </head>
 <body>
 <div class="page-with-sidebar">
 <aside id="page-sidebar" class="page-sidebar"></aside>
 <main class="container search-container page-main">
+<div class="panel omni-search-panel" id="omni-search-root">
+  <div class="panel-header">
+    <h3 style="margin:0;">四维全域情报检索与左搜右读精读台（v1.0）</h3>
+    <span id="omni-status-text" class="muted">覆盖全球专利 · 学术论文 · 开源代码 · 行业标准</span>
+  </div>
+  <div class="omni-realm-bar">
+    <label class="omni-realm-check"><input type="checkbox" name="omni-realm" value="patent" checked> 全球专利</label>
+    <label class="omni-realm-check"><input type="checkbox" name="omni-realm" value="scholar" checked> 学术论文 (OpenAlex/Crossref/arXiv/S2)</label>
+    <label class="omni-realm-check"><input type="checkbox" name="omni-realm" value="code_repo" checked> 开源代码工程</label>
+    <label class="omni-realm-check"><input type="checkbox" name="omni-realm" value="standard" checked> 行业标准/白皮书</label>
+    <label class="omni-realm-check"><input type="checkbox" id="omni-ai-rewrite"> AI 检索式扩写</label>
+    <label class="omni-realm-check"><input type="checkbox" id="omni-save-vault"> 自动沉淀入库</label>
+  </div>
+  <div class="omni-toolbar">
+    <input type="text" id="omni-query-input" placeholder="输入技术想法、自然语言问题或专利/DOI/标准关键词...">
+    <select id="omni-role-filter" title="金库资产角色过滤">
+      <option value="">全部资产角色</option>
+      <option value="own_asset">我方已有成果</option>
+      <option value="competitor_wall">竞品壁垒</option>
+      <option value="review_cited">审稿/审查引证</option>
+      <option value="general_ref">一般参考</option>
+    </select>
+    <button type="button" class="btn-primary" id="omni-search-btn">四维全域检索</button>
+    <button type="button" class="btn-secondary" id="omni-chunks-btn">RRF 段落召回</button>
+    <button type="button" class="btn-secondary btn-sm" data-omni-export="csv">导出 CSV</button>
+    <button type="button" class="btn-secondary btn-sm" data-omni-export="xlsx">导出 XLSX</button>
+    <button type="button" class="btn-secondary btn-sm" data-omni-export="pdf">导出 PDF</button>
+  </div>
+  <div id="omni-diagnostics"></div>
+  <div class="omni-split-workspace">
+    <div id="omni-results-list" class="omni-results-col">
+      <div class="muted">输入检索意图并点击「四维全域检索」，左侧展示跨源去重结果与命中理由，支持一键打标 <code>[我方已有成果]</code> 入库。</div>
+    </div>
+    <div id="omni-reader-pane" class="omni-reader-col">
+      <div class="muted">点击左侧任意命中结果或「同屏精读」，在此右侧展示权项树、说明书段落、附图部件悬停对照与 BibTeX 一键复制。</div>
+    </div>
+  </div>
+</div>
+
 <div class="panel">
 <h3 data-i18n="search.title"></h3>
 <div class="search-grid">
@@ -1252,5 +1321,6 @@ if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/static/service-worker.js').catch(function(){});
 }
 </script>
+<script type="module" src="/static/js/cards/search.js"></script>
 </body>
 </html>

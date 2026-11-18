@@ -23,17 +23,69 @@ http://127.0.0.1:3000
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/` | 首页 / Home |
-| GET | `/search` | 搜索页 / Search page |
-| GET | `/compare` | 专利对比页 / Patent comparison page |
-| GET | `/ai` | AI 助手页 / AI assistant page |
-| GET | `/settings` | 设置页 / Settings page |
-| GET | `/patent/{id}` | 专利详情页 / Patent detail page |
-| GET | `/idea` | 创意验证页 / Idea validation page |
-| GET | `/oa-response` | 审查意见答复页 / Office action response page |
+| GET | `/` | 首页（v1.0 七大独立卡片导航台） / Home (v1.0 7-Card Hub) |
+| GET | `/search` | 卡片 ① 全域情报检索页 / Card ① Omni-Search |
+| GET | `/studio` | 卡片 ② 多模态想法共创与推演页 / Card ② Idea Studio |
+| GET | `/dissect` | 卡片 ③ 单篇文献扒皮与深析页 / Card ③ Deep Dissect |
+| GET | `/matrix` | 卡片 ④ 多方案对决与矩阵页 / Card ④ Scheme Matrix |
+| GET | `/rebuttal` | 卡片 ⑤ 审查与审稿三栖抗辩页 / Card ⑤ Rebuttal Hub |
+| GET | `/forge` | 卡片 ⑥ 全谱系成果锻造工坊页 / Card ⑥ Deliverable Forge |
+| GET | `/settings` | 卡片 ⑦ 系统配置与知识金库页 / Card ⑦ Settings & Vault |
+| GET | `/doc-viewer` | 独立结构化文献精读器 / Standalone Document Reader |
+| GET | `/doc/{id}` | 按文献 ID 打开精读器 / Document Reader by ID |
+| GET | `/compare` | 旧版专利对比兼容页 / Legacy Patent Comparison |
+| GET | `/ai` | 旧版 AI 助手兼容页 / Legacy AI Assistant |
+| GET | `/patent/{id}` | 旧版专利详情兼容页 / Legacy Patent Detail |
+| GET | `/idea` | 旧版创意验证兼容页 / Legacy Idea Validation |
+| GET | `/oa-response` | 旧版审查意见答复兼容页 / Legacy Office Action Response |
 | GET | `/static/{*path}` | 内嵌静态资源 / Embedded static assets |
 
 > 注：`/test`（调试页）与 `/import`（样例导入页）两条页面路由已在代码中移除，故不再列出（issue #62）。
+
+---
+
+## v1.0 正交 REST 与 SSE 契约总表 / v1.0 Orthogonal APIs
+
+| Method | Path | Card / Module | Description |
+|---|---|---|---|
+| GET | `/api/healthz` | `app` | 免鉴权存活探针 / Liveness probe |
+| POST | `/api/auth/unlock` | `app` | 非回环访问码换取同源 `HttpOnly` Cookie / Unlock session |
+| GET | `/api/settings/health` | `settings_vault` | 四维环境健康快速自检 / 4D environment health check |
+| GET | `/api/settings/config` | `settings_vault` | 掩码脱敏配置快照 / Masked configuration snapshot |
+| POST | `/api/settings/config` | `settings_vault` | 保存系统配置与 9 服务商容灾链 / Save system configuration |
+| POST | `/api/settings/probe-provider` | `settings_vault` | 3s 短超时探测服务商连通性 / Probe LLM provider |
+| POST | `/api/vault/import-pack` | `settings_vault` | 免 Python 原生公开文献/专利包流式灌库 / Native data pack import |
+| GET | `/api/vault/docs` | `settings_vault` | 分页查询知识金库文献与实验统计 / List Vault documents |
+| PATCH | `/api/vault/docs` | `settings_vault` | 更新文献角色（`own_asset`）与申请状态 / Patch Vault doc role/status |
+| DELETE | `/api/vault/docs` | `settings_vault` | 删除金库文献及关联切片词典 / Delete Vault document |
+| POST | `/api/omni-search/query` | `omni_search` | 四维并发检索与真实 DOI/BibTeX 归一化 / 4-realm omni-search |
+| POST | `/api/omni-search/chunks` | `omni_search` | BM25 + 向量 RRF 段落混合检索 / Hybrid RRF chunk recall |
+| GET | `/api/omni-search/doc/{id}` | `omni_search` | 获取单篇文献权项树、段落与附图词典 / Get structured document |
+| POST | `/api/omni-search/export` | `omni_search` | 导出检索结果（`csv / xlsx / pdf`） / Export search results |
+| POST | `/api/idea-studio/session` | `idea_studio` | 创建多模态共创会话 / Create co-creation session |
+| POST | `/api/idea-studio/session/{id}/turn` | `idea_studio` | 推进一轮图文共创并收敛方案基线卡 / Advance co-creation turn |
+| POST | `/api/idea-studio/run/start` | `idea_studio` | 选定三档深度启动 DAG 推演 / Start tiered DAG run |
+| POST | `/api/idea-studio/run/{id}/fork` | `idea_studio` | 从任意步骤节点分叉新对比路线 / Fork DAG run from step |
+| POST | `/api/idea-studio/run/{id}/checkpoint` | `idea_studio` | 提交人工卡点确认并恢复运行 / Resume paused checkpoint |
+| POST | `/api/idea-studio/run/{id}/experiment` | `idea_studio` | 回填真实样机/对照实验数据生成 `Exp:{id}` 锚点 / Record experiment |
+| GET | `/api/idea-studio/run/{id}/events` | `idea_studio` | 订阅统一 SSE 七事件推演流 / Subscribe DAG SSE stream |
+| POST | `/api/deep-dissect/ingest` | `deep_dissect` | 上传或加载单篇专利/论文无截断切分入库 / Ingest single document |
+| POST | `/api/deep-dissect/analyze` | `deep_dissect` | 专利 FTO/附图拆解或论文机理/局限深析 / Deep dissect analysis |
+| POST | `/api/deep-dissect/ask` | `deep_dissect` | 多轮带局部截图与锚点上下文追问 / Contextual Q&A with figure marks |
+| POST | `/api/scheme-matrix/compare` | `scheme_matrix` | 2～6 方案三维视角对决与拼凑预警 / Multi-scheme matrix comparison |
+| GET | `/api/scheme-matrix/{id}` | `scheme_matrix` | 读取已持久化对决矩阵结果 / Get saved comparison matrix |
+| POST | `/api/scheme-matrix/{id}/export` | `scheme_matrix` | 导出矩阵为 `.xlsx` 或 `.pdf` / Export matrix |
+| POST | `/api/rebuttal-hub/case` | `rebuttal_hub` | 创建三栖抗辩案件（专利 OA / 预审 / 论文 Rebuttal） / Create rebuttal case |
+| POST | `/api/rebuttal-hub/case/{id}/round` | `rebuttal_hub` | 新增一通/二通/返修轮次与绝限追踪 / Add review round |
+| POST | `/api/rebuttal-hub/case/{id}/mock-review` | `rebuttal_hub` | 触发魔鬼审查员/同行审稿人模拟质疑 / Run mock review |
+| POST | `/api/rebuttal-hub/case/{id}/draft` | `rebuttal_hub` | 策略裁决与绑定原文锚点答复草稿生成 / Generate rebuttal draft |
+| POST | `/api/rebuttal-hub/case/{id}/verify` | `rebuttal_hub` | 五维硬阻断门禁、第 33 条与跨实施例核验 / Run 5D quality gate |
+| POST | `/api/rebuttal-hub/case/{id}/export` | `rebuttal_hub` | 导出带 `<w:ins>/<w:del>` 修订痕迹 `.docx` / Export tracked DOCX |
+| POST | `/api/deliverable-forge/priority-check` | `deliverable_forge` | 先专利后论文/开源公开时序冲突守卫检查 / Check disclosure priority |
+| POST | `/api/deliverable-forge/compile` | `deliverable_forge` | 一源四出体裁编译与商业秘密裁剪预览 / Compile deliverable preview |
+| POST | `/api/deliverable-forge/export` | `deliverable_forge` | 导出 `.docx` / `.md` / `.tex` / `.pdf` 成品包 / Export deliverable |
+| POST | `/api/multimodal/upload` | `multimodal` | 多模态文件/剪贴板图像三级自适应解析 / Upload & 3-tier ingest |
+| GET | `/api/multimodal/task/{id}/events` | `multimodal` | 多模态解析进度统一 SSE 流 / Multimodal task SSE stream |
 
 ---
 

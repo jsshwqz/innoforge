@@ -22,7 +22,7 @@ fn setup_test_db() -> Connection {
         "INSERT INTO knowledge_docs (
             doc_id, doc_kind, asset_role, external_id, title_zh, filing_status,
             doi_verified, abstract_text, claims_json, fulltext_raw, fulltext_status, chunk_ver
-        ) VALUES (?1, 'patent', 'competitor_wall', 'CN114000001A', '对比散热装置', 'public_disclosed',
+        ) VALUES (?1, 'patent', 'competitor_wall', 'CN990001001A', '对比散热装置', 'public_disclosed',
                   0, '一种基础散热结构', '权利要求1：包括基座10。', '实施例1包括液冷微通道11；实施例2包括相变均热板22。', 'fulltext_ready', 2)",
         params!["CN-D1-001"],
     )
@@ -67,7 +67,7 @@ fn setup_test_db() -> Connection {
         "INSERT INTO knowledge_docs (
             doc_id, doc_kind, asset_role, external_id, title_zh, filing_status,
             doi_verified, abstract_text, claims_json, fulltext_raw, fulltext_status, chunk_ver
-        ) VALUES (?1, 'patent', 'own_asset', 'CN202610000001.X', '我方复合散热结构', 'patent_filed',
+        ) VALUES (?1, 'patent', 'own_asset', 'CN990001002A', '我方复合散热结构', 'patent_filed',
                   0, '一种梯度多孔铜散热结构', '权利要求1：一种散热器，包括基座和微通道。',
                   '具体实施方式：微通道内壁采用梯度多孔铜结构，工作温度为120℃至200℃。', 'fulltext_ready', 2)",
         params!["CN-OWN-001"],

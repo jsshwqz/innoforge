@@ -63,8 +63,11 @@ function extractRoutes(text) {
     const routePath = pm[1];
     const tail = seg.slice(pm.index + pm[0].length);
     const methods = [];
-    for (const m of METHODS) {
-      if (new RegExp("\\b" + m + "\\s*\\(").test(tail)) methods.push(m.toUpperCase());
+    const mRe = /\b(get|post|put|delete|patch|head|options)\s*\(/g;
+    let mm;
+    while ((mm = mRe.exec(tail)) !== null) {
+      const upper = mm[1].toUpperCase();
+      if (!methods.includes(upper)) methods.push(upper);
     }
     // 处理函数不一定是 `routes::x`：也可能是 `crate::a::b` 或裸函数名。
     const handler = (seg.match(HANDLER_RE) || [])[1] || "";

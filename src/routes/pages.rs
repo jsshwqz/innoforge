@@ -64,6 +64,64 @@ pub async fn settings_page() -> Response {
         .into_response()
 }
 
+pub async fn studio_page() -> Response {
+    (
+        no_cache_headers(),
+        Html(include_str!("../../templates/studio.html").to_string()),
+    )
+        .into_response()
+}
+
+pub async fn dissect_page() -> Response {
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let html = include_str!("../../templates/dissect.html")
+        .replace("{{timestamp}}", &timestamp.to_string());
+    (no_cache_headers(), Html(html)).into_response()
+}
+
+pub async fn matrix_page() -> Response {
+    (
+        no_cache_headers(),
+        Html(include_str!("../../templates/matrix.html").to_string()),
+    )
+        .into_response()
+}
+
+pub async fn rebuttal_page() -> Response {
+    (
+        no_cache_headers(),
+        Html(include_str!("../../templates/rebuttal.html").to_string()),
+    )
+        .into_response()
+}
+
+pub async fn forge_page() -> Response {
+    (
+        no_cache_headers(),
+        Html(include_str!("../../templates/forge.html").to_string()),
+    )
+        .into_response()
+}
+
+pub async fn doc_viewer_page() -> Response {
+    (
+        no_cache_headers(),
+        Html(include_str!("../../templates/doc_viewer.html").to_string()),
+    )
+        .into_response()
+}
+
+pub async fn doc_viewer_by_id_page(Path(_id): Path<String>) -> Response {
+    (
+        no_cache_headers(),
+        Html(include_str!("../../templates/doc_viewer.html").to_string()),
+    )
+        .into_response()
+}
+
 pub async fn office_action_response_page() -> Response {
     let html = include_str!("../../templates/office_action_response.html").to_string();
     let headers = [("Cache-Control", "no-cache, no-store, must-revalidate")];

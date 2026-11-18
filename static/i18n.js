@@ -644,7 +644,31 @@ const I18N_COMMON = {
     'widget.matrix.modePaperBaseline': '学术 Baseline 增益对决',
     'widget.matrix.exportExcel': '导出 Excel',
     'widget.matrix.exportPdf': '导出 PDF',
-    'widget.matrix.empty': '暂无对决矩阵数据'
+    'widget.matrix.empty': '暂无对决矩阵数据',
+    'nav.studio': '共创推演',
+    'nav.dissect': '单篇深析',
+    'nav.matrix': '方案矩阵',
+    'nav.rebuttal': '三栖抗辩',
+    'nav.forge': '成果工坊',
+    'omni.docViewerTitle': '文献结构化精读器（权项树 · 段落 · 附图部件对照）',
+    'studio.multimodal.placeholder': '粘贴技术草图/截图、拖入 PDF/DOCX/CSV 实验表，描述核心技术痛点或改进想法…',
+    'dissect.title': '单篇文献扒皮与深析',
+    'dissect.subtitle': '专利附图部件词典与 FTO 逐权项排雷 · 学术论文机理公式拆解、复现条件与局限挖掘',
+    'dissect.ingestPlaceholder': '粘贴专利/论文全文、权项或方法实验章节，或拖入 PDF/DOCX/图片…',
+    'dissect.privacyLock': '涉密离线锁（禁止外发看图接口）',
+    'dissect.askPlaceholder': '输入局部技术问题或附图部件追问（支持粘贴局部截图）…',
+    'matrix.title': '多方案对决与三维矩阵',
+    'rebuttal.title': '审查与审稿三栖抗辩台',
+    'rebuttal.noticePlaceholder': '粘贴官方审查意见通知书、魔鬼预审靶点或期刊审稿意见（Reviewer Comments）…',
+    'forge.title': '全谱系成果锻造工坊',
+    'forge.subtitle': '一源四出（PRD/TRD · 调研/FTO 报告 · 真实 BibTeX 期刊论文 · 专利交底书）与公开时序守卫',
+    'card_search.title': '① 全域情报检索卡',
+    'card_studio.title': '② 多模态想法共创与推演卡',
+    'card_dissect.title': '③ 单篇文献扒皮与深析卡',
+    'card_matrix.title': '④ 多方案对决与矩阵卡',
+    'card_rebuttal.title': '⑤ 审查与审稿三栖抗辩卡',
+    'card_forge.title': '⑥ 全谱系成果锻造工坊卡',
+    'card_settings.title': '⑦ 系统配置与知识金库卡'
   },
   en: {
     'cad.draw': 'FreeCAD Drawing',
@@ -1325,7 +1349,31 @@ const I18N_COMMON = {
     'widget.matrix.modePaperBaseline': 'Academic Baseline Comparison',
     'widget.matrix.exportExcel': 'Export Excel',
     'widget.matrix.exportPdf': 'Export PDF',
-    'widget.matrix.empty': 'No comparison matrix data yet'
+    'widget.matrix.empty': 'No comparison matrix data yet',
+    'nav.studio': 'Idea Studio',
+    'nav.dissect': 'Deep Dissect',
+    'nav.matrix': 'Scheme Matrix',
+    'nav.rebuttal': 'Rebuttal Hub',
+    'nav.forge': 'Deliverable Forge',
+    'omni.docViewerTitle': 'Structured Document Reader (Claims Tree · Sections · Figure Glossary)',
+    'studio.multimodal.placeholder': 'Paste sketches/screenshots, drop PDF/DOCX/CSV data, and describe your core technical idea…',
+    'dissect.title': 'Single-Document Deep Dissect',
+    'dissect.subtitle': 'Patent Figure Glossary & Claim-by-Claim FTO · Paper Mechanism, Reproduction & Limitations',
+    'dissect.ingestPlaceholder': 'Paste full patent/paper text, claims, or methods/experiments, or drop PDF/DOCX/image…',
+    'dissect.privacyLock': 'Offline Privacy Lock (Disable External Vision API)',
+    'dissect.askPlaceholder': 'Ask follow-up questions on sections or figure numerals (paste cropped image supported)…',
+    'matrix.title': 'Multi-Scheme Comparison Matrix',
+    'rebuttal.title': 'Patent OA & Peer-Review Rebuttal Hub',
+    'rebuttal.noticePlaceholder': 'Paste official Office Action, mock examiner critique, or journal Reviewer Comments…',
+    'forge.title': 'Full-Spectrum Deliverable Forge',
+    'forge.subtitle': 'One-Source Four-Deliverables (PRD/TRD · FTO Survey · Verified-BibTeX Paper · Patent Disclosure) & Priority Guard',
+    'card_search.title': '① Omni-Search Card',
+    'card_studio.title': '② Multimodal Idea Studio Card',
+    'card_dissect.title': '③ Deep Dissect Card',
+    'card_matrix.title': '④ Scheme Matrix Card',
+    'card_rebuttal.title': '⑤ Rebuttal Hub Card',
+    'card_forge.title': '⑥ Deliverable Forge Card',
+    'card_settings.title': '⑦ Settings & Knowledge Vault Card'
   }
 };
 
@@ -1391,14 +1439,30 @@ var _NAV_ICONS = {
 function renderSidebar(extraHtml) {
   var el = document.getElementById('page-sidebar');
   if (!el) return;
+  var customExtraHtml = extraHtml;
+  if (typeof extraHtml === 'string' && extraHtml.indexOf('<') === -1 && extraHtml.trim().length > 0) {
+    _activePage = extraHtml.trim();
+    customExtraHtml = '';
+  }
   var fromPath = location.pathname;
+  if (!_activePage) {
+    if (fromPath === '/') _activePage = 'home';
+    else if (fromPath.indexOf('/search') === 0 || fromPath.indexOf('/doc') === 0) _activePage = 'search';
+    else if (fromPath.indexOf('/studio') === 0) _activePage = 'studio';
+    else if (fromPath.indexOf('/dissect') === 0) _activePage = 'dissect';
+    else if (fromPath.indexOf('/matrix') === 0) _activePage = 'matrix';
+    else if (fromPath.indexOf('/rebuttal') === 0) _activePage = 'rebuttal';
+    else if (fromPath.indexOf('/forge') === 0) _activePage = 'forge';
+    else if (fromPath.indexOf('/settings') === 0) _activePage = 'settings';
+  }
   var links = [
     { href: '/', key: 'nav.home', id: 'home', icon: 'home' },
-    { href: '/idea', key: 'nav.idea', id: 'idea', icon: 'idea' },
     { href: '/search', key: 'nav.search', id: 'search', icon: 'search' },
-    { href: '/compare', key: 'nav.compare', id: 'compare', icon: 'compare' },
-    { href: '/oa-response', key: 'nav.oar', id: 'oar', icon: 'oar' },
-    { href: '/ai', key: 'nav.ai', id: 'ai', icon: 'ai' },
+    { href: '/studio', key: 'nav.studio', id: 'studio', icon: 'idea' },
+    { href: '/dissect', key: 'nav.dissect', id: 'dissect', icon: 'ai' },
+    { href: '/matrix', key: 'nav.matrix', id: 'matrix', icon: 'compare' },
+    { href: '/rebuttal', key: 'nav.rebuttal', id: 'rebuttal', icon: 'oar' },
+    { href: '/forge', key: 'nav.forge', id: 'forge', icon: 'oar' },
     { href: '/settings?from=' + encodeURIComponent(fromPath), key: 'nav.settings', id: 'settings', icon: 'settings' }
   ];
   // Brand
@@ -1416,7 +1480,7 @@ function renderSidebar(extraHtml) {
   for (let i = 0; i < links.length; i++) {
     var cls = (links[i].id === activeId) ? ' class="active"' : '';
     html += '<a href="' + links[i].href + '"' + cls + '>'
-      + _NAV_ICONS[links[i].icon] + '<span data-i18n="' + links[i].key + '">' + t(links[i].key) + '</span></a>';
+      + (_NAV_ICONS[links[i].icon] || _NAV_ICONS.home) + '<span data-i18n="' + links[i].key + '">' + t(links[i].key) + '</span></a>';
   }
   html += '</div></div>';
   // Language section
@@ -1427,7 +1491,7 @@ function renderSidebar(extraHtml) {
   html += '<option value="en"' + (i18nLang === 'en' ? ' selected' : '') + '>EN</option>';
   html += '</select>';
   html += '</div>';
-  if (extraHtml) html += extraHtml;
+  if (customExtraHtml) html += customExtraHtml;
   el.innerHTML = DOMPurify.sanitize(html);
   // 异步加载版本号显示在侧边栏底部
   if (!window.__versionLoaded) {

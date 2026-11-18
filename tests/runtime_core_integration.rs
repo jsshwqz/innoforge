@@ -32,7 +32,7 @@ fn setup_test_db() -> Connection {
         "INSERT INTO knowledge_docs (
             doc_id, doc_kind, asset_role, external_id, title_zh, filing_status,
             doi_verified, abstract_text, claims_json, fulltext_raw, fulltext_status, chunk_ver
-        ) VALUES (?1, 'patent', 'own_asset', 'CN202610008888.1', '我方已递交微流控散热专利', 'patent_filed',
+        ) VALUES (?1, 'patent', 'own_asset', 'CN990001002A', '我方已递交微流控散热专利', 'patent_filed',
                   0, '一种梯度微通道散热装置', '权利要求1：包括微通道与均热板。',
                   '具体实施方式：微通道采用铜基复合材料。', 'fulltext_ready', 2)",
         params!["OWN-FILED-001"],

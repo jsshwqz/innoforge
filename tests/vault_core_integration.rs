@@ -51,7 +51,7 @@ fn legacy_patents_migrate_to_v26_and_backfill_incrementally() {
              INSERT INTO patents (id, patent_number, title, abstract_text, description, claims, applicant, publication_date, country)
              VALUES (
                  'legacy-p1',
-                 'CN115000001A',
+                 'CN990001001A',
                  '高速涡轮轴温监测装置',
                  '一种用于监测高速涡轮轴温的传感结构。',
                  '[0001] 本发明涉及高速涡轮轴温传感器与阻尼孔冷却结构。',
@@ -80,7 +80,7 @@ fn legacy_patents_migrate_to_v26_and_backfill_incrementally() {
     let doc = VaultService::get_document(&conn, "legacy-p1")
         .expect("query mapped doc")
         .expect("mapped doc exists");
-    assert_eq!(doc.external_id, "CN115000001A");
+    assert_eq!(doc.external_id, "CN990001001A");
     assert_eq!(doc.title_zh, "高速涡轮轴温监测装置");
     assert_eq!(doc.doc_kind, DocKind::Patent);
 }
@@ -93,7 +93,7 @@ fn cjk_bigram_bm25_and_weighted_rrf_prioritize_claims_over_background() {
         doc_id: "pat-turbine-1".to_string(),
         doc_kind: DocKind::Patent,
         asset_role: AssetRole::CompetitorWall,
-        external_id: "CN116000002B".to_string(),
+        external_id: "CN990001013B".to_string(),
         title_zh: "涡轮轴温与阻尼孔结构".to_string(),
         title_en: String::new(),
         authors_or_assignees: "竞品公司".to_string(),
@@ -188,7 +188,7 @@ fn dependent_claim_hit_prepends_full_parent_claim_chain() {
         doc_id: "pat-chain-1".to_string(),
         doc_kind: DocKind::Patent,
         asset_role: AssetRole::OwnAsset,
-        external_id: "CN117000003A".to_string(),
+        external_id: "CN990001014A".to_string(),
         title_zh: "分级阻尼密封结构".to_string(),
         title_en: String::new(),
         authors_or_assignees: "我方".to_string(),

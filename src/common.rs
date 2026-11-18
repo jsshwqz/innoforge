@@ -393,9 +393,159 @@ pub fn build_router_inner(state: crate::routes::AppState) -> Router {
         // 健康检查与同源鉴权 / Health check & auth unlock
         .route("/api/healthz", get(crate::app::api_healthz))
         .route("/api/auth/unlock", post(crate::app::api_auth_unlock))
-        // 页面路由 / Page routes
+        // v1.0 正交系统与金库接口（第五章第 1 组）
+        .route(
+            "/api/settings/health",
+            get(crate::cards::settings_vault::api_settings_health),
+        )
+        .route(
+            "/api/settings/config",
+            get(crate::cards::settings_vault::api_settings_get_config)
+                .post(crate::cards::settings_vault::api_settings_save_config),
+        )
+        .route(
+            "/api/settings/probe-provider",
+            post(crate::cards::settings_vault::api_settings_probe_provider),
+        )
+        .route(
+            "/api/vault/import-pack",
+            post(crate::cards::settings_vault::api_vault_import_pack),
+        )
+        .route(
+            "/api/vault/docs",
+            get(crate::cards::settings_vault::api_vault_list_docs)
+                .patch(crate::cards::settings_vault::api_vault_patch_doc)
+                .delete(crate::cards::settings_vault::api_vault_delete_doc),
+        )
+        // v1.0 卡片 ① 全域情报检索（第五章第 2 组）
+        .route(
+            "/api/omni-search/query",
+            post(crate::cards::omni_search::api_omni_search_query),
+        )
+        .route(
+            "/api/omni-search/chunks",
+            post(crate::cards::omni_search::api_omni_search_chunks),
+        )
+        .route(
+            "/api/omni-search/doc/{id}",
+            get(crate::cards::omni_search::api_omni_search_doc),
+        )
+        .route(
+            "/api/omni-search/export",
+            post(crate::cards::omni_search::api_omni_search_export),
+        )
+        // v1.0 卡片 ② 多模态想法共创与可分叉推演（第五章第 3 组）
+        .route(
+            "/api/idea-studio/session",
+            post(crate::cards::idea_studio::api_studio_create_session),
+        )
+        .route(
+            "/api/idea-studio/session/{id}/turn",
+            post(crate::cards::idea_studio::api_studio_turn),
+        )
+        .route(
+            "/api/idea-studio/run/start",
+            post(crate::cards::idea_studio::api_studio_run_start),
+        )
+        .route(
+            "/api/idea-studio/run/{id}/fork",
+            post(crate::cards::idea_studio::api_studio_run_fork),
+        )
+        .route(
+            "/api/idea-studio/run/{id}/checkpoint",
+            post(crate::cards::idea_studio::api_studio_run_checkpoint),
+        )
+        .route(
+            "/api/idea-studio/run/{id}/experiment",
+            post(crate::cards::idea_studio::api_studio_run_experiment),
+        )
+        .route(
+            "/api/idea-studio/run/{id}/events",
+            get(crate::cards::idea_studio::api_studio_run_events),
+        )
+        // v1.0 卡片 ③ 单篇文献扒皮与深析（第五章第 4 组）
+        .route(
+            "/api/deep-dissect/ingest",
+            post(crate::cards::deep_dissect::api_dissect_ingest),
+        )
+        .route(
+            "/api/deep-dissect/analyze",
+            post(crate::cards::deep_dissect::api_dissect_analyze),
+        )
+        .route(
+            "/api/deep-dissect/ask",
+            post(crate::cards::deep_dissect::api_dissect_ask),
+        )
+        // v1.0 卡片 ④ 多方案对决与矩阵（第五章第 5 组）
+        .route(
+            "/api/scheme-matrix/compare",
+            post(crate::cards::scheme_matrix::api_matrix_compare),
+        )
+        .route(
+            "/api/scheme-matrix/{id}",
+            get(crate::cards::scheme_matrix::api_matrix_get),
+        )
+        .route(
+            "/api/scheme-matrix/{id}/export",
+            post(crate::cards::scheme_matrix::api_matrix_export),
+        )
+        // v1.0 卡片 ⑤ 审查与审稿三栖抗辩（第五章第 6 组）
+        .route(
+            "/api/rebuttal-hub/case",
+            post(crate::cards::rebuttal_hub::api_rebuttal_create_case),
+        )
+        .route(
+            "/api/rebuttal-hub/case/{id}/round",
+            post(crate::cards::rebuttal_hub::api_rebuttal_add_round),
+        )
+        .route(
+            "/api/rebuttal-hub/case/{id}/mock-review",
+            post(crate::cards::rebuttal_hub::api_rebuttal_mock_review),
+        )
+        .route(
+            "/api/rebuttal-hub/case/{id}/draft",
+            post(crate::cards::rebuttal_hub::api_rebuttal_draft),
+        )
+        .route(
+            "/api/rebuttal-hub/case/{id}/verify",
+            post(crate::cards::rebuttal_hub::api_rebuttal_verify),
+        )
+        .route(
+            "/api/rebuttal-hub/case/{id}/export",
+            post(crate::cards::rebuttal_hub::api_rebuttal_export),
+        )
+        // v1.0 卡片 ⑥ 全谱系成果锻造工坊（第五章第 7 组）
+        .route(
+            "/api/deliverable-forge/priority-check",
+            post(crate::cards::deliverable_forge::api_forge_priority_check),
+        )
+        .route(
+            "/api/deliverable-forge/compile",
+            post(crate::cards::deliverable_forge::api_forge_compile),
+        )
+        .route(
+            "/api/deliverable-forge/export",
+            post(crate::cards::deliverable_forge::api_forge_export),
+        )
+        // v1.0 多模态公共上传与进度流（第五章第 8 组）
+        .route(
+            "/api/multimodal/upload",
+            post(crate::cards::multimodal_api::api_multimodal_upload),
+        )
+        .route(
+            "/api/multimodal/task/{id}/events",
+            get(crate::cards::multimodal_api::api_multimodal_task_events),
+        )
+        // 页面路由 / Page routes（v1.0 七大独立卡片 + 历史兼容入口）
         .route("/", get(routes::index_page))
         .route("/search", get(routes::search_page))
+        .route("/studio", get(routes::studio_page))
+        .route("/dissect", get(routes::dissect_page))
+        .route("/matrix", get(routes::matrix_page))
+        .route("/rebuttal", get(routes::rebuttal_page))
+        .route("/forge", get(routes::forge_page))
+        .route("/doc-viewer", get(routes::doc_viewer_page))
+        .route("/doc/{id}", get(routes::doc_viewer_by_id_page))
         .route("/patent/{id}", get(routes::patent_detail_page))
         .route("/ai", get(routes::ai_page))
         .route("/compare", get(routes::compare_page))

@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>多模态想法共创与可分叉推演 - 创研台 InnoForge</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="manifest" href="/static/manifest.json">
+  <meta name="theme-color" content="#0d1117">
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <script src="/static/purify.min.js"></script>
+  <script src="/static/i18n.js"></script>
+  <style>
+    .studio-shell { max-width: 1360px; margin: 0 auto; padding: 20px; }
+    .studio-header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 18px; }
+    .studio-tabs { display: inline-flex; gap: 8px; background: var(--bg-secondary, #161b22); padding: 4px; border-radius: 8px; border: 1px solid var(--border-color, #30363d); }
+    .studio-tab { padding: 8px 16px; border: none; border-radius: 6px; background: transparent; color: var(--text-secondary, #8b949e); cursor: pointer; font-weight: 600; }
+    .studio-tab.is-active { background: var(--accent, #2f81f7); color: #fff; }
+    .studio-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 18px; align-items: start; }
+    @media (max-width: 960px) { .studio-grid { grid-template-columns: 1fr; } }
+    .studio-panel { background: var(--bg-secondary, #161b22); border: 1px solid var(--border-color, #30363d); border-radius: 10px; padding: 16px; }
+    .studio-panel h2, .studio-panel h3 { margin-top: 0; font-size: 16px; }
+    .studio-chat-log { max-height: 360px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+    .studio-turn { padding: 10px 12px; border-radius: 8px; background: var(--bg-primary, #0d1117); border: 1px solid var(--border-color, #30363d); }
+    .studio-turn-role { font-size: 12px; font-weight: 600; color: var(--accent, #58a6ff); margin-bottom: 4px; }
+    .studio-followups { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .studio-followup-btn { font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--accent-border, #388bfd); background: transparent; color: var(--text-primary, #c9d1d9); cursor: pointer; }
+    .baseline-field { margin-bottom: 10px; }
+    .baseline-label { font-size: 12px; color: var(--text-secondary, #8b949e); margin-bottom: 4px; }
+    .baseline-list { margin: 0; padding-left: 18px; font-size: 13px; }
+    .tier-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 16px; }
+    .tier-btn { padding: 8px 14px; border-radius: 8px; border: 1px solid var(--border-color, #30363d); background: var(--bg-primary, #0d1117); color: var(--text-primary, #c9d1d9); cursor: pointer; }
+    .tier-btn.is-active { border-color: var(--accent, #2f81f7); background: rgba(47, 129, 247, 0.15); color: #fff; }
+    .dag-rail { display: flex; flex-direction: column; gap: 10px; }
+    .dag-step-card { padding: 12px; border-radius: 8px; border: 1px solid var(--border-color, #30363d); background: var(--bg-primary, #0d1117); display: flex; flex-direction: column; gap: 8px; }
+    .dag-step-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .dag-status-badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: #21262d; color: #c9d1d9; }
+    .dag-status-badge.is-completed { background: rgba(63, 185, 80, 0.2); color: #3fb950; }
+    .dag-status-badge.is-paused { background: rgba(210, 153, 34, 0.2); color: #d29922; }
+    .studio-form-grid { display: grid; gap: 10px; }
+    .studio-input, .studio-textarea { width: 100%; box-sizing: border-box; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border-color, #30363d); background: var(--bg-primary, #0d1117); color: var(--text-primary, #c9d1d9); font-family: inherit; }
+    .studio-btn-primary { padding: 9px 16px; border-radius: 6px; border: none; background: var(--accent, #2f81f7); color: #fff; font-weight: 600; cursor: pointer; }
+    .studio-btn-secondary { padding: 7px 12px; border-radius: 6px; border: 1px solid var(--border-color, #30363d); background: transparent; color: var(--text-primary, #c9d1d9); cursor: pointer; }
+    .is-hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="page-with-sidebar">
+    <aside id="page-sidebar" class="page-sidebar"></aside>
+    <main class="page-main studio-shell">
+      <header class="studio-header">
+        <div>
+          <h1 style="margin:0 0 4px;">卡片 ② · 多模态想法共创与可分叉推演</h1>
+          <p id="studio-session-meta" style="margin:0; font-size:13px; color:#8b949e;">前舱多轮图文共创收敛基线卡 · 后舱三档推演、A/B 分叉与实测证据锚点</p>
+        </div>
+        <div class="studio-tabs" role="tablist">
+          <button type="button" id="tab-front-cabin" class="studio-tab is-active" role="tab" aria-selected="true">前舱 · 图文共创</button>
+          <button type="button" id="tab-rear-cabin" class="studio-tab" role="tab" aria-selected="false">后舱 · 分叉推演与实验</button>
+        </div>
+      </header>
+
+      <!-- 前舱：多模态图文共创 + 右侧结构化技术方案基线卡 -->
+      <section id="cabin-front" class="studio-grid">
+        <div class="studio-panel">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+            <h2 style="margin:0;">多轮图文共创对话流</h2>
+            <div style="display:flex; gap:8px;">
+              <button type="button" id="btn-toggle-vault-picker" class="studio-btn-secondary">挂载我方前序资产</button>
+              <button type="button" id="btn-new-session" class="studio-btn-secondary">新建会话</button>
+            </div>
+          </div>
+
+          <if-vault-picker id="studio-vault-picker" filter-roles="own_asset" multi-select></if-vault-picker>
+
+          <div id="studio-chat-log" class="studio-chat-log" aria-live="polite"></div>
+
+          <if-multimodal-box id="studio-multimodal-box" allow-vault-mount="true" placeholder-key="studio.multimodal.placeholder"></if-multimodal-box>
+        </div>
+
+        <aside class="studio-panel">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 style="margin:0;">《结构化技术方案基线卡》</h2>
+            <span id="baseline-lock-badge" class="dag-status-badge">草稿收敛中</span>
+          </div>
+          <div id="baseline-card-view"></div>
+          <div style="margin-top:14px; display:flex; gap:10px; flex-wrap:wrap;">
+            <button type="button" id="btn-lock-enter-rear" class="studio-btn-primary">锁定基线并进入后舱推演</button>
+          </div>
+        </aside>
+      </section>
+
+      <!-- 后舱：三档运行 + 步骤轨分叉 + 卡点确认 + 实测数据回填 -->
+      <section id="cabin-rear" class="is-hidden">
+        <div class="studio-panel" style="margin-bottom:16px;">
+          <div class="tier-bar">
+            <span style="font-weight:600;">运行深度档位：</span>
+            <button type="button" class="tier-btn is-active" data-tier="quick_scout">1 档 · 快速探路 (3 步)</button>
+            <button type="button" class="tier-btn" data-tier="rd_experiment">2 档 · 研发与对照实验 (5 步)</button>
+            <button type="button" class="tier-btn" data-tier="full_protection_rebuttal">3 档 · 全套保护与抗辩预演 (7 步)</button>
+            <button type="button" id="btn-start-run" class="studio-btn-primary" style="margin-left:auto;">启动推演流水线</button>
+          </div>
+          <div id="run-progress-bar" style="font-size:13px; color:#8b949e;">尚未启动运行</div>
+        </div>
+
+        <div class="studio-grid">
+          <div class="studio-panel">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+              <h2 style="margin:0;">可分叉推演步骤轨</h2>
+              <span id="run-genealogy-badge" style="font-size:12px; color:#8b949e;"></span>
+            </div>
+            <div id="dag-step-rail" class="dag-rail"></div>
+
+            <!-- 人工卡点微调确认面板 -->
+            <div id="checkpoint-panel" class="is-hidden" style="margin-top:16px; padding:12px; border:1px solid #d29922; border-radius:8px;">
+              <h3 style="margin:0 0 8px; color:#d29922;">人工卡点确认 · 对照实验方案微调</h3>
+              <div class="studio-form-grid">
+                <input type="text" id="cp-title" class="studio-input" placeholder="实验标题">
+                <input type="text" id="cp-control" class="studio-input" placeholder="对照组规格 (Control)">
+                <input type="text" id="cp-test" class="studio-input" placeholder="实验组规格 (Test)">
+                <button type="button" id="btn-resume-checkpoint" class="studio-btn-primary">确认微调并恢复运行</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="studio-panel">
+            <h2>对照实验实测数据回填（生成 Exp 铁证锚点）</h2>
+            <form id="experiment-backfill-form" class="studio-form-grid">
+              <input type="text" id="exp-title" class="studio-input" placeholder="实验名称（如：液态金属微通道热阻对比）" required>
+              <input type="text" id="exp-hypothesis" class="studio-input" placeholder="验证假设">
+              <input type="text" id="exp-control" class="studio-input" placeholder="对照组规格（Control）">
+              <input type="text" id="exp-test" class="studio-input" placeholder="实验组规格（Test）">
+              <textarea id="exp-measured-json" class="studio-textarea" rows="4" placeholder='{"delta_temp_c": -8.4, "thermal_resistance_k_w": 0.19}' required></textarea>
+              <label style="display:flex; align-items:center; gap:8px; font-size:13px;">
+                <input type="checkbox" id="exp-verified"> 标记为已复核实测铁证（Verified）
+              </label>
+              <button type="submit" id="btn-submit-experiment" class="studio-btn-primary">提交实测数据并生成 Exp 锚点</button>
+            </form>
+            <div id="experiment-anchors-list" style="margin-top:14px; display:flex; flex-wrap:wrap; gap:8px;"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script type="module" src="/static/js/cards/studio.js"></script>
+</body>
+</html>

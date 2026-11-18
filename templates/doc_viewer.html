@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>文献结构化精读器 - 创研台</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="manifest" href="/static/manifest.json">
+<meta name="theme-color" content="#0d1117">
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<script src="/static/purify.min.js"></script>
+<style>
+.omni-viewer-toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+.omni-viewer-toolbar input { flex: 1; min-width: 240px; }
+.omni-reader-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; border-bottom: 1px solid var(--border-muted, #30363d); padding-bottom: 12px; margin-bottom: 12px; }
+.omni-reader-meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
+.omni-reader-title { margin: 4px 0; font-size: 1.15rem; }
+.omni-reader-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.omni-reader-abstract { background: var(--bg-elevated, #161b22); padding: 10px 12px; border-radius: 8px; margin-bottom: 14px; line-height: 1.55; }
+.omni-viewer-split { display: grid; grid-template-columns: 2fr 1fr; gap: 14px; align-items: start; }
+@media (max-width: 960px) { .omni-viewer-split { grid-template-columns: 1fr; } }
+.omni-chunk-item { border: 1px solid var(--border-muted, #30363d); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; background: var(--bg-elevated, #161b22); }
+.omni-chunk-child { margin-left: 18px; border-left: 3px solid var(--accent, #58a6ff); }
+.omni-chunk-item.is-highlighted { border-color: var(--accent, #58a6ff); box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.25); }
+.omni-chunk-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
+.omni-chunk-body { line-height: 1.6; white-space: pre-wrap; }
+.omni-numeral-list { display: flex; flex-direction: column; gap: 6px; }
+.omni-numeral-pill { display: flex; align-items: center; gap: 6px; text-align: left; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border-muted, #30363d); background: var(--bg-elevated, #161b22); color: var(--text-primary, #e6edf3); cursor: pointer; }
+.omni-numeral-pill.is-active, .omni-numeral-pill:hover { border-color: var(--accent, #58a6ff); background: rgba(88, 166, 255, 0.14); }
+.omni-numeral-mark { background: rgba(245, 158, 11, 0.35); color: inherit; padding: 0 3px; border-radius: 3px; }
+.omni-badge, .omni-badge-subtle { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: rgba(88, 166, 255, 0.14); border: 1px solid rgba(88, 166, 255, 0.35); }
+.omni-error { color: #f87171; padding: 10px; }
+</style>
+</head>
+<body>
+<div class="page-with-sidebar">
+<aside id="page-sidebar" class="page-sidebar"></aside>
+<main class="container page-main" id="doc-viewer-root">
+  <div class="panel">
+    <div class="omni-viewer-toolbar">
+      <h3 style="margin:0; margin-right:auto;" data-i18n="omni.docViewerTitle">文献结构化精读器（权项树 · 段落 · 附图部件对照）</h3>
+      <input type="text" id="doc-viewer-id-input" placeholder="输入金库文献 ID（如 pat-xxx 或 oa-xxx）">
+      <button type="button" class="btn-primary btn-sm" id="doc-viewer-load-btn">加载文献</button>
+      <a href="/search" class="btn-secondary btn-sm">返回全域检索</a>
+    </div>
+    <div id="doc-viewer-content" class="muted">请通过检索结果进入，或在上方输入文献 ID 加载结构化精读视图。</div>
+  </div>
+</main>
+</div>
+
+<script src="/static/i18n.js"></script>
+<script>
+if (typeof applyI18nCommon === 'function') {
+  applyI18nCommon();
+}
+if (typeof renderSidebar === 'function') {
+  renderSidebar('search');
+}
+</script>
+<script type="module" src="/static/js/cards/search.js"></script>
+</body>
+</html>

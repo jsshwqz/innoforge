@@ -53,7 +53,8 @@ function extractDefs(html, defined) {
     for (const modRe of [modReA, modReB]) {
         let mm;
         while ((mm = modRe.exec(html)) !== null) {
-            const entryPath = resolve(process.cwd(), 'static', mm[1]);
+            const cleanRel = mm[1].split('?')[0].split('#')[0];
+            const entryPath = resolve(process.cwd(), 'static', cleanRel);
             collectModuleTree(entryPath, defined, visited);
         }
     }

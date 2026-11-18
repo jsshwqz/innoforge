@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>单篇文献扒皮与深析 - 创研台 InnoForge</title>
+<link rel="stylesheet" href="/static/style.css?v={{timestamp}}">
+<link rel="manifest" href="/static/manifest.json">
+<meta name="theme-color" content="#0d1117">
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<style>
+.dissect-shell {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+.dissect-topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.dissect-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.dissect-split {
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) minmax(360px, 1.15fr);
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 980px) {
+  .dissect-split {
+    grid-template-columns: 1fr;
+  }
+}
+.dissect-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 520px;
+}
+.dissect-chunks {
+  max-height: 460px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-right: 4px;
+}
+.dissect-chunk-card {
+  border: 1px solid var(--border-color, #30363d);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--bg-secondary, rgba(255, 255, 255, 0.02));
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.dissect-chunk-card.is-highlighted {
+  border-color: var(--accent-color, #58a6ff);
+  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.25);
+}
+.dissect-chunk-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  opacity: 0.85;
+}
+.dissect-chunk-body {
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.dissect-numeral-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 140px;
+  overflow-y: auto;
+}
+.dissect-numeral-pill {
+  border: 1px solid var(--border-color, #30363d);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 12px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.dissect-numeral-pill.is-active {
+  border-color: var(--accent-color, #58a6ff);
+  background: rgba(88, 166, 255, 0.14);
+}
+.dissect-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  border-bottom: 1px solid var(--border-color, #30363d);
+  padding-bottom: 8px;
+}
+.dissect-tab-btn {
+  border: 1px solid var(--border-color, #30363d);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.dissect-tab-btn.is-active {
+  border-color: var(--accent-color, #58a6ff);
+  background: rgba(88, 166, 255, 0.16);
+  font-weight: 600;
+}
+.dissect-report-box {
+  font-size: 13.5px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 360px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color, #30363d);
+  border-radius: 8px;
+}
+.dissect-chip-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.dissect-atom-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.dissect-atom-card {
+  border: 1px solid var(--border-color, #30363d);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 12.5px;
+}
+.dissect-qa-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.dissect-qa-msg {
+  border: 1px solid var(--border-color, #30363d);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+  white-space: pre-wrap;
+}
+.dissect-meta-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+</style>
+</head>
+<body>
+<div class="page-with-sidebar">
+  <aside id="page-sidebar" class="page-sidebar"></aside>
+  <main class="container page-main">
+    <div class="dissect-shell">
+      <section class="panel">
+        <div class="dissect-topbar">
+          <div>
+            <h2 data-i18n="dissect.title">单篇文献扒皮与深析</h2>
+            <p class="muted" data-i18n="dissect.subtitle">拖入单篇专利/论文或从本地金库点选，执行无截断切片入库、双模式深析、FTO 排雷与带图局部追问。</p>
+          </div>
+          <div class="dissect-controls">
+            <select id="dissect-mode-select" aria-label="深析模式">
+              <option value="auto">自动识别（专利 / 论文）</option>
+              <option value="patent">专利模式（方案 + 附图 + FTO）</option>
+              <option value="paper">论文模式（机理 + 复现 + 局限性）</option>
+            </select>
+            <label class="dissect-privacy-toggle">
+              <input type="checkbox" id="dissect-privacy-lock">
+              <span data-i18n="dissect.privacyLock">涉密离线锁</span>
+            </label>
+            <button type="button" id="btn-open-vault-picker" class="btn-secondary">从金库点选文献</button>
+            <button type="button" id="btn-run-analyze" class="btn-primary">开始双模式深析</button>
+          </div>
+        </div>
+
+        <div class="dissect-meta-row">
+          <input type="text" id="dissect-title-input" placeholder="文献标题（可选，上传文件时自动识别）">
+          <input type="text" id="dissect-external-id-input" placeholder="专利公开号（如 CN1123456A）或论文 DOI（10.xxxx/...）">
+        </div>
+
+        <if-multimodal-box
+          id="dissect-ingest-box"
+          placeholder-key="dissect.ingestPlaceholder"
+          accept-types=".pdf,.docx,.txt,.md,.csv,.png,.jpg,.jpeg,.webp">
+        </if-multimodal-box>
+      </section>
+
+      <section class="dissect-split">
+        <!-- 左栏：原文与附图部件对照阅读器 -->
+        <div class="panel dissect-pane">
+          <div class="dissect-topbar">
+            <h3>原文切片与附图部件对照阅读器</h3>
+            <span id="dissect-doc-badge" class="muted">尚未加载文献</span>
+          </div>
+          <div>
+            <div class="muted" style="font-size:12px;margin-bottom:6px;">附图部件标号词典（点击可筛选关联切片并带入追问）：</div>
+            <div id="dissect-numerals-container" class="dissect-numeral-list"></div>
+          </div>
+          <div id="dissect-chunks-container" class="dissect-chunks"></div>
+        </div>
+
+        <!-- 右栏：专利 FTO / 论文复现与局限性多标签页 + 引证芯片联动 + 带图追问 -->
+        <div class="panel dissect-pane">
+          <div id="dissect-tabs" class="dissect-tabs">
+            <button type="button" class="dissect-tab-btn is-active" data-tab="report">深析报告</button>
+            <button type="button" class="dissect-tab-btn" data-tab="atoms">沉淀特征原子</button>
+            <button type="button" class="dissect-tab-btn" data-tab="ask">带图局部追问</button>
+          </div>
+
+          <div id="dissect-panel-report">
+            <div id="dissect-subtabs" class="dissect-tabs" style="margin-bottom:8px;"></div>
+            <div id="dissect-citations-bar" class="dissect-chip-bar" style="margin-bottom:8px;"></div>
+            <div id="dissect-report-box" class="dissect-report-box">请先拖入文献或从金库点选一篇文献，再点击「开始双模式深析」。</div>
+          </div>
+
+          <div id="dissect-panel-atoms" hidden>
+            <div id="dissect-atoms-list" class="dissect-atom-list"></div>
+          </div>
+
+          <div id="dissect-panel-ask" hidden>
+            <div id="dissect-selection-hint" class="muted" style="font-size:12px;margin-bottom:8px;">
+              提示：在左栏点击任意切片的「框选追问」或点击附图部件标号，即可锁定局部上下文；下方支持粘贴截图追问。
+            </div>
+            <div id="dissect-qa-thread" class="dissect-qa-thread" style="margin-bottom:10px;"></div>
+            <if-multimodal-box
+              id="dissect-ask-box"
+              placeholder-key="dissect.askPlaceholder"
+              accept-types=".png,.jpg,.jpeg,.webp">
+            </if-multimodal-box>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<if-vault-picker id="dissect-vault-picker"></if-vault-picker>
+
+<script src="/static/i18n.js?v={{timestamp}}"></script>
+<script type="module" src="/static/js/cards/dissect.js?v={{timestamp}}"></script>
+</body>
+</html>

@@ -16,7 +16,104 @@
     <div class="page-with-sidebar">
     <aside id="page-sidebar" class="page-sidebar"></aside>
     <div class="settings-container page-main">
-        <div class="page-title-bar"><h2>系统设置</h2><span id="version-display" style="margin-left:auto;color:#8b949e;font-size:13px;"></span></div>
+        <div class="page-title-bar"><h2>系统配置与知识金库</h2><span id="version-display" style="margin-left:auto;color:#8b949e;font-size:13px;"></span></div>
+
+        <!-- v1.0 卡片 ⑦ 四大核心面板 -->
+        <section class="setting-group" id="v1-health-panel">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+                <h3>① 四维环境健康自检</h3>
+                <button type="button" class="btn-gray" id="v1-health-refresh-btn">立即重新自检</button>
+            </div>
+            <p>纯本机无阻塞毫秒级检查：SQLite WAL/v26、网络回环与同源鉴权、9 服务商容灾与看图就绪度、四维检索与三级 OCR 状态。</p>
+            <div id="v1-health-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:10px;"></div>
+        </section>
+
+        <section class="setting-group" id="v1-llm-router-panel">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+                <h3>② 9 服务商容灾链与看图路由</h3>
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <label style="font-size:13px;display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
+                        <input type="checkbox" id="v1-privacy-offline">
+                        <span>涉密离线锁（禁止外发云端看图）</span>
+                    </label>
+                    <button type="button" class="btn-save" id="v1-save-router-btn">保存容灾与路由配置</button>
+                </div>
+            </div>
+            <p>密钥全程脱敏掩码回显；点击「探活」执行 3 秒短超时异步连通性探测。</p>
+            <div style="display:flex;gap:14px;flex-wrap:wrap;margin:10px 0;">
+                <label style="font-size:13px;">看图首选服务商
+                    <select id="v1-vision-provider" style="margin-left:6px;"></select>
+                </label>
+                <label style="font-size:13px;">AI 日调用预算
+                    <input type="number" id="v1-daily-budget" min="1" max="10000" value="200" style="width:90px;margin-left:6px;">
+                </label>
+                <label style="font-size:13px;">本机 Umi-OCR 地址
+                    <input type="text" id="v1-umi-ocr-url" placeholder="http://127.0.0.1:1224" style="width:200px;margin-left:6px;">
+                </label>
+            </div>
+            <div id="v1-providers-list" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px;margin-top:10px;"></div>
+        </section>
+
+        <section class="setting-group" id="v1-pack-import-panel">
+            <h3>③ 免 Python 原生公开文献/专利数据包流式导入</h3>
+            <p>支持拖拽或粘贴 <code>.json</code> / <code>.jsonl</code> / <code>.csv</code> / <code>.bib</code> (BibTeX) 数据包，纯 Rust 单事务切分并灌入 <code>knowledge_docs</code> 与 <code>doc_chunks</code>。</p>
+            <div id="v1-pack-dropzone" style="border:2px dashed var(--border);border-radius:8px;padding:18px;text-align:center;cursor:pointer;margin:10px 0;">
+                <input type="file" id="v1-pack-file-input" accept=".json,.jsonl,.ndjson,.csv,.bib,.txt" style="display:none;">
+                <span id="v1-pack-drop-label">拖拽公开文献/专利数据包到此处，或点击选择文件</span>
+            </div>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px;align-items:center;">
+                <select id="v1-pack-format">
+                    <option value="auto">自动识别格式</option>
+                    <option value="json_array">JSON 数组</option>
+                    <option value="jsonl">JSONL 行流</option>
+                    <option value="csv">CSV 表格</option>
+                    <option value="bibtex">BibTeX (.bib)</option>
+                </select>
+                <select id="v1-pack-default-kind">
+                    <option value="patent">默认类型：专利 (patent)</option>
+                    <option value="journal_paper">默认类型：期刊论文 (journal_paper)</option>
+                    <option value="conf_paper">默认类型：会议论文 (conf_paper)</option>
+                    <option value="preprint">默认类型：预印本 (preprint)</option>
+                </select>
+                <select id="v1-pack-default-role">
+                    <option value="general_ref">默认角色：通用参考 (general_ref)</option>
+                    <option value="own_asset">默认角色：我方已有成果 (own_asset)</option>
+                    <option value="competitor_wall">默认角色：竞品壁垒 (competitor_wall)</option>
+                    <option value="review_cited">默认角色：审查引证 (review_cited)</option>
+                </select>
+                <button type="button" class="btn-save" id="v1-pack-import-btn">立即流式灌库</button>
+            </div>
+            <textarea id="v1-pack-textarea" rows="4" placeholder="也可以直接粘贴 JSON / JSONL / CSV / BibTeX 内容..." style="width:100%;font-family:monospace;font-size:12px;"></textarea>
+            <div id="v1-pack-result" class="status-message" style="margin-top:8px;"></div>
+        </section>
+
+        <section class="setting-group" id="v1-vault-manager-panel">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+                <h3>④ 本机知识金库总表（自有成果与公开状态管理）</h3>
+                <div id="v1-vault-stats" style="font-size:12px;color:var(--text-secondary);"></div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0;">
+                <input type="text" id="v1-vault-search-q" placeholder="按标题 / 编号 / 作者过滤..." style="flex:1;min-width:180px;">
+                <select id="v1-vault-role-filter">
+                    <option value="all">全部资产角色</option>
+                    <option value="own_asset">我方已有成果 (own_asset)</option>
+                    <option value="competitor_wall">竞品壁垒 (competitor_wall)</option>
+                    <option value="review_cited">审查引证 (review_cited)</option>
+                    <option value="general_ref">通用参考 (general_ref)</option>
+                </select>
+                <select id="v1-vault-kind-filter">
+                    <option value="all">全部文献类型</option>
+                    <option value="patent">专利</option>
+                    <option value="journal_paper">期刊论文</option>
+                    <option value="conf_paper">会议论文</option>
+                    <option value="preprint">预印本</option>
+                    <option value="code_repo">开源代码</option>
+                    <option value="standard">行业标准</option>
+                </select>
+                <button type="button" class="btn-gray" id="v1-vault-reload-btn">刷新金库列表</button>
+            </div>
+            <div id="v1-vault-docs-list" style="display:flex;flex-direction:column;gap:8px;"></div>
+        </section>
 
         <div class="setting-group">
             <h3>🔑 SerpAPI 搜索配置（多 Key 轮询）</h3>
@@ -1416,5 +1513,6 @@
             }
         }
 </script>
+<script type="module" src="/static/js/cards/settings.js"></script>
 </body>
 </html>

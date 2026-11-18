@@ -9,6 +9,7 @@
 pub mod ai;
 pub mod app;
 mod cad;
+pub mod cards;
 pub mod common;
 pub(crate) mod context;
 pub mod core;

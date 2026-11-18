@@ -38,12 +38,12 @@ async fn start_mock_server() -> (String, MockServerState) {
                 Json(json!({
                     "organic_results": [
                         {
-                            "publication_number": "CN117654321A",
+                            "publication_number": "CN990001001A",
                             "title": "一种固态电池复合电解质热管理系统",
                             "snippet": "公开了一种基于相变材料的固态电池热管理结构。",
                             "assignee": "某新能源科技有限公司",
                             "publication_date": "2024-03-01",
-                            "patent_link": "https://patents.google.com/patent/CN117654321A"
+                            "patent_link": "https://patents.google.com/patent/CN990001001A"
                         }
                     ]
                 }))

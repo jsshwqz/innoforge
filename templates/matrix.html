@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>多方案对决与矩阵卡 - 创研台</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="manifest" href="/static/manifest.json">
+<meta name="theme-color" content="#0d1117">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<style>
+.matrix-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+.matrix-title-input {
+  flex: 1 1 260px;
+  min-width: 220px;
+}
+.matrix-slots-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.matrix-slot-card {
+  background: var(--bg-subtle, #161b22);
+  border: 1px solid var(--border-muted, #30363d);
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.matrix-slot-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.matrix-slot-badge {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary, #8b949e);
+}
+.matrix-slot-row {
+  display: flex;
+  gap: 8px;
+}
+.matrix-slot-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border-muted, #30363d);
+  background: var(--bg-canvas, #0d1117);
+  color: var(--text-primary, #e6edf3);
+  font-size: 13px;
+}
+.matrix-slot-textarea {
+  min-height: 76px;
+  resize: vertical;
+  font-family: inherit;
+}
+.matrix-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 14px 0;
+}
+.matrix-tab-btn {
+  padding: 7px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border-muted, #30363d);
+  background: var(--bg-subtle, #161b22);
+  color: var(--text-secondary, #8b949e);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+.matrix-tab-btn.is-active {
+  border-color: var(--accent-border, #388bfd);
+  background: var(--accent-subtle, rgba(56, 139, 253, 0.15));
+  color: var(--text-primary, #e6edf3);
+}
+.matrix-banner--warn {
+  border: 1px solid #d29922;
+  background: rgba(210, 153, 34, 0.12);
+  color: #f0c674;
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  font-size: 13px;
+}
+.matrix-diff-block {
+  border: 1px solid var(--border-muted, #30363d);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  background: var(--bg-canvas, #0d1117);
+}
+.matrix-diff-meta {
+  font-size: 12px;
+  color: var(--text-secondary, #8b949e);
+  margin-bottom: 6px;
+}
+.matrix-diff-stream {
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.matrix-diff-eq { color: var(--text-primary, #e6edf3); }
+.matrix-diff-add {
+  background: rgba(46, 160, 67, 0.25);
+  color: #7ee787;
+  padding: 0 2px;
+  border-radius: 3px;
+}
+.matrix-diff-rm {
+  background: rgba(248, 81, 73, 0.22);
+  color: #ffa198;
+  text-decoration: line-through;
+  padding: 0 2px;
+  border-radius: 3px;
+}
+.matrix-export-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-muted, #30363d);
+}
+.matrix-rec-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+</style>
+</head>
+<body>
+<div class="page-with-sidebar">
+  <aside id="page-sidebar" class="page-sidebar"></aside>
+  <main class="container page-main" style="max-width: 1200px;">
+    <div class="page-title-bar">
+      <h2 data-i18n="matrix.title">多方案对决与矩阵卡</h2>
+    </div>
+
+    <section class="panel">
+      <div class="matrix-toolbar">
+        <input id="matrix-title" type="text" class="matrix-slot-input matrix-title-input" placeholder="对决矩阵标题（可选，例如：边缘端推理引擎三方案对决）">
+        <button id="btn-add-slot" type="button" class="if-mm-btn if-mm-btn--ghost">+ 添加方案槽位 (2～6)</button>
+        <button id="btn-open-vault" type="button" class="if-mm-btn if-mm-btn--ghost">从知识金库挂载</button>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
+          <input id="chk-ai-synthesis" type="checkbox">
+          <span>AI 深度融合建议</span>
+        </label>
+        <button id="btn-run-compare" type="button" class="if-mm-btn if-mm-btn--primary">生成三维对决矩阵</button>
+      </div>
+
+      <div id="scheme-slots" class="matrix-slots-grid"></div>
+      <if-vault-picker id="vault-picker" multi-select="true"></if-vault-picker>
+    </section>
+
+    <section class="panel" style="margin-top: 14px;">
+      <div id="perspective-tabs" class="matrix-tabs" role="tablist">
+        <button type="button" class="matrix-tab-btn is-active" data-mode="engineering_spec">工程性能与成本</button>
+        <button type="button" class="matrix-tab-btn" data-mode="paper_baseline">学术 SOTA Baseline 增益</button>
+        <button type="button" class="matrix-tab-btn" data-mode="claim_chart">专利 Claim Chart 覆盖度</button>
+      </div>
+
+      <div id="stitching-banner" class="matrix-banner--warn" hidden></div>
+
+      <if-matrix-table id="matrix-table" matrix-mode="engineering_spec"></if-matrix-table>
+
+      <div id="export-bar" class="matrix-export-bar">
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;">
+          <input id="chk-ack-priority" type="checkbox">
+          <span>内部草稿确认导出（如含未申请专利方案）</span>
+        </label>
+        <div style="display:flex;gap:8px;">
+          <button id="btn-export-xlsx" type="button" class="if-mm-btn if-mm-btn--ghost">导出 Excel (.xlsx)</button>
+          <button id="btn-export-pdf" type="button" class="if-mm-btn if-mm-btn--primary">导出 PDF (.pdf)</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="diff-panel" class="panel" style="margin-top: 14px;" hidden>
+      <h3 style="margin-top:0;">Hirschberg 线性空间语义差异比对</h3>
+      <div id="diff-list"></div>
+    </section>
+
+    <section id="fusion-panel" class="panel" style="margin-top: 14px;" hidden>
+      <h3 style="margin-top:0;">多方案融合优化建议</h3>
+      <ul id="fusion-rec-list" class="matrix-rec-list"></ul>
+      <div id="ai-synthesis-box" style="margin-top:10px;font-size:13px;white-space:pre-wrap;"></div>
+    </section>
+  </main>
+</div>
+
+<script src="/static/purify.min.js"></script>
+<script src="/static/i18n.js"></script>
+<script type="module" src="/static/js/cards/matrix.js"></script>
+</body>
+</html>

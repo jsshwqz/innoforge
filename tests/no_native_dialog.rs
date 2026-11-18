@@ -8,8 +8,15 @@ mod tests {
     const TEMPLATES: &[(&str, &str)] = &[
         ("ai.html", include_str!("../templates/ai.html")),
         ("compare.html", include_str!("../templates/compare.html")),
+        ("dissect.html", include_str!("../templates/dissect.html")),
+        (
+            "doc_viewer.html",
+            include_str!("../templates/doc_viewer.html"),
+        ),
+        ("forge.html", include_str!("../templates/forge.html")),
         ("idea.html", include_str!("../templates/idea.html")),
         ("index.html", include_str!("../templates/index.html")),
+        ("matrix.html", include_str!("../templates/matrix.html")),
         (
             "office_action_response.html",
             include_str!("../templates/office_action_response.html"),
@@ -18,8 +25,10 @@ mod tests {
             "patent_detail.html",
             include_str!("../templates/patent_detail.html"),
         ),
+        ("rebuttal.html", include_str!("../templates/rebuttal.html")),
         ("search.html", include_str!("../templates/search.html")),
         ("settings.html", include_str!("../templates/settings.html")),
+        ("studio.html", include_str!("../templates/studio.html")),
     ];
 
     #[test]

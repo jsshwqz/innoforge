@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>审查与审稿三栖抗辩 - 创研台 InnoForge</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="manifest" href="/static/manifest.json">
+<meta name="theme-color" content="#0d1117">
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<script src="/static/purify.min.js"></script>
+<script src="/static/i18n.js"></script>
+<style>
+  .rebuttal-topbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .mode-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .mode-tab {
+    padding: 8px 16px;
+    border-radius: 8px;
+    border: 1px solid var(--border, #30363d);
+    background: var(--bg-elevated, #161b22);
+    color: var(--text-secondary, #8b949e);
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    transition: all 0.15s ease;
+  }
+  .mode-tab.is-active {
+    background: var(--accent, #6366f1);
+    border-color: var(--accent, #6366f1);
+    color: #fff;
+  }
+  .deadline-strip {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    background: var(--bg-elevated, #161b22);
+    border: 1px solid var(--border, #30363d);
+    margin-bottom: 16px;
+  }
+  .deadline-badge {
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    background: rgba(56, 139, 253, 0.15);
+    color: #79c0ff;
+    border: 1px solid rgba(56, 139, 253, 0.35);
+  }
+  .deadline-badge.is-urgent {
+    background: rgba(248, 81, 73, 0.18);
+    color: #ffa198;
+    border-color: rgba(248, 81, 73, 0.45);
+  }
+  .rebuttal-grid-3 {
+    display: grid;
+    grid-template-columns: minmax(280px, 1fr) minmax(380px, 1.45fr) minmax(300px, 1fr);
+    gap: 16px;
+    align-items: start;
+  }
+  @media (max-width: 1180px) {
+    .rebuttal-grid-3 {
+      grid-template-columns: 1fr;
+    }
+  }
+  .reb-field {
+    margin-bottom: 12px;
+  }
+  .reb-field label {
+    display: block;
+    font-size: 12px;
+    color: var(--text-muted, #8b949e);
+    margin-bottom: 5px;
+    font-weight: 600;
+  }
+  .reb-input, .reb-select, .reb-textarea {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border, #30363d);
+    background: var(--bg-input, #0d1117);
+    color: var(--text-primary, #e6edf3);
+    font-size: 13px;
+    font-family: inherit;
+  }
+  .reb-textarea {
+    min-height: 110px;
+    resize: vertical;
+    line-height: 1.5;
+  }
+  .diff-pair {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  @media (max-width: 780px) {
+    .diff-pair {
+      grid-template-columns: 1fr;
+    }
+  }
+  .issue-card {
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border, #30363d);
+    background: var(--bg-input, #0d1117);
+    margin-bottom: 8px;
+  }
+  .issue-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 4px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .sev-pill {
+    font-size: 11px;
+    padding: 2px 7px;
+    border-radius: 999px;
+    text-transform: uppercase;
+  }
+  .sev-high { background: rgba(248, 81, 73, 0.2); color: #ffa198; }
+  .sev-medium { background: rgba(210, 153, 34, 0.2); color: #fde68a; }
+  .sev-low { background: rgba(63, 185, 80, 0.2); color: #86efac; }
+  .gate-lamp-banner {
+    padding: 12px;
+    border-radius: 8px;
+    font-weight: 700;
+    font-size: 14px;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .gate-lamp-banner.lamp-green {
+    background: rgba(63, 185, 80, 0.16);
+    border: 1px solid rgba(63, 185, 80, 0.45);
+    color: #86efac;
+  }
+  .gate-lamp-banner.lamp-yellow {
+    background: rgba(210, 153, 34, 0.16);
+    border: 1px solid rgba(210, 153, 34, 0.45);
+    color: #fde68a;
+  }
+  .gate-lamp-banner.lamp-red {
+    background: rgba(248, 81, 73, 0.18);
+    border: 1px solid rgba(248, 81, 73, 0.5);
+    color: #ffa198;
+  }
+  .dim-row {
+    margin-bottom: 10px;
+  }
+  .dim-row-head {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    margin-bottom: 4px;
+    color: var(--text-secondary, #c9d1d9);
+  }
+  .dim-bar-track {
+    height: 7px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    overflow: hidden;
+  }
+  .dim-bar-fill {
+    height: 100%;
+    border-radius: 999px;
+    background: var(--accent, #6366f1);
+    transition: width 0.25s ease;
+  }
+  .chips-wrap {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 6px;
+  }
+  .round-pill-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .round-pill {
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    border: 1px solid var(--border, #30363d);
+    background: var(--bg-input, #0d1117);
+    color: var(--text-secondary, #c9d1d9);
+    cursor: pointer;
+  }
+  .round-pill.is-active {
+    border-color: var(--accent, #6366f1);
+    color: #fff;
+    background: rgba(99, 102, 241, 0.25);
+  }
+  .alert-list {
+    margin: 8px 0 0;
+    padding-left: 16px;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+</style>
+</head>
+<body>
+<div class="page-with-sidebar">
+  <aside id="page-sidebar" class="page-sidebar"></aside>
+  <main class="container page-main">
+    <div class="rebuttal-topbar">
+      <div>
+        <h2 style="margin:0 0 4px;" data-i18n="rebuttal.title">审查与审稿三栖抗辩中心</h2>
+        <div class="muted" style="font-size:13px;" id="rebuttal-case-status">尚未创建案件 · 请选择抗辩模式并创建案件</div>
+      </div>
+      <div class="mode-tabs" role="tablist" aria-label="三栖抗辩模式">
+        <button type="button" class="mode-tab is-active" data-mode="patent_oa">① 已有专利官方 OA/复审</button>
+        <button type="button" class="mode-tab" data-mode="patent_pre_mock">② 新专利提交前魔鬼预审</button>
+        <button type="button" class="mode-tab" data-mode="paper_rebuttal">③ 期刊论文模拟审稿与 Rebuttal</button>
+      </div>
+    </div>
+
+    <!-- 绝限倒计时与轮次历史栏 -->
+    <div class="deadline-strip">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <label for="reb-oa-type" style="font-size:12px;color:var(--text-muted);">通知书/轮次类型</label>
+        <select id="reb-oa-type" class="reb-select" style="width:auto;min-width:150px;">
+          <option value="first_exam">一通 OA1 (4个月)</option>
+          <option value="second_rejection">二通/驳回 (2个月)</option>
+          <option value="reject_review">复审请求 (3个月)</option>
+          <option value="abnormal">非正常通知 (15工作日)</option>
+        </select>
+        <label for="reb-dispatch-date" style="font-size:12px;color:var(--text-muted);">发文/审稿日</label>
+        <input type="date" id="reb-dispatch-date" class="reb-input" style="width:auto;">
+        <span id="reb-deadline-badge" class="deadline-badge">待设定发文日</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-left:auto;flex-wrap:wrap;">
+        <div id="reb-rounds-bar" class="round-pill-list"></div>
+        <button type="button" id="btn-add-round" class="btn-secondary btn-sm">+ 新增轮次 (二通/R2)</button>
+        <button type="button" id="btn-create-case" class="btn-primary btn-sm">保存/新建案件</button>
+      </div>
+    </div>
+
+    <!-- 三栏专业攻坚布局 -->
+    <div class="rebuttal-grid-3">
+      <!-- 左栏：案件文献/手稿与引证锚点对照 -->
+      <section class="panel" aria-label="案件文献与锚点对照">
+        <div class="panel-header">
+          <h3 style="margin:0;">案件文献与锚点对照</h3>
+          <button type="button" id="btn-open-vault" class="btn-secondary btn-sm">从金库挂载</button>
+        </div>
+
+        <div class="reb-field">
+          <label for="reb-title">案件标题</label>
+          <input type="text" id="reb-title" class="reb-input" placeholder="例如：高导热氮化铝陶瓷散热基板一通答复 / NeurIPS R1 Rebuttal">
+        </div>
+
+        <div class="reb-field">
+          <label for="reb-own-doc">我方主体文献 ID（`knowledge_docs.doc_id`）</label>
+          <input type="text" id="reb-own-doc" class="reb-input" placeholder="可选：如 own_pat_001 或 paper_ms_01">
+        </div>
+
+        <div class="reb-field">
+          <label for="reb-ref-docs">对比专利 / 真实 DOI 文献 ID（逗号分隔）</label>
+          <input type="text" id="reb-ref-docs" class="reb-input" placeholder="如：ref_d1, ref_doi_10_1038">
+        </div>
+
+        <div class="reb-field">
+          <label for="reb-exp-ids">实测对照实验 ID（逗号分隔，生成 `[Exp:id]` 锚点）</label>
+          <input type="text" id="reb-exp-ids" class="reb-input" placeholder="如：exp_001, exp_ablation_2">
+        </div>
+
+        <div class="reb-field">
+          <label for="reb-knowhow">商业秘密脱敏词条（逗号分隔）</label>
+          <input type="text" id="reb-knowhow" class="reb-input" placeholder="如：内部配方A-17, 烧结曲线保密参数">
+        </div>
+
+        <div class="reb-field">
+          <label>审查意见通知书 / 审稿信多模态输入</label>
+          <if-multimodal-box id="reb-notice-box" placeholder-key="rebuttal.noticePlaceholder" allow-vault-mount></if-multimodal-box>
+        </div>
+
+        <if-vault-picker id="reb-vault-picker" multi-select></if-vault-picker>
+
+        <div>
+          <label style="font-size:12px;color:var(--text-muted);font-weight:600;">已识别 / 核验引证锚点</label>
+          <div id="reb-anchor-chips" class="chips-wrap"></div>
+        </div>
+      </section>
+
+      <!-- 中栏：质疑拆解、双轨策略与权项/正文修订编辑器 -->
+      <section class="panel" aria-label="质疑拆解与双轨修订编辑器">
+        <div class="panel-header">
+          <h3 style="margin:0;">质疑拆解 · 双轨策略 · 修订编辑</h3>
+          <div style="display:flex;gap:8px;">
+            <button type="button" id="btn-mock-review" class="btn-secondary btn-sm">发起模拟审查/审稿</button>
+            <button type="button" id="btn-draft-rebuttal" class="btn-primary btn-sm">生成双轨答复草稿</button>
+          </div>
+        </div>
+
+        <div class="reb-field">
+          <label for="reb-strategy-track">双轨策略裁决</label>
+          <select id="reb-strategy-track" class="reb-select">
+            <option value="amend_and_argue">修改权项/正文 + 精准争辩（Amend &amp; Argue）</option>
+            <option value="pure_argument">纯争辩/跨实施例拼凑反驳（Pure Argument）</option>
+            <option value="add_experiment_and_revise">补实测实验 [Exp:id] + 逐条返修（Add Exp &amp; Revise）</option>
+          </select>
+        </div>
+
+        <div class="reb-field">
+          <label>高强度质疑拆解清单</label>
+          <div id="reb-issues-list">
+            <div class="muted" style="font-size:12px;">点击右上角「发起模拟审查/审稿」或先创建案件以拆解质疑要点。</div>
+          </div>
+        </div>
+
+        <div class="diff-pair">
+          <div class="reb-field">
+            <label for="reb-original-text">修改前原权利要求 / 原手稿</label>
+            <textarea id="reb-original-text" class="reb-textarea" placeholder="粘贴原权利要求或原论文段落..."></textarea>
+          </div>
+          <div class="reb-field">
+            <label for="reb-amended-text">修改后权利要求 / 返修稿（生成修订留痕）</label>
+            <textarea id="reb-amended-text" class="reb-textarea" placeholder="粘贴或编辑修改后的权利要求/返修正文..."></textarea>
+          </div>
+        </div>
+
+        <div class="reb-field">
+          <label for="reb-draft-text">意见陈述书 / Response to Reviewers 全文草稿（须绑定 `[doc_id#anchor]` 或 `[Exp:id]`）</label>
+          <textarea id="reb-draft-text" class="reb-textarea" style="min-height:190px;" placeholder="点击「生成双轨答复草稿」自动生成，或在此手动精修..."></textarea>
+        </div>
+      </section>
+
+      <!-- 右栏：五维硬阻断门禁红黄绿灯面板与修订留痕 DOCX 导出 -->
+      <section class="panel" aria-label="五维硬阻断门禁与导出">
+        <div class="panel-header">
+          <h3 style="margin:0;">五维硬阻断门禁体检</h3>
+          <button type="button" id="btn-verify-gate" class="btn-primary btn-sm">执行五维核验</button>
+        </div>
+
+        <div id="reb-gate-lamp" class="gate-lamp-banner lamp-yellow">
+          <span id="reb-gate-decision-text">待核验 / Pending Verification</span>
+          <span id="reb-gate-overall-score">-- / 100</span>
+        </div>
+
+        <div id="reb-gate-dims">
+          <div class="dim-row">
+            <div class="dim-row-head"><span>1. 引证锚点真实率</span><span id="dim-val-1">--</span></div>
+            <div class="dim-bar-track"><div id="dim-bar-1" class="dim-bar-fill" style="width:0%"></div></div>
+          </div>
+          <div class="dim-row">
+            <div class="dim-row-head"><span>2. 第33条/论文返修一致性</span><span id="dim-val-2">--</span></div>
+            <div class="dim-bar-track"><div id="dim-bar-2" class="dim-bar-fill" style="width:0%"></div></div>
+          </div>
+          <div class="dim-row">
+            <div class="dim-row-head"><span>3. 技术论证逻辑链完整度</span><span id="dim-val-3">--</span></div>
+            <div class="dim-bar-track"><div id="dim-bar-3" class="dim-bar-fill" style="width:0%"></div></div>
+          </div>
+          <div class="dim-row">
+            <div class="dim-row-head"><span>4. 实施例自洽度（跨实施例识破）</span><span id="dim-val-4">--</span></div>
+            <div class="dim-bar-track"><div id="dim-bar-4" class="dim-bar-fill" style="width:0%"></div></div>
+          </div>
+          <div class="dim-row">
+            <div class="dim-row-head"><span>5. 公开时序与隐私脱敏合规度</span><span id="dim-val-5">--</span></div>
+            <div class="dim-bar-track"><div id="dim-bar-5" class="dim-bar-fill" style="width:0%"></div></div>
+          </div>
+        </div>
+
+        <div class="reb-field" style="margin-top:12px;">
+          <label>硬阻断与降级警告明细</label>
+          <ul id="reb-gate-alerts" class="alert-list muted">
+            <li>尚未运行门禁核验。</li>
+          </ul>
+        </div>
+
+        <hr style="border:none;border-top:1px solid var(--border,#30363d);margin:14px 0;">
+
+        <div class="reb-field">
+          <label for="reb-export-format">三件套 / 修订留痕导出</label>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <select id="reb-export-format" class="reb-select" style="flex:1;min-width:130px;">
+              <option value="docx">Word 修订留痕 (.docx &lt;w:del&gt;/&lt;w:ins&gt;)</option>
+              <option value="md">Markdown 审校稿 (.md)</option>
+              <option value="tex">LaTeX 返修包 (.tex)</option>
+              <option value="pdf">PDF 审校稿 (.pdf)</option>
+            </select>
+            <button type="button" id="btn-export-docx" class="btn-primary btn-sm">一键导出答复包</button>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<script type="module" src="/static/js/cards/rebuttal.js"></script>
+</body>
+</html>

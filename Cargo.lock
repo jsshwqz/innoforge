@@ -873,7 +873,7 @@ dependencies = [
 
 [[package]]
 name = "innoforge"
-version = "1.0.0-alpha.1"
+version = "1.0.0-beta.1"
 dependencies = [
  "anyhow",
  "async-stream",
