@@ -1080,6 +1080,46 @@ pub async fn api_idea_delivery_pack_xlsx(
     }
 }
 
+/// POST /api/ideas/:id/control-prototype — 生成 IEC 61131-3 ST 控制原型、多段标定表与闭环阶跃响应曲线
+pub async fn api_idea_control_prototype(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+) -> axum::response::Response {
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+
+    let idea = match s.db.get_idea(&id) {
+        Ok(Some(i)) => i,
+        _ => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "status": "error", "message": "Idea not found" })),
+            )
+                .into_response();
+        }
+    };
+
+    let cards = s.db.get_feature_cards_by_idea(&idea.id).unwrap_or_default();
+    let ai_expert = {
+        let cfg = s.config.read().unwrap_or_else(|e| e.into_inner());
+        if cfg.ai_expert_channel_ready() {
+            Some(cfg.ai_client_expert())
+        } else {
+            None
+        }
+    };
+
+    let result = crate::pipeline::steps::control_proto::generate_control_prototype(
+        &idea.id,
+        &idea.title,
+        &cards,
+        ai_expert.as_ref(),
+    )
+    .await;
+
+    (StatusCode::OK, Json(json!(result))).into_response()
+}
+
 #[cfg(test)]
 mod deliverables_report_tests {
     use super::{build_deliverable_report_json, Idea};

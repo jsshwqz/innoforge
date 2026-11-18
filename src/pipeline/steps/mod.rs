@@ -1,6 +1,7 @@
 pub mod analysis;
 pub mod claim_tree;
 pub mod contradiction;
+pub mod control_proto;
 pub mod debate;
 pub mod deep_reasoning;
 pub mod deliverables;

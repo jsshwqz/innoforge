@@ -11,6 +11,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
     <script src="/static/purify.min.js"></script>
+    <script src="/static/vendor/chart.umd.min.js"></script>
 
     <style>
     .confirm-modal-overlay {
@@ -252,6 +253,20 @@
                     <div style="margin-top:12px; text-align:right;">
                         <button id="report-open-btn" class="ai-btn violet" style="display:none; width:auto; padding:6px 14px; font-size:0.85em;" onclick="openReportInNewTab()">在新窗口打开</button>
                     </div>
+                </div>
+                <div id="control-proto-panel" class="panel-box" style="margin-top:16px;">
+                    <div class="page-header-row">
+                        <h3 style="margin:0;" data-i18n="idea.controlProtoTitle">🎛️ 控制原型与响应曲线</h3>
+                        <div style="display:flex; gap:8px;">
+                            <button class="ai-btn blue" style="width:auto; padding:6px 14px; font-size:0.85em;" onclick="generateControlPrototype()" id="btn-gen-control-proto" data-i18n="idea.controlProtoBtn">生成 ST 控制原型与仿真曲线</button>
+                            <button class="ai-btn" style="width:auto; padding:6px 14px; font-size:0.85em;" onclick="copyControlStCode()" id="btn-copy-st-code" data-i18n="idea.copyStCode">复制 ST 代码</button>
+                        </div>
+                    </div>
+                    <div id="control-proto-metrics" class="muted" style="margin:8px 0; font-size:0.9em;"></div>
+                    <div style="max-height:260px; margin:8px 0;">
+                        <canvas id="control-response-chart"></canvas>
+                    </div>
+                    <pre id="control-st-code" style="display:none; background:var(--bg-elevated, #161b22); padding:12px; border-radius:6px; overflow:auto; max-height:260px; font-size:0.82em;"></pre>
                 </div>
             </div>
 
@@ -1993,6 +2008,61 @@
     function exportBomXlsx() {
         if (!currentIdeaId) return;
         window.location.href = '/api/ideas/' + encodeURIComponent(currentIdeaId) + '/delivery-pack/xlsx';
+    }
+
+    var controlResponseChartInstance = null;
+    async function generateControlPrototype() {
+        if (!currentIdeaId) {
+            alert('请先选择或创建项目');
+            return;
+        }
+        var btn = document.getElementById('btn-gen-control-proto');
+        if (btn) btn.disabled = true;
+        try {
+            var resp = await fetch('/api/ideas/' + encodeURIComponent(currentIdeaId) + '/control-prototype', {
+                method: 'POST'
+            });
+            var data = await resp.json();
+            var metricsEl = document.getElementById('control-proto-metrics');
+            if (metricsEl && data.simulation && data.simulation.metrics) {
+                var m = data.simulation.metrics;
+                metricsEl.textContent = '模型: ' + (data.model_used || '') +
+                    ' | 超调量: ' + m.overshoot_pct + '% | 稳态误差: ' + m.steady_state_error +
+                    ' | 调节时间: ' + m.settling_time_ms + ' ms';
+            }
+            var stEl = document.getElementById('control-st-code');
+            if (stEl && data.st_code) {
+                stEl.textContent = data.st_code;
+                stEl.style.display = 'block';
+            }
+            var canvas = document.getElementById('control-response-chart');
+            if (canvas && typeof Chart !== 'undefined' && data.simulation) {
+                if (controlResponseChartInstance) controlResponseChartInstance.destroy();
+                controlResponseChartInstance = new Chart(canvas.getContext('2d'), {
+                    type: 'line',
+                    data: {
+                        labels: data.simulation.time_ms || [],
+                        datasets: [
+                            { label: '设定值 (Setpoint)', data: data.simulation.setpoint || [], borderColor: '#8b949e', borderDash: [5, 5], tension: 0 },
+                            { label: '实际响应 (Actual)', data: data.simulation.actual_value || [], borderColor: '#58a6ff', tension: 0.25 }
+                        ]
+                    },
+                    options: { responsive: true, maintainAspectRatio: false }
+                });
+            }
+        } catch (err) {
+            alert('生成控制原型失败: ' + err.message);
+        } finally {
+            if (btn) btn.disabled = false;
+        }
+    }
+
+    function copyControlStCode() {
+        var stEl = document.getElementById('control-st-code');
+        if (!stEl || !stEl.textContent) return;
+        if (navigator.clipboard) {
+            navigator.clipboard.writeText(stEl.textContent).catch(function() {});
+        }
     }
 
     function openReportInNewTab() {

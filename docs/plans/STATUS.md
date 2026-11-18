@@ -14,6 +14,12 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-11-18 — **Batch 7：控制系统原型代码生成 + 闭环响应曲线可视化（v0.9.50）**
+
+- **状态 / Status**: ✅ 本地全量验证通过（`cargo fmt` / `clippy --all-targets -D warnings` 零告警，`cargo test --no-fail-fast` 73 个测试二进制全过，含 lib 1000 passed），已提 PR 等 CI 合并进 `main` 并打 `v0.9.50` Tag
+- **① IEC 61131-3 ST 与闭环仿真**（`src/pipeline/steps/control_proto.rs`、`src/pipeline/steps/mod.rs`）：生成含防除零/超限联锁/手自动无扰切换的 ST 功能块、5 点分段线性插值标定表与闭环阶跃响应数值仿真（Python 沙箱优先+确定性 Rust 回退）。
+- **② API 与本地 Chart.js 可视化**（`src/routes/idea_reports.rs`、`src/common.rs`、`templates/idea.html`、`static/i18n.js`、`docs/API.md`）：新增 `POST /api/ideas/:id/control-prototype`，前端复用 `/static/vendor/chart.umd.min.js`（纯离线零 CDN）绘制设定值 vs 实际响应曲线并支持一键复制 ST 代码。
+
 ### 2026-11-18 — **Batch 6：离线专利库批量导入提速 + 工程 BOM Excel 专业导出（v0.9.49）**
 
 - **状态 / Status**: ✅ 本地全量验证通过（`cargo fmt` / `clippy --all-targets -D warnings` 零告警，`cargo test --no-fail-fast` 73 个测试二进制全过，含 lib 997 passed），已提 PR 等 CI 合并进 `main` 并打 `v0.9.49` Tag
