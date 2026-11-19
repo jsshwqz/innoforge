@@ -19,9 +19,34 @@
 //! 现在 `main.rs` 只 `use innoforge::common`，所有 `crate::` 路径解析到 lib crate，
 //! 源码只编译一次，`#[allow(dead_code)]` 可逐条消除。
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
-use innoforge::common::build_router;
+use innoforge::common::build_router_with_token;
+
+fn resolve_bind_ip() -> IpAddr {
+    let raw = std::env::var("INNOFORGE_BIND_HOST")
+        .ok()
+        .or_else(|| std::env::var("HOST").ok());
+    match raw.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(s) => s
+            .parse::<IpAddr>()
+            .unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST)),
+        None => IpAddr::V4(Ipv4Addr::LOCALHOST),
+    }
+}
+
+fn resolve_access_token(bind_ip: IpAddr) -> Option<String> {
+    if let Ok(tok) = std::env::var("INNOFORGE_ACCESS_TOKEN") {
+        let trimmed = tok.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+    if !bind_ip.is_loopback() {
+        return Some(uuid::Uuid::new_v4().simple().to_string());
+    }
+    None
+}
 
 fn bind_candidate_ports(configured_port: Option<u16>) -> Vec<u16> {
     match configured_port {
@@ -48,13 +73,14 @@ async fn main() -> anyhow::Result<()> {
 
     let mut state = innoforge::common::init_app_state(&db_path)?;
 
+    let bind_ip = resolve_bind_ip();
     let configured_port = std::env::var("INNOFORGE_PORT")
         .ok()
         .and_then(|v| v.parse::<u16>().ok());
     let mut server = None;
     let mut last_bind_error = None;
     for candidate in bind_candidate_ports(configured_port) {
-        let candidate_addr = SocketAddr::from(([0, 0, 0, 0], candidate));
+        let candidate_addr = SocketAddr::new(bind_ip, candidate);
         match axum::Server::try_bind(&candidate_addr) {
             Ok(bound_server) => {
                 server = Some((candidate, candidate_addr, bound_server));
@@ -105,7 +131,14 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    let app = build_router(state);
+    let access_token = resolve_access_token(bind_ip);
+    if let Some(ref token) = access_token {
+        println!(
+            "🔒 Access token auth enabled (non-loopback or INNOFORGE_ACCESS_TOKEN set). Pass Header `Authorization: Bearer {token}` or `X-InnoForge-Token: {token}`."
+        );
+    }
+
+    let app = build_router_with_token(state, access_token);
 
     println!(
         "创研台 InnoForge v{} running at http://{addr}",

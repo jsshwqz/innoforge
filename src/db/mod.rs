@@ -149,6 +149,27 @@ impl Database {
         Ok(meta.len())
     }
 
+    /// 对导出的备份快照执行敏感密钥脱敏（默认清空 API Key / Secret / Token 等敏感项）。
+    pub fn scrub_backup_secrets(backup_path: &std::path::Path) -> Result<usize> {
+        for comp in backup_path.components() {
+            if matches!(comp, std::path::Component::ParentDir) {
+                anyhow::bail!("备份路径禁止包含 '..'");
+            }
+        }
+        let conn = rusqlite::Connection::open(backup_path)?;
+        let affected = conn.execute(
+            "UPDATE app_settings
+             SET value = ''
+             WHERE LOWER(key) LIKE '%key%'
+                OR LOWER(key) LIKE '%secret%'
+                OR LOWER(key) LIKE '%token%'
+                OR LOWER(key) LIKE '%password%'
+                OR LOWER(key) = 'fallback_providers'",
+            [],
+        )?;
+        Ok(affected)
+    }
+
     /// 校验备份文件头（SQLite format 3）及 `schema_version` 完整性，返回 `(schema_version, file_size)`。
     pub fn verify_sqlite_backup(backup_path: &std::path::Path) -> Result<(i32, u64)> {
         use std::io::Read;
@@ -193,5 +214,37 @@ mod backup_tests {
             Database::verify_sqlite_backup(&backup_path).expect("verify backup");
         assert_eq!(size, verified_size);
         assert!(ver >= 25, "expected schema_version >= 25, got {ver}");
+    }
+
+    #[test]
+    fn scrub_backup_secrets_redacts_api_keys_and_preserves_other_settings() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let main_path = dir.path().join("main_sec.db");
+        let backup_path = dir.path().join("snap_sec.db");
+        let db = Database::init(main_path.to_str().expect("utf8")).expect("init db");
+        db.set_setting("ai_api_key", "sk-secret-123456")
+            .expect("set key");
+        db.set_setting("ai_model", "deepseek-chat")
+            .expect("set model");
+
+        db.vacuum_into_backup(&backup_path).expect("vacuum into");
+        let scrubbed = Database::scrub_backup_secrets(&backup_path).expect("scrub secrets");
+        assert!(scrubbed >= 1);
+
+        let snap_db = Database::init(backup_path.to_str().expect("utf8")).expect("reopen backup");
+        assert_eq!(
+            snap_db
+                .get_setting("ai_api_key")
+                .unwrap_or(None)
+                .unwrap_or_default(),
+            ""
+        );
+        assert_eq!(
+            snap_db
+                .get_setting("ai_model")
+                .unwrap_or(None)
+                .unwrap_or_default(),
+            "deepseek-chat"
+        );
     }
 }

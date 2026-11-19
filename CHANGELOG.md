@@ -6,6 +6,18 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 ---
 ## [Unreleased]
 
+## [v0.9.60] - 2026-11-19
+
+### 修复与安全加固 / Fixed & Security Hardening
+
+- **P0 安全止血与工程健康修复**：
+  - 修复 `Dockerfile` 第 15 行 `COPY templates static ./` 丢失目录层级问题，改为显式 `COPY templates/ templates/` 与 `COPY static/ static/`，并配置 `INNOFORGE_BIND_HOST=0.0.0.0`；
+  - 收紧桌面端默认监听地址为回环 `127.0.0.1`（可通过 `INNOFORGE_BIND_HOST`/`HOST` 覆盖），非回环绑定或设置 `INNOFORGE_ACCESS_TOKEN` 时通过 `build_router_with_token` 强制启用 Bearer / `X-InnoForge-Token` / Cookie 鉴权；
+  - `POST /api/backup/export` 默认调用 `Database::scrub_backup_secrets` 脱敏导出快照中的 API Key/Secret/Token（需显式 `?include_secrets=true` 才保留明文）；
+  - `src/experiment/sandbox.rs` 接入宿主机代码执行安全门禁，默认禁止直接执行 AI 生成脚本，需人工核对后显式配置 `INNOFORGE_ALLOW_HOST_EXEC=1` 方可运行；
+  - 清除 `src/routes/upload.rs` 中的硬编码个人 Windows Python/脚本路径并改为异步 `tokio::process::Command` 跨平台调用；
+  - 修复 `src/routes/settings.rs` `update_env_file` 在测试运行期污染仓库 `.env` 的问题，支持 `INNOFORGE_ENV_PATH` 覆盖。
+
 ## [v0.9.59] - 2026-11-18
 
 ### 新增 / Added
@@ -471,6 +483,18 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 ## [Unreleased]
+
+## [v0.9.60] - 2026-11-19
+
+### 修复与安全加固 / Fixed & Security Hardening
+
+- **P0 安全止血与工程健康修复**：
+  - 修复 `Dockerfile` 第 15 行 `COPY templates static ./` 丢失目录层级问题，改为显式 `COPY templates/ templates/` 与 `COPY static/ static/`，并配置 `INNOFORGE_BIND_HOST=0.0.0.0`；
+  - 收紧桌面端默认监听地址为回环 `127.0.0.1`（可通过 `INNOFORGE_BIND_HOST`/`HOST` 覆盖），非回环绑定或设置 `INNOFORGE_ACCESS_TOKEN` 时通过 `build_router_with_token` 强制启用 Bearer / `X-InnoForge-Token` / Cookie 鉴权；
+  - `POST /api/backup/export` 默认调用 `Database::scrub_backup_secrets` 脱敏导出快照中的 API Key/Secret/Token（需显式 `?include_secrets=true` 才保留明文）；
+  - `src/experiment/sandbox.rs` 接入宿主机代码执行安全门禁，默认禁止直接执行 AI 生成脚本，需人工核对后显式配置 `INNOFORGE_ALLOW_HOST_EXEC=1` 方可运行；
+  - 清除 `src/routes/upload.rs` 中的硬编码个人 Windows Python/脚本路径并改为异步 `tokio::process::Command` 跨平台调用；
+  - 修复 `src/routes/settings.rs` `update_env_file` 在测试运行期污染仓库 `.env` 的问题，支持 `INNOFORGE_ENV_PATH` 覆盖。
 
 ## [v0.9.59] - 2026-11-18
 
