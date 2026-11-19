@@ -12,7 +12,8 @@ COPY src/ src/
 # 源目录不带结尾斜杠：把目录本身复制进去，保留 templates/ static/ 层级
 # （build.rs 要遍历 templates/ 计算 sha256；templates 走 include_str!、static 走 rust-embed，
 #  都是编译期读取）。tests/ 被 .dockerignore 排除，且 --release --bin 构建不需要它。
-COPY templates static ./
+COPY templates/ templates/
+COPY static/ static/
 RUN cargo build --release --bin innoforge-server
 
 # Stage 2: Runtime
@@ -30,5 +31,7 @@ COPY .env.example /data/.env.example
 
 EXPOSE 3000
 ENV RUST_LOG=info
+# 非回环绑定 0.0.0.0 时会自动强制开启访问令牌鉴权（建议通过 -e INNOFORGE_ACCESS_TOKEN=... 指定）
+ENV INNOFORGE_BIND_HOST=0.0.0.0
 VOLUME ["/data"]
 CMD ["innoforge-server"]

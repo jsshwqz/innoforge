@@ -525,13 +525,42 @@ async fn extract_pdf_via_ai_vision(
         temp_files.track_output(PathBuf::from(format!("{}_{}.png", out_prefix_str, page)));
     }
 
-    // Convert PDF pages to PNG using PyMuPDF (max 10 pages)
-    let python = r"C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe";
-    let script = r"D:\test\patent-hub-backup\convert_pdf.py";
+    // Convert PDF pages to PNG using PyMuPDF (max 10 pages, cross-platform & async)
+    let python_candidates: Vec<String> = match std::env::var("INNOFORGE_PYTHON_BIN") {
+        Ok(p) if !p.trim().is_empty() => vec![p.trim().to_string()],
+        _ => vec!["python3".to_string(), "python".to_string()],
+    };
+    const CONVERT_PDF_PY: &str = r#"import sys, fitz
+doc = fitz.open(sys.argv[1])
+limit = min(len(doc), 10)
+for i in range(limit):
+    pix = doc[i].get_pixmap(dpi=150)
+    pix.save(f"{sys.argv[2]}_{i}.png")
+print(limit)
+"#;
 
-    let output = std::process::Command::new(python)
-        .args([script, &tmp_pdf_str, &out_prefix_str])
-        .output();
+    let mut output = Err(std::io::Error::new(
+        std::io::ErrorKind::NotFound,
+        "python3/python not found in PATH",
+    ));
+    for py in &python_candidates {
+        match tokio::process::Command::new(py)
+            .args(["-c", CONVERT_PDF_PY, &tmp_pdf_str, &out_prefix_str])
+            .kill_on_drop(true)
+            .output()
+            .await
+        {
+            Ok(o) => {
+                output = Ok(o);
+                break;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => {
+                output = Err(e);
+                break;
+            }
+        }
+    }
 
     let page_count: usize = match output {
         Ok(o) if o.status.success() => {

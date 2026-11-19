@@ -17,8 +17,22 @@ use tokio::process::Command as AsyncCommand;
 /// 最大超时上限（防止 timeout_secs 被设为过大）
 const MAX_TIMEOUT_SECS: u64 = 300;
 
-/// 在沙箱中运行实验脚本
+/// 检查是否显式允许在宿主机直接执行 AI 生成的实验脚本（默认关闭，防任意代码执行）。
+pub fn host_exec_allowed() -> bool {
+    std::env::var("INNOFORGE_ALLOW_HOST_EXEC")
+        .is_ok_and(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+}
+
+/// 在沙箱中运行实验脚本（默认受安全门禁保护，需显式开启 `INNOFORGE_ALLOW_HOST_EXEC=1`）
 pub async fn run_experiment(spec: &ExperimentSpec) -> Result<ExperimentResult> {
+    run_experiment_with_policy(spec, host_exec_allowed()).await
+}
+
+/// 带显式执行策略的实验运行入口（便于安全门禁测试与用户确认后显式放行）。
+pub async fn run_experiment_with_policy(
+    spec: &ExperimentSpec,
+    allow_host_exec: bool,
+) -> Result<ExperimentResult> {
     let start = Instant::now();
 
     let script_id = uuid::Uuid::new_v4().to_string();
@@ -28,6 +42,19 @@ pub async fn run_experiment(spec: &ExperimentSpec) -> Result<ExperimentResult> {
         "rust" => ("rs", "rustc".to_string()),
         _ => ("py", find_python()),
     };
+
+    if !allow_host_exec {
+        return Ok(ExperimentResult {
+            script_path: format!("exp_{}.{}", script_id, ext),
+            language: spec.language.clone(),
+            exit_code: -2,
+            stdout: String::new(),
+            stderr: "安全门禁已拦截：默认禁止在宿主机直接执行 AI 生成脚本。请人工审阅脚本内容后设置环境变量 INNOFORGE_ALLOW_HOST_EXEC=1 再执行。".to_string(),
+            metrics: serde_json::Value::Null,
+            duration_ms: start.elapsed().as_millis() as u64,
+            success: false,
+        });
+    }
 
     // 使用项目专属临时目录 + UUID 文件名
     let script_path = new_temp_file("exp", ext)?;
@@ -189,6 +216,22 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn test_default_policy_blocks_host_execution() {
+        let spec = ExperimentSpec {
+            title: "blocked_test".to_string(),
+            language: "python".to_string(),
+            script_content: "print('SHOULD_NOT_RUN')".to_string(),
+            hypothesis: "safety gate".to_string(),
+            timeout_secs: 10,
+        };
+        let result = run_experiment_with_policy(&spec, false).await.unwrap();
+        assert!(!result.success);
+        assert_eq!(result.exit_code, -2);
+        assert!(result.stderr.contains("INNOFORGE_ALLOW_HOST_EXEC"));
+        assert!(result.stdout.is_empty());
+    }
+
+    #[tokio::test]
     async fn test_simple_python_experiment() {
         if !python_available() {
             eprintln!("Skipping test: Python not available");
@@ -205,7 +248,7 @@ print("EXPERIMENT_DONE")"#
             hypothesis: "test hypothesis".to_string(),
             timeout_secs: 10,
         };
-        let result = run_experiment(&spec).await.unwrap();
+        let result = run_experiment_with_policy(&spec, true).await.unwrap();
         assert!(result.success, "脚本应成功执行: {}", result.stderr);
         assert!(
             result.stdout.contains("EXPERIMENT_DONE"),
