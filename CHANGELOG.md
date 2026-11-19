@@ -6,6 +6,15 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 ---
 ## [Unreleased]
 
+## [v0.9.62] - 2026-11-19
+
+### 补强与收官 / Verified & Closed
+
+- **任务板遗留闭环与验证守卫补齐（[issue 78](https://github.com/jsshwqz/innoforge/issues/78) / [issue 67](https://github.com/jsshwqz/innoforge/issues/67) / [issue 90](https://github.com/jsshwqz/innoforge/issues/90)）**：
+  - **RAG `chunks_fts` + RRF 验收闭环**：`src/db/tests.rs` 新增 `fresh_install_schema_matches_migrated_schema` 守卫全新库（`0 -> 25`）与升级库（`v24 -> v25` + `backfill_chunks_fts`）的 `sqlite_master` 及表列结构完全一致；`src/db/rag.rs` 新增 `hybrid_rrf_terminology_recall_benchmark_cn990001001a` 量化对比多术语召回指标。
+  - **浏览器中英双语 E2E 回归**：`scripts/e2e_test.mjs` 升级至 92 项断言（`checkI18nRuntimeSwitch`），在 `/search` 与 `/settings` 页面动态切换 `setI18nLang('zh')` / `setI18nLang('en')`，验证英文模式下零中文残留、无裸键名回退，中文模式下正确渲染。
+  - **Docker 与监听文档对齐及契约守卫**：新增 `tests/dockerfile_contract.rs` 静态守卫 `Dockerfile` 的嵌套目录复制（`templates/`、`static/`）与构建/监听配置；更新 `README.md` Docker 构建未进 CI 说明、`INNOFORGE_ACCESS_TOKEN` 容器示例以及桌面默认回环 `127.0.0.1:3000` 安全契约。
+
 ## [v0.9.61] - 2026-11-19
 
 ### 增强 / Enhanced

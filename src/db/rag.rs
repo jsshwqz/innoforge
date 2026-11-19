@@ -878,4 +878,116 @@ mod tests {
             "批量导入后 chunks_fts 应立即支持 BM25 检索"
         );
     }
+
+    /// #78 多术语 `CN990001001A` 合成专利召回对比基准：量化对比纯向量 vs RRF 混合召回前/后指标。
+    #[test]
+    fn hybrid_rrf_terminology_recall_benchmark_cn990001001a() {
+        let db = Database::init(":memory:").expect("open in-memory db");
+        let mut patent = crate::types::patent::Patent {
+            id: String::new(),
+            patent_number: "CN990001001A".to_string(),
+            title: "复合固态电解质隔膜及电化学装置".to_string(),
+            abstract_text: "涉及石榴石基陶瓷涂覆隔膜及其烧结与热稳定性控制。".to_string(),
+            description: String::new(),
+            claims: String::new(),
+            applicant: String::new(),
+            inventor: String::new(),
+            filing_date: String::new(),
+            publication_date: String::new(),
+            grant_date: None,
+            ipc_codes: String::new(),
+            cpc_codes: String::new(),
+            priority_date: String::new(),
+            country: "CN".to_string(),
+            kind_code: "A".to_string(),
+            family_id: None,
+            legal_status: String::new(),
+            citations: "[]".to_string(),
+            cited_by: "[]".to_string(),
+            source: String::new(),
+            raw_json: String::new(),
+            created_at: String::new(),
+            images: "[]".to_string(),
+            pdf_url: String::new(),
+        };
+        let patent_id = db.insert_patent(&patent).expect("insert CN990001001A");
+        patent.id = patent_id.clone();
+
+        let filler = "本实施方式采用通用反应釜进行常规混合与干燥操作，按照预设时间间隔采样观察表面形貌与宏观均匀性，相关工艺步骤为本领域常规设置。";
+        let chunks = vec![
+            make_chunk(
+                &patent_id,
+                0,
+                "Desc:[0001]",
+                "电化学储能体系界面稳定性与隔膜机械强度综述研究。",
+            ),
+            make_chunk(
+                &patent_id,
+                1,
+                "Claim:1",
+                &format!("一种复合固态电解质隔膜，包含镧锆氧石榴石主相与柔性聚合物骨架。{filler}"),
+            ),
+            make_chunk(
+                &patent_id,
+                2,
+                "Desc:[0018]",
+                &format!("采用磁控溅射沉积非晶氧化铌阻挡层并配合超声雾化喷涂工艺。{filler}"),
+            ),
+            make_chunk(
+                &patent_id,
+                3,
+                "Desc:[0024]",
+                &format!("在氩气氛围下进行放电等离子烧结致密化成型，升温速率保持恒定。{filler}"),
+            ),
+            make_chunk(
+                &patent_id,
+                4,
+                "Desc:[0042]",
+                &format!("差示扫描量热测试表明材料具备高玻璃化转变阈值且抑制枝晶穿刺。{filler}"),
+            ),
+        ];
+        db.save_patent_chunks(&patent_id, &chunks, "char-tfidf-v1")
+            .expect("save benchmark chunks");
+
+        let cases = [
+            ("镧锆氧石榴石主相", format!("{patent_id}-c1")),
+            ("超声雾化喷涂工艺", format!("{patent_id}-c2")),
+            ("放电等离子烧结致密化", format!("{patent_id}-c3")),
+        ];
+
+        let mut vec_r1 = 0usize;
+        let mut hyb_r1 = 0usize;
+        let mut vec_r3 = 0usize;
+        let mut hyb_r3 = 0usize;
+        for (query, expected_id) in &cases {
+            let emb = compute_chunk_embedding(query);
+            let vec_hits = db.search_chunks(&patent_id, &emb, 3).expect("vec search");
+            let hyb_hits = db
+                .search_chunks_hybrid_rrf(&patent_id, query, &emb, 3)
+                .expect("hybrid rrf search");
+            if vec_hits.first().map(|x| &x.0) == Some(expected_id) {
+                vec_r1 += 1;
+            }
+            if hyb_hits.first().map(|x| &x.0) == Some(expected_id) {
+                hyb_r1 += 1;
+            }
+            if vec_hits.iter().any(|x| &x.0 == expected_id) {
+                vec_r3 += 1;
+            }
+            if hyb_hits.iter().any(|x| &x.0 == expected_id) {
+                hyb_r3 += 1;
+            }
+        }
+
+        let n = cases.len();
+        eprintln!(
+            "CN990001001A recall@1: vector={vec_r1}/{n}, hybrid={hyb_r1}/{n}; recall@3: vector={vec_r3}/{n}, hybrid={hyb_r3}/{n}"
+        );
+        assert!(hyb_r1 >= vec_r1, "hybrid recall@1 must be >= vector-only");
+        assert!(hyb_r3 >= vec_r3, "hybrid recall@3 must be >= vector-only");
+        assert_eq!(
+            hyb_r1, n,
+            "hybrid RRF 应将 3 个专业术语查询全部稳定召回至 Rank-1"
+        );
+    }
 }

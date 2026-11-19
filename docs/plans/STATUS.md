@@ -14,6 +14,12 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-11-19 — **任务板收官：`#78` / `#67` / `#90` 验收闭环（v0.9.62）**
+
+- **状态 / Status**: ✅ 本地全量验证通过，提交 PR 等 CI 合并进 `main` 并打 `v0.9.62` Tag 收官
+- **① `#78` RAG 迁移一致性与术语召回量化守卫**（`src/db/tests.rs`、`src/db/rag.rs`）：新增 `fresh_install_schema_matches_migrated_schema` 校验全新建库与 `v24 -> v25` 升级库结构全同，新增 `hybrid_rrf_terminology_recall_benchmark_cn990001001a` 验证多术语 RRF 召回优于纯向量。
+- **② `#67` 浏览器双语切换 E2E 与 Docker 契约文档对齐**（`scripts/e2e_test.mjs`、`tests/dockerfile_contract.rs`、`README.md`）：E2E 增补 `/search` 与 `/settings` 动态切换中/英运行时断言（期望通过数 `90 -> 92`）；补齐 `Dockerfile` 结构契约守卫及 `README.md` 默认回环 `127.0.0.1:3000` / 非回环鉴权 / Docker CI 未实测说明；核对 AI 搜索 P3 证据展示与已完结批次，收官关闭 `#78`、`#67`、`#90`。
+
 ### 2026-11-19 — **Batch 11 / 12 / 15 / 16 实审与工程补强（v0.9.61）**
 
 - **状态 / Status**: ✅ 本地全量验证通过，已提 PR 等 CI 合并进 `main` 并打 `v0.9.61` Tag
