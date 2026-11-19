@@ -390,11 +390,14 @@
                 // 同批退役（见 docs/plans/STATUS.md 2026-11-08 条），现役以 CI 实测的
                 // gemini-3.8-flash / gemini-flash-lite-latest 为准
                 models: [
-                    {value: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash（推荐，支持看图）'},
-                    {value: 'gemini-flash-lite-latest', label: 'Gemini Flash Lite Latest（轻量备用）'},
+                    {value: 'gemini-flash-lite-latest', label: 'Gemini Flash Lite Latest（实测稳定推荐，支持看图）'},
+                    {value: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash Lite（轻量快速）'},
+                    {value: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash Lite（备用）'},
+                    {value: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash（高峰期可能限流，自动降级）'},
                     {value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro（最强，需付费）'},
                 ],
                 expert_models: [
+                    {value: 'gemini-flash-lite-latest', label: 'Gemini Flash Lite Latest'},
                     {value: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash'},
                     {value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro（最强）'},
                 ],

@@ -410,6 +410,41 @@ pub(crate) fn normalize_model_for_provider(base_url: &str, model: &str) -> Strin
     }
 }
 
+/// 判断是否为本机 AI 端点（Ollama / 本机网关）。
+/// 仅本机端点启用 `.no_proxy()` 以防系统代理劫持 localhost；
+/// 云端端点（如 Google Gemini、OpenAI、OpenRouter）尊重系统/环境变量代理。
+fn is_local_ai_host(base_url: &str) -> bool {
+    let lower = base_url.to_ascii_lowercase();
+    lower.contains("://localhost") || lower.contains("://127.0.0.1") || lower.contains("://[::1]")
+}
+
+fn build_ai_http_client(base_url: &str, timeout: Duration, pooled: bool) -> Client {
+    let mut builder = Client::builder().timeout(timeout);
+    if pooled {
+        builder = builder
+            .pool_max_idle_per_host(2)
+            .pool_idle_timeout(Duration::from_secs(90));
+    }
+    if is_local_ai_host(base_url) {
+        builder = builder.no_proxy();
+    }
+    builder
+        // issue #55 同族：兜底禁止静默退回无超时客户端，builder 失败属进程级故障（TLS 后端初始化）。
+        .expect_or_build()
+}
+
+trait ClientBuilderExt {
+    fn expect_or_build(self) -> Client;
+}
+
+impl ClientBuilderExt for reqwest::ClientBuilder {
+    fn expect_or_build(self) -> Client {
+        self.build().expect(
+            "AI 上游客户端构建失败（TLS 后端初始化）——禁止静默退回无超时客户端，见 issue #55",
+        )
+    }
+}
+
 impl AiClient {
     fn apply_model_override(provider: &AiProvider, model_override: Option<&str>) -> AiProvider {
         if let Some(model) = model_override {
@@ -426,15 +461,9 @@ impl AiClient {
     /// Create from explicit config values (preferred).
     pub fn with_config(base_url: &str, api_key: &str, model: &str) -> Self {
         let normalized_model = normalize_model_for_provider(base_url, model);
+        let timeout = Duration::from_secs(provider_http_timeout_secs());
         Self {
-            client: Client::builder()
-                .timeout(Duration::from_secs(provider_http_timeout_secs()))
-                .no_proxy()
-                .build()
-                // issue #55 同族：兜底禁止静默退回无超时客户端。no_proxy 是刻意的
-                // （AI 网关常在本机，系统代理会劫持 localhost 路由），builder 失败
-                // 属进程级故障（TLS 后端初始化），expect 明确失败。
-                .expect("AI 上游客户端构建失败（TLS 后端初始化）——禁止静默退回无超时客户端，见 issue #55"),
+            client: build_ai_http_client(base_url, timeout, false),
             primary: AiProvider {
                 name: "primary".to_string(),
                 base_url: base_url.to_string(),
@@ -444,7 +473,7 @@ impl AiClient {
             fallbacks: Vec::new(),
             provider_mode: AiProviderMode::Http,
             gemini_cli_path: None,
-            timeout: Duration::from_secs(provider_http_timeout_secs()),
+            timeout,
             last_usage: Arc::new(RwLock::new(None)),
         }
     }
@@ -475,15 +504,7 @@ impl AiClient {
     pub fn clone_with_timeout(&self, timeout: Duration) -> Self {
         let mut new = self.clone();
         new.timeout = timeout;
-        new.client = Client::builder()
-            .timeout(timeout)
-            .pool_max_idle_per_host(2)
-            .pool_idle_timeout(Duration::from_secs(90))
-            .no_proxy()
-            .build()
-            .expect(
-                "AI 上游客户端构建失败（TLS 后端初始化）——禁止静默退回无超时客户端，见 issue #55",
-            );
+        new.client = build_ai_http_client(&self.primary.base_url, timeout, true);
         new
     }
 
@@ -771,6 +792,14 @@ impl AiClient {
                             continue;
                         }
                         return Err(anyhow::anyhow!("{}", content));
+                    }
+
+                    if !status.is_success() {
+                        return Err(anyhow::anyhow!(
+                            "AI 错误：HTTP {} ({})",
+                            status.as_u16(),
+                            safe_truncate(&raw_text, 200)
+                        ));
                     }
 
                     return Ok(content);

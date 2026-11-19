@@ -256,9 +256,9 @@ impl AppConfig {
     }
 
     const GEMINI_FALLBACK_CHAIN: [&'static str; 4] = [
-        "gemini-2.5-flash",
-        "gemini-2.0-flash",
         "gemini-flash-lite-latest",
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite",
         "gemini-3.8-flash",
     ];
 
@@ -826,18 +826,18 @@ mod tests {
         assert_eq!(
             AppConfig::gemini_fallback_models("gemini-2.5-pro"),
             vec![
-                "gemini-2.5-flash",
-                "gemini-2.0-flash",
                 "gemini-flash-lite-latest",
+                "gemini-3.5-flash-lite",
+                "gemini-3.1-flash-lite",
                 "gemini-3.8-flash"
             ]
         );
         assert_eq!(
             AppConfig::gemini_fallback_models("models/gemini-3.8-flash"),
             vec![
-                "gemini-2.5-flash",
-                "gemini-2.0-flash",
-                "gemini-flash-lite-latest"
+                "gemini-flash-lite-latest",
+                "gemini-3.5-flash-lite",
+                "gemini-3.1-flash-lite"
             ]
         );
     }
