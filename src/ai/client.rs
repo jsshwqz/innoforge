@@ -395,13 +395,28 @@ fn extract_content_from_data(data: &Value) -> Option<String> {
     None
 }
 
+/// 规范化服务商模型名称：Google Gemini OpenAI 兼容接口的 `/models` 列表会返回
+/// `models/gemini-...` 前缀，但 `/chat/completions` 若带该前缀或旧模型名易触发 404
+/// `model is not found`，此处自动剥离 `models/` 前缀。
+pub(crate) fn normalize_model_for_provider(base_url: &str, model: &str) -> String {
+    let trimmed = model.trim();
+    if base_url.to_ascii_lowercase().contains("googleapis") {
+        trimmed
+            .strip_prefix("models/")
+            .unwrap_or(trimmed)
+            .to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
 impl AiClient {
     fn apply_model_override(provider: &AiProvider, model_override: Option<&str>) -> AiProvider {
         if let Some(model) = model_override {
-            let m = model.trim();
+            let m = normalize_model_for_provider(&provider.base_url, model);
             if !m.is_empty() {
                 let mut p = provider.clone();
-                p.model = m.to_string();
+                p.model = m;
                 return p;
             }
         }
@@ -410,6 +425,7 @@ impl AiClient {
 
     /// Create from explicit config values (preferred).
     pub fn with_config(base_url: &str, api_key: &str, model: &str) -> Self {
+        let normalized_model = normalize_model_for_provider(base_url, model);
         Self {
             client: Client::builder()
                 .timeout(Duration::from_secs(provider_http_timeout_secs()))
@@ -423,7 +439,7 @@ impl AiClient {
                 name: "primary".to_string(),
                 base_url: base_url.to_string(),
                 api_key: api_key.to_string(),
-                model: model.to_string(),
+                model: normalized_model,
             },
             fallbacks: Vec::new(),
             provider_mode: AiProviderMode::Http,
@@ -511,7 +527,7 @@ impl AiClient {
             name: name.to_string(),
             base_url: base_url.to_string(),
             api_key: api_key.to_string(),
-            model: model.to_string(),
+            model: normalize_model_for_provider(base_url, model),
         });
     }
 
@@ -727,6 +743,21 @@ impl AiClient {
                         });
                     }
 
+                    if !status.is_success() && (status.as_u16() == 400 || status.as_u16() == 404) {
+                        // 400/404（例如 model is not found）无法通过原地重试同一个模型修复，
+                        // 立即返回 Err 让 send_chat_inner 自动降级切换到 fallback 模型链。
+                        let err_msg = if content.starts_with("AI 错误") {
+                            content
+                        } else {
+                            format!(
+                                "AI 错误：HTTP {} ({})",
+                                status.as_u16(),
+                                safe_truncate(&raw_text, 200)
+                            )
+                        };
+                        return Err(anyhow::anyhow!("{}", err_msg));
+                    }
+
                     if crate::error::error_kind(status.as_u16()).should_retry()
                         && attempt < max_retries - 1
                     {
@@ -734,9 +765,12 @@ impl AiClient {
                         continue;
                     }
 
-                    if content.starts_with("AI 错误") && attempt < max_retries - 1 {
-                        last_err = Some(anyhow::anyhow!("{}", content));
-                        continue;
+                    if content.starts_with("AI 错误") {
+                        if attempt < max_retries - 1 {
+                            last_err = Some(anyhow::anyhow!("{}", content));
+                            continue;
+                        }
+                        return Err(anyhow::anyhow!("{}", content));
                     }
 
                     return Ok(content);
@@ -1445,6 +1479,31 @@ mod tests {
             AiClient::global_timeout_secs(),
             300,
             "global AI timeout must be 300 seconds"
+        );
+    }
+
+    #[test]
+    fn normalize_model_strips_models_prefix_only_for_googleapis() {
+        assert_eq!(
+            super::normalize_model_for_provider(
+                "https://generativelanguage.googleapis.com/v1beta/openai",
+                "models/gemini-3.8-flash"
+            ),
+            "gemini-3.8-flash"
+        );
+        assert_eq!(
+            super::normalize_model_for_provider(
+                "https://generativelanguage.googleapis.com/v1beta/openai",
+                "gemini-2.5-flash"
+            ),
+            "gemini-2.5-flash"
+        );
+        assert_eq!(
+            super::normalize_model_for_provider(
+                "https://openrouter.ai/api/v1",
+                "models/custom-model"
+            ),
+            "models/custom-model"
         );
     }
 }

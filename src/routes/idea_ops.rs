@@ -969,10 +969,19 @@ pub async fn list_ai_models(
                 Err(_) => json!({}),
             };
             let arr = data["data"].as_array().or_else(|| data.as_array());
+            let is_google = url.to_ascii_lowercase().contains("googleapis");
             let models: Vec<serde_json::Value> = match arr {
                 Some(ml) => ml
                     .iter()
-                    .filter_map(|m| Some(json!({"id": m["id"].as_str()?.to_string()})))
+                    .filter_map(|m| {
+                        let raw = m["id"].as_str()?;
+                        let id = if is_google {
+                            raw.strip_prefix("models/").unwrap_or(raw)
+                        } else {
+                            raw
+                        };
+                        Some(json!({"id": id}))
+                    })
                     .collect(),
                 None => Vec::new(),
             };

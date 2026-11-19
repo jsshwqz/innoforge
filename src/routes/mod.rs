@@ -255,14 +255,22 @@ impl AppConfig {
         client
     }
 
-    const GEMINI_FALLBACK_CHAIN: [&'static str; 2] =
-        ["gemini-3.8-flash", "gemini-flash-lite-latest"];
+    const GEMINI_FALLBACK_CHAIN: [&'static str; 4] = [
+        "gemini-2.5-flash",
+        "gemini-2.0-flash",
+        "gemini-flash-lite-latest",
+        "gemini-3.8-flash",
+    ];
 
     fn gemini_fallback_models(primary_model: &str) -> Vec<&'static str> {
+        let normalized = primary_model
+            .trim()
+            .strip_prefix("models/")
+            .unwrap_or(primary_model.trim());
         Self::GEMINI_FALLBACK_CHAIN
             .iter()
             .copied()
-            .filter(|fb| *fb != primary_model)
+            .filter(|fb| *fb != normalized)
             .collect()
     }
 
@@ -817,11 +825,20 @@ mod tests {
     fn gemini_fallback_chain_uses_active_models_and_skips_primary() {
         assert_eq!(
             AppConfig::gemini_fallback_models("gemini-2.5-pro"),
-            vec!["gemini-3.8-flash", "gemini-flash-lite-latest"]
+            vec![
+                "gemini-2.5-flash",
+                "gemini-2.0-flash",
+                "gemini-flash-lite-latest",
+                "gemini-3.8-flash"
+            ]
         );
         assert_eq!(
-            AppConfig::gemini_fallback_models("gemini-3.8-flash"),
-            vec!["gemini-flash-lite-latest"]
+            AppConfig::gemini_fallback_models("models/gemini-3.8-flash"),
+            vec![
+                "gemini-2.5-flash",
+                "gemini-2.0-flash",
+                "gemini-flash-lite-latest"
+            ]
         );
     }
 
