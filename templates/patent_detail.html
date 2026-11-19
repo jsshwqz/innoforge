@@ -652,6 +652,33 @@
 
         if (images.length === 0) {
             container.innerHTML = '';
+            if (pdfUrl && pdfUrl.trim().length > 10) {
+                var pdfProxyUrl = '/api/patent/image-proxy?url=' + encodeURIComponent(pdfUrl.trim());
+                var headerBar = document.createElement('div');
+                headerBar.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;';
+                var titleSpan = document.createElement('span');
+                titleSpan.style.cssText = 'color:#58a6ff;font-weight:bold;';
+                titleSpan.textContent = '📄 官方原版专利 PDF（含全部说明书附图）';
+                var dlLink = document.createElement('a');
+                dlLink.href = pdfProxyUrl;
+                dlLink.target = '_blank';
+                dlLink.rel = 'noopener noreferrer';
+                dlLink.style.cssText = 'color:#58a6ff;text-decoration:none;font-weight:600;';
+                dlLink.textContent = '📥 新窗口打开 / 下载原始 PDF';
+                headerBar.appendChild(titleSpan);
+                headerBar.appendChild(dlLink);
+                container.appendChild(headerBar);
+
+                var iframe = document.createElement('iframe');
+                iframe.src = pdfProxyUrl + '#view=FitH';
+                iframe.title = '专利原始 PDF（含附图）';
+                iframe.style.cssText = 'width:100%;height:760px;border:1px solid #30363d;border-radius:8px;background:#fff;';
+                container.appendChild(iframe);
+
+                var pdfTabBtn = document.getElementById('tab-drawings-btn');
+                if (pdfTabBtn) pdfTabBtn.textContent = '📐 图纸 (PDF)';
+                return;
+            }
             var noDrawP = document.createElement('p');
             noDrawP.style.color = '#8b949e';
             noDrawP.textContent = '暂无图纸。点击「加载全文」获取。';
@@ -754,14 +781,15 @@
     (async function() {
         var claimsEl = document.querySelector('#tab-claims .content-box pre');
         var descEl = document.querySelector('#tab-description .content-box pre');
-        var hasInitialImages = false;
+        var hasInitialVisual = false;
         try {
             var initImgs = {{images_json}};
-            hasInitialImages = Array.isArray(initImgs) && initImgs.length > 0;
+            var initPdf = '{{pdf_url}}';
+            hasInitialVisual = (Array.isArray(initImgs) && initImgs.length > 0) || (initPdf && initPdf.trim().length > 10);
         } catch(e) {}
         var needsEnrich = (!claimsEl || claimsEl.textContent.trim().length < 5)
                        || (!descEl || descEl.textContent.trim().length < 5)
-                       || !hasInitialImages;
+                       || !hasInitialVisual;
         if (needsEnrich) {
             var enrichInfo = document.createElement('div');
             enrichInfo.className = 'ai-summary';

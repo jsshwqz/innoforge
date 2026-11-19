@@ -14,6 +14,12 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-11-19 — **专利图纸页签内嵌渲染官方原版 PDF 与 SerpAPI 去重（合入 main，暂不升版本号）**
+
+- **状态 / Status**: ✅ 本地验证通过，提交 PR 合入 `main`（待多轮体验测完后再统一打版）
+- **① 图纸页签 PDF 内嵌回退**（`templates/patent_detail.html`）：解决 SerpAPI `google_patents_details` 对较新中国专利/实用新型仅返回 `pdf` 不返回拆图 `images[]` 时页面显示“暂无图纸”的问题；有 `pdf_url` 时直接内嵌官方原版 PDF 阅览器（走 `/api/patent/image-proxy`）并标为 `📐 图纸 (PDF)`。
+- **② 避免重复消耗 SerpAPI 与放宽连接超时**（`src/routes/patent.rs`、`src/common.rs`）：已有正文与 `pdf_url` 时跳过重复补全；`build_upstream_client` 连接超时由 `500ms` 调整为 `5s` 防止跨国代理误超时。
+
 ### 2026-11-19 — **检索版面/条数对齐、专利图纸代理与 Gemini 实测容灾修复（v0.9.63）**
 
 - **状态 / Status**: ✅ 本地全量验证与 Gemini 真实接口实测通过，提交 PR #242 等 CI 合并进 `main` 并打 `v0.9.63` Tag

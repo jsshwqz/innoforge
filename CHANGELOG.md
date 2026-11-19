@@ -6,6 +6,13 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 ---
 ## [Unreleased]
 
+### 修复 / Fixed
+
+- **专利图纸页签内嵌渲染官方原版 PDF（解决新中国专利/实用新型无拆图 PNG 时显示“暂无图纸”的问题）**：
+  - `templates/patent_detail.html`：`renderImages` 在 `images` 为空但存在 `pdf_url` 时，通过安全 DOM API 内嵌官方原版专利 PDF 阅览器（走 `/api/patent/image-proxy`）并提供「新窗口打开 / 下载原始 PDF」入口，标签自动显示 `📐 图纸 (PDF)`；
+  - `src/routes/patent.rs` 与 `templates/patent_detail.html`：已有正文且已获取 `pdf_url` 时不再重复触发 SerpAPI 补全，避免无谓消耗配额；
+  - `src/common.rs`：将 `build_upstream_client` 连接超时从 `500ms` 调整为 `5s`，减少跨国代理 TLS 握手误超时。
+
 ## [v0.9.63] - 2026-11-19
 
 ### 修复 / Fixed
