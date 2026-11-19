@@ -8,13 +8,14 @@ use axum::{extract::State, Json};
 use serde_json::{json, Value};
 
 use crate::ai::{
-    citation_check, claim_coverage, feature_attribution, golden_regression, paraphrase_check,
-    prohibition_check, search_report, targeted_claims, tech_problem_check,
+    citation_check, claim_coverage, feature_attribution, golden_regression, oa_drift,
+    paraphrase_check, pre_submission_check, prohibition_check, search_report, targeted_claims,
+    tech_problem_check,
 };
 
 /// POST /api/ai/audit-checks — 运行全部 12 个审计模块
 pub async fn api_ai_audit_checks(
-    State(_s): State<crate::routes::AppState>,
+    State(s): State<crate::routes::AppState>,
     Json(req): Json<Value>,
 ) -> Json<Value> {
     let oa_text = req["oa_text"].as_str().unwrap_or("");
@@ -141,11 +142,42 @@ pub async fn api_ai_audit_checks(
         "segment_count": paraphrase_segments.len(),
     });
 
-    // ── 7. pre_submission_check ──
-    let precheck_json = json!({
-        "status": "available",
-        "note": "需完整 CaseInput，请用 /api/ai/oa-discuss 或 /api/ai/oa-panel 调用",
-    });
+    // ── 7. pre_submission_check（含跨轮次 oa_drift 禁止反言红线校验）──
+    let case_id = req["case_id"]
+        .as_str()
+        .or_else(|| req["patent_id"].as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty());
+    let draft_text = req["response_draft"]
+        .as_str()
+        .or_else(|| req["response_text"].as_str())
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or(ai_output);
+    let precheck_json = if let Some(cid) = case_id {
+        match oa_drift::analyze_case_drift(&s.db, cid) {
+            Ok(drift_report) if drift_report.total_rounds > 0 => {
+                let estoppel_item =
+                    pre_submission_check::check_estoppel_consistency(draft_text, &drift_report);
+                json!({
+                    "status": if estoppel_item.passed { "passed" } else { "blocked" },
+                    "case_id": cid,
+                    "total_rounds": drift_report.total_rounds,
+                    "redline_count": drift_report.consistency_redlines.len(),
+                    "passed": estoppel_item.passed,
+                    "estoppel_check": estoppel_item,
+                })
+            }
+            _ => json!({
+                "status": "available",
+                "note": "未找到该案件的多轮 oa_rounds 历史记录；如需全量预检请提供完整 CaseInput",
+            }),
+        }
+    } else {
+        json!({
+            "status": "available",
+            "note": "需完整 CaseInput 或 case_id + response_draft，请用 /api/ai/oa-discuss 或 /api/ai/oa-panel 调用",
+        })
+    };
 
     // ── 8. search_report (C3/C7/C8) ──
     let sr_entries = search_report::parse_search_report(oa_text);

@@ -916,6 +916,261 @@ fn extract_claim_scope_changes(prev_response: &str, curr_oa: &str) -> Vec<String
     changes
 }
 
+/// 拟提交答复草稿与前轮禁止反言红线的冲突项。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EstoppelConflict {
+    pub redline_id: String,
+    pub source_round: i32,
+    pub category: String,
+    pub prior_statement: String,
+    pub draft_excerpt: String,
+    pub reason: String,
+}
+
+fn split_clauses(text: &str) -> Vec<String> {
+    text.split(['\n', '。', '；', ';', '，', ','])
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+        .collect()
+}
+
+fn extract_d_labels(text: &str) -> HashSet<String> {
+    let mut labels = HashSet::new();
+    if let Some(re) = d_ref_regex() {
+        for cap in re.captures_iter(text) {
+            if let Some(num) = cap.get(1) {
+                labels.insert(format!("D{}", num.as_str()));
+            } else if let Some(d) = cap.get(2) {
+                let prev_ok = text
+                    .get(..d.start())
+                    .and_then(|s| s.chars().next_back())
+                    .is_none_or(|c| !c.is_ascii_alphanumeric());
+                let next_ok = text
+                    .get(d.end()..)
+                    .and_then(|s| s.chars().next())
+                    .is_none_or(|c| !c.is_ascii_alphanumeric());
+                if prev_ok && next_ok {
+                    labels.insert(d.as_str().to_uppercase());
+                }
+            }
+        }
+    }
+    labels
+}
+
+fn extract_redline_anchor(redline: &ConsistencyRedline) -> String {
+    let stmt = redline.statement_excerpt.as_str();
+    let markers: &[&str] = match redline.category.as_str() {
+        "estoppel_admission" => &[
+            "确实公开了",
+            "公开了特征",
+            "公开了",
+            "不否认",
+            "承认",
+            "不再争辩",
+            "放弃",
+            "concede",
+            "admit",
+        ],
+        "estoppel_amendment" => &[
+            "增加特征",
+            "修改为",
+            "限定为",
+            "并入权利要求",
+            "加入",
+            "增加",
+            "引入",
+            "删除了",
+            "amended to",
+            "limited to",
+        ],
+        _ => &[
+            "核心区别特征在于",
+            "区别特征在于",
+            "区别在于",
+            "技术效果在于",
+            "协同效应",
+            "实质区别",
+            "在于",
+        ],
+    };
+
+    let mut tail = stmt;
+    for m in markers {
+        if let Some(pos) = stmt.find(m) {
+            if let Some(after) = stmt.get(pos + m.len()..) {
+                let trimmed = after.trim();
+                if !trimmed.is_empty() {
+                    tail = trimmed;
+                    break;
+                }
+            }
+        }
+    }
+
+    let mut cleaned = tail.to_string();
+    for noise in [
+        "的限定",
+        "限定特征",
+        "特征",
+        "限定",
+        "结构",
+        "所述",
+        "采用",
+        "了",
+    ] {
+        cleaned = cleaned.replace(noise, "");
+    }
+    // 去掉 D1/对比文件1 前缀，保留核心技术特征词
+    if let Some(re) = d_ref_regex() {
+        cleaned = re.replace_all(&cleaned, "").to_string();
+    }
+    if let Some(re_c) = claim_num_regex() {
+        cleaned = re_c.replace_all(&cleaned, "").to_string();
+    }
+    cleaned.trim().to_string()
+}
+
+fn anchor_matches_clause(anchor: &str, clause: &str) -> bool {
+    let norm_anchor: String = anchor
+        .chars()
+        .filter(|c| !c.is_whitespace() && !['，', '。', '、', ',', '.', '：', ':'].contains(c))
+        .collect();
+    let norm_clause: String = clause
+        .chars()
+        .filter(|c| !c.is_whitespace() && !['，', '。', '、', ',', '.', '：', ':'].contains(c))
+        .collect();
+    if norm_anchor.chars().count() < 2 || norm_clause.chars().count() < 2 {
+        return false;
+    }
+    let anchor_lower = norm_anchor.to_ascii_lowercase();
+    let clause_lower = norm_clause.to_ascii_lowercase();
+    if clause_lower.contains(&anchor_lower) {
+        return true;
+    }
+
+    let a_chars: Vec<char> = anchor_lower.chars().collect();
+    let a_bigrams: HashSet<String> = a_chars.windows(2).map(|w| w.iter().collect()).collect();
+    if a_bigrams.is_empty() {
+        return false;
+    }
+    let c_chars: Vec<char> = clause_lower.chars().collect();
+    let c_bigrams: HashSet<String> = c_chars.windows(2).map(|w| w.iter().collect()).collect();
+    let shared = a_bigrams.intersection(&c_bigrams).count();
+    let ratio = (shared as f64) / (a_bigrams.len() as f64);
+    shared >= 2 && ratio >= 0.30
+}
+
+/// 确定性检测新答复草稿是否与历史轮次 `consistency_redlines`（自认/限缩/区别特征口径）相矛盾。
+pub fn detect_estoppel_conflicts(
+    response_draft: &str,
+    drift_report: &OaDriftReport,
+) -> Vec<EstoppelConflict> {
+    if response_draft.trim().is_empty() || drift_report.consistency_redlines.is_empty() {
+        return Vec::new();
+    }
+
+    const ADMISSION_NEGATIONS: &[&str] = &[
+        "未公开",
+        "没有公开",
+        "并未公开",
+        "未披露",
+        "并未披露",
+        "不存在",
+        "均未公开",
+        "均未披露",
+        "不承认",
+        "不再承认",
+        "否认",
+        "未记载",
+        "not disclose",
+        "does not disclose",
+        "did not disclose",
+    ];
+    const AMENDMENT_ROLLBACKS: &[&str] = &[
+        "删除",
+        "取消",
+        "删去",
+        "去掉",
+        "不再限定",
+        "取消限定",
+        "删除限定",
+        "放弃限定",
+        "恢复原",
+        "扩大保护范围",
+        "撤回修改",
+        "remove",
+        "delete",
+    ];
+    const DISTINCTION_NEGATIONS: &[&str] = &[
+        "并非区别",
+        "不是区别",
+        "不在于",
+        "并无协同效应",
+        "无协同效应",
+        "并不能",
+        "无法抑制",
+        "不具有该效果",
+        "并非采用",
+    ];
+
+    let clauses = split_clauses(response_draft);
+    let mut conflicts = Vec::new();
+    let mut seen_ids = HashSet::new();
+
+    for rl in &drift_report.consistency_redlines {
+        let anchor = extract_redline_anchor(rl);
+        let prior_d_labels = extract_d_labels(&rl.statement_excerpt);
+
+        for clause in &clauses {
+            let clause_lower = clause.to_ascii_lowercase();
+            let matched = match rl.category.as_str() {
+                "estoppel_admission" => {
+                    let has_neg = ADMISSION_NEGATIONS
+                        .iter()
+                        .any(|m| clause.contains(m) || clause_lower.contains(m));
+                    if !has_neg || !anchor_matches_clause(&anchor, clause) {
+                        false
+                    } else if prior_d_labels.is_empty() {
+                        true
+                    } else {
+                        let clause_d = extract_d_labels(clause);
+                        clause_d.is_empty() || prior_d_labels.iter().any(|dl| clause_d.contains(dl))
+                    }
+                }
+                "estoppel_amendment" => {
+                    let has_rollback = AMENDMENT_ROLLBACKS
+                        .iter()
+                        .any(|m| clause.contains(m) || clause_lower.contains(m));
+                    has_rollback && anchor_matches_clause(&anchor, clause)
+                }
+                "estoppel_distinction" => {
+                    let has_neg = DISTINCTION_NEGATIONS
+                        .iter()
+                        .any(|m| clause.contains(m) || clause_lower.contains(m));
+                    has_neg && anchor_matches_clause(&anchor, clause)
+                }
+                _ => false,
+            };
+
+            if matched && seen_ids.insert(rl.redline_id.clone()) {
+                conflicts.push(EstoppelConflict {
+                    redline_id: rl.redline_id.clone(),
+                    source_round: rl.source_round,
+                    category: rl.category.clone(),
+                    prior_statement: rl.statement_excerpt.clone(),
+                    draft_excerpt: truncate_chars(clause, 100),
+                    reason: rl.constraint_rule.clone(),
+                });
+                break;
+            }
+        }
+    }
+
+    conflicts
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1089,5 +1344,38 @@ mod tests {
             .iter()
             .any(|p| p.label == "D3" && p.doc_ref == "CN100000003A"));
         assert!(!report.consistency_redlines.is_empty());
+    }
+
+    #[test]
+    fn detects_estoppel_contradictions_in_new_response_draft() {
+        let r1 = mock_round(
+            1,
+            "first_rejection",
+            "2026-02-01",
+            "一审：权利要求1不具备创造性（D1）。",
+            Some(
+                "一审意见陈述：申请人承认D1公开了传动轴。我们将权利要求1修改为增加非对称阻尼槽宽度比0.3-0.5限定。",
+            ),
+            None,
+        );
+        let report = build_round_drift_report("CASE-ESTOPPEL-1", &[r1]);
+
+        let contradicting_draft = "本轮答复：经核查，D1并未公开传动轴。同时现删除非对称阻尼槽宽度比0.3-0.5的限定，恢复原保护范围。";
+        let conflicts = detect_estoppel_conflicts(contradicting_draft, &report);
+        assert_eq!(
+            conflicts.len(),
+            2,
+            "应同时检出自认反悔与修改回退矛盾: {conflicts:?}"
+        );
+        assert!(conflicts.iter().any(|c| c.category == "estoppel_admission"));
+        assert!(conflicts.iter().any(|c| c.category == "estoppel_amendment"));
+
+        let consistent_draft =
+            "本轮答复：虽然D1公开了传动轴，但D1与D3均未公开非对称阻尼槽宽度比0.3-0.5的限定特征。";
+        let no_conflicts = detect_estoppel_conflicts(consistent_draft, &report);
+        assert!(
+            no_conflicts.is_empty(),
+            "口径一致的答复草稿不应误报禁止反言冲突: {no_conflicts:?}"
+        );
     }
 }

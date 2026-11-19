@@ -84,10 +84,56 @@ pub struct SimulationPlotData {
     pub from_step13: bool,
 }
 
+/// 期刊投稿 LaTeX 模板类型
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum PaperLatexTemplate {
+    /// 中文工程核心期刊（`\documentclass[UTF8]{ctexart}`，中文内容默认）
+    #[default]
+    Ctexart,
+    /// 国际工程期刊 IEEE Transactions（`\documentclass[journal]{IEEEtran}`）
+    Ieee,
+    /// Elsevier 期刊（`\documentclass[preprint,12pt]{elsarticle}`）
+    Elsevier,
+}
+
+impl PaperLatexTemplate {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Ctexart => "ctexart",
+            Self::Ieee => "ieee",
+            Self::Elsevier => "elsevier",
+        }
+    }
+
+    /// 解析查询参数 `?template=...`；未指定时中文内容默认 `ctexart`，纯英文默认 `ieee`。
+    pub fn from_query_or_content(template_param: Option<&str>, content_sample: &str) -> Self {
+        match template_param
+            .map(|s| s.trim().to_ascii_lowercase())
+            .as_deref()
+        {
+            Some("ctexart") | Some("cn") | Some("zh") => Self::Ctexart,
+            Some("ieee") | Some("ieeetran") => Self::Ieee,
+            Some("elsevier") | Some("elsarticle") => Self::Elsevier,
+            _ => {
+                let has_cjk = content_sample
+                    .chars()
+                    .any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c));
+                if has_cjk {
+                    Self::Ctexart
+                } else {
+                    Self::Ieee
+                }
+            }
+        }
+    }
+}
+
 /// 期刊投稿 LaTeX + BibTeX + SVG 仿真图打包输出
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaperLatexBundle {
     pub idea_id: String,
+    pub template: PaperLatexTemplate,
     pub novelty_lock_warning: String,
     pub bib_entries: Vec<BibEntry>,
     pub bibtex_content: String,
@@ -1236,12 +1282,25 @@ fn escape_latex(s: &str) -> String {
     out
 }
 
-/// 构造可直接用于投稿的 LaTeX + BibTeX + SVG 仿真图打包输出
+/// 构造可直接用于投稿的 LaTeX + BibTeX + SVG 仿真图打包输出（自动按内容语言选择默认模板）
 pub fn build_paper_latex_bundle(
     ctx: &PipelineContext,
     feature_cards: &[FeatureCard],
     db_patents: &[Patent],
     fallback_sim: Option<&StepSimulationData>,
+) -> PaperLatexBundle {
+    let sample = format!("{} {} {}", ctx.title, ctx.description, ctx.ai_analysis);
+    let template = PaperLatexTemplate::from_query_or_content(None, &sample);
+    build_paper_latex_bundle_with_template(ctx, feature_cards, db_patents, fallback_sim, template)
+}
+
+/// 按指定模板构造可直接用于投稿的 LaTeX + BibTeX + SVG 仿真图打包输出
+pub fn build_paper_latex_bundle_with_template(
+    ctx: &PipelineContext,
+    feature_cards: &[FeatureCard],
+    db_patents: &[Patent],
+    fallback_sim: Option<&StepSimulationData>,
+    template: PaperLatexTemplate,
 ) -> PaperLatexBundle {
     let bib_entries = extract_verified_bib_entries(ctx, db_patents);
     let bibtex_content = format_bibtex(&bib_entries);
@@ -1395,64 +1454,176 @@ pub fn build_paper_latex_bundle(
     let bibliography_block = if bib_entries.is_empty() {
         "% No \\cite{} keys emitted because zero verified DOI references are bound.\n".to_string()
     } else {
-        "\\bibliographystyle{plain}\n\\bibliography{references}\n".to_string()
+        let bib_style = match template {
+            PaperLatexTemplate::Ctexart => "plain",
+            PaperLatexTemplate::Ieee => "IEEEtran",
+            PaperLatexTemplate::Elsevier => "elsarticle-num",
+        };
+        format!("\\bibliographystyle{{{bib_style}}}\n\\bibliography{{references}}\n")
     };
 
-    let main_tex = format!(
-        "% !TEX program = xelatex\n\
-         % !NOVELTY LOCK WARNING: {novelty_plain}\n\
-         \\documentclass[11pt,a4paper]{{article}}\n\
-         \\usepackage[utf8]{{inputenc}}\n\
-         \\usepackage{{graphicx}}\n\
-         \\usepackage{{amsmath}}\n\
-         \\usepackage{{booktabs}}\n\
-         \\usepackage{{hyperref}}\n\
-         \\title{{{tex_title}}}\n\
-         \\author{{InnoForge Engineering Research Workspace}}\n\
-         \\date{{\\today}}\n\n\
-         \\begin{{document}}\n\
-         \\maketitle\n\n\
-         \\begin{{center}}\n\
-         \\fbox{{\\parbox{{0.94\\linewidth}}{{\\textbf{{Novelty Lock Warning:}} {tex_warning}}}}}\n\
-         \\end{{center}}\n\n\
-         \\begin{{abstract}}\n\
-         {tex_abstract}\n\
-         \\end{{abstract}}\n\n\
-         \\noindent\\textbf{{Keywords:}} {tex_keywords}\n\n\
-         \\section{{Introduction and Related Work}}\n\
-         This work investigates technical challenges in \\textbf{{{tex_domain}}}.\n\
-         {related_work}\n\
-         \\section{{System Mechanism and Structural Modeling}}\n\
-         {mechanism}\n\n\
-         \\section{{Simulation and Experimental Validation}}\n\
-         {exp_rows}\n\
-         \\begin{{figure}}[htbp]\n\
-         \\centering\n\
-         % Note: For pdfLaTeX, convert figures/simulation_curve.svg to PDF/PNG or compile with svg package.\n\
-         \\includegraphics[width=0.92\\linewidth]{{figures/simulation_curve.svg}}\n\
-         \\caption{{{sim_caption}}}\n\
-         \\label{{fig:sim_curve}}\n\
-         \\end{{figure}}\n\n\
-         \\section{{Conclusion}}\n\
-         {tex_conclusion}\n\n\
-         {bibliography_block}\
-         \\end{{document}}\n",
-        novelty_plain = NOVELTY_LOCK_TEXT_PLAIN,
-        tex_title = escape_latex(title),
-        tex_warning = escape_latex(NOVELTY_LOCK_TEXT_PLAIN),
-        tex_abstract = escape_latex(abstract_body),
-        tex_keywords = escape_latex(&keywords_line),
-        tex_domain = escape_latex(domain),
-        related_work = related_work_tex,
-        mechanism = mechanism_tex,
-        exp_rows = exp_rows_tex,
-        sim_caption = sim_caption,
-        tex_conclusion = escape_latex(&conclusion_body),
-        bibliography_block = bibliography_block,
-    );
+    let main_tex = match template {
+        PaperLatexTemplate::Ctexart => format!(
+            "% !TEX program = xelatex\n\
+             % !NOVELTY LOCK WARNING: {novelty_plain}\n\
+             \\documentclass[UTF8]{{ctexart}}\n\
+             \\usepackage{{graphicx}}\n\
+             \\usepackage{{amsmath}}\n\
+             \\usepackage{{booktabs}}\n\
+             \\usepackage{{hyperref}}\n\
+             \\title{{{tex_title}}}\n\
+             \\author{{InnoForge 工程创研工作台}}\n\
+             \\date{{\\today}}\n\n\
+             \\begin{{document}}\n\
+             \\maketitle\n\n\
+             \\begin{{center}}\n\
+             \\fbox{{\\parbox{{0.94\\linewidth}}{{\\textbf{{防破新颖性安全锁：}} {tex_warning}}}}}\n\
+             \\end{{center}}\n\n\
+             \\begin{{abstract}}\n\
+             {tex_abstract}\n\
+             \\end{{abstract}}\n\n\
+             \\noindent\\textbf{{关键词：}} {tex_keywords}\n\n\
+             \\section{{引言与文献评述}}\n\
+             本研究面向\\textbf{{{tex_domain}}}领域开展技术建模与实验验证。\n\
+             {related_work}\n\
+             \\section{{系统机理与结构建模}}\n\
+             {mechanism}\n\n\
+             \\section{{仿真与实验验证}}\n\
+             {exp_rows}\n\
+             \\begin{{figure}}[htbp]\n\
+             \\centering\n\
+             % Note: For pdfLaTeX, convert figures/simulation_curve.svg to PDF/PNG or compile with svg package.\n\
+             \\includegraphics[width=0.92\\linewidth]{{figures/simulation_curve.svg}}\n\
+             \\caption{{{sim_caption}}}\n\
+             \\label{{fig:sim_curve}}\n\
+             \\end{{figure}}\n\n\
+             \\section{{结论}}\n\
+             {tex_conclusion}\n\n\
+             {bibliography_block}\
+             \\end{{document}}\n",
+            novelty_plain = NOVELTY_LOCK_TEXT_PLAIN,
+            tex_title = escape_latex(title),
+            tex_warning = escape_latex(NOVELTY_LOCK_TEXT_PLAIN),
+            tex_abstract = escape_latex(abstract_body),
+            tex_keywords = escape_latex(&keywords_line),
+            tex_domain = escape_latex(domain),
+            related_work = related_work_tex,
+            mechanism = mechanism_tex,
+            exp_rows = exp_rows_tex,
+            sim_caption = sim_caption,
+            tex_conclusion = escape_latex(&conclusion_body),
+            bibliography_block = bibliography_block,
+        ),
+        PaperLatexTemplate::Ieee => format!(
+            "% !TEX program = xelatex\n\
+             % !NOVELTY LOCK WARNING: {novelty_plain}\n\
+             \\documentclass[journal]{{IEEEtran}}\n\
+             \\usepackage{{graphicx}}\n\
+             \\usepackage{{amsmath}}\n\
+             \\usepackage{{booktabs}}\n\
+             \\usepackage{{cite}}\n\
+             \\usepackage{{hyperref}}\n\
+             \\title{{{tex_title}}}\n\
+             \\author{{InnoForge Engineering Research Workspace}}\n\n\
+             \\begin{{document}}\n\
+             \\maketitle\n\n\
+             \\begin{{center}}\n\
+             \\fbox{{\\parbox{{0.94\\linewidth}}{{\\textbf{{Novelty Lock Warning:}} {tex_warning}}}}}\n\
+             \\end{{center}}\n\n\
+             \\begin{{abstract}}\n\
+             {tex_abstract}\n\
+             \\end{{abstract}}\n\n\
+             \\begin{{IEEEkeywords}}\n\
+             {tex_keywords}\n\
+             \\end{{IEEEkeywords}}\n\n\
+             \\section{{Introduction and Related Work}}\n\
+             This work investigates technical challenges in \\textbf{{{tex_domain}}}.\n\
+             {related_work}\n\
+             \\section{{System Mechanism and Structural Modeling}}\n\
+             {mechanism}\n\n\
+             \\section{{Simulation and Experimental Validation}}\n\
+             {exp_rows}\n\
+             \\begin{{figure}}[htbp]\n\
+             \\centering\n\
+             % Note: For pdfLaTeX, convert figures/simulation_curve.svg to PDF/PNG or compile with svg package.\n\
+             \\includegraphics[width=0.92\\linewidth]{{figures/simulation_curve.svg}}\n\
+             \\caption{{{sim_caption}}}\n\
+             \\label{{fig:sim_curve}}\n\
+             \\end{{figure}}\n\n\
+             \\section{{Conclusion}}\n\
+             {tex_conclusion}\n\n\
+             {bibliography_block}\
+             \\end{{document}}\n",
+            novelty_plain = NOVELTY_LOCK_TEXT_PLAIN,
+            tex_title = escape_latex(title),
+            tex_warning = escape_latex(NOVELTY_LOCK_TEXT_PLAIN),
+            tex_abstract = escape_latex(abstract_body),
+            tex_keywords = escape_latex(&keywords_line),
+            tex_domain = escape_latex(domain),
+            related_work = related_work_tex,
+            mechanism = mechanism_tex,
+            exp_rows = exp_rows_tex,
+            sim_caption = sim_caption,
+            tex_conclusion = escape_latex(&conclusion_body),
+            bibliography_block = bibliography_block,
+        ),
+        PaperLatexTemplate::Elsevier => format!(
+            "% !TEX program = xelatex\n\
+             % !NOVELTY LOCK WARNING: {novelty_plain}\n\
+             \\documentclass[preprint,12pt]{{elsarticle}}\n\
+             \\usepackage{{graphicx}}\n\
+             \\usepackage{{amsmath}}\n\
+             \\usepackage{{booktabs}}\n\
+             \\usepackage{{hyperref}}\n\n\
+             \\begin{{document}}\n\
+             \\begin{{frontmatter}}\n\
+             \\title{{{tex_title}}}\n\
+             \\author{{InnoForge Engineering Research Workspace}}\n\
+             \\begin{{abstract}}\n\
+             {tex_abstract}\n\
+             \\end{{abstract}}\n\
+             \\begin{{keyword}}\n\
+             {tex_keywords}\n\
+             \\end{{keyword}}\n\
+             \\end{{frontmatter}}\n\n\
+             \\begin{{center}}\n\
+             \\fbox{{\\parbox{{0.94\\linewidth}}{{\\textbf{{Novelty Lock Warning:}} {tex_warning}}}}}\n\
+             \\end{{center}}\n\n\
+             \\section{{Introduction and Related Work}}\n\
+             This work investigates technical challenges in \\textbf{{{tex_domain}}}.\n\
+             {related_work}\n\
+             \\section{{System Mechanism and Structural Modeling}}\n\
+             {mechanism}\n\n\
+             \\section{{Simulation and Experimental Validation}}\n\
+             {exp_rows}\n\
+             \\begin{{figure}}[htbp]\n\
+             \\centering\n\
+             \\includegraphics[width=0.92\\linewidth]{{figures/simulation_curve.svg}}\n\
+             \\caption{{{sim_caption}}}\n\
+             \\label{{fig:sim_curve}}\n\
+             \\end{{figure}}\n\n\
+             \\section{{Conclusion}}\n\
+             {tex_conclusion}\n\n\
+             {bibliography_block}\
+             \\end{{document}}\n",
+            novelty_plain = NOVELTY_LOCK_TEXT_PLAIN,
+            tex_title = escape_latex(title),
+            tex_warning = escape_latex(NOVELTY_LOCK_TEXT_PLAIN),
+            tex_abstract = escape_latex(abstract_body),
+            tex_keywords = escape_latex(&keywords_line),
+            tex_domain = escape_latex(domain),
+            related_work = related_work_tex,
+            mechanism = mechanism_tex,
+            exp_rows = exp_rows_tex,
+            sim_caption = sim_caption,
+            tex_conclusion = escape_latex(&conclusion_body),
+            bibliography_block = bibliography_block,
+        ),
+    };
 
     PaperLatexBundle {
         idea_id: ctx.idea_id.clone(),
+        template,
         novelty_lock_warning: NOVELTY_LOCK_WARNING.to_string(),
         bib_entries,
         bibtex_content,
@@ -1715,5 +1886,60 @@ mod tests {
         assert!(bundle.simulation_svg.contains("actual_value"));
         assert!(bundle.simulation_svg.contains("<polyline"));
         assert!(bundle.main_tex.contains("figures/simulation_curve.svg"));
+    }
+
+    #[test]
+    fn latex_bundle_supports_ctexart_default_and_ieee_template_switch() {
+        let mut ctx_zh = PipelineContext::new(
+            "idea-tpl-zh",
+            "双闭环磁流变隔振器",
+            "针对高频微振动抑制的磁流变阻尼器建模与测试",
+        );
+        ctx_zh.patent_results.push(PipelinePatentHit {
+            id: "10.1016/j.ymssp.2024.111222".to_string(),
+            title: "MR Damper Control".to_string(),
+            snippet: "OpenAlex".to_string(),
+            link: "https://doi.org/10.1016/j.ymssp.2024.111222".to_string(),
+            source: "openalex".to_string(),
+        });
+
+        // 中文内容默认选择 ctexart
+        let default_zh = build_paper_latex_bundle(&ctx_zh, &[], &[], None);
+        assert_eq!(default_zh.template, PaperLatexTemplate::Ctexart);
+        assert!(default_zh
+            .main_tex
+            .contains(r"\documentclass[UTF8]{ctexart}"));
+        assert!(default_zh.main_tex.contains("专利法》第22条第2款新颖性"));
+
+        // 显式切换为 IEEEtran
+        let ieee_bundle = build_paper_latex_bundle_with_template(
+            &ctx_zh,
+            &[],
+            &[],
+            None,
+            PaperLatexTemplate::Ieee,
+        );
+        assert_eq!(ieee_bundle.template, PaperLatexTemplate::Ieee);
+        assert!(ieee_bundle
+            .main_tex
+            .contains(r"\documentclass[journal]{IEEEtran}"));
+        assert!(ieee_bundle.main_tex.contains(r"\begin{IEEEkeywords}"));
+        assert_eq!(
+            extract_tex_cite_keys(&ieee_bundle.main_tex).len(),
+            1,
+            "IEEE template must still cite verified DOI"
+        );
+
+        // 纯英文内容默认选择 IEEEtran
+        let ctx_en = PipelineContext::new(
+            "idea-tpl-en",
+            "Active Magnetic Vibration Isolation",
+            "Closed-loop feedforward damping control system",
+        );
+        let default_en = build_paper_latex_bundle(&ctx_en, &[], &[], None);
+        assert_eq!(default_en.template, PaperLatexTemplate::Ieee);
+        assert!(default_en
+            .main_tex
+            .contains(r"\documentclass[journal]{IEEEtran}"));
     }
 }

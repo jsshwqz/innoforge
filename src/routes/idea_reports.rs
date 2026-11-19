@@ -1197,6 +1197,18 @@ pub async fn build_project_archive_zip(
         None,
     )
     .await;
+    let fallback_sim = crate::pipeline::steps::control_proto::run_closed_loop_step_simulation(
+        &crate::pipeline::steps::control_proto::default_calibration_table(),
+    );
+    let dois = crate::pipeline::steps::deliverables::extract_verified_dois(&ctx);
+    let db_patents = db.get_patents_by_numbers(&dois).unwrap_or_default();
+    let latex_bundle = crate::pipeline::steps::deliverables::build_paper_latex_bundle(
+        &ctx,
+        &cards,
+        &db_patents,
+        Some(&fallback_sim),
+    );
+    let paper_docx_bytes = build_paper_docx_bytes(db, idea)?;
     let docx_bytes = crate::routes::oa_export::build_oa_docx_bytes(
         &idea.title,
         "",
@@ -1270,6 +1282,19 @@ pub async fn build_project_archive_zip(
                 "05_IP_and_Paper/journal_manuscript_draft.md",
                 journal.full_markdown.into_bytes(),
             ),
+            (
+                "05_IP_and_Paper/main.tex",
+                latex_bundle.main_tex.into_bytes(),
+            ),
+            (
+                "05_IP_and_Paper/references.bib",
+                latex_bundle.bibtex_content.into_bytes(),
+            ),
+            (
+                "05_IP_and_Paper/figures/simulation_curve.svg",
+                latex_bundle.simulation_svg.into_bytes(),
+            ),
+            ("05_IP_and_Paper/paper_manuscript.docx", paper_docx_bytes),
             ("05_IP_and_Paper/oa_response_kit.docx", docx_bytes),
         ];
 
@@ -1410,6 +1435,15 @@ pub fn build_paper_latex_bundle_zip(
     db: &crate::db::Database,
     idea: &Idea,
 ) -> Result<Vec<u8>, String> {
+    build_paper_latex_bundle_zip_with_template(db, idea, None)
+}
+
+/// 按指定模板（`ctexart` | `ieee` | `elsevier`）生成期刊投稿 LaTeX 打包 ZIP
+pub fn build_paper_latex_bundle_zip_with_template(
+    db: &crate::db::Database,
+    idea: &Idea,
+    template_param: Option<&str>,
+) -> Result<Vec<u8>, String> {
     use std::io::Write;
     use zip::write::SimpleFileOptions;
 
@@ -1420,18 +1454,25 @@ pub fn build_paper_latex_bundle_zip(
     let fallback_sim = crate::pipeline::steps::control_proto::run_closed_loop_step_simulation(
         &crate::pipeline::steps::control_proto::default_calibration_table(),
     );
+    let sample = format!("{} {} {}", ctx.title, ctx.description, ctx.ai_analysis);
+    let template = crate::pipeline::steps::deliverables::PaperLatexTemplate::from_query_or_content(
+        template_param,
+        &sample,
+    );
 
-    let bundle = crate::pipeline::steps::deliverables::build_paper_latex_bundle(
+    let bundle = crate::pipeline::steps::deliverables::build_paper_latex_bundle_with_template(
         &ctx,
         &cards,
         &db_patents,
         Some(&fallback_sim),
+        template,
     );
 
     let readme = format!(
         "InnoForge Journal Submission LaTeX Bundle\n\
          ========================================\n\
          Project: {}\n\
+         Template: {}\n\
          Verified DOI Citations: {}\n\
          Step 13 Numerical Simulation Figure: {}\n\n\
          Files:\n\
@@ -1440,6 +1481,7 @@ pub fn build_paper_latex_bundle_zip(
          - figures/simulation_curve.svg\n\n\
          {}\n",
         idea.title,
+        bundle.template.as_str(),
         bundle.bib_entries.len(),
         if bundle.has_step13_simulation {
             "figures/simulation_curve.svg (Step 13 Experiment Validation)"
@@ -1752,10 +1794,17 @@ pub fn build_paper_docx_bytes(db: &crate::db::Database, idea: &Idea) -> Result<V
     Ok(buf.into_inner())
 }
 
+#[derive(Debug, Deserialize, Default)]
+pub struct LatexBundleQuery {
+    #[serde(default)]
+    pub template: Option<String>,
+}
+
 /// GET /api/ideas/:id/paper/latex-bundle — 导出期刊投稿 LaTeX 打包文件 (.zip: main.tex + references.bib + SVG 仿真图)
 pub async fn api_idea_paper_latex_bundle(
     State(s): State<AppState>,
     Path(id): Path<String>,
+    Query(query): Query<LatexBundleQuery>,
 ) -> axum::response::Response {
     use axum::http::{header, StatusCode};
     use axum::response::IntoResponse;
@@ -1765,7 +1814,7 @@ pub async fn api_idea_paper_latex_bundle(
         _ => return (StatusCode::NOT_FOUND, "Idea not found").into_response(),
     };
 
-    match build_paper_latex_bundle_zip(&s.db, &idea) {
+    match build_paper_latex_bundle_zip_with_template(&s.db, &idea, query.template.as_deref()) {
         Ok(bytes) => {
             let safe_id = sanitize_ascii_id(&idea.id, "paper");
             let filename = format!("paper-latex-{safe_id}.zip");
@@ -1956,6 +2005,41 @@ mod deliverables_report_tests {
                 "missing directory {prefix} in {names:?}"
             );
         }
+        for required_paper_file in [
+            "05_IP_and_Paper/main.tex",
+            "05_IP_and_Paper/references.bib",
+            "05_IP_and_Paper/figures/simulation_curve.svg",
+            "05_IP_and_Paper/paper_manuscript.docx",
+        ] {
+            assert!(
+                names.iter().any(|n| n == required_paper_file),
+                "missing paper deliverable {required_paper_file} in {names:?}"
+            );
+        }
+
+        let mut tex = String::new();
+        std::io::Read::read_to_string(
+            &mut archive
+                .by_name("05_IP_and_Paper/main.tex")
+                .expect("main.tex"),
+            &mut tex,
+        )
+        .expect("read main.tex");
+        assert!(tex.contains(r"\documentclass[UTF8]{ctexart}"));
+        assert!(tex.contains("10.1016/j.ymssp.2024.111222"));
+
+        let mut docx_buf = Vec::new();
+        std::io::Read::read_to_end(
+            &mut archive
+                .by_name("05_IP_and_Paper/paper_manuscript.docx")
+                .expect("paper_manuscript.docx"),
+            &mut docx_buf,
+        )
+        .expect("read paper_manuscript.docx");
+        assert!(
+            docx_buf.starts_with(b"PK"),
+            "embedded paper docx must be a valid ZIP"
+        );
     }
 
     #[test]
@@ -2037,6 +2121,20 @@ mod deliverables_report_tests {
         assert!(svg.contains("Time (ms)"));
         assert!(svg.contains("class=\"legend\""));
         assert!(svg.contains("<polyline"));
+
+        // 显式选择 ?template=ieee 应生成 IEEEtran 文档类
+        let ieee_bytes =
+            super::build_paper_latex_bundle_zip_with_template(&db, &idea, Some("ieee"))
+                .expect("build ieee latex zip");
+        let mut ieee_archive =
+            zip::ZipArchive::new(std::io::Cursor::new(ieee_bytes)).expect("open ieee zip");
+        let mut ieee_tex = String::new();
+        std::io::Read::read_to_string(
+            &mut ieee_archive.by_name("main.tex").expect("ieee main.tex"),
+            &mut ieee_tex,
+        )
+        .expect("read ieee main.tex");
+        assert!(ieee_tex.contains(r"\documentclass[journal]{IEEEtran}"));
     }
 
     #[test]

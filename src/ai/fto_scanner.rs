@@ -47,6 +47,13 @@ pub struct FtoScanReport {
 
 /// 判断专利法律状态是否为“已失效/可自由实施”。
 pub fn is_patent_inactive(legal_status: &str) -> bool {
+    if matches!(
+        crate::search::providers::epo_ops::LegalStatus::from_str_lossy(legal_status),
+        crate::search::providers::epo_ops::LegalStatus::Expired
+            | crate::search::providers::epo_ops::LegalStatus::Rejected
+    ) {
+        return true;
+    }
     let lower = legal_status.trim().to_ascii_lowercase();
     if lower.is_empty() {
         return false;
@@ -59,8 +66,11 @@ pub fn is_patent_inactive(legal_status: &str) -> bool {
         "驳回",
         "视撤",
         "过期",
+        "期满",
         "expired",
+        "expiration",
         "withdrawn",
+        "rejected",
         "invalid",
         "lapsed",
         "revoked",
@@ -368,5 +378,24 @@ mod tests {
             .expect("inactive hit");
         assert_eq!(expired_safe.risk_level, "safe_green");
         assert!(expired_safe.rationale.contains("已失效"));
+    }
+
+    #[test]
+    fn fto_treats_google_patents_expired_and_withdrawn_variants_as_safe_green() {
+        for status in ["Expired", "Withdrawn", "Rejected", "Abandoned", "Lapsed"] {
+            assert!(
+                is_patent_inactive(status),
+                "{status} should be treated as inactive"
+            );
+            let p = Patent {
+                patent_number: format!("US-{status}"),
+                title: "电磁阀".into(),
+                claims: "1. 一种电磁阀，包括电磁驱动线圈。".into(),
+                legal_status: status.into(),
+                ..Default::default()
+            };
+            let hit = evaluate_patent_fto(&p, "一种电磁阀，包括电磁驱动线圈。");
+            assert_eq!(hit.risk_level, "safe_green");
+        }
     }
 }

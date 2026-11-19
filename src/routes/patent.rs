@@ -183,23 +183,32 @@ pub async fn api_enrich_patent(
                     if family_id.is_some() {
                         updated.family_id = family_id;
                     }
-                    if let Some(events) = json["legal_events"].as_array() {
-                        let status_parts: Vec<String> = events
-                            .iter()
-                            .take(3)
-                            .filter_map(|e| {
-                                let title = e["title"].as_str().unwrap_or("");
-                                let date = e["date"].as_str().unwrap_or("");
-                                if !title.is_empty() {
-                                    Some(format!("{} ({})", title, date))
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect();
-                        if !status_parts.is_empty() {
-                            updated.legal_status = status_parts.join("; ");
+                    let parsed_events = parse_google_patents_legal_events(&json);
+                    if !parsed_events.is_empty() {
+                        let (_, _, summary) = map_google_patents_events_to_status(&parsed_events);
+                        if !summary.is_empty() {
+                            updated.legal_status = summary;
                         }
+                    } else if let Some(raw_status) = json["legal_status"]
+                        .as_str()
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                    {
+                        let normalized =
+                            crate::search::providers::epo_ops::LegalStatus::from_str_lossy(
+                                raw_status,
+                            );
+                        updated.legal_status = if normalized
+                            != crate::search::providers::epo_ops::LegalStatus::Unknown
+                        {
+                            format!(
+                                "{} — {}",
+                                legal_status_cn_label(normalized, raw_status),
+                                raw_status
+                            )
+                        } else {
+                            raw_status.to_string()
+                        };
                     }
                     // Extract images
                     if let Some(images) = json["images"].as_array() {
@@ -1170,18 +1179,25 @@ pub async fn api_patent_legal_status(
                     }
                 }
             }
-            // 更新本地 Patent 记录的 legal_status 字段
+            // 更新本地 Patent 记录的 legal_status 字段（保留标准状态标签以联动 FTO 判定）
             if !result.current_status.is_empty() && result.current_status != "未知" {
                 let status_text = if result.events.is_empty() {
                     result.current_status.clone()
                 } else {
-                    result
-                        .events
-                        .iter()
-                        .take(5)
-                        .map(|e| format!("{} ({})", e.title, e.date))
-                        .collect::<Vec<_>>()
-                        .join("; ")
+                    let (_, _, mapped_summary) =
+                        map_google_patents_events_to_status(&result.events);
+                    if !mapped_summary.is_empty() {
+                        mapped_summary
+                    } else {
+                        let events_summary = result
+                            .events
+                            .iter()
+                            .take(5)
+                            .map(|e| format!("{} ({})", e.title, e.date))
+                            .collect::<Vec<_>>()
+                            .join("; ");
+                        format!("{} — {}", result.current_status, events_summary)
+                    }
                 };
                 let _ =
                     s.db.update_patent_legal_status(&patent_number, &status_text);
@@ -1390,9 +1406,19 @@ async fn fetch_legal_from_google_patents(
         .timeout(std::time::Duration::from_secs(15))
         .build()?;
 
+    let patent_id_param = if patent_number.starts_with("patent/") {
+        patent_number.to_string()
+    } else {
+        let lang = if patent_number.to_ascii_uppercase().starts_with("CN") {
+            "zh"
+        } else {
+            "en"
+        };
+        format!("patent/{}/{}", patent_number, lang)
+    };
     let url = format!(
         "https://serpapi.com/search.json?engine=google_patents_details&patent_id={}&api_key={}",
-        urlencoding::encode(patent_number),
+        urlencoding::encode(&patent_id_param),
         serpapi_key
     );
 
@@ -1403,24 +1429,27 @@ async fn fetch_legal_from_google_patents(
 
     let json: serde_json::Value = resp.json().await?;
     let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
-    let mut events = Vec::new();
+    let mut events = parse_google_patents_legal_events(&json);
 
-    if let Some(legal_events) = json["legal_events"].as_array() {
-        for e in legal_events {
-            let title = e["title"].as_str().unwrap_or("").to_string();
-            let date = e["date"].as_str().unwrap_or("").to_string();
-            let desc = e["description"].as_str().unwrap_or("").to_string();
-            if !title.is_empty() {
+    let mut current_status = infer_current_status(&events);
+    if current_status == "未知" {
+        if let Some(raw_status) = json["legal_status"]
+            .as_str()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            let normalized =
+                crate::search::providers::epo_ops::LegalStatus::from_str_lossy(raw_status);
+            current_status = legal_status_cn_label(normalized, raw_status).to_string();
+            if events.is_empty() && current_status != "未知" {
                 events.push(LegalEvent {
-                    date,
-                    title,
-                    description: desc,
+                    date: now.clone(),
+                    title: raw_status.to_string(),
+                    description: String::new(),
                 });
             }
         }
     }
-
-    let current_status = infer_current_status(&events);
 
     Ok(LegalStatusResult {
         patent_number: patent_number.to_string(),
@@ -1573,30 +1602,149 @@ async fn fetch_legal_from_sogou(patent_number: &str) -> anyhow::Result<LegalStat
     })
 }
 
-/// 从法律事件推断当前状态 / Infer current status from legal events
-fn infer_current_status(events: &[LegalEvent]) -> String {
-    for e in events {
-        let t = e.title.as_str();
-        if t.contains("无效") || t.contains("Expired") || t.contains("失效") {
-            return "无效".to_string();
-        }
-        if t.contains("驳回") || t.contains("Rejected") {
-            return "驳回".to_string();
-        }
-        if t.contains("撤回") || t.contains("Withdrawn") {
-            return "撤回".to_string();
-        }
-        if t.contains("授权") || t.contains("Grant") || t.contains("Active") {
-            return "有效".to_string();
-        }
-        if t.contains("实审") || t.contains("审查") {
-            return "审查中".to_string();
-        }
-        if t.contains("公开") {
-            return "公开".to_string();
+/// 解析 Google Patents / SerpAPI `legal_events` 数组
+pub(crate) fn parse_google_patents_legal_events(json: &serde_json::Value) -> Vec<LegalEvent> {
+    let mut events = Vec::new();
+    if let Some(legal_events) = json["legal_events"].as_array() {
+        for e in legal_events {
+            let title = e["title"]
+                .as_str()
+                .or_else(|| e["code"].as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            let date = e["date"].as_str().unwrap_or("").trim().to_string();
+            let desc = e["description"].as_str().unwrap_or("").trim().to_string();
+            if !title.is_empty() || !desc.is_empty() {
+                let effective_title = if title.is_empty() {
+                    desc.clone()
+                } else {
+                    title
+                };
+                events.push(LegalEvent {
+                    date,
+                    title: effective_title,
+                    description: desc,
+                });
+            }
         }
     }
-    "未知".to_string()
+    events
+}
+
+fn legal_status_cn_label(
+    status: crate::search::providers::epo_ops::LegalStatus,
+    raw_text: &str,
+) -> &'static str {
+    use crate::search::providers::epo_ops::LegalStatus;
+    let lower = raw_text.to_ascii_lowercase();
+    match status {
+        LegalStatus::Expired => "已失效",
+        LegalStatus::Rejected => {
+            if lower.contains("withdrawn")
+                || lower.contains("abandoned")
+                || raw_text.contains("撤回")
+                || raw_text.contains("视撤")
+                || raw_text.contains("放弃")
+            {
+                "撤回"
+            } else if lower.contains("rejected") || raw_text.contains("驳回") {
+                "驳回"
+            } else {
+                "无效"
+            }
+        }
+        LegalStatus::Active => "有效",
+        LegalStatus::Pending => {
+            if raw_text.contains("公开") && !raw_text.contains("审") {
+                "公开"
+            } else {
+                "审查中"
+            }
+        }
+        LegalStatus::Unknown => "未知",
+    }
+}
+
+/// 将法律事件列表按时间倒序映射为标准 `LegalStatus`、中文状态标签及入库摘要（供 FTO 联动消费）
+pub(crate) fn map_google_patents_events_to_status(
+    events: &[LegalEvent],
+) -> (
+    crate::search::providers::epo_ops::LegalStatus,
+    &'static str,
+    String,
+) {
+    use crate::search::providers::epo_ops::LegalStatus;
+    if events.is_empty() {
+        return (LegalStatus::Unknown, "未知", String::new());
+    }
+
+    // 按日期降序排列（同日或无日期时保持数组靠后者优先，符合 Google Patents 时间正序习惯）
+    let mut ordered: Vec<(usize, &LegalEvent)> = events.iter().enumerate().collect();
+    ordered.sort_by(|(idx_a, a), (idx_b, b)| {
+        b.date
+            .trim()
+            .cmp(a.date.trim())
+            .then_with(|| idx_b.cmp(idx_a))
+    });
+
+    let mut matched_status = LegalStatus::Unknown;
+    let mut matched_label = "未知";
+    for (_, ev) in &ordered {
+        let combined = format!("{} {}", ev.title, ev.description);
+        let parsed = LegalStatus::from_str_lossy(&combined);
+        if parsed != LegalStatus::Unknown {
+            matched_status = parsed;
+            matched_label = legal_status_cn_label(parsed, &combined);
+            break;
+        }
+    }
+
+    let event_parts: Vec<String> = ordered
+        .iter()
+        .take(3)
+        .filter_map(|(_, ev)| {
+            let use_desc = ev.title.trim().is_empty()
+                || (!ev.description.trim().is_empty()
+                    && ev.title.trim().len() <= 6
+                    && ev.description.trim() != ev.title.trim());
+            let label = if use_desc {
+                ev.description.trim()
+            } else {
+                ev.title.trim()
+            };
+            if label.is_empty() {
+                None
+            } else if ev.date.trim().is_empty() {
+                Some(label.to_string())
+            } else {
+                Some(format!("{} ({})", label, ev.date.trim()))
+            }
+        })
+        .collect();
+
+    let summary = if matched_label != "未知" {
+        if event_parts.is_empty() {
+            matched_label.to_string()
+        } else {
+            format!(
+                "{} ({}) — {}",
+                matched_label,
+                matched_status.as_str(),
+                event_parts.join("; ")
+            )
+        }
+    } else {
+        event_parts.join("; ")
+    };
+
+    (matched_status, matched_label, summary)
+}
+
+/// 从法律事件推断当前状态 / Infer current status from legal events
+fn infer_current_status(events: &[LegalEvent]) -> String {
+    let (_, label, _) = map_google_patents_events_to_status(events);
+    label.to_string()
 }
 
 #[cfg(test)]
@@ -1743,5 +1891,99 @@ mod patent_image_proxy_tests {
             .expect("update");
         let loaded2 = db.get_patent(&id1).expect("get").expect("found");
         assert_eq!(loaded2.title, "更新后的中文标题");
+    }
+
+    #[test]
+    fn google_patents_legal_events_map_expired_and_withdrawn_to_fto_safe_green() {
+        use crate::ai::fto_scanner::{evaluate_patent_fto, is_patent_inactive};
+        use crate::search::providers::epo_ops::LegalStatus;
+
+        let expired_json = serde_json::json!({
+            "legal_events": [
+                { "date": "2018-03-01", "title": "Application granted", "description": "Granted" },
+                { "date": "2024-05-15", "title": "FP", "description": "Expired due to non-payment of maintenance fee" }
+            ]
+        });
+        let expired_events = super::parse_google_patents_legal_events(&expired_json);
+        let (st_exp, label_exp, summary_exp) =
+            super::map_google_patents_events_to_status(&expired_events);
+        assert_eq!(st_exp, LegalStatus::Expired);
+        assert_eq!(label_exp, "已失效");
+        assert!(is_patent_inactive(&summary_exp));
+
+        let patent_exp = crate::patent::Patent {
+            patent_number: "US10000001B2".to_string(),
+            title: "Magnetic valve".to_string(),
+            claims: "1. A magnetic valve comprising a coil and double bellows.".to_string(),
+            legal_status: summary_exp,
+            ..Default::default()
+        };
+        let fto_exp = evaluate_patent_fto(
+            &patent_exp,
+            "A magnetic valve comprising a coil and double bellows.",
+        );
+        assert_eq!(fto_exp.risk_level, "safe_green");
+
+        let withdrawn_json = serde_json::json!({
+            "legal_events": [
+                { "date": "2023-02-01", "title": "Substantive examination", "description": "Under exam" },
+                { "date": "2025-01-10", "title": "Legal event", "description": "Application withdrawn by applicant" }
+            ]
+        });
+        let withdrawn_events = super::parse_google_patents_legal_events(&withdrawn_json);
+        let (st_wd, label_wd, summary_wd) =
+            super::map_google_patents_events_to_status(&withdrawn_events);
+        assert_eq!(st_wd, LegalStatus::Rejected);
+        assert_eq!(label_wd, "撤回");
+        assert!(is_patent_inactive(&summary_wd));
+
+        let active_json = serde_json::json!({
+            "legal_events": [
+                { "date": "2021-06-01", "title": "Application granted", "description": "Patent granted" },
+                { "date": "2024-06-01", "title": "FP", "description": "Fee payment year 4" }
+            ]
+        });
+        let active_events = super::parse_google_patents_legal_events(&active_json);
+        let (st_act, label_act, summary_act) =
+            super::map_google_patents_events_to_status(&active_events);
+        assert_eq!(st_act, LegalStatus::Active);
+        assert_eq!(label_act, "有效");
+        assert!(!is_patent_inactive(&summary_act));
+    }
+
+    #[tokio::test]
+    async fn manual_legal_status_update_persists_and_normalizes() {
+        let state = crate::common::init_app_state(":memory:").expect("init app state");
+        let patent = crate::patent::Patent {
+            id: "pat-legal-1".to_string(),
+            patent_number: "CN118888888A".to_string(),
+            title: "测试专利".to_string(),
+            abstract_text: "摘要".to_string(),
+            legal_status: "审查中".to_string(),
+            ..Default::default()
+        };
+        state.db.insert_patent(&patent).expect("insert patent");
+
+        let resp = super::api_update_patent_legal_status(
+            axum::extract::State(state.clone()),
+            axum::extract::Path("CN118888888A".to_string()),
+            axum::Json(super::UpdateLegalStatusRequest {
+                legal_status: "Withdrawn".to_string(),
+            }),
+        )
+        .await;
+        assert_eq!(resp.0["status"], "ok");
+        assert_eq!(resp.0["normalized_status"], "Rejected");
+        assert_eq!(resp.0["badge_color"], "green");
+
+        let loaded = state
+            .db
+            .get_patent("CN118888888A")
+            .expect("db get")
+            .expect("patent exists");
+        assert_eq!(loaded.legal_status, "Withdrawn");
+        assert!(crate::ai::fto_scanner::is_patent_inactive(
+            &loaded.legal_status
+        ));
     }
 }
