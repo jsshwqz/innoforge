@@ -14,6 +14,12 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-11-19 — **Batch 11 / 12 / 15 / 16 实审与工程补强（v0.9.61）**
+
+- **状态 / Status**: ✅ 本地全量验证通过，已提 PR 等 CI 合并进 `main` 并打 `v0.9.61` Tag
+- **① 法律状态与权利要求补强**（`src/common.rs`、`src/routes/patent.rs`、`src/routes/idea_ops.rs`、`src/ai/claim_validator.rs`）：补齐 `PATCH /api/patent/:id/legal-status` 与 Google Patents 法律事件回填 FTO 联动；新增 `PUT /api/ideas/:id/claims` 批量保存及独权主题名称一致性/纯功能性限定实施例支撑检查。
+- **② 多轮禁止反悔硬拦截与论文模板归档**（`src/ai/oa_drift.rs`、`src/ai/pre_submission_check.rs`、`src/routes/audit.rs`、`src/routes/oa_core.rs`、`src/pipeline/steps/deliverables.rs`、`src/routes/idea_reports.rs`、`templates/idea.html`）：将 `oa_drift` 禁止反悔冲突接入提交前硬拦截；新增 `ctexart`/`ieee`/`elsevier` LaTeX 模板切换并将完整论文产物自动并入项目 `.zip` 归档包 `05_IP_and_Paper/`。
+
 ### 2026-11-19 — **P0 安全止血与工程健康加固（v0.9.60）**
 
 - **状态 / Status**: ✅ 本地全量验证通过，已提 PR 等 CI 合并进 `main` 并打 `v0.9.60` Tag

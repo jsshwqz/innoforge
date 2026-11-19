@@ -532,7 +532,9 @@ pub fn build_router_with_token(
         )
         .route(
             "/api/patent/:id/legal-status",
-            get(routes::api_patent_legal_status).post(routes::api_update_patent_legal_status),
+            get(routes::api_patent_legal_status)
+                .post(routes::api_update_patent_legal_status)
+                .patch(routes::api_update_patent_legal_status),
         )
         .route(
             "/api/patent/:id/citation-graph",
@@ -786,6 +788,10 @@ pub fn build_router_with_token(
         .route(
             "/api/feature-cards/diff",
             get(routes::api_feature_card_diff),
+        )
+        .route(
+            "/api/ideas/:id/claims",
+            put(routes::api_idea_claims_replace),
         )
         .route(
             "/api/ideas/:id/claims/validate",

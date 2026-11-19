@@ -5,7 +5,7 @@
 > `node scripts/gen_route_inventory.js`
 > 逐条「收什么、回什么」的契约（路径参数 / 请求体字段 / 响应键）见 `docs/API-CONTRACTS.md`，同样自动生成。
 
-共 **159** 条路由：页面/静态 9 条，`/api` 接口 150 条。
+共 **160** 条路由：页面/静态 9 条，`/api` 接口 151 条。
 
 ## 说明：清单只回答「有哪些端点」
 
@@ -57,119 +57,120 @@
 | 41 | POST | `/api/patent/lookup-or-fetch` | `routes::api_patent_lookup_and_fetch` | src/common.rs:521 |
 | 42 | POST | `/api/patent/resolve-chinese-titles` | `routes::api_resolve_chinese_titles` | src/common.rs:525 |
 | 43 | GET | `/api/patent/similar/:id` | `routes::api_recommend_similar` | src/common.rs:529 |
-| 44 | GET / POST | `/api/patent/:id/legal-status` | `routes::api_patent_legal_status` | src/common.rs:533 |
-| 45 | GET | `/api/patent/:id/citation-graph` | `routes::api_patent_citation_graph` | src/common.rs:537 |
-| 46 | POST | `/api/ai/chat` | `routes::api_ai_chat` | src/common.rs:542 |
-| 47 | POST | `/api/ai/chat/stream` | `routes::api_ai_chat_stream` | src/common.rs:543 |
-| 48 | POST | `/api/ai/chat/conclusions` | `routes::api_ai_chat_conclusions` | src/common.rs:544 |
-| 49 | GET | `/api/auth/google/url` | `routes::api_google_auth_url` | src/common.rs:549 |
-| 50 | GET | `/api/auth/google/callback` | `routes::api_google_callback` | src/common.rs:550 |
-| 51 | POST | `/api/auth/google/exchange` | `routes::api_google_exchange_handler` | src/common.rs:554 |
-| 52 | GET | `/api/auth/google/status` | `routes::api_google_oauth_status` | src/common.rs:558 |
-| 53 | GET | `/api/auth/gcloud/status` | `routes::api_gcloud_status` | src/common.rs:563 |
-| 54 | POST | `/api/auth/gcloud/login` | `routes::api_gcloud_login` | src/common.rs:564 |
-| 55 | POST | `/api/ai/summarize` | `routes::api_ai_summarize` | src/common.rs:565 |
-| 56 | POST | `/api/ai/compare` | `routes::api_ai_compare` | src/common.rs:566 |
-| 57 | POST | `/api/ai/claims` | `routes::api_ai_claims_analysis` | src/common.rs:567 |
-| 58 | POST | `/api/ai/risk` | `routes::api_ai_risk_assessment` | src/common.rs:568 |
-| 59 | POST | `/api/ai/compare-matrix` | `routes::api_ai_compare_matrix` | src/common.rs:569 |
-| 60 | POST | `/api/ai/batch-summarize` | `routes::api_ai_batch_summarize` | src/common.rs:573 |
-| 61 | POST | `/api/ai/inventiveness-analysis` | `routes::api_ai_inventiveness_analysis` | src/common.rs:577 |
-| 62 | POST | `/api/ai/office-action-response` | `routes::api_ai_office_action_response` | src/common.rs:581 |
-| 63 | POST | `/api/ai/office-action-response/stream` | `routes::api_ai_office_action_response_stream` | src/common.rs:585 |
-| 64 | POST | `/api/ai/oa-generate-response-letter` | `routes::api_ai_oa_generate_response_letter` | src/common.rs:589 |
-| 65 | POST | `/api/ai/oa-discuss` | `routes::api_ai_oa_discuss` | src/common.rs:593 |
-| 66 | POST | `/api/ai/oa-fetch-refs` | `routes::api_ai_oa_fetch_refs` | src/common.rs:594 |
-| 67 | POST | `/api/ai/oa-panel` | `routes::api_ai_oa_panel` | src/common.rs:595 |
-| 68 | POST | `/api/ai/oa-history-compare` | `routes::api_ai_oa_history_compare` | src/common.rs:596 |
-| 69 | POST | `/api/ai/oa-examiner-preview` | `routes::api_ai_oa_examiner_preview` | src/common.rs:600 |
-| 70 | POST | `/api/ai/oa-defense-analysis` | `routes::api_ai_oa_defense_analysis` | src/common.rs:604 |
-| 71 | POST | `/api/ai/oa-strategy-recommend` | `routes::api_ai_oa_strategy_recommend` | src/common.rs:608 |
-| 72 | POST | `/api/ai/oa-quality-score` | `routes::api_ai_oa_quality_score` | src/common.rs:612 |
-| 73 | POST | `/api/ai/audit-checks` | `routes::api_ai_audit_checks` | src/common.rs:616 |
-| 74 | POST | `/api/ai/prohibition-check` | `routes::api_ai_prohibition_check` | src/common.rs:617 |
-| 75 | POST | `/api/ai/oa-claim-simulate` | `routes::api_ai_oa_claim_simulate` | src/common.rs:621 |
-| 76 | POST | `/api/ai/oa-collect-evidence` | `routes::api_ai_oa_collect_evidence` | src/common.rs:625 |
-| 77 | POST | `/api/ai/oa-adversarial` | `routes::api_ai_oa_adversarial` | src/common.rs:629 |
-| 78 | POST | `/api/ai/vision-figure-check` | `routes::api_ai_vision_figure_check` | src/common.rs:633 |
-| 79 | POST | `/api/ai/oa-feature-matrix` | `routes::api_ai_oa_feature_matrix` | src/common.rs:637 |
-| 80 | GET | `/api/oa/history/all` | `routes::api_oa_history_all` | src/common.rs:642 |
-| 81 | GET | `/api/oa/history/:patent_number` | `routes::api_oa_history` | src/common.rs:643 |
-| 82 | GET | `/api/oa/history/detail/:id` | `routes::api_oa_history_detail` | src/common.rs:647 |
-| 83 | POST | `/api/oa/history/:id/delete` | `routes::api_oa_history_delete` | src/common.rs:651 |
-| 84 | GET | `/api/oa/history/:patent_number/diff` | `routes::api_oa_history_diff` | src/common.rs:656 |
-| 85 | GET | `/api/oa/discussions/:patent_number` | `routes::api_oa_discussion_list` | src/common.rs:661 |
-| 86 | GET | `/api/oa/discussions/:patent_number/:discussion_id` | `routes::api_oa_discussion_get` | src/common.rs:665 |
-| 87 | POST | `/api/oa/discussions/import` | `routes::api_oa_discussion_import` | src/common.rs:669 |
-| 88 | POST | `/api/oa/export-docx` | `routes::api_oa_export_docx` | src/common.rs:674 |
-| 89 | GET | `/api/oa/:case_id/export/docx` | `routes::api_oa_case_export_docx` | src/common.rs:675 |
-| 90 | POST | `/api/oa/export` | `routes::oa_export::api_oa_export_post` | src/common.rs:680 |
-| 91 | GET | `/api/oa/export/:filename` | `routes::oa_export::api_oa_export_get` | src/common.rs:684 |
-| 92 | GET | `/api/oa/rounds/:patent_id` | `routes::api_oa_rounds_get` | src/common.rs:689 |
-| 93 | GET | `/api/oa/:case_id/rounds/diff` | `routes::api_oa_rounds_diff` | src/common.rs:690 |
-| 94 | POST | `/api/oa/rounds` | `routes::api_oa_rounds_create` | src/common.rs:694 |
-| 95 | PUT | `/api/oa/rounds/update/:id` | `routes::api_oa_rounds_update` | src/common.rs:695 |
-| 96 | GET | `/api/oa/timeline/:patent_id` | `routes::api_oa_timeline` | src/common.rs:699 |
-| 97 | POST | `/api/ai/check-amendments` | `routes::api_ai_check_amendments` | src/common.rs:700 |
-| 98 | POST | `/api/ai/threat-assessment` | `routes::api_ai_threat_assessment` | src/common.rs:705 |
-| 99 | POST | `/api/ai/claim-chart` | `routes::api_ai_claim_chart` | src/common.rs:709 |
-| 100 | GET | `/api/ai/cost` | `routes::api_ai_cost_summary` | src/common.rs:710 |
-| 101 | GET | `/api/ai/cost/records` | `routes::api_ai_cost_records` | src/common.rs:711 |
-| 102 | POST | `/api/ai/cost/record` | `routes::api_ai_cost_save` | src/common.rs:712 |
-| 103 | POST | `/api/idea/submit` | `routes::api_idea_submit` | src/common.rs:714 |
-| 104 | POST | `/api/idea/analyze` | `routes::api_idea_analyze` | src/common.rs:715 |
-| 105 | POST | `/api/idea/pipeline` | `routes::api_idea_pipeline` | src/common.rs:716 |
-| 106 | POST | `/api/ideas/batch-compare` | `routes::api_ideas_batch_compare` | src/common.rs:717 |
-| 107 | GET | `/api/idea/list` | `routes::api_idea_list` | src/common.rs:721 |
-| 108 | GET | `/api/idea/:id` | `routes::api_idea_get` | src/common.rs:722 |
-| 109 | POST | `/api/idea/:id/delete` | `routes::api_idea_delete` | src/common.rs:723 |
-| 110 | GET | `/api/idea/:id/progress` | `routes::api_idea_progress` | src/common.rs:724 |
-| 111 | POST | `/api/idea/:id/resume` | `routes::api_idea_resume` | src/common.rs:725 |
-| 112 | GET / POST | `/api/idea/:id/research-state` | `routes::api_idea_research_state` | src/common.rs:726 |
-| 113 | POST | `/api/idea/:id/redirect` | `routes::api_idea_redirect` | src/common.rs:730 |
-| 114 | GET | `/api/idea/:id/report` | `routes::api_idea_report` | src/common.rs:731 |
-| 115 | GET | `/api/idea/:id/report.html` | `routes::api_idea_report_html` | src/common.rs:732 |
-| 116 | GET | `/api/ai/models` | `routes::list_ai_models` | src/common.rs:736 |
-| 117 | POST | `/api/idea/:id/chat` | `routes::api_idea_chat` | src/common.rs:737 |
-| 118 | GET | `/api/idea/:id/evidence` | `routes::api_idea_evidence` | src/common.rs:738 |
-| 119 | GET | `/api/idea/:id/kernel-report` | `routes::api_idea_kernel_report` | src/common.rs:739 |
-| 120 | GET | `/api/idea/:id/messages` | `routes::api_idea_messages` | src/common.rs:743 |
-| 121 | GET | `/api/idea/:id/chat/conclusions` | `routes::api_idea_chat_conclusions` | src/common.rs:744 |
-| 122 | GET | `/api/idea/:id/chat/conversation` | `routes::api_idea_chat_conversation` | src/common.rs:748 |
-| 123 | POST | `/api/idea/:id/summarize` | `routes::api_idea_summarize_discussion` | src/common.rs:752 |
-| 124 | GET / POST | `/api/ideas/:id/feature-cards` | `routes::api_get_feature_cards` | src/common.rs:757 |
-| 125 | POST | `/api/ideas/:id/feature-cards/generate` | `routes::api_generate_feature_cards` | src/common.rs:761 |
-| 126 | GET | `/api/ideas/:id/delivery-pack/xlsx` | `routes::api_idea_delivery_pack_xlsx` | src/common.rs:765 |
-| 127 | POST | `/api/ideas/:id/control-prototype` | `routes::api_idea_control_prototype` | src/common.rs:769 |
-| 128 | POST | `/api/ideas/:id/fto-scan` | `routes::api_idea_fto_scan` | src/common.rs:773 |
-| 129 | GET | `/api/ideas/:id/archive/zip` | `routes::api_idea_archive_zip` | src/common.rs:774 |
-| 130 | GET | `/api/ideas/:id/paper/latex-bundle` | `routes::api_idea_paper_latex_bundle` | src/common.rs:778 |
-| 131 | GET | `/api/ideas/:id/paper/docx` | `routes::api_idea_paper_docx` | src/common.rs:782 |
-| 132 | GET | `/api/feature-cards/diff` | `routes::api_feature_card_diff` | src/common.rs:786 |
-| 133 | POST | `/api/ideas/:id/claims/validate` | `routes::api_idea_claims_validate` | src/common.rs:790 |
-| 134 | GET / POST | `/api/idea/:id/claim-tree` | `routes::api_idea_claim_tree` | src/common.rs:795 |
-| 135 | DELETE | `/api/idea/:id/claim-tree/:claim_id` | `routes::api_idea_claim_node_delete` | src/common.rs:799 |
-| 136 | POST | `/api/idea/:id/iterate` | `routes::api_idea_iterate` | src/common.rs:803 |
-| 137 | GET | `/api/idea/:id/versions` | `routes::api_idea_versions` | src/common.rs:804 |
-| 138 | GET | `/api/idea/:id/branches` | `routes::api_idea_branches` | src/common.rs:805 |
-| 139 | GET | `/api/idea/:id/findings` | `routes::api_idea_findings` | src/common.rs:806 |
-| 140 | GET / POST | `/api/idea/:id/memory` | `routes::api_idea_memory` | src/common.rs:808 |
-| 141 | DELETE | `/api/idea/:id/memory/:entry_id` | `routes::api_idea_memory_delete` | src/common.rs:812 |
-| 142 | GET | `/api/ipc/tree` | `routes::api_ipc_tree` | src/common.rs:817 |
-| 143 | GET | `/api/ipc/:code/patents` | `routes::api_ipc_patents` | src/common.rs:818 |
-| 144 | POST | `/api/patents/import` | `routes::api_import_patents` | src/common.rs:820 |
-| 145 | POST | `/api/backup/export` | `routes::api_backup_export` | src/common.rs:821 |
-| 146 | POST | `/api/backup/check` | `routes::api_backup_check` | src/common.rs:822 |
-| 147 | GET / POST | `/api/collections` | `routes::api_list_collections` | src/common.rs:824 |
-| 148 | DELETE | `/api/collections/:id` | `routes::api_delete_collection` | src/common.rs:828 |
-| 149 | GET | `/api/collections/:id/patents` | `routes::api_get_collection_patents` | src/common.rs:832 |
-| 150 | POST | `/api/collections/:id/add` | `routes::api_add_to_collection` | src/common.rs:836 |
-| 151 | DELETE | `/api/collections/:id/remove/:patent_id` | `routes::api_remove_from_collection` | src/common.rs:840 |
-| 152 | GET / POST | `/api/patents/:id/tags` | `routes::api_get_patent_tags` | src/common.rs:845 |
-| 153 | DELETE | `/api/patents/:id/tags/:tag` | `routes::api_remove_tag` | src/common.rs:849 |
-| 154 | GET | `/api/patents/:id/collections` | `routes::api_get_patent_collections` | src/common.rs:853 |
-| 155 | GET | `/api/tags` | `routes::api_list_all_tags` | src/common.rs:857 |
-| 156 | POST | `/api/upload/compare` | `routes::api_upload_compare` | src/common.rs:859 |
-| 157 | POST | `/api/upload/extract` | `routes::api_upload_extract` | src/common.rs:860 |
-| 158 | POST | `/api/upload/pdf-store` | `routes::api_upload_pdf_store` | src/common.rs:861 |
-| 159 | GET | `/static/*path` | `serve_static_embedded` | src/common.rs:865 |
+| 44 | GET / POST / PATCH | `/api/patent/:id/legal-status` | `routes::api_patent_legal_status` | src/common.rs:533 |
+| 45 | GET | `/api/patent/:id/citation-graph` | `routes::api_patent_citation_graph` | src/common.rs:539 |
+| 46 | POST | `/api/ai/chat` | `routes::api_ai_chat` | src/common.rs:544 |
+| 47 | POST | `/api/ai/chat/stream` | `routes::api_ai_chat_stream` | src/common.rs:545 |
+| 48 | POST | `/api/ai/chat/conclusions` | `routes::api_ai_chat_conclusions` | src/common.rs:546 |
+| 49 | GET | `/api/auth/google/url` | `routes::api_google_auth_url` | src/common.rs:551 |
+| 50 | GET | `/api/auth/google/callback` | `routes::api_google_callback` | src/common.rs:552 |
+| 51 | POST | `/api/auth/google/exchange` | `routes::api_google_exchange_handler` | src/common.rs:556 |
+| 52 | GET | `/api/auth/google/status` | `routes::api_google_oauth_status` | src/common.rs:560 |
+| 53 | GET | `/api/auth/gcloud/status` | `routes::api_gcloud_status` | src/common.rs:565 |
+| 54 | POST | `/api/auth/gcloud/login` | `routes::api_gcloud_login` | src/common.rs:566 |
+| 55 | POST | `/api/ai/summarize` | `routes::api_ai_summarize` | src/common.rs:567 |
+| 56 | POST | `/api/ai/compare` | `routes::api_ai_compare` | src/common.rs:568 |
+| 57 | POST | `/api/ai/claims` | `routes::api_ai_claims_analysis` | src/common.rs:569 |
+| 58 | POST | `/api/ai/risk` | `routes::api_ai_risk_assessment` | src/common.rs:570 |
+| 59 | POST | `/api/ai/compare-matrix` | `routes::api_ai_compare_matrix` | src/common.rs:571 |
+| 60 | POST | `/api/ai/batch-summarize` | `routes::api_ai_batch_summarize` | src/common.rs:575 |
+| 61 | POST | `/api/ai/inventiveness-analysis` | `routes::api_ai_inventiveness_analysis` | src/common.rs:579 |
+| 62 | POST | `/api/ai/office-action-response` | `routes::api_ai_office_action_response` | src/common.rs:583 |
+| 63 | POST | `/api/ai/office-action-response/stream` | `routes::api_ai_office_action_response_stream` | src/common.rs:587 |
+| 64 | POST | `/api/ai/oa-generate-response-letter` | `routes::api_ai_oa_generate_response_letter` | src/common.rs:591 |
+| 65 | POST | `/api/ai/oa-discuss` | `routes::api_ai_oa_discuss` | src/common.rs:595 |
+| 66 | POST | `/api/ai/oa-fetch-refs` | `routes::api_ai_oa_fetch_refs` | src/common.rs:596 |
+| 67 | POST | `/api/ai/oa-panel` | `routes::api_ai_oa_panel` | src/common.rs:597 |
+| 68 | POST | `/api/ai/oa-history-compare` | `routes::api_ai_oa_history_compare` | src/common.rs:598 |
+| 69 | POST | `/api/ai/oa-examiner-preview` | `routes::api_ai_oa_examiner_preview` | src/common.rs:602 |
+| 70 | POST | `/api/ai/oa-defense-analysis` | `routes::api_ai_oa_defense_analysis` | src/common.rs:606 |
+| 71 | POST | `/api/ai/oa-strategy-recommend` | `routes::api_ai_oa_strategy_recommend` | src/common.rs:610 |
+| 72 | POST | `/api/ai/oa-quality-score` | `routes::api_ai_oa_quality_score` | src/common.rs:614 |
+| 73 | POST | `/api/ai/audit-checks` | `routes::api_ai_audit_checks` | src/common.rs:618 |
+| 74 | POST | `/api/ai/prohibition-check` | `routes::api_ai_prohibition_check` | src/common.rs:619 |
+| 75 | POST | `/api/ai/oa-claim-simulate` | `routes::api_ai_oa_claim_simulate` | src/common.rs:623 |
+| 76 | POST | `/api/ai/oa-collect-evidence` | `routes::api_ai_oa_collect_evidence` | src/common.rs:627 |
+| 77 | POST | `/api/ai/oa-adversarial` | `routes::api_ai_oa_adversarial` | src/common.rs:631 |
+| 78 | POST | `/api/ai/vision-figure-check` | `routes::api_ai_vision_figure_check` | src/common.rs:635 |
+| 79 | POST | `/api/ai/oa-feature-matrix` | `routes::api_ai_oa_feature_matrix` | src/common.rs:639 |
+| 80 | GET | `/api/oa/history/all` | `routes::api_oa_history_all` | src/common.rs:644 |
+| 81 | GET | `/api/oa/history/:patent_number` | `routes::api_oa_history` | src/common.rs:645 |
+| 82 | GET | `/api/oa/history/detail/:id` | `routes::api_oa_history_detail` | src/common.rs:649 |
+| 83 | POST | `/api/oa/history/:id/delete` | `routes::api_oa_history_delete` | src/common.rs:653 |
+| 84 | GET | `/api/oa/history/:patent_number/diff` | `routes::api_oa_history_diff` | src/common.rs:658 |
+| 85 | GET | `/api/oa/discussions/:patent_number` | `routes::api_oa_discussion_list` | src/common.rs:663 |
+| 86 | GET | `/api/oa/discussions/:patent_number/:discussion_id` | `routes::api_oa_discussion_get` | src/common.rs:667 |
+| 87 | POST | `/api/oa/discussions/import` | `routes::api_oa_discussion_import` | src/common.rs:671 |
+| 88 | POST | `/api/oa/export-docx` | `routes::api_oa_export_docx` | src/common.rs:676 |
+| 89 | GET | `/api/oa/:case_id/export/docx` | `routes::api_oa_case_export_docx` | src/common.rs:677 |
+| 90 | POST | `/api/oa/export` | `routes::oa_export::api_oa_export_post` | src/common.rs:682 |
+| 91 | GET | `/api/oa/export/:filename` | `routes::oa_export::api_oa_export_get` | src/common.rs:686 |
+| 92 | GET | `/api/oa/rounds/:patent_id` | `routes::api_oa_rounds_get` | src/common.rs:691 |
+| 93 | GET | `/api/oa/:case_id/rounds/diff` | `routes::api_oa_rounds_diff` | src/common.rs:692 |
+| 94 | POST | `/api/oa/rounds` | `routes::api_oa_rounds_create` | src/common.rs:696 |
+| 95 | PUT | `/api/oa/rounds/update/:id` | `routes::api_oa_rounds_update` | src/common.rs:697 |
+| 96 | GET | `/api/oa/timeline/:patent_id` | `routes::api_oa_timeline` | src/common.rs:701 |
+| 97 | POST | `/api/ai/check-amendments` | `routes::api_ai_check_amendments` | src/common.rs:702 |
+| 98 | POST | `/api/ai/threat-assessment` | `routes::api_ai_threat_assessment` | src/common.rs:707 |
+| 99 | POST | `/api/ai/claim-chart` | `routes::api_ai_claim_chart` | src/common.rs:711 |
+| 100 | GET | `/api/ai/cost` | `routes::api_ai_cost_summary` | src/common.rs:712 |
+| 101 | GET | `/api/ai/cost/records` | `routes::api_ai_cost_records` | src/common.rs:713 |
+| 102 | POST | `/api/ai/cost/record` | `routes::api_ai_cost_save` | src/common.rs:714 |
+| 103 | POST | `/api/idea/submit` | `routes::api_idea_submit` | src/common.rs:716 |
+| 104 | POST | `/api/idea/analyze` | `routes::api_idea_analyze` | src/common.rs:717 |
+| 105 | POST | `/api/idea/pipeline` | `routes::api_idea_pipeline` | src/common.rs:718 |
+| 106 | POST | `/api/ideas/batch-compare` | `routes::api_ideas_batch_compare` | src/common.rs:719 |
+| 107 | GET | `/api/idea/list` | `routes::api_idea_list` | src/common.rs:723 |
+| 108 | GET | `/api/idea/:id` | `routes::api_idea_get` | src/common.rs:724 |
+| 109 | POST | `/api/idea/:id/delete` | `routes::api_idea_delete` | src/common.rs:725 |
+| 110 | GET | `/api/idea/:id/progress` | `routes::api_idea_progress` | src/common.rs:726 |
+| 111 | POST | `/api/idea/:id/resume` | `routes::api_idea_resume` | src/common.rs:727 |
+| 112 | GET / POST | `/api/idea/:id/research-state` | `routes::api_idea_research_state` | src/common.rs:728 |
+| 113 | POST | `/api/idea/:id/redirect` | `routes::api_idea_redirect` | src/common.rs:732 |
+| 114 | GET | `/api/idea/:id/report` | `routes::api_idea_report` | src/common.rs:733 |
+| 115 | GET | `/api/idea/:id/report.html` | `routes::api_idea_report_html` | src/common.rs:734 |
+| 116 | GET | `/api/ai/models` | `routes::list_ai_models` | src/common.rs:738 |
+| 117 | POST | `/api/idea/:id/chat` | `routes::api_idea_chat` | src/common.rs:739 |
+| 118 | GET | `/api/idea/:id/evidence` | `routes::api_idea_evidence` | src/common.rs:740 |
+| 119 | GET | `/api/idea/:id/kernel-report` | `routes::api_idea_kernel_report` | src/common.rs:741 |
+| 120 | GET | `/api/idea/:id/messages` | `routes::api_idea_messages` | src/common.rs:745 |
+| 121 | GET | `/api/idea/:id/chat/conclusions` | `routes::api_idea_chat_conclusions` | src/common.rs:746 |
+| 122 | GET | `/api/idea/:id/chat/conversation` | `routes::api_idea_chat_conversation` | src/common.rs:750 |
+| 123 | POST | `/api/idea/:id/summarize` | `routes::api_idea_summarize_discussion` | src/common.rs:754 |
+| 124 | GET / POST | `/api/ideas/:id/feature-cards` | `routes::api_get_feature_cards` | src/common.rs:759 |
+| 125 | POST | `/api/ideas/:id/feature-cards/generate` | `routes::api_generate_feature_cards` | src/common.rs:763 |
+| 126 | GET | `/api/ideas/:id/delivery-pack/xlsx` | `routes::api_idea_delivery_pack_xlsx` | src/common.rs:767 |
+| 127 | POST | `/api/ideas/:id/control-prototype` | `routes::api_idea_control_prototype` | src/common.rs:771 |
+| 128 | POST | `/api/ideas/:id/fto-scan` | `routes::api_idea_fto_scan` | src/common.rs:775 |
+| 129 | GET | `/api/ideas/:id/archive/zip` | `routes::api_idea_archive_zip` | src/common.rs:776 |
+| 130 | GET | `/api/ideas/:id/paper/latex-bundle` | `routes::api_idea_paper_latex_bundle` | src/common.rs:780 |
+| 131 | GET | `/api/ideas/:id/paper/docx` | `routes::api_idea_paper_docx` | src/common.rs:784 |
+| 132 | GET | `/api/feature-cards/diff` | `routes::api_feature_card_diff` | src/common.rs:788 |
+| 133 | PUT | `/api/ideas/:id/claims` | `routes::api_idea_claims_replace` | src/common.rs:792 |
+| 134 | POST | `/api/ideas/:id/claims/validate` | `routes::api_idea_claims_validate` | src/common.rs:796 |
+| 135 | GET / POST | `/api/idea/:id/claim-tree` | `routes::api_idea_claim_tree` | src/common.rs:801 |
+| 136 | DELETE | `/api/idea/:id/claim-tree/:claim_id` | `routes::api_idea_claim_node_delete` | src/common.rs:805 |
+| 137 | POST | `/api/idea/:id/iterate` | `routes::api_idea_iterate` | src/common.rs:809 |
+| 138 | GET | `/api/idea/:id/versions` | `routes::api_idea_versions` | src/common.rs:810 |
+| 139 | GET | `/api/idea/:id/branches` | `routes::api_idea_branches` | src/common.rs:811 |
+| 140 | GET | `/api/idea/:id/findings` | `routes::api_idea_findings` | src/common.rs:812 |
+| 141 | GET / POST | `/api/idea/:id/memory` | `routes::api_idea_memory` | src/common.rs:814 |
+| 142 | DELETE | `/api/idea/:id/memory/:entry_id` | `routes::api_idea_memory_delete` | src/common.rs:818 |
+| 143 | GET | `/api/ipc/tree` | `routes::api_ipc_tree` | src/common.rs:823 |
+| 144 | GET | `/api/ipc/:code/patents` | `routes::api_ipc_patents` | src/common.rs:824 |
+| 145 | POST | `/api/patents/import` | `routes::api_import_patents` | src/common.rs:826 |
+| 146 | POST | `/api/backup/export` | `routes::api_backup_export` | src/common.rs:827 |
+| 147 | POST | `/api/backup/check` | `routes::api_backup_check` | src/common.rs:828 |
+| 148 | GET / POST | `/api/collections` | `routes::api_list_collections` | src/common.rs:830 |
+| 149 | DELETE | `/api/collections/:id` | `routes::api_delete_collection` | src/common.rs:834 |
+| 150 | GET | `/api/collections/:id/patents` | `routes::api_get_collection_patents` | src/common.rs:838 |
+| 151 | POST | `/api/collections/:id/add` | `routes::api_add_to_collection` | src/common.rs:842 |
+| 152 | DELETE | `/api/collections/:id/remove/:patent_id` | `routes::api_remove_from_collection` | src/common.rs:846 |
+| 153 | GET / POST | `/api/patents/:id/tags` | `routes::api_get_patent_tags` | src/common.rs:851 |
+| 154 | DELETE | `/api/patents/:id/tags/:tag` | `routes::api_remove_tag` | src/common.rs:855 |
+| 155 | GET | `/api/patents/:id/collections` | `routes::api_get_patent_collections` | src/common.rs:859 |
+| 156 | GET | `/api/tags` | `routes::api_list_all_tags` | src/common.rs:863 |
+| 157 | POST | `/api/upload/compare` | `routes::api_upload_compare` | src/common.rs:865 |
+| 158 | POST | `/api/upload/extract` | `routes::api_upload_extract` | src/common.rs:866 |
+| 159 | POST | `/api/upload/pdf-store` | `routes::api_upload_pdf_store` | src/common.rs:867 |
+| 160 | GET | `/static/*path` | `serve_static_embedded` | src/common.rs:871 |

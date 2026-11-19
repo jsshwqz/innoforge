@@ -8,6 +8,8 @@
 use serde::{Deserialize, Serialize};
 
 use super::case_input::CaseInput;
+use super::oa_drift::{self, OaDriftReport};
+use crate::db::Database;
 
 /// 目标递交系统类型
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -31,6 +33,9 @@ pub struct PreCheckItem {
     pub passed: bool,
     /// 未通过时的修复建议
     pub fix_hint: Option<String>,
+    /// 严重级别（如 `"blocking_error"`，可选）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub severity: Option<String>,
 }
 
 /// 完整检查清单
@@ -46,6 +51,16 @@ pub struct PreSubmissionChecklist {
 
 /// 运行递交前检查，返回完整清单
 pub fn run_pre_submission_check(input: &CaseInput, target: TargetSystem) -> PreSubmissionChecklist {
+    run_pre_submission_check_with_drift(input, target, None, None)
+}
+
+/// 结合多轮 OA 禁止反言报告（`OaDriftReport`）与拟提交答复草稿运行递交前检查
+pub fn run_pre_submission_check_with_drift(
+    input: &CaseInput,
+    target: TargetSystem,
+    response_draft: Option<&str>,
+    drift_report: Option<&OaDriftReport>,
+) -> PreSubmissionChecklist {
     // 1-5 为通用检查项，顺序即清单展示顺序
     let mut items = vec![
         check_applicant_type(input),
@@ -60,12 +75,109 @@ pub fn run_pre_submission_check(input: &CaseInput, target: TargetSystem) -> PreS
         items.push(check_reexam_fee(input));
     }
 
+    // 7. 跨轮次禁止反言与历史口径一致性红线校验（Batch 15）
+    if let Some(report) = drift_report {
+        if report.total_rounds > 0 && !report.consistency_redlines.is_empty() {
+            let fallback_draft;
+            let draft_text = match response_draft.map(str::trim).filter(|s| !s.is_empty()) {
+                Some(d) => d,
+                None => {
+                    fallback_draft = format!(
+                        "{}\n{}",
+                        input.legacy_discussion.as_deref().unwrap_or(""),
+                        input.claims_under_review
+                    );
+                    fallback_draft.as_str()
+                }
+            };
+            items.push(check_estoppel_consistency(draft_text, report));
+        }
+    }
+
     let all_passed = items.iter().all(|item| item.passed);
 
     PreSubmissionChecklist {
         target,
         items,
         all_passed,
+    }
+}
+
+/// 从数据库读取 `oa_rounds` 历史记录并运行含禁止反言红线校验的递交前检查
+pub fn run_pre_submission_check_for_case(
+    db: &Database,
+    input: &CaseInput,
+    target: TargetSystem,
+    case_id: Option<&str>,
+    response_draft: Option<&str>,
+) -> PreSubmissionChecklist {
+    let resolved_case_id = case_id
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(input.case_meta.application_number.as_str());
+    let drift_report = if resolved_case_id.trim().is_empty() {
+        None
+    } else {
+        oa_drift::analyze_case_drift(db, resolved_case_id).ok()
+    };
+    run_pre_submission_check_with_drift(input, target, response_draft, drift_report.as_ref())
+}
+
+/// 核查拟提交答复草稿是否与前轮 `oa_drift` 禁止反言/自认承诺相矛盾
+pub fn check_estoppel_consistency(
+    response_draft: &str,
+    drift_report: &OaDriftReport,
+) -> PreCheckItem {
+    if drift_report.consistency_redlines.is_empty() {
+        return PreCheckItem {
+            name: "禁止反言与跨轮次一致性红线".to_string(),
+            pass_condition: "本轮答复草稿不得推翻前轮自认、已承诺限缩或核心区别特征口径"
+                .to_string(),
+            current_value: "无历史禁止反言红线".to_string(),
+            passed: true,
+            fix_hint: None,
+            severity: None,
+        };
+    }
+
+    let conflicts = oa_drift::detect_estoppel_conflicts(response_draft, drift_report);
+    if conflicts.is_empty() {
+        return PreCheckItem {
+            name: "禁止反言与跨轮次一致性红线".to_string(),
+            pass_condition: "本轮答复草稿不得推翻前轮自认、已承诺限缩或核心区别特征口径"
+                .to_string(),
+            current_value: format!(
+                "已核验 {} 条前轮红线，未检出口径矛盾",
+                drift_report.consistency_redlines.len()
+            ),
+            passed: true,
+            fix_hint: None,
+            severity: None,
+        };
+    }
+
+    let summary_list: Vec<String> = conflicts
+        .iter()
+        .map(|c| {
+            format!(
+                "[{}·第{}轮] 冲突片段「{}」",
+                c.redline_id, c.source_round, c.draft_excerpt
+            )
+        })
+        .collect();
+    let hints: Vec<String> = conflicts.iter().map(|c| c.reason.clone()).collect();
+
+    PreCheckItem {
+        name: "禁止反言与跨轮次一致性红线".to_string(),
+        pass_condition: "本轮答复草稿不得推翻前轮自认、已承诺限缩或核心区别特征口径".to_string(),
+        current_value: format!(
+            "阻断错误：检出 {} 处矛盾（{}）",
+            conflicts.len(),
+            summary_list.join("；")
+        ),
+        passed: false,
+        fix_hint: Some(format!("禁止反言阻断建议：{}", hints.join("；"))),
+        severity: Some("blocking_error".to_string()),
     }
 }
 
@@ -124,6 +236,7 @@ fn check_applicant_type(input: &CaseInput) -> PreCheckItem {
         } else {
             Some("请在 legacy_analysis 或 legacy_discussion 中补充申请人类型(个人/企业/事业单位)和证件类型(身份证/统一社会信用代码)".to_string())
         },
+        severity: None,
     }
 }
 
@@ -159,6 +272,7 @@ fn check_address_dedup(input: &CaseInput) -> PreCheckItem {
         } else {
             None
         },
+        severity: None,
     }
 }
 
@@ -208,6 +322,7 @@ fn check_oa_date(input: &CaseInput) -> PreCheckItem {
         } else {
             Some("请填写驳回决定发文日".to_string())
         },
+        severity: None,
     }
 }
 
@@ -237,6 +352,7 @@ fn check_opinion_text(input: &CaseInput) -> PreCheckItem {
         } else {
             Some("请填写权利要求或OA全文".to_string())
         },
+        severity: None,
     }
 }
 
@@ -257,6 +373,7 @@ fn check_attachment_list(input: &CaseInput) -> PreCheckItem {
         } else {
             Some("请添加至少1个对比文件".to_string())
         },
+        severity: None,
     }
 }
 
@@ -287,6 +404,7 @@ fn check_reexam_fee(input: &CaseInput) -> PreCheckItem {
         } else {
             Some("请在 legacy_analysis 中补充复审费缴纳信息".to_string())
         },
+        severity: None,
     }
 }
 
@@ -309,7 +427,13 @@ pub fn format_checklist(checklist: &PreSubmissionChecklist) -> String {
     ));
 
     for (i, item) in checklist.items.iter().enumerate() {
-        let status = if item.passed { "✓" } else { "✗" };
+        let status = if item.passed {
+            "✓"
+        } else if item.severity.as_deref() == Some("blocking_error") {
+            "⛔ 阻断错误"
+        } else {
+            "✗"
+        };
         text.push_str(&format!("{}. {} [{}]\n", i + 1, item.name, status));
         text.push_str(&format!("   通过条件：{}\n", item.pass_condition));
         text.push_str(&format!("   当前值：{}\n", item.current_value));
@@ -468,5 +592,76 @@ mod tests {
             );
         }
         let _ = text; // suppress unused warning
+    }
+
+    #[test]
+    fn estoppel_redline_contradiction_blocks_pre_submission_check() {
+        let db = Database::init(":memory:").expect("init db");
+        let case_id = "CASE-PRECHECK-ESTOPPEL-01";
+        let round1 = crate::db::oa::OaRound {
+            id: "round-pre-1".to_string(),
+            patent_id: case_id.to_string(),
+            round_number: 1,
+            round_type: "first_rejection".to_string(),
+            oa_date: Some("2026-01-15".to_string()),
+            oa_text: Some("一审：权利要求1相对于D1（CN100000001A）不具备创造性。".to_string()),
+            response_date: Some("2026-03-01".to_string()),
+            response_text: Some(
+                "一审答复：申请人承认D1公开了行星齿轮架。我们将权利要求1修改为增加双列圆锥滚子轴承预紧力限定。"
+                    .to_string(),
+            ),
+            result: Some("partially_accepted".to_string()),
+            result_date: None,
+            strategy_used: None,
+            quality_score: None,
+            notes: None,
+            created_at: "2026-01-15T00:00:00Z".to_string(),
+            updated_at: "2026-03-01T00:00:00Z".to_string(),
+        };
+        db.save_oa_round(&round1).expect("save oa round");
+
+        let mut input = make_base_input();
+        input.case_meta.application_number = case_id.to_string();
+        input.legacy_analysis =
+            Some("申请人类型：企业。证件类型：统一社会信用代码。复审费已缴纳。".to_string());
+
+        // 1) 新答复草稿推翻前轮自认并删除已承诺限定 -> 必须阻断
+        let bad_draft =
+            "二审答复：经核查，D1并未公开行星齿轮架，同时现删除双列圆锥滚子轴承预紧力限定。";
+        let blocked = run_pre_submission_check_for_case(
+            &db,
+            &input,
+            TargetSystem::CnipaReexam,
+            Some(case_id),
+            Some(bad_draft),
+        );
+        assert!(
+            !blocked.all_passed,
+            "存在禁止反言矛盾时 all_passed 必须为 false: {:?}",
+            blocked.items
+        );
+        let estoppel_item = blocked
+            .items
+            .iter()
+            .find(|i| i.name == "禁止反言与跨轮次一致性红线")
+            .expect("estoppel check item must be present");
+        assert!(!estoppel_item.passed);
+        assert_eq!(estoppel_item.severity.as_deref(), Some("blocking_error"));
+        assert!(estoppel_item.fix_hint.is_some());
+
+        // 2) 一致性答复草稿 -> 全部通过
+        let good_draft = "二审答复：虽然D1公开了行星齿轮架，但D1和D3均未公开双列圆锥滚子轴承预紧力限定所产生的抗偏载效果。";
+        let passed = run_pre_submission_check_for_case(
+            &db,
+            &input,
+            TargetSystem::CnipaReexam,
+            Some(case_id),
+            Some(good_draft),
+        );
+        assert!(
+            passed.all_passed,
+            "一致性答复应通过预检: {:?}",
+            passed.items
+        );
     }
 }

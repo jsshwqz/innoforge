@@ -247,6 +247,210 @@ pub struct ValidateClaimsRequest {
     pub claims: Vec<crate::ai::claim_validator::ClaimInput>,
     #[serde(default)]
     pub specification: Option<String>,
+    #[serde(default)]
+    pub invention_title: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+pub struct ReplaceClaimsRequest {
+    #[serde(default)]
+    pub claims: Vec<UpsertClaimNodeRequest>,
+}
+
+/// PUT /api/ideas/:id/claims — 整树批量替换保存编辑后的权利要求树
+pub async fn api_idea_claims_replace(
+    State(s): State<AppState>,
+    Path(idea_id): Path<String>,
+    Json(req): Json<ReplaceClaimsRequest>,
+) -> impl axum::response::IntoResponse {
+    use axum::http::StatusCode;
+    use std::collections::{HashMap, HashSet};
+
+    match s.db.get_idea(&idea_id) {
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({"status": "error", "message": "创意不存在"})),
+            );
+        }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"status": "error", "message": e.to_string()})),
+            );
+        }
+    }
+
+    for item in &req.claims {
+        if item.claim_number == 0 || item.content.trim().is_empty() {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(
+                    json!({"status": "error", "message": "每条权利要求必须满足 claim_number >= 1 且 content 不能为空"}),
+                ),
+            );
+        }
+    }
+
+    let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+    let mut conn = s.db.conn();
+
+    // 先收集当前 idea 已拥有的 claim_id，避免跨项目 id 碰撞并保持内部 parent_claim_id 引用一致
+    let owned_ids: HashSet<String> = {
+        let mut stmt = match conn.prepare("SELECT id FROM claim_nodes WHERE idea_id = ?1") {
+            Ok(stmt) => stmt,
+            Err(e) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"status": "error", "message": e.to_string()})),
+                );
+            }
+        };
+        let mapped = stmt
+            .query_map(rusqlite::params![idea_id], |r| r.get::<_, String>(0))
+            .map(|rows| rows.filter_map(|r| r.ok()).collect::<HashSet<String>>())
+            .unwrap_or_default();
+        mapped
+    };
+
+    let mut assigned_ids: Vec<String> = Vec::with_capacity(req.claims.len());
+    let mut used_ids: HashSet<String> = HashSet::new();
+    let mut id_remap: HashMap<String, String> = HashMap::new();
+
+    for item in &req.claims {
+        let raw_id = item.id.as_deref().map(str::trim).filter(|v| !v.is_empty());
+        let resolved_id = match raw_id {
+            Some(rid) if owned_ids.contains(rid) && used_ids.insert(rid.to_string()) => {
+                rid.to_string()
+            }
+            Some(rid) => {
+                let mut candidate = rid.to_string();
+                let exists_elsewhere: bool = conn
+                    .query_row(
+                        "SELECT EXISTS(SELECT 1 FROM claim_nodes WHERE id = ?1 AND idea_id != ?2)",
+                        rusqlite::params![candidate, idea_id],
+                        |r| r.get(0),
+                    )
+                    .unwrap_or(true);
+                if exists_elsewhere || !used_ids.insert(candidate.clone()) {
+                    candidate = uuid::Uuid::new_v4().to_string();
+                    used_ids.insert(candidate.clone());
+                    id_remap.insert(rid.to_string(), candidate.clone());
+                }
+                candidate
+            }
+            None => {
+                let fresh = uuid::Uuid::new_v4().to_string();
+                used_ids.insert(fresh.clone());
+                fresh
+            }
+        };
+        assigned_ids.push(resolved_id);
+    }
+
+    let tx = match conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate) {
+        Ok(tx) => tx,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"status": "error", "message": e.to_string()})),
+            );
+        }
+    };
+
+    if let Err(e) = tx.execute(
+        "DELETE FROM technical_features WHERE claim_id IN (SELECT id FROM claim_nodes WHERE idea_id = ?1)",
+        rusqlite::params![idea_id],
+    ) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"status": "error", "message": e.to_string()})),
+        );
+    }
+    if let Err(e) = tx.execute(
+        "DELETE FROM claim_nodes WHERE idea_id = ?1",
+        rusqlite::params![idea_id],
+    ) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"status": "error", "message": e.to_string()})),
+        );
+    }
+
+    let mut saved_claims = Vec::with_capacity(req.claims.len());
+    for (idx, item) in req.claims.iter().enumerate() {
+        let cid = &assigned_ids[idx];
+        let content = item.content.trim().to_string();
+        let parent_claim_id = item
+            .parent_claim_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(|pid| {
+                id_remap
+                    .get(pid)
+                    .cloned()
+                    .unwrap_or_else(|| pid.to_string())
+            });
+        let claim_type = if item.claim_type.trim().eq_ignore_ascii_case("dependent") {
+            "dependent".to_string()
+        } else if item.claim_type.trim().eq_ignore_ascii_case("independent") {
+            "independent".to_string()
+        } else if parent_claim_id.is_some()
+            || content.starts_with("根据权利要求")
+            || content.starts_with("如权利要求")
+        {
+            "dependent".to_string()
+        } else {
+            "independent".to_string()
+        };
+
+        if let Err(e) = tx.execute(
+            "INSERT INTO claim_nodes (id, idea_id, claim_number, claim_type, parent_claim_id, content, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params![
+                cid,
+                idea_id,
+                item.claim_number,
+                claim_type,
+                parent_claim_id,
+                content,
+                now
+            ],
+        ) {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"status": "error", "message": e.to_string()})),
+            );
+        }
+
+        saved_claims.push(json!({
+            "id": cid,
+            "claim_number": item.claim_number,
+            "claim_type": claim_type,
+            "parent_claim_id": parent_claim_id,
+            "content": content,
+            "created_at": now,
+        }));
+    }
+
+    if let Err(e) = tx.commit() {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"status": "error", "message": e.to_string()})),
+        );
+    }
+
+    (
+        StatusCode::OK,
+        Json(json!({
+            "status": "ok",
+            "idea_id": idea_id,
+            "count": saved_claims.len(),
+            "claims": saved_claims,
+        })),
+    )
 }
 
 /// POST /api/idea/:id/claim-tree — 新增或编辑单条权利要求节点
@@ -495,8 +699,15 @@ pub async fn api_idea_claims_validate(
         }
     };
 
-    let report = crate::ai::claim_validator::validate_claims(
+    let title_override = req
+        .invention_title
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+
+    let report = crate::ai::claim_validator::validate_claims_with_title(
         &idea.id,
+        title_override,
         &claims,
         &extra_spec_chunks,
         Some(&s.db),
@@ -1068,5 +1279,91 @@ mod idea_memory_context_tests {
         let block = build_memory_context(&entries).expect("block");
         let count = block.matches("（置信度").count();
         assert!((1..=10).contains(&count));
+    }
+}
+
+#[cfg(test)]
+mod claims_replace_tests {
+    use super::*;
+    use crate::common::init_app_state;
+    use axum::extract::{Path, State};
+    use axum::response::IntoResponse;
+
+    #[tokio::test]
+    async fn api_idea_claims_replace_overwrites_tree_atomically() {
+        let state = init_app_state(":memory:").expect("init app state");
+        let now = "2026-11-18T00:00:00Z".to_string();
+        let idea = Idea {
+            id: "idea-claims-put-1".to_string(),
+            title: "一种热管理电池箱".to_string(),
+            description: "测试方案".to_string(),
+            input_type: "text".to_string(),
+            status: "done".to_string(),
+            analysis: String::new(),
+            web_results: "[]".to_string(),
+            patent_results: "[]".to_string(),
+            novelty_score: None,
+            created_at: now.clone(),
+            updated_at: now,
+            discussion_summary: String::new(),
+        };
+        state.db.insert_idea(&idea).expect("insert idea");
+
+        // 先写入一条旧权利要求
+        let first_req = ReplaceClaimsRequest {
+            claims: vec![UpsertClaimNodeRequest {
+                id: Some("c-old".to_string()),
+                claim_number: 1,
+                claim_type: "independent".to_string(),
+                parent_claim_id: None,
+                content: "一种旧装置，包括底座。".to_string(),
+            }],
+        };
+        let resp1 = api_idea_claims_replace(
+            State(state.clone()),
+            Path("idea-claims-put-1".to_string()),
+            Json(first_req),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp1.status(), axum::http::StatusCode::OK);
+
+        // 再用 PUT 整树替换为 2 条新权利要求
+        let second_req = ReplaceClaimsRequest {
+            claims: vec![
+                UpsertClaimNodeRequest {
+                    id: Some("c-1".to_string()),
+                    claim_number: 1,
+                    claim_type: "independent".to_string(),
+                    parent_claim_id: None,
+                    content: "一种热管理电池箱，包括壳体和导热板。".to_string(),
+                },
+                UpsertClaimNodeRequest {
+                    id: Some("c-2".to_string()),
+                    claim_number: 2,
+                    claim_type: "dependent".to_string(),
+                    parent_claim_id: Some("c-1".to_string()),
+                    content:
+                        "根据权利要求1所述的热管理电池箱，其特征在于，所述导热板设有散热鳍片。"
+                            .to_string(),
+                },
+            ],
+        };
+        let resp2 = api_idea_claims_replace(
+            State(state.clone()),
+            Path("idea-claims-put-1".to_string()),
+            Json(second_req),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp2.status(), axum::http::StatusCode::OK);
+
+        let tree =
+            api_idea_claim_tree(State(state.clone()), Path("idea-claims-put-1".to_string())).await;
+        let claims = tree.0["claims"].as_array().expect("claims array");
+        assert_eq!(claims.len(), 2);
+        assert_eq!(claims[0]["claim_number"], 1);
+        assert_eq!(claims[1]["claim_number"], 2);
+        assert_eq!(claims[1]["parent_claim_id"], "c-1");
     }
 }

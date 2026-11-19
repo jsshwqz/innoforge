@@ -938,9 +938,23 @@ pub async fn api_ai_oa_generate_response_letter(
         // 因此只做"引用了哪些锚点、能不能精确对上"，对不上就如实报，不假装核验过。
         let anchor_report =
             crate::ai::anchor_verify::verify_anchors(&header_fill.letter, &crate::ai::anchor_verify::ChunkIndex::new());
+        let estoppel_check = drift_report
+            .as_ref()
+            .filter(|r| !r.consistency_redlines.is_empty())
+            .map(|r| crate::ai::pre_submission_check::check_estoppel_consistency(&header_fill.letter, r));
+        let estoppel_blocked = estoppel_check.as_ref().is_some_and(|item| !item.passed);
         let mut body = String::new();
         if !source_banner.is_empty() {
             body.push_str(&source_banner);
+        }
+        if let Some(ref item) = estoppel_check {
+            if !item.passed {
+                body.push_str(&format!(
+                    "> ⛔ **禁止反言与跨轮次一致性红线阻断**：{}（{}）\n\n",
+                    item.current_value,
+                    item.fix_hint.as_deref().unwrap_or("请对照前轮承诺修订后再提交")
+                ));
+            }
         }
         if gate.unsupported_count > 0 {
             let banner = gate.banner();
@@ -971,7 +985,7 @@ pub async fn api_ai_oa_generate_response_letter(
         }
         // 结构化维度：amendment_unsupported=N 与提交度维度（N>0 即 False）
         yield Ok(Event::default().event("meta").data(format!(
-            "{{\"source\":\"{analysis_source}\",\"amendment_unsupported\":{},\"amendment_marked\":{},\"amendment_merged\":{},\"amendment_unlocated\":{},\"broadening_count\":{},\"broadening_checked\":{},\"amendment_assertions_downgraded\":{},\"amendment_claims\":{},\"amendment_features\":{},\"corpus_claims\":{},\"amendment_gate\":\"{}\",\"anchor_verified\":{},\"anchor_unverified\":{},\"anchor_unparsed\":{},\"anchor_hallucination_rate\":{:.3},\"submission_ready\":{},\"header_known\":{},\"header_filled\":{},\"header_unresolved_count\":{},\"header_unresolved\":\"{}\",\"header_unresolved_marks\":{},\"drift_constraints_applied\":{},\"drift_redlines_count\":{}}}",
+            "{{\"source\":\"{analysis_source}\",\"amendment_unsupported\":{},\"amendment_marked\":{},\"amendment_merged\":{},\"amendment_unlocated\":{},\"broadening_count\":{},\"broadening_checked\":{},\"amendment_assertions_downgraded\":{},\"amendment_claims\":{},\"amendment_features\":{},\"corpus_claims\":{},\"amendment_gate\":\"{}\",\"anchor_verified\":{},\"anchor_unverified\":{},\"anchor_unparsed\":{},\"anchor_hallucination_rate\":{:.3},\"submission_ready\":{},\"header_known\":{},\"header_filled\":{},\"header_unresolved_count\":{},\"header_unresolved\":\"{}\",\"header_unresolved_marks\":{},\"drift_constraints_applied\":{},\"drift_redlines_count\":{},\"estoppel_blocked\":{}}}",
             gate.unsupported_count,
             gate.marked_count,
             gate.merged_count,
@@ -987,14 +1001,15 @@ pub async fn api_ai_oa_generate_response_letter(
             anchor_report.unverified.len(),
             anchor_report.unparsed.len(),
             anchor_report.hallucination_rate(),
-            gate.submission_ready,
+            gate.submission_ready && !estoppel_blocked,
             oa_header.known_count(),
             header_fill.filled,
             header_fill.unresolved_fields.len(),
             header_fill.unresolved_fields.join("|"),
             header_fill.unresolved_marks,
             drift_constraints_applied,
-            drift_redlines_count
+            drift_redlines_count,
+            estoppel_blocked
         )));
         // R6c: 事实核查已由 pipeline 内嵌，SSE 层不再重复追加
         yield Ok(Event::default().event("done").data("[DONE]"));

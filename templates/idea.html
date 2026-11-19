@@ -285,6 +285,10 @@
                             <button class="report-type-btn" data-rtype="journal_draft" onclick="switchReportType('journal_draft')" data-i18n="idea.reportJournalDraft">期刊论文草稿</button>
                             <button class="report-type-btn" type="button" onclick="exportBomXlsx()" data-i18n="idea.exportBomXlsx">导出 Excel BOM 包</button>
                             <button class="report-type-btn" type="button" onclick="exportProjectZip()" data-i18n="idea.exportProjectZip">一键导出完整项目包 (.zip)</button>
+                            <select id="paper-latex-template" class="report-type-btn" style="padding:4px 8px;" aria-label="LaTeX 模板">
+                                <option value="ctexart" data-i18n="idea.latexTplCtexart">中文核心期刊 (ctexart)</option>
+                                <option value="ieee" data-i18n="idea.latexTplIeee">IEEE 期刊 (IEEEtran)</option>
+                            </select>
                             <button class="report-type-btn" type="button" onclick="exportPaperLatexBundle()" data-i18n="idea.exportPaperLatex">导出论文 LaTeX 包 (.zip)</button>
                             <button class="report-type-btn" type="button" onclick="exportPaperDocx()" data-i18n="idea.exportPaperDocx">导出论文 Word (.docx)</button>
                         </div>
@@ -2388,7 +2392,9 @@
 
     function exportPaperLatexBundle() {
         if (!currentIdeaId) return;
-        window.location.href = '/api/ideas/' + encodeURIComponent(currentIdeaId) + '/paper/latex-bundle';
+        const tplEl = document.getElementById('paper-latex-template');
+        const tpl = tplEl && tplEl.value ? tplEl.value : 'ctexart';
+        window.location.href = '/api/ideas/' + encodeURIComponent(currentIdeaId) + '/paper/latex-bundle?template=' + encodeURIComponent(tpl);
     }
 
     function exportPaperDocx() {

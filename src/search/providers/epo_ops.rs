@@ -1168,18 +1168,24 @@ impl LegalStatus {
         }
         if lower.contains("rejected")
             || lower.contains("withdrawn")
+            || lower.contains("abandoned")
             || lower.contains("驳回")
             || lower.contains("撤回")
             || lower.contains("视撤")
             || lower.contains("无效")
+            || lower.contains("放弃")
             || lower.contains("revoked")
             || lower.contains("invalid")
         {
             return Self::Rejected;
         }
         if lower.contains("expired")
+            || lower.contains("expiration")
             || lower.contains("lapsed")
             || lower.contains("cease")
+            || lower.contains("nonpayment")
+            || lower.contains("non-payment")
+            || lower.contains("termination")
             || lower.contains("失效")
             || lower.contains("终止")
             || lower.contains("期满")
@@ -1189,14 +1195,19 @@ impl LegalStatus {
         }
         if lower.contains("active")
             || lower.contains("granted")
+            || lower.contains("grant")
             || lower.contains("valid")
+            || lower.contains("reinstated")
             || lower.contains("有效")
             || lower.contains("授权")
+            || lower.contains("恢复")
         {
             return Self::Active;
         }
         if lower.contains("pending")
             || lower.contains("exam")
+            || lower.contains("published")
+            || lower.contains("publication")
             || lower.contains("审")
             || lower.contains("公开")
         {

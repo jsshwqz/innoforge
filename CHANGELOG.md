@@ -6,6 +6,16 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 ---
 ## [Unreleased]
 
+## [v0.9.61] - 2026-11-19
+
+### 增强 / Enhanced
+
+- **Batch 11 / 12 / 15 / 16 四大实审补强**：
+  - **Batch 11**：`/api/patent/:id/legal-status` 补挂 `PATCH` 别名；增强 Google Patents / SerpAPI 法律事件解析回填并与 FTO 失效自动标绿联动；
+  - **Batch 12**：新增 `PUT /api/ideas/:id/claims` 权利要求树事务性批量保存接口；`claim_validator` 新增「独立权利要求主题名称与发明名称一致性」(`SYNTAX_TITLE_MISMATCH`) 及「纯功能性限定无结构/算法实施例支撑」(`ART26_4_PURE_FUNCTIONAL`) 自检；
+  - **Batch 15**：将 `oa_drift` 禁止反悔一致性冲突校验（`detect_estoppel_conflicts` / `check_estoppel_consistency`）接入提交前 `pre_submission_check` 硬拦截与流式答复元信息；
+  - **Batch 16**：`GET /api/ideas/:id/paper/latex-bundle` 支持 `?template=ctexart|ieee|elsevier` 中文工程核心期刊/英文 IEEE 模板切换（中文内容默认 `ctexart`），并将 `main.tex`、`references.bib`、`simulation_curve.svg` 与 `paper_manuscript.docx` 自动并入全项目 `.zip` 归档包 `05_IP_and_Paper/` 目录。
+
 ## [v0.9.60] - 2026-11-19
 
 ### 修复与安全加固 / Fixed & Security Hardening
@@ -483,6 +493,16 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 
 ---
 ## [Unreleased]
+
+## [v0.9.61] - 2026-11-19
+
+### 增强 / Enhanced
+
+- **Batch 11 / 12 / 15 / 16 四大实审补强**：
+  - **Batch 11**：`/api/patent/:id/legal-status` 补挂 `PATCH` 别名；增强 Google Patents / SerpAPI 法律事件解析回填并与 FTO 失效自动标绿联动；
+  - **Batch 12**：新增 `PUT /api/ideas/:id/claims` 权利要求树事务性批量保存接口；`claim_validator` 新增「独立权利要求主题名称与发明名称一致性」(`SYNTAX_TITLE_MISMATCH`) 及「纯功能性限定无结构/算法实施例支撑」(`ART26_4_PURE_FUNCTIONAL`) 自检；
+  - **Batch 15**：将 `oa_drift` 禁止反悔一致性冲突校验（`detect_estoppel_conflicts` / `check_estoppel_consistency`）接入提交前 `pre_submission_check` 硬拦截与流式答复元信息；
+  - **Batch 16**：`GET /api/ideas/:id/paper/latex-bundle` 支持 `?template=ctexart|ieee|elsevier` 中文工程核心期刊/英文 IEEE 模板切换（中文内容默认 `ctexart`），并将 `main.tex`、`references.bib`、`simulation_curve.svg` 与 `paper_manuscript.docx` 自动并入全项目 `.zip` 归档包 `05_IP_and_Paper/` 目录。
 
 ## [v0.9.60] - 2026-11-19
 

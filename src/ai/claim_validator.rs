@@ -92,12 +92,34 @@ pub fn validate_claims_deterministic(
     claims: &[ClaimInput],
     spec_chunks: &[String],
 ) -> ClaimValidationReport {
-    validate_claims_internal(idea_id, claims, spec_chunks, 0)
+    validate_claims_internal(idea_id, None, claims, spec_chunks, 0)
+}
+
+/// 带发明名称的确定性规则校验（用于核查独立权利要求主题名称与发明名称一致性）
+pub fn validate_claims_deterministic_with_title(
+    idea_id: &str,
+    invention_title: Option<&str>,
+    claims: &[ClaimInput],
+    spec_chunks: &[String],
+) -> ClaimValidationReport {
+    validate_claims_internal(idea_id, invention_title, claims, spec_chunks, 0)
 }
 
 /// 结合 `Database`（`v25` `chunks_fts`）与可选 `ai_client_expert` 执行完整权利要求体检
 pub async fn validate_claims(
     idea_id: &str,
+    claims: &[ClaimInput],
+    extra_spec_chunks: &[String],
+    db: Option<&Database>,
+    ai_expert: Option<&AiClient>,
+) -> ClaimValidationReport {
+    validate_claims_with_title(idea_id, None, claims, extra_spec_chunks, db, ai_expert).await
+}
+
+/// 结合 `Database`、`invention_title` 与可选 `ai_client_expert` 执行完整权利要求体检
+pub async fn validate_claims_with_title(
+    idea_id: &str,
+    invention_title: Option<&str>,
     claims: &[ClaimInput],
     extra_spec_chunks: &[String],
     db: Option<&Database>,
@@ -110,6 +132,10 @@ pub async fn validate_claims(
         .collect();
     let mut fts_hits_count = 0usize;
     let mut matched_chunk_ids: Vec<String> = Vec::new();
+    let mut resolved_title: Option<String> = invention_title
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToString::to_string);
 
     if let Some(database) = db {
         let mut query_parts: Vec<String> = claims
@@ -119,6 +145,9 @@ pub async fn validate_claims(
             .collect();
         if let Ok(Some(idea)) = database.get_idea(idea_id) {
             if !idea.title.trim().is_empty() {
+                if resolved_title.is_none() {
+                    resolved_title = Some(idea.title.clone());
+                }
                 query_parts.push(idea.title);
             }
         }
@@ -149,7 +178,13 @@ pub async fn validate_claims(
         }
     }
 
-    let mut report = validate_claims_internal(idea_id, claims, &spec_chunks, fts_hits_count);
+    let mut report = validate_claims_internal(
+        idea_id,
+        resolved_title.as_deref(),
+        claims,
+        &spec_chunks,
+        fts_hits_count,
+    );
 
     // 附带命中的 chunks_fts 来源标签（如有数值/功能警告，便于追溯已查核的分块）
     if !matched_chunk_ids.is_empty() {
@@ -187,6 +222,7 @@ pub async fn validate_claims(
 
 fn validate_claims_internal(
     idea_id: &str,
+    invention_title: Option<&str>,
     claims: &[ClaimInput],
     spec_chunks: &[String],
     fts_hits_count: usize,
@@ -461,6 +497,32 @@ fn validate_claims_internal(
                     evidence_chunks: Vec::new(),
                 });
             }
+
+            // 1e. 独立权利要求主题名称与发明名称一致性核查（审查指南第一部分第一章 4.1 / 细则第19条）
+            if let Some(inv_title) = invention_title.map(str::trim).filter(|s| !s.is_empty()) {
+                let claim_subject = extract_claim_subject_title(trimmed);
+                if !claim_subject.is_empty()
+                    && !is_subject_title_consistent(inv_title, &claim_subject)
+                {
+                    issues.push(ClaimValidationIssue {
+                        claim_number: num,
+                        rule_id: "SYNTAX_TITLE_MISMATCH".to_string(),
+                        category: "syntax".to_string(),
+                        severity: ClaimIssueSeverity::Warning,
+                        title: "独立权利要求主题名称与发明名称不一致".to_string(),
+                        message: format!(
+                            "独立权利要求 {} 的主题名称「{}」与发明名称「{}」核心主题词或技术类别存在偏差，可能触发形式审查补正。",
+                            num, claim_subject, inv_title
+                        ),
+                        snippet: claim_subject,
+                        suggestion: format!(
+                            "请核对发明名称「{}」与独立权利要求 {} 的主题名称，确保产品/方法类型及核心主题名词一致。",
+                            inv_title, num
+                        ),
+                        evidence_chunks: Vec::new(),
+                    });
+                }
+            }
         }
     }
 
@@ -525,6 +587,37 @@ fn validate_claims_internal(
                         evidence_chunks: Vec::new(),
                     });
                 }
+            }
+        }
+
+        // 2c. 纯功能性模块/单元限定核查（第26条第4款：黑盒模块/单元缺乏说明书结构或算法实施例支撑）
+        for pure_func in extract_pure_functional_modules(trimmed) {
+            if !pure_functional_supported_in_corpus(&pure_func, &normalized_corpus) {
+                let severity = if normalized_corpus.is_empty() {
+                    ClaimIssueSeverity::Warning
+                } else {
+                    ClaimIssueSeverity::Fatal
+                };
+                let reason = if normalized_corpus.is_empty() {
+                    "当前未提供说明书具体实施方式，无法证实该纯功能模块/单元具备硬件结构或具体算法实施例支撑"
+                } else {
+                    "说明书中未检出该功能性模块/单元对应的具体硬件结构、电路或可执行算法步骤实施例支撑"
+                };
+                issues.push(ClaimValidationIssue {
+                    claim_number: num,
+                    rule_id: "ART26_4_PURE_FUNCTIONAL".to_string(),
+                    category: "article_26_4".to_string(),
+                    severity,
+                    title: "纯功能性模块/单元限定缺乏结构或算法支撑（第26条第4款）".to_string(),
+                    message: format!(
+                        "权利要求 {} 中的功能性特征“{}”{}，易被 CNIPA 审查员以纯功能性限定得不到说明书支持驳回。",
+                        num, pure_func, reason
+                    ),
+                    snippet: pure_func,
+                    suggestion: "请将该功能模块替换为具体硬件部件/连接关系或具体算法步骤，并在说明书具体实施方式中补充可实现的电路/流程图实施例。"
+                        .to_string(),
+                    evidence_chunks: Vec::new(),
+                });
             }
         }
     }
@@ -1106,6 +1199,298 @@ fn functional_supported_in_corpus(phrase: &str, normalized_corpus: &str) -> bool
     (hits as f64) / (total_bigrams as f64) >= 0.25
 }
 
+fn strip_subject_prefixes(s: &str) -> String {
+    let mut cur = s.trim();
+    if let Ok(re_num) = Regex::new(r"^(?:权利要求\s*\d+\s*[:：]?|\d+\s*[.、:：])\s*") {
+        if let Some(m) = re_num.find(cur) {
+            cur = cur.get(m.end()..).unwrap_or("").trim();
+        }
+    }
+    for prefix in ["一种", "所述的", "所述", "关于"] {
+        if let Some(rest) = cur.strip_prefix(prefix) {
+            cur = rest.trim();
+        }
+    }
+    let lower = cur.to_ascii_lowercase();
+    for en_prefix in ["a ", "an ", "the "] {
+        if lower.starts_with(en_prefix) {
+            cur = cur.get(en_prefix.len()..).unwrap_or("").trim();
+            break;
+        }
+    }
+    cur.to_string()
+}
+
+fn extract_claim_subject_title(content: &str) -> String {
+    let cleaned = strip_subject_prefixes(content);
+    let transitions = [
+        "其特征在于",
+        "包括",
+        "包含",
+        "具有",
+        "设有",
+        "由",
+        "，",
+        ",",
+        "。",
+        "：",
+        ":",
+        "；",
+        ";",
+        " comprising",
+        " including",
+        " having",
+        " wherein",
+    ];
+    let lower = cleaned.to_ascii_lowercase();
+    let mut best_byte_idx: Option<usize> = None;
+    for tok in transitions {
+        let pos = if tok.is_ascii() {
+            lower.find(tok)
+        } else {
+            cleaned.find(tok)
+        };
+        if let Some(idx) = pos {
+            if best_byte_idx.is_none_or(|b| idx < b) {
+                best_byte_idx = Some(idx);
+            }
+        }
+    }
+    let head = match best_byte_idx {
+        Some(idx) => cleaned.get(..idx).unwrap_or(&cleaned),
+        None => cleaned.as_str(),
+    };
+    strip_subject_prefixes(head)
+}
+
+fn char_bigrams_set(s: &str) -> HashSet<String> {
+    let chars: Vec<char> = s
+        .chars()
+        .filter(|c| !c.is_whitespace() && !is_clause_delimiter(*c))
+        .collect();
+    let mut set = HashSet::new();
+    for w in chars.windows(2) {
+        set.insert(w.iter().collect::<String>().to_ascii_lowercase());
+    }
+    set
+}
+
+fn is_method_subject(s: &str) -> bool {
+    let lower = s.to_ascii_lowercase();
+    s.ends_with("方法")
+        || s.ends_with("工艺")
+        || lower.ends_with("method")
+        || lower.ends_with("process")
+}
+
+fn is_apparatus_subject(s: &str) -> bool {
+    let lower = s.to_ascii_lowercase();
+    s.ends_with("装置")
+        || s.ends_with("设备")
+        || s.ends_with("系统")
+        || s.ends_with("机构")
+        || s.ends_with("组件")
+        || s.ends_with('器')
+        || lower.ends_with("apparatus")
+        || lower.ends_with("device")
+        || lower.ends_with("system")
+}
+
+fn is_subject_title_consistent(invention_title: &str, claim_subject: &str) -> bool {
+    let norm_inv = normalize_for_match(&strip_subject_prefixes(invention_title));
+    let norm_subj = normalize_for_match(&strip_subject_prefixes(claim_subject));
+    if norm_inv.is_empty() || norm_subj.is_empty() {
+        return true;
+    }
+
+    // 类别明显冲突检测（如发明名称仅写“方法”，而独权主题是纯“装置/设备”）
+    if is_method_subject(&norm_inv)
+        && is_apparatus_subject(&norm_subj)
+        && !norm_inv.contains("装置")
+        && !norm_inv.contains("设备")
+        && !norm_inv.contains("系统")
+        && !norm_inv.contains("apparatus")
+        && !norm_inv.contains("device")
+        && !norm_inv.contains("system")
+    {
+        return false;
+    }
+    if is_apparatus_subject(&norm_inv)
+        && is_method_subject(&norm_subj)
+        && !norm_inv.contains("方法")
+        && !norm_inv.contains("工艺")
+        && !norm_inv.contains("method")
+        && !norm_inv.contains("process")
+    {
+        return false;
+    }
+
+    if norm_inv.contains(&norm_subj) || norm_subj.contains(&norm_inv) {
+        return true;
+    }
+
+    let inv_bg = char_bigrams_set(&norm_inv);
+    let subj_bg = char_bigrams_set(&norm_subj);
+    if inv_bg.is_empty() || subj_bg.is_empty() {
+        return norm_inv == norm_subj;
+    }
+    let shared = inv_bg.intersection(&subj_bg).count();
+    let denom = inv_bg.len().min(subj_bg.len()).max(1);
+    (shared as f64) / (denom as f64) >= 0.25
+}
+
+fn extract_pure_functional_modules(content: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+
+    // 1. “用于实现...的模块/单元/装置”黑盒句式
+    if let Ok(re_for) = Regex::new(
+        r"用于(?:实现|完成|进行|执行)?[^，。；,;：:（）()]{2,20}的(?:模块|单元|装置|机构|部件|组件)",
+    ) {
+        for m in re_for.find_iter(content) {
+            let phrase = m.as_str().trim().to_string();
+            if !phrase.is_empty() && !out.contains(&phrase) {
+                out.push(phrase);
+            }
+        }
+    }
+
+    // 2. 英文 "module/unit configured to / for ..."
+    if let Ok(re_en) =
+        Regex::new(r"(?i)\b(?:module|unit)\s+(?:configured\s+to|for)\s+[a-z0-9\s\-]{3,40}")
+    {
+        for m in re_en.find_iter(content) {
+            let phrase = m.as_str().trim().to_string();
+            if !phrase.is_empty() && !out.contains(&phrase) {
+                out.push(phrase);
+            }
+        }
+    }
+
+    // 3. 抽象功能性前缀 + 模块/单元/子系统（排除已显式限定硬件实体的名词）
+    const HARDWARE_MARKERS: &[&str] = &[
+        "电路",
+        "芯片",
+        "传感器",
+        "电机",
+        "阀",
+        "泵",
+        "壳体",
+        "弹簧",
+        "齿轮",
+        "连杆",
+        "轴承",
+        "光学",
+        "激光",
+        "线圈",
+        "波纹管",
+    ];
+    if let Ok(re_mod) = Regex::new(
+        r"(?:智能|自适应|自动|控制|处理|计算|运算|分析|识别|检测|判断|决策|优化|调节|调整|管理|调度|通信|传输|采集|生成|评估|预测|监控|辅助|感知|执行)[\u{4e00}-\u{9fff}A-Za-z0-9]{0,10}(?:模块|单元|子系统|功能块)",
+    ) {
+        for m in re_mod.find_iter(content) {
+            let phrase = m.as_str().trim().to_string();
+            if phrase.is_empty() || HARDWARE_MARKERS.iter().any(|hw| phrase.contains(hw)) {
+                continue;
+            }
+            let covered_by_existing = out
+                .iter()
+                .any(|existing| existing == &phrase || existing.contains(&phrase));
+            if !covered_by_existing {
+                out.push(phrase);
+            }
+        }
+    }
+
+    out
+}
+
+fn has_embodiment_support_markers(normalized_corpus: &str) -> bool {
+    const EMBODIMENT_MARKERS: &[&str] = &[
+        "电路",
+        "芯片",
+        "处理器",
+        "微控制器",
+        "单片机",
+        "fpga",
+        "dsp",
+        "plc",
+        "cpu",
+        "gpu",
+        "mcu",
+        "传感器",
+        "电机",
+        "比例阀",
+        "电磁阀",
+        "泵",
+        "齿轮",
+        "连杆",
+        "壳体",
+        "活塞",
+        "线圈",
+        "算法",
+        "公式",
+        "方程",
+        "步骤",
+        "流程",
+        "pid",
+        "滤波",
+        "卡尔曼",
+        "神经网络",
+        "状态机",
+        "寄存器",
+        "引脚",
+        "接口",
+        "阈值",
+        "circuit",
+        "processor",
+        "microcontroller",
+        "sensor",
+        "algorithm",
+        "equation",
+        "flowchart",
+        "pid",
+    ];
+    EMBODIMENT_MARKERS
+        .iter()
+        .any(|m| normalized_corpus.contains(m))
+}
+
+fn pure_functional_supported_in_corpus(phrase: &str, normalized_corpus: &str) -> bool {
+    if normalized_corpus.is_empty() || !has_embodiment_support_markers(normalized_corpus) {
+        return false;
+    }
+
+    let stripped = phrase
+        .trim_start_matches("用于实现")
+        .trim_start_matches("用于完成")
+        .trim_start_matches("用于进行")
+        .trim_start_matches("用于执行")
+        .trim_start_matches("用于")
+        .trim_end_matches("的模块")
+        .trim_end_matches("的单元")
+        .trim_end_matches("的装置")
+        .trim_end_matches("的机构")
+        .trim_end_matches("的部件")
+        .trim_end_matches("的组件");
+    let norm_phrase = normalize_for_match(phrase);
+    let norm_core = normalize_for_match(stripped);
+    if normalized_corpus.contains(&norm_phrase)
+        || (!norm_core.is_empty() && normalized_corpus.contains(&norm_core))
+    {
+        return true;
+    }
+
+    let bg = char_bigrams_set(&norm_core);
+    if bg.is_empty() {
+        return false;
+    }
+    let hits = bg
+        .iter()
+        .filter(|g| normalized_corpus.contains(g.as_str()))
+        .count();
+    (hits as f64) / (bg.len() as f64) >= 0.45
+}
+
 fn extract_ref_clause_snippet(content: &str) -> String {
     for clause in content.split(['，', '。', ',', '.']) {
         if clause.contains("权利要求") || clause.to_ascii_lowercase().contains("claim") {
@@ -1444,6 +1829,139 @@ mod tests {
             }),
             "权2的 180-220℃ 应检出无实施例支撑并附带检索分块记录: {:?}",
             report.issues
+        );
+    }
+
+    #[test]
+    fn detects_independent_claim_subject_title_mismatch() {
+        let claims = vec![make_claim(
+            1,
+            "independent",
+            "一种超声波清洗机，包括清洗槽、换能器和驱动电源。",
+        )];
+        let spec = vec!["具体实施方式：超声波清洗机包括清洗槽、换能器和驱动电源。".to_string()];
+
+        let mismatch = validate_claims_deterministic_with_title(
+            "idea-title-mismatch",
+            Some("一种磁流变阻尼器"),
+            &claims,
+            &spec,
+        );
+        assert!(!mismatch.passed);
+        assert!(
+            mismatch.issues.iter().any(|i| {
+                i.claim_number == 1
+                    && i.rule_id == "SYNTAX_TITLE_MISMATCH"
+                    && i.severity == ClaimIssueSeverity::Warning
+            }),
+            "独权主题与发明名称不一致时应触发 SYNTAX_TITLE_MISMATCH: {:?}",
+            mismatch.issues
+        );
+
+        let category_mismatch_claims = vec![make_claim(
+            1,
+            "independent",
+            "一种流体控制装置，包括阀体、阀芯和驱动电机。",
+        )];
+        let category_mismatch = validate_claims_deterministic_with_title(
+            "idea-cat-mismatch",
+            Some("一种流体控制方法"),
+            &category_mismatch_claims,
+            &["实施例：流体控制装置包括阀体、阀芯和驱动电机。".to_string()],
+        );
+        assert!(
+            category_mismatch
+                .issues
+                .iter()
+                .any(|i| i.rule_id == "SYNTAX_TITLE_MISMATCH"),
+            "方法名称与装置独权应触发主题一致性告警: {:?}",
+            category_mismatch.issues
+        );
+
+        let matched = validate_claims_deterministic_with_title(
+            "idea-title-ok",
+            Some("一种超声波清洗机"),
+            &claims,
+            &spec,
+        );
+        assert!(
+            !matched
+                .issues
+                .iter()
+                .any(|i| i.rule_id == "SYNTAX_TITLE_MISMATCH"),
+            "主题一致时不应误报 SYNTAX_TITLE_MISMATCH: {:?}",
+            matched.issues
+        );
+    }
+
+    #[test]
+    fn detects_pure_functional_limitations_without_embodiment_support() {
+        let claims = vec![make_claim(
+            1,
+            "independent",
+            "一种温控系统，包括智能调节模块、控制单元以及用于实现异常自愈的模块。",
+        )];
+
+        // 1) 无说明书支撑时触发 Warning
+        let no_spec_report = validate_claims_deterministic("idea-pure-func-1", &claims, &[]);
+        assert!(!no_spec_report.passed);
+        assert!(
+            no_spec_report.issues.iter().any(|i| {
+                i.claim_number == 1
+                    && i.rule_id == "ART26_4_PURE_FUNCTIONAL"
+                    && i.snippet == "智能调节模块"
+            }),
+            "应检出纯功能模块“智能调节模块”: {:?}",
+            no_spec_report.issues
+        );
+        assert!(
+            no_spec_report.issues.iter().any(|i| {
+                i.claim_number == 1
+                    && i.rule_id == "ART26_4_PURE_FUNCTIONAL"
+                    && i.snippet == "控制单元"
+            }),
+            "应检出纯功能单元“控制单元”: {:?}",
+            no_spec_report.issues
+        );
+        assert!(
+            no_spec_report.issues.iter().any(|i| {
+                i.claim_number == 1
+                    && i.rule_id == "ART26_4_PURE_FUNCTIONAL"
+                    && i.snippet.contains("用于实现异常自愈的模块")
+            }),
+            "应检出“用于实现...的模块”: {:?}",
+            no_spec_report.issues
+        );
+
+        // 2) 说明书仅有空洞复述、无结构/算法实施例时触发 Fatal
+        let hollow_spec = vec![
+            "具体实施方式：本温控系统包含智能调节模块、控制单元和用于实现异常自愈的模块。"
+                .to_string(),
+        ];
+        let hollow_report =
+            validate_claims_deterministic("idea-pure-func-2", &claims, &hollow_spec);
+        assert!(
+            hollow_report.issues.iter().any(|i| {
+                i.rule_id == "ART26_4_PURE_FUNCTIONAL" && i.severity == ClaimIssueSeverity::Fatal
+            }),
+            "空洞复述缺乏结构/算法支撑应触发 Fatal: {:?}",
+            hollow_report.issues
+        );
+
+        // 3) 说明书给出具体硬件电路与算法实施例时应通过
+        let grounded_spec = vec![
+            "具体实施方式：智能调节模块与控制单元采用STM32微控制器、温度传感器与PWM驱动电路，按PID控制算法及异常自愈状态机切换流程输出控制阈值。"
+                .to_string(),
+        ];
+        let grounded_report =
+            validate_claims_deterministic("idea-pure-func-3", &claims, &grounded_spec);
+        assert!(
+            !grounded_report
+                .issues
+                .iter()
+                .any(|i| i.rule_id == "ART26_4_PURE_FUNCTIONAL"),
+            "具备具体电路与算法实施例支撑时不应误报 ART26_4_PURE_FUNCTIONAL: {:?}",
+            grounded_report.issues
         );
     }
 }
