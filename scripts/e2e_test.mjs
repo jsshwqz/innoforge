@@ -7,7 +7,7 @@ const baseUrl = (process.env.INNOFORGE_E2E_BASE_URL || 'http://127.0.0.1:3000').
 const localAuthority = new URL(`${baseUrl}/`).host;
 // Single source of truth for expected pass count.
 // Do NOT duplicate this number elsewhere — parse the JSON output to verify.
-const expectedPasses = 90;
+const expectedPasses = 92;
 const failures = [];
 const assertions = [];   // every assertion recorded as {kind, name, ...}
 let passed = 0;
@@ -1207,6 +1207,78 @@ async function checkSearchDiagnosticsAndCooldown(searchPage) {
     await searchPage.evaluate(() => renderSearchDiagnostics({}));
 }
 
+// issue #67 P2.5：真实浏览器中英切换运行时回归——
+// 在 /search 与 /settings 页面上动态切换 setI18nLang('zh') 与 setI18nLang('en')，
+// 断言英文模式下所有 [data-i18n] 叶子节点无残留中文字符且无未翻译键名，中文模式下正常渲染汉字。
+async function checkI18nRuntimeSwitch(searchPage, settingsPage) {
+    const targets = [
+        { page: searchPage, path: '/search' },
+        { page: settingsPage, path: '/settings' },
+    ];
+    for (const { page, path } of targets) {
+        if (!page) {
+            fail(`i18n runtime switch renders clean zh/en on ${path}`, `page=${baseUrl}${path} missing_page_instance=true`);
+            continue;
+        }
+        let checkResult;
+        try {
+            checkResult = await page.evaluate(() => {
+                const collectLeafTranslations = lang => {
+                    if (typeof setI18nLang === 'function') {
+                        setI18nLang(lang);
+                    }
+                    const items = [...document.querySelectorAll('[data-i18n]')]
+                        .filter(el => el.childElementCount === 0)
+                        .map(el => ({
+                            key: el.getAttribute('data-i18n') || '',
+                            text: (el.textContent || '').trim(),
+                        }));
+                    return {
+                        lang: document.documentElement.lang || '',
+                        items,
+                    };
+                };
+                const zh = collectLeafTranslations('zh');
+                const en = collectLeafTranslations('en');
+                return { zh, en };
+            });
+        } finally {
+            await page.evaluate(() => {
+                if (typeof setI18nLang === 'function') setI18nLang('zh');
+            }).catch(() => {});
+        }
+
+        const zhItems = checkResult?.zh?.items || [];
+        const enItems = checkResult?.en?.items || [];
+        const cjkRegex = /[\u4e00-\u9fff]/;
+        const missingZh = zhItems.filter(x => !x.text || x.text === 'undefined' || x.text === x.key);
+        const missingEn = enItems.filter(x => !x.text || x.text === 'undefined' || x.text === x.key);
+        const cjkInEn = enItems.filter(x => cjkRegex.test(x.text));
+        const zhCjkCount = zhItems.filter(x => cjkRegex.test(x.text)).length;
+        const switchedToLatin = enItems.filter((x, idx) => {
+            const zhText = zhItems[idx]?.text || '';
+            return x.text !== zhText && /[A-Za-z]/.test(x.text);
+        }).length;
+
+        const ok =
+            checkResult?.zh?.lang === 'zh-CN'
+            && checkResult?.en?.lang === 'en'
+            && zhItems.length >= 20
+            && enItems.length === zhItems.length
+            && missingZh.length === 0
+            && missingEn.length === 0
+            && cjkInEn.length === 0
+            && zhCjkCount >= 20
+            && switchedToLatin >= 20;
+
+        requireCondition(
+            ok,
+            `i18n runtime switch renders clean zh/en on ${path}`,
+            `page=${path} zhLang=${checkResult?.zh?.lang} enLang=${checkResult?.en?.lang} count=${zhItems.length}/${enItems.length} zhCjk=${zhCjkCount} switched=${switchedToLatin} missingZh=${missingZh.map(x => x.key).join(',')} missingEn=${missingEn.map(x => x.key).join(',')} cjkInEn=${cjkInEn.map(x => `${x.key}=${x.text}`).join(',')}`,
+        );
+    }
+}
+
 async function main() {
     const pageErrors = [];
     const requestFailures = [];
@@ -1238,6 +1310,7 @@ async function main() {
         }
         const settingsPage = openedPages.get('/settings');
         if (settingsPage) await checkSettingsDoesNotAutoStartFreeCad(settingsPage);
+        await checkI18nRuntimeSwitch(searchPage, settingsPage);
         const oaPage = openedPages.get('/oa-response');
         if (oaPage) {
             await checkAmendmentEndpoint(oaPage);

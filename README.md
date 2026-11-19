@@ -104,10 +104,12 @@ Windows 用户也可以直接双击 `start.bat`（它需要先装好 Rust，会�
 
 ```bash
 docker build -t innoforge .
-docker run -p 3000:3000 -v innoforge-data:/data innoforge
+docker run -p 3000:3000 -e INNOFORGE_ACCESS_TOKEN=your-secret-token -v innoforge-data:/data innoforge
 ```
 
-数据库与导出文件都落在容器内的 `/data`，用命名卷挂载即可跨容器重建保留。
+数据库与导出文件都落在容器内的 `/data`，用命名卷挂载即可跨容器重建保留；容器镜像内默认设置 `INNOFORGE_BIND_HOST=0.0.0.0` 并自动启用同源访问令牌鉴权（建议通过 `INNOFORGE_ACCESS_TOKEN` 显式指定令牌，未指定时会在启动日志中打印一次性随机令牌）。
+
+> 注：Docker 镜像构建（`docker build -t innoforge .`）当前尚未纳入 CI 自动构建验证（CI 中仅通过 `tests/dockerfile_contract.rs` 校验 Dockerfile 目录层级与构建命令静态契约）。
 
 ### 方式四：移动端
 
@@ -123,7 +125,7 @@ docker run -p 3000:3000 -v innoforge-data:/data innoforge
 | 配置项 | 默认值 | 说明 |
 |--------|--------|------|
 | 数据库 | `innoforge.db` | SQLite 数据库文件路径 |
-| 监听地址 | `0.0.0.0:3000` | 主程序绑定所有网卡（`src/main.rs`），本机访问用 http://127.0.0.1:3000；可用 `INNOFORGE_PORT` 改端口。**没有访问鉴权，请勿把该端口直接暴露到公网**，需要远程访问请套一层反向代理或 SSH 隧道 |
+| 监听地址 | `127.0.0.1:3000` | 桌面主程序默认仅绑定回环地址 `127.0.0.1`（可用 `INNOFORGE_PORT` 改端口）；如需局域网/容器访问可设 `INNOFORGE_BIND_HOST=0.0.0.0`，此时自动强制启用 Bearer / `X-InnoForge-Token` / HttpOnly Cookie 访问鉴权（建议配合 `INNOFORGE_ACCESS_TOKEN` 及 HTTPS 反向代理或 SSH 隧道） |
 | Umi-OCR 地址 | `http://127.0.0.1:1224` | 扫描版 PDF 的本地 OCR 服务（issue #33）。OCR 装在其它机器/端口时设置环境变量 `UMI_OCR_BASE_URL`（如 `http://192.168.1.8:1224`） |
 
 所有设置均可通过**设置页面**（http://localhost:3000/settings）在线配置，也可编辑 `.env` 文件。
@@ -219,7 +221,8 @@ innoforge/
 ### 已知限制
 
 - **扫描版 PDF（无可复制文字）需要本机运行 [Umi-OCR](https://github.com/hiroi-sora/Umi-OCR)**（默认 `127.0.0.1:1224`，可用环境变量 `UMI_OCR_BASE_URL` 指向其它地址/端口，issue #33）。未运行时会直接返回「Umi-OCR 未运行」的明确错误（约 2 秒，不会等超时）；可改用文字版 PDF，或先 OCR 得到文本再上传。
-- 服务绑定 `0.0.0.0` 且无访问鉴权，请勿直接暴露公网。
+- 桌面端默认绑定 `127.0.0.1:3000`；设置 `INNOFORGE_BIND_HOST=0.0.0.0`（或容器默认模式）暴露非回环接口时会自动启用令牌鉴权（推荐显式配置 `INNOFORGE_ACCESS_TOKEN`），公网场景请配合 HTTPS 反向代理或 SSH 隧道。
+- Docker 镜像构建（`docker build -t innoforge .`）暂未在 CI 自动实测（CI 仅运行 `tests/dockerfile_contract.rs` 静态结构契约守卫）。
 - 在线专利检索依赖 SerpAPI / Google Patents 可达性；不可用时自动回退本地库，结果为空说明本地库尚未导入数据。
 - AI 功能需要自备一个 OpenAI 兼容的 API Key；不配置时检索、收藏、导入与管理仍可用。
 - 页面图表使用随包携带的本地 Chart.js（`/static/vendor/chart.umd.min.js`），**离线可用**。

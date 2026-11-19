@@ -758,3 +758,129 @@ async fn snapshot_write_offload_does_not_starve_the_runtime() {
     )
     .await;
 }
+
+#[derive(Debug, PartialEq, Eq)]
+struct SchemaSnapshot {
+    objects: Vec<(String, String)>,
+    columns_by_table: Vec<(String, Vec<(String, String)>)>,
+}
+
+/// 采集数据库公开 schema 快照（对象清单 + 每张普通表的列定义），用于校验全新建库与升级库一致。
+fn schema_snapshot(conn: &rusqlite::Connection) -> SchemaSnapshot {
+    let mut obj_stmt = conn
+        .prepare(
+            "SELECT type, name FROM sqlite_master
+             WHERE name NOT LIKE 'sqlite_%'
+             ORDER BY type, name",
+        )
+        .expect("prepare sqlite_master snapshot");
+    let objects: Vec<(String, String)> = obj_stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .expect("query objects")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("collect objects");
+
+    let mut tbl_stmt = conn
+        .prepare(
+            "SELECT name FROM sqlite_master
+             WHERE type = 'table'
+               AND name NOT LIKE 'sqlite_%'
+               AND COALESCE(sql, '') NOT LIKE 'CREATE VIRTUAL TABLE%'
+               AND name NOT LIKE '%_fts_%'
+             ORDER BY name",
+        )
+        .expect("prepare table list");
+    let tables: Vec<String> = tbl_stmt
+        .query_map([], |row| row.get(0))
+        .expect("query tables")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("collect tables");
+
+    let mut columns_by_table = Vec::new();
+    for table in tables {
+        let mut info_stmt = conn
+            .prepare(&format!("PRAGMA table_info(\"{}\")", table))
+            .expect("prepare table_info");
+        let mut cols: Vec<(String, String)> = info_stmt
+            .query_map([], |row| Ok((row.get(1)?, row.get(2)?)))
+            .expect("query table_info")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("collect columns");
+        cols.sort();
+        columns_by_table.push((table, cols));
+    }
+
+    SchemaSnapshot {
+        objects,
+        columns_by_table,
+    }
+}
+
+/// #78 验收守卫：全新建库 (`0 -> SCHEMA_VERSION`) 与 v24 存量升级库 (`24 -> 25`)
+/// 的表、索引、虚表与列定义必须完全一致，且存量 chunk 自动完成 `chunks_fts` 回填。
+#[test]
+fn fresh_install_schema_matches_migrated_schema() {
+    let fresh_file = tempfile::NamedTempFile::new().expect("fresh temp db");
+    let fresh_path = fresh_file.path().to_string_lossy().to_string();
+    let fresh_db = Database::init(&fresh_path).expect("fresh Database::init");
+
+    let migrated_file = tempfile::NamedTempFile::new().expect("migrated temp db");
+    let migrated_path = migrated_file.path().to_string_lossy().to_string();
+    {
+        let conn = rusqlite::Connection::open(&migrated_path).expect("open raw v24 db");
+        conn.execute_batch(
+            "PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL;
+             CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);",
+        )
+        .expect("setup schema_version");
+        // 先跑通迁移再精确回退 v25 DDL/版本号，构造真实的 v24 存量库状态
+        crate::db::migrations::run(&conn, 0, 24).expect("seed base schema");
+        conn.execute_batch(
+            "DROP TABLE IF EXISTS chunks_fts;
+             DROP INDEX IF EXISTS idx_chunk_section_tag;
+             ALTER TABLE patent_chunks DROP COLUMN section_tag;
+             DELETE FROM schema_version;
+             INSERT INTO schema_version (version) VALUES (24);
+             INSERT INTO patents (id, patent_number, title)
+             VALUES ('p-cn99', 'CN990001001A', '固态电解质陶瓷隔膜测试专利');
+             INSERT INTO patent_chunks (id, patent_id, chunk_index, source_type, content, embedding)
+             VALUES ('cn99-c0', 'p-cn99', 0, 'description', '固态电解质陶瓷隔膜快离子导体制备工艺', x'00000000');",
+        )
+        .expect("prepare true v24 state with unindexed legacy chunk");
+    }
+
+    let migrated_db = Database::init(&migrated_path).expect("upgrade v24->v25 via Database::init");
+
+    assert_eq!(
+        fresh_db.query_schema_version().expect("fresh version"),
+        Database::SCHEMA_VERSION
+    );
+    assert_eq!(
+        migrated_db
+            .query_schema_version()
+            .expect("migrated version"),
+        Database::SCHEMA_VERSION
+    );
+
+    let fresh_snap = schema_snapshot(&fresh_db.conn());
+    let migrated_snap = schema_snapshot(&migrated_db.conn());
+    assert_eq!(
+        fresh_snap, migrated_snap,
+        "全新库与升级库的 sqlite_master/列定义必须完全一致"
+    );
+    assert!(
+        has_column(&migrated_db.conn(), "patent_chunks", "section_tag"),
+        "升级库 patent_chunks 必须包含 section_tag 列"
+    );
+
+    let query = "陶瓷隔膜快离子导体";
+    let emb = crate::rag::chunker::compute_chunk_embedding(query);
+    let hits = migrated_db
+        .search_chunks_hybrid_rrf("p-cn99", query, &emb, 3)
+        .expect("hybrid search after v25 backfill");
+    assert_eq!(
+        hits.first().map(|(id, _)| id.as_str()),
+        Some("cn99-c0"),
+        "v25 回填后应通过 chunks_fts 召回存量切片: {hits:?}"
+    );
+}
