@@ -961,6 +961,10 @@ fn allowed_patent_image_mime(content_type: Option<&str>) -> Option<&'static str>
         Some("image/bmp")
     } else if mime.eq_ignore_ascii_case("image/avif") {
         Some("image/avif")
+    } else if mime.eq_ignore_ascii_case("image/tiff") {
+        Some("image/tiff")
+    } else if mime.eq_ignore_ascii_case("application/pdf") {
+        Some("application/pdf")
     } else {
         None
     }
@@ -1031,9 +1035,10 @@ pub async fn api_patent_image_proxy(
         }
     };
 
+    // 尊重系统/环境变量代理：patentimages.storage.googleapis.com 在国内需经代理访问；
+    // SSRF 边界已由 validate_patent_image_url 白名单 + HTTPS + 禁止重定向守住。
     let client = match reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
-        .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
         .build()
     {

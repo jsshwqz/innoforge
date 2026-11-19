@@ -63,7 +63,7 @@
 <div class="search-grid-2">
 <input type="date" id="date-from" data-i18n-title="date.from">
 <input type="date" id="date-to" data-i18n-title="date.to">
-<select id="page-size">
+<select id="page-size" onchange="if (currentRequest) doSearch(1)">
 <option value="10">每页 10 条</option>
 <option value="20" selected>每页 20 条</option>
 <option value="50">每页 50 条</option>
@@ -198,7 +198,8 @@ function clearSearchPdfMeta() {
     'results.evidenceSources': '命中源',
     'results.webTitle': '网页搜索结果（在线专利源 0 命中，已回退网页搜索）',
     'results.webOpen': '以上为相关网页（非专利著录），点按标题在新窗口打开原文。',
-    'results.info': '找到 {total} 条 | 第 {page} 页 | 每页 {size} 条{source}',
+    'results.info': '找到 {total} 条 | 第 {page} 页 | 本页 {shown} 条 / 设 {size} 条{source}',
+    'results.source_cap': '当前源每页上限 {cap} 条',
     'results.upstream_filtered': '上游共命中 {upstream} 条，本页 {shown} 条通过相关性过滤',
     'results.source': '来源',
     'results.google': 'Google Patents',
@@ -288,7 +289,8 @@ function clearSearchPdfMeta() {
     'results.evidenceSources': 'Hit sources',
     'results.webTitle': 'Web results (patent sources found nothing, fell back to web search)',
     'results.webOpen': 'The items above are related web pages (not patent records). Click a title to open the original page in a new window.',
-    'results.info': 'Found {total} | page {page} | {size}/page{source}',
+    'results.info': 'Found {total} | page {page} | {shown} shown / {size}/page{source}',
+    'results.source_cap': 'source cap {cap}/page',
     'results.upstream_filtered': 'upstream matched {upstream}, {shown} passed relevance filter on this page',
     'results.source': 'source',
     'results.google': 'Google Patents',
@@ -537,13 +539,17 @@ function renderResults(data, page, pageSize) {
     // before initialization"），整个 renderResults 抛错、搜索结果永远显示失败。
     const upstream = Number(data.upstream_total || 0);
     const shown = Array.isArray(data.patents) ? data.patents.length : 0;
+    if (effectiveSize !== pageSize) {
+        source += `<span class="muted"> (${escapeHtml(t('results.source_cap', { cap: effectiveSize }))})</span>`;
+    }
     if (upstream > shown) {
         source += `<span class="muted"> | ${escapeHtml(t('results.upstream_filtered', { upstream, shown }))}</span>`;
     }
     document.getElementById('results-info').innerHTML = t('results.info', {
         total,
         page,
-        size: effectiveSize,
+        shown,
+        size: pageSize,
         source
     });
 

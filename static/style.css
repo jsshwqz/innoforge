@@ -946,8 +946,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); curso
 
 /* ---------- 18. 搜索页 ---------- */
 .search-container { display: grid; gap: var(--sp-4); max-width: 1200px; }
-.search-grid { display: grid; grid-template-columns: 2fr repeat(4, 1fr); gap: var(--sp-2); }
-.search-grid-2 { display: grid; grid-template-columns: repeat(6, 1fr); gap: var(--sp-2); margin-top: var(--sp-2); }
+.search-grid { display: grid; grid-template-columns: minmax(220px, 2fr) repeat(auto-fit, minmax(120px, 1fr)); gap: var(--sp-2); align-items: center; }
+.search-grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: var(--sp-2); margin-top: var(--sp-2); align-items: center; }
 .search-grid input, .search-grid select, .search-grid-2 input, .search-grid-2 select { width: 100%; }
 .history-list { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 .history-item-pill {

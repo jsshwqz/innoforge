@@ -671,15 +671,27 @@
         images.forEach(function(url, idx) {
             // Use local proxy to bypass GFW blocking of Google patent images
             var proxyUrl = '/api/patent/image-proxy?url=' + encodeURIComponent(url);
-            html += '<div style="background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:8px;text-align:center;">';
+            html += '<div class="drawing-card" style="background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:8px;text-align:center;">';
             html += '<a href="' + proxyUrl + '" target="_blank">';
-            html += '<img src="' + proxyUrl + '" alt="图 ' + (idx + 1) + '" style="max-width:100%;max-height:400px;border-radius:4px;" loading="lazy" onerror="this.parentElement.parentElement.style.display=\'none\'">';
+            html += '<img src="' + proxyUrl + '" data-orig-url="' + escapeHtml(url) + '" alt="图 ' + (idx + 1) + '" style="max-width:100%;max-height:400px;border-radius:4px;" loading="lazy">';
             html += '</a>';
             html += '<div style="color:#8b949e;font-size:0.8em;margin-top:4px;">图 ' + (idx + 1) + '</div>';
             html += '</div>';
         });
         html += '</div>';
         container.innerHTML = DOMPurify.sanitize(html);
+        container.querySelectorAll('img').forEach(function(img) {
+            img.addEventListener('error', function() {
+                var card = img.closest('.drawing-card');
+                if (!card || card.dataset.errHandled) return;
+                card.dataset.errHandled = '1';
+                img.style.display = 'none';
+                var note = document.createElement('div');
+                note.style.cssText = 'color:#d29922;font-size:0.82em;padding:12px 6px;';
+                note.textContent = '⚠️ 图纸代理加载失败，请检查网络/代理或点击上方链接重试';
+                card.appendChild(note);
+            });
+        });
 
         // Update tab button badge
         var tabBtn = document.getElementById('tab-drawings-btn');
@@ -742,8 +754,14 @@
     (async function() {
         var claimsEl = document.querySelector('#tab-claims .content-box pre');
         var descEl = document.querySelector('#tab-description .content-box pre');
+        var hasInitialImages = false;
+        try {
+            var initImgs = {{images_json}};
+            hasInitialImages = Array.isArray(initImgs) && initImgs.length > 0;
+        } catch(e) {}
         var needsEnrich = (!claimsEl || claimsEl.textContent.trim().length < 5)
-                       || (!descEl || descEl.textContent.trim().length < 5);
+                       || (!descEl || descEl.textContent.trim().length < 5)
+                       || !hasInitialImages;
         if (needsEnrich) {
             var enrichInfo = document.createElement('div');
             enrichInfo.className = 'ai-summary';

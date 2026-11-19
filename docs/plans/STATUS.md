@@ -14,6 +14,13 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-11-19 — **检索版面/条数对齐、专利图纸代理与 Gemini 实测容灾修复（v0.9.63）**
+
+- **状态 / Status**: ✅ 本地全量验证与 Gemini 真实接口实测通过，提交 PR #242 等 CI 合并进 `main` 并打 `v0.9.63` Tag
+- **① 检索版面与每页条数对齐**（`static/style.css`、`templates/search.html`）：修复 `.search-grid` 固定 5 列导致 7~8 个筛选控件换行错位；`#page-size` 补充 `onchange` 自动重搜，并在结果汇总栏明确展示「本页实际条数 / 设定条数」及上游源单页上限。
+- **② 专利图纸代理与免费提取**（`src/routes/patent.rs`、`src/search/enrichment.rs`、`templates/patent_detail.html`）：移除 `/api/patent/image-proxy` 的 `.no_proxy()` 使代理环境可拉取 `patentimages.storage.googleapis.com`，并放行 `application/pdf`/`image/tiff`；`enrich_patent_free` 同步从 Google Patents HTML 提取高清附图与 PDF；前端补全纳入缺图判定并保留错误重试提示。
+- **③ Gemini 实测可用性与自动容灾**（`src/ai/client.rs`、`src/routes/mod.rs`、`src/routes/idea_ops.rs`、`templates/settings.html`）：仅本机端点启用 `.no_proxy()`、云端端点（含 Googleapis）尊重系统代理；自动剥离 `models/` 前缀；修复 `send_openai_request` 末次错误仍返回 `Ok` 导致跳过备用链的问题，并以实测可用模型更新 `GEMINI_FALLBACK_CHAIN`（`gemini-flash-lite-latest → gemini-3.5-flash-lite → gemini-3.1-flash-lite → gemini-3.8-flash`）。
+
 ### 2026-11-19 — **任务板收官：`#78` / `#67` / `#90` 验收闭环（v0.9.62）**
 
 - **状态 / Status**: ✅ 本地全量验证通过，提交 PR 等 CI 合并进 `main` 并打 `v0.9.62` Tag 收官

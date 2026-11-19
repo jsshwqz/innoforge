@@ -6,6 +6,21 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
 ---
 ## [Unreleased]
 
+## [v0.9.63] - 2026-11-19
+
+### 修复 / Fixed
+
+- **检索版面与每页条数对齐**：
+  - 修复 `static/style.css` 中 `.search-grid` 固定 5 列导致 7~8 个筛选控件换行错位的问题，改为自适应均衡网格；
+  - `templates/search.html` 为 `#page-size` 补充 `onchange` 自动重搜，并在结果汇总栏明确展示「本页实际条数 / 设定条数」及上游源单页上限提示。
+- **专利详情图纸与原始 PDF 加载修复**：
+  - 修复 `src/routes/patent.rs` 中 `/api/patent/image-proxy` 错误启用 `.no_proxy()` 导致代理环境下无法拉取 `patentimages.storage.googleapis.com` 附图的问题，并放行 `application/pdf` 与 `image/tiff`；
+  - `src/search/enrichment.rs` 免费补全 `enrich_patent_free` 同步从 Google Patents HTML 提取高清附图 URL 与原始 PDF 链接；
+  - `templates/patent_detail.html` 自动补全补充「已有正文但缺少图纸」判定，且图纸加载失败时保留错误提示与重试入口而非静默隐藏。
+- **Gemini `model is not found` 与 AI 自动容灾修复**：
+  - `src/ai/client.rs`、`src/routes/mod.rs`、`src/routes/idea_ops.rs` 对 Googleapis 通道自动剥离 `models/` 前缀，避免 `models/gemini-...` 触发 404；
+  - 修复 `send_openai_request` 末次重试仍返回 `Ok("AI 错误：...")` 导致跳过备用模型链的缺陷，对 400/404 立即返回 `Err` 触发多模型降级，并扩充 `GEMINI_FALLBACK_CHAIN`。
+
 ## [v0.9.62] - 2026-11-19
 
 ### 补强与收官 / Verified & Closed

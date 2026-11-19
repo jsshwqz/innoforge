@@ -395,13 +395,63 @@ fn extract_content_from_data(data: &Value) -> Option<String> {
     None
 }
 
+/// 规范化服务商模型名称：Google Gemini OpenAI 兼容接口的 `/models` 列表会返回
+/// `models/gemini-...` 前缀，但 `/chat/completions` 若带该前缀或旧模型名易触发 404
+/// `model is not found`，此处自动剥离 `models/` 前缀。
+pub(crate) fn normalize_model_for_provider(base_url: &str, model: &str) -> String {
+    let trimmed = model.trim();
+    if base_url.to_ascii_lowercase().contains("googleapis") {
+        trimmed
+            .strip_prefix("models/")
+            .unwrap_or(trimmed)
+            .to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// 判断是否为本机 AI 端点（Ollama / 本机网关）。
+/// 仅本机端点启用 `.no_proxy()` 以防系统代理劫持 localhost；
+/// 云端端点（如 Google Gemini、OpenAI、OpenRouter）尊重系统/环境变量代理。
+fn is_local_ai_host(base_url: &str) -> bool {
+    let lower = base_url.to_ascii_lowercase();
+    lower.contains("://localhost") || lower.contains("://127.0.0.1") || lower.contains("://[::1]")
+}
+
+fn build_ai_http_client(base_url: &str, timeout: Duration, pooled: bool) -> Client {
+    let mut builder = Client::builder().timeout(timeout);
+    if pooled {
+        builder = builder
+            .pool_max_idle_per_host(2)
+            .pool_idle_timeout(Duration::from_secs(90));
+    }
+    if is_local_ai_host(base_url) {
+        builder = builder.no_proxy();
+    }
+    builder
+        // issue #55 同族：兜底禁止静默退回无超时客户端，builder 失败属进程级故障（TLS 后端初始化）。
+        .expect_or_build()
+}
+
+trait ClientBuilderExt {
+    fn expect_or_build(self) -> Client;
+}
+
+impl ClientBuilderExt for reqwest::ClientBuilder {
+    fn expect_or_build(self) -> Client {
+        self.build().expect(
+            "AI 上游客户端构建失败（TLS 后端初始化）——禁止静默退回无超时客户端，见 issue #55",
+        )
+    }
+}
+
 impl AiClient {
     fn apply_model_override(provider: &AiProvider, model_override: Option<&str>) -> AiProvider {
         if let Some(model) = model_override {
-            let m = model.trim();
+            let m = normalize_model_for_provider(&provider.base_url, model);
             if !m.is_empty() {
                 let mut p = provider.clone();
-                p.model = m.to_string();
+                p.model = m;
                 return p;
             }
         }
@@ -410,25 +460,20 @@ impl AiClient {
 
     /// Create from explicit config values (preferred).
     pub fn with_config(base_url: &str, api_key: &str, model: &str) -> Self {
+        let normalized_model = normalize_model_for_provider(base_url, model);
+        let timeout = Duration::from_secs(provider_http_timeout_secs());
         Self {
-            client: Client::builder()
-                .timeout(Duration::from_secs(provider_http_timeout_secs()))
-                .no_proxy()
-                .build()
-                // issue #55 同族：兜底禁止静默退回无超时客户端。no_proxy 是刻意的
-                // （AI 网关常在本机，系统代理会劫持 localhost 路由），builder 失败
-                // 属进程级故障（TLS 后端初始化），expect 明确失败。
-                .expect("AI 上游客户端构建失败（TLS 后端初始化）——禁止静默退回无超时客户端，见 issue #55"),
+            client: build_ai_http_client(base_url, timeout, false),
             primary: AiProvider {
                 name: "primary".to_string(),
                 base_url: base_url.to_string(),
                 api_key: api_key.to_string(),
-                model: model.to_string(),
+                model: normalized_model,
             },
             fallbacks: Vec::new(),
             provider_mode: AiProviderMode::Http,
             gemini_cli_path: None,
-            timeout: Duration::from_secs(provider_http_timeout_secs()),
+            timeout,
             last_usage: Arc::new(RwLock::new(None)),
         }
     }
@@ -459,15 +504,7 @@ impl AiClient {
     pub fn clone_with_timeout(&self, timeout: Duration) -> Self {
         let mut new = self.clone();
         new.timeout = timeout;
-        new.client = Client::builder()
-            .timeout(timeout)
-            .pool_max_idle_per_host(2)
-            .pool_idle_timeout(Duration::from_secs(90))
-            .no_proxy()
-            .build()
-            .expect(
-                "AI 上游客户端构建失败（TLS 后端初始化）——禁止静默退回无超时客户端，见 issue #55",
-            );
+        new.client = build_ai_http_client(&self.primary.base_url, timeout, true);
         new
     }
 
@@ -511,7 +548,7 @@ impl AiClient {
             name: name.to_string(),
             base_url: base_url.to_string(),
             api_key: api_key.to_string(),
-            model: model.to_string(),
+            model: normalize_model_for_provider(base_url, model),
         });
     }
 
@@ -727,6 +764,21 @@ impl AiClient {
                         });
                     }
 
+                    if !status.is_success() && (status.as_u16() == 400 || status.as_u16() == 404) {
+                        // 400/404（例如 model is not found）无法通过原地重试同一个模型修复，
+                        // 立即返回 Err 让 send_chat_inner 自动降级切换到 fallback 模型链。
+                        let err_msg = if content.starts_with("AI 错误") {
+                            content
+                        } else {
+                            format!(
+                                "AI 错误：HTTP {} ({})",
+                                status.as_u16(),
+                                safe_truncate(&raw_text, 200)
+                            )
+                        };
+                        return Err(anyhow::anyhow!("{}", err_msg));
+                    }
+
                     if crate::error::error_kind(status.as_u16()).should_retry()
                         && attempt < max_retries - 1
                     {
@@ -734,9 +786,20 @@ impl AiClient {
                         continue;
                     }
 
-                    if content.starts_with("AI 错误") && attempt < max_retries - 1 {
-                        last_err = Some(anyhow::anyhow!("{}", content));
-                        continue;
+                    if content.starts_with("AI 错误") {
+                        if attempt < max_retries - 1 {
+                            last_err = Some(anyhow::anyhow!("{}", content));
+                            continue;
+                        }
+                        return Err(anyhow::anyhow!("{}", content));
+                    }
+
+                    if !status.is_success() {
+                        return Err(anyhow::anyhow!(
+                            "AI 错误：HTTP {} ({})",
+                            status.as_u16(),
+                            safe_truncate(&raw_text, 200)
+                        ));
                     }
 
                     return Ok(content);
@@ -1445,6 +1508,31 @@ mod tests {
             AiClient::global_timeout_secs(),
             300,
             "global AI timeout must be 300 seconds"
+        );
+    }
+
+    #[test]
+    fn normalize_model_strips_models_prefix_only_for_googleapis() {
+        assert_eq!(
+            super::normalize_model_for_provider(
+                "https://generativelanguage.googleapis.com/v1beta/openai",
+                "models/gemini-3.8-flash"
+            ),
+            "gemini-3.8-flash"
+        );
+        assert_eq!(
+            super::normalize_model_for_provider(
+                "https://generativelanguage.googleapis.com/v1beta/openai",
+                "gemini-2.5-flash"
+            ),
+            "gemini-2.5-flash"
+        );
+        assert_eq!(
+            super::normalize_model_for_provider(
+                "https://openrouter.ai/api/v1",
+                "models/custom-model"
+            ),
+            "models/custom-model"
         );
     }
 }

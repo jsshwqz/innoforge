@@ -140,6 +140,58 @@ pub fn extract_classifications(html: &str) -> Option<String> {
     }
 }
 
+/// 从 Google Patents HTML 中提取附图 URL 与原始 PDF URL。
+///
+/// Google Patents 详情页将附图放在 `https://patentimages.storage.googleapis.com/...`
+/// 的 `meta[itemprop="full"]`、`link` 或 `img` 属性中，PDF 放在 `citation_pdf_url`
+/// 或 `.pdf` 链接中。此处按纯字符串扫描提取并去重，不引入额外解析依赖。
+pub fn extract_images_and_pdf(html: &str) -> (Vec<String>, Option<String>) {
+    let prefix = "https://patentimages.storage.googleapis.com/";
+    let mut full_images: Vec<String> = Vec::new();
+    let mut thumb_images: Vec<String> = Vec::new();
+    let mut pdf_url: Option<String> = None;
+
+    for segment in html.split(prefix).skip(1) {
+        let suffix = segment
+            .split(['"', '\'', '<', '>', ' ', '\n', '\r', '\t', ')'])
+            .next()
+            .unwrap_or("");
+        if suffix.is_empty() || suffix.len() > 300 {
+            continue;
+        }
+        let lower = suffix.to_ascii_lowercase();
+        let candidate = format!("{prefix}{suffix}");
+        if lower.ends_with(".pdf") {
+            if pdf_url.is_none() {
+                pdf_url = Some(candidate);
+            }
+            continue;
+        }
+        let is_image = lower.ends_with(".png")
+            || lower.ends_with(".jpg")
+            || lower.ends_with(".jpeg")
+            || lower.ends_with(".gif")
+            || lower.ends_with(".webp");
+        if !is_image {
+            continue;
+        }
+        if lower.contains("/thumbnails/") || lower.contains("thumbnail") {
+            if !thumb_images.contains(&candidate) && thumb_images.len() < 30 {
+                thumb_images.push(candidate);
+            }
+        } else if !full_images.contains(&candidate) && full_images.len() < 30 {
+            full_images.push(candidate);
+        }
+    }
+
+    let images = if !full_images.is_empty() {
+        full_images
+    } else {
+        thumb_images
+    };
+    (images, pdf_url)
+}
+
 fn has_full_text(p: &Patent) -> bool {
     p.description.len() > 50 && p.claims.len() > 50
 }
@@ -283,6 +335,15 @@ pub async fn enrich_patent_free(db: &Database, patent_id: &str) -> EnrichResult 
     if patent.ipc_codes.is_empty() {
         if let Some(ipc) = extract_classifications(&html) {
             updated.ipc_codes = ipc;
+        }
+    }
+    let (extracted_images, extracted_pdf) = extract_images_and_pdf(&html);
+    if patent.images.len() <= 5 && !extracted_images.is_empty() {
+        updated.images = serde_json::to_string(&extracted_images).unwrap_or_else(|_| "[]".into());
+    }
+    if patent.pdf_url.is_empty() {
+        if let Some(pdf) = extracted_pdf {
+            updated.pdf_url = pdf;
         }
     }
 
@@ -847,5 +908,28 @@ mod tests {
         assert_eq!(json, "\"parse_empty\"");
         let json = serde_json::to_string(&EnrichFailReason::NotFound).unwrap();
         assert_eq!(json, "\"not_found\"");
+    }
+
+    #[test]
+    fn extract_images_and_pdf_parses_full_drawings_and_pdf() {
+        let html = r#"
+            <meta name="citation_pdf_url" content="https://patentimages.storage.googleapis.com/aa/bb/cc/CN123456A.pdf">
+            <meta itemprop="full" content="https://patentimages.storage.googleapis.com/11/22/33/fig1.png">
+            <meta itemprop="full" content="https://patentimages.storage.googleapis.com/11/22/33/fig1.png">
+            <img src="https://patentimages.storage.googleapis.com/thumbnails/fig1_thumb.png">
+            <meta itemprop="full" content="https://patentimages.storage.googleapis.com/44/55/66/fig2.jpg">
+        "#;
+        let (images, pdf) = extract_images_and_pdf(html);
+        assert_eq!(
+            images,
+            vec![
+                "https://patentimages.storage.googleapis.com/11/22/33/fig1.png",
+                "https://patentimages.storage.googleapis.com/44/55/66/fig2.jpg",
+            ]
+        );
+        assert_eq!(
+            pdf.as_deref(),
+            Some("https://patentimages.storage.googleapis.com/aa/bb/cc/CN123456A.pdf")
+        );
     }
 }
