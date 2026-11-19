@@ -1430,14 +1430,6 @@ fn docx_table_xml(headers: &[&str], rows: &[Vec<String>]) -> String {
     xml
 }
 
-/// 生成期刊投稿 LaTeX 打包 ZIP（`main.tex`、`references.bib`、`figures/simulation_curve.svg`）
-pub fn build_paper_latex_bundle_zip(
-    db: &crate::db::Database,
-    idea: &Idea,
-) -> Result<Vec<u8>, String> {
-    build_paper_latex_bundle_zip_with_template(db, idea, None)
-}
-
 /// 按指定模板（`ctexart` | `ieee` | `elsevier`）生成期刊投稿 LaTeX 打包 ZIP
 pub fn build_paper_latex_bundle_zip_with_template(
     db: &crate::db::Database,
@@ -2072,7 +2064,8 @@ mod deliverables_report_tests {
         db.save_pipeline_snapshot(&idea.id, "Finalize", &ctx_json)
             .expect("save snapshot");
 
-        let bytes = super::build_paper_latex_bundle_zip(&db, &idea).expect("build latex zip");
+        let bytes = super::build_paper_latex_bundle_zip_with_template(&db, &idea, None)
+            .expect("build latex zip");
         assert!(bytes.starts_with(b"PK"), "latex bundle must be a valid ZIP");
 
         let cursor = std::io::Cursor::new(bytes);
