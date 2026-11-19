@@ -92,11 +92,19 @@ async fn run_with_repair(
     spec: &mut ExperimentSpec,
     ai_fast: Option<&AiClient>,
 ) -> Result<(ExperimentResult, Vec<String>)> {
+    run_with_repair_policy(spec, ai_fast, sandbox::host_exec_allowed()).await
+}
+
+async fn run_with_repair_policy(
+    spec: &mut ExperimentSpec,
+    ai_fast: Option<&AiClient>,
+    allow_host_exec: bool,
+) -> Result<(ExperimentResult, Vec<String>)> {
     let mut repair_log: Vec<String> = Vec::new();
     let mut rounds = 0u32;
     let result = loop {
-        let result = sandbox::run_experiment(spec).await?;
-        if result.success || rounds >= MAX_REPAIR_ROUNDS {
+        let result = sandbox::run_experiment_with_policy(spec, allow_host_exec).await?;
+        if result.success || result.exit_code == -2 || rounds >= MAX_REPAIR_ROUNDS {
             break result;
         }
         let Some(ai) = ai_fast else {
@@ -387,7 +395,9 @@ mod tests {
     #[tokio::test]
     async fn offline_mode_skips_repair_and_records_failure_verbatim() {
         let mut spec = spec_with("fn main() { eprintln!(\"boom\"); std::process::exit(3); }");
-        let (result, repair_log) = run_with_repair(&mut spec, None).await.expect("run");
+        let (result, repair_log) = run_with_repair_policy(&mut spec, None, true)
+            .await
+            .expect("run");
         assert!(!result.success);
         assert_eq!(result.exit_code, 3, "真实退出码必须保留");
         assert!(result.stderr.contains("boom"));
@@ -400,7 +410,9 @@ mod tests {
         let (base_url, handle) = spawn_stub_ai(format!("```rust\n{fixed}\n```"));
         let ai = AiClient::with_config(&base_url, "test-key", "test-model");
         let mut spec = spec_with("fn main() { eprintln!(\"boom\"); std::process::exit(3); }");
-        let (result, repair_log) = run_with_repair(&mut spec, Some(&ai)).await.expect("run");
+        let (result, repair_log) = run_with_repair_policy(&mut spec, Some(&ai), true)
+            .await
+            .expect("run");
         handle.join().expect("stub thread");
         assert!(result.success, "修复后应成功: stderr={}", result.stderr);
         assert_eq!(result.exit_code, 0);
@@ -419,7 +431,9 @@ mod tests {
         let (base_url, handle) = spawn_stub_ai(broken.clone());
         let ai = AiClient::with_config(&base_url, "test-key", "test-model");
         let mut spec = spec_with(&broken);
-        let (result, repair_log) = run_with_repair(&mut spec, Some(&ai)).await.expect("run");
+        let (result, repair_log) = run_with_repair_policy(&mut spec, Some(&ai), true)
+            .await
+            .expect("run");
         handle.join().expect("stub thread");
         assert!(!result.success);
         assert_eq!(

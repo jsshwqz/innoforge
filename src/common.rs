@@ -374,9 +374,70 @@ pub fn init_app_state(db_path: &str) -> anyhow::Result<crate::routes::AppState> 
 ///
 /// 所有路由入口集中在本函数，确保 `main.rs` 和 `lib.rs` 同步。
 pub fn build_router(state: crate::routes::AppState) -> Router {
+    build_router_with_token(state, None)
+}
+
+async fn enforce_access_token(
+    axum::extract::State(expected): axum::extract::State<std::sync::Arc<String>>,
+    req: axum::http::Request<axum::body::Body>,
+    next: axum::middleware::Next<axum::body::Body>,
+) -> axum::response::Response {
+    use axum::http::{header, StatusCode};
+    use axum::response::IntoResponse;
+
+    let path = req.uri().path();
+    // 仅对 API 与上传文件实施令牌拦截，静态资源与首页壳子放行以便输入令牌
+    let protected = path.starts_with("/api/") || path.starts_with("/uploads/");
+    if !protected || path == "/api/health" {
+        return next.run(req).await;
+    }
+
+    let expected_str = expected.as_str();
+    let bearer_ok = req
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .is_some_and(|tok| tok.trim() == expected_str);
+
+    let header_ok = req
+        .headers()
+        .get("x-innoforge-token")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|tok| tok.trim() == expected_str);
+
+    let cookie_ok = req
+        .headers()
+        .get(header::COOKIE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|raw| {
+            raw.split(';')
+                .filter_map(|part| part.trim().split_once('='))
+                .any(|(k, v)| k.trim() == "innoforge_token" && v.trim() == expected_str)
+        });
+
+    if bearer_ok || header_ok || cookie_ok {
+        return next.run(req).await;
+    }
+
+    (
+        StatusCode::UNAUTHORIZED,
+        axum::Json(serde_json::json!({
+            "status": "error",
+            "message": "Unauthorized: valid Bearer token or X-InnoForge-Token required for non-loopback server"
+        })),
+    )
+        .into_response()
+}
+
+/// 构建带可选访问令牌鉴权的统一 Router（非回环绑定 `0.0.0.0` 时强制启用）。
+pub fn build_router_with_token(
+    state: crate::routes::AppState,
+    access_token: Option<String>,
+) -> Router {
     use crate::routes;
 
-    Router::new()
+    let router = Router::new()
         // 页面路由 / Page routes
         .route("/", get(routes::index_page))
         .route("/search", get(routes::search_page))
@@ -824,7 +885,16 @@ pub fn build_router(state: crate::routes::AppState) -> Router {
             axum::http::header::REFERRER_POLICY,
             HeaderValue::from_static("strict-origin-when-cross-origin"),
         ))
-        .with_state(state)
+        .with_state(state);
+
+    if let Some(token) = access_token.filter(|t| !t.trim().is_empty()) {
+        router.layer(axum::middleware::from_fn_with_state(
+            std::sync::Arc::new(token),
+            enforce_access_token,
+        ))
+    } else {
+        router
+    }
 }
 
 // ============================================================================

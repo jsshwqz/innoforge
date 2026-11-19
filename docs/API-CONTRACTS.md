@@ -59,7 +59,7 @@
 | 27 | GET | `/api/patent/enrich/:id` | `id` | — | — | JSON（§27） | `routes::api_enrich_patent` | `src/routes/patent.rs:35` |
 | 28 | GET | `/api/patent/enrich-free/:id` | `id` | — | — | JSON（§28） | `routes::api_enrich_patent_free` | `src/routes/patent.rs:247` |
 | 29 | GET | `/api/patent/pdf/:id` | `id` | — | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_patent_pdf` | `src/routes/patent.rs:679` |
-| 30 | POST | `/api/patent/pdf/extract-text` | — | — | — | JSON（§30） | `routes::api_patent_pdf_extract_text` | `src/routes/upload.rs:1139` |
+| 30 | POST | `/api/patent/pdf/extract-text` | — | — | — | JSON（§30） | `routes::api_patent_pdf_extract_text` | `src/routes/upload.rs:1168` |
 | 31 | GET | `/api/patent/image-proxy` | — | — | 任意键值对（§31） | HTTP 响应（动态，状态码/正文见源码） | `routes::api_patent_image_proxy` | `src/routes/patent.rs:1002` |
 | 32 | GET | `/api/patent/lookup/:number` | `number` | — | 任意键值对（§32） | JSON（§32） | `routes::api_patent_lookup` | `src/routes/patent.rs:282` |
 | 33 | POST | `/api/patent/lookup-or-fetch` | — | 任意 JSON（§33） | — | JSON（§33） | `routes::api_patent_lookup_and_fetch` | `src/routes/patent.rs:453` |
@@ -166,8 +166,8 @@
 | 134 | GET | `/api/ipc/tree` | — | — | — | JSON（§134） | `routes::api_ipc_tree` | `src/routes/ipc.rs:22` |
 | 135 | GET | `/api/ipc/:code/patents` | `code` | — | — | JSON（§135） | `routes::api_ipc_patents` | `src/routes/ipc.rs:122` |
 | 136 | POST | `/api/patents/import` | — | `ImportRequest` | — | JSON（§136） | `routes::api_import_patents` | `src/routes/settings.rs:812` |
-| 137 | POST | `/api/backup/export` | — | — | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_backup_export` | `src/routes/settings.rs:1510` |
-| 138 | POST | `/api/backup/check` | — | 任意 JSON（§138） | — | JSON（§138） | `routes::api_backup_check` | `src/routes/settings.rs:1553` |
+| 137 | POST | `/api/backup/export` | — | — | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_backup_export` | `src/routes/settings.rs:1524` |
+| 138 | POST | `/api/backup/check` | — | 任意 JSON（§138） | — | JSON（§138） | `routes::api_backup_check` | `src/routes/settings.rs:1585` |
 | 139 | GET / POST | `/api/collections` | — | POST 任意 JSON（§139） | — | JSON（§139） | `routes::api_list_collections`<br>`routes::api_create_collection` | `src/routes/collections.rs:28`<br>`src/routes/collections.rs:8` |
 | 140 | DELETE | `/api/collections/:id` | `id` | — | — | JSON（§140） | `routes::api_delete_collection` | `src/routes/collections.rs:49` |
 | 141 | GET | `/api/collections/:id/patents` | `id` | — | — | JSON（§141） | `routes::api_get_collection_patents` | `src/routes/collections.rs:92` |
@@ -630,7 +630,7 @@
 
 ### §30 POST `/api/patent/pdf/extract-text`
 
-- 源码：`src/routes/upload.rs:1139`
+- 源码：`src/routes/upload.rs:1168`
 - 响应顶层键：`char_count`、`error`、`full_text`、`method`、`page`、`page_count`、`pages`、`status`、`text`、`total_chars`
 - `status` 取值：ok
 
@@ -1253,7 +1253,7 @@
 
 ### §138 POST `/api/backup/check`
 
-- 源码：`src/routes/settings.rs:1553`
+- 源码：`src/routes/settings.rs:1585`
 - 读取的请求键：`path`
 - 响应顶层键：`message`、`schema_version`、`size_bytes`、`status`、`valid_sqlite`
 - `status` 取值：error / ok

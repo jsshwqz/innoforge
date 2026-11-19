@@ -833,8 +833,19 @@ pub async fn api_import_patents(
 // api_save_fallbacks 已屏蔽（仅保留 DeepSeek AI，无需备用 AI）
 
 fn update_env_file(key: &str, value: &str) -> Result<(), String> {
-    let env_path = ".env";
-    let content = std::fs::read_to_string(env_path).unwrap_or_default();
+    let explicit_path = std::env::var("INNOFORGE_ENV_PATH")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    // 测试环境下未显式指定 INNOFORGE_ENV_PATH 时，严禁写入并污染仓库根目录 `.env`
+    #[cfg(test)]
+    if explicit_path.is_none() {
+        return Ok(());
+    }
+
+    let env_path = explicit_path.unwrap_or_else(|| ".env".to_string());
+    let content = std::fs::read_to_string(&env_path).unwrap_or_default();
     let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
     let mut found = false;
 
@@ -854,7 +865,7 @@ fn update_env_file(key: &str, value: &str) -> Result<(), String> {
     let tmp_path = format!("{}.tmp", env_path);
     std::fs::write(&tmp_path, lines.join("\n"))
         .map_err(|e| format!("Failed to write .env.tmp file: {}", e))?;
-    std::fs::rename(&tmp_path, env_path)
+    std::fs::rename(&tmp_path, &env_path)
         .map_err(|e| format!("Failed to rename .env.tmp to .env: {}", e))?;
 
     Ok(())
@@ -1507,9 +1518,19 @@ mod ai_settings_charset_tests {
 }
 
 /// POST /api/backup/export — 使用 SQLite `VACUUM INTO` 生成一致热备份并作为 `.db` 文件下载
-pub async fn api_backup_export(State(s): State<AppState>) -> axum::response::Response {
+///
+/// 默认对导出的快照副本执行敏感密钥脱敏（清空 `app_settings` 中 API Key / Secret / Token），
+/// 仅当显式传入 `?include_secrets=true` 时保留原始密钥。
+pub async fn api_backup_export(
+    State(s): State<AppState>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> axum::response::Response {
     use axum::http::{header, StatusCode};
     use axum::response::IntoResponse;
+
+    let include_secrets = params
+        .get("include_secrets")
+        .is_some_and(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"));
 
     let ts = chrono::Local::now().format("%Y%m%d-%H%M%S");
     let filename = format!("innoforge-backup-{ts}.db");
@@ -1523,6 +1544,17 @@ pub async fn api_backup_export(State(s): State<AppState>) -> axum::response::Res
             format!("数据库热备份失败: {e}"),
         )
             .into_response();
+    }
+
+    if !include_secrets {
+        if let Err(e) = crate::db::Database::scrub_backup_secrets(&snap_path) {
+            let _ = tokio::fs::remove_file(&snap_path).await;
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("备份快照敏感密钥脱敏失败: {e}"),
+            )
+                .into_response();
+        }
     }
 
     let read_res = tokio::fs::read(&snap_path).await;

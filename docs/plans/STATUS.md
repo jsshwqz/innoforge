@@ -14,6 +14,12 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-11-19 — **P0 安全止血与工程健康加固（v0.9.60）**
+
+- **状态 / Status**: ✅ 本地全量验证通过，已提 PR 等 CI 合并进 `main` 并打 `v0.9.60` Tag
+- **① 网络暴露与备份脱敏**（`src/main.rs`、`src/common.rs`、`src/db/mod.rs`、`src/routes/settings.rs`）：默认监听收紧为 `127.0.0.1`，非回环绑定强制启用访问令牌鉴权；`api_backup_export` 默认脱敏 `app_settings` 中的 API Key/Secret/Token。
+- **② 沙箱执行门禁与路径/容器修复**（`src/experiment/sandbox.rs`、`src/routes/upload.rs`、`Dockerfile`、`src/routes/settings.rs`）：AI 生成实验脚本默认禁止在宿主机直接执行（需显式 `INNOFORGE_ALLOW_HOST_EXEC=1`）；清除 `upload.rs` 个人硬编码路径并改为异步调用；修复 `Dockerfile` `COPY templates/ templates/` + `COPY static/ static/` 层级 Bug 与 `update_env_file` 测试污染 `.env` 问题。
+
 ### 2026-11-18 — **Batch 16：期刊论文 LaTeX/Word 双模排版 + 仿真图/BibTeX 自动嵌入（v0.9.59）**
 
 - **状态 / Status**: ✅ 本地全量验证通过，已提 PR 等 CI 合并进 `main` 并打 `v0.9.59` Tag
