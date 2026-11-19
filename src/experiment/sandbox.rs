@@ -23,12 +23,7 @@ pub fn host_exec_allowed() -> bool {
         .is_ok_and(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
 }
 
-/// 在沙箱中运行实验脚本（默认受安全门禁保护，需显式开启 `INNOFORGE_ALLOW_HOST_EXEC=1`）
-pub async fn run_experiment(spec: &ExperimentSpec) -> Result<ExperimentResult> {
-    run_experiment_with_policy(spec, host_exec_allowed()).await
-}
-
-/// 带显式执行策略的实验运行入口（便于安全门禁测试与用户确认后显式放行）。
+/// 带显式执行策略的实验运行入口（默认受 `INNOFORGE_ALLOW_HOST_EXEC` 安全门禁保护）。
 pub async fn run_experiment_with_policy(
     spec: &ExperimentSpec,
     allow_host_exec: bool,
@@ -269,7 +264,7 @@ time.sleep(300)"#
             hypothesis: "timeout test".to_string(),
             timeout_secs: 5,
         };
-        let result = run_experiment(&spec).await.unwrap();
+        let result = run_experiment_with_policy(&spec, true).await.unwrap();
         assert!(!result.success, "超时脚本应失败");
         assert!(
             result.stderr.contains("超时"),
