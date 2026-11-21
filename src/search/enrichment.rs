@@ -232,6 +232,28 @@ pub async fn enrich_patent_free(db: &Database, patent_id: &str) -> EnrichResult 
 
     // 2. 检查已有全文
     if has_full_text(&patent) && !cn_needs_refetch(&patent) {
+        if patent.images.len() <= 5 && !patent.pdf_url.trim().is_empty() {
+            if let Ok(drawings) =
+                crate::pdf_drawings::fetch_and_extract_drawings_from_pdf_url(&patent.pdf_url).await
+            {
+                if !drawings.is_empty() {
+                    let mut updated = patent.clone();
+                    if let Some(norm_pdf) =
+                        crate::pdf_drawings::normalize_patent_pdf_url(&updated.pdf_url)
+                    {
+                        updated.pdf_url = norm_pdf;
+                    }
+                    let data_urls: Vec<String> = drawings.into_iter().map(|d| d.data_url).collect();
+                    updated.images =
+                        serde_json::to_string(&data_urls).unwrap_or_else(|_| "[]".into());
+                    let _ = db.insert_patent(&updated);
+                    return EnrichResult::Enriched {
+                        description_len: updated.description.len(),
+                        claims_len: updated.claims.len(),
+                    };
+                }
+            }
+        }
         return EnrichResult::AlreadyEnriched;
     }
 
@@ -344,6 +366,19 @@ pub async fn enrich_patent_free(db: &Database, patent_id: &str) -> EnrichResult 
     if patent.pdf_url.is_empty() {
         if let Some(pdf) = extracted_pdf {
             updated.pdf_url = pdf;
+        }
+    }
+    if let Some(norm_pdf) = crate::pdf_drawings::normalize_patent_pdf_url(&updated.pdf_url) {
+        updated.pdf_url = norm_pdf;
+    }
+    if updated.images.len() <= 5 && !updated.pdf_url.is_empty() {
+        if let Ok(drawings) =
+            crate::pdf_drawings::fetch_and_extract_drawings_from_pdf_url(&updated.pdf_url).await
+        {
+            if !drawings.is_empty() {
+                let data_urls: Vec<String> = drawings.into_iter().map(|d| d.data_url).collect();
+                updated.images = serde_json::to_string(&data_urls).unwrap_or_else(|_| "[]".into());
+            }
         }
     }
 

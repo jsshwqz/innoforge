@@ -230,12 +230,67 @@ impl AppConfig {
         client
     }
 
+    /// 判断模型名是否与当前 `ai_base_url` 服务商明显跨源不兼容
+    /// （如切换服务商后 `ai_model_expert` / `ai_model_fast` 残留了上一家服务商的模型名）。
+    fn is_model_compatible_with_base_url(base_url: &str, model: &str) -> bool {
+        let m = model.trim().to_ascii_lowercase();
+        if m.is_empty() {
+            return false;
+        }
+        let b = base_url.to_ascii_lowercase();
+        if b.contains("openrouter") || is_ollama_url(base_url) {
+            return true;
+        }
+        if b.contains("googleapis") {
+            return m.contains("gemini");
+        }
+        if m.contains("gemini") {
+            return false;
+        }
+        if b.contains("deepseek.com") {
+            return m.contains("deepseek");
+        }
+        if b.contains("bigmodel.cn") {
+            return m.contains("glm");
+        }
+        if b.contains("dashscope") {
+            return m.contains("qwen");
+        }
+        if b.contains("xiaomimimo") {
+            return m.contains("mimo");
+        }
+        if b.contains("sensenova") {
+            // 商汤网关若主模型已选 sensenova-*，而专家模型残留了旧 deepseek-v4.1-*（响应极慢或易超时），优先走同系模型
+            return m.contains("sensenova");
+        }
+        true
+    }
+
     /// Build an AiClient using the expert model for deep analysis tasks.
-    /// 同样自动添加模型降级兜底。
+    /// 若专家模型为空或与当前服务商跨源不兼容，则直接使用主模型；
+    /// 若与主模型不同，自动将主模型加为第一顺位兜底。
     pub fn ai_client_expert(&self) -> AiClient {
         let api_key = self.effective_api_key();
-        let mut client = AiClient::with_config(&self.ai_base_url, &api_key, &self.ai_model_expert);
-        self.add_gemini_model_fallback(&mut client, &self.ai_model_expert);
+        let primary_expert = if self.ai_model_expert.trim().is_empty()
+            || (!self.ai_model.trim().is_empty()
+                && !Self::is_model_compatible_with_base_url(
+                    &self.ai_base_url,
+                    &self.ai_model_expert,
+                )) {
+            &self.ai_model
+        } else {
+            &self.ai_model_expert
+        };
+        let mut client = AiClient::with_config(&self.ai_base_url, &api_key, primary_expert);
+        if !self.ai_model.trim().is_empty() && primary_expert.trim() != self.ai_model.trim() {
+            client.add_fallback(
+                &self.ai_base_url,
+                &api_key,
+                &self.ai_model,
+                "primary-model-fallback",
+            );
+        }
+        self.add_gemini_model_fallback(&mut client, primary_expert);
         let is_gemini = self.ai_base_url.contains("googleapis");
         if is_gemini && self.gemini_cli_enabled && !self.gemini_cli_path.is_empty() {
             client.set_gemini_cli(&self.gemini_cli_path);
@@ -244,10 +299,27 @@ impl AppConfig {
     }
 
     /// 创建使用快速模型的 AI 客户端（用于 Stage A 特征提取等结构化输出任务）。
+    /// 同样在快模型为空或跨源不兼容时直接使用主模型，并自动兜底回退主模型。
     pub fn ai_client_fast(&self) -> AiClient {
         let api_key = self.effective_api_key();
-        let mut client = AiClient::with_config(&self.ai_base_url, &api_key, &self.ai_model_fast);
-        self.add_gemini_model_fallback(&mut client, &self.ai_model_fast);
+        let primary_fast = if self.ai_model_fast.trim().is_empty()
+            || (!self.ai_model.trim().is_empty()
+                && !Self::is_model_compatible_with_base_url(&self.ai_base_url, &self.ai_model_fast))
+        {
+            &self.ai_model
+        } else {
+            &self.ai_model_fast
+        };
+        let mut client = AiClient::with_config(&self.ai_base_url, &api_key, primary_fast);
+        if !self.ai_model.trim().is_empty() && primary_fast.trim() != self.ai_model.trim() {
+            client.add_fallback(
+                &self.ai_base_url,
+                &api_key,
+                &self.ai_model,
+                "primary-model-fallback",
+            );
+        }
+        self.add_gemini_model_fallback(&mut client, primary_fast);
         let is_gemini = self.ai_base_url.contains("googleapis");
         if is_gemini && self.gemini_cli_enabled && !self.gemini_cli_path.is_empty() {
             client.set_gemini_cli(&self.gemini_cli_path);

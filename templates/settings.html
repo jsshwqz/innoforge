@@ -1367,6 +1367,18 @@
                         });
                     }
                     if (models.length > 0) {
+                        if (selectedProvider === 'gemini' && AI_PROVIDERS.gemini) {
+                            var presetMap = {};
+                            var ordered = [];
+                            AI_PROVIDERS.gemini.models.forEach(function(pm) {
+                                presetMap[pm.value] = true;
+                                ordered.push({ value: pm.value, label: pm.label });
+                            });
+                            models.forEach(function(m) {
+                                if (!presetMap[m.value]) ordered.push(m);
+                            });
+                            models = ordered;
+                        }
                         var modelEl = document.getElementById('ai-model');
                         var customGroup = document.getElementById('custom-model-group');
                         var curModel = modelEl.value;
@@ -1374,15 +1386,26 @@
                         if (customGroup && customGroup.style.display !== 'none') {
                             curModel = document.getElementById('ai-model-custom').value || curModel;
                         }
-                        var curExpert = document.getElementById('ai-model-expert').value;
-                        populateSelect('ai-model', models, curModel);
-                        populateSelect('ai-model-expert', models, curExpert);
-                        if (customGroup && curModel) {
-                            // 手输的模型名在探测列表里 → 直接选中并收起手输框；不在则保留手输框可用
+                        var expertEl = document.getElementById('ai-model-expert');
+                        var customExpertGroup = document.getElementById('custom-expert-model-group');
+                        var curExpert = expertEl.value;
+                        if (customExpertGroup && customExpertGroup.style.display !== 'none') {
+                            curExpert = document.getElementById('ai-model-expert-custom').value || curExpert;
+                        }
+                        populateSelect('ai-model', models, curModel || models[0].value);
+                        populateSelect('ai-model-expert', models, curExpert || curModel || models[0].value);
+                        if (customGroup) {
                             var inList = models.some(function(m) { return m.value === curModel; });
-                            if (inList) {
-                                modelEl.value = curModel;
+                            if (inList || !curModel) {
+                                modelEl.value = inList ? curModel : models[0].value;
                                 customGroup.style.display = 'none';
+                            }
+                        }
+                        if (customExpertGroup) {
+                            var expInList = models.some(function(m) { return m.value === curExpert; });
+                            if (expInList || !curExpert) {
+                                expertEl.value = expInList ? curExpert : (modelEl.value || models[0].value);
+                                customExpertGroup.style.display = 'none';
                             }
                         }
                         if (isManual) {

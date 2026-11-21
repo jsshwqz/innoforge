@@ -728,11 +728,12 @@ fn resolve_compare_item(
     }
     match db.get_patent(id) {
         Ok(Some(p)) => {
-            let abs = truncate_for_ai(&p.abstract_text, 20_000);
-            let claims = truncate_for_ai(&p.claims, 50_000);
-            Ok(format!(
-                "【{}】\n专利号：{}\n标题：{}\n申请人：{}\n摘要：{}\n权利要求（前部分）：{}",
-                label, p.patent_number, p.title, p.applicant, abs, claims
+            let raw_block = format!(
+                "【{}】\n专利号：{}\n标题：{}\n申请人：{}\n摘要：{}\n\n权利要求书全文：\n{}\n\n说明书（前部分）：\n{}",
+                label, p.patent_number, p.title, p.applicant, p.abstract_text, p.claims, p.description
+            );
+            Ok(crate::ai::patent::structured_patent_excerpt(
+                &raw_block, 20_000,
             ))
         }
         _ => Err(format!(
@@ -1029,15 +1030,15 @@ pub async fn api_ai_compare_matrix(
         }
         let id = item.as_str().unwrap_or("");
         if let Ok(Some(p)) = s.db.get_patent(id) {
-            let claims_preview = truncate_for_ai(&p.claims, 6_000);
             patents_info.push_str(&format!(
-                "### 专利 {}\n专利号：{}\n标题：{}\n申请人：{}\n摘要：{}\n权利要求：{}\n\n",
+                "### 专利 {}\n专利号：{}\n标题：{}\n申请人：{}\n摘要：{}\n\n权利要求书全文：\n{}\n\n说明书（前部分）：\n{}\n\n",
                 i + 1,
                 p.patent_number,
                 p.title,
                 p.applicant,
                 p.abstract_text,
-                claims_preview
+                p.claims,
+                p.description
             ));
         }
     }
@@ -1195,12 +1196,16 @@ fn resolve_references(
             continue;
         }
         if let Ok(Some(p)) = db.get_patent(id) {
-            let claims_preview = truncate_for_ai(&p.claims, 50_000);
-            let abs_preview = truncate_for_ai(&p.abstract_text, 30_000);
             refs_info.push_str(&format!(
-                "### 对比文件 {} — {}\n专利号：{}\n标题：{}\n申请人：{}\n\n摘要：{}\n\n权利要求（前部分）：\n{}\n\n",
-                i + 1, p.patent_number, p.patent_number, p.title, p.applicant,
-                abs_preview, claims_preview
+                "### 对比文件 {} — {}\n专利号：{}\n标题：{}\n申请人：{}\n\n摘要：{}\n\n权利要求书全文：\n{}\n\n说明书（前部分）：\n{}\n\n",
+                i + 1,
+                p.patent_number,
+                p.patent_number,
+                p.title,
+                p.applicant,
+                p.abstract_text,
+                p.claims,
+                p.description
             ));
         } else {
             not_found.push(id.to_string());

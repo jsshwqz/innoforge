@@ -740,47 +740,42 @@ pub async fn api_save_ai(
     Ok(Json(json!({"status": "ok"})))
 }
 
-/// 查询 SerpAPI 账户余额/用量
+/// 查询 SerpAPI 账户余额/用量（异步请求 + 错误消息脱敏，严禁回显明文 Key）
 pub async fn api_serpapi_balance(State(s): State<AppState>) -> Json<serde_json::Value> {
-    let config = s.config.read().unwrap_or_else(|e| e.into_inner());
-    let keys = config.serpapi_keys.clone();
-    drop(config);
+    let keys = {
+        let config = s.config.read().unwrap_or_else(|e| e.into_inner());
+        config.serpapi_keys.clone()
+    };
 
-    // 使用同步线程 + channel 的方式查询 SerpAPI（避免 async reqwest 的 Send 问题）
     let data = if keys.is_empty() {
         None
     } else {
         let key = keys[0].clone();
         let url = format!("https://serpapi.com/account.json?api_key={}", key);
-        let (tx, rx) = std::sync::mpsc::channel::<Result<serde_json::Value, String>>();
-        std::thread::spawn(move || {
-            // errors.md #74 纪律：blocking 客户端挂住会泄漏线程（通道等待方有
-            // recv_timeout 兜底，但线程本身会一直卡着），显式 15s 上限。
-            let client = reqwest::blocking::Client::builder()
-                .connect_timeout(std::time::Duration::from_millis(500))
-                .timeout(std::time::Duration::from_secs(15))
-                .build()
-                .expect("SerpAPI 余额检查客户端构建失败——见 issue #55");
-            let result = client
-                .get(&url)
-                .send()
-                .map_err(|e| format!("连接 SerpAPI 失败: {}", e))
-                .and_then(|r| {
-                    r.json::<serde_json::Value>()
-                        .map_err(|e| format!("解析 SerpAPI 响应失败: {}", e))
-                });
-            let _ = tx.send(result);
-        });
-        match rx.recv_timeout(std::time::Duration::from_secs(30)) {
-            Ok(Ok(d)) => Some(d),
-            Ok(Err(e)) => return Json(json!({"status": "error", "message": e})),
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                return Json(json!({"status": "error", "message": "查询 SerpAPI 余额超时（>30s）"}))
-            }
+        let client = crate::common::build_upstream_client();
+        let resp = match client
+            .get(&url)
+            .timeout(std::time::Duration::from_secs(15))
+            .send()
+            .await
+        {
+            Ok(r) => r,
             Err(e) => {
-                return Json(
-                    json!({"status": "error", "message": format!("接收线程结果失败: {}", e)}),
-                )
+                let safe_err = e.to_string().replace(&key, "***");
+                return Json(json!({
+                    "status": "error",
+                    "message": format!("连接 SerpAPI 失败: {}", safe_err)
+                }));
+            }
+        };
+        match resp.json::<serde_json::Value>().await {
+            Ok(d) => Some(d),
+            Err(e) => {
+                let safe_err = e.to_string().replace(&key, "***");
+                return Json(json!({
+                    "status": "error",
+                    "message": format!("解析 SerpAPI 响应失败: {}", safe_err)
+                }));
             }
         }
     };

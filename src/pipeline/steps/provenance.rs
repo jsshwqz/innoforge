@@ -262,6 +262,7 @@ pub fn run_provenance_pipeline(ctx: &mut PipelineContext, allow_decision: bool) 
         }
         append_decision_section(ctx);
     } else {
+        ctx.decision = None;
         ctx.ai_analysis.push_str(
             "\n\n---\n\n## 决策建议\n\n（证据核验未达门槛：实证度过低或证据不足，本次不输出申请/放弃/转向建议。详见上方证据核验报告。）\n",
         );

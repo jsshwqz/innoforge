@@ -1,3 +1,7 @@
+//! 模块职责：专利详情查询、全文/附图富化（SerpAPI + 免费直抓 + PDF 真实附图提取）、图片代理与法律状态/引文图谱路由。
+//! 上游调用者：`src/common.rs` (`build_router_with_token`) 及前端 `templates/patent_detail.html`、`search.html`、`compare.html`。
+//! 模块专属禁区：严禁把 `pdf_url` 非空当作已有附图而跳过附图提取；严禁把整本 PDF 全页转图或用 PDF iframe 冒充专利附图；图片代理严禁硬编码 `.no_proxy()` 或绕过 `validate_patent_image_url` 白名单。
+
 use super::{efld, AppState};
 use crate::patent::*;
 use axum::{
@@ -41,7 +45,7 @@ pub async fn api_enrich_patent(
         Ok(Some(p)) => p,
         _ => return Json(json!({"status":"error","message":"Patent not found"})),
     };
-    // Only skip if we have claims AND images already
+    // Only skip if we have claims AND real extracted/fetched images already
     let has_images = patent.images.len() > 5;
     let is_cn = patent.country == "CN" || patent.patent_number.starts_with("CN");
     // For CN patents, force re-fetch if existing content has no CJK characters (was fetched in English)
@@ -53,6 +57,28 @@ pub async fn api_enrich_patent(
             .any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c));
     if patent.claims.len() > 50 && has_images && !cn_needs_refetch {
         return Json(json!({"status":"ok","message":"Already enriched","patent":patent}));
+    }
+    if patent.claims.len() > 50
+        && !has_images
+        && !cn_needs_refetch
+        && !patent.pdf_url.trim().is_empty()
+    {
+        if let Ok(drawings) =
+            crate::pdf_drawings::fetch_and_extract_drawings_from_pdf_url(&patent.pdf_url).await
+        {
+            if !drawings.is_empty() {
+                let mut updated = patent.clone();
+                if let Some(norm_pdf) =
+                    crate::pdf_drawings::normalize_patent_pdf_url(&updated.pdf_url)
+                {
+                    updated.pdf_url = norm_pdf;
+                }
+                let data_urls: Vec<String> = drawings.into_iter().map(|d| d.data_url).collect();
+                updated.images = serde_json::to_string(&data_urls).unwrap_or_else(|_| "[]".into());
+                let _ = s.db.insert_patent(&updated);
+                return Json(json!({"status":"ok","patent":updated}));
+            }
+        }
     }
 
     let api_key = s
@@ -220,7 +246,28 @@ pub async fn api_enrich_patent(
                     }
                     // Extract PDF URL
                     if let Some(pdf) = json["pdf"].as_str() {
-                        updated.pdf_url = pdf.to_string();
+                        updated.pdf_url = crate::pdf_drawings::normalize_patent_pdf_url(pdf)
+                            .unwrap_or_else(|| pdf.to_string());
+                    } else if let Some(norm_pdf) =
+                        crate::pdf_drawings::normalize_patent_pdf_url(&updated.pdf_url)
+                    {
+                        updated.pdf_url = norm_pdf;
+                    }
+                    // 若 SerpAPI 未返回单张附图但有 PDF 链接，从 PDF 中提取真实单张附图
+                    if updated.images.len() <= 5 && !updated.pdf_url.is_empty() {
+                        if let Ok(drawings) =
+                            crate::pdf_drawings::fetch_and_extract_drawings_from_pdf_url(
+                                &updated.pdf_url,
+                            )
+                            .await
+                        {
+                            if !drawings.is_empty() {
+                                let data_urls: Vec<String> =
+                                    drawings.into_iter().map(|d| d.data_url).collect();
+                                updated.images = serde_json::to_string(&data_urls)
+                                    .unwrap_or_else(|_| "[]".into());
+                            }
+                        }
                     }
                     match s.db.insert_patent(&updated) {
                         Ok(id) => crate::db::vector::try_compute_and_save_embedding(
@@ -284,6 +331,58 @@ pub async fn api_enrich_patent_free(
         crate::search::enrichment::EnrichResult::NotFound => {
             Json(json!({"status":"error","message":"Patent not found"}))
         }
+    }
+}
+
+/// POST /api/patent/:id/extract-pdf-drawings
+///
+/// 从该专利关联的官方 PDF 文档（`pdf_url`）中提取真实的单张专利附图（Image XObjects 或说明书附图专属页），
+/// 过滤印章、条形码及纯文字页，落库更新 `patent.images` 并返回单张附图列表。
+pub async fn api_extract_patent_pdf_drawings(
+    Path(id): Path<String>,
+    State(s): State<AppState>,
+) -> Json<serde_json::Value> {
+    let patent = match s.db.get_patent(&id) {
+        Ok(Some(p)) => p,
+        _ => return Json(json!({"status":"error","message":"Patent not found"})),
+    };
+
+    if patent.pdf_url.trim().is_empty() {
+        return Json(json!({
+            "status": "error",
+            "message": "该专利尚无原始 PDF 链接，请先点击「加载全文」获取"
+        }));
+    }
+
+    match crate::pdf_drawings::fetch_and_extract_drawings_from_pdf_url(&patent.pdf_url).await {
+        Ok(drawings) => {
+            if drawings.is_empty() {
+                return Json(json!({
+                    "status": "ok",
+                    "count": 0,
+                    "images": [],
+                    "message": "PDF 中未检出符合尺寸规范的独立专利附图"
+                }));
+            }
+            let data_urls: Vec<String> = drawings.iter().map(|d| d.data_url.clone()).collect();
+            let mut updated = patent.clone();
+            if let Some(norm_pdf) = crate::pdf_drawings::normalize_patent_pdf_url(&updated.pdf_url)
+            {
+                updated.pdf_url = norm_pdf;
+            }
+            updated.images = serde_json::to_string(&data_urls).unwrap_or_else(|_| "[]".into());
+            let _ = s.db.insert_patent(&updated);
+            Json(json!({
+                "status": "ok",
+                "count": data_urls.len(),
+                "images": data_urls,
+                "pdf_url": updated.pdf_url,
+            }))
+        }
+        Err(e) => Json(json!({
+            "status": "error",
+            "message": e
+        })),
     }
 }
 

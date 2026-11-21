@@ -1,289 +1,99 @@
-# InnoForge 项目规约
+# InnoForge 工程与协作总宪章（AGENTS.md）
 
-> 本文件是所有 AI Agent 和人类贡献者的强制规范。修改代码前必须阅读并遵守。
-> **开工第一入口 = 下方 §〇「2026-10-27 整顿令」**；任务排队在整顿令范围内以 GitHub issue #90 为准。本文件只讲规矩，不承载进度；现状见 `docs/plans/STATUS.md`（历史）。
+> 本文件是创研台 InnoForge 仓库的**唯一最高规约（Single Source of Truth）**，适用于所有 AI Agent 与人类开发者。`CLAUDE.md` 仅作指向本文件的精简入口，严禁另行维护副本导致规则漂移。
 
-## 〇、最高效力令：2026-10-27 整顿令（不可跳过）
+## 〇、历史令归档与最高效力链
 
-> 全文与里程碑：`docs/plans/2026-10-27-rectification.md`。本节的目的是让任何 agent 在第一步就撞上它。
-> 机器守卫：`tests/rectification_order_present.rs` —— 删除/改名本令或入口标记，`cargo test` 与 CI 直接红。
+> **2026-10-27 整顿令（已结项归档）**：原整顿令三周窗口及 M1–M3 主线任务已于 2026-11-07 结项（历史全文见 `docs/plans/2026-10-27-rectification.md`，机器守卫见 `tests/rectification_order_present.rs`，严禁删除本标记）。其沉淀出的永久性原则（**实证可核验、禁止自嗨堆指标、真实案件材料严禁入库**）已升格为本宪章永久条款。
 
-1. **效力链**：本令 > 本文件其余条款（安全/隐私红线除外）> issue #90 > `docs/plans/product-vision.md` > MASTER / STATUS / 2026-03-30 规划（均为历史，不得据其认领任务或判断进度）。
-2. **唯一主线**：**一宗真实在办 OA/复审案 → 答复书 + 证据表 → 人工判"可提交"**。三周内只此一件；验收口径见 `docs/plans/product-vision.md` §3（报告敢用 / 决策敢做 / 答复敢交）。
-3. **开工声明（不可跳过）**：任务记录或首条回复必须写 `ACK 2026-10-27 整顿令：本任务 = M1/M2/M3 第X步，服务于 <质量项>`；归不进任一步 = 不做。
-4. **三周禁止**：新检索/向量/成本基建；新 prompt/报告类型/前端；#78 暂停；#125 收口 `common.rs`+`idea.rs` 未提交接线后冻结、不扩；云端开机/DevSpace；以测试数/PR 数/文档数当进度；单开守卫/计数/文档时效类 issue。
-5. **门禁**：M1（至 10/31）先出五维基线分与 top-10 失败清单，≥3 维达 4/5 才进 M2；M2 只修 top-3；M3 出终稿并做交/不交决定。M1 未过不得以"顺手修"为名提前改代码。
-6. **commit-first**：先提交再验收，禁止只靠 patch / `.b64` 回传；无 commit 不开长任务。
-7. **事实更正（防重复误诊）**：5000 字截断在 `src/ai/patent.rs:307-308`，且 `src/ai/client.rs` 的 `truncate_for_ai`（尾注在 :304） 会追加"材料不完整"尾注，不是静默截断；`fact_check_rejected` 在 `src/pipeline/steps/finalize.rs:30-32` 只 warn，不阻断。
-8. **案件材料只在本地**；禁止进入 git / PR / issue / CI 日志。
-
-## 记忆
-Step 0b/0c：反馈→`docs/feedback.md`；踩坑→`docs/errors.md`；阶段事实→`docs/plans/STATUS.md`；长期偏好→本文件。冲突以代码/运行结果为准。`src/context.rs` 自动汇编（≤6000 字符）注入提示词，缺失静默降级。
+**唯一效力链**：
+1. **安全与隐私红线**（本文件 §六 案件数据一票否决 & 推送纪律）
+2. **本宪章工程铁律**（本文件 §一 ~ §五）
+3. **产品愿景与功能边界**（`docs/plans/product-vision.md` — 面向企业研发与高校科研的四位虚拟专家：`检索员 / 技术分析师 / 专利代理师 / 学术论文助手`）
+4. **当前活规划与现状**（`docs/plans/STATUS.md` 与当前激活的唯一规划文档；`docs/plans/archive/` 下均为历史档案，禁止据此认领旧任务）
 
 ---
 
-## 一、目标用户
+## 一、产品定位与功能边界（为谁服务、做什么、绝不做什么）
 
-面向 **研发用户**（发明人、工程师），不是专利工程师或律师。
-所有功能设计、文案措辞、报告格式都以研发人员视角为准。
-
----
-
-## 二、代码规范
-
-### 2.1 语言与格式
-- Rust 代码必须通过 `cargo fmt` 和 `cargo clippy -- -D warnings`（零警告）
-- 提交前必须 `cargo test` 全通过
-- 提交信息格式：`feat/fix/refactor/chore/docs: 中文简要描述`
-
-### 2.2 类型与结构体
-- **禁止重复定义类型**。新增数据结构前，先在 `src/patent.rs` 和对应模块中搜索是否已有同类型
-- 公共类型统一放在 `src/patent.rs`，模块内部类型放在对应模块文件中
-- 新增 struct/enum 必须带 `#[derive(Debug, Clone, Serialize, Deserialize)]`
-
-### 2.3 数据库变更
-- Schema 变更必须通过 `src/db/migrations.rs` 的版本化迁移，禁止手动改 DB
-- 迁移版本号递增（当前 v11），新增迁移在 `run_migrations` 函数中追加
-- 新增表/字段必须在迁移注释中说明用途
-
-### 2.4 路由注册
-- 所有 API 端点统一在 `src/common.rs` 的 `build_router` 函数中注册；`src/main.rs`（桌面端 / Docker 独立运行入口）与 `src/lib.rs`（Android / iOS FFI 共享库入口）都通过调用同一个 `build_router` 获得路由，禁止在两处各自重复注册导致漂移
-- 路由命名规范：`/api/{模块}/{动作}`，RESTful 风格
-
-### 2.5 前端
-- 纯 HTML/CSS/JS，禁止引入构建工具（webpack/vite 等）
-- 所有面向用户的文本必须通过 `static/i18n.js` 做中英双语
-- XSS 防护：禁止 `innerHTML = 用户输入`，使用 `createElement + textContent`；需要渲染富文本时必须经 DOMPurify 过滤
-- **DOMPurify 是必选依赖，不是可选增强**：所有 `innerHTML` 赋值必须调用 `DOMPurify.sanitize()`。DOMPurify 加载可能失败（网络/CDN/编译嵌入问题），因此在 `static/i18n.js` 中已设置全局保护（自动 fallback）。如需在其他 JS 中使用 DOMPurify，必须确保 `i18n.js` 已加载在先。**禁止在任何页面直接调用 `DOMPurify.sanitize()` 而不依赖全局保护**。
-- **截断不得破坏数据完整性**：凡是截断文本（`substring`/`slice`/`safe_truncate`/`chars().take()`），必须确认被截的是显示用途而非数据用途。用于提交给后端或传给 AI 的数据，必须保留全文，禁止为了省 token 或省空间而截断数据内容。
-- **JS 变量声明**：同一作用域内禁止 `const` 在 `var` 之后声明同名变量（`no-redeclare`）。优先使用 `let`/`const` 而非 `var`。
-
-### 2.6 AI 提示词
-- AI 相关 prompt 统一放在对应 route handler 中（不单独建 prompt 文件）
-- 新增 AI 功能必须设置超时（**单次 AI 调用** 60 秒上限，非整条 pipeline）
-- 必须处理 AI 调用失败的降级逻辑
-- **Prompt 注入防护**：用户输入拼入 prompt 前必须做边界隔离（如用 `<user_input>` 标签包裹），禁止将用户原始输入直接拼接为系统指令
-
-### 2.7 Rust 编码安全
-- 生产路径（非测试代码）**禁止** `unwrap()` / `expect()`，统一用 `Result` + `?` 传播错误
-- API 层错误必须转换为用户友好的 JSON 响应，禁止将 Rust panic 信息暴露给前端
-- 禁止在循环中逐条查询数据库，优先使用批量操作（`WHERE id IN (...)` 等）
-- **禁止裸字节切片 `&s[..n]` / `&s[n..]`**（#73 防线）：对 `&str` 按字节索引切片时，
-  若 `n` 未经过 `is_char_boundary(n)` 回退或未由 `chars()` 间接保证落在字符边界，
-  非_ascii 输入会在多字节字符中间切断，触发 `panic`。正确做法：
-  - 截断文本 → 用 `crate::ai::client::safe_truncate`（字节）或 `safe_truncate_chars`（字符）；
-  - 取前/后 N 个字符 → `s.chars().take(N).collect()` / `s.chars().skip(count-N).collect()`；
-  - 确需按字节切 → 先 `while !s.is_char_boundary(end) && end > 0 { end -= 1; }` 回退到边界。
-  - CI 侧有 `tests/no_unsafe_byte_slice.rs` 静态扫描守这条线，新增违例会红。
+* **目标用户（双栖定位）**：
+  1. **企业一线研发工程师 / 发明人**：查新避坑、工程推演验证、专利布局与 OA 复审答复、BOM/交付落地；
+  2. **高校科研师生 / 实验室**：全学科文献查新（含工程/医工/理工）、研究空白点挖掘、实验数据仿真、核心期刊/SCI 论文写作（带真实 DOI 与防破专利新颖性提醒）。
+  * 软件形态始终保持为**单机零配置、离线隐私优先的本地实战工作台**。
+* **北极星验收标尺**：**报告敢用（每条事实/文献有真实出处）· 决策敢做（逻辑闭环自洽）· 成果敢交（专利答复与学术论文均达到可提交水准）**。
+* **功能取舍过滤器**：任何新功能必须服务于四位虚拟专家之一——**检索员（专利+学术全库查全查准）、技术分析师（问题拆解与仿真验证）、专利代理师（确权布局与 OA 攻防）、学术论文助手（文献综述与规范排版）**。
+* **明确不做清单（Non-Goals）**：
+  * 不引入前端打包构建工具链（webpack / vite 等），产品前端坚持原生 HTML/CSS/JS 零构建；
+  * 不做云端多租户 SaaS 运维组件（如 P50/P95/P99 性能遥测面板）；
+  * 不做脱离实际业务的纯架构大搬家重构（如无业务收益的全局抽层重写）或自造假题库刷分台；
+  * 不替代专业工业设计/编程软件（如 EPLAN 电气画图或 PLC 专用 IDE）。
 
 ---
 
-## 三、变更追踪
+## 二、AI 提效与编码工程规范
 
-### 3.1 CHANGELOG 规则
-- 每个版本发布时**必须**更新 `CHANGELOG.md`
-- 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/)
-- 分类：新增 / 修复 / 改进 / 安全修复 / 重大变更
-- 中英双语，中文在前
+### 2.1 仓库导航与单一权威入口（防两张皮）
+* **先看地图再动手**：开工前必读 `docs/CODE_MAP.md`（≤ 80 行核心能力→唯一入口文件→定向单测命令映射表），避免盲目全仓搜索浪费上下文。
+* **单一入口原则**：同类能力全仓只允许一套权威实现，改动前必先全仓检索复用：
+  * API 路由：统一在 `src/common.rs` 的 `build_router` 注册（`src/main.rs` 与 `src/lib.rs` 共用，禁止两处重复注册）；
+  * 公共类型：统一查/放 `src/patent.rs`，禁止重复定义结构体；
+  * 数据库变更：统一经 `src/db/migrations.rs` 递增版本化幂等迁移（`column_exists` + `run_migration_tx`），版本号以 `src/db/migrations.rs` 源码为准；
+  * OCR / 检索 / AI 调度：统一复用仓库现有可配置插件与底层模型路由器（后台自动按任务类型分发给**快模型 / 强推理 / 视觉看图 / 严格 JSON 校验**四类通道），禁止在局部模块另起炉灶硬编码另一套外部命令行或模型调用。
+* **模块顶部契约注释**：核心业务 `.rs` 文件顶部用 3 行 `//!` 注明「模块职责、上游调用者、模块专属禁区」，让后续接手者第一眼直击边界。
 
-### 3.2 版本号规则
-- 遵循语义化版本：`MAJOR.MINOR.PATCH`
-- `Cargo.toml` 中的 version 字段必须与 CHANGELOG 一致
-- PATCH：bug 修复、小改进
-- MINOR：新功能、非破坏性变更
-- MAJOR：破坏性 API 变更
+### 2.2 Rust 编码与异步安全
+* **格式与零告警**：必须通过 `cargo fmt --check` 与 `cargo clippy --all-targets -- -D warnings`。
+* **禁止崩溃写法**：生产路径（非测试代码）**严禁** `unwrap()` / `expect()`，统一用 `Result` + `?` 传播；API 错误必须转为友好 JSON，禁止暴露 panic。
+* **禁止裸字节切片 `&s[..n]` / `&s[n..]`**：必须使用 `safe_truncate` / `safe_truncate_chars`、`chars()` 或 `is_char_boundary` 回退（CI 由 `tests/no_unsafe_byte_slice.rs` 强制守卫）。
+* **异步无阻塞**：异步路由与任务中严禁调用阻塞 I/O（如 `reqwest::blocking`、`std::fs::read`）；禁止循环内逐条查库，优先批量 SQL。
 
-### 3.3 任务计划追踪
-- 版本规划文档统一放在 `docs/plans/` 目录
-- 任务完成后在计划文档中标注 ✅ 和对应 commit hash
-- 禁止删除已完成的任务记录（保留完整历史）
+### 2.3 前端与数据完整性
+* **双语与 XSS 安全**：用户可见文案走 `static/i18n.js` 中英双语；禁止未过滤 `innerHTML = 用户输入`，富文本必须经 `static/i18n.js` 保护的 `DOMPurify.sanitize()`；优先 `const`/`let`，禁止 `var` 后重复 `const` 声明。
+* **数据完整不静默截断**：用于提交给后端或喂给 AI 的核心业务数据禁止静默截断丢内容；超上下文预算时必须走结构化保留或 RAG 召回，并显式返回覆盖率/截断元信息。
+* **AI 调用纪律**：单次 AI 调用必须设超时与失败降级；用户输入拼入 Prompt 前必须用 `<user_input>` 隔离防注入；确定性程序能算清的事（语法校验、段落定位、图像提取）不交给大模型去猜。
 
----
-
-## 四、文件与目录规范
-
-### 4.1 仓库只保留核心代码
-```
-src/           # Rust 核心代码
-templates/     # HTML 页面模板（7 个页面）
-static/        # CSS + JS + 图标（不放图片资源）
-tests/         # 集成测试
-docs/          # 文档和规划
-```
-
-### 4.2 禁止提交到仓库的文件
-- 辩论报告、分析报告等 AI 生成的 `.md` / `.txt` 产物
-- 测试用的 PDF、图片、OCR 结果等临时文件
-- 日志文件（`*.log`）
-- 数据库文件（`*.db`）
-- 环境变量文件（`.env`）
-
-如果需要保存这类文件，放在仓库外部或添加到 `.gitignore`。
-
-### 4.3 开发工具/依赖分离
-- 核心仓库只包含 Rust + 前端静态文件
-- 桌面端（Tauri）/ iOS / 鸿蒙 → 各自独立仓库，**目前尚未创建**（规划中）；本仓库仅在 `src/lib.rs` 导出 C ABI 供壳工程内嵌
-- MCP 技能/插件 → 独立仓库，不放在本项目中
-- 本条本意是**禁止引入前端构建工具链**（webpack / vite / 打包器等），产品前端仍为纯 HTML/CSS/JS。
-- **开发工具的依赖清单属于例外，必须入库**：`package.json`、`package-lock.json` 等（供 ESLint / Puppeteer / 扫描脚本等开发工具使用）应当提交，其中**锁文件必须与 `package.json` 同步提交**，否则 CI 的 `npm ci` 在干净 runner 上必然失败（`npm error code EUSAGE`），依赖版本也无法复现。提交前用 `npm ci --dry-run` 自检。
-- 仍禁止入库的是：`node_modules/`、构建产物、以及任何真正的构建工具链配置（webpack/vite 配置与插件）。
+### 2.4 工程真实性、反糊弄与 3 轮熔断铁律
+* **禁止假修复与降级应付**：修复功能回归前必先用 `git log / git show` 溯源哪次提交改坏的；严禁用降级替代方案掩盖真实缺陷、假接通参数或静默吞错返空。
+* **禁止造假绿测试**：严禁删除/弱化既有断言或用管道掩盖非零退出码；关键修复必须附带**负面反作弊测试**（验证非法输入或降级偷懒行为确实被拦截）。
+* **端到端完工标准（DoD）**：禁止半截工程——新增后端路由必须完成前端接线与 `docs/API.md` 同步；持久化状态必须有下游真实消费；风控/证据门禁命中必须产生实质阻断或降级，严禁仅打 `tracing::warn!` 不作为。
+* **测试环境彻底隔离**：严禁硬编码端口或绕过端口记账分配器直接 `bind(":0")`；测试必须隔离 `INNOFORGE_HOME`、宿主机 `.env` 及进程级环境变量（读写环境变量的测试必须加锁串行）。
+* **3 轮熔断机制**：同一个编译、链接或测试报错连续修正 3 轮仍未通过，必须**立刻停手保留现场并如实汇报完整报错日志**，严禁为了强行过关而篡改接口契约、偷塞 `unwrap()` 或阉割核心功能。
 
 ---
 
-## 五、标准操作流程（所有 AI Agent 必须遵守）
+## 三、开发流程与三级验证阶梯
 
-任何 AI Agent 接到任务后，按以下步骤顺序执行。不可跳步。
-
-### Step 0: 读规约
-- 读取本文件（`AGENTS.md`），理解项目定位、规范和禁忌
-- 读取 `docs/plans/STATUS.md`，了解当前焦点、最近变更、已知问题（**每次必读**）
-- 如果是首次进入项目，同时读：
-  - `CHANGELOG.md` — 版本历史，了解改了什么
-  - `Cargo.toml` — 当前版本号和依赖
-  - `docs/errors.md` — 错误复盘数据库，避免重复踩坑
-- 其他文档（`docs/ARCHITECTURE.md`、`docs/API.md`）需要时再读
-- **首次克隆/进入项目后，设置 git 钩子**（防忘记跑检查）：
-  ```bash
-  git config core.hooksPath .githooks      # 或运行 sh .githooks/setup-githooks.sh
-  ```
-
-  钩子用 `core.hooksPath` 指向 `.githooks/`，随仓库提交、跨机器共享；每次 `git commit` 自动跑 `scripts/check_html_functions.mjs`。
-- **硬关卡（强制）**：本地钩子可被 `git commit --no-verify` 跳过，它只是方便层；真正的强制关卡是远端 **CI**（`.github/workflows/ci.yml`），push/PR 后自动跑 fmt/clippy/test + HTML 函数完整性扫描 + e2e，不过关无法合并——任何 AI 或开发者想绕过本地检查都拦不住远端。
-
-#### Step 0b/0c: 记忆检索与回写
-- 只展开与本任务直接相关的记忆（反馈 / 踩坑 / 计划），证据足够即停；冲突以代码 / 运行结果为准。
-- 最终回复前静默判断：用户纠正或认可→`docs/feedback.md`；工具踩坑→`docs/errors.md`；一次性流水账不沉淀。
-
-### Step 1: 理解任务
-- 明确用户要做什么（新功能 / bug 修复 / 重构 / 分析调研）
-- 有歧义时主动问用户，不要猜
-
-### Step 2: 现状调查
-- `git log --oneline -10` 了解最近改动
-- `git status` 确认当前工作区状态，不覆盖用户未提交的工作
-- 搜索相关代码，确认：
-  - 是否已有类似实现（禁止重复造轮子）
-  - 涉及哪些文件、哪些模块
-  - 现有的类型定义、数据库表、API 端点
-
-### Step 3: 方案确认
-- 简要说明修改范围和方案（改哪些文件、加什么、改什么）
-- 涉及以下情况时**必须等用户确认**再动手：
-  - 新增 crate 依赖
-  - 修改数据库 schema
-  - 删除或重命名现有 API
-  - 大范围重构（> 3 个文件）
-- 小修复和明确任务可直接执行
-
-### Step 4: 实现
-- 按第二章代码规范编写代码
-- 新增类型先查 `src/patent.rs`，避免重复定义
-- 新增 API 同时注册到 `src/main.rs` 和 `src/lib.rs`
-- 前端文本走 `static/i18n.js` 双语
-- 数据库变更走 `src/db/migrations.rs` 版本迁移
-
-### Step 5: 验证
-- 运行 `cargo fmt --check`（格式检查）
-- 运行 `cargo clippy -- -D warnings`（零警告）
-- 运行 `cargo test`（测试通过）
-- 如果修改了模板（`templates/`）或 JS 文件（`static/`），运行 ESLint 检查 JS 语法：
-  ```bash
-  npx eslint static/i18n.js
-  ```
-  无 `error` 级别报错
-- 三项全过才算完成，任一失败必须修复后重跑
-- 优化：fmt 失败先修格式再跑后续；clippy 失败不必跑 test，先修警告
-- **端到端回退检测**：如果修改了模板文件（`templates/`）或静态资源（`static/`），特别是涉及截断、数据流、DOM 操作的改动，完成编译后必须手动跑一遍核心流程确认正常：
-  1. 首页 → 上传 PDF → 检查文件内容完整（未被截断）
-  2. 专利详情页 → 点「加载全文」→ 检查 5 个标签页内容均显示正常
-  3. OA 答复页 → 粘贴 OA → 专利号/日期自动填入 → 点分析 → 讨论 → 生成答复书
-  4. 技术调研 → 上传 PDF → 点开始 → 导出报告 → 检查 PDF 全文完整
-  **关键原则**：改了什么，就要测什么。改了 PDF 提取就测 PDF 上传，改了截断就测数据完整性，改了 i18n 就测标签页文本。
-- **Puppeteer 自动化测试**：如果修改了模板文件（`templates/`），且 Puppeteer 已安装（`node_modules/puppeteer` 存在），必须在仓库根目录运行：
-  ```bash
-  node scripts/e2e_test.mjs
-  ```
-  确保全部测试通过（54/54 PASSED）。如果有失败项必须修复后才能提交。
-  若你的环境需要给 Playwright/Puppeteer 指定浏览器路径，请自行设置 `PATH`，不要把本机绝对路径写进仓库。
-
-- **HTML 模板函数完整性扫描（强制）**：每次修改 `templates/` 下任何 HTML 文件，编译前必须运行：
-  ```bash
-  node scripts/check_html_functions.mjs
-  ```
-  该扫描**自动发现 `templates/` 下所有 `*.html`（包括未来新增页面）**，不靠硬编码页面清单。它执行两条规则：
-  1. 任何 `on*` 引用的函数未定义（按钮在、函数没了）→ 拦截
-  2. 基线中存在的引用/定义在当前被移除（整块功能消失）→ 拦截（补齐静态扫描的原理盲区）
-  **任何"按钮在、函数没了"或"整块功能消失"的情况（如历史事故 42c726e / 9f1a14b 两次重构误删函数）都会被拦截在编译前。**
-  基线文件为 `docs/functions-manifest.json`（随代码提交）；新增页面/新增函数后，跑一次 `node scripts/check_html_functions.mjs --refresh` 更新基线，并把基线变更与模板变更一起提交（基线变更在 code review 中可审计）。
-  退出码非 0 时必须先补齐函数定义再继续。
-
-- **重构模板时的功能清单核对**：重写/重构任何页面模板前，先列出该页所有功能点（按钮 → 对应函数 → 对应 API），重构后逐项核对，禁止"删了再说"式重构。函数级删除必须先确认无引用。
-
-### Step 6: 提交
-- 提交信息格式：`feat/fix/refactor/chore/docs: 中文简要描述`
-- 提交信息说明改了什么、为什么改
-- 只提交相关文件，不提交临时产物
-
-### Step 7: 记录
-- 如果是新功能或重要修复，更新 `CHANGELOG.md`（遵循第三章格式）
-- 如果属于某个版本计划任务，在 `docs/plans/` 对应文档中标注 ✅ + commit hash
-- 向用户汇报：改了什么、影响范围、是否需要后续操作
+1. **查现场**：`git branch --show-current`、`git status`、`git log --oneline -5`；读 `docs/CODE_MAP.md` 与 `docs/plans/STATUS.md`。
+2. **确认边界**：涉及新增 crate 依赖、改 DB schema、删改现有 API、或跨模块大改（>3 文件）须先明确方案再动工；小修与已确认任务卡直接推进。
+3. **三级验证阶梯（提效闭环）**：
+   * **编码期（秒级快测）**：`cargo test --lib <目标模块>`；
+   * **提交前（本地全检）**：`cargo fmt --check`、`cargo clippy --all-targets -- -D warnings`、`cargo test --no-fail-fast`；改动模板或 JS 必跑 `node scripts/check_html_functions.mjs`（禁篡改扫描规则，新增函数须 `--refresh` 同步 `docs/functions-manifest.json`）与 `npx eslint static/i18n.js`；
+   * **提 PR 后（云端终验）**：由 GitHub Actions 跑全量 CI 与 E2E；改了什么核心链路必须在本机隔离环境实测验证。
+4. **分支、版本与提交**：
+   * **`main (0.9.x)` 版本号严格保持 `< v1.0`**，严禁与 `dev (1.0.0)` 混提交或混用 `STATUS.md`；
+   * 提交格式 `feat/fix/refactor/chore/docs: 中文简要描述`；`CHANGELOG.md` 引用 Issue 必须用 `[#NN](url)` 链接格式（防 `Autoclose Hygiene` 拦截）；
+   * 禁止直推 `main`，禁止 `git add -A` / `git add .`（必须显式列文件路径），禁止提交临时 `.txt`/`.log`/`.db`/`.env` 文件；`package.json` 与 `package-lock.json` 须同步提交（禁止提交 `node_modules/`）。
 
 ---
 
-### 特殊场景补充
+## 四、三层防再犯复盘机制（彻底替代无效流水账）
 
-**调研/分析类任务**（不涉及代码修改）：
-- 执行 Step 0 → Step 1 → Step 2，然后输出分析结论
-- 涉及深度分析时自动多轮迭代直到收敛，不需用户每次提醒
-
-**紧急 bug 修复**：
-- Step 3 可简化为一句话说明，不必等确认
-- 但 Step 5 验证不可跳过
-
-**禁止行为**（任何场景下都不可做）：
-- 禁止大规模重构未经用户确认的代码
-- 禁止引入新的 crate 依赖而不说明原因
-- 禁止修改 DB schema 而不增加迁移版本
-- 禁止在仓库根目录创建临时文件
-- 禁止删除或覆盖用户未提交的工作
-- 禁止跳过 Step 5 验证直接提交
-- 禁止删除或篡改 `scripts/check_html_functions.mjs` 的扫描规则、或静默删除 `docs/functions-manifest.json` 基线。如需更改扫描规则或基线，必须在同一提交中说明原因并提交完整的 `--refresh` 更新结果，以便 code review 审查。
-- 禁止在生产路径使用 `unwrap()` / `expect()`（见 2.7）
+每个版本 PR 合并前**必须显式完成复盘**，按强制力从高到低转化，禁止静默跳过：
+1. **第一层（机器拦截，首选）**：凡能用测试或静态守卫拦住的坑，必须补写 1 条负面单元测试或 CI 守卫，让后续 Agent 想犯错都过不了编译/测试。
+2. **第二层（就近撞脸）**：模块专属致命禁区，直接写成目标 `.rs` 文件顶部 3 行 `//!` 注释。
+3. **第三层（极简活索引）**：`docs/errors.md` 永远只保留 **Top-15 高频跨模块避坑索引**（已转为测试或一次性环境流水账定期归档至 `docs/archive/`）；用户纠正与偏好落盘 `docs/feedback.md`。每次交付汇报末尾必须单列「本轮复盘沉淀」（无新增须写明原因）。
 
 ---
 
-## 六、当前状态速查
+## 五、部署与推送铁律
 
-> 版本/Schema/Pipeline/前端页面等**会变的数字不在此硬编码**。唯一权威：优先级=GitHub issue **#90**；版本=`Cargo.toml`；Schema=`src/db/migrations.rs`；现状=`docs/plans/STATUS.md`。本仓禁止 `git add -A` / `git add .`。
+1. 改模板必须 `cargo build --release` 且重启替换进程（模板经 `include_str!` 编入二进制）。
+2. 认版只认 `/api/version` 的 `git_commit` + 模板 `sha256`，不单看版本号。
+3. 部署后须核验页内按钮接线（`typeof window[on*函数] === 'function'`）；改 HTML 内联 JS 禁用 `sed`。
+4. **推送纪律**：只允许推送至 GitHub `https://github.com/jsshwqz/innoforge`（严禁推送或添加 gitee / gitcode remote）；推送前确认 `git merge-base --is-ancestor` 成立；禁止 force-push 或重写已推送历史。
 
-## 部署铁律 / Deployment Rules
+---
 
-1. **改模板必须 `cargo build --release` 且换进程**，否则用户永远看到旧版（模板通过 `include_str!` 编入二进制）。
-2. **认版只认 `/api/version` 的 `git_commit` ＋ 模板 `sha256`**，不信版本号（版本号与 Cargo.toml 一模一样时分不出新旧二进制）。
-3. **禁止 `git add -A` / `git add .`**，只允许显式列文件路径（防止误推 data/ 下用户数据到公网）。
-4. **部署完必须跑一遍页内按钮接线检查**（`typeof window[每个 on* 函数名] === 'function'`），因为旧函数把后面声明吞进局部作用域的 bug，cargo check / 构建 / 静态扫描全部发现不了。
-5. **改 `templates/*.html` 里的 JS 禁用 `sed`**，用 `python3` 或编辑器改（sed 对引号/转义/多行处理不可靠）。
-6. **推送纪律**：只允许推 `jsshwqz/innoforge`（GitHub，`https://github.com/jsshwqz/innoforge`）的 `main` / `dev`。gitee、gitcode 一律禁止推送、禁止添加或使用这两个 remote、禁止重建镜像。
-   - **禁"新分支"比禁"禁推的远端"更要紧**：本仓是从 `innoforge-legacy` 全新重建的孤立历史（331 文件、无旧提交）。把 legacy（或任何带旧历史的克隆）的历史推到这里，等于把案件专有信息重新放回公开面——`push main` 会因 non-fast-forward 被拒，但 `push dev`、`push feature/*`、`push` 任何 legacy 分支都会被当作**新分支接受**。
-   - 因此：任何机器上的克隆在推送前必须先确认 `git log --oneline origin/main -1` 与本地历史的祖先后关系成立（`git merge-base --is-ancestor`）；不允许把旧仓库的 remote URL 原样指过来（改名后用同名新建仓库会使 `github.com/jsshwqz/innoforge` 的旧重定向**失效**，该 URL 现在就指向本公开仓）。云端 `/root/innoforge` 这类旧克隆应先 `git remote set-url --push origin no-push` 断写，再把 fetch URL 改指 `innoforge-legacy`。
-   - 禁止 force-push，禁止以 rebase/squash 名义重写已推送历史。
-   - 原因（事实依据）：gitee 镜像内容级实测 `main@fc102f0` 仍含申请人姓名与案号，任何再次推送都会把脏历史放回公开面。
+## 六、案件数据一票否决（最高隐私红线）
 
-## 案件数据一票否决 / Case Data Veto
-
-**扫描范围**：全仓 git 跟踪文件（src、templates、docs、tests、*.md、Cargo.toml、build.rs 全含），不限于 src/** 与 templates/**。
-
-**红线规则**：
-真实在办案件的任何具体标识（包括但不限于：发明人/申请人真实姓名及拼音、真实申请号、真实公开号、对比文件公开号、发文序号等案件专有信息）**严禁出现在任何 git 跟踪文件中**。
-案件材料与真实案件数据仅允许存在于本地未跟踪路径（如 `data/` 目录），禁止进入 git、PR、issue 或 CI 日志。
-
-**机器守卫**：`tests/no_case_data_in_repo.rs` 执行多层防御：
-1. **外置禁词表扫描**：支持从本地外置文件（`~/.config/innoforge/privacy-terms.txt`）或 `INNOFORGE_PRIVACY_TERMS` 环境变量动态加载本地隐私禁词并执行全词及子串匹配；未配置本地表时仅打印提示，绝不在仓库公开面硬编码任何敏感字面量；
-2. **长句摘要守卫**：不可逆 SHA-256 digest 扫描已知的敏感句子；
-3. **申请号/公开号形状正则**（`\d{13}(\.\d)?`、`CN\d{8}[A-Z]`、`CN\d{9}U`，生代码区与路径级扫描）；
-4. **路径级扫描**：不只扫文件内容，还对 `git ls-files` 的每条路径本身执行匹配。
-
-tests/fixtures/ 内容也执行严格检查（fixture 按定义是合成内容，更应被扫描）。白名单常量必须保持为空。违规消息不回显命中串。
-
-**违反后果**：任何 AI 或开发者在提交中引入上述涉案敏感信息（无论在内容还是路径中），`cargo test` 将失败，CI 阻断合并。
+真实在办案件的任何标识（发明人/申请人姓名及拼音、真实申请号/公开号、对比文件号、发文序号等）**严禁进入任何 git 跟踪文件、PR、Issue 或 CI 日志**，仅允许存于本地未跟踪目录（如 `data/`）。全仓由 `tests/no_case_data_in_repo.rs` 强制守卫，违规直接阻断合并。

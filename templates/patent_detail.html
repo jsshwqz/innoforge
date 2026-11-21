@@ -23,8 +23,9 @@
                 <div class="detail-actions">
                     <button class="ai-btn" onclick="aiSummarize()">🤖 <span data-i18n="detail.analyze"></span></button>
                     <button class="ai-btn" id="load-full-btn" onclick="loadFullText()">📄 加载全文</button>
+                    <button class="ai-btn" id="view-original-pdf-btn" style="display:none;background:#1f6feb;" onclick="openOriginalPatentPdf()">📑 查看原版 PDF</button>
                     <button class="ai-btn violet" onclick="window.open('/api/patent/pdf/{{id}}','_blank')">📥 导出 PDF</button>
-                    <button class="ai-btn green" onclick="window.location.href='/compare?patent={{patent_number}}'">⚖️ 对比分析</button>
+                    <button class="ai-btn green" onclick="window.location.href='/compare?patent={{patent_number}}&id={{id}}'">⚖️ 对比分析</button>
                     <button class="ai-btn orange" id="collect-btn" onclick="toggleCollect()">⭐ 收藏</button>
                 </div>
             </div>
@@ -104,7 +105,10 @@
             </div>
             <div id="tab-ai-chat" class="tab-content">
                 <div class="chat-box" id="chat-messages"></div>
+                <div id="patent-chat-preview" class="image-preview-area" style="display:none;margin-bottom:6px;"></div>
                 <div class="chat-input">
+                    <input type="file" id="patent-chat-file" accept="image/*,.pdf,.txt,.md,.docx,.csv,.json" multiple style="display:none" onchange="handlePatentChatFiles(event)">
+                    <button type="button" class="btn-secondary" onclick="document.getElementById('patent-chat-file').click()" title="上传图片或文件（PDF / DOCX / TXT / 图片）" style="padding:8px 12px;flex-shrink:0;">📎</button>
                     <input type="text" id="chat-msg" data-i18n-placeholder="detail.chatPlaceholder">
                     <button id="patent-send-btn" onclick="sendChat()" data-i18n="detail.send"></button>
                     <button id="patent-cad-btn" type="button" onclick="drawPatentCad()" data-i18n="cad.draw"></button>
@@ -372,44 +376,167 @@
         });
     }
 
+    var patentChatImages = [];
+    var patentChatFiles = [];
+    var patentChatUploading = false;
+
+    document.getElementById('chat-msg').addEventListener('paste', function(e) {
+        var items = (e.clipboardData || window.clipboardData).items || [];
+        for (let i = 0; i < items.length; i++) {
+            if (items[i].type && items[i].type.indexOf('image') === 0) {
+                e.preventDefault();
+                var file = items[i].getAsFile();
+                if (!file) continue;
+                patentChatUploading = true;
+                var reader = new FileReader();
+                reader.onload = function(ev) {
+                    patentChatImages.push(ev.target.result);
+                    patentChatUploading = false;
+                    renderPatentChatPreview();
+                };
+                reader.onerror = function() { patentChatUploading = false; };
+                reader.readAsDataURL(file);
+                break;
+            }
+        }
+    });
+
+    async function handlePatentChatFiles(ev) {
+        var files = Array.from((ev.target && ev.target.files) || []);
+        if (ev.target) ev.target.value = '';
+        for (let i = 0; i < files.length; i++) {
+            var file = files[i];
+            if (file.type && file.type.indexOf('image/') === 0) {
+                patentChatUploading = true;
+                await new Promise(function(resolve) {
+                    var reader = new FileReader();
+                    reader.onload = function(e) { patentChatImages.push(e.target.result); resolve(); };
+                    reader.onerror = function() { resolve(); };
+                    reader.readAsDataURL(file);
+                });
+                patentChatUploading = false;
+                renderPatentChatPreview();
+            } else {
+                patentChatUploading = true;
+                try {
+                    var fd = new FormData();
+                    fd.append('file', file);
+                    var resp = await fetch('/api/upload/extract', { method: 'POST', body: fd });
+                    var data = await resp.json();
+                    if (data && data.content) {
+                        patentChatFiles.push({ name: data.title || file.name, content: data.content });
+                    } else {
+                        alert('文件解析失败: ' + ((data && data.error) || file.name));
+                    }
+                } catch (err) {
+                    alert('文件上传失败: ' + err.message);
+                }
+                patentChatUploading = false;
+                renderPatentChatPreview();
+            }
+        }
+    }
+
+    function renderPatentChatPreview() {
+        var area = document.getElementById('patent-chat-preview');
+        if (!area) return;
+        area.innerHTML = '';
+        if (patentChatImages.length === 0 && patentChatFiles.length === 0) {
+            area.style.display = 'none';
+            return;
+        }
+        area.style.display = 'flex';
+        for (let i = 0; i < patentChatImages.length; i++) {
+            var thumb = document.createElement('div');
+            thumb.className = 'image-preview-thumb';
+            var img = document.createElement('img');
+            img.src = patentChatImages[i];
+            var rm = document.createElement('span');
+            rm.className = 'image-preview-remove';
+            rm.textContent = '×';
+            (function(idx) { rm.onclick = function() { patentChatImages.splice(idx, 1); renderPatentChatPreview(); }; })(i);
+            thumb.appendChild(img);
+            thumb.appendChild(rm);
+            area.appendChild(thumb);
+        }
+        for (let j = 0; j < patentChatFiles.length; j++) {
+            var chip = document.createElement('div');
+            chip.style.cssText = 'display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border-radius:6px;background:#161b22;border:1px solid #30363d;color:#c9d1d9;font-size:12px;';
+            var lbl = document.createElement('span');
+            lbl.textContent = '📄 ' + patentChatFiles[j].name + ' (' + patentChatFiles[j].content.length + '字)';
+            var rmF = document.createElement('span');
+            rmF.style.cssText = 'cursor:pointer;color:#f85149;font-weight:bold;';
+            rmF.textContent = '×';
+            (function(idx) { rmF.onclick = function() { patentChatFiles.splice(idx, 1); renderPatentChatPreview(); }; })(j);
+            chip.appendChild(lbl);
+            chip.appendChild(rmF);
+            area.appendChild(chip);
+        }
+    }
+
     async function sendChat() {
         const input = document.getElementById('chat-msg');
-        const msg = input.value.trim();
-        if (!msg) return;
-        if (patentCadController.shouldHandle(msg)) {
+        let msg = input.value.trim();
+        while (patentChatUploading) {
+            await new Promise(function(r) { setTimeout(r, 100); });
+        }
+        var images = patentChatImages.slice();
+        var files = patentChatFiles.slice();
+        if (!msg && images.length === 0 && files.length === 0) return;
+        if (files.length === 0 && images.length === 0 && patentCadController.shouldHandle(msg)) {
             input.value = '';
             await patentCadController.draw(msg);
             return;
         }
+        if (files.length > 0) {
+            var blocks = files.map(function(f) {
+                return '【附件：' + f.name + '】\n' + f.content.slice(0, 12000);
+            }).join('\n\n');
+            msg = msg ? (msg + '\n\n' + blocks) : ('请结合当前专利分析以下附件内容：\n\n' + blocks);
+        }
         input.value = '';
+        patentChatImages = [];
+        patentChatFiles = [];
+        renderPatentChatPreview();
         chatHistory.push(msg);
         if (patentChatSending) {
-            patentChatQueue.enqueue(msg);
+            patentChatQueue.enqueue({ msg: msg, images: images });
             return;
         }
-        await sendPatentChatCore(msg);
+        await sendPatentChatCore(msg, images);
     }
 
-    async function sendPatentChatCore(msg) {
+    async function sendPatentChatCore(msg, images) {
+        images = images || [];
         var box = document.getElementById('chat-messages');
         var userMsgDiv = document.createElement('div');
         userMsgDiv.className = 'msg user';
         userMsgDiv.textContent = msg;
+        for (let i = 0; i < images.length; i++) {
+            var imgEl = document.createElement('img');
+            imgEl.src = images[i];
+            imgEl.style.cssText = 'max-width:120px;max-height:120px;border-radius:4px;margin-top:6px;display:block;';
+            userMsgDiv.appendChild(imgEl);
+        }
         box.appendChild(userMsgDiv);
         patentChatSending = true;
         showPatentStopButton();
         try {
-            await doPatentSend(msg);
+            await doPatentSend(msg, images);
         } finally {
             patentChatSending = false;
             hidePatentStopButton();
             box.scrollTop = box.scrollHeight;
             var next = patentChatQueue.dequeue();
-            if (next) await sendPatentChatCore(next);
+            if (next) {
+                if (typeof next === 'string') await sendPatentChatCore(next, []);
+                else await sendPatentChatCore(next.msg, next.images || []);
+            }
         }
     }
 
-    async function doPatentSend(msg) {
+    async function doPatentSend(msg, images) {
+        images = images || [];
         patentRetryMsg = msg;
         var box = document.getElementById('chat-messages');
         var aiLoadDiv = document.createElement('div');
@@ -421,10 +548,12 @@
         var controller = new AbortController();
         patentAbortController = controller;
         try {
+            var payload = {message: msg, patent_id: '{{id}}', history: patentChatHistory};
+            if (images.length > 0) payload.images = images;
             const resp = await fetch('/api/ai/chat', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({message: msg, patent_id: '{{id}}', history: patentChatHistory}),
+                body: JSON.stringify(payload),
                 signal: controller.signal
             });
             if (!resp.ok) throw new Error('服务器错误 (' + resp.status + ')');
@@ -629,18 +758,67 @@
             }
         });
         if (p.legal_status) {
-            var lbl = document.getElementById('legal-status-label');
-            if (lbl) {
-                var cell = lbl.closest('tr');
-                if (cell) { var td = cell.querySelectorAll('td')[1]; if (td) td.textContent = p.legal_status; }
+            var badge = document.getElementById('legal-status-badge');
+            if (badge) {
+                badge.textContent = p.legal_status;
             }
+            syncManualLegalStatusSelect(p.legal_status);
         }
         // Render patent drawings
         renderImages(p.images, p.pdf_url);
     }
 
+    var currentOriginalPdfUrl = '';
+    var pdfDrawingExtractionAttempted = false;
+
+    function normalizePatentPdfUrl(rawUrl) {
+        var u = (rawUrl || '').trim();
+        if (!u) return '';
+        if (u.indexOf('https://') === 0 || u.indexOf('http://') === 0) return u;
+        if (u.toLowerCase().slice(-4) === '.pdf') {
+            return 'https://patentimages.storage.googleapis.com/' + u.replace(/^\/+/, '');
+        }
+        return '';
+    }
+
+    function updateOriginalPdfButton(pdfUrl) {
+        var norm = normalizePatentPdfUrl(pdfUrl);
+        currentOriginalPdfUrl = norm;
+        var btn = document.getElementById('view-original-pdf-btn');
+        if (btn) {
+            btn.style.display = norm ? '' : 'none';
+        }
+    }
+
+    function openOriginalPatentPdf() {
+        if (!currentOriginalPdfUrl) return;
+        var proxyUrl = '/api/patent/image-proxy?url=' + encodeURIComponent(currentOriginalPdfUrl);
+        window.open(proxyUrl, '_blank', 'noopener');
+    }
+
+    async function extractRealDrawingsFromPdf() {
+        var container = document.getElementById('drawings-container');
+        if (container) {
+            container.innerHTML = '';
+            var loadingP = document.createElement('p');
+            loadingP.style.color = '#58a6ff';
+            loadingP.textContent = '⏳ 正在从专利 PDF 文档提取真实单张附图...';
+            container.appendChild(loadingP);
+        }
+        try {
+            var resp = await fetch('/api/patent/{{id}}/extract-pdf-drawings', { method: 'POST' });
+            var data = await resp.json();
+            if (data.status === 'ok' && Array.isArray(data.images) && data.images.length > 0) {
+                renderImages(data.images, data.pdf_url || currentOriginalPdfUrl);
+                return true;
+            }
+        } catch(e) {}
+        return false;
+    }
+
     function renderImages(imagesJson, pdfUrl) {
         var container = document.getElementById('drawings-container');
+        updateOriginalPdfButton(pdfUrl);
         var images = [];
         try {
             if (typeof imagesJson === 'string' && imagesJson.length > 2) {
@@ -652,6 +830,19 @@
 
         if (images.length === 0) {
             container.innerHTML = '';
+            if (currentOriginalPdfUrl && !pdfDrawingExtractionAttempted) {
+                pdfDrawingExtractionAttempted = true;
+                extractRealDrawingsFromPdf().then(function(ok) {
+                    if (!ok) {
+                        container.innerHTML = '';
+                        var p = document.createElement('p');
+                        p.style.color = '#8b949e';
+                        p.textContent = '暂无已提取的单张附图。可点击上方「加载全文」重试，或点击「查看原版 PDF」辅助浏览。';
+                        container.appendChild(p);
+                    }
+                });
+                return;
+            }
             var noDrawP = document.createElement('p');
             noDrawP.style.color = '#8b949e';
             noDrawP.textContent = '暂无图纸。点击「加载全文」获取。';
@@ -661,16 +852,15 @@
 
         var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">';
         html += '<span style="color:#58a6ff;font-weight:bold;">共 ' + images.length + ' 张图纸</span>';
-        if (pdfUrl) {
-            var pdfProxyUrl = '/api/patent/image-proxy?url=' + encodeURIComponent(pdfUrl);
-            html += '<a href="' + pdfProxyUrl + '" target="_blank" style="color:#58a6ff;text-decoration:none;">📄 下载原始 PDF</a>';
-        }
         html += '</div>';
 
         html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;">';
         images.forEach(function(url, idx) {
-            // Use local proxy to bypass GFW blocking of Google patent images
-            var proxyUrl = '/api/patent/image-proxy?url=' + encodeURIComponent(url);
+            // Data URLs (extracted directly from patent PDF) or local API paths render directly;
+            // external Google patent image URLs go through the local proxy.
+            var proxyUrl = (url.indexOf('data:image/') === 0 || url.indexOf('/api/') === 0)
+                ? url
+                : ('/api/patent/image-proxy?url=' + encodeURIComponent(url));
             html += '<div class="drawing-card" style="background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:8px;text-align:center;">';
             html += '<a href="' + proxyUrl + '" target="_blank">';
             html += '<img src="' + proxyUrl + '" data-orig-url="' + escapeHtml(url) + '" alt="图 ' + (idx + 1) + '" style="max-width:100%;max-height:400px;border-radius:4px;" loading="lazy">';
@@ -728,40 +918,62 @@
             }
 
             if (hasImages) {
-                btn.textContent = '✅ 已加载';
-                btn.style.background = '#238636';
+                setLoadFullButtons('✅ 已加载', '#238636');
             } else {
                 // Still loaded text even without images
                 var descEl = document.querySelector('#tab-description .content-box pre');
                 if (descEl && descEl.textContent.trim().length > 10) {
-                    btn.textContent = '✅ 文本已加载';
-                    btn.style.background = '#238636';
+                    setLoadFullButtons('✅ 文本已加载', '#238636');
                 } else {
-                    btn.textContent = '⚠️ 部分加载';
-                    btn.style.background = '#d29922';
+                    setLoadFullButtons('⚠️ 部分加载', '#d29922');
                 }
             }
         } catch(e) {
-            btn.textContent = '❌ 加载失败';
-            btn.style.background = '#da3633';
+            setLoadFullButtons('❌ 加载失败', '#da3633');
         }
         setTimeout(function() {
             btn.disabled = false;
         }, 3000);
     }
 
+    function setLoadFullButtons(text, bg) {
+        var b1 = document.getElementById('load-full-btn');
+        var b2 = document.getElementById('sb-load-full');
+        if (b1) { b1.textContent = text; if (bg) b1.style.background = bg; }
+        if (b2) { b2.textContent = text; }
+    }
+
+    function syncManualLegalStatusSelect(rawStatus) {
+        var sel = document.getElementById('manual-legal-status-select');
+        if (!sel) return;
+        var s = String(rawStatus || '').toLowerCase();
+        var pn = '{{patent_number}}'.toUpperCase();
+        if (s.includes('expire') || s.includes('失效') || s.includes('届满') || s.includes('终止')) {
+            sel.value = 'Expired';
+        } else if (s.includes('reject') || s.includes('withdraw') || s.includes('驳回') || s.includes('撤回')) {
+            sel.value = 'Rejected';
+        } else if (s.includes('substantive examination') || s.includes('pending') || s.includes('实审') || s.includes('审查中') || (s.includes('publication') && !s.includes('grant') && pn.endsWith('A'))) {
+            sel.value = 'Pending';
+        } else if (s.includes('active') || s.includes('grant') || s.includes('有效') || s.includes('授权') || pn.endsWith('B') || pn.endsWith('U')) {
+            sel.value = 'Active';
+        } else {
+            sel.value = 'Unknown';
+        }
+    }
+
     // Auto-enrich on page load
     (async function() {
         var claimsEl = document.querySelector('#tab-claims .content-box pre');
         var descEl = document.querySelector('#tab-description .content-box pre');
-        var hasInitialImages = false;
+        var hasInitialVisual = false;
         try {
             var initImgs = {{images_json}};
-            hasInitialImages = Array.isArray(initImgs) && initImgs.length > 0;
+            var initPdf = '{{pdf_url}}';
+            hasInitialVisual = (Array.isArray(initImgs) && initImgs.length > 0) || (initPdf && initPdf.trim().length > 10);
         } catch(e) {}
         var needsEnrich = (!claimsEl || claimsEl.textContent.trim().length < 5)
                        || (!descEl || descEl.textContent.trim().length < 5)
-                       || !hasInitialImages;
+                       || !hasInitialVisual;
         if (needsEnrich) {
             var enrichInfo = document.createElement('div');
             enrichInfo.className = 'ai-summary';
@@ -777,8 +989,7 @@
                 if (data.status === 'ok' && data.patent) {
                     applyEnrichedData(data.patent);
                     enrichInfo.textContent = '✅ 全文和图纸加载完成';
-                    document.getElementById('load-full-btn').textContent = '✅ 已加载';
-                    document.getElementById('load-full-btn').style.background = '#238636';
+                    setLoadFullButtons('✅ 已加载', '#238636');
                     setTimeout(function() { enrichInfo.style.display = 'none'; }, 3000);
                 } else {
                     // Try free endpoint as fallback (text only)
@@ -798,8 +1009,7 @@
             }
         } else {
             // Already have full text
-            document.getElementById('load-full-btn').textContent = '✅ 已加载';
-            document.getElementById('load-full-btn').style.background = '#238636';
+            setLoadFullButtons('✅ 已加载', '#238636');
         }
     })();
 
@@ -868,19 +1078,56 @@
         }
     }
 
-    // Claims analysis (generated by aion-forge, refined)
+    var claimsAbortController = null;
+    function cancelAnalyzeClaims() {
+        if (claimsAbortController) {
+            claimsAbortController.abort();
+            claimsAbortController = null;
+        }
+    }
+
+    // Claims analysis (with live elapsed timer + cancel + 60s timeout)
     async function analyzeClaims() {
         var btn = document.getElementById('claims-analyze-btn');
         var result = document.getElementById('claims-analysis-result');
-        btn.textContent = '⏳ 分析中...';
+        if (claimsAbortController) {
+            cancelAnalyzeClaims();
+            return;
+        }
+        var controller = new AbortController();
+        claimsAbortController = controller;
+        var startedAt = Date.now();
+        btn.textContent = '⏳ 分析中 (0s)...';
         btn.disabled = true;
         result.style.display = 'block';
-        result.textContent = '正在分析权利要求...';
+        result.innerHTML = '';
+        var statusSpan = document.createElement('span');
+        statusSpan.style.color = '#58a6ff';
+        statusSpan.textContent = '正在分析权利要求 (0s)... ';
+        var cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'btn-secondary';
+        cancelBtn.style.cssText = 'padding:2px 10px;font-size:12px;margin-left:8px;';
+        cancelBtn.textContent = '取消';
+        cancelBtn.onclick = cancelAnalyzeClaims;
+        result.appendChild(statusSpan);
+        result.appendChild(cancelBtn);
+
+        var timerId = setInterval(function() {
+            var sec = Math.floor((Date.now() - startedAt) / 1000);
+            btn.textContent = '⏳ 分析中 (' + sec + 's)...';
+            statusSpan.textContent = '正在分析权利要求 (' + sec + 's)... ';
+        }, 1000);
+        var timeoutId = setTimeout(function() {
+            if (claimsAbortController === controller) controller.abort();
+        }, 60000);
+
         try {
             var resp = await fetch('/api/ai/claims', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({patent_id: '{{id}}'})
+                body: JSON.stringify({patent_id: '{{id}}'}),
+                signal: controller.signal
             });
             if (!resp.ok) throw new Error('服务器错误 (' + resp.status + ')');
             var data = await resp.json();
@@ -895,13 +1142,19 @@
             }
         } catch(e) {
             var claimCatchSpan = document.createElement('span');
-            claimCatchSpan.style.color = '#f85149';
-            claimCatchSpan.textContent = '❌ 请求失败: ' + e.message;
+            claimCatchSpan.style.color = '#d29922';
+            claimCatchSpan.textContent = (e && e.name === 'AbortError')
+                ? '⚠️ 已取消或分析超时（>60s），请重试或到「设置」检查 AI 模型'
+                : ('❌ 请求失败: ' + e.message);
             result.innerHTML = '';
             result.appendChild(claimCatchSpan);
+        } finally {
+            clearInterval(timerId);
+            clearTimeout(timeoutId);
+            if (claimsAbortController === controller) claimsAbortController = null;
+            btn.textContent = '🔍 分析权利要求';
+            btn.disabled = false;
         }
-        btn.textContent = '🔍 分析权利要求';
-        btn.disabled = false;
     }
 
     // Init
@@ -916,6 +1169,7 @@
       + '</div>'
     );
     applyI18nCommon();
+    syncManualLegalStatusSelect('{{legal_status}}');
     window._onI18nLangChange = window._onI18nLangChange || [];
     window._onI18nLangChange.push(applyDetailI18n);
     loadSimilar();

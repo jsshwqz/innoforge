@@ -227,6 +227,25 @@ Request:
 
 **GET** `/api/patent/enrich/:id`
 
+**GET** `/api/patent/enrich-free/:id`
+
+### 3.1) 从专利 PDF 文档提取真实单张附图 / Extract Real Drawings from Patent PDF
+
+**POST** `/api/patent/:id/extract-pdf-drawings`
+
+从专利关联的官方 PDF（`pdf_url`）中提取真实单张附图（Image XObjects 或 `说明书附图` 专属页），过滤条形码、印章与纯文字页，更新 `patent.images` 并返回提取出的附图 Data URL 列表。
+
+Response:
+
+```json
+{
+  "status": "ok",
+  "count": 5,
+  "images": ["data:image/jpeg;base64,..."],
+  "pdf_url": "https://patentimages.storage.googleapis.com/..."
+}
+```
+
 ### 4) 相似专利推荐 / Similar Patents
 
 **GET** `/api/patent/similar/:id`

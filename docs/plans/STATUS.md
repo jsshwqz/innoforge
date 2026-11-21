@@ -14,6 +14,14 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-11-21 — **专利 PDF 真实单张附图提取、Umi-OCR 统一接入、证据门禁真阻断与裸截断清零（v0.9.64）**
+
+- **状态 / Status**: ✅ 本地全量验证与真实专利 PDF 单张附图提取 / Umi-OCR 实测通过，提交 PR 合入 `main` 并打 `v0.9.64` Tag
+- **① 专利 PDF 文档真实单张附图提取**（`src/pdf_drawings.rs`、`src/routes/patent.rs`、`src/search/enrichment.rs`、`templates/patent_detail.html`）：新增纯 Rust 专利 PDF 真实附图提取引擎与 `POST /api/patent/:id/extract-pdf-drawings`，优先提取 PDF 内真实嵌入图像对象（Image XObjects，过滤小印章/条形码并严格跳过封面文字区、权利要求书与纯文字说明书页），扫描件仅解码并提取末尾 `说明书附图` 专属页附图区；移除 `patent_detail.html` 中用整本 PDF `<iframe>` 顶替图纸页签的假修复，「📑 查看原版 PDF」作为独立辅助按钮。
+- **② 全仓 OCR 统一优先接入 Umi-OCR**（`src/ai/extraction.rs`、`src/routes/upload.rs`）：消除 `upload.rs` 与 `extraction.rs` 两张皮，`extract_ocr` 统一优先调用已配置的 `Umi-OCR`（`UMI_OCR_BASE_URL`），不可达时再回退 `pdftoppm + tesseract`。
+- **③ `finalize.rs` 证据门禁真阻断与 6 处裸截断清零**（`src/pipeline/steps/finalize.rs`、`src/pipeline/steps/provenance.rs`、`src/ai/patent.rs`、`src/routes/ai.rs`、`src/routes/upload.rs`）：`fact_check_rejected` 与 `!allow_decision` 命中时清空 `ctx.decision` 并注入顶层拦截声明；`summarize_patent`、`analyze_claims`、`assess_infringement`、`resolve_compare_item`、`api_ai_compare_matrix`、`resolve_references`、`api_upload_compare` 全部接入 `structured_patent_excerpt`。
+- **④ `:3001` 实测有效修复、规约修补与 6 版实战规划收口**（`AGENTS.md`、`docs/errors.md`、`docs/feedback.md`、`docs/plans/2026-11-21-next-12-versions-roadmap.md`）：合入 `api_serpapi_balance` 异步化与脱敏、跨服务商残留模型纠偏、对话附件/粘贴图片、对比页自动带出引证/相似文献；`AGENTS.md` 新增 `§2.8 工程真实性与熔断铁律` 及强制版本复盘门禁；将后续路线浓缩为 `v0.9.64 ~ v0.9.69` 6 版实战序列。
+
 ### 2026-11-19 — **检索版面/条数对齐、专利图纸代理与 Gemini 实测容灾修复（v0.9.63）**
 
 - **状态 / Status**: ✅ 本地全量验证与 Gemini 真实接口实测通过，提交 PR #242 等 CI 合并进 `main` 并打 `v0.9.63` Tag
