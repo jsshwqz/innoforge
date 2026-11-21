@@ -21,7 +21,7 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
   - `src/routes/settings.rs` & `src/search/providers/serpapi.rs`：`api_serpapi_balance` 移除 `reqwest::blocking` 改用异步客户端并对错误输出脱敏 `api_key`；
   - `src/routes/mod.rs` & `src/routes/idea_ops.rs`：跨服务商残留模型自动纠偏回退，`/api/ai/models` 过滤非对话模型；
   - `templates/ai.html`、`patent_detail.html`、`compare.html`：AI 对话支持 `📎` 附件与粘贴截图、权要分析计时与取消、多专利对比选中主专利自动带出引证/相似对比文献；
-  - `AGENTS.md` 新增 `§2.8 工程真实性与熔断铁律`、`§3.2` `< v1.0` 版本红线与 `Step 7` 强制版本复盘门禁；`docs/errors.md`（#80、#81）与 `docs/feedback.md` 补齐复盘落盘。
+  - `AGENTS.md` 新增 `§2.8 工程真实性与熔断铁律`、`§3.2` `< v1.0` 版本红线与 `Step 7` 强制版本复盘门禁；`docs/errors.md`（Top-15 活索引第 1、2 条）与 `docs/feedback.md` 补齐复盘落盘。
 
 ## [v0.9.63] - 2026-11-19
 
