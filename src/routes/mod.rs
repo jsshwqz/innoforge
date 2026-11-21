@@ -282,14 +282,6 @@ impl AppConfig {
             &self.ai_model_expert
         };
         let mut client = AiClient::with_config(&self.ai_base_url, &api_key, primary_expert);
-        if !self.ai_model.trim().is_empty() && primary_expert.trim() != self.ai_model.trim() {
-            client.add_fallback(
-                &self.ai_base_url,
-                &api_key,
-                &self.ai_model,
-                "primary-model-fallback",
-            );
-        }
         self.add_gemini_model_fallback(&mut client, primary_expert);
         let is_gemini = self.ai_base_url.contains("googleapis");
         if is_gemini && self.gemini_cli_enabled && !self.gemini_cli_path.is_empty() {
@@ -299,7 +291,7 @@ impl AppConfig {
     }
 
     /// 创建使用快速模型的 AI 客户端（用于 Stage A 特征提取等结构化输出任务）。
-    /// 同样在快模型为空或跨源不兼容时直接使用主模型，并自动兜底回退主模型。
+    /// 同样在快模型为空或跨源不兼容时直接使用主模型。
     pub fn ai_client_fast(&self) -> AiClient {
         let api_key = self.effective_api_key();
         let primary_fast = if self.ai_model_fast.trim().is_empty()
@@ -311,14 +303,6 @@ impl AppConfig {
             &self.ai_model_fast
         };
         let mut client = AiClient::with_config(&self.ai_base_url, &api_key, primary_fast);
-        if !self.ai_model.trim().is_empty() && primary_fast.trim() != self.ai_model.trim() {
-            client.add_fallback(
-                &self.ai_base_url,
-                &api_key,
-                &self.ai_model,
-                "primary-model-fallback",
-            );
-        }
         self.add_gemini_model_fallback(&mut client, primary_fast);
         let is_gemini = self.ai_base_url.contains("googleapis");
         if is_gemini && self.gemini_cli_enabled && !self.gemini_cli_path.is_empty() {
