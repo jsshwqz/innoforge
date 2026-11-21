@@ -61,8 +61,8 @@
 </select>
 </div>
 <div class="search-grid-2">
-<input type="date" id="date-from" data-i18n-title="date.from">
-<input type="date" id="date-to" data-i18n-title="date.to">
+<label style="display:flex;align-items:center;gap:6px;margin:0;font-size:12px;color:#8b949e;white-space:nowrap;"><span>起:</span><input type="date" id="date-from" data-i18n-title="date.from" aria-label="开始日期"></label>
+<label style="display:flex;align-items:center;gap:6px;margin:0;font-size:12px;color:#8b949e;white-space:nowrap;"><span>止:</span><input type="date" id="date-to" data-i18n-title="date.to" aria-label="结束日期"></label>
 <select id="page-size" onchange="if (currentRequest) doSearch(1)">
 <option value="10">每页 10 条</option>
 <option value="20" selected>每页 20 条</option>

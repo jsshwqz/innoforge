@@ -980,6 +980,25 @@ pub async fn list_ai_models(
                         } else {
                             raw
                         };
+                        if is_google {
+                            let low = id.to_ascii_lowercase();
+                            if !low.starts_with("gemini-")
+                                || low.contains("tts")
+                                || low.contains("image")
+                                || low.contains("lyria")
+                                || low.contains("transcribe")
+                                || low.contains("robotics")
+                                || low.contains("computer-use")
+                                || low.contains("embedding")
+                                || low.contains("nano-banana")
+                                || low.starts_with("gemini-4-")
+                                || low.starts_with("gemini-3.6-")
+                                || low.starts_with("gemini-3.7-")
+                                || low == "gemini-2.5-flash"
+                            {
+                                return None;
+                            }
+                        }
                         Some(json!({"id": id}))
                     })
                     .collect(),

@@ -508,6 +508,10 @@ pub fn build_router_with_token(
             "/api/patent/enrich-free/:id",
             get(routes::api_enrich_patent_free),
         )
+        .route(
+            "/api/patent/:id/extract-pdf-drawings",
+            post(routes::api_extract_patent_pdf_drawings),
+        )
         .route("/api/patent/pdf/:id", get(routes::api_patent_pdf))
         .route(
             "/api/patent/pdf/extract-text",
@@ -881,7 +885,8 @@ pub fn build_router_with_token(
         )
         .layer(SetResponseHeaderLayer::overriding(
             axum::http::header::X_FRAME_OPTIONS,
-            HeaderValue::from_static("DENY"),
+            // SAMEORIGIN：保持防跨站点击劫持，同时允许同源 <iframe> 内嵌专利原版 PDF 阅览器
+            HeaderValue::from_static("SAMEORIGIN"),
         ))
         .layer(SetResponseHeaderLayer::overriding(
             axum::http::header::X_CONTENT_TYPE_OPTIONS,
@@ -1065,7 +1070,8 @@ pub fn upstream_timeout_secs() -> u64 {
 pub fn build_upstream_client() -> reqwest::Client {
     reqwest::Client::builder()
         // errors.md #74 纪律：上游/外联类客户端显式设连接超时，防代理/死端点悬挂
-        .connect_timeout(std::time::Duration::from_millis(500))
+        // 5s 兼顾死端点快速失败与海外 TLS/代理握手稳定性（500ms 在跨国代理下易误超时）
+        .connect_timeout(std::time::Duration::from_secs(5))
         .timeout(std::time::Duration::from_secs(upstream_timeout_secs()))
         .build()
         // issue #55 收口：builder 失败（TLS 后端初始化）时 expect 明确失败——

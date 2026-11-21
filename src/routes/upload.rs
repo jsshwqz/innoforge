@@ -347,9 +347,9 @@ pub async fn api_upload_compare(
         5. 主要差异点",
         patent.title,
         patent.abstract_text,
-        truncate_for_ai(&patent.claims, 2_000),
+        crate::ai::patent::structured_patent_excerpt(&patent.claims, 30_000),
         file_type_label,
-        truncate_for_ai(&file_content, 3_000)
+        crate::ai::patent::structured_patent_excerpt(&file_content, 30_000)
     );
 
     match ai_client.chat(&prompt, None).await {
@@ -672,7 +672,14 @@ async fn extract_pdf_text(data: &[u8]) -> Result<String, String> {
             }
         }
     }
-    // Step 5: Tesseract OCR (handles scanned/special font PDFs)
+    // Step 5: Umi-OCR 本地离线 OCR（优先调用已配置的 Umi-OCR，高精度中文识别）
+    let data_vec = data.to_vec();
+    if let Ok(text) = extract_pdf_text_umi_ocr(data_vec).await {
+        if !text.trim().is_empty() {
+            return Ok(text);
+        }
+    }
+    // Step 6: Tesseract OCR 回退 (handles scanned/special font PDFs when Umi-OCR is unavailable)
     // §3.3: OCR 是最耗时的阻塞调用，必须用 spawn_blocking 移出异步线程
     {
         let data_vec = data.to_vec();
@@ -688,13 +695,6 @@ async fn extract_pdf_text(data: &[u8]) -> Result<String, String> {
             if !trimmed.is_empty() && !is_error {
                 return Ok(text);
             }
-        }
-    }
-    // Step 6: Umi-OCR 本地离线 OCR（高精度中文识别，替代依赖云端/外部 Python 环境的方案）
-    let data_vec = data.to_vec();
-    if let Ok(text) = extract_pdf_text_umi_ocr(data_vec).await {
-        if !text.trim().is_empty() {
-            return Ok(text);
         }
     }
     // Step 7: MinerU 云端 API（OCR+版面还原，中文专利优化）
@@ -970,12 +970,20 @@ async fn describe_image_with_ai(
 ///
 /// 使用 Umi-OCR 的文档识别接口：
 ///   上传 → 轮询 → 获取结果
-async fn extract_pdf_text_umi_ocr(data: Vec<u8>) -> Result<String, String> {
+pub(crate) async fn extract_pdf_text_umi_ocr(data: Vec<u8>) -> Result<String, String> {
+    let base_url = umi_ocr_base_url();
+    extract_pdf_text_umi_ocr_with_base_url(data, &base_url).await
+}
+
+pub(crate) async fn extract_pdf_text_umi_ocr_with_base_url(
+    data: Vec<u8>,
+    base_url: &str,
+) -> Result<String, String> {
     // Probe Umi-OCR reachability before attempting the full 120s workflow.
     // If the service is not running, return immediately with a helpful message
     // instead of waiting for the HTTP timeout.
-    let base_url = umi_ocr_base_url();
-    let probe_addr = probe_addr_for(&base_url);
+    let base_url = base_url.trim().trim_end_matches('/');
+    let probe_addr = probe_addr_for(base_url);
     let probe = tokio::time::timeout(
         Duration::from_secs(2),
         tokio::net::TcpStream::connect(probe_addr),

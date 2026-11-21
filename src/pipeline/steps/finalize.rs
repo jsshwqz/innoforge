@@ -28,12 +28,29 @@ pub async fn execute(ctx: &mut PipelineContext, db: &Arc<Database>) -> Result<()
     // MB1: 幻觉防线——事实校验（在 ai_analysis 确定后、provenance 之前执行）
     super::fact_check::run_fact_check(ctx);
     if ctx.fact_check_rejected {
-        tracing::warn!("Fact check rejected: score below threshold");
+        let fc_score = ctx
+            .fact_check_report
+            .as_ref()
+            .map(|r| r.score)
+            .unwrap_or(0.0);
+        tracing::warn!(
+            "Fact check rejected: score={:.1} below threshold — suppressing decision output",
+            fc_score
+        );
+        ctx.decision = None;
+        let block_banner = format!(
+            "> ⚠️ **【证据与事实核验门禁拦截声明】**：本轮分析未通过确定性事实核验（核验得分：{:.0}/100），\
+             系统已硬性阻断正面立项/专利申请决策建议。请重点核查下方标记为 `【未证实】`、`【无原文支撑】` 或 `【修改超范围】` 的条目并补充真实对比文献原文。\n\n",
+            fc_score
+        );
+        if !ctx.ai_analysis.contains("【证据与事实核验门禁拦截声明】") {
+            ctx.ai_analysis = format!("{block_banner}{}", ctx.ai_analysis);
+        }
     }
 
     // EK-v2: 证据核验内核（docs/design/evidence-kernel-v2.md）。
     // 逐句绑定证据：未支撑断言降级标注【未证实】；报告追加到 ai_analysis 尾部；
-    // 决策门（grounding < 0.5 或证据不足）抑制申请/放弃/转向建议。
+    // 决策门（grounding < 0.5 或证据不足或事实核验被拒）抑制申请/放弃/转向建议。
     let corpus = crate::evidence_kernel::corpus_from_chunks(&ctx.rag_chunks);
     let (kernel_report, kernel_text) =
         crate::evidence_kernel::run_kernel(&ctx.ai_analysis, &corpus);
@@ -41,10 +58,13 @@ pub async fn execute(ctx: &mut PipelineContext, db: &Arc<Database>) -> Result<()
         ctx.ai_analysis = kernel_text;
     }
     ctx.kernel_report = serde_json::to_string(&kernel_report).ok();
-    let allow_decision = !crate::evidence_kernel::should_suppress_decision(&kernel_report);
+    let ek_suppressed = crate::evidence_kernel::should_suppress_decision(&kernel_report);
+    let allow_decision = !ctx.fact_check_rejected && !ek_suppressed;
     if !allow_decision {
+        ctx.decision = None;
         tracing::warn!(
-            "EK-v2 decision gate: status={:?} grounding={:.2} — 决策建议被抑制",
+            "Decision gate blocked: fact_check_rejected={} ek_status={:?} grounding={:.2} — 决策建议被抑制",
+            ctx.fact_check_rejected,
             kernel_report.status,
             kernel_report.rubric.grounding
         );
@@ -459,5 +479,47 @@ mod tests {
             Some("FinalizeDeliverables")
         );
         assert!(journal_entry.content.contains("防破新颖性安全锁"));
+    }
+
+    #[tokio::test]
+    async fn finalize_blocks_decision_and_injects_banner_when_fact_check_rejected() {
+        let db = Arc::new(Database::init(":memory:").expect("in-memory db"));
+        let mut ctx = PipelineContext::new(
+            "idea-fin-reject",
+            "固态电池隔热片",
+            "采用气凝胶与相变层复合隔热",
+        );
+        // 构造触发 C12 致命禁令（"属于常规设计"）与虚构段落引用的分析文本，必然触发 fact_check_rejected = true
+        ctx.top_matches.push(crate::pipeline::context::RankedMatch {
+            source_id: "CN001".to_string(),
+            source_title: "对比文件1".to_string(),
+            source_type: "patent".to_string(),
+            source_url: String::new(),
+            snippet: "[0001] 简短现有技术摘要。".to_string(),
+            combined_score: 0.8,
+            ..Default::default()
+        });
+        ctx.ai_analysis =
+            "该区别特征属于常规设计，且对比文件1第[9999]段、第[8888]段记载效率提升99.9%。"
+                .to_string();
+
+        execute(&mut ctx, &db).await.expect("finalize execute");
+
+        assert!(
+            ctx.fact_check_rejected,
+            "Fabricated citations without backing evidence must trigger fact_check_rejected"
+        );
+        assert!(
+            ctx.decision.is_none(),
+            "Decision recommendation must be suppressed (None) when fact_check_rejected is true"
+        );
+        assert!(
+            ctx.ai_analysis.contains("【证据与事实核验门禁拦截声明】"),
+            "Blocking banner must be injected into ai_analysis when fact check fails"
+        );
+        assert!(
+            ctx.ai_analysis.contains("本次不输出申请/放弃/转向建议"),
+            "Decision section must explicitly state that recommendations are suppressed"
+        );
     }
 }

@@ -39,7 +39,11 @@
                     <button class="btn-remove" onclick="removeRef(this)" title="移除">&times;</button>
                 </div>
             </div>
-            <button class="btn-add" onclick="addRef()" id="btn-add-ref">+ 添加对比文件</button>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px;">
+                <button class="btn-add" onclick="addRef()" id="btn-add-ref" style="margin-top:0;">+ 添加对比文件</button>
+                <button class="btn-add" onclick="autoFetchRefs()" id="btn-auto-ref" style="margin-top:0;border-color:#58a6ff;color:#58a6ff;">🔍 自动获取引证/相似对比文件</button>
+                <span id="auto-ref-hint" style="font-size:12px;color:#8b949e;"></span>
+            </div>
         </div>
 
         <!-- Office Action (审查意见书) -->
@@ -686,13 +690,106 @@
     renderSidebar();
     applyI18nCommon();
 
-    // Pre-fill from URL params (e.g. ?patent=CN900000001A)
+    var prefilledPatentId = '';
+
+    async function autoFetchRefs(targetIdOrNum) {
+        var hintEl = document.getElementById('auto-ref-hint');
+        var myVal = (document.getElementById('my-patent') || {}).value || '';
+        var key = (targetIdOrNum || prefilledPatentId || myVal).trim();
+        if (!key) {
+            if (hintEl) hintEl.textContent = '请先填写「我的专利」再自动获取对比文件';
+            return;
+        }
+        if (hintEl) {
+            hintEl.style.color = '#58a6ff';
+            hintEl.textContent = '⏳ 正在自动获取引证与相似对比文件...';
+        }
+        var found = [];
+        var seen = new Set([myVal.trim().toUpperCase(), key.toUpperCase()]);
+        function pushCandidate(num, title, sourceLabel) {
+            var clean = (num || '').trim();
+            if (!clean) return;
+            var up = clean.toUpperCase();
+            if (seen.has(up) || found.length >= 3) return;
+            seen.add(up);
+            found.push({ num: clean, title: (title || '').trim(), source: sourceLabel || '推荐' });
+        }
+        try {
+            // 1. 优先拉取引文/同族图谱
+            var cgResp = await fetch('/api/patent/' + encodeURIComponent(key) + '/citation-graph');
+            if (cgResp.ok) {
+                var cg = await cgResp.json();
+                var nodes = (cg && cg.nodes) || [];
+                for (let i = 0; i < nodes.length; i++) {
+                    if (nodes[i] && nodes[i].relation && nodes[i].relation !== 'root') {
+                        pushCandidate(nodes[i].patent_number || nodes[i].id, nodes[i].title, '引证');
+                    }
+                }
+            }
+        } catch (e) {}
+        try {
+            // 2. 补充本地库相似专利推荐
+            if (found.length < 3) {
+                var simResp = await fetch('/api/patent/similar/' + encodeURIComponent(key));
+                if (simResp.ok) {
+                    var sim = await simResp.json();
+                    var list = (sim && sim.similar) || [];
+                    for (let i = 0; i < list.length; i++) {
+                        pushCandidate(list[i].patent_number || list[i].id, list[i].title, '相似');
+                    }
+                }
+            }
+        } catch (e) {}
+
+        if (found.length === 0) {
+            if (hintEl) {
+                hintEl.style.color = '#d29922';
+                hintEl.textContent = '未在本地库找到引证/相似专利，请手动输入专利号或上传对比文件';
+            }
+            return;
+        }
+
+        // 填入 #ref-list 并附带标题与来源标签
+        var refList = document.getElementById('ref-list');
+        while (refList.querySelectorAll('.ref-row').length < found.length) {
+            addRef();
+        }
+        var rows = refList.querySelectorAll('.ref-row');
+        for (let i = 0; i < found.length; i++) {
+            var inp = rows[i].querySelector('.ref-input');
+            if (inp && !inp.disabled) {
+                inp.value = found[i].num;
+                if (found[i].title) {
+                    inp.title = '[' + found[i].source + '] ' + found[i].title;
+                }
+            }
+            var oldMeta = rows[i].querySelector('.ref-auto-meta');
+            if (oldMeta) oldMeta.remove();
+            if (found[i].title) {
+                var meta = document.createElement('span');
+                meta.className = 'ref-auto-meta';
+                meta.style.cssText = 'font-size:12px;color:#8b949e;margin-left:6px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;';
+                meta.textContent = '📌 [' + found[i].source + '] ' + found[i].title;
+                meta.title = found[i].title;
+                rows[i].appendChild(meta);
+            }
+        }
+        if (hintEl) {
+            hintEl.style.color = '#3fb950';
+            hintEl.textContent = '✅ 已自动带入 ' + found.length + ' 篇引证/相似对比文件，可直接点击下方对比按钮';
+        }
+    }
+
+    // Pre-fill from URL params (e.g. ?patent=CN900000001A&id=...)
     (function() {
         var params = new URLSearchParams(window.location.search);
         var patent = params.get('patent');
+        var pid = params.get('id');
+        if (pid) prefilledPatentId = pid;
         if (patent) {
             var myInput = document.getElementById('my-patent');
             if (myInput) myInput.value = patent;
+            autoFetchRefs(pid || patent);
         }
     })();
 

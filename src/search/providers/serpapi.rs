@@ -129,8 +129,8 @@ impl SerpApiProvider {
     /// 客户端构造：超时 15s（MA6a 收紧，见 `UPSTREAM_TIMEOUT_SECS` 注释），builder 失败时退回默认客户端。
     fn client() -> reqwest::Client {
         reqwest::Client::builder()
-            // errors.md #74 纪律：上游/外联类客户端显式设连接超时
-            .connect_timeout(Duration::from_millis(500))
+            // errors.md #74 纪律：上游/外联类客户端显式设连接超时（5s 兼顾死端点快速失败与跨国 TLS 握手）
+            .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(UPSTREAM_TIMEOUT_SECS))
             .build()
             .expect("上游 HTTP 客户端构建失败（TLS 后端初始化）——禁止静默退回无超时客户端，见 issue #55")
@@ -354,9 +354,13 @@ impl SearchProvider for SerpApiProvider {
                     }
                 }
                 Err(e) => {
-                    println!("[ONLINE] SerpAPI request error: {}", e);
-                    hint = Some(format!("SerpAPI 请求异常：{}，已自动尝试下游回退。", e));
-                    error_note = Some(format!("请求 SerpAPI 上游失败（网络/超时）：{}", e));
+                    let safe_err = e.to_string().replace(&self.api_key, "***");
+                    println!("[ONLINE] SerpAPI request error: {}", safe_err);
+                    hint = Some(format!(
+                        "SerpAPI 请求异常：{}，已自动尝试下游回退。",
+                        safe_err
+                    ));
+                    error_note = Some(format!("请求 SerpAPI 上游失败（网络/超时）：{}", safe_err));
                     status = AttemptStatus::Failed(FailKind::Network);
                 }
             }

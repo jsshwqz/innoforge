@@ -136,14 +136,14 @@ impl AiClient {
             "请对以下专利进行全面分析摘要：\n\n\
              标题：{patent_title}\n\n\
              摘要：{abstract_text}\n\n\
-             权利要求（前部分）：{claims_preview}\n\n\
+             权利要求全文：{claims_preview}\n\n\
              请从以下几个方面分析：\n\
              1. 技术领域\n\
              2. 核心技术方案\n\
              3. 创新点\n\
              4. 应用场景\n\
              5. 关键权利要求解读",
-            claims_preview = crate::ai::client::truncate_for_ai(claims, 2000)
+            claims_preview = structured_patent_excerpt(claims, 20_000)
         );
         self.chat(&prompt, None).await
     }
@@ -168,7 +168,7 @@ impl AiClient {
              提取最核心的限定性技术特征（决定保护范围的关键要素）\n\n\
              ### 5. 保护强度评估\n\
              综合评估该专利权利要求的保护强度（强/中/弱），并说明原因",
-            claims_text = crate::ai::client::truncate_for_ai(claims, 4000)
+            claims_text = structured_patent_excerpt(claims, 50_000)
         );
 
         let messages = vec![
@@ -213,8 +213,8 @@ impl AiClient {
              3. 具体的规避设计建议\n\n\
              ### 综合建议\n\
              整体风险评估和应对策略建议",
-            product = crate::ai::client::truncate_for_ai(product_description, 2000),
-            patents = crate::ai::client::truncate_for_ai(patents_info, 4000),
+            product = structured_patent_excerpt(product_description, 20_000),
+            patents = structured_patent_excerpt(patents_info, 30_000),
         );
 
         let messages = vec![

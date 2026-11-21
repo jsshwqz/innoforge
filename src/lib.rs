@@ -19,6 +19,7 @@ mod experiment;
 mod oa_deadline;
 pub mod orchestrator;
 pub mod patent;
+pub mod pdf_drawings;
 pub mod pipeline;
 pub mod rag;
 mod routes;

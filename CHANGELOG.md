@@ -4,7 +4,24 @@
 All notable changes are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
-## [Unreleased]
+## [v0.9.64] - 2026-11-21
+
+### 修复与增强 / Fixed & Enhanced
+
+- **专利 PDF 文档真实单张附图提取（彻底根治拿整本 PDF 套 iframe 或全页转图充数）**：
+  - 新增 `src/pdf_drawings.rs` 与 `POST /api/patent/:id/extract-pdf-drawings`（并在 `enrich_patent_free` / `api_enrich_patent` 中自动触发）：优先从 PDF 页面资源字典提取真实嵌入的图像对象（`Subtype /Image`，支持 `/DCTDecode` JPEG 与 `/FlateDecode` 位图转 PNG），按尺寸、像素面积与长宽比过滤顶部条形码、二维码、印章与微小符号，并严格排除封面文字区、`权利要求书` 及纯文字 `说明书` 页；对无文本层扫描件 PDF（含 `/CCITTFaxDecode` Group 4 传真流）在纯 Rust 中解码位图并通过文字行周期密度剔除文字页，仅提取末尾 `说明书附图` 专属页附图区；
+  - `templates/patent_detail.html` 移除用整本 PDF `<iframe>` 顶替图纸页签的应付逻辑，「📑 查看原版 PDF」作为标题栏独立辅助按钮存在；
+  - 新增“权利要求书纯文字页 + 纯文字说明书页 + 说明书附图页 + 小尺寸印章”合成 PDF 反作弊单测（`anti_cheat_pdf_drawing_extractor_excludes_text_pages_and_stamps`）。
+- **全仓 OCR 通道统一优先接入 Umi-OCR（根治 `upload.rs` 与 `extraction.rs` 两张皮）**：
+  - `src/ai/extraction.rs` 的 `extract_ocr` 与 `src/routes/upload.rs` 统一优先调用已配置的 `Umi-OCR`（`UMI_OCR_BASE_URL`，默认 `http://127.0.0.1:1224`），仅在 `Umi-OCR` 不可达时回退 `pdftoppm + tesseract`。
+- **`finalize.rs` 证据与事实核验门禁真阻断 + 剩余 6 处裸截断清零**：
+  - `src/pipeline/steps/finalize.rs` 与 `provenance.rs`：当 `fact_check_rejected` 或 `should_suppress_decision(&kernel_report)` 命中时，不再仅打 `tracing::warn!`，而是清空 `ctx.decision`、抑制正面申请/放弃/转向结论并在报告顶部注入显式 `【证据与事实核验门禁拦截声明】`；
+  - `src/ai/patent.rs`（`summarize_patent`、`analyze_claims`、`assess_infringement`）、`src/routes/ai.rs`（`resolve_compare_item`、`api_ai_compare_matrix`、`resolve_references`）与 `src/routes/upload.rs`（`api_upload_compare`）剩余裸 `truncate_for_ai` 硬截断全部升级为 `structured_patent_excerpt`（100% 保留权利要求全文 + 说明书关键实施例选段）。
+- **`:3001` 实测有效修复合入与规约/复盘沉淀**：
+  - `src/routes/settings.rs` & `src/search/providers/serpapi.rs`：`api_serpapi_balance` 移除 `reqwest::blocking` 改用异步客户端并对错误输出脱敏 `api_key`；
+  - `src/routes/mod.rs` & `src/routes/idea_ops.rs`：跨服务商残留模型自动纠偏回退，`/api/ai/models` 过滤非对话模型；
+  - `templates/ai.html`、`patent_detail.html`、`compare.html`：AI 对话支持 `📎` 附件与粘贴截图、权要分析计时与取消、多专利对比选中主专利自动带出引证/相似对比文献；
+  - `AGENTS.md` 新增 `§2.8 工程真实性与熔断铁律`、`§3.2` `< v1.0` 版本红线与 `Step 7` 强制版本复盘门禁；`docs/errors.md`（Top-15 活索引第 1、2 条）与 `docs/feedback.md` 补齐复盘落盘。
 
 ## [v0.9.63] - 2026-11-19
 

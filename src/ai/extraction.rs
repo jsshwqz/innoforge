@@ -1,11 +1,6 @@
-//! C0 文本提取质量门 / Text Extraction Quality Gate
-//!
-//! 任何 PDF 进来，先试文本层提取（poppler/pdftotext），检测到文本层存在就用文本层；
-//! 只有检测到无文本层（扫描件/图片件）才回退 OCR。
-//!
-//! 输出必须带提取方式标记（TextLayer / OcrFallback / ImageOnlyEmpty）。
-//! OCR_FALLBACK 的文本在 C1/C2/C11 这类计数断言前必须标红提示风险。
-//! C0 是 C1-C13 的前置依赖：输入脏了下游计数全错。
+//! 模块职责：C0 PDF 文本提取质量门（优先文本层提取，无文本层扫描件自动回退 OCR 并输出 `ExtractionMethod` 标记）。
+//! 上游调用者：OA/复审材料解析与证据核验管线（`src/ai/`、`src/routes/`）。
+//! 模块专属禁区：OCR 回退严禁另起炉灶仅硬编码调 `pdftoppm + tesseract`，必须统一优先调用已配置的 `Umi-OCR`（`UMI_OCR_BASE_URL`），仅在 `Umi-OCR` 不可达时回退命令行工具。
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -222,10 +217,65 @@ fn extract_text_layer(pdf_path: &Path) -> Result<String, ExtractionError> {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-//  OCR 回退提取
+//  OCR 回退提取（统一优先调用 Umi-OCR，不可达时再回退 pdftoppm + tesseract）
 // ═══════════════════════════════════════════════════════════════════════
 
-fn extract_ocr(pdf_path: &Path, _n_pages: usize) -> Result<String, ExtractionError> {
+fn try_extract_ocr_via_umi_base_url(pdf_path: &Path, umi_base_url: &str) -> Result<String, String> {
+    let data = std::fs::read(pdf_path).map_err(|e| format!("读取 PDF 失败: {e}"))?;
+    let base_url = umi_base_url.to_string();
+
+    // 在独立操作系统线程中启动轻量 Tokio current_thread 运行时调用公共异步 Umi-OCR 通道：
+    // 既避免引入 reqwest::blocking，也防止在已有 Tokio 上下文内 block_on 触发 panic。
+    let join_res = std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| format!("创建 Umi-OCR 运行时失败: {e}"))?;
+        rt.block_on(crate::routes::extract_pdf_text_umi_ocr_with_base_url(
+            data, &base_url,
+        ))
+    })
+    .join();
+
+    match join_res {
+        Ok(res) => res,
+        Err(_) => Err("Umi-OCR 线程异常终止".to_string()),
+    }
+}
+
+fn extract_ocr(pdf_path: &Path, n_pages: usize) -> Result<String, ExtractionError> {
+    let umi_base = crate::routes::umi_ocr_base_url();
+    extract_ocr_with_umi_base_url(pdf_path, n_pages, &umi_base)
+}
+
+fn extract_ocr_with_umi_base_url(
+    pdf_path: &Path,
+    _n_pages: usize,
+    umi_base_url: &str,
+) -> Result<String, ExtractionError> {
+    // Step 1: 统一优先尝试已配置的 Umi-OCR（UMI_OCR_BASE_URL，默认 http://127.0.0.1:1224）
+    match try_extract_ocr_via_umi_base_url(pdf_path, umi_base_url) {
+        Ok(text) if !text.trim().is_empty() => {
+            tracing::info!(
+                "[extraction::extract_ocr] Umi-OCR 识别成功，提取 {} 字符",
+                text.len()
+            );
+            return Ok(text);
+        }
+        Ok(_) => {
+            tracing::warn!(
+                "[extraction::extract_ocr] Umi-OCR 返回空文本，回退 pdftoppm + tesseract"
+            );
+        }
+        Err(err) => {
+            tracing::info!(
+                "[extraction::extract_ocr] Umi-OCR 不可用 ({})，回退 pdftoppm + tesseract",
+                err
+            );
+        }
+    }
+
+    // Step 2: Umi-OCR 未运行或失败时，回退本地 pdftoppm + tesseract 命令行工具
     let temp_dir = std::env::temp_dir().join(format!(
         "innoforge_ocr_{}",
         std::time::SystemTime::now()
@@ -831,5 +881,69 @@ mod tests {
         let input = "他说\u{201C}你好\u{201D}世界";
         let result = normalize_text(input);
         assert_eq!(result, "他说\"你好\"世界");
+    }
+
+    #[test]
+    fn test_extract_ocr_prioritizes_umi_ocr_when_available() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        // 绑定本机临时端口模拟 Umi-OCR 服务（探活 + /api/doc/upload + /api/doc/result + /api/doc/clear）
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock umi-ocr");
+        let addr = listener.local_addr().expect("local addr");
+        let base_url = format!("http://{addr}");
+
+        let server_thread = std::thread::spawn(move || {
+            for _ in 0..6 {
+                let Ok((mut stream, _)) = listener.accept() else {
+                    break;
+                };
+                let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(800)));
+                let mut buf = [0u8; 4096];
+                let n = stream.read(&mut buf).unwrap_or(0);
+                if n == 0 {
+                    // TCP 探活连接
+                    continue;
+                }
+                let head: Vec<u8> = buf.iter().copied().take(n).collect();
+                let req_str = String::from_utf8_lossy(&head);
+                let first_line = req_str.lines().next().unwrap_or("");
+                let body_json = if first_line.contains("/api/doc/upload") {
+                    // 消费可能残余的 multipart 请求体
+                    let mut drain = [0u8; 4096];
+                    while let Ok(k) = stream.read(&mut drain) {
+                        if k < drain.len() {
+                            break;
+                        }
+                    }
+                    r#"{"code":100,"data":"mock-task-001"}"#
+                } else if first_line.contains("/api/doc/result") {
+                    r#"{"code":100,"is_done":true,"state":"success","data":"Umi-OCR识别出的专利扫描件正文：权利要求1、一种具有隔热结构的电池模组。"}"#
+                } else {
+                    r#"{"code":100}"#
+                };
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body_json.len(),
+                    body_json
+                );
+                let _ = stream.write_all(resp.as_bytes());
+                let _ = stream.flush();
+                if first_line.contains("/api/doc/clear") {
+                    break;
+                }
+            }
+        });
+
+        let tmp_file = tempfile::NamedTempFile::new().expect("temp pdf");
+        std::fs::write(tmp_file.path(), b"%PDF-1.4\n%mock scanned pdf\n%%EOF").expect("write pdf");
+
+        let extracted = extract_ocr_with_umi_base_url(tmp_file.path(), 1, &base_url)
+            .expect("Umi-OCR should succeed without needing pdftoppm or tesseract");
+        assert!(
+            extracted.contains("Umi-OCR识别出的专利扫描件正文"),
+            "Expected Umi-OCR output, got: {extracted}"
+        );
+        let _ = server_thread.join();
     }
 }
