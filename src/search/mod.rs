@@ -38,7 +38,9 @@
 pub mod agent;
 pub mod breaker;
 pub mod chain;
+pub mod craap;
 pub mod enrichment;
+pub mod ipc_anchor;
 pub mod merge;
 pub mod model;
 pub mod provider;

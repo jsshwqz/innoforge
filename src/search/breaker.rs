@@ -78,6 +78,8 @@ pub fn cooldown_duration(source: SourceKind, fail: FailKind) -> Option<Duration>
         }
         (SourceKind::EpoOps, FailKind::Quota) => Some(EPO_QUOTA_COOLDOWN),
         (SourceKind::EpoOps, FailKind::Auth) => Some(EPO_AUTH_COOLDOWN),
+        (SourceKind::SemanticScholar, FailKind::Quota | FailKind::Auth) => Some(XHR_QUOTA_COOLDOWN),
+        (SourceKind::PubMed, FailKind::Quota | FailKind::Auth) => Some(XHR_QUOTA_COOLDOWN),
         (SourceKind::LocalFts, _) => None,
         // cools_down 只有 Quota/Auth 两个 true 值，上面已穷举；此臂恒不可达，
         // 但不写 panic/unwrap（规约 2.7），返回 None 即「宁可不冷却也不炸链」。

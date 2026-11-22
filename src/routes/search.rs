@@ -8,6 +8,8 @@ use crate::patent::*;
 // MA2b：链尾追加 EPO OPS 英文域补源（规格书 §4），同样「未配 Key 即不登记」。
 use crate::search::breaker::{self, CooldownTable};
 use crate::search::chain::SourceChain;
+use crate::search::craap;
+use crate::search::ipc_anchor;
 use crate::search::merge::{dedup_patent_summaries, sort_by_relevance};
 use crate::search::model::{
     report_excerpt, AttemptReport, AttemptStatus, FailKind, Lang, SearchOutcome, SearchQuery,
@@ -17,6 +19,8 @@ use crate::search::provider::SearchProvider;
 use crate::search::providers::epo_ops::EpoOpsProvider;
 use crate::search::providers::google_patents_xhr::GooglePatentsXhrProvider;
 use crate::search::providers::openalex::OpenAlexProvider;
+use crate::search::providers::pubmed::PubMedProvider;
+use crate::search::providers::semantic_scholar::SemanticScholarProvider;
 use crate::search::providers::serpapi::{exact_lookup_response, SerpApiProvider};
 use crate::search::query::resolve_lang_with_explicit;
 use axum::{
@@ -238,8 +242,10 @@ fn online_chain_providers(
         ))),
         None => println!("[ONLINE] No EPO_KEY/EPO_SECRET configured, skipping epo_ops"),
     }
-    // 免 Key 学术文献补充源，恒登记链尾（Batch 1 任务 1.5）。
+    // 免 Key 学术文献补充源，恒登记链尾（OpenAlex + v0.9.67 Semantic Scholar + PubMed）。
     providers.push(Arc::new(OpenAlexProvider::new(db.clone())));
+    providers.push(Arc::new(SemanticScholarProvider::new(db.clone())));
+    providers.push(Arc::new(PubMedProvider::new(db.clone())));
     providers
 }
 
@@ -1104,6 +1110,59 @@ pub async fn api_search_online(
             }
         }
         apply_online_sort(&mut patents, req.sort_by.as_deref());
+        // v0.9.67: IPC 子空间自动锚定 + 锁定前缀跨领域去噪 + CRAAP 五维评分与多源互证
+        let locked_ipcs = ipc_anchor::parse_locked_ipc_prefixes(req.ipc.as_deref());
+        let mut observed_ipcs: Vec<String> = Vec::new();
+        let mut extra_corr_keys: Vec<(String, String)> = Vec::new();
+        for p in &patents {
+            if let Ok(Some(full_p)) = s.db.get_patent(&p.patent_number) {
+                if !full_p.ipc_codes.trim().is_empty() {
+                    observed_ipcs.push(full_p.ipc_codes.clone());
+                }
+                if !full_p.source.is_empty() && full_p.source != winner.as_str() {
+                    let key = craap::canonical_corroboration_key(&p.patent_number, &p.title);
+                    extra_corr_keys.push((full_p.source, key));
+                }
+            }
+        }
+        let ipc_anchors = ipc_anchor::derive_ipc_anchors(&search_query.keyword, &observed_ipcs, 3);
+        let mut ipc_filtered_count = 0usize;
+        if !locked_ipcs.is_empty() {
+            let mut kept_patents = Vec::with_capacity(patents.len());
+            let mut kept_reasons = Vec::with_capacity(rerank_reasons.len());
+            let mut kept_origin = Vec::with_capacity(patent_origin.len());
+            for (i, p) in patents.into_iter().enumerate() {
+                let ipc_blob =
+                    s.db.get_patent(&p.patent_number)
+                        .ok()
+                        .flatten()
+                        .map(|fp| fp.ipc_codes)
+                        .unwrap_or_default();
+                let text = format!("{} {}", p.title, p.abstract_text);
+                if ipc_anchor::matches_locked_ipc_subspace(&ipc_blob, &text, &locked_ipcs) {
+                    kept_patents.push(p);
+                    kept_reasons.push(rerank_reasons.get(i).cloned().flatten());
+                    kept_origin.push(patent_origin.get(i).copied().unwrap_or(i));
+                } else {
+                    ipc_filtered_count += 1;
+                }
+            }
+            patents = kept_patents;
+            rerank_reasons = kept_reasons;
+            patent_origin = kept_origin;
+        }
+        let current_year = chrono::Utc::now()
+            .format("%Y")
+            .to_string()
+            .parse::<i32>()
+            .unwrap_or(2026);
+        let craap_scores = craap::score_batch_with_corroboration(
+            &patents,
+            winner.as_str(),
+            &extra_corr_keys,
+            current_year,
+        );
+
         let gated_count = patents.len();
         let paginated = matches!(winner, SourceKind::SerpApi | SourceKind::EpoOps);
         let (total, upstream_total) = if paginated {
@@ -1153,7 +1212,10 @@ pub async fn api_search_online(
             "page": req.page,
             "page_size": effective_size,
             "source": winner.as_str(),
-            "attempts": attempts_json(&outcome)
+            "attempts": attempts_json(&outcome),
+            "ipc_anchors": ipc_anchors,
+            "ipc_filtered_count": ipc_filtered_count,
+            "craap_scores": craap_scores
         });
         if let Some(up) = upstream_total {
             if up > gated_count {
@@ -1454,10 +1516,13 @@ pub async fn api_search_vector(
         sorted
     };
 
-    // 按规范专利号（回退标题）做专利级聚合去重，并计算诚实校准相关度与真实命中片段
+    // 按规范专利号（回退标题）做专利级聚合去重，并计算诚实校准相关度、IPC 子空间过滤与 CRAAP 五维评分
+    let locked_ipcs = ipc_anchor::parse_locked_ipc_prefixes(req["ipc"].as_str());
     let mut seen_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut dedup_removed = 0usize;
-    let mut scored_candidates: Vec<(f64, serde_json::Value)> = Vec::new();
+    let mut ipc_filtered_count = 0usize;
+    let mut observed_ipcs: Vec<String> = Vec::new();
+    let mut scored_candidates: Vec<(f64, serde_json::Value, PatentSummary)> = Vec::new();
 
     for (id, fused_score) in fused {
         let Ok(Some(patent)) = s.db.get_patent(&id) else {
@@ -1474,6 +1539,20 @@ pub async fn api_search_vector(
         if !dedup_key.is_empty() && !seen_keys.insert(dedup_key) {
             dedup_removed += 1;
             continue;
+        }
+        if !patent.ipc_codes.trim().is_empty() {
+            observed_ipcs.push(patent.ipc_codes.clone());
+        }
+        if !locked_ipcs.is_empty() {
+            let text_probe = format!("{} {}", patent.title, patent.abstract_text);
+            if !ipc_anchor::matches_locked_ipc_subspace(
+                &patent.ipc_codes,
+                &text_probe,
+                &locked_ipcs,
+            ) {
+                ipc_filtered_count += 1;
+                continue;
+            }
         }
 
         let vec_sim = vector_score_map.get(&id).copied().unwrap_or(0.0);
@@ -1541,6 +1620,19 @@ pub async fn api_search_vector(
         };
 
         let rank_key = calibrated_score + fused_score * 50.0;
+        let summary_for_craap = PatentSummary {
+            id: patent.id.clone(),
+            patent_number: patent.patent_number.clone(),
+            title: patent.title.clone(),
+            abstract_text: patent.abstract_text.clone(),
+            applicant: patent.applicant.clone(),
+            inventor: patent.inventor.clone(),
+            filing_date: patent.filing_date.clone(),
+            country: patent.country.clone(),
+            relevance_score: Some(calibrated_score),
+            score_source: Some(score_source.clone()),
+            matched_fields: None,
+        };
         scored_candidates.push((
             rank_key,
             json!({
@@ -1561,15 +1653,26 @@ pub async fn api_search_vector(
                 "matched_snippet": matched_snippet,
                 "score_source": score_source,
             }),
+            summary_for_craap,
         ));
     }
 
     scored_candidates.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-    let top_patents: Vec<serde_json::Value> = scored_candidates
-        .into_iter()
-        .take(limit)
-        .map(|(_, v)| v)
-        .collect();
+    let mut top_patents: Vec<serde_json::Value> = Vec::new();
+    let mut top_summaries: Vec<PatentSummary> = Vec::new();
+    for (_, val, sum) in scored_candidates.into_iter().take(limit) {
+        top_patents.push(val);
+        top_summaries.push(sum);
+    }
+
+    let ipc_anchors = ipc_anchor::derive_ipc_anchors(query, &observed_ipcs, 3);
+    let current_year = chrono::Utc::now()
+        .format("%Y")
+        .to_string()
+        .parse::<i32>()
+        .unwrap_or(2026);
+    let craap_scores =
+        craap::score_batch_with_corroboration(&top_summaries, "local_hybrid", &[], current_year);
 
     let index_status =
         s.db.get_backfill_index_status()
@@ -1586,7 +1689,154 @@ pub async fn api_search_vector(
         "bm25_count": bm25_result.len(),
         "vector_count": vector_results.len(),
         "dedup_removed": dedup_removed,
+        "ipc_anchors": ipc_anchors,
+        "ipc_filtered_count": ipc_filtered_count,
+        "craap_scores": craap_scores,
         "index_status": index_status,
+    }))
+}
+
+/// v0.9.67：检索空间透明化面板「一键单源补搜」端点（`POST /api/search/source`）。
+///
+/// 允许用户对任意失败/跳过/0 命中的单一数据源发起定向补搜，并附带 IPC 锚点与 CRAAP 五维评分。
+pub async fn api_search_single_source(
+    State(s): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let source_name = req["source"]
+        .as_str()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    let query = req["query"].as_str().unwrap_or("").trim();
+    if query.is_empty() {
+        return Json(json!({
+            "patents": [],
+            "total": 0,
+            "source": source_name,
+            "error": "请输入检索关键词"
+        }));
+    }
+
+    let page = req["page"].as_u64().unwrap_or(1).max(1) as usize;
+    let page_size = req["page_size"].as_u64().unwrap_or(10).clamp(1, 50) as usize;
+    let ipc = req["ipc"]
+        .as_str()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_string);
+    let country = req["country"]
+        .as_str()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_string);
+    let region = req["region"]
+        .as_str()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_string);
+    let explicit_lang = req["language"]
+        .as_str()
+        .and_then(|s| serde_json::from_str::<Lang>(&format!("\"{s}\"")).ok());
+    let lang =
+        resolve_lang_with_explicit(explicit_lang, region.as_deref(), country.as_deref(), query);
+
+    let search_query = SearchQuery {
+        keyword: query.to_string(),
+        country,
+        language: Some(lang),
+        assignee: None,
+        exact_assignee: false,
+        date_from: None,
+        date_to: None,
+        limit: page_size,
+        page,
+        sort_by: None,
+        search_type: Some(SearchType::Keyword),
+    };
+
+    let (api_key_opt, epo_creds) = {
+        let cfg = s.config.read().unwrap_or_else(|e| e.into_inner());
+        let serp = cfg
+            .next_serpapi_key()
+            .filter(|k| !k.is_empty() && k != "your-serpapi-key-here");
+        (serp, cfg.epo_credentials())
+    };
+
+    let provider: Result<Arc<dyn SearchProvider>, String> = match source_name.as_str() {
+        "serpapi" => match api_key_opt {
+            Some(key) => Ok(Arc::new(SerpApiProvider::new(key, s.db.clone()))),
+            None => Err("未配置 SerpAPI Key，无法执行 SerpAPI 单源补搜".to_string()),
+        },
+        "google_patents_xhr" => Ok(Arc::new(GooglePatentsXhrProvider::new(s.db.clone()))),
+        "epo_ops" => match epo_creds {
+            Some((k, sec)) => Ok(Arc::new(EpoOpsProvider::new(k, sec, s.db.clone()))),
+            None => Err("未配置 EPO_KEY / EPO_SECRET，无法执行 EPO OPS 单源补搜".to_string()),
+        },
+        "openalex" => Ok(Arc::new(OpenAlexProvider::new(s.db.clone()))),
+        "semantic_scholar" => Ok(Arc::new(SemanticScholarProvider::new(s.db.clone()))),
+        "pubmed" => Ok(Arc::new(PubMedProvider::new(s.db.clone()))),
+        _ => Err(format!("不支持的单源名称: {source_name}")),
+    };
+
+    let provider = match provider {
+        Ok(p) => p,
+        Err(msg) => {
+            return Json(json!({
+                "patents": [],
+                "total": 0,
+                "source": source_name,
+                "error": msg,
+                "attempts": []
+            }));
+        }
+    };
+
+    let outcome = provider.search(search_query).await;
+    let mut patents = outcome.summaries();
+    let locked_ipcs = ipc_anchor::parse_locked_ipc_prefixes(ipc.as_deref());
+    let mut observed_ipcs: Vec<String> = Vec::new();
+    for p in &patents {
+        if let Ok(Some(fp)) = s.db.get_patent(&p.patent_number) {
+            if !fp.ipc_codes.trim().is_empty() {
+                observed_ipcs.push(fp.ipc_codes);
+            }
+        }
+    }
+    let ipc_anchors = ipc_anchor::derive_ipc_anchors(query, &observed_ipcs, 3);
+    let mut ipc_filtered_count = 0usize;
+    if !locked_ipcs.is_empty() {
+        let before = patents.len();
+        patents.retain(|p| {
+            let ipc_blob =
+                s.db.get_patent(&p.patent_number)
+                    .ok()
+                    .flatten()
+                    .map(|fp| fp.ipc_codes)
+                    .unwrap_or_default();
+            let text = format!("{} {}", p.title, p.abstract_text);
+            ipc_anchor::matches_locked_ipc_subspace(&ipc_blob, &text, &locked_ipcs)
+        });
+        ipc_filtered_count = before.saturating_sub(patents.len());
+    }
+    let current_year = chrono::Utc::now()
+        .format("%Y")
+        .to_string()
+        .parse::<i32>()
+        .unwrap_or(2026);
+    let craap_scores =
+        craap::score_batch_with_corroboration(&patents, &source_name, &[], current_year);
+
+    Json(json!({
+        "patents": patents,
+        "total": patents.len(),
+        "page": page,
+        "page_size": page_size,
+        "source": source_name,
+        "attempts": attempts_json(&outcome),
+        "ipc_anchors": ipc_anchors,
+        "ipc_filtered_count": ipc_filtered_count,
+        "craap_scores": craap_scores
     }))
 }
 

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-22T15:44:40.778Z",
+  "generatedAt": "2026-11-22T17:03:38.762Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -665,11 +665,13 @@
         "removePdfFile",
         "renderBarList",
         "renderHistory",
+        "renderIpcAnchors",
         "renderPagination",
         "renderResults",
         "renderSearchDiagnostics",
         "renderWebResults",
         "resolveChineseTitles",
+        "retrySingleSource",
         "runRiskAssessment",
         "runVectorBackfill",
         "saveHistory",
@@ -677,6 +679,7 @@
         "serpapiBalancePromise",
         "showStats",
         "toggleAllChecks",
+        "toggleIpcAnchor",
         "toggleRegionSelect",
         "toggleRiskModal",
         "updatePdfFileList",

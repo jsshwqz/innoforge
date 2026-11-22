@@ -4,6 +4,23 @@
 All notable changes are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
+## [v0.9.67] - 2026-11-23
+
+### 新增与增强 / Added & Enhanced
+
+- **IPC 子空间自动锚定与跨领域同词噪声过滤（`src/search/ipc_anchor.rs`）**：
+  - 融合「候选专利真实 IPC 分布 + 确定性工程领域词典」自动推导 Top-1~3 IPC 4 位主小类子空间（如 `H02K`/`F28D`/`H01M`），接入 `/api/search/online`、`/api/search/vector` 与 `/api/search/source`；
+  - 支持前端一键勾选/取消锁定 IPC 子空间过滤跨领域同词噪声（附负面反作弊测试拦截异域同词文献）。
+- **新增 `Semantic Scholar` 与 `PubMed` 学术检索源（`src/search/providers/semantic_scholar.rs`、`pubmed.rs`）**：
+  - 接入 Semantic Scholar Graph API（保留真实 DOI、总引用数与高影响力引用数）与 NCBI PubMed E-utilities（两段式 `esearch` + `esummary`，覆盖生物医学与医工交叉期刊），并恒登记至在线多源降级链尾（`SerpAPI → GooglePatentsXhr → EPO OPS → OpenAlex → SemanticScholar → PubMed`）；
+  - 新增 `POST /api/search/source` 端点，支持检索空间透明化面板对任意失败/跳过/0 命中数据源一键「🔄 单源补搜」。
+- **`CRAAP` 五维来源可信度评分、多源三角互证与检索空间透明化面板（`src/search/craap.rs`、`templates/search.html`）**：
+  - 基于时效性（C）、相关性（R）、权威度（A1）、实体核验准确度（A2）与文献客观度（P）确定性计算 0~100 分与 A/B/C/D 等级，识别跨独立源交叉印证并展示 `🔺 多源互证` 徽标；
+  - 升级搜索页顶部诊断面板为「🔭 检索空间透明化面板」，展示各源耗时、命中数、去重数、IPC 滤噪数与一键单源补搜。
+- **Idea 流水线全文档深度研发推演重构（`src/pipeline/steps/deep_reasoning.rs`、`analysis.rs`）**：
+  - 废除 6 个脱离文档的抽象哲学角色及 `120/150/500` 字裸截断，改为 6 个扎根全文档与真实物理规律的「首席总工 × 资深专利代理师 × 未来 3~5 年演进卡位」维度，充分消费 `enrich_top_n` 富化全文与 `extract_whole_document_signals` 预挖定量参数/拓扑/未权要隐藏宝藏，同时严格保留 `[引用N]` 1 基证据溯源对齐。
+
+---
 ## [v0.9.66] - 2026-11-22
 
 ### 新增与增强 / Added & Enhanced

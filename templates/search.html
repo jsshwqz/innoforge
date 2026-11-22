@@ -97,8 +97,9 @@
 </div>
 
 <div class="panel">
-<!-- MA5b 检索诊断面板：仅在线链路（/api/search/online 返回 attempts）时由 renderSearchDiagnostics 渲染 -->
+<!-- MA5b + v0.9.67 检索空间透明化面板与 IPC 子空间锚定条 -->
 <div id="search-diagnostics" style="display:none;"></div>
+<div id="ipc-anchor-bar" style="display:none;margin-bottom:10px;"></div>
 <div id="search-hint" class="search-hint" style="display:none;"></div>
 <div id="results-info"></div>
 <div id="results"></div>
@@ -495,7 +496,7 @@ async function doSearch(page) {
         const endpoint = getSearchEndpoint();
         const mode = document.getElementById('search-mode').value;
         const payload = mode === 'vector'
-            ? { query: body.query, limit: body.page_size, rrf_k: 60 }
+            ? { query: body.query, limit: body.page_size, rrf_k: 60, ipc: body.ipc || '' }
             : body;
         const res = await fetch(endpoint, {
             method: 'POST',
@@ -590,6 +591,7 @@ function renderWebResults(data) {
 
 function renderResults(data, page, pageSize) {
     renderSearchDiagnostics(data);
+    renderIpcAnchors(data);
     const total = Number(data.total || 0);
     // 后端如实返回的每页条数优先（在线源上游每页 10 条，与请求的 page_size 可能不同；
     // 本地兜底回显请求值）。翻页数学必须用真实交付口径，否则会算出不存在的页。
@@ -652,10 +654,20 @@ function renderResults(data, page, pageSize) {
         return;
     }
 
+    const craapMap = (data && data.craap_scores && typeof data.craap_scores === 'object') ? data.craap_scores : {};
     let html = '';
     patents.forEach((p) => {
         const score = Number(p.relevance_score || 0);
         const scoreColor = score >= 90 ? '#3fb950' : score >= 70 ? '#58a6ff' : score >= 50 ? '#d29922' : '#8b949e';
+        const craap = craapMap[p.id] || craapMap[p.patent_number] || null;
+        let craapHtml = '';
+        if (craap) {
+            const cColor = craap.grade === 'A' ? '#3fb950' : craap.grade === 'B' ? '#58a6ff' : craap.grade === 'C' ? '#d29922' : '#8b949e';
+            craapHtml += `<span title="${escapeHtml(craap.summary_zh || '')}" style="display:inline-block;margin-top:4px;padding:1px 7px;border-radius:10px;font-size:11px;border:1px solid ${cColor};color:${cColor};white-space:nowrap;">🛡️ CRAAP ${Number(craap.total || 0)} (${escapeHtml(craap.grade || 'C')})</span>`;
+            if (Array.isArray(craap.corroborated_sources) && craap.corroborated_sources.length >= 2) {
+                craapHtml += `<span title="${escapeHtml('多源三角互证：' + craap.corroborated_sources.join(' + '))}" style="display:inline-block;margin-top:4px;margin-left:4px;padding:1px 7px;border-radius:10px;font-size:11px;border:1px solid #a371f7;color:#d2a8ff;background:#a371f722;white-space:nowrap;">🔺 多源互证</span>`;
+            }
+        }
         html += `
         <div class="patent-card">
             <div class="patent-title-row">
@@ -678,6 +690,7 @@ function renderResults(data, page, pageSize) {
                 <div class="score-tag">
                     <div class="score-value" style="color:${scoreColor}">${score.toFixed(0)}%</div>
                     <div class="score-source">${escapeHtml(p.score_source || t('results.score'))}</div>
+                    <div>${craapHtml}</div>
                 </div>
             </div>
         </div>`;
@@ -770,10 +783,108 @@ const DIAG_SOURCE_LABELS = {
     google_patents_xhr: 'Google Patents XHR',
     epo_ops: 'EPO OPS',
     openalex: 'OpenAlex 学术',
+    semantic_scholar: 'Semantic Scholar 学术',
+    pubmed: 'PubMed 医工学术',
     local_fts: 'Local FTS',
     firecrawl_web: 'Firecrawl Web',
-    query_rewrite: 'Query Rewrite（改写）'
+    query_rewrite: 'Query Rewrite（改写）',
+    llm_rerank: 'LLM Rerank（重排）'
 };
+const RETRYABLE_SOURCES = ['serpapi', 'google_patents_xhr', 'epo_ops', 'openalex', 'semantic_scholar', 'pubmed'];
+
+// v0.9.67：IPC 子空间自动锚定交互条（支持一键勾选/取消锁定 IPC 小类并重搜去噪）
+function renderIpcAnchors(data) {
+    var bar = document.getElementById('ipc-anchor-bar');
+    if (!bar) return;
+    bar.textContent = '';
+    var anchors = data && Array.isArray(data.ipc_anchors) ? data.ipc_anchors : [];
+    var filtered = Number((data && data.ipc_filtered_count) || 0);
+    var ipcInput = document.getElementById('ipc-filter');
+    var activeCodes = ipcInput && ipcInput.value.trim()
+        ? ipcInput.value.trim().toUpperCase().split(/[,;\s]+/).filter(Boolean)
+        : [];
+    if (!anchors.length && !activeCodes.length) {
+        bar.style.display = 'none';
+        return;
+    }
+    bar.style.display = 'flex';
+    bar.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px;padding:8px 12px;background:#161b22;border:1px solid #30363d;border-radius:8px;font-size:0.85em;';
+
+    var title = document.createElement('span');
+    title.textContent = '🧭 IPC 子空间锚定：';
+    title.style.cssText = 'color:#58a6ff;font-weight:600;';
+    bar.appendChild(title);
+
+    anchors.forEach(function(a) {
+        var code = String(a.code || '').toUpperCase();
+        var isLocked = activeCodes.indexOf(code) >= 0;
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.style.cssText = isLocked
+            ? 'padding:3px 10px;border-radius:14px;border:1px solid #3fb950;background:#23863644;color:#7ee787;cursor:pointer;font-size:0.9em;white-space:nowrap;'
+            : 'padding:3px 10px;border-radius:14px;border:1px solid #30363d;background:#21262d;color:#c9d1d9;cursor:pointer;font-size:0.9em;white-space:nowrap;';
+        var pct = Math.round(Number(a.confidence || 0) * 100);
+        btn.textContent = (isLocked ? '✓ ' : '+ ') + code + ' ' + String(a.label_zh || '') + ' (' + pct + '%)';
+        btn.title = '点击' + (isLocked ? '取消锁定' : '锁定') + ' IPC 子空间 ' + code + '（过滤跨领域同词噪声）';
+        btn.onclick = function() { toggleIpcAnchor(code); };
+        bar.appendChild(btn);
+    });
+
+    if (activeCodes.length) {
+        var clearBtn = document.createElement('button');
+        clearBtn.type = 'button';
+        clearBtn.textContent = '✕ 解除 IPC 锁定';
+        clearBtn.style.cssText = 'padding:3px 9px;border-radius:12px;border:1px solid #f8514966;background:transparent;color:#f85149;cursor:pointer;font-size:0.85em;';
+        clearBtn.onclick = function() {
+            if (ipcInput) ipcInput.value = '';
+            doSearch(1);
+        };
+        bar.appendChild(clearBtn);
+    }
+    if (filtered > 0) {
+        bar.appendChild(diagMutedSpan('已滤除 ' + filtered + ' 条跨领域同词噪声'));
+    }
+}
+
+function toggleIpcAnchor(code) {
+    var ipcInput = document.getElementById('ipc-filter');
+    if (!ipcInput) return;
+    var list = ipcInput.value.trim()
+        ? ipcInput.value.trim().toUpperCase().split(/[,;\s]+/).filter(Boolean)
+        : [];
+    var idx = list.indexOf(code);
+    if (idx >= 0) list.splice(idx, 1);
+    else list.push(code);
+    ipcInput.value = list.join(',');
+    doSearch(1);
+}
+
+async function retrySingleSource(sourceName) {
+    var body = buildRequest(1);
+    if (!body.query) {
+        alert(t('alert.emptyQuery'));
+        return;
+    }
+    document.getElementById('results').innerHTML = '<p class="muted">🔄 正在向单源 [' + escapeHtml(DIAG_SOURCE_LABELS[sourceName] || sourceName) + '] 定向补搜...</p>';
+    try {
+        var payload = Object.assign({}, body, { source: sourceName });
+        var res = await fetch('/api/search/source', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        if (!res.ok) throw new Error('服务器错误 (' + res.status + ')');
+        var data = await res.json();
+        if (data.error) {
+            document.getElementById('results').innerHTML = '<p style="color:#d29922;">⚠️ ' + escapeHtml(data.error) + '</p>';
+            return;
+        }
+        lastResponse = data;
+        renderResults(data, 1, body.page_size);
+    } catch (err) {
+        document.getElementById('results').innerHTML = '<p style="color:#f85149;">❌ 单源补搜失败: ' + escapeHtml(err.message) + '</p>';
+    }
+}
 const DIAG_FAIL_KEYS = ['network', 'quota', 'auth', 'parse'];
 
 // 「冷却中」展示镜像：后端 FailKind::cools_down()（src/search/model.rs：Quota|Auth → true）
@@ -843,7 +954,9 @@ function renderSearchDiagnostics(data) {
     details.style.cssText = 'margin-bottom:12px;padding:8px 12px;background:#161b22;border:1px solid #30363d;border-radius:8px;';
     var summary = document.createElement('summary');
     summary.style.cssText = 'cursor:pointer;color:#8b949e;font-size:0.85em;user-select:none;';
-    summary.textContent = t('diag.title') + ' · ' + t('diag.summary', { n: attempts.length });
+    var dedupPart = (data && Number(data.dedup_removed || 0) > 0) ? (' · 去重 ' + Number(data.dedup_removed) + ' 条') : '';
+    var ipcPart = (data && Number(data.ipc_filtered_count || 0) > 0) ? (' · IPC滤噪 ' + Number(data.ipc_filtered_count) + ' 条') : '';
+    summary.textContent = '🔭 ' + t('diag.title') + ' · ' + t('diag.summary', { n: attempts.length }) + dedupPart + ipcPart;
     details.appendChild(summary);
 
     var serpapiRow = null;
@@ -891,6 +1004,16 @@ function renderSearchDiagnostics(data) {
             var hintText = String(a.hint);
             var hintShown = hintText.length > 48 ? hintText.slice(0, 48) + '…' : hintText;
             row.appendChild(diagMutedSpan(t('diag.hint') + ': ' + hintShown, hintText));
+        }
+        if (RETRYABLE_SOURCES.indexOf(a.source) >= 0) {
+            var retryBtn = document.createElement('button');
+            retryBtn.type = 'button';
+            retryBtn.textContent = '🔄 单源补搜';
+            retryBtn.style.cssText = 'margin-left:auto;padding:2px 8px;border-radius:6px;border:1px solid #30363d;background:#21262d;color:#58a6ff;cursor:pointer;font-size:0.82em;';
+            retryBtn.onclick = (function(srcName) {
+                return function() { retrySingleSource(srcName); };
+            })(a.source);
+            row.appendChild(retryBtn);
         }
         if (a.source === 'serpapi') serpapiRow = row;
         details.appendChild(row);

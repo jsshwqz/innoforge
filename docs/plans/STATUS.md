@@ -14,6 +14,14 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-11-23 — **IPC 子空间自动锚定、Semantic Scholar/PubMed 学术源、CRAAP 五维评分、检索透明化面板与全文档深度推演重构（v0.9.67）**
+
+- **状态 / Status**: ✅ 本地全量验证与真实检索/浏览器实测通过，提交 PR 合入 `main` 并打 `v0.9.67` Tag
+- **① IPC 子空间自动锚定降噪**（`src/search/ipc_anchor.rs`、`src/routes/search.rs`、`templates/search.html`）：融合语料真实 IPC 分布与确定性工程词典自动推导 Top-1~3 IPC 主分类子空间，前端支持一键锁定/取消过滤跨领域同词噪声。
+- **② 新增 `Semantic Scholar` 与 `PubMed` 学术源 + 单源补搜**（`src/search/providers/semantic_scholar.rs`、`pubmed.rs`、`src/search/model.rs`、`src/search/breaker.rs`、`src/common.rs`）：接入高影响力引用指标与医工文献检索并并入在线执行链，新增 `POST /api/search/source` 一键单源补搜。
+- **③ `CRAAP` 五维来源可信度评分、多源三角互证与检索空间透明化面板**（`src/search/craap.rs`、`templates/search.html`）：确定性计算五维可信度与多源互证徽标，前端检索面板实时展示源耗时/命中/去重/IPC 滤噪与单源重试。
+- **④ Idea 流水线全文档深度推演引擎重构**（`src/pipeline/steps/deep_reasoning.rs`、`src/pipeline/steps/analysis.rs`）：以 6 个首席总工 × 资深专利代理师 × 未来 3~5 年演进维度替换抽象哲学角色，废除 120/150/500 字裸截断并注入预挖全文档信号。
+
 ### 2026-11-22 — **T2.5 异步 SSE OCR 进度流、4 类结构化错误码与 V-RAG 附图标号双向联动核查（v0.9.66）**
 
 - **状态 / Status**: ✅ 本地全量验证与隔离端口实测通过，提交 PR 合入 `main` 并打 `v0.9.66` Tag
