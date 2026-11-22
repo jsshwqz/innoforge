@@ -1321,24 +1321,49 @@ pub async fn api_search_vector(
         return Json(json!({"error": "查询不能为空"}));
     }
 
+    // 提取查询词元（供精准去噪、真实相关度校准与命中片段摘取）
+    let query_terms: Vec<String> = query
+        .split(|c: char| {
+            c.is_whitespace()
+                || c.is_ascii_punctuation()
+                || matches!(c, '，' | '。' | '；' | '：' | '、' | '（' | '）')
+        })
+        .map(|t| t.trim().to_lowercase())
+        .filter(|t| t.chars().count() >= 2)
+        .collect();
+
+    // 为专利级去重留足候选余量（避免库内多条同号记录把结果截断）
+    let candidate_limit = (limit * 4).clamp(40, 200);
+
     // BM25 layer
-    let bm25_result: Vec<(String, f64)> =
-        match s
-            .db
-            .search_smart(query, Some(&SearchType::Mixed), None, None, None, 1, limit)
-        {
-            Ok((patents, _total, _detected)) => patents
-                .into_iter()
-                .enumerate()
-                .map(|(i, p)| (p.id, (limit as f64 - i as f64) / limit as f64))
-                .collect(),
-            Err(e) => {
-                tracing::warn!("BM25 search failed: {}", e);
-                vec![]
-            }
-        };
+    let bm25_result: Vec<(String, f64)> = match s.db.search_smart(
+        query,
+        Some(&SearchType::Mixed),
+        None,
+        None,
+        None,
+        1,
+        candidate_limit,
+    ) {
+        Ok((patents, _total, _detected)) => patents
+            .into_iter()
+            .enumerate()
+            .map(|(i, p)| {
+                (
+                    p.id,
+                    (candidate_limit as f64 - i as f64) / candidate_limit as f64,
+                )
+            })
+            .collect(),
+        Err(e) => {
+            tracing::warn!("BM25 search failed: {}", e);
+            vec![]
+        }
+    };
 
     // Vector layer: compute query embedding and search cached embeddings
+    let mut all_vector_scores: std::collections::HashMap<String, f32> =
+        std::collections::HashMap::new();
     let vector_results: Vec<(String, f32)> = {
         let query_embedding = crate::db::vector::compute_tfidf_embedding(query);
         let count = s.db.count_embeddings().unwrap_or_default();
@@ -1368,7 +1393,11 @@ pub async fn api_search_vector(
                 }) {
                     for (pid, emb) in rows.flatten() {
                         let sim = crate::db::vector::cosine_similarity(&query_embedding, &emb);
-                        if sim > 0.1 {
+                        if sim > 0.01 {
+                            all_vector_scores.insert(pid.clone(), sim);
+                        }
+                        // 过滤 512 维特征哈希在长文上的低频碰撞底噪（< 0.14 不进入纯向量召回）
+                        if sim >= 0.14 {
                             results.push((pid, sim));
                         }
                     }
@@ -1377,25 +1406,23 @@ pub async fn api_search_vector(
         }
 
         results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        results.truncate(limit);
+        results.truncate(candidate_limit);
         results
     };
 
-    let mut vector_score_map: std::collections::HashMap<String, f32> =
-        std::collections::HashMap::new();
-    for (pid, sim) in &vector_results {
-        vector_score_map.insert(pid.clone(), *sim);
-    }
+    let vector_score_map = all_vector_scores;
 
     // 同步结合分块级 `chunks_fts` 词法命中，补充命中段落标签 `section_tag` 与片段预览
     let mut chunk_tag_map: std::collections::HashMap<String, (String, String)> =
         std::collections::HashMap::new();
-    if let Ok(chunk_hits) = s.db.search_embodiment_chunks_lexical(query, limit) {
+    if let Ok(chunk_hits) =
+        s.db.search_embodiment_chunks_lexical(query, candidate_limit)
+    {
         for hit in chunk_hits {
             chunk_tag_map
                 .entry(hit.patent_id.clone())
                 .or_insert_with(|| {
-                    let preview: String = hit.content.chars().take(120).collect();
+                    let preview: String = hit.content.chars().take(160).collect();
                     let tag = if hit.section_tag.is_empty() {
                         "FullText".to_string()
                     } else {
@@ -1427,18 +1454,96 @@ pub async fn api_search_vector(
         sorted
     };
 
-    let mut top_patents: Vec<serde_json::Value> = Vec::new();
-    for (id, fused_score) in fused.into_iter().take(limit) {
-        if let Ok(Some(patent)) = s.db.get_patent(&id) {
-            let vec_sim = vector_score_map.get(&id).copied().unwrap_or(0.0);
-            let score_percent = ((vec_sim as f64 * 100.0).max(fused_score * 3000.0))
-                .clamp(1.0, 99.9)
-                .round();
-            let (section_tag, chunk_snippet) = chunk_tag_map
-                .get(&id)
-                .cloned()
-                .unwrap_or_else(|| ("Abstract".to_string(), String::new()));
-            top_patents.push(json!({
+    // 按规范专利号（回退标题）做专利级聚合去重，并计算诚实校准相关度与真实命中片段
+    let mut seen_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut dedup_removed = 0usize;
+    let mut scored_candidates: Vec<(f64, serde_json::Value)> = Vec::new();
+
+    for (id, fused_score) in fused {
+        let Ok(Some(patent)) = s.db.get_patent(&id) else {
+            continue;
+        };
+        let dedup_key = {
+            let ck = crate::patent::canonical_patent_key(&patent.patent_number);
+            if !ck.is_empty() {
+                ck
+            } else {
+                patent.title.trim().to_lowercase()
+            }
+        };
+        if !dedup_key.is_empty() && !seen_keys.insert(dedup_key) {
+            dedup_removed += 1;
+            continue;
+        }
+
+        let vec_sim = vector_score_map.get(&id).copied().unwrap_or(0.0);
+        let title_lower = patent.title.to_lowercase();
+        let abs_lower = patent.abstract_text.to_lowercase();
+        let claims_lower = patent.claims.to_lowercase();
+        let desc_lower = patent.description.to_lowercase();
+
+        let mut hit_terms = 0usize;
+        let mut title_hits = 0usize;
+        for term in &query_terms {
+            let in_title = title_lower.contains(term.as_str());
+            let in_body = in_title
+                || abs_lower.contains(term.as_str())
+                || claims_lower.contains(term.as_str())
+                || desc_lower.contains(term.as_str());
+            if in_title {
+                title_hits += 1;
+            }
+            if in_body {
+                hit_terms += 1;
+            }
+        }
+        // 纯向量噪声且一个查询词都没命中、向量相似度也偏低（< 0.24）直接过滤，杜绝“车牌识别”混入散热检索
+        if !query_terms.is_empty() && hit_terms == 0 && vec_sim < 0.24 {
+            continue;
+        }
+
+        let term_ratio = if query_terms.is_empty() {
+            0.0
+        } else {
+            hit_terms as f64 / query_terms.len() as f64
+        };
+        let title_bonus = if query_terms.is_empty() {
+            0.0
+        } else {
+            (title_hits as f64 / query_terms.len() as f64) * 18.0
+        };
+        // 诚实校准分：词项覆盖(最高55分) + 标题命中加成(最高18分) + 向量余弦(最高27分)，绝不虚高到 100%
+        let calibrated_score = (term_ratio * 55.0 + title_bonus + (vec_sim as f64) * 45.0)
+            .clamp(5.0, 99.0)
+            .round();
+
+        // 提取真实命中段落标签与含查询词的上下文片段（杜绝全标 [Abstract] 且 snippet 为空）
+        let (section_tag, matched_snippet) = if let Some((tag, snip)) = chunk_tag_map.get(&id) {
+            if !snip.trim().is_empty() && !tag.starts_with("Meta:") {
+                (tag.clone(), snip.clone())
+            } else {
+                extract_best_matched_snippet(&patent, &query_terms)
+            }
+        } else {
+            extract_best_matched_snippet(&patent, &query_terms)
+        };
+
+        let score_source = if !query_terms.is_empty() {
+            format!(
+                "词项 {}/{} · 向量 {:.0}% · [{}]",
+                hit_terms,
+                query_terms.len(),
+                vec_sim * 100.0,
+                section_tag
+            )
+        } else {
+            format!("向量 {:.0}% · [{}]", vec_sim * 100.0, section_tag)
+        };
+
+        let rank_key = calibrated_score + fused_score * 50.0;
+        scored_candidates.push((
+            rank_key,
+            json!({
                 "id": patent.id,
                 "patent_number": patent.patent_number,
                 "title": patent.title,
@@ -1449,15 +1554,22 @@ pub async fn api_search_vector(
                 "publication_date": patent.publication_date,
                 "country": patent.country,
                 "ipc_codes": patent.ipc_codes,
-                "relevance_score": score_percent,
+                "relevance_score": calibrated_score,
                 "fused_score": fused_score,
                 "vector_score": vec_sim,
                 "matched_section_tag": section_tag,
-                "matched_snippet": chunk_snippet,
-                "score_source": format!("向量相似 {:.0}% · 命中 [{}]", vec_sim * 100.0, section_tag),
-            }));
-        }
+                "matched_snippet": matched_snippet,
+                "score_source": score_source,
+            }),
+        ));
     }
+
+    scored_candidates.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    let top_patents: Vec<serde_json::Value> = scored_candidates
+        .into_iter()
+        .take(limit)
+        .map(|(_, v)| v)
+        .collect();
 
     let index_status =
         s.db.get_backfill_index_status()
@@ -1473,8 +1585,55 @@ pub async fn api_search_vector(
         "rrf_k": k,
         "bm25_count": bm25_result.len(),
         "vector_count": vector_results.len(),
+        "dedup_removed": dedup_removed,
         "index_status": index_status,
     }))
+}
+
+/// 从专利的标题/权利要求/说明书/摘要中摘取含最多查询词元的真实命中片段与来源标签
+fn extract_best_matched_snippet(
+    patent: &crate::patent::Patent,
+    query_terms: &[String],
+) -> (String, String) {
+    let sources = [
+        ("权利要求", patent.claims.as_str()),
+        ("说明书", patent.description.as_str()),
+        ("摘要", patent.abstract_text.as_str()),
+        ("标题", patent.title.as_str()),
+    ];
+    let mut best: Option<(usize, &str, String)> = None;
+    for (label, text) in sources {
+        if text.trim().is_empty() {
+            continue;
+        }
+        for seg in text.split(['。', '；', '\n']) {
+            let trimmed = seg.trim();
+            if trimmed.chars().count() < 4 {
+                continue;
+            }
+            let lower = trimmed.to_lowercase();
+            let hits = query_terms
+                .iter()
+                .filter(|t| lower.contains(t.as_str()))
+                .count();
+            if hits > 0 {
+                let preview: String = trimmed.chars().take(160).collect();
+                if best.as_ref().is_none_or(|(b_hits, _, _)| hits > *b_hits) {
+                    best = Some((hits, label, preview));
+                }
+            }
+        }
+    }
+    if let Some((_, label, snippet)) = best {
+        (label.to_string(), snippet)
+    } else if !patent.abstract_text.trim().is_empty() {
+        (
+            "摘要".to_string(),
+            patent.abstract_text.chars().take(140).collect(),
+        )
+    } else {
+        ("标题".to_string(), patent.title.chars().take(140).collect())
+    }
 }
 
 pub async fn api_search_stats(

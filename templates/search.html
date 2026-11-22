@@ -159,7 +159,7 @@ function clearSearchPdfMeta() {
     'search.placeholder': '输入关键词、文献号、申请人或发明人...',
     'mode.local': '本地数据库',
     'mode.online': '在线搜索',
-    'mode.vector': '🧠 语义向量检索 (本地)',
+    'mode.vector': '🧠 语义向量',
     'vector.backfillBtn': '⚡ 一键后台补齐存量向量索引',
     'vector.backfillDone': '✅ 本地向量与分块索引已全部就绪',
     'vector.backfillRunning': '⏳ 正在补齐向量与段落索引...',
@@ -254,7 +254,7 @@ function clearSearchPdfMeta() {
     'search.placeholder': 'Enter keywords, patent number, applicant, or inventor...',
     'mode.local': 'Local DB',
     'mode.online': 'Online',
-    'mode.vector': '🧠 Semantic Vector (Local)',
+    'mode.vector': '🧠 Semantic',
     'vector.backfillBtn': '⚡ Backfill Local Vector Index',
     'vector.backfillDone': '✅ Local vector & chunk index ready',
     'vector.backfillRunning': '⏳ Backfilling vector & chunk index...',
@@ -672,6 +672,7 @@ function renderResults(data, page, pageSize) {
                         <span>${t('meta.country')}: ${escapeHtml(p.country || '暂无')}</span>
                     </div>
                     <p class="patent-abstract">${escapeHtml((p.abstract_text || '').slice(0, 260))}${(p.abstract_text || '').length > 260 ? '...' : ''}</p>
+                    ${p.matched_snippet ? `<div style="margin-top:6px;padding:6px 10px;background:#0d1117;border-left:3px solid #58a6ff;border-radius:4px;font-size:0.84em;color:#c9d1d9;line-height:1.5;"><span style="color:#58a6ff;font-weight:600;margin-right:6px;">[命中 · ${escapeHtml(p.matched_section_tag || '正文')}]</span>${escapeHtml(p.matched_snippet)}</div>` : ''}
                     ${p.evidence ? `<details class="evidence-row" style="margin-top:4px;"><summary style="cursor:pointer;color:#58a6ff;font-size:0.8em;">${t('results.whyTitle')}</summary><div style="color:#8b949e;font-size:0.8em;padding:4px 0;">${evidenceHtml(p.evidence)}</div></details>` : ''}
                 </div>
                 <div class="score-tag">
@@ -1276,28 +1277,77 @@ async function extractPdfContent() {
     }
     if (!currentPdfFile) return;
     const zone = document.getElementById('pdf-upload-zone');
-    const originalText = zone.querySelector('span[data-i18n="upload.dragDrop"]').textContent;
-    zone.querySelector('span[data-i18n="upload.dragDrop"]').textContent = t('upload.extracting');
+    const labelSpan = zone.querySelector('span[data-i18n="upload.dragDrop"]');
+    if (labelSpan) labelSpan.textContent = t('upload.extracting');
     zone.style.pointerEvents = 'none';
-    zone.style.opacity = '0.6';
+    zone.style.opacity = '0.7';
 
     try {
         const formData = new FormData();
         formData.append('file', currentPdfFile);
-        const res = await fetch('/api/upload/extract', {
+        const res = await fetch('/api/upload/extract/stream', {
             method: 'POST',
             body: formData
         });
-        const data = await res.json();
-        if (data.text) {
-            currentPdfContent = data.text;
-            saveSearchPdfMeta();
-            zone.querySelector('span[data-i18n="upload.dragDrop"]').textContent = t('upload.extractSuccess');
-        } else {
-            zone.querySelector('span[data-i18n="upload.dragDrop"]').textContent = t('upload.extractFail');
+        if (!res.ok || !res.body) {
+            throw new Error('HTTP ' + res.status);
+        }
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let buf = '';
+        let currentEvent = 'message';
+        let gotResult = false;
+        let lastErr = null;
+
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream: true });
+            const lines = buf.split('\n');
+            buf = lines.pop() || '';
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i].trim();
+                if (!line) {
+                    currentEvent = 'message';
+                    continue;
+                }
+                if (line.startsWith('event:')) {
+                    currentEvent = line.slice(6).trim();
+                } else if (line.startsWith('data:')) {
+                    const rawData = line.slice(5).trim();
+                    if (rawData === '[DONE]') continue;
+                    try {
+                        const payload = JSON.parse(rawData);
+                        if (currentEvent === 'progress' && labelSpan) {
+                            const pageInfo = payload.total_pages
+                                ? (' (' + Number(payload.page || 0) + '/' + Number(payload.total_pages) + ' 页 · ' + Number(payload.percent || 0) + '%)')
+                                : '';
+                            labelSpan.textContent = '⏳ ' + (payload.message || t('upload.extracting')) + pageInfo;
+                        } else if (currentEvent === 'result' && payload.text) {
+                            currentPdfContent = payload.text;
+                            saveSearchPdfMeta();
+                            gotResult = true;
+                            if (labelSpan) {
+                                labelSpan.textContent = t('upload.extractSuccess') + ' (' + (payload.method || 'text') + ', ' + Number(payload.char_length || payload.text.length) + '字)';
+                            }
+                        } else if (currentEvent === 'error') {
+                            lastErr = payload;
+                        }
+                    } catch (_) { /* ignore non-json SSE line */ }
+                }
+            }
+        }
+        if (!gotResult) {
+            if (lastErr) {
+                const codeTag = lastErr.error_code ? ('[' + lastErr.error_code + '] ') : '';
+                const hintStr = lastErr.hint ? (' — ' + lastErr.hint) : '';
+                if (labelSpan) labelSpan.textContent = '❌ ' + codeTag + (lastErr.error || t('upload.extractFail')) + hintStr;
+            } else if (labelSpan) {
+                labelSpan.textContent = t('upload.extractFail');
+            }
         }
     } catch (err) {
-        zone.querySelector('span[data-i18n="upload.dragDrop"]').textContent = t('upload.error') + ': ' + err.message;
+        if (labelSpan) labelSpan.textContent = t('upload.error') + ': ' + err.message;
     } finally {
         zone.style.pointerEvents = 'auto';
         zone.style.opacity = '1';

@@ -1904,6 +1904,24 @@ BM25 + 向量相似度的 RRF 融合检索。
 
 保存 AI 调用次数与 Token 硬熔断阈值（`0` 表示不限制）：请求体 `{"daily_max_calls": 0, "daily_max_tokens": 0, "idea_max_tokens": 0}`。达到阈值后，13 步推演流水线与 AI 对话接口均会硬阻断并返回可诊断提示。
 
+### T2.5 异步 SSE OCR 与 V-RAG 附图标号核查（v0.9.66）
+
+**POST** `/api/upload/extract/stream`
+
+以 `multipart/form-data`（`file` 字段）上传 PDF/DOCX/TXT/图片，返回 `text/event-stream`：
+- `event: progress`：实时推送 `{ stage, page, total_pages, percent, message }`（扫描件 PDF 优先对接 `Umi-OCR` 逐页上报 `page X/Y`）；
+- `event: result`：推送 `{ text, file_type, length, char_length, truncated, method, total_pages }`；
+- `event: error`：推送含 4 类标准错误码的结构化对象 `{ error_code, error, hint }`（`ERR_PDF_ENCRYPTED` / `ERR_FILE_CORRUPTED` / `ERR_OCR_UNAVAILABLE` / `ERR_FILE_TOO_LARGE`）；
+- `event: done`：`[DONE]`。
+
+**GET** `/api/patent/:id/numeral-check`
+
+对指定专利的权利要求与说明书运行静态部件标号提取与一致性核查，返回 `{"status":"ok","patent_id","patent_number","passed","total_numerals","issue_count","summary","parts":[...],"issues":[...]}`，供专利详情页 V-RAG 附图标号 ↔ 正文双向联动渲染。
+
+**POST** `/api/ai/numeral-consistency-check`
+
+对任意交底书/权利要求/附图清单运行静态标号一致性核查。请求体：`{"claims_text": "...", "description_text": "...", "drawing_parts": [{"number":"1","name":"阀体"}]}`（`drawing_parts` 可选）。确定性检出 `FIGURE_OR_LEGEND_ONLY`、`TEXT_ONLY_MISSING_IN_FIGURE`、`NAME_INCONSISTENT_FOR_SAME_NUMERAL` 三类错误。
+
 ## 覆盖说明 / Coverage
 
 - `/api` 路由：**132 / 132 条都有说明**（按 path 计；5 条 GET+POST 合并声明的路由在同一节里按方法分别写）。

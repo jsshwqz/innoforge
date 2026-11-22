@@ -90,7 +90,12 @@ pub async fn patent_detail_page(Path(id): Path<String>, State(s): State<AppState
                 .replace("{{ipc_codes}}", &html_escape(&p.ipc_codes))
                 .replace("{{cpc_codes}}", &html_escape(&p.cpc_codes))
                 .replace("{{country}}", &html_escape(&p.country))
-                .replace("{{legal_status}}", &html_escape(&p.legal_status))
+                .replace(
+                    "{{legal_status}}",
+                    &html_escape(&crate::routes::patent::dedup_legal_status_summary(
+                        &p.legal_status,
+                    )),
+                )
                 .replace("{{id}}", &html_escape(&p.id))
                 .replace("{{images_json}}", &p.images)
                 .replace("{{pdf_url}}", &html_escape(&p.pdf_url)),

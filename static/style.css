@@ -942,8 +942,9 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); curso
 .report-type-btn:not(.active):hover { color: var(--text-primary); }
 .result-tabs {
   border-bottom: 1px solid var(--border-default);
-  margin-top: var(--sp-3); overflow-x: auto; display: flex; gap: 2px;
+  margin-top: var(--sp-3); display: flex; flex-wrap: wrap; gap: 4px;
 }
+.idea-history-toggle { display: none; }
 
 /* ---------- 18. 搜索页 ---------- */
 .search-container { display: grid; gap: var(--sp-4); max-width: 1200px; }
@@ -1064,6 +1065,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); curso
   .page-sidebar { display: none; }
   .idea-layout { display: block; }
   .idea-sidebar { display: none; }
+  .idea-sidebar.drawer-open { display: block; position: relative; width: 100%; height: auto; max-height: 280px; border-right: none; border-bottom: 1px solid var(--border-muted); }
+  .idea-history-toggle { display: inline-flex; }
   .search-grid { grid-template-columns: 1fr; }
   .search-grid-2 { grid-template-columns: 1fr 1fr; }
   .bar-item { grid-template-columns: 90px 1fr 40px; }

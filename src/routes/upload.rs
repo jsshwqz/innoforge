@@ -1,8 +1,19 @@
+//! 模块职责：文件上传与内容提取统一入口（PDF/DOCX/TXT/图片），含 T2.5 异步 SSE OCR 进度流、优先 Umi-OCR 通道与 4 类结构化错误码。
+//! 上游调用者：`src/common.rs` (`/api/upload/*`)、`src/ai/extraction.rs` (`extract_pdf_text_umi_ocr`) 与前端各上传入口。
+//! 模块专属禁区：严禁硬编码个人 Windows Python/Tesseract 绝对路径；严禁在异步路由中直接执行阻塞子进程（需 `tokio::process` 或 `spawn_blocking`）；上传错误必须归入 4 类结构化错误码且兼容 `error` 键。
+
 use super::AppState;
 use crate::ai::truncate_for_ai;
-use axum::{extract::State, Json};
+use axum::{
+    extract::State,
+    response::sse::{Event, Sse},
+    Json,
+};
+use futures::stream::Stream;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
+    convert::Infallible,
     fs::{self, File, OpenOptions},
     io::Write,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -12,6 +23,143 @@ use std::{
 
 const MAX_FILE_SIZE: usize = 10 * 1024 * 1024; // 10 MB
 const MAX_PDF_STORE_SIZE: usize = 20 * 1024 * 1024; // 20 MB
+
+/// T2.5 4 类结构化文件上传/解析错误码
+pub const ERR_PDF_ENCRYPTED: &str = "ERR_PDF_ENCRYPTED";
+pub const ERR_FILE_CORRUPTED: &str = "ERR_FILE_CORRUPTED";
+pub const ERR_OCR_UNAVAILABLE: &str = "ERR_OCR_UNAVAILABLE";
+pub const ERR_FILE_TOO_LARGE: &str = "ERR_FILE_TOO_LARGE";
+
+/// 结构化文件解析错误（向后兼容旧 `error` 字段，并补充机器可判定的 `error_code` 与排障 `hint`）
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StructuredUploadError {
+    pub error_code: String,
+    pub error: String,
+    pub hint: String,
+}
+
+impl StructuredUploadError {
+    pub fn new(code: impl Into<String>, error: impl Into<String>, hint: impl Into<String>) -> Self {
+        Self {
+            error_code: code.into(),
+            error: error.into(),
+            hint: hint.into(),
+        }
+    }
+
+    pub fn file_too_large(max_mb: usize) -> Self {
+        Self::new(
+            ERR_FILE_TOO_LARGE,
+            format!("文件大小超过 {max_mb}MB 限制"),
+            format!("请先压缩图片清晰度或按章节拆分 PDF 至 {max_mb}MB 以内后重新上传。"),
+        )
+    }
+
+    pub fn pdf_encrypted() -> Self {
+        Self::new(
+            ERR_PDF_ENCRYPTED,
+            "检测到该 PDF 已加密或受密码/权限保护，无法直接提取文字",
+            "请先在 PDF 阅读器中解除密码保护（或“另存为/打印为新 PDF”）后再上传。",
+        )
+    }
+
+    pub fn file_corrupted(detail: impl Into<String>) -> Self {
+        Self::new(
+            ERR_FILE_CORRUPTED,
+            format!("文件已损坏或格式异常：{}", detail.into()),
+            "请确认文件下载完整、未截断，或将其重新导出为标准 PDF / DOCX / TXT 后重试。",
+        )
+    }
+
+    pub fn ocr_unavailable(detail: impl Into<String>) -> Self {
+        Self::new(
+            ERR_OCR_UNAVAILABLE,
+            format!("PDF 为扫描件且当前无可用 OCR 引擎（{}）", detail.into()),
+            "排障建议：1) 启动本机 Umi-OCR 并确认监听端口（可用 UMI_OCR_BASE_URL 配置）；2) 或在设置页配置支持看图的多模态模型（如 Gemini/Qwen-VL）；3) 或直接上传可编辑的 .docx/.txt。",
+        )
+    }
+
+    pub fn to_json(&self) -> serde_json::Value {
+        json!({
+            "error_code": self.error_code,
+            "error": self.error,
+            "hint": self.hint,
+        })
+    }
+}
+
+/// 异步 SSE OCR 进度事件载荷
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OcrProgressEvent {
+    pub stage: String,
+    pub page: usize,
+    pub total_pages: usize,
+    pub percent: u8,
+    pub message: String,
+}
+
+/// 预检 PDF 字节完整性、加密状态与总页数（确定性纯函数）
+pub fn inspect_pdf_integrity(data: &[u8]) -> Result<usize, StructuredUploadError> {
+    if !has_pdf_header(data) {
+        return Err(StructuredUploadError::file_corrupted(
+            "未检测到 %PDF- 文件签名",
+        ));
+    }
+    // 检查未压缩字节中是否包含典型加密字典标记 `/Encrypt`
+    let has_encrypt_marker = data.windows(8).any(|w| w == b"/Encrypt");
+    match pdf_extract::Document::load_mem(data) {
+        Ok(doc) => {
+            if doc.is_encrypted() || has_encrypt_marker {
+                return Err(StructuredUploadError::pdf_encrypted());
+            }
+            let pages = doc.get_pages().len();
+            if pages == 0 {
+                return Err(StructuredUploadError::file_corrupted(
+                    "PDF 不包含任何有效页面",
+                ));
+            }
+            Ok(pages)
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            let lower = msg.to_lowercase();
+            if has_encrypt_marker
+                || lower.contains("encrypt")
+                || lower.contains("password")
+                || lower.contains("decryption")
+            {
+                return Err(StructuredUploadError::pdf_encrypted());
+            }
+            let has_eof = data.windows(5).any(|w| w == b"%%EOF");
+            if !has_eof {
+                return Err(StructuredUploadError::file_corrupted(format!(
+                    "缺少 %%EOF 结束标记（{msg}）"
+                )));
+            }
+            // 某些非标 PDF 虽令 lopdf 报轻微语法错，但 poppler/Umi-OCR 仍可读取
+            Ok(1)
+        }
+    }
+}
+
+fn resolve_python_bin() -> String {
+    if let Ok(p) = std::env::var("INNOFORGE_PYTHON_BIN") {
+        let trimmed = p.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+    for cand in ["python3", "python"] {
+        if std::process::Command::new(cand)
+            .arg("--version")
+            .output()
+            .is_ok_and(|o| o.status.success())
+        {
+            return cand.to_string();
+        }
+    }
+    "python3".to_string()
+}
 
 /// Umi-OCR 出厂默认 HTTP 地址（端口可在 Umi-OCR 全局设置中修改）。
 /// issue #33：可用环境变量 `UMI_OCR_BASE_URL` 覆盖（部署环境属性 → env 注入点）。
@@ -381,17 +529,19 @@ pub async fn api_upload_extract(
             match field.bytes().await {
                 Ok(data) => {
                     if data.len() > MAX_FILE_SIZE {
-                        return Json(json!({"error": "文件大小超过 10MB 限制"}));
+                        return Json(StructuredUploadError::file_too_large(10).to_json());
                     }
                     file_bytes = data.to_vec();
                 }
-                Err(_) => return Json(json!({"error": "文件读取失败"})),
+                Err(_) => {
+                    return Json(StructuredUploadError::file_corrupted("文件读取失败").to_json())
+                }
             }
         }
     }
 
     if file_bytes.is_empty() {
-        return Json(json!({"error": "缺少文件"}));
+        return Json(StructuredUploadError::file_corrupted("缺少文件或文件为空").to_json());
     }
 
     tracing::info!(
@@ -412,10 +562,10 @@ pub async fn api_upload_extract(
         Some(magic_type) => magic_type.to_string(),
         None => ext_from_name,
     };
-    if ext == "pdf" && !has_pdf_header(&file_bytes) {
-        return Json(json!({
-            "error": "文件不是有效 PDF，未检测到 %PDF- 文件签名"
-        }));
+    if ext == "pdf" {
+        if let Err(err) = inspect_pdf_integrity(&file_bytes) {
+            return Json(err.to_json());
+        }
     }
     let is_image = matches!(
         ext.as_str(),
@@ -430,7 +580,7 @@ pub async fn api_upload_extract(
             .ai_client();
         match describe_image_with_fallback(&ai_client, &file_bytes, &ext).await {
             Ok(desc) => desc,
-            Err(e) => return Json(json!({ "error": format!("图片识别失败: {}", e) })),
+            Err(e) => return Json(StructuredUploadError::ocr_unavailable(e).to_json()),
         }
     } else if ext == "pdf" {
         match extract_pdf_text(&file_bytes).await {
@@ -443,7 +593,10 @@ pub async fn api_upload_extract(
                 };
                 if is_deepseek {
                     return Json(
-                        json!({"error": "PDF 文字提取失败。当前 AI 为 DeepSeek 不支持图片识别，\n建议：1) 上传可编辑的文本文件(.txt/.docx) 2) 在设置页切换至 Gemini 后重试 3) 直接粘贴文字内容"}),
+                        StructuredUploadError::ocr_unavailable(
+                            "本地 Umi-OCR/Tesseract 未命中，且当前 AI 为 DeepSeek 不支持图片识别",
+                        )
+                        .to_json(),
                     );
                 }
                 let ai_client = s
@@ -454,9 +607,12 @@ pub async fn api_upload_extract(
                 match extract_pdf_via_ai_vision(&file_bytes, &ai_client).await {
                     Ok(t) => t,
                     Err(e) => {
-                        return Json(json!({
-                            "error": format!("PDF 提取失败（含 AI 视觉兜底）: {}", e)
-                        }))
+                        return Json(
+                            StructuredUploadError::ocr_unavailable(format!(
+                                "全部 OCR 与视觉兜底均失败: {e}"
+                            ))
+                            .to_json(),
+                        )
                     }
                 }
             }
@@ -464,24 +620,32 @@ pub async fn api_upload_extract(
     } else if ext == "docx" {
         match extract_docx_text(&file_bytes) {
             Ok(t) if t.trim().len() >= 100 => t,
-            Ok(_) => return Json(json!({"error": "DOCX 无可提取文字"})),
-            Err(e) => return Json(json!({ "error": format!("DOCX 解析失败: {}", e) })),
+            Ok(_) => {
+                return Json(StructuredUploadError::file_corrupted("DOCX 无可提取文字").to_json())
+            }
+            Err(e) => {
+                return Json(
+                    StructuredUploadError::file_corrupted(format!("DOCX 解析失败: {e}")).to_json(),
+                )
+            }
         }
     } else if ext == "doc" {
-        return Json(json!({"error": "暂不支持 .doc 格式，请另存为 .docx 或 .pdf"}));
+        return Json(
+            StructuredUploadError::file_corrupted("暂不支持 .doc 格式，请另存为 .docx 或 .pdf")
+                .to_json(),
+        );
     } else {
         match String::from_utf8(file_bytes.clone()) {
             Ok(t) => t,
             Err(_) => {
                 let (t, _, had_errors) = encoding_rs::GBK.decode(&file_bytes);
                 if had_errors {
-                    // #97: The content is neither valid UTF-8 nor valid GBK,
-                    // and magic bytes did not identify it as PDF/DOCX.
-                    // The real problem is "unrecognised file type", not
-                    // "encoding unsupported".
-                    return Json(json!({
-                        "error": "无法识别文件类型，请上传 PDF、DOCX、TXT 或图片文件"
-                    }));
+                    return Json(
+                        StructuredUploadError::file_corrupted(
+                            "无法识别文件类型，请上传 PDF、DOCX、TXT 或图片文件",
+                        )
+                        .to_json(),
+                    );
                 }
                 t.into_owned()
             }
@@ -494,8 +658,6 @@ pub async fn api_upload_extract(
         text.len(),
         text.chars().take(80).collect::<String>()
     );
-    // 提取结果会被前端（compare/idea/index/oa/search 五个页面）再送去 AI 分析，
-    // 因此这里是数据路径而非显示路径：超限时必须显式告知，不能静默截断。
     const MAX_EXTRACT_CHARS: usize = 50_000;
     let total_chars = text.chars().count();
     let truncated = total_chars > MAX_EXTRACT_CHARS;
@@ -506,6 +668,355 @@ pub async fn api_upload_extract(
         "char_length": total_chars,
         "truncated": truncated
     }))
+}
+
+/// T2.5: POST /api/upload/extract/stream — 异步 SSE 文件提取与分页 OCR 进度流
+///
+/// 优先使用 `Umi-OCR` 异步文档识别并逐页推送 `event: progress`（`page X/Y`），
+/// 杜绝大扫描件 PDF 单请求长时间阻塞超时；出错时严格返回 4 类结构化错误码：
+/// `ERR_FILE_TOO_LARGE` / `ERR_PDF_ENCRYPTED` / `ERR_FILE_CORRUPTED` / `ERR_OCR_UNAVAILABLE`。
+pub async fn api_upload_extract_stream(
+    State(s): State<AppState>,
+    mut multipart: axum::extract::Multipart,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let mut file_bytes: Vec<u8> = Vec::new();
+    let mut file_name = String::new();
+    let mut precheck_err: Option<StructuredUploadError> = None;
+
+    while let Ok(Some(field)) = multipart.next_field().await {
+        let name = field.name().unwrap_or("").to_string();
+        if name == "file" {
+            file_name = field.file_name().unwrap_or("unknown.txt").to_lowercase();
+            match field.bytes().await {
+                Ok(data) => {
+                    if data.len() > MAX_FILE_SIZE {
+                        precheck_err = Some(StructuredUploadError::file_too_large(10));
+                        break;
+                    }
+                    file_bytes = data.to_vec();
+                }
+                Err(_) => {
+                    precheck_err = Some(StructuredUploadError::file_corrupted("文件读取失败"));
+                    break;
+                }
+            }
+        }
+    }
+
+    if precheck_err.is_none() && file_bytes.is_empty() {
+        precheck_err = Some(StructuredUploadError::file_corrupted("缺少文件或文件为空"));
+    }
+
+    let stream = async_stream::stream! {
+        if let Some(err) = precheck_err {
+            yield Ok(Event::default().event("error").data(err.to_json().to_string()));
+            yield Ok(Event::default().event("done").data("[DONE]"));
+            return;
+        }
+
+        let ext_from_name = file_name.rsplit('.').next().unwrap_or("").to_lowercase();
+        let ext = match detect_type_by_magic(&file_bytes) {
+            Some(magic_type) => magic_type.to_string(),
+            None => ext_from_name,
+        };
+        let is_image = matches!(
+            ext.as_str(),
+            "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp"
+        );
+
+        let mut total_pages = 1usize;
+        if ext == "pdf" {
+            match inspect_pdf_integrity(&file_bytes) {
+                Ok(pages) => total_pages = pages,
+                Err(err) => {
+                    yield Ok(Event::default().event("error").data(err.to_json().to_string()));
+                    yield Ok(Event::default().event("done").data("[DONE]"));
+                    return;
+                }
+            }
+        }
+
+        let init_evt = OcrProgressEvent {
+            stage: "inspect".to_string(),
+            page: 0,
+            total_pages,
+            percent: 5,
+            message: format!("正在解析 {}（共 {} 页）...", ext.to_uppercase(), total_pages),
+        };
+        yield Ok(Event::default().event("progress").data(serde_json::to_string(&init_evt).unwrap_or_default()));
+
+        let mut method = "text_layer".to_string();
+        let extracted: Result<String, StructuredUploadError> = if is_image {
+            method = "image_ocr".to_string();
+            let ai_client = s
+                .config
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .ai_client();
+            describe_image_with_fallback(&ai_client, &file_bytes, &ext)
+                .await
+                .map_err(StructuredUploadError::ocr_unavailable)
+        } else if ext == "pdf" {
+            // 1. 先尝试无 OCR 快速文本层提取
+            let quick_text = extract_pdf_text_fast_layers(&file_bytes).await;
+            if let Ok(t) = quick_text {
+                if t.trim().len() >= 100 {
+                    let done_evt = OcrProgressEvent {
+                        stage: "text_layer".to_string(),
+                        page: total_pages,
+                        total_pages,
+                        percent: 95,
+                        message: format!("已从文本层快速提取 {} 页内容", total_pages),
+                    };
+                    yield Ok(Event::default().event("progress").data(serde_json::to_string(&done_evt).unwrap_or_default()));
+                    Ok(t)
+                } else {
+                    // 文本层不足，进入流式 Umi-OCR
+                    method = "umi_ocr".to_string();
+                    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<OcrProgressEvent>();
+                    let pdf_for_ocr = file_bytes.clone();
+                    let base_url = umi_ocr_base_url();
+                    let mut ocr_handle = tokio::spawn(async move {
+                        extract_pdf_text_umi_ocr_with_progress(
+                            pdf_for_ocr,
+                            &base_url,
+                            total_pages,
+                            Some(tx),
+                        )
+                        .await
+                    });
+
+                    while let Some(evt) = rx.recv().await {
+                        yield Ok(Event::default().event("progress").data(serde_json::to_string(&evt).unwrap_or_default()));
+                    }
+
+                    match (&mut ocr_handle).await {
+                        Ok(Ok(ocr_text)) if !ocr_text.trim().is_empty() => Ok(ocr_text),
+                        Ok(Err(umi_err)) => {
+                            // Umi-OCR 不可用或失败时依次回退本地 Tesseract -> AI 视觉
+                            let fb_evt = OcrProgressEvent {
+                                stage: "fallback".to_string(),
+                                page: 0,
+                                total_pages,
+                                percent: 40,
+                                message: "Umi-OCR 未命中，尝试本地 OCR / 视觉模型兜底...".to_string(),
+                            };
+                            yield Ok(Event::default().event("progress").data(serde_json::to_string(&fb_evt).unwrap_or_default()));
+
+                            let data_for_tess = file_bytes.clone();
+                            let tess_res = tokio::task::spawn_blocking(move || extract_pdf_text_ocr(&data_for_tess))
+                                .await
+                                .unwrap_or_else(|_| Err("Tesseract task panicked".into()));
+                            if let Ok(t) = tess_res {
+                                if !t.trim().is_empty() {
+                                    method = "tesseract".to_string();
+                                    Ok(t)
+                                } else {
+                                    Err(StructuredUploadError::ocr_unavailable(umi_err))
+                                }
+                            } else {
+                                let is_deepseek = {
+                                    let cfg = s.config.read().unwrap_or_else(|e| e.into_inner());
+                                    cfg.ai_base_url.contains("deepseek")
+                                };
+                                if is_deepseek {
+                                    Err(StructuredUploadError::ocr_unavailable(format!(
+                                        "{umi_err}；且 DeepSeek 不支持图片视觉兜底"
+                                    )))
+                                } else {
+                                    let ai_client = s
+                                        .config
+                                        .read()
+                                        .unwrap_or_else(|e| e.into_inner())
+                                        .ai_client();
+                                    match extract_pdf_via_ai_vision(&file_bytes, &ai_client).await {
+                                        Ok(v) if !v.trim().is_empty() => {
+                                            method = "ai_vision".to_string();
+                                            Ok(v)
+                                        }
+                                        Ok(_) | Err(_) => Err(StructuredUploadError::ocr_unavailable(umi_err)),
+                                    }
+                                }
+                            }
+                        }
+                        _ => Err(StructuredUploadError::ocr_unavailable("Umi-OCR 异步任务异常中止")),
+                    }
+                }
+            } else {
+                // 快速文本层失败，直接走流式 Umi-OCR + 兜底
+                method = "umi_ocr".to_string();
+                let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<OcrProgressEvent>();
+                let pdf_for_ocr = file_bytes.clone();
+                let base_url = umi_ocr_base_url();
+                let mut ocr_handle = tokio::spawn(async move {
+                    extract_pdf_text_umi_ocr_with_progress(
+                        pdf_for_ocr,
+                        &base_url,
+                        total_pages,
+                        Some(tx),
+                    )
+                    .await
+                });
+
+                while let Some(evt) = rx.recv().await {
+                    yield Ok(Event::default().event("progress").data(serde_json::to_string(&evt).unwrap_or_default()));
+                }
+
+                match (&mut ocr_handle).await {
+                    Ok(Ok(ocr_text)) if !ocr_text.trim().is_empty() => Ok(ocr_text),
+                    Ok(Err(umi_err)) => {
+                        let data_for_tess = file_bytes.clone();
+                        let tess_res = tokio::task::spawn_blocking(move || extract_pdf_text_ocr(&data_for_tess))
+                            .await
+                            .unwrap_or_else(|_| Err("Tesseract task panicked".into()));
+                        if let Ok(t) = tess_res {
+                            if !t.trim().is_empty() {
+                                method = "tesseract".to_string();
+                                Ok(t)
+                            } else {
+                                Err(StructuredUploadError::ocr_unavailable(umi_err))
+                            }
+                        } else {
+                            let is_deepseek = {
+                                let cfg = s.config.read().unwrap_or_else(|e| e.into_inner());
+                                cfg.ai_base_url.contains("deepseek")
+                            };
+                            if is_deepseek {
+                                Err(StructuredUploadError::ocr_unavailable(format!(
+                                    "{umi_err}；且 DeepSeek 不支持图片视觉兜底"
+                                )))
+                            } else {
+                                let ai_client = s
+                                    .config
+                                    .read()
+                                    .unwrap_or_else(|e| e.into_inner())
+                                    .ai_client();
+                                match extract_pdf_via_ai_vision(&file_bytes, &ai_client).await {
+                                    Ok(v) if !v.trim().is_empty() => {
+                                        method = "ai_vision".to_string();
+                                        Ok(v)
+                                    }
+                                    Ok(_) | Err(_) => Err(StructuredUploadError::ocr_unavailable(umi_err)),
+                                }
+                            }
+                        }
+                    }
+                    _ => Err(StructuredUploadError::ocr_unavailable("Umi-OCR 异步任务异常中止")),
+                }
+            }
+        } else if ext == "docx" {
+            method = "docx_xml".to_string();
+            extract_docx_text(&file_bytes)
+                .map_err(|e| StructuredUploadError::file_corrupted(format!("DOCX 解析失败: {e}")))
+                .and_then(|t| {
+                    if t.trim().is_empty() {
+                        Err(StructuredUploadError::file_corrupted("DOCX 无可提取文字"))
+                    } else {
+                        Ok(t)
+                    }
+                })
+        } else if ext == "doc" {
+            Err(StructuredUploadError::file_corrupted(
+                "暂不支持旧版 .doc 格式，请另存为 .docx 或 .pdf",
+            ))
+        } else {
+            method = "plain_text".to_string();
+            match String::from_utf8(file_bytes.clone()) {
+                Ok(t) => Ok(t),
+                Err(_) => {
+                    let (t, _, had_errors) = encoding_rs::GBK.decode(&file_bytes);
+                    if had_errors {
+                        Err(StructuredUploadError::file_corrupted(
+                            "无法识别文件类型，请上传 PDF、DOCX、TXT 或图片文件",
+                        ))
+                    } else {
+                        Ok(t.into_owned())
+                    }
+                }
+            }
+        };
+
+        match extracted {
+            Ok(text) => {
+                const MAX_EXTRACT_CHARS: usize = 50_000;
+                let total_chars = text.chars().count();
+                let truncated = total_chars > MAX_EXTRACT_CHARS;
+                let payload = json!({
+                    "text": truncate_for_ai(&text, MAX_EXTRACT_CHARS),
+                    "file_type": ext,
+                    "length": text.len(),
+                    "char_length": total_chars,
+                    "truncated": truncated,
+                    "method": method,
+                    "total_pages": total_pages,
+                });
+                yield Ok(Event::default().event("result").data(payload.to_string()));
+            }
+            Err(err) => {
+                yield Ok(Event::default().event("error").data(err.to_json().to_string()));
+            }
+        }
+        yield Ok(Event::default().event("done").data("[DONE]"));
+    };
+
+    Sse::new(stream)
+}
+
+/// 仅执行快速文本层提取（pdf-extract -> by-pages -> pdftotext -> PyMuPDF），不触发慢速 OCR
+async fn extract_pdf_text_fast_layers(data: &[u8]) -> Result<String, String> {
+    if let Ok(text) = pdf_extract::extract_text_from_mem(data) {
+        let trimmed = text.trim();
+        let is_error = trimmed.contains("MuPDF error")
+            || trimmed.contains("mupdf error")
+            || trimmed.contains("zlib error")
+            || trimmed.contains("PDF error");
+        if !trimmed.is_empty() && !is_error {
+            return Ok(text);
+        }
+    }
+    if let Ok(text) = extract_pdf_text_by_pages(data) {
+        let trimmed = text.trim();
+        let is_error = trimmed.contains("MuPDF error")
+            || trimmed.contains("mupdf error")
+            || trimmed.contains("zlib error")
+            || trimmed.contains("PDF error");
+        if !trimmed.is_empty() && !is_error {
+            return Ok(text);
+        }
+    }
+    {
+        let data_vec = data.to_vec();
+        let result = tokio::task::spawn_blocking(move || extract_pdf_text_pdftotext(&data_vec))
+            .await
+            .unwrap_or_else(|_| Err("pdftotext task panicked".into()));
+        if let Ok(text) = result {
+            let trimmed = text.trim();
+            let is_error = trimmed.contains("MuPDF error")
+                || trimmed.contains("mupdf error")
+                || trimmed.contains("zlib error")
+                || trimmed.contains("PDF error");
+            if !trimmed.is_empty() && !is_error {
+                return Ok(text);
+            }
+        }
+    }
+    {
+        let data_vec = data.to_vec();
+        let result = tokio::task::spawn_blocking(move || extract_pdf_text_pymupdf(&data_vec))
+            .await
+            .unwrap_or_else(|_| Err("PyMuPDF task panicked".into()));
+        if let Ok(text) = result {
+            let trimmed = text.trim();
+            let is_error = trimmed.contains("MuPDF error")
+                || trimmed.contains("mupdf error")
+                || trimmed.contains("zlib error")
+                || trimmed.contains("PDF error");
+            if !trimmed.is_empty() && !is_error {
+                return Ok(text);
+            }
+        }
+    }
+    Err("PDF 无可提取文本层".into())
 }
 
 /// AI 视觉兜底：将 PDF 每页转 PNG，用 AI 视觉模型识别文字
@@ -781,7 +1292,7 @@ fn extract_pdf_text_pymupdf(data: &[u8]) -> Result<String, String> {
         .map_err(|error| format!("failed to prepare PDF for PyMuPDF: {error}"))?;
     let tmp_str = tmp_path.to_string_lossy().to_string();
 
-    let python = r"C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe";
+    let python = resolve_python_bin();
     let script = "import fitz,sys\nsys.stdout.reconfigure(encoding='utf-8')\ndoc=fitz.open(sys.argv[1])\nfor p in doc:\n print(p.get_text())".to_string();
 
     let output = std::process::Command::new(python)
@@ -831,8 +1342,8 @@ else:
         token, tmp_pdf_str
     );
 
-    let python = r"C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe";
-    let output = std::process::Command::new(python)
+    let python = resolve_python_bin();
+    let output = std::process::Command::new(&python)
         .args(["-c", &script])
         .output();
 
@@ -868,14 +1379,13 @@ fn extract_pdf_text_ocr(data: &[u8]) -> Result<String, String> {
         .map_err(|error| format!("failed to prepare PDF for OCR: {error}"))?;
     let tmp_str = tmp_path.to_string_lossy().to_string();
 
-    let python = r"C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe";
+    let python = resolve_python_bin();
     let script = r#"
 import pytesseract, fitz, sys
 from PIL import Image
 import io
 
 sys.stdout.reconfigure(encoding='utf-8')
-pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 doc = fitz.open(sys.argv[1])
 for page in doc:
     mat = fitz.Matrix(2.0, 2.0)
@@ -885,7 +1395,7 @@ for page in doc:
     print(text)
 "#;
 
-    let output = std::process::Command::new(python)
+    let output = std::process::Command::new(&python)
         .args(["-c", script, &tmp_str])
         .output();
 
@@ -979,20 +1489,40 @@ pub(crate) async fn extract_pdf_text_umi_ocr_with_base_url(
     data: Vec<u8>,
     base_url: &str,
 ) -> Result<String, String> {
-    // Probe Umi-OCR reachability before attempting the full 120s workflow.
-    // If the service is not running, return immediately with a helpful message
-    // instead of waiting for the HTTP timeout.
+    extract_pdf_text_umi_ocr_with_progress(data, base_url, 1, None).await
+}
+
+/// 带分页进度回调的 Umi-OCR 文档识别（供同步与 T2.5 SSE 流式接口共用唯一实现）
+pub(crate) async fn extract_pdf_text_umi_ocr_with_progress(
+    data: Vec<u8>,
+    base_url: &str,
+    known_total_pages: usize,
+    progress_tx: Option<tokio::sync::mpsc::UnboundedSender<OcrProgressEvent>>,
+) -> Result<String, String> {
     let base_url = base_url.trim().trim_end_matches('/');
     let probe_addr = probe_addr_for(base_url);
     let probe = tokio::time::timeout(
         Duration::from_secs(2),
-        tokio::net::TcpStream::connect(probe_addr),
+        tokio::net::TcpStream::connect(&probe_addr),
     )
     .await;
     if probe.is_err() || probe.unwrap().is_err() {
-        return Err("Umi-OCR 未运行（127.0.0.1:1224 不可达）。\
-             需要 Umi-OCR 或改用可复制文本的 PDF"
-            .into());
+        return Err(format!(
+            "Umi-OCR 未运行（{probe_addr} 不可达）。需要启动 Umi-OCR 或改用可复制文本的 PDF"
+        ));
+    }
+
+    if let Some(ref tx) = progress_tx {
+        let _ = tx.send(OcrProgressEvent {
+            stage: "umi_ocr".to_string(),
+            page: 0,
+            total_pages: known_total_pages.max(1),
+            percent: 10,
+            message: format!(
+                "已连接 Umi-OCR（{base_url}），正在上传扫描件（共 {} 页）...",
+                known_total_pages.max(1)
+            ),
+        });
     }
 
     let client = reqwest::Client::builder()
@@ -1000,7 +1530,6 @@ pub(crate) async fn extract_pdf_text_umi_ocr_with_base_url(
         .build()
         .map_err(|e| format!("Umi-OCR 客户端创建失败: {}", e))?;
 
-    // Upload via multipart; the request body already owns the PDF bytes.
     let upload_url = format!("{}/api/doc/upload", base_url);
     let file_part = reqwest::multipart::Part::bytes(data)
         .file_name("document.pdf")
@@ -1042,11 +1571,12 @@ pub(crate) async fn extract_pdf_text_umi_ocr_with_base_url(
         }
     };
 
-    // Step 3: Poll for result (wait up to ~90s)
+    // Step 3: Poll for result (up to 180s for large scanned patent PDFs)
     let result_url = format!("{}/api/doc/result", base_url);
     let mut all_text = String::new();
-    let max_polls = 90; // 90 * 1s = 90s max wait
-    for _poll in 0..max_polls {
+    let max_polls = 180;
+    let mut last_reported_page = 0usize;
+    for poll in 0..max_polls {
         let poll_resp = client
             .post(&result_url)
             .json(&serde_json::json!({
@@ -1073,6 +1603,15 @@ pub(crate) async fn extract_pdf_text_umi_ocr_with_base_url(
 
         let is_done = poll_json["is_done"].as_bool().unwrap_or(false);
         let state = poll_json["state"].as_str().unwrap_or("");
+        let processed = poll_json["processed_count"]
+            .as_u64()
+            .map(|n| n as usize)
+            .unwrap_or(last_reported_page);
+        let total = poll_json["pages_count"]
+            .as_u64()
+            .map(|n| n as usize)
+            .filter(|&n| n > 0)
+            .unwrap_or_else(|| known_total_pages.max(1));
 
         // Collect incremental text
         if let Some(data_str) = poll_json["data"].as_str() {
@@ -1081,16 +1620,26 @@ pub(crate) async fn extract_pdf_text_umi_ocr_with_base_url(
             }
         }
 
-        if is_done {
+        if let Some(ref tx) = progress_tx {
+            if processed > last_reported_page || is_done || poll % 3 == 0 {
+                last_reported_page = processed;
+                let effective_page = if is_done { total } else { processed.min(total) };
+                let pct = ((effective_page * 85) / total.max(1) + 10).min(98) as u8;
+                let _ = tx.send(OcrProgressEvent {
+                    stage: "umi_ocr".to_string(),
+                    page: effective_page,
+                    total_pages: total,
+                    percent: pct,
+                    message: format!("Umi-OCR 正在识别第 {effective_page}/{total} 页..."),
+                });
+            }
+        }
+
+        if is_done || state == "failure" {
             break;
         }
 
-        // state == "failure" — stop early
-        if state == "failure" {
-            break;
-        }
-
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
     }
 
     // Step 4: Cleanup — clear task on Umi-OCR
@@ -1762,6 +2311,122 @@ mod umi_ocr_config_tests {
             probe_addr_for("127.0.0.1:1224"),
             "127.0.0.1:1224",
             "无 scheme 也能取"
+        );
+    }
+
+    #[test]
+    fn t25_structured_upload_error_codes_classify_all_four_cases() {
+        // 1. 损坏文件（无 %PDF- 签名 / 截断缺 %%EOF）
+        let corrupt = inspect_pdf_integrity(b"not a pdf file").expect_err("corrupted must fail");
+        assert_eq!(corrupt.error_code, ERR_FILE_CORRUPTED);
+        assert!(!corrupt.hint.is_empty());
+
+        let truncated =
+            inspect_pdf_integrity(b"%PDF-1.7\n1 0 obj\n<<>>\nendobj").expect_err("truncated");
+        assert_eq!(truncated.error_code, ERR_FILE_CORRUPTED);
+
+        // 2. 加密 PDF（含 /Encrypt 字典项）
+        let encrypted = inspect_pdf_integrity(
+            b"%PDF-1.7\n1 0 obj\n<< /Filter /Standard /V 2 >>\nendobj\ntrailer\n<< /Encrypt 1 0 R >>\n%%EOF",
+        )
+        .expect_err("encrypted PDF must fail");
+        assert_eq!(encrypted.error_code, ERR_PDF_ENCRYPTED);
+
+        // 3. 超体积上限
+        let too_large = StructuredUploadError::file_too_large(10);
+        assert_eq!(too_large.error_code, ERR_FILE_TOO_LARGE);
+
+        // 4. OCR 不可用
+        let ocr_err = StructuredUploadError::ocr_unavailable("Umi-OCR unreachable");
+        assert_eq!(ocr_err.error_code, ERR_OCR_UNAVAILABLE);
+        assert!(ocr_err.hint.contains("Umi-OCR"));
+    }
+
+    #[tokio::test]
+    async fn t25_umi_ocr_progress_stream_emits_page_updates_and_text() {
+        use axum::{routing::get, routing::post, Router};
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        };
+
+        let poll_counter = Arc::new(AtomicUsize::new(0));
+        let poll_counter_clone = poll_counter.clone();
+        let app = Router::new()
+            .route(
+                "/api/doc/upload",
+                post(|| async { Json(json!({ "code": 100, "data": "mock-task-42" })) }),
+            )
+            .route(
+                "/api/doc/result",
+                post(move || {
+                    let c = poll_counter_clone.clone();
+                    async move {
+                        let step = c.fetch_add(1, Ordering::SeqCst);
+                        if step == 0 {
+                            Json(json!({
+                                "code": 100,
+                                "is_done": false,
+                                "state": "running",
+                                "processed_count": 1,
+                                "pages_count": 3,
+                                "data": "第1页：固态电解质隔膜"
+                            }))
+                        } else {
+                            Json(json!({
+                                "code": 100,
+                                "is_done": true,
+                                "state": "success",
+                                "processed_count": 3,
+                                "pages_count": 3,
+                                "data": "\n第2-3页：说明书附图与实施例"
+                            }))
+                        }
+                    }
+                }),
+            )
+            .route(
+                "/api/doc/clear/:id",
+                get(|| async { Json(json!({ "code": 100 })) }),
+            );
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind mock umi-ocr");
+        let addr = listener.local_addr().expect("local addr");
+        let server = tokio::spawn(async move {
+            let _ = axum::Server::from_tcp(listener)
+                .expect("server")
+                .serve(app.into_make_service())
+                .await;
+        });
+
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let base_url = format!("http://{addr}");
+        let text = extract_pdf_text_umi_ocr_with_progress(
+            b"%PDF-1.4\n%%EOF".to_vec(),
+            &base_url,
+            3,
+            Some(tx),
+        )
+        .await
+        .expect("umi-ocr mock should succeed");
+
+        let mut events = Vec::new();
+        while let Ok(evt) = rx.try_recv() {
+            events.push(evt);
+        }
+        server.abort();
+
+        assert!(text.contains("固态电解质隔膜"));
+        assert!(text.contains("说明书附图与实施例"));
+        assert!(
+            events.iter().any(|e| e.page == 1 && e.total_pages == 3),
+            "must emit page 1/3 progress, got: {:?}",
+            events
+        );
+        assert!(
+            events.iter().any(|e| e.page == 3 && e.total_pages == 3),
+            "must emit page 3/3 progress, got: {:?}",
+            events
         );
     }
 }

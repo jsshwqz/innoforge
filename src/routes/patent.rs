@@ -410,6 +410,70 @@ pub async fn api_patents_backfill_index(
     }
 }
 
+/// GET /api/patent/:id/numeral-check — 专利详情页 V-RAG 附图标号索引与一致性静态核查（v0.9.66）
+pub async fn api_patent_numeral_check(
+    Path(id): Path<String>,
+    State(s): State<AppState>,
+) -> Json<serde_json::Value> {
+    let patent = match s.db.get_patent(&id) {
+        Ok(Some(p)) => p,
+        _ => return Json(json!({"status": "error", "message": "Patent not found"})),
+    };
+    let report = crate::ai::strategy_arbitration::part_topology::check_numeral_consistency(
+        &patent.claims,
+        &patent.description,
+        None,
+    );
+    Json(json!({
+        "status": "ok",
+        "patent_id": patent.id,
+        "patent_number": patent.patent_number,
+        "passed": report.passed,
+        "total_numerals": report.total_numerals,
+        "issue_count": report.issue_count,
+        "summary": report.summary,
+        "parts": report.parts,
+        "issues": report.issues,
+    }))
+}
+
+/// POST /api/ai/numeral-consistency-check — 交底书 / 权利要求 / 附图标号一致性静态核查（v0.9.66）
+pub async fn api_ai_numeral_consistency_check(
+    Json(req): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let claims_text = req
+        .get("claims_text")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let description_text = req
+        .get("description_text")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if claims_text.trim().is_empty() && description_text.trim().is_empty() {
+        return Json(json!({
+            "status": "error",
+            "message": "请至少提供权利要求文本（claims_text）或说明书/交底书正文（description_text）"
+        }));
+    }
+    let drawing_parts: Option<Vec<crate::ai::strategy_arbitration::part_topology::PartDesignator>> =
+        req.get("drawing_parts")
+            .and_then(|v| serde_json::from_value(v.clone()).ok());
+    let report = crate::ai::strategy_arbitration::part_topology::check_numeral_consistency(
+        claims_text,
+        description_text,
+        drawing_parts.as_deref(),
+    );
+    Json(json!({
+        "status": "ok",
+        "passed": report.passed,
+        "total_numerals": report.total_numerals,
+        "issue_count": report.issue_count,
+        "summary": report.summary,
+        "parts": report.parts,
+        "issues": report.issues,
+    }))
+}
+
 /// Optional query param `?fetch=true` triggers online fetch if not found locally
 pub async fn api_patent_lookup(
     Path(patent_number): Path<String>,
@@ -1048,7 +1112,7 @@ h2 {{ color: #1a5276; border-bottom: 1px solid #ccc; padding-bottom: 5px; margin
         pub_date = esc(&patent.publication_date),
         country = esc(&patent.country),
         ipc = esc(&patent.ipc_codes),
-        legal = esc(&patent.legal_status),
+        legal = esc(&dedup_legal_status_summary(&patent.legal_status)),
         abstract_text = esc(&patent.abstract_text),
         claims_html = claims_html,
         desc_html = desc_html,
@@ -1828,28 +1892,34 @@ pub(crate) fn map_google_patents_events_to_status(
         }
     }
 
-    let event_parts: Vec<String> = ordered
-        .iter()
-        .take(3)
-        .filter_map(|(_, ev)| {
-            let use_desc = ev.title.trim().is_empty()
-                || (!ev.description.trim().is_empty()
-                    && ev.title.trim().len() <= 6
-                    && ev.description.trim() != ev.title.trim());
-            let label = if use_desc {
-                ev.description.trim()
-            } else {
-                ev.title.trim()
-            };
-            if label.is_empty() {
-                None
-            } else if ev.date.trim().is_empty() {
-                Some(label.to_string())
-            } else {
-                Some(format!("{} ({})", label, ev.date.trim()))
+    let mut seen_event_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut event_parts: Vec<String> = Vec::new();
+    for (_, ev) in &ordered {
+        let use_desc = ev.title.trim().is_empty()
+            || (!ev.description.trim().is_empty()
+                && ev.title.trim().len() <= 6
+                && ev.description.trim() != ev.title.trim());
+        let label = if use_desc {
+            ev.description.trim()
+        } else {
+            ev.title.trim()
+        };
+        if label.is_empty() {
+            continue;
+        }
+        let formatted = if ev.date.trim().is_empty() {
+            label.to_string()
+        } else {
+            format!("{} ({})", label, ev.date.trim())
+        };
+        let norm_key = formatted.to_ascii_lowercase();
+        if seen_event_keys.insert(norm_key) {
+            event_parts.push(formatted);
+            if event_parts.len() >= 3 {
+                break;
             }
-        })
-        .collect();
+        }
+    }
 
     let summary = if matched_label != "未知" {
         if event_parts.is_empty() {
@@ -1867,6 +1937,36 @@ pub(crate) fn map_google_patents_events_to_status(
     };
 
     (matched_status, matched_label, summary)
+}
+
+/// 清理并去重历史存量 `legal_status` 中的重复事件项（如 `Patent grant (2024-06-14); Patent grant (2024-06-14)`）
+pub(crate) fn dedup_legal_status_summary(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let (prefix, events_part) = if let Some((lhs, rhs)) = trimmed.split_once(" — ") {
+        (Some(lhs.trim()), rhs.trim())
+    } else {
+        (None, trimmed)
+    };
+    let mut seen = std::collections::HashSet::new();
+    let mut unique = Vec::new();
+    for seg in events_part.split([';', '；']) {
+        let s = seg.trim();
+        if s.is_empty() {
+            continue;
+        }
+        if seen.insert(s.to_ascii_lowercase()) {
+            unique.push(s);
+        }
+    }
+    let joined = unique.join("; ");
+    match prefix {
+        Some(p) if !joined.is_empty() => format!("{p} — {joined}"),
+        Some(p) => p.to_string(),
+        None => joined,
+    }
 }
 
 /// 从法律事件推断当前状态 / Infer current status from legal events
@@ -2113,5 +2213,34 @@ mod patent_image_proxy_tests {
         assert!(crate::ai::fto_scanner::is_patent_inactive(
             &loaded.legal_status
         ));
+    }
+
+    #[test]
+    fn dedup_legal_status_summary_removes_duplicate_events_preserving_order() {
+        let dirty = "有效 (Active) — Patent grant (2024-06-14); Patent grant (2024-06-14); Publication (2024-06-14)";
+        assert_eq!(
+            super::dedup_legal_status_summary(dirty),
+            "有效 (Active) — Patent grant (2024-06-14); Publication (2024-06-14)"
+        );
+        let events = vec![
+            crate::patent::LegalEvent {
+                date: "2024-06-14".into(),
+                title: "Patent grant".into(),
+                description: "Patent grant".into(),
+            },
+            crate::patent::LegalEvent {
+                date: "2024-06-14".into(),
+                title: "Patent grant".into(),
+                description: "Patent grant".into(),
+            },
+            crate::patent::LegalEvent {
+                date: "2016-05-04".into(),
+                title: "Substantive examination".into(),
+                description: "Substantive examination".into(),
+            },
+        ];
+        let (st, _, summary) = super::map_google_patents_events_to_status(&events);
+        assert_eq!(st, crate::search::providers::epo_ops::LegalStatus::Active);
+        assert_eq!(summary.matches("Patent grant (2024-06-14)").count(), 1);
     }
 }

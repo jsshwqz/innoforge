@@ -15,7 +15,8 @@
 | **检索员** | 专利分块、`chunks_fts`、向量回填与 RRF 混合检索 | `src/patent_chunker.rs`、`src/db/rag.rs`、`src/db/vector.rs` | `POST /api/search/vector`、`patents_embedding` | `cargo test --lib db::vector` |
 | **检索员+分析师** | 免费全文补全与 HTML 解析 | `src/search/enrichment.rs` (`enrich_patent_free`) | `GET /api/patent/enrich-free/:id` | `cargo test --lib search::enrichment` |
 | **检索员+分析师** | **专利 PDF 真实单张附图提取** | `src/pdf_drawings.rs` (`extract_drawings_from_pdf_bytes`) | `POST /api/patent/:id/extract-pdf-drawings` | `cargo test --lib pdf_drawings` |
-| **检索员+分析师** | **PDF/图片文本提取与 Umi-OCR 统一通道** | `src/routes/upload.rs`、`src/ai/extraction.rs` | `POST /api/upload/extract` (`UMI_OCR_BASE_URL`) | `cargo test --lib ai::extraction` |
+| **检索员+分析师** | **PDF/图片文本提取、T2.5 SSE OCR 与 Umi-OCR 通道** | `src/routes/upload.rs`、`src/ai/extraction.rs` | `POST /api/upload/extract/stream` (`UMI_OCR_BASE_URL`) | `cargo test --lib routes::upload` |
+| **专利代理师** | **V-RAG 附图标号联动与交底书标号一致性核查** | `src/ai/part_topology.rs` (`check_numeral_consistency`) | `GET /api/patent/:id/numeral-check`、`/api/ai/numeral-consistency-check` | `cargo test --lib ai::part_topology` |
 | **技术分析师** | 16 步创新验证流水线编排与状态机 | `src/pipeline/engine.rs`、`src/db/research_state.rs` | `ideas`、`research_states` | `cargo test --lib pipeline` |
 | **技术分析师** | 事实校验、EK-v2 证据核验与决策门禁 | `src/pipeline/steps/fact_check.rs`、`finalize.rs`、`src/evidence_kernel/` | `evidence_chain`、`ideas.analysis` | `cargo test --lib pipeline::steps::finalize` |
 | **技术分析师** | 特征卡、3-Sheet BOM Excel 与工程归档 | `src/routes/feature_cards.rs`、`src/pipeline/steps/deliverables.rs` | `feature_cards`、`/api/ideas/:id/archive/zip` | `cargo test --lib pipeline::steps::deliverables` |

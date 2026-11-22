@@ -14,6 +14,13 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-11-22 — **T2.5 异步 SSE OCR 进度流、4 类结构化错误码与 V-RAG 附图标号双向联动核查（v0.9.66）**
+
+- **状态 / Status**: ✅ 本地全量验证与隔离端口实测通过，提交 PR 合入 `main` 并打 `v0.9.66` Tag
+- **① `T2.5` 异步 SSE OCR 进度流与 4 类错误码**（`src/routes/upload.rs`、`src/common.rs`、`templates/search.html`）：新增 `POST /api/upload/extract/stream` 优先对接 `Umi-OCR` 逐页推送 `page X/Y` 进度，并在 `/api/upload/extract` 与流式接口统一输出 `ERR_PDF_ENCRYPTED` / `ERR_FILE_CORRUPTED` / `ERR_OCR_UNAVAILABLE` / `ERR_FILE_TOO_LARGE` 四类结构化错误码与排障建议；清除 `upload.rs` 残留硬编码个人路径。
+- **② V-RAG 附图标号 ↔ 正文双向高亮与标号一致性静态核查**（`src/ai/part_topology.rs`、`src/routes/patent.rs`、`templates/patent_detail.html`、`templates/office_action_response.html`）：新增 `check_numeral_consistency`、`GET /api/patent/:id/numeral-check` 与 `POST /api/ai/numeral-consistency-check`，确定性检出图中有号正文未提、正文有号附图缺失、同一标号异名三类低级错误，并打通详情页与 OA 页的图文标号双向高亮定位。
+- **③ 真实 759 篇库 + 浏览器全页实测质量打磨**（`src/db/patent.rs`、`src/db/vector.rs`、`src/routes/search.rs`、`src/pdf_drawings.rs`、`src/routes/pages.rs`、`templates/*.html`、`static/style.css`）：修复 `insert_patent` 超 200 行漏去重及浅层数据冲刷已富化字段；修复语义向量跨空格伪词元、专利级聚合去重、诚实相关度分与真实命中片段卡片；标号提取支持全部三种 CNIPA 图例格式并过滤物理数值/日期伪标号（真实 10 篇误报 `88 → 7`，8/10 篇 0 误报）；老扫描件自动去 A4 白边裁切并加白底内边距防贴边；修复已授权专利法律状态误判为 `Pending` 及法律事件重复拼接；收敛 OA/Idea/Settings 响应式排版与交互。
+
 ### 2026-11-21 — **MB0b 语义向量检索前端闭环、存量断点回填与全链路 Token 预算硬熔断（v0.9.65）**
 
 - **状态 / Status**: ✅ 本地全量验证与 `:3001` 实测通过，提交 PR 合入 `main` 并打 `v0.9.65` Tag

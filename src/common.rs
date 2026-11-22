@@ -881,10 +881,23 @@ pub fn build_router_with_token(
             get(routes::api_get_patent_collections),
         )
         .route("/api/tags", get(routes::api_list_all_tags))
-        // 文件上传
+        // 文件上传与 T2.5 异步 SSE OCR 流
         .route("/api/upload/compare", post(routes::api_upload_compare))
         .route("/api/upload/extract", post(routes::api_upload_extract))
+        .route(
+            "/api/upload/extract/stream",
+            post(routes::api_upload_extract_stream),
+        )
         .route("/api/upload/pdf-store", post(routes::api_upload_pdf_store))
+        // V-RAG 附图标号索引与交底书标号一致性核查（v0.9.66）
+        .route(
+            "/api/patent/:id/numeral-check",
+            get(routes::api_patent_numeral_check),
+        )
+        .route(
+            "/api/ai/numeral-consistency-check",
+            post(routes::api_ai_numeral_consistency_check),
+        )
         // 上传文件静态服务
         .nest_service("/uploads", ServeDir::new("data/uploads"))
         // 静态资源
