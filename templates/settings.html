@@ -274,6 +274,12 @@
             <div id="ai-budget-status-msg" class="status-message" style="margin-top:8px;"></div>
         </div>
 
+        <div class="setting-group" id="model-router-group">
+            <h3>🧭 四角色 AI 模型路由表（Model Router）</h3>
+            <p class="muted" style="font-size:13px;">后端统一按任务角色自动分发至快模型、强推理、视觉多模态与严格 JSON 校验四类通道。</p>
+            <div id="model-router-table" class="muted" style="font-size:13px;">正在加载模型路由表...</div>
+        </div>
+
         <div class="setting-group" id="ai-cost-group" style="display:none;">
             <h3>💰 <span data-i18n="ai.costTitle">AI 使用统计（近30天）</span></h3>
             <div id="ai-cost-summary" class="form-section">
@@ -727,9 +733,67 @@
 
             document.getElementById('config-status').innerHTML = DOMPurify.sanitize(status.join('<br>'));
 
-            // 加载 AI 使用统计与熔断阈值
+            // 加载 AI 使用统计、熔断阈值与四角色模型路由表
             loadAiCostStats();
             loadAiBudgetSettings();
+            loadModelRouterTable();
+        }
+
+        async function loadModelRouterTable() {
+            var box = document.getElementById('model-router-table');
+            if (!box) return;
+            try {
+                var res = await fetch('/api/settings/model-router');
+                if (!res.ok) return;
+                var data = await res.json();
+                var roles = Array.isArray(data.roles) ? data.roles : [];
+                if (!roles.length) return;
+                box.textContent = '';
+                var wrap = document.createElement('div');
+                wrap.style.overflowX = 'auto';
+                var tbl = document.createElement('table');
+                tbl.style.cssText = 'width:100%;border-collapse:collapse;font-size:13px;';
+                var thead = document.createElement('thead');
+                var hr = document.createElement('tr');
+                ['角色通道', '解析模型', '状态 / 温度 / 超时', '职责'].forEach(function(h) {
+                    var th = document.createElement('th');
+                    th.textContent = h;
+                    th.style.cssText = 'text-align:left;padding:6px 10px;border:1px solid #30363d;background:#161b22;color:#58a6ff;white-space:nowrap;';
+                    hr.appendChild(th);
+                });
+                thead.appendChild(hr);
+                tbl.appendChild(thead);
+                var tbody = document.createElement('tbody');
+                roles.forEach(function(r) {
+                    var tr = document.createElement('tr');
+                    var td1 = document.createElement('td');
+                    td1.textContent = r.label_zh || r.role_key || '';
+                    td1.style.cssText = 'padding:6px 10px;border:1px solid #30363d;color:#f0f6fc;font-weight:600;white-space:nowrap;';
+                    var td2 = document.createElement('td');
+                    td2.textContent = r.resolved_model || '-';
+                    td2.style.cssText = 'padding:6px 10px;border:1px solid #30363d;color:#79c0ff;font-family:monospace;white-space:nowrap;';
+                    var td3 = document.createElement('td');
+                    td3.style.cssText = 'padding:6px 10px;border:1px solid #30363d;color:#c9d1d9;white-space:nowrap;';
+                    var badge = document.createElement('span');
+                    badge.textContent = r.ready ? '● 就绪' : '○ 降级';
+                    badge.style.color = r.ready ? '#3fb950' : '#d29922';
+                    td3.appendChild(badge);
+                    td3.appendChild(document.createTextNode(' · T=' + Number(r.default_temperature || 0).toFixed(2) + ' · ' + Number(r.recommended_timeout_secs || 0) + 's'));
+                    var td4 = document.createElement('td');
+                    td4.textContent = r.purpose_zh || '';
+                    td4.style.cssText = 'padding:6px 10px;border:1px solid #30363d;color:#8b949e;';
+                    tr.appendChild(td1);
+                    tr.appendChild(td2);
+                    tr.appendChild(td3);
+                    tr.appendChild(td4);
+                    tbody.appendChild(tr);
+                });
+                tbl.appendChild(tbody);
+                wrap.appendChild(tbl);
+                box.appendChild(wrap);
+            } catch (e) {
+                console.warn('loadModelRouterTable failed:', e);
+            }
         }
 
         function applyAiBudgetUi(data) {

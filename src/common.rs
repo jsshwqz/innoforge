@@ -484,6 +484,10 @@ pub fn build_router_with_token(
             get(routes::api_get_ai_budget).post(routes::api_save_ai_budget),
         )
         .route(
+            "/api/settings/model-router",
+            get(routes::api_get_model_router),
+        )
+        .route(
             "/api/settings/serpapi/balance",
             get(routes::api_serpapi_balance),
         )
@@ -731,6 +735,7 @@ pub fn build_router_with_token(
         .route("/api/ai/cost/record", post(routes::api_ai_cost_save))
         // 创意验证 API / Idea API
         .route("/api/idea/submit", post(routes::api_idea_submit))
+        .route("/api/idea/decompose", post(routes::api_idea_decompose))
         .route("/api/idea/analyze", post(routes::api_idea_analyze))
         .route("/api/idea/pipeline", post(routes::api_idea_pipeline))
         .route(

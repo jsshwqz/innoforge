@@ -49,6 +49,7 @@ pub mod pre_submission_check;
 pub mod prohibition_check;
 mod providers;
 pub mod response_pipeline;
+pub mod router;
 pub mod search_report;
 pub mod strategy_arbitration;
 pub mod targeted_claims;

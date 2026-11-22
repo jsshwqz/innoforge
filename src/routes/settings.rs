@@ -740,6 +740,18 @@ pub async fn api_save_ai(
     Ok(Json(json!({"status": "ok"})))
 }
 
+/// GET /api/settings/model-router — 查询四角色表驱动模型路由表实时状态（v0.9.69）
+pub async fn api_get_model_router(State(s): State<AppState>) -> Json<serde_json::Value> {
+    let routes = {
+        let cfg = s.config.read().unwrap_or_else(|e| e.into_inner());
+        cfg.model_routing_snapshot()
+    };
+    Json(json!({
+        "status": "ok",
+        "roles": routes,
+    }))
+}
+
 /// GET /api/settings/ai-budget — 读取 AI 调用次数与 Token 硬熔断阈值及今日实时消耗
 pub async fn api_get_ai_budget(State(s): State<AppState>) -> Json<serde_json::Value> {
     match s.db.get_ai_budget_status() {

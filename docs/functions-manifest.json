@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-22T17:48:40.523Z",
+  "generatedAt": "2026-11-22T18:45:21.324Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -130,10 +130,12 @@
     "idea.html": {
       "references": [
         "addMemoryEntry",
+        "applyQuadrupleToDesc",
         "cancelCheckpointRollback",
         "clearForm",
         "compareFeatureCards",
         "copyControlStCode",
+        "decomposeIdeaQuadruple",
         "deleteMemory",
         "drawIdeaCad",
         "exportBomXlsx",
@@ -169,6 +171,7 @@
       ],
       "definitions": [
         "addMemoryEntry",
+        "applyQuadrupleToDesc",
         "buildPipelineUI",
         "cancelCheckpointRollback",
         "cleanup",
@@ -178,6 +181,7 @@
         "compareFeatureCards",
         "context",
         "copyControlStCode",
+        "decomposeIdeaQuadruple",
         "deleteClaimNode",
         "deleteIdea",
         "deleteMemory",
@@ -732,6 +736,7 @@
         "goBack",
         "loadAiBudgetSettings",
         "loadAiCostStats",
+        "loadModelRouterTable",
         "loginWithGcloud",
         "onAuth",
         "onProviderChange",
