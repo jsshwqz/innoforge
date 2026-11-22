@@ -236,7 +236,7 @@
             <div id="freecad-status" class="status-pill" data-i18n="cad.checking"></div>
             <div class="btn-row">
                 <button class="btn-save" type="button" onclick="saveFreeCadSettings()" data-i18n="cad.saveSettings"></button>
-                <button class="btn-gray" id="freecad-start-btn" type="button" onclick="checkAndStartFreeCad()" data-i18n="cad.detectStart"></button>
+                <button class="btn-gray btn-save" id="freecad-start-btn" type="button" onclick="checkAndStartFreeCad()" data-i18n="cad.detectStart"></button>
             </div>
         </div>
 
@@ -247,7 +247,7 @@
             <p id="config-status">加载中...</p>
             <div class="btn-row" style="margin-top:12px;">
                 <button class="btn-save" type="button" onclick="exportDbBackup()" id="btn-backup-db" data-i18n="settings.backupDb">💾 立即备份本地数据库</button>
-                <button class="btn-gray" type="button" onclick="checkDbBackupHealth()" id="btn-check-backup" data-i18n="settings.checkBackup">🔍 校验热备份完整性</button>
+                <button class="btn-gray btn-save" type="button" onclick="checkDbBackupHealth()" id="btn-check-backup" data-i18n="settings.checkBackup">🔍 校验热备份完整性</button>
             </div>
             <div id="backup-status-msg" class="status-message" style="margin-top:8px;"></div>
         </div>
@@ -732,21 +732,28 @@
             loadAiBudgetSettings();
         }
 
+        function applyAiBudgetUi(data) {
+            var callsEl = document.getElementById('ai-budget-daily-calls');
+            var tokensEl = document.getElementById('ai-budget-daily-tokens');
+            var ideaEl = document.getElementById('ai-budget-idea-tokens');
+            var summaryEl = document.getElementById('ai-budget-today-summary');
+            if (callsEl) callsEl.value = Number(data.daily_max_calls || 0);
+            if (tokensEl) tokensEl.value = Number(data.daily_max_tokens || 0);
+            if (ideaEl) ideaEl.value = Number(data.idea_max_tokens || 0);
+            if (summaryEl) {
+                var tc = Number(data.today_calls || 0);
+                var tt = Number(data.today_total_tokens || 0);
+                var note = (tc > 0 && tt === 0) ? '（含未返回 token 明细的调用）' : '';
+                summaryEl.textContent = '📊 今日已调用 ' + tc + ' 次 · 已消耗 ' + tt.toLocaleString() + ' Tokens' + note;
+            }
+        }
+
         async function loadAiBudgetSettings() {
             try {
                 var res = await fetch('/api/settings/ai-budget');
                 if (!res.ok) return;
                 var data = await res.json();
-                var callsEl = document.getElementById('ai-budget-daily-calls');
-                var tokensEl = document.getElementById('ai-budget-daily-tokens');
-                var ideaEl = document.getElementById('ai-budget-idea-tokens');
-                var summaryEl = document.getElementById('ai-budget-today-summary');
-                if (callsEl) callsEl.value = Number(data.daily_max_calls || 0);
-                if (tokensEl) tokensEl.value = Number(data.daily_max_tokens || 0);
-                if (ideaEl) ideaEl.value = Number(data.idea_max_tokens || 0);
-                if (summaryEl) {
-                    summaryEl.textContent = '📊 今日已调用 ' + Number(data.today_calls || 0) + ' 次 · 已消耗 ' + Number(data.today_total_tokens || 0).toLocaleString() + ' Tokens';
-                }
+                applyAiBudgetUi(data);
             } catch (e) {
                 console.warn('loadAiBudgetSettings failed:', e);
             }
@@ -769,11 +776,11 @@
                 });
                 var data = await res.json();
                 if (res.ok && data.status === 'ok') {
+                    applyAiBudgetUi(data);
                     if (msgEl) {
                         msgEl.textContent = '✅ AI 熔断阈值已保存生效';
                         msgEl.className = 'status-message success';
                     }
-                    loadAiBudgetSettings();
                 } else if (msgEl) {
                     msgEl.textContent = '❌ 保存失败: ' + (data.message || '未知错误');
                     msgEl.className = 'status-message error';

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-22T08:26:17.658Z",
+  "generatedAt": "2026-11-22T15:44:40.778Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -162,6 +162,7 @@
         "summarizeDiscussion",
         "switchReportType",
         "switchTab",
+        "toggleIdeaHistoryDrawer",
         "validateClaimTree"
       ],
       "definitions": [
@@ -239,6 +240,7 @@
         "switchTab",
         "toCST",
         "toggleDimension",
+        "toggleIdeaHistoryDrawer",
         "updateFeatureDiffControls",
         "updatePipelineStep",
         "validateClaimTree"
@@ -566,10 +568,12 @@
         "exportPatentConclusions",
         "extractRealDrawingsFromPdf",
         "focusDrawingPart",
+        "formatNumeralIssueBadge",
         "getBtn",
         "handlePatentChatFiles",
         "hidePatentStopButton",
         "history",
+        "inlineFmt",
         "input",
         "jumpToNumeralInTab",
         "loadCitationGraph",
@@ -590,6 +594,7 @@
         "onOverlay",
         "openOriginalPatentPdf",
         "removeTag",
+        "renderDeepAnalysisMarkdown",
         "renderImages",
         "renderPatentChatPreview",
         "renderPatentMessages",
@@ -703,6 +708,7 @@
       ],
       "definitions": [
         "addSerpapiKeyRow",
+        "applyAiBudgetUi",
         "checkAndStartFreeCad",
         "checkDbBackupHealth",
         "connectGoogle",

@@ -717,17 +717,25 @@ pub async fn api_ai_summarize(
     State(s): State<AppState>,
     Json(req): Json<FetchPatentRequest>,
 ) -> Json<AiResponse> {
+    if let Err(breaker_msg) = s.db.check_ai_budget_circuit_breaker(None) {
+        return Json(AiResponse {
+            content: breaker_msg,
+        });
+    }
     let ai = s
         .config
         .read()
         .unwrap_or_else(|e| e.into_inner())
-        .ai_client();
+        .ai_client_expert();
     match s.db.get_patent(&req.patent_number) {
         Ok(Some(p)) => match ai
-            .summarize_patent(&p.title, &p.abstract_text, &p.claims)
+            .summarize_patent_deep(&p.title, &p.abstract_text, &p.claims, &p.description)
             .await
         {
-            Ok(content) => Json(AiResponse { content }),
+            Ok(content) => {
+                let _ = s.db.log_ai_call(&ai, "ai-summarize-deep", None, None);
+                Json(AiResponse { content })
+            }
             Err(e) => Json(AiResponse {
                 content: format!("AI error: {e}"),
             }),
@@ -935,12 +943,19 @@ pub async fn api_ai_claims_analysis(
         return Json(json!({"error": "该专利没有权利要求数据，请先获取完整专利信息"}));
     }
 
+    if let Err(breaker_msg) = s.db.check_ai_budget_circuit_breaker(None) {
+        return Json(json!({"error": breaker_msg}));
+    }
+
     let ai = s
         .config
         .read()
         .unwrap_or_else(|e| e.into_inner())
         .ai_client_expert();
-    match ai.analyze_claims(&patent.title, &patent.claims).await {
+    match ai
+        .analyze_claims_deep(&patent.title, &patent.claims, &patent.description)
+        .await
+    {
         Ok(content) => {
             let _ = s.db.log_ai_call(&ai, "ai-claims-analysis", None, None);
             Json(json!({"status": "ok", "analysis": content}))
@@ -1078,11 +1093,18 @@ pub async fn api_ai_compare_matrix(
         }
     }
 
+    if let Err(breaker_msg) = s.db.check_ai_budget_circuit_breaker(None) {
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(json!({"error": breaker_msg})),
+        );
+    }
+
     let ai = s
         .config
         .read()
         .unwrap_or_else(|e| e.into_inner())
-        .ai_client();
+        .ai_client_expert();
     match ai.compare_multiple(&patents_info).await {
         Ok(content) => {
             let _ = s.db.log_ai_call(&ai, "ai-compare-matrix", None, None);

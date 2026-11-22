@@ -41,7 +41,8 @@
         <div class="idea-main">
             <div class="page-header-row">
                 <h2 data-i18n="idea.title"></h2>
-                <div style="display:flex;gap:8px;">
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <button type="button" class="btn-secondary btn-sm idea-history-toggle" onclick="toggleIdeaHistoryDrawer()">📂 历史创意</button>
                     <a href="/" class="link-pill">首页</a>
                     <button class="btn-success-sm" onclick="showNewIdeaForm()">+ 新建</button>
                 </div>
@@ -2067,7 +2068,14 @@
         if (target) toggleDimension(target.getAttribute('data-dim'));
     });
 
+    function toggleIdeaHistoryDrawer() {
+        var sb = document.querySelector('.idea-sidebar');
+        if (sb) sb.classList.toggle('drawer-open');
+    }
+
     function displayResults(idea) {
+        var formEl = document.getElementById('idea-form');
+        if (formEl && idea && idea.id) formEl.style.display = 'none';
         var resultTabs = document.getElementById('result-tabs');
         if (resultTabs) resultTabs.style.display = 'flex';
         switchTab('overview');

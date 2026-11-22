@@ -17,6 +17,15 @@ All notable changes are documented here. Format based on [Keep a Changelog](http
   - `src/routes/patent.rs` & `src/common.rs`：新增 `GET /api/patent/:id/numeral-check` 与 `POST /api/ai/numeral-consistency-check`；
   - `templates/patent_detail.html` 实现正文/权要标号点击联动切换并高亮附图部件卡、点击部件卡反向高亮正文引用段并支持一键跳转定位；`templates/office_action_response.html` 新增「🔢 标号一致性核查」按钮与交互结果面板。
 
+- **全文档深度研发知识挖掘引擎升级（根治单篇/权要/对比分析浮于表面）**：
+  - `src/ai/patent.rs` & `src/routes/ai.rs`：新增确定性全文档信号预挖器 `extract_whole_document_signals`（在调用专家大模型前，先从权利要求 + 说明书全文提取真实定量工程参数窗口、部件连接拓扑与“仅说明书披露未写入权利要求书的隐藏部件”）；
+  - 升级 `summarize_patent_deep`（传入完整说明书 + 预挖信号，使用 `ai_client_expert` 输出因果物理链/定量参数表/失效边界/说明书隐藏宝藏/规避靶点/二次研发切入点）、`analyze_claims_deep`（权利要求 × 说明书交叉剖析多余限定、26.4 条支撑弱点与可落地规避方案）及 `compare_multiple`（跨文档共性瓶颈 + 跨专利嫁接空白点 + FTO 绕行通道）；
+  - `templates/patent_detail.html` 新增 `renderDeepAnalysisMarkdown`（XSS 安全渲染标题、加粗、代码与 Markdown 表格），告别原始 `###` / `|---|` 文本堆叠。
+- **真实浏览器 + 759 篇专利库实测打磨（检索去重校准、标号 92% 降误报、法律状态与入库去重合并）**：
+  - `src/db/patent.rs`：修复 `insert_patent` 使用 `%CN% + LIMIT 200` 导致大库同公开号重复入库并覆盖已富化字段的缺陷，改为精确按规范专利号检索合并保留全文/附图/PDF/IPC/法律状态；
+  - `src/db/vector.rs` & `src/routes/search.rs` & `templates/search.html`：修复跨空格伪 N-Gram 拼接，增加专利级聚合去重、512 维底噪门禁、诚实校准相关度与真实 `matched_snippet` 命中片段卡片展示；
+  - `src/ai/part_topology.rs` & `src/pdf_drawings.rs` & `src/routes/patent.rs` & `templates/patent_detail.html`：支持全部三种 CNIPA 图例格式并过滤温度/百分比/日期/申请号伪标号（10 篇真实全文专利误报由 88 条降至 7 条，8/10 篇 0 误报）；老扫描件附图新增墨迹外接框自动去白边裁切与白底内边距防黑字贴边；修复已授权专利被历史 `Substantive examination` 事件误判为「实审中」及法律事件重复拼接的问题；修复详情页跨 Tab 跳转激活态与说明书标号高亮滚动、OA 页工具栏分组、Idea 页 9-Tab 换行与窄屏历史抽屉及 Settings 按钮样式。
+
 ## [v0.9.65] - 2026-11-21
 
 ### 新增与增强 / Added & Enhanced

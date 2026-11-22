@@ -185,14 +185,29 @@ const TOPOLOGY_VERBS: &[&str] = &[
 
 fn strip_inline_prefixes(raw: &str) -> String {
     let mut current = raw.trim();
-    // 若行内匹配把动词/介词短语一起吃进来了（如 "固定连接在机架"），截断到最后一个分隔词之后
+    // 若行内匹配把动词/介词短语一起吃进来了（如 "固定连接在机架" / "并安装电磁线圈"），截断到最后一个分隔词之后
     const SPLIT_MARKERS: &[&str] = &[
+        "固定设置有",
+        "连通设置有",
+        "内部安装有",
+        "顶部设置有",
+        "一侧设置有",
+        "一端设置有",
+        "上设置有",
+        "固定连接有",
+        "固定安装有",
+        "并安装有",
+        "还设置有",
         "连接在",
         "固定在",
         "安装在",
         "设置于",
         "设于",
         "位于",
+        "安装有",
+        "并安装",
+        "还设置",
+        "设置有",
         "包括",
         "包含",
         "设有",
@@ -203,6 +218,9 @@ fn strip_inline_prefixes(raw: &str) -> String {
         "上述",
         "其中",
         "以及",
+        "安装",
+        "设置",
+        "驱动",
         "在",
         "于",
         "与",
@@ -217,6 +235,8 @@ fn strip_inline_prefixes(raw: &str) -> String {
         "从",
         "为",
         "的",
+        "并",
+        "且",
     ];
     for marker in SPLIT_MARKERS {
         if let Some(pos) = current.rfind(marker) {
@@ -230,9 +250,12 @@ fn strip_inline_prefixes(raw: &str) -> String {
         let mut changed = false;
         for prefix in INLINE_PREFIXES {
             if let Some(rest) = current.strip_prefix(prefix) {
-                current = rest.trim();
-                changed = true;
-                break;
+                let candidate = rest.trim();
+                if candidate.chars().count() >= 2 {
+                    current = candidate;
+                    changed = true;
+                    break;
+                }
             }
         }
         if !changed {
@@ -240,6 +263,253 @@ fn strip_inline_prefixes(raw: &str) -> String {
         }
     }
     current.to_string()
+}
+
+/// 判断数字上下文是否属于温度、百分比、日期、申请号、物理量或动作动词短语（非机械部件标号）
+fn is_measurement_or_non_part_context(
+    text: &str,
+    num_start: usize,
+    num_end: usize,
+    number: &str,
+    raw_name: &str,
+) -> bool {
+    // 专利附图标记一般从 1 开始，绝不为 0 或带前导零
+    if number.is_empty() || number == "0" || number.starts_with('0') {
+        return true;
+    }
+
+    // 检查数字紧前字符：若紧邻数字或小数点（如长编号后缀 .1 或小数 3.5）直接拒绝
+    if let Some(prev_ch) = text.get(..num_start).and_then(|s| s.chars().next_back()) {
+        if prev_ch.is_ascii_digit() || prev_ch == '.' {
+            return true;
+        }
+    }
+
+    // 检查数字紧后文本：若紧跟物理单位、量词、日期、百分比、小数点或范围符号，直接拒绝
+    let tail = text.get(num_end..).unwrap_or("");
+    let tail_trimmed_space = tail.trim_start_matches([' ', '\t']);
+    // 若数字前有左括号但后无右括号，或紧后是小数/范围符
+    if let Some(next_ch) = tail_trimmed_space.chars().next() {
+        if next_ch.is_ascii_digit()
+            || matches!(
+                next_ch,
+                '.' | '%'
+                    | '％'
+                    | '℃'
+                    | '°'
+                    | '~'
+                    | '～'
+                    | '年'
+                    | '月'
+                    | '日'
+                    | '时'
+                    | '分'
+                    | '秒'
+                    | '个'
+                    | '组'
+                    | '台'
+                    | '套'
+                    | '条'
+                    | '根'
+                    | '块'
+                    | '片'
+                    | '层'
+                    | '级'
+                    | '次'
+                    | '倍'
+                    | '份'
+                    | '种'
+                    | '类'
+                    | '项'
+                    | '页'
+                    | '段'
+                    | '点'
+                    | '天'
+                    | '周'
+                    | '米'
+                    | '克'
+                    | '升'
+                    | '度'
+                    | '瓦'
+                    | '伏'
+                    | '安'
+                    | '赫'
+            )
+        {
+            return true;
+        }
+    }
+    let tail_lower: String = tail_trimmed_space
+        .chars()
+        .take(5)
+        .map(|c| c.to_ascii_lowercase())
+        .collect();
+    const ASCII_UNIT_PREFIXES: &[&str] = &[
+        "mpa", "kpa", "pa", "mm", "cm", "km", "kg", "mg", "kw", "mw", "kv", "ma", "hz", "rpm",
+        "ml", "min", "sec", "hr", "°c",
+    ];
+    if ASCII_UNIT_PREFIXES
+        .iter()
+        .any(|u| tail_lower.starts_with(u))
+    {
+        return true;
+    }
+    // 单字母单位（如 5m、10g、20s、30h、12V、5A、10W、2L），要求紧后非字母
+    if let Some(first) = tail_lower.chars().next() {
+        if matches!(first, 'm' | 'g' | 's' | 'h' | 'v' | 'a' | 'w' | 'l') {
+            let second = tail_lower.chars().nth(1);
+            if second.is_none_or(|c| !c.is_ascii_alphabetic()) {
+                return true;
+            }
+        }
+    }
+
+    // 检查前文是否包含典型数值/非部件触发语
+    const NUMERIC_CUE_SUBSTRINGS: &[&str] = &[
+        "降为",
+        "降温到",
+        "下降到",
+        "上升到",
+        "预热到",
+        "加热到",
+        "冷却到",
+        "升温到",
+        "温度为",
+        "温度大概为",
+        "温度高达",
+        "温度约",
+        "温度在",
+        "温度达",
+        "温度降",
+        "温度升",
+        "效率达到",
+        "回收达到",
+        "达到",
+        "高达",
+        "节能",
+        "仅有",
+        "持续",
+        "约为",
+        "大约",
+        "大概",
+        "超过",
+        "大于",
+        "小于",
+        "不少于",
+        "不超过",
+        "至少为",
+        "起点为",
+        "距离为",
+        "压力为",
+        "转速为",
+        "功率为",
+        "流量为",
+        "产生近",
+        "吸收",
+        "排出",
+        "申请日",
+        "申请号",
+        "本公开",
+        "本发明",
+        "实用新",
+        "实施例",
+        "权利要求",
+        "对比文件",
+        "步骤",
+        "附图",
+        "阶段",
+        "模式",
+        "回路中",
+    ];
+    if NUMERIC_CUE_SUBSTRINGS
+        .iter()
+        .any(|cue| raw_name.contains(cue))
+    {
+        return true;
+    }
+
+    false
+}
+
+/// 定位说明书中的「附图标记说明 / 图中，」专属段落（返回字节起止区间列表）
+fn find_explicit_legend_blocks(text: &str) -> Vec<(usize, usize)> {
+    const LEGEND_HEADERS: &[&str] = &[
+        "附图标记说明",
+        "附图标记的含义",
+        "附图标记如下",
+        "附图标记：",
+        "附图标记:",
+        "附图标记",
+        "附图标号说明",
+        "附图标号",
+        "附图中，",
+        "附图中:",
+        "附图中：",
+        "图中，",
+        "图中：",
+        "图中:",
+    ];
+    const STOP_HEADERS: &[&str] = &[
+        "具体实施方式",
+        "实施例1",
+        "实施例 1",
+        "下面结合附图",
+        "为使本发明",
+        "为了使本",
+    ];
+
+    let mut blocks = Vec::new();
+    let mut search_from = 0usize;
+    while search_from < text.len() {
+        let Some(slice) = text.get(search_from..) else {
+            break;
+        };
+        let mut best_match: Option<(usize, usize)> = None;
+        for header in LEGEND_HEADERS {
+            if let Some(rel) = slice.find(header) {
+                let abs_start = search_from + rel;
+                let abs_after = abs_start + header.len();
+                if best_match.is_none_or(|(b_start, _)| abs_start < b_start) {
+                    best_match = Some((abs_start, abs_after));
+                }
+            }
+        }
+        let Some((hdr_start, hdr_after)) = best_match else {
+            break;
+        };
+        let rest = text.get(hdr_after..).unwrap_or("");
+        // 寻找图例段结尾（遇到空行双换行或「具体实施方式」等）
+        let mut end_rel = rest.len().min(2000);
+        if let Some(dbl) = rest.find("\n\n") {
+            if dbl > 8 {
+                end_rel = end_rel.min(dbl);
+            }
+        }
+        if let Some(dbl_crlf) = rest.find("\r\n\r\n") {
+            if dbl_crlf > 8 {
+                end_rel = end_rel.min(dbl_crlf);
+            }
+        }
+        for stop in STOP_HEADERS {
+            if let Some(pos) = rest.find(stop) {
+                if pos > 4 {
+                    end_rel = end_rel.min(pos);
+                }
+            }
+        }
+        // 回退到字符边界
+        while end_rel > 0 && !rest.is_char_boundary(end_rel) {
+            end_rel -= 1;
+        }
+        let abs_end = hdr_after + end_rel;
+        if abs_end > hdr_after {
+            blocks.push((hdr_start, abs_end));
+            search_from = abs_end;
+        } else {
+            search_from = hdr_after;
+        }
+    }
+    blocks
 }
 
 fn trim_legend_name(raw: &str) -> String {
@@ -279,48 +549,23 @@ fn push_unique_part(parts: &mut Vec<PartDesignator>, number: String, name: Strin
     parts.push(PartDesignator { number, name });
 }
 
-/// 从文本中提取部件标号（支持图例式与行内式，过滤非部件词，去重保序）
+/// 从文本中提取部件标号（支持图例式与行内式，过滤数值/单位/非部件词，去重保序）
 pub fn extract_part_designators(text: &str) -> Vec<PartDesignator> {
     let mut parts = Vec::new();
     if text.trim().is_empty() {
         return parts;
     }
 
-    // 1. 图例式：如 "1-机架"、"1、电缸"、"10：阀体"（名称部分不吞掉后续标号数字）
-    let Ok(legend_re) = regex::Regex::new(
-        r"(?:^|[^\dA-Za-z])(\d{1,3})\s*[-—－、：:]\s*([\u4e00-\u9fa5A-Za-z]{2,16})",
-    ) else {
-        return parts;
-    };
-
-    for cap in legend_re.captures_iter(text) {
-        let Some(num_m) = cap.get(1) else {
-            continue;
-        };
-        let Some(name_m) = cap.get(2) else {
-            continue;
-        };
-        let number = num_m.as_str().trim().to_string();
-        let name = trim_legend_name(name_m.as_str());
-        push_unique_part(&mut parts, number, name);
+    // 1. 图例式（仅当标号前为行首/空白/标点，严禁把 "再生滚筒1、热风炉2" 错配为 "1、热风炉"！）
+    let (legend_parts, legend_ranges) = extract_legend_designators_with_ranges(text);
+    for p in legend_parts {
+        push_unique_part(&mut parts, p.number, p.name);
     }
 
-    // 2. 行内式：如 "阀芯3"、"第一壳体12"、"驱动电机（2）"
-    let Ok(inline_re) = regex::Regex::new(r"([\u4e00-\u9fa5]{2,12})\s*[（(]?\s*(\d{1,3})\s*[）)]?")
-    else {
-        return parts;
-    };
-
-    for cap in inline_re.captures_iter(text) {
-        let Some(name_m) = cap.get(1) else {
-            continue;
-        };
-        let Some(num_m) = cap.get(2) else {
-            continue;
-        };
-        let cleaned_name = strip_inline_prefixes(name_m.as_str());
-        let number = num_m.as_str().trim().to_string();
-        push_unique_part(&mut parts, number, cleaned_name);
+    // 2. 行内式（从剥离图例后的正文提取，过滤温度/百分比/日期/申请号/不匹配括号）
+    let body = strip_legend_ranges(text, &legend_ranges);
+    for p in extract_inline_designators(&body) {
+        push_unique_part(&mut parts, p.number, p.name);
     }
 
     parts
@@ -513,41 +758,131 @@ pub struct NumeralConsistencyReport {
     pub issues: Vec<NumeralConsistencyIssue>,
 }
 
-/// 仅提取图例式定义（如 `1-机架`、`2、电缸`、`10：阀体`）及其在原文中的字节起止区间
+/// 提取说明书中的全部三种标准 CNIPA 图例格式，并返回对应字节区间：
+/// - 格式 A（数字-分隔符-名称）：`1-阀体；2、膜片；10：防尘盖`（标号前必为标点/空白/行首，严禁吞掉前一个中文部件名！）
+/// - 格式 B（显式图例段内数字直连名称）：`附图标记的含义：1新润滑油脂加注装置；2转动设备轴承；3量具`
+/// - 格式 C（显式图例段内名称直连数字列表）：`附图标记\n再生滚筒1、热风炉2、再生燃烧器3`
 fn extract_legend_designators_with_ranges(
     text: &str,
 ) -> (Vec<PartDesignator>, Vec<(usize, usize)>) {
     let mut parts = Vec::new();
     let mut ranges = Vec::new();
-    let Ok(legend_re) = regex::Regex::new(
-        r"(?:^|[^\dA-Za-z])(\d{1,3})\s*[-—－、：:]\s*([\u4e00-\u9fa5A-Za-z]{2,16})",
-    ) else {
-        return (parts, ranges);
-    };
-    for cap in legend_re.captures_iter(text) {
-        let Some(full) = cap.get(0) else {
+
+    let blocks = find_explicit_legend_blocks(text);
+    let legend_sep_re = regex::Regex::new(
+        r"(?:^|[，,。；;\n\r\t ：:])(\d{1,3})\s*[-—－、：:]\s*([\u4e00-\u9fa5A-Za-z]{2,16})",
+    )
+    .ok();
+    let legend_direct_num_name_re =
+        regex::Regex::new(r"(?:^|[，,。；;\n\r\t ：:])(\d{1,3})([\u4e00-\u9fa5]{2,14})").ok();
+    let legend_name_num_re =
+        regex::Regex::new(r"^([\u4e00-\u9fa5]{2,14})\s*[（(]?(\d{1,3})[）)]?$").ok();
+
+    for &(b_start, b_end) in &blocks {
+        let Some(block_text) = text.get(b_start..b_end) else {
             continue;
         };
-        let Some(num_m) = cap.get(1) else {
-            continue;
-        };
-        let Some(name_m) = cap.get(2) else {
-            continue;
-        };
-        let number = num_m.as_str().trim().to_string();
-        let name = trim_legend_name(name_m.as_str());
-        if is_valid_part_name(&name) {
-            ranges.push((full.start(), full.end()));
-            push_unique_part(&mut parts, number, name);
+        let mut block_found = 0usize;
+
+        if let Some(ref re) = legend_sep_re {
+            for cap in re.captures_iter(block_text) {
+                if let (Some(num_m), Some(name_m)) = (cap.get(1), cap.get(2)) {
+                    let number = num_m.as_str().trim().to_string();
+                    if number == "0" || number.starts_with('0') {
+                        continue;
+                    }
+                    let name = trim_legend_name(name_m.as_str());
+                    if is_valid_part_name(&name) {
+                        push_unique_part(&mut parts, number, name);
+                        block_found += 1;
+                    }
+                }
+            }
+        }
+
+        if block_found == 0 {
+            if let Some(ref re) = legend_direct_num_name_re {
+                for cap in re.captures_iter(block_text) {
+                    if let (Some(num_m), Some(name_m)) = (cap.get(1), cap.get(2)) {
+                        let number = num_m.as_str().trim().to_string();
+                        if number == "0" || number.starts_with('0') {
+                            continue;
+                        }
+                        let name = trim_legend_name(name_m.as_str());
+                        if is_valid_part_name(&name) {
+                            push_unique_part(&mut parts, number, name);
+                            block_found += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        if block_found == 0 {
+            if let Some(ref re) = legend_name_num_re {
+                for seg in
+                    block_text.split(['，', ',', '。', '；', ';', '、', '\n', '\r', '：', ':'])
+                {
+                    let trimmed = seg.trim();
+                    if let Some(cap) = re.captures(trimmed) {
+                        if let (Some(name_m), Some(num_m)) = (cap.get(1), cap.get(2)) {
+                            let number = num_m.as_str().trim().to_string();
+                            if number == "0" || number.starts_with('0') {
+                                continue;
+                            }
+                            let name = strip_inline_prefixes(name_m.as_str());
+                            if is_valid_part_name(&name) {
+                                push_unique_part(&mut parts, number, name);
+                                block_found += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if block_found > 0 {
+            ranges.push((b_start, b_end));
         }
     }
+
+    if parts.is_empty() {
+        if let Some(ref re) = legend_sep_re {
+            for cap in re.captures_iter(text) {
+                let (Some(num_m), Some(name_m)) = (cap.get(1), cap.get(2)) else {
+                    continue;
+                };
+                let number = num_m.as_str().trim().to_string();
+                if number == "0" || number.starts_with('0') {
+                    continue;
+                }
+                if is_measurement_or_non_part_context(
+                    text,
+                    num_m.start(),
+                    num_m.end(),
+                    &number,
+                    name_m.as_str(),
+                ) {
+                    continue;
+                }
+                let name = trim_legend_name(name_m.as_str());
+                if is_valid_part_name(&name) {
+                    ranges.push((num_m.start(), name_m.end()));
+                    push_unique_part(&mut parts, number, name);
+                }
+            }
+        }
+    }
+
+    ranges.sort_by_key(|&(s, _)| s);
     (parts, ranges)
 }
 
-/// 仅提取行内式引用（如 `阀芯3`、`驱动电机（2）`）
+/// 仅提取行内式引用（如 `阀芯3`、`驱动电机（2）`），严格过滤温度/百分比/日期/不匹配括号等伪标号
 fn extract_inline_designators(text: &str) -> Vec<PartDesignator> {
     let mut parts = Vec::new();
-    let Ok(inline_re) = regex::Regex::new(r"([\u4e00-\u9fa5]{2,12})\s*[（(]?\s*(\d{1,3})\s*[）)]?")
+    let Ok(inline_re) =
+        regex::Regex::new(r"([\u4e00-\u9fa5]{2,14})\s*(?:[（(]\s*(\d{1,3})\s*[）)]|(\d{1,3}))")
     else {
         return parts;
     };
@@ -555,11 +890,25 @@ fn extract_inline_designators(text: &str) -> Vec<PartDesignator> {
         let Some(name_m) = cap.get(1) else {
             continue;
         };
-        let Some(num_m) = cap.get(2) else {
-            continue;
+        let (num_m, is_parenthesized) = match (cap.get(2), cap.get(3)) {
+            (Some(m), _) => (m, true),
+            (None, Some(m)) => (m, false),
+            _ => continue,
         };
-        let cleaned_name = strip_inline_prefixes(name_m.as_str());
         let number = num_m.as_str().trim().to_string();
+        let raw_name = name_m.as_str();
+        if is_measurement_or_non_part_context(text, num_m.start(), num_m.end(), &number, raw_name) {
+            continue;
+        }
+        if !is_parenthesized {
+            if let Ok(n_val) = number.parse::<u32>() {
+                let is_typical_subpart = n_val >= 100 && (n_val % 100) <= 20;
+                if n_val > 35 && !is_typical_subpart {
+                    continue;
+                }
+            }
+        }
+        let cleaned_name = strip_inline_prefixes(raw_name);
         push_unique_part(&mut parts, number, cleaned_name);
     }
     parts
@@ -907,5 +1256,55 @@ mod tests {
             clean_report.issues
         );
         assert_eq!(clean_report.total_numerals, 2);
+    }
+
+    #[test]
+    fn real_world_cnipa_patterns_reject_units_and_support_all_three_legend_formats() {
+        // 1. 温度/百分比/日期/小数绝不能误判为机械部件标号
+        let thermo_desc =
+            "余热锅炉1产生近300℃蒸汽，经过两级换热后烟气温度降为75℃，余热回收效率达到90%，\
+                           整个机组可以节能8%，持续运行12小时，申请日为2021年12月29日，起点为0。";
+        let thermo_report = check_numeral_consistency("", thermo_desc, None);
+        let nums: Vec<&str> = thermo_report
+            .parts
+            .iter()
+            .map(|p| p.number.as_str())
+            .collect();
+        assert!(nums.contains(&"1"), "真实标号 1 应保留: {:?}", nums);
+        for bad in ["0", "8", "12", "75", "90", "300", "29"] {
+            assert!(
+                !nums.contains(&bad),
+                "物理数值/日期 {bad} 不得被误判为部件标号: {:?}",
+                thermo_report.parts
+            );
+        }
+
+        // 2. 「名称+数字、名称+数字」图例格式绝不能错位成 `1、热风炉`
+        let c_claims = "1. 一种再生装置，包括再生滚筒(1)、热风炉(2)、再生燃烧器(3)。";
+        let c_desc = "附图标记\n再生滚筒1、热风炉2、再生燃烧器3。\n\n具体实施方式\n所述再生滚筒1一侧设置热风炉2，热风炉2上并安装再生燃烧器3。";
+        let c_report = check_numeral_consistency(c_claims, c_desc, None);
+        assert!(
+            c_report.passed,
+            "名称+数字图例格式不应产生错位误报: {:?}",
+            c_report.issues
+        );
+        assert!(
+            c_report
+                .parts
+                .iter()
+                .any(|p| p.number == "3" && p.name == "再生燃烧器"),
+            "并安装前缀应剥离干净: {:?}",
+            c_report.parts
+        );
+
+        // 3. 「数字直连中文名称」图例格式（无分隔符）应完整识别
+        let b_claims = "1. 一种润滑装置，包括加注装置(1)、转动轴承(2)、量具(3)。";
+        let b_desc = "附图标记的含义：1加注装置；2转动轴承；3量具。\n\n具体实施方式\n加注装置(1)位于转动轴承(2)上方，量具(3)位于下方。";
+        let b_report = check_numeral_consistency(b_claims, b_desc, None);
+        assert!(
+            b_report.passed,
+            "无分隔符图例格式不应误报缺失: {:?}",
+            b_report.issues
+        );
     }
 }

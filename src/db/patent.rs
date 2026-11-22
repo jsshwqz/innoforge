@@ -1,7 +1,43 @@
+//! 模块职责：专利主表（`patents`）增删改查、规范专利号入库去重合并、全文检索（`patents_fts`）与统计分析。
+//! 上游调用者：`src/routes/patent.rs`、`src/routes/search.rs`、`src/search/enrichment.rs`。
+//! 模块专属禁区：严禁在 `insert_patent` 中使用带 `LIMIT 200` 的前 2 字符宽泛前缀匹配导致大库漏去重；严禁让浅层搜索结果覆盖已有全文/附图/IPC/法律状态字段。
+
 use super::relevance::{calculate_field_relevance, calculate_mixed_relevance};
 use crate::patent::{Patent, PatentSummary, SearchType};
 use anyhow::Result;
 use rusqlite::{params, OptionalExtension};
+
+fn pick_richer_str(existing: &str, incoming: &str) -> String {
+    let e = existing.trim();
+    let n = incoming.trim();
+    if n.is_empty() {
+        return existing.to_string();
+    }
+    if e.is_empty() {
+        return incoming.to_string();
+    }
+    if e.len() > n.len() {
+        existing.to_string()
+    } else {
+        incoming.to_string()
+    }
+}
+
+fn pick_richer_json_array(existing: &str, incoming: &str) -> String {
+    let e_empty = existing.trim().is_empty() || existing.trim() == "[]";
+    let n_empty = incoming.trim().is_empty() || incoming.trim() == "[]";
+    if n_empty && !e_empty {
+        return existing.to_string();
+    }
+    if e_empty {
+        return incoming.to_string();
+    }
+    if existing.len() > incoming.len() {
+        existing.to_string()
+    } else {
+        incoming.to_string()
+    }
+}
 
 impl super::Database {
     pub fn insert_patent(&self, p: &Patent) -> Result<String> {
@@ -12,18 +48,36 @@ impl super::Database {
         let mut final_abstract = p.abstract_text.clone();
         let mut final_description = p.description.clone();
         let mut final_claims = p.claims.clone();
+        let mut final_applicant = p.applicant.clone();
+        let mut final_inventor = p.inventor.clone();
+        let mut final_filing_date = p.filing_date.clone();
+        let mut final_pub_date = p.publication_date.clone();
+        let mut final_grant_date = p.grant_date.clone();
+        let mut final_ipc = p.ipc_codes.clone();
+        let mut final_cpc = p.cpc_codes.clone();
+        let mut final_priority_date = p.priority_date.clone();
+        let mut final_family_id = p.family_id.clone();
+        let mut final_legal_status = p.legal_status.clone();
+        let mut final_citations = p.citations.clone();
+        let mut final_cited_by = p.cited_by.clone();
+        let mut final_images = p.images.clone();
+        let mut final_pdf_url = p.pdf_url.clone();
 
-        // Reuse existing row id for same canonical publication key to avoid duplicate rows.
+        // 按规范公开号精确检索同号存量记录（不再使用 `%CN%` + LIMIT 200 漏查），
+        // 命中后合并保留所有已富化字段（权利要求/说明书/附图/PDF/IPC/法律状态等）。
         if !canonical.is_empty() {
             let mut stmt = c.prepare(
-                "SELECT id, patent_number, title, abstract_text, description, claims FROM patents
-                 WHERE patent_number LIKE ?1
-                    OR REPLACE(REPLACE(UPPER(patent_number), ' ', ''), '.', '') LIKE ?2
-                 LIMIT 200",
+                "SELECT id, patent_number, title, abstract_text, description, claims,
+                        applicant, inventor, filing_date, publication_date, grant_date,
+                        ipc_codes, cpc_codes, priority_date, family_id, legal_status,
+                        citations, cited_by, images, pdf_url
+                 FROM patents
+                 WHERE REPLACE(REPLACE(REPLACE(UPPER(patent_number), ' ', ''), '-', ''), '.', '') LIKE ?1
+                 ORDER BY LENGTH(COALESCE(claims, '')) + LENGTH(COALESCE(images, '')) DESC
+                 LIMIT 20",
             )?;
-            let fuzzy_like = format!("%{}%", p.patent_number.chars().take(2).collect::<String>());
             let canonical_like = format!("%{}%", canonical);
-            let mut rows = stmt.query(params![fuzzy_like, canonical_like])?;
+            let mut rows = stmt.query(params![canonical_like])?;
             while let Some(row) = rows.next()? {
                 let existing_id: String = row.get(0)?;
                 let existing_number: String = row.get(1)?;
@@ -33,6 +87,20 @@ impl super::Database {
                     let existing_abstract: String = row.get(3).unwrap_or_default();
                     let existing_desc: String = row.get(4).unwrap_or_default();
                     let existing_claims_text: String = row.get(5).unwrap_or_default();
+                    let existing_applicant: String = row.get(6).unwrap_or_default();
+                    let existing_inventor: String = row.get(7).unwrap_or_default();
+                    let existing_filing_date: String = row.get(8).unwrap_or_default();
+                    let existing_pub_date: String = row.get(9).unwrap_or_default();
+                    let existing_grant_date: Option<String> = row.get(10).ok().flatten();
+                    let existing_ipc: String = row.get(11).unwrap_or_default();
+                    let existing_cpc: String = row.get(12).unwrap_or_default();
+                    let existing_priority_date: String = row.get(13).unwrap_or_default();
+                    let existing_family_id: Option<String> = row.get(14).ok().flatten();
+                    let existing_legal_status: String = row.get(15).unwrap_or_default();
+                    let existing_citations: String = row.get(16).unwrap_or_default();
+                    let existing_cited_by: String = row.get(17).unwrap_or_default();
+                    let existing_images: String = row.get(18).unwrap_or_default();
+                    let existing_pdf_url: String = row.get(19).unwrap_or_default();
 
                     // 若已有中文标题，严禁被新抓到的纯英文标题冲刷覆盖（保持中文原文）
                     let existing_has_cjk = existing_title
@@ -42,7 +110,9 @@ impl super::Database {
                         .title
                         .chars()
                         .any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c));
-                    if existing_has_cjk && !new_has_cjk {
+                    if (existing_has_cjk && !new_has_cjk)
+                        || (final_title.trim().is_empty() && !existing_title.trim().is_empty())
+                    {
                         final_title = existing_title;
                     }
                     if existing_claims_text.len() > p.claims.len() {
@@ -58,9 +128,37 @@ impl super::Database {
                         .abstract_text
                         .chars()
                         .any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c));
-                    if existing_abs_has_cjk && !new_abs_has_cjk && !existing_abstract.is_empty() {
+                    if (existing_abs_has_cjk && !new_abs_has_cjk && !existing_abstract.is_empty())
+                        || (final_abstract.trim().is_empty()
+                            && !existing_abstract.trim().is_empty())
+                    {
                         final_abstract = existing_abstract;
                     }
+                    final_applicant = pick_richer_str(&existing_applicant, &final_applicant);
+                    final_inventor = pick_richer_str(&existing_inventor, &final_inventor);
+                    final_filing_date = pick_richer_str(&existing_filing_date, &final_filing_date);
+                    final_pub_date = pick_richer_str(&existing_pub_date, &final_pub_date);
+                    if final_grant_date
+                        .as_deref()
+                        .is_none_or(|s| s.trim().is_empty())
+                    {
+                        final_grant_date = existing_grant_date;
+                    }
+                    final_ipc = pick_richer_json_array(&existing_ipc, &final_ipc);
+                    final_cpc = pick_richer_json_array(&existing_cpc, &final_cpc);
+                    final_priority_date =
+                        pick_richer_str(&existing_priority_date, &final_priority_date);
+                    if final_family_id.is_none() {
+                        final_family_id = existing_family_id;
+                    }
+                    // 仅当新法律状态为空时沿用旧值（保留用户/外部最新合法状态更新能力）
+                    if final_legal_status.trim().is_empty() {
+                        final_legal_status = existing_legal_status;
+                    }
+                    final_citations = pick_richer_json_array(&existing_citations, &final_citations);
+                    final_cited_by = pick_richer_json_array(&existing_cited_by, &final_cited_by);
+                    final_images = pick_richer_json_array(&existing_images, &final_images);
+                    final_pdf_url = pick_richer_str(&existing_pdf_url, &final_pdf_url);
                     break;
                 }
             }
@@ -74,7 +172,7 @@ impl super::Database {
             tracing::warn!("FTS delete for patent {} failed: {}", final_id, e);
         }
         c.execute("INSERT OR REPLACE INTO patents (id,patent_number,title,abstract_text,description,claims,applicant,inventor,filing_date,publication_date,grant_date,ipc_codes,cpc_codes,priority_date,country,kind_code,family_id,legal_status,citations,cited_by,source,raw_json,images,pdf_url) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24)",
-            params![final_id,p.patent_number,final_title,final_abstract,final_description,final_claims,p.applicant,p.inventor,p.filing_date,p.publication_date,p.grant_date,p.ipc_codes,p.cpc_codes,p.priority_date,p.country,p.kind_code,p.family_id,p.legal_status,p.citations,p.cited_by,p.source,p.raw_json,p.images,p.pdf_url])?;
+            params![final_id,p.patent_number,final_title,final_abstract,final_description,final_claims,final_applicant,final_inventor,final_filing_date,final_pub_date,final_grant_date,final_ipc,final_cpc,final_priority_date,p.country,p.kind_code,final_family_id,final_legal_status,final_citations,final_cited_by,p.source,p.raw_json,final_images,final_pdf_url])?;
         // Insert single row into FTS index (incremental, not full rebuild)
         if let Err(e) = c.execute(
             "INSERT INTO patents_fts(rowid, patent_number, title, abstract_text, claims, applicant, inventor, ipc_codes) SELECT rowid, patent_number, title, abstract_text, claims, applicant, inventor, ipc_codes FROM patents WHERE id = ?1",
@@ -998,5 +1096,69 @@ impl super::Database {
             .filter_map(|r| r.ok())
             .collect();
         Ok(rows)
+    }
+}
+
+#[cfg(test)]
+mod insert_dedup_tests {
+    use crate::db::Database;
+    use crate::patent::Patent;
+
+    #[test]
+    fn insert_patent_dedups_beyond_200_rows_and_preserves_rich_fields() {
+        let db = Database::init(":memory:").expect("init db");
+        // 先插入 220 条 CN 专利，突破旧版 `%CN% + LIMIT 200` 盲区
+        for i in 0..220 {
+            let p = Patent {
+                id: format!("seed-{i}"),
+                patent_number: format!("CN99100{i:04}A"),
+                title: format!("测试专利 {i}"),
+                ..Default::default()
+            };
+            db.insert_patent(&p).expect("seed");
+        }
+
+        // 第 221 条：带完整权利要求、图纸、PDF 和 IPC
+        let rich = Patent {
+            id: "rich-target-id".to_string(),
+            patent_number: "CN999888777B".to_string(),
+            title: "高效伺服冷却系统".to_string(),
+            claims: "1. 一种高效伺服冷却系统，包括散热器与油泵。".to_string(),
+            images: r#"["data:image/jpeg;base64,AAA"]"#.to_string(),
+            pdf_url: "https://patentimages.storage.googleapis.com/demo.pdf".to_string(),
+            ipc_codes: r#"["H02K9/19"]"#.to_string(),
+            grant_date: Some("2024-06-14".to_string()),
+            ..Default::default()
+        };
+        let id1 = db.insert_patent(&rich).expect("insert rich");
+        assert_eq!(id1, "rich-target-id");
+
+        // 再次插入同号但浅层字段（无图无权要无 IPC），必须复用原 ID 且绝不冲掉附图与 IPC
+        let shallow = Patent {
+            id: "dup-new-uuid".to_string(),
+            patent_number: "CN 999888777 B".to_string(),
+            title: "High efficiency servo cooling".to_string(),
+            images: "[]".to_string(),
+            ipc_codes: "[]".to_string(),
+            ..Default::default()
+        };
+        let id2 = db.insert_patent(&shallow).expect("insert shallow dup");
+        assert_eq!(id2, id1, "超过 200 条后同号仍必须复用到同一主行");
+
+        let count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM patents WHERE patent_number LIKE '%999888777%'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count");
+        assert_eq!(count, 1, "同公开号不得产生重复行");
+
+        let loaded = db.get_patent(&id1).expect("get").expect("exists");
+        assert_eq!(loaded.title, "高效伺服冷却系统");
+        assert!(loaded.images.contains("data:image/jpeg;base64,AAA"));
+        assert!(loaded.ipc_codes.contains("H02K9/19"));
+        assert_eq!(loaded.grant_date.as_deref(), Some("2024-06-14"));
     }
 }

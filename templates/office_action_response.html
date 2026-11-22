@@ -152,21 +152,12 @@
             <div id="auto-fetch-refs-result" style="margin-top:8px;"></div>
 
         <!-- Depth Selector + Action Buttons -->
-        <div class="btn-row">
+        <div class="btn-row" style="flex-wrap:wrap;gap:8px;align-items:center;">
             <button class="btn-primary" id="btn-analyze" onclick="doOAAnalysis()" data-i18n="oar.btnAnalyze"></button>
-            <button class="btn-secondary" onclick="showOADiscussImportDialog()" style="margin-left:8px;" data-i18n="oar.discussImport">📥 导入讨论</button>
-            <button class="btn-secondary" onclick="showOaPanel()" id="btn-oa-panel" style="margin-left:8px;">🎭 <span data-i18n="oa.panel.btn">多角色会诊</span></button>
-            <button class="btn-secondary" onclick="examinerPreview()" id="btn-examiner-preview" style="margin-left:8px;">🔍 <span data-i18n="oa.preview.btn">模拟审查员预判</span></button>
-            <button class="btn-secondary" onclick="defenseAnalysis()" id="btn-defense-analysis" style="margin-left:8px;">🛡️ <span data-i18n="oa.defense.btn">对方视角防御</span></button>
-            <button class="btn-secondary" onclick="recommendStrategy()" id="btn-strategy-recommend" style="margin-left:8px;">💡 <span data-i18n="oa.strategy.btn">智能推荐策略</span></button>
-            <button class="btn-secondary" onclick="qualityScore()" id="btn-quality-score" style="margin-left:8px;">📊 <span data-i18n="oa.quality.btn">质量评估</span></button>
-            <button class="btn-secondary" onclick="openClaimSimulator()" id="btn-claim-sim" style="margin-left:8px;">🔧 <span data-i18n="oa.claimSim.title">权利要求修改模拟器</span></button>
-            <button class="btn-secondary" onclick="collectEvidence()" id="btn-collect-evidence" style="margin-left:8px;">📁 <span data-i18n="oa.evidence.btn">自动收集证据</span></button>
-            <button class="btn-secondary" onclick="startAdversarial()" id="btn-adversarial" style="margin-left:8px;">🔄 <span data-i18n="oa.adversarial.start">多轮对抗推演</span></button>
-            <button class="btn-secondary" onclick="triggerVisionFigureCheck()" id="btn-vision-figure" style="margin-left:8px;">🖼️ <span data-i18n="oa.visionFigure.btn">附图标号与结构核对</span></button>
-            <button class="btn-secondary" onclick="runNumeralConsistencyCheck()" id="btn-numeral-check" style="margin-left:8px;">🔢 标号一致性核查</button>
-            <button class="btn-secondary" onclick="buildOaFeatureMatrix()" id="btn-oa-matrix" style="margin-left:8px;">🧮 <span data-i18n="oa.matrix.btn">三维特征比对矩阵</span></button>
-            <button class="btn-secondary" onclick="exportOaWordKit()" id="btn-oa-word-kit" style="margin-left:8px;">📝 <span data-i18n="oa.exportWordKit.btn">导出 Word 答复套件 (.docx)</span></button>
+            <button class="btn-secondary" onclick="runNumeralConsistencyCheck()" id="btn-numeral-check">🔢 标号一致性核查</button>
+            <button class="btn-secondary" onclick="triggerVisionFigureCheck()" id="btn-vision-figure">🖼️ <span data-i18n="oa.visionFigure.btn">附图标号与结构核对</span></button>
+            <button class="btn-secondary" onclick="buildOaFeatureMatrix()" id="btn-oa-matrix">🧮 <span data-i18n="oa.matrix.btn">三维特征比对矩阵</span></button>
+            <button class="btn-secondary" onclick="exportOaWordKit()" id="btn-oa-word-kit">📝 <span data-i18n="oa.exportWordKit.btn">导出 Word 答复套件 (.docx)</span></button>
             <input type="file" id="vision-figure-input" accept="image/*" multiple style="display:none;" onchange="handleVisionFigureFiles(this)">
             <div style="display:flex;align-items:center;gap:8px;margin-left:auto;">
                 <span class="muted" data-i18n="oar.depthLabel"></span>
@@ -177,6 +168,20 @@
                 </select>
             </div>
         </div>
+        <details style="margin:8px 0 12px;padding:8px 12px;background:#161b22;border:1px solid #30363d;border-radius:8px;">
+            <summary style="cursor:pointer;color:#8b949e;font-size:13px;user-select:none;">🧰 更多专家推演与核查工具（多角色会诊 / 模拟审查员 / 权要修改模拟器 / 导入讨论等）</summary>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;">
+                <button class="btn-secondary" onclick="showOADiscussImportDialog()" data-i18n="oar.discussImport">📥 导入讨论</button>
+                <button class="btn-secondary" onclick="showOaPanel()" id="btn-oa-panel">🎭 <span data-i18n="oa.panel.btn">多角色会诊</span></button>
+                <button class="btn-secondary" onclick="examinerPreview()" id="btn-examiner-preview">🔍 <span data-i18n="oa.preview.btn">模拟审查员预判</span></button>
+                <button class="btn-secondary" onclick="defenseAnalysis()" id="btn-defense-analysis">🛡️ <span data-i18n="oa.defense.btn">对方视角防御</span></button>
+                <button class="btn-secondary" onclick="recommendStrategy()" id="btn-strategy-recommend">💡 <span data-i18n="oa.strategy.btn">智能推荐策略</span></button>
+                <button class="btn-secondary" onclick="qualityScore()" id="btn-quality-score">📊 <span data-i18n="oa.quality.btn">质量评估</span></button>
+                <button class="btn-secondary" onclick="openClaimSimulator()" id="btn-claim-sim">🔧 <span data-i18n="oa.claimSim.title">权利要求修改模拟器</span></button>
+                <button class="btn-secondary" onclick="collectEvidence()" id="btn-collect-evidence">📁 <span data-i18n="oa.evidence.btn">自动收集证据</span></button>
+                <button class="btn-secondary" onclick="startAdversarial()" id="btn-adversarial">🔄 <span data-i18n="oa.adversarial.start">多轮对抗推演</span></button>
+            </div>
+        </details>
 
         <div id="result"></div>
         <!-- P2-T1: 多角色会诊面板 -->
@@ -5233,13 +5238,15 @@
                         noneP.textContent = '暂无直接引用片段';
                         snipBox.appendChild(noneP);
                     } else {
-                        var ul = document.createElement('ul');
+                        var listDiv = document.createElement('div');
+                        listDiv.style.cssText = 'display:flex;flex-direction:column;gap:4px;margin-top:6px;';
                         snips.forEach(function(s) {
-                            var li = document.createElement('li');
-                            li.textContent = s;
-                            ul.appendChild(li);
+                            var item = document.createElement('div');
+                            item.style.cssText = 'padding:4px 8px;border-left:2px solid #58a6ff;background:#161b22;border-radius:3px;color:#c9d1d9;';
+                            item.textContent = s;
+                            listDiv.appendChild(item);
                         });
-                        snipBox.appendChild(ul);
+                        snipBox.appendChild(listDiv);
                     }
                     snipBox.style.display = 'block';
                 });
@@ -5249,16 +5256,24 @@
             panel.appendChild(snipBox);
         }
 
+        var issueLabels = {
+            'FIGURE_OR_LEGEND_ONLY': '图中有号正文未提',
+            'TEXT_ONLY_MISSING_IN_FIGURE': '正文有号附图缺失',
+            'NAME_INCONSISTENT_FOR_SAME_NUMERAL': '同一标号名称冲突'
+        };
         var issues = Array.isArray(data.issues) ? data.issues : [];
         if (issues.length > 0) {
-            var ul = document.createElement('ul');
+            var issueWrap = document.createElement('div');
+            issueWrap.style.cssText = 'display:flex;flex-direction:column;gap:6px;margin-top:8px;';
             issues.forEach(function(iss) {
-                var li = document.createElement('li');
-                li.style.marginBottom = '6px';
-                li.textContent = '[' + (iss.code || '') + '] ' + (iss.title || '') + ' — ' + (iss.message || '') + '（建议：' + (iss.suggestion || '') + '）';
-                ul.appendChild(li);
+                var row = document.createElement('div');
+                var sevColor = iss.severity === 'error' ? '#f85149' : '#d29922';
+                row.style.cssText = 'padding:8px 10px;border-left:3px solid ' + sevColor + ';background:#0d1117;border-radius:4px;font-size:13px;';
+                var label = issueLabels[iss.code] || '标号异常';
+                row.textContent = '【' + label + '】' + (iss.title || '') + ' — ' + (iss.message || '') + '（建议：' + (iss.suggestion || '') + '）';
+                issueWrap.appendChild(row);
             });
-            panel.appendChild(ul);
+            panel.appendChild(issueWrap);
         }
 
         var anchor = document.getElementById('btn-numeral-check');

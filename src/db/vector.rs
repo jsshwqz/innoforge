@@ -177,20 +177,45 @@ fn fnv1a_hash_gram(gram: &str) -> (usize, f32) {
 
 /// Compute a char-n-gram TF-IDF feature-hashed embedding for the given text.
 ///
-/// Uses `Vec<char>` windowing (`n = 2..=4`) + sublinear TF + patent-corpus IDF weighting
-/// + signed feature hashing into a shared `EMBEDDING_DIM` (512) coordinate space.
+/// 先按空白与中英文标点切分连续词段，再在各词段内部提取 `n = 2..=4` 字符 N-Gram（严禁跨空格拼接伪词元）
+/// + sublinear TF + patent-corpus IDF weighting + signed feature hashing into `EMBEDDING_DIM` (512).
 pub fn compute_tfidf_embedding(text: &str) -> Vec<f32> {
-    let cleaned: Vec<char> = text
-        .chars()
-        .filter(|c| !c.is_whitespace() && !c.is_ascii_punctuation())
-        .map(|c| c.to_ascii_lowercase())
-        .collect();
     let mut tf: HashMap<String, f32> = HashMap::new();
-    for n in 2..=4 {
-        if cleaned.len() >= n {
-            for i in 0..=cleaned.len() - n {
-                let gram: String = cleaned[i..i + n].iter().collect();
-                *tf.entry(gram).or_insert(0.0) += 1.0;
+    for segment in text.split(|c: char| {
+        c.is_whitespace()
+            || c.is_ascii_punctuation()
+            || matches!(
+                c,
+                '，' | '。'
+                    | '；'
+                    | '：'
+                    | '、'
+                    | '（'
+                    | '）'
+                    | '【'
+                    | '】'
+                    | '《'
+                    | '》'
+                    | '“'
+                    | '”'
+                    | '‘'
+                    | '’'
+                    | '！'
+                    | '？'
+                    | '—'
+                    | '…'
+            )
+    }) {
+        let chars: Vec<char> = segment.chars().map(|c| c.to_ascii_lowercase()).collect();
+        if chars.len() < 2 {
+            continue;
+        }
+        for n in 2..=4 {
+            if chars.len() >= n {
+                for i in 0..=chars.len() - n {
+                    let gram: String = chars[i..i + n].iter().collect();
+                    *tf.entry(gram).or_insert(0.0) += 1.0;
+                }
             }
         }
     }

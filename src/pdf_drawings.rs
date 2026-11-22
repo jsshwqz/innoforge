@@ -444,8 +444,15 @@ fn decode_pdf_image_stream(
     // 3. CCITTFaxDecode (Group 4 1-bit 单色图)
     if filter.contains("CCITTFaxDecode") {
         let bitmap = decode_ccitt_group4(&stream.content, width as usize, height as usize)?;
-        let png_bytes =
-            bitmap_1bit_to_png(&bitmap, width as usize, height as usize, 0, height as usize)?;
+        let png_bytes = bitmap_1bit_to_png(
+            &bitmap,
+            width as usize,
+            height as usize,
+            0,
+            width as usize,
+            0,
+            height as usize,
+        )?;
         return Some(("image/png".to_string(), png_bytes, width, height));
     }
 
@@ -475,17 +482,82 @@ fn decode_scanned_drawing_page_if_non_text(
         return None;
     }
 
-    // 裁掉顶部 9% 页眉（「说明书附图」字样及横线）和底部 7% 页脚页码
-    let crop_top = (h * 9) / 100;
-    let crop_bottom = (h * 93) / 100;
-    if crop_bottom <= crop_top + 100 {
+    // 裁掉顶部 9% 页眉（「说明书附图」字样及横线）和底部 7% 页脚页码后，进一步自动紧贴墨迹外接框去除多余 A4 留白
+    let base_top = (h * 9) / 100;
+    let base_bottom = (h * 93) / 100;
+    if base_bottom <= base_top + 100 {
         return None;
     }
-    let out_h = (crop_bottom - crop_top) as u32;
-    let png_bytes = bitmap_1bit_to_png(&bitmap, w, h, crop_top, crop_bottom)?;
+    let (crop_x0, crop_x1, crop_y0, crop_y1) =
+        auto_crop_1bit_ink_bounds(&bitmap, w, h, base_top, base_bottom);
+    let out_w = (crop_x1 - crop_x0) as u32;
+    let out_h = (crop_y1 - crop_y0) as u32;
+    let png_bytes = bitmap_1bit_to_png(&bitmap, w, h, crop_x0, crop_x1, crop_y0, crop_y1)?;
     let b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
     let data_url = format!("data:image/png;base64,{b64}");
-    Some(("image/png".to_string(), data_url, width, out_h))
+    Some(("image/png".to_string(), data_url, out_w, out_h))
+}
+
+/// 在给定垂直区间内寻找有效墨迹外接框并保留 36px 舒朗白边，大幅提升老旧扫描件附图的可读性
+fn auto_crop_1bit_ink_bounds(
+    bitmap: &[u8],
+    width: usize,
+    height: usize,
+    y_min_bound: usize,
+    y_max_bound: usize,
+) -> (usize, usize, usize, usize) {
+    let x_margin_ignore = (width * 2) / 100; // 避开扫描仪边沿黑线噪点
+    let x_scan_start = x_margin_ignore;
+    let x_scan_end = width.saturating_sub(x_margin_ignore).max(x_scan_start + 1);
+    let y_scan_end = y_max_bound.min(height);
+
+    let mut min_x = x_scan_end;
+    let mut max_x = x_scan_start;
+    let mut min_y = y_scan_end;
+    let mut max_y = y_min_bound;
+
+    for y in y_min_bound..y_scan_end {
+        let row = y * width;
+        let mut row_black = 0usize;
+        let mut row_min_x = x_scan_end;
+        let mut row_max_x = x_scan_start;
+        for x in x_scan_start..x_scan_end {
+            if bitmap[row + x] != 0 {
+                row_black += 1;
+                if x < row_min_x {
+                    row_min_x = x;
+                }
+                if x > row_max_x {
+                    row_max_x = x;
+                }
+            }
+        }
+        // 至少 3 个黑像素才算有效内容行（过滤单点灰尘）
+        if row_black >= 3 {
+            if y < min_y {
+                min_y = y;
+            }
+            if y > max_y {
+                max_y = y;
+            }
+            if row_min_x < min_x {
+                min_x = row_min_x;
+            }
+            if row_max_x > max_x {
+                max_x = row_max_x;
+            }
+        }
+    }
+
+    if max_x <= min_x + 80 || max_y <= min_y + 80 {
+        return (0, width, y_min_bound, y_scan_end);
+    }
+    let pad = 36usize;
+    let x0 = min_x.saturating_sub(pad);
+    let x1 = (max_x + pad + 1).min(width);
+    let y0 = min_y.saturating_sub(pad).max(y_min_bound);
+    let y1 = (max_y + pad + 1).min(y_scan_end);
+    (x0, x1, y0, y1)
 }
 
 /// 统计 1-bit 页面位图正文区中具有印刷文字特征的水平文字行数
@@ -672,16 +744,20 @@ fn bitmap_1bit_to_png(
     bitmap: &[u8],
     width: usize,
     height: usize,
+    x_start: usize,
+    x_end: usize,
     y_start: usize,
     y_end: usize,
 ) -> Option<Vec<u8>> {
+    let x_end = x_end.min(width);
     let y_end = y_end.min(height);
-    if y_end <= y_start || width == 0 {
+    if y_end <= y_start || x_end <= x_start || width == 0 {
         return None;
     }
+    let crop_w = x_end - x_start;
     let crop_h = y_end - y_start;
-    let scale = if width >= 1800 { 2 } else { 1 };
-    let out_w = width / scale;
+    let scale = if crop_w >= 1800 { 2 } else { 1 };
+    let out_w = crop_w / scale;
     let out_h = crop_h / scale;
     if out_w == 0 || out_h == 0 {
         return None;
@@ -691,7 +767,7 @@ fn bitmap_1bit_to_png(
     for oy in 0..out_h {
         let sy0 = y_start + oy * scale;
         for ox in 0..out_w {
-            let sx0 = ox * scale;
+            let sx0 = x_start + ox * scale;
             let mut black_count = 0u32;
             let mut total = 0u32;
             for dy in 0..scale {

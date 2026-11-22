@@ -125,6 +125,124 @@ pub fn extract_publication_numbers(oa_text: &str) -> Vec<(String, String)> {
     results
 }
 
+/// 确定性全文档信号预挖摘要（v0.9.66 深度研发分析底座）：
+/// 在调用大模型之前，用确定性规则先从整篇专利的「权利要求 + 说明书全文」中挖出 3 类高价值硬事实，
+/// 彻底杜绝大模型只复述摘要/表面文字：
+/// 1. 定量工程参数与工况窗口（温度/压力/尺寸/效率/转速/电压/配比等真实数值句）；
+/// 2. 机械/电气部件连接拓扑关系；
+/// 3. 说明书中已公开但未写入权利要求书的隐藏结构/部件（免费可借鉴或可二次挖潜宝藏）。
+#[derive(Debug, Clone, Default)]
+pub struct WholeDocumentSignals {
+    pub quantitative_params: Vec<String>,
+    pub topology_edges: Vec<String>,
+    pub unclaimed_spec_parts: Vec<String>,
+    pub total_parts: usize,
+}
+
+impl WholeDocumentSignals {
+    pub fn format_prompt_block(&self) -> String {
+        let mut sections = Vec::new();
+        if !self.quantitative_params.is_empty() {
+            sections.push(format!(
+                "【程序预挖 · 全文定量参数与性能指标（共 {} 条，严禁忽略）】\n{}",
+                self.quantitative_params.len(),
+                self.quantitative_params
+                    .iter()
+                    .map(|s| format!("- {s}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            ));
+        }
+        if !self.topology_edges.is_empty() {
+            sections.push(format!(
+                "【程序预挖 · 部件结构连接拓扑（共 {} 条）】\n{}",
+                self.topology_edges.len(),
+                self.topology_edges
+                    .iter()
+                    .map(|s| format!("- {s}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            ));
+        }
+        if !self.unclaimed_spec_parts.is_empty() {
+            sections.push(format!(
+                "【程序预挖 · 仅说明书披露而未写入权利要求书的隐藏部件/细节（共 {} 个）】\n{}",
+                self.unclaimed_spec_parts.len(),
+                self.unclaimed_spec_parts.join("、")
+            ));
+        }
+        if sections.is_empty() {
+            "（该专利当前仅含摘要或缺少说明书全文，未提取到定量参数与部件拓扑；请在结论中显式标注数据缺失边界）"
+                .to_string()
+        } else {
+            sections.join("\n\n")
+        }
+    }
+}
+
+/// 从整篇专利（权利要求 + 说明书全文）确定性预挖定量参数、部件拓扑与未权要隐藏部件
+pub fn extract_whole_document_signals(claims: &str, description: &str) -> WholeDocumentSignals {
+    let mut signals = WholeDocumentSignals::default();
+    let full = if description.trim().is_empty() {
+        claims.to_string()
+    } else {
+        format!("{claims}\n{description}")
+    };
+
+    // 1. 提取含真实定量工程参数/性能收益的句子（温度/压力/效率/尺寸/转速/功率/时间/配比）
+    if let Ok(param_re) = regex::Regex::new(
+        r"\d+(?:\.\d+)?\s*(?:℃|°C|%|％|MPa|kPa|Pa|mm|cm|μm|nm|kg|kW|MW|rpm|Hz|V|mA|A|W|小时|分钟|秒|倍|wt%|mol)",
+    ) {
+        for raw_seg in full.split(['。', '；', '\n']) {
+            let seg = raw_seg.trim();
+            if seg.chars().count() < 8 || !param_re.is_match(seg) {
+                continue;
+            }
+            // 过滤纯申请日/公告日/专利号等非工程参数行
+            if seg.contains("申请号") || seg.contains("申请日") || seg.contains("公开日") {
+                continue;
+            }
+            let preview: String = seg.chars().take(120).collect();
+            if !signals.quantitative_params.contains(&preview) {
+                signals.quantitative_params.push(preview);
+                if signals.quantitative_params.len() >= 14 {
+                    break;
+                }
+            }
+        }
+    }
+
+    // 2. 部件标号与拓扑连接关系
+    let parts = crate::ai::strategy_arbitration::part_topology::extract_part_designators(&full);
+    signals.total_parts = parts.len();
+    let rels =
+        crate::ai::strategy_arbitration::part_topology::extract_topology_relations(&full, &parts);
+    for r in rels.into_iter().take(16) {
+        let edge = format!("{} —[{}]→ {}", r.part_a, r.relation_verb, r.part_b);
+        if !signals.topology_edges.contains(&edge) {
+            signals.topology_edges.push(edge);
+        }
+    }
+
+    // 3. 识别“说明书（含图例/实施例）中有、但权利要求书中从未写入”的隐藏部件（免费借鉴/规避/分案宝藏）
+    if !claims.trim().is_empty() && !description.trim().is_empty() {
+        let report = crate::ai::strategy_arbitration::part_topology::check_numeral_consistency(
+            claims,
+            description,
+            None,
+        );
+        for p in report.parts {
+            if !p.in_claims && (p.in_description || p.in_legend) && !claims.contains(&p.name) {
+                signals
+                    .unclaimed_spec_parts
+                    .push(format!("[{}] {}", p.number, p.name));
+            }
+        }
+    }
+
+    signals
+}
+
 impl AiClient {
     pub async fn summarize_patent(
         &self,
@@ -132,51 +250,127 @@ impl AiClient {
         abstract_text: &str,
         claims: &str,
     ) -> Result<String> {
-        let prompt = format!(
-            "请对以下专利进行全面分析摘要：\n\n\
-             标题：{patent_title}\n\n\
-             摘要：{abstract_text}\n\n\
-             权利要求全文：{claims_preview}\n\n\
-             请从以下几个方面分析：\n\
-             1. 技术领域\n\
-             2. 核心技术方案\n\
-             3. 创新点\n\
-             4. 应用场景\n\
-             5. 关键权利要求解读",
-            claims_preview = structured_patent_excerpt(claims, 20_000)
-        );
-        self.chat(&prompt, None).await
+        self.summarize_patent_deep(patent_title, abstract_text, claims, "")
+            .await
     }
 
-    /// Analyze patent claims: identify independent vs dependent, extract scope elements.
-    pub async fn analyze_claims(&self, patent_title: &str, claims: &str) -> Result<String> {
+    /// 单篇专利全文档深度研发剖析（v0.9.66）：
+    /// 必须结合「权利要求 + 说明书全文 + 程序预挖的定量参数/部件拓扑/未权要隐藏部件」，
+    /// 从全文档发掘隐含物理机理、失效边界、未权要隐藏细节与二次研发突破口，严禁表面复述摘要。
+    pub async fn summarize_patent_deep(
+        &self,
+        patent_title: &str,
+        abstract_text: &str,
+        claims: &str,
+        description: &str,
+    ) -> Result<String> {
+        let signals = extract_whole_document_signals(claims, description);
+        let pre_mined = signals.format_prompt_block();
+        let combined_doc = if description.trim().is_empty() {
+            format!(
+                "权利要求书全文：\n{}",
+                structured_patent_excerpt(claims, 25_000)
+            )
+        } else {
+            structured_patent_excerpt(
+                &format!("权利要求书全文：\n{claims}\n\n说明书（前部分）：\n{description}"),
+                32_000,
+            )
+        };
+
         let prompt = format!(
-            "请对以下专利的权利要求进行深度分析：\n\n\
-             专利标题：{patent_title}\n\n\
-             权利要求全文：\n{claims_text}\n\n\
-             请按以下格式分析（使用 Markdown 表格）：\n\n\
-             ### 1. 权利要求结构总览\n\
-             列出每条权利要求的编号、类型（独立/从属）、所从属的权利要求号\n\n\
-             ### 2. 独立权利要求分析\n\
-             对每条独立权利要求：\n\
-             - 保护范围要素（技术特征列表）\n\
-             - 保护范围宽度评估（宽/中/窄）\n\
-             - 可能的规避设计方向\n\n\
-             ### 3. 从属权利要求层级\n\
-             用缩进或树形结构展示权利要求之间的从属关系\n\n\
-             ### 4. 关键技术特征\n\
-             提取最核心的限定性技术特征（决定保护范围的关键要素）\n\n\
-             ### 5. 保护强度评估\n\
-             综合评估该专利权利要求的保护强度（强/中/弱），并说明原因",
-            claims_text = structured_patent_excerpt(claims, 50_000)
+            "请以「首席研发总工 + 资深专利分析师」双重视角，对以下专利做**全文档深度知识发掘**（严禁浮于表面地复述摘要或翻译权1，必须挖出对一线研发和专利攻防真正有价值的隐含知识）：\n\n\
+             【专利标题】{patent_title}\n\
+             【摘要】{abstract_text}\n\n\
+             {pre_mined}\n\n\
+             【专利全文材料】\n{combined_doc}\n\n\
+             请严格按以下 5 个硬核维度输出（使用 Markdown 标题与表格，凡引用参数/结构必须标明源自全文依据；全文缺失某项数据时明确标注「原文未披露」，绝不编造）：\n\n\
+             ### 1. 核心物理/工程因果链与定量参数窗口\n\
+             - 用「痛点机理 → 关键结构/工艺手段 → 物理作用链 → 实测定量收益」拆解（必须把说明书里的具体温度/压力/尺寸/材料/效率指标拉成对照表）；\n\
+             - 指出真正起决定作用的 1~2 个“胜负手”特征（而非把所有常规部件平铺一遍）。\n\n\
+             ### 2. 隐含工程前提与失效边界（Anti-Pattern / 踩坑预警）\n\
+             - 该方案默认成立却未明说的 2~3 个工程前提是什么？（如特定工况载荷、装配公差、介质清洁度、散热/密封寿命、维护成本等）；\n\
+             - 在什么边界条件下该方案会率先失效或性价比崩塌？\n\n\
+             ### 3. 说明书隐藏宝藏（已公开但未写入独立权利要求的细节）\n\
+             - 结合程序预挖清单，重点剖析说明书实施例中披露、却未被独立权利要求圈住的替代结构/子部件/工艺细节；\n\
+             - 明确区分：哪些属于「可直接免费借鉴的公知设计」，哪些属于「值得做二次改进/外围补强的挖潜点」。\n\n\
+             ### 4. 权利要求薄弱点与工程规避靶点\n\
+             - 指出独立权利要求中最窄化/非必要的限定特征（竞品只要替换或省去这 1 点即可绕过字面侵权），并给出具体可落地的结构替换思路。\n\n\
+             ### 5. 面向研发与未来 3~5 年演进的突破口（抓重点 × 不拘一格 × 沉住气求真）\n\
+             - **如果重来一次怎么抓真重点**：剔除原型里的非必要工艺/结构细枝末节，真正决定胜负的核心物理原理是什么？写专利时哪一层抽象最值得卡死？\n\
+             - **面向未来 3~5 年的演进卡位与二次研发**：提出至少 2 个既不局限眼前原型、又经得起物理规律与量产检验的进化方向（如跨代材料/架构替代、系统级集成或控制范式跃迁），每条必须写清「改动部位 + 物理机理 + 预期提升指标 + 必须先做实验验证的真实风险边界（绝不画大饼）」。"
         );
 
         let messages = vec![
             Message {
                 role: "system".into(),
                 content: format!(
-                    "你是一位资深专利代理人和知识产权律师。你擅长解读专利权利要求书，\
-                         分析保护范围，识别关键技术特征。请用专业、严谨的语言分析。{FACT_DISCIPLINE}"
+                    "你是拥有 20 年机电/热管理/材料一线研发经验的首席总工兼资深专利分析专家。\
+                     你极度厌恶“技术领域+核心方案+应用场景”式的表面套话总结，必须从整篇说明书的字里行间挖出定量参数、\
+                     隐含假设、失效边界、未权要隐藏细节和可落地的二次研发切入点。{FACT_DISCIPLINE}"
+                ),
+            },
+            Message {
+                role: "user".into(),
+                content: prompt,
+            },
+        ];
+
+        self.send_chat(messages, 0.35).await
+    }
+
+    /// Analyze patent claims: identify independent vs dependent, extract scope elements.
+    pub async fn analyze_claims(&self, patent_title: &str, claims: &str) -> Result<String> {
+        self.analyze_claims_deep(patent_title, claims, "").await
+    }
+
+    /// 权利要求 × 说明书交叉深度剖析（v0.9.66）：
+    /// 结合说明书全文审查独权保护宽度、多余限定靶点、第 26.4 条支撑风险与未权要实施例宝藏。
+    pub async fn analyze_claims_deep(
+        &self,
+        patent_title: &str,
+        claims: &str,
+        description: &str,
+    ) -> Result<String> {
+        let signals = extract_whole_document_signals(claims, description);
+        let pre_mined = signals.format_prompt_block();
+        let spec_excerpt = if description.trim().is_empty() {
+            "（未提供说明书全文，仅基于权利要求书分析；涉及第 26.4 条说明书支撑项请标注需补充全文核验）"
+                .to_string()
+        } else {
+            structured_patent_excerpt(&format!("说明书（前部分）：\n{description}"), 24_000)
+        };
+
+        let prompt = format!(
+            "请对以下专利执行**「权利要求书 × 说明书全文」交叉深度攻防分析**（面向专利代理师与一线研发规避设计，严禁只把权要逐句复述）：\n\n\
+             【专利标题】{patent_title}\n\n\
+             {pre_mined}\n\n\
+             【权利要求书全文】\n{claims_text}\n\n\
+             【说明书全文选段】\n{spec_excerpt}\n\n\
+             请按以下 5 节输出（使用 Markdown 表格）：\n\n\
+             ### 1. 独立权利要求逐特征拆解与“多余限定”诊断\n\
+             | 特征编号 | 权利要求原文特征 | 作用（必要/窄化多余） | 规避难度 | 竞品可替换思路 |\n\
+             |---|---|---|---|---|\n\n\
+             ### 2. 从属权利要求防御梯度树与真正有价值的退守防线\n\
+             - 用树形缩进展示引用层级，并指出哪几条从权是真正具备创造性退守价值的“硬骨头”，哪几条只是常规公知凑数。\n\n\
+             ### 3. 「权利要求 vs 说明书」落差深挖（隐藏宝藏与漏洞）\n\
+             - **漏圈的宝藏**：说明书中已详细披露、却未写进独权/从权的替代结构、材料或工艺参数有哪些？（可直接用于规避借鉴或外围布局）；\n\
+             - **专利法第 26.4 条 / 稳定性弱点**：独权中哪些上位概括、功能性限定或数值范围在说明书中缺少充分实施例支撑（可作为无效/答辩突破口）？\n\n\
+             ### 4. 可落地的工程规避设计方案（至少 2 条）\n\
+             - 每条必须明确写出：① 舍弃或替换独权中的哪一个具体特征；② 改用什么不同物理机理/结构实现同等或更优功能；③ 为何既不落入字面侵权也不构成等同侵权（三基本一无需原则）。\n\n\
+             ### 5. 综合保护强度、可无效性评级与「着眼未来的重写/补强建议」\n\
+             - 给出保护强度（强/中/弱）、最易攻破的 1~2 个软肋；\n\
+             - **若作为发明人今天重构/续写外围布局**：指出应从独权中剔除哪些锁死单一原型的多余限定，并给出 2 个面向未来 3~5 年技术演进的上位化或替代实施例布局方向（确保真实可实现，兼顾宽保护与稳固授权）。",
+            claims_text = structured_patent_excerpt(claims, 30_000),
+        );
+
+        let messages = vec![
+            Message {
+                role: "system".into(),
+                content: format!(
+                    "你是一位专攻专利无效、侵权规避设计与研发专利布局的资深专利代理师兼机械/电气总工。\
+                     你擅长把权利要求书与说明书实施例交叉比对，找出多余限定、26.4 条支撑漏洞、未权要的隐藏细节，\
+                     并给出工程师可以直接画图落地的规避设计路径。{FACT_DISCIPLINE}"
                 ),
             },
             Message {
@@ -234,40 +428,35 @@ impl AiClient {
         self.send_chat(messages, 0.3).await
     }
 
-    /// Compare multiple patents across multiple dimensions.
+    /// Compare multiple patents across multiple dimensions — upgraded in v0.9.66 for cross-document R&D knowledge discovery.
     pub async fn compare_multiple(&self, patents_info: &str) -> Result<String> {
         let prompt = format!(
-            "请对以下多个专利进行多维度对比分析：\n\n{patents}\n\n\
-             请按以下格式输出（使用 Markdown 表格）：\n\n\
-             ### 1. 基本信息对比\n\
-             | 维度 | 专利1 | 专利2 | ... |\n\
-             |------|-------|-------|-----|\n\
-             | 技术领域 | | | |\n\
-             | 核心问题 | | | |\n\
-             | 申请人 | | | |\n\n\
-             ### 2. 技术方案对比\n\
-             | 维度 | 专利1 | 专利2 | ... |\n\
-             |------|-------|-------|-----|\n\
-             | 核心方案 | | | |\n\
-             | 创新点 | | | |\n\
-             | 技术路线 | | | |\n\n\
-             ### 3. 优缺点分析\n\
-             | 专利 | 优点 | 缺点 | 应用场景 |\n\n\
-             ### 4. 综合评价\n\
-             - 技术演进趋势\n\
-             - 最具创新性的方案\n\
-             - 互补性分析",
-            // Batch 1 任务 1.4：废除 6000 字硬截断——权利要求 100% 保留，
-            // 说明书按相关性选段（每节预算 20k 字符，超限带显式完整性提示）
-            patents = structured_patent_excerpt(patents_info, 20_000),
+            "请对以下多篇技术文档执行**「跨文档深度知识发掘与研发空白点分析」**（严禁只做基本信息抄录或空泛优缺点罗列，必须发掘出跨文档交叉才能看到的新知识）：\n\n{patents}\n\n\
+             请按以下 4 个深度模块输出（使用 Markdown 表格，未披露指标填「原文未披露」，绝不编造）：\n\n\
+             ### 1. 跨文档技术手段 × 物理机理 × 实测参数对照矩阵\n\
+             | 对比维度 | 专利/文档1 | 专利/文档2 | ... |\n\
+             |---|---|---|---|\n\
+             | 核心物理机理/架构 | | | |\n\
+             | 关键量化参数窗口（温度/压力/效率/尺寸等） | | | |\n\
+             | 核心胜负手结构 | | | |\n\
+             | 固有代价/失效边界 | | | |\n\n\
+             ### 2. 全行业共性瓶颈（所有对比方案共同默认、都未打破的死角）\n\
+             - 提炼出这批文档**共同存在的 2~3 个隐含假设或物理矛盾**，说明为什么单靠现有各方案的局部微调无法突破。\n\n\
+             ### 3. 跨专利嫁接与研发空白点（可落地的新方案假设）\n\
+             - 发掘**至少 2 个跨文档交叉空白点**：明确指出「提取文档 A 的 XX 结构/机理 + 结合文档 B 的 YY 控制/材料」如何解决第 2 节的共性瓶颈；\n\
+             - 同步预判这种跨方案嫁接会引入什么**新的工程耦合副作用**以及对应的解决措施。\n\n\
+             ### 4. FTO 侵权雷区与最窄绕行通道\n\
+             - 综合这批专利的独立权利要求，标出**绝对不可触碰的高危特征交集**与**最安全的可规避工程路线**。",
+            patents = structured_patent_excerpt(patents_info, 28_000),
         );
 
         let messages = vec![
             Message {
                 role: "system".into(),
-                content: "你是一位专利技术分析专家，擅长对比分析多个专利的技术方案，\
-                         识别技术演进趋势和创新差异。请用结构化的表格形式呈现分析结果。"
-                    .into(),
+                content: format!(
+                    "你是首席研发架构师兼资深专利情报专家。你的核心价值是从多篇专利的全文差异与参数边界中，\
+                     提炼出“单看任何一篇都看不出来的跨文档新知识、行业共性盲区与可落地的嫁接创新空白点”。{FACT_DISCIPLINE}"
+                ),
             },
             Message {
                 role: "user".into(),
@@ -275,7 +464,7 @@ impl AiClient {
             },
         ];
 
-        self.send_chat(messages, 0.5).await
+        self.send_chat(messages, 0.4).await
     }
 
     /// Inventiveness (创造性) analysis: compare my patent against reference documents
@@ -1783,5 +1972,41 @@ mod structured_excerpt_tests {
     fn empty_input_empty_output() {
         assert_eq!("", structured_patent_excerpt("", 10_000));
         assert_eq!("", structured_patent_excerpt("   ", 10_000));
+    }
+
+    /// v0.9.66 全文档信号预挖引擎测试：必须确定性挖出定量参数、部件拓扑与未写入权要的说明书隐藏部件
+    #[test]
+    fn whole_document_signals_extracts_params_topology_and_unclaimed_gems() {
+        let claims = "1. 一种电机冷却系统，包括电机机体(1)、散热器(2)和油泵(3)，油泵(3)与散热器(2)固定连接。";
+        let desc = "附图标记说明：1-电机机体；2-散热器；3-油泵；4-透明观察窗；5-导流挡板。\n\
+                    具体实施方式：工作时油泵(3)将冷却液在0.45MPa压力下泵入散热器(2)，可将绕组峰值温度从145℃降至82℃，\
+                    整体散热效率提升35%。壳体侧面安装有透明观察窗(4)，腔体内部焊接有导流挡板(5)以减少涡流损失。";
+
+        let sig = super::extract_whole_document_signals(claims, desc);
+        assert!(
+            sig.quantitative_params
+                .iter()
+                .any(|s| s.contains("0.45MPa") || s.contains("145℃")),
+            "必须预挖出说明书里的定量参数句: {:?}",
+            sig.quantitative_params
+        );
+        assert!(
+            !sig.topology_edges.is_empty(),
+            "必须预挖出部件拓扑连接边: {:?}",
+            sig.topology_edges
+        );
+        assert!(
+            sig.unclaimed_spec_parts
+                .iter()
+                .any(|p| p.contains("透明观察窗"))
+                && sig
+                    .unclaimed_spec_parts
+                    .iter()
+                    .any(|p| p.contains("导流挡板")),
+            "必须预挖出仅说明书披露而未写入权利要求的隐藏部件: {:?}",
+            sig.unclaimed_spec_parts
+        );
+        let block = sig.format_prompt_block();
+        assert!(block.contains("定量参数") && block.contains("隐藏部件"));
     }
 }
