@@ -252,6 +252,28 @@
             <div id="backup-status-msg" class="status-message" style="margin-top:8px;"></div>
         </div>
 
+        <div class="setting-group" id="ai-budget-breaker-group">
+            <h3>🛡️ AI 调用次数与 Token 硬熔断设置</h3>
+            <p class="muted" style="font-size:13px;">防止流水线或循环对话失控消耗配额。设为 0 表示不限制；达到上限时后端将硬阻断新的 AI 请求。</p>
+            <div id="ai-budget-today-summary" class="status-pill" style="margin-bottom:12px;">今日已调用 -- 次 · 已消耗 -- Tokens</div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:12px;">
+                <div class="form-group" style="margin:0;">
+                    <label for="ai-budget-daily-calls">单日总调用次数上限 (次/天)</label>
+                    <input type="number" id="ai-budget-daily-calls" min="0" value="0" placeholder="0 = 不限制">
+                </div>
+                <div class="form-group" style="margin:0;">
+                    <label for="ai-budget-daily-tokens">单日总 Token 上限 (Tokens/天)</label>
+                    <input type="number" id="ai-budget-daily-tokens" min="0" value="0" placeholder="0 = 不限制">
+                </div>
+                <div class="form-group" style="margin:0;">
+                    <label for="ai-budget-idea-tokens">单个创意累计 Token 上限 (Tokens/创意)</label>
+                    <input type="number" id="ai-budget-idea-tokens" min="0" value="0" placeholder="0 = 不限制">
+                </div>
+            </div>
+            <button class="btn-save" type="button" onclick="saveAiBudgetSettings()">保存熔断阈值</button>
+            <div id="ai-budget-status-msg" class="status-message" style="margin-top:8px;"></div>
+        </div>
+
         <div class="setting-group" id="ai-cost-group" style="display:none;">
             <h3>💰 <span data-i18n="ai.costTitle">AI 使用统计（近30天）</span></h3>
             <div id="ai-cost-summary" class="form-section">
@@ -705,8 +727,63 @@
 
             document.getElementById('config-status').innerHTML = DOMPurify.sanitize(status.join('<br>'));
 
-            // 加载 AI 使用统计
+            // 加载 AI 使用统计与熔断阈值
             loadAiCostStats();
+            loadAiBudgetSettings();
+        }
+
+        async function loadAiBudgetSettings() {
+            try {
+                var res = await fetch('/api/settings/ai-budget');
+                if (!res.ok) return;
+                var data = await res.json();
+                var callsEl = document.getElementById('ai-budget-daily-calls');
+                var tokensEl = document.getElementById('ai-budget-daily-tokens');
+                var ideaEl = document.getElementById('ai-budget-idea-tokens');
+                var summaryEl = document.getElementById('ai-budget-today-summary');
+                if (callsEl) callsEl.value = Number(data.daily_max_calls || 0);
+                if (tokensEl) tokensEl.value = Number(data.daily_max_tokens || 0);
+                if (ideaEl) ideaEl.value = Number(data.idea_max_tokens || 0);
+                if (summaryEl) {
+                    summaryEl.textContent = '📊 今日已调用 ' + Number(data.today_calls || 0) + ' 次 · 已消耗 ' + Number(data.today_total_tokens || 0).toLocaleString() + ' Tokens';
+                }
+            } catch (e) {
+                console.warn('loadAiBudgetSettings failed:', e);
+            }
+        }
+
+        async function saveAiBudgetSettings() {
+            var msgEl = document.getElementById('ai-budget-status-msg');
+            var dailyCalls = Number((document.getElementById('ai-budget-daily-calls') || {}).value || 0);
+            var dailyTokens = Number((document.getElementById('ai-budget-daily-tokens') || {}).value || 0);
+            var ideaTokens = Number((document.getElementById('ai-budget-idea-tokens') || {}).value || 0);
+            try {
+                var res = await fetch('/api/settings/ai-budget', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        daily_max_calls: Math.max(0, Math.floor(dailyCalls)),
+                        daily_max_tokens: Math.max(0, Math.floor(dailyTokens)),
+                        idea_max_tokens: Math.max(0, Math.floor(ideaTokens))
+                    })
+                });
+                var data = await res.json();
+                if (res.ok && data.status === 'ok') {
+                    if (msgEl) {
+                        msgEl.textContent = '✅ AI 熔断阈值已保存生效';
+                        msgEl.className = 'status-message success';
+                    }
+                    loadAiBudgetSettings();
+                } else if (msgEl) {
+                    msgEl.textContent = '❌ 保存失败: ' + (data.message || '未知错误');
+                    msgEl.className = 'status-message error';
+                }
+            } catch (e) {
+                if (msgEl) {
+                    msgEl.textContent = '❌ 保存失败: ' + e.message;
+                    msgEl.className = 'status-message error';
+                }
+            }
         }
 
         async function loadAiCostStats() {

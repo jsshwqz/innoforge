@@ -24,6 +24,7 @@
 <select id="search-mode" onchange="toggleRegionSelect()">
 <option value="local" data-i18n="mode.local"></option>
 <option value="online" data-i18n="mode.online"></option>
+<option value="vector" data-i18n="mode.vector"></option>
 </select>
 <select id="search-region" style="display:none" title="搜索区域">
 <option value="auto" data-i18n="region.auto"></option>
@@ -158,6 +159,10 @@ function clearSearchPdfMeta() {
     'search.placeholder': '输入关键词、文献号、申请人或发明人...',
     'mode.local': '本地数据库',
     'mode.online': '在线搜索',
+    'mode.vector': '🧠 语义向量检索 (本地)',
+    'vector.backfillBtn': '⚡ 一键后台补齐存量向量索引',
+    'vector.backfillDone': '✅ 本地向量与分块索引已全部就绪',
+    'vector.backfillRunning': '⏳ 正在补齐向量与段落索引...',
     'region.auto': '自动识别区域',
     'region.cn': '国内（国知局/搜狗）',
     'region.intl': '国外（SerpAPI/Google）',
@@ -249,6 +254,10 @@ function clearSearchPdfMeta() {
     'search.placeholder': 'Enter keywords, patent number, applicant, or inventor...',
     'mode.local': 'Local DB',
     'mode.online': 'Online',
+    'mode.vector': '🧠 Semantic Vector (Local)',
+    'vector.backfillBtn': '⚡ Backfill Local Vector Index',
+    'vector.backfillDone': '✅ Local vector & chunk index ready',
+    'vector.backfillRunning': '⏳ Backfilling vector & chunk index...',
     'region.auto': 'Auto Detect',
     'region.cn': 'China (CNIPR/Sogou)',
     'region.intl': 'International (SerpAPI/Google)',
@@ -355,9 +364,10 @@ renderNavbar('search');
 renderSidebar(
   '<div class="sidebar-section">'
   + '<div class="sidebar-label">' + t('mode.local').split(' ')[0] + '</div>'
-  + '<select id="sidebar-search-mode" onchange="document.getElementById(\'search-mode\').value=this.value">'
+  + '<select id="sidebar-search-mode" onchange="document.getElementById(\'search-mode\').value=this.value;toggleRegionSelect()">'
   + '<option value="local" data-i18n="mode.local">' + t('mode.local') + '</option>'
   + '<option value="online" data-i18n="mode.online">' + t('mode.online') + '</option>'
+  + '<option value="vector" data-i18n="mode.vector">' + t('mode.vector') + '</option>'
   + '</select>'
   + '</div>'
   + '<div class="sidebar-section">'
@@ -387,13 +397,61 @@ function escapeHtml(str) {
 
 function toggleRegionSelect() {
     var mode = document.getElementById('search-mode').value;
+    var sidebarMode = document.getElementById('sidebar-search-mode');
+    if (sidebarMode && sidebarMode.value !== mode) sidebarMode.value = mode;
     var regionEl = document.getElementById('search-region');
     if (regionEl) regionEl.style.display = mode === 'online' ? '' : 'none';
 }
 
 function getSearchEndpoint() {
     var mode = document.getElementById('search-mode').value;
-    return mode === 'online' ? '/api/search/online' : '/api/search';
+    if (mode === 'online') return '/api/search/online';
+    if (mode === 'vector') return '/api/search/vector';
+    return '/api/search';
+}
+
+async function runVectorBackfill() {
+    var hintEl = document.getElementById('search-hint');
+    if (hintEl) {
+        hintEl.style.display = 'block';
+        hintEl.innerHTML = DOMPurify.sanitize('<span style="color:#58a6ff;">' + escapeHtml(t('vector.backfillRunning')) + '</span>');
+    }
+    try {
+        var done = false;
+        var guard = 0;
+        var lastData = null;
+        while (!done && guard < 30) {
+            guard += 1;
+            var res = await fetch('/api/patents/backfill-index', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ batch_size: 100 })
+            });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            lastData = await res.json();
+            done = Boolean(lastData.done) || Number(lastData.remaining || 0) === 0;
+            if (hintEl && lastData) {
+                var indexed = Number(lastData.embedded_patents || 0);
+                var total = Number(lastData.total_patents || 0);
+                var pct = Number(lastData.progress_percent || 0).toFixed(1);
+                hintEl.innerHTML = DOMPurify.sanitize(
+                    '<span style="color:#58a6ff;">' + escapeHtml(t('vector.backfillRunning')) + ' (' + indexed + '/' + total + ' · ' + pct + '%)</span>'
+                );
+            }
+        }
+        if (hintEl && lastData) {
+            hintEl.innerHTML = DOMPurify.sanitize(
+                '<span style="color:#3fb950;">' + escapeHtml(t('vector.backfillDone')) + ' (' + Number(lastData.embedded_patents || 0) + '/' + Number(lastData.total_patents || 0) + ')</span>'
+            );
+        }
+        if (currentRequest) {
+            doSearch(1);
+        }
+    } catch (err) {
+        if (hintEl) {
+            hintEl.innerHTML = DOMPurify.sanitize('<span style="color:#f85149;">❌ ' + escapeHtml(err.message) + '</span>');
+        }
+    }
 }
 
 function buildRequest(page) {
@@ -435,10 +493,14 @@ async function doSearch(page) {
 
     try {
         const endpoint = getSearchEndpoint();
+        const mode = document.getElementById('search-mode').value;
+        const payload = mode === 'vector'
+            ? { query: body.query, limit: body.page_size, rrf_k: 60 }
+            : body;
         const res = await fetch(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body)
+            body: JSON.stringify(payload)
         });
         if (!res.ok) throw new Error('服务器错误 (' + res.status + ')');
         const data = await res.json();
@@ -553,8 +615,19 @@ function renderResults(data, page, pageSize) {
         source
     });
 
-    // 显示搜索来源提示（如免费搜索时建议注册更好的服务）
-    if (data.hint) {
+    // 显示搜索来源提示（如免费搜索时建议注册更好的服务，或向量检索存量回填进度）
+    if (data.index_status && Number(data.index_status.remaining || 0) > 0) {
+        const hintEl = document.getElementById('search-hint');
+        if (hintEl) {
+            const st = data.index_status;
+            const pct = Number(st.progress_percent || 0).toFixed(1);
+            hintEl.innerHTML = DOMPurify.sanitize(
+                `🧠 本地向量索引覆盖率 ${Number(st.embedded_patents || 0)}/${Number(st.total_patents || 0)} (${pct}%)，尚有 <strong>${Number(st.remaining || 0)}</strong> 篇存量专利待建立 v2 向量与段落分块索引 ` +
+                `<button class="btn-secondary btn-sm" style="margin-left:8px;padding:2px 10px;" onclick="runVectorBackfill()">${escapeHtml(t('vector.backfillBtn'))}</button>`
+            );
+            hintEl.style.display = 'block';
+        }
+    } else if (data.hint) {
         const hintEl = document.getElementById('search-hint');
         if (hintEl) {
             hintEl.innerHTML = DOMPurify.sanitize(`💡 ${escapeHtml(data.hint)} <a href="/settings" style="color:#58a6ff;">去设置</a>`);

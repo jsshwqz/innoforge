@@ -740,6 +740,56 @@ pub async fn api_save_ai(
     Ok(Json(json!({"status": "ok"})))
 }
 
+/// GET /api/settings/ai-budget — 读取 AI 调用次数与 Token 硬熔断阈值及今日实时消耗
+pub async fn api_get_ai_budget(State(s): State<AppState>) -> Json<serde_json::Value> {
+    match s.db.get_ai_budget_status() {
+        Ok(val) => Json(val),
+        Err(e) => Json(json!({"status": "error", "message": e.to_string()})),
+    }
+}
+
+/// POST /api/settings/ai-budget — 保存 AI 调用次数与 Token 硬熔断阈值（0 表示不限制）
+pub async fn api_save_ai_budget(
+    State(s): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let daily_max_calls = req
+        .get("daily_max_calls")
+        .and_then(|v| {
+            v.as_i64()
+                .or_else(|| v.as_str().and_then(|s| s.trim().parse().ok()))
+        })
+        .unwrap_or(0)
+        .max(0);
+    let daily_max_tokens = req
+        .get("daily_max_tokens")
+        .and_then(|v| {
+            v.as_i64()
+                .or_else(|| v.as_str().and_then(|s| s.trim().parse().ok()))
+        })
+        .unwrap_or(0)
+        .max(0);
+    let idea_max_tokens = req
+        .get("idea_max_tokens")
+        .and_then(|v| {
+            v.as_i64()
+                .or_else(|| v.as_str().and_then(|s| s.trim().parse().ok()))
+        })
+        .unwrap_or(0)
+        .max(0);
+
+    match s
+        .db
+        .save_ai_budget_settings(daily_max_calls, daily_max_tokens, idea_max_tokens)
+    {
+        Ok(()) => match s.db.get_ai_budget_status() {
+            Ok(status) => Json(status),
+            Err(_) => Json(json!({"status": "ok"})),
+        },
+        Err(e) => Json(json!({"status": "error", "message": e.to_string()})),
+    }
+}
+
 /// 查询 SerpAPI 账户余额/用量（异步请求 + 错误消息脱敏，严禁回显明文 Key）
 pub async fn api_serpapi_balance(State(s): State<AppState>) -> Json<serde_json::Value> {
     let keys = {

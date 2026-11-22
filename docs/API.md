@@ -1882,6 +1882,28 @@ BM25 + 向量相似度的 RRF 融合检索。
 
 删除一条记忆：`{"status":"ok"}` 或 `{"status":"error","message":…}`。删除不存在的条目也返回 `ok`（SQL 影响 0 行不算错）。
 
+### 向量索引回填与 AI 预算硬熔断（v0.9.65）
+
+**GET** `/api/patents/backfill-status`
+
+查询本地专利向量索引（`patents_embedding`，模型 `char-tfidf-v2`）与段落分块索引（`patent_chunks`）的覆盖进度：`{"status":"ok","total_patents","embedded_patents","chunked_patents","remaining","done","progress_percent"}`。
+
+**POST** `/api/patents/backfill-index`
+
+按批次（请求体 `{"batch_size": 100}`，默认 100，上限 200）断点续传回填尚未建立 `char-tfidf-v2` 向量或 `patent_chunks` 的本地存量专利，返回本批处理篇数 `processed`、`chunks_saved` 及最新进度快照。
+
+**GET** `/api/idea/:id/token-usage`
+
+查询指定创意的累计 AI 调用次数与 Token 消耗汇总：`{"status":"ok","idea_id","total_calls","input_tokens","output_tokens","total_tokens","steps":[...],"budget":{...}}`。
+
+**GET** `/api/settings/ai-budget`
+
+查询当前 AI 调用次数与 Token 硬熔断配置及今日实时用量：`{"status":"ok","daily_max_calls","daily_max_tokens","idea_max_tokens","today_calls","today_input_tokens","today_output_tokens","today_total_tokens"}`。
+
+**POST** `/api/settings/ai-budget`
+
+保存 AI 调用次数与 Token 硬熔断阈值（`0` 表示不限制）：请求体 `{"daily_max_calls": 0, "daily_max_tokens": 0, "idea_max_tokens": 0}`。达到阈值后，13 步推演流水线与 AI 对话接口均会硬阻断并返回可诊断提示。
+
 ## 覆盖说明 / Coverage
 
 - `/api` 路由：**132 / 132 条都有说明**（按 path 计；5 条 GET+POST 合并声明的路由在同一节里按方法分别写）。

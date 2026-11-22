@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-21T11:09:59.091Z",
+  "generatedAt": "2026-11-21T12:10:37.553Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -201,6 +201,7 @@
         "loadFindings",
         "loadHistory",
         "loadIdea",
+        "loadIdeaTokenUsage",
         "loadMemory",
         "loadMessages",
         "loadReportTab",
@@ -615,6 +616,7 @@
         "previewPdfContent",
         "removePdfFile",
         "runRiskAssessment",
+        "runVectorBackfill",
         "showStats",
         "toggleAllChecks",
         "toggleRegionSelect",
@@ -651,6 +653,7 @@
         "renderWebResults",
         "resolveChineseTitles",
         "runRiskAssessment",
+        "runVectorBackfill",
         "saveHistory",
         "saveSearchPdfMeta",
         "serpapiBalancePromise",
@@ -675,6 +678,7 @@
         "fetchAiModels",
         "fetchSerpapiBalance",
         "loginWithGcloud",
+        "saveAiBudgetSettings",
         "saveAiConfig",
         "saveEpoCredentials",
         "saveFreeCadSettings",
@@ -699,6 +703,7 @@
         "fillEpoCredentials",
         "formatNumber",
         "goBack",
+        "loadAiBudgetSettings",
         "loadAiCostStats",
         "loginWithGcloud",
         "onAuth",
@@ -706,6 +711,7 @@
         "populateSelect",
         "refreshFreeCadStatus",
         "renderFreeCadStatus",
+        "saveAiBudgetSettings",
         "saveAiConfig",
         "saveEpoCredentials",
         "saveFreeCadSettings",

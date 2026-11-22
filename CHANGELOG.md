@@ -4,6 +4,19 @@
 All notable changes are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
+## [v0.9.65] - 2026-11-21
+
+### 新增与增强 / Added & Enhanced
+
+- **`MB0b` 本地语义向量检索闭环与存量断点回填（`/api/search/vector` + `char-tfidf-v2`）**：
+  - `src/db/vector.rs` & `src/vector/mod.rs`：将 `compute_tfidf_embedding` 升级为 512 维带符号 FNV-1a 特征哈希（`fnv1a_hash_gram`）+ 专利高频套话 IDF 降权（`patent_ngram_idf`，将“一种/包括/装置/所述”等套话权重压至 `0.08`，提升 3-gram/4-gram 专业术语区分度至 `1.25`/`1.45`）；
+  - 新增 `GET /api/patents/backfill-status` 与 `POST /api/patents/backfill-index`（`backfill_embeddings_and_chunks_batch`），支持对存量专利分批幂等补齐 `char-tfidf-v2` 向量与 `patent_chunks` 段落分块索引；
+  - `src/routes/search.rs`（`api_search_vector`）与 `templates/search.html`：前端检索模式新增「🧠 语义向量检索 (本地)」，融合 BM25 + 向量余弦相似度 + 段落级 RRF（`search_chunks_hybrid_rrf`），返回完整专利卡片、命中段落标签 `[Claims]`/`[Embodiment]` 及一键后台补齐存量向量索引进度条。
+- **全链路 Token 记账与单日/单创意预算硬熔断**：
+  - `src/db/cost.rs`：新增 `log_ai_stream_or_call`（支持流式 SSE 精确 usage 或字符级确定性估算）、`get_today_total_usage`、`get_idea_token_summary`、`get_ai_budget_status`、`save_ai_budget_settings` 与 `check_ai_budget_circuit_breaker`；
+  - `src/orchestrator/engine.rs`、`src/routes/ai.rs`、`src/routes/idea.rs`：在 13 步流水线每步执行前及 `/api/ai/chat`、`/api/ai/chat/stream`、`/api/idea/chat`、`/api/idea/analyze`、`/api/idea/pipeline` 入口执行预算硬熔断校验，并在 `ai_client` 与 `ai_client_fast` 双通道完成全链路调用记账；
+  - 新增 `GET /api/idea/:id/token-usage`、`GET /api/settings/ai-budget`、`POST /api/settings/ai-budget`，并在 `templates/idea.html` 顶部展示当前创意累计调用次数与 Token 消耗徽标，在 `templates/settings.html` 新增「🛡️ AI 调用次数与 Token 硬熔断设置」卡片。
+
 ## [v0.9.64] - 2026-11-21
 
 ### 修复与增强 / Fixed & Enhanced

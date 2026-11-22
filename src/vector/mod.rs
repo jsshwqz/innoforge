@@ -46,65 +46,16 @@ impl CharNGramTokenizer {
 
 /// Lazy-initialized TF-IDF vocabulary and document matrix.
 /// For large corpora, only the vocabulary is cached; embeddings are computed on demand.
+#[derive(Default)]
 pub struct VectorIndex {
-    tokenizer: CharNGramTokenizer,
     doc_embeddings: RwLock<HashMap<String, Vec<f32>>>,
-}
-
-impl Default for VectorIndex {
-    fn default() -> Self {
-        Self {
-            tokenizer: CharNGramTokenizer::default(),
-            doc_embeddings: RwLock::new(HashMap::new()),
-        }
-    }
 }
 
 impl VectorIndex {
     /// Compute TF-IDF embedding for a single text document.
-    /// Returns a fixed-size vector (top-k features).
+    /// Delegates to `crate::db::vector::compute_tfidf_embedding` (512-D signed feature hashing + patent IDF).
     pub fn compute_embedding(&self, text: &str) -> Vec<f32> {
-        let tokens = self.tokenizer.tokenize(text);
-        if tokens.is_empty() {
-            return vec![0.0f32];
-        }
-
-        // Compute term frequency
-        let mut tf: HashMap<String, f32> = HashMap::new();
-        for token in &tokens {
-            *tf.entry(token.clone()).or_insert(0.0) += 1.0;
-        }
-        let doc_len = tokens.len() as f32;
-        for count in tf.values_mut() {
-            *count = 1.0 + (*count / doc_len).log2();
-        }
-
-        // Normalize to unit vector.
-        //
-        // KNOWN LIMITATION (M-B §0 decision, intentionally not fixed this round):
-        //   - No IDF weighting (no corpus statistics); all terms treated equally.
-        //   - The sorted-then-padded approach discards the term→dimension mapping,
-        //     so query and document vectors are NOT in the same comparable space.
-        //     Cosine similarity values do NOT constitute semantic relevance.
-        //   - This is acceptable for M-B: we only promise "usable + no panic +
-        //     single implementation", not retrieval quality.
-        //   - Re-evaluate after MB3 when real chunk corpus is available.
-        let norm_sq: f32 = tf.values().map(|v| v * v).sum();
-        let norm = if norm_sq > 0.0 { norm_sq.sqrt() } else { 1.0 };
-
-        // Return as sorted values (for consistent embedding length)
-        let mut embedding: Vec<f32> = tf.values().map(|v| v / norm).collect();
-        embedding.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
-
-        // Pad/truncate to a fixed size for storage
-        const FIXED_SIZE: usize = 512;
-        if embedding.len() < FIXED_SIZE {
-            embedding.resize(FIXED_SIZE, 0.0);
-        } else {
-            embedding.truncate(FIXED_SIZE);
-        }
-
-        embedding
+        crate::db::vector::compute_tfidf_embedding(text)
     }
 
     /// Compute cosine similarity between two normalized vectors.

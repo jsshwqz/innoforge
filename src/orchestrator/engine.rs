@@ -116,6 +116,17 @@ impl Orchestrator {
             // 3. 发送 Running 进度
             self.send_progress(&progress_tx, &step, StepStatus::Running);
 
+            // 3.5 AI 步骤执行前检查单日/单创意 Token 与调用次数硬熔断
+            if step.step_type() == StepType::Llm {
+                if let Err(breaker_msg) = self
+                    .db
+                    .check_ai_budget_circuit_breaker(Some(ctx.idea_id.as_str()))
+                {
+                    self.send_progress(&progress_tx, &step, StepStatus::Error);
+                    return Err(anyhow::anyhow!(breaker_msg));
+                }
+            }
+
             // 4. 执行步骤（前置快照 + 失败回滚）
             // Execute step with pre-snapshot for rollback on failure.
             // R2 fix: PipelineContext is cloned before step execution so that
@@ -123,6 +134,18 @@ impl Orchestrator {
             let ctx_before_step = ctx.clone();
             let result = self.execute_step(&mut ctx, &progress_tx).await;
             let duration_ms = step_start.elapsed().as_millis() as u64;
+
+            // 4.5 全步骤 Token 落账收口（捕获本步骤在主模型与快模型通道上的真实消耗）
+            let step_tag = format!("pipeline_{:?}", step);
+            let _ =
+                self.db
+                    .log_ai_call(&self.ai_client, &step_tag, Some(ctx.idea_id.as_str()), None);
+            if let Some(ref fast_ai) = self.ai_client_fast {
+                let fast_tag = format!("pipeline_{:?}_fast", step);
+                let _ = self
+                    .db
+                    .log_ai_call(fast_ai, &fast_tag, Some(ctx.idea_id.as_str()), None);
+            }
 
             ctx.step_results.push(StepResult {
                 step,

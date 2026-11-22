@@ -1381,6 +1381,31 @@ pub async fn api_search_vector(
         results
     };
 
+    let mut vector_score_map: std::collections::HashMap<String, f32> =
+        std::collections::HashMap::new();
+    for (pid, sim) in &vector_results {
+        vector_score_map.insert(pid.clone(), *sim);
+    }
+
+    // 同步结合分块级 `chunks_fts` 词法命中，补充命中段落标签 `section_tag` 与片段预览
+    let mut chunk_tag_map: std::collections::HashMap<String, (String, String)> =
+        std::collections::HashMap::new();
+    if let Ok(chunk_hits) = s.db.search_embodiment_chunks_lexical(query, limit) {
+        for hit in chunk_hits {
+            chunk_tag_map
+                .entry(hit.patent_id.clone())
+                .or_insert_with(|| {
+                    let preview: String = hit.content.chars().take(120).collect();
+                    let tag = if hit.section_tag.is_empty() {
+                        "FullText".to_string()
+                    } else {
+                        hit.section_tag
+                    };
+                    (tag, preview)
+                });
+        }
+    }
+
     // RRF fuse
     let fused: Vec<(String, f64)> = {
         use std::collections::HashMap;
@@ -1393,6 +1418,10 @@ pub async fn api_search_vector(
             let rank = i + 1;
             *scores.entry(id.clone()).or_insert(0.0) += 1.0 / (k as f64 + rank as f64);
         }
+        for (i, pid) in chunk_tag_map.keys().enumerate() {
+            let rank = i + 1;
+            *scores.entry(pid.clone()).or_insert(0.0) += 0.5 / (k as f64 + rank as f64);
+        }
         let mut sorted: Vec<(String, f64)> = scores.into_iter().collect();
         sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         sorted
@@ -1401,27 +1430,50 @@ pub async fn api_search_vector(
     let mut top_patents: Vec<serde_json::Value> = Vec::new();
     for (id, fused_score) in fused.into_iter().take(limit) {
         if let Ok(Some(patent)) = s.db.get_patent(&id) {
-            let score_percent = (fused_score * 100.0).round() * 100.0 / 100.0;
+            let vec_sim = vector_score_map.get(&id).copied().unwrap_or(0.0);
+            let score_percent = ((vec_sim as f64 * 100.0).max(fused_score * 3000.0))
+                .clamp(1.0, 99.9)
+                .round();
+            let (section_tag, chunk_snippet) = chunk_tag_map
+                .get(&id)
+                .cloned()
+                .unwrap_or_else(|| ("Abstract".to_string(), String::new()));
             top_patents.push(json!({
                 "id": patent.id,
                 "patent_number": patent.patent_number,
                 "title": patent.title,
+                "abstract_text": patent.abstract_text,
                 "applicant": patent.applicant,
                 "inventor": patent.inventor,
+                "filing_date": patent.filing_date,
+                "publication_date": patent.publication_date,
+                "country": patent.country,
+                "ipc_codes": patent.ipc_codes,
                 "relevance_score": score_percent,
                 "fused_score": fused_score,
+                "vector_score": vec_sim,
+                "matched_section_tag": section_tag,
+                "matched_snippet": chunk_snippet,
+                "score_source": format!("向量相似 {:.0}% · 命中 [{}]", vec_sim * 100.0, section_tag),
             }));
         }
     }
 
+    let index_status =
+        s.db.get_backfill_index_status()
+            .unwrap_or_else(|_| json!({}));
+
     Json(json!({
         "patents": top_patents,
         "total": top_patents.len(),
+        "page": 1,
+        "page_size": limit,
         "source": "hybrid",
         "method": "rrf",
         "rrf_k": k,
         "bm25_count": bm25_result.len(),
         "vector_count": vector_results.len(),
+        "index_status": index_status,
     }))
 }
 

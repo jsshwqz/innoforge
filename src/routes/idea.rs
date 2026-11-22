@@ -234,6 +234,9 @@ pub async fn api_idea_analyze(
         Ok(Some(i)) => i,
         _ => return Json(json!({"status": "error", "message": "idea not found"})),
     };
+    if let Err(breaker_msg) = s.db.check_ai_budget_circuit_breaker(Some(id)) {
+        return Json(json!({"status": "error", "message": breaker_msg}));
+    }
 
     // Mark as analyzing
     {
@@ -593,6 +596,9 @@ pub async fn api_idea_chat(
         Ok(Some(i)) => i,
         _ => return Json(json!({"error": "创意不存在"})),
     };
+    if let Err(breaker_msg) = s.db.check_ai_budget_circuit_breaker(Some(&idea_id)) {
+        return Json(json!({"error": breaker_msg}));
+    }
 
     // Get previous messages for context
     let history = s.db.get_idea_messages(&idea_id).unwrap_or_default();
@@ -972,6 +978,17 @@ pub async fn api_idea_chat(
     }))
 }
 
+/// GET /api/idea/:id/token-usage — 查询单创意全链路累计调用次数与 Token 明细
+pub async fn api_idea_token_usage(
+    State(s): State<AppState>,
+    Path(idea_id): Path<String>,
+) -> Json<serde_json::Value> {
+    match s.db.get_idea_token_summary(&idea_id) {
+        Ok(summary) => Json(summary),
+        Err(e) => Json(json!({"status": "error", "message": e.to_string()})),
+    }
+}
+
 /// Get all messages for an idea discussion
 pub async fn api_idea_messages(
     State(s): State<AppState>,
@@ -1012,6 +1029,9 @@ pub async fn api_idea_pipeline(
         Ok(Some(i)) => i,
         _ => return Json(json!({"status": "error", "message": "创意不存在"})),
     };
+    if let Err(breaker_msg) = s.db.check_ai_budget_circuit_breaker(Some(id)) {
+        return Json(json!({"status": "error", "message": breaker_msg}));
+    }
 
     // 创建进度广播通道 / Create broadcast channel for progress
     let (tx, _) = tokio::sync::broadcast::channel::<PipelineProgress>(64);

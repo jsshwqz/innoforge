@@ -78,6 +78,7 @@
             </div>
 
             <div id="status-area"></div>
+            <div id="idea-token-usage-badge" style="display:none;margin:8px 0;padding:8px 12px;background:#161b22;border:1px solid #30363d;border-radius:6px;font-size:12px;color:#8b949e;"></div>
             <div id="score-area"></div>
 
             <!-- Tab 导航 -->
@@ -534,8 +535,28 @@
             loadClaimTree(ideaId);
             loadFindings(ideaId);
             loadFeatureCards(ideaId);
+            loadIdeaTokenUsage(ideaId);
             showDiscussionPanel && showDiscussionPanel();
         } catch(e) {}
+    }
+
+    async function loadIdeaTokenUsage(ideaId) {
+        var badgeEl = document.getElementById('idea-token-usage-badge');
+        if (!badgeEl || !ideaId) return;
+        try {
+            var resp = await fetch('/api/idea/' + encodeURIComponent(ideaId) + '/token-usage');
+            if (!resp.ok) return;
+            var data = await resp.json();
+            var calls = Number(data.total_calls || 0);
+            var tokens = Number(data.total_tokens || 0);
+            var budget = data.budget || {};
+            var limitIdea = Number(budget.idea_max_tokens || 0);
+            var limitStr = limitIdea > 0 ? (' / 单创意熔断上限 ' + limitIdea.toLocaleString() + ' Tokens') : '';
+            badgeEl.textContent = '📊 本创意累计 AI 调用 ' + calls + ' 次 · 共消耗 ' + tokens.toLocaleString() + ' Tokens' + limitStr;
+            badgeEl.style.display = 'block';
+        } catch (e) {
+            badgeEl.style.display = 'none';
+        }
     }
 
     // 加载证据链 / Load evidence chain

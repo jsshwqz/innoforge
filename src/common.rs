@@ -480,6 +480,10 @@ pub fn build_router_with_token(
         .route("/api/settings/serpapi", post(routes::api_save_serpapi))
         .route("/api/settings/ai", post(routes::api_save_ai))
         .route(
+            "/api/settings/ai-budget",
+            get(routes::api_get_ai_budget).post(routes::api_save_ai_budget),
+        )
+        .route(
             "/api/settings/serpapi/balance",
             get(routes::api_serpapi_balance),
         )
@@ -511,6 +515,14 @@ pub fn build_router_with_token(
         .route(
             "/api/patent/:id/extract-pdf-drawings",
             post(routes::api_extract_patent_pdf_drawings),
+        )
+        .route(
+            "/api/patents/backfill-status",
+            get(routes::api_patents_backfill_status),
+        )
+        .route(
+            "/api/patents/backfill-index",
+            post(routes::api_patents_backfill_index),
         )
         .route("/api/patent/pdf/:id", get(routes::api_patent_pdf))
         .route(
@@ -747,6 +759,10 @@ pub fn build_router_with_token(
             get(routes::api_idea_kernel_report),
         )
         .route("/api/idea/:id/messages", get(routes::api_idea_messages))
+        .route(
+            "/api/idea/:id/token-usage",
+            get(routes::api_idea_token_usage),
+        )
         .route(
             "/api/idea/:id/chat/conclusions",
             get(routes::api_idea_chat_conclusions),
