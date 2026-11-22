@@ -349,6 +349,74 @@ impl AppConfig {
         self.ai_channel_ready()
     }
 
+    /// v0.9.69：表驱动四角色模型路由统一入口（`src/ai/router.rs`）。
+    /// 将 FastRewrite / DeepReasoning / VisionMultimodal / StrictJsonVerifier 收口至单一路由函数。
+    pub fn ai_client_for_role(&self, role: crate::ai::router::ModelRole) -> AiClient {
+        match role {
+            crate::ai::router::ModelRole::FastRewrite
+            | crate::ai::router::ModelRole::StrictJsonVerifier => self.ai_client_fast(),
+            crate::ai::router::ModelRole::DeepReasoning => self.ai_client_expert(),
+            crate::ai::router::ModelRole::VisionMultimodal => self
+                .ai_client_vision()
+                .map(|(c, _)| c)
+                .unwrap_or_else(|| self.ai_client()),
+        }
+    }
+
+    /// v0.9.69：导出四角色实时模型路由表快照（供 `GET /api/settings/model-router` 与设置页透明化展示）。
+    pub fn model_routing_snapshot(&self) -> Vec<crate::ai::router::ModelRouteInfo> {
+        let fast_model = if self.ai_model_fast.trim().is_empty()
+            || (!self.ai_model.trim().is_empty()
+                && !Self::is_model_compatible_with_base_url(&self.ai_base_url, &self.ai_model_fast))
+        {
+            self.ai_model.clone()
+        } else {
+            self.ai_model_fast.clone()
+        };
+        let expert_model = if self.ai_model_expert.trim().is_empty()
+            || (!self.ai_model.trim().is_empty()
+                && !Self::is_model_compatible_with_base_url(
+                    &self.ai_base_url,
+                    &self.ai_model_expert,
+                )) {
+            self.ai_model.clone()
+        } else {
+            self.ai_model_expert.clone()
+        };
+        let vision_pair = self.ai_client_vision();
+        let base_ready = self.ai_channel_ready();
+
+        crate::ai::router::MODEL_ROUTING_TABLE
+            .iter()
+            .map(|spec| {
+                let (resolved_model, ready) = match spec.role {
+                    crate::ai::router::ModelRole::FastRewrite
+                    | crate::ai::router::ModelRole::StrictJsonVerifier => {
+                        (fast_model.clone(), base_ready)
+                    }
+                    crate::ai::router::ModelRole::DeepReasoning => {
+                        (expert_model.clone(), base_ready)
+                    }
+                    crate::ai::router::ModelRole::VisionMultimodal => match &vision_pair {
+                        Some((_, m)) => (m.clone(), true),
+                        None => ("未配置视觉模型（将回退文字通道）".to_string(), false),
+                    },
+                };
+                crate::ai::router::ModelRouteInfo {
+                    role: spec.role,
+                    role_key: spec.role_key.to_string(),
+                    label_zh: spec.label_zh.to_string(),
+                    channel: spec.channel.to_string(),
+                    resolved_model,
+                    ready,
+                    default_temperature: spec.default_temperature,
+                    recommended_timeout_secs: spec.recommended_timeout_secs,
+                    purpose_zh: spec.purpose_zh.to_string(),
+                }
+            })
+            .collect()
+    }
+
     /// 首选支持多模态看图的 AI 客户端，返回 `(AiClient, 选中的视觉模型名)`；
     /// 若当前及已配置独立 Key 的服务商均不支持看图，返回 `None` 供调用方优雅降级。
     pub fn ai_client_vision(&self) -> Option<(AiClient, String)> {

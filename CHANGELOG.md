@@ -4,6 +4,22 @@
 All notable changes are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
+## [v0.9.69] - 2026-11-23
+
+### 新增与增强 / Added & Enhanced
+
+- **`v0.7.0` 研发问题结构化四元组拆解器（`src/pipeline/steps/decompose.rs`、`POST /api/idea/decompose`）**：
+  - 在查新与推演启动前将模糊创意拆解为可交互微调的「核心技术对象 + 量化目标效果 + 工程边界约束 + 核心物理矛盾对 + 推荐检索词」（支持快模型通道与零联网确定性基线兜底）；
+  - `templates/idea.html` 新增「🧩 四元组结构化拆解」按钮、四元组微调面板与「✅ 回填为结构化描述」闭环。
+- **`Minimal Diff 2.0` 创造性实质贡献分级（`src/routes/feature_cards.rs`）**：
+  - 为特征卡片最小差异对比新增 `minimal_diff_v2` 创造性贡献 4 级判定（`unexpected_effect` 预料不到的技术效果 / `synergistic_effect` 协同增效 / `cross_domain_transfer` 跨领域转用 / `routine_substitution` 常规公知置换 / `no_substantive_diff` 无实质区别）及专利审查指南三步法映射表（附负面反作弊测试拦截虚高评级）。
+- **补齐第三类核心报告 `GET /api/idea/:id/report?type=patent`（专利代理师实战版）**：
+  - `src/routes/idea_reports.rs` 新增 `type=patent` 专业报告，涵盖 D1/D2 Claim Chart、三步法三元映射表、独立/从属权利要求攻防梯度布局树、防自我窄化与面向未来 3~5 年演进的替代实施例布局建议及专利法第 26.4/22.3 条静态合规自检表；
+  - `templates/idea.html` 报告页签新增「⚖️ 专利代理师版」一键切换入口。
+- **表驱动四角色 AI 模型路由收口（`src/ai/router.rs`、`GET /api/settings/model-router`）**：
+  - 新增 `ModelRole::{FastRewrite, DeepReasoning, VisionMultimodal, StrictJsonVerifier}` 唯一权威常量路由表、`AppConfig::ai_client_for_role` 与 `model_routing_snapshot`，并在 `templates/settings.html` 新增「🧭 四角色 AI 模型路由表」透明化状态面板，完成 `0.9.x` 主线 6 版规划全面闭环。
+
+---
 ## [v0.9.68] - 2026-11-23
 
 ### 新增与增强 / Added & Enhanced

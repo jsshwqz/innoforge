@@ -14,6 +14,14 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-11-23 — **研发问题四元组拆解器、`Minimal Diff 2.0`、第三类「专利代理师版 (`type=patent`)」报告与四角色模型路由收口（v0.9.69）**
+
+- **状态 / Status**: ✅ 本地全量验证与隔离端口实测通过，提交 PR 合入 `main` 并打 `v0.9.69` Tag（6 版 `0.9.x` 规划全面闭环）
+- **① 研发问题结构化四元组拆解器**（`src/pipeline/steps/decompose.rs`、`POST /api/idea/decompose`、`templates/idea.html`）：支持在查新前交互拆解并微调「技术对象 + 量化目标效果 + 工程边界约束 + 核心矛盾对」，无 AI Key 时自动确定性拆解兜底。
+- **② `Minimal Diff 2.0` 创造性贡献分级**（`src/routes/feature_cards.rs`）：新增 4 级实质创造性贡献判定与专利审查指南三步法映射，拒绝无实质差异虚高评级。
+- **③ 第三类「专利代理师实战版 (`type=patent`)」报告**（`src/routes/idea_reports.rs`、`templates/idea.html`）：输出 D1/D2 Claim Chart、三步法映射表、权要攻防树、防窄化与未来 3~5 年替代实施例布局建议及第 26.4/22.3 条静态自检表。
+- **④ 表驱动四角色模型路由收口**（`src/ai/router.rs`、`src/routes/mod.rs`、`GET /api/settings/model-router`、`templates/settings.html`）：将 `FastRewrite / DeepReasoning / VisionMultimodal / StrictJsonVerifier` 统一收口至单一表驱动路由器并在设置页透明展示。
+
 ### 2026-11-23 — **`ResearchState` 跨轮次负向约束闭环、步骤级检查点快照回滚与限次自动补搜（v0.9.68）**
 
 - **状态 / Status**: ✅ 本地全量验证与隔离端口实测通过，提交 PR 合入 `main` 并打 `v0.9.68` Tag

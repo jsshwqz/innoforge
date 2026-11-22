@@ -74,7 +74,36 @@
                 </div>
                 <div class="btn-row">
                     <button class="btn-primary" id="submit-btn" onclick="submitIdea()" data-i18n="idea.submit"></button>
+                    <button type="button" class="btn-secondary" id="decompose-btn" onclick="decomposeIdeaQuadruple()">🧩 四元组结构化拆解</button>
                     <button class="btn-secondary" onclick="clearForm()" data-i18n="idea.clear"></button>
+                </div>
+                <div id="quadruple-panel" style="display:none;margin-top:12px;padding:12px;background:#161b22;border:1px solid #58a6ff66;border-radius:8px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                        <strong style="color:#58a6ff;font-size:0.92em;">🧩 研发问题四元组（查新前可微调聚焦真重点）</strong>
+                        <span id="quadruple-source-tag" class="muted" style="font-size:0.8em;"></span>
+                    </div>
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;margin-bottom:8px;">
+                        <div>
+                            <label style="font-size:0.8em;color:#8b949e;display:block;margin-bottom:2px;">1. 核心技术对象</label>
+                            <input id="quad-object" type="text" style="width:100%;padding:6px 8px;background:#0d1117;border:1px solid #30363d;border-radius:5px;color:#c9d1d9;">
+                        </div>
+                        <div>
+                            <label style="font-size:0.8em;color:#8b949e;display:block;margin-bottom:2px;">2. 量化目标效果</label>
+                            <input id="quad-target" type="text" style="width:100%;padding:6px 8px;background:#0d1117;border:1px solid #30363d;border-radius:5px;color:#c9d1d9;">
+                        </div>
+                        <div>
+                            <label style="font-size:0.8em;color:#8b949e;display:block;margin-bottom:2px;">3. 工程边界约束（分号分隔）</label>
+                            <input id="quad-constraints" type="text" style="width:100%;padding:6px 8px;background:#0d1117;border:1px solid #30363d;border-radius:5px;color:#c9d1d9;">
+                        </div>
+                        <div>
+                            <label style="font-size:0.8em;color:#8b949e;display:block;margin-bottom:2px;">4. 核心物理矛盾对</label>
+                            <input id="quad-contradiction" type="text" style="width:100%;padding:6px 8px;background:#0d1117;border:1px solid #30363d;border-radius:5px;color:#c9d1d9;">
+                        </div>
+                    </div>
+                    <div style="display:flex;gap:8px;align-items:center;">
+                        <button type="button" class="btn-primary" style="padding:5px 12px;font-size:0.84em;" onclick="applyQuadrupleToDesc()">✅ 回填为结构化描述</button>
+                        <button type="button" class="btn-secondary" style="padding:5px 10px;font-size:0.84em;" onclick="document.getElementById('quadruple-panel').style.display='none';">收起</button>
+                    </div>
                 </div>
             </div>
 
@@ -279,9 +308,10 @@
                 <div id="report-panel" class="panel-box">
                     <div class="page-header-row">
                         <h3 style="margin:0;">📄 报告 / Report</h3>
-                        <div id="report-type-switcher" class="mode-pills">
+                        <div id="report-type-switcher" class="mode-pills" style="flex-wrap:wrap;gap:6px;">
                             <button class="report-type-btn active" data-rtype="full" onclick="switchReportType('full')">完整版</button>
                             <button class="report-type-btn" data-rtype="technical" onclick="switchReportType('technical')">技术版</button>
+                            <button class="report-type-btn" data-rtype="patent" onclick="switchReportType('patent')">⚖️ 专利代理师版</button>
                             <button class="report-type-btn" data-rtype="executive" onclick="switchReportType('executive')">精简版</button>
                             <button class="report-type-btn" data-rtype="bom_pack" onclick="switchReportType('bom_pack')" data-i18n="idea.reportBomPack">工程 BOM 交付包</button>
                             <button class="report-type-btn" data-rtype="journal_draft" onclick="switchReportType('journal_draft')" data-i18n="idea.reportJournalDraft">期刊论文草稿</button>
@@ -1977,6 +2007,55 @@
         } catch(e) {
             msgEl.textContent = '❌ 请求失败: ' + e.message;
             msgEl.style.color = '#f85149';
+        }
+    }
+
+    async function decomposeIdeaQuadruple() {
+        var title = (document.getElementById('idea-title').value || '').trim();
+        var desc = (document.getElementById('idea-desc').value || '').trim();
+        if (!title && !desc) { alert('请先输入创意标题或技术描述'); return; }
+        var btn = document.getElementById('decompose-btn');
+        if (btn) { btn.disabled = true; btn.textContent = '⏳ 正在拆解四元组...'; }
+        try {
+            var res = await fetch('/api/idea/decompose', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title: title, description: desc, use_ai: true })
+            });
+            var data = await res.json();
+            if (data.status === 'ok' && data.quadruple) {
+                var q = data.quadruple;
+                document.getElementById('quad-object').value = q.technical_object || '';
+                document.getElementById('quad-target').value = q.quantitative_target_effect || '';
+                document.getElementById('quad-constraints').value = Array.isArray(q.engineering_constraints) ? q.engineering_constraints.join('；') : '';
+                document.getElementById('quad-contradiction').value = q.core_contradiction_pair || '';
+                var tagEl = document.getElementById('quadruple-source-tag');
+                if (tagEl) tagEl.textContent = q.source === 'ai' ? '✨ 快模型结构化拆解' : '⚙️ 确定性规则拆解';
+                document.getElementById('quadruple-panel').style.display = 'block';
+            } else {
+                alert(data.message || '拆解失败');
+            }
+        } catch(e) {
+            alert('拆解请求失败: ' + e.message);
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = '🧩 四元组结构化拆解'; }
+        }
+    }
+
+    function applyQuadrupleToDesc() {
+        var obj = document.getElementById('quad-object').value.trim();
+        var target = document.getElementById('quad-target').value.trim();
+        var cons = document.getElementById('quad-constraints').value.trim();
+        var contra = document.getElementById('quad-contradiction').value.trim();
+        var parts = [];
+        if (obj) parts.push('【技术对象】' + obj);
+        if (target) parts.push('【量化目标效果】' + target);
+        if (cons) parts.push('【工程边界约束】' + cons);
+        if (contra) parts.push('【核心矛盾对】' + contra);
+        var descEl = document.getElementById('idea-desc');
+        if (descEl && parts.length) {
+            var orig = descEl.value.trim();
+            descEl.value = parts.join('\n') + (orig ? ('\n\n【原始说明】\n' + orig) : '');
         }
     }
 

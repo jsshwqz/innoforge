@@ -191,11 +191,12 @@ pub async fn api_feature_card_diff(
     };
 
     let diff = compute_minimal_diff(&card_a, &card_b);
+    let m2 = assess_minimal_diff_v2(&card_a, &card_b);
     if params.semantic == Some(true) {
         let fast_client = {
             let cfg = s.config.read().unwrap_or_else(|e| e.into_inner());
             if cfg.ai_fast_channel_ready() {
-                Some(cfg.ai_client_fast())
+                Some(cfg.ai_client_for_role(crate::ai::router::ModelRole::StrictJsonVerifier))
             } else {
                 None
             }
@@ -211,6 +212,7 @@ pub async fn api_feature_card_diff(
             "novelty_reason": verdict.novelty_reason,
             "semantically_equivalent": verdict.semantically_equivalent,
             "fallback_used": verdict.fallback_used,
+            "minimal_diff_v2": m2,
         }))
         .into_response();
     }
@@ -224,8 +226,131 @@ pub async fn api_feature_card_diff(
         "diff_type": diff_type,
         "novelty_significance": novelty_significance,
         "novelty_reason": novelty_reason,
+        "minimal_diff_v2": m2,
     }))
     .into_response()
+}
+
+/// Minimal Diff 2.0（v0.9.69）：创造性实质贡献 4 级判定 + 专利审查指南三步法映射。
+///
+/// 等级从高到低：
+/// - `unexpected_effect`：预料不到的技术效果（核心结构/工艺变革 + 量化指标/新颖性跃升或矛盾打破）
+/// - `synergistic_effect`：协同增效（结构 + 关系/工艺多维联动改变，非孤立拼凑）
+/// - `cross_domain_transfer`：跨领域转用（核心结构/机理迁移至不同应用场景并适配）
+/// - `routine_substitution`：常规公知置换（仅单点参数或常规等同替换）
+/// - `no_substantive_diff`：无实质区别
+fn assess_minimal_diff_v2(a: &FeatureCard, b: &FeatureCard) -> serde_json::Value {
+    let structure_changed = a.core_structure.trim() != b.core_structure.trim();
+    let method_changed = a.process_steps.trim() != b.process_steps.trim();
+    let problem_changed = a.technical_problem.trim() != b.technical_problem.trim();
+    let relations_changed = a.key_relations.trim() != b.key_relations.trim();
+    let scenarios_changed = a.application_scenarios.trim() != b.application_scenarios.trim();
+
+    let quant_effect_cue = [
+        "%",
+        "℃",
+        "MPa",
+        "倍",
+        "提升",
+        "降低",
+        "消除",
+        "零泄漏",
+        "突破",
+    ];
+    let b_has_quant_leap = quant_effect_cue
+        .iter()
+        .any(|cue| b.description.contains(cue) || b.technical_problem.contains(cue));
+    let score_leap = match (a.novelty_score, b.novelty_score) {
+        (Some(sa), Some(sb)) => (sb - sa).abs() >= 20.0,
+        _ => false,
+    };
+
+    let (grade, label_zh, non_obviousness) = if !structure_changed
+        && !method_changed
+        && !problem_changed
+        && !relations_changed
+        && !scenarios_changed
+    {
+        (
+            "no_substantive_diff",
+            "无实质区别",
+            "与对比特征卡实质相同，不具备三步法创造性基础，需重新重构技术方案",
+        )
+    } else if (structure_changed && method_changed && (b_has_quant_leap || score_leap))
+        || (structure_changed && problem_changed && b_has_quant_leap)
+    {
+        (
+            "unexpected_effect",
+            "预料不到的技术效果",
+            "核心结构/工艺发生机理级变化并伴随量化性能跃升或解决既有矛盾，具备强三步法非显而易见性（建议在说明书中补齐对照实验数据固定该效果）",
+        )
+    } else if structure_changed && (method_changed || relations_changed) {
+        (
+            "synergistic_effect",
+            "协同增效",
+            "核心结构与部件连接关系/工艺流程形成多维耦合协同（非简单功能叠加），三步法创造性较强，建议重点论证各特征间的相互作用机制",
+        )
+    } else if scenarios_changed && (structure_changed || problem_changed) {
+        (
+            "cross_domain_transfer",
+            "跨领域转用",
+            "属于跨技术领域方案迁移并适配新场景，需在答辩中重点论证克服了领域壁垒及接口适配困难（避免被评为公知直接套用）",
+        )
+    } else {
+        (
+            "routine_substitution",
+            "常规公知置换",
+            "仅表现为局部参数或单一特征常规替换，三步法易被审查员结合公知常识驳回，建议补充协同结构或机理级区别特征",
+        )
+    };
+
+    let mut distinguishing = Vec::new();
+    if structure_changed {
+        distinguishing.push(format!(
+            "核心结构区别：{} → {}",
+            a.core_structure.trim(),
+            b.core_structure.trim()
+        ));
+    }
+    if relations_changed {
+        distinguishing.push(format!(
+            "关键连接关系区别：{} → {}",
+            a.key_relations.trim(),
+            b.key_relations.trim()
+        ));
+    }
+    if method_changed {
+        distinguishing.push(format!(
+            "工艺/控制步骤区别：{} → {}",
+            a.process_steps.trim(),
+            b.process_steps.trim()
+        ));
+    }
+    if scenarios_changed {
+        distinguishing.push(format!(
+            "应用场景迁移：{} → {}",
+            a.application_scenarios.trim(),
+            b.application_scenarios.trim()
+        ));
+    }
+
+    let actual_problem = if !b.technical_problem.trim().is_empty() {
+        b.technical_problem.trim().to_string()
+    } else {
+        "待补充实际解决的技术问题（须与上述区别特征一一因果对应）".to_string()
+    };
+
+    json!({
+        "inventive_contribution_grade": grade,
+        "inventive_contribution_label_zh": label_zh,
+        "patent_law_basis": "专利法第22条第3款（三步法创造性审查标准）",
+        "three_step_mapping": {
+            "step1_closest_prior_art": a.title,
+            "step2_distinguishing_features": distinguishing,
+            "step2_actual_technical_problem": actual_problem,
+            "step3_non_obviousness_assessment": non_obviousness
+        }
+    })
 }
 
 /// 计算两张卡片的最小差异 / Compute minimal diff between two cards
@@ -910,6 +1035,30 @@ mod tests {
         assert_eq!(diff_type, "none");
         assert!(!significance);
         assert_eq!(reason, "无显著差异");
+    }
+
+    /// Minimal Diff 2.0 负面反作弊测试：无差异/仅改标题不得虚高评级；结构+工艺+量化效果跃升必须评为预料不到的技术效果
+    #[test]
+    fn minimal_diff_v2_grades_unexpected_synergistic_and_rejects_cosmetic_inflation() {
+        let base = sample_card("c1", "现有密封流道散热");
+        let same = assess_minimal_diff_v2(&base, &base);
+        assert_eq!(same["inventive_contribution_grade"], "no_substantive_diff");
+
+        let mut cosmetic = base.clone();
+        cosmetic.title = "仅改标题无实质变化".into();
+        let cos = assess_minimal_diff_v2(&base, &cosmetic);
+        assert_eq!(cos["inventive_contribution_grade"], "no_substantive_diff");
+
+        let mut unexpected = base.clone();
+        unexpected.core_structure = "微负压直接浸没介电液冷却腔".into();
+        unexpected.process_steps = "温度前馈实时变频调速泵吸".into();
+        unexpected.description = "实测绕组峰值温升降低38%，实现零泄漏".into();
+        let u = assess_minimal_diff_v2(&base, &unexpected);
+        assert_eq!(u["inventive_contribution_grade"], "unexpected_effect");
+        assert!(u["three_step_mapping"]["step2_distinguishing_features"]
+            .as_array()
+            .map(|a| a.len() >= 2)
+            .unwrap_or(false));
     }
 
     #[test]

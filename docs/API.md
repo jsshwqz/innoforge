@@ -479,7 +479,11 @@ Response:
 
 **GET** `/api/idea/:id/report?type=executive`
 
-Query 参数 `type`: `executive | technical`
+Query 参数 `type`: `executive | technical | patent | bom_pack | journal_draft | full`（v0.9.69 新增 `patent` 专利代理师实战版报告，含 D1/D2 Claim Chart、三步法映射表、权要攻防树、未来 3~5 年替代实施例布局与第 26.4/22.3 条自检表）。
+
+**POST** `/api/idea/decompose`
+
+v0.7.0 研发问题结构化四元组拆解器（v0.9.69）：请求体 `{"title": "...", "description": "...", "use_ai": true}`，将模糊想法拆解为「技术对象 + 量化目标效果 + 工程边界约束 + 核心矛盾对 + 推荐检索词」（支持快模型通道与零联网确定性兜底）。
 
 返回 JSON 格式的验证报告。
 
@@ -1907,6 +1911,10 @@ BM25 + 向量相似度的 RRF 融合检索（支持可选 `ipc` 子空间前缀�
 **GET** `/api/idea/:id/token-usage`
 
 查询指定创意的累计 AI 调用次数与 Token 消耗汇总：`{"status":"ok","idea_id","total_calls","input_tokens","output_tokens","total_tokens","steps":[...],"budget":{...}}`。
+
+**GET** `/api/settings/model-router`
+
+查询四角色表驱动模型路由表实时状态（v0.9.69）：返回 `FastRewrite` / `DeepReasoning` / `VisionMultimodal` / `StrictJsonVerifier` 四类通道的解析模型、就绪态、默认温度与建议超时。
 
 **GET** `/api/settings/ai-budget`
 

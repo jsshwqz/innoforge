@@ -134,6 +134,14 @@ pub async fn api_idea_report(
                 "patent_results": patent_results,
             }))
         }
+        "patent" => Json(build_patent_attorney_report_json(
+            &s.db,
+            &idea,
+            score,
+            &score_line,
+            level,
+            &analysis_text,
+        )),
         "bom_pack" | "journal_draft" => {
             Json(build_deliverable_report_json(&s.db, &idea, report_type))
         }
@@ -1027,6 +1035,329 @@ pub async fn api_idea_checkpoint_rollback(
         "excluded_paths_count": excluded_count,
         "message": format!("已从版本 v{} ({}) 创建新分支「{}」并启动局部重跑", ver.version_number, target_step.description(), branch_name)
     }))
+}
+
+/// POST /api/idea/decompose — v0.7.0 研发问题结构化四元组拆解器（v0.9.69）
+pub async fn api_idea_decompose(
+    State(s): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let title = req["title"].as_str().unwrap_or("").trim();
+    let description = req["description"].as_str().unwrap_or("").trim();
+    if title.is_empty() && description.is_empty() {
+        return Json(json!({
+            "status": "error",
+            "message": "请至少输入创意标题或技术描述"
+        }));
+    }
+    let use_ai = req["use_ai"].as_bool().unwrap_or(true);
+    let fast_client = if use_ai && s.db.check_ai_budget_circuit_breaker(None).is_ok() {
+        let cfg = s.config.read().unwrap_or_else(|e| e.into_inner());
+        if cfg.ai_fast_channel_ready() {
+            Some(cfg.ai_client_for_role(crate::ai::router::ModelRole::FastRewrite))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let quadruple = crate::pipeline::steps::decompose::decompose_with_ai(
+        title,
+        description,
+        fast_client.as_ref(),
+    )
+    .await;
+    if let Some(ref client) = fast_client {
+        let _ = s.db.log_ai_call(client, "idea_decompose", None, None);
+    }
+
+    Json(json!({
+        "status": "ok",
+        "quadruple": quadruple,
+    }))
+}
+
+/// v0.9.69：第三类核心报告——专利代理师实战版（`GET /api/idea/:id/report?type=patent`）。
+///
+/// 包含：
+/// 1. D1/D2 Claim Chart（对比文件特征对照表）
+/// 2. 区别特征 — 实际解决技术问题 — 技术效果 三元映射表（三步法）
+/// 3. 独立/从属权利要求攻防梯度布局树（含抓真重点防窄化建议）
+/// 4. 规避设计包裹与面向未来 3~5 年演进的替代实施例布局建议
+/// 5. 专利法第 26.4 条 / 第 22.3 条静态合规自检表
+fn build_patent_attorney_report_json(
+    db: &crate::db::Database,
+    idea: &Idea,
+    score: Option<f64>,
+    score_line: &str,
+    level: &str,
+    analysis_text: &str,
+) -> serde_json::Value {
+    let ctx = resolve_pipeline_context_for_deliverables(db, idea);
+    let cards = db.get_feature_cards_by_idea(&idea.id).unwrap_or_default();
+    let claim_nodes: Vec<(u32, String, String)> = {
+        let conn = db.conn();
+        conn.prepare(
+            "SELECT claim_number, claim_type, content FROM claim_nodes \
+             WHERE idea_id = ?1 ORDER BY claim_number ASC",
+        )
+        .ok()
+        .and_then(|mut stmt| {
+            stmt.query_map(rusqlite::params![&idea.id], |r| {
+                let num: i64 = r.get(0)?;
+                let ctype: String = r.get(1)?;
+                let content: String = r.get(2)?;
+                Ok((num.max(1) as u32, ctype, content))
+            })
+            .ok()
+            .map(|rows| rows.flatten().collect())
+        })
+        .unwrap_or_default()
+    };
+    let research_state = db
+        .get_research_state(&idea.id)
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let quadruple =
+        crate::pipeline::steps::decompose::decompose_deterministic(&idea.title, &idea.description);
+
+    // 1. D1/D2 Claim Chart
+    let mut d_rows = String::new();
+    let mut ref_count = 0usize;
+    for (idx, m) in ctx.top_matches.iter().take(3).enumerate() {
+        ref_count += 1;
+        let tag = format!("D{}", idx + 1);
+        let title_clean = m.source_title.replace('|', " ");
+        let snip: String = m
+            .snippet
+            .replace(['\n', '|'], " ")
+            .chars()
+            .take(90)
+            .collect();
+        d_rows.push_str(&format!(
+            "| {} | {} | {:.0}% | {} |\n",
+            tag,
+            title_clean,
+            m.combined_score * 100.0,
+            snip
+        ));
+    }
+    if ref_count == 0 {
+        for (idx, p) in ctx.patent_results.iter().take(3).enumerate() {
+            ref_count += 1;
+            let tag = format!("D{}", idx + 1);
+            let title_clean = p.title.replace('|', " ");
+            let snip: String = p
+                .snippet
+                .replace(['\n', '|'], " ")
+                .chars()
+                .take(90)
+                .collect();
+            d_rows.push_str(&format!(
+                "| {} | {} | 待计算 | {} |\n",
+                tag, title_clean, snip
+            ));
+        }
+    }
+    let claim_chart_md = if ref_count == 0 {
+        "（当前创意尚未检索到已入库的 D1/D2 对比专利，请先运行检索流水线补齐对比文件，严禁编造对比文件号。）\n".to_string()
+    } else {
+        format!(
+            "| 对比文件 | 文献标题/编号 | 综合相似度 | 关键公开技术手段摘录 |\n|---|---|---|---|\n{d_rows}"
+        )
+    };
+
+    // 2. 三步法三元映射表
+    let mut tri_rows = String::new();
+    if cards.is_empty() {
+        tri_rows.push_str(&format!(
+            "| 1 | {}（核心机理特征） | {} | {} |\n",
+            quadruple.technical_object.replace('|', " "),
+            quadruple.core_contradiction_pair.replace('|', " "),
+            quadruple.quantitative_target_effect.replace('|', " ")
+        ));
+    } else {
+        for (idx, c) in cards.iter().take(6).enumerate() {
+            let feat = if !c.core_structure.trim().is_empty() {
+                c.core_structure.trim()
+            } else {
+                c.title.trim()
+            };
+            let prob = if !c.technical_problem.trim().is_empty() {
+                c.technical_problem.trim()
+            } else {
+                "解决既有方案结构或效率瓶颈"
+            };
+            let eff = if !c.description.trim().is_empty() {
+                c.description.trim()
+            } else {
+                "提升系统综合性能与可靠性（具体量化指标须经实验验证）"
+            };
+            tri_rows.push_str(&format!(
+                "| {} | {} | {} | {} |\n",
+                idx + 1,
+                feat.replace(['\n', '|'], " ")
+                    .chars()
+                    .take(60)
+                    .collect::<String>(),
+                prob.replace(['\n', '|'], " ")
+                    .chars()
+                    .take(60)
+                    .collect::<String>(),
+                eff.replace(['\n', '|'], " ")
+                    .chars()
+                    .take(70)
+                    .collect::<String>(),
+            ));
+        }
+    }
+
+    // 3. 独立/从属权利要求攻防梯度树 & 静态 26.4/22.3 自检
+    let mut claim_tree_md = String::new();
+    let mut claim_inputs: Vec<crate::ai::claim_validator::ClaimInput> = Vec::new();
+    if claim_nodes.is_empty() {
+        claim_tree_md.push_str(&format!(
+            "- **独立权利要求 1（核心物理抽象层）**：一种{}，聚焦解决「{}」，只写入决定核心物理机理的必要技术特征，**严禁将单一原型的安装方位、螺纹连接、外壳把手等非必要细枝末节写入独权**。\n\
+             - **从属权利要求 2~3（核心退守硬防线）**：限定关键介质/材料窗口、负压/流体/控制闭环拓扑，用于实质审查或无效程序中的强力退守。\n\
+             - **从属权利要求 4~5（未来 3~5 年演进卡位实施例）**：提前铺设跨代替代介质、前馈/预测控制范式与模块化装配替代构型。\n",
+            quadruple.technical_object, quadruple.core_contradiction_pair
+        ));
+    } else {
+        for (claim_number, claim_type, content) in &claim_nodes {
+            let indent = if claim_type == "independent" {
+                ""
+            } else {
+                "  └─ "
+            };
+            let badge = if claim_type == "independent" {
+                "【独权】"
+            } else {
+                "【从权】"
+            };
+            claim_tree_md.push_str(&format!(
+                "{}{} 权{}：{}\n",
+                indent, badge, claim_number, content
+            ));
+            claim_inputs.push(crate::ai::claim_validator::ClaimInput {
+                id: None,
+                claim_number: *claim_number,
+                claim_type: claim_type.clone(),
+                parent_claim_id: None,
+                depends_on: Vec::new(),
+                content: content.clone(),
+            });
+        }
+    }
+
+    let validation_issues = if !claim_inputs.is_empty() {
+        let spec_chunks = vec![idea.description.clone(), analysis_text.to_string()];
+        let rep = crate::ai::claim_validator::validate_claims_deterministic_with_title(
+            &idea.id,
+            Some(&idea.title),
+            &claim_inputs,
+            &spec_chunks,
+        );
+        rep.issues
+            .into_iter()
+            .map(|iss| format!("[{}] 权{}: {}", iss.rule_id, iss.claim_number, iss.message))
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+
+    let compliance_rows = format!(
+        "| 核查条款 | 核查状态 | 代理师行动项 |\n\
+         |---|---|---|\n\
+         | **专利法第 22 条第 2 款（新颖性）** | {}（{}） | 核对上述 D1/D2 Claim Chart，确保独权至少包含 1 项 D1 未公开的实质区别特征 |\n\
+         | **专利法第 22 条第 3 款（创造性三步法）** | {} | 将区别特征与实际解决的技术问题/预料不到的技术效果绑定论证，避免常规公知置换 |\n\
+         | **专利法第 26 条第 4 款（说明书充分支撑）** | {} | 独权中所有上位概括、数值范围与功能性限定必须在说明书实施例给出 ≥2 组具体实现与实验数据 |\n\
+         | **跨轮次负向约束排雷** | 已登记 {} 条排除路径 | {} |\n",
+        score_line,
+        level,
+        if score.unwrap_or(0.0) >= 70.0 {
+            "🟢 初步满足强差异基础"
+        } else if score.is_some() {
+            "🟡 需强化协同增效/非显而易见性论证"
+        } else {
+            "⚪ 证据不足待补检"
+        },
+        if validation_issues.is_empty() {
+            "🟢 静态校验未见形式缺陷（仍需人工核对实施例数据）".to_string()
+        } else {
+            format!("🔴 检出 {} 项形式/26.4条风险", validation_issues.len())
+        },
+        research_state.excluded_paths.len(),
+        if research_state.excluded_paths.is_empty() {
+            "暂无已排除路径".to_string()
+        } else {
+            research_state.excluded_paths.join("；")
+        }
+    );
+
+    let validation_detail = if validation_issues.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\n#### 静态规则检出明细\n{}\n",
+            validation_issues
+                .iter()
+                .map(|s| format!("- {s}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
+    };
+
+    let report_md = format!(
+        "# ⚖️ 专利代理师实战布局报告（Patent Attorney Edition）\n\n\
+         **研发项目**：{}\n\
+         **新颖性评估**：{}（{}）\n\
+         **核心技术对象**：{}\n\
+         **核心物理矛盾对**：{}\n\
+         **量化目标效果**：{}\n\n\
+         ---\n\n\
+         ## 1. D1/D2 对比文件 Claim Chart\n\n\
+         {}\n\n\
+         ## 2. 三步法三元映射表（区别特征 × 技术问题 × 技术效果）\n\n\
+         | 序号 | 区别技术特征 | 实际解决的技术问题 | 对应技术效果 |\n\
+         |---|---|---|---|\n\
+         {}\n\n\
+         ## 3. 独立/从属权利要求攻防梯度布局树\n\n\
+         {}\n\n\
+         ## 4. 规避设计包裹与面向未来 3~5 年的替代实施例布局建议\n\n\
+         - **防自我窄化红线（抓真重点）**：复查独权 1 是否混入了具体安装方位（如“顶部/侧面”）、具体连接件（如“螺纹/焊接”）或人因附件（如“拉钮/观察窗”）；凡不影响核心物理因果链的特征一律踢出独权、下沉为从权。\n\
+         - **规避设计包裹（防竞品绕道）**：对核心执行部件与连接接口分别撰写结构上位词（如“流体连通通道”替代“固定连通管”，“可拆密封连接”替代“螺纹连接”），并在说明书中列举 ≥3 种等同替换构型。\n\
+         - **未来 3~5 年演进卡位（不拘一格 × 沉住气求真）**：提前在说明书实施例与方法权利要求中布局跨代材料/介质替代方案、多传感器前馈/预测控制策略及自动化工艺装备，同时对未实测的预期指标诚实标注需台架验证，不写入未经证实的虚假数字。\n\n\
+         ## 5. 专利法第 26.4 条 / 第 22.3 条合规自检表\n\n\
+         {}{}\n\n\
+         ---\n\n\
+         ## 6. 关联深度研发剖析摘录\n\n\
+         {}",
+        idea.title,
+        score_line,
+        level,
+        quadruple.technical_object,
+        quadruple.core_contradiction_pair,
+        quadruple.quantitative_target_effect,
+        claim_chart_md,
+        tri_rows,
+        claim_tree_md,
+        compliance_rows,
+        validation_detail,
+        crate::ai::patent::structured_patent_excerpt(analysis_text, 4000),
+    );
+
+    json!({
+        "status": "ok",
+        "report_type": "patent",
+        "report": report_md,
+        "quadruple": quadruple,
+        "claim_count": claim_nodes.len(),
+        "prior_art_count": ref_count,
+        "validation_issues": validation_issues,
+        "excluded_paths": research_state.excluded_paths,
+    })
 }
 
 fn resolve_pipeline_context_for_deliverables(
