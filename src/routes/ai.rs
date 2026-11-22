@@ -389,17 +389,47 @@ pub async fn api_ai_chat_stream(
         ctx
     };
 
-    let mut rx = ai.chat_stream(&req.message, ctx_with_role.as_deref());
+    let prompt_chars = req.message.chars().count()
+        + ctx_with_role
+            .as_ref()
+            .map(|c| c.chars().count())
+            .unwrap_or(0);
+    let db = s.db.clone();
+    let breaker_err = db.check_ai_budget_circuit_breaker(None).err();
+    let mut rx = if breaker_err.is_none() {
+        Some(ai.chat_stream(&req.message, ctx_with_role.as_deref()))
+    } else {
+        None
+    };
 
     let stream = async_stream::stream! {
-        while let Some(chunk) = rx.recv().await {
-            if chunk.starts_with("[ERROR]") {
-                yield Ok(Event::default().event("error").data(chunk));
-                break;
+        if let Some(err_msg) = breaker_err {
+            yield Ok(Event::default().event("error").data(format!("[ERROR] {err_msg}")));
+            yield Ok(Event::default().event("done").data("[DONE]"));
+            return;
+        }
+        let mut completion_chars = 0usize;
+        if let Some(ref mut rx) = rx {
+            while let Some(chunk) = rx.recv().await {
+                if chunk.starts_with("[ERROR]") {
+                    yield Ok(Event::default().event("error").data(chunk));
+                    break;
+                }
+                completion_chars += chunk.chars().count();
+                // Keep paragraph boundaries while preserving a single SSE data line.
+                let escaped = chunk.replace('\r', "").replace('\n', "\\n");
+                yield Ok(Event::default().data(escaped));
             }
-            // Keep paragraph boundaries while preserving a single SSE data line.
-            let escaped = chunk.replace('\r', "").replace('\n', "\\n");
-            yield Ok(Event::default().data(escaped));
+        }
+        if completion_chars > 0 {
+            let _ = db.log_ai_stream_or_call(
+                &ai,
+                "ai-chat-stream",
+                prompt_chars,
+                completion_chars,
+                None,
+                None,
+            );
         }
         yield Ok(Event::default().event("done").data("[DONE]"));
     };
@@ -414,6 +444,11 @@ pub async fn api_ai_chat(
     if !has_only_allowed_history_roles(&req.history) {
         return Json(AiResponse {
             content: INVALID_HISTORY_MESSAGE.to_string(),
+        });
+    }
+    if let Err(breaker_msg) = s.db.check_ai_budget_circuit_breaker(None) {
+        return Json(AiResponse {
+            content: breaker_msg,
         });
     }
 

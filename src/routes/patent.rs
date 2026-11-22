@@ -386,6 +386,30 @@ pub async fn api_extract_patent_pdf_drawings(
     }
 }
 
+/// GET /api/patents/backfill-status — 查询存量专利向量 (`char-tfidf-v2`) 与分块 (`patent_chunks`) 覆盖进度
+pub async fn api_patents_backfill_status(State(s): State<AppState>) -> Json<serde_json::Value> {
+    match s.db.get_backfill_index_status() {
+        Ok(val) => Json(val),
+        Err(e) => Json(json!({"status": "error", "message": e.to_string()})),
+    }
+}
+
+/// POST /api/patents/backfill-index — 按批可断点回填存量专利的向量与分块索引
+pub async fn api_patents_backfill_index(
+    State(s): State<AppState>,
+    body: Option<Json<serde_json::Value>>,
+) -> Json<serde_json::Value> {
+    let batch_size = body
+        .as_ref()
+        .and_then(|b| b.get("batch_size"))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(100) as usize;
+    match s.db.backfill_embeddings_and_chunks_batch(batch_size) {
+        Ok(val) => Json(val),
+        Err(e) => Json(json!({"status": "error", "message": e.to_string()})),
+    }
+}
+
 /// Optional query param `?fetch=true` triggers online fetch if not found locally
 pub async fn api_patent_lookup(
     Path(patent_number): Path<String>,

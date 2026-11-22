@@ -8,10 +8,11 @@
 | **全局底座** | 公共领域类型与 DTO | `src/patent.rs`、`src/types/` | 全模块共用结构体 | `cargo test --lib patent` |
 | **全局底座** | SQLite 版本化幂等迁移 | `src/db/migrations.rs` (`v1`~`v26`) | `schema_version` | `cargo test --lib db::tests` |
 | **全局底座** | AI 客户端、降级链与安全截断 | `src/ai/client.rs`、`src/routes/mod.rs` | `/api/ai/models`、`app_settings` | `cargo test --lib ai::client` |
+| **全局底座** | 全链路 Token 记账与单日/单创意硬熔断 | `src/db/cost.rs` (`check_ai_budget_circuit_breaker`) | `ai_cost_log`、`/api/settings/ai-budget` | `cargo test --lib db::cost` |
 | **检索员** | 多源检索编排、冷却熔断与去重 | `src/search/mod.rs`、`src/search/breaker.rs` | `POST /api/search/online` | `cargo test --lib search` |
 | **检索员** | Agentic 检索改写、精排与推荐理由 | `src/search/agent.rs`、`src/routes/search.rs` | `POST /api/search`、`ai_cost_ledger` | `cargo test --lib search::agent` |
 | **检索员** | 专利/学术数据源 Providers | `src/search/providers/` (`serpapi`/`epo_ops`/`openalex`等) | `/api/patent/:id/legal-status` | `cargo test --lib search::providers` |
-| **检索员** | 专利分块、`chunks_fts` 与 RRF 混合检索 | `src/patent_chunker.rs`、`src/db/rag.rs`、`src/vector/` | `patent_chunks`、`chunks_fts` | `cargo test --lib db::rag` |
+| **检索员** | 专利分块、`chunks_fts`、向量回填与 RRF 混合检索 | `src/patent_chunker.rs`、`src/db/rag.rs`、`src/db/vector.rs` | `POST /api/search/vector`、`patents_embedding` | `cargo test --lib db::vector` |
 | **检索员+分析师** | 免费全文补全与 HTML 解析 | `src/search/enrichment.rs` (`enrich_patent_free`) | `GET /api/patent/enrich-free/:id` | `cargo test --lib search::enrichment` |
 | **检索员+分析师** | **专利 PDF 真实单张附图提取** | `src/pdf_drawings.rs` (`extract_drawings_from_pdf_bytes`) | `POST /api/patent/:id/extract-pdf-drawings` | `cargo test --lib pdf_drawings` |
 | **检索员+分析师** | **PDF/图片文本提取与 Umi-OCR 统一通道** | `src/routes/upload.rs`、`src/ai/extraction.rs` | `POST /api/upload/extract` (`UMI_OCR_BASE_URL`) | `cargo test --lib ai::extraction` |

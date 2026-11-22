@@ -762,10 +762,10 @@ mod tests {
 
     /// **RRF 召回率 >= 纯向量检索**（虚拟合成专利夹具，Batch 1 任务 1.3 验收锚点）。
     ///
-    /// 夹具利用现役 TF-IDF「排序权重伪嵌入」（向量只比权重分布、不认词元）的物理事实：
-    /// - `decoy`：全不重复短句 → 与查询的嵌入余弦 ≈ 1.0（均匀分布向量），纯向量 top-1；
+    /// 夹具模拟向量通道出现高相似误报（如历史旧版 `char-tfidf-v1` 伪嵌入或近似向量撞车）：
+    /// - `decoy`：文本与查询词元无关，但向量的余弦分布与查询高度撞车，纯向量 top-1；
     /// - `target`：含查询的稀有 bigram（钪碲化合物）但被大量重复填充词稀释，
-    ///   嵌入分布与查询差异大，纯向量排位靠后；
+    ///   纯向量排位靠后；
     /// - `f1`：另一块普通填充。
     ///
     /// 断言：① 纯向量 top-1 = decoy（向量通道抓不到目标）；② RRF 融合 top-1 = target
@@ -774,15 +774,21 @@ mod tests {
     #[test]
     fn hybrid_rrf_recall_beats_vector_only_on_synthetic_patent() {
         let (db, patent_id) = setup_db();
+        let query_text = "钪碲化合物快离子导体材料制备方法";
+        let query_emb = compute_chunk_embedding(query_text);
+
         let filler = "本实施例采用常规工艺进行制备，搅拌均匀后静置，随后进行干燥处理，\
                       重复上述步骤若干次，直至得到均匀稳定的最终产物，产物的形貌与预期一致。";
+        let mut decoy = make_chunk(
+            &patent_id,
+            0,
+            "Desc:背景技术",
+            "锂枝晶抑制与界面阻抗调控研究进展综述。",
+        );
+        // 模拟向量通道撞车误报（与查询向量方向一致但文本无词元重叠）
+        decoy.embedding = query_emb.clone();
         let chunks = vec![
-            make_chunk(
-                &patent_id,
-                0,
-                "Desc:背景技术",
-                "锂枝晶抑制与界面阻抗调控研究进展综述。",
-            ),
+            decoy,
             make_chunk(
                 &patent_id,
                 1,
@@ -794,10 +800,7 @@ mod tests {
         db.save_patent_chunks(&patent_id, &chunks, "char-tfidf-v1")
             .expect("save");
 
-        let query_text = "钪碲化合物快离子导体材料制备方法";
-        let query_emb = compute_chunk_embedding(query_text);
-
-        // ① 纯向量 top-1 = decoy（c0）：权重分布与查询几乎一致，而目标被稀释
+        // ① 纯向量 top-1 = decoy（c0）：向量撞车，而目标被稀释
         let vec_only = db
             .search_chunks(&patent_id, &query_emb, 3)
             .expect("vector search");

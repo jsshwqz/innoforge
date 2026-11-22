@@ -14,6 +14,12 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-11-21 — **MB0b 语义向量检索前端闭环、存量断点回填与全链路 Token 预算硬熔断（v0.9.65）**
+
+- **状态 / Status**: ✅ 本地全量验证与 `:3001` 实测通过，提交 PR 合入 `main` 并打 `v0.9.65` Tag
+- **① `MB0b` 本地语义向量检索与存量断点回填**（`src/db/vector.rs`、`src/vector/mod.rs`、`src/routes/search.rs`、`src/routes/patent.rs`、`templates/search.html`）：将 `compute_tfidf_embedding` 升级为 512 维带符号 FNV-1a 特征哈希 + 专利套话 IDF 降权（`char-tfidf-v2`）；新增 `GET /api/patents/backfill-status` 与 `POST /api/patents/backfill-index` 断点分批回填向量与 `patent_chunks`；搜索页接入「🧠 语义向量检索 (本地)」模式与一键补齐存量索引进度条。
+- **② 全链路 Token 记账与单日/单创意硬熔断**（`src/db/cost.rs`、`src/orchestrator/engine.rs`、`src/routes/ai.rs`、`src/routes/idea.rs`、`src/routes/settings.rs`、`templates/idea.html`、`templates/settings.html`）：补齐 `ai_client` + `ai_client_fast` 及流式 SSE 对话的全链路 `ai_cost_log` 记账，新增 `GET /api/idea/:id/token-usage` 与 `GET/POST /api/settings/ai-budget`，当今日调用次数、今日总 Token 或单创意累计 Token 超出阈值时在流水线与对话入口产生真实硬阻断。
+
 ### 2026-11-21 — **专利 PDF 真实单张附图提取、Umi-OCR 统一接入、证据门禁真阻断与裸截断清零（v0.9.64）**
 
 - **状态 / Status**: ✅ 本地全量验证与真实专利 PDF 单张附图提取 / Umi-OCR 实测通过，提交 PR 合入 `main` 并打 `v0.9.64` Tag

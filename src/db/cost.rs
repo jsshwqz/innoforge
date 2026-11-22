@@ -1,3 +1,7 @@
+//! 模块职责：AI 调用次数与 Token 消耗账本（`ai_cost_ledger`）、流式/全步骤用量记账与单日/单创意硬熔断门禁。
+//! 上游调用者：`src/routes/ai.rs`、`src/routes/idea.rs`、`src/orchestrator/engine.rs`、`src/routes/settings.rs`。
+//! 模块专属禁区：严禁在跨时区「今日」统计中漏掉 `'localtime'`；严禁维护冗长过期的多服务商硬编码单价表，预算管控统一以真实调用次数与 Token 硬熔断为准；严禁在持有 `self.conn()` 锁期间嵌套调用其他 `self.*` 查库方法（会导致单线程 Mutex 死锁）。
+
 use super::Database;
 use crate::pipeline::context::AiCostRecord;
 use anyhow::Result;
@@ -175,6 +179,202 @@ impl Database {
             idea_id,
             session_id,
         )
+    }
+
+    /// 记录流式（SSE）或普通 AI 调用的 Token 用量：
+    /// 优先取 `ai.take_last_usage()` 精确值；若流式通道未返回 usage 段，则按实际输入/输出字符数估算 Token 落库，杜绝流式漏账。
+    pub fn log_ai_stream_or_call(
+        &self,
+        ai: &crate::ai::AiClient,
+        call_type: &str,
+        prompt_chars: usize,
+        completion_chars: usize,
+        idea_id: Option<&str>,
+        session_id: Option<&str>,
+    ) -> Result<(), rusqlite::Error> {
+        if let Some(usage) = ai.take_last_usage() {
+            return self.save_cost_record_from_client(
+                usage.input_tokens,
+                usage.output_tokens,
+                ai.model_name(),
+                ai.provider_name(),
+                call_type,
+                idea_id,
+                session_id,
+            );
+        }
+        if completion_chars == 0 {
+            return Ok(());
+        }
+        let est_input = prompt_chars.div_ceil(2).max(1) as i64;
+        let est_output = completion_chars.div_ceil(2).max(1) as i64;
+        self.save_cost_record_from_client(
+            est_input,
+            est_output,
+            ai.model_name(),
+            ai.provider_name(),
+            call_type,
+            idea_id,
+            session_id,
+        )
+    }
+
+    /// 统计今日全量 AI 调用次数与总 Token（按本地日期 `'localtime'` 对齐）
+    pub fn get_today_total_usage(&self) -> Result<(i64, i64, i64), rusqlite::Error> {
+        let c = self.conn();
+        c.query_row(
+            "SELECT COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0)
+             FROM ai_cost_ledger
+             WHERE date(timestamp, 'localtime') = date('now', 'localtime')",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+    }
+
+    /// 统计单个创意（`idea_id`）全链路累计调用次数、Input/Output Token 及分步明细
+    pub fn get_idea_token_summary(
+        &self,
+        idea_id: &str,
+    ) -> Result<serde_json::Value, rusqlite::Error> {
+        let (total_calls, in_tokens, out_tokens, steps) = {
+            let c = self.conn();
+            let (total_calls, in_tokens, out_tokens): (i64, i64, i64) = c.query_row(
+                "SELECT COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0)
+                 FROM ai_cost_ledger WHERE idea_id = ?1",
+                rusqlite::params![idea_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )?;
+
+            let mut stmt = c.prepare(
+                "SELECT step, COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0)
+                 FROM ai_cost_ledger
+                 WHERE idea_id = ?1
+                 GROUP BY step
+                 ORDER BY MAX(timestamp) ASC",
+            )?;
+            let rows = stmt.query_map(rusqlite::params![idea_id], |row| {
+                let step: String = row.get(0)?;
+                let calls: i64 = row.get(1)?;
+                let in_t: i64 = row.get(2)?;
+                let out_t: i64 = row.get(3)?;
+                Ok(serde_json::json!({
+                    "step": step,
+                    "calls": calls,
+                    "input_tokens": in_t,
+                    "output_tokens": out_t,
+                    "total_tokens": in_t + out_t,
+                }))
+            })?;
+            let mut steps = Vec::new();
+            for r in rows {
+                steps.push(r?);
+            }
+            (total_calls, in_tokens, out_tokens, steps)
+        };
+
+        let budget = self
+            .get_ai_budget_status()
+            .unwrap_or_else(|_| serde_json::json!({}));
+
+        Ok(serde_json::json!({
+            "status": "ok",
+            "idea_id": idea_id,
+            "total_calls": total_calls,
+            "input_tokens": in_tokens,
+            "output_tokens": out_tokens,
+            "total_tokens": in_tokens + out_tokens,
+            "steps": steps,
+            "budget": budget,
+        }))
+    }
+
+    /// 读取 AI 预算硬熔断配置与今日实时消耗
+    pub fn get_ai_budget_status(&self) -> Result<serde_json::Value, rusqlite::Error> {
+        let daily_max_calls = self
+            .get_setting("ai_daily_max_calls")
+            .ok()
+            .flatten()
+            .and_then(|v| v.trim().parse::<i64>().ok())
+            .unwrap_or(0)
+            .max(0);
+        let daily_max_tokens = self
+            .get_setting("ai_daily_max_tokens")
+            .ok()
+            .flatten()
+            .and_then(|v| v.trim().parse::<i64>().ok())
+            .unwrap_or(0)
+            .max(0);
+        let idea_max_tokens = self
+            .get_setting("ai_idea_max_tokens")
+            .ok()
+            .flatten()
+            .and_then(|v| v.trim().parse::<i64>().ok())
+            .unwrap_or(0)
+            .max(0);
+
+        let (today_calls, today_in, today_out) = self.get_today_total_usage()?;
+        let today_tokens = today_in + today_out;
+
+        Ok(serde_json::json!({
+            "status": "ok",
+            "daily_max_calls": daily_max_calls,
+            "daily_max_tokens": daily_max_tokens,
+            "idea_max_tokens": idea_max_tokens,
+            "today_calls": today_calls,
+            "today_input_tokens": today_in,
+            "today_output_tokens": today_out,
+            "today_total_tokens": today_tokens,
+        }))
+    }
+
+    /// 保存 AI 预算硬熔断阈值（`0` 表示不限制）
+    pub fn save_ai_budget_settings(
+        &self,
+        daily_max_calls: i64,
+        daily_max_tokens: i64,
+        idea_max_tokens: i64,
+    ) -> anyhow::Result<()> {
+        self.set_setting("ai_daily_max_calls", &daily_max_calls.max(0).to_string())?;
+        self.set_setting("ai_daily_max_tokens", &daily_max_tokens.max(0).to_string())?;
+        self.set_setting("ai_idea_max_tokens", &idea_max_tokens.max(0).to_string())?;
+        Ok(())
+    }
+
+    /// 硬熔断检查：在发起高消耗 AI 调用前校验单日调用次数、单日总 Token 与单创意总 Token 是否超限。
+    /// 若任一已配置阈值（`> 0`）被触达，立即返回可读阻断原因。
+    pub fn check_ai_budget_circuit_breaker(&self, idea_id: Option<&str>) -> Result<(), String> {
+        let budget = self
+            .get_ai_budget_status()
+            .map_err(|e| format!("读取预算状态失败: {e}"))?;
+        let daily_max_calls = budget["daily_max_calls"].as_i64().unwrap_or(0);
+        let daily_max_tokens = budget["daily_max_tokens"].as_i64().unwrap_or(0);
+        let idea_max_tokens = budget["idea_max_tokens"].as_i64().unwrap_or(0);
+        let today_calls = budget["today_calls"].as_i64().unwrap_or(0);
+        let today_tokens = budget["today_total_tokens"].as_i64().unwrap_or(0);
+
+        if daily_max_calls > 0 && today_calls >= daily_max_calls {
+            return Err(format!(
+                "【预算硬熔断】已达到今日 AI 调用次数上限（今日已调用 {today_calls} 次 / 上限 {daily_max_calls} 次），已阻断本次请求。可在设置页上调或清零阈值。"
+            ));
+        }
+        if daily_max_tokens > 0 && today_tokens >= daily_max_tokens {
+            return Err(format!(
+                "【预算硬熔断】已达到今日 Token 消耗上限（今日已消耗 {today_tokens} tokens / 上限 {daily_max_tokens} tokens），已阻断本次请求。可在设置页上调或清零阈值。"
+            ));
+        }
+        if idea_max_tokens > 0 {
+            if let Some(iid) = idea_id.map(str::trim).filter(|s| !s.is_empty()) {
+                if let Ok(summary) = self.get_idea_token_summary(iid) {
+                    let idea_tokens = summary["total_tokens"].as_i64().unwrap_or(0);
+                    if idea_tokens >= idea_max_tokens {
+                        return Err(format!(
+                            "【预算硬熔断】当前创意已达到单创意 Token 上限（已消耗 {idea_tokens} tokens / 上限 {idea_max_tokens} tokens），已阻断继续调用。"
+                        ));
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     /// 按时间范围统计成本。
@@ -385,5 +585,46 @@ mod tests {
             0,
             "无记录时为 0（预算判据不炸）"
         );
+    }
+
+    #[test]
+    fn budget_circuit_breaker_blocks_when_daily_or_idea_limit_exceeded() {
+        let db = Database::init(":memory:").expect("in-memory db");
+        let ai = test_client();
+
+        // 默认未设上限 (0) 时全部放行
+        assert!(db
+            .check_ai_budget_circuit_breaker(Some("idea-budget-1"))
+            .is_ok());
+
+        // 记录一笔流式估算用量（prompt 400 字 -> 200 tokens, completion 600 字 -> 300 tokens, 共 500 tokens）
+        db.log_ai_stream_or_call(&ai, "ai-chat-stream", 400, 600, Some("idea-budget-1"), None)
+            .expect("log stream call");
+
+        let summary = db
+            .get_idea_token_summary("idea-budget-1")
+            .expect("idea token summary");
+        assert_eq!(summary["total_calls"], 1);
+        assert_eq!(summary["total_tokens"], 500);
+
+        // 设定单创意上限 450 tokens -> 必须触发硬熔断阻断
+        db.save_ai_budget_settings(0, 0, 450).expect("save budget");
+        let err = db
+            .check_ai_budget_circuit_breaker(Some("idea-budget-1"))
+            .expect_err("idea token limit must trigger circuit breaker");
+        assert!(err.contains("单创意 Token 上限"));
+
+        // 另一创意未超限应放行
+        assert!(db
+            .check_ai_budget_circuit_breaker(Some("idea-budget-2"))
+            .is_ok());
+
+        // 设定单日调用次数上限 1 次 -> 全局均被熔断阻断
+        db.save_ai_budget_settings(1, 0, 0)
+            .expect("save daily call limit");
+        let daily_err = db
+            .check_ai_budget_circuit_breaker(None)
+            .expect_err("daily call limit must trigger circuit breaker");
+        assert!(daily_err.contains("今日 AI 调用次数上限"));
     }
 }
