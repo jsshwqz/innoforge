@@ -14,6 +14,12 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-11-22 — **T2.5 异步 SSE OCR 进度流、4 类结构化错误码与 V-RAG 附图标号双向联动核查（v0.9.66）**
+
+- **状态 / Status**: ✅ 本地全量验证与隔离端口实测通过，提交 PR 合入 `main` 并打 `v0.9.66` Tag
+- **① `T2.5` 异步 SSE OCR 进度流与 4 类错误码**（`src/routes/upload.rs`、`src/common.rs`、`templates/search.html`）：新增 `POST /api/upload/extract/stream` 优先对接 `Umi-OCR` 逐页推送 `page X/Y` 进度，并在 `/api/upload/extract` 与流式接口统一输出 `ERR_PDF_ENCRYPTED` / `ERR_FILE_CORRUPTED` / `ERR_OCR_UNAVAILABLE` / `ERR_FILE_TOO_LARGE` 四类结构化错误码与排障建议；清除 `upload.rs` 残留硬编码个人路径。
+- **② V-RAG 附图标号 ↔ 正文双向高亮与标号一致性静态核查**（`src/ai/part_topology.rs`、`src/routes/patent.rs`、`templates/patent_detail.html`、`templates/office_action_response.html`）：新增 `check_numeral_consistency`、`GET /api/patent/:id/numeral-check` 与 `POST /api/ai/numeral-consistency-check`，确定性检出图中有号正文未提、正文有号附图缺失、同一标号异名三类低级错误，并打通详情页与 OA 页的图文标号双向高亮定位。
+
 ### 2026-11-21 — **MB0b 语义向量检索前端闭环、存量断点回填与全链路 Token 预算硬熔断（v0.9.65）**
 
 - **状态 / Status**: ✅ 本地全量验证与 `:3001` 实测通过，提交 PR 合入 `main` 并打 `v0.9.65` Tag

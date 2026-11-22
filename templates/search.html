@@ -1276,28 +1276,77 @@ async function extractPdfContent() {
     }
     if (!currentPdfFile) return;
     const zone = document.getElementById('pdf-upload-zone');
-    const originalText = zone.querySelector('span[data-i18n="upload.dragDrop"]').textContent;
-    zone.querySelector('span[data-i18n="upload.dragDrop"]').textContent = t('upload.extracting');
+    const labelSpan = zone.querySelector('span[data-i18n="upload.dragDrop"]');
+    if (labelSpan) labelSpan.textContent = t('upload.extracting');
     zone.style.pointerEvents = 'none';
-    zone.style.opacity = '0.6';
+    zone.style.opacity = '0.7';
 
     try {
         const formData = new FormData();
         formData.append('file', currentPdfFile);
-        const res = await fetch('/api/upload/extract', {
+        const res = await fetch('/api/upload/extract/stream', {
             method: 'POST',
             body: formData
         });
-        const data = await res.json();
-        if (data.text) {
-            currentPdfContent = data.text;
-            saveSearchPdfMeta();
-            zone.querySelector('span[data-i18n="upload.dragDrop"]').textContent = t('upload.extractSuccess');
-        } else {
-            zone.querySelector('span[data-i18n="upload.dragDrop"]').textContent = t('upload.extractFail');
+        if (!res.ok || !res.body) {
+            throw new Error('HTTP ' + res.status);
+        }
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let buf = '';
+        let currentEvent = 'message';
+        let gotResult = false;
+        let lastErr = null;
+
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream: true });
+            const lines = buf.split('\n');
+            buf = lines.pop() || '';
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i].trim();
+                if (!line) {
+                    currentEvent = 'message';
+                    continue;
+                }
+                if (line.startsWith('event:')) {
+                    currentEvent = line.slice(6).trim();
+                } else if (line.startsWith('data:')) {
+                    const rawData = line.slice(5).trim();
+                    if (rawData === '[DONE]') continue;
+                    try {
+                        const payload = JSON.parse(rawData);
+                        if (currentEvent === 'progress' && labelSpan) {
+                            const pageInfo = payload.total_pages
+                                ? (' (' + Number(payload.page || 0) + '/' + Number(payload.total_pages) + ' 页 · ' + Number(payload.percent || 0) + '%)')
+                                : '';
+                            labelSpan.textContent = '⏳ ' + (payload.message || t('upload.extracting')) + pageInfo;
+                        } else if (currentEvent === 'result' && payload.text) {
+                            currentPdfContent = payload.text;
+                            saveSearchPdfMeta();
+                            gotResult = true;
+                            if (labelSpan) {
+                                labelSpan.textContent = t('upload.extractSuccess') + ' (' + (payload.method || 'text') + ', ' + Number(payload.char_length || payload.text.length) + '字)';
+                            }
+                        } else if (currentEvent === 'error') {
+                            lastErr = payload;
+                        }
+                    } catch (_) { /* ignore non-json SSE line */ }
+                }
+            }
+        }
+        if (!gotResult) {
+            if (lastErr) {
+                const codeTag = lastErr.error_code ? ('[' + lastErr.error_code + '] ') : '';
+                const hintStr = lastErr.hint ? (' — ' + lastErr.hint) : '';
+                if (labelSpan) labelSpan.textContent = '❌ ' + codeTag + (lastErr.error || t('upload.extractFail')) + hintStr;
+            } else if (labelSpan) {
+                labelSpan.textContent = t('upload.extractFail');
+            }
         }
     } catch (err) {
-        zone.querySelector('span[data-i18n="upload.dragDrop"]').textContent = t('upload.error') + ': ' + err.message;
+        if (labelSpan) labelSpan.textContent = t('upload.error') + ': ' + err.message;
     } finally {
         zone.style.pointerEvents = 'auto';
         zone.style.opacity = '1';

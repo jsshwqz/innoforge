@@ -164,6 +164,7 @@
             <button class="btn-secondary" onclick="collectEvidence()" id="btn-collect-evidence" style="margin-left:8px;">📁 <span data-i18n="oa.evidence.btn">自动收集证据</span></button>
             <button class="btn-secondary" onclick="startAdversarial()" id="btn-adversarial" style="margin-left:8px;">🔄 <span data-i18n="oa.adversarial.start">多轮对抗推演</span></button>
             <button class="btn-secondary" onclick="triggerVisionFigureCheck()" id="btn-vision-figure" style="margin-left:8px;">🖼️ <span data-i18n="oa.visionFigure.btn">附图标号与结构核对</span></button>
+            <button class="btn-secondary" onclick="runNumeralConsistencyCheck()" id="btn-numeral-check" style="margin-left:8px;">🔢 标号一致性核查</button>
             <button class="btn-secondary" onclick="buildOaFeatureMatrix()" id="btn-oa-matrix" style="margin-left:8px;">🧮 <span data-i18n="oa.matrix.btn">三维特征比对矩阵</span></button>
             <button class="btn-secondary" onclick="exportOaWordKit()" id="btn-oa-word-kit" style="margin-left:8px;">📝 <span data-i18n="oa.exportWordKit.btn">导出 Word 答复套件 (.docx)</span></button>
             <input type="file" id="vision-figure-input" accept="image/*" multiple style="display:none;" onchange="handleVisionFigureFiles(this)">
@@ -5154,6 +5155,115 @@
         var btnRow = document.getElementById('btn-vision-figure');
         if (btnRow && btnRow.parentNode && btnRow.parentNode.parentNode) {
             btnRow.parentNode.parentNode.appendChild(panel);
+        }
+    }
+
+    async function runNumeralConsistencyCheck() {
+        var btn = document.getElementById('btn-numeral-check');
+        var patentData = getMyPatent();
+        var specText = patentData ? (patentData.content || patentData) : '';
+        var claimsEl = document.getElementById('current-claims-input');
+        var claimsText = (claimsEl && claimsEl.value) ? claimsEl.value : '';
+        if (!claimsText.trim() && (!specText || !String(specText).trim())) {
+            alert('请先输入本申请专利文本或当前权利要求，再执行标号一致性核查。');
+            return;
+        }
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = '⏳ 正在核查标号一致性...';
+        }
+        try {
+            var resp = await fetch('/api/ai/numeral-consistency-check', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    claims_text: claimsText,
+                    description_text: typeof specText === 'string' ? specText : ''
+                })
+            });
+            var data = await resp.json();
+            renderNumeralConsistencyPanel(data);
+        } catch (err) {
+            alert('标号一致性核查失败: ' + err.message);
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = '🔢 标号一致性核查';
+            }
+        }
+    }
+
+    function renderNumeralConsistencyPanel(data) {
+        var existing = document.getElementById('numeral-consistency-panel');
+        if (existing) existing.remove();
+        var panel = document.createElement('div');
+        panel.id = 'numeral-consistency-panel';
+        panel.className = 'cmp-section';
+        panel.style.marginTop = '12px';
+
+        var title = document.createElement('h4');
+        title.textContent = (data.passed ? '✅ ' : '⚠️ ') + '交底书/权要附图标号一致性核查 (' + Number(data.total_numerals || 0) + ' 个标号)';
+        panel.appendChild(title);
+
+        var summary = document.createElement('p');
+        summary.textContent = data.summary || data.message || '';
+        panel.appendChild(summary);
+
+        var parts = Array.isArray(data.parts) ? data.parts : [];
+        if (parts.length > 0) {
+            var chipBar = document.createElement('div');
+            chipBar.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin:8px 0;';
+            var snipBox = document.createElement('div');
+            snipBox.style.cssText = 'display:none;padding:8px 10px;background:#0d1117;border:1px solid #30363d;border-radius:6px;margin-bottom:8px;font-size:12px;';
+
+            parts.forEach(function(p) {
+                var chip = document.createElement('button');
+                chip.type = 'button';
+                chip.className = 'btn-secondary';
+                chip.style.cssText = 'padding:3px 9px;font-size:12px;border-radius:12px;';
+                chip.textContent = '[' + p.number + '] ' + p.name;
+                chip.addEventListener('click', function() {
+                    snipBox.textContent = '';
+                    var h = document.createElement('strong');
+                    h.textContent = '📍 [' + p.number + '] ' + p.name + ' 引用段落：';
+                    snipBox.appendChild(h);
+                    var snips = Array.isArray(p.snippets) ? p.snippets : [];
+                    if (snips.length === 0) {
+                        var noneP = document.createElement('div');
+                        noneP.textContent = '暂无直接引用片段';
+                        snipBox.appendChild(noneP);
+                    } else {
+                        var ul = document.createElement('ul');
+                        snips.forEach(function(s) {
+                            var li = document.createElement('li');
+                            li.textContent = s;
+                            ul.appendChild(li);
+                        });
+                        snipBox.appendChild(ul);
+                    }
+                    snipBox.style.display = 'block';
+                });
+                chipBar.appendChild(chip);
+            });
+            panel.appendChild(chipBar);
+            panel.appendChild(snipBox);
+        }
+
+        var issues = Array.isArray(data.issues) ? data.issues : [];
+        if (issues.length > 0) {
+            var ul = document.createElement('ul');
+            issues.forEach(function(iss) {
+                var li = document.createElement('li');
+                li.style.marginBottom = '6px';
+                li.textContent = '[' + (iss.code || '') + '] ' + (iss.title || '') + ' — ' + (iss.message || '') + '（建议：' + (iss.suggestion || '') + '）';
+                ul.appendChild(li);
+            });
+            panel.appendChild(ul);
+        }
+
+        var anchor = document.getElementById('btn-numeral-check');
+        if (anchor && anchor.parentNode && anchor.parentNode.parentNode) {
+            anchor.parentNode.parentNode.appendChild(panel);
         }
     }
 

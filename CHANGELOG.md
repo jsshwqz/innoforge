@@ -4,6 +4,19 @@
 All notable changes are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
+## [v0.9.66] - 2026-11-22
+
+### 新增与增强 / Added & Enhanced
+
+- **`T2.5` 异步 SSE OCR 进度流（优先对接 Umi-OCR）与 4 类结构化错误码**：
+  - `src/routes/upload.rs` & `src/common.rs`：新增 `POST /api/upload/extract/stream` SSE 接口，大扫描件 PDF 优先调用 `Umi-OCR` 异步文档识别并逐页实时推送 `event: progress`（`page X/Y` 与百分比），杜绝单请求同步长阻塞超时；
+  - 新增确定性预检函数 `inspect_pdf_integrity` 与 4 类机器可判定错误码（`ERR_PDF_ENCRYPTED` 加密 PDF、`ERR_FILE_CORRUPTED` 损坏/截断文件、`ERR_OCR_UNAVAILABLE` 无可用 OCR 引擎、`ERR_FILE_TOO_LARGE` 超体积上限）及排障 `hint`，同时清理 `upload.rs` 残留的 3 处个人 Windows Python 绝对路径硬编码；
+  - `templates/search.html` 接入 `/api/upload/extract/stream` 实时进度条与结构化错误码提示。
+- **V-RAG 附图标号 ↔ 正文双向高亮与交底书标号一致性静态核查**：
+  - `src/ai/part_topology.rs`：扩展 `check_numeral_consistency` 静态核查器，确定性检出三类撰写低级错误——`FIGURE_OR_LEGEND_ONLY`（图中有号正文未提）、`TEXT_ONLY_MISSING_IN_FIGURE`（正文有号附图/图例缺失）、`NAME_INCONSISTENT_FOR_SAME_NUMERAL`（同一标号前后部件名称不一致），并输出带全文上下文片段的部件标号索引；
+  - `src/routes/patent.rs` & `src/common.rs`：新增 `GET /api/patent/:id/numeral-check` 与 `POST /api/ai/numeral-consistency-check`；
+  - `templates/patent_detail.html` 实现正文/权要标号点击联动切换并高亮附图部件卡、点击部件卡反向高亮正文引用段并支持一键跳转定位；`templates/office_action_response.html` 新增「🔢 标号一致性核查」按钮与交互结果面板。
+
 ## [v0.9.65] - 2026-11-21
 
 ### 新增与增强 / Added & Enhanced

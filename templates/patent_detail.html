@@ -99,6 +99,7 @@
                 <div class="content-box"><pre>{{description}}</pre></div>
             </div>
             <div id="tab-drawings" class="tab-content">
+                <div id="vrag-numeral-panel" style="display:none;margin-bottom:16px;padding:12px 14px;background:#161b22;border:1px solid #30363d;border-radius:8px;text-align:left;"></div>
                 <div id="drawings-container" style="text-align:center;">
                     <p class="muted">加载全文后可查看图纸</p>
                 </div>
@@ -745,8 +746,14 @@
         var claimsEl = document.querySelector('#tab-claims .content-box pre');
         var descEl = document.querySelector('#tab-description .content-box pre');
         var absEl = document.querySelector('#tab-abstract .content-box');
-        if (claimsEl && p.claims) claimsEl.textContent = p.claims;
-        if (descEl && p.description) descEl.textContent = p.description;
+        if (claimsEl && p.claims) {
+            claimsEl.textContent = p.claims;
+            claimsEl.dataset.vragDecorated = '0';
+        }
+        if (descEl && p.description) {
+            descEl.textContent = p.description;
+            descEl.dataset.vragDecorated = '0';
+        }
         if (absEl && p.abstract_text) absEl.textContent = p.abstract_text;
         document.querySelectorAll('.detail-section p').forEach(function(el) {
             // Only update if we have real classification codes (not boolean/empty)
@@ -764,8 +771,10 @@
             }
             syncManualLegalStatusSelect(p.legal_status);
         }
-        // Render patent drawings
+        // Render patent drawings & refresh V-RAG numeral index
         renderImages(p.images, p.pdf_url);
+        vragNumeralLoaded = false;
+        loadPatentNumeralIndex();
     }
 
     var currentOriginalPdfUrl = '';
@@ -1479,10 +1488,169 @@
         origShowTab(name, ev);
         if (name === 'oa-timeline') loadOaTimeline();
         if (name === 'citations') loadCitationGraph();
+        if (name === 'drawings' && !vragNumeralLoaded) loadPatentNumeralIndex();
     };
+
+    // ── V-RAG 附图标号 ↔ 正文双向高亮与一致性核查（v0.9.66）──
+    let vragNumeralData = null;
+    let vragNumeralLoaded = false;
+    let vragActiveNumeral = null;
+
+    async function loadPatentNumeralIndex() {
+        try {
+            const resp = await fetch('/api/patent/' + encodeURIComponent(patentId) + '/numeral-check');
+            if (!resp.ok) return;
+            const data = await resp.json();
+            if (data.status !== 'ok') return;
+            vragNumeralData = data;
+            vragNumeralLoaded = true;
+            renderVragNumeralPanel(data);
+            decorateTextWithNumeralLinks(data.parts || []);
+        } catch (e) {
+            console.warn('loadPatentNumeralIndex failed:', e);
+        }
+    }
+
+    function renderVragNumeralPanel(data) {
+        const panel = document.getElementById('vrag-numeral-panel');
+        if (!panel) return;
+        const parts = Array.isArray(data.parts) ? data.parts : [];
+        const issues = Array.isArray(data.issues) ? data.issues : [];
+        if (parts.length === 0 && issues.length === 0) {
+            panel.style.display = 'none';
+            return;
+        }
+        panel.style.display = 'block';
+        let html = '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px;">';
+        html += '<strong style="color:#58a6ff;">🧩 V-RAG 附图标号索引与一致性核查 (' + parts.length + ' 个部件)</strong>';
+        const statusBadge = data.passed
+            ? '<span style="color:#3fb950;font-size:12px;">✅ ' + escapeHtml(data.summary || '标号一致') + '</span>'
+            : '<span style="color:#f0883e;font-size:12px;">⚠️ ' + escapeHtml(data.summary || ('检出 ' + issues.length + ' 处异常')) + '</span>';
+        html += statusBadge + '</div>';
+
+        if (parts.length > 0) {
+            html += '<div id="vrag-part-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;">';
+            parts.forEach(function(p) {
+                const num = escapeHtml(p.number);
+                const active = vragActiveNumeral === String(p.number);
+                const bg = active ? '#1f6feb' : '#21262d';
+                const border = active ? '#58a6ff' : '#30363d';
+                html += '<button type="button" class="vrag-part-card" data-part-num="' + num + '" onclick="selectDrawingPart(\'' + num + '\')" '
+                    + 'style="padding:4px 10px;border-radius:14px;border:1px solid ' + border + ';background:' + bg + ';color:#f0f6fc;cursor:pointer;font-size:12px;">'
+                    + '<strong>[' + num + ']</strong> ' + escapeHtml(p.name)
+                    + '</button>';
+            });
+            html += '</div>';
+        }
+
+        html += '<div id="vrag-part-snippets" style="display:none;padding:10px 12px;background:#0d1117;border:1px solid #30363d;border-radius:6px;margin-bottom:8px;font-size:13px;"></div>';
+
+        if (issues.length > 0) {
+            html += '<details style="margin-top:6px;"><summary style="cursor:pointer;color:#f0883e;font-size:12px;">查看 ' + issues.length + ' 项标号一致性核查告警</summary>';
+            html += '<div style="margin-top:6px;display:flex;flex-direction:column;gap:6px;">';
+            issues.forEach(function(iss) {
+                const c = iss.severity === 'error' ? '#f85149' : '#d29922';
+                html += '<div style="padding:6px 10px;border-left:3px solid ' + c + ';background:#0d1117;border-radius:4px;font-size:12px;">'
+                    + '<div style="color:' + c + ';font-weight:600;">[' + escapeHtml(iss.code) + '] ' + escapeHtml(iss.title) + '</div>'
+                    + '<div style="color:#c9d1d9;margin-top:2px;">' + escapeHtml(iss.message) + '</div>'
+                    + '<div style="color:#8b949e;margin-top:2px;">建议：' + escapeHtml(iss.suggestion) + '</div>'
+                    + '</div>';
+            });
+            html += '</div></details>';
+        }
+        panel.innerHTML = safeSanitize(html);
+    }
+
+    function decorateTextWithNumeralLinks(parts) {
+        if (!parts || parts.length === 0) return;
+        const targets = [
+            document.querySelector('#tab-claims .content-box pre'),
+            document.querySelector('#tab-description .content-box pre')
+        ];
+        // 按名称长度降序匹配，避免短名截断长名
+        const sorted = parts.slice().sort(function(a, b) {
+            return String(b.name || '').length - String(a.name || '').length;
+        });
+        targets.forEach(function(preEl) {
+            if (!preEl || preEl.dataset.vragDecorated === '1') return;
+            const raw = preEl.textContent || '';
+            if (raw.trim().length < 5) return;
+            let escaped = escapeHtml(raw);
+            sorted.forEach(function(p) {
+                const num = String(p.number || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const name = String(p.name || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                if (!num || !name) return;
+                const re = new RegExp('(' + name + '\\s*[（(]?' + num + '[）)]?)', 'g');
+                escaped = escaped.replace(
+                    re,
+                    '<span class="vrag-text-ref" data-part-num="' + escapeHtml(p.number) + '" '
+                    + 'onclick="focusDrawingPart(\'' + escapeHtml(p.number) + '\')" '
+                    + 'title="点击联动高亮附图与部件 [' + escapeHtml(p.number) + '] ' + escapeHtml(p.name) + '" '
+                    + 'style="background:rgba(88,166,255,0.16);border-bottom:1px dashed #58a6ff;color:#79c0ff;cursor:pointer;padding:0 2px;border-radius:3px;">$1</span>'
+                );
+            });
+            preEl.innerHTML = safeSanitize(escaped);
+            preEl.dataset.vragDecorated = '1';
+        });
+    }
+
+    function focusDrawingPart(num) {
+        showTab('drawings');
+        selectDrawingPart(num);
+    }
+
+    function selectDrawingPart(num) {
+        vragActiveNumeral = String(num);
+        if (!vragNumeralData || !Array.isArray(vragNumeralData.parts)) return;
+        const part = vragNumeralData.parts.find(function(p) { return String(p.number) === vragActiveNumeral; });
+        document.querySelectorAll('.vrag-part-card').forEach(function(btn) {
+            const isMatch = btn.dataset.partNum === vragActiveNumeral;
+            btn.style.background = isMatch ? '#1f6feb' : '#21262d';
+            btn.style.borderColor = isMatch ? '#58a6ff' : '#30363d';
+        });
+        // 反向高亮正文中的所有对应标号
+        document.querySelectorAll('.vrag-text-ref').forEach(function(span) {
+            const isMatch = span.dataset.partNum === vragActiveNumeral;
+            span.style.background = isMatch ? 'rgba(240,180,41,0.38)' : 'rgba(88,166,255,0.16)';
+            span.style.color = isMatch ? '#ffd33d' : '#79c0ff';
+        });
+        const box = document.getElementById('vrag-part-snippets');
+        if (!box || !part) return;
+        const snips = Array.isArray(part.snippets) ? part.snippets : [];
+        let html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:6px;">';
+        html += '<strong style="color:#ffd33d;">📍 部件 [' + escapeHtml(part.number) + '] ' + escapeHtml(part.name) + ' 正文引用段落 (' + snips.length + ')</strong>';
+        html += '<span style="display:flex;gap:6px;">';
+        if (part.in_claims) {
+            html += '<button type="button" class="btn-secondary" style="padding:2px 8px;font-size:11px;" onclick="jumpToNumeralInTab(\'claims\', \'' + escapeHtml(part.number) + '\')">跳转权利要求</button>';
+        }
+        if (part.in_description) {
+            html += '<button type="button" class="btn-secondary" style="padding:2px 8px;font-size:11px;" onclick="jumpToNumeralInTab(\'description\', \'' + escapeHtml(part.number) + '\')">跳转说明书</button>';
+        }
+        html += '</span></div>';
+        if (snips.length === 0) {
+            html += '<div class="muted">正文未检索到该标号的直接上下文引用。</div>';
+        } else {
+            html += '<ul style="margin:0;padding-left:18px;color:#c9d1d9;line-height:1.6;">';
+            snips.forEach(function(s) {
+                html += '<li>' + escapeHtml(s) + '</li>';
+            });
+            html += '</ul>';
+        }
+        box.innerHTML = safeSanitize(html);
+        box.style.display = 'block';
+    }
+
+    function jumpToNumeralInTab(tabName, num) {
+        showTab(tabName);
+        const target = document.querySelector('#tab-' + tabName + ' .vrag-text-ref[data-part-num="' + String(num).replace(/"/g, '') + '"]');
+        if (target && target.scrollIntoView) {
+            target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    }
 
     loadCollectState();
     loadTags();
+    loadPatentNumeralIndex();
     </script>
 
     <!-- OA Round creation modal (issue #15, replaces native prompt) -->

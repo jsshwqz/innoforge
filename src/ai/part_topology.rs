@@ -1,8 +1,6 @@
-//! 部件标号提取与拓扑连接关系校验模块。
-//!
-//! 从本申请与对比文件原文中确定性提取机械/电气部件标号（图例式与行内式），
-//! 构建部件间拓扑连接边，并对比识别对比文件未公开的部件及连接关系，
-//! 生成符合 `output_guard` 规范的专利答复反驳句。
+//! 模块职责：部件标号提取、拓扑连接关系校验与交底书/权要/附图 V-RAG 标号一致性静态核查。
+//! 上游调用者：`src/ai/strategy_arbitration.rs`、`src/ai/vision_topology.rs`、`src/routes/patent.rs`、`/api/ai/numeral-consistency-check`。
+//! 模块专属禁区：严禁在标号核查中将「图1」「权利要求1」「步骤1」「实施例1」误判为机械部件标号；严禁使用裸字节切片截取中文上下文片段。
 
 use serde::{Deserialize, Serialize};
 
@@ -477,6 +475,355 @@ pub fn diff_topology_rebuttals(app_text: &str, ref_label: &str, ref_text: &str) 
     rebuttals
 }
 
+/// 单个标号的全文索引摘要（供 V-RAG 附图标号 ↔ 正文双向联动渲染）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NumeralPartSummary {
+    pub number: String,
+    pub name: String,
+    pub all_names: Vec<String>,
+    pub in_claims: bool,
+    pub in_description: bool,
+    pub in_legend: bool,
+    pub in_drawing: bool,
+    pub mention_count: usize,
+    pub snippets: Vec<String>,
+}
+
+/// 标号一致性静态核查单条告警
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NumeralConsistencyIssue {
+    /// `FIGURE_OR_LEGEND_ONLY` | `TEXT_ONLY_MISSING_IN_FIGURE` | `NAME_INCONSISTENT_FOR_SAME_NUMERAL`
+    pub code: String,
+    /// `error` | `warning`
+    pub severity: String,
+    pub numeral: String,
+    pub title: String,
+    pub message: String,
+    pub suggestion: String,
+}
+
+/// 交底书 / 权利要求 / 附图标号一致性核查报告
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NumeralConsistencyReport {
+    pub passed: bool,
+    pub total_numerals: usize,
+    pub issue_count: usize,
+    pub summary: String,
+    pub parts: Vec<NumeralPartSummary>,
+    pub issues: Vec<NumeralConsistencyIssue>,
+}
+
+/// 仅提取图例式定义（如 `1-机架`、`2、电缸`、`10：阀体`）及其在原文中的字节起止区间
+fn extract_legend_designators_with_ranges(
+    text: &str,
+) -> (Vec<PartDesignator>, Vec<(usize, usize)>) {
+    let mut parts = Vec::new();
+    let mut ranges = Vec::new();
+    let Ok(legend_re) = regex::Regex::new(
+        r"(?:^|[^\dA-Za-z])(\d{1,3})\s*[-—－、：:]\s*([\u4e00-\u9fa5A-Za-z]{2,16})",
+    ) else {
+        return (parts, ranges);
+    };
+    for cap in legend_re.captures_iter(text) {
+        let Some(full) = cap.get(0) else {
+            continue;
+        };
+        let Some(num_m) = cap.get(1) else {
+            continue;
+        };
+        let Some(name_m) = cap.get(2) else {
+            continue;
+        };
+        let number = num_m.as_str().trim().to_string();
+        let name = trim_legend_name(name_m.as_str());
+        if is_valid_part_name(&name) {
+            ranges.push((full.start(), full.end()));
+            push_unique_part(&mut parts, number, name);
+        }
+    }
+    (parts, ranges)
+}
+
+/// 仅提取行内式引用（如 `阀芯3`、`驱动电机（2）`）
+fn extract_inline_designators(text: &str) -> Vec<PartDesignator> {
+    let mut parts = Vec::new();
+    let Ok(inline_re) = regex::Regex::new(r"([\u4e00-\u9fa5]{2,12})\s*[（(]?\s*(\d{1,3})\s*[）)]?")
+    else {
+        return parts;
+    };
+    for cap in inline_re.captures_iter(text) {
+        let Some(name_m) = cap.get(1) else {
+            continue;
+        };
+        let Some(num_m) = cap.get(2) else {
+            continue;
+        };
+        let cleaned_name = strip_inline_prefixes(name_m.as_str());
+        let number = num_m.as_str().trim().to_string();
+        push_unique_part(&mut parts, number, cleaned_name);
+    }
+    parts
+}
+
+/// 将图例定义段从说明书正文中剥离，避免“图例中写过”误算作“正文具体实施方式已提及”
+fn strip_legend_ranges(text: &str, ranges: &[(usize, usize)]) -> String {
+    if ranges.is_empty() {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut cursor = 0usize;
+    for &(start, end) in ranges {
+        if let Some(chunk) = text.get(cursor..start) {
+            out.push_str(chunk);
+            out.push(' ');
+            if text.is_char_boundary(end) {
+                cursor = end;
+            }
+        }
+    }
+    if let Some(tail) = text.get(cursor..) {
+        out.push_str(tail);
+    }
+    out
+}
+
+/// 判断两个部件名是否属于实质性异名（排除「散热板」vs「第一散热板」或前后缀包含关系）
+fn names_conflict(a: &str, b: &str) -> bool {
+    if a == b || a.contains(b) || b.contains(a) {
+        return false;
+    }
+    // 共有至少 2 个汉字视为同一部件的简称/全称变体（如「导热散热片」vs「散热片结构」）
+    let common_han = a
+        .chars()
+        .filter(|c| ('\u{4e00}'..='\u{9fff}').contains(c) && b.contains(*c))
+        .count();
+    common_han < 2
+}
+
+fn collect_numeral_snippets(claims: &str, desc: &str, number: &str, name: &str) -> Vec<String> {
+    let mut snippets = Vec::new();
+    let combined = [("[权要] ", claims), ("[说明书] ", desc)];
+    let pattern_plain = format!("{name}{number}");
+    let pattern_paren_cn = format!("{name}（{number}）");
+    let pattern_paren_en = format!("{name}({number})");
+    let pattern_dash = format!("{number}-{name}");
+    let pattern_enum = format!("{number}、{name}");
+    let pattern_colon = format!("{number}：{name}");
+
+    for (prefix, src) in combined {
+        for raw_seg in src.split(['。', '；', '\n']) {
+            let seg = raw_seg.trim();
+            if seg.len() < 4 {
+                continue;
+            }
+            let matched = seg.contains(&pattern_plain)
+                || seg.contains(&pattern_paren_cn)
+                || seg.contains(&pattern_paren_en)
+                || seg.contains(&pattern_dash)
+                || seg.contains(&pattern_enum)
+                || seg.contains(&pattern_colon)
+                || (seg.contains(name)
+                    && seg
+                        .split(|c: char| !c.is_ascii_digit())
+                        .any(|tok| tok == number));
+            if matched {
+                let preview: String = seg.chars().take(110).collect();
+                let entry = format!("{prefix}{preview}");
+                if !snippets.contains(&entry) {
+                    snippets.push(entry);
+                }
+                if snippets.len() >= 5 {
+                    return snippets;
+                }
+            }
+        }
+    }
+    snippets
+}
+
+/// 交底书 / 权利要求 / 附图标号一致性静态核查器（v0.9.66）。
+///
+/// 确定性检出三类专利撰写低级错误：
+/// 1. `FIGURE_OR_LEGEND_ONLY`：图中有号（附图或图例说明已列出），但权要与正文均未引用；
+/// 2. `TEXT_ONLY_MISSING_IN_FIGURE`：正文或权要引用了标号，但附图或图例说明中缺失；
+/// 3. `NAME_INCONSISTENT_FOR_SAME_NUMERAL`：同一标号在全文前后对应了互相冲突的部件名称。
+pub fn check_numeral_consistency(
+    claims_text: &str,
+    description_text: &str,
+    drawing_parts: Option<&[PartDesignator]>,
+) -> NumeralConsistencyReport {
+    use std::collections::BTreeMap;
+
+    #[derive(Default)]
+    struct Acc {
+        names: Vec<String>,
+        in_claims: bool,
+        in_description: bool,
+        in_legend: bool,
+        in_drawing: bool,
+    }
+
+    let mut map: BTreeMap<String, Acc> = BTreeMap::new();
+    let add_name = |acc: &mut Acc, name: &str| {
+        if !name.is_empty() && !acc.names.iter().any(|n| n == name) {
+            acc.names.push(name.to_string());
+        }
+    };
+
+    // 1. 说明书图例定义（标号说明）
+    let (legend_parts, legend_ranges) = extract_legend_designators_with_ranges(description_text);
+    for p in &legend_parts {
+        let acc = map.entry(p.number.clone()).or_default();
+        acc.in_legend = true;
+        add_name(acc, &p.name);
+    }
+
+    // 2. 剥离图例后的说明书正文行内引用
+    let desc_body_only = strip_legend_ranges(description_text, &legend_ranges);
+    for p in extract_inline_designators(&desc_body_only) {
+        let acc = map.entry(p.number.clone()).or_default();
+        acc.in_description = true;
+        add_name(acc, &p.name);
+    }
+
+    // 3. 权利要求书中的标号（行内式 + 偶发图例式）
+    for p in extract_part_designators(claims_text) {
+        let acc = map.entry(p.number.clone()).or_default();
+        acc.in_claims = true;
+        add_name(acc, &p.name);
+    }
+
+    // 4. 可选的附图视觉识别标号清单
+    let has_drawing_source = drawing_parts.is_some_and(|list| !list.is_empty());
+    if let Some(d_parts) = drawing_parts {
+        for p in d_parts {
+            let acc = map.entry(p.number.clone()).or_default();
+            acc.in_drawing = true;
+            add_name(acc, &p.name);
+        }
+    }
+
+    // 检查是否存在“图例或附图”基准源（否则不强报 TEXT_ONLY_MISSING_IN_FIGURE 避免对无图例纯权要误报）
+    let has_figure_or_legend_baseline = !legend_parts.is_empty() || has_drawing_source;
+
+    let mut parts_out: Vec<NumeralPartSummary> = Vec::new();
+    let mut issues: Vec<NumeralConsistencyIssue> = Vec::new();
+
+    // 按数值大小升序排列标号（如 1, 2, 10 而非 1, 10, 2）
+    let mut entries: Vec<(String, Acc)> = map.into_iter().collect();
+    entries.sort_by_key(|(num, _)| (num.parse::<u32>().unwrap_or(u32::MAX), num.clone()));
+
+    for (num, acc) in entries {
+        let primary_name = acc
+            .names
+            .first()
+            .cloned()
+            .unwrap_or_else(|| format!("部件{num}"));
+        let snippets = collect_numeral_snippets(claims_text, description_text, &num, &primary_name);
+        let mention_count = snippets.len().max(
+            usize::from(acc.in_claims)
+                + usize::from(acc.in_description)
+                + usize::from(acc.in_legend)
+                + usize::from(acc.in_drawing),
+        );
+
+        // 错误类 1：同一标号前后部件名称不一致
+        if acc.names.len() >= 2 {
+            let mut conflicting_pair: Option<(String, String)> = None;
+            'outer: for i in 0..acc.names.len() {
+                for j in (i + 1)..acc.names.len() {
+                    if names_conflict(&acc.names[i], &acc.names[j]) {
+                        conflicting_pair = Some((acc.names[i].clone(), acc.names[j].clone()));
+                        break 'outer;
+                    }
+                }
+            }
+            if let Some((n1, n2)) = conflicting_pair {
+                issues.push(NumeralConsistencyIssue {
+                    code: "NAME_INCONSISTENT_FOR_SAME_NUMERAL".to_string(),
+                    severity: "error".to_string(),
+                    numeral: num.clone(),
+                    title: format!("标号 {num} 前后名称不一致"),
+                    message: format!(
+                        "同一附图标记「{num}」在文本中分别对应了「{n1}」与「{n2}」，涉嫌违反专利法实施细则关于同一附图标记仅代表同一组成部分的要求。"
+                    ),
+                    suggestion: format!(
+                        "请核对附图并统一标号「{num}」的标准部件名称，或为不同部件分配独立标号。"
+                    ),
+                });
+            }
+        }
+
+        // 错误类 2：图中有号正文未提
+        let in_figure_side = acc.in_legend || acc.in_drawing;
+        let in_text_side = acc.in_claims || acc.in_description;
+        if in_figure_side && !in_text_side {
+            issues.push(NumeralConsistencyIssue {
+                code: "FIGURE_OR_LEGEND_ONLY".to_string(),
+                severity: "warning".to_string(),
+                numeral: num.clone(),
+                title: format!("标号 {num}（{primary_name}）图中有号但正文未提及"),
+                message: format!(
+                    "附图/附图标记说明中列出了「{num}-{primary_name}」，但在权利要求书与具体实施方式正文中未检索到该标号的引用。"
+                ),
+                suggestion: format!(
+                    "请在具体实施方式中补充「{primary_name}（{num}）」的结构与连接关系说明，或从附图及图例中删除多余标号。"
+                ),
+            });
+        }
+
+        // 错误类 3：正文有号附图/图例缺失
+        if has_figure_or_legend_baseline && in_text_side && !in_figure_side {
+            issues.push(NumeralConsistencyIssue {
+                code: "TEXT_ONLY_MISSING_IN_FIGURE".to_string(),
+                severity: "error".to_string(),
+                numeral: num.clone(),
+                title: format!("标号 {num}（{primary_name}）正文有号但附图/图例缺失"),
+                message: format!(
+                    "权利要求书或说明书正文中引用了「{primary_name}（{num}）」，但附图标记说明/附图清单中缺失标号「{num}」。"
+                ),
+                suggestion: format!(
+                    "请在附图标记说明中补录「{num}-{primary_name}」并确认对应附图已清晰标出数字 {num}。"
+                ),
+            });
+        }
+
+        parts_out.push(NumeralPartSummary {
+            number: num,
+            name: primary_name,
+            all_names: acc.names,
+            in_claims: acc.in_claims,
+            in_description: acc.in_description,
+            in_legend: acc.in_legend,
+            in_drawing: acc.in_drawing,
+            mention_count,
+            snippets,
+        });
+    }
+
+    let total_numerals = parts_out.len();
+    let issue_count = issues.len();
+    let passed = issue_count == 0;
+    let summary = if total_numerals == 0 {
+        "未在文本中识别到机械/电气部件标号。".to_string()
+    } else if passed {
+        format!("共核查 {total_numerals} 个部件标号，图文标号与部件名称完全一致，未发现低级错误。")
+    } else {
+        format!(
+            "共核查 {total_numerals} 个部件标号，检出 {issue_count} 处一致性异常，请在提交前核对修正。"
+        )
+    };
+
+    NumeralConsistencyReport {
+        passed,
+        total_numerals,
+        issue_count,
+        summary,
+        parts: parts_out,
+        issues,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -522,5 +869,43 @@ mod tests {
         assert!(rebuttals
             .iter()
             .any(|s| s.contains("阀芯") && s.contains("D1")));
+    }
+
+    #[test]
+    fn numeral_consistency_detects_all_three_error_classes() {
+        let claims = "1. 一种液压隔膜阀，其特征在于包括：阀体（1）、与阀体1配合的膜片2，以及驱动膜片2运动的电磁线圈4。";
+        let description = "附图标记说明：1-阀体；2-膜片；3-防尘盖。\n\
+                           具体实施方式：工作时，阀体1内部安装有膜片2，且散热支架1固定在底座上方，电磁线圈4驱动膜片2开合。";
+
+        let report = check_numeral_consistency(claims, description, None);
+        assert!(!report.passed, "存在三类标号错误必须拦截");
+
+        let codes: Vec<&str> = report.issues.iter().map(|i| i.code.as_str()).collect();
+        assert!(
+            codes.contains(&"FIGURE_OR_LEGEND_ONLY"),
+            "必须检出图中有号正文未提（3-防尘盖），got: {:?}",
+            report.issues
+        );
+        assert!(
+            codes.contains(&"TEXT_ONLY_MISSING_IN_FIGURE"),
+            "必须检出正文有号图例缺失（电磁线圈4），got: {:?}",
+            report.issues
+        );
+        assert!(
+            codes.contains(&"NAME_INCONSISTENT_FOR_SAME_NUMERAL"),
+            "必须检出同一标号异名（1: 阀体 vs 散热支架），got: {:?}",
+            report.issues
+        );
+
+        // 规范无误文本必须零误报通过
+        let clean_claims = "1. 一种隔膜阀，包括阀体1与膜片2。";
+        let clean_desc = "附图标记说明：1-阀体；2-膜片。\n具体实施方式：阀体1内腔设有膜片2。";
+        let clean_report = check_numeral_consistency(clean_claims, clean_desc, None);
+        assert!(
+            clean_report.passed,
+            "规范文本不应误报: {:?}",
+            clean_report.issues
+        );
+        assert_eq!(clean_report.total_numerals, 2);
     }
 }

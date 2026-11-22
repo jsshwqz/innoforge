@@ -410,6 +410,70 @@ pub async fn api_patents_backfill_index(
     }
 }
 
+/// GET /api/patent/:id/numeral-check — 专利详情页 V-RAG 附图标号索引与一致性静态核查（v0.9.66）
+pub async fn api_patent_numeral_check(
+    Path(id): Path<String>,
+    State(s): State<AppState>,
+) -> Json<serde_json::Value> {
+    let patent = match s.db.get_patent(&id) {
+        Ok(Some(p)) => p,
+        _ => return Json(json!({"status": "error", "message": "Patent not found"})),
+    };
+    let report = crate::ai::strategy_arbitration::part_topology::check_numeral_consistency(
+        &patent.claims,
+        &patent.description,
+        None,
+    );
+    Json(json!({
+        "status": "ok",
+        "patent_id": patent.id,
+        "patent_number": patent.patent_number,
+        "passed": report.passed,
+        "total_numerals": report.total_numerals,
+        "issue_count": report.issue_count,
+        "summary": report.summary,
+        "parts": report.parts,
+        "issues": report.issues,
+    }))
+}
+
+/// POST /api/ai/numeral-consistency-check — 交底书 / 权利要求 / 附图标号一致性静态核查（v0.9.66）
+pub async fn api_ai_numeral_consistency_check(
+    Json(req): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let claims_text = req
+        .get("claims_text")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let description_text = req
+        .get("description_text")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if claims_text.trim().is_empty() && description_text.trim().is_empty() {
+        return Json(json!({
+            "status": "error",
+            "message": "请至少提供权利要求文本（claims_text）或说明书/交底书正文（description_text）"
+        }));
+    }
+    let drawing_parts: Option<Vec<crate::ai::strategy_arbitration::part_topology::PartDesignator>> =
+        req.get("drawing_parts")
+            .and_then(|v| serde_json::from_value(v.clone()).ok());
+    let report = crate::ai::strategy_arbitration::part_topology::check_numeral_consistency(
+        claims_text,
+        description_text,
+        drawing_parts.as_deref(),
+    );
+    Json(json!({
+        "status": "ok",
+        "passed": report.passed,
+        "total_numerals": report.total_numerals,
+        "issue_count": report.issue_count,
+        "summary": report.summary,
+        "parts": report.parts,
+        "issues": report.issues,
+    }))
+}
+
 /// Optional query param `?fetch=true` triggers online fetch if not found locally
 pub async fn api_patent_lookup(
     Path(patent_number): Path<String>,
