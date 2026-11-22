@@ -43,20 +43,40 @@ pub async fn deep_analysis(
     Ok(())
 }
 
-/// 执行 Step 11 的降级版本：单次 AI 调用（用于快速模式或推演引擎失败时）
+/// 执行 Step 11 的降级版本：单次全文档深度 AI 调用（用于快速模式或推演引擎失败时）
 pub async fn deep_analysis_simple(ctx: &mut PipelineContext, ai: &AiClient) -> Result<()> {
-    // 构建结构化数据包，让 AI 基于代码计算的结果分析
+    // v0.9.67：告别 150 字裸截断，保留结构化全文摘录并预挖定量参数/拓扑/隐藏部件
+    let mut combined_claims = String::new();
+    let mut combined_desc = String::new();
+    for m in ctx.top_matches.iter().take(5) {
+        if let Some((desc_part, claims_part)) = m.snippet.split_once("## 权利要求") {
+            combined_desc.push_str(desc_part);
+            combined_desc.push('\n');
+            combined_claims.push_str("## 权利要求");
+            combined_claims.push_str(claims_part);
+            combined_claims.push('\n');
+        } else {
+            combined_desc.push_str(&m.snippet);
+            combined_desc.push('\n');
+        }
+    }
+    let signals =
+        crate::ai::patent::extract_whole_document_signals(&combined_claims, &combined_desc);
+    let pre_mined = signals.format_prompt_block();
+
     let top_matches_summary: String = ctx
         .top_matches
         .iter()
-        .take(10)
-        .map(|m| {
+        .take(8)
+        .enumerate()
+        .map(|(idx, m)| {
+            let budget = if idx < 4 { 1200 } else { 500 };
             format!(
                 "- [{}] {} (相似度: {:.1}%)\n  {}\n  来源: {}",
                 m.source_type,
                 m.source_title,
                 m.combined_score * 100.0,
-                crate::ai::truncate_for_ai(&m.snippet, 150),
+                crate::ai::patent::structured_patent_excerpt(&m.snippet, budget),
                 m.source_url,
             )
         })
@@ -81,30 +101,29 @@ pub async fn deep_analysis_simple(ctx: &mut PipelineContext, ai: &AiClient) -> R
     };
 
     let prompt = format!(
-        "## 用户的创意\n\
+        "请以「首席研发总工 + 资深专利代理师」双重视角，基于以下全文档材料做深度研发与专利布局剖析（严禁浮于表面，原文未披露数据标注「原文未披露」，绝不编造）：\n\n\
+         ## 用户的创意\n\
          **标题：** {title}\n\
          **描述：** {description}\n\
          **技术领域：** {domain}\n\n\
-         ## 代码计算结果（已验证，请基于此分析）\n\n\
-         **新颖性评分：{score:.0}/100**\n\
-         - 最高相似度：{max_sim:.1}%（与最相似的现有技术）\n\
-         - Top5 平均相似度：{avg_sim:.1}%\n\
-         - 矛盾信号加分：+{contra_bonus:.0}\n\
-         - 覆盖缺口加分：+{gap_bonus:.0}\n\
-         - 搜索多样性：{diversity:.0}%\n\n\
-         ## 最相关的现有技术（按相似度排序）\n\n\
+         ## 代码计算结果（已验证）\n\
+         **新颖性评分：{score:.0}/100**（最高相似度 {max_sim:.1}% / Top5 均值 {avg_sim:.1}% / 矛盾加分 +{contra_bonus:.0} / 缺口加分 +{gap_bonus:.0} / 多样性 {diversity:.0}%）\n\n\
+         ## 程序预挖现有技术全文信号\n{pre_mined}\n\n\
+         ## 最相关的现有技术（含富化全文选段）\n\n\
          {matches}\n\n\
          ## 矛盾信号（不同技术路线 = 创新空间）\n\n\
          {contradictions}\n\n\
-         请基于以上**代码已计算的结构化数据**进行深度分析，用 Markdown 格式返回：\n\n\
-         ### 1. 新颖性解读\n\
-         - 解读评分含义，哪些方面是新颖的，哪些已有先例\n\n\
-         ### 2. 已有方案分析\n\
-         - 对最相关的 3-5 个现有方案进行优缺点分析\n\n\
-         ### 3. 差异化机会\n\
-         - 基于矛盾信号和覆盖缺口，指出最有前景的创新方向\n\n\
-         ### 4. 风险提示\n\
-         - 技术壁垒、知识产权风险、市场竞争风险",
+         请用 Markdown 标题与表格严格按以下 5 节输出：\n\n\
+         ### 1. 核心物理因果链与现有方案失效边界\n\
+         - 拆解最相关现有技术的核心机理、实测参数窗口与隐含工程前提/失效边界。\n\n\
+         ### 2. 说明书隐藏宝藏与跨文档创新空白点\n\
+         - 指出可免费借鉴的未权要细节与跨方案嫁接切入点（同步指出新引入的耦合风险）。\n\n\
+         ### 3. 抓准真重点：独立权利要求最优抽象层与规避靶点\n\
+         - 明确哪些核心原理必须卡死进独权、哪些单一原型细枝末节必须踢出独权；给出 ≥2 条可落地规避设计路径。\n\n\
+         ### 4. 面向未来 3~5 年的演进卡位（不拘一格 × 沉住气求真）\n\
+         - 给出 2 个跨代材料/架构/控制演进方向及可提前铺设的替代实施例，并列明必须先在实验室验证的真实风险红线。\n\n\
+         ### 5. 知识产权与落地可行性总评\n\
+         - 给出清晰的新颖性/创造性判断、主要技术壁垒与优先行动建议。",
         title = ctx.title,
         description = ctx.description,
         domain = ctx.technical_domain,
@@ -114,6 +133,7 @@ pub async fn deep_analysis_simple(ctx: &mut PipelineContext, ai: &AiClient) -> R
         contra_bonus = ctx.score_breakdown.contradiction_bonus,
         gap_bonus = ctx.score_breakdown.coverage_gap_bonus,
         diversity = ctx.diversity_score.unwrap_or(0.0) * 100.0,
+        pre_mined = pre_mined,
         matches = top_matches_summary,
         contradictions = contradictions_summary,
     );
@@ -139,27 +159,30 @@ pub async fn deep_analysis_simple(ctx: &mut PipelineContext, ai: &AiClient) -> R
 
 /// 执行 Step 12: AI 生成行动方案
 pub async fn action_plan(ctx: &mut PipelineContext, ai: &AiClient) -> Result<()> {
+    let analysis_excerpt = crate::ai::patent::structured_patent_excerpt(&ctx.ai_analysis, 3500);
     let prompt = format!(
-        "基于以下创意分析结果，生成具体的行动方案：\n\n\
+        "基于以下全文档深度分析结果，生成可拿回实验室与专利撰写台直接执行的行动方案：\n\n\
          **创意：** {}\n\
          **新颖性评分：** {:.0}/100\n\
          **技术领域：** {}\n\
          **矛盾信号数量：** {}\n\n\
-         **AI 分析摘要（前 500 字）：**\n{}\n\n\
-         请给出：\n\n\
-         ### 优化建议\n\
-         - 3-5 条具体可执行的技术改进方向\n\n\
-         ### 推荐行动\n\
-         - 短期（1-3个月）应该做什么\n\
-         - 中期（3-6个月）应该做什么\n\n\
-         ### 潜在合作/资源\n\
-         - 可以参考或合作的机构/团队\n\
-         - 推荐关注的技术社区或会议",
+         **深度分析核心摘录：**\n{}\n\n\
+         请按以下 4 节输出（务实求真、不画大饼）：\n\n\
+         ### 1. 专利撰写与保护宽度防踩坑清单（抓真重点）\n\
+         - 独立权利要求必须卡死的核心物理特征 vs 必须踢出的非必要原型细节；\n\
+         - 建议同步铺设的 2~3 个面向未来 3~5 年演进的替代实施例。\n\n\
+         ### 2. 台架/实验室优先验证清单（沉住气求真）\n\
+         - 列出 3 项最先必须跑通的定量验证实验（写清测试指标、合格红线与失败止损条件）。\n\n\
+         ### 3. 阶段性推进路线\n\
+         - 短期（1~3 个月）：原型验证与核心专利交底卡位；\n\
+         - 中期（3~12 个月）：工程可靠性验证与外围组合布局。\n\n\
+         ### 4. 潜在对标机构与关键标准/文献线索\n\
+         - 建议重点跟踪的对标团队、行业测试标准或核心期刊方向。",
         ctx.title,
         ctx.novelty_score,
         ctx.technical_domain,
         ctx.contradictions.len(),
-        crate::ai::truncate_for_ai(&ctx.ai_analysis, 500),
+        analysis_excerpt,
     );
 
     match ai.chat_expert(&prompt, None).await {

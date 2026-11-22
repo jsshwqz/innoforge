@@ -17,4 +17,6 @@ pub mod epo_ops;
 pub mod firecrawl;
 pub mod google_patents_xhr;
 pub mod openalex;
+pub mod pubmed;
+pub mod semantic_scholar;
 pub mod serpapi;

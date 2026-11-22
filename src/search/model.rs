@@ -35,6 +35,14 @@ pub enum SourceKind {
     /// 期刊名进 applicant，见 `providers/openalex.rs` 模块头字段映射）。
     #[serde(rename = "openalex")]
     OpenAlex,
+    /// Semantic Scholar 学术文献源（v0.9.67，免费无 Key / 可选 S2_API_KEY），
+    /// 提供论文标题、摘要、发表年份、期刊会议、真实 DOI 及总引用/高影响力引用数。
+    #[serde(rename = "semantic_scholar")]
+    SemanticScholar,
+    /// NCBI PubMed 医工与生命科学文献源（v0.9.67，免费无 Key E-utilities），
+    /// 提供生物医学/医疗器械/医工交叉期刊文献标题、作者、期刊、PMID/DOI 与摘要。
+    #[serde(rename = "pubmed")]
+    PubMed,
     /// 本地 FTS 兜底。**MA4a 起有真实生产消费点**：`routes/search.rs::local_fallback_json`
     /// 把每次本地兜底补记为 attempts 末条的 `local_fts` 行（仅记账，不进在线链、
     /// 不参与 `winning_source`，出参 `source` 仍为 `"local"`）。
@@ -69,6 +77,8 @@ impl SourceKind {
             SourceKind::GooglePatentsXhr => "google_patents_xhr",
             SourceKind::EpoOps => "epo_ops",
             SourceKind::OpenAlex => "openalex",
+            SourceKind::SemanticScholar => "semantic_scholar",
+            SourceKind::PubMed => "pubmed",
             SourceKind::LocalFts => "local_fts",
             SourceKind::FirecrawlWeb => "firecrawl_web",
             SourceKind::QueryRewrite => "query_rewrite",

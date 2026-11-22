@@ -161,10 +161,12 @@ mod tests {
                 SourceKind::SerpApi,
                 SourceKind::GooglePatentsXhr,
                 SourceKind::EpoOps,
-                SourceKind::OpenAlex
+                SourceKind::OpenAlex,
+                SourceKind::SemanticScholar,
+                SourceKind::PubMed,
             ],
             with_epo.kinds(),
-            "四源齐配时的链形状 = 优先级顺序（OpenAlex 恒登记链尾）"
+            "六源齐配时的链形状 = 优先级顺序（OpenAlex/SemanticScholar/PubMed 恒登记链尾）"
         );
 
         let without_epo = SourceChain::new(online_chain_providers(
@@ -176,28 +178,37 @@ mod tests {
             vec![
                 SourceKind::SerpApi,
                 SourceKind::GooglePatentsXhr,
-                SourceKind::OpenAlex
+                SourceKind::OpenAlex,
+                SourceKind::SemanticScholar,
+                SourceKind::PubMed,
             ],
             without_epo.kinds(),
-            "未配 EPO 凭证即不登记该源（与 SerpAPI 同语义）；OpenAlex 仍在"
+            "未配 EPO 凭证即不登记该源（与 SerpAPI 同语义）；三大学术补源仍在"
         );
 
-        // SerpAPI 缺 Key 只摘掉它自己，不影响 EPO/OpenAlex 的登记与相对顺序。
+        // SerpAPI 缺 Key 只摘掉它自己，不影响 EPO/学术源的登记与相对顺序。
         let without_serpapi = SourceChain::new(online_chain_providers(&db, None, creds()));
         assert_eq!(
             vec![
                 SourceKind::GooglePatentsXhr,
                 SourceKind::EpoOps,
-                SourceKind::OpenAlex
+                SourceKind::OpenAlex,
+                SourceKind::SemanticScholar,
+                SourceKind::PubMed,
             ],
             without_serpapi.kinds()
         );
 
-        // 专利源全不可用（两 Key 皆无）时链仍非空：免费的 XHR 直抓 + OpenAlex 恒登记，
+        // 专利源全不可用（两 Key 皆无）时链仍非空：免费的 XHR 直抓 + 三大学术补源恒登记，
         // 学术文献兜底之后才轮到本地库。
         let bare = SourceChain::new(online_chain_providers(&db, None, None));
         assert_eq!(
-            vec![SourceKind::GooglePatentsXhr, SourceKind::OpenAlex],
+            vec![
+                SourceKind::GooglePatentsXhr,
+                SourceKind::OpenAlex,
+                SourceKind::SemanticScholar,
+                SourceKind::PubMed,
+            ],
             bare.kinds()
         );
         assert!(!bare.is_empty());
@@ -239,7 +250,9 @@ mod tests {
                 SourceKind::SerpApi,
                 SourceKind::GooglePatentsXhr,
                 SourceKind::EpoOps,
-                SourceKind::OpenAlex
+                SourceKind::OpenAlex,
+                SourceKind::SemanticScholar,
+                SourceKind::PubMed,
             ],
             order
         );
@@ -249,7 +262,9 @@ mod tests {
             vec![
                 SourceKind::GooglePatentsXhr,
                 SourceKind::EpoOps,
-                SourceKind::OpenAlex
+                SourceKind::OpenAlex,
+                SourceKind::SemanticScholar,
+                SourceKind::PubMed,
             ],
             active.iter().map(|p| p.kind()).collect::<Vec<_>>(),
             "冷却源必须摘到链外——链只跑手里的 providers，摘掉即零请求"
@@ -259,17 +274,19 @@ mod tests {
             cooled
         );
 
-        // 链只跑了 XHR（成功）、EPO（网络失败）与 OpenAlex（成功），
+        // 链只跑了 XHR（成功）、EPO（网络失败）与三大学术补源（成功），
         // attempts 本里没有 SerpAPI 的位置
         let chain_attempts = vec![
             brk_report(SourceKind::GooglePatentsXhr, AttemptStatus::Success),
             brk_report(SourceKind::EpoOps, AttemptStatus::Failed(FailKind::Network)),
             brk_report(SourceKind::OpenAlex, AttemptStatus::Success),
+            brk_report(SourceKind::SemanticScholar, AttemptStatus::Success),
+            brk_report(SourceKind::PubMed, AttemptStatus::Success),
         ];
         let merged = weave_cooled_attempts(&order, &cooled, chain_attempts);
 
         assert_eq!(
-            4,
+            6,
             merged.len(),
             "冷却源不能从面板消失（伪装成没配 Key 是误读）"
         );
@@ -292,12 +309,14 @@ mod tests {
             None, merged[0].hint,
             "hint 必须留空，否则会污染出参顶层 hint 键"
         );
-        // 真跑过的那三路原样保留、顺序不变
+        // 真跑过的五路原样保留、顺序不变
         assert_eq!(
             vec![
                 (SourceKind::GooglePatentsXhr, AttemptStatus::Success),
                 (SourceKind::EpoOps, AttemptStatus::Failed(FailKind::Network)),
                 (SourceKind::OpenAlex, AttemptStatus::Success),
+                (SourceKind::SemanticScholar, AttemptStatus::Success),
+                (SourceKind::PubMed, AttemptStatus::Success),
             ],
             merged[1..]
                 .iter()

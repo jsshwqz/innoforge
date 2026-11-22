@@ -1655,9 +1655,13 @@ Response:
 - 生成失败：`500` + 纯文本 `Failed to generate Excel: …`。
 - 只查**本地库**，不出网；没有结果时返回只有表头的文件。
 
+**POST** `/api/search/source`
+
+检索空间透明化面板单源定向补搜（v0.9.67）：对指定数据源（`serpapi` / `google_patents_xhr` / `epo_ops` / `openalex` / `semantic_scholar` / `pubmed`）执行单源补搜，返回 `patents`、`attempts`、`ipc_anchors` 与 `craap_scores`。
+
 **POST** `/api/search/vector`
 
-BM25 + 向量相似度的 RRF 融合检索。
+BM25 + 向量相似度的 RRF 融合检索（支持可选 `ipc` 子空间前缀过滤，返回 `ipc_anchors` 与 `craap_scores`）。
 
 ```json
 { "query": "…", "limit": 20, "rrf_k": 60 }
