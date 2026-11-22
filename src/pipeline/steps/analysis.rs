@@ -100,12 +100,15 @@ pub async fn deep_analysis_simple(ctx: &mut PipelineContext, ai: &AiClient) -> R
             .join("\n\n")
     };
 
+    let excluded_block =
+        crate::orchestrator::constraints::format_excluded_paths_prompt_block(&ctx.research_state);
     let prompt = format!(
         "请以「首席研发总工 + 资深专利代理师」双重视角，基于以下全文档材料做深度研发与专利布局剖析（严禁浮于表面，原文未披露数据标注「原文未披露」，绝不编造）：\n\n\
          ## 用户的创意\n\
          **标题：** {title}\n\
          **描述：** {description}\n\
-         **技术领域：** {domain}\n\n\
+         **技术领域：** {domain}\n\
+         {excluded_block}\n\
          ## 代码计算结果（已验证）\n\
          **新颖性评分：{score:.0}/100**（最高相似度 {max_sim:.1}% / Top5 均值 {avg_sim:.1}% / 矛盾加分 +{contra_bonus:.0} / 缺口加分 +{gap_bonus:.0} / 多样性 {diversity:.0}%）\n\n\
          ## 程序预挖现有技术全文信号\n{pre_mined}\n\n\
@@ -134,6 +137,7 @@ pub async fn deep_analysis_simple(ctx: &mut PipelineContext, ai: &AiClient) -> R
         gap_bonus = ctx.score_breakdown.coverage_gap_bonus,
         diversity = ctx.diversity_score.unwrap_or(0.0) * 100.0,
         pre_mined = pre_mined,
+        excluded_block = excluded_block,
         matches = top_matches_summary,
         contradictions = contradictions_summary,
     );
@@ -160,12 +164,14 @@ pub async fn deep_analysis_simple(ctx: &mut PipelineContext, ai: &AiClient) -> R
 /// 执行 Step 12: AI 生成行动方案
 pub async fn action_plan(ctx: &mut PipelineContext, ai: &AiClient) -> Result<()> {
     let analysis_excerpt = crate::ai::patent::structured_patent_excerpt(&ctx.ai_analysis, 3500);
+    let excluded_block =
+        crate::orchestrator::constraints::format_excluded_paths_prompt_block(&ctx.research_state);
     let prompt = format!(
         "基于以下全文档深度分析结果，生成可拿回实验室与专利撰写台直接执行的行动方案：\n\n\
          **创意：** {}\n\
          **新颖性评分：** {:.0}/100\n\
          **技术领域：** {}\n\
-         **矛盾信号数量：** {}\n\n\
+         **矛盾信号数量：** {}\n{}\n\
          **深度分析核心摘录：**\n{}\n\n\
          请按以下 4 节输出（务实求真、不画大饼）：\n\n\
          ### 1. 专利撰写与保护宽度防踩坑清单（抓真重点）\n\
@@ -182,6 +188,7 @@ pub async fn action_plan(ctx: &mut PipelineContext, ai: &AiClient) -> Result<()>
         ctx.novelty_score,
         ctx.technical_domain,
         ctx.contradictions.len(),
+        excluded_block,
         analysis_excerpt,
     );
 

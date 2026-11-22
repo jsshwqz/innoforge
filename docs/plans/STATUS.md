@@ -14,6 +14,13 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-11-23 — **`ResearchState` 跨轮次负向约束闭环、步骤级检查点快照回滚与限次自动补搜（v0.9.68）**
+
+- **状态 / Status**: ✅ 本地全量验证与隔离端口实测通过，提交 PR 合入 `main` 并打 `v0.9.68` Tag
+- **① `ResearchState` 跨轮次负向约束闭环**（`src/orchestrator/constraints.rs`、`src/orchestrator/engine.rs`、`src/pipeline/steps/{expand,deep_reasoning,analysis}.rs`）：打通 `get_research_state` 跨轮次读取，`excluded_paths` 自动注入上游 Prompt 并在分析/行动方案产出后执行确定性实质拦截警示。
+- **② 步骤级检查点快照回滚与分支重跑**（`src/db/version.rs`、`src/pipeline/state.rs`、`src/routes/idea_reports.rs`、`src/common.rs`、`templates/idea.html`）：新增 `GET /api/idea/:id/checkpoints` 与 `POST /api/idea/:id/checkpoint/rollback`，前端支持从任意历史步骤追加负向约束/微调输入并分支重跑。
+- **③ 限次自动补搜闭环（上限 2 轮）**（`src/orchestrator/constraints.rs`、`src/orchestrator/engine.rs`、`src/pipeline/context.rs`）：检测到 `open_questions`/盲区新证据缺口且未触发预算熔断时自动回跳 `SearchPatents` 补搜，严格硬控最多 2 轮。
+
 ### 2026-11-23 — **IPC 子空间自动锚定、Semantic Scholar/PubMed 学术源、CRAAP 五维评分、检索透明化面板与全文档深度推演重构（v0.9.67）**
 
 - **状态 / Status**: ✅ 本地全量验证与真实检索/浏览器实测通过，提交 PR 合入 `main` 并打 `v0.9.67` Tag

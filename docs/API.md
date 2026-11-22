@@ -545,7 +545,15 @@ Request:
 
 **POST** `/api/idea/:id/iterate`
 
-基于当前验证结果，自动迭代优化创意。
+基于当前验证结果，自动迭代优化创意（跨轮次自动加载已排除路径负向约束）。
+
+**GET** `/api/idea/:id/checkpoints`
+
+获取创意的所有步骤级检查点快照列表及当前持久化的 `ResearchState`（含 `excluded_paths` 与 `open_questions`）。
+
+**POST** `/api/idea/:id/checkpoint/rollback`
+
+从指定历史步骤检查点（`version_id`）回滚上下文、支持局部覆盖描述/关键词或追加 `add_excluded_path` 负向约束，创建新分支并从 `target_step` 向后重跑。
 
 ### 21) 版本历史 / Versions
 
