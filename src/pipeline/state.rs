@@ -112,6 +112,29 @@ impl PipelineStep {
         )
     }
 
+    /// 从步骤名称字符串（Debug 形态）反解析步骤枚举（用于步骤级检查点回滚）
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name.trim() {
+            "ParseInput" => Some(Self::ParseInput),
+            "ExpandQuery" => Some(Self::ExpandQuery),
+            "SearchWeb" => Some(Self::SearchWeb),
+            "SearchPatents" => Some(Self::SearchPatents),
+            "DiversityGate" => Some(Self::DiversityGate),
+            "ComputeSimilarity" => Some(Self::ComputeSimilarity),
+            "RankAndFilter" => Some(Self::RankAndFilter),
+            "PriorArtCluster" => Some(Self::PriorArtCluster),
+            "DetectContradictions" => Some(Self::DetectContradictions),
+            "ScoreNovelty" => Some(Self::ScoreNovelty),
+            "AiDeepAnalysis" => Some(Self::AiDeepAnalysis),
+            "AiActionPlan" => Some(Self::AiActionPlan),
+            "ExperimentValidation" => Some(Self::ExperimentValidation),
+            "BuildClaimTree" => Some(Self::BuildClaimTree),
+            "Finalize" => Some(Self::Finalize),
+            "GenerateOaResponse" => Some(Self::GenerateOaResponse),
+            _ => None,
+        }
+    }
+
     /// 快速模式下跳过的步骤
     pub fn skipped_in_quick_mode(&self) -> bool {
         matches!(

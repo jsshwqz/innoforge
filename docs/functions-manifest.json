@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-22T17:03:38.762Z",
+  "generatedAt": "2026-11-22T17:48:40.523Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -130,6 +130,7 @@
     "idea.html": {
       "references": [
         "addMemoryEntry",
+        "cancelCheckpointRollback",
         "clearForm",
         "compareFeatureCards",
         "copyControlStCode",
@@ -158,6 +159,7 @@
         "showNewIdeaForm",
         "startIterate",
         "stopIdeaGeneration",
+        "submitCheckpointRollback",
         "submitIdea",
         "summarizeDiscussion",
         "switchReportType",
@@ -168,6 +170,7 @@
       "definitions": [
         "addMemoryEntry",
         "buildPipelineUI",
+        "cancelCheckpointRollback",
         "cleanup",
         "clearForm",
         "clearResults",
@@ -209,6 +212,7 @@
         "loadVersionHistory",
         "messages",
         "onContinue",
+        "openCheckpointRollback",
         "openReport",
         "openReportInNewTab",
         "populateClaimParentSelect",
@@ -234,6 +238,7 @@
         "showStatus",
         "startIterate",
         "stopIdeaGeneration",
+        "submitCheckpointRollback",
         "submitIdea",
         "summarizeDiscussion",
         "switchReportType",

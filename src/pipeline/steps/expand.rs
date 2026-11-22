@@ -8,18 +8,22 @@ use anyhow::Result;
 
 /// 执行 Step 2
 pub async fn execute(ctx: &mut PipelineContext, ai: &AiClient) -> Result<()> {
+    let excluded_block =
+        crate::orchestrator::constraints::format_excluded_paths_prompt_block(&ctx.research_state);
     let prompt = format!(
         "基于以下创意，生成 6-8 个搜索查询词，用于检索相关的现有技术和专利。\n\n\
-         创意标题：{}\n创意描述：{}\n提取的关键词：{}\n技术领域：{}\n\n\
+         创意标题：{}\n创意描述：{}\n提取的关键词：{}\n技术领域：{}\n{}\n\
          要求：\n\
          - 包含中文和英文查询词\n\
          - 包含同义词、上位概念、下位概念\n\
+         - 主动避开已排除的失败路径，向未证伪的替代方向拓展\n\
          - 每行一个查询词，不要编号\n\
          - 只输出查询词，不要其他说明文字",
         ctx.title,
         ctx.description,
         ctx.keywords.join("、"),
         ctx.technical_domain,
+        excluded_block,
     );
 
     match ai.chat(&prompt, None).await {

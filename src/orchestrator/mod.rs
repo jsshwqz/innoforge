@@ -5,6 +5,7 @@
 //! 通过 OrchestratorCommand 可触发高级控制流。
 
 pub mod command;
+pub mod constraints;
 pub mod engine;
 
 pub use command::OrchestratorCommand;

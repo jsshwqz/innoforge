@@ -201,12 +201,16 @@ pub(crate) fn build_user_context(ctx: &PipelineContext) -> String {
         rag_ctx
     };
 
+    let excluded_block =
+        crate::orchestrator::constraints::format_excluded_paths_prompt_block(&ctx.research_state);
+
     format!(
         "## 待分析的创意\n\
          **标题：** {title}\n\
          **描述：** {desc}\n\
          **技术领域：** {domain}\n\
-         **新颖性评分：** {score:.0}/100\n\n\
+         **新颖性评分：** {score:.0}/100\n\
+         {excluded_block}\n\
          ## 程序预挖现有技术全文信号\n{pre_mined}\n\n\
          ## 已发现的相关现有技术（含富化全文选段）\n{matches}\n\n\
          {rag}\n\
@@ -217,6 +221,7 @@ pub(crate) fn build_user_context(ctx: &PipelineContext) -> String {
         desc = ctx.description,
         domain = ctx.technical_domain,
         score = ctx.novelty_score,
+        excluded_block = excluded_block,
         pre_mined = pre_mined_block,
         matches = top_matches,
         rag = rag_context,

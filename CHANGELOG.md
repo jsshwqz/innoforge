@@ -4,6 +4,19 @@
 All notable changes are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
+## [v0.9.68] - 2026-11-23
+
+### 新增与增强 / Added & Enhanced
+
+- **`ResearchState` 跨轮次读取 `excluded_paths` 负向约束闭环（`src/orchestrator/constraints.rs`、`engine.rs`）**：
+  - 彻底打通 `src/db/research_state.rs` “只写不读”断链：`Orchestrator::run` 启动时自动加载持久化 `ResearchState` 合并至当前上下文，并将 `excluded_paths` 作为「⛔ 跨轮次负向硬约束」注入 `expand`、`deep_reasoning`、`deep_analysis_simple` 与 `action_plan` Prompt；
+  - 新增确定性后置拦截器 `enforce_excluded_path_guard`（识别正面复用已排除路径并放行明确否定语境），违规时实质置顶拦截警示横幅并登记待验证缺口（附负面反作弊测试）。
+- **Pipeline 步骤级检查点快照回滚与分支重跑（`GET /api/idea/:id/checkpoints`、`POST /api/idea/:id/checkpoint/rollback`）**：
+  - 新增 `Database::get_idea_version_by_id` 与 `PipelineStep::from_name`，支持在 `templates/idea.html` 的版本历史页签中查看所有步骤检查点、追加已排除路径负向约束或局部微调描述，一键创建新分支并从指定历史步骤向后重跑（原主线快照零破坏）。
+- **基于 `open_questions` / 盲区的限次自动补搜闭环（严格硬控上限 2 轮）**：
+  - `PipelineContext` 新增 `auto_refill_rounds` 计数与 `MAX_AUTO_REFILL_ROUNDS = 2` 硬上限，当 `AiDeepAnalysis` 完成后检测到未覆盖的新对比证据缺口且通过 `v0.9.65` 预算熔断检查时，自动派生子查询回跳 `SearchPatents` 补搜（上限 2 轮严格受反作弊单测守卫）。
+
+---
 ## [v0.9.67] - 2026-11-23
 
 ### 新增与增强 / Added & Enhanced

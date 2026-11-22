@@ -57,6 +57,18 @@ impl Orchestrator {
         mut ctx: PipelineContext,
         progress_tx: Option<tokio::sync::broadcast::Sender<PipelineProgress>>,
     ) -> Result<PipelineContext> {
+        // v0.9.68：彻底打通 ResearchState “只写不读”断链——启动前先加载持久化状态（含 excluded_paths 负向约束）
+        {
+            let db_clone = self.db.clone();
+            let idea_id_clone = ctx.idea_id.clone();
+            if let Ok(Ok(Some(persisted))) =
+                tokio::task::spawn_blocking(move || db_clone.get_research_state(&idea_id_clone))
+                    .await
+            {
+                super::constraints::merge_persisted_research_state(&mut ctx, persisted);
+            }
+        }
+
         loop {
             // 1. 检查是否有待处理的命令
             if let Some(cmd) = self.pending_command.take() {
@@ -161,6 +173,21 @@ impl Orchestrator {
             // 5. 处理结果（含回滚）
             match &result {
                 Ok(()) => {
+                    // v0.9.68：深度分析/行动方案产出后强制执行跨轮次 excluded_paths 后置拦截校验
+                    if matches!(
+                        step,
+                        PipelineStep::AiDeepAnalysis | PipelineStep::AiActionPlan
+                    ) {
+                        let violations = super::constraints::enforce_excluded_path_guard(&mut ctx);
+                        if !violations.is_empty() {
+                            tracing::warn!(
+                                "负向约束后置拦截命中 {} 条已排除路径: {:?}",
+                                violations.len(),
+                                violations
+                            );
+                        }
+                    }
+
                     self.send_progress(&progress_tx, &step, StepStatus::Done);
                     let context_json = serde_json::to_string(&ctx).unwrap_or_default();
                     let step_str = format!("{:?}", step);
@@ -178,6 +205,54 @@ impl Orchestrator {
                     )
                     .await;
                     super::save_version_snapshot_blocking(self.db.clone(), ctx.clone(), step).await;
+
+                    // v0.9.68：基于 open_questions / blind_spots 的限次自动补搜闭环（严格硬控上限 2 轮 + 预算熔断）
+                    if step == PipelineStep::AiDeepAnalysis {
+                        let refill_queries =
+                            super::constraints::derive_open_question_refill_queries(&ctx);
+                        let budget_ok = self
+                            .db
+                            .check_ai_budget_circuit_breaker(Some(ctx.idea_id.as_str()))
+                            .is_ok();
+                        if super::constraints::should_trigger_auto_refill(
+                            self.quick_mode,
+                            step,
+                            ctx.auto_refill_rounds,
+                            super::constraints::MAX_AUTO_REFILL_ROUNDS,
+                            budget_ok,
+                            &refill_queries,
+                        ) {
+                            ctx.auto_refill_rounds += 1;
+                            let round = ctx.auto_refill_rounds;
+                            ctx.expanded_queries.extend(refill_queries.clone());
+                            tracing::info!(
+                                "Evidence gap detected: triggering bounded auto-refill round {}/{} with {} queries",
+                                round,
+                                super::constraints::MAX_AUTO_REFILL_ROUNDS,
+                                refill_queries.len()
+                            );
+                            if let Some(tx) = &progress_tx {
+                                let _ = tx.send(PipelineProgress {
+                                    step: PipelineStep::SearchPatents,
+                                    step_index: PipelineStep::SearchPatents.index(),
+                                    total_steps: PipelineStep::TOTAL_STEPS,
+                                    status: StepStatus::Running,
+                                    message: format!(
+                                        "🔄 检测到对比证据缺口，启动第 {}/{} 轮限次自动补搜（新增 {} 条子查询）",
+                                        round,
+                                        super::constraints::MAX_AUTO_REFILL_ROUNDS,
+                                        refill_queries.len()
+                                    ),
+                                    sub_step: Some(format!("auto_refill_{round}")),
+                                    sub_progress: None,
+                                });
+                            }
+                            self.inject_command(OrchestratorCommand::Jump(
+                                PipelineStep::SearchPatents,
+                            ));
+                            continue;
+                        }
+                    }
 
                     // Run reflection + debate for LLM steps (multi-agent pipeline)
                     let step_clone = step;

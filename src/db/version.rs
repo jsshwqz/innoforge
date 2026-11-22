@@ -76,6 +76,28 @@ impl Database {
         Ok(rows)
     }
 
+    pub fn get_idea_version_by_id(&self, version_id: &str) -> Result<Option<IdeaVersion>> {
+        let c = self.conn();
+        let mut stmt = c.prepare(
+            "SELECT id, idea_id, version_number, context_json, current_step, branch_id, created_at \
+             FROM idea_versions WHERE id = ?1 LIMIT 1",
+        )?;
+        let v = stmt
+            .query_row(params![version_id], |r| {
+                Ok(IdeaVersion {
+                    id: r.get(0)?,
+                    idea_id: r.get(1)?,
+                    version_number: r.get(2)?,
+                    context_json: r.get(3)?,
+                    current_step: r.get(4)?,
+                    branch_id: r.get(5)?,
+                    created_at: r.get(6)?,
+                })
+            })
+            .ok();
+        Ok(v)
+    }
+
     pub fn get_latest_version(
         &self,
         idea_id: &str,

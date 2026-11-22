@@ -729,6 +729,11 @@ pub async fn api_idea_iterate(
     ctx.iteration_count += 1;
     ctx.parent_version_id = latest.id.clone();
 
+    // v0.9.68：加载并合并数据库持久化的 ResearchState（含跨轮次 excluded_paths 负向约束）
+    if let Ok(Some(persisted)) = s.db.get_research_state(&idea_id) {
+        crate::orchestrator::constraints::merge_persisted_research_state(&mut ctx, persisted);
+    }
+
     // 使用 open_questions 作为额外搜索种子
     if !ctx.research_state.open_questions.is_empty() {
         let extra_queries: Vec<String> = ctx
@@ -805,6 +810,222 @@ pub async fn api_idea_iterate(
         "status": "ok",
         "message": format!("第 {} 轮迭代已启动（Orchestrator Jump→SearchWeb）", iteration),
         "iteration": iteration,
+    }))
+}
+
+/// GET /api/idea/:id/checkpoints — 列出所有步骤级检查点快照及当前跨轮次 ResearchState（v0.9.68）
+pub async fn api_idea_checkpoints(
+    State(s): State<AppState>,
+    Path(idea_id): Path<String>,
+) -> Json<serde_json::Value> {
+    let versions = s.db.get_idea_versions(&idea_id).unwrap_or_default();
+    let research_state =
+        s.db.get_research_state(&idea_id)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+
+    let checkpoints: Vec<serde_json::Value> = versions
+        .into_iter()
+        .map(|v| {
+            let step_label = crate::pipeline::state::PipelineStep::from_name(&v.current_step)
+                .map(|st| st.description().to_string())
+                .unwrap_or_else(|| v.current_step.clone());
+            let parsed_ctx: Option<crate::pipeline::context::PipelineContext> =
+                serde_json::from_str(&v.context_json).ok();
+            let auto_refill_rounds = parsed_ctx
+                .as_ref()
+                .map(|c| c.auto_refill_rounds)
+                .unwrap_or(0);
+            let excluded_count = parsed_ctx
+                .as_ref()
+                .map(|c| c.research_state.excluded_paths.len())
+                .unwrap_or(0);
+            serde_json::json!({
+                "version_id": v.id,
+                "version_number": v.version_number,
+                "step": v.current_step,
+                "step_label": step_label,
+                "branch_id": v.branch_id,
+                "created_at": v.created_at,
+                "auto_refill_rounds": auto_refill_rounds,
+                "excluded_paths_count": excluded_count,
+            })
+        })
+        .collect();
+
+    Json(serde_json::json!({
+        "status": "ok",
+        "checkpoints": checkpoints,
+        "research_state": research_state,
+    }))
+}
+
+/// POST /api/idea/:id/checkpoint/rollback — 步骤级检查点回滚并创建新分支重跑（v0.9.68）
+pub async fn api_idea_checkpoint_rollback(
+    State(s): State<AppState>,
+    Path(idea_id): Path<String>,
+    Json(req): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let version_id = req["version_id"].as_str().unwrap_or("").trim();
+    if version_id.is_empty() {
+        return Json(serde_json::json!({
+            "status": "error",
+            "message": "缺少 version_id（请选择要回滚的步骤检查点）"
+        }));
+    }
+
+    let ver = match s.db.get_idea_version_by_id(version_id) {
+        Ok(Some(v)) if v.idea_id == idea_id => v,
+        Ok(Some(_)) => {
+            return Json(serde_json::json!({
+                "status": "error",
+                "message": "检查点快照不属于当前创意"
+            }));
+        }
+        Ok(None) => {
+            return Json(serde_json::json!({
+                "status": "error",
+                "message": "未找到指定的检查点快照"
+            }));
+        }
+        Err(e) => {
+            return Json(serde_json::json!({
+                "status": "error",
+                "message": format!("读取检查点失败: {e}")
+            }));
+        }
+    };
+
+    let mut ctx: crate::pipeline::context::PipelineContext =
+        match serde_json::from_str(&ver.context_json) {
+            Ok(c) => c,
+            Err(e) => {
+                return Json(serde_json::json!({
+                    "status": "error",
+                    "message": format!("检查点上下文反序列化失败: {e}")
+                }));
+            }
+        };
+
+    // 合并最新持久化的 ResearchState，确保不丢失已记录的负向约束
+    if let Ok(Some(persisted)) = s.db.get_research_state(&idea_id) {
+        crate::orchestrator::constraints::merge_persisted_research_state(&mut ctx, persisted);
+    }
+
+    // 应用用户局部输入微调
+    if let Some(desc) = req["override_description"]
+        .as_str()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        ctx.description = desc.to_string();
+    }
+    if let Some(kws) = req["override_keywords"].as_array() {
+        let parsed: Vec<String> = kws
+            .iter()
+            .filter_map(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect();
+        if !parsed.is_empty() {
+            ctx.keywords = parsed;
+        }
+    }
+    if let Some(excl) = req["add_excluded_path"]
+        .as_str()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        if !ctx.research_state.excluded_paths.iter().any(|p| p == excl) {
+            ctx.research_state.excluded_paths.push(excl.to_string());
+        }
+        let _ = s.db.upsert_research_state(&idea_id, &ctx.research_state);
+    }
+
+    let requested_step = req["target_step"]
+        .as_str()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(&ver.current_step);
+    let target_step = crate::pipeline::state::PipelineStep::from_name(requested_step)
+        .unwrap_or(crate::pipeline::state::PipelineStep::ExpandQuery);
+
+    let branch_name = req["branch_name"]
+        .as_str()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("rollback-v{}-{}", ver.version_number, requested_step));
+
+    ctx.parent_version_id = ver.id.clone();
+    ctx.iteration_count += 1;
+    let branch_id = match crate::orchestrator::create_branch(&s.db, &ctx, &branch_name) {
+        Ok(bid) => bid,
+        Err(e) => {
+            return Json(serde_json::json!({
+                "status": "error",
+                "message": format!("创建回滚分支失败: {e}")
+            }));
+        }
+    };
+    ctx.branch_id = branch_id.clone();
+
+    if let Err(breaker_msg) = s.db.check_ai_budget_circuit_breaker(Some(&idea_id)) {
+        return Json(serde_json::json!({
+            "status": "error",
+            "message": breaker_msg
+        }));
+    }
+
+    let config = s.config.read().unwrap_or_else(|e| e.into_inner()).clone();
+    let mut orch = crate::orchestrator::engine::Orchestrator::new(
+        config.ai_client(),
+        fast_ai_channel(&config),
+        s.db.clone(),
+        config.next_serpapi_key().unwrap_or_default(),
+        false,
+    );
+    orch.inject_command(crate::orchestrator::OrchestratorCommand::Jump(target_step));
+
+    let db = s.db.clone();
+    let idea_id_clone = idea_id.clone();
+    let excluded_count = ctx.research_state.excluded_paths.len();
+    tokio::spawn(async move {
+        match orch.run(ctx, None).await {
+            Ok(result_ctx) => {
+                if let Ok(Some(mut idea)) = db.get_idea(&idea_id_clone) {
+                    idea.novelty_score = if result_ctx.novelty_status
+                        == crate::pipeline::context::NoveltyStatus::Sufficient
+                    {
+                        Some(result_ctx.novelty_score)
+                    } else {
+                        None
+                    };
+                    idea.analysis = result_ctx.ai_analysis;
+                    idea.status = "done".into();
+                    let _ = db.update_idea(&idea);
+                }
+            }
+            Err(e) => {
+                tracing::error!("Checkpoint rollback failed: {}", e);
+                if let Ok(Some(mut idea)) = db.get_idea(&idea_id_clone) {
+                    idea.analysis = format!("检查点分支重跑失败: {}", e);
+                    idea.status = "error".into();
+                    let _ = db.update_idea(&idea);
+                }
+            }
+        }
+    });
+
+    Json(serde_json::json!({
+        "status": "ok",
+        "branch_id": branch_id,
+        "branch_name": branch_name,
+        "target_step": format!("{:?}", target_step),
+        "excluded_paths_count": excluded_count,
+        "message": format!("已从版本 v{} ({}) 创建新分支「{}」并启动局部重跑", ver.version_number, target_step.description(), branch_name)
     }))
 }
 

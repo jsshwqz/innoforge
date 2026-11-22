@@ -828,6 +828,14 @@ pub fn build_router_with_token(
             delete(routes::api_idea_claim_node_delete),
         )
         .route("/api/idea/:id/iterate", post(routes::api_idea_iterate))
+        .route(
+            "/api/idea/:id/checkpoints",
+            get(routes::api_idea_checkpoints),
+        )
+        .route(
+            "/api/idea/:id/checkpoint/rollback",
+            post(routes::api_idea_checkpoint_rollback),
+        )
         .route("/api/idea/:id/versions", get(routes::api_idea_versions))
         .route("/api/idea/:id/branches", get(routes::api_idea_branches))
         .route("/api/idea/:id/findings", get(routes::api_idea_findings))

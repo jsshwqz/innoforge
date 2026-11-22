@@ -321,6 +321,9 @@ pub struct PipelineContext {
     pub branch_id: String,
     #[serde(default)]
     pub iteration_count: u32,
+    /// v0.9.68: 限次自动补搜已执行轮数（硬上限 MAX_AUTO_REFILL_ROUNDS = 2）
+    #[serde(default)]
+    pub auto_refill_rounds: u32,
     #[serde(default)]
     pub parent_version_id: String,
 
@@ -394,6 +397,7 @@ impl PipelineContext {
             research_state: ResearchState::default(),
             branch_id: "main".to_string(),
             iteration_count: 0,
+            auto_refill_rounds: 0,
             parent_version_id: String::new(),
             experiment_results: Vec::new(),
             enrichment_results: Vec::new(),

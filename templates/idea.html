@@ -324,14 +324,37 @@
                 </div>
             </div>
 
-            <!-- Tab: 版本历史 -->
+            <!-- Tab: 版本历史与步骤级检查点回滚（v0.9.68） -->
             <div id="tab-versions" class="tab-panel">
+                <div id="research-constraints-panel" class="panel-box" style="margin-bottom:12px;">
+                    <h3 style="margin:0 0 8px;color:#f85149;font-size:1em;">⛔ 跨轮次负向约束（已排除路径，后续推演严禁重走）</h3>
+                    <div id="excluded-paths-list" class="muted" style="font-size:0.88em;margin-bottom:8px;">暂无已排除路径</div>
+                    <div id="open-questions-list" class="muted" style="font-size:0.85em;"></div>
+                </div>
                 <div id="version-history-panel" class="panel-box">
                     <div class="page-header-row">
-                        <h3 class="violet-title" style="margin:0;">📜 版本历史 / Version History (<span id="version-count">0</span>)</h3>
+                        <h3 class="violet-title" style="margin:0;">📜 步骤检查点快照与分支回滚 (<span id="version-count">0</span>)</h3>
                         <button id="iterate-from-versions-btn" class="btn-primary" style="display:none; padding:5px 14px; font-size:0.85em;" onclick="if(currentIdeaId) startIterate(currentIdeaId);">继续迭代</button>
                     </div>
-                    <div id="version-list"><p class="muted">暂无版本历史</p></div>
+                    <div id="checkpoint-rollback-box" style="display:none;margin:10px 0;padding:12px;background:#161b22;border:1px solid #58a6ff;border-radius:8px;">
+                        <div style="font-weight:600;color:#58a6ff;margin-bottom:8px;" id="rollback-target-label">⏪ 从历史步骤回滚并创建新分支重跑</div>
+                        <input type="hidden" id="rollback-version-id">
+                        <input type="hidden" id="rollback-target-step">
+                        <div style="margin-bottom:8px;">
+                            <label style="font-size:0.82em;color:#8b949e;display:block;margin-bottom:4px;">追加已排除的技术路径（跨轮次负向硬约束，选填）：</label>
+                            <input id="rollback-excluded-path" type="text" placeholder="例如：外部密封水套流道（成本高且易漏液）" style="width:100%;padding:6px 10px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;">
+                        </div>
+                        <div style="margin-bottom:8px;">
+                            <label style="font-size:0.82em;color:#8b949e;display:block;margin-bottom:4px;">局部修改创意描述或补充方向（留空沿用快照原输入）：</label>
+                            <textarea id="rollback-override-desc" rows="2" placeholder="可选：补充新的物理机理或边界约束..." style="width:100%;padding:6px 10px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;"></textarea>
+                        </div>
+                        <div style="display:flex;gap:8px;align-items:center;">
+                            <button type="button" class="btn-primary" style="padding:5px 14px;font-size:0.85em;" onclick="submitCheckpointRollback()">🚀 创建新分支并从此步重跑</button>
+                            <button type="button" class="btn-gray" style="padding:5px 12px;font-size:0.85em;" onclick="cancelCheckpointRollback()">取消</button>
+                            <span id="rollback-status-msg" style="font-size:0.85em;color:#8b949e;"></span>
+                        </div>
+                    </div>
+                    <div id="version-list"><p class="muted">暂无步骤检查点快照</p></div>
                 </div>
             </div>
         </div>
@@ -1805,50 +1828,155 @@
         var list = document.getElementById('version-list');
         var countEl = document.getElementById('version-count');
         var iterBtn = document.getElementById('iterate-from-versions-btn');
+        var exclEl = document.getElementById('excluded-paths-list');
+        var oqEl = document.getElementById('open-questions-list');
         try {
-            var resp = await fetch('/api/idea/' + encodeURIComponent(ideaId) + '/versions');
+            var resp = await fetch('/api/idea/' + encodeURIComponent(ideaId) + '/checkpoints');
             if (!resp.ok) { if (panel) panel.style.display = 'none'; if (iterBtn) iterBtn.style.display = 'none'; return; }
             var data = await resp.json();
-            if (data.status !== 'ok' || !data.versions || data.versions.length === 0) {
-                if (panel) panel.style.display = 'none';
+            if (data.status !== 'ok') return;
+
+            var rs = data.research_state || {};
+            if (exclEl) {
+                var excl = Array.isArray(rs.excluded_paths) ? rs.excluded_paths : [];
+                exclEl.textContent = '';
+                if (!excl.length) {
+                    exclEl.textContent = '暂无已排除路径（回滚重跑时可追加负向约束，防止 AI 重复走死胡同）';
+                } else {
+                    excl.forEach(function(p) {
+                        var chip = document.createElement('span');
+                        chip.style.cssText = 'display:inline-block;margin:2px 6px 2px 0;padding:2px 9px;border-radius:12px;border:1px solid #f8514966;background:#f851491a;color:#ff7b72;font-size:0.85em;';
+                        chip.textContent = '⛔ ' + p;
+                        exclEl.appendChild(chip);
+                    });
+                }
+            }
+            if (oqEl) {
+                var oqs = Array.isArray(rs.open_questions) ? rs.open_questions : [];
+                oqEl.textContent = oqs.length ? ('🔍 待验证证据缺口 (' + oqs.length + ')：' + oqs.slice(0, 3).join('；')) : '';
+            }
+
+            var cps = Array.isArray(data.checkpoints) ? data.checkpoints : [];
+            if (panel) panel.style.display = 'block';
+            if (countEl) countEl.textContent = cps.length;
+            if (!cps.length) {
                 if (iterBtn) iterBtn.style.display = 'none';
+                if (list) list.innerHTML = '<p class="muted">暂无步骤检查点快照，运行流水线后将自动按步骤留存检查点。</p>';
                 return;
             }
-            if (panel) panel.style.display = 'block';
             if (iterBtn) iterBtn.style.display = 'inline-block';
-            if (countEl) countEl.textContent = data.versions.length;
             list.innerHTML = '';
-            data.versions.forEach(function(ver) {
+            cps.forEach(function(ver) {
                 var row = document.createElement('div');
-                row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px 12px;margin-bottom:4px;background:#0d1117;border:1px solid #21262d;border-radius:6px;cursor:pointer;transition:border-color 0.2s;';
+                row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;padding:8px 12px;margin-bottom:6px;background:#0d1117;border:1px solid #21262d;border-radius:6px;transition:border-color 0.2s;';
                 row.onmouseover = function() { row.style.borderColor = '#58a6ff'; };
                 row.onmouseout = function() { row.style.borderColor = '#21262d'; };
 
                 var left = document.createElement('div');
                 var vLabel = document.createElement('span');
                 vLabel.style.cssText = 'color:#f0f6fc;font-weight:600;font-size:0.9em;';
-                vLabel.textContent = (i18nLang === 'en' ? 'v' : '版本 ') + ver.version_number;
+                vLabel.textContent = (i18nLang === 'en' ? 'v' : '检查点 v') + ver.version_number;
                 left.appendChild(vLabel);
 
                 var stepSpan = document.createElement('span');
-                stepSpan.style.cssText = 'color:#8b949e;font-size:0.8em;margin-left:10px;';
-                stepSpan.textContent = ver.current_step || '';
+                stepSpan.style.cssText = 'color:#58a6ff;font-size:0.82em;margin-left:10px;';
+                stepSpan.textContent = (ver.step_label || ver.step || '') + (ver.branch_id && ver.branch_id !== 'main' ? (' · 分支:' + String(ver.branch_id).slice(0, 8)) : '');
                 left.appendChild(stepSpan);
 
+                if (Number(ver.auto_refill_rounds || 0) > 0) {
+                    var refSpan = document.createElement('span');
+                    refSpan.style.cssText = 'color:#d29922;font-size:0.78em;margin-left:8px;padding:1px 6px;border:1px solid #d2992266;border-radius:10px;';
+                    refSpan.textContent = '🔄 自动补搜×' + ver.auto_refill_rounds;
+                    left.appendChild(refSpan);
+                }
+
                 var right = document.createElement('div');
-                right.style.cssText = 'color:#8b949e;font-size:0.8em;';
-                right.textContent = toCST(ver.created_at).substring(0, 16).replace('T', ' ');
+                right.style.cssText = 'display:flex;align-items:center;gap:8px;color:#8b949e;font-size:0.8em;';
+                var timeSpan = document.createElement('span');
+                timeSpan.textContent = toCST(ver.created_at).substring(0, 16).replace('T', ' ');
+                right.appendChild(timeSpan);
+
+                var viewBtn = document.createElement('button');
+                viewBtn.type = 'button';
+                viewBtn.textContent = '📄 报告';
+                viewBtn.style.cssText = 'padding:2px 8px;border-radius:5px;border:1px solid #30363d;background:#21262d;color:#c9d1d9;cursor:pointer;font-size:0.9em;';
+                viewBtn.onclick = function(e) {
+                    e.stopPropagation();
+                    window.open('/api/idea/' + encodeURIComponent(ideaId) + '/report.html?version_id=' + encodeURIComponent(ver.version_id), '_blank');
+                };
+                right.appendChild(viewBtn);
+
+                var rbBtn = document.createElement('button');
+                rbBtn.type = 'button';
+                rbBtn.textContent = '⏪ 从此步回滚分支重跑';
+                rbBtn.style.cssText = 'padding:2px 9px;border-radius:5px;border:1px solid #58a6ff66;background:#1f6feb22;color:#58a6ff;cursor:pointer;font-size:0.9em;';
+                rbBtn.onclick = function(e) {
+                    e.stopPropagation();
+                    openCheckpointRollback(ver.version_id, ver.version_number, ver.step, ver.step_label || ver.step);
+                };
+                right.appendChild(rbBtn);
 
                 row.appendChild(left);
                 row.appendChild(right);
-                row.onclick = function() {
-                    window.open('/api/idea/' + encodeURIComponent(ideaId) + '/report.html?version_id=' + encodeURIComponent(ver.id), '_blank');
-                };
                 list.appendChild(row);
             });
         } catch(e) {
             if (panel) panel.style.display = 'none';
             if (iterBtn) iterBtn.style.display = 'none';
+        }
+    }
+
+    function openCheckpointRollback(versionId, verNum, step, stepLabel) {
+        var box = document.getElementById('checkpoint-rollback-box');
+        if (!box) return;
+        document.getElementById('rollback-version-id').value = versionId;
+        document.getElementById('rollback-target-step').value = step;
+        document.getElementById('rollback-target-label').textContent = '⏪ 从检查点 v' + verNum + '（' + stepLabel + '）回滚并创建新分支重跑';
+        document.getElementById('rollback-status-msg').textContent = '';
+        box.style.display = 'block';
+        box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function cancelCheckpointRollback() {
+        var box = document.getElementById('checkpoint-rollback-box');
+        if (box) box.style.display = 'none';
+    }
+
+    async function submitCheckpointRollback() {
+        if (!currentIdeaId) return;
+        var versionId = document.getElementById('rollback-version-id').value;
+        var targetStep = document.getElementById('rollback-target-step').value;
+        var addExcluded = document.getElementById('rollback-excluded-path').value.trim();
+        var overrideDesc = document.getElementById('rollback-override-desc').value.trim();
+        var msgEl = document.getElementById('rollback-status-msg');
+        if (!versionId) return;
+        msgEl.textContent = '⏳ 正在创建回滚分支并启动重跑...';
+        msgEl.style.color = '#58a6ff';
+        try {
+            var res = await fetch('/api/idea/' + encodeURIComponent(currentIdeaId) + '/checkpoint/rollback', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    version_id: versionId,
+                    target_step: targetStep,
+                    add_excluded_path: addExcluded || null,
+                    override_description: overrideDesc || null
+                })
+            });
+            var data = await res.json();
+            if (data.status === 'ok') {
+                msgEl.textContent = '✅ ' + (data.message || '分支重跑已启动');
+                msgEl.style.color = '#3fb950';
+                document.getElementById('rollback-excluded-path').value = '';
+                document.getElementById('rollback-override-desc').value = '';
+                loadVersionHistory(currentIdeaId);
+            } else {
+                msgEl.textContent = '❌ ' + (data.message || '回滚失败');
+                msgEl.style.color = '#f85149';
+            }
+        } catch(e) {
+            msgEl.textContent = '❌ 请求失败: ' + e.message;
+            msgEl.style.color = '#f85149';
         }
     }
 
