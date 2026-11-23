@@ -224,10 +224,17 @@ pub fn build_journal_manuscript_draft(ctx: &PipelineContext) -> JournalManuscrip
     } else {
         safe_truncate_chars(ctx.description.trim(), 300).to_string()
     };
-    let keywords_line = if ctx.keywords.is_empty() {
+    let clean_keywords: Vec<String> = ctx
+        .keywords
+        .iter()
+        .map(|k| k.trim())
+        .filter(|k| is_valid_technical_keyword(k))
+        .map(ToString::to_string)
+        .collect();
+    let keywords_line = if clean_keywords.is_empty() {
         "【待补充关键词】".to_string()
     } else {
-        ctx.keywords.join("；")
+        clean_keywords.join("；")
     };
 
     let total_refs = ctx.patent_results.len() + ctx.web_results.len();
@@ -370,10 +377,10 @@ fn build_bom_items(ctx: &PipelineContext, feature_cards: &[FeatureCard]) -> Vec<
         return items;
     }
 
-    // 特征卡为空时，回退解析 ctx.keywords + ctx.description
+    // 特征卡为空时，回退解析 ctx.keywords + ctx.description（过滤口语碎片与单字噪音）
     for kw in &ctx.keywords {
         let trimmed = kw.trim();
-        if trimmed.is_empty() {
+        if !is_valid_technical_keyword(trimmed) {
             continue;
         }
         let category = classify_keyword_category(trimmed);
@@ -416,6 +423,35 @@ fn build_bom_items(ctx: &PipelineContext, feature_cards: &[FeatureCard]) -> Vec<
     }
 
     items
+}
+
+/// 判断关键词是否为有效的工程技术词汇（过滤 1 字碎片、纯数字/标点、口语虚词碎片如“录”“烧这”“录你”“话记”）
+fn is_valid_technical_keyword(kw: &str) -> bool {
+    let trimmed = kw.trim();
+    let char_count = trimmed.chars().count();
+    if char_count < 2 {
+        return false;
+    }
+    if trimmed
+        .chars()
+        .all(|c| c.is_ascii_digit() || c.is_ascii_punctuation() || c.is_whitespace())
+    {
+        return false;
+    }
+    let has_cjk = trimmed
+        .chars()
+        .any(|c| ('\u{4E00}'..='\u{9FFF}').contains(&c));
+    if has_cjk && char_count == 2 {
+        const CONVERSATIONAL_FRAGMENTS: &str =
+            "你我他她它这那哪怎吗呢吧啊呀哦嗯啦嘛了的得地着过把被给向对与和或但而却就都也还又再很太最更没不无话记";
+        if trimmed
+            .chars()
+            .any(|c| CONVERSATIONAL_FRAGMENTS.contains(c))
+        {
+            return false;
+        }
+    }
+    true
 }
 
 fn classify_keyword_category(keyword: &str) -> &'static str {
@@ -1359,10 +1395,17 @@ pub fn build_paper_latex_bundle_with_template(
     } else {
         safe_truncate_chars(ctx.description.trim(), 500)
     };
-    let keywords_line = if ctx.keywords.is_empty() {
+    let clean_latex_keywords: Vec<String> = ctx
+        .keywords
+        .iter()
+        .map(|k| k.trim())
+        .filter(|k| is_valid_technical_keyword(k))
+        .map(ToString::to_string)
+        .collect();
+    let keywords_line = if clean_latex_keywords.is_empty() {
         "Engineering Design; Closed-Loop Control; Experimental Validation".to_string()
     } else {
-        ctx.keywords.join("; ")
+        clean_latex_keywords.join("; ")
     };
 
     let related_work_tex = if bib_entries.is_empty() {
@@ -1941,5 +1984,44 @@ mod tests {
         assert!(default_en
             .main_tex
             .contains(r"\documentclass[journal]{IEEEtran}"));
+    }
+
+    #[test]
+    fn bom_and_journal_filter_noisy_cjk_fragment_keywords() {
+        let mut ctx = PipelineContext::new(
+            "idea-noise-kw",
+            "高效散热电机",
+            "采用双螺旋流道散热结构实现定子温升降低",
+        );
+        ctx.keywords = vec![
+            "录".into(),
+            "烧这".into(),
+            "录你".into(),
+            "话记".into(),
+            "定子散热".into(),
+            "电磁阀".into(),
+        ];
+        let bom = build_bom_items(&ctx, &[]);
+        let part_names: Vec<&str> = bom.iter().map(|b| b.part_name.as_str()).collect();
+        assert!(part_names.contains(&"定子散热"));
+        assert!(part_names.contains(&"电磁阀"));
+        for noise in ["录", "烧这", "录你", "话记"] {
+            assert!(
+                !part_names.contains(&noise),
+                "BOM 不得包含口语碎片关键词 {}: {:?}",
+                noise,
+                part_names
+            );
+        }
+
+        let journal = build_journal_manuscript_draft(&ctx);
+        assert!(journal.full_markdown.contains("定子散热"));
+        for noise in ["烧这", "录你", "话记"] {
+            assert!(
+                !journal.full_markdown.contains(noise),
+                "期刊手稿关键词不得包含噪音碎片 {}",
+                noise
+            );
+        }
     }
 }

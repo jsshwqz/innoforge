@@ -33,13 +33,62 @@ pub struct MultiDocFeatureMatrix {
     pub summary: String,
 }
 
-/// 从权利要求文本拆解原子技术特征（按分号/句号/“其特征在于”切分并去重）。
+/// 判断拆解片段是否为非技术特征的章节标题或附图标记说明行（避免把“附图标记说明：1-阀体”误列为 F1）
+fn is_non_feature_heading_or_legend(seg: &str) -> bool {
+    let trimmed = seg.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+    const HEADING_PREFIXES: &[&str] = &[
+        "附图标记说明",
+        "附图标号说明",
+        "附图说明",
+        "标号说明",
+        "具体实施方式",
+        "背景技术",
+        "技术领域",
+        "发明内容",
+        "实用新型内容",
+        "权利要求书",
+        "摘要",
+    ];
+    if HEADING_PREFIXES.iter().any(|p| {
+        trimmed == *p
+            || trimmed.starts_with(&format!("{p}："))
+            || trimmed.starts_with(&format!("{p}:"))
+    }) {
+        return true;
+    }
+    // 纯“1-阀体、2-线圈、3-壳体”型标号图例列表
+    let legend_parts: Vec<&str> = trimmed
+        .split(['、', '，', ',', ' '])
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect();
+    if legend_parts.len() >= 2
+        && legend_parts.iter().all(|part| {
+            part.split_once('-')
+                .or_else(|| part.split_once('—'))
+                .or_else(|| part.split_once('－'))
+                .is_some_and(|(num, name)| {
+                    !num.is_empty()
+                        && num.chars().all(|c| c.is_ascii_digit())
+                        && !name.trim().is_empty()
+                })
+        })
+    {
+        return true;
+    }
+    false
+}
+
+/// 从权利要求文本拆解原子技术特征（按分号/句号/“其特征在于”切分并去重，过滤附图标记说明等非特征行）。
 pub fn split_atomic_features(claims_text: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut seen = HashSet::new();
     for raw_line in claims_text.lines() {
         let line = raw_line.trim();
-        if line.is_empty() {
+        if line.is_empty() || is_non_feature_heading_or_legend(line) {
             continue;
         }
         let replaced = line
@@ -48,11 +97,20 @@ pub fn split_atomic_features(claims_text: &str) -> Vec<String> {
             .replace("其特征在于", "；")
             .replace(['。', ';'], "；");
         for seg in replaced.split('；') {
-            let s = seg.trim().trim_start_matches(|c: char| {
-                c.is_ascii_digit() || c == '.' || c == '、' || c == ' '
-            });
+            if is_non_feature_heading_or_legend(seg) {
+                continue;
+            }
+            let s = seg
+                .trim()
+                .trim_start_matches(|c: char| {
+                    c.is_ascii_digit() || c == '.' || c == '、' || c == ' '
+                })
+                .trim_end_matches(['，', ',', '、', '：', ':']);
             let clean = s.trim();
-            if clean.chars().count() >= 6 && seen.insert(clean.to_string()) {
+            if clean.chars().count() >= 6
+                && !is_non_feature_heading_or_legend(clean)
+                && seen.insert(clean.to_string())
+            {
                 out.push(clean.to_string());
             }
         }
@@ -267,5 +325,26 @@ mod tests {
         assert!(iso_row.is_distinguishing);
         assert_eq!(iso_row.app_anchor, "[0024]");
         assert_eq!(iso_row.d1.status, "未公开");
+    }
+
+    #[test]
+    fn split_atomic_features_skips_figure_legend_and_section_headers() {
+        let mixed = "权利要求书\n附图标记说明：1-阀体、2-动铁芯、3-波纹管\n1-阀体、2-动铁芯、3-波纹管\n1. 一种双波纹管隔离电磁阀，包括电磁驱动线圈；其特征在于：波纹管组件将流体介质与动铁芯完全隔离。";
+        let feats = split_atomic_features(mixed);
+        assert!(
+            !feats.iter().any(|f| f.contains("附图标记说明")),
+            "不应将附图标记说明当成原子技术特征: {:?}",
+            feats
+        );
+        assert!(
+            !feats.iter().any(|f| f.contains("1-阀体")),
+            "不应将纯标号图例列表当成原子技术特征: {:?}",
+            feats
+        );
+        assert!(
+            feats.iter().any(|f| f.contains("波纹管组件")),
+            "应正常保留真实权利要求技术特征: {:?}",
+            feats
+        );
     }
 }

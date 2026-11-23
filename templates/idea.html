@@ -16,17 +16,17 @@
     <style>
     .confirm-modal-overlay {
         display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-        background: rgba(0,0,0,0.4); z-index: 2000;
+        background: rgba(0,0,0,0.65); z-index: 2000;
     }
     .confirm-modal-overlay.show { display: flex; align-items: center; justify-content: center; }
     .confirm-modal {
-        background: #fff; border-radius: 8px; padding: 24px; min-width: 320px; max-width: 480px;
-        box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+        background: #161b22; color: #e6edf3; border: 1px solid #30363d; border-radius: 8px; padding: 24px; min-width: 320px; max-width: 480px;
+        box-shadow: 0 8px 28px rgba(0,0,0,0.45);
     }
-    .confirm-modal p { margin: 0 0 16px 0; line-height: 1.6; }
+    .confirm-modal p { margin: 0 0 16px 0; line-height: 1.6; color: #e6edf3; }
     .modal-btns { display: flex; justify-content: flex-end; gap: 8px; }
-    .btn-modal-cancel { padding: 8px 16px; border: 1px solid #ccc; border-radius: 4px; background: #f5f5f5; cursor: pointer; }
-    .btn-modal-ok { padding: 8px 16px; border: none; border-radius: 4px; background: #1976d2; color: #fff; cursor: pointer; }
+    .btn-modal-cancel { padding: 8px 16px; border: 1px solid #30363d; border-radius: 4px; background: #21262d; color: #c9d1d9; cursor: pointer; }
+    .btn-modal-ok { padding: 8px 16px; border: none; border-radius: 4px; background: #1f6feb; color: #fff; cursor: pointer; }
     </style>
 </head>
 <body>
@@ -575,6 +575,8 @@
 
     async function loadIdea(ideaId) {
         try {
+            var sb = document.querySelector('.idea-sidebar');
+            if (sb && sb.classList.contains('drawer-open')) sb.classList.remove('drawer-open');
             var resp = await fetch('/api/idea/' + encodeURIComponent(ideaId));
             if (!resp.ok) return;
             var data = await resp.json();
@@ -1119,7 +1121,57 @@
                 reasonEl.textContent = data.novelty_reason;
                 box.appendChild(reasonEl);
             }
+            if (data.minimal_diff_v2) {
+                var m2 = data.minimal_diff_v2;
+                var gradeColors = {
+                    unexpected_effect: '#3fb950',
+                    synergistic_effect: '#58a6ff',
+                    cross_domain_transfer: '#d2a8ff',
+                    routine_substitution: '#d29922',
+                    no_substantive_diff: '#8b949e'
+                };
+                var gColor = gradeColors[m2.inventive_contribution_grade] || '#58a6ff';
+                var m2Box = document.createElement('div');
+                m2Box.style.cssText = 'margin-top:8px;padding:8px 10px;background:#161b22;border:1px solid #30363d;border-left:3px solid ' + gColor + ';border-radius:4px;font-size:12px;line-height:1.6;';
+
+                var headerRow = document.createElement('div');
+                headerRow.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px;';
+                var badge = document.createElement('span');
+                badge.style.cssText = 'padding:2px 8px;border-radius:10px;font-weight:600;background:' + gColor + '22;color:' + gColor + ';border:1px solid ' + gColor + '66;';
+                badge.textContent = 'Minimal Diff 2.0 · ' + (m2.inventive_contribution_label_zh || m2.inventive_contribution_grade || '');
+                headerRow.appendChild(badge);
+                if (m2.patent_law_basis) {
+                    var basisSpan = document.createElement('span');
+                    basisSpan.style.cssText = 'color:#8b949e;';
+                    basisSpan.textContent = '⚖️ ' + m2.patent_law_basis;
+                    headerRow.appendChild(basisSpan);
+                }
+                m2Box.appendChild(headerRow);
+
+                var ts = m2.three_step_mapping || {};
+                var distFeat = Array.isArray(ts.step2_distinguishing_features)
+                    ? ts.step2_distinguishing_features.filter(Boolean).join('；')
+                    : (ts.step2_distinguishing_features || ts.step2_distinguishing_features_and_problem || '');
+                [
+                    { label: '三步法·步骤1（最近现有技术）', val: ts.step1_closest_prior_art },
+                    { label: '三步法·步骤2（区别技术特征）', val: distFeat || '无实质区别特征' },
+                    { label: '三步法·步骤2（实际解决的技术问题）', val: ts.step2_actual_technical_problem },
+                    { label: '三步法·步骤3（非显而易见性研判）', val: ts.step3_non_obviousness_assessment || ts.step3_non_obviousness_verdict }
+                ].forEach(function(item) {
+                    if (!item.val) return;
+                    var line = document.createElement('div');
+                    line.style.cssText = 'margin-top:3px;color:#c9d1d9;';
+                    var strong = document.createElement('strong');
+                    strong.style.color = '#79c0ff';
+                    strong.textContent = item.label + '：';
+                    line.appendChild(strong);
+                    line.appendChild(document.createTextNode(String(item.val)));
+                    m2Box.appendChild(line);
+                });
+                box.appendChild(m2Box);
+            }
             resEl.appendChild(box);
+            if (currentIdeaId) loadIdeaTokenUsage(currentIdeaId);
         } catch(e) {
             resEl.textContent = t('idea.featureDiffFailed') + (e && e.message ? ': ' + e.message : '');
         } finally {
@@ -1214,6 +1266,7 @@
             }
             if (statusEl) statusEl.textContent = t('idea.featureCardsGenerated');
             await loadFeatureCards(currentIdeaId);
+            loadIdeaTokenUsage(currentIdeaId);
         } catch(e) {
             if (statusEl) statusEl.textContent = t('idea.featureCardsGenFailed') + (e && e.message ? ': ' + e.message : '');
         } finally {
@@ -2324,6 +2377,9 @@
                 iterateHint.textContent = i18nLang === 'en' ? 'Explore more possibilities based on current analysis' : '基于当前分析结果，探索更多可能性';
                 document.getElementById('score-area').appendChild(iterateHint);
             }
+        } else {
+            var scoreEl = document.getElementById('score-area');
+            if (scoreEl) scoreEl.innerHTML = '';
         }
 
         if (idea.analysis) {
@@ -2391,7 +2447,7 @@
             var resp = await fetch('/api/idea/' + encodeURIComponent(currentIdeaId) + '/memory');
             if (!resp.ok) { listEl.innerHTML = '<p class="muted">Load failed</p>'; return; }
             var data = await resp.json();
-            if (data.status !== 'ok' || !data.entries) { listEl.innerHTML = '<p class="muted">No memory</p>'; return; }
+            if (data.status !== 'ok' || !data.entries) { listEl.innerHTML = '<p class="muted">' + (i18nLang === 'en' ? 'No memory yet' : '暂无研究记忆') + '</p>'; return; }
 
             var filter = document.getElementById('memory-filter').value;
             var filtered = filter === 'all' ? data.entries : data.entries.filter(function(e) { return e.concept_type === filter; });
@@ -2403,7 +2459,7 @@
             document.getElementById('mem-stat-pattern').textContent = counts.pattern || 0;
             document.getElementById('mem-stat-question').textContent = counts.question || 0;
 
-            if (filtered.length === 0) { listEl.innerHTML = '<p class="muted">No entries</p>'; return; }
+            if (filtered.length === 0) { listEl.innerHTML = '<p class="muted">' + (i18nLang === 'en' ? 'No memory entries yet' : '暂无跨轮次研究记忆') + '</p>'; return; }
 
             listEl.innerHTML = '';
             filtered.forEach(function(entry) {
@@ -2482,29 +2538,37 @@
             codeBlocks.push('<pre style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:10px;overflow-x:auto;font-size:0.85em;"><code>' + code.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</code></pre>');
             return '\x00CB' + (codeBlocks.length - 1) + '\x00';
         });
-        // 提取表格
+        // 提取表格（转义并解析单元格内 **加粗** 与 `代码`）
         var tables = [];
-        text = text.replace(/((?:^\|.+\|[ \t]*\n)+)/gm, function(block) {
+        text = text.replace(/((?:^\|.+\|[ \t]*\n?)+)/gm, function(block) {
             var rows = block.trim().split('\n');
             if (rows.length < 2) return block;
-            var html = '<table style="border-collapse:collapse;width:100%;margin:8px 0;font-size:0.9em;">';
+            var html = '<div style="overflow-x:auto;margin:8px 0;"><table style="border-collapse:collapse;width:100%;font-size:0.9em;">';
             rows.forEach(function(row, ri) {
                 if (row.replace(/[\|\-\s:]/g, '') === '') return; // skip separator row
                 var tag = ri === 0 ? 'th' : 'td';
                 var cells = row.split('|').filter(function(c, i, a) { return i > 0 && i < a.length - 1; });
                 html += '<tr>';
-                cells.forEach(function(c) {
-                    var st = 'border:1px solid #30363d;padding:6px 10px;' + (ri === 0 ? 'background:#161b22;color:#58a6ff;font-weight:600;' : '');
-                    html += '<' + tag + ' style="' + st + '">' + c.trim() + '</' + tag + '>';
+                cells.forEach(function(c, ci) {
+                    var st = 'border:1px solid #30363d;padding:6px 10px;' +
+                        (ri === 0 ? 'background:#161b22;color:#58a6ff;font-weight:600;white-space:nowrap;' : '') +
+                        (ci === 0 ? 'min-width:110px;' : '');
+                    var cellHtml = esc(c.trim())
+                        .replace(/`([^`]+)`/g, '<code style="background:#21262d;padding:1px 5px;border-radius:3px;font-size:0.9em;">$1</code>')
+                        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                        .replace(/\*(.+?)\*/g, '<em>$1</em>');
+                    html += '<' + tag + ' style="' + st + '">' + cellHtml + '</' + tag + '>';
                 });
                 html += '</tr>';
             });
-            html += '</table>';
+            html += '</table></div>';
             tables.push(html);
             return '\x00TB' + (tables.length - 1) + '\x00';
         });
         var result = text
             .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/^---+[ \t]*$/gm, '<hr style="border:none;border-top:1px solid #30363d;margin:12px 0;">')
+            .replace(/^&gt; (.+)$/gm, '<blockquote style="border-left:3px solid #58a6ff;padding:6px 12px;margin:8px 0;background:#161b22;color:#c9d1d9;border-radius:4px;">$1</blockquote>')
             .replace(/^### (.+)$/gm, '<h3>$1</h3>')
             .replace(/^## (.+)$/gm, '<h3 style="font-size:1.1em">$1</h3>')
             .replace(/^# (.+)$/gm, '<h2>$1</h2>')
@@ -2515,7 +2579,8 @@
             .replace(/^(\d+)\. (.+)$/gm, '<li>$2</li>')
             .replace(/\n{2,}/g, '</p><p>')
             .replace(/\n/g, '<br>')
-            .replace(/^/, '<p>').replace(/$/, '</p>');
+            .replace(/^/, '<p>').replace(/$/, '</p>')
+            .replace(/<p>(?:\s|<br>)*<\/p>/g, '');
         // 恢复代码块和表格
         result = result.replace(/\x00CB(\d+)\x00/g, function(_, i) { return codeBlocks[parseInt(i)]; });
         result = result.replace(/\x00TB(\d+)\x00/g, function(_, i) { return tables[parseInt(i)]; });
@@ -2900,8 +2965,43 @@
     function renderOverview(idea) {
         var analysisArea = document.getElementById('analysis-area');
         var findingsArea = document.getElementById('findings-area');
-        if (analysisArea && idea.analysis) {
-            analysisArea.innerHTML = DOMPurify.sanitize('<div class="analysis-result">' + renderMarkdown(idea.analysis) + '</div>');
+        if (analysisArea) {
+            if (idea.analysis && idea.analysis.trim()) {
+                analysisArea.innerHTML = DOMPurify.sanitize('<div class="analysis-result">' + renderMarkdown(idea.analysis) + '</div>');
+            } else {
+                analysisArea.textContent = '';
+                var card = document.createElement('div');
+                card.style.cssText = 'padding:18px 20px;background:#161b22;border:1px solid #30363d;border-radius:8px;line-height:1.7;';
+                var header = document.createElement('div');
+                header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px;';
+                var titleEl = document.createElement('h3');
+                titleEl.style.cssText = 'margin:0;color:#f0f6fc;';
+                titleEl.textContent = idea.title || '未命名创意';
+                var statusBadge = document.createElement('span');
+                statusBadge.style.cssText = 'padding:2px 10px;border-radius:12px;font-size:12px;background:#d2992222;color:#d29922;border:1px solid #d2992266;';
+                statusBadge.textContent = idea.status === 'error' ? '⚠️ 上次推演中断' : '⏳ 待推演（尚未生成深度分析）';
+                header.appendChild(titleEl);
+                header.appendChild(statusBadge);
+                card.appendChild(header);
+
+                var descP = document.createElement('p');
+                descP.style.cssText = 'color:#c9d1d9;margin:0 0 14px;white-space:pre-wrap;';
+                descP.textContent = idea.description || '暂无方案描述。';
+                card.appendChild(descP);
+
+                var btnRow = document.createElement('div');
+                btnRow.style.cssText = 'display:flex;gap:10px;flex-wrap:wrap;';
+                if (idea.id) {
+                    var startBtn = document.createElement('button');
+                    startBtn.type = 'button';
+                    startBtn.style.cssText = 'padding:8px 18px;background:#238636;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;';
+                    startBtn.textContent = '🚀 立即启动深度推演';
+                    startBtn.addEventListener('click', function() { resumePipeline(idea.id); });
+                    btnRow.appendChild(startBtn);
+                }
+                card.appendChild(btnRow);
+                analysisArea.appendChild(card);
+            }
         }
         if (findingsArea) {
             var webResults = idea.web_results || [];

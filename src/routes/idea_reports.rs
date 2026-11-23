@@ -106,11 +106,49 @@ pub async fn api_idea_report(
             }))
         }
         "technical" => {
-            // 研发版：详细技术报告
+            // 研发版：详细技术报告（真实渲染已检索的专利与网络文献摘要，禁止泄漏内部字段名）
             let web_results =
                 serde_json::from_str::<serde_json::Value>(&idea.web_results).unwrap_or_default();
             let patent_results =
                 serde_json::from_str::<serde_json::Value>(&idea.patent_results).unwrap_or_default();
+            let patent_arr = patent_results.as_array().cloned().unwrap_or_default();
+            let web_arr = web_results.as_array().cloned().unwrap_or_default();
+            let mut prior_art_md = String::new();
+            if patent_arr.is_empty() && web_arr.is_empty() {
+                prior_art_md.push_str(
+                    "暂无已收录的现有技术与文献检索记录，建议先执行检索推演或补充对比文献。",
+                );
+            } else {
+                prior_art_md.push_str(&format!(
+                    "本次共检索比对 **{} 篇专利** 与 **{} 篇网络/学术文献**：\n",
+                    patent_arr.len(),
+                    web_arr.len()
+                ));
+                if !patent_arr.is_empty() {
+                    prior_art_md.push_str("\n### 代表性相关专利\n");
+                    for (idx, p) in patent_arr.iter().take(6).enumerate() {
+                        let pn = p["patent_number"]
+                            .as_str()
+                            .or_else(|| p["id"].as_str())
+                            .unwrap_or("未编号");
+                        let title = p["title"].as_str().unwrap_or("（无标题）");
+                        prior_art_md.push_str(&format!("{}. **{}** — {}\n", idx + 1, pn, title));
+                    }
+                }
+                if !web_arr.is_empty() {
+                    prior_art_md.push_str("\n### 代表性学术/网络文献\n");
+                    for (idx, w) in web_arr.iter().take(6).enumerate() {
+                        let title = w["title"].as_str().unwrap_or("（无标题）");
+                        let source = w["source"].as_str().unwrap_or("web");
+                        prior_art_md.push_str(&format!(
+                            "{}. {}（来源：{}）\n",
+                            idx + 1,
+                            title,
+                            source
+                        ));
+                    }
+                }
+            }
             let report_md = format!(
                 "# 技术验证报告\n\n\
                  ## 创意概述\n\
@@ -119,12 +157,21 @@ pub async fn api_idea_report(
                  ## 新颖性评分\n\
                  **总分**：{}（{}）\n\n\
                  ## 现有技术对比\n\
-                 详见 web_results 和 patent_results 字段。\n\n\
+                 {}\n\n\
                  ## 技术差异分析\n\
                  {}\n\n\
                  ## 行动方案\n\
                  基于以上分析，建议执行差异化策略。",
-                idea.title, idea.description, score_line, level, analysis_text
+                idea.title,
+                idea.description,
+                score_line,
+                level,
+                prior_art_md.trim_end(),
+                if analysis_text.trim().is_empty() {
+                    "尚未生成深度技术差异分析，请先完成推演流程。"
+                } else {
+                    analysis_text.trim()
+                }
             );
             Json(json!({
                 "status": "ok",

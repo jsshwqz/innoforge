@@ -201,7 +201,7 @@ impl super::Database {
 
     pub fn get_patent(&self, id: &str) -> Result<Option<Patent>> {
         let c = self.conn();
-        let mut stmt = c.prepare("SELECT id,patent_number,title,abstract_text,description,claims,applicant,inventor,filing_date,publication_date,grant_date,ipc_codes,cpc_codes,priority_date,country,kind_code,family_id,legal_status,citations,cited_by,source,raw_json,created_at,images,pdf_url FROM patents WHERE id=?1 OR patent_number=?1")?;
+        let mut stmt = c.prepare("SELECT id,patent_number,title,abstract_text,description,claims,applicant,inventor,filing_date,publication_date,grant_date,ipc_codes,cpc_codes,priority_date,country,kind_code,family_id,legal_status,citations,cited_by,source,raw_json,created_at,images,pdf_url FROM patents WHERE id=?1 OR patent_number=?1 ORDER BY (CASE WHEN id=?1 THEN 1 ELSE 0 END) DESC, (LENGTH(claims) + LENGTH(description) + LENGTH(images)) DESC LIMIT 1")?;
         let result = stmt
             .query_row(params![id], |r| Ok(Self::row_to_patent(r)))
             .optional()?;
@@ -291,7 +291,7 @@ impl super::Database {
         let c = self.conn();
         let like = format!("%{}%", canonical);
         let mut stmt = c.prepare(
-            "SELECT id,patent_number,title,abstract_text,description,claims,applicant,inventor,filing_date,publication_date,grant_date,ipc_codes,cpc_codes,priority_date,country,kind_code,family_id,legal_status,citations,cited_by,source,raw_json,created_at,images,pdf_url FROM patents WHERE REPLACE(REPLACE(UPPER(patent_number), ' ', ''), '.', '') LIKE ?1 LIMIT 5",
+            "SELECT id,patent_number,title,abstract_text,description,claims,applicant,inventor,filing_date,publication_date,grant_date,ipc_codes,cpc_codes,priority_date,country,kind_code,family_id,legal_status,citations,cited_by,source,raw_json,created_at,images,pdf_url FROM patents WHERE REPLACE(REPLACE(UPPER(patent_number), ' ', ''), '.', '') LIKE ?1 ORDER BY (LENGTH(claims) + LENGTH(description) + LENGTH(images)) DESC LIMIT 20",
         )?;
         let rows = stmt.query_map(params![like], |r| Ok(Self::row_to_patent(r)))?;
         for p in rows.flatten() {
@@ -1160,5 +1160,64 @@ mod insert_dedup_tests {
         assert!(loaded.images.contains("data:image/jpeg;base64,AAA"));
         assert!(loaded.ipc_codes.contains("H02K9/19"));
         assert_eq!(loaded.grant_date.as_deref(), Some("2024-06-14"));
+    }
+
+    #[test]
+    fn get_patent_by_number_prefers_richest_fulltext_row() {
+        let db = Database::init(":memory:").expect("mem db");
+        // 模拟历史库中残留的“旧浅层行 + 新全文行”同专利号双行
+        {
+            let c = db.conn();
+            c.execute(
+                "INSERT INTO patents (id, patent_number, title, abstract_text, description, claims, images) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                rusqlite::params![
+                    "legacy-shallow-id",
+                    "CN99990001U",
+                    "旧摘要行",
+                    "仅有摘要",
+                    "",
+                    "",
+                    "[]"
+                ],
+            )
+            .expect("insert legacy shallow");
+            c.execute(
+                "INSERT INTO patents (id, patent_number, title, abstract_text, description, claims, images) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                rusqlite::params![
+                    "newer-fulltext-id",
+                    "CN99990001U",
+                    "完整全文行",
+                    "完整摘要",
+                    "具体实施方式：定子铁芯内设有螺旋油冷流道，油泵压力0.4MPa。",
+                    "1. 一种油冷定子铁芯结构，其特征在于设有螺旋流道。",
+                    r#"["data:image/png;base64,BBB"]"#
+                ],
+            )
+            .expect("insert newer fulltext");
+        }
+
+        // 按专利号查询必须命中内容最完整的全文行，而不是较早插入的空摘要行
+        let by_num = db
+            .get_patent("CN99990001U")
+            .expect("get by num")
+            .expect("exists");
+        assert_eq!(by_num.id, "newer-fulltext-id");
+        assert!(by_num.claims.contains("螺旋流道"));
+        assert!(by_num.description.contains("0.4MPa"));
+
+        // 按精确 ID 查询仍应返回精确匹配行
+        let by_id = db
+            .get_patent("legacy-shallow-id")
+            .expect("get by id")
+            .expect("exists");
+        assert_eq!(by_id.id, "legacy-shallow-id");
+
+        // 归一化公开号查找 find_patent_by_number 也必须优先命中全文行
+        let by_norm = db
+            .find_patent_by_number("CN 99990001 U")
+            .expect("find by norm")
+            .expect("exists");
+        assert_eq!(by_norm.id, "newer-fulltext-id");
+        assert!(by_norm.claims.contains("螺旋流道"));
     }
 }
