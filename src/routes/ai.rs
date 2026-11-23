@@ -746,7 +746,7 @@ pub async fn api_ai_summarize(
     }
 }
 
-/// Resolve a single patent/text item into a compare info block.
+/// Resolve a single patent/text item into a compare info block with whole-document pre-mined signals.
 fn resolve_compare_item(
     db: &crate::db::Database,
     item: &serde_json::Value,
@@ -760,23 +760,41 @@ fn resolve_compare_item(
                 .and_then(|v| v.as_str())
                 .unwrap_or("上传文件");
             let content = obj.get("content").and_then(|v| v.as_str()).unwrap_or("");
+            let signals = crate::ai::patent::extract_whole_document_signals("", content);
             let preview = truncate_for_ai(content, 150_000);
-            return Ok(format!("【{}】\n标题：{}\n内容：{}", label, title, preview));
+            return Ok(format!(
+                "【{}】\n标题：{}\n{}\n\n全文内容：\n{}",
+                label,
+                title,
+                signals.format_prompt_block(),
+                preview
+            ));
         }
     }
-    // String — patent ID
+    // String — patent ID or patent number
     let id = item.as_str().unwrap_or("");
     if id.is_empty() {
         return Err(format!("{}未填写", label));
     }
     match db.get_patent(id) {
         Ok(Some(p)) => {
+            let signals =
+                crate::ai::patent::extract_whole_document_signals(&p.claims, &p.description);
             let raw_block = format!(
-                "【{}】\n专利号：{}\n标题：{}\n申请人：{}\n摘要：{}\n\n权利要求书全文：\n{}\n\n说明书（前部分）：\n{}",
-                label, p.patent_number, p.title, p.applicant, p.abstract_text, p.claims, p.description
+                "【{}】\n专利号：{}\n标题：{}\n申请人：{}\nIPC分类：{}\n法律状态：{}\n摘要：{}\n\n{}\n\n权利要求书全文：\n{}\n\n说明书（前部分）：\n{}",
+                label,
+                p.patent_number,
+                p.title,
+                p.applicant,
+                p.ipc_codes,
+                p.legal_status,
+                p.abstract_text,
+                signals.format_prompt_block(),
+                p.claims,
+                p.description
             );
             Ok(crate::ai::patent::structured_patent_excerpt(
-                &raw_block, 20_000,
+                &raw_block, 24_000,
             ))
         }
         _ => Err(format!(
@@ -790,6 +808,12 @@ pub async fn api_ai_compare(
     State(s): State<AppState>,
     Json(req): Json<serde_json::Value>,
 ) -> Json<AiResponse> {
+    if let Err(breaker_msg) = s.db.check_ai_budget_circuit_breaker(None) {
+        return Json(AiResponse {
+            content: breaker_msg,
+        });
+    }
+
     // Support new format: items array with mixed types
     let (info1, info2) = if let Some(items) = req["items"].as_array() {
         if items.len() < 2 {
@@ -821,18 +845,28 @@ pub async fn api_ai_compare(
         (i1, i2)
     };
 
+    const SYSTEM_PROMPT: &str = "你是兼具 15 年一线总工程师与资深专利代理师经验的深度技术对比专家。\
+         你的核心职责是穿透两份专利/技术文本的表面措辞，基于完整权利要求、说明书实施例与程序预挖的定量参数/部件拓扑，\
+         产出高信息密度、可直接指导研发决策与专利攻防的深度对比报告。\
+         严禁泛泛而谈或只复述摘要；材料未披露的数据或权利要求必须显式标注【材料未提供】或【仅基于摘要，需补全文】。";
+
     let prompt = format!(
-        "请对比分析以下两个专利/文件的异同：\n\n{}\n\n{}\n\n\
-         请从以下方面对比：\n\
-         1. 技术领域是否相同\n\
-         2. 解决的技术问题对比\n\
-         3. 技术方案的异同点\n\
-         4. 创新点对比\n\
-         5. 保护范围对比\n\
-         6. 是否存在侵权风险（初步判断）\n\
-         7. 至少列出5条有材料支撑的对比依据，每条以“依据N：”开头\n\
-         8. 至少列出3条可执行建议，每条以“建议N：”开头\n\
-         9. 最后使用“结论：”给出综合判断",
+        "请对以下两份专利/技术文件进行全维度深度对比分析：\n\n<user_input>\n{}\n\n{}\n</user_input>\n\n\
+         请严格按以下结构输出专业 Markdown 报告：\n\n\
+         ## 一、核心技术问题与物理/工程机理本质对比\n\
+         - 穿透文字表面，拆解两者各自面对的底层物理矛盾/工程瓶颈、核心工作原理及解决路径的本质差异（不得照抄摘要）。\n\n\
+         ## 二、逐项结构/工艺特征深度对比表\n\
+         - 使用标准 Markdown 表格，列为：`对比维度 | 专利/文件1 | 专利/文件2 | 本质异同与协同作用`。\n\
+         - 覆盖至少 6 个实质维度：核心拓扑结构、关键连接/传动/流道关系、定量参数与工艺窗口、实施例隐藏细节（未写入权要部分）、可制造性/成本边界、预期性能收益。\n\n\
+         ## 三、独立权利要求保护范围边界与侵权/FTO 风险研判\n\
+         - 逐项核对独立权利要求的必要技术特征覆盖关系（全面覆盖原则 + 等同原则），明确是否存在交叉侵权、从属专利依赖或 FTO 高风险点，并标注置信度（高/中/低）。\n\n\
+         ## 四、规避设计路径与未来 3–5 年技术演进前瞻\n\
+         - 提出至少 2 条工程上可落地的绕开/规避设计思路（指出具体替换机理与副作用权衡）；\n\
+         - 跳出眼前单点改进，指出该技术路线未来 3–5 年的演进方向、卡脖子瓶颈与高价值外围专利布局空白。\n\n\
+         ## 五、有原文支撑的核心对比依据与可执行建议\n\
+         - 至少列出 5 条有材料原文（含专利号/权利要求号或定量参数）支撑的对比依据，每条必须以“依据N：”开头；\n\
+         - 至少列出 3 条可执行研发/专利布局建议，每条必须以“建议N：”开头；\n\
+         - 最后单独一行以“结论：”给出清晰、敢拍板的综合判断。",
         info1, info2
     );
 
@@ -840,8 +874,8 @@ pub async fn api_ai_compare(
         .config
         .read()
         .unwrap_or_else(|e| e.into_inner())
-        .ai_client();
-    match ai.chat(&prompt, None).await {
+        .ai_client_for_role(crate::ai::router::ModelRole::DeepReasoning);
+    match ai.chat_with_system(SYSTEM_PROMPT, &prompt, 0.3).await {
         Ok(content) => {
             let _ = s.db.log_ai_call(&ai, "ai-compare", None, None);
             Json(AiResponse { content })

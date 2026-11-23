@@ -279,6 +279,10 @@
         updateAddBtn();
         reindexPlaceholders();
         updateRefCounter();
+        var hintEl = document.getElementById('auto-ref-hint');
+        if (hintEl && !list.querySelector('.ref-auto-meta')) {
+            hintEl.textContent = '';
+        }
     }
 
     function updateAddBtn() {
@@ -653,24 +657,36 @@
         text = text.replace(/(?:^|\n)(\|.+\|)\n(\|[\s:|-]+\|)\n((?:\|.+\|\n?)+)/gm, function(_, header, sep, body) {
             var ths = header.split('|').filter(function(c) { return c.trim() !== ''; });
             var rows = body.trim().split('\n');
-            var html = '<table><thead><tr>';
-            for (let i = 0; i < ths.length; i++) html += '<th>' + escapeHtml(ths[i].trim()) + '</th>';
+            var html = '<div style="overflow-x:auto;margin:10px 0;"><table><thead><tr>';
+            for (let i = 0; i < ths.length; i++) {
+                var thStyle = i === 0 ? ' style="min-width:130px;white-space:nowrap;"' : '';
+                html += '<th' + thStyle + '>' + escapeHtml(ths[i].trim()) + '</th>';
+            }
             html += '</tr></thead><tbody>';
             for (let r = 0; r < rows.length; r++) {
                 var cells = rows[r].split('|').filter(function(c) { return c.trim() !== ''; });
                 html += '<tr>';
-                for (let c = 0; c < cells.length; c++) html += '<td>' + escapeHtml(cells[c].trim()).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>') + '</td>';
+                for (let c = 0; c < cells.length; c++) {
+                    var tdStyle = c === 0 ? ' style="min-width:130px;font-weight:600;"' : '';
+                    var cellText = escapeHtml(cells[c].trim())
+                        .replace(/`([^`]+)`/g, '<code>$1</code>')
+                        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+                    html += '<td' + tdStyle + '>' + cellText + '</td>';
+                }
                 html += '</tr>';
             }
-            html += '</tbody></table>';
+            html += '</tbody></table></div>';
             tableBlocks.push(html);
             return '\n\x00TB' + (tableBlocks.length - 1) + '\x00\n';
         });
 
         var result = escapeHtml(text)
+            .replace(/^---+[ \t]*$/gm, '<hr style="border:none;border-top:1px solid #30363d;margin:12px 0;">')
+            .replace(/^&gt; (.+)$/gm, '<blockquote style="border-left:3px solid #58a6ff;padding:6px 12px;margin:8px 0;background:#161b22;color:#c9d1d9;border-radius:4px;">$1</blockquote>')
             .replace(/^#### (.+)$/gm, '<h4>$1</h4>')
             .replace(/^### (.+)$/gm, '<h3>$1</h3>')
             .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+            .replace(/^# (.+)$/gm, '<h1>$1</h1>')
             .replace(/`([^`]+)`/g, '<code>$1</code>')
             .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
             .replace(/^\- (.+)$/gm, '<li>$1</li>')
@@ -678,7 +694,8 @@
             .replace(/(<li>.*<\/li>)/g, '<ul>$1</ul>')
             .replace(/<\/ul>\s*<ul>/g, '')
             .replace(/\n{2,}/g, '</p><p>')
-            .replace(/\n/g, '<br>');
+            .replace(/\n/g, '<br>')
+            .replace(/<p>(?:\s|<br>)*<\/p>/g, '');
 
         result = result.replace(/\x00CB(\d+)\x00/g, function(_, i) { return codeBlocks[parseInt(i)]; });
         result = result.replace(/\x00TB(\d+)\x00/g, function(_, i) { return tableBlocks[parseInt(i)]; });
@@ -706,6 +723,15 @@
         }
         var found = [];
         var seen = new Set([myVal.trim().toUpperCase(), key.toUpperCase()]);
+        // 收集用户已手动输入的对比文件号，避免自动拉取覆盖或错配标签
+        var refList = document.getElementById('ref-list');
+        var existingRows = refList ? refList.querySelectorAll('.ref-row') : [];
+        for (let r = 0; r < existingRows.length; r++) {
+            var exInp = existingRows[r].querySelector('.ref-input');
+            if (exInp && exInp.value.trim() && exInp.dataset.autofilled !== '1') {
+                seen.add(exInp.value.trim().toUpperCase());
+            }
+        }
         function pushCandidate(num, title, sourceLabel) {
             var clean = (num || '').trim();
             if (!clean) return;
@@ -749,36 +775,63 @@
             return;
         }
 
-        // 填入 #ref-list 并附带标题与来源标签
-        var refList = document.getElementById('ref-list');
-        while (refList.querySelectorAll('.ref-row').length < found.length) {
-            addRef();
-        }
-        var rows = refList.querySelectorAll('.ref-row');
-        for (let i = 0; i < found.length; i++) {
-            var inp = rows[i].querySelector('.ref-input');
-            if (inp && !inp.disabled) {
-                inp.value = found[i].num;
-                if (found[i].title) {
-                    inp.title = '[' + found[i].source + '] ' + found[i].title;
-                }
+        // 填入 #ref-list：绝不覆盖用户手动输入，也绝不把推荐标题错挂到用户手输行
+        var rows = Array.prototype.slice.call(refList.querySelectorAll('.ref-row'));
+        var targetSlots = [];
+        for (let i = 0; i < rows.length; i++) {
+            var rowInp = rows[i].querySelector('.ref-input');
+            if (rowInp && !rowInp.disabled && (!rowInp.value.trim() || rowInp.dataset.autofilled === '1')) {
+                targetSlots.push(rows[i]);
             }
-            var oldMeta = rows[i].querySelector('.ref-auto-meta');
+        }
+        var maxNew = Math.max(0, 4 - rows.length);
+        while (targetSlots.length < found.length && maxNew > 0) {
+            addRef();
+            var allRows = refList.querySelectorAll('.ref-row');
+            targetSlots.push(allRows[allRows.length - 1]);
+            maxNew--;
+        }
+        var applied = 0;
+        for (let i = 0; i < found.length && i < targetSlots.length; i++) {
+            var slotRow = targetSlots[i];
+            var inp = slotRow.querySelector('.ref-input');
+            if (!inp || inp.disabled) continue;
+            // 若用户在异步请求期间刚刚手动输入了新内容，立即跳过防竞态覆盖
+            if (inp.value.trim() && inp.dataset.autofilled !== '1') continue;
+            inp.value = found[i].num;
+            inp.dataset.autofilled = '1';
+            if (found[i].title) {
+                inp.title = '[' + found[i].source + '] ' + found[i].title;
+            }
+            var oldMeta = slotRow.querySelector('.ref-auto-meta');
             if (oldMeta) oldMeta.remove();
             if (found[i].title) {
-                var meta = document.createElement('span');
+                slotRow.style.flexWrap = 'wrap';
+                var meta = document.createElement('div');
                 meta.className = 'ref-auto-meta';
-                meta.style.cssText = 'font-size:12px;color:#8b949e;margin-left:6px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;';
+                meta.style.cssText = 'flex-basis:100%;font-size:12px;color:#8b949e;margin-top:3px;padding-left:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
                 meta.textContent = '📌 [' + found[i].source + '] ' + found[i].title;
                 meta.title = found[i].title;
-                rows[i].appendChild(meta);
+                slotRow.appendChild(meta);
             }
+            applied++;
         }
         if (hintEl) {
             hintEl.style.color = '#3fb950';
-            hintEl.textContent = '✅ 已自动带入 ' + found.length + ' 篇引证/相似对比文件，可直接点击下方对比按钮';
+            hintEl.textContent = '✅ 已自动带入 ' + applied + ' 篇引证/相似对比文件，可直接点击下方对比按钮';
         }
     }
+
+    // 用户手动修改对比文件输入框时，清除自动填充标记与旧标题标签，防止张冠李戴
+    document.getElementById('ref-list').addEventListener('input', function(e) {
+        if (e.target && e.target.classList && e.target.classList.contains('ref-input')) {
+            delete e.target.dataset.autofilled;
+            e.target.title = '';
+            var row = e.target.closest('.ref-row');
+            var oldMeta = row ? row.querySelector('.ref-auto-meta') : null;
+            if (oldMeta) oldMeta.remove();
+        }
+    });
 
     // Pre-fill from URL params (e.g. ?patent=CN900000001A&id=...)
     (function() {

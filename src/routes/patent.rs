@@ -437,38 +437,110 @@ pub async fn api_patent_numeral_check(
     }))
 }
 
-/// POST /api/ai/numeral-consistency-check — 交底书 / 权利要求 / 附图标号一致性静态核查（v0.9.66）
+/// 尝试将单行专利号或本地内部 ID 解析为本地库专利记录（用于 OA 工具栏直接填专利号）
+fn try_resolve_patent_ref(db: &crate::db::Database, raw: &str) -> Option<crate::patent::Patent> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty()
+        || trimmed.contains('\n')
+        || trimmed.chars().count() > 64
+        || trimmed.contains('。')
+        || trimmed.contains('；')
+        || trimmed.contains('，')
+    {
+        return None;
+    }
+    db.find_patent_by_number(trimmed)
+        .ok()
+        .flatten()
+        .or_else(|| db.get_patent(trimmed).ok().flatten())
+}
+
+/// POST /api/ai/numeral-consistency-check — 交底书 / 权利要求 / 附图标号一致性静态核查（v0.9.66，v0.9.70 支持专利号自动加载全文与 0 标号防误绿）
 pub async fn api_ai_numeral_consistency_check(
+    State(s): State<AppState>,
     Json(req): Json<serde_json::Value>,
 ) -> Json<serde_json::Value> {
-    let claims_text = req
+    let raw_claims = req
         .get("claims_text")
         .and_then(|v| v.as_str())
         .unwrap_or("");
-    let description_text = req
+    let raw_desc = req
         .get("description_text")
         .and_then(|v| v.as_str())
         .unwrap_or("");
-    if claims_text.trim().is_empty() && description_text.trim().is_empty() {
+    if raw_claims.trim().is_empty() && raw_desc.trim().is_empty() {
         return Json(json!({
             "status": "error",
             "message": "请至少提供权利要求文本（claims_text）或说明书/交底书正文（description_text）"
         }));
     }
+
+    let mut claims_text = raw_claims.to_string();
+    let mut description_text = raw_desc.to_string();
+    let mut resolved_patent_number: Option<String> = None;
+
+    if let Some(p) = try_resolve_patent_ref(&s.db, raw_desc) {
+        resolved_patent_number = Some(p.patent_number.clone());
+        description_text = if !p.description.trim().is_empty() {
+            p.description.clone()
+        } else {
+            p.abstract_text.clone()
+        };
+        if claims_text.trim().is_empty() || claims_text.trim().eq_ignore_ascii_case(raw_desc.trim())
+        {
+            claims_text = p.claims.clone();
+        }
+    } else if let Some(p) = try_resolve_patent_ref(&s.db, raw_claims) {
+        resolved_patent_number = Some(p.patent_number.clone());
+        claims_text = p.claims.clone();
+        if description_text.trim().is_empty() {
+            description_text = if !p.description.trim().is_empty() {
+                p.description.clone()
+            } else {
+                p.abstract_text.clone()
+            };
+        }
+    }
+
     let drawing_parts: Option<Vec<crate::ai::strategy_arbitration::part_topology::PartDesignator>> =
         req.get("drawing_parts")
             .and_then(|v| serde_json::from_value(v.clone()).ok());
     let report = crate::ai::strategy_arbitration::part_topology::check_numeral_consistency(
-        claims_text,
-        description_text,
+        &claims_text,
+        &description_text,
         drawing_parts.as_deref(),
     );
+
+    // 负面防误绿守卫：未识别到任何附图标号时不得返回 passed=true 绿标
+    let insufficient_input = report.total_numerals == 0;
+    let passed = if insufficient_input {
+        false
+    } else {
+        report.passed
+    };
+    let summary = if insufficient_input {
+        if let Some(ref pn) = resolved_patent_number {
+            format!(
+                "已自动加载本地专利 {} 全文，但未在权利要求/说明书中提取到附图标号（如“阀体10”“腔室(2)”），请检查该专利文本是否完整收录或手动粘贴含标号正文。",
+                pn
+            )
+        } else {
+            "未在输入文本中识别到任何附图标号（如“阀体10”“腔室(2)”等）。若您仅填写了未收录本地库的专利号，请先点击「🔍 查询」联网获取全文，或粘贴含附图标号的权利要求/说明书正文后再核查。".to_string()
+        }
+    } else if let Some(ref pn) = resolved_patent_number {
+        format!("已自动加载本地专利 {} 全文。{}", pn, report.summary)
+    } else {
+        report.summary
+    };
+
     Json(json!({
         "status": "ok",
-        "passed": report.passed,
+        "passed": passed,
+        "insufficient_input": insufficient_input,
+        "resolved_patent_number": resolved_patent_number,
         "total_numerals": report.total_numerals,
         "issue_count": report.issue_count,
-        "summary": report.summary,
+        "summary": summary,
         "parts": report.parts,
         "issues": report.issues,
     }))
@@ -2242,5 +2314,55 @@ mod patent_image_proxy_tests {
         let (st, _, summary) = super::map_google_patents_events_to_status(&events);
         assert_eq!(st, crate::search::providers::epo_ops::LegalStatus::Active);
         assert_eq!(summary.matches("Patent grant (2024-06-14)").count(), 1);
+    }
+
+    #[tokio::test]
+    async fn numeral_consistency_check_resolves_patent_number_and_blocks_zero_numeral_false_pass() {
+        let state = crate::common::init_app_state(":memory:").expect("init app state");
+        let patent = crate::patent::Patent {
+            id: "num-check-demo".into(),
+            patent_number: "CN99990002U".into(),
+            title: "双流道冷却电机".into(),
+            claims: "1. 一种双流道冷却电机，其特征在于包括定子铁芯(10)和螺旋冷却流道(20)。".into(),
+            description:
+                "具体实施方式：定子铁芯(10)外周环绕螺旋冷却流道(20)，导流罩(30)套设于端部。".into(),
+            ..Default::default()
+        };
+        state.db.insert_patent(&patent).expect("insert");
+
+        // 1) 传入专利号时应自动解析本地全文并提取到真实附图标号（> 0）
+        let resolved_resp = super::api_ai_numeral_consistency_check(
+            axum::extract::State(state.clone()),
+            axum::Json(serde_json::json!({
+                "claims_text": "",
+                "description_text": "CN99990002U"
+            })),
+        )
+        .await;
+        assert_eq!(resolved_resp.0["status"], "ok");
+        assert_eq!(resolved_resp.0["resolved_patent_number"], "CN99990002U");
+        assert!(
+            resolved_resp.0["total_numerals"].as_u64().unwrap_or(0) >= 2,
+            "应从解析后的本地专利全文提取标号: {}",
+            resolved_resp.0
+        );
+        assert_eq!(resolved_resp.0["insufficient_input"], false);
+
+        // 2) 负面反作弊测试：传入未收录专利号或无标号文本时，严禁返回 passed=true 假绿标
+        let empty_resp = super::api_ai_numeral_consistency_check(
+            axum::extract::State(state),
+            axum::Json(serde_json::json!({
+                "claims_text": "",
+                "description_text": "CN99999999X"
+            })),
+        )
+        .await;
+        assert_eq!(empty_resp.0["status"], "ok");
+        assert_eq!(empty_resp.0["total_numerals"], 0);
+        assert_eq!(empty_resp.0["insufficient_input"], true);
+        assert_eq!(
+            empty_resp.0["passed"], false,
+            "0 个标号严禁返回 passed=true 误导用户"
+        );
     }
 }

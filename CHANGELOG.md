@@ -4,6 +4,25 @@
 All notable changes are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
+## [v0.9.70] - 2026-11-23
+
+### 修复与深度质量提升 / Fixed & Quality Elevation
+
+- **数据库查重优先序修复（`src/db/patent.rs`）**：
+  - 修复 `Database::get_patent` 与 `Database::find_patent_by_number` 在历史库同专利号存在“旧摘要浅层行 + 新全文富化行”时无 `ORDER BY` 误返回空权要/空说明书旧行的缺陷，优先精确匹配 `id` 并按 `(LENGTH(claims)+LENGTH(description)+LENGTH(images)) DESC` 命中全文最完整记录（附回归单测）。
+- **两篇专利深度对比全面升级（`src/routes/ai.rs`、`templates/compare.html`）**：
+  - 将 `POST /api/ai/compare` 从浅层 1–9 通用提示词升级为「首席总工 × 资深专利代理师」全文档深度对比，接入预算熔断器、`ModelRole::DeepReasoning` 路由及 `extract_whole_document_signals` 全文定量参数/部件拓扑/隐藏实施例预挖，并保留 `依据N：`/`建议N：`/`结论：` 可核验锚点；
+  - 修复 `compare.html` 中 `autoFetchRefs()` 异步竞态覆盖手输专利号与推荐标题张冠李戴缺陷，将来源标签改至独立子行对齐输入框右边缘；补全 Markdown 渲染器的 `# `、`> `、`---`、`code` 单元格及表格首列最小宽度。
+- **OA 答复页三大核心工具真实接线与防误绿修复（`templates/office_action_response.html`、`src/routes/patent.rs`、`src/routes/oa_assist.rs`、`src/ai/oa_matrix.rs`）**：
+  - 修复 `runNumeralConsistencyCheck`、`buildOaFeatureMatrix`、`exportOaWordKit` 均错误读取不存在的 `current-claims-input`（正确 ID 为 `current-claims`）导致现行权利要求完全被忽略的 P0 断链；
+  - `api_ai_numeral_consistency_check` 与 `api_ai_oa_feature_matrix` 升级为支持直接输入本地专利号/ID 自动加载全文与说明书锚点；0 标号场景严禁返回 `passed: true` 绿标，改为 `insufficient_input: true` 琥珀色提示（附负面反作弊单测）；
+  - `split_atomic_features` 过滤“附图标记说明”与纯标号图例行，避免误列为原子特征 `F1`；三维矩阵表头加 `white-space: nowrap` 与横向滚动容器防竖排折行，结果区渲染后自动平滑滚动至视口；`restoreOaUi` 清理 0 字符失效草稿防误锁输入框。
+- **创意推演页闭环补齐（`templates/idea.html`、`src/routes/feature_cards.rs`、`src/pipeline/steps/deliverables.rs`、`src/routes/idea_reports.rs`）**：
+  - 接通 `Minimal Diff 2.0` 前端可视化卡片（创造性贡献 4 级徽标 + 专利法审查基准 + 三步法逐条映射）；
+  - 为特征卡提取（`feature-cards-generate`）与语义差异对比（`feature-cards-diff-semantic`）补齐 `log_ai_call` Token 记账并实时刷新页面消耗统计；
+  - 过滤 `build_bom_items` / 期刊手稿中的单字与口语碎片关键词噪声；修复技术版报告泄漏内部字段名 `web_results 和 patent_results`；升级 `idea.html` Markdown 渲染（表格单元格转义/加粗/代码、引用块、分隔线）；为「待推演」历史创意展示原始描述与「🚀 立即启动深度推演」按钮，窄屏选创意自动收起抽屉并汉化记忆页空态提示。
+
+---
 ## [v0.9.69] - 2026-11-23
 
 ### 新增与增强 / Added & Enhanced

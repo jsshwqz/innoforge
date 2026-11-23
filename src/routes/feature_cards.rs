@@ -202,6 +202,16 @@ pub async fn api_feature_card_diff(
             }
         };
         let verdict = classify_diff_semantic(fast_client.as_ref(), &card_a, &card_b).await;
+        if let Some(ref ai) = fast_client {
+            if !verdict.fallback_used {
+                let _ = s.db.log_ai_call(
+                    ai,
+                    "feature-cards-diff-semantic",
+                    Some(&card_a.idea_id),
+                    None,
+                );
+            }
+        }
         return Json(json!({
             "status": "ok",
             "card_a": { "id": card_a.id, "title": card_a.title },
@@ -750,6 +760,8 @@ pub async fn api_generate_feature_cards(
             .ai_client_fast()
             .clone_with_timeout(std::time::Duration::from_secs(60));
         if let Ok(raw) = fast_ai.chat_with_system(SYSTEM_PROMPT, &prompt, 0.2).await {
+            let _ =
+                s.db.log_ai_call(&fast_ai, "feature-cards-generate", Some(&idea_id), None);
             let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
             let cards =
                 crate::pipeline::steps::analysis::parse_ai_feature_cards_json(&idea_id, &raw, &now);

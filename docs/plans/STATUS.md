@@ -14,6 +14,13 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-11-23 — **真实全流程浏览器实测深度修复：`/compare` + `/idea` + `/oa-response` 质量跃升（v0.9.70）**
+
+- **状态 / Status**: ✅ 基于真实 LLM 与真实浏览器对 `/compare`、`/idea`、`/oa-response` 全流程深度审查发现的 P0/P1 缺陷全部闭环修复、通过本地全量测试与前后对比复测
+- **① 数据库与两篇专利深度对比**（`src/db/patent.rs`、`src/routes/ai.rs`、`templates/compare.html`）：`get_patent` 按富文本完整度排序避免命中历史浅层空行；`api_ai_compare` 接入全文预挖信号与 `DeepReasoning` 路由；修复 `autoFetchRefs` 竞态张冠李戴并完善 Markdown 表格与排版。
+- **② OA 答复三大工具真实接线与防误绿**（`templates/office_action_response.html`、`src/routes/patent.rs`、`src/routes/oa_assist.rs`、`src/ai/oa_matrix.rs`）：修复 `current-claims` ID 失配、支持专利号自动查库解析全文、拦截 0 标号假绿标、过滤附图标记图例行并优化三维矩阵表头与自动滚动。
+- **③ 创意推演页闭环与数据净化**（`templates/idea.html`、`src/routes/feature_cards.rs`、`src/pipeline/steps/deliverables.rs`、`src/routes/idea_reports.rs`）：渲染 `Minimal Diff 2.0` 卡片、补齐特征卡 AI Token 记账、过滤 BOM/期刊口语碎片关键词、消除技术版报告内部字段名泄漏并完善待推演卡片与 Markdown 渲染。
+
 ### 2026-11-23 — **研发问题四元组拆解器、`Minimal Diff 2.0`、第三类「专利代理师版 (`type=patent`)」报告与四角色模型路由收口（v0.9.69）**
 
 - **状态 / Status**: ✅ 本地全量验证与隔离端口实测通过，提交 PR 合入 `main` 并打 `v0.9.69` Tag（6 版 `0.9.x` 规划全面闭环）

@@ -969,29 +969,90 @@ pub async fn api_ai_vision_figure_check(
     (StatusCode::OK, Json(json!(result)))
 }
 
-/// Batch 8: 多对比文件（D1/D2/D3）三维特征对比矩阵
+fn try_resolve_oa_patent_ref(db: &crate::db::Database, raw: &str) -> Option<crate::patent::Patent> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty()
+        || trimmed.contains('\n')
+        || trimmed.chars().count() > 64
+        || trimmed.contains('。')
+        || trimmed.contains('；')
+        || trimmed.contains('，')
+    {
+        return None;
+    }
+    db.find_patent_by_number(trimmed)
+        .ok()
+        .flatten()
+        .or_else(|| db.get_patent(trimmed).ok().flatten())
+}
+
+/// Batch 8: 多对比文件（D1/D2/D3）三维特征对比矩阵（v0.9.70 支持专利号自动查库解析全文）
 /// POST /api/ai/oa-feature-matrix
 pub async fn api_ai_oa_feature_matrix(
+    State(s): State<AppState>,
     Json(req): Json<serde_json::Value>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let claims = req["claims"].as_str().unwrap_or("");
-    let spec_text = req["spec_text"].as_str().unwrap_or("");
+    let raw_claims = req["claims"].as_str().unwrap_or("");
+    let raw_spec = req["spec_text"].as_str().unwrap_or("");
+
+    let mut claims = raw_claims.to_string();
+    let mut spec_text = raw_spec.to_string();
+
+    if let Some(p) = try_resolve_oa_patent_ref(&s.db, raw_spec) {
+        spec_text = if !p.description.trim().is_empty() {
+            format!("{}\n{}", p.abstract_text, p.description)
+        } else {
+            p.abstract_text.clone()
+        };
+        if claims.trim().is_empty() || claims.trim().eq_ignore_ascii_case(raw_spec.trim()) {
+            claims = if !p.claims.trim().is_empty() {
+                p.claims.clone()
+            } else {
+                p.abstract_text.clone()
+            };
+        }
+    } else if let Some(p) = try_resolve_oa_patent_ref(&s.db, raw_claims) {
+        claims = if !p.claims.trim().is_empty() {
+            p.claims.clone()
+        } else {
+            p.abstract_text.clone()
+        };
+        if spec_text.trim().is_empty() {
+            spec_text = if !p.description.trim().is_empty() {
+                format!("{}\n{}", p.abstract_text, p.description)
+            } else {
+                p.abstract_text.clone()
+            };
+        }
+    }
+
     let refs: Vec<crate::ai::case_input::ReferenceDocument> = req["refs"]
         .as_array()
         .map(|arr| {
             arr.iter()
                 .enumerate()
                 .filter_map(|(idx, v)| {
-                    let text = v.as_str().or_else(|| v["full_text"].as_str())?;
+                    let raw_text = v.as_str().or_else(|| v["full_text"].as_str())?;
                     let label = v["label"]
                         .as_str()
                         .map(ToString::to_string)
                         .unwrap_or_else(|| format!("D{}", idx + 1));
-                    let pub_num = v["publication_number"].as_str().unwrap_or("").to_string();
+                    let mut pub_num = v["publication_number"].as_str().unwrap_or("").to_string();
+                    let full_text = if let Some(p) = try_resolve_oa_patent_ref(&s.db, raw_text) {
+                        if pub_num.is_empty() {
+                            pub_num = p.patent_number.clone();
+                        }
+                        format!(
+                            "{}\n{}\n{}\n{}",
+                            p.title, p.abstract_text, p.claims, p.description
+                        )
+                    } else {
+                        raw_text.to_string()
+                    };
                     Some(crate::ai::case_input::ReferenceDocument {
                         label,
                         publication_number: pub_num,
-                        full_text: text.to_string(),
+                        full_text,
                         extraction_method: None,
                         page_count: None,
                         technical_field: None,
@@ -1001,6 +1062,67 @@ pub async fn api_ai_oa_feature_matrix(
         })
         .unwrap_or_default();
 
-    let matrix = crate::ai::oa_matrix::build_multi_doc_feature_matrix(claims, spec_text, &refs);
+    let matrix = crate::ai::oa_matrix::build_multi_doc_feature_matrix(&claims, &spec_text, &refs);
     (StatusCode::OK, Json(json!(matrix)))
+}
+
+#[cfg(test)]
+mod oa_matrix_route_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn api_ai_oa_feature_matrix_resolves_patent_numbers_from_db() {
+        let state = crate::common::init_app_state(":memory:").expect("init app state");
+        let app_patent = crate::patent::Patent {
+            id: "oa-app-1".into(),
+            patent_number: "CN99990010U".into(),
+            title: "双通道液冷定子".into(),
+            claims: "1. 一种双通道液冷定子，其特征在于：定子轭部内设有螺旋微流道与端部喷淋环。"
+                .into(),
+            description: "[0018] 螺旋微流道与端部喷淋环串联导通，降低定子绕组温升。".into(),
+            ..Default::default()
+        };
+        let d1_patent = crate::patent::Patent {
+            id: "oa-d1-1".into(),
+            patent_number: "CN99990011A".into(),
+            title: "常规水冷机壳".into(),
+            claims: "1. 一种电机水冷机壳，包括环形水套。".into(),
+            description: "[0009] 机壳外壁设置环形水套，未涉及定子轭部内部流道。".into(),
+            ..Default::default()
+        };
+        state.db.insert_patent(&app_patent).expect("insert app");
+        state.db.insert_patent(&d1_patent).expect("insert d1");
+
+        let (status, Json(body)) = api_ai_oa_feature_matrix(
+            State(state),
+            Json(json!({
+                "claims": "",
+                "spec_text": "CN99990010U",
+                "refs": [{ "label": "D1", "full_text": "CN99990011A" }]
+            })),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        let rows = body["rows"].as_array().expect("rows array");
+        assert!(
+            !rows.is_empty(),
+            "仅传专利号时也必须查库解析出真实原子技术特征: {}",
+            body
+        );
+        assert!(
+            rows.iter().any(|r| r["feature_text"]
+                .as_str()
+                .unwrap_or("")
+                .contains("螺旋微流道")),
+            "应解析出本申请真实特征而非专利号字符串: {}",
+            body
+        );
+        assert!(
+            rows.iter()
+                .any(|r| r["app_anchor"].as_str() == Some("[0018]")),
+            "应命中本申请说明书段落锚点 [0018]: {}",
+            body
+        );
+    }
 }

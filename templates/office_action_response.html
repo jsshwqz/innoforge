@@ -15,17 +15,17 @@
     <style>
     .confirm-modal-overlay {
         display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-        background: rgba(0,0,0,0.4); z-index: 2000;
+        background: rgba(0,0,0,0.65); z-index: 2000;
     }
     .confirm-modal-overlay.show { display: flex; align-items: center; justify-content: center; }
     .confirm-modal {
-        background: #fff; border-radius: 8px; padding: 24px; min-width: 320px; max-width: 480px;
-        box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+        background: #161b22; color: #e6edf3; border: 1px solid #30363d; border-radius: 8px; padding: 24px; min-width: 320px; max-width: 480px;
+        box-shadow: 0 8px 28px rgba(0,0,0,0.45);
     }
-    .confirm-modal h3 { margin: 0 0 16px 0; }
-    .confirm-modal p { margin: 0 0 16px 0; line-height: 1.6; }
+    .confirm-modal h3 { margin: 0 0 16px 0; color: #f0f6fc; }
+    .confirm-modal p { margin: 0 0 16px 0; line-height: 1.6; color: #e6edf3; }
     .date-modal-input {
-        width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; margin-bottom: 12px;
+        width: 100%; padding: 8px; border: 1px solid #30363d; background: #0d1117; color: #e6edf3; border-radius: 4px; box-sizing: border-box; margin-bottom: 12px;
     }
     </style>
 </head>
@@ -474,15 +474,18 @@
 
     function restoreOaUi() {
         for (let key in _uploadedData) {
+            var d = uploadedData[key];
+            if ((key === 'my' || key === 'oa' || key.startsWith('ref_')) && (!d || !(d.content || '').trim())) {
+                delete uploadedData[key];
+                continue;
+            }
             if (key === 'my') {
                 document.getElementById('my-patent').disabled = true;
-                var d = uploadedData[key];
                 document.getElementById('my-file-tag').innerHTML = '<span class="file-tag">📋 ' + escapeHtml(d.title)
                     + ' (' + (d.content || '').length + t('common.chars') + ')'
                     + '<span class="tag-remove" onclick="clearMyPatent()">&times;</span></span>';
             } else if (key === 'oa') {
                 document.getElementById('oa-input').disabled = true;
-                var d = uploadedData[key];
                 document.getElementById('oa-file-tag').innerHTML = '<span class="file-tag">📋 ' + escapeHtml(d.title)
                     + ' (' + (d.content || '').length + t('common.chars') + ')'
                     + '<span class="tag-remove" onclick="clearOA()">&times;</span></span>';
@@ -492,7 +495,6 @@
                 for (let i = 0; i < rows.length; i++) {
                     if (rows[i].getAttribute('data-idx') === idx) {
                         rows[i].querySelector('.ref-input').disabled = true;
-                        var d = uploadedData[key];
                         var tag = rows[i].querySelector('.file-tag-container') || document.createElement('span');
                         tag.className = 'file-tag-container';
                         tag.innerHTML = '<span class="file-tag">📋 ' + escapeHtml(d.title)
@@ -5167,7 +5169,7 @@
         var btn = document.getElementById('btn-numeral-check');
         var patentData = getMyPatent();
         var specText = patentData ? (patentData.content || patentData) : '';
-        var claimsEl = document.getElementById('current-claims-input');
+        var claimsEl = document.getElementById('current-claims');
         var claimsText = (claimsEl && claimsEl.value) ? claimsEl.value : '';
         if (!claimsText.trim() && (!specText || !String(specText).trim())) {
             alert('请先输入本申请专利文本或当前权利要求，再执行标号一致性核查。');
@@ -5206,8 +5208,13 @@
         panel.className = 'cmp-section';
         panel.style.marginTop = '12px';
 
+        var totalNums = Number(data.total_numerals || 0);
+        var isInsufficient = !!data.insufficient_input || totalNums === 0;
+        var isPassed = !!data.passed && !isInsufficient;
+        panel.style.borderLeft = '3px solid ' + (isPassed ? '#3fb950' : (isInsufficient ? '#d29922' : '#f85149'));
+
         var title = document.createElement('h4');
-        title.textContent = (data.passed ? '✅ ' : '⚠️ ') + '交底书/权要附图标号一致性核查 (' + Number(data.total_numerals || 0) + ' 个标号)';
+        title.textContent = (isPassed ? '✅ ' : '⚠️ ') + '交底书/权要附图标号一致性核查 (' + totalNums + ' 个标号)';
         panel.appendChild(title);
 
         var summary = document.createElement('p');
@@ -5279,13 +5286,14 @@
         var anchor = document.getElementById('btn-numeral-check');
         if (anchor && anchor.parentNode && anchor.parentNode.parentNode) {
             anchor.parentNode.parentNode.appendChild(panel);
+            panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
     }
 
     async function buildOaFeatureMatrix() {
         var claimsData = getMyPatent();
         var specText = claimsData ? (claimsData.content || claimsData) : '';
-        var claimsEl = document.getElementById('current-claims-input');
+        var claimsEl = document.getElementById('current-claims');
         var claims = (claimsEl && claimsEl.value) ? claimsEl.value : (typeof specText === 'string' ? specText : '');
         var refsArr = getRefs();
         var refs = refsArr.map(function(r, idx) {
@@ -5326,19 +5334,32 @@
         summary.textContent = '🧮 ' + (t('oa.matrix.title') || '多对比文件三维特征比对矩阵') + ' — ' + (data.summary || '');
         details.appendChild(summary);
 
+        var tableWrap = document.createElement('div');
+        tableWrap.style.cssText = 'overflow-x:auto;margin-top:8px;';
+
         var table = document.createElement('table');
         table.style.width = '100%';
         table.style.borderCollapse = 'collapse';
-        table.style.marginTop = '8px';
         table.style.fontSize = '0.85em';
 
+        var colDefs = [
+            { label: '区别', minW: '48px', nowrap: true },
+            { label: '原子技术特征', minW: '260px', nowrap: false },
+            { label: '本案锚点', minW: '88px', nowrap: true },
+            { label: 'D1', minW: '92px', nowrap: true },
+            { label: 'D2', minW: '92px', nowrap: true },
+            { label: 'D3', minW: '92px', nowrap: true },
+            { label: '结合障碍', minW: '200px', nowrap: false }
+        ];
         var thead = document.createElement('thead');
         var htr = document.createElement('tr');
-        ['区别', '特征', '本案锚点', 'D1', 'D2', 'D3', '结合障碍'].forEach(function(col) {
+        colDefs.forEach(function(col) {
             var th = document.createElement('th');
-            th.textContent = col;
+            th.textContent = col.label;
             th.style.textAlign = 'left';
-            th.style.padding = '6px';
+            th.style.padding = '6px 8px';
+            th.style.minWidth = col.minW;
+            th.style.whiteSpace = 'nowrap';
             th.style.borderBottom = '1px solid var(--border-color, #30363d)';
             htr.appendChild(th);
         });
@@ -5349,6 +5370,9 @@
         (data.rows || []).forEach(function(row) {
             var tr = document.createElement('tr');
             var tdChk = document.createElement('td');
+            tdChk.style.padding = '6px 8px';
+            tdChk.style.whiteSpace = 'nowrap';
+            tdChk.style.borderBottom = '1px solid var(--border-color, #30363d)';
             var chk = document.createElement('input');
             chk.type = 'checkbox';
             chk.checked = !!row.is_distinguishing;
@@ -5356,33 +5380,36 @@
             tr.appendChild(tdChk);
 
             [
-                row.feature_text || '',
-                row.app_anchor || '—',
-                (row.d1 && row.d1.status ? row.d1.status : '') + (row.d1 && row.d1.anchor ? ' ' + row.d1.anchor : ''),
-                (row.d2 && row.d2.status ? row.d2.status : '') + (row.d2 && row.d2.anchor ? ' ' + row.d2.anchor : ''),
-                (row.d3 && row.d3.status ? row.d3.status : '') + (row.d3 && row.d3.anchor ? ' ' + row.d3.anchor : ''),
-                row.combination_barrier || ''
-            ].forEach(function(val) {
+                { val: row.feature_text || '', nowrap: false },
+                { val: row.app_anchor || '—', nowrap: true },
+                { val: (row.d1 && row.d1.status ? row.d1.status : '') + (row.d1 && row.d1.anchor ? ' ' + row.d1.anchor : ''), nowrap: true },
+                { val: (row.d2 && row.d2.status ? row.d2.status : '') + (row.d2 && row.d2.anchor ? ' ' + row.d2.anchor : ''), nowrap: true },
+                { val: (row.d3 && row.d3.status ? row.d3.status : '') + (row.d3 && row.d3.anchor ? ' ' + row.d3.anchor : ''), nowrap: true },
+                { val: row.combination_barrier || '', nowrap: false }
+            ].forEach(function(cell) {
                 var td = document.createElement('td');
-                td.textContent = val;
-                td.style.padding = '6px';
+                td.textContent = cell.val;
+                td.style.padding = '6px 8px';
+                if (cell.nowrap) td.style.whiteSpace = 'nowrap';
                 td.style.borderBottom = '1px solid var(--border-color, #30363d)';
                 tr.appendChild(td);
             });
             tbody.appendChild(tr);
         });
         table.appendChild(tbody);
-        details.appendChild(table);
+        tableWrap.appendChild(table);
+        details.appendChild(tableWrap);
 
         var btnRow = document.getElementById('btn-oa-matrix');
         if (btnRow && btnRow.parentNode && btnRow.parentNode.parentNode) {
             btnRow.parentNode.parentNode.appendChild(details);
+            details.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
     }
 
     function exportOaWordKit() {
         var caseId = getCurrentPatentNumber() || 'draft';
-        var claimsEl = document.getElementById('current-claims-input');
+        var claimsEl = document.getElementById('current-claims');
         var newClaims = claimsEl && claimsEl.value ? claimsEl.value : '';
         var url = '/api/oa/' + encodeURIComponent(caseId) + '/export/docx?new_claims=' + encodeURIComponent(newClaims);
         window.location.href = url;
