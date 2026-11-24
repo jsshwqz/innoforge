@@ -402,6 +402,11 @@ impl AppConfig {
                         None => ("未配置视觉模型（将回退文字通道）".to_string(), false),
                     },
                 };
+                let resolved_model = resolved_model
+                    .trim()
+                    .strip_prefix("models/")
+                    .unwrap_or(resolved_model.trim())
+                    .to_string();
                 crate::ai::router::ModelRouteInfo {
                     role: spec.role,
                     role_key: spec.role_key.to_string(),

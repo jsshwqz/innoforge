@@ -478,16 +478,52 @@ fn find_explicit_legend_blocks(text: &str) -> Vec<(usize, usize)> {
             break;
         };
         let rest = text.get(hdr_after..).unwrap_or("");
-        // 寻找图例段结尾（遇到空行双换行或「具体实施方式」等）
-        let mut end_rel = rest.len().min(2000);
-        if let Some(dbl) = rest.find("\n\n") {
-            if dbl > 8 {
-                end_rel = end_rel.min(dbl);
+        // 判断是否为 Google Patents / CNIPA 抓取的双换行多列表格型图例（如「附图标号说明：\n\n标号\n\n名称\n\n10\n\n定子总成...」）
+        let leading_lines: Vec<&str> = rest
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && *l != "：" && *l != ":")
+            .take(6)
+            .collect();
+        let is_multiline_table_legend = leading_lines.len() >= 2
+            && (matches!(
+                leading_lines[0],
+                "标号" | "名称" | "附图标记" | "部件名称" | "序号"
+            ) || (leading_lines[0].chars().all(|c| c.is_ascii_digit())
+                && leading_lines[0].len() <= 3
+                && leading_lines[1].chars().count() <= 14
+                && !leading_lines[1].contains('。')));
+
+        // 寻找图例段结尾：表格型图例可跨 \n\n 直至遇到长叙述句或停止章节标题；普通图例遇双换行/停止标题即停
+        let mut end_rel = rest.len().min(if is_multiline_table_legend {
+            6000
+        } else {
+            2000
+        });
+        if is_multiline_table_legend {
+            let mut offset = 0usize;
+            for raw_line in rest.split_inclusive('\n') {
+                let t = raw_line.trim();
+                let is_narrative = t.chars().count() > 26 && (t.contains('。') || t.contains('，'));
+                if is_narrative && offset > 16 {
+                    end_rel = end_rel.min(offset);
+                    break;
+                }
+                offset += raw_line.len();
+                if offset >= end_rel {
+                    break;
+                }
             }
-        }
-        if let Some(dbl_crlf) = rest.find("\r\n\r\n") {
-            if dbl_crlf > 8 {
-                end_rel = end_rel.min(dbl_crlf);
+        } else {
+            if let Some(dbl) = rest.find("\n\n") {
+                if dbl > 8 {
+                    end_rel = end_rel.min(dbl);
+                }
+            }
+            if let Some(dbl_crlf) = rest.find("\r\n\r\n") {
+                if dbl_crlf > 8 {
+                    end_rel = end_rel.min(dbl_crlf);
+                }
             }
         }
         for stop in STOP_HEADERS {
@@ -784,17 +820,66 @@ fn extract_legend_designators_with_ranges(
         };
         let mut block_found = 0usize;
 
-        if let Some(ref re) = legend_sep_re {
-            for cap in re.captures_iter(block_text) {
-                if let (Some(num_m), Some(name_m)) = (cap.get(1), cap.get(2)) {
-                    let number = num_m.as_str().trim().to_string();
-                    if number == "0" || number.starts_with('0') {
-                        continue;
+        // 格式 D（Google Patents / CNIPA 抓取的双换行多列表格：`标号\n\n名称\n\n10\n\n定子总成\n\n400\n\n槽绝缘纸`）
+        let non_empty_lines: Vec<&str> = block_text
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .collect();
+        if non_empty_lines.len() >= 4 {
+            const TABLE_HEADERS: &[&str] = &[
+                "标号",
+                "名称",
+                "附图标记",
+                "部件名称",
+                "序号",
+                "说明",
+                "附图标记说明",
+                "附图标记说明：",
+                "附图标号说明",
+                "附图标号说明：",
+            ];
+            let mut idx = 0usize;
+            while idx + 1 < non_empty_lines.len() {
+                let cur = non_empty_lines[idx];
+                if TABLE_HEADERS.contains(&cur) {
+                    idx += 1;
+                    continue;
+                }
+                let is_pure_num =
+                    !cur.is_empty() && cur.len() <= 3 && cur.chars().all(|c| c.is_ascii_digit());
+                if is_pure_num && cur != "0" && !cur.starts_with('0') {
+                    let next_line = non_empty_lines[idx + 1];
+                    if !TABLE_HEADERS.contains(&next_line)
+                        && !next_line.chars().all(|c| c.is_ascii_digit())
+                        && !next_line.contains('。')
+                    {
+                        let name = trim_legend_name(next_line);
+                        if is_valid_part_name(&name) {
+                            push_unique_part(&mut parts, cur.to_string(), name);
+                            block_found += 1;
+                            idx += 2;
+                            continue;
+                        }
                     }
-                    let name = trim_legend_name(name_m.as_str());
-                    if is_valid_part_name(&name) {
-                        push_unique_part(&mut parts, number, name);
-                        block_found += 1;
+                }
+                idx += 1;
+            }
+        }
+
+        if block_found == 0 {
+            if let Some(ref re) = legend_sep_re {
+                for cap in re.captures_iter(block_text) {
+                    if let (Some(num_m), Some(name_m)) = (cap.get(1), cap.get(2)) {
+                        let number = num_m.as_str().trim().to_string();
+                        if number == "0" || number.starts_with('0') {
+                            continue;
+                        }
+                        let name = trim_legend_name(name_m.as_str());
+                        if is_valid_part_name(&name) {
+                            push_unique_part(&mut parts, number, name);
+                            block_found += 1;
+                        }
                     }
                 }
             }
@@ -878,12 +963,12 @@ fn extract_legend_designators_with_ranges(
     (parts, ranges)
 }
 
-/// 仅提取行内式引用（如 `阀芯3`、`驱动电机（2）`），严格过滤温度/百分比/日期/不匹配括号等伪标号
+/// 仅提取行内式引用（如 `阀芯3`、`驱动电机（2）`），严禁跨换行错配多列表格单元格，严格过滤温度/百分比/日期/不匹配括号等伪标号
 fn extract_inline_designators(text: &str) -> Vec<PartDesignator> {
     let mut parts = Vec::new();
-    let Ok(inline_re) =
-        regex::Regex::new(r"([\u4e00-\u9fa5]{2,14})\s*(?:[（(]\s*(\d{1,3})\s*[）)]|(\d{1,3}))")
-    else {
+    let Ok(inline_re) = regex::Regex::new(
+        r"([\u4e00-\u9fa5]{2,14})[ \t]*(?:[（(][ \t]*(\d{1,3})[ \t]*[）)]|(\d{1,3}))",
+    ) else {
         return parts;
     };
     for cap in inline_re.captures_iter(text) {
@@ -1040,6 +1125,29 @@ pub fn check_numeral_consistency(
         let acc = map.entry(p.number.clone()).or_default();
         acc.in_claims = true;
         add_name(acc, &p.name);
+    }
+
+    // 3b. 对已在图例中明确定义的部件标号（含 40/50/51/130/510/622 等），在正文与权利要求中直接核验 `名称+标号` 或 `名称(标号)`，避免被行内启发式 `n_val > 35` 误筛
+    for p in &legend_parts {
+        let p_plain = format!("{}{}", p.name, p.number);
+        let p_cn = format!("{}（{}）", p.name, p.number);
+        let p_en = format!("{}({})", p.name, p.number);
+        if let Some(acc) = map.get_mut(&p.number) {
+            if !acc.in_description
+                && (desc_body_only.contains(&p_plain)
+                    || desc_body_only.contains(&p_cn)
+                    || desc_body_only.contains(&p_en))
+            {
+                acc.in_description = true;
+            }
+            if !acc.in_claims
+                && (claims_text.contains(&p_plain)
+                    || claims_text.contains(&p_cn)
+                    || claims_text.contains(&p_en))
+            {
+                acc.in_claims = true;
+            }
+        }
     }
 
     // 4. 可选的附图视觉识别标号清单
@@ -1305,6 +1413,36 @@ mod tests {
             b_report.passed,
             "无分隔符图例格式不应误报缺失: {:?}",
             b_report.issues
+        );
+    }
+
+    #[test]
+    fn double_newline_two_column_cnipa_table_parses_cleanly_without_mis_pairing() {
+        let claims =
+            "1. 一种电机冷却系统，包括定子总成(10)、定子铁芯(100)、槽绝缘纸(400)与电机(20)。";
+        let desc = "附图标号说明：\n\n标号\n\n名称\n\n标号\n\n名称\n\n10\n\n定子总成\n\n400\n\n槽绝缘纸\n\n20\n\n电机\n\n100\n\n定子铁芯\n\n具体实施方式\n本实施例公开定子总成10，其内部包括定子铁芯100与槽绝缘纸400，安装于电机20壳体内。";
+        let report = check_numeral_consistency(claims, desc, None);
+        assert!(
+            report.passed,
+            "双换行多列表格标号不得错配产生误报: {:?}",
+            report.issues
+        );
+        let by_num: std::collections::HashMap<&str, &str> = report
+            .parts
+            .iter()
+            .map(|p| (p.number.as_str(), p.name.as_str()))
+            .collect();
+        assert_eq!(by_num.get("10"), Some(&"定子总成"));
+        assert_eq!(by_num.get("400"), Some(&"槽绝缘纸"));
+        assert_eq!(by_num.get("20"), Some(&"电机"));
+        assert_eq!(by_num.get("100"), Some(&"定子铁芯"));
+        assert!(
+            !report
+                .parts
+                .iter()
+                .any(|p| p.name == "名称" || p.name == "标号"),
+            "表头「名称」「标号」绝不得被当成部件名: {:?}",
+            report.parts
         );
     }
 }

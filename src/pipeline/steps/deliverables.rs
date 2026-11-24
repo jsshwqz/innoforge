@@ -444,9 +444,14 @@ fn is_valid_technical_keyword(kw: &str) -> bool {
     if has_cjk && char_count == 2 {
         const CONVERSATIONAL_FRAGMENTS: &str =
             "你我他她它这那哪怎吗呢吧啊呀哦嗯啦嘛了的得地着过把被给向对与和或但而却就都也还又再很太最更没不无话记";
-        if trimmed
-            .chars()
-            .any(|c| CONVERSATIONAL_FRAGMENTS.contains(c))
+        const STOPWORD_BIGRAMS: &[&str] = &[
+            "先分", "来聊", "一下", "一些", "一个", "这个", "那个", "怎么", "什么", "可以", "能够",
+            "进行", "通过", "使用", "采用", "主要", "目前", "现在", "分析", "讨论", "研究", "介绍",
+        ];
+        if STOPWORD_BIGRAMS.contains(&trimmed)
+            || trimmed
+                .chars()
+                .any(|c| CONVERSATIONAL_FRAGMENTS.contains(c))
         {
             return false;
         }

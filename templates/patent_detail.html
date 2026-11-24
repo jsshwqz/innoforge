@@ -29,12 +29,12 @@
                     <button class="ai-btn orange" id="collect-btn" onclick="toggleCollect()">⭐ 收藏</button>
                 </div>
             </div>
-            <div id="ai-summary" class="ai-summary" style="display:none"></div>
+            <div id="ai-summary" class="ai-summary" style="display:none;max-height:75vh;overflow-y:auto;"></div>
 
             <!-- 收藏夹 & 标签 -->
             <div class="collect-tags-area">
                 <span id="collections-display"></span>
-                <span class="divider">|</span>
+                <span class="divider" id="collect-tags-divider" style="display:none;">|</span>
                 <span id="tags-display"></span>
                 <input type="text" id="new-tag-input" placeholder="添加标签..." onkeydown="if(event.key==='Enter')addTag()">
             </div>
@@ -92,7 +92,7 @@
                 <div style="margin-bottom:12px;">
                     <button class="btn-primary" onclick="analyzeClaims()" id="claims-analyze-btn">🔍 分析权利要求 <span class="reasoner-badge">Reasoner</span></button>
                 </div>
-                <div id="claims-analysis-result" class="analysis-result" style="display:none;margin-bottom:16px;"></div>
+                <div id="claims-analysis-result" class="analysis-result" style="display:none;margin-bottom:16px;max-height:75vh;overflow-y:auto;"></div>
                 <div class="content-box"><pre>{{claims}}</pre></div>
             </div>
             <div id="tab-description" class="tab-content">
@@ -116,6 +116,7 @@
                     <button id="patent-stop-btn" class="btn-stop" style="display:none" onclick="stopPatentGeneration()" data-i18n="detail.stop"></button>
                     <button id="patent-export-btn" class="btn-export-ghost" style="display:none" onclick="exportPatentConclusions()" data-i18n="detail.exportConclusions"></button>
                 </div>
+            </div>
             <div id="tab-citations" class="tab-content">
                 <div style="padding: 12px 0;">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
@@ -138,7 +139,6 @@
                         <p class="muted" data-i18n="oa.workflow.empty"></p>
                     </div>
                 </div>
-            </div>
             </div>
         </div>
 
@@ -212,8 +212,33 @@
         var html = [];
         var inTable = false;
         var inList = false;
+        function cleanInlineLatex(raw) {
+            return String(raw || '').replace(/\$([^$\n]{1,120})\$/g, function(_, expr) {
+                return expr
+                    .replace(/\\text\{([^}]*)\}/g, '$1')
+                    .replace(/\\mathrm\{([^}]*)\}/g, '$1')
+                    .replace(/\\rightarrow|\\to/g, '→')
+                    .replace(/\\leftarrow/g, '←')
+                    .replace(/\\leftrightarrow/g, '↔')
+                    .replace(/\\ge|\\geq/g, '≥')
+                    .replace(/\\le|\\leq/g, '≤')
+                    .replace(/\\approx/g, '≈')
+                    .replace(/\\neq|\\ne/g, '≠')
+                    .replace(/\\times/g, '×')
+                    .replace(/\\pm/g, '±')
+                    .replace(/\\mu/g, 'μ')
+                    .replace(/\^\\circ\s*C/g, '°C')
+                    .replace(/\^\{\\circ\}\s*C/g, '°C')
+                    .replace(/\^\\circ/g, '°')
+                    .replace(/\^\{\\circ\}/g, '°')
+                    .replace(/\^\{([^}]+)\}/g, '^$1')
+                    .replace(/\\,/g, ' ')
+                    .replace(/\\/g, '');
+            });
+        }
         function inlineFmt(s) {
-            return escapeHtml(s)
+            return escapeHtml(cleanInlineLatex(s))
+                .replace(/&lt;br\s*\/?&gt;/gi, '<br>')
                 .replace(/\*\*([^*]+)\*\*/g, '<strong style="color:#f0f6fc;">$1</strong>')
                 .replace(/`([^`]+)`/g, '<code style="background:#21262d;padding:1px 5px;border-radius:4px;color:#79c0ff;">$1</code>');
         }
@@ -227,11 +252,17 @@
                 if (!inTable) {
                     inTable = true;
                     html.push('<div style="overflow-x:auto;margin:10px 0;"><table style="width:100%;border-collapse:collapse;font-size:13px;"><thead><tr>');
-                    cells.forEach(function(c) { html.push('<th style="text-align:left;padding:6px 10px;border:1px solid #30363d;background:#161b22;color:#58a6ff;">' + inlineFmt(c) + '</th>'); });
+                    cells.forEach(function(c, ci) {
+                        var extra = ci === 0 ? 'min-width:120px;white-space:nowrap;' : '';
+                        html.push('<th style="text-align:left;padding:6px 10px;border:1px solid #30363d;background:#161b22;color:#58a6ff;' + extra + '">' + inlineFmt(c) + '</th>');
+                    });
                     html.push('</tr></thead><tbody>');
                 } else {
                     html.push('<tr>');
-                    cells.forEach(function(c) { html.push('<td style="padding:6px 10px;border:1px solid #30363d;color:#c9d1d9;vertical-align:top;">' + inlineFmt(c) + '</td>'); });
+                    cells.forEach(function(c, ci) {
+                        var extra = ci === 0 ? 'min-width:120px;font-weight:600;' : '';
+                        html.push('<td style="padding:6px 10px;border:1px solid #30363d;color:#c9d1d9;vertical-align:top;' + extra + '">' + inlineFmt(c) + '</td>');
+                    });
                     html.push('</tr>');
                 }
                 continue;
@@ -245,6 +276,12 @@
             } else if (/^>\s+/.test(trim)) {
                 if (inList) { html.push('</ul>'); inList = false; }
                 html.push('<blockquote style="margin:8px 0;padding:8px 12px;border-left:3px solid #58a6ff;background:#161b22;color:#8b949e;border-radius:0 6px 6px 0;">' + inlineFmt(trim.replace(/^>\s+/, '')) + '</blockquote>');
+            } else if (/^#{5,6}\s+/.test(trim)) {
+                if (inList) { html.push('</ul>'); inList = false; }
+                html.push('<h6 style="color:#a5d6ff;margin:10px 0 4px;font-size:13.5px;font-weight:600;">' + inlineFmt(trim.replace(/^#{5,6}\s+/, '')) + '</h6>');
+            } else if (/^####\s+/.test(trim)) {
+                if (inList) { html.push('</ul>'); inList = false; }
+                html.push('<h5 style="color:#79c0ff;margin:12px 0 6px;font-size:14px;">' + inlineFmt(trim.replace(/^####\s+/, '')) + '</h5>');
             } else if (/^###\s+/.test(trim)) {
                 if (inList) { html.push('</ul>'); inList = false; }
                 html.push('<h4 style="color:#58a6ff;margin:16px 0 8px;border-bottom:1px solid #30363d;padding-bottom:4px;">' + inlineFmt(trim.replace(/^###\s+/, '')) + '</h4>');
@@ -1094,11 +1131,13 @@
             if (data.similar && data.similar.length > 0) {
                 let html = '';
                 data.similar.forEach(p => {
+                    var metaParts = [];
+                    if (p.patent_number && String(p.patent_number).trim()) metaParts.push(escapeHtml(p.patent_number));
+                    if (p.applicant && String(p.applicant).trim()) metaParts.push(escapeHtml(p.applicant));
                     html += '<div style="padding: 12px; background: #0d1117; border-radius: 6px; margin-bottom: 12px;">'
                         + '<h4 style="margin: 0 0 8px 0;"><a href="/patent/' + encodeURIComponent(p.id) + '" style="color: #58a6ff;">' + escapeHtml(p.title || '无标题') + '</a></h4>'
                         + '<div style="color: #8b949e; font-size: 13px;">'
-                        + '<span>' + escapeHtml(p.patent_number || '暂无') + '</span> | '
-                        + '<span>' + escapeHtml(p.applicant || '暂无') + '</span>'
+                        + (metaParts.length ? metaParts.join(' · ') : '暂无元数据')
                         + '</div></div>';
                 });
                 document.getElementById('similar-list').innerHTML = DOMPurify.sanitize(html);
@@ -1654,9 +1693,9 @@
                     + 'onclick="focusDrawingPart(\'' + escapeHtml(p.number) + '\')" '
                     + 'title="点击联动高亮附图与部件 [' + escapeHtml(p.number) + '] ' + escapeHtml(p.name) + '" '
                     + 'style="background:rgba(88,166,255,0.16);border-bottom:1px dashed #58a6ff;color:#79c0ff;cursor:pointer;padding:0 2px;border-radius:3px;">';
-                const reInline = new RegExp('(' + name + '\\s*[（(]?' + num + '[）)]?)', 'g');
+                const reInline = new RegExp('(' + name + '[ \\t]*[（(]?' + num + '[）)]?)', 'g');
                 escaped = escaped.replace(reInline, chipStart + '$1</span>');
-                const reLegend = new RegExp('((?:^|[，,。；;\\s：:])' + num + '\\s*[-—－、：:]?\\s*' + name + ')', 'g');
+                const reLegend = new RegExp('((?:^|[，,。；;\\s：:])' + num + '[ \\t]*[-—－、：:]?[ \\t]*' + name + ')', 'g');
                 escaped = escaped.replace(reLegend, chipStart + '$1</span>');
             });
             preEl.innerHTML = safeSanitize(escaped);
@@ -1719,11 +1758,50 @@
         }
         showTab(tabName);
         const safeNum = String(num).replace(/"/g, '');
-        const target = document.querySelector('#tab-' + tabName + ' .vrag-text-ref[data-part-num="' + safeNum + '"]');
+        const matches = document.querySelectorAll('#tab-' + tabName + ' .vrag-text-ref[data-part-num="' + safeNum + '"]');
+        matches.forEach(function(el) {
+            el.classList.add('vrag-highlight-active');
+            el.style.background = '#ffd33d';
+            el.style.color = '#0d1117';
+            el.style.fontWeight = '700';
+            el.style.boxShadow = '0 0 0 2px rgba(255,211,61,0.45)';
+        });
+        const target = matches[0];
         if (target && target.scrollIntoView) {
             target.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
     }
+
+    // 详情页元信息空态与按钮同步收口（v0.9.72）
+    (function polishDetailMeta() {
+        var badge = document.getElementById('legal-status-badge');
+        var sel = document.getElementById('manual-legal-status-select');
+        if (badge && !badge.textContent.trim() && sel && sel.selectedIndex >= 0) {
+            var optText = sel.options[sel.selectedIndex].textContent || sel.value;
+            var icon = sel.value === 'Active' ? '🟢 ' : (sel.value === 'Expired' || sel.value === 'Rejected' ? '⚪ ' : '🟡 ');
+            badge.textContent = icon + optText;
+        }
+        document.querySelectorAll('.ipc-chip').forEach(function(chip) {
+            var txt = (chip.textContent || '').trim();
+            if (!txt || txt === '[]') {
+                chip.textContent = '暂无';
+                chip.style.opacity = '0.6';
+            }
+        });
+        var colDisp = document.getElementById('collections-display');
+        var divEl = document.getElementById('collect-tags-divider');
+        if (colDisp && divEl) {
+            var obs = new MutationObserver(function() {
+                divEl.style.display = colDisp.textContent.trim() ? 'inline' : 'none';
+            });
+            obs.observe(colDisp, { childList: true, subtree: true, characterData: true });
+            divEl.style.display = colDisp.textContent.trim() ? 'inline' : 'none';
+        }
+        var mainFullBtn = document.getElementById('load-full-btn');
+        if (mainFullBtn && mainFullBtn.textContent.indexOf('已加载') >= 0) {
+            setLoadFullButtons(mainFullBtn.textContent, '#238636');
+        }
+    })();
 
     loadCollectState();
     loadTags();

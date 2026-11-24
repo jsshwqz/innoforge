@@ -5408,9 +5408,19 @@
     }
 
     function exportOaWordKit() {
-        var caseId = getCurrentPatentNumber() || 'draft';
+        var myPat = getMyPatent();
+        var oaVal = (document.getElementById('oa-text') && document.getElementById('oa-text').value) || (uploadedData && uploadedData.oa && uploadedData.oa.content) || '';
         var claimsEl = document.getElementById('current-claims');
         var newClaims = claimsEl && claimsEl.value ? claimsEl.value : '';
+        if (!myPat && !String(oaVal).trim() && !newClaims.trim()) {
+            var toast = document.createElement('div');
+            toast.style.cssText = 'position:fixed;top:20px;right:20px;background:#9e6a03;color:#fff;padding:10px 16px;border-radius:8px;z-index:9999;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,0.4);';
+            toast.textContent = '⚠️ 请先输入本申请专利、审查意见通知书或现行权利要求，再导出 Word 答复套件 (.docx)';
+            document.body.appendChild(toast);
+            setTimeout(function() { toast.remove(); }, 3500);
+            return;
+        }
+        var caseId = getCurrentPatentNumber() || 'draft';
         var url = '/api/oa/' + encodeURIComponent(caseId) + '/export/docx?new_claims=' + encodeURIComponent(newClaims);
         window.location.href = url;
     }
