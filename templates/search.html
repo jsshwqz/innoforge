@@ -22,7 +22,9 @@
 <div class="search-grid">
 <input type="text" id="search-input" data-i18n-placeholder="search.placeholder">
 <select id="search-mode" onchange="toggleRegionSelect()">
-<option value="local" data-i18n="mode.local"></option>
+<option value="local" selected data-i18n="mode.local"></option>
+<option value="omni" data-i18n="mode.omni"></option>
+<option value="academic" data-i18n="mode.academic"></option>
 <option value="online" data-i18n="mode.online"></option>
 <option value="vector" data-i18n="mode.vector"></option>
 </select>
@@ -170,8 +172,10 @@ function clearSearchPdfMeta() {
   var searchZh = {
     'search.title': '技术调研',
     'search.placeholder': '输入关键词、文献号、申请人或发明人...',
+    'mode.omni': '🌐 AI 全域混搜（专利+论文+本地）',
     'mode.local': '本地数据库',
-    'mode.online': '在线搜索',
+    'mode.online': '在线专利搜索',
+    'mode.academic': '🎓 学术论文（OpenAlex/S2/PubMed）',
     'mode.vector': '🧠 语义向量',
     'vector.backfillBtn': '⚡ 一键后台补齐存量向量索引',
     'vector.backfillDone': '✅ 本地向量与分块索引已全部就绪',
@@ -265,8 +269,10 @@ function clearSearchPdfMeta() {
   var searchEn = {
     'search.title': 'Patent Search',
     'search.placeholder': 'Enter keywords, patent number, applicant, or inventor...',
+    'mode.omni': '🌐 AI Omni (Patents + Papers + Local)',
     'mode.local': 'Local DB',
-    'mode.online': 'Online',
+    'mode.online': 'Online Patents',
+    'mode.academic': '🎓 Academic (OpenAlex/S2/PubMed)',
     'mode.vector': '🧠 Semantic',
     'vector.backfillBtn': '⚡ Backfill Local Vector Index',
     'vector.backfillDone': '✅ Local vector & chunk index ready',
@@ -378,7 +384,9 @@ renderSidebar(
   '<div class="sidebar-section">'
   + '<div class="sidebar-label">' + t('mode.local').split(' ')[0] + '</div>'
   + '<select id="sidebar-search-mode" onchange="document.getElementById(\'search-mode\').value=this.value;toggleRegionSelect()">'
-  + '<option value="local" data-i18n="mode.local">' + t('mode.local') + '</option>'
+  + '<option value="local" selected data-i18n="mode.local">' + t('mode.local') + '</option>'
+  + '<option value="omni" data-i18n="mode.omni">' + t('mode.omni') + '</option>'
+  + '<option value="academic" data-i18n="mode.academic">' + t('mode.academic') + '</option>'
   + '<option value="online" data-i18n="mode.online">' + t('mode.online') + '</option>'
   + '<option value="vector" data-i18n="mode.vector">' + t('mode.vector') + '</option>'
   + '</select>'
@@ -413,11 +421,12 @@ function toggleRegionSelect() {
     var sidebarMode = document.getElementById('sidebar-search-mode');
     if (sidebarMode && sidebarMode.value !== mode) sidebarMode.value = mode;
     var regionEl = document.getElementById('search-region');
-    if (regionEl) regionEl.style.display = mode === 'online' ? '' : 'none';
+    if (regionEl) regionEl.style.display = (mode === 'online' || mode === 'omni') ? '' : 'none';
 }
 
 function getSearchEndpoint() {
     var mode = document.getElementById('search-mode').value;
+    if (mode === 'omni' || mode === 'academic') return '/api/search/omni';
     if (mode === 'online') return '/api/search/online';
     if (mode === 'vector') return '/api/search/vector';
     return '/api/search';
@@ -477,7 +486,9 @@ function buildRequest(page) {
     const pageSize = parseInt(document.getElementById('page-size').value, 10);
 
     const region = document.getElementById('search-region').value;
+    const mode = document.getElementById('search-mode').value;
     const body = { query, page, page_size: pageSize, sort_by: sortBy };
+    if (mode === 'omni' || mode === 'academic') body.scope = mode;
     if (country) body.country = country;
     if (searchType && searchType !== 'auto') body.search_type = searchType;
     if (dateFrom) body.date_from = dateFrom;
@@ -668,7 +679,7 @@ function renderResults(data, page, pageSize) {
 
     const craapMap = (data && data.craap_scores && typeof data.craap_scores === 'object') ? data.craap_scores : {};
     let html = '';
-    patents.forEach((p) => {
+    patents.forEach((p, idx) => {
         const score = Number(p.relevance_score || 0);
         const scoreColor = score >= 90 ? '#3fb950' : score >= 70 ? '#58a6ff' : score >= 50 ? '#d29922' : '#8b949e';
         const craap = craapMap[p.id] || craapMap[p.patent_number] || null;
@@ -680,6 +691,16 @@ function renderResults(data, page, pageSize) {
                 craapHtml += `<span title="${escapeHtml('多源三角互证：' + craap.corroborated_sources.join(' + '))}" style="display:inline-block;margin-top:4px;margin-left:4px;padding:1px 7px;border-radius:10px;font-size:11px;border:1px solid #a371f7;color:#d2a8ff;background:#a371f722;white-space:nowrap;">🔺 多源互证</span>`;
             }
         }
+        const pnStr = String(p.patent_number || '');
+        const litKind = p.literature_kind || ((pnStr.startsWith('10.') || pnStr.toUpperCase().startsWith('PMID')) ? 'academic_paper' : (pnStr.toUpperCase().startsWith('LOCAL-') ? 'local_upload' : 'patent'));
+        const kindBadge = litKind === 'academic_paper'
+            ? '<span style="display:inline-block;padding:1px 7px;margin-right:6px;border-radius:10px;font-size:11px;background:#8957e522;border:1px solid #a371f7;color:#d2a8ff;vertical-align:middle;">🎓 学术论文</span>'
+            : litKind === 'local_upload'
+                ? '<span style="display:inline-block;padding:1px 7px;margin-right:6px;border-radius:10px;font-size:11px;background:#23863622;border:1px solid #3fb950;color:#3fb950;vertical-align:middle;">📄 本地文献</span>'
+                : '<span style="display:inline-block;padding:1px 7px;margin-right:6px;border-radius:10px;font-size:11px;background:#1f6feb22;border:1px solid #58a6ff;color:#79c0ff;vertical-align:middle;">📜 专利</span>';
+        const srcTagHtml = p.source_tag
+            ? `<span style="display:inline-block;padding:1px 6px;margin-right:6px;border-radius:8px;font-size:11px;background:#21262d;border:1px solid #30363d;color:#8b949e;vertical-align:middle;">${escapeHtml(p.source_tag)}</span>`
+            : '';
         html += `
         <div class="patent-card">
             <div class="patent-title-row">
@@ -687,7 +708,7 @@ function renderResults(data, page, pageSize) {
                     <input type="checkbox" class="batch-check" data-id="${escapeHtml(p.id)}" style="width:16px;height:16px;cursor:pointer;">
                 </label>
                 <div style="flex:1;">
-                    <h3><a id="patent-title-link-${escapeHtml(p.id)}" href="/patent/${escapeHtml(p.id)}">${escapeHtml(p.title || '无标题')}</a></h3>
+                    <h3>${kindBadge}${srcTagHtml}<a id="patent-title-link-${escapeHtml(p.id)}" href="/patent/${escapeHtml(p.id)}">${escapeHtml(p.title || '无标题')}</a></h3>
                     <div class="meta-row">
                         <span>${t('meta.patent')}: ${escapeHtml(p.patent_number || '暂无')}</span>
                         <span>${t('meta.applicant')}: ${escapeHtml(p.applicant || '暂无')}</span>
@@ -696,6 +717,10 @@ function renderResults(data, page, pageSize) {
                         <span>${t('meta.country')}: ${escapeHtml(p.country || '暂无')}</span>
                     </div>
                     <p class="patent-abstract">${escapeHtml((p.abstract_text || '').slice(0, 260))}${(p.abstract_text || '').length > 260 ? '...' : ''}</p>
+                    <div style="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                        <button type="button" data-card-compare-idx="${idx}" style="padding:2px 9px;font-size:11.5px;border-radius:5px;border:1px solid #30363d;background:#21262d;color:#79c0ff;cursor:pointer;">⚖️ 加入方案对比</button>
+                        <a href="/patent/${escapeHtml(p.id)}" style="padding:2px 9px;font-size:11.5px;border-radius:5px;border:1px solid #30363d;background:#161b22;color:#c9d1d9;text-decoration:none;">💬 详情 / AI深析</a>
+                    </div>
                     ${p.matched_snippet ? `<div style="margin-top:6px;padding:6px 10px;background:#0d1117;border-left:3px solid #58a6ff;border-radius:4px;font-size:0.84em;color:#c9d1d9;line-height:1.5;"><span style="color:#58a6ff;font-weight:600;margin-right:6px;">[命中 · ${escapeHtml(p.matched_section_tag || '正文')}]</span>${escapeHtml(p.matched_snippet)}</div>` : ''}
                     ${p.evidence ? `<details class="evidence-row" style="margin-top:4px;"><summary style="cursor:pointer;color:#58a6ff;font-size:0.8em;">${t('results.whyTitle')}</summary><div style="color:#8b949e;font-size:0.8em;padding:4px 0;">${evidenceHtml(p.evidence)}</div></details>` : ''}
                 </div>
@@ -707,6 +732,20 @@ function renderResults(data, page, pageSize) {
             </div>
         </div>`;
     });
+    // Show AI Omni breakdown / expanded terms banner when returned by /api/search/omni
+    if (data.source_breakdown || data.ai_expanded_terms) {
+        const sb = data.source_breakdown || {};
+        let omniHtml = '<div id="omni-summary-bar" style="padding:10px 14px;margin-bottom:12px;background:#161b22;border:1px solid #30363d;border-left:3px solid #a371f7;border-radius:8px;font-size:12.5px;color:#c9d1d9;display:flex;flex-wrap:wrap;gap:12px;align-items:center;">';
+        omniHtml += '<strong style="color:#d2a8ff;">🌐 多圈层聚合命中：</strong>';
+        omniHtml += `<span>📦 本地知识库 <strong>${Number(sb.local || 0)}</strong></span>`;
+        omniHtml += `<span>📜 全球专利 <strong>${Number(sb.patent || 0)}</strong></span>`;
+        omniHtml += `<span>🎓 学术论文 <strong>${Number(sb.academic || 0)}</strong></span>`;
+        if (data.ai_expanded_terms) {
+            omniHtml += `<span style="color:#8b949e;">| 🤖 AI 自动英文扩写：<code style="color:#79c0ff;">${escapeHtml(data.ai_expanded_terms)}</code></span>`;
+        }
+        omniHtml += '</div>';
+        html = omniHtml + html;
+    }
     // Show dedup info
     if (data.dedup_removed && data.dedup_removed > 0) {
         html = `<div style="padding:8px 12px;margin-bottom:12px;background:#1c2128;border-radius:6px;color:#8b949e;font-size:0.85em;">
@@ -738,8 +777,60 @@ function renderResults(data, page, pageSize) {
     </div>` + html;
 
     document.getElementById('results').innerHTML = html + '<div id="batch-result" style="margin-top:16px;"></div>';
+    document.querySelectorAll('#results [data-card-compare-idx]').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            const idx = parseInt(btn.getAttribute('data-card-compare-idx'), 10);
+            const item = !isNaN(idx) ? patents[idx] : null;
+            if (!item) return;
+            addSearchItemToCompare(item);
+        });
+    });
     renderPagination(total, page, effectiveSize);
     resolveChineseTitles(patents);
+}
+
+function addSearchItemToCompare(item) {
+    const COMPARE_KEY = 'innoforge_ws_compare_v1';
+    let st = {};
+    try {
+        const raw = sessionStorage.getItem(COMPARE_KEY);
+        if (raw) st = JSON.parse(raw) || {};
+    } catch (e) { st = {}; }
+    if (!st.uploadedData || typeof st.uploadedData !== 'object') st.uploadedData = {};
+    if (!Array.isArray(st.refRows) || !st.refRows.length) {
+        st.refRows = [{ idx: '0', value: '' }];
+        st.refIdxCounter = 0;
+    }
+    let targetIdx = null;
+    for (let i = 0; i < st.refRows.length; i++) {
+        const idxStr = String(st.refRows[i].idx);
+        if (!st.refRows[i].value && !st.uploadedData['ref_' + idxStr]) {
+            targetIdx = idxStr;
+            break;
+        }
+    }
+    if (targetIdx === null) {
+        const nextNum = Number(st.refIdxCounter || 0) + 1;
+        st.refIdxCounter = nextNum;
+        targetIdx = String(nextNum);
+        st.refRows.push({ idx: targetIdx, value: '' });
+    }
+    const label = (item.patent_number ? (item.patent_number + ' ') : '') + (item.title || '检索文献');
+    const content = [
+        '标题：' + (item.title || ''),
+        item.patent_number ? ('编号/DOI：' + item.patent_number) : '',
+        item.applicant ? ('申请人/期刊：' + item.applicant) : '',
+        item.inventor ? ('发明人/作者：' + item.inventor) : '',
+        item.filing_date ? ('日期：' + item.filing_date) : '',
+        '',
+        '摘要：' + (item.abstract_text || '')
+    ].filter(Boolean).join('\n');
+    st.uploadedData['ref_' + targetIdx] = { title: label.slice(0, 80), content: content };
+    st.urlSearch = '';
+    st.savedAt = Date.now();
+    try { sessionStorage.setItem(COMPARE_KEY, JSON.stringify(st)); } catch (e) {}
+    if (typeof saveSearchWorkspaceState === 'function') saveSearchWorkspaceState();
+    window.location.href = '/compare';
 }
 
 function resolveChineseTitles(patents) {

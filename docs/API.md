@@ -1676,6 +1676,10 @@ Response:
 
 检索空间透明化面板单源定向补搜（v0.9.67）：对指定数据源（`serpapi` / `google_patents_xhr` / `epo_ops` / `openalex` / `semantic_scholar` / `pubmed`）执行单源补搜，返回 `patents`、`attempts`、`ipc_anchors` 与 `craap_scores`。
 
+**POST** `/api/search/omni`
+
+AI 全域无感混搜（v0.9.78）：支持 `scope = "omni"`（并行聚合本地知识库 + 在线专利 + OpenAlex / Semantic Scholar 学术论文，自动用轻量 AI 扩写英文专业检索词并跨源去重）与 `scope = "academic"`（并行专搜 OpenAlex / Semantic Scholar / PubMed 学术论文），返回体裁标签 `literature_kind`、多源互证 `corroborated_sources`、`ai_expanded_terms` 与 `source_breakdown`。
+
 **POST** `/api/search/vector`
 
 BM25 + 向量相似度的 RRF 融合检索（支持可选 `ipc` 子空间前缀过滤，返回 `ipc_anchors` 与 `craap_scores`）。

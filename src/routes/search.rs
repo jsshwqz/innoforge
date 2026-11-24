@@ -1870,6 +1870,390 @@ pub async fn api_search_single_source(
     }))
 }
 
+/// 根据公开号/DOI 与来源标签判定文献体裁，供全域检索卡片渲染与去重统计复用。
+fn classify_literature_kind(patent_number: &str, source_tag: &str) -> &'static str {
+    let src = source_tag.to_ascii_lowercase();
+    let pn = patent_number.trim();
+    if matches!(
+        src.as_str(),
+        "openalex" | "semantic_scholar" | "pubmed" | "local_paper"
+    ) || pn.starts_with("10.")
+        || pn.to_ascii_uppercase().starts_with("DOI:")
+        || pn.to_ascii_uppercase().starts_with("PMID")
+        || (pn.to_ascii_uppercase().starts_with('W')
+            && pn.len() >= 8
+            && pn
+                .get(1..)
+                .map(|s| s.chars().all(|c| c.is_ascii_digit()))
+                .unwrap_or(false))
+    {
+        "academic_paper"
+    } else if pn.to_ascii_uppercase().starts_with("LOCAL-")
+        || src == "local_upload"
+        || src == "local_doc"
+    {
+        "local_upload"
+    } else {
+        "patent"
+    }
+}
+
+fn omni_source_display_label(source_tag: &str) -> &'static str {
+    match source_tag {
+        "local" => "本地知识库",
+        "serpapi" => "SerpAPI 专利",
+        "google_patents_xhr" => "Google Patents",
+        "openalex" => "OpenAlex 学术",
+        "semantic_scholar" => "Semantic Scholar",
+        "pubmed" => "PubMed 医工",
+        _ => "在线检索",
+    }
+}
+
+/// 跨圈层（本地库 / 在线专利 / 学术论文）融合去重，保留更丰富摘要与多源互证标签。
+fn dedup_and_merge_omni_items(
+    tagged_items: Vec<(PatentSummary, &'static str)>,
+) -> (Vec<serde_json::Value>, usize, usize, usize) {
+    use std::collections::HashMap;
+
+    struct MergedEntry {
+        summary: PatentSummary,
+        primary_source: &'static str,
+        sources: Vec<String>,
+        kind: &'static str,
+    }
+
+    let mut entries: Vec<MergedEntry> = Vec::new();
+    let mut key_to_idx: HashMap<String, usize> = HashMap::new();
+
+    for (summary, src) in tagged_items {
+        let norm_pn = summary
+            .patent_number
+            .trim()
+            .to_ascii_uppercase()
+            .replace([' ', '-', '_'], "");
+        let norm_title: String = summary
+            .title
+            .chars()
+            .filter(|c| c.is_alphanumeric() || ('\u{4E00}'..='\u{9FFF}').contains(c))
+            .collect::<String>()
+            .to_ascii_lowercase();
+        let dedup_key = if norm_pn.len() >= 6 && !norm_pn.starts_with("LOCAL") {
+            format!("pn:{norm_pn}")
+        } else if !norm_title.is_empty() {
+            format!("t:{norm_title}")
+        } else {
+            format!("id:{}", summary.id)
+        };
+
+        let src_label = omni_source_display_label(src).to_string();
+        if let Some(&existing_idx) = key_to_idx.get(&dedup_key) {
+            let entry = &mut entries[existing_idx];
+            if !entry.sources.contains(&src_label) {
+                entry.sources.push(src_label);
+            }
+            if summary.abstract_text.chars().count() > entry.summary.abstract_text.chars().count() {
+                entry.summary.abstract_text = summary.abstract_text;
+            }
+            if entry.summary.applicant.trim().is_empty() && !summary.applicant.trim().is_empty() {
+                entry.summary.applicant = summary.applicant;
+            }
+            if entry.summary.filing_date.trim().is_empty() && !summary.filing_date.trim().is_empty()
+            {
+                entry.summary.filing_date = summary.filing_date;
+            }
+        } else {
+            let kind = classify_literature_kind(&summary.patent_number, src);
+            key_to_idx.insert(dedup_key, entries.len());
+            entries.push(MergedEntry {
+                summary,
+                primary_source: src,
+                sources: vec![src_label],
+                kind,
+            });
+        }
+    }
+
+    let mut local_count = 0usize;
+    let mut patent_count = 0usize;
+    let mut academic_count = 0usize;
+    let mut out = Vec::with_capacity(entries.len());
+
+    for entry in entries {
+        match entry.primary_source {
+            "local" => local_count += 1,
+            "openalex" | "semantic_scholar" | "pubmed" => academic_count += 1,
+            _ => patent_count += 1,
+        }
+        if let Ok(mut val) = serde_json::to_value(&entry.summary) {
+            if let Some(obj) = val.as_object_mut() {
+                obj.insert(
+                    "literature_kind".to_string(),
+                    serde_json::Value::String(entry.kind.to_string()),
+                );
+                obj.insert(
+                    "source_tag".to_string(),
+                    serde_json::Value::String(
+                        omni_source_display_label(entry.primary_source).to_string(),
+                    ),
+                );
+                obj.insert("corroborated_sources".to_string(), json!(entry.sources));
+            }
+            out.push(val);
+        }
+    }
+
+    (out, local_count, patent_count, academic_count)
+}
+
+/// 快速将自然语言/中文技术描述用轻量 AI 扩写为英文学术检索词（5s 硬超时，失败静默退回原查询）
+async fn expand_omni_english_query(s: &AppState, query: &str) -> Option<String> {
+    let has_cjk = query
+        .chars()
+        .any(|c| ('\u{4E00}'..='\u{9FFF}').contains(&c));
+    if !has_cjk && query.split_whitespace().count() <= 6 {
+        return None;
+    }
+    let ai = {
+        let cfg = s.config.read().unwrap_or_else(|e| e.into_inner());
+        if cfg.ai_api_key.trim().is_empty()
+            && cfg.ai_api_key_gemini.trim().is_empty()
+            && cfg.ai_api_key_deepseek.trim().is_empty()
+        {
+            return None;
+        }
+        cfg.ai_client_fast()
+    };
+    let prompt = format!(
+        "将以下研发技术查询浓缩为 2 至 5 个最精准的英文专业检索关键词（仅输出空格分隔的英文词，不要任何标点、解释或引号）：\n<user_input>{}</user_input>",
+        crate::ai::client::safe_truncate(query, 300)
+    );
+    let fut = ai.chat_with_system(
+        "你是专利与学术文献检索词翻译器，仅输出 2-5 个空格分隔的英文专业关键词。",
+        &prompt,
+        0.1,
+    );
+    match tokio::time::timeout(std::time::Duration::from_secs(6), fut).await {
+        Ok(Ok(raw)) => {
+            let cleaned: String = raw
+                .lines()
+                .next()
+                .unwrap_or("")
+                .trim()
+                .trim_matches(|c: char| c == '"' || c == '\'' || c == '`')
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric() || c.is_ascii_whitespace() || *c == '-')
+                .collect::<String>()
+                .split_whitespace()
+                .take(6)
+                .collect::<Vec<_>>()
+                .join(" ");
+            if cleaned.len() >= 3 {
+                Some(cleaned)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+/// POST /api/search/omni — AI 全域无感混搜（本地知识库 + 全球专利 + 学术论文并行聚合去重）
+/// 支持 `scope = "omni"`（默认，全圈层融合）与 `scope = "academic"`（专搜 OpenAlex / Semantic Scholar / PubMed 学术论文）。
+pub async fn api_search_omni(
+    State(s): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let query = req["query"].as_str().unwrap_or("").trim();
+    let scope = req["scope"]
+        .as_str()
+        .unwrap_or("omni")
+        .trim()
+        .to_ascii_lowercase();
+    let scope = if scope == "academic" {
+        "academic"
+    } else {
+        "omni"
+    };
+
+    if query.is_empty() {
+        return Json(json!({
+            "patents": [],
+            "total": 0,
+            "page": 1,
+            "page_size": 20,
+            "source": scope,
+            "scope": scope,
+            "error": "请输入检索关键词或自然语言技术描述"
+        }));
+    }
+
+    let page = req["page"].as_u64().unwrap_or(1).max(1) as usize;
+    let page_size = req["page_size"].as_u64().unwrap_or(20).clamp(1, 50) as usize;
+    let country = req["country"]
+        .as_str()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_string);
+    let region = req["region"]
+        .as_str()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_string);
+    let explicit_lang = req["language"]
+        .as_str()
+        .and_then(|v| serde_json::from_str::<Lang>(&format!("\"{v}\"")).ok());
+    let lang =
+        resolve_lang_with_explicit(explicit_lang, region.as_deref(), country.as_deref(), query);
+
+    // 隐式 AI 扩写英文学术检索词（对中文或自然语言技术提问尤为关键，6s 超时静默降级）
+    let ai_expanded_en = expand_omni_english_query(&s, query).await;
+    let academic_keyword = ai_expanded_en.as_deref().unwrap_or(query).to_string();
+
+    let per_source_limit = (page_size / 2).clamp(6, 15);
+    let academic_query = SearchQuery {
+        keyword: academic_keyword.clone(),
+        country: None,
+        language: Some(Lang::English),
+        assignee: None,
+        exact_assignee: false,
+        date_from: None,
+        date_to: None,
+        limit: per_source_limit,
+        page,
+        sort_by: None,
+        search_type: Some(SearchType::Keyword),
+    };
+
+    let mut tagged_results: Vec<(PatentSummary, &'static str)> = Vec::new();
+    let mut attempts: Vec<serde_json::Value> = Vec::new();
+    let timeout_dur = std::time::Duration::from_secs(18);
+
+    if scope == "academic" {
+        let oa_p = OpenAlexProvider::new(s.db.clone());
+        let s2_p = SemanticScholarProvider::new(s.db.clone());
+        let pm_p = PubMedProvider::new(s.db.clone());
+
+        let (oa_res, s2_res, pm_res) = tokio::join!(
+            tokio::time::timeout(timeout_dur, oa_p.search(academic_query.clone())),
+            tokio::time::timeout(timeout_dur, s2_p.search(academic_query.clone())),
+            tokio::time::timeout(timeout_dur, pm_p.search(academic_query)),
+        );
+
+        for (tag, res) in [
+            ("openalex", oa_res),
+            ("semantic_scholar", s2_res),
+            ("pubmed", pm_res),
+        ] {
+            if let Ok(outcome) = res {
+                if let Some(arr) = attempts_json(&outcome).as_array() {
+                    attempts.extend(arr.iter().cloned());
+                }
+                for item in outcome.summaries() {
+                    tagged_results.push((item, tag));
+                }
+            }
+        }
+    } else {
+        // 全域混搜：并发查询「本地知识库 + 在线专利源 + OpenAlex 学术 + Semantic Scholar 学术」
+        let local_db = s.db.clone();
+        let local_q = query.to_string();
+        let local_fut = tokio::task::spawn_blocking(move || {
+            local_db
+                .search_fts(&local_q, 1, per_source_limit)
+                .ok()
+                .map(|(list, _)| list)
+        });
+
+        let serp_key_opt = {
+            let cfg = s.config.read().unwrap_or_else(|e| e.into_inner());
+            cfg.next_serpapi_key()
+                .filter(|k| !k.is_empty() && k != "your-serpapi-key-here")
+        };
+        let (patent_tag, patent_provider): (&'static str, Arc<dyn SearchProvider>) =
+            match serp_key_opt {
+                Some(key) => ("serpapi", Arc::new(SerpApiProvider::new(key, s.db.clone()))),
+                None => (
+                    "google_patents_xhr",
+                    Arc::new(GooglePatentsXhrProvider::new(s.db.clone())),
+                ),
+            };
+        let patent_query = SearchQuery {
+            keyword: query.to_string(),
+            country: country.clone(),
+            language: Some(lang),
+            assignee: None,
+            exact_assignee: false,
+            date_from: None,
+            date_to: None,
+            limit: per_source_limit,
+            page,
+            sort_by: None,
+            search_type: Some(SearchType::Keyword),
+        };
+        let oa_p = OpenAlexProvider::new(s.db.clone());
+        let s2_p = SemanticScholarProvider::new(s.db.clone());
+
+        let (local_res, pat_res, oa_res, s2_res) = tokio::join!(
+            local_fut,
+            tokio::time::timeout(timeout_dur, patent_provider.search(patent_query)),
+            tokio::time::timeout(timeout_dur, oa_p.search(academic_query.clone())),
+            tokio::time::timeout(timeout_dur, s2_p.search(academic_query)),
+        );
+
+        if let Ok(Some(local_list)) = local_res {
+            for item in local_list {
+                tagged_results.push((item, "local"));
+            }
+        }
+        if let Ok(outcome) = pat_res {
+            if let Some(arr) = attempts_json(&outcome).as_array() {
+                attempts.extend(arr.iter().cloned());
+            }
+            for item in outcome.summaries() {
+                tagged_results.push((item, patent_tag));
+            }
+        }
+        if let Ok(outcome) = oa_res {
+            if let Some(arr) = attempts_json(&outcome).as_array() {
+                attempts.extend(arr.iter().cloned());
+            }
+            for item in outcome.summaries() {
+                tagged_results.push((item, "openalex"));
+            }
+        }
+        if let Ok(outcome) = s2_res {
+            if let Some(arr) = attempts_json(&outcome).as_array() {
+                attempts.extend(arr.iter().cloned());
+            }
+            for item in outcome.summaries() {
+                tagged_results.push((item, "semantic_scholar"));
+            }
+        }
+    }
+
+    let (all_merged, local_cnt, patent_cnt, academic_cnt) =
+        dedup_and_merge_omni_items(tagged_results);
+    let total = all_merged.len();
+    let shown: Vec<serde_json::Value> = all_merged.into_iter().take(page_size).collect();
+
+    Json(json!({
+        "patents": shown,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "source": scope,
+        "scope": scope,
+        "ai_expanded_terms": ai_expanded_en,
+        "source_breakdown": {
+            "local": local_cnt,
+            "patent": patent_cnt,
+            "academic": academic_cnt
+        },
+        "attempts": attempts
+    }))
+}
+
 /// 从专利的标题/权利要求/说明书/摘要中摘取含最多查询词元的真实命中片段与来源标签
 fn extract_best_matched_snippet(
     patent: &crate::patent::Patent,
@@ -2181,5 +2565,67 @@ mod search_dedup_pagination_tests {
             "第 1 页应补满 10 条不重复结果而非仅 5 条"
         );
         assert_eq!(r2.patents.len(), 2, "第 2 页应返回剩余 2 条不重复结果");
+    }
+
+    #[test]
+    fn omni_dedup_and_classify_merges_cross_source_duplicates() {
+        let mk = |id: &str, pn: &str, title: &str, abs: &str| PatentSummary {
+            id: id.into(),
+            patent_number: pn.into(),
+            title: title.into(),
+            abstract_text: abs.into(),
+            applicant: String::new(),
+            inventor: String::new(),
+            filing_date: "2025-03-01".into(),
+            country: "CN".into(),
+            relevance_score: Some(88.0),
+            score_source: None,
+            matched_fields: None,
+        };
+        let items = vec![
+            (
+                mk("1", "10.1109/TIE.2025.001", "Adaptive MPC for SiC", "Short"),
+                "openalex",
+            ),
+            (
+                mk(
+                    "2",
+                    "10.1109/TIE.2025.001",
+                    "Adaptive MPC for SiC",
+                    "Full detailed abstract with thermal loss benchmarks",
+                ),
+                "semantic_scholar",
+            ),
+            (
+                mk("3", "CN113675966B", "螺旋冷却流道定子", "水冷定子结构"),
+                "serpapi",
+            ),
+            (
+                mk("4", "LOCAL-ABC123", "内部实验报告", "温升测试记录"),
+                "local",
+            ),
+        ];
+        let (merged, local_cnt, pat_cnt, acad_cnt) = dedup_and_merge_omni_items(items);
+        assert_eq!(merged.len(), 3, "跨源相同 DOI 论文应去重合并为 1 条");
+        assert_eq!(local_cnt, 1);
+        assert_eq!(pat_cnt, 1);
+        assert_eq!(acad_cnt, 1);
+        assert_eq!(merged[0]["literature_kind"], "academic_paper");
+        assert!(
+            merged[0]["abstract_text"]
+                .as_str()
+                .unwrap_or("")
+                .contains("Full detailed abstract"),
+            "合并后应保留更完整的摘要"
+        );
+        assert_eq!(
+            merged[0]["corroborated_sources"]
+                .as_array()
+                .map(|a| a.len()),
+            Some(2),
+            "多源命中应记录 2 个来源"
+        );
+        assert_eq!(merged[1]["literature_kind"], "patent");
+        assert_eq!(merged[2]["literature_kind"], "local_upload");
     }
 }
