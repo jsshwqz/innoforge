@@ -4,6 +4,24 @@
 All notable changes are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
+## [v0.9.72] - 2026-11-24
+
+### 修复与深度打磨 / Fixed & Polished
+
+- **专利详情页 (`/patent/:id`) 两大 P0 空白页签与深层剖析渲染修复（`templates/patent_detail.html`）**：
+  - 修复 `#tab-ai-chat` 缺失闭合 `</div>` 导致 `🔗 引文与同族`（`#tab-citations`）与 `OA 答复时间线`（`#tab-oa-timeline`）被嵌套隐藏、点击完全空白的 P0 缺陷；
+  - 升级 `renderDeepAnalysisMarkdown` 支持 `####` 四级标题、常见行内 LaTeX 符号/单位自动转洁净 Unicode（`$0.5\text{ mm}$` → `0.5 mm`、`$\rightarrow$` → `→`、`$\ge 120^\circ\text{C}$` → `≥ 120°C`）与表格首列最小宽度，并为 `#ai-summary` / `#claims-analysis-result` 增加 `max-height: 75vh; overflow-y: auto;` 防止 2,500–4,100px 长报告撑爆页面；
+  - 修复详情页元信息空态：自动同步 `#legal-status-badge`、空 IPC/CPC 芯片显示 `暂无`、隐藏无收藏夹时的孤立 `|` 分隔符、同步侧边栏 `✅ 已加载` 状态并清理相似专利列表空字段分隔符。
+- **V-RAG 附图标号解析器支持 Google Patents / CNIPA 双换行多列表格（`src/ai/part_topology.rs`、`templates/patent_detail.html`）**：
+  - 修复双换行多列图例表（`附图标号说明：\n\n标号\n\n名称\n\n10\n\n定子总成...`）被提前截断且行内正则 `\s*` 跨行错配产生 19 条假异名误报的根因（新增格式 D 多列图例解析 + 行内匹配限水平空白 `[ \t]*` + 回归单测）；
+  - 强化 `jumpToNumeralInTab` 跳转说明书/权利要求时的醒目高亮聚焦与滚动定位。
+- **设置页 (`/settings`) 热备校验显隐与模型路由归一化（`templates/settings.html`、`src/routes/mod.rs`）**：
+  - 修复 `#backup-status-msg` 因 `.status-message` 默认 `display: none` 导致点击「🔍 校验热备份完整性」与导出热备后结果完全不可见的 P0 缺陷；
+  - 统一 `model_routing_snapshot` 去除不一致的 `models/` 前缀，优化 Token 熔断三列底部对齐与 API Base URL 通用占位符。
+- **创意报告与 OA 导出边界体验收口（`templates/idea.html`、`templates/office_action_response.html`、`src/pipeline/steps/deliverables.rs`）**：
+  - 修复待推演创意点击「完整版」报告渲染空白框的问题；收紧 `#paper-latex-template` 下拉框宽度避免独占整行；过滤期刊关键词中的口语双字停用词（如 `先分`/`来聊`/`一下`）；OA 导出 Word 套件增加空表单非阻塞 Toast 防护。
+
+---
 ## [v0.9.71] - 2026-11-24
 
 ### 新增与深度提质 / Added & Quality Elevation

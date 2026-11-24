@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-23T23:50:18.363Z",
+  "generatedAt": "2026-11-24T00:56:37.164Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -572,6 +572,7 @@
         "applyDetailI18n",
         "applyEnrichedData",
         "cancelAnalyzeClaims",
+        "cleanInlineLatex",
         "cleanup",
         "context",
         "createBtn",
@@ -608,6 +609,7 @@
         "onOk",
         "onOverlay",
         "openOriginalPatentPdf",
+        "polishDetailMeta",
         "removeTag",
         "renderDeepAnalysisMarkdown",
         "renderImages",

@@ -114,7 +114,7 @@
 
             <div class="form-group">
                 <label>API Base URL</label>
-                <input type="text" id="ai-base-url" value="https://api.deepseek.com/v1" placeholder="https://api.deepseek.com/v1">
+                <input type="text" id="ai-base-url" value="https://api.deepseek.com/v1" placeholder="https://api.example.com/v1">
                 <span class="form-hint" id="ai-base-hint">兼容 OpenAI 格式的 API 地址</span>
             </div>
 
@@ -256,9 +256,9 @@
             <h3>🛡️ AI 调用次数与 Token 硬熔断设置</h3>
             <p class="muted" style="font-size:13px;">防止流水线或循环对话失控消耗配额。设为 0 表示不限制；达到上限时后端将硬阻断新的 AI 请求。</p>
             <div id="ai-budget-today-summary" class="status-pill" style="margin-bottom:12px;">今日已调用 -- 次 · 已消耗 -- Tokens</div>
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:12px;">
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;margin-bottom:12px;align-items:end;">
                 <div class="form-group" style="margin:0;">
-                    <label for="ai-budget-daily-calls">单日总调用次数上限 (次/天)</label>
+                    <label for="ai-budget-daily-calls">单日调用次数上限 (次/天)</label>
                     <input type="number" id="ai-budget-daily-calls" min="0" value="0" placeholder="0 = 不限制">
                 </div>
                 <div class="form-group" style="margin:0;">
@@ -266,7 +266,7 @@
                     <input type="number" id="ai-budget-daily-tokens" min="0" value="0" placeholder="0 = 不限制">
                 </div>
                 <div class="form-group" style="margin:0;">
-                    <label for="ai-budget-idea-tokens">单个创意累计 Token 上限 (Tokens/创意)</label>
+                    <label for="ai-budget-idea-tokens">单创意 Token 上限 (Tokens/创意)</label>
                     <input type="number" id="ai-budget-idea-tokens" min="0" value="0" placeholder="0 = 不限制">
                 </div>
             </div>
@@ -1620,7 +1620,11 @@
 
         async function exportDbBackup() {
             var msgEl = document.getElementById('backup-status-msg');
-            if (msgEl) msgEl.textContent = '⏳ 正在生成 SQLite 热备份...';
+            if (msgEl) {
+                msgEl.className = 'status-message success';
+                msgEl.style.display = 'block';
+                msgEl.textContent = '⏳ 正在生成 SQLite 热备份...';
+            }
             try {
                 var resp = await fetch('/api/backup/export', { method: 'POST' });
                 if (!resp.ok) throw new Error('HTTP ' + resp.status);
@@ -1633,15 +1637,27 @@
                 a.click();
                 a.remove();
                 URL.revokeObjectURL(url);
-                if (msgEl) msgEl.textContent = '✅ 热备份已导出下载';
+                if (msgEl) {
+                    msgEl.className = 'status-message success';
+                    msgEl.style.display = 'block';
+                    msgEl.textContent = '✅ 热备份已导出下载';
+                }
             } catch (err) {
-                if (msgEl) msgEl.textContent = '❌ 备份失败: ' + err.message;
+                if (msgEl) {
+                    msgEl.className = 'status-message error';
+                    msgEl.style.display = 'block';
+                    msgEl.textContent = '❌ 备份失败: ' + err.message;
+                }
             }
         }
 
         async function checkDbBackupHealth() {
             var msgEl = document.getElementById('backup-status-msg');
-            if (msgEl) msgEl.textContent = '⏳ 校验中...';
+            if (msgEl) {
+                msgEl.className = 'status-message success';
+                msgEl.style.display = 'block';
+                msgEl.textContent = '⏳ 正在校验热备份完整性...';
+            }
             try {
                 var resp = await fetch('/api/backup/check', {
                     method: 'POST',
@@ -1650,12 +1666,18 @@
                 });
                 var data = await resp.json();
                 if (msgEl) {
+                    msgEl.className = data.valid_sqlite ? 'status-message success' : 'status-message error';
+                    msgEl.style.display = 'block';
                     msgEl.textContent = data.valid_sqlite
-                        ? '✅ 快照校验通过 (schema v' + data.schema_version + ', ' + data.size_bytes + ' bytes)'
+                        ? '✅ 快照校验通过 (schema v' + data.schema_version + ', ' + Number(data.size_bytes || 0).toLocaleString() + ' bytes)'
                         : '❌ 校验失败: ' + (data.message || '');
                 }
             } catch (err) {
-                if (msgEl) msgEl.textContent = '❌ 校验失败: ' + err.message;
+                if (msgEl) {
+                    msgEl.className = 'status-message error';
+                    msgEl.style.display = 'block';
+                    msgEl.textContent = '❌ 校验失败: ' + err.message;
+                }
             }
         }
 </script>

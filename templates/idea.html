@@ -317,7 +317,7 @@
                             <button class="report-type-btn" data-rtype="journal_draft" onclick="switchReportType('journal_draft')" data-i18n="idea.reportJournalDraft">期刊论文草稿</button>
                             <button class="report-type-btn" type="button" onclick="exportBomXlsx()" data-i18n="idea.exportBomXlsx">导出 Excel BOM 包</button>
                             <button class="report-type-btn" type="button" onclick="exportProjectZip()" data-i18n="idea.exportProjectZip">一键导出完整项目包 (.zip)</button>
-                            <select id="paper-latex-template" class="report-type-btn" style="padding:4px 8px;" aria-label="LaTeX 模板">
+                            <select id="paper-latex-template" class="report-type-btn" style="padding:4px 8px;width:auto;min-width:170px;flex:0 0 auto;" aria-label="LaTeX 模板">
                                 <option value="ctexart" data-i18n="idea.latexTplCtexart">中文核心期刊 (ctexart)</option>
                                 <option value="ieee" data-i18n="idea.latexTplIeee">IEEE 期刊 (IEEEtran)</option>
                             </select>
@@ -2670,8 +2670,16 @@
                 if (reportType === 'full' && typeof data.report === 'object') {
                     reportText = data.report.analysis || '';
                 }
-                content.innerHTML = DOMPurify.sanitize('<div class="analysis-result">' + renderMarkdown(reportText) + '</div>');
-                if (openBtn) openBtn.style.display = 'inline-block';
+                if (!String(reportText || '').trim()) {
+                    content.innerHTML = DOMPurify.sanitize(
+                        '<div style="padding:16px 18px;background:#161b22;border:1px solid #30363d;border-radius:8px;color:#8b949e;line-height:1.7;">' +
+                        '⏳ 当前创意尚未完成深度推演，暂无完整分析报告。请先返回「概览」点击 <strong>🚀 立即启动深度推演</strong>，或切换查看「⚖️ 专利代理师版 / 工程 BOM 交付包 / 期刊论文草稿」预生成草稿。</div>'
+                    );
+                    if (openBtn) openBtn.style.display = 'none';
+                } else {
+                    content.innerHTML = DOMPurify.sanitize('<div class="analysis-result">' + renderMarkdown(reportText) + '</div>');
+                    if (openBtn) openBtn.style.display = 'inline-block';
+                }
             } else {
                 content.innerHTML = DOMPurify.sanitize('<p style="color:#8b949e;">' + (data.message || '暂无报告') + '</p>');
                 if (openBtn) openBtn.style.display = 'none';

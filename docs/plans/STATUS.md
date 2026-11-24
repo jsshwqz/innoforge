@@ -14,6 +14,14 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-11-24 — **专利详情页 P0 双空白页签、V-RAG 多列标号表根治、设置页热备校验与导出打磨（v0.9.72）**
+
+- **状态 / Status**: ✅ 基于对 `/patent/:id`、`/settings`、`/idea`、`/oa-response` 真实浏览器审查发现的 P0/P1/P2 问题全部闭环修复与复测
+- **① 专利详情页 P0 与深层渲染修复**（`templates/patent_detail.html`）：补齐 `#tab-ai-chat` 闭合标签彻底修复 `引文与同族` / `OA 时间线` 空白；升级 `renderDeepAnalysisMarkdown` 解析 `####` 与行内 LaTeX 并限制报告高度；收口法律状态/IPC/孤立分隔符/相似专利排版。
+- **② V-RAG 双换行多列标号表根治**（`src/ai/part_topology.rs`、`templates/patent_detail.html`）：新增格式 D 解析 Google Patents/CNIPA 双换行多列表格并禁止行内正则跨换行匹配，彻底消除 19 条错位误报，强化跳转说明书高亮聚焦。
+- **③ 设置页热备校验显隐与模型路由收口**（`templates/settings.html`、`src/routes/mod.rs`）：修复 `#backup-status-msg` 隐藏态导致热备校验静默不可见；归一化四角色模型路由 `models/` 前缀并优化三列对齐。
+- **④ 报告与 OA 导出体验完善**（`templates/idea.html`、`templates/office_action_response.html`、`src/pipeline/steps/deliverables.rs`）：修复待推演完整版报告空白、LaTeX 模板下拉框拉满、期刊停用词碎片与 OA 空表单导出防护。
+
 ### 2026-11-24 — **首页四位虚拟专家工作台、`/ai` 专利防写窄辅导与 Markdown 重构、FTO/批量/检索深度分析引擎与稳定分页（v0.9.71）**
 
 - **状态 / Status**: ✅ 基于 `/`、`/ai`、`/search` 真机浏览器全面审查实施深度重构与端到端复验
