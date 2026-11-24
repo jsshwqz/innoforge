@@ -581,6 +581,12 @@ impl AiClient {
             "admin_lawsuit" => {
                 Self::build_admin_lawsuit_prompt(my_patent, oa, refs, depth, discuss)
             }
+            "pre_filing_devil" => {
+                Self::build_pre_filing_devil_prompt(my_patent, oa, refs, depth, discuss)
+            }
+            "peer_review_rebuttal" => {
+                Self::build_peer_review_rebuttal_prompt(my_patent, oa, refs, depth, discuss)
+            }
             _ => Self::build_first_exam_prompt(my_patent, oa, refs, depth, discuss),
         };
 
@@ -788,6 +794,20 @@ impl AiClient {
             "admin_lawsuit" => {
                 Self::build_admin_lawsuit_prompt(&my_patent_str, &oa_str, &refs_str, depth, discuss)
             }
+            "pre_filing_devil" => Self::build_pre_filing_devil_prompt(
+                &my_patent_str,
+                &oa_str,
+                &refs_str,
+                depth,
+                discuss,
+            ),
+            "peer_review_rebuttal" => Self::build_peer_review_rebuttal_prompt(
+                &my_patent_str,
+                &oa_str,
+                &refs_str,
+                depth,
+                discuss,
+            ),
             _ => Self::build_first_exam_prompt(&my_patent_str, &oa_str, &refs_str, depth, discuss),
         };
 
@@ -997,6 +1017,8 @@ impl AiClient {
         let doc_type = match oa_type {
             "abnormal" => "意见陈述书（非正常申请答辩）",
             "reject_review" => "复审请求书",
+            "pre_filing_devil" => "提交前魔鬼预审补强清单与改稿",
+            "peer_review_rebuttal" => "学术论文审稿意见逐条回复信（Response to Reviewers）",
             _ => "意见陈述书",
         };
 

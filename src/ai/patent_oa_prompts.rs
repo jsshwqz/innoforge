@@ -445,6 +445,96 @@ impl AiClient {
         )
     }
 
+    /// 提交前“魔鬼审查员”模拟预审 prompt（公理 5：新专利提交前预审）
+    pub(super) fn build_pre_filing_devil_prompt(
+        my_patent: &str,
+        oa: &str,
+        refs: &str,
+        depth: &str,
+        discuss: bool,
+    ) -> (String, String) {
+        let focus = if oa.trim().is_empty() {
+            "（用户未指定额外预审重点，请按国家知识产权局严格实审标准全面挑刺）"
+        } else {
+            oa.trim()
+        };
+        let refs_block = if refs.trim().is_empty() {
+            "（未附外部对比文献，请结合本领域常规技术手段与公知常识模拟审查员攻击）"
+        } else {
+            refs.trim()
+        };
+        let section_tail = if discuss {
+            "\n\n---\n注意：**本次先输出模拟审查意见与薄弱点诊断**，用户审阅讨论后再生成最终补强改稿。"
+        } else {
+            "\n\n## 五、提交前必须补强的修改对照表\n请用 Markdown 表格列出：`缺陷位置 | 原草稿表述 | 推荐加固修改表述 | 需补写实施例/实验数据`。"
+        };
+        let depth_hint = if depth == "shallow" {
+            "请精炼输出核心驳回风险与前 5 条最高优先级修改建议。"
+        } else {
+            "请以最挑剔的国知局实审员视角逐项深挖，不留情面，所有指出问题均需引用草稿原文或对比文献锚点。"
+        };
+        (
+            "你同时具备 20 年国家知识产权局高级实审员（“魔鬼审查员”视角）与资深专利代理师经验，精通《专利法》第22条、第26条第3/4款、第33条与《专利审查指南》。严禁编造草稿或对比文献中不存在的特征或实验数据。"
+                .into(),
+            format!(
+                "## 待提交专利草稿 / 技术交底书\n{my_patent}\n\n## 预审重点 / 拟投场景\n{focus}\n\n## 对比文献 / 现有技术\n{refs_block}\n\n{depth_hint}\n\n\
+                 请按以下结构输出《魔鬼审查员模拟第一次审查意见通知书及提交前补强方案》：\n\n\
+                 ## 一、模拟审查员攻击总评（授权概率与致命短板）\n\
+                 - 评估独立权利要求被评述缺乏新颖性/创造性（专利法§22.2/§22.3）的风险等级（高/中/低）\n\
+                 - 列出最可能成为“最接近现有技术”的文献或常规技术方案\n\n\
+                 ## 二、三步法创造性模拟驳回（魔鬼审查员视角）\n\
+                 - 逐一拆解独立权利要求与对比文献的共有特征、区别特征、实际解决的技术问题及公知常识/结合启示攻击路径\n\n\
+                 ## 三、形式与法条硬伤排查（§26.3 / §26.4 / 细则§20.2）\n\
+                 - 指出概念模糊、功能性限定过宽、缺乏必要技术特征、说明书实施例支撑不足、数值范围无端点实验数据等问题\n\n\
+                 ## 四、防写窄与从权梯队加固建议\n\
+                 - 指出哪些非必要细节被误写进独权导致“写窄易规避”，以及建议补充的 3–5 项高防御力从属权利要求\n\
+                 {section_tail}"
+            ),
+        )
+    }
+
+    /// 学术论文/期刊同行评审返修（Rebuttal / Response to Reviewers）prompt（公理 5：三栖抗辩）
+    pub(super) fn build_peer_review_rebuttal_prompt(
+        my_patent: &str,
+        oa: &str,
+        refs: &str,
+        depth: &str,
+        discuss: bool,
+    ) -> (String, String) {
+        let refs_block = if refs.trim().is_empty() {
+            "（未额外上传对比文献或实验数据表；如审稿人质疑实验数据且原稿未记载，严禁编造数据，必须标注【需作者补测实验数据】）"
+        } else {
+            refs.trim()
+        };
+        let section_tail = if discuss {
+            "\n\n---\n注意：**本次先输出审稿意见风险拆解、逐条抗辩策略与补实验清单**，与作者讨论确认后再生成正式版 Response to Reviewers 全文。"
+        } else {
+            "\n\n## 四、正式版逐条回复信草稿（Point-by-Point Response to Reviewers）\n\
+             按 `Reviewer #1 - Comment 1` 规范格式输出可直接提交期刊/会议系统的中英双语或学术规范回复信，每条包含：**审稿人原意见摘要 → 礼貌克制的技术回应（附原稿章节/公式/图表证据）→ 原文修改对照（Original → Revised）**。"
+        };
+        let depth_hint = if depth == "shallow" {
+            "请快速给出每条审稿意见的定性分类（接受修改 / 礼貌澄清 / 必须补实验）与核心回应要点。"
+        } else {
+            "请按 IEEE / Nature / Science / ACM 顶刊返修标准逐条精雕细琢，做到不卑不亢、证据闭环、零数据造假、零虚假参考文献 DOI。"
+        };
+        (
+            "你是国际顶级学术期刊（IEEE Transactions / Nature / Science 系列）资深副主编与同行评审返修专家。严守学术诚信红线：严禁编造任何实验数值、消融结果或虚假论文 DOI；原稿或附件中缺失的数据必须明确标注【需作者补测实验数据】。"
+                .into(),
+            format!(
+                "## 我方论文手稿（PDF / DOCX / LaTeX）\n{my_patent}\n\n## 审稿人意见（Reviewer Comments）\n{oa}\n\n## 审稿人提及对比文献 / 补充实验数据表\n{refs_block}\n\n{depth_hint}\n\n\
+                 请按以下结构输出《学术论文同行评审返修诊断与逐条回复方案》：\n\n\
+                 ## 一、审稿意见全局拆解与风险评级表\n\
+                 用 Markdown 表格列出每条意见：`编号 | 审稿人核心关切 | 严重等级(致命/Major/Minor) | 判定策略(直接修改/补充实验/礼貌澄清) | 依据锚点`\n\n\
+                 ## 二、逐条深度技术剖析与抗辩逻辑\n\
+                 - 区分“审稿人误解（需用原稿推导/数据礼貌澄清）”与“论文真实短板（必须诚恳承认并补强）”\n\
+                 - 对创新性对比质疑，结合对比文献逐项列出机理差异、适用边界与量化指标优势\n\n\
+                 ## 三、必须补做的实验 / 消融 / 引用核验清单\n\
+                 - 按优先级列出需补测的对照实验、误差棒/统计显著性检验、或需补充的真实文献对比（明确标注哪些数据目前缺失）\n\
+                 {section_tail}"
+            ),
+        )
+    }
+
     /// P3-T1: 答复策略智能推荐 prompt
     /// 根据 OA 类型、对比文献特征、专利技术领域，构建策略推荐 prompt
     pub fn build_strategy_recommend_prompt(
@@ -515,6 +605,31 @@ mod tests {
         assert!(user.contains("第三部分"), "missing section 3");
         assert!(user.contains("第四部分"), "missing section 4");
         assert!(user.contains("第五部分"), "missing section 5");
+    }
+
+    #[test]
+    fn pre_filing_devil_and_peer_review_rebuttal_prompts_have_structured_sections() {
+        let (sys_devil, user_devil) = AiClient::build_pre_filing_devil_prompt(
+            "一种带螺旋流道的碳化硅逆变器水冷板",
+            "",
+            "D1: 直通流道散热板",
+            "medium",
+            false,
+        );
+        assert!(sys_devil.contains("魔鬼审查员"));
+        assert!(user_devil.contains("三步法创造性模拟驳回"));
+        assert!(user_devil.contains("防写窄"));
+
+        let (sys_reb, user_reb) = AiClient::build_peer_review_rebuttal_prompt(
+            "Manuscript: Adaptive MPC for SiC Inverter",
+            "Reviewer 1: Lack of ablation study at 120C.",
+            "Table 1: 120C test data",
+            "medium",
+            false,
+        );
+        assert!(sys_reb.contains("学术诚信"));
+        assert!(user_reb.contains("Response to Reviewers"));
+        assert!(user_reb.contains("审稿意见全局拆解"));
     }
 
     #[test]

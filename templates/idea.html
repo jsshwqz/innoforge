@@ -483,12 +483,29 @@
         }
     }
 
+    var IDEA_WORKSPACE_SNAP_KEY = 'innoforge_idea_workspace_v1';
+
+    function saveIdeaWorkspaceState() {
+        try {
+            var activeBtn = document.querySelector('.tab-btn.active');
+            var activeTab = activeBtn ? (activeBtn.getAttribute('data-tab') || 'chat') : 'chat';
+            var chatInput = document.getElementById('chat-input');
+            sessionStorage.setItem(IDEA_WORKSPACE_SNAP_KEY, JSON.stringify({
+                ideaId: currentIdeaId || '',
+                tab: activeTab,
+                draft: chatInput ? chatInput.value : '',
+                savedAt: Date.now()
+            }));
+        } catch (e) { /* ignore quota */ }
+    }
+
     function switchTab(tabId) {
         document.querySelectorAll('.tab-panel').forEach(function(p) { p.classList.remove('active'); });
         document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
         var panel = document.getElementById('tab-' + tabId);
         if (panel) panel.classList.add('active');
         document.querySelectorAll('.tab-btn[data-tab="' + tabId + '"]').forEach(function(b) { b.classList.add('active'); });
+        saveIdeaWorkspaceState();
     }
 
     // 加载创意历史列表 / Load idea history sidebar
@@ -565,7 +582,7 @@
                 row.appendChild(delBtn);
                 row.onmouseover = function() { row.style.borderColor = '#58a6ff'; row.style.background = '#1c2129'; };
                 row.onmouseout = function() { row.style.borderColor = '#21262d'; row.style.background = '#161b22'; };
-                row.onclick = function() { currentIdeaId = item.id; loadIdea(item.id); };
+                row.onclick = function() { currentIdeaId = item.id; saveIdeaWorkspaceState(); loadIdea(item.id); };
                 list.appendChild(row);
             });
         } catch(e) {
@@ -3037,10 +3054,33 @@
         }
     }
 
+    async function restoreIdeaWorkspaceState() {
+        try {
+            var raw = sessionStorage.getItem(IDEA_WORKSPACE_SNAP_KEY);
+            if (!raw) return;
+            var snap = JSON.parse(raw);
+            if (!snap || typeof snap !== 'object') return;
+            var urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.get('idea_id') || urlParams.get('id')) return;
+            if (snap.ideaId && !currentIdeaId) {
+                currentIdeaId = snap.ideaId;
+                await loadIdea(snap.ideaId);
+            }
+            if (snap.tab) switchTab(snap.tab);
+            var chatInput = document.getElementById('chat-input');
+            if (chatInput && snap.draft && !chatInput.value) {
+                chatInput.value = snap.draft;
+            }
+        } catch (e) { /* ignore */ }
+    }
+
     document.addEventListener('DOMContentLoaded', function() {
         var filterEl = document.getElementById('memory-filter');
         if (filterEl) filterEl.onchange = function() { loadMemory(); };
-        loadHistory();
+        var chatInput = document.getElementById('chat-input');
+        if (chatInput) chatInput.addEventListener('input', saveIdeaWorkspaceState);
+        window.addEventListener('pagehide', saveIdeaWorkspaceState);
+        loadHistory().then(function() { restoreIdeaWorkspaceState(); });
     });
 
     // ── Page-in confirm dialog (issue #15, replaces native confirm) ──
