@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-24T17:27:10.288Z",
+  "generatedAt": "2026-11-24T18:13:16.284Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -86,6 +86,7 @@
       "definitions": [
         "addRef",
         "autoFetchRefs",
+        "bindCompareDropZone",
         "buildToolbar",
         "clearCompareWorkspace",
         "clearLoading",
@@ -101,6 +102,7 @@
         "doGenerateOAFromAnalysis",
         "doInventiveness",
         "doOfficeAction",
+        "downloadCompareDiscussionDocx",
         "escapeHtml",
         "exportDiscussionConclusions",
         "exportResultDocx",
@@ -110,8 +112,10 @@
         "getMyPatent",
         "getOA",
         "getRefs",
+        "handleDroppedCompareFile",
         "hideBtn",
         "hideDiscussionStopButton",
+        "initCompareDropZones",
         "pasteMyPatent",
         "pasteOA",
         "pasteRef",
@@ -254,6 +258,7 @@
         "setAnalysisMode",
         "showClaimNodeForm",
         "showConfirmDialog",
+        "showDisclosureTimingGuardBanner",
         "showDiscussionPanel",
         "showMemoryForm",
         "showNewIdeaForm",
@@ -286,6 +291,7 @@
         "checkStatus",
         "closePdfPreview",
         "fetchPatent",
+        "initHomeDraftPersistence",
         "loadRecentIdeas",
         "loadUploadedMeta",
         "previewPdfFile",
@@ -293,6 +299,8 @@
         "removeRestoredFile",
         "renderFileList",
         "renderOaDeadlineReminders",
+        "restoreHomeDraftState",
+        "saveHomeDraftState",
         "saveUploadedMeta",
         "setMode",
         "showPdfPreview",

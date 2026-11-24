@@ -2711,8 +2711,29 @@
         window.location.href = '/api/ideas/' + encodeURIComponent(currentIdeaId) + '/archive/zip';
     }
 
+    function showDisclosureTimingGuardBanner() {
+        var existing = document.getElementById('disclosure-timing-guard-banner');
+        if (existing) return;
+        var panel = document.getElementById('report-panel');
+        if (!panel) return;
+        var banner = document.createElement('div');
+        banner.id = 'disclosure-timing-guard-banner';
+        banner.style.cssText = 'margin:10px 0;padding:10px 14px;background:#3a2a12;border:1px solid #d29922;border-left:4px solid #f0883e;border-radius:6px;font-size:12.5px;color:#f0f6fc;line-height:1.6;display:flex;align-items:flex-start;justify-content:space-between;gap:10px;';
+        var msg = document.createElement('div');
+        msg.textContent = '🛡️ 公开时序守卫提示（防自我公开破坏新颖性）：若本方案拟申请发明/实用新型专利，请务必先提交专利申请锁定「申请日」，再公开发表期刊论文、arXiv 预印本或开源代码仓库。';
+        var closeBtn = document.createElement('button');
+        closeBtn.type = 'button';
+        closeBtn.textContent = '×';
+        closeBtn.style.cssText = 'background:none;border:none;color:#d29922;font-size:16px;cursor:pointer;padding:0 4px;flex-shrink:0;';
+        closeBtn.addEventListener('click', function() { banner.remove(); });
+        banner.appendChild(msg);
+        banner.appendChild(closeBtn);
+        panel.insertBefore(banner, panel.children[1] || null);
+    }
+
     function exportPaperLatexBundle() {
         if (!currentIdeaId) return;
+        showDisclosureTimingGuardBanner();
         const tplEl = document.getElementById('paper-latex-template');
         const tpl = tplEl && tplEl.value ? tplEl.value : 'ctexart';
         window.location.href = '/api/ideas/' + encodeURIComponent(currentIdeaId) + '/paper/latex-bundle?template=' + encodeURIComponent(tpl);
@@ -2720,6 +2741,7 @@
 
     function exportPaperDocx() {
         if (!currentIdeaId) return;
+        showDisclosureTimingGuardBanner();
         window.location.href = '/api/ideas/' + encodeURIComponent(currentIdeaId) + '/paper/docx';
     }
 
