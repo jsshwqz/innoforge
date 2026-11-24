@@ -1,5 +1,21 @@
 use super::*;
 
+/// 合法的 OA / 提交前预审 / 学术审稿返修类型白名单（统一供非流式、流式与答复书生成复用）。
+fn is_valid_oa_type(v: &str) -> bool {
+    matches!(
+        v,
+        "abnormal"
+            | "reject_review"
+            | "first_exam"
+            | "second_rejection"
+            | "reexamination_request"
+            | "reexamination_decision"
+            | "admin_lawsuit"
+            | "pre_filing_devil"
+            | "peer_review_rebuttal"
+    )
+}
+
 /// 从请求体或备选案号中解析 `case_id` 并提取多轮 OA 视图漂移与禁止反言约束。
 fn resolve_oa_drift_report(
     db: &crate::db::Database,
@@ -178,15 +194,7 @@ pub async fn api_ai_office_action_response(
         let oa_type_hint = req
             .get("oa_type")
             .and_then(|v| v.as_str())
-            .filter(|&v| {
-                v == "abnormal"
-                    || v == "reject_review"
-                    || v == "first_exam"
-                    || v == "second_rejection"
-                    || v == "reexamination_request"
-                    || v == "reexamination_decision"
-                    || v == "admin_lawsuit"
-            })
+            .filter(|&v| is_valid_oa_type(v))
             .unwrap_or("first_exam");
         let depth_hint = req
             .get("depth")
@@ -229,15 +237,7 @@ pub async fn api_ai_office_action_response(
     let oa_type = req
         .get("oa_type")
         .and_then(|v| v.as_str())
-        .filter(|&v| {
-            v == "abnormal"
-                || v == "reject_review"
-                || v == "first_exam"
-                || v == "second_rejection"
-                || v == "reexamination_request"
-                || v == "reexamination_decision"
-                || v == "admin_lawsuit"
-        })
+        .filter(|&v| is_valid_oa_type(v))
         .unwrap_or("first_exam");
     let depth = req
         .get("depth")
@@ -505,15 +505,7 @@ pub async fn api_ai_office_action_response_stream(
     let oa_type = req
         .get("oa_type")
         .and_then(|v| v.as_str())
-        .filter(|&v| {
-            v == "abnormal"
-                || v == "reject_review"
-                || v == "first_exam"
-                || v == "second_rejection"
-                || v == "reexamination_request"
-                || v == "reexamination_decision"
-                || v == "admin_lawsuit"
-        })
+        .filter(|&v| is_valid_oa_type(v))
         .or_else(|| {
             // Phase 4: CaseInput JSON 格式从 case_meta.oa_type 提取
             req.get("case_meta")
@@ -719,15 +711,7 @@ pub async fn api_ai_oa_generate_response_letter(
     let oa_type = req
         .get("oa_type")
         .and_then(|v| v.as_str())
-        .filter(|&v| {
-            v == "abnormal"
-                || v == "reject_review"
-                || v == "first_exam"
-                || v == "second_rejection"
-                || v == "reexamination_request"
-                || v == "reexamination_decision"
-                || v == "admin_lawsuit"
-        })
+        .filter(|&v| is_valid_oa_type(v))
         .or_else(|| {
             req.get("case_meta")
                 .and_then(|m| m.get("oa_type"))

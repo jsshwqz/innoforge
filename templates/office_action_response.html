@@ -91,6 +91,14 @@
                     <input type="radio" name="oa_type" value="admin_lawsuit">
                     <span data-i18n="oar.typeAdminLawsuit"></span>
                 </label>
+                <label class="oa-type-option" id="oa-type-pre-filing-devil">
+                    <input type="radio" name="oa_type" value="pre_filing_devil">
+                    <span data-i18n="oar.typePreFilingDevil"></span>
+                </label>
+                <label class="oa-type-option" id="oa-type-peer-review-rebuttal">
+                    <input type="radio" name="oa_type" value="peer_review_rebuttal">
+                    <span data-i18n="oar.typePeerReviewRebuttal"></span>
+                </label>
             </div>
         </div>
 
@@ -293,6 +301,12 @@
         if (oaType === 'admin_lawsuit') {
             return '📝 ' + (t('oar.btnGenerateAdminLawsuit') || '生成行政诉讼起诉状');
         }
+        if (oaType === 'pre_filing_devil') {
+            return '📝 生成提交前补强清单与改稿';
+        }
+        if (oaType === 'peer_review_rebuttal') {
+            return '📝 生成逐条审稿回复信 (Rebuttal)';
+        }
         return '📝 ' + (t('oar.btnGenerateResponse') || '生成答复书');
     }
 
@@ -308,6 +322,12 @@
         if (oaType === 'admin_lawsuit') {
             return t('oar.section5AdminLawsuit') || '行政诉讼起诉状草稿';
         }
+        if (oaType === 'pre_filing_devil') {
+            return '提交前补强修改清单';
+        }
+        if (oaType === 'peer_review_rebuttal') {
+            return '学术审稿逐条回复信（Response to Reviewers）';
+        }
         return t('oar.section5') || '意见陈述书草稿';
     }
 
@@ -322,6 +342,12 @@
         }
         if (oaType === 'admin_lawsuit') {
             return t('oar.generateHintAdminLawsuit') || '确认分析无误后可生成正式行政诉讼起诉状';
+        }
+        if (oaType === 'pre_filing_devil') {
+            return '确认预审短板后可一键生成提交前完整补强改稿';
+        }
+        if (oaType === 'peer_review_rebuttal') {
+            return '确认逐条策略后可一键生成正式版 Response to Reviewers';
         }
         return t('oar.generateHint') || '确认分析无误后可生成正式答复书';
     }
@@ -412,13 +438,42 @@
             if (saved) {
                 var data = JSON.parse(saved);
                 Object.keys(data).forEach(function(k) { _uploadedData[k] = data[k]; });
-                restoreOaUi();
             }
+            restoreOaUi();
         } catch (e) { /* ignore */ }
+    }
+
+    var OA_WORKSPACE_SNAP_KEY = 'innoforge_oa_workspace_v1';
+
+    function saveOaWorkspaceSnapshot() {
+        try {
+            var checkedType = document.querySelector('input[name="oa_type"]:checked');
+            var myEl = document.getElementById('my-patent');
+            var oaEl = document.getElementById('oa-input');
+            var depthEl = document.getElementById('depth-select');
+            var refInputs = Array.from(document.querySelectorAll('.ref-row')).map(function(r) {
+                var inp = r.querySelector('.ref-input');
+                return {
+                    idx: r.getAttribute('data-idx') || '0',
+                    val: inp ? inp.value : ''
+                };
+            });
+            var snap = {
+                oa_type: checkedType ? checkedType.value : 'first_exam',
+                my_val: myEl ? myEl.value : '',
+                oa_val: oaEl ? oaEl.value : '',
+                depth: depthEl ? depthEl.value : 'medium',
+                ref_inputs: refInputs,
+                last_analysis_raw: lastAnalysisRawText || '',
+                saved_at: Date.now()
+            };
+            sessionStorage.setItem(OA_WORKSPACE_SNAP_KEY, JSON.stringify(snap));
+        } catch (e) { /* ignore quota */ }
     }
 
     function clearOaState() {
         try { localStorage.removeItem(OA_STORAGE_KEY); } catch (e) { /* ignore */ }
+        try { sessionStorage.removeItem(OA_WORKSPACE_SNAP_KEY); } catch (e) { /* ignore */ }
     }
 
     // 清空本案输入：只清前端状态（uploadedData + UI），不删磁盘文件
@@ -451,6 +506,10 @@
         if (firstRefTag) firstRefTag.remove();
         reindexPlaceholders();
         // 清除截止日期：重置日期输入、倒计时显示、localStorage 键
+        try { sessionStorage.removeItem(OA_WORKSPACE_SNAP_KEY); } catch (e) { /* ignore */ }
+        lastAnalysisRawText = '';
+        var resBox = document.getElementById('result');
+        if (resBox) resBox.innerHTML = '';
         localStorage.removeItem('innoforge_oa_date');
         var oaDateInput = document.getElementById('oa-date');
         if (oaDateInput) oaDateInput.value = '';
@@ -472,7 +531,68 @@
         if (result) result.innerHTML = '';
     }
 
+    function ensureRefRowByIdx(idxStr) {
+        var rows = document.querySelectorAll('.ref-row');
+        for (let i = 0; i < rows.length; i++) {
+            if (rows[i].getAttribute('data-idx') === idxStr) return rows[i];
+        }
+        var targetNum = parseInt(idxStr, 10);
+        if (isNaN(targetNum)) targetNum = refIdxCounter + 1;
+        while (refIdxCounter < targetNum) {
+            addRef();
+        }
+        rows = document.querySelectorAll('.ref-row');
+        for (let j = 0; j < rows.length; j++) {
+            if (rows[j].getAttribute('data-idx') === idxStr) return rows[j];
+        }
+        return rows[rows.length - 1] || null;
+    }
+
     function restoreOaUi() {
+        // 先恢复 sessionStorage 工作区表单状态（OA 类型、输入框文本、多行对比文件、深度、上次分析报告）
+        var snap = null;
+        try {
+            var rawSnap = sessionStorage.getItem(OA_WORKSPACE_SNAP_KEY);
+            if (rawSnap) snap = JSON.parse(rawSnap);
+        } catch (e) { snap = null; }
+
+        if (snap && typeof snap === 'object') {
+            if (snap.oa_type) {
+                var radio = document.querySelector('input[name="oa_type"][value="' + snap.oa_type + '"]');
+                if (radio) {
+                    radio.checked = true;
+                    document.querySelectorAll('.oa-type-option').forEach(function(el) { el.style.borderColor = '#30363d'; });
+                    if (radio.closest('.oa-type-option')) radio.closest('.oa-type-option').style.borderColor = '#d2a8ff';
+                }
+            }
+            if (snap.depth && document.getElementById('depth-select')) {
+                document.getElementById('depth-select').value = snap.depth;
+            }
+            if (snap.my_val && document.getElementById('my-patent')) {
+                document.getElementById('my-patent').value = snap.my_val;
+            }
+            if (snap.oa_val && document.getElementById('oa-input')) {
+                document.getElementById('oa-input').value = snap.oa_val;
+            }
+            if (Array.isArray(snap.ref_inputs)) {
+                snap.ref_inputs.forEach(function(ri) {
+                    var row = ensureRefRowByIdx(String(ri.idx || '0'));
+                    if (row && ri.val) {
+                        var inp = row.querySelector('.ref-input');
+                        if (inp) inp.value = ri.val;
+                    }
+                });
+            }
+        }
+
+        // 恢复已上传/粘贴的文档标签（多份对比文件自动补足 .ref-row）
+        var refKeys = Object.keys(_uploadedData).filter(function(k) { return k.startsWith('ref_'); }).sort(function(a, b) {
+            return (parseInt(a.replace('ref_', ''), 10) || 0) - (parseInt(b.replace('ref_', ''), 10) || 0);
+        });
+        refKeys.forEach(function(rk) {
+            ensureRefRowByIdx(rk.replace('ref_', ''));
+        });
+
         for (let key in _uploadedData) {
             var d = uploadedData[key];
             if ((key === 'my' || key === 'oa' || key.startsWith('ref_')) && (!d || !(d.content || '').trim())) {
@@ -491,19 +611,24 @@
                     + '<span class="tag-remove" onclick="clearOA()">&times;</span></span>';
             } else if (key.startsWith('ref_')) {
                 var idx = key.replace('ref_', '');
-                var rows = document.querySelectorAll('.ref-row');
-                for (let i = 0; i < rows.length; i++) {
-                    if (rows[i].getAttribute('data-idx') === idx) {
-                        rows[i].querySelector('.ref-input').disabled = true;
-                        var tag = rows[i].querySelector('.file-tag-container') || document.createElement('span');
-                        tag.className = 'file-tag-container';
-                        tag.innerHTML = '<span class="file-tag">📋 ' + escapeHtml(d.title)
-                            + ' (' + (d.content || '').length + t('common.chars') + ')'
-                            + '<span class="tag-remove" onclick="clearRefUpload(\'' + idx + '\')">&times;</span></span>';
-                        rows[i].appendChild(tag);
-                        break;
-                    }
+                var targetRow = ensureRefRowByIdx(idx);
+                if (targetRow) {
+                    targetRow.querySelector('.ref-input').disabled = true;
+                    var tag = targetRow.querySelector('.file-tag-container') || document.createElement('span');
+                    tag.className = 'file-tag-container';
+                    tag.innerHTML = '<span class="file-tag">📋 ' + escapeHtml(d.title)
+                        + ' (' + (d.content || '').length + t('common.chars') + ')'
+                        + '<span class="tag-remove" onclick="clearRefUpload(\'' + idx + '\')">&times;</span></span>';
+                    targetRow.appendChild(tag);
                 }
+            }
+        }
+
+        // 恢复跨页前的分析报告（例如跳去 /settings 调参数再返回时保留整份报告）
+        if (snap && snap.last_analysis_raw && snap.last_analysis_raw.trim().length > 20) {
+            lastAnalysisRawText = snap.last_analysis_raw;
+            if (typeof showResult === 'function' && typeof renderMarkdown === 'function') {
+                showResult(renderMarkdown(lastAnalysisRawText), { copy: true, export: true, showDiscussion: true, amend: true });
             }
         }
     }
@@ -2010,6 +2135,7 @@
         }
         if (options.export) {
             html += '<button onclick="exportResultMarkdown()" title="' + t('oar.export') + '">' + t('oar.export') + '</button>';
+            html += '<button onclick="exportResultDocx()" title="导出为 Word (.docx) 专业报告">📄 导出 Word</button>';
         }
         if (options.showDiscussion) {
             html += '<button onclick="startDiscussion()">' + t('oar.discussBtn') + '</button>';
@@ -2027,6 +2153,42 @@
         var toolbar = buildToolbar(options);
         document.getElementById('result').innerHTML = '<div class="result-box">' + toolbar + '<div class="result-content">' + finalHtml + '</div></div>';
         clearLoading();
+        if (typeof saveOaWorkspaceSnapshot === 'function') saveOaWorkspaceSnapshot();
+    }
+
+    async function exportResultDocx() {
+        var text = lastAnalysisRawText || (document.querySelector('.result-content') || {}).innerText || '';
+        if (!text) return;
+        try {
+            var checked = document.querySelector('input[name="oa_type"]:checked');
+            var oaType = checked ? checked.value : 'first_exam';
+            var titleMap = {
+                'pre_filing_devil': '提交前魔鬼审查员模拟预审与补强报告',
+                'peer_review_rebuttal': '学术论文同行评审返修报告（Response to Reviewers）',
+                'reject_review': '驳回后复审深度分析与抗辩报告',
+                'admin_lawsuit': '专利行政诉讼分析报告'
+            };
+            var docTitle = titleMap[oaType] || '审查意见深度分析与答复报告';
+            var ts = new Date().toISOString().slice(0, 16).replace(/[T:]/g, '-');
+            var resp = await fetch('/api/export/docx', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    title: docTitle,
+                    markdown: text,
+                    filename: docTitle + '_' + ts
+                })
+            });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            var blob = await resp.blob();
+            var a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = docTitle + '_' + ts + '.docx';
+            a.click();
+            URL.revokeObjectURL(a.href);
+        } catch (e) {
+            alert('导出 Word 失败: ' + e.message);
+        }
     }
 
     function showError(msg) {
@@ -2193,7 +2355,15 @@
         console.log('[OA-DEBUG] oaType=', oaType, 'depth=', depth);
 
         if (!my) { console.warn('[OA-DEBUG] my 为空'); alert(t('oar.alertPatent')); return; }
-        if (!oa) { console.warn('[OA-DEBUG] oa 为空'); alert(t('oar.alertOA')); return; }
+        if (!oa) {
+            if (oaType === 'pre_filing_devil') {
+                oa = '请以最严格的国家知识产权局实审标准，对本待提交专利草稿进行提交前魔鬼预审，全面排查新颖性/创造性、权要清楚性与支持及防写窄隐患。';
+            } else {
+                console.warn('[OA-DEBUG] oa 为空');
+                alert(t('oar.alertOA'));
+                return;
+            }
+        }
         console.log('[OA-DEBUG] 验证通过，准备发请求');
 
         var typeLabel = document.querySelector('input[name="oa_type"]:checked + span');
@@ -4542,7 +4712,122 @@
     // Register hook so language switch (which re-runs applyI18nCommon) also re-fixes placeholders
     if (!window._onI18nLangChange) window._onI18nLangChange = [];
     window._onI18nLangChange.push(function() { reindexPlaceholders(); updateRoundLabel(); });
+    // ── OA 区域拖拽文件上传 + 跨页自动快照监听 ──
+    async function handleDroppedOaFile(targetType, file) {
+        if (!file) return;
+        if (targetType === 'my') {
+            var myTagEl = document.getElementById('my-file-tag');
+            if (myTagEl) myTagEl.innerHTML = DOMPurify.sanitize('<span style="color:#8b949e;font-size:12px;">' + t('common.extracting') + '</span>');
+            uploadedFileObjects['my'] = file;
+            try {
+                var myRes = await extractFile(file);
+                uploadedData['my'] = myRes;
+                if (myTagEl) {
+                    myTagEl.innerHTML = '<span class="file-tag">📄 ' + escapeHtml(myRes.title)
+                        + ' (' + myRes.content.length + t('common.chars') + ')'
+                        + '<span class="tag-remove" onclick="clearMyPatent()">&times;</span></span>';
+                }
+                document.getElementById('my-patent').disabled = true;
+            } catch (e) {
+                if (myTagEl) myTagEl.innerHTML = DOMPurify.sanitize('<span style="color:#f85149;font-size:12px;">' + escapeHtml(e.message) + '</span>');
+            }
+        } else if (targetType === 'oa') {
+            var oaTagEl = document.getElementById('oa-file-tag');
+            if (oaTagEl) oaTagEl.innerHTML = DOMPurify.sanitize('<span style="color:#8b949e;font-size:12px;">' + t('common.extracting') + '</span>');
+            uploadedFileObjects['oa'] = file;
+            try {
+                var oaRes = await extractFile(file);
+                uploadedData['oa'] = oaRes;
+                if (oaTagEl) {
+                    oaTagEl.innerHTML = '<span class="file-tag">📄 ' + escapeHtml(oaRes.title)
+                        + ' (' + oaRes.content.length + t('common.chars') + ')'
+                        + '<span class="tag-remove" onclick="clearOA()">&times;</span></span>';
+                }
+                document.getElementById('oa-input').disabled = true;
+            } catch (e) {
+                if (oaTagEl) oaTagEl.innerHTML = DOMPurify.sanitize('<span style="color:#f85149;font-size:12px;">' + escapeHtml(e.message) + '</span>');
+            }
+        } else if (targetType === 'ref') {
+            var rows = document.querySelectorAll('.ref-row');
+            var targetRow = null;
+            for (let i = 0; i < rows.length; i++) {
+                var rIdx = rows[i].getAttribute('data-idx');
+                if (!uploadedData['ref_' + rIdx] && !rows[i].querySelector('.ref-input').value.trim()) {
+                    targetRow = rows[i];
+                    break;
+                }
+            }
+            if (!targetRow) {
+                addRef();
+                rows = document.querySelectorAll('.ref-row');
+                targetRow = rows[rows.length - 1];
+            }
+            var idx = targetRow.getAttribute('data-idx');
+            var existing = targetRow.querySelector('.file-tag-container') || document.createElement('span');
+            existing.className = 'file-tag-container';
+            existing.innerHTML = DOMPurify.sanitize('<span style="color:#8b949e;font-size:12px;">' + t('common.extracting') + '</span>');
+            targetRow.appendChild(existing);
+            try {
+                var refRes = await extractFile(file);
+                uploadedData['ref_' + idx] = refRes;
+                existing.innerHTML = '<span class="file-tag">📄 ' + escapeHtml(refRes.title)
+                    + ' (' + refRes.content.length + t('common.chars') + ')'
+                    + '<span class="tag-remove" onclick="clearRefUpload(\'' + idx + '\')">&times;</span></span>';
+                targetRow.querySelector('.ref-input').disabled = true;
+            } catch (e) {
+                existing.innerHTML = DOMPurify.sanitize('<span style="color:#f85149;font-size:12px;">' + escapeHtml(e.message) + '</span>');
+            }
+        }
+        saveOaWorkspaceSnapshot();
+    }
+
+    function bindOaDropZone(selector, targetType) {
+        var zone = document.querySelector(selector);
+        if (!zone) return;
+        zone.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            zone.style.outline = '2px dashed #58a6ff';
+        });
+        zone.addEventListener('dragleave', function() {
+            zone.style.outline = '';
+        });
+        zone.addEventListener('drop', function(e) {
+            e.preventDefault();
+            zone.style.outline = '';
+            var files = e.dataTransfer && e.dataTransfer.files;
+            if (!files || !files.length) return;
+            if (targetType === 'ref') {
+                for (let i = 0; i < files.length; i++) handleDroppedOaFile('ref', files[i]);
+            } else {
+                handleDroppedOaFile(targetType, files[0]);
+            }
+        });
+    }
+
+    function initOaWorkspacePersistenceAndDrops() {
+        bindOaDropZone('.cmp-section.cmp-my', 'my');
+        bindOaDropZone('.cmp-section.cmp-oa-red', 'oa');
+        bindOaDropZone('.cmp-section.cmp-ref', 'ref');
+        document.querySelectorAll('input[name="oa_type"]').forEach(function(r) {
+            r.addEventListener('change', saveOaWorkspaceSnapshot);
+        });
+        ['my-patent', 'oa-input', 'depth-select'].forEach(function(id) {
+            var el = document.getElementById(id);
+            if (el) {
+                el.addEventListener('input', saveOaWorkspaceSnapshot);
+                el.addEventListener('change', saveOaWorkspaceSnapshot);
+            }
+        });
+        var refListEl = document.getElementById('ref-list');
+        if (refListEl) {
+            refListEl.addEventListener('input', saveOaWorkspaceSnapshot);
+            refListEl.addEventListener('change', saveOaWorkspaceSnapshot);
+        }
+        window.addEventListener('pagehide', saveOaWorkspaceSnapshot);
+    }
+
     loadOaState();
+    initOaWorkspacePersistenceAndDrops();
     loadOaHistory();
     initDiscQuoteEvents();
     initDeadline();
