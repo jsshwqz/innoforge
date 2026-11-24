@@ -45,7 +45,7 @@
                 <!-- 文件上传区 -->
                 <div class="upload-zone" id="upload-zone" onclick="document.getElementById('file-input').click()">
                     <input type="file" id="file-input" multiple accept=".pdf,.docx,.pptx,.xlsx,.ofd,.step,.stp,.iges,.igs,.stl,.txt,.md,.csv,.tsv,.json,.yaml,.yml,.tex,.bib,.html,.htm,.xml,.rtf,.dxf,.png,.jpg,.jpeg,.gif,.bmp,.webp">
-                    <span data-i18n="home.uploadHint">拖拽文件到此处，或点击上传（PDF / Word / 图片 / 文本）</span>
+                    <span data-i18n="home.uploadHint">拖拽文件到此处，或点击上传（PDF / Office / OFD / STEP·STL 三维 / LaTeX / 图片）</span>
                 </div>
                 <div class="file-list" id="file-list"></div>
 
@@ -669,8 +669,40 @@
         container.style.display = '';
     }
 
-    // 页面加载时渲染提醒
+    // 页面加载时渲染提醒 + 首页草稿/模式跨页无损恢复
     renderOaDeadlineReminders();
+
+    var HOME_DRAFT_KEY = 'innoforge_home_draft_v1';
+    function saveHomeDraftState() {
+        try {
+            var ta = document.getElementById('idea-input');
+            sessionStorage.setItem(HOME_DRAFT_KEY, JSON.stringify({
+                text: ta ? ta.value : '',
+                mode: typeof currentMode !== 'undefined' ? currentMode : 'chat',
+                savedAt: Date.now()
+            }));
+        } catch (e) {}
+    }
+    function restoreHomeDraftState() {
+        try {
+            var raw = sessionStorage.getItem(HOME_DRAFT_KEY);
+            if (!raw) return;
+            var st = JSON.parse(raw);
+            if (!st || typeof st !== 'object') return;
+            var ta = document.getElementById('idea-input');
+            if (ta && st.text && !ta.value) ta.value = st.text;
+            if (st.mode && typeof setMode === 'function') setMode(st.mode);
+        } catch (e) {}
+    }
+    (function initHomeDraftPersistence() {
+        restoreHomeDraftState();
+        var ta = document.getElementById('idea-input');
+        if (ta) ta.addEventListener('input', saveHomeDraftState);
+        document.querySelectorAll('.mode-btn').forEach(function(b) {
+            b.addEventListener('click', function() { setTimeout(saveHomeDraftState, 0); });
+        });
+        window.addEventListener('pagehide', saveHomeDraftState);
+    })();
     </script>
 </body>
 </html>
