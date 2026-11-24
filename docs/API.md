@@ -1458,6 +1458,10 @@ Response:
 
 把答复正文导出为 DOCX（服务端生成，返回 base64）。
 
+### POST `/api/export/docx`
+
+通用 Markdown 专业报告导出 Word（`.docx` 二进制流，支持标题、加粗/行内代码、列表、引用块、代码块与原生 Word 表格，带 UTF-8 `Content-Disposition`）。
+
 - 请求：`{ "response_text": "…", "patent_number": "…", "applicant": "…", "oa_type": "…" }`；`response_text` 必填且不超过 50,000 字符。
 - 成功：`{ "status": "ok", "docx": "<base64>" }`；失败：`{ "error": "…" }`。
 - 注意：响应是 JSON 里的 base64，不是二进制流。
@@ -1477,6 +1481,7 @@ Response:
 | GET | `/api/oa/discussions/:patent_number/:discussion_id` | 单个讨论会话详情 |
 | POST | `/api/oa/discussions/import` | 导入讨论会话 |
 | POST | `/api/oa/export-docx` | 答复正文导出 DOCX（base64） |
+| POST | `/api/export/docx` | 通用 Markdown 专业报告导出 Word（`.docx` 二进制） |
 | POST | `/api/oa/export` | 分析结果服务端导出 |
 | GET | `/api/oa/export/:filename` | 下载已导出的文件 |
 | GET | `/api/oa/rounds/:patent_id` | 某专利的 OA 轮次列表 |

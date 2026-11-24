@@ -25,7 +25,7 @@ mod idea;
 mod ipc;
 mod oa_diff;
 pub mod oa_export;
-pub use oa_export::api_oa_case_export_docx;
+pub use oa_export::{api_export_markdown_docx, api_oa_case_export_docx};
 mod oa_rounds;
 mod pages;
 mod patent;

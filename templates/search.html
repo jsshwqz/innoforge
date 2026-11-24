@@ -1392,6 +1392,83 @@ function renderSearchMarkdown(raw) {
     return out;
 }
 
+async function downloadSearchReportDocx(title, markdownText, filenamePrefix, docxBtn) {
+    if (docxBtn) {
+        docxBtn.disabled = true;
+        docxBtn.textContent = '⏳ 生成中...';
+    }
+    try {
+        var ts = new Date().toISOString().slice(0, 16).replace(/[T:]/g, '-');
+        var resp = await fetch('/api/export/docx', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                title: title || '创研台技术调研报告',
+                markdown: markdownText || '',
+                filename: (filenamePrefix || '调研报告') + '_' + ts
+            })
+        });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        var blob = await resp.blob();
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = (filenamePrefix || '调研报告') + '_' + ts + '.docx';
+        a.click();
+        URL.revokeObjectURL(a.href);
+    } catch (err) {
+        alert('导出 Word 失败: ' + err.message);
+    } finally {
+        if (docxBtn) {
+            docxBtn.disabled = false;
+            docxBtn.textContent = '📄 导出 Word (.docx)';
+        }
+    }
+}
+
+function buildSearchExportToolbar(title, markdownText, filenamePrefix) {
+    var bar = document.createElement('div');
+    bar.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;';
+    var btnStyle = 'padding:5px 11px;font-size:12px;border-radius:6px;border:1px solid #30363d;background:#21262d;color:#c9d1d9;cursor:pointer;';
+
+    var copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.textContent = '📋 复制全文';
+    copyBtn.style.cssText = btnStyle;
+    copyBtn.addEventListener('click', function() {
+        navigator.clipboard.writeText(markdownText || '').then(function() {
+            copyBtn.textContent = '✅ 已复制';
+            setTimeout(function() { copyBtn.textContent = '📋 复制全文'; }, 1500);
+        });
+    });
+
+    var mdBtn = document.createElement('button');
+    mdBtn.type = 'button';
+    mdBtn.textContent = '📥 导出 Markdown';
+    mdBtn.style.cssText = btnStyle;
+    mdBtn.addEventListener('click', function() {
+        var blob = new Blob([markdownText || ''], { type: 'text/markdown;charset=utf-8' });
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        var ts = new Date().toISOString().slice(0, 16).replace(/[T:]/g, '-');
+        a.download = (filenamePrefix || '调研报告') + '_' + ts + '.md';
+        a.click();
+        URL.revokeObjectURL(a.href);
+    });
+
+    var docxBtn = document.createElement('button');
+    docxBtn.type = 'button';
+    docxBtn.textContent = '📄 导出 Word (.docx)';
+    docxBtn.style.cssText = btnStyle + 'border-color:#1f6feb;color:#58a6ff;';
+    docxBtn.addEventListener('click', function() {
+        downloadSearchReportDocx(title, markdownText, filenamePrefix, docxBtn);
+    });
+
+    bar.appendChild(copyBtn);
+    bar.appendChild(mdBtn);
+    bar.appendChild(docxBtn);
+    return bar;
+}
+
 async function compareMatrix() {
     var ids = Array.from(document.querySelectorAll('.batch-check:checked')).map(function(cb) { return cb.dataset.id; });
     var resultDiv = document.getElementById('batch-result');
@@ -1403,7 +1480,17 @@ async function compareMatrix() {
         if (!resp.ok) throw new Error('服务器错误 (' + resp.status + ')');
         var data = await resp.json();
         if (data.status === 'ok') {
-            resultDiv.innerHTML = DOMPurify.sanitize('<h3 style="color:#a371f7;margin-bottom:12px;">📊 跨文档深度对比矩阵</h3><div style="padding:16px 18px;background:#0d1117;border:1px solid #30363d;border-radius:8px;color:#c9d1d9;line-height:1.75;max-height:72vh;overflow-y:auto;">' + renderSearchMarkdown(data.analysis || '') + '</div>');
+            var matrixMd = data.analysis || '';
+            resultDiv.innerHTML = '';
+            var matrixH3 = document.createElement('h3');
+            matrixH3.style.cssText = 'color:#a371f7;margin-bottom:10px;';
+            matrixH3.textContent = '📊 跨文档深度对比矩阵';
+            resultDiv.appendChild(matrixH3);
+            resultDiv.appendChild(buildSearchExportToolbar('跨文档深度对比矩阵', matrixMd, '专利对比矩阵'));
+            var matrixBox = document.createElement('div');
+            matrixBox.style.cssText = 'padding:16px 18px;background:#0d1117;border:1px solid #30363d;border-radius:8px;color:#c9d1d9;line-height:1.75;max-height:72vh;overflow-y:auto;';
+            matrixBox.innerHTML = DOMPurify.sanitize(renderSearchMarkdown(matrixMd));
+            resultDiv.appendChild(matrixBox);
         } else { resultDiv.innerHTML = '<p style="color:#f85149;">❌ ' + escapeHtml(data.error || '对比失败') + '</p>'; }
     } catch(e) { resultDiv.innerHTML = '<p style="color:#f85149;">❌ ' + escapeHtml(e.message) + '</p>'; }
 }
@@ -1439,7 +1526,13 @@ async function runRiskAssessment() {
         if (!resp.ok) throw new Error('服务器错误 (' + resp.status + ')');
         var data = await resp.json();
         if (data.status === 'ok') {
-            resultDiv.innerHTML = DOMPurify.sanitize('<div style="padding:14px 16px;background:#0d1117;border:1px solid #30363d;border-radius:8px;color:#c9d1d9;line-height:1.75;max-height:55vh;overflow-y:auto;">' + renderSearchMarkdown(data.analysis || '') + '</div>');
+            var riskMd = data.analysis || '';
+            resultDiv.innerHTML = '';
+            resultDiv.appendChild(buildSearchExportToolbar('侵权风险评估（FTO 深度排查）', riskMd, 'FTO侵权风险评估'));
+            var riskBox = document.createElement('div');
+            riskBox.style.cssText = 'padding:14px 16px;background:#0d1117;border:1px solid #30363d;border-radius:8px;color:#c9d1d9;line-height:1.75;max-height:55vh;overflow-y:auto;';
+            riskBox.innerHTML = DOMPurify.sanitize(renderSearchMarkdown(riskMd));
+            resultDiv.appendChild(riskBox);
         } else { resultDiv.innerHTML = '<p style="color:#f85149;">❌ ' + escapeHtml(data.error || '评估失败') + '</p>'; }
     } catch(e) { resultDiv.innerHTML = '<p style="color:#f85149;">❌ ' + escapeHtml(e.message) + '</p>'; }
 }
@@ -1567,6 +1660,28 @@ async function analyzeSearchResults() {
                 });
             }
         }
+        var exportMdParts = ['# AI 检索结果深度态势与研发空白点分析（' + query + '）'];
+        if (an.raw) {
+            exportMdParts.push(an.raw);
+        } else {
+            if (an.trend) exportMdParts.push('## 📈 技术演进趋势\n\n' + an.trend);
+            if (an.gaps) exportMdParts.push('## 🎯 共性技术瓶颈与研发空白点\n\n' + an.gaps);
+            if (Array.isArray(an.suggestions) && an.suggestions.length) {
+                exportMdParts.push('## 💡 高价值创新切入点与专利布局建议\n\n' + an.suggestions.map(function(s) { return '- ' + String(s || ''); }).join('\n'));
+            }
+            if (Array.isArray(an.scores) && an.scores.length) {
+                exportMdParts.push('## 📊 逐篇机理相关性评分\n\n' + an.scores.map(function(sc) {
+                    var idx = Number(sc.index || 0);
+                    var p = patents[idx - 1];
+                    return '- [' + idx + '] ' + (p ? ((p.patent_number || '') + ' ' + (p.title || '')) : '') + ' — ' + Number(sc.score || 0) + '分：' + String(sc.reason || '');
+                }).join('\n'));
+            }
+        }
+        resultDiv.appendChild(buildSearchExportToolbar(
+            '技术态势与研发空白点分析（' + query + '）',
+            exportMdParts.join('\n\n'),
+            '技术态势分析'
+        ));
         resultDiv.appendChild(card);
     } catch (e) {
         resultDiv.textContent = '❌ 请求失败: ' + e.message;

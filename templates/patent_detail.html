@@ -1262,8 +1262,14 @@
                         }).join(' · ') + '</div>';
                 }
                 resultDiv.innerHTML = DOMPurify.sanitize(filesHeader + renderDeepAnalysisMarkdown(data.analysis || ''));
-                document.getElementById('upload-result').innerHTML = '';
-                document.getElementById('upload-result').appendChild(resultDiv);
+                var uploadResHost = document.getElementById('upload-result');
+                uploadResHost.innerHTML = '';
+                uploadResHost.appendChild(buildPatentExportToolbar(
+                    '多文献深度对比分析报告',
+                    data.analysis || '',
+                    '多文献对比_{{patent_number}}'
+                ));
+                uploadResHost.appendChild(resultDiv);
                 if (typeof savePatentWorkspaceState === 'function') savePatentWorkspaceState();
             } else {
                 var errP2 = document.createElement('p');
@@ -1287,6 +1293,83 @@
             claimsAbortController.abort();
             claimsAbortController = null;
         }
+    }
+
+    async function downloadPatentReportDocx(title, markdownText, filenamePrefix, docxBtn) {
+        if (docxBtn) {
+            docxBtn.disabled = true;
+            docxBtn.textContent = '⏳ 生成中...';
+        }
+        try {
+            var ts = new Date().toISOString().slice(0, 16).replace(/[T:]/g, '-');
+            var resp = await fetch('/api/export/docx', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    title: title || '专利深度分析报告',
+                    markdown: markdownText || '',
+                    filename: (filenamePrefix || '专利分析') + '_' + ts
+                })
+            });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            var blob = await resp.blob();
+            var a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = (filenamePrefix || '专利分析') + '_' + ts + '.docx';
+            a.click();
+            URL.revokeObjectURL(a.href);
+        } catch (err) {
+            alert('导出 Word 失败: ' + err.message);
+        } finally {
+            if (docxBtn) {
+                docxBtn.disabled = false;
+                docxBtn.textContent = '📄 导出 Word (.docx)';
+            }
+        }
+    }
+
+    function buildPatentExportToolbar(title, markdownText, filenamePrefix) {
+        var bar = document.createElement('div');
+        bar.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;';
+        var btnStyle = 'padding:5px 11px;font-size:12px;border-radius:6px;border:1px solid #30363d;background:#21262d;color:#c9d1d9;cursor:pointer;';
+
+        var copyBtn = document.createElement('button');
+        copyBtn.type = 'button';
+        copyBtn.textContent = '📋 复制全文';
+        copyBtn.style.cssText = btnStyle;
+        copyBtn.addEventListener('click', function() {
+            navigator.clipboard.writeText(markdownText || '').then(function() {
+                copyBtn.textContent = '✅ 已复制';
+                setTimeout(function() { copyBtn.textContent = '📋 复制全文'; }, 1500);
+            });
+        });
+
+        var mdBtn = document.createElement('button');
+        mdBtn.type = 'button';
+        mdBtn.textContent = '📥 导出 Markdown';
+        mdBtn.style.cssText = btnStyle;
+        mdBtn.addEventListener('click', function() {
+            var blob = new Blob([markdownText || ''], { type: 'text/markdown;charset=utf-8' });
+            var a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            var ts = new Date().toISOString().slice(0, 16).replace(/[T:]/g, '-');
+            a.download = (filenamePrefix || '专利分析') + '_' + ts + '.md';
+            a.click();
+            URL.revokeObjectURL(a.href);
+        });
+
+        var docxBtn = document.createElement('button');
+        docxBtn.type = 'button';
+        docxBtn.textContent = '📄 导出 Word (.docx)';
+        docxBtn.style.cssText = btnStyle + 'border-color:#1f6feb;color:#58a6ff;';
+        docxBtn.addEventListener('click', function() {
+            downloadPatentReportDocx(title, markdownText, filenamePrefix, docxBtn);
+        });
+
+        bar.appendChild(copyBtn);
+        bar.appendChild(mdBtn);
+        bar.appendChild(docxBtn);
+        return bar;
     }
 
     // Claims analysis (with live elapsed timer + cancel + 60s timeout)
@@ -1335,7 +1418,15 @@
             if (!resp.ok) throw new Error('服务器错误 (' + resp.status + ')');
             var data = await resp.json();
             if (data.status === 'ok') {
-                result.innerHTML = DOMPurify.sanitize('<h3 style="color:#58a6ff;margin:0 0 12px;">🔍 权利要求 × 说明书交叉深度剖析</h3><div style="color:#c9d1d9;text-align:left;">' + renderDeepAnalysisMarkdown(data.analysis) + '</div>');
+                result.innerHTML = '';
+                result.appendChild(buildPatentExportToolbar(
+                    '权利要求 × 说明书交叉深度剖析',
+                    data.analysis || '',
+                    '权利要求分析_{{patent_number}}'
+                ));
+                var claimsBody = document.createElement('div');
+                claimsBody.innerHTML = DOMPurify.sanitize('<h3 style="color:#58a6ff;margin:0 0 12px;">🔍 权利要求 × 说明书交叉深度剖析</h3><div style="color:#c9d1d9;text-align:left;">' + renderDeepAnalysisMarkdown(data.analysis) + '</div>');
+                result.appendChild(claimsBody);
             } else {
                 var claimErrSpan = document.createElement('span');
                 claimErrSpan.style.color = '#f85149';

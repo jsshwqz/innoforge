@@ -778,6 +778,73 @@
                     '<div style="font-size:0.82em;color:#58a6ff;margin-bottom:6px;font-weight:bold;">📝 ' + escapeHtml(exportTitle) + '</div>' +
                     '<div style="color:#c9d1d9;font-size:0.92em;line-height:1.65;">' + renderAiMarkdown(data.conclusions) + '</div>'
                 );
+                var actionBar = document.createElement('div');
+                actionBar.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;padding-top:8px;border-top:1px solid #30363d;';
+                var btnCss = 'padding:4px 10px;font-size:12px;border-radius:6px;border:1px solid #30363d;background:#21262d;color:#c9d1d9;cursor:pointer;';
+                var rawMd = data.conclusions || '';
+
+                var copyBtn = document.createElement('button');
+                copyBtn.type = 'button';
+                copyBtn.textContent = '📋 复制结论';
+                copyBtn.style.cssText = btnCss;
+                copyBtn.addEventListener('click', function() {
+                    navigator.clipboard.writeText(rawMd).then(function() {
+                        copyBtn.textContent = '✅ 已复制';
+                        setTimeout(function() { copyBtn.textContent = '📋 复制结论'; }, 1500);
+                    });
+                });
+
+                var mdBtn = document.createElement('button');
+                mdBtn.type = 'button';
+                mdBtn.textContent = '📥 下载 Markdown';
+                mdBtn.style.cssText = btnCss;
+                mdBtn.addEventListener('click', function() {
+                    var blob = new Blob([rawMd], { type: 'text/markdown;charset=utf-8' });
+                    var a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    var ts = new Date().toISOString().slice(0, 16).replace(/[T:]/g, '-');
+                    a.download = 'AI讨论结论_' + ts + '.md';
+                    a.click();
+                    URL.revokeObjectURL(a.href);
+                });
+
+                var docxBtn = document.createElement('button');
+                docxBtn.type = 'button';
+                docxBtn.textContent = '📄 导出 Word (.docx)';
+                docxBtn.style.cssText = btnCss + 'border-color:#1f6feb;color:#58a6ff;';
+                docxBtn.addEventListener('click', async function() {
+                    docxBtn.disabled = true;
+                    docxBtn.textContent = '⏳ 生成中...';
+                    try {
+                        var ts = new Date().toISOString().slice(0, 16).replace(/[T:]/g, '-');
+                        var dResp = await fetch('/api/export/docx', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                title: 'AI 专家讨论结论报告',
+                                markdown: rawMd,
+                                filename: 'AI讨论结论_' + ts
+                            })
+                        });
+                        if (!dResp.ok) throw new Error('HTTP ' + dResp.status);
+                        var blob = await dResp.blob();
+                        var a = document.createElement('a');
+                        a.href = URL.createObjectURL(blob);
+                        a.download = 'AI讨论结论_' + ts + '.docx';
+                        a.click();
+                        URL.revokeObjectURL(a.href);
+                    } catch (err) {
+                        alert('导出 Word 失败: ' + err.message);
+                    } finally {
+                        docxBtn.disabled = false;
+                        docxBtn.textContent = '📄 导出 Word (.docx)';
+                    }
+                });
+
+                actionBar.appendChild(copyBtn);
+                actionBar.appendChild(mdBtn);
+                actionBar.appendChild(docxBtn);
+                div.appendChild(actionBar);
                 box.appendChild(div);
                 box.scrollTop = box.scrollHeight;
             } else {
