@@ -54,6 +54,16 @@ pub static SYSTEM_PROMPT_PRESETS: &[(&str, &str, &str)] = &[
         "发明人头脑风暴 / Inventor Brainstorm",
         "你是一位经验丰富的研发创新导师，擅长与发明人进行头脑风暴。你善于：(1)从零散的技术想法中提炼核心发明构思 (2)引导发明人梳理技术问题的来龙去脉 (3)识别现有技术的盲点和改进空间 (4)帮助发明人用专利语言重新描述其技术方案。请用引导式提问帮助发明人深入思考，而非直接给出答案。语气鼓励、开放、建设性。",
     ),
+    (
+        "patent_drafting_coach",
+        "专利高质量撰写辅导 / Patent Drafting Coach",
+        "你是兼具 15 年一线总工程师与资深专利代理师经验的高价值专利撰写教练。你的核心使命是防止发明人把好技术写窄、写漏或写烂：1) 剥离独立权利要求 1 中的非必要实施例限定，守住最宽物理机理边界；2) 设计层层递进的从属权利要求攻防梯度（结构变体→关键配合→量化工艺窗口→控制策略）；3) 跳出眼前单点结构，着眼未来 3–5 年技术演进主动挖掘可替代材料、驱动/传热/拓扑变体写入说明书实施例以堵死竞争对手规避路径；4) 严查专利法第 26.4 条得不到支持、自我窄化措辞及“只披露不权要”的商业秘密裸奔风险。始终沉住气、重实证，材料未给的数据必须标注【待实验/补充】，严禁空话套话。",
+    ),
+    (
+        "academic_paper_assistant",
+        "学术论文与综述助手 / Academic Paper Assistant",
+        "你是面向高校科研师生与企业研发人员的严谨学术论文助手（覆盖工程、医工、理工全学科）。你擅长：(1) 基于真实文献梳理研究脉络、对比方法优劣与指出科学空白；(2) 审阅实验设计、对照基线与统计显著性漏洞；(3) 按 SCI/EI/核心期刊规范润色摘要、引言、机理建模与讨论章节。铁律：(a) 严禁编造任何文献、作者或 DOI，未提供真实 DOI 时必须显式标注【待补充可核验 DOI】；(b) 若内容涉及尚未提交专利的新技术方案，必须在开头醒目给出【防破新颖性安全锁】提醒（中国专利法第 22 条第 2 款：论文早于专利申请日公开将导致自身丧失新颖性）。",
+    ),
 ];
 
 impl AiChatRequest {
@@ -84,4 +94,41 @@ pub struct ChatMessage {
     pub role: String,
     pub content: String,
     pub created_at: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn all_seven_system_prompt_presets_resolve_cleanly() {
+        assert_eq!(SYSTEM_PROMPT_PRESETS.len(), 7);
+        for key in [
+            "general",
+            "patent_examiner",
+            "oa_expert",
+            "claim_analyst",
+            "inventor_brainstorm",
+            "patent_drafting_coach",
+            "academic_paper_assistant",
+        ] {
+            let req = AiChatRequest {
+                message: "测试".into(),
+                patent_id: None,
+                history: vec![],
+                web_search: false,
+                images: vec![],
+                system_prompt: Some(key.into()),
+                preset_mode: true,
+            };
+            let resolved = req
+                .effective_system_prompt()
+                .expect("preset should resolve");
+            assert!(
+                resolved.chars().count() >= 30,
+                "preset {} prompt too short",
+                key
+            );
+        }
+    }
 }

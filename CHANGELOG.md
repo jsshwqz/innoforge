@@ -4,6 +4,24 @@
 All notable changes are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
+## [v0.9.71] - 2026-11-24
+
+### 新增与深度提质 / Added & Quality Elevation
+
+- **AI 工作台 (`/ai`) 全面重构与两位实战专家预设上线（`src/types/chat.rs`、`templates/ai.html`）**：
+  - 新增 `patent_drafting_coach`（✍️ 专利高质量撰写辅导：独立权要剥离非必要限定防写窄 + 从属权要梯度 + 面向未来 3–5 年替代实施例布局）与 `academic_paper_assistant`（🎓 学术论文与综述助手：严禁编造 DOI + 专利法第 22.2 条防破新颖性安全锁）两个官方角色预设（附 7 预设解析单测）；
+  - 修复 `<textarea autofocus>` 导致 `/ai` 顶栏 `<h2>AI 助手</h2>` 在首屏被滚出视口的布局缺陷；
+  - 彻底替换 `escapeHtml().replace(/\n/g, '<br>')` 纯文本直出为完整 Markdown 渲染器（支持标题、表格、代码块、引用块、列表与分隔线），修复历史消息奇数条崩溃隐患与导出结论重复 emoji，并新增 4 组一键专家起手模板、清空对话按钮、URL `?role=` 直达与发送中防重复提交。
+- **FTO 侵权评估、批量摘要与检索结果分析全面升级为全文档深度引擎（`src/routes/ai.rs`、`src/ai/patent.rs`）**：
+  - `api_ai_risk_assessment` + `assess_infringement` 接入预算熔断、确定性法律状态预检（`is_patent_inactive` 自动标识已失效/撤回/驳回专利不得误判为高侵权风险）及 `extract_whole_document_signals` 全文定量参数/拓扑预挖；
+  - `api_ai_batch_summarize` + `batch_summarize` 升级为融合权利要求、说明书节选与预挖信号的结构化研发简报，替代原 500 字摘要 2–3 句浅层总结；
+  - `api_ai_analyze_results`（`POST /api/search/analyze`）废除 100 字摘要截断，按 ID/公开号查库富化 IPC、全文摘要、权要节选与定量参数锚点，切至 `ModelRole::DeepReasoning` 输出未来 3–5 年趋势与真实空白点，并在 `templates/search.html` 补齐「🧠 AI 趋势与空白点分析」直达按钮。
+- **本地检索去重分页稳定性与全局交互修复（`src/routes/search.rs`、`templates/index.html`、`static/i18n.js`、`static/style.css`）**：
+  - 修复 `api_search` 仅在单页内去重并扣减总数导致的翻页总数漂移与单页条目不足缺陷，改为跨页窗口全局按富文本完整度去重后再稳定分页（附回归单测）；
+  - 首页 (`/`) 新增「四位虚拟专家工作台」直达条（检索员 / 技术分析师 / 专利代理师 / 学术论文助手）、功能卡片改为 2×2 对称网格、补齐空输入即时校验提示；
+  - 修复 `static/i18n.js` 中 `DOMPurify.sanitize` 剥离 `#lang-switch` `onchange` 属性导致语言切换失效的问题，新增 `<=900px` 移动端顶部导航栏回退与暗色原生复选框适配。
+
+---
 ## [v0.9.70] - 2026-11-23
 
 ### 修复与深度质量提升 / Fixed & Quality Elevation

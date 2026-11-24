@@ -17,18 +17,27 @@
     <aside id="page-sidebar" class="page-sidebar"></aside>
     <main class="container page-main">
         <div class="chat-container">
-            <div class="page-title-bar"><h2 data-i18n="ai.title"></h2></div>
-            <p class="hint" data-i18n="ai.hint"></p>
-            <div class="chat-box" id="chat-messages" style="position:relative;"></div>
+            <div class="page-title-bar" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+                <h2 data-i18n="ai.title" style="margin:0;"></h2>
+                <button type="button" id="btn-clear-chat" class="btn-secondary btn-sm" onclick="clearAiChat()" style="font-size:12px;padding:4px 10px;">🗑️ 清空对话</button>
+            </div>
+            <p class="hint" data-i18n="ai.hint" style="margin:6px 0 10px;"></p>
+            <div class="ai-quick-starters" id="ai-quick-starters" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
+                <button type="button" class="btn-secondary btn-sm" onclick="applyExpertStarter('patent_drafting_coach', '请以高价值专利撰写教练视角帮我体检以下技术方案：1) 找出独立权利要求可能写窄的限定；2) 设计多梯度从属权利要求；3) 面向未来 3-5 年演进补充可替代实施例堵死竞争对手规避路径。\n\n【我的技术方案】：')" style="font-size:12px;padding:5px 10px;">✍️ 专利防写窄体检</button>
+                <button type="button" class="btn-secondary btn-sm" onclick="applyExpertStarter('inventor_brainstorm', '请帮我穿透表面结构，拆解以下研发课题的底层物理矛盾，并展望未来 3-5 年的技术演进与高价值外围专利空白：\n\n【研发课题】：')" style="font-size:12px;padding:5px 10px;">🔬 物理机理与3-5年演进</button>
+                <button type="button" class="btn-secondary btn-sm" onclick="applyExpertStarter('claim_analyst', '请按全面覆盖原则与等同原则，帮我逐项分析以下目标专利的独立权利要求保护边界，并给出可落地的工程规避设计路径与副作用权衡：\n\n【专利号/权利要求与我方方案】：')" style="font-size:12px;padding:5px 10px;">⚖️ 权要边界与规避设计</button>
+                <button type="button" class="btn-secondary btn-sm" onclick="applyExpertStarter('academic_paper_assistant', '请以严谨学术论文助手视角帮我梳理以下研究主题的文献脉络、实验对照设计漏洞与期刊投稿结构（严禁编造 DOI，并提示专利申请新颖性安全锁）：\n\n【研究主题/实验数据】：')" style="font-size:12px;padding:5px 10px;">🎓 学术综述与论文辅导</button>
+            </div>
+            <div class="chat-box" id="chat-messages" style="position:relative;min-height:360px;max-height:calc(100vh - 300px);"></div>
             <button class="scroll-bottom-btn" id="scroll-bottom-btn" onclick="scrollChatToBottom()">↓</button>
             <div class="chat-input">
                 <input type="file" id="chat-file-input" accept="image/*,.pdf,.txt,.md,.docx,.csv,.json" multiple style="display:none" onchange="handleChatFiles(event)">
                 <button type="button" class="btn-secondary" onclick="document.getElementById('chat-file-input').click()" title="上传图片或文件（PDF / DOCX / TXT / 图片）" style="padding:8px 12px;flex-shrink:0;">📎</button>
                 <div class="chat-input-wrap">
-                    <textarea id="chat-msg" rows="1" data-i18n-placeholder="ai.placeholder" autofocus></textarea>
+                    <textarea id="chat-msg" rows="1" data-i18n-placeholder="ai.placeholder"></textarea>
                     <div id="image-preview-area" class="image-preview-area" style="display:none;"></div>
                 </div>
-                <button onclick="sendChat()" data-i18n="ai.send"></button>
+                <button id="btn-send" onclick="sendChat()" data-i18n="ai.send"></button>
                 <button id="btn-stop" class="btn-stop" style="display:none" onclick="stopGeneration()" data-i18n="ai.stop"></button>
                 <button id="btn-export" class="btn-export-ghost" style="display:none" onclick="exportConclusions()" data-i18n="ai.exportConclusions"></button>
             </div>
@@ -54,6 +63,8 @@
       + '<div class="sidebar-label">' + (i18nLang === 'zh' ? '角色预设' : 'Role Preset') + '</div>'
       + '<select id="role-select">'
       + '<option value="general">' + (i18nLang === 'zh' ? '通用助手' : 'General Assistant') + '</option>'
+      + '<option value="patent_drafting_coach">' + (i18nLang === 'zh' ? '✍️ 专利高质量撰写辅导（防写窄/3-5年）' : '✍️ Patent Drafting Coach') + '</option>'
+      + '<option value="academic_paper_assistant">' + (i18nLang === 'zh' ? '🎓 学术论文与综述助手（真实DOI/防破新颖性）' : '🎓 Academic Paper Assistant') + '</option>'
       + '<option value="patent_examiner">' + (i18nLang === 'zh' ? '专利审查专家' : 'Patent Examiner') + '</option>'
       + '<option value="oa_expert">' + (i18nLang === 'zh' ? 'OA 答复专家' : 'OA Response Expert') + '</option>'
       + '<option value="claim_analyst">' + (i18nLang === 'zh' ? '权利要求分析师' : 'Claim Analyst') + '</option>'
@@ -65,6 +76,94 @@
     </script>
     <script>
     function escapeHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+    function renderAiMarkdown(text) {
+        if (!text) return '';
+        var codeBlocks = [];
+        var src = String(text).replace(/```(\w*)\n?([\s\S]*?)```/g, function(_, lang, code) {
+            codeBlocks.push('<pre style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:10px;overflow-x:auto;font-size:0.86em;margin:8px 0;"><code>' + escapeHtml(code) + '</code></pre>');
+            return '\x00CB' + (codeBlocks.length - 1) + '\x00';
+        });
+        var tables = [];
+        src = src.replace(/(?:^|\n)(\|.+\|)\n(\|[\s:|-]+\|)\n((?:\|.+\|\n?)+)/gm, function(_, header, sep, body) {
+            var ths = header.split('|').filter(function(c) { return c.trim() !== ''; });
+            var rows = body.trim().split('\n');
+            var html = '<div style="overflow-x:auto;margin:8px 0;"><table style="border-collapse:collapse;width:100%;font-size:0.9em;"><thead><tr>';
+            for (let i = 0; i < ths.length; i++) {
+                html += '<th style="border:1px solid #30363d;padding:6px 10px;background:#161b22;color:#58a6ff;text-align:left;white-space:nowrap;">' + escapeHtml(ths[i].trim()) + '</th>';
+            }
+            html += '</tr></thead><tbody>';
+            for (let r = 0; r < rows.length; r++) {
+                var cells = rows[r].split('|').filter(function(c) { return c.trim() !== ''; });
+                html += '<tr>';
+                for (let c = 0; c < cells.length; c++) {
+                    var cell = escapeHtml(cells[c].trim())
+                        .replace(/`([^`]+)`/g, '<code style="background:#21262d;padding:1px 4px;border-radius:3px;">$1</code>')
+                        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+                    html += '<td style="border:1px solid #30363d;padding:6px 10px;">' + cell + '</td>';
+                }
+                html += '</tr>';
+            }
+            html += '</tbody></table></div>';
+            tables.push(html);
+            return '\n\x00TB' + (tables.length - 1) + '\x00\n';
+        });
+        var res = escapeHtml(src)
+            .replace(/^---+[ \t]*$/gm, '<hr style="border:none;border-top:1px solid #30363d;margin:10px 0;">')
+            .replace(/^&gt; (.+)$/gm, '<blockquote style="border-left:3px solid #58a6ff;padding:5px 10px;margin:6px 0;background:#161b22;color:#c9d1d9;border-radius:4px;">$1</blockquote>')
+            .replace(/^#### (.+)$/gm, '<h4 style="margin:8px 0 4px;color:#79c0ff;">$1</h4>')
+            .replace(/^### (.+)$/gm, '<h3 style="margin:10px 0 6px;color:#58a6ff;font-size:1.05em;">$1</h3>')
+            .replace(/^## (.+)$/gm, '<h3 style="margin:12px 0 6px;color:#58a6ff;font-size:1.12em;">$1</h3>')
+            .replace(/^# (.+)$/gm, '<h2 style="margin:12px 0 8px;color:#f0f6fc;font-size:1.22em;">$1</h2>')
+            .replace(/`([^`]+)`/g, '<code style="background:#21262d;padding:1px 5px;border-radius:3px;font-size:0.9em;">$1</code>')
+            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+            .replace(/(^|\s)\*([^*\n]+)\*/g, '$1<em>$2</em>')
+            .replace(/^[-*] (.+)$/gm, '<li style="margin-left:18px;">$1</li>')
+            .replace(/^(\d+)\. (.+)$/gm, '<li style="margin-left:18px;">$2</li>')
+            .replace(/\n{2,}/g, '</p><p style="margin:6px 0;">')
+            .replace(/\n/g, '<br>')
+            .replace(/<p[^>]*>(?:\s|<br>)*<\/p>/g, '');
+        res = res.replace(/\x00CB(\d+)\x00/g, function(_, i) { return codeBlocks[parseInt(i)]; });
+        res = res.replace(/\x00TB(\d+)\x00/g, function(_, i) { return tables[parseInt(i)]; });
+        return res;
+    }
+
+    function applyExpertStarter(roleKey, promptPrefix) {
+        var sel = document.getElementById('role-select');
+        if (sel && roleKey) sel.value = roleKey;
+        var inp = document.getElementById('chat-msg');
+        if (inp) {
+            inp.value = promptPrefix || '';
+            inp.focus();
+            inp.setSelectionRange(inp.value.length, inp.value.length);
+        }
+    }
+
+    async function clearAiChat() {
+        if (chatSending) return;
+        chatHistory = [];
+        chatOffset = 0;
+        chatTotal = 0;
+        try { localStorage.removeItem(AI_CHAT_KEY); } catch(e) {}
+        try {
+            await fetch('/api/chat/' + encodeURIComponent(AI_CHAT_KEY) + '/delete', { method: 'POST' });
+        } catch(e) {}
+        renderAllMessages();
+        updateLoadMoreButton();
+        hideExportButton();
+    }
+
+    // 支持 URL ?role=patent_drafting_coach 等快捷入口直达指定专家角色
+    (function applyUrlRoleParam() {
+        var params = new URLSearchParams(window.location.search);
+        var role = params.get('role');
+        var sel = document.getElementById('role-select');
+        if (role && sel) {
+            for (let i = 0; i < sel.options.length; i++) {
+                if (sel.options[i].value === role) { sel.value = role; break; }
+            }
+        }
+    })();
 
     // ── 持久化存储（后端 SQLite 替代 localStorage）──
     var AI_CHAT_KEY = 'innoforge_ai_chat';
@@ -189,14 +288,19 @@
     function renderAllMessages() {
         var box = document.getElementById('chat-messages');
         box.innerHTML = '';
-        for (let i = 0; i < chatHistory.length; i += 2) {
-            var userDiv = document.createElement('div');
-            renderUserMessage(userDiv, chatHistory[i][1]);
-            box.appendChild(userDiv);
-            var aiDiv = document.createElement('div');
-            aiDiv.className = 'msg ai';
-            aiDiv.innerHTML = DOMPurify.sanitize(escapeHtml(chatHistory[i+1][1]).replace(/\n/g, '<br>'));
-            box.appendChild(aiDiv);
+        for (let i = 0; i < chatHistory.length; i++) {
+            var item = chatHistory[i];
+            if (!Array.isArray(item) || item.length < 2) continue;
+            if (item[0] === 'user') {
+                var userDiv = document.createElement('div');
+                renderUserMessage(userDiv, item[1]);
+                box.appendChild(userDiv);
+            } else {
+                var aiDiv = document.createElement('div');
+                aiDiv.className = 'msg ai';
+                aiDiv.innerHTML = DOMPurify.sanitize(renderAiMarkdown(item[1]));
+                box.appendChild(aiDiv);
+            }
         }
         box.scrollTop = box.scrollHeight;
         showExportButton();
@@ -519,11 +623,14 @@
         renderUserMessage(userDiv, msg, images);
         box.appendChild(userDiv);
         chatSending = true;
+        var sendBtn = document.getElementById('btn-send');
+        if (sendBtn) sendBtn.disabled = true;
         showStopButton();
         try {
             await doSend(msg, images);
         } finally {
             chatSending = false;
+            if (sendBtn) sendBtn.disabled = false;
             hideStopButton();
             document.getElementById('chat-msg').focus();
             box.scrollTop = box.scrollHeight;
@@ -564,11 +671,12 @@
             });
             if (!resp.ok) throw new Error('服务器错误 (' + resp.status + ')');
             var data = await resp.json();
-            document.getElementById(loadingId).innerHTML = DOMPurify.sanitize(escapeHtml(data.content).replace(/\n/g, '<br>'));
+            document.getElementById(loadingId).innerHTML = DOMPurify.sanitize(renderAiMarkdown(data.content));
             chatHistory.push(["user", msg]);
             chatHistory.push(["assistant", data.content]);
             saveMessage('user', msg);
             saveMessage('assistant', data.content);
+            showExportButton();
             retryMsg = '';
         } catch(e) {
             if (e.name === 'AbortError') return;
@@ -629,9 +737,10 @@
                 var box = document.getElementById('chat-messages');
                 var div = document.createElement('div');
                 div.className = 'msg ai';
+                var exportTitle = String(t('ai.exportConclusions') || '导出结论').replace(/^📝\s*/, '');
                 div.innerHTML = DOMPurify.sanitize(
-                    '<div style="font-size:0.8em;color:#58a6ff;margin-bottom:4px;font-weight:bold;">📝 ' + t('ai.exportConclusions') + '</div>' +
-                    '<div style="color:#c9d1d9;font-size:0.9em;line-height:1.6;">' + escapeHtml(data.conclusions).replace(/\n/g, '<br>') + '</div>'
+                    '<div style="font-size:0.82em;color:#58a6ff;margin-bottom:6px;font-weight:bold;">📝 ' + escapeHtml(exportTitle) + '</div>' +
+                    '<div style="color:#c9d1d9;font-size:0.92em;line-height:1.65;">' + renderAiMarkdown(data.conclusions) + '</div>'
                 );
                 box.appendChild(div);
                 box.scrollTop = box.scrollHeight;

@@ -356,12 +356,44 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); curso
   box-shadow: var(--shadow-sm);
 }
 
-/* 首页功能卡 */
+/* 首页功能卡：桌面 2×2 对称网格，消除 3 列第 4 卡片孤岛 */
 .features {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: var(--sp-5); max-width: 1000px; margin: var(--sp-8) auto 0;
+  display: grid; grid-template-columns: repeat(2, minmax(260px, 1fr));
+  gap: var(--sp-5); max-width: 1000px; margin: var(--sp-6) auto 0;
   background: transparent; border: none; box-shadow: none; padding: 0;
 }
+/* 首页四位虚拟专家工作台条 */
+.experts-strip {
+  display: grid; grid-template-columns: repeat(4, minmax(180px, 1fr));
+  gap: var(--sp-3); max-width: 1000px; margin: var(--sp-5) auto 0;
+}
+.expert-pill {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 12px 14px; border-radius: var(--r-md);
+  background: var(--bg-surface); border: 1px solid var(--border-default);
+  text-decoration: none; transition: var(--t);
+}
+.expert-pill:hover {
+  border-color: rgba(99, 102, 241, 0.55); transform: translateY(-2px);
+  text-decoration: none; box-shadow: var(--shadow-sm);
+}
+.expert-pill-title { font-weight: 600; color: var(--text-primary); font-size: var(--fs-base); }
+.expert-pill-desc { color: var(--text-muted); font-size: var(--fs-sm); line-height: 1.45; }
+/* 暗色原生复选框适配，避免亮白刺眼 */
+input[type="checkbox"] { accent-color: var(--accent); color-scheme: dark; }
+/* 移动端/窄屏顶栏导航（默认桌面隐藏，<=900px 自动显示） */
+.mobile-top-nav {
+  display: none; position: sticky; top: 0; z-index: 900;
+  background: var(--bg-subtle); border-bottom: 1px solid var(--border-muted);
+  padding: 8px 12px; gap: 10px; align-items: center; overflow-x: auto;
+}
+.mobile-top-brand { font-weight: 700; color: var(--accent-hover); font-size: 14px; white-space: nowrap; text-decoration: none; }
+.mobile-top-links { display: flex; gap: 6px; align-items: center; flex-wrap: nowrap; }
+.mobile-top-links a {
+  padding: 4px 9px; border-radius: 6px; font-size: 12px; color: var(--text-muted);
+  white-space: nowrap; text-decoration: none; border: 1px solid transparent;
+}
+.mobile-top-links a.active { color: var(--text-primary); background: var(--accent-subtle); border-color: var(--accent-border); font-weight: 600; }
 .feature-card { padding: var(--sp-6); transition: var(--t); }
 .feature-card:hover {
   transform: translateY(-3px);
@@ -1061,13 +1093,17 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); curso
   .idea-sidebar { width: 240px; }
 }
 @media (max-width: 900px) {
+  .mobile-top-nav { display: flex; }
   .page-with-sidebar { display: block; }
   .page-sidebar { display: none; }
+  .features { grid-template-columns: 1fr; }
+  .experts-strip { grid-template-columns: repeat(2, 1fr); }
   .idea-layout { display: block; }
   .idea-sidebar { display: none; }
   .idea-sidebar.drawer-open { display: block; position: relative; width: 100%; height: auto; max-height: 280px; border-right: none; border-bottom: 1px solid var(--border-muted); }
   .idea-history-toggle { display: inline-flex; }
-  .search-grid { grid-template-columns: 1fr; }
+  .search-grid { grid-template-columns: 1fr 1fr; }
+  .search-grid > input[type="text"]:first-child { grid-column: 1 / -1; }
   .search-grid-2 { grid-template-columns: 1fr 1fr; }
   .bar-item { grid-template-columns: 90px 1fr 40px; }
   .hero { padding: 32px var(--sp-4) var(--sp-4); }

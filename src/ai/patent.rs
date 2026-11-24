@@ -382,7 +382,7 @@ impl AiClient {
         self.send_chat(messages, 0.3).await
     }
 
-    /// Assess infringement risk: compare a product/tech description against multiple patents.
+    /// Assess infringement risk: compare a product/tech description against multiple patents (v0.9.71 deep FTO + legal status pre-check).
     pub async fn assess_infringement(
         &self,
         product_description: &str,
@@ -390,33 +390,32 @@ impl AiClient {
     ) -> Result<String> {
         let prompt = format!(
             "## 待评估的产品/技术方案\n{product}\n\n\
-             ## 对比专利列表\n{patents}\n\n\
-             请对每个专利逐一进行侵权风险评估，按以下格式输出（使用 Markdown 表格）：\n\n\
-             ### 侵权风险评估矩阵\n\
-             | 专利号 | 风险等级 | 关键风险点 | 规避建议 |\n\
-             |--------|----------|------------|----------|\n\n\
-             风险等级说明：\n\
-             - **高风险**: 产品技术方案与专利权利要求高度重合\n\
-             - **中风险**: 部分技术特征重合，需进一步分析\n\
-             - **低风险**: 技术方案存在明显差异\n\
-             - **无风险**: 不在专利保护范围内\n\n\
-             ### 详细分析\n\
-             对每个高/中风险专利，详细说明：\n\
-             1. 哪些技术特征与专利权利要求对应\n\
-             2. 字面侵权还是等同侵权的可能性\n\
-             3. 具体的规避设计建议\n\n\
-             ### 综合建议\n\
-             整体风险评估和应对策略建议",
+             ## 对比专利列表（含法律状态预检与全文预挖信号）\n{patents}\n\n\
+             请按资深专利代理师 + 首席总工程师 FTO 实战标准，对每篇专利逐一进行深度侵权风险与规避设计评估：\n\n\
+             ### 一、FTO 侵权风险评估总览矩阵\n\
+             | 专利号 | 法律状态 | 风险等级 | 关键重合特征/雷区 | 核心规避思路 |\n\
+             |--------|----------|----------|-------------------|--------------|\n\n\
+             **风险等级硬规则**：\n\
+             - 若材料标明该专利已【失效/撤回/驳回/终止】，其法定行权风险必须评为 **无侵权风险（已失效，可自由实施）**，并在规避栏注明其作为现有技术抗辩的价值；\n\
+             - **高风险**：产品方案落入有效/审查中专利独立权利要求的全部必要技术特征（全面覆盖原则）；\n\
+             - **中风险**：部分特征重合或存在等同侵权风险（手段-功能-效果基本相同）；\n\
+             - **低风险**：核心物理机理或必要结构特征存在实质缺失/反向差异。\n\n\
+             ### 二、高/中风险专利逐项权要特征比对（Claim Chart）\n\
+             对每篇高/中风险专利，列出：\n\
+             1. **独立权利要求必要技术特征逐项拆解**（标注字面覆盖 / 等同风险 / 明确缺失，附原文锚点）；\n\
+             2. **规避设计工程路径与副作用权衡**（给出至少 2 条可执行替换机理，并诚实说明对成本/可靠性/性能的副作用）；\n\
+             3. **稳定性/无效切入点**（若权利要求撰写过宽或缺少说明书定量参数支持，指出潜在无效抓手）。\n\n\
+             ### 三、整体 FTO 策略与未来 3–5 年外围防御布局建议\n\
+             - 给出研发立项/量产放行结论（红/黄/绿灯）及未来 3–5 年可提前卡位的外围改进专利方向。",
             product = structured_patent_excerpt(product_description, 20_000),
-            patents = structured_patent_excerpt(patents_info, 30_000),
+            patents = structured_patent_excerpt(patents_info, 32_000),
         );
 
         let messages = vec![
             Message {
                 role: "system".into(),
                 content: format!(
-                    "你是一位资深知识产权律师和专利侵权分析专家。你擅长评估产品的专利侵权风险，\
-                         对比技术方案与专利权利要求的对应关系。请客观、专业地分析，并提供可操作的建议。{FACT_DISCIPLINE}"
+                    "你是一位资深知识产权律师、专利代理师兼首席研发总工。你擅长 FTO 自由实施排查、全面覆盖与等同原则逐特征核对，以及可落地的工程规避设计。绝不把已失效专利误判为高侵权风险，绝不遗漏全文预挖信号。{FACT_DISCIPLINE}"
                 ),
             },
             Message {
@@ -697,19 +696,24 @@ impl AiClient {
         full_output[start..].to_string()
     }
 
-    /// Batch summarize multiple patents concurrently.
+    /// Batch summarize multiple patents with deep structured R&D briefs (v0.9.71).
     pub async fn batch_summarize(
         &self,
         patents: &[(String, String, String)],
     ) -> Vec<(String, Result<String>)> {
         let mut results = Vec::new();
-        for (id, title, abstract_text) in patents {
+        for (id, title, enriched_context) in patents {
             let result = self
                 .chat(
                     &format!(
-                        "请用2-3句话简要总结这个专利的核心技术方案：\n标题：{}\n摘要：{}",
+                        "你是资深研发总工程师兼专利分析师。请穿透文字表面，基于以下专利全文/预挖材料输出高信息密度结构化研发简报（严禁复述废话，未披露项明确写「原文未披露」）：\n\
+                         - **核心机理与结构**：解决的底层矛盾与关键架构\n\
+                         - **关键量化参数**：温度/压力/尺寸/效率等实测或工艺窗口\n\
+                         - **独立权要边界**：核心保护点及潜在规避切口\n\
+                         - **研发启发与局限**：可借鉴亮点及固有代价/失效边界\n\n\
+                         标题：{}\n材料：\n{}",
                         title,
-                        safe_truncate(abstract_text, 500)
+                        safe_truncate(enriched_context, 3_500)
                     ),
                     None,
                 )

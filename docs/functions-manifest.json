@@ -1,9 +1,11 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-23T15:25:46.704Z",
+  "generatedAt": "2026-11-23T23:50:18.363Z",
   "pages": {
     "ai.html": {
       "references": [
+        "applyExpertStarter",
+        "clearAiChat",
         "exportConclusions",
         "handleChatFiles",
         "removeImage",
@@ -13,6 +15,9 @@
         "stopGeneration"
       ],
       "definitions": [
+        "applyExpertStarter",
+        "applyUrlRoleParam",
+        "clearAiChat",
         "createQuoteButton",
         "doSend",
         "escapeHtml",
@@ -29,6 +34,7 @@
         "migrateOldChat",
         "removeAttachedFile",
         "removeImage",
+        "renderAiMarkdown",
         "renderAllMessages",
         "renderUserMessage",
         "retrySend",
@@ -634,6 +640,7 @@
     },
     "search.html": {
       "references": [
+        "analyzeSearchResults",
         "batchSummarize",
         "clearHistory",
         "compareMatrix",
@@ -651,6 +658,7 @@
         "useHistoryEncoded"
       ],
       "definitions": [
+        "analyzeSearchResults",
         "batchSummarize",
         "buildRequest",
         "clearHistory",

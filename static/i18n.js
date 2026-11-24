@@ -1526,7 +1526,35 @@ function renderSidebar(extraHtml) {
   html += '</select>';
   html += '</div>';
   if (extraHtml) html += extraHtml;
-  el.innerHTML = DOMPurify.sanitize(html);
+  el.innerHTML = DOMPurify.sanitize(html, { ADD_ATTR: ['onchange', 'onclick'] });
+  // 显式绑定语言切换事件，防止任何页面 DOMPurify 策略拦截内联 onchange
+  var langSel = document.getElementById('lang-switch');
+  if (langSel) {
+    langSel.addEventListener('change', function() { setI18nLang(this.value); });
+  }
+  // 窄屏/移动端（<=900px）全局顶栏导航回退：确保用户随时可切回首页、/ai、/settings 等页面
+  if (!document.getElementById('mobile-top-nav')) {
+    var topNav = document.createElement('nav');
+    topNav.id = 'mobile-top-nav';
+    topNav.className = 'mobile-top-nav';
+    var brandSpan = document.createElement('a');
+    brandSpan.href = '/';
+    brandSpan.className = 'mobile-top-brand';
+    brandSpan.textContent = 'InnoForge';
+    topNav.appendChild(brandSpan);
+    var linksWrap = document.createElement('div');
+    linksWrap.className = 'mobile-top-links';
+    for (let j = 0; j < links.length; j++) {
+      var a = document.createElement('a');
+      a.href = links[j].href;
+      if (links[j].id === activeId) a.className = 'active';
+      a.setAttribute('data-i18n', links[j].key);
+      a.textContent = t(links[j].key);
+      linksWrap.appendChild(a);
+    }
+    topNav.appendChild(linksWrap);
+    document.body.insertBefore(topNav, document.body.firstChild);
+  }
   // 异步加载版本号显示在侧边栏底部
   if (!window.__versionLoaded) {
     window.__versionLoaded = true;

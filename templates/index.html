@@ -73,7 +73,28 @@
                     <button class="btn-primary" onclick="startFlow()" id="start-btn">开始对话</button>
                     <button class="btn-secondary" onclick="window.location.href='/idea'">历史项目</button>
                 </div>
+                <div id="start-flow-hint" style="margin-top:8px;font-size:13px;color:#d29922;min-height:18px;"></div>
             </div>
+        </div>
+
+        <!-- 四位虚拟专家工作台直达（与 product-vision.md 严格对齐） -->
+        <div class="experts-strip" aria-label="四位虚拟专家工作台">
+            <a href="/search" class="expert-pill">
+                <span class="expert-pill-title">🔍 检索员</span>
+                <span class="expert-pill-desc">专利+学术全库查全查准、IPC 锚定降噪与 CRAAP 互证</span>
+            </a>
+            <a href="/idea" class="expert-pill">
+                <span class="expert-pill-title">🔬 技术分析师</span>
+                <span class="expert-pill-desc">四元组拆解、6 维物理机理深度推演与仿真交付包</span>
+            </a>
+            <a href="/ai?role=patent_drafting_coach" class="expert-pill">
+                <span class="expert-pill-title">⚖️ 专利代理师</span>
+                <span class="expert-pill-desc">高质量防写窄撰写辅导、FTO 规避与 OA 审查答复</span>
+            </a>
+            <a href="/ai?role=academic_paper_assistant" class="expert-pill">
+                <span class="expert-pill-title">🎓 学术论文助手</span>
+                <span class="expert-pill-desc">真实 DOI 文献综述、实验设计与防破新颖性安全锁</span>
+            </a>
         </div>
 
         <!-- 服务状态 -->
@@ -341,10 +362,13 @@
     // 主流程
     async function startFlow() {
         const text = document.getElementById('idea-input').value.trim();
+        const hintEl = document.getElementById('start-flow-hint');
         if (!text && uploadedFiles.length === 0 && restoredFiles.length === 0) {
+            if (hintEl) hintEl.textContent = '⚠️ 请先输入您的技术想法、研究课题，或拖入参考文件后再启动。';
             document.getElementById('idea-input').focus();
             return;
         }
+        if (hintEl) hintEl.textContent = '';
 
         const title = (text.split(/[。.!！?\n]/)[0] || '').substring(0, 50) || '新研发项目';
         let description = text;
@@ -518,10 +542,18 @@
 
     // 快速抓取
     async function fetchPatent() {
-        const num = document.getElementById('fetch-number').value;
+        const num = document.getElementById('fetch-number').value.trim();
         const source = document.getElementById('fetch-source').value;
         const el = document.getElementById('fetch-result');
-        if (!num) return;
+        if (!num) {
+            if (el) {
+                el.style.color = '#d29922';
+                el.textContent = '⚠️ 请输入要导入的专利公开号（如 CN900000001A、EP1234567、US10000000）。';
+            }
+            document.getElementById('fetch-number').focus();
+            return;
+        }
+        el.style.color = '';
         el.innerHTML = '';
         var fetchingP = document.createElement('p');
         fetchingP.className = 'muted';

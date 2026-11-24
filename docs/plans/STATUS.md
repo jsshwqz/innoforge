@@ -14,6 +14,13 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-11-24 — **首页四位虚拟专家工作台、`/ai` 专利防写窄辅导与 Markdown 重构、FTO/批量/检索深度分析引擎与稳定分页（v0.9.71）**
+
+- **状态 / Status**: ✅ 基于 `/`、`/ai`、`/search` 真机浏览器全面审查实施深度重构与端到端复验
+- **① `/ai` 工作台与新专家预设**（`src/types/chat.rs`、`templates/ai.html`）：上线 `patent_drafting_coach`（防写窄 + 3–5 年替代实施例布局）与 `academic_paper_assistant`（真实 DOI + 防破新颖性锁）；修复首屏顶栏截断、全面接通 Markdown/表格渲染与奇偶消息防崩，新增 4 场景快捷起手与清空对话。
+- **② FTO、批量摘要与检索结果分析深层化**（`src/routes/ai.rs`、`src/ai/patent.rs`、`templates/search.html`）：FTO 接入法律状态预检（失效专利不误判高风险）与全文预挖；批量摘要升级结构化研发简报；`/api/search/analyze` 废除 100 字截断并在搜索页接线「🧠 AI 趋势与空白点分析」。
+- **③ 检索去重稳定分页与首页/导航体验修复**（`src/routes/search.rs`、`templates/index.html`、`static/i18n.js`、`static/style.css`）：跨页全局富文本去重消除翻页总数漂移；首页上线四位虚拟专家工作台条、2×2 卡片与空输入校验；修复 `#lang-switch` 事件被 DOMPurify 剥离并补齐窄屏顶部导航栏。
+
 ### 2026-11-23 — **真实全流程浏览器实测深度修复：`/compare` + `/idea` + `/oa-response` 质量跃升（v0.9.70）**
 
 - **状态 / Status**: ✅ 基于真实 LLM 与真实浏览器对 `/compare`、`/idea`、`/oa-response` 全流程深度审查发现的 P0/P1 缺陷全部闭环修复、通过本地全量测试与前后对比复测
