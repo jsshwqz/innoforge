@@ -16,7 +16,11 @@
     <div class="page-with-sidebar">
     <aside id="page-sidebar" class="page-sidebar"></aside>
     <div class="settings-container page-main">
-        <div class="page-title-bar"><h2>系统设置</h2><span id="version-display" style="margin-left:auto;color:#8b949e;font-size:13px;"></span></div>
+        <div class="page-title-bar">
+            <h2>系统设置</h2>
+            <button type="button" id="settings-back-btn" class="btn-gray" onclick="goBack()" style="display:none;margin-left:14px;padding:5px 12px;font-size:13px;border-radius:6px;cursor:pointer;">← 返回原工作页</button>
+            <span id="version-display" style="margin-left:auto;color:#8b949e;font-size:13px;"></span>
+        </div>
 
         <div class="setting-group">
             <h3>🔑 SerpAPI 搜索配置（多 Key 轮询）</h3>
@@ -597,6 +601,10 @@
             // 从 URL 参数获取返回地址
             const urlParams = new URLSearchParams(window.location.search);
             returnUrl = urlParams.get('from') || document.referrer || '';
+            const backBtn = document.getElementById('settings-back-btn');
+            if (backBtn && returnUrl && !returnUrl.includes('/settings')) {
+                backBtn.style.display = 'inline-flex';
+            }
 
             try {
                 const res = await fetch('/api/settings');

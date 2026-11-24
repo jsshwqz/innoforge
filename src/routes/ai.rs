@@ -1176,6 +1176,7 @@ pub async fn api_ai_compare_matrix(
     };
 
     let mut patents_info = String::new();
+    let per_item_budget = (26_000 / items.len().max(2)).max(4_500);
     for (i, item) in items.iter().enumerate() {
         if let Some(obj) = item.as_object() {
             if obj.get("type").and_then(|v| v.as_str()) == Some("text") {
@@ -1184,11 +1185,14 @@ pub async fn api_ai_compare_matrix(
                     .and_then(|v| v.as_str())
                     .unwrap_or("上传文件");
                 let content = obj.get("content").and_then(|v| v.as_str()).unwrap_or("");
-                let preview = truncate_for_ai(content, 150_000);
+                let signals = crate::ai::patent::extract_whole_document_signals("", content);
+                let preview =
+                    crate::ai::patent::structured_patent_excerpt(content, per_item_budget);
                 patents_info.push_str(&format!(
-                    "### 文件 {}\n标题：{}\n内容：{}\n\n",
+                    "### 文件 {}\n标题：{}\n{}\n内容：{}\n\n",
                     i + 1,
                     title,
+                    signals.format_prompt_block(),
                     preview
                 ));
                 continue;
@@ -1196,16 +1200,33 @@ pub async fn api_ai_compare_matrix(
         }
         let id = item.as_str().unwrap_or("");
         if let Ok(Some(p)) = s.db.get_patent(id) {
-            patents_info.push_str(&format!(
-                "### 专利 {}\n专利号：{}\n标题：{}\n申请人：{}\n摘要：{}\n\n权利要求书全文：\n{}\n\n说明书（前部分）：\n{}\n\n",
+            let signals =
+                crate::ai::patent::extract_whole_document_signals(&p.claims, &p.description);
+            let legal_tag = if crate::ai::fto_scanner::is_patent_inactive(&p.legal_status) {
+                format!("{}（已失效/非有效权）", p.legal_status.trim())
+            } else if p.legal_status.trim().is_empty() {
+                "未标注".to_string()
+            } else {
+                p.legal_status.trim().to_string()
+            };
+            let raw_doc = format!(
+                "### 专利 {}\n专利号：{}\n标题：{}\n申请人：{}\nIPC分类：{}\n法律状态：{}\n摘要：{}\n\n{}\n\n权利要求书全文：\n{}\n\n说明书（前部分）：\n{}",
                 i + 1,
                 p.patent_number,
                 p.title,
                 p.applicant,
+                p.ipc_codes,
+                legal_tag,
                 p.abstract_text,
+                signals.format_prompt_block(),
                 p.claims,
                 p.description
+            );
+            patents_info.push_str(&crate::ai::patent::structured_patent_excerpt(
+                &raw_doc,
+                per_item_budget,
             ));
+            patents_info.push_str("\n\n");
         }
     }
 

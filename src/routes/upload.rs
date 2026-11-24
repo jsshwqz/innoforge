@@ -341,51 +341,50 @@ pub async fn api_upload_compare(
     State(s): State<AppState>,
     mut multipart: axum::extract::Multipart,
 ) -> Json<serde_json::Value> {
-    let mut file_bytes: Vec<u8> = Vec::new();
-    let mut file_name = String::new();
+    const MAX_COMPARE_FILES: usize = 5;
+    let mut uploaded_raw: Vec<(String, Vec<u8>)> = Vec::new();
     let mut patent_id = String::new();
+    let mut compare_focus = String::new();
 
     while let Ok(Some(field)) = multipart.next_field().await {
         let name = field.name().unwrap_or("").to_string();
 
-        if name == "file" {
-            file_name = field.file_name().unwrap_or("unknown.txt").to_lowercase();
+        if name == "file" || name == "files" {
+            if uploaded_raw.len() >= MAX_COMPARE_FILES {
+                return Json(json!({
+                    "error": format!("最多支持同时上传 {} 份对比文件", MAX_COMPARE_FILES)
+                }));
+            }
+            let fname = field
+                .file_name()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| format!("document_{}.txt", uploaded_raw.len() + 1));
             match field.bytes().await {
                 Ok(data) => {
                     if data.len() > MAX_FILE_SIZE {
-                        return Json(json!({"error": "文件大小超过 10MB 限制"}));
+                        return Json(json!({
+                            "error": format!("文件「{}」大小超过 10MB 限制", fname)
+                        }));
                     }
-                    file_bytes = data.to_vec();
+                    if !data.is_empty() {
+                        uploaded_raw.push((fname, data.to_vec()));
+                    }
                 }
-                Err(_) => return Json(json!({"error": "文件读取失败"})),
+                Err(_) => return Json(json!({"error": format!("文件「{}」读取失败", fname)})),
             }
         } else if name == "patent_id" {
             if let Ok(text) = field.text().await {
                 patent_id = text;
             }
+        } else if name == "compare_focus" {
+            if let Ok(text) = field.text().await {
+                compare_focus = text.trim().to_string();
+            }
         }
     }
 
-    if file_bytes.is_empty() || patent_id.is_empty() {
-        return Json(json!({"error": "缺少文件或专利 ID"}));
-    }
-
-    let ext_from_name = file_name.rsplit('.').next().unwrap_or("").to_lowercase();
-    // #97: filename may be missing or mangled for non-ASCII names.
-    // Use content magic bytes to detect type when the extension is unreliable.
-    let ext = match detect_type_by_magic(&file_bytes) {
-        Some(magic_type) => {
-            // Magic bytes override the filename extension — the content is
-            // authoritative.  This fixes non-ASCII filenames where the
-            // multipart parser may return None or a mangled file_name.
-            magic_type.to_string()
-        }
-        None => ext_from_name,
-    };
-    if ext == "pdf" && !has_pdf_header(&file_bytes) {
-        return Json(json!({
-            "error": "文件不是有效 PDF，未检测到 %PDF- 文件签名"
-        }));
+    if uploaded_raw.is_empty() || patent_id.is_empty() {
+        return Json(json!({"error": "缺少对比文件或专利 ID"}));
     }
 
     let patent = match s.db.get_patent(&patent_id) {
@@ -393,125 +392,713 @@ pub async fn api_upload_compare(
         _ => return Json(json!({"error": "专利不存在"})),
     };
 
-    // Extract text content based on file type
-    let is_image = matches!(
-        ext.as_str(),
-        "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp"
-    );
+    let mut extracted_docs: Vec<UploadedCompareDoc> = Vec::new();
+    let mut first_ext = String::new();
+    let mut total_content_len = 0usize;
 
-    let file_content = if is_image {
-        // For images, use AI vision to describe the content
-        let ai_client = s
-            .config
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .ai_client();
-        match describe_image_with_fallback(&ai_client, &file_bytes, &ext).await {
-            Ok(description) => description,
-            Err(e) => return Json(json!({ "error": format!("图片识别失败: {}", e) })),
+    for (raw_name, file_bytes) in uploaded_raw {
+        let lower_name = raw_name.to_lowercase();
+        let ext_from_name = lower_name.rsplit('.').next().unwrap_or("").to_lowercase();
+        // #97: filename may be missing or mangled for non-ASCII names.
+        let ext = match detect_type_by_magic(&file_bytes) {
+            Some(magic_type) => magic_type.to_string(),
+            None => ext_from_name,
+        };
+        if ext == "pdf" && !has_pdf_header(&file_bytes) {
+            return Json(json!({
+                "error": format!("文件「{}」不是有效 PDF，未检测到 %PDF- 文件签名", raw_name)
+            }));
         }
-    } else if ext == "pdf" {
-        match extract_pdf_text(&file_bytes).await {
-            Ok(t) if t.trim().len() >= 100 => t,
-            _ => {
-                // 文字提取失败，用 AI 视觉模型兜底
-                let is_deepseek = {
-                    let cfg = s.config.read().unwrap_or_else(|e| e.into_inner());
-                    cfg.ai_base_url.contains("deepseek")
-                };
-                if is_deepseek {
-                    return Json(
-                        json!({"error": "PDF 文字提取失败。当前 AI 为 DeepSeek 不支持图片识别，\n建议：1) 上传可编辑的文本文件(.txt/.docx) 2) 在设置页切换至 Gemini 后重试 3) 直接粘贴文字内容"}),
-                    );
+
+        let is_image = matches!(
+            ext.as_str(),
+            "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp"
+        );
+
+        let file_content = if is_image {
+            let ai_client = s
+                .config
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .ai_client();
+            match describe_image_with_fallback(&ai_client, &file_bytes, &ext).await {
+                Ok(description) => description,
+                Err(e) => {
+                    return Json(json!({
+                        "error": format!("图片「{}」识别失败: {}", raw_name, e)
+                    }))
                 }
-                let ai_client = s
-                    .config
-                    .read()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .ai_client();
-                match extract_pdf_via_ai_vision(&file_bytes, &ai_client).await {
-                    Ok(t) => t,
-                    Err(e) => {
+            }
+        } else if ext == "pdf" {
+            match extract_pdf_text(&file_bytes).await {
+                Ok(t) if t.trim().len() >= 100 => t,
+                _ => {
+                    let is_deepseek = {
+                        let cfg = s.config.read().unwrap_or_else(|e| e.into_inner());
+                        cfg.ai_base_url.contains("deepseek")
+                    };
+                    if is_deepseek {
                         return Json(json!({
-                            "error": format!("PDF 提取失败（含 AI 视觉兜底）: {}", e)
-                        }))
+                            "error": format!(
+                                "PDF「{}」文字提取失败。当前 AI 为 DeepSeek 不支持图片识别，\n建议：1) 上传可编辑文本(.txt/.docx) 2) 在设置页切换至 Gemini 后重试 3) 直接粘贴文字内容",
+                                raw_name
+                            )
+                        }));
+                    }
+                    let ai_client = s
+                        .config
+                        .read()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .ai_client();
+                    match extract_pdf_via_ai_vision(&file_bytes, &ai_client).await {
+                        Ok(t) => t,
+                        Err(e) => {
+                            return Json(json!({
+                                "error": format!("PDF「{}」提取失败（含 AI 视觉兜底）: {}", raw_name, e)
+                            }))
+                        }
                     }
                 }
             }
-        }
-    } else if ext == "docx" {
-        // DOCX = ZIP containing XML; extract text from word/document.xml
-        match extract_docx_text(&file_bytes) {
-            Ok(text) if !text.trim().is_empty() => text,
-            Ok(_) => return Json(json!({"error": "DOCX 文件无可提取的文字内容"})),
-            Err(e) => return Json(json!({ "error": format!("DOCX 解析失败: {}", e) })),
-        }
-    } else if ext == "doc" {
-        return Json(
-            json!({"error": "暂不支持旧版 .doc 格式，请将文件另存为 .docx、.txt 或 .pdf 后重试"}),
-        );
-    } else {
-        // TXT, CSV, etc. — try UTF-8, then GBK
-        match String::from_utf8(file_bytes.clone()) {
-            Ok(text) => text,
-            Err(_) => {
-                // Try GBK/GB18030 for Chinese text files
-                let (text, _encoding, had_errors) = encoding_rs::GBK.decode(&file_bytes);
-                if had_errors {
-                    return Json(
-                        json!({"error": "无法识别文件类型，请上传 PDF、DOCX、TXT 或图片文件"}),
-                    );
+        } else if ext == "docx" {
+            match extract_docx_text(&file_bytes) {
+                Ok(text) if !text.trim().is_empty() => text,
+                Ok(_) => {
+                    return Json(json!({
+                        "error": format!("DOCX 文件「{}」无可提取的文字内容", raw_name)
+                    }))
                 }
-                text.into_owned()
+                Err(e) => {
+                    return Json(json!({
+                        "error": format!("DOCX「{}」解析失败: {}", raw_name, e)
+                    }))
+                }
             }
-        }
-    };
+        } else if ext == "pptx" {
+            match extract_pptx_text(&file_bytes) {
+                Ok(text) if !text.trim().is_empty() => text,
+                Ok(_) => {
+                    return Json(json!({
+                        "error": format!("PPTX 文件「{}」无可提取的幻灯片文字", raw_name)
+                    }))
+                }
+                Err(e) => {
+                    return Json(json!({
+                        "error": format!("PPTX「{}」解析失败: {}", raw_name, e)
+                    }))
+                }
+            }
+        } else if ext == "xlsx" {
+            match extract_xlsx_text(&file_bytes) {
+                Ok(text) if !text.trim().is_empty() => text,
+                Ok(_) => {
+                    return Json(json!({
+                        "error": format!("XLSX 表格「{}」无可提取的单元格内容", raw_name)
+                    }))
+                }
+                Err(e) => {
+                    return Json(json!({
+                        "error": format!("XLSX「{}」解析失败: {}", raw_name, e)
+                    }))
+                }
+            }
+        } else if ext == "ofd" {
+            match extract_ofd_text(&file_bytes) {
+                Ok(text) if !text.trim().is_empty() => text,
+                Ok(_) => {
+                    return Json(json!({
+                        "error": format!("OFD 文档「{}」无可提取文字（若为纯扫描件请另存 PDF 后上传）", raw_name)
+                    }))
+                }
+                Err(e) => {
+                    return Json(json!({
+                        "error": format!("OFD「{}」解析失败: {}", raw_name, e)
+                    }))
+                }
+            }
+        } else if ext == "stl" {
+            match extract_stl_summary(&file_bytes) {
+                Ok(text) if !text.trim().is_empty() => text,
+                Ok(_) => {
+                    return Json(json!({
+                        "error": format!("STL 三维文件「{}」未提取到有效三角面片", raw_name)
+                    }))
+                }
+                Err(e) => {
+                    return Json(json!({
+                        "error": format!("STL「{}」解析失败: {}", raw_name, e)
+                    }))
+                }
+            }
+        } else if let Some(hint) = unsupported_proprietary_format_hint(&ext, &raw_name) {
+            return Json(json!({ "error": hint }));
+        } else {
+            let decoded = match String::from_utf8(file_bytes.clone()) {
+                Ok(text) => text,
+                Err(_) => {
+                    let (text, _encoding, had_errors) = encoding_rs::GBK.decode(&file_bytes);
+                    if had_errors {
+                        return Json(json!({
+                            "error": format!("无法识别文件「{}」类型，请上传 PDF、DOCX、PPTX、XLSX、OFD、TXT/MD/LaTeX/HTML 或图片文件", raw_name)
+                        }));
+                    }
+                    text.into_owned()
+                }
+            };
+            postprocess_text_by_ext(&ext, &decoded)
+        };
 
-    if file_content.trim().is_empty() {
-        return Json(json!({"error": "文件内容为空"}));
+        if file_content.trim().is_empty() {
+            return Json(json!({
+                "error": format!("文件「{}」内容为空", raw_name)
+            }));
+        }
+        if first_ext.is_empty() {
+            first_ext = ext.clone();
+        }
+        total_content_len += file_content.len();
+        let doc_kind = infer_uploaded_doc_kind(&raw_name, &file_content, is_image);
+        extracted_docs.push(UploadedCompareDoc {
+            file_name: raw_name,
+            doc_kind: doc_kind.to_string(),
+            ext,
+            content: file_content,
+        });
+    }
+
+    if let Err(breaker_msg) = s.db.check_ai_budget_circuit_breaker(None) {
+        return Json(json!({ "error": breaker_msg }));
     }
 
     let ai_client = s
         .config
         .read()
         .unwrap_or_else(|e| e.into_inner())
-        .ai_client();
+        .ai_client_expert();
 
-    let file_type_label = if is_image {
-        "图片识别内容"
-    } else {
-        "上传文档"
-    };
-
-    let prompt = format!(
-        "请对比以下两份技术文档，分析它们的相似性和差异：\n\n\
-        【专利文档】\n标题：{}\n摘要：{}\n权利要求：{}\n\n\
-        【{}】\n{}\n\n\
-        请从以下方面分析：\n\
-        1. 技术领域是否相同\n\
-        2. 解决的技术问题是否相似\n\
-        3. 技术方案的相似度（百分比）\n\
-        4. 是否存在侵权风险\n\
-        5. 主要差异点",
-        patent.title,
-        patent.abstract_text,
-        crate::ai::patent::structured_patent_excerpt(&patent.claims, 30_000),
-        file_type_label,
-        crate::ai::patent::structured_patent_excerpt(&file_content, 30_000)
+    let (system_prompt, prompt) = build_multi_upload_compare_prompt(
+        &patent,
+        &extracted_docs,
+        if compare_focus.is_empty() {
+            None
+        } else {
+            Some(compare_focus.as_str())
+        },
     );
 
-    match ai_client.chat(&prompt, None).await {
+    let files_meta: Vec<serde_json::Value> = extracted_docs
+        .iter()
+        .map(|d| {
+            json!({
+                "file_name": d.file_name,
+                "doc_kind": d.doc_kind,
+                "file_type": d.ext,
+                "content_length": d.content.len()
+            })
+        })
+        .collect();
+
+    match ai_client.chat(&prompt, Some(&system_prompt)).await {
         Ok(response) => {
-            let _ = s.db.log_ai_call(&ai_client, "upload-compare", None, None);
+            let _ =
+                s.db.log_ai_call(&ai_client, "upload-compare-deep", None, None);
             Json(json!({
                 "success": true,
                 "analysis": response,
-                "file_type": ext,
-                "content_length": file_content.len()
+                "file_type": first_ext,
+                "file_count": extracted_docs.len(),
+                "files": files_meta,
+                "content_length": total_content_len
             }))
         }
         Err(e) => Json(json!({ "error": format!("AI 分析失败: {}", e) })),
     }
+}
+
+struct UploadedCompareDoc {
+    file_name: String,
+    doc_kind: String,
+    ext: String,
+    content: String,
+}
+
+/// 根据文件名与正文特征自动识别对比文献体裁（专利 / 期刊学术论文 / 图片图纸 / 技术方案文档）
+fn infer_uploaded_doc_kind(file_name: &str, content: &str, is_image: bool) -> &'static str {
+    if is_image {
+        return "图片/图纸识别内容";
+    }
+    let lower_name = file_name.to_lowercase();
+    let sample: String = content.chars().take(2500).collect();
+    let lower_sample = sample.to_lowercase();
+    if lower_name.ends_with(".step")
+        || lower_name.ends_with(".stp")
+        || lower_name.ends_with(".stl")
+        || lower_name.ends_with(".iges")
+        || lower_name.ends_with(".igs")
+        || sample.contains("【STEP 三维 CAD 模型结构化解析】")
+        || sample.contains("【STL 三维网格模型解析】")
+        || sample.contains("【IGES 三维 CAD 模型解析】")
+    {
+        return "三维 CAD 模型";
+    }
+    if lower_sample.contains("doi:")
+        || (lower_sample.contains("10.")
+            && (lower_sample.contains("abstract")
+                || lower_sample.contains("keywords")
+                || lower_sample.contains("references")
+                || lower_sample.contains("journal")
+                || lower_sample.contains("ieee")
+                || lower_sample.contains("elsevier")
+                || lower_sample.contains("springer")))
+        || sample.contains("参考文献")
+        || sample.contains("基金项目")
+        || sample.contains("收稿日期")
+        || sample.contains("中图分类号")
+        || sample.contains("期刊")
+        || lower_name.contains("paper")
+        || lower_name.contains("journal")
+        || lower_name.contains("论文")
+        || lower_name.contains("期刊")
+    {
+        "期刊/学术论文"
+    } else if sample.contains("权利要求书")
+        || sample.contains("说明书附图")
+        || sample.contains("公开号")
+        || sample.contains("申请号")
+        || lower_sample.contains("what is claimed is")
+        || lower_name.contains("patent")
+        || lower_name.contains("专利")
+    {
+        "对比专利文献"
+    } else {
+        "自定义技术文档/交底书"
+    }
+}
+
+/// 单文件上传对比提示词入口（委托给多文献统一构造器，保持调用兼容）
+#[cfg(test)]
+fn build_upload_compare_prompt(
+    patent: &crate::patent::Patent,
+    file_type_label: &str,
+    file_content: &str,
+) -> (String, String) {
+    let doc = UploadedCompareDoc {
+        file_name: file_type_label.to_string(),
+        doc_kind: file_type_label.to_string(),
+        ext: "txt".to_string(),
+        content: file_content.to_string(),
+    };
+    build_multi_upload_compare_prompt(patent, &[doc], None)
+}
+
+/// 构造专利详情页「多文件自定义对比（支持专利 + 期刊论文 + 技术文档 + 图纸混合）」的全文档深度提示词
+fn build_multi_upload_compare_prompt(
+    patent: &crate::patent::Patent,
+    docs: &[UploadedCompareDoc],
+    compare_focus: Option<&str>,
+) -> (String, String) {
+    let patent_signals =
+        crate::ai::patent::extract_whole_document_signals(&patent.claims, &patent.description);
+
+    let legal_precheck = if crate::ai::fto_scanner::is_patent_inactive(&patent.legal_status) {
+        format!(
+            "【程序预检 · 失效/未授权状态：{}】该专利已失效、终止、撤回或被驳回，原则上不构成有效字面侵权风险（仅作现有技术与公知设计参考）。",
+            patent.legal_status.trim()
+        )
+    } else if patent.legal_status.trim().is_empty() {
+        "未标注法律状态（请提示用户核实专利局最新有效状态后再下最终 FTO 放行结论）".to_string()
+    } else {
+        format!("有效/在审状态：{}", patent.legal_status.trim())
+    };
+
+    let patent_excerpt = crate::ai::patent::structured_patent_excerpt(
+        &format!(
+            "专利号：{}\n标题：{}\n申请人：{}\nIPC分类：{}\n法律状态：{}\n摘要：{}\n\n{}\n\n权利要求书全文：\n{}\n\n说明书（前部分）：\n{}",
+            patent.patent_number,
+            patent.title,
+            patent.applicant,
+            patent.ipc_codes,
+            legal_precheck,
+            patent.abstract_text,
+            patent_signals.format_prompt_block(),
+            patent.claims,
+            patent.description
+        ),
+        22_000,
+    );
+
+    let doc_count = docs.len().max(1);
+    let per_doc_budget = (26_000 / doc_count).max(4_500);
+    let mut has_academic_doc = false;
+    let mut docs_blocks = Vec::with_capacity(docs.len());
+
+    for (idx, doc) in docs.iter().enumerate() {
+        if doc.doc_kind.contains("论文") || doc.doc_kind.contains("期刊") {
+            has_academic_doc = true;
+        }
+        let doc_signals = crate::ai::patent::extract_whole_document_signals("", &doc.content);
+        let excerpt = crate::ai::patent::structured_patent_excerpt(
+            &format!(
+                "{}\n\n原文内容：\n{}",
+                doc_signals.format_prompt_block(),
+                doc.content
+            ),
+            per_doc_budget,
+        );
+        docs_blocks.push(format!(
+            "【对比文献 D{}｜体裁：{}｜文件名：{}】\n{}",
+            idx + 1,
+            doc.doc_kind,
+            doc.file_name,
+            excerpt
+        ));
+    }
+
+    let focus_clause = match compare_focus.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(f) => format!(
+            "\n【用户自定义重点对比诉求】\n<user_input>{f}</user_input>\n请务必在报告中正面、定量地优先回应上述自定义诉求。\n"
+        ),
+        None => String::new(),
+    };
+
+    let academic_clause = if has_academic_doc {
+        "\n- **期刊/学术论文专项交叉分析**：明确对比论文的理论模型、实验平台、实测性能数据（标注原文真实 DOI/期刊/年份，原文未给出的严禁编造）与本专利权利要求覆盖范围的差异；评估该论文若早于申请日公开，是否可能构成本专利的新颖性/创造性现有技术威胁（专利法第 22 条），以及论文中的实验验证方法有哪些可直接吸收用于工程验证。\n"
+    } else {
+        "\n- 若上传文献中包含学术论文、行业标准或实验报告内容，同步核验其理论/实验依据与本专利权利要求的新颖性/创造性及工程边界差异（原文未给出的 DOI/指标严禁编造）。\n"
+    };
+
+    let system_prompt = "你是兼具 15 年一线总工程师、资深专利代理师与跨学科科研审稿人经验的深度文献对比专家。\
+         你的核心职责是打通专利文献、期刊学术论文、技术交底书与工程图纸之间的体裁壁垒，结合完整权利要求、说明书实施例、\
+         法律状态预检与程序预挖的定量参数/部件拓扑，产出高信息密度、可直接指导研发决策、专利攻防与论文实验设计的深度对比报告。\
+         严禁只凭摘要泛泛而谈；严禁将已失效/撤回/驳回专利误判为高侵权风险；原文未披露的定量指标、DOI 或权要细节必须显式标注「原文未披露」，绝不编造。"
+        .to_string();
+
+    let prompt = format!(
+        "请将【目标专利】与用户自定义的 **{doc_count} 份对比文献**（覆盖专利、期刊论文、技术文档或图纸）进行全维度跨体裁深度对比分析：\n\
+         {focus_clause}\n\
+         <user_input>\n\
+         【目标专利】\n{patent_excerpt}\n\n\
+         {docs_joined}\n\
+         </user_input>\n\n\
+         请严格按以下 4 个硬核维度输出标准 Markdown 报告：\n\n\
+         ### 一、多文献核心物理机理与定量参数横向对照表\n\
+         - 使用标准 Markdown 表格（列：`对比维度 | 目标专利 | D1 | ... | 本质异同与工程含义`），覆盖至少 5 个实质维度：底层痛点机理、核心拓扑/算法架构、定量参数与实测指标窗口、隐含前提与失效边界、落地代价/成熟度。\n\n\
+         ### 二、独立权利要求逐特征核验、FTO 风险与学术现有技术交叉评估\n\
+         - 先明确复核上述法律状态预检结论；若目标专利已失效/撤回/驳回，直接标明「无有效专利权侵权风险，仅作公知技术参考」。\n\
+         - 逐项拆解目标专利独立权利要求必要技术特征，对照每份对比文献标注「字面覆盖 / 等同风险 / 明确缺失 / 现有技术公开威胁 / 原文未披露」，给出最终风险定级（高 / 中 / 低 / 无）与量化依据。{academic_clause}\n\
+         ### 三、说明书隐藏细节、跨文献互补嫁接与工程规避路径\n\
+         - 结合程序预挖的未权要隐藏部件、独立权利要求薄弱点及各篇对比文献（含论文方法/结构）的长板，给出至少 2 条可落地的工程绕行或跨方案嫁接路径，并诚实说明各自对成本、可靠性或性能的副作用。\n\n\
+         ### 四、面向未来 3–5 年的差异化创新与专利/论文协同布局建议\n\
+         - 提炼这批文献共同未攻克的研发空白点，给出外围高价值专利布局与学术实验验证切入点，明确每条建议必须先做的实验验证边界。",
+        docs_joined = docs_blocks.join("\n\n")
+    );
+
+    (system_prompt, prompt)
+}
+
+/// POST /api/upload/ingest-local
+/// 将「技术调研」页上传解析后的本地文件（专利 / 期刊论文 / 技术文档）自动识别体裁并收入本地数据库
+/// （同步触发 FTS5 全文索引与本地语义向量），使本地检索立即可查，并提取核心检索词供下游衔接。
+pub async fn api_upload_ingest_local(
+    State(s): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let filename = req["filename"]
+        .as_str()
+        .unwrap_or("local_document.txt")
+        .trim();
+    let content = req["content"].as_str().unwrap_or("").trim();
+    if content.is_empty() {
+        return Json(json!({ "status": "error", "error": "文档内容为空，无法入库" }));
+    }
+
+    let (patent, doc_kind, keywords) = build_local_patent_record(filename, content);
+    match s.db.insert_patent(&patent) {
+        Ok(id) => {
+            crate::db::vector::try_compute_and_save_embedding(
+                &s.db,
+                &id,
+                &format!("{} {}", patent.title, patent.abstract_text),
+            );
+            Json(json!({
+                "status": "ok",
+                "id": id,
+                "patent_number": patent.patent_number,
+                "title": patent.title,
+                "doc_kind": doc_kind,
+                "source": patent.source,
+                "keywords": keywords,
+                "detail_url": format!("/patent/{}", id),
+            }))
+        }
+        Err(e) => Json(json!({
+            "status": "error",
+            "error": format!("收入本地文献库失败: {}", e)
+        })),
+    }
+}
+
+fn build_local_patent_record(
+    filename: &str,
+    content: &str,
+) -> (crate::patent::Patent, &'static str, Vec<String>) {
+    let doc_kind = infer_uploaded_doc_kind(filename, content, false);
+    let sample: String = content.chars().take(4000).collect();
+
+    let stem = filename
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(filename)
+        .rsplit_once('.')
+        .map(|(base, _)| base)
+        .unwrap_or(filename)
+        .trim()
+        .to_string();
+
+    // 确定性短指纹（同内容重复上传生成同一编号，便于幂等去重）
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for b in content.as_bytes().iter().take(4096) {
+        hash ^= *b as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    let short_hash = format!("{:08X}", (hash & 0xFFFF_FFFF) as u32);
+
+    // 1. 提取标题：优先命中「发明名称/题目/Title」，否则取首个有效长行或文件名
+    let mut title = String::new();
+    for line in sample.lines().take(30) {
+        let trimmed = line.trim();
+        for prefix in [
+            "发明名称：",
+            "发明名称:",
+            "实用新型名称：",
+            "名称：",
+            "题目：",
+            "Title:",
+            "TITLE:",
+        ] {
+            if let Some(rest) = trimmed.strip_prefix(prefix) {
+                let candidate = rest.trim();
+                if candidate.chars().count() >= 4 {
+                    title = candidate.chars().take(120).collect();
+                    break;
+                }
+            }
+        }
+        if !title.is_empty() {
+            break;
+        }
+    }
+    if title.is_empty() {
+        title = sample
+            .lines()
+            .map(str::trim)
+            .find(|l| {
+                let c = l.chars().count();
+                (6..=90).contains(&c)
+                    && !l.starts_with("http")
+                    && !l.contains("申请号")
+                    && !l.contains("公开号")
+                    && !l.contains("授权公告号")
+            })
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| {
+                if stem.is_empty() {
+                    "本地上传文献".to_string()
+                } else {
+                    stem.clone()
+                }
+            });
+    }
+
+    // 2. 按体裁确定编号、来源与国家标签
+    let (patent_number, source, country) = if doc_kind == "对比专利文献" {
+        let pat_no = regex::Regex::new(r"\b(?:CN|US|EP|WO|JP|KR)\s*[0-9]{6,13}\s*[A-Z][0-9]?\b")
+            .ok()
+            .and_then(|re| re.find(&sample).map(|m| m.as_str().replace(' ', "")))
+            .unwrap_or_else(|| format!("LOCAL-PAT-{}", short_hash));
+        let ctry = if pat_no.starts_with("LOCAL-") {
+            "LOCAL".to_string()
+        } else {
+            pat_no.chars().take(2).collect()
+        };
+        (pat_no, "local_patent".to_string(), ctry)
+    } else if doc_kind == "期刊/学术论文" {
+        let doi = regex::Regex::new(r"10\.\d{4,9}/[^\s,;)\]>，。]+")
+            .ok()
+            .and_then(|re| {
+                re.find(&sample)
+                    .map(|m| m.as_str().trim_end_matches('.').to_string())
+            })
+            .unwrap_or_else(|| format!("LOCAL-PAPER-{}", short_hash));
+        (doi, "local_paper".to_string(), "PAPER".to_string())
+    } else {
+        (
+            format!("LOCAL-DOC-{}", short_hash),
+            "local_doc".to_string(),
+            "DOC".to_string(),
+        )
+    };
+
+    // 3. 拆分摘要 / 权利要求 / 说明书
+    let abstract_text = extract_section_between(
+        content,
+        &["摘要", "摘 要", "Abstract", "ABSTRACT"],
+        &[
+            "关键词",
+            "Keywords",
+            "权利要求书",
+            "1.",
+            "技术领域",
+            "引言",
+            "Introduction",
+        ],
+        600,
+    )
+    .unwrap_or_else(|| content.chars().take(420).collect());
+
+    let (claims, description) = if doc_kind == "对比专利文献" {
+        let claims_part = extract_section_between(
+            content,
+            &["权利要求书", "What is claimed is", "CLAIMS"],
+            &["说明书", "技术领域", "DESCRIPTION", "具体实施方式"],
+            30_000,
+        )
+        .unwrap_or_default();
+        let desc_part = extract_section_between(
+            content,
+            &["说明书", "技术领域", "具体实施方式", "DESCRIPTION"],
+            &[],
+            80_000,
+        )
+        .unwrap_or_else(|| content.chars().take(80_000).collect());
+        (claims_part, desc_part)
+    } else {
+        (String::new(), content.chars().take(80_000).collect())
+    };
+
+    let ipc_codes = regex::Regex::new(r"\b[A-H][0-9]{2}[A-Z]\s*[0-9]{1,4}/[0-9]{2,4}\b")
+        .ok()
+        .map(|re| {
+            let mut codes: Vec<String> = Vec::new();
+            for m in re.find_iter(&sample) {
+                let code = m.as_str().replace(' ', "");
+                if !codes.contains(&code) {
+                    codes.push(code);
+                }
+                if codes.len() >= 4 {
+                    break;
+                }
+            }
+            codes.join("; ")
+        })
+        .unwrap_or_default();
+
+    let applicant = sample
+        .lines()
+        .find_map(|l| {
+            let t = l.trim();
+            for prefix in [
+                "申请人：",
+                "申请人:",
+                "专利权人：",
+                "专利权人:",
+                "作者单位：",
+            ] {
+                if let Some(rest) = t.strip_prefix(prefix) {
+                    let v = rest.trim();
+                    if !v.is_empty() {
+                        return Some(v.chars().take(80).collect::<String>());
+                    }
+                }
+            }
+            None
+        })
+        .unwrap_or_else(|| match doc_kind {
+            "期刊/学术论文" => "本地上传期刊论文".to_string(),
+            "对比专利文献" => "本地上传专利".to_string(),
+            _ => "本地上传技术文档".to_string(),
+        });
+
+    let mut keywords = crate::search::relevance::extract_query_words(&title);
+    if keywords.len() < 3 {
+        for kw in crate::search::relevance::extract_query_words(&abstract_text) {
+            if !keywords.contains(&kw) {
+                keywords.push(kw);
+            }
+            if keywords.len() >= 6 {
+                break;
+            }
+        }
+    }
+    keywords.truncate(6);
+
+    let patent = crate::patent::Patent {
+        id: uuid::Uuid::new_v4().to_string(),
+        patent_number,
+        title,
+        abstract_text,
+        description,
+        claims,
+        applicant,
+        inventor: String::new(),
+        filing_date: chrono::Utc::now().format("%Y-%m-%d").to_string(),
+        publication_date: String::new(),
+        grant_date: None,
+        ipc_codes,
+        cpc_codes: String::new(),
+        priority_date: String::new(),
+        country,
+        kind_code: String::new(),
+        family_id: None,
+        legal_status: match doc_kind {
+            "期刊/学术论文" => "学术文献（本地上传）".to_string(),
+            "对比专利文献" => "本地上传专利".to_string(),
+            _ => "本地技术文档".to_string(),
+        },
+        citations: "[]".to_string(),
+        cited_by: "[]".to_string(),
+        source,
+        raw_json: "{}".to_string(),
+        created_at: chrono::Utc::now().to_rfc3339(),
+        images: "[]".to_string(),
+        pdf_url: String::new(),
+    };
+
+    (patent, doc_kind, keywords)
+}
+
+fn extract_section_between(
+    text: &str,
+    starts: &[&str],
+    ends: &[&str],
+    max_chars: usize,
+) -> Option<String> {
+    let mut start_pos: Option<usize> = None;
+    for marker in starts {
+        if let Some(idx) = text.find(marker) {
+            let after = idx + marker.len();
+            if start_pos.is_none_or(|prev| after < prev) {
+                start_pos = Some(after);
+            }
+        }
+    }
+    let from = start_pos?;
+    let tail = text
+        .get(from..)?
+        .trim_start_matches([':', '：', ' ', '\t', '\r', '\n']);
+    let mut end_pos = tail.len();
+    for marker in ends {
+        if let Some(idx) = tail.find(marker) {
+            if idx > 20 && idx < end_pos {
+                end_pos = idx;
+            }
+        }
+    }
+    let slice = tail.get(..end_pos)?.trim();
+    if slice.is_empty() {
+        return None;
+    }
+    Some(slice.chars().take(max_chars).collect())
 }
 
 /// 通用文件内容提取（首页上传附件用）
@@ -619,7 +1206,7 @@ pub async fn api_upload_extract(
         }
     } else if ext == "docx" {
         match extract_docx_text(&file_bytes) {
-            Ok(t) if t.trim().len() >= 100 => t,
+            Ok(t) if !t.trim().is_empty() => t,
             Ok(_) => {
                 return Json(StructuredUploadError::file_corrupted("DOCX 无可提取文字").to_json())
             }
@@ -629,27 +1216,88 @@ pub async fn api_upload_extract(
                 )
             }
         }
-    } else if ext == "doc" {
-        return Json(
-            StructuredUploadError::file_corrupted("暂不支持 .doc 格式，请另存为 .docx 或 .pdf")
-                .to_json(),
-        );
+    } else if ext == "pptx" {
+        match extract_pptx_text(&file_bytes) {
+            Ok(t) if !t.trim().is_empty() => t,
+            Ok(_) => {
+                return Json(
+                    StructuredUploadError::file_corrupted("PPTX 无可提取的幻灯片文字").to_json(),
+                )
+            }
+            Err(e) => {
+                return Json(
+                    StructuredUploadError::file_corrupted(format!("PPTX 解析失败: {e}")).to_json(),
+                )
+            }
+        }
+    } else if ext == "xlsx" {
+        match extract_xlsx_text(&file_bytes) {
+            Ok(t) if !t.trim().is_empty() => t,
+            Ok(_) => {
+                return Json(
+                    StructuredUploadError::file_corrupted("XLSX 无可提取的表格内容").to_json(),
+                )
+            }
+            Err(e) => {
+                return Json(
+                    StructuredUploadError::file_corrupted(format!("XLSX 解析失败: {e}")).to_json(),
+                )
+            }
+        }
+    } else if ext == "ofd" {
+        match extract_ofd_text(&file_bytes) {
+            Ok(t) if !t.trim().is_empty() => t,
+            Ok(_) => {
+                return Json(
+                    StructuredUploadError::file_corrupted(
+                        "OFD 无可提取文字（若为扫描件请另存 PDF 后上传）",
+                    )
+                    .to_json(),
+                )
+            }
+            Err(e) => {
+                return Json(
+                    StructuredUploadError::file_corrupted(format!("OFD 解析失败: {e}")).to_json(),
+                )
+            }
+        }
+    } else if ext == "stl" {
+        match extract_stl_summary(&file_bytes) {
+            Ok(t) if !t.trim().is_empty() => t,
+            Ok(_) => {
+                return Json(
+                    StructuredUploadError::file_corrupted("STL 三维文件未提取到有效面片").to_json(),
+                )
+            }
+            Err(e) => {
+                return Json(
+                    StructuredUploadError::file_corrupted(format!("STL 解析失败: {e}")).to_json(),
+                )
+            }
+        }
+    } else if let Some(hint) = unsupported_proprietary_format_hint(&ext, &file_name) {
+        return Json(json!({
+            "error": hint,
+            "error_code": "ERR_UNSUPPORTED_FORMAT",
+            "hint": hint
+        }));
     } else {
-        match String::from_utf8(file_bytes.clone()) {
+        let decoded = match String::from_utf8(file_bytes.clone()) {
             Ok(t) => t,
             Err(_) => {
                 let (t, _, had_errors) = encoding_rs::GBK.decode(&file_bytes);
                 if had_errors {
                     return Json(
                         StructuredUploadError::file_corrupted(
-                            "无法识别文件类型，请上传 PDF、DOCX、TXT 或图片文件",
+                            "无法识别文件类型，请上传 PDF、DOCX、PPTX、XLSX、OFD、TXT/MD/LaTeX/HTML 或图片文件",
                         )
                         .to_json(),
                     );
                 }
                 t.into_owned()
             }
-        }
+        };
+        postprocess_text_by_ext(&ext, &decoded)
     };
 
     tracing::info!(
@@ -1443,7 +2091,633 @@ fn extract_docx_text(data: &[u8]) -> Result<String, String> {
             text.push(ch);
         }
     }
-    Ok(text)
+    Ok(decode_basic_xml_entities(&text))
+}
+
+fn decode_basic_xml_entities(input: &str) -> String {
+    input
+        .replace("&nbsp;", " ")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&amp;", "&")
+}
+
+/// 针对私有/老旧专有格式（知网 CAJ、旧版 Office 97-2003、WPS、AutoCAD DWG）返回可执行的中文转换提示
+fn unsupported_proprietary_format_hint(ext: &str, file_name: &str) -> Option<String> {
+    match ext {
+        "caj" | "nh" | "kdh" => Some(format!(
+            "文件「{}」为知网私有格式（.{}），受私有编码限制暂不支持直读。请在知网下载页改选「PDF 下载」，或在 CAJViewer 中「打印 → 另存为 PDF」后上传。",
+            file_name, ext
+        )),
+        "doc" | "ppt" | "xls" => Some(format!(
+            "文件「{}」为旧版 Office 97-2003 二进制格式（.{}），请用 Word/PowerPoint/Excel 或 WPS「另存为 .docx / .pptx / .xlsx 或 .pdf」后上传。",
+            file_name, ext
+        )),
+        "wps" | "et" | "dps" => Some(format!(
+            "文件「{}」为 WPS 老旧专有格式（.{}），请用 WPS「另存为 .docx / .xlsx / .pptx 或 .pdf」后上传。",
+            file_name, ext
+        )),
+        "dwg" => Some(format!(
+            "文件「{}」为 AutoCAD 私有二进制图纸（.dwg），请在 CAD 软件中导出为 .pdf、.dxf 或高分辨率 .png 截图后上传。",
+            file_name
+        )),
+        _ => None,
+    }
+}
+
+/// 按文本类后缀做清洗（STEP/IGES 三维结构化提取、HTML/XML 去标签、RTF 去控制字，其余源码文本原样保留）
+fn postprocess_text_by_ext(ext: &str, raw: &str) -> String {
+    match ext {
+        "step" | "stp" => extract_step_summary(raw),
+        "iges" | "igs" => extract_iges_summary(raw),
+        "html" | "htm" | "xml" => extract_html_or_xml_text(raw),
+        "rtf" => extract_rtf_text(raw),
+        _ => raw.to_string(),
+    }
+}
+
+/// 解码 STEP (ISO 10303-21) 中的 `\X2\XXXX...\X0\` UTF-16BE 中文/Unicode 转义序列
+fn decode_step_unicode(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut rest = input;
+    while let Some(pos) = rest.find("\\X2\\") {
+        if let Some(prefix) = rest.get(..pos) {
+            out.push_str(prefix);
+        }
+        let after = rest.get(pos + 4..).unwrap_or("");
+        if let Some(end_pos) = after.find("\\X0\\") {
+            let hex_str = after.get(..end_pos).unwrap_or("");
+            let mut u16s = Vec::new();
+            let bytes = hex_str.as_bytes();
+            let mut idx = 0;
+            while idx + 4 <= bytes.len() {
+                if let Some(chunk) = hex_str.get(idx..idx + 4) {
+                    if let Ok(val) = u16::from_str_radix(chunk, 16) {
+                        u16s.push(val);
+                    }
+                }
+                idx += 4;
+            }
+            out.push_str(&String::from_utf16_lossy(&u16s));
+            rest = after.get(end_pos + 4..).unwrap_or("");
+        } else {
+            out.push_str("\\X2\\");
+            rest = after;
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// 从 ISO 10303-21 STEP (`.step`/`.stp`) 三维 CAD 文件提取高信息密度工程结构摘要：
+/// 装配体与零件清单（含中文解码）、精确三维外廓包络尺寸、典型圆孔/圆柱直径分布、几何拓扑统计。
+fn extract_step_summary(raw: &str) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    let mut schema = String::new();
+    let mut file_meta = String::new();
+    let mut unit_label = "mm（默认）";
+
+    if raw.contains("SI_UNIT(.MILLI.,.METRE.)") {
+        unit_label = "mm";
+    } else if raw.contains("SI_UNIT($,.METRE.)") {
+        unit_label = "m";
+    } else if raw.contains("CONVERSION_BASED_UNIT('INCH'") || raw.contains("INCH") {
+        unit_label = "inch";
+    }
+
+    if let Ok(re_schema) = regex::Regex::new(r"FILE_SCHEMA\s*\(\s*\(\s*'([^']+)'") {
+        if let Some(c) = re_schema.captures(raw) {
+            schema = c[1].to_string();
+        }
+    }
+    if let Ok(re_fname) = regex::Regex::new(r"FILE_NAME\s*\(\s*'([^']*)'") {
+        if let Some(c) = re_fname.captures(raw) {
+            file_meta = decode_step_unicode(c[1].trim());
+        }
+    }
+
+    if let Ok(re_part) = regex::Regex::new(
+        r"(?:PRODUCT|MANIFOLD_SOLID_BREP|NEXT_ASSEMBLY_USAGE_OCCURRENCE)\s*\(\s*'([^']*)'(?:\s*,\s*'([^']*)')?",
+    ) {
+        for cap in re_part.captures_iter(raw) {
+            for group_idx in [1usize, 2usize] {
+                if let Some(m) = cap.get(group_idx) {
+                    let decoded = decode_step_unicode(m.as_str().trim());
+                    let trimmed = decoded.trim();
+                    if trimmed.chars().count() >= 2
+                        && !trimmed.eq_ignore_ascii_case("NONE")
+                        && !trimmed.eq_ignore_ascii_case("NA")
+                        && !trimmed.eq_ignore_ascii_case("OPEN CASCADE")
+                        && !parts.contains(&trimmed.to_string())
+                    {
+                        parts.push(trimmed.to_string());
+                        if parts.len() >= 60 {
+                            break;
+                        }
+                    }
+                }
+            }
+            if parts.len() >= 60 {
+                break;
+            }
+        }
+    }
+
+    // 计算三维外廓包络尺寸（扫描 CARTESIAN_POINT）
+    let mut min_x = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    let mut min_z = f64::INFINITY;
+    let mut max_z = f64::NEG_INFINITY;
+    let mut point_count = 0usize;
+    if let Ok(re_pt) = regex::Regex::new(
+        r"CARTESIAN_POINT\s*\(\s*'[^']*'\s*,\s*\(\s*([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)\s*,\s*([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)\s*,\s*([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)\s*\)\s*\)",
+    ) {
+        for cap in re_pt.captures_iter(raw) {
+            if let (Ok(x), Ok(y), Ok(z)) = (
+                cap[1].parse::<f64>(),
+                cap[2].parse::<f64>(),
+                cap[3].parse::<f64>(),
+            ) {
+                if x.is_finite() && y.is_finite() && z.is_finite() {
+                    min_x = min_x.min(x);
+                    max_x = max_x.max(x);
+                    min_y = min_y.min(y);
+                    max_y = max_y.max(y);
+                    min_z = min_z.min(z);
+                    max_z = max_z.max(z);
+                    point_count += 1;
+                }
+            }
+        }
+    }
+
+    // 提取圆柱面与圆特征半径分布
+    let mut radii: Vec<f64> = Vec::new();
+    if let Ok(re_rad) = regex::Regex::new(
+        r"(?:CYLINDRICAL_SURFACE|CIRCLE)\s*\(\s*'[^']*'\s*,\s*#\d+\s*,\s*([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)\s*\)",
+    ) {
+        for cap in re_rad.captures_iter(raw) {
+            if let Ok(r) = cap[1].parse::<f64>() {
+                if r.is_finite() && r > 0.0 && r < 1e7 {
+                    let rounded = (r * 100.0).round() / 100.0;
+                    if !radii.iter().any(|v| (*v - rounded).abs() < 0.005) {
+                        radii.push(rounded);
+                    }
+                }
+            }
+        }
+    }
+    radii.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+    let solid_cnt = raw.matches("MANIFOLD_SOLID_BREP").count();
+    let shell_cnt = raw.matches("CLOSED_SHELL").count();
+    let face_cnt = raw.matches("ADVANCED_FACE").count();
+    let plane_cnt = raw.matches("PLANE(").count();
+    let cyl_cnt = raw.matches("CYLINDRICAL_SURFACE(").count();
+    let cone_cnt = raw.matches("CONICAL_SURFACE(").count();
+    let bspline_cnt = raw.matches("B_SPLINE_SURFACE").count();
+
+    let mut md = String::from("【STEP 三维 CAD 模型结构化解析】\n");
+    if !file_meta.is_empty() {
+        md.push_str(&format!("- 模型名称：{}\n", file_meta));
+    }
+    if !schema.is_empty() {
+        md.push_str(&format!("- 协议标准：{}\n", schema));
+    }
+    md.push_str(&format!("- 长度单位：{}\n", unit_label));
+    if point_count > 0 {
+        md.push_str(&format!(
+            "- 三维外廓包络尺寸（基于 {} 个几何控制点）：X = {:.2} {}（{:.2} ~ {:.2}），Y = {:.2} {}（{:.2} ~ {:.2}），Z = {:.2} {}（{:.2} ~ {:.2}）\n",
+            point_count,
+            max_x - min_x,
+            unit_label,
+            min_x,
+            max_x,
+            max_y - min_y,
+            unit_label,
+            min_y,
+            max_y,
+            max_z - min_z,
+            unit_label,
+            min_z,
+            max_z,
+        ));
+    }
+    md.push_str(&format!(
+        "- 几何拓扑统计：实体(MANIFOLD_SOLID_BREP) {} 个、封闭壳体 {} 个、高级面 {} 个（平面 {}、圆柱面 {}、锥面 {}、自由曲面 {}）\n",
+        solid_cnt, shell_cnt, face_cnt, plane_cnt, cyl_cnt, cone_cnt, bspline_cnt
+    ));
+    if !radii.is_empty() {
+        let sample_dims: Vec<String> = radii
+            .iter()
+            .take(12)
+            .map(|r| format!("R={:.2}/Ø{:.2}", r, r * 2.0))
+            .collect();
+        md.push_str(&format!(
+            "- 典型圆孔/圆柱特征半径与直径（共 {} 种规格，单位 {}）：{}\n",
+            radii.len(),
+            unit_label,
+            sample_dims.join("、")
+        ));
+    }
+    if !parts.is_empty() {
+        md.push_str(&format!(
+            "\n### 装配体与零部件清单（共 {} 项）\n{}\n",
+            parts.len(),
+            parts
+                .iter()
+                .enumerate()
+                .map(|(i, p)| format!("{}. {}", i + 1, p))
+                .collect::<Vec<_>>()
+                .join("\n")
+        ));
+    }
+    md.push_str("\n> 说明：已自动过滤原始海量坐标点文本，仅保留装配体/零部件树、精确外廓尺寸、圆孔/轴径规格与拓扑特征供 AI 技术剖析与对比；如需同时评估三维外观视角，可补充三视图截图或调用本机 FreeCAD 渲染。\n");
+    md
+}
+
+/// 从 STL（同时支持 Binary STL 与 ASCII STL）提取三维外廓包络尺寸与三角面片数
+fn extract_stl_summary(data: &[u8]) -> Result<String, String> {
+    let mut min_x = f32::INFINITY;
+    let mut max_x = f32::NEG_INFINITY;
+    let mut min_y = f32::INFINITY;
+    let mut max_y = f32::NEG_INFINITY;
+    let mut min_z = f32::INFINITY;
+    let mut max_z = f32::NEG_INFINITY;
+
+    // 优先检测标准 Binary STL：80B header + 4B u32 triangle_count + 50B * count
+    if data.len() >= 84 {
+        let tri_count = u32::from_le_bytes([data[80], data[81], data[82], data[83]]) as usize;
+        let expected = 84usize.saturating_add(tri_count.saturating_mul(50));
+        if tri_count > 0 && expected == data.len() {
+            let header_text = String::from_utf8_lossy(data.get(..80).unwrap_or(data))
+                .trim_matches(|c: char| c == '\0' || c.is_whitespace())
+                .to_string();
+            for i in 0..tri_count {
+                let base = 84 + i * 50;
+                // 跳过 12 字节法向量，读取 3 个顶点 (x, y, z)
+                for v in 0..3 {
+                    let off = base + 12 + v * 12;
+                    let x = f32::from_le_bytes([
+                        data[off],
+                        data[off + 1],
+                        data[off + 2],
+                        data[off + 3],
+                    ]);
+                    let y = f32::from_le_bytes([
+                        data[off + 4],
+                        data[off + 5],
+                        data[off + 6],
+                        data[off + 7],
+                    ]);
+                    let z = f32::from_le_bytes([
+                        data[off + 8],
+                        data[off + 9],
+                        data[off + 10],
+                        data[off + 11],
+                    ]);
+                    if x.is_finite() && y.is_finite() && z.is_finite() {
+                        min_x = min_x.min(x);
+                        max_x = max_x.max(x);
+                        min_y = min_y.min(y);
+                        max_y = max_y.max(y);
+                        min_z = min_z.min(z);
+                        max_z = max_z.max(z);
+                    }
+                }
+            }
+            return Ok(format!(
+                "【STL 三维网格模型解析】\n- 编码格式：Binary STL\n- 文件头备注：{}\n- 三角面片总数：{}\n- 三维外廓包络尺寸：X = {:.2}（{:.2} ~ {:.2}），Y = {:.2}（{:.2} ~ {:.2}），Z = {:.2}（{:.2} ~ {:.2}）\n",
+                if header_text.is_empty() { "无" } else { &header_text },
+                tri_count,
+                max_x - min_x, min_x, max_x,
+                max_y - min_y, min_y, max_y,
+                max_z - min_z, min_z, max_z,
+            ));
+        }
+    }
+
+    // 回退 ASCII STL
+    let text = String::from_utf8_lossy(data);
+    let mut vertex_count = 0usize;
+    let mut facet_count = 0usize;
+    for line in text.lines() {
+        let t = line.trim();
+        if t.starts_with("facet ") {
+            facet_count += 1;
+        } else if let Some(rest) = t.strip_prefix("vertex ") {
+            let nums: Vec<f32> = rest
+                .split_whitespace()
+                .filter_map(|s| s.parse::<f32>().ok())
+                .collect();
+            if nums.len() >= 3 && nums[0].is_finite() && nums[1].is_finite() && nums[2].is_finite()
+            {
+                min_x = min_x.min(nums[0]);
+                max_x = max_x.max(nums[0]);
+                min_y = min_y.min(nums[1]);
+                max_y = max_y.max(nums[1]);
+                min_z = min_z.min(nums[2]);
+                max_z = max_z.max(nums[2]);
+                vertex_count += 1;
+            }
+        }
+    }
+    if vertex_count == 0 {
+        return Err("未检测到有效的 Binary 或 ASCII STL 三维网格顶点".into());
+    }
+    Ok(format!(
+        "【STL 三维网格模型解析】\n- 编码格式：ASCII STL\n- 三角面片总数：{}（顶点数 {}）\n- 三维外廓包络尺寸：X = {:.2}（{:.2} ~ {:.2}），Y = {:.2}（{:.2} ~ {:.2}），Z = {:.2}（{:.2} ~ {:.2}）\n",
+        facet_count.max(vertex_count / 3),
+        vertex_count,
+        max_x - min_x, min_x, max_x,
+        max_y - min_y, min_y, max_y,
+        max_z - min_z, min_z, max_z,
+    ))
+}
+
+/// 从 IGES (`.iges`/`.igs`) 三维 CAD 文件提取全局头信息与实体统计
+fn extract_iges_summary(raw: &str) -> String {
+    let mut start_lines = Vec::new();
+    let mut global_lines = Vec::new();
+    let mut entity_lines = 0usize;
+    for line in raw.lines() {
+        if line.len() >= 73 {
+            let sec = line.as_bytes()[72] as char;
+            let content = line.get(..72).unwrap_or("").trim();
+            match sec {
+                'S' if !content.is_empty() => start_lines.push(content),
+                'G' if !content.is_empty() => global_lines.push(content),
+                'D' => entity_lines += 1,
+                _ => {}
+            }
+        }
+    }
+    let entity_count = entity_lines / 2;
+    let global_preview: String = global_lines.join("").chars().take(600).collect();
+    let start_preview: String = start_lines.join(" ").chars().take(300).collect();
+    format!(
+        "【IGES 三维 CAD 模型解析】\n- 目录实体总数：{} 个\n- Start 说明：{}\n- Global 参数摘要：{}\n",
+        entity_count,
+        if start_preview.is_empty() { "无" } else { &start_preview },
+        if global_preview.is_empty() { "无" } else { &global_preview },
+    )
+}
+
+/// 从 PPTX 幻灯片（ZIP 内 `ppt/slides/slide*.xml`）按页顺序原生提取文字
+fn extract_pptx_text(data: &[u8]) -> Result<String, String> {
+    use std::io::{Cursor, Read};
+    let mut archive =
+        zip::ZipArchive::new(Cursor::new(data)).map_err(|e| format!("非有效 PPTX: {}", e))?;
+    let mut slide_names: Vec<(usize, String)> = Vec::new();
+    for i in 0..archive.len() {
+        if let Ok(file) = archive.by_index(i) {
+            let name = file.name().to_string();
+            if name.starts_with("ppt/slides/slide") && name.ends_with(".xml") {
+                let num = name
+                    .trim_start_matches("ppt/slides/slide")
+                    .trim_end_matches(".xml")
+                    .parse::<usize>()
+                    .unwrap_or(usize::MAX);
+                slide_names.push((num, name));
+            }
+        }
+    }
+    slide_names.sort_by_key(|(n, _)| *n);
+    if slide_names.is_empty() {
+        return Err("PPTX 中未找到 ppt/slides/slide*.xml".into());
+    }
+
+    let mut sections = Vec::new();
+    for (idx, (_, name)) in slide_names.into_iter().enumerate() {
+        let mut xml = String::new();
+        if let Ok(mut f) = archive.by_name(&name) {
+            let _ = f.read_to_string(&mut xml);
+        }
+        let body = extract_xml_tag_texts(&xml, &["a:t", "t"]).join(" ");
+        let trimmed = body.trim();
+        if !trimmed.is_empty() {
+            sections.push(format!("【幻灯片 {}】\n{}", idx + 1, trimmed));
+        }
+    }
+    Ok(sections.join("\n\n"))
+}
+
+/// 从 XLSX 表格（ZIP 内 `xl/sharedStrings.xml` + `xl/worksheets/sheet*.xml`）原生提取可读表格文本
+fn extract_xlsx_text(data: &[u8]) -> Result<String, String> {
+    use std::io::{Cursor, Read};
+    let mut archive =
+        zip::ZipArchive::new(Cursor::new(data)).map_err(|e| format!("非有效 XLSX: {}", e))?;
+
+    let mut shared_strings: Vec<String> = Vec::new();
+    if let Ok(mut ss_file) = archive.by_name("xl/sharedStrings.xml") {
+        let mut xml = String::new();
+        let _ = ss_file.read_to_string(&mut xml);
+        for si in xml.split("<si").skip(1) {
+            let end = si.find("</si>").unwrap_or(si.len());
+            let chunk = si.get(..end).unwrap_or(si);
+            let joined = extract_xml_tag_texts(chunk, &["t"]).join("");
+            shared_strings.push(joined);
+        }
+    }
+
+    let mut sheet_names: Vec<(usize, String)> = Vec::new();
+    for i in 0..archive.len() {
+        if let Ok(file) = archive.by_index(i) {
+            let name = file.name().to_string();
+            if name.starts_with("xl/worksheets/sheet") && name.ends_with(".xml") {
+                let num = name
+                    .trim_start_matches("xl/worksheets/sheet")
+                    .trim_end_matches(".xml")
+                    .parse::<usize>()
+                    .unwrap_or(usize::MAX);
+                sheet_names.push((num, name));
+            }
+        }
+    }
+    sheet_names.sort_by_key(|(n, _)| *n);
+    if sheet_names.is_empty() {
+        return Err("XLSX 中未找到 xl/worksheets/sheet*.xml".into());
+    }
+
+    let mut out = Vec::new();
+    for (idx, (_, name)) in sheet_names.into_iter().enumerate() {
+        let mut xml = String::new();
+        if let Ok(mut f) = archive.by_name(&name) {
+            let _ = f.read_to_string(&mut xml);
+        }
+        let mut rows_out = Vec::new();
+        for row_chunk in xml.split("<row").skip(1) {
+            let row_end = row_chunk.find("</row>").unwrap_or(row_chunk.len());
+            let row_slice = row_chunk.get(..row_end).unwrap_or(row_chunk);
+            let mut cells = Vec::new();
+            for cell_chunk in row_slice.split("<c").skip(1) {
+                if !cell_chunk
+                    .chars()
+                    .next()
+                    .is_some_and(|ch| ch == '>' || ch.is_whitespace())
+                {
+                    continue;
+                }
+                let cell_end = cell_chunk.find("</c>").unwrap_or(cell_chunk.len());
+                let cell_slice = cell_chunk.get(..cell_end).unwrap_or(cell_chunk);
+                let tag_close = cell_slice.find('>').unwrap_or(0);
+                let header = cell_slice.get(..tag_close).unwrap_or("");
+                let is_shared = header.contains("t=\"s\"") || header.contains("t='s'");
+                let is_inline = header.contains("t=\"inlineStr\"");
+                let val = if is_inline {
+                    extract_xml_tag_texts(cell_slice, &["t"]).join("")
+                } else {
+                    let raw_v = extract_xml_tag_texts(cell_slice, &["v"]).join("");
+                    if is_shared {
+                        raw_v
+                            .trim()
+                            .parse::<usize>()
+                            .ok()
+                            .and_then(|i| shared_strings.get(i).cloned())
+                            .unwrap_or(raw_v)
+                    } else {
+                        raw_v
+                    }
+                };
+                let cleaned = val.trim();
+                if !cleaned.is_empty() {
+                    cells.push(cleaned.to_string());
+                }
+            }
+            if !cells.is_empty() {
+                rows_out.push(cells.join(" | "));
+            }
+        }
+        if !rows_out.is_empty() {
+            out.push(format!("【工作表 {}】\n{}", idx + 1, rows_out.join("\n")));
+        }
+    }
+    Ok(out.join("\n\n"))
+}
+
+/// 从国产版式文档 OFD（常见于国知局电子发文/专利证书：ZIP 内 `Pages/*/Content.xml` 的 `<ofd:TextCode>`）原生提取文字
+fn extract_ofd_text(data: &[u8]) -> Result<String, String> {
+    use std::io::{Cursor, Read};
+    let mut archive =
+        zip::ZipArchive::new(Cursor::new(data)).map_err(|e| format!("非有效 OFD: {}", e))?;
+    let mut page_files: Vec<String> = Vec::new();
+    for i in 0..archive.len() {
+        if let Ok(file) = archive.by_index(i) {
+            let name = file.name().to_string();
+            let lower = name.to_ascii_lowercase();
+            if lower.contains("page") && lower.ends_with("content.xml") {
+                page_files.push(name);
+            }
+        }
+    }
+    page_files.sort();
+    if page_files.is_empty() {
+        return Err("OFD 中未找到页面内容 XML（Pages/*/Content.xml）".into());
+    }
+    let mut pages_out = Vec::new();
+    for (idx, name) in page_files.into_iter().enumerate() {
+        let mut xml = String::new();
+        if let Ok(mut f) = archive.by_name(&name) {
+            let _ = f.read_to_string(&mut xml);
+        }
+        let tokens = extract_xml_tag_texts(&xml, &["ofd:TextCode", "TextCode"]);
+        let joined = tokens.join("");
+        let trimmed = joined.trim();
+        if !trimmed.is_empty() {
+            pages_out.push(format!("【第 {} 页】\n{}", idx + 1, trimmed));
+        }
+    }
+    Ok(pages_out.join("\n\n"))
+}
+
+/// 提取指定 XML 标签对内的文本节点（跳过属性，按 UTF-8 字符边界安全扫描）
+fn extract_xml_tag_texts(xml: &str, tag_names: &[&str]) -> Vec<String> {
+    let mut results = Vec::new();
+    let mut rest = xml;
+    while let Some(lt) = rest.find('<') {
+        let after_lt = match rest.get(lt + 1..) {
+            Some(s) => s,
+            None => break,
+        };
+        let mut matched_tag: Option<&str> = None;
+        for &tag in tag_names {
+            if let Some(after_tag) = after_lt.strip_prefix(tag) {
+                if after_tag
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c == '>' || c.is_whitespace())
+                {
+                    matched_tag = Some(tag);
+                    break;
+                }
+            }
+        }
+        if let Some(tag) = matched_tag {
+            if let Some(gt) = after_lt.find('>') {
+                let body_start = match after_lt.get(gt + 1..) {
+                    Some(s) => s,
+                    None => break,
+                };
+                let close_pat = format!("</{}>", tag);
+                if let Some(close_idx) = body_start.find(&close_pat) {
+                    if let Some(inner) = body_start.get(..close_idx) {
+                        let decoded = decode_basic_xml_entities(inner);
+                        if !decoded.is_empty() {
+                            results.push(decoded);
+                        }
+                    }
+                    rest = body_start.get(close_idx + close_pat.len()..).unwrap_or("");
+                    continue;
+                }
+            }
+        }
+        rest = after_lt;
+    }
+    results
+}
+
+/// 清理 HTML / XML 文档中的 `<script>` / `<style>` 与标签，保留纯正文
+fn extract_html_or_xml_text(raw: &str) -> String {
+    let cleaned = regex::Regex::new(r"(?is)<(?:script|style)[^>]*>.*?</(?:script|style)>")
+        .map(|re| re.replace_all(raw, " ").into_owned())
+        .unwrap_or_else(|_| raw.to_string());
+    let mut text = String::with_capacity(cleaned.len() / 2);
+    let mut in_tag = false;
+    for ch in cleaned.chars() {
+        if ch == '<' {
+            in_tag = true;
+            text.push('\n');
+        } else if ch == '>' {
+            in_tag = false;
+        } else if !in_tag {
+            text.push(ch);
+        }
+    }
+    let decoded = decode_basic_xml_entities(&text);
+    decoded
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// 轻量提取 RTF 富文本中的可读文字（去除控制字与花括号）
+fn extract_rtf_text(raw: &str) -> String {
+    let no_ctrl = regex::Regex::new(r"\\[a-zA-Z]+-?\d* ?|\\[{}\\]")
+        .map(|re| re.replace_all(raw, " ").into_owned())
+        .unwrap_or_else(|_| raw.to_string());
+    no_ctrl
+        .replace(['{', '}'], " ")
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Use AI vision (GLM-4V or compatible) to describe an image
@@ -1980,14 +3254,76 @@ fn has_docx_header(data: &[u8]) -> bool {
 /// Detect file type by content magic bytes when the filename extension is
 /// missing or unreliable (e.g. non-ASCII filenames mangled by multipart parsers).
 ///
-/// Returns `Some("pdf")` / `Some("docx")` when magic bytes match, `None` when
-/// no known magic is recognised.
+/// Supports PDF, Office Open XML (`docx` / `pptx` / `xlsx`), CNIPA `ofd`,
+/// images (`png` / `jpg` / `gif` / `webp` / `bmp`), `rtf`, and CNKI `caj`.
 fn detect_type_by_magic(data: &[u8]) -> Option<&'static str> {
     if has_pdf_header(data) {
         return Some("pdf");
     }
     if has_docx_header(data) {
+        // 细查 ZIP 内部清单，精确区分 DOCX / PPTX / XLSX / OFD（均以 PK\x03\x04 开头）
+        if let Ok(mut archive) = zip::ZipArchive::new(std::io::Cursor::new(data)) {
+            let mut is_ofd = false;
+            let mut is_pptx = false;
+            let mut is_xlsx = false;
+            let mut is_docx = false;
+            for i in 0..archive.len().min(64) {
+                if let Ok(entry) = archive.by_index(i) {
+                    let lower = entry.name().to_ascii_lowercase();
+                    if lower == "ofd.xml" || lower.ends_with("/ofd.xml") {
+                        is_ofd = true;
+                        break;
+                    } else if lower.starts_with("ppt/") {
+                        is_pptx = true;
+                    } else if lower.starts_with("xl/") {
+                        is_xlsx = true;
+                    } else if lower.starts_with("word/") {
+                        is_docx = true;
+                    }
+                }
+            }
+            if is_ofd {
+                return Some("ofd");
+            }
+            if is_pptx {
+                return Some("pptx");
+            }
+            if is_xlsx {
+                return Some("xlsx");
+            }
+            if is_docx {
+                return Some("docx");
+            }
+        }
         return Some("docx");
+    }
+    if data.len() >= 8 && data[0..8] == [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A] {
+        return Some("png");
+    }
+    if data.len() >= 3 && data[0..3] == [0xFF, 0xD8, 0xFF] {
+        return Some("jpg");
+    }
+    if data.len() >= 6 && (&data[0..6] == b"GIF87a" || &data[0..6] == b"GIF89a") {
+        return Some("gif");
+    }
+    if data.len() >= 12 && &data[0..4] == b"RIFF" && &data[8..12] == b"WEBP" {
+        return Some("webp");
+    }
+    if data.len() >= 2 && &data[0..2] == b"BM" {
+        return Some("bmp");
+    }
+    if data.len() >= 5 && &data[0..5] == b"{\\rtf" {
+        return Some("rtf");
+    }
+    if data.len() >= 4 && (&data[0..4] == b"CAJ\x00" || &data[0..4] == b"HN\x00\x00") {
+        return Some("caj");
+    }
+    let head = data.get(..data.len().min(128)).unwrap_or(data);
+    if head
+        .windows(b"ISO-10303-21".len())
+        .any(|w| w == b"ISO-10303-21")
+    {
+        return Some("step");
     }
     None
 }
@@ -2427,6 +3763,253 @@ mod umi_ocr_config_tests {
             events.iter().any(|e| e.page == 3 && e.total_pages == 3),
             "must emit page 3/3 progress, got: {:?}",
             events
+        );
+    }
+
+    #[test]
+    fn upload_compare_prompt_includes_spec_signals_inactive_legal_precheck_and_user_input_isolation(
+    ) {
+        let patent = crate::patent::Patent {
+            id: "pat-uc-1".into(),
+            patent_number: "CN90002001B".into(),
+            title: "双流道油冷驱动电机".into(),
+            abstract_text: "摘要文本".into(),
+            legal_status: "Withdrawn".into(),
+            claims: "1. 一种双流道油冷电机，包括定子铁芯(10)与螺旋油道(20)。".into(),
+            description:
+                "实施例1：冷却油流量 12 L/min，定子绕组峰值温度降至 115℃；导流环(30)位于端盖内侧。"
+                    .into(),
+            ..Default::default()
+        };
+        let (sys, prompt) = build_upload_compare_prompt(
+            &patent,
+            "上传文档",
+            "研发交底书：采用轴向微通道冷却，工作压力 0.35 MPa，绕组温升降低 18%。",
+        );
+        assert!(sys.contains("已失效/撤回/驳回专利误判"));
+        assert!(prompt.contains("<user_input>") && prompt.contains("</user_input>"));
+        assert!(prompt.contains("失效/未授权状态：Withdrawn"));
+        assert!(prompt.contains("115℃"), "应带入说明书定量参数预挖");
+        assert!(prompt.contains("导流环"), "应带入说明书未权要隐藏部件");
+        assert!(prompt.contains("0.35 MPa"), "应带入上传文档定量参数");
+        assert!(prompt.contains("未来 3–5 年"));
+    }
+
+    #[test]
+    fn multi_upload_compare_prompt_handles_mixed_patent_and_journal_papers_with_custom_focus() {
+        let patent = crate::patent::Patent {
+            id: "pat-multi-1".into(),
+            patent_number: "CN90003001A".into(),
+            title: "低频交流电场辅助贫燃燃烧器".into(),
+            abstract_text: "利用低频交流电场强化天然气贫燃稳定。".into(),
+            claims: "1. 一种电场辅助燃烧器，包括环形高压电极(10)和旋流喷口(20)。".into(),
+            description: "实施例：施加 50Hz、4.5 kV 交流电压，NOx 排放降至 28 mg/m3。".into(),
+            ..Default::default()
+        };
+        let docs = vec![
+            UploadedCompareDoc {
+                file_name: "ieee_flame_paper_2024.pdf".into(),
+                doc_kind: infer_uploaded_doc_kind(
+                    "ieee_flame_paper_2024.pdf",
+                    "Abstract: Electric-field assisted lean combustion. DOI: 10.1109/TPS.2024.000123. Experimental NOx dropped by 35%.",
+                    false,
+                )
+                .to_string(),
+                ext: "pdf".into(),
+                content: "Abstract: Electric-field assisted lean combustion. DOI: 10.1109/TPS.2024.000123. Experimental NOx dropped by 35%.".into(),
+            },
+            UploadedCompareDoc {
+                file_name: "competitor_patent.txt".into(),
+                doc_kind: infer_uploaded_doc_kind(
+                    "competitor_patent.txt",
+                    "权利要求书：1. 一种等离子体稳燃装置，采用直流脉冲电源。",
+                    false,
+                )
+                .to_string(),
+                ext: "txt".into(),
+                content: "权利要求书：1. 一种等离子体稳燃装置，采用直流脉冲电源。".into(),
+            },
+        ];
+        let (_sys, prompt) = build_multi_upload_compare_prompt(
+            &patent,
+            &docs,
+            Some("重点对比论文的实测 NOx 降幅与两件专利电极方案的寿命差异"),
+        );
+        assert!(prompt.contains("2 份对比文献"));
+        assert!(prompt.contains("体裁：期刊/学术论文"));
+        assert!(prompt.contains("体裁：对比专利文献"));
+        assert!(prompt.contains("10.1109/TPS.2024.000123"));
+        assert!(prompt.contains("期刊/学术论文专项交叉分析"));
+        assert!(prompt.contains("重点对比论文的实测 NOx 降幅"));
+    }
+
+    #[tokio::test]
+    async fn ingest_local_indexes_patent_and_journal_paper_for_local_search() {
+        let state = crate::common::init_app_state(":memory:").expect("init app state");
+
+        // 1) 上传本地专利 PDF 文本 -> 识别为专利文献并进入本地搜索索引
+        let pat_resp = api_upload_ingest_local(
+            axum::extract::State(state.clone()),
+            axum::Json(serde_json::json!({
+                "filename": "dual_channel_cooling_patent.pdf",
+                "content": "公开号：CN90008881B\n发明名称：一种双流道油冷扁线驱动电机定子总成\n申请人：示例电驱研究院\nInt.Cl. H02K 9/19\n摘要：本发明公开一种双流道油冷扁线定子冷却结构。\n权利要求书\n1. 一种双流道油冷定子总成，包括定子铁芯(10)和轴向微通道(20)。\n说明书\n具体实施方式：定子铁芯(10)外周设置轴向微通道(20)。"
+            })),
+        )
+        .await;
+        assert_eq!(pat_resp.0["status"], "ok");
+        assert_eq!(pat_resp.0["source"], "local_patent");
+        assert_eq!(pat_resp.0["patent_number"], "CN90008881B");
+        assert!(pat_resp.0["detail_url"]
+            .as_str()
+            .unwrap_or("")
+            .starts_with("/patent/"));
+
+        // 验证本地数据库搜索立刻能命中刚才上传的专利
+        let (hits, total) = state
+            .db
+            .search_like("双流道油冷扁线", None, None, None, 1, 10)
+            .expect("local search");
+        assert!(total >= 1 && hits.iter().any(|h| h.patent_number == "CN90008881B"));
+
+        // 2) 上传期刊学术论文 -> 识别为期刊/学术论文、提取真实 DOI 并入库可检
+        let paper_resp = api_upload_ingest_local(
+            axum::extract::State(state.clone()),
+            axum::Json(serde_json::json!({
+                "filename": "thermal_journal_2025.pdf",
+                "content": "Thermal Management of Hairpin PMSM via Spray Oil Cooling\nDOI: 10.1109/TIE.2025.998877\nAbstract: Experimental study of hairpin motor winding oil spray cooling with 12 L/min flow.\nKeywords: hairpin motor, oil spray cooling\nReferences: [1] ..."
+            })),
+        )
+        .await;
+        assert_eq!(paper_resp.0["status"], "ok");
+        assert_eq!(paper_resp.0["source"], "local_paper");
+        assert_eq!(paper_resp.0["patent_number"], "10.1109/TIE.2025.998877");
+        let (paper_hits, paper_total) = state
+            .db
+            .search_like("Hairpin PMSM", None, None, None, 1, 10)
+            .expect("local paper search");
+        assert!(
+            paper_total >= 1
+                && paper_hits
+                    .iter()
+                    .any(|h| h.patent_number == "10.1109/TIE.2025.998877")
+        );
+    }
+
+    #[test]
+    fn universal_extractors_parse_pptx_xlsx_ofd_html_and_guide_caj() {
+        use std::io::Write;
+
+        let make_zip = |files: &[(&str, &str)]| -> Vec<u8> {
+            let mut cursor = std::io::Cursor::new(Vec::new());
+            {
+                let mut zw = zip::ZipWriter::new(&mut cursor);
+                let opts = zip::write::SimpleFileOptions::default();
+                for (name, body) in files {
+                    zw.start_file(*name, opts).expect("start zip file");
+                    zw.write_all(body.as_bytes()).expect("write zip entry");
+                }
+                zw.finish().expect("finish zip");
+            }
+            cursor.into_inner()
+        };
+
+        // 1) PPTX
+        let pptx = make_zip(&[
+            ("ppt/presentation.xml", "<p:presentation/>"),
+            (
+                "ppt/slides/slide1.xml",
+                "<p:sld><a:t>第一页：油冷电机温升测试</a:t><a:t>热点降低 34℃</a:t></p:sld>",
+            ),
+        ]);
+        assert_eq!(detect_type_by_magic(&pptx), Some("pptx"));
+        let pptx_text = extract_pptx_text(&pptx).expect("pptx extract");
+        assert!(pptx_text.contains("第一页：油冷电机温升测试"));
+        assert!(pptx_text.contains("热点降低 34℃"));
+
+        // 2) XLSX
+        let xlsx = make_zip(&[
+            ("xl/workbook.xml", "<workbook/>"),
+            (
+                "xl/sharedStrings.xml",
+                "<sst><si><t>流量(L/min)</t></si><si><t>峰值温度(℃)</t></si></sst>",
+            ),
+            (
+                "xl/worksheets/sheet1.xml",
+                "<worksheet><sheetData><row><c t=\"s\"><v>0</v></c><c t=\"s\"><v>1</v></c></row><row><c><v>10.5</v></c><c><v>134</v></c></row></sheetData></worksheet>",
+            ),
+        ]);
+        assert_eq!(detect_type_by_magic(&xlsx), Some("xlsx"));
+        let xlsx_text = extract_xlsx_text(&xlsx).expect("xlsx extract");
+        assert!(xlsx_text.contains("流量(L/min) | 峰值温度(℃)"));
+        assert!(xlsx_text.contains("10.5 | 134"));
+
+        // 3) OFD（国知局电子发文）
+        let ofd = make_zip(&[
+            ("OFD.xml", "<ofd:OFD/>"),
+            (
+                "Doc_0/Pages/Page_0/Content.xml",
+                "<ofd:Page><ofd:TextCode>第一次审查意见通知书：权利要求1不具备创造性</ofd:TextCode></ofd:Page>",
+            ),
+        ]);
+        assert_eq!(detect_type_by_magic(&ofd), Some("ofd"));
+        let ofd_text = extract_ofd_text(&ofd).expect("ofd extract");
+        assert!(ofd_text.contains("第一次审查意见通知书"));
+
+        // 4) HTML stripping
+        let html = "<html><head><style>.x{color:red}</style><script>alert(1)</script></head><body><h1>专利摘要</h1><p>温度 &le; 120&deg;C &amp; 压力 0.2MPa</p></body></html>";
+        let html_text = extract_html_or_xml_text(html);
+        assert!(html_text.contains("专利摘要"));
+        assert!(!html_text.contains("alert(1)"));
+        assert!(!html_text.contains("color:red"));
+
+        // 5) CAJ / DWG 友好引导
+        assert_eq!(detect_type_by_magic(b"CAJ\x00dummy"), Some("caj"));
+        let caj_hint = unsupported_proprietary_format_hint("caj", "paper.caj").expect("caj hint");
+        assert!(caj_hint.contains("PDF 下载") && caj_hint.contains("CAJViewer"));
+        let dwg_hint = unsupported_proprietary_format_hint("dwg", "motor.dwg").expect("dwg hint");
+        assert!(dwg_hint.contains(".dxf"));
+    }
+
+    #[test]
+    fn step_and_stl_3d_extractors_decode_chinese_parts_and_bounding_box() {
+        let step_sample = "ISO-10303-21;\n\
+            HEADER;\n\
+            FILE_NAME('stator_assembly.stp','2026-11-24',('Engineer'),('R&D'),'SolidWorks','','');\n\
+            FILE_SCHEMA(('AUTOMOTIVE_DESIGN'));\n\
+            ENDSEC;\n\
+            DATA;\n\
+            #10=SI_UNIT(.MILLI.,.METRE.);\n\
+            #20=PRODUCT('Stator_Housing','\\X2\\5B9A5B5094C182AF\\X0\\','',(#1));\n\
+            #21=MANIFOLD_SOLID_BREP('Cooling_Jacket',#30);\n\
+            #30=CLOSED_SHELL('',(#40));\n\
+            #40=ADVANCED_FACE('',(),#50,.T.);\n\
+            #50=CYLINDRICAL_SURFACE('',#60,60.0);\n\
+            #60=CARTESIAN_POINT('',(0.0,0.0,0.0));\n\
+            #61=CARTESIAN_POINT('',(240.0,240.0,180.0));\n\
+            ENDSEC;\n\
+            END-ISO-10303-21;\n";
+
+        assert_eq!(detect_type_by_magic(step_sample.as_bytes()), Some("step"));
+        let summary = extract_step_summary(step_sample);
+        assert!(
+            summary.contains("定子铁芯"),
+            "应解码 STEP UTF-16BE 中文部件名: {summary}"
+        );
+        assert!(summary.contains("Cooling_Jacket"));
+        assert!(summary.contains("X = 240.00 mm"));
+        assert!(summary.contains("Z = 180.00 mm"));
+        assert!(summary.contains("R=60.00/Ø120.00"));
+        assert_eq!(
+            infer_uploaded_doc_kind("motor.stp", &summary, false),
+            "三维 CAD 模型"
+        );
+
+        let ascii_stl = "solid box\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 100 0 0\nvertex 100 50 25\nendloop\nendfacet\nendsolid box\n";
+        let stl_sum = extract_stl_summary(ascii_stl.as_bytes()).expect("ascii stl");
+        assert!(
+            stl_sum.contains("X = 100.00")
+                && stl_sum.contains("Y = 50.00")
+                && stl_sum.contains("Z = 25.00")
         );
     }
 }

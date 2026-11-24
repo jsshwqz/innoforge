@@ -924,6 +924,10 @@ pub fn build_router_with_token(
         .route("/api/tags", get(routes::api_list_all_tags))
         // 文件上传与 T2.5 异步 SSE OCR 流
         .route("/api/upload/compare", post(routes::api_upload_compare))
+        .route(
+            "/api/upload/ingest-local",
+            post(routes::api_upload_ingest_local),
+        )
         .route("/api/upload/extract", post(routes::api_upload_extract))
         .route(
             "/api/upload/extract/stream",

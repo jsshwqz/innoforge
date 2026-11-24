@@ -165,8 +165,8 @@ const I18N_COMMON = {
     'detail.stop': '■ 停止',
     'detail.exportConclusions': '📝 导出结论',
     'detail.exporting': '导出中...',
-    'detail.upload': '上传文档对比',
-    'detail.uploadHint': '上传文件与本专利进行 AI 对比分析（支持 TXT、PDF、图片）',
+    'detail.upload': '上传多份对比文献（专利 / 期刊论文 / 技术方案）',
+    'detail.uploadHint': '支持同时上传 1–5 份自定义对比文件（不限于专利：支持期刊学术论文 PDF、Word 交底书、TXT/Markdown、图片图纸混合对比）',
     'detail.uploadBtn': '开始对比',
     'detail.similar': '相似专利推荐',
     'detail.similarLoading': '加载中...',
@@ -903,8 +903,8 @@ const I18N_COMMON = {
     'detail.stop': '■ Stop',
     'detail.exportConclusions': '📝 Export Conclusions',
     'detail.exporting': 'Exporting...',
-    'detail.upload': 'Upload Document for Comparison',
-    'detail.uploadHint': 'Upload a file to compare with this patent via AI (TXT, PDF, images supported)',
+    'detail.upload': 'Compare with Custom Documents (Patents / Papers / Specs)',
+    'detail.uploadHint': 'Upload 1–5 custom files (patents, journal papers PDF, DOCX disclosures, TXT/MD, or drawings) for cross-document AI analysis',
     'detail.uploadBtn': 'Start Comparison',
     'detail.similar': 'Similar Patents',
     'detail.similarLoading': 'Loading...',
@@ -1591,7 +1591,7 @@ var _NAV_ICONS = {
 function renderSidebar(extraHtml) {
   var el = document.getElementById('page-sidebar');
   if (!el) return;
-  var fromPath = location.pathname;
+  var fromPath = location.pathname + location.search;
   var links = [
     { href: '/', key: 'nav.home', id: 'home', icon: 'home' },
     { href: '/idea', key: 'nav.idea', id: 'idea', icon: 'idea' },

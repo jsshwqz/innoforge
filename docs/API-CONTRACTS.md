@@ -4,7 +4,7 @@
 > `tests/api_contracts_up_to_date.rs` 会用同一脚本的 `--check` 模式比对，代码改了没重跑就红。
 > 叙述性说明、示例与业务语义仍写在 [`docs/API.md`](API.md)。
 
-共 **164** 条 `/api` 路由（另有 9 条页面/静态路由，见 [API-ROUTES.md](API-ROUTES.md)）。
+共 **165** 条 `/api` 路由（另有 9 条页面/静态路由，见 [API-ROUTES.md](API-ROUTES.md)）。
 
 ## 怎么读
 
@@ -18,11 +18,11 @@
 
 | 维度 | 数量 |
 | --- | --- |
-| `/api` 路由 | 164 |
+| `/api` 路由 | 165 |
 | 请求体是具体结构体 | 21 |
-| 请求体是任意 JSON | 54 |
-| 其中能从函数体抽到请求键 | 53 |
-| 响应含可识别 JSON 顶层键 | 136 |
+| 请求体是任意 JSON | 55 |
+| 其中能从函数体抽到请求键 | 54 |
+| 响应含可识别 JSON 顶层键 | 137 |
 | 引用的请求/查询类型已解析到 struct | 22/22 |
 | 处理函数未找到 | 0 |
 
@@ -65,7 +65,7 @@
 | 33 | GET | `/api/patents/backfill-status` | — | — | — | JSON（§33） | `routes::api_patents_backfill_status` | `src/routes/patent.rs:390` |
 | 34 | POST | `/api/patents/backfill-index` | — | — | — | JSON（§34） | `routes::api_patents_backfill_index` | `src/routes/patent.rs:398` |
 | 35 | GET | `/api/patent/pdf/:id` | `id` | — | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_patent_pdf` | `src/routes/patent.rs:1185` |
-| 36 | POST | `/api/patent/pdf/extract-text` | — | — | — | JSON（§36） | `routes::api_patent_pdf_extract_text` | `src/routes/upload.rs:1725` |
+| 36 | POST | `/api/patent/pdf/extract-text` | — | — | — | JSON（§36） | `routes::api_patent_pdf_extract_text` | `src/routes/upload.rs:2999` |
 | 37 | GET | `/api/patent/image-proxy` | — | — | 任意键值对（§37） | HTTP 响应（动态，状态码/正文见源码） | `routes::api_patent_image_proxy` | `src/routes/patent.rs:1512` |
 | 38 | GET | `/api/patent/lookup/:number` | `number` | — | 任意键值对（§38） | JSON（§38） | `routes::api_patent_lookup` | `src/routes/patent.rs:550` |
 | 39 | POST | `/api/patent/lookup-or-fetch` | — | 任意 JSON（§39） | — | JSON（§39） | `routes::api_patent_lookup_and_fetch` | `src/routes/patent.rs:721` |
@@ -87,8 +87,8 @@
 | 55 | POST | `/api/ai/claims` | — | 任意 JSON（§55） | — | JSON（§55） | `routes::api_ai_claims_analysis` | `src/routes/ai.rs:1026` |
 | 56 | POST | `/api/ai/risk` | — | 任意 JSON（§56） | — | JSON（§56） | `routes::api_ai_risk_assessment` | `src/routes/ai.rs:1062` |
 | 57 | POST | `/api/ai/compare-matrix` | — | 任意 JSON（§57） | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_ai_compare_matrix` | `src/routes/ai.rs:1147` |
-| 58 | POST | `/api/ai/batch-summarize` | — | 任意 JSON（§58） | — | JSON（§58） | `routes::api_ai_batch_summarize` | `src/routes/ai.rs:1240` |
-| 59 | POST | `/api/ai/inventiveness-analysis` | — | 任意 JSON（§59） | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_ai_inventiveness_analysis` | `src/routes/ai.rs:1419` |
+| 58 | POST | `/api/ai/batch-summarize` | — | 任意 JSON（§58） | — | JSON（§58） | `routes::api_ai_batch_summarize` | `src/routes/ai.rs:1261` |
+| 59 | POST | `/api/ai/inventiveness-analysis` | — | 任意 JSON（§59） | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_ai_inventiveness_analysis` | `src/routes/ai.rs:1440` |
 | 60 | POST | `/api/ai/office-action-response` | — | 任意 JSON（§60） | — | JSON（§60） | `routes::api_ai_office_action_response` | `src/routes/oa_core.rs:57` |
 | 61 | POST | `/api/ai/office-action-response/stream` | — | 任意 JSON（§61） | — | SSE 事件流（text/event-stream） | `routes::api_ai_office_action_response_stream` | `src/routes/oa_core.rs:355` |
 | 62 | POST | `/api/ai/oa-generate-response-letter` | — | 任意 JSON（§62） | — | SSE 事件流（text/event-stream） | `routes::api_ai_oa_generate_response_letter` | `src/routes/oa_core.rs:677` |
@@ -189,11 +189,12 @@
 | 157 | GET | `/api/patents/:id/collections` | `id` | — | — | JSON（§157） | `routes::api_get_patent_collections` | `src/routes/collections.rs:151` |
 | 158 | GET | `/api/tags` | — | — | — | JSON（§158） | `routes::api_list_all_tags` | `src/routes/collections.rs:138` |
 | 159 | POST | `/api/upload/compare` | — | — | — | JSON（§159） | `routes::api_upload_compare` | `src/routes/upload.rs:340` |
-| 160 | POST | `/api/upload/extract` | — | — | — | JSON（§160） | `routes::api_upload_extract` | `src/routes/upload.rs:518` |
-| 161 | POST | `/api/upload/extract/stream` | — | — | — | SSE 事件流（text/event-stream） | `routes::api_upload_extract_stream` | `src/routes/upload.rs:678` |
-| 162 | POST | `/api/upload/pdf-store` | — | — | — | JSON（§162） | `routes::api_upload_pdf_store` | `src/routes/upload.rs:275` |
-| 163 | GET | `/api/patent/:id/numeral-check` | `id` | — | — | JSON（§163） | `routes::api_patent_numeral_check` | `src/routes/patent.rs:414` |
-| 164 | POST | `/api/ai/numeral-consistency-check` | — | 任意 JSON（§164） | — | JSON（§164） | `routes::api_ai_numeral_consistency_check` | `src/routes/patent.rs:459` |
+| 160 | POST | `/api/upload/ingest-local` | — | 任意 JSON（§160） | — | JSON（§160） | `routes::api_upload_ingest_local` | `src/routes/upload.rs:802` |
+| 161 | POST | `/api/upload/extract` | — | — | — | JSON（§161） | `routes::api_upload_extract` | `src/routes/upload.rs:1105` |
+| 162 | POST | `/api/upload/extract/stream` | — | — | — | SSE 事件流（text/event-stream） | `routes::api_upload_extract_stream` | `src/routes/upload.rs:1326` |
+| 163 | POST | `/api/upload/pdf-store` | — | — | — | JSON（§163） | `routes::api_upload_pdf_store` | `src/routes/upload.rs:275` |
+| 164 | GET | `/api/patent/:id/numeral-check` | `id` | — | — | JSON（§164） | `routes::api_patent_numeral_check` | `src/routes/patent.rs:414` |
+| 165 | POST | `/api/ai/numeral-consistency-check` | — | 任意 JSON（§165） | — | JSON（§165） | `routes::api_ai_numeral_consistency_check` | `src/routes/patent.rs:459` |
 
 ## 请求 / 查询类型字段
 
@@ -700,7 +701,7 @@
 
 ### §36 POST `/api/patent/pdf/extract-text`
 
-- 源码：`src/routes/upload.rs:1725`
+- 源码：`src/routes/upload.rs:2999`
 - 响应顶层键：`char_count`、`error`、`full_text`、`method`、`page`、`page_count`、`pages`、`status`、`text`、`total_chars`
 - `status` 取值：ok
 
@@ -825,14 +826,14 @@
 
 ### §58 POST `/api/ai/batch-summarize`
 
-- 源码：`src/routes/ai.rs:1240`
+- 源码：`src/routes/ai.rs:1261`
 - 读取的请求键：`patent_ids`
 - 响应顶层键：`error`、`id`、`patent_number`、`status`、`summaries`、`summary`、`title`
 - `status` 取值：ok
 
 ### §59 POST `/api/ai/inventiveness-analysis`
 
-- 源码：`src/routes/ai.rs:1419`
+- 源码：`src/routes/ai.rs:1440`
 - 读取的请求键：`reference_ids`、`references`
 - 响应顶层键：`analysis`、`error`、`status`
 - `status` 取值：ok
@@ -1426,31 +1427,38 @@
 ### §159 POST `/api/upload/compare`
 
 - 源码：`src/routes/upload.rs:340`
-- 响应顶层键：`analysis`、`content_length`、`error`、`file_type`、`success`
+- 响应顶层键：`analysis`、`content_length`、`doc_kind`、`error`、`file_count`、`file_name`、`file_type`、`files`、`success`
 
-### §160 POST `/api/upload/extract`
+### §160 POST `/api/upload/ingest-local`
 
-- 源码：`src/routes/upload.rs:518`
-- 响应顶层键：`char_length`、`file_type`、`length`、`text`、`truncated`
+- 源码：`src/routes/upload.rs:802`
+- 读取的请求键：`content`、`filename`
+- 响应顶层键：`detail_url`、`doc_kind`、`error`、`id`、`keywords`、`patent_number`、`source`、`status`、`title`
+- `status` 取值：error / ok
 
-### §161 POST `/api/upload/extract/stream`
+### §161 POST `/api/upload/extract`
 
-- 源码：`src/routes/upload.rs:678`
+- 源码：`src/routes/upload.rs:1105`
+- 响应顶层键：`char_length`、`error`、`error_code`、`file_type`、`hint`、`length`、`text`、`truncated`
+
+### §162 POST `/api/upload/extract/stream`
+
+- 源码：`src/routes/upload.rs:1326`
 - 响应顶层键：`char_length`、`file_type`、`length`、`method`、`text`、`total_pages`、`truncated`
 
-### §162 POST `/api/upload/pdf-store`
+### §163 POST `/api/upload/pdf-store`
 
 - 源码：`src/routes/upload.rs:275`
 - 响应顶层键：`filename`、`message`、`size`、`status`、`url`
 - `status` 取值：error / ok
 
-### §163 GET `/api/patent/:id/numeral-check`
+### §164 GET `/api/patent/:id/numeral-check`
 
 - 源码：`src/routes/patent.rs:414`
 - 响应顶层键：`issue_count`、`issues`、`message`、`parts`、`passed`、`patent_id`、`patent_number`、`status`、`summary`、`total_numerals`
 - `status` 取值：error / ok
 
-### §164 POST `/api/ai/numeral-consistency-check`
+### §165 POST `/api/ai/numeral-consistency-check`
 
 - 源码：`src/routes/patent.rs:459`
 - 读取的请求键：`claims_text`、`description_text`、`drawing_parts`
