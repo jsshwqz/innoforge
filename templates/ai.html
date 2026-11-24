@@ -146,7 +146,7 @@
         chatTotal = 0;
         try { localStorage.removeItem(AI_CHAT_KEY); } catch(e) {}
         try {
-            await fetch('/api/chat/' + encodeURIComponent(AI_CHAT_KEY), { method: 'DELETE' });
+            await fetch('/api/chat/' + encodeURIComponent(AI_CHAT_KEY) + '/delete', { method: 'POST' });
         } catch(e) {}
         renderAllMessages();
         updateLoadMoreButton();
