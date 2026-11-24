@@ -554,7 +554,7 @@
     function triggerFileSelect(callback) {
         var input = document.createElement('input');
         input.type = 'file';
-        input.accept = '.pdf,.docx,.txt';
+        input.accept = '.pdf,.docx,.pptx,.xlsx,.ofd,.step,.stp,.iges,.igs,.stl,.txt,.md,.csv,.tsv,.json,.yaml,.yml,.tex,.bib,.html,.htm,.xml,.rtf,.dxf,.png,.jpg,.jpeg,.webp,.bmp,.gif';
         input.onchange = function() {
             if (input.files.length > 0) callback(input.files[0]);
         };
@@ -2571,8 +2571,8 @@
         html += '</div>';
         html += '<div style="border-top:1px solid #30363d;padding:8px 12px;display:flex;gap:8px;">';
         html += '<input id="oa-discuss-input" type="text" placeholder="' + (t('oar.discussPlaceholder') || '输入讨论内容...') + '" style="flex:1;background:#161b22;border:1px solid #30363d;border-radius:6px;padding:8px 12px;color:#c9d1d9;font-size:13px;" onkeydown="if(event.key===\'Enter\')sendOADiscussion()">';
-        html += '<label style="cursor:pointer;color:#58a6ff;font-size:18px;padding:4px 8px;border-radius:6px;user-select:none;" title="上传截图/文件"><input type="file" id="oa-discuss-file" accept="image/*,.pdf,.doc,.docx,.txt" style="display:none;" onchange="attachDiscussFile()"></label>';
-        html += '<span id="oa-discuss-file-label" style="color:#8b949e;font-size:12px;padding:8px 0;display:none;"></span>';
+        html += '<label style="cursor:pointer;color:#58a6ff;font-size:18px;padding:4px 8px;border-radius:6px;user-select:none;" title="上传截图或文件（PDF / DOCX / OFD / PPTX / XLSX / STEP / STL / LaTeX / 图片）">📎<input type="file" id="oa-discuss-file" accept="image/*,.pdf,.docx,.pptx,.xlsx,.ofd,.step,.stp,.iges,.igs,.stl,.txt,.md,.csv,.tsv,.json,.yaml,.yml,.tex,.bib,.html,.htm,.xml,.rtf,.dxf" style="display:none;" onchange="attachDiscussFile()"></label>';
+        html += '<span id="oa-discuss-file-label" style="color:#8b949e;font-size:12px;padding:8px 0;display:none;align-items:center;gap:6px;"></span>';
         html += '<button onclick="sendOADiscussion()" style="background:#238636;color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-size:13px;white-space:nowrap;">' + (t('oar.discussSend') || '发送') + '</button>';
         html += '</div>';
         html += '</div>';
@@ -2600,6 +2600,11 @@
         html += '</div>'; // end result-box
 
         container.innerHTML = DOMPurify.sanitize(html);
+        var oaDiscussFileEl = document.getElementById('oa-discuss-file');
+        if (oaDiscussFileEl && !oaDiscussFileEl.dataset.boundChange) {
+            oaDiscussFileEl.dataset.boundChange = '1';
+            oaDiscussFileEl.addEventListener('change', attachDiscussFile);
+        }
         updateCurrentOADiscussionExportButton();
         loadOADiscussionHistory();
         initDiscQuoteEvents(); // 重新绑定引用按钮到新的 #oa-discuss-messages
@@ -2611,7 +2616,10 @@
         var input = document.getElementById('oa-discuss-input');
         if (!input) return;
         var msg = input.value.trim();
-        if (!msg) return;
+        if (!msg && !window._oaDiscussPendingFile) return;
+        if (!msg && window._oaDiscussPendingFile) {
+            msg = '请结合附件「' + window._oaDiscussPendingFile.name + '」的内容进行审查答复分析。';
+        }
         input.value = '';
         if (oaInputHistory) oaInputHistory.push(msg);
 
@@ -2687,14 +2695,18 @@
             if (patentNum) payload.patent_number = patentNum;
             if (applicantNm) payload.applicant_name = applicantNm;
             payload.discussion_id = discussionId;
-            // 如果有上传的文件，把 base64 内容传给 AI（使用上面缓存的 pendingFile，避免 1237 行清空后读不到）
+            // 如果有上传的文件，传递已提取文本或图片 base64
             var pf = pendingFile;
-            if (pf && pf.base64) {
+            if (pf) {
                 payload.file_name = pf.name;
-                payload.file_base64 = pf.base64;
-                payload.file_type = pf.type;
-                // 清空待发送文件
-                window._oaDiscussPendingFile = null;
+                payload.file_type = pf.type || '';
+                if (pf.text) {
+                    payload.file_text = pf.text;
+                } else if (pf.base64) {
+                    payload.file_base64 = pf.base64;
+                }
+                // 清空待发送文件与标签
+                removeDiscussFile();
             }
 
             var resp = await fetch('/api/ai/oa-discuss', {
@@ -4226,7 +4238,23 @@
     }
 
     // ========== OA 讨论文件上传 ==========
-    function attachDiscussFile() {
+    function renderDiscussFileBadge(labelEl, text) {
+        if (!labelEl) return;
+        labelEl.innerHTML = '';
+        var nameSpan = document.createElement('span');
+        nameSpan.textContent = text;
+        var rmBtn = document.createElement('button');
+        rmBtn.type = 'button';
+        rmBtn.textContent = '×';
+        rmBtn.title = '移除附件';
+        rmBtn.style.cssText = 'background:none;border:none;color:#f85149;cursor:pointer;font-weight:bold;padding:0 4px;font-size:14px;';
+        rmBtn.addEventListener('click', removeDiscussFile);
+        labelEl.appendChild(nameSpan);
+        labelEl.appendChild(rmBtn);
+        labelEl.style.display = 'inline-flex';
+    }
+
+    async function attachDiscussFile() {
         var fileInput = document.getElementById('oa-discuss-file');
         var labelEl = document.getElementById('oa-discuss-file-label');
         if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
@@ -4241,23 +4269,52 @@
             return;
         }
 
-        // 读取文件并存储为 base64
-        var reader = new FileReader();
-        reader.onload = function(e) {
-            var dataUrl = e.target.result;
-            window._oaDiscussPendingFile = {
-                name: file.name,
-                type: file.type,
-                size: file.size,
-                dataUrl: dataUrl,
-                base64: dataUrl.split(',')[1] || ''
+        var isImage = file.type && file.type.indexOf('image/') === 0;
+        if (isImage) {
+            // 图片读取为 DataURL/base64，便于界面缩略图预览及后端视觉识别
+            var reader = new FileReader();
+            reader.onload = function(e) {
+                var dataUrl = e.target.result;
+                window._oaDiscussPendingFile = {
+                    name: file.name,
+                    type: file.type,
+                    size: file.size,
+                    dataUrl: dataUrl,
+                    base64: dataUrl.split(',')[1] || ''
+                };
+                renderDiscussFileBadge(labelEl, '🖼️ ' + file.name);
             };
-            if (labelEl) {
-                labelEl.textContent = '📎 ' + file.name;
-                labelEl.style.display = 'inline';
+            reader.readAsDataURL(file);
+            return;
+        }
+
+        // 所有非图片文件统一走全格式解析接口（PDF/DOCX/OFD/PPTX/XLSX/STEP/STL/IGES/LaTeX/HTML/TXT 等）
+        if (labelEl) {
+            labelEl.textContent = '⏳ 正在解析 ' + file.name + '...';
+            labelEl.style.display = 'inline-flex';
+        }
+        try {
+            var fd = new FormData();
+            fd.append('file', file);
+            var resp = await fetch('/api/upload/extract', { method: 'POST', body: fd });
+            var data = await resp.json();
+            var extractedText = data && (data.text || data.content);
+            if (extractedText) {
+                window._oaDiscussPendingFile = {
+                    name: file.name,
+                    type: file.type || (data.file_type || ''),
+                    size: file.size,
+                    text: extractedText
+                };
+                renderDiscussFileBadge(labelEl, '📎 ' + file.name + ' (' + extractedText.length + '字)');
+            } else {
+                alert('文件解析失败: ' + ((data && data.error) || file.name));
+                removeDiscussFile();
             }
-        };
-        reader.readAsDataURL(file);
+        } catch (err) {
+            alert('文件上传失败: ' + err.message);
+            removeDiscussFile();
+        }
     }
 
     // 移除上传的文件

@@ -1142,16 +1142,46 @@ pub async fn api_upload_extract(
         }
     );
 
+    match extract_universal_text_from_bytes(&s, &file_name, &file_bytes).await {
+        Ok((text, ext)) => {
+            tracing::info!(
+                "[EXTRACT] result: file_type={}, text_len={}, preview={}",
+                ext,
+                text.len(),
+                text.chars().take(80).collect::<String>()
+            );
+            const MAX_EXTRACT_CHARS: usize = 50_000;
+            let total_chars = text.chars().count();
+            let truncated = total_chars > MAX_EXTRACT_CHARS;
+            Json(json!({
+                "text": truncate_for_ai(&text, MAX_EXTRACT_CHARS),
+                "file_type": ext,
+                "length": text.len(),
+                "char_length": total_chars,
+                "truncated": truncated
+            }))
+        }
+        Err(err_json) => Json(err_json),
+    }
+}
+
+/// 统一全格式解析入口（供 `/api/upload/extract` 与 `/api/ai/oa-discuss` 等内部复用）：
+/// 支持 PDF / DOCX / PPTX / XLSX / OFD / STEP / STL / IGES / HTML / XML / RTF / LaTeX / Markdown / TXT 及图片视觉识别。
+pub(crate) async fn extract_universal_text_from_bytes(
+    s: &AppState,
+    file_name: &str,
+    file_bytes: &[u8],
+) -> Result<(String, String), serde_json::Value> {
     let ext_from_name = file_name.rsplit('.').next().unwrap_or("").to_lowercase();
     // #97: filename may be missing or mangled for non-ASCII names.
     // Use content magic bytes to detect type when the extension is unreliable.
-    let ext = match detect_type_by_magic(&file_bytes) {
+    let ext = match detect_type_by_magic(file_bytes) {
         Some(magic_type) => magic_type.to_string(),
         None => ext_from_name,
     };
     if ext == "pdf" {
-        if let Err(err) = inspect_pdf_integrity(&file_bytes) {
-            return Json(err.to_json());
+        if let Err(err) = inspect_pdf_integrity(file_bytes) {
+            return Err(err.to_json());
         }
     }
     let is_image = matches!(
@@ -1165,12 +1195,12 @@ pub async fn api_upload_extract(
             .read()
             .unwrap_or_else(|e| e.into_inner())
             .ai_client();
-        match describe_image_with_fallback(&ai_client, &file_bytes, &ext).await {
+        match describe_image_with_fallback(&ai_client, file_bytes, &ext).await {
             Ok(desc) => desc,
-            Err(e) => return Json(StructuredUploadError::ocr_unavailable(e).to_json()),
+            Err(e) => return Err(StructuredUploadError::ocr_unavailable(e).to_json()),
         }
     } else if ext == "pdf" {
-        match extract_pdf_text(&file_bytes).await {
+        match extract_pdf_text(file_bytes).await {
             Ok(t) if t.trim().len() >= 100 => t,
             _ => {
                 // 文字提取失败，用 AI 视觉模型兜底
@@ -1179,120 +1209,112 @@ pub async fn api_upload_extract(
                     cfg.ai_base_url.contains("deepseek")
                 };
                 if is_deepseek {
-                    return Json(
-                        StructuredUploadError::ocr_unavailable(
-                            "本地 Umi-OCR/Tesseract 未命中，且当前 AI 为 DeepSeek 不支持图片识别",
-                        )
-                        .to_json(),
-                    );
+                    return Err(StructuredUploadError::ocr_unavailable(
+                        "本地 Umi-OCR/Tesseract 未命中，且当前 AI 为 DeepSeek 不支持图片识别",
+                    )
+                    .to_json());
                 }
                 let ai_client = s
                     .config
                     .read()
                     .unwrap_or_else(|e| e.into_inner())
                     .ai_client();
-                match extract_pdf_via_ai_vision(&file_bytes, &ai_client).await {
+                match extract_pdf_via_ai_vision(file_bytes, &ai_client).await {
                     Ok(t) => t,
                     Err(e) => {
-                        return Json(
-                            StructuredUploadError::ocr_unavailable(format!(
-                                "全部 OCR 与视觉兜底均失败: {e}"
-                            ))
-                            .to_json(),
-                        )
+                        return Err(StructuredUploadError::ocr_unavailable(format!(
+                            "全部 OCR 与视觉兜底均失败: {e}"
+                        ))
+                        .to_json());
                     }
                 }
             }
         }
     } else if ext == "docx" {
-        match extract_docx_text(&file_bytes) {
+        match extract_docx_text(file_bytes) {
             Ok(t) if !t.trim().is_empty() => t,
             Ok(_) => {
-                return Json(StructuredUploadError::file_corrupted("DOCX 无可提取文字").to_json())
+                return Err(StructuredUploadError::file_corrupted("DOCX 无可提取文字").to_json());
             }
             Err(e) => {
-                return Json(
+                return Err(
                     StructuredUploadError::file_corrupted(format!("DOCX 解析失败: {e}")).to_json(),
-                )
+                );
             }
         }
     } else if ext == "pptx" {
-        match extract_pptx_text(&file_bytes) {
+        match extract_pptx_text(file_bytes) {
             Ok(t) if !t.trim().is_empty() => t,
             Ok(_) => {
-                return Json(
+                return Err(
                     StructuredUploadError::file_corrupted("PPTX 无可提取的幻灯片文字").to_json(),
-                )
+                );
             }
             Err(e) => {
-                return Json(
+                return Err(
                     StructuredUploadError::file_corrupted(format!("PPTX 解析失败: {e}")).to_json(),
-                )
+                );
             }
         }
     } else if ext == "xlsx" {
-        match extract_xlsx_text(&file_bytes) {
+        match extract_xlsx_text(file_bytes) {
             Ok(t) if !t.trim().is_empty() => t,
             Ok(_) => {
-                return Json(
+                return Err(
                     StructuredUploadError::file_corrupted("XLSX 无可提取的表格内容").to_json(),
-                )
+                );
             }
             Err(e) => {
-                return Json(
+                return Err(
                     StructuredUploadError::file_corrupted(format!("XLSX 解析失败: {e}")).to_json(),
-                )
+                );
             }
         }
     } else if ext == "ofd" {
-        match extract_ofd_text(&file_bytes) {
+        match extract_ofd_text(file_bytes) {
             Ok(t) if !t.trim().is_empty() => t,
             Ok(_) => {
-                return Json(
-                    StructuredUploadError::file_corrupted(
-                        "OFD 无可提取文字（若为扫描件请另存 PDF 后上传）",
-                    )
-                    .to_json(),
+                return Err(StructuredUploadError::file_corrupted(
+                    "OFD 无可提取文字（若为扫描件请另存 PDF 后上传）",
                 )
+                .to_json());
             }
             Err(e) => {
-                return Json(
+                return Err(
                     StructuredUploadError::file_corrupted(format!("OFD 解析失败: {e}")).to_json(),
-                )
+                );
             }
         }
     } else if ext == "stl" {
-        match extract_stl_summary(&file_bytes) {
+        match extract_stl_summary(file_bytes) {
             Ok(t) if !t.trim().is_empty() => t,
             Ok(_) => {
-                return Json(
+                return Err(
                     StructuredUploadError::file_corrupted("STL 三维文件未提取到有效面片").to_json(),
-                )
+                );
             }
             Err(e) => {
-                return Json(
+                return Err(
                     StructuredUploadError::file_corrupted(format!("STL 解析失败: {e}")).to_json(),
-                )
+                );
             }
         }
-    } else if let Some(hint) = unsupported_proprietary_format_hint(&ext, &file_name) {
-        return Json(json!({
+    } else if let Some(hint) = unsupported_proprietary_format_hint(&ext, file_name) {
+        return Err(json!({
             "error": hint,
             "error_code": "ERR_UNSUPPORTED_FORMAT",
             "hint": hint
         }));
     } else {
-        let decoded = match String::from_utf8(file_bytes.clone()) {
+        let decoded = match String::from_utf8(file_bytes.to_vec()) {
             Ok(t) => t,
             Err(_) => {
-                let (t, _, had_errors) = encoding_rs::GBK.decode(&file_bytes);
+                let (t, _, had_errors) = encoding_rs::GBK.decode(file_bytes);
                 if had_errors {
-                    return Json(
-                        StructuredUploadError::file_corrupted(
-                            "无法识别文件类型，请上传 PDF、DOCX、PPTX、XLSX、OFD、TXT/MD/LaTeX/HTML 或图片文件",
-                        )
-                        .to_json(),
-                    );
+                    return Err(StructuredUploadError::file_corrupted(
+                        "无法识别文件类型，请上传 PDF、DOCX、PPTX、XLSX、OFD、STEP/STL/IGES、TXT/MD/LaTeX/HTML 或图片文件",
+                    )
+                    .to_json());
                 }
                 t.into_owned()
             }
@@ -1300,22 +1322,7 @@ pub async fn api_upload_extract(
         postprocess_text_by_ext(&ext, &decoded)
     };
 
-    tracing::info!(
-        "[EXTRACT] result: file_type={}, text_len={}, preview={}",
-        ext,
-        text.len(),
-        text.chars().take(80).collect::<String>()
-    );
-    const MAX_EXTRACT_CHARS: usize = 50_000;
-    let total_chars = text.chars().count();
-    let truncated = total_chars > MAX_EXTRACT_CHARS;
-    Json(json!({
-        "text": truncate_for_ai(&text, MAX_EXTRACT_CHARS),
-        "file_type": ext,
-        "length": text.len(),
-        "char_length": total_chars,
-        "truncated": truncated
-    }))
+    Ok((text, ext))
 }
 
 /// T2.5: POST /api/upload/extract/stream — 异步 SSE 文件提取与分页 OCR 进度流
@@ -4010,6 +4017,28 @@ mod umi_ocr_config_tests {
             stl_sum.contains("X = 100.00")
                 && stl_sum.contains("Y = 50.00")
                 && stl_sum.contains("Z = 25.00")
+        );
+    }
+
+    #[tokio::test]
+    async fn shared_universal_extractor_handles_step_and_caj_for_oa_discuss() {
+        let state = crate::common::init_app_state(":memory:").expect("init in-memory state");
+        let step_bytes = b"ISO-10303-21;\nHEADER;\nFILE_NAME('valve.stp','2026-11-24',('Eng'),('Lab'),'CAD','','');\nENDSEC;\nDATA;\n#10=SI_UNIT(.MILLI.,.METRE.);\n#20=PRODUCT('Valve','\\X2\\96004F53\\X0\\','',(#1));\n#60=CARTESIAN_POINT('',(0.0,0.0,0.0));\n#61=CARTESIAN_POINT('',(80.0,40.0,20.0));\nENDSEC;\nEND-ISO-10303-21;\n";
+        let (text, ext) = extract_universal_text_from_bytes(&state, "valve.stp", step_bytes)
+            .await
+            .expect("step extract should succeed");
+        assert_eq!(ext, "step");
+        assert!(
+            text.contains("阀体") && text.contains("X = 80.00 mm"),
+            "unexpected STEP summary: {text}"
+        );
+
+        let err_json = extract_universal_text_from_bytes(&state, "paper.caj", b"CAJ\x00dummy")
+            .await
+            .expect_err("caj should return conversion hint");
+        assert_eq!(
+            err_json.get("error_code").and_then(|v| v.as_str()),
+            Some("ERR_UNSUPPORTED_FORMAT")
         );
     }
 }
