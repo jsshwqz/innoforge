@@ -441,14 +441,21 @@ pub async fn api_search(
     }
 
     let search_type = parse_search_type(req.search_type.as_deref());
-    let (mut patents, total, detected_type) = match s.db.search_smart_exact(
+    let page = req.page.max(1);
+    let page_size = req.page_size.clamp(1, 100);
+    // 先取跨页窗口做全局按规范公开号去重，再做稳定分页切片，避免“每页 20 条去重后只剩 3 条 + 翻页总数漂移”
+    let fetch_window = page
+        .saturating_mul(page_size)
+        .saturating_mul(4)
+        .clamp(200, 600);
+    let (mut patents, raw_total, detected_type) = match s.db.search_smart_exact(
         &req.query,
         search_type.as_ref(),
         req.country.as_deref(),
         req.date_from.as_deref(),
         req.date_to.as_deref(),
-        req.page,
-        req.page_size,
+        1,
+        fetch_window,
         // MA4b：本地检索端点同享精确开关（false/缺省 = 旧 LIKE 行为逐字不变）
         req.exact_assignee,
     ) {
@@ -489,14 +496,29 @@ pub async fn api_search(
         });
     }
 
-    // Deduplication: remove patents with same base number (e.g. CN123456A vs CN123456B)
+    // Deduplication: remove patents with same base number (e.g. CN123456A vs CN123456B), keeping richest entry
     let pre_dedup_count = patents.len();
-    let mut seen_base_numbers = std::collections::HashSet::new();
-    patents.retain(|p| {
+    let mut deduped: Vec<crate::patent::PatentSummary> = Vec::with_capacity(patents.len());
+    let mut seen_idx: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for p in patents {
         let base = crate::patent::canonical_patent_key(&p.patent_number);
-        seen_base_numbers.insert(base)
-    });
-    let dedup_removed = pre_dedup_count - patents.len();
+        let key = if base.is_empty() { p.id.clone() } else { base };
+        if let Some(&idx) = seen_idx.get(&key) {
+            let existing = &deduped[idx];
+            let new_richness = p.abstract_text.len() + p.title.len();
+            let old_richness = existing.abstract_text.len() + existing.title.len();
+            let new_score = p.relevance_score.unwrap_or(0.0);
+            let old_score = existing.relevance_score.unwrap_or(0.0);
+            if new_richness > old_richness && new_score >= old_score - 5.0 {
+                deduped[idx] = p;
+            }
+        } else {
+            seen_idx.insert(key, deduped.len());
+            deduped.push(p);
+        }
+    }
+    let mut patents = deduped;
+    let dedup_removed = pre_dedup_count.saturating_sub(patents.len());
 
     if let Some(sort_by) = req.sort_by.as_deref() {
         match sort_by {
@@ -573,12 +595,20 @@ pub async fn api_search(
         SearchType::Mixed => "mixed",
     };
 
-    let final_total = if !ipc_filter.is_empty() || !cpc_filter.is_empty() {
-        patents.len()
-    } else if dedup_removed > 0 {
-        total.saturating_sub(dedup_removed)
+    let final_total =
+        if raw_total <= fetch_window || !ipc_filter.is_empty() || !cpc_filter.is_empty() {
+            patents.len()
+        } else {
+            raw_total.saturating_sub(dedup_removed).max(patents.len())
+        };
+
+    // 按去重排序后的稳定集合切片出当前页
+    let start = (page - 1).saturating_mul(page_size);
+    let mut patents = if start < patents.len() {
+        let end = start.saturating_add(page_size).min(patents.len());
+        patents[start..end].to_vec()
     } else {
-        total
+        Vec::new()
     };
 
     // # issue #72 — 响应可自证：标注本次实际查询的字段与策略
@@ -2093,3 +2123,63 @@ pub async fn api_export_xlsx(
 #[path = "search_tail.rs"]
 mod search_tail;
 use search_tail::item_matched_fields;
+
+#[cfg(test)]
+mod search_dedup_pagination_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn api_search_dedup_keeps_consistent_total_and_full_page_size() {
+        let state = crate::common::init_app_state(":memory:").expect("init app state");
+        // 插入 12 篇唯一专利，每篇带 2 条同号重复行（共 24 条），验证分页去重总数恒为 12 且第 1 页满 10 条
+        {
+            let c = state.db.conn();
+            for i in 1..=12 {
+                let pn = format!("CN998800{:02}A", i);
+                let title = format!("高效电机冷却定子方案 {}", i);
+                for dup in 0..2 {
+                    let id = format!("dup-{}-{}", i, dup);
+                    let abs = if dup == 0 {
+                        "短摘要"
+                    } else {
+                        "完整长摘要：采用定子螺旋冷却流道与端部喷淋协同降温，温升降低 25%"
+                    };
+                    c.execute(
+                        "INSERT INTO patents (id, patent_number, title, abstract_text, country) VALUES (?1, ?2, ?3, ?4, 'CN')",
+                        rusqlite::params![id, pn, title, abs],
+                    )
+                    .expect("insert dup");
+                }
+            }
+        }
+
+        let make_req = |page: usize| SearchRequest {
+            query: "电机 冷却".into(),
+            country: None,
+            date_from: None,
+            date_to: None,
+            search_type: None,
+            ipc: None,
+            cpc: None,
+            sort_by: None,
+            page,
+            page_size: 10,
+            assignee: None,
+            language: None,
+            region: None,
+            exact_assignee: false,
+        };
+
+        let r1 = api_search(State(state.clone()), Json(make_req(1))).await.0;
+        let r2 = api_search(State(state), Json(make_req(2))).await.0;
+
+        assert_eq!(r1.total, 12, "第 1 页去重后总数应恒为 12");
+        assert_eq!(r2.total, 12, "第 2 页去重后总数必须与第 1 页一致，禁止漂移");
+        assert_eq!(
+            r1.patents.len(),
+            10,
+            "第 1 页应补满 10 条不重复结果而非仅 5 条"
+        );
+        assert_eq!(r2.patents.len(), 2, "第 2 页应返回剩余 2 条不重复结果");
+    }
+}

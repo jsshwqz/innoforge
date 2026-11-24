@@ -898,36 +898,99 @@ pub async fn api_ai_analyze_results(
         Some(arr) => arr,
         None => return Json(json!({"error": "缺少查询词或专利数据"})),
     };
+    if let Err(breaker_msg) = s.db.check_ai_budget_circuit_breaker(None) {
+        return Json(json!({"error": breaker_msg}));
+    }
 
     let mut patent_list = String::new();
-    for (i, p) in patents.iter().enumerate().take(10) {
-        let title = p["title"].as_str().unwrap_or("");
-        let abstract_text = p["abstract_text"].as_str().unwrap_or("");
-        let applicant = p["applicant"].as_str().unwrap_or("");
-        let preview = truncate_for_ai(abstract_text, 100);
+    for (i, p) in patents.iter().enumerate().take(12) {
+        let id = p["id"].as_str().unwrap_or("");
+        let pn = p["patent_number"].as_str().unwrap_or("");
+        let db_rec = if !id.is_empty() {
+            s.db.get_patent(id).ok().flatten()
+        } else if !pn.is_empty() {
+            s.db.find_patent_by_number(pn).ok().flatten()
+        } else {
+            None
+        };
+        let title = db_rec
+            .as_ref()
+            .map(|r| r.title.as_str())
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| p["title"].as_str().unwrap_or(""));
+        let applicant = db_rec
+            .as_ref()
+            .map(|r| r.applicant.as_str())
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| p["applicant"].as_str().unwrap_or(""));
+        let ipc = db_rec
+            .as_ref()
+            .map(|r| r.ipc_codes.as_str())
+            .filter(|s| !s.trim().is_empty() && *s != "[]")
+            .unwrap_or("未标注");
+        let abstract_text = db_rec
+            .as_ref()
+            .map(|r| r.abstract_text.as_str())
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| p["abstract_text"].as_str().unwrap_or(""));
+        let claims_excerpt = db_rec
+            .as_ref()
+            .filter(|r| !r.claims.trim().is_empty())
+            .map(|r| truncate_for_ai(&r.claims, 600))
+            .unwrap_or_default();
+        let quant_note = db_rec
+            .as_ref()
+            .map(|r| {
+                let sig =
+                    crate::ai::patent::extract_whole_document_signals(&r.claims, &r.description);
+                if sig.quantitative_params.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        "\n   定量参数锚点：{}",
+                        sig.quantitative_params
+                            .iter()
+                            .take(3)
+                            .cloned()
+                            .collect::<Vec<_>>()
+                            .join("；")
+                    )
+                }
+            })
+            .unwrap_or_default();
+
+        let abs_preview = truncate_for_ai(abstract_text, 600);
         patent_list.push_str(&format!(
-            "{}. 标题：{}\n   申请人：{}\n   摘要：{}\n\n",
+            "{}. [{}] 标题：{}\n   申请人：{} | IPC：{}\n   摘要：{}{}{}\n\n",
             i + 1,
+            if pn.is_empty() { "本地记录" } else { pn },
             title,
             applicant,
-            preview
+            ipc,
+            abs_preview,
+            if claims_excerpt.is_empty() {
+                String::new()
+            } else {
+                format!("\n   核心权利要求节选：{}", claims_excerpt)
+            },
+            quant_note
         ));
     }
 
     let prompt = format!(
-        "你是一个专利分析专家和研发创新顾问。用户正在研究「{}」方向。\n\n\
-         以下是搜索到的相关专利列表：\n{}\n\n\
-         请完成以下分析（用JSON格式返回）：\n\n\
-         1. **语义相关性评分**：对每条专利给出0-100的语义相关性评分\n\
-         2. **技术趋势**：这些专利反映了什么技术发展趋势\n\
-         3. **技术空白**：哪些方向还没有被充分覆盖\n\
-         4. **创新建议**：针对用户的研究方向，给出2-3个具体的创新切入点\n\n\
-         请严格按以下JSON格式返回（不要包含其他文字）：\n\
+        "你是兼具首席总工程师与资深专利战略师视角的检索分析专家。用户正在深度调研「{}」方向。\n\n\
+         以下是检索命中的相关专利（已富化 IPC、全文摘要、权要节选与定量参数锚点）：\n<user_input>\n{}\n</user_input>\n\n\
+         请穿透文字表面完成深度技术态势与空白点发掘（严格只返回一个合法 JSON 对象，不要包含额外说明文字）：\n\
+         1. **scores**：对每条专利给出 0–100 的技术机理相关性评分与一句话硬核理由（点明核心技术手段差异）；\n\
+         2. **trend**：归纳这批专利揭示的技术演进路线、主流机理聚类及未来 3–5 年的演进趋势（附具体专利序号佐证）；\n\
+         3. **gaps**：发掘全行业共同忽略的共性技术瓶颈、参数死角或结构耦合空白点（严禁空泛套话）；\n\
+         4. **suggestions**：给出 3 条具体可落地、可布局高价值专利的研发切入点与规避方向。\n\n\
+         JSON 格式：\n\
          {{\n\
-           \"scores\": [{{\"index\": 1, \"score\": 85, \"reason\": \"简短原因\"}}, ...],\n\
-           \"trend\": \"技术趋势分析文字\",\n\
-           \"gaps\": \"技术空白分析文字\",\n\
-           \"suggestions\": [\"建议1\", \"建议2\", \"建议3\"]\n\
+           \"scores\": [{{\"index\": 1, \"score\": 85, \"reason\": \"机理相关性硬核理由\"}}, ...],\n\
+           \"trend\": \"技术路线演进与未来3-5年趋势分析\",\n\
+           \"gaps\": \"共性瓶颈与真实技术空白点\",\n\
+           \"suggestions\": [\"具体创新切入点1\", \"具体创新切入点2\", \"具体创新切入点3\"]\n\
          }}",
         query, patent_list
     );
@@ -936,19 +999,16 @@ pub async fn api_ai_analyze_results(
         .config
         .read()
         .unwrap_or_else(|e| e.into_inner())
-        .ai_client();
+        .ai_client_for_role(crate::ai::router::ModelRole::DeepReasoning);
     match ai.chat(&prompt, None).await {
         Ok(content) => {
             let _ = s.db.log_ai_call(&ai, "ai-analyze-results", None, None);
             let trimmed = content.trim();
-            let json_str = if let Some(start) = trimmed.find('{') {
-                if let Some(end) = trimmed.rfind('}') {
-                    &trimmed[start..=end]
-                } else {
-                    trimmed
+            let json_str = match (trimmed.find('{'), trimmed.rfind('}')) {
+                (Some(start), Some(end)) if start <= end => {
+                    trimmed.get(start..=end).unwrap_or(trimmed)
                 }
-            } else {
-                trimmed
+                _ => trimmed,
             };
 
             match serde_json::from_str::<serde_json::Value>(json_str) {
@@ -1019,18 +1079,40 @@ pub async fn api_ai_risk_assessment(
         return Json(json!({"error": "请选择 1-10 个专利进行评估"}));
     }
 
+    if let Err(breaker_msg) = s.db.check_ai_budget_circuit_breaker(None) {
+        return Json(json!({"error": breaker_msg}));
+    }
+
     let mut patents_info = String::new();
     let mut not_found: Vec<String> = Vec::new();
     for (i, id) in ids.iter().enumerate() {
         if let Ok(Some(p)) = s.db.get_patent(id) {
             let claims_preview = truncate_for_ai(&p.claims, 50_000);
+            let inactive = crate::ai::fto_scanner::is_patent_inactive(&p.legal_status);
+            let legal_precheck = if inactive {
+                format!(
+                    "{}（【法律状态预检：已失效/撤回/驳回 — 无法定侵权行权风险，仅供现有技术自由实施参考】）",
+                    p.legal_status
+                )
+            } else if p.legal_status.trim().is_empty() {
+                "未知（【需核实法律状态】）".to_string()
+            } else {
+                format!(
+                    "{}（有效/审查中，须按全面覆盖与等同原则严核）",
+                    p.legal_status
+                )
+            };
+            let signals =
+                crate::ai::patent::extract_whole_document_signals(&p.claims, &p.description);
             patents_info.push_str(&format!(
-                "### 专利 {} - {}\n专利号：{}\n申请人：{}\n摘要：{}\n权利要求：{}\n\n",
+                "### 专利 {} - {}\n专利号：{}\n申请人：{}\n法律状态：{}\n摘要：{}\n{}\n权利要求：{}\n\n",
                 i + 1,
                 p.title,
                 p.patent_number,
                 p.applicant,
+                legal_precheck,
                 p.abstract_text,
+                signals.format_prompt_block(),
                 claims_preview
             ));
         } else {
@@ -1169,6 +1251,9 @@ pub async fn api_ai_batch_summarize(
     if ids.is_empty() || ids.len() > 20 {
         return Json(json!({"error": "请选择 1-20 个专利"}));
     }
+    if let Err(breaker_msg) = s.db.check_ai_budget_circuit_breaker(None) {
+        return Json(json!({"error": breaker_msg}));
+    }
 
     let mut patents_data: Vec<(String, String, String)> = Vec::new();
     // Keep patent_number + title for response enrichment
@@ -1177,7 +1262,22 @@ pub async fn api_ai_batch_summarize(
     for id in &ids {
         if let Ok(Some(p)) = s.db.get_patent(id) {
             patent_meta.insert(p.id.clone(), (p.patent_number.clone(), p.title.clone()));
-            patents_data.push((p.id.clone(), p.title.clone(), p.abstract_text.clone()));
+            let signals =
+                crate::ai::patent::extract_whole_document_signals(&p.claims, &p.description);
+            let enriched = format!(
+                "专利号：{} | 法律状态：{}\n摘要：{}\n{}\n核心权利要求：{}\n说明书节选：{}",
+                p.patent_number,
+                if p.legal_status.trim().is_empty() {
+                    "未标注"
+                } else {
+                    p.legal_status.as_str()
+                },
+                p.abstract_text,
+                signals.format_prompt_block(),
+                truncate_for_ai(&p.claims, 1_500),
+                truncate_for_ai(&p.description, 1_200),
+            );
+            patents_data.push((p.id.clone(), p.title.clone(), enriched));
         }
     }
 

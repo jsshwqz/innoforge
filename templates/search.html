@@ -716,8 +716,9 @@ function renderResults(data, page, pageSize) {
     }
 
     // Batch action bar
-    html = `<div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;padding:8px 12px;background:#161b22;border-radius:6px;">
+    html = `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;padding:8px 12px;background:#161b22;border-radius:6px;">
         <label style="color:#8b949e;font-size:0.85em;cursor:pointer;"><input type="checkbox" onchange="toggleAllChecks(this.checked)" style="margin-right:4px;">全选</label>
+        <button onclick="analyzeSearchResults()" style="background:#238636;padding:4px 12px;font-size:0.85em;border-radius:4px;color:white;border:none;cursor:pointer;">🧠 AI 趋势与空白点分析</button>
         <button onclick="batchSummarize()" style="background:#1f6feb;padding:4px 12px;font-size:0.85em;border-radius:4px;color:white;border:none;cursor:pointer;">🤖 批量摘要</button>
         <button onclick="compareMatrix()" style="background:#8b5cf6;padding:4px 12px;font-size:0.85em;border-radius:4px;color:white;border:none;cursor:pointer;">📊 对比矩阵</button>
         <button onclick="toggleRiskModal()" style="background:#da3633;padding:4px 12px;font-size:0.85em;border-radius:4px;color:white;border:none;cursor:pointer;">⚠️ 侵权评估 <span style="font-size:10px;background:#da363344;border:1px solid #f85149;border-radius:3px;padding:1px 5px;margin-left:2px;vertical-align:middle;">Reasoner</span></button>
@@ -1310,6 +1311,92 @@ async function batchSummarize() {
         }
     } catch(e) {
         resultDiv.innerHTML = DOMPurify.sanitize('<p style="color:#f85149;">❌ 请求失败: ' + escapeHtml(e.message) + '</p>');
+    }
+}
+
+async function analyzeSearchResults() {
+    var resultDiv = document.getElementById('batch-result');
+    var query = (document.getElementById('search-input') && document.getElementById('search-input').value.trim()) || (currentRequest && currentRequest.query) || '';
+    var patents = (lastResponse && Array.isArray(lastResponse.patents)) ? lastResponse.patents.slice(0, 12) : [];
+    if (!query || !patents.length) {
+        alert('请先执行检索获取专利结果，再进行 AI 趋势与空白点分析');
+        return;
+    }
+    if (!resultDiv) return;
+    resultDiv.textContent = '⏳ 正在基于全文摘要、权利要求与定量参数锚点深度分析 ' + patents.length + ' 篇专利的技术趋势与研发空白点...';
+    resultDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    try {
+        var resp = await fetch('/api/search/analyze', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: query, patents: patents })
+        });
+        var data = await resp.json();
+        if (data.error) {
+            resultDiv.textContent = '❌ ' + data.error;
+            return;
+        }
+        var an = data.analysis || {};
+        resultDiv.textContent = '';
+        var card = document.createElement('div');
+        card.style.cssText = 'padding:16px 18px;background:#161b22;border:1px solid #30363d;border-left:3px solid #3fb950;border-radius:8px;line-height:1.7;';
+        var h3 = document.createElement('h3');
+        h3.style.cssText = 'margin:0 0 10px;color:#3fb950;';
+        h3.textContent = '🧠 AI 检索结果深度态势与研发空白点分析（' + query + '）';
+        card.appendChild(h3);
+
+        if (an.raw) {
+            var pre = document.createElement('div');
+            pre.style.whiteSpace = 'pre-wrap';
+            pre.textContent = an.raw;
+            card.appendChild(pre);
+        } else {
+            [
+                { title: '📈 技术演进趋势（含未来 3–5 年方向）', text: an.trend },
+                { title: '🎯 共性技术瓶颈与研发空白点', text: an.gaps }
+            ].forEach(function(sec) {
+                if (!sec.text) return;
+                var sh = document.createElement('h4');
+                sh.style.cssText = 'margin:10px 0 4px;color:#58a6ff;';
+                sh.textContent = sec.title;
+                var sp = document.createElement('p');
+                sp.style.cssText = 'margin:0 0 8px;color:#c9d1d9;white-space:pre-wrap;';
+                sp.textContent = sec.text;
+                card.appendChild(sh);
+                card.appendChild(sp);
+            });
+            if (Array.isArray(an.suggestions) && an.suggestions.length) {
+                var sugH = document.createElement('h4');
+                sugH.style.cssText = 'margin:10px 0 4px;color:#d2a8ff;';
+                sugH.textContent = '💡 高价值创新切入点与专利布局建议';
+                card.appendChild(sugH);
+                var ul = document.createElement('ul');
+                ul.style.cssText = 'margin:4px 0 8px 18px;color:#c9d1d9;';
+                an.suggestions.forEach(function(s) {
+                    var li = document.createElement('li');
+                    li.textContent = String(s || '');
+                    ul.appendChild(li);
+                });
+                card.appendChild(ul);
+            }
+            if (Array.isArray(an.scores) && an.scores.length) {
+                var scH = document.createElement('h4');
+                scH.style.cssText = 'margin:10px 0 4px;color:#79c0ff;';
+                scH.textContent = '📊 逐篇机理相关性硬核评分';
+                card.appendChild(scH);
+                an.scores.forEach(function(sc) {
+                    var idx = Number(sc.index || 0);
+                    var p = patents[idx - 1];
+                    var row = document.createElement('div');
+                    row.style.cssText = 'padding:5px 8px;margin-bottom:4px;background:#0d1117;border-radius:4px;font-size:0.88em;color:#c9d1d9;';
+                    row.textContent = '[' + idx + '] ' + (p ? ((p.patent_number || '') + ' ' + (p.title || '')) : '') + ' — ' + Number(sc.score || 0) + '分：' + String(sc.reason || '');
+                    card.appendChild(row);
+                });
+            }
+        }
+        resultDiv.appendChild(card);
+    } catch (e) {
+        resultDiv.textContent = '❌ 请求失败: ' + e.message;
     }
 }
 </script>
