@@ -535,6 +535,7 @@ pub fn build_router_with_token(
         .route("/api/search/export/xlsx", post(routes::api_export_xlsx))
         .route("/api/search/online", post(routes::api_search_online))
         .route("/api/search/source", post(routes::api_search_single_source))
+        .route("/api/search/omni", post(routes::api_search_omni))
         .route("/api/search/vector", post(routes::api_search_vector))
         .route("/api/search/analyze", post(routes::api_ai_analyze_results))
         // 专利 API / Patent API
