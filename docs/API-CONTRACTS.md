@@ -64,15 +64,15 @@
 | 32 | POST | `/api/patent/:id/extract-pdf-drawings` | `id` | — | — | JSON（§32） | `routes::api_extract_patent_pdf_drawings` | `src/routes/patent.rs:341` |
 | 33 | GET | `/api/patents/backfill-status` | — | — | — | JSON（§33） | `routes::api_patents_backfill_status` | `src/routes/patent.rs:390` |
 | 34 | POST | `/api/patents/backfill-index` | — | — | — | JSON（§34） | `routes::api_patents_backfill_index` | `src/routes/patent.rs:398` |
-| 35 | GET | `/api/patent/pdf/:id` | `id` | — | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_patent_pdf` | `src/routes/patent.rs:947` |
+| 35 | GET | `/api/patent/pdf/:id` | `id` | — | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_patent_pdf` | `src/routes/patent.rs:1185` |
 | 36 | POST | `/api/patent/pdf/extract-text` | — | — | — | JSON（§36） | `routes::api_patent_pdf_extract_text` | `src/routes/upload.rs:1725` |
-| 37 | GET | `/api/patent/image-proxy` | — | — | 任意键值对（§37） | HTTP 响应（动态，状态码/正文见源码） | `routes::api_patent_image_proxy` | `src/routes/patent.rs:1274` |
+| 37 | GET | `/api/patent/image-proxy` | — | — | 任意键值对（§37） | HTTP 响应（动态，状态码/正文见源码） | `routes::api_patent_image_proxy` | `src/routes/patent.rs:1512` |
 | 38 | GET | `/api/patent/lookup/:number` | `number` | — | 任意键值对（§38） | JSON（§38） | `routes::api_patent_lookup` | `src/routes/patent.rs:550` |
 | 39 | POST | `/api/patent/lookup-or-fetch` | — | 任意 JSON（§39） | — | JSON（§39） | `routes::api_patent_lookup_and_fetch` | `src/routes/patent.rs:721` |
 | 40 | POST | `/api/patent/resolve-chinese-titles` | — | `ResolveTitlesRequest` | — | JSON（§40） | `routes::api_resolve_chinese_titles` | `src/routes/patent.rs:631` |
-| 41 | GET | `/api/patent/similar/:id` | `id` | — | — | JSON（§41） | `routes::api_recommend_similar` | `src/routes/patent.rs:803` |
-| 42 | GET / POST / PATCH | `/api/patent/:id/legal-status` | `id` | `UpdateLegalStatusRequest` | — | JSON（§42） | `routes::api_patent_legal_status`<br>`routes::api_update_patent_legal_status`<br>`routes::api_update_patent_legal_status` | `src/routes/patent.rs:1395`<br>`src/routes/patent.rs:1481`<br>`src/routes/patent.rs:1481` |
-| 43 | GET | `/api/patent/:id/citation-graph` | `id` | — | — | JSON（§43） | `routes::api_patent_citation_graph` | `src/routes/patent.rs:1523` |
+| 41 | GET | `/api/patent/similar/:id` | `id` | — | — | JSON（§41） | `routes::api_recommend_similar` | `src/routes/patent.rs:984` |
+| 42 | GET / POST / PATCH | `/api/patent/:id/legal-status` | `id` | `UpdateLegalStatusRequest` | — | JSON（§42） | `routes::api_patent_legal_status`<br>`routes::api_update_patent_legal_status`<br>`routes::api_update_patent_legal_status` | `src/routes/patent.rs:1633`<br>`src/routes/patent.rs:1719`<br>`src/routes/patent.rs:1719` |
+| 43 | GET | `/api/patent/:id/citation-graph` | `id` | — | — | JSON（§43） | `routes::api_patent_citation_graph` | `src/routes/patent.rs:1761` |
 | 44 | POST | `/api/ai/chat` | — | `AiChatRequest` | — | JSON AiResponse | `routes::api_ai_chat` | `src/routes/ai.rs:440` |
 | 45 | POST | `/api/ai/chat/stream` | — | `AiChatRequest` | — | SSE 事件流（text/event-stream） | `routes::api_ai_chat_stream` | `src/routes/ai.rs:357` |
 | 46 | POST | `/api/ai/chat/conclusions` | — | 任意 JSON（§46） | — | JSON（§46） | `routes::api_ai_chat_conclusions` | `src/routes/ai.rs:626` |
@@ -415,7 +415,7 @@
 
 使用该类型的端点：`/api/search`
 
-### `UpdateLegalStatusRequest`（请求体；定义于 `src/routes/patent.rs:1476`）
+### `UpdateLegalStatusRequest`（请求体；定义于 `src/routes/patent.rs:1714`）
 
 | 字段（JSON 名） | 类型 | 可省略 |
 | --- | --- | --- |
@@ -706,7 +706,7 @@
 
 ### §37 GET `/api/patent/image-proxy`
 
-- 源码：`src/routes/patent.rs:1274`
+- 源码：`src/routes/patent.rs:1512`
 - 读取的查询键：`url`
 - 响应顶层键：未抽取到（动态构造或非 JSON 响应）
 
@@ -733,26 +733,26 @@
 
 ### §41 GET `/api/patent/similar/:id`
 
-- 源码：`src/routes/patent.rs:803`
-- 响应顶层键：`error`、`similar`
+- 源码：`src/routes/patent.rs:984`
+- 响应顶层键：`error`、`similar`、`source`
 
 ### §42 GET / POST / PATCH `/api/patent/:id/legal-status`
 
-- **GET** `routes::api_patent_legal_status`（`src/routes/patent.rs:1395`）
+- **GET** `routes::api_patent_legal_status`（`src/routes/patent.rs:1633`）
   - 响应顶层键：`message`、`result`、`status`
   - `status` 取值：error / ok
-- **POST** `routes::api_update_patent_legal_status`（`src/routes/patent.rs:1481`）
+- **POST** `routes::api_update_patent_legal_status`（`src/routes/patent.rs:1719`）
   - 请求体：`UpdateLegalStatusRequest`（字段见上文类型表）
   - 响应顶层键：`badge_color`、`legal_status`、`message`、`normalized_status`、`patent_id`、`status`
   - `status` 取值：error / ok
-- **PATCH** `routes::api_update_patent_legal_status`（`src/routes/patent.rs:1481`）
+- **PATCH** `routes::api_update_patent_legal_status`（`src/routes/patent.rs:1719`）
   - 请求体：`UpdateLegalStatusRequest`（字段见上文类型表）
   - 响应顶层键：`badge_color`、`legal_status`、`message`、`normalized_status`、`patent_id`、`status`
   - `status` 取值：error / ok
 
 ### §43 GET `/api/patent/:id/citation-graph`
 
-- 源码：`src/routes/patent.rs:1523`
+- 源码：`src/routes/patent.rs:1761`
 - 响应顶层键：`badge_color`、`cited_patents`、`citing_patents`、`country`、`edges`、`family_id`、`family_patents`、`from`、`id`、`label`、`legal_status`、`message`、`nodes`、`normalized_status`、`patent_number`、`relation`、`role`、`status`、`title`、`to`
 - `status` 取值：error / ok
 

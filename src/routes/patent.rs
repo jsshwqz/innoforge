@@ -800,6 +800,187 @@ pub async fn api_patent_lookup_and_fetch(
     }
 }
 
+fn normalize_patent_no_for_dedup(raw: &str) -> String {
+    raw.trim()
+        .to_uppercase()
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect()
+}
+
+fn extract_primary_ipc_subclass(ipc_codes: &str) -> Option<String> {
+    ipc_codes
+        .split([',', ';', '，', '；', '\n', ' '])
+        .map(|s| s.trim())
+        .find(|s| s.len() >= 4 && s.chars().next().is_some_and(|c| c.is_ascii_alphabetic()))
+        .map(|s| s.chars().take(4).collect::<String>().to_uppercase())
+}
+
+fn find_local_similar_patents(
+    db: &crate::db::Database,
+    patent: &Patent,
+    limit: usize,
+) -> Vec<serde_json::Value> {
+    let norm_self = normalize_patent_no_for_dedup(&patent.patent_number);
+    let query_words = crate::search::relevance::extract_query_words(&patent.title);
+    let lower_words: Vec<String> = query_words
+        .iter()
+        .map(|w| w.trim().to_lowercase())
+        .filter(|w| w.chars().count() >= 2)
+        .collect();
+    let ipc_prefix = extract_primary_ipc_subclass(&patent.ipc_codes);
+
+    struct LocalCand {
+        id: String,
+        patent_number: String,
+        title: String,
+        abstract_text: String,
+        applicant: String,
+        filing_date: String,
+        country: String,
+        ipc_codes: String,
+        score: f64,
+    }
+
+    let mut by_key: std::collections::HashMap<String, LocalCand> = std::collections::HashMap::new();
+
+    let mut consider = |id: String,
+                        patent_number: String,
+                        title: String,
+                        abstract_text: String,
+                        applicant: String,
+                        filing_date: String,
+                        country: String,
+                        ipc_codes: String,
+                        ipc_hit: bool| {
+        if id == patent.id {
+            return;
+        }
+        let norm_pn = normalize_patent_no_for_dedup(&patent_number);
+        if !norm_self.is_empty() && norm_pn == norm_self {
+            return;
+        }
+        let title_lower = title.to_lowercase();
+        let abs_lower = abstract_text.to_lowercase();
+        let mut score = 0.0_f64;
+        for w in &lower_words {
+            if title_lower.contains(w) {
+                score += 3.0;
+            } else if abs_lower.contains(w) {
+                score += 1.0;
+            }
+        }
+        if ipc_hit
+            || ipc_prefix
+                .as_deref()
+                .is_some_and(|pref| ipc_codes.to_uppercase().contains(pref))
+        {
+            score += 2.5;
+        }
+        if score <= 0.0 {
+            return;
+        }
+
+        let key = if norm_pn.is_empty() {
+            id.clone()
+        } else {
+            norm_pn
+        };
+        let replace = match by_key.get(&key) {
+            None => true,
+            Some(prev) => {
+                score > prev.score
+                    || ((score - prev.score).abs() < f64::EPSILON
+                        && !applicant.trim().is_empty()
+                        && prev.applicant.trim().is_empty())
+            }
+        };
+        if replace {
+            by_key.insert(
+                key,
+                LocalCand {
+                    id,
+                    patent_number,
+                    title,
+                    abstract_text,
+                    applicant,
+                    filing_date,
+                    country,
+                    ipc_codes,
+                    score,
+                },
+            );
+        }
+    };
+
+    if !patent.title.trim().is_empty() {
+        if let Ok((rows, _)) = db.search_like(&patent.title, None, None, None, 1, 25) {
+            for r in rows {
+                consider(
+                    r.id,
+                    r.patent_number,
+                    r.title,
+                    r.abstract_text,
+                    r.applicant,
+                    r.filing_date,
+                    r.country,
+                    String::new(),
+                    false,
+                );
+            }
+        }
+    }
+
+    if let Some(ref pref) = ipc_prefix {
+        if let Ok(rows) = db.search_by_ipc(pref) {
+            for v in rows {
+                let id = v["id"].as_str().unwrap_or("").to_string();
+                if id.is_empty() {
+                    continue;
+                }
+                consider(
+                    id,
+                    v["patent_number"].as_str().unwrap_or("").to_string(),
+                    v["title"].as_str().unwrap_or("").to_string(),
+                    v["abstract_text"].as_str().unwrap_or("").to_string(),
+                    v["applicant"].as_str().unwrap_or("").to_string(),
+                    v["filing_date"].as_str().unwrap_or("").to_string(),
+                    v["country"].as_str().unwrap_or("").to_string(),
+                    v["ipc_codes"].as_str().unwrap_or("").to_string(),
+                    true,
+                );
+            }
+        }
+    }
+
+    let mut ranked: Vec<LocalCand> = by_key.into_values().collect();
+    ranked.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| b.filing_date.cmp(&a.filing_date))
+            .then_with(|| a.patent_number.cmp(&b.patent_number))
+    });
+
+    ranked
+        .into_iter()
+        .take(limit)
+        .map(|c| {
+            json!({
+                "id": c.id,
+                "patent_number": c.patent_number,
+                "title": c.title,
+                "abstract_text": c.abstract_text,
+                "applicant": c.applicant,
+                "filing_date": c.filing_date,
+                "country": c.country,
+                "ipc_codes": c.ipc_codes,
+                "similarity_score": (c.score * 10.0).round() / 10.0,
+            })
+        })
+        .collect()
+}
+
 pub async fn api_recommend_similar(
     Path(id): Path<String>,
     State(s): State<AppState>,
@@ -809,8 +990,40 @@ pub async fn api_recommend_similar(
         _ => return Json(json!({"error": "专利不存在"})),
     };
 
-    let keywords: Vec<&str> = patent.title.split_whitespace().take(5).collect();
-    let query = keywords.join(" ");
+    // 1) 本地库优先：毫秒级召回同技术词 + 同 IPC 小类相似专利，彻底消除每次打开详情页 40~60s 阻塞与外网配额消耗
+    let mut similar = find_local_similar_patents(&s.db, &patent, 5);
+    if similar.len() >= 3 {
+        return Json(json!({ "similar": similar, "source": "local" }));
+    }
+
+    // 2) 本地库稀疏（< 3 条）时，有限时（≤ 10s）在线补全，并按 ID + 规范化公开号双重去重排除自身
+    let extracted = crate::search::relevance::extract_query_words(&patent.title);
+    let query = if !extracted.is_empty() {
+        extracted.into_iter().take(4).collect::<Vec<_>>().join(" ")
+    } else {
+        patent
+            .title
+            .split_whitespace()
+            .take(5)
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    if query.trim().is_empty() {
+        return Json(json!({ "similar": similar, "source": "local" }));
+    }
+
+    let norm_self = normalize_patent_no_for_dedup(&patent.patent_number);
+    let mut seen_keys: std::collections::HashSet<String> = similar
+        .iter()
+        .filter_map(|p| {
+            let pn = normalize_patent_no_for_dedup(p["patent_number"].as_str().unwrap_or(""));
+            if !pn.is_empty() {
+                Some(pn)
+            } else {
+                p["id"].as_str().map(|s| s.to_string())
+            }
+        })
+        .collect();
 
     let req = SearchRequest {
         query,
@@ -831,20 +1044,45 @@ pub async fn api_recommend_similar(
         exact_assignee: false,
     };
 
-    match super::api_search_online(State(s), Json(req)).await {
-        Json(result) => {
-            if let Some(patents) = result.get("patents").and_then(|p| p.as_array()) {
-                let filtered: Vec<_> = patents
-                    .iter()
-                    .filter(|p| p.get("id").and_then(|i| i.as_str()) != Some(&id))
-                    .take(5)
-                    .collect();
-                Json(json!({ "similar": filtered }))
-            } else {
-                Json(json!({"similar": []}))
+    let online_res = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        super::api_search_online(State(s), Json(req)),
+    )
+    .await;
+
+    let mut source = "local";
+    if let Ok(Json(result)) = online_res {
+        if let Some(patents) = result.get("patents").and_then(|p| p.as_array()) {
+            let before = similar.len();
+            for p in patents {
+                if similar.len() >= 5 {
+                    break;
+                }
+                let pid = p.get("id").and_then(|i| i.as_str()).unwrap_or("");
+                if pid == id || pid == patent.id {
+                    continue;
+                }
+                let pn = normalize_patent_no_for_dedup(
+                    p.get("patent_number")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(""),
+                );
+                if !norm_self.is_empty() && pn == norm_self {
+                    continue;
+                }
+                let key = if pn.is_empty() { pid.to_string() } else { pn };
+                if !key.is_empty() && !seen_keys.insert(key) {
+                    continue;
+                }
+                similar.push(p.clone());
+            }
+            if similar.len() > before {
+                source = if before > 0 { "hybrid" } else { "online" };
             }
         }
     }
+
+    Json(json!({ "similar": similar, "source": source }))
 }
 
 async fn fetch_patent(num: &str, source: &str) -> anyhow::Result<Patent> {
@@ -2364,5 +2602,91 @@ mod patent_image_proxy_tests {
             empty_resp.0["passed"], false,
             "0 个标号严禁返回 passed=true 误导用户"
         );
+    }
+
+    #[tokio::test]
+    async fn recommend_similar_uses_fast_local_matches_and_excludes_self_by_number() {
+        let state = crate::common::init_app_state(":memory:").expect("init app state");
+        let target = crate::patent::Patent {
+            id: "pat-sim-target".into(),
+            patent_number: "CN90001001B".into(),
+            title: "一种旋流煤粉低氮燃烧器及其稳燃喷口".into(),
+            abstract_text: "涉及锅炉煤粉旋流低氮燃烧技术。".into(),
+            ipc_codes: "F23D 1/00; F23C 7/00".into(),
+            applicant: "示例能源研究院".into(),
+            filing_date: "2023-05-01".into(),
+            ..Default::default()
+        };
+        // 同公开号不同 UUID 的重复记录（绝对不可推荐为"相似专利"）
+        let self_dup = crate::patent::Patent {
+            id: "pat-sim-self-dup".into(),
+            patent_number: "CN 90001001 B".into(),
+            title: "一种旋流煤粉低氮燃烧器及其稳燃喷口".into(),
+            ipc_codes: "F23D 1/00".into(),
+            ..Default::default()
+        };
+        let peers = [
+            (
+                "pat-sim-1",
+                "CN90001002A",
+                "双级旋流煤粉低氮燃烧器",
+                "F23D 1/02",
+            ),
+            (
+                "pat-sim-2",
+                "CN90001003A",
+                "中心给粉旋流稳燃煤粉喷嘴",
+                "F23D 1/00",
+            ),
+            (
+                "pat-sim-3",
+                "CN90001004B",
+                "锅炉低氮燃烧稳燃风道装置",
+                "F23D 14/00",
+            ),
+            (
+                "pat-sim-unrelated",
+                "CN90009999A",
+                "一种无线蓝牙耳机充电仓结构",
+                "H04R 1/10",
+            ),
+        ];
+        state.db.insert_patent(&target).expect("insert target");
+        state.db.insert_patent(&self_dup).expect("insert self dup");
+        for (id, pn, title, ipc) in peers {
+            state
+                .db
+                .insert_patent(&crate::patent::Patent {
+                    id: id.into(),
+                    patent_number: pn.into(),
+                    title: title.into(),
+                    ipc_codes: ipc.into(),
+                    applicant: "示例机械厂".into(),
+                    filing_date: "2022-08-01".into(),
+                    ..Default::default()
+                })
+                .expect("insert peer");
+        }
+
+        let started = std::time::Instant::now();
+        let resp = super::api_recommend_similar(
+            axum::extract::Path("pat-sim-target".to_string()),
+            axum::extract::State(state),
+        )
+        .await;
+        assert!(
+            started.elapsed().as_secs() < 2,
+            "本地充足相似专利应毫秒级返回，不得阻塞外网搜索"
+        );
+        assert_eq!(resp.0["source"], "local");
+        let arr = resp.0["similar"].as_array().expect("similar array");
+        assert_eq!(arr.len(), 3, "应命中 3 件同领域专利: {}", resp.0);
+        let pns: Vec<&str> = arr
+            .iter()
+            .filter_map(|v| v["patent_number"].as_str())
+            .collect();
+        assert!(!pns.contains(&"CN90001001B"));
+        assert!(!pns.contains(&"CN 90001001 B"));
+        assert!(!pns.contains(&"CN90009999A"));
     }
 }

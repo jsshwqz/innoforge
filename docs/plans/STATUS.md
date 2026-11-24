@@ -14,6 +14,13 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-11-24 — **相似专利推荐本地优先毫秒级提速、工程 BOM 硬件/工艺精准分流与首页全量双语（v0.9.73）**
+
+- **状态 / Status**: ✅ 完成编码、单测与本地全量检查，准备实时浏览器复测与发布
+- **① 相似专利推荐本地优先提速与双重去重**（`src/routes/patent.rs`）：`GET /api/patent/similar/:id` 改为本地中文分词 + IPC 小类毫秒级召回，彻底消除详情页每次加载 41–60s 外网阻塞与配额消耗，并按 `id` + 规范化公开号双重排除自身（附回归单测）。
+- **② 工程 BOM 硬件与机理/流程精准分流**（`src/pipeline/steps/deliverables.rs`）：区分真实机械/电控硬件与纯物理相关性/工艺步骤，杜绝物理公式与工艺箭头混入「外购标准件/执行器」「传感与控制件」及电控 IO 硬件清单（附反作弊单测）。
+- **③ 首页全量中英双语与跨版本静态资源 `ETag/no-cache` 防陈旧缓存**（`src/common.rs`、`static/i18n.js`、`templates/index.html`）：修复 `serve_static_embedded` `max-age=3600` 导致升级后 1 小时陈旧 `i18n.js` 缓存问题（改 `no-cache` + SHA-256 `ETag` + `304` + `?v={{version}}`），补齐 `home.*`/`sidebar.*` 全量双语词典并实时联动切换。
+
 ### 2026-11-24 — **专利详情页 P0 双空白页签、V-RAG 多列标号表根治、设置页热备校验与导出打磨（v0.9.72）**
 
 - **状态 / Status**: ✅ 基于对 `/patent/:id`、`/settings`、`/idea`、`/oa-response` 真实浏览器审查发现的 P0/P1/P2 问题全部闭环修复与复测
