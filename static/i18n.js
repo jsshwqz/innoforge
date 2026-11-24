@@ -71,6 +71,9 @@ const I18N_COMMON = {
     'nav.oar': 'OA答复',
     'nav.ai': 'AI 助手',
     'nav.settings': '设置',
+    'sidebar.brandSub': '创研台',
+    'sidebar.nav': '导航',
+    'sidebar.lang': '语言',
     // AI page
     'ai.title': 'AI 助手',
     'ai.hint': '可以问我技术相关的问题：可行性分析、方案比较、专利解读、技术路线等。',
@@ -693,7 +696,51 @@ const I18N_COMMON = {
     'oa.drift.transitionsTitle': '相邻轮次演化对比',
     'oa.drift.noAccepted': '暂未检出明确或隐含认可的特征',
     'oa.drift.noNewPriorArt': '暂未检出新增对比文件或新增驳回理由',
-    'oa.drift.noRedlines': '暂未检出前轮答复中的禁止反言约束'
+    'oa.drift.noRedlines': '暂未检出前轮答复中的禁止反言约束',
+    // Home page
+    'home.title': '创研台',
+    'home.subtitle': '从想法到落地 · 决策依据 · 执行方案 · 知识产权保护',
+    'home.step1': '描述想法',
+    'home.step2': 'AI 分析推演',
+    'home.step3': '全网技术调研',
+    'home.step4': '可行性报告',
+    'home.inputLabel': '描述你的技术想法或创新方案',
+    'home.inputPlaceholder': '例如：一种基于液态金属的手机散热方案，利用镓铟合金的高导热性，在手机内部形成微循环散热通道...\n\n支持粘贴文字，也可以拖入文件。越详细，AI 验证越准确。',
+    'home.uploadHint': '拖拽文件到此处，或点击上传（PDF / Word / 图片 / 文本）',
+    'home.sidebarMode': '推演模式',
+    'home.modeChat': 'AI 对话梳理',
+    'home.modeChatShort': '对话梳理',
+    'home.modeChatDesc': '先与 AI 讨论，梳理技术方案后再验证',
+    'home.modeChatHint': '先与 AI 对话，梳理技术方案、拆解创新点，确认后再推演',
+    'home.modeChatBtn': '开始对话',
+    'home.modeQuick': '快速推演',
+    'home.modeQuickDesc': '6 步快速验证可行性，约 30 秒',
+    'home.modeQuickHint': '跳过对话，直接运行 6 步快速推演（约 30 秒）',
+    'home.modeDeep': '深度推演',
+    'home.modeDeepDesc': '13 步全链路调研，约 2-5 分钟',
+    'home.modeDeepHint': '跳过对话，直接运行 13 步深度推演（约 2-5 分钟）',
+    'home.historyBtn': '历史项目',
+    'home.emptyHint': '⚠️ 请先输入您的技术想法、研究课题，或拖入参考文件后再启动。',
+    'home.expertSearcherTitle': '🔍 检索员',
+    'home.expertSearcherDesc': '专利+学术全库查全查准、IPC 锚定降噪与 CRAAP 互证',
+    'home.expertAnalystTitle': '🔬 技术分析师',
+    'home.expertAnalystDesc': '四元组拆解、6 维物理机理深度推演与仿真交付包',
+    'home.expertAttorneyTitle': '⚖️ 专利代理师',
+    'home.expertAttorneyDesc': '高质量防写窄撰写辅导、FTO 规避与 OA 审查答复',
+    'home.expertAcademicTitle': '🎓 学术论文助手',
+    'home.expertAcademicDesc': '真实 DOI 文献综述、实验设计与防破新颖性安全锁',
+    'home.recentTitle': '最近项目',
+    'home.quickFetchSummary': '快速导入技术文献（输入专利号或文献编号）',
+    'home.quickFetchPlaceholder': '输入专利号 (如 EP1234567, US10000000)',
+    'home.quickFetchBtn': '抓取',
+    'home.featIdeaTitle': '🧠 AI 推演验证',
+    'home.featIdeaDesc': '描述技术想法，AI 全链路分析：新颖性评分、证据链、特征卡片与可行性报告。',
+    'home.featSearchTitle': '🔍 专利检索调研',
+    'home.featSearchDesc': '在线搜索或本地库检索现有技术，按相关度排序，附统计分析与批量导出。',
+    'home.featCompareTitle': '⚖️ 对比与侵权评估',
+    'home.featCompareDesc': '本申请与对比文件逐项比对，三步法创造性分析，一键生成一审答复。',
+    'home.featOarTitle': '📝 OA 答复与复审',
+    'home.featOarDesc': '粘贴审查意见通知书，AI 全链路分析、多轮讨论推演，生成意见陈述书与证据表。'
   },
   en: {
     'cad.draw': 'FreeCAD Drawing',
@@ -766,6 +813,9 @@ const I18N_COMMON = {
     'nav.oar': 'OA Reply',
     'nav.ai': 'AI Assistant',
     'nav.settings': 'Settings',
+    'sidebar.brandSub': 'R&D Workbench',
+    'sidebar.nav': 'Navigation',
+    'sidebar.lang': 'Language',
     'ai.title': 'AI Assistant',
     'ai.hint': 'Ask me about technical topics: feasibility analysis, solution comparison, patent review, technology roadmaps, etc.',
     'ai.placeholder': 'Enter your question...',
@@ -1423,7 +1473,51 @@ const I18N_COMMON = {
     'oa.drift.transitionsTitle': 'Round-to-Round Transition Diff',
     'oa.drift.noAccepted': 'No explicitly or implicitly accepted features detected yet',
     'oa.drift.noNewPriorArt': 'No newly introduced prior art or rejection grounds detected',
-    'oa.drift.noRedlines': 'No prior-round estoppel constraints detected yet'
+    'oa.drift.noRedlines': 'No prior-round estoppel constraints detected yet',
+    // Home page
+    'home.title': 'InnoForge',
+    'home.subtitle': 'From Idea to Delivery · Grounded Evidence · Execution Plan · IP Protection',
+    'home.step1': 'Describe Idea',
+    'home.step2': 'AI Reasoning',
+    'home.step3': 'Prior Art Research',
+    'home.step4': 'Feasibility Report',
+    'home.inputLabel': 'Describe your technical idea or innovation proposal',
+    'home.inputPlaceholder': 'Example: A liquid-metal micro-loop thermal dissipation architecture for smartphones using Ga-In alloy...\n\nPaste text or drop reference files. More detail yields sharper verification.',
+    'home.uploadHint': 'Drag & drop files here, or click to upload (PDF / Word / Image / Text)',
+    'home.sidebarMode': 'Workflow Mode',
+    'home.modeChat': 'AI Co-Design',
+    'home.modeChatShort': 'AI Co-Design',
+    'home.modeChatDesc': 'Discuss with AI to refine technical features before verification',
+    'home.modeChatHint': 'Discuss with AI first to structure claims and innovation points before running verification',
+    'home.modeChatBtn': 'Start Discussion',
+    'home.modeQuick': 'Quick Verify',
+    'home.modeQuickDesc': '6-step rapid feasibility verification (~30s)',
+    'home.modeQuickHint': 'Skip chat and run the 6-step rapid feasibility pipeline (~30s)',
+    'home.modeDeep': 'Deep Research',
+    'home.modeDeepDesc': '13-step end-to-end R&D & prior-art pipeline (~2-5 min)',
+    'home.modeDeepHint': 'Skip chat and run the 13-step full R&D & prior-art pipeline (~2-5 min)',
+    'home.historyBtn': 'History',
+    'home.emptyHint': '⚠️ Please enter your technical idea/research topic or attach reference files before starting.',
+    'home.expertSearcherTitle': '🔍 Patent & Paper Searcher',
+    'home.expertSearcherDesc': 'Global patent + academic search, IPC noise filtering & CRAAP triangulation',
+    'home.expertAnalystTitle': '🔬 Technical Analyst',
+    'home.expertAnalystDesc': '4-tuple decomposition, 6D physics modeling & simulation deliverables',
+    'home.expertAttorneyTitle': '⚖️ Patent Attorney',
+    'home.expertAttorneyDesc': 'Anti-narrowing claim drafting, FTO workarounds & OA responses',
+    'home.expertAcademicTitle': '🎓 Academic Paper Assistant',
+    'home.expertAcademicDesc': 'Verified-DOI literature review, experiment design & novelty-lock guard',
+    'home.recentTitle': 'Recent Projects',
+    'home.quickFetchSummary': 'Quick Import Technical Document (Patent / Publication Number)',
+    'home.quickFetchPlaceholder': 'Enter patent number (e.g. EP1234567, US10000000)',
+    'home.quickFetchBtn': 'Fetch',
+    'home.featIdeaTitle': '🧠 AI Feasibility Pipeline',
+    'home.featIdeaDesc': 'Full-chain novelty scoring, evidence matrix, feature cards & engineering reports.',
+    'home.featSearchTitle': '🔍 Patent & Prior-Art Search',
+    'home.featSearchDesc': 'Online & local prior-art search with relevance ranking, stats & batch export.',
+    'home.featCompareTitle': '⚖️ Comparison & FTO Analysis',
+    'home.featCompareDesc': 'Feature-by-feature claim comparison, three-step inventiveness & FTO assessment.',
+    'home.featOarTitle': '📝 Office Action & Review',
+    'home.featOarDesc': 'Paste Office Action notices for structured rebuttal arguments, claim charts & DOCX export.'
   }
 };
 
@@ -1454,13 +1548,21 @@ function setI18nLang(lang) {
 function applyI18nCommon() {
   document.documentElement.lang = i18nLang === 'zh' ? 'zh-CN' : 'en';
   document.querySelectorAll('[data-i18n]').forEach(function(el) {
-    if (el.childElementCount === 0) { el.textContent = t(el.getAttribute("data-i18n")); }
+    if (el.childElementCount === 0) {
+      var key = el.getAttribute('data-i18n');
+      var translated = t(key);
+      if (translated !== key) { el.textContent = translated; }
+    }
   });
   document.querySelectorAll('[data-i18n-placeholder]').forEach(function(el) {
-    el.placeholder = t(el.getAttribute('data-i18n-placeholder'));
+    var key = el.getAttribute('data-i18n-placeholder');
+    var translated = t(key);
+    if (translated !== key) { el.placeholder = translated; }
   });
   document.querySelectorAll('[data-i18n-title]').forEach(function(el) {
-    el.title = t(el.getAttribute('data-i18n-title'));
+    var key = el.getAttribute('data-i18n-title');
+    var translated = t(key);
+    if (translated !== key) { el.title = translated; }
   });
   var sw = document.getElementById('lang-switch');
   if (sw) sw.value = i18nLang;
@@ -1503,11 +1605,11 @@ function renderSidebar(extraHtml) {
   var html = '<div class="sidebar-brand">'
     + '<div class="brand-mark">IF</div>'
     + '<div><div class="brand-name">InnoForge</div>'
-    + '<span class="brand-sub">创研台</span></div>'
+    + '<span class="brand-sub" data-i18n="sidebar.brandSub">' + t('sidebar.brandSub') + '</span></div>'
     + '</div>';
   // Navigation section
   html += '<div class="sidebar-section">';
-  html += '<div class="sidebar-label">' + (i18nLang === 'zh' ? '导航' : 'Navigation') + '</div>';
+  html += '<div class="sidebar-label" data-i18n="sidebar.nav">' + t('sidebar.nav') + '</div>';
   html += '<div class="sidebar-nav">';
   // patent_detail 页无独立导航项，映射到「搜索」保持激活态
   var activeId = (_activePage === 'detail') ? 'search' : _activePage;
@@ -1519,7 +1621,7 @@ function renderSidebar(extraHtml) {
   html += '</div></div>';
   // Language section
   html += '<div class="sidebar-section">';
-  html += '<div class="sidebar-label">' + (i18nLang === 'zh' ? '语言' : 'Language') + '</div>';
+  html += '<div class="sidebar-label" data-i18n="sidebar.lang">' + t('sidebar.lang') + '</div>';
   html += '<select onchange="setI18nLang(this.value)" id="lang-switch">';
   html += '<option value="zh"' + (i18nLang === 'zh' ? ' selected' : '') + '>中文</option>';
   html += '<option value="en"' + (i18nLang === 'en' ? ' selected' : '') + '>EN</option>';

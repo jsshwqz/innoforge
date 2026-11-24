@@ -4,6 +4,20 @@
 All notable changes are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
+## [v0.9.73] - 2026-11-24
+
+### 性能、工程精度与双语体验提升 / Performance, Precision & Bilingual Polish
+
+- **专利详情页相似专利推荐提速 3000×（`41–60s → <15ms`）与去重自排除修复（`src/routes/patent.rs`）**：
+  - 将 `GET /api/patent/similar/:id` 从「每次打开详情页无条件触发全源在线搜索 + LLM 编排（耗时 41–60s 且消耗外部配额）」重构为**本地库优先（Local-First）**：基于 `extract_query_words` 中文关键词分词 + IPC 四位小类命中双通道毫秒级召回并按相关度排序，本地命中 ≥ 3 件时即时返回（零外网耗时、离线可用）；仅本地稀疏时以 `10s` 硬超时做有限在线补全；
+  - 修复仅按 `id` 排重导致同公开号不同 UUID 的当前专利自我推荐的问题，改为 `id` + 规范化 `patent_number` 双重自排除与去重（附回归单测）。
+- **工程交付包 BOM 清单精准区分硬件件与物理机理/工艺流程（`src/pipeline/steps/deliverables.rs`）**：
+  - 修复 `build_bom_items` 将特征卡 `key_relations` 与 `process_steps` 盲目归类为「外购标准件/执行器」与「传感与控制件」的问题，引入确定性硬件执行与传感电控特征识别：纯物理相关性规律（如 `R90 细度与燃烧效率呈负相关`）归类为「工艺/机理约束（非硬件件）」，纯工艺流转步骤（如 `原煤入磨→研磨→喷燃`）归类为「工艺流程/软件策略（非硬件件）」，且不再污染电控 IO 规格表中的硬件执行单元清单（附反作弊单测）。
+- **首页 (`/`) 全量中英双语打通与跨版本静态资源防陈旧缓存根治（`src/common.rs`、`static/i18n.js`、`templates/index.html`）**：
+  - 修复 `serve_static_embedded` 硬编码 `Cache-Control: public, max-age=3600` 导致用户升级版本后 1 小时内浏览器继续命中旧版 `i18n.js`/`style.css` 缓存而出现原始 i18n 键名泄漏的 P0 隐患，全面切换为 `Cache-Control: no-cache` + 编译期 SHA-256 `ETag`（支持 `304 Not Modified`）并为首页静态脚本附带 `?v={{version}}` 强制破除旧版残留缓存（附单元测试）；
+  - 补齐 `home.*` 与 `sidebar.*` 完整中英字典及 `data-i18n` / `data-i18n-placeholder` 绑定，联动 `setMode()` 与 `_onI18nLangChange` 回调，切换侧边栏语言下拉框时首页主区、四位虚拟专家工作台、侧边栏标题（`创研台`/`导航`/`语言`）、推演模式与 2×2 功能卡片即时完整切换双语。
+
+---
 ## [v0.9.72] - 2026-11-24
 
 ### 修复与深度打磨 / Fixed & Polished

@@ -70,16 +70,43 @@ fn parse_cors_origin(origin: &str) -> Option<HeaderValue> {
 
 /// 统一的静态文件服务函数 / Unified static file serving function.
 /// 从编译进二进制的静态资源中读取并返回。
+/// 使用 `Cache-Control: no-cache` + 基于编译期 SHA-256 的 `ETag`（支持 `304 Not Modified`），
+/// 既保证本机零流量命中缓存，又彻底消除升级版本后浏览器在 `max-age` 窗口内加载旧版 `i18n.js`/`style.css` 导致界面错乱的缺陷。
 pub async fn serve_static_embedded(
+    headers: axum::http::HeaderMap,
     axum::extract::Path(path): axum::extract::Path<String>,
 ) -> Response<Body> {
     match StaticAssets::get(&path) {
         Some(content) => {
             let mime = mime_guess::from_path(&path).first_or_octet_stream();
+            let sha = content.metadata.sha256_hash();
+            let mut hex = String::with_capacity(sha.len() * 2);
+            for b in sha {
+                use std::fmt::Write;
+                let _ = write!(&mut hex, "{:02x}", b);
+            }
+            let etag = format!("\"{}\"", hex);
+
+            if headers
+                .get(axum::http::header::IF_NONE_MATCH)
+                .and_then(|v| v.to_str().ok())
+                .is_some_and(|v| v.trim() == etag)
+            {
+                if let Ok(resp) = Response::builder()
+                    .status(StatusCode::NOT_MODIFIED)
+                    .header("ETag", &etag)
+                    .header("Cache-Control", "no-cache")
+                    .body(Body::empty())
+                {
+                    return resp;
+                }
+            }
+
             match Response::builder()
                 .status(StatusCode::OK)
                 .header("Content-Type", mime.as_ref())
-                .header("Cache-Control", "public, max-age=3600")
+                .header("ETag", &etag)
+                .header("Cache-Control", "no-cache")
                 .body(Body::from(content.data.to_vec()))
             {
                 Ok(resp) => resp,
@@ -1142,4 +1169,51 @@ pub fn oauth_callback_url(listen_port: u16) -> String {
         }
     }
     format!("http://localhost:{listen_port}/api/auth/google/callback")
+}
+
+#[cfg(test)]
+mod static_asset_cache_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn serve_static_embedded_uses_etag_and_no_cache_preventing_upgrade_staleness() {
+        let resp = serve_static_embedded(
+            axum::http::HeaderMap::new(),
+            axum::extract::Path("i18n.js".to_string()),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers()
+                .get("Cache-Control")
+                .and_then(|v| v.to_str().ok()),
+            Some("no-cache"),
+            "静态资源必须使用 no-cache + ETag，避免升级后 1 小时陈旧缓存破坏页面"
+        );
+        let etag = resp
+            .headers()
+            .get("ETag")
+            .and_then(|v| v.to_str().ok())
+            .expect("ETag header present")
+            .to_string();
+        assert!(etag.starts_with('"') && etag.ends_with('"') && etag.len() > 16);
+
+        let mut match_headers = axum::http::HeaderMap::new();
+        match_headers.insert(
+            axum::http::header::IF_NONE_MATCH,
+            HeaderValue::from_str(&etag).expect("valid etag header"),
+        );
+        let resp_304 =
+            serve_static_embedded(match_headers, axum::extract::Path("i18n.js".to_string())).await;
+        assert_eq!(resp_304.status(), StatusCode::NOT_MODIFIED);
+
+        let mut stale_headers = axum::http::HeaderMap::new();
+        stale_headers.insert(
+            axum::http::header::IF_NONE_MATCH,
+            HeaderValue::from_static("\"stale-previous-version-hash\""),
+        );
+        let resp_fresh =
+            serve_static_embedded(stale_headers, axum::extract::Path("i18n.js".to_string())).await;
+        assert_eq!(resp_fresh.status(), StatusCode::OK);
+    }
 }

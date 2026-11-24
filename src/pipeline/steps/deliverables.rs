@@ -335,11 +335,17 @@ fn build_bom_items(ctx: &PipelineContext, feature_cards: &[FeatureCard]) -> Vec<
             }
 
             if !card.key_relations.trim().is_empty() {
+                let rel = card.key_relations.trim();
+                let (part_suffix, category) = if has_hardware_actuation_cue(rel) {
+                    ("传动/连接执行组件", "外购标准件/执行器")
+                } else {
+                    ("关键机理与参数约束", "工艺/机理约束（非硬件件）")
+                };
                 items.push(BomItem {
                     item_no: next_no,
-                    part_name: format!("{} - 传动/连接执行组件", feature_name),
-                    category: "外购标准件/执行器".to_string(),
-                    spec_summary: safe_truncate_chars(card.key_relations.trim(), 120).to_string(),
+                    part_name: format!("{} - {}", feature_name, part_suffix),
+                    category: category.to_string(),
+                    spec_summary: safe_truncate_chars(rel, 120).to_string(),
                     source_feature: feature_name.to_string(),
                 });
                 next_no += 1;
@@ -347,11 +353,17 @@ fn build_bom_items(ctx: &PipelineContext, feature_cards: &[FeatureCard]) -> Vec<
             }
 
             if !card.process_steps.trim().is_empty() {
+                let steps = card.process_steps.trim();
+                let (part_suffix, category) = if has_sensing_control_cue(steps) {
+                    ("传感与控制单元", "传感与控制件")
+                } else {
+                    ("核心工艺流程节点", "工艺流程/软件策略（非硬件件）")
+                };
                 items.push(BomItem {
                     item_no: next_no,
-                    part_name: format!("{} - 传感与控制单元", feature_name),
-                    category: "传感与控制件".to_string(),
-                    spec_summary: safe_truncate_chars(card.process_steps.trim(), 120).to_string(),
+                    part_name: format!("{} - {}", feature_name, part_suffix),
+                    category: category.to_string(),
+                    spec_summary: safe_truncate_chars(steps, 120).to_string(),
                     source_feature: feature_name.to_string(),
                 });
                 next_no += 1;
@@ -423,6 +435,87 @@ fn build_bom_items(ctx: &PipelineContext, feature_cards: &[FeatureCard]) -> Vec<
     }
 
     items
+}
+
+/// 判断特征卡 `key_relations` 是否描述真实机械/机电/流体硬件执行与连接件（而非纯物理公式/相关性规律）
+fn has_hardware_actuation_cue(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    const HARDWARE_CUES: &[&str] = &[
+        "电机",
+        "泵",
+        "阀",
+        "气缸",
+        "液压",
+        "轴承",
+        "齿轮",
+        "连杆",
+        "啮合",
+        "驱动",
+        "执行",
+        "发生器",
+        "联轴",
+        "导轨",
+        "丝杠",
+        "弹簧",
+        "传动",
+        "法兰",
+        "管路",
+        "管道",
+        "喷嘴",
+        "散热",
+        "翅片",
+        "壳体",
+        "腔体",
+        "电极",
+        "膜片",
+        "电路",
+        "电源",
+        "风扇",
+        "压缩机",
+        "actuator",
+        "motor",
+        "valve",
+        "gear",
+        "bearing",
+        "pump",
+        "shaft",
+    ];
+    HARDWARE_CUES.iter().any(|kw| lower.contains(kw))
+}
+
+/// 判断特征卡 `process_steps` 是否包含真实传感/采集/电控硬件环节（而非纯工艺流程或物理传质步骤）
+fn has_sensing_control_cue(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    const CONTROL_CUES: &[&str] = &[
+        "传感",
+        "编码器",
+        "检测",
+        "采样",
+        "控制",
+        "闭环",
+        "反馈",
+        "调节",
+        "驱动器",
+        "变频",
+        "继电器",
+        "开关",
+        "报警",
+        "触发",
+        "测温",
+        "测压",
+        "热电偶",
+        "红外",
+        "电控",
+        "plc",
+        "mcu",
+        "fpga",
+        "pid",
+        "sensor",
+        "encoder",
+        "control",
+        "feedback",
+    ];
+    CONTROL_CUES.iter().any(|kw| lower.contains(kw))
 }
 
 /// 判断关键词是否为有效的工程技术词汇（过滤 1 字碎片、纯数字/标点、口语虚词碎片如“录”“烧这”“录你”“话记”）
@@ -1786,6 +1879,42 @@ mod tests {
         assert_eq!(pack.bom_items.len(), 2);
         assert!(pack.control_io_spec_md.contains(MISSING_CALIBRATION_TAG));
         assert!(pack.bench_test_outline_md.contains(MISSING_CALIBRATION_TAG));
+    }
+
+    #[test]
+    fn bom_separates_physics_relations_and_workflow_steps_from_hardware_parts() {
+        let ctx = PipelineContext::new("idea-coal", "煤粉低氮稳燃工艺", "优化煤粉细度与燃烧效率");
+        let card = FeatureCard {
+            id: "fc-coal".to_string(),
+            idea_id: "idea-coal".to_string(),
+            title: "煤粉细度与燃烧耦合优化".to_string(),
+            description: "降低未燃尽碳损失并抑制 NOx 生成".to_string(),
+            novelty_score: Some(0.78),
+            created_at: "2026-11-24T00:00:00Z".to_string(),
+            technical_problem: "过粗煤粉燃尽差、过细能耗高".to_string(),
+            core_structure: "分级旋流煤粉浓缩室与浓淡分离挡板".to_string(),
+            key_relations: "煤粉细度R90与燃烧效率呈负相关，一次风速与火焰稳定性呈非线性耦合"
+                .to_string(),
+            process_steps: "原煤入磨→研磨至目标细度→风煤混合→浓淡分离→炉膛稳燃".to_string(),
+            application_scenarios: "燃煤电站锅炉".to_string(),
+        };
+
+        let pack = build_engineering_bom_pack(&ctx, &[card]);
+        assert_eq!(pack.bom_items.len(), 3);
+        assert_eq!(pack.bom_items[0].category, "自制结构件");
+        assert_eq!(
+            pack.bom_items[1].category, "工艺/机理约束（非硬件件）",
+            "纯物理相关性规律不得误标为外购标准件/执行器"
+        );
+        assert_eq!(
+            pack.bom_items[2].category, "工艺流程/软件策略（非硬件件）",
+            "纯工艺流转步骤不得误标为传感与控制件"
+        );
+        assert!(
+            pack.control_io_spec_md.contains("暂无显式电控特征"),
+            "非硬件工艺/机理条目不得污染电控 IO 单元列表: {}",
+            pack.control_io_spec_md
+        );
     }
 
     #[test]
