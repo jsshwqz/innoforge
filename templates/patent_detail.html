@@ -145,8 +145,13 @@
         <div class="section-box">
             <h3 data-i18n="detail.upload"></h3>
             <p class="muted" data-i18n="detail.uploadHint"></p>
-            <input type="file" id="upload-file" accept=".txt,.doc,.docx,.pdf,.png,.jpg,.jpeg,.gif,.bmp,.webp">
-            <button class="btn-primary" onclick="uploadCompare()" data-i18n="detail.uploadBtn"></button>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">
+                <input type="file" id="upload-file" multiple accept=".pdf,.docx,.pptx,.xlsx,.ofd,.step,.stp,.iges,.igs,.stl,.txt,.md,.csv,.tsv,.json,.yaml,.yml,.tex,.bib,.html,.htm,.xml,.rtf,.dxf,.png,.jpg,.jpeg,.gif,.bmp,.webp" onchange="onUploadCompareFilesSelected(event)">
+                <button type="button" class="btn-secondary" id="upload-clear-btn" onclick="clearUploadCompareFiles()" style="display:none;padding:6px 12px;font-size:13px;">清空已选</button>
+                <button class="btn-primary" id="upload-compare-btn" onclick="uploadCompare()" data-i18n="detail.uploadBtn"></button>
+            </div>
+            <div id="upload-compare-file-list" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;"></div>
+            <input type="text" id="upload-compare-focus" placeholder="自定义对比重点（可选）：例如对比期刊论文实测数据与本专利权要差异、评估新颖性/FTO 风险..." style="width:100%;padding:8px 10px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;font-size:13px;box-sizing:border-box;">
             <div id="upload-result" style="margin-top:16px;"></div>
         </div>
 
@@ -453,10 +458,12 @@
             userDiv.className = 'msg user';
             userDiv.textContent = patentChatHistory[i][1];
             box.appendChild(userDiv);
-            var aiDiv = document.createElement('div');
-            aiDiv.className = 'msg ai';
-            aiDiv.innerHTML = DOMPurify.sanitize(escapeHtml(patentChatHistory[i+1][1]).replace(/\n/g, '<br>'));
-            box.appendChild(aiDiv);
+            if (patentChatHistory[i + 1]) {
+                var aiDiv = document.createElement('div');
+                aiDiv.className = 'msg ai';
+                aiDiv.innerHTML = DOMPurify.sanitize(renderDeepAnalysisMarkdown(patentChatHistory[i + 1][1]));
+                box.appendChild(aiDiv);
+            }
         }
         patentCadController.renderHistory();
         box.scrollTop = box.scrollHeight;
@@ -655,17 +662,19 @@
             });
             if (!resp.ok) throw new Error('服务器错误 (' + resp.status + ')');
             const data = await resp.json();
-            if (data.error || !data.content) {
-                var errMsg = data.error || 'AI 无响应';
+            if (data.error || !data.content || String(data.content).indexOf('AI 调用失败:') === 0 || String(data.content).indexOf('AI 错误') === 0) {
+                var errMsg = data.error || data.content || 'AI 无响应';
                 if (errMsg.includes('unexpected end of file') || errMsg.includes('connection')) {
                     errMsg += '\n\n💡 可能原因：API Key 无效或网络不稳定。请到「设置」页检查 AI 配置。';
+                } else if (errMsg.includes('429') || errMsg.includes('频率限制') || errMsg.includes('配额')) {
+                    errMsg += '\n\n💡 说明：这是当前服务商 API 触发 HTTP 429 额度/频率限制（并非模型不支持图片）。可稍候点击重试，或前往「设置」页切换服务商/Key，返回本页时当前工作状态会自动保留。';
                 }
                 showPatentError(errMsg);
             } else {
                 var loadEl = document.getElementById('ai-loading');
                 var aiReplace = document.createElement('div');
                 aiReplace.className = 'msg ai';
-                aiReplace.innerHTML = DOMPurify.sanitize(escapeHtml(data.content).replace(/\n/g, '<br>'));
+                aiReplace.innerHTML = DOMPurify.sanitize(renderDeepAnalysisMarkdown(data.content));
                 loadEl.parentNode.replaceChild(aiReplace, loadEl);
                 patentChatHistory.push(["user", msg]);
                 patentChatHistory.push(["assistant", data.content]);
@@ -822,8 +831,8 @@
                 var div = document.createElement('div');
                 div.className = 'msg ai';
                 div.innerHTML = DOMPurify.sanitize(
-                    '<div style="font-size:0.8em;color:#58a6ff;margin-bottom:4px;font-weight:bold;">📝 ' + t('detail.exportConclusions') + '</div>' +
-                    '<div style="color:#c9d1d9;font-size:0.9em;line-height:1.6;">' + escapeHtml(data.conclusions).replace(/\n/g, '<br>') + '</div>'
+                    '<div style="font-size:0.85em;color:#58a6ff;margin-bottom:6px;font-weight:bold;">' + escapeHtml(t('detail.exportConclusions')) + '</div>' +
+                    '<div style="color:#c9d1d9;font-size:0.92em;line-height:1.7;">' + renderDeepAnalysisMarkdown(data.conclusions) + '</div>'
                 );
                 box.appendChild(div);
                 box.scrollTop = box.scrollHeight;
@@ -1149,19 +1158,92 @@
         }
     }
 
+    var uploadCompareFiles = [];
+
+    function renderUploadCompareFileList() {
+        var listEl = document.getElementById('upload-compare-file-list');
+        var clearBtn = document.getElementById('upload-clear-btn');
+        var runBtn = document.getElementById('upload-compare-btn');
+        if (!listEl) return;
+        if (!uploadCompareFiles.length) {
+            listEl.innerHTML = '';
+            if (clearBtn) clearBtn.style.display = 'none';
+            if (runBtn) runBtn.textContent = t('detail.uploadBtn');
+            return;
+        }
+        if (clearBtn) clearBtn.style.display = '';
+        if (runBtn) runBtn.textContent = t('detail.uploadBtn') + '（' + uploadCompareFiles.length + ' 份）';
+        var html = '';
+        uploadCompareFiles.forEach(function(f, idx) {
+            var sizeStr = f.size < 1024 ? (f.size + 'B') : (f.size < 1048576 ? ((f.size / 1024).toFixed(1) + 'KB') : ((f.size / 1048576).toFixed(1) + 'MB'));
+            var icon = /\.(png|jpg|jpeg|gif|bmp|webp)$/i.test(f.name) ? '🖼️' : /\.pdf$/i.test(f.name) ? '📑' : '📄';
+            html += '<span style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;background:#161b22;border:1px solid #30363d;border-radius:14px;font-size:12.5px;color:#c9d1d9;">'
+                + icon + ' ' + escapeHtml(f.name) + ' <span style="color:#8b949e;">(' + sizeStr + ')</span>'
+                + '<button type="button" data-rm-upload="' + idx + '" style="background:none;border:none;color:#f85149;cursor:pointer;padding:0 2px;font-size:14px;line-height:1;" title="移除">&times;</button>'
+                + '</span>';
+        });
+        listEl.innerHTML = DOMPurify.sanitize(html);
+        listEl.querySelectorAll('button[data-rm-upload]').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                removeUploadCompareFile(parseInt(btn.getAttribute('data-rm-upload'), 10));
+            });
+        });
+    }
+
+    function onUploadCompareFilesSelected(ev) {
+        var incoming = Array.from((ev && ev.target && ev.target.files) || []);
+        var uploadResultEl = document.getElementById('upload-result');
+        for (let i = 0; i < incoming.length; i++) {
+            var f = incoming[i];
+            if (uploadCompareFiles.length >= 5) {
+                if (uploadResultEl) {
+                    uploadResultEl.innerHTML = DOMPurify.sanitize('<p style="color:#d29922;margin:8px 0 0;">⚠️ 最多支持同时添加 5 份对比文献（已保留前 5 份）。</p>');
+                }
+                break;
+            }
+            var dup = uploadCompareFiles.some(function(ex) { return ex.name === f.name && ex.size === f.size; });
+            if (!dup) uploadCompareFiles.push(f);
+        }
+        renderUploadCompareFileList();
+    }
+
+    function removeUploadCompareFile(idx) {
+        uploadCompareFiles.splice(idx, 1);
+        renderUploadCompareFileList();
+    }
+
+    function clearUploadCompareFiles() {
+        uploadCompareFiles = [];
+        var inp = document.getElementById('upload-file');
+        if (inp) inp.value = '';
+        renderUploadCompareFileList();
+    }
+
     async function uploadCompare() {
         const fileInput = document.getElementById('upload-file');
-        const file = fileInput.files[0];
-        if (!file) { alert(t('detail.selectFile')); return; }
+        var filesToSend = uploadCompareFiles.slice();
+        if (!filesToSend.length && fileInput && fileInput.files && fileInput.files.length) {
+            filesToSend = Array.from(fileInput.files).slice(0, 5);
+        }
+        var uploadResultEl = document.getElementById('upload-result');
+        if (!filesToSend.length) {
+            if (uploadResultEl) {
+                uploadResultEl.innerHTML = DOMPurify.sanitize('<p style="color:#d29922;margin:8px 0 0;">⚠️ ' + escapeHtml(t('detail.selectFile')) + '</p>');
+            }
+            return;
+        }
         const patentId = window.location.pathname.split('/').pop();
         const formData = new FormData();
-        formData.append('file', file);
+        filesToSend.forEach(function(f) { formData.append('files', f); });
         formData.append('patent_id', patentId);
-        var uploadResultEl = document.getElementById('upload-result');
+        var focusInput = document.getElementById('upload-compare-focus');
+        if (focusInput && focusInput.value.trim()) {
+            formData.append('compare_focus', focusInput.value.trim());
+        }
         uploadResultEl.innerHTML = '';
         var analyzingP = document.createElement('p');
         analyzingP.style.color = '#58a6ff';
-        analyzingP.textContent = t('detail.uploadAnalyzing');
+        analyzingP.textContent = t('detail.uploadAnalyzing') + '（共 ' + filesToSend.length + ' 份对比文献）';
         uploadResultEl.appendChild(analyzingP);
         try {
             const res = await fetch('/api/upload/compare', { method: 'POST', body: formData });
@@ -1169,10 +1251,19 @@
             const data = await res.json();
             if (data.success) {
                 var resultDiv = document.createElement('div');
-                resultDiv.style.cssText = 'padding: 16px; background: #0d1117; border-radius: 6px; white-space: pre-wrap; line-height: 1.6;';
-                resultDiv.textContent = data.analysis;
+                resultDiv.className = 'ai-result-box';
+                resultDiv.style.cssText = 'padding: 16px 18px; background: #0d1117; border: 1px solid #30363d; border-radius: 8px; line-height: 1.7; max-height: 75vh; overflow-y: auto;';
+                var filesHeader = '';
+                if (Array.isArray(data.files) && data.files.length) {
+                    filesHeader = '<div style="margin-bottom:10px;padding:8px 10px;background:#161b22;border-radius:6px;font-size:12.5px;color:#8b949e;">📎 已对比文献（' + data.files.length + ' 份）：'
+                        + data.files.map(function(fm, idx) {
+                            return '<span style="color:#c9d1d9;margin-left:6px;">D' + (idx + 1) + ' ' + escapeHtml(fm.file_name || '') + ' [' + escapeHtml(fm.doc_kind || '') + ']</span>';
+                        }).join(' · ') + '</div>';
+                }
+                resultDiv.innerHTML = DOMPurify.sanitize(filesHeader + renderDeepAnalysisMarkdown(data.analysis || ''));
                 document.getElementById('upload-result').innerHTML = '';
                 document.getElementById('upload-result').appendChild(resultDiv);
+                if (typeof savePatentWorkspaceState === 'function') savePatentWorkspaceState();
             } else {
                 var errP2 = document.createElement('p');
                 errP2.style.color = '#f85149';
@@ -1803,9 +1894,75 @@
         }
     })();
 
+    // ── 页面状态自动保留（切换至设置/其它页面后再返回时自动恢复当前页签、AI 报告与草稿）──
+    var PATENT_WS_KEY = 'innoforge_ws_patent_' + (window.location.pathname.split('/').pop() || 'default');
+    function getActivePatentTabName() {
+        var active = document.querySelector('.tab-content.active');
+        return active && active.id ? active.id.replace(/^tab-/, '') : 'abstract';
+    }
+    function savePatentWorkspaceState() {
+        try {
+            var aiSummary = document.getElementById('ai-summary');
+            var claimsRes = document.getElementById('claims-analysis-result');
+            var uploadRes = document.getElementById('upload-result');
+            var focusInp = document.getElementById('upload-compare-focus');
+            var chatInp = document.getElementById('chat-msg');
+            var payload = {
+                tab: getActivePatentTabName(),
+                aiSummaryHtml: (aiSummary && aiSummary.style.display !== 'none' && aiSummary.innerHTML.trim() && aiSummary.textContent.indexOf('正在全文档深度挖掘') < 0) ? aiSummary.innerHTML : '',
+                claimsHtml: (claimsRes && claimsRes.style.display !== 'none' && claimsRes.innerHTML.trim() && claimsRes.textContent.indexOf('正在分析') < 0) ? claimsRes.innerHTML : '',
+                uploadHtml: (uploadRes && uploadRes.querySelector('.ai-result-box')) ? uploadRes.innerHTML : '',
+                uploadFocus: focusInp ? focusInp.value : '',
+                chatDraft: chatInp ? chatInp.value : '',
+                scrollY: window.scrollY || 0,
+                savedAt: Date.now()
+            };
+            sessionStorage.setItem(PATENT_WS_KEY, JSON.stringify(payload));
+        } catch (e) {}
+    }
+    function restorePatentWorkspaceState() {
+        try {
+            var raw = sessionStorage.getItem(PATENT_WS_KEY);
+            if (!raw) return;
+            var st = JSON.parse(raw);
+            if (!st || typeof st !== 'object') return;
+            if (st.tab && st.tab !== 'abstract') {
+                showTab(st.tab);
+            }
+            var aiSummary = document.getElementById('ai-summary');
+            if (aiSummary && st.aiSummaryHtml) {
+                aiSummary.innerHTML = DOMPurify.sanitize(st.aiSummaryHtml);
+                aiSummary.style.display = 'block';
+            }
+            var claimsRes = document.getElementById('claims-analysis-result');
+            if (claimsRes && st.claimsHtml) {
+                claimsRes.innerHTML = DOMPurify.sanitize(st.claimsHtml);
+                claimsRes.style.display = 'block';
+            }
+            var uploadRes = document.getElementById('upload-result');
+            if (uploadRes && st.uploadHtml) {
+                uploadRes.innerHTML = DOMPurify.sanitize(st.uploadHtml);
+            }
+            var focusInp = document.getElementById('upload-compare-focus');
+            if (focusInp && st.uploadFocus) focusInp.value = st.uploadFocus;
+            var chatInp = document.getElementById('chat-msg');
+            if (chatInp && st.chatDraft) chatInp.value = st.chatDraft;
+            if (typeof st.scrollY === 'number' && st.scrollY > 0) {
+                setTimeout(function() { window.scrollTo(0, st.scrollY); }, 80);
+            }
+        } catch (e) {}
+    }
+    window.addEventListener('pagehide', savePatentWorkspaceState);
+    window.addEventListener('beforeunload', savePatentWorkspaceState);
+    var _focusEl = document.getElementById('upload-compare-focus');
+    if (_focusEl) _focusEl.addEventListener('input', savePatentWorkspaceState);
+    var _chatEl = document.getElementById('chat-msg');
+    if (_chatEl) _chatEl.addEventListener('input', savePatentWorkspaceState);
+
     loadCollectState();
     loadTags();
     loadPatentNumeralIndex();
+    restorePatentWorkspaceState();
     </script>
 
     <!-- OA Round creation modal (issue #15, replaces native prompt) -->

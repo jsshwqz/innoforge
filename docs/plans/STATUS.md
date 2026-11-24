@@ -14,6 +14,15 @@
 
 ## 状态变更日志 (Status Change Log)
 
+### 2026-11-24 — **上传文档对比深度引擎化、多专利对比均衡上下文与全站残留 Markdown 渲染收口（v0.9.74）**
+
+- **状态 / Status**: ✅ 完成编码、单测、本地检查与实时浏览器复测，准备提交 PR 合并发布
+- **① 自定义多文件跨体裁对比（专利 + 期刊论文 + 图纸）**（`src/routes/upload.rs`、`templates/patent_detail.html`、`static/i18n.js`）：支持 1–5 份多文件混合对比与自定义重点诉求，自动识别期刊/学术论文并开启论文实验/DOI × 专利新颖性交叉评估（附单测）。
+- **② 跨页返回完整状态保留（含 `/compare` 上传对比文件）与 `/search` 本地上传入库闭环**（`src/routes/upload.rs`、`src/common.rs`、`templates/compare.html`、`templates/search.html`、`templates/settings.html`、`templates/patent_detail.html`、`templates/ai.html`）：完整持久化 `/compare` `uploadedData` 上传/粘贴文件；新增 `POST /api/upload/ingest-local` 自动识别专利/期刊论文/技术文档收入本地 FTS5+向量库，并提供一键衔接搜相似、对比、推演与 AI 助手（附单测）。
+- **③ 修复图片讨论故障转移未改写 `body.model` 导致连环 429 Bug**（`src/ai/client.rs`、`templates/patent_detail.html`）：`try_provider_with_body` 强制覆写备用通道模型名、跳过非视觉备用模型并精准区分 429 配额超限与模型不支持看图（附单测），前端错误回复不再污染聊天记录。
+- **② 多专利矩阵均衡预算与预挖**（`src/routes/ai.rs`）：`api_ai_compare_matrix` 按篇数均分结构化摘要预算并注入法律状态与全文预挖信号，杜绝长专利挤占后序专利上下文。
+- **③ 全站残留 `<br>` Markdown 渲染清零**（`templates/search.html`、`templates/patent_detail.html`、`templates/compare.html`）：搜索页对比矩阵/FTO 弹窗/批量摘要/趋势分析、专利详情页 AI 问答/结论与对比页讨论统一接入 Markdown + 表格渲染与 `DOMPurify.sanitize`。
+
 ### 2026-11-24 — **相似专利推荐本地优先毫秒级提速、工程 BOM 硬件/工艺精准分流与首页全量双语（v0.9.73）**
 
 - **状态 / Status**: ✅ 完成编码、单测与本地全量检查，准备实时浏览器复测与发布

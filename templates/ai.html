@@ -31,7 +31,7 @@
             <div class="chat-box" id="chat-messages" style="position:relative;min-height:360px;max-height:calc(100vh - 300px);"></div>
             <button class="scroll-bottom-btn" id="scroll-bottom-btn" onclick="scrollChatToBottom()">↓</button>
             <div class="chat-input">
-                <input type="file" id="chat-file-input" accept="image/*,.pdf,.txt,.md,.docx,.csv,.json" multiple style="display:none" onchange="handleChatFiles(event)">
+                <input type="file" id="chat-file-input" accept="image/*,.pdf,.docx,.pptx,.xlsx,.ofd,.step,.stp,.iges,.igs,.stl,.txt,.md,.csv,.tsv,.json,.yaml,.yml,.tex,.bib,.html,.htm,.xml,.rtf,.dxf" multiple style="display:none" onchange="handleChatFiles(event)">
                 <button type="button" class="btn-secondary" onclick="document.getElementById('chat-file-input').click()" title="上传图片或文件（PDF / DOCX / TXT / 图片）" style="padding:8px 12px;flex-shrink:0;">📎</button>
                 <div class="chat-input-wrap">
                     <textarea id="chat-msg" rows="1" data-i18n-placeholder="ai.placeholder"></textarea>
@@ -479,6 +479,41 @@
         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
     });
     var aiInputHistory = initChatHistory('chat-msg');
+
+    // ── 页面状态自动保留（切换至设置/其它页面后再返回时保留当前角色、联网开关与未发送草稿）──
+    const AI_WS_KEY = 'innoforge_ws_ai_v1';
+    function saveAiWorkspaceState() {
+        try {
+            var roleSel = document.getElementById('role-select');
+            var webCb = document.getElementById('web-search-cb');
+            var msgEl = document.getElementById('chat-msg');
+            sessionStorage.setItem(AI_WS_KEY, JSON.stringify({
+                role: roleSel ? roleSel.value : '',
+                webSearch: !!(webCb && webCb.checked),
+                draft: msgEl ? msgEl.value : '',
+                savedAt: Date.now()
+            }));
+        } catch (e) {}
+    }
+    (function restoreAiWorkspaceState() {
+        try {
+            var raw = sessionStorage.getItem(AI_WS_KEY);
+            if (!raw) return;
+            var st = JSON.parse(raw);
+            if (!st || typeof st !== 'object') return;
+            var urlRole = new URLSearchParams(window.location.search).get('role');
+            var roleSel = document.getElementById('role-select');
+            if (roleSel && !urlRole && st.role) roleSel.value = st.role;
+            var webCb = document.getElementById('web-search-cb');
+            if (webCb && typeof st.webSearch === 'boolean') webCb.checked = st.webSearch;
+            var msgEl = document.getElementById('chat-msg');
+            if (msgEl && st.draft && !msgEl.value) msgEl.value = st.draft;
+        } catch (e) {}
+    })();
+    window.addEventListener('pagehide', saveAiWorkspaceState);
+    window.addEventListener('beforeunload', saveAiWorkspaceState);
+    var _aiMsgEl = document.getElementById('chat-msg');
+    if (_aiMsgEl) _aiMsgEl.addEventListener('input', saveAiWorkspaceState);
 
     // ── 图片与文件附件支持 ──
     var pastedImages = [];

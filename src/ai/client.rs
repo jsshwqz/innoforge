@@ -1001,35 +1001,120 @@ impl AiClient {
         }
     }
 
-    async fn send_json_body_inner(&self, body: serde_json::Value) -> Result<String> {
-        let mut last_err = anyhow::anyhow!("All providers failed");
-        let mut failed_chain: Vec<String> = Vec::new();
-        // Try primary
-        match self.try_provider_with_body(&self.primary, &body).await {
-            Ok(content) => return Ok(content),
-            Err(e) => {
-                failed_chain.push(format!("{}: {}", self.primary.name, e));
-                if self.fallbacks.is_empty() {
-                    return Err(e);
-                }
-                tracing::warn!("[{}] failed: {}, trying fallbacks...", self.primary.name, e);
-                last_err = e;
+    /// 检查原始 JSON 请求体是否包含多模态图片分片（`type == "image_url"`）
+    pub(super) fn body_has_image_parts(body: &serde_json::Value) -> bool {
+        body.get("messages")
+            .and_then(|m| m.as_array())
+            .is_some_and(|msgs| {
+                msgs.iter().any(|msg| {
+                    msg.get("content")
+                        .and_then(|c| c.as_array())
+                        .is_some_and(|parts| {
+                            parts.iter().any(|p| {
+                                p.get("type").and_then(|t| t.as_str()) == Some("image_url")
+                            })
+                        })
+                })
+            })
+    }
+
+    /// 构造发送给指定 provider 的 JSON 请求体：强制将 `model` 覆写为当前 provider 规范化模型名，
+    /// 彻底杜绝多模态故障转移时把主模型名透传给备用通道导致连环 429/404 的缺陷。
+    pub(super) fn prepare_provider_json_body(
+        provider: &AiProvider,
+        body: &serde_json::Value,
+    ) -> serde_json::Value {
+        let mut req_body = body.clone();
+        if let Some(obj) = req_body.as_object_mut() {
+            let normalized_model =
+                normalize_model_for_provider(&provider.base_url, &provider.model);
+            if !normalized_model.is_empty() {
+                obj.insert(
+                    "model".to_string(),
+                    serde_json::Value::String(normalized_model),
+                );
             }
         }
-        for fallback in &self.fallbacks {
-            match self.try_provider_with_body(fallback, &body).await {
+        req_body
+    }
+
+    async fn send_json_body_inner(&self, body: serde_json::Value) -> Result<String> {
+        let has_images = Self::body_has_image_parts(&body);
+        let mut last_err = anyhow::anyhow!("All providers failed");
+        let mut failed_chain: Vec<String> = Vec::new();
+        let mut tried_vision_provider = false;
+
+        // Try primary
+        if has_images && !Self::supports_vision(&self.primary) {
+            tracing::warn!(
+                "[{}] skipped for image payload: model '{}' does not support vision",
+                self.primary.name,
+                self.primary.model
+            );
+            failed_chain.push(format!(
+                "{}({}): 不支持多模态看图",
+                self.primary.name, self.primary.model
+            ));
+        } else {
+            tried_vision_provider = true;
+            match self.try_provider_with_body(&self.primary, &body).await {
                 Ok(content) => return Ok(content),
                 Err(e) => {
-                    failed_chain.push(format!("{}: {}", fallback.name, e));
+                    failed_chain.push(format!(
+                        "{}({}): {}",
+                        self.primary.name, self.primary.model, e
+                    ));
+                    if self.fallbacks.is_empty() {
+                        return Err(e);
+                    }
+                    tracing::warn!("[{}] failed: {}, trying fallbacks...", self.primary.name, e);
                     last_err = e;
                 }
             }
+        }
+
+        for fallback in &self.fallbacks {
+            if has_images && !Self::supports_vision(fallback) {
+                tracing::info!(
+                    "[failover] skipping non-vision fallback {} ({})",
+                    fallback.name,
+                    fallback.model
+                );
+                failed_chain.push(format!(
+                    "{}({}): 不支持多模态看图（已跳过）",
+                    fallback.name, fallback.model
+                ));
+                continue;
+            }
+            tried_vision_provider = true;
+            tracing::info!(
+                "[failover] trying {} (model={})...",
+                fallback.name,
+                fallback.model
+            );
+            match self.try_provider_with_body(fallback, &body).await {
+                Ok(content) => {
+                    tracing::info!("[failover] {} succeeded", fallback.name);
+                    return Ok(content);
+                }
+                Err(e) => {
+                    failed_chain.push(format!("{}({}): {}", fallback.name, fallback.model, e));
+                    last_err = e;
+                }
+            }
+        }
+
+        if has_images && !tried_vision_provider {
+            return Err(anyhow::anyhow!(
+                "当前已配置的模型均不支持多模态看图（{}）。请前往「设置」切换支持视觉的模型（如 Gemini / GPT-4o / Qwen-VL / SenseNova）后再上传图片。",
+                failed_chain.join(" | ")
+            ));
         }
         if failed_chain.is_empty() {
             Err(last_err)
         } else {
             Err(anyhow::anyhow!(
-                "AI 多通道均失败（{}）。请检查对应服务商 Key/额度/网络状态。",
+                "AI 多通道均失败（{}）。如遇 HTTP 429 配额/频率超限，可稍候重试或在「设置」页更换服务商/Key。",
                 failed_chain.join(" | ")
             ))
         }
@@ -1041,6 +1126,7 @@ impl AiClient {
         provider: &AiProvider,
         body: &serde_json::Value,
     ) -> Result<String> {
+        let req_body = Self::prepare_provider_json_body(provider, body);
         let max_retries = PROVIDER_MAX_RETRIES;
         let mut last_err = None;
         for attempt in 0..max_retries {
@@ -1054,7 +1140,7 @@ impl AiClient {
                     provider.base_url.trim_end_matches('/')
                 ))
                 .header("Authorization", format!("Bearer {}", provider.api_key))
-                .json(body)
+                .json(&req_body)
                 .send()
                 .await
             {
@@ -1072,6 +1158,12 @@ impl AiClient {
                             provider.name,
                             safe_truncate(&raw_text, 100)
                         );
+                        let is_quota = raw_text.to_ascii_lowercase().contains("quota");
+                        let err_msg = if is_quota {
+                            "HTTP 429 配额已超限（非模型不支持图片）"
+                        } else {
+                            "HTTP 429 请求频率超限，请稍后再试"
+                        };
                         if attempt < max_retries - 1 {
                             let delay = retry_after.map(Duration::from_secs).unwrap_or_else(|| {
                                 Duration::from_secs(2u64.pow(attempt as u32 + 1))
@@ -1082,10 +1174,10 @@ impl AiClient {
                                 delay.as_secs()
                             );
                             tokio::time::sleep(delay).await;
-                            last_err = Some(anyhow::anyhow!("AI 频率限制，请稍后再试"));
+                            last_err = Some(anyhow::anyhow!("{err_msg}"));
                             continue;
                         }
-                        return Err(anyhow::anyhow!("AI 频率限制，请稍后再试"));
+                        return Err(anyhow::anyhow!("{err_msg}"));
                     }
                     if status.as_u16() == 401 || status.as_u16() == 403 {
                         let raw_text = resp.text().await.unwrap_or_default();
@@ -1116,15 +1208,27 @@ impl AiClient {
                             *w = Some(usage);
                         });
                     }
-                    if crate::error::error_kind(status.as_u16()).should_retry()
-                        && attempt < max_retries - 1
-                    {
-                        last_err = Some(anyhow::anyhow!("Server error {}", status));
-                        continue;
+                    if crate::error::error_kind(status.as_u16()).should_retry() {
+                        if attempt < max_retries - 1 {
+                            last_err = Some(anyhow::anyhow!("Server error {}", status));
+                            continue;
+                        }
+                        return Err(anyhow::anyhow!(
+                            "HTTP {} {}",
+                            status.as_u16(),
+                            if content.is_empty() {
+                                "上游服务繁忙"
+                            } else {
+                                content.as_str()
+                            }
+                        ));
                     }
-                    if content.starts_with("AI 错误") && attempt < max_retries - 1 {
-                        last_err = Some(anyhow::anyhow!("{}", content));
-                        continue;
+                    if content.starts_with("AI 错误") {
+                        if attempt < max_retries - 1 {
+                            last_err = Some(anyhow::anyhow!("{}", content));
+                            continue;
+                        }
+                        return Err(anyhow::anyhow!("{}", content));
                     }
                     return Ok(content);
                 }
@@ -1534,5 +1638,48 @@ mod tests {
             ),
             "models/custom-model"
         );
+    }
+
+    #[test]
+    fn send_json_body_rewrites_model_on_failover_and_detects_vision_payload() {
+        let img_body = serde_json::json!({
+            "model": "gemini-3.8-flash",
+            "messages": [
+                {"role": "system", "content": "sys"},
+                {"role": "user", "content": [
+                    {"type": "text", "text": "分析这张专利附图"},
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}
+                ]}
+            ]
+        });
+        assert!(AiClient::body_has_image_parts(&img_body));
+
+        let text_body = serde_json::json!({
+            "model": "gemini-3.8-flash",
+            "messages": [{"role": "user", "content": "hello"}]
+        });
+        assert!(!AiClient::body_has_image_parts(&text_body));
+
+        let fallback = super::AiProvider {
+            name: "gemini-flash-lite-latest".into(),
+            base_url: "https://generativelanguage.googleapis.com/v1beta/openai".into(),
+            api_key: "k".into(),
+            model: "models/gemini-flash-lite-latest".into(),
+        };
+        let rewritten = AiClient::prepare_provider_json_body(&fallback, &img_body);
+        assert_eq!(
+            rewritten["model"].as_str(),
+            Some("gemini-flash-lite-latest"),
+            "多模态故障转移必须把 body.model 覆写为备用通道模型名，禁止继续请求已限额主模型"
+        );
+        assert!(AiClient::supports_vision(&fallback));
+
+        let non_vision = super::AiProvider {
+            name: "deepseek".into(),
+            base_url: "https://api.deepseek.com/v1".into(),
+            api_key: "k".into(),
+            model: "deepseek-chat".into(),
+        };
+        assert!(!AiClient::supports_vision(&non_vision));
     }
 }

@@ -62,6 +62,7 @@
             <button class="btn-primary" id="btn-compare" onclick="doCompare()">通用对比</button>
             <button class="btn-inventive" id="btn-inventive" onclick="doInventiveness()">创造性分析（三步法） <span class="reasoner-badge" style="background:rgba(219,109,40,0.25);border-color:#db6d28;">Reasoner</span></button>
             <button class="btn-danger" id="btn-oa" onclick="doOfficeAction()">一审答复分析 <span class="reasoner-badge" style="background:rgba(248,81,73,0.25);border-color:var(--red);">Reasoner</span></button>
+            <button class="btn-add" type="button" onclick="clearCompareWorkspace()" style="margin-top:0;margin-left:auto;border-color:#484f58;color:#8b949e;" title="清空当前所有对比文件与结果，重新开始">🗑️ 清空对比</button>
         </div>
 
         <div id="result"></div>
@@ -158,7 +159,7 @@
     function triggerFileSelect(callback) {
         var input = document.createElement('input');
         input.type = 'file';
-        input.accept = '.pdf,.docx,.txt';
+        input.accept = '.pdf,.docx,.pptx,.xlsx,.ofd,.step,.stp,.iges,.igs,.stl,.txt,.md,.csv,.tsv,.json,.yaml,.yml,.tex,.bib,.html,.htm,.xml,.rtf,.dxf,.png,.jpg,.jpeg,.webp,.bmp,.gif';
         input.onchange = function() {
             if (input.files.length > 0) callback(input.files[0]);
         };
@@ -191,6 +192,7 @@
                 tagEl.innerHTML = '<span class="file-tag">📄 ' + escapeHtml(result.title)
                     + ' (' + result.content.length + '字)'
                     + '<span class="tag-remove" onclick="clearMyUpload()">&times;</span></span>' + previewBtn;
+                saveCompareWorkspaceState();
             } catch(e) {
                 tagEl.innerHTML = DOMPurify.sanitize('<span style="color:#f85149; font-size:12px;">' + escapeHtml(e.message) + '</span>');
             }
@@ -202,6 +204,7 @@
         delete uploadedFileObjects['my'];
         document.getElementById('my-patent').disabled = false;
         document.getElementById('my-file-tag').innerHTML = '';
+        saveCompareWorkspaceState();
     }
 
     // ── Reference upload ──
@@ -229,6 +232,7 @@
                 existing.innerHTML = '<span class="file-tag" style="margin-left:8px;">📄 ' + escapeHtml(result.title)
                     + ' (' + result.content.length + '字)'
                     + '<span class="tag-remove" onclick="clearRefUpload(\'' + idx + '\')">&times;</span></span>' + previewBtn;
+                saveCompareWorkspaceState();
             } catch(e) {
                 existing.innerHTML = DOMPurify.sanitize('<span style="color:#f85149; font-size:12px; margin-left:8px;">' + escapeHtml(e.message) + '</span>');
             }
@@ -247,6 +251,7 @@
         }
         var tagContainer = document.querySelector('[data-for="' + idx + '"]');
         if (tagContainer) tagContainer.remove();
+        saveCompareWorkspaceState();
     }
 
     // ── Ref row management ──
@@ -371,6 +376,7 @@
             }
         }
         closePasteModal();
+        saveCompareWorkspaceState();
     }
 
     // Close modal on overlay click
@@ -393,6 +399,7 @@
                 tagEl.innerHTML = '<span class="file-tag" style="border-color:#f85149; color:#f85149;">📄 ' + escapeHtml(result.title)
                     + ' (' + result.content.length + '字)'
                     + '<span class="tag-remove" onclick="clearOA()">&times;</span></span>' + previewBtn;
+                saveCompareWorkspaceState();
             } catch(e) {
                 tagEl.innerHTML = DOMPurify.sanitize('<span style="color:#f85149; font-size:12px;">' + escapeHtml(e.message) + '</span>');
             }
@@ -1026,7 +1033,9 @@
         var container = document.getElementById('discussion-messages');
         var div = document.createElement('div');
         div.className = 'msg msg-' + role;
-        var bubbleContent = escapeHtml(content).replace(/\n/g, '<br>');
+        var bubbleContent = role === 'ai'
+            ? renderCompareMarkdown(content)
+            : escapeHtml(content).replace(/\n/g, '<br>');
         div.innerHTML = DOMPurify.sanitize('<div class="msg-bubble">' + bubbleContent + '</div>');
         container.appendChild(div);
         container.scrollTop = container.scrollHeight;
@@ -1074,10 +1083,12 @@
                 var container = document.getElementById('discussion-messages');
                 var div = document.createElement('div');
                 div.className = 'msg msg-ai';
-                div.innerHTML = '<div class="msg-bubble" style="border-left:3px solid #6e7681;">' +
-                    '<div style="font-size:0.8em;color:#58a6ff;margin-bottom:4px;font-weight:bold;">📝 ' + t('compare.exportConclusions') + '</div>' +
-                    '<div style="color:#c9d1d9;font-size:0.9em;line-height:1.6;">' + escapeHtml(data.conclusions).replace(/\n/g, '<br>') + '</div>' +
-                    '</div>';
+                div.innerHTML = DOMPurify.sanitize(
+                    '<div class="msg-bubble" style="border-left:3px solid #6e7681;">' +
+                    '<div style="font-size:0.85em;color:#58a6ff;margin-bottom:6px;font-weight:bold;">' + escapeHtml(t('compare.exportConclusions')) + '</div>' +
+                    '<div style="color:#c9d1d9;font-size:0.92em;line-height:1.7;">' + renderCompareMarkdown(data.conclusions) + '</div>' +
+                    '</div>'
+                );
                 container.appendChild(div);
                 container.scrollTop = container.scrollHeight;
             } else {
@@ -1089,6 +1100,222 @@
         btn.textContent = t('compare.exportConclusions');
         btn.disabled = false;
     }
+
+    // ── 页面状态自动保留（切换至设置/其它页面后再返回时完整保留上传/粘贴的对比文件、报告与讨论）──
+    const COMPARE_WS_KEY = 'innoforge_ws_compare_v1';
+    function serializeUploadedDataForSession() {
+        var out = {};
+        var totalChars = 0;
+        var MAX_TOTAL = 2200000;
+        Object.keys(uploadedData || {}).forEach(function(k) {
+            var item = uploadedData[k];
+            if (!item || typeof item.content !== 'string') return;
+            var remaining = MAX_TOTAL - totalChars;
+            if (remaining <= 0) return;
+            var content = item.content.length > remaining ? item.content.slice(0, remaining) : item.content;
+            totalChars += content.length;
+            out[k] = { title: String(item.title || '对比文献'), content: content };
+        });
+        return out;
+    }
+    function renderRestoredUploadTag(key, item) {
+        if (!item) return;
+        if (key === 'my') {
+            var myInp = document.getElementById('my-patent');
+            if (myInp) { myInp.value = ''; myInp.disabled = true; }
+            var myTag = document.getElementById('my-file-tag');
+            if (myTag) {
+                myTag.innerHTML = DOMPurify.sanitize(
+                    '<span class="file-tag">📄 ' + escapeHtml(item.title) + ' (' + item.content.length + '字)'
+                    + '<span class="tag-remove" data-clear="my">&times;</span></span>'
+                );
+                var rmMy = myTag.querySelector('.tag-remove');
+                if (rmMy) rmMy.addEventListener('click', function() { clearMyUpload(); });
+            }
+        } else if (key === 'oa') {
+            var oaTag = document.getElementById('oa-file-tag');
+            if (oaTag) {
+                oaTag.innerHTML = DOMPurify.sanitize(
+                    '<span class="file-tag" style="border-color:#f85149; color:#f85149;">📄 ' + escapeHtml(item.title) + ' (' + item.content.length + '字)'
+                    + '<span class="tag-remove" data-clear="oa">&times;</span></span>'
+                );
+                var rmOa = oaTag.querySelector('.tag-remove');
+                if (rmOa) rmOa.addEventListener('click', function() { clearOA(); });
+            }
+        } else if (key.indexOf('ref_') === 0) {
+            var idx = key.slice(4);
+            var rows = document.querySelectorAll('.ref-row');
+            for (let i = 0; i < rows.length; i++) {
+                if (rows[i].getAttribute('data-idx') === idx) {
+                    var inp = rows[i].querySelector('.ref-input');
+                    if (inp) { inp.value = ''; inp.disabled = true; }
+                    var existing = document.querySelector('[data-for="' + idx + '"]');
+                    if (!existing) {
+                        existing = document.createElement('div');
+                        existing.className = 'file-tag-container';
+                        existing.setAttribute('data-for', idx);
+                        rows[i].parentElement.insertBefore(existing, rows[i].nextSibling);
+                    }
+                    existing.innerHTML = DOMPurify.sanitize(
+                        '<span class="file-tag" style="margin-left:8px;">📄 ' + escapeHtml(item.title) + ' (' + item.content.length + '字)'
+                        + '<span class="tag-remove" data-clear-ref="' + escapeHtml(idx) + '">&times;</span></span>'
+                    );
+                    var rmRef = existing.querySelector('.tag-remove');
+                    if (rmRef) rmRef.addEventListener('click', (function(refIdx) { return function() { clearRefUpload(refIdx); }; })(idx));
+                    break;
+                }
+            }
+        }
+    }
+    function saveCompareWorkspaceState() {
+        try {
+            var myInp = document.getElementById('my-patent');
+            var refRows = Array.from(document.querySelectorAll('.ref-row')).map(function(row) {
+                var inp = row.querySelector('.ref-input');
+                return {
+                    idx: row.getAttribute('data-idx') || '0',
+                    value: inp ? (inp.value || '') : ''
+                };
+            });
+            var resEl = document.getElementById('result');
+            var discInp = document.getElementById('discussion-input');
+            var state = {
+                urlSearch: window.location.search || '',
+                myPatent: myInp ? myInp.value : '',
+                refIdxCounter: typeof refIdxCounter === 'number' ? refIdxCounter : 0,
+                refRows: refRows,
+                uploadedData: serializeUploadedDataForSession(),
+                resultHtml: (resEl && resEl.innerHTML.trim() && resEl.textContent.indexOf('⏳') < 0 && resEl.textContent.indexOf('正在') < 0) ? resEl.innerHTML : '',
+                lastAnalysisRawText: typeof lastAnalysisRawText === 'string' ? lastAnalysisRawText : '',
+                discussionDraft: discInp ? discInp.value : '',
+                discussionHistory: Array.isArray(discussionHistory) ? discussionHistory : [],
+                savedAt: Date.now()
+            };
+            sessionStorage.setItem(COMPARE_WS_KEY, JSON.stringify(state));
+        } catch (e) {}
+    }
+    function clearCompareWorkspace() {
+        try { sessionStorage.removeItem(COMPARE_WS_KEY); } catch (e) {}
+        uploadedData = {};
+        uploadedFileObjects = {};
+        discussionHistory = [];
+        lastAnalysisRawText = '';
+        var myInp = document.getElementById('my-patent');
+        if (myInp) { myInp.value = ''; myInp.disabled = false; }
+        var myTag = document.getElementById('my-file-tag');
+        if (myTag) myTag.innerHTML = '';
+        var oaTag = document.getElementById('oa-file-tag');
+        if (oaTag) oaTag.innerHTML = '';
+        var list = document.getElementById('ref-list');
+        if (list) {
+            list.innerHTML = '<div class="ref-row" data-idx="0">'
+                + '<input type="text" class="cmp-input ref-input" placeholder="对比文件 1 — 专利号或 ID">'
+                + '<button class="btn-upload" onclick="uploadRef(this)">📎 上传</button>'
+                + '<button class="btn-paste" onclick="pasteRef(this)">📋 粘贴</button>'
+                + '<button class="btn-remove" onclick="removeRef(this)" title="移除">&times;</button>'
+                + '</div>';
+            refIdxCounter = 0;
+            updateRefCounter();
+        }
+        var resEl = document.getElementById('result');
+        if (resEl) resEl.innerHTML = '';
+        var panel = document.getElementById('discussion-panel');
+        if (panel) panel.classList.add('hidden');
+        var msgBox = document.getElementById('discussion-messages');
+        if (msgBox) msgBox.innerHTML = '';
+        var hintEl = document.getElementById('auto-ref-hint');
+        if (hintEl) hintEl.textContent = '';
+    }
+    function restoreCompareWorkspaceState() {
+        try {
+            var raw = sessionStorage.getItem(COMPARE_WS_KEY);
+            if (!raw) return;
+            var st = JSON.parse(raw);
+            if (!st || typeof st !== 'object') return;
+            var urlParams = new URLSearchParams(window.location.search);
+            var urlTarget = urlParams.get('patent') || urlParams.get('my') || '';
+            var savedUrlParams = new URLSearchParams(st.urlSearch || '');
+            var savedUrlTarget = savedUrlParams.get('patent') || savedUrlParams.get('my') || '';
+            // 仅当显式从其它专利点入一个全新 ?patent=B 时跳过旧的「我的专利」恢复，否则完整恢复
+            var isDifferentUrlPatent = Boolean(urlTarget && urlTarget !== savedUrlTarget);
+
+            var myInp = document.getElementById('my-patent');
+            if (!isDifferentUrlPatent && myInp && st.myPatent && !myInp.value.trim()) {
+                myInp.value = st.myPatent;
+            }
+
+            // 恢复对比文件行结构（保留精确 data-idx，确保 ref_<idx> 上传标签严格对齐）
+            var savedRows = Array.isArray(st.refRows) ? st.refRows : [];
+            if (savedRows.length > 0) {
+                var list = document.getElementById('ref-list');
+                if (list) {
+                    list.innerHTML = '';
+                    var maxIdx = 0;
+                    savedRows.forEach(function(r, i) {
+                        var idxStr = String(r.idx !== undefined ? r.idx : i);
+                        var idxNum = parseInt(idxStr, 10);
+                        if (!isNaN(idxNum) && idxNum > maxIdx) maxIdx = idxNum;
+                        var row = document.createElement('div');
+                        row.className = 'ref-row';
+                        row.setAttribute('data-idx', idxStr);
+                        row.innerHTML = '<input type="text" class="cmp-input ref-input" placeholder="对比文件 ' + (i + 1) + ' — 专利号或 ID">'
+                            + '<button class="btn-upload" onclick="uploadRef(this)">📎 上传</button>'
+                            + '<button class="btn-paste" onclick="pasteRef(this)">📋 粘贴</button>'
+                            + '<button class="btn-remove" onclick="removeRef(this)" title="移除">&times;</button>';
+                        row.querySelector('.ref-input').value = r.value || '';
+                        list.appendChild(row);
+                    });
+                    refIdxCounter = Math.max(maxIdx, Number(st.refIdxCounter || 0));
+                    updateRefCounter();
+                }
+            }
+
+            // 恢复所有上传/粘贴的文献内容（my / ref_* / oa）
+            if (st.uploadedData && typeof st.uploadedData === 'object') {
+                Object.keys(st.uploadedData).forEach(function(k) {
+                    if (k === 'my' && isDifferentUrlPatent) return;
+                    var item = st.uploadedData[k];
+                    if (item && typeof item.content === 'string') {
+                        uploadedData[k] = { title: item.title || '对比文献', content: item.content };
+                        renderRestoredUploadTag(k, uploadedData[k]);
+                    }
+                });
+            }
+
+            if (!isDifferentUrlPatent) {
+                var resEl = document.getElementById('result');
+                if (resEl && st.resultHtml && !resEl.innerHTML.trim()) {
+                    resEl.innerHTML = DOMPurify.sanitize(st.resultHtml, { ADD_ATTR: ['onclick'] });
+                }
+                if (st.lastAnalysisRawText) lastAnalysisRawText = st.lastAnalysisRawText;
+                var discInp = document.getElementById('discussion-input');
+                if (discInp && st.discussionDraft) discInp.value = st.discussionDraft;
+                if (Array.isArray(st.discussionHistory) && st.discussionHistory.length > 0) {
+                    discussionHistory = st.discussionHistory;
+                    var panel = document.getElementById('discussion-panel');
+                    if (panel) panel.classList.remove('hidden');
+                    var msgBox = document.getElementById('discussion-messages');
+                    if (msgBox) {
+                        msgBox.innerHTML = '';
+                        discussionHistory.forEach(function(pair) {
+                            if (Array.isArray(pair) && pair.length >= 2) {
+                                renderMsg(pair[0] === 'user' ? 'user' : 'ai', pair[1]);
+                            }
+                        });
+                    }
+                    showDiscussionExportButton();
+                }
+            }
+        } catch (e) {}
+    }
+    window.addEventListener('pagehide', saveCompareWorkspaceState);
+    window.addEventListener('beforeunload', saveCompareWorkspaceState);
+    document.addEventListener('input', function(e) {
+        if (e.target && (e.target.id === 'my-patent' || e.target.id === 'discussion-input' || (e.target.classList && e.target.classList.contains('ref-input')))) {
+            saveCompareWorkspaceState();
+        }
+    });
+    window.addEventListener('DOMContentLoaded', restoreCompareWorkspaceState);
     </script>
 </body>
 </html>

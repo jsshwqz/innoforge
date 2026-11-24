@@ -4,6 +4,31 @@
 All notable changes are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
+## [v0.9.74] - 2026-11-24
+
+### 深度分析引擎统一与全站 Markdown 渲染收口 / Deep Engine Unification & Markdown Rendering Polish
+
+- **专利详情页「上传对比文献」升级支持自定义 1–5 份多体裁文献混合对比（`src/routes/upload.rs`、`templates/patent_detail.html`、`static/i18n.js`）**：
+  - 突破原单文件上传限制，支持同时或分批添加最多 5 份自定义对比文件（不限于专利：支持期刊学术论文 PDF、Word 交底书、TXT/Markdown、图片图纸混合上传，每份可单独移除），并新增「自定义对比重点」输入框；
+  - 后端 `api_upload_compare` 自动识别文献体裁（期刊/学术论文、对比专利、图纸、交底书），按篇均分结构化文本预算并注入 `extract_whole_document_signals` 定量预挖、失效法律状态预检、预算熔断与 `<user_input>` 隔离，针对期刊论文自动开启「论文理论/实验数据/DOI × 专利新颖性/创造性」专项交叉分析（附单元测试）；
+  - 前端 `uploadCompare()` 由原始 `textContent` 升级为 `renderDeepAnalysisMarkdown` + 可滚动暗色卡片，未选文件改为非阻塞内联提示。
+- **全站多格式统一文件解析引擎（`src/routes/upload.rs`、`templates/search.html`、`templates/compare.html`、`templates/patent_detail.html`、`templates/index.html`、`templates/ai.html`）**：
+  - 升级 `detect_type_by_magic`（细查 ZIP 清单精确区分 `docx`/`pptx`/`xlsx`/`ofd`，并识别 `ISO-10303-21` STEP、图片/RTF/CAJ 魔数）并新增零依赖原生解析器：**STEP 三维 CAD（`.step`/`.stp`，解码 `\X2\...\X0\` 中文部件名、装配树、精确三维外廓包络尺寸与圆孔/圆柱直径规格）**、**STL（Binary/ASCII 三维网格包络与面片数）**、**IGES（`.iges`/`.igs`）**、**PPTX 幻灯片**、**XLSX 表格（含共享字符串表）**、**国产版式文档 OFD（国知局电子通知书 `<ofd:TextCode>`）**、**HTML/XML 去脚本标签**与 **RTF 富文本**，同步兼容 LaTeX (`.tex`/`.bib`) / CSV / JSON / YAML / DXF；
+  - 对知网 `.caj`/`.nh`/`.kdh`、旧版 Office `.doc`/`.ppt`/`.xls`、WPS `.wps` 与 AutoCAD `.dwg` 提供清晰中文转换引导提示；全站上传入口 `<input accept>` 统一口径（附单元测试）。
+- **工作页跨页跳转返回自动保留状态（含 `/compare` 上传/粘贴对比文件）与 `/search` 本地文献入库衔接闭环（`src/routes/upload.rs`、`src/common.rs`、`static/i18n.js`、`templates/settings.html`、`templates/search.html`、`templates/patent_detail.html`、`templates/compare.html`、`templates/ai.html`）**：
+  - 修复侧边栏进入 `/settings` 时丢弃 URL 查询参数（`location.pathname` → `location.pathname + location.search`）并在设置页顶栏增加醒目「← 返回原工作页」按钮；
+  - 为 `/search`、`/patent/:id`、`/compare`（完整持久化 `uploadedData` 中所有上传/粘贴的本方案、全部对比文件与 OA 文本及其行标签、`lastAnalysisRawText` 和讨论记录，并新增「🗑️ 清空对比」按钮）、`/ai` 接入自动 `sessionStorage` 工作区快照与恢复；
+  - 新增 `POST /api/upload/ingest-local` 并升级 `/search` 本地上传区（支持 PDF / DOCX / TXT / MD）：上传后自动识别体裁（专利文献 / 期刊学术论文 / 技术文档）并写入本地 SQLite + FTS5 + 语义向量库（本地搜索与向量检索立即可查），下方呈现一键下游衔接动作条（`查看入库详情` / `以此文献搜相似` / `带入方案对比（本方案或对比文件）` / `带入创新推演` / `带入 AI 助手解读`，附单元测试）。
+- **修复多模态图片讨论故障转移未覆写备用模型导致连环 429 的根因 Bug（`src/ai/client.rs`、`templates/patent_detail.html`）**：
+  - 根治 `send_json_body` / `try_provider_with_body` 在主模型触发 HTTP 429 切换备用通道时未将 `body["model"]` 覆写为备用通道模型名（导致所有备用模型仍请求已限额主模型并连续撞 429 达 55 秒）的缺陷，并自动跳过不支持视觉的纯文本备用模型、精准区分「HTTP 429 配额/频率超限」与「模型不支持多模态看图」（附单元测试）；
+  - 修复前端把 `AI 调用失败:` 错误文本当作正常回复写入聊天记录的问题，改为展示带重试按钮的错误卡片。
+- **多专利技术对比矩阵均衡上下文与全文预挖增强（`src/routes/ai.rs`）**：
+  - `api_ai_compare_matrix` 为 2–5 篇专利按篇数均分结构化文本预算（避免首篇超长说明书挤占导致后几篇权要被截断），同步注入法律状态标识与 `extract_whole_document_signals` 预挖信号。
+- **全站残留原始 Markdown `<br>` 直出与重复 Emoji 彻底清零（`templates/search.html`、`templates/patent_detail.html`、`templates/compare.html`）**：
+  - `templates/search.html` 新增 `renderSearchMarkdown`（支持标题、暗色表格、代码块、列表与行内 LaTeX 净化），全面接管 `📊 跨文档深度对比矩阵`、`⚠️ 侵权风险评估`（同步扩宽弹窗至 `860px`）、`🤖 批量深度研发简报` 与 `🧠 AI 检索结果趋势空白点分析`；
+  - `templates/patent_detail.html`（AI 问答历史/实时回复/导出结论）与 `templates/compare.html`（多轮讨论/导出结论）统一接入 Markdown 渲染与 `DOMPurify.sanitize`，并消除导出结论标题重复 `📝` 图标与奇数条聊天记录潜在越界。
+
+---
 ## [v0.9.73] - 2026-11-24
 
 ### 性能、工程精度与双语体验提升 / Performance, Precision & Bilingual Polish

@@ -74,13 +74,14 @@
 <button class="btn-secondary" onclick="showStats()" data-i18n="btn.stats"></button>
 <button class="btn-secondary" onclick="exportCsv()" data-i18n="btn.export"></button>
 </div>
-<!-- PDF Upload Zone -->
+<!-- Local Document Upload Zone (Patent / Paper / Office / OFD / Image / Tech Doc) -->
 <div id="pdf-upload-zone" class="upload-zone" onclick="document.getElementById('pdf-file-input').click()">
-    <span data-i18n="upload.dragDrop">拖拽PDF文件到此处，或点击上传</span>
-    <div class="upload-hint" data-i18n="upload.hint">支持单个PDF文件，用于提取技术方案进行检索分析</div>
+    <span data-i18n="upload.dragDrop">拖拽本地文献到此处，或点击上传（PDF / Office / OFD / 论文源码 / 图片）</span>
+    <div class="upload-hint" data-i18n="upload.hint">支持专利、期刊论文、PPTX/XLSX、国知局 OFD、TeX/HTML/TXT 与图片：自动收入本地库可检，并一键衔接下游流程</div>
     <div class="file-list" id="pdf-file-list"></div>
-    <input type="file" id="pdf-file-input" accept=".pdf" multiple="false" style="display:none" onchange="handlePdfUpload(event)">
+    <input type="file" id="pdf-file-input" accept=".pdf,.docx,.pptx,.xlsx,.ofd,.step,.stp,.iges,.igs,.stl,.txt,.md,.csv,.tsv,.json,.yaml,.yml,.tex,.bib,.html,.htm,.xml,.rtf,.dxf,.png,.jpg,.jpeg,.webp,.bmp,.gif" multiple="false" style="display:none" onchange="handlePdfUpload(event)">
 </div>
+<div id="pdf-action-bar" style="display:none;margin-top:10px;padding:12px 14px;background:#161b22;border:1px solid #30363d;border-left:3px solid #58a6ff;border-radius:8px;"></div>
 </div>
 
 <div class="panel">
@@ -120,16 +121,25 @@ let lastResponse = null;
 let lastPage = 1;
 let lastPageSize = 20;
 
-// PDF Upload State
+// PDF / Local Document Upload State
 let currentPdfFile = null;
 let currentPdfContent = null;
+let currentIngestedDoc = null;
 const SEARCH_PDF_STORAGE_KEY = 'innoforge_search_pdf';
 let restoredSearchPdf = null;
 
 function saveSearchPdfMeta() {
     try {
-        if (currentPdfFile && currentPdfContent) {
-            const data = { name: currentPdfFile.name, size: currentPdfFile.size, content: currentPdfContent, timestamp: Date.now() };
+        const name = (currentPdfFile && currentPdfFile.name) || (restoredSearchPdf && restoredSearchPdf.name) || '';
+        const size = (currentPdfFile && currentPdfFile.size) || (restoredSearchPdf && restoredSearchPdf.size) || 0;
+        if (name && currentPdfContent) {
+            const data = {
+                name: name,
+                size: size,
+                content: currentPdfContent,
+                ingested: currentIngestedDoc || null,
+                timestamp: Date.now()
+            };
             localStorage.setItem(SEARCH_PDF_STORAGE_KEY, JSON.stringify(data));
         }
     } catch(e) { /* ignore */ }
@@ -143,14 +153,16 @@ function loadSearchPdfMeta() {
             if (data && data.name && data.content) {
                 restoredSearchPdf = data;
                 currentPdfContent = data.content;
+                currentIngestedDoc = data.ingested || null;
             }
         }
-    } catch(e) { restoredSearchPdf = null; }
+    } catch(e) { restoredSearchPdf = null; currentIngestedDoc = null; }
 }
 
 function clearSearchPdfMeta() {
     localStorage.removeItem(SEARCH_PDF_STORAGE_KEY);
     restoredSearchPdf = null;
+    currentIngestedDoc = null;
 }
 
 // Merge search-specific i18n keys into global I18N_COMMON
@@ -239,8 +251,8 @@ function clearSearchPdfMeta() {
     'meta.inventor': '发明人',
     'meta.filing': '申请日',
     'meta.country': '国家',
-    'upload.dragDrop': '拖拽PDF文件到此处，或点击上传',
-    'upload.hint': '支持单个PDF文件，用于提取技术方案进行检索分析',
+    'upload.dragDrop': '拖拽本地文献到此处，或点击上传（PDF / Office / OFD / 论文源码 / 图片）',
+    'upload.hint': '支持专利、期刊论文、DOCX/PPTX/XLSX、国知局 OFD、TeX/HTML/TXT 与图片：自动收入本地库可检，并一键衔接搜相似、对比、推演与 AI',
     'upload.removed': '已移除',
     'upload.preview': '预览',
     'upload.uploading': '上传中...',
@@ -334,8 +346,8 @@ function clearSearchPdfMeta() {
     'meta.inventor': 'Inventor',
     'meta.filing': 'Filing',
     'meta.country': 'Country',
-    'upload.dragDrop': 'Drag & drop PDF here, or click to upload',
-    'upload.hint': 'Single PDF file for extracting technical content for search analysis',
+    'upload.dragDrop': 'Drag & drop local document here, or click to upload (PDF / DOCX / TXT / MD)',
+    'upload.hint': 'Supports patents, journal papers & tech docs: auto-indexes into local library and bridges to Similar Search, Compare, Idea & AI',
     'upload.removed': 'Removed',
     'upload.preview': 'Preview',
     'upload.uploading': 'Uploading...',
@@ -1206,6 +1218,83 @@ async function exportCsv() {
     }
 }
 
+const SEARCH_WS_KEY = 'innoforge_ws_search_v1';
+
+function saveSearchWorkspaceState() {
+    try {
+        var checkedIds = Array.from(document.querySelectorAll('.batch-check:checked')).map(function(cb) { return cb.dataset.id; });
+        var batchEl = document.getElementById('batch-result');
+        var batchHtml = (batchEl && batchEl.innerHTML.trim() && batchEl.textContent.indexOf('⏳') < 0) ? batchEl.innerHTML : '';
+        var state = {
+            query: (document.getElementById('search-input') || {}).value || '',
+            mode: (document.getElementById('search-mode') || {}).value || 'local',
+            region: (document.getElementById('search-region') || {}).value || 'auto',
+            searchType: (document.getElementById('search-type') || {}).value || 'auto',
+            country: (document.getElementById('country-filter') || {}).value || '',
+            ipc: (document.getElementById('ipc-filter') || {}).value || '',
+            sortBy: (document.getElementById('sort-by') || {}).value || 'relevance',
+            dateFrom: (document.getElementById('date-from') || {}).value || '',
+            dateTo: (document.getElementById('date-to') || {}).value || '',
+            lastResponse: lastResponse || null,
+            lastPage: typeof lastPage === 'number' ? lastPage : 1,
+            lastPageSize: typeof lastPageSize === 'number' ? lastPageSize : 20,
+            currentRequest: currentRequest || null,
+            checkedIds: checkedIds,
+            batchHtml: batchHtml,
+            scrollY: window.scrollY || 0,
+            savedAt: Date.now()
+        };
+        sessionStorage.setItem(SEARCH_WS_KEY, JSON.stringify(state));
+    } catch (e) { /* ignore sessionStorage quota */ }
+}
+
+function restoreSearchWorkspaceState() {
+    try {
+        var raw = sessionStorage.getItem(SEARCH_WS_KEY);
+        if (!raw) return false;
+        var st = JSON.parse(raw);
+        if (!st || typeof st !== 'object') return false;
+        if (st.query && document.getElementById('search-input')) document.getElementById('search-input').value = st.query;
+        if (st.mode && document.getElementById('search-mode')) {
+            document.getElementById('search-mode').value = st.mode;
+            if (typeof toggleRegionSelect === 'function') toggleRegionSelect();
+        }
+        if (st.region && document.getElementById('search-region')) document.getElementById('search-region').value = st.region;
+        if (st.searchType && document.getElementById('search-type')) document.getElementById('search-type').value = st.searchType;
+        if (typeof st.country === 'string' && document.getElementById('country-filter')) document.getElementById('country-filter').value = st.country;
+        if (typeof st.ipc === 'string' && document.getElementById('ipc-filter')) document.getElementById('ipc-filter').value = st.ipc;
+        if (st.sortBy && document.getElementById('sort-by')) document.getElementById('sort-by').value = st.sortBy;
+        if (typeof st.dateFrom === 'string' && document.getElementById('date-from')) document.getElementById('date-from').value = st.dateFrom;
+        if (typeof st.dateTo === 'string' && document.getElementById('date-to')) document.getElementById('date-to').value = st.dateTo;
+        if (st.currentRequest) currentRequest = st.currentRequest;
+        if (st.lastResponse) {
+            lastResponse = st.lastResponse;
+            lastPage = st.lastPage || 1;
+            lastPageSize = st.lastPageSize || 20;
+            renderResults(lastResponse, lastPage, lastPageSize);
+            if (Array.isArray(st.checkedIds) && st.checkedIds.length) {
+                var set = new Set(st.checkedIds);
+                document.querySelectorAll('.batch-check').forEach(function(cb) {
+                    if (set.has(cb.dataset.id)) cb.checked = true;
+                });
+            }
+        }
+        var batchEl = document.getElementById('batch-result');
+        if (batchEl && st.batchHtml) {
+            batchEl.innerHTML = DOMPurify.sanitize(st.batchHtml);
+        }
+        if (typeof st.scrollY === 'number' && st.scrollY > 0) {
+            setTimeout(function() { window.scrollTo(0, st.scrollY); }, 80);
+        }
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
+window.addEventListener('pagehide', saveSearchWorkspaceState);
+window.addEventListener('beforeunload', saveSearchWorkspaceState);
+
 window.addEventListener('DOMContentLoaded', () => {
     renderHistory();
 
@@ -1218,8 +1307,91 @@ window.addEventListener('DOMContentLoaded', () => {
     if (q) {
         document.getElementById('search-input').value = q;
         doSearch(1);
+    } else {
+        restoreSearchWorkspaceState();
     }
 });
+function renderSearchMarkdown(raw) {
+    if (!raw) return '';
+    var text = String(raw).replace(/\r\n/g, '\n');
+    // 清理常见行内 LaTeX 为洁净可读文本
+    text = text
+        .replace(/\$([^$\n]{1,80})\$/g, function(_, inner) {
+            return inner
+                .replace(/\\text\{([^}]*)\}/g, '$1')
+                .replace(/\\mathrm\{([^}]*)\}/g, '$1')
+                .replace(/\\circ/g, '°')
+                .replace(/\\ge(?:q)?/g, '≥')
+                .replace(/\\le(?:q)?/g, '≤')
+                .replace(/\\rightarrow|\\to/g, '→')
+                .replace(/\\times/g, '×')
+                .replace(/\\pm/g, '±')
+                .replace(/\\approx/g, '≈')
+                .replace(/\\mu/g, 'μ')
+                .replace(/\^\{([^}]*)\}/g, '^$1')
+                .replace(/_\{([^}]*)\}/g, '_$1')
+                .replace(/\\/g, '');
+        });
+
+    var codeBlocks = [];
+    text = text.replace(/```(\w*)\n([\s\S]*?)```/g, function(_, lang, code) {
+        codeBlocks.push('<pre style="background:#010409;border:1px solid #30363d;border-radius:6px;padding:10px 12px;overflow-x:auto;margin:8px 0;"><code>' + escapeHtml(code.trimEnd()) + '</code></pre>');
+        return '\n\x00SCB' + (codeBlocks.length - 1) + '\x00\n';
+    });
+
+    var tableBlocks = [];
+    text = text.replace(/(?:^\|[^\n]+\|\s*$\n?){2,}/gm, function(block) {
+        var rows = block.trim().split('\n').filter(function(r) { return r.trim().startsWith('|'); });
+        if (rows.length < 2 || !/^\|[\s:|-]+\|$/.test(rows[1].trim())) return block;
+        var parseRow = function(r) { return r.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(function(c) { return c.trim(); }); };
+        var fmtCell = function(c) {
+            return escapeHtml(c)
+                .replace(/&lt;br\s*\/?&gt;/gi, '<br>')
+                .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                .replace(/`([^`]+)`/g, '<code style="background:#21262d;padding:1px 4px;border-radius:3px;">$1</code>');
+        };
+        var headers = parseRow(rows[0]);
+        var html = '<div style="overflow-x:auto;margin:10px 0;"><table style="width:100%;border-collapse:collapse;font-size:0.9em;"><thead><tr>';
+        headers.forEach(function(h, idx) {
+            html += '<th style="background:#161b22;color:#79c0ff;border:1px solid #30363d;padding:8px 10px;text-align:left;' + (idx === 0 ? 'min-width:110px;' : '') + '">' + fmtCell(h) + '</th>';
+        });
+        html += '</tr></thead><tbody>';
+        for (let r = 2; r < rows.length; r++) {
+            var cells = parseRow(rows[r]);
+            html += '<tr>';
+            for (let c = 0; c < headers.length; c++) {
+                html += '<td style="border:1px solid #30363d;padding:7px 10px;vertical-align:top;color:#c9d1d9;">' + fmtCell(cells[c] || '') + '</td>';
+            }
+            html += '</tr>';
+        }
+        html += '</tbody></table></div>';
+        tableBlocks.push(html);
+        return '\n\x00STB' + (tableBlocks.length - 1) + '\x00\n';
+    });
+
+    var out = escapeHtml(text)
+        .replace(/^---+[ \t]*$/gm, '<hr style="border:none;border-top:1px solid #30363d;margin:12px 0;">')
+        .replace(/^&gt; (.+)$/gm, '<blockquote style="border-left:3px solid #58a6ff;padding:6px 12px;margin:8px 0;background:#161b22;color:#c9d1d9;border-radius:4px;">$1</blockquote>')
+        .replace(/^##### (.+)$/gm, '<h5 style="color:#d2a8ff;margin:10px 0 4px;font-size:0.95em;">$1</h5>')
+        .replace(/^#### (.+)$/gm, '<h4 style="color:#79c0ff;margin:12px 0 6px;font-size:1em;">$1</h4>')
+        .replace(/^### (.+)$/gm, '<h3 style="color:#58a6ff;margin:14px 0 6px;font-size:1.08em;">$1</h3>')
+        .replace(/^## (.+)$/gm, '<h2 style="color:#79c0ff;margin:16px 0 8px;font-size:1.18em;border-bottom:1px solid #30363d;padding-bottom:4px;">$1</h2>')
+        .replace(/^# (.+)$/gm, '<h2 style="color:#58a6ff;margin:16px 0 8px;font-size:1.25em;">$1</h2>')
+        .replace(/`([^`]+)`/g, '<code style="background:#21262d;padding:1px 5px;border-radius:3px;">$1</code>')
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/^\s*[-*] (.+)$/gm, '<li>$1</li>')
+        .replace(/^\s*\d+\. (.+)$/gm, '<li>$1</li>')
+        .replace(/(<li>.*<\/li>)/g, '<ul style="margin:6px 0 8px 20px;">$1</ul>')
+        .replace(/<\/ul>\s*<ul[^>]*>/g, '')
+        .replace(/\n{2,}/g, '</p><p style="margin:6px 0;">')
+        .replace(/\n/g, '<br>')
+        .replace(/<p[^>]*>(?:\s|<br>)*<\/p>/g, '');
+
+    out = out.replace(/\x00SCB(\d+)\x00/g, function(_, i) { return codeBlocks[parseInt(i, 10)]; });
+    out = out.replace(/\x00STB(\d+)\x00/g, function(_, i) { return tableBlocks[parseInt(i, 10)]; });
+    return out;
+}
+
 async function compareMatrix() {
     var ids = Array.from(document.querySelectorAll('.batch-check:checked')).map(function(cb) { return cb.dataset.id; });
     var resultDiv = document.getElementById('batch-result');
@@ -1231,7 +1403,7 @@ async function compareMatrix() {
         if (!resp.ok) throw new Error('服务器错误 (' + resp.status + ')');
         var data = await resp.json();
         if (data.status === 'ok') {
-            resultDiv.innerHTML = DOMPurify.sanitize('<h3 style="color:#8b5cf6;margin-bottom:12px;">📊 技术对比矩阵</h3><div style="padding:16px;background:#0d1117;border:1px solid #30363d;border-radius:8px;color:#c9d1d9;line-height:1.8;white-space:pre-wrap;">' + escapeHtml(data.analysis).replace(/\n/g, '<br>') + '</div>');
+            resultDiv.innerHTML = DOMPurify.sanitize('<h3 style="color:#a371f7;margin-bottom:12px;">📊 跨文档深度对比矩阵</h3><div style="padding:16px 18px;background:#0d1117;border:1px solid #30363d;border-radius:8px;color:#c9d1d9;line-height:1.75;max-height:72vh;overflow-y:auto;">' + renderSearchMarkdown(data.analysis || '') + '</div>');
         } else { resultDiv.innerHTML = '<p style="color:#f85149;">❌ ' + escapeHtml(data.error || '对比失败') + '</p>'; }
     } catch(e) { resultDiv.innerHTML = '<p style="color:#f85149;">❌ ' + escapeHtml(e.message) + '</p>'; }
 }
@@ -1240,9 +1412,9 @@ function toggleRiskModal() {
     var modal = document.getElementById('risk-modal');
     if (modal) { modal.remove(); return; }
     var ids = Array.from(document.querySelectorAll('.batch-check:checked')).map(function(cb) { return cb.dataset.id; }).join(', ');
-    var html = '<div id="risk-modal" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:999;display:flex;align-items:center;justify-content:center;">'
-        + '<div style="background:#161b22;border:1px solid #30363d;border-radius:12px;padding:24px;max-width:500px;width:90%;">'
-        + '<h3 style="color:#da3633;margin:0 0 16px;">⚠️ 侵权风险评估</h3>'
+    var html = '<div id="risk-modal" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.75);z-index:999;display:flex;align-items:center;justify-content:center;padding:16px;">'
+        + '<div style="background:#161b22;border:1px solid #30363d;border-radius:12px;padding:24px;max-width:860px;width:94%;max-height:88vh;overflow-y:auto;">'
+        + '<h3 style="color:#da3633;margin:0 0 16px;">⚠️ 侵权风险评估（FTO 深度排查）</h3>'
         + '<label style="color:#8b949e;font-size:0.85em;">产品/技术描述</label>'
         + '<textarea id="risk-product" rows="4" style="width:100%;padding:8px;background:#0d1117;border:1px solid #30363d;color:#c9d1d9;border-radius:6px;margin:4px 0 12px;" placeholder="描述你的产品或技术方案..."></textarea>'
         + '<label style="color:#8b949e;font-size:0.85em;">已收录的专利号或 ID（逗号分隔，或先在搜索结果中勾选）</label>'
@@ -1261,13 +1433,13 @@ async function runRiskAssessment() {
     var resultDiv = document.getElementById('risk-result');
     if (!productDesc) { resultDiv.innerHTML = '<p style="color:#d29922;">请输入产品描述</p>'; return; }
     if (patentIds.length === 0) { resultDiv.innerHTML = '<p style="color:#d29922;">请输入至少一个专利号</p>'; return; }
-    resultDiv.innerHTML = DOMPurify.sanitize('<p style="color:#58a6ff;">⏳ 正在评估侵权风险...</p>');
+    resultDiv.innerHTML = DOMPurify.sanitize('<p style="color:#58a6ff;">⏳ 正在评估侵权风险（含法律状态预检与权要逐项核对）...</p>');
     try {
         var resp = await fetch('/api/ai/risk', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({product_description: productDesc, patent_ids: patentIds}) });
         if (!resp.ok) throw new Error('服务器错误 (' + resp.status + ')');
         var data = await resp.json();
         if (data.status === 'ok') {
-            resultDiv.innerHTML = DOMPurify.sanitize('<div style="padding:12px;background:#0d1117;border-radius:6px;color:#c9d1d9;line-height:1.8;white-space:pre-wrap;max-height:300px;overflow-y:auto;">' + escapeHtml(data.analysis).replace(/\n/g, '<br>') + '</div>');
+            resultDiv.innerHTML = DOMPurify.sanitize('<div style="padding:14px 16px;background:#0d1117;border:1px solid #30363d;border-radius:8px;color:#c9d1d9;line-height:1.75;max-height:55vh;overflow-y:auto;">' + renderSearchMarkdown(data.analysis || '') + '</div>');
         } else { resultDiv.innerHTML = '<p style="color:#f85149;">❌ ' + escapeHtml(data.error || '评估失败') + '</p>'; }
     } catch(e) { resultDiv.innerHTML = '<p style="color:#f85149;">❌ ' + escapeHtml(e.message) + '</p>'; }
 }
@@ -1287,7 +1459,7 @@ async function batchSummarize() {
         return;
     }
 
-    resultDiv.innerHTML = DOMPurify.sanitize('<p style="color:#58a6ff;">⏳ 正在批量生成摘要 (' + ids.length + '条)...</p>');
+    resultDiv.innerHTML = DOMPurify.sanitize('<p style="color:#58a6ff;">⏳ 正在批量生成深度研发简报 (' + ids.length + '条)...</p>');
 
     try {
         var response = await fetch('/api/ai/batch-summarize', {
@@ -1299,13 +1471,13 @@ async function batchSummarize() {
         var data = await response.json();
         if (data.status === 'ok' && data.summaries) {
             var cardsHtml = data.summaries.map(function(item) {
-                return '<div style="padding:12px;margin-bottom:8px;background:#0d1117;border:1px solid #30363d;border-radius:6px;">' +
-                    '<strong style="color:#58a6ff;">' + escapeHtml(item.patent_number) + '</strong> ' +
-                    escapeHtml(item.title) +
-                    '<p style="color:#c9d1d9;margin:8px 0 0;font-size:0.9em;line-height:1.6;">' +
-                    escapeHtml(item.summary).replace(/\n/g, '<br>') + '</p></div>';
+                return '<div style="padding:14px 16px;margin-bottom:10px;background:#0d1117;border:1px solid #30363d;border-radius:8px;">' +
+                    '<div style="margin-bottom:6px;"><strong style="color:#58a6ff;">' + escapeHtml(item.patent_number) + '</strong> ' +
+                    escapeHtml(item.title) + '</div>' +
+                    '<div style="color:#c9d1d9;font-size:0.92em;line-height:1.7;">' +
+                    renderSearchMarkdown(item.summary || '') + '</div></div>';
             }).join('');
-            resultDiv.innerHTML = DOMPurify.sanitize('<h3 style="color:#58a6ff;margin-bottom:12px;">🤖 批量摘要结果</h3>' + cardsHtml);
+            resultDiv.innerHTML = DOMPurify.sanitize('<h3 style="color:#58a6ff;margin-bottom:12px;">🤖 批量深度研发简报</h3>' + cardsHtml);
         } else {
             resultDiv.innerHTML = DOMPurify.sanitize('<p style="color:#f85149;">❌ ' + escapeHtml(data.error || data.message || '生成失败') + '</p>');
         }
@@ -1319,7 +1491,9 @@ async function analyzeSearchResults() {
     var query = (document.getElementById('search-input') && document.getElementById('search-input').value.trim()) || (currentRequest && currentRequest.query) || '';
     var patents = (lastResponse && Array.isArray(lastResponse.patents)) ? lastResponse.patents.slice(0, 12) : [];
     if (!query || !patents.length) {
-        alert('请先执行检索获取专利结果，再进行 AI 趋势与空白点分析');
+        if (resultDiv) {
+            resultDiv.innerHTML = DOMPurify.sanitize('<p style="color:#d29922;">⚠️ 请先执行检索获取专利结果，再进行 AI 趋势与空白点分析。</p>');
+        }
         return;
     }
     if (!resultDiv) return;
@@ -1347,8 +1521,7 @@ async function analyzeSearchResults() {
 
         if (an.raw) {
             var pre = document.createElement('div');
-            pre.style.whiteSpace = 'pre-wrap';
-            pre.textContent = an.raw;
+            pre.innerHTML = DOMPurify.sanitize(renderSearchMarkdown(an.raw));
             card.appendChild(pre);
         } else {
             [
@@ -1359,9 +1532,9 @@ async function analyzeSearchResults() {
                 var sh = document.createElement('h4');
                 sh.style.cssText = 'margin:10px 0 4px;color:#58a6ff;';
                 sh.textContent = sec.title;
-                var sp = document.createElement('p');
-                sp.style.cssText = 'margin:0 0 8px;color:#c9d1d9;white-space:pre-wrap;';
-                sp.textContent = sec.text;
+                var sp = document.createElement('div');
+                sp.style.cssText = 'margin:0 0 8px;color:#c9d1d9;';
+                sp.innerHTML = DOMPurify.sanitize(renderSearchMarkdown(sec.text));
                 card.appendChild(sh);
                 card.appendChild(sp);
             });
@@ -1401,34 +1574,212 @@ async function analyzeSearchResults() {
 }
 </script>
 <script>
-// PDF Upload Functions
+// Local Document Upload & Downstream Hub Functions
+function getActiveUploadedDocName() {
+    return (currentPdfFile && currentPdfFile.name) || (restoredSearchPdf && restoredSearchPdf.name) || '本地上传文献';
+}
+
+function renderUploadedDocActionBar() {
+    const bar = document.getElementById('pdf-action-bar');
+    if (!bar) return;
+    if (!currentPdfContent) {
+        bar.style.display = 'none';
+        bar.innerHTML = '';
+        return;
+    }
+    const doc = currentIngestedDoc;
+    const fileName = getActiveUploadedDocName();
+    const kindLabel = doc && doc.doc_kind ? doc.doc_kind : '本地文献';
+    const kindIcon = kindLabel.indexOf('论文') >= 0 || kindLabel.indexOf('期刊') >= 0
+        ? '🎓'
+        : kindLabel.indexOf('专利') >= 0 ? '📘' : '📄';
+    const kwList = doc && Array.isArray(doc.keywords) && doc.keywords.length
+        ? doc.keywords.join(' ')
+        : '';
+    const ingestLine = doc && doc.id
+        ? '<span style="color:#3fb950;font-weight:600;">✅ 已自动收入本地文献库</span>'
+          + ' <span style="color:#8b949e;">（本地数据库与语义向量搜索现已可检 · 编号 <code>' + escapeHtml(doc.patent_number || '') + '</code>）</span>'
+        : '<span style="color:#d29922;">⏳ 正在收入本地文献库...</span>';
+
+    var detailBtn = doc && doc.detail_url
+        ? '<a href="' + escapeHtml(doc.detail_url) + '" style="display:inline-flex;align-items:center;padding:5px 11px;border-radius:6px;background:#238636;color:#fff;text-decoration:none;font-size:12.5px;font-weight:600;">🔗 查看入库详情</a>'
+        : '<button type="button" data-doc-action="ingest" style="padding:5px 11px;border-radius:6px;border:1px solid #238636;background:#238636;color:#fff;cursor:pointer;font-size:12.5px;">📥 收入本地库</button>';
+
+    var html = '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:8px;font-size:13px;">'
+        + '<span style="padding:2px 8px;border-radius:10px;background:#21262d;border:1px solid #30363d;color:#79c0ff;font-weight:600;">' + kindIcon + ' ' + escapeHtml(kindLabel) + '</span>'
+        + '<strong style="color:#c9d1d9;">' + escapeHtml((doc && doc.title) || fileName) + '</strong>'
+        + '<span style="color:#8b949e;">(' + currentPdfContent.length + '字)</span>'
+        + '</div>'
+        + '<div style="font-size:12.5px;margin-bottom:10px;">' + ingestLine
+        + (kwList ? '<div style="margin-top:4px;color:#8b949e;">提取核心词：<span style="color:#c9d1d9;">' + escapeHtml(kwList) + '</span></div>' : '')
+        + '</div>'
+        + '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">'
+        + detailBtn
+        + '<button type="button" data-doc-action="similar" style="padding:5px 11px;border-radius:6px;border:1px solid #388bfd;background:#1f6feb;color:#fff;cursor:pointer;font-size:12.5px;">🔍 以此文献搜相似</button>'
+        + '<button type="button" data-doc-action="compare-my" style="padding:5px 11px;border-radius:6px;border:1px solid #30363d;background:#21262d;color:#c9d1d9;cursor:pointer;font-size:12.5px;">⚖️ 设为方案对比·本方案</button>'
+        + '<button type="button" data-doc-action="compare-ref" style="padding:5px 11px;border-radius:6px;border:1px solid #30363d;background:#21262d;color:#c9d1d9;cursor:pointer;font-size:12.5px;">📎 加入方案对比·对比文件</button>'
+        + '<button type="button" data-doc-action="idea" style="padding:5px 11px;border-radius:6px;border:1px solid #30363d;background:#21262d;color:#d2a8ff;cursor:pointer;font-size:12.5px;">🧠 带入创新推演</button>'
+        + '<button type="button" data-doc-action="ai" style="padding:5px 11px;border-radius:6px;border:1px solid #30363d;background:#21262d;color:#79c0ff;cursor:pointer;font-size:12.5px;">💬 带入 AI 助手解读</button>'
+        + '</div>';
+    bar.innerHTML = DOMPurify.sanitize(html);
+    bar.querySelectorAll('button[data-doc-action]').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var act = btn.getAttribute('data-doc-action');
+            if (act === 'ingest') ingestUploadedDocToLocal();
+            else if (act === 'similar') searchByUploadedDoc();
+            else if (act === 'compare-my') sendUploadedDocToCompare('my');
+            else if (act === 'compare-ref') sendUploadedDocToCompare('ref');
+            else if (act === 'idea') sendUploadedDocToIdea();
+            else if (act === 'ai') sendUploadedDocToAi();
+        });
+    });
+    bar.style.display = 'block';
+}
+
+async function ingestUploadedDocToLocal() {
+    if (!currentPdfContent) return;
+    renderUploadedDocActionBar();
+    try {
+        const res = await fetch('/api/upload/ingest-local', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                filename: getActiveUploadedDocName(),
+                content: currentPdfContent
+            })
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        if (data.status === 'ok') {
+            currentIngestedDoc = data;
+            saveSearchPdfMeta();
+        }
+    } catch (e) {
+        console.warn('本地文献入库失败:', e);
+    }
+    renderUploadedDocActionBar();
+}
+
+function searchByUploadedDoc() {
+    const kw = (currentIngestedDoc && Array.isArray(currentIngestedDoc.keywords) && currentIngestedDoc.keywords.length)
+        ? currentIngestedDoc.keywords.slice(0, 4).join(' ')
+        : ((currentIngestedDoc && currentIngestedDoc.title) || getActiveUploadedDocName().replace(/\.[^.]+$/, ''));
+    const inp = document.getElementById('search-input');
+    if (inp) inp.value = kw;
+    doSearch(1);
+}
+
+function sendUploadedDocToCompare(slot) {
+    if (!currentPdfContent) return;
+    const title = (currentIngestedDoc && currentIngestedDoc.title) || getActiveUploadedDocName();
+    const COMPARE_KEY = 'innoforge_ws_compare_v1';
+    let st = {};
+    try {
+        const raw = sessionStorage.getItem(COMPARE_KEY);
+        if (raw) st = JSON.parse(raw) || {};
+    } catch (e) { st = {}; }
+    if (!st.uploadedData || typeof st.uploadedData !== 'object') st.uploadedData = {};
+    if (!Array.isArray(st.refRows) || !st.refRows.length) {
+        st.refRows = [{ idx: '0', value: '' }];
+        st.refIdxCounter = 0;
+    }
+    if (slot === 'my') {
+        st.uploadedData['my'] = { title: title, content: currentPdfContent };
+        st.myPatent = '';
+    } else {
+        // 找到首个空对比文件槽位，否则自动新增一行，绝不覆盖已有对比文件
+        let targetIdx = null;
+        for (let i = 0; i < st.refRows.length; i++) {
+            const idxStr = String(st.refRows[i].idx);
+            if (!st.refRows[i].value && !st.uploadedData['ref_' + idxStr]) {
+                targetIdx = idxStr;
+                break;
+            }
+        }
+        if (targetIdx === null) {
+            const nextNum = Number(st.refIdxCounter || 0) + 1;
+            st.refIdxCounter = nextNum;
+            targetIdx = String(nextNum);
+            st.refRows.push({ idx: targetIdx, value: '' });
+        }
+        st.uploadedData['ref_' + targetIdx] = { title: title, content: currentPdfContent };
+    }
+    st.urlSearch = '';
+    st.savedAt = Date.now();
+    try { sessionStorage.setItem(COMPARE_KEY, JSON.stringify(st)); } catch (e) {}
+    saveSearchWorkspaceState();
+    window.location.href = '/compare';
+}
+
+async function sendUploadedDocToIdea() {
+    if (!currentPdfContent) return;
+    const title = ((currentIngestedDoc && currentIngestedDoc.title) || getActiveUploadedDocName().replace(/\.[^.]+$/, '')).slice(0, 60);
+    const desc = '【源自技术调研本地上传文献：' + getActiveUploadedDocName() + '】\n\n' + currentPdfContent.slice(0, 20000);
+    try {
+        const resp = await fetch('/api/idea/submit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: title, description: desc, input_type: 'mixed' })
+        });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const data = await resp.json();
+        if (data && data.id) {
+            saveSearchWorkspaceState();
+            window.location.href = '/idea?id=' + encodeURIComponent(data.id) + '&mode=chat';
+            return;
+        }
+    } catch (e) {
+        alert('带入创新推演失败: ' + e.message);
+    }
+}
+
+function sendUploadedDocToAi() {
+    if (!currentPdfContent) return;
+    const title = (currentIngestedDoc && currentIngestedDoc.title) || getActiveUploadedDocName();
+    const kind = (currentIngestedDoc && currentIngestedDoc.doc_kind) || '本地上传文献';
+    const draft = '请深度剖析这篇【' + kind + '】《' + title + '》的核心物理机理、关键定量参数、薄弱点以及后续研发/专利/论文切入点：\n\n'
+        + currentPdfContent.slice(0, 8000);
+    try {
+        sessionStorage.setItem('innoforge_ws_ai_v1', JSON.stringify({
+            role: kind.indexOf('论文') >= 0 ? 'academic_paper_assistant' : 'patent_drafting_coach',
+            webSearch: false,
+            draft: draft,
+            savedAt: Date.now()
+        }));
+    } catch (e) {}
+    saveSearchWorkspaceState();
+    window.location.href = '/ai';
+}
+
 function updatePdfFileList() {
     const listEl = document.getElementById('pdf-file-list');
     if (!listEl) return;
     if (!currentPdfFile && !restoredSearchPdf) {
         listEl.innerHTML = '';
+        renderUploadedDocActionBar();
         return;
     }
     if (currentPdfFile) {
         listEl.innerHTML = `
-            <div class="file-item">
-                <span class="preview-btn" onclick="previewPdfContent()" title="${t('upload.preview')}">👁️</span>
+            <div class="file-item" onclick="event.stopPropagation()">
+                <span class="preview-btn" onclick="event.stopPropagation();previewPdfContent()" title="${t('upload.preview')}">👁️</span>
                 <span style="color:#58a6ff;">${escapeHtml(currentPdfFile.name)}</span>
                 <span style="color:#8b949e;font-size:10px;">(${formatFileSize(currentPdfFile.size)})</span>
-                <span class="remove" onclick="removePdfFile()" title="${t('upload.removed')}">×</span>
+                <span class="remove" onclick="event.stopPropagation();removePdfFile()" title="${t('upload.removed')}">×</span>
             </div>
         `;
     } else if (restoredSearchPdf) {
         listEl.innerHTML = `
-            <div class="file-item">
-                <span class="preview-btn" onclick="previewPdfContent()" title="${t('upload.preview')}">👁️</span>
+            <div class="file-item" onclick="event.stopPropagation()">
+                <span class="preview-btn" onclick="event.stopPropagation();previewPdfContent()" title="${t('upload.preview')}">👁️</span>
                 <span style="color:#58a6ff;">${escapeHtml(restoredSearchPdf.name)}</span>
                 <span style="color:#8b949e;font-size:10px;">(${formatFileSize(restoredSearchPdf.size)})</span>
                 <span style="color:#3fb950;font-size:0.75em;margin-left:6px;">已保存</span>
-                <span class="remove" onclick="removePdfFile()" title="${t('upload.removed')}">×</span>
+                <span class="remove" onclick="event.stopPropagation();removePdfFile()" title="${t('upload.removed')}">×</span>
             </div>
         `;
     }
+    renderUploadedDocActionBar();
 }
 
 updatePdfFileList();
@@ -1444,13 +1795,32 @@ function formatFileSize(bytes) {
 function handlePdfUpload(event) {
     const file = event.target.files[0];
     if (!file) return;
-    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
-        alert(t('upload.error') + ': 仅支持PDF文件');
+    const lower = file.name.toLowerCase();
+    const ext = lower.indexOf('.') >= 0 ? lower.split('.').pop() : '';
+    const proprietaryHints = {
+        caj: '知网私有格式（.caj）受加密/私密编码限制暂不支持直读，请在知网改选「PDF 下载」，或在 CAJViewer 中「打印 → 另存为 PDF」后上传。',
+        nh: '知网私有格式（.nh）暂不支持直读，请在知网改选「PDF 下载」或通过 CAJViewer 另存为 PDF 后上传。',
+        kdh: '知网私有格式（.kdh）暂不支持直读，请在知网改选「PDF 下载」或通过 CAJViewer 另存为 PDF 后上传。',
+        doc: '旧版 Word（.doc）暂不支持直读，请另存为 .docx 或 .pdf 后上传。',
+        ppt: '旧版 PPT（.ppt）暂不支持直读，请另存为 .pptx 或 .pdf 后上传。',
+        xls: '旧版 Excel（.xls）暂不支持直读，请另存为 .xlsx 或 .csv 后上传。',
+        wps: 'WPS 老格式（.wps）暂不支持直读，请另存为 .docx 或 .pdf 后上传。',
+        dwg: 'AutoCAD 私有图纸（.dwg）暂不支持直读，请导出为 .pdf、.dxf 或 .png 截图后上传。'
+    };
+    if (proprietaryHints[ext]) {
+        const bar = document.getElementById('pdf-action-bar');
+        if (bar) {
+            bar.innerHTML = DOMPurify.sanitize('<div style="color:#d29922;font-size:13px;">⚠️ ' + escapeHtml(proprietaryHints[ext]) + '</div>');
+            bar.style.display = 'block';
+        }
+        event.target.value = '';
         return;
     }
     currentPdfFile = file;
+    currentPdfContent = null;
+    currentIngestedDoc = null;
     updatePdfFileList();
-    // Auto-extract after upload
+    // Auto-extract and ingest into local library
     extractPdfContent();
     event.target.value = ''; // Reset input
 }
@@ -1472,7 +1842,7 @@ function previewPdfContent() {
         alert('暂无解析内容');
         return;
     }
-    alert('PDF内容预览:\n\n' + currentPdfContent.slice(0, 500) + (currentPdfContent.length > 500 ? '...' : ''));
+    alert('文献内容预览:\n\n' + currentPdfContent.slice(0, 500) + (currentPdfContent.length > 500 ? '...' : ''));
 }
 
 async function extractPdfContent() {
@@ -1483,6 +1853,7 @@ async function extractPdfContent() {
             const span = zone.querySelector('span[data-i18n="upload.dragDrop"]');
             if (span) span.textContent = t('upload.extractSuccess');
         }
+        renderUploadedDocActionBar();
         return;
     }
     if (!currentPdfFile) return;
@@ -1492,9 +1863,28 @@ async function extractPdfContent() {
     zone.style.pointerEvents = 'none';
     zone.style.opacity = '0.7';
 
+    const isPdf = currentPdfFile.name.toLowerCase().endsWith('.pdf');
     try {
         const formData = new FormData();
         formData.append('file', currentPdfFile);
+
+        if (!isPdf) {
+            const res = await fetch('/api/upload/extract', { method: 'POST', body: formData });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const data = await res.json();
+            if (data.error || !data.text) {
+                if (labelSpan) labelSpan.textContent = '❌ ' + (data.error || t('upload.extractFail'));
+                return;
+            }
+            currentPdfContent = data.text;
+            saveSearchPdfMeta();
+            if (labelSpan) {
+                labelSpan.textContent = t('upload.extractSuccess') + ' (' + (data.file_type || 'text') + ', ' + Number(data.char_length || data.text.length) + '字)';
+            }
+            await ingestUploadedDocToLocal();
+            return;
+        }
+
         const res = await fetch('/api/upload/extract/stream', {
             method: 'POST',
             body: formData
@@ -1547,7 +1937,9 @@ async function extractPdfContent() {
                 }
             }
         }
-        if (!gotResult) {
+        if (gotResult) {
+            await ingestUploadedDocToLocal();
+        } else {
             if (lastErr) {
                 const codeTag = lastErr.error_code ? ('[' + lastErr.error_code + '] ') : '';
                 const hintStr = lastErr.hint ? (' — ' + lastErr.hint) : '';

@@ -1766,6 +1766,13 @@ BM25 + 向量相似度的 RRF 融合检索（支持可选 `ipc` 子空间前缀�
 - 成功：`{"status":"ok","url":"/uploads/<uuid>.pdf","filename","size"}`。
 - 失败：`{"status":"error","message":"…"}`。
 
+**POST** `/api/upload/ingest-local`
+
+将技术调研页上传解析后的本地文献（专利 PDF、期刊/学术论文或技术方案文档）自动识别体裁并收入本地 SQLite 文献库（含 FTS5 全文索引与本地语义向量），返回入库 ID、自动识别体裁、核心检索关键词与详情页链接。
+
+- 请求 JSON：`{"filename": "paper.pdf", "content": "..."}`
+- 成功：`{"status":"ok","id":"...","patent_number":"...","title":"...","doc_kind":"...","source":"local_patent|local_paper|local_doc","keywords":[...],"detail_url":"/patent/..."}`。
+
 ### AI 分析（非流式 / 流式 / 审计 / 成本）
 
 **POST** `/api/ai/claims`

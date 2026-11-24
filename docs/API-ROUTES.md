@@ -5,7 +5,7 @@
 > `node scripts/gen_route_inventory.js`
 > 逐条「收什么、回什么」的契约（路径参数 / 请求体字段 / 响应键）见 `docs/API-CONTRACTS.md`，同样自动生成。
 
-共 **173** 条路由：页面/静态 9 条，`/api` 接口 164 条。
+共 **174** 条路由：页面/静态 9 条，`/api` 接口 165 条。
 
 ## 说明：清单只回答「有哪些端点」
 
@@ -181,9 +181,10 @@
 | 165 | GET | `/api/patents/:id/collections` | `routes::api_get_patent_collections` | src/common.rs:920 |
 | 166 | GET | `/api/tags` | `routes::api_list_all_tags` | src/common.rs:924 |
 | 167 | POST | `/api/upload/compare` | `routes::api_upload_compare` | src/common.rs:926 |
-| 168 | POST | `/api/upload/extract` | `routes::api_upload_extract` | src/common.rs:927 |
-| 169 | POST | `/api/upload/extract/stream` | `routes::api_upload_extract_stream` | src/common.rs:928 |
-| 170 | POST | `/api/upload/pdf-store` | `routes::api_upload_pdf_store` | src/common.rs:932 |
-| 171 | GET | `/api/patent/:id/numeral-check` | `routes::api_patent_numeral_check` | src/common.rs:934 |
-| 172 | POST | `/api/ai/numeral-consistency-check` | `routes::api_ai_numeral_consistency_check` | src/common.rs:938 |
-| 173 | GET | `/static/*path` | `serve_static_embedded` | src/common.rs:945 |
+| 168 | POST | `/api/upload/ingest-local` | `routes::api_upload_ingest_local` | src/common.rs:927 |
+| 169 | POST | `/api/upload/extract` | `routes::api_upload_extract` | src/common.rs:931 |
+| 170 | POST | `/api/upload/extract/stream` | `routes::api_upload_extract_stream` | src/common.rs:932 |
+| 171 | POST | `/api/upload/pdf-store` | `routes::api_upload_pdf_store` | src/common.rs:936 |
+| 172 | GET | `/api/patent/:id/numeral-check` | `routes::api_patent_numeral_check` | src/common.rs:938 |
+| 173 | POST | `/api/ai/numeral-consistency-check` | `routes::api_ai_numeral_consistency_check` | src/common.rs:942 |
+| 174 | GET | `/static/*path` | `serve_static_embedded` | src/common.rs:949 |
