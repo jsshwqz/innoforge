@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-24T15:22:02.627Z",
+  "generatedAt": "2026-11-24T16:05:43.569Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -594,6 +594,7 @@
         "createNewOaRound",
         "decorateTextWithNumeralLinks",
         "doPatentSend",
+        "downloadPatentReportDocx",
         "drawPatentCad",
         "escapeHtml",
         "exportPatentConclusions",
@@ -693,6 +694,7 @@
         "diagMutedSpan",
         "diagParseStatus",
         "doSearch",
+        "downloadSearchReportDocx",
         "escapeHtml",
         "evidenceHtml",
         "exportCsv",
