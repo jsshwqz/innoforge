@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-24T10:04:19.638Z",
+  "generatedAt": "2026-11-24T13:04:58.753Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -483,6 +483,7 @@
         "removeRef",
         "renderAdversarialResult",
         "renderArgBoard",
+        "renderDiscussFileBadge",
         "renderEvidenceCenter",
         "renderImportDiscussionPanel",
         "renderMarkdown",

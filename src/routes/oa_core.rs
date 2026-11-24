@@ -1088,8 +1088,13 @@ pub async fn api_ai_oa_discuss(
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
+    let file_text = req
+        .get("file_text")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
 
-    if message.trim().is_empty() && file_base64.is_empty() {
+    if message.trim().is_empty() && file_base64.is_empty() && file_text.is_empty() {
         return Sse::new(error_sse("[ERROR] 请输入讨论内容".into()));
     }
 
@@ -1229,35 +1234,49 @@ pub async fn api_ai_oa_discuss(
          {discussion_context}"
     );
 
-    // 处理上传的文件
-    let file_attachment = if !file_base64.is_empty() && !file_name.is_empty() {
-        if file_type.starts_with("image/") {
-            format!(
-                "\n\n[附件] 用户上传了一张图片：{}，请参考图片内容进行分析。",
-                file_name
-            )
-        } else {
-            // 尝试 base64 decode 文本文件
-            match base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &file_base64) {
-                Ok(bytes) => {
-                    if let Ok(text) = String::from_utf8(bytes) {
-                        if text.len() < 20000 {
-                            format!(
-                                "\n\n[附件] 用户上传了文件：{}\n内容：\n```\n{}\n```",
-                                file_name, text
-                            )
+    // 处理上传的文件（优先使用前端已提取的 file_text；否则用统一全格式解析器解析 file_base64，支持图片/PDF/DOCX/PPTX/XLSX/OFD/STEP/STL/IGES 等）
+    let file_attachment = if !file_text.trim().is_empty() && !file_name.is_empty() {
+        let bounded = crate::ai::truncate_for_ai(&file_text, 20_000);
+        format!(
+            "\n\n## 用户上传的补充附件\n{}",
+            bounded_reference_material(&format!("附件：{file_name}"), &bounded)
+        )
+    } else if !file_base64.is_empty() && !file_name.is_empty() {
+        match base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &file_base64) {
+            Ok(bytes) => {
+                match crate::routes::upload::extract_universal_text_from_bytes(
+                    &s, &file_name, &bytes,
+                )
+                .await
+                {
+                    Ok((extracted, ext)) => {
+                        let bounded = crate::ai::truncate_for_ai(&extracted, 20_000);
+                        let label = if file_type.starts_with("image/") {
+                            format!("图片附件（视觉识别）：{file_name}")
                         } else {
-                            format!(
-                                "\n\n[附件] 用户上传了文件：{}（文件过大，仅显示前20000字符）",
-                                file_name
-                            )
-                        }
-                    } else {
-                        format!("\n\n[附件] 用户上传了文件：{}（二进制文件）", file_name)
+                            format!("附件（{ext}）：{file_name}")
+                        };
+                        format!(
+                            "\n\n## 用户上传的补充附件\n{}",
+                            bounded_reference_material(&label, &bounded)
+                        )
+                    }
+                    Err(err_json) => {
+                        let reason = err_json
+                            .get("error")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("无法解析该附件格式");
+                        format!(
+                            "\n\n[附件] 用户上传了文件：{}（解析失败：{}）",
+                            file_name, reason
+                        )
                     }
                 }
-                Err(_) => format!("\n\n[附件] 用户上传了文件：{}（无法解析）", file_name),
             }
+            Err(_) => format!(
+                "\n\n[附件] 用户上传了文件：{}（Base64 解码失败）",
+                file_name
+            ),
         }
     } else {
         String::new()

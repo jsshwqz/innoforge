@@ -861,7 +861,7 @@ dependencies = [
 
 [[package]]
 name = "innoforge"
-version = "0.9.74"
+version = "0.9.75"
 dependencies = [
  "anyhow",
  "async-stream",

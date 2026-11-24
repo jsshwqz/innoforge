@@ -545,8 +545,9 @@
                     fd.append('file', file);
                     var resp = await fetch('/api/upload/extract', { method: 'POST', body: fd });
                     var data = await resp.json();
-                    if (data && data.content) {
-                        attachedFiles.push({ name: data.title || file.name, content: data.content });
+                    var extractedText = data && (data.text || data.content);
+                    if (extractedText) {
+                        attachedFiles.push({ name: data.title || file.name, content: extractedText });
                     } else {
                         alert('文件解析失败: ' + ((data && data.error) || file.name));
                     }
