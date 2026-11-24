@@ -722,6 +722,7 @@ pub fn build_router_with_token(
         )
         // OA 答复书 docx 导出
         .route("/api/oa/export-docx", post(routes::api_oa_export_docx))
+        .route("/api/export/docx", post(routes::api_export_markdown_docx))
         .route(
             "/api/oa/:case_id/export/docx",
             get(routes::api_oa_case_export_docx),

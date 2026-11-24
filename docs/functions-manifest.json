@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-24T13:04:58.753Z",
+  "generatedAt": "2026-11-24T15:22:02.627Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -69,6 +69,7 @@
         "doInventiveness",
         "doOfficeAction",
         "exportDiscussionConclusions",
+        "exportResultDocx",
         "exportResultMarkdown",
         "pasteMyPatent",
         "pasteOA",
@@ -102,6 +103,7 @@
         "doOfficeAction",
         "escapeHtml",
         "exportDiscussionConclusions",
+        "exportResultDocx",
         "exportResultMarkdown",
         "extractFile",
         "getBtn",
@@ -582,6 +584,7 @@
         "analyzeClaims",
         "applyDetailI18n",
         "applyEnrichedData",
+        "buildPatentExportToolbar",
         "cancelAnalyzeClaims",
         "cleanInlineLatex",
         "cleanup",
@@ -681,6 +684,7 @@
         "analyzeSearchResults",
         "batchSummarize",
         "buildRequest",
+        "buildSearchExportToolbar",
         "clearHistory",
         "clearSearchPdfMeta",
         "compareMatrix",

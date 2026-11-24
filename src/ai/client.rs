@@ -418,7 +418,7 @@ fn is_local_ai_host(base_url: &str) -> bool {
     lower.contains("://localhost") || lower.contains("://127.0.0.1") || lower.contains("://[::1]")
 }
 
-fn build_ai_http_client(base_url: &str, timeout: Duration, pooled: bool) -> Client {
+pub(super) fn build_ai_http_client(base_url: &str, timeout: Duration, pooled: bool) -> Client {
     let mut builder = Client::builder().timeout(timeout);
     if pooled {
         builder = builder

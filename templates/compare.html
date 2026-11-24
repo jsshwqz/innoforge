@@ -474,6 +474,7 @@
         }
         if (options.export) {
             html += '<button onclick="exportResultMarkdown()" title="导出为 Markdown 文件">📥 导出 Markdown</button>';
+            html += '<button onclick="exportResultDocx()" title="导出为 Word (.docx) 专业报告">📄 导出 Word</button>';
         }
         if (options.generateOA) {
             html += '<button class="btn-followup" onclick="doGenerateOAFromAnalysis()" title="基于上方创造性分析结果，生成意见陈述书草稿">📝 生成意见陈述书</button>';
@@ -519,6 +520,32 @@
         a.download = '分析报告_' + ts + '.md';
         a.click();
         URL.revokeObjectURL(a.href);
+    }
+
+    async function exportResultDocx() {
+        var text = lastAnalysisRawText || (document.querySelector('.result-content') || {}).innerText || '';
+        if (!text) return;
+        try {
+            var ts = new Date().toISOString().slice(0, 16).replace(/[T:]/g, '-');
+            var resp = await fetch('/api/export/docx', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    title: '方案对比与专利性分析报告',
+                    markdown: text,
+                    filename: '方案对比报告_' + ts
+                })
+            });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            var blob = await resp.blob();
+            var a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = '方案对比报告_' + ts + '.docx';
+            a.click();
+            URL.revokeObjectURL(a.href);
+        } catch (e) {
+            alert('导出 Word 失败: ' + e.message);
+        }
     }
 
     // ── General Compare ──

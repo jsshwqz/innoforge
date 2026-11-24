@@ -712,6 +712,111 @@ pub struct OaDocxQuery {
     pub statement: String,
 }
 
+/// POST /api/export/docx — 通用 Markdown 专业报告导出 Word (`.docx`)
+pub async fn api_export_markdown_docx(
+    Json(req): Json<serde_json::Value>,
+) -> axum::response::Response {
+    use axum::http::header;
+    use axum::response::IntoResponse;
+
+    let title = req
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("创研台技术分析报告")
+        .trim()
+        .to_string();
+    let subtitle = req
+        .get("subtitle")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let markdown = req
+        .get("markdown")
+        .or_else(|| req.get("content"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    if markdown.trim().is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "导出内容为空" })),
+        )
+            .into_response();
+    }
+
+    let raw_name = req
+        .get("filename")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or(if title.is_empty() {
+            "innoforge_report"
+        } else {
+            title.as_str()
+        });
+    let safe_stem: String = raw_name
+        .trim_end_matches(".docx")
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' || c == '-' || ('\u{4E00}'..='\u{9FFF}').contains(&c)
+            {
+                c
+            } else {
+                '_'
+            }
+        })
+        .take(64)
+        .collect();
+    let final_stem = if safe_stem.trim_matches('_').is_empty() {
+        "innoforge_report".to_string()
+    } else {
+        safe_stem.trim_matches('_').to_string()
+    };
+    let final_filename = format!("{final_stem}.docx");
+    let encoded_name = urlencoding::encode(&final_filename);
+
+    let default_subtitle = if subtitle.is_empty() {
+        format!(
+            "由创研台 InnoForge 生成 · {}",
+            chrono::Utc::now().format("%Y-%m-%d %H:%M UTC")
+        )
+    } else {
+        subtitle
+    };
+
+    let params = crate::docx_export::MarkdownDocxParams {
+        title,
+        subtitle: default_subtitle,
+        markdown,
+    };
+    match crate::docx_export::generate_markdown_docx(&params) {
+        Ok(bytes) => {
+            let disposition = format!(
+                "attachment; filename=\"innoforge_report.docx\"; filename*=UTF-8''{}",
+                encoded_name
+            );
+            (
+                StatusCode::OK,
+                [
+                    (
+                        header::CONTENT_TYPE,
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                            .to_string(),
+                    ),
+                    (header::CONTENT_DISPOSITION, disposition),
+                ],
+                bytes,
+            )
+                .into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("生成 Word 文档失败: {e}") })),
+        )
+            .into_response(),
+    }
+}
+
 /// GET /api/oa/:case_id/export/docx — 导出带红删线/蓝下划线修改对照页与意见陈述书的标准 `.docx`
 pub async fn api_oa_case_export_docx(
     State(s): State<AppState>,
