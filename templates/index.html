@@ -480,7 +480,7 @@
                 aiEl.style.color = '#d29922';
                 aiEl.style.borderColor = '#d29922';
             } else {
-                aiEl.textContent = t('home.statusAiOff');
+                aiEl.textContent = (typeof t === 'function' && t('home.statusAiOff') !== 'home.statusAiOff') ? t('home.statusAiOff') : '⚠️ AI 未配置 — 点击设置';
                 aiEl.style.color = '#d29922';
                 aiEl.style.borderColor = '#d29922';
             }
