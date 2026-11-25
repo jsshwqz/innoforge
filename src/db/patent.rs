@@ -7,7 +7,7 @@ use crate::patent::{Patent, PatentSummary, SearchType};
 use anyhow::Result;
 use rusqlite::{params, OptionalExtension};
 
-fn pick_richer_str(existing: &str, incoming: &str) -> String {
+pub(super) fn pick_richer_str(existing: &str, incoming: &str) -> String {
     let e = existing.trim();
     let n = incoming.trim();
     if n.is_empty() {
@@ -23,7 +23,7 @@ fn pick_richer_str(existing: &str, incoming: &str) -> String {
     }
 }
 
-fn pick_richer_json_array(existing: &str, incoming: &str) -> String {
+pub(super) fn pick_richer_json_array(existing: &str, incoming: &str) -> String {
     let e_empty = existing.trim().is_empty() || existing.trim() == "[]";
     let n_empty = incoming.trim().is_empty() || incoming.trim() == "[]";
     if n_empty && !e_empty {

@@ -94,6 +94,9 @@ impl Database {
     }
 
     /// 批量导入公开专利并同步写入结构化分块与 `chunks_fts`（单 `BEGIN IMMEDIATE` 事务 + 末尾 FTS optimize）。
+    ///
+    /// 增量防覆盖铁律：若同规范公开号记录已存在于本机库（例如之前已 Enrich 过完整权利要求/说明书/附图），
+    /// 批量导入轻量著录表时**绝不覆盖已有更丰富的全文/附图/中文标题/法律状态**，仅合并补齐缺失字段。
     pub fn batch_import_patents_with_chunks(
         &self,
         patents: &[crate::patent::Patent],
@@ -105,23 +108,168 @@ impl Database {
         let mut chunks_written = 0usize;
 
         for p in patents {
-            let existing_id: Option<String> = if p.patent_number.trim().is_empty() {
-                None
+            let canonical = crate::patent::canonical_patent_key(&p.patent_number);
+            let mut final_id = if p.id.trim().is_empty() {
+                uuid::Uuid::new_v4().to_string()
             } else {
-                tx.query_row(
-                    "SELECT id FROM patents WHERE patent_number = ?1 LIMIT 1",
-                    rusqlite::params![p.patent_number],
-                    |r| r.get(0),
-                )
-                .ok()
+                p.id.clone()
             };
-            let final_id = existing_id.unwrap_or_else(|| {
-                if p.id.trim().is_empty() {
-                    uuid::Uuid::new_v4().to_string()
-                } else {
-                    p.id.clone()
+            let mut final_patent_number = p.patent_number.clone();
+            let mut final_title = p.title.clone();
+            let mut final_abstract = p.abstract_text.clone();
+            let mut final_description = p.description.clone();
+            let mut final_claims = p.claims.clone();
+            let mut final_applicant = p.applicant.clone();
+            let mut final_inventor = p.inventor.clone();
+            let mut final_filing_date = p.filing_date.clone();
+            let mut final_pub_date = p.publication_date.clone();
+            let mut final_grant_date = p.grant_date.clone();
+            let mut final_ipc = p.ipc_codes.clone();
+            let mut final_cpc = p.cpc_codes.clone();
+            let mut final_priority_date = p.priority_date.clone();
+            let mut final_country = p.country.clone();
+            let mut final_kind_code = p.kind_code.clone();
+            let mut final_family_id = p.family_id.clone();
+            let mut final_legal_status = p.legal_status.clone();
+            let mut final_citations = p.citations.clone();
+            let mut final_cited_by = p.cited_by.clone();
+            let mut final_source = p.source.clone();
+            let mut final_raw_json = p.raw_json.clone();
+            let mut final_images = p.images.clone();
+            let mut final_pdf_url = p.pdf_url.clone();
+
+            if !canonical.is_empty() {
+                let mut stmt = tx.prepare_cached(
+                    "SELECT id, patent_number, title, abstract_text, description, claims,
+                            applicant, inventor, filing_date, publication_date, grant_date,
+                            ipc_codes, cpc_codes, priority_date, country, kind_code,
+                            family_id, legal_status, citations, cited_by, source, raw_json,
+                            images, pdf_url
+                     FROM patents
+                     WHERE REPLACE(REPLACE(REPLACE(UPPER(patent_number), ' ', ''), '-', ''), '.', '') LIKE ?1
+                     ORDER BY LENGTH(COALESCE(claims, '')) + LENGTH(COALESCE(description, '')) + LENGTH(COALESCE(images, '')) DESC
+                     LIMIT 20",
+                )?;
+                let canonical_like = format!("%{}%", canonical);
+                let mut rows = stmt.query(rusqlite::params![canonical_like])?;
+                while let Some(row) = rows.next()? {
+                    let existing_id: String = row.get(0)?;
+                    let existing_number: String = row.get(1)?;
+                    if crate::patent::canonical_patent_key(&existing_number) == canonical {
+                        final_id = existing_id;
+                        if final_patent_number.trim().is_empty() {
+                            final_patent_number = existing_number;
+                        }
+                        let existing_title: String = row.get(2).unwrap_or_default();
+                        let existing_abstract: String = row.get(3).unwrap_or_default();
+                        let existing_desc: String = row.get(4).unwrap_or_default();
+                        let existing_claims: String = row.get(5).unwrap_or_default();
+                        let existing_applicant: String = row.get(6).unwrap_or_default();
+                        let existing_inventor: String = row.get(7).unwrap_or_default();
+                        let existing_filing_date: String = row.get(8).unwrap_or_default();
+                        let existing_pub_date: String = row.get(9).unwrap_or_default();
+                        let existing_grant_date: Option<String> = row.get(10).ok().flatten();
+                        let existing_ipc: String = row.get(11).unwrap_or_default();
+                        let existing_cpc: String = row.get(12).unwrap_or_default();
+                        let existing_priority_date: String = row.get(13).unwrap_or_default();
+                        let existing_country: String = row.get(14).unwrap_or_default();
+                        let existing_kind_code: String = row.get(15).unwrap_or_default();
+                        let existing_family_id: Option<String> = row.get(16).ok().flatten();
+                        let existing_legal_status: String = row.get(17).unwrap_or_default();
+                        let existing_citations: String = row.get(18).unwrap_or_default();
+                        let existing_cited_by: String = row.get(19).unwrap_or_default();
+                        let existing_source: String = row.get(20).unwrap_or_default();
+                        let existing_raw_json: String = row.get(21).unwrap_or_default();
+                        let existing_images: String = row.get(22).unwrap_or_default();
+                        let existing_pdf_url: String = row.get(23).unwrap_or_default();
+
+                        let existing_has_cjk = existing_title
+                            .chars()
+                            .any(|ch| ('\u{4e00}'..='\u{9fff}').contains(&ch));
+                        let new_has_cjk = final_title
+                            .chars()
+                            .any(|ch| ('\u{4e00}'..='\u{9fff}').contains(&ch));
+                        if (existing_has_cjk && !new_has_cjk)
+                            || (final_title.trim().is_empty() && !existing_title.trim().is_empty())
+                        {
+                            final_title = existing_title;
+                        }
+                        if existing_claims.len() > final_claims.len() {
+                            final_claims = existing_claims;
+                        }
+                        if existing_desc.len() > final_description.len() {
+                            final_description = existing_desc;
+                        }
+                        let existing_abs_has_cjk = existing_abstract
+                            .chars()
+                            .any(|ch| ('\u{4e00}'..='\u{9fff}').contains(&ch));
+                        let new_abs_has_cjk = final_abstract
+                            .chars()
+                            .any(|ch| ('\u{4e00}'..='\u{9fff}').contains(&ch));
+                        if (existing_abs_has_cjk
+                            && !new_abs_has_cjk
+                            && !existing_abstract.is_empty())
+                            || (final_abstract.trim().is_empty()
+                                && !existing_abstract.trim().is_empty())
+                            || existing_abstract.len() > final_abstract.len()
+                        {
+                            final_abstract = existing_abstract;
+                        }
+                        final_applicant =
+                            super::patent::pick_richer_str(&existing_applicant, &final_applicant);
+                        final_inventor =
+                            super::patent::pick_richer_str(&existing_inventor, &final_inventor);
+                        final_filing_date = super::patent::pick_richer_str(
+                            &existing_filing_date,
+                            &final_filing_date,
+                        );
+                        final_pub_date =
+                            super::patent::pick_richer_str(&existing_pub_date, &final_pub_date);
+                        if final_grant_date
+                            .as_deref()
+                            .is_none_or(|s| s.trim().is_empty())
+                        {
+                            final_grant_date = existing_grant_date;
+                        }
+                        final_ipc =
+                            super::patent::pick_richer_json_array(&existing_ipc, &final_ipc);
+                        final_cpc =
+                            super::patent::pick_richer_json_array(&existing_cpc, &final_cpc);
+                        final_priority_date = super::patent::pick_richer_str(
+                            &existing_priority_date,
+                            &final_priority_date,
+                        );
+                        final_country =
+                            super::patent::pick_richer_str(&existing_country, &final_country);
+                        final_kind_code =
+                            super::patent::pick_richer_str(&existing_kind_code, &final_kind_code);
+                        if final_family_id.is_none() {
+                            final_family_id = existing_family_id;
+                        }
+                        if final_legal_status.trim().is_empty() {
+                            final_legal_status = existing_legal_status;
+                        }
+                        final_citations = super::patent::pick_richer_json_array(
+                            &existing_citations,
+                            &final_citations,
+                        );
+                        final_cited_by = super::patent::pick_richer_json_array(
+                            &existing_cited_by,
+                            &final_cited_by,
+                        );
+                        if final_source.trim().is_empty() {
+                            final_source = existing_source;
+                        }
+                        final_raw_json =
+                            super::patent::pick_richer_str(&existing_raw_json, &final_raw_json);
+                        final_images =
+                            super::patent::pick_richer_json_array(&existing_images, &final_images);
+                        final_pdf_url =
+                            super::patent::pick_richer_str(&existing_pdf_url, &final_pdf_url);
+                        break;
+                    }
                 }
-            });
+            }
 
             tx.execute(
                 "DELETE FROM patents_fts WHERE rowid = (SELECT rowid FROM patents WHERE id = ?1)",
@@ -131,29 +279,29 @@ impl Database {
                 "INSERT OR REPLACE INTO patents (id,patent_number,title,abstract_text,description,claims,applicant,inventor,filing_date,publication_date,grant_date,ipc_codes,cpc_codes,priority_date,country,kind_code,family_id,legal_status,citations,cited_by,source,raw_json,images,pdf_url) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24)",
                 rusqlite::params![
                     final_id,
-                    p.patent_number,
-                    p.title,
-                    p.abstract_text,
-                    p.description,
-                    p.claims,
-                    p.applicant,
-                    p.inventor,
-                    p.filing_date,
-                    p.publication_date,
-                    p.grant_date,
-                    p.ipc_codes,
-                    p.cpc_codes,
-                    p.priority_date,
-                    p.country,
-                    p.kind_code,
-                    p.family_id,
-                    p.legal_status,
-                    p.citations,
-                    p.cited_by,
-                    p.source,
-                    p.raw_json,
-                    p.images,
-                    p.pdf_url
+                    final_patent_number,
+                    final_title,
+                    final_abstract,
+                    final_description,
+                    final_claims,
+                    final_applicant,
+                    final_inventor,
+                    final_filing_date,
+                    final_pub_date,
+                    final_grant_date,
+                    final_ipc,
+                    final_cpc,
+                    final_priority_date,
+                    final_country,
+                    final_kind_code,
+                    final_family_id,
+                    final_legal_status,
+                    final_citations,
+                    final_cited_by,
+                    final_source,
+                    final_raw_json,
+                    final_images,
+                    final_pdf_url
                 ],
             )?;
             tx.execute(
@@ -163,10 +311,10 @@ impl Database {
 
             let chunks = crate::rag::build_chunks_from_patent(
                 &final_id,
-                &p.title,
-                &p.abstract_text,
-                &p.claims,
-                &p.description,
+                &final_title,
+                &final_abstract,
+                &final_claims,
+                &final_description,
             );
             chunks_written += Self::write_chunks_in_tx(&tx, &final_id, &chunks, model_name)?;
             imported += 1;

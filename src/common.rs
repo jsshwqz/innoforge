@@ -887,6 +887,14 @@ pub fn build_router_with_token(
         .route("/api/ipc/:code/patents", get(routes::api_ipc_patents))
         // 导入 API
         .route("/api/patents/import", post(routes::api_import_patents))
+        .route(
+            "/api/patents/import-table",
+            post(routes::api_import_patent_table),
+        )
+        .route(
+            "/api/patents/sync-folder",
+            get(routes::api_get_patent_sync_folder).post(routes::api_sync_patent_folder),
+        )
         .route("/api/backup/export", post(routes::api_backup_export))
         .route("/api/backup/check", post(routes::api_backup_check))
         // 收藏夹 API

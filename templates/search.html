@@ -116,6 +116,41 @@
 </div>
 <div id="pdf-action-bar" style="display:none;margin-top:10px;padding:12px 14px;background:#161b22;border:1px solid #30363d;border-left:3px solid #58a6ff;border-radius:8px;"></div>
 </div>
+<div class="panel page-bottom-panel" id="patent-bulk-import-panel">
+<div class="panel-header">
+<h3 style="margin:0;" data-i18n="bulk.title">📥 批量导入专利表 &amp; 本地/网盘同步目录</h3>
+</div>
+<p class="bulk-import-hint" data-i18n="bulk.desc">支持直接导入国知局 / Google Patents / 智慧芽 / incoPat 导出的 .xlsx / .csv / .json / .jsonl 轻量著录表，或绑定私人网盘同步文件夹一键增量扫描。已拉取全文/权利要求/附图的专利绝不被覆盖，粗筛命中后再按需补全文。</p>
+<div class="bulk-import-grid">
+  <div class="bulk-import-card">
+    <div class="bulk-import-subtitle" data-i18n="bulk.uploadTitle">1. 上传专利导出表（多行自动批量入库）</div>
+    <div class="bulk-import-row">
+      <input type="text" id="table-ipc-filter" data-i18n-placeholder="bulk.ipcPlaceholder" placeholder="可选 IPC 赛道过滤（如 H01L,G06F）">
+      <label class="bulk-import-check">
+        <input type="checkbox" id="table-lightweight-cb" checked>
+        <span data-i18n="bulk.lightweightLabel">仅存轻量著录（省空间，命中再按需补全文）</span>
+      </label>
+    </div>
+    <div class="bulk-import-row">
+      <input type="file" id="patent-table-input" accept=".xlsx,.csv,.tsv,.json,.jsonl" style="display:none" onchange="handlePatentTableUpload(event)">
+      <button type="button" class="btn-primary btn-sm" id="btn-upload-patent-table" onclick="document.getElementById('patent-table-input').click()" data-i18n="bulk.uploadBtn">📤 选择专利表导入 (.xlsx / .csv)</button>
+    </div>
+    <div id="table-import-status" class="bulk-import-status"></div>
+  </div>
+
+  <div class="bulk-import-card">
+    <div class="bulk-import-subtitle" data-i18n="bulk.syncTitle">2. 本地 / 私人网盘同步目录（跨电脑增量同步）</div>
+    <div class="bulk-import-row">
+      <input type="text" id="sync-folder-path" data-i18n-placeholder="bulk.folderPlaceholder" placeholder="填入本机或网盘同步目录绝对路径（如 /mnt/d/OneDrive/Patents）">
+    </div>
+    <div class="bulk-import-row">
+      <button type="button" class="btn-primary btn-sm" id="btn-sync-folder" onclick="syncPatentFolder(false)" data-i18n="bulk.syncBtn">🔄 一键增量同步</button>
+      <button type="button" class="btn-secondary btn-sm" id="btn-sync-folder-force" onclick="syncPatentFolder(true)" data-i18n="bulk.syncForceBtn">♻️ 全量重扫</button>
+    </div>
+    <div id="sync-folder-status" class="bulk-import-status"></div>
+  </div>
+</div>
+</div>
 </div>
 </main>
 </div>
@@ -211,6 +246,20 @@ function clearSearchPdfMeta() {
     'date.fromShort': '起:',
     'date.toShort': '止:',
     'search.bottomUploadTitle': '📎 本地文献上传与暂存',
+    'bulk.title': '📥 批量导入专利表 & 本地/网盘同步目录',
+    'bulk.desc': '支持直接导入国知局 / Google Patents / 智慧芽 / incoPat 导出的 .xlsx / .csv / .json / .jsonl 轻量著录表，或绑定私人网盘同步文件夹一键增量扫描。已拉取全文/权利要求/附图的专利绝不被覆盖，粗筛命中后再按需补全文。',
+    'bulk.uploadTitle': '1. 上传专利导出表（多行自动批量入库）',
+    'bulk.ipcPlaceholder': '可选 IPC 赛道过滤（如 H01L,G06F）',
+    'bulk.lightweightLabel': '仅存轻量著录（省空间，命中再按需补全文）',
+    'bulk.uploadBtn': '📤 选择专利表导入 (.xlsx / .csv)',
+    'bulk.syncTitle': '2. 本地 / 私人网盘同步目录（跨电脑增量同步）',
+    'bulk.folderPlaceholder': '填入本机或网盘同步目录绝对路径（如 /mnt/d/OneDrive/Patents）',
+    'bulk.syncBtn': '🔄 一键增量同步',
+    'bulk.syncForceBtn': '♻️ 全量重扫',
+    'bulk.uploading': '⏳ 正在解析并批量写入本地专利库...',
+    'bulk.syncing': '⏳ 正在增量扫描目录并写入本地专利库...',
+    'bulk.enterFolder': '请先填写本地或网盘同步目录路径',
+    'bulk.searchLocalNow': '🔍 立即搜本地库',
     'btn.search': '搜索',
     'btn.stats': '统计',
     'btn.export': '导出 CSV',
@@ -311,6 +360,20 @@ function clearSearchPdfMeta() {
     'date.fromShort': 'From:',
     'date.toShort': 'To:',
     'search.bottomUploadTitle': '📎 Local Document Staging & Import',
+    'bulk.title': '📥 Bulk Patent Table Import & Sync Folder',
+    'bulk.desc': 'Import .xlsx / .csv / .json / .jsonl patent tables exported from CNIPA, Google Patents, PatSnap, or incoPat, or bind a local / cloud-drive sync folder for incremental scanning. Existing enriched full text, claims, and drawings are never overwritten.',
+    'bulk.uploadTitle': '1. Upload Patent Export Table (Multi-Row Batch Import)',
+    'bulk.ipcPlaceholder': 'Optional IPC prefix filter (e.g. H01L,G06F)',
+    'bulk.lightweightLabel': 'Lightweight biblio only (save disk, enrich on demand)',
+    'bulk.uploadBtn': '📤 Select Patent Table (.xlsx / .csv)',
+    'bulk.syncTitle': '2. Local / Cloud-Drive Sync Folder (Incremental)',
+    'bulk.folderPlaceholder': 'Absolute path to local or cloud-sync folder (e.g. /mnt/d/OneDrive/Patents)',
+    'bulk.syncBtn': '🔄 Incremental Sync',
+    'bulk.syncForceBtn': '♻️ Full Rescan',
+    'bulk.uploading': '⏳ Parsing and importing into local patent DB...',
+    'bulk.syncing': '⏳ Scanning folder and importing new/updated tables...',
+    'bulk.enterFolder': 'Please enter a local or cloud-sync folder path first',
+    'bulk.searchLocalNow': '🔍 Search Local DB Now',
     'btn.search': 'Search',
     'btn.stats': 'Stats',
     'btn.export': 'Export CSV',
@@ -2279,6 +2342,163 @@ if (uploadZone) {
         }
     });
 }
+
+// ── Bulk Patent Table Upload & Local/Cloud-Drive Sync Folder (v0.9.86) ──
+function quickSearchLocalAfterImport(sampleQuery) {
+    var modeEl = document.getElementById('search-mode');
+    if (modeEl) modeEl.value = 'local';
+    toggleRegionSelect();
+    var inp = document.getElementById('search-input');
+    if (inp && sampleQuery) inp.value = sampleQuery;
+    doSearch(1);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+async function handlePatentTableUpload(event) {
+    var file = event && event.target && event.target.files ? event.target.files[0] : null;
+    if (!file) return;
+    var statusEl = document.getElementById('table-import-status');
+    var btn = document.getElementById('btn-upload-patent-table');
+    if (statusEl) {
+        statusEl.style.color = '#58a6ff';
+        statusEl.textContent = t('bulk.uploading');
+    }
+    if (btn) btn.disabled = true;
+    try {
+        var formData = new FormData();
+        formData.append('file', file);
+        var ipcEl = document.getElementById('table-ipc-filter');
+        var lwEl = document.getElementById('table-lightweight-cb');
+        if (ipcEl && ipcEl.value.trim()) formData.append('ipc_prefix', ipcEl.value.trim());
+        if (lwEl && lwEl.checked) formData.append('lightweight', 'true');
+        var resp = await fetch('/api/patents/import-table', { method: 'POST', body: formData });
+        var data = await resp.json();
+        if (data.status !== 'ok') {
+            if (statusEl) {
+                statusEl.style.color = '#f85149';
+                statusEl.textContent = '❌ ' + (data.message || '导入失败');
+            }
+            return;
+        }
+        if (statusEl) {
+            statusEl.style.color = '#3fb950';
+            var samples = Array.isArray(data.sample_numbers) ? data.sample_numbers : [];
+            var firstSample = samples.length > 0 ? samples[0] : '';
+            var msg = i18nLang === 'en'
+                ? ('✅ Imported ' + data.imported + ' / ' + data.total_rows + ' rows (' + data.chunks + ' chunks)' + (data.filtered_out ? ', filtered out ' + data.filtered_out : ''))
+                : ('✅ 已入库 ' + data.imported + ' / ' + data.total_rows + ' 条专利（' + data.chunks + ' 个索引分块）' + (data.filtered_out ? '，按 IPC 过滤 ' + data.filtered_out + ' 条' : ''));
+            statusEl.innerHTML = '';
+            var span = document.createElement('span');
+            span.textContent = msg + (samples.length ? ' · ' + samples.slice(0, 3).join(', ') : '');
+            statusEl.appendChild(span);
+            if (data.imported > 0) {
+                var jumpBtn = document.createElement('button');
+                jumpBtn.type = 'button';
+                jumpBtn.className = 'btn-secondary btn-sm';
+                jumpBtn.style.marginLeft = '8px';
+                jumpBtn.textContent = t('bulk.searchLocalNow');
+                jumpBtn.addEventListener('click', function() { quickSearchLocalAfterImport(firstSample); });
+                statusEl.appendChild(jumpBtn);
+            }
+        }
+    } catch (err) {
+        if (statusEl) {
+            statusEl.style.color = '#f85149';
+            statusEl.textContent = '❌ ' + err.message;
+        }
+    } finally {
+        if (btn) btn.disabled = false;
+        if (event && event.target) event.target.value = '';
+    }
+}
+
+async function loadPatentSyncFolderStatus() {
+    var pathEl = document.getElementById('sync-folder-path');
+    var statusEl = document.getElementById('sync-folder-status');
+    var ipcEl = document.getElementById('table-ipc-filter');
+    var lwEl = document.getElementById('table-lightweight-cb');
+    if (!pathEl || !statusEl) return;
+    try {
+        var resp = await fetch('/api/patents/sync-folder');
+        var data = await resp.json();
+        if (data.status !== 'ok') return;
+        if (data.folder_path) pathEl.value = data.folder_path;
+        if (data.ipc_prefix && ipcEl && !ipcEl.value) ipcEl.value = data.ipc_prefix;
+        if (typeof data.lightweight === 'boolean' && lwEl && data.folder_path) lwEl.checked = data.lightweight;
+        if (data.folder_path) {
+            var existsText = data.exists
+                ? (i18nLang === 'en' ? ('Folder ready · ' + data.detected_files + ' table file(s)') : ('目录就绪 · 发现 ' + data.detected_files + ' 个专利表文件'))
+                : (i18nLang === 'en' ? 'Folder not found on disk' : '当前目录不存在');
+            var lastText = data.last_at ? (' · ' + data.last_at + (data.last_summary ? ' (' + data.last_summary + ')' : '')) : '';
+            statusEl.style.color = data.exists ? '#8b949e' : '#d29922';
+            statusEl.textContent = existsText + lastText;
+        }
+    } catch (e) { /* ignore initial status load error */ }
+}
+
+async function syncPatentFolder(forceRescan) {
+    var pathEl = document.getElementById('sync-folder-path');
+    var statusEl = document.getElementById('sync-folder-status');
+    var btn = document.getElementById('btn-sync-folder');
+    var btnForce = document.getElementById('btn-sync-folder-force');
+    var folderPath = pathEl ? pathEl.value.trim() : '';
+    if (!folderPath) {
+        if (statusEl) {
+            statusEl.style.color = '#d29922';
+            statusEl.textContent = t('bulk.enterFolder');
+        }
+        return;
+    }
+    if (statusEl) {
+        statusEl.style.color = '#58a6ff';
+        statusEl.textContent = t('bulk.syncing');
+    }
+    if (btn) btn.disabled = true;
+    if (btnForce) btnForce.disabled = true;
+    try {
+        var ipcEl = document.getElementById('table-ipc-filter');
+        var lwEl = document.getElementById('table-lightweight-cb');
+        var resp = await fetch('/api/patents/sync-folder', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                folder_path: folderPath,
+                ipc_prefix: ipcEl ? ipcEl.value.trim() : '',
+                lightweight: lwEl ? Boolean(lwEl.checked) : false,
+                save_only: false,
+                force: Boolean(forceRescan)
+            })
+        });
+        var data = await resp.json();
+        if (data.status !== 'ok') {
+            if (statusEl) {
+                statusEl.style.color = '#f85149';
+                statusEl.textContent = '❌ ' + (data.message || '同步失败');
+            }
+            return;
+        }
+        if (statusEl) {
+            statusEl.style.color = '#3fb950';
+            var msg = i18nLang === 'en'
+                ? ('✅ Scanned ' + data.scanned_files + ' file(s): imported ' + data.imported_files + ' (' + data.imported_patents + ' patents), skipped unchanged ' + data.skipped_unchanged_files)
+                : ('✅ ' + (data.summary || ('已导入 ' + data.imported_patents + ' 件专利')));
+            if (Array.isArray(data.errors) && data.errors.length > 0) {
+                msg += ' · ⚠️ ' + data.errors[0];
+            }
+            statusEl.textContent = msg;
+        }
+    } catch (err) {
+        if (statusEl) {
+            statusEl.style.color = '#f85149';
+            statusEl.textContent = '❌ ' + err.message;
+        }
+    } finally {
+        if (btn) btn.disabled = false;
+        if (btnForce) btnForce.disabled = false;
+    }
+}
+
+loadPatentSyncFolderStatus();
 </script>
 <script>
 if ('serviceWorker' in navigator) {
