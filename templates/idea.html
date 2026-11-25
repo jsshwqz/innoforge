@@ -505,6 +505,11 @@
         var panel = document.getElementById('tab-' + tabId);
         if (panel) panel.classList.add('active');
         document.querySelectorAll('.tab-btn[data-tab="' + tabId + '"]').forEach(function(b) { b.classList.add('active'); });
+        if (tabId === 'report' && currentIdeaId && typeof loadReportTab === 'function') {
+            loadReportTab(currentIdeaId, currentReportType || 'full');
+        } else if (tabId === 'memory' && currentIdeaId && typeof loadMemory === 'function') {
+            loadMemory();
+        }
         saveIdeaWorkspaceState();
     }
 
@@ -2477,22 +2482,28 @@
             filtered.forEach(function(entry) {
                 var row = document.createElement('div');
                 row.style.cssText = 'padding:10px 14px;margin-bottom:6px;background:#161b22;border:1px solid #30363d;border-radius:6px;';
-                var delBtn = '<button style="padding:3px 8px;background:#f85149;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:11px;" onclick="deleteMemory(\'' + currentIdeaId + '\',\'' + entry.id.replace(/\'/g, "\\\\'") + '\')">Delete</button>';
+                var delText = i18nLang === 'en' ? 'Delete' : '删除';
                 row.innerHTML = DOMPurify.sanitize(
-                    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">' +
-                    '<div style="display:flex;align-items:center;gap:8px;">' +
+                    '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:6px;">' +
+                    '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
                     '<span style="font-size:1.1em;">' + getTypeIcon(entry.concept_type) + '</span>' +
                     '<span style="font-weight:600;color:#f0f6fc;">' + esc(entry.concept_name) + '</span>' +
-                    '<span style="font-size:0.8em;">' + getTypeLabel(entry.concept_type) + '</span>' +
+                    '<span style="font-size:0.8em;padding:1px 6px;border-radius:4px;background:#21262d;color:#8b949e;">' + getTypeLabel(entry.concept_type) + '</span>' +
                     '</div>' +
-                    '<div style="display:flex;align-items:center;gap:10px;">' +
-                    '<span style="font-size:0.8em;color:#8b949e;">confidence ' + (entry.confidence || 0).toFixed(2) + '</span>' +
-                    '<span style="font-size:0.75em;color:#484f58;">' + (entry.source_step || '') + '</span>' +
-                    delBtn +
+                    '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
+                    '<span style="font-size:0.78em;padding:2px 7px;border-radius:4px;background:#21262d;color:#8b949e;">confidence ' + (entry.confidence || 0).toFixed(2) + '</span>' +
+                    (entry.source_step ? '<span style="font-size:0.75em;padding:2px 7px;border-radius:4px;background:#1f242c;color:#79c0ff;">' + esc(entry.source_step) + '</span>' : '') +
+                    '<button type="button" class="mem-del-btn" style="padding:3px 9px;background:#da3633;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px;">' + delText + '</button>' +
                     '</div></div>' +
                     '<div style="color:#c9d1d9;line-height:1.6;font-size:0.9em;padding-left:24px;">' + esc(entry.content) + '</div>' +
                     '<div style="font-size:0.75em;color:#484f58;padding-left:24px;margin-top:4px;">' + (entry.created_at ? entry.created_at.substring(0, 16).replace('T', ' ') : '') + '</div>'
                 );
+                var delBtnEl = row.querySelector('.mem-del-btn');
+                if (delBtnEl) {
+                    delBtnEl.addEventListener('click', (function(ideaIdCopy, entryIdCopy) {
+                        return function() { deleteMemory(ideaIdCopy, entryIdCopy); };
+                    })(currentIdeaId, entry.id));
+                }
                 listEl.appendChild(row);
             });
         } catch(e) {

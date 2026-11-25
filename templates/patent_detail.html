@@ -24,7 +24,7 @@
                     <button class="ai-btn" onclick="aiSummarize()">🤖 <span data-i18n="detail.analyze"></span></button>
                     <button class="ai-btn" id="load-full-btn" onclick="loadFullText()">📄 加载全文</button>
                     <button class="ai-btn" id="view-original-pdf-btn" style="display:none;background:#1f6feb;" onclick="openOriginalPatentPdf()">📑 查看原版 PDF</button>
-                    <button class="ai-btn violet" onclick="window.open('/api/patent/pdf/{{id}}','_blank')">📥 导出 PDF</button>
+                    <button class="ai-btn violet" onclick="window.open('/api/patent/pdf/{{id}}','_blank')">🖨️ 打印 / 保存 PDF</button>
                     <button class="ai-btn green" onclick="window.location.href='/compare?patent={{patent_number}}&id={{id}}'">⚖️ 对比分析</button>
                     <button class="ai-btn orange" id="collect-btn" onclick="toggleCollect()">⭐ 收藏</button>
                 </div>
@@ -246,6 +246,7 @@
             return escapeHtml(cleanInlineLatex(s))
                 .replace(/&lt;br\s*\/?&gt;/gi, '<br>')
                 .replace(/\*\*([^*]+)\*\*/g, '<strong style="color:#f0f6fc;">$1</strong>')
+                .replace(/(^|[^\w*])\*([^\s*][^*\n]{0,120}?[^\s*]|[^\s*])\*(?!\*)/g, '$1<em>$2</em>')
                 .replace(/`([^`]+)`/g, '<code style="background:#21262d;padding:1px 5px;border-radius:4px;color:#79c0ff;">$1</code>');
         }
         for (var i = 0; i < lines.length; i++) {
@@ -321,7 +322,18 @@
             });
             if (!resp.ok) throw new Error('服务器错误 (' + resp.status + ')');
             const data = await resp.json();
-            el.innerHTML = DOMPurify.sanitize('<h3 style="margin:0 0 10px;color:#58a6ff;">🧠 全文档深度研发剖析</h3><div style="text-align:left;">' + renderDeepAnalysisMarkdown(data.content) + '</div>');
+            el.innerHTML = '';
+            const hdr = document.createElement('h3');
+            hdr.style.cssText = 'margin:0 0 10px;color:#58a6ff;';
+            hdr.textContent = '🧠 全文档深度研发剖析';
+            el.appendChild(hdr);
+            if (typeof buildPatentExportToolbar === 'function' && data.content) {
+                el.appendChild(buildPatentExportToolbar('全文档深度研发剖析 - {{patent_number}}', data.content, '专利深析_{{patent_number}}'));
+            }
+            const bodyDiv = document.createElement('div');
+            bodyDiv.style.textAlign = 'left';
+            bodyDiv.innerHTML = DOMPurify.sanitize(renderDeepAnalysisMarkdown(data.content));
+            el.appendChild(bodyDiv);
         } catch(e) { el.textContent = t('detail.fail') + ': ' + e; }
     }
 
@@ -990,6 +1002,16 @@
             img.addEventListener('error', function() {
                 var card = img.closest('.drawing-card');
                 if (!card || card.dataset.errHandled) return;
+                if (!img.dataset.retried) {
+                    img.dataset.retried = '1';
+                    var baseSrc = img.getAttribute('src') || '';
+                    if (baseSrc.indexOf('/api/patent/image-proxy') === 0) {
+                        setTimeout(function() {
+                            img.src = baseSrc + (baseSrc.indexOf('?') >= 0 ? '&' : '?') + '_r=' + Date.now();
+                        }, 900);
+                        return;
+                    }
+                }
                 card.dataset.errHandled = '1';
                 img.style.display = 'none';
                 var note = document.createElement('div');
@@ -1459,7 +1481,7 @@
       + '<div class="sidebar-label">' + (i18nLang === 'zh' ? '操作' : 'Actions') + '</div>'
       + '<button class="sidebar-btn primary" onclick="aiSummarize()">🤖 ' + t('detail.analyze') + '</button>'
       + '<button class="sidebar-btn" id="sb-load-full" onclick="loadFullText()">📄 加载全文</button>'
-      + '<button class="sidebar-btn" onclick="window.open(\'/api/patent/pdf/{{id}}\',\'_blank\')">📥 导出 PDF</button>'
+      + '<button class="sidebar-btn" onclick="window.open(\'/api/patent/pdf/{{id}}\',\'_blank\')">🖨️ 打印 / 保存 PDF</button>'
       + '<button class="sidebar-btn" id="sb-collect" onclick="toggleCollect()">⭐ 收藏</button>'
       + '</div>'
     );

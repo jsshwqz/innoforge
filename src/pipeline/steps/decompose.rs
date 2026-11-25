@@ -63,6 +63,11 @@ pub fn decompose_deterministic(title: &str, description: &str) -> ProblemQuadrup
         "达到",
         "优于",
         "控制在",
+        "nH",
+        "mΩ",
+        "kV",
+        "K/W",
+        "W/m",
     ];
     let target_sents: Vec<String> = full
         .split(['。', '；', '\n'])
@@ -73,7 +78,7 @@ pub fn decompose_deterministic(title: &str, description: &str) -> ProblemQuadrup
                 && quant_units.iter().any(|u| s.contains(u))
         })
         .take(2)
-        .map(|s| s.chars().take(80).collect())
+        .map(|s| s.chars().take(220).collect())
         .collect();
     let quantitative_target_effect = if !target_sents.is_empty() {
         target_sents.join("；")

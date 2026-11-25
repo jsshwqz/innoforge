@@ -521,6 +521,9 @@ async function doSearch(page) {
     currentRequest = body;
     saveHistory(body.query);
     renderHistory();
+    document.getElementById('results-info').innerHTML = '';
+    const diagEl = document.getElementById('search-diagnostics');
+    if (diagEl) diagEl.style.display = 'none';
     document.getElementById('results').innerHTML = `<p class="muted">${t('results.searching')}</p>`;
     document.getElementById('pagination').innerHTML = '';
 
@@ -1259,14 +1262,35 @@ async function showStats() {
     document.getElementById('stats-panel').style.display = 'block';
     document.getElementById('stats-content').innerHTML = `<p class="muted">${t('stats.loading')}</p>`;
     try {
-        const statsReq = { ...currentRequest, page: 1, page_size: 10000 };
-        const res = await fetch('/api/search/stats', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(statsReq)
-        });
-        if (!res.ok) throw new Error('服务器错误 (' + res.status + ')');
-        const data = await res.json();
+        let data;
+        const activeMode = document.getElementById('search-mode') ? document.getElementById('search-mode').value : '';
+        if ((activeMode === 'omni' || activeMode === 'academic') && lastResponse && Array.isArray(lastResponse.patents) && lastResponse.patents.length > 0) {
+            const items = lastResponse.patents;
+            const yearMap = {}, countryMap = {}, appMap = {};
+            items.forEach(function(p) {
+                const yr = String(p.filing_date || p.publication_date || '').slice(0, 4);
+                if (/^\d{4}$/.test(yr)) yearMap[yr] = (yearMap[yr] || 0) + 1;
+                const ct = String(p.country || (p.literature_kind === 'academic_paper' ? '学术/DOI' : '未知')).trim() || '未知';
+                countryMap[ct] = (countryMap[ct] || 0) + 1;
+                const ap = String(p.applicant || p.source_tag || '未知').trim() || '未知';
+                appMap[ap] = (appMap[ap] || 0) + 1;
+            });
+            data = {
+                total: items.length,
+                years: Object.entries(yearMap).sort(function(a, b) { return a[0].localeCompare(b[0]); }),
+                countries: Object.entries(countryMap).sort(function(a, b) { return b[1] - a[1]; }).slice(0, 8),
+                applicants: Object.entries(appMap).sort(function(a, b) { return b[1] - a[1]; }).slice(0, 10)
+            };
+        } else {
+            const statsReq = { ...currentRequest, page: 1, page_size: 10000 };
+            const res = await fetch('/api/search/stats', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(statsReq)
+            });
+            if (!res.ok) throw new Error('服务器错误 (' + res.status + ')');
+            data = await res.json();
+        }
         const applicants = Array.isArray(data.applicants) ? data.applicants : [];
         const countries = Array.isArray(data.countries) ? data.countries : [];
         const years = Array.isArray(data.years) ? data.years : [];

@@ -2006,7 +2006,56 @@ fn dedup_and_merge_omni_items(
     (out, local_count, patent_count, academic_count)
 }
 
-/// 快速将自然语言/中文技术描述用轻量 AI 扩写为英文学术检索词（5s 硬超时，失败静默退回原查询）
+/// 确定性中文工程术语→英文关键词兜底映射（当 AI 扩写超时或未配置 Key 时兜底，避免学术源 0 命中）
+fn fallback_cjk_technical_terms(query: &str) -> Option<String> {
+    const GLOSSARY: &[(&str, &str)] = &[
+        ("碳化硅", "silicon carbide"),
+        ("氮化镓", "gallium nitride"),
+        ("双面水冷", "double-sided liquid cooling"),
+        ("双面散热", "double-sided cooling"),
+        ("微通道", "microchannel"),
+        ("液冷", "liquid cooling"),
+        ("水冷", "water cooling"),
+        ("风冷", "air cooling"),
+        ("散热", "thermal cooling"),
+        ("热管理", "thermal management"),
+        ("液态金属", "liquid metal"),
+        ("均温板", "vapor chamber"),
+        ("热管", "heat pipe"),
+        ("母排", "busbar"),
+        ("功率模块", "power module"),
+        ("逆变器", "inverter"),
+        ("电驱", "electric drive"),
+        ("固态电池", "solid-state battery"),
+        ("锂电池", "lithium battery"),
+        ("储能", "energy storage"),
+        ("电机", "electric motor"),
+        ("转子", "rotor"),
+        ("定子", "stator"),
+        ("半导体", "semiconductor"),
+        ("激光", "laser"),
+        ("陶瓷", "ceramic"),
+        ("传感器", "sensor"),
+        ("无人机", "unmanned aerial vehicle"),
+        ("机器人", "robot"),
+    ];
+    let mut terms: Vec<&str> = Vec::new();
+    for (zh, en) in GLOSSARY {
+        if query.contains(zh) && !terms.contains(en) {
+            terms.push(en);
+            if terms.len() >= 4 {
+                break;
+            }
+        }
+    }
+    if terms.is_empty() {
+        None
+    } else {
+        Some(terms.join(" "))
+    }
+}
+
+/// 快速将自然语言/中文技术描述用轻量 AI 扩写为英文学术检索词（12s 超时 + 术语表兜底，失败静默退回）
 async fn expand_omni_english_query(s: &AppState, query: &str) -> Option<String> {
     let has_cjk = query
         .chars()
@@ -2014,27 +2063,30 @@ async fn expand_omni_english_query(s: &AppState, query: &str) -> Option<String> 
     if !has_cjk && query.split_whitespace().count() <= 6 {
         return None;
     }
-    let ai = {
+    let ai_opt = {
         let cfg = s.config.read().unwrap_or_else(|e| e.into_inner());
         if cfg.ai_api_key.trim().is_empty()
             && cfg.ai_api_key_gemini.trim().is_empty()
             && cfg.ai_api_key_deepseek.trim().is_empty()
+            && cfg.ai_api_key_sensetime.trim().is_empty()
+            && cfg.ai_api_key_openai.trim().is_empty()
         {
-            return None;
+            None
+        } else {
+            Some(cfg.ai_client_fast())
         }
-        cfg.ai_client_fast()
     };
-    let prompt = format!(
-        "将以下研发技术查询浓缩为 2 至 5 个最精准的英文专业检索关键词（仅输出空格分隔的英文词，不要任何标点、解释或引号）：\n<user_input>{}</user_input>",
-        crate::ai::client::safe_truncate(query, 300)
-    );
-    let fut = ai.chat_with_system(
-        "你是专利与学术文献检索词翻译器，仅输出 2-5 个空格分隔的英文专业关键词。",
-        &prompt,
-        0.1,
-    );
-    match tokio::time::timeout(std::time::Duration::from_secs(6), fut).await {
-        Ok(Ok(raw)) => {
+    if let Some(ai) = ai_opt {
+        let prompt = format!(
+            "将以下研发技术查询浓缩为 2 至 5 个最精准的英文专业检索关键词（仅输出空格分隔的英文词，不要任何标点、解释或引号）：\n<user_input>{}</user_input>",
+            crate::ai::client::safe_truncate(query, 300)
+        );
+        let fut = ai.chat_with_system(
+            "你是专利与学术文献检索词翻译器，仅输出 2-5 个空格分隔的英文专业关键词。",
+            &prompt,
+            0.1,
+        );
+        if let Ok(Ok(raw)) = tokio::time::timeout(std::time::Duration::from_secs(12), fut).await {
             let cleaned: String = raw
                 .lines()
                 .next()
@@ -2049,13 +2101,11 @@ async fn expand_omni_english_query(s: &AppState, query: &str) -> Option<String> 
                 .collect::<Vec<_>>()
                 .join(" ");
             if cleaned.len() >= 3 {
-                Some(cleaned)
-            } else {
-                None
+                return Some(cleaned);
             }
         }
-        _ => None,
     }
+    fallback_cjk_technical_terms(query)
 }
 
 /// POST /api/search/omni — AI 全域无感混搜（本地知识库 + 全球专利 + 学术论文并行聚合去重）
@@ -2072,6 +2122,8 @@ pub async fn api_search_omni(
         .to_ascii_lowercase();
     let scope = if scope == "academic" {
         "academic"
+    } else if scope == "local" {
+        "local"
     } else {
         "omni"
     };
@@ -2129,7 +2181,30 @@ pub async fn api_search_omni(
     let mut attempts: Vec<serde_json::Value> = Vec::new();
     let timeout_dur = std::time::Duration::from_secs(18);
 
-    if scope == "academic" {
+    if scope == "local" {
+        let local_db = s.db.clone();
+        let local_q = query.to_string();
+        let local_en = ai_expanded_en.clone();
+        let local_res = tokio::task::spawn_blocking(move || {
+            let mut out = local_db
+                .search_fts(&local_q, 1, per_source_limit)
+                .ok()
+                .map(|(list, _)| list)
+                .unwrap_or_default();
+            if let Some(en_q) = local_en {
+                if let Ok((en_list, _)) = local_db.search_fts(&en_q, 1, per_source_limit) {
+                    out.extend(en_list);
+                }
+            }
+            out
+        })
+        .await;
+        if let Ok(list) = local_res {
+            for item in list {
+                tagged_results.push((item, "local"));
+            }
+        }
+    } else if scope == "academic" {
         let oa_p = OpenAlexProvider::new(s.db.clone());
         let s2_p = SemanticScholarProvider::new(s.db.clone());
         let pm_p = PubMedProvider::new(s.db.clone());
@@ -2155,14 +2230,22 @@ pub async fn api_search_omni(
             }
         }
     } else {
-        // 全域混搜：并发查询「本地知识库 + 在线专利源 + OpenAlex 学术 + Semantic Scholar 学术」
+        // 全域混搜：并发查询「本地知识库（原词+英文扩写）+ 在线专利源 + OpenAlex 学术 + Semantic Scholar 学术」
         let local_db = s.db.clone();
         let local_q = query.to_string();
+        let local_en = ai_expanded_en.clone();
         let local_fut = tokio::task::spawn_blocking(move || {
-            local_db
+            let mut out = local_db
                 .search_fts(&local_q, 1, per_source_limit)
                 .ok()
                 .map(|(list, _)| list)
+                .unwrap_or_default();
+            if let Some(en_q) = local_en {
+                if let Ok((en_list, _)) = local_db.search_fts(&en_q, 1, per_source_limit) {
+                    out.extend(en_list);
+                }
+            }
+            Some(out)
         });
 
         let serp_key_opt = {
@@ -2232,6 +2315,17 @@ pub async fn api_search_omni(
         }
     }
 
+    // 为全域混搜结果统一计算 CRAAP 质量评分与多源互证徽章
+    let current_year = chrono::Utc::now()
+        .format("%Y")
+        .to_string()
+        .parse::<i32>()
+        .unwrap_or(2026);
+    let craap_summaries: Vec<PatentSummary> =
+        tagged_results.iter().map(|(s, _)| s.clone()).collect();
+    let craap_scores =
+        craap::score_batch_with_corroboration(&craap_summaries, scope, &[], current_year);
+
     let (all_merged, local_cnt, patent_cnt, academic_cnt) =
         dedup_and_merge_omni_items(tagged_results);
     let total = all_merged.len();
@@ -2245,6 +2339,7 @@ pub async fn api_search_omni(
         "source": scope,
         "scope": scope,
         "ai_expanded_terms": ai_expanded_en,
+        "craap_scores": craap_scores,
         "source_breakdown": {
             "local": local_cnt,
             "patent": patent_cnt,
