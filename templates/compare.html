@@ -20,61 +20,61 @@
 
         <!-- My Patent -->
         <div class="cmp-section cmp-my">
-            <label class="cmp-label my">我的专利（本申请）</label>
+            <label class="cmp-label my" data-i18n="compare.myPatentLabel">我的专利（本申请）</label>
             <div class="my-input-row">
-                <input type="text" id="my-patent" class="cmp-input" placeholder="输入专利号或内部 ID（如 CN900000001A）">
-                <button type="button" class="btn-upload" onclick="uploadMyPatent()">📎 上传</button>
-                <button type="button" id="btn-paste-my" class="btn-paste" onclick="pasteMyPatent()">📋 粘贴文本</button>
+                <input type="text" id="my-patent" class="cmp-input" data-i18n-placeholder="compare.myPatentPlaceholder" placeholder="输入专利号或内部 ID（如 CN900000001A）">
+                <button type="button" class="btn-upload" onclick="uploadMyPatent()" data-i18n="compare.uploadBtn">📎 上传</button>
+                <button type="button" id="btn-paste-my" class="btn-paste" onclick="pasteMyPatent()" data-i18n="compare.pasteBtn">📋 粘贴文本</button>
             </div>
             <div id="my-file-tag"></div>
         </div>
 
         <!-- Reference Documents -->
         <div class="cmp-section cmp-ref">
-            <label class="cmp-label ref">对比文件 <span class="ref-counter" id="ref-counter">1 篇</span></label>
+            <label class="cmp-label ref"><span data-i18n="compare.refLabel">对比文件</span> <span class="ref-counter" id="ref-counter">1 篇</span></label>
             <div id="ref-list">
                 <div class="ref-row" data-idx="0">
                     <input type="text" class="cmp-input ref-input" placeholder="对比文件 1 — 专利号或 ID">
-                    <button type="button" class="btn-upload" onclick="uploadRef(this)">📎 上传</button>
-                    <button type="button" class="btn-paste" onclick="pasteRef(this)">📋 粘贴文本</button>
+                    <button type="button" class="btn-upload" onclick="uploadRef(this)" data-i18n="compare.uploadBtn">📎 上传</button>
+                    <button type="button" class="btn-paste" onclick="pasteRef(this)" data-i18n="compare.pasteBtn">📋 粘贴文本</button>
                     <button type="button" class="btn-remove" onclick="removeRef(this)" title="移除">&times;</button>
                 </div>
             </div>
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px;">
-                <button class="btn-add" onclick="addRef()" id="btn-add-ref" style="margin-top:0;">+ 添加对比文件</button>
-                <button class="btn-add" onclick="autoFetchRefs()" id="btn-auto-ref" style="margin-top:0;border-color:#58a6ff;color:#58a6ff;">🔍 自动获取引证/相似对比文件</button>
+                <button class="btn-add" onclick="addRef()" id="btn-add-ref" style="margin-top:0;" data-i18n="compare.addRef">+ 添加对比文件</button>
+                <button class="btn-add" onclick="autoFetchRefs()" id="btn-auto-ref" style="margin-top:0;border-color:#58a6ff;color:#58a6ff;" data-i18n="compare.autoFetchRef">🔍 自动获取引证/相似对比文件</button>
                 <span id="auto-ref-hint" style="font-size:12px;color:#8b949e;"></span>
             </div>
         </div>
 
         <!-- Office Action (审查意见书) -->
         <div class="cmp-section cmp-oa">
-            <label class="cmp-label oa">审查意见通知书（可选 — 一审答复专用）</label>
+            <label class="cmp-label oa" data-i18n="compare.oaLabel">审查意见通知书（可选 — 一审答复专用）</label>
             <div class="my-input-row">
-                <input type="text" id="oa-input" class="cmp-input" disabled placeholder="请上传 PDF 或粘贴审查意见全文" style="flex:1;">
-                <button type="button" class="btn-upload" onclick="uploadOA()">📎 上传</button>
-                <button type="button" id="btn-paste-oa" class="btn-paste" onclick="pasteOA()">📋 粘贴文本</button>
+                <input type="text" id="oa-input" class="cmp-input" disabled data-i18n-placeholder="compare.oaPlaceholder" placeholder="请上传 PDF 或粘贴审查意见全文" style="flex:1;">
+                <button type="button" class="btn-upload" onclick="uploadOA()" data-i18n="compare.uploadBtn">📎 上传</button>
+                <button type="button" id="btn-paste-oa" class="btn-paste" onclick="pasteOA()" data-i18n="compare.pasteBtn">📋 粘贴文本</button>
             </div>
             <div id="oa-file-tag"></div>
         </div>
 
         <!-- Action Buttons -->
         <div class="btn-row">
-            <button class="btn-primary" id="btn-compare" onclick="doCompare()">通用对比</button>
-            <button class="btn-inventive" id="btn-inventive" onclick="doInventiveness()">创造性分析（三步法） <span class="reasoner-badge" style="background:rgba(219,109,40,0.25);border-color:#db6d28;">Reasoner</span></button>
-            <button class="btn-danger" id="btn-oa" onclick="doOfficeAction()">一审答复分析 <span class="reasoner-badge" style="background:rgba(248,81,73,0.25);border-color:var(--red);">Reasoner</span></button>
-            <button class="btn-add" type="button" onclick="clearCompareWorkspace()" style="margin-top:0;margin-left:auto;border-color:#484f58;color:#8b949e;" title="清空当前所有对比文件与结果，重新开始">🗑️ 清空对比</button>
+            <button class="btn-primary" id="btn-compare" onclick="doCompare()" data-i18n="compare.btnGeneral">通用对比</button>
+            <button class="btn-inventive" id="btn-inventive" onclick="doInventiveness()"><span data-i18n="compare.btnInventive">创造性分析（三步法）</span> <span class="reasoner-badge" style="background:rgba(219,109,40,0.25);border-color:#db6d28;">Reasoner</span></button>
+            <button class="btn-danger" id="btn-oa" onclick="doOfficeAction()"><span data-i18n="compare.btnOa">一审答复分析</span> <span class="reasoner-badge" style="background:rgba(248,81,73,0.25);border-color:var(--red);">Reasoner</span></button>
+            <button class="btn-add" type="button" onclick="clearCompareWorkspace()" style="margin-top:0;margin-left:auto;border-color:#484f58;color:#8b949e;" title="清空当前所有对比文件与结果，重新开始" data-i18n="compare.clearBtn">🗑️ 清空对比</button>
         </div>
 
         <div id="result"></div>
 
         <!-- AI Discussion Panel -->
         <div class="discussion-panel hidden" id="discussion-panel">
-            <div class="discussion-header">💬 AI 讨论 — 基于当前对比上下文</div>
+            <div class="discussion-header" data-i18n="compare.discussHeader">💬 AI 讨论 — 基于当前对比上下文</div>
             <div class="discussion-messages" id="discussion-messages"></div>
             <div class="discussion-input-row">
-                <input type="text" id="discussion-input" placeholder="输入你的问题..." onkeydown="if(event.key==='Enter') sendDiscussionMessage()">
-                <button id="discussion-send-btn" onclick="sendDiscussionMessage()">发送</button>
+                <input type="text" id="discussion-input" data-i18n-placeholder="compare.discussPlaceholder" placeholder="输入你的问题..." onkeydown="if(event.key==='Enter') sendDiscussionMessage()">
+                <button id="discussion-send-btn" onclick="sendDiscussionMessage()" data-i18n="compare.discussSend">发送</button>
                 <button id="discussion-stop-btn" class="btn-stop" style="display:none" onclick="stopDiscussionGeneration()" data-i18n="compare.stop"></button>
                 <button id="discussion-export-btn" class="btn-export-ghost" style="display:none" onclick="exportDiscussionConclusions()" data-i18n="compare.exportConclusions"></button>
             </div>
@@ -92,12 +92,12 @@
     <!-- Paste Text Modal -->
     <div class="paste-modal-overlay" id="paste-modal">
         <div class="paste-modal">
-            <h3 id="paste-modal-title">粘贴专利文本</h3>
-            <input type="text" class="paste-title-input" id="paste-title" placeholder="文档标题（如：CN900000001A 说明书）">
-            <textarea id="paste-content" placeholder="在此粘贴专利全文内容（权利要求书、说明书等）..."></textarea>
+            <h3 id="paste-modal-title" data-i18n="compare.pasteModalTitle">粘贴专利文本</h3>
+            <input type="text" class="paste-title-input" id="paste-title" data-i18n-placeholder="compare.pasteTitlePlaceholder" placeholder="文档标题（如：CN900000001A 说明书）">
+            <textarea id="paste-content" data-i18n-placeholder="compare.pasteContentPlaceholder" placeholder="在此粘贴专利全文内容（权利要求书、说明书等）..."></textarea>
             <div class="modal-btns">
-                <button class="btn-modal-cancel" onclick="closePasteModal()">取消</button>
-                <button class="btn-modal-ok" onclick="confirmPaste()">确定</button>
+                <button class="btn-modal-cancel" onclick="closePasteModal()" data-i18n="compare.cancel">取消</button>
+                <button class="btn-modal-ok" onclick="confirmPaste()" data-i18n="compare.confirm">确定</button>
             </div>
         </div>
     </div>
@@ -264,9 +264,9 @@
         var row = document.createElement('div');
         row.className = 'ref-row';
         row.setAttribute('data-idx', String(refIdxCounter));
-        row.innerHTML = '<input type="text" class="cmp-input ref-input" placeholder="对比文件 ' + (count + 1) + ' — 专利号或 ID">'
-            + '<button type="button" class="btn-upload" onclick="uploadRef(this)">📎 上传</button>'
-            + '<button type="button" class="btn-paste" onclick="pasteRef(this)">📋 粘贴文本</button>'
+        row.innerHTML = '<input type="text" class="cmp-input ref-input" placeholder="' + escapeHtml(t('compare.refPlaceholder', { n: count + 1 })) + '">'
+            + '<button type="button" class="btn-upload" onclick="uploadRef(this)" data-i18n="compare.uploadBtn">' + escapeHtml(t('compare.uploadBtn')) + '</button>'
+            + '<button type="button" class="btn-paste" onclick="pasteRef(this)" data-i18n="compare.pasteBtn">' + escapeHtml(t('compare.pasteBtn')) + '</button>'
             + '<button type="button" class="btn-remove" onclick="removeRef(this)" title="移除">&times;</button>';
         list.appendChild(row);
         updateAddBtn();
@@ -298,14 +298,14 @@
 
     function updateRefCounter() {
         var count = document.getElementById('ref-list').querySelectorAll('.ref-row').length;
-        document.getElementById('ref-counter').textContent = count + ' 篇';
+        document.getElementById('ref-counter').textContent = i18nLang === 'en' ? (count + (count === 1 ? ' doc' : ' docs')) : (count + ' 篇');
     }
 
     function reindexPlaceholders() {
         var inputs = document.querySelectorAll('.ref-input');
         for (let i = 0; i < inputs.length; i++) {
             if (!inputs[i].disabled) {
-                inputs[i].placeholder = '对比文件 ' + (i + 1) + ' — 专利号或 ID';
+                inputs[i].placeholder = t('compare.refPlaceholder', { n: i + 1 });
             }
         }
     }
@@ -776,6 +776,13 @@
     renderNavbar('compare');
     renderSidebar();
     applyI18nCommon();
+    updateRefCounter();
+    reindexPlaceholders();
+    window._onI18nLangChange = window._onI18nLangChange || [];
+    window._onI18nLangChange.push(function() {
+        updateRefCounter();
+        reindexPlaceholders();
+    });
 
     var prefilledPatentId = '';
 
@@ -1348,9 +1355,9 @@
         var list = document.getElementById('ref-list');
         if (list) {
             list.innerHTML = '<div class="ref-row" data-idx="0">'
-                + '<input type="text" class="cmp-input ref-input" placeholder="对比文件 1 — 专利号或 ID">'
-                + '<button type="button" class="btn-upload" onclick="uploadRef(this)">📎 上传</button>'
-                + '<button type="button" class="btn-paste" onclick="pasteRef(this)">📋 粘贴文本</button>'
+                + '<input type="text" class="cmp-input ref-input" placeholder="' + escapeHtml(t('compare.refPlaceholder', { n: 1 })) + '">'
+                + '<button type="button" class="btn-upload" onclick="uploadRef(this)" data-i18n="compare.uploadBtn">' + escapeHtml(t('compare.uploadBtn')) + '</button>'
+                + '<button type="button" class="btn-paste" onclick="pasteRef(this)" data-i18n="compare.pasteBtn">' + escapeHtml(t('compare.pasteBtn')) + '</button>'
                 + '<button type="button" class="btn-remove" onclick="removeRef(this)" title="移除">&times;</button>'
                 + '</div>';
             refIdxCounter = 0;
@@ -1397,9 +1404,9 @@
                         var row = document.createElement('div');
                         row.className = 'ref-row';
                         row.setAttribute('data-idx', idxStr);
-                        row.innerHTML = '<input type="text" class="cmp-input ref-input" placeholder="对比文件 ' + (i + 1) + ' — 专利号或 ID">'
-                            + '<button type="button" class="btn-upload" onclick="uploadRef(this)">📎 上传</button>'
-                            + '<button type="button" class="btn-paste" onclick="pasteRef(this)">📋 粘贴文本</button>'
+                        row.innerHTML = '<input type="text" class="cmp-input ref-input" placeholder="' + escapeHtml(t('compare.refPlaceholder', { n: i + 1 })) + '">'
+                            + '<button type="button" class="btn-upload" onclick="uploadRef(this)" data-i18n="compare.uploadBtn">' + escapeHtml(t('compare.uploadBtn')) + '</button>'
+                            + '<button type="button" class="btn-paste" onclick="pasteRef(this)" data-i18n="compare.pasteBtn">' + escapeHtml(t('compare.pasteBtn')) + '</button>'
                             + '<button type="button" class="btn-remove" onclick="removeRef(this)" title="移除">&times;</button>';
                         row.querySelector('.ref-input').value = r.value || '';
                         list.appendChild(row);

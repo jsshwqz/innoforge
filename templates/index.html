@@ -175,6 +175,7 @@
     window._onI18nLangChange = window._onI18nLangChange || [];
     window._onI18nLangChange.push(function() {
       if (typeof setMode === 'function') setMode(currentMode);
+      if (typeof renderHomeServiceStatus === 'function') renderHomeServiceStatus();
     });
     </script>
     <script>
@@ -453,23 +454,48 @@
     loadUploadedMeta();
     renderFileList();
 
+    var _homeStatusSnap = { searchOk: null, aiState: null, okName: '', errNames: [] };
+    function renderHomeServiceStatus() {
+        var aiEl = document.getElementById('status-ai');
+        var searchEl = document.getElementById('status-search');
+        if (searchEl && _homeStatusSnap.searchOk !== null) {
+            if (_homeStatusSnap.searchOk) {
+                searchEl.textContent = t('home.statusSearchOn');
+                searchEl.style.color = '#3fb950';
+            } else {
+                searchEl.textContent = t('home.statusSearchOff');
+                searchEl.style.color = '#8b949e';
+            }
+        }
+        if (aiEl && _homeStatusSnap.aiState) {
+            if (_homeStatusSnap.aiState === 'ok') {
+                aiEl.textContent = _homeStatusSnap.okName
+                    ? t('home.statusAiOkNamed', { name: _homeStatusSnap.okName })
+                    : t('home.statusAiOk');
+                aiEl.style.color = '#3fb950';
+                aiEl.style.borderColor = '';
+            } else if (_homeStatusSnap.aiState === 'err') {
+                var sep = i18nLang === 'en' ? ', ' : '、';
+                aiEl.textContent = t('home.statusAiErr', { names: _homeStatusSnap.errNames.join(sep) });
+                aiEl.style.color = '#d29922';
+                aiEl.style.borderColor = '#d29922';
+            } else {
+                aiEl.textContent = t('home.statusAiOff');
+                aiEl.style.color = '#d29922';
+                aiEl.style.borderColor = '#d29922';
+            }
+        }
+    }
+
     // 服务状态检测 — issue #68: AI 状态条与 /api/ai/models 探测同源，
     // 不再自己用 /api/settings 的 ai_api_key_configured 另算一套。
     (async function checkStatus() {
-        var aiEl = document.getElementById('status-ai');
-        var searchEl = document.getElementById('status-search');
-
         // 搜索状态仍从 /api/settings 读取
         try {
             var resp = await fetch('/api/settings');
             var data = await resp.json();
-            if (data.serpapi_key_configured || data.bing_api_key_configured || data.lens_api_key_configured) {
-                searchEl.textContent = '✅ 在线搜索已配置';
-                searchEl.style.color = '#3fb950';
-            } else {
-                searchEl.textContent = 'ℹ️ 在线搜索未配置（可用本地库）';
-                searchEl.style.color = '#8b949e';
-            }
+            _homeStatusSnap.searchOk = Boolean(data.serpapi_key_configured || data.bing_api_key_configured || data.lens_api_key_configured);
+            renderHomeServiceStatus();
         } catch(e) {}
 
         // AI 状态从 /api/ai/models 探测结果取 — 与模型列表页同一判据
@@ -483,28 +509,25 @@
             // #103：provider 显示名一律从探测结果派生，禁止写死厂商字面量
             var errNames = providers
                 .filter(function(p) { return p.status === 'error'; })
-                .map(function(p) { return p.name || '未知服务'; });
+                .map(function(p) { return p.name || (i18nLang === 'en' ? 'Unknown' : '未知服务'); });
             var okName = '';
             providers.forEach(function(p) {
                 if (!okName && p.status === 'ok' && (p.count || 0) > 0) okName = p.name || '';
             });
             if (anyOk) {
-                aiEl.textContent = okName ? ('✅ AI 已配置（' + okName + '）') : '✅ AI 服务已配置';
-                aiEl.style.color = '#3fb950';
+                _homeStatusSnap.aiState = 'ok';
+                _homeStatusSnap.okName = okName;
             } else if (errNames.length > 0) {
-                aiEl.textContent = '⚠️ ' + errNames.join('、') + '（未检测到服务）— 点击设置';
-                aiEl.style.color = '#d29922';
-                aiEl.style.borderColor = '#d29922';
+                _homeStatusSnap.aiState = 'err';
+                _homeStatusSnap.errNames = errNames;
             } else {
-                aiEl.textContent = '⚠️ AI 未配置 — 点击设置';
-                aiEl.style.color = '#d29922';
-                aiEl.style.borderColor = '#d29922';
+                _homeStatusSnap.aiState = 'off';
             }
+            renderHomeServiceStatus();
         } catch(e) {
             // 探测失败时回退到保守的"未配置"提示，不给假绿灯
-            aiEl.textContent = '⚠️ AI 未配置 — 点击设置';
-            aiEl.style.color = '#d29922';
-            aiEl.style.borderColor = '#d29922';
+            _homeStatusSnap.aiState = 'off';
+            renderHomeServiceStatus();
         }
     })();
 

@@ -17,34 +17,34 @@
     <aside id="page-sidebar" class="page-sidebar"></aside>
     <main class="settings-container page-main">
         <div class="page-title-bar">
-            <h2>系统设置</h2>
-            <button type="button" id="settings-back-btn" class="btn-gray" onclick="goBack()" style="display:none;margin-left:14px;padding:5px 12px;font-size:13px;border-radius:6px;cursor:pointer;">← 返回原工作页</button>
+            <h2 data-i18n="settings.pageHeading">系统设置</h2>
+            <button type="button" id="settings-back-btn" class="btn-gray" onclick="goBack()" style="display:none;margin-left:14px;padding:5px 12px;font-size:13px;border-radius:6px;cursor:pointer;" data-i18n="settings.backBtn">← 返回原工作页</button>
             <span id="version-display" style="margin-left:auto;color:#8b949e;font-size:13px;"></span>
         </div>
 
         <div class="setting-group">
-            <h3>🔑 SerpAPI 搜索配置（多 Key 轮询）</h3>
+            <h3 data-i18n="settings.serpapiTitle">🔑 SerpAPI 搜索配置（多 Key 轮询）</h3>
 
-            <p>配置多个 SerpAPI Key 自动轮询，突破单账号每月 250 次限制。未配置时自动回退本地数据库。</p>
-            <p class="warn-text">注册地址：<a href="https://serpapi.com/manage-api-key" target="_blank">https://serpapi.com/manage-api-key</a></p>
+            <p data-i18n="settings.serpapiDesc">配置多个 SerpAPI Key 自动轮询，突破单账号每月 250 次限制。未配置时自动回退本地数据库。</p>
+            <p class="warn-text"><span data-i18n="settings.serpapiReg">注册地址：</span><a href="https://serpapi.com/manage-api-key" target="_blank">https://serpapi.com/manage-api-key</a></p>
             <div id="serpapi-key-list"></div>
             <div class="btn-row" style="margin-top:8px;">
-                <button class="btn-gray btn-save" onclick="addSerpapiKeyRow()">+ 添加 SerpAPI Key</button>
-                <button class="btn-save" onclick="saveSerpApiKey()">保存</button>
+                <button class="btn-gray btn-save" onclick="addSerpapiKeyRow()" data-i18n="settings.serpapiAddKey">+ 添加 SerpAPI Key</button>
+                <button class="btn-save" onclick="saveSerpApiKey()" data-i18n="settings.saveBtn">保存</button>
             </div>
             <div id="serpapi-status" class="status-message"></div>
 
             <div class="sub-box">
-                <strong style="color:var(--accent-hover);">📊 SerpAPI 余额 / 用量</strong>
+                <strong style="color:var(--accent-hover);" data-i18n="settings.serpapiBalanceTitle">📊 SerpAPI 余额 / 用量</strong>
                 <div id="serpapi-balance-content" style="margin-top:8px;color:var(--text-secondary);font-size:var(--fs-base);">
                     点击查询加载...
                 </div>
-                <button class="btn-gray btn-save" style="margin-top:8px;padding:6px 16px;font-size:13px;" onclick="fetchSerpapiBalance()">🔄 刷新余额</button>
+                <button class="btn-gray btn-save" style="margin-top:8px;padding:6px 16px;font-size:13px;" onclick="fetchSerpapiBalance()" data-i18n="settings.serpapiBalanceRefresh">🔄 刷新余额</button>
             </div>
         </div>
 
         <div class="setting-group">
-            <h3>🤖 AI 搜索编排（队列 #2）</h3>
+            <h3 data-i18n="settings.agentTitle">🤖 AI 搜索编排（队列 #2）</h3>
             <p data-i18n="agent.desc">检索结果 0 命中时由 AI 改写重试；有结果时由 AI 重排并给出推荐理由。关闭后检索行为与旧版完全一致。LLM 编排调用共享每日预算。</p>
             <div style="margin:10px 0;">
                 <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
@@ -92,11 +92,11 @@
         </div>
 
         <div class="setting-group">
-            <h3>🤖 <span id="ai-provider-title">AI</span> 配置</h3>
-            <p>当前默认 AI 服务商，用于专利分析、创意验证等。</p>
+            <h3>🤖 <span id="ai-provider-title">AI</span> <span data-i18n="settings.aiConfigSuffix">配置</span></h3>
+            <p data-i18n="settings.aiConfigDesc">当前默认 AI 服务商，用于专利分析、创意验证等。</p>
 
             <div class="form-group">
-                <label>AI 服务商</label>
+                <label data-i18n="settings.aiProviderLabel">AI 服务商</label>
                 <select id="ai-provider">
                     <option value="deepseek">DeepSeek（国内第一）</option>
                     <option value="openai">OpenAI GPT-4o（国际最强）</option>
@@ -112,9 +112,9 @@
             </div>
 
             <div class="form-group">
-                <label>API Key</label>
+                <label data-i18n="settings.aiApiKeyLabel">API 密钥</label>
                 <div style="display:flex;gap:6px;align-items:center;">
-                    <input type="password" id="ai-api-key" placeholder="输入 API Key" autocomplete="off" style="flex:1;">
+                    <input type="password" id="ai-api-key" data-i18n-placeholder="settings.aiApiKeyPlaceholder" placeholder="输入 API Key" autocomplete="off" style="flex:1;">
                     <button type="button" class="btn-secondary" style="padding:6px 10px;font-size:12px;" onclick="toggleSecretField('ai-api-key', this)" title="显示/隐藏密钥">👁</button>
                 </div>
                 <a id="ai-key-link" href="https://platform.deepseek.com/" target="_blank" class="help-link">
@@ -123,45 +123,45 @@
             </div>
 
             <div class="form-group">
-                <label>API Base URL</label>
+                <label data-i18n="settings.aiBaseUrlLabel">接口地址（Base URL）</label>
                 <input type="text" id="ai-base-url" value="https://api.deepseek.com/v1" placeholder="https://api.example.com/v1">
                 <span class="form-hint" id="ai-base-hint">兼容 OpenAI 格式的 API 地址</span>
             </div>
 
             <div class="form-group">
-                <label>AI 模型（默认）</label>
+                <label data-i18n="settings.aiModelDefaultLabel">AI 模型（默认）</label>
                 <select id="ai-model">
                 </select>
-                <button class="btn-gray btn-save" id="ai-models-btn" style="margin-top:8px;padding:6px 16px;font-size:13px;" onclick="fetchAiModels(null, false)">🔍 查询可用模型</button>
+                <button class="btn-gray btn-save" id="ai-models-btn" style="margin-top:8px;padding:6px 16px;font-size:13px;" onclick="fetchAiModels(null, false)" data-i18n="settings.aiModelsQueryBtn">🔍 查询可用模型</button>
                 <div id="custom-model-group" class="form-group" style="display:none;margin-top:8px;">
-                    <label>自定义模型名称</label>
-                    <input type="text" id="ai-model-custom" placeholder="自定义模式请手动输入模型名">
+                    <label data-i18n="settings.aiModelCustomLabel">自定义模型名称</label>
+                    <input type="text" id="ai-model-custom" data-i18n-placeholder="settings.aiModelCustomPlaceholder" placeholder="自定义模式请手动输入模型名">
                 </div>
-                <span class="form-hint" id="ai-model-hint">选择模型或切换至自定义输入</span>
+                <span class="form-hint" id="ai-model-hint" data-i18n="settings.aiModelHint">选择模型或切换至自定义输入</span>
             </div>
 
             <div class="form-group">
-                <label>专家模型（深度分析）</label>
+                <label data-i18n="settings.aiModelExpertLabel">专家模型（深度分析）</label>
                 <select id="ai-model-expert">
                 </select>
                 <div id="custom-expert-model-group" class="form-group" style="display:none;margin-top:8px;">
-                    <label>自定义专家模型名称</label>
-                    <input type="text" id="ai-model-expert-custom" placeholder="自定义模式请手动输入模型名">
+                    <label data-i18n="settings.aiModelExpertCustomLabel">自定义专家模型名称</label>
+                    <input type="text" id="ai-model-expert-custom" data-i18n-placeholder="settings.aiModelCustomPlaceholder" placeholder="自定义模式请手动输入模型名">
                 </div>
-                <span class="form-hint">用于创新推演、创造性分析、侵权评估等高推理任务</span>
+                <span class="form-hint" data-i18n="settings.aiModelExpertHint">用于创新推演、创造性分析、侵权评估等高推理任务</span>
             </div>
 
-            <button class="btn-save" onclick="saveAiConfig()">保存</button>
+            <button class="btn-save" onclick="saveAiConfig()" data-i18n="settings.saveBtn">保存</button>
             <div id="ai-status" class="status-message"></div>
         </div>
 
         <div class="setting-group" id="google-oauth-section">
-            <h3>🔐 Google 高级认证（Gemini 更高额度）</h3>
-            <p>Google 账号认证后可获得比免费 API Key 更好的频率限制和配额。</p>
+            <h3 data-i18n="settings.googleAuthTitle">🔐 Google 高级认证（Gemini 更高额度）</h3>
+            <p data-i18n="settings.googleAuthDesc">Google 账号认证后可获得比免费 API Key 更好的频率限制和配额。</p>
 
             <!-- ── gcloud CLI 方式（推荐）── -->
             <div class="sub-box" style="margin-bottom:16px;">
-                <h4>方式一：gcloud CLI 自动识别 <span style="font-size:12px;color:var(--text-muted);font-weight:normal;">（推荐，无需配置 OAuth 同意屏幕）</span></h4>
+                <h4><span data-i18n="settings.gcloudTitle">方式一：gcloud CLI 自动识别</span> <span style="font-size:12px;color:var(--text-muted);font-weight:normal;">（推荐，无需配置 OAuth 同意屏幕）</span></h4>
                 <p style="color:var(--text-secondary);font-size:var(--fs-base);margin:8px 0;">
                     需要先安装 <a href="https://cloud.google.com/sdk/docs/install" target="_blank" style="color:var(--accent-hover);">gcloud CLI</a>，
                     然后运行以下命令登录：
@@ -172,15 +172,15 @@
                 <div id="gcloud-status" class="status-pill">检测 gcloud 状态中...</div>
 
                 <div class="btn-row">
-                    <button class="btn-gray btn-save" id="gcloud-detect-btn" onclick="detectGcloud()" style="padding:8px 16px;font-size:13px;">🔄 检测 gcloud 状态</button>
-                    <button class="btn-google btn-save" id="gcloud-login-btn" onclick="loginWithGcloud()" style="padding:8px 16px;font-size:13px;">🔑 通过 gcloud CLI 登录</button>
+                    <button class="btn-gray btn-save" id="gcloud-detect-btn" onclick="detectGcloud()" style="padding:8px 16px;font-size:13px;" data-i18n="settings.gcloudDetectBtn">🔄 检测 gcloud 状态</button>
+                    <button class="btn-google btn-save" id="gcloud-login-btn" onclick="loginWithGcloud()" style="padding:8px 16px;font-size:13px;" data-i18n="settings.gcloudLoginBtn">🔑 通过 gcloud CLI 登录</button>
                 </div>
                 <div id="gcloud-msg" class="status-message"></div>
             </div>
 
             <!-- ── 浏览器 OAuth 方式（备选）── -->
             <details class="details-box">
-                <summary>
+                <summary data-i18n="settings.oauthSummary">
                     ⚙️ 备用方式：浏览器 OAuth（需配置 OAuth 同意屏幕）
                 </summary>
                 <div class="sub-box" style="margin-top:8px;">
@@ -202,7 +202,7 @@
                     <div id="google-oauth-status" class="status-pill" style="font-size:var(--fs-base);"></div>
 
                     <div class="btn-row">
-                        <button class="btn-gray btn-save" onclick="saveGoogleCredentials()" style="padding:8px 16px;font-size:13px;">保存凭据</button>
+                        <button class="btn-gray btn-save" onclick="saveGoogleCredentials()" style="padding:8px 16px;font-size:13px;" data-i18n="settings.oauthSaveBtn">保存凭据</button>
                         <button class="btn-google btn-save" id="google-connect-btn" onclick="connectGoogle()" disabled style="padding:8px 16px;font-size:13px;">
                             <span id="google-btn-text">🔗 使用 Google 账号登录</span>
                         </button>
@@ -215,17 +215,17 @@
 
             <!-- ── Gemini CLI 方式（新增）── -->
             <div class="sub-box" style="margin-top:16px;">
-                <h4>方式三：Gemini CLI 子进程模式 <span style="font-size:12px;color:var(--text-muted);font-weight:normal;">（无需 API Key）</span></h4>
+                <h4><span data-i18n="settings.geminiCliTitle">方式三：Gemini CLI 子进程模式</span> <span style="font-size:12px;color:var(--text-muted);font-weight:normal;">（无需 API Key）</span></h4>
                 <p style="color:var(--text-secondary);font-size:var(--fs-base);margin:8px 0;">
                     使用已安装的 <code style="background:var(--bg-elevated);padding:1px 4px;border-radius:2px;">gemini</code> CLI 工具进行 AI 推理，
                     完全绕过 API Key 和 OAuth 作用域限制。启用后所有 AI 请求将改由 Gemini CLI 子进程处理。
                 </p>
                 <div id="gemini-cli-status" class="status-pill">检测 Gemini CLI 状态中...</div>
                 <div class="btn-row" style="align-items:center;">
-                    <button class="btn-gray btn-save" onclick="detectGeminiCli()" style="padding:8px 16px;font-size:13px;">🔄 检测 Gemini CLI</button>
+                    <button class="btn-gray btn-save" onclick="detectGeminiCli()" style="padding:8px 16px;font-size:13px;" data-i18n="settings.geminiCliDetectBtn">🔄 检测 Gemini CLI</button>
                     <label class="sidebar-toggle" style="margin-left:8px;">
                         <input type="checkbox" id="gemini-cli-toggle" onchange="toggleGeminiCliMode()">
-                        <span>启用 Gemini CLI 模式</span>
+                        <span data-i18n="settings.geminiCliEnable">启用 Gemini CLI 模式</span>
                     </label>
                 </div>
                 <div id="gemini-cli-msg" class="status-message"></div>
@@ -253,7 +253,7 @@
         <!-- 备用搜索源（Firecrawl/Bing/CNIPR）和备用 AI 已屏蔽，仅保留 SerpAPI + DeepSeek -->
 
         <div class="setting-group">
-            <h3>ℹ️ 当前配置状态</h3>
+            <h3 data-i18n="settings.statusTitle">ℹ️ 当前配置状态</h3>
             <p id="config-status">加载中...</p>
             <div class="btn-row" style="margin-top:12px;">
                 <button class="btn-save" type="button" onclick="exportDbBackup()" id="btn-backup-db" data-i18n="settings.backupDb">💾 立即备份本地数据库</button>
@@ -263,30 +263,30 @@
         </div>
 
         <div class="setting-group" id="ai-budget-breaker-group">
-            <h3>🛡️ AI 调用次数与 Token 硬熔断设置</h3>
-            <p class="muted" style="font-size:13px;">防止流水线或循环对话失控消耗配额。设为 0 表示不限制；达到上限时后端将硬阻断新的 AI 请求。</p>
+            <h3 data-i18n="settings.budgetTitle">🛡️ AI 调用次数与 Token 硬熔断设置</h3>
+            <p class="muted" style="font-size:13px;" data-i18n="settings.budgetDesc">防止流水线或循环对话失控消耗配额。设为 0 表示不限制；达到上限时后端将硬阻断新的 AI 请求。</p>
             <div id="ai-budget-today-summary" class="status-pill" style="margin-bottom:12px;">今日已调用 -- 次 · 已消耗 -- Tokens</div>
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;margin-bottom:12px;align-items:end;">
                 <div class="form-group" style="margin:0;">
-                    <label for="ai-budget-daily-calls">单日调用次数上限 (次/天)</label>
+                    <label for="ai-budget-daily-calls" data-i18n="settings.budgetDailyCalls">单日调用次数上限 (次/天)</label>
                     <input type="number" id="ai-budget-daily-calls" min="0" value="0" placeholder="0 = 不限制">
                 </div>
                 <div class="form-group" style="margin:0;">
-                    <label for="ai-budget-daily-tokens">单日总 Token 上限 (Tokens/天)</label>
+                    <label for="ai-budget-daily-tokens" data-i18n="settings.budgetDailyTokens">单日总 Token 上限 (Tokens/天)</label>
                     <input type="number" id="ai-budget-daily-tokens" min="0" value="0" placeholder="0 = 不限制">
                 </div>
                 <div class="form-group" style="margin:0;">
-                    <label for="ai-budget-idea-tokens">单创意 Token 上限 (Tokens/创意)</label>
+                    <label for="ai-budget-idea-tokens" data-i18n="settings.budgetIdeaTokens">单创意 Token 上限 (Tokens/创意)</label>
                     <input type="number" id="ai-budget-idea-tokens" min="0" value="0" placeholder="0 = 不限制">
                 </div>
             </div>
-            <button class="btn-save" type="button" onclick="saveAiBudgetSettings()">保存熔断阈值</button>
+            <button class="btn-save" type="button" onclick="saveAiBudgetSettings()" data-i18n="settings.budgetSaveBtn">保存熔断阈值</button>
             <div id="ai-budget-status-msg" class="status-message" style="margin-top:8px;"></div>
         </div>
 
         <div class="setting-group" id="model-router-group">
-            <h3>🧭 四角色 AI 模型路由表（Model Router）</h3>
-            <p class="muted" style="font-size:13px;">后端统一按任务角色自动分发至快模型、强推理、视觉多模态与严格 JSON 校验四类通道。</p>
+            <h3 data-i18n="settings.routerTitle">🧭 四角色 AI 模型路由表（Model Router）</h3>
+            <p class="muted" style="font-size:13px;" data-i18n="settings.routerDesc">后端统一按任务角色自动分发至快模型、强推理、视觉多模态与严格 JSON 校验四类通道。</p>
             <div id="model-router-table" class="muted" style="font-size:13px;">正在加载模型路由表...</div>
         </div>
 
@@ -326,6 +326,19 @@
         renderNavbar('settings');
         renderSidebar();
         applyI18nCommon();
+        window._onI18nLangChange = window._onI18nLangChange || [];
+        window._onI18nLangChange.push(function() {
+            var pSel = document.getElementById('ai-provider');
+            var keyLink = document.getElementById('ai-key-link');
+            if (pSel && keyLink && typeof AI_PROVIDERS !== 'undefined') {
+                var p = AI_PROVIDERS[pSel.value];
+                if (p) {
+                    keyLink.textContent = (typeof i18nLang !== 'undefined' && i18nLang === 'en')
+                        ? ('\u2192 Get ' + p.title + ' Key')
+                        : ('\u2192 \u83b7\u53d6 ' + p.title + ' Key');
+                }
+            }
+        });
 
         // ── AI 服务商预设数据 ──
         var AI_PROVIDERS = {
@@ -525,7 +538,9 @@
             if (provider) {
                 document.getElementById('ai-base-url').value = provider.base_url;
                 document.getElementById('ai-key-link').href = provider.key_link;
-                document.getElementById('ai-key-link').textContent = '\u2192 \u83b7\u53d6 ' + provider.title + ' Key';
+                document.getElementById('ai-key-link').textContent = (typeof i18nLang !== 'undefined' && i18nLang === 'en')
+                    ? ('\u2192 Get ' + provider.title + ' Key')
+                    : ('\u2192 \u83b7\u53d6 ' + provider.title + ' Key');
                 document.getElementById('ai-base-hint').textContent = provider.hint;
             } else {
                 document.getElementById('ai-base-url').value = 'http://localhost:11434/v1';

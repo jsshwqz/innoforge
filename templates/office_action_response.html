@@ -46,7 +46,7 @@
             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                 <button class="btn-secondary" id="btn-oa-round-drift" onclick="loadOaRoundDrift(true)" style="padding: 4px 12px; font-size: 13px;">🧭 <span data-i18n="oa.drift.btn">多轮视图漂移</span></button>
                 <button class="btn-primary" onclick="createOaRoundFromPage()" data-i18n="oa.workflow.newRound" style="padding: 4px 12px; font-size: 13px;"></button>
-                <button class="btn-secondary" onclick="clearCurrentCaseInputs()" style="padding: 4px 12px; font-size: 13px; color: #d73a49;">🗑️ 清空本案输入</button>
+                <button class="btn-secondary" onclick="clearCurrentCaseInputs()" style="padding: 4px 12px; font-size: 13px; color: #d73a49;" data-i18n="oar.clearCaseBtn">🗑️ 清空本案输入</button>
             </div>
         </div>
 
@@ -116,8 +116,8 @@
 
         <!-- 现行权利要求书（可选）：审查所针对的那版权项，用于「删限定＝扩大范围」校验 -->
         <div class="cmp-section cmp-my" id="oa-claims-section">
-            <label class="cmp-label orange" id="oa-claims-label">现行权利要求书（可选）</label>
-            <textarea id="current-claims" rows="3" style="width:100%;resize:vertical;font-family:Consolas,monospace;font-size:13px;" placeholder="可选。粘贴审查意见所针对的那版权项全文（如「1.一种……；2.根据权利要求1……」）。填了才能校验修改有没有删掉限定特征；不填会在产物里标注「扩范围方向未核验」。"></textarea>
+            <label class="cmp-label orange" id="oa-claims-label" data-i18n="oar.currentClaimsLabel">现行权利要求书（可选）</label>
+            <textarea id="current-claims" rows="3" style="width:100%;resize:vertical;font-family:Consolas,monospace;font-size:13px;" data-i18n-placeholder="oar.currentClaimsPlaceholder" placeholder="可选。粘贴审查意见所针对的那版权项全文（如「1.一种……；2.根据权利要求1……」）。填了才能校验修改有没有删掉限定特征；不填会在产物里标注「扩范围方向未核验」。"></textarea>
         </div>
 
         <!-- P0a: Deadline Countdown -->
@@ -162,7 +162,7 @@
         <!-- Depth Selector + Action Buttons -->
         <div class="btn-row" style="flex-wrap:wrap;gap:8px;align-items:center;">
             <button class="btn-primary" id="btn-analyze" onclick="doOAAnalysis()" data-i18n="oar.btnAnalyze"></button>
-            <button class="btn-secondary" onclick="runNumeralConsistencyCheck()" id="btn-numeral-check">🔢 标号一致性核查</button>
+            <button class="btn-secondary" onclick="runNumeralConsistencyCheck()" id="btn-numeral-check" data-i18n="oar.numeralCheckBtn">🔢 标号一致性核查</button>
             <button class="btn-secondary" onclick="triggerVisionFigureCheck()" id="btn-vision-figure">🖼️ <span data-i18n="oa.visionFigure.btn">附图标号与结构核对</span></button>
             <button class="btn-secondary" onclick="buildOaFeatureMatrix()" id="btn-oa-matrix">🧮 <span data-i18n="oa.matrix.btn">三维特征比对矩阵</span></button>
             <button class="btn-secondary" onclick="exportOaWordKit()" id="btn-oa-word-kit">📝 <span data-i18n="oa.exportWordKit.btn">导出 Word 答复套件 (.docx)</span></button>
@@ -177,7 +177,7 @@
             </div>
         </div>
         <details style="margin:8px 0 12px;padding:8px 12px;background:#161b22;border:1px solid #30363d;border-radius:8px;">
-            <summary style="cursor:pointer;color:#8b949e;font-size:13px;user-select:none;">🧰 更多专家推演与核查工具（多角色会诊 / 模拟审查员 / 权要修改模拟器 / 导入讨论等）</summary>
+            <summary style="cursor:pointer;color:#8b949e;font-size:13px;user-select:none;" data-i18n="oar.moreToolsSummary">🧰 更多专家推演与核查工具（多角色会诊 / 模拟审查员 / 权要修改模拟器 / 导入讨论等）</summary>
             <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;">
                 <button class="btn-secondary" onclick="showOADiscussImportDialog()" data-i18n="oar.discussImport">📥 导入讨论</button>
                 <button class="btn-secondary" onclick="showOaPanel()" id="btn-oa-panel">🎭 <span data-i18n="oa.panel.btn">多角色会诊</span></button>
