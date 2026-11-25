@@ -51,12 +51,12 @@
 | 19 | POST | `/api/chat/:session_key/save` | `session_key` | 任意 JSON（§19） | — | JSON（§19） | `routes::api_chat_save_message` | `src/routes/chat.rs:53` |
 | 20 | POST | `/api/chat/:session_key/delete` | `session_key` | — | — | JSON（§20） | `routes::api_chat_delete_messages` | `src/routes/chat.rs:90` |
 | 21 | POST | `/api/search` | — | `SearchRequest` | — | JSON SearchResult | `routes::api_search` | `src/routes/search.rs:423` |
-| 22 | POST | `/api/search/stats` | — | `SearchRequest` | — | JSON（§22） | `routes::api_search_stats` | `src/routes/search.rs:2303` |
-| 23 | POST | `/api/search/export` | — | `SearchRequest` | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_export_csv` | `src/routes/search.rs:2367` |
-| 24 | POST | `/api/search/export/xlsx` | — | `SearchRequest` | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_export_xlsx` | `src/routes/search.rs:2418` |
+| 22 | POST | `/api/search/stats` | — | `SearchRequest` | — | JSON（§22） | `routes::api_search_stats` | `src/routes/search.rs:2398` |
+| 23 | POST | `/api/search/export` | — | `SearchRequest` | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_export_csv` | `src/routes/search.rs:2462` |
+| 24 | POST | `/api/search/export/xlsx` | — | `SearchRequest` | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_export_xlsx` | `src/routes/search.rs:2513` |
 | 25 | POST | `/api/search/online` | — | `SearchRequest` | — | JSON（§25） | `routes::api_search_online` | `src/routes/search.rs:712` |
 | 26 | POST | `/api/search/source` | — | 任意 JSON（§26） | — | JSON（§26） | `routes::api_search_single_source` | `src/routes/search.rs:1732` |
-| 27 | POST | `/api/search/omni` | — | 任意 JSON（§27） | — | JSON（§27） | `routes::api_search_omni` | `src/routes/search.rs:2063` |
+| 27 | POST | `/api/search/omni` | — | 任意 JSON（§27） | — | JSON（§27） | `routes::api_search_omni` | `src/routes/search.rs:2113` |
 | 28 | POST | `/api/search/vector` | — | 任意 JSON（§28） | — | JSON（§28） | `routes::api_search_vector` | `src/routes/search.rs:1402` |
 | 29 | POST | `/api/search/analyze` | — | 任意 JSON（§29） | — | JSON（§29） | `routes::api_ai_analyze_results` | `src/routes/ai.rs:889` |
 | 30 | POST | `/api/patent/fetch` | — | `FetchPatentRequest` | — | JSON（§30） | `routes::api_fetch_patent` | `src/routes/patent.rs:18` |
@@ -72,8 +72,8 @@
 | 40 | POST | `/api/patent/lookup-or-fetch` | — | 任意 JSON（§40） | — | JSON（§40） | `routes::api_patent_lookup_and_fetch` | `src/routes/patent.rs:721` |
 | 41 | POST | `/api/patent/resolve-chinese-titles` | — | `ResolveTitlesRequest` | — | JSON（§41） | `routes::api_resolve_chinese_titles` | `src/routes/patent.rs:631` |
 | 42 | GET | `/api/patent/similar/:id` | `id` | — | — | JSON（§42） | `routes::api_recommend_similar` | `src/routes/patent.rs:984` |
-| 43 | GET / POST / PATCH | `/api/patent/:id/legal-status` | `id` | `UpdateLegalStatusRequest` | — | JSON（§43） | `routes::api_patent_legal_status`<br>`routes::api_update_patent_legal_status`<br>`routes::api_update_patent_legal_status` | `src/routes/patent.rs:1633`<br>`src/routes/patent.rs:1719`<br>`src/routes/patent.rs:1719` |
-| 44 | GET | `/api/patent/:id/citation-graph` | `id` | — | — | JSON（§44） | `routes::api_patent_citation_graph` | `src/routes/patent.rs:1761` |
+| 43 | GET / POST / PATCH | `/api/patent/:id/legal-status` | `id` | `UpdateLegalStatusRequest` | — | JSON（§43） | `routes::api_patent_legal_status`<br>`routes::api_update_patent_legal_status`<br>`routes::api_update_patent_legal_status` | `src/routes/patent.rs:1663`<br>`src/routes/patent.rs:1749`<br>`src/routes/patent.rs:1749` |
+| 44 | GET | `/api/patent/:id/citation-graph` | `id` | — | — | JSON（§44） | `routes::api_patent_citation_graph` | `src/routes/patent.rs:1791` |
 | 45 | POST | `/api/ai/chat` | — | `AiChatRequest` | — | JSON AiResponse | `routes::api_ai_chat` | `src/routes/ai.rs:440` |
 | 46 | POST | `/api/ai/chat/stream` | — | `AiChatRequest` | — | SSE 事件流（text/event-stream） | `routes::api_ai_chat_stream` | `src/routes/ai.rs:357` |
 | 47 | POST | `/api/ai/chat/conclusions` | — | 任意 JSON（§47） | — | JSON（§47） | `routes::api_ai_chat_conclusions` | `src/routes/ai.rs:626` |
@@ -418,7 +418,7 @@
 
 使用该类型的端点：`/api/search`
 
-### `UpdateLegalStatusRequest`（请求体；定义于 `src/routes/patent.rs:1714`）
+### `UpdateLegalStatusRequest`（请求体；定义于 `src/routes/patent.rs:1744`）
 
 | 字段（JSON 名） | 类型 | 可省略 |
 | --- | --- | --- |
@@ -635,7 +635,7 @@
 
 ### §22 POST `/api/search/stats`
 
-- 源码：`src/routes/search.rs:2303`
+- 源码：`src/routes/search.rs:2398`
 - 请求体：`SearchRequest`（字段见上文类型表）
 - 响应顶层键：`applicants`、`countries`、`total`、`years`
 
@@ -653,9 +653,9 @@
 
 ### §27 POST `/api/search/omni`
 
-- 源码：`src/routes/search.rs:2063`
+- 源码：`src/routes/search.rs:2113`
 - 读取的请求键：`country`、`language`、`page`、`page_size`、`query`、`region`、`scope`
-- 响应顶层键：`ai_expanded_terms`、`attempts`、`error`、`page`、`page_size`、`patents`、`scope`、`source`、`source_breakdown`、`total`
+- 响应顶层键：`ai_expanded_terms`、`attempts`、`craap_scores`、`error`、`page`、`page_size`、`patents`、`scope`、`source`、`source_breakdown`、`total`
 
 ### §28 POST `/api/search/vector`
 
@@ -747,21 +747,21 @@
 
 ### §43 GET / POST / PATCH `/api/patent/:id/legal-status`
 
-- **GET** `routes::api_patent_legal_status`（`src/routes/patent.rs:1633`）
+- **GET** `routes::api_patent_legal_status`（`src/routes/patent.rs:1663`）
   - 响应顶层键：`message`、`result`、`status`
   - `status` 取值：error / ok
-- **POST** `routes::api_update_patent_legal_status`（`src/routes/patent.rs:1719`）
+- **POST** `routes::api_update_patent_legal_status`（`src/routes/patent.rs:1749`）
   - 请求体：`UpdateLegalStatusRequest`（字段见上文类型表）
   - 响应顶层键：`badge_color`、`legal_status`、`message`、`normalized_status`、`patent_id`、`status`
   - `status` 取值：error / ok
-- **PATCH** `routes::api_update_patent_legal_status`（`src/routes/patent.rs:1719`）
+- **PATCH** `routes::api_update_patent_legal_status`（`src/routes/patent.rs:1749`）
   - 请求体：`UpdateLegalStatusRequest`（字段见上文类型表）
   - 响应顶层键：`badge_color`、`legal_status`、`message`、`normalized_status`、`patent_id`、`status`
   - `status` 取值：error / ok
 
 ### §44 GET `/api/patent/:id/citation-graph`
 
-- 源码：`src/routes/patent.rs:1761`
+- 源码：`src/routes/patent.rs:1791`
 - 响应顶层键：`badge_color`、`cited_patents`、`citing_patents`、`country`、`edges`、`family_id`、`family_patents`、`from`、`id`、`label`、`legal_status`、`message`、`nodes`、`normalized_status`、`patent_number`、`relation`、`role`、`status`、`title`、`to`
 - `status` 取值：error / ok
 

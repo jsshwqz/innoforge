@@ -1534,11 +1534,18 @@ pub async fn api_patent_image_proxy(
 
     // 尊重系统/环境变量代理：patentimages.storage.googleapis.com 在国内需经代理访问；
     // SSRF 边界已由 validate_patent_image_url 白名单 + HTTPS + 禁止重定向守住。
-    let client = match reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-    {
+    // 使用进程级复用连接池 + 短退避重试，避免 20+ 附图并发加载时反复冷握手触发 502。
+    static IMAGE_PROXY_CLIENT: std::sync::OnceLock<Result<reqwest::Client, String>> =
+        std::sync::OnceLock::new();
+    let client = match IMAGE_PROXY_CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .timeout(std::time::Duration::from_secs(30))
+            .pool_max_idle_per_host(8)
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|e| e.to_string())
+    }) {
         Ok(client) => client,
         Err(_) => {
             return (
@@ -1549,12 +1556,35 @@ pub async fn api_patent_image_proxy(
         }
     };
 
-    match client
-        .get(url)
-        .header("User-Agent", "Mozilla/5.0")
-        .send()
-        .await
-    {
+    let mut last_resp: Option<Result<reqwest::Response, reqwest::Error>> = None;
+    for attempt in 0..3u8 {
+        if attempt > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(350 * u64::from(attempt))).await;
+        }
+        let res = client
+            .get(url.clone())
+            .header("User-Agent", "Mozilla/5.0")
+            .send()
+            .await;
+        let should_retry = match &res {
+            Ok(r) => r.status().as_u16() == 429 || r.status().is_server_error(),
+            Err(_) => true,
+        };
+        last_resp = Some(res);
+        if !should_retry {
+            break;
+        }
+    }
+
+    let Some(resp_result) = last_resp else {
+        return (
+            StatusCode::BAD_GATEWAY,
+            [(header::CONTENT_TYPE, "text/plain")],
+            b"Failed to fetch image".to_vec(),
+        );
+    };
+
+    match resp_result {
         Ok(mut resp) => {
             if !resp.status().is_success() {
                 return (

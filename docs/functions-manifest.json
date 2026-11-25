@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-25T05:21:48.574Z",
+  "generatedAt": "2026-11-25T06:51:34.792Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -158,7 +158,6 @@
         "compareFeatureCards",
         "copyControlStCode",
         "decomposeIdeaQuadruple",
-        "deleteMemory",
         "drawIdeaCad",
         "exportBomXlsx",
         "exportConclusions",
