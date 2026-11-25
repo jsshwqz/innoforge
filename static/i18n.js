@@ -73,7 +73,19 @@ const I18N_COMMON = {
     'nav.settings': '设置',
     'sidebar.brandSub': '创研台',
     'sidebar.nav': '导航',
+    'sidebar.specialists': '专家角色',
     'sidebar.lang': '语言',
+    'nav.patentCoach': '专利代理师',
+    'nav.academicCoach': '学术论文助手',
+    'nav.tip.home': '输入技术想法，启动对话梳理、快速推演或深度推演',
+    'nav.tip.idea': '四元组拆解、6 维物理机理深度推演与仿真/BOM/论文交付包',
+    'nav.tip.search': '专利 + 学术论文全域混搜、IPC 锚定降噪与 CRAAP 互证',
+    'nav.tip.compare': '本申请与多份对比文件逐项比对、三步法创造性与侵权评估',
+    'nav.tip.oar': '官方 OA 答复、提交前魔鬼预审与期刊审稿逐条 Rebuttal',
+    'nav.tip.ai': '通用研发 AI 对话与多模态附件解读',
+    'nav.tip.settings': '配置 AI 服务商、检索密钥、模型路由与本地热备份',
+    'nav.tip.patentCoach': '高质量防写窄撰写辅导、FTO 规避与权要梯度布局',
+    'nav.tip.academicCoach': '真实 DOI 文献综述、实验设计与防破新颖性时序锁',
     // AI page
     'ai.title': 'AI 助手',
     'ai.hint': '可以问我技术相关的问题：可行性分析、方案比较、专利解读、技术路线等。',
@@ -734,6 +746,7 @@ const I18N_COMMON = {
     'home.expertAcademicTitle': '🎓 学术论文助手',
     'home.expertAcademicDesc': '真实 DOI 文献综述、实验设计与防破新颖性安全锁',
     'home.recentTitle': '最近项目',
+    'home.recentViewAll': '全部项目 →',
     'home.quickFetchSummary': '快速导入技术文献（输入专利号或文献编号）',
     'home.quickFetchPlaceholder': '输入专利号 (如 EP1234567, US10000000)',
     'home.quickFetchBtn': '抓取',
@@ -978,7 +991,19 @@ const I18N_COMMON = {
     'nav.settings': 'Settings',
     'sidebar.brandSub': 'R&D Workbench',
     'sidebar.nav': 'Navigation',
+    'sidebar.specialists': 'Specialists',
     'sidebar.lang': 'Language',
+    'nav.patentCoach': 'Patent Attorney',
+    'nav.academicCoach': 'Academic Paper',
+    'nav.tip.home': 'Describe a technical idea to start AI co-design, quick verify, or deep research',
+    'nav.tip.idea': '4-tuple decomposition, 6D physics reasoning, BOM & LaTeX deliverables',
+    'nav.tip.search': 'Global patent + academic omni-search, IPC anchoring & CRAAP scoring',
+    'nav.tip.compare': 'Multi-document technical comparison, 3-step inventiveness & FTO check',
+    'nav.tip.oar': 'Official OA response, pre-filing devil examiner & peer-review rebuttal',
+    'nav.tip.ai': 'General multimodal R&D assistant with file & diagram analysis',
+    'nav.tip.settings': 'Configure AI providers, search keys, model router & DB backup',
+    'nav.tip.patentCoach': 'Anti-narrowing claim drafting coach, FTO design-around & claim strategy',
+    'nav.tip.academicCoach': 'Verified-DOI literature review, experiment design & novelty-lock guard',
     'ai.title': 'AI Assistant',
     'ai.hint': 'Ask me about technical topics: feasibility analysis, solution comparison, patent review, technology roadmaps, etc.',
     'ai.placeholder': 'Enter your question...',
@@ -1674,6 +1699,7 @@ const I18N_COMMON = {
     'home.expertAcademicTitle': '🎓 Academic Paper Assistant',
     'home.expertAcademicDesc': 'Verified-DOI literature review, experiment design & novelty-lock guard',
     'home.recentTitle': 'Recent Projects',
+    'home.recentViewAll': 'View all →',
     'home.quickFetchSummary': 'Quick Import Technical Document (Patent / Publication Number)',
     'home.quickFetchPlaceholder': 'Enter patent number (e.g. EP1234567, US10000000)',
     'home.quickFetchBtn': 'Fetch',
@@ -1923,22 +1949,30 @@ var _NAV_ICONS = {
   compare: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="1.5" y="2.5" width="5.5" height="9" rx="1"/><rect x="9" y="2.5" width="5.5" height="9" rx="1"/><path d="M4.25 14v-2.5M11.75 14v-2.5"/></svg>',
   oar: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 1.5h4.5L12 5v9a.5.5 0 0 1-.5.5h-7A.5.5 0 0 1 4 14Z"/><path d="M8.5 1.5V5H12M6 9.5h4M6 11.5h2.5"/></svg>',
   ai: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3.5A1.5 1.5 0 0 1 3.5 2h9A1.5 1.5 0 0 1 14 3.5V9a1.5 1.5 0 0 1-1.5 1.5H7l-3.2 2.7V10.5H3.5A1.5 1.5 0 0 1 2 9Z"/><path d="M5.5 6h5M5.5 8h3"/></svg>',
+  attorney: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v11.5M4.5 13.5h7M3 5.5h10"/><path d="M3 5.5 1.7 9a2 2 0 0 0 2.6 0L3 5.5ZM13 5.5 11.7 9a2 2 0 0 0 2.6 0L13 5.5Z"/></svg>',
+  academic: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 6 8 3l6.5 3L8 9 1.5 6Z"/><path d="M4 7.5v3.5c0 1 1.8 2 4 2s4-1 4-2V7.5"/><path d="M14.5 6v4"/></svg>',
   settings: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="2.3"/><path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M12.4 3.6l-1.1 1.1M4.7 11.3l-1.1 1.1"/></svg>'
 };
 
-// Render right sidebar: brand + navigation + language switch + page-specific controls
+// Render right sidebar: brand + navigation + specialist roles + language switch + page-specific controls
 function renderSidebar(extraHtml) {
   var el = document.getElementById('page-sidebar');
   if (!el) return;
   var fromPath = location.pathname + location.search;
+  var currentRole = '';
+  try { currentRole = new URLSearchParams(location.search).get('role') || ''; } catch (e) {}
   var links = [
-    { href: '/', key: 'nav.home', id: 'home', icon: 'home' },
-    { href: '/idea', key: 'nav.idea', id: 'idea', icon: 'idea' },
-    { href: '/search', key: 'nav.search', id: 'search', icon: 'search' },
-    { href: '/compare', key: 'nav.compare', id: 'compare', icon: 'compare' },
-    { href: '/oa-response', key: 'nav.oar', id: 'oar', icon: 'oar' },
-    { href: '/ai', key: 'nav.ai', id: 'ai', icon: 'ai' },
-    { href: '/settings?from=' + encodeURIComponent(fromPath), key: 'nav.settings', id: 'settings', icon: 'settings' }
+    { href: '/', key: 'nav.home', tip: 'nav.tip.home', id: 'home', icon: 'home' },
+    { href: '/idea', key: 'nav.idea', tip: 'nav.tip.idea', id: 'idea', icon: 'idea' },
+    { href: '/search', key: 'nav.search', tip: 'nav.tip.search', id: 'search', icon: 'search' },
+    { href: '/compare', key: 'nav.compare', tip: 'nav.tip.compare', id: 'compare', icon: 'compare' },
+    { href: '/oa-response', key: 'nav.oar', tip: 'nav.tip.oar', id: 'oar', icon: 'oar' },
+    { href: '/ai', key: 'nav.ai', tip: 'nav.tip.ai', id: 'ai', icon: 'ai' },
+    { href: '/settings?from=' + encodeURIComponent(fromPath), key: 'nav.settings', tip: 'nav.tip.settings', id: 'settings', icon: 'settings' }
+  ];
+  var specialistLinks = [
+    { href: '/ai?role=patent_drafting_coach', key: 'nav.patentCoach', tip: 'nav.tip.patentCoach', role: 'patent_drafting_coach', icon: 'attorney' },
+    { href: '/ai?role=academic_paper_assistant', key: 'nav.academicCoach', tip: 'nav.tip.academicCoach', role: 'academic_paper_assistant', icon: 'academic' }
   ];
   // Brand
   var html = '<div class="sidebar-brand">'
@@ -1950,12 +1984,23 @@ function renderSidebar(extraHtml) {
   html += '<div class="sidebar-section">';
   html += '<div class="sidebar-label" data-i18n="sidebar.nav">' + t('sidebar.nav') + '</div>';
   html += '<div class="sidebar-nav">';
-  // patent_detail 页无独立导航项，映射到「搜索」保持激活态
-  var activeId = (_activePage === 'detail') ? 'search' : _activePage;
+  // patent_detail 页无独立导航项，映射到「搜索」保持激活态；若在预设专家角色下则高亮对应专家项
+  var isSpecialistActive = _activePage === 'ai' && (currentRole === 'patent_drafting_coach' || currentRole === 'academic_paper_assistant');
+  var activeId = (_activePage === 'detail') ? 'search' : (isSpecialistActive ? '' : _activePage);
   for (let i = 0; i < links.length; i++) {
     var cls = (links[i].id === activeId) ? ' class="active"' : '';
-    html += '<a href="' + links[i].href + '"' + cls + '>'
+    html += '<a href="' + links[i].href + '"' + cls + ' data-i18n-title="' + links[i].tip + '" title="' + t(links[i].tip) + '">'
       + _NAV_ICONS[links[i].icon] + '<span data-i18n="' + links[i].key + '">' + t(links[i].key) + '</span></a>';
+  }
+  html += '</div></div>';
+  // Specialists quick-launch section (available from every page)
+  html += '<div class="sidebar-section">';
+  html += '<div class="sidebar-label" data-i18n="sidebar.specialists">' + t('sidebar.specialists') + '</div>';
+  html += '<div class="sidebar-nav">';
+  for (let s = 0; s < specialistLinks.length; s++) {
+    var sCls = (isSpecialistActive && currentRole === specialistLinks[s].role) ? ' class="active"' : '';
+    html += '<a href="' + specialistLinks[s].href + '"' + sCls + ' data-i18n-title="' + specialistLinks[s].tip + '" title="' + t(specialistLinks[s].tip) + '">'
+      + _NAV_ICONS[specialistLinks[s].icon] + '<span data-i18n="' + specialistLinks[s].key + '">' + t(specialistLinks[s].key) + '</span></a>';
   }
   html += '</div></div>';
   // Language section

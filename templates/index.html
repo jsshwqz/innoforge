@@ -88,7 +88,10 @@
 
         <!-- 最近项目（严格与主卡片 960px 等宽对齐） -->
         <div class="recent-section" id="recent-ideas">
-            <h3 data-i18n="home.recentTitle">最近项目</h3>
+            <div class="home-section-head" style="margin-top:0;">
+                <h3 data-i18n="home.recentTitle">最近项目</h3>
+                <a href="/idea" style="font-size:12px;color:var(--accent-hover);text-decoration:none;" data-i18n="home.recentViewAll">全部项目 →</a>
+            </div>
             <div class="recent-list" id="recent-list"></div>
         </div>
 
@@ -108,58 +111,8 @@
             </details>
         </div>
 
-        <!-- 去重整合后的 6 卡片 3×2 独立自治工作台矩阵（零重复入口，严格 960px 齐平） -->
-        <div class="home-section-head">
-            <h3 data-i18n="home.workbenchTitle">功能工作台直达</h3>
-            <span data-i18n="home.workbenchSub">每张卡片独立即用 · 本地知识金库自动互通</span>
-        </div>
-        <div class="home-workbench-grid" aria-label="功能工作台直达">
-            <a href="/search" class="workbench-card">
-                <div class="workbench-card-top">
-                    <span class="workbench-card-title" data-i18n="home.featSearchTitle">🔍 专利检索调研</span>
-                    <span class="workbench-card-arrow">↗</span>
-                </div>
-                <p class="workbench-card-desc" data-i18n="home.expertSearcherDesc">专利+学术全库查全查准、IPC 锚定降噪与 CRAAP 互证</p>
-            </a>
-            <a href="/idea" class="workbench-card">
-                <div class="workbench-card-top">
-                    <span class="workbench-card-title" data-i18n="home.featIdeaTitle">🧠 AI 推演验证</span>
-                    <span class="workbench-card-arrow">↗</span>
-                </div>
-                <p class="workbench-card-desc" data-i18n="home.expertAnalystDesc">四元组拆解、6 维物理机理深度推演与仿真交付包</p>
-            </a>
-            <a href="/compare" class="workbench-card">
-                <div class="workbench-card-top">
-                    <span class="workbench-card-title" data-i18n="home.featCompareTitle">⚖️ 对比与侵权评估</span>
-                    <span class="workbench-card-arrow">↗</span>
-                </div>
-                <p class="workbench-card-desc" data-i18n="home.featCompareDesc">本申请与对比文件逐项比对，三步法创造性分析，一键生成一审答复。</p>
-            </a>
-            <a href="/oa-response" class="workbench-card">
-                <div class="workbench-card-top">
-                    <span class="workbench-card-title" data-i18n="home.featOarTitle">📝 OA 答复与复审</span>
-                    <span class="workbench-card-arrow">↗</span>
-                </div>
-                <p class="workbench-card-desc" data-i18n="home.featOarDesc">粘贴审查意见通知书，AI 全链路分析、多轮讨论推演，生成意见陈述书与证据表。</p>
-            </a>
-            <a href="/ai?role=patent_drafting_coach" class="workbench-card">
-                <div class="workbench-card-top">
-                    <span class="workbench-card-title" data-i18n="home.expertAttorneyTitle">⚖️ 专利代理师</span>
-                    <span class="workbench-card-arrow">↗</span>
-                </div>
-                <p class="workbench-card-desc" data-i18n="home.expertAttorneyDesc">高质量防写窄撰写辅导、FTO 规避与 OA 审查答复</p>
-            </a>
-            <a href="/ai?role=academic_paper_assistant" class="workbench-card">
-                <div class="workbench-card-top">
-                    <span class="workbench-card-title" data-i18n="home.expertAcademicTitle">🎓 学术论文助手</span>
-                    <span class="workbench-card-arrow">↗</span>
-                </div>
-                <p class="workbench-card-desc" data-i18n="home.expertAcademicDesc">真实 DOI 文献综述、实验设计与防破新颖性安全锁</p>
-            </a>
-        </div>
-
         <footer class="page-footer">
-            v{{version}} · <a href="https://github.com/jsshwqz/innoforge" target="_blank" rel="noopener">GitHub</a> · MIT License
+            v{{version}} · <a href="/oa-response" data-i18n="nav.oar">OA答复</a> · <a href="https://github.com/jsshwqz/innoforge" target="_blank" rel="noopener">GitHub</a> · MIT License
         </footer>
         </div>
     </main>
