@@ -15,7 +15,7 @@
 <body>
     <div class="page-with-sidebar">
     <aside id="page-sidebar" class="page-sidebar"></aside>
-    <div class="settings-container page-main">
+    <main class="settings-container page-main">
         <div class="page-title-bar">
             <h2>系统设置</h2>
             <button type="button" id="settings-back-btn" class="btn-gray" onclick="goBack()" style="display:none;margin-left:14px;padding:5px 12px;font-size:13px;border-radius:6px;cursor:pointer;">← 返回原工作页</button>
@@ -69,7 +69,10 @@
 
             <div class="form-group">
                 <label for="epo-key" data-i18n="settings.epoKeyLabel"></label>
-                <input type="text" id="epo-key" data-i18n-placeholder="settings.epoKeyPlaceholder" autocomplete="off" oninput="updateEpoPairHint()">
+                <div style="display:flex;gap:6px;align-items:center;">
+                    <input type="password" id="epo-key" data-i18n-placeholder="settings.epoKeyPlaceholder" autocomplete="off" oninput="updateEpoPairHint()" style="flex:1;">
+                    <button type="button" class="btn-secondary" style="padding:6px 10px;font-size:12px;" onclick="toggleSecretField('epo-key', this)" title="显示/隐藏密钥">👁</button>
+                </div>
                 <span class="form-hint" data-i18n="settings.epoKeyHint"></span>
             </div>
 
@@ -110,7 +113,10 @@
 
             <div class="form-group">
                 <label>API Key</label>
-                <input type="text" id="ai-api-key" placeholder="输入 API Key">
+                <div style="display:flex;gap:6px;align-items:center;">
+                    <input type="password" id="ai-api-key" placeholder="输入 API Key" autocomplete="off" style="flex:1;">
+                    <button type="button" class="btn-secondary" style="padding:6px 10px;font-size:12px;" onclick="toggleSecretField('ai-api-key', this)" title="显示/隐藏密钥">👁</button>
+                </div>
                 <a id="ai-key-link" href="https://platform.deepseek.com/" target="_blank" class="help-link">
                     → 获取 API Key
                 </a>
@@ -308,7 +314,7 @@
                 <div id="ai-cost-by-model" style="font-size:13px;color:var(--text-muted);"></div>
             </div>
         </div>
-    </div>
+    </main>
     </div>
 
     <script src="/static/i18n.js"></script>
@@ -921,14 +927,34 @@
             header.appendChild(delBtn);
             row.appendChild(header);
 
+            var inputWrap = document.createElement('div');
+            inputWrap.style.cssText = 'display:flex;gap:6px;align-items:center;';
             var input = document.createElement('input');
-            input.type = 'text';
+            input.type = 'password';
             input.id = 'serpapi-key-' + i;
+            input.setAttribute('data-serpapi-key', '1');
+            input.autocomplete = 'off';
             input.placeholder = '输入 SerpAPI Key #' + i;
             input.value = key || '';
-            input.style.cssText = 'width:100%;padding:8px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;font-size:0.9em;box-sizing:border-box;';
-            row.appendChild(input);
+            input.style.cssText = 'flex:1;padding:8px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;font-size:0.9em;box-sizing:border-box;';
+            var eyeBtn = document.createElement('button');
+            eyeBtn.type = 'button';
+            eyeBtn.textContent = '👁';
+            eyeBtn.title = '显示/隐藏密钥';
+            eyeBtn.style.cssText = 'padding:6px 10px;font-size:12px;background:#21262d;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;cursor:pointer;';
+            eyeBtn.addEventListener('click', function() { toggleSecretField(input.id, eyeBtn); });
+            inputWrap.appendChild(input);
+            inputWrap.appendChild(eyeBtn);
+            row.appendChild(inputWrap);
             container.appendChild(row);
+        }
+
+        function toggleSecretField(inputId, btn) {
+            var el = document.getElementById(inputId);
+            if (!el) return;
+            var isPwd = el.type === 'password';
+            el.type = isPwd ? 'text' : 'password';
+            if (btn) btn.textContent = isPwd ? '🙈' : '👁';
         }
 
 
@@ -1014,7 +1040,7 @@
         async function saveSerpApiKey() {
             var statusEl = document.getElementById('serpapi-status');
             var keys = [];
-            var inputs = document.querySelectorAll('#serpapi-key-list input[type="text"]');
+            var inputs = document.querySelectorAll('#serpapi-key-list input[data-serpapi-key="1"], #serpapi-key-list input[id^="serpapi-key-"]');
             for (let i = 0; i < inputs.length; i++) {
                 var val = inputs[i].value.trim();
                 if (val) keys.push(val);

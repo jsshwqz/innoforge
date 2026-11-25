@@ -10,6 +10,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+    <script src="/static/purify.min.js"></script>
 </head>
 <body>
     <div class="page-with-sidebar">
@@ -22,8 +23,8 @@
             <label class="cmp-label my">我的专利（本申请）</label>
             <div class="my-input-row">
                 <input type="text" id="my-patent" class="cmp-input" placeholder="输入专利号或内部 ID（如 CN900000001A）">
-                <button class="btn-upload" onclick="uploadMyPatent()">📎 上传</button>
-                <button class="btn-paste" onclick="pasteMyPatent()">📋 粘贴文本</button>
+                <button type="button" class="btn-upload" onclick="uploadMyPatent()">📎 上传</button>
+                <button type="button" id="btn-paste-my" class="btn-paste" onclick="pasteMyPatent()">📋 粘贴文本</button>
             </div>
             <div id="my-file-tag"></div>
         </div>
@@ -34,9 +35,9 @@
             <div id="ref-list">
                 <div class="ref-row" data-idx="0">
                     <input type="text" class="cmp-input ref-input" placeholder="对比文件 1 — 专利号或 ID">
-                    <button class="btn-upload" onclick="uploadRef(this)">📎 上传</button>
-                    <button class="btn-paste" onclick="pasteRef(this)">📋 粘贴</button>
-                    <button class="btn-remove" onclick="removeRef(this)" title="移除">&times;</button>
+                    <button type="button" class="btn-upload" onclick="uploadRef(this)">📎 上传</button>
+                    <button type="button" class="btn-paste" onclick="pasteRef(this)">📋 粘贴文本</button>
+                    <button type="button" class="btn-remove" onclick="removeRef(this)" title="移除">&times;</button>
                 </div>
             </div>
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px;">
@@ -51,8 +52,8 @@
             <label class="cmp-label oa">审查意见通知书（可选 — 一审答复专用）</label>
             <div class="my-input-row">
                 <input type="text" id="oa-input" class="cmp-input" disabled placeholder="请上传 PDF 或粘贴审查意见全文" style="flex:1;">
-                <button class="btn-upload" onclick="uploadOA()">📎 上传</button>
-                <button class="btn-paste" onclick="pasteOA()">📋 粘贴文本</button>
+                <button type="button" class="btn-upload" onclick="uploadOA()">📎 上传</button>
+                <button type="button" id="btn-paste-oa" class="btn-paste" onclick="pasteOA()">📋 粘贴文本</button>
             </div>
             <div id="oa-file-tag"></div>
         </div>
@@ -264,9 +265,9 @@
         row.className = 'ref-row';
         row.setAttribute('data-idx', String(refIdxCounter));
         row.innerHTML = '<input type="text" class="cmp-input ref-input" placeholder="对比文件 ' + (count + 1) + ' — 专利号或 ID">'
-            + '<button class="btn-upload" onclick="uploadRef(this)">📎 上传</button>'
-            + '<button class="btn-paste" onclick="pasteRef(this)">📋 粘贴</button>'
-            + '<button class="btn-remove" onclick="removeRef(this)" title="移除">&times;</button>';
+            + '<button type="button" class="btn-upload" onclick="uploadRef(this)">📎 上传</button>'
+            + '<button type="button" class="btn-paste" onclick="pasteRef(this)">📋 粘贴文本</button>'
+            + '<button type="button" class="btn-remove" onclick="removeRef(this)" title="移除">&times;</button>';
         list.appendChild(row);
         updateAddBtn();
         updateRefCounter();
@@ -312,28 +313,36 @@
     // ── Paste text modal ──
     var pasteTarget = null; // 'my' or 'ref_<idx>'
 
-    function pasteMyPatent() {
-        pasteTarget = 'my';
-        document.getElementById('paste-modal-title').textContent = '粘贴「我的专利」文本';
+    function openPasteModal(titleText) {
+        var modal = document.getElementById('paste-modal');
+        if (!modal) return;
+        document.getElementById('paste-modal-title').textContent = titleText;
         document.getElementById('paste-title').value = '';
         document.getElementById('paste-content').value = '';
-        document.getElementById('paste-modal').classList.add('show');
-        document.getElementById('paste-content').focus();
+        modal.classList.add('show');
+        modal.style.display = 'flex';
+        var ta = document.getElementById('paste-content');
+        if (ta) ta.focus();
+    }
+
+    function pasteMyPatent() {
+        pasteTarget = 'my';
+        openPasteModal('粘贴「我的专利 / 技术方案」文本');
     }
 
     function pasteRef(btn) {
         var row = btn.closest('.ref-row');
         var idx = row.getAttribute('data-idx');
         pasteTarget = 'ref_' + idx;
-        document.getElementById('paste-modal-title').textContent = '粘贴对比文件文本';
-        document.getElementById('paste-title').value = '';
-        document.getElementById('paste-content').value = '';
-        document.getElementById('paste-modal').classList.add('show');
-        document.getElementById('paste-content').focus();
+        openPasteModal('粘贴对比文件文本');
     }
 
     function closePasteModal() {
-        document.getElementById('paste-modal').classList.remove('show');
+        var modal = document.getElementById('paste-modal');
+        if (modal) {
+            modal.classList.remove('show');
+            modal.style.display = '';
+        }
         pasteTarget = null;
     }
 
@@ -408,11 +417,8 @@
 
     function pasteOA() {
         pasteTarget = 'oa';
-        document.getElementById('paste-modal-title').textContent = '粘贴审查意见通知书';
+        openPasteModal('粘贴审查意见通知书');
         document.getElementById('paste-title').value = '审查意见通知书';
-        document.getElementById('paste-content').value = '';
-        document.getElementById('paste-modal').classList.add('show');
-        document.getElementById('paste-content').focus();
     }
 
     function clearOA() {
@@ -679,6 +685,32 @@
     // ── Markdown Renderer (with table support) ──
     function escapeHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
+    function normalizeInlineMathText(s) {
+        if (!s) return '';
+        return String(s).replace(/\$([^$\n]{1,120})\$/g, function(_, expr) {
+            return expr
+                .replace(/\\(?:text|mathrm|mathbf|operatorname)\{([^}]*)\}/g, '$1')
+                .replace(/\\rightarrow|\\to\b/g, '→')
+                .replace(/\\leftarrow/g, '←')
+                .replace(/\\leftrightarrow/g, '↔')
+                .replace(/\^\\circ|\\circ\b/g, '°')
+                .replace(/\\leq|\\le\b/g, '≤')
+                .replace(/\\geq|\\ge\b/g, '≥')
+                .replace(/\\pm\b/g, '±')
+                .replace(/\\times\b/g, '×')
+                .replace(/\\cdot\b/g, '·')
+                .replace(/\\approx\b/g, '≈')
+                .replace(/\\Delta\b/g, 'Δ')
+                .replace(/\\mu\b/g, 'μ')
+                .replace(/\\Omega\b/g, 'Ω')
+                .replace(/\\alpha\b/g, 'α')
+                .replace(/\\beta\b/g, 'β')
+                .replace(/\\%/g, '%')
+                .replace(/\\,/g, ' ')
+                .replace(/[{}]/g, '');
+        });
+    }
+
     function renderMarkdown(text) {
         if (!text) return '';
         var codeBlocks = [];
@@ -686,6 +718,7 @@
             codeBlocks.push('<pre><code>' + escapeHtml(code) + '</code></pre>');
             return '\x00CB' + (codeBlocks.length - 1) + '\x00';
         });
+        text = normalizeInlineMathText(text);
 
         var tableBlocks = [];
         text = text.replace(/(?:^|\n)(\|.+\|)\n(\|[\s:|-]+\|)\n((?:\|.+\|\n?)+)/gm, function(_, header, sep, body) {
@@ -703,6 +736,7 @@
                 for (let c = 0; c < cells.length; c++) {
                     var tdStyle = c === 0 ? ' style="min-width:130px;font-weight:600;"' : '';
                     var cellText = escapeHtml(cells[c].trim())
+                        .replace(/&lt;br\s*\/?&gt;/gi, '<br>')
                         .replace(/`([^`]+)`/g, '<code>$1</code>')
                         .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
                     html += '<td' + tdStyle + '>' + cellText + '</td>';
@@ -715,6 +749,7 @@
         });
 
         var result = escapeHtml(text)
+            .replace(/&lt;br\s*\/?&gt;/gi, '<br>')
             .replace(/^---+[ \t]*$/gm, '<hr style="border:none;border-top:1px solid #30363d;margin:12px 0;">')
             .replace(/^&gt; (.+)$/gm, '<blockquote style="border-left:3px solid #58a6ff;padding:6px 12px;margin:8px 0;background:#161b22;color:#c9d1d9;border-radius:4px;">$1</blockquote>')
             .replace(/^#### (.+)$/gm, '<h4>$1</h4>')
@@ -723,8 +758,9 @@
             .replace(/^# (.+)$/gm, '<h1>$1</h1>')
             .replace(/`([^`]+)`/g, '<code>$1</code>')
             .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-            .replace(/^\- (.+)$/gm, '<li>$1</li>')
-            .replace(/^(\d+)\. (.+)$/gm, '<li>$2</li>')
+            .replace(/^[ \t]*(?:-|\*|•) (.+)$/gm, '<li>$1</li>')
+            .replace(/^[ \t]*(\d+)\. (.+)$/gm, '<li>$2</li>')
+            .replace(/(^|[^\w*])\*([^\s*][^*\n]{0,120}?[^\s*]|[^\s*])\*(?!\*)/g, '$1<em>$2</em>')
             .replace(/(<li>.*<\/li>)/g, '<ul>$1</ul>')
             .replace(/<\/ul>\s*<ul>/g, '')
             .replace(/\n{2,}/g, '</p><p>')
@@ -1313,9 +1349,9 @@
         if (list) {
             list.innerHTML = '<div class="ref-row" data-idx="0">'
                 + '<input type="text" class="cmp-input ref-input" placeholder="对比文件 1 — 专利号或 ID">'
-                + '<button class="btn-upload" onclick="uploadRef(this)">📎 上传</button>'
-                + '<button class="btn-paste" onclick="pasteRef(this)">📋 粘贴</button>'
-                + '<button class="btn-remove" onclick="removeRef(this)" title="移除">&times;</button>'
+                + '<button type="button" class="btn-upload" onclick="uploadRef(this)">📎 上传</button>'
+                + '<button type="button" class="btn-paste" onclick="pasteRef(this)">📋 粘贴文本</button>'
+                + '<button type="button" class="btn-remove" onclick="removeRef(this)" title="移除">&times;</button>'
                 + '</div>';
             refIdxCounter = 0;
             updateRefCounter();
@@ -1362,9 +1398,9 @@
                         row.className = 'ref-row';
                         row.setAttribute('data-idx', idxStr);
                         row.innerHTML = '<input type="text" class="cmp-input ref-input" placeholder="对比文件 ' + (i + 1) + ' — 专利号或 ID">'
-                            + '<button class="btn-upload" onclick="uploadRef(this)">📎 上传</button>'
-                            + '<button class="btn-paste" onclick="pasteRef(this)">📋 粘贴</button>'
-                            + '<button class="btn-remove" onclick="removeRef(this)" title="移除">&times;</button>';
+                            + '<button type="button" class="btn-upload" onclick="uploadRef(this)">📎 上传</button>'
+                            + '<button type="button" class="btn-paste" onclick="pasteRef(this)">📋 粘贴文本</button>'
+                            + '<button type="button" class="btn-remove" onclick="removeRef(this)" title="移除">&times;</button>';
                         row.querySelector('.ref-input').value = r.value || '';
                         list.appendChild(row);
                     });

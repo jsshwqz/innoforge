@@ -1574,6 +1574,8 @@ function applyI18nCommon() {
   });
   var sw = document.getElementById('lang-switch');
   if (sw) sw.value = i18nLang;
+  var msw = document.getElementById('mobile-lang-switch');
+  if (msw) msw.value = i18nLang;
 }
 
 // activePage is stored globally for renderSidebar to use
@@ -1654,6 +1656,7 @@ function renderSidebar(extraHtml) {
     topNav.appendChild(brandSpan);
     var linksWrap = document.createElement('div');
     linksWrap.className = 'mobile-top-links';
+    linksWrap.style.cssText = 'display:flex;gap:6px;align-items:center;flex:1;overflow-x:auto;min-width:0;';
     for (let j = 0; j < links.length; j++) {
       var a = document.createElement('a');
       a.href = links[j].href;
@@ -1663,6 +1666,21 @@ function renderSidebar(extraHtml) {
       linksWrap.appendChild(a);
     }
     topNav.appendChild(linksWrap);
+    var mobLang = document.createElement('select');
+    mobLang.id = 'mobile-lang-switch';
+    mobLang.style.cssText = 'width:auto;max-width:74px;min-width:56px;flex:0 0 auto;white-space:nowrap;background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:3px 6px;font-size:12px;cursor:pointer;';
+    var optZh = document.createElement('option');
+    optZh.value = 'zh';
+    optZh.textContent = '中文';
+    optZh.selected = i18nLang === 'zh';
+    var optEn = document.createElement('option');
+    optEn.value = 'en';
+    optEn.textContent = 'EN';
+    optEn.selected = i18nLang === 'en';
+    mobLang.appendChild(optZh);
+    mobLang.appendChild(optEn);
+    mobLang.addEventListener('change', function() { setI18nLang(mobLang.value); });
+    topNav.appendChild(mobLang);
     document.body.insertBefore(topNav, document.body.firstChild);
   }
   // 异步加载版本号显示在侧边栏底部
