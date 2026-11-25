@@ -19,14 +19,14 @@
         <div class="chat-container">
             <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:4px;">
                 <div class="page-title-bar" style="margin-bottom:0;"><h2 data-i18n="ai.title" style="margin:0;"></h2></div>
-                <button type="button" id="btn-clear-chat" class="btn-secondary btn-sm" onclick="clearAiChat()" style="font-size:12px;padding:4px 10px;margin-top:4px;">🗑️ 清空对话</button>
+                <button type="button" id="btn-clear-chat" class="btn-secondary btn-sm" onclick="clearAiChat()" style="font-size:12px;padding:4px 10px;margin-top:4px;" data-i18n="ai.clearChatBtn">🗑️ 清空对话</button>
             </div>
             <p class="hint" data-i18n="ai.hint" style="margin:6px 0 10px;"></p>
             <div class="ai-quick-starters" id="ai-quick-starters" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
-                <button type="button" class="btn-secondary btn-sm" onclick="applyExpertStarter('patent_drafting_coach', '请以高价值专利撰写教练视角帮我体检以下技术方案：1) 找出独立权利要求可能写窄的限定；2) 设计多梯度从属权利要求；3) 面向未来 3-5 年演进补充可替代实施例堵死竞争对手规避路径。\n\n【我的技术方案】：')" style="font-size:12px;padding:5px 10px;">✍️ 专利防写窄体检</button>
-                <button type="button" class="btn-secondary btn-sm" onclick="applyExpertStarter('inventor_brainstorm', '请帮我穿透表面结构，拆解以下研发课题的底层物理矛盾，并展望未来 3-5 年的技术演进与高价值外围专利空白：\n\n【研发课题】：')" style="font-size:12px;padding:5px 10px;">🔬 物理机理与3-5年演进</button>
-                <button type="button" class="btn-secondary btn-sm" onclick="applyExpertStarter('claim_analyst', '请按全面覆盖原则与等同原则，帮我逐项分析以下目标专利的独立权利要求保护边界，并给出可落地的工程规避设计路径与副作用权衡：\n\n【专利号/权利要求与我方方案】：')" style="font-size:12px;padding:5px 10px;">⚖️ 权要边界与规避设计</button>
-                <button type="button" class="btn-secondary btn-sm" onclick="applyExpertStarter('academic_paper_assistant', '请以严谨学术论文助手视角帮我梳理以下研究主题的文献脉络、实验对照设计漏洞与期刊投稿结构（严禁编造 DOI，并提示专利申请新颖性安全锁）：\n\n【研究主题/实验数据】：')" style="font-size:12px;padding:5px 10px;">🎓 学术综述与论文辅导</button>
+                <button type="button" class="btn-secondary btn-sm" onclick="applyExpertStarter('patent_drafting_coach', '请以高价值专利撰写教练视角帮我体检以下技术方案：1) 找出独立权利要求可能写窄的限定；2) 设计多梯度从属权利要求；3) 面向未来 3-5 年演进补充可替代实施例堵死竞争对手规避路径。\n\n【我的技术方案】：')" style="font-size:12px;padding:5px 10px;" data-i18n="ai.starterDrafting">✍️ 专利防写窄体检</button>
+                <button type="button" class="btn-secondary btn-sm" onclick="applyExpertStarter('inventor_brainstorm', '请帮我穿透表面结构，拆解以下研发课题的底层物理矛盾，并展望未来 3-5 年的技术演进与高价值外围专利空白：\n\n【研发课题】：')" style="font-size:12px;padding:5px 10px;" data-i18n="ai.starterPhysics">🔬 物理机理与3-5年演进</button>
+                <button type="button" class="btn-secondary btn-sm" onclick="applyExpertStarter('claim_analyst', '请按全面覆盖原则与等同原则，帮我逐项分析以下目标专利的独立权利要求保护边界，并给出可落地的工程规避设计路径与副作用权衡：\n\n【专利号/权利要求与我方方案】：')" style="font-size:12px;padding:5px 10px;" data-i18n="ai.starterClaims">⚖️ 权要边界与规避设计</button>
+                <button type="button" class="btn-secondary btn-sm" onclick="applyExpertStarter('academic_paper_assistant', '请以严谨学术论文助手视角帮我梳理以下研究主题的文献脉络、实验对照设计漏洞与期刊投稿结构（严禁编造 DOI，并提示专利申请新颖性安全锁）：\n\n【研究主题/实验数据】：')" style="font-size:12px;padding:5px 10px;" data-i18n="ai.starterAcademic">🎓 学术综述与论文辅导</button>
             </div>
             <div class="chat-box" id="chat-messages" style="position:relative;min-height:360px;max-height:calc(100vh - 300px);"></div>
             <button class="scroll-bottom-btn" id="scroll-bottom-btn" onclick="scrollChatToBottom()">↓</button>
@@ -53,24 +53,24 @@
     renderNavbar('ai');
     renderSidebar(
       '<div class="sidebar-section">'
-      + '<div class="sidebar-label">' + (i18nLang === 'zh' ? '搜索选项' : 'Search') + '</div>'
+      + '<div class="sidebar-label" data-i18n="ai.sidebarSearchLabel">' + t('ai.sidebarSearchLabel') + '</div>'
       + '<label class="sidebar-toggle" title="开启后 AI 会先联网搜索最新资料再回答">'
       + '<input type="checkbox" id="web-search-cb">'
       + '<span data-i18n="ai.webSearch">' + t('ai.webSearch') + '</span>'
       + '</label>'
       + '</div>'
       + '<div class="sidebar-section">'
-      + '<div class="sidebar-label">' + (i18nLang === 'zh' ? '角色预设' : 'Role Preset') + '</div>'
+      + '<div class="sidebar-label" data-i18n="ai.sidebarRoleLabel">' + t('ai.sidebarRoleLabel') + '</div>'
       + '<select id="role-select">'
-      + '<option value="general">' + (i18nLang === 'zh' ? '通用助手' : 'General Assistant') + '</option>'
-      + '<option value="patent_drafting_coach">' + (i18nLang === 'zh' ? '✍️ 专利高质量撰写辅导（防写窄/3-5年）' : '✍️ Patent Drafting Coach') + '</option>'
-      + '<option value="academic_paper_assistant">' + (i18nLang === 'zh' ? '🎓 学术论文与综述助手（真实DOI/防破新颖性）' : '🎓 Academic Paper Assistant') + '</option>'
-      + '<option value="patent_examiner">' + (i18nLang === 'zh' ? '专利审查专家' : 'Patent Examiner') + '</option>'
-      + '<option value="oa_expert">' + (i18nLang === 'zh' ? 'OA 答复专家' : 'OA Response Expert') + '</option>'
-      + '<option value="claim_analyst">' + (i18nLang === 'zh' ? '权利要求分析师' : 'Claim Analyst') + '</option>'
-      + '<option value="inventor_brainstorm">' + (i18nLang === 'zh' ? '发明人头脑风暴' : 'Inventor Brainstorm') + '</option>'
+      + '<option value="general" data-i18n="ai.roleGeneral">' + t('ai.roleGeneral') + '</option>'
+      + '<option value="patent_drafting_coach" data-i18n="ai.roleDrafting">' + t('ai.roleDrafting') + '</option>'
+      + '<option value="academic_paper_assistant" data-i18n="ai.roleAcademic">' + t('ai.roleAcademic') + '</option>'
+      + '<option value="patent_examiner" data-i18n="ai.roleExaminer">' + t('ai.roleExaminer') + '</option>'
+      + '<option value="oa_expert" data-i18n="ai.roleOa">' + t('ai.roleOa') + '</option>'
+      + '<option value="claim_analyst" data-i18n="ai.roleClaims">' + t('ai.roleClaims') + '</option>'
+      + '<option value="inventor_brainstorm" data-i18n="ai.roleBrainstorm">' + t('ai.roleBrainstorm') + '</option>'
       + '</select>'
-      + '<div class="sidebar-hint">' + (i18nLang === 'zh' ? '选择角色以定制 AI 回复风格和专业知识' : 'Select role to customize AI response style') + '</div>'
+      + '<div class="sidebar-hint" data-i18n="ai.sidebarRoleHint">' + t('ai.sidebarRoleHint') + '</div>'
       + '</div>'
     );
     </script>

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-25T04:31:45.014Z",
+  "generatedAt": "2026-11-25T05:21:48.574Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -300,6 +300,7 @@
         "removeFile",
         "removeRestoredFile",
         "renderFileList",
+        "renderHomeServiceStatus",
         "renderOaDeadlineReminders",
         "restoreHomeDraftState",
         "saveHomeDraftState",
