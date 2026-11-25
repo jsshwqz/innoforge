@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-25T11:44:21.530Z",
+  "generatedAt": "2026-11-25T12:52:27.812Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -56,6 +56,7 @@
       "references": [
         "addRef",
         "autoFetchRefs",
+        "clearCompareHistory",
         "clearCompareWorkspace",
         "clearMyUpload",
         "clearOA",
@@ -88,6 +89,7 @@
         "autoFetchRefs",
         "bindCompareDropZone",
         "buildToolbar",
+        "clearCompareHistory",
         "clearCompareWorkspace",
         "clearLoading",
         "clearMyUpload",
@@ -108,7 +110,9 @@
         "exportResultDocx",
         "exportResultMarkdown",
         "extractFile",
+        "formatCompareHistoryTime",
         "getBtn",
+        "getCompareModeLabel",
         "getMyPatent",
         "getOA",
         "getRefs",
@@ -116,6 +120,7 @@
         "hideBtn",
         "hideDiscussionStopButton",
         "initCompareDropZones",
+        "loadCompareHistory",
         "normalizeInlineMathText",
         "openPasteModal",
         "pasteMyPatent",
@@ -123,12 +128,16 @@
         "pasteRef",
         "previewPdfByKey",
         "pushCandidate",
+        "recordCompareHistory",
         "reindexPlaceholders",
         "removeRef",
+        "renderCompareHistory",
         "renderMarkdown",
         "renderMsg",
         "renderRestoredUploadTag",
+        "restoreCompareHistoryItem",
         "restoreCompareWorkspaceState",
+        "saveCompareHistory",
         "saveCompareWorkspaceState",
         "sendDiscussionMessage",
         "serializeUploadedDataForSession",

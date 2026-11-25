@@ -51,7 +51,7 @@
         <div class="cmp-section cmp-oa">
             <label class="cmp-label oa" data-i18n="compare.oaLabel">审查意见通知书（可选 — 一审答复专用）</label>
             <div class="my-input-row">
-                <input type="text" id="oa-input" class="cmp-input" disabled data-i18n-placeholder="compare.oaPlaceholder" placeholder="请上传 PDF 或粘贴审查意见全文" style="flex:1;">
+                <input type="text" id="oa-input" class="cmp-input" data-i18n-placeholder="compare.oaPlaceholder" placeholder="请上传 PDF 或粘贴审查意见全文" style="flex:1;">
                 <button type="button" class="btn-upload" onclick="uploadOA()" data-i18n="compare.uploadBtn">📎 上传</button>
                 <button type="button" id="btn-paste-oa" class="btn-paste" onclick="pasteOA()" data-i18n="compare.pasteBtn">📋 粘贴文本</button>
             </div>
@@ -79,6 +79,15 @@
                 <button id="discussion-export-btn" class="btn-export-ghost" style="display:none" onclick="exportDiscussionConclusions()" data-i18n="compare.exportConclusions"></button>
             </div>
         </div>
+
+        <!-- Bottom Contextual History: Recent Comparisons -->
+        <section class="page-bottom-section" id="compare-history-section">
+            <div class="page-bottom-header">
+                <h3 class="page-bottom-title" data-i18n="compare.historyTitle">🕒 本页最近对比记录</h3>
+                <button type="button" class="btn-secondary btn-sm" onclick="clearCompareHistory()" data-i18n="compare.historyClear">清空记录</button>
+            </div>
+            <div id="compare-history-list" class="page-bottom-list"></div>
+        </section>
     </main>
     </div>
     <!-- PDF Preview Modal -->
@@ -424,6 +433,8 @@
     function clearOA() {
         delete uploadedData['oa'];
         delete uploadedFileObjects['oa'];
+        var oaInp = document.getElementById('oa-input');
+        if (oaInp) { oaInp.value = ''; oaInp.disabled = false; }
         document.getElementById('oa-file-tag').innerHTML = '';
     }
 
@@ -431,6 +442,9 @@
         if (uploadedData['oa']) {
             return { type: 'text', title: uploadedData['oa'].title, content: uploadedData['oa'].content };
         }
+        var oaInp = document.getElementById('oa-input');
+        var v = oaInp ? oaInp.value.trim() : '';
+        if (v) return { type: 'text', title: '审查意见通知书', content: v };
         return null;
     }
 
@@ -574,6 +588,7 @@
                 lastAnalysisRawText = data.content || '';
                 lastAnalysisContext = null;
                 showResult(renderMarkdown(data.content), { copy: true, export: true, showDiscussion: true });
+                recordCompareHistory('general');
             } catch(e) { showError('请求失败: ' + e.message); }
         } else {
             setLoading('正在进行 ' + allItems.length + ' 篇对比分析...');
@@ -588,6 +603,7 @@
                 lastAnalysisRawText = data.analysis || '';
                 lastAnalysisContext = null;
                 showResult(renderMarkdown(data.analysis), { copy: true, export: true, showDiscussion: true });
+                recordCompareHistory('general');
             } catch(e) { showError('请求失败: ' + e.message); }
         }
     }
@@ -618,6 +634,7 @@
             // Save context for follow-up office action generation
             lastAnalysisContext = { my: my, refs: refs, analysis: data.analysis };
             showResult(renderMarkdown(data.analysis), { copy: true, export: true, generateOA: true, showDiscussion: true });
+            recordCompareHistory('inventive');
         } catch(e) { showError('请求失败: ' + e.message); }
     }
 
@@ -650,6 +667,7 @@
             if (data.error) { showError(data.error); return; }
             lastAnalysisRawText = data.analysis || '';
             showResult(renderMarkdown(data.analysis), { copy: true, export: true, showDiscussion: true });
+            recordCompareHistory('oa');
         } catch(e) { showError('请求失败: ' + e.message); }
     }
 
@@ -679,6 +697,7 @@
             lastAnalysisRawText = data.analysis || '';
             lastAnalysisContext = null;
             showResult(renderMarkdown(data.analysis), { copy: true, export: true, showDiscussion: true });
+            recordCompareHistory('oa');
         } catch(e) { showError('请求失败: ' + e.message); }
     }
 
@@ -782,6 +801,7 @@
     window._onI18nLangChange.push(function() {
         updateRefCounter();
         reindexPlaceholders();
+        renderCompareHistory();
     });
 
     var prefilledPatentId = '';
@@ -1350,6 +1370,8 @@
         if (myInp) { myInp.value = ''; myInp.disabled = false; }
         var myTag = document.getElementById('my-file-tag');
         if (myTag) myTag.innerHTML = '';
+        var oaInp = document.getElementById('oa-input');
+        if (oaInp) { oaInp.value = ''; oaInp.disabled = false; }
         var oaTag = document.getElementById('oa-file-tag');
         if (oaTag) oaTag.innerHTML = '';
         var list = document.getElementById('ref-list');
@@ -1530,9 +1552,168 @@
         bindCompareDropZone('.cmp-section.cmp-oa', 'oa');
     }
 
+    // ── Bottom Contextual History (localStorage, max 8 items) ──
+    var COMPARE_HISTORY_KEY = 'innoforge_compare_history_v1';
+
+    function loadCompareHistory() {
+        try {
+            var raw = localStorage.getItem(COMPARE_HISTORY_KEY);
+            var list = raw ? JSON.parse(raw) : [];
+            return Array.isArray(list) ? list : [];
+        } catch (e) { return []; }
+    }
+
+    function saveCompareHistory(list) {
+        try {
+            localStorage.setItem(COMPARE_HISTORY_KEY, JSON.stringify((list || []).slice(0, 8)));
+        } catch (e) {}
+    }
+
+    function recordCompareHistory(modeKey) {
+        try {
+            var myInp = document.getElementById('my-patent');
+            var myLabel = uploadedData['my']
+                ? (uploadedData['my'].title || 'Uploaded')
+                : ((myInp && myInp.value.trim()) || '');
+            var refRows = Array.from(document.querySelectorAll('.ref-row')).map(function(row) {
+                var idx = row.getAttribute('data-idx') || '0';
+                var inp = row.querySelector('.ref-input');
+                var up = uploadedData['ref_' + idx];
+                return {
+                    idx: idx,
+                    value: inp ? (inp.value || '') : '',
+                    label: up ? (up.title || 'Uploaded') : ((inp && inp.value.trim()) || '')
+                };
+            });
+            var refLabels = refRows.map(function(r) { return r.label; }).filter(Boolean);
+            var resEl = document.getElementById('result');
+            var resultHtml = resEl ? resEl.innerHTML : '';
+            if (!resultHtml && !lastAnalysisRawText) return;
+            var entry = {
+                id: String(Date.now()),
+                savedAt: Date.now(),
+                mode: modeKey || 'general',
+                myLabel: myLabel || (i18nLang === 'en' ? 'My Scheme' : '本方案'),
+                refLabels: refLabels,
+                myPatent: myInp ? myInp.value : '',
+                refRows: refRows.map(function(r) { return { idx: r.idx, value: r.value }; }),
+                lastAnalysisRawText: (lastAnalysisRawText || '').slice(0, 60000),
+                resultHtml: resultHtml.slice(0, 80000)
+            };
+            var list = loadCompareHistory();
+            list.unshift(entry);
+            saveCompareHistory(list);
+            saveCompareWorkspaceState();
+            renderCompareHistory();
+        } catch (e) {}
+    }
+
+    function getCompareModeLabel(modeKey) {
+        if (modeKey === 'inventive') return t('compare.historyModeInventive');
+        if (modeKey === 'oa') return t('compare.historyModeOa');
+        return t('compare.historyModeGeneral');
+    }
+
+    function formatCompareHistoryTime(ts) {
+        if (!ts) return '';
+        var d = new Date(ts);
+        var mm = String(d.getMonth() + 1).padStart(2, '0');
+        var dd = String(d.getDate()).padStart(2, '0');
+        var hh = String(d.getHours()).padStart(2, '0');
+        var mi = String(d.getMinutes()).padStart(2, '0');
+        return d.getFullYear() + '/' + mm + '/' + dd + ' ' + hh + ':' + mi;
+    }
+
+    function renderCompareHistory() {
+        var listEl = document.getElementById('compare-history-list');
+        if (!listEl) return;
+        var list = loadCompareHistory();
+        if (!list.length) {
+            listEl.innerHTML = DOMPurify.sanitize(
+                '<div class="page-bottom-empty">' + escapeHtml(t('compare.historyEmpty')) + '</div>'
+            );
+            return;
+        }
+        var html = list.map(function(item, idx) {
+            var refsText = (item.refLabels && item.refLabels.length) ? item.refLabels.join(' / ') : '-';
+            var title = (item.myLabel || '-') + '  vs  ' + refsText;
+            var modeLabel = getCompareModeLabel(item.mode);
+            var charsUnit = t('common.chars') || (i18nLang === 'en' ? 'chars' : '字');
+            var len = (item.lastAnalysisRawText || '').length;
+            return '<div class="page-bottom-item" data-cmp-hist-idx="' + idx + '">'
+                + '<div class="page-bottom-item-main">'
+                + '<div class="page-bottom-item-title">' + escapeHtml(title) + '</div>'
+                + '<div class="page-bottom-item-meta">'
+                + '<span class="page-bottom-badge">' + escapeHtml(modeLabel) + '</span>'
+                + '<span>' + escapeHtml(formatCompareHistoryTime(item.savedAt)) + '</span>'
+                + (len ? '<span>· ' + len + ' ' + escapeHtml(charsUnit) + '</span>' : '')
+                + '</div>'
+                + '</div>'
+                + '<span class="btn-secondary btn-sm" style="pointer-events:none;flex-shrink:0;">' + escapeHtml(t('compare.historyRestore')) + '</span>'
+                + '</div>';
+        }).join('');
+        listEl.innerHTML = DOMPurify.sanitize(html);
+        listEl.querySelectorAll('[data-cmp-hist-idx]').forEach(function(el) {
+            el.addEventListener('click', function() {
+                var idx = parseInt(el.getAttribute('data-cmp-hist-idx'), 10);
+                if (!isNaN(idx)) restoreCompareHistoryItem(idx);
+            });
+        });
+    }
+
+    function restoreCompareHistoryItem(idx) {
+        var list = loadCompareHistory();
+        var item = list[idx];
+        if (!item) return;
+        var myInp = document.getElementById('my-patent');
+        if (myInp && item.myPatent) {
+            myInp.disabled = false;
+            myInp.value = item.myPatent;
+        }
+        if (Array.isArray(item.refRows) && item.refRows.length > 0) {
+            var refList = document.getElementById('ref-list');
+            if (refList) {
+                refList.innerHTML = '';
+                item.refRows.forEach(function(r, i) {
+                    var row = document.createElement('div');
+                    row.className = 'ref-row';
+                    row.setAttribute('data-idx', String(r.idx !== undefined ? r.idx : i));
+                    row.innerHTML = '<input type="text" class="cmp-input ref-input" placeholder="' + escapeHtml(t('compare.refPlaceholder', { n: i + 1 })) + '">'
+                        + '<button type="button" class="btn-upload" onclick="uploadRef(this)" data-i18n="compare.uploadBtn">' + escapeHtml(t('compare.uploadBtn')) + '</button>'
+                        + '<button type="button" class="btn-paste" onclick="pasteRef(this)" data-i18n="compare.pasteBtn">' + escapeHtml(t('compare.pasteBtn')) + '</button>'
+                        + '<button type="button" class="btn-remove" onclick="removeRef(this)" title="移除">&times;</button>';
+                    row.querySelector('.ref-input').value = r.value || '';
+                    refList.appendChild(row);
+                });
+                updateRefCounter();
+            }
+        }
+        if (item.lastAnalysisRawText) {
+            lastAnalysisRawText = item.lastAnalysisRawText;
+            showResult(renderMarkdown(item.lastAnalysisRawText), {
+                copy: true,
+                export: true,
+                generateOA: item.mode === 'inventive',
+                showDiscussion: true
+            });
+        } else if (item.resultHtml) {
+            var resEl = document.getElementById('result');
+            if (resEl) resEl.innerHTML = DOMPurify.sanitize(item.resultHtml, { ADD_ATTR: ['onclick'] });
+        }
+        saveCompareWorkspaceState();
+        var target = document.getElementById('result');
+        if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function clearCompareHistory() {
+        try { localStorage.removeItem(COMPARE_HISTORY_KEY); } catch (e) {}
+        renderCompareHistory();
+    }
+
     window.addEventListener('DOMContentLoaded', function() {
         restoreCompareWorkspaceState();
         initCompareDropZones();
+        renderCompareHistory();
     });
     </script>
 </body>

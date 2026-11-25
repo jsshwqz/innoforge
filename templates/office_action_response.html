@@ -153,11 +153,13 @@
                     <button class="btn-remove" onclick="removeRef(this)" title="移除">&times;</button>
                 </div>
             </div>
-            <button class="btn-add" onclick="addRef()" id="btn-add-ref">+ <span data-i18n="oar.addRef"></span></button>
-        </div>
-            <!-- T1: 自动获取对比文献 -->
-            <button class="btn-secondary" onclick="autoFetchRefs()" id="btn-auto-fetch-refs" style="margin-left:8px;">🔍 <span data-i18n="oa.refs.autoFetch">自动获取对比文献</span></button>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px;">
+                <button class="btn-add" onclick="addRef()" id="btn-add-ref" style="margin-top:0;">+ <span data-i18n="oar.addRef"></span></button>
+                <!-- T1: 自动获取对比文献 -->
+                <button class="btn-add" onclick="autoFetchRefs()" id="btn-auto-fetch-refs" style="margin-top:0;border-color:#58a6ff;color:#58a6ff;">🔍 <span data-i18n="oa.refs.autoFetch">自动获取对比文献</span></button>
+            </div>
             <div id="auto-fetch-refs-result" style="margin-top:8px;"></div>
+        </div>
 
         <!-- Depth Selector + Action Buttons -->
         <div class="btn-row" style="flex-wrap:wrap;gap:8px;align-items:center;">
@@ -248,6 +250,18 @@
             <label class="cmp-label violet">📊 <span data-i18n="oar.matrixTitle"></span></label>
             <div id="matrix-content" class="oa-content" style="overflow-x:auto;"></div>
         </div>
+
+        <!-- Bottom Contextual History: Recent OA Analyses on This Page -->
+        <section class="page-bottom-section" id="oa-history-section">
+            <div class="page-bottom-header">
+                <h3 class="page-bottom-title">
+                    <span>📋</span>
+                    <span data-i18n="oar.historyLabel">分析历史</span>
+                    <span id="oa-history-count" class="page-bottom-count"></span>
+                </h3>
+            </div>
+            <div id="oa-history-cards" class="oa-history-grid"></div>
+        </section>
     </main>
     </div>
 
@@ -4207,42 +4221,80 @@
             var data = await resp.json();
             if (data.status === 'ok' && data.analyses) {
                 oaHistory = data.analyses;
-                renderOaHistory();
             }
         } catch (e) { /* history load failed silently */ }
+        renderOaHistory();
     }
 
     function renderOaHistory() {
-        var sidebar = document.getElementById('page-sidebar');
-        if (!sidebar || oaHistory.length === 0) return;
-        var html = '<div class="sidebar-section">'
-            + '<div class="sidebar-label" style="display:flex;justify-content:space-between;align-items:center;">'
-            + '📋 ' + t('oar.historyLabel')
-            + '<span style="color:#8b949e;font-size:11px;font-weight:400;">' + oaHistory.length + ' 件</span></div>';
+        var container = document.getElementById('oa-history-cards');
+        var countEl = document.getElementById('oa-history-count');
+        if (!container) return;
+        if (countEl) {
+            countEl.textContent = oaHistory.length > 0
+                ? t('oar.historyCount', { n: oaHistory.length })
+                : '';
+        }
+        if (oaHistory.length === 0) {
+            container.innerHTML = DOMPurify.sanitize(
+                '<div class="page-bottom-empty">' + escapeHtml(t('oar.historyEmpty')) + '</div>'
+            );
+            return;
+        }
+        var typeLabels = i18nLang === 'en'
+            ? {
+                first_exam: '1st/2nd OA',
+                abnormal: 'Abnormal',
+                reject_review: 'Rejection',
+                second_rejection: '2nd Rejection',
+                reexamination_request: 'Reexam Req',
+                reexamination_decision: 'Reexam Dec',
+                admin_lawsuit: 'Admin Suit',
+                pre_filing_devil: 'Pre-Filing Sim',
+                peer_review_rebuttal: 'Peer Rebuttal'
+            }
+            : {
+                first_exam: '一审/二审',
+                abnormal: '非正常',
+                reject_review: '复审',
+                second_rejection: '二审驳回',
+                reexamination_request: '复审请求',
+                reexamination_decision: '复审决定',
+                admin_lawsuit: '行政诉讼',
+                pre_filing_devil: '提交前预审',
+                peer_review_rebuttal: '审稿返修'
+            };
+        var typeColors = {
+            first_exam: '#d2a8ff',
+            abnormal: '#d29922',
+            reject_review: '#f0883e',
+            second_rejection: '#da3633',
+            reexamination_request: '#6e7681',
+            reexamination_decision: '#1f6feb',
+            admin_lawsuit: '#8957e5',
+            pre_filing_devil: '#58a6ff',
+            peer_review_rebuttal: '#3fb950'
+        };
+        var html = '';
         for (let i = 0; i < Math.min(oaHistory.length, 30); i++) {
             var h = oaHistory[i];
             var ver = h.version || '-';
-            var typeLabel = ({first_exam:'一审/二审',abnormal:'非正常',reject_review:'复审',second_rejection:'二审驳回',reexamination_request:'复审请求',reexamination_decision:'复审决定',admin_lawsuit:'行政诉讼'})[h.oa_type] || '其他';
-            var typeColor = ({first_exam:'#d2a8ff',abnormal:'#d29922',reject_review:'#f0883e',second_rejection:'#da3633',reexamination_request:'#6e7681',reexamination_decision:'#1f6feb',admin_lawsuit:'#8957e5'})[h.oa_type] || '#8b949e';
-            html += '<div style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:8px 10px;margin-bottom:6px;cursor:pointer;" onclick="loadOaAnalysis(' + h.id + ')">'
-                + '<div style="display:flex;align-items:center;gap:4px;margin-bottom:4px;">'
-                + '<span style="background:#1f6feb22;border:1px solid #1f6feb;color:#58a6ff;border-radius:3px;padding:0 5px;font-size:10px;font-weight:600;">v' + ver + '</span>'
-                + '<span style="font-size:11px;color:' + typeColor + ';border:1px solid ' + typeColor + '22;background:' + typeColor + '11;border-radius:3px;padding:0 5px;">' + typeLabel + '</span>'
+            var typeLabel = typeLabels[h.oa_type] || (i18nLang === 'en' ? 'Other' : '其他');
+            var typeColor = typeColors[h.oa_type] || '#8b949e';
+            var charsUnit = t('common.chars') || (i18nLang === 'en' ? 'chars' : '字');
+            html += '<div class="oa-history-card" onclick="loadOaAnalysis(' + Number(h.id) + ')">'
+                + '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">'
+                + '<span style="background:#1f6feb22;border:1px solid #1f6feb;color:#58a6ff;border-radius:3px;padding:0 5px;font-size:10px;font-weight:600;">v' + escapeHtml(String(ver)) + '</span>'
+                + '<span style="font-size:11px;color:' + typeColor + ';border:1px solid ' + typeColor + '33;background:' + typeColor + '14;border-radius:3px;padding:0 6px;">' + escapeHtml(typeLabel) + '</span>'
                 + '</div>'
-                + '<div style="color:#c9d1d9;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:2px;">'
-                + escapeHtml(h.patent_title || h.patent_number) + '</div>'
-                + '<div style="color:#8b949e;font-size:10px;">'
-                + (h.created_at || '').slice(0, 16)
-                + ' · ' + (h.analysis_text ? h.analysis_text.length + '字' : '')
+                + '<div class="page-bottom-item-title">'
+                + escapeHtml(h.patent_title || h.patent_number || t('oar.untitled')) + '</div>'
+                + '<div class="page-bottom-item-meta">'
+                + '<span>' + escapeHtml((h.created_at || '').slice(0, 16)) + '</span>'
+                + (h.analysis_text ? '<span>· ' + h.analysis_text.length + ' ' + escapeHtml(charsUnit) + '</span>' : '')
                 + '</div></div>';
         }
-        html += '</div>';
-        var existing = sidebar.querySelector('.oa-history-section');
-        if (existing) existing.remove();
-        var wrapper = document.createElement('div');
-        wrapper.className = 'oa-history-section';
-        wrapper.innerHTML = DOMPurify.sanitize(html);
-        sidebar.appendChild(wrapper);
+        container.innerHTML = DOMPurify.sanitize(html);
     }
 
     async function loadOaAnalysis(id) {
@@ -4878,6 +4930,10 @@
     initOaWorkspacePersistenceAndDrops();
     document.addEventListener('DOMContentLoaded', function() {
         updateOaModeSectionLabels();
+    });
+    window._onI18nLangChange = window._onI18nLangChange || [];
+    window._onI18nLangChange.push(function() {
+        renderOaHistory();
     });
     loadOaHistory();
     initDiscQuoteEvents();

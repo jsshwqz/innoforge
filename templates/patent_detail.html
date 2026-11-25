@@ -1476,15 +1476,7 @@
 
     // Init
     renderNavbar('detail');
-    renderSidebar(
-      '<div class="sidebar-section">'
-      + '<div class="sidebar-label">' + (i18nLang === 'zh' ? '操作' : 'Actions') + '</div>'
-      + '<button class="sidebar-btn primary" onclick="aiSummarize()">🤖 ' + t('detail.analyze') + '</button>'
-      + '<button class="sidebar-btn" id="sb-load-full" onclick="loadFullText()">📄 加载全文</button>'
-      + '<button class="sidebar-btn" onclick="window.open(\'/api/patent/pdf/{{id}}\',\'_blank\')">🖨️ 打印 / 保存 PDF</button>'
-      + '<button class="sidebar-btn" id="sb-collect" onclick="toggleCollect()">⭐ 收藏</button>'
-      + '</div>'
-    );
+    renderSidebar();
     applyI18nCommon();
     syncManualLegalStatusSelect('{{legal_status}}');
     window._onI18nLangChange = window._onI18nLangChange || [];
