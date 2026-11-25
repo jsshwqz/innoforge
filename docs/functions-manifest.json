@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-25T06:51:34.792Z",
+  "generatedAt": "2026-11-25T10:36:47.858Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -281,6 +281,7 @@
     },
     "index.html": {
       "references": [
+        "clearHomeDraft",
         "closePdfPreview",
         "fetchPatent",
         "setMode",
@@ -290,6 +291,7 @@
         "_escapeHtml",
         "addFiles",
         "checkStatus",
+        "clearHomeDraft",
         "closePdfPreview",
         "fetchPatent",
         "initHomeDraftPersistence",
@@ -690,6 +692,7 @@
         "compareMatrix",
         "doSearch",
         "exportCsv",
+        "exportSelectedCsv",
         "handlePdfUpload",
         "previewPdfContent",
         "removePdfFile",
@@ -710,6 +713,7 @@
         "clearHistory",
         "clearSearchPdfMeta",
         "compareMatrix",
+        "csvEsc",
         "decodeHtmlEntities",
         "diagBadgeSpan",
         "diagCoolsDown",
@@ -720,6 +724,7 @@
         "escapeHtml",
         "evidenceHtml",
         "exportCsv",
+        "exportSelectedCsv",
         "extractPdfContent",
         "fmtCell",
         "formatFileSize",
@@ -759,6 +764,7 @@
         "toggleIpcAnchor",
         "toggleRegionSelect",
         "toggleRiskModal",
+        "updateBatchSelectionUI",
         "updatePdfFileList",
         "useHistory",
         "useHistoryEncoded"

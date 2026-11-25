@@ -42,9 +42,9 @@
             <div class="page-header-row">
                 <h2 data-i18n="idea.title"></h2>
                 <div style="display:flex;gap:8px;align-items:center;">
-                    <button type="button" class="btn-secondary btn-sm idea-history-toggle" onclick="toggleIdeaHistoryDrawer()">📂 历史创意</button>
-                    <a href="/" class="link-pill">首页</a>
-                    <button class="btn-success-sm" onclick="showNewIdeaForm()">+ 新建</button>
+                    <button type="button" class="btn-secondary btn-sm idea-history-toggle" onclick="toggleIdeaHistoryDrawer()" data-i18n="idea.historyToggle">📂 历史创意</button>
+                    <a href="/" class="link-pill" data-i18n="idea.homeLink">首页</a>
+                    <button class="btn-success-sm" onclick="showNewIdeaForm()" data-i18n="idea.newBtn">+ 新建</button>
                 </div>
             </div>
             <p class="hint" data-i18n="idea.hint"></p>
@@ -59,50 +59,50 @@
                     <textarea id="idea-desc" data-i18n-placeholder="idea.descPlaceholder"></textarea>
                 </div>
                 <div class="form-group" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-                    <label style="margin:0;white-space:nowrap;">推演模式:</label>
+                    <label style="margin:0;white-space:nowrap;" data-i18n="idea.modeLabel">推演模式:</label>
                     <div class="mode-pills">
                         <button type="button" id="mode-quick" class="mode-pill" onclick="setAnalysisMode('quick')"
-                            style="background:#21262d;color:#8b949e;">
+                            style="background:#21262d;color:#8b949e;" data-i18n="idea.modeQuick">
                             快速推演
                         </button>
                         <button type="button" id="mode-deep" class="mode-pill" onclick="setAnalysisMode('deep')"
-                            style="background:#1f6feb;color:#fff;">
+                            style="background:#1f6feb;color:#fff;" data-i18n="idea.modeDeep">
                             深度推演
                         </button>
                     </div>
-                    <span class="muted" id="mode-hint">13 步流水线 + 多角度 AI 分析</span>
+                    <span class="muted" id="mode-hint" data-i18n="idea.modeDeepHint">13 步流水线 + 多角度 AI 分析</span>
                 </div>
                 <div class="btn-row">
                     <button class="btn-primary" id="submit-btn" onclick="submitIdea()" data-i18n="idea.submit"></button>
-                    <button type="button" class="btn-secondary" id="decompose-btn" onclick="decomposeIdeaQuadruple()">🧩 四元组结构化拆解</button>
+                    <button type="button" class="btn-secondary" id="decompose-btn" onclick="decomposeIdeaQuadruple()" data-i18n="idea.decomposeBtn">🧩 四元组结构化拆解</button>
                     <button class="btn-secondary" onclick="clearForm()" data-i18n="idea.clear"></button>
                 </div>
                 <div id="quadruple-panel" style="display:none;margin-top:12px;padding:12px;background:#161b22;border:1px solid #58a6ff66;border-radius:8px;">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-                        <strong style="color:#58a6ff;font-size:0.92em;">🧩 研发问题四元组（查新前可微调聚焦真重点）</strong>
+                        <strong style="color:#58a6ff;font-size:0.92em;" data-i18n="idea.quadTitle">🧩 研发问题四元组（查新前可微调聚焦真重点）</strong>
                         <span id="quadruple-source-tag" class="muted" style="font-size:0.8em;"></span>
                     </div>
                     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;margin-bottom:8px;">
                         <div>
-                            <label style="font-size:0.8em;color:#8b949e;display:block;margin-bottom:2px;">1. 核心技术对象</label>
+                            <label style="font-size:0.8em;color:#8b949e;display:block;margin-bottom:2px;" data-i18n="idea.quadObjLabel">1. 核心技术对象</label>
                             <input id="quad-object" type="text" style="width:100%;padding:6px 8px;background:#0d1117;border:1px solid #30363d;border-radius:5px;color:#c9d1d9;">
                         </div>
                         <div>
-                            <label style="font-size:0.8em;color:#8b949e;display:block;margin-bottom:2px;">2. 量化目标效果</label>
+                            <label style="font-size:0.8em;color:#8b949e;display:block;margin-bottom:2px;" data-i18n="idea.quadTargetLabel">2. 量化目标效果</label>
                             <input id="quad-target" type="text" style="width:100%;padding:6px 8px;background:#0d1117;border:1px solid #30363d;border-radius:5px;color:#c9d1d9;">
                         </div>
                         <div>
-                            <label style="font-size:0.8em;color:#8b949e;display:block;margin-bottom:2px;">3. 工程边界约束（分号分隔）</label>
+                            <label style="font-size:0.8em;color:#8b949e;display:block;margin-bottom:2px;" data-i18n="idea.quadConstraintsLabel">3. 工程边界约束（分号分隔）</label>
                             <input id="quad-constraints" type="text" style="width:100%;padding:6px 8px;background:#0d1117;border:1px solid #30363d;border-radius:5px;color:#c9d1d9;">
                         </div>
                         <div>
-                            <label style="font-size:0.8em;color:#8b949e;display:block;margin-bottom:2px;">4. 核心物理矛盾对</label>
+                            <label style="font-size:0.8em;color:#8b949e;display:block;margin-bottom:2px;" data-i18n="idea.quadContradictionLabel">4. 核心物理矛盾对</label>
                             <input id="quad-contradiction" type="text" style="width:100%;padding:6px 8px;background:#0d1117;border:1px solid #30363d;border-radius:5px;color:#c9d1d9;">
                         </div>
                     </div>
                     <div style="display:flex;gap:8px;align-items:center;">
-                        <button type="button" class="btn-primary" style="padding:5px 12px;font-size:0.84em;" onclick="applyQuadrupleToDesc()">✅ 回填为结构化描述</button>
-                        <button type="button" class="btn-secondary" style="padding:5px 10px;font-size:0.84em;" onclick="document.getElementById('quadruple-panel').style.display='none';">收起</button>
+                        <button type="button" class="btn-primary" style="padding:5px 12px;font-size:0.84em;" onclick="applyQuadrupleToDesc()" data-i18n="idea.quadApplyBtn">✅ 回填为结构化描述</button>
+                        <button type="button" class="btn-secondary" style="padding:5px 10px;font-size:0.84em;" onclick="document.getElementById('quadruple-panel').style.display='none';" data-i18n="idea.quadCloseBtn">收起</button>
                     </div>
                 </div>
             </div>
@@ -113,15 +113,15 @@
 
             <!-- Tab 导航 -->
             <div id="result-tabs" class="result-tabs" style="display:none;">
-                <button class="tab-btn active" data-tab="overview" onclick="switchTab('overview')">📊 概览</button>
-                <button class="tab-btn" data-tab="evidence" onclick="switchTab('evidence')">🔍 证据链</button>
-                <button class="tab-btn" data-tab="features" onclick="switchTab('features')">🧩 特征卡片</button>
-                <button class="tab-btn" data-tab="claims" onclick="switchTab('claims')">🌳 权利要求树</button>
-                <button class="tab-btn" data-tab="findings" onclick="switchTab('findings')">🔑 关键发现</button>
-                <button class="tab-btn" data-tab="memory" onclick="switchTab('memory'); loadMemory()">🧠 记忆</button>
-                <button class="tab-btn" data-tab="chat" onclick="switchTab('chat')">💬 讨论</button>
-                <button class="tab-btn" data-tab="report" onclick="switchTab('report')">📄 报告</button>
-                <button class="tab-btn" data-tab="versions" onclick="switchTab('versions')">📜 版本历史</button>
+                <button class="tab-btn active" data-tab="overview" onclick="switchTab('overview')" data-i18n="idea.tabOverview">📊 概览</button>
+                <button class="tab-btn" data-tab="evidence" onclick="switchTab('evidence')" data-i18n="idea.tabEvidence">🔍 证据链</button>
+                <button class="tab-btn" data-tab="features" onclick="switchTab('features')" data-i18n="idea.tabFeatures">🧩 特征卡片</button>
+                <button class="tab-btn" data-tab="claims" onclick="switchTab('claims')" data-i18n="idea.tabClaims">🌳 权利要求树</button>
+                <button class="tab-btn" data-tab="findings" onclick="switchTab('findings')" data-i18n="idea.tabFindings">🔑 关键发现</button>
+                <button class="tab-btn" data-tab="memory" onclick="switchTab('memory'); loadMemory()" data-i18n="idea.tabMemory">🧠 记忆</button>
+                <button class="tab-btn" data-tab="chat" onclick="switchTab('chat')" data-i18n="idea.tabChat">💬 讨论</button>
+                <button class="tab-btn" data-tab="report" onclick="switchTab('report')" data-i18n="idea.tabReport">📄 报告</button>
+                <button class="tab-btn" data-tab="versions" onclick="switchTab('versions')" data-i18n="idea.tabVersions">📜 版本历史</button>
             </div>
 
             <!-- Tab: 概览 -->
@@ -133,7 +133,7 @@
             <!-- Tab: 证据链 -->
             <div id="tab-evidence" class="tab-panel">
                 <div id="evidence-panel" class="panel-box">
-                    <h3>🔗 证据链 / Evidence Chain (<span id="evidence-count">0</span> 条)</h3>
+                    <h3><span data-i18n="idea.headingEvidence">🔗 证据链</span> (<span id="evidence-count">0</span>)</h3>
                     <div id="evidence-list"></div>
                 </div>
             </div>
@@ -142,7 +142,7 @@
             <div id="tab-features" class="tab-panel">
                 <div id="feature-cards-area" class="panel-box">
                     <div class="page-header-row">
-                        <h3 style="margin:0;">🧩 特征卡片 / Feature Cards</h3>
+                        <h3 style="margin:0;" data-i18n="idea.headingFeatures">🧩 特征卡片</h3>
                         <div style="display:flex;gap:8px;align-items:center;">
                             <span id="feature-cards-status" class="muted" style="font-size:12px;"></span>
                             <button id="btn-generate-feature-cards" class="btn-success-sm" onclick="generateFeatureCards()" data-i18n="idea.generateFeatureCards">AI 自动提取特征卡</button>
@@ -210,7 +210,7 @@
             <!-- Tab: 关键发现 -->
             <div id="tab-findings" class="tab-panel">
                 <div id="key-findings-panel" class="panel-box">
-                    <h3>🔑 关键发现 / Key Findings (<span id="key-findings-count">0</span>)</h3>
+                    <h3><span data-i18n="idea.headingFindings">🔑 关键发现</span> (<span id="key-findings-count">0</span>)</h3>
                     <div id="key-findings-list"><p class="muted">暂无发现记录</p></div>
                 </div>
             </div>
@@ -307,12 +307,12 @@
             <div id="tab-report" class="tab-panel">
                 <div id="report-panel" class="panel-box">
                     <div class="page-header-row">
-                        <h3 style="margin:0;">📄 报告 / Report</h3>
+                        <h3 style="margin:0;" data-i18n="idea.headingReport">📄 报告</h3>
                         <div id="report-type-switcher" class="mode-pills" style="flex-wrap:wrap;gap:6px;">
-                            <button class="report-type-btn active" data-rtype="full" onclick="switchReportType('full')">完整版</button>
-                            <button class="report-type-btn" data-rtype="technical" onclick="switchReportType('technical')">技术版</button>
-                            <button class="report-type-btn" data-rtype="patent" onclick="switchReportType('patent')">⚖️ 专利代理师版</button>
-                            <button class="report-type-btn" data-rtype="executive" onclick="switchReportType('executive')">精简版</button>
+                            <button class="report-type-btn active" data-rtype="full" onclick="switchReportType('full')" data-i18n="idea.reportFull">完整版</button>
+                            <button class="report-type-btn" data-rtype="technical" onclick="switchReportType('technical')" data-i18n="idea.reportTechnical">技术版</button>
+                            <button class="report-type-btn" data-rtype="patent" onclick="switchReportType('patent')" data-i18n="idea.reportPatent">⚖️ 专利代理师版</button>
+                            <button class="report-type-btn" data-rtype="executive" onclick="switchReportType('executive')" data-i18n="idea.reportExecutive">精简版</button>
                             <button class="report-type-btn" data-rtype="bom_pack" onclick="switchReportType('bom_pack')" data-i18n="idea.reportBomPack">工程 BOM 交付包</button>
                             <button class="report-type-btn" data-rtype="journal_draft" onclick="switchReportType('journal_draft')" data-i18n="idea.reportJournalDraft">期刊论文草稿</button>
                             <button class="report-type-btn" type="button" onclick="exportBomXlsx()" data-i18n="idea.exportBomXlsx">导出 Excel BOM 包</button>
@@ -325,9 +325,9 @@
                             <button class="report-type-btn" type="button" onclick="exportPaperDocx()" data-i18n="idea.exportPaperDocx">导出论文 Word (.docx)</button>
                         </div>
                     </div>
-                    <div id="report-content" style="line-height:1.7; color:var(--text-secondary);"><p class="muted">完成推演后可查看报告</p></div>
+                    <div id="report-content" style="line-height:1.7; color:var(--text-secondary);"><p class="muted" data-i18n="idea.reportPlaceholder">完成推演后可查看报告</p></div>
                     <div style="margin-top:12px; text-align:right;">
-                        <button id="report-open-btn" class="ai-btn violet" style="display:none; width:auto; padding:6px 14px; font-size:0.85em;" onclick="openReportInNewTab()">在新窗口打开</button>
+                        <button id="report-open-btn" class="ai-btn violet" style="display:none; width:auto; padding:6px 14px; font-size:0.85em;" onclick="openReportInNewTab()" data-i18n="idea.reportOpenNewTab">在新窗口打开</button>
                     </div>
                 </div>
                 <div id="control-proto-panel" class="panel-box" style="margin-top:16px;">

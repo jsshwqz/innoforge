@@ -22,11 +22,11 @@
                 <span class="patent-number-large">{{patent_number}}</span>
                 <div class="detail-actions">
                     <button class="ai-btn" onclick="aiSummarize()">🤖 <span data-i18n="detail.analyze"></span></button>
-                    <button class="ai-btn" id="load-full-btn" onclick="loadFullText()">📄 加载全文</button>
-                    <button class="ai-btn" id="view-original-pdf-btn" style="display:none;background:#1f6feb;" onclick="openOriginalPatentPdf()">📑 查看原版 PDF</button>
-                    <button class="ai-btn violet" onclick="window.open('/api/patent/pdf/{{id}}','_blank')">🖨️ 打印 / 保存 PDF</button>
-                    <button class="ai-btn green" onclick="window.location.href='/compare?patent={{patent_number}}&id={{id}}'">⚖️ 对比分析</button>
-                    <button class="ai-btn orange" id="collect-btn" onclick="toggleCollect()">⭐ 收藏</button>
+                    <button class="ai-btn" id="load-full-btn" onclick="loadFullText()" data-i18n="detail.loadFullBtn">📄 加载全文</button>
+                    <button class="ai-btn" id="view-original-pdf-btn" style="display:none;background:#1f6feb;" onclick="openOriginalPatentPdf()" data-i18n="detail.viewOriginalPdfBtn">📑 查看原版 PDF</button>
+                    <button class="ai-btn violet" onclick="window.open('/api/patent/pdf/{{id}}','_blank')" data-i18n="detail.printPdfBtn">🖨️ 打印 / 保存 PDF</button>
+                    <button class="ai-btn green" onclick="window.location.href='/compare?patent={{patent_number}}&id={{id}}'" data-i18n="detail.compareBtn">⚖️ 对比分析</button>
+                    <button class="ai-btn orange" id="collect-btn" onclick="toggleCollect()" data-i18n="detail.collectBtn">⭐ 收藏</button>
                 </div>
             </div>
             <div id="ai-summary" class="ai-summary" style="display:none;max-height:75vh;overflow-y:auto;"></div>
@@ -36,7 +36,7 @@
                 <span id="collections-display"></span>
                 <span class="divider" id="collect-tags-divider" style="display:none;">|</span>
                 <span id="tags-display"></span>
-                <input type="text" id="new-tag-input" placeholder="添加标签..." onkeydown="if(event.key==='Enter')addTag()">
+                <input type="text" id="new-tag-input" data-i18n-placeholder="detail.addTagPlaceholder" placeholder="添加标签..." onkeydown="if(event.key==='Enter')addTag()">
             </div>
 
             <div class="detail-grid">
@@ -56,11 +56,11 @@
                                 <span id="legal-status-badge">{{legal_status}}</span>
                                 <span style="margin-left:8px;">
                                     <select id="manual-legal-status-select" style="padding:2px 6px;border-radius:4px;">
-                                        <option value="Active">有效授权 (Active)</option>
-                                        <option value="Pending">实审中 (Pending)</option>
-                                        <option value="Expired">期满失效 (Expired)</option>
-                                        <option value="Rejected">驳回/撤回 (Rejected)</option>
-                                        <option value="Unknown">未知 (Unknown)</option>
+                                        <option value="Active" data-i18n="detail.legalActive">有效授权 (Active)</option>
+                                        <option value="Pending" data-i18n="detail.legalPending">实审中 (Pending)</option>
+                                        <option value="Expired" data-i18n="detail.legalExpired">期满失效 (Expired)</option>
+                                        <option value="Rejected" data-i18n="detail.legalRejected">驳回/撤回 (Rejected)</option>
+                                        <option value="Unknown" data-i18n="detail.legalUnknown">未知 (Unknown)</option>
                                     </select>
                                     <button type="button" class="btn-secondary" style="padding:2px 8px;font-size:12px;" onclick="saveManualLegalStatus()" data-i18n="detail.legalStatusSave">保存</button>
                                 </span>
@@ -79,7 +79,7 @@
                 <button class="tab active" onclick="showTab('abstract', event)" data-i18n="detail.tabAbstract"></button>
                 <button class="tab" onclick="showTab('claims', event)" data-i18n="detail.tabClaims"></button>
                 <button class="tab" onclick="showTab('description', event)" data-i18n="detail.tabDesc"></button>
-                <button class="tab" onclick="showTab('drawings', event)" id="tab-drawings-btn">📐 图纸</button>
+                <button class="tab" onclick="showTab('drawings', event)" id="tab-drawings-btn" data-i18n="detail.tabDrawings">📐 图纸</button>
                 <button class="tab" onclick="showTab('ai-chat', event)" data-i18n="detail.tabAiChat"></button>
                 <button class="tab" onclick="showTab('citations', event)" data-i18n="detail.tabCitations">🔗 引文与同族</button>
                 <button class="tab" onclick="showTab('oa-timeline', event)" data-i18n="oa.workflow.timeline"></button>
@@ -90,7 +90,7 @@
             </div>
             <div id="tab-claims" class="tab-content">
                 <div style="margin-bottom:12px;">
-                    <button class="btn-primary" onclick="analyzeClaims()" id="claims-analyze-btn">🔍 分析权利要求 <span class="reasoner-badge">Reasoner</span></button>
+                    <button class="btn-primary" onclick="analyzeClaims()" id="claims-analyze-btn"><span data-i18n="detail.analyzeClaimsBtn">🔍 分析权利要求</span> <span class="reasoner-badge">Reasoner</span></button>
                 </div>
                 <div id="claims-analysis-result" class="analysis-result" style="display:none;margin-bottom:16px;max-height:75vh;overflow-y:auto;"></div>
                 <div class="content-box"><pre>{{claims}}</pre></div>
@@ -147,8 +147,8 @@
             <p class="muted" data-i18n="detail.uploadHint"></p>
             <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">
                 <input type="file" id="upload-file" style="display:none;" multiple accept=".pdf,.docx,.pptx,.xlsx,.ofd,.step,.stp,.iges,.igs,.stl,.txt,.md,.csv,.tsv,.json,.yaml,.yml,.tex,.bib,.html,.htm,.xml,.rtf,.dxf,.png,.jpg,.jpeg,.gif,.bmp,.webp" onchange="onUploadCompareFilesSelected(event)">
-                <button type="button" class="btn-secondary" id="upload-pick-btn" onclick="document.getElementById('upload-file').click()" style="padding:7px 14px;font-size:13px;">📎 选择对比文件（可多选）</button>
-                <button type="button" class="btn-secondary" id="upload-clear-btn" onclick="clearUploadCompareFiles()" style="display:none;padding:6px 12px;font-size:13px;">清空已选</button>
+                <button type="button" class="btn-secondary" id="upload-pick-btn" onclick="document.getElementById('upload-file').click()" style="padding:7px 14px;font-size:13px;" data-i18n="detail.uploadPickBtn">📎 选择对比文件（可多选）</button>
+                <button type="button" class="btn-secondary" id="upload-clear-btn" onclick="clearUploadCompareFiles()" style="display:none;padding:6px 12px;font-size:13px;" data-i18n="detail.uploadClearBtn">清空已选</button>
                 <button class="btn-primary" id="upload-compare-btn" onclick="uploadCompare()" data-i18n="detail.uploadBtn"></button>
             </div>
             <div id="upload-compare-file-list" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;"></div>
