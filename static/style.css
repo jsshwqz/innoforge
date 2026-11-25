@@ -1214,6 +1214,124 @@ input[type="checkbox"] { accent-color: var(--accent); color-scheme: dark; }
 .page-footer a { color: var(--text-faint); }
 .page-footer a:hover { color: var(--text-muted); }
 
+/* ---------- Unified Bottom Contextual Assets Zone (History / Saved Files / Page Tools) ---------- */
+.page-bottom-zone {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--sp-4);
+  margin-top: var(--sp-2);
+}
+.page-bottom-panel {
+  border-color: var(--border-muted);
+  background: rgba(22, 27, 36, 0.72);
+}
+.page-bottom-section {
+  margin-top: var(--sp-4);
+  padding: var(--sp-4);
+  background: rgba(22, 27, 36, 0.72);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--r-lg);
+}
+.page-bottom-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
+}
+.page-bottom-title {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.page-bottom-count {
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  color: var(--text-muted);
+}
+.page-bottom-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.page-bottom-empty {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  padding: 6px 2px;
+}
+.page-bottom-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 10px 14px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: var(--t);
+}
+.page-bottom-item:hover {
+  border-color: var(--accent-border);
+  background: rgba(88, 166, 255, 0.06);
+}
+.page-bottom-item-main {
+  min-width: 0;
+  flex: 1;
+}
+.page-bottom-item-title {
+  color: var(--text-primary);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.page-bottom-item-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+}
+.page-bottom-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  border: 1px solid var(--border-muted);
+  color: #58a6ff;
+  background: rgba(31, 111, 235, 0.14);
+}
+.oa-history-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--sp-2);
+}
+.oa-history-grid .page-bottom-empty {
+  grid-column: 1 / -1;
+}
+.oa-history-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--r-md);
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: var(--t);
+}
+.oa-history-card:hover {
+  border-color: var(--accent-border);
+  background: rgba(88, 166, 255, 0.06);
+}
+
 /* ---------- FreeCAD conversation cards ---------- */
 .cad-card { margin: var(--sp-3) 0; padding: var(--sp-4); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-raised); }
 .cad-card-title { color: var(--text); font-weight: 650; margin-bottom: var(--sp-3); }

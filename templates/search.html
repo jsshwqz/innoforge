@@ -64,8 +64,8 @@
 </select>
 </div>
 <div class="search-grid-2">
-<label style="display:flex;align-items:center;gap:6px;margin:0;font-size:12px;color:#8b949e;white-space:nowrap;"><span>起:</span><input type="date" id="date-from" data-i18n-title="date.from" aria-label="开始日期"></label>
-<label style="display:flex;align-items:center;gap:6px;margin:0;font-size:12px;color:#8b949e;white-space:nowrap;"><span>止:</span><input type="date" id="date-to" data-i18n-title="date.to" aria-label="结束日期"></label>
+<label style="display:flex;align-items:center;gap:6px;margin:0;font-size:12px;color:#8b949e;white-space:nowrap;"><span data-i18n="date.fromShort">起:</span><input type="date" id="date-from" data-i18n-title="date.from" aria-label="开始日期"></label>
+<label style="display:flex;align-items:center;gap:6px;margin:0;font-size:12px;color:#8b949e;white-space:nowrap;"><span data-i18n="date.toShort">止:</span><input type="date" id="date-to" data-i18n-title="date.to" aria-label="结束日期"></label>
 <select id="page-size" onchange="if (currentRequest) doSearch(1)">
 <option value="10">每页 10 条</option>
 <option value="20" selected>每页 20 条</option>
@@ -76,22 +76,6 @@
 <button class="btn-secondary" onclick="showStats()" data-i18n="btn.stats"></button>
 <button class="btn-secondary" onclick="exportCsv()" data-i18n="btn.export"></button>
 </div>
-<!-- Local Document Upload Zone (Patent / Paper / Office / OFD / Image / Tech Doc) -->
-<div id="pdf-upload-zone" class="upload-zone" onclick="document.getElementById('pdf-file-input').click()">
-    <span data-i18n="upload.dragDrop">拖拽本地文献到此处，或点击上传（PDF / Office / OFD / 论文源码 / 图片）</span>
-    <div class="upload-hint" data-i18n="upload.hint">支持专利、期刊论文、PPTX/XLSX、国知局 OFD、TeX/HTML/TXT 与图片：自动收入本地库可检，并一键衔接下游流程</div>
-    <div class="file-list" id="pdf-file-list"></div>
-    <input type="file" id="pdf-file-input" accept=".pdf,.docx,.pptx,.xlsx,.ofd,.step,.stp,.iges,.igs,.stl,.txt,.md,.csv,.tsv,.json,.yaml,.yml,.tex,.bib,.html,.htm,.xml,.rtf,.dxf,.png,.jpg,.jpeg,.webp,.bmp,.gif" multiple="false" style="display:none" onchange="handlePdfUpload(event)">
-</div>
-<div id="pdf-action-bar" style="display:none;margin-top:10px;padding:12px 14px;background:#161b22;border:1px solid #30363d;border-left:3px solid #58a6ff;border-radius:8px;"></div>
-</div>
-
-<div class="panel">
-<div class="panel-header">
-<h3 style="margin:0;" data-i18n="history.title"></h3>
-<button class="btn-secondary btn-sm" onclick="clearHistory()" data-i18n="history.clear"></button>
-</div>
-<div id="history-list" class="history-list"></div>
 </div>
 
 <div class="panel" id="stats-panel" style="display:none;">
@@ -107,6 +91,31 @@
 <div id="results-info"></div>
 <div id="results"></div>
 <div id="pagination" class="pagination"></div>
+</div>
+
+<!-- 本页底部上下文资产区：检索历史 + 本地文献上传暂存 -->
+<div class="page-bottom-zone">
+<div class="panel page-bottom-panel">
+<div class="panel-header">
+<h3 style="margin:0;" data-i18n="history.title"></h3>
+<button class="btn-secondary btn-sm" onclick="clearHistory()" data-i18n="history.clear"></button>
+</div>
+<div id="history-list" class="history-list"></div>
+</div>
+
+<div class="panel page-bottom-panel">
+<div class="panel-header">
+<h3 style="margin:0;" data-i18n="search.bottomUploadTitle">📎 本地文献上传与暂存</h3>
+</div>
+<!-- Local Document Upload Zone (Patent / Paper / Office / OFD / Image / Tech Doc) -->
+<div id="pdf-upload-zone" class="upload-zone" onclick="document.getElementById('pdf-file-input').click()">
+    <span data-i18n="upload.dragDrop">拖拽本地文献到此处，或点击上传（PDF / Office / OFD / 论文源码 / 图片）</span>
+    <div class="upload-hint" data-i18n="upload.hint">支持专利、期刊论文、PPTX/XLSX、国知局 OFD、TeX/HTML/TXT 与图片：自动收入本地库可检，并一键衔接下游流程</div>
+    <div class="file-list" id="pdf-file-list"></div>
+    <input type="file" id="pdf-file-input" accept=".pdf,.docx,.pptx,.xlsx,.ofd,.step,.stp,.iges,.igs,.stl,.txt,.md,.csv,.tsv,.json,.yaml,.yml,.tex,.bib,.html,.htm,.xml,.rtf,.dxf,.png,.jpg,.jpeg,.webp,.bmp,.gif" multiple="false" style="display:none" onchange="handlePdfUpload(event)">
+</div>
+<div id="pdf-action-bar" style="display:none;margin-top:10px;padding:12px 14px;background:#161b22;border:1px solid #30363d;border-left:3px solid #58a6ff;border-radius:8px;"></div>
+</div>
 </div>
 </main>
 </div>
@@ -199,6 +208,9 @@ function clearSearchPdfMeta() {
     'sort.old': '最早',
     'date.from': '开始日期',
     'date.to': '结束日期',
+    'date.fromShort': '起:',
+    'date.toShort': '止:',
+    'search.bottomUploadTitle': '📎 本地文献上传与暂存',
     'btn.search': '搜索',
     'btn.stats': '统计',
     'btn.export': '导出 CSV',
@@ -296,6 +308,9 @@ function clearSearchPdfMeta() {
     'sort.old': 'Oldest',
     'date.from': 'Date from',
     'date.to': 'Date to',
+    'date.fromShort': 'From:',
+    'date.toShort': 'To:',
+    'search.bottomUploadTitle': '📎 Local Document Staging & Import',
     'btn.search': 'Search',
     'btn.stats': 'Stats',
     'btn.export': 'Export CSV',
@@ -380,23 +395,7 @@ setI18nLang = function(lang) {
 
 // Initialize navbar, sidebar, and apply i18n after search keys are registered
 renderNavbar('search');
-renderSidebar(
-  '<div class="sidebar-section">'
-  + '<div class="sidebar-label">' + t('mode.local').split(' ')[0] + '</div>'
-  + '<select id="sidebar-search-mode" onchange="document.getElementById(\'search-mode\').value=this.value;toggleRegionSelect()">'
-  + '<option value="local" selected data-i18n="mode.local">' + t('mode.local') + '</option>'
-  + '<option value="omni" data-i18n="mode.omni">' + t('mode.omni') + '</option>'
-  + '<option value="academic" data-i18n="mode.academic">' + t('mode.academic') + '</option>'
-  + '<option value="online" data-i18n="mode.online">' + t('mode.online') + '</option>'
-  + '<option value="vector" data-i18n="mode.vector">' + t('mode.vector') + '</option>'
-  + '</select>'
-  + '</div>'
-  + '<div class="sidebar-section">'
-  + '<div class="sidebar-label">' + (i18nLang === 'zh' ? '快捷操作' : 'Actions') + '</div>'
-  + '<button class="sidebar-btn" onclick="showStats()" data-i18n="btn.stats">' + t('btn.stats') + '</button>'
-  + '<button class="sidebar-btn" onclick="exportCsv()" data-i18n="btn.export">' + t('btn.export') + '</button>'
-  + '</div>'
-);
+renderSidebar();
 	applyI18nCommon();
 	loadSearchPdfMeta();
 	if (restoredSearchPdf) {
@@ -427,8 +426,6 @@ function escapeHtml(str) {
 
 function toggleRegionSelect() {
     var mode = document.getElementById('search-mode').value;
-    var sidebarMode = document.getElementById('sidebar-search-mode');
-    if (sidebarMode && sidebarMode.value !== mode) sidebarMode.value = mode;
     var regionEl = document.getElementById('search-region');
     if (regionEl) regionEl.style.display = (mode === 'online' || mode === 'omni') ? '' : 'none';
 }
