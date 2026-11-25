@@ -1339,6 +1339,52 @@ pub async fn api_search_online(
         return Json(out);
     }
 
+    // ── 国内直连无 VPN 回退：若用户配置了博查 BOCHA_API_KEY，则走国内直连 Web Search ──
+    let bocha_key = {
+        let cfg = s.config.read().unwrap_or_else(|e| e.into_inner());
+        let k = cfg.bocha_api_key.trim().to_string();
+        if k.is_empty() {
+            None
+        } else {
+            Some(k)
+        }
+    };
+    if let Some(key) = bocha_key {
+        if online_start.elapsed().as_secs() < ONLINE_TOTAL_BUDGET_SECS {
+            if let Ok(provider) = crate::search::providers::bocha::BochaSearchProvider::new(key) {
+                if let Ok(hits) = provider.web_search(&search_query).await {
+                    if !hits.is_empty() {
+                        let web_results: Vec<serde_json::Value> = hits
+                            .iter()
+                            .map(|h| {
+                                json!({
+                                    "title": h.title,
+                                    "snippet": h.snippet,
+                                    "url": h.url,
+                                    "patent_number": h.patent_number,
+                                    "published_date": h.published_date
+                                })
+                            })
+                            .collect();
+                        let mut out = json!({
+                            "patents": [],
+                            "web_results": web_results,
+                            "total": hits.len(),
+                            "page": req.page.max(1),
+                            "page_size": req.page_size.clamp(1, 50),
+                            "source": "bocha_web",
+                            "attempts": attempts_json(&outcome),
+                        });
+                        if let Some(h) = upstream_hint.take().filter(|v| !v.is_empty()) {
+                            out["hint"] = json!(h);
+                        }
+                        return Json(out);
+                    }
+                }
+            }
+        }
+    }
+
     // MA2b 起在线链路为 [SerpAPI → Google Patents XHR 直抓 → EPO OPS]（见上方的 SourceChain），
     // 其余历史源（Firecrawl / Bing / CNIPR / 搜狗）仍处于屏蔽状态。
     // 三个在线源都没有可用结果时，回退本地数据库。
@@ -2276,12 +2322,44 @@ pub async fn api_search_omni(
         };
         let oa_p = OpenAlexProvider::new(s.db.clone());
         let s2_p = SemanticScholarProvider::new(s.db.clone());
+        let bocha_key_opt = {
+            let cfg = s.config.read().unwrap_or_else(|e| e.into_inner());
+            let k = cfg.bocha_api_key.trim().to_string();
+            if k.is_empty() {
+                None
+            } else {
+                Some(k)
+            }
+        };
+        let bocha_query = patent_query.clone();
+        let bocha_fut = async move {
+            let Some(key) = bocha_key_opt else {
+                return Vec::new();
+            };
+            let Ok(provider) = crate::search::providers::bocha::BochaSearchProvider::new(key)
+            else {
+                return Vec::new();
+            };
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(12),
+                provider.web_search(&bocha_query),
+            )
+            .await
+            {
+                Ok(Ok(hits)) => hits
+                    .into_iter()
+                    .map(|h| h.to_patent_summary())
+                    .collect::<Vec<_>>(),
+                _ => Vec::new(),
+            }
+        };
 
-        let (local_res, pat_res, oa_res, s2_res) = tokio::join!(
+        let (local_res, pat_res, oa_res, s2_res, bocha_list) = tokio::join!(
             local_fut,
             tokio::time::timeout(timeout_dur, patent_provider.search(patent_query)),
             tokio::time::timeout(timeout_dur, oa_p.search(academic_query.clone())),
             tokio::time::timeout(timeout_dur, s2_p.search(academic_query)),
+            bocha_fut,
         );
 
         if let Ok(Some(local_list)) = local_res {
@@ -2312,6 +2390,9 @@ pub async fn api_search_omni(
             for item in outcome.summaries() {
                 tagged_results.push((item, "semantic_scholar"));
             }
+        }
+        for item in bocha_list {
+            tagged_results.push((item, "bocha_web"));
         }
     }
 

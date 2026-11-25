@@ -1133,7 +1133,7 @@ input[type="checkbox"] { accent-color: var(--accent); color-scheme: dark; }
 
 /* ---------- 19. 设置页 ---------- */
 .settings-container { max-width: 900px; margin: var(--sp-6) auto; padding: 0 var(--sp-5) 80px; }
-.setting-group { padding: var(--sp-5); margin-bottom: var(--sp-5); }
+.setting-group { padding: var(--sp-5); margin-bottom: var(--sp-5); max-width: 100%; overflow-x: auto; }
 .setting-group h3 { margin-top: 0; color: var(--accent-hover); font-size: var(--fs-xl); margin-bottom: var(--sp-2); }
 .setting-group p { color: var(--text-muted); font-size: var(--fs-base); margin: var(--sp-2) 0; }
 .setting-group .form-group { margin: var(--sp-4) 0; }

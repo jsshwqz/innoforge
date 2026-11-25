@@ -518,6 +518,10 @@ pub fn build_router_with_token(
             "/api/settings/serpapi/balance",
             get(routes::api_serpapi_balance),
         )
+        .route(
+            "/api/settings/epo/test",
+            post(routes::api_test_epo_credentials),
+        )
         // 聊天记录 API / Chat Records API
         .route("/api/chat/:session_key", get(routes::api_chat_get_messages))
         .route(

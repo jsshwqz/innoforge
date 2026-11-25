@@ -12,10 +12,13 @@ from __future__ import annotations
 
 import argparse
 import csv
+import io
 import json
 import re
 import sys
 import uuid
+import xml.etree.ElementTree as ET
+import zipfile
 from pathlib import Path
 from typing import Dict, Iterable, List
 from urllib import error, request
@@ -115,10 +118,74 @@ def to_patent(row: Dict[str, object], source_tag: str) -> Dict[str, object]:
 
 
 def read_csv(path: Path) -> Iterable[Dict[str, object]]:
-    with path.open("r", encoding="utf-8-sig", newline="") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            yield row
+    raw = path.read_bytes()
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = raw.decode("gb18030", errors="replace")
+    reader = csv.DictReader(io.StringIO(text))
+    for row in reader:
+        yield row
+
+
+def _col_letters_to_idx(ref: str) -> int:
+    col = 0
+    for ch in ref:
+        if ch.isalpha():
+            col = col * 26 + (ord(ch.upper()) - ord("A") + 1)
+        else:
+            break
+    return max(0, col - 1)
+
+
+def read_xlsx(path: Path) -> Iterable[Dict[str, object]]:
+    ns = {"x": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+    with zipfile.ZipFile(path, "r") as zf:
+        shared: List[str] = []
+        if "xl/sharedStrings.xml" in zf.namelist():
+            root = ET.fromstring(zf.read("xl/sharedStrings.xml"))
+            for si in root.findall("x:si", ns):
+                shared.append("".join(t.text or "" for t in si.findall(".//x:t", ns)))
+        sheets = sorted(
+            n for n in zf.namelist() if n.startswith("xl/worksheets/sheet") and n.endswith(".xml")
+        )
+        if not sheets:
+            return
+        root = ET.fromstring(zf.read(sheets[0]))
+        matrix: List[List[str]] = []
+        for row_el in root.findall(".//x:sheetData/x:row", ns):
+            cells: List[str] = []
+            cursor = 0
+            for c_el in row_el.findall("x:c", ns):
+                ref = c_el.attrib.get("r", "")
+                col_idx = _col_letters_to_idx(ref) if ref else cursor
+                cursor = col_idx + 1
+                while len(cells) <= col_idx:
+                    cells.append("")
+                ctype = c_el.attrib.get("t", "")
+                if ctype == "inlineStr":
+                    val = "".join(t.text or "" for t in c_el.findall(".//x:t", ns))
+                else:
+                    v_el = c_el.find("x:v", ns)
+                    raw_v = (v_el.text or "").strip() if v_el is not None else ""
+                    if ctype == "s" and raw_v.isdigit():
+                        idx = int(raw_v)
+                        val = shared[idx] if 0 <= idx < len(shared) else raw_v
+                    else:
+                        val = raw_v
+                cells[col_idx] = val.strip()
+            if any(cells):
+                matrix.append(cells)
+        if len(matrix) < 2:
+            return
+        headers = matrix[0]
+        for row in matrix[1:]:
+            item: Dict[str, object] = {}
+            for i, val in enumerate(row):
+                if i < len(headers) and headers[i]:
+                    item[headers[i]] = val
+            if item:
+                yield item
 
 
 def read_json(path: Path) -> Iterable[Dict[str, object]]:
@@ -179,6 +246,8 @@ def post_import(api_url: str, batch: List[Dict[str, object]]) -> int:
 
 
 def load_rows(path: Path, fmt: str) -> Iterable[Dict[str, object]]:
+    if fmt == "xlsx":
+        return read_xlsx(path)
     if fmt == "csv":
         return read_csv(path)
     if fmt == "json":
@@ -186,6 +255,8 @@ def load_rows(path: Path, fmt: str) -> Iterable[Dict[str, object]]:
     if fmt == "jsonl":
         return read_jsonl(path)
     suffix = path.suffix.lower()
+    if suffix == ".xlsx":
+        return read_xlsx(path)
     if suffix == ".csv":
         return read_csv(path)
     if suffix in (".jsonl", ".ndjson"):
@@ -197,15 +268,21 @@ def load_rows(path: Path, fmt: str) -> Iterable[Dict[str, object]]:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="公开专利数据批量导入到 InnoForge 本地库")
-    ap.add_argument("--file", required=True, help="输入文件路径（csv/json/jsonl）")
+    ap.add_argument("--file", required=True, help="输入文件路径（xlsx/csv/json/jsonl）")
     ap.add_argument(
         "--api",
         default="http://127.0.0.1:3000/api/patents/import",
         help="导入接口地址",
     )
-    ap.add_argument("--format", choices=["auto", "csv", "json", "jsonl"], default="auto")
+    ap.add_argument("--format", choices=["auto", "xlsx", "csv", "json", "jsonl"], default="auto")
     ap.add_argument("--batch-size", type=int, default=200)
     ap.add_argument("--source", default="public_bulk")
+    ap.add_argument("--ipc-prefix", default="", help="可选 IPC 前缀过滤（逗号分隔，如 H01L,G06F）")
+    ap.add_argument(
+        "--lightweight",
+        action="store_true",
+        help="轻量索引模式：截断长摘要至 400 字并跳过正文/权利要求",
+    )
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
@@ -214,16 +291,29 @@ def main() -> int:
         print(f"[ERR] 文件不存在: {path}")
         return 2
 
+    ipc_prefixes = [p.strip().upper() for p in args.ipc_prefix.split(",") if p.strip()]
     fmt = "auto" if args.format == "auto" else args.format
     raw_rows = list(load_rows(path, fmt))
     normalized: List[Dict[str, object]] = []
     seen = set()
     skipped = 0
+    filtered = 0
     for row in raw_rows:
         pat = to_patent(row, args.source)
         if not pat:
             skipped += 1
             continue
+        if ipc_prefixes:
+            hay = f"{pat.get('ipc_codes', '')} {pat.get('cpc_codes', '')}".upper()
+            if not any(pref in hay for pref in ipc_prefixes):
+                filtered += 1
+                continue
+        if args.lightweight:
+            abs_text = str(pat.get("abstract_text", ""))
+            if len(abs_text) > 400:
+                pat["abstract_text"] = abs_text[:400] + "…"
+            pat["description"] = ""
+            pat["claims"] = ""
         pid = pat["id"]
         if pid in seen:
             skipped += 1
@@ -232,11 +322,11 @@ def main() -> int:
         normalized.append(pat)
 
     if not normalized:
-        print("[WARN] 没有可导入的数据（字段可能不匹配）")
+        print("[WARN] 没有可导入的数据（字段可能不匹配或被 IPC 过滤）")
         return 1
 
     print(
-        f"[INFO] 读取 {len(raw_rows)} 行，规范化 {len(normalized)} 行，跳过 {skipped} 行，批大小 {args.batch_size}"
+        f"[INFO] 读取 {len(raw_rows)} 行，规范化 {len(normalized)} 行，IPC 过滤 {filtered} 行，跳过 {skipped} 行，批大小 {args.batch_size}"
     )
 
     if args.dry_run:

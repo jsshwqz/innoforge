@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-25T14:56:04.715Z",
+  "generatedAt": "2026-11-25T16:29:59.991Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -800,11 +800,13 @@
         "loginWithGcloud",
         "saveAiBudgetSettings",
         "saveAiConfig",
+        "saveBochaKey",
         "saveEpoCredentials",
         "saveFreeCadSettings",
         "saveGoogleCredentials",
         "saveSearchAgentSettings",
         "saveSerpApiKey",
+        "testEpoCredentials",
         "toggleGeminiCliMode",
         "toggleSecretField",
         "updateEpoPairHint"
@@ -822,6 +824,7 @@
         "fallbackToProviderPresets",
         "fetchAiModels",
         "fetchSerpapiBalance",
+        "fillBochaKey",
         "fillEpoCredentials",
         "formatNumber",
         "goBack",
@@ -836,6 +839,7 @@
         "renderFreeCadStatus",
         "saveAiBudgetSettings",
         "saveAiConfig",
+        "saveBochaKey",
         "saveEpoCredentials",
         "saveFreeCadSettings",
         "saveGoogleCredentials",
@@ -843,8 +847,10 @@
         "saveSerpApiKey",
         "showCustomManualFallback",
         "showStatus",
+        "testEpoCredentials",
         "toggleGeminiCliMode",
         "toggleSecretField",
+        "updateBochaStatus",
         "updateConfigStatus",
         "updateEpoPairHint",
         "updateEpoStatus",

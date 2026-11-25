@@ -13,6 +13,7 @@
 //! `crate::search::provider` 的 `trait_is_dyn_compatible_and_registry_builds` 锁死）。
 //! MA4 的本地 FTS 兜底源（spec §7）在此追加。
 
+pub mod bocha;
 pub mod epo_ops;
 pub mod firecrawl;
 pub mod google_patents_xhr;
