@@ -531,6 +531,10 @@ fn is_valid_technical_keyword(kw: &str) -> bool {
     {
         return false;
     }
+    // 过滤纯参数/量纲碎片（如 "800v" / "1200v" / "600a" / "8nh" / "32%" / "10mm" / "90度"），避免污染硬件 BOM
+    if is_bare_numeric_parameter(trimmed) {
+        return false;
+    }
     let has_cjk = trimmed
         .chars()
         .any(|c| ('\u{4E00}'..='\u{9FFF}').contains(&c));
@@ -552,9 +556,88 @@ fn is_valid_technical_keyword(kw: &str) -> bool {
     true
 }
 
+/// 判断是否为纯数字+单位参数碎片（如 "800v"、"32%"、"8nh"、"10mm"、"90度"），非实体 BOM 部件
+fn is_bare_numeric_parameter(s: &str) -> bool {
+    let trimmed = s.trim();
+    let mut chars = trimmed.chars().peekable();
+    let mut digit_count = 0usize;
+    while let Some(&c) = chars.peek() {
+        if c.is_ascii_digit() || c == '.' || c == '-' || c == '<' || c == '>' || c == '~' {
+            if c.is_ascii_digit() {
+                digit_count += 1;
+            }
+            chars.next();
+        } else {
+            break;
+        }
+    }
+    if digit_count == 0 {
+        return false;
+    }
+    let rest: String = chars.collect::<String>().trim().to_ascii_lowercase();
+    matches!(
+        rest.as_str(),
+        "" | "%"
+            | "v"
+            | "kv"
+            | "mv"
+            | "a"
+            | "ma"
+            | "w"
+            | "kw"
+            | "mw"
+            | "hz"
+            | "khz"
+            | "mhz"
+            | "nh"
+            | "uh"
+            | "mh"
+            | "pf"
+            | "nf"
+            | "uf"
+            | "mm"
+            | "cm"
+            | "um"
+            | "nm"
+            | "m"
+            | "kg"
+            | "g"
+            | "mg"
+            | "pa"
+            | "kpa"
+            | "mpa"
+            | "rpm"
+            | "deg"
+            | "c"
+            | "k"
+            | "°c"
+            | "℃"
+            | "°"
+            | "度"
+            | "小时"
+            | "h"
+            | "s"
+            | "ms"
+    )
+}
+
 fn classify_keyword_category(keyword: &str) -> &'static str {
     let lower = keyword.to_lowercase();
-    if lower.contains("传感")
+    if lower == "sic"
+        || lower == "gan"
+        || lower == "igbt"
+        || lower == "mosfet"
+        || lower.contains("碳化硅")
+        || lower.contains("氮化镓")
+        || lower.contains("功率模块")
+        || lower.contains("功率半导体")
+        || lower.contains("igbt")
+        || lower.contains("mosfet")
+        || lower.contains("芯片")
+        || lower.contains("晶圆")
+    {
+        "功率半导体/外购核心器件"
+    } else if lower.contains("传感")
         || lower.contains("检测")
         || lower.contains("控制")
         || lower.contains("算法")
