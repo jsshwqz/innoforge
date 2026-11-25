@@ -81,6 +81,10 @@ pub struct AppConfig {
     /// OPS 消费者 Secret（app_settings `EPO_SECRET`，环境变量后备）。
     pub epo_secret: String,
 
+    // ── 博查国内直连 Web Search BYOK ──
+    /// 博查 API Key（app_settings `BOCHA_API_KEY`，环境变量后备）。未配置时零请求。
+    pub bocha_api_key: String,
+
     pub ai_base_url: String,
     /// 通用 AI API Key（自定义服务商使用 + 向后兼容）
     pub ai_api_key: String,
@@ -163,6 +167,7 @@ impl AppConfig {
         // 环境变量后备。设置页的两个配置位属 MA5（本包只做读取与登记，不加 UI）。
         let epo_key = get("EPO_KEY", "");
         let epo_secret = get("EPO_SECRET", "");
+        let bocha_api_key = get("BOCHA_API_KEY", "");
 
         // 解析 google_token_expiry（存储在 DB 中的字符串），
         // 环境变量 GOOGLE_TOKEN_EXPIRY 作为后备
@@ -189,6 +194,7 @@ impl AppConfig {
             serpapi_keys,
             epo_key,
             epo_secret,
+            bocha_api_key,
 
             ai_base_url: get("AI_BASE_URL", "http://localhost:11434/v1"),
             ai_api_key: get("AI_API_KEY", "ollama"),

@@ -78,7 +78,10 @@
 
             <div class="form-group">
                 <label for="epo-secret" data-i18n="settings.epoSecretLabel"></label>
-                <input type="password" id="epo-secret" data-i18n-placeholder="settings.epoSecretPlaceholder" autocomplete="off" oninput="updateEpoPairHint()">
+                <div style="display:flex;gap:6px;align-items:center;">
+                    <input type="password" id="epo-secret" data-i18n-placeholder="settings.epoSecretPlaceholder" autocomplete="off" oninput="updateEpoPairHint()" style="flex:1;">
+                    <button type="button" class="btn-secondary" style="padding:6px 10px;font-size:12px;" onclick="toggleSecretField('epo-secret', this)" title="显示/隐藏密钥">👁</button>
+                </div>
                 <span class="form-hint" data-i18n="settings.epoSecretHint"></span>
             </div>
 
@@ -86,9 +89,31 @@
 
             <div class="btn-row" style="margin-top:8px;">
                 <button class="btn-save" type="button" onclick="saveEpoCredentials()" data-i18n="settings.epoSave"></button>
+                <button class="btn-secondary" type="button" id="btn-test-epo" onclick="testEpoCredentials()" data-i18n="settings.epoTestBtn"></button>
             </div>
             <div id="epo-status" class="status-message"></div>
             <div id="epo-current" class="status-pill" style="margin-top:8px;"></div>
+        </div>
+
+        <div class="setting-group">
+            <h3 data-i18n="settings.bochaTitle"></h3>
+            <p data-i18n="settings.bochaHint"></p>
+            <p class="warn-text"><span data-i18n="settings.bochaRegister"></span>：<a href="https://open.bochaai.com/" target="_blank" rel="noopener">https://open.bochaai.com/</a></p>
+
+            <div class="form-group">
+                <label for="bocha-key" data-i18n="settings.bochaKeyLabel"></label>
+                <div style="display:flex;gap:6px;align-items:center;">
+                    <input type="password" id="bocha-key" data-i18n-placeholder="settings.bochaKeyPlaceholder" autocomplete="off" style="flex:1;">
+                    <button type="button" class="btn-secondary" style="padding:6px 10px;font-size:12px;" onclick="toggleSecretField('bocha-key', this)" title="显示/隐藏密钥">👁</button>
+                </div>
+                <span class="form-hint" data-i18n="settings.bochaKeyHint"></span>
+            </div>
+
+            <div class="btn-row" style="margin-top:8px;">
+                <button class="btn-save" type="button" onclick="saveBochaKey()" data-i18n="settings.bochaSave"></button>
+            </div>
+            <div id="bocha-status" class="status-message"></div>
+            <div id="bocha-current" class="status-pill" style="margin-top:8px;"></div>
         </div>
 
         <div class="setting-group">
@@ -648,6 +673,7 @@
                     }
                     // 回填 EPO OPS 凭证（脱敏掩码回显，MA5a）
                     fillEpoCredentials(config);
+                    fillBochaKey(config);
 
                     document.getElementById('ai-base-url').value = config.ai_base_url || 'https://api.deepseek.com/v1';
                     document.getElementById('ai-api-key').value = config.ai_api_key || '';
@@ -738,6 +764,10 @@
                 status.push(t('settings.epoStatusHalf'));
             } else {
                 status.push(t('settings.epoStatusOff'));
+            }
+
+            if (config.bocha_configured) {
+                status.push(t('settings.bochaStatusOn'));
             }
 
             if (config.ai_api_key_configured) {
@@ -1140,6 +1170,75 @@
                     } catch (_) {}
                 } else {
                     showStatus(statusEl, 'error', data.message || t('settings.epoSaveFail'));
+                }
+            } catch (e) {
+                showStatus(statusEl, 'error', t('settings.epoNetworkFail') + '：' + e.message);
+            }
+        }
+
+        async function testEpoCredentials() {
+            var statusEl = document.getElementById('epo-status');
+            var btn = document.getElementById('btn-test-epo');
+            var payload = {
+                epo_key: document.getElementById('epo-key').value.trim(),
+                epo_secret: document.getElementById('epo-secret').value.trim()
+            };
+            if (btn) btn.disabled = true;
+            showStatus(statusEl, 'info', t('settings.epoTesting'));
+            try {
+                const res = await fetch('/api/settings/epo/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (res.ok && data.status === 'ok') {
+                    showStatus(statusEl, 'success', data.message || '✅ EPO OPS OK');
+                } else {
+                    showStatus(statusEl, 'error', data.message || t('settings.epoSaveFail'));
+                }
+            } catch (e) {
+                showStatus(statusEl, 'error', t('settings.epoNetworkFail') + '：' + e.message);
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        }
+
+        function fillBochaKey(config) {
+            var inp = document.getElementById('bocha-key');
+            if (inp) inp.value = config.bocha_key || '';
+            updateBochaStatus(config);
+        }
+
+        function updateBochaStatus(config) {
+            var el = document.getElementById('bocha-current');
+            if (!el) return;
+            el.textContent = config.bocha_configured ? t('settings.bochaStatusOn') : t('settings.bochaStatusOff');
+            el.className = 'status-pill ' + (config.bocha_configured ? 'success' : 'warning');
+        }
+
+        async function saveBochaKey() {
+            var statusEl = document.getElementById('bocha-status');
+            var payload = { bocha_key: document.getElementById('bocha-key').value.trim() };
+            try {
+                const res = await fetch('/api/settings/serpapi', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (res.ok && data.status === 'ok') {
+                    showStatus(statusEl, 'success', '✅ ' + (data.message || t('settings.bochaSaved')));
+                    try {
+                        const refreshRes = await fetch('/api/settings');
+                        if (refreshRes.ok) {
+                            const refreshed = await refreshRes.json();
+                            fillBochaKey(refreshed);
+                            updateConfigStatus(refreshed);
+                        }
+                    } catch (_) {}
+                } else {
+                    showStatus(statusEl, 'error', data.message || t('settings.bochaSaveFail'));
                 }
             } catch (e) {
                 showStatus(statusEl, 'error', t('settings.epoNetworkFail') + '：' + e.message);

@@ -127,6 +127,8 @@ pub async fn api_get_settings(State(s): State<AppState>) -> Json<serde_json::Val
         "epo_key_configured": !config.epo_key.trim().is_empty(),
         "epo_secret_configured": !config.epo_secret.trim().is_empty(),
         "epo_configured": config.epo_credentials().is_some(),
+        "bocha_key": mask_api_key(&config.bocha_api_key),
+        "bocha_configured": !config.bocha_api_key.trim().is_empty(),
         "ai_base_url": config.ai_base_url,
         "ai_api_key": mask_api_key(&current_key),
         "ai_api_key_configured": ai_configured,
@@ -463,25 +465,219 @@ fn apply_epo_credentials(
     }))
 }
 
+fn apply_bocha_key(
+    s: &AppState,
+    req: &serde_json::Value,
+    current_key: &str,
+) -> Json<serde_json::Value> {
+    let parsed_key = match parse_epo_credential(req, "bocha_key", current_key, "Bocha API Key") {
+        Ok(value) => value,
+        Err(message) => return Json(json!({"status": "error", "message": message})),
+    };
+    let next_key = parsed_key.unwrap_or_else(|| current_key.trim().to_string());
+    if let Err(error) = s.db.set_setting("BOCHA_API_KEY", &next_key) {
+        tracing::error!("保存博查 API Key 到数据库失败: {error}");
+        return Json(json!({
+            "status": "error",
+            "message": "保存博查 API Key 失败，请稍后重试"
+        }));
+    }
+    {
+        let mut config = s.config.write().unwrap_or_else(|e| e.into_inner());
+        config.bocha_api_key = next_key.clone();
+    }
+    let _ = update_env_file("BOCHA_API_KEY", &next_key);
+    let message = if next_key.is_empty() {
+        "已清空博查 API Key，国内直连搜索兜底已关闭"
+    } else {
+        "已保存博查 API Key，国内直连搜索与全域混搜已启用该源"
+    };
+    Json(json!({
+        "status": "ok",
+        "message": message,
+        "bocha_configured": !next_key.is_empty()
+    }))
+}
+
+/// POST `/api/settings/epo/test` — 现场实测 EPO OPS OAuth2 鉴权与 1 条公开专利连通性（不回显明文密钥）。
+pub async fn api_test_epo_credentials(
+    State(s): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    use base64::Engine;
+    let (saved_key, saved_secret) = {
+        let config = s.config.read().unwrap_or_else(|e| e.into_inner());
+        (config.epo_key.clone(), config.epo_secret.clone())
+    };
+    let key = match parse_epo_credential(&req, "epo_key", &saved_key, "EPO Consumer Key") {
+        Ok(Some(v)) => v,
+        Ok(None) => saved_key.trim().to_string(),
+        Err(msg) => return Json(json!({"status": "error", "message": msg})),
+    };
+    let secret =
+        match parse_epo_credential(&req, "epo_secret", &saved_secret, "EPO Consumer Secret") {
+            Ok(Some(v)) => v,
+            Ok(None) => saved_secret.trim().to_string(),
+            Err(msg) => return Json(json!({"status": "error", "message": msg})),
+        };
+
+    if key.is_empty() || secret.is_empty() {
+        return Json(json!({
+            "status": "error",
+            "token_ok": false,
+            "search_ok": false,
+            "message": "EPO OPS 需要同时填写 Consumer Key 与 Consumer Secret（两者缺一不可）"
+        }));
+    }
+
+    let client = match reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .timeout(std::time::Duration::from_secs(12))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            return Json(json!({
+                "status": "error",
+                "message": format!("HTTP 客户端初始化失败: {e}")
+            }));
+        }
+    };
+
+    let started = std::time::Instant::now();
+    let basic = base64::engine::general_purpose::STANDARD.encode(format!("{key}:{secret}"));
+    let token_resp = match client
+        .post("https://ops.epo.org/3.2/auth/accesstoken")
+        .header("Authorization", format!("Basic {basic}"))
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .body("grant_type=client_credentials")
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            return Json(json!({
+                "status": "error",
+                "token_ok": false,
+                "search_ok": false,
+                "latency_ms": started.elapsed().as_millis() as u64,
+                "message": format!("连接欧专局鉴权服务失败（请检查网络）: {e}")
+            }));
+        }
+    };
+
+    let token_status = token_resp.status().as_u16();
+    let token_body = token_resp.text().await.unwrap_or_default();
+    if !(200..=299).contains(&token_status) {
+        let hint = if token_status == 401 || token_status == 403 {
+            "Consumer Key 或 Consumer Secret 不正确、填反，或应用尚未在 developers.epo.org 生效"
+        } else {
+            "欧专局鉴权接口返回异常状态"
+        };
+        return Json(json!({
+            "status": "error",
+            "token_ok": false,
+            "search_ok": false,
+            "http_status": token_status,
+            "latency_ms": started.elapsed().as_millis() as u64,
+            "message": format!("鉴权失败 (HTTP {token_status})：{hint}")
+        }));
+    }
+
+    let token_json: serde_json::Value = serde_json::from_str(&token_body).unwrap_or_default();
+    let access_token = token_json["access_token"].as_str().unwrap_or("").trim();
+    let expires_in = token_json["expires_in"]
+        .as_str()
+        .and_then(|v| v.parse::<u64>().ok())
+        .or_else(|| token_json["expires_in"].as_u64())
+        .unwrap_or(1199);
+
+    if access_token.is_empty() {
+        return Json(json!({
+            "status": "error",
+            "token_ok": false,
+            "search_ok": false,
+            "latency_ms": started.elapsed().as_millis() as u64,
+            "message": "欧专局返回 200 但未包含 access_token"
+        }));
+    }
+
+    // 真实试查 1 条公开专利，确认业务接口与配额均可用
+    let search_url =
+        "https://ops.epo.org/3.2/rest-services/published-data/search/biblio?q=pn%3DEP1000000&Range=1-1";
+    let search_resp = client
+        .get(search_url)
+        .header("Authorization", format!("Bearer {access_token}"))
+        .header("Accept", "application/json")
+        .send()
+        .await;
+
+    let latency_ms = started.elapsed().as_millis() as u64;
+    match search_resp {
+        Ok(r) if r.status().is_success() => Json(json!({
+            "status": "ok",
+            "token_ok": true,
+            "search_ok": true,
+            "expires_in": expires_in,
+            "latency_ms": latency_ms,
+            "message": format!("✅ EPO OPS 鉴权与实测检索均已打通（Token 有效 {expires_in}s，耗时 {latency_ms}ms）")
+        })),
+        Ok(r) => {
+            let st = r.status().as_u16();
+            Json(json!({
+                "status": "error",
+                "token_ok": true,
+                "search_ok": false,
+                "http_status": st,
+                "expires_in": expires_in,
+                "latency_ms": latency_ms,
+                "message": format!("Token 获取成功，但检索测试返回 HTTP {st}（可能触发欧专局限流或应用未勾选 OPS 权限）")
+            }))
+        }
+        Err(e) => Json(json!({
+            "status": "error",
+            "token_ok": true,
+            "search_ok": false,
+            "expires_in": expires_in,
+            "latency_ms": latency_ms,
+            "message": format!("Token 获取成功，但检索测试连接超时: {e}")
+        })),
+    }
+}
+
 /// 保存**搜索源凭证**。
 ///
 /// 路由单源在 `src/common.rs::build_router`，MA5a 的红线是路由表对 `main` 零 diff
 /// （118 条 `.route()` 不动），因此 EPO OPS 的两个配置位复用本端点而不是新开
 /// `/api/settings/epo`。请求体按字段分组各管各的源：带 `api_keys` 只动 SerpAPI，
-/// 带 `epo_key`/`epo_secret` 只动 EPO，两组同时出现则明确报错（宁可拒也不静默丢 Key）。
+/// 带 `epo_key`/`epo_secret` 只动 EPO，带 `bocha_key` 只动博查，多组同时出现则明确报错。
 pub async fn api_save_serpapi(
     State(s): State<AppState>,
     Json(req): Json<serde_json::Value>,
 ) -> Json<serde_json::Value> {
     // 读取当前内存中的实际 Key（用于反查掩码对应的原始值）
-    let (current_keys, current_epo_key, current_epo_secret) = {
+    let (current_keys, current_epo_key, current_epo_secret, current_bocha_key) = {
         let config = s.config.read().unwrap_or_else(|e| e.into_inner());
         (
             config.serpapi_keys.clone(),
             config.epo_key.clone(),
             config.epo_secret.clone(),
+            config.bocha_api_key.clone(),
         )
     };
+
+    if req.get("bocha_key").is_some() {
+        if req.get("api_keys").is_some()
+            || req.get("epo_key").is_some()
+            || req.get("epo_secret").is_some()
+        {
+            return Json(json!({
+                "status": "error",
+                "message": "一次请求只能保存一组搜索源凭证：请分别提交 SerpAPI、EPO OPS 与博查 Key"
+            }));
+        }
+        return apply_bocha_key(&s, &req, &current_bocha_key);
+    }
 
     if req.get("epo_key").is_some() || req.get("epo_secret").is_some() {
         if req.get("api_keys").is_some() {
