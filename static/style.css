@@ -1331,6 +1331,61 @@ input[type="checkbox"] { accent-color: var(--accent); color-scheme: dark; }
   border-color: var(--accent-border);
   background: rgba(88, 166, 255, 0.06);
 }
+.bulk-import-hint {
+  margin: 0 0 var(--sp-3);
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+.bulk-import-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: var(--sp-3);
+}
+.bulk-import-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--r-md);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.bulk-import-subtitle {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.bulk-import-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.bulk-import-row input[type="text"] {
+  flex: 1;
+  min-width: 180px;
+}
+.bulk-import-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  margin: 0;
+  cursor: pointer;
+}
+.bulk-import-check input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+}
+.bulk-import-status {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  min-height: 18px;
+  line-height: 1.5;
+  word-break: break-word;
+}
 
 /* ---------- FreeCAD conversation cards ---------- */
 .cad-card { margin: var(--sp-3) 0; padding: var(--sp-4); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-raised); }
