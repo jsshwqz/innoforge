@@ -104,7 +104,7 @@
 
         <!-- My Patent -->
         <div class="cmp-section cmp-my">
-            <label class="cmp-label orange" data-i18n="oar.myPatent"></label>
+            <label class="cmp-label orange" id="oa-my-label" data-i18n="oar.myPatent"></label>
             <div class="my-input-row">
                 <input type="text" id="my-patent" class="cmp-input" data-i18n-placeholder="oar.myPatentPlaceholder">
                 <button class="btn-upload" onclick="uploadMyPatent()">📎 <span data-i18n="common.upload"></span></button>
@@ -115,8 +115,8 @@
         </div>
 
         <!-- 现行权利要求书（可选）：审查所针对的那版权项，用于「删限定＝扩大范围」校验 -->
-        <div class="cmp-section cmp-my">
-            <label class="cmp-label orange">现行权利要求书（可选）</label>
+        <div class="cmp-section cmp-my" id="oa-claims-section">
+            <label class="cmp-label orange" id="oa-claims-label">现行权利要求书（可选）</label>
             <textarea id="current-claims" rows="3" style="width:100%;resize:vertical;font-family:Consolas,monospace;font-size:13px;" placeholder="可选。粘贴审查意见所针对的那版权项全文（如「1.一种……；2.根据权利要求1……」）。填了才能校验修改有没有删掉限定特征；不填会在产物里标注「扩范围方向未核验」。"></textarea>
         </div>
 
@@ -132,9 +132,9 @@
 
         <!-- Office Action Text -->
         <div class="cmp-section cmp-oa-red">
-            <label class="cmp-label red" data-i18n="oar.oaLabel"></label>
+            <label class="cmp-label red" id="oa-notice-label" data-i18n="oar.oaLabel"></label>
             <div class="my-input-row">
-                <input type="text" id="oa-input" class="cmp-input" disabled data-i18n-placeholder="oar.oaPlaceholder" style="flex:1;">
+                <input type="text" id="oa-input" class="cmp-input" data-i18n-placeholder="oar.oaPlaceholder" style="flex:1;">
                 <button class="btn-upload" onclick="uploadOA()">📎 <span data-i18n="common.upload"></span></button>
                 <button class="btn-paste" onclick="pasteOA()">📋 <span data-i18n="common.paste"></span></button>
             </div>
@@ -143,7 +143,7 @@
 
         <!-- Reference Documents -->
         <div class="cmp-section cmp-ref">
-            <label class="cmp-label blue" data-i18n="oar.refLabel"></label>
+            <label class="cmp-label blue" id="oa-ref-label" data-i18n="oar.refLabel"></label>
             <div id="ref-list">
                 <div class="ref-row" data-idx="0">
                     <input type="text" class="cmp-input ref-input">
@@ -563,6 +563,9 @@
                     radio.checked = true;
                     document.querySelectorAll('.oa-type-option').forEach(function(el) { el.style.borderColor = '#30363d'; });
                     if (radio.closest('.oa-type-option')) radio.closest('.oa-type-option').style.borderColor = '#d2a8ff';
+                }
+                if (typeof updateOaModeSectionLabels === 'function') {
+                    updateOaModeSectionLabels(snap.oa_type);
                 }
             }
             if (snap.depth && document.getElementById('depth-select')) {
@@ -4711,7 +4714,7 @@
     updateRoundLabel();
     // Register hook so language switch (which re-runs applyI18nCommon) also re-fixes placeholders
     if (!window._onI18nLangChange) window._onI18nLangChange = [];
-    window._onI18nLangChange.push(function() { reindexPlaceholders(); updateRoundLabel(); });
+    window._onI18nLangChange.push(function() { reindexPlaceholders(); updateRoundLabel(); if (typeof updateOaModeSectionLabels === 'function') updateOaModeSectionLabels(); });
     // ── OA 区域拖拽文件上传 + 跨页自动快照监听 ──
     async function handleDroppedOaFile(targetType, file) {
         if (!file) return;
@@ -4804,13 +4807,58 @@
         });
     }
 
+    function updateOaModeSectionLabels() {
+        var checked = document.querySelector('input[name="oa_type"]:checked');
+        var oaType = checked ? checked.value : 'first_exam';
+        var myLabel = document.getElementById('oa-my-label');
+        var myInput = document.getElementById('my-patent');
+        var claimsLabel = document.getElementById('oa-claims-label');
+        var claimsTa = document.getElementById('current-claims');
+        var oaLabel = document.getElementById('oa-notice-label');
+        var oaInput = document.getElementById('oa-input');
+        var refLabel = document.getElementById('oa-ref-label');
+        var deadlineSec = document.getElementById('deadline-section');
+
+        if (oaType === 'peer_review_rebuttal') {
+            if (myLabel) myLabel.textContent = i18nLang === 'en' ? '📄 Manuscript (PDF / DOCX / LaTeX)' : '📄 我方论文手稿（PDF / DOCX / LaTeX）';
+            if (myInput) myInput.placeholder = i18nLang === 'en' ? 'Upload or paste your manuscript text, or enter local ID' : '上传、拖入或粘贴我方论文手稿全文（支持 PDF / DOCX / LaTeX）';
+            if (claimsLabel) claimsLabel.textContent = i18nLang === 'en' ? '📝 Key Revised Excerpts / Extra Lab Data (Optional)' : '📝 原稿重点修改片段 / 补充实验数据（可选）';
+            if (claimsTa) claimsTa.placeholder = i18nLang === 'en' ? 'Optional: paste revised manuscript excerpts or extra ablation data.' : '可选：粘贴已补测的新实验数值、消融结果或拟修改的原稿段落，避免模型臆造数据。';
+            if (oaLabel) oaLabel.textContent = i18nLang === 'en' ? '🎓 Reviewer Comments (Major / Minor)' : '🎓 审稿人意见（Reviewer Comments）';
+            if (oaInput) oaInput.placeholder = i18nLang === 'en' ? 'Paste or upload Reviewer #1 / #2 comments' : '直接输入、粘贴或上传审稿人逐条意见全文';
+            if (refLabel) refLabel.textContent = i18nLang === 'en' ? '📚 Cited Papers / Experimental Tables (Optional)' : '📚 审稿人提及的对比文献 / 实验数据表（可选）';
+            if (deadlineSec) deadlineSec.style.display = 'none';
+        } else if (oaType === 'pre_filing_devil') {
+            if (myLabel) myLabel.textContent = i18nLang === 'en' ? '😈 Draft Patent / Technical Disclosure' : '😈 待提交专利草稿 / 技术交底书';
+            if (myInput) myInput.placeholder = i18nLang === 'en' ? 'Upload or paste your patent draft / disclosure' : '上传、拖入或粘贴待提交专利交底书或权利要求草稿';
+            if (claimsLabel) claimsLabel.textContent = i18nLang === 'en' ? '📝 Draft Claims to Stress-Test (Optional)' : '📝 待体检的独立/从属权利要求草稿（可选）';
+            if (claimsTa) claimsTa.placeholder = i18nLang === 'en' ? 'Optional: paste draft claims to check clarity, support, and narrow-scope risks.' : '可选：粘贴待提交权利要求书全文，便于魔鬼审查员逐项排查清楚性、支持与“写窄”隐患。';
+            if (oaLabel) oaLabel.textContent = i18nLang === 'en' ? '🎯 Pre-Exam Focus / Target Field (Optional)' : '🎯 预审重点 / 拟投领域说明（可选，不填默认全面挑刺）';
+            if (oaInput) oaInput.placeholder = i18nLang === 'en' ? 'Optional: leave blank for a full CNIPA devil-examiner stress test' : '可选：留空则默认按国知局最严实审标准全面挑刺';
+            if (refLabel) refLabel.textContent = i18nLang === 'en' ? '📚 Known Prior Art / Competitor Patents (Optional)' : '📚 已知对比专利 / 竞品文献（可选）';
+            if (deadlineSec) deadlineSec.style.display = 'none';
+        } else {
+            if (myLabel) myLabel.textContent = t('oar.myPatent') || '我的专利（本申请）';
+            if (myInput) myInput.placeholder = t('oar.myPatentPlaceholder') || '输入专利号或内部 ID';
+            if (claimsLabel) claimsLabel.textContent = i18nLang === 'en' ? 'Current Claims (Optional)' : '现行权利要求书（可选）';
+            if (claimsTa) claimsTa.placeholder = i18nLang === 'en' ? 'Optional: paste the examined claim set to guard against improper scope broadening.' : '可选。粘贴审查意见所针对的那版权项全文（如「1.一种……；2.根据权利要求1……」）。填了才能校验修改有没有删掉限定特征；不填会在产物里标注「扩范围方向未核验」。';
+            if (oaLabel) oaLabel.textContent = t('oar.oaLabel') || '审查意见通知书';
+            if (oaInput) oaInput.placeholder = t('oar.oaPlaceholder') || '请粘贴审查意见全文或上传文件';
+            if (refLabel) refLabel.textContent = t('oar.refLabel') || '对比文献';
+        }
+    }
+
     function initOaWorkspacePersistenceAndDrops() {
         bindOaDropZone('.cmp-section.cmp-my', 'my');
         bindOaDropZone('.cmp-section.cmp-oa-red', 'oa');
         bindOaDropZone('.cmp-section.cmp-ref', 'ref');
         document.querySelectorAll('input[name="oa_type"]').forEach(function(r) {
-            r.addEventListener('change', saveOaWorkspaceSnapshot);
+            r.addEventListener('change', function() {
+                updateOaModeSectionLabels();
+                saveOaWorkspaceSnapshot();
+            });
         });
+        updateOaModeSectionLabels();
         ['my-patent', 'oa-input', 'depth-select'].forEach(function(id) {
             var el = document.getElementById(id);
             if (el) {
@@ -4828,6 +4876,9 @@
 
     loadOaState();
     initOaWorkspacePersistenceAndDrops();
+    document.addEventListener('DOMContentLoaded', function() {
+        updateOaModeSectionLabels();
+    });
     loadOaHistory();
     initDiscQuoteEvents();
     initDeadline();

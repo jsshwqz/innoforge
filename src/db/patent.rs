@@ -895,7 +895,7 @@ impl super::Database {
                         filing_date: row.get::<_, String>(6).unwrap_or_default(),
                         country: row.get::<_, String>(7).unwrap_or_default(),
                         relevance_score: Some(score),
-                        score_source: Some("mixed search match".to_string()),
+                        score_source: Some("混合检索命中".to_string()),
                         matched_fields: None,
                     })
                 })?
@@ -948,7 +948,7 @@ impl super::Database {
                         filing_date: row.get::<_, String>(6).unwrap_or_default(),
                         country: row.get::<_, String>(7).unwrap_or_default(),
                         relevance_score: Some(score),
-                        score_source: Some("mixed search match".to_string()),
+                        score_source: Some("混合检索命中".to_string()),
                         matched_fields: None,
                     })
                 })?

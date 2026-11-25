@@ -68,7 +68,7 @@
                         </tr>
                     </table>
                 </div>
-                <div class="detail-section">
+                <div class="detail-section" style="align-self:start;">
                     <h3 data-i18n="common.info.classification"></h3>
                     <p class="classify-row"><strong>IPC:</strong> <code class="ipc-chip">{{ipc_codes}}</code></p>
                     <p class="classify-row"><strong>CPC:</strong> <code class="ipc-chip">{{cpc_codes}}</code></p>
@@ -146,7 +146,8 @@
             <h3 data-i18n="detail.upload"></h3>
             <p class="muted" data-i18n="detail.uploadHint"></p>
             <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">
-                <input type="file" id="upload-file" multiple accept=".pdf,.docx,.pptx,.xlsx,.ofd,.step,.stp,.iges,.igs,.stl,.txt,.md,.csv,.tsv,.json,.yaml,.yml,.tex,.bib,.html,.htm,.xml,.rtf,.dxf,.png,.jpg,.jpeg,.gif,.bmp,.webp" onchange="onUploadCompareFilesSelected(event)">
+                <input type="file" id="upload-file" style="display:none;" multiple accept=".pdf,.docx,.pptx,.xlsx,.ofd,.step,.stp,.iges,.igs,.stl,.txt,.md,.csv,.tsv,.json,.yaml,.yml,.tex,.bib,.html,.htm,.xml,.rtf,.dxf,.png,.jpg,.jpeg,.gif,.bmp,.webp" onchange="onUploadCompareFilesSelected(event)">
+                <button type="button" class="btn-secondary" id="upload-pick-btn" onclick="document.getElementById('upload-file').click()" style="padding:7px 14px;font-size:13px;">📎 选择对比文件（可多选）</button>
                 <button type="button" class="btn-secondary" id="upload-clear-btn" onclick="clearUploadCompareFiles()" style="display:none;padding:6px 12px;font-size:13px;">清空已选</button>
                 <button class="btn-primary" id="upload-compare-btn" onclick="uploadCompare()" data-i18n="detail.uploadBtn"></button>
             </div>

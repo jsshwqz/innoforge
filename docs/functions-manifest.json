@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-24T18:13:16.284Z",
+  "generatedAt": "2026-11-25T04:31:45.014Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -116,6 +116,8 @@
         "hideBtn",
         "hideDiscussionStopButton",
         "initCompareDropZones",
+        "normalizeInlineMathText",
+        "openPasteModal",
         "pasteMyPatent",
         "pasteOA",
         "pasteRef",
@@ -560,6 +562,7 @@
         "updateChecklistProgress",
         "updateCurrentOADiscussionExportButton",
         "updateDeadline",
+        "updateOaModeSectionLabels",
         "updateRoundLabel",
         "uploadAndPreviewPdf",
         "uploadMyPatent",
@@ -707,6 +710,7 @@
         "clearHistory",
         "clearSearchPdfMeta",
         "compareMatrix",
+        "decodeHtmlEntities",
         "diagBadgeSpan",
         "diagCoolsDown",
         "diagMutedSpan",
@@ -781,6 +785,7 @@
         "saveSearchAgentSettings",
         "saveSerpApiKey",
         "toggleGeminiCliMode",
+        "toggleSecretField",
         "updateEpoPairHint"
       ],
       "definitions": [
@@ -818,6 +823,7 @@
         "showCustomManualFallback",
         "showStatus",
         "toggleGeminiCliMode",
+        "toggleSecretField",
         "updateConfigStatus",
         "updateEpoPairHint",
         "updateEpoStatus",

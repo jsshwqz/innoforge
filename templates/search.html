@@ -407,6 +407,15 @@ renderSidebar(
 	    }
 	}
 
+function decodeHtmlEntities(str) {
+    return String(str || '')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'");
+}
+
 function escapeHtml(str) {
     return String(str || '')
         .replace(/&/g, '&amp;')
@@ -691,8 +700,10 @@ function renderResults(data, page, pageSize) {
                 craapHtml += `<span title="${escapeHtml('多源三角互证：' + craap.corroborated_sources.join(' + '))}" style="display:inline-block;margin-top:4px;margin-left:4px;padding:1px 7px;border-radius:10px;font-size:11px;border:1px solid #a371f7;color:#d2a8ff;background:#a371f722;white-space:nowrap;">🔺 多源互证</span>`;
             }
         }
-        const pnStr = String(p.patent_number || '');
-        const litKind = p.literature_kind || ((pnStr.startsWith('10.') || pnStr.toUpperCase().startsWith('PMID')) ? 'academic_paper' : (pnStr.toUpperCase().startsWith('LOCAL-') ? 'local_upload' : 'patent'));
+        const pnStr = String(p.patent_number || '').trim();
+        const srcLower = String(p.source_tag || p.applicant || '').toLowerCase();
+        const looksAcademic = !pnStr && /ieee|openalex|semantic|arxiv|pubmed|crossref|openhsu|springer|elsevier|nature|science|journal|conference/.test(srcLower);
+        const litKind = p.literature_kind || ((pnStr.startsWith('10.') || pnStr.toUpperCase().startsWith('PMID') || looksAcademic) ? 'academic_paper' : (pnStr.toUpperCase().startsWith('LOCAL-') ? 'local_upload' : 'patent'));
         const kindBadge = litKind === 'academic_paper'
             ? '<span style="display:inline-block;padding:1px 7px;margin-right:6px;border-radius:10px;font-size:11px;background:#8957e522;border:1px solid #a371f7;color:#d2a8ff;vertical-align:middle;">🎓 学术论文</span>'
             : litKind === 'local_upload'
@@ -701,6 +712,25 @@ function renderResults(data, page, pageSize) {
         const srcTagHtml = p.source_tag
             ? `<span style="display:inline-block;padding:1px 6px;margin-right:6px;border-radius:8px;font-size:11px;background:#21262d;border:1px solid #30363d;color:#8b949e;vertical-align:middle;">${escapeHtml(p.source_tag)}</span>`
             : '';
+        const cleanAbstract = decodeHtmlEntities(p.abstract_text || '');
+        const cleanSnippet = decodeHtmlEntities(p.matched_snippet || '');
+        const metaItems = [];
+        if (litKind === 'academic_paper') {
+            if (p.patent_number) metaItems.push(`<span>DOI/编号: ${escapeHtml(p.patent_number)}</span>`);
+            if (p.applicant) metaItems.push(`<span>期刊/来源: ${escapeHtml(p.applicant)}</span>`);
+            if (p.inventor) metaItems.push(`<span>作者: ${escapeHtml(p.inventor)}</span>`);
+            if (p.filing_date) metaItems.push(`<span>发表日期: ${escapeHtml(p.filing_date)}</span>`);
+            if (!metaItems.length) metaItems.push(`<span>来源: ${escapeHtml(p.source_tag || '学术文献')}</span>`);
+        } else {
+            metaItems.push(`<span>${t('meta.patent')}: ${escapeHtml(p.patent_number || '暂无')}</span>`);
+            metaItems.push(`<span>${t('meta.applicant')}: ${escapeHtml(p.applicant || '暂无')}</span>`);
+            metaItems.push(`<span>${t('meta.inventor')}: ${escapeHtml(p.inventor || '暂无')}</span>`);
+            metaItems.push(`<span>${t('meta.filing')}: ${escapeHtml(p.filing_date || '暂无')}</span>`);
+            metaItems.push(`<span>${t('meta.country')}: ${escapeHtml(p.country || '暂无')}</span>`);
+        }
+        const scoreSrcText = p.score_source === 'mixed search match'
+            ? (i18nLang === 'en' ? 'Mixed match' : '混合检索命中')
+            : (p.score_source || t('results.score'));
         html += `
         <div class="patent-card">
             <div class="patent-title-row">
@@ -708,25 +738,19 @@ function renderResults(data, page, pageSize) {
                     <input type="checkbox" class="batch-check" data-id="${escapeHtml(p.id)}" style="width:16px;height:16px;cursor:pointer;">
                 </label>
                 <div style="flex:1;">
-                    <h3>${kindBadge}${srcTagHtml}<a id="patent-title-link-${escapeHtml(p.id)}" href="/patent/${escapeHtml(p.id)}">${escapeHtml(p.title || '无标题')}</a></h3>
-                    <div class="meta-row">
-                        <span>${t('meta.patent')}: ${escapeHtml(p.patent_number || '暂无')}</span>
-                        <span>${t('meta.applicant')}: ${escapeHtml(p.applicant || '暂无')}</span>
-                        <span>${t('meta.inventor')}: ${escapeHtml(p.inventor || '暂无')}</span>
-                        <span>${t('meta.filing')}: ${escapeHtml(p.filing_date || '暂无')}</span>
-                        <span>${t('meta.country')}: ${escapeHtml(p.country || '暂无')}</span>
-                    </div>
-                    <p class="patent-abstract">${escapeHtml((p.abstract_text || '').slice(0, 260))}${(p.abstract_text || '').length > 260 ? '...' : ''}</p>
+                    <h3>${kindBadge}${srcTagHtml}<a id="patent-title-link-${escapeHtml(p.id)}" href="/patent/${escapeHtml(p.id)}">${escapeHtml(decodeHtmlEntities(p.title || '无标题'))}</a></h3>
+                    <div class="meta-row">${metaItems.join('')}</div>
+                    <p class="patent-abstract">${escapeHtml(cleanAbstract.slice(0, 260))}${cleanAbstract.length > 260 ? '...' : ''}</p>
                     <div style="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
                         <button type="button" data-card-compare-idx="${idx}" style="padding:2px 9px;font-size:11.5px;border-radius:5px;border:1px solid #30363d;background:#21262d;color:#79c0ff;cursor:pointer;">⚖️ 加入方案对比</button>
                         <a href="/patent/${escapeHtml(p.id)}" style="padding:2px 9px;font-size:11.5px;border-radius:5px;border:1px solid #30363d;background:#161b22;color:#c9d1d9;text-decoration:none;">💬 详情 / AI深析</a>
                     </div>
-                    ${p.matched_snippet ? `<div style="margin-top:6px;padding:6px 10px;background:#0d1117;border-left:3px solid #58a6ff;border-radius:4px;font-size:0.84em;color:#c9d1d9;line-height:1.5;"><span style="color:#58a6ff;font-weight:600;margin-right:6px;">[命中 · ${escapeHtml(p.matched_section_tag || '正文')}]</span>${escapeHtml(p.matched_snippet)}</div>` : ''}
+                    ${cleanSnippet ? `<div style="margin-top:6px;padding:6px 10px;background:#0d1117;border-left:3px solid #58a6ff;border-radius:4px;font-size:0.84em;color:#c9d1d9;line-height:1.5;"><span style="color:#58a6ff;font-weight:600;margin-right:6px;">[命中 · ${escapeHtml(p.matched_section_tag || '正文')}]</span>${escapeHtml(cleanSnippet)}</div>` : ''}
                     ${p.evidence ? `<details class="evidence-row" style="margin-top:4px;"><summary style="cursor:pointer;color:#58a6ff;font-size:0.8em;">${t('results.whyTitle')}</summary><div style="color:#8b949e;font-size:0.8em;padding:4px 0;">${evidenceHtml(p.evidence)}</div></details>` : ''}
                 </div>
                 <div class="score-tag">
                     <div class="score-value" style="color:${scoreColor}">${score.toFixed(0)}%</div>
-                    <div class="score-source">${escapeHtml(p.score_source || t('results.score'))}</div>
+                    <div class="score-source">${escapeHtml(scoreSrcText)}</div>
                     <div>${craapHtml}</div>
                 </div>
             </div>
