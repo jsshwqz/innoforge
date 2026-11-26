@@ -78,16 +78,12 @@ pub async fn execute(ctx: &mut PipelineContext) -> Result<()> {
     let max_sim_penalty = max_similarity * 60.0;
     // 平均相似度惩罚（权重 20%）
     let avg_penalty = avg_top5 * 20.0;
+    let total_penalty = max_sim_penalty + avg_penalty;
 
-    let raw_score =
-        100.0 - max_sim_penalty - avg_penalty + contradiction_bonus + coverage_gap_bonus;
-
-    // 根因 3（#70）：raw_score > 100 意味着分数靠加分凑出来，是构造错误信号。
-    // debug_assert 让越界在开发期炸出，不许静默 clamp 成满分掩盖。
-    debug_assert!(
-        raw_score <= 100.0,
-        "raw_score={raw_score} 超 100：加分口径异常（contradiction_bonus={contradiction_bonus}, coverage_gap_bonus={coverage_gap_bonus}）"
-    );
+    // 根因 3（#70 + v0.9.92 实案修复）：加分项仅用于抵消相似度惩罚，不得把分数硬凑超过 100；
+    // 旧实现在低相似度叠加矛盾信号时 raw_score 可达 103.95 并触发 debug_assert 崩溃卡死后台线程。
+    let effective_bonus = (contradiction_bonus + coverage_gap_bonus).min(total_penalty);
+    let raw_score = 100.0 - total_penalty + effective_bonus;
 
     // 限制在 0-100 范围
     let final_score = raw_score.clamp(0.0, 100.0);
@@ -245,6 +241,38 @@ mod tests {
         assert_eq!(ctx.score_breakdown.coverage_gap_bonus, 0.0);
         assert!(
             (ctx.novelty_score - 92.0).abs() < 1e-6,
+            "got {}",
+            ctx.novelty_score
+        );
+    }
+
+    /// v0.9.92 实案回归锁：低相似度 + 多个矛盾信号（contradiction_bonus=10 > total_penalty）
+    /// 必须平滑截顶于 100.0，绝不允许触发 debug_assert panic 导致后台流水线静默卡死。
+    #[tokio::test]
+    async fn contradiction_bonus_never_panics_or_exceeds_100() {
+        use crate::pipeline::context::Contradiction;
+        let mut ctx = PipelineContext::new("test", "微压氧仓", "市面微压氧仓类型与优缺点");
+        ctx.similarity_scores = vec![SimilarityEntry {
+            source_id: "p1".into(),
+            source_title: "微压氧舱".into(),
+            source_type: "patent".into(),
+            tfidf_score: 0.07,
+            jaccard_score: 0.08,
+            combined_score: 0.075,
+        }];
+        ctx.contradictions = (0..4)
+            .map(|i| Contradiction {
+                source_a: format!("A{i}"),
+                source_b: format!("B{i}"),
+                dimension: "dim".into(),
+                signal_strength: 0.9,
+                opportunity: "opp".into(),
+            })
+            .collect();
+        execute(&mut ctx).await.unwrap();
+        assert_eq!(ctx.novelty_status, NoveltyStatus::Sufficient);
+        assert!(
+            ctx.novelty_score <= 100.0 && ctx.novelty_score >= 90.0,
             "got {}",
             ctx.novelty_score
         );
