@@ -107,7 +107,7 @@ pub trait OpenAlexTransport: Send + Sync {
     ) -> Pin<Box<dyn Future<Output = Result<OpenAlexReply, OpenAlexFault>> + Send + '_>>;
 }
 
-/// 生产传输：reqwest + 15s 超时 + 500ms 连接超时（errors.md #74 纪律）。
+/// 生产传输：reqwest + 15s 超时 + 3s 连接超时（防跨境/代理 TLS 握手 >500ms 误杀）。
 pub struct ReqwestOpenAlexTransport {
     client: reqwest::Client,
 }
@@ -116,7 +116,7 @@ impl ReqwestOpenAlexTransport {
     pub fn new() -> Self {
         ReqwestOpenAlexTransport {
             client: reqwest::Client::builder()
-                .connect_timeout(Duration::from_millis(500))
+                .connect_timeout(Duration::from_secs(3))
                 .timeout(UPSTREAM_TIMEOUT)
                 .build()
                 .expect("上游 HTTP 客户端构建失败（TLS 后端初始化）——禁止静默退回无超时客户端，见 issue #55"),

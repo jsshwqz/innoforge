@@ -2021,6 +2021,14 @@ fn dedup_and_merge_omni_items(
         }
     }
 
+    // 按相关度得分降序排列（同分时多源互证条目优先，稳定排序保留同源原有次序）
+    entries.sort_by(|a, b| {
+        let sa = a.summary.relevance_score.unwrap_or(50.0);
+        let sb = b.summary.relevance_score.unwrap_or(50.0);
+        sb.total_cmp(&sa)
+            .then_with(|| b.sources.len().cmp(&a.sources.len()))
+    });
+
     let mut local_count = 0usize;
     let mut patent_count = 0usize;
     let mut academic_count = 0usize;
@@ -2249,6 +2257,17 @@ pub async fn api_search_omni(
                 .ok()
                 .map(|(list, _)| list)
                 .unwrap_or_default();
+            if out.is_empty() {
+                if let Ok((like_list, _)) =
+                    local_db.search_like(&local_q, None, None, None, 1, per_source_limit)
+                {
+                    out.extend(
+                        like_list
+                            .into_iter()
+                            .filter(|item| item.relevance_score.unwrap_or(0.0) >= 55.0),
+                    );
+                }
+            }
             if let Some(en_q) = local_en {
                 if let Ok((en_list, _)) = local_db.search_fts(&en_q, 1, per_source_limit) {
                     out.extend(en_list);
@@ -2298,6 +2317,17 @@ pub async fn api_search_omni(
                 .ok()
                 .map(|(list, _)| list)
                 .unwrap_or_default();
+            if out.is_empty() {
+                if let Ok((like_list, _)) =
+                    local_db.search_like(&local_q, None, None, None, 1, per_source_limit)
+                {
+                    out.extend(
+                        like_list
+                            .into_iter()
+                            .filter(|item| item.relevance_score.unwrap_or(0.0) >= 55.0),
+                    );
+                }
+            }
             if let Some(en_q) = local_en {
                 if let Ok((en_list, _)) = local_db.search_fts(&en_q, 1, per_source_limit) {
                     out.extend(en_list);
@@ -2420,16 +2450,28 @@ pub async fn api_search_omni(
         craap::score_batch_with_corroboration(&craap_summaries, scope, &[], current_year);
 
     // 同步推导 IPC 子空间锚点，使全域混搜与在线/本地检索共用一致的 IPC 降噪能力
-    let mut observed_ipcs: Vec<String> = Vec::new();
-    for item in &craap_summaries {
-        if !item.patent_number.trim().is_empty() {
-            if let Ok(Some(fp)) = s.db.get_patent(&item.patent_number) {
-                if !fp.ipc_codes.trim().is_empty() {
-                    observed_ipcs.push(fp.ipc_codes);
-                }
-            }
-        }
-    }
+    // 批量查库（避免循环逐条 N+1 阻塞异步线程，符合 AGENTS.md 工程铁律）
+    let pns: Vec<String> = craap_summaries
+        .iter()
+        .map(|item| item.patent_number.trim().to_string())
+        .filter(|pn| !pn.is_empty())
+        .collect();
+    let ipc_db = s.db.clone();
+    let observed_ipcs: Vec<String> = if pns.is_empty() {
+        Vec::new()
+    } else {
+        tokio::task::spawn_blocking(move || {
+            ipc_db
+                .get_patents_by_numbers(&pns)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|fp| fp.ipc_codes)
+                .filter(|codes| !codes.trim().is_empty())
+                .collect()
+        })
+        .await
+        .unwrap_or_default()
+    };
     let anchor_query = match ai_expanded_en.as_deref() {
         Some(en) => format!("{query} {en}"),
         None => query.to_string(),

@@ -42,7 +42,7 @@ impl Database {
     }
 
     /// Current schema version. Increment when adding migrations.
-    pub const SCHEMA_VERSION: i32 = 25;
+    pub const SCHEMA_VERSION: i32 = 26;
 
     pub fn init(path: &str) -> Result<Self> {
         let conn = match Self::try_open_valid(path) {
@@ -67,9 +67,10 @@ impl Database {
             }
         };
         // busy_timeout：并发启动/并行读写时不要立刻 SQLITE_BUSY（#77）；
-        // synchronous=NORMAL：WAL 下足以保证崩溃一致性，同时少一次 fsync。
+        // synchronous=NORMAL：WAL 下足以保证崩溃一致性，同时少一次 fsync；
+        // cache_size=-16000 / temp_store=MEMORY：给覆盖索引与排序常驻 16MB 内存缓存，避免 42MB 主表重复扫盘。
         conn.execute_batch(
-            "PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;",
+            "PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA temp_store=MEMORY; PRAGMA cache_size=-16000;",
         )?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);",
