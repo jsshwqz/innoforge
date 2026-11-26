@@ -53,16 +53,114 @@ impl SourceChain {
         self.providers.is_empty()
     }
 
-    /// 并行发起全部源，按登记顺序择胜。永不返回 `Err`（失败以 `attempts` 记账）。
+    /// 并行发起全部源，按**严格优先级早停**择胜。永不返回 `Err`（失败以 `attempts` 记账）。
+    ///
+    /// ## 严格优先级早停规则（零质量折损提速）
+    /// - 所有源同时发起，但仅当**最高顺位（或排在其前面的全部高顺位源都已明确失败/零命中/跳过）**
+    ///   产出有效结果（或命中 `FailKind::Parse` 截断）时，才立刻收口返回并取消尾部尚未返回的低顺位慢源；
+    /// - 若低顺位源先返回而高顺位源仍在路上，结果暂存槽位、继续等待高顺位源，**绝不抢跑降级**；
+    /// - 尚未返回的尾部低顺位源在 `attempts` 中按原始顺位诚实记为 `Skipped`（主源已命中，提前结束等待），
+    ///   既保持诊断面板顺位与长度不变，又彻底消除干等尾部慢源超时造成的 25s+ 卡顿。
     pub async fn run(&self, query: crate::search::model::SearchQuery) -> SearchOutcome {
-        let outcomes = futures::future::join_all(self.providers.iter().map(|provider| {
+        let n = self.providers.len();
+        if n == 0 {
+            return SearchOutcome {
+                results: Vec::new(),
+                attempts: Vec::new(),
+                upstream_total: None,
+            };
+        }
+
+        let started = std::time::Instant::now();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(usize, SearchOutcome)>();
+        let mut handles: Vec<tokio::task::JoinHandle<()>> = Vec::with_capacity(n);
+
+        for (idx, provider) in self.providers.iter().enumerate() {
             let provider = provider.clone();
             let attempt_query = query.clone();
-            async move { provider.search(attempt_query).await }
-        }))
-        .await;
+            let tx_clone = tx.clone();
+            handles.push(tokio::spawn(async move {
+                let outcome = provider.search(attempt_query).await;
+                let _ = tx_clone.send((idx, outcome));
+            }));
+        }
+        drop(tx);
+
+        let mut slots: Vec<Option<SearchOutcome>> = vec![None; n];
+        let mut next_unresolved = 0usize;
+        let mut decided_early_reason: Option<&'static str> = None;
+
+        while let Some((idx, outcome)) = rx.recv().await {
+            if idx < n {
+                slots[idx] = Some(outcome);
+            }
+            // 把当前通道里已经就绪的其余响应一并收回（避免同刻完成的源误记为提前取消）
+            while let Ok((ready_idx, ready_outcome)) = rx.try_recv() {
+                if ready_idx < n {
+                    slots[ready_idx] = Some(ready_outcome);
+                }
+            }
+
+            while next_unresolved < n {
+                let Some(ref o) = slots[next_unresolved] else {
+                    break;
+                };
+                if outcome_produced(o) {
+                    decided_early_reason = Some("高优先级主源已命中，提前结束低顺位源等待");
+                    break;
+                }
+                if outcome_blocks_degradation(o) {
+                    decided_early_reason = Some("高优先级主源解析异常已截断降级，提前结束等待");
+                    break;
+                }
+                next_unresolved += 1;
+            }
+
+            if decided_early_reason.is_some() || next_unresolved >= n {
+                break;
+            }
+        }
+
+        let elapsed_ms = started.elapsed().as_millis() as u64;
+        for (idx, handle) in handles.into_iter().enumerate() {
+            if slots[idx].is_none() {
+                handle.abort();
+            }
+        }
+
+        let skip_reason = decided_early_reason.unwrap_or("检索通道提前关闭，未完成");
+        let outcomes: Vec<SearchOutcome> = slots
+            .into_iter()
+            .enumerate()
+            .map(|(idx, opt)| match opt {
+                Some(o) => o,
+                None => SearchOutcome {
+                    results: Vec::new(),
+                    attempts: vec![AttemptReport {
+                        source: self.providers[idx].kind(),
+                        status: AttemptStatus::Skipped,
+                        latency_ms: elapsed_ms,
+                        hits: 0,
+                        error: Some(skip_reason.to_string()),
+                        hint: None,
+                    }],
+                    upstream_total: None,
+                },
+            })
+            .collect();
+
         resolve_by_precedence(outcomes)
     }
+}
+
+fn outcome_produced(o: &SearchOutcome) -> bool {
+    !o.results.is_empty() && o.attempts.iter().any(|a| a.produced_hits())
+}
+
+fn outcome_blocks_degradation(o: &SearchOutcome) -> bool {
+    o.attempts
+        .iter()
+        .any(|a| matches!(a.status, AttemptStatus::Failed(kind) if !kind.switches_source()))
 }
 
 /// 纯函数形态的择胜规则 —— 与 `run` 拆开，好让降级链用例不必真起并发即可断言。
@@ -72,21 +170,6 @@ impl SourceChain {
 ///   并行模型下即使某源的结果没被采用，它确实跑了，面板就该看见。
 /// - `winner`：按优先级扫描，首个「带回可用内容」的胜出；遇到 Parse 失败即截断，不再下探。
 pub(crate) fn resolve_by_precedence(outcomes: Vec<SearchOutcome>) -> SearchOutcome {
-    // 「这一路真的带回了可用内容」= 有成功且有命中的尝试，**且**结果数组非空。
-    // 两个条件都要：只看 hits 会漏过「报告说命中但结果为空」的实现自相矛盾；
-    // 只看 results 会把 Failed 状态下残留的结果数组误当成功。
-    fn produced(o: &SearchOutcome) -> bool {
-        !o.results.is_empty() && o.attempts.iter().any(|a| a.produced_hits())
-    }
-
-    fn blocks_degradation(o: &SearchOutcome) -> bool {
-        // spec §1 的处置表在这里只有一条生效分支：Parse → 不切换。
-        // 直接复用 FailKind::switches_source()，避免「哪些失败该降级」出现第二份判定。
-        o.attempts
-            .iter()
-            .any(|a| matches!(a.status, AttemptStatus::Failed(kind) if !kind.switches_source()))
-    }
-
     let attempts: Vec<AttemptReport> = outcomes
         .iter()
         .flat_map(|o| o.attempts.iter().cloned())
@@ -94,12 +177,12 @@ pub(crate) fn resolve_by_precedence(outcomes: Vec<SearchOutcome>) -> SearchOutco
 
     let mut winner: Option<SearchOutcome> = None;
     for outcome in &outcomes {
-        if produced(outcome) {
+        if outcome_produced(outcome) {
             winner = Some(outcome.clone());
             break;
         }
         // spec §1：Parse 不再往下降级（详见模块头的并行语义说明）。
-        if blocks_degradation(outcome) {
+        if outcome_blocks_degradation(outcome) {
             break;
         }
     }
@@ -663,5 +746,100 @@ mod tests {
         let outcome = chain.run(cn_query()).await;
         assert!(outcome.results.is_empty() && outcome.attempts.is_empty());
         assert_eq!(None, outcome.winning_source());
+    }
+
+    struct DelayedStubProvider {
+        kind: SourceKind,
+        delay: std::time::Duration,
+        outcome: SearchOutcome,
+    }
+
+    impl SearchProvider for DelayedStubProvider {
+        fn kind(&self) -> SourceKind {
+            self.kind
+        }
+        fn search<'a>(
+            &'a self,
+            _query: SearchQuery,
+        ) -> Pin<Box<dyn Future<Output = SearchOutcome> + Send + 'a>> {
+            let delay = self.delay;
+            let outcome = self.outcome.clone();
+            Box::pin(async move {
+                tokio::time::sleep(delay).await;
+                outcome
+            })
+        }
+    }
+
+    fn delayed_stub(
+        source: SourceKind,
+        delay_ms: u64,
+        patent_num: &str,
+    ) -> Arc<dyn SearchProvider> {
+        Arc::new(DelayedStubProvider {
+            kind: source,
+            delay: std::time::Duration::from_millis(delay_ms),
+            outcome: SearchOutcome {
+                results: vec![MergedPatent {
+                    sources: vec![source],
+                    summary: summary(patent_num, "延迟源测试结果"),
+                }],
+                attempts: vec![AttemptReport {
+                    source,
+                    status: AttemptStatus::Success,
+                    latency_ms: delay_ms,
+                    hits: 1,
+                    error: None,
+                    hint: None,
+                }],
+                upstream_total: Some(1),
+            },
+        })
+    }
+
+    /// 严格优先级早停：主源快速命中后立即返回，绝不干等 5 秒的慢尾源。
+    #[tokio::test]
+    async fn primary_hit_early_stops_without_waiting_for_slow_fallback() {
+        let chain = SourceChain::new(vec![
+            delayed_stub(SourceKind::SerpApi, 15, "CN900000001A"),
+            delayed_stub(SourceKind::GooglePatentsXhr, 5_000, "CN900000002A"),
+            delayed_stub(SourceKind::EpoOps, 5_000, "EP900000003A"),
+        ]);
+
+        let started = std::time::Instant::now();
+        let outcome = chain.run(cn_query()).await;
+        let elapsed = started.elapsed();
+
+        assert!(
+            elapsed < std::time::Duration::from_millis(800),
+            "主源命中后必须早停，不应等待慢尾源: elapsed={elapsed:?}"
+        );
+        assert_eq!(Some(SourceKind::SerpApi), outcome.winning_source());
+        assert_eq!("CN900000001A", outcome.summaries()[0].patent_number);
+        assert_eq!(3, outcome.attempts.len());
+        assert_eq!(AttemptStatus::Success, outcome.attempts[0].status);
+        assert_eq!(AttemptStatus::Skipped, outcome.attempts[1].status);
+        assert_eq!(AttemptStatus::Skipped, outcome.attempts[2].status);
+    }
+
+    /// 绝不抢跑降级：低顺位源先返回时仍必须等待高顺位主源，确保零质量折损。
+    #[tokio::test]
+    async fn fast_fallback_never_preempts_pending_primary() {
+        let chain = SourceChain::new(vec![
+            delayed_stub(SourceKind::SerpApi, 120, "CN900000010A"),
+            delayed_stub(SourceKind::EpoOps, 5, "EP900000020A"),
+        ]);
+
+        let outcome = chain.run(cn_query()).await;
+
+        assert_eq!(
+            Some(SourceKind::SerpApi),
+            outcome.winning_source(),
+            "低顺位源更快返回也不能抢掉高顺位主源的结果"
+        );
+        assert_eq!("CN900000010A", outcome.summaries()[0].patent_number);
+        assert_eq!(2, outcome.attempts.len());
+        assert_eq!(AttemptStatus::Success, outcome.attempts[0].status);
+        assert_eq!(AttemptStatus::Success, outcome.attempts[1].status);
     }
 }

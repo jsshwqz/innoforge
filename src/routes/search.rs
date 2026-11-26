@@ -1014,7 +1014,7 @@ pub async fn api_search_online(
             s.db.count_ai_calls_today_steps(&[REWRITE_COST_STEP, RERANK_COST_STEP])
                 .unwrap_or(daily_budget);
         if rerank_enabled && !user_wants_chrono && patents.len() >= 2 {
-            if rerank_budget_used >= daily_budget || online_start.elapsed().as_secs() >= 35 {
+            if rerank_budget_used >= daily_budget || online_start.elapsed().as_secs() >= 12 {
                 outcome.attempts.push(AttemptReport {
                     source: SourceKind::LlmRerank,
                     status: AttemptStatus::Skipped,
@@ -1025,7 +1025,7 @@ pub async fn api_search_online(
                             "今日编排预算已用尽（{rerank_budget_used}/{daily_budget}），重排未参与"
                         )
                     } else {
-                        "链路耗时已超 35s，重排未参与".to_string()
+                        "链路耗时已超 12s，跳过 LLM 重排以保障检索响应速度".to_string()
                     }),
                     hint: None,
                 });
@@ -1043,11 +1043,15 @@ pub async fn api_search_online(
                 );
                 let rerank_start = Instant::now();
                 let rerank_result = tokio::time::timeout(
-                    std::time::Duration::from_secs(20),
+                    std::time::Duration::from_secs(6),
                     fast_model.chat_with_system(RERANK_SYSTEM_PROMPT, &user_msg, 0.2),
                 )
                 .await
-                .unwrap_or_else(|_| Err(anyhow::anyhow!("重排调用超时（20s 预算用尽）")));
+                .unwrap_or_else(|_| {
+                    Err(anyhow::anyhow!(
+                        "重排调用超时（6s 快速预算用尽，已自动回退混合相关度排序）"
+                    ))
+                });
                 let _ =
                     s.db.save_cost_record(&crate::pipeline::context::AiCostRecord {
                         id: uuid::Uuid::new_v4().to_string(),
@@ -1124,14 +1128,11 @@ pub async fn api_search_online(
                             patents[new_pos] = old[*old_pos].clone();
                         }
                         patent_origin = new_order.clone();
-                        for v in &verdicts {
-                            let p = &mut patents[v.index - 1];
-                            p.relevance_score = Some(v.score as f64);
-                            p.score_source = Some("LLM重排".to_string());
-                        }
-                        // P3 证据：LLM 理由按重排后位置收集（新序第 i 位 = 原序 new_order[i]）
+                        // 按重排后的新位置 new_pos 同步写入对应原条目 old_pos 的 LLM 得分与理由（避免按旧下标错贴到其它专利上）
                         for (new_pos, old_pos) in new_order.iter().enumerate() {
                             if let Some(v) = verdicts.iter().find(|v| v.index - 1 == *old_pos) {
+                                patents[new_pos].relevance_score = Some(v.score as f64);
+                                patents[new_pos].score_source = Some("LLM重排".to_string());
                                 rerank_reasons[new_pos] = Some(v.reason.clone());
                             }
                         }
