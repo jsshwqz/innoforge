@@ -138,7 +138,7 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
-    let app = build_router_with_token(state, access_token);
+    let app = build_router_with_token(state, access_token.clone());
 
     println!(
         "创研台 InnoForge v{} running at http://{addr}",
@@ -155,9 +155,13 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    // 显示局域网 IP（方便手机访问）
+    // 显示局域网 IP（方便手机 / WSL2 宿主机一键访问）
     if let Ok(local_ip) = local_ip_address::local_ip() {
-        println!("Mobile access: http://{}:{port}", local_ip);
+        if let Some(ref token) = access_token {
+            println!("Mobile access: http://{}:{port}/?token={token}", local_ip);
+        } else {
+            println!("Mobile access: http://{}:{port}", local_ip);
+        }
     }
 
     server.serve(app.into_make_service()).await?;

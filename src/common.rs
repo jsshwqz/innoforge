@@ -413,13 +413,59 @@ async fn enforce_access_token(
     use axum::response::IntoResponse;
 
     let path = req.uri().path();
+    let expected_str = expected.as_str();
     // 仅对 API 与上传文件实施令牌拦截，静态资源与首页壳子放行以便输入令牌
     let protected = path.starts_with("/api/") || path.starts_with("/uploads/");
     if !protected || path == "/api/health" {
+        // 一键免 F12 登录：当页面路由携带合法 `?token=<expected>` 时，自动种下 HttpOnly Cookie 并 302 剥离 URL 里的 token
+        if !protected {
+            if let Some(query) = req.uri().query() {
+                let mut matched = false;
+                let mut remaining_pairs: Vec<&str> = Vec::new();
+                for pair in query.split('&') {
+                    if let Some((k, v)) = pair.split_once('=') {
+                        if k == "token" && v.trim() == expected_str {
+                            matched = true;
+                            continue;
+                        }
+                    }
+                    if !pair.is_empty() {
+                        remaining_pairs.push(pair);
+                    }
+                }
+                if matched {
+                    // 仅允许同源相对路径（防开放重定向）
+                    let safe_path = if path.starts_with('/') && !path.starts_with("//") {
+                        path
+                    } else {
+                        "/"
+                    };
+                    let location = if remaining_pairs.is_empty() {
+                        safe_path.to_string()
+                    } else {
+                        format!("{safe_path}?{}", remaining_pairs.join("&"))
+                    };
+                    let cookie_val =
+                        format!("innoforge_token={expected_str}; Path=/; HttpOnly; SameSite=Lax");
+                    if let (Ok(loc_hdr), Ok(cookie_hdr)) = (
+                        header::HeaderValue::from_str(&location),
+                        header::HeaderValue::from_str(&cookie_val),
+                    ) {
+                        return (
+                            StatusCode::FOUND,
+                            [
+                                (header::SET_COOKIE, cookie_hdr),
+                                (header::LOCATION, loc_hdr),
+                            ],
+                        )
+                            .into_response();
+                    }
+                }
+            }
+        }
         return next.run(req).await;
     }
 
-    let expected_str = expected.as_str();
     let bearer_ok = req
         .headers()
         .get(header::AUTHORIZATION)
@@ -1233,5 +1279,77 @@ mod static_asset_cache_tests {
         let resp_fresh =
             serve_static_embedded(stale_headers, axum::extract::Path("i18n.js".to_string())).await;
         assert_eq!(resp_fresh.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn query_token_exchanges_for_httponly_cookie_and_strips_token_from_url() {
+        use axum::routing::get;
+
+        let token = std::sync::Arc::new("tok-secret-123".to_string());
+        let root_path = "/";
+        let ping_path = "/api/ping";
+        let app = Router::new()
+            .route(root_path, get(|| async { "home" }))
+            .route(ping_path, get(|| async { "pong" }))
+            .layer(axum::middleware::from_fn_with_state(
+                token,
+                enforce_access_token,
+            ));
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("ephemeral bind");
+        let addr = listener.local_addr().expect("local_addr");
+        let server = axum::Server::from_tcp(listener)
+            .expect("from_tcp")
+            .serve(app.into_make_service());
+        let handle = tokio::spawn(async move {
+            let _ = server.await;
+        });
+
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .expect("client");
+
+        // 1) 未带凭证访问 /api/ping -> 401
+        let unauth = client
+            .get(format!("http://{addr}/api/ping"))
+            .send()
+            .await
+            .expect("unauth req");
+        assert_eq!(unauth.status().as_u16(), 401);
+
+        // 2) 页面路由携带正确 ?token= -> 302 剥离 token 并种下 HttpOnly Cookie
+        let login = client
+            .get(format!("http://{addr}/?token=tok-secret-123&tab=history"))
+            .send()
+            .await
+            .expect("login req");
+        assert_eq!(login.status().as_u16(), 302);
+        assert_eq!(
+            login
+                .headers()
+                .get("location")
+                .and_then(|v| v.to_str().ok()),
+            Some("/?tab=history")
+        );
+        let set_cookie = login
+            .headers()
+            .get("set-cookie")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        assert!(set_cookie.contains("innoforge_token=tok-secret-123"));
+        assert!(set_cookie.contains("HttpOnly"));
+
+        // 3) 携带该 Cookie 访问 /api/ping -> 200
+        let authed = client
+            .get(format!("http://{addr}/api/ping"))
+            .header("Cookie", "innoforge_token=tok-secret-123")
+            .send()
+            .await
+            .expect("authed req");
+        assert_eq!(authed.status().as_u16(), 200);
+
+        handle.abort();
     }
 }
