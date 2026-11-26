@@ -211,7 +211,7 @@ impl ReqwestEpoTransport {
     pub fn new() -> Self {
         ReqwestEpoTransport {
             client: reqwest::Client::builder()
-                .connect_timeout(Duration::from_millis(500))
+                .connect_timeout(Duration::from_secs(3))
                 .timeout(UPSTREAM_TIMEOUT)
                 .build()
                 .expect("上游 HTTP 客户端构建失败（TLS 后端初始化）——禁止静默退回无超时客户端，见 issue #55"),
