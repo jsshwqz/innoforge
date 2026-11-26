@@ -1062,10 +1062,30 @@ pub async fn api_idea_pipeline(
     let description = idea.description.clone();
     let channels = s.pipeline_channels.clone();
 
-    // Run pipeline in background
+    // Run pipeline in background (catch_unwind 兜底，防止任意步骤 panic 导致前端永久卡在 pending)
     tokio::spawn(async move {
+        use futures::FutureExt;
         tracing::info!("Pipeline 开始执行: {}", idea_id);
-        let result = runner.run(&idea_id, &title, &description, Some(tx)).await;
+        let result = match std::panic::AssertUnwindSafe(runner.run(
+            &idea_id,
+            &title,
+            &description,
+            Some(tx),
+        ))
+        .catch_unwind()
+        .await
+        {
+            Ok(res) => res,
+            Err(panic_payload) => {
+                let msg = panic_payload
+                    .downcast_ref::<&str>()
+                    .copied()
+                    .or_else(|| panic_payload.downcast_ref::<String>().map(String::as_str))
+                    .unwrap_or("内部异常中断");
+                tracing::error!("Pipeline 捕获未预期 panic ({}): {}", idea_id, msg);
+                Err(anyhow::anyhow!("流水线内部异常：{}", msg))
+            }
+        };
         tracing::info!("Pipeline 执行完毕: {} => {:?}", idea_id, result.is_ok());
 
         // Save result to database
@@ -1203,8 +1223,24 @@ pub async fn api_idea_resume(
 
     let idea_id = id.clone();
     tokio::spawn(async move {
+        use futures::FutureExt;
         tracing::info!("Pipeline 断点续跑: {}", idea_id);
-        match runner.resume(&idea_id, None).await {
+        let resume_res = match std::panic::AssertUnwindSafe(runner.resume(&idea_id, None))
+            .catch_unwind()
+            .await
+        {
+            Ok(res) => res,
+            Err(panic_payload) => {
+                let msg = panic_payload
+                    .downcast_ref::<&str>()
+                    .copied()
+                    .or_else(|| panic_payload.downcast_ref::<String>().map(String::as_str))
+                    .unwrap_or("内部异常中断");
+                tracing::error!("Pipeline 续跑捕获未预期 panic ({}): {}", idea_id, msg);
+                Err(anyhow::anyhow!("流水线内部异常：{}", msg))
+            }
+        };
+        match resume_res {
             Ok(Some(ctx)) => {
                 if let Ok(Some(mut idea)) = db.get_idea(&idea_id) {
                     idea.novelty_score = if ctx.novelty_status
