@@ -4,6 +4,26 @@
 All notable changes are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
+## [v0.9.94] - 2026-11-26
+
+### 全域检索提速、三栖抗辩升级与质量自进化里程碑（含 v0.9.75–v0.9.94 汇总） / Omni-Search Speedup, Tri-Mode Rebuttal & Eval-Driven Milestone
+
+- **四维全域无感混搜与极致性能优化（`v0.9.78` / `v0.9.87`–`v0.9.91`）**：
+  - 新增 `POST /api/search/omni` 并行融合本地知识库 + 全球专利（SerpAPI / Google Patents XHR / EPO OPS）+ 学术论文（OpenAlex / Semantic Scholar / PubMed）+ 博查国内直连 Web Search BYOK，支持文献体裁徽章、CRAAP 多源互证评分、IPC 子空间锚点与一键加入对比；
+  - SQLite Schema 升级至 `v26`：新增本地混合检索覆盖索引 `idx_patents_search_cover` 与规范专利号表达式索引 `idx_patents_norm_pn` 并改写为 `COUNT(*) OVER()` 单趟查询（本地检索由 `5,221ms` 压降至 `< 100ms`，批量入库查重提速 `600×+`）；
+  - 确定性工程术语表零毫秒英文扩写 + 多源链严格优先级早停 + 海外源 `500ms → 3s` 连接超时修复 + AI HTTP 429 配额耗尽秒切备用通道，全量 8 题质量回归 Eval 实测 **`8/8` 满分 `100.0/100`**，端到端均值由 `21.98s` 压降至 **`5.35s`**。
+- **开放式行业调研模式、流水线稳定性与快速验证修复（`v0.9.92` / `v0.9.94`）**：
+  - 新增 `QueryIntent::{InventionValidation, MarketLandscapeSurvey}` 零延迟意图识别：自动区分开放式行业/产品谱系调研问句与具体专利构想验证，切换专属调研报告与跨维度合成结构；
+  - 修复低相似度叠加矛盾信号时 `ScoreNovelty` 加分越界触发 `debug_assert!` 崩溃的隐患，并为后台流水线与断点续跑补齐 `FutureExt::catch_unwind` 防静默卡死兜底；
+  - 修复 `quick_mode` 漏跳过第 16 步 `GenerateOaResponse` 导致的 60 秒超时旧缺陷（快速调研压降至 `0.68s`），并修复中文关键词提取按字节数过滤产生的单字噪声。
+- **审查与审稿三栖抗辩、通用 Word 导出与跨页体验统一（`v0.9.75`–`v0.9.86` / `v0.9.93`）**：
+  - 升级审查与审稿三栖抗辩（官方 OA 答复 + 魔鬼审查员模拟预审 + 学术论文 Rebuttal 逐条回复），并强化 `<user_input>` 隔离与严禁编造专利号防幻觉约束；
+  - 新增全站通用 Word（`.docx`）专业报告导出、论文导出公开时序守卫、专利表格（`.xlsx`/`.csv`/`.tsv`/`.json`）批量无损导入与本地/网盘目录增量同步、EPO OPS 一键连通性测试；
+  - 统一全站右侧边栏切页导航、底部历史与附件区、全站中英双语零汉字泄漏齐平，并新增非回环/WSL2/局域网场景一键 `?token=` 自动换取 `HttpOnly` Cookie 登录机制。
+- **轻量脱敏质量回归评测脚手架（`v0.9.89` / `v0.9.94`）**：
+  - 新增 `tools/eval_suite.py` 与 `tools/eval_cases.json`（覆盖 5 项检索 + AI 方案对比 + OA 审查员预判防幻觉 + 行业调研意图路由共 8 题，支持基线保存、退步门禁拦截与 `--token` 鉴权）。
+
+---
 ## [v0.9.74] - 2026-11-24
 
 ### 深度分析引擎统一与全站 Markdown 渲染收口 / Deep Engine Unification & Markdown Rendering Polish
