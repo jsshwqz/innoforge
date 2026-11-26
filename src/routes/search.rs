@@ -2074,6 +2074,9 @@ fn fallback_cjk_technical_terms(query: &str) -> Option<String> {
         ("逆变器", "inverter"),
         ("电驱", "electric drive"),
         ("固态电池", "solid-state battery"),
+        ("硫化物", "sulfide"),
+        ("电解质", "electrolyte"),
+        ("界面", "interface"),
         ("锂电池", "lithium battery"),
         ("储能", "energy storage"),
         ("电机", "electric motor"),
@@ -2102,13 +2105,21 @@ fn fallback_cjk_technical_terms(query: &str) -> Option<String> {
     }
 }
 
-/// 快速将自然语言/中文技术描述用轻量 AI 扩写为英文学术检索词（12s 超时 + 术语表兜底，失败静默退回）
+/// 快速将自然语言/中文技术描述扩写为英文学术检索词（确定性专业术语表 0ms 优先 + 4s 轻量 AI 兜底）。
 async fn expand_omni_english_query(s: &AppState, query: &str) -> Option<String> {
     let has_cjk = query
         .chars()
         .any(|c| ('\u{4E00}'..='\u{9FFF}').contains(&c));
-    if !has_cjk && query.split_whitespace().count() <= 6 {
+    // 已是简洁英文技术查询（≤12 词）直接原样透传，绝不白耗一次 AI 翻译延迟
+    if !has_cjk && query.split_whitespace().count() <= 12 {
         return None;
+    }
+    // 若确定性工程术语表已覆盖 ≥2 个精准英文术语，直接 0ms 返回（避免 4-12s LLM 串行等待）
+    let glossary_hit = fallback_cjk_technical_terms(query);
+    if let Some(ref g) = glossary_hit {
+        if g.split_whitespace().count() >= 3 {
+            return Some(g.clone());
+        }
     }
     let ai_opt = {
         let cfg = s.config.read().unwrap_or_else(|e| e.into_inner());
@@ -2133,7 +2144,7 @@ async fn expand_omni_english_query(s: &AppState, query: &str) -> Option<String> 
             &prompt,
             0.1,
         );
-        if let Ok(Ok(raw)) = tokio::time::timeout(std::time::Duration::from_secs(12), fut).await {
+        if let Ok(Ok(raw)) = tokio::time::timeout(std::time::Duration::from_secs(4), fut).await {
             let cleaned: String = raw
                 .lines()
                 .next()
@@ -2152,7 +2163,7 @@ async fn expand_omni_english_query(s: &AppState, query: &str) -> Option<String> 
             }
         }
     }
-    fallback_cjk_technical_terms(query)
+    glossary_hit
 }
 
 /// POST /api/search/omni — AI 全域无感混搜（本地知识库 + 全球专利 + 学术论文并行聚合去重）
@@ -2226,7 +2237,7 @@ pub async fn api_search_omni(
 
     let mut tagged_results: Vec<(PatentSummary, &'static str)> = Vec::new();
     let mut attempts: Vec<serde_json::Value> = Vec::new();
-    let timeout_dur = std::time::Duration::from_secs(18);
+    let timeout_dur = std::time::Duration::from_secs(10);
 
     if scope == "local" {
         let local_db = s.db.clone();
@@ -2408,6 +2419,23 @@ pub async fn api_search_omni(
     let craap_scores =
         craap::score_batch_with_corroboration(&craap_summaries, scope, &[], current_year);
 
+    // 同步推导 IPC 子空间锚点，使全域混搜与在线/本地检索共用一致的 IPC 降噪能力
+    let mut observed_ipcs: Vec<String> = Vec::new();
+    for item in &craap_summaries {
+        if !item.patent_number.trim().is_empty() {
+            if let Ok(Some(fp)) = s.db.get_patent(&item.patent_number) {
+                if !fp.ipc_codes.trim().is_empty() {
+                    observed_ipcs.push(fp.ipc_codes);
+                }
+            }
+        }
+    }
+    let anchor_query = match ai_expanded_en.as_deref() {
+        Some(en) => format!("{query} {en}"),
+        None => query.to_string(),
+    };
+    let ipc_anchors = ipc_anchor::derive_ipc_anchors(&anchor_query, &observed_ipcs, 3);
+
     let (all_merged, local_cnt, patent_cnt, academic_cnt) =
         dedup_and_merge_omni_items(tagged_results);
     let total = all_merged.len();
@@ -2421,6 +2449,7 @@ pub async fn api_search_omni(
         "source": scope,
         "scope": scope,
         "ai_expanded_terms": ai_expanded_en,
+        "ipc_anchors": ipc_anchors,
         "craap_scores": craap_scores,
         "source_breakdown": {
             "local": local_cnt,
