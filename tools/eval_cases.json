@@ -1,0 +1,109 @@
+{
+  "schema_version": "1.0",
+  "description": "InnoForge 脱敏公开质量回归评测集（仅含公开通用技术词汇与合成样例，严禁混入真实涉密案件）",
+  "search_cases": [
+    {
+      "id": "omni_sic_cooling_zh",
+      "name": "全域混搜 · 中文半导体散热（SiC 微通道液冷）",
+      "endpoint": "/api/search/omni",
+      "payload": {
+        "query": "碳化硅功率模块双面微通道液冷散热",
+        "scope": "omni",
+        "page": 1,
+        "page_size": 10
+      },
+      "min_hits": 3,
+      "max_latency_ms": 20000,
+      "expected_terms": ["sic", "silicon carbide", "碳化硅", "cool", "散热", "液冷", "power module", "功率模块", "microchannel", "微通道"],
+      "expected_ipc_prefixes": ["H01L", "H05K", "F28D", "H02M"],
+      "require_craap": true
+    },
+    {
+      "id": "omni_solid_battery_zh",
+      "name": "全域混搜 · 中文新能源材料（硫化物固态电解质）",
+      "endpoint": "/api/search/omni",
+      "payload": {
+        "query": "硫化物固态电池电解质界面修饰",
+        "scope": "omni",
+        "page": 1,
+        "page_size": 10
+      },
+      "min_hits": 3,
+      "max_latency_ms": 20000,
+      "expected_terms": ["sulfide", "solid", "battery", "electrolyte", "硫化物", "固态", "电解质", "电池", "界面", "interface"],
+      "expected_ipc_prefixes": ["H01M"],
+      "require_craap": true
+    },
+    {
+      "id": "academic_llm_kv_cache_en",
+      "name": "学术专搜 · 英文前沿论文（LLM KV Cache 压缩）",
+      "endpoint": "/api/search/omni",
+      "payload": {
+        "query": "large language model KV cache quantization compression",
+        "scope": "academic",
+        "page": 1,
+        "page_size": 10
+      },
+      "min_hits": 3,
+      "max_latency_ms": 18000,
+      "expected_terms": ["kv", "cache", "quantization", "compression", "language model", "llm", "transformer", "attention"],
+      "expected_ipc_prefixes": [],
+      "require_craap": true
+    },
+    {
+      "id": "online_sic_inverter_en",
+      "name": "在线专利链 · 英文早停提速校验（SiC Inverter）",
+      "endpoint": "/api/search/online",
+      "payload": {
+        "query": "silicon carbide inverter",
+        "language": "english",
+        "page": 1,
+        "page_size": 5
+      },
+      "min_hits": 2,
+      "max_latency_ms": 18000,
+      "expected_terms": ["silicon carbide", "sic", "inverter", "power", "module", "semiconductor", "switch"],
+      "expected_ipc_prefixes": ["H01L", "H02M"],
+      "require_craap": true
+    },
+    {
+      "id": "local_fts_smoke",
+      "name": "本地知识库 FTS5 毫秒级响应校验",
+      "endpoint": "/api/search",
+      "payload": {
+        "query": "电池",
+        "page": 1,
+        "page_size": 10
+      },
+      "min_hits": 0,
+      "max_latency_ms": 1000,
+      "expected_terms": ["电池", "battery", "电"],
+      "expected_ipc_prefixes": [],
+      "require_craap": false
+    }
+  ],
+  "ai_compare_cases": [
+    {
+      "id": "ai_compare_cooling_synthetic",
+      "name": "方案对比 · 合成技术方案防幻觉与结构完整度",
+      "endpoint": "/api/ai/compare",
+      "payload": {
+        "items": [
+          {
+            "type": "text",
+            "title": "方案A：双面针翅微通道SiC散热器",
+            "content": "一种用于800V车规级碳化硅功率模块的双面直接水冷散热器，芯片上下表面均采用银烧结连接氮化硅AMB陶瓷基板，基板外侧直接集成错列菱形微针翅流道，并配置双向对称分流歧管，热阻降至0.12 K/W。"
+          },
+          {
+            "type": "text",
+            "title": "方案B：单面底板间接液冷模块",
+            "content": "一种传统单面液冷功率模块，芯片底部通过焊锡焊接至DBC陶瓷基板，基板下方涂覆导热硅脂后通过螺栓压接在铝合金冷板上，芯片顶部采用铝键合线互连并灌封硅胶。"
+          }
+        ]
+      },
+      "max_latency_ms": 45000,
+      "required_signals": ["双面", "单面", "微针翅", "热阻", "差异"],
+      "forbid_fabricated_patents": true
+    }
+  ]
+}
