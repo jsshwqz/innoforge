@@ -300,10 +300,31 @@ pub async fn api_idea_analyze(
                         .collect::<Vec<_>>(),
                 )
                 .unwrap_or_else(|_| "[]".into());
-                idea.analysis =
-                    if ctx.novelty_status == crate::pipeline::context::NoveltyStatus::Sufficient {
-                        format!(
-                            "## 快速验证报告\n\n\
+                let is_survey = ctx.query_intent
+                    == crate::pipeline::context::QueryIntent::MarketLandscapeSurvey;
+                let query_intent_str = if is_survey {
+                    "market_landscape_survey"
+                } else {
+                    "invention_validation"
+                };
+                idea.analysis = if is_survey {
+                    format!(
+                            "## 快速调研报告（行业与产品谱系调研模式）\n\n\
+                         **意图识别：** 开放式行业/产品调研（不套用单一专利新颖性驳回评分）\n\
+                         **识别领域：** {}\n\n\
+                         ### 检索覆盖\n\
+                         - 网络线索：{} 条\n\
+                         - 专利/文献证据：{} 条\n\n\
+                         ### 提示\n\
+                         点击「深度推演」即可基于上述真实证据生成完整的产品类型优缺点对比矩阵、痛点演进与差异化切入建议。\n",
+                            ctx.technical_domain,
+                            ctx.web_results.len(),
+                            ctx.patent_results.len(),
+                        )
+                } else if ctx.novelty_status == crate::pipeline::context::NoveltyStatus::Sufficient
+                {
+                    format!(
+                        "## 快速验证报告\n\n\
                          **新颖性评分：{:.0}/100**\n\n\
                          ### 评分细项\n\
                          - 最高相似度：{:.1}%\n\
@@ -311,16 +332,16 @@ pub async fn api_idea_analyze(
                          ### 搜索结果\n\
                          - 网络结果：{} 条\n\
                          - 专利结果：{} 条\n",
-                            ctx.novelty_score,
-                            ctx.score_breakdown.max_similarity * 100.0,
-                            ctx.score_breakdown.avg_top5_similarity * 100.0,
-                            ctx.web_results.len(),
-                            ctx.patent_results.len(),
-                        )
-                    } else {
-                        // #70：证据不足时不给数值分，给出可操作出路
-                        format!(
-                            "## 快速验证报告\n\n\
+                        ctx.novelty_score,
+                        ctx.score_breakdown.max_similarity * 100.0,
+                        ctx.score_breakdown.avg_top5_similarity * 100.0,
+                        ctx.web_results.len(),
+                        ctx.patent_results.len(),
+                    )
+                } else {
+                    // #70：证据不足时不给数值分，给出可操作出路
+                    format!(
+                        "## 快速验证报告\n\n\
                          **新颖性评分：无法评估（证据不足）**\n\n\
                          未获得任何对比文献：本地库 0 条 / 在线搜索未配置，无法评估新颖性。\n\n\
                          ### 可操作出路\n\
@@ -329,10 +350,10 @@ pub async fn api_idea_analyze(
                          ### 搜索结果\n\
                          - 网络结果：{} 条\n\
                          - 专利结果：{} 条\n",
-                            ctx.web_results.len(),
-                            ctx.patent_results.len(),
-                        )
-                    };
+                        ctx.web_results.len(),
+                        ctx.patent_results.len(),
+                    )
+                };
                 idea.status = "done".into();
                 let _ = db.update_idea(&idea);
 
@@ -348,6 +369,7 @@ pub async fn api_idea_analyze(
                         "id": idea.id,
                         "title": idea.title,
                         "status": idea.status,
+                        "query_intent": query_intent_str,
                         "analysis": idea.analysis,
                         "novelty_score": idea.novelty_score,
                         "novelty_status": novelty_status_str,

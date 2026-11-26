@@ -102,45 +102,82 @@ pub async fn deep_analysis_simple(ctx: &mut PipelineContext, ai: &AiClient) -> R
 
     let excluded_block =
         crate::orchestrator::constraints::format_excluded_paths_prompt_block(&ctx.research_state);
-    let prompt = format!(
-        "请以「首席研发总工 + 资深专利代理师」双重视角，基于以下全文档材料做深度研发与专利布局剖析（严禁浮于表面，原文未披露数据标注「原文未披露」，绝不编造）：\n\n\
-         ## 用户的创意\n\
-         **标题：** {title}\n\
-         **描述：** {description}\n\
-         **技术领域：** {domain}\n\
-         {excluded_block}\n\
-         ## 代码计算结果（已验证）\n\
-         **新颖性评分：{score:.0}/100**（最高相似度 {max_sim:.1}% / Top5 均值 {avg_sim:.1}% / 矛盾加分 +{contra_bonus:.0} / 缺口加分 +{gap_bonus:.0} / 多样性 {diversity:.0}%）\n\n\
-         ## 程序预挖现有技术全文信号\n{pre_mined}\n\n\
-         ## 最相关的现有技术（含富化全文选段）\n\n\
-         {matches}\n\n\
-         ## 矛盾信号（不同技术路线 = 创新空间）\n\n\
-         {contradictions}\n\n\
-         请用 Markdown 标题与表格严格按以下 5 节输出：\n\n\
-         ### 1. 核心物理因果链与现有方案失效边界\n\
-         - 拆解最相关现有技术的核心机理、实测参数窗口与隐含工程前提/失效边界。\n\n\
-         ### 2. 说明书隐藏宝藏与跨文档创新空白点\n\
-         - 指出可免费借鉴的未权要细节与跨方案嫁接切入点（同步指出新引入的耦合风险）。\n\n\
-         ### 3. 抓准真重点：独立权利要求最优抽象层与规避靶点\n\
-         - 明确哪些核心原理必须卡死进独权、哪些单一原型细枝末节必须踢出独权；给出 ≥2 条可落地规避设计路径。\n\n\
-         ### 4. 面向未来 3~5 年的演进卡位（不拘一格 × 沉住气求真）\n\
-         - 给出 2 个跨代材料/架构/控制演进方向及可提前铺设的替代实施例，并列明必须先在实验室验证的真实风险红线。\n\n\
-         ### 5. 知识产权与落地可行性总评\n\
-         - 给出清晰的新颖性/创造性判断、主要技术壁垒与优先行动建议。",
-        title = ctx.title,
-        description = ctx.description,
-        domain = ctx.technical_domain,
-        score = ctx.novelty_score,
-        max_sim = ctx.score_breakdown.max_similarity * 100.0,
-        avg_sim = ctx.score_breakdown.avg_top5_similarity * 100.0,
-        contra_bonus = ctx.score_breakdown.contradiction_bonus,
-        gap_bonus = ctx.score_breakdown.coverage_gap_bonus,
-        diversity = ctx.diversity_score.unwrap_or(0.0) * 100.0,
-        pre_mined = pre_mined,
-        excluded_block = excluded_block,
-        matches = top_matches_summary,
-        contradictions = contradictions_summary,
-    );
+    let is_survey =
+        ctx.query_intent == crate::pipeline::context::QueryIntent::MarketLandscapeSurvey;
+    let prompt = if is_survey {
+        format!(
+            "请以「资深产业技术分析师 + 首席研发总工」双重视角，针对用户的开放式行业与产品谱系调研提问，严格基于以下真实检索材料输出结构化调研推演报告（严禁编造输入证据之外的任何专利公开号或 DOI，原文未披露的数据必须明确标注「原文未披露」）：\n\n\
+             ## 用户调研主题\n\
+             **主题：** {title}\n\
+             **具体问题：** {description}\n\
+             **技术领域：** {domain}\n\
+             {excluded_block}\n\
+             ## 程序预挖现有技术全文信号\n{pre_mined}\n\n\
+             ## 检索到的代表性专利与文献证据（共 {hit_count} 条核心匹配）\n\n\
+             {matches}\n\n\
+             ## 路线差异与创新机会信号\n\n\
+             {contradictions}\n\n\
+             请用 Markdown 标题与表格严格按以下 5 节输出：\n\n\
+             ### 1. 物理工作区间、标准边界与合规/安全红线\n\
+             - 明确该品类主流工程参数区间、民用/专业或法规准入边界及核心安全风险。\n\n\
+             ### 2. 市面主流产品分类与优缺点全景对照表\n\
+             - 用 Markdown 表格横向对比各类主流产品形态（结构原理、代表真实专利/厂商、核心优点、核心缺点与痛点、适用场景）。\n\n\
+             ### 3. 行业共性技术痛点与近年专利演进趋势\n\
+             - 结合输入中的真实专利/文献剖析当前竞争壁垒与技术演进方向。\n\n\
+             ### 4. 差异化产品定义与高价值研发/专利切入建议\n\
+             - 给出 ≥3 条避开红海内卷的可落地切入路线及对应技术突破口。\n\n\
+             ### 5. 立项决策与实验室验证优先清单\n\
+             - 给出清晰的产品选型建议、成本/合规权衡与优先验证指标。",
+            title = ctx.title,
+            description = ctx.description,
+            domain = ctx.technical_domain,
+            hit_count = ctx.top_matches.len(),
+            pre_mined = pre_mined,
+            excluded_block = excluded_block,
+            matches = top_matches_summary,
+            contradictions = contradictions_summary,
+        )
+    } else {
+        format!(
+            "请以「首席研发总工 + 资深专利代理师」双重视角，基于以下全文档材料做深度研发与专利布局剖析（严禁浮于表面，原文未披露数据标注「原文未披露」，绝不编造）：\n\n\
+             ## 用户的创意\n\
+             **标题：** {title}\n\
+             **描述：** {description}\n\
+             **技术领域：** {domain}\n\
+             {excluded_block}\n\
+             ## 代码计算结果（已验证）\n\
+             **新颖性评分：{score:.0}/100**（最高相似度 {max_sim:.1}% / Top5 均值 {avg_sim:.1}% / 矛盾加分 +{contra_bonus:.0} / 缺口加分 +{gap_bonus:.0} / 多样性 {diversity:.0}%）\n\n\
+             ## 程序预挖现有技术全文信号\n{pre_mined}\n\n\
+             ## 最相关的现有技术（含富化全文选段）\n\n\
+             {matches}\n\n\
+             ## 矛盾信号（不同技术路线 = 创新空间）\n\n\
+             {contradictions}\n\n\
+             请用 Markdown 标题与表格严格按以下 5 节输出：\n\n\
+             ### 1. 核心物理因果链与现有方案失效边界\n\
+             - 拆解最相关现有技术的核心机理、实测参数窗口与隐含工程前提/失效边界。\n\n\
+             ### 2. 说明书隐藏宝藏与跨文档创新空白点\n\
+             - 指出可免费借鉴的未权要细节与跨方案嫁接切入点（同步指出新引入的耦合风险）。\n\n\
+             ### 3. 抓准真重点：独立权利要求最优抽象层与规避靶点\n\
+             - 明确哪些核心原理必须卡死进独权、哪些单一原型细枝末节必须踢出独权；给出 ≥2 条可落地规避设计路径。\n\n\
+             ### 4. 面向未来 3~5 年的演进卡位（不拘一格 × 沉住气求真）\n\
+             - 给出 2 个跨代材料/架构/控制演进方向及可提前铺设的替代实施例，并列明必须先在实验室验证的真实风险红线。\n\n\
+             ### 5. 知识产权与落地可行性总评\n\
+             - 给出清晰的新颖性/创造性判断、主要技术壁垒与优先行动建议。",
+            title = ctx.title,
+            description = ctx.description,
+            domain = ctx.technical_domain,
+            score = ctx.novelty_score,
+            max_sim = ctx.score_breakdown.max_similarity * 100.0,
+            avg_sim = ctx.score_breakdown.avg_top5_similarity * 100.0,
+            contra_bonus = ctx.score_breakdown.contradiction_bonus,
+            gap_bonus = ctx.score_breakdown.coverage_gap_bonus,
+            diversity = ctx.diversity_score.unwrap_or(0.0) * 100.0,
+            pre_mined = pre_mined,
+            excluded_block = excluded_block,
+            matches = top_matches_summary,
+            contradictions = contradictions_summary,
+        )
+    };
 
     match ai.chat_expert(&prompt, None).await {
         Ok(analysis) => ctx.ai_analysis = analysis,
