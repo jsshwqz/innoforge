@@ -63,7 +63,7 @@ impl super::Database {
         let mut final_images = p.images.clone();
         let mut final_pdf_url = p.pdf_url.clone();
 
-        // 按规范公开号精确检索同号存量记录（不再使用 `%CN%` + LIMIT 200 漏查），
+        // 按规范公开号范围查表达式索引 idx_patents_norm_pn（消除 42MB 全表 LIKE 扫描），
         // 命中后合并保留所有已富化字段（权利要求/说明书/附图/PDF/IPC/法律状态等）。
         if !canonical.is_empty() {
             let mut stmt = c.prepare(
@@ -72,12 +72,13 @@ impl super::Database {
                         ipc_codes, cpc_codes, priority_date, family_id, legal_status,
                         citations, cited_by, images, pdf_url
                  FROM patents
-                 WHERE REPLACE(REPLACE(REPLACE(UPPER(patent_number), ' ', ''), '-', ''), '.', '') LIKE ?1
+                 WHERE REPLACE(REPLACE(REPLACE(REPLACE(UPPER(patent_number), ' ', ''), '-', ''), '.', ''), '/', '') >= ?1
+                   AND REPLACE(REPLACE(REPLACE(REPLACE(UPPER(patent_number), ' ', ''), '-', ''), '.', ''), '/', '') < ?2
                  ORDER BY LENGTH(COALESCE(claims, '')) + LENGTH(COALESCE(images, '')) DESC
                  LIMIT 20",
             )?;
-            let canonical_like = format!("%{}%", canonical);
-            let mut rows = stmt.query(params![canonical_like])?;
+            let canonical_upper = format!("{canonical}\u{10FFFF}");
+            let mut rows = stmt.query(params![canonical, canonical_upper])?;
             while let Some(row) = rows.next()? {
                 let existing_id: String = row.get(0)?;
                 let existing_number: String = row.get(1)?;
@@ -289,11 +290,13 @@ impl super::Database {
             return self.get_patent(number);
         }
         let c = self.conn();
-        let like = format!("%{}%", canonical);
+        let canonical_upper = format!("{canonical}\u{10FFFF}");
         let mut stmt = c.prepare(
-            "SELECT id,patent_number,title,abstract_text,description,claims,applicant,inventor,filing_date,publication_date,grant_date,ipc_codes,cpc_codes,priority_date,country,kind_code,family_id,legal_status,citations,cited_by,source,raw_json,created_at,images,pdf_url FROM patents WHERE REPLACE(REPLACE(UPPER(patent_number), ' ', ''), '.', '') LIKE ?1 ORDER BY (LENGTH(claims) + LENGTH(description) + LENGTH(images)) DESC LIMIT 20",
+            "SELECT id,patent_number,title,abstract_text,description,claims,applicant,inventor,filing_date,publication_date,grant_date,ipc_codes,cpc_codes,priority_date,country,kind_code,family_id,legal_status,citations,cited_by,source,raw_json,created_at,images,pdf_url FROM patents WHERE REPLACE(REPLACE(REPLACE(REPLACE(UPPER(patent_number), ' ', ''), '-', ''), '.', ''), '/', '') >= ?1 AND REPLACE(REPLACE(REPLACE(REPLACE(UPPER(patent_number), ' ', ''), '-', ''), '.', ''), '/', '') < ?2 ORDER BY (LENGTH(claims) + LENGTH(description) + LENGTH(images)) DESC LIMIT 20",
         )?;
-        let rows = stmt.query_map(params![like], |r| Ok(Self::row_to_patent(r)))?;
+        let rows = stmt.query_map(params![canonical, canonical_upper], |r| {
+            Ok(Self::row_to_patent(r))
+        })?;
         for p in rows.flatten() {
             if crate::patent::canonical_patent_key(&p.patent_number) == canonical {
                 return Ok(Some(p));
@@ -840,7 +843,7 @@ impl super::Database {
         let n_like = like_patterns.len();
 
         // 收集参数值（LIKE patterns 在前，后续 country/date/limit/offset）
-        let mut param_values: Vec<String> = like_patterns.clone();
+        let param_values: Vec<String> = like_patterns.clone();
 
         let (where_clause, total, rows) = if let Some(country_val) = country {
             let country_idx = n_like + 1;
@@ -851,36 +854,28 @@ impl super::Database {
                  AND (?{df_idx} = '' OR filing_date >= ?{df_idx})
                  AND (?{dt_idx} = '' OR filing_date <= ?{dt_idx})"
             );
-            let count_sql = format!("SELECT COUNT(*) FROM patents {where_clause}");
-            let total: usize = c.prepare(&count_sql)?.query_row(
-                rusqlite::params_from_iter(
-                    param_values.iter().chain(
-                        [
-                            country_val.to_string(),
-                            date_from.to_string(),
-                            date_to.to_string(),
-                        ]
-                        .iter(),
-                    ),
-                ),
-                |r| r.get(0),
-            )?;
 
+            // 单趟覆盖索引查询：用窗口函数 COUNT(*) OVER() 复用同一次扫描，避免双重全表扫描
             let data_sql = format!(
-                "SELECT id,patent_number,title,abstract_text,applicant,inventor,filing_date,country
+                "SELECT id,patent_number,title,abstract_text,applicant,inventor,filing_date,country,COUNT(*) OVER()
                  FROM patents {where_clause} {order_clause} LIMIT ?{} OFFSET ?{}",
                 n_like + 4,
                 n_like + 5
             );
-            param_values.push(country_val.to_string());
-            param_values.push(date_from.to_string());
-            param_values.push(date_to.to_string());
-            param_values.push(page_size.to_string());
-            param_values.push(offset.to_string());
+            let mut data_params = param_values.clone();
+            data_params.push(country_val.to_string());
+            data_params.push(date_from.to_string());
+            data_params.push(date_to.to_string());
+            data_params.push(page_size.to_string());
+            data_params.push(offset.to_string());
 
             let mut stmt = c.prepare(&data_sql)?;
+            let mut window_total: Option<usize> = None;
             let rows: Vec<PatentSummary> = stmt
-                .query_map(rusqlite::params_from_iter(param_values.iter()), |row| {
+                .query_map(rusqlite::params_from_iter(data_params.iter()), |row| {
+                    if window_total.is_none() {
+                        window_total = row.get::<_, usize>(8).ok();
+                    }
                     let applicant = row.get::<_, String>(4).unwrap_or_default();
                     let inventor = row.get::<_, String>(5).unwrap_or_default();
                     let title = row.get::<_, String>(2).unwrap_or_default();
@@ -901,6 +896,26 @@ impl super::Database {
                 })?
                 .filter_map(|r| r.ok())
                 .collect();
+            let total = if let Some(t) = window_total {
+                t
+            } else if offset == 0 {
+                0
+            } else {
+                let count_sql = format!("SELECT COUNT(*) FROM patents {where_clause}");
+                c.prepare(&count_sql)?.query_row(
+                    rusqlite::params_from_iter(
+                        param_values.iter().chain(
+                            [
+                                country_val.to_string(),
+                                date_from.to_string(),
+                                date_to.to_string(),
+                            ]
+                            .iter(),
+                        ),
+                    ),
+                    |r| r.get(0),
+                )?
+            };
             (where_clause, total, rows)
         } else {
             let df_idx = n_like + 1;
@@ -910,30 +925,27 @@ impl super::Database {
                  AND (?{df_idx} = '' OR filing_date >= ?{df_idx})
                  AND (?{dt_idx} = '' OR filing_date <= ?{dt_idx})"
             );
-            let count_sql = format!("SELECT COUNT(*) FROM patents {where_clause}");
-            let total: usize = c.prepare(&count_sql)?.query_row(
-                rusqlite::params_from_iter(
-                    param_values
-                        .iter()
-                        .chain([date_from.to_string(), date_to.to_string()].iter()),
-                ),
-                |r| r.get(0),
-            )?;
 
+            // 单趟覆盖索引查询：用窗口函数 COUNT(*) OVER() 复用同一次扫描，避免双重全表扫描
             let data_sql = format!(
-                "SELECT id,patent_number,title,abstract_text,applicant,inventor,filing_date,country
+                "SELECT id,patent_number,title,abstract_text,applicant,inventor,filing_date,country,COUNT(*) OVER()
                  FROM patents {where_clause} {order_clause} LIMIT ?{} OFFSET ?{}",
                 n_like + 3,
                 n_like + 4
             );
-            param_values.push(date_from.to_string());
-            param_values.push(date_to.to_string());
-            param_values.push(page_size.to_string());
-            param_values.push(offset.to_string());
+            let mut data_params = param_values.clone();
+            data_params.push(date_from.to_string());
+            data_params.push(date_to.to_string());
+            data_params.push(page_size.to_string());
+            data_params.push(offset.to_string());
 
             let mut stmt = c.prepare(&data_sql)?;
+            let mut window_total: Option<usize> = None;
             let rows: Vec<PatentSummary> = stmt
-                .query_map(rusqlite::params_from_iter(param_values.iter()), |row| {
+                .query_map(rusqlite::params_from_iter(data_params.iter()), |row| {
+                    if window_total.is_none() {
+                        window_total = row.get::<_, usize>(8).ok();
+                    }
                     let applicant = row.get::<_, String>(4).unwrap_or_default();
                     let inventor = row.get::<_, String>(5).unwrap_or_default();
                     let title = row.get::<_, String>(2).unwrap_or_default();
@@ -954,6 +966,21 @@ impl super::Database {
                 })?
                 .filter_map(|r| r.ok())
                 .collect();
+            let total = if let Some(t) = window_total {
+                t
+            } else if offset == 0 {
+                0
+            } else {
+                let count_sql = format!("SELECT COUNT(*) FROM patents {where_clause}");
+                c.prepare(&count_sql)?.query_row(
+                    rusqlite::params_from_iter(
+                        param_values
+                            .iter()
+                            .chain([date_from.to_string(), date_to.to_string()].iter()),
+                    ),
+                    |r| r.get(0),
+                )?
+            };
             (where_clause, total, rows)
         };
         let _ = where_clause;

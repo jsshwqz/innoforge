@@ -535,6 +535,21 @@ pub(crate) fn run(conn: &Connection, current_version: i32, target_version: i32) 
         tracing::info!("Database migrated to version 25 (chunk_section_tag_chunks_fts)");
     }
 
+    if current_version < 26 && target_version >= 26 {
+        // v0.9.91 性能演进：
+        // 1) idx_patents_search_cover：覆盖本地混合检索全部 8 列，跳过 raw_json/description/claims 大字段；
+        // 2) idx_patents_norm_pn：规范化专利号表达式索引，消除 insert_patent / find_patent_by_number 全表扫描。
+        run_migration_tx(
+            conn,
+            26,
+            "CREATE INDEX IF NOT EXISTS idx_patents_search_cover
+                ON patents(title, abstract_text, applicant, inventor, patent_number, id, filing_date, country);
+             CREATE INDEX IF NOT EXISTS idx_patents_norm_pn
+                ON patents(REPLACE(REPLACE(REPLACE(REPLACE(UPPER(patent_number), ' ', ''), '-', ''), '.', ''), '/', ''));",
+        )?;
+        tracing::info!("Database migrated to version 26 (search_cover_and_norm_pn_indexes)");
+    }
+
     if current_version > 0 && current_version < target_version {
         tracing::info!(
             "Database migrated from version {} to {}",
@@ -744,5 +759,29 @@ mod tests {
             )
             .unwrap();
         assert_eq!(1, rows, "重放后不得出现重复索引行");
+    }
+
+    #[test]
+    fn migration_v26_creates_search_cover_and_norm_pn_indexes() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let conn = Connection::open(dir.path().join("v26.db")).unwrap();
+        conn.execute_batch("CREATE TABLE schema_version (version INTEGER NOT NULL);")
+            .unwrap();
+        run(&conn, 0, 26).unwrap();
+        let v: i32 = conn
+            .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(26, v);
+
+        for idx in ["idx_patents_search_cover", "idx_patents_norm_pn"] {
+            let cnt: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?1",
+                    rusqlite::params![idx],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(1, cnt, "索引 {idx} 必须存在");
+        }
     }
 }

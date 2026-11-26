@@ -78,10 +78,9 @@ struct ReqwestFirecrawlTransport {
 
 impl ReqwestFirecrawlTransport {
     fn new() -> Self {
-        // 连接超时 500ms（errors.md #74 同款纪律：探活/外联类请求不允许连接悬挂），
-        // 总超时 15s 兜底。
+        // 连接超时 3s（防跨境/代理 TLS 握手 >500ms 误杀），总超时 15s 兜底。
         let client = reqwest::Client::builder()
-            .connect_timeout(Duration::from_millis(500))
+            .connect_timeout(Duration::from_secs(3))
             .timeout(Duration::from_secs(WEB_SEARCH_TIMEOUT_SECS))
             .build()
             .expect("上游 HTTP 客户端构建失败（TLS 后端初始化）——禁止静默退回无超时客户端，见 issue #55");

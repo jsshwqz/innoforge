@@ -578,6 +578,17 @@ impl AiClient {
             .await
     }
 
+    /// 判断 HTTP 429 响应是否属于配额耗尽/欠费类硬错（重试退避无意义，应立即切换备用通道）。
+    pub(super) fn is_quota_exhausted_429(raw_text: &str) -> bool {
+        let lower = raw_text.to_ascii_lowercase();
+        lower.contains("exceeded your current quota")
+            || lower.contains("insufficient_quota")
+            || lower.contains("quota exceeded")
+            || lower.contains("billing")
+            || lower.contains("credit balance")
+            || (lower.contains("quota") && lower.contains("resource_exhausted"))
+    }
+
     /// 判断模型/端点是否支持多模态看图。
     pub(super) fn supports_vision(provider: &AiProvider) -> bool {
         let base = provider.base_url.to_ascii_lowercase();
@@ -704,6 +715,15 @@ impl AiClient {
                             provider.name,
                             safe_truncate(&raw_text, 100)
                         );
+                        if Self::is_quota_exhausted_429(&raw_text) {
+                            tracing::warn!(
+                                "[{}] quota exhausted (429), failing fast to fallback provider",
+                                provider.name
+                            );
+                            return Err(anyhow::anyhow!(
+                                "AI 配额已超限（HTTP 429），已立即切换备用通道"
+                            ));
+                        }
                         if attempt < max_retries - 1 {
                             let delay = retry_after.map(Duration::from_secs).unwrap_or_else(|| {
                                 Duration::from_secs(2u64.pow(attempt as u32 + 1))
@@ -1158,12 +1178,19 @@ impl AiClient {
                             provider.name,
                             safe_truncate(&raw_text, 100)
                         );
-                        let is_quota = raw_text.to_ascii_lowercase().contains("quota");
+                        let is_quota = Self::is_quota_exhausted_429(&raw_text);
                         let err_msg = if is_quota {
                             "HTTP 429 配额已超限（非模型不支持图片）"
                         } else {
                             "HTTP 429 请求频率超限，请稍后再试"
                         };
+                        if is_quota {
+                            tracing::warn!(
+                                "[{}] multimodal quota exhausted (429), failing fast to fallback provider",
+                                provider.name
+                            );
+                            return Err(anyhow::anyhow!("{err_msg}"));
+                        }
                         if attempt < max_retries - 1 {
                             let delay = retry_after.map(Duration::from_secs).unwrap_or_else(|| {
                                 Duration::from_secs(2u64.pow(attempt as u32 + 1))
@@ -1681,5 +1708,21 @@ mod tests {
             model: "deepseek-chat".into(),
         };
         assert!(!AiClient::supports_vision(&non_vision));
+    }
+
+    #[test]
+    fn quota_exhausted_429_distinguishes_quota_from_transient_rpm() {
+        assert!(AiClient::is_quota_exhausted_429(
+            r#"[{"error":{"code":429,"message":"You exceeded your current quota, please check your plan"}}]"#
+        ));
+        assert!(AiClient::is_quota_exhausted_429(
+            r#"{"error":{"type":"insufficient_quota","message":"quota exceeded"}}"#
+        ));
+        assert!(AiClient::is_quota_exhausted_429(
+            "Your credit balance is too low to access the API"
+        ));
+        assert!(!AiClient::is_quota_exhausted_429(
+            r#"{"error":{"code":429,"message":"Rate limit reached: too many requests per minute"}}"#
+        ));
     }
 }

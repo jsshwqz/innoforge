@@ -146,12 +146,13 @@ impl Database {
                             family_id, legal_status, citations, cited_by, source, raw_json,
                             images, pdf_url
                      FROM patents
-                     WHERE REPLACE(REPLACE(REPLACE(UPPER(patent_number), ' ', ''), '-', ''), '.', '') LIKE ?1
+                     WHERE REPLACE(REPLACE(REPLACE(REPLACE(UPPER(patent_number), ' ', ''), '-', ''), '.', ''), '/', '') >= ?1
+                       AND REPLACE(REPLACE(REPLACE(REPLACE(UPPER(patent_number), ' ', ''), '-', ''), '.', ''), '/', '') < ?2
                      ORDER BY LENGTH(COALESCE(claims, '')) + LENGTH(COALESCE(description, '')) + LENGTH(COALESCE(images, '')) DESC
                      LIMIT 20",
                 )?;
-                let canonical_like = format!("%{}%", canonical);
-                let mut rows = stmt.query(rusqlite::params![canonical_like])?;
+                let canonical_upper = format!("{canonical}\u{10FFFF}");
+                let mut rows = stmt.query(rusqlite::params![canonical, canonical_upper])?;
                 while let Some(row) = rows.next()? {
                     let existing_id: String = row.get(0)?;
                     let existing_number: String = row.get(1)?;
