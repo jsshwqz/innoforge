@@ -52,12 +52,12 @@
 | 20 | POST | `/api/chat/:session_key/save` | `session_key` | 任意 JSON（§20） | — | JSON（§20） | `routes::api_chat_save_message` | `src/routes/chat.rs:53` |
 | 21 | POST | `/api/chat/:session_key/delete` | `session_key` | — | — | JSON（§21） | `routes::api_chat_delete_messages` | `src/routes/chat.rs:90` |
 | 22 | POST | `/api/search` | — | `SearchRequest` | — | JSON SearchResult | `routes::api_search` | `src/routes/search.rs:423` |
-| 23 | POST | `/api/search/stats` | — | `SearchRequest` | — | JSON（§23） | `routes::api_search_stats` | `src/routes/search.rs:2509` |
-| 24 | POST | `/api/search/export` | — | `SearchRequest` | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_export_csv` | `src/routes/search.rs:2573` |
-| 25 | POST | `/api/search/export/xlsx` | — | `SearchRequest` | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_export_xlsx` | `src/routes/search.rs:2624` |
+| 23 | POST | `/api/search/stats` | — | `SearchRequest` | — | JSON（§23） | `routes::api_search_stats` | `src/routes/search.rs:2551` |
+| 24 | POST | `/api/search/export` | — | `SearchRequest` | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_export_csv` | `src/routes/search.rs:2615` |
+| 25 | POST | `/api/search/export/xlsx` | — | `SearchRequest` | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_export_xlsx` | `src/routes/search.rs:2666` |
 | 26 | POST | `/api/search/online` | — | `SearchRequest` | — | JSON（§26） | `routes::api_search_online` | `src/routes/search.rs:712` |
 | 27 | POST | `/api/search/source` | — | 任意 JSON（§27） | — | JSON（§27） | `routes::api_search_single_source` | `src/routes/search.rs:1779` |
-| 28 | POST | `/api/search/omni` | — | 任意 JSON（§28） | — | JSON（§28） | `routes::api_search_omni` | `src/routes/search.rs:2171` |
+| 28 | POST | `/api/search/omni` | — | 任意 JSON（§28） | — | JSON（§28） | `routes::api_search_omni` | `src/routes/search.rs:2179` |
 | 29 | POST | `/api/search/vector` | — | 任意 JSON（§29） | — | JSON（§29） | `routes::api_search_vector` | `src/routes/search.rs:1449` |
 | 30 | POST | `/api/search/analyze` | — | 任意 JSON（§30） | — | JSON（§30） | `routes::api_ai_analyze_results` | `src/routes/ai.rs:889` |
 | 31 | POST | `/api/patent/fetch` | — | `FetchPatentRequest` | — | JSON（§31） | `routes::api_fetch_patent` | `src/routes/patent.rs:18` |
@@ -657,7 +657,7 @@
 
 ### §23 POST `/api/search/stats`
 
-- 源码：`src/routes/search.rs:2509`
+- 源码：`src/routes/search.rs:2551`
 - 请求体：`SearchRequest`（字段见上文类型表）
 - 响应顶层键：`applicants`、`countries`、`total`、`years`
 
@@ -675,7 +675,7 @@
 
 ### §28 POST `/api/search/omni`
 
-- 源码：`src/routes/search.rs:2171`
+- 源码：`src/routes/search.rs:2179`
 - 读取的请求键：`country`、`language`、`page`、`page_size`、`query`、`region`、`scope`
 - 响应顶层键：`ai_expanded_terms`、`attempts`、`craap_scores`、`error`、`ipc_anchors`、`page`、`page_size`、`patents`、`scope`、`source`、`source_breakdown`、`total`
 
