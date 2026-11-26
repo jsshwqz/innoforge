@@ -2,7 +2,7 @@
 //! Type: CODE (pure code, no LLM call)
 
 use crate::db::Database;
-use crate::pipeline::context::PipelineContext;
+use crate::pipeline::context::{PipelineContext, QueryIntent};
 use anyhow::Result;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -321,15 +321,87 @@ fn inject_memory(ctx: &mut PipelineContext, db: &Arc<Database>) {
     ctx.description.push_str(&memory_note);
 }
 
+/// 确定性意图识别（零 LLM 延迟，v0.9.94）：
+/// 区分“开放式行业/产品谱系调研问句”与“具体技术构想的创新性验证”。
+pub fn detect_query_intent(title: &str, description: &str) -> QueryIntent {
+    let combined = format!("{} {}", title.trim(), description.trim());
+    let lower = combined.to_ascii_lowercase();
+
+    // 若文本中已含明确的专利方案构造特征，优先走创新验证与布局路径
+    const INVENTION_SIGNALS: &[&str] = &[
+        "本发明",
+        "本实用新型",
+        "权利要求",
+        "其特征在于",
+        "本发明提出",
+        "提出一种",
+        "设计了一种",
+        "一种用于",
+        "一种基于",
+        "通过将",
+        "进而降低",
+        "进而提高",
+    ];
+    let invention_hits = INVENTION_SIGNALS
+        .iter()
+        .filter(|s| combined.contains(**s))
+        .count();
+
+    const SURVEY_SIGNALS: &[&str] = &[
+        "有哪些",
+        "什么类型",
+        "哪些类型",
+        "分别是什么",
+        "优缺点",
+        "优劣对比",
+        "市面上",
+        "市场上",
+        "市场现状",
+        "行业现状",
+        "竞品分析",
+        "产品谱系",
+        "主流方案",
+        "主流路线",
+        "技术路线有哪些",
+        "发展趋势",
+        "调研",
+        "综述",
+        "what types",
+        "pros and cons",
+        "market landscape",
+        "state of the art",
+        "survey of",
+    ];
+    let survey_hits = SURVEY_SIGNALS
+        .iter()
+        .filter(|s| combined.contains(**s) || lower.contains(**s))
+        .count();
+
+    if (survey_hits >= 1 && invention_hits == 0)
+        || (survey_hits >= 2 && survey_hits > invention_hits)
+    {
+        QueryIntent::MarketLandscapeSurvey
+    } else {
+        QueryIntent::InventionValidation
+    }
+}
+
 pub async fn execute(ctx: &mut PipelineContext, db: &Arc<Database>) -> Result<()> {
     let full_text = format!("{} {}", ctx.title, ctx.description);
     ctx.keywords = extract_keywords(&full_text, 20);
     ctx.technical_domain = infer_domain(&ctx.keywords);
+    ctx.query_intent = detect_query_intent(&ctx.title, &ctx.description);
 
-    ctx.research_state.current_hypothesis = format!(
-        "创意「{}」在{}领域可能具有新颖性",
-        ctx.title, ctx.technical_domain
-    );
+    ctx.research_state.current_hypothesis = match ctx.query_intent {
+        QueryIntent::MarketLandscapeSurvey => format!(
+            "梳理「{}」在{}领域的主流产品分类、技术路线优缺点与差异化研发切入点",
+            ctx.title, ctx.technical_domain
+        ),
+        QueryIntent::InventionValidation => format!(
+            "创意「{}」在{}领域可能具有新颖性",
+            ctx.title, ctx.technical_domain
+        ),
+    };
 
     if ctx.keywords.len() < 2 {
         anyhow::bail!("输入内容太短，无法提取有效关键词（至少需要 2 个关键词）");
@@ -366,5 +438,30 @@ mod tests {
     fn test_infer_domain() {
         let kw = vec!["阀门".into(), "流量".into(), "调节".into()];
         assert_eq!(infer_domain(&kw), "流体控制/阀门");
+    }
+
+    #[test]
+    fn detect_query_intent_separates_market_survey_from_concrete_invention() {
+        assert_eq!(
+            detect_query_intent(
+                "微压氧仓",
+                "目前市面上微压氧仓有哪些，分别是什么类型，他们的优缺点有什么？"
+            ),
+            QueryIntent::MarketLandscapeSurvey
+        );
+        assert_eq!(
+            detect_query_intent(
+                "固态电解质路线调研",
+                "What types of solid-state battery electrolytes exist and their pros and cons?"
+            ),
+            QueryIntent::MarketLandscapeSurvey
+        );
+        assert_eq!(
+            detect_query_intent(
+                "800V SiC双面微通道液冷母排",
+                "本发明提出一种用于800V电驱的双面直接水冷叠层母排，其特征在于将铜排直接作为微通道冷板壁面，进而降低结壳热阻32%。"
+            ),
+            QueryIntent::InventionValidation
+        );
     }
 }

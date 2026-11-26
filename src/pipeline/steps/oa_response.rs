@@ -12,6 +12,13 @@ use anyhow::Result;
 
 /// 执行 Step 16（基于流水线结果生成 OA 答复辅助分析）
 pub async fn execute(ctx: &mut PipelineContext, ai_client: &AiClient) -> Result<()> {
+    // v0.9.94：开放式行业/产品谱系调研不涉及单一专利驳回答复，跳过冗余 LLM 调用
+    if ctx.query_intent == crate::pipeline::context::QueryIntent::MarketLandscapeSurvey {
+        ctx.oa_response =
+            "（当前为开放式行业与产品谱系调研模式，未触发单一专利 OA 答复分析。）".to_string();
+        return Ok(());
+    }
+
     // 从流水线上下文收集有用信息
     let title = &ctx.title;
     let description = &ctx.description;

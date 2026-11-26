@@ -2,6 +2,20 @@ use super::state::PipelineStep;
 use crate::search::enrichment::EnrichmentStatus;
 use serde::{Deserialize, Serialize};
 
+/// 用户输入意图分类（v0.9.94）
+///
+/// 区分「具体技术方案的新颖性验证与专利布局」与「开放式行业/产品谱系调研」，
+/// 避免把“市面上有哪些类型、优缺点是什么”这类调研提问生硬套进专利驳回/打分模板。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum QueryIntent {
+    /// 具体技术构想的创新性验证与专利布局（默认）
+    #[default]
+    InventionValidation,
+    /// 开放式行业/产品谱系与优缺点对比调研
+    MarketLandscapeSurvey,
+}
+
 /// 新颖性评估的证据状态
 ///
 /// 区分「查了且证据充分」与「没查到任何对比文献」。
@@ -250,6 +264,9 @@ pub struct PipelineContext {
     // Step 1: ParseInput
     pub keywords: Vec<String>,
     pub technical_domain: String,
+    /// v0.9.94：识别用户输入是具体方案验证还是开放式行业/产品调研
+    #[serde(default)]
+    pub query_intent: QueryIntent,
 
     // Step 2: ExpandQuery
     pub expanded_queries: Vec<String>,
@@ -372,6 +389,7 @@ impl PipelineContext {
             description: description.to_string(),
             keywords: Vec::new(),
             technical_domain: String::new(),
+            query_intent: QueryIntent::default(),
             expanded_queries: Vec::new(),
             web_results: Vec::new(),
             patent_results: Vec::new(),

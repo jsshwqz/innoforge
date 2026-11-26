@@ -135,7 +135,7 @@ impl PipelineStep {
         }
     }
 
-    /// 快速模式下跳过的步骤
+    /// 快速模式下跳过的步骤（不含耗时 LLM 深度步骤与 OA 答复步骤）
     pub fn skipped_in_quick_mode(&self) -> bool {
         matches!(
             self,
@@ -148,6 +148,22 @@ impl PipelineStep {
                 | Self::AiActionPlan
                 | Self::ExperimentValidation
                 | Self::BuildClaimTree
+                | Self::GenerateOaResponse
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quick_mode_skips_all_llm_steps_including_generate_oa_response() {
+        assert!(PipelineStep::GenerateOaResponse.skipped_in_quick_mode());
+        assert!(PipelineStep::AiDeepAnalysis.skipped_in_quick_mode());
+        assert!(PipelineStep::ExpandQuery.skipped_in_quick_mode());
+        assert!(!PipelineStep::ParseInput.skipped_in_quick_mode());
+        assert!(!PipelineStep::ScoreNovelty.skipped_in_quick_mode());
+        assert!(!PipelineStep::Finalize.skipped_in_quick_mode());
     }
 }

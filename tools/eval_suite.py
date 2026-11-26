@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 import time
@@ -30,12 +31,20 @@ RAW_HTML_ENTITY_RE = re.compile(r"&(?:amp|lt|gt|quot|#39|#x27);")
 PATENT_NUM_RE = re.compile(r"\b(?:CN|US|EP|WO|JP|KR)\s*\d{6,13}\s*[A-Z]\d?\b", re.I)
 
 
-def http_post_json(url: str, payload: Dict[str, Any], timeout: float = 60.0) -> Tuple[int, Dict[str, Any], int]:
+def http_post_json(
+    url: str,
+    payload: Dict[str, Any],
+    timeout: float = 60.0,
+    access_token: str = "",
+) -> Tuple[int, Dict[str, Any], int]:
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+    if access_token:
+        headers["X-InnoForge-Token"] = access_token
     req = request.Request(
         url,
         data=data,
-        headers={"Content-Type": "application/json"},
+        headers=headers,
         method="POST",
     )
     opener = request.build_opener(request.ProxyHandler({}))
@@ -161,7 +170,11 @@ def grade_ai_compare_case(
     resp: Dict[str, Any],
     latency_ms: int,
 ) -> Dict[str, Any]:
-    text = str(resp.get("content") or resp.get("analysis") or "")
+    field = case.get("response_field")
+    if field:
+        text = str(resp.get(field) or "")
+    else:
+        text = str(resp.get("content") or resp.get("analysis") or resp.get("preview") or "")
     if http_status != 200 or not text.strip():
         return {
             "id": case["id"],
@@ -207,6 +220,64 @@ def grade_ai_compare_case(
         "signal_rate": round(signal_rate, 3),
         "fabricated_patents": fabricated,
         "output_chars": len(text),
+        "notes": notes,
+    }
+
+
+def grade_idea_intent_case(
+    case: Dict[str, Any],
+    http_status: int,
+    resp: Dict[str, Any],
+    latency_ms: int,
+) -> Dict[str, Any]:
+    idea = resp.get("idea") or {}
+    actual_intent = str(idea.get("query_intent") or "")
+    expected_intent = str(case.get("expected_intent") or "")
+    analysis = str(idea.get("analysis") or "")
+    expected_signals = case.get("expected_analysis_signals") or []
+    max_latency_ms = int(case.get("max_latency_ms", 30000))
+
+    if http_status != 200 or resp.get("status") != "ok":
+        return {
+            "id": case["id"],
+            "name": case["name"],
+            "passed": False,
+            "score": 0.0,
+            "http_status": http_status,
+            "latency_ms": latency_ms,
+            "output_chars": len(analysis),
+            "notes": [f"HTTP {http_status}: {resp.get('message') or resp.get('error') or 'analyze failed'}"],
+        }
+
+    score = 0.0
+    notes: List[str] = []
+    if actual_intent == expected_intent:
+        score += 50.0
+    else:
+        notes.append(f"意图不匹配: 期望 {expected_intent}, 实得 {actual_intent}")
+
+    matched = [s for s in expected_signals if s in analysis]
+    sig_rate = len(matched) / len(expected_signals) if expected_signals else 1.0
+    score += round(35.0 * sig_rate, 1)
+    if sig_rate < 1.0:
+        notes.append(f"报告信号缺失: 命中 {matched} / {expected_signals}")
+
+    if latency_ms <= max_latency_ms:
+        score += 15.0
+    else:
+        notes.append(f"耗时超预算: {latency_ms}ms > {max_latency_ms}ms")
+
+    score = round(min(100.0, score), 1)
+    passed = (actual_intent == expected_intent) and (sig_rate >= 0.5) and (score >= 80.0)
+    return {
+        "id": case["id"],
+        "name": case["name"],
+        "passed": passed,
+        "score": score,
+        "http_status": http_status,
+        "latency_ms": latency_ms,
+        "query_intent": actual_intent,
+        "output_chars": len(analysis),
         "notes": notes,
     }
 
@@ -327,6 +398,28 @@ def run_self_test() -> int:
         {"avg_score": 95.0, "avg_latency_ms": 1500, "results": [g1]},
     )
     assert not ok, "regression should fail baseline gate"
+
+    # 5. 开放式调研意图路由评分自测
+    intent_case = {
+        "id": "intent1",
+        "name": "survey intent",
+        "expected_intent": "market_landscape_survey",
+        "expected_analysis_signals": ["行业与产品谱系调研模式"],
+        "max_latency_ms": 10000,
+    }
+    gi = grade_idea_intent_case(
+        intent_case,
+        200,
+        {
+            "status": "ok",
+            "idea": {
+                "query_intent": "market_landscape_survey",
+                "analysis": "## 快速调研报告（行业与产品谱系调研模式）",
+            },
+        },
+        1500,
+    )
+    assert gi["passed"] and gi["score"] == 100.0, f"expected 100, got {gi}"
     print("eval_suite.py self-test: ALL PASSED")
     return 0
 
@@ -335,11 +428,16 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="InnoForge 轻量质量回归评测脚手架（Eval Harness）")
     ap.add_argument("--base-url", default="http://127.0.0.1:3001", help="InnoForge 服务地址")
     ap.add_argument(
+        "--token",
+        default=os.environ.get("INNOFORGE_ACCESS_TOKEN", ""),
+        help="非回环服务的 X-InnoForge-Token 访问令牌（可选，默认读环境变量 INNOFORGE_ACCESS_TOKEN）",
+    )
+    ap.add_argument(
         "--cases",
         default=str(Path(__file__).with_name("eval_cases.json")),
         help="评测考题 JSON 路径",
     )
-    ap.add_argument("--mode", choices=["fast", "full"], default="fast", help="fast=检索质量; full=检索+AI防幻觉")
+    ap.add_argument("--mode", choices=["fast", "full"], default="fast", help="fast=检索质量; full=检索+AI对比+OA预判+调研意图")
     ap.add_argument("--save-baseline", default="", help="将本次评测结果保存为 JSON 基线文件")
     ap.add_argument("--compare", default="", help="与历史基线 JSON 对比，退步时返回非零退出码")
     ap.add_argument("--output-md", default="", help="导出 Markdown 评测报告路径")
@@ -351,27 +449,60 @@ def main() -> int:
 
     cases_data = json.loads(Path(args.cases).read_text(encoding="utf-8"))
     base = args.base_url.rstrip("/")
+    tok = args.token.strip()
     results: List[Dict[str, Any]] = []
 
     for case in cases_data.get("search_cases", []):
-        status, resp, ms = http_post_json(f"{base}{case['endpoint']}", case["payload"], timeout=45.0)
+        status, resp, ms = http_post_json(f"{base}{case['endpoint']}", case["payload"], timeout=45.0, access_token=tok)
         res = grade_search_case(case, status, resp, ms)
         results.append(res)
         flag = "PASS" if res["passed"] else "FAIL"
         print(
-            f"[{flag}] {res['id']:28s} score={res['score']:5.1f} latency={res['latency_ms']:5d}ms "
+            f"[{flag}] {res['id']:32s} score={res['score']:5.1f} latency={res['latency_ms']:5d}ms "
             f"hits={res['hits']:2d} rel={res['relevance_rate']:.0%} {('; '.join(res['notes']) if res['notes'] else '')}"
         )
 
     if args.mode == "full":
-        for case in cases_data.get("ai_compare_cases", []):
-            status, resp, ms = http_post_json(f"{base}{case['endpoint']}", case["payload"], timeout=90.0)
-            res = grade_ai_compare_case(case, status, resp, ms)
+        for group_key in ("ai_compare_cases", "ai_oa_cases"):
+            for case in cases_data.get(group_key, []):
+                status, resp, ms = http_post_json(
+                    f"{base}{case['endpoint']}", case["payload"], timeout=90.0, access_token=tok
+                )
+                res = grade_ai_compare_case(case, status, resp, ms)
+                results.append(res)
+                flag = "PASS" if res["passed"] else "FAIL"
+                print(
+                    f"[{flag}] {res['id']:32s} score={res['score']:5.1f} latency={res['latency_ms']:5d}ms "
+                    f"chars={res.get('output_chars', 0)} {('; '.join(res['notes']) if res['notes'] else '')}"
+                )
+
+        for case in cases_data.get("idea_intent_cases", []):
+            sub_status, sub_resp, _ = http_post_json(
+                f"{base}/api/idea/submit",
+                {"title": case["title"], "description": case["description"]},
+                timeout=20.0,
+                access_token=tok,
+            )
+            idea_id = str(sub_resp.get("id") or (sub_resp.get("idea") or {}).get("id") or "")
+            if sub_status != 200 or not idea_id:
+                res = grade_idea_intent_case(case, sub_status, sub_resp, 0)
+            else:
+                try:
+                    st, resp, ms = http_post_json(
+                        f"{base}/api/idea/analyze",
+                        {"id": idea_id},
+                        timeout=60.0,
+                        access_token=tok,
+                    )
+                    res = grade_idea_intent_case(case, st, resp, ms)
+                finally:
+                    # 评测用临时脱敏记录立即清理，严禁污染用户真实项目库
+                    http_post_json(f"{base}/api/idea/{idea_id}/delete", {}, timeout=15.0, access_token=tok)
             results.append(res)
             flag = "PASS" if res["passed"] else "FAIL"
             print(
-                f"[{flag}] {res['id']:28s} score={res['score']:5.1f} latency={res['latency_ms']:5d}ms "
-                f"chars={res.get('output_chars', 0)} {('; '.join(res['notes']) if res['notes'] else '')}"
+                f"[{flag}] {res['id']:32s} score={res['score']:5.1f} latency={res['latency_ms']:5d}ms "
+                f"intent={res.get('query_intent', '')} {('; '.join(res['notes']) if res['notes'] else '')}"
             )
 
     total = len(results)

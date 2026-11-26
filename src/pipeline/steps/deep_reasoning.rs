@@ -203,9 +203,17 @@ pub(crate) fn build_user_context(ctx: &PipelineContext) -> String {
 
     let excluded_block =
         crate::orchestrator::constraints::format_excluded_paths_prompt_block(&ctx.research_state);
+    let intent_header = if ctx.query_intent
+        == crate::pipeline::context::QueryIntent::MarketLandscapeSurvey
+    {
+        "## 分析模式：开放式行业与产品谱系调研\n\
+             （注意：用户正在调研该品类的主流产品类型、技术路线优缺点与切入机会，请侧重产品谱系分类对比、代表性真实专利/厂商、共性工程痛点与差异化切入建议，避免生硬套用单一专利驳回打分口吻，严禁编造输入外的专利号/DOI。）\n"
+    } else {
+        ""
+    };
 
     format!(
-        "## 待分析的创意\n\
+        "{intent_header}## 待分析的创意\n\
          **标题：** {title}\n\
          **描述：** {desc}\n\
          **技术领域：** {domain}\n\
@@ -217,6 +225,7 @@ pub(crate) fn build_user_context(ctx: &PipelineContext) -> String {
          ## 已检测到的技术路线矛盾\n{contras}\n\n\
          基于以上真实文档材料与预挖信号，按你的专业视角进行全文档深度知识发掘。\
          如引用了全文切片，请在相关结论后标注 [引用N]；原文未披露的具体数值必须标明「原文未披露」，严禁编造。",
+        intent_header = intent_header,
         title = ctx.title,
         desc = ctx.description,
         domain = ctx.technical_domain,
@@ -373,18 +382,39 @@ pub async fn run_deep_reasoning(
         .collect::<Vec<_>>()
         .join("\n---\n\n");
 
-    let synthesis_prompt = format!(
-        "以下是 6 位不同思维模式专家对同一个创意的分析：\n\n\
-         **创意：** {title}\n\
-         **描述：** {desc}\n\n\
-         ---\n\n\
-         {inputs}\n\n\
-         ---\n\n\
-         请进行跨维度合成分析。",
-        title = ctx.title,
-        desc = ctx.description,
-        inputs = synthesis_input,
-    );
+    let synthesis_prompt = if ctx.query_intent
+        == crate::pipeline::context::QueryIntent::MarketLandscapeSurvey
+    {
+        format!(
+            "以下是 6 位不同思维模式专家对同一个**开放式行业与产品谱系调研主题**的剖析：\n\n\
+             **调研主题：** {title}\n\
+             **具体问题：** {desc}\n\n\
+             ---\n\n\
+             {inputs}\n\n\
+             ---\n\n\
+             请按「行业与产品谱系调研合成报告」格式进行跨维度整合，务必包含：\n\
+             1. 物理工作区间与法规/安全边界；\n\
+             2. 市面主流产品分类与优缺点 Markdown 横向对比表（只引用输入中真实存在的专利/文献号，严禁编造）；\n\
+             3. 行业共性技术痛点与演进趋势；\n\
+             4. ≥3 条差异化研发与高价值专利切入建议。",
+            title = ctx.title,
+            desc = ctx.description,
+            inputs = synthesis_input,
+        )
+    } else {
+        format!(
+            "以下是 6 位不同思维模式专家对同一个创意的分析：\n\n\
+             **创意：** {title}\n\
+             **描述：** {desc}\n\n\
+             ---\n\n\
+             {inputs}\n\n\
+             ---\n\n\
+             请进行跨维度合成分析。",
+            title = ctx.title,
+            desc = ctx.description,
+            inputs = synthesis_input,
+        )
+    };
 
     match ai
         .chat_with_system(SYNTHESIS_SYSTEM, &synthesis_prompt, 0.5)

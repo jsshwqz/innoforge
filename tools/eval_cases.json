@@ -105,5 +105,32 @@
       "required_signals": ["双面", "单面", "微针翅", "热阻", "差异"],
       "forbid_fabricated_patents": true
     }
+  ],
+  "ai_oa_cases": [
+    {
+      "id": "ai_oa_examiner_preview_synthetic",
+      "name": "审查抗辩 · 模拟审查员预判防幻觉与结构完整度",
+      "endpoint": "/api/ai/oa-examiner-preview",
+      "response_field": "preview",
+      "payload": {
+        "my_patent": "权利要求1：一种硫化物全固态电池正极界面修饰方法，其特征在于在单晶高镍三元正极颗粒表面通过原子层沉积构筑厚度2~5nm的LiNbO3缓冲层，并在其外侧原位包覆卤化物快离子导体过渡层，界面阻抗降低45%。",
+        "oa_text": "审查意见通知书：权利要求1相对于对比文件1（公开了高镍正极表面包覆LiNbO3层）和对比文件2（公开了卤化物固态电解质）的结合不具备专利法第22条第3款规定的创造性。",
+        "response_text": "申请人意见陈述：对比文件1仅采用单层氧化物包覆以抑制空间电荷层，但未能解决高电压下氧化物与硫化物电解质的界面副反应；对比文件2将卤化物作为体相电解质而非与2~5nm超薄LiNbO3协同的双层梯度缓冲结构。本申请双层协同将4.3V循环200周容量保持率从68%提升至91%，取得了预料不到的技术效果。"
+      },
+      "max_latency_ms": 45000,
+      "required_signals": ["接受", "反驳", "驳回", "建议"],
+      "forbid_fabricated_patents": true
+    }
+  ],
+  "idea_intent_cases": [
+    {
+      "id": "idea_survey_intent_synthetic",
+      "name": "推演意图路由 · 开放式行业调研自动识别与快速落盘",
+      "title": "固态电池电解质路线调研",
+      "description": "目前市面上固态电池电解质有哪些，分别是什么类型，他们的优缺点有什么？",
+      "expected_intent": "market_landscape_survey",
+      "expected_analysis_signals": ["行业与产品谱系调研模式", "开放式行业/产品调研"],
+      "max_latency_ms": 30000
+    }
   ]
 }
