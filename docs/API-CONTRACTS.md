@@ -161,9 +161,9 @@
 | 129 | GET | `/api/ideas/:id/delivery-pack/xlsx` | `id` | — | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_idea_delivery_pack_xlsx` | `src/routes/idea_reports.rs:1632` |
 | 130 | POST | `/api/ideas/:id/control-prototype` | `id` | — | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_idea_control_prototype` | `src/routes/idea_reports.rs:1683` |
 | 131 | POST | `/api/ideas/:id/fto-scan` | `id` | — | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_idea_fto_scan` | `src/routes/idea_reports.rs:1723` |
-| 132 | GET | `/api/ideas/:id/archive/zip` | `id` | — | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_idea_archive_zip` | `src/routes/idea_reports.rs:1915` |
-| 133 | GET | `/api/ideas/:id/paper/latex-bundle` | `id` | — | `LatexBundleQuery` | HTTP 响应（动态，状态码/正文见源码） | `routes::api_idea_paper_latex_bundle` | `src/routes/idea_reports.rs:2395` |
-| 134 | GET | `/api/ideas/:id/paper/docx` | `id` | — | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_idea_paper_docx` | `src/routes/idea_reports.rs:2434` |
+| 132 | GET | `/api/ideas/:id/archive/zip` | `id` | — | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_idea_archive_zip` | `src/routes/idea_reports.rs:1936` |
+| 133 | GET | `/api/ideas/:id/paper/latex-bundle` | `id` | — | `LatexBundleQuery` | HTTP 响应（动态，状态码/正文见源码） | `routes::api_idea_paper_latex_bundle` | `src/routes/idea_reports.rs:2416` |
+| 134 | GET | `/api/ideas/:id/paper/docx` | `id` | — | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_idea_paper_docx` | `src/routes/idea_reports.rs:2455` |
 | 135 | GET | `/api/feature-cards/diff` | — | — | `FeatureCardDiffQuery` | HTTP 响应（动态，状态码/正文见源码） | `routes::api_feature_card_diff` | `src/routes/feature_cards.rs:132` |
 | 136 | PUT | `/api/ideas/:id/claims` | `id` | `ReplaceClaimsRequest` | — | impl axum::response::IntoResponse | `routes::api_idea_claims_replace` | `src/routes/idea_ops.rs:261` |
 | 137 | POST | `/api/ideas/:id/claims/validate` | `id` | — | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_idea_claims_validate` | `src/routes/idea_ops.rs:617` |
@@ -177,8 +177,8 @@
 | 145 | GET | `/api/idea/:id/findings` | `id` | — | — | JSON（§145） | `routes::api_idea_findings` | `src/routes/idea_ops.rs:758` |
 | 146 | GET / POST | `/api/idea/:id/memory` | `id` | POST 任意 JSON（§146） | — | JSON（§146） | `routes::api_idea_memory`<br>`routes::api_idea_memory_add` | `src/routes/idea_ops.rs:769`<br>`src/routes/idea_ops.rs:790` |
 | 147 | DELETE | `/api/idea/:id/memory/:entry_id` | `id`, `entry_id` | — | — | JSON（§147） | `routes::api_idea_memory_delete` | `src/routes/idea_ops.rs:848` |
-| 148 | GET | `/api/ipc/tree` | — | — | — | JSON（§148） | `routes::api_ipc_tree` | `src/routes/ipc.rs:22` |
-| 149 | GET | `/api/ipc/:code/patents` | `code` | — | — | JSON（§149） | `routes::api_ipc_patents` | `src/routes/ipc.rs:122` |
+| 148 | GET | `/api/ipc/tree` | — | — | — | JSON（§148） | `routes::api_ipc_tree` | `src/routes/ipc.rs:153` |
+| 149 | GET | `/api/ipc/:code/patents` | `code` | — | — | JSON（§149） | `routes::api_ipc_patents` | `src/routes/ipc.rs:163` |
 | 150 | POST | `/api/patents/import` | — | `ImportRequest` | — | JSON（§150） | `routes::api_import_patents` | `src/routes/settings.rs:1065` |
 | 151 | POST | `/api/patents/import-table` | — | — | — | JSON（§151） | `routes::api_import_patent_table` | `src/routes/patent_import.rs:1306` |
 | 152 | GET / POST | `/api/patents/sync-folder` | — | `SyncFolderRequest` | — | JSON（§152） | `routes::api_get_patent_sync_folder`<br>`routes::api_sync_patent_folder` | `src/routes/patent_import.rs:2221`<br>`src/routes/patent_import.rs:2320` |
@@ -338,7 +338,7 @@
 
 使用该类型的端点：`/api/patents/import`
 
-### `LatexBundleQuery`（查询；定义于 `src/routes/idea_reports.rs:2389`）
+### `LatexBundleQuery`（查询；定义于 `src/routes/idea_reports.rs:2410`）
 
 | 字段（JSON 名） | 类型 | 可省略 |
 | --- | --- | --- |
@@ -1381,13 +1381,13 @@
 
 ### §148 GET `/api/ipc/tree`
 
-- 源码：`src/routes/ipc.rs:22`
-- 响应顶层键：`classes`、`code`、`count`、`message`、`name`、`sections`、`status`、`subclasses`、`total_codes`
-- `status` 取值：error / ok
+- 源码：`src/routes/ipc.rs:153`
+- 响应顶层键：`message`、`status`
+- `status` 取值：error
 
 ### §149 GET `/api/ipc/:code/patents`
 
-- 源码：`src/routes/ipc.rs:122`
+- 源码：`src/routes/ipc.rs:163`
 - 响应顶层键：`code`、`count`、`message`、`patents`、`status`
 - `status` 取值：error / ok
 

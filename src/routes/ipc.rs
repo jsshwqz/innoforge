@@ -18,13 +18,46 @@ fn ipc_section_name(code: &str) -> &'static str {
     }
 }
 
-/// GET /api/ipc/tree — build IPC tree from patents in database
-pub async fn api_ipc_tree(State(s): State<AppState>) -> Json<Value> {
-    let all_codes = match s.db.get_all_ipc_codes() {
-        Ok(v) => v,
-        Err(e) => return Json(json!({"status":"error","message":e.to_string()})),
+/// 解析 `patents.ipc_codes` 字段（兼容 JSON 数组 `["F23D1/00","F23C7/00"]` 与逗号/分号分隔纯文本），
+/// 返回归一化大写的有效 IPC 分类号列表（过滤掉 `[`、`"` 等语法噪音与非法部类）。
+pub fn parse_ipc_code_list(raw: &str) -> Vec<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed == "[]" {
+        return Vec::new();
+    }
+    let items: Vec<String> = if trimmed.starts_with('[') {
+        serde_json::from_str::<Vec<String>>(trimmed).unwrap_or_else(|_| {
+            trimmed
+                .trim_matches(['[', ']'])
+                .split([',', ';', '；', '|'])
+                .map(str::to_string)
+                .collect()
+        })
+    } else {
+        trimmed
+            .split([',', ';', '；', '|'])
+            .map(str::to_string)
+            .collect()
     };
 
+    let mut out = Vec::new();
+    for item in items {
+        let cleaned = item
+            .trim()
+            .trim_matches(['"', '\'', '[', ']', ' '])
+            .replace(' ', "")
+            .to_uppercase();
+        if let Some(first) = cleaned.chars().next() {
+            if matches!(first, 'A'..='H') && !out.contains(&cleaned) {
+                out.push(cleaned);
+            }
+        }
+    }
+    out
+}
+
+/// 将 `(ipc_codes_raw, row_count)` 聚合构建为 IPC 三级树 JSON（使用安全 Unicode 字符迭代，禁用裸字节切片）。
+fn build_ipc_tree_payload(code_counts: &[(String, usize)]) -> Value {
     let mut section_counts: std::collections::HashMap<String, usize> =
         std::collections::HashMap::new();
     let mut class_counts: std::collections::HashMap<String, usize> =
@@ -32,28 +65,26 @@ pub async fn api_ipc_tree(State(s): State<AppState>) -> Json<Value> {
     let mut subclass_counts: std::collections::HashMap<String, usize> =
         std::collections::HashMap::new();
 
-    for raw in &all_codes {
-        for code in raw.split(',') {
-            let code = code.trim();
-            if code.is_empty() {
+    for (raw, weight) in code_counts {
+        let w = *weight;
+        if w == 0 {
+            continue;
+        }
+        for code in parse_ipc_code_list(raw) {
+            let chars: Vec<char> = code.chars().collect();
+            let Some(&first) = chars.first() else {
                 continue;
-            }
-            let section = code
-                .chars()
-                .next()
-                .unwrap_or('?')
-                .to_uppercase()
-                .to_string();
-            *section_counts.entry(section.clone()).or_insert(0) += 1;
+            };
+            let section = first.to_string();
+            *section_counts.entry(section).or_insert(0) += w;
 
-            if code.len() >= 3 {
-                let class = code[..3].to_uppercase();
-                *class_counts.entry(class).or_insert(0) += 1;
+            if chars.len() >= 3 {
+                let class: String = chars.iter().take(3).collect();
+                *class_counts.entry(class).or_insert(0) += w;
             }
-
-            if code.len() >= 4 {
-                let subclass = code[..4].to_uppercase();
-                *subclass_counts.entry(subclass).or_insert(0) += 1;
+            if chars.len() >= 4 {
+                let subclass: String = chars.iter().take(4).collect();
+                *subclass_counts.entry(subclass).or_insert(0) += w;
             }
         }
     }
@@ -111,23 +142,95 @@ pub async fn api_ipc_tree(State(s): State<AppState>) -> Json<Value> {
         })
         .collect();
 
-    Json(json!({
+    json!({
         "status": "ok",
         "sections": sections,
         "total_codes": section_counts.values().sum::<usize>(),
-    }))
+    })
+}
+
+/// GET /api/ipc/tree — build IPC tree from patents in database
+pub async fn api_ipc_tree(State(s): State<AppState>) -> Json<Value> {
+    let db = s.db.clone();
+    match tokio::task::spawn_blocking(move || db.get_ipc_code_counts()).await {
+        Ok(Ok(counts)) => Json(build_ipc_tree_payload(&counts)),
+        Ok(Err(e)) => Json(json!({"status":"error","message":e.to_string()})),
+        Err(e) => Json(json!({"status":"error","message":format!("task join error: {e}")})),
+    }
 }
 
 /// GET /api/ipc/:code/patents — get patents matching an IPC code prefix
 pub async fn api_ipc_patents(State(s): State<AppState>, Path(code): Path<String>) -> Json<Value> {
     let code = code.trim().to_uppercase();
-    match s.db.search_by_ipc(&code) {
-        Ok(patents) => Json(json!({
+    let db = s.db.clone();
+    let query_code = code.clone();
+    match tokio::task::spawn_blocking(move || db.search_by_ipc(&query_code)).await {
+        Ok(Ok(patents)) => Json(json!({
             "status": "ok",
             "code": code,
             "count": patents.len(),
             "patents": patents,
         })),
-        Err(e) => Json(json!({"status":"error","message":e.to_string()})),
+        Ok(Err(e)) => Json(json!({"status":"error","message":e.to_string()})),
+        Err(e) => Json(json!({"status":"error","message":format!("task join error: {e}")})),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::Database;
+    use crate::patent::Patent;
+
+    #[test]
+    fn parse_ipc_code_list_handles_json_arrays_and_delimited_strings() {
+        assert_eq!(
+            parse_ipc_code_list(r#"["F23D 1/00", "F23C7/00", "f23d1/00"]"#),
+            vec!["F23D1/00", "F23C7/00"]
+        );
+        assert_eq!(
+            parse_ipc_code_list("A61G10/02; H01M10/0525"),
+            vec!["A61G10/02", "H01M10/0525"]
+        );
+        assert!(parse_ipc_code_list("[]").is_empty());
+        assert!(parse_ipc_code_list("中文噪声").is_empty());
+    }
+
+    #[test]
+    fn build_ipc_tree_classifies_json_arrays_into_valid_sections_not_brackets() {
+        let payload = build_ipc_tree_payload(&[
+            (r#"["F23D1/00","A61G10/02"]"#.to_string(), 3),
+            ("F23C7/00".to_string(), 2),
+        ]);
+        let sections = payload["sections"].as_array().expect("sections array");
+        let codes: Vec<&str> = sections.iter().filter_map(|s| s["code"].as_str()).collect();
+        assert_eq!(codes, vec!["A", "F"]);
+        assert_eq!(payload["total_codes"], 8);
+        assert_eq!(sections[1]["count"], 5);
+    }
+
+    #[test]
+    fn ipc_prefix_filter_section_f_does_not_false_match_g06f() {
+        let db = Database::init(":memory:").expect("init db");
+        let p_f = Patent {
+            id: "ipc-f-1".into(),
+            patent_number: "CN990301A".into(),
+            title: "旋流燃烧器".into(),
+            ipc_codes: r#"["F23D1/00"]"#.into(),
+            ..Default::default()
+        };
+        let p_g = Patent {
+            id: "ipc-g-1".into(),
+            patent_number: "CN990302A".into(),
+            title: "计算机数据处理".into(),
+            ipc_codes: r#"["G06F16/00"]"#.into(),
+            ..Default::default()
+        };
+        db.insert_patent(&p_f).expect("insert f");
+        db.insert_patent(&p_g).expect("insert g");
+
+        let hits = db.search_by_ipc("F").expect("search F");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0]["patent_number"], "CN990301A");
     }
 }

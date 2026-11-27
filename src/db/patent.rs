@@ -1000,27 +1000,75 @@ impl super::Database {
         Ok(rows)
     }
 
-    pub fn search_by_ipc(&self, code: &str) -> Result<Vec<serde_json::Value>> {
+    /// 按 `ipc_codes` 原始字符串分组统计数量，大幅减少大库向 Rust 侧搬运重复字符串的内存开销。
+    pub fn get_ipc_code_counts(&self) -> Result<Vec<(String, usize)>> {
         let c = self.conn();
-        let pattern = format!("%{}%", code);
+        let mut stmt = c.prepare(
+            "SELECT ipc_codes, COUNT(*) FROM patents \
+             WHERE ipc_codes IS NOT NULL AND ipc_codes != '' AND ipc_codes != '[]' \
+             GROUP BY ipc_codes",
+        )?;
+        let rows = stmt
+            .query_map([], |row| {
+                let raw: String = row.get(0)?;
+                let cnt: i64 = row.get(1)?;
+                Ok((raw, cnt.max(0) as usize))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    }
+
+    /// 按 rowid 倒序快速取出最近入库的专利 ID（毫秒级，避免 FTO 兜底调用空串 `search_like("")` 恒返回空）。
+    pub fn list_recent_patent_ids(&self, limit: usize) -> Result<Vec<String>> {
+        let c = self.conn();
+        let mut stmt = c.prepare("SELECT id FROM patents ORDER BY rowid DESC LIMIT ?1")?;
+        let rows = stmt
+            .query_map(params![limit.clamp(1, 200) as i64], |row| {
+                row.get::<_, String>(0)
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    }
+
+    pub fn search_by_ipc(&self, code: &str) -> Result<Vec<serde_json::Value>> {
+        let target = code.trim().to_uppercase();
+        if target.is_empty() {
+            return Ok(Vec::new());
+        }
+        let c = self.conn();
+        let pattern = format!("%{}%", target);
+        // 先放大候选取 300 条，再对解析出的真实 IPC 列表执行严格前缀匹配（防止查部类 "F" 误命中 "G06F"）
         let mut stmt = c.prepare(
             "SELECT id, patent_number, title, abstract_text, applicant, filing_date, country, ipc_codes
-             FROM patents WHERE ipc_codes LIKE ?1 ORDER BY filing_date DESC LIMIT 100",
+             FROM patents WHERE ipc_codes LIKE ?1 ORDER BY filing_date DESC LIMIT 300",
         )?;
         let rows = stmt
             .query_map(params![pattern], |row| {
-                Ok(serde_json::json!({
-                    "id": row.get::<_, String>(0)?,
-                    "patent_number": row.get::<_, String>(1)?,
-                    "title": row.get::<_, String>(2)?,
-                    "abstract_text": row.get::<_, String>(3).unwrap_or_default(),
-                    "applicant": row.get::<_, String>(4).unwrap_or_default(),
-                    "filing_date": row.get::<_, String>(5).unwrap_or_default(),
-                    "country": row.get::<_, String>(6).unwrap_or_default(),
-                    "ipc_codes": row.get::<_, String>(7).unwrap_or_default(),
-                }))
+                let ipc_raw: String = row.get::<_, String>(7).unwrap_or_default();
+                Ok((
+                    ipc_raw.clone(),
+                    serde_json::json!({
+                        "id": row.get::<_, String>(0)?,
+                        "patent_number": row.get::<_, String>(1)?,
+                        "title": row.get::<_, String>(2)?,
+                        "abstract_text": row.get::<_, String>(3).unwrap_or_default(),
+                        "applicant": row.get::<_, String>(4).unwrap_or_default(),
+                        "filing_date": row.get::<_, String>(5).unwrap_or_default(),
+                        "country": row.get::<_, String>(6).unwrap_or_default(),
+                        "ipc_codes": ipc_raw,
+                    }),
+                ))
             })?
             .filter_map(|r| r.ok())
+            .filter(|(ipc_raw, _)| {
+                crate::routes::parse_ipc_code_list(ipc_raw)
+                    .iter()
+                    .any(|c| c.starts_with(&target))
+            })
+            .take(100)
+            .map(|(_, val)| val)
             .collect();
         Ok(rows)
     }
