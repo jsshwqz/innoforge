@@ -388,9 +388,11 @@ pub async fn api_extract_patent_pdf_drawings(
 
 /// GET /api/patents/backfill-status — 查询存量专利向量 (`char-tfidf-v2`) 与分块 (`patent_chunks`) 覆盖进度
 pub async fn api_patents_backfill_status(State(s): State<AppState>) -> Json<serde_json::Value> {
-    match s.db.get_backfill_index_status() {
-        Ok(val) => Json(val),
-        Err(e) => Json(json!({"status": "error", "message": e.to_string()})),
+    let db = s.db.clone();
+    match tokio::task::spawn_blocking(move || db.get_backfill_index_status()).await {
+        Ok(Ok(val)) => Json(val),
+        Ok(Err(e)) => Json(json!({"status": "error", "message": e.to_string()})),
+        Err(e) => Json(json!({"status": "error", "message": format!("task join error: {e}")})),
     }
 }
 
@@ -404,9 +406,13 @@ pub async fn api_patents_backfill_index(
         .and_then(|b| b.get("batch_size"))
         .and_then(|v| v.as_u64())
         .unwrap_or(100) as usize;
-    match s.db.backfill_embeddings_and_chunks_batch(batch_size) {
-        Ok(val) => Json(val),
-        Err(e) => Json(json!({"status": "error", "message": e.to_string()})),
+    let db = s.db.clone();
+    match tokio::task::spawn_blocking(move || db.backfill_embeddings_and_chunks_batch(batch_size))
+        .await
+    {
+        Ok(Ok(val)) => Json(val),
+        Ok(Err(e)) => Json(json!({"status": "error", "message": e.to_string()})),
+        Err(e) => Json(json!({"status": "error", "message": format!("task join error: {e}")})),
     }
 }
 

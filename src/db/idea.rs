@@ -62,13 +62,44 @@ impl super::Database {
     /// 运行时重置超过指定分钟数仍在 "analyzing" 的创意为 "error"
     /// Runtime: reset ideas stuck in "analyzing" for more than N minutes
     pub fn reset_stuck_analyzing(&self, stale_minutes: i64) -> Result<usize> {
+        self.reset_stuck_analyzing_excluding(stale_minutes, &[])
+    }
+
+    /// 运行时重置孤立卡住的 "analyzing" 创意为 "error"，但严格保护仍在 `active_ids`（活跃执行通道）中的长耗时流水线
+    pub fn reset_stuck_analyzing_excluding(
+        &self,
+        stale_minutes: i64,
+        active_ids: &[String],
+    ) -> Result<usize> {
         let c = self.conn();
-        let count = c.execute(
+        if active_ids.is_empty() {
+            let count = c.execute(
+                "UPDATE ideas SET status='error' \
+                 WHERE status='analyzing' \
+                 AND updated_at < datetime('now', ?1)",
+                params![format!("-{} minutes", stale_minutes)],
+            )?;
+            return Ok(count);
+        }
+        let placeholders = (2..=active_ids.len() + 1)
+            .map(|i| format!("?{i}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
             "UPDATE ideas SET status='error' \
              WHERE status='analyzing' \
-             AND updated_at < datetime('now', ?1)",
-            params![format!("-{} minutes", stale_minutes)],
-        )?;
+             AND updated_at < datetime('now', ?1) \
+             AND id NOT IN ({placeholders})"
+        );
+        let mut bind_vals: Vec<rusqlite::types::Value> = Vec::with_capacity(active_ids.len() + 1);
+        bind_vals.push(rusqlite::types::Value::Text(format!(
+            "-{} minutes",
+            stale_minutes
+        )));
+        for id in active_ids {
+            bind_vals.push(rusqlite::types::Value::Text(id.clone()));
+        }
+        let count = c.execute(&sql, rusqlite::params_from_iter(bind_vals))?;
         Ok(count)
     }
 
@@ -358,5 +389,67 @@ impl super::Database {
             params![idea_id],
         )?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod stuck_analyzing_tests {
+    use super::super::Database;
+    use crate::patent::Idea;
+
+    #[test]
+    fn reset_stuck_analyzing_excluding_preserves_live_active_pipelines() {
+        let db = Database::init(":memory:").expect("init db");
+        let active_idea = Idea {
+            id: "idea-live-running".to_string(),
+            title: "仍在执行的深度推演".to_string(),
+            description: "描述".to_string(),
+            input_type: "text".to_string(),
+            status: "analyzing".to_string(),
+            analysis: String::new(),
+            web_results: "[]".to_string(),
+            patent_results: "[]".to_string(),
+            novelty_score: None,
+            created_at: "2020-01-01 00:00:00".to_string(),
+            updated_at: "2020-01-01 00:00:00".to_string(),
+            discussion_summary: String::new(),
+        };
+        let orphan_idea = Idea {
+            id: "idea-orphan-stuck".to_string(),
+            title: "已崩溃孤立推演".to_string(),
+            ..active_idea.clone()
+        };
+        db.insert_idea(&active_idea).expect("insert active");
+        db.insert_idea(&orphan_idea).expect("insert orphan");
+        // 将两条 updated_at 回拨至 2 小时前
+        {
+            let c = db.conn();
+            c.execute(
+                "UPDATE ideas SET updated_at = datetime('now', '-120 minutes')",
+                [],
+            )
+            .expect("backdate updated_at");
+        }
+
+        let reset_count = db
+            .reset_stuck_analyzing_excluding(30, &["idea-live-running".to_string()])
+            .expect("reset excluding active");
+        assert_eq!(reset_count, 1);
+        assert_eq!(
+            db.get_idea("idea-live-running")
+                .expect("get active")
+                .expect("exists")
+                .status,
+            "analyzing",
+            "仍在活跃通道中的推演严禁被误重置为 error"
+        );
+        assert_eq!(
+            db.get_idea("idea-orphan-stuck")
+                .expect("get orphan")
+                .expect("exists")
+                .status,
+            "error",
+            "无活跃通道且超时的孤立推演应正确重置为 error"
+        );
     }
 }
