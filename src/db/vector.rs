@@ -359,12 +359,15 @@ impl Database {
         let total_patents: i64 =
             c.query_row("SELECT COUNT(*) FROM patents", [], |row| row.get(0))?;
         let embedded_v2: i64 = c.query_row(
-            "SELECT COUNT(*) FROM patents_embedding WHERE model_name = 'char-tfidf-v2'",
+            "SELECT COUNT(*) FROM patents_embedding pe
+             INNER JOIN patents p ON p.id = pe.patent_id
+             WHERE pe.model_name = 'char-tfidf-v2'",
             [],
             |row| row.get(0),
         )?;
         let chunked_patents: i64 = c.query_row(
-            "SELECT COUNT(DISTINCT patent_id) FROM patent_chunks",
+            "SELECT COUNT(DISTINCT pc.patent_id) FROM patent_chunks pc
+             INNER JOIN patents p ON p.id = pc.patent_id",
             [],
             |row| row.get(0),
         )?;
@@ -376,16 +379,16 @@ impl Database {
             [],
             |row| row.get(0),
         )?;
+        let ready_patents = (total_patents - needing_work).max(0);
         let progress_percent = if total_patents <= 0 {
             100.0
         } else {
-            (((total_patents - needing_work).max(0) as f64 / total_patents as f64) * 100.0 * 10.0)
-                .round()
-                / 10.0
+            ((ready_patents as f64 / total_patents as f64) * 100.0 * 10.0).round() / 10.0
         };
         Ok(json!({
             "status": "ok",
             "total_patents": total_patents,
+            "ready_patents": ready_patents,
             "embedded_patents": embedded_v2,
             "chunked_patents": chunked_patents,
             "remaining": needing_work,
@@ -536,5 +539,45 @@ mod tests {
         assert_eq!(step2["done"], true);
         assert_eq!(step2["embedded_patents"], 4);
         assert_eq!(step2["chunked_patents"], 4);
+        assert_eq!(step2["ready_patents"], 4);
+    }
+
+    #[test]
+    fn backfill_status_separates_ready_from_v2_embedded_when_chunks_missing() {
+        let db = Database::init(":memory:").expect("init db");
+        for i in 1..=2 {
+            let p = crate::patent::Patent {
+                id: format!("pat-partial-{i}"),
+                patent_number: format!("CN99010{i}A"),
+                title: format!("测试微压氧舱控制系统 {i}"),
+                abstract_text: "一种微压氧舱压力监测与自动泄压装置。".to_string(),
+                ..Default::default()
+            };
+            db.insert_patent(&p).expect("insert patent");
+            try_compute_and_save_embedding(&db, &p.id, &format!("{} {}", p.title, p.abstract_text));
+        }
+
+        // 仅第 1 篇写入段落分块，第 2 篇仅有 v2 向量但无分块
+        let chunks = crate::rag::build_chunks_from_patent(
+            "pat-partial-1",
+            "测试微压氧舱控制系统 1",
+            "一种微压氧舱压力监测与自动泄压装置。",
+            "",
+            "",
+        );
+        db.save_patent_chunks("pat-partial-1", &chunks, "char-tfidf-v2")
+            .expect("save chunks");
+
+        let st = db.get_backfill_index_status().expect("status");
+        assert_eq!(st["total_patents"], 2);
+        assert_eq!(st["embedded_patents"], 2);
+        assert_eq!(st["chunked_patents"], 1);
+        assert_eq!(st["ready_patents"], 1);
+        assert_eq!(st["remaining"], 1);
+        assert_eq!(st["progress_percent"], 50.0);
+        assert_eq!(
+            st["ready_patents"].as_i64().unwrap_or(0) + st["remaining"].as_i64().unwrap_or(0),
+            st["total_patents"].as_i64().unwrap_or(0)
+        );
     }
 }

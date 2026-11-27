@@ -224,6 +224,7 @@ function clearSearchPdfMeta() {
     'vector.backfillBtn': '⚡ 一键后台补齐存量向量索引',
     'vector.backfillDone': '✅ 本地向量与分块索引已全部就绪',
     'vector.backfillRunning': '⏳ 正在补齐向量与段落索引...',
+    'vector.backfillHint': '🧠 本地语义与分块双索引就绪 {ready}/{total} ({pct}%)（v2 向量 {embedded}/{total} · 段落分块 {chunked}/{total}），尚有 <strong>{remaining}</strong> 篇待补齐',
     'region.auto': '自动识别区域',
     'region.cn': '国内（国知局/搜狗）',
     'region.intl': '国外（SerpAPI/Google）',
@@ -338,6 +339,7 @@ function clearSearchPdfMeta() {
     'vector.backfillBtn': '⚡ Backfill Local Vector Index',
     'vector.backfillDone': '✅ Local vector & chunk index ready',
     'vector.backfillRunning': '⏳ Backfilling vector & chunk index...',
+    'vector.backfillHint': '🧠 Local dual index ready {ready}/{total} ({pct}%) (v2 vectors {embedded}/{total} · chunks {chunked}/{total}), <strong>{remaining}</strong> remaining',
     'region.auto': 'Auto Detect',
     'region.cn': 'China (CNIPR/Sogou)',
     'region.intl': 'International (SerpAPI/Google)',
@@ -522,17 +524,23 @@ async function runVectorBackfill() {
             lastData = await res.json();
             done = Boolean(lastData.done) || Number(lastData.remaining || 0) === 0;
             if (hintEl && lastData) {
-                var indexed = Number(lastData.embedded_patents || 0);
-                var total = Number(lastData.total_patents || 0);
-                var pct = Number(lastData.progress_percent || 0).toFixed(1);
+                const total = Number(lastData.total_patents || 0);
+                const ready = typeof lastData.ready_patents === 'number'
+                    ? Number(lastData.ready_patents)
+                    : Math.max(0, total - Number(lastData.remaining || 0));
+                const pct = Number(lastData.progress_percent || 0).toFixed(1);
                 hintEl.innerHTML = DOMPurify.sanitize(
-                    '<span style="color:#58a6ff;">' + escapeHtml(t('vector.backfillRunning')) + ' (' + indexed + '/' + total + ' · ' + pct + '%)</span>'
+                    '<span style="color:#58a6ff;">' + escapeHtml(t('vector.backfillRunning')) + ' (' + ready + '/' + total + ' · ' + pct + '%)</span>'
                 );
             }
         }
         if (hintEl && lastData) {
+            const total = Number(lastData.total_patents || 0);
+            const ready = typeof lastData.ready_patents === 'number'
+                ? Number(lastData.ready_patents)
+                : Math.max(0, total - Number(lastData.remaining || 0));
             hintEl.innerHTML = DOMPurify.sanitize(
-                '<span style="color:#3fb950;">' + escapeHtml(t('vector.backfillDone')) + ' (' + Number(lastData.embedded_patents || 0) + '/' + Number(lastData.total_patents || 0) + ')</span>'
+                '<span style="color:#3fb950;">' + escapeHtml(t('vector.backfillDone')) + ' (' + ready + '/' + total + ')</span>'
             );
         }
         if (currentRequest) {
@@ -717,10 +725,24 @@ function renderResults(data, page, pageSize) {
         const hintEl = document.getElementById('search-hint');
         if (hintEl) {
             const st = data.index_status;
+            const totalPatents = Number(st.total_patents || 0);
+            const remaining = Number(st.remaining || 0);
+            const ready = typeof st.ready_patents === 'number'
+                ? Number(st.ready_patents)
+                : Math.max(0, totalPatents - remaining);
+            const embedded = Number(st.embedded_patents || 0);
+            const chunked = Number(st.chunked_patents || 0);
             const pct = Number(st.progress_percent || 0).toFixed(1);
             hintEl.innerHTML = DOMPurify.sanitize(
-                `🧠 本地向量索引覆盖率 ${Number(st.embedded_patents || 0)}/${Number(st.total_patents || 0)} (${pct}%)，尚有 <strong>${Number(st.remaining || 0)}</strong> 篇存量专利待建立 v2 向量与段落分块索引 ` +
-                `<button class="btn-secondary btn-sm" style="margin-left:8px;padding:2px 10px;" onclick="runVectorBackfill()">${escapeHtml(t('vector.backfillBtn'))}</button>`
+                t('vector.backfillHint', {
+                    ready,
+                    total: totalPatents,
+                    pct,
+                    embedded,
+                    chunked,
+                    remaining
+                }) +
+                ` <button class="btn-secondary btn-sm" style="margin-left:8px;padding:2px 10px;" onclick="runVectorBackfill()">${escapeHtml(t('vector.backfillBtn'))}</button>`
             );
             hintEl.style.display = 'block';
         }
