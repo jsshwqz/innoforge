@@ -154,6 +154,10 @@
     <div class="bulk-import-row">
       <button type="button" class="btn-primary btn-sm" id="btn-sync-folder" onclick="syncPatentFolder(false)" data-i18n="bulk.syncBtn">🔄 一键增量同步</button>
       <button type="button" class="btn-secondary btn-sm" id="btn-sync-folder-force" onclick="syncPatentFolder(true)" data-i18n="bulk.syncForceBtn">♻️ 全量重扫</button>
+      <button type="button" class="btn-secondary btn-sm" id="btn-sync-folder-cancel" style="display:none;color:#f85149;border-color:#f85149;" onclick="cancelPatentFolderSync()" data-i18n="bulk.syncCancelBtn">⏹ 停止同步</button>
+    </div>
+    <div id="sync-folder-progress-wrap" class="bulk-sync-progress-wrap" style="display:none;">
+      <div id="sync-folder-progress-bar" class="bulk-sync-progress-bar"></div>
     </div>
     <div id="sync-folder-status" class="bulk-import-status"></div>
   </div>
@@ -268,6 +272,8 @@ function clearSearchPdfMeta() {
     'bulk.folderPlaceholder': '如 F:\\down\\专利数据 或 /mnt/d/OneDrive/Patents',
     'bulk.syncBtn': '🔄 一键增量同步',
     'bulk.syncForceBtn': '♻️ 全量重扫',
+    'bulk.syncCancelBtn': '⏹ 停止同步',
+    'bulk.syncCancelling': '⏹ 正在安全停止并保存已完成断点...',
     'bulk.uploading': '⏳ 正在解析并批量写入本地专利库...',
     'bulk.syncing': '⏳ 正在递归增量扫描目录并写入本地专利库...',
     'bulk.enterFolder': '请先填写本地或网盘同步目录路径',
@@ -388,6 +394,8 @@ function clearSearchPdfMeta() {
     'bulk.folderPlaceholder': 'e.g. F:\\down\\Patents or /mnt/d/OneDrive/Patents',
     'bulk.syncBtn': '🔄 Incremental Sync',
     'bulk.syncForceBtn': '♻️ Full Rescan',
+    'bulk.syncCancelBtn': '⏹ Stop Sync',
+    'bulk.syncCancelling': '⏹ Stopping safely and saving checkpoint...',
     'bulk.uploading': '⏳ Parsing and importing into local patent DB...',
     'bulk.syncing': '⏳ Recursively scanning folder and importing new/updated files...',
     'bulk.enterFolder': 'Please enter a local or cloud-sync folder path first',
@@ -2554,6 +2562,124 @@ async function handlePatentTableUpload(event) {
     }
 }
 
+let patentSyncPollTimer = null;
+
+function stopPatentSyncPolling() {
+    if (patentSyncPollTimer) {
+        clearInterval(patentSyncPollTimer);
+        patentSyncPollTimer = null;
+    }
+}
+
+function setPatentSyncButtonsRunning(running) {
+    const btn = document.getElementById('btn-sync-folder');
+    const btnForce = document.getElementById('btn-sync-folder-force');
+    const btnCancel = document.getElementById('btn-sync-folder-cancel');
+    if (btn) btn.disabled = running;
+    if (btnForce) btnForce.disabled = running;
+    if (btnCancel) {
+        btnCancel.style.display = running ? 'inline-block' : 'none';
+        btnCancel.disabled = false;
+    }
+}
+
+function renderFolderSyncJob(job) {
+    const statusEl = document.getElementById('sync-folder-status');
+    const wrapEl = document.getElementById('sync-folder-progress-wrap');
+    const barEl = document.getElementById('sync-folder-progress-bar');
+    if (!statusEl || !job) return;
+
+    const total = Number(job.files_total || 0);
+    const done = Number(job.files_done || 0);
+    const pct = total > 0 ? Math.min(100, Math.round((done / total) * 1000) / 10) : (job.state === 'done' ? 100 : 0);
+
+    if (job.state === 'running') {
+        setPatentSyncButtonsRunning(true);
+        if (wrapEl) wrapEl.style.display = 'block';
+        if (barEl) barEl.style.width = Math.max(2, pct) + '%';
+        const diskNote = job.free_disk_mb ? (' · 磁盘剩余 ' + Number(job.free_disk_mb) + ' MB') : '';
+        const rateNote = Number(job.rows_per_sec || 0) > 0 ? (' · ' + Number(job.rows_per_sec) + ' 条/秒') : '';
+        const curNote = job.current_file ? (' · 当前: ' + job.current_file) : '';
+        const fltNote = Number(job.filtered_out || 0) > 0 ? ('（过滤 ' + Number(job.filtered_out) + '）') : '';
+        statusEl.style.color = '#58a6ff';
+        statusEl.textContent = i18nLang === 'en'
+            ? ('⏳ Syncing [' + done + '/' + total + ' · ' + pct + '%] · imported ' + Number(job.imported_patents || 0) + rateNote + (job.current_file ? ' · ' + job.current_file : ''))
+            : ('⏳ 后台同步中 [' + done + '/' + total + ' 文件 · ' + pct + '%] · 已入库 ' + Number(job.imported_patents || 0) + ' 条' + fltNote + rateNote + diskNote + curNote);
+        return;
+    }
+
+    stopPatentSyncPolling();
+    setPatentSyncButtonsRunning(false);
+    if (wrapEl) {
+        wrapEl.style.display = job.state === 'idle' ? 'none' : 'block';
+    }
+    if (barEl) {
+        barEl.style.width = (job.state === 'done' ? 100 : pct) + '%';
+    }
+
+    if (job.state === 'idle') return;
+    const mappedNote = job.resolved_path ? (' [' + job.resolved_path + '] ') : '';
+    const isWarn = job.state === 'cancelled' || job.state === 'paused_disk_low';
+    const isErr = job.state === 'error';
+    statusEl.style.color = isErr ? '#f85149' : isWarn ? '#d29922' : '#3fb950';
+    let msg = (isErr ? '❌ ' : isWarn ? '' : '✅ ') + mappedNote + (job.summary || ('已导入 ' + Number(job.imported_patents || 0) + ' 件专利/文献'));
+    if (Array.isArray(job.errors) && job.errors.length > 0 && !msg.includes(job.errors[0])) {
+        msg += ' · ⚠️ ' + job.errors[0];
+    }
+    statusEl.innerHTML = '';
+    const span = document.createElement('span');
+    span.textContent = msg;
+    statusEl.appendChild(span);
+    if (Number(job.imported_patents || 0) > 0) {
+        const samples = Array.isArray(job.sample_numbers) ? job.sample_numbers : [];
+        const firstSample = samples.length > 0 ? samples[0] : '';
+        const jumpBtn = document.createElement('button');
+        jumpBtn.type = 'button';
+        jumpBtn.className = 'btn-secondary btn-sm';
+        jumpBtn.style.marginLeft = '8px';
+        jumpBtn.textContent = t('bulk.searchLocalNow');
+        jumpBtn.addEventListener('click', function() { quickSearchLocalAfterImport(firstSample); });
+        statusEl.appendChild(jumpBtn);
+    }
+}
+
+async function pollPatentSyncProgressOnce() {
+    try {
+        const resp = await fetch('/api/patents/sync-folder/progress');
+        const data = await resp.json();
+        if (data.status === 'ok' && data.job) {
+            renderFolderSyncJob(data.job);
+        }
+    } catch (_) { /* ignore transient poll hiccup */ }
+}
+
+function startPatentSyncPolling() {
+    stopPatentSyncPolling();
+    patentSyncPollTimer = setInterval(pollPatentSyncProgressOnce, 1000);
+}
+
+async function cancelPatentFolderSync() {
+    const btnCancel = document.getElementById('btn-sync-folder-cancel');
+    const statusEl = document.getElementById('sync-folder-status');
+    if (btnCancel) btnCancel.disabled = true;
+    if (statusEl) {
+        statusEl.style.color = '#d29922';
+        statusEl.textContent = t('bulk.syncCancelling');
+    }
+    try {
+        const resp = await fetch('/api/patents/sync-folder/cancel', { method: 'POST' });
+        const data = await resp.json();
+        if (data.status === 'ok' && data.job && data.job.state !== 'running') {
+            renderFolderSyncJob(data.job);
+        }
+    } catch (err) {
+        if (statusEl) {
+            statusEl.style.color = '#f85149';
+            statusEl.textContent = '❌ ' + err.message;
+        }
+    }
+}
+
 async function loadPatentSyncFolderStatus() {
     const pathEl = document.getElementById('sync-folder-path');
     const statusEl = document.getElementById('sync-folder-status');
@@ -2569,12 +2695,21 @@ async function loadPatentSyncFolderStatus() {
             ipcEl.value = data.ipc_prefix;
         }
         if (typeof data.lightweight === 'boolean' && lwEl && data.folder_path) lwEl.checked = data.lightweight;
+        if (data.job && data.job.state === 'running') {
+            renderFolderSyncJob(data.job);
+            startPatentSyncPolling();
+            return;
+        }
         if (data.folder_path) {
             const mappedNote = data.resolved_path ? (' → ' + data.resolved_path) : '';
+            const dedupNote = Number(data.deduped_pair_files || 0) > 0
+                ? (i18nLang === 'en' ? (', auto-deduped ' + data.deduped_pair_files + ' duplicate CSV(s)') : ('，已自动去重 ' + data.deduped_pair_files + ' 个同名重复 CSV'))
+                : '';
+            const diskNote = data.free_disk_mb ? (' · 磁盘可用 ' + Number(data.free_disk_mb) + ' MB') : '';
             const existsText = data.exists
                 ? (i18nLang === 'en'
-                    ? ('Folder ready' + mappedNote + ' · ' + data.detected_files + ' file(s)')
-                    : ('目录就绪' + mappedNote + ' · 发现 ' + data.detected_files + ' 个可同步文件（表 ' + Number(data.table_files || 0) + ' / 文档 ' + Number(data.doc_files || 0) + ' / 压缩包 ' + Number(data.archive_files || 0) + '）'))
+                    ? ('Folder ready' + mappedNote + ' · ' + data.detected_files + ' file(s)' + dedupNote)
+                    : ('目录就绪' + mappedNote + ' · 发现 ' + data.detected_files + ' 个待同步文件（表 ' + Number(data.table_files || 0) + ' / 文档 ' + Number(data.doc_files || 0) + ' / 压缩包 ' + Number(data.archive_files || 0) + dedupNote + '）' + diskNote))
                 : (i18nLang === 'en' ? 'Folder not found on disk' : '当前目录不存在');
             const lastText = data.last_at ? (' · ' + data.last_at + (data.last_summary ? ' (' + data.last_summary + ')' : '')) : '';
             statusEl.style.color = data.exists ? '#8b949e' : '#d29922';
@@ -2586,8 +2721,6 @@ async function loadPatentSyncFolderStatus() {
 async function syncPatentFolder(forceRescan) {
     const pathEl = document.getElementById('sync-folder-path');
     const statusEl = document.getElementById('sync-folder-status');
-    const btn = document.getElementById('btn-sync-folder');
-    const btnForce = document.getElementById('btn-sync-folder-force');
     const ipcEl = document.getElementById('table-ipc-filter');
     const lwEl = document.getElementById('table-lightweight-cb');
     const folderPath = pathEl ? pathEl.value.trim() : '';
@@ -2611,8 +2744,7 @@ async function syncPatentFolder(forceRescan) {
         statusEl.style.color = '#58a6ff';
         statusEl.textContent = t('bulk.syncing');
     }
-    if (btn) btn.disabled = true;
-    if (btnForce) btnForce.disabled = true;
+    setPatentSyncButtonsRunning(true);
     try {
         const resp = await fetch('/api/patents/sync-folder', {
             method: 'POST',
@@ -2620,52 +2752,35 @@ async function syncPatentFolder(forceRescan) {
             body: JSON.stringify({
                 folder_path: folderPath,
                 ipc_prefix: ipcVal,
-                lightweight: lwEl ? Boolean(lwEl.checked) : false,
+                lightweight: lwEl ? Boolean(lwEl.checked) : true,
                 save_only: false,
-                force: Boolean(forceRescan)
+                force: Boolean(forceRescan),
+                async_mode: true
             })
         });
         const data = await resp.json();
         if (data.status !== 'ok') {
+            setPatentSyncButtonsRunning(false);
             if (statusEl) {
                 statusEl.style.color = '#f85149';
                 statusEl.textContent = '❌ ' + (data.message || '同步失败');
             }
             return;
         }
-        if (statusEl) {
-            statusEl.style.color = '#3fb950';
-            const mappedNote = data.resolved_path ? (' [' + data.resolved_path + '] ') : '';
-            let msg = i18nLang === 'en'
-                ? ('✅' + mappedNote + ' Scanned ' + data.scanned_files + ' file(s): imported ' + data.imported_files + ' (' + data.imported_patents + ' item(s)), skipped unchanged ' + data.skipped_unchanged_files)
-                : ('✅' + mappedNote + (data.summary || ('已导入 ' + data.imported_patents + ' 件专利/文献')));
-            if (Array.isArray(data.errors) && data.errors.length > 0) {
-                msg += ' · ⚠️ ' + data.errors[0];
+        if (data.job) {
+            renderFolderSyncJob(data.job);
+            if (data.job.state === 'running') {
+                startPatentSyncPolling();
             }
-            statusEl.innerHTML = '';
-            const span = document.createElement('span');
-            span.textContent = msg;
-            statusEl.appendChild(span);
-            if (Number(data.imported_patents || 0) > 0) {
-                const samples = Array.isArray(data.sample_numbers) ? data.sample_numbers : [];
-                const firstSample = samples.length > 0 ? samples[0] : '';
-                const jumpBtn = document.createElement('button');
-                jumpBtn.type = 'button';
-                jumpBtn.className = 'btn-secondary btn-sm';
-                jumpBtn.style.marginLeft = '8px';
-                jumpBtn.textContent = t('bulk.searchLocalNow');
-                jumpBtn.addEventListener('click', function() { quickSearchLocalAfterImport(firstSample); });
-                statusEl.appendChild(jumpBtn);
-            }
+        } else {
+            setPatentSyncButtonsRunning(false);
         }
     } catch (err) {
+        setPatentSyncButtonsRunning(false);
         if (statusEl) {
             statusEl.style.color = '#f85149';
             statusEl.textContent = '❌ ' + err.message;
         }
-    } finally {
-        if (btn) btn.disabled = false;
-        if (btnForce) btnForce.disabled = false;
     }
 }
 

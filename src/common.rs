@@ -945,6 +945,14 @@ pub fn build_router_with_token(
             "/api/patents/sync-folder",
             get(routes::api_get_patent_sync_folder).post(routes::api_sync_patent_folder),
         )
+        .route(
+            "/api/patents/sync-folder/progress",
+            get(routes::api_get_patent_sync_progress),
+        )
+        .route(
+            "/api/patents/sync-folder/cancel",
+            post(routes::api_cancel_patent_sync),
+        )
         .route("/api/backup/export", post(routes::api_backup_export))
         .route("/api/backup/check", post(routes::api_backup_check))
         // 收藏夹 API

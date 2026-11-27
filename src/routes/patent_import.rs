@@ -11,10 +11,12 @@ use axum::extract::{Multipart, State};
 use axum::response::Json;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::HashMap;
-use std::io::{Cursor, Read};
+use std::collections::{HashMap, HashSet};
+use std::io::{BufRead, BufReader, Cursor, Read};
 use std::path::{Path, PathBuf};
-use std::time::UNIX_EPOCH;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Instant, UNIX_EPOCH};
 
 const SETTING_SYNC_FOLDER: &str = "patent_sync_folder";
 const SETTING_SYNC_IPC_PREFIX: &str = "patent_sync_ipc_prefix";
@@ -23,11 +25,14 @@ const SETTING_SYNC_LAST_AT: &str = "patent_sync_last_at";
 const SETTING_SYNC_LAST_SUMMARY: &str = "patent_sync_last_summary";
 const SETTING_SYNC_MANIFEST: &str = "patent_sync_file_manifest";
 
-const MAX_TABLE_BYTES: usize = 30 * 1024 * 1024; // 30 MB
+const MAX_TABLE_BYTES: usize = 30 * 1024 * 1024; // 30 MB（用于单文件内存解析：XLSX/DOC/ZIP 等）
+const MAX_STREAM_TABLE_BYTES: u64 = 250 * 1024 * 1024; // 250 MB（用于流式读取 JSONL/CSV/TSV）
 const MAX_SYNC_FILES: usize = 500;
 const MAX_WALK_DEPTH: usize = 6;
 const MAX_ZIP_ENTRIES: usize = 100;
 const MAX_ZIP_TOTAL_UNCOMPRESSED: u64 = 100 * 1024 * 1024; // 100 MB 防压缩炸弹
+const STREAM_BATCH_ROWS: usize = 2000;
+const MIN_FREE_DISK_MB: u64 = 1024; // 低于 1 GB 自动暂停同步保护硬盘
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PatentTableImportOptions {
@@ -58,6 +63,94 @@ pub struct SyncFolderRequest {
     pub save_only: bool,
     #[serde(default)]
     pub force: bool,
+    #[serde(default)]
+    pub async_mode: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FolderSyncJobSnapshot {
+    pub state: String,
+    pub folder_path: String,
+    pub resolved_path: Option<String>,
+    pub current_file: String,
+    pub files_done: usize,
+    pub files_total: usize,
+    pub deduped_pair_files: usize,
+    pub table_files: usize,
+    pub doc_files: usize,
+    pub archive_files: usize,
+    pub imported_files: usize,
+    pub skipped_unchanged_files: usize,
+    pub imported_patents: usize,
+    pub filtered_out: usize,
+    pub chunks: usize,
+    pub rows_per_sec: usize,
+    pub free_disk_mb: Option<u64>,
+    pub elapsed_secs: u64,
+    pub sample_numbers: Vec<String>,
+    pub summary: String,
+    pub errors: Vec<String>,
+}
+
+impl Default for FolderSyncJobSnapshot {
+    fn default() -> Self {
+        Self {
+            state: "idle".to_string(),
+            folder_path: String::new(),
+            resolved_path: None,
+            current_file: String::new(),
+            files_done: 0,
+            files_total: 0,
+            deduped_pair_files: 0,
+            table_files: 0,
+            doc_files: 0,
+            archive_files: 0,
+            imported_files: 0,
+            skipped_unchanged_files: 0,
+            imported_patents: 0,
+            filtered_out: 0,
+            chunks: 0,
+            rows_per_sec: 0,
+            free_disk_mb: None,
+            elapsed_secs: 0,
+            sample_numbers: Vec::new(),
+            summary: String::new(),
+            errors: Vec::new(),
+        }
+    }
+}
+
+struct FolderSyncJobManager {
+    snapshot: FolderSyncJobSnapshot,
+    cancel_flag: Arc<AtomicBool>,
+}
+
+impl Default for FolderSyncJobManager {
+    fn default() -> Self {
+        Self {
+            snapshot: FolderSyncJobSnapshot::default(),
+            cancel_flag: Arc::new(AtomicBool::new(false)),
+        }
+    }
+}
+
+static FOLDER_SYNC_MANAGER: OnceLock<Mutex<FolderSyncJobManager>> = OnceLock::new();
+
+fn sync_manager() -> &'static Mutex<FolderSyncJobManager> {
+    FOLDER_SYNC_MANAGER.get_or_init(|| Mutex::new(FolderSyncJobManager::default()))
+}
+
+fn current_sync_snapshot() -> FolderSyncJobSnapshot {
+    sync_manager()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .snapshot
+        .clone()
+}
+
+fn update_sync_snapshot(mutator: impl FnOnce(&mut FolderSyncJobSnapshot)) {
+    let mut guard = sync_manager().lock().unwrap_or_else(|e| e.into_inner());
+    mutator(&mut guard.snapshot);
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,6 +169,8 @@ enum SyncFileKind {
     Doc,
     Archive,
 }
+
+type SyncFileEntry = (String, PathBuf, String, SyncFileKind);
 
 fn is_supported_table_ext(ext_lower: &str) -> bool {
     matches!(ext_lower, "xlsx" | "csv" | "tsv" | "json" | "jsonl")
@@ -752,10 +847,15 @@ fn row_map_to_patent(
         ],
     );
     let pdf_url = pick_alias(row, &["pdf链接", "pdf_url", "result_link", "url"]);
-    let source = if options.source_tag.trim().is_empty() {
-        "table_import".to_string()
+    let base_source = if options.source_tag.trim().is_empty() {
+        "table_import"
     } else {
-        options.source_tag.trim().to_string()
+        options.source_tag.trim()
+    };
+    let source = if options.lightweight && !base_source.ends_with("_lightweight") {
+        format!("{base_source}_lightweight")
+    } else {
+        base_source.to_string()
     };
 
     Some(Patent {
@@ -1286,12 +1386,12 @@ pub async fn api_import_patent_table(
     let db = s.db.clone();
     let patents = stats.matched_patents;
     let import_res = tokio::task::spawn_blocking(move || {
-        db.batch_import_patents_with_chunks(&patents, "char-tfidf-v2")
+        db.batch_import_patents_chunked(&patents, lightweight, "char-tfidf-v2", None)
     })
     .await;
 
     match import_res {
-        Ok(Ok((imported, chunks))) => Json(json!({
+        Ok(Ok((imported, chunks, _))) => Json(json!({
             "status": "ok",
             "filename": first_filename,
             "files_processed": files_count,
@@ -1314,6 +1414,42 @@ pub async fn api_import_patent_table(
     }
 }
 
+/// 查询目标路径所在磁盘的可用空间（MB）；用于 GB 级同步前与同步中实时护栏，防撑爆硬盘。
+pub fn free_disk_mb_for_path(path: &Path) -> Option<u64> {
+    let check_dir = if path.is_dir() {
+        path
+    } else {
+        path.parent().unwrap_or(path)
+    };
+    #[cfg(unix)]
+    {
+        let out = std::process::Command::new("df")
+            .arg("-Pk")
+            .arg(check_dir)
+            .output()
+            .ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let data_line = stdout.lines().nth(1)?;
+        let cols: Vec<&str> = data_line.split_whitespace().collect();
+        // POSIX `df -Pk` 列序：Filesystem 1024-blocks Used Available Capacity Mounted
+        let avail_kb: u64 = cols.get(3)?.parse().ok()?;
+        Some(avail_kb / 1024)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = check_dir;
+        None
+    }
+}
+
+fn free_disk_mb_for_db(db: &crate::db::Database) -> Option<u64> {
+    let db_path = db.main_db_file_path()?;
+    free_disk_mb_for_path(&db_path)
+}
+
 fn should_skip_sync_dir(dir_name: &str) -> bool {
     dir_name.starts_with('.')
         || matches!(
@@ -1322,11 +1458,19 @@ fn should_skip_sync_dir(dir_name: &str) -> bool {
         )
 }
 
+fn max_sync_file_bytes_for_ext(ext_lower: &str) -> u64 {
+    if matches!(ext_lower, "jsonl" | "csv" | "tsv") {
+        MAX_STREAM_TABLE_BYTES
+    } else {
+        MAX_TABLE_BYTES as u64
+    }
+}
+
 fn walk_syncable_files(
     root: &Path,
     dir: &Path,
     depth: usize,
-    out: &mut Vec<(String, PathBuf, String, SyncFileKind)>,
+    out: &mut Vec<SyncFileEntry>,
 ) -> Result<(), String> {
     if depth > MAX_WALK_DEPTH || out.len() >= MAX_SYNC_FILES {
         return Ok(());
@@ -1366,7 +1510,7 @@ fn walk_syncable_files(
             Ok(m) => m,
             Err(_) => continue,
         };
-        if meta.len() == 0 || meta.len() as usize > MAX_TABLE_BYTES {
+        if meta.len() == 0 || meta.len() > max_sync_file_bytes_for_ext(&ext) {
             continue;
         }
         let mtime = meta
@@ -1393,17 +1537,615 @@ fn walk_syncable_files(
     Ok(())
 }
 
-fn list_syncable_files_recursive(
-    dir: &Path,
-) -> Result<Vec<(String, PathBuf, String, SyncFileKind)>, String> {
+/// 同目录下若同时存在同前缀的 `.csv` 与 `.jsonl`（如国知局 `BIBS-10-A_20260908.csv` + `.jsonl` 成对导出），
+/// 自动保留更适合流式解析的 `.jsonl` 并跳过重复的 `.csv`，立省 50% I/O 与写入耗时。
+fn dedup_sibling_table_pairs(files: Vec<SyncFileEntry>) -> (Vec<SyncFileEntry>, usize) {
+    let mut jsonl_stems: HashSet<String> = HashSet::new();
+    for (rel, _, _, kind) in &files {
+        if *kind == SyncFileKind::Table {
+            let lower = rel.to_lowercase();
+            if let Some(stem) = lower.strip_suffix(".jsonl") {
+                jsonl_stems.insert(stem.to_string());
+            }
+        }
+    }
+    if jsonl_stems.is_empty() {
+        return (files, 0);
+    }
+    let mut kept = Vec::with_capacity(files.len());
+    let mut deduped = 0usize;
+    for item in files {
+        let lower = item.0.to_lowercase();
+        if item.3 == SyncFileKind::Table {
+            if let Some(stem) = lower.strip_suffix(".csv") {
+                if jsonl_stems.contains(stem) {
+                    deduped += 1;
+                    continue;
+                }
+            }
+        }
+        kept.push(item);
+    }
+    (kept, deduped)
+}
+
+fn list_syncable_files_recursive_dedup(dir: &Path) -> Result<(Vec<SyncFileEntry>, usize), String> {
     let mut files = Vec::new();
     walk_syncable_files(dir, dir, 0, &mut files)?;
     files.sort_by(|a, b| a.0.cmp(&b.0));
-    files.truncate(MAX_SYNC_FILES);
-    Ok(files)
+    let (mut deduped_files, deduped_pairs) = dedup_sibling_table_pairs(files);
+    deduped_files.truncate(MAX_SYNC_FILES);
+    Ok((deduped_files, deduped_pairs))
 }
 
-/// GET `/api/patents/sync-folder` — 获取当前已配置的本地/网盘专利同步目录状态
+#[cfg(test)]
+fn list_syncable_files_recursive(dir: &Path) -> Result<Vec<SyncFileEntry>, String> {
+    list_syncable_files_recursive_dedup(dir).map(|(files, _)| files)
+}
+
+struct StreamFileSyncOutcome {
+    imported: usize,
+    filtered_out: usize,
+    chunks: usize,
+    sample_numbers: Vec<String>,
+    cancelled: bool,
+    disk_low_mb: Option<u64>,
+}
+
+/// 逐行流式解析并分段提交 `.jsonl` 专利公报（每 2,000 行提交一次小事务，内存占用 < 10 MB，实时响应取消与磁盘守卫）。
+fn sync_stream_jsonl_file(
+    db: &crate::db::Database,
+    path: &Path,
+    options: &PatentTableImportOptions,
+    cancel: &AtomicBool,
+    mut on_batch: impl FnMut(usize, usize, usize, &[String]),
+) -> Result<StreamFileSyncOutcome, String> {
+    let file = std::fs::File::open(path).map_err(|e| format!("打开文件失败: {e}"))?;
+    let reader = BufReader::with_capacity(128 * 1024, file);
+    let prefixes = parse_ipc_prefixes(&options.ipc_prefix);
+
+    let mut buf: Vec<Patent> = Vec::with_capacity(STREAM_BATCH_ROWS);
+    let mut total_imported = 0usize;
+    let mut total_filtered = 0usize;
+    let mut total_chunks = 0usize;
+    let mut samples: Vec<String> = Vec::new();
+    let mut batch_filtered = 0usize;
+    let mut batches_since_disk_check = 0usize;
+
+    for line_res in reader.lines() {
+        if cancel.load(Ordering::Relaxed) {
+            return Ok(StreamFileSyncOutcome {
+                imported: total_imported,
+                filtered_out: total_filtered + batch_filtered,
+                chunks: total_chunks,
+                sample_numbers: samples,
+                cancelled: true,
+                disk_low_mb: None,
+            });
+        }
+        let line = match line_res {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+        let trimmed = line.trim().trim_start_matches('\u{feff}');
+        if trimmed.is_empty() {
+            continue;
+        }
+        let Ok(val) = serde_json::from_str::<Value>(trimmed) else {
+            continue;
+        };
+        let Some(row_map) = json_value_to_row_map(&val) else {
+            continue;
+        };
+        let Some(patent) = row_map_to_patent(&row_map, options) else {
+            continue;
+        };
+        if !matches_ipc_prefixes(&patent, &prefixes) {
+            batch_filtered += 1;
+            continue;
+        }
+        if samples.len() < 5 {
+            let label = if !patent.patent_number.is_empty() {
+                patent.patent_number.clone()
+            } else {
+                patent.title.clone()
+            };
+            if !label.is_empty() && !samples.contains(&label) {
+                samples.push(label);
+            }
+        }
+        buf.push(patent);
+
+        if buf.len() >= STREAM_BATCH_ROWS {
+            batches_since_disk_check += 1;
+            if batches_since_disk_check >= 5 {
+                batches_since_disk_check = 0;
+                if let Some(free_mb) = free_disk_mb_for_db(db) {
+                    if free_mb < MIN_FREE_DISK_MB {
+                        return Ok(StreamFileSyncOutcome {
+                            imported: total_imported,
+                            filtered_out: total_filtered + batch_filtered,
+                            chunks: total_chunks,
+                            sample_numbers: samples,
+                            cancelled: false,
+                            disk_low_mb: Some(free_mb),
+                        });
+                    }
+                }
+            }
+            let (imp, chks, was_cancelled) = db
+                .batch_import_patents_chunked(
+                    &buf,
+                    options.lightweight,
+                    "char-tfidf-v2",
+                    Some(cancel),
+                )
+                .map_err(|e| format!("批量写入失败: {e}"))?;
+            total_imported += imp;
+            total_filtered += batch_filtered;
+            total_chunks += chks;
+            on_batch(imp, batch_filtered, chks, &samples);
+            batch_filtered = 0;
+            buf.clear();
+            if was_cancelled {
+                return Ok(StreamFileSyncOutcome {
+                    imported: total_imported,
+                    filtered_out: total_filtered,
+                    chunks: total_chunks,
+                    sample_numbers: samples,
+                    cancelled: true,
+                    disk_low_mb: None,
+                });
+            }
+        }
+    }
+
+    if !buf.is_empty() {
+        let (imp, chks, was_cancelled) = db
+            .batch_import_patents_chunked(&buf, options.lightweight, "char-tfidf-v2", Some(cancel))
+            .map_err(|e| format!("批量写入失败: {e}"))?;
+        total_imported += imp;
+        total_filtered += batch_filtered;
+        total_chunks += chks;
+        on_batch(imp, batch_filtered, chks, &samples);
+        if was_cancelled {
+            return Ok(StreamFileSyncOutcome {
+                imported: total_imported,
+                filtered_out: total_filtered,
+                chunks: total_chunks,
+                sample_numbers: samples,
+                cancelled: true,
+                disk_low_mb: None,
+            });
+        }
+    } else if batch_filtered > 0 {
+        total_filtered += batch_filtered;
+        on_batch(0, batch_filtered, 0, &samples);
+    }
+
+    Ok(StreamFileSyncOutcome {
+        imported: total_imported,
+        filtered_out: total_filtered,
+        chunks: total_chunks,
+        sample_numbers: samples,
+        cancelled: false,
+        disk_low_mb: None,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn execute_folder_sync_worker(
+    db: Arc<crate::db::Database>,
+    dir: PathBuf,
+    folder_trimmed: String,
+    resolved_for_resp: Option<String>,
+    ipc_prefix: String,
+    lightweight: bool,
+    force: bool,
+    cancel_flag: Arc<AtomicBool>,
+    update_global_job: bool,
+) -> Result<Value, String> {
+    let started_at = Instant::now();
+    let (files, deduped_pairs) = list_syncable_files_recursive_dedup(&dir)?;
+    let table_files = files.iter().filter(|f| f.3 == SyncFileKind::Table).count();
+    let doc_files = files.iter().filter(|f| f.3 == SyncFileKind::Doc).count();
+    let archive_files = files
+        .iter()
+        .filter(|f| f.3 == SyncFileKind::Archive)
+        .count();
+    let initial_free_mb = free_disk_mb_for_db(&db);
+
+    if update_global_job {
+        update_sync_snapshot(|snap| {
+            snap.state = "running".to_string();
+            snap.folder_path = folder_trimmed.clone();
+            snap.resolved_path = resolved_for_resp.clone();
+            snap.files_done = 0;
+            snap.files_total = files.len();
+            snap.deduped_pair_files = deduped_pairs;
+            snap.table_files = table_files;
+            snap.doc_files = doc_files;
+            snap.archive_files = archive_files;
+            snap.imported_files = 0;
+            snap.skipped_unchanged_files = 0;
+            snap.imported_patents = 0;
+            snap.filtered_out = 0;
+            snap.chunks = 0;
+            snap.rows_per_sec = 0;
+            snap.free_disk_mb = initial_free_mb;
+            snap.elapsed_secs = 0;
+            snap.sample_numbers.clear();
+            snap.errors.clear();
+            snap.summary.clear();
+        });
+    }
+
+    let prev_manifest_raw = db
+        .get_setting(SETTING_SYNC_MANIFEST)
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let mut manifest: HashMap<String, String> =
+        serde_json::from_str(&prev_manifest_raw).unwrap_or_default();
+
+    let mut imported_files = 0usize;
+    let mut skipped_unchanged_files = 0usize;
+    let mut total_imported = 0usize;
+    let mut total_filtered = 0usize;
+    let mut total_chunks = 0usize;
+    let mut sample_numbers: Vec<String> = Vec::new();
+    let mut details: Vec<FileSyncResult> = Vec::new();
+    let mut errors: Vec<String> = Vec::new();
+    let mut was_cancelled = false;
+    let mut paused_disk_low_mb: Option<u64> = None;
+
+    let options = PatentTableImportOptions {
+        ipc_prefix: ipc_prefix.clone(),
+        lightweight,
+        source_tag: "folder_sync".to_string(),
+    };
+
+    for (idx, (name, path, sig, _kind)) in files.iter().enumerate() {
+        if cancel_flag.load(Ordering::Relaxed) {
+            was_cancelled = true;
+            break;
+        }
+        let free_mb = free_disk_mb_for_db(&db);
+        if let Some(mb) = free_mb {
+            if mb < MIN_FREE_DISK_MB {
+                paused_disk_low_mb = Some(mb);
+                break;
+            }
+        }
+        if update_global_job {
+            update_sync_snapshot(|snap| {
+                snap.current_file = name.clone();
+                snap.files_done = idx;
+                snap.free_disk_mb = free_mb;
+                snap.elapsed_secs = started_at.elapsed().as_secs();
+            });
+        }
+
+        let manifest_key = format!("{}|{}|{}", name, ipc_prefix, lightweight);
+        if !force && manifest.get(&manifest_key).is_some_and(|old| old == sig) {
+            skipped_unchanged_files += 1;
+            details.push(FileSyncResult {
+                filename: name.clone(),
+                status: "skipped_unchanged".to_string(),
+                imported: 0,
+                filtered_out: 0,
+                chunks: 0,
+                message: "未变更，已跳过".to_string(),
+            });
+            if update_global_job {
+                update_sync_snapshot(|snap| {
+                    snap.files_done = idx + 1;
+                    snap.skipped_unchanged_files = skipped_unchanged_files;
+                });
+            }
+            continue;
+        }
+
+        let ext_lower = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+
+        if ext_lower == "jsonl" {
+            let mut batch_imp_acc = total_imported;
+            let mut batch_flt_acc = total_filtered;
+            let mut batch_chk_acc = total_chunks;
+            match sync_stream_jsonl_file(
+                &db,
+                path,
+                &options,
+                &cancel_flag,
+                |imp, flt, chks, smps| {
+                    batch_imp_acc += imp;
+                    batch_flt_acc += flt;
+                    batch_chk_acc += chks;
+                    if update_global_job {
+                        let secs = started_at.elapsed().as_secs().max(1);
+                        let rate = (batch_imp_acc + batch_flt_acc) / secs as usize;
+                        update_sync_snapshot(|snap| {
+                            snap.imported_patents = batch_imp_acc;
+                            snap.filtered_out = batch_flt_acc;
+                            snap.chunks = batch_chk_acc;
+                            snap.rows_per_sec = rate;
+                            snap.elapsed_secs = secs;
+                            for s in smps {
+                                if snap.sample_numbers.len() < 5 && !snap.sample_numbers.contains(s)
+                                {
+                                    snap.sample_numbers.push(s.clone());
+                                }
+                            }
+                        });
+                    }
+                },
+            ) {
+                Ok(out) => {
+                    total_imported += out.imported;
+                    total_filtered += out.filtered_out;
+                    total_chunks += out.chunks;
+                    for s in out.sample_numbers {
+                        if sample_numbers.len() < 5 && !sample_numbers.contains(&s) {
+                            sample_numbers.push(s);
+                        }
+                    }
+                    if let Some(mb) = out.disk_low_mb {
+                        paused_disk_low_mb = Some(mb);
+                        break;
+                    }
+                    if out.cancelled {
+                        was_cancelled = true;
+                        break;
+                    }
+                    manifest.insert(manifest_key, sig.clone());
+                    if out.imported > 0 {
+                        imported_files += 1;
+                    }
+                    details.push(FileSyncResult {
+                        filename: name.clone(),
+                        status: if out.imported > 0 {
+                            "imported"
+                        } else {
+                            "empty"
+                        }
+                        .to_string(),
+                        imported: out.imported,
+                        filtered_out: out.filtered_out,
+                        chunks: out.chunks,
+                        message: format!("导入 {} 件", out.imported),
+                    });
+                }
+                Err(e) => {
+                    let msg = format!("{name}: {e}");
+                    errors.push(msg.clone());
+                    details.push(FileSyncResult {
+                        filename: name.clone(),
+                        status: "error".to_string(),
+                        imported: 0,
+                        filtered_out: 0,
+                        chunks: 0,
+                        message: msg,
+                    });
+                }
+            }
+        } else {
+            let bytes = match std::fs::read(path) {
+                Ok(b) => b,
+                Err(e) => {
+                    let msg = format!("{name}: 读取失败 ({e})");
+                    errors.push(msg.clone());
+                    details.push(FileSyncResult {
+                        filename: name.clone(),
+                        status: "error".to_string(),
+                        imported: 0,
+                        filtered_out: 0,
+                        chunks: 0,
+                        message: msg,
+                    });
+                    continue;
+                }
+            };
+
+            match parse_any_patent_bytes(name, &bytes, &options) {
+                Ok(st) => {
+                    if st.matched_patents.is_empty() {
+                        manifest.insert(manifest_key, sig.clone());
+                        total_filtered += st.filtered_out;
+                        details.push(FileSyncResult {
+                            filename: name.clone(),
+                            status: "empty".to_string(),
+                            imported: 0,
+                            filtered_out: st.filtered_out,
+                            chunks: 0,
+                            message: "无匹配专利/文献行".to_string(),
+                        });
+                    } else {
+                        for p in &st.matched_patents {
+                            if sample_numbers.len() >= 5 {
+                                break;
+                            }
+                            let label = if !p.patent_number.is_empty() {
+                                p.patent_number.clone()
+                            } else {
+                                p.title.clone()
+                            };
+                            if !label.is_empty() && !sample_numbers.contains(&label) {
+                                sample_numbers.push(label);
+                            }
+                        }
+                        match db.batch_import_patents_chunked(
+                            &st.matched_patents,
+                            lightweight,
+                            "char-tfidf-v2",
+                            Some(&cancel_flag),
+                        ) {
+                            Ok((imp, chunks, chunk_cancelled)) => {
+                                total_imported += imp;
+                                total_filtered += st.filtered_out;
+                                total_chunks += chunks;
+                                if chunk_cancelled {
+                                    was_cancelled = true;
+                                    break;
+                                }
+                                manifest.insert(manifest_key, sig.clone());
+                                imported_files += 1;
+                                details.push(FileSyncResult {
+                                    filename: name.clone(),
+                                    status: "imported".to_string(),
+                                    imported: imp,
+                                    filtered_out: st.filtered_out,
+                                    chunks,
+                                    message: format!("导入 {imp} 件"),
+                                });
+                            }
+                            Err(e) => {
+                                let msg = format!("{name}: 入库失败 ({e})");
+                                errors.push(msg.clone());
+                                details.push(FileSyncResult {
+                                    filename: name.clone(),
+                                    status: "error".to_string(),
+                                    imported: 0,
+                                    filtered_out: st.filtered_out,
+                                    chunks: 0,
+                                    message: msg,
+                                });
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    let msg = format!("{name}: {e}");
+                    errors.push(msg.clone());
+                    details.push(FileSyncResult {
+                        filename: name.clone(),
+                        status: "error".to_string(),
+                        imported: 0,
+                        filtered_out: 0,
+                        chunks: 0,
+                        message: msg,
+                    });
+                }
+            }
+        }
+
+        // 每完成一个文件即断点落盘 manifest，保证用户随时点击「停止」后下次增量同步无缝续跑
+        if let Ok(manifest_json) = serde_json::to_string(&manifest) {
+            let _ = db.set_settings_batch(&[(SETTING_SYNC_MANIFEST, &manifest_json)]);
+        }
+        if update_global_job {
+            let secs = started_at.elapsed().as_secs().max(1);
+            let rate = (total_imported + total_filtered) / secs as usize;
+            update_sync_snapshot(|snap| {
+                snap.files_done = idx + 1;
+                snap.imported_files = imported_files;
+                snap.skipped_unchanged_files = skipped_unchanged_files;
+                snap.imported_patents = total_imported;
+                snap.filtered_out = total_filtered;
+                snap.chunks = total_chunks;
+                snap.rows_per_sec = rate;
+                snap.elapsed_secs = secs;
+                snap.sample_numbers = sample_numbers.clone();
+                snap.errors = errors.clone();
+            });
+        }
+    }
+
+    let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    let dedup_note = if deduped_pairs > 0 {
+        format!("，自动跳过同名重复 CSV {} 个", deduped_pairs)
+    } else {
+        String::new()
+    };
+    let final_state = if let Some(mb) = paused_disk_low_mb {
+        errors.insert(
+            0,
+            format!(
+                "数据库所在磁盘剩余空间仅 {mb} MB（低于 {MIN_FREE_DISK_MB} MB 安全红线），已自动暂停同步以保护硬盘"
+            ),
+        );
+        "paused_disk_low"
+    } else if was_cancelled {
+        "cancelled"
+    } else {
+        "done"
+    };
+    let state_prefix = match final_state {
+        "paused_disk_low" => "⚠️ 磁盘空间不足已安全暂停：",
+        "cancelled" => "⏹ 已手动停止（已完成文件断点已保留）：",
+        _ => "",
+    };
+    let summary = format!(
+        "{state_prefix}扫描 {} 个文件（表格 {} · 文档 {} · 压缩包 {}{}）：导入 {} 个（共 {} 件专利/文献），跳过未变更 {} 个",
+        files.len(),
+        table_files,
+        doc_files,
+        archive_files,
+        dedup_note,
+        imported_files,
+        total_imported,
+        skipped_unchanged_files
+    );
+    let manifest_json = serde_json::to_string(&manifest).unwrap_or_else(|_| "{}".to_string());
+    let _ = db.set_settings_batch(&[
+        (SETTING_SYNC_MANIFEST, &manifest_json),
+        (SETTING_SYNC_LAST_AT, &now),
+        (SETTING_SYNC_LAST_SUMMARY, &summary),
+    ]);
+
+    let final_free_mb = free_disk_mb_for_db(&db);
+    let elapsed_secs = started_at.elapsed().as_secs();
+    let rate = (total_imported + total_filtered) / elapsed_secs.max(1) as usize;
+    if update_global_job {
+        update_sync_snapshot(|snap| {
+            snap.state = final_state.to_string();
+            snap.current_file.clear();
+            if final_state == "done" {
+                snap.files_done = files.len();
+            }
+            snap.imported_files = imported_files;
+            snap.skipped_unchanged_files = skipped_unchanged_files;
+            snap.imported_patents = total_imported;
+            snap.filtered_out = total_filtered;
+            snap.chunks = total_chunks;
+            snap.rows_per_sec = rate;
+            snap.free_disk_mb = final_free_mb;
+            snap.elapsed_secs = elapsed_secs;
+            snap.sample_numbers = sample_numbers.clone();
+            snap.summary = summary.clone();
+            snap.errors = errors.clone();
+        });
+    }
+
+    Ok(json!({
+        "status": "ok",
+        "state": final_state,
+        "folder_path": folder_trimmed,
+        "resolved_path": resolved_for_resp,
+        "scanned_files": files.len(),
+        "deduped_pair_files": deduped_pairs,
+        "table_files": table_files,
+        "doc_files": doc_files,
+        "archive_files": archive_files,
+        "imported_files": imported_files,
+        "skipped_unchanged_files": skipped_unchanged_files,
+        "imported_patents": total_imported,
+        "filtered_out": total_filtered,
+        "chunks": total_chunks,
+        "free_disk_mb": final_free_mb,
+        "elapsed_secs": elapsed_secs,
+        "sample_numbers": sample_numbers,
+        "last_at": now,
+        "summary": summary,
+        "errors": errors,
+        "details": details
+    }))
+}
+
+/// GET `/api/patents/sync-folder` — 获取当前已配置的本地/网盘专利同步目录状态（含后台任务实时快照）
 pub async fn api_get_patent_sync_folder(State(s): State<AppState>) -> Json<Value> {
     let folder_path =
         s.db.get_setting(SETTING_SYNC_FOLDER)
@@ -1431,21 +2173,28 @@ pub async fn api_get_patent_sync_folder(State(s): State<AppState>) -> Json<Value
             .flatten()
             .unwrap_or_default();
 
-    let (exists, detected_files, table_files, doc_files, archive_files, resolved_path) =
-        if folder_path.trim().is_empty() {
-            (false, 0usize, 0usize, 0usize, 0usize, None)
+    let (
+        exists,
+        detected_files,
+        deduped_pair_files,
+        table_files,
+        doc_files,
+        archive_files,
+        resolved_path,
+    ) = if folder_path.trim().is_empty() {
+        (false, 0usize, 0usize, 0usize, 0usize, 0usize, None)
+    } else {
+        let (p, mapped) = resolve_local_folder_path(&folder_path);
+        if p.is_dir() {
+            let (list, deduped) = list_syncable_files_recursive_dedup(&p).unwrap_or_default();
+            let t = list.iter().filter(|f| f.3 == SyncFileKind::Table).count();
+            let d = list.iter().filter(|f| f.3 == SyncFileKind::Doc).count();
+            let a = list.iter().filter(|f| f.3 == SyncFileKind::Archive).count();
+            (true, list.len(), deduped, t, d, a, mapped)
         } else {
-            let (p, mapped) = resolve_local_folder_path(&folder_path);
-            if p.is_dir() {
-                let list = list_syncable_files_recursive(&p).unwrap_or_default();
-                let t = list.iter().filter(|f| f.3 == SyncFileKind::Table).count();
-                let d = list.iter().filter(|f| f.3 == SyncFileKind::Doc).count();
-                let a = list.iter().filter(|f| f.3 == SyncFileKind::Archive).count();
-                (true, list.len(), t, d, a, mapped)
-            } else {
-                (false, 0, 0, 0, 0, mapped)
-            }
-        };
+            (false, 0, 0, 0, 0, 0, mapped)
+        }
+    };
 
     Json(json!({
         "status": "ok",
@@ -1455,11 +2204,36 @@ pub async fn api_get_patent_sync_folder(State(s): State<AppState>) -> Json<Value
         "lightweight": lightweight,
         "exists": exists,
         "detected_files": detected_files,
+        "deduped_pair_files": deduped_pair_files,
         "table_files": table_files,
         "doc_files": doc_files,
         "archive_files": archive_files,
+        "free_disk_mb": free_disk_mb_for_db(&s.db),
         "last_at": last_at,
-        "last_summary": last_summary
+        "last_summary": last_summary,
+        "job": current_sync_snapshot()
+    }))
+}
+
+/// GET `/api/patents/sync-folder/progress` — 查询后台 GB 级目录同步实时进度
+pub async fn api_get_patent_sync_progress() -> Json<Value> {
+    Json(json!({
+        "status": "ok",
+        "job": current_sync_snapshot()
+    }))
+}
+
+/// POST `/api/patents/sync-folder/cancel` — 立即请求优雅停止正在运行的后台目录同步（保留已完成断点）
+pub async fn api_cancel_patent_sync() -> Json<Value> {
+    let snap = {
+        let guard = sync_manager().lock().unwrap_or_else(|e| e.into_inner());
+        guard.cancel_flag.store(true, Ordering::Relaxed);
+        guard.snapshot.clone()
+    };
+    Json(json!({
+        "status": "ok",
+        "cancelling": snap.state == "running",
+        "job": snap
     }))
 }
 
@@ -1524,13 +2298,85 @@ pub async fn api_sync_patent_folder(
     }
 
     if req.save_only {
-        let list = list_syncable_files_recursive(&dir).unwrap_or_default();
+        let (list, deduped) = list_syncable_files_recursive_dedup(&dir).unwrap_or_default();
         return Json(json!({
             "status": "ok",
             "folder_path": folder_trimmed,
             "resolved_path": resolved_path,
             "detected_files": list.len(),
+            "deduped_pair_files": deduped,
+            "free_disk_mb": free_disk_mb_for_db(&s.db),
             "saved_only": true
+        }));
+    }
+
+    if let Some(free_mb) = free_disk_mb_for_db(&s.db) {
+        if free_mb < MIN_FREE_DISK_MB {
+            return Json(json!({
+                "status": "error",
+                "message": format!(
+                    "数据库所在磁盘剩余空间仅 {free_mb} MB（低于 {MIN_FREE_DISK_MB} MB 安全红线），已禁止启动批量同步以保护硬盘；请清理磁盘或先填写 IPC 赛道过滤"
+                )
+            }));
+        }
+    }
+
+    if req.async_mode {
+        let cancel_flag = {
+            let mut guard = sync_manager().lock().unwrap_or_else(|e| e.into_inner());
+            if guard.snapshot.state == "running" {
+                return Json(json!({
+                    "status": "ok",
+                    "already_running": true,
+                    "job": guard.snapshot.clone()
+                }));
+            }
+            let new_cancel = Arc::new(AtomicBool::new(false));
+            guard.cancel_flag = new_cancel.clone();
+            guard.snapshot = FolderSyncJobSnapshot {
+                state: "running".to_string(),
+                folder_path: folder_trimmed.clone(),
+                resolved_path: resolved_path.clone(),
+                free_disk_mb: free_disk_mb_for_db(&s.db),
+                ..Default::default()
+            };
+            new_cancel
+        };
+
+        let db = s.db.clone();
+        let ipc_prefix = validated_ipc;
+        let lightweight = req.lightweight;
+        let force = req.force;
+        let folder_bg = folder_trimmed.clone();
+        let resolved_bg = resolved_path.clone();
+
+        tokio::task::spawn_blocking(move || {
+            if let Err(err) = execute_folder_sync_worker(
+                db,
+                dir,
+                folder_bg,
+                resolved_bg,
+                ipc_prefix,
+                lightweight,
+                force,
+                cancel_flag,
+                true,
+            ) {
+                update_sync_snapshot(|snap| {
+                    snap.state = "error".to_string();
+                    snap.current_file.clear();
+                    snap.errors.push(err.clone());
+                    snap.summary = format!("同步失败: {err}");
+                });
+            }
+        });
+
+        return Json(json!({
+            "status": "ok",
+            "started": true,
+            "folder_path": folder_trimmed,
+            "resolved_path": resolved_path,
+            "job": current_sync_snapshot()
         }));
     }
 
@@ -1539,186 +2385,20 @@ pub async fn api_sync_patent_folder(
     let lightweight = req.lightweight;
     let force = req.force;
     let resolved_for_resp = resolved_path.clone();
+    let cancel_flag = Arc::new(AtomicBool::new(false));
 
-    let sync_res = tokio::task::spawn_blocking(move || -> Result<Value, String> {
-        let files = list_syncable_files_recursive(&dir)?;
-        let table_files = files
-            .iter()
-            .filter(|f| f.3 == SyncFileKind::Table)
-            .count();
-        let doc_files = files.iter().filter(|f| f.3 == SyncFileKind::Doc).count();
-        let archive_files = files
-            .iter()
-            .filter(|f| f.3 == SyncFileKind::Archive)
-            .count();
-
-        let prev_manifest_raw = db
-            .get_setting(SETTING_SYNC_MANIFEST)
-            .ok()
-            .flatten()
-            .unwrap_or_default();
-        let mut manifest: HashMap<String, String> =
-            serde_json::from_str(&prev_manifest_raw).unwrap_or_default();
-
-        let mut imported_files = 0usize;
-        let mut skipped_unchanged_files = 0usize;
-        let mut total_imported = 0usize;
-        let mut total_filtered = 0usize;
-        let mut total_chunks = 0usize;
-        let mut sample_numbers: Vec<String> = Vec::new();
-        let mut details: Vec<FileSyncResult> = Vec::new();
-        let mut errors: Vec<String> = Vec::new();
-
-        let options = PatentTableImportOptions {
-            ipc_prefix: ipc_prefix.clone(),
+    let sync_res = tokio::task::spawn_blocking(move || {
+        execute_folder_sync_worker(
+            db,
+            dir,
+            folder_trimmed,
+            resolved_for_resp,
+            ipc_prefix,
             lightweight,
-            source_tag: "folder_sync".to_string(),
-        };
-
-        for (name, path, sig, _kind) in &files {
-            let manifest_key = format!("{}|{}|{}", name, ipc_prefix, lightweight);
-            if !force && manifest.get(&manifest_key).is_some_and(|old| old == sig) {
-                skipped_unchanged_files += 1;
-                details.push(FileSyncResult {
-                    filename: name.clone(),
-                    status: "skipped_unchanged".to_string(),
-                    imported: 0,
-                    filtered_out: 0,
-                    chunks: 0,
-                    message: "未变更，已跳过".to_string(),
-                });
-                continue;
-            }
-
-            let bytes = match std::fs::read(path) {
-                Ok(b) => b,
-                Err(e) => {
-                    let msg = format!("{name}: 读取失败 ({e})");
-                    errors.push(msg.clone());
-                    details.push(FileSyncResult {
-                        filename: name.clone(),
-                        status: "error".to_string(),
-                        imported: 0,
-                        filtered_out: 0,
-                        chunks: 0,
-                        message: msg,
-                    });
-                    continue;
-                }
-            };
-
-            match parse_any_patent_bytes(name, &bytes, &options) {
-                Ok(st) => {
-                    if st.matched_patents.is_empty() {
-                        manifest.insert(manifest_key, sig.clone());
-                        total_filtered += st.filtered_out;
-                        details.push(FileSyncResult {
-                            filename: name.clone(),
-                            status: "empty".to_string(),
-                            imported: 0,
-                            filtered_out: st.filtered_out,
-                            chunks: 0,
-                            message: "无匹配专利/文献行".to_string(),
-                        });
-                        continue;
-                    }
-                    for p in &st.matched_patents {
-                        if sample_numbers.len() >= 5 {
-                            break;
-                        }
-                        let label = if !p.patent_number.is_empty() {
-                            p.patent_number.clone()
-                        } else {
-                            p.title.clone()
-                        };
-                        if !label.is_empty() && !sample_numbers.contains(&label) {
-                            sample_numbers.push(label);
-                        }
-                    }
-                    match db
-                        .batch_import_patents_with_chunks(&st.matched_patents, "char-tfidf-v2")
-                    {
-                        Ok((imp, chunks)) => {
-                            manifest.insert(manifest_key, sig.clone());
-                            imported_files += 1;
-                            total_imported += imp;
-                            total_filtered += st.filtered_out;
-                            total_chunks += chunks;
-                            details.push(FileSyncResult {
-                                filename: name.clone(),
-                                status: "imported".to_string(),
-                                imported: imp,
-                                filtered_out: st.filtered_out,
-                                chunks,
-                                message: format!("导入 {imp} 件"),
-                            });
-                        }
-                        Err(e) => {
-                            let msg = format!("{name}: 入库失败 ({e})");
-                            errors.push(msg.clone());
-                            details.push(FileSyncResult {
-                                filename: name.clone(),
-                                status: "error".to_string(),
-                                imported: 0,
-                                filtered_out: st.filtered_out,
-                                chunks: 0,
-                                message: msg,
-                            });
-                        }
-                    }
-                }
-                Err(e) => {
-                    let msg = format!("{name}: {e}");
-                    errors.push(msg.clone());
-                    details.push(FileSyncResult {
-                        filename: name.clone(),
-                        status: "error".to_string(),
-                        imported: 0,
-                        filtered_out: 0,
-                        chunks: 0,
-                        message: msg,
-                    });
-                }
-            }
-        }
-
-        let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-        let summary = format!(
-            "扫描 {} 个文件（表格 {} · 文档 {} · 压缩包 {}）：导入 {} 个（共 {} 件专利/文献），跳过未变更 {} 个",
-            files.len(),
-            table_files,
-            doc_files,
-            archive_files,
-            imported_files,
-            total_imported,
-            skipped_unchanged_files
-        );
-        let manifest_json = serde_json::to_string(&manifest).unwrap_or_else(|_| "{}".to_string());
-        let _ = db.set_settings_batch(&[
-            (SETTING_SYNC_MANIFEST, &manifest_json),
-            (SETTING_SYNC_LAST_AT, &now),
-            (SETTING_SYNC_LAST_SUMMARY, &summary),
-        ]);
-
-        Ok(json!({
-            "status": "ok",
-            "folder_path": folder_trimmed,
-            "resolved_path": resolved_for_resp,
-            "scanned_files": files.len(),
-            "table_files": table_files,
-            "doc_files": doc_files,
-            "archive_files": archive_files,
-            "imported_files": imported_files,
-            "skipped_unchanged_files": skipped_unchanged_files,
-            "imported_patents": total_imported,
-            "filtered_out": total_filtered,
-            "chunks": total_chunks,
-            "sample_numbers": sample_numbers,
-            "last_at": now,
-            "summary": summary,
-            "errors": errors,
-            "details": details
-        }))
+            force,
+            cancel_flag,
+            false,
+        )
     })
     .await;
 
@@ -1984,5 +2664,75 @@ CN118100002A,一种农业灌溉喷头,节水喷头结构,A01G25/02,某农机公�
         let st = db.get_backfill_index_status().expect("status");
         assert_eq!(st["ready_patents"], 2);
         assert_eq!(st["remaining"], 0);
+    }
+
+    #[test]
+    fn dedup_sibling_table_pairs_prefers_jsonl_over_csv() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let sub = tmp.path().join("2026Q3");
+        std::fs::create_dir_all(&sub).expect("mkdir");
+        std::fs::write(
+            sub.join("BIBS_01.csv"),
+            "patent_number,title\nCN990301A,T1\n",
+        )
+        .unwrap();
+        std::fs::write(
+            sub.join("BIBS_01.jsonl"),
+            "{\"patent_number\":\"CN990301A\",\"title\":\"T1\"}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            sub.join("ONLY_CSV.csv"),
+            "patent_number,title\nCN990302A,T2\n",
+        )
+        .unwrap();
+
+        let (kept, deduped) = list_syncable_files_recursive_dedup(tmp.path()).expect("list");
+        assert_eq!(deduped, 1, "同名 .csv + .jsonl 对必须跳过 .csv");
+        assert_eq!(kept.len(), 2);
+        let names: Vec<&str> = kept.iter().map(|x| x.0.as_str()).collect();
+        assert!(names.contains(&"2026Q3/BIBS_01.jsonl"));
+        assert!(names.contains(&"2026Q3/ONLY_CSV.csv"));
+    }
+
+    #[test]
+    fn stream_jsonl_lightweight_skips_chunks_and_vectors_and_respects_cancel() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let jsonl = tmp.path().join("gazette.jsonl");
+        let mut lines = String::new();
+        for i in 1..=6 {
+            let ipc = if i % 2 == 0 { "F23D1/00" } else { "A61G10/02" };
+            lines.push_str(&format!(
+                "{{\"patent_number\":\"CN99040{i}A\",\"title\":\"测试专利 {i}\",\"abstract_text\":\"微压氧舱或燃烧器摘要 {i}\",\"ipc_codes\":\"{ipc}\"}}\n"
+            ));
+        }
+        std::fs::write(&jsonl, lines).expect("write jsonl");
+
+        let db = Database::init(":memory:").expect("init db");
+        let opts = PatentTableImportOptions {
+            ipc_prefix: "F23".to_string(),
+            lightweight: true,
+            source_tag: "folder_sync".to_string(),
+        };
+        let cancel = AtomicBool::new(false);
+        let out = sync_stream_jsonl_file(&db, &jsonl, &opts, &cancel, |_, _, _, _| {})
+            .expect("stream jsonl");
+        assert_eq!(out.imported, 3);
+        assert_eq!(out.filtered_out, 3);
+        assert_eq!(out.chunks, 0, "lightweight 模式不应生成 patent_chunks");
+        assert!(!out.cancelled);
+
+        // 验证轻量公报立即可走 FTS5 搜到，且不污染向量待回填队列
+        let st = db.get_backfill_index_status().expect("status");
+        assert_eq!(st["lightweight_patents"], 3);
+        assert_eq!(st["remaining"], 0);
+        assert_eq!(db.count_embeddings().expect("emb count"), 0);
+
+        // 预设取消标志应立即提前停止
+        let cancel_now = AtomicBool::new(true);
+        let out2 = sync_stream_jsonl_file(&db, &jsonl, &opts, &cancel_now, |_, _, _, _| {})
+            .expect("cancelled stream");
+        assert!(out2.cancelled);
+        assert_eq!(out2.imported, 0);
     }
 }
