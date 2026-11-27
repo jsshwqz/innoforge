@@ -1692,6 +1692,132 @@
         if (pctEl) pctEl.textContent = pct + '%';
     }
 
+    // 统一启动/续跑流水线并等待真实终态（杜绝启动失败或 pending 空报告时假报 100% ✓）
+    function isIdeaReportCompleted(report) {
+        if (!report) return false;
+        if (report.status === 'done') return true;
+        if (report.status === 'error' || report.status === 'analyzing' || report.status === 'pending') return false;
+        return Boolean(report.analysis && String(report.analysis).trim().length > 0);
+    }
+
+    async function waitPipelineSse(ideaId, connId) {
+        await new Promise(function(resolve) {
+            const eventSource = new EventSource('/api/idea/' + encodeURIComponent(ideaId) + '/progress');
+            activeEventSource = eventSource;
+            let sseErrorCount = 0;
+            const timeout = setTimeout(function() {
+                eventSource.close();
+                if (activeEventSource === eventSource) activeEventSource = null;
+                resolve();
+            }, 600000); // 10 min max
+
+            eventSource.onopen = function() {
+                if (connId !== activeSSEConnectionId) { eventSource.close(); return; }
+                sseErrorCount = 0;
+            };
+            eventSource.onmessage = function(e) {
+                if (connId !== activeSSEConnectionId) { eventSource.close(); return; }
+                try {
+                    const progress = JSON.parse(e.data);
+                    updatePipelineStep(
+                        progress.step_index,
+                        progress.status,
+                        progress.sub_step || null,
+                        progress.sub_progress || null,
+                        progress.message || null
+                    );
+                } catch(err) {}
+            };
+            eventSource.addEventListener('done', function() {
+                clearTimeout(timeout);
+                eventSource.close();
+                if (activeEventSource === eventSource) activeEventSource = null;
+                resolve();
+            });
+            eventSource.onerror = function() {
+                if (connId !== activeSSEConnectionId) { eventSource.close(); return; }
+                sseErrorCount += 1;
+                if (sseErrorCount <= 3) return;
+                clearTimeout(timeout);
+                eventSource.close();
+                if (activeEventSource === eventSource) activeEventSource = null;
+                resolve();
+            };
+        });
+    }
+
+    async function pollIdeaReportUntilTerminal(ideaId) {
+        let lastReport = null;
+        for (let attempt = 0; attempt < 60; attempt++) {
+            try {
+                const reportResp = await fetch('/api/idea/' + encodeURIComponent(ideaId) + '/report');
+                if (reportResp.ok) {
+                    const reportData = await reportResp.json();
+                    if (reportData.status === 'ok' && reportData.report) {
+                        lastReport = reportData.report;
+                        if (isIdeaReportCompleted(lastReport) || lastReport.status === 'error') {
+                            return { status: 'ok', report: lastReport };
+                        }
+                        // 若既不是 analyzing 也不是 done/error（例如仍停在 pending），说明流水线未启动，立刻退出避免空等 2 分钟
+                        if (lastReport.status !== 'analyzing') {
+                            return { status: 'not_started', report: lastReport };
+                        }
+                    }
+                }
+            } catch (_) {}
+            await new Promise(function(r) { setTimeout(r, 2000); });
+        }
+        return { status: 'timeout', report: lastReport, message: '推演仍在后台执行或获取报告超时，请稍后刷新查看' };
+    }
+
+    async function runPipelineFlow(ideaId, startUrl, startBody) {
+        document.getElementById('status-area').innerHTML = DOMPurify.sanitize(buildPipelineUI());
+        closeActiveSSE();
+        const connId = ++activeSSEConnectionId;
+
+        const fetchOpts = { method: 'POST' };
+        if (startBody !== null && startBody !== undefined) {
+            fetchOpts.headers = { 'Content-Type': 'application/json' };
+            fetchOpts.body = JSON.stringify(startBody);
+        }
+        const startResp = await fetch(startUrl, fetchOpts);
+        if (!startResp.ok) {
+            throw new Error('启动深度推演失败（HTTP ' + startResp.status + '）');
+        }
+        const startData = await startResp.json();
+        if (startData.status !== 'ok') {
+            throw new Error(startData.message || '启动深度推演失败');
+        }
+
+        await waitPipelineSse(ideaId, connId);
+        const pollRes = await pollIdeaReportUntilTerminal(ideaId);
+        const fill = document.getElementById('pipeline-bar-fill');
+        const pctEl = document.getElementById('pipeline-percent');
+
+        if (pollRes.status === 'ok' && pollRes.report && isIdeaReportCompleted(pollRes.report)) {
+            if (fill) { fill.style.width = '100%'; fill.style.background = '#238636'; }
+            if (pctEl) pctEl.textContent = '100% ✓';
+            displayResults(pollRes.report);
+            loadHistory();
+            showDiscussionPanel();
+        } else if (pollRes.status === 'ok' && pollRes.report && pollRes.report.status === 'error') {
+            if (fill) { fill.style.background = '#f85149'; }
+            if (pctEl) pctEl.textContent = '⚠️ 中断';
+            showStatus('error', pollRes.report.analysis || t('idea.analyzeFail'));
+            displayResults(pollRes.report);
+            loadHistory();
+        } else if (pollRes.status === 'not_started') {
+            if (fill) { fill.style.width = '0%'; fill.style.background = '#d29922'; }
+            if (pctEl) pctEl.textContent = '未启动';
+            showStatus('error', '深度推演未能正常启动，请重试或检查设置中的 AI Key 与网络连接');
+            if (pollRes.report) displayResults(pollRes.report);
+        } else {
+            if (fill) { fill.style.background = '#d29922'; }
+            if (pctEl) pctEl.textContent = '后台运行中...';
+            showStatus('error', pollRes.message || '获取报告超时');
+        }
+    }
+
     // Auto-start analysis on an existing (already submitted) idea
     async function runExistingIdea(ideaId, mode) {
         if (isAnalyzing) return;
@@ -1719,72 +1845,7 @@
                     showStatus('error', analyzeData.message || t('idea.analyzeFail'));
                 }
             } else {
-                document.getElementById('status-area').innerHTML = DOMPurify.sanitize(buildPipelineUI());
-                var sseErrorCount = 0;
-                closeActiveSSE();
-                var connId = ++activeSSEConnectionId;
-                await new Promise(function(resolve) {
-                    var eventSource = new EventSource('/api/idea/' + ideaId + '/progress');
-                    activeEventSource = eventSource;
-                    var pipelineStarted = false;
-                    var timeout = setTimeout(function() { eventSource.close(); if (activeEventSource === eventSource) activeEventSource = null; resolve(); }, 300000);
-
-                    eventSource.onopen = function() {
-                        if (connId !== activeSSEConnectionId) { eventSource.close(); return; }
-                        sseErrorCount = 0;
-                        if (!pipelineStarted) {
-                            pipelineStarted = true;
-                            fetch('/api/idea/pipeline', {
-                                method: 'POST', headers: {'Content-Type': 'application/json'},
-                                body: JSON.stringify({ id: ideaId }),
-                            }).catch(function(e) { console.error('pipeline start failed:', e); });
-                        }
-                    };
-                    eventSource.onmessage = function(e) {
-                        if (connId !== activeSSEConnectionId) { eventSource.close(); return; }
-                        try {
-                            var progress = JSON.parse(e.data);
-                            updatePipelineStep(progress.step_index, progress.status, progress.sub_step || null, progress.sub_progress || null, progress.message || null);
-                        } catch(err) {}
-                    };
-                    eventSource.addEventListener('done', function() { clearTimeout(timeout); eventSource.close(); if (activeEventSource === eventSource) activeEventSource = null; resolve(); });
-                    eventSource.onerror = function() {
-                        if (connId !== activeSSEConnectionId) { eventSource.close(); return; }
-                        sseErrorCount++;
-                        if (sseErrorCount <= 3) return;
-                        clearTimeout(timeout); eventSource.close();
-                        if (activeEventSource === eventSource) activeEventSource = null;
-                        if (!pipelineStarted) {
-                            pipelineStarted = true;
-                            fetch('/api/idea/pipeline', {
-                                method: 'POST', headers: {'Content-Type': 'application/json'},
-                                body: JSON.stringify({ id: ideaId }),
-                            }).catch(function(e) { console.error('pipeline start failed:', e); });
-                        }
-                        resolve();
-                    };
-                });
-                // Poll for report readiness (pipeline may still be running after SSE disconnect)
-                var reportData = null;
-                for (let attempt = 0; attempt < 30; attempt++) {
-                    var reportResp = await fetch('/api/idea/' + ideaId + '/report');
-                    if (!reportResp.ok) { await new Promise(function(r) { setTimeout(r, 2000); }); continue; }
-                    reportData = await reportResp.json();
-                    if (reportData.status === 'ok') break;
-                    await new Promise(function(r) { setTimeout(r, 2000); });
-                }
-                if (!reportData) reportData = { status: 'error', message: '获取报告超时' };
-                if (reportData.status === 'ok') {
-                    var fill = document.getElementById('pipeline-bar-fill');
-                    var pctEl = document.getElementById('pipeline-percent');
-                    if (fill) { fill.style.width = '100%'; fill.style.background = '#238636'; }
-                    if (pctEl) pctEl.textContent = '100% ✓';
-                    displayResults(reportData.report);
-                    loadHistory();
-                    showDiscussionPanel();
-                } else {
-                    showStatus('error', reportData.message || t('idea.analyzeFail'));
-                }
+                await runPipelineFlow(ideaId, '/api/idea/pipeline', { id: ideaId });
             }
         } catch(e) {
             showStatus('error', t('idea.analyzeFail') + '：' + e.message);
@@ -1795,7 +1856,7 @@
         }
     }
 
-    // 断点续跑：从上次失败的步骤继续
+    // 断点续跑：从上次失败的步骤继续（无快照时后端自动转为全新深度推演）
     async function resumePipeline(ideaId) {
         if (isAnalyzing) return;
         isAnalyzing = true;
@@ -1803,70 +1864,8 @@
         btn.disabled = true;
         btn.textContent = t('idea.analyzing');
 
-        document.getElementById('status-area').innerHTML = DOMPurify.sanitize(buildPipelineUI());
-
         try {
-            var sseErrCount = 0;
-            closeActiveSSE();
-            var connId = ++activeSSEConnectionId;
-            await new Promise(function(resolve) {
-                var eventSource = new EventSource('/api/idea/' + ideaId + '/progress');
-                activeEventSource = eventSource;
-                var resumeStarted = false;
-                var timeout = setTimeout(function() { eventSource.close(); if (activeEventSource === eventSource) activeEventSource = null; resolve(); }, 300000);
-
-                eventSource.onopen = function() {
-                    if (connId !== activeSSEConnectionId) { eventSource.close(); return; }
-                    sseErrCount = 0;
-                    if (!resumeStarted) {
-                        resumeStarted = true;
-                        fetch('/api/idea/' + ideaId + '/resume', { method: 'POST' }).catch(function(e) { console.error('resume failed:', e); });
-                    }
-                };
-                eventSource.onmessage = function(e) {
-                    if (connId !== activeSSEConnectionId) { eventSource.close(); return; }
-                    try {
-                        var progress = JSON.parse(e.data);
-                        updatePipelineStep(progress.step_index, progress.status, progress.sub_step || null, progress.sub_progress || null, progress.message || null);
-                    } catch(err) {}
-                };
-                eventSource.addEventListener('done', function() { clearTimeout(timeout); eventSource.close(); if (activeEventSource === eventSource) activeEventSource = null; resolve(); });
-                eventSource.onerror = function() {
-                    if (connId !== activeSSEConnectionId) { eventSource.close(); return; }
-                    sseErrCount++;
-                    if (sseErrCount <= 3) return;
-                    clearTimeout(timeout); eventSource.close();
-                    if (activeEventSource === eventSource) activeEventSource = null;
-                    if (!resumeStarted) {
-                        resumeStarted = true;
-                        fetch('/api/idea/' + ideaId + '/resume', { method: 'POST' }).catch(function(e) { console.error('resume failed:', e); });
-                    }
-                    resolve();
-                };
-            });
-
-            // Poll for report
-            var reportData = null;
-            for (let attempt = 0; attempt < 30; attempt++) {
-                var reportResp = await fetch('/api/idea/' + ideaId + '/report');
-                if (!reportResp.ok) { await new Promise(function(r) { setTimeout(r, 2000); }); continue; }
-                reportData = await reportResp.json();
-                if (reportData.status === 'ok') break;
-                await new Promise(function(r) { setTimeout(r, 2000); });
-            }
-            if (!reportData) reportData = { status: 'error', message: '获取报告超时' };
-
-            if (reportData.status === 'ok') {
-                var fill = document.getElementById('pipeline-bar-fill');
-                var pctEl = document.getElementById('pipeline-percent');
-                if (fill) { fill.style.width = '100%'; fill.style.background = '#238636'; }
-                if (pctEl) pctEl.textContent = '100% ✓';
-                displayResults(reportData.report);
-                loadHistory();
-                showDiscussionPanel();
-            } else {
-                showStatus('error', reportData.message || t('idea.analyzeFail'));
-            }
+            await runPipelineFlow(ideaId, '/api/idea/' + encodeURIComponent(ideaId) + '/resume', null);
         } catch(e) {
             showStatus('error', t('idea.analyzeFail') + '：' + e.message);
         } finally {
@@ -2179,103 +2178,8 @@
                     showStatus('error', analyzeData.message || t('idea.analyzeFail'));
                 }
             } else {
-                // Deep mode: 13-step pipeline with SSE progress
-                // Show pipeline progress UI
-                document.getElementById('status-area').innerHTML = DOMPurify.sanitize(buildPipelineUI());
-
-                // Connect SSE FIRST, then start pipeline (avoids race condition)
-                var sseErrors = 0;
-                closeActiveSSE();
-                var connId = ++activeSSEConnectionId;
-                await new Promise(function(resolve, reject) {
-                    var eventSource = new EventSource('/api/idea/' + submitData.id + '/progress');
-                    activeEventSource = eventSource;
-                    var pipelineStarted = false;
-                    var timeout = setTimeout(function() {
-                        eventSource.close();
-                        if (activeEventSource === eventSource) activeEventSource = null;
-                        resolve();
-                    }, 300000); // 5 min max
-
-                    eventSource.onopen = function() {
-                        if (connId !== activeSSEConnectionId) { eventSource.close(); return; }
-                        // SSE connected — now safe to start pipeline
-                        sseErrors = 0;
-                        if (!pipelineStarted) {
-                            pipelineStarted = true;
-                            fetch('/api/idea/pipeline', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ id: submitData.id }),
-                            }).catch(function(e) { console.error('pipeline start failed:', e); });
-                        }
-                    };
-
-                    eventSource.onmessage = function(e) {
-                        if (connId !== activeSSEConnectionId) { eventSource.close(); return; }
-                        try {
-                            var progress = JSON.parse(e.data);
-                            updatePipelineStep(
-                                progress.step_index,
-                                progress.status,
-                                progress.sub_step || null,
-                                progress.sub_progress || null,
-                                progress.message || null
-                            );
-                        } catch(err) {}
-                    };
-
-                    eventSource.addEventListener('done', function() {
-                        clearTimeout(timeout);
-                        eventSource.close();
-                        if (activeEventSource === eventSource) activeEventSource = null;
-                        resolve();
-                    });
-
-                    eventSource.onerror = function() {
-                        if (connId !== activeSSEConnectionId) { eventSource.close(); return; }
-                        sseErrors++;
-                        if (sseErrors <= 3) return; // let browser auto-reconnect a few times
-                        clearTimeout(timeout);
-                        eventSource.close();
-                        if (activeEventSource === eventSource) activeEventSource = null;
-                        // If pipeline wasn't started yet, start it without SSE
-                        if (!pipelineStarted) {
-                            pipelineStarted = true;
-                            fetch('/api/idea/pipeline', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ id: submitData.id }),
-                            }).catch(function(e) { console.error('pipeline start failed:', e); });
-                        }
-                        resolve();
-                    };
-                });
-
-                // Poll for report readiness (pipeline may still be running after SSE disconnect)
-                var reportData = null;
-                for (let _attempt = 0; _attempt < 30; _attempt++) {
-                    var reportResp = await fetch('/api/idea/' + submitData.id + '/report');
-                    if (!reportResp.ok) { await new Promise(function(r) { setTimeout(r, 2000); }); continue; }
-                    reportData = await reportResp.json();
-                    if (reportData.status === 'ok') break;
-                    await new Promise(function(r) { setTimeout(r, 2000); });
-                }
-                if (!reportData) reportData = { status: 'error', message: '获取报告超时' };
-
-                if (reportData.status === 'ok') {
-                    // Update pipeline bar to 100%
-                    var fill = document.getElementById('pipeline-bar-fill');
-                    var pctEl = document.getElementById('pipeline-percent');
-                    if (fill) { fill.style.width = '100%'; fill.style.background = '#238636'; }
-                    if (pctEl) pctEl.textContent = '100% ✓';
-
-                    displayResults(reportData.report);
-                    loadHistory();
-                    showDiscussionPanel();
-                } else {
-                    showStatus('error', reportData.message || t('idea.analyzeFail'));
-                }
+                // Deep mode: 15-step pipeline with SSE progress
+                await runPipelineFlow(submitData.id, '/api/idea/pipeline', { id: submitData.id });
             }
         } catch (e) {
             showStatus('error', t('idea.analyzeFail') + '：' + e.message);
@@ -3044,8 +2948,14 @@
                 titleEl.style.cssText = 'margin:0;color:#f0f6fc;';
                 titleEl.textContent = idea.title || '未命名创意';
                 var statusBadge = document.createElement('span');
-                statusBadge.style.cssText = 'padding:2px 10px;border-radius:12px;font-size:12px;background:#d2992222;color:#d29922;border:1px solid #d2992266;';
-                statusBadge.textContent = idea.status === 'error' ? '⚠️ 上次推演中断' : '⏳ 待推演（尚未生成深度分析）';
+                const isErr = idea.status === 'error';
+                const isRunning = idea.status === 'analyzing';
+                statusBadge.style.cssText = isRunning
+                    ? 'padding:2px 10px;border-radius:12px;font-size:12px;background:#1f6feb22;color:#58a6ff;border:1px solid #58a6ff66;'
+                    : 'padding:2px 10px;border-radius:12px;font-size:12px;background:#d2992222;color:#d29922;border:1px solid #d2992266;';
+                statusBadge.textContent = isErr
+                    ? '⚠️ 上次推演中断'
+                    : (isRunning ? '🔄 深度推演正在运行中' : '⏳ 待推演（尚未生成深度分析）');
                 header.appendChild(titleEl);
                 header.appendChild(statusBadge);
                 card.appendChild(header);
@@ -3062,8 +2972,16 @@
                     var startBtn = document.createElement('button');
                     startBtn.type = 'button';
                     startBtn.style.cssText = 'padding:8px 18px;background:#238636;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;';
-                    startBtn.textContent = '🚀 立即启动深度推演';
-                    startBtn.addEventListener('click', function() { resumePipeline(idea.id); });
+                    startBtn.textContent = isErr
+                        ? '🔄 断点续跑深度推演'
+                        : (isRunning ? '📡 连接/查看实时进度' : '🚀 立即启动深度推演');
+                    startBtn.addEventListener('click', function() {
+                        if (isErr) {
+                            resumePipeline(idea.id);
+                        } else {
+                            runExistingIdea(idea.id, 'deep');
+                        }
+                    });
                     btnRow.appendChild(startBtn);
                 }
                 card.appendChild(btnRow);
@@ -3138,10 +3056,11 @@
             const chatInputEl = document.getElementById('chat-input');
             if (chatInputEl) chatInputEl.focus();
         } else if ((autostart === 'quick' || autostart === 'deep') && loaded.status === 'pending' && !(loaded.analysis && loaded.analysis.trim())) {
+            const targetMode = autostart === 'quick' ? 'quick' : 'deep';
             if (typeof setAnalysisMode === 'function') {
-                setAnalysisMode(autostart === 'quick' ? 'quick' : 'deep');
+                setAnalysisMode(targetMode);
             }
-            resumePipeline(targetId);
+            runExistingIdea(targetId, targetMode);
         }
     }
 

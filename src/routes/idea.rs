@@ -1037,7 +1037,45 @@ pub async fn api_idea_messages(
 
 // ── Pipeline API ─────────────────────────────────────────────────────
 
-/// POST /api/idea/pipeline — 启动 13 步创新验证流水线
+/// 注册一条带历史事件缓冲的 SSE 进度通道（防止快步骤在客户端连上 SSE 前丢失，也支持断线重连回放）
+fn register_pipeline_channel(
+    s: &AppState,
+    idea_id: &str,
+) -> tokio::sync::broadcast::Sender<PipelineProgress> {
+    let (tx, mut recorder_rx) = tokio::sync::broadcast::channel::<PipelineProgress>(64);
+    let history = std::sync::Arc::new(std::sync::Mutex::new(Vec::<PipelineProgress>::new()));
+    {
+        let mut channels = s
+            .pipeline_channels
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        channels.insert(
+            idea_id.to_string(),
+            super::PipelineChannelEntry {
+                sender: tx.clone(),
+                history: history.clone(),
+                created_at: std::time::Instant::now(),
+            },
+        );
+    }
+    tokio::spawn(async move {
+        loop {
+            match recorder_rx.recv().await {
+                Ok(progress) => {
+                    let mut h = history.lock().unwrap_or_else(|e| e.into_inner());
+                    if h.len() < 256 {
+                        h.push(progress);
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
+    tx
+}
+
+/// POST /api/idea/pipeline — 启动 15 步创新验证流水线
 pub async fn api_idea_pipeline(
     State(s): State<AppState>,
     Json(req): Json<serde_json::Value>,
@@ -1047,7 +1085,7 @@ pub async fn api_idea_pipeline(
         return Json(json!({"status": "error", "message": "缺少创意 ID"}));
     }
 
-    let idea = match s.db.get_idea(id) {
+    let mut idea = match s.db.get_idea(id) {
         Ok(Some(i)) => i,
         _ => return Json(json!({"status": "error", "message": "创意不存在"})),
     };
@@ -1055,21 +1093,27 @@ pub async fn api_idea_pipeline(
         return Json(json!({"status": "error", "message": breaker_msg}));
     }
 
-    // 创建进度广播通道 / Create broadcast channel for progress
-    let (tx, _) = tokio::sync::broadcast::channel::<PipelineProgress>(64);
+    // 幂等去重：若该创意已有活跃流水线通道，直接复用并由 SSE 回放已完成的进度事件，避免重复扣费
     {
-        let mut channels = s
+        let channels = s
             .pipeline_channels
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        channels.insert(
-            id.to_string(),
-            super::PipelineChannelEntry {
-                sender: tx.clone(),
-                created_at: std::time::Instant::now(),
-            },
-        );
+        if let Some(entry) = channels.get(id) {
+            if entry.created_at.elapsed() < std::time::Duration::from_secs(600) {
+                return Json(
+                    json!({"status": "ok", "message": "流水线已在运行中，正在连接实时进度"}),
+                );
+            }
+        }
     }
+
+    // 启动前立刻置为 analyzing，避免前端轮询 /report 时误把旧 pending 状态当成已完成
+    idea.status = "analyzing".into();
+    let _ = s.db.update_idea(&idea);
+
+    // 创建带回放缓存的进度广播通道 / Create broadcast channel with replay buffer
+    let tx = register_pipeline_channel(&s, id);
 
     // Build runner from config
     let config = s.config.read().unwrap_or_else(|e| e.into_inner()).clone();
@@ -1218,18 +1262,31 @@ pub async fn api_idea_pipeline(
     Json(json!({"status": "ok", "message": "流水线已启动"}))
 }
 
-/// POST /api/idea/:id/resume — 断点续跑：从上次中断的步骤继续
-/// Resume pipeline from last saved snapshot
+/// POST /api/idea/:id/resume — 断点续跑：从上次中断的步骤继续（若尚无快照则自动转为全新启动深度推演流水线）
+/// Resume pipeline from last saved snapshot, or start a fresh pipeline when no snapshot exists yet.
 pub async fn api_idea_resume(
     State(s): State<AppState>,
     Path(id): Path<String>,
 ) -> Json<serde_json::Value> {
-    // 检查是否有快照 / Check if snapshot exists
+    // 若该创意尚无快照（例如仅在对话区聊过的 pending 创意），自动无缝转为全新启动 15 步深度推演
     match s.db.load_pipeline_snapshot(&id) {
         Ok(Some(_)) => {}
-        Ok(None) => return Json(json!({"status": "error", "message": "没有可恢复的管道快照"})),
+        Ok(None) => {
+            return api_idea_pipeline(State(s), Json(json!({ "id": id }))).await;
+        }
         Err(e) => return Json(json!({"status": "error", "message": e.to_string()})),
     }
+
+    if let Err(breaker_msg) = s.db.check_ai_budget_circuit_breaker(Some(&id)) {
+        return Json(json!({"status": "error", "message": breaker_msg}));
+    }
+    if let Ok(Some(mut idea)) = s.db.get_idea(&id) {
+        idea.status = "analyzing".into();
+        let _ = s.db.update_idea(&idea);
+    }
+
+    // 续跑同样建立带回放缓存的 SSE 进度广播通道，确保前端 15 步进度条实时更新
+    let tx = register_pipeline_channel(&s, &id);
 
     let config = s.config.read().unwrap_or_else(|e| e.into_inner()).clone();
     let ai_client = config.ai_client_expert();
@@ -1244,10 +1301,11 @@ pub async fn api_idea_resume(
     );
 
     let idea_id = id.clone();
+    let channels = s.pipeline_channels.clone();
     tokio::spawn(async move {
         use futures::FutureExt;
         tracing::info!("Pipeline 断点续跑: {}", idea_id);
-        let resume_res = match std::panic::AssertUnwindSafe(runner.resume(&idea_id, None))
+        let resume_res = match std::panic::AssertUnwindSafe(runner.resume(&idea_id, Some(tx)))
             .catch_unwind()
             .await
         {
@@ -1280,7 +1338,19 @@ pub async fn api_idea_resume(
                 }
                 tracing::info!("Pipeline 续跑完成: {}", idea_id);
             }
-            Ok(None) => tracing::info!("Pipeline 无需续跑（已完成）: {}", idea_id),
+            Ok(None) => {
+                if let Ok(Some(mut idea)) = db.get_idea(&idea_id) {
+                    if idea.status == "analyzing" {
+                        idea.status = if idea.analysis.trim().is_empty() {
+                            "pending".into()
+                        } else {
+                            "done".into()
+                        };
+                        let _ = db.update_idea(&idea);
+                    }
+                }
+                tracing::info!("Pipeline 无需续跑（已完成）: {}", idea_id);
+            }
             Err(e) => {
                 tracing::error!("Pipeline 续跑失败: {} — {}", idea_id, e);
                 if let Ok(Some(mut idea)) = db.get_idea(&idea_id) {
@@ -1290,6 +1360,8 @@ pub async fn api_idea_resume(
                 }
             }
         }
+        let mut ch = channels.lock().unwrap_or_else(|e| e.into_inner());
+        ch.remove(&idea_id);
     });
 
     Json(json!({"status": "ok", "message": "管道正在恢复执行"}))
@@ -1306,10 +1378,16 @@ pub async fn api_idea_progress(
     let stream = async_stream::stream! {
         // 等待 channel 创建（最多 5 秒，给 pipeline 启动时间）
         let mut rx = None;
+        let mut replay: Vec<PipelineProgress> = Vec::new();
         for _ in 0..10 {
             {
                 let ch = channels.lock().unwrap_or_else(|e| e.into_inner());
                 if let Some(entry) = ch.get(&id) {
+                    replay = entry
+                        .history
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .clone();
                     rx = Some(entry.sender.subscribe());
                     break;
                 }
@@ -1318,6 +1396,10 @@ pub async fn api_idea_progress(
         }
 
         if let Some(mut rx) = rx {
+            for progress in replay {
+                let data = serde_json::to_string(&progress).unwrap_or_default();
+                yield Ok(Event::default().data(data));
+            }
             loop {
                 match rx.recv().await {
                     Ok(progress) => {
@@ -1349,3 +1431,75 @@ pub use idea_reports::*;
 #[path = "idea_ops.rs"]
 mod idea_ops;
 pub use idea_ops::*;
+
+#[cfg(test)]
+mod pipeline_resume_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn api_idea_resume_without_snapshot_falls_back_to_fresh_pipeline_with_sse_channel() {
+        let state = crate::common::init_app_state(":memory:").expect("init app state");
+        let idea = crate::patent::Idea {
+            id: "idea-pending-no-snap".to_string(),
+            title: "测试待推演微压氧舱方案".to_string(),
+            description: "尚未运行过流水线的纯讨论创意".to_string(),
+            input_type: "text".to_string(),
+            status: "pending".to_string(),
+            analysis: String::new(),
+            web_results: "[]".to_string(),
+            patent_results: "[]".to_string(),
+            novelty_score: None,
+            created_at: "2026-11-27T11:00:00Z".to_string(),
+            updated_at: "2026-11-27T11:00:00Z".to_string(),
+            discussion_summary: String::new(),
+        };
+        state.db.insert_idea(&idea).expect("insert idea");
+
+        let resp = api_idea_resume(State(state.clone()), Path(idea.id.clone()))
+            .await
+            .0;
+        assert_eq!(
+            resp["status"], "ok",
+            "无快照的 pending 创意调用 /resume 应无缝转入全新流水线而非报错: {:?}",
+            resp
+        );
+        let updated = state
+            .db
+            .get_idea(&idea.id)
+            .expect("get idea")
+            .expect("idea exists");
+        assert_ne!(
+            updated.status, "pending",
+            "流水线启动后状态不应继续停留在 pending"
+        );
+    }
+
+    #[tokio::test]
+    async fn register_pipeline_channel_records_history_for_late_sse_subscribers() {
+        let state = crate::common::init_app_state(":memory:").expect("init app state");
+        let tx = register_pipeline_channel(&state, "idea-replay-test");
+        let _ = tx.send(PipelineProgress {
+            step: crate::pipeline::state::PipelineStep::ParseInput,
+            step_index: 0,
+            total_steps: 15,
+            status: crate::pipeline::context::StepStatus::Done,
+            message: "ok".into(),
+            sub_step: None,
+            sub_progress: None,
+        });
+        // 让异步记录器消费这条广播消息
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+        let channels = state
+            .pipeline_channels
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let entry = channels.get("idea-replay-test").expect("channel exists");
+        let hist = entry.history.lock().unwrap_or_else(|e| e.into_inner());
+        assert_eq!(hist.len(), 1);
+        assert_eq!(hist[0].step_index, 0);
+        assert!(matches!(
+            hist[0].status,
+            crate::pipeline::context::StepStatus::Done
+        ));
+    }
+}
