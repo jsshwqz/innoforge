@@ -2270,7 +2270,7 @@ function formatReadableLatex(raw) {
     return String(raw)
         .replace(/\$\$([\s\S]{1,300}?)\$\$/g, function(_, expr) { return convertExpr(expr); })
         .replace(/\\\[([\s\S]{1,300}?)\\\]/g, function(_, expr) { return convertExpr(expr); })
-        .replace(/\\\(([^)\n]{1,220}?)\\\)/g, function(_, expr) { return convertExpr(expr); })
+        .replace(/\\\(((?:(?!\\\))[^\n]){1,260}?)\\\)/g, function(_, expr) { return convertExpr(expr); })
         .replace(/\$([^$\n]{1,180}?)\$/g, function(full, expr) {
             if (/^\d+(?:[.,]\d+)?$/.test(expr.trim())) return full;
             return convertExpr(expr);

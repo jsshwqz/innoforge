@@ -2354,7 +2354,12 @@
 
     function toggleIdeaHistoryDrawer() {
         var sb = document.querySelector('.idea-sidebar');
-        if (sb) sb.classList.toggle('drawer-open');
+        if (sb) {
+            sb.classList.toggle('drawer-open');
+            if (sb.classList.contains('drawer-open')) {
+                sb.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        }
     }
 
     function displayResults(idea) {
