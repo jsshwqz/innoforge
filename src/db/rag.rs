@@ -318,6 +318,23 @@ impl Database {
                 &final_description,
             );
             chunks_written += Self::write_chunks_in_tx(&tx, &final_id, &chunks, model_name)?;
+
+            // 同步写入 v2 语义向量，确保批量/目录导入后的专利立即可被「语义向量」模式检索
+            let emb_text = format!("{final_title} {final_abstract} {final_claims}");
+            if !emb_text.trim().is_empty() {
+                let emb = crate::db::vector::compute_tfidf_embedding(&emb_text);
+                let emb_bytes: Vec<u8> = emb.iter().flat_map(|f| f.to_le_bytes()).collect();
+                let emb_hash = emb
+                    .iter()
+                    .fold(0u64, |acc, f| {
+                        acc.wrapping_add(f.to_bits() as u64) ^ 0x9E3779B9u64
+                    })
+                    .to_string();
+                tx.execute(
+                    "INSERT OR REPLACE INTO patents_embedding (patent_id, embedding, model_name, text_hash, updated_at) VALUES (?1, ?2, 'char-tfidf-v2', ?3, datetime('now'))",
+                    rusqlite::params![final_id, rusqlite::types::Value::Blob(emb_bytes), emb_hash],
+                )?;
+            }
             imported += 1;
         }
 

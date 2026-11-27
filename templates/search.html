@@ -118,30 +118,38 @@
 </div>
 <div class="panel page-bottom-panel" id="patent-bulk-import-panel">
 <div class="panel-header">
-<h3 style="margin:0;" data-i18n="bulk.title">📥 批量导入专利表 &amp; 本地/网盘同步目录</h3>
+<h3 style="margin:0;" data-i18n="bulk.title">📥 批量导入专利/文献 &amp; 本地/网盘同步目录</h3>
 </div>
-<p class="bulk-import-hint" data-i18n="bulk.desc">支持直接导入国知局 / Google Patents / 智慧芽 / incoPat 导出的 .xlsx / .csv / .json / .jsonl 轻量著录表，或绑定私人网盘同步文件夹一键增量扫描。已拉取全文/权利要求/附图的专利绝不被覆盖，粗筛命中后再按需补全文。</p>
+<p class="bulk-import-hint" data-i18n="bulk.desc">支持直接导入国知局 / Google Patents / 智慧芽 / incoPat 导出的表格（.xlsx / .csv / .json / .jsonl）、全文文档（.pdf / .ofd / .docx / .txt / .xml）与压缩包（.zip），或绑定本机 / 网盘同步文件夹递归增量扫描。已拉取全文/权利要求/附图的专利绝不被覆盖。</p>
 <div class="bulk-import-grid">
   <div class="bulk-import-card">
-    <div class="bulk-import-subtitle" data-i18n="bulk.uploadTitle">1. 上传专利导出表（多行自动批量入库）</div>
-    <div class="bulk-import-row">
-      <input type="text" id="table-ipc-filter" data-i18n-placeholder="bulk.ipcPlaceholder" placeholder="可选 IPC 赛道过滤（如 H01L,G06F）">
-      <label class="bulk-import-check">
-        <input type="checkbox" id="table-lightweight-cb" checked>
-        <span data-i18n="bulk.lightweightLabel">仅存轻量著录（省空间，命中再按需补全文）</span>
-      </label>
+    <div class="bulk-import-subtitle" data-i18n="bulk.uploadTitle">1. 批量上传文件或整个本地文件夹</div>
+    <div class="bulk-import-field">
+      <label class="bulk-import-field-label" for="table-ipc-filter" data-i18n="bulk.ipcLabel">可选 IPC 赛道过滤（留空 = 导入全部，请勿填文件夹路径）</label>
+      <div class="bulk-import-row">
+        <input type="text" id="table-ipc-filter" data-i18n-placeholder="bulk.ipcPlaceholder" placeholder="如 H01L,G06F（留空则不过滤）">
+        <label class="bulk-import-check">
+          <input type="checkbox" id="table-lightweight-cb" checked>
+          <span data-i18n="bulk.lightweightLabel">仅存轻量著录（省空间，命中再按需补全文）</span>
+        </label>
+      </div>
     </div>
     <div class="bulk-import-row">
-      <input type="file" id="patent-table-input" accept=".xlsx,.csv,.tsv,.json,.jsonl" style="display:none" onchange="handlePatentTableUpload(event)">
-      <button type="button" class="btn-primary btn-sm" id="btn-upload-patent-table" onclick="document.getElementById('patent-table-input').click()" data-i18n="bulk.uploadBtn">📤 选择专利表导入 (.xlsx / .csv)</button>
+      <input type="file" id="patent-table-input" accept=".xlsx,.csv,.tsv,.json,.jsonl,.pdf,.ofd,.docx,.txt,.md,.xml,.html,.htm,.rtf,.tex,.zip" multiple style="display:none" onchange="handlePatentTableUpload(event)">
+      <input type="file" id="patent-folder-input" webkitdirectory directory multiple style="display:none" onchange="handlePatentTableUpload(event)">
+      <button type="button" class="btn-primary btn-sm" id="btn-upload-patent-table" onclick="document.getElementById('patent-table-input').click()" data-i18n="bulk.uploadBtn">📤 选择文件导入 (表/PDF/OFD/ZIP)</button>
+      <button type="button" class="btn-secondary btn-sm" id="btn-upload-patent-folder" onclick="document.getElementById('patent-folder-input').click()" data-i18n="bulk.uploadFolderBtn">📁 选择本地文件夹上传</button>
     </div>
     <div id="table-import-status" class="bulk-import-status"></div>
   </div>
 
   <div class="bulk-import-card">
-    <div class="bulk-import-subtitle" data-i18n="bulk.syncTitle">2. 本地 / 私人网盘同步目录（跨电脑增量同步）</div>
-    <div class="bulk-import-row">
-      <input type="text" id="sync-folder-path" data-i18n-placeholder="bulk.folderPlaceholder" placeholder="填入本机或网盘同步目录绝对路径（如 /mnt/d/OneDrive/Patents）">
+    <div class="bulk-import-subtitle" data-i18n="bulk.syncTitle">2. 本地 / 私人网盘同步目录（递归扫描 · 增量同步）</div>
+    <div class="bulk-import-field">
+      <label class="bulk-import-field-label" for="sync-folder-path" data-i18n="bulk.folderLabel">本机或网盘同步目录绝对路径（自动兼容 Windows F:\... 与 Linux /mnt/...）</label>
+      <div class="bulk-import-row">
+        <input type="text" id="sync-folder-path" data-i18n-placeholder="bulk.folderPlaceholder" placeholder="如 F:\down\专利数据 或 /mnt/d/OneDrive/Patents">
+      </div>
     </div>
     <div class="bulk-import-row">
       <button type="button" class="btn-primary btn-sm" id="btn-sync-folder" onclick="syncPatentFolder(false)" data-i18n="bulk.syncBtn">🔄 一键增量同步</button>
@@ -247,19 +255,24 @@ function clearSearchPdfMeta() {
     'date.fromShort': '起:',
     'date.toShort': '止:',
     'search.bottomUploadTitle': '📎 本地文献上传与暂存',
-    'bulk.title': '📥 批量导入专利表 & 本地/网盘同步目录',
-    'bulk.desc': '支持直接导入国知局 / Google Patents / 智慧芽 / incoPat 导出的 .xlsx / .csv / .json / .jsonl 轻量著录表，或绑定私人网盘同步文件夹一键增量扫描。已拉取全文/权利要求/附图的专利绝不被覆盖，粗筛命中后再按需补全文。',
-    'bulk.uploadTitle': '1. 上传专利导出表（多行自动批量入库）',
-    'bulk.ipcPlaceholder': '可选 IPC 赛道过滤（如 H01L,G06F）',
+    'bulk.title': '📥 批量导入专利/文献 & 本地/网盘同步目录',
+    'bulk.desc': '支持直接导入国知局 / Google Patents / 智慧芽 / incoPat 导出的表格（.xlsx / .csv / .json / .jsonl）、全文文档（.pdf / .ofd / .docx / .txt / .xml）与压缩包（.zip），或绑定本机 / 网盘同步文件夹递归增量扫描。已拉取全文/权利要求/附图的专利绝不被覆盖。',
+    'bulk.uploadTitle': '1. 批量上传文件或整个本地文件夹',
+    'bulk.ipcLabel': '可选 IPC 赛道过滤（留空 = 导入全部，请勿填文件夹路径）',
+    'bulk.ipcPlaceholder': '如 H01L,G06F（留空则不过滤）',
     'bulk.lightweightLabel': '仅存轻量著录（省空间，命中再按需补全文）',
-    'bulk.uploadBtn': '📤 选择专利表导入 (.xlsx / .csv)',
-    'bulk.syncTitle': '2. 本地 / 私人网盘同步目录（跨电脑增量同步）',
-    'bulk.folderPlaceholder': '填入本机或网盘同步目录绝对路径（如 /mnt/d/OneDrive/Patents）',
+    'bulk.uploadBtn': '📤 选择文件导入 (表/PDF/OFD/ZIP)',
+    'bulk.uploadFolderBtn': '📁 选择本地文件夹上传',
+    'bulk.syncTitle': '2. 本地 / 私人网盘同步目录（递归扫描 · 增量同步）',
+    'bulk.folderLabel': '本机或网盘同步目录绝对路径（自动兼容 Windows F:\\... 与 Linux /mnt/...）',
+    'bulk.folderPlaceholder': '如 F:\\down\\专利数据 或 /mnt/d/OneDrive/Patents',
     'bulk.syncBtn': '🔄 一键增量同步',
     'bulk.syncForceBtn': '♻️ 全量重扫',
     'bulk.uploading': '⏳ 正在解析并批量写入本地专利库...',
-    'bulk.syncing': '⏳ 正在增量扫描目录并写入本地专利库...',
+    'bulk.syncing': '⏳ 正在递归增量扫描目录并写入本地专利库...',
     'bulk.enterFolder': '请先填写本地或网盘同步目录路径',
+    'bulk.ipcLooksLikePath': '❌ 左侧「IPC 赛道过滤」框似乎误填了文件夹路径，请先清空该框；目录路径请填在右侧「同步目录」框中。',
+    'bulk.noSupportedFiles': '所选文件夹中未找到受支持的专利表/PDF/OFD/DOCX/ZIP 文件（或均超过 19 MB 单文件上限）',
     'bulk.searchLocalNow': '🔍 立即搜本地库',
     'btn.search': '搜索',
     'btn.stats': '统计',
@@ -362,19 +375,24 @@ function clearSearchPdfMeta() {
     'date.fromShort': 'From:',
     'date.toShort': 'To:',
     'search.bottomUploadTitle': '📎 Local Document Staging & Import',
-    'bulk.title': '📥 Bulk Patent Table Import & Sync Folder',
-    'bulk.desc': 'Import .xlsx / .csv / .json / .jsonl patent tables exported from CNIPA, Google Patents, PatSnap, or incoPat, or bind a local / cloud-drive sync folder for incremental scanning. Existing enriched full text, claims, and drawings are never overwritten.',
-    'bulk.uploadTitle': '1. Upload Patent Export Table (Multi-Row Batch Import)',
-    'bulk.ipcPlaceholder': 'Optional IPC prefix filter (e.g. H01L,G06F)',
+    'bulk.title': '📥 Bulk Patent/Doc Import & Sync Folder',
+    'bulk.desc': 'Import patent tables (.xlsx / .csv / .json / .jsonl), full-text documents (.pdf / .ofd / .docx / .txt / .xml), or .zip bundles, or bind a local / cloud-drive sync folder for recursive incremental scanning. Existing enriched full text, claims, and drawings are never overwritten.',
+    'bulk.uploadTitle': '1. Batch Upload Files or Local Folder',
+    'bulk.ipcLabel': 'Optional IPC prefix filter (blank = import all; do not enter a folder path here)',
+    'bulk.ipcPlaceholder': 'e.g. H01L,G06F (leave blank for all)',
     'bulk.lightweightLabel': 'Lightweight biblio only (save disk, enrich on demand)',
-    'bulk.uploadBtn': '📤 Select Patent Table (.xlsx / .csv)',
-    'bulk.syncTitle': '2. Local / Cloud-Drive Sync Folder (Incremental)',
-    'bulk.folderPlaceholder': 'Absolute path to local or cloud-sync folder (e.g. /mnt/d/OneDrive/Patents)',
+    'bulk.uploadBtn': '📤 Select Files (Table/PDF/OFD/ZIP)',
+    'bulk.uploadFolderBtn': '📁 Upload Local Folder',
+    'bulk.syncTitle': '2. Local / Cloud-Drive Sync Folder (Recursive Incremental)',
+    'bulk.folderLabel': 'Absolute path to local or cloud-sync folder (supports Windows F:\\... & Linux /mnt/...)',
+    'bulk.folderPlaceholder': 'e.g. F:\\down\\Patents or /mnt/d/OneDrive/Patents',
     'bulk.syncBtn': '🔄 Incremental Sync',
     'bulk.syncForceBtn': '♻️ Full Rescan',
     'bulk.uploading': '⏳ Parsing and importing into local patent DB...',
-    'bulk.syncing': '⏳ Scanning folder and importing new/updated tables...',
+    'bulk.syncing': '⏳ Recursively scanning folder and importing new/updated files...',
     'bulk.enterFolder': 'Please enter a local or cloud-sync folder path first',
+    'bulk.ipcLooksLikePath': '❌ The IPC filter box looks like a folder path. Please clear it and put the folder path in the Sync Folder box on the right.',
+    'bulk.noSupportedFiles': 'No supported table/PDF/OFD/DOCX/ZIP files (<= 19 MB) found in selection',
     'bulk.searchLocalNow': '🔍 Search Local DB Now',
     'btn.search': 'Search',
     'btn.stats': 'Stats',
@@ -2376,51 +2394,152 @@ function quickSearchLocalAfterImport(sampleQuery) {
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
+function looksLikeFilePathForIpc(val) {
+    const v = String(val || '').trim();
+    if (!v) return false;
+    return /[\\]|^[A-Za-z]:|^\//.test(v) || v.startsWith('~/') || v.indexOf('://') !== -1;
+}
+
+const BULK_SUPPORTED_EXTS = new Set([
+    'xlsx', 'csv', 'tsv', 'json', 'jsonl',
+    'pdf', 'ofd', 'docx', 'txt', 'md', 'xml', 'html', 'htm', 'rtf', 'tex', 'zip'
+]);
+
 async function handlePatentTableUpload(event) {
-    var file = event && event.target && event.target.files ? event.target.files[0] : null;
-    if (!file) return;
-    var statusEl = document.getElementById('table-import-status');
-    var btn = document.getElementById('btn-upload-patent-table');
-    if (statusEl) {
-        statusEl.style.color = '#58a6ff';
-        statusEl.textContent = t('bulk.uploading');
-    }
-    if (btn) btn.disabled = true;
-    try {
-        var formData = new FormData();
-        formData.append('file', file);
-        var ipcEl = document.getElementById('table-ipc-filter');
-        var lwEl = document.getElementById('table-lightweight-cb');
-        if (ipcEl && ipcEl.value.trim()) formData.append('ipc_prefix', ipcEl.value.trim());
-        if (lwEl && lwEl.checked) formData.append('lightweight', 'true');
-        var resp = await fetch('/api/patents/import-table', { method: 'POST', body: formData });
-        var data = await resp.json();
-        if (data.status !== 'ok') {
-            if (statusEl) {
-                statusEl.style.color = '#f85149';
-                statusEl.textContent = '❌ ' + (data.message || '导入失败');
-            }
-            return;
-        }
+    const rawFiles = event && event.target && event.target.files ? Array.from(event.target.files) : [];
+    if (!rawFiles.length) return;
+    const statusEl = document.getElementById('table-import-status');
+    const btn = document.getElementById('btn-upload-patent-table');
+    const btnFolder = document.getElementById('btn-upload-patent-folder');
+    const ipcEl = document.getElementById('table-ipc-filter');
+    const lwEl = document.getElementById('table-lightweight-cb');
+    const ipcVal = ipcEl ? ipcEl.value.trim() : '';
+
+    if (looksLikeFilePathForIpc(ipcVal)) {
         if (statusEl) {
-            statusEl.style.color = '#3fb950';
-            var samples = Array.isArray(data.sample_numbers) ? data.sample_numbers : [];
-            var firstSample = samples.length > 0 ? samples[0] : '';
-            var msg = i18nLang === 'en'
-                ? ('✅ Imported ' + data.imported + ' / ' + data.total_rows + ' rows (' + data.chunks + ' chunks)' + (data.filtered_out ? ', filtered out ' + data.filtered_out : ''))
-                : ('✅ 已入库 ' + data.imported + ' / ' + data.total_rows + ' 条专利（' + data.chunks + ' 个索引分块）' + (data.filtered_out ? '，按 IPC 过滤 ' + data.filtered_out + ' 条' : ''));
-            statusEl.innerHTML = '';
-            var span = document.createElement('span');
-            span.textContent = msg + (samples.length ? ' · ' + samples.slice(0, 3).join(', ') : '');
-            statusEl.appendChild(span);
-            if (data.imported > 0) {
-                var jumpBtn = document.createElement('button');
-                jumpBtn.type = 'button';
-                jumpBtn.className = 'btn-secondary btn-sm';
-                jumpBtn.style.marginLeft = '8px';
-                jumpBtn.textContent = t('bulk.searchLocalNow');
-                jumpBtn.addEventListener('click', function() { quickSearchLocalAfterImport(firstSample); });
-                statusEl.appendChild(jumpBtn);
+            statusEl.style.color = '#f85149';
+            statusEl.textContent = t('bulk.ipcLooksLikePath');
+        }
+        if (event && event.target) event.target.value = '';
+        return;
+    }
+
+    const maxSingleBytes = 19 * 1024 * 1024;
+    const maxBatchBytes = 14 * 1024 * 1024;
+    const maxBatchCount = 10;
+    const eligible = [];
+    let skippedCount = 0;
+    for (const f of rawFiles) {
+        const fname = f.name || '';
+        if (fname.startsWith('~$') || fname.startsWith('.')) {
+            skippedCount += 1;
+            continue;
+        }
+        const dotIdx = fname.lastIndexOf('.');
+        const ext = dotIdx >= 0 ? fname.slice(dotIdx + 1).toLowerCase() : '';
+        if (!BULK_SUPPORTED_EXTS.has(ext) || f.size === 0 || f.size > maxSingleBytes) {
+            skippedCount += 1;
+            continue;
+        }
+        eligible.push(f);
+    }
+
+    if (!eligible.length) {
+        if (statusEl) {
+            statusEl.style.color = '#d29922';
+            statusEl.textContent = t('bulk.noSupportedFiles');
+        }
+        if (event && event.target) event.target.value = '';
+        return;
+    }
+
+    // 拆分为安全批次（单批 <= 14 MB 且 <= 10 文件），避免超过服务端 20 MB 单次请求上限
+    const batches = [];
+    let curBatch = [];
+    let curBytes = 0;
+    for (const f of eligible) {
+        if (curBatch.length > 0 && (curBatch.length >= maxBatchCount || curBytes + f.size > maxBatchBytes)) {
+            batches.push(curBatch);
+            curBatch = [];
+            curBytes = 0;
+        }
+        curBatch.push(f);
+        curBytes += f.size;
+    }
+    if (curBatch.length > 0) batches.push(curBatch);
+
+    if (btn) btn.disabled = true;
+    if (btnFolder) btnFolder.disabled = true;
+    try {
+        let totalImported = 0;
+        let totalRows = 0;
+        let totalChunks = 0;
+        let totalFiltered = 0;
+        const sampleNumbers = [];
+        const allErrors = [];
+
+        for (let bi = 0; bi < batches.length; bi += 1) {
+            if (statusEl) {
+                statusEl.style.color = '#58a6ff';
+                statusEl.textContent = batches.length > 1
+                    ? (i18nLang === 'en'
+                        ? ('⏳ Uploading batch ' + (bi + 1) + '/' + batches.length + ' (' + eligible.length + ' files)...')
+                        : ('⏳ 正在上传解析第 ' + (bi + 1) + '/' + batches.length + ' 批（共 ' + eligible.length + ' 个受支持文件）...'))
+                    : t('bulk.uploading');
+            }
+            const formData = new FormData();
+            for (const f of batches[bi]) {
+                formData.append('file', f, f.webkitRelativePath || f.name);
+            }
+            if (ipcVal) formData.append('ipc_prefix', ipcVal);
+            if (lwEl && lwEl.checked) formData.append('lightweight', 'true');
+            const resp = await fetch('/api/patents/import-table', { method: 'POST', body: formData });
+            const data = await resp.json();
+            if (data.status !== 'ok') {
+                allErrors.push(data.message || '导入失败');
+                continue;
+            }
+            totalImported += Number(data.imported || 0);
+            totalRows += Number(data.total_rows || 0);
+            totalChunks += Number(data.chunks || 0);
+            totalFiltered += Number(data.filtered_out || 0);
+            if (Array.isArray(data.sample_numbers)) {
+                for (const sn of data.sample_numbers) {
+                    if (sn && sampleNumbers.length < 5 && !sampleNumbers.includes(sn)) sampleNumbers.push(sn);
+                }
+            }
+            if (Array.isArray(data.errors)) {
+                for (const er of data.errors) allErrors.push(er);
+            }
+        }
+
+        if (statusEl) {
+            if (totalImported === 0 && allErrors.length > 0) {
+                statusEl.style.color = '#f85149';
+                statusEl.textContent = '❌ ' + allErrors[0];
+            } else {
+                statusEl.style.color = '#3fb950';
+                const firstSample = sampleNumbers.length > 0 ? sampleNumbers[0] : '';
+                const skippedNote = skippedCount > 0
+                    ? (i18nLang === 'en' ? (', skipped ' + skippedCount + ' unsupported') : ('，跳过 ' + skippedCount + ' 个非目标文件'))
+                    : '';
+                const errNote = allErrors.length > 0 ? (' · ⚠️ ' + allErrors[0]) : '';
+                const msg = i18nLang === 'en'
+                    ? ('✅ Imported ' + totalImported + ' / ' + totalRows + ' item(s) from ' + eligible.length + ' file(s) (' + totalChunks + ' chunks)' + (totalFiltered ? ', filtered out ' + totalFiltered : '') + skippedNote)
+                    : ('✅ 已从 ' + eligible.length + ' 个文件入库 ' + totalImported + ' / ' + totalRows + ' 条专利/文献（' + totalChunks + ' 个索引分块）' + (totalFiltered ? '，按 IPC 过滤 ' + totalFiltered + ' 条' : '') + skippedNote);
+                statusEl.innerHTML = '';
+                const span = document.createElement('span');
+                span.textContent = msg + (sampleNumbers.length ? ' · ' + sampleNumbers.slice(0, 3).join(', ') : '') + errNote;
+                statusEl.appendChild(span);
+                if (totalImported > 0) {
+                    const jumpBtn = document.createElement('button');
+                    jumpBtn.type = 'button';
+                    jumpBtn.className = 'btn-secondary btn-sm';
+                    jumpBtn.style.marginLeft = '8px';
+                    jumpBtn.textContent = t('bulk.searchLocalNow');
+                    jumpBtn.addEventListener('click', function() { quickSearchLocalAfterImport(firstSample); });
+                    statusEl.appendChild(jumpBtn);
+                }
             }
         }
     } catch (err) {
@@ -2430,28 +2549,34 @@ async function handlePatentTableUpload(event) {
         }
     } finally {
         if (btn) btn.disabled = false;
+        if (btnFolder) btnFolder.disabled = false;
         if (event && event.target) event.target.value = '';
     }
 }
 
 async function loadPatentSyncFolderStatus() {
-    var pathEl = document.getElementById('sync-folder-path');
-    var statusEl = document.getElementById('sync-folder-status');
-    var ipcEl = document.getElementById('table-ipc-filter');
-    var lwEl = document.getElementById('table-lightweight-cb');
+    const pathEl = document.getElementById('sync-folder-path');
+    const statusEl = document.getElementById('sync-folder-status');
+    const ipcEl = document.getElementById('table-ipc-filter');
+    const lwEl = document.getElementById('table-lightweight-cb');
     if (!pathEl || !statusEl) return;
     try {
-        var resp = await fetch('/api/patents/sync-folder');
-        var data = await resp.json();
+        const resp = await fetch('/api/patents/sync-folder');
+        const data = await resp.json();
         if (data.status !== 'ok') return;
         if (data.folder_path) pathEl.value = data.folder_path;
-        if (data.ipc_prefix && ipcEl && !ipcEl.value) ipcEl.value = data.ipc_prefix;
+        if (data.ipc_prefix && !looksLikeFilePathForIpc(data.ipc_prefix) && ipcEl && !ipcEl.value) {
+            ipcEl.value = data.ipc_prefix;
+        }
         if (typeof data.lightweight === 'boolean' && lwEl && data.folder_path) lwEl.checked = data.lightweight;
         if (data.folder_path) {
-            var existsText = data.exists
-                ? (i18nLang === 'en' ? ('Folder ready · ' + data.detected_files + ' table file(s)') : ('目录就绪 · 发现 ' + data.detected_files + ' 个专利表文件'))
+            const mappedNote = data.resolved_path ? (' → ' + data.resolved_path) : '';
+            const existsText = data.exists
+                ? (i18nLang === 'en'
+                    ? ('Folder ready' + mappedNote + ' · ' + data.detected_files + ' file(s)')
+                    : ('目录就绪' + mappedNote + ' · 发现 ' + data.detected_files + ' 个可同步文件（表 ' + Number(data.table_files || 0) + ' / 文档 ' + Number(data.doc_files || 0) + ' / 压缩包 ' + Number(data.archive_files || 0) + '）'))
                 : (i18nLang === 'en' ? 'Folder not found on disk' : '当前目录不存在');
-            var lastText = data.last_at ? (' · ' + data.last_at + (data.last_summary ? ' (' + data.last_summary + ')' : '')) : '';
+            const lastText = data.last_at ? (' · ' + data.last_at + (data.last_summary ? ' (' + data.last_summary + ')' : '')) : '';
             statusEl.style.color = data.exists ? '#8b949e' : '#d29922';
             statusEl.textContent = existsText + lastText;
         }
@@ -2459,11 +2584,22 @@ async function loadPatentSyncFolderStatus() {
 }
 
 async function syncPatentFolder(forceRescan) {
-    var pathEl = document.getElementById('sync-folder-path');
-    var statusEl = document.getElementById('sync-folder-status');
-    var btn = document.getElementById('btn-sync-folder');
-    var btnForce = document.getElementById('btn-sync-folder-force');
-    var folderPath = pathEl ? pathEl.value.trim() : '';
+    const pathEl = document.getElementById('sync-folder-path');
+    const statusEl = document.getElementById('sync-folder-status');
+    const btn = document.getElementById('btn-sync-folder');
+    const btnForce = document.getElementById('btn-sync-folder-force');
+    const ipcEl = document.getElementById('table-ipc-filter');
+    const lwEl = document.getElementById('table-lightweight-cb');
+    const folderPath = pathEl ? pathEl.value.trim() : '';
+    const ipcVal = ipcEl ? ipcEl.value.trim() : '';
+
+    if (looksLikeFilePathForIpc(ipcVal)) {
+        if (statusEl) {
+            statusEl.style.color = '#f85149';
+            statusEl.textContent = t('bulk.ipcLooksLikePath');
+        }
+        return;
+    }
     if (!folderPath) {
         if (statusEl) {
             statusEl.style.color = '#d29922';
@@ -2478,20 +2614,18 @@ async function syncPatentFolder(forceRescan) {
     if (btn) btn.disabled = true;
     if (btnForce) btnForce.disabled = true;
     try {
-        var ipcEl = document.getElementById('table-ipc-filter');
-        var lwEl = document.getElementById('table-lightweight-cb');
-        var resp = await fetch('/api/patents/sync-folder', {
+        const resp = await fetch('/api/patents/sync-folder', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 folder_path: folderPath,
-                ipc_prefix: ipcEl ? ipcEl.value.trim() : '',
+                ipc_prefix: ipcVal,
                 lightweight: lwEl ? Boolean(lwEl.checked) : false,
                 save_only: false,
                 force: Boolean(forceRescan)
             })
         });
-        var data = await resp.json();
+        const data = await resp.json();
         if (data.status !== 'ok') {
             if (statusEl) {
                 statusEl.style.color = '#f85149';
@@ -2501,13 +2635,28 @@ async function syncPatentFolder(forceRescan) {
         }
         if (statusEl) {
             statusEl.style.color = '#3fb950';
-            var msg = i18nLang === 'en'
-                ? ('✅ Scanned ' + data.scanned_files + ' file(s): imported ' + data.imported_files + ' (' + data.imported_patents + ' patents), skipped unchanged ' + data.skipped_unchanged_files)
-                : ('✅ ' + (data.summary || ('已导入 ' + data.imported_patents + ' 件专利')));
+            const mappedNote = data.resolved_path ? (' [' + data.resolved_path + '] ') : '';
+            let msg = i18nLang === 'en'
+                ? ('✅' + mappedNote + ' Scanned ' + data.scanned_files + ' file(s): imported ' + data.imported_files + ' (' + data.imported_patents + ' item(s)), skipped unchanged ' + data.skipped_unchanged_files)
+                : ('✅' + mappedNote + (data.summary || ('已导入 ' + data.imported_patents + ' 件专利/文献')));
             if (Array.isArray(data.errors) && data.errors.length > 0) {
                 msg += ' · ⚠️ ' + data.errors[0];
             }
-            statusEl.textContent = msg;
+            statusEl.innerHTML = '';
+            const span = document.createElement('span');
+            span.textContent = msg;
+            statusEl.appendChild(span);
+            if (Number(data.imported_patents || 0) > 0) {
+                const samples = Array.isArray(data.sample_numbers) ? data.sample_numbers : [];
+                const firstSample = samples.length > 0 ? samples[0] : '';
+                const jumpBtn = document.createElement('button');
+                jumpBtn.type = 'button';
+                jumpBtn.className = 'btn-secondary btn-sm';
+                jumpBtn.style.marginLeft = '8px';
+                jumpBtn.textContent = t('bulk.searchLocalNow');
+                jumpBtn.addEventListener('click', function() { quickSearchLocalAfterImport(firstSample); });
+                statusEl.appendChild(jumpBtn);
+            }
         }
     } catch (err) {
         if (statusEl) {

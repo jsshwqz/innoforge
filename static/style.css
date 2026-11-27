@@ -1379,6 +1379,17 @@ input[type="checkbox"] { accent-color: var(--accent); color-scheme: dark; }
   flex: 1;
   min-width: 180px;
 }
+.bulk-import-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+}
+.bulk-import-field-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
 .bulk-import-check {
   display: inline-flex;
   align-items: center;

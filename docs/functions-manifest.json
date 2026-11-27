@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-26T16:38:18.899Z",
+  "generatedAt": "2026-11-27T03:58:21.768Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -748,6 +748,7 @@
         "loadHistory",
         "loadPatentSyncFolderStatus",
         "loadSearchPdfMeta",
+        "looksLikeFilePathForIpc",
         "parseRow",
         "previewPdfContent",
         "quickSearchLocalAfterImport",
