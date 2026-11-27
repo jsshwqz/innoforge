@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-27T03:58:21.768Z",
+  "generatedAt": "2026-11-27T06:06:28.650Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -698,6 +698,7 @@
       "references": [
         "analyzeSearchResults",
         "batchSummarize",
+        "cancelPatentFolderSync",
         "clearHistory",
         "compareMatrix",
         "doSearch",
@@ -722,6 +723,7 @@
         "batchSummarize",
         "buildRequest",
         "buildSearchExportToolbar",
+        "cancelPatentFolderSync",
         "clearHistory",
         "clearSearchPdfMeta",
         "compareMatrix",
@@ -750,10 +752,12 @@
         "loadSearchPdfMeta",
         "looksLikeFilePathForIpc",
         "parseRow",
+        "pollPatentSyncProgressOnce",
         "previewPdfContent",
         "quickSearchLocalAfterImport",
         "removePdfFile",
         "renderBarList",
+        "renderFolderSyncJob",
         "renderHistory",
         "renderIpcAnchors",
         "renderPagination",
@@ -775,7 +779,10 @@
         "sendUploadedDocToCompare",
         "sendUploadedDocToIdea",
         "serpapiBalancePromise",
+        "setPatentSyncButtonsRunning",
         "showStats",
+        "startPatentSyncPolling",
+        "stopPatentSyncPolling",
         "syncPatentFolder",
         "toggleAllChecks",
         "toggleIpcAnchor",

@@ -354,28 +354,39 @@ impl Database {
     }
 
     /// MB0b: 查询存量专利的向量与分块索引覆盖状态
+    ///
+    /// 注：轻量著录批量导入（`source LIKE '%_lightweight'`）默认仅走 FTS5 词法粗筛，命中后再按需补全文与向量，
+    /// 因此不计入待回填向量队列（单独在 `lightweight_patents` 披露），防止百万级公报拖垮本地全表向量检索。
     pub fn get_backfill_index_status(&self) -> Result<serde_json::Value, rusqlite::Error> {
         let c = self.conn();
-        let total_patents: i64 =
-            c.query_row("SELECT COUNT(*) FROM patents", [], |row| row.get(0))?;
+        let all_patents: i64 = c.query_row("SELECT COUNT(*) FROM patents", [], |row| row.get(0))?;
+        let lightweight_patents: i64 = c.query_row(
+            "SELECT COUNT(*) FROM patents WHERE COALESCE(source, '') LIKE '%_lightweight'",
+            [],
+            |row| row.get(0),
+        )?;
+        let total_patents = (all_patents - lightweight_patents).max(0);
         let embedded_v2: i64 = c.query_row(
             "SELECT COUNT(*) FROM patents_embedding pe
              INNER JOIN patents p ON p.id = pe.patent_id
-             WHERE pe.model_name = 'char-tfidf-v2'",
+             WHERE pe.model_name = 'char-tfidf-v2'
+               AND COALESCE(p.source, '') NOT LIKE '%_lightweight'",
             [],
             |row| row.get(0),
         )?;
         let chunked_patents: i64 = c.query_row(
             "SELECT COUNT(DISTINCT pc.patent_id) FROM patent_chunks pc
-             INNER JOIN patents p ON p.id = pc.patent_id",
+             INNER JOIN patents p ON p.id = pc.patent_id
+             WHERE COALESCE(p.source, '') NOT LIKE '%_lightweight'",
             [],
             |row| row.get(0),
         )?;
         let needing_work: i64 = c.query_row(
             "SELECT COUNT(*) FROM patents p
              LEFT JOIN patents_embedding pe ON p.id = pe.patent_id AND pe.model_name = 'char-tfidf-v2'
-             WHERE pe.patent_id IS NULL
-                OR NOT EXISTS (SELECT 1 FROM patent_chunks pc WHERE pc.patent_id = p.id)",
+             WHERE COALESCE(p.source, '') NOT LIKE '%_lightweight'
+               AND (pe.patent_id IS NULL
+                    OR NOT EXISTS (SELECT 1 FROM patent_chunks pc WHERE pc.patent_id = p.id))",
             [],
             |row| row.get(0),
         )?;
@@ -388,6 +399,8 @@ impl Database {
         Ok(json!({
             "status": "ok",
             "total_patents": total_patents,
+            "all_patents": all_patents,
+            "lightweight_patents": lightweight_patents,
             "ready_patents": ready_patents,
             "embedded_patents": embedded_v2,
             "chunked_patents": chunked_patents,
@@ -409,8 +422,9 @@ impl Database {
                 "SELECT p.id, COALESCE(p.title, ''), COALESCE(p.abstract_text, ''), COALESCE(p.claims, ''), COALESCE(p.description, '')
                  FROM patents p
                  LEFT JOIN patents_embedding pe ON p.id = pe.patent_id AND pe.model_name = 'char-tfidf-v2'
-                 WHERE pe.patent_id IS NULL
-                    OR NOT EXISTS (SELECT 1 FROM patent_chunks pc WHERE pc.patent_id = p.id)
+                 WHERE COALESCE(p.source, '') NOT LIKE '%_lightweight'
+                   AND (pe.patent_id IS NULL
+                        OR NOT EXISTS (SELECT 1 FROM patent_chunks pc WHERE pc.patent_id = p.id))
                  LIMIT ?1",
             )?;
             let rows = stmt.query_map(rusqlite::params![limit as i64], |row| {
@@ -579,5 +593,38 @@ mod tests {
             st["ready_patents"].as_i64().unwrap_or(0) + st["remaining"].as_i64().unwrap_or(0),
             st["total_patents"].as_i64().unwrap_or(0)
         );
+    }
+
+    #[test]
+    fn backfill_status_excludes_lightweight_gazette_stubs_from_remaining() {
+        let db = Database::init(":memory:").expect("init db");
+        let full = crate::patent::Patent {
+            id: "pat-full-1".to_string(),
+            patent_number: "CN990201A".to_string(),
+            title: "全量富化微压氧舱控制装置".to_string(),
+            abstract_text: "包含完整权利要求与说明书。".to_string(),
+            source: "google_patents".to_string(),
+            ..Default::default()
+        };
+        let lw = crate::patent::Patent {
+            id: "pat-lw-1".to_string(),
+            patent_number: "CN990202A".to_string(),
+            title: "公报轻量著录专利".to_string(),
+            abstract_text: "仅用于 FTS5 粗筛。".to_string(),
+            source: "folder_sync_lightweight".to_string(),
+            ..Default::default()
+        };
+        db.batch_import_patents_chunked(&[full], false, "char-tfidf-v2", None)
+            .expect("import full");
+        db.batch_import_patents_chunked(&[lw], true, "char-tfidf-v2", None)
+            .expect("import lightweight");
+
+        let st = db.get_backfill_index_status().expect("status");
+        assert_eq!(st["all_patents"], 2);
+        assert_eq!(st["lightweight_patents"], 1);
+        assert_eq!(st["total_patents"], 1);
+        assert_eq!(st["ready_patents"], 1);
+        assert_eq!(st["remaining"], 0);
+        assert_eq!(st["done"], true);
     }
 }

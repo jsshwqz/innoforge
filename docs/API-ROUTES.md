@@ -5,7 +5,7 @@
 > `node scripts/gen_route_inventory.js`
 > 逐条「收什么、回什么」的契约（路径参数 / 请求体字段 / 响应键）见 `docs/API-CONTRACTS.md`，同样自动生成。
 
-共 **179** 条路由：页面/静态 9 条，`/api` 接口 170 条。
+共 **181** 条路由：页面/静态 9 条，`/api` 接口 172 条。
 
 ## 说明：清单只回答「有哪些端点」
 
@@ -174,22 +174,24 @@
 | 158 | POST | `/api/patents/import` | `routes::api_import_patents` | src/common.rs:939 |
 | 159 | POST | `/api/patents/import-table` | `routes::api_import_patent_table` | src/common.rs:940 |
 | 160 | GET / POST | `/api/patents/sync-folder` | `routes::api_get_patent_sync_folder` | src/common.rs:944 |
-| 161 | POST | `/api/backup/export` | `routes::api_backup_export` | src/common.rs:948 |
-| 162 | POST | `/api/backup/check` | `routes::api_backup_check` | src/common.rs:949 |
-| 163 | GET / POST | `/api/collections` | `routes::api_list_collections` | src/common.rs:951 |
-| 164 | DELETE | `/api/collections/:id` | `routes::api_delete_collection` | src/common.rs:955 |
-| 165 | GET | `/api/collections/:id/patents` | `routes::api_get_collection_patents` | src/common.rs:959 |
-| 166 | POST | `/api/collections/:id/add` | `routes::api_add_to_collection` | src/common.rs:963 |
-| 167 | DELETE | `/api/collections/:id/remove/:patent_id` | `routes::api_remove_from_collection` | src/common.rs:967 |
-| 168 | GET / POST | `/api/patents/:id/tags` | `routes::api_get_patent_tags` | src/common.rs:972 |
-| 169 | DELETE | `/api/patents/:id/tags/:tag` | `routes::api_remove_tag` | src/common.rs:976 |
-| 170 | GET | `/api/patents/:id/collections` | `routes::api_get_patent_collections` | src/common.rs:980 |
-| 171 | GET | `/api/tags` | `routes::api_list_all_tags` | src/common.rs:984 |
-| 172 | POST | `/api/upload/compare` | `routes::api_upload_compare` | src/common.rs:986 |
-| 173 | POST | `/api/upload/ingest-local` | `routes::api_upload_ingest_local` | src/common.rs:987 |
-| 174 | POST | `/api/upload/extract` | `routes::api_upload_extract` | src/common.rs:991 |
-| 175 | POST | `/api/upload/extract/stream` | `routes::api_upload_extract_stream` | src/common.rs:992 |
-| 176 | POST | `/api/upload/pdf-store` | `routes::api_upload_pdf_store` | src/common.rs:996 |
-| 177 | GET | `/api/patent/:id/numeral-check` | `routes::api_patent_numeral_check` | src/common.rs:998 |
-| 178 | POST | `/api/ai/numeral-consistency-check` | `routes::api_ai_numeral_consistency_check` | src/common.rs:1002 |
-| 179 | GET | `/static/*path` | `serve_static_embedded` | src/common.rs:1009 |
+| 161 | GET | `/api/patents/sync-folder/progress` | `routes::api_get_patent_sync_progress` | src/common.rs:948 |
+| 162 | POST | `/api/patents/sync-folder/cancel` | `routes::api_cancel_patent_sync` | src/common.rs:952 |
+| 163 | POST | `/api/backup/export` | `routes::api_backup_export` | src/common.rs:956 |
+| 164 | POST | `/api/backup/check` | `routes::api_backup_check` | src/common.rs:957 |
+| 165 | GET / POST | `/api/collections` | `routes::api_list_collections` | src/common.rs:959 |
+| 166 | DELETE | `/api/collections/:id` | `routes::api_delete_collection` | src/common.rs:963 |
+| 167 | GET | `/api/collections/:id/patents` | `routes::api_get_collection_patents` | src/common.rs:967 |
+| 168 | POST | `/api/collections/:id/add` | `routes::api_add_to_collection` | src/common.rs:971 |
+| 169 | DELETE | `/api/collections/:id/remove/:patent_id` | `routes::api_remove_from_collection` | src/common.rs:975 |
+| 170 | GET / POST | `/api/patents/:id/tags` | `routes::api_get_patent_tags` | src/common.rs:980 |
+| 171 | DELETE | `/api/patents/:id/tags/:tag` | `routes::api_remove_tag` | src/common.rs:984 |
+| 172 | GET | `/api/patents/:id/collections` | `routes::api_get_patent_collections` | src/common.rs:988 |
+| 173 | GET | `/api/tags` | `routes::api_list_all_tags` | src/common.rs:992 |
+| 174 | POST | `/api/upload/compare` | `routes::api_upload_compare` | src/common.rs:994 |
+| 175 | POST | `/api/upload/ingest-local` | `routes::api_upload_ingest_local` | src/common.rs:995 |
+| 176 | POST | `/api/upload/extract` | `routes::api_upload_extract` | src/common.rs:999 |
+| 177 | POST | `/api/upload/extract/stream` | `routes::api_upload_extract_stream` | src/common.rs:1000 |
+| 178 | POST | `/api/upload/pdf-store` | `routes::api_upload_pdf_store` | src/common.rs:1004 |
+| 179 | GET | `/api/patent/:id/numeral-check` | `routes::api_patent_numeral_check` | src/common.rs:1006 |
+| 180 | POST | `/api/ai/numeral-consistency-check` | `routes::api_ai_numeral_consistency_check` | src/common.rs:1010 |
+| 181 | GET | `/static/*path` | `serve_static_embedded` | src/common.rs:1017 |
