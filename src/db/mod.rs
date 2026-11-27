@@ -30,6 +30,8 @@ use std::sync::Mutex;
 /// 数据库实例 / Database instance
 pub struct Database {
     conn: Mutex<Connection>,
+    /// 主库文件路径（`:memory:` 内存库为 `None`），供独立 WAL 批量写入连接与磁盘守卫无锁读取。
+    db_path: Option<std::path::PathBuf>,
 }
 
 impl Database {
@@ -85,8 +87,18 @@ impl Database {
 
         migrations::run(&conn, current_version, Self::SCHEMA_VERSION)?;
 
+        let db_path = {
+            let trimmed = path.trim();
+            if trimmed.is_empty() || trimmed == ":memory:" || trimmed.starts_with("file::memory:") {
+                None
+            } else {
+                Some(std::path::PathBuf::from(trimmed))
+            }
+        };
+
         Ok(Self {
             conn: Mutex::new(conn),
+            db_path,
         })
     }
 

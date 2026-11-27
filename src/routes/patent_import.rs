@@ -31,7 +31,7 @@ const MAX_SYNC_FILES: usize = 500;
 const MAX_WALK_DEPTH: usize = 6;
 const MAX_ZIP_ENTRIES: usize = 100;
 const MAX_ZIP_TOTAL_UNCOMPRESSED: u64 = 100 * 1024 * 1024; // 100 MB 防压缩炸弹
-const STREAM_BATCH_ROWS: usize = 2000;
+const STREAM_BATCH_ROWS: usize = 500;
 const MIN_FREE_DISK_MB: u64 = 1024; // 低于 1 GB 自动暂停同步保护硬盘
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -2245,6 +2245,8 @@ pub async fn api_get_patent_sync_folder(State(s): State<AppState>) -> Json<Value
             .flatten()
             .unwrap_or_default();
 
+    let folder_for_scan = folder_path.clone();
+    let db_path_for_disk = s.db.main_db_file_path();
     let (
         exists,
         detected_files,
@@ -2253,20 +2255,25 @@ pub async fn api_get_patent_sync_folder(State(s): State<AppState>) -> Json<Value
         doc_files,
         archive_files,
         resolved_path,
-    ) = if folder_path.trim().is_empty() {
-        (false, 0usize, 0usize, 0usize, 0usize, 0usize, None)
-    } else {
-        let (p, mapped) = resolve_local_folder_path(&folder_path);
+        free_disk_mb,
+    ) = tokio::task::spawn_blocking(move || {
+        let free_mb = db_path_for_disk.as_deref().and_then(free_disk_mb_for_path);
+        if folder_for_scan.trim().is_empty() {
+            return (false, 0usize, 0usize, 0usize, 0usize, 0usize, None, free_mb);
+        }
+        let (p, mapped) = resolve_local_folder_path(&folder_for_scan);
         if p.is_dir() {
             let (list, deduped) = list_syncable_files_recursive_dedup(&p).unwrap_or_default();
             let t = list.iter().filter(|f| f.3 == SyncFileKind::Table).count();
             let d = list.iter().filter(|f| f.3 == SyncFileKind::Doc).count();
             let a = list.iter().filter(|f| f.3 == SyncFileKind::Archive).count();
-            (true, list.len(), deduped, t, d, a, mapped)
+            (true, list.len(), deduped, t, d, a, mapped, free_mb)
         } else {
-            (false, 0, 0, 0, 0, 0, mapped)
+            (false, 0, 0, 0, 0, 0, mapped, free_mb)
         }
-    };
+    })
+    .await
+    .unwrap_or((false, 0, 0, 0, 0, 0, None, None));
 
     Json(json!({
         "status": "ok",
@@ -2280,7 +2287,7 @@ pub async fn api_get_patent_sync_folder(State(s): State<AppState>) -> Json<Value
         "table_files": table_files,
         "doc_files": doc_files,
         "archive_files": archive_files,
-        "free_disk_mb": free_disk_mb_for_db(&s.db),
+        "free_disk_mb": free_disk_mb,
         "last_at": last_at,
         "last_summary": last_summary,
         "job": current_sync_snapshot()
