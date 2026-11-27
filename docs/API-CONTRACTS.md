@@ -141,7 +141,7 @@
 | 109 | GET | `/api/idea/list` | — | — | — | JSON（§109） | `routes::api_idea_list` | `src/routes/idea.rs:429` |
 | 110 | GET | `/api/idea/:id` | `id` | — | — | JSON（§110） | `routes::api_idea_get` | `src/routes/idea.rs:397` |
 | 111 | POST | `/api/idea/:id/delete` | `id` | — | — | JSON（§111） | `routes::api_idea_delete` | `src/routes/idea.rs:439` |
-| 112 | GET | `/api/idea/:id/progress` | `id` | — | — | SSE 事件流（text/event-stream） | `routes::api_idea_progress` | `src/routes/idea.rs:1371` |
+| 112 | GET | `/api/idea/:id/progress` | `id` | — | — | SSE 事件流（text/event-stream） | `routes::api_idea_progress` | `src/routes/idea.rs:1385` |
 | 113 | POST | `/api/idea/:id/resume` | `id` | — | — | JSON（§113） | `routes::api_idea_resume` | `src/routes/idea.rs:1267` |
 | 114 | GET / POST | `/api/idea/:id/research-state` | `id` | `ResearchStateUpdateRequest` | — | JSON（§114） | `routes::api_idea_research_state`<br>`routes::api_idea_research_state_update` | `src/routes/idea_ops.rs:11`<br>`src/routes/idea_ops.rs:30` |
 | 115 | POST | `/api/idea/:id/redirect` | `id` | `RedirectRequest` | — | JSON（§115） | `routes::api_idea_redirect` | `src/routes/idea_ops.rs:51` |
@@ -181,9 +181,9 @@
 | 149 | GET | `/api/ipc/:code/patents` | `code` | — | — | JSON（§149） | `routes::api_ipc_patents` | `src/routes/ipc.rs:122` |
 | 150 | POST | `/api/patents/import` | — | `ImportRequest` | — | JSON（§150） | `routes::api_import_patents` | `src/routes/settings.rs:1065` |
 | 151 | POST | `/api/patents/import-table` | — | — | — | JSON（§151） | `routes::api_import_patent_table` | `src/routes/patent_import.rs:1306` |
-| 152 | GET / POST | `/api/patents/sync-folder` | — | `SyncFolderRequest` | — | JSON（§152） | `routes::api_get_patent_sync_folder`<br>`routes::api_sync_patent_folder` | `src/routes/patent_import.rs:2221`<br>`src/routes/patent_import.rs:2313` |
-| 153 | GET | `/api/patents/sync-folder/progress` | — | — | — | JSON（§153） | `routes::api_get_patent_sync_progress` | `src/routes/patent_import.rs:2291` |
-| 154 | POST | `/api/patents/sync-folder/cancel` | — | — | — | JSON（§154） | `routes::api_cancel_patent_sync` | `src/routes/patent_import.rs:2299` |
+| 152 | GET / POST | `/api/patents/sync-folder` | — | `SyncFolderRequest` | — | JSON（§152） | `routes::api_get_patent_sync_folder`<br>`routes::api_sync_patent_folder` | `src/routes/patent_import.rs:2221`<br>`src/routes/patent_import.rs:2320` |
+| 153 | GET | `/api/patents/sync-folder/progress` | — | — | — | JSON（§153） | `routes::api_get_patent_sync_progress` | `src/routes/patent_import.rs:2298` |
+| 154 | POST | `/api/patents/sync-folder/cancel` | — | — | — | JSON（§154） | `routes::api_cancel_patent_sync` | `src/routes/patent_import.rs:2306` |
 | 155 | POST | `/api/backup/export` | — | — | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_backup_export` | `src/routes/settings.rs:1777` |
 | 156 | POST | `/api/backup/check` | — | 任意 JSON（§156） | — | JSON（§156） | `routes::api_backup_check` | `src/routes/settings.rs:1838` |
 | 157 | GET / POST | `/api/collections` | — | POST 任意 JSON（§157） | — | JSON（§157） | `routes::api_list_collections`<br>`routes::api_create_collection` | `src/routes/collections.rs:28`<br>`src/routes/collections.rs:8` |
@@ -1409,20 +1409,20 @@
 - **GET** `routes::api_get_patent_sync_folder`（`src/routes/patent_import.rs:2221`）
   - 响应顶层键：`archive_files`、`deduped_pair_files`、`detected_files`、`doc_files`、`exists`、`folder_path`、`free_disk_mb`、`ipc_prefix`、`job`、`last_at`、`last_summary`、`lightweight`、`resolved_path`、`status`、`table_files`
   - `status` 取值：ok
-- **POST** `routes::api_sync_patent_folder`（`src/routes/patent_import.rs:2313`）
+- **POST** `routes::api_sync_patent_folder`（`src/routes/patent_import.rs:2320`）
   - 请求体：`SyncFolderRequest`（字段见上文类型表）
   - 响应顶层键：`already_running`、`deduped_pair_files`、`detected_files`、`folder_path`、`free_disk_mb`、`job`、`message`、`resolved_path`、`saved_only`、`started`、`status`
   - `status` 取值：error / ok
 
 ### §153 GET `/api/patents/sync-folder/progress`
 
-- 源码：`src/routes/patent_import.rs:2291`
+- 源码：`src/routes/patent_import.rs:2298`
 - 响应顶层键：`job`、`status`
 - `status` 取值：ok
 
 ### §154 POST `/api/patents/sync-folder/cancel`
 
-- 源码：`src/routes/patent_import.rs:2299`
+- 源码：`src/routes/patent_import.rs:2306`
 - 响应顶层键：`cancelling`、`job`、`status`
 - `status` 取值：ok
 

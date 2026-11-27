@@ -1280,6 +1280,20 @@ pub async fn api_idea_resume(
     if let Err(breaker_msg) = s.db.check_ai_budget_circuit_breaker(Some(&id)) {
         return Json(json!({"status": "error", "message": breaker_msg}));
     }
+    // 幂等去重：若该创意已有活跃流水线通道，避免重复触发并发续跑导致双倍扣费
+    {
+        let channels = s
+            .pipeline_channels
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if let Some(entry) = channels.get(&id) {
+            if entry.created_at.elapsed() < std::time::Duration::from_secs(600) {
+                return Json(
+                    json!({"status": "ok", "message": "流水线已在运行中，正在连接实时进度"}),
+                );
+            }
+        }
+    }
     if let Ok(Some(mut idea)) = s.db.get_idea(&id) {
         idea.status = "analyzing".into();
         let _ = s.db.update_idea(&idea);
