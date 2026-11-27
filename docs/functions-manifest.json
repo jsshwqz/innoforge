@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-27T09:11:53.789Z",
+  "generatedAt": "2026-11-27T11:51:38.553Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -234,6 +234,7 @@
         "history",
         "initIdeaPageFromUrl",
         "input",
+        "isIdeaReportCompleted",
         "loadClaimTree",
         "loadEvidence",
         "loadFeatureCards",
@@ -250,6 +251,7 @@
         "openCheckpointRollback",
         "openReport",
         "openReportInNewTab",
+        "pollIdeaReportUntilTerminal",
         "populateClaimParentSelect",
         "reapplyPage",
         "renderChatAttachments",
@@ -262,6 +264,7 @@
         "resumePipeline",
         "runBatchFtoScan",
         "runExistingIdea",
+        "runPipelineFlow",
         "saveClaimNode",
         "saveIdeaWorkspaceState",
         "scrollIdeaChatToBottom",
@@ -286,7 +289,8 @@
         "toggleIdeaHistoryDrawer",
         "updateFeatureDiffControls",
         "updatePipelineStep",
-        "validateClaimTree"
+        "validateClaimTree",
+        "waitPipelineSse"
       ]
     },
     "index.html": {

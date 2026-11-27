@@ -62,10 +62,11 @@ use tokio::sync::broadcast;
 /// Round-robin counter for SerpAPI multi-key rotation.
 static SERPAPI_KEY_INDEX: AtomicUsize = AtomicUsize::new(0);
 
-/// 管道通道条目，附带创建时间用于超时清理
-/// Pipeline channel entry with creation timestamp for stale cleanup
+/// 管道通道条目，附带历史事件缓存与创建时间（防止快步骤在 SSE 连上前丢失 + 超时清理）
+/// Pipeline channel entry with event replay history and creation timestamp for stale cleanup
 pub struct PipelineChannelEntry {
     pub sender: broadcast::Sender<PipelineProgress>,
+    pub history: Arc<Mutex<Vec<PipelineProgress>>>,
     pub created_at: Instant,
 }
 
