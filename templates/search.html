@@ -125,13 +125,24 @@
   <div class="bulk-import-card">
     <div class="bulk-import-subtitle" data-i18n="bulk.uploadTitle">1. 批量上传文件或整个本地文件夹</div>
     <div class="bulk-import-field">
-      <label class="bulk-import-field-label" for="table-ipc-filter" data-i18n="bulk.ipcLabel">可选 IPC 赛道过滤（留空 = 导入全部，请勿填文件夹路径）</label>
+      <label class="bulk-import-field-label" for="table-ipc-filter" data-i18n="bulk.ipcLabel">可选过滤：填中文关键词（如 煤粉, 热风炉, 氧舱）或点下方行业大类（留空 = 全部）</label>
       <div class="bulk-import-row">
-        <input type="text" id="table-ipc-filter" data-i18n-placeholder="bulk.ipcPlaceholder" placeholder="如 H01L,G06F（留空则不过滤）">
+        <input type="text" id="table-ipc-filter" oninput="syncImportFilterChipHighlights()" data-i18n-placeholder="bulk.ipcPlaceholder" placeholder="如 煤粉, 燃烧器, 氧舱 或点下方标签（留空 = 导入全部）">
         <label class="bulk-import-check">
           <input type="checkbox" id="table-lightweight-cb" checked>
           <span data-i18n="bulk.lightweightLabel">仅存轻量著录（省空间，命中再按需补全文）</span>
         </label>
+      </div>
+      <div class="bulk-filter-chips" id="bulk-domain-chips">
+        <button type="button" class="bulk-filter-chip" data-filter-code="F" title="动力/热工/燃烧/泵阀/暖通（公报占比约 5.8%）" onclick="toggleImportFilterChip('F')" data-i18n="bulk.chipThermal">🔥 动力/热工</button>
+        <button type="button" class="bulk-filter-chip" data-filter-code="A61" title="医疗器械/氧舱/康复健康（公报占比约 6%）" onclick="toggleImportFilterChip('A61')" data-i18n="bulk.chipMedical">🫁 医疗/健康</button>
+        <button type="button" class="bulk-filter-chip" data-filter-code="D" title="纺织/印染/造纸（公报占比约 1.2%）" onclick="toggleImportFilterChip('D')" data-i18n="bulk.chipTextile">🧵 纺织/印染</button>
+        <button type="button" class="bulk-filter-chip" data-filter-code="H01M,H02J" title="电池/储能/供电系统（公报占比约 4%）" onclick="toggleImportFilterChip('H01M,H02J')" data-i18n="bulk.chipBattery">🔋 电池/储能</button>
+        <button type="button" class="bulk-filter-chip" data-filter-code="B" title="机械加工/运输/包装设备（公报占比约 20%）" onclick="toggleImportFilterChip('B')" data-i18n="bulk.chipMech">⚙️ 机械加工</button>
+        <button type="button" class="bulk-filter-chip" data-filter-code="C" title="化学/材料/冶金（公报占比约 16%）" onclick="toggleImportFilterChip('C')" data-i18n="bulk.chipChem">🧪 化学/材料</button>
+        <button type="button" class="bulk-filter-chip" data-filter-code="H" title="电气/电子/芯片/电力（公报占比约 24%）" onclick="toggleImportFilterChip('H')" data-i18n="bulk.chipElec">⚡ 电气/电子</button>
+        <button type="button" class="bulk-filter-chip" data-filter-code="E" title="建筑/土木/采矿（公报占比约 3.4%）" onclick="toggleImportFilterChip('E')" data-i18n="bulk.chipBuild">🏗️ 建筑/采矿</button>
+        <button type="button" class="bulk-filter-chip bulk-filter-chip-clear" id="btn-clear-import-filter" style="display:none;" onclick="clearImportFilterChips()" data-i18n="bulk.chipClear">✕ 清空</button>
       </div>
     </div>
     <div class="bulk-import-row">
@@ -262,8 +273,17 @@ function clearSearchPdfMeta() {
     'bulk.title': '📥 批量导入专利/文献 & 本地/网盘同步目录',
     'bulk.desc': '支持直接导入国知局 / Google Patents / 智慧芽 / incoPat 导出的表格（.xlsx / .csv / .json / .jsonl）、全文文档（.pdf / .ofd / .docx / .txt / .xml）与压缩包（.zip），或绑定本机 / 网盘同步文件夹递归增量扫描。已拉取全文/权利要求/附图的专利绝不被覆盖。',
     'bulk.uploadTitle': '1. 批量上传文件或整个本地文件夹',
-    'bulk.ipcLabel': '可选 IPC 赛道过滤（留空 = 导入全部，请勿填文件夹路径）',
-    'bulk.ipcPlaceholder': '如 H01L,G06F（留空则不过滤）',
+    'bulk.ipcLabel': '可选过滤：填中文关键词（如 煤粉, 热风炉, 氧舱）或点下方行业大类（留空 = 全部）',
+    'bulk.ipcPlaceholder': '如 煤粉, 燃烧器, 氧舱 或点下方标签（留空 = 导入全部）',
+    'bulk.chipThermal': '🔥 动力/热工',
+    'bulk.chipMedical': '🫁 医疗/健康',
+    'bulk.chipTextile': '🧵 纺织/印染',
+    'bulk.chipBattery': '🔋 电池/储能',
+    'bulk.chipMech': '⚙️ 机械加工',
+    'bulk.chipChem': '🧪 化学/材料',
+    'bulk.chipElec': '⚡ 电气/电子',
+    'bulk.chipBuild': '🏗️ 建筑/采矿',
+    'bulk.chipClear': '✕ 清空',
     'bulk.lightweightLabel': '仅存轻量著录（省空间，命中再按需补全文）',
     'bulk.uploadBtn': '📤 选择文件导入 (表/PDF/OFD/ZIP)',
     'bulk.uploadFolderBtn': '📁 选择本地文件夹上传',
@@ -384,8 +404,17 @@ function clearSearchPdfMeta() {
     'bulk.title': '📥 Bulk Patent/Doc Import & Sync Folder',
     'bulk.desc': 'Import patent tables (.xlsx / .csv / .json / .jsonl), full-text documents (.pdf / .ofd / .docx / .txt / .xml), or .zip bundles, or bind a local / cloud-drive sync folder for recursive incremental scanning. Existing enriched full text, claims, and drawings are never overwritten.',
     'bulk.uploadTitle': '1. Batch Upload Files or Local Folder',
-    'bulk.ipcLabel': 'Optional IPC prefix filter (blank = import all; do not enter a folder path here)',
-    'bulk.ipcPlaceholder': 'e.g. H01L,G06F (leave blank for all)',
+    'bulk.ipcLabel': 'Optional filter: keywords (e.g. burner, oxygen chamber) or domain chips below (blank = all)',
+    'bulk.ipcPlaceholder': 'e.g. burner, oxygen chamber, SiC or click chips below (blank = all)',
+    'bulk.chipThermal': '🔥 Thermal/Power',
+    'bulk.chipMedical': '🫁 Medical',
+    'bulk.chipTextile': '🧵 Textile/Dye',
+    'bulk.chipBattery': '🔋 Battery/Energy',
+    'bulk.chipMech': '⚙️ Mechanical',
+    'bulk.chipChem': '🧪 Chem/Material',
+    'bulk.chipElec': '⚡ Electrical',
+    'bulk.chipBuild': '🏗️ Civil/Mining',
+    'bulk.chipClear': '✕ Clear',
     'bulk.lightweightLabel': 'Lightweight biblio only (save disk, enrich on demand)',
     'bulk.uploadBtn': '📤 Select Files (Table/PDF/OFD/ZIP)',
     'bulk.uploadFolderBtn': '📁 Upload Local Folder',
@@ -2408,6 +2437,56 @@ function looksLikeFilePathForIpc(val) {
     return /[\\]|^[A-Za-z]:|^\//.test(v) || v.startsWith('~/') || v.indexOf('://') !== -1;
 }
 
+function parseImportFilterTokens(raw) {
+    return String(raw || '')
+        .split(/[,，;；、\s]+/)
+        .map(function(s) { return s.trim(); })
+        .filter(Boolean);
+}
+
+function syncImportFilterChipHighlights() {
+    const ipcEl = document.getElementById('table-ipc-filter');
+    const clearBtn = document.getElementById('btn-clear-import-filter');
+    const tokens = parseImportFilterTokens(ipcEl ? ipcEl.value : '').map(function(s) { return s.toUpperCase(); });
+    const tokenSet = new Set(tokens);
+    document.querySelectorAll('#bulk-domain-chips .bulk-filter-chip[data-filter-code]').forEach(function(btn) {
+        const codes = String(btn.getAttribute('data-filter-code') || '').split(',').map(function(c) { return c.trim().toUpperCase(); }).filter(Boolean);
+        const isActive = codes.length > 0 && codes.every(function(c) { return tokenSet.has(c); });
+        btn.classList.toggle('active', isActive);
+    });
+    if (clearBtn) clearBtn.style.display = tokens.length > 0 ? 'inline-block' : 'none';
+}
+
+function toggleImportFilterChip(codeGroup) {
+    const ipcEl = document.getElementById('table-ipc-filter');
+    if (!ipcEl) return;
+    const codes = String(codeGroup || '').split(',').map(function(c) { return c.trim(); }).filter(Boolean);
+    const current = parseImportFilterTokens(ipcEl.value);
+    const upperSet = new Set(current.map(function(s) { return s.toUpperCase(); }));
+    const allPresent = codes.every(function(c) { return upperSet.has(c.toUpperCase()); });
+    let next;
+    if (allPresent) {
+        const removeSet = new Set(codes.map(function(c) { return c.toUpperCase(); }));
+        next = current.filter(function(s) { return !removeSet.has(s.toUpperCase()); });
+    } else {
+        next = current.slice();
+        for (const c of codes) {
+            if (!upperSet.has(c.toUpperCase())) {
+                next.push(c);
+                upperSet.add(c.toUpperCase());
+            }
+        }
+    }
+    ipcEl.value = next.join(', ');
+    syncImportFilterChipHighlights();
+}
+
+function clearImportFilterChips() {
+    const ipcEl = document.getElementById('table-ipc-filter');
+    if (ipcEl) ipcEl.value = '';
+    syncImportFilterChipHighlights();
+}
+
 const BULK_SUPPORTED_EXTS = new Set([
     'xlsx', 'csv', 'tsv', 'json', 'jsonl',
     'pdf', 'ofd', 'docx', 'txt', 'md', 'xml', 'html', 'htm', 'rtf', 'tex', 'zip'
@@ -2693,6 +2772,7 @@ async function loadPatentSyncFolderStatus() {
         if (data.folder_path) pathEl.value = data.folder_path;
         if (data.ipc_prefix && !looksLikeFilePathForIpc(data.ipc_prefix) && ipcEl && !ipcEl.value) {
             ipcEl.value = data.ipc_prefix;
+            syncImportFilterChipHighlights();
         }
         if (typeof data.lightweight === 'boolean' && lwEl && data.folder_path) lwEl.checked = data.lightweight;
         if (data.job && data.job.state === 'running') {
