@@ -1738,22 +1738,43 @@ pub async fn api_idea_fto_scan(
         }
     };
 
-    let cards = s.db.get_feature_cards_by_idea(&idea.id).unwrap_or_default();
-    let mut ids: Vec<String> =
-        s.db.search_smart(&idea.title, None, None, None, None, 1, 20)
+    let db = s.db.clone();
+    let idea_id_for_db = idea.id.clone();
+    let title_for_db = idea.title.clone();
+    let (cards, patents) = tokio::task::spawn_blocking(move || {
+        let cards = db
+            .get_feature_cards_by_idea(&idea_id_for_db)
+            .unwrap_or_default();
+        let mut ids: Vec<String> = db
+            .search_smart(&title_for_db, None, None, None, None, 1, 20)
             .map(|(list, _, _)| list.into_iter().map(|p| p.id).collect())
             .unwrap_or_default();
-    if ids.is_empty() {
-        ids =
-            s.db.search_like("", None, None, None, 1, 20)
-                .map(|(list, _)| list.into_iter().map(|p| p.id).collect())
-                .unwrap_or_default();
-    }
-    let patents = if ids.is_empty() {
-        Vec::new()
-    } else {
-        s.db.get_patents_by_ids(&ids).unwrap_or_default()
-    };
+        if ids.is_empty() {
+            // 若长标题未精确命中，按首段核心子句尝试 FTS；仍为空则按 rowid 倒序取最近 20 件（原 search_like("") 恒为空）
+            let first_clause = title_for_db
+                .split(['，', ',', '。', '？', '?', '；', ';', ' '])
+                .map(str::trim)
+                .find(|s| s.chars().count() >= 2)
+                .unwrap_or("");
+            if !first_clause.is_empty() {
+                ids = db
+                    .search_fts(first_clause, 1, 20)
+                    .map(|(list, _)| list.into_iter().map(|p| p.id).collect())
+                    .unwrap_or_default();
+            }
+        }
+        if ids.is_empty() {
+            ids = db.list_recent_patent_ids(20).unwrap_or_default();
+        }
+        let patents = if ids.is_empty() {
+            Vec::new()
+        } else {
+            db.get_patents_by_ids(&ids).unwrap_or_default()
+        };
+        (cards, patents)
+    })
+    .await
+    .unwrap_or_default();
 
     let solution_desc = format!("{}\n{}", idea.title, idea.description);
     let report =
