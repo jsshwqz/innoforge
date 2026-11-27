@@ -24,7 +24,10 @@ const SETTING_SYNC_LAST_SUMMARY: &str = "patent_sync_last_summary";
 const SETTING_SYNC_MANIFEST: &str = "patent_sync_file_manifest";
 
 const MAX_TABLE_BYTES: usize = 30 * 1024 * 1024; // 30 MB
-const MAX_SYNC_FILES: usize = 200;
+const MAX_SYNC_FILES: usize = 500;
+const MAX_WALK_DEPTH: usize = 6;
+const MAX_ZIP_ENTRIES: usize = 100;
+const MAX_ZIP_TOTAL_UNCOMPRESSED: u64 = 100 * 1024 * 1024; // 100 MB 防压缩炸弹
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PatentTableImportOptions {
@@ -67,8 +70,144 @@ struct FileSyncResult {
     message: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SyncFileKind {
+    Table,
+    Doc,
+    Archive,
+}
+
 fn is_supported_table_ext(ext_lower: &str) -> bool {
     matches!(ext_lower, "xlsx" | "csv" | "tsv" | "json" | "jsonl")
+}
+
+fn is_supported_doc_ext(ext_lower: &str) -> bool {
+    matches!(
+        ext_lower,
+        "pdf" | "ofd" | "docx" | "txt" | "md" | "xml" | "html" | "htm" | "rtf" | "tex"
+    )
+}
+
+fn is_supported_archive_ext(ext_lower: &str) -> bool {
+    ext_lower == "zip"
+}
+
+fn classify_sync_ext(ext_lower: &str) -> Option<SyncFileKind> {
+    if is_supported_table_ext(ext_lower) {
+        Some(SyncFileKind::Table)
+    } else if is_supported_doc_ext(ext_lower) {
+        Some(SyncFileKind::Doc)
+    } else if is_supported_archive_ext(ext_lower) {
+        Some(SyncFileKind::Archive)
+    } else {
+        None
+    }
+}
+
+/// 清理用户粘贴路径两侧可能附带的引号与空白（例如 Windows「复制文件地址」产生的 `"F:\down\专利数据"`）
+fn clean_folder_path_input(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.len() >= 2
+        && ((trimmed.starts_with('"') && trimmed.ends_with('"'))
+            || (trimmed.starts_with('\'') && trimmed.ends_with('\'')))
+    {
+        trimmed
+            .chars()
+            .skip(1)
+            .take(trimmed.chars().count().saturating_sub(2))
+            .collect::<String>()
+            .trim()
+            .to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// 将 Windows 盘符路径（`F:\down\专利数据` / `F:/down/专利数据`）或 WSL UNC 路径
+/// （`\\wsl$\Ubuntu\...` / `\\wsl.localhost\Ubuntu\...`）转换为 WSL `/mnt/<drive>/...` 候选路径。
+pub fn windows_path_to_wsl_candidate(raw: &str) -> Option<PathBuf> {
+    let cleaned = clean_folder_path_input(raw);
+    let mut chars = cleaned.chars();
+    let c0 = chars.next()?;
+    let c1 = chars.next()?;
+
+    // 1. 盘符路径：F:\down\专利数据 或 F:/down/专利数据 或 F:
+    if c0.is_ascii_alphabetic() && c1 == ':' {
+        let rest_str: String = chars.collect();
+        if !rest_str.is_empty() && !rest_str.starts_with('\\') && !rest_str.starts_with('/') {
+            return None;
+        }
+        let drive = c0.to_ascii_lowercase();
+        let norm_rest = rest_str.replace('\\', "/");
+        let rel = norm_rest.trim_matches('/');
+        return if rel.is_empty() {
+            Some(PathBuf::from(format!("/mnt/{drive}")))
+        } else {
+            Some(PathBuf::from(format!("/mnt/{drive}/{rel}")))
+        };
+    }
+
+    // 2. WSL UNC 路径：\\wsl$\<distro>\... 或 \\wsl.localhost\<distro>\...
+    let lower = cleaned.to_ascii_lowercase();
+    let unc_prefix_len = if lower.starts_with(r"\\wsl$\") {
+        7
+    } else if lower.starts_with(r"\\wsl.localhost\") {
+        16
+    } else {
+        0
+    };
+    if unc_prefix_len > 0 {
+        let after_prefix: String = cleaned.chars().skip(unc_prefix_len).collect();
+        let mut parts = after_prefix.splitn(2, ['\\', '/']);
+        let _distro = parts.next()?;
+        let linux_rel = parts.next().unwrap_or("").replace('\\', "/");
+        let rel = linux_rel.trim_start_matches('/');
+        return Some(PathBuf::from(format!("/{rel}")));
+    }
+
+    None
+}
+
+/// 解析本机或网盘同步目录路径：
+/// - 优先按原路径检查；
+/// - 在 Linux/WSL 下若用户输入 Windows 盘符路径（如 `F:\down\专利数据`），自动映射为 `/mnt/f/down/专利数据`。
+///
+/// 返回 `(解析后的实际路径, 若发生了自动映射则为映射后路径文本)`。
+pub fn resolve_local_folder_path(raw: &str) -> (PathBuf, Option<String>) {
+    let cleaned = clean_folder_path_input(raw);
+    let direct = PathBuf::from(&cleaned);
+    if direct.is_dir() {
+        return (direct, None);
+    }
+    #[cfg(unix)]
+    if let Some(wsl_candidate) = windows_path_to_wsl_candidate(&cleaned) {
+        let display = wsl_candidate.to_string_lossy().to_string();
+        return (wsl_candidate, Some(display));
+    }
+    (direct, None)
+}
+
+/// 校验可选 IPC 赛道过滤栏，拦截把本地文件夹路径误填进 IPC 过滤栏（否则会静默过滤掉 100% 专利）
+pub fn validate_ipc_prefix_filter(raw: &str) -> Result<String, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(String::new());
+    }
+    let looks_like_drive = {
+        let mut chs = trimmed.chars();
+        matches!((chs.next(), chs.next()), (Some(c), Some(':')) if c.is_ascii_alphabetic())
+    };
+    let looks_like_path = looks_like_drive
+        || trimmed.contains('\\')
+        || trimmed.starts_with('/')
+        || trimmed.starts_with("~/")
+        || trimmed.contains("://");
+    if looks_like_path {
+        return Err(format!(
+            "左侧「IPC 赛道过滤」栏误填了路径（“{trimmed}”），请清空该栏或填写合法 IPC 前缀（如 H01L,G06F），文件夹路径请填在右侧「同步目录」框中"
+        ));
+    }
+    Ok(trimmed.to_string())
 }
 
 fn normalize_header_key(raw: &str) -> String {
@@ -821,29 +960,200 @@ pub fn parse_patent_table_bytes(
     })
 }
 
-/// POST `/api/patents/import-table` — 网页一键上传 `.xlsx / .csv / .tsv / .json / .jsonl` 批量入库专利
+/// 统一解析任意受支持的专利/文献文件字节（表格 `.xlsx/.csv/.tsv/.json/.jsonl`、全文文档 `.pdf/.ofd/.docx/.txt/.md/.xml/.html/.rtf/.tex`、压缩包 `.zip`）。
+pub fn parse_any_patent_bytes(
+    filename: &str,
+    data: &[u8],
+    options: &PatentTableImportOptions,
+) -> Result<ParsedTableStats, String> {
+    let ext = Path::new(filename)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    match classify_sync_ext(&ext) {
+        Some(SyncFileKind::Table) => parse_patent_table_bytes(filename, data, options),
+        Some(SyncFileKind::Doc) => parse_single_doc_bytes(filename, data, options),
+        Some(SyncFileKind::Archive) => parse_zip_archive_bytes(filename, data, options),
+        None => Err(format!(
+            "不支持的文件格式 `.{ext}`，支持表格(.xlsx/.csv/.tsv/.json/.jsonl)、全文文档(.pdf/.ofd/.docx/.txt/.md/.xml)与压缩包(.zip)"
+        )),
+    }
+}
+
+fn parse_single_doc_bytes(
+    filename: &str,
+    data: &[u8],
+    options: &PatentTableImportOptions,
+) -> Result<ParsedTableStats, String> {
+    let text = crate::routes::upload::extract_fast_doc_text_sync(filename, data)?;
+    let (mut patent, _doc_kind, _kw) =
+        crate::routes::upload::build_local_patent_record(filename, &text);
+    if !options.source_tag.is_empty() && patent.source.starts_with("local_") {
+        patent.source = format!("{}_{}", options.source_tag, patent.source);
+    }
+    let prefixes = parse_ipc_prefixes(&options.ipc_prefix);
+    if !matches_ipc_prefixes(&patent, &prefixes) {
+        return Ok(ParsedTableStats {
+            total_rows: 1,
+            matched_patents: Vec::new(),
+            filtered_out: 1,
+            skipped_empty: 0,
+        });
+    }
+    Ok(ParsedTableStats {
+        total_rows: 1,
+        matched_patents: vec![patent],
+        filtered_out: 0,
+        skipped_empty: 0,
+    })
+}
+
+fn parse_zip_archive_bytes(
+    _archive_name: &str,
+    data: &[u8],
+    options: &PatentTableImportOptions,
+) -> Result<ParsedTableStats, String> {
+    let mut archive =
+        zip::ZipArchive::new(Cursor::new(data)).map_err(|e| format!("无法打开 ZIP 压缩包: {e}"))?;
+
+    let mut total_rows = 0usize;
+    let mut matched_patents = Vec::new();
+    let mut filtered_out = 0usize;
+    let mut skipped_empty = 0usize;
+    let mut total_uncompressed: u64 = 0;
+    let mut processed_entries = 0usize;
+    let mut first_err: Option<String> = None;
+
+    for i in 0..archive.len() {
+        if processed_entries >= MAX_ZIP_ENTRIES {
+            break;
+        }
+        let mut entry = match archive.by_index(i) {
+            Ok(f) => f,
+            Err(zip::result::ZipError::UnsupportedArchive(msg))
+                if msg.to_lowercase().contains("encrypt")
+                    || msg.to_lowercase().contains("password") =>
+            {
+                return Err("检测到加密 ZIP（含密码保护），暂不支持直接解压导入".into());
+            }
+            Err(e) => {
+                if first_err.is_none() {
+                    first_err = Some(format!("ZIP 条目读取失败: {e}"));
+                }
+                continue;
+            }
+        };
+        if entry.is_dir() {
+            continue;
+        }
+        let entry_name = entry.name().to_string();
+        if entry_name.starts_with("__MACOSX/")
+            || entry_name.contains("/__MACOSX/")
+            || entry_name
+                .rsplit(['/', '\\'])
+                .next()
+                .is_some_and(|base| base.starts_with('.') || base.starts_with("~$"))
+        {
+            continue;
+        }
+        let ext = Path::new(&entry_name)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+        // 禁止递归解压嵌套 ZIP 防炸弹；支持内嵌表格与专利/论文全文文档
+        let Some(kind) = classify_sync_ext(&ext) else {
+            continue;
+        };
+        if kind == SyncFileKind::Archive {
+            continue;
+        }
+        if entry.size() > MAX_TABLE_BYTES as u64 {
+            continue;
+        }
+        total_uncompressed = total_uncompressed.saturating_add(entry.size());
+        if total_uncompressed > MAX_ZIP_TOTAL_UNCOMPRESSED {
+            break;
+        }
+        let mut buf = Vec::new();
+        if entry
+            .by_ref()
+            .take((MAX_TABLE_BYTES as u64) + 1)
+            .read_to_end(&mut buf)
+            .is_err()
+        {
+            continue;
+        }
+        if buf.len() > MAX_TABLE_BYTES || buf.is_empty() {
+            continue;
+        }
+        processed_entries += 1;
+        let res = match kind {
+            SyncFileKind::Table => parse_patent_table_bytes(&entry_name, &buf, options),
+            SyncFileKind::Doc => parse_single_doc_bytes(&entry_name, &buf, options),
+            SyncFileKind::Archive => continue,
+        };
+        match res {
+            Ok(st) => {
+                total_rows += st.total_rows;
+                matched_patents.extend(st.matched_patents);
+                filtered_out += st.filtered_out;
+                skipped_empty += st.skipped_empty;
+            }
+            Err(e) => {
+                if first_err.is_none() {
+                    first_err = Some(format!("{entry_name}: {e}"));
+                }
+            }
+        }
+    }
+
+    if processed_entries == 0 {
+        if let Some(err) = first_err {
+            return Err(err);
+        }
+        return Err("ZIP 压缩包内未找到可识别的专利表或 PDF/OFD/DOCX/TXT 文档".into());
+    }
+    if matched_patents.is_empty() && filtered_out == 0 {
+        if let Some(err) = first_err {
+            return Err(err);
+        }
+    }
+
+    Ok(ParsedTableStats {
+        total_rows,
+        matched_patents,
+        filtered_out,
+        skipped_empty,
+    })
+}
+
+/// POST `/api/patents/import-table` — 网页一键上传单个或多个专利表 / PDF / OFD / DOCX / ZIP（或整个本地文件夹分批上传）批量入库
 pub async fn api_import_patent_table(
     State(s): State<AppState>,
     mut multipart: Multipart,
 ) -> Json<Value> {
-    let mut filename = String::new();
-    let mut file_bytes: Vec<u8> = Vec::new();
+    let mut uploaded_files: Vec<(String, Vec<u8>)> = Vec::new();
     let mut ipc_prefix = String::new();
     let mut lightweight = false;
 
     while let Ok(Some(field)) = multipart.next_field().await {
         let name = field.name().unwrap_or("").to_string();
-        if name == "file" {
-            filename = field.file_name().unwrap_or("patents.csv").to_string();
+        if name == "file" || name == "files" {
+            let filename = field.file_name().unwrap_or("patents.csv").to_string();
             match field.bytes().await {
                 Ok(b) => {
                     if b.len() > MAX_TABLE_BYTES {
                         return Json(json!({
                             "status": "error",
-                            "message": "文件超过 30 MB 上限，请按年份或 IPC 拆分后导入"
+                            "message": format!("文件 {filename} 超过 30 MB 上限，请拆分后导入")
                         }));
                     }
-                    file_bytes = b.to_vec();
+                    if !b.is_empty() {
+                        uploaded_files.push((filename, b.to_vec()));
+                    }
                 }
                 Err(e) => {
                     return Json(json!({
@@ -863,51 +1173,100 @@ pub async fn api_import_patent_table(
         }
     }
 
-    if file_bytes.is_empty() {
-        return Json(json!({
-            "status": "error",
-            "message": "未接收到专利表格文件，请选择 .xlsx / .csv / .json / .jsonl"
-        }));
-    }
-
-    let options = PatentTableImportOptions {
-        ipc_prefix,
-        lightweight,
-        source_tag: "table_import".to_string(),
-    };
-    let parse_filename = filename.clone();
-    let parsed_res = tokio::task::spawn_blocking(move || {
-        parse_patent_table_bytes(&parse_filename, &file_bytes, &options)
-    })
-    .await;
-
-    let stats = match parsed_res {
-        Ok(Ok(st)) => st,
-        Ok(Err(msg)) => {
+    let validated_ipc = match validate_ipc_prefix_filter(&ipc_prefix) {
+        Ok(v) => v,
+        Err(msg) => {
             return Json(json!({
                 "status": "error",
                 "message": msg
             }));
         }
+    };
+
+    if uploaded_files.is_empty() {
+        return Json(json!({
+            "status": "error",
+            "message": "未接收到可导入文件，请选择 .xlsx / .csv / .json / .pdf / .ofd / .docx / .zip"
+        }));
+    }
+
+    let first_filename = uploaded_files
+        .first()
+        .map(|(n, _)| n.clone())
+        .unwrap_or_default();
+    let files_count = uploaded_files.len();
+    let options = PatentTableImportOptions {
+        ipc_prefix: validated_ipc,
+        lightweight,
+        source_tag: "table_import".to_string(),
+    };
+
+    let parsed_res = tokio::task::spawn_blocking(move || {
+        let mut total_rows = 0usize;
+        let mut matched_patents: Vec<Patent> = Vec::new();
+        let mut filtered_out = 0usize;
+        let mut skipped_empty = 0usize;
+        let mut errors: Vec<String> = Vec::new();
+        let mut files_ok = 0usize;
+
+        for (fname, bytes) in uploaded_files {
+            match parse_any_patent_bytes(&fname, &bytes, &options) {
+                Ok(st) => {
+                    files_ok += 1;
+                    total_rows += st.total_rows;
+                    matched_patents.extend(st.matched_patents);
+                    filtered_out += st.filtered_out;
+                    skipped_empty += st.skipped_empty;
+                }
+                Err(msg) => {
+                    errors.push(format!("{fname}: {msg}"));
+                }
+            }
+        }
+        (
+            ParsedTableStats {
+                total_rows,
+                matched_patents,
+                filtered_out,
+                skipped_empty,
+            },
+            files_ok,
+            errors,
+        )
+    })
+    .await;
+
+    let (stats, files_ok, errors) = match parsed_res {
+        Ok(res) => res,
         Err(e) => {
             return Json(json!({
                 "status": "error",
-                "message": format!("表格解析任务异常: {e}")
+                "message": format!("批量解析任务异常: {e}")
             }));
         }
     };
 
+    if files_ok == 0 && !errors.is_empty() {
+        return Json(json!({
+            "status": "error",
+            "message": errors[0],
+            "errors": errors
+        }));
+    }
+
     if stats.matched_patents.is_empty() {
         return Json(json!({
             "status": "ok",
-            "filename": filename,
+            "filename": first_filename,
+            "files_processed": files_count,
             "total_rows": stats.total_rows,
             "imported": 0,
             "filtered_out": stats.filtered_out,
             "skipped_empty": stats.skipped_empty,
             "chunks": 0,
             "sample_numbers": [],
-            "message": "表格未解析出符合条件的专利行（请检查表头是否包含公开号/专利号/发明名称或 IPC 过滤条件）"
+            "errors": errors,
+            "message": "未解析出符合条件的专利/文献（请检查文件格式或 IPC 过滤条件）"
         }));
     }
 
@@ -927,20 +1286,22 @@ pub async fn api_import_patent_table(
     let db = s.db.clone();
     let patents = stats.matched_patents;
     let import_res = tokio::task::spawn_blocking(move || {
-        db.batch_import_patents_with_chunks(&patents, "tfidf-local")
+        db.batch_import_patents_with_chunks(&patents, "char-tfidf-v2")
     })
     .await;
 
     match import_res {
         Ok(Ok((imported, chunks))) => Json(json!({
             "status": "ok",
-            "filename": filename,
+            "filename": first_filename,
+            "files_processed": files_count,
             "total_rows": stats.total_rows,
             "imported": imported,
             "filtered_out": stats.filtered_out,
             "skipped_empty": stats.skipped_empty,
             "chunks": chunks,
-            "sample_numbers": sample_numbers
+            "sample_numbers": sample_numbers,
+            "errors": errors
         })),
         Ok(Err(e)) => Json(json!({
             "status": "error",
@@ -953,17 +1314,42 @@ pub async fn api_import_patent_table(
     }
 }
 
-fn list_syncable_table_files(dir: &Path) -> Result<Vec<(String, PathBuf, String)>, String> {
+fn should_skip_sync_dir(dir_name: &str) -> bool {
+    dir_name.starts_with('.')
+        || matches!(
+            dir_name,
+            "__MACOSX" | "node_modules" | "$RECYCLE.BIN" | "System Volume Information"
+        )
+}
+
+fn walk_syncable_files(
+    root: &Path,
+    dir: &Path,
+    depth: usize,
+    out: &mut Vec<(String, PathBuf, String, SyncFileKind)>,
+) -> Result<(), String> {
+    if depth > MAX_WALK_DEPTH || out.len() >= MAX_SYNC_FILES {
+        return Ok(());
+    }
     let entries = std::fs::read_dir(dir).map_err(|e| format!("无法读取目录: {e}"))?;
-    let mut files = Vec::new();
+    let mut subdirs: Vec<PathBuf> = Vec::new();
     for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
+        if out.len() >= MAX_SYNC_FILES {
+            break;
         }
+        let path = entry.path();
         let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
             continue;
         };
+        if path.is_dir() {
+            if depth < MAX_WALK_DEPTH && !should_skip_sync_dir(name) {
+                subdirs.push(path);
+            }
+            continue;
+        }
+        if !path.is_file() {
+            continue;
+        }
         // 跳过 Excel 临时锁文件（~$xxx.xlsx）与隐藏文件
         if name.starts_with("~$") || name.starts_with('.') {
             continue;
@@ -973,14 +1359,14 @@ fn list_syncable_table_files(dir: &Path) -> Result<Vec<(String, PathBuf, String)
             .and_then(|e| e.to_str())
             .unwrap_or("")
             .to_lowercase();
-        if !is_supported_table_ext(&ext) {
+        let Some(kind) = classify_sync_ext(&ext) else {
             continue;
-        }
+        };
         let meta = match entry.metadata() {
             Ok(m) => m,
             Err(_) => continue,
         };
-        if meta.len() as usize > MAX_TABLE_BYTES {
+        if meta.len() == 0 || meta.len() as usize > MAX_TABLE_BYTES {
             continue;
         }
         let mtime = meta
@@ -990,8 +1376,28 @@ fn list_syncable_table_files(dir: &Path) -> Result<Vec<(String, PathBuf, String)
             .map(|d| d.as_secs())
             .unwrap_or(0);
         let sig = format!("{}:{}", meta.len(), mtime);
-        files.push((name.to_string(), path, sig));
+        let rel = path
+            .strip_prefix(root)
+            .ok()
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_else(|| name.to_string());
+        out.push((rel, path, sig, kind));
     }
+    subdirs.sort();
+    for sub in subdirs {
+        if out.len() >= MAX_SYNC_FILES {
+            break;
+        }
+        let _ = walk_syncable_files(root, &sub, depth + 1, out);
+    }
+    Ok(())
+}
+
+fn list_syncable_files_recursive(
+    dir: &Path,
+) -> Result<Vec<(String, PathBuf, String, SyncFileKind)>, String> {
+    let mut files = Vec::new();
+    walk_syncable_files(dir, dir, 0, &mut files)?;
     files.sort_by(|a, b| a.0.cmp(&b.0));
     files.truncate(MAX_SYNC_FILES);
     Ok(files)
@@ -1025,40 +1431,58 @@ pub async fn api_get_patent_sync_folder(State(s): State<AppState>) -> Json<Value
             .flatten()
             .unwrap_or_default();
 
-    let (exists, detected_files) = if folder_path.trim().is_empty() {
-        (false, 0usize)
-    } else {
-        let p = PathBuf::from(folder_path.trim());
-        if p.is_dir() {
-            let count = list_syncable_table_files(&p).map(|v| v.len()).unwrap_or(0);
-            (true, count)
+    let (exists, detected_files, table_files, doc_files, archive_files, resolved_path) =
+        if folder_path.trim().is_empty() {
+            (false, 0usize, 0usize, 0usize, 0usize, None)
         } else {
-            (false, 0)
-        }
-    };
+            let (p, mapped) = resolve_local_folder_path(&folder_path);
+            if p.is_dir() {
+                let list = list_syncable_files_recursive(&p).unwrap_or_default();
+                let t = list.iter().filter(|f| f.3 == SyncFileKind::Table).count();
+                let d = list.iter().filter(|f| f.3 == SyncFileKind::Doc).count();
+                let a = list.iter().filter(|f| f.3 == SyncFileKind::Archive).count();
+                (true, list.len(), t, d, a, mapped)
+            } else {
+                (false, 0, 0, 0, 0, mapped)
+            }
+        };
 
     Json(json!({
         "status": "ok",
         "folder_path": folder_path,
+        "resolved_path": resolved_path,
         "ipc_prefix": ipc_prefix,
         "lightweight": lightweight,
         "exists": exists,
         "detected_files": detected_files,
+        "table_files": table_files,
+        "doc_files": doc_files,
+        "archive_files": archive_files,
         "last_at": last_at,
         "last_summary": last_summary
     }))
 }
 
-/// POST `/api/patents/sync-folder` — 保存并增量同步本地/私人网盘同步目录中的专利表格
+/// POST `/api/patents/sync-folder` — 保存并递归增量同步本地/私人网盘同步目录中的专利表格、PDF/OFD/DOCX 与 ZIP 压缩包
 pub async fn api_sync_patent_folder(
     State(s): State<AppState>,
     Json(req): Json<SyncFolderRequest>,
 ) -> Json<Value> {
-    let folder_trimmed = req.folder_path.trim().to_string();
+    let folder_trimmed = clean_folder_path_input(&req.folder_path);
+    let validated_ipc = match validate_ipc_prefix_filter(&req.ipc_prefix) {
+        Ok(v) => v,
+        Err(msg) => {
+            return Json(json!({
+                "status": "error",
+                "message": msg
+            }));
+        }
+    };
+
     if folder_trimmed.is_empty() {
         let _ = s.db.set_settings_batch(&[
             (SETTING_SYNC_FOLDER, ""),
-            (SETTING_SYNC_IPC_PREFIX, req.ipc_prefix.trim()),
+            (SETTING_SYNC_IPC_PREFIX, &validated_ipc),
             (
                 SETTING_SYNC_LIGHTWEIGHT,
                 if req.lightweight { "1" } else { "0" },
@@ -1071,18 +1495,26 @@ pub async fn api_sync_patent_folder(
         }));
     }
 
-    let dir = PathBuf::from(&folder_trimmed);
+    let (dir, resolved_path) = resolve_local_folder_path(&folder_trimmed);
     if !dir.exists() || !dir.is_dir() {
+        let detail = if let Some(ref mapped) = resolved_path {
+            format!(
+                "目录不存在或不是文件夹: {}（WSL 自动映射路径 {} 也不存在）",
+                folder_trimmed, mapped
+            )
+        } else {
+            format!("目录不存在或不是文件夹: {}", folder_trimmed)
+        };
         return Json(json!({
             "status": "error",
-            "message": format!("目录不存在或不是文件夹: {}", folder_trimmed)
+            "message": detail
         }));
     }
 
     let lw_flag = if req.lightweight { "1" } else { "0" };
     if let Err(e) = s.db.set_settings_batch(&[
         (SETTING_SYNC_FOLDER, &folder_trimmed),
-        (SETTING_SYNC_IPC_PREFIX, req.ipc_prefix.trim()),
+        (SETTING_SYNC_IPC_PREFIX, &validated_ipc),
         (SETTING_SYNC_LIGHTWEIGHT, lw_flag),
     ]) {
         return Json(json!({
@@ -1092,24 +1524,34 @@ pub async fn api_sync_patent_folder(
     }
 
     if req.save_only {
-        let detected = list_syncable_table_files(&dir)
-            .map(|v| v.len())
-            .unwrap_or(0);
+        let list = list_syncable_files_recursive(&dir).unwrap_or_default();
         return Json(json!({
             "status": "ok",
             "folder_path": folder_trimmed,
-            "detected_files": detected,
+            "resolved_path": resolved_path,
+            "detected_files": list.len(),
             "saved_only": true
         }));
     }
 
     let db = s.db.clone();
-    let ipc_prefix = req.ipc_prefix.trim().to_string();
+    let ipc_prefix = validated_ipc;
     let lightweight = req.lightweight;
     let force = req.force;
+    let resolved_for_resp = resolved_path.clone();
 
     let sync_res = tokio::task::spawn_blocking(move || -> Result<Value, String> {
-        let files = list_syncable_table_files(&dir)?;
+        let files = list_syncable_files_recursive(&dir)?;
+        let table_files = files
+            .iter()
+            .filter(|f| f.3 == SyncFileKind::Table)
+            .count();
+        let doc_files = files.iter().filter(|f| f.3 == SyncFileKind::Doc).count();
+        let archive_files = files
+            .iter()
+            .filter(|f| f.3 == SyncFileKind::Archive)
+            .count();
+
         let prev_manifest_raw = db
             .get_setting(SETTING_SYNC_MANIFEST)
             .ok()
@@ -1123,6 +1565,7 @@ pub async fn api_sync_patent_folder(
         let mut total_imported = 0usize;
         let mut total_filtered = 0usize;
         let mut total_chunks = 0usize;
+        let mut sample_numbers: Vec<String> = Vec::new();
         let mut details: Vec<FileSyncResult> = Vec::new();
         let mut errors: Vec<String> = Vec::new();
 
@@ -1132,7 +1575,7 @@ pub async fn api_sync_patent_folder(
             source_tag: "folder_sync".to_string(),
         };
 
-        for (name, path, sig) in &files {
+        for (name, path, sig, _kind) in &files {
             let manifest_key = format!("{}|{}|{}", name, ipc_prefix, lightweight);
             if !force && manifest.get(&manifest_key).is_some_and(|old| old == sig) {
                 skipped_unchanged_files += 1;
@@ -1164,7 +1607,7 @@ pub async fn api_sync_patent_folder(
                 }
             };
 
-            match parse_patent_table_bytes(name, &bytes, &options) {
+            match parse_any_patent_bytes(name, &bytes, &options) {
                 Ok(st) => {
                     if st.matched_patents.is_empty() {
                         manifest.insert(manifest_key, sig.clone());
@@ -1175,11 +1618,26 @@ pub async fn api_sync_patent_folder(
                             imported: 0,
                             filtered_out: st.filtered_out,
                             chunks: 0,
-                            message: "无匹配专利行".to_string(),
+                            message: "无匹配专利/文献行".to_string(),
                         });
                         continue;
                     }
-                    match db.batch_import_patents_with_chunks(&st.matched_patents, "tfidf-local") {
+                    for p in &st.matched_patents {
+                        if sample_numbers.len() >= 5 {
+                            break;
+                        }
+                        let label = if !p.patent_number.is_empty() {
+                            p.patent_number.clone()
+                        } else {
+                            p.title.clone()
+                        };
+                        if !label.is_empty() && !sample_numbers.contains(&label) {
+                            sample_numbers.push(label);
+                        }
+                    }
+                    match db
+                        .batch_import_patents_with_chunks(&st.matched_patents, "char-tfidf-v2")
+                    {
                         Ok((imp, chunks)) => {
                             manifest.insert(manifest_key, sig.clone());
                             imported_files += 1;
@@ -1226,8 +1684,11 @@ pub async fn api_sync_patent_folder(
 
         let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
         let summary = format!(
-            "扫描 {} 个文件：导入 {} 个（共 {} 件专利），跳过未变更 {} 个",
+            "扫描 {} 个文件（表格 {} · 文档 {} · 压缩包 {}）：导入 {} 个（共 {} 件专利/文献），跳过未变更 {} 个",
             files.len(),
+            table_files,
+            doc_files,
+            archive_files,
             imported_files,
             total_imported,
             skipped_unchanged_files
@@ -1242,12 +1703,17 @@ pub async fn api_sync_patent_folder(
         Ok(json!({
             "status": "ok",
             "folder_path": folder_trimmed,
+            "resolved_path": resolved_for_resp,
             "scanned_files": files.len(),
+            "table_files": table_files,
+            "doc_files": doc_files,
+            "archive_files": archive_files,
             "imported_files": imported_files,
             "skipped_unchanged_files": skipped_unchanged_files,
             "imported_patents": total_imported,
             "filtered_out": total_filtered,
             "chunks": total_chunks,
+            "sample_numbers": sample_numbers,
             "last_at": now,
             "summary": summary,
             "errors": errors,
@@ -1422,5 +1888,101 @@ CN118100002A,一种农业灌溉喷头,节水喷头结构,A01G25/02,某农机公�
             "批量轻量导入绝不能覆盖已有附图"
         );
         assert_eq!(after.pdf_url, "https://example.com/cn118000123a.pdf");
+    }
+
+    #[test]
+    fn windows_path_to_wsl_candidate_maps_drive_and_unc_paths() {
+        assert_eq!(
+            windows_path_to_wsl_candidate(r#"F:\down\专利数据"#),
+            Some(PathBuf::from("/mnt/f/down/专利数据"))
+        );
+        assert_eq!(
+            windows_path_to_wsl_candidate(r#""D:/Patents/2026""#),
+            Some(PathBuf::from("/mnt/d/Patents/2026"))
+        );
+        assert_eq!(
+            windows_path_to_wsl_candidate(r"\\wsl$\Ubuntu\home\user\patents"),
+            Some(PathBuf::from("/home/user/patents"))
+        );
+        assert_eq!(windows_path_to_wsl_candidate("/mnt/f/down/专利数据"), None);
+    }
+
+    #[test]
+    fn validate_ipc_prefix_rejects_folder_paths_and_allows_valid_ipcs() {
+        assert_eq!(validate_ipc_prefix_filter("").unwrap(), "");
+        assert_eq!(
+            validate_ipc_prefix_filter("H01L, G06F").unwrap(),
+            "H01L, G06F"
+        );
+        assert!(validate_ipc_prefix_filter(r"F:\down\专利数据").is_err());
+        assert!(validate_ipc_prefix_filter("/mnt/f/down/专利数据").is_err());
+        assert!(validate_ipc_prefix_filter("~/patents").is_err());
+    }
+
+    #[test]
+    fn recursive_sync_lists_nested_files_and_parses_mixed_zip_bundle() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let sub = tmp.path().join("sub_folder");
+        std::fs::create_dir_all(&sub).expect("mkdir");
+        std::fs::write(
+            sub.join("cnipa_export.csv"),
+            "公开号,发明名称,摘要\nCN990123A,一种微压氧舱泄压阀,微压氧舱自动泄压保护结构\n",
+        )
+        .expect("write csv");
+        std::fs::write(
+            sub.join("note.txt"),
+            "发明名称：一种多级旋流煤粉燃烧器\n公开号：CN990124A\n摘要：用于热风炉膛的煤粉稳燃装置。\n",
+        )
+        .expect("write txt");
+
+        // 构造混合 ZIP（含 1 份 CSV + 1 份 TXT）
+        let mut cursor = Cursor::new(Vec::new());
+        {
+            let mut z = zip::ZipWriter::new(&mut cursor);
+            let opts = SimpleFileOptions::default();
+            z.start_file("nested/table.csv", opts).expect("start csv");
+            z.write_all(
+                "公开号,发明名称,摘要\nCN990125A,一种氧舱监测模块,监测氧浓度与微压\n".as_bytes(),
+            )
+            .expect("write zip csv");
+            z.start_file("nested/doc.txt", opts).expect("start txt");
+            z.write_all(
+                "发明名称：一种热风炉余热回收装置\n摘要：提升沥青热再生热效率。\n".as_bytes(),
+            )
+            .expect("write zip txt");
+            z.finish().expect("finish zip");
+        }
+        let zip_bytes = cursor.into_inner();
+        std::fs::write(tmp.path().join("bundle.zip"), &zip_bytes).expect("write zip");
+
+        let found = list_syncable_files_recursive(tmp.path()).expect("list recursive");
+        assert_eq!(
+            found.len(),
+            3,
+            "应递归发现 1 个压缩包 + 子目录内 1 表 1 文档"
+        );
+
+        let parsed_zip = parse_any_patent_bytes(
+            "bundle.zip",
+            &zip_bytes,
+            &PatentTableImportOptions::default(),
+        )
+        .expect("parse mixed zip");
+        assert_eq!(
+            parsed_zip.matched_patents.len(),
+            2,
+            "混合 ZIP 应同时解析出内嵌 CSV 与 TXT 文献"
+        );
+
+        // 确认 batch_import_patents_with_chunks 同步写入了 char-tfidf-v2 向量
+        let db = Database::init(":memory:").expect("init db");
+        let (imp, chunks) = db
+            .batch_import_patents_with_chunks(&parsed_zip.matched_patents, "char-tfidf-v2")
+            .expect("batch import");
+        assert_eq!(imp, 2);
+        assert!(chunks >= 2);
+        let st = db.get_backfill_index_status().expect("status");
+        assert_eq!(st["ready_patents"], 2);
+        assert_eq!(st["remaining"], 0);
     }
 }

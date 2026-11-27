@@ -1,4 +1,4 @@
-const CACHE_NAME = 'innoforge-v3';
+const CACHE_NAME = 'innoforge-v4';
 
 const STATIC_ASSETS = [
     '/static/style.css',

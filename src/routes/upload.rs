@@ -838,7 +838,7 @@ pub async fn api_upload_ingest_local(
     }
 }
 
-fn build_local_patent_record(
+pub(crate) fn build_local_patent_record(
     filename: &str,
     content: &str,
 ) -> (crate::patent::Patent, &'static str, Vec<String>) {
@@ -1615,6 +1615,85 @@ pub async fn api_upload_extract_stream(
     };
 
     Sse::new(stream)
+}
+
+/// 同步快速提取本地文档文字层（供批量目录同步 / ZIP 批导在 `spawn_blocking` 中复用）：
+/// 支持 PDF（文本层，不触发付费 AI 视觉）、OFD、DOCX、HTML/XML、RTF、TXT/MD/LaTeX。
+pub(crate) fn extract_fast_doc_text_sync(
+    file_name: &str,
+    file_bytes: &[u8],
+) -> Result<String, String> {
+    let ext_from_name = file_name.rsplit('.').next().unwrap_or("").to_lowercase();
+    let ext = match detect_type_by_magic(file_bytes) {
+        Some(magic_type) => magic_type.to_string(),
+        None => ext_from_name,
+    };
+
+    if ext == "pdf" {
+        if let Err(err) = inspect_pdf_integrity(file_bytes) {
+            return Err(err.error);
+        }
+        let is_bad = |s: &str| {
+            s.contains("MuPDF error")
+                || s.contains("mupdf error")
+                || s.contains("zlib error")
+                || s.contains("PDF error")
+        };
+        if let Ok(text) = pdf_extract::extract_text_from_mem(file_bytes) {
+            let trimmed = text.trim();
+            if trimmed.chars().count() >= 20 && !is_bad(trimmed) {
+                return Ok(text);
+            }
+        }
+        if let Ok(text) = extract_pdf_text_by_pages(file_bytes) {
+            let trimmed = text.trim();
+            if trimmed.chars().count() >= 20 && !is_bad(trimmed) {
+                return Ok(text);
+            }
+        }
+        if let Ok(text) = extract_pdf_text_pdftotext(file_bytes) {
+            let trimmed = text.trim();
+            if trimmed.chars().count() >= 20 && !is_bad(trimmed) {
+                return Ok(text);
+            }
+        }
+        if let Ok(text) = extract_pdf_text_pymupdf(file_bytes) {
+            let trimmed = text.trim();
+            if trimmed.chars().count() >= 20 && !is_bad(trimmed) {
+                return Ok(text);
+            }
+        }
+        return Err("扫描版 PDF 无内嵌文字层（请通过上方单文件上传区走 OCR 识别）".into());
+    }
+
+    if ext == "docx" {
+        let t = extract_docx_text(file_bytes).map_err(|e| format!("DOCX 解析失败: {e}"))?;
+        if t.trim().is_empty() {
+            return Err("DOCX 无可提取文字".into());
+        }
+        return Ok(t);
+    }
+
+    if ext == "ofd" {
+        let t = extract_ofd_text(file_bytes).map_err(|e| format!("OFD 解析失败: {e}"))?;
+        if t.trim().is_empty() {
+            return Err("OFD 无可提取文字（若为扫描件请转 PDF 后上传）".into());
+        }
+        return Ok(t);
+    }
+
+    let decoded = match String::from_utf8(file_bytes.to_vec()) {
+        Ok(t) => t,
+        Err(_) => {
+            let (t, _, _) = encoding_rs::GB18030.decode(file_bytes);
+            t.into_owned()
+        }
+    };
+    let text = postprocess_text_by_ext(&ext, &decoded);
+    if text.trim().is_empty() {
+        return Err("文档无可提取文字".into());
+    }
+    Ok(text)
 }
 
 /// 仅执行快速文本层提取（pdf-extract -> by-pages -> pdftotext -> PyMuPDF），不触发慢速 OCR
