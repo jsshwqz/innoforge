@@ -1338,12 +1338,12 @@
 
                 var bubble = document.createElement('div');
                 bubble.style.cssText = 'max-width:80%;padding:10px 14px;background:' + bgColor + ';color:' + textColor + ';border:1px solid ' + borderColor + ';border-radius:' + (isUser ? '12px 12px 4px 12px' : '12px 12px 12px 4px') + ';font-size:13px;line-height:1.6;word-break:break-word;';
-                var content = m.content || '';
-                // Render markdown-like content
-                content = content.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-                content = content.replace(/`([^`]+)`/g, '<code style="background:#0d1117;padding:1px 5px;border-radius:3px;font-size:0.9em;">$1</code>');
-                content = content.replace(/\n/g, '<br>');
-                bubble.innerHTML = DOMPurify.sanitize(content);
+                const rawContent = m.content || '';
+                if (isUser) {
+                    bubble.innerHTML = DOMPurify.sanitize(esc(rawContent).replace(/\n/g, '<br>'));
+                } else {
+                    bubble.innerHTML = DOMPurify.sanitize('<div class="analysis-result" style="margin:0;">' + renderMarkdown(rawContent) + '</div>');
+                }
 
                 var metaDiv = document.createElement('div');
                 metaDiv.style.cssText = 'display:flex;align-items:center;gap:6px;margin-top:4px;opacity:0.7;font-size:11px;';
@@ -1440,11 +1440,7 @@
             aiAv.textContent = '🤖';
             var aiBubble = document.createElement('div');
             aiBubble.style.cssText = 'max-width:80%;padding:10px 14px;background:#161b22;color:#c9d1d9;border:1px solid #21262d;border-radius:12px 12px 12px 4px;font-size:13px;line-height:1.6;word-break:break-word;';
-            var aiContent = aiText;
-            aiContent = aiContent.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-            aiContent = aiContent.replace(/`([^`]+)`/g, '<code style="background:#0d1117;padding:1px 5px;border-radius:3px;font-size:0.9em;">$1</code>');
-            aiContent = aiContent.replace(/\n/g, '<br>');
-            aiBubble.innerHTML = DOMPurify.sanitize(aiContent);
+            aiBubble.innerHTML = DOMPurify.sanitize('<div class="analysis-result" style="margin:0;">' + renderMarkdown(aiText || '') + '</div>');
             aiRow.appendChild(aiAv);
             aiRow.appendChild(aiBubble);
             chatEl.appendChild(aiRow);
