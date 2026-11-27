@@ -1709,7 +1709,7 @@
                 eventSource.close();
                 if (activeEventSource === eventSource) activeEventSource = null;
                 resolve();
-            }, 600000); // 10 min max
+            }, 1800000); // 30 min max (matches backend pipeline channel TTL)
 
             eventSource.onopen = function() {
                 if (connId !== activeSSEConnectionId) { eventSource.close(); return; }
