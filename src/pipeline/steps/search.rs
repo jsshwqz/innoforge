@@ -208,6 +208,10 @@ pub async fn search_web(ctx: &mut PipelineContext, serpapi_key: &str, db: &Datab
 /// - 补搜轮（`auto_refill_rounds > 0`）：取最新追加到尾部的至多 3 条补搜查询，
 ///   避免重跑前 3 条命中旧缓存原地空转。
 fn select_patent_search_queries(ctx: &PipelineContext) -> Vec<String> {
+    // 严格保持空查询语义（例如 quick_mode 跳过 ExpandQuery 时 expanded_queries 为空，不得私自触发在线检索，见 issue #70）
+    if ctx.expanded_queries.is_empty() {
+        return Vec::new();
+    }
     let raw_slice: Vec<String> = if ctx.auto_refill_rounds > 0 && ctx.expanded_queries.len() > 3 {
         let skip = ctx.expanded_queries.len().saturating_sub(3);
         ctx.expanded_queries.iter().skip(skip).cloned().collect()
@@ -461,5 +465,9 @@ mod tests {
             select_patent_search_queries(&ctx),
             vec!["微高压氧仓", "高压氧舱 密封结构"]
         );
+
+        // quick_mode / 未执行 ExpandQuery 时 expanded_queries 为空，必须保持返回空集
+        let empty_ctx = PipelineContext::new("id-3", "相变储热散热底座", "描述");
+        assert!(select_patent_search_queries(&empty_ctx).is_empty());
     }
 }
