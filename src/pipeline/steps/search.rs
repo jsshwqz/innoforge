@@ -123,7 +123,23 @@ pub async fn search_web(ctx: &mut PipelineContext, serpapi_key: &str, db: &Datab
     }
 
     // 缓存命中则直接返回 / Return cached results if available
-    let queries: Vec<String> = ctx.expanded_queries.iter().take(3).cloned().collect();
+    let queries: Vec<String> = ctx
+        .expanded_queries
+        .iter()
+        .map(|q| super::parse::sanitize_search_query(q))
+        .filter(|q| q.chars().count() >= 2)
+        .take(3)
+        .collect();
+    let queries = if queries.is_empty() {
+        let t = super::parse::sanitize_search_query(&ctx.title);
+        if t.is_empty() {
+            ctx.expanded_queries.iter().take(3).cloned().collect()
+        } else {
+            vec![t]
+        }
+    } else {
+        queries
+    };
     if let Some(cached) = try_cache(db, &queries, "web") {
         ctx.web_results = cached;
         return Ok(());
@@ -137,7 +153,7 @@ pub async fn search_web(ctx: &mut PipelineContext, serpapi_key: &str, db: &Datab
     let mut seen_urls: HashSet<String> = HashSet::new();
 
     // SerpAPI 搜索
-    for query in ctx.expanded_queries.iter().take(3) {
+    for query in &queries {
         let mut params = vec![
             (
                 "q",
@@ -192,12 +208,39 @@ pub async fn search_web(ctx: &mut PipelineContext, serpapi_key: &str, db: &Datab
 /// - 补搜轮（`auto_refill_rounds > 0`）：取最新追加到尾部的至多 3 条补搜查询，
 ///   避免重跑前 3 条命中旧缓存原地空转。
 fn select_patent_search_queries(ctx: &PipelineContext) -> Vec<String> {
-    if ctx.auto_refill_rounds > 0 && ctx.expanded_queries.len() > 3 {
+    let raw_slice: Vec<String> = if ctx.auto_refill_rounds > 0 && ctx.expanded_queries.len() > 3 {
         let skip = ctx.expanded_queries.len().saturating_sub(3);
         ctx.expanded_queries.iter().skip(skip).cloned().collect()
     } else {
-        ctx.expanded_queries.iter().take(3).cloned().collect()
+        ctx.expanded_queries.iter().take(5).cloned().collect()
+    };
+
+    let mut clean: Vec<String> = Vec::new();
+    for q in raw_slice {
+        let s = super::parse::sanitize_search_query(&q);
+        if s.chars().count() >= 2 && !clean.contains(&s) {
+            clean.push(s);
+            if clean.len() >= 3 {
+                break;
+            }
+        }
     }
+    if clean.is_empty() {
+        let title_q = super::parse::sanitize_search_query(&ctx.title);
+        if title_q.chars().count() >= 2 {
+            clean.push(title_q);
+        }
+        for kw in &ctx.keywords {
+            let s = super::parse::sanitize_search_query(kw);
+            if s.chars().count() >= 2 && !clean.contains(&s) {
+                clean.push(s);
+                if clean.len() >= 3 {
+                    break;
+                }
+            }
+        }
+    }
+    clean
 }
 
 /// 将新检索命中的专利按标题去重合并到目标集合中，返回实际新增条数。
@@ -260,22 +303,48 @@ pub async fn search_patents(
     let mut batch_results = Vec::new();
     let mut batch_seen: HashSet<String> = HashSet::new();
 
-    // 本地数据库搜索（兜底，先跑保证有结果）
+    // 本地数据库搜索（兜底，先跑保证有结果；若全词 FTS 命中不足 5 件且为中文长词，尝试去首尾字核心词干兼容单字笔误如“氧仓”→“氧舱”）
     for query in &queries {
-        if let Ok((local_results, _total)) = db.search_fts(query, 1, 20) {
-            for p in local_results {
-                let title_key = p.title.chars().take(20).collect::<String>().to_lowercase();
-                if batch_seen.contains(&title_key) {
-                    continue;
+        let mut local_queries = vec![query.clone()];
+        let cjk_only: Vec<char> = query
+            .chars()
+            .filter(|c| (*c as u32) >= 0x4E00 && (*c as u32) <= 0x9FFF)
+            .collect();
+        if cjk_only.len() >= 4 {
+            let head_stem: String = cjk_only.iter().take(cjk_only.len() - 1).collect();
+            let mid_stem: String = cjk_only
+                .iter()
+                .skip(1)
+                .take(cjk_only.len().saturating_sub(2))
+                .collect();
+            if head_stem.chars().count() >= 3 && !local_queries.contains(&head_stem) {
+                local_queries.push(head_stem);
+            }
+            if mid_stem.chars().count() >= 3 && !local_queries.contains(&mid_stem) {
+                local_queries.push(mid_stem);
+            }
+        }
+        let mut hits_for_q = 0usize;
+        for lq in &local_queries {
+            if let Ok((local_results, _total)) = db.search_fts(lq, 1, 20) {
+                for p in local_results {
+                    let title_key = p.title.chars().take(20).collect::<String>().to_lowercase();
+                    if batch_seen.contains(&title_key) {
+                        continue;
+                    }
+                    batch_seen.insert(title_key);
+                    batch_results.push(PipelinePatentHit {
+                        id: format!("patent_local_{}", p.patent_number),
+                        title: p.title,
+                        snippet: p.abstract_text,
+                        link: format!("https://patents.google.com/patent/{}", p.patent_number),
+                        source: "local_db".into(),
+                    });
+                    hits_for_q += 1;
                 }
-                batch_seen.insert(title_key);
-                batch_results.push(PipelinePatentHit {
-                    id: format!("patent_local_{}", p.patent_number),
-                    title: p.title,
-                    snippet: p.abstract_text,
-                    link: format!("https://patents.google.com/patent/{}", p.patent_number),
-                    source: "local_db".into(),
-                });
+            }
+            if hits_for_q >= 5 {
+                break;
             }
         }
     }
@@ -372,6 +441,25 @@ mod tests {
         assert_eq!(
             select_patent_search_queries(&ctx),
             vec!["氧气密封", "气动自紧密封唇", "多级迷宫微通道阻尼"]
+        );
+    }
+
+    #[test]
+    fn select_patent_search_queries_filters_gibberish_and_stopwords() {
+        let mut ctx = PipelineContext::new(
+            "id-2",
+            "微高压氧仓，目前市场上头部品牌有哪些，分别优缺点有哪些",
+            "描述",
+        );
+        ctx.expanded_queries = vec![
+            "有哪".into(),
+            "微高压氧仓，目前市场上头部品牌有哪些，分别优缺点有哪些".into(),
+            "标题A与标题B在家用/用微/微高 vs 软体/体舱维度存在矛盾，需进一步验证".into(),
+            "高压氧舱 密封结构".into(),
+        ];
+        assert_eq!(
+            select_patent_search_queries(&ctx),
+            vec!["微高压氧仓", "高压氧舱 密封结构"]
         );
     }
 }

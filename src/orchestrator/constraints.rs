@@ -204,7 +204,7 @@ pub fn enforce_excluded_path_guard(ctx: &mut PipelineContext) -> Vec<String> {
     combined_violations
 }
 
-/// 从 `open_questions` 与 `deep_reasoning.blind_spots` 中派生针对性补搜子查询（去重并排除已搜查询）。
+/// 从 `open_questions` 与 `deep_reasoning.blind_spots` 中派生针对性补搜子查询（去重、清洗噪音并排除已搜查询）。
 pub fn derive_open_question_refill_queries(ctx: &PipelineContext) -> Vec<String> {
     let existing_lower: Vec<String> = ctx
         .expanded_queries
@@ -214,25 +214,15 @@ pub fn derive_open_question_refill_queries(ctx: &PipelineContext) -> Vec<String>
     let mut candidates: Vec<String> = Vec::new();
 
     for q in &ctx.research_state.open_questions {
-        let cleaned = q
-            .trim()
-            .trim_start_matches(['-', '*', '•', ' '])
-            .chars()
-            .take(64)
-            .collect::<String>();
+        let cleaned = crate::pipeline::steps::parse::sanitize_search_query(q);
         if cleaned.chars().count() >= 4 {
             candidates.push(cleaned);
         }
     }
 
     for b in &ctx.deep_reasoning.blind_spots {
-        let cleaned = b
-            .trim()
-            .trim_start_matches(['-', '*', '•', ' '])
-            .chars()
-            .take(64)
-            .collect::<String>();
-        if cleaned.chars().count() >= 6 {
+        let cleaned = crate::pipeline::steps::parse::sanitize_search_query(b);
+        if cleaned.chars().count() >= 4 {
             candidates.push(cleaned);
         }
     }
@@ -372,5 +362,19 @@ mod tests {
             true,
             &q
         ));
+    }
+
+    #[test]
+    fn derive_open_question_refill_queries_skips_contradiction_prose_and_bigram_soup() {
+        let mut ctx = PipelineContext::new("i3", "微压氧舱", "描述");
+        ctx.research_state.open_questions.push(
+            "家用微高压氧舱怎么选？青云软体舱与高压氧舱十大品牌推荐在家用/用微/微高 vs 软体/体舱维度存在矛盾，需进一步验证".into(),
+        );
+        ctx.deep_reasoning
+            .blind_spots
+            .push("软体舱拉链气密性疲劳寿命测试".into());
+
+        let derived = derive_open_question_refill_queries(&ctx);
+        assert_eq!(derived, vec!["软体舱拉链气密性疲劳寿命测试".to_string()]);
     }
 }

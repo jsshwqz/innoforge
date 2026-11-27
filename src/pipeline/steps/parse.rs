@@ -95,6 +95,31 @@ const ZH_STOPWORDS: &[&str] = &[
     "有哪些",
     "优缺点",
     "市面上",
+    "市场上",
+    "有哪",
+    "别优",
+    "点有",
+    "牌有",
+    "部品牌",
+    "头部",
+    "品牌",
+    "市场",
+    "场上",
+    "怎么选",
+    "对比",
+    "比较",
+    "推荐",
+    "榜单",
+    "趋势",
+    "现状",
+    "分析",
+    "介绍",
+    "总结",
+    "综述",
+    "调研",
+    "分别优",
+    "优缺",
+    "头部品",
 ];
 
 const EN_STOPWORDS: &[&str] = &[
@@ -134,27 +159,161 @@ pub fn tokenize(text: &str) -> Vec<String> {
         tokens.push(current_ascii);
     }
 
-    let chinese_chars: Vec<char> = chars
-        .iter()
-        .filter(|c| (**c as u32) >= 0x4E00 && (**c as u32) <= 0x9FFF)
-        .copied()
-        .collect();
+    // 按标点/空白切分连续中文片段再生成 2-gram，严禁跨逗号/问号拼接垃圾碎片（如“仓目”“些分”“有哪”）
+    let mut cjk_run: Vec<char> = Vec::new();
+    let flush_cjk_run = |run: &mut Vec<char>, tokens: &mut Vec<String>| {
+        for window in run.windows(2) {
+            let bigram: String = window.iter().collect();
+            if !stopwords.contains(bigram.as_str()) {
+                tokens.push(bigram);
+            }
+        }
+        for &ch in run.iter() {
+            let s = ch.to_string();
+            if !stopwords.contains(s.as_str()) {
+                tokens.push(s);
+            }
+        }
+        run.clear();
+    };
 
-    for window in chinese_chars.windows(2) {
-        let bigram: String = window.iter().collect();
-        if !stopwords.contains(bigram.as_str()) {
-            tokens.push(bigram);
+    for &ch in &chars {
+        if (ch as u32) >= 0x4E00 && (ch as u32) <= 0x9FFF {
+            cjk_run.push(ch);
+        } else if !cjk_run.is_empty() {
+            flush_cjk_run(&mut cjk_run, &mut tokens);
         }
     }
-
-    for &ch in &chinese_chars {
-        let s = ch.to_string();
-        if !stopwords.contains(s.as_str()) {
-            tokens.push(s);
-        }
+    if !cjk_run.is_empty() {
+        flush_cjk_run(&mut cjk_run, &mut tokens);
     }
 
     tokens
+}
+
+/// 清洗并提炼适合专利/网络搜索引擎的核心查询短语：
+/// - 剔除口语化调研问句（如「目前市场上头部品牌有哪些，分别优缺点有哪些」）；
+/// - 拦截矛盾模板句与 `/` 滑窗双字碎片拼串（防止向 SerpAPI / Google Patents 发送无意义长句或「有哪」等 2 字虚词）；
+/// - 按 Unicode 字符边界截断至 32 字以内。
+pub fn sanitize_search_query(raw: &str) -> String {
+    let trimmed = raw
+        .trim()
+        .trim_start_matches(['-', '*', '•', '·', ' ', '\t'])
+        .trim_matches(['"', '\'', '「', '」', '《', '》', '“', '”']);
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    // 拦截矛盾开放问题模板与滑窗双字碎片（如“标题A与标题B在家用/用微/微高 vs ...”）
+    let lower = trimmed.to_ascii_lowercase();
+    if trimmed.contains("维度存在矛盾")
+        || trimmed.contains("需进一步验证")
+        || (lower.contains(" vs ") && trimmed.matches('/').count() >= 2)
+        || trimmed.matches('/').count() >= 3
+    {
+        return String::new();
+    }
+
+    const CONVERSATIONAL_PHRASES: &[&str] = &[
+        "目前市场上头部品牌有哪些",
+        "目前市面上有哪些",
+        "目前市场上有哪些",
+        "分别是什么类型",
+        "分别优缺点有哪些",
+        "他们的优缺点有什么",
+        "它们的优缺点有什么",
+        "优缺点有哪些",
+        "优缺点是什么",
+        "头部品牌有哪些",
+        "有哪些头部品牌",
+        "主流品牌有哪些",
+        "有哪些品牌",
+        "目前市场上",
+        "目前市面上",
+        "市面上",
+        "市场上",
+        "头部品牌",
+        "十大品牌推荐",
+        "权威推荐榜单",
+        "推荐榜单",
+        "分别优缺点",
+        "优缺点",
+        "优劣对比",
+        "有哪些",
+        "有什么",
+        "什么类型",
+        "哪些类型",
+        "分别是",
+        "怎么选",
+        "请问",
+        "国内外发展对比",
+        "国内行业的机遇与短板",
+        "行业发展趋势",
+        "what types of",
+        "pros and cons",
+        "market landscape",
+        "top brands",
+    ];
+
+    let mut cleaned = trimmed.to_string();
+    for phrase in CONVERSATIONAL_PHRASES {
+        if phrase.is_ascii() {
+            // 不区分大小写剔除英文调研套话
+            let low_now = cleaned.to_ascii_lowercase();
+            if let Some(pos) = low_now.find(phrase) {
+                let before = cleaned.get(..pos).unwrap_or("");
+                let after = cleaned.get(pos + phrase.len()..).unwrap_or("");
+                cleaned = format!("{before} {after}");
+            }
+        } else if cleaned.contains(phrase) {
+            cleaned = cleaned.replace(phrase, " ");
+        }
+    }
+
+    let stopwords: HashSet<&str> = ZH_STOPWORDS
+        .iter()
+        .chain(EN_STOPWORDS.iter())
+        .copied()
+        .collect();
+
+    let mut kept_clauses: Vec<String> = Vec::new();
+    for part in cleaned.split([
+        '，', ',', '。', '？', '?', '！', '!', '；', ';', '：', ':', '—', '…', '\n', '\r',
+    ]) {
+        let p = part
+            .split_whitespace()
+            .filter(|w| !stopwords.contains(&w.to_ascii_lowercase().as_str()))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let p_trim = p
+            .trim()
+            .trim_matches(['的', '与', '和', '及', '在', '对', '把'])
+            .trim();
+        let char_len = p_trim.chars().count();
+        if char_len < 2 || stopwords.contains(p_trim) {
+            continue;
+        }
+        // 若整段拆完没有任何非停用词 token（如“分别有哪”），直接跳过
+        let meaningful = tokenize(p_trim)
+            .into_iter()
+            .any(|tok| tok.chars().count() >= 2 && !stopwords.contains(tok.as_str()));
+        if !meaningful {
+            continue;
+        }
+        if !kept_clauses.iter().any(|x| x == p_trim) {
+            kept_clauses.push(p_trim.to_string());
+        }
+        if kept_clauses.len() >= 2 {
+            break;
+        }
+    }
+
+    let joined = kept_clauses.join(" ");
+    let final_q: String = joined.trim().chars().take(32).collect();
+    if final_q.chars().count() < 2 || stopwords.contains(final_q.as_str()) {
+        String::new()
+    } else {
+        final_q
+    }
 }
 
 fn extract_keywords(text: &str, max_keywords: usize) -> Vec<String> {
@@ -463,5 +622,24 @@ mod tests {
             ),
             QueryIntent::InventionValidation
         );
+    }
+
+    #[test]
+    fn sanitize_search_query_strips_conversational_questions_and_contradiction_gibberish() {
+        assert_eq!(
+            sanitize_search_query("微高压氧仓，目前市场上头部品牌有哪些，分别优缺点有哪些"),
+            "微高压氧仓"
+        );
+        assert_eq!(sanitize_search_query("有哪"), "");
+        assert_eq!(
+            sanitize_search_query(
+                "家用微高压氧舱怎么选？青云软体舱与高压氧舱十大品牌推荐在家用/用微/微高 vs 软体/体舱维度存在矛盾，需进一步验证"
+            ),
+            ""
+        );
+        let tokens = tokenize("微高压氧仓，目前市场上头部品牌有哪些，分别优缺点有哪些");
+        assert!(!tokens.contains(&"有哪".to_string()));
+        assert!(!tokens.contains(&"仓目".to_string()));
+        assert!(!tokens.contains(&"些分".to_string()));
     }
 }
