@@ -483,9 +483,26 @@ pub async fn enrich_patent_free(db: &Database, patent_id: &str) -> EnrichResult 
     }
 }
 
+/// 判断裸 ID 是否形如真实专利公开号（两位字母国别码 + 至少 4 位数字，如 `CN990001001A` / `US12345678B2`）。
+fn looks_like_patent_number(raw: &str) -> bool {
+    let trimmed = raw.trim();
+    if trimmed.len() < 6 || trimmed.len() > 24 {
+        return false;
+    }
+    let bytes = trimmed.as_bytes();
+    if !(bytes[0].is_ascii_alphabetic() && bytes[1].is_ascii_alphabetic()) {
+        return false;
+    }
+    let digits = bytes[2..].iter().filter(|b| b.is_ascii_digit()).count();
+    digits >= 4
+        && bytes
+            .iter()
+            .all(|b| b.is_ascii_alphanumeric() || *b == b'-' || *b == b'/')
+}
+
 /// 从 `RankedMatch` 的 `source_id` 或 `source_url` 提取专利号。
 ///
-/// `source_id` 格式：`patent_local_CN123456`（本地）或 `patent_online_0`（在线）。
+/// `source_id` 格式：`patent_local_CN123456`（本地）或 `patent_online_0`（在线）或 `web_0`（网页结果，绝非专利号）。
 /// `source_url` 格式：`https://patents.google.com/patent/CN123456`。
 pub fn extract_patent_number(source_id: &str, source_url: &str) -> Option<String> {
     // 优先从 source_url 提取（更可靠）
@@ -502,8 +519,16 @@ pub fn extract_patent_number(source_id: &str, source_url: &str) -> Option<String
             return Some(pn.to_string());
         }
     }
-    // 兜底：source_id 本身可能是专利号
-    if !source_id.is_empty() && !source_id.starts_with("patent_online_") {
+    // 明确排除网页/合成检索结果 ID（如 web_4、online_0、patent_online_3）
+    if source_id.starts_with("patent_online_")
+        || source_id.starts_with("web_")
+        || source_id.starts_with("online_")
+        || source_id.starts_with("local_")
+    {
+        return None;
+    }
+    // 兜底：仅当 source_id 本身符合专利号格式时才返回
+    if looks_like_patent_number(source_id) {
         return Some(source_id.to_string());
     }
     None
@@ -790,6 +815,12 @@ mod tests {
     fn extract_patent_number_none_for_online_synthetic() {
         let pn = extract_patent_number("patent_online_3", "");
         assert_eq!(pn, None);
+        assert_eq!(
+            extract_patent_number("web_4", "https://example.com/oxygen-chamber"),
+            None
+        );
+        assert_eq!(extract_patent_number("online_0", ""), None);
+        assert_eq!(extract_patent_number("random_slug", ""), None);
     }
 
     #[test]

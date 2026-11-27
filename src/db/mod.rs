@@ -44,7 +44,7 @@ impl Database {
     }
 
     /// Current schema version. Increment when adding migrations.
-    pub const SCHEMA_VERSION: i32 = 26;
+    pub const SCHEMA_VERSION: i32 = 27;
 
     pub fn init(path: &str) -> Result<Self> {
         let conn = match Self::try_open_valid(path) {

@@ -700,19 +700,19 @@ pub struct AppState {
 }
 
 impl AppState {
-    /// 启动后台定时清理，移除超过 5 分钟的管道通道（防止 panic 导致泄漏）
-    /// Spawn background task to remove pipeline channels older than 5 minutes
+    /// 启动后台定时清理，移除超过 30 分钟的管道通道（防止长链路 15 步深度推演中途被误杀，同时兜底防止异常泄漏）
+    /// Spawn background task to remove stale pipeline channels older than 30 minutes
     pub fn spawn_channel_cleaner(&self) {
         let channels = self.pipeline_channels.clone();
         let db = self.db.clone();
         let config = self.config.clone();
         tokio::spawn(async move {
-            let stale_threshold = std::time::Duration::from_secs(300); // 5 分钟
+            let stale_threshold = std::time::Duration::from_secs(1800); // 30 分钟（深度推演含多轮检索+7维推理常需 8~15 分钟）
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(60)).await;
 
-                // 清理超时的管道通道
-                {
+                // 清理超时的管道通道，同时收集当前仍在运行中的活跃创意 ID
+                let active_ids: Vec<String> = {
                     let mut ch = channels.lock().unwrap_or_else(|e| e.into_inner());
                     let before = ch.len();
                     ch.retain(|id, entry| {
@@ -729,13 +729,14 @@ impl AppState {
                     if ch.len() < before {
                         tracing::info!("管道通道清理完成: 移除 {} 个", before - ch.len());
                     }
-                } // ch dropped here
+                    ch.keys().cloned().collect()
+                }; // ch dropped here
 
                 // 自动刷新 Google OAuth / gcloud 令牌（如需要）
                 refresh_google_token_background(&config, &db).await;
 
-                // 重置卡住超过 10 分钟的 analyzing 创意为 error
-                match db.reset_stuck_analyzing(10) {
+                // 仅重置孤立且卡住超过 30 分钟的 analyzing 创意；仍在 pipeline_channels 中活跃执行的绝不误杀
+                match db.reset_stuck_analyzing_excluding(30, &active_ids) {
                     Ok(n) if n > 0 => {
                         tracing::warn!("自动恢复: 重置 {} 个卡住的 analyzing 创意为 error", n)
                     }

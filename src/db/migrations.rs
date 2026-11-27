@@ -550,6 +550,18 @@ pub(crate) fn run(conn: &Connection, current_version: i32, target_version: i32) 
         tracing::info!("Database migrated to version 26 (search_cover_and_norm_pn_indexes)");
     }
 
+    if current_version < 27 && target_version >= 27 {
+        // v0.9.94 性能演进：
+        // idx_patents_source_id：覆盖 backfill-status / backfill-index 的按 source 分组计数与非轻量记录过滤，
+        // 彻底消除 700MB+ 大库下 COALESCE(source, '') LIKE '%_lightweight' 触发的 1.4GB 全表扫描卡死。
+        run_migration_tx(
+            conn,
+            27,
+            "CREATE INDEX IF NOT EXISTS idx_patents_source_id ON patents(source, id);",
+        )?;
+        tracing::info!("Database migrated to version 27 (patents_source_id_covering_index)");
+    }
+
     if current_version > 0 && current_version < target_version {
         tracing::info!(
             "Database migrated from version {} to {}",
@@ -783,5 +795,27 @@ mod tests {
                 .unwrap();
             assert_eq!(1, cnt, "索引 {idx} 必须存在");
         }
+    }
+
+    #[test]
+    fn migration_v27_creates_patents_source_id_covering_index() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let conn = Connection::open(dir.path().join("v27.db")).unwrap();
+        conn.execute_batch("CREATE TABLE schema_version (version INTEGER NOT NULL);")
+            .unwrap();
+        run(&conn, 0, 27).unwrap();
+        let v: i32 = conn
+            .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(27, v);
+
+        let cnt: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_patents_source_id'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(1, cnt, "覆盖索引 idx_patents_source_id 必须存在");
     }
 }

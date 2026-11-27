@@ -353,49 +353,130 @@ impl Database {
         Ok(count)
     }
 
-    /// MB0b: 查询存量专利的向量与分块索引覆盖状态
+    /// 通过 `idx_patents_source_id` 覆盖索引做 `GROUP BY source` 分类统计，零表体（heap）扫描。
+    /// 返回 `(all_patents, lightweight_patents, non_lightweight_sources, include_null_source)`。
+    fn classify_patent_sources(
+        c: &rusqlite::Connection,
+    ) -> Result<(i64, i64, Vec<String>, bool), rusqlite::Error> {
+        let mut stmt = c.prepare("SELECT source, COUNT(*) FROM patents GROUP BY source")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, Option<String>>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        let mut all_patents = 0i64;
+        let mut lightweight_patents = 0i64;
+        let mut non_lw_sources = Vec::new();
+        let mut include_null = false;
+        for item in rows {
+            let (src_opt, cnt) = item?;
+            all_patents += cnt;
+            match src_opt {
+                Some(src) => {
+                    if src.ends_with("_lightweight") {
+                        lightweight_patents += cnt;
+                    } else {
+                        non_lw_sources.push(src);
+                    }
+                }
+                None => {
+                    include_null = true;
+                }
+            }
+        }
+        Ok((
+            all_patents,
+            lightweight_patents,
+            non_lw_sources,
+            include_null,
+        ))
+    }
+
+    /// 构造可走 `idx_patents_source_id(source, id)` 索引的精确过滤条件（杜绝 `COALESCE(source,'') NOT LIKE '%_lightweight'` 破坏索引）。
+    fn build_non_lw_source_filter(
+        alias: &str,
+        non_lw_sources: &[String],
+        include_null: bool,
+    ) -> String {
+        let mut parts = Vec::new();
+        if !non_lw_sources.is_empty() {
+            let ph = (1..=non_lw_sources.len())
+                .map(|i| format!("?{i}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            parts.push(format!("{alias}.source IN ({ph})"));
+        }
+        if include_null {
+            parts.push(format!("{alias}.source IS NULL"));
+        }
+        if parts.is_empty() {
+            "1 = 0".to_string()
+        } else {
+            format!("({})", parts.join(" OR "))
+        }
+    }
+
+    /// MB0b: 查询存量专利的向量与分块索引覆盖状态（全程走 `idx_patents_source_id` 覆盖索引，700MB+ 大库毫秒返回）
     ///
     /// 注：轻量著录批量导入（`source LIKE '%_lightweight'`）默认仅走 FTS5 词法粗筛，命中后再按需补全文与向量，
     /// 因此不计入待回填向量队列（单独在 `lightweight_patents` 披露），防止百万级公报拖垮本地全表向量检索。
     pub fn get_backfill_index_status(&self) -> Result<serde_json::Value, rusqlite::Error> {
         let c = self.conn();
-        let all_patents: i64 = c.query_row("SELECT COUNT(*) FROM patents", [], |row| row.get(0))?;
-        let lightweight_patents: i64 = c.query_row(
-            "SELECT COUNT(*) FROM patents WHERE COALESCE(source, '') LIKE '%_lightweight'",
-            [],
-            |row| row.get(0),
-        )?;
+        let (all_patents, lightweight_patents, non_lw_sources, include_null) =
+            Self::classify_patent_sources(&c)?;
         let total_patents = (all_patents - lightweight_patents).max(0);
-        let embedded_v2: i64 = c.query_row(
+        if total_patents <= 0 {
+            return Ok(json!({
+                "status": "ok",
+                "total_patents": 0,
+                "all_patents": all_patents,
+                "lightweight_patents": lightweight_patents,
+                "ready_patents": 0,
+                "embedded_patents": 0,
+                "chunked_patents": 0,
+                "remaining": 0,
+                "done": true,
+                "progress_percent": 100.0,
+            }));
+        }
+
+        let src_filter = Self::build_non_lw_source_filter("p", &non_lw_sources, include_null);
+        let embedded_sql = format!(
             "SELECT COUNT(*) FROM patents_embedding pe
              INNER JOIN patents p ON p.id = pe.patent_id
-             WHERE pe.model_name = 'char-tfidf-v2'
-               AND COALESCE(p.source, '') NOT LIKE '%_lightweight'",
-            [],
+             WHERE pe.model_name = 'char-tfidf-v2' AND {src_filter}"
+        );
+        let embedded_v2: i64 = c.query_row(
+            &embedded_sql,
+            rusqlite::params_from_iter(non_lw_sources.iter()),
             |row| row.get(0),
         )?;
-        let chunked_patents: i64 = c.query_row(
+
+        let chunked_sql = format!(
             "SELECT COUNT(DISTINCT pc.patent_id) FROM patent_chunks pc
              INNER JOIN patents p ON p.id = pc.patent_id
-             WHERE COALESCE(p.source, '') NOT LIKE '%_lightweight'",
-            [],
+             WHERE {src_filter}"
+        );
+        let chunked_patents: i64 = c.query_row(
+            &chunked_sql,
+            rusqlite::params_from_iter(non_lw_sources.iter()),
             |row| row.get(0),
         )?;
-        let needing_work: i64 = c.query_row(
+
+        let needing_sql = format!(
             "SELECT COUNT(*) FROM patents p
              LEFT JOIN patents_embedding pe ON p.id = pe.patent_id AND pe.model_name = 'char-tfidf-v2'
-             WHERE COALESCE(p.source, '') NOT LIKE '%_lightweight'
+             WHERE {src_filter}
                AND (pe.patent_id IS NULL
-                    OR NOT EXISTS (SELECT 1 FROM patent_chunks pc WHERE pc.patent_id = p.id))",
-            [],
+                    OR NOT EXISTS (SELECT 1 FROM patent_chunks pc WHERE pc.patent_id = p.id))"
+        );
+        let needing_work: i64 = c.query_row(
+            &needing_sql,
+            rusqlite::params_from_iter(non_lw_sources.iter()),
             |row| row.get(0),
         )?;
+
         let ready_patents = (total_patents - needing_work).max(0);
-        let progress_percent = if total_patents <= 0 {
-            100.0
-        } else {
-            ((ready_patents as f64 / total_patents as f64) * 100.0 * 10.0).round() / 10.0
-        };
+        let progress_percent =
+            ((ready_patents as f64 / total_patents as f64) * 100.0 * 10.0).round() / 10.0;
         Ok(json!({
             "status": "ok",
             "total_patents": total_patents,
@@ -418,29 +499,53 @@ impl Database {
         let limit = batch_size.clamp(1, 200);
         let batch_rows: Vec<(String, String, String, String, String)> = {
             let c = self.conn();
-            let mut stmt = c.prepare(
-                "SELECT p.id, COALESCE(p.title, ''), COALESCE(p.abstract_text, ''), COALESCE(p.claims, ''), COALESCE(p.description, '')
-                 FROM patents p
-                 LEFT JOIN patents_embedding pe ON p.id = pe.patent_id AND pe.model_name = 'char-tfidf-v2'
-                 WHERE COALESCE(p.source, '') NOT LIKE '%_lightweight'
-                   AND (pe.patent_id IS NULL
-                        OR NOT EXISTS (SELECT 1 FROM patent_chunks pc WHERE pc.patent_id = p.id))
-                 LIMIT ?1",
-            )?;
-            let rows = stmt.query_map(rusqlite::params![limit as i64], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                ))
-            })?;
-            let mut list = Vec::new();
-            for r in rows {
-                list.push(r?);
+            let (_, _, non_lw_sources, include_null) = Self::classify_patent_sources(&c)?;
+            if non_lw_sources.is_empty() && !include_null {
+                Vec::new()
+            } else {
+                let src_filter =
+                    Self::build_non_lw_source_filter("p", &non_lw_sources, include_null);
+                let limit_idx = non_lw_sources.len() + 1;
+                let id_sql = format!(
+                    "SELECT p.id FROM patents p
+                     LEFT JOIN patents_embedding pe ON p.id = pe.patent_id AND pe.model_name = 'char-tfidf-v2'
+                     WHERE {src_filter}
+                       AND (pe.patent_id IS NULL
+                            OR NOT EXISTS (SELECT 1 FROM patent_chunks pc WHERE pc.patent_id = p.id))
+                     LIMIT ?{limit_idx}"
+                );
+                let mut params_vec: Vec<rusqlite::types::Value> = non_lw_sources
+                    .iter()
+                    .map(|s| rusqlite::types::Value::Text(s.clone()))
+                    .collect();
+                params_vec.push(rusqlite::types::Value::Integer(limit as i64));
+                let mut id_stmt = c.prepare(&id_sql)?;
+                let ids: Vec<String> = id_stmt
+                    .query_map(rusqlite::params_from_iter(params_vec), |row| {
+                        row.get::<_, String>(0)
+                    })?
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                let mut list = Vec::with_capacity(ids.len());
+                let mut fetch_stmt = c.prepare_cached(
+                    "SELECT id, COALESCE(title, ''), COALESCE(abstract_text, ''), COALESCE(claims, ''), COALESCE(description, '')
+                     FROM patents WHERE id = ?1",
+                )?;
+                for pid in ids {
+                    if let Ok(tuple) = fetch_stmt.query_row(rusqlite::params![pid], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, String>(3)?,
+                            row.get::<_, String>(4)?,
+                        ))
+                    }) {
+                        list.push(tuple);
+                    }
+                }
+                list
             }
-            list
         };
 
         let mut processed = 0usize;
@@ -626,5 +731,43 @@ mod tests {
         assert_eq!(st["ready_patents"], 1);
         assert_eq!(st["remaining"], 0);
         assert_eq!(st["done"], true);
+    }
+
+    #[test]
+    fn backfill_status_uses_covering_index_without_full_table_scan() {
+        let db = Database::init(":memory:").expect("init db");
+        let c = db.conn();
+        let mut stmt = c
+            .prepare("EXPLAIN QUERY PLAN SELECT source, COUNT(*) FROM patents GROUP BY source")
+            .expect("explain group by");
+        let plan_lines: Vec<String> = stmt
+            .query_map([], |r| r.get::<_, String>(3))
+            .expect("query plan")
+            .flatten()
+            .collect();
+        let joined = plan_lines.join(" | ");
+        assert!(
+            joined.contains("idx_patents_source_id"),
+            "GROUP BY source 必须走 idx_patents_source_id 覆盖索引，禁止 700MB 全表扫描: {joined}"
+        );
+
+        let mut stmt2 = c
+            .prepare(
+                "EXPLAIN QUERY PLAN SELECT COUNT(*) FROM patents p
+                 LEFT JOIN patents_embedding pe ON p.id = pe.patent_id AND pe.model_name = 'char-tfidf-v2'
+                 WHERE p.source IN ('google_patents', 'local')
+                   AND (pe.patent_id IS NULL OR NOT EXISTS (SELECT 1 FROM patent_chunks pc WHERE pc.patent_id = p.id))",
+            )
+            .expect("explain needing_work");
+        let plan2: Vec<String> = stmt2
+            .query_map([], |r| r.get::<_, String>(3))
+            .expect("query plan 2")
+            .flatten()
+            .collect();
+        let joined2 = plan2.join(" | ");
+        assert!(
+            joined2.contains("idx_patents_source_id"),
+            "needing_work 查询必须走 idx_patents_source_id 覆盖索引: {joined2}"
+        );
     }
 }

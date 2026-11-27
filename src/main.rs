@@ -146,13 +146,16 @@ async fn main() -> anyhow::Result<()> {
     );
     println!("Local access: http://127.0.0.1:{port}");
 
-    // 自动打开浏览器（设置 INNOFORGE_NO_OPEN 可禁用）
+    // 异步打开浏览器（避免 open::that 在 Windows/WSL2 同步阻塞 30 秒卡住 server.serve() 受理连接；设置 INNOFORGE_NO_OPEN 可禁用）
     if std::env::var("INNOFORGE_NO_OPEN").is_err() {
         let url = format!("http://127.0.0.1:{port}/");
-        if let Err(e) = open::that(&url) {
-            println!("Could not open browser: {}", e);
-            println!("Please visit: {}", url);
-        }
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            if let Err(e) = open::that(&url) {
+                println!("Could not open browser: {}", e);
+                println!("Please visit: {}", url);
+            }
+        });
     }
 
     // 显示局域网 IP（方便手机 / WSL2 宿主机一键访问）

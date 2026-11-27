@@ -266,40 +266,7 @@ pub async fn api_idea_analyze(
     match result {
         Ok(ctx) => {
             if let Ok(Some(mut idea)) = db.get_idea(id) {
-                idea.novelty_score =
-                    if ctx.novelty_status == crate::pipeline::context::NoveltyStatus::Sufficient {
-                        Some(ctx.novelty_score)
-                    } else {
-                        None
-                    };
-                idea.web_results = serde_json::to_string(
-                    &ctx.web_results
-                        .iter()
-                        .map(|r| {
-                            json!({
-                                "title": r.title,
-                                "snippet": r.snippet,
-                                "link": r.link,
-                                "source": r.source,
-                            })
-                        })
-                        .collect::<Vec<_>>(),
-                )
-                .unwrap_or_else(|_| "[]".into());
-                idea.patent_results = serde_json::to_string(
-                    &ctx.patent_results
-                        .iter()
-                        .map(|r| {
-                            json!({
-                                "patent_number": r.id,
-                                "title": r.title,
-                                "abstract": r.snippet,
-                                "source": r.source,
-                            })
-                        })
-                        .collect::<Vec<_>>(),
-                )
-                .unwrap_or_else(|_| "[]".into());
+                apply_pipeline_ctx_to_idea(&mut idea, &ctx);
                 let is_survey = ctx.query_intent
                     == crate::pipeline::context::QueryIntent::MarketLandscapeSurvey;
                 let query_intent_str = if is_survey {
@@ -1075,6 +1042,49 @@ fn register_pipeline_channel(
     tx
 }
 
+/// 将深度流水线执行完成的 `PipelineContext` 持久化写回 `Idea`：
+/// - 统一落库 `web_results` 与 `patent_results`（避免深度模式检索结果页签空白）；
+/// - 开放式行业/产品谱系调研（`MarketLandscapeSurvey`）或证据不足时置 `novelty_score = None`，绝不虚标 `100/100`。
+fn apply_pipeline_ctx_to_idea(idea: &mut Idea, ctx: &crate::pipeline::context::PipelineContext) {
+    let is_survey =
+        ctx.query_intent == crate::pipeline::context::QueryIntent::MarketLandscapeSurvey;
+    let sufficient = ctx.novelty_status == crate::pipeline::context::NoveltyStatus::Sufficient;
+    idea.novelty_score = if !is_survey && sufficient {
+        Some(ctx.novelty_score)
+    } else {
+        None
+    };
+    idea.web_results = serde_json::to_string(
+        &ctx.web_results
+            .iter()
+            .map(|r| {
+                json!({
+                    "title": r.title,
+                    "snippet": r.snippet,
+                    "link": r.link,
+                    "source": r.source,
+                })
+            })
+            .collect::<Vec<_>>(),
+    )
+    .unwrap_or_else(|_| "[]".into());
+    idea.patent_results = serde_json::to_string(
+        &ctx.patent_results
+            .iter()
+            .map(|r| {
+                json!({
+                    "patent_number": r.id,
+                    "title": r.title,
+                    "abstract": r.snippet,
+                    "link": r.link,
+                    "source": r.source,
+                })
+            })
+            .collect::<Vec<_>>(),
+    )
+    .unwrap_or_else(|_| "[]".into());
+}
+
 /// POST /api/idea/pipeline — 启动 15 步创新验证流水线
 pub async fn api_idea_pipeline(
     State(s): State<AppState>,
@@ -1160,11 +1170,7 @@ pub async fn api_idea_pipeline(
                 if let Ok(Some(mut idea)) = db.get_idea(&idea_id) {
                     let sufficient =
                         ctx.novelty_status == crate::pipeline::context::NoveltyStatus::Sufficient;
-                    idea.novelty_score = if sufficient {
-                        Some(ctx.novelty_score)
-                    } else {
-                        None
-                    };
+                    apply_pipeline_ctx_to_idea(&mut idea, ctx);
                     idea.analysis = if !ctx.ai_analysis.is_empty() {
                         ctx.ai_analysis.clone()
                     } else if !sufficient {
@@ -1337,13 +1343,7 @@ pub async fn api_idea_resume(
         match resume_res {
             Ok(Some(ctx)) => {
                 if let Ok(Some(mut idea)) = db.get_idea(&idea_id) {
-                    idea.novelty_score = if ctx.novelty_status
-                        == crate::pipeline::context::NoveltyStatus::Sufficient
-                    {
-                        Some(ctx.novelty_score)
-                    } else {
-                        None
-                    };
+                    apply_pipeline_ctx_to_idea(&mut idea, &ctx);
                     if !ctx.ai_analysis.is_empty() {
                         idea.analysis = ctx.ai_analysis;
                     }
@@ -1515,5 +1515,60 @@ mod pipeline_resume_tests {
             hist[0].status,
             crate::pipeline::context::StepStatus::Done
         ));
+    }
+
+    #[test]
+    fn apply_pipeline_ctx_persists_search_results_and_suppresses_survey_novelty_score() {
+        let mut idea = crate::patent::Idea {
+            id: "idea-survey-1".to_string(),
+            title: "微高压氧仓头部品牌对比".to_string(),
+            description: "目前市场上头部品牌有哪些，分别优缺点有哪些".to_string(),
+            input_type: "text".to_string(),
+            status: "analyzing".to_string(),
+            analysis: String::new(),
+            web_results: "[]".to_string(),
+            patent_results: "[]".to_string(),
+            novelty_score: Some(100.0),
+            created_at: "2026-11-28T00:00:00Z".to_string(),
+            updated_at: "2026-11-28T00:00:00Z".to_string(),
+            discussion_summary: String::new(),
+        };
+        let mut ctx = crate::pipeline::context::PipelineContext::new(
+            &idea.id,
+            &idea.title,
+            &idea.description,
+        );
+        ctx.query_intent = crate::pipeline::context::QueryIntent::MarketLandscapeSurvey;
+        ctx.novelty_status = crate::pipeline::context::NoveltyStatus::Sufficient;
+        ctx.novelty_score = 100.0;
+        ctx.web_results
+            .push(crate::pipeline::context::PipelinePatentHit {
+                id: "web_0".into(),
+                title: "微高压氧舱主流品牌解析".into(),
+                snippet: "硬体舱与软体舱对比".into(),
+                link: "https://example.com/a".into(),
+                source: "serpapi".into(),
+            });
+        ctx.patent_results
+            .push(crate::pipeline::context::PipelinePatentHit {
+                id: "patent_local_CN990001001A".into(),
+                title: "一种家用微压氧舱".into(),
+                snippet: "气密拉链结构".into(),
+                link: "https://patents.google.com/patent/CN990001001A".into(),
+                source: "local_db".into(),
+            });
+
+        apply_pipeline_ctx_to_idea(&mut idea, &ctx);
+        assert_eq!(
+            idea.novelty_score, None,
+            "行业/产品调研模式不应输出 100/100 专利新颖性分"
+        );
+        let web_v: serde_json::Value =
+            serde_json::from_str(&idea.web_results).expect("valid web_results json");
+        let pat_v: serde_json::Value =
+            serde_json::from_str(&idea.patent_results).expect("valid patent_results json");
+        assert_eq!(web_v.as_array().map(Vec::len), Some(1));
+        assert_eq!(pat_v.as_array().map(Vec::len), Some(1));
+        assert_eq!(pat_v[0]["patent_number"], "patent_local_CN990001001A");
     }
 }
