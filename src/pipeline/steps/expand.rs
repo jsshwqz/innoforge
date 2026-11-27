@@ -28,34 +28,56 @@ pub async fn execute(ctx: &mut PipelineContext, ai: &AiClient) -> Result<()> {
 
     match ai.chat(&prompt, None).await {
         Ok(response) => {
-            let queries: Vec<String> = response
-                .lines()
-                .map(|l| {
-                    l.trim().trim_start_matches(|c: char| {
-                        c.is_numeric() || c == '.' || c == '、' || c == '-'
+            let mut queries: Vec<String> = Vec::new();
+            for line in response.lines() {
+                let raw = line
+                    .trim()
+                    .trim_start_matches(|c: char| {
+                        c.is_numeric() || c == '.' || c == '、' || c == '-' || c == '*'
                     })
-                })
-                .map(|l| l.trim().to_string())
-                .filter(|l| !l.is_empty() && l.len() >= 2)
-                .take(8)
-                .collect();
+                    .trim();
+                let cleaned = super::parse::sanitize_search_query(raw);
+                if cleaned.chars().count() >= 2 && !queries.contains(&cleaned) {
+                    queries.push(cleaned);
+                }
+                if queries.len() >= 8 {
+                    break;
+                }
+            }
 
             if queries.is_empty() {
-                // AI 失败时，用关键词作为备选查询
-                ctx.expanded_queries = ctx.keywords.iter().take(5).cloned().collect();
+                // AI 失败时，用清洗后的关键词作为备选查询
+                ctx.expanded_queries = ctx
+                    .keywords
+                    .iter()
+                    .map(|k| super::parse::sanitize_search_query(k))
+                    .filter(|k| k.chars().count() >= 2)
+                    .take(5)
+                    .collect();
             } else {
                 ctx.expanded_queries = queries;
             }
         }
         Err(_) => {
-            // AI 不可用时降级：直接用提取的关键词
-            ctx.expanded_queries = ctx.keywords.iter().take(5).cloned().collect();
+            // AI 不可用时降级：直接用清洗后的关键词
+            ctx.expanded_queries = ctx
+                .keywords
+                .iter()
+                .map(|k| super::parse::sanitize_search_query(k))
+                .filter(|k| k.chars().count() >= 2)
+                .take(5)
+                .collect();
         }
     }
 
-    // 确保至少有原始标题作为查询
-    if !ctx.expanded_queries.contains(&ctx.title) {
-        ctx.expanded_queries.insert(0, ctx.title.clone());
+    // 补充清洗后的核心标题短语（绝不把 28 字口语调研整句强塞到第 0 位挤占专利检索配额）
+    let sanitized_title = super::parse::sanitize_search_query(&ctx.title);
+    if sanitized_title.chars().count() >= 2 && !ctx.expanded_queries.contains(&sanitized_title) {
+        if ctx.expanded_queries.is_empty() {
+            ctx.expanded_queries.push(sanitized_title);
+        } else {
+            ctx.expanded_queries.insert(0, sanitized_title);
+        }
     }
 
     Ok(())

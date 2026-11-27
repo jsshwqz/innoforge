@@ -209,8 +209,14 @@ impl Orchestrator {
                     // v0.9.68：基于真实证据缺口的限次自动补搜闭环（严格硬控上限 2 轮 + 预算熔断）
                     // 仅当 Top 匹配不足或未取得全文切片时才触发补搜，避免证据已充足却反复重跑 7 维推演。
                     if step == PipelineStep::AiDeepAnalysis {
-                        let has_evidence_gap =
-                            ctx.top_matches.len() < 5 || ctx.rag_chunks.is_empty();
+                        let is_survey = ctx.query_intent
+                            == crate::pipeline::context::QueryIntent::MarketLandscapeSurvey;
+                        // 行业/产品谱系调研若已有 >=5 条检索结果，不因缺少专利全文切片反复重跑 7 维 LLM 推演
+                        let has_evidence_gap = if is_survey {
+                            ctx.top_matches.len() < 5
+                        } else {
+                            ctx.top_matches.len() < 5 || ctx.rag_chunks.is_empty()
+                        };
                         let refill_queries = if has_evidence_gap {
                             super::constraints::derive_open_question_refill_queries(&ctx)
                         } else {
