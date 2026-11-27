@@ -1445,6 +1445,54 @@ fn firecrawl_web_results_json(
     out
 }
 
+/// 判断字符是否为中日韩统一表意文字（CJK）
+fn is_cjk_char(c: char) -> bool {
+    matches!(c as u32, 0x4E00..=0x9FFF | 0x3400..=0x4DBF)
+}
+
+/// 从较长 CJK 查询词提取去套话后的高 IDF 二元字符子词（如「微压氧仓」→ `["微压", "压氧", "氧仓"]`），
+/// 用于容忍单字异体/错别字（如「仓」vs「舱」）的语义召回与精准去噪校验。
+fn extract_cjk_subterms(query_terms: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for term in query_terms {
+        let chars: Vec<char> = term.chars().collect();
+        if chars.len() < 3 || !chars.iter().all(|&c| is_cjk_char(c)) {
+            continue;
+        }
+        for i in 0..=chars.len() - 2 {
+            let gram: String = chars[i..i + 2].iter().collect();
+            if crate::db::vector::patent_ngram_idf(&gram) >= 1.0 && seen.insert(gram.clone()) {
+                out.push(gram);
+            }
+        }
+    }
+    out
+}
+
+/// 当整词 BM25 0 命中时，从 `>= 4` 字 CJK 查询词提取高 IDF 三元字符探针（如「微压氧仓」→ `["微压氧", "压氧仓"]`），
+/// 补充候选召回，避免单字笔误导致整个技术主题全部漏检。
+fn extract_cjk_probe_trigrams(query_terms: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for term in query_terms {
+        let chars: Vec<char> = term.chars().collect();
+        if chars.len() < 4 || !chars.iter().all(|&c| is_cjk_char(c)) {
+            continue;
+        }
+        for i in 0..=chars.len() - 3 {
+            let gram: String = chars[i..i + 3].iter().collect();
+            if crate::db::vector::patent_ngram_idf(&gram) >= 1.0 && seen.insert(gram.clone()) {
+                out.push(gram);
+                if out.len() >= 4 {
+                    return out;
+                }
+            }
+        }
+    }
+    out
+}
+
 /// Vector hybrid search endpoint — RRF fuse BM25 + vector similarity.
 pub async fn api_search_vector(
     State(s): State<AppState>,
@@ -1470,6 +1518,8 @@ pub async fn api_search_vector(
         .map(|t| t.trim().to_lowercase())
         .filter(|t| t.chars().count() >= 2)
         .collect();
+    let cjk_subterms = extract_cjk_subterms(&query_terms);
+    let cjk_probe_trigrams = extract_cjk_probe_trigrams(&query_terms);
 
     // 为专利级去重留足候选余量（避免库内多条同号记录把结果截断）
     let candidate_limit = (limit * 4).clamp(40, 200);
@@ -1499,6 +1549,29 @@ pub async fn api_search_vector(
             vec![]
         }
     };
+
+    // 当整词 BM25 0 命中且含长中文词时，使用高 IDF 三元字符探针做近词候选补充（后续仍经严格双闸门去噪）
+    let mut fuzzy_bm25_ids: Vec<String> = Vec::new();
+    if bm25_result.is_empty() && !cjk_probe_trigrams.is_empty() {
+        let mut seen_fuzzy = std::collections::HashSet::new();
+        for probe in &cjk_probe_trigrams {
+            if let Ok((patents, _, _)) = s.db.search_smart(
+                probe,
+                Some(&SearchType::Mixed),
+                None,
+                None,
+                None,
+                1,
+                candidate_limit,
+            ) {
+                for p in patents {
+                    if seen_fuzzy.insert(p.id.clone()) {
+                        fuzzy_bm25_ids.push(p.id);
+                    }
+                }
+            }
+        }
+    }
 
     // Vector layer: compute query embedding and search cached embeddings
     let mut all_vector_scores: std::collections::HashMap<String, f32> =
@@ -1535,8 +1608,9 @@ pub async fn api_search_vector(
                         if sim > 0.01 {
                             all_vector_scores.insert(pid.clone(), sim);
                         }
-                        // 过滤 512 维特征哈希在长文上的低频碰撞底噪（< 0.14 不进入纯向量召回）
-                        if sim >= 0.14 {
+                        // 短中文查询带单字异体/笔误（如「微压氧仓」→「微压氧舱」）在长专利上余弦集中在 0.10~0.20；
+                        // 放宽候选召回阈值至 0.10，交由下文词项/子词双闸门彻底阻断 512 维哈希碰撞噪声。
+                        if sim >= 0.10 {
                             results.push((pid, sim));
                         }
                     }
@@ -1579,6 +1653,10 @@ pub async fn api_search_vector(
         for (i, (id, _)) in bm25_result.iter().enumerate() {
             let rank = i + 1;
             *scores.entry(id.clone()).or_insert(0.0) += 1.0 / (k as f64 + rank as f64);
+        }
+        for (i, id) in fuzzy_bm25_ids.iter().enumerate() {
+            let rank = i + 1;
+            *scores.entry(id.clone()).or_insert(0.0) += 0.6 / (k as f64 + rank as f64);
         }
         for (i, (id, _)) in vector_results.iter().enumerate() {
             let rank = i + 1;
@@ -1653,20 +1731,52 @@ pub async fn api_search_vector(
                 hit_terms += 1;
             }
         }
-        // 纯向量噪声且一个查询词都没命中、向量相似度也偏低（< 0.24）直接过滤，杜绝“车牌识别”混入散热检索
-        if !query_terms.is_empty() && hit_terms == 0 && vec_sim < 0.24 {
+
+        let mut sub_hit_terms = 0usize;
+        let mut sub_title_hits = 0usize;
+        if hit_terms == 0 && !cjk_subterms.is_empty() {
+            for sub in &cjk_subterms {
+                let in_title = title_lower.contains(sub.as_str());
+                let in_body = in_title
+                    || abs_lower.contains(sub.as_str())
+                    || claims_lower.contains(sub.as_str())
+                    || desc_lower.contains(sub.as_str());
+                if in_title {
+                    sub_title_hits += 1;
+                }
+                if in_body {
+                    sub_hit_terms += 1;
+                }
+            }
+        }
+        let sub_coverage = if cjk_subterms.is_empty() {
+            0.0
+        } else {
+            sub_hit_terms as f64 / cjk_subterms.len() as f64
+        };
+        let passes_fuzzy_cjk = !cjk_subterms.is_empty()
+            && sub_hit_terms > 0
+            && (sub_hit_terms >= 2 || sub_coverage >= 0.5)
+            && (vec_sim >= 0.10 || sub_title_hits > 0);
+
+        // 纯向量噪声且既无整词命中也无高覆盖中文专业子词命中、向量相似度又偏低（< 0.24）直接过滤，
+        // 杜绝 512 维哈希碰撞（如“车牌识别”混入散热检索），同时允许单字异体/错别字（如“微压氧仓”→“微压氧舱”）被稳定召回
+        if !query_terms.is_empty() && hit_terms == 0 && !passes_fuzzy_cjk && vec_sim < 0.24 {
             continue;
         }
 
-        let term_ratio = if query_terms.is_empty() {
-            0.0
+        let (term_ratio, title_bonus) = if hit_terms > 0 && !query_terms.is_empty() {
+            (
+                hit_terms as f64 / query_terms.len() as f64,
+                (title_hits as f64 / query_terms.len() as f64) * 18.0,
+            )
+        } else if passes_fuzzy_cjk {
+            (
+                sub_coverage * 0.72,
+                (sub_title_hits as f64 / cjk_subterms.len() as f64) * 12.0,
+            )
         } else {
-            hit_terms as f64 / query_terms.len() as f64
-        };
-        let title_bonus = if query_terms.is_empty() {
-            0.0
-        } else {
-            (title_hits as f64 / query_terms.len() as f64) * 18.0
+            (0.0, 0.0)
         };
         // 诚实校准分：词项覆盖(最高55分) + 标题命中加成(最高18分) + 向量余弦(最高27分)，绝不虚高到 100%
         let calibrated_score = (term_ratio * 55.0 + title_bonus + (vec_sim as f64) * 45.0)
@@ -1674,20 +1784,40 @@ pub async fn api_search_vector(
             .round();
 
         // 提取真实命中段落标签与含查询词的上下文片段（杜绝全标 [Abstract] 且 snippet 为空）
+        let snippet_terms = if hit_terms == 0 && !cjk_subterms.is_empty() {
+            &cjk_subterms
+        } else {
+            &query_terms
+        };
         let (section_tag, matched_snippet) = if let Some((tag, snip)) = chunk_tag_map.get(&id) {
             if !snip.trim().is_empty() && !tag.starts_with("Meta:") {
                 (tag.clone(), snip.clone())
             } else {
-                extract_best_matched_snippet(&patent, &query_terms)
+                extract_best_matched_snippet(&patent, snippet_terms)
             }
         } else {
-            extract_best_matched_snippet(&patent, &query_terms)
+            extract_best_matched_snippet(&patent, snippet_terms)
         };
 
-        let score_source = if !query_terms.is_empty() {
+        let score_source = if hit_terms > 0 && !query_terms.is_empty() {
             format!(
                 "词项 {}/{} · 向量 {:.0}% · [{}]",
                 hit_terms,
+                query_terms.len(),
+                vec_sim * 100.0,
+                section_tag
+            )
+        } else if passes_fuzzy_cjk {
+            format!(
+                "近词 {}/{} · 向量 {:.0}% · [{}]",
+                sub_hit_terms,
+                cjk_subterms.len(),
+                vec_sim * 100.0,
+                section_tag
+            )
+        } else if !query_terms.is_empty() {
+            format!(
+                "词项 0/{} · 向量 {:.0}% · [{}]",
                 query_terms.len(),
                 vec_sim * 100.0,
                 section_tag
@@ -2875,5 +3005,93 @@ mod search_dedup_pagination_tests {
         );
         assert_eq!(merged[1]["literature_kind"], "patent");
         assert_eq!(merged[2]["literature_kind"], "local_upload");
+    }
+
+    #[tokio::test]
+    async fn api_search_vector_recalls_cjk_single_char_variant_without_noise() {
+        let state = crate::common::init_app_state(":memory:").expect("init app state");
+        let fixtures = [
+            (
+                "vec-oxy-1",
+                "CN990001A",
+                "一种微压氧舱的控制及监测系统",
+                "本发明公开了一种用于微压氧舱的多生理指标监测、制氧调压与安全泄压控制装置。",
+            ),
+            (
+                "vec-oxy-2",
+                "CN990002A",
+                "模块化拼装式微压氧舱舱体结构",
+                "本实用新型涉及一种可拆装微压氧舱舱体与唇形门密封结构。",
+            ),
+            (
+                "vec-noise-1",
+                "CN990003A",
+                "部分氢化嵌段共聚物粘着胶带组合物",
+                "一种包含氢化嵌段共聚物与增粘树脂的压敏胶带及改性沥青组合物。",
+            ),
+            (
+                "vec-noise-2",
+                "CN990004A",
+                "折叠屏手机铰链旋转定位机构",
+                "一种包括双轴齿轮同步件的折叠屏终端铰链与转轴阻尼结构。",
+            ),
+        ];
+        for (id, pn, title, abs) in fixtures {
+            let p = crate::patent::Patent {
+                id: id.to_string(),
+                patent_number: pn.to_string(),
+                title: title.to_string(),
+                abstract_text: abs.to_string(),
+                country: "CN".to_string(),
+                ..Default::default()
+            };
+            state.db.insert_patent(&p).expect("insert fixture");
+            crate::db::vector::try_compute_and_save_embedding(
+                &state.db,
+                id,
+                &format!("{title} {abs}"),
+            );
+        }
+
+        // 「微压氧仓」与库内「微压氧舱」仅差 1 字异体/笔误，应稳定召回 2 篇氧舱专利且 0 噪声泄漏
+        let res = api_search_vector(
+            State(state.clone()),
+            Json(json!({"query": "微压氧仓", "limit": 10})),
+        )
+        .await
+        .0;
+        let patents = res["patents"].as_array().cloned().unwrap_or_default();
+        assert_eq!(
+            patents.len(),
+            2,
+            "单字笔误「微压氧仓」应命中 2 篇微压氧舱专利而非 0 条: {:?}",
+            patents
+        );
+        let nums: Vec<&str> = patents
+            .iter()
+            .filter_map(|p| p["patent_number"].as_str())
+            .collect();
+        assert!(nums.contains(&"CN990001A"));
+        assert!(nums.contains(&"CN990002A"));
+        assert!(
+            patents[0]["score_source"]
+                .as_str()
+                .unwrap_or("")
+                .contains("近词"),
+            "近词召回应在 score_source 中透明标注「近词」"
+        );
+
+        // 完全无关查询仍必须返回 0 条（防 512 维哈希碰撞底噪）
+        let noise_res = api_search_vector(
+            State(state),
+            Json(json!({"query": "太空电梯反重力引擎", "limit": 10})),
+        )
+        .await
+        .0;
+        assert_eq!(
+            noise_res["patents"].as_array().map(|a| a.len()),
+            Some(0),
+            "完全无关查询禁止泄漏噪声结果"
+        );
     }
 }
