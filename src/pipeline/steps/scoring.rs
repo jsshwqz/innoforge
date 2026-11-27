@@ -27,6 +27,9 @@ pub async fn execute(ctx: &mut PipelineContext) -> Result<()> {
         ctx.score_breakdown = ScoreBreakdown::default();
         ctx.research_state
             .verified_claims
+            .retain(|c| !c.starts_with("新颖性评分 ") && !c.starts_with("新颖性无法评估"));
+        ctx.research_state
+            .verified_claims
             .push("新颖性无法评估：未获得任何对比文献（证据不足）".to_string());
         ctx.evidence_chain.push(Evidence {
             id: uuid::Uuid::new_v4().to_string(),
@@ -97,7 +100,10 @@ pub async fn execute(ctx: &mut PipelineContext) -> Result<()> {
     };
     ctx.novelty_score = final_score;
 
-    // 更新研发状态机：记录验证结论
+    // 更新研发状态机：记录验证结论（先去重覆盖旧分，避免迭代/补搜后重复写入多份）
+    ctx.research_state
+        .verified_claims
+        .retain(|c| !c.starts_with("新颖性评分 ") && !c.starts_with("新颖性无法评估"));
     ctx.research_state.verified_claims.push(format!(
         "新颖性评分 {:.1}/100（最高相似度 {:.2}）",
         final_score, max_similarity

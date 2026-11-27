@@ -59,10 +59,10 @@ pub async fn execute(ctx: &mut PipelineContext) -> Result<()> {
         }
     }
 
-    // 为高相似度匹配生成证据 / Generate evidence for high-similarity matches
+    // 为高相关及 Top-5 对比文献生成证据 / Generate evidence for top prior-art matches
     let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
-    for m in &ranked {
-        if m.combined_score > 0.1 {
+    for (idx, m) in ranked.iter().enumerate() {
+        if m.combined_score > 0.1 || (idx < 5 && m.combined_score > 0.0) {
             let relation = if m.combined_score > 0.7 {
                 "supports" // 高度相似，支撑"已有类似技术"结论
             } else if m.combined_score > 0.3 {
@@ -70,6 +70,9 @@ pub async fn execute(ctx: &mut PipelineContext) -> Result<()> {
             } else {
                 "supports"
             };
+            let canonical_source_id =
+                crate::search::enrichment::extract_patent_number(&m.source_id, &m.source_url)
+                    .unwrap_or_else(|| m.source_id.clone());
             ctx.evidence_chain.push(Evidence {
                 id: uuid::Uuid::new_v4().to_string(),
                 idea_id: ctx.idea_id.clone(),
@@ -79,7 +82,7 @@ pub async fn execute(ctx: &mut PipelineContext) -> Result<()> {
                     m.combined_score * 100.0
                 ),
                 source_type: m.source_type.clone(),
-                source_id: m.source_id.clone(),
+                source_id: canonical_source_id,
                 source_title: m.source_title.clone(),
                 source_url: m.source_url.clone(),
                 claim_number: None,

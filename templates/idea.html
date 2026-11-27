@@ -560,7 +560,7 @@
                 }
                 // Render
                 var html = '';
-                html += '<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;overflow:hidden;">';
+                html += '<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;overflow:hidden;padding-right:24px;">';
                 html += '<span style="color:#f0f6fc;font-weight:600;font-size:1.05em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;">' + esc(title) + '</span>';
                 html += '<span style="display:inline-flex;align-items:center;flex-shrink:0;gap:4px;">' + scoreHtml + msgHtml + badge + '</span>';
                 html += '</div>';
@@ -600,11 +600,17 @@
             var sb = document.querySelector('.idea-sidebar');
             if (sb && sb.classList.contains('drawer-open')) sb.classList.remove('drawer-open');
             var resp = await fetch('/api/idea/' + encodeURIComponent(ideaId));
-            if (!resp.ok) return;
+            if (!resp.ok) return null;
             var data = await resp.json();
             var idea = data.idea || data;
-            if (!idea) return;
+            if (!idea) return null;
             currentIdeaId = ideaId;
+            try {
+                const targetUrl = '/idea?id=' + encodeURIComponent(ideaId);
+                if (window.location.pathname + window.location.search !== targetUrl) {
+                    window.history.replaceState({}, '', targetUrl);
+                }
+            } catch (e) { /* ignore history errors */ }
             displayResults(idea);
             loadVersionHistory(ideaId);
             loadMemory();
@@ -615,7 +621,8 @@
             loadFeatureCards(ideaId);
             loadIdeaTokenUsage(ideaId);
             showDiscussionPanel && showDiscussionPanel();
-        } catch(e) {}
+            return idea;
+        } catch(e) { return null; }
     }
 
     async function loadIdeaTokenUsage(ideaId) {
@@ -2361,7 +2368,7 @@
             const scoreLabel = idea.novelty_score >= 70 ? t('idea.scoreHigh') : idea.novelty_score >= 40 ? t('idea.scoreMid') : t('idea.scoreLow');
             document.getElementById('score-area').innerHTML = DOMPurify.sanitize(
                 '<div class="score-display">' +
-                '<div class="score-number ' + scoreClass + '" style="background:transparent;">' + Math.round(idea.novelty_score * 10) / 10 + '</div>' +
+                '<div class="score-number ' + scoreClass + '">' + Math.round(idea.novelty_score * 10) / 10 + '</div>' +
                 '<div class="score-label">' + (i18nLang === 'en' ? 'Novelty Score / 100 — ' : '新颖性评分 / 100 — ') + scoreLabel + '</div>' +
                 '</div>');
             // 操作按钮行：导出报告 + 继续迭代
@@ -2555,27 +2562,32 @@
     }
 
     function renderMarkdown(text) {
+        if (!text) return '';
+        text = String(text);
         // 先提取代码块，避免内部被其他规则破坏
         var codeBlocks = [];
         text = text.replace(/```(\w*)\n?([\s\S]*?)```/g, function(_, lang, code) {
             codeBlocks.push('<pre style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:10px;overflow-x:auto;font-size:0.85em;"><code>' + code.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</code></pre>');
             return '\x00CB' + (codeBlocks.length - 1) + '\x00';
         });
+        if (typeof formatReadableLatex === 'function') {
+            text = formatReadableLatex(text);
+        }
         // 提取表格（转义并解析单元格内 **加粗** 与 `代码`）
         var tables = [];
         text = text.replace(/((?:^\|.+\|[ \t]*\n?)+)/gm, function(block) {
             var rows = block.trim().split('\n');
             if (rows.length < 2) return block;
-            var html = '<div style="overflow-x:auto;margin:8px 0;"><table style="border-collapse:collapse;width:100%;font-size:0.9em;">';
+            var html = '<div class="md-table-scroll" style="width:100%;max-width:100%;overflow-x:auto;margin:8px 0;"><table style="border-collapse:collapse;width:100%;font-size:0.88em;table-layout:auto;">';
             rows.forEach(function(row, ri) {
                 if (row.replace(/[\|\-\s:]/g, '') === '') return; // skip separator row
                 var tag = ri === 0 ? 'th' : 'td';
                 var cells = row.split('|').filter(function(c, i, a) { return i > 0 && i < a.length - 1; });
                 html += '<tr>';
                 cells.forEach(function(c, ci) {
-                    var st = 'border:1px solid #30363d;padding:6px 10px;' +
-                        (ri === 0 ? 'background:#161b22;color:#58a6ff;font-weight:600;white-space:nowrap;' : '') +
-                        (ci === 0 ? 'min-width:110px;' : '');
+                    var st = 'border:1px solid #30363d;padding:6px 10px;white-space:normal;word-break:break-word;vertical-align:top;' +
+                        (ri === 0 ? 'background:#161b22;color:#58a6ff;font-weight:600;' : '') +
+                        (ci === 0 ? 'min-width:96px;' : '');
                     var cellHtml = esc(c.trim())
                         .replace(/`([^`]+)`/g, '<code style="background:#21262d;padding:1px 5px;border-radius:3px;font-size:0.9em;">$1</code>')
                         .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
@@ -3038,8 +3050,9 @@
                 card.appendChild(header);
 
                 var descP = document.createElement('p');
-                descP.style.cssText = 'color:#c9d1d9;margin:0 0 14px;white-space:pre-wrap;';
-                descP.textContent = idea.description || '暂无方案描述。';
+                descP.style.cssText = 'color:#c9d1d9;margin:0 0 14px;white-space:pre-wrap;overflow-wrap:break-word;';
+                const rawDesc = idea.description || '暂无方案描述。';
+                descP.textContent = typeof formatReadableLatex === 'function' ? formatReadableLatex(rawDesc) : rawDesc;
                 card.appendChild(descP);
 
                 var btnRow = document.createElement('div');
@@ -3107,13 +3120,37 @@
         } catch (e) { /* ignore */ }
     }
 
+    async function initIdeaPageFromUrl() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const targetId = (urlParams.get('id') || urlParams.get('idea_id') || '').trim();
+        const mode = (urlParams.get('mode') || '').trim();
+        const autostart = (urlParams.get('autostart') || '').trim();
+        if (!targetId) {
+            await restoreIdeaWorkspaceState();
+            return;
+        }
+        const loaded = await loadIdea(targetId);
+        if (!loaded) return;
+        saveIdeaWorkspaceState();
+        if (mode === 'chat') {
+            switchTab('chat');
+            const chatInputEl = document.getElementById('chat-input');
+            if (chatInputEl) chatInputEl.focus();
+        } else if ((autostart === 'quick' || autostart === 'deep') && loaded.status === 'pending' && !(loaded.analysis && loaded.analysis.trim())) {
+            if (typeof setAnalysisMode === 'function') {
+                setAnalysisMode(autostart === 'quick' ? 'quick' : 'deep');
+            }
+            resumePipeline(targetId);
+        }
+    }
+
     document.addEventListener('DOMContentLoaded', function() {
         var filterEl = document.getElementById('memory-filter');
         if (filterEl) filterEl.onchange = function() { loadMemory(); };
         var chatInput = document.getElementById('chat-input');
         if (chatInput) chatInput.addEventListener('input', saveIdeaWorkspaceState);
         window.addEventListener('pagehide', saveIdeaWorkspaceState);
-        loadHistory().then(function() { restoreIdeaWorkspaceState(); });
+        loadHistory().then(function() { initIdeaPageFromUrl(); });
     });
 
     // ── Page-in confirm dialog (issue #15, replaces native confirm) ──

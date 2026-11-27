@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-25T16:29:59.991Z",
+  "generatedAt": "2026-11-26T16:38:18.899Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -232,6 +232,7 @@
         "hideClaimNodeForm",
         "hideMemoryForm",
         "history",
+        "initIdeaPageFromUrl",
         "input",
         "loadClaimTree",
         "loadEvidence",

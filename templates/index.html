@@ -517,7 +517,7 @@
                 left.className = 'recent-left';
                 var statusDot = document.createElement('span');
                 var s = idea.status || '';
-                var dotColor = s === 'completed' ? '#3fb950' : s === 'analyzing' ? '#d29922' : s === 'failed' ? '#f85149' : '#8b949e';
+                var dotColor = (s === 'done' || s === 'completed') ? '#3fb950' : (s === 'analyzing' || s === 'running') ? '#d29922' : (s === 'failed' || s === 'error') ? '#f85149' : '#8b949e';
                 statusDot.className = 'status-dot';
                 statusDot.style.background = dotColor;
                 var title = document.createElement('span');

@@ -420,10 +420,48 @@ fn is_measurement_or_non_part_context(
         "阶段",
         "模式",
         "回路中",
+        "测量值为",
+        "最大值为",
+        "最小值为",
+        "平均值为",
+        "理想值为",
+        "设定值为",
+        "目标值为",
+        "标准值为",
+        "除以",
+        "乘以",
+        "相加",
+        "相减",
+        "求和",
+        "取值",
+        "权重",
+        "系数",
+        "指标",
+        "阈值",
+        "评分为",
+        "得分为",
+        "比值为",
+        "范围为",
+        "区间为",
+        "设为",
+        "记为",
+        "等于",
+        "之和",
+        "之差",
+        "之积",
+        "之商",
     ];
     if NUMERIC_CUE_SUBSTRINGS
         .iter()
         .any(|cue| raw_name.contains(cue))
+    {
+        return true;
+    }
+    let trimmed_raw = raw_name.trim();
+    if trimmed_raw.ends_with('为')
+        || trimmed_raw.ends_with("除以")
+        || trimmed_raw.ends_with("乘以")
+        || trimmed_raw.ends_with("等于")
     {
         return true;
     }
@@ -1442,6 +1480,18 @@ mod tests {
                 .iter()
                 .any(|p| p.name == "名称" || p.name == "标号"),
             "表头「名称」「标号」绝不得被当成部件名: {:?}",
+            report.parts
+        );
+    }
+
+    #[test]
+    fn formula_prose_numbers_are_not_misclassified_as_drawing_numerals() {
+        let claims = "1. 一种微压氧舱控制方法，其中气体质量指标为两者相加后除以2，含氧量测量值为10，气压最大值为100。";
+        let desc = "具体实施方式：将第一参数与第二参数两者相加后除以2，记录当前测量值为10，阈值最大值为100。";
+        let report = check_numeral_consistency(claims, desc, None);
+        assert!(
+            report.parts.is_empty(),
+            "公式/测量值叙述中的数值不应误判为附图标号: {:?}",
             report.parts
         );
     }

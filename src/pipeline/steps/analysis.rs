@@ -251,6 +251,15 @@ pub async fn extract_feature_cards(ctx: &PipelineContext, db: &Database) -> Resu
         let novelty = ((1.0 - m.combined_score) * 100.0).clamp(0.0, 100.0);
         let description = crate::ai::truncate_for_ai(&m.snippet, 300);
 
+        let mut seen_rel = std::collections::HashSet::new();
+        let clean_relations: Vec<&str> = m
+            .tokens
+            .iter()
+            .map(String::as_str)
+            .filter(|t| !super::contradiction::is_noise_diff_token(t) && seen_rel.insert(*t))
+            .take(8)
+            .collect();
+
         let card = FeatureCard {
             id: format!("{}-fc-{}", idea_id, i + 1),
             idea_id: idea_id.clone(),
@@ -260,7 +269,7 @@ pub async fn extract_feature_cards(ctx: &PipelineContext, db: &Database) -> Resu
             created_at: now.clone(),
             technical_problem: format!("与「{}」相关的技术问题", ctx.title),
             core_structure: crate::ai::truncate_for_ai(&m.snippet, 200),
-            key_relations: m.tokens.join(", "),
+            key_relations: clean_relations.join(", "),
             process_steps: String::new(),
             application_scenarios: ctx.technical_domain.clone(),
         };
@@ -500,20 +509,67 @@ fn retrieve_rag_chunks(ctx: &mut PipelineContext, db: &Database) {
             continue;
         }
 
-        match retrieve_chunks(db, pn_str, &query, top_k) {
-            Ok(chunks) => {
-                if !chunks.is_empty() {
-                    tracing::info!(
-                        "[MB3] Retrieved {} chunks for patent {}",
-                        chunks.len(),
-                        pn_str
+        // patent_chunks.patent_id 存的是专利主键 UUID（patents.id），而非公开号；
+        // 先按公开号查库解析真实 UUID，若该专利已有全文/摘要但尚未切片则按需懒切片入库。
+        let (lookup_id, display_label) = match db.get_patent(pn_str) {
+            Ok(Some(patent)) => {
+                if db.count_chunks(&patent.id).unwrap_or(0) == 0 {
+                    let built = crate::rag::build_chunks_from_patent(
+                        &patent.id,
+                        &patent.title,
+                        &patent.abstract_text,
+                        &patent.claims,
+                        &patent.description,
                     );
-                    all_chunks.extend(chunks);
+                    if !built.is_empty() {
+                        match db.save_patent_chunks(&patent.id, &built, "char-tfidf-v1") {
+                            Ok(cnt) => tracing::info!(
+                                "[MB3] Lazily indexed {} chunks for patent {}",
+                                cnt,
+                                patent.patent_number
+                            ),
+                            Err(e) => tracing::warn!(
+                                "[MB3] Lazy chunk persist failed for {}: {}",
+                                patent.patent_number,
+                                e
+                            ),
+                        }
+                    }
                 }
+                let label = if patent.patent_number.is_empty() {
+                    pn_str.to_string()
+                } else {
+                    patent.patent_number
+                };
+                (patent.id, label)
             }
+            _ => (pn_str.to_string(), pn_str.to_string()),
+        };
+
+        let mut retrieved = match retrieve_chunks(db, &lookup_id, &query, top_k) {
+            Ok(chunks) => chunks,
             Err(e) => {
-                tracing::warn!("[MB3] Chunk retrieval failed for {}: {}", pn_str, e);
+                tracing::warn!("[MB3] Chunk retrieval failed for {}: {}", display_label, e);
+                Vec::new()
             }
+        };
+        // 兼容直接以公开号写入切片的旧测试/数据
+        if retrieved.is_empty() && lookup_id != pn_str {
+            if let Ok(fallback_chunks) = retrieve_chunks(db, pn_str, &query, top_k) {
+                retrieved = fallback_chunks;
+            }
+        }
+
+        if !retrieved.is_empty() {
+            for chunk in &mut retrieved {
+                chunk.patent_id = display_label.clone();
+            }
+            tracing::info!(
+                "[MB3] Retrieved {} chunks for patent {}",
+                retrieved.len(),
+                display_label
+            );
+            all_chunks.extend(retrieved);
         }
     }
 
@@ -618,6 +674,48 @@ mod tests {
         retrieve_rag_chunks(&mut ctx, &db);
         // No chunks in DB → rag_chunks should be empty (graceful degradation)
         assert!(ctx.rag_chunks.is_empty());
+    }
+
+    #[test]
+    fn test_retrieve_rag_chunks_resolves_patent_number_to_uuid_and_lazy_chunks() {
+        let db = crate::db::Database::init(":memory:").expect("in-memory db");
+        let patent = crate::patent::Patent {
+            id: "1ba47bb0-b1ad-4b33-bc7e-0afa42d62f85".to_string(),
+            patent_number: "CN990001012A".to_string(),
+            title: "一种微压氧舱的控制及监测系统".to_string(),
+            abstract_text: "本发明公开一种微压氧舱控制及监测系统，用于监测气压和含氧量。".to_string(),
+            description: "具体实施方式：本微压氧舱通过进气模块和排气模块闭环调节舱内气压至0.13MPa，并监测二氧化碳浓度与温湿度。".to_string(),
+            claims: "1. 一种微压氧舱的控制及监测系统，包括微压氧舱、进气模块、排气模块和数据采集模块。".to_string(),
+            ..Default::default()
+        };
+        db.insert_patent(&patent).expect("insert patent");
+        assert_eq!(db.count_chunks(&patent.id).expect("count"), 0);
+
+        let mut ctx = PipelineContext::new("idea-1", "微压氧舱", "微压氧舱气压与含氧量控制方案");
+        ctx.top_matches.push(RankedMatch {
+            rank: 1,
+            source_id: "patent_local_CN990001012A".to_string(),
+            source_title: patent.title.clone(),
+            source_type: "patent".to_string(),
+            source_url: "https://patents.google.com/patent/CN990001012A".to_string(),
+            snippet: patent.abstract_text.clone(),
+            combined_score: 0.65,
+            tokens: Vec::new(),
+        });
+
+        retrieve_rag_chunks(&mut ctx, &db);
+
+        assert!(
+            !ctx.rag_chunks.is_empty(),
+            "应解析 UUID 并按需切片检索到真实全文切片"
+        );
+        assert_eq!(ctx.rag_chunks[0].patent_id, "CN990001012A");
+        assert!(
+            db.count_chunks(&patent.id).expect("count after") > 0,
+            "懒切片应持久化回 patent_chunks"
+        );
+        let corpus = crate::evidence_kernel::corpus_from_chunks(&ctx.rag_chunks);
+        assert!(!corpus.is_empty(), "Evidence Kernel 语料不应为空");
     }
 
     #[test]

@@ -194,6 +194,17 @@
         if (legalLabel) legalLabel.textContent = t('common.info.legalStatus');
     }
 
+    document.addEventListener('DOMContentLoaded', function() {
+        const claimsPre = document.querySelector('#tab-claims pre');
+        if (claimsPre && claimsPre.textContent) {
+            claimsPre.textContent = claimsPre.textContent.replace(/^\s*Claims\s*\(?[\d\s]*\)?\s*\n+/i, '');
+        }
+        const descPre = document.querySelector('#tab-description pre');
+        if (descPre && descPre.textContent) {
+            descPre.textContent = descPre.textContent.replace(/^\s*Description\s*\n+/i, '');
+        }
+    });
+
     function showTab(name, ev) {
         document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
         document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));

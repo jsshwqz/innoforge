@@ -84,11 +84,14 @@
             codeBlocks.push('<pre style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:10px;overflow-x:auto;font-size:0.86em;margin:8px 0;"><code>' + escapeHtml(code) + '</code></pre>');
             return '\x00CB' + (codeBlocks.length - 1) + '\x00';
         });
+        if (typeof formatReadableLatex === 'function') {
+            src = formatReadableLatex(src);
+        }
         var tables = [];
         src = src.replace(/(?:^|\n)(\|.+\|)\n(\|[\s:|-]+\|)\n((?:\|.+\|\n?)+)/gm, function(_, header, sep, body) {
             var ths = header.split('|').filter(function(c) { return c.trim() !== ''; });
             var rows = body.trim().split('\n');
-            var html = '<div style="overflow-x:auto;margin:8px 0;"><table style="border-collapse:collapse;width:100%;font-size:0.9em;"><thead><tr>';
+            var html = '<div class="md-table-scroll" style="width:100%;max-width:100%;overflow-x:auto;margin:8px 0;"><table style="border-collapse:collapse;width:100%;font-size:0.9em;"><thead><tr>';
             for (let i = 0; i < ths.length; i++) {
                 html += '<th style="border:1px solid #30363d;padding:6px 10px;background:#161b22;color:#58a6ff;text-align:left;white-space:nowrap;">' + escapeHtml(ths[i].trim()) + '</th>';
             }

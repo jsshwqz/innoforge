@@ -800,7 +800,7 @@ function renderResults(data, page, pageSize) {
                 <label style="display:flex;align-items:center;margin-right:8px;cursor:pointer;">
                     <input type="checkbox" class="batch-check" data-id="${escapeHtml(p.id)}" style="width:16px;height:16px;cursor:pointer;">
                 </label>
-                <div style="flex:1;">
+                <div style="flex:1;min-width:0;">
                     <h3>${kindBadge}${srcTagHtml}<a id="patent-title-link-${escapeHtml(p.id)}" href="/patent/${escapeHtml(p.id)}">${escapeHtml(decodeHtmlEntities(p.title || '无标题'))}</a></h3>
                     <div class="meta-row">${metaItems.join('')}</div>
                     <p class="patent-abstract">${escapeHtml(cleanAbstract.slice(0, 260))}${cleanAbstract.length > 260 ? '...' : ''}</p>

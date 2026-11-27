@@ -385,12 +385,12 @@ input[type="checkbox"] { accent-color: var(--accent); color-scheme: dark; }
 .mobile-top-nav {
   display: none; position: sticky; top: 0; z-index: 900;
   background: var(--bg-subtle); border-bottom: 1px solid var(--border-muted);
-  padding: 8px 12px; gap: 10px; align-items: center; overflow-x: auto;
+  padding: 8px 12px; gap: 6px 10px; align-items: center; flex-wrap: wrap;
 }
 .mobile-top-brand { font-weight: 700; color: var(--accent-hover); font-size: 14px; white-space: nowrap; text-decoration: none; }
-.mobile-top-links { display: flex; gap: 6px; align-items: center; flex-wrap: nowrap; }
+.mobile-top-links { display: flex; gap: 4px 6px; align-items: center; flex-wrap: wrap; flex: 1; min-width: 0; }
 .mobile-top-links a {
-  padding: 4px 9px; border-radius: 6px; font-size: 12px; color: var(--text-muted);
+  padding: 3px 8px; border-radius: 6px; font-size: 12px; color: var(--text-muted);
   white-space: nowrap; text-decoration: none; border: 1px solid transparent;
 }
 .mobile-top-links a.active { color: var(--text-primary); background: var(--accent-subtle); border-color: var(--accent-border); font-weight: 600; }
@@ -411,6 +411,7 @@ input[type="checkbox"] { accent-color: var(--accent); color-scheme: dark; }
   box-shadow: 0 6px 22px rgba(0, 0, 0, 0.4), var(--glow-accent);
 }
 .patent-header, .patent-title-row { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--sp-4); margin-bottom: var(--sp-3); }
+.patent-title-row > div { min-width: 0; }
 .patent-title { font-size: var(--fs-lg); font-weight: 600; color: var(--text-primary); transition: var(--t); }
 .patent-card:hover .patent-title { color: var(--accent-hover); }
 .patent-number {
@@ -753,7 +754,9 @@ input[type="checkbox"] { accent-color: var(--accent); color-scheme: dark; }
 
 .result-toolbar { display: flex; gap: var(--sp-2); margin-bottom: var(--sp-3); padding-bottom: var(--sp-3); border-bottom: 1px solid var(--border-default); flex-wrap: wrap; }
 
-.analysis-result { padding: var(--sp-5); margin-top: var(--sp-5); line-height: 1.75; }
+.analysis-result { padding: var(--sp-5); margin-top: var(--sp-5); line-height: 1.75; max-width: 100%; min-width: 0; overflow-wrap: break-word; }
+.md-table-scroll { width: 100%; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 8px 0; }
+.tab-panel, #analysis-area { max-width: 100%; min-width: 0; }
 .analysis-result h3 { color: var(--accent-hover); margin: var(--sp-5) 0 var(--sp-3); display: flex; align-items: center; gap: var(--sp-2); }
 .analysis-result h3::before { content: ''; display: inline-block; width: 3px; height: 15px; background: var(--accent); border-radius: 2px; }
 .analysis-result h3:first-child { margin-top: 0; }
@@ -768,6 +771,14 @@ input[type="checkbox"] { accent-color: var(--accent); color-scheme: dark; }
 .finding-card .title { font-weight: 600; margin-bottom: var(--sp-1); color: var(--text-primary); font-size: var(--fs-base); }
 .score-display { text-align: center; padding: var(--sp-8); margin: var(--sp-5) 0; }
 .score-number { font-size: 56px; font-weight: 800; background: var(--gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; line-height: 1.1; }
+.score-number.score-high,
+.score-number.score-mid,
+.score-number.score-low {
+  background: none;
+  border: none;
+  -webkit-background-clip: initial;
+  -webkit-text-fill-color: currentColor;
+}
 
 /* ---------- 15. Compare / OA 输入区 ---------- */
 .cmp-input { width: 100%; padding: 10px; background: var(--bg-inset); border: 1px solid var(--border-default); border-radius: var(--r-md); color: var(--text-secondary); font-size: var(--fs-base); }
@@ -1014,6 +1025,8 @@ input[type="checkbox"] { accent-color: var(--accent); color-scheme: dark; }
 @media (max-width: 640px) {
   .home-shell { padding: 0 var(--sp-4) 48px; }
   .home-workbench-grid { grid-template-columns: 1fr; }
+  .patent-title-row { flex-wrap: wrap; gap: var(--sp-2); }
+  .patent-title-row .score-tag { min-width: auto; width: 100%; text-align: left; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
 }
 
 /* 模式切换（首页卡片式） */

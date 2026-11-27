@@ -2031,9 +2031,9 @@ function renderSidebar(extraHtml) {
     brandSpan.className = 'mobile-top-brand';
     brandSpan.textContent = 'InnoForge';
     topNav.appendChild(brandSpan);
-    var linksWrap = document.createElement('div');
+    const linksWrap = document.createElement('div');
     linksWrap.className = 'mobile-top-links';
-    linksWrap.style.cssText = 'display:flex;gap:6px;align-items:center;flex:1;overflow-x:auto;min-width:0;';
+    linksWrap.style.cssText = 'display:flex;gap:4px 6px;align-items:center;flex:1;flex-wrap:wrap;min-width:0;';
     for (let j = 0; j < links.length; j++) {
       var a = document.createElement('a');
       a.href = links[j].href;
@@ -2216,3 +2216,66 @@ if (typeof DOMPurify === 'undefined' || typeof DOMPurify.sanitize !== 'function'
         showError(msg.length > 120 ? msg.substring(0, 120) + '...' : msg);
     });
 })();
+
+// Zero-dependency LaTeX-to-readable-Unicode helper shared across /idea, /ai, /patent
+function formatReadableLatex(raw) {
+    if (!raw) return '';
+    const convertExpr = function(expr) {
+        let out = String(expr || '').trim();
+        for (let pass = 0; pass < 2; pass++) {
+            out = out.replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, '($1)/($2)');
+            out = out.replace(/\\sqrt\{([^{}]+)\}/g, '√($1)');
+            out = out.replace(/\\text\{([^{}]*)\}/g, '$1');
+            out = out.replace(/\\mathrm\{([^{}]*)\}/g, '$1');
+        }
+        return out
+            .replace(/\\rightarrow|\\to\b/g, '→')
+            .replace(/\\leftarrow/g, '←')
+            .replace(/\\leftrightarrow/g, '↔')
+            .replace(/\\geq|\\ge\b/g, '≥')
+            .replace(/\\leq|\\le\b/g, '≤')
+            .replace(/\\approx/g, '≈')
+            .replace(/\\neq|\\ne\b/g, '≠')
+            .replace(/\\times/g, '×')
+            .replace(/\\cdot/g, '·')
+            .replace(/\\pm/g, '±')
+            .replace(/\\alpha/g, 'α')
+            .replace(/\\beta/g, 'β')
+            .replace(/\\gamma/g, 'γ')
+            .replace(/\\Delta/g, 'Δ')
+            .replace(/\\delta/g, 'δ')
+            .replace(/\\eta/g, 'η')
+            .replace(/\\mu/g, 'μ')
+            .replace(/\\pi/g, 'π')
+            .replace(/\\rho/g, 'ρ')
+            .replace(/\\sigma/g, 'σ')
+            .replace(/\\omega/g, 'ω')
+            .replace(/\^\{\\circ\}\s*C|\^\\circ\s*C/g, '°C')
+            .replace(/\^\{\\circ\}|\^\\circ/g, '°')
+            .replace(/CO_\{?2\}?/g, 'CO₂')
+            .replace(/H_\{?2\}?O/g, 'H₂O')
+            .replace(/O_\{?2\}?/g, 'O₂')
+            .replace(/NO_\{?x\}?/g, 'NOₓ')
+            .replace(/Nm\^\{?3\}?/g, 'Nm³')
+            .replace(/m\^\{?3\}?/g, 'm³')
+            .replace(/m\^\{?2\}?/g, 'm²')
+            .replace(/\^\{([^}]+)\}/g, '^$1')
+            .replace(/_\{([^}]+)\}/g, '_$1')
+            .replace(/\\%/g, '%')
+            .replace(/\\[,;! ]/g, ' ')
+            .replace(/\\/g, '')
+            .replace(/\s{2,}/g, ' ')
+            .trim();
+    };
+    return String(raw)
+        .replace(/\$\$([\s\S]{1,300}?)\$\$/g, function(_, expr) { return convertExpr(expr); })
+        .replace(/\\\[([\s\S]{1,300}?)\\\]/g, function(_, expr) { return convertExpr(expr); })
+        .replace(/\\\(([^)\n]{1,220}?)\\\)/g, function(_, expr) { return convertExpr(expr); })
+        .replace(/\$([^$\n]{1,180}?)\$/g, function(full, expr) {
+            if (/^\d+(?:[.,]\d+)?$/.test(expr.trim())) return full;
+            return convertExpr(expr);
+        });
+}
+if (typeof window !== 'undefined') {
+    window.formatReadableLatex = formatReadableLatex;
+}

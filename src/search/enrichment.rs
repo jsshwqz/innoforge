@@ -97,6 +97,22 @@ pub fn extract_section(html: &str, section: &str) -> Option<String> {
     if parts.is_empty() {
         return None;
     }
+    // 清理 Google Patents 节首抓取残留标题（如 "Claims ("、"Claims"、"Description"）
+    while let Some(first) = parts.first() {
+        let f = first.trim();
+        let is_boiler = matches!(
+            f,
+            "Claims" | "Claims (" | "Claims(" | "Description" | "Abstract" | ")"
+        ) || (f.starts_with("Claims (") && f.ends_with(')'));
+        if is_boiler {
+            parts.remove(0);
+        } else {
+            break;
+        }
+    }
+    if parts.is_empty() {
+        return None;
+    }
     let result = parts.join("\n\n");
     if result.len() < 10 {
         return None;
@@ -232,6 +248,25 @@ pub async fn enrich_patent_free(db: &Database, patent_id: &str) -> EnrichResult 
 
     // 2. 检查已有全文
     if has_full_text(&patent) && !cn_needs_refetch(&patent) {
+        // MB3 兜底：若历史已富化专利缺少 RAG 切片，顺手补建切片，避免 Evidence Kernel 语料为空
+        if db.count_chunks(&patent.id).unwrap_or(0) == 0 {
+            let chunks = crate::rag::build_chunks_from_patent(
+                &patent.id,
+                &patent.title,
+                &patent.abstract_text,
+                &patent.claims,
+                &patent.description,
+            );
+            if !chunks.is_empty() {
+                if let Ok(n) = db.save_patent_chunks(&patent.id, &chunks, "char-tfidf-v1") {
+                    tracing::info!(
+                        "[MB3] Backfilled {} chunks for already-enriched patent {}",
+                        n,
+                        patent.patent_number
+                    );
+                }
+            }
+        }
         if patent.images.len() <= 5 && !patent.pdf_url.trim().is_empty() {
             if let Ok(drawings) =
                 crate::pdf_drawings::fetch_and_extract_drawings_from_pdf_url(&patent.pdf_url).await
