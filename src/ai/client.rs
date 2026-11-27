@@ -4,8 +4,17 @@ use anyhow::Result;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::sync::{Arc, RwLock};
-use std::time::Duration;
+use std::collections::HashMap;
+use std::sync::{Arc, OnceLock, RwLock};
+use std::time::{Duration, Instant};
+
+const QUOTA_COOLDOWN_SECS: u64 = 180;
+
+static QUOTA_COOLDOWN_MAP: OnceLock<RwLock<HashMap<String, Instant>>> = OnceLock::new();
+
+fn quota_cooldown_store() -> &'static RwLock<HashMap<String, Instant>> {
+    QUOTA_COOLDOWN_MAP.get_or_init(|| RwLock::new(HashMap::new()))
+}
 
 /// 分级超时策略 / Graded timeout strategy
 ///
@@ -589,6 +598,40 @@ impl AiClient {
             || (lower.contains("quota") && lower.contains("resource_exhausted"))
     }
 
+    pub(super) fn quota_cooldown_key(provider: &AiProvider) -> String {
+        format!(
+            "{}::{}",
+            provider.base_url.trim_end_matches('/'),
+            provider.model
+        )
+    }
+
+    pub(super) fn mark_quota_cooldown(provider: &AiProvider) {
+        let key = Self::quota_cooldown_key(provider);
+        if let Ok(mut map) = quota_cooldown_store().write() {
+            map.insert(
+                key,
+                Instant::now() + Duration::from_secs(QUOTA_COOLDOWN_SECS),
+            );
+        }
+    }
+
+    pub(super) fn is_in_quota_cooldown(provider: &AiProvider) -> bool {
+        let key = Self::quota_cooldown_key(provider);
+        let Ok(map) = quota_cooldown_store().read() else {
+            return false;
+        };
+        map.get(&key).is_some_and(|until| Instant::now() < *until)
+    }
+
+    #[cfg(test)]
+    pub(super) fn clear_quota_cooldown(provider: &AiProvider) {
+        let key = Self::quota_cooldown_key(provider);
+        if let Ok(mut map) = quota_cooldown_store().write() {
+            map.remove(&key);
+        }
+    }
+
     /// 判断模型/端点是否支持多模态看图。
     pub(super) fn supports_vision(provider: &AiProvider) -> bool {
         let base = provider.base_url.to_ascii_lowercase();
@@ -716,9 +759,11 @@ impl AiClient {
                             safe_truncate(&raw_text, 100)
                         );
                         if Self::is_quota_exhausted_429(&raw_text) {
+                            Self::mark_quota_cooldown(provider);
                             tracing::warn!(
-                                "[{}] quota exhausted (429), failing fast to fallback provider",
-                                provider.name
+                                "[{}] quota exhausted (429), entering {}s cooldown and failing fast to fallback provider",
+                                provider.name,
+                                QUOTA_COOLDOWN_SECS
                             );
                             return Err(anyhow::anyhow!(
                                 "AI 配额已超限（HTTP 429），已立即切换备用通道"
@@ -1185,9 +1230,11 @@ impl AiClient {
                             "HTTP 429 请求频率超限，请稍后再试"
                         };
                         if is_quota {
+                            Self::mark_quota_cooldown(provider);
                             tracing::warn!(
-                                "[{}] multimodal quota exhausted (429), failing fast to fallback provider",
-                                provider.name
+                                "[{}] multimodal quota exhausted (429), entering {}s cooldown and failing fast to fallback provider",
+                                provider.name,
+                                QUOTA_COOLDOWN_SECS
                             );
                             return Err(anyhow::anyhow!("{err_msg}"));
                         }
@@ -1403,29 +1450,42 @@ impl AiClient {
             .ok_or_else(|| anyhow::anyhow!("Gemini CLI 响应中缺少 response 字段"))
     }
 
-    /// 内部实现：Gemini CLI 模式或依次尝试 primary + fallbacks
+    /// 内部实现：Gemini CLI 模式或依次尝试 primary + fallbacks（主通道处于 429 配额冷却时直连健康备用通道，全部备用失败仍兜底回试主通道）
     async fn send_chat_inner(&self, messages: Vec<Message>, temperature: f32) -> Result<String> {
         if self.provider_mode == AiProviderMode::GeminiCli {
             return Self::call_gemini_cli(&messages, self.gemini_cli_path.as_deref()).await;
         }
 
         let mut failed_chain: Vec<String> = Vec::new();
-        match self
-            .try_provider(&self.primary, &messages, temperature)
-            .await
-        {
-            Ok(content) => return Ok(content),
-            Err(e) => {
-                failed_chain.push(format!("{}: {}", self.primary.name, e));
-                if self.fallbacks.is_empty() {
-                    return Err(e);
+        let skip_primary_first =
+            !self.fallbacks.is_empty() && Self::is_in_quota_cooldown(&self.primary);
+        if skip_primary_first {
+            tracing::debug!(
+                "[{}] in quota cooldown, routing directly to fallback chain",
+                self.primary.name
+            );
+        } else {
+            match self
+                .try_provider(&self.primary, &messages, temperature)
+                .await
+            {
+                Ok(content) => return Ok(content),
+                Err(e) => {
+                    failed_chain.push(format!("{}: {}", self.primary.name, e));
+                    if self.fallbacks.is_empty() {
+                        return Err(e);
+                    }
+                    tracing::warn!("[{}] failed: {}, trying fallbacks...", self.primary.name, e);
                 }
-                tracing::warn!("[{}] failed: {}, trying fallbacks...", self.primary.name, e);
             }
         }
 
         let mut last_err = anyhow::anyhow!("All providers failed");
         for fallback in &self.fallbacks {
+            if Self::is_in_quota_cooldown(fallback) {
+                tracing::debug!("[failover] skipping {} (in quota cooldown)", fallback.name);
+                continue;
+            }
             tracing::info!("[failover] trying {}...", fallback.name);
             match self.try_provider(fallback, &messages, temperature).await {
                 Ok(content) => {
@@ -1435,6 +1495,20 @@ impl AiClient {
                 Err(e) => {
                     tracing::warn!("[failover] {} failed: {}", fallback.name, e);
                     failed_chain.push(format!("{}: {}", fallback.name, e));
+                    last_err = e;
+                }
+            }
+        }
+
+        // 若因冷却跳过主通道且备用全挂，仍最后兜底试一次主通道，避免假死
+        if skip_primary_first {
+            match self
+                .try_provider(&self.primary, &messages, temperature)
+                .await
+            {
+                Ok(content) => return Ok(content),
+                Err(e) => {
+                    failed_chain.push(format!("{}: {}", self.primary.name, e));
                     last_err = e;
                 }
             }
@@ -1462,20 +1536,32 @@ impl AiClient {
 
         let mut failed_chain: Vec<String> = Vec::new();
         let primary = Self::apply_model_override(&self.primary, model_override);
-        match self.try_provider(&primary, &messages, temperature).await {
-            Ok(content) => return Ok(content),
-            Err(e) => {
-                failed_chain.push(format!("{}: {}", primary.name, e));
-                if self.fallbacks.is_empty() {
-                    return Err(e);
+        let skip_primary_first = !self.fallbacks.is_empty() && Self::is_in_quota_cooldown(&primary);
+        if skip_primary_first {
+            tracing::debug!(
+                "[{}] in quota cooldown, routing directly to fallback chain",
+                primary.name
+            );
+        } else {
+            match self.try_provider(&primary, &messages, temperature).await {
+                Ok(content) => return Ok(content),
+                Err(e) => {
+                    failed_chain.push(format!("{}: {}", primary.name, e));
+                    if self.fallbacks.is_empty() {
+                        return Err(e);
+                    }
+                    tracing::warn!("[{}] failed: {}, trying fallbacks...", primary.name, e);
                 }
-                tracing::warn!("[{}] failed: {}, trying fallbacks...", primary.name, e);
             }
         }
 
         let mut last_err = anyhow::anyhow!("All providers failed");
         for fallback in &self.fallbacks {
             let fb = Self::apply_model_override(fallback, model_override);
+            if Self::is_in_quota_cooldown(&fb) {
+                tracing::debug!("[failover] skipping {} (in quota cooldown)", fb.name);
+                continue;
+            }
             tracing::info!("[failover] trying {}...", fb.name);
             match self.try_provider(&fb, &messages, temperature).await {
                 Ok(content) => {
@@ -1485,6 +1571,16 @@ impl AiClient {
                 Err(e) => {
                     tracing::warn!("[failover] {} failed: {}", fb.name, e);
                     failed_chain.push(format!("{}: {}", fb.name, e));
+                    last_err = e;
+                }
+            }
+        }
+
+        if skip_primary_first {
+            match self.try_provider(&primary, &messages, temperature).await {
+                Ok(content) => return Ok(content),
+                Err(e) => {
+                    failed_chain.push(format!("{}: {}", primary.name, e));
                     last_err = e;
                 }
             }
@@ -1724,5 +1820,21 @@ mod tests {
         assert!(!AiClient::is_quota_exhausted_429(
             r#"{"error":{"code":429,"message":"Rate limit reached: too many requests per minute"}}"#
         ));
+    }
+
+    #[test]
+    fn quota_cooldown_marks_and_clears_provider() {
+        let p = super::AiProvider {
+            name: "primary".into(),
+            base_url: "https://example.invalid/v1/".into(),
+            api_key: "k".into(),
+            model: "test-cooldown-model".into(),
+        };
+        AiClient::clear_quota_cooldown(&p);
+        assert!(!AiClient::is_in_quota_cooldown(&p));
+        AiClient::mark_quota_cooldown(&p);
+        assert!(AiClient::is_in_quota_cooldown(&p));
+        AiClient::clear_quota_cooldown(&p);
+        assert!(!AiClient::is_in_quota_cooldown(&p));
     }
 }

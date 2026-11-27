@@ -4,6 +4,23 @@
 All notable changes are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ---
+## [v0.9.94] - 2026-11-26
+
+### 开放式行业调研模式、全域检索提速、SQLite v26、一键登录与全站实盘 QA 集中修复 / Landscape Survey Mode, Omni Speedup, SQLite v26 & Full-App QA Batch
+
+- **开放式行业/产品谱系调研意图模式与快速模式修复（`src/pipeline/context.rs`、`src/pipeline/steps/{parse,analysis,deep_reasoning,oa_response}.rs`、`src/pipeline/state.rs`）**：
+  - 零 LLM 自动识别「开放式行业与产品谱系调研（`MarketLandscapeSurvey`）」与「具体方案查新（`InventionValidation`）」，开放式调研自动切换行业全景对照表、合规/安全红线与差异化切入提示词，避免生硬套用单一专利驳回打分口吻；
+  - 修复 `quick_mode` 遗漏跳过 Step 16 `GenerateOaResponse` 导致快速分析撞 60s 超时的根因（快速调研由 60,003ms 降至 681ms）；加固 `api_ai_oa_examiner_preview` 的 `<user_input>` 隔离与反编造门禁；扩展 8 题全量 Eval 套件（`tools/eval_suite.py`、`tools/eval_cases.json`，8/8 满分 100.0/100）。
+- **实盘深水缺陷打包根治（`src/pipeline/steps/{search,analysis,contradiction,rank,scoring}.rs`、`src/orchestrator/engine.rs`、`src/search/enrichment.rs`、`src/ai/{client,part_topology}.rs`）**：
+  - 修复自动补搜 `SearchPatents` 仅取前 3 条命中旧缓存原地空转 3 轮（多耗 3 分钟 + 14 次 AI 调用且重复写入 3 份评分/证据链）的缺陷；补搜改为检索尾部新增子查询并增量去重合并，仅在真实证据缺口（Top 匹配 < 5 或无全文切片）时触发；
+  - 修复 `retrieve_rag_chunks` 传专利公开号查 `patent_chunks.patent_id`（UUID）恒返 0 切片及已富化专利未懒建切片的断链，打通 Evidence Kernel v2 真实语料与 `RankAndFilter` 专利号证据链回查；
+  - 新增 AI 429 配额耗尽 180 秒短时熔断冷却（直切健康备用通道、全挂仍兜底回试主通道），清理矛盾关键词/特征卡噪声碎片、Google Patents `Claims (` 残留头与 V-RAG 附图标号公式数值误判。
+- **前端路由与可视化实测缺陷集中修复（`templates/{idea,index,ai,search,patent_detail}.html`、`static/{i18n.js,style.css}`）**：
+  - 修复 `/idea?id=<uuid>`（含 `&mode=chat` / `&autostart=quick|deep`）直达与首页最近项目跳转落入空白表单的 P0 缺陷，并在切换历史创意时同步浏览器地址栏与首页完成态绿点；
+  - 修复 `/idea` 概览页新颖性大数字因 `background:transparent` 叠加 `-webkit-text-fill-color:transparent` 隐身白板的问题、历史抽屉 `✕` 与 `✓ 完成` 徽章重叠、宽 Markdown 表格裁切与原始 LaTeX 公式直出（共享零依赖 `formatReadableLatex`），以及英文/移动端（`390×844`）顶栏与搜索卡片评分徽章裁切。
+- **（含 `v0.9.90`–`v0.9.93` 累计）**：全域混搜 0ms 词典英扩与 IPC 锚点、SQLite Schema v26 覆盖索引与规范号范围查找（624× 提速）、`scoring.rs` 溢出防护与后台 `catch_unwind`、非回环/WSL2 一键 `?token=` 自动换取 `HttpOnly` Cookie 免 F12 登录。
+
+---
 ## [v0.9.74] - 2026-11-24
 
 ### 深度分析引擎统一与全站 Markdown 渲染收口 / Deep Engine Unification & Markdown Rendering Polish

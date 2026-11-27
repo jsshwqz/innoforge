@@ -187,6 +187,43 @@ pub async fn search_web(ctx: &mut PipelineContext, serpapi_key: &str, db: &Datab
     Ok(())
 }
 
+/// 根据当前自动补搜轮次选择本轮要执行的专利查询子集：
+/// - 初始轮（`auto_refill_rounds == 0`）：取前 3 条核心扩展查询；
+/// - 补搜轮（`auto_refill_rounds > 0`）：取最新追加到尾部的至多 3 条补搜查询，
+///   避免重跑前 3 条命中旧缓存原地空转。
+fn select_patent_search_queries(ctx: &PipelineContext) -> Vec<String> {
+    if ctx.auto_refill_rounds > 0 && ctx.expanded_queries.len() > 3 {
+        let skip = ctx.expanded_queries.len().saturating_sub(3);
+        ctx.expanded_queries.iter().skip(skip).cloned().collect()
+    } else {
+        ctx.expanded_queries.iter().take(3).cloned().collect()
+    }
+}
+
+/// 将新检索命中的专利按标题去重合并到目标集合中，返回实际新增条数。
+fn merge_unique_patent_hits(
+    target: &mut Vec<PipelinePatentHit>,
+    seen_titles: &mut HashSet<String>,
+    incoming: Vec<PipelinePatentHit>,
+) -> usize {
+    let mut added = 0;
+    for hit in incoming {
+        let title_key = hit
+            .title
+            .chars()
+            .take(20)
+            .collect::<String>()
+            .to_lowercase();
+        if title_key.is_empty() || seen_titles.contains(&title_key) {
+            continue;
+        }
+        seen_titles.insert(title_key);
+        target.push(hit);
+        added += 1;
+    }
+    added
+}
+
 /// 执行 Step 4: 专利搜索
 ///
 /// MC1：改走 M-A 多源检索链（SourceChain），复用 SerpAPI + GooglePatentsXhr + EpoOps
@@ -196,26 +233,43 @@ pub async fn search_patents(
     serpapi_key: &str,
     db: &Arc<crate::db::Database>,
 ) -> Result<()> {
-    // 缓存命中则直接返回 / Return cached results if available
-    let queries: Vec<String> = ctx.expanded_queries.iter().take(3).cloned().collect();
+    let queries = select_patent_search_queries(ctx);
+    let is_refill = ctx.auto_refill_rounds > 0 && !ctx.patent_results.is_empty();
+
+    let mut all_results = if is_refill {
+        ctx.patent_results.clone()
+    } else {
+        Vec::new()
+    };
+    let mut seen_titles: HashSet<String> = all_results
+        .iter()
+        .map(|r| r.title.chars().take(20).collect::<String>().to_lowercase())
+        .collect();
+
+    // 缓存命中：初始轮直接返回；补搜轮增量合并去重，不覆盖已有结果
     if let Some(cached) = try_cache(db, &queries, "patent") {
-        ctx.patent_results = cached;
+        if is_refill {
+            merge_unique_patent_hits(&mut all_results, &mut seen_titles, cached);
+            ctx.patent_results = all_results;
+        } else {
+            ctx.patent_results = cached;
+        }
         return Ok(());
     }
 
-    let mut all_results = Vec::new();
-    let mut seen_titles: HashSet<String> = HashSet::new();
+    let mut batch_results = Vec::new();
+    let mut batch_seen: HashSet<String> = HashSet::new();
 
     // 本地数据库搜索（兜底，先跑保证有结果）
-    for query in ctx.expanded_queries.iter().take(3) {
+    for query in &queries {
         if let Ok((local_results, _total)) = db.search_fts(query, 1, 20) {
             for p in local_results {
                 let title_key = p.title.chars().take(20).collect::<String>().to_lowercase();
-                if seen_titles.contains(&title_key) {
+                if batch_seen.contains(&title_key) {
                     continue;
                 }
-                seen_titles.insert(title_key);
-                all_results.push(PipelinePatentHit {
+                batch_seen.insert(title_key);
+                batch_results.push(PipelinePatentHit {
                     id: format!("patent_local_{}", p.patent_number),
                     title: p.title,
                     snippet: p.abstract_text,
@@ -237,7 +291,7 @@ pub async fn search_patents(
     let providers = build_online_chain(db, serpapi_opt.clone(), None);
 
     if !providers.is_empty() {
-        for query in ctx.expanded_queries.iter().take(2) {
+        for query in queries.iter().take(2) {
             let lang = if contains_cjk(query) {
                 Lang::Chinese
             } else {
@@ -267,25 +321,57 @@ pub async fn search_patents(
                     .take(20)
                     .collect::<String>()
                     .to_lowercase();
-                if seen_titles.contains(&title_key) || summary.title.is_empty() {
+                if batch_seen.contains(&title_key) || summary.title.is_empty() {
                     continue;
                 }
-                seen_titles.insert(title_key);
-                all_results.push(summary_to_hit(summary, all_results.len()));
+                batch_seen.insert(title_key);
+                batch_results.push(summary_to_hit(
+                    summary,
+                    all_results.len() + batch_results.len(),
+                ));
             }
 
-            // 如果已有足够结果，不再多查
-            if all_results.len() >= 30 {
+            // 如果本批已有足够结果，不再多查
+            if batch_results.len() >= 30 {
                 break;
             }
         }
     }
 
-    // 写入缓存 / Persist to cache
-    if !all_results.is_empty() {
-        save_cache(db, &queries, "patent", &all_results);
+    // 写入本批查询缓存 / Persist batch to cache
+    if !batch_results.is_empty() {
+        save_cache(db, &queries, "patent", &batch_results);
     }
 
+    merge_unique_patent_hits(&mut all_results, &mut seen_titles, batch_results);
     ctx.patent_results = all_results;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn select_patent_search_queries_uses_tail_queries_during_auto_refill() {
+        let mut ctx = PipelineContext::new("id-1", "微压氧舱", "描述");
+        ctx.expanded_queries = vec![
+            "微压氧舱".into(),
+            "高压氧舱".into(),
+            "氧气密封".into(),
+            "气动自紧密封唇".into(),
+            "多级迷宫微通道阻尼".into(),
+        ];
+
+        assert_eq!(
+            select_patent_search_queries(&ctx),
+            vec!["微压氧舱", "高压氧舱", "氧气密封"]
+        );
+
+        ctx.auto_refill_rounds = 1;
+        assert_eq!(
+            select_patent_search_queries(&ctx),
+            vec!["氧气密封", "气动自紧密封唇", "多级迷宫微通道阻尼"]
+        );
+    }
 }

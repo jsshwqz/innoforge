@@ -206,10 +206,16 @@ impl Orchestrator {
                     .await;
                     super::save_version_snapshot_blocking(self.db.clone(), ctx.clone(), step).await;
 
-                    // v0.9.68：基于 open_questions / blind_spots 的限次自动补搜闭环（严格硬控上限 2 轮 + 预算熔断）
+                    // v0.9.68：基于真实证据缺口的限次自动补搜闭环（严格硬控上限 2 轮 + 预算熔断）
+                    // 仅当 Top 匹配不足或未取得全文切片时才触发补搜，避免证据已充足却反复重跑 7 维推演。
                     if step == PipelineStep::AiDeepAnalysis {
-                        let refill_queries =
-                            super::constraints::derive_open_question_refill_queries(&ctx);
+                        let has_evidence_gap =
+                            ctx.top_matches.len() < 5 || ctx.rag_chunks.is_empty();
+                        let refill_queries = if has_evidence_gap {
+                            super::constraints::derive_open_question_refill_queries(&ctx)
+                        } else {
+                            Vec::new()
+                        };
                         let budget_ok = self
                             .db
                             .check_ai_budget_circuit_breaker(Some(ctx.idea_id.as_str()))
@@ -394,6 +400,14 @@ impl Orchestrator {
         if target_idx <= PipelineStep::ComputeSimilarity.index() {
             ctx.similarity_scores.clear();
             ctx.top_matches.clear();
+            ctx.prior_art_clusters.clear();
+            ctx.contradictions.clear();
+            ctx.evidence_chain.retain(|e| {
+                !matches!(
+                    e.produced_by.as_str(),
+                    "RankAndFilter" | "DetectContradictions" | "ScoreNovelty"
+                )
+            });
         }
         if target_idx <= PipelineStep::ScoreNovelty.index() {
             ctx.novelty_score = 0.0;
@@ -404,6 +418,7 @@ impl Orchestrator {
             ctx.ai_analysis.clear();
             ctx.action_plan.clear();
             ctx.deep_reasoning = Default::default();
+            ctx.rag_chunks.clear();
         }
 
         // 保留 keywords/technical_domain/expanded_queries（用户可能手动调整过）
