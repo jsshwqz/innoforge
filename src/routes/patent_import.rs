@@ -299,7 +299,7 @@ pub fn validate_ipc_prefix_filter(raw: &str) -> Result<String, String> {
         || trimmed.contains("://");
     if looks_like_path {
         return Err(format!(
-            "左侧「IPC 赛道过滤」栏误填了路径（“{trimmed}”），请清空该栏或填写合法 IPC 前缀（如 H01L,G06F），文件夹路径请填在右侧「同步目录」框中"
+            "左侧「关键词/领域过滤」栏误填了路径（“{trimmed}”），请清空该栏或填写中文关键词/领域，文件夹路径请填在右侧「同步目录」框中"
         ));
     }
     Ok(trimmed.to_string())
@@ -891,19 +891,91 @@ fn row_map_to_patent(
     })
 }
 
-fn matches_ipc_prefixes(patent: &Patent, prefixes: &[String]) -> bool {
-    if prefixes.is_empty() {
-        return true;
-    }
-    let hay = format!("{} {}", patent.ipc_codes, patent.cpc_codes).to_uppercase();
-    prefixes.iter().any(|p| hay.contains(p))
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ImportFilterRule {
+    /// IPC / CPC 分类号前缀（如 `F`、`F23`、`A61G`、`H01L23/473`），按独立分类号前缀匹配防 `F` 误命中 `G06F`
+    IpcPrefix(String),
+    /// 大白话中文/英文技术关键词（如 `煤粉`、`热风炉`、`氧舱`、`SiC`），按标题/摘要/权利要求/申请人子串匹配
+    Keyword(String),
 }
 
-fn parse_ipc_prefixes(raw: &str) -> Vec<String> {
-    raw.split([',', '，', ';', '；', ' '])
-        .map(|s| s.trim().to_uppercase())
+fn is_ipc_code_token(raw_token: &str) -> bool {
+    let trimmed = raw_token.trim();
+    if trimmed.is_empty() || !trimmed.is_ascii() {
+        return false;
+    }
+    let bytes = trimmed.as_bytes();
+    // 单字母仅接受大写 A-H 作为 IPC 部级大类（避免普通小写单字母被误判）
+    if bytes.len() == 1 {
+        return matches!(bytes[0], b'A'..=b'H');
+    }
+    // 标准 IPC/CPC 形态：[A-H][0-9]{2}[A-Z0-9/]*
+    let upper = trimmed.to_ascii_uppercase();
+    let ub = upper.as_bytes();
+    ub.len() >= 3
+        && matches!(ub[0], b'A'..=b'H')
+        && ub[1].is_ascii_digit()
+        && ub[2].is_ascii_digit()
+        && ub.iter().all(|b| b.is_ascii_alphanumeric() || *b == b'/')
+}
+
+fn parse_ipc_prefixes(raw: &str) -> Vec<ImportFilterRule> {
+    raw.split([',', '，', ';', '；', '、', ' ', '\t', '\n', '\r'])
+        .map(str::trim)
         .filter(|s| !s.is_empty())
+        .map(|token| {
+            if is_ipc_code_token(token) {
+                ImportFilterRule::IpcPrefix(token.to_ascii_uppercase())
+            } else {
+                ImportFilterRule::Keyword(token.to_lowercase())
+            }
+        })
         .collect()
+}
+
+fn extract_code_tokens(raw_codes: &str) -> Vec<String> {
+    raw_codes
+        .split(|c: char| !c.is_ascii_alphanumeric() && c != '/')
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_ascii_uppercase())
+        .collect()
+}
+
+fn matches_ipc_prefixes(patent: &Patent, rules: &[ImportFilterRule]) -> bool {
+    if rules.is_empty() {
+        return true;
+    }
+    let has_ipc_rule = rules
+        .iter()
+        .any(|r| matches!(r, ImportFilterRule::IpcPrefix(_)));
+    let has_kw_rule = rules
+        .iter()
+        .any(|r| matches!(r, ImportFilterRule::Keyword(_)));
+
+    let code_tokens = if has_ipc_rule {
+        let mut codes = extract_code_tokens(&patent.ipc_codes);
+        codes.extend(extract_code_tokens(&patent.cpc_codes));
+        codes
+    } else {
+        Vec::new()
+    };
+
+    let text_hay = if has_kw_rule {
+        format!(
+            "{} {} {} {}",
+            patent.title, patent.abstract_text, patent.claims, patent.applicant
+        )
+        .to_lowercase()
+    } else {
+        String::new()
+    };
+
+    rules.iter().any(|rule| match rule {
+        ImportFilterRule::IpcPrefix(prefix) => code_tokens
+            .iter()
+            .any(|code| code.starts_with(prefix.as_str())),
+        ImportFilterRule::Keyword(kw) => text_hay.contains(kw.as_str()),
+    })
 }
 
 fn matrix_to_row_maps(matrix: Vec<Vec<String>>) -> Vec<HashMap<String, String>> {
@@ -2734,5 +2806,78 @@ CN118100002A,一种农业灌溉喷头,节水喷头结构,A01G25/02,某农机公�
             .expect("cancelled stream");
         assert!(out2.cancelled);
         assert_eq!(out2.imported, 0);
+    }
+
+    #[test]
+    fn import_filter_supports_chinese_keywords_and_exact_ipc_section_prefix() {
+        let coal_pat = Patent {
+            patent_number: "CN990501A".to_string(),
+            title: "一种沥青热再生热风炉煤粉燃烧器".to_string(),
+            abstract_text: "适用于 200 目神木煤粉稳燃。".to_string(),
+            ipc_codes: "[\"F23D1/00\"]".to_string(),
+            ..Default::default()
+        };
+        let oxy_pat = Patent {
+            patent_number: "CN990502A".to_string(),
+            title: "模块化微压氧舱泄压阀".to_string(),
+            abstract_text: "医疗级家用微压氧舱。".to_string(),
+            ipc_codes: "[\"A61G10/02\"]".to_string(),
+            ..Default::default()
+        };
+        let software_pat = Patent {
+            patent_number: "CN990503A".to_string(),
+            title: "一种推荐算法排序方法".to_string(),
+            abstract_text: "软件神经网络检索排序。".to_string(),
+            ipc_codes: "[\"G06F16/24\"]".to_string(),
+            ..Default::default()
+        };
+
+        // 1. 纯大白话中文关键词过滤
+        let kw_rules = parse_ipc_prefixes("煤粉, 氧舱");
+        assert!(matches_ipc_prefixes(&coal_pat, &kw_rules));
+        assert!(matches_ipc_prefixes(&oxy_pat, &kw_rules));
+        assert!(!matches_ipc_prefixes(&software_pat, &kw_rules));
+
+        // 2. 单字母 IPC 部级大类 `F` 必须精准匹配 F23D1/00，绝不能误命中 G06F16/24
+        let sec_f_rules = parse_ipc_prefixes("F");
+        assert!(matches_ipc_prefixes(&coal_pat, &sec_f_rules));
+        assert!(!matches_ipc_prefixes(&oxy_pat, &sec_f_rules));
+        assert!(
+            !matches_ipc_prefixes(&software_pat, &sec_f_rules),
+            "大类 F 严禁误匹配包含字母 F 的软件分类号 G06F"
+        );
+
+        // 3. 中文关键词 + IPC 混写（OR 语义）
+        let mixed_rules = parse_ipc_prefixes("F23, 氧舱");
+        assert!(matches_ipc_prefixes(&coal_pat, &mixed_rules));
+        assert!(matches_ipc_prefixes(&oxy_pat, &mixed_rules));
+        assert!(!matches_ipc_prefixes(&software_pat, &mixed_rules));
+    }
+
+    #[test]
+    fn stream_jsonl_supports_chinese_keyword_filter() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let jsonl = tmp.path().join("kw_gazette.jsonl");
+        std::fs::write(
+            &jsonl,
+            concat!(
+                "{\"patent_number\":\"CN990601A\",\"title\":\"超临界二氧化碳无水染色釜\",\"abstract_text\":\"纺织印染节能设备\",\"ipc_codes\":\"D06B3/00\"}\n",
+                "{\"patent_number\":\"CN990602A\",\"title\":\"手机屏幕触控算法\",\"abstract_text\":\"提升滑动流畅度\",\"ipc_codes\":\"G06F3/041\"}\n"
+            ),
+        )
+        .expect("write jsonl");
+
+        let db = Database::init(":memory:").expect("init db");
+        let opts = PatentTableImportOptions {
+            ipc_prefix: "超临界二氧化碳, 染色".to_string(),
+            lightweight: true,
+            source_tag: "folder_sync".to_string(),
+        };
+        let cancel = AtomicBool::new(false);
+        let out = sync_stream_jsonl_file(&db, &jsonl, &opts, &cancel, |_, _, _, _| {})
+            .expect("stream keyword jsonl");
+        assert_eq!(out.imported, 1);
+        assert_eq!(out.filtered_out, 1);
+        assert_eq!(out.sample_numbers, vec!["CN990601A".to_string()]);
     }
 }

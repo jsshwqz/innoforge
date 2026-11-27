@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-11-27T06:06:28.650Z",
+  "generatedAt": "2026-11-27T09:11:53.789Z",
   "pages": {
     "ai.html": {
       "references": [
@@ -700,6 +700,7 @@
         "batchSummarize",
         "cancelPatentFolderSync",
         "clearHistory",
+        "clearImportFilterChips",
         "compareMatrix",
         "doSearch",
         "exportCsv",
@@ -711,8 +712,10 @@
         "runRiskAssessment",
         "runVectorBackfill",
         "showStats",
+        "syncImportFilterChipHighlights",
         "syncPatentFolder",
         "toggleAllChecks",
+        "toggleImportFilterChip",
         "toggleRegionSelect",
         "toggleRiskModal",
         "useHistoryEncoded"
@@ -725,6 +728,7 @@
         "buildSearchExportToolbar",
         "cancelPatentFolderSync",
         "clearHistory",
+        "clearImportFilterChips",
         "clearSearchPdfMeta",
         "compareMatrix",
         "csvEsc",
@@ -751,6 +755,7 @@
         "loadPatentSyncFolderStatus",
         "loadSearchPdfMeta",
         "looksLikeFilePathForIpc",
+        "parseImportFilterTokens",
         "parseRow",
         "pollPatentSyncProgressOnce",
         "previewPdfContent",
@@ -783,8 +788,10 @@
         "showStats",
         "startPatentSyncPolling",
         "stopPatentSyncPolling",
+        "syncImportFilterChipHighlights",
         "syncPatentFolder",
         "toggleAllChecks",
+        "toggleImportFilterChip",
         "toggleIpcAnchor",
         "toggleRegionSelect",
         "toggleRiskModal",

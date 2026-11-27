@@ -1405,6 +1405,36 @@ input[type="checkbox"] { accent-color: var(--accent); color-scheme: dark; }
   border-radius: 999px;
   transition: width 0.25s ease;
 }
+.bulk-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+.bulk-filter-chip {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border-muted);
+  background: rgba(139, 148, 158, 0.1);
+  color: var(--text-secondary);
+  cursor: pointer;
+  line-height: 1.5;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+.bulk-filter-chip:hover {
+  border-color: var(--accent-border);
+  color: var(--text-primary);
+}
+.bulk-filter-chip.active {
+  border-color: #58a6ff;
+  background: rgba(88, 166, 255, 0.2);
+  color: #58a6ff;
+  font-weight: 600;
+}
+.bulk-filter-chip-clear {
+  color: var(--text-muted);
+}
 .bulk-import-check {
   display: inline-flex;
   align-items: center;
