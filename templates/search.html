@@ -146,7 +146,7 @@
       </div>
     </div>
     <div class="bulk-import-row">
-      <input type="file" id="patent-table-input" accept=".xlsx,.csv,.tsv,.json,.jsonl,.pdf,.ofd,.docx,.txt,.md,.xml,.html,.htm,.rtf,.tex,.zip" multiple style="display:none" onchange="handlePatentTableUpload(event)">
+      <input type="file" id="patent-table-input" accept=".xlsx,.csv,.tsv,.json,.jsonl,.gz,.pdf,.ofd,.docx,.txt,.md,.xml,.html,.htm,.rtf,.tex,.zip" multiple style="display:none" onchange="handlePatentTableUpload(event)">
       <input type="file" id="patent-folder-input" webkitdirectory directory multiple style="display:none" onchange="handlePatentTableUpload(event)">
       <button type="button" class="btn-primary btn-sm" id="btn-upload-patent-table" onclick="document.getElementById('patent-table-input').click()" data-i18n="bulk.uploadBtn">📤 选择文件导入 (表/PDF/OFD/ZIP)</button>
       <button type="button" class="btn-secondary btn-sm" id="btn-upload-patent-folder" onclick="document.getElementById('patent-folder-input').click()" data-i18n="bulk.uploadFolderBtn">📁 选择本地文件夹上传</button>
@@ -166,11 +166,22 @@
       <button type="button" class="btn-primary btn-sm" id="btn-sync-folder" onclick="syncPatentFolder(false)" data-i18n="bulk.syncBtn">🔄 一键增量同步</button>
       <button type="button" class="btn-secondary btn-sm" id="btn-sync-folder-force" onclick="syncPatentFolder(true)" data-i18n="bulk.syncForceBtn">♻️ 全量重扫</button>
       <button type="button" class="btn-secondary btn-sm" id="btn-sync-folder-cancel" style="display:none;color:#f85149;border-color:#f85149;" onclick="cancelPatentFolderSync()" data-i18n="bulk.syncCancelBtn">⏹ 停止同步</button>
+      <label class="bulk-import-field-label" for="sync-auto-interval" style="margin:0 0 0 6px;display:inline-flex;align-items:center;gap:6px;">
+        <span data-i18n="bulk.autoLabel">自动巡检</span>
+        <select id="sync-auto-interval" onchange="savePatentAutoSyncInterval()" style="background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:4px 8px;font-size:12px;">
+          <option value="0" data-i18n="bulk.autoOff">关闭（手动）</option>
+          <option value="15" data-i18n="bulk.auto15m">每 15 分钟</option>
+          <option value="30" data-i18n="bulk.auto30m">每 30 分钟</option>
+          <option value="60" data-i18n="bulk.auto60m">每 1 小时</option>
+          <option value="360" data-i18n="bulk.auto360m">每 6 小时</option>
+        </select>
+      </label>
     </div>
     <div id="sync-folder-progress-wrap" class="bulk-sync-progress-wrap" style="display:none;">
       <div id="sync-folder-progress-bar" class="bulk-sync-progress-bar"></div>
     </div>
     <div id="sync-folder-status" class="bulk-import-status"></div>
+    <div id="sync-collector-status" class="bulk-import-status" style="display:none;color:#58a6ff;"></div>
   </div>
 </div>
 </div>
@@ -293,6 +304,13 @@ function clearSearchPdfMeta() {
     'bulk.syncBtn': '🔄 一键增量同步',
     'bulk.syncForceBtn': '♻️ 全量重扫',
     'bulk.syncCancelBtn': '⏹ 停止同步',
+    'bulk.autoLabel': '自动巡检',
+    'bulk.autoOff': '关闭（手动）',
+    'bulk.auto15m': '每 15 分钟',
+    'bulk.auto30m': '每 30 分钟',
+    'bulk.auto60m': '每 1 小时',
+    'bulk.auto360m': '每 6 小时',
+    'bulk.autoSaved': '✅ 已保存自动增量巡检设置',
     'bulk.syncCancelling': '⏹ 正在安全停止并保存已完成断点...',
     'bulk.uploading': '⏳ 正在解析并批量写入本地专利库...',
     'bulk.syncing': '⏳ 正在递归增量扫描目录并写入本地专利库...',
@@ -424,6 +442,13 @@ function clearSearchPdfMeta() {
     'bulk.syncBtn': '🔄 Incremental Sync',
     'bulk.syncForceBtn': '♻️ Full Rescan',
     'bulk.syncCancelBtn': '⏹ Stop Sync',
+    'bulk.autoLabel': 'Auto-Poll',
+    'bulk.autoOff': 'Off (Manual)',
+    'bulk.auto15m': 'Every 15m',
+    'bulk.auto30m': 'Every 30m',
+    'bulk.auto60m': 'Every 1h',
+    'bulk.auto360m': 'Every 6h',
+    'bulk.autoSaved': '✅ Auto incremental poll interval saved',
     'bulk.syncCancelling': '⏹ Stopping safely and saving checkpoint...',
     'bulk.uploading': '⏳ Parsing and importing into local patent DB...',
     'bulk.syncing': '⏳ Recursively scanning folder and importing new/updated files...',
@@ -2759,17 +2784,89 @@ async function cancelPatentFolderSync() {
     }
 }
 
+function renderCollectorStatus(collector) {
+    const el = document.getElementById('sync-collector-status');
+    if (!el) return;
+    if (!collector || (!collector.total_tasks && !collector.extracted_rows)) {
+        el.style.display = 'none';
+        el.textContent = '';
+        return;
+    }
+    const done = Number(collector.done || 0);
+    const total = Number(collector.total_tasks || 0);
+    const rows = Number(collector.extracted_rows || 0).toLocaleString();
+    const speed = Number(collector.total_speed_kbps || 0).toFixed(1);
+    const disk = collector.free_disk_gb != null ? Number(collector.free_disk_gb).toFixed(1) : '';
+    const running = Boolean(collector.running);
+    el.style.display = 'block';
+    el.style.color = running ? '#58a6ff' : '#8b949e';
+    if (i18nLang === 'en') {
+        el.textContent = (running ? '📡 Collector running: ' : '📡 Collector idle: ')
+            + done + '/' + total + ' issues · ' + rows + ' rows extracted'
+            + (running ? (' · ' + speed + ' KB/s') : '')
+            + (disk ? (' · Disk free ' + disk + ' GB') : '');
+    } else {
+        el.textContent = (running ? '📡 采集器运行中：' : '📡 采集器待机：')
+            + done + '/' + total + ' 期 · 已抽取 ' + rows + ' 条'
+            + (running ? (' · ' + speed + ' KB/s') : '')
+            + (disk ? (' · 源盘余 ' + disk + ' GB') : '');
+    }
+}
+
+async function savePatentAutoSyncInterval() {
+    const pathEl = document.getElementById('sync-folder-path');
+    const ipcEl = document.getElementById('table-ipc-filter');
+    const lwEl = document.getElementById('table-lightweight-cb');
+    const autoEl = document.getElementById('sync-auto-interval');
+    const statusEl = document.getElementById('sync-folder-status');
+    const folderPath = pathEl ? pathEl.value.trim() : '';
+    const mins = autoEl ? Number(autoEl.value || 0) : 0;
+    if (!folderPath) {
+        if (statusEl && mins > 0) {
+            statusEl.style.color = '#d29922';
+            statusEl.textContent = t('bulk.enterFolder');
+        }
+        return;
+    }
+    try {
+        const resp = await fetch('/api/patents/sync-folder', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                folder_path: folderPath,
+                ipc_prefix: ipcEl ? ipcEl.value.trim() : '',
+                lightweight: lwEl ? Boolean(lwEl.checked) : true,
+                save_only: true,
+                force: false,
+                async_mode: false,
+                auto_interval_mins: mins
+            })
+        });
+        const data = await resp.json();
+        if (data.status === 'ok' && statusEl) {
+            statusEl.style.color = '#3fb950';
+            statusEl.textContent = t('bulk.autoSaved') + (mins > 0 ? (' (' + mins + ' min)') : '');
+            if (data.collector_status) renderCollectorStatus(data.collector_status);
+        }
+    } catch (_) { /* ignore transient save error */ }
+}
+
 async function loadPatentSyncFolderStatus() {
     const pathEl = document.getElementById('sync-folder-path');
     const statusEl = document.getElementById('sync-folder-status');
     const ipcEl = document.getElementById('table-ipc-filter');
     const lwEl = document.getElementById('table-lightweight-cb');
+    const autoEl = document.getElementById('sync-auto-interval');
     if (!pathEl || !statusEl) return;
     try {
         const resp = await fetch('/api/patents/sync-folder');
         const data = await resp.json();
         if (data.status !== 'ok') return;
         if (data.folder_path) pathEl.value = data.folder_path;
+        if (autoEl && typeof data.auto_interval_mins === 'number') {
+            autoEl.value = String(data.auto_interval_mins);
+        }
+        renderCollectorStatus(data.collector_status || null);
         if (data.ipc_prefix && !looksLikeFilePathForIpc(data.ipc_prefix) && ipcEl && !ipcEl.value) {
             ipcEl.value = data.ipc_prefix;
             syncImportFilterChipHighlights();
@@ -2783,7 +2880,7 @@ async function loadPatentSyncFolderStatus() {
         if (data.folder_path) {
             const mappedNote = data.resolved_path ? (' → ' + data.resolved_path) : '';
             const dedupNote = Number(data.deduped_pair_files || 0) > 0
-                ? (i18nLang === 'en' ? (', auto-deduped ' + data.deduped_pair_files + ' duplicate CSV(s)') : ('，已自动去重 ' + data.deduped_pair_files + ' 个同名重复 CSV'))
+                ? (i18nLang === 'en' ? (', auto-deduped ' + data.deduped_pair_files + ' duplicate table(s)') : ('，已自动去重 ' + data.deduped_pair_files + ' 个同名重复表'))
                 : '';
             const diskNote = data.free_disk_mb ? (' · 磁盘可用 ' + Number(data.free_disk_mb) + ' MB') : '';
             const existsText = data.exists
@@ -2803,6 +2900,7 @@ async function syncPatentFolder(forceRescan) {
     const statusEl = document.getElementById('sync-folder-status');
     const ipcEl = document.getElementById('table-ipc-filter');
     const lwEl = document.getElementById('table-lightweight-cb');
+    const autoEl = document.getElementById('sync-auto-interval');
     const folderPath = pathEl ? pathEl.value.trim() : '';
     const ipcVal = ipcEl ? ipcEl.value.trim() : '';
 
@@ -2835,7 +2933,8 @@ async function syncPatentFolder(forceRescan) {
                 lightweight: lwEl ? Boolean(lwEl.checked) : true,
                 save_only: false,
                 force: Boolean(forceRescan),
-                async_mode: true
+                async_mode: true,
+                auto_interval_mins: autoEl ? Number(autoEl.value || 0) : 0
             })
         });
         const data = await resp.json();

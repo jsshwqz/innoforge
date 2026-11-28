@@ -138,7 +138,11 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
+    let auto_sync_db = state.db.clone();
     let app = build_router_with_token(state, access_token.clone());
+
+    // 启动后台定时增量同步调度器（仅在用户配置了目录且自动巡检间隔 > 0 时低开销触发）
+    innoforge::common::spawn_folder_auto_sync_loop(auto_sync_db);
 
     println!(
         "创研台 InnoForge v{} running at http://{addr}",
