@@ -1454,23 +1454,49 @@ impl super::Database {
         })
     }
 
+    /// 构造兼容紧缩形态（`A61G10/02`）与 CNIPA 空格形态（`A61G 10/02`）的 FTS5 `ipc_codes` 查询串。
+    fn build_ipc_fts_query(target: &str) -> String {
+        let before_slash = target.split('/').next().unwrap_or(target);
+        let clean: String = before_slash
+            .chars()
+            .filter(|ch| ch.is_ascii_alphanumeric())
+            .collect::<String>()
+            .to_uppercase();
+        if clean.is_empty() {
+            return String::new();
+        }
+        let chars: Vec<char> = clean.chars().collect();
+        if chars.len() > 4
+            && chars[0].is_ascii_alphabetic()
+            && chars[1].is_ascii_digit()
+            && chars[2].is_ascii_digit()
+            && chars[3].is_ascii_alphabetic()
+        {
+            let subclass: String = chars.iter().take(4).collect();
+            let group: String = chars.iter().skip(4).collect();
+            format!("ipc_codes : (\"{clean}\"* OR (\"{subclass}\"* \"{group}\"*))")
+        } else {
+            format!("ipc_codes : (\"{clean}\"*)")
+        }
+    }
+
     pub fn search_by_ipc(&self, code: &str) -> Result<Vec<serde_json::Value>> {
         let target = code.trim().to_uppercase();
         if target.is_empty() {
+            return Ok(Vec::new());
+        }
+        let target_compact: String = target.chars().filter(|c| !c.is_whitespace()).collect();
+        if target_compact.is_empty() {
             return Ok(Vec::new());
         }
         self.with_read_conn(|c| {
             // 大库走 FTS5 `ipc_codes` 倒排前缀索引（<10ms），彻底避免点击冷门部类时 1.1 GB 全表 LIKE 扫盘
             let use_fts_fast = Self::patent_row_count_fast(c) >= Self::LARGE_DB_FULLSCAN_GUARD_ROWS;
             let raw_rows: Vec<(String, serde_json::Value)> = if use_fts_fast {
-                let clean: String = target
-                    .chars()
-                    .filter(|ch| ch.is_ascii_alphanumeric())
-                    .collect();
-                if clean.is_empty() {
+                let fts_q = Self::build_ipc_fts_query(&target);
+                if fts_q.is_empty() {
                     return Ok(Vec::new());
                 }
-                let fts_q = format!("ipc_codes : (\"{clean}\"*)");
                 let mut stmt = c.prepare(
                     "SELECT p.id, p.patent_number, p.title, p.abstract_text, p.applicant, p.filing_date, p.country, p.ipc_codes
                      FROM (SELECT rowid FROM patents_fts WHERE patents_fts MATCH ?1 LIMIT 300) f
@@ -1498,11 +1524,11 @@ impl super::Database {
                     .collect();
                 items
             } else {
-                let pattern = format!("%{}%", target);
+                let pattern = format!("%{}%", target_compact);
                 // 先放大候选取 300 条，再对解析出的真实 IPC 列表执行严格前缀匹配（防止查部类 "F" 误命中 "G06F"）
                 let mut stmt = c.prepare(
                     "SELECT id, patent_number, title, abstract_text, applicant, filing_date, country, ipc_codes
-                     FROM patents WHERE ipc_codes LIKE ?1 ORDER BY filing_date DESC LIMIT 300",
+                     FROM patents WHERE REPLACE(ipc_codes, ' ', '') LIKE ?1 ORDER BY filing_date DESC LIMIT 300",
                 )?;
                 let items: Vec<(String, serde_json::Value)> = stmt
                     .query_map(params![pattern], |row| {
@@ -1530,7 +1556,7 @@ impl super::Database {
                 .filter(|(ipc_raw, _)| {
                     crate::routes::parse_ipc_code_list(ipc_raw)
                         .iter()
-                        .any(|c| c.starts_with(&target))
+                        .any(|c| c.replace(' ', "").starts_with(&target_compact))
                 })
                 .take(100)
                 .map(|(_, val)| val)
@@ -1836,5 +1862,38 @@ mod insert_dedup_tests {
             .expect("WAL concurrent reader must not block while main conn mutex is held");
         assert_eq!(fts_res.expect("search_fts ok"), 1);
         assert_eq!(batch_res.expect("get_patents_by_numbers ok"), 1);
+    }
+
+    #[test]
+    fn search_by_ipc_handles_cnipa_spaced_ipc_format_in_both_fts_and_like_paths() {
+        let db = Database::init(":memory:").expect("init db");
+        db.insert_patent(&Patent {
+            id: "ipc-spaced-1".into(),
+            patent_number: "CN990961A".into(),
+            title: "医用高压氧舱压力调控阀".into(),
+            ipc_codes: "[\"A61G 10/02\", \"A61M 16/00\"]".into(),
+            country: "CN".into(),
+            ..Default::default()
+        })
+        .expect("insert");
+
+        // 1) FTS5 查询表达式必须同时匹配紧缩与 CNIPA 空格形态（`"A61G10"* OR ("A61G"* "10"*)`）
+        let fts_q = Database::build_ipc_fts_query("A61G10");
+        assert!(fts_q.contains("\"A61G10\"*"));
+        assert!(fts_q.contains("\"A61G\"* \"10\"*"));
+        let fts_hits: usize = db
+            .with_read_conn(|c| {
+                Ok(c.query_row(
+                    "SELECT COUNT(*) FROM patents_fts WHERE patents_fts MATCH ?1",
+                    rusqlite::params![fts_q],
+                    |r| r.get::<_, usize>(0),
+                )?)
+            })
+            .expect("fts spaced ipc query");
+        assert_eq!(fts_hits, 1);
+
+        // 2) search_by_ipc 传紧缩 `"A61G10"` 与带空格 `"A61G 10"` 均必须命中
+        assert_eq!(db.search_by_ipc("A61G10").expect("compact").len(), 1);
+        assert_eq!(db.search_by_ipc("A61G 10").expect("spaced").len(), 1);
     }
 }
