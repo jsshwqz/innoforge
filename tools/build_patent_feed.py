@@ -65,12 +65,22 @@ def sha256_and_size(path: Path) -> Tuple[str, int]:
     return h.hexdigest(), total
 
 
-def compress_jsonl_incremental(src_file: Path, dst_gz: Path) -> Tuple[bool, int]:
-    """若目标 .jsonl.gz 已存在且 mtime >= 源文件 mtime，则跳过重压。返回 (是否重新压缩, 行数估算/0)。"""
+def compress_jsonl_incremental(
+    src_file: Path,
+    dst_gz: Path,
+    prev_item: Optional[Dict[str, object]] = None,
+) -> Tuple[bool, int]:
+    """若目标 .jsonl.gz 已存在且整秒 mtime 与源文件匹配（兼容 WSL2/NTFS 纳秒截断）则跳过重压。返回 (是否重新压缩, 行数估算/0)。"""
     dst_gz.parent.mkdir(parents=True, exist_ok=True)
     src_stat = src_file.stat()
-    if dst_gz.is_file() and dst_gz.stat().st_size > 0 and dst_gz.stat().st_mtime >= src_stat.st_mtime:
-        return False, 0
+    src_mtime_sec = int(src_stat.st_mtime)
+    if dst_gz.is_file():
+        dst_stat = dst_gz.stat()
+        dst_mtime_sec = int(dst_stat.st_mtime)
+        prev_src_size = prev_item.get("src_size") if isinstance(prev_item, dict) else None
+        src_size_unchanged = prev_src_size is None or int(prev_src_size) == int(src_stat.st_size)
+        if dst_stat.st_size > 0 and dst_mtime_sec + 1 >= src_mtime_sec and src_size_unchanged:
+            return False, 0
 
     tmp_path = dst_gz.with_suffix(dst_gz.suffix + ".tmp")
     rows = 0
@@ -80,7 +90,7 @@ def compress_jsonl_incremental(src_file: Path, dst_gz: Path) -> Tuple[bool, int]
                 if line.strip():
                     rows += 1
                 fout.write(line)
-        os.utime(tmp_path, (src_stat.st_atime, src_stat.st_mtime))
+        os.utime(tmp_path, (src_mtime_sec, src_mtime_sec))
         os.replace(tmp_path, dst_gz)
     finally:
         if tmp_path.exists():
@@ -150,24 +160,30 @@ def build_feed(
         src_size = src_file.stat().st_size
         total_raw_bytes += src_size
 
+        old_item = prev_index.get(rel_out)
         if src_file.name.lower().endswith(".jsonl.gz"):
             dst_gz.parent.mkdir(parents=True, exist_ok=True)
-            if not dst_gz.is_file() or dst_gz.stat().st_mtime < src_file.stat().st_mtime:
+            if not dst_gz.is_file() or int(dst_gz.stat().st_mtime) + 1 < int(src_file.stat().st_mtime):
                 shutil.copy2(src_file, dst_gz)
                 changed = True
             else:
                 changed = False
             rows = 0
         else:
-            changed, rows = compress_jsonl_incremental(src_file, dst_gz)
+            changed, rows = compress_jsonl_incremental(src_file, dst_gz, old_item)
 
         dst_stat = dst_gz.stat()
         mtime = int(dst_stat.st_mtime)
         size = int(dst_stat.st_size)
         total_gz_bytes += size
 
-        old_item = prev_index.get(rel_out)
-        if not changed and old_item and old_item.get("size") == size and old_item.get("mtime") == mtime and old_item.get("sha256"):
+        if (
+            not changed
+            and old_item
+            and old_item.get("size") == size
+            and abs(int(old_item.get("mtime", 0) or 0) - mtime) <= 2
+            and old_item.get("sha256")
+        ):
             sha = str(old_item["sha256"])
             rows = int(old_item.get("rows", 0) or 0)
             reused += 1
@@ -178,6 +194,7 @@ def build_feed(
         entry: Dict[str, object] = {
             "path": rel_out,
             "size": size,
+            "src_size": int(src_size),
             "mtime": mtime,
             "sha256": sha,
         }

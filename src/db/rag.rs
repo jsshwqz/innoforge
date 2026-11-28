@@ -107,7 +107,7 @@ impl Database {
     ) -> Result<rusqlite::Connection, rusqlite::Error> {
         let conn = rusqlite::Connection::open(db_path)?;
         conn.execute_batch(
-            "PRAGMA busy_timeout=30000; PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA temp_store=MEMORY; PRAGMA cache_size=-16000;",
+            "PRAGMA busy_timeout=30000; PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA wal_autocheckpoint=1000; PRAGMA journal_size_limit=33554432; PRAGMA temp_store=MEMORY; PRAGMA cache_size=-16000;",
         )?;
         Ok(conn)
     }
@@ -141,7 +141,8 @@ impl Database {
         use std::sync::atomic::Ordering;
 
         let _bulk_guard = self.begin_bulk_write();
-        let chunk_size = if lightweight { 100 } else { 50 };
+        // 轻量著录导入采用 500 行分段提交（减少 5 倍 WAL fsync 次数且在线搜索在 bulk_write 期间自动避让写锁，兼顾吞吐与响应）
+        let chunk_size = if lightweight { 500 } else { 50 };
         let total_batches = patents.len().div_ceil(chunk_size);
         let mut dedicated_conn = self
             .db_path
@@ -179,6 +180,14 @@ impl Database {
             } else {
                 let c = self.conn();
                 let _ = c.execute("INSERT INTO chunks_fts(chunks_fts) VALUES('optimize')", []);
+            }
+        }
+        // 单文件批次完成后主动执行短超时 WAL TRUNCATE 检查点，防止连续导入上百个文件时 `-wal` 长期膨胀到数百 MB
+        if imported > 0 {
+            if let Some(ref writer) = dedicated_conn {
+                let _ = writer.execute_batch(
+                    "PRAGMA busy_timeout=3000; PRAGMA wal_checkpoint(TRUNCATE); PRAGMA busy_timeout=30000;",
+                );
             }
         }
         Ok((imported, chunks_written, cancelled))
@@ -1337,5 +1346,18 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM patents", [], |r| r.get(0))
             .expect("count patents");
         assert_eq!(count, 150);
+
+        // 验证 journal_size_limit=32MB 生效且批次结束后 WAL 已被 TRUNCATE 截断回收
+        let limit: i64 = main_guard
+            .query_row("PRAGMA journal_size_limit", [], |r| r.get(0))
+            .expect("journal_size_limit");
+        assert_eq!(limit, 33_554_432);
+        let wal_len = std::fs::metadata(format!("{}-wal", db_path.display()))
+            .map(|m| m.len())
+            .unwrap_or(0);
+        assert!(
+            wal_len <= 65_536,
+            "bulk import 结束后 WAL 应被截断而非持续膨胀，实际 wal_len={wal_len}"
+        );
     }
 }
