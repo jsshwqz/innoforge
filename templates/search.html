@@ -76,6 +76,30 @@
 <button class="btn-secondary" onclick="showStats()" data-i18n="btn.stats"></button>
 <button class="btn-secondary" onclick="exportCsv()" data-i18n="btn.export"></button>
 </div>
+<details id="hybrid-strategy-guide" style="margin-top:10px;padding:8px 12px;background:#0d1117;border:1px solid #30363d;border-radius:8px;font-size:12.5px;color:#8b949e;">
+<summary style="cursor:pointer;color:#79c0ff;font-weight:600;user-select:none;" data-i18n="strategy.summary">🧭 专业混合检索策略与边界指南（CNIPA 官方库 × 语义 × 引文补漏）</summary>
+<div style="margin-top:8px;line-height:1.65;color:#c9d1d9;">
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;margin-bottom:8px;">
+    <div style="padding:8px 10px;background:#161b22;border:1px solid #30363d;border-radius:6px;">
+      <strong style="color:#58a6ff;" data-i18n="strategy.s1Title">① 布尔/字段/IPC 控范围</strong>
+      <div style="font-size:12px;color:#8b949e;margin-top:3px;" data-i18n="strategy.s1Body">先用本地 CNIPA 库或在线源按关键词、申请人、日期与 IPC 锚点框定技术子空间，压低跨领域噪声。</div>
+    </div>
+    <div style="padding:8px 10px;background:#161b22;border:1px solid #30363d;border-radius:6px;">
+      <strong style="color:#a371f7;" data-i18n="strategy.s2Title">② 语义与多源扩召回</strong>
+      <div style="font-size:12px;color:#8b949e;margin-top:3px;" data-i18n="strategy.s2Body">切换「AI 全域混搜」或「语义向量」，自动扩写英文并同步检索全球专利、OpenAlex/S2 学术论文与本地库。</div>
+    </div>
+    <div style="padding:8px 10px;background:#161b22;border:1px solid #30363d;border-radius:6px;">
+      <strong style="color:#3fb950;" data-i18n="strategy.s3Title">③ 引文/同族/同IPC 补漏</strong>
+      <div style="font-size:12px;color:#8b949e;margin-top:3px;" data-i18n="strategy.s3Body">点结果栏「引文/同族/同IPC补漏」，顺着种子专利的前后向引文、同族及同 IPC 语义邻域，挖出“换了词但方案同源”的对比文件。</div>
+    </div>
+    <div style="padding:8px 10px;background:#161b22;border:1px solid #30363d;border-radius:6px;">
+      <strong style="color:#d29922;" data-i18n="strategy.s4Title">④ 特征比对与官方核验</strong>
+      <div style="font-size:12px;color:#8b949e;margin-top:3px;" data-i18n="strategy.s4Body">勾选高相关文献一键「加入方案对比」做逐特征比对；最终新颖性、无效与法律状态核验以国知局/EPO/WIPO 官方著录为准。</div>
+    </div>
+  </div>
+  <div style="font-size:12px;color:#8b949e;border-top:1px dashed #30363d;padding-top:6px;" data-i18n="strategy.boundary">边界提醒：语义高分可能存在“表述相近但技术方案实质不同”的假阳性；智能检索用于提升查全效率，法律状态与最终结论务必回核官方库与人工特征比对。</div>
+</div>
+</details>
 </div>
 
 <div class="panel" id="stats-panel" style="display:none;">
@@ -444,7 +468,24 @@ function clearSearchPdfMeta() {
     'upload.error': '上传失败',
     'upload.extracting': 'PDF解析中...',
     'upload.extractSuccess': '解析完成',
-    'upload.extractFail': '解析失败，请重试'
+    'upload.extractFail': '解析失败，请重试',
+    'strategy.summary': '🧭 专业混合检索策略与边界指南（CNIPA 官方库 × 语义 × 引文补漏）',
+    'strategy.s1Title': '① 布尔/字段/IPC 控范围',
+    'strategy.s1Body': '先用本地 CNIPA 库或在线源按关键词、申请人、日期与 IPC 锚点框定技术子空间，压低跨领域噪声。',
+    'strategy.s2Title': '② 语义与多源扩召回',
+    'strategy.s2Body': '切换「AI 全域混搜」或「语义向量」，自动扩写英文并同步检索全球专利、OpenAlex/S2 学术论文与本地库。',
+    'strategy.s3Title': '③ 引文/同族/同IPC 补漏',
+    'strategy.s3Body': '点结果栏「引文/同族/同IPC补漏」，顺着种子专利的前后向引文、同族及同 IPC 语义邻域，挖出“换了词但方案同源”的对比文件。',
+    'strategy.s4Title': '④ 特征比对与官方核验',
+    'strategy.s4Body': '勾选高相关文献一键「加入方案对比」做逐特征比对；最终新颖性、无效与法律状态核验以国知局/EPO/WIPO 官方著录为准。',
+    'strategy.boundary': '边界提醒：语义高分可能存在“表述相近但技术方案实质不同”的假阳性；智能检索用于提升查全效率，法律状态与最终结论务必回核官方库与人工特征比对。',
+    'snowball.btn': '🕸️ 引文/同族/同IPC补漏',
+    'snowball.loading': '⏳ 正在沿引文、同族与同 IPC 语义邻域展开补漏...',
+    'snowball.title': '🕸️ 二阶段引文/同族/同IPC 语义补漏发现',
+    'snowball.empty': '未在当前本地库中发现更多新的引文、同族或同 IPC 语义邻近专利（可先补充同步更多 CNIPA 数据或在线富化引文）。',
+    'snowball.compareBtn': '⚖️ 加入方案对比',
+    'snowball.detailBtn': '💬 详情 / AI深析',
+    'snowball.close': '收起'
   };
   var searchEn = {
     'search.title': 'Patent Search',
@@ -606,7 +647,24 @@ function clearSearchPdfMeta() {
     'upload.error': 'Upload failed',
     'upload.extracting': 'Parsing PDF...',
     'upload.extractSuccess': 'Parsed',
-    'upload.extractFail': 'Parse failed, retry'
+    'upload.extractFail': 'Parse failed, retry',
+    'strategy.summary': '🧭 Hybrid Patent Search Methodology & Boundaries (CNIPA × Semantic × Citation Snowball)',
+    'strategy.s1Title': '1. Boolean / Field / IPC Scoping',
+    'strategy.s1Body': 'Start with local CNIPA or online search using keywords, applicant, filing dates, and IPC anchors to bound the technical subspace.',
+    'strategy.s2Title': '2. Semantic & Multi-Source Recall',
+    'strategy.s2Body': 'Use AI Omni or Semantic mode to expand English terms and query global patents, OpenAlex/S2 papers, and your local vault in parallel.',
+    'strategy.s3Title': '3. Citation / Family / Co-IPC Snowball',
+    'strategy.s3Body': 'Click "Citation & IPC Snowball" to traverse backward/forward citations, patent families, and co-IPC semantic neighbors that use different terminology.',
+    'strategy.s4Title': '4. Feature Matrix & Official Verification',
+    'strategy.s4Body': 'Send top hits to Compare for claim-level feature mapping; always verify final novelty and legal status against official CNIPA/EPO/WIPO records.',
+    'strategy.boundary': 'Boundary notice: high semantic similarity can include false positives with different technical implementations. Use AI retrieval for recall, and confirm legal conclusions against official registries.',
+    'snowball.btn': '🕸️ Citation & IPC Snowball',
+    'snowball.loading': '⏳ Expanding citations, patent families, and co-IPC semantic neighbors...',
+    'snowball.title': '🕸️ Stage-2 Citation / Family / Co-IPC Snowball Discoveries',
+    'snowball.empty': 'No additional citation, family, or co-IPC semantic neighbors found in local vault yet.',
+    'snowball.compareBtn': '⚖️ Add to Compare',
+    'snowball.detailBtn': '💬 Details / AI Analysis',
+    'snowball.close': 'Collapse'
   };
   Object.keys(searchZh).forEach(function(k) { if (!I18N_COMMON.zh[k]) I18N_COMMON.zh[k] = searchZh[k]; });
   Object.keys(searchEn).forEach(function(k) { if (!I18N_COMMON.en[k]) I18N_COMMON.en[k] = searchEn[k]; });
@@ -1044,12 +1102,13 @@ function renderResults(data, page, pageSize) {
     html = `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;padding:8px 12px;background:#161b22;border-radius:6px;">
         <label style="color:#8b949e;font-size:0.85em;cursor:pointer;"><input type="checkbox" onchange="toggleAllChecks(this.checked)" style="margin-right:4px;">全选</label>
         <button onclick="analyzeSearchResults()" style="background:#238636;padding:4px 12px;font-size:0.85em;border-radius:4px;color:white;border:none;cursor:pointer;">🧠 AI 趋势与空白点分析</button>
+        <button type="button" id="btn-expand-snowball" onclick="expandCitationSnowball()" style="background:#0969da;padding:4px 12px;font-size:0.85em;border-radius:4px;color:white;border:none;cursor:pointer;">${escapeHtml(t('snowball.btn'))}</button>
         <button onclick="batchSummarize()" style="background:#1f6feb;padding:4px 12px;font-size:0.85em;border-radius:4px;color:white;border:none;cursor:pointer;">🤖 批量摘要</button>
         <button onclick="compareMatrix()" style="background:#8b5cf6;padding:4px 12px;font-size:0.85em;border-radius:4px;color:white;border:none;cursor:pointer;">📊 对比矩阵</button>
         <button onclick="toggleRiskModal()" style="background:#da3633;padding:4px 12px;font-size:0.85em;border-radius:4px;color:white;border:none;cursor:pointer;">⚠️ 侵权评估 <span style="font-size:10px;background:#da363344;border:1px solid #f85149;border-radius:3px;padding:1px 5px;margin-left:2px;vertical-align:middle;">Reasoner</span></button>
         <button type="button" id="btn-export-selected-csv" onclick="exportSelectedCsv()" style="display:none;background:#21262d;border:1px solid #30363d;padding:4px 10px;font-size:0.82em;border-radius:4px;color:#79c0ff;cursor:pointer;">📥 导出已选 CSV</button>
         <span id="batch-count" style="color:#8b949e;font-size:0.8em;"></span>
-    </div>` + html;
+    </div><div id="snowball-result" style="display:none;margin-bottom:14px;"></div>` + html;
 
     document.getElementById('results').innerHTML = html + '<div id="batch-result" style="margin-top:16px;"></div>';
     document.querySelectorAll('#results .batch-check').forEach(function(cb) {
@@ -1066,6 +1125,174 @@ function renderResults(data, page, pageSize) {
     });
     renderPagination(total, page, effectiveSize);
     resolveChineseTitles(patents);
+}
+
+async function expandCitationSnowball() {
+    const container = document.getElementById('snowball-result');
+    if (!container) return;
+    const allDisplayed = (lastResponse && Array.isArray(lastResponse.patents)) ? lastResponse.patents : [];
+    const checkedIds = Array.from(document.querySelectorAll('#results .batch-check:checked'))
+        .map(function(cb) { return cb.dataset.id; })
+        .filter(Boolean);
+    const seedItems = checkedIds.length > 0
+        ? allDisplayed.filter(function(p) { return p && checkedIds.indexOf(p.id) >= 0; })
+        : allDisplayed.slice(0, 8);
+    if (!seedItems.length) {
+        alert(t('alert.searchFirst'));
+        return;
+    }
+    const seedIds = seedItems.map(function(p) { return p.id; }).filter(Boolean);
+    const seedNumbers = seedItems.map(function(p) { return p.patent_number; }).filter(Boolean);
+    const query = (document.getElementById('search-input') || {}).value || '';
+
+    container.style.display = 'block';
+    container.textContent = '';
+    const loadingBox = document.createElement('div');
+    loadingBox.style.cssText = 'padding:12px 14px;background:#161b22;border:1px solid #30363d;border-left:3px solid #3fb950;border-radius:8px;color:#8b949e;font-size:13px;';
+    loadingBox.textContent = t('snowball.loading');
+    container.appendChild(loadingBox);
+
+    try {
+        const res = await fetch('/api/search/expand-citations', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                query: query,
+                seed_ids: seedIds,
+                seed_numbers: seedNumbers,
+                limit: 15
+            })
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        renderSnowballResults(container, data);
+    } catch (err) {
+        container.textContent = '';
+        const errBox = document.createElement('div');
+        errBox.style.cssText = 'padding:12px 14px;background:#161b22;border:1px solid #da3633;border-radius:8px;color:#f85149;font-size:13px;';
+        errBox.textContent = 'Snowball error: ' + (err && err.message ? err.message : String(err));
+        container.appendChild(errBox);
+    }
+}
+
+function renderSnowballResults(container, data) {
+    container.textContent = '';
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'padding:12px 14px;background:#0d1117;border:1px solid #30363d;border-left:3px solid #3fb950;border-radius:8px;';
+
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px;';
+    const titleEl = document.createElement('strong');
+    titleEl.style.cssText = 'color:#7ee787;font-size:13.5px;';
+    titleEl.textContent = t('snowball.title') + ' (' + Number(data.total || 0) + ')';
+    header.appendChild(titleEl);
+
+    const bd = data.breakdown || {};
+    const stats = document.createElement('span');
+    stats.style.cssText = 'font-size:12px;color:#8b949e;';
+    const ipcsText = Array.isArray(data.top_ipcs) && data.top_ipcs.length ? ' · IPC: ' + data.top_ipcs.join(', ') : '';
+    stats.textContent = '引证 ' + Number(bd.backward_citation || 0)
+        + ' · 被引 ' + Number(bd.forward_citation || 0)
+        + ' · 同族 ' + Number(bd.patent_family || 0)
+        + ' · 同IPC语义 ' + Number(bd.co_ipc_semantic || 0)
+        + ipcsText
+        + ' · ' + Number(data.elapsed_ms || 0) + ' ms';
+    header.appendChild(stats);
+
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.style.cssText = 'padding:2px 8px;font-size:11.5px;border-radius:4px;border:1px solid #30363d;background:#21262d;color:#c9d1d9;cursor:pointer;';
+    closeBtn.textContent = t('snowball.close');
+    closeBtn.addEventListener('click', function() { container.style.display = 'none'; });
+    header.appendChild(closeBtn);
+    wrap.appendChild(header);
+
+    const items = Array.isArray(data.patents) ? data.patents : [];
+    if (!items.length) {
+        const empty = document.createElement('div');
+        empty.style.cssText = 'color:#8b949e;font-size:12.5px;padding:6px 0;';
+        empty.textContent = data.error || t('snowball.empty');
+        wrap.appendChild(empty);
+        container.appendChild(wrap);
+        return;
+    }
+
+    const list = document.createElement('div');
+    list.style.cssText = 'display:flex;flex-direction:column;gap:8px;';
+    items.forEach(function(p) {
+        const card = document.createElement('div');
+        card.style.cssText = 'padding:10px 12px;background:#161b22;border:1px solid #30363d;border-radius:6px;';
+
+        const top = document.createElement('div');
+        top.style.cssText = 'display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;';
+
+        const left = document.createElement('div');
+        left.style.cssText = 'flex:1;min-width:220px;';
+
+        const badge = document.createElement('span');
+        const isCite = p.relation_type === 'backward_citation' || p.relation_type === 'forward_citation';
+        const isFam = p.relation_type === 'patent_family';
+        badge.style.cssText = isCite
+            ? 'display:inline-block;padding:1px 7px;margin-right:6px;border-radius:10px;font-size:11px;background:#1f6feb33;border:1px solid #58a6ff;color:#79c0ff;'
+            : isFam
+                ? 'display:inline-block;padding:1px 7px;margin-right:6px;border-radius:10px;font-size:11px;background:#8957e533;border:1px solid #a371f7;color:#d2a8ff;'
+                : 'display:inline-block;padding:1px 7px;margin-right:6px;border-radius:10px;font-size:11px;background:#23863633;border:1px solid #3fb950;color:#7ee787;';
+        badge.textContent = String(p.relation_label || '');
+        left.appendChild(badge);
+
+        const link = document.createElement('a');
+        link.href = '/patent/' + encodeURIComponent(String(p.id || ''));
+        link.style.cssText = 'color:#58a6ff;font-weight:600;text-decoration:none;font-size:13.5px;';
+        link.textContent = (p.patent_number ? p.patent_number + ' · ' : '') + String(p.title || '');
+        left.appendChild(link);
+
+        const meta = document.createElement('div');
+        meta.style.cssText = 'margin-top:4px;font-size:12px;color:#8b949e;';
+        const viaList = Array.isArray(p.via_seeds) && p.via_seeds.length ? ' · 关联: ' + p.via_seeds.join(', ') : '';
+        meta.textContent = [p.applicant || '', p.filing_date || '', p.country || ''].filter(Boolean).join(' · ') + viaList;
+        left.appendChild(meta);
+
+        if (p.abstract_text) {
+            const abs = document.createElement('div');
+            abs.style.cssText = 'margin-top:5px;font-size:12px;color:#c9d1d9;line-height:1.45;';
+            abs.textContent = String(p.abstract_text);
+            left.appendChild(abs);
+        }
+
+        const actions = document.createElement('div');
+        actions.style.cssText = 'margin-top:6px;display:flex;gap:8px;flex-wrap:wrap;';
+        const cmpBtn = document.createElement('button');
+        cmpBtn.type = 'button';
+        cmpBtn.style.cssText = 'padding:2px 9px;font-size:11.5px;border-radius:5px;border:1px solid #30363d;background:#21262d;color:#79c0ff;cursor:pointer;';
+        cmpBtn.textContent = t('snowball.compareBtn');
+        cmpBtn.addEventListener('click', function() { addSearchItemToCompare(p); });
+        actions.appendChild(cmpBtn);
+
+        const detailLink = document.createElement('a');
+        detailLink.href = '/patent/' + encodeURIComponent(String(p.id || ''));
+        detailLink.style.cssText = 'padding:2px 9px;font-size:11.5px;border-radius:5px;border:1px solid #30363d;background:#0d1117;color:#c9d1d9;text-decoration:none;';
+        detailLink.textContent = t('snowball.detailBtn');
+        actions.appendChild(detailLink);
+        left.appendChild(actions);
+
+        const right = document.createElement('div');
+        right.style.cssText = 'text-align:right;white-space:nowrap;';
+        const scoreEl = document.createElement('div');
+        scoreEl.style.cssText = 'font-weight:700;font-size:14px;color:#3fb950;';
+        scoreEl.textContent = Math.round(Number(p.relevance_score || 0)) + '%';
+        right.appendChild(scoreEl);
+        const semEl = document.createElement('div');
+        semEl.style.cssText = 'font-size:11px;color:#8b949e;';
+        semEl.textContent = '语义 ' + Number(p.semantic_pct || 0) + '%';
+        right.appendChild(semEl);
+
+        top.appendChild(left);
+        top.appendChild(right);
+        card.appendChild(top);
+        list.appendChild(card);
+    });
+    wrap.appendChild(list);
+    container.appendChild(wrap);
 }
 
 function addSearchItemToCompare(item) {
