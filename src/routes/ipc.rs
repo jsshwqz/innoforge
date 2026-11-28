@@ -1,7 +1,57 @@
 use axum::{extract::Path, extract::State, Json};
 use serde_json::{json, Value};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use super::AppState;
+
+struct IpcTreeCacheEntry {
+    db_ptr: usize,
+    db_path: Option<String>,
+    patent_count: usize,
+    max_rowid: i64,
+    payload: Value,
+}
+
+static IPC_TREE_CACHE: OnceLock<Mutex<Option<IpcTreeCacheEntry>>> = OnceLock::new();
+
+fn ipc_tree_cache() -> &'static Mutex<Option<IpcTreeCacheEntry>> {
+    IPC_TREE_CACHE.get_or_init(|| Mutex::new(None))
+}
+
+fn load_or_build_ipc_tree(db: &Arc<crate::db::Database>) -> anyhow::Result<Value> {
+    let db_ptr = Arc::as_ptr(db) as usize;
+    let db_path = db
+        .main_db_file_path()
+        .map(|p| p.to_string_lossy().to_string());
+    let (patent_count, max_rowid) = db.get_patent_table_watermark()?;
+
+    {
+        let guard = ipc_tree_cache().lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(entry) = guard.as_ref() {
+            if entry.db_ptr == db_ptr
+                && entry.db_path == db_path
+                && entry.patent_count == patent_count
+                && entry.max_rowid == max_rowid
+            {
+                return Ok(entry.payload.clone());
+            }
+        }
+    }
+
+    let counts = db.get_ipc_code_counts()?;
+    let payload = build_ipc_tree_payload(&counts);
+    {
+        let mut guard = ipc_tree_cache().lock().unwrap_or_else(|e| e.into_inner());
+        *guard = Some(IpcTreeCacheEntry {
+            db_ptr,
+            db_path,
+            patent_count,
+            max_rowid,
+            payload: payload.clone(),
+        });
+    }
+    Ok(payload)
+}
 
 /// IPC Section names (top level A-H)
 fn ipc_section_name(code: &str) -> &'static str {
@@ -149,11 +199,11 @@ fn build_ipc_tree_payload(code_counts: &[(String, usize)]) -> Value {
     })
 }
 
-/// GET /api/ipc/tree — build IPC tree from patents in database
+/// GET /api/ipc/tree — build IPC tree from patents in database (with watermark cache)
 pub async fn api_ipc_tree(State(s): State<AppState>) -> Json<Value> {
     let db = s.db.clone();
-    match tokio::task::spawn_blocking(move || db.get_ipc_code_counts()).await {
-        Ok(Ok(counts)) => Json(build_ipc_tree_payload(&counts)),
+    match tokio::task::spawn_blocking(move || load_or_build_ipc_tree(&db)).await {
+        Ok(Ok(payload)) => Json(payload),
         Ok(Err(e)) => Json(json!({"status":"error","message":e.to_string()})),
         Err(e) => Json(json!({"status":"error","message":format!("task join error: {e}")})),
     }
@@ -232,5 +282,43 @@ mod tests {
         let hits = db.search_by_ipc("F").expect("search F");
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0]["patent_number"], "CN990301A");
+    }
+
+    #[test]
+    fn ipc_tree_cache_hits_and_invalidates_on_insert() {
+        let db = Arc::new(Database::init(":memory:").expect("init db"));
+        db.insert_patent(&Patent {
+            id: "ipc-cache-1".into(),
+            patent_number: "CN990401A".into(),
+            title: "第一件热工专利".into(),
+            ipc_codes: r#"["F23D1/00"]"#.into(),
+            ..Default::default()
+        })
+        .expect("insert 1");
+
+        let first = load_or_build_ipc_tree(&db).expect("first build");
+        assert_eq!(first["total_codes"], 1);
+        let second = load_or_build_ipc_tree(&db).expect("cached hit");
+        assert_eq!(second["total_codes"], 1);
+
+        // 插入新专利后，watermark (count, max_rowid) 改变，缓存必须立刻失效并重算
+        db.insert_patent(&Patent {
+            id: "ipc-cache-2".into(),
+            patent_number: "CN990402A".into(),
+            title: "第二件医用氧舱专利".into(),
+            ipc_codes: r#"["A61G10/02"]"#.into(),
+            ..Default::default()
+        })
+        .expect("insert 2");
+
+        let third = load_or_build_ipc_tree(&db).expect("recomputed");
+        assert_eq!(third["total_codes"], 2);
+        let secs: Vec<&str> = third["sections"]
+            .as_array()
+            .expect("sections")
+            .iter()
+            .filter_map(|s| s["code"].as_str())
+            .collect();
+        assert_eq!(secs, vec!["A", "F"]);
     }
 }

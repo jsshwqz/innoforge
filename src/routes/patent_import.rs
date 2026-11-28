@@ -11,7 +11,7 @@ use axum::extract::{Multipart, State};
 use axum::response::Json;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Cursor, Read};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -24,6 +24,7 @@ const SETTING_SYNC_LIGHTWEIGHT: &str = "patent_sync_lightweight";
 const SETTING_SYNC_LAST_AT: &str = "patent_sync_last_at";
 const SETTING_SYNC_LAST_SUMMARY: &str = "patent_sync_last_summary";
 const SETTING_SYNC_MANIFEST: &str = "patent_sync_file_manifest";
+const SETTING_SYNC_AUTO_INTERVAL_MINS: &str = "patent_sync_auto_interval_mins";
 
 const MAX_TABLE_BYTES: usize = 30 * 1024 * 1024; // 30 MB（用于单文件内存解析：XLSX/DOC/ZIP 等）
 const MAX_STREAM_TABLE_BYTES: u64 = 250 * 1024 * 1024; // 250 MB（用于流式读取 JSONL/CSV/TSV）
@@ -65,6 +66,8 @@ pub struct SyncFolderRequest {
     pub force: bool,
     #[serde(default)]
     pub async_mode: bool,
+    #[serde(default)]
+    pub auto_interval_mins: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -172,8 +175,32 @@ enum SyncFileKind {
 
 type SyncFileEntry = (String, PathBuf, String, SyncFileKind);
 
-fn is_supported_table_ext(ext_lower: &str) -> bool {
-    matches!(ext_lower, "xlsx" | "csv" | "tsv" | "json" | "jsonl")
+pub(crate) fn table_ext_for_filename(filename: &str) -> Option<(&'static str, bool)> {
+    let lower = filename.to_ascii_lowercase();
+    if lower.ends_with(".jsonl.gz") {
+        return Some(("jsonl", true));
+    }
+    if lower.ends_with(".csv.gz") {
+        return Some(("csv", true));
+    }
+    if lower.ends_with(".tsv.gz") {
+        return Some(("tsv", true));
+    }
+    if lower.ends_with(".json.gz") {
+        return Some(("json", true));
+    }
+    let ext = Path::new(&lower)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    match ext {
+        "xlsx" => Some(("xlsx", false)),
+        "csv" => Some(("csv", false)),
+        "tsv" => Some(("tsv", false)),
+        "json" => Some(("json", false)),
+        "jsonl" => Some(("jsonl", false)),
+        _ => None,
+    }
 }
 
 fn is_supported_doc_ext(ext_lower: &str) -> bool {
@@ -188,7 +215,7 @@ fn is_supported_archive_ext(ext_lower: &str) -> bool {
 }
 
 fn classify_sync_ext(ext_lower: &str) -> Option<SyncFileKind> {
-    if is_supported_table_ext(ext_lower) {
+    if matches!(ext_lower, "xlsx" | "csv" | "tsv" | "json" | "jsonl") {
         Some(SyncFileKind::Table)
     } else if is_supported_doc_ext(ext_lower) {
         Some(SyncFileKind::Doc)
@@ -197,6 +224,71 @@ fn classify_sync_ext(ext_lower: &str) -> Option<SyncFileKind> {
     } else {
         None
     }
+}
+
+fn classify_sync_filename(filename: &str) -> Option<SyncFileKind> {
+    if table_ext_for_filename(filename).is_some() {
+        return Some(SyncFileKind::Table);
+    }
+    let ext = Path::new(filename)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    classify_sync_ext(&ext)
+}
+
+fn is_temp_download_filename(name: &str) -> bool {
+    if name.starts_with("~$") || name.starts_with('.') {
+        return true;
+    }
+    let lower = name.to_ascii_lowercase();
+    // 跳过采集器状态/清单/凭证与系统元信息 JSON（防止 STATUS_v2.json 秒级刷新反复触发自动同步，且绝不触碰凭证文件）
+    if lower.ends_with(".json")
+        && (lower.starts_with("status")
+            || lower.starts_with("manifest")
+            || lower.starts_with("ftp_accounts")
+            || lower.starts_with("innoforge-feed")
+            || lower.starts_with('_')
+            || matches!(
+                lower.as_str(),
+                "package.json"
+                    | "package-lock.json"
+                    | "tsconfig.json"
+                    | "config.json"
+                    | "settings.json"
+            ))
+    {
+        return true;
+    }
+    if [
+        ".part",
+        ".tmp",
+        ".temp",
+        ".crdownload",
+        ".downloading",
+        ".download",
+        ".aria2",
+        ".!qb",
+        ".!ut",
+        ".filepart",
+    ]
+    .iter()
+    .any(|suffix| lower.ends_with(suffix))
+    {
+        return true;
+    }
+    if let Some(ext) = lower.rsplit('.').next() {
+        let mut chars = ext.chars();
+        if chars.next() == Some('z')
+            && matches!(chars.next(), Some(c) if c.is_ascii_digit())
+            && matches!(chars.next(), Some(c) if c.is_ascii_digit())
+            && chars.next().is_none()
+        {
+            return true;
+        }
+    }
+    false
 }
 
 /// 清理用户粘贴路径两侧可能附带的引号与空白（例如 Windows「复制文件地址」产生的 `"F:\down\专利数据"`）
@@ -1062,23 +1154,41 @@ pub fn parse_patent_table_bytes(
     data: &[u8],
     options: &PatentTableImportOptions,
 ) -> Result<ParsedTableStats, String> {
-    let ext = Path::new(filename)
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_lowercase();
-    if !is_supported_table_ext(&ext) {
+    let Some((base_ext, is_gz)) = table_ext_for_filename(filename) else {
+        let ext = Path::new(filename)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
         return Err(format!(
-            "不支持的文件格式 `.{ext}`，请上传 .xlsx / .csv / .tsv / .json / .jsonl"
+            "不支持的文件格式 `.{ext}`，请上传 .xlsx / .csv / .tsv / .json / .jsonl（支持 .gz 压缩）"
         ));
-    }
+    };
 
-    let row_maps: Vec<HashMap<String, String>> = match ext.as_str() {
-        "xlsx" => matrix_to_row_maps(parse_xlsx_rows(data)?),
-        "csv" => matrix_to_row_maps(parse_delimited_rows(&decode_text_bytes(data), false)),
-        "tsv" => matrix_to_row_maps(parse_delimited_rows(&decode_text_bytes(data), true)),
+    let decompressed_owned: Vec<u8>;
+    let payload: &[u8] = if is_gz {
+        let mut decoder = flate2::read::GzDecoder::new(Cursor::new(data));
+        let mut buf = Vec::new();
+        decoder
+            .by_ref()
+            .take(MAX_ZIP_TOTAL_UNCOMPRESSED + 1)
+            .read_to_end(&mut buf)
+            .map_err(|e| format!("Gzip 解压失败: {e}"))?;
+        if buf.len() as u64 > MAX_ZIP_TOTAL_UNCOMPRESSED {
+            return Err("Gzip 解压后体积超过 100 MB 单文件安全上限，请改用目录流式同步".into());
+        }
+        decompressed_owned = buf;
+        &decompressed_owned
+    } else {
+        data
+    };
+
+    let row_maps: Vec<HashMap<String, String>> = match base_ext {
+        "xlsx" => matrix_to_row_maps(parse_xlsx_rows(payload)?),
+        "csv" => matrix_to_row_maps(parse_delimited_rows(&decode_text_bytes(payload), false)),
+        "tsv" => matrix_to_row_maps(parse_delimited_rows(&decode_text_bytes(payload), true)),
         "json" => {
-            let text = decode_text_bytes(data);
+            let text = decode_text_bytes(payload);
             let parsed: Value =
                 serde_json::from_str(&text).map_err(|e| format!("JSON 解析失败: {e}"))?;
             let items: Vec<Value> = if let Some(arr) = parsed.as_array() {
@@ -1095,7 +1205,7 @@ pub fn parse_patent_table_bytes(
             items.iter().filter_map(json_value_to_row_map).collect()
         }
         "jsonl" => {
-            let text = decode_text_bytes(data);
+            let text = decode_text_bytes(payload);
             text.lines()
                 .filter(|l| !l.trim().is_empty())
                 .filter_map(|line| serde_json::from_str::<Value>(line).ok())
@@ -1132,25 +1242,26 @@ pub fn parse_patent_table_bytes(
     })
 }
 
-/// 统一解析任意受支持的专利/文献文件字节（表格 `.xlsx/.csv/.tsv/.json/.jsonl`、全文文档 `.pdf/.ofd/.docx/.txt/.md/.xml/.html/.rtf/.tex`、压缩包 `.zip`）。
+/// 统一解析任意受支持的专利/文献文件字节（表格 `.xlsx/.csv/.tsv/.json/.jsonl/.jsonl.gz/.csv.gz`、全文文档 `.pdf/.ofd/.docx/.txt/.md/.xml/.html/.rtf/.tex`、压缩包 `.zip`）。
 pub fn parse_any_patent_bytes(
     filename: &str,
     data: &[u8],
     options: &PatentTableImportOptions,
 ) -> Result<ParsedTableStats, String> {
-    let ext = Path::new(filename)
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_lowercase();
-
-    match classify_sync_ext(&ext) {
+    match classify_sync_filename(filename) {
         Some(SyncFileKind::Table) => parse_patent_table_bytes(filename, data, options),
         Some(SyncFileKind::Doc) => parse_single_doc_bytes(filename, data, options),
         Some(SyncFileKind::Archive) => parse_zip_archive_bytes(filename, data, options),
-        None => Err(format!(
-            "不支持的文件格式 `.{ext}`，支持表格(.xlsx/.csv/.tsv/.json/.jsonl)、全文文档(.pdf/.ofd/.docx/.txt/.md/.xml)与压缩包(.zip)"
-        )),
+        None => {
+            let ext = Path::new(filename)
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_lowercase();
+            Err(format!(
+                "不支持的文件格式 `.{ext}`，支持表格(.xlsx/.csv/.tsv/.json/.jsonl/.gz)、全文文档(.pdf/.ofd/.docx/.txt/.md/.xml)与压缩包(.zip)"
+            ))
+        }
     }
 }
 
@@ -1522,16 +1633,28 @@ fn free_disk_mb_for_db(db: &crate::db::Database) -> Option<u64> {
     free_disk_mb_for_path(&db_path)
 }
 
-fn should_skip_sync_dir(dir_name: &str) -> bool {
+pub(crate) fn should_skip_sync_dir(dir_name: &str) -> bool {
+    let lower = dir_name.to_ascii_lowercase();
     dir_name.starts_with('.')
+        || lower.starts_with("work_")
         || matches!(
-            dir_name,
-            "__MACOSX" | "node_modules" | "$RECYCLE.BIN" | "System Volume Information"
+            lower.as_str(),
+            "__macosx"
+                | "node_modules"
+                | "$recycle.bin"
+                | "system volume information"
+                | "__pycache__"
+                | "tmp"
+                | "_tmp"
+                | "temp"
         )
 }
 
-fn max_sync_file_bytes_for_ext(ext_lower: &str) -> u64 {
-    if matches!(ext_lower, "jsonl" | "csv" | "tsv") {
+fn max_sync_file_bytes_for_filename(filename: &str) -> u64 {
+    if matches!(
+        table_ext_for_filename(filename),
+        Some(("jsonl" | "csv" | "tsv", _))
+    ) {
         MAX_STREAM_TABLE_BYTES
     } else {
         MAX_TABLE_BYTES as u64
@@ -1566,23 +1689,18 @@ fn walk_syncable_files(
         if !path.is_file() {
             continue;
         }
-        // 跳过 Excel 临时锁文件（~$xxx.xlsx）与隐藏文件
-        if name.starts_with("~$") || name.starts_with('.') {
+        // 跳过 Excel 临时锁文件、隐藏文件与下载中未完结临时分卷（.part/.tmp/.crdownload/.z01 等）
+        if is_temp_download_filename(name) {
             continue;
         }
-        let ext = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("")
-            .to_lowercase();
-        let Some(kind) = classify_sync_ext(&ext) else {
+        let Some(kind) = classify_sync_filename(name) else {
             continue;
         };
         let meta = match entry.metadata() {
             Ok(m) => m,
             Err(_) => continue,
         };
-        if meta.len() == 0 || meta.len() > max_sync_file_bytes_for_ext(&ext) {
+        if meta.len() == 0 || meta.len() > max_sync_file_bytes_for_filename(name) {
             continue;
         }
         let mtime = meta
@@ -1609,28 +1727,43 @@ fn walk_syncable_files(
     Ok(())
 }
 
-/// 同目录下若同时存在同前缀的 `.csv` 与 `.jsonl`（如国知局 `BIBS-10-A_20260908.csv` + `.jsonl` 成对导出），
-/// 自动保留更适合流式解析的 `.jsonl` 并跳过重复的 `.csv`，立省 50% I/O 与写入耗时。
+/// 解析同前缀表格变体的词干与优先级：`.jsonl.gz` (4) > `.jsonl` (3) > `.csv.gz` (2) > `.csv` (1)。
+pub(crate) fn table_dedup_stem_and_rank(rel_path: &str) -> Option<(String, u8)> {
+    let lower = rel_path.to_ascii_lowercase();
+    if let Some(stem) = lower.strip_suffix(".jsonl.gz") {
+        Some((stem.to_string(), 4))
+    } else if let Some(stem) = lower.strip_suffix(".jsonl") {
+        Some((stem.to_string(), 3))
+    } else if let Some(stem) = lower.strip_suffix(".csv.gz") {
+        Some((stem.to_string(), 2))
+    } else {
+        lower.strip_suffix(".csv").map(|stem| (stem.to_string(), 1))
+    }
+}
+
+/// 同目录下若同时存在同前缀的 `.jsonl.gz` / `.jsonl` / `.csv.gz` / `.csv`（如国知局成对导出或压缩归档），
+/// 自动保留最高优先级的一份（`.jsonl.gz` > `.jsonl` > `.csv.gz` > `.csv`），立省 50%+ I/O 与写入耗时。
 fn dedup_sibling_table_pairs(files: Vec<SyncFileEntry>) -> (Vec<SyncFileEntry>, usize) {
-    let mut jsonl_stems: HashSet<String> = HashSet::new();
+    let mut best_rank: HashMap<String, u8> = HashMap::new();
     for (rel, _, _, kind) in &files {
         if *kind == SyncFileKind::Table {
-            let lower = rel.to_lowercase();
-            if let Some(stem) = lower.strip_suffix(".jsonl") {
-                jsonl_stems.insert(stem.to_string());
+            if let Some((stem, rank)) = table_dedup_stem_and_rank(rel) {
+                let entry = best_rank.entry(stem).or_insert(0);
+                if rank > *entry {
+                    *entry = rank;
+                }
             }
         }
     }
-    if jsonl_stems.is_empty() {
+    if best_rank.is_empty() {
         return (files, 0);
     }
     let mut kept = Vec::with_capacity(files.len());
     let mut deduped = 0usize;
     for item in files {
-        let lower = item.0.to_lowercase();
         if item.3 == SyncFileKind::Table {
-            if let Some(stem) = lower.strip_suffix(".csv") {
-                if jsonl_stems.contains(stem) {
+            if let Some((stem, rank)) = table_dedup_stem_and_rank(&item.0) {
+                if best_rank.get(&stem).is_some_and(|best| rank < *best) {
                     deduped += 1;
                     continue;
                 }
@@ -1655,25 +1788,23 @@ fn list_syncable_files_recursive(dir: &Path) -> Result<Vec<SyncFileEntry>, Strin
     list_syncable_files_recursive_dedup(dir).map(|(files, _)| files)
 }
 
-struct StreamFileSyncOutcome {
-    imported: usize,
-    filtered_out: usize,
-    chunks: usize,
-    sample_numbers: Vec<String>,
-    cancelled: bool,
-    disk_low_mb: Option<u64>,
+pub(crate) struct StreamFileSyncOutcome {
+    pub(crate) imported: usize,
+    pub(crate) filtered_out: usize,
+    pub(crate) chunks: usize,
+    pub(crate) sample_numbers: Vec<String>,
+    pub(crate) cancelled: bool,
+    pub(crate) disk_low_mb: Option<u64>,
 }
 
-/// 逐行流式解析并分段提交 `.jsonl` 专利公报（每 2,000 行提交一次小事务，内存占用 < 10 MB，实时响应取消与磁盘守卫）。
-fn sync_stream_jsonl_file(
+/// 通用逐行 JSONL 流式写入器（本地 `.jsonl` / `.jsonl.gz` 与远端 WebDAV / HTTP 流共享同一低内存引擎）。
+pub(crate) fn sync_stream_jsonl_reader<R: BufRead>(
     db: &crate::db::Database,
-    path: &Path,
+    reader: R,
     options: &PatentTableImportOptions,
     cancel: &AtomicBool,
     mut on_batch: impl FnMut(usize, usize, usize, &[String]),
 ) -> Result<StreamFileSyncOutcome, String> {
-    let file = std::fs::File::open(path).map_err(|e| format!("打开文件失败: {e}"))?;
-    let reader = BufReader::with_capacity(128 * 1024, file);
     let prefixes = parse_ipc_prefixes(&options.ipc_prefix);
 
     let mut buf: Vec<Patent> = Vec::with_capacity(STREAM_BATCH_ROWS);
@@ -1805,6 +1936,30 @@ fn sync_stream_jsonl_file(
     })
 }
 
+/// 逐行流式解析并分段提交 `.jsonl` / `.jsonl.gz` 专利公报（每 500 行分段提交，内存占用 < 10 MB，实时响应取消与磁盘守卫）。
+fn sync_stream_jsonl_file(
+    db: &crate::db::Database,
+    path: &Path,
+    options: &PatentTableImportOptions,
+    cancel: &AtomicBool,
+    on_batch: impl FnMut(usize, usize, usize, &[String]),
+) -> Result<StreamFileSyncOutcome, String> {
+    let file = std::fs::File::open(path).map_err(|e| format!("打开文件失败: {e}"))?;
+    let lower = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if lower.ends_with(".jsonl.gz") {
+        let decoder = flate2::read::GzDecoder::new(file);
+        let reader = BufReader::with_capacity(128 * 1024, decoder);
+        sync_stream_jsonl_reader(db, reader, options, cancel, on_batch)
+    } else {
+        let reader = BufReader::with_capacity(128 * 1024, file);
+        sync_stream_jsonl_reader(db, reader, options, cancel, on_batch)
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn execute_folder_sync_worker(
     db: Arc<crate::db::Database>,
@@ -1918,13 +2073,9 @@ fn execute_folder_sync_worker(
             continue;
         }
 
-        let ext_lower = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("")
-            .to_lowercase();
+        let is_stream_jsonl = matches!(table_ext_for_filename(name), Some(("jsonl", _)));
 
-        if ext_lower == "jsonl" {
+        if is_stream_jsonl {
             let mut batch_imp_acc = total_imported;
             let mut batch_flt_acc = total_filtered;
             let mut batch_chk_acc = total_chunks;
@@ -1992,16 +2143,30 @@ fn execute_folder_sync_worker(
                     });
                 }
                 Err(e) => {
-                    let msg = format!("{name}: {e}");
-                    errors.push(msg.clone());
-                    details.push(FileSyncResult {
-                        filename: name.clone(),
-                        status: "error".to_string(),
-                        imported: 0,
-                        filtered_out: 0,
-                        chunks: 0,
-                        message: msg,
-                    });
+                    // 未下载完的 ZIP 压缩包缺少中央目录（EOCD），不记入 manifest 且温和跳过，待下轮完结后自动补导
+                    let is_incomplete_zip = name.to_ascii_lowercase().ends_with(".zip")
+                        && e.contains("Could not find EOCD");
+                    if is_incomplete_zip {
+                        details.push(FileSyncResult {
+                            filename: name.clone(),
+                            status: "skipped_incomplete".to_string(),
+                            imported: 0,
+                            filtered_out: 0,
+                            chunks: 0,
+                            message: "下载中未完结 ZIP，已跳过待下次自动补导".to_string(),
+                        });
+                    } else {
+                        let msg = format!("{name}: {e}");
+                        errors.push(msg.clone());
+                        details.push(FileSyncResult {
+                            filename: name.clone(),
+                            status: "error".to_string(),
+                            imported: 0,
+                            filtered_out: 0,
+                            chunks: 0,
+                            message: msg,
+                        });
+                    }
                 }
             }
         } else {
@@ -2090,16 +2255,30 @@ fn execute_folder_sync_worker(
                     }
                 }
                 Err(e) => {
-                    let msg = format!("{name}: {e}");
-                    errors.push(msg.clone());
-                    details.push(FileSyncResult {
-                        filename: name.clone(),
-                        status: "error".to_string(),
-                        imported: 0,
-                        filtered_out: 0,
-                        chunks: 0,
-                        message: msg,
-                    });
+                    // 未下载完的 ZIP 压缩包缺少中央目录（EOCD），不记入 manifest 且温和跳过，待下轮完结后自动补导
+                    let is_incomplete_zip = name.to_ascii_lowercase().ends_with(".zip")
+                        && e.contains("Could not find EOCD");
+                    if is_incomplete_zip {
+                        details.push(FileSyncResult {
+                            filename: name.clone(),
+                            status: "skipped_incomplete".to_string(),
+                            imported: 0,
+                            filtered_out: 0,
+                            chunks: 0,
+                            message: "下载中未完结 ZIP，已跳过待下次自动补导".to_string(),
+                        });
+                    } else {
+                        let msg = format!("{name}: {e}");
+                        errors.push(msg.clone());
+                        details.push(FileSyncResult {
+                            filename: name.clone(),
+                            status: "error".to_string(),
+                            imported: 0,
+                            filtered_out: 0,
+                            chunks: 0,
+                            message: msg,
+                        });
+                    }
                 }
             }
         }
@@ -2217,6 +2396,227 @@ fn execute_folder_sync_worker(
     }))
 }
 
+fn normalize_auto_interval_mins(raw: u64) -> u64 {
+    if raw == 0 {
+        0
+    } else {
+        raw.clamp(5, 1440)
+    }
+}
+
+/// 读取采集脚本在同步目录（或其父目录，当用户指向 `headers_v2` 子目录时）生成的 `STATUS_v2.json` 脱敏进度摘要。
+/// 严格只返回数值与布尔状态，绝不回传 PID、账号名、FTP 节点地址或本地私有路径。
+fn read_collector_status_summary(dir: &Path) -> Option<Value> {
+    let direct = dir.join("STATUS_v2.json");
+    let candidate = if direct.is_file() {
+        direct
+    } else {
+        let dir_name = dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if dir_name.starts_with("headers") {
+            let parent_status = dir.parent()?.join("STATUS_v2.json");
+            if parent_status.is_file() {
+                parent_status
+            } else {
+                return None;
+            }
+        } else {
+            return None;
+        }
+    };
+
+    let meta = std::fs::metadata(&candidate).ok()?;
+    if meta.len() == 0 || meta.len() > 65_536 {
+        return None;
+    }
+    let raw = std::fs::read_to_string(&candidate).ok()?;
+    let val: Value = serde_json::from_str(&raw).ok()?;
+    let obj = val.as_object()?;
+    let total_tasks = obj.get("total_tasks").and_then(Value::as_u64).unwrap_or(0);
+    if total_tasks == 0 && obj.get("extracted_rows").is_none() {
+        return None;
+    }
+    let active_count = obj
+        .get("active")
+        .and_then(Value::as_object)
+        .map(|m| m.len())
+        .unwrap_or(0);
+
+    Some(json!({
+        "running": obj.get("running").and_then(Value::as_bool).unwrap_or(false),
+        "done": obj.get("done").and_then(Value::as_u64).unwrap_or(0),
+        "total_tasks": total_tasks,
+        "failed": obj.get("failed").and_then(Value::as_u64).unwrap_or(0),
+        "extracted_rows": obj.get("extracted_rows").and_then(Value::as_u64).unwrap_or(0),
+        "total_speed_kbps": obj.get("total_speed_kbps").and_then(Value::as_f64).unwrap_or(0.0),
+        "free_disk_gb": obj.get("free_disk_gb").and_then(Value::as_f64),
+        "active_count": active_count,
+        "updated_at": obj.get("updated_at").and_then(Value::as_str).unwrap_or(""),
+    }))
+}
+
+/// 快速比对目录中是否存在未入库或已更新的文件（仅查 metadata + manifest，无新文件时零写库开销）。
+fn count_pending_sync_files(
+    db: &crate::db::Database,
+    dir: &Path,
+    ipc_prefix: &str,
+    lightweight: bool,
+) -> usize {
+    let Ok((files, _)) = list_syncable_files_recursive_dedup(dir) else {
+        return 0;
+    };
+    if files.is_empty() {
+        return 0;
+    }
+    let prev_manifest_raw = db
+        .get_setting(SETTING_SYNC_MANIFEST)
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let manifest: HashMap<String, String> =
+        serde_json::from_str(&prev_manifest_raw).unwrap_or_default();
+    files
+        .iter()
+        .filter(|(name, _, sig, _)| {
+            let key = format!("{}|{}|{}", name, ipc_prefix, lightweight);
+            !manifest.get(&key).is_some_and(|old| old == sig)
+        })
+        .count()
+}
+
+/// 启动后台定时增量同步巡检循环（仅当用户显式开启 `patent_sync_auto_interval_mins > 0` 且有新完结文件时触发）。
+pub fn spawn_folder_auto_sync_loop(db: Arc<crate::db::Database>) {
+    tokio::spawn(async move {
+        // 服务刚启动时等待 45 秒，避免抢占首屏加载与初始化资源
+        tokio::time::sleep(std::time::Duration::from_secs(45)).await;
+        let mut last_attempt: Option<Instant> = None;
+
+        loop {
+            let db_check = db.clone();
+            let cfg_res = tokio::task::spawn_blocking(move || {
+                let interval_mins = db_check
+                    .get_setting(SETTING_SYNC_AUTO_INTERVAL_MINS)
+                    .ok()
+                    .flatten()
+                    .and_then(|v| v.trim().parse::<u64>().ok())
+                    .map(normalize_auto_interval_mins)
+                    .unwrap_or(0);
+                let folder = db_check
+                    .get_setting(SETTING_SYNC_FOLDER)
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default();
+                let ipc_prefix = db_check
+                    .get_setting(SETTING_SYNC_IPC_PREFIX)
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default();
+                let lightweight = db_check
+                    .get_setting(SETTING_SYNC_LIGHTWEIGHT)
+                    .ok()
+                    .flatten()
+                    .is_some_and(|v| v == "1" || v == "true");
+                (interval_mins, folder, ipc_prefix, lightweight)
+            })
+            .await;
+
+            if let Ok((interval_mins, folder_raw, ipc_prefix, lightweight)) = cfg_res {
+                let folder_trimmed = clean_folder_path_input(&folder_raw);
+                let due = interval_mins > 0
+                    && !folder_trimmed.is_empty()
+                    && last_attempt
+                        .map(|t| t.elapsed().as_secs() >= interval_mins.saturating_mul(60))
+                        .unwrap_or(true);
+
+                if due {
+                    last_attempt = Some(Instant::now());
+                    let db_probe = db.clone();
+                    let folder_probe = folder_trimmed.clone();
+                    let ipc_probe = ipc_prefix.clone();
+
+                    let should_run = tokio::task::spawn_blocking(move || {
+                        let (dir, resolved) = resolve_local_folder_path(&folder_probe);
+                        if !dir.is_dir() {
+                            return None;
+                        }
+                        if let Some(free_mb) = free_disk_mb_for_db(&db_probe) {
+                            if free_mb < MIN_FREE_DISK_MB {
+                                return None;
+                            }
+                        }
+                        let pending =
+                            count_pending_sync_files(&db_probe, &dir, &ipc_probe, lightweight);
+                        if pending > 0 {
+                            Some((dir, resolved, pending))
+                        } else {
+                            None
+                        }
+                    })
+                    .await
+                    .ok()
+                    .flatten();
+
+                    if let Some((dir, resolved_path, pending)) = should_run {
+                        let maybe_cancel = {
+                            let mut guard =
+                                sync_manager().lock().unwrap_or_else(|e| e.into_inner());
+                            if guard.snapshot.state == "running" {
+                                None
+                            } else {
+                                let new_cancel = Arc::new(AtomicBool::new(false));
+                                guard.cancel_flag = new_cancel.clone();
+                                guard.snapshot = FolderSyncJobSnapshot {
+                                    state: "running".to_string(),
+                                    folder_path: folder_trimmed.clone(),
+                                    resolved_path: resolved_path.clone(),
+                                    free_disk_mb: free_disk_mb_for_db(&db),
+                                    ..Default::default()
+                                };
+                                Some(new_cancel)
+                            }
+                        };
+
+                        if let Some(cancel_flag) = maybe_cancel {
+                            tracing::info!(
+                                "自动增量同步检测到 {} 个新增/变更文件，开始后台同步: {}",
+                                pending,
+                                folder_trimmed
+                            );
+                            let db_run = db.clone();
+                            let folder_bg = folder_trimmed.clone();
+                            tokio::task::spawn_blocking(move || {
+                                if let Err(err) = execute_folder_sync_worker(
+                                    db_run,
+                                    dir,
+                                    folder_bg,
+                                    resolved_path,
+                                    ipc_prefix,
+                                    lightweight,
+                                    false,
+                                    cancel_flag,
+                                    true,
+                                ) {
+                                    update_sync_snapshot(|snap| {
+                                        snap.state = "error".to_string();
+                                        snap.current_file.clear();
+                                        snap.errors.push(err.clone());
+                                        snap.summary = format!("自动同步失败: {err}");
+                                    });
+                                }
+                            });
+                        }
+                    }
+                }
+            }
+
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        }
+    });
+}
+
 /// GET `/api/patents/sync-folder` — 获取当前已配置的本地/网盘专利同步目录状态（含后台任务实时快照）
 pub async fn api_get_patent_sync_folder(State(s): State<AppState>) -> Json<Value> {
     let folder_path =
@@ -2244,6 +2644,13 @@ pub async fn api_get_patent_sync_folder(State(s): State<AppState>) -> Json<Value
             .ok()
             .flatten()
             .unwrap_or_default();
+    let auto_interval_mins =
+        s.db.get_setting(SETTING_SYNC_AUTO_INTERVAL_MINS)
+            .ok()
+            .flatten()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .map(normalize_auto_interval_mins)
+            .unwrap_or(0);
 
     let folder_for_scan = folder_path.clone();
     let db_path_for_disk = s.db.main_db_file_path();
@@ -2256,10 +2663,13 @@ pub async fn api_get_patent_sync_folder(State(s): State<AppState>) -> Json<Value
         archive_files,
         resolved_path,
         free_disk_mb,
+        collector_status,
     ) = tokio::task::spawn_blocking(move || {
         let free_mb = db_path_for_disk.as_deref().and_then(free_disk_mb_for_path);
         if folder_for_scan.trim().is_empty() {
-            return (false, 0usize, 0usize, 0usize, 0usize, 0usize, None, free_mb);
+            return (
+                false, 0usize, 0usize, 0usize, 0usize, 0usize, None, free_mb, None,
+            );
         }
         let (p, mapped) = resolve_local_folder_path(&folder_for_scan);
         if p.is_dir() {
@@ -2267,13 +2677,24 @@ pub async fn api_get_patent_sync_folder(State(s): State<AppState>) -> Json<Value
             let t = list.iter().filter(|f| f.3 == SyncFileKind::Table).count();
             let d = list.iter().filter(|f| f.3 == SyncFileKind::Doc).count();
             let a = list.iter().filter(|f| f.3 == SyncFileKind::Archive).count();
-            (true, list.len(), deduped, t, d, a, mapped, free_mb)
+            let collector = read_collector_status_summary(&p);
+            (
+                true,
+                list.len(),
+                deduped,
+                t,
+                d,
+                a,
+                mapped,
+                free_mb,
+                collector,
+            )
         } else {
-            (false, 0, 0, 0, 0, 0, mapped, free_mb)
+            (false, 0, 0, 0, 0, 0, mapped, free_mb, None)
         }
     })
     .await
-    .unwrap_or((false, 0, 0, 0, 0, 0, None, None));
+    .unwrap_or((false, 0, 0, 0, 0, 0, None, None, None));
 
     Json(json!({
         "status": "ok",
@@ -2281,6 +2702,7 @@ pub async fn api_get_patent_sync_folder(State(s): State<AppState>) -> Json<Value
         "resolved_path": resolved_path,
         "ipc_prefix": ipc_prefix,
         "lightweight": lightweight,
+        "auto_interval_mins": auto_interval_mins,
         "exists": exists,
         "detected_files": detected_files,
         "deduped_pair_files": deduped_pair_files,
@@ -2288,6 +2710,7 @@ pub async fn api_get_patent_sync_folder(State(s): State<AppState>) -> Json<Value
         "doc_files": doc_files,
         "archive_files": archive_files,
         "free_disk_mb": free_disk_mb,
+        "collector_status": collector_status,
         "last_at": last_at,
         "last_summary": last_summary,
         "job": current_sync_snapshot()
@@ -2365,11 +2788,28 @@ pub async fn api_sync_patent_folder(
     }
 
     let lw_flag = if req.lightweight { "1" } else { "0" };
-    if let Err(e) = s.db.set_settings_batch(&[
-        (SETTING_SYNC_FOLDER, &folder_trimmed),
-        (SETTING_SYNC_IPC_PREFIX, &validated_ipc),
-        (SETTING_SYNC_LIGHTWEIGHT, lw_flag),
-    ]) {
+    let mut settings_to_save: Vec<(&str, String)> = vec![
+        (SETTING_SYNC_FOLDER, folder_trimmed.clone()),
+        (SETTING_SYNC_IPC_PREFIX, validated_ipc.clone()),
+        (SETTING_SYNC_LIGHTWEIGHT, lw_flag.to_string()),
+    ];
+    let effective_auto_mins = if let Some(raw_mins) = req.auto_interval_mins {
+        let norm = normalize_auto_interval_mins(raw_mins);
+        settings_to_save.push((SETTING_SYNC_AUTO_INTERVAL_MINS, norm.to_string()));
+        norm
+    } else {
+        s.db.get_setting(SETTING_SYNC_AUTO_INTERVAL_MINS)
+            .ok()
+            .flatten()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .map(normalize_auto_interval_mins)
+            .unwrap_or(0)
+    };
+    let batch_refs: Vec<(&str, &str)> = settings_to_save
+        .iter()
+        .map(|(k, v)| (*k, v.as_str()))
+        .collect();
+    if let Err(e) = s.db.set_settings_batch(&batch_refs) {
         return Json(json!({
             "status": "error",
             "message": format!("保存同步目录配置失败: {e}")
@@ -2377,14 +2817,24 @@ pub async fn api_sync_patent_folder(
     }
 
     if req.save_only {
-        let (list, deduped) = list_syncable_files_recursive_dedup(&dir).unwrap_or_default();
+        let dir_for_scan = dir.clone();
+        let (list_len, deduped, collector) = tokio::task::spawn_blocking(move || {
+            let (list, deduped) =
+                list_syncable_files_recursive_dedup(&dir_for_scan).unwrap_or_default();
+            let collector = read_collector_status_summary(&dir_for_scan);
+            (list.len(), deduped, collector)
+        })
+        .await
+        .unwrap_or((0, 0, None));
         return Json(json!({
             "status": "ok",
             "folder_path": folder_trimmed,
             "resolved_path": resolved_path,
-            "detected_files": list.len(),
+            "auto_interval_mins": effective_auto_mins,
+            "detected_files": list_len,
             "deduped_pair_files": deduped,
             "free_disk_mb": free_disk_mb_for_db(&s.db),
+            "collector_status": collector,
             "saved_only": true
         }));
     }
@@ -2886,5 +3336,124 @@ CN118100002A,一种农业灌溉喷头,节水喷头结构,A01G25/02,某农机公�
         assert_eq!(out.imported, 1);
         assert_eq!(out.filtered_out, 1);
         assert_eq!(out.sample_numbers, vec!["CN990601A".to_string()]);
+    }
+
+    #[test]
+    fn sync_folder_skips_work_temp_dirs_and_supports_jsonl_gz_dedup() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        // 1) work_v2 临时下载目录内的半成品 ZIP 必须完全跳过
+        let work_dir = tmp.path().join("work_v2").join("10-B").join("20260714");
+        std::fs::create_dir_all(&work_dir).expect("mkdir work_v2");
+        std::fs::write(work_dir.join("20260714.zip"), b"partial zip without eocd")
+            .expect("write partial zip");
+        std::fs::write(work_dir.join("20260714.z01"), b"split volume").expect("write z01");
+
+        // 2) headers_v2 下同时存在 .csv / .jsonl / .jsonl.gz 及 .part 临时文件
+        let headers = tmp.path().join("headers_v2").join("2026Q3");
+        std::fs::create_dir_all(&headers).expect("mkdir headers");
+        std::fs::write(
+            headers.join("BIBS-10-A_20260728.csv"),
+            b"patent_number,title\n",
+        )
+        .expect("write csv");
+        std::fs::write(
+            headers.join("BIBS-10-A_20260728.jsonl"),
+            b"{\"patent_number\":\"CN990701A\",\"title\":\"raw\"}\n",
+        )
+        .expect("write jsonl");
+        std::fs::write(headers.join("downloading.jsonl.part"), b"{}").expect("write part");
+
+        // 写入真实的 gzip 压缩 .jsonl.gz
+        let gz_path = headers.join("BIBS-10-A_20260728.jsonl.gz");
+        {
+            let f = std::fs::File::create(&gz_path).expect("create gz");
+            let mut enc = flate2::write::GzEncoder::new(f, flate2::Compression::default());
+            enc.write_all(
+                concat!(
+                    "{\"patent_number\":\"CN990701A\",\"title\":\"高压氧舱安全阀\",\"ipc_codes\":\"A61G10/02\"}\n",
+                    "{\"patent_number\":\"CN990702A\",\"title\":\"手机壳装饰工艺\",\"ipc_codes\":\"A45C11/00\"}\n"
+                )
+                .as_bytes(),
+            )
+            .expect("write gz body");
+            enc.finish().expect("finish gz");
+        }
+
+        let (files, deduped) = list_syncable_files_recursive_dedup(tmp.path()).expect("list files");
+        assert_eq!(files.len(), 1, "应只保留最高优先级的 .jsonl.gz: {files:?}");
+        assert!(files[0].0.ends_with(".jsonl.gz"));
+        assert_eq!(deduped, 2, "同前缀 .csv 与 .jsonl 均应自动去重");
+
+        // 流式解析 .jsonl.gz + IPC 过滤
+        let db = Database::init(":memory:").expect("init db");
+        let opts = PatentTableImportOptions {
+            ipc_prefix: "A61".to_string(),
+            lightweight: true,
+            source_tag: "folder_sync".to_string(),
+        };
+        let cancel = AtomicBool::new(false);
+        let out = sync_stream_jsonl_file(&db, &gz_path, &opts, &cancel, |_, _, _, _| {})
+            .expect("stream gz");
+        assert_eq!(out.imported, 1);
+        assert_eq!(out.filtered_out, 1);
+        assert_eq!(out.sample_numbers, vec!["CN990701A".to_string()]);
+    }
+
+    #[test]
+    fn collector_status_summary_strips_sensitive_fields_and_tracks_pending_changes() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            tmp.path().join("STATUS_v2.json"),
+            r#"{
+              "running": true,
+              "pid": 99999,
+              "total_tasks": 881,
+              "done": 61,
+              "failed": 2,
+              "extracted_rows": 911459,
+              "total_speed_kbps": 960.6,
+              "free_disk_gb": 31.2,
+              "active": {"10-A:20260529": "20260529.zip via ftp1/secret_account"},
+              "updated_at": "2026-11-28T07:25:41"
+            }"#,
+        )
+        .expect("write status");
+
+        let summary = read_collector_status_summary(tmp.path()).expect("collector summary");
+        assert_eq!(summary["running"], true);
+        assert_eq!(summary["done"], 61);
+        assert_eq!(summary["total_tasks"], 881);
+        assert_eq!(summary["active_count"], 1);
+        let serialized = summary.to_string();
+        assert!(!serialized.contains("secret_account"));
+        assert!(!serialized.contains("99999"));
+
+        // 增量待同步检测
+        let db = Arc::new(Database::init(":memory:").expect("init db"));
+        std::fs::write(
+            tmp.path().join("batch1.jsonl"),
+            "{\"patent_number\":\"CN990801A\",\"title\":\"增量测试专利\",\"ipc_codes\":\"F23D1/00\"}\n",
+        )
+        .expect("write batch1");
+        assert_eq!(count_pending_sync_files(&db, tmp.path(), "", true), 1);
+
+        let cancel = Arc::new(AtomicBool::new(false));
+        let _ = execute_folder_sync_worker(
+            db.clone(),
+            tmp.path().to_path_buf(),
+            tmp.path().to_string_lossy().to_string(),
+            None,
+            String::new(),
+            true,
+            false,
+            cancel,
+            false,
+        )
+        .expect("sync batch1");
+        assert_eq!(
+            count_pending_sync_files(&db, tmp.path(), "", true),
+            0,
+            "已入库且未变更文件不应重复触发自动同步"
+        );
     }
 }

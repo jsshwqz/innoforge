@@ -177,13 +177,13 @@
 | 145 | GET | `/api/idea/:id/findings` | `id` | — | — | JSON（§145） | `routes::api_idea_findings` | `src/routes/idea_ops.rs:758` |
 | 146 | GET / POST | `/api/idea/:id/memory` | `id` | POST 任意 JSON（§146） | — | JSON（§146） | `routes::api_idea_memory`<br>`routes::api_idea_memory_add` | `src/routes/idea_ops.rs:769`<br>`src/routes/idea_ops.rs:790` |
 | 147 | DELETE | `/api/idea/:id/memory/:entry_id` | `id`, `entry_id` | — | — | JSON（§147） | `routes::api_idea_memory_delete` | `src/routes/idea_ops.rs:848` |
-| 148 | GET | `/api/ipc/tree` | — | — | — | JSON（§148） | `routes::api_ipc_tree` | `src/routes/ipc.rs:153` |
-| 149 | GET | `/api/ipc/:code/patents` | `code` | — | — | JSON（§149） | `routes::api_ipc_patents` | `src/routes/ipc.rs:163` |
+| 148 | GET | `/api/ipc/tree` | — | — | — | JSON（§148） | `routes::api_ipc_tree` | `src/routes/ipc.rs:203` |
+| 149 | GET | `/api/ipc/:code/patents` | `code` | — | — | JSON（§149） | `routes::api_ipc_patents` | `src/routes/ipc.rs:213` |
 | 150 | POST | `/api/patents/import` | — | `ImportRequest` | — | JSON（§150） | `routes::api_import_patents` | `src/routes/settings.rs:1065` |
-| 151 | POST | `/api/patents/import-table` | — | — | — | JSON（§151） | `routes::api_import_patent_table` | `src/routes/patent_import.rs:1306` |
-| 152 | GET / POST | `/api/patents/sync-folder` | — | `SyncFolderRequest` | — | JSON（§152） | `routes::api_get_patent_sync_folder`<br>`routes::api_sync_patent_folder` | `src/routes/patent_import.rs:2221`<br>`src/routes/patent_import.rs:2320` |
-| 153 | GET | `/api/patents/sync-folder/progress` | — | — | — | JSON（§153） | `routes::api_get_patent_sync_progress` | `src/routes/patent_import.rs:2298` |
-| 154 | POST | `/api/patents/sync-folder/cancel` | — | — | — | JSON（§154） | `routes::api_cancel_patent_sync` | `src/routes/patent_import.rs:2306` |
+| 151 | POST | `/api/patents/import-table` | — | — | — | JSON（§151） | `routes::api_import_patent_table` | `src/routes/patent_import.rs:1417` |
+| 152 | GET / POST | `/api/patents/sync-folder` | — | `SyncFolderRequest` | — | JSON（§152） | `routes::api_get_patent_sync_folder`<br>`routes::api_sync_patent_folder` | `src/routes/patent_import.rs:2621`<br>`src/routes/patent_import.rs:2743` |
+| 153 | GET | `/api/patents/sync-folder/progress` | — | — | — | JSON（§153） | `routes::api_get_patent_sync_progress` | `src/routes/patent_import.rs:2721` |
+| 154 | POST | `/api/patents/sync-folder/cancel` | — | — | — | JSON（§154） | `routes::api_cancel_patent_sync` | `src/routes/patent_import.rs:2729` |
 | 155 | POST | `/api/backup/export` | — | — | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_backup_export` | `src/routes/settings.rs:1777` |
 | 156 | POST | `/api/backup/check` | — | 任意 JSON（§156） | — | JSON（§156） | `routes::api_backup_check` | `src/routes/settings.rs:1838` |
 | 157 | GET / POST | `/api/collections` | — | POST 任意 JSON（§157） | — | JSON（§157） | `routes::api_list_collections`<br>`routes::api_create_collection` | `src/routes/collections.rs:28`<br>`src/routes/collections.rs:8` |
@@ -423,7 +423,7 @@
 
 使用该类型的端点：`/api/search`
 
-### `SyncFolderRequest`（请求体；定义于 `src/routes/patent_import.rs:56`）
+### `SyncFolderRequest`（请求体；定义于 `src/routes/patent_import.rs:57`）
 
 | 字段（JSON 名） | 类型 | 可省略 |
 | --- | --- | --- |
@@ -433,6 +433,7 @@
 | `save_only` | `bool` | 是 |
 | `force` | `bool` | 是 |
 | `async_mode` | `bool` | 是 |
+| `auto_interval_mins` | `Option<u64>` | 是 |
 
 使用该类型的端点：`/api/patents/sync-folder`
 
@@ -1381,13 +1382,13 @@
 
 ### §148 GET `/api/ipc/tree`
 
-- 源码：`src/routes/ipc.rs:153`
+- 源码：`src/routes/ipc.rs:203`
 - 响应顶层键：`message`、`status`
 - `status` 取值：error
 
 ### §149 GET `/api/ipc/:code/patents`
 
-- 源码：`src/routes/ipc.rs:163`
+- 源码：`src/routes/ipc.rs:213`
 - 响应顶层键：`code`、`count`、`message`、`patents`、`status`
 - `status` 取值：error / ok
 
@@ -1400,29 +1401,29 @@
 
 ### §151 POST `/api/patents/import-table`
 
-- 源码：`src/routes/patent_import.rs:1306`
+- 源码：`src/routes/patent_import.rs:1417`
 - 响应顶层键：`chunks`、`errors`、`filename`、`files_processed`、`filtered_out`、`imported`、`message`、`sample_numbers`、`skipped_empty`、`status`、`total_rows`
 - `status` 取值：error / ok
 
 ### §152 GET / POST `/api/patents/sync-folder`
 
-- **GET** `routes::api_get_patent_sync_folder`（`src/routes/patent_import.rs:2221`）
-  - 响应顶层键：`archive_files`、`deduped_pair_files`、`detected_files`、`doc_files`、`exists`、`folder_path`、`free_disk_mb`、`ipc_prefix`、`job`、`last_at`、`last_summary`、`lightweight`、`resolved_path`、`status`、`table_files`
+- **GET** `routes::api_get_patent_sync_folder`（`src/routes/patent_import.rs:2621`）
+  - 响应顶层键：`archive_files`、`auto_interval_mins`、`collector_status`、`deduped_pair_files`、`detected_files`、`doc_files`、`exists`、`folder_path`、`free_disk_mb`、`ipc_prefix`、`job`、`last_at`、`last_summary`、`lightweight`、`resolved_path`、`status`、`table_files`
   - `status` 取值：ok
-- **POST** `routes::api_sync_patent_folder`（`src/routes/patent_import.rs:2320`）
+- **POST** `routes::api_sync_patent_folder`（`src/routes/patent_import.rs:2743`）
   - 请求体：`SyncFolderRequest`（字段见上文类型表）
-  - 响应顶层键：`already_running`、`deduped_pair_files`、`detected_files`、`folder_path`、`free_disk_mb`、`job`、`message`、`resolved_path`、`saved_only`、`started`、`status`
+  - 响应顶层键：`already_running`、`auto_interval_mins`、`collector_status`、`deduped_pair_files`、`detected_files`、`folder_path`、`free_disk_mb`、`job`、`message`、`resolved_path`、`saved_only`、`started`、`status`
   - `status` 取值：error / ok
 
 ### §153 GET `/api/patents/sync-folder/progress`
 
-- 源码：`src/routes/patent_import.rs:2298`
+- 源码：`src/routes/patent_import.rs:2721`
 - 响应顶层键：`job`、`status`
 - `status` 取值：ok
 
 ### §154 POST `/api/patents/sync-folder/cancel`
 
-- 源码：`src/routes/patent_import.rs:2306`
+- 源码：`src/routes/patent_import.rs:2729`
 - 响应顶层键：`cancelling`、`job`、`status`
 - `status` 取值：ok
 

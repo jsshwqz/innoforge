@@ -870,6 +870,7 @@ dependencies = [
  "chrono",
  "dotenvy",
  "encoding_rs",
+ "flate2",
  "futures",
  "local-ip-address",
  "mime_guess",

@@ -1000,6 +1000,17 @@ impl super::Database {
         Ok(rows)
     }
 
+    /// 快速获取 `patents` 表行数与最大 `rowid` 水位（毫秒级，用于 IPC 分类树缓存失效校验）。
+    pub fn get_patent_table_watermark(&self) -> Result<(usize, i64)> {
+        let c = self.conn();
+        let (cnt, max_rowid): (i64, i64) = c.query_row(
+            "SELECT COUNT(*), COALESCE(MAX(rowid), 0) FROM patents",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        Ok((cnt.max(0) as usize, max_rowid))
+    }
+
     /// 按 `ipc_codes` 原始字符串分组统计数量，大幅减少大库向 Rust 侧搬运重复字符串的内存开销。
     pub fn get_ipc_code_counts(&self) -> Result<Vec<(String, usize)>> {
         let c = self.conn();

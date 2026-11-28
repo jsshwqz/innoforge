@@ -29,6 +29,11 @@ use tower_http::set_header::SetResponseHeaderLayer;
 #[folder = "static/"]
 pub struct StaticAssets;
 
+/// 启动后台定时增量同步巡检循环（由桌面入口 `main.rs` 在监听前调用）
+pub fn spawn_folder_auto_sync_loop(db: Arc<crate::db::Database>) {
+    crate::routes::spawn_folder_auto_sync_loop(db);
+}
+
 const DEFAULT_CORS_ORIGINS: [&str; 2] = ["http://127.0.0.1:3000", "http://localhost:3000"];
 
 /// Returns the local defaults plus explicitly configured, syntactically valid origins.
