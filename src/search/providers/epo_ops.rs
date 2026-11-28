@@ -564,8 +564,8 @@ impl EpoOpsProvider {
 
     /// 命中行 → `PatentSummary[]`（打分/放行/中文过滤/去重与两兄弟源共用
     /// [`rank_and_gate_hits`]，避免第二份实现）。
-    fn outcome_patents(
-        &self,
+    fn outcome_patents_with_db(
+        db: &Database,
         query: &SearchQuery,
         rows: Vec<serde_json::Value>,
     ) -> Vec<PatentSummary> {
@@ -574,7 +574,7 @@ impl EpoOpsProvider {
         // 三源的 q 语法各不相同，只有用户原词是同一把尺子，混进语法串只会污染相关性分。
         let keyword = query.keyword.trim();
         let mut patents = rank_and_gate_hits(
-            self.db.as_ref(),
+            db,
             SOURCE_LABEL,
             keyword,
             epo_wants_chinese_gate(query),
@@ -1097,7 +1097,11 @@ impl SearchProvider for EpoOpsProvider {
                 Err((kind, msg)) => (Vec::new(), None, AttemptStatus::Failed(kind), Some(msg)),
             };
             let patents = if matches!(status, AttemptStatus::Success) {
-                self.outcome_patents(&query, rows)
+                let db = self.db.clone();
+                let q = query.clone();
+                tokio::task::spawn_blocking(move || Self::outcome_patents_with_db(&db, &q, rows))
+                    .await
+                    .unwrap_or_default()
             } else {
                 Vec::new()
             };

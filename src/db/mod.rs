@@ -25,13 +25,26 @@ pub use oa::OaDiscussion;
 
 use anyhow::Result;
 use rusqlite::Connection;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
+
+/// 批量写库 RAII 守卫：持有期间标记 `Database::is_bulk_write_active() == true`，
+/// 使在线搜索缓存主动避让写锁，避免并发 `SQLITE_BUSY` 拖慢检索响应。
+pub(crate) struct BulkWriteGuard<'a>(&'a AtomicUsize);
+
+impl Drop for BulkWriteGuard<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Release);
+    }
+}
 
 /// 数据库实例 / Database instance
 pub struct Database {
     conn: Mutex<Connection>,
     /// 主库文件路径（`:memory:` 内存库为 `None`），供独立 WAL 批量写入连接与磁盘守卫无锁读取。
     db_path: Option<std::path::PathBuf>,
+    /// 正在进行的批量导库写任务计数（>0 时前台在线检索跳过同步落库缓存，零锁竞争）。
+    bulk_write_depth: AtomicUsize,
 }
 
 impl Database {
@@ -99,6 +112,7 @@ impl Database {
         Ok(Self {
             conn: Mutex::new(conn),
             db_path,
+            bulk_write_depth: AtomicUsize::new(0),
         })
     }
 
@@ -134,6 +148,41 @@ impl Database {
         let c = self.conn();
         let v: i64 = c.query_row("PRAGMA busy_timeout", [], |r| r.get(0))?;
         Ok(v)
+    }
+
+    /// 为大库高频只读查询（检索、IPC 聚合等）打开独立 SQLite WAL 只读连接：
+    /// 在 WAL 模式下读者之间、读者与写者之间 100% 并发不互斥，彻底避免慢查询占死全局 `self.conn` 互斥锁卡死全站。
+    /// 内存库（`:memory:`）返回 `None`，自动回退主连接。
+    pub(crate) fn open_concurrent_wal_reader(&self) -> Option<Connection> {
+        let path = self.db_path.as_deref()?;
+        let flags =
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX;
+        let conn = Connection::open_with_flags(path, flags).ok()?;
+        let _ = conn.execute_batch(
+            "PRAGMA query_only=ON; PRAGMA busy_timeout=15000; PRAGMA temp_store=MEMORY; PRAGMA cache_size=-16000;",
+        );
+        Some(conn)
+    }
+
+    /// 标记进入批量写库区间（返回 RAII 守卫，退出或 panic 时自动清除）。
+    pub(crate) fn begin_bulk_write(&self) -> BulkWriteGuard<'_> {
+        self.bulk_write_depth.fetch_add(1, Ordering::Acquire);
+        BulkWriteGuard(&self.bulk_write_depth)
+    }
+
+    /// 当前是否有后台大批量专利导入正在占用 SQLite 写锁。
+    pub fn is_bulk_write_active(&self) -> bool {
+        self.bulk_write_depth.load(Ordering::Acquire) > 0
+    }
+
+    /// 在文件库上优先走独立 WAL 并发只读连接执行只读闭包，内存库自动回退 `self.conn()`。
+    pub(crate) fn with_read_conn<T>(&self, f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
+        if let Some(conn) = self.open_concurrent_wal_reader() {
+            f(&conn)
+        } else {
+            let c = self.conn();
+            f(&c)
+        }
     }
 
     /// 使用 SQLite 原生 `VACUUM INTO` 生成一致热备份快照文件，返回文件大小（字节）。

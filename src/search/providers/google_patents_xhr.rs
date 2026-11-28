@@ -374,8 +374,8 @@ impl GooglePatentsXhrProvider {
 
     /// 命中行 → `PatentSummary[]`（打分/放行/中文过滤/去重走与 SerpAPI 共用的
     /// [`rank_and_gate_hits`]，避免第二份实现）。
-    fn outcome_patents(
-        &self,
+    fn outcome_patents_with_db(
+        db: &Database,
         query: &SearchQuery,
         rows: Vec<serde_json::Value>,
     ) -> Vec<PatentSummary> {
@@ -387,14 +387,8 @@ impl GooglePatentsXhrProvider {
             query.date_to.as_deref(),
         );
         let keyword = render_q(query);
-        let mut patents = rank_and_gate_hits(
-            self.db.as_ref(),
-            SOURCE_LABEL,
-            &keyword,
-            cn_query,
-            &rows,
-            xhr_to_patent,
-        );
+        let mut patents =
+            rank_and_gate_hits(db, SOURCE_LABEL, &keyword, cn_query, &rows, xhr_to_patent);
         // spec §2 未提供条数参数（存档证据亦无），故按 limit 做客户端截断（见 model.rs::limit 注释）。
         if query.limit > 0 && patents.len() > query.limit {
             patents.truncate(query.limit);
@@ -645,7 +639,11 @@ impl SearchProvider for GooglePatentsXhrProvider {
             };
 
             let patents = if matches!(status, AttemptStatus::Success) {
-                self.outcome_patents(&query, rows)
+                let db = self.db.clone();
+                let q = query.clone();
+                tokio::task::spawn_blocking(move || Self::outcome_patents_with_db(&db, &q, rows))
+                    .await
+                    .unwrap_or_default()
             } else {
                 Vec::new()
             };

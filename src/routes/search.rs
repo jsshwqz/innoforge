@@ -448,20 +448,35 @@ pub async fn api_search(
         .saturating_mul(page_size)
         .saturating_mul(4)
         .clamp(200, 600);
-    let (mut patents, raw_total, detected_type) = match s.db.search_smart_exact(
-        &req.query,
-        search_type.as_ref(),
-        req.country.as_deref(),
-        req.date_from.as_deref(),
-        req.date_to.as_deref(),
-        1,
-        fetch_window,
-        // MA4b：本地检索端点同享精确开关（false/缺省 = 旧 LIKE 行为逐字不变）
-        req.exact_assignee,
-    ) {
-        Ok((patents, total, search_type)) => (patents, total, search_type),
-        Err(e) => {
+    let db_local = s.db.clone();
+    let q_local = req.query.clone();
+    let st_local = search_type.clone();
+    let country_local = req.country.clone();
+    let df_local = req.date_from.clone();
+    let dt_local = req.date_to.clone();
+    let exact_local = req.exact_assignee;
+    let (mut patents, raw_total, detected_type) = match tokio::task::spawn_blocking(move || {
+        db_local.search_smart_exact(
+            &q_local,
+            st_local.as_ref(),
+            country_local.as_deref(),
+            df_local.as_deref(),
+            dt_local.as_deref(),
+            1,
+            fetch_window,
+            // MA4b：本地检索端点同享精确开关（false/缺省 = 旧 LIKE 行为逐字不变）
+            exact_local,
+        )
+    })
+    .await
+    {
+        Ok(Ok((patents, total, search_type))) => (patents, total, search_type),
+        Ok(Err(e)) => {
             tracing::error!("search_smart failed: {}", e);
+            (vec![], 0, SearchType::Mixed)
+        }
+        Err(e) => {
+            tracing::error!("search_smart task join failed: {}", e);
             (vec![], 0, SearchType::Mixed)
         }
     };
@@ -472,7 +487,12 @@ pub async fn api_search(
     if !ipc_filter.is_empty() || !cpc_filter.is_empty() {
         // Batch query to avoid N+1 (AGENTS.md 2.7)
         let ids: Vec<String> = patents.iter().map(|p| p.id.clone()).collect();
-        let full_patents = s.db.get_patents_by_ids(&ids).unwrap_or_default();
+        let db_ids = s.db.clone();
+        let full_patents = tokio::task::spawn_blocking(move || db_ids.get_patents_by_ids(&ids))
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .unwrap_or_default();
         let cache: std::collections::HashMap<String, crate::patent::Patent> = full_patents
             .into_iter()
             .map(|p| (p.id.clone(), p))
@@ -1391,14 +1411,24 @@ pub async fn api_search_online(
     // 三个在线源都没有可用结果时，回退本地数据库。
     // MA4a：本地兜底本身也是链上的一次尝试——记账与出参组装抽到 [`local_fallback_json`]，
     // 便于用内存库离线锁定形状（不经网络），出参各键逐字不变。
-    Json(local_fallback_json(
-        &s.db,
-        &req,
-        &online_search_type,
-        upstream_hint,
-        &mut outcome,
-        &cooled,
-    ))
+    let db_fb = s.db.clone();
+    let req_fb = req.clone();
+    let ost_fb = online_search_type.clone();
+    let cooled_fb = cooled.clone();
+    let mut outcome_fb = outcome;
+    let fallback_payload = tokio::task::spawn_blocking(move || {
+        local_fallback_json(
+            &db_fb,
+            &req_fb,
+            &ost_fb,
+            upstream_hint,
+            &mut outcome_fb,
+            &cooled_fb,
+        )
+    })
+    .await
+    .unwrap_or_else(|_| json!({ "patents": [], "total": 0, "page": 1, "page_size": 20 }));
+    Json(fallback_payload)
 }
 
 /// 队列 #1：Firecrawl 网页回退的出参组装（纯函数，离线可测）。
@@ -2383,11 +2413,16 @@ pub async fn api_search_omni(
         let local_en = ai_expanded_en.clone();
         let local_res = tokio::task::spawn_blocking(move || {
             let mut out = local_db
-                .search_fts(&local_q, 1, per_source_limit)
+                .search_smart(&local_q, None, None, None, None, 1, per_source_limit)
                 .ok()
-                .map(|(list, _)| list)
+                .map(|(list, _, _)| list)
                 .unwrap_or_default();
-            if out.is_empty() {
+            if out.is_empty()
+                && !matches!(
+                    local_db.detect_search_type(&local_q),
+                    SearchType::Applicant | SearchType::PatentNumber
+                )
+            {
                 if let Ok((like_list, _)) =
                     local_db.search_like(&local_q, None, None, None, 1, per_source_limit)
                 {
@@ -2442,12 +2477,18 @@ pub async fn api_search_omni(
         let local_q = query.to_string();
         let local_en = ai_expanded_en.clone();
         let local_fut = tokio::task::spawn_blocking(move || {
+            // 优先走 search_smart（公司名自动路由 applicant 倒排索引、专利号自动走规范号索引，避免公司名被 OR 拆成省份噪声）
             let mut out = local_db
-                .search_fts(&local_q, 1, per_source_limit)
+                .search_smart(&local_q, None, None, None, None, 1, per_source_limit)
                 .ok()
-                .map(|(list, _)| list)
+                .map(|(list, _, _)| list)
                 .unwrap_or_default();
-            if out.is_empty() {
+            if out.is_empty()
+                && !matches!(
+                    local_db.detect_search_type(&local_q),
+                    SearchType::Applicant | SearchType::PatentNumber
+                )
+            {
                 if let Ok((like_list, _)) =
                     local_db.search_like(&local_q, None, None, None, 1, per_source_limit)
                 {
@@ -2527,14 +2568,14 @@ pub async fn api_search_omni(
         };
 
         let (local_res, pat_res, oa_res, s2_res, bocha_list) = tokio::join!(
-            local_fut,
+            tokio::time::timeout(std::time::Duration::from_secs(8), local_fut),
             tokio::time::timeout(timeout_dur, patent_provider.search(patent_query)),
             tokio::time::timeout(timeout_dur, oa_p.search(academic_query.clone())),
             tokio::time::timeout(timeout_dur, s2_p.search(academic_query)),
             bocha_fut,
         );
 
-        if let Ok(Some(local_list)) = local_res {
+        if let Ok(Ok(Some(local_list))) = local_res {
             for item in local_list {
                 tagged_results.push((item, "local"));
             }
@@ -2683,18 +2724,27 @@ pub async fn api_search_stats(
     Json(req): Json<SearchRequest>,
 ) -> Json<serde_json::Value> {
     let search_type = parse_search_type(req.search_type.as_deref());
-    let all_results = match s.db.search_smart(
-        &req.query,
-        search_type.as_ref(),
-        req.country.as_deref(),
-        req.date_from.as_deref(),
-        req.date_to.as_deref(),
-        1,
-        10000,
-    ) {
-        Ok((p, _, _)) => p,
-        Err(_) => vec![],
-    };
+    let db = s.db.clone();
+    let query = req.query.clone();
+    let country = req.country.clone();
+    let date_from = req.date_from.clone();
+    let date_to = req.date_to.clone();
+    let all_results = tokio::task::spawn_blocking(move || {
+        match db.search_smart(
+            &query,
+            search_type.as_ref(),
+            country.as_deref(),
+            date_from.as_deref(),
+            date_to.as_deref(),
+            1,
+            10000,
+        ) {
+            Ok((p, _, _)) => p,
+            Err(_) => vec![],
+        }
+    })
+    .await
+    .unwrap_or_default();
 
     let mut applicant_counts: std::collections::HashMap<String, usize> =
         std::collections::HashMap::new();
@@ -2747,18 +2797,27 @@ pub async fn api_export_csv(
     Json(req): Json<SearchRequest>,
 ) -> axum::response::Response {
     let search_type = parse_search_type(req.search_type.as_deref());
-    let all_results = match s.db.search_smart(
-        &req.query,
-        search_type.as_ref(),
-        req.country.as_deref(),
-        req.date_from.as_deref(),
-        req.date_to.as_deref(),
-        1,
-        10000,
-    ) {
-        Ok((p, _, _)) => p,
-        Err(_) => vec![],
-    };
+    let db = s.db.clone();
+    let query = req.query.clone();
+    let country = req.country.clone();
+    let date_from = req.date_from.clone();
+    let date_to = req.date_to.clone();
+    let all_results = tokio::task::spawn_blocking(move || {
+        match db.search_smart(
+            &query,
+            search_type.as_ref(),
+            country.as_deref(),
+            date_from.as_deref(),
+            date_to.as_deref(),
+            1,
+            10000,
+        ) {
+            Ok((p, _, _)) => p,
+            Err(_) => vec![],
+        }
+    })
+    .await
+    .unwrap_or_default();
 
     let mut csv_data = String::from("专利号,标题,申请人,发明人,申请日,公开日,国家/地区,摘要\n");
     for p in all_results {
@@ -2798,18 +2857,27 @@ pub async fn api_export_xlsx(
     Json(req): Json<SearchRequest>,
 ) -> impl IntoResponse {
     let search_type = parse_search_type(req.search_type.as_deref());
-    let all_results = match s.db.search_smart(
-        &req.query,
-        search_type.as_ref(),
-        req.country.as_deref(),
-        req.date_from.as_deref(),
-        req.date_to.as_deref(),
-        1,
-        10000,
-    ) {
-        Ok((p, _, _)) => p,
-        Err(_) => vec![],
-    };
+    let db = s.db.clone();
+    let query = req.query.clone();
+    let country = req.country.clone();
+    let date_from = req.date_from.clone();
+    let date_to = req.date_to.clone();
+    let all_results = tokio::task::spawn_blocking(move || {
+        match db.search_smart(
+            &query,
+            search_type.as_ref(),
+            country.as_deref(),
+            date_from.as_deref(),
+            date_to.as_deref(),
+            1,
+            10000,
+        ) {
+            Ok((p, _, _)) => p,
+            Err(_) => vec![],
+        }
+    })
+    .await
+    .unwrap_or_default();
 
     let mut workbook = rust_xlsxwriter::Workbook::new();
     let sheet = workbook.add_worksheet();

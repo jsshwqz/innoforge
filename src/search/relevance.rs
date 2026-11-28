@@ -323,25 +323,57 @@ where
     F: Fn(&serde_json::Value) -> Patent,
 {
     let mut patents: Vec<PatentSummary> = Vec::new();
+    let mut skip_sync_cache = db.is_bulk_write_active();
+    if skip_sync_cache && !rows.is_empty() {
+        tracing::info!(
+            "Bulk DB import active; skipping synchronous cache writes for {} ({} rows) to keep search responsive",
+            source_label,
+            rows.len()
+        );
+    }
     for (idx, row) in rows.iter().enumerate() {
         let p = to_patent(row);
         if p.title.is_empty() {
             continue;
         }
-        let saved_id = db.insert_patent(&p).unwrap_or_else(|e| {
-            tracing::warn!(
-                "Failed to cache {} patent {}: {}",
-                source_label,
-                p.patent_number,
-                e
-            );
-            p.id.clone()
-        });
-        crate::db::vector::try_compute_and_save_embedding(
-            db,
-            &saved_id,
-            &format!("{} {}", p.title, p.abstract_text),
-        );
+        let saved_id = if skip_sync_cache {
+            // 后台批量导入占写锁期间走无锁 WAL 只读连接复用已有主键，彻底避免 10×15s 串行 SQLITE_BUSY 阻塞检索
+            if !p.patent_number.trim().is_empty() {
+                db.find_patent_by_number(&p.patent_number)
+                    .ok()
+                    .flatten()
+                    .map(|existing| existing.id)
+                    .unwrap_or_else(|| p.id.clone())
+            } else {
+                p.id.clone()
+            }
+        } else {
+            match db.insert_patent(&p) {
+                Ok(id) => {
+                    crate::db::vector::try_compute_and_save_embedding(
+                        db,
+                        &id,
+                        &format!("{} {}", p.title, p.abstract_text),
+                    );
+                    id
+                }
+                Err(e) => {
+                    let msg = e.to_string();
+                    tracing::warn!(
+                        "Failed to cache {} patent {}: {}",
+                        source_label,
+                        p.patent_number,
+                        msg
+                    );
+                    let lower = msg.to_lowercase();
+                    if lower.contains("locked") || lower.contains("busy") {
+                        // 遇 SQLITE_BUSY 立即熔断本批次剩余同步缓存，防止连续 N 条各空等 5s 拖垮全站
+                        skip_sync_cache = true;
+                    }
+                    p.id.clone()
+                }
+            }
+        };
         // Hybrid relevance: position + content matching
         let position_score = (98.0 - idx as f64 * 3.0).max(30.0);
         let content_score = calculate_online_relevance(
@@ -590,5 +622,32 @@ mod tests {
             !is_online_result_relevant(q, noise_title, noise_abs, score_noise, true, "zzz"),
             "无关噪声专利必须被拦截：score={score_noise}"
         );
+    }
+
+    #[test]
+    fn rank_and_gate_skips_sync_writes_when_bulk_import_active() {
+        let db = Database::init(":memory:").expect("init db");
+        let _guard = db.begin_bulk_write();
+        assert!(db.is_bulk_write_active());
+        let rows = vec![serde_json::json!({
+            "patent_number": "CN990992A",
+            "title": "一种绿色建材低碳胶凝材料",
+            "abstract": "绿色建材配方与制备工艺"
+        })];
+        let hits = rank_and_gate_hits(&db, "test_provider", "绿色建材", true, &rows, |row| {
+            Patent {
+                id: "ephemeral-1".into(),
+                patent_number: row["patent_number"].as_str().unwrap_or("").into(),
+                title: row["title"].as_str().unwrap_or("").into(),
+                abstract_text: row["abstract"].as_str().unwrap_or("").into(),
+                ..Default::default()
+            }
+        });
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].patent_number, "CN990992A");
+        // 批量写入期间不得抢占写锁写入缓存行
+        assert!(db.get_patent("CN990992A").expect("get").is_none());
+        drop(_guard);
+        assert!(!db.is_bulk_write_active());
     }
 }
