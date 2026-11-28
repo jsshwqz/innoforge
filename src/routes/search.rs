@@ -3089,21 +3089,48 @@ pub async fn api_search_expand_citations(
             }
         }
 
-        // 2. 在内存中构造 512 维专利 IDF 查询画像（查询词 + 前 6 篇种子专利标题/摘要）
+        // 2. 在内存中构造 512 维专利 IDF 三视角查询画像：
+        // - query_vec：用户原查询词（防多篇长摘要平均后稀释核心词，如「高压氧舱」被某篇种子的脑电/墙板摘要冲淡）
+        // - title_vec：前 6 篇种子专利标题聚合（高信噪比技术主体）
+        // - seed_vec：查询词 + 种子标题/摘要完整画像（捕捉摘要级技术细节）
         let mut profile_parts: Vec<String> = Vec::new();
+        let mut title_parts: Vec<String> = Vec::new();
         if !query_clone.is_empty() {
             profile_parts.push(query_clone.clone());
+            title_parts.push(query_clone.clone());
         }
         for p in seeds.iter().take(6) {
             if !p.title.trim().is_empty() {
                 profile_parts.push(p.title.clone());
+                title_parts.push(p.title.clone());
             }
             let abs_snip: String = p.abstract_text.chars().take(240).collect();
             if !abs_snip.trim().is_empty() {
                 profile_parts.push(abs_snip);
             }
         }
+        let query_vec = (!query_clone.is_empty())
+            .then(|| crate::db::vector::compute_tfidf_embedding(&query_clone));
+        let title_vec = crate::db::vector::compute_tfidf_embedding(&title_parts.join(" "));
         let seed_vec = crate::db::vector::compute_tfidf_embedding(&profile_parts.join(" "));
+        let compute_hybrid_sim = |title: &str, abstract_text: &str| -> f64 {
+            let cand_full =
+                crate::db::vector::compute_tfidf_embedding(&format!("{} {}", title, abstract_text));
+            let cand_title = crate::db::vector::compute_tfidf_embedding(title);
+            let sim_seed =
+                crate::db::vector::cosine_similarity(&seed_vec, &cand_full).max(0.0) as f64;
+            let sim_title =
+                crate::db::vector::cosine_similarity(&title_vec, &cand_title).max(0.0) as f64;
+            let sim_query = query_vec
+                .as_ref()
+                .map(|qv| {
+                    crate::db::vector::cosine_similarity(qv, &cand_full)
+                        .max(crate::db::vector::cosine_similarity(qv, &cand_title))
+                        .max(0.0) as f64
+                })
+                .unwrap_or(0.0);
+            sim_seed.max(sim_title * 0.95).max(sim_query)
+        };
 
         struct Candidate {
             id: String,
@@ -3200,12 +3227,7 @@ pub async fn api_search_expand_citations(
                     }
                     return;
                 }
-                let cand_vec = crate::db::vector::compute_tfidf_embedding(&format!(
-                    "{} {}",
-                    p.title, p.abstract_text
-                ));
-                let sim =
-                    crate::db::vector::cosine_similarity(&seed_vec, &cand_vec).max(0.0) as f64;
+                let sim = compute_hybrid_sim(&p.title, &p.abstract_text);
                 cands.insert(
                     dedup_key,
                     Candidate {
@@ -3296,7 +3318,14 @@ pub async fn api_search_expand_citations(
                 .then_with(|| b.1 .1.cmp(&a.1 .1))
                 .then_with(|| a.0.cmp(&b.0))
         });
-        let top_ipcs: Vec<String> = ipc_sorted.into_iter().take(2).map(|(k, _)| k).collect();
+        // 当存在跨种子共有核心 IPC（top_df >= 2）时，过滤掉仅出现于单篇种子的边缘辅助分类号（如 G06F18），防跨领域噪声与慢查询
+        let top_df = ipc_sorted.first().map(|(_, (df, _))| *df).unwrap_or(0);
+        let top_ipcs: Vec<String> = ipc_sorted
+            .into_iter()
+            .filter(|(_, (df, _))| top_df < 2 || *df >= 2)
+            .take(2)
+            .map(|(k, _)| k)
+            .collect();
 
         for ipc in &top_ipcs {
             if let Ok(ipc_rows) = db.search_by_ipc(ipc) {
@@ -3316,13 +3345,8 @@ pub async fn api_search_expand_citations(
                     if cands.contains_key(&dedup_key) {
                         continue;
                     }
-                    let cand_vec = crate::db::vector::compute_tfidf_embedding(&format!(
-                        "{} {}",
-                        title, abstract_text
-                    ));
-                    let sim =
-                        crate::db::vector::cosine_similarity(&seed_vec, &cand_vec).max(0.0) as f64;
-                    if sim < 0.12 {
+                    let sim = compute_hybrid_sim(&title, &abstract_text);
+                    if sim < 0.10 {
                         continue;
                     }
                     cands.insert(
@@ -3784,9 +3808,9 @@ mod search_dedup_pagination_tests {
             .map(|a| a.iter().filter_map(|v| v.as_str()).collect())
             .unwrap_or_default();
         assert_eq!(
-            top_ipcs.first().copied(),
-            Some("A61G10"),
-            "跨种子共有核心 IPC A61G10(DF=2) 必须排在单篇多细分 E04C2(DF=1) 之前: {top_ipcs:?}"
+            top_ipcs,
+            vec!["A61G10"],
+            "跨种子共有核心 IPC A61G10(DF=2) 必须独占核心列表并剔除单篇边缘 E04C2(DF=1): {top_ipcs:?}"
         );
     }
 }
