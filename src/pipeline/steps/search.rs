@@ -271,16 +271,138 @@ fn merge_unique_patent_hits(
     added
 }
 
+/// 执行本地一阶段 FTS 检索（同步逻辑，供 `spawn_blocking` 与离线单测共用），返回命中列表及供二阶段雪球补漏的种子 ID/专利号。
+fn collect_local_stage1_hits_sync(
+    db: &Database,
+    queries: &[String],
+) -> (Vec<PipelinePatentHit>, Vec<String>, Vec<String>) {
+    let mut hits = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut seed_ids: Vec<String> = Vec::new();
+    let mut seed_numbers: Vec<String> = Vec::new();
+
+    for query in queries {
+        let mut local_queries = vec![query.clone()];
+        let cjk_only: Vec<char> = query
+            .chars()
+            .filter(|c| (*c as u32) >= 0x4E00 && (*c as u32) <= 0x9FFF)
+            .collect();
+        if cjk_only.len() >= 4 {
+            let head_stem: String = cjk_only.iter().take(cjk_only.len() - 1).collect();
+            let mid_stem: String = cjk_only
+                .iter()
+                .skip(1)
+                .take(cjk_only.len().saturating_sub(2))
+                .collect();
+            if head_stem.chars().count() >= 3 && !local_queries.contains(&head_stem) {
+                local_queries.push(head_stem);
+            }
+            if mid_stem.chars().count() >= 3 && !local_queries.contains(&mid_stem) {
+                local_queries.push(mid_stem);
+            }
+        }
+        let mut hits_for_q = 0usize;
+        for lq in &local_queries {
+            if let Ok((local_results, _total, _detected)) =
+                db.search_smart(lq, Some(&SearchType::Mixed), None, None, None, 1, 20)
+            {
+                for p in local_results {
+                    let title_key = p.title.chars().take(20).collect::<String>().to_lowercase();
+                    if seen.contains(&title_key) {
+                        continue;
+                    }
+                    seen.insert(title_key);
+                    if !p.id.trim().is_empty() && seed_ids.len() < 12 && !seed_ids.contains(&p.id) {
+                        seed_ids.push(p.id.clone());
+                    }
+                    if !p.patent_number.trim().is_empty()
+                        && seed_numbers.len() < 16
+                        && !seed_numbers.contains(&p.patent_number)
+                    {
+                        seed_numbers.push(p.patent_number.clone());
+                    }
+                    hits.push(PipelinePatentHit {
+                        id: format!("patent_local_{}", p.patent_number),
+                        title: p.title,
+                        snippet: p.abstract_text,
+                        link: format!("https://patents.google.com/patent/{}", p.patent_number),
+                        source: "local_db".into(),
+                    });
+                    hits_for_q += 1;
+                }
+            }
+            if hits_for_q >= 5 {
+                break;
+            }
+        }
+    }
+
+    (hits, seed_ids, seed_numbers)
+}
+
+/// 将一阶段种子专利送入二阶段引文/同族/同IPC三视角语义补漏引擎，返回去重后的增量对比专利（零 API 成本、零磁盘膨胀）。
+fn collect_stage2_snowball_hits_sync(
+    db: &Database,
+    title: &str,
+    queries: &[String],
+    seed_ids: &[String],
+    seed_numbers: &[String],
+    limit: usize,
+) -> (
+    Vec<PipelinePatentHit>,
+    crate::routes::SnowballExpansionResult,
+) {
+    let snowball_query = if let Some(first_q) = queries.first() {
+        if title.trim().is_empty() || title.contains(first_q) {
+            title.to_string()
+        } else {
+            format!("{} {}", title, first_q)
+        }
+    } else {
+        title.to_string()
+    };
+    let snow = crate::routes::expand_citations_snowball_sync(
+        db,
+        &snowball_query,
+        seed_ids,
+        seed_numbers,
+        limit,
+    );
+    let hits: Vec<PipelinePatentHit> = snow
+        .patents
+        .iter()
+        .map(|hit| {
+            let pn = if hit.patent_number.trim().is_empty() {
+                hit.id.clone()
+            } else {
+                hit.patent_number.clone()
+            };
+            PipelinePatentHit {
+                id: format!("patent_snowball_{}", pn),
+                title: hit.title.clone(),
+                snippet: format!("[{}] {}", hit.relation_label, hit.abstract_text),
+                link: format!("https://patents.google.com/patent/{}", pn),
+                source: "local_snowball".into(),
+            }
+        })
+        .collect();
+    (hits, snow)
+}
+
 /// 执行 Step 4: 专利搜索
 ///
 /// MC1：改走 M-A 多源检索链（SourceChain），复用 SerpAPI + GooglePatentsXhr + EpoOps
-/// 三源并行发起、按优先级择胜的降级链。本地 DB FTS 兜底保留。
+/// 三源并行发起、按优先级择胜的降级链。本地 DB FTS 兜底保留，并在一阶段命中种子后自动触发
+/// 二阶段引文/同族/同IPC三视角语义补漏（复用 `routes::search::expand_citations_snowball_sync`）。
 pub async fn search_patents(
     ctx: &mut PipelineContext,
     serpapi_key: &str,
     db: &Arc<crate::db::Database>,
 ) -> Result<()> {
     let queries = select_patent_search_queries(ctx);
+    if queries.is_empty() {
+        return Ok(());
+    }
     let is_refill = ctx.auto_refill_rounds > 0 && !ctx.patent_results.is_empty();
 
     let mut all_results = if is_refill {
@@ -307,51 +429,15 @@ pub async fn search_patents(
     let mut batch_results = Vec::new();
     let mut batch_seen: HashSet<String> = HashSet::new();
 
-    // 本地数据库搜索（兜底，先跑保证有结果；若全词 FTS 命中不足 5 件且为中文长词，尝试去首尾字核心词干兼容单字笔误如“氧仓”→“氧舱”）
-    for query in &queries {
-        let mut local_queries = vec![query.clone()];
-        let cjk_only: Vec<char> = query
-            .chars()
-            .filter(|c| (*c as u32) >= 0x4E00 && (*c as u32) <= 0x9FFF)
-            .collect();
-        if cjk_only.len() >= 4 {
-            let head_stem: String = cjk_only.iter().take(cjk_only.len() - 1).collect();
-            let mid_stem: String = cjk_only
-                .iter()
-                .skip(1)
-                .take(cjk_only.len().saturating_sub(2))
-                .collect();
-            if head_stem.chars().count() >= 3 && !local_queries.contains(&head_stem) {
-                local_queries.push(head_stem);
-            }
-            if mid_stem.chars().count() >= 3 && !local_queries.contains(&mid_stem) {
-                local_queries.push(mid_stem);
-            }
-        }
-        let mut hits_for_q = 0usize;
-        for lq in &local_queries {
-            if let Ok((local_results, _total)) = db.search_fts(lq, 1, 20) {
-                for p in local_results {
-                    let title_key = p.title.chars().take(20).collect::<String>().to_lowercase();
-                    if batch_seen.contains(&title_key) {
-                        continue;
-                    }
-                    batch_seen.insert(title_key);
-                    batch_results.push(PipelinePatentHit {
-                        id: format!("patent_local_{}", p.patent_number),
-                        title: p.title,
-                        snippet: p.abstract_text,
-                        link: format!("https://patents.google.com/patent/{}", p.patent_number),
-                        source: "local_db".into(),
-                    });
-                    hits_for_q += 1;
-                }
-            }
-            if hits_for_q >= 5 {
-                break;
-            }
-        }
-    }
+    // 一阶段本地数据库搜索（放入 spawn_blocking，防止在 30 万+ 本地库上阻塞 Tokio 工作线程；同时收集二阶段雪球种子）
+    let db_local = db.clone();
+    let local_queries = queries.clone();
+    let (local_hits, seed_ids, mut seed_numbers) = tokio::task::spawn_blocking(move || {
+        collect_local_stage1_hits_sync(&db_local, &local_queries)
+    })
+    .await
+    .unwrap_or_default();
+    merge_unique_patent_hits(&mut batch_results, &mut batch_seen, local_hits);
 
     // MC1: 在线多源检索链（SourceChain）
     let serpapi_opt = if !serpapi_key.is_empty() && serpapi_key != "your-serpapi-key-here" {
@@ -388,6 +474,12 @@ pub async fn search_patents(
             let summaries = outcome.summaries();
 
             for summary in &summaries {
+                if !summary.patent_number.trim().is_empty()
+                    && seed_numbers.len() < 16
+                    && !seed_numbers.contains(&summary.patent_number)
+                {
+                    seed_numbers.push(summary.patent_number.clone());
+                }
                 let title_key = summary
                     .title
                     .chars()
@@ -407,6 +499,40 @@ pub async fn search_patents(
             // 如果本批已有足够结果，不再多查
             if batch_results.len() >= 30 {
                 break;
+            }
+        }
+    }
+
+    // 二阶段混合补漏：从本地 + 在线一阶段种子出发，沿引文网络 / 同族 / 同 IPC 语义邻域自动挖掘换表述隐蔽对比文件
+    if (!seed_ids.is_empty() || !seed_numbers.is_empty()) && batch_results.len() < 30 {
+        let snowball_limit = (30 - batch_results.len()).min(10);
+        let db_snow = db.clone();
+        let title_owned = ctx.title.clone();
+        let queries_owned = queries.clone();
+        if let Ok((snow_hits, snow_meta)) = tokio::task::spawn_blocking(move || {
+            collect_stage2_snowball_hits_sync(
+                &db_snow,
+                &title_owned,
+                &queries_owned,
+                &seed_ids,
+                &seed_numbers,
+                snowball_limit,
+            )
+        })
+        .await
+        {
+            let added = merge_unique_patent_hits(&mut batch_results, &mut batch_seen, snow_hits);
+            if added > 0 {
+                tracing::info!(
+                    "[IDEA-SNOWBALL] seeds={} top_ipcs={:?} added={} (back={} fwd={} fam={} co_ipc={})",
+                    snow_meta.seed_count,
+                    snow_meta.top_ipcs,
+                    added,
+                    snow_meta.backward_citation,
+                    snow_meta.forward_citation,
+                    snow_meta.patent_family,
+                    snow_meta.co_ipc_semantic,
+                );
             }
         }
     }
@@ -469,5 +595,88 @@ mod tests {
         // quick_mode / 未执行 ExpandQuery 时 expanded_queries 为空，必须保持返回空集
         let empty_ctx = PipelineContext::new("id-3", "相变储热散热底座", "描述");
         assert!(select_patent_search_queries(&empty_ctx).is_empty());
+    }
+
+    #[test]
+    fn local_stage1_plus_stage2_snowball_recalls_non_lexical_cited_and_co_ipc_patents() {
+        let db = Database::init(":memory:").expect("init in-memory db");
+        let seed = crate::patent::Patent {
+            id: "idea-seed-1".into(),
+            patent_number: "CN990701A".into(),
+            title: "便携式医用高压氧舱智能供氧稳压系统".into(),
+            abstract_text: "涉及医用加压供氧舱体结构、呼吸压力闭环调控与安全泄压阀。".into(),
+            ipc_codes: "[\"A61G 10/02\"]".into(),
+            citations: "[\"CN990702A\"]".into(),
+            country: "CN".into(),
+            filing_date: "2026-02-10".into(),
+            ..Default::default()
+        };
+        let cited = crate::patent::Patent {
+            id: "idea-cited-2".into(),
+            patent_number: "CN990702A".into(),
+            title: "高海拔密闭舱快锁气密门机构".into(),
+            abstract_text: "一种用于密闭舱体快速锁紧与气密门防漏压的机械锁定结构。".into(),
+            ipc_codes: "[\"E05B 65/00\"]".into(),
+            country: "CN".into(),
+            filing_date: "2024-06-15".into(),
+            ..Default::default()
+        };
+        let co_ipc = crate::patent::Patent {
+            id: "idea-coipc-3".into(),
+            patent_number: "CN990703A".into(),
+            title: "医用加压供氧治疗室双级泄压安全阀".into(),
+            abstract_text: "针对医用加压供氧治疗舱内呼吸压力闭环调控设计的双级安全阀。".into(),
+            ipc_codes: "[\"A61G 10/02\"]".into(),
+            country: "CN".into(),
+            filing_date: "2025-10-20".into(),
+            ..Default::default()
+        };
+        let noise = crate::patent::Patent {
+            id: "idea-noise-4".into(),
+            patent_number: "CN990704A".into(),
+            title: "折叠屏终端双轴阻尼铰链".into(),
+            abstract_text: "移动终端柔性屏幕折叠转轴机械限位机构。".into(),
+            ipc_codes: "[\"H04M 1/02\"]".into(),
+            country: "CN".into(),
+            filing_date: "2025-08-01".into(),
+            ..Default::default()
+        };
+        for p in [&seed, &cited, &co_ipc, &noise] {
+            db.insert_patent(p).expect("insert fixture");
+        }
+
+        let queries = vec!["高压氧舱".to_string()];
+        let (stage1_hits, seed_ids, seed_numbers) = collect_local_stage1_hits_sync(&db, &queries);
+        assert_eq!(stage1_hits.len(), 1, "一阶段词面检索应仅命中种子专利本身");
+        assert_eq!(stage1_hits[0].id, "patent_local_CN990701A");
+
+        let mut merged = Vec::new();
+        let mut seen = HashSet::new();
+        merge_unique_patent_hits(&mut merged, &mut seen, stage1_hits);
+
+        let (snow_hits, snow_meta) = collect_stage2_snowball_hits_sync(
+            &db,
+            "便携式医用高压氧舱智能供氧",
+            &queries,
+            &seed_ids,
+            &seed_numbers,
+            10,
+        );
+        let added = merge_unique_patent_hits(&mut merged, &mut seen, snow_hits);
+        assert_eq!(added, 2, "二阶段补漏应补充引证对比文件 + 同IPC语义邻居");
+        assert_eq!(snow_meta.backward_citation, 1);
+        assert_eq!(snow_meta.co_ipc_semantic, 1);
+
+        let ids: Vec<&str> = merged.iter().map(|h| h.id.as_str()).collect();
+        assert!(ids.contains(&"patent_snowball_CN990702A"));
+        assert!(ids.contains(&"patent_snowball_CN990703A"));
+        assert!(!ids.contains(&"patent_snowball_CN990704A"));
+        assert!(
+            merged
+                .iter()
+                .filter(|h| h.source == "local_snowball")
+                .all(|h| h.snippet.starts_with('[')),
+            "二阶段补漏摘要应前置关系标签，供下游新颖性分析透明追溯"
+        );
     }
 }

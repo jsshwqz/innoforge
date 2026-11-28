@@ -4,17 +4,18 @@ use rusqlite::{params, OptionalExtension};
 impl super::Database {
     // ── App Settings (SQLite-based persistence, works on Android) ──
 
-    /// 获取单个设置项
+    /// 获取单个设置项（文件库走无锁 WAL 并发只读连接，避免批量导库期间读取设置项阻塞）
     pub fn get_setting(&self, key: &str) -> Result<Option<String>> {
-        let c = self.conn();
-        let result = c
-            .query_row(
-                "SELECT value FROM app_settings WHERE key = ?1",
-                params![key],
-                |r| r.get(0),
-            )
-            .optional()?;
-        Ok(result)
+        self.with_read_conn(|c| {
+            let result = c
+                .query_row(
+                    "SELECT value FROM app_settings WHERE key = ?1",
+                    params![key],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            Ok(result)
+        })
     }
 
     /// 保存设置项（插入或更新）

@@ -24,7 +24,15 @@ impl Database {
     /// 直接比较会让凌晨 0-8 点的调用错位到昨天的预算窗口）。
     /// 预算超限时路由层记 Skipped 并走原行为——响亮降级，不阻断检索。
     pub fn count_ai_calls_today(&self, step: &str) -> Result<i64, rusqlite::Error> {
-        let c = self.conn();
+        let reader = self.open_concurrent_wal_reader();
+        let guard;
+        let c: &rusqlite::Connection = match reader.as_ref() {
+            Some(conn) => conn,
+            None => {
+                guard = self.conn();
+                &guard
+            }
+        };
         let mut stmt = c.prepare(
             "SELECT COUNT(*) FROM ai_cost_ledger WHERE step = ?1 AND date(timestamp, 'localtime') = date('now','localtime')",
         )?;
@@ -39,7 +47,15 @@ impl Database {
             return Ok(0);
         }
         let placeholders = vec!["?"; steps.len()].join(",");
-        let c = self.conn();
+        let reader = self.open_concurrent_wal_reader();
+        let guard;
+        let c: &rusqlite::Connection = match reader.as_ref() {
+            Some(conn) => conn,
+            None => {
+                guard = self.conn();
+                &guard
+            }
+        };
         let mut stmt = c.prepare(&format!(
             "SELECT COUNT(*) FROM ai_cost_ledger WHERE step IN ({placeholders}) AND date(timestamp, 'localtime') = date('now','localtime')"
         ))?;
