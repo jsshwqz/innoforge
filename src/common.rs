@@ -29,9 +29,10 @@ use tower_http::set_header::SetResponseHeaderLayer;
 #[folder = "static/"]
 pub struct StaticAssets;
 
-/// 启动后台定时增量同步巡检循环（由桌面入口 `main.rs` 在监听前调用）
+/// 启动后台定时增量同步巡检循环（本地同步目录 + 远端 WebDAV / R2 / OSS 订阅源）
 pub fn spawn_folder_auto_sync_loop(db: Arc<crate::db::Database>) {
-    crate::routes::spawn_folder_auto_sync_loop(db);
+    crate::routes::spawn_folder_auto_sync_loop(db.clone());
+    crate::routes::spawn_remote_auto_sync_loop(db);
 }
 
 const DEFAULT_CORS_ORIGINS: [&str; 2] = ["http://127.0.0.1:3000", "http://localhost:3000"];
@@ -957,6 +958,18 @@ pub fn build_router_with_token(
         .route(
             "/api/patents/sync-folder/cancel",
             post(routes::api_cancel_patent_sync),
+        )
+        .route(
+            "/api/patents/remote-sync",
+            get(routes::api_get_patent_remote_sync).post(routes::api_patent_remote_sync),
+        )
+        .route(
+            "/api/patents/remote-sync/progress",
+            get(routes::api_get_patent_remote_sync_progress),
+        )
+        .route(
+            "/api/patents/remote-sync/cancel",
+            post(routes::api_cancel_patent_remote_sync),
         )
         .route("/api/backup/export", post(routes::api_backup_export))
         .route("/api/backup/check", post(routes::api_backup_check))

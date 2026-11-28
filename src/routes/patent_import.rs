@@ -33,7 +33,7 @@ const MAX_WALK_DEPTH: usize = 6;
 const MAX_ZIP_ENTRIES: usize = 100;
 const MAX_ZIP_TOTAL_UNCOMPRESSED: u64 = 100 * 1024 * 1024; // 100 MB 防压缩炸弹
 const STREAM_BATCH_ROWS: usize = 500;
-const MIN_FREE_DISK_MB: u64 = 1024; // 低于 1 GB 自动暂停同步保护硬盘
+pub(crate) const MIN_FREE_DISK_MB: u64 = 1024; // 低于 1 GB 自动暂停同步保护硬盘
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PatentTableImportOptions {
@@ -167,7 +167,7 @@ struct FileSyncResult {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SyncFileKind {
+pub(crate) enum SyncFileKind {
     Table,
     Doc,
     Archive,
@@ -226,7 +226,7 @@ fn classify_sync_ext(ext_lower: &str) -> Option<SyncFileKind> {
     }
 }
 
-fn classify_sync_filename(filename: &str) -> Option<SyncFileKind> {
+pub(crate) fn classify_sync_filename(filename: &str) -> Option<SyncFileKind> {
     if table_ext_for_filename(filename).is_some() {
         return Some(SyncFileKind::Table);
     }
@@ -238,7 +238,7 @@ fn classify_sync_filename(filename: &str) -> Option<SyncFileKind> {
     classify_sync_ext(&ext)
 }
 
-fn is_temp_download_filename(name: &str) -> bool {
+pub(crate) fn is_temp_download_filename(name: &str) -> bool {
     if name.starts_with("~$") || name.starts_with('.') {
         return true;
     }
@@ -1628,7 +1628,7 @@ pub fn free_disk_mb_for_path(path: &Path) -> Option<u64> {
     }
 }
 
-fn free_disk_mb_for_db(db: &crate::db::Database) -> Option<u64> {
+pub(crate) fn free_disk_mb_for_db(db: &crate::db::Database) -> Option<u64> {
     let db_path = db.main_db_file_path()?;
     free_disk_mb_for_path(&db_path)
 }
@@ -1937,7 +1937,7 @@ pub(crate) fn sync_stream_jsonl_reader<R: BufRead>(
 }
 
 /// 逐行流式解析并分段提交 `.jsonl` / `.jsonl.gz` 专利公报（每 500 行分段提交，内存占用 < 10 MB，实时响应取消与磁盘守卫）。
-fn sync_stream_jsonl_file(
+pub(crate) fn sync_stream_jsonl_file(
     db: &crate::db::Database,
     path: &Path,
     options: &PatentTableImportOptions,
@@ -2396,7 +2396,7 @@ fn execute_folder_sync_worker(
     }))
 }
 
-fn normalize_auto_interval_mins(raw: u64) -> u64 {
+pub(crate) fn normalize_auto_interval_mins(raw: u64) -> u64 {
     if raw == 0 {
         0
     } else {
