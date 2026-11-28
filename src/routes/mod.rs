@@ -737,13 +737,20 @@ impl AppState {
                 // 自动刷新 Google OAuth / gcloud 令牌（如需要）
                 refresh_google_token_background(&config, &db).await;
 
-                // 仅重置孤立且卡住超过 30 分钟的 analyzing 创意；仍在 pipeline_channels 中活跃执行的绝不误杀
-                match db.reset_stuck_analyzing_excluding(30, &active_ids) {
-                    Ok(n) if n > 0 => {
+                // 仅重置孤立且卡住超过 30 分钟的 analyzing 创意；仍在 pipeline_channels 中活跃执行的绝不误杀（移入 spawn_blocking 防阻塞 Tokio 线程）
+                let db_reset = db.clone();
+                let active_for_reset = active_ids.clone();
+                match tokio::task::spawn_blocking(move || {
+                    db_reset.reset_stuck_analyzing_excluding(30, &active_for_reset)
+                })
+                .await
+                {
+                    Ok(Ok(n)) if n > 0 => {
                         tracing::warn!("自动恢复: 重置 {} 个卡住的 analyzing 创意为 error", n)
                     }
-                    Ok(_) => {}
-                    Err(e) => tracing::error!("自动恢复检查失败: {}", e),
+                    Ok(Ok(_)) => {}
+                    Ok(Err(e)) => tracing::error!("自动恢复检查失败: {}", e),
+                    Err(e) => tracing::error!("自动恢复任务异常: {}", e),
                 }
 
                 // 清理超过 24 小时的上传文件

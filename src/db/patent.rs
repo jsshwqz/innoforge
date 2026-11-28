@@ -201,12 +201,13 @@ impl super::Database {
     }
 
     pub fn get_patent(&self, id: &str) -> Result<Option<Patent>> {
-        let c = self.conn();
-        let mut stmt = c.prepare("SELECT id,patent_number,title,abstract_text,description,claims,applicant,inventor,filing_date,publication_date,grant_date,ipc_codes,cpc_codes,priority_date,country,kind_code,family_id,legal_status,citations,cited_by,source,raw_json,created_at,images,pdf_url FROM patents WHERE id=?1 OR patent_number=?1 ORDER BY (CASE WHEN id=?1 THEN 1 ELSE 0 END) DESC, (LENGTH(claims) + LENGTH(description) + LENGTH(images)) DESC LIMIT 1")?;
-        let result = stmt
-            .query_row(params![id], |r| Ok(Self::row_to_patent(r)))
-            .optional()?;
-        Ok(result)
+        self.with_read_conn(|c| {
+            let mut stmt = c.prepare("SELECT id,patent_number,title,abstract_text,description,claims,applicant,inventor,filing_date,publication_date,grant_date,ipc_codes,cpc_codes,priority_date,country,kind_code,family_id,legal_status,citations,cited_by,source,raw_json,created_at,images,pdf_url FROM patents WHERE id=?1 OR patent_number=?1 ORDER BY (CASE WHEN id=?1 THEN 1 ELSE 0 END) DESC, (LENGTH(claims) + LENGTH(description) + LENGTH(images)) DESC LIMIT 1")?;
+            let result = stmt
+                .query_row(params![id], |r| Ok(Self::row_to_patent(r)))
+                .optional()?;
+            Ok(result)
+        })
     }
     /// 批量查询专利完整信息（WHERE id IN (...)），避免 N+1 查询。
     /// Batch query patents by IDs using WHERE id IN (...) to avoid N+1 queries.
@@ -216,70 +217,75 @@ impl super::Database {
             return Ok(Vec::new());
         }
 
-        let c = self.conn();
-        let mut result = Vec::new();
-        const CHUNK_SIZE: usize = 500;
+        self.with_read_conn(|c| {
+            let mut result = Vec::new();
+            const CHUNK_SIZE: usize = 500;
 
-        for chunk in ids.chunks(CHUNK_SIZE) {
-            let placeholders = vec!["?"; chunk.len()].join(",");
-            let sql = format!(
-                "SELECT id,patent_number,title,abstract_text,description,claims,applicant,inventor,                  filing_date,publication_date,grant_date,ipc_codes,cpc_codes,priority_date,                  country,kind_code,family_id,legal_status,citations,cited_by,source,raw_json,                  created_at,images,pdf_url FROM patents WHERE id IN ({}) LIMIT {}",
-                placeholders,
-                chunk.len()
-            );
+            for chunk in ids.chunks(CHUNK_SIZE) {
+                let placeholders = vec!["?"; chunk.len()].join(",");
+                let sql = format!(
+                    "SELECT id,patent_number,title,abstract_text,description,claims,applicant,inventor,                  filing_date,publication_date,grant_date,ipc_codes,cpc_codes,priority_date,                  country,kind_code,family_id,legal_status,citations,cited_by,source,raw_json,                  created_at,images,pdf_url FROM patents WHERE id IN ({}) LIMIT {}",
+                    placeholders,
+                    chunk.len()
+                );
 
-            let mut stmt = c.prepare(&sql)?;
-            let params: Vec<&str> = chunk.iter().map(|id| id.as_str()).collect();
-            let rows = stmt.query_map(rusqlite::params_from_iter(params.iter().copied()), |r| {
-                Ok(Self::row_to_patent(r))
-            })?;
+                let mut stmt = c.prepare(&sql)?;
+                let params: Vec<&str> = chunk.iter().map(|id| id.as_str()).collect();
+                let rows =
+                    stmt.query_map(rusqlite::params_from_iter(params.iter().copied()), |r| {
+                        Ok(Self::row_to_patent(r))
+                    })?;
 
-            for row in rows.flatten() {
-                result.push(row);
+                for row in rows.flatten() {
+                    result.push(row);
+                }
             }
-        }
 
-        Ok(result)
+            Ok(result)
+        })
     }
 
-    /// 批量按专利号/DOI 查询记录（避免 N+1 逐条查库）
+    /// 批量按专利号/DOI 查询记录（避免 N+1 逐条查库，直接命中 `idx_patents_norm_pn` 表达式索引，杜绝 `LOWER(patent_number)` 全表扫描）
     pub fn get_patents_by_numbers(&self, numbers: &[String]) -> Result<Vec<Patent>> {
         let normalized: Vec<String> = numbers
             .iter()
-            .map(|n| n.trim().to_lowercase())
+            .map(|n| n.trim().to_uppercase().replace([' ', '-', '.', '/'], ""))
             .filter(|n| !n.is_empty())
             .collect();
         if normalized.is_empty() {
             return Ok(Vec::new());
         }
 
-        let c = self.conn();
-        let mut result = Vec::new();
-        const CHUNK_SIZE: usize = 500;
+        self.with_read_conn(|c| {
+            let mut result = Vec::new();
+            const CHUNK_SIZE: usize = 500;
 
-        for chunk in normalized.chunks(CHUNK_SIZE) {
-            let placeholders = vec!["?"; chunk.len()].join(",");
-            let sql = format!(
-                "SELECT id,patent_number,title,abstract_text,description,claims,applicant,inventor, \
-                 filing_date,publication_date,grant_date,ipc_codes,cpc_codes,priority_date, \
-                 country,kind_code,family_id,legal_status,citations,cited_by,source,raw_json, \
-                 created_at,images,pdf_url FROM patents WHERE LOWER(patent_number) IN ({}) LIMIT {}",
-                placeholders,
-                chunk.len().saturating_mul(2)
-            );
+            for chunk in normalized.chunks(CHUNK_SIZE) {
+                let placeholders = vec!["?"; chunk.len()].join(",");
+                let sql = format!(
+                    "SELECT id,patent_number,title,abstract_text,description,claims,applicant,inventor, \
+                     filing_date,publication_date,grant_date,ipc_codes,cpc_codes,priority_date, \
+                     country,kind_code,family_id,legal_status,citations,cited_by,source,raw_json, \
+                     created_at,images,pdf_url FROM patents \
+                     WHERE REPLACE(REPLACE(REPLACE(REPLACE(UPPER(patent_number), ' ', ''), '-', ''), '.', ''), '/', '') IN ({}) LIMIT {}",
+                    placeholders,
+                    chunk.len().saturating_mul(2)
+                );
 
-            let mut stmt = c.prepare(&sql)?;
-            let params: Vec<&str> = chunk.iter().map(|n| n.as_str()).collect();
-            let rows = stmt.query_map(rusqlite::params_from_iter(params.iter().copied()), |r| {
-                Ok(Self::row_to_patent(r))
-            })?;
+                let mut stmt = c.prepare(&sql)?;
+                let params: Vec<&str> = chunk.iter().map(|n| n.as_str()).collect();
+                let rows =
+                    stmt.query_map(rusqlite::params_from_iter(params.iter().copied()), |r| {
+                        Ok(Self::row_to_patent(r))
+                    })?;
 
-            for row in rows.flatten() {
-                result.push(row);
+                for row in rows.flatten() {
+                    result.push(row);
+                }
             }
-        }
 
-        Ok(result)
+            Ok(result)
+        })
     }
 
     /// 按专利号模糊查找（归一化后匹配），支持带空格/点的输入
@@ -289,20 +295,21 @@ impl super::Database {
         if canonical.is_empty() {
             return self.get_patent(number);
         }
-        let c = self.conn();
-        let canonical_upper = format!("{canonical}\u{10FFFF}");
-        let mut stmt = c.prepare(
-            "SELECT id,patent_number,title,abstract_text,description,claims,applicant,inventor,filing_date,publication_date,grant_date,ipc_codes,cpc_codes,priority_date,country,kind_code,family_id,legal_status,citations,cited_by,source,raw_json,created_at,images,pdf_url FROM patents WHERE REPLACE(REPLACE(REPLACE(REPLACE(UPPER(patent_number), ' ', ''), '-', ''), '.', ''), '/', '') >= ?1 AND REPLACE(REPLACE(REPLACE(REPLACE(UPPER(patent_number), ' ', ''), '-', ''), '.', ''), '/', '') < ?2 ORDER BY (LENGTH(claims) + LENGTH(description) + LENGTH(images)) DESC LIMIT 20",
-        )?;
-        let rows = stmt.query_map(params![canonical, canonical_upper], |r| {
-            Ok(Self::row_to_patent(r))
-        })?;
-        for p in rows.flatten() {
-            if crate::patent::canonical_patent_key(&p.patent_number) == canonical {
-                return Ok(Some(p));
+        self.with_read_conn(|c| {
+            let canonical_upper = format!("{canonical}\u{10FFFF}");
+            let mut stmt = c.prepare(
+                "SELECT id,patent_number,title,abstract_text,description,claims,applicant,inventor,filing_date,publication_date,grant_date,ipc_codes,cpc_codes,priority_date,country,kind_code,family_id,legal_status,citations,cited_by,source,raw_json,created_at,images,pdf_url FROM patents WHERE REPLACE(REPLACE(REPLACE(REPLACE(UPPER(patent_number), ' ', ''), '-', ''), '.', ''), '/', '') >= ?1 AND REPLACE(REPLACE(REPLACE(REPLACE(UPPER(patent_number), ' ', ''), '-', ''), '.', ''), '/', '') < ?2 ORDER BY (LENGTH(claims) + LENGTH(description) + LENGTH(images)) DESC LIMIT 20",
+            )?;
+            let rows = stmt.query_map(params![canonical, canonical_upper], |r| {
+                Ok(Self::row_to_patent(r))
+            })?;
+            for p in rows.flatten() {
+                if crate::patent::canonical_patent_key(&p.patent_number) == canonical {
+                    return Ok(Some(p));
+                }
             }
-        }
-        Ok(None)
+            Ok(None)
+        })
     }
 
     /// Detect search type from query string.
@@ -479,6 +486,238 @@ impl super::Database {
         }
     }
 
+    /// 大库全表扫描保护阈值：超过 20,000 件专利时，禁用 `LIKE '%...%'` 全表扫描，
+    /// 改走 `patents_fts` 倒排索引 + 前缀/规范号覆盖索引（从数分钟扫盘压至 <20ms）。
+    const LARGE_DB_FULLSCAN_GUARD_ROWS: usize = 20_000;
+
+    fn patent_row_count_fast(c: &rusqlite::Connection) -> usize {
+        // O(1) B-tree 右叶查找（<0.1ms），避免大库上每次检索重复扫全索引计数
+        c.query_row("SELECT COALESCE(MAX(rowid), 0) FROM patents", [], |r| {
+            r.get::<_, i64>(0)
+        })
+        .map(|n| n.max(0) as usize)
+        .unwrap_or(0)
+    }
+
+    /// 将用户输入切分为安全的 FTS5 前缀词查询（剔除中文括号/标点与 FTS5 保留符，防语法错并支持公司名/长词高速命中）。
+    fn build_fts_token_query(query: &str, field_scope: Option<&str>, or_mode: bool) -> String {
+        let reserved = ["AND", "OR", "NOT", "NEAR"];
+        let mut raw_tokens: Vec<String> = Vec::new();
+        for seg in query.split(|c: char| {
+            c.is_whitespace()
+                || matches!(
+                    c,
+                    '（' | '）'
+                        | '('
+                        | ')'
+                        | '，'
+                        | ','
+                        | '、'
+                        | '；'
+                        | ';'
+                        | '：'
+                        | ':'
+                        | '/'
+                        | '\\'
+                        | '-'
+                        | '"'
+                        | '\''
+                        | '*'
+                        | '^'
+                        | '{'
+                        | '}'
+                        | '['
+                        | ']'
+                        | '《'
+                        | '》'
+                        | '。'
+                        | '！'
+                        | '？'
+                        | '!'
+                        | '?'
+                )
+        }) {
+            let trimmed = seg.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            if reserved.contains(&trimmed.to_ascii_uppercase().as_str()) && trimmed.len() <= 4 {
+                continue;
+            }
+            if !raw_tokens.iter().any(|t| t == trimmed) {
+                raw_tokens.push(trimmed.to_string());
+            }
+        }
+        // 对于单段较长无标点中文查询，再补充提取核心词以提升 FTS 召回
+        if or_mode && raw_tokens.len() <= 1 {
+            for kw in crate::search::relevance::extract_query_words(query) {
+                let clean: String = kw
+                    .chars()
+                    .filter(|c| !matches!(*c, '"' | '*' | '^' | '(' | ')' | '{' | '}' | ':'))
+                    .collect();
+                let trimmed = clean.trim();
+                if !trimmed.is_empty()
+                    && !reserved.contains(&trimmed.to_ascii_uppercase().as_str())
+                    && !raw_tokens.iter().any(|t| t == trimmed)
+                {
+                    raw_tokens.push(trimmed.to_string());
+                }
+            }
+        }
+        if raw_tokens.is_empty() {
+            return String::new();
+        }
+        let quoted: Vec<String> = raw_tokens
+            .into_iter()
+            .take(8)
+            .map(|t| format!("\"{t}\"*"))
+            .collect();
+        let expr = if or_mode {
+            quoted.join(" OR ")
+        } else {
+            quoted.join(" ")
+        };
+        match field_scope {
+            Some("applicant") => format!("applicant : ({expr})"),
+            Some("inventor") => format!("inventor : ({expr})"),
+            _ => expr,
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn search_fts_with_filters_on_conn(
+        c: &rusqlite::Connection,
+        query: &str,
+        field_scope: Option<&str>,
+        country: Option<&str>,
+        date_from: &str,
+        date_to: &str,
+        page: usize,
+        page_size: usize,
+        or_mode: bool,
+    ) -> Result<(Vec<PatentSummary>, usize)> {
+        let fts_q = Self::build_fts_token_query(query, field_scope, or_mode);
+        if fts_q.is_empty() {
+            return Ok((vec![], 0));
+        }
+        let offset = page.saturating_sub(1) * page_size;
+        let country_val = country.unwrap_or("");
+        let has_filters = !country_val.is_empty() || !date_from.is_empty() || !date_to.is_empty();
+        let total: usize = if !has_filters {
+            c.prepare("SELECT COUNT(*) FROM patents_fts WHERE patents_fts MATCH ?1")?
+                .query_row(params![fts_q], |r| r.get(0))
+                .unwrap_or(0)
+        } else {
+            c.prepare(
+                "SELECT COUNT(*) FROM patents p INNER JOIN patents_fts f ON p.rowid = f.rowid
+                 WHERE patents_fts MATCH ?1
+                   AND (?2 = '' OR p.country = ?2)
+                   AND (?3 = '' OR p.filing_date >= ?3)
+                   AND (?4 = '' OR p.filing_date <= ?4)",
+            )?
+            .query_row(params![fts_q, country_val, date_from, date_to], |r| {
+                r.get(0)
+            })
+            .unwrap_or(0)
+        };
+        if total == 0 {
+            return Ok((vec![], 0));
+        }
+        let mut stmt = if !has_filters {
+            // 无额外过滤时先在 FTS5 内 LIMIT/OFFSET 再回表取至多 page_size 行，避免数万命中全回表扫盘
+            c.prepare(
+                "SELECT p.id,p.patent_number,p.title,p.abstract_text,p.applicant,p.inventor,p.filing_date,p.country,f.rank
+                 FROM (SELECT rowid, rank FROM patents_fts WHERE patents_fts MATCH ?1 ORDER BY rank LIMIT ?2 OFFSET ?3) f
+                 INNER JOIN patents p ON p.rowid = f.rowid
+                 ORDER BY f.rank",
+            )?
+        } else {
+            c.prepare(
+                "SELECT p.id,p.patent_number,p.title,p.abstract_text,p.applicant,p.inventor,p.filing_date,p.country,f.rank
+                 FROM patents p INNER JOIN patents_fts f ON p.rowid = f.rowid
+                 WHERE patents_fts MATCH ?1
+                   AND (?2 = '' OR p.country = ?2)
+                   AND (?3 = '' OR p.filing_date >= ?3)
+                   AND (?4 = '' OR p.filing_date <= ?4)
+                 ORDER BY f.rank LIMIT ?5 OFFSET ?6",
+            )?
+        };
+        let rows = if !has_filters {
+            stmt.query_map(params![fts_q, page_size as i64, offset as i64], |r| {
+                let applicant = r.get::<_, String>(4).unwrap_or_default();
+                let inventor = r.get::<_, String>(5).unwrap_or_default();
+                let title = r.get::<_, String>(2).unwrap_or_default();
+                let rank: f64 = r.get::<_, f64>(8).unwrap_or(0.0);
+                let (score, src) = match field_scope {
+                    Some("applicant") => calculate_field_relevance(query, &applicant, "applicant"),
+                    Some("inventor") => calculate_field_relevance(query, &inventor, "inventor"),
+                    _ => {
+                        let s = ((-rank).min(20.0) / 20.0 * 70.0 + 30.0).min(100.0);
+                        (s, "FTS5-BM25".to_string())
+                    }
+                };
+                Ok(PatentSummary {
+                    id: r.get(0)?,
+                    patent_number: r.get(1)?,
+                    title,
+                    abstract_text: r.get::<_, String>(3).unwrap_or_default(),
+                    applicant,
+                    inventor,
+                    filing_date: r.get::<_, String>(6).unwrap_or_default(),
+                    country: r.get::<_, String>(7).unwrap_or_default(),
+                    relevance_score: Some(score),
+                    score_source: Some(src),
+                    matched_fields: None,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect()
+        } else {
+            stmt.query_map(
+                params![
+                    fts_q,
+                    country_val,
+                    date_from,
+                    date_to,
+                    page_size as i64,
+                    offset as i64
+                ],
+                |r| {
+                    let applicant = r.get::<_, String>(4).unwrap_or_default();
+                    let inventor = r.get::<_, String>(5).unwrap_or_default();
+                    let title = r.get::<_, String>(2).unwrap_or_default();
+                    let rank: f64 = r.get::<_, f64>(8).unwrap_or(0.0);
+                    let (score, src) = match field_scope {
+                        Some("applicant") => {
+                            calculate_field_relevance(query, &applicant, "applicant")
+                        }
+                        Some("inventor") => calculate_field_relevance(query, &inventor, "inventor"),
+                        _ => {
+                            let s = ((-rank).min(20.0) / 20.0 * 70.0 + 30.0).min(100.0);
+                            (s, "FTS5-BM25".to_string())
+                        }
+                    };
+                    Ok(PatentSummary {
+                        id: r.get(0)?,
+                        patent_number: r.get(1)?,
+                        title,
+                        abstract_text: r.get::<_, String>(3).unwrap_or_default(),
+                        applicant,
+                        inventor,
+                        filing_date: r.get::<_, String>(6).unwrap_or_default(),
+                        country: r.get::<_, String>(7).unwrap_or_default(),
+                        relevance_score: Some(score),
+                        score_source: Some(src),
+                        matched_fields: None,
+                    })
+                },
+            )?
+            .filter_map(|r| r.ok())
+            .collect()
+        };
+        Ok((rows, total))
+    }
+
     /// Search by patent number.
     fn search_by_patent_number(
         &self,
@@ -488,70 +727,128 @@ impl super::Database {
         page: usize,
         page_size: usize,
     ) -> Result<(Vec<PatentSummary>, usize)> {
-        let c = self.conn();
-        let offset = page.saturating_sub(1) * page_size;
-        // Strip spaces and dots for flexible matching (e.g. 9999.1 → 99991)
-        let q_clean = query.replace([' ', '.'], "");
-        // Also strip CN/ZL prefix to match against bare numbers in patent_number field
-        let q_digits: String = q_clean.chars().filter(|c| c.is_ascii_digit()).collect();
-        let q_with_prefix = format!("%{}%", query.replace(' ', ""));
-        let q_digits_like = format!("%{}%", q_digits);
-        let date_from = date_from.unwrap_or("");
-        let date_to = date_to.unwrap_or("");
+        self.with_read_conn(|c| {
+            let offset = page.saturating_sub(1) * page_size;
+            let date_from = date_from.unwrap_or("");
+            let date_to = date_to.unwrap_or("");
 
-        // Match either the original query or just the digit portion
-        let total: usize = c
-            .prepare(
-                "SELECT COUNT(*) FROM patents
-             WHERE (REPLACE(REPLACE(patent_number, ' ', ''), '.', '') LIKE ?1
-                    OR REPLACE(REPLACE(patent_number, ' ', ''), '.', '') LIKE ?4)
-             AND (?2 = '' OR filing_date >= ?2)
-             AND (?3 = '' OR filing_date <= ?3)",
-            )?
-            .query_row(
-                params![q_with_prefix, date_from, date_to, q_digits_like],
-                |r| r.get(0),
+            // 优先走归一化专利号表达式索引 `idx_patents_canonical_number`（毫秒级），避免 10 万+ 大库全表 REPLACE LIKE
+            let canonical = crate::patent::canonical_patent_key(query);
+            if !canonical.is_empty() {
+                let canonical_upper = format!("{canonical}\u{10FFFF}");
+                let idx_total: usize = c
+                    .prepare(
+                        "SELECT COUNT(*) FROM patents
+                         WHERE REPLACE(REPLACE(REPLACE(REPLACE(UPPER(patent_number), ' ', ''), '-', ''), '.', ''), '/', '') >= ?1
+                           AND REPLACE(REPLACE(REPLACE(REPLACE(UPPER(patent_number), ' ', ''), '-', ''), '.', ''), '/', '') < ?2
+                           AND (?3 = '' OR filing_date >= ?3)
+                           AND (?4 = '' OR filing_date <= ?4)",
+                    )?
+                    .query_row(params![canonical, canonical_upper, date_from, date_to], |r| r.get(0))
+                    .unwrap_or(0);
+                if idx_total > 0 || Self::patent_row_count_fast(c) >= Self::LARGE_DB_FULLSCAN_GUARD_ROWS {
+                    let mut stmt = c.prepare(
+                        "SELECT id,patent_number,title,abstract_text,applicant,inventor,filing_date,country
+                         FROM patents
+                         WHERE REPLACE(REPLACE(REPLACE(REPLACE(UPPER(patent_number), ' ', ''), '-', ''), '.', ''), '/', '') >= ?1
+                           AND REPLACE(REPLACE(REPLACE(REPLACE(UPPER(patent_number), ' ', ''), '-', ''), '.', ''), '/', '') < ?2
+                           AND (?3 = '' OR filing_date >= ?3)
+                           AND (?4 = '' OR filing_date <= ?4)
+                         ORDER BY filing_date DESC LIMIT ?5 OFFSET ?6",
+                    )?;
+                    let rows = stmt
+                        .query_map(
+                            params![
+                                canonical,
+                                canonical_upper,
+                                date_from,
+                                date_to,
+                                page_size as i64,
+                                offset as i64
+                            ],
+                            |r| {
+                                Ok(PatentSummary {
+                                    id: r.get(0)?,
+                                    patent_number: r.get(1)?,
+                                    title: r.get(2)?,
+                                    abstract_text: r.get::<_, String>(3).unwrap_or_default(),
+                                    applicant: r.get::<_, String>(4).unwrap_or_default(),
+                                    inventor: r.get::<_, String>(5).unwrap_or_default(),
+                                    filing_date: r.get::<_, String>(6).unwrap_or_default(),
+                                    country: r.get::<_, String>(7).unwrap_or_default(),
+                                    relevance_score: Some(100.0),
+                                    score_source: Some("patent number exact match".to_string()),
+                                    matched_fields: None,
+                                })
+                            },
+                        )?
+                        .filter_map(|r| r.ok())
+                        .collect();
+                    return Ok((rows, idx_total));
+                }
+            }
+
+            // Strip spaces and dots for flexible matching (e.g. 9999.1 → 99991)
+            let q_clean = query.replace([' ', '.'], "");
+            // Also strip CN/ZL prefix to match against bare numbers in patent_number field
+            let q_digits: String = q_clean.chars().filter(|ch| ch.is_ascii_digit()).collect();
+            let q_with_prefix = format!("%{}%", query.replace(' ', ""));
+            let q_digits_like = format!("%{}%", q_digits);
+
+            // Match either the original query or just the digit portion
+            let total: usize = c
+                .prepare(
+                    "SELECT COUNT(*) FROM patents
+                 WHERE (REPLACE(REPLACE(patent_number, ' ', ''), '.', '') LIKE ?1
+                        OR REPLACE(REPLACE(patent_number, ' ', ''), '.', '') LIKE ?4)
+                 AND (?2 = '' OR filing_date >= ?2)
+                 AND (?3 = '' OR filing_date <= ?3)",
+                )?
+                .query_row(
+                    params![q_with_prefix, date_from, date_to, q_digits_like],
+                    |r| r.get(0),
+                )?;
+
+            let mut stmt = c.prepare(
+                "SELECT id,patent_number,title,abstract_text,applicant,inventor,filing_date,country
+                 FROM patents
+                 WHERE (REPLACE(REPLACE(patent_number, ' ', ''), '.', '') LIKE ?1
+                        OR REPLACE(REPLACE(patent_number, ' ', ''), '.', '') LIKE ?4)
+                 AND (?2 = '' OR filing_date >= ?2)
+                 AND (?3 = '' OR filing_date <= ?3)
+                 ORDER BY filing_date DESC LIMIT ?5 OFFSET ?6",
             )?;
+            let rows = stmt
+                .query_map(
+                    params![
+                        q_with_prefix,
+                        date_from,
+                        date_to,
+                        q_digits_like,
+                        page_size as i64,
+                        offset as i64
+                    ],
+                    |r| {
+                        Ok(PatentSummary {
+                            id: r.get(0)?,
+                            patent_number: r.get(1)?,
+                            title: r.get(2)?,
+                            abstract_text: r.get::<_, String>(3).unwrap_or_default(),
+                            applicant: r.get::<_, String>(4).unwrap_or_default(),
+                            inventor: r.get::<_, String>(5).unwrap_or_default(),
+                            filing_date: r.get::<_, String>(6).unwrap_or_default(),
+                            country: r.get::<_, String>(7).unwrap_or_default(),
+                            relevance_score: Some(100.0),
+                            score_source: Some("patent number exact match".to_string()),
+                            matched_fields: None,
+                        })
+                    },
+                )?
+                .filter_map(|r| r.ok())
+                .collect();
 
-        let mut stmt = c.prepare(
-            "SELECT id,patent_number,title,abstract_text,applicant,inventor,filing_date,country
-             FROM patents
-             WHERE (REPLACE(REPLACE(patent_number, ' ', ''), '.', '') LIKE ?1
-                    OR REPLACE(REPLACE(patent_number, ' ', ''), '.', '') LIKE ?4)
-             AND (?2 = '' OR filing_date >= ?2)
-             AND (?3 = '' OR filing_date <= ?3)
-             ORDER BY filing_date DESC LIMIT ?5 OFFSET ?6",
-        )?;
-        let rows = stmt
-            .query_map(
-                params![
-                    q_with_prefix,
-                    date_from,
-                    date_to,
-                    q_digits_like,
-                    page_size as i64,
-                    offset as i64
-                ],
-                |r| {
-                    Ok(PatentSummary {
-                        id: r.get(0)?,
-                        patent_number: r.get(1)?,
-                        title: r.get(2)?,
-                        abstract_text: r.get::<_, String>(3).unwrap_or_default(),
-                        applicant: r.get::<_, String>(4).unwrap_or_default(),
-                        inventor: r.get::<_, String>(5).unwrap_or_default(),
-                        filing_date: r.get::<_, String>(6).unwrap_or_default(),
-                        country: r.get::<_, String>(7).unwrap_or_default(),
-                        relevance_score: Some(100.0),
-                        score_source: Some("patent number exact match".to_string()),
-                        matched_fields: None,
-                    })
-                },
-            )?
-            .filter_map(|r| r.ok())
-            .collect();
-
-        Ok((rows, total))
+            Ok((rows, total))
+        })
     }
 
     /// Generic search by a single field (applicant or inventor) with optional country filter.
@@ -577,92 +874,159 @@ impl super::Database {
             "inventor" => "inventor",
             _ => return Err(anyhow::anyhow!("invalid search field: {}", field)),
         };
-        let c = self.conn();
-        let offset = page.saturating_sub(1) * page_size;
-        // 精确通道绑定原词（trim 后等值）；模糊通道保持旧 `%词%` 形态逐字不变。
-        let q = if exact {
-            query.trim().to_string()
-        } else {
-            format!("%{}%", query)
-        };
-        let pred = if exact {
-            format!("{} = ?1", field)
-        } else {
-            format!("{} LIKE ?1", field)
-        };
-        let date_from = date_from.unwrap_or("");
-        let date_to = date_to.unwrap_or("");
+        self.with_read_conn(|c| {
+            let offset = page.saturating_sub(1) * page_size;
+            let date_from = date_from.unwrap_or("");
+            let date_to = date_to.unwrap_or("");
 
-        // Build WHERE clause dynamically based on whether country filter is present
-        let (count_sql, data_sql) = if let Some(country_val) = country.filter(|s| !s.is_empty()) {
-            let count = format!(
-                "SELECT COUNT(*) FROM patents WHERE {} AND country = ?2
-                 AND (?3 = '' OR filing_date >= ?3)
-                 AND (?4 = '' OR filing_date <= ?4)",
-                pred
-            );
-            let data = format!(
-                "SELECT id,patent_number,title,abstract_text,applicant,inventor,filing_date,country
-                 FROM patents WHERE {} AND country = ?2
-                 AND (?3 = '' OR filing_date >= ?3)
-                 AND (?4 = '' OR filing_date <= ?4)
-                 ORDER BY filing_date DESC LIMIT ?5 OFFSET ?6",
-                pred
-            );
+            // 大库保护：模糊申请人/发明人检索在 >= 20,000 行大库下改走 FTS5 倒排索引 + 前缀 B-tree 索引，
+            // 彻底根除 `applicant LIKE '%...%'` 双趟 1.1 GB 全表扫盘卡死全站。
+            if !exact && Self::patent_row_count_fast(c) >= Self::LARGE_DB_FULLSCAN_GUARD_ROWS {
+                let (rows, total) = Self::search_fts_with_filters_on_conn(
+                    c,
+                    query,
+                    Some(field),
+                    country,
+                    date_from,
+                    date_to,
+                    page,
+                    page_size,
+                    false,
+                )?;
+                if total > 0 {
+                    return Ok((rows, total));
+                }
+                // 再试索引前缀范围（idx_applicant / idx_inventor B-tree，毫秒级）
+                let prefix = query.trim();
+                if !prefix.is_empty() {
+                    let upper = format!("{prefix}\u{10FFFF}");
+                    let country_val = country.unwrap_or("");
+                    let count_sql = format!(
+                        "SELECT COUNT(*) FROM patents WHERE {field} >= ?1 AND {field} < ?2
+                         AND (?3 = '' OR country = ?3)
+                         AND (?4 = '' OR filing_date >= ?4)
+                         AND (?5 = '' OR filing_date <= ?5)"
+                    );
+                    let total_pref: usize = c
+                        .prepare(&count_sql)?
+                        .query_row(params![prefix, upper, country_val, date_from, date_to], |r| {
+                            r.get(0)
+                        })
+                        .unwrap_or(0);
+                    if total_pref > 0 {
+                        let data_sql = format!(
+                            "SELECT id,patent_number,title,abstract_text,applicant,inventor,filing_date,country
+                             FROM patents WHERE {field} >= ?1 AND {field} < ?2
+                             AND (?3 = '' OR country = ?3)
+                             AND (?4 = '' OR filing_date >= ?4)
+                             AND (?5 = '' OR filing_date <= ?5)
+                             ORDER BY filing_date DESC LIMIT ?6 OFFSET ?7"
+                        );
+                        let mut stmt = c.prepare(&data_sql)?;
+                        let pref_rows: Vec<PatentSummary> = stmt
+                            .query_map(
+                                params![
+                                    prefix,
+                                    upper,
+                                    country_val,
+                                    date_from,
+                                    date_to,
+                                    page_size as i64,
+                                    offset as i64
+                                ],
+                                |row| self.row_to_summary_with_relevance(row, query, field),
+                            )?
+                            .filter_map(|r| r.ok())
+                            .collect();
+                        return Ok((pref_rows, total_pref));
+                    }
+                }
+                return Ok((vec![], 0));
+            }
+
+            // 精确通道绑定原词（trim 后等值，命中 idx_applicant / idx_inventor）；小库模糊通道保持旧 `%词%` 形态逐字不变。
+            let q = if exact {
+                query.trim().to_string()
+            } else {
+                format!("%{}%", query)
+            };
+            let pred = if exact {
+                format!("{} = ?1", field)
+            } else {
+                format!("{} LIKE ?1", field)
+            };
+
+            // Build WHERE clause dynamically based on whether country filter is present
+            let (count_sql, data_sql) = if let Some(country_val) = country.filter(|s| !s.is_empty()) {
+                let count = format!(
+                    "SELECT COUNT(*) FROM patents WHERE {} AND country = ?2
+                     AND (?3 = '' OR filing_date >= ?3)
+                     AND (?4 = '' OR filing_date <= ?4)",
+                    pred
+                );
+                let data = format!(
+                    "SELECT id,patent_number,title,abstract_text,applicant,inventor,filing_date,country
+                     FROM patents WHERE {} AND country = ?2
+                     AND (?3 = '' OR filing_date >= ?3)
+                     AND (?4 = '' OR filing_date <= ?4)
+                     ORDER BY filing_date DESC LIMIT ?5 OFFSET ?6",
+                    pred
+                );
+
+                let total: usize = c
+                    .prepare(&count)?
+                    .query_row(params![q, country_val, date_from, date_to], |r| r.get(0))?;
+
+                let mut stmt = c.prepare(&data)?;
+                let rows: Vec<PatentSummary> = stmt
+                    .query_map(
+                        params![
+                            q,
+                            country_val,
+                            date_from,
+                            date_to,
+                            page_size as i64,
+                            offset as i64
+                        ],
+                        |row| self.row_to_summary_with_relevance(row, query, field),
+                    )?
+                    .filter_map(|r| r.ok())
+                    .collect();
+
+                return Ok((rows, total));
+            } else {
+                let count = format!(
+                    "SELECT COUNT(*) FROM patents WHERE {}
+                     AND (?2 = '' OR filing_date >= ?2)
+                     AND (?3 = '' OR filing_date <= ?3)",
+                    pred
+                );
+                let data = format!(
+                    "SELECT id,patent_number,title,abstract_text,applicant,inventor,filing_date,country
+                     FROM patents WHERE {}
+                     AND (?2 = '' OR filing_date >= ?2)
+                     AND (?3 = '' OR filing_date <= ?3)
+                     ORDER BY filing_date DESC LIMIT ?4 OFFSET ?5",
+                    pred
+                );
+                (count, data)
+            };
 
             let total: usize = c
-                .prepare(&count)?
-                .query_row(params![q, country_val, date_from, date_to], |r| r.get(0))?;
+                .prepare(&count_sql)?
+                .query_row(params![q, date_from, date_to], |r| r.get(0))?;
 
-            let mut stmt = c.prepare(&data)?;
+            let mut stmt = c.prepare(&data_sql)?;
             let rows: Vec<PatentSummary> = stmt
                 .query_map(
-                    params![
-                        q,
-                        country_val,
-                        date_from,
-                        date_to,
-                        page_size as i64,
-                        offset as i64
-                    ],
+                    params![q, date_from, date_to, page_size as i64, offset as i64],
                     |row| self.row_to_summary_with_relevance(row, query, field),
                 )?
                 .filter_map(|r| r.ok())
                 .collect();
 
-            return Ok((rows, total));
-        } else {
-            let count = format!(
-                "SELECT COUNT(*) FROM patents WHERE {}
-                 AND (?2 = '' OR filing_date >= ?2)
-                 AND (?3 = '' OR filing_date <= ?3)",
-                pred
-            );
-            let data = format!(
-                "SELECT id,patent_number,title,abstract_text,applicant,inventor,filing_date,country
-                 FROM patents WHERE {}
-                 AND (?2 = '' OR filing_date >= ?2)
-                 AND (?3 = '' OR filing_date <= ?3)
-                 ORDER BY filing_date DESC LIMIT ?4 OFFSET ?5",
-                pred
-            );
-            (count, data)
-        };
-
-        let total: usize = c
-            .prepare(&count_sql)?
-            .query_row(params![q, date_from, date_to], |r| r.get(0))?;
-
-        let mut stmt = c.prepare(&data_sql)?;
-        let rows: Vec<PatentSummary> = stmt
-            .query_map(
-                params![q, date_from, date_to, page_size as i64, offset as i64],
-                |row| self.row_to_summary_with_relevance(row, query, field),
-            )?
-            .filter_map(|r| r.ok())
-            .collect();
-
-        Ok((rows, total))
+            Ok((rows, total))
+        })
     }
 
     /// Map a row to PatentSummary with relevance scoring based on field type.
@@ -729,42 +1093,41 @@ impl super::Database {
         page: usize,
         page_size: usize,
     ) -> Result<(Vec<PatentSummary>, usize)> {
-        let c = self.conn();
-        let offset = page.saturating_sub(1) * page_size;
-        let safe_query = Self::sanitize_fts_query(query);
-        if safe_query.is_empty() {
-            return Ok((vec![], 0));
-        }
-        let total: usize = c
-            .prepare("SELECT COUNT(*) FROM patents_fts WHERE patents_fts MATCH ?1")?
-            .query_row(params![safe_query], |r| r.get(0))
-            .unwrap_or(0);
-        // BM25 权重：title(1) 最高, abstract(2) 次之, claims(3) 中等, applicant/inventor(4-5) 较低
-        // 列顺序: patent_number(0), title(1), abstract_text(2), claims(3), applicant(4), inventor(5), ipc_codes(6)
-        let mut stmt = c.prepare("SELECT p.id,p.patent_number,p.title,p.abstract_text,p.applicant,p.inventor,p.filing_date,p.country,f.rank FROM patents p INNER JOIN patents_fts f ON p.rowid=f.rowid WHERE patents_fts MATCH ?1 ORDER BY bm25(patents_fts, 0.0, 5.0, 10.0, 5.0, 3.0, 2.0, 2.0, 1.0) LIMIT ?2 OFFSET ?3")?;
-        let rows = stmt
-            .query_map(params![safe_query, page_size as i64, offset as i64], |r| {
-                let rank: f64 = r.get::<_, f64>(8).unwrap_or(0.0);
-                // FTS5 BM25 rank is negative (closer to 0 = better). Normalize to 0-100.
-                // Typical range: -20 (very relevant) to 0 (less relevant)
-                let score = ((-rank).min(20.0) / 20.0 * 70.0 + 30.0).min(100.0);
-                Ok(PatentSummary {
-                    id: r.get(0)?,
-                    patent_number: r.get(1)?,
-                    title: r.get(2)?,
-                    abstract_text: r.get::<_, String>(3).unwrap_or_default(),
-                    applicant: r.get::<_, String>(4).unwrap_or_default(),
-                    inventor: r.get::<_, String>(5).unwrap_or_default(),
-                    filing_date: r.get::<_, String>(6).unwrap_or_default(),
-                    country: r.get::<_, String>(7).unwrap_or_default(),
-                    relevance_score: Some(score),
-                    score_source: Some("FTS5-BM25".to_string()),
-                    matched_fields: None,
-                })
-            })?
-            .filter_map(|r| r.ok())
-            .collect();
-        Ok((rows, total))
+        self.with_read_conn(|c| {
+            let offset = page.saturating_sub(1) * page_size;
+            let safe_query = Self::sanitize_fts_query(query);
+            if safe_query.is_empty() {
+                return Ok((vec![], 0));
+            }
+            let total: usize = c
+                .prepare("SELECT COUNT(*) FROM patents_fts WHERE patents_fts MATCH ?1")?
+                .query_row(params![safe_query], |r| r.get(0))
+                .unwrap_or(0);
+            // BM25 权重：title(1) 最高, abstract(2) 次之, claims(3) 中等, applicant/inventor(4-5) 较低
+            // 列顺序: patent_number(0), title(1), abstract_text(2), claims(3), applicant(4), inventor(5), ipc_codes(6)
+            let mut stmt = c.prepare("SELECT p.id,p.patent_number,p.title,p.abstract_text,p.applicant,p.inventor,p.filing_date,p.country,f.rank FROM patents p INNER JOIN patents_fts f ON p.rowid=f.rowid WHERE patents_fts MATCH ?1 ORDER BY bm25(patents_fts, 0.0, 5.0, 10.0, 5.0, 3.0, 2.0, 2.0, 1.0) LIMIT ?2 OFFSET ?3")?;
+            let rows = stmt
+                .query_map(params![safe_query, page_size as i64, offset as i64], |r| {
+                    let rank: f64 = r.get::<_, f64>(8).unwrap_or(0.0);
+                    let score = ((-rank).min(20.0) / 20.0 * 70.0 + 30.0).min(100.0);
+                    Ok(PatentSummary {
+                        id: r.get(0)?,
+                        patent_number: r.get(1)?,
+                        title: r.get(2)?,
+                        abstract_text: r.get::<_, String>(3).unwrap_or_default(),
+                        applicant: r.get::<_, String>(4).unwrap_or_default(),
+                        inventor: r.get::<_, String>(5).unwrap_or_default(),
+                        filing_date: r.get::<_, String>(6).unwrap_or_default(),
+                        country: r.get::<_, String>(7).unwrap_or_default(),
+                        relevance_score: Some(score),
+                        score_source: Some("FTS5-BM25".to_string()),
+                        matched_fields: None,
+                    })
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
+            Ok((rows, total))
+        })
     }
 
     /// Multi-token LIKE search across title/abstract/applicant/inventor/patent_number.
@@ -783,8 +1146,25 @@ impl super::Database {
         page: usize,
         page_size: usize,
     ) -> Result<(Vec<PatentSummary>, usize)> {
-        let c = self.conn();
-        let offset = page.saturating_sub(1) * page_size;
+        self.with_read_conn(|c| {
+            let date_from_s = date_from.unwrap_or("");
+            let date_to_s = date_to.unwrap_or("");
+            // 大库全表扫盘保护：>= 20,000 行时，严禁触发多列 35 路 OR LIKE 全盘扫表（会导致全站卡死），
+            // 直接走 FTS5 前缀/词组 OR 倒排索引 + SQL 国家/日期条件（< 20ms）。
+            if Self::patent_row_count_fast(c) >= Self::LARGE_DB_FULLSCAN_GUARD_ROWS {
+                return Self::search_fts_with_filters_on_conn(
+                    c,
+                    query,
+                    None,
+                    country.filter(|s| !s.is_empty()),
+                    date_from_s,
+                    date_to_s,
+                    page,
+                    page_size,
+                    true,
+                );
+            }
+            let offset = page.saturating_sub(1) * page_size;
 
         // 多词查询切 token：优先尊重用户空格，无空格中文长句自动提取核心技术词，均走 OR 语义。
         let extracted_words = crate::search::relevance::extract_query_words(query);
@@ -985,62 +1365,68 @@ impl super::Database {
         };
         let _ = where_clause;
         Ok((rows, total))
+        })
     }
+
     // ── IPC Classification ────────────────────────────────────────────────────
 
     pub fn get_all_ipc_codes(&self) -> Result<Vec<String>> {
-        let c = self.conn();
-        let mut stmt = c.prepare(
-            "SELECT ipc_codes FROM patents WHERE ipc_codes != '' AND ipc_codes IS NOT NULL",
-        )?;
-        let rows = stmt
-            .query_map([], |row| row.get::<_, String>(0))?
-            .filter_map(|r| r.ok())
-            .collect();
-        Ok(rows)
+        self.with_read_conn(|c| {
+            let mut stmt = c.prepare(
+                "SELECT ipc_codes FROM patents WHERE ipc_codes != '' AND ipc_codes IS NOT NULL",
+            )?;
+            let rows = stmt
+                .query_map([], |row| row.get::<_, String>(0))?
+                .filter_map(|r| r.ok())
+                .collect();
+            Ok(rows)
+        })
     }
 
     /// 快速获取 `patents` 表行数与最大 `rowid` 水位（毫秒级，用于 IPC 分类树缓存失效校验）。
     pub fn get_patent_table_watermark(&self) -> Result<(usize, i64)> {
-        let c = self.conn();
-        let (cnt, max_rowid): (i64, i64) = c.query_row(
-            "SELECT COUNT(*), COALESCE(MAX(rowid), 0) FROM patents",
-            [],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )?;
-        Ok((cnt.max(0) as usize, max_rowid))
+        self.with_read_conn(|c| {
+            let (cnt, max_rowid): (i64, i64) = c.query_row(
+                "SELECT COUNT(*), COALESCE(MAX(rowid), 0) FROM patents",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )?;
+            Ok((cnt.max(0) as usize, max_rowid))
+        })
     }
 
     /// 按 `ipc_codes` 原始字符串分组统计数量，大幅减少大库向 Rust 侧搬运重复字符串的内存开销。
     pub fn get_ipc_code_counts(&self) -> Result<Vec<(String, usize)>> {
-        let c = self.conn();
-        let mut stmt = c.prepare(
-            "SELECT ipc_codes, COUNT(*) FROM patents \
-             WHERE ipc_codes IS NOT NULL AND ipc_codes != '' AND ipc_codes != '[]' \
-             GROUP BY ipc_codes",
-        )?;
-        let rows = stmt
-            .query_map([], |row| {
-                let raw: String = row.get(0)?;
-                let cnt: i64 = row.get(1)?;
-                Ok((raw, cnt.max(0) as usize))
-            })?
-            .filter_map(|r| r.ok())
-            .collect();
-        Ok(rows)
+        self.with_read_conn(|c| {
+            let mut stmt = c.prepare(
+                "SELECT ipc_codes, COUNT(*) FROM patents \
+                 WHERE ipc_codes IS NOT NULL AND ipc_codes != '' AND ipc_codes != '[]' \
+                 GROUP BY ipc_codes",
+            )?;
+            let rows = stmt
+                .query_map([], |row| {
+                    let raw: String = row.get(0)?;
+                    let cnt: i64 = row.get(1)?;
+                    Ok((raw, cnt.max(0) as usize))
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
+            Ok(rows)
+        })
     }
 
     /// 按 rowid 倒序快速取出最近入库的专利 ID（毫秒级，避免 FTO 兜底调用空串 `search_like("")` 恒返回空）。
     pub fn list_recent_patent_ids(&self, limit: usize) -> Result<Vec<String>> {
-        let c = self.conn();
-        let mut stmt = c.prepare("SELECT id FROM patents ORDER BY rowid DESC LIMIT ?1")?;
-        let rows = stmt
-            .query_map(params![limit.clamp(1, 200) as i64], |row| {
-                row.get::<_, String>(0)
-            })?
-            .filter_map(|r| r.ok())
-            .collect();
-        Ok(rows)
+        self.with_read_conn(|c| {
+            let mut stmt = c.prepare("SELECT id FROM patents ORDER BY rowid DESC LIMIT ?1")?;
+            let rows = stmt
+                .query_map(params![limit.clamp(1, 200) as i64], |row| {
+                    row.get::<_, String>(0)
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
+            Ok(rows)
+        })
     }
 
     pub fn search_by_ipc(&self, code: &str) -> Result<Vec<serde_json::Value>> {
@@ -1048,40 +1434,84 @@ impl super::Database {
         if target.is_empty() {
             return Ok(Vec::new());
         }
-        let c = self.conn();
-        let pattern = format!("%{}%", target);
-        // 先放大候选取 300 条，再对解析出的真实 IPC 列表执行严格前缀匹配（防止查部类 "F" 误命中 "G06F"）
-        let mut stmt = c.prepare(
-            "SELECT id, patent_number, title, abstract_text, applicant, filing_date, country, ipc_codes
-             FROM patents WHERE ipc_codes LIKE ?1 ORDER BY filing_date DESC LIMIT 300",
-        )?;
-        let rows = stmt
-            .query_map(params![pattern], |row| {
-                let ipc_raw: String = row.get::<_, String>(7).unwrap_or_default();
-                Ok((
-                    ipc_raw.clone(),
-                    serde_json::json!({
-                        "id": row.get::<_, String>(0)?,
-                        "patent_number": row.get::<_, String>(1)?,
-                        "title": row.get::<_, String>(2)?,
-                        "abstract_text": row.get::<_, String>(3).unwrap_or_default(),
-                        "applicant": row.get::<_, String>(4).unwrap_or_default(),
-                        "filing_date": row.get::<_, String>(5).unwrap_or_default(),
-                        "country": row.get::<_, String>(6).unwrap_or_default(),
-                        "ipc_codes": ipc_raw,
-                    }),
-                ))
-            })?
-            .filter_map(|r| r.ok())
-            .filter(|(ipc_raw, _)| {
-                crate::routes::parse_ipc_code_list(ipc_raw)
-                    .iter()
-                    .any(|c| c.starts_with(&target))
-            })
-            .take(100)
-            .map(|(_, val)| val)
-            .collect();
-        Ok(rows)
+        self.with_read_conn(|c| {
+            // 大库走 FTS5 `ipc_codes` 倒排前缀索引（<10ms），彻底避免点击冷门部类时 1.1 GB 全表 LIKE 扫盘
+            let use_fts_fast = Self::patent_row_count_fast(c) >= Self::LARGE_DB_FULLSCAN_GUARD_ROWS;
+            let raw_rows: Vec<(String, serde_json::Value)> = if use_fts_fast {
+                let clean: String = target
+                    .chars()
+                    .filter(|ch| ch.is_ascii_alphanumeric())
+                    .collect();
+                if clean.is_empty() {
+                    return Ok(Vec::new());
+                }
+                let fts_q = format!("ipc_codes : (\"{clean}\"*)");
+                let mut stmt = c.prepare(
+                    "SELECT p.id, p.patent_number, p.title, p.abstract_text, p.applicant, p.filing_date, p.country, p.ipc_codes
+                     FROM (SELECT rowid FROM patents_fts WHERE patents_fts MATCH ?1 LIMIT 300) f
+                     INNER JOIN patents p ON p.rowid = f.rowid
+                     ORDER BY p.filing_date DESC",
+                )?;
+                let items: Vec<(String, serde_json::Value)> = stmt
+                    .query_map(params![fts_q], |row| {
+                        let ipc_raw: String = row.get::<_, String>(7).unwrap_or_default();
+                        Ok((
+                            ipc_raw.clone(),
+                            serde_json::json!({
+                                "id": row.get::<_, String>(0)?,
+                                "patent_number": row.get::<_, String>(1)?,
+                                "title": row.get::<_, String>(2)?,
+                                "abstract_text": row.get::<_, String>(3).unwrap_or_default(),
+                                "applicant": row.get::<_, String>(4).unwrap_or_default(),
+                                "filing_date": row.get::<_, String>(5).unwrap_or_default(),
+                                "country": row.get::<_, String>(6).unwrap_or_default(),
+                                "ipc_codes": ipc_raw,
+                            }),
+                        ))
+                    })?
+                    .filter_map(|r| r.ok())
+                    .collect();
+                items
+            } else {
+                let pattern = format!("%{}%", target);
+                // 先放大候选取 300 条，再对解析出的真实 IPC 列表执行严格前缀匹配（防止查部类 "F" 误命中 "G06F"）
+                let mut stmt = c.prepare(
+                    "SELECT id, patent_number, title, abstract_text, applicant, filing_date, country, ipc_codes
+                     FROM patents WHERE ipc_codes LIKE ?1 ORDER BY filing_date DESC LIMIT 300",
+                )?;
+                let items: Vec<(String, serde_json::Value)> = stmt
+                    .query_map(params![pattern], |row| {
+                        let ipc_raw: String = row.get::<_, String>(7).unwrap_or_default();
+                        Ok((
+                            ipc_raw.clone(),
+                            serde_json::json!({
+                                "id": row.get::<_, String>(0)?,
+                                "patent_number": row.get::<_, String>(1)?,
+                                "title": row.get::<_, String>(2)?,
+                                "abstract_text": row.get::<_, String>(3).unwrap_or_default(),
+                                "applicant": row.get::<_, String>(4).unwrap_or_default(),
+                                "filing_date": row.get::<_, String>(5).unwrap_or_default(),
+                                "country": row.get::<_, String>(6).unwrap_or_default(),
+                                "ipc_codes": ipc_raw,
+                            }),
+                        ))
+                    })?
+                    .filter_map(|r| r.ok())
+                    .collect();
+                items
+            };
+            let rows = raw_rows
+                .into_iter()
+                .filter(|(ipc_raw, _)| {
+                    crate::routes::parse_ipc_code_list(ipc_raw)
+                        .iter()
+                        .any(|c| c.starts_with(&target))
+                })
+                .take(100)
+                .map(|(_, val)| val)
+                .collect();
+            Ok(rows)
+        })
     }
 
     fn row_to_patent(r: &rusqlite::Row) -> Patent {
@@ -1165,23 +1595,24 @@ impl super::Database {
         if family_id.trim().is_empty() {
             return Ok(Vec::new());
         }
-        let c = self.conn();
-        let mut stmt = c.prepare(
-            "SELECT id,patent_number,title,abstract_text,description,claims,applicant,inventor,
-                    filing_date,publication_date,grant_date,ipc_codes,cpc_codes,priority_date,
-                    country,kind_code,family_id,legal_status,citations,cited_by,source,raw_json,
-                    created_at,images,pdf_url
-             FROM patents
-             WHERE family_id = ?1 AND patent_number <> ?2
-             LIMIT 30",
-        )?;
-        let rows = stmt
-            .query_map(params![family_id.trim(), exclude_patent_number], |r| {
-                Ok(Self::row_to_patent(r))
-            })?
-            .filter_map(|r| r.ok())
-            .collect();
-        Ok(rows)
+        self.with_read_conn(|c| {
+            let mut stmt = c.prepare(
+                "SELECT id,patent_number,title,abstract_text,description,claims,applicant,inventor,
+                        filing_date,publication_date,grant_date,ipc_codes,cpc_codes,priority_date,
+                        country,kind_code,family_id,legal_status,citations,cited_by,source,raw_json,
+                        created_at,images,pdf_url
+                 FROM patents
+                 WHERE family_id = ?1 AND patent_number <> ?2
+                 LIMIT 30",
+            )?;
+            let rows = stmt
+                .query_map(params![family_id.trim(), exclude_patent_number], |r| {
+                    Ok(Self::row_to_patent(r))
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
+            Ok(rows)
+        })
     }
 }
 
@@ -1305,5 +1736,80 @@ mod insert_dedup_tests {
             .expect("exists");
         assert_eq!(by_norm.id, "newer-fulltext-id");
         assert!(by_norm.claims.contains("螺旋流道"));
+    }
+
+    #[test]
+    fn fts_fast_path_handles_chinese_parentheses_and_concurrent_wal_reader_never_blocks() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let db_file = tmp.path().join("concurrent_read.db");
+        let db = std::sync::Arc::new(
+            Database::init(db_file.to_str().expect("path")).expect("init file db"),
+        );
+        db.insert_patent(&Patent {
+            id: "wal-read-1".into(),
+            patent_number: "CN990951A".into(),
+            title: "绿色建材 低碳胶凝材料".into(),
+            abstract_text: "建筑环保材料制备工艺".into(),
+            applicant: "星辰（示例）绿色建材有限公司".into(),
+            ipc_codes: "[\"C04B 28/00\"]".into(),
+            filing_date: "2026-05-01".into(),
+            country: "CN".into(),
+            ..Default::default()
+        })
+        .expect("insert");
+
+        // 验证带中文括号的公司名在 FTS5 通道下无语法错误且精准命中（含无过滤子查询路径与过滤路径）
+        let (rows, total) = db
+            .with_read_conn(|c| {
+                Database::search_fts_with_filters_on_conn(
+                    c,
+                    "星辰（示例）绿色建材有限公司",
+                    Some("applicant"),
+                    Some("CN"),
+                    "",
+                    "",
+                    1,
+                    10,
+                    false,
+                )
+            })
+            .expect("fts applicant query");
+        assert_eq!(total, 1);
+        assert_eq!(rows[0].patent_number, "CN990951A");
+
+        let (unfiltered_rows, unfiltered_total) = db
+            .with_read_conn(|c| {
+                Database::search_fts_with_filters_on_conn(
+                    c,
+                    "星辰（示例）绿色建材有限公司",
+                    Some("applicant"),
+                    None,
+                    "",
+                    "",
+                    1,
+                    10,
+                    false,
+                )
+            })
+            .expect("fts applicant unfiltered query");
+        assert_eq!(unfiltered_total, 1);
+        assert_eq!(unfiltered_rows[0].patent_number, "CN990951A");
+
+        // 反卡死核心实测：主连接互斥锁 `db.conn()` 被故意持有时，独立 WAL 只读连接必须毫秒级完成查询不阻塞！
+        let _hold_main_mutex = db.conn();
+        let db_reader = db.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let fts_res = db_reader.search_fts("绿色建材", 1, 10).map(|(_, t)| t);
+            let batch_res = db_reader
+                .get_patents_by_numbers(&["cn 990951 a".to_string()])
+                .map(|v| v.len());
+            let _ = tx.send((fts_res, batch_res));
+        });
+        let (fts_res, batch_res) = rx
+            .recv_timeout(std::time::Duration::from_secs(3))
+            .expect("WAL concurrent reader must not block while main conn mutex is held");
+        assert_eq!(fts_res.expect("search_fts ok"), 1);
+        assert_eq!(batch_res.expect("get_patents_by_numbers ok"), 1);
     }
 }

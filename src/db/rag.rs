@@ -107,7 +107,7 @@ impl Database {
     ) -> Result<rusqlite::Connection, rusqlite::Error> {
         let conn = rusqlite::Connection::open(db_path)?;
         conn.execute_batch(
-            "PRAGMA busy_timeout=15000; PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA temp_store=MEMORY; PRAGMA cache_size=-16000;",
+            "PRAGMA busy_timeout=30000; PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA temp_store=MEMORY; PRAGMA cache_size=-16000;",
         )?;
         Ok(conn)
     }
@@ -156,10 +156,10 @@ impl Database {
                 break;
             }
             let (batch_imp, batch_chunks) = if let Some(ref mut writer) = dedicated_conn {
-                Self::write_patent_batch_in_tx(writer, batch, lightweight, model_name)?
+                Self::write_patent_batch_in_tx_with_retry(writer, batch, lightweight, model_name)?
             } else {
                 let mut c = self.conn();
-                Self::write_patent_batch_in_tx(&mut c, batch, lightweight, model_name)?
+                Self::write_patent_batch_in_tx_with_retry(&mut c, batch, lightweight, model_name)?
             };
             imported += batch_imp;
             chunks_written += batch_chunks;
@@ -181,6 +181,24 @@ impl Database {
             }
         }
         Ok((imported, chunks_written, cancelled))
+    }
+
+    fn write_patent_batch_in_tx_with_retry(
+        c: &mut rusqlite::Connection,
+        batch: &[crate::patent::Patent],
+        lightweight: bool,
+        model_name: &str,
+    ) -> Result<(usize, usize), rusqlite::Error> {
+        for attempt in 1..=6u32 {
+            match Self::write_patent_batch_in_tx(c, batch, lightweight, model_name) {
+                Ok(res) => return Ok(res),
+                Err(e) if format!("{e}").contains("database is locked") && attempt < 6 => {
+                    std::thread::sleep(std::time::Duration::from_millis(250 * u64::from(attempt)));
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        Self::write_patent_batch_in_tx(c, batch, lightweight, model_name)
     }
 
     fn write_patent_batch_in_tx(

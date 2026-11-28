@@ -136,6 +136,30 @@ impl Database {
         Ok(v)
     }
 
+    /// 为大库高频只读查询（检索、IPC 聚合等）打开独立 SQLite WAL 只读连接：
+    /// 在 WAL 模式下读者之间、读者与写者之间 100% 并发不互斥，彻底避免慢查询占死全局 `self.conn` 互斥锁卡死全站。
+    /// 内存库（`:memory:`）返回 `None`，自动回退主连接。
+    pub(crate) fn open_concurrent_wal_reader(&self) -> Option<Connection> {
+        let path = self.db_path.as_deref()?;
+        let flags =
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX;
+        let conn = Connection::open_with_flags(path, flags).ok()?;
+        let _ = conn.execute_batch(
+            "PRAGMA query_only=ON; PRAGMA busy_timeout=15000; PRAGMA temp_store=MEMORY; PRAGMA cache_size=-16000;",
+        );
+        Some(conn)
+    }
+
+    /// 在文件库上优先走独立 WAL 并发只读连接执行只读闭包，内存库自动回退 `self.conn()`。
+    pub(crate) fn with_read_conn<T>(&self, f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
+        if let Some(conn) = self.open_concurrent_wal_reader() {
+            f(&conn)
+        } else {
+            let c = self.conn();
+            f(&c)
+        }
+    }
+
     /// 使用 SQLite 原生 `VACUUM INTO` 生成一致热备份快照文件，返回文件大小（字节）。
     pub fn vacuum_into_backup(&self, dest_path: &std::path::Path) -> Result<u64> {
         for comp in dest_path.components() {
