@@ -83,9 +83,10 @@ impl Database {
         };
         // busy_timeout：并发启动/并行读写时不要立刻 SQLITE_BUSY（#77）；
         // synchronous=NORMAL：WAL 下足以保证崩溃一致性，同时少一次 fsync；
-        // cache_size=-16000 / temp_store=MEMORY：给覆盖索引与排序常驻 16MB 内存缓存，避免 42MB 主表重复扫盘。
+        // journal_size_limit=32MB + wal_autocheckpoint=1000：硬限制 WAL 文件体积上限，杜绝 GB 级批量导入后 WAL 膨胀至数百 MB 拖慢读写与重启恢复；
+        // cache_size=-16000 / temp_store=MEMORY：给覆盖索引与排序常驻 16MB 内存缓存，避免主表重复扫盘。
         conn.execute_batch(
-            "PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA temp_store=MEMORY; PRAGMA cache_size=-16000;",
+            "PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA wal_autocheckpoint=1000; PRAGMA journal_size_limit=33554432; PRAGMA temp_store=MEMORY; PRAGMA cache_size=-16000;",
         )?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);",
@@ -108,6 +109,20 @@ impl Database {
                 Some(std::path::PathBuf::from(trimmed))
             }
         };
+
+        // 启动自愈：若上次异常退出或大规模导入留下 >32MB 未截断 WAL，启动时自动 TRUNCATE 回收磁盘并避免后续每读一次都扫数万 WAL 帧
+        if let Some(ref p) = db_path {
+            let wal_path = std::path::PathBuf::from(format!("{}-wal", p.display()));
+            if let Ok(meta) = std::fs::metadata(&wal_path) {
+                if meta.len() > 32 * 1024 * 1024 {
+                    tracing::info!(
+                        "Detected large leftover WAL ({:.1} MB), running startup TRUNCATE checkpoint...",
+                        meta.len() as f64 / (1024.0 * 1024.0)
+                    );
+                    let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+                }
+            }
+        }
 
         Ok(Self {
             conn: Mutex::new(conn),
