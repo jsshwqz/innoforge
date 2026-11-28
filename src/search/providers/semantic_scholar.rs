@@ -219,14 +219,14 @@ impl SemanticScholarProvider {
         }
     }
 
-    fn outcome_patents(
-        &self,
+    fn outcome_patents_with_db(
+        db: &Database,
         query: &SearchQuery,
         rows: Vec<serde_json::Value>,
     ) -> Vec<PatentSummary> {
         let cn_query = matches!(query.language, Some(Lang::Chinese));
         let mut patents = rank_and_gate_hits(
-            self.db.as_ref(),
+            db,
             SOURCE_LABEL,
             query.keyword.trim(),
             cn_query,
@@ -301,7 +301,11 @@ impl SearchProvider for SemanticScholarProvider {
                 };
 
             let patents = if matches!(status, AttemptStatus::Success) {
-                self.outcome_patents(&query, rows)
+                let db = self.db.clone();
+                let q = query.clone();
+                tokio::task::spawn_blocking(move || Self::outcome_patents_with_db(&db, &q, rows))
+                    .await
+                    .unwrap_or_default()
             } else {
                 Vec::new()
             };

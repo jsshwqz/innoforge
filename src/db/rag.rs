@@ -140,6 +140,7 @@ impl Database {
     ) -> Result<(usize, usize, bool), rusqlite::Error> {
         use std::sync::atomic::Ordering;
 
+        let _bulk_guard = self.begin_bulk_write();
         let chunk_size = if lightweight { 100 } else { 50 };
         let total_batches = patents.len().div_ceil(chunk_size);
         let mut dedicated_conn = self

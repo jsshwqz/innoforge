@@ -165,23 +165,48 @@ impl super::Database {
             }
         }
 
-        // Delete old FTS entry if replacing
-        if let Err(e) = c.execute(
-            "DELETE FROM patents_fts WHERE rowid = (SELECT rowid FROM patents WHERE id = ?1)",
-            params![final_id],
-        ) {
-            tracing::warn!("FTS delete for patent {} failed: {}", final_id, e);
+        // 将旧 FTS 清理 + 主表写入 + 新 FTS 插入合入单次 SAVEPOINT 事务：
+        // 1) 闲时合并为单次 WAL fsync（3x 提速）；2) 忙时首条即快速失败并原子回滚，避免连撞 3 次 5s busy_timeout。
+        c.execute_batch("SAVEPOINT innoforge_insert_patent")?;
+        let write_res: Result<()> = (|| {
+            // Delete old FTS entry if replacing
+            if let Err(e) = c.execute(
+                "DELETE FROM patents_fts WHERE rowid = (SELECT rowid FROM patents WHERE id = ?1)",
+                params![final_id],
+            ) {
+                let lower = e.to_string().to_lowercase();
+                if lower.contains("locked") || lower.contains("busy") {
+                    return Err(e.into());
+                }
+                tracing::warn!("FTS delete for patent {} failed: {}", final_id, e);
+            }
+            c.execute("INSERT OR REPLACE INTO patents (id,patent_number,title,abstract_text,description,claims,applicant,inventor,filing_date,publication_date,grant_date,ipc_codes,cpc_codes,priority_date,country,kind_code,family_id,legal_status,citations,cited_by,source,raw_json,images,pdf_url) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24)",
+                params![final_id,p.patent_number,final_title,final_abstract,final_description,final_claims,final_applicant,final_inventor,final_filing_date,final_pub_date,final_grant_date,final_ipc,final_cpc,final_priority_date,p.country,p.kind_code,final_family_id,final_legal_status,final_citations,final_cited_by,p.source,p.raw_json,final_images,final_pdf_url])?;
+            // Insert single row into FTS index (incremental, not full rebuild)
+            if let Err(e) = c.execute(
+                "INSERT INTO patents_fts(rowid, patent_number, title, abstract_text, claims, applicant, inventor, ipc_codes) SELECT rowid, patent_number, title, abstract_text, claims, applicant, inventor, ipc_codes FROM patents WHERE id = ?1",
+                params![final_id],
+            ) {
+                let lower = e.to_string().to_lowercase();
+                if lower.contains("locked") || lower.contains("busy") {
+                    return Err(e.into());
+                }
+                tracing::warn!("FTS insert for patent {} failed: {}", final_id, e);
+            }
+            Ok(())
+        })();
+        match write_res {
+            Ok(()) => {
+                c.execute_batch("RELEASE SAVEPOINT innoforge_insert_patent")?;
+                Ok(final_id)
+            }
+            Err(e) => {
+                let _ = c.execute_batch(
+                    "ROLLBACK TO SAVEPOINT innoforge_insert_patent; RELEASE SAVEPOINT innoforge_insert_patent",
+                );
+                Err(e)
+            }
         }
-        c.execute("INSERT OR REPLACE INTO patents (id,patent_number,title,abstract_text,description,claims,applicant,inventor,filing_date,publication_date,grant_date,ipc_codes,cpc_codes,priority_date,country,kind_code,family_id,legal_status,citations,cited_by,source,raw_json,images,pdf_url) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24)",
-            params![final_id,p.patent_number,final_title,final_abstract,final_description,final_claims,final_applicant,final_inventor,final_filing_date,final_pub_date,final_grant_date,final_ipc,final_cpc,final_priority_date,p.country,p.kind_code,final_family_id,final_legal_status,final_citations,final_cited_by,p.source,p.raw_json,final_images,final_pdf_url])?;
-        // Insert single row into FTS index (incremental, not full rebuild)
-        if let Err(e) = c.execute(
-            "INSERT INTO patents_fts(rowid, patent_number, title, abstract_text, claims, applicant, inventor, ipc_codes) SELECT rowid, patent_number, title, abstract_text, claims, applicant, inventor, ipc_codes FROM patents WHERE id = ?1",
-            params![final_id],
-        ) {
-            tracing::warn!("FTS insert for patent {} failed: {}", final_id, e);
-        }
-        Ok(final_id)
     }
 
     /// 局部更新单篇专利标题并同步更新 FTS 索引

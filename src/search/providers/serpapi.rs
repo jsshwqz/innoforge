@@ -201,6 +201,7 @@ impl SerpApiProvider {
     /// AGENTS.md 2.2 禁止同一打分链路存在第二份实现）。本方法只剩「注入本源的字段映射器
     /// [`serp_to_patent`]」这一层职责，行为与 MA1 逐字一致，
     /// 等价性继续由 `outcome_patents_match_legacy_mapping` 对**迁移前**参照实现逐字段比对锁死。
+    #[allow(dead_code)]
     fn outcome_patents(
         &self,
         keyword: &str,
@@ -405,7 +406,22 @@ impl SearchProvider for SerpApiProvider {
                 }
             }
             if matches!(status, AttemptStatus::Success) && parsed_ok {
-                patents = self.outcome_patents(&query.keyword, is_cn_query(&query), &raw_rows);
+                let db = self.db.clone();
+                let kw = query.keyword.clone();
+                let cn = is_cn_query(&query);
+                let rows_for_rank = std::mem::take(&mut raw_rows);
+                patents = tokio::task::spawn_blocking(move || {
+                    rank_and_gate_hits(
+                        db.as_ref(),
+                        SourceKind::SerpApi.as_str(),
+                        &kw,
+                        cn,
+                        &rows_for_rank,
+                        serp_to_patent,
+                    )
+                })
+                .await
+                .unwrap_or_default();
                 // 旧代码只在这条「解析成功但零结果」的路径上补该文案；
                 // 网络/读体失败等路径不得顺手覆盖，否则用户可见提示会变。
                 if patents.is_empty() {

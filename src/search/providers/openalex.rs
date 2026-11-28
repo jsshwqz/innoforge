@@ -255,21 +255,15 @@ impl OpenAlexProvider {
 
     /// 命中行 → `PatentSummary[]`（打分/放行/中文过滤/去重走共用的
     /// [`rank_and_gate_hits`]，避免第二份实现）。
-    fn outcome_patents(
-        &self,
+    fn outcome_patents_with_db(
+        db: &Database,
         query: &SearchQuery,
         rows: Vec<serde_json::Value>,
     ) -> Vec<PatentSummary> {
         let cn_query = matches!(query.language, Some(Lang::Chinese));
         let keyword = query.keyword.trim();
-        let mut patents = rank_and_gate_hits(
-            self.db.as_ref(),
-            SOURCE_LABEL,
-            keyword,
-            cn_query,
-            &rows,
-            work_to_patent,
-        );
+        let mut patents =
+            rank_and_gate_hits(db, SOURCE_LABEL, keyword, cn_query, &rows, work_to_patent);
         if query.limit > 0 && patents.len() > query.limit {
             patents.truncate(query.limit);
         }
@@ -506,7 +500,11 @@ impl SearchProvider for OpenAlexProvider {
             };
 
             let patents = if matches!(status, AttemptStatus::Success) {
-                self.outcome_patents(&query, rows)
+                let db = self.db.clone();
+                let q = query.clone();
+                tokio::task::spawn_blocking(move || Self::outcome_patents_with_db(&db, &q, rows))
+                    .await
+                    .unwrap_or_default()
             } else {
                 Vec::new()
             };
