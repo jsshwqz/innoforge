@@ -3126,7 +3126,8 @@ pub async fn api_search_expand_citations(
         let mut backward_targets: HashMap<String, Vec<String>> = HashMap::new();
         let mut forward_targets: HashMap<String, Vec<String>> = HashMap::new();
         let mut family_seeds: HashMap<String, Vec<String>> = HashMap::new();
-        let mut ipc_freq: HashMap<String, usize> = HashMap::new();
+        // (文档频次 DF, 原始出现次 TF)：按覆盖种子篇数优先排序，防单篇专利挂 5 个辅助细分 IPC 压过所有种子共有的核心 IPC
+        let mut ipc_freq: HashMap<String, (usize, usize)> = HashMap::new();
 
         for p in &seeds {
             let seed_label = if p.patent_number.trim().is_empty() {
@@ -3163,9 +3164,14 @@ pub async fn api_search_expand_citations(
                     .or_default()
                     .push(seed_label.clone());
             }
+            let mut seen_in_seed: HashSet<String> = HashSet::new();
             for code in crate::routes::parse_ipc_code_list(&p.ipc_codes) {
                 if let Some(pref) = ipc_snowball_prefix(&code) {
-                    *ipc_freq.entry(pref).or_insert(0) += 1;
+                    let entry = ipc_freq.entry(pref.clone()).or_insert((0, 0));
+                    if seen_in_seed.insert(pref) {
+                        entry.0 += 1;
+                    }
+                    entry.1 += 1;
                 }
             }
         }
@@ -3283,8 +3289,13 @@ pub async fn api_search_expand_citations(
         }
 
         // 通道 4：同 IPC 高频子空间 + 内存 512 维专利 IDF 语义补漏（解决纯著录库无引文与换表述漏检）
-        let mut ipc_sorted: Vec<(String, usize)> = ipc_freq.into_iter().collect();
-        ipc_sorted.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        let mut ipc_sorted: Vec<(String, (usize, usize))> = ipc_freq.into_iter().collect();
+        ipc_sorted.sort_by(|a, b| {
+            b.1 .0
+                .cmp(&a.1 .0)
+                .then_with(|| b.1 .1.cmp(&a.1 .1))
+                .then_with(|| a.0.cmp(&b.0))
+        });
         let top_ipcs: Vec<String> = ipc_sorted.into_iter().take(2).map(|(k, _)| k).collect();
 
         for ipc in &top_ipcs {
@@ -3730,5 +3741,52 @@ mod search_dedup_pagination_tests {
         assert_eq!(res["breakdown"]["backward_citation"].as_u64(), Some(1));
         assert_eq!(res["breakdown"]["patent_family"].as_u64(), Some(1));
         assert_eq!(res["breakdown"]["co_ipc_semantic"].as_u64(), Some(1));
+    }
+
+    #[tokio::test]
+    async fn api_search_expand_citations_ranks_shared_core_ipc_by_document_frequency() {
+        let state = crate::common::init_app_state(":memory:").expect("init app state");
+        let seed_a = crate::patent::Patent {
+            id: "df-seed-a".into(),
+            patent_number: "CN990601A".into(),
+            title: "便携式医用高压氧舱".into(),
+            abstract_text: "医用加压供氧治疗舱结构".into(),
+            ipc_codes: "[\"A61G 10/02\"]".into(),
+            country: "CN".into(),
+            ..Default::default()
+        };
+        let seed_b = crate::patent::Patent {
+            id: "df-seed-b".into(),
+            patent_number: "CN990602A".into(),
+            title: "高原微压氧舱板材拼装结构".into(),
+            abstract_text: "微压供氧舱体拼装壁板与密封条".into(),
+            // 单篇挂 4 个 E04C 2/* 辅助分类号 + 1 个共享核心分类号 A61G 10/02
+            ipc_codes: "[\"E04C 2/292\",\"E04C 2/30\",\"E04C 2/34\",\"E04C 2/38\",\"A61G 10/02\"]"
+                .into(),
+            country: "CN".into(),
+            ..Default::default()
+        };
+        for p in [&seed_a, &seed_b] {
+            state.db.insert_patent(p).expect("insert seed");
+        }
+        let res = api_search_expand_citations(
+            State(state),
+            Json(json!({
+                "query": "高压氧舱",
+                "seed_ids": ["df-seed-a", "df-seed-b"],
+                "limit": 10
+            })),
+        )
+        .await
+        .0;
+        let top_ipcs: Vec<&str> = res["top_ipcs"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|v| v.as_str()).collect())
+            .unwrap_or_default();
+        assert_eq!(
+            top_ipcs.first().copied(),
+            Some("A61G10"),
+            "跨种子共有核心 IPC A61G10(DF=2) 必须排在单篇多细分 E04C2(DF=1) 之前: {top_ipcs:?}"
+        );
     }
 }
