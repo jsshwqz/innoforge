@@ -2950,6 +2950,480 @@ pub async fn api_export_xlsx(
     }
 }
 
+/// 从专利的 `citations` / `cited_by` 字段解析规范公开号列表（兼容 JSON 字符串数组、对象数组与分隔串）。
+fn extract_citation_numbers(raw: &str) -> Vec<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed == "[]" {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) {
+        if let Some(arr) = val.as_array() {
+            for item in arr {
+                let s = if let Some(txt) = item.as_str() {
+                    Some(txt)
+                } else {
+                    item.get("patent_number")
+                        .or_else(|| item.get("publication_number"))
+                        .or_else(|| item.get("number"))
+                        .or_else(|| item.get("id"))
+                        .and_then(|v| v.as_str())
+                };
+                if let Some(num) = s.map(str::trim).filter(|v| !v.is_empty()) {
+                    out.push(num.to_string());
+                }
+            }
+            return out;
+        }
+    }
+    for part in trimmed.split([',', ';', '，', '；', '\n']) {
+        let p = part.trim();
+        if p.chars().count() >= 5 {
+            out.push(p.to_string());
+        }
+    }
+    out
+}
+
+/// 从规范 IPC 串提取主组前缀（如 `A61G10/02` -> `A61G10`），用于同 IPC 语义补漏召回。
+fn ipc_snowball_prefix(code: &str) -> Option<String> {
+    let before_slash = code.split('/').next().unwrap_or(code);
+    let clean: String = before_slash
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect::<String>()
+        .to_uppercase();
+    if clean.len() >= 4 {
+        Some(clean)
+    } else {
+        None
+    }
+}
+
+/// 二阶段混合检索补漏端点（Ambercite 引文网络 + 同族关联 + 同 IPC 内存向量语义重排）：
+/// 1) 零磁盘膨胀：全部在无锁 WAL 并发只读连接与内存中完成（不强制全量写向量表）；
+/// 2) 专治「换了术语但技术同源」的对比文件漏检：沿种子专利的前后向引文、同族 ID 与高频主 IPC 展开并按专利 IDF 余弦相似度精排。
+pub async fn api_search_expand_citations(
+    State(s): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let started = Instant::now();
+    let query = req["query"].as_str().unwrap_or("").trim().to_string();
+    let limit = req["limit"].as_u64().unwrap_or(15).clamp(1, 30) as usize;
+
+    let seed_ids: Vec<String> = req["seed_ids"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(str::trim))
+                .filter(|v| !v.is_empty())
+                .take(20)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    let seed_numbers: Vec<String> = req["seed_numbers"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(str::trim))
+                .filter(|v| !v.is_empty())
+                .take(20)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+
+    if seed_ids.is_empty() && seed_numbers.is_empty() {
+        return Json(json!({
+            "patents": [],
+            "total": 0,
+            "seed_count": 0,
+            "top_ipcs": [],
+            "breakdown": {
+                "backward_citation": 0,
+                "forward_citation": 0,
+                "patent_family": 0,
+                "co_ipc_semantic": 0
+            },
+            "elapsed_ms": started.elapsed().as_millis() as u64,
+            "error": "请先执行一次检索或勾选至少 1 篇种子专利后再展开补漏"
+        }));
+    }
+
+    let db = s.db.clone();
+    let query_clone = query.clone();
+    let out = tokio::task::spawn_blocking(move || {
+        use std::collections::{HashMap, HashSet};
+
+        // 1. 通过无锁 WAL 只读连接解析种子专利全文元数据
+        let mut seeds_by_id: HashMap<String, crate::patent::Patent> = HashMap::new();
+        if !seed_ids.is_empty() {
+            if let Ok(list) = db.get_patents_by_ids(&seed_ids) {
+                for p in list {
+                    seeds_by_id.insert(p.id.clone(), p);
+                }
+            }
+        }
+        if !seed_numbers.is_empty() {
+            if let Ok(list) = db.get_patents_by_numbers(&seed_numbers) {
+                for p in list {
+                    seeds_by_id.entry(p.id.clone()).or_insert(p);
+                }
+            }
+        }
+        let seeds: Vec<crate::patent::Patent> = seeds_by_id.into_values().collect();
+        let seed_count = seeds.len();
+
+        let mut exclude_ids: HashSet<String> = seed_ids.iter().cloned().collect();
+        let mut exclude_keys: HashSet<String> = seed_numbers
+            .iter()
+            .map(|n| crate::patent::canonical_patent_key(n))
+            .filter(|k| !k.is_empty())
+            .collect();
+        for p in &seeds {
+            exclude_ids.insert(p.id.clone());
+            let ck = crate::patent::canonical_patent_key(&p.patent_number);
+            if !ck.is_empty() {
+                exclude_keys.insert(ck);
+            }
+        }
+
+        // 2. 在内存中构造 512 维专利 IDF 查询画像（查询词 + 前 6 篇种子专利标题/摘要）
+        let mut profile_parts: Vec<String> = Vec::new();
+        if !query_clone.is_empty() {
+            profile_parts.push(query_clone.clone());
+        }
+        for p in seeds.iter().take(6) {
+            if !p.title.trim().is_empty() {
+                profile_parts.push(p.title.clone());
+            }
+            let abs_snip: String = p.abstract_text.chars().take(240).collect();
+            if !abs_snip.trim().is_empty() {
+                profile_parts.push(abs_snip);
+            }
+        }
+        let seed_vec = crate::db::vector::compute_tfidf_embedding(&profile_parts.join(" "));
+
+        struct Candidate {
+            id: String,
+            patent_number: String,
+            title: String,
+            abstract_text: String,
+            applicant: String,
+            inventor: String,
+            filing_date: String,
+            country: String,
+            ipc_codes: String,
+            relation_type: &'static str,
+            relation_label: String,
+            via_seeds: Vec<String>,
+            base_score: f64,
+            semantic_sim: f64,
+        }
+
+        let mut cands: HashMap<String, Candidate> = HashMap::new();
+        let mut backward_targets: HashMap<String, Vec<String>> = HashMap::new();
+        let mut forward_targets: HashMap<String, Vec<String>> = HashMap::new();
+        let mut family_seeds: HashMap<String, Vec<String>> = HashMap::new();
+        let mut ipc_freq: HashMap<String, usize> = HashMap::new();
+
+        for p in &seeds {
+            let seed_label = if p.patent_number.trim().is_empty() {
+                p.id.clone()
+            } else {
+                p.patent_number.clone()
+            };
+            for cnum in extract_citation_numbers(&p.citations) {
+                let ck = crate::patent::canonical_patent_key(&cnum);
+                if !ck.is_empty() && !exclude_keys.contains(&ck) {
+                    backward_targets
+                        .entry(cnum)
+                        .or_default()
+                        .push(seed_label.clone());
+                }
+            }
+            for cnum in extract_citation_numbers(&p.cited_by) {
+                let ck = crate::patent::canonical_patent_key(&cnum);
+                if !ck.is_empty() && !exclude_keys.contains(&ck) {
+                    forward_targets
+                        .entry(cnum)
+                        .or_default()
+                        .push(seed_label.clone());
+                }
+            }
+            if let Some(fid) = p
+                .family_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                family_seeds
+                    .entry(fid.to_string())
+                    .or_default()
+                    .push(seed_label.clone());
+            }
+            for code in crate::routes::parse_ipc_code_list(&p.ipc_codes) {
+                if let Some(pref) = ipc_snowball_prefix(&code) {
+                    *ipc_freq.entry(pref).or_insert(0) += 1;
+                }
+            }
+        }
+
+        let mut insert_patent_candidate =
+            |p: crate::patent::Patent,
+             rel_type: &'static str,
+             rel_label: String,
+             via: Vec<String>,
+             base_score: f64| {
+                let ck = crate::patent::canonical_patent_key(&p.patent_number);
+                if exclude_ids.contains(&p.id) || (!ck.is_empty() && exclude_keys.contains(&ck)) {
+                    return;
+                }
+                let dedup_key = if ck.is_empty() { p.id.clone() } else { ck };
+                if let Some(existing) = cands.get_mut(&dedup_key) {
+                    if base_score > existing.base_score {
+                        existing.base_score = base_score;
+                        existing.relation_type = rel_type;
+                        existing.relation_label = rel_label;
+                    }
+                    for s in via {
+                        if !existing.via_seeds.contains(&s) && existing.via_seeds.len() < 4 {
+                            existing.via_seeds.push(s);
+                        }
+                    }
+                    return;
+                }
+                let cand_vec = crate::db::vector::compute_tfidf_embedding(&format!(
+                    "{} {}",
+                    p.title, p.abstract_text
+                ));
+                let sim =
+                    crate::db::vector::cosine_similarity(&seed_vec, &cand_vec).max(0.0) as f64;
+                cands.insert(
+                    dedup_key,
+                    Candidate {
+                        id: p.id,
+                        patent_number: p.patent_number,
+                        title: p.title,
+                        abstract_text: p.abstract_text,
+                        applicant: p.applicant,
+                        inventor: p.inventor,
+                        filing_date: p.filing_date,
+                        country: p.country,
+                        ipc_codes: p.ipc_codes,
+                        relation_type: rel_type,
+                        relation_label: rel_label,
+                        via_seeds: via.into_iter().take(4).collect(),
+                        base_score,
+                        semantic_sim: sim,
+                    },
+                );
+            };
+
+        // 通道 1：后向引证对比文件（走 4.8ms 规范号表达式索引批量查库）
+        if !backward_targets.is_empty() {
+            let nums: Vec<String> = backward_targets.keys().take(80).cloned().collect();
+            if let Ok(found) = db.get_patents_by_numbers(&nums) {
+                for p in found {
+                    let ck = crate::patent::canonical_patent_key(&p.patent_number);
+                    let via: Vec<String> = backward_targets
+                        .iter()
+                        .filter(|(k, _)| crate::patent::canonical_patent_key(k) == ck)
+                        .flat_map(|(_, v)| v.iter().cloned())
+                        .collect();
+                    let co = via.len().clamp(1, 4) as f64;
+                    insert_patent_candidate(
+                        p,
+                        "backward_citation",
+                        "引证对比文件".to_string(),
+                        via,
+                        58.0 + co * 9.0,
+                    );
+                }
+            }
+        }
+
+        // 通道 2：前向被引用演进专利
+        if !forward_targets.is_empty() {
+            let nums: Vec<String> = forward_targets.keys().take(80).cloned().collect();
+            if let Ok(found) = db.get_patents_by_numbers(&nums) {
+                for p in found {
+                    let ck = crate::patent::canonical_patent_key(&p.patent_number);
+                    let via: Vec<String> = forward_targets
+                        .iter()
+                        .filter(|(k, _)| crate::patent::canonical_patent_key(k) == ck)
+                        .flat_map(|(_, v)| v.iter().cloned())
+                        .collect();
+                    let co = via.len().clamp(1, 4) as f64;
+                    insert_patent_candidate(
+                        p,
+                        "forward_citation",
+                        "被引用演进".to_string(),
+                        via,
+                        52.0 + co * 8.0,
+                    );
+                }
+            }
+        }
+
+        // 通道 3：同族专利（family_id）
+        for (fid, via) in family_seeds.into_iter().take(5) {
+            if let Ok(fam) = db.list_family_patents(&fid, "") {
+                for p in fam {
+                    insert_patent_candidate(
+                        p,
+                        "patent_family",
+                        format!("同族关联 ({fid})"),
+                        via.clone(),
+                        66.0,
+                    );
+                }
+            }
+        }
+
+        // 通道 4：同 IPC 高频子空间 + 内存 512 维专利 IDF 语义补漏（解决纯著录库无引文与换表述漏检）
+        let mut ipc_sorted: Vec<(String, usize)> = ipc_freq.into_iter().collect();
+        ipc_sorted.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        let top_ipcs: Vec<String> = ipc_sorted.into_iter().take(2).map(|(k, _)| k).collect();
+
+        for ipc in &top_ipcs {
+            if let Ok(ipc_rows) = db.search_by_ipc(ipc) {
+                for row in ipc_rows {
+                    let id = row["id"].as_str().unwrap_or("").to_string();
+                    let pn = row["patent_number"].as_str().unwrap_or("").to_string();
+                    let title = row["title"].as_str().unwrap_or("").to_string();
+                    let abstract_text = row["abstract_text"].as_str().unwrap_or("").to_string();
+                    if id.is_empty() || title.trim().is_empty() {
+                        continue;
+                    }
+                    let ck = crate::patent::canonical_patent_key(&pn);
+                    if exclude_ids.contains(&id) || (!ck.is_empty() && exclude_keys.contains(&ck)) {
+                        continue;
+                    }
+                    let dedup_key = if ck.is_empty() { id.clone() } else { ck };
+                    if cands.contains_key(&dedup_key) {
+                        continue;
+                    }
+                    let cand_vec = crate::db::vector::compute_tfidf_embedding(&format!(
+                        "{} {}",
+                        title, abstract_text
+                    ));
+                    let sim =
+                        crate::db::vector::cosine_similarity(&seed_vec, &cand_vec).max(0.0) as f64;
+                    if sim < 0.12 {
+                        continue;
+                    }
+                    cands.insert(
+                        dedup_key,
+                        Candidate {
+                            id,
+                            patent_number: pn,
+                            title,
+                            abstract_text,
+                            applicant: row["applicant"].as_str().unwrap_or("").to_string(),
+                            inventor: String::new(),
+                            filing_date: row["filing_date"].as_str().unwrap_or("").to_string(),
+                            country: row["country"].as_str().unwrap_or("").to_string(),
+                            ipc_codes: row["ipc_codes"].as_str().unwrap_or("").to_string(),
+                            relation_type: "co_ipc_semantic",
+                            relation_label: format!("同IPC语义补漏 ({ipc})"),
+                            via_seeds: vec![ipc.clone()],
+                            base_score: (36.0 + sim * 62.0).clamp(36.0, 95.0),
+                            semantic_sim: sim,
+                        },
+                    );
+                }
+            }
+        }
+
+        let mut ranked: Vec<(f64, Candidate)> = cands
+            .into_values()
+            .map(|c| {
+                let final_score = if c.relation_type == "co_ipc_semantic" {
+                    c.base_score
+                } else {
+                    (c.base_score + c.semantic_sim * 25.0).min(99.0)
+                };
+                (final_score, c)
+            })
+            .collect();
+        ranked.sort_by(|a, b| {
+            b.0.partial_cmp(&a.0)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| b.1.filing_date.cmp(&a.1.filing_date))
+        });
+        ranked.truncate(limit);
+
+        let mut cnt_back = 0usize;
+        let mut cnt_fwd = 0usize;
+        let mut cnt_fam = 0usize;
+        let mut cnt_ipc = 0usize;
+        let items: Vec<serde_json::Value> = ranked
+            .into_iter()
+            .map(|(score, c)| {
+                match c.relation_type {
+                    "backward_citation" => cnt_back += 1,
+                    "forward_citation" => cnt_fwd += 1,
+                    "patent_family" => cnt_fam += 1,
+                    _ => cnt_ipc += 1,
+                }
+                let abs_preview: String = c.abstract_text.chars().take(180).collect();
+                json!({
+                    "id": c.id,
+                    "patent_number": c.patent_number,
+                    "title": c.title,
+                    "abstract_text": abs_preview,
+                    "applicant": c.applicant,
+                    "inventor": c.inventor,
+                    "filing_date": c.filing_date,
+                    "country": c.country,
+                    "ipc_codes": c.ipc_codes,
+                    "relevance_score": (score * 10.0).round() / 10.0,
+                    "semantic_pct": (c.semantic_sim * 100.0).round() as u32,
+                    "relation_type": c.relation_type,
+                    "relation_label": c.relation_label,
+                    "via_seeds": c.via_seeds,
+                    "score_source": c.relation_label,
+                })
+            })
+            .collect();
+
+        json!({
+            "patents": items,
+            "total": items.len(),
+            "seed_count": seed_count,
+            "top_ipcs": top_ipcs,
+            "breakdown": {
+                "backward_citation": cnt_back,
+                "forward_citation": cnt_fwd,
+                "patent_family": cnt_fam,
+                "co_ipc_semantic": cnt_ipc
+            },
+            "elapsed_ms": started.elapsed().as_millis() as u64
+        })
+    })
+    .await
+    .unwrap_or_else(|e| {
+        json!({
+            "patents": [],
+            "total": 0,
+            "seed_count": 0,
+            "top_ipcs": [],
+            "breakdown": {
+                "backward_citation": 0,
+                "forward_citation": 0,
+                "patent_family": 0,
+                "co_ipc_semantic": 0
+            },
+            "elapsed_ms": started.elapsed().as_millis() as u64,
+            "error": format!("引文补漏任务异常: {e}")
+        })
+    });
+
+    Json(out)
+}
+
 #[path = "search_tail.rs"]
 mod search_tail;
 use search_tail::item_matched_fields;
@@ -3161,5 +3635,100 @@ mod search_dedup_pagination_tests {
             Some(0),
             "完全无关查询禁止泄漏噪声结果"
         );
+    }
+
+    #[tokio::test]
+    async fn api_search_expand_citations_surfaces_citation_family_and_co_ipc_semantic_neighbors() {
+        let state = crate::common::init_app_state(":memory:").expect("init app state");
+        let seed = crate::patent::Patent {
+            id: "snow-seed-1".into(),
+            patent_number: "CN990501A".into(),
+            title: "便携式医用高压氧舱智能供氧稳压系统".into(),
+            abstract_text: "涉及医用加压供氧舱体结构、呼吸压力闭环调控与泄压安全阀。".into(),
+            ipc_codes: "[\"A61G10/02\"]".into(),
+            citations: "[\"CN990502A\"]".into(),
+            family_id: Some("FAM990501".into()),
+            country: "CN".into(),
+            filing_date: "2026-03-01".into(),
+            ..Default::default()
+        };
+        let cited = crate::patent::Patent {
+            id: "snow-cited-2".into(),
+            patent_number: "CN990502A".into(),
+            title: "高海拔密闭舱气密门锁定机构".into(),
+            abstract_text: "一种用于高海拔舱体的快速锁紧与密封门结构。".into(),
+            ipc_codes: "[\"E05B65/00\"]".into(),
+            country: "CN".into(),
+            filing_date: "2024-05-01".into(),
+            ..Default::default()
+        };
+        let fam = crate::patent::Patent {
+            id: "snow-fam-3".into(),
+            patent_number: "CN990503A".into(),
+            title: "医用微压舱多级过滤供氧模块".into(),
+            abstract_text: "同族分案，公开一种便携式加压供氧过滤组件。".into(),
+            ipc_codes: "[\"A61G10/02\"]".into(),
+            family_id: Some("FAM990501".into()),
+            country: "CN".into(),
+            filing_date: "2026-04-01".into(),
+            ..Default::default()
+        };
+        let co_ipc = crate::patent::Patent {
+            id: "snow-ipc-4".into(),
+            patent_number: "CN990504A".into(),
+            title: "医用加压供氧治疗室呼吸压力调控安全阀".into(),
+            abstract_text: "针对医用加压供氧与舱内呼吸压力闭环调控设计的双级安全泄压阀。".into(),
+            ipc_codes: "[\"A61G10/02\"]".into(),
+            country: "CN".into(),
+            filing_date: "2025-11-15".into(),
+            ..Default::default()
+        };
+        let noise = crate::patent::Patent {
+            id: "snow-noise-5".into(),
+            patent_number: "CN990505A".into(),
+            title: "折叠屏终端双轴铰链阻尼转轴".into(),
+            abstract_text: "移动终端柔性屏幕折叠转轴机械限位结构。".into(),
+            ipc_codes: "[\"H04M1/02\"]".into(),
+            country: "CN".into(),
+            filing_date: "2025-09-01".into(),
+            ..Default::default()
+        };
+        for p in [&seed, &cited, &fam, &co_ipc, &noise] {
+            state.db.insert_patent(p).expect("insert snowball fixture");
+        }
+
+        let res = api_search_expand_citations(
+            State(state),
+            Json(json!({
+                "query": "医用高压氧舱供氧稳压",
+                "seed_ids": ["snow-seed-1"],
+                "limit": 10
+            })),
+        )
+        .await
+        .0;
+
+        let patents = res["patents"].as_array().cloned().unwrap_or_default();
+        let nums: Vec<&str> = patents
+            .iter()
+            .filter_map(|p| p["patent_number"].as_str())
+            .collect();
+        assert!(!nums.contains(&"CN990501A"), "种子专利本身不应回流");
+        assert!(
+            nums.contains(&"CN990502A"),
+            "后向引证对比文件必须被召回: {nums:?}"
+        );
+        assert!(nums.contains(&"CN990503A"), "同族专利必须被召回: {nums:?}");
+        assert!(
+            nums.contains(&"CN990504A"),
+            "同IPC高语义相似邻近专利必须被召回: {nums:?}"
+        );
+        assert!(
+            !nums.contains(&"CN990505A"),
+            "跨领域噪声专利不得进入补漏结果: {nums:?}"
+        );
+        assert_eq!(res["breakdown"]["backward_citation"].as_u64(), Some(1));
+        assert_eq!(res["breakdown"]["patent_family"].as_u64(), Some(1));
+        assert_eq!(res["breakdown"]["co_ipc_semantic"].as_u64(), Some(1));
     }
 }
