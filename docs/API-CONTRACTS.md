@@ -4,7 +4,7 @@
 > `tests/api_contracts_up_to_date.rs` 会用同一脚本的 `--check` 模式比对，代码改了没重跑就红。
 > 叙述性说明、示例与业务语义仍写在 [`docs/API.md`](API.md)。
 
-共 **172** 条 `/api` 路由（另有 9 条页面/静态路由，见 [API-ROUTES.md](API-ROUTES.md)）。
+共 **175** 条 `/api` 路由（另有 9 条页面/静态路由，见 [API-ROUTES.md](API-ROUTES.md)）。
 
 ## 怎么读
 
@@ -18,12 +18,12 @@
 
 | 维度 | 数量 |
 | --- | --- |
-| `/api` 路由 | 172 |
-| 请求体是具体结构体 | 22 |
+| `/api` 路由 | 175 |
+| 请求体是具体结构体 | 23 |
 | 请求体是任意 JSON | 58 |
 | 其中能从函数体抽到请求键 | 57 |
-| 响应含可识别 JSON 顶层键 | 144 |
-| 引用的请求/查询类型已解析到 struct | 23/23 |
+| 响应含可识别 JSON 顶层键 | 147 |
+| 引用的请求/查询类型已解析到 struct | 24/24 |
 | 处理函数未找到 | 0 |
 
 ## 路由契约总表
@@ -184,24 +184,27 @@
 | 152 | GET / POST | `/api/patents/sync-folder` | — | `SyncFolderRequest` | — | JSON（§152） | `routes::api_get_patent_sync_folder`<br>`routes::api_sync_patent_folder` | `src/routes/patent_import.rs:2621`<br>`src/routes/patent_import.rs:2743` |
 | 153 | GET | `/api/patents/sync-folder/progress` | — | — | — | JSON（§153） | `routes::api_get_patent_sync_progress` | `src/routes/patent_import.rs:2721` |
 | 154 | POST | `/api/patents/sync-folder/cancel` | — | — | — | JSON（§154） | `routes::api_cancel_patent_sync` | `src/routes/patent_import.rs:2729` |
-| 155 | POST | `/api/backup/export` | — | — | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_backup_export` | `src/routes/settings.rs:1777` |
-| 156 | POST | `/api/backup/check` | — | 任意 JSON（§156） | — | JSON（§156） | `routes::api_backup_check` | `src/routes/settings.rs:1838` |
-| 157 | GET / POST | `/api/collections` | — | POST 任意 JSON（§157） | — | JSON（§157） | `routes::api_list_collections`<br>`routes::api_create_collection` | `src/routes/collections.rs:28`<br>`src/routes/collections.rs:8` |
-| 158 | DELETE | `/api/collections/:id` | `id` | — | — | JSON（§158） | `routes::api_delete_collection` | `src/routes/collections.rs:49` |
-| 159 | GET | `/api/collections/:id/patents` | `id` | — | — | JSON（§159） | `routes::api_get_collection_patents` | `src/routes/collections.rs:92` |
-| 160 | POST | `/api/collections/:id/add` | `id` | 任意 JSON（§160） | — | JSON（§160） | `routes::api_add_to_collection` | `src/routes/collections.rs:59` |
-| 161 | DELETE | `/api/collections/:id/remove/:patent_id` | `id`, `patent_id` | — | — | JSON（§161） | `routes::api_remove_from_collection` | `src/routes/collections.rs:82` |
-| 162 | GET / POST | `/api/patents/:id/tags` | `id` | POST 任意 JSON（§162） | — | JSON（§162） | `routes::api_get_patent_tags`<br>`routes::api_add_tag` | `src/routes/collections.rs:128`<br>`src/routes/collections.rs:102` |
-| 163 | DELETE | `/api/patents/:id/tags/:tag` | `id`, `tag` | — | — | JSON（§163） | `routes::api_remove_tag` | `src/routes/collections.rs:118` |
-| 164 | GET | `/api/patents/:id/collections` | `id` | — | — | JSON（§164） | `routes::api_get_patent_collections` | `src/routes/collections.rs:151` |
-| 165 | GET | `/api/tags` | — | — | — | JSON（§165） | `routes::api_list_all_tags` | `src/routes/collections.rs:138` |
-| 166 | POST | `/api/upload/compare` | — | — | — | JSON（§166） | `routes::api_upload_compare` | `src/routes/upload.rs:340` |
-| 167 | POST | `/api/upload/ingest-local` | — | 任意 JSON（§167） | — | JSON（§167） | `routes::api_upload_ingest_local` | `src/routes/upload.rs:802` |
-| 168 | POST | `/api/upload/extract` | — | — | — | JSON（§168） | `routes::api_upload_extract` | `src/routes/upload.rs:1105` |
-| 169 | POST | `/api/upload/extract/stream` | — | — | — | SSE 事件流（text/event-stream） | `routes::api_upload_extract_stream` | `src/routes/upload.rs:1333` |
-| 170 | POST | `/api/upload/pdf-store` | — | — | — | JSON（§170） | `routes::api_upload_pdf_store` | `src/routes/upload.rs:275` |
-| 171 | GET | `/api/patent/:id/numeral-check` | `id` | — | — | JSON（§171） | `routes::api_patent_numeral_check` | `src/routes/patent.rs:420` |
-| 172 | POST | `/api/ai/numeral-consistency-check` | — | 任意 JSON（§172） | — | JSON（§172） | `routes::api_ai_numeral_consistency_check` | `src/routes/patent.rs:465` |
+| 155 | GET / POST | `/api/patents/remote-sync` | — | `RemoteSyncRequest` | — | JSON（§155） | `routes::api_get_patent_remote_sync`<br>`routes::api_patent_remote_sync` | `src/routes/patent_remote_sync.rs:1413`<br>`src/routes/patent_remote_sync.rs:1483` |
+| 156 | GET | `/api/patents/remote-sync/progress` | — | — | — | JSON（§156） | `routes::api_get_patent_remote_sync_progress` | `src/routes/patent_remote_sync.rs:1459` |
+| 157 | POST | `/api/patents/remote-sync/cancel` | — | — | — | JSON（§157） | `routes::api_cancel_patent_remote_sync` | `src/routes/patent_remote_sync.rs:1467` |
+| 158 | POST | `/api/backup/export` | — | — | — | HTTP 响应（动态，状态码/正文见源码） | `routes::api_backup_export` | `src/routes/settings.rs:1777` |
+| 159 | POST | `/api/backup/check` | — | 任意 JSON（§159） | — | JSON（§159） | `routes::api_backup_check` | `src/routes/settings.rs:1838` |
+| 160 | GET / POST | `/api/collections` | — | POST 任意 JSON（§160） | — | JSON（§160） | `routes::api_list_collections`<br>`routes::api_create_collection` | `src/routes/collections.rs:28`<br>`src/routes/collections.rs:8` |
+| 161 | DELETE | `/api/collections/:id` | `id` | — | — | JSON（§161） | `routes::api_delete_collection` | `src/routes/collections.rs:49` |
+| 162 | GET | `/api/collections/:id/patents` | `id` | — | — | JSON（§162） | `routes::api_get_collection_patents` | `src/routes/collections.rs:92` |
+| 163 | POST | `/api/collections/:id/add` | `id` | 任意 JSON（§163） | — | JSON（§163） | `routes::api_add_to_collection` | `src/routes/collections.rs:59` |
+| 164 | DELETE | `/api/collections/:id/remove/:patent_id` | `id`, `patent_id` | — | — | JSON（§164） | `routes::api_remove_from_collection` | `src/routes/collections.rs:82` |
+| 165 | GET / POST | `/api/patents/:id/tags` | `id` | POST 任意 JSON（§165） | — | JSON（§165） | `routes::api_get_patent_tags`<br>`routes::api_add_tag` | `src/routes/collections.rs:128`<br>`src/routes/collections.rs:102` |
+| 166 | DELETE | `/api/patents/:id/tags/:tag` | `id`, `tag` | — | — | JSON（§166） | `routes::api_remove_tag` | `src/routes/collections.rs:118` |
+| 167 | GET | `/api/patents/:id/collections` | `id` | — | — | JSON（§167） | `routes::api_get_patent_collections` | `src/routes/collections.rs:151` |
+| 168 | GET | `/api/tags` | — | — | — | JSON（§168） | `routes::api_list_all_tags` | `src/routes/collections.rs:138` |
+| 169 | POST | `/api/upload/compare` | — | — | — | JSON（§169） | `routes::api_upload_compare` | `src/routes/upload.rs:340` |
+| 170 | POST | `/api/upload/ingest-local` | — | 任意 JSON（§170） | — | JSON（§170） | `routes::api_upload_ingest_local` | `src/routes/upload.rs:802` |
+| 171 | POST | `/api/upload/extract` | — | — | — | JSON（§171） | `routes::api_upload_extract` | `src/routes/upload.rs:1105` |
+| 172 | POST | `/api/upload/extract/stream` | — | — | — | SSE 事件流（text/event-stream） | `routes::api_upload_extract_stream` | `src/routes/upload.rs:1333` |
+| 173 | POST | `/api/upload/pdf-store` | — | — | — | JSON（§173） | `routes::api_upload_pdf_store` | `src/routes/upload.rs:275` |
+| 174 | GET | `/api/patent/:id/numeral-check` | `id` | — | — | JSON（§174） | `routes::api_patent_numeral_check` | `src/routes/patent.rs:420` |
+| 175 | POST | `/api/ai/numeral-consistency-check` | — | 任意 JSON（§175） | — | JSON（§175） | `routes::api_ai_numeral_consistency_check` | `src/routes/patent.rs:465` |
 
 ## 请求 / 查询类型字段
 
@@ -357,6 +360,25 @@
 | `research_state` | `Option<ResearchStateUpdateRequest>` | 是 |
 
 使用该类型的端点：`/api/idea/:id/redirect`
+
+### `RemoteSyncRequest`（请求体；定义于 `src/routes/patent_remote_sync.rs:48`）
+
+| 字段（JSON 名） | 类型 | 可省略 |
+| --- | --- | --- |
+| `mode` | `String` | 是 |
+| `url` | `String` | 是 |
+| `username` | `String` | 是 |
+| `password` | `Option<String>` | 是 |
+| `clear_password` | `bool` | 是 |
+| `token` | `Option<String>` | 是 |
+| `clear_token` | `bool` | 是 |
+| `ipc_prefix` | `String` | 是 |
+| `lightweight` | `bool` | 是 |
+| `auto_interval_mins` | `Option<u64>` | 是 |
+| `action` | `String` | 是 |
+| `force` | `bool` | 是 |
+
+使用该类型的端点：`/api/patents/remote-sync`
 
 ### `ReplaceClaimsRequest`（请求体；定义于 `src/routes/idea_ops.rs:255`）
 
@@ -1427,14 +1449,36 @@
 - 响应顶层键：`cancelling`、`job`、`status`
 - `status` 取值：ok
 
-### §156 POST `/api/backup/check`
+### §155 GET / POST `/api/patents/remote-sync`
+
+- **GET** `routes::api_get_patent_remote_sync`（`src/routes/patent_remote_sync.rs:1413`）
+  - 响应顶层键：`auto_interval_mins`、`free_disk_mb`、`ipc_prefix`、`job`、`last_at`、`last_summary`、`lightweight`、`mode`、`password_configured`、`status`、`token_configured`、`url`、`username`
+  - `status` 取值：ok
+- **POST** `routes::api_patent_remote_sync`（`src/routes/patent_remote_sync.rs:1483`）
+  - 请求体：`RemoteSyncRequest`（字段见上文类型表）
+  - 响应顶层键：`already_running`、`auto_interval_mins`、`deduped_pair_files`、`detected_files`、`job`、`message`、`mode`、`password_configured`、`pending_files`、`reachable`、`sample_files`、`saved`、`started`、`status`、`token_configured`、`total_size_mb`、`url`
+  - `status` 取值：error / ok
+
+### §156 GET `/api/patents/remote-sync/progress`
+
+- 源码：`src/routes/patent_remote_sync.rs:1459`
+- 响应顶层键：`job`、`status`
+- `status` 取值：ok
+
+### §157 POST `/api/patents/remote-sync/cancel`
+
+- 源码：`src/routes/patent_remote_sync.rs:1467`
+- 响应顶层键：`cancelling`、`job`、`status`
+- `status` 取值：ok
+
+### §159 POST `/api/backup/check`
 
 - 源码：`src/routes/settings.rs:1838`
 - 读取的请求键：`path`
 - 响应顶层键：`message`、`schema_version`、`size_bytes`、`status`、`valid_sqlite`
 - `status` 取值：error / ok
 
-### §157 GET / POST `/api/collections`
+### §160 GET / POST `/api/collections`
 
 - **GET** `routes::api_list_collections`（`src/routes/collections.rs:28`）
   - 响应顶层键：`collections`、`created_at`、`description`、`error`、`id`、`name`、`patent_count`
@@ -1443,31 +1487,31 @@
   - 响应顶层键：`error`、`id`、`name`、`status`
   - `status` 取值：ok
 
-### §158 DELETE `/api/collections/:id`
+### §161 DELETE `/api/collections/:id`
 
 - 源码：`src/routes/collections.rs:49`
 - 响应顶层键：`error`、`status`
 - `status` 取值：ok
 
-### §159 GET `/api/collections/:id/patents`
+### §162 GET `/api/collections/:id/patents`
 
 - 源码：`src/routes/collections.rs:92`
 - 响应顶层键：`error`、`patents`
 
-### §160 POST `/api/collections/:id/add`
+### §163 POST `/api/collections/:id/add`
 
 - 源码：`src/routes/collections.rs:59`
 - 读取的请求键：`patent_id`
 - 响应顶层键：`error`、`status`
 - `status` 取值：ok
 
-### §161 DELETE `/api/collections/:id/remove/:patent_id`
+### §164 DELETE `/api/collections/:id/remove/:patent_id`
 
 - 源码：`src/routes/collections.rs:82`
 - 响应顶层键：`error`、`status`
 - `status` 取值：ok
 
-### §162 GET / POST `/api/patents/:id/tags`
+### §165 GET / POST `/api/patents/:id/tags`
 
 - **GET** `routes::api_get_patent_tags`（`src/routes/collections.rs:128`）
   - 响应顶层键：`error`、`tags`
@@ -1476,57 +1520,57 @@
   - 响应顶层键：`error`、`status`
   - `status` 取值：ok
 
-### §163 DELETE `/api/patents/:id/tags/:tag`
+### §166 DELETE `/api/patents/:id/tags/:tag`
 
 - 源码：`src/routes/collections.rs:118`
 - 响应顶层键：`error`、`status`
 - `status` 取值：ok
 
-### §164 GET `/api/patents/:id/collections`
+### §167 GET `/api/patents/:id/collections`
 
 - 源码：`src/routes/collections.rs:151`
 - 响应顶层键：`collection_ids`、`error`
 
-### §165 GET `/api/tags`
+### §168 GET `/api/tags`
 
 - 源码：`src/routes/collections.rs:138`
 - 响应顶层键：`count`、`error`、`tag`、`tags`
 
-### §166 POST `/api/upload/compare`
+### §169 POST `/api/upload/compare`
 
 - 源码：`src/routes/upload.rs:340`
 - 响应顶层键：`analysis`、`content_length`、`doc_kind`、`error`、`file_count`、`file_name`、`file_type`、`files`、`success`
 
-### §167 POST `/api/upload/ingest-local`
+### §170 POST `/api/upload/ingest-local`
 
 - 源码：`src/routes/upload.rs:802`
 - 读取的请求键：`content`、`filename`
 - 响应顶层键：`detail_url`、`doc_kind`、`error`、`id`、`keywords`、`patent_number`、`source`、`status`、`title`
 - `status` 取值：error / ok
 
-### §168 POST `/api/upload/extract`
+### §171 POST `/api/upload/extract`
 
 - 源码：`src/routes/upload.rs:1105`
 - 响应顶层键：`char_length`、`file_type`、`length`、`text`、`truncated`
 
-### §169 POST `/api/upload/extract/stream`
+### §172 POST `/api/upload/extract/stream`
 
 - 源码：`src/routes/upload.rs:1333`
 - 响应顶层键：`char_length`、`file_type`、`length`、`method`、`text`、`total_pages`、`truncated`
 
-### §170 POST `/api/upload/pdf-store`
+### §173 POST `/api/upload/pdf-store`
 
 - 源码：`src/routes/upload.rs:275`
 - 响应顶层键：`filename`、`message`、`size`、`status`、`url`
 - `status` 取值：error / ok
 
-### §171 GET `/api/patent/:id/numeral-check`
+### §174 GET `/api/patent/:id/numeral-check`
 
 - 源码：`src/routes/patent.rs:420`
 - 响应顶层键：`issue_count`、`issues`、`message`、`parts`、`passed`、`patent_id`、`patent_number`、`status`、`summary`、`total_numerals`
 - `status` 取值：error / ok
 
-### §172 POST `/api/ai/numeral-consistency-check`
+### §175 POST `/api/ai/numeral-consistency-check`
 
 - 源码：`src/routes/patent.rs:465`
 - 读取的请求键：`claims_text`、`description_text`、`drawing_parts`

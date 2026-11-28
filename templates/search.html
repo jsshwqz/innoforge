@@ -183,6 +183,43 @@
     <div id="sync-folder-status" class="bulk-import-status"></div>
     <div id="sync-collector-status" class="bulk-import-status" style="display:none;color:#58a6ff;"></div>
   </div>
+
+  <div class="bulk-import-card" style="grid-column: 1 / -1;">
+    <div class="bulk-import-subtitle" data-i18n="bulk.remoteTitle">3. 多网盘 / 远端只读源订阅（接收方免注册 · 免客户端 · 协议无关）</div>
+    <div class="bulk-filter-chips" style="margin-bottom:8px;">
+      <button type="button" class="bulk-filter-chip" onclick="applyRemoteSyncPreset('openlist')" data-i18n="bulk.presetOpenlist">☁️ 天翼云/阿里云盘 (OpenList WebDAV)</button>
+      <button type="button" class="bulk-filter-chip" onclick="applyRemoteSyncPreset('r2')" data-i18n="bulk.presetR2">📦 Cloudflare R2 / OSS / COS (清单直连)</button>
+      <button type="button" class="bulk-filter-chip" onclick="applyRemoteSyncPreset('nas')" data-i18n="bulk.presetNas">🖥️ 坚果云 / 群晖 / Nextcloud (WebDAV)</button>
+    </div>
+    <div class="bulk-import-row" style="gap:8px;flex-wrap:wrap;">
+      <select id="remote-sync-mode" onchange="onRemoteSyncModeChange()" style="background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:6px 10px;font-size:12px;">
+        <option value="webdav" data-i18n="bulk.remoteModeWebdav">WebDAV 只读目录</option>
+        <option value="manifest" data-i18n="bulk.remoteModeManifest">HTTP(S) 清单源 (R2/OSS)</option>
+      </select>
+      <input type="text" id="remote-sync-url" style="flex:2;min-width:240px;" data-i18n-placeholder="bulk.remoteUrlPlaceholder" placeholder="如 https://alist.example.com/dav/patents 或 https://r2.example.com/patents/">
+      <input type="text" id="remote-sync-user" style="flex:0.7;min-width:110px;" data-i18n-placeholder="bulk.remoteUserPlaceholder" placeholder="只读账号（可选）">
+      <input type="password" id="remote-sync-secret" style="flex:0.9;min-width:130px;" data-i18n-placeholder="bulk.remoteSecretPlaceholder" placeholder="只读口令 / Token（可选）" autocomplete="new-password">
+    </div>
+    <div class="bulk-import-row" style="margin-top:8px;">
+      <button type="button" class="btn-secondary btn-sm" id="btn-remote-test" onclick="runRemotePatentSync('test', false)" data-i18n="bulk.remoteTestBtn">🔌 测试连接</button>
+      <button type="button" class="btn-primary btn-sm" id="btn-remote-sync" onclick="runRemotePatentSync('sync', false)" data-i18n="bulk.remoteSyncBtn">☁️ 一键增量拉取</button>
+      <button type="button" class="btn-secondary btn-sm" id="btn-remote-force" onclick="runRemotePatentSync('sync', true)" data-i18n="bulk.remoteForceBtn">♻️ 全量重拉</button>
+      <button type="button" class="btn-secondary btn-sm" id="btn-remote-cancel" style="display:none;color:#f85149;border-color:#f85149;" onclick="cancelRemotePatentSync()" data-i18n="bulk.remoteCancelBtn">⏹ 停止拉取</button>
+      <label class="bulk-import-field-label" for="remote-auto-interval" style="margin:0 0 0 6px;display:inline-flex;align-items:center;gap:6px;">
+        <span data-i18n="bulk.remoteAutoLabel">定时拉取</span>
+        <select id="remote-auto-interval" onchange="saveRemoteAutoSyncInterval()" style="background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:4px 8px;font-size:12px;">
+          <option value="0" data-i18n="bulk.remoteAutoOff">关闭（手动）</option>
+          <option value="30" data-i18n="bulk.remoteAuto30m">每 30 分钟</option>
+          <option value="60" data-i18n="bulk.remoteAuto60m">每 1 小时</option>
+          <option value="360" data-i18n="bulk.remoteAuto360m">每 6 小时</option>
+        </select>
+      </label>
+    </div>
+    <div id="remote-sync-progress-wrap" class="bulk-sync-progress-wrap" style="display:none;">
+      <div id="remote-sync-progress-bar" class="bulk-sync-progress-bar"></div>
+    </div>
+    <div id="remote-sync-status" class="bulk-import-status"></div>
+  </div>
 </div>
 </div>
 </div>
@@ -311,6 +348,30 @@ function clearSearchPdfMeta() {
     'bulk.auto60m': '每 1 小时',
     'bulk.auto360m': '每 6 小时',
     'bulk.autoSaved': '✅ 已保存自动增量巡检设置',
+    'bulk.remoteTitle': '3. 多网盘 / 远端只读源订阅（接收方免注册 · 免客户端 · 协议无关）',
+    'bulk.presetOpenlist': '☁️ 天翼云/阿里云盘 (OpenList WebDAV)',
+    'bulk.presetR2': '📦 Cloudflare R2 / OSS / COS (清单直连)',
+    'bulk.presetNas': '🖥️ 坚果云 / 群晖 / Nextcloud (WebDAV)',
+    'bulk.remoteModeWebdav': 'WebDAV 只读目录',
+    'bulk.remoteModeManifest': 'HTTP(S) 清单源 (R2/OSS)',
+    'bulk.remoteUrlPlaceholder': '如 https://alist.example.com/dav/patents 或 https://r2.example.com/patents/',
+    'bulk.remoteUserPlaceholder': '只读账号（可选）',
+    'bulk.remoteSecretPlaceholder': '只读口令 / Token（可选）',
+    'bulk.remoteSecretSaved': '已保存凭证（留空保持不变）',
+    'bulk.remoteTestBtn': '🔌 测试连接',
+    'bulk.remoteSyncBtn': '☁️ 一键增量拉取',
+    'bulk.remoteForceBtn': '♻️ 全量重拉',
+    'bulk.remoteCancelBtn': '⏹ 停止拉取',
+    'bulk.remoteAutoLabel': '定时拉取',
+    'bulk.remoteAutoOff': '关闭（手动）',
+    'bulk.remoteAuto30m': '每 30 分钟',
+    'bulk.remoteAuto60m': '每 1 小时',
+    'bulk.remoteAuto360m': '每 6 小时',
+    'bulk.remoteEnterUrl': '请先填写远端 WebDAV 或清单源 http(s) 地址',
+    'bulk.remoteTesting': '🔌 正在测试远端连接并探测可同步文件...',
+    'bulk.remoteSyncing': '⏳ 正在连接远端源并启动增量流式拉取...',
+    'bulk.remoteCancelling': '⏹ 正在优雅停止远端同步并保留断点...',
+    'bulk.remoteAutoSaved': '✅ 已保存远端定时增量拉取设置',
     'bulk.syncCancelling': '⏹ 正在安全停止并保存已完成断点...',
     'bulk.uploading': '⏳ 正在解析并批量写入本地专利库...',
     'bulk.syncing': '⏳ 正在递归增量扫描目录并写入本地专利库...',
@@ -449,6 +510,30 @@ function clearSearchPdfMeta() {
     'bulk.auto60m': 'Every 1h',
     'bulk.auto360m': 'Every 6h',
     'bulk.autoSaved': '✅ Auto incremental poll interval saved',
+    'bulk.remoteTitle': '3. Multi-Cloud / Remote Read-Only Feed (Zero Signup · Protocol-Agnostic)',
+    'bulk.presetOpenlist': '☁️ 189Cloud/Aliyun (OpenList WebDAV)',
+    'bulk.presetR2': '📦 Cloudflare R2 / OSS / COS (Manifest)',
+    'bulk.presetNas': '🖥️ Nutstore / Synology / Nextcloud (WebDAV)',
+    'bulk.remoteModeWebdav': 'WebDAV Read-Only Dir',
+    'bulk.remoteModeManifest': 'HTTP(S) Manifest Feed',
+    'bulk.remoteUrlPlaceholder': 'e.g. https://alist.example.com/dav/patents or https://r2.example.com/patents/',
+    'bulk.remoteUserPlaceholder': 'Read-only user (optional)',
+    'bulk.remoteSecretPlaceholder': 'Password / Bearer Token (optional)',
+    'bulk.remoteSecretSaved': 'Saved secret (leave blank to keep)',
+    'bulk.remoteTestBtn': '🔌 Test Connection',
+    'bulk.remoteSyncBtn': '☁️ Incremental Pull',
+    'bulk.remoteForceBtn': '♻️ Full Repull',
+    'bulk.remoteCancelBtn': '⏹ Stop Pull',
+    'bulk.remoteAutoLabel': 'Auto-Pull',
+    'bulk.remoteAutoOff': 'Off (Manual)',
+    'bulk.remoteAuto30m': 'Every 30m',
+    'bulk.remoteAuto60m': 'Every 1h',
+    'bulk.remoteAuto360m': 'Every 6h',
+    'bulk.remoteEnterUrl': 'Please enter a remote WebDAV or manifest http(s) URL first',
+    'bulk.remoteTesting': '🔌 Testing remote connection and listing syncable files...',
+    'bulk.remoteSyncing': '⏳ Connecting to remote source and starting incremental stream...',
+    'bulk.remoteCancelling': '⏹ Stopping remote sync cleanly and saving checkpoint...',
+    'bulk.remoteAutoSaved': '✅ Remote auto-pull interval saved',
     'bulk.syncCancelling': '⏹ Stopping safely and saving checkpoint...',
     'bulk.uploading': '⏳ Parsing and importing into local patent DB...',
     'bulk.syncing': '⏳ Recursively scanning folder and importing new/updated files...',
@@ -2963,7 +3048,310 @@ async function syncPatentFolder(forceRescan) {
     }
 }
 
+let remoteSyncPollTimer = null;
+
+function stopRemoteSyncPolling() {
+    if (remoteSyncPollTimer) {
+        clearInterval(remoteSyncPollTimer);
+        remoteSyncPollTimer = null;
+    }
+}
+
+function setRemoteSyncButtonsRunning(running) {
+    const btnTest = document.getElementById('btn-remote-test');
+    const btnSync = document.getElementById('btn-remote-sync');
+    const btnForce = document.getElementById('btn-remote-force');
+    const btnCancel = document.getElementById('btn-remote-cancel');
+    if (btnTest) btnTest.disabled = running;
+    if (btnSync) btnSync.disabled = running;
+    if (btnForce) btnForce.disabled = running;
+    if (btnCancel) {
+        btnCancel.style.display = running ? 'inline-block' : 'none';
+        btnCancel.disabled = false;
+    }
+}
+
+function onRemoteSyncModeChange() {
+    const modeEl = document.getElementById('remote-sync-mode');
+    const userEl = document.getElementById('remote-sync-user');
+    if (!modeEl || !userEl) return;
+    userEl.style.display = modeEl.value === 'manifest' ? 'none' : '';
+}
+
+function applyRemoteSyncPreset(preset) {
+    const modeEl = document.getElementById('remote-sync-mode');
+    const urlEl = document.getElementById('remote-sync-url');
+    const userEl = document.getElementById('remote-sync-user');
+    const statusEl = document.getElementById('remote-sync-status');
+    if (!modeEl || !urlEl) return;
+    if (preset === 'r2') {
+        modeEl.value = 'manifest';
+        urlEl.placeholder = 'https://r2.example.com/patents/ (或阿里云 OSS / 腾讯云 COS 目录地址)';
+        if (statusEl) {
+            statusEl.style.color = '#8b949e';
+            statusEl.textContent = i18nLang === 'en'
+                ? 'Preset: HTTP(S) Manifest Feed — upload innoforge-feed.json + .jsonl.gz to Cloudflare R2 / OSS / COS; subscribers need zero cloud accounts.'
+                : '已切换「HTTP 清单直连」：用 tools/build_patent_feed.py 压缩上传至 Cloudflare R2 / 阿里云 OSS / 腾讯云 COS 后，他人贴 URL 免注册直连。';
+        }
+    } else if (preset === 'nas') {
+        modeEl.value = 'webdav';
+        urlEl.placeholder = 'https://dav.jianguoyun.com/dav/patents 或 https://nas.example.com:5006/patents';
+        if (userEl && !userEl.value) userEl.placeholder = i18nLang === 'en' ? 'WebDAV username' : 'WebDAV 只读账号';
+        if (statusEl) {
+            statusEl.style.color = '#8b949e';
+            statusEl.textContent = i18nLang === 'en'
+                ? 'Preset: Native WebDAV — compatible with Nutstore, Synology NAS, Nextcloud, and OwnCloud.'
+                : '已切换「标准 WebDAV」：原生兼容坚果云、群晖 NAS、Nextcloud、OwnCloud 只读目录。';
+        }
+    } else {
+        modeEl.value = 'webdav';
+        urlEl.placeholder = 'https://alist.example.com/dav/patents (OpenList/AList 挂载天翼云/阿里云盘)';
+        if (userEl && !userEl.value) userEl.placeholder = 'reader（OpenList 只读账号）';
+        if (statusEl) {
+            statusEl.style.color = '#8b949e';
+            statusEl.textContent = i18nLang === 'en'
+                ? 'Preset: OpenList/AList WebDAV — mount 189Cloud/AliyunDrive with 302 redirect + read-only user; subscribers need zero cloud accounts.'
+                : '已切换「OpenList WebDAV」：挂载天翼云/阿里云盘并选 302 重定向 + 只读账号（基本路径锁死 /patents），他人免注册网盘满速直拉。';
+        }
+    }
+    onRemoteSyncModeChange();
+}
+
+function renderRemoteSyncJob(job) {
+    const statusEl = document.getElementById('remote-sync-status');
+    const wrapEl = document.getElementById('remote-sync-progress-wrap');
+    const barEl = document.getElementById('remote-sync-progress-bar');
+    if (!statusEl || !job) return;
+
+    const total = Number(job.files_total || 0);
+    const done = Number(job.files_done || 0);
+    const pct = total > 0 ? Math.min(100, Math.round((done / total) * 1000) / 10) : (job.state === 'done' ? 100 : 0);
+    const dlMb = (Number(job.bytes_downloaded || 0) / (1024 * 1024)).toFixed(1);
+
+    if (job.state === 'running') {
+        setRemoteSyncButtonsRunning(true);
+        if (wrapEl) wrapEl.style.display = 'block';
+        if (barEl) barEl.style.width = Math.max(2, pct) + '%';
+        const curNote = job.current_file ? (' · ' + job.current_file) : '';
+        statusEl.style.color = '#58a6ff';
+        statusEl.textContent = i18nLang === 'en'
+            ? ('⏳ Remote syncing [' + done + '/' + total + ' · ' + pct + '%] · imported ' + Number(job.imported_patents || 0) + ' · ' + dlMb + ' MB' + curNote)
+            : ('⏳ 远端同步中 [' + done + '/' + total + ' 文件 · ' + pct + '%] · 已入库 ' + Number(job.imported_patents || 0) + ' 件 · 已下载 ' + dlMb + ' MB' + curNote);
+        return;
+    }
+
+    stopRemoteSyncPolling();
+    setRemoteSyncButtonsRunning(false);
+    if (wrapEl) wrapEl.style.display = job.state === 'idle' ? 'none' : 'block';
+    if (barEl) barEl.style.width = (job.state === 'done' ? 100 : pct) + '%';
+    if (job.state === 'idle') return;
+
+    const isWarn = job.state === 'cancelled' || job.state === 'paused_disk_low';
+    const isErr = job.state === 'error';
+    statusEl.style.color = isErr ? '#f85149' : isWarn ? '#d29922' : '#3fb950';
+    let msg = (isErr ? '❌ ' : isWarn ? '' : '✅ ') + (job.summary || ('远端导入 ' + Number(job.imported_patents || 0) + ' 件'));
+    if (Array.isArray(job.errors) && job.errors.length > 0 && !msg.includes(job.errors[0])) {
+        msg += ' · ⚠️ ' + job.errors[0];
+    }
+    statusEl.textContent = '';
+    const span = document.createElement('span');
+    span.textContent = msg;
+    statusEl.appendChild(span);
+    if (Number(job.imported_patents || 0) > 0) {
+        const samples = Array.isArray(job.sample_numbers) ? job.sample_numbers : [];
+        const firstSample = samples.length > 0 ? samples[0] : '';
+        const jumpBtn = document.createElement('button');
+        jumpBtn.type = 'button';
+        jumpBtn.className = 'btn-secondary btn-sm';
+        jumpBtn.style.marginLeft = '8px';
+        jumpBtn.textContent = t('bulk.searchLocalNow');
+        jumpBtn.addEventListener('click', function() { quickSearchLocalAfterImport(firstSample); });
+        statusEl.appendChild(jumpBtn);
+    }
+}
+
+async function pollRemoteSyncProgressOnce() {
+    try {
+        const resp = await fetch('/api/patents/remote-sync/progress');
+        const data = await resp.json();
+        if (data.status === 'ok' && data.job) {
+            renderRemoteSyncJob(data.job);
+        }
+    } catch (_) { /* ignore transient poll hiccup */ }
+}
+
+function startRemoteSyncPolling() {
+    stopRemoteSyncPolling();
+    remoteSyncPollTimer = setInterval(pollRemoteSyncProgressOnce, 1000);
+}
+
+function buildRemoteSyncPayload(action, forceRescan) {
+    const modeEl = document.getElementById('remote-sync-mode');
+    const urlEl = document.getElementById('remote-sync-url');
+    const userEl = document.getElementById('remote-sync-user');
+    const secretEl = document.getElementById('remote-sync-secret');
+    const ipcEl = document.getElementById('table-ipc-filter');
+    const lwEl = document.getElementById('table-lightweight-cb');
+    const autoEl = document.getElementById('remote-auto-interval');
+    const mode = modeEl ? modeEl.value : 'webdav';
+    const secretVal = secretEl ? secretEl.value : '';
+    return {
+        mode: mode,
+        url: urlEl ? urlEl.value.trim() : '',
+        username: userEl ? userEl.value.trim() : '',
+        password: mode === 'webdav' && secretVal ? secretVal : null,
+        token: mode === 'manifest' && secretVal ? secretVal : null,
+        ipc_prefix: ipcEl ? ipcEl.value.trim() : '',
+        lightweight: lwEl ? Boolean(lwEl.checked) : true,
+        auto_interval_mins: autoEl ? Number(autoEl.value || 0) : 0,
+        action: action,
+        force: Boolean(forceRescan)
+    };
+}
+
+async function saveRemoteAutoSyncInterval() {
+    const statusEl = document.getElementById('remote-sync-status');
+    const payload = buildRemoteSyncPayload('save', false);
+    if (!payload.url && payload.auto_interval_mins > 0) {
+        if (statusEl) {
+            statusEl.style.color = '#d29922';
+            statusEl.textContent = t('bulk.remoteEnterUrl');
+        }
+        return;
+    }
+    try {
+        const resp = await fetch('/api/patents/remote-sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await resp.json();
+        if (data.status === 'ok' && statusEl) {
+            statusEl.style.color = '#3fb950';
+            statusEl.textContent = t('bulk.remoteAutoSaved') + (payload.auto_interval_mins > 0 ? (' (' + payload.auto_interval_mins + ' min)') : '');
+        }
+    } catch (_) { /* ignore transient save error */ }
+}
+
+async function cancelRemotePatentSync() {
+    const btnCancel = document.getElementById('btn-remote-cancel');
+    const statusEl = document.getElementById('remote-sync-status');
+    if (btnCancel) btnCancel.disabled = true;
+    if (statusEl) {
+        statusEl.style.color = '#d29922';
+        statusEl.textContent = t('bulk.remoteCancelling');
+    }
+    try {
+        const resp = await fetch('/api/patents/remote-sync/cancel', { method: 'POST' });
+        const data = await resp.json();
+        if (data.status === 'ok' && data.job && data.job.state !== 'running') {
+            renderRemoteSyncJob(data.job);
+        }
+    } catch (err) {
+        if (statusEl) {
+            statusEl.style.color = '#f85149';
+            statusEl.textContent = '❌ ' + err.message;
+        }
+    }
+}
+
+async function runRemotePatentSync(action, forceRescan) {
+    const statusEl = document.getElementById('remote-sync-status');
+    const payload = buildRemoteSyncPayload(action, forceRescan);
+    if (looksLikeFilePathForIpc(payload.ipc_prefix)) {
+        if (statusEl) {
+            statusEl.style.color = '#f85149';
+            statusEl.textContent = t('bulk.ipcLooksLikePath');
+        }
+        return;
+    }
+    if (!payload.url) {
+        if (statusEl) {
+            statusEl.style.color = '#d29922';
+            statusEl.textContent = t('bulk.remoteEnterUrl');
+        }
+        return;
+    }
+    if (statusEl) {
+        statusEl.style.color = '#58a6ff';
+        statusEl.textContent = action === 'test' ? t('bulk.remoteTesting') : t('bulk.remoteSyncing');
+    }
+    if (action === 'sync') setRemoteSyncButtonsRunning(true);
+    try {
+        const resp = await fetch('/api/patents/remote-sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await resp.json();
+        if (data.status !== 'ok') {
+            setRemoteSyncButtonsRunning(false);
+            if (statusEl) {
+                statusEl.style.color = '#f85149';
+                statusEl.textContent = '❌ ' + (data.message || '远端操作失败');
+            }
+            return;
+        }
+        if (action === 'test') {
+            if (statusEl) {
+                statusEl.style.color = '#3fb950';
+                statusEl.textContent = '✅ ' + (data.message || ('发现 ' + Number(data.detected_files || 0) + ' 个文件'));
+            }
+            return;
+        }
+        if (data.job) {
+            renderRemoteSyncJob(data.job);
+            if (data.job.state === 'running') {
+                startRemoteSyncPolling();
+            }
+        } else {
+            setRemoteSyncButtonsRunning(false);
+        }
+    } catch (err) {
+        setRemoteSyncButtonsRunning(false);
+        if (statusEl) {
+            statusEl.style.color = '#f85149';
+            statusEl.textContent = '❌ ' + err.message;
+        }
+    }
+}
+
+async function loadPatentRemoteSyncStatus() {
+    const modeEl = document.getElementById('remote-sync-mode');
+    const urlEl = document.getElementById('remote-sync-url');
+    const userEl = document.getElementById('remote-sync-user');
+    const secretEl = document.getElementById('remote-sync-secret');
+    const autoEl = document.getElementById('remote-auto-interval');
+    const statusEl = document.getElementById('remote-sync-status');
+    if (!urlEl || !statusEl) return;
+    try {
+        const resp = await fetch('/api/patents/remote-sync');
+        const data = await resp.json();
+        if (data.status !== 'ok') return;
+        if (modeEl && data.mode) modeEl.value = data.mode;
+        if (data.url) urlEl.value = data.url;
+        if (userEl && data.username) userEl.value = data.username;
+        if (secretEl && (data.password_configured || data.token_configured)) {
+            secretEl.placeholder = t('bulk.remoteSecretSaved');
+        }
+        if (autoEl && typeof data.auto_interval_mins === 'number') {
+            autoEl.value = String(data.auto_interval_mins);
+        }
+        onRemoteSyncModeChange();
+        if (data.job && data.job.state === 'running') {
+            renderRemoteSyncJob(data.job);
+            startRemoteSyncPolling();
+            return;
+        }
+        if (data.url && data.last_at) {
+            statusEl.style.color = '#8b949e';
+            statusEl.textContent = data.last_at + (data.last_summary ? (' · ' + data.last_summary) : '');
+        }
+    } catch (_) { /* ignore initial load error */ }
+}
+
 loadPatentSyncFolderStatus();
+loadPatentRemoteSyncStatus();
 </script>
 <script>
 if ('serviceWorker' in navigator) {
