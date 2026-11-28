@@ -299,6 +299,24 @@ pub fn is_online_result_relevant(
     content_score >= 40.0
 }
 
+/// 判断在线结果的申请人字段是否直接匹配查询词（忽略空白与中英文括号形态差异）。
+///
+/// 解决企业/高校申请人检索时标题与摘要通常不含公司名称、被正文相关度门槛（45 分）整页误杀的问题。
+fn applicant_matches_online_query(query: &str, applicant: &str) -> bool {
+    let normalize = |s: &str| -> String {
+        s.chars()
+            .filter(|c| !c.is_whitespace() && !matches!(c, '(' | ')' | '（' | '）'))
+            .collect::<String>()
+            .to_lowercase()
+    };
+    let nq = normalize(query);
+    let na = normalize(applicant);
+    if nq.chars().count() < 2 || na.chars().count() < 2 {
+        return false;
+    }
+    na.contains(&nq) || (na.chars().count() >= 4 && nq.contains(&na))
+}
+
 /// 在线源命中行的统一处理链路（MA2a 自 `SerpApiProvider::outcome_patents` 抽出，逐步骤等价）：
 ///
 /// 1. `to_patent` 把该源的一条原始记录映射为域内 [`Patent`]（各源字段名不同，映射归各源自己）；
@@ -392,14 +410,17 @@ where
             &p.inventor,
             content_score
         );
-        if !is_online_result_relevant(
-            keyword,
-            &p.title,
-            &p.abstract_text,
-            content_score,
-            cn_query,
-            &p.inventor,
-        ) {
+        let applicant_hit = applicant_matches_online_query(keyword, &p.applicant);
+        if !applicant_hit
+            && !is_online_result_relevant(
+                keyword,
+                &p.title,
+                &p.abstract_text,
+                content_score,
+                cn_query,
+                &p.inventor,
+            )
+        {
             continue;
         }
         let score = (position_score * 0.4 + content_score * 0.6).min(100.0);
@@ -649,5 +670,39 @@ mod tests {
         assert!(db.get_patent("CN990992A").expect("get").is_none());
         drop(_guard);
         assert!(!db.is_bulk_write_active());
+    }
+
+    #[test]
+    fn rank_and_gate_preserves_applicant_match_with_cjk_parens() {
+        let db = Database::init(":memory:").expect("init db");
+        let rows = vec![serde_json::json!({
+            "patent_number": "CN990995A",
+            "title": "一种再生骨料低碳混凝土制备工艺",
+            "abstract": "本发明涉及装配式建筑材料拌合工艺。",
+            "applicant": "星辰(广东)绿色建筑材料有限公司",
+            "inventor": "王某"
+        })];
+        let hits = rank_and_gate_hits(
+            &db,
+            "test_provider",
+            "星辰（广东）绿色建筑材料有限公司",
+            true,
+            &rows,
+            |row| Patent {
+                id: "app-match-1".into(),
+                patent_number: row["patent_number"].as_str().unwrap_or("").into(),
+                title: row["title"].as_str().unwrap_or("").into(),
+                abstract_text: row["abstract"].as_str().unwrap_or("").into(),
+                applicant: row["applicant"].as_str().unwrap_or("").into(),
+                inventor: row["inventor"].as_str().unwrap_or("").into(),
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            hits.len(),
+            1,
+            "申请人名命中（含中英文括号归一化）时不得被标题/摘要门槛误杀"
+        );
+        assert_eq!(hits[0].patent_number, "CN990995A");
     }
 }

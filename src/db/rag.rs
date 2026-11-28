@@ -166,6 +166,13 @@ impl Database {
             imported += batch_imp;
             chunks_written += batch_chunks;
 
+            // 每 8 批（轻量模式 4,000 条）执行一次非阻塞 PASSIVE WAL 检查点，防止单文件上万条记录在入库中途将 `-wal` 撑爆至数百 MB
+            if (batch_idx + 1).is_multiple_of(8) && batch_idx + 1 < total_batches {
+                if let Some(ref writer) = dedicated_conn {
+                    let _ = writer.execute_batch("PRAGMA wal_checkpoint(PASSIVE);");
+                }
+            }
+
             // 批间短暂停顿让出 SQLite WAL 写锁，保证前台聊天/提交/设置写入立即获锁不报 SQLITE_BUSY
             if batch_idx + 1 < total_batches
                 && !cancel.is_some_and(|flag| flag.load(Ordering::Relaxed))

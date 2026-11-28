@@ -862,8 +862,34 @@ pub async fn api_search_online(
     breaker::note_attempts(&outcome.attempts);
     outcome.attempts = weave_cooled_attempts(&chain_kinds, &cooled, outcome.attempts);
 
-    // P3 证据：改写重试的胜出变体（有结果来自重试时才非 None）
+    // P3 证据：改写/确定性重试的胜出变体（有结果来自重试时才非 None）
     let mut winning_variant: Option<String> = None;
+    // ── 零成本确定性 0 命中回退（中文申请人放宽严格 assignee 引号 + 全角括号归一化）──
+    // 在调用 LLM 改写之前优先执行：实测 `assignee:"...（...）..."` 易在 Google Patents 返回 0 条，
+    // 确定性归一化并放宽为关键词重试无需消耗 LLM 预算与 20s 等待。
+    if outcome.winning_source().is_none()
+        && !providers.is_empty()
+        && online_start.elapsed().as_secs() < 30
+    {
+        if let Some(det_query) =
+            crate::search::agent::deterministic_zero_hit_fallback(&search_query)
+        {
+            println!(
+                "[ONLINE] 零命中确定性重试: '{}' (search_type={:?})",
+                det_query.keyword, det_query.search_type
+            );
+            let det_outcome = SourceChain::new(providers.clone())
+                .run(det_query.clone())
+                .await;
+            breaker::note_attempts(&det_outcome.attempts);
+            if det_outcome.winning_source().is_some() {
+                outcome.results = det_outcome.results.clone();
+                outcome.upstream_total = det_outcome.upstream_total;
+                winning_variant = Some(det_query.keyword.clone());
+            }
+            outcome.attempts.extend(det_outcome.attempts);
+        }
+    }
     // ── 队列 #2 P1：链 0 命中 → LLM 改写变体重试一次（设计稿 [A] 段）──
     // 纪律：主查询恒为用户原词（LLM 只贡献变体）；解析失败/预算用尽/超时 → 记账后走
     // 原降级链，行为与 v0.9.38 逐字一致（设计稿硬验收）。重试链只跑一次（成本上限 +1 轮）。
@@ -899,8 +925,9 @@ pub async fn api_search_online(
             )
             .await
             .unwrap_or_else(|_| Err(anyhow::anyhow!("改写调用超时（20s 预算用尽）")));
-            let _ =
-                s.db.save_cost_record(&crate::pipeline::context::AiCostRecord {
+            if !s.db.is_bulk_write_active() {
+                let db_cost = s.db.clone();
+                let cost_rec = crate::pipeline::context::AiCostRecord {
                     id: uuid::Uuid::new_v4().to_string(),
                     pipeline_run_id: uuid::Uuid::new_v4().to_string(),
                     step: REWRITE_COST_STEP.to_string(),
@@ -913,7 +940,11 @@ pub async fn api_search_online(
                     duration_ms: rewrite_start.elapsed().as_millis() as i64,
                     idea_id: None,
                     session_id: None,
+                };
+                tokio::task::spawn_blocking(move || {
+                    let _ = db_cost.save_cost_record(&cost_rec);
                 });
+            }
             match rewrite_result {
                 Err(e) => {
                     outcome.attempts.push(AttemptReport {
@@ -1072,8 +1103,9 @@ pub async fn api_search_online(
                         "重排调用超时（6s 快速预算用尽，已自动回退混合相关度排序）"
                     ))
                 });
-                let _ =
-                    s.db.save_cost_record(&crate::pipeline::context::AiCostRecord {
+                if !s.db.is_bulk_write_active() {
+                    let db_cost = s.db.clone();
+                    let cost_rec = crate::pipeline::context::AiCostRecord {
                         id: uuid::Uuid::new_v4().to_string(),
                         pipeline_run_id: uuid::Uuid::new_v4().to_string(),
                         step: RERANK_COST_STEP.to_string(),
@@ -1086,7 +1118,11 @@ pub async fn api_search_online(
                         duration_ms: rerank_start.elapsed().as_millis() as i64,
                         idea_id: None,
                         session_id: None,
+                    };
+                    tokio::task::spawn_blocking(move || {
+                        let _ = db_cost.save_cost_record(&cost_rec);
                     });
+                }
                 let verdicts = match rerank_result {
                     Err(e) => {
                         outcome.attempts.push(AttemptReport {
@@ -1162,17 +1198,51 @@ pub async fn api_search_online(
         }
         apply_online_sort(&mut patents, req.sort_by.as_deref());
         // v0.9.67: IPC 子空间自动锚定 + 锁定前缀跨领域去噪 + CRAAP 五维评分与多源互证
+        // 批量查库（避免循环逐条 N+1 阻塞 Tokio 工作线程，符合 AGENTS.md 工程铁律）
         let locked_ipcs = ipc_anchor::parse_locked_ipc_prefixes(req.ipc.as_deref());
+        let batch_pns: Vec<String> = patents
+            .iter()
+            .map(|p| p.patent_number.trim().to_string())
+            .filter(|pn| !pn.is_empty())
+            .collect();
+        let db_ipc = s.db.clone();
+        let stored_by_norm: std::collections::HashMap<String, crate::patent::Patent> =
+            if batch_pns.is_empty() {
+                std::collections::HashMap::new()
+            } else {
+                tokio::task::spawn_blocking(move || {
+                    db_ipc
+                        .get_patents_by_numbers(&batch_pns)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|fp| {
+                            let key = fp
+                                .patent_number
+                                .trim()
+                                .to_uppercase()
+                                .replace([' ', '-', '.', '/'], "");
+                            (key, fp)
+                        })
+                        .collect()
+                })
+                .await
+                .unwrap_or_default()
+            };
         let mut observed_ipcs: Vec<String> = Vec::new();
         let mut extra_corr_keys: Vec<(String, String)> = Vec::new();
         for p in &patents {
-            if let Ok(Some(full_p)) = s.db.get_patent(&p.patent_number) {
+            let norm_pn = p
+                .patent_number
+                .trim()
+                .to_uppercase()
+                .replace([' ', '-', '.', '/'], "");
+            if let Some(full_p) = stored_by_norm.get(&norm_pn) {
                 if !full_p.ipc_codes.trim().is_empty() {
                     observed_ipcs.push(full_p.ipc_codes.clone());
                 }
                 if !full_p.source.is_empty() && full_p.source != winner.as_str() {
                     let key = craap::canonical_corroboration_key(&p.patent_number, &p.title);
-                    extra_corr_keys.push((full_p.source, key));
+                    extra_corr_keys.push((full_p.source.clone(), key));
                 }
             }
         }
@@ -1183,14 +1253,17 @@ pub async fn api_search_online(
             let mut kept_reasons = Vec::with_capacity(rerank_reasons.len());
             let mut kept_origin = Vec::with_capacity(patent_origin.len());
             for (i, p) in patents.into_iter().enumerate() {
-                let ipc_blob =
-                    s.db.get_patent(&p.patent_number)
-                        .ok()
-                        .flatten()
-                        .map(|fp| fp.ipc_codes)
-                        .unwrap_or_default();
+                let norm_pn = p
+                    .patent_number
+                    .trim()
+                    .to_uppercase()
+                    .replace([' ', '-', '.', '/'], "");
+                let ipc_blob = stored_by_norm
+                    .get(&norm_pn)
+                    .map(|fp| fp.ipc_codes.as_str())
+                    .unwrap_or("");
                 let text = format!("{} {}", p.title, p.abstract_text);
-                if ipc_anchor::matches_locked_ipc_subspace(&ipc_blob, &text, &locked_ipcs) {
+                if ipc_anchor::matches_locked_ipc_subspace(ipc_blob, &text, &locked_ipcs) {
                     kept_patents.push(p);
                     kept_reasons.push(rerank_reasons.get(i).cloned().flatten());
                     kept_origin.push(patent_origin.get(i).copied().unwrap_or(i));
@@ -2032,27 +2105,54 @@ pub async fn api_search_single_source(
     let outcome = provider.search(search_query).await;
     let mut patents = outcome.summaries();
     let locked_ipcs = ipc_anchor::parse_locked_ipc_prefixes(ipc.as_deref());
-    let mut observed_ipcs: Vec<String> = Vec::new();
-    for p in &patents {
-        if let Ok(Some(fp)) = s.db.get_patent(&p.patent_number) {
-            if !fp.ipc_codes.trim().is_empty() {
-                observed_ipcs.push(fp.ipc_codes);
-            }
-        }
-    }
+    let single_pns: Vec<String> = patents
+        .iter()
+        .map(|p| p.patent_number.trim().to_string())
+        .filter(|pn| !pn.is_empty())
+        .collect();
+    let db_single = s.db.clone();
+    let single_ipc_map: std::collections::HashMap<String, String> = if single_pns.is_empty() {
+        std::collections::HashMap::new()
+    } else {
+        tokio::task::spawn_blocking(move || {
+            db_single
+                .get_patents_by_numbers(&single_pns)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|fp| {
+                    let key = fp
+                        .patent_number
+                        .trim()
+                        .to_uppercase()
+                        .replace([' ', '-', '.', '/'], "");
+                    (key, fp.ipc_codes)
+                })
+                .collect()
+        })
+        .await
+        .unwrap_or_default()
+    };
+    let observed_ipcs: Vec<String> = single_ipc_map
+        .values()
+        .filter(|codes| !codes.trim().is_empty())
+        .cloned()
+        .collect();
     let ipc_anchors = ipc_anchor::derive_ipc_anchors(query, &observed_ipcs, 3);
     let mut ipc_filtered_count = 0usize;
     if !locked_ipcs.is_empty() {
         let before = patents.len();
         patents.retain(|p| {
-            let ipc_blob =
-                s.db.get_patent(&p.patent_number)
-                    .ok()
-                    .flatten()
-                    .map(|fp| fp.ipc_codes)
-                    .unwrap_or_default();
+            let norm_pn = p
+                .patent_number
+                .trim()
+                .to_uppercase()
+                .replace([' ', '-', '.', '/'], "");
+            let ipc_blob = single_ipc_map
+                .get(&norm_pn)
+                .map(String::as_str)
+                .unwrap_or("");
             let text = format!("{} {}", p.title, p.abstract_text);
-            ipc_anchor::matches_locked_ipc_subspace(&ipc_blob, &text, &locked_ipcs)
+            ipc_anchor::matches_locked_ipc_subspace(ipc_blob, &text, &locked_ipcs)
         });
         ipc_filtered_count = before.saturating_sub(patents.len());
     }
@@ -3000,6 +3100,442 @@ fn ipc_snowball_prefix(code: &str) -> Option<String> {
     }
 }
 
+/// 二阶段混合检索补漏命中的单条对比专利结构（供 `/api/search/expand-citations` 与 `/idea` 流水线共用单一出处）。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) struct SnowballPatentHit {
+    pub id: String,
+    pub patent_number: String,
+    pub title: String,
+    pub abstract_text: String,
+    pub applicant: String,
+    pub inventor: String,
+    pub filing_date: String,
+    pub country: String,
+    pub ipc_codes: String,
+    pub relevance_score: f64,
+    pub semantic_pct: u32,
+    pub relation_type: String,
+    pub relation_label: String,
+    pub via_seeds: Vec<String>,
+    pub score_source: String,
+}
+
+/// 二阶段混合检索补漏结果汇总（引文网络 + 同族关联 + 同 IPC 三视角语义重排）。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) struct SnowballExpansionResult {
+    pub patents: Vec<SnowballPatentHit>,
+    pub seed_count: usize,
+    pub top_ipcs: Vec<String>,
+    pub backward_citation: usize,
+    pub forward_citation: usize,
+    pub patent_family: usize,
+    pub co_ipc_semantic: usize,
+}
+
+/// 二阶段混合检索补漏核心引擎（同步阻塞实现，调用方应置于 `tokio::task::spawn_blocking` 中执行）：
+/// 1) 零磁盘膨胀：全部在无锁 WAL 并发只读连接与内存中完成（不强制全量写向量表）；
+/// 2) 专治「换了术语但技术同源」的对比文件漏检：沿种子专利的前后向引文、同族 ID 与高频主 IPC 展开并按三视角专利 IDF 余弦相似度精排。
+pub(crate) fn expand_citations_snowball_sync(
+    db: &Database,
+    query: &str,
+    seed_ids: &[String],
+    seed_numbers: &[String],
+    limit: usize,
+) -> SnowballExpansionResult {
+    use std::collections::{HashMap, HashSet};
+
+    let query_trimmed = query.trim();
+    let limit = limit.clamp(1, 30);
+
+    // 1. 通过无锁 WAL 只读连接解析种子专利全文元数据
+    let mut seeds_by_id: HashMap<String, crate::patent::Patent> = HashMap::new();
+    if !seed_ids.is_empty() {
+        if let Ok(list) = db.get_patents_by_ids(seed_ids) {
+            for p in list {
+                seeds_by_id.insert(p.id.clone(), p);
+            }
+        }
+    }
+    if !seed_numbers.is_empty() {
+        if let Ok(list) = db.get_patents_by_numbers(seed_numbers) {
+            for p in list {
+                seeds_by_id.entry(p.id.clone()).or_insert(p);
+            }
+        }
+    }
+    let seeds: Vec<crate::patent::Patent> = seeds_by_id.into_values().collect();
+    let seed_count = seeds.len();
+    if seed_count == 0 {
+        return SnowballExpansionResult {
+            patents: Vec::new(),
+            seed_count: 0,
+            top_ipcs: Vec::new(),
+            backward_citation: 0,
+            forward_citation: 0,
+            patent_family: 0,
+            co_ipc_semantic: 0,
+        };
+    }
+
+    let mut exclude_ids: HashSet<String> = seed_ids.iter().cloned().collect();
+    let mut exclude_keys: HashSet<String> = seed_numbers
+        .iter()
+        .map(|n| crate::patent::canonical_patent_key(n))
+        .filter(|k| !k.is_empty())
+        .collect();
+    for p in &seeds {
+        exclude_ids.insert(p.id.clone());
+        let ck = crate::patent::canonical_patent_key(&p.patent_number);
+        if !ck.is_empty() {
+            exclude_keys.insert(ck);
+        }
+    }
+
+    // 2. 在内存中构造 512 维专利 IDF 三视角查询画像：
+    // - query_vec：用户原查询词（防多篇长摘要平均后稀释核心词，如「高压氧舱」被某篇种子的脑电/墙板摘要冲淡）
+    // - title_vec：前 6 篇种子专利标题聚合（高信噪比技术主体）
+    // - seed_vec：查询词 + 种子标题/摘要完整画像（捕捉摘要级技术细节）
+    let mut profile_parts: Vec<String> = Vec::new();
+    let mut title_parts: Vec<String> = Vec::new();
+    if !query_trimmed.is_empty() {
+        profile_parts.push(query_trimmed.to_string());
+        title_parts.push(query_trimmed.to_string());
+    }
+    for p in seeds.iter().take(6) {
+        if !p.title.trim().is_empty() {
+            profile_parts.push(p.title.clone());
+            title_parts.push(p.title.clone());
+        }
+        let abs_snip: String = p.abstract_text.chars().take(240).collect();
+        if !abs_snip.trim().is_empty() {
+            profile_parts.push(abs_snip);
+        }
+    }
+    let query_vec = (!query_trimmed.is_empty())
+        .then(|| crate::db::vector::compute_tfidf_embedding(query_trimmed));
+    let title_vec = crate::db::vector::compute_tfidf_embedding(&title_parts.join(" "));
+    let seed_vec = crate::db::vector::compute_tfidf_embedding(&profile_parts.join(" "));
+    let compute_hybrid_sim = |title: &str, abstract_text: &str| -> f64 {
+        let cand_full =
+            crate::db::vector::compute_tfidf_embedding(&format!("{} {}", title, abstract_text));
+        let cand_title = crate::db::vector::compute_tfidf_embedding(title);
+        let sim_seed = crate::db::vector::cosine_similarity(&seed_vec, &cand_full).max(0.0) as f64;
+        let sim_title =
+            crate::db::vector::cosine_similarity(&title_vec, &cand_title).max(0.0) as f64;
+        let sim_query = query_vec
+            .as_ref()
+            .map(|qv| {
+                crate::db::vector::cosine_similarity(qv, &cand_full)
+                    .max(crate::db::vector::cosine_similarity(qv, &cand_title))
+                    .max(0.0) as f64
+            })
+            .unwrap_or(0.0);
+        sim_seed.max(sim_title * 0.95).max(sim_query)
+    };
+
+    struct Candidate {
+        id: String,
+        patent_number: String,
+        title: String,
+        abstract_text: String,
+        applicant: String,
+        inventor: String,
+        filing_date: String,
+        country: String,
+        ipc_codes: String,
+        relation_type: &'static str,
+        relation_label: String,
+        via_seeds: Vec<String>,
+        base_score: f64,
+        semantic_sim: f64,
+    }
+
+    let mut cands: HashMap<String, Candidate> = HashMap::new();
+    let mut backward_targets: HashMap<String, Vec<String>> = HashMap::new();
+    let mut forward_targets: HashMap<String, Vec<String>> = HashMap::new();
+    let mut family_seeds: HashMap<String, Vec<String>> = HashMap::new();
+    // (文档频次 DF, 原始出现次 TF)：按覆盖种子篇数优先排序，防单篇专利挂 5 个辅助细分 IPC 压过所有种子共有的核心 IPC
+    let mut ipc_freq: HashMap<String, (usize, usize)> = HashMap::new();
+
+    for p in &seeds {
+        let seed_label = if p.patent_number.trim().is_empty() {
+            p.id.clone()
+        } else {
+            p.patent_number.clone()
+        };
+        for cnum in extract_citation_numbers(&p.citations) {
+            let ck = crate::patent::canonical_patent_key(&cnum);
+            if !ck.is_empty() && !exclude_keys.contains(&ck) {
+                backward_targets
+                    .entry(cnum)
+                    .or_default()
+                    .push(seed_label.clone());
+            }
+        }
+        for cnum in extract_citation_numbers(&p.cited_by) {
+            let ck = crate::patent::canonical_patent_key(&cnum);
+            if !ck.is_empty() && !exclude_keys.contains(&ck) {
+                forward_targets
+                    .entry(cnum)
+                    .or_default()
+                    .push(seed_label.clone());
+            }
+        }
+        if let Some(fid) = p
+            .family_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            family_seeds
+                .entry(fid.to_string())
+                .or_default()
+                .push(seed_label.clone());
+        }
+        let mut seen_in_seed: HashSet<String> = HashSet::new();
+        for code in crate::routes::parse_ipc_code_list(&p.ipc_codes) {
+            if let Some(pref) = ipc_snowball_prefix(&code) {
+                let entry = ipc_freq.entry(pref.clone()).or_insert((0, 0));
+                if seen_in_seed.insert(pref) {
+                    entry.0 += 1;
+                }
+                entry.1 += 1;
+            }
+        }
+    }
+
+    let mut insert_patent_candidate = |p: crate::patent::Patent,
+                                       rel_type: &'static str,
+                                       rel_label: String,
+                                       via: Vec<String>,
+                                       base_score: f64| {
+        let ck = crate::patent::canonical_patent_key(&p.patent_number);
+        if exclude_ids.contains(&p.id) || (!ck.is_empty() && exclude_keys.contains(&ck)) {
+            return;
+        }
+        let dedup_key = if ck.is_empty() { p.id.clone() } else { ck };
+        if let Some(existing) = cands.get_mut(&dedup_key) {
+            if base_score > existing.base_score {
+                existing.base_score = base_score;
+                existing.relation_type = rel_type;
+                existing.relation_label = rel_label;
+            }
+            for s in via {
+                if !existing.via_seeds.contains(&s) && existing.via_seeds.len() < 4 {
+                    existing.via_seeds.push(s);
+                }
+            }
+            return;
+        }
+        let sim = compute_hybrid_sim(&p.title, &p.abstract_text);
+        cands.insert(
+            dedup_key,
+            Candidate {
+                id: p.id,
+                patent_number: p.patent_number,
+                title: p.title,
+                abstract_text: p.abstract_text,
+                applicant: p.applicant,
+                inventor: p.inventor,
+                filing_date: p.filing_date,
+                country: p.country,
+                ipc_codes: p.ipc_codes,
+                relation_type: rel_type,
+                relation_label: rel_label,
+                via_seeds: via.into_iter().take(4).collect(),
+                base_score,
+                semantic_sim: sim,
+            },
+        );
+    };
+
+    // 通道 1：后向引证对比文件（走 4.8ms 规范号表达式索引批量查库）
+    if !backward_targets.is_empty() {
+        let nums: Vec<String> = backward_targets.keys().take(80).cloned().collect();
+        if let Ok(found) = db.get_patents_by_numbers(&nums) {
+            for p in found {
+                let ck = crate::patent::canonical_patent_key(&p.patent_number);
+                let via: Vec<String> = backward_targets
+                    .iter()
+                    .filter(|(k, _)| crate::patent::canonical_patent_key(k) == ck)
+                    .flat_map(|(_, v)| v.iter().cloned())
+                    .collect();
+                let co = via.len().clamp(1, 4) as f64;
+                insert_patent_candidate(
+                    p,
+                    "backward_citation",
+                    "引证对比文件".to_string(),
+                    via,
+                    58.0 + co * 9.0,
+                );
+            }
+        }
+    }
+
+    // 通道 2：前向被引用演进专利
+    if !forward_targets.is_empty() {
+        let nums: Vec<String> = forward_targets.keys().take(80).cloned().collect();
+        if let Ok(found) = db.get_patents_by_numbers(&nums) {
+            for p in found {
+                let ck = crate::patent::canonical_patent_key(&p.patent_number);
+                let via: Vec<String> = forward_targets
+                    .iter()
+                    .filter(|(k, _)| crate::patent::canonical_patent_key(k) == ck)
+                    .flat_map(|(_, v)| v.iter().cloned())
+                    .collect();
+                let co = via.len().clamp(1, 4) as f64;
+                insert_patent_candidate(
+                    p,
+                    "forward_citation",
+                    "被引用演进".to_string(),
+                    via,
+                    52.0 + co * 8.0,
+                );
+            }
+        }
+    }
+
+    // 通道 3：同族专利（family_id）
+    for (fid, via) in family_seeds.into_iter().take(5) {
+        if let Ok(fam) = db.list_family_patents(&fid, "") {
+            for p in fam {
+                insert_patent_candidate(
+                    p,
+                    "patent_family",
+                    format!("同族关联 ({fid})"),
+                    via.clone(),
+                    66.0,
+                );
+            }
+        }
+    }
+
+    // 通道 4：同 IPC 高频子空间 + 内存 512 维专利 IDF 语义补漏（解决纯著录库无引文与换表述漏检）
+    let mut ipc_sorted: Vec<(String, (usize, usize))> = ipc_freq.into_iter().collect();
+    ipc_sorted.sort_by(|a, b| {
+        b.1 .0
+            .cmp(&a.1 .0)
+            .then_with(|| b.1 .1.cmp(&a.1 .1))
+            .then_with(|| a.0.cmp(&b.0))
+    });
+    // 当存在跨种子共有核心 IPC（top_df >= 2）时，过滤掉仅出现于单篇种子的边缘辅助分类号（如 G06F18），防跨领域噪声与慢查询
+    let top_df = ipc_sorted.first().map(|(_, (df, _))| *df).unwrap_or(0);
+    let top_ipcs: Vec<String> = ipc_sorted
+        .into_iter()
+        .filter(|(_, (df, _))| top_df < 2 || *df >= 2)
+        .take(2)
+        .map(|(k, _)| k)
+        .collect();
+
+    for ipc in &top_ipcs {
+        if let Ok(ipc_rows) = db.search_by_ipc(ipc) {
+            for row in ipc_rows {
+                let id = row["id"].as_str().unwrap_or("").to_string();
+                let pn = row["patent_number"].as_str().unwrap_or("").to_string();
+                let title = row["title"].as_str().unwrap_or("").to_string();
+                let abstract_text = row["abstract_text"].as_str().unwrap_or("").to_string();
+                if id.is_empty() || title.trim().is_empty() {
+                    continue;
+                }
+                let ck = crate::patent::canonical_patent_key(&pn);
+                if exclude_ids.contains(&id) || (!ck.is_empty() && exclude_keys.contains(&ck)) {
+                    continue;
+                }
+                let dedup_key = if ck.is_empty() { id.clone() } else { ck };
+                if cands.contains_key(&dedup_key) {
+                    continue;
+                }
+                let sim = compute_hybrid_sim(&title, &abstract_text);
+                if sim < 0.10 {
+                    continue;
+                }
+                cands.insert(
+                    dedup_key,
+                    Candidate {
+                        id,
+                        patent_number: pn,
+                        title,
+                        abstract_text,
+                        applicant: row["applicant"].as_str().unwrap_or("").to_string(),
+                        inventor: String::new(),
+                        filing_date: row["filing_date"].as_str().unwrap_or("").to_string(),
+                        country: row["country"].as_str().unwrap_or("").to_string(),
+                        ipc_codes: row["ipc_codes"].as_str().unwrap_or("").to_string(),
+                        relation_type: "co_ipc_semantic",
+                        relation_label: format!("同IPC语义补漏 ({ipc})"),
+                        via_seeds: vec![ipc.clone()],
+                        base_score: (36.0 + sim * 62.0).clamp(36.0, 95.0),
+                        semantic_sim: sim,
+                    },
+                );
+            }
+        }
+    }
+
+    let mut ranked: Vec<(f64, Candidate)> = cands
+        .into_values()
+        .map(|c| {
+            let final_score = if c.relation_type == "co_ipc_semantic" {
+                c.base_score
+            } else {
+                (c.base_score + c.semantic_sim * 25.0).min(99.0)
+            };
+            (final_score, c)
+        })
+        .collect();
+    ranked.sort_by(|a, b| {
+        b.0.partial_cmp(&a.0)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| b.1.filing_date.cmp(&a.1.filing_date))
+    });
+    ranked.truncate(limit);
+
+    let mut cnt_back = 0usize;
+    let mut cnt_fwd = 0usize;
+    let mut cnt_fam = 0usize;
+    let mut cnt_ipc = 0usize;
+    let patents: Vec<SnowballPatentHit> = ranked
+        .into_iter()
+        .map(|(score, c)| {
+            match c.relation_type {
+                "backward_citation" => cnt_back += 1,
+                "forward_citation" => cnt_fwd += 1,
+                "patent_family" => cnt_fam += 1,
+                _ => cnt_ipc += 1,
+            }
+            let abs_preview: String = c.abstract_text.chars().take(180).collect();
+            let score_source = c.relation_label.clone();
+            SnowballPatentHit {
+                id: c.id,
+                patent_number: c.patent_number,
+                title: c.title,
+                abstract_text: abs_preview,
+                applicant: c.applicant,
+                inventor: c.inventor,
+                filing_date: c.filing_date,
+                country: c.country,
+                ipc_codes: c.ipc_codes,
+                relevance_score: (score * 10.0).round() / 10.0,
+                semantic_pct: (c.semantic_sim * 100.0).round() as u32,
+                relation_type: c.relation_type.to_string(),
+                relation_label: c.relation_label,
+                via_seeds: c.via_seeds,
+                score_source,
+            }
+        })
+        .collect();
+
+    SnowballExpansionResult {
+        patents,
+        seed_count,
+        top_ipcs,
+        backward_citation: cnt_back,
+        forward_citation: cnt_fwd,
+        patent_family: cnt_fam,
+        co_ipc_semantic: cnt_ipc,
+    }
+}
+
 /// 二阶段混合检索补漏端点（Ambercite 引文网络 + 同族关联 + 同 IPC 内存向量语义重排）：
 /// 1) 零磁盘膨胀：全部在无锁 WAL 并发只读连接与内存中完成（不强制全量写向量表）；
 /// 2) 专治「换了术语但技术同源」的对比文件漏检：沿种子专利的前后向引文、同族 ID 与高频主 IPC 展开并按专利 IDF 余弦相似度精排。
@@ -3054,386 +3590,18 @@ pub async fn api_search_expand_citations(
     let db = s.db.clone();
     let query_clone = query.clone();
     let out = tokio::task::spawn_blocking(move || {
-        use std::collections::{HashMap, HashSet};
-
-        // 1. 通过无锁 WAL 只读连接解析种子专利全文元数据
-        let mut seeds_by_id: HashMap<String, crate::patent::Patent> = HashMap::new();
-        if !seed_ids.is_empty() {
-            if let Ok(list) = db.get_patents_by_ids(&seed_ids) {
-                for p in list {
-                    seeds_by_id.insert(p.id.clone(), p);
-                }
-            }
-        }
-        if !seed_numbers.is_empty() {
-            if let Ok(list) = db.get_patents_by_numbers(&seed_numbers) {
-                for p in list {
-                    seeds_by_id.entry(p.id.clone()).or_insert(p);
-                }
-            }
-        }
-        let seeds: Vec<crate::patent::Patent> = seeds_by_id.into_values().collect();
-        let seed_count = seeds.len();
-
-        let mut exclude_ids: HashSet<String> = seed_ids.iter().cloned().collect();
-        let mut exclude_keys: HashSet<String> = seed_numbers
-            .iter()
-            .map(|n| crate::patent::canonical_patent_key(n))
-            .filter(|k| !k.is_empty())
-            .collect();
-        for p in &seeds {
-            exclude_ids.insert(p.id.clone());
-            let ck = crate::patent::canonical_patent_key(&p.patent_number);
-            if !ck.is_empty() {
-                exclude_keys.insert(ck);
-            }
-        }
-
-        // 2. 在内存中构造 512 维专利 IDF 三视角查询画像：
-        // - query_vec：用户原查询词（防多篇长摘要平均后稀释核心词，如「高压氧舱」被某篇种子的脑电/墙板摘要冲淡）
-        // - title_vec：前 6 篇种子专利标题聚合（高信噪比技术主体）
-        // - seed_vec：查询词 + 种子标题/摘要完整画像（捕捉摘要级技术细节）
-        let mut profile_parts: Vec<String> = Vec::new();
-        let mut title_parts: Vec<String> = Vec::new();
-        if !query_clone.is_empty() {
-            profile_parts.push(query_clone.clone());
-            title_parts.push(query_clone.clone());
-        }
-        for p in seeds.iter().take(6) {
-            if !p.title.trim().is_empty() {
-                profile_parts.push(p.title.clone());
-                title_parts.push(p.title.clone());
-            }
-            let abs_snip: String = p.abstract_text.chars().take(240).collect();
-            if !abs_snip.trim().is_empty() {
-                profile_parts.push(abs_snip);
-            }
-        }
-        let query_vec = (!query_clone.is_empty())
-            .then(|| crate::db::vector::compute_tfidf_embedding(&query_clone));
-        let title_vec = crate::db::vector::compute_tfidf_embedding(&title_parts.join(" "));
-        let seed_vec = crate::db::vector::compute_tfidf_embedding(&profile_parts.join(" "));
-        let compute_hybrid_sim = |title: &str, abstract_text: &str| -> f64 {
-            let cand_full =
-                crate::db::vector::compute_tfidf_embedding(&format!("{} {}", title, abstract_text));
-            let cand_title = crate::db::vector::compute_tfidf_embedding(title);
-            let sim_seed =
-                crate::db::vector::cosine_similarity(&seed_vec, &cand_full).max(0.0) as f64;
-            let sim_title =
-                crate::db::vector::cosine_similarity(&title_vec, &cand_title).max(0.0) as f64;
-            let sim_query = query_vec
-                .as_ref()
-                .map(|qv| {
-                    crate::db::vector::cosine_similarity(qv, &cand_full)
-                        .max(crate::db::vector::cosine_similarity(qv, &cand_title))
-                        .max(0.0) as f64
-                })
-                .unwrap_or(0.0);
-            sim_seed.max(sim_title * 0.95).max(sim_query)
-        };
-
-        struct Candidate {
-            id: String,
-            patent_number: String,
-            title: String,
-            abstract_text: String,
-            applicant: String,
-            inventor: String,
-            filing_date: String,
-            country: String,
-            ipc_codes: String,
-            relation_type: &'static str,
-            relation_label: String,
-            via_seeds: Vec<String>,
-            base_score: f64,
-            semantic_sim: f64,
-        }
-
-        let mut cands: HashMap<String, Candidate> = HashMap::new();
-        let mut backward_targets: HashMap<String, Vec<String>> = HashMap::new();
-        let mut forward_targets: HashMap<String, Vec<String>> = HashMap::new();
-        let mut family_seeds: HashMap<String, Vec<String>> = HashMap::new();
-        // (文档频次 DF, 原始出现次 TF)：按覆盖种子篇数优先排序，防单篇专利挂 5 个辅助细分 IPC 压过所有种子共有的核心 IPC
-        let mut ipc_freq: HashMap<String, (usize, usize)> = HashMap::new();
-
-        for p in &seeds {
-            let seed_label = if p.patent_number.trim().is_empty() {
-                p.id.clone()
-            } else {
-                p.patent_number.clone()
-            };
-            for cnum in extract_citation_numbers(&p.citations) {
-                let ck = crate::patent::canonical_patent_key(&cnum);
-                if !ck.is_empty() && !exclude_keys.contains(&ck) {
-                    backward_targets
-                        .entry(cnum)
-                        .or_default()
-                        .push(seed_label.clone());
-                }
-            }
-            for cnum in extract_citation_numbers(&p.cited_by) {
-                let ck = crate::patent::canonical_patent_key(&cnum);
-                if !ck.is_empty() && !exclude_keys.contains(&ck) {
-                    forward_targets
-                        .entry(cnum)
-                        .or_default()
-                        .push(seed_label.clone());
-                }
-            }
-            if let Some(fid) = p
-                .family_id
-                .as_deref()
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-            {
-                family_seeds
-                    .entry(fid.to_string())
-                    .or_default()
-                    .push(seed_label.clone());
-            }
-            let mut seen_in_seed: HashSet<String> = HashSet::new();
-            for code in crate::routes::parse_ipc_code_list(&p.ipc_codes) {
-                if let Some(pref) = ipc_snowball_prefix(&code) {
-                    let entry = ipc_freq.entry(pref.clone()).or_insert((0, 0));
-                    if seen_in_seed.insert(pref) {
-                        entry.0 += 1;
-                    }
-                    entry.1 += 1;
-                }
-            }
-        }
-
-        let mut insert_patent_candidate =
-            |p: crate::patent::Patent,
-             rel_type: &'static str,
-             rel_label: String,
-             via: Vec<String>,
-             base_score: f64| {
-                let ck = crate::patent::canonical_patent_key(&p.patent_number);
-                if exclude_ids.contains(&p.id) || (!ck.is_empty() && exclude_keys.contains(&ck)) {
-                    return;
-                }
-                let dedup_key = if ck.is_empty() { p.id.clone() } else { ck };
-                if let Some(existing) = cands.get_mut(&dedup_key) {
-                    if base_score > existing.base_score {
-                        existing.base_score = base_score;
-                        existing.relation_type = rel_type;
-                        existing.relation_label = rel_label;
-                    }
-                    for s in via {
-                        if !existing.via_seeds.contains(&s) && existing.via_seeds.len() < 4 {
-                            existing.via_seeds.push(s);
-                        }
-                    }
-                    return;
-                }
-                let sim = compute_hybrid_sim(&p.title, &p.abstract_text);
-                cands.insert(
-                    dedup_key,
-                    Candidate {
-                        id: p.id,
-                        patent_number: p.patent_number,
-                        title: p.title,
-                        abstract_text: p.abstract_text,
-                        applicant: p.applicant,
-                        inventor: p.inventor,
-                        filing_date: p.filing_date,
-                        country: p.country,
-                        ipc_codes: p.ipc_codes,
-                        relation_type: rel_type,
-                        relation_label: rel_label,
-                        via_seeds: via.into_iter().take(4).collect(),
-                        base_score,
-                        semantic_sim: sim,
-                    },
-                );
-            };
-
-        // 通道 1：后向引证对比文件（走 4.8ms 规范号表达式索引批量查库）
-        if !backward_targets.is_empty() {
-            let nums: Vec<String> = backward_targets.keys().take(80).cloned().collect();
-            if let Ok(found) = db.get_patents_by_numbers(&nums) {
-                for p in found {
-                    let ck = crate::patent::canonical_patent_key(&p.patent_number);
-                    let via: Vec<String> = backward_targets
-                        .iter()
-                        .filter(|(k, _)| crate::patent::canonical_patent_key(k) == ck)
-                        .flat_map(|(_, v)| v.iter().cloned())
-                        .collect();
-                    let co = via.len().clamp(1, 4) as f64;
-                    insert_patent_candidate(
-                        p,
-                        "backward_citation",
-                        "引证对比文件".to_string(),
-                        via,
-                        58.0 + co * 9.0,
-                    );
-                }
-            }
-        }
-
-        // 通道 2：前向被引用演进专利
-        if !forward_targets.is_empty() {
-            let nums: Vec<String> = forward_targets.keys().take(80).cloned().collect();
-            if let Ok(found) = db.get_patents_by_numbers(&nums) {
-                for p in found {
-                    let ck = crate::patent::canonical_patent_key(&p.patent_number);
-                    let via: Vec<String> = forward_targets
-                        .iter()
-                        .filter(|(k, _)| crate::patent::canonical_patent_key(k) == ck)
-                        .flat_map(|(_, v)| v.iter().cloned())
-                        .collect();
-                    let co = via.len().clamp(1, 4) as f64;
-                    insert_patent_candidate(
-                        p,
-                        "forward_citation",
-                        "被引用演进".to_string(),
-                        via,
-                        52.0 + co * 8.0,
-                    );
-                }
-            }
-        }
-
-        // 通道 3：同族专利（family_id）
-        for (fid, via) in family_seeds.into_iter().take(5) {
-            if let Ok(fam) = db.list_family_patents(&fid, "") {
-                for p in fam {
-                    insert_patent_candidate(
-                        p,
-                        "patent_family",
-                        format!("同族关联 ({fid})"),
-                        via.clone(),
-                        66.0,
-                    );
-                }
-            }
-        }
-
-        // 通道 4：同 IPC 高频子空间 + 内存 512 维专利 IDF 语义补漏（解决纯著录库无引文与换表述漏检）
-        let mut ipc_sorted: Vec<(String, (usize, usize))> = ipc_freq.into_iter().collect();
-        ipc_sorted.sort_by(|a, b| {
-            b.1 .0
-                .cmp(&a.1 .0)
-                .then_with(|| b.1 .1.cmp(&a.1 .1))
-                .then_with(|| a.0.cmp(&b.0))
-        });
-        // 当存在跨种子共有核心 IPC（top_df >= 2）时，过滤掉仅出现于单篇种子的边缘辅助分类号（如 G06F18），防跨领域噪声与慢查询
-        let top_df = ipc_sorted.first().map(|(_, (df, _))| *df).unwrap_or(0);
-        let top_ipcs: Vec<String> = ipc_sorted
-            .into_iter()
-            .filter(|(_, (df, _))| top_df < 2 || *df >= 2)
-            .take(2)
-            .map(|(k, _)| k)
-            .collect();
-
-        for ipc in &top_ipcs {
-            if let Ok(ipc_rows) = db.search_by_ipc(ipc) {
-                for row in ipc_rows {
-                    let id = row["id"].as_str().unwrap_or("").to_string();
-                    let pn = row["patent_number"].as_str().unwrap_or("").to_string();
-                    let title = row["title"].as_str().unwrap_or("").to_string();
-                    let abstract_text = row["abstract_text"].as_str().unwrap_or("").to_string();
-                    if id.is_empty() || title.trim().is_empty() {
-                        continue;
-                    }
-                    let ck = crate::patent::canonical_patent_key(&pn);
-                    if exclude_ids.contains(&id) || (!ck.is_empty() && exclude_keys.contains(&ck)) {
-                        continue;
-                    }
-                    let dedup_key = if ck.is_empty() { id.clone() } else { ck };
-                    if cands.contains_key(&dedup_key) {
-                        continue;
-                    }
-                    let sim = compute_hybrid_sim(&title, &abstract_text);
-                    if sim < 0.10 {
-                        continue;
-                    }
-                    cands.insert(
-                        dedup_key,
-                        Candidate {
-                            id,
-                            patent_number: pn,
-                            title,
-                            abstract_text,
-                            applicant: row["applicant"].as_str().unwrap_or("").to_string(),
-                            inventor: String::new(),
-                            filing_date: row["filing_date"].as_str().unwrap_or("").to_string(),
-                            country: row["country"].as_str().unwrap_or("").to_string(),
-                            ipc_codes: row["ipc_codes"].as_str().unwrap_or("").to_string(),
-                            relation_type: "co_ipc_semantic",
-                            relation_label: format!("同IPC语义补漏 ({ipc})"),
-                            via_seeds: vec![ipc.clone()],
-                            base_score: (36.0 + sim * 62.0).clamp(36.0, 95.0),
-                            semantic_sim: sim,
-                        },
-                    );
-                }
-            }
-        }
-
-        let mut ranked: Vec<(f64, Candidate)> = cands
-            .into_values()
-            .map(|c| {
-                let final_score = if c.relation_type == "co_ipc_semantic" {
-                    c.base_score
-                } else {
-                    (c.base_score + c.semantic_sim * 25.0).min(99.0)
-                };
-                (final_score, c)
-            })
-            .collect();
-        ranked.sort_by(|a, b| {
-            b.0.partial_cmp(&a.0)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| b.1.filing_date.cmp(&a.1.filing_date))
-        });
-        ranked.truncate(limit);
-
-        let mut cnt_back = 0usize;
-        let mut cnt_fwd = 0usize;
-        let mut cnt_fam = 0usize;
-        let mut cnt_ipc = 0usize;
-        let items: Vec<serde_json::Value> = ranked
-            .into_iter()
-            .map(|(score, c)| {
-                match c.relation_type {
-                    "backward_citation" => cnt_back += 1,
-                    "forward_citation" => cnt_fwd += 1,
-                    "patent_family" => cnt_fam += 1,
-                    _ => cnt_ipc += 1,
-                }
-                let abs_preview: String = c.abstract_text.chars().take(180).collect();
-                json!({
-                    "id": c.id,
-                    "patent_number": c.patent_number,
-                    "title": c.title,
-                    "abstract_text": abs_preview,
-                    "applicant": c.applicant,
-                    "inventor": c.inventor,
-                    "filing_date": c.filing_date,
-                    "country": c.country,
-                    "ipc_codes": c.ipc_codes,
-                    "relevance_score": (score * 10.0).round() / 10.0,
-                    "semantic_pct": (c.semantic_sim * 100.0).round() as u32,
-                    "relation_type": c.relation_type,
-                    "relation_label": c.relation_label,
-                    "via_seeds": c.via_seeds,
-                    "score_source": c.relation_label,
-                })
-            })
-            .collect();
-
+        let res =
+            expand_citations_snowball_sync(&db, &query_clone, &seed_ids, &seed_numbers, limit);
         json!({
-            "patents": items,
-            "total": items.len(),
-            "seed_count": seed_count,
-            "top_ipcs": top_ipcs,
+            "patents": res.patents,
+            "total": res.patents.len(),
+            "seed_count": res.seed_count,
+            "top_ipcs": res.top_ipcs,
             "breakdown": {
-                "backward_citation": cnt_back,
-                "forward_citation": cnt_fwd,
-                "patent_family": cnt_fam,
-                "co_ipc_semantic": cnt_ipc
+                "backward_citation": res.backward_citation,
+                "forward_citation": res.forward_citation,
+                "patent_family": res.patent_family,
+                "co_ipc_semantic": res.co_ipc_semantic
             },
             "elapsed_ms": started.elapsed().as_millis() as u64
         })

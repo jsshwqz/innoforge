@@ -102,6 +102,57 @@ pub fn parse_rewrite_response(body: &str, original: &str) -> Option<QueryRewrite
     Some(QueryRewrite { variants, intent })
 }
 
+/// 零成本确定性 0 命中重试策略（在触发昂贵/慢速 LLM 改写前优先执行，纯函数离线可测）。
+///
+/// 解决两类高频实测 0 命中场景（不修改 `render_q` 主路径，确保历史等价锁零漂移）：
+/// 1. 中文申请人含企业名称/全角括号（如 `星辰（广东）绿色建筑材料有限公司`）时，Google Patents / SerpAPI
+///    的严格 `assignee:"..."` 语法常因英文音译或半角括号不匹配返回 0 条；若用户未勾选 `exact_assignee`，
+///    将其确定性放宽为 `SearchType::Keyword` 并规范全角括号为半角括号重试；
+/// 2. 任意非专利号查询包含全角中文括号 `（`/`）` 时，将全角括号规范为 ASCII `(`/`)` 重试一次。
+pub(crate) fn deterministic_zero_hit_fallback(original: &SearchQuery) -> Option<SearchQuery> {
+    let trimmed = original.keyword.trim();
+    if trimmed.is_empty()
+        || matches!(
+            original.search_type,
+            Some(crate::types::search::SearchType::PatentNumber)
+        )
+    {
+        return None;
+    }
+
+    let normalize_parens = |s: &str| -> String {
+        s.trim()
+            .replace('（', "(")
+            .replace('）', ")")
+            .replace("  ", " ")
+    };
+
+    let norm_kw = normalize_parens(trimmed);
+    let norm_assignee = original.assignee.as_deref().map(normalize_parens);
+    let parens_changed = norm_kw != trimmed || norm_assignee != original.assignee;
+
+    let has_cjk = trimmed
+        .chars()
+        .any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c));
+    let relax_cjk_applicant = matches!(
+        original.search_type,
+        Some(crate::types::search::SearchType::Applicant)
+    ) && !original.exact_assignee
+        && has_cjk;
+
+    if !relax_cjk_applicant && !parens_changed {
+        return None;
+    }
+
+    let mut retry = original.clone();
+    retry.keyword = norm_kw;
+    retry.assignee = norm_assignee;
+    if relax_cjk_applicant {
+        retry.search_type = Some(crate::types::search::SearchType::Keyword);
+    }
+    Some(retry)
+}
+
 /// 「链 0 命中后」的重试决策（纯函数，离线可测）。
 ///
 /// 返回 `Some(重试查询)` = 用第一个变体重试一次；`None` = 不重试（走原降级链）。
@@ -217,6 +268,46 @@ mod tests {
         let mut blank = original.clone();
         blank.keyword = "  ".into();
         assert!(retry_query_for(&blank, Some(&rw)).is_none());
+    }
+
+    #[test]
+    fn deterministic_zero_hit_fallback_handles_cjk_applicant_and_fullwidth_parens() {
+        use crate::types::search::SearchType;
+
+        // 1. 中文申请人含全角括号且未锁精确匹配：放宽为 Keyword 并归一化半角括号
+        let app_q = SearchQuery {
+            keyword: "星辰（广东）绿色建筑材料有限公司".into(),
+            search_type: Some(SearchType::Applicant),
+            exact_assignee: false,
+            ..Default::default()
+        };
+        let fb = deterministic_zero_hit_fallback(&app_q).expect("中文申请人应触发确定性回退");
+        assert_eq!(fb.keyword, "星辰(广东)绿色建筑材料有限公司");
+        assert_eq!(fb.search_type, Some(SearchType::Keyword));
+
+        // 2. 用户显式开启 exact_assignee=true 时不得擅自放宽为 Keyword，但仍归一化全角括号
+        let mut exact_q = app_q.clone();
+        exact_q.exact_assignee = true;
+        let fb_exact =
+            deterministic_zero_hit_fallback(&exact_q).expect("全角括号应归一化为半角括号");
+        assert_eq!(fb_exact.keyword, "星辰(广东)绿色建筑材料有限公司");
+        assert_eq!(fb_exact.search_type, Some(SearchType::Applicant));
+
+        // 3. 普通中文关键词无全角括号：不触发确定性回退（交由后续 LLM 改写）
+        let plain_kw = SearchQuery {
+            keyword: "固态电池隔膜".into(),
+            search_type: Some(SearchType::Keyword),
+            ..Default::default()
+        };
+        assert!(deterministic_zero_hit_fallback(&plain_kw).is_none());
+
+        // 4. 专利号查询：绝不触发回退
+        let pn_q = SearchQuery {
+            keyword: "CN990001001A（测试）".into(),
+            search_type: Some(SearchType::PatentNumber),
+            ..Default::default()
+        };
+        assert!(deterministic_zero_hit_fallback(&pn_q).is_none());
     }
 }
 
